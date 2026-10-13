@@ -177,11 +177,8 @@ async fn handle_viewer_pair(
     }
     tracing::info!(%device_id, %device_name, "viewer: device paired");
     // The desktop shows a toast and closes the QR (frontend `viewer:paired`).
-    state.event_bus.broadcast_event(&crate::backend::eventbus::WSEventType {
-        eventtype: "viewer:paired".to_string(),
-        oref: String::new(),
-        data: Some(json!({ "device_id": device_id, "device_name": device_name })),
-    });
+    let paired = crate::backend::mps_events::ViewerPairedEvent { device_id: device_id.to_string(), device_name: device_name.to_string() };
+    state.event_bus.broadcast_event(&crate::backend::eventbus::EventBus::typed_ws_event::<crate::backend::mps_events::ViewerPaired>(&paired, String::new()));
     let mut out = json!({
         "token": token,
         "device_id": device_id,

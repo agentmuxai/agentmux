@@ -1,6 +1,6 @@
 # Typed events on every path
 
-**Status:** proposed. Written 2026-10-13, after `SPEC_TYPED_EVENT_PAYLOADS_2026_10_13.md` shipped (#4791–#4803).
+**Status:** proposed — part 1 (the helpers, the wider ratchet, the handler check, and every site but the LAN events) in review; part 2 (the LAN events, `LanInstance` exported, the ratchet at 0) next. Written 2026-10-13, after `SPEC_TYPED_EVENT_PAYLOADS_2026_10_13.md` shipped (#4791–#4803).
 **Follows:** that spec. Its ratchet reached 0, but it counted only two of the ways srv sends an event, so events sent the other ways are still untyped.
 
 ## The gap

@@ -342,16 +342,13 @@ pub(super) fn broadcast_meta_update(
         .mstore
         .must_get::<crate::backend::obj::Block>(block_id)
         .map_err(|e| e.to_string())?;
-    state.event_bus.broadcast_event(&crate::backend::eventbus::WSEventType {
-        eventtype: "waveobj:update".to_string(),
-        oref: oref_str,
-        data: Some(serde_json::to_value(&crate::backend::obj::MuxObjUpdate {
-            updatetype: "update".into(),
-            otype: "block".into(),
-            oid: block_id.to_string(),
-            obj: Some(crate::backend::obj::mux_obj_to_value(&block)),
-        }).unwrap_or_default()),
-    });
+    let update = crate::backend::obj::MuxObjUpdate {
+        updatetype: "update".into(),
+        otype: "block".into(),
+        oid: block_id.to_string(),
+        obj: Some(crate::backend::obj::mux_obj_to_value(&block)),
+    };
+    state.event_bus.broadcast_event(&crate::backend::eventbus::EventBus::typed_ws_event::<crate::backend::mps_events::MuxObjUpdated>(&update, oref_str));
     Ok(())
 }
 
@@ -542,16 +539,13 @@ fn clear_shell_pointer_if(state: &AppState, agent_block_id: &str, id: &str) {
         if parent.meta.get(META_KEY_SHELL_SUBBLOCK_ID).and_then(|v| v.as_str()) == Some(id) {
             parent.meta.insert(META_KEY_SHELL_SUBBLOCK_ID.to_string(), serde_json::Value::Null);
             if state.mstore.update(&mut parent).is_ok() {
-                state.event_bus.broadcast_event(&crate::backend::eventbus::WSEventType {
-                    eventtype: "waveobj:update".to_string(),
-                    oref: format!("block:{agent_block_id}"),
-                    data: Some(serde_json::to_value(&crate::backend::obj::MuxObjUpdate {
-                        updatetype: "update".into(),
-                        otype: "block".into(),
-                        oid: agent_block_id.to_string(),
-                        obj: Some(crate::backend::obj::mux_obj_to_value(&parent)),
-                    }).unwrap_or_default()),
-                });
+                let update = crate::backend::obj::MuxObjUpdate {
+                    updatetype: "update".into(),
+                    otype: "block".into(),
+                    oid: agent_block_id.to_string(),
+                    obj: Some(crate::backend::obj::mux_obj_to_value(&parent)),
+                };
+                state.event_bus.broadcast_event(&crate::backend::eventbus::EventBus::typed_ws_event::<crate::backend::mps_events::MuxObjUpdated>(&update, format!("block:{agent_block_id}")));
             }
         }
     }

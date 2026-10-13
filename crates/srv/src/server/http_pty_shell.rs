@@ -333,16 +333,13 @@ pub(super) async fn handle_pty_shell_create(
                 .mstore
                 .get::<crate::backend::obj::Block>(&req.agent_block_id)
             {
-                state.event_bus.broadcast_event(&crate::backend::eventbus::WSEventType {
-                    eventtype: "waveobj:update".to_string(),
-                    oref: format!("block:{}", req.agent_block_id),
-                    data: Some(serde_json::to_value(&crate::backend::obj::MuxObjUpdate {
-                        updatetype: "update".into(),
-                        otype: "block".into(),
-                        oid: req.agent_block_id.clone(),
-                        obj: Some(crate::backend::obj::mux_obj_to_value(&parent)),
-                    }).unwrap_or_default()),
-                });
+                let update = crate::backend::obj::MuxObjUpdate {
+                    updatetype: "update".into(),
+                    otype: "block".into(),
+                    oid: req.agent_block_id.clone(),
+                    obj: Some(crate::backend::obj::mux_obj_to_value(&parent)),
+                };
+                state.event_bus.broadcast_event(&crate::backend::eventbus::EventBus::typed_ws_event::<crate::backend::mps_events::MuxObjUpdated>(&update, format!("block:{}", req.agent_block_id)));
             }
             (child_id.clone(), block)
         }
@@ -354,16 +351,13 @@ pub(super) async fn handle_pty_shell_create(
             // (or opened moments later) actually sees the pointer reactively
             // instead of only on its next unrelated refetch.
             if let Ok(Some(parent)) = state.mstore.get::<crate::backend::obj::Block>(&req.agent_block_id) {
-                state.event_bus.broadcast_event(&crate::backend::eventbus::WSEventType {
-                    eventtype: "waveobj:update".to_string(),
-                    oref: format!("block:{}", req.agent_block_id),
-                    data: Some(serde_json::to_value(&crate::backend::obj::MuxObjUpdate {
-                        updatetype: "update".into(),
-                        otype: "block".into(),
-                        oid: req.agent_block_id.clone(),
-                        obj: Some(crate::backend::obj::mux_obj_to_value(&parent)),
-                    }).unwrap_or_default()),
-                });
+                let update = crate::backend::obj::MuxObjUpdate {
+                    updatetype: "update".into(),
+                    otype: "block".into(),
+                    oid: req.agent_block_id.clone(),
+                    obj: Some(crate::backend::obj::mux_obj_to_value(&parent)),
+                };
+                state.event_bus.broadcast_event(&crate::backend::eventbus::EventBus::typed_ws_event::<crate::backend::mps_events::MuxObjUpdated>(&update, format!("block:{}", req.agent_block_id)));
             }
             (child_id.clone(), block)
         }
@@ -429,16 +423,13 @@ pub(super) async fn handle_pty_shell_create(
             }
             if changed {
                 let _ = state.mstore.update(&mut parent);
-                state.event_bus.broadcast_event(&crate::backend::eventbus::WSEventType {
-                    eventtype: "waveobj:update".to_string(),
-                    oref: format!("block:{}", req.agent_block_id),
-                    data: Some(serde_json::to_value(&crate::backend::obj::MuxObjUpdate {
-                        updatetype: "update".into(),
-                        otype: "block".into(),
-                        oid: req.agent_block_id.clone(),
-                        obj: Some(crate::backend::obj::mux_obj_to_value(&parent)),
-                    }).unwrap_or_default()),
-                });
+                let update = crate::backend::obj::MuxObjUpdate {
+                    updatetype: "update".into(),
+                    otype: "block".into(),
+                    oid: req.agent_block_id.clone(),
+                    obj: Some(crate::backend::obj::mux_obj_to_value(&parent)),
+                };
+                state.event_bus.broadcast_event(&crate::backend::eventbus::EventBus::typed_ws_event::<crate::backend::mps_events::MuxObjUpdated>(&update, format!("block:{}", req.agent_block_id)));
             }
         }
         return (

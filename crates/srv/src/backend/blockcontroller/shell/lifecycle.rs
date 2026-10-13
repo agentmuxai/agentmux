@@ -1115,17 +1115,13 @@ impl Controller for ShellController {
                                 // to SQLite — it does NOT send a WebSocket event on its own).
                                 if let Ok(updated_block) = store.must_get::<crate::backend::obj::Block>(&self.block_id) {
                                     if let Some(ref event_bus) = self.event_bus {
-                                        let update_data = serde_json::to_value(&obj::MuxObjUpdate {
+                                        let update = obj::MuxObjUpdate {
                                             updatetype: "update".into(),
                                             otype: "block".into(),
                                             oid: self.block_id.clone(),
                                             obj: Some(obj::mux_obj_to_value(&updated_block)),
-                                        }).ok();
-                                        event_bus.broadcast_event(&crate::backend::eventbus::WSEventType {
-                                            eventtype: "waveobj:update".to_string(),
-                                            oref: oref_str.clone(),
-                                            data: update_data,
-                                        });
+                                        };
+                                        event_bus.broadcast_event(&crate::backend::eventbus::EventBus::typed_ws_event::<crate::backend::mps_events::MuxObjUpdated>(&update, oref_str.clone()));
                                         tracing::info!(block_id = %self.block_id, "cmd:cwd seeded and broadcast to frontend");
                                     } else {
                                         tracing::warn!(block_id = %self.block_id, "cmd:cwd written to store but no event_bus to broadcast — frontend won't update");

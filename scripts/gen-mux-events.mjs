@@ -71,16 +71,21 @@ export function wpsNames(source) {
 
 const parsed = new Map();
 
-/** Whether `at` in the source at `path` falls inside a comment. TypeScript parses the file, so a
- *  `//` or `/*` inside a string, a template or a regex literal is not taken for one: a comment is
- *  what lies in a token's leading trivia. */
-function inComment(path, text, at) {
+function sourceFile(path, text) {
     let sf = parsed.get(text);
     if (!sf) {
         const kind = path.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS;
         sf = ts.createSourceFile(path, text, ts.ScriptTarget.Latest, true, kind);
         parsed.set(text, sf);
     }
+    return sf;
+}
+
+/** Whether `at` in the source at `path` falls inside a comment. TypeScript parses the file, so a
+ *  `//` or `/*` inside a string, a template or a regex literal is not taken for one: a comment is
+ *  what lies in a token's leading trivia. */
+function inComment(path, text, at) {
+    const sf = sourceFile(path, text);
     for (let node = sf; ; ) {
         const child = node.getChildren(sf).find((c) => c.pos <= at && at < c.end);
         if (!child) return at < node.getStart(sf);
@@ -88,6 +93,52 @@ function inComment(path, text, at) {
         if (child.kind >= ts.SyntaxKind.FirstJSDocNode && child.kind <= ts.SyntaxKind.LastJSDocNode) return true;
         node = child;
     }
+}
+
+/** `onMuxEvent` handlers still written against the event rather than its payload: the first
+ *  parameter typed `any`, `unknown` or `MuxEvent`, or read as `<param>.data`. Such a handler
+ *  gets the payload itself, so `event.data` is silently `undefined`, and `tsc` can't tell when
+ *  the parameter is `any`. No typed payload has a top-level `data` field; if one ever does, its
+ *  handlers name the read differently (`const { data } = payload`). */
+export function eventShapedHandlers(sources) {
+    const errors = [];
+    for (const [path, text] of sources) {
+        if (!text.includes("onMuxEvent(")) continue;
+        const sf = sourceFile(path, text);
+        const visit = (node) => {
+            if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === "onMuxEvent") {
+                const handler = node.arguments[1];
+                const param = handler && (ts.isArrowFunction(handler) || ts.isFunctionExpression(handler)) ? handler.parameters[0] : undefined;
+                if (param) {
+                    const type = param.type?.getText(sf).trim();
+                    let readsData = false;
+                    if (ts.isIdentifier(param.name)) {
+                        const name = param.name.text;
+                        // `event.data`, also through a cast or parentheses: `(event as any)?.data`.
+                        const receiver = (e) =>
+                            ts.isParenthesizedExpression(e) || ts.isAsExpression(e) || ts.isTypeAssertionExpression(e) || ts.isNonNullExpression(e) || ts.isSatisfiesExpression(e)
+                                ? receiver(e.expression)
+                                : e;
+                        const walk = (n) => {
+                            if (ts.isPropertyAccessExpression(n) && n.name.text === "data") {
+                                const r = receiver(n.expression);
+                                if (ts.isIdentifier(r) && r.text === name) readsData = true;
+                            }
+                            ts.forEachChild(n, walk);
+                        };
+                        walk(handler.body);
+                    }
+                    if ((type && /^(any|unknown|MuxEvent)$/.test(type)) || readsData) {
+                        const line = sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1;
+                        errors.push(`${path}:${line}: onMuxEvent's handler gets the payload itself, typed; take it as (data) => …, not the event`);
+                    }
+                }
+            }
+            ts.forEachChild(node, visit);
+        };
+        visit(sf);
+    }
+    return errors;
 }
 
 /** Where a typed event is subscribed with `muxEventSubscribe` instead of `onMuxEvent`, in
@@ -154,7 +205,9 @@ async function main() {
     const fixed = rows.filter((r) => !r.perId);
     for (const r of fixed) if (!known.has(r.event)) errors.push(`"${r.event}" is typed in srv but has no WpsEvent name in frontend/app/store/mps-events.ts`);
     const perIdPrefixes = new Set(rows.filter((r) => r.perId).map((r) => r.event));
-    errors.push(...untypedSubscriptions(frontendSources(), new Set(fixed.map((r) => r.event)), wps, perIdPrefixes));
+    const sources = frontendSources();
+    errors.push(...untypedSubscriptions(sources, new Set(fixed.map((r) => r.event)), wps, perIdPrefixes));
+    errors.push(...eventShapedHandlers(sources));
     if (errors.length) {
         console.error(`gen-mux-events: ${errors.length} problem(s):\n${errors.map((e) => `  - ${e}`).join("\n")}`);
         process.exit(1);

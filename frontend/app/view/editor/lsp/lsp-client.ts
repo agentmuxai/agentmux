@@ -13,7 +13,7 @@
 
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { muxEventSubscribe } from "@/app/store/mps";
+import { onMuxEvent } from "@/app/store/mps";
 import type {
     LspInitializeResult,
     LspMessageEnvelope,
@@ -243,26 +243,23 @@ export class LspClient {
 
     private subscribe(): void {
         if (this.unsubscribeWs) return;
-        this.unsubscribeWs = muxEventSubscribe({
-            eventType: WpsEvent.LspMessage,
-            handler: (event) => {
-                const envelope = event.data as LspMessageEnvelope | undefined;
-                if (!envelope || envelope.server_id !== this.serverId) return;
-                const msg = envelope.message;
-                if ("id" in msg && typeof msg.id === "number") {
-                    // Response to one of our requests
-                    const resolver = this.pending.get(msg.id);
-                    if (resolver) {
-                        this.pending.delete(msg.id);
-                        resolver(msg as LspResponse);
-                    }
-                    return;
+        this.unsubscribeWs = onMuxEvent(WpsEvent.LspMessage, (envelope) => {
+            if (envelope.server_id !== this.serverId) return;
+            // srv forwards the server's JSON-RPC message as it came.
+            const msg = envelope.message as LspMessageEnvelope["message"];
+            if ("id" in msg && typeof msg.id === "number") {
+                // Response to one of our requests
+                const resolver = this.pending.get(msg.id);
+                if (resolver) {
+                    this.pending.delete(msg.id);
+                    resolver(msg as LspResponse);
                 }
-                if ("method" in msg) {
-                    // Server-pushed notification
-                    this.handleNotification(msg.method, msg.params);
-                }
-            },
+                return;
+            }
+            if ("method" in msg) {
+                // Server-pushed notification
+                this.handleNotification(msg.method, msg.params);
+            }
         });
     }
 
