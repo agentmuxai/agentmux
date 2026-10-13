@@ -186,9 +186,6 @@ pub struct SettingsType {
     #[serde(rename = "widget:*", default, skip_serializing_if = "is_false")]
     pub widget_clear: bool,
 
-    #[serde(rename = "widget:showhelp", default, skip_serializing_if = "Option::is_none")]
-    pub widget_show_help: Option<bool>,
-
     #[serde(rename = "widget:icononly", default, skip_serializing_if = "Option::is_none")]
     pub widget_icon_only: Option<bool>,
 
@@ -896,9 +893,6 @@ pub struct FullConfigType {
 
     #[serde(rename = "mimetypes", default)]
     pub mime_types: HashMap<String, MimeTypeConfigType>,
-
-    #[serde(rename = "defaultwidgets", default)]
-    pub default_widgets: HashMap<String, WidgetConfigType>,
 
     #[serde(default)]
     pub widgets: HashMap<String, WidgetConfigType>,

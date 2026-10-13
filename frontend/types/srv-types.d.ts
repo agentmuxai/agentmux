@@ -505,7 +505,6 @@ declare global {
     type FullConfigType = {
         settings: SettingsType;
         mimetypes: {[key: string]: MimeTypeConfigType};
-        defaultwidgets: {[key: string]: WidgetConfigType};
         widgets: {[key: string]: WidgetConfigType};
         presets: {[key: string]: MetaType};
         termthemes: {[key: string]: TermThemeType};
@@ -714,7 +713,6 @@ declare global {
         "onboarding:githubstar"?: boolean;
         "onboarding:lastversion"?: string;
         count?: number;
-        "widget:order"?: string[];
         "agent:*"?: boolean;
         agentId?: string;
         /** v6 — DB row id of the AgentInstance currently bound to this pane. */
@@ -907,7 +905,6 @@ declare global {
         "app:showtray"?: boolean;
         "app:startatlogin"?: boolean;
         "widget:*"?: boolean;
-        "widget:showhelp"?: boolean;
         "widget:icononly"?: boolean;
         /** Pinned widget-bar icons, in order, as short names (`agent` for `defwidget@agent`). */
         "widget:pinned"?: string[];

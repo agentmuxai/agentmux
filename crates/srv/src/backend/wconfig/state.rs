@@ -51,13 +51,6 @@ impl ConfigState {
         self.config.read().unwrap().settings.clone()
     }
 
-    /// Update the full config (called when files change).
-    #[allow(dead_code)]
-    pub fn set_config(&self, config: FullConfigType) {
-        let mut current = self.config.write().unwrap();
-        *current = Arc::new(config);
-    }
-
     /// Update just the settings portion, and the per-connection settings that
     /// live inside it (`settings.json` → `connections`): every
     /// per-connection reader looks at `FullConfigType::connections`.

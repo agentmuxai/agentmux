@@ -83,7 +83,7 @@ fn apply(config_watcher: &ConfigState, user: HashMap<String, WidgetConfigType>) 
 
 /// Merge again: the built-ins, then each approved widget package's entries
 /// (SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md §5.4), then the user's own
-/// widgets.json, which can still rename, hide or replace a package's entry.
+/// widgets.json, which replaces a package's entry when it uses the same key.
 pub fn recompute(config_watcher: &ConfigState) {
     let user = LAST_USER.lock().unwrap_or_else(|p| p.into_inner()).clone().unwrap_or_default();
     let mut base = builtin_widgets().clone();
