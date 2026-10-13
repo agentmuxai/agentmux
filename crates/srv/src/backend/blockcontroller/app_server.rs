@@ -314,6 +314,7 @@ impl AppServerTransport {
 
     /// Reply to a server-initiated request. The caller must have an explicit
     /// policy/UI decision; this primitive never invents an approval.
+    #[cfg(test)]
     pub async fn respond(
         &self,
         id: RpcId,
@@ -899,19 +900,6 @@ impl AppServerProcess {
 
     pub fn pid(&self) -> Option<u32> {
         self.pid
-    }
-
-    pub async fn spawn_initialized(
-        command: Command,
-        limits: AppServerLimits,
-        initialize_timeout: Duration,
-    ) -> Result<Self, AppServerError> {
-        let process = Self::spawn(command, limits)?;
-        if let Err(error) = process.transport.initialize(initialize_timeout).await {
-            let _ = process.shutdown(Duration::from_secs(1)).await;
-            return Err(error);
-        }
-        Ok(process)
     }
 
     /// Await the reaper task's exit status. Race-free for any number of

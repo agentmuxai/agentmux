@@ -49,7 +49,7 @@ pub use pane_geometry::*;
 #[cfg(not(target_os = "windows"))]
 pub(crate) use platform_macos::clear_pane_swizzle_statics;
 #[cfg(target_os = "macos")]
-pub use platform_macos::*;
+pub(crate) use platform_macos::*;
 
 /// Get the CEF Views Window for a browser label on the UI thread.
 pub(crate) fn get_window_on_ui(state: &Arc<AppState>, label: &str) -> Option<Window> {

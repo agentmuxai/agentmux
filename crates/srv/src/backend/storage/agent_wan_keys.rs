@@ -81,19 +81,6 @@ impl Store {
         }
     }
 
-    /// Load only this agent's PUBLIC key — the half that is safe to publish to
-    /// muxbus's ownership registry. Never loads or touches the private half.
-    pub fn agent_wan_public_key_load(&self, agent_id: &str) -> Result<Option<String>, StoreError> {
-        let key = agent_id.to_lowercase();
-        let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare("SELECT public_key FROM db_agent_wan_keys WHERE agent_id = ?1")?;
-        match stmt.query_row(params![key], |row| row.get(0)) {
-            Ok(v) => Ok(Some(v)),
-            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-            Err(e) => Err(e.into()),
-        }
-    }
-
     /// Return this agent's WAN keypair, minting and persisting a fresh random
     /// one on first use. Race-safe under concurrent first-use — same
     /// `INSERT OR IGNORE` + re-read pattern as `agent_lan_key_ensure`: two
@@ -149,7 +136,6 @@ mod tests {
     fn load_returns_none_when_unminted() {
         let store = object_store();
         assert!(store.agent_wan_key_load("agentx").unwrap().is_none());
-        assert!(store.agent_wan_public_key_load("agentx").unwrap().is_none());
     }
 
     #[test]
@@ -187,14 +173,6 @@ mod tests {
         let minted = store.agent_wan_key_ensure("agentx").unwrap();
         let loaded = store.agent_wan_key_load("agentx").unwrap().unwrap();
         assert_eq!(minted, loaded);
-    }
-
-    #[test]
-    fn public_key_load_matches_the_public_half_of_the_full_keypair() {
-        let store = object_store();
-        let minted = store.agent_wan_key_ensure("agentx").unwrap();
-        let public_only = store.agent_wan_public_key_load("agentx").unwrap().unwrap();
-        assert_eq!(minted.public_key, public_only);
     }
 
     #[test]

@@ -162,6 +162,7 @@ pub fn parse_probe(out: &str, version: &str) -> Probe {
 
 /// Where this version's build for `target` is on this computer (the same
 /// places [`local_build`] reads): what WSL runs in place.
+#[cfg(windows)]
 pub fn local_path(version: &str, target: &str) -> Result<PathBuf, String> {
     let dev_dir = std::env::var_os("AGENTMUX_REMOTE_HELPER_DIR").map(PathBuf::from);
     let exe_dir = std::env::current_exe()

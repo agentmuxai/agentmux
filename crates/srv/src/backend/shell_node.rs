@@ -102,6 +102,7 @@ impl ShellSessionRegistry {
     }
 
     // Used by unit tests — registers a stop handle with no stdin relay/status.
+    #[cfg(test)]
     fn insert(&self, shell_id: String, tx: oneshot::Sender<()>) {
         self.shells.lock().insert(shell_id, ShellEntry { stop_tx: tx, stdin_tx: None });
     }
@@ -404,7 +405,6 @@ impl ShellNodeRunner {
         // (-pgid). Windows uses taskkill /T on the pid instead.
         #[cfg(unix)]
         {
-            use std::os::unix::process::CommandExt as _;
             child_cmd.process_group(0);
         }
 

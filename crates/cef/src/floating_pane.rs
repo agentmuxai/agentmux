@@ -822,16 +822,16 @@ pub fn post_create_floating_window(
     post_task(ThreadId::UI, Some(&mut task));
 }
 
-/// Pre-warmed pane pool window task (Windows). Creates a WS_POPUP +
-/// WS_EX_TOOLWINDOW window at the off-screen pool position and embeds a
-/// CEF child browser. The outer HWND is cached in `PANE_POOL_HWND_CACHE`
-/// before `browser_host_create_browser` fires so `promote_pane_pool_window`
-/// has a reliable handle even after CEF nulls `window_handle()` post-load.
-///
-/// Differs from `CreateFloatingWindowTask`:
-///   1. No `register_floater_hwnd` — parent HWND unknown at spawn; deferred to promote.
-///   2. Offscreen position + pane pool dimensions; window is hidden after create_popup.
-///   3. URL carries `?pane-pool=1`; frontend defers init until `pool:pane-promote`.
+// Pre-warmed pane pool window task (Windows). Creates a WS_POPUP +
+// WS_EX_TOOLWINDOW window at the off-screen pool position and embeds a
+// CEF child browser. The outer HWND is cached in `PANE_POOL_HWND_CACHE`
+// before `browser_host_create_browser` fires so `promote_pane_pool_window`
+// has a reliable handle even after CEF nulls `window_handle()` post-load.
+//
+// Differs from `CreateFloatingWindowTask`:
+//   1. No `register_floater_hwnd` — parent HWND unknown at spawn; deferred to promote.
+//   2. Offscreen position + pane pool dimensions; window is hidden after create_popup.
+//   3. URL carries `?pane-pool=1`; frontend defers init until `pool:pane-promote`.
 wrap_task! {
     pub(crate) struct CreatePanePoolWindowWin32Task {
         state: Arc<AppState>,
@@ -1186,7 +1186,6 @@ fn create_popup(
 ) -> Result<*mut std::ffi::c_void, String> {
     use std::ffi::OsStr;
     use std::os::windows::ffi::OsStrExt;
-    use windows_sys::Win32::Foundation::HWND;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         CreateWindowExW, RegisterClassExW, ShowWindow, CS_HREDRAW, CS_VREDRAW, SW_SHOWNOACTIVATE,
         WNDCLASSEXW, WS_EX_TOOLWINDOW, WS_POPUP, WS_THICKFRAME,

@@ -19,7 +19,7 @@ use crate::backend::rpc_types::{
     CommandAgentSessionArchiveData, AgentSessionArchiveResult,
     CommandAgentSessionListArchivesData, AgentArchiveRow,
 };
-use crate::backend::storage::store::{AgentDefinition, AgentIdentityLink, AgentInstance, IdentityAccount};
+use crate::backend::storage::store::{AgentIdentityLink, AgentInstance, IdentityAccount};
 
 use super::super::AppState;
 use super::read_session_preview;
@@ -790,6 +790,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::backend::storage::store::AgentDefinition;
     use crate::backend::rpc_types::RpcMessage;
     use crate::registry::{
         DefinitionRecord, DefinitionRecordV1, DefinitionStore, NamedAgentRecord,

@@ -140,6 +140,8 @@ impl std::fmt::Display for UpgradeError {
 /// `srv_child` must be the handle for the ALREADY-RUNNING srv this upgrade
 /// is replacing — this function does not spawn or discover it — and
 /// `srv_stdin` its stdin keepalive (see [`quiesce_srv`]).
+// No caller until phase 1b of SPEC_FAST_STARTUP_UPGRADE_OWNS_MIGRATIONS_AND_UPDATES_2026_09_15.md §8.
+#[allow(dead_code)]
 pub async fn run_migration_upgrade(
     launcher_exe_dir: &Path,
     paths: &DataPaths,

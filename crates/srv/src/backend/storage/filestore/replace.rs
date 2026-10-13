@@ -148,6 +148,7 @@ impl FileStore {
     /// one transaction — so the metadata can describe the content without a
     /// window where it describes other content.
     #[track_caller]
+    #[cfg(test)]
     pub fn put_file_with_meta(&self, zone_id: &str, name: &str, data: &[u8], meta: FileMeta) -> Result<(), StoreError> {
         self.replace_inner(zone_id, name, data, Some(meta), &[], None).map(|_| ())
     }
@@ -369,6 +370,7 @@ impl FileStore {
 
     /// A file's metadata, read from the database rather than the cache.
     #[track_caller]
+    #[cfg(test)]
     pub fn meta_db(&self, zone_id: &str, name: &str) -> Result<Option<FileMeta>, StoreError> {
         let conn = self.lock_conn();
         let meta: Option<String> = conn

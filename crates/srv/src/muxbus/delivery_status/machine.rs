@@ -124,6 +124,7 @@ impl Machine {
     }
 
     /// When the current pause began, if one is open.
+    #[cfg(test)]
     pub fn paused_since_ms(&self) -> Option<i64> {
         self.paused_since_ms
     }

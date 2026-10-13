@@ -25,6 +25,10 @@
 //!   dev builds sit at a new path every time, so a per-program rule stops
 //!   matching on every update (spec R7). A **port** rule does not.
 
+// Only Windows reads its firewall so far (`lan_firewall_windows.rs`; macOS and
+// Linux are later PRs of the spec): elsewhere only the tests build rules.
+#![cfg_attr(not(windows), allow(dead_code))]
+
 use std::net::Ipv4Addr;
 
 /// `NET_FW_PROFILE2_*` bits.
@@ -228,6 +232,7 @@ impl LocalScope {
 /// One firewall rule, with the fields that decide whether it affects us.
 #[derive(Debug, Clone)]
 pub struct FwRule {
+    #[cfg(test)]
     pub name: String,
     pub enabled: bool,
     pub inbound: bool,
@@ -343,6 +348,7 @@ fn rule_applies(rule: &FwRule, exe: &str, need: Need, category: Category, local_
 
 /// The rules that decide `need` for `category`, allow or block. For diagnostics
 /// and tests: it is the same predicate `coverage` uses.
+#[cfg(test)]
 pub fn matching_rules<'a>(
     rules: &'a [FwRule],
     exe: &str,
@@ -413,6 +419,7 @@ pub enum Coverage {
 
 /// [`coverage_with`] under Windows' default profile settings, for an adapter
 /// whose addresses are unknown (only rules open to every local address match).
+#[cfg(test)]
 pub fn coverage(rules: &[FwRule], exe: &str, needs: &[Need], category: Category) -> Coverage {
     coverage_with(rules, exe, needs, category, ProfileSettings::default(), &[])
 }
@@ -466,6 +473,7 @@ pub fn coverage_with(
 #[derive(Debug, Clone)]
 pub struct Adapter {
     /// The adapter GUID (`if_addrs::Interface::adapter_name` on Windows).
+    #[cfg(test)]
     pub id: String,
     pub name: String,
     pub ipv4: Vec<Ipv4Addr>,
@@ -485,6 +493,7 @@ pub enum AdapterState {
     Unknown,
 }
 
+#[cfg(test)]
 pub fn adapter_state(rules: &[FwRule], exe: &str, needs: &[Need], adapter: &Adapter) -> AdapterState {
     adapter_state_with(rules, exe, needs, adapter, Profiles::default())
 }

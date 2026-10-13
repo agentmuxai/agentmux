@@ -141,12 +141,14 @@ pub(crate) fn heads(fs: &FileStore, scope: &str) -> Result<Heads, StoreError> {
 }
 
 /// An entry's `(name, instructions)` at a version's hash.
+#[cfg(test)]
 pub(crate) fn body(fs: &FileStore, scope: &str, sha256: &str) -> Result<Option<(String, String)>, StoreError> {
     let got = fs.read_files_consistent(&zone(scope), &[&format!("blob/{sha256}")])?.pop().flatten();
     Ok(got.and_then(|b| serde_json::from_slice::<Body>(&b).ok()).map(|b| (b.name, b.instructions)))
 }
 
 /// Every version of an entry, oldest first.
+#[cfg(test)]
 pub(crate) fn history(fs: &FileStore, scope: &str, entry_id: &str) -> Result<Vec<EntryVersion>, StoreError> {
     let log = fs.read_files_consistent(&zone(scope), &[LOG_FILE])?.pop().flatten().unwrap_or_default();
     Ok(log

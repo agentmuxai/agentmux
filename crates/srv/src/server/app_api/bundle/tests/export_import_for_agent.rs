@@ -715,7 +715,7 @@ async fn agent_less_export_warns_for_an_instance_scoped_binding_too() {
         .agent_native_memory_upsert("agent-1", "MEMORY.md", "a fact", None, "/x", 6, 0)
         .unwrap();
 
-    let inst: crate::backend::storage::AgentInstance =
+    let inst: crate::backend::storage::agents::AgentInstance =
         serde_json::from_value(serde_json::json!({
             "id": "inst-1",
             "definition_id": "agent-1",

@@ -6,11 +6,8 @@
 //! `trigger_eager_naming` — the read-mostly surface RPC dispatch calls into,
 //! plus the eager Haiku-naming trigger fired from `jsonl::process_jsonl_change`.
 
-use serde_json::json;
-
 use super::types::*;
 use super::SubagentWatcher;
-use crate::backend::eventbus::{WSEventType, WS_EVENT_RPC};
 
 impl SubagentWatcher {
     /// List all subagents across all sessions (sync — safe to call from RPC dispatch).

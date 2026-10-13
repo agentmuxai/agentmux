@@ -78,6 +78,7 @@ pub(crate) struct AgentRecords {
 enum StoreSource {
     /// The global transcript store, looked up when used: bootstrap attaches it.
     Global,
+    #[cfg(test)]
     Fixed(Option<Arc<FileStore>>),
 }
 
@@ -86,6 +87,7 @@ impl AgentRecords {
         AgentRecords { store: StoreSource::Global, scans: Mutex::new(HashMap::new()) }
     }
 
+    #[cfg(test)]
     pub(crate) fn new(store: Option<Arc<FileStore>>) -> Self {
         AgentRecords { store: StoreSource::Fixed(store), scans: Mutex::new(HashMap::new()) }
     }
@@ -93,6 +95,7 @@ impl AgentRecords {
     fn store(&self) -> Option<Arc<FileStore>> {
         match &self.store {
             StoreSource::Global => crate::backend::agent_session::global_transcript_store().cloned(),
+            #[cfg(test)]
             StoreSource::Fixed(store) => store.clone(),
         }
     }

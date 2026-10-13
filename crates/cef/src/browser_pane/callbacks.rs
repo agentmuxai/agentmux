@@ -108,7 +108,7 @@ pub(crate) fn update_pane_load_watchdog_url(state: &Arc<AppState>, block_id: &st
 /// stale and must not act.
 fn fire_pane_load_watchdog(state: &Arc<AppState>, block_id: &str, epoch: u64) {
     let entry = state.browser_pane_load_watchdog.lock().remove(block_id);
-    let Some((armed_at, armed_epoch, mut browser, target_url)) = entry else { return };
+    let Some((armed_at, armed_epoch, browser, target_url)) = entry else { return };
     if armed_epoch != epoch {
         // A newer navigation re-armed this pane after this timeout was
         // scheduled — put the newer entry back (we shouldn't have taken it)
@@ -248,7 +248,7 @@ pub(crate) fn resolve_pane_label(state: &Arc<AppState>, browser: &Browser) -> Op
         .list_browsers()
         .into_iter()
         .find(|(_k, b)| {
-            let mut b_clone = b.clone();
+            let b_clone = b.clone();
             let mut browser_clone: cef::Browser = browser.clone();
             b_clone.is_same(Some(&mut browser_clone)) != 0
         })
@@ -326,7 +326,7 @@ pub fn on_after_created_browser_pane(state: &Arc<AppState>, browser: &Browser) {
 
             if let Some(win_label) = parent_window_label {
                 if let Some(main_browser) = state.get_browser(&win_label) {
-                    if let Some(mut host) = main_browser.host() {
+                    if let Some(host) = main_browser.host() {
                         host.set_focus(1);
                         tracing::info!(
                             block_id = %block_id, window_label = %win_label,
@@ -637,7 +637,7 @@ pub(crate) fn resolve_pane_block_id(state: &Arc<AppState>, browser: &Browser) ->
         .list_browsers()
         .into_iter()
         .find(|(_k, b)| {
-            let mut b_clone = b.clone();
+            let b_clone = b.clone();
             let mut browser_clone: cef::Browser = browser.clone();
             b_clone.is_same(Some(&mut browser_clone)) != 0
         })

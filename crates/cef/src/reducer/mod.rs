@@ -33,7 +33,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use cef::Browser;
 
 use crate::state::{
-    BrowserHandle, BrowserKind, DragSession, BrowserPaneEntry, BrowserPaneLifecycle,
+    BrowserHandle, BrowserKind, DragSession, BrowserPaneEntry,
     PanePoolState, PaneWindowState, PendingWindowCreation, PoolState, QuitReason, QuitState,
     WindowPlacement,
 };
@@ -42,8 +42,6 @@ use crate::state::{
 /// reducers' phase enum.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HostLifecyclePhase {
-    /// Pre-init: AppState exists, but no commands accepted yet.
-    Bootstrapping,
     /// Normal operation: all commands accepted.
     Running,
     /// Shutting down: only cleanup commands accepted; producers
@@ -230,9 +228,6 @@ impl Default for HostState {
             window_opacities: HashMap::new(),
             pane_window_states: HashMap::new(),
             pending_browser_pane_creates: HashMap::new(),
-            // Boot directly into Running — nothing in F.1 needs the
-            // pre-init guard yet. Future PRs (drag, tear-off hooks)
-            // will move boot through Bootstrapping → Running.
             lifecycle: HostLifecyclePhase::Running,
             event_version: 0,
         }
@@ -318,10 +313,6 @@ pub enum HostCommand {
 
     // ── H.1 — pane lifecycle ────────────────────────────────────────────
 
-    /// Caller (pane create code) requests a new pane lifecycle entry.
-    /// Reducer inserts with `Live`. Reject if `block_id` already present.
-    EnqueueBrowserPaneCreate { block_id: String, label: String },
-
     /// PR #5 — sole pane registration entry point post-H.1.d.
     ///
     /// Replaces `pane::lifecycle::PaneStateMachine::try_register_live`.
@@ -341,10 +332,6 @@ pub enum HostCommand {
         pending: Option<crate::state::PendingBrowserPaneCreate>,
     },
 
-    /// CEF on_after_created fired for a pane browser; confirm it's Live.
-    /// No-op if already Live or absent (idempotent against late callbacks).
-    CompleteBrowserPaneCreate { block_id: String },
-
     /// Caller requests pane close. Reducer flips entry to `Closing` and
     /// returns the entry's label via `DispatchOutput::closed_browser_pane_label`
     /// iff the transition actually fired (was `Live`). Returns `None` for
@@ -363,10 +350,6 @@ pub enum HostCommand {
     /// `DispatchOutput::drained_browser_pane_block_id` so the caller can also dispatch
     /// any block_id-keyed cleanup. Idempotent (None if no match).
     DrainBrowserPaneByLabel { label: String },
-
-    /// Pane creation failed before reaching Live (e.g., CEF callback
-    /// never fired, browser host returned 0). Reducer removes entry.
-    AbortBrowserPaneCreate { block_id: String, reason: String },
 
     // ── H.2 — browser handle registry ───────────────────────────────────
 
@@ -391,6 +374,7 @@ pub enum HostCommand {
     /// already exists. `window_meta` / `window_hwnds` live on `AppState`
     /// and are re-keyed by the caller. See
     /// `SPEC_FLOATING_PANE_POOL_RELABEL_2026_06_30`.
+    #[cfg(target_os = "windows")]
     RelabelBrowser { old_label: String, new_label: String },
 
     // ── H.3 — drag state ────────────────────────────────────────────────
@@ -417,11 +401,6 @@ pub enum HostCommand {
     /// clear `respawn_in_flight`.
     PoolWindowDestroyedBeforePromote { label: String },
 
-    /// Promote a pool window into a user-visible top-level. Removes from
-    /// `queue` and `unpromoted`, marks the corresponding `BrowserHandle`
-    /// as `is_pool: false`.
-    PromotePoolWindow { label: String },
-
     /// Round 6 (pool demote) — a promoted pool window is being closed;
     /// return it to the pool instead of destroying it (CEF 148 parks the
     /// browser on every destroy sequence — see
@@ -429,6 +408,7 @@ pub enum HostCommand {
     /// back to `is_pool: true` and re-inserts the label into `unpromoted`;
     /// the queue re-entry then rides the normal `PoolWindowReady`
     /// handshake after the caller reloads the window to its pool boot URL.
+    #[cfg(any(target_os = "windows", test))]
     DemotePoolWindow { label: String },
 
     /// PR #5 H.4 — atomic pop+promote front of pool queue. Returns the
@@ -437,9 +417,6 @@ pub enum HostCommand {
     /// `state.window_pool.lock().pop_front() + state.unpromoted_pool_labels.lock().remove`
     /// pair in `promote_pool_window`.
     PopAndPromoteFrontPoolWindow,
-
-    /// Drain all pool windows on shutdown. Idempotent.
-    PoolDrainAll,
 
     /// Atomic pop of the front of the top-level window pool queue for
     /// memory-pressure eviction (issue #1936/#2218 follow-up — active
@@ -452,6 +429,7 @@ pub enum HostCommand {
     /// (mid-flight spawn with no HWND yet to destroy) — same scope
     /// restriction as the pane-pool version, for the same reason.
     /// Returns the popped label via `DispatchOutput::evicted_pool_label`.
+    #[cfg(any(target_os = "windows", test))]
     PopFrontPoolWindowForEviction,
 
     // ── Pane pool (floating-pool-{uuid}, frameless=true) ────────────────
@@ -471,6 +449,7 @@ pub enum HostCommand {
     /// `PopAndPromoteFrontPanePoolWindow` above so eviction and a real
     /// tear-off can never race for the same front label (reagent P2).
     /// Returns the popped label via `DispatchOutput::evicted_pane_pool_label`.
+    #[cfg(any(target_os = "windows", test))]
     PopFrontPanePoolWindowForEviction,
 
     // ── H.5 — quit lifecycle ────────────────────────────────────────────
@@ -481,6 +460,9 @@ pub enum HostCommand {
 
     /// All drainable resources are gone (pool empty, browsers empty).
     /// Transition Draining → Quit.
+    // Not dispatched yet; kept for SPEC_INSTANCE_LIFECYCLE_CONSOLIDATION_2026_06_21.md
+    // §5.1/§7.2 (`Draining` + last pool/browser gone ⇒ `ConfirmDrained`).
+    #[allow(dead_code)]
     ConfirmDrained,
 
     /// Pure no-op poke: mutates nothing, but is quit-relevant, so `update`
@@ -535,6 +517,7 @@ pub enum HostCommand {
     /// `pane_window_states[label].always_on_top` and emits
     /// `FloatingAlwaysOnTopChanged`; the IPC handler applies the Win32
     /// z-order afterwards.
+    #[cfg(any(target_os = "windows", test))]
     SetFloatingAlwaysOnTop { label: String, on: bool },
 }
 
@@ -552,19 +535,10 @@ impl std::fmt::Debug for HostCommand {
                 .debug_struct("TakePendingWindowCreation")
                 .field("label", label)
                 .finish(),
-            HostCommand::EnqueueBrowserPaneCreate { block_id, label } => f
-                .debug_struct("EnqueueBrowserPaneCreate")
-                .field("block_id", block_id)
-                .field("label", label)
-                .finish(),
             HostCommand::TryRegisterBrowserPaneLive { block_id, pending } => f
                 .debug_struct("TryRegisterBrowserPaneLive")
                 .field("block_id", block_id)
                 .field("has_pending", &pending.is_some())
-                .finish(),
-            HostCommand::CompleteBrowserPaneCreate { block_id } => f
-                .debug_struct("CompleteBrowserPaneCreate")
-                .field("block_id", block_id)
                 .finish(),
             HostCommand::EnqueueBrowserPaneClose { block_id } => f
                 .debug_struct("EnqueueBrowserPaneClose")
@@ -578,11 +552,6 @@ impl std::fmt::Debug for HostCommand {
                 .debug_struct("DrainBrowserPaneByLabel")
                 .field("label", label)
                 .finish(),
-            HostCommand::AbortBrowserPaneCreate { block_id, reason } => f
-                .debug_struct("AbortBrowserPaneCreate")
-                .field("block_id", block_id)
-                .field("reason", reason)
-                .finish(),
             HostCommand::RegisterBrowser { label, kind, .. } => f
                 .debug_struct("RegisterBrowser")
                 .field("label", label)
@@ -593,6 +562,7 @@ impl std::fmt::Debug for HostCommand {
                 .debug_struct("UnregisterBrowser")
                 .field("label", label)
                 .finish(),
+            #[cfg(target_os = "windows")]
             HostCommand::RelabelBrowser { old_label, new_label } => f
                 .debug_struct("RelabelBrowser")
                 .field("old_label", old_label)
@@ -620,16 +590,13 @@ impl std::fmt::Debug for HostCommand {
                 .debug_struct("PoolWindowDestroyedBeforePromote")
                 .field("label", label)
                 .finish(),
-            HostCommand::PromotePoolWindow { label } => f
-                .debug_struct("PromotePoolWindow")
-                .field("label", label)
-                .finish(),
+            #[cfg(any(target_os = "windows", test))]
             HostCommand::DemotePoolWindow { label } => f
                 .debug_struct("DemotePoolWindow")
                 .field("label", label)
                 .finish(),
             HostCommand::PopAndPromoteFrontPoolWindow => f.write_str("PopAndPromoteFrontPoolWindow"),
-            HostCommand::PoolDrainAll => f.write_str("PoolDrainAll"),
+            #[cfg(any(target_os = "windows", test))]
             HostCommand::PopFrontPoolWindowForEviction => f.write_str("PopFrontPoolWindowForEviction"),
             HostCommand::PanePoolWindowSpawnStart { label } => f
                 .debug_struct("PanePoolWindowSpawnStart")
@@ -644,6 +611,7 @@ impl std::fmt::Debug for HostCommand {
                 .field("label", label)
                 .finish(),
             HostCommand::PopAndPromoteFrontPanePoolWindow => f.write_str("PopAndPromoteFrontPanePoolWindow"),
+            #[cfg(any(target_os = "windows", test))]
             HostCommand::PopFrontPanePoolWindowForEviction => f.write_str("PopFrontPanePoolWindowForEviction"),
             HostCommand::BeginDrain { reason } => f
                 .debug_struct("BeginDrain")
@@ -665,6 +633,7 @@ impl std::fmt::Debug for HostCommand {
                 .debug_struct("EvictFloatingPaneWindowState")
                 .field("label", label)
                 .finish(),
+            #[cfg(any(target_os = "windows", test))]
             HostCommand::SetFloatingAlwaysOnTop { label, on } => f
                 .debug_struct("SetFloatingAlwaysOnTop")
                 .field("label", label)
@@ -740,22 +709,12 @@ pub enum HostEvent {
         label: String,
         version: u64,
     },
-    BrowserPaneLive {
-        block_id: String,
-        label: String,
-        version: u64,
-    },
     BrowserPaneClosing {
         block_id: String,
         version: u64,
     },
     BrowserPaneClosed {
         block_id: String,
-        version: u64,
-    },
-    BrowserPaneCreationFailed {
-        block_id: String,
-        reason: String,
         version: u64,
     },
 
@@ -797,7 +756,6 @@ pub enum HostEvent {
         reason: PoolLeaveReason,
         version: u64,
     },
-    PoolEmpty { version: u64 },
 
     // ── H.5 — quit events ───────────────────────────────────────────────
 
@@ -834,6 +792,7 @@ pub enum HostEvent {
     },
     /// A floater's "Always on top" flag was set (`SetFloatingAlwaysOnTop`).
     /// The IPC handler applies the z-order change after dispatch.
+    #[cfg(any(target_os = "windows", test))]
     FloatingAlwaysOnTopChanged {
         label: String,
         on: bool,
@@ -923,23 +882,25 @@ pub struct DispatchOutput {
     /// into the pool (`is_pool` flipped, inserted into `unpromoted`). False
     /// = already pool-side or unknown browser; caller falls back to the
     /// destroy path.
+    #[cfg(any(target_os = "windows", test))]
     pub pool_demote_accepted: bool,
     /// Set by `PopFrontPoolWindowForEviction` — the label atomically popped
     /// for memory-pressure eviction, or `None` if the queue was already
     /// empty. Mirrors `evicted_pane_pool_label`; distinct from
     /// `promoted_pool_label` so eviction and promotion can never be
     /// confused with each other, same reasoning as the pane-pool field.
+    #[cfg(any(target_os = "windows", test))]
     pub evicted_pool_label: Option<String>,
     // Pane pool fields (parallel to tab pool above)
     pub pane_pool_spawn_proceeding: bool,
     pub pane_pool_size_after: Option<usize>,
-    pub pane_pool_destroyed_was_unpromoted: bool,
     pub promoted_pane_pool_label: Option<String>,
     /// Set by `PopFrontPanePoolWindowForEviction` — the label atomically
     /// popped for memory-pressure eviction (issue #2218, B.5 Part 1), or
     /// `None` if the queue was already empty. Distinct from
     /// `promoted_pane_pool_label` so eviction and promotion can never be
     /// confused with each other (reagent P2).
+    #[cfg(any(target_os = "windows", test))]
     pub evicted_pane_pool_label: Option<String>,
     /// Pillar 2 (level-triggered quit) — set by `update()` after any quit-relevant
     /// command when the host should begin draining NOW (no live user window, no
@@ -980,6 +941,7 @@ pub struct DispatchOutput {
     /// The caller MUST gate the AppState `window_hwnds`/`window_meta` re-key
     /// and the `pool:pane-promote` emit on this, else `browsers` and the
     /// AppState maps would disagree and the emit would resolve no browser.
+    #[cfg(target_os = "windows")]
     pub relabel_ok: bool,
 }
 
@@ -1065,23 +1027,22 @@ pub(crate) use quit::{count_live_user_windows, live_user_window_labels};
 /// (drag-opacity ticks) plus the browser-pane lifecycle (panes live in the
 /// separate `browser_panes` map and never affect `count_live_user_windows`).
 fn is_quit_relevant(cmd: &HostCommand) -> bool {
-    !matches!(
-        cmd,
+    match cmd {
         HostCommand::SetWindowOpacity { .. }
-            | HostCommand::StartDrag { .. }
-            | HostCommand::EndDrag { .. }
-            | HostCommand::ToggleFloatingMaximize { .. }
-            | HostCommand::EvictFloatingPaneWindowState { .. }
-            | HostCommand::SetFloatingAlwaysOnTop { .. }
-            | HostCommand::EnqueueBrowserPaneCreate { .. }
-            | HostCommand::TryRegisterBrowserPaneLive { .. }
-            | HostCommand::CompleteBrowserPaneCreate { .. }
-            | HostCommand::EnqueueBrowserPaneClose { .. }
-            | HostCommand::CompleteBrowserPaneClose { .. }
-            | HostCommand::DrainBrowserPaneByLabel { .. }
-            | HostCommand::AbortBrowserPaneCreate { .. }
-            | HostCommand::RelabelBrowser { .. }
-    )
+        | HostCommand::StartDrag { .. }
+        | HostCommand::EndDrag { .. }
+        | HostCommand::ToggleFloatingMaximize { .. }
+        | HostCommand::EvictFloatingPaneWindowState { .. }
+        | HostCommand::TryRegisterBrowserPaneLive { .. }
+        | HostCommand::EnqueueBrowserPaneClose { .. }
+        | HostCommand::CompleteBrowserPaneClose { .. }
+        | HostCommand::DrainBrowserPaneByLabel { .. } => false,
+        #[cfg(any(target_os = "windows", test))]
+        HostCommand::SetFloatingAlwaysOnTop { .. } => false,
+        #[cfg(target_os = "windows")]
+        HostCommand::RelabelBrowser { .. } => false,
+        _ => true,
+    }
 }
 
 pub fn update(state: &mut HostState, cmd: HostCommand) -> DispatchOutput {
@@ -1098,14 +1059,8 @@ pub fn update(state: &mut HostState, cmd: HostCommand) -> DispatchOutput {
             handle_take_pending_window_creation(state, label)
         }
         // H.1 panes
-        HostCommand::EnqueueBrowserPaneCreate { block_id, label } => {
-            panes::handle_enqueue_browser_pane_create(state, block_id, label)
-        }
         HostCommand::TryRegisterBrowserPaneLive { block_id, pending } => {
             panes::handle_try_register_browser_pane_live(state, block_id, pending)
-        }
-        HostCommand::CompleteBrowserPaneCreate { block_id } => {
-            panes::handle_complete_browser_pane_create(state, block_id)
         }
         HostCommand::EnqueueBrowserPaneClose { block_id } => {
             panes::handle_enqueue_browser_pane_close(state, block_id)
@@ -1116,9 +1071,6 @@ pub fn update(state: &mut HostState, cmd: HostCommand) -> DispatchOutput {
         HostCommand::DrainBrowserPaneByLabel { label } => {
             panes::handle_drain_browser_pane_by_label(state, label)
         }
-        HostCommand::AbortBrowserPaneCreate { block_id, reason } => {
-            panes::handle_abort_browser_pane_create(state, block_id, reason)
-        }
         // H.2 browsers
         HostCommand::RegisterBrowser { label, browser, kind } => {
             browsers::handle_register_browser(state, label, browser, kind)
@@ -1126,6 +1078,7 @@ pub fn update(state: &mut HostState, cmd: HostCommand) -> DispatchOutput {
         HostCommand::UnregisterBrowser { label } => {
             browsers::handle_unregister_browser(state, label)
         }
+        #[cfg(target_os = "windows")]
         HostCommand::RelabelBrowser { old_label, new_label } => {
             browsers::handle_relabel_browser(state, old_label, new_label)
         }
@@ -1135,13 +1088,13 @@ pub fn update(state: &mut HostState, cmd: HostCommand) -> DispatchOutput {
         // H.4 pool
         HostCommand::PoolWindowSpawnStart { label } => pool::handle_pool_spawn_start(state, label),
         HostCommand::PoolWindowReady { label } => pool::handle_pool_ready(state, label),
+        #[cfg(any(target_os = "windows", test))]
         HostCommand::DemotePoolWindow { label } => pool::handle_demote_pool_window(state, label),
         HostCommand::PoolWindowDestroyedBeforePromote { label } => {
             pool::handle_pool_destroyed_before_promote(state, label)
         }
-        HostCommand::PromotePoolWindow { label } => pool::handle_promote_pool_window(state, label),
         HostCommand::PopAndPromoteFrontPoolWindow => pool::handle_pop_and_promote_front_pool_window(state),
-        HostCommand::PoolDrainAll => pool::handle_pool_drain_all(state),
+        #[cfg(any(target_os = "windows", test))]
         HostCommand::PopFrontPoolWindowForEviction => pool::handle_pop_front_pool_for_eviction(state),
         // Pane pool
         HostCommand::PanePoolWindowSpawnStart { label } => pane_pool::handle_pane_pool_spawn_start(state, label),
@@ -1150,6 +1103,7 @@ pub fn update(state: &mut HostState, cmd: HostCommand) -> DispatchOutput {
             pane_pool::handle_pane_pool_destroyed_before_promote(state, label)
         }
         HostCommand::PopAndPromoteFrontPanePoolWindow => pane_pool::handle_pop_and_promote_front_pane_pool_window(state),
+        #[cfg(any(target_os = "windows", test))]
         HostCommand::PopFrontPanePoolWindowForEviction => pane_pool::handle_pop_front_pane_pool_for_eviction(state),
         // H.5 quit
         HostCommand::BeginDrain { reason } => quit::handle_begin_drain(state, reason),
@@ -1168,6 +1122,7 @@ pub fn update(state: &mut HostState, cmd: HostCommand) -> DispatchOutput {
         HostCommand::EvictFloatingPaneWindowState { label } => {
             pane_window::handle_evict_floating_pane_window_state(state, label)
         }
+        #[cfg(any(target_os = "windows", test))]
         HostCommand::SetFloatingAlwaysOnTop { label, on } => {
             pane_window::handle_set_floating_always_on_top(state, label, on)
         }

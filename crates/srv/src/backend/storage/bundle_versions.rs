@@ -174,6 +174,7 @@ impl Store {
     /// version without also touching the bundle row itself. Production
     /// write paths use `Store::bundle_upsert_with_version` (`bundles.rs`)
     /// instead, which keeps the bundle row and its version atomic.
+    #[cfg(test)]
     pub fn bundle_version_insert(
         &self,
         bundle_id: &str,

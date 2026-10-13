@@ -57,12 +57,9 @@ use std::time::{Duration, Instant};
 /// `AGENTMUX_BACKEND_WEB`. (codex P1, PR #2411: an earlier version of this
 /// function stripped a `http://` prefix that never exists, so every probe
 /// silently failed and every healthy srv got recycled to death.)
-pub async fn probe(web_endpoint: &str, timeout: Duration) -> bool {
-    probe_rtt(web_endpoint, timeout).await.is_some()
-}
-
-/// [`probe`], returning how long the successful round-trip took. `None` is a
-/// miss (timeout, refused, or a non-200 answer).
+///
+/// Returns how long the successful round-trip took. `None` is a miss
+/// (timeout, refused, or a non-200 answer).
 pub async fn probe_rtt(web_endpoint: &str, timeout: Duration) -> Option<Duration> {
     let started = Instant::now();
     match tokio::time::timeout(timeout, probe_inner(web_endpoint)).await {
@@ -281,9 +278,6 @@ pub fn process_cpu_time(_pid: u32) -> Option<Duration> {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Instant;
-
-
     #[tokio::test]
     async fn probe_succeeds_against_a_real_200_response() {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -300,7 +294,7 @@ mod tests {
         // `addr` here matches the real shape of `srv_result.web_endpoint`
         // (bare host:port, no scheme) — see the codex P1 fix this test
         // guards against.
-        let ok = super::probe(&addr.to_string(), std::time::Duration::from_secs(2)).await;
+        let ok = super::probe_rtt(&addr.to_string(), std::time::Duration::from_secs(2)).await.is_some();
         assert!(ok);
     }
 
@@ -315,7 +309,7 @@ mod tests {
             let (_sock, _) = listener.accept().await.unwrap();
             tokio::time::sleep(std::time::Duration::from_secs(10)).await;
         });
-        let ok = super::probe(&addr.to_string(), std::time::Duration::from_millis(200)).await;
+        let ok = super::probe_rtt(&addr.to_string(), std::time::Duration::from_millis(200)).await.is_some();
         assert!(!ok);
     }
 
@@ -325,7 +319,7 @@ mod tests {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         drop(listener);
-        let ok = super::probe(&addr.to_string(), std::time::Duration::from_secs(1)).await;
+        let ok = super::probe_rtt(&addr.to_string(), std::time::Duration::from_secs(1)).await.is_some();
         assert!(!ok);
     }
 

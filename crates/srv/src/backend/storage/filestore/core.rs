@@ -203,6 +203,7 @@ impl FileStore {
 
     /// Raw connection access for tests that need to force a specific
     /// failure mode (e.g. dropping a table) — mirrors `Store::conn()`.
+    #[cfg(test)]
     pub(crate) fn conn(&self) -> &Mutex<Connection> {
         &self.conn
     }

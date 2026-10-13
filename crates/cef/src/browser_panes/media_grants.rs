@@ -93,17 +93,6 @@ impl MediaGrantStore {
         }
     }
 
-    /// Drop one origin's grant in one pane.
-    ///
-    /// Note this only stops *future* requests. It cannot stop a capture already
-    /// in flight — CEF exposes no API for that, so revoking a live stream also
-    /// requires reloading the pane (spec §3.7). Callers implementing user-facing
-    /// revoke must do both; this function alone is not "revoke".
-    pub fn revoke(&mut self, block_id: &str, origin: &str) {
-        self.grants
-            .remove(&(block_id.to_string(), origin.to_string()));
-    }
-
     /// Drop every grant belonging to one pane.
     ///
     /// Must be called when a pane closes. Block ids are not reused in practice,
@@ -112,16 +101,6 @@ impl MediaGrantStore {
     /// occupant's grants.
     pub fn clear_pane(&mut self, block_id: &str) {
         self.grants.retain(|(pane, _), _| pane != block_id);
-    }
-
-    /// Bits currently granted to `origin` in `block_id`, if any. For rendering
-    /// an indicator or a revoke affordance; decisions should use [`covers`].
-    ///
-    /// [`covers`]: Self::covers
-    pub fn granted_bits(&self, block_id: &str, origin: &str) -> Option<u32> {
-        self.grants
-            .get(&(block_id.to_string(), origin.to_string()))
-            .copied()
     }
 
     /// Every `(origin, bits)` pair currently granted in one pane.
@@ -228,21 +207,7 @@ mod tests {
         let mut s = MediaGrantStore::new();
         s.grant(PANE, ORIGIN, VIDEO);
         s.grant(PANE, ORIGIN, 0);
-        assert_eq!(s.granted_bits(PANE, ORIGIN), None);
-    }
-
-    #[test]
-    fn revoke_removes_only_that_pane_and_origin() {
-        let mut s = MediaGrantStore::new();
-        s.grant(PANE, ORIGIN, VIDEO);
-        s.grant(PANE, "https://other.test", VIDEO);
-        s.grant("block-2", ORIGIN, VIDEO);
-
-        s.revoke(PANE, ORIGIN);
-
-        assert!(!s.covers(PANE, ORIGIN, VIDEO));
-        assert!(s.covers(PANE, "https://other.test", VIDEO));
-        assert!(s.covers("block-2", ORIGIN, VIDEO));
+        assert!(s.pane_grants(PANE).is_empty());
     }
 
     #[test]

@@ -20,4 +20,4 @@
 pub mod supervisor;
 pub mod workspace;
 
-pub use supervisor::{LspSupervisor, ServerId, StartArgs, StartResult};
+pub use supervisor::{LspSupervisor, StartArgs};

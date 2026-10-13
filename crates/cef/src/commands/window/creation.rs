@@ -1072,6 +1072,8 @@ fn get_secondary_window_size(px: i32, py: i32) -> (i32, i32) {
             return ((work_w as f64 * 0.70) as i32, (work_h as f64 * 0.70) as i32);
         }
     }
+    #[cfg(not(target_os = "windows"))]
+    let _ = (px, py);
     (1200, 800)
 }
 

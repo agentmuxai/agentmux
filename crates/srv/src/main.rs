@@ -20,6 +20,7 @@ mod reducer;
 mod registry;
 mod sagas;
 mod server;
+#[cfg(target_os = "windows")]
 mod srv_ipc;
 mod srv_info;
 mod state;

@@ -3,9 +3,8 @@
 
 use super::*;
 use agentmux_common::ipc::{HwndDriftKind, WindowKind};
-use crate::state::WindowMirror;
 use agentmux_common::ipc::{ClientKind, ErrorCode};
-use crate::state::{LifecyclePhase, ProcessRecord, ProcessState};
+use crate::state::{LifecyclePhase, ProcessState};
 
 fn ctx(conn_id: u64) -> Ctx {
     Ctx {

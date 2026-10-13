@@ -29,7 +29,9 @@
 //! window on any platform, including the two this was written on without
 //! being able to run them.
 
-use std::time::{Duration, Instant};
+#[cfg(any(target_os = "windows", target_os = "macos", test))]
+use std::time::Duration;
+use std::time::Instant;
 
 use crate::startup_events::{StartupEvent, StartupStatus};
 
@@ -238,8 +240,6 @@ pub enum RowKind<'a> {
 
 pub struct Row<'a> {
     pub kind: RowKind<'a>,
-    /// Sub-items and tallies are indented under their stage; stages are not.
-    pub indented: bool,
 }
 
 /// The label for a collapsed-sub-items row. Shared so all three platforms
@@ -264,23 +264,20 @@ pub fn visible_rows(stages: &[StageEntry], budget: usize) -> Vec<Row<'_>> {
     // the stage row it belongs under.
     let mut blocks: Vec<Vec<Row<'_>>> = Vec::new();
     for stage in stages {
-        let mut block = vec![Row { kind: RowKind::Stage(stage), indented: false }];
+        let mut block = vec![Row { kind: RowKind::Stage(stage) }];
         let subs = &stage.subs;
         if subs.len() > SUB_DETAIL_MAX {
             // Counted over ALL of the stage's sub-items, not just the hidden
             // ones: this is the stage's progress ratio, so it has to keep
             // rising as the two always-shown items finish too.
             let done = subs.iter().filter(|s| s.done.is_some()).count();
-            block.push(Row {
-                kind: RowKind::SubTally { done, total: subs.len() },
-                indented: true,
-            });
+            block.push(Row { kind: RowKind::SubTally { done, total: subs.len() } });
             for sub in &subs[subs.len() - SUB_DETAIL_MAX..] {
-                block.push(Row { kind: RowKind::Sub(sub), indented: true });
+                block.push(Row { kind: RowKind::Sub(sub) });
             }
         } else {
             for sub in subs {
-                block.push(Row { kind: RowKind::Sub(sub), indented: true });
+                block.push(Row { kind: RowKind::Sub(sub) });
             }
         }
         blocks.push(block);
@@ -318,6 +315,7 @@ pub fn visible_rows(stages: &[StageEntry], budget: usize) -> Vec<Row<'_>> {
 
 // ── Formatting ───────────────────────────────────────────────────────────────
 
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 pub fn format_ms(ms: u64) -> String {
     if ms >= 10_000 {
         format!("{:.0}s", ms as f64 / 1000.0)
@@ -328,6 +326,7 @@ pub fn format_ms(ms: u64) -> String {
     }
 }
 
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 pub fn format_running(started_at: Instant) -> String {
     let s = started_at.elapsed().as_secs_f32();
     if s >= 10.0 {
@@ -354,6 +353,7 @@ pub fn trunc(s: &str, max: usize) -> String {
 /// Only completed stages are summed: a stage's own duration already covers
 /// whatever its subs took (summing subs too would double-count), and an
 /// undone stage would inflate the sum with an ever-changing partial value.
+#[cfg(any(target_os = "windows", target_os = "macos", test))]
 pub fn accounted_ms(stages: &[StageEntry]) -> u64 {
     stages.iter().filter_map(|s| s.done.as_ref().map(|(dur, ..)| *dur)).sum()
 }
@@ -365,6 +365,7 @@ pub fn accounted_ms(stages: &[StageEntry]) -> u64 {
 /// `docs/analysis/ANALYSIS_SPLASH_SCREEN_TIMING_2026_07_20.md` §5.
 /// `saturating_sub` guards the should-be-impossible case where accounted
 /// time exceeds the wall-clock total.
+#[cfg(any(target_os = "windows", target_os = "macos", test))]
 pub fn reconcile(stages: &[StageEntry], total_ms: u64) -> (u64, u64) {
     let accounted = accounted_ms(stages);
     (accounted, total_ms.saturating_sub(accounted))
@@ -384,6 +385,7 @@ pub fn reconcile(stages: &[StageEntry], total_ms: u64) -> (u64, u64) {
 /// `docs/reports/REPORT_SPLASH_SCREEN_ARCHITECTURE_RETHINK_2026_09_14.md`
 /// §4.4. Shortened to `min(1000ms)` for a very fast start (<500ms total) so
 /// a near-instant cold start doesn't force an artificially long hold.
+#[cfg(any(target_os = "windows", target_os = "macos", test))]
 pub fn hold_duration(total_ms: u64) -> Duration {
     let hold_ms = std::env::var("AGENTMUX_SPLASH_HOLD_MS")
         .ok()
@@ -662,14 +664,6 @@ mod tests {
     fn a_zero_budget_yields_no_rows_rather_than_panicking() {
         let tl = timeline_with_subs(5);
         assert!(visible_rows(&tl.stages, 0).is_empty());
-    }
-
-    #[test]
-    fn stages_are_not_indented_but_subs_and_tallies_are() {
-        let tl = timeline_with_subs(9);
-        let rows = visible_rows(&tl.stages, 12);
-        let indents: Vec<bool> = rows.iter().map(|r| r.indented).collect();
-        assert_eq!(indents, vec![false, true, true, true]);
     }
 
     #[test]

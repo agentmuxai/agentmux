@@ -691,6 +691,7 @@ fn global_memory_in_startup_files(files: &[crate::backend::startup_files::Startu
 
 /// The files the CLI read by itself at session start, as card items. Only
 /// for a new session: on `/clear` and compaction they are still in context.
+#[cfg(test)]
 fn startup_items(launch: &LaunchDirs) -> Vec<EntrySize> {
     startup_items_of(startup_files(launch))
 }

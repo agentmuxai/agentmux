@@ -29,7 +29,7 @@ wrap_task! {
 
     impl Task {
         fn execute(&self) {
-            let mut browser = self.browser.clone();
+            let browser = self.browser.clone();
             if let Some(frame) = browser.main_frame() {
                 frame.load_url(Some(&CefString::from(self.url.as_str())));
             }
@@ -314,7 +314,7 @@ wrap_task! {
                             // browser is still attached and healthy (round 3;
                             // force=1 skips unload handlers — our own frontend,
                             // no user content).
-                            if let Some(mut browser) = self.state.get_browser(&self.label) {
+                            if let Some(browser) = self.state.get_browser(&self.label) {
                                 if let Some(host) = browser.host() {
                                     crate::client::dlog(&format!(
                                         "CloseWindowTask({}): round 5 — close_browser(1) to arm destruction",
@@ -395,7 +395,7 @@ wrap_task! {
                 // path is KNOWN INSUFFICIENT (destruction initiates but parks
                 // — see retro); it remains only as the no-strict-HWND fallback.
                 if self.label != "main" {
-                    if let Some(mut browser) = self.state.get_browser(&self.label) {
+                    if let Some(browser) = self.state.get_browser(&self.label) {
                         if let Some(host) = browser.host() {
                             tracing::info!(
                                 target: "wrr",
@@ -432,7 +432,7 @@ wrap_task! {
             ));
             // Fallback: no CefWindow for this label (non-Views path / pre-init
             // teardown) — close the browser handle directly.
-            if let Some(mut browser) = self.state.get_browser(&self.label) {
+            if let Some(browser) = self.state.get_browser(&self.label) {
                 if let Some(host) = browser.host() {
                     host.try_close_browser();
                 }
@@ -663,7 +663,7 @@ pub(crate) fn begin_drain_and_cascade(state: &Arc<AppState>, reason: crate::stat
     {
         use windows_sys::Win32::Foundation::HWND;
         use windows_sys::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_CLOSE};
-        for (i, mut b) in pool_browsers.into_iter().enumerate() {
+        for (i, b) in pool_browsers.into_iter().enumerate() {
             let hwnd_opt = b.host().and_then(|h| {
                 let wh = h.window_handle();
                 if wh.0.is_null() {
@@ -877,6 +877,7 @@ wrap_task! {
     }
 }
 
+#[cfg(not(target_os = "windows"))]
 pub fn post_minimize_window(state: &Arc<AppState>, label: &str) {
     let mut task = MinimizeWindowTask::new(state.clone(), label.to_string());
     post_task(ThreadId::UI, Some(&mut task));
@@ -903,6 +904,7 @@ wrap_task! {
     }
 }
 
+#[cfg(not(target_os = "windows"))]
 pub fn post_maximize_window(state: &Arc<AppState>, label: &str) {
     let mut task = MaximizeWindowTask::new(state.clone(), label.to_string());
     post_task(ThreadId::UI, Some(&mut task));
@@ -1287,6 +1289,7 @@ wrap_task! {
     }
 }
 
+#[cfg(not(target_os = "windows"))]
 pub fn post_move_window(state: &Arc<AppState>, label: &str, dx: i32, dy: i32) {
     let mut task = MoveWindowTask::new(state.clone(), label.to_string(), dx, dy);
     post_task(ThreadId::UI, Some(&mut task));
@@ -1317,6 +1320,7 @@ wrap_task! {
     }
 }
 
+#[cfg(not(target_os = "windows"))]
 pub fn post_set_window_position(state: &Arc<AppState>, label: &str, x: i32, y: i32) {
     let mut task = SetWindowPositionTask::new(state.clone(), label.to_string(), x, y);
     post_task(ThreadId::UI, Some(&mut task));
@@ -1377,6 +1381,7 @@ wrap_task! {
 /// Read a CEF Views window's absolute position (DIP) from the IPC thread by
 /// bouncing through the UI thread. `None` if the window isn't found or the UI
 /// thread doesn't answer within the timeout (e.g. mid-teardown).
+#[cfg(not(target_os = "windows"))]
 pub fn get_window_position_blocking(state: &Arc<AppState>, label: &str) -> Option<(i32, i32)> {
     let (tx, rx) = std::sync::mpsc::sync_channel::<Option<(i32, i32)>>(1);
     let mut task = GetWindowPositionTask::new(state.clone(), label.to_string(), tx);
@@ -1410,6 +1415,7 @@ wrap_task! {
 /// Read a CEF Views window's full rect (DIP) from the IPC thread by bouncing
 /// through the UI thread. Returns `None` if the window isn't found or the UI
 /// thread doesn't answer within the timeout.
+#[cfg(not(target_os = "windows"))]
 pub fn get_window_rect_blocking(state: &Arc<AppState>, label: &str) -> Option<(i32, i32, i32, i32)> {
     let (tx, rx) = std::sync::mpsc::sync_channel::<Option<(i32, i32, i32, i32)>>(1);
     let mut task = GetWindowRectTask::new(state.clone(), label.to_string(), tx);
@@ -1450,6 +1456,7 @@ wrap_task! {
     }
 }
 
+#[cfg(not(target_os = "windows"))]
 pub fn post_set_window_rect(state: &Arc<AppState>, label: &str, x: i32, y: i32, width: i32, height: i32) {
     let mut task = SetWindowRectTask::new(state.clone(), label.to_string(), x, y, width, height);
     post_task(ThreadId::UI, Some(&mut task));
@@ -1918,13 +1925,15 @@ wrap_task! {
             };
 
             // Phase H.2.b — reducer-aware lookup with fallback.
-            let mut browser = match self.state.get_browser(&label) {
+            let browser = match self.state.get_browser(&label) {
                 Some(b) => b,
                 None => {
                     tracing::warn!("[main-focus-reclaim] no browser for label={}", label);
                     return;
                 }
             };
+            #[cfg(target_os = "windows")]
+            let mut browser = browser;
 
             // Only reclaim inside the window the user is in. Both set_focus and
             // Win32 SetFocus activate a background window, and that window's
@@ -1987,7 +1996,7 @@ wrap_task! {
                         .list_browsers()
                         .into_iter()
                         .filter(|(k, _)| k.starts_with("browser-pane-"))
-                        .filter_map(|(_, mut b)| {
+                        .filter_map(|(_, b)| {
                             b.host().and_then(|h| {
                                 let wh = h.window_handle();
                                 if wh.0.is_null() { None } else { Some(wh.0 as *mut std::ffi::c_void) }

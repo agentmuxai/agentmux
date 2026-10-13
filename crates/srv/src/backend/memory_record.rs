@@ -540,6 +540,7 @@ pub(crate) fn version_shas(fs: &FileStore, agent_uid: &str) -> Result<std::colle
 
 /// Every version of `file`, oldest first — by time, since imported history
 /// is logged after the versions it predates.
+#[cfg(test)]
 pub(crate) fn history(fs: &FileStore, agent_uid: &str, file: &str) -> Result<Vec<Version>, StoreError> {
     let zone = zone_or_err(agent_uid)?;
     let log = fs.read_files_consistent(&zone, &[LOG_FILE])?.pop().flatten().unwrap_or_default();

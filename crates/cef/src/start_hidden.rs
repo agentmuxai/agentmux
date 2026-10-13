@@ -63,6 +63,7 @@ impl StartHidden {
     /// Called where a top-level window is about to be shown for the first
     /// time. `Skip::Yes` = do not show it; `first` marks the first skipped
     /// attempt (retries are skipped too), which starts the audit period.
+    #[cfg(test)]
     pub fn should_skip_reveal(&self, label: Option<&str>) -> Skip {
         self.should_skip_reveal_then(label, || {})
     }
@@ -87,6 +88,7 @@ impl StartHidden {
     }
 
     /// Release the hold. Returns what the caller must do.
+    #[cfg(test)]
     pub fn release(&self) -> Release {
         self.release_then(|| {})
     }

@@ -505,7 +505,7 @@ fn apply_tab_reordered(
     // reducer can therefore emit a TabReordered for a tab that on
     // disk still lives in `pinnedtabids`. Search both lists so the
     // reorder lands wherever the tab actually is. (codex P2 #617.)
-    let target_index = (new_index as usize);
+    let target_index = new_index as usize;
     if let Some(current_pos) = ws.tabids.iter().position(|t| t == tab_id) {
         let len = ws.tabids.len();
         let target = target_index.min(len.saturating_sub(1));

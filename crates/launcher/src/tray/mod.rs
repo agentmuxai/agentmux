@@ -88,6 +88,8 @@ pub fn unavailable() -> bool {
     TRAY_UNAVAILABLE.load(Ordering::SeqCst)
 }
 
+// No macOS menu-bar backend yet (SPEC_OS_NOTIFICATIONS_SYSTEM_2026_09_24.md §6.2).
+#[cfg_attr(target_os = "macos", allow(dead_code))]
 pub(crate) mod notify_menu;
 #[cfg(target_os = "windows")]
 mod windows;

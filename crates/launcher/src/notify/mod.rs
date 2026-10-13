@@ -170,6 +170,7 @@ pub fn start(
 /// srv was respawned: reconnect to its new endpoint. The toasts on screen
 /// name ids the new srv never issued — clear them rather than leave clicks
 /// that can't find their pane (rich-content spec §3.3 F).
+#[cfg(target_os = "windows")]
 pub fn update_endpoint(ws_endpoint: &str, auth_key: &str) {
     if let Some(h) = HANDLE.get() {
         h.presenter.clear_all();

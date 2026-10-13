@@ -112,7 +112,7 @@ wrap_task! {
             {
                 controller.set_visible(1);
                 if let Some(main_browser) = self.state.get_browser(&self.window_label) {
-                    if let Some(mut host) = main_browser.host() { host.set_focus(1); }
+                    if let Some(host) = main_browser.host() { host.set_focus(1); }
                 }
                 return;
             }
@@ -126,15 +126,15 @@ wrap_task! {
             // so set_bounds() should succeed and commit the bounds in CEF's Views layer.
             // The ObjC block additionally sets the NSWindow frame directly.
             #[cfg(target_os = "macos")]
-            let (mut task_dip_x, mut task_dip_y, mut task_dip_w, mut task_dip_h) = (0i32, 0i32, 0i32, 0i32);
+            let (task_dip_x, task_dip_y, task_dip_w, task_dip_h): (i32, i32, i32, i32);
             #[cfg(target_os = "macos")]
-            let mut task_main_win:    *mut std::ffi::c_void = std::ptr::null_mut();
+            let task_main_win:    *mut std::ffi::c_void;
             #[cfg(target_os = "macos")]
-            let mut task_overlay_win: *mut std::ffi::c_void = std::ptr::null_mut();
+            let task_overlay_win: *mut std::ffi::c_void;
             #[cfg(target_os = "macos")]
-            let mut task_sel_make_key_front: *const std::ffi::c_void = std::ptr::null();
+            let task_sel_make_key_front: *const std::ffi::c_void;
             #[cfg(target_os = "macos")]
-            let mut task_sel_order_front:    *const std::ffi::c_void = std::ptr::null();
+            let task_sel_order_front:    *const std::ffi::c_void;
 
             #[cfg(target_os = "macos")]
             unsafe {
@@ -174,8 +174,6 @@ wrap_task! {
                 let obj_at:         extern "C" fn(Id, Sel, usize) -> Id = std::mem::transmute(objc_msgSend as *const std::ffi::c_void);
                 let get_frame:      extern "C" fn(Id, Sel) -> NSRect    = std::mem::transmute(objc_msgSend as *const std::ffi::c_void);
                 let set_frame_d:    extern "C" fn(Id, Sel, NSRect, u8)  = std::mem::transmute(objc_msgSend as *const std::ffi::c_void);
-                let make_key_front: extern "C" fn(Id, Sel, Id)          = std::mem::transmute(objc_msgSend as *const std::ffi::c_void);
-                let order_front:    extern "C" fn(Id, Sel, Id)          = std::mem::transmute(objc_msgSend as *const std::ffi::c_void);
 
                 // Step 1: show the overlay on the first run only.
                 // On retry >= 1, the overlay is already visible; we just reaffirm the
@@ -366,7 +364,7 @@ wrap_task! {
 
             #[cfg(target_os = "macos")]
             if let Some(main_browser) = self.state.get_browser(&self.window_label) {
-                if let Some(mut host) = main_browser.host() { host.set_focus(1); }
+                if let Some(host) = main_browser.host() { host.set_focus(1); }
             }
 
             // macOS: call controller.set_bounds() with DIP coordinates computed above.
@@ -808,8 +806,8 @@ wrap_task! {
                             map.get(&self.label).map(|(wl, _)| wl.clone())
                         };
                         if let Some(win_label) = win_label {
-                            if let Some(mut main_browser) = self.state.get_browser(&win_label) {
-                                if let Some(mut host) = main_browser.host() {
+                            if let Some(main_browser) = self.state.get_browser(&win_label) {
+                                if let Some(host) = main_browser.host() {
                                     host.set_focus(1);
                                     tracing::debug!(
                                         label = %self.label, win = %win_label,

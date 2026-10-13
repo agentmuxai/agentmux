@@ -18,10 +18,8 @@ pub(crate) async fn dispatch_to_reducer(
     state: &AppState,
     cmd: agentmux_common::ipc::Command,
 ) -> Vec<agentmux_common::ipc::Event> {
-    let now = chrono::Utc::now().to_rfc3339();
     let mut s = state.srv_state.lock().await;
     let ctx = crate::reducer::Ctx {
-        now_rfc3339: now,
         registered_pid: None,
     };
     crate::reducer::update(&mut s, cmd, &ctx)
@@ -103,7 +101,6 @@ pub(crate) async fn seed_layout_via_reducer(
     let events = {
         let mut s = state.srv_state.lock().await;
         let ctx = crate::reducer::Ctx {
-            now_rfc3339: chrono::Utc::now().to_rfc3339(),
             registered_pid: None,
         };
         let events = crate::reducer::update(&mut s, cmd, &ctx);
@@ -186,7 +183,6 @@ pub(crate) async fn queue_layout_actions_via_reducer(
     let events = {
         let mut s = state.srv_state.lock().await;
         let ctx = crate::reducer::Ctx {
-            now_rfc3339: chrono::Utc::now().to_rfc3339(),
             registered_pid: None,
         };
         let events = crate::reducer::update(&mut s, cmd, &ctx);

@@ -20,8 +20,6 @@
 
 use serde::Serialize;
 
-use crate::backend::storage::cron::CronJob;
-use crate::backend::storage::work_queue::{work_state, WorkItem};
 use crate::server::AppState;
 
 /// Who asked.
@@ -159,9 +157,6 @@ pub struct QuitSummary {
     pub containers_left: Vec<String>,
 }
 
-// Moved to the one inventory (spec §6.1); re-exported for existing callers.
-pub use crate::server::agent_resources::{cron_targets, holds_claim};
-
 pub async fn run(state: &AppState, block_id: &str, origin: QuitOrigin) -> Result<QuitSummary, String> {
     run_with(state, block_id, origin, None).await
 }
@@ -236,6 +231,7 @@ pub async fn run_with(state: &AppState, block_id: &str, origin: QuitOrigin, deta
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::server::agent_resources::{cron_targets, holds_claim};
     use crate::server::tests::test_state;
     use agentmux_common::ipc::{Command, Event};
 

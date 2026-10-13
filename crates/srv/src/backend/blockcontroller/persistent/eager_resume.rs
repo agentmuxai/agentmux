@@ -23,6 +23,7 @@ impl PersistentSubprocessController {
     /// test in the file (confirmed by mutation: deleting the claim block
     /// entirely still passed all 6 eager-resume tests, since none of them
     /// exercised `try_eager_resume`'s OWN claim step in isolation).
+    #[cfg(test)]
     pub(super) fn try_claim_eager_resume_spawn(&self) -> bool {
         self.try_claim_eager_resume_spawn_for(None)
     }

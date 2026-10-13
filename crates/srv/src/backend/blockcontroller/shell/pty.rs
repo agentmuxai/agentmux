@@ -127,7 +127,7 @@ pub(super) const FLUSHER_EOF_GRACE: std::time::Duration = std::time::Duration::f
 /// is unchanged from before the barrier existed, rather than doubled (muxreview
 /// P2 on PR #3261).
 pub(super) const FLUSHER_BARRIER_TIMEOUT: std::time::Duration =
-    std::time::Duration::from_millis(900);
+    FLUSHER_DRAIN_TIMEOUT.saturating_sub(FLUSHER_EOF_GRACE);
 
 /// Detect the best available interactive shell on Windows.
 ///

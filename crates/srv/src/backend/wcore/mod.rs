@@ -17,7 +17,6 @@ mod workspace;
 
 // Re-export all public APIs so callers can continue using `wcore::function_name`.
 pub use block::*;
-pub use dnd::*;
 #[allow(unused_imports)]
 pub use event::*;
 pub use tab::*;
@@ -326,6 +325,7 @@ pub fn get_client(store: &Store) -> Result<Client, StoreError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::dnd::*;
 
     fn make_store() -> Store {
         Store::open_in_memory().unwrap()

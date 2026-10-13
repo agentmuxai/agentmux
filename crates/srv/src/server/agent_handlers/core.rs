@@ -5,8 +5,6 @@
 use std::sync::Arc;
 use chrono::Utc;
 
-use serde_json::json;
-
 use crate::backend::rpc::engine::WshRpcEngine;
 use crate::backend::rpc_types::{
     COMMAND_LIST_AGENTS, COMMAND_CREATE_AGENT, COMMAND_UPDATE_AGENT,
@@ -761,7 +759,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
 mod tests {
     use super::*;
     use crate::backend::rpc_types::RpcMessage;
-    use crate::backend::storage::Bundle;
+    use crate::backend::storage::bundles::Bundle;
     use crate::server::tests::test_state;
 
     fn seed_bundle(state: &AppState, id: &str, provider: &str) {

@@ -20,7 +20,7 @@
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
-pub(crate) use agentmux_common::popup_rules::{decide, origin_of, MAX_POPUPS_PER_PANE};
+pub(crate) use agentmux_common::popup_rules::{decide, origin_of};
 
 /// Block meta on a popup pane: the pane that opened it. Written only by srv.
 pub(crate) const POPUP_OF_META_KEY: &str = "browser:popup_of";

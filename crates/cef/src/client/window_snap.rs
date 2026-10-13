@@ -4,8 +4,8 @@
 //! Pure geometry for Chrome-style window snapping —
 //! `docs/specs/SPEC_WINDOW_SNAP_MAXIMIZE_2026_09_04.md`.
 //!
-//! Deliberately **not** `#[cfg(target_os = "windows")]` and deliberately free
-//! of any Win32 type: the callers (`client::wndproc`'s `WM_SIZING` arm for
+//! Built for tests on every target (`#[cfg(any(target_os = "windows", test))]`)
+//! and deliberately free of any Win32 type: the callers (`client::wndproc`'s `WM_SIZING` arm for
 //! border-drag vertical snap, `ui_tasks::drag`'s move loop for
 //! drag-to-top maximize) are both native message-loop code that no test
 //! harness can drive, so the only way any of this logic gets asserted is by
@@ -24,6 +24,7 @@
 /// own edge magnetism is in this neighbourhood; small enough that a user
 /// deliberately sizing a window near the screen edge isn't fighting it,
 /// large enough to be reachable without pixel-hunting.
+#[cfg(target_os = "windows")]
 pub(crate) const SNAP_THRESHOLD_PX: i32 = 12;
 
 /// Which horizontal edge of the window a `WM_SIZING` drag is moving.
