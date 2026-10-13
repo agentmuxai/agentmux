@@ -24,21 +24,34 @@
 //! one.
 //!
 //! A goodbye (a v3 record, `gone`) is due when something was published and
-//! the relay takes v2 ([`Machine::farewell`]): an older relay would refuse
-//! v3, so it gets none. Turning publishing off says it here
+//! the relay takes v2 or later ([`Machine::farewell`]): an older relay would
+//! refuse v3, so it gets none. Turning publishing off says it here
 //! ([`Action::Goodbye`]); a sign-out and a quit say it from outside, and a
 //! sign-out tells the machine with [`Event::Goodbye`].
 //!
-//! Two refusals get one immediate second try before `rejected`: a record
-//! the relay can't parse is sent again as v1 (an older relay knows no agent
-//! states), and v1 is then kept for that relay for [`Config::v1_memory`]; a
+//! Two refusals get an immediate second try before `rejected`: a record the
+//! relay can't parse is sent again one version down, v4 then v2 then v1 (an
+//! older relay knows no agent lines, an older one still no states), and the
+//! version it took is then kept for that relay for [`Config::v1_memory`]; a
 //! record whose time the relay refuses is sent again stamped with the
 //! relay's clock, learned from the `Date` of every answer.
 
 use std::collections::HashMap;
 use std::time::Duration;
 
-use agentmux_common::install_presence::{PRESENCE_VERSION, PRESENCE_VERSION_V1};
+use agentmux_common::install_presence::{PRESENCE_VERSION, PRESENCE_VERSION_LINES, PRESENCE_VERSION_V1};
+
+/// The version a fresh try sends to a relay not known to be older.
+pub(crate) const LIVE_VERSION: u32 = PRESENCE_VERSION_LINES;
+
+/// The version to try after `v` was refused as malformed, if any.
+fn step_down(v: u32) -> Option<u32> {
+    match v {
+        PRESENCE_VERSION_LINES => Some(PRESENCE_VERSION),
+        PRESENCE_VERSION => Some(PRESENCE_VERSION_V1),
+        _ => None,
+    }
+}
 
 use crate::backend::rpc_types::{PresenceOffReason, PresenceState, PresenceStatusResult};
 
@@ -194,7 +207,8 @@ pub(crate) struct Step {
 /// The second tries already spent on the record being sent.
 #[derive(Debug, Default, Clone, Copy)]
 struct Followups {
-    v1: bool,
+    /// The record was sent again one version down at least once.
+    stepped_down: bool,
     clock: bool,
 }
 
@@ -212,8 +226,8 @@ pub(crate) struct Machine {
     health_due_ms: Option<u64>,
     dirty: bool,
     followups: Followups,
-    /// Relays that took only v1, until when.
-    v1_until_ms: HashMap<String, u64>,
+    /// Relays that took only an older version: which, and until when.
+    older_until_ms: HashMap<String, (u32, u64)>,
     offset_ms: Option<i64>,
     relay_version: Option<String>,
     /// The relay's version just after its 404.
@@ -255,7 +269,7 @@ impl Machine {
             health_due_ms: None,
             dirty: false,
             followups: Followups::default(),
-            v1_until_ms: HashMap::new(),
+            older_until_ms: HashMap::new(),
             offset_ms: None,
             relay_version: None,
             version_at_404: None,
@@ -295,21 +309,21 @@ impl Machine {
 
     /// Whether a goodbye is due if this install went away now: something
     /// was published, publishing is on and no goodbye has been said since,
-    /// and the relay takes v2 (one that took only v1 would refuse v3).
+    /// and the relay takes v2 or later (one that took only v1 would refuse v3).
     pub(crate) fn farewell(&self, now: &Now) -> Option<Farewell> {
         let due = self.off.is_none()
             && self.state != Some(PresenceState::SignedOff)
             && self.last_ok_wall_ms.is_some()
-            && self.record_version(now) == PRESENCE_VERSION;
+            && self.record_version(now) >= PRESENCE_VERSION;
         due.then(|| Farewell { offset_ms: self.offset_ms.unwrap_or(0) })
     }
 
-    /// The version a fresh try sends: v1 while this relay is remembered as
-    /// taking only v1.
+    /// The version a fresh try sends: an older one while this relay is
+    /// remembered as taking only that.
     pub(crate) fn record_version(&self, now: &Now) -> u32 {
-        match self.v1_until_ms.get(&self.relay) {
-            Some(&until) if now.mono_ms < until => PRESENCE_VERSION_V1,
-            _ => PRESENCE_VERSION,
+        match self.older_until_ms.get(&self.relay) {
+            Some(&(v, until)) if now.mono_ms < until => v,
+            _ => LIVE_VERSION,
         }
     }
 
@@ -465,23 +479,24 @@ impl Machine {
     fn on_answer(&mut self, sent_v: u32, answer: Answer, now: &Now, logs: &mut Vec<Log>) -> Action {
         match answer {
             Answer::Stored => {
-                if sent_v == PRESENCE_VERSION_V1 && self.followups.v1 {
-                    self.v1_until_ms.insert(self.relay.clone(), now.mono_ms + ms(self.config.v1_memory));
+                if self.followups.stepped_down {
+                    let until = now.mono_ms + ms(self.config.v1_memory);
+                    self.older_until_ms.insert(self.relay.clone(), (sent_v, until));
                 }
                 self.failures = 0;
                 self.last_ok_wall_ms = Some(now.wall_ms);
-                let text = if sent_v == PRESENCE_VERSION_V1 {
-                    "published, as v1: the relay is on an older version and gets no agent states"
-                } else {
-                    "published"
+                let text = match sent_v {
+                    PRESENCE_VERSION_V1 => "published, as v1: the relay is on an older version and gets no agent states",
+                    PRESENCE_VERSION => "published, as v2: the relay is on an older version and gets no agent summaries",
+                    _ => "published",
                 };
                 self.enter(PresenceState::Publishing, None, text, now, logs);
                 self.due_ms = now.mono_ms + ms(self.config.interval);
                 Action::Wait
             }
-            Answer::Malformed if sent_v != PRESENCE_VERSION_V1 && !self.followups.v1 => {
-                self.followups.v1 = true;
-                self.attempt(Some(PRESENCE_VERSION_V1), now)
+            Answer::Malformed if step_down(sent_v).is_some() => {
+                self.followups.stepped_down = true;
+                self.attempt(step_down(sent_v), now)
             }
             Answer::ClockRefused(_) if !self.followups.clock => {
                 self.followups.clock = true;
@@ -628,6 +643,8 @@ impl Machine {
         let record_version = self.record_version(now);
         if record_version == PRESENCE_VERSION_V1 {
             notes.push("The cloud runs an older version, so your devices don't see agent states".to_string());
+        } else if record_version == PRESENCE_VERSION {
+            notes.push("The cloud runs an older version, so your devices don't see agent summaries".to_string());
         }
         Some(PresenceStatusResult {
             state,
@@ -698,7 +715,7 @@ mod tests {
     }
 
     fn answer(answer: Answer) -> Event {
-        Event::Answer { sent_v: 2, answer, relay_date_ms: None }
+        Event::Answer { sent_v: 4, answer, relay_date_ms: None }
     }
 
     fn unreachable() -> Event {
@@ -711,7 +728,7 @@ mod tests {
 
     fn publishing() -> Machine {
         let mut m = machine();
-        assert_eq!(m.next(Event::Start, at(0)).action, Action::Attempt { v: 2 });
+        assert_eq!(m.next(Event::Start, at(0)).action, Action::Attempt { v: 4 });
         m.next(answer(Answer::Stored), at(0));
         m
     }
@@ -727,14 +744,14 @@ mod tests {
         assert_eq!(m.state(), Some(PresenceState::Publishing));
         assert_eq!((step.action, step.wait), (Action::Wait, Duration::from_secs(60)));
         assert_eq!(step.logs, vec![Log { warn: false, text: "published".into() }]);
-        assert_eq!(m.next(Event::Due, at(60 * S)).action, Action::Attempt { v: 2 });
+        assert_eq!(m.next(Event::Due, at(60 * S)).action, Action::Attempt { v: 4 });
     }
 
     #[test]
     fn while_publishing_a_change_is_sent_after_the_drivers_debounce() {
         let mut m = publishing();
         assert!(m.follows_changes());
-        assert_eq!(m.next(Event::Changed, at(5 * S)).action, Action::Attempt { v: 2 });
+        assert_eq!(m.next(Event::Changed, at(5 * S)).action, Action::Attempt { v: 4 });
     }
 
     #[test]
@@ -746,7 +763,7 @@ mod tests {
         assert_eq!(m.status(&at(0)).unwrap().next_try_ms, None, "no try is promised while signed out");
         assert_eq!(m.next(Event::Changed, at(S)).action, Action::Wait, "a change while signed out sends nothing");
         assert_eq!(m.next(Event::Woke, at(2 * S)).action, Action::Wait);
-        assert_eq!(m.next(Event::SignIn, at(3 * S)).action, Action::Attempt { v: 2 }, "a sign-in tries at once");
+        assert_eq!(m.next(Event::SignIn, at(3 * S)).action, Action::Attempt { v: 4 }, "a sign-in tries at once");
     }
 
     #[test]
@@ -811,7 +828,7 @@ mod tests {
                 t += 60 * S;
                 let step = m.next(Event::Due, at(t));
                 if step.action != Action::CheckHealth {
-                    assert_eq!(step.action, Action::Attempt { v: 2 });
+                    assert_eq!(step.action, Action::Attempt { v: 4 });
                     break;
                 }
                 m.next(Event::Health { version: Some("1.0.0".into()), relay_date_ms: None }, at(t));
@@ -832,7 +849,7 @@ mod tests {
             let mut m = machine();
             m.next(answer(Answer::NoRoute), at(0));
             m.next(Event::Health { version: Some("1.0.0".into()), relay_date_ms: None }, at(0));
-            assert_eq!(m.next(event.clone(), at(5 * S)).action, Action::Attempt { v: 2 }, "{event:?}");
+            assert_eq!(m.next(event.clone(), at(5 * S)).action, Action::Attempt { v: 4 }, "{event:?}");
         }
     }
 
@@ -849,7 +866,7 @@ mod tests {
         assert_eq!(step.action, Action::Wait, "a failed check changes nothing");
         assert_eq!(m.next(Event::Due, at(180 * S)).action, Action::CheckHealth);
         let step = m.next(Event::Health { version: Some("1.1.0".into()), relay_date_ms: None }, at(180 * S));
-        assert_eq!(step.action, Action::Attempt { v: 2 });
+        assert_eq!(step.action, Action::Attempt { v: 4 });
         assert_eq!(m.status(&at(180 * S)).unwrap().relay_version.as_deref(), Some("1.1.0"));
         // Still 404 on the new version: that version is the new baseline.
         assert_eq!(m.next(answer(Answer::NoRoute), at(181 * S)).action, Action::CheckHealth);
@@ -882,7 +899,7 @@ mod tests {
         m.next(unreachable(), at(0));
         m.next(Event::Changed, at(100));
         let step = m.next(Event::Due, at(10 * S));
-        assert_eq!(step.action, Action::Attempt { v: 2 }, "the next try sends the latest");
+        assert_eq!(step.action, Action::Attempt { v: 4 }, "the next try sends the latest");
         assert!(!m.dirty());
     }
 
@@ -899,27 +916,31 @@ mod tests {
         }
         let mut m = machine();
         m.next(answer(Answer::Refused("x".into())), at(0));
-        assert_eq!(m.next(Event::PublishNow, at(S)).action, Action::Attempt { v: 2 }, "but the user may ask");
+        assert_eq!(m.next(Event::PublishNow, at(S)).action, Action::Attempt { v: 4 }, "but the user may ask");
     }
 
     #[test]
-    fn a_malformed_v2_is_sent_again_as_v1_once() {
+    fn a_malformed_record_is_sent_again_one_version_down_until_v1() {
         let mut m = publishing();
-        assert_eq!(m.next(Event::Due, at(60 * S)).action, Action::Attempt { v: 2 });
+        assert_eq!(m.next(Event::Due, at(60 * S)).action, Action::Attempt { v: 4 });
         let step = m.next(answer(Answer::Malformed), at(60 * S));
-        assert_eq!(step.action, Action::Attempt { v: 1 });
+        assert_eq!(step.action, Action::Attempt { v: 2 });
         assert_eq!(m.state(), Some(PresenceState::Publishing), "no state change for the second try");
+        let step = m.next(Event::Answer { sent_v: 2, answer: Answer::Malformed, relay_date_ms: None }, at(60 * S));
+        assert_eq!(step.action, Action::Attempt { v: 1 });
         let step = m.next(Event::Answer { sent_v: 1, answer: Answer::Malformed, relay_date_ms: None }, at(60 * S));
         assert_eq!(step.action, Action::Wait, "v1 failing too: no third try");
         assert_eq!(m.state(), Some(PresenceState::Rejected));
-        assert_eq!(m.status(&at(60 * S)).unwrap().record_version, 2, "nothing remembered");
+        assert_eq!(m.status(&at(60 * S)).unwrap().record_version, 4, "nothing remembered");
     }
 
     #[test]
     fn a_relay_that_took_v1_gets_v1_for_six_hours() {
         let mut m = machine();
         m.next(Event::Start, at(0));
-        assert_eq!(m.next(answer(Answer::Malformed), at(0)).action, Action::Attempt { v: 1 });
+        assert_eq!(m.next(answer(Answer::Malformed), at(0)).action, Action::Attempt { v: 2 });
+        let malformed_v2 = Event::Answer { sent_v: 2, answer: Answer::Malformed, relay_date_ms: None };
+        assert_eq!(m.next(malformed_v2, at(0)).action, Action::Attempt { v: 1 });
         let step = m.next(Event::Answer { sent_v: 1, answer: Answer::Stored, relay_date_ms: None }, at(0));
         assert_eq!(m.state(), Some(PresenceState::Publishing));
         assert!(step.logs[0].text.contains("as v1"), "{:?}", step.logs);
@@ -929,13 +950,27 @@ mod tests {
 
         assert_eq!(m.next(Event::Due, at(60 * S)).action, Action::Attempt { v: 1 });
         m.next(Event::Answer { sent_v: 1, answer: Answer::Stored, relay_date_ms: None }, at(60 * S));
-        // Per relay: another one gets v2.
+        // Per relay: another one gets v4.
         m.set_relay("https://other.test/");
-        assert_eq!(m.next(Event::Due, at(120 * S)).action, Action::Attempt { v: 2 });
+        assert_eq!(m.next(Event::Due, at(120 * S)).action, Action::Attempt { v: 4 });
         m.set_relay("https://relay.test");
         assert_eq!(m.next(Event::Due, at(6 * 60 * MIN - 1)).action, Action::Attempt { v: 1 });
-        assert_eq!(m.next(Event::Due, at(6 * 60 * MIN)).action, Action::Attempt { v: 2 }, "forgotten after 6 h");
+        assert_eq!(m.next(Event::Due, at(6 * 60 * MIN)).action, Action::Attempt { v: 4 }, "forgotten after 6 h");
         assert_eq!(m.status(&at(6 * 60 * MIN)).unwrap().note, None);
+    }
+
+    #[test]
+    fn a_relay_that_took_v2_gets_v2_and_still_a_goodbye() {
+        let mut m = machine();
+        m.next(Event::Start, at(0));
+        assert_eq!(m.next(answer(Answer::Malformed), at(0)).action, Action::Attempt { v: 2 });
+        let step = m.next(Event::Answer { sent_v: 2, answer: Answer::Stored, relay_date_ms: None }, at(0));
+        assert!(step.logs[0].text.contains("as v2"), "{:?}", step.logs);
+        let status = m.status(&at(0)).unwrap();
+        assert_eq!(status.record_version, 2);
+        assert!(status.note.as_deref().unwrap().contains("agent summaries"), "{status:?}");
+        assert_eq!(m.next(Event::Due, at(60 * S)).action, Action::Attempt { v: 2 });
+        assert!(m.farewell(&at(60 * S)).is_some(), "a relay that takes v2 takes the v3 goodbye");
     }
 
     #[test]
@@ -943,9 +978,9 @@ mod tests {
         let mut m = machine();
         m.next(Event::Start, at(0));
         m.next(answer(Answer::Malformed), at(0));
-        m.next(Event::Answer { sent_v: 1, answer: unreachable_answer(), relay_date_ms: None }, at(0));
+        m.next(Event::Answer { sent_v: 2, answer: unreachable_answer(), relay_date_ms: None }, at(0));
         assert_eq!(m.state(), Some(PresenceState::Retrying));
-        assert_eq!(m.next(Event::Due, at(MIN)).action, Action::Attempt { v: 2 }, "v2 again: v1 never landed");
+        assert_eq!(m.next(Event::Due, at(MIN)).action, Action::Attempt { v: 4 }, "v4 again: v2 never landed");
     }
 
     fn unreachable_answer() -> Answer {
@@ -960,7 +995,7 @@ mod tests {
             let now = at(0);
             assert_eq!(m.stamp(now.wall_ms), now.wall_ms, "no answer yet: the local clock");
             let relay_date = (now.wall_ms as i64 - local_minus_relay) as u64;
-            let step = m.next(Event::Answer { sent_v: 2, answer: Answer::Stored, relay_date_ms: Some(relay_date) }, now);
+            let step = m.next(Event::Answer { sent_v: 4, answer: Answer::Stored, relay_date_ms: Some(relay_date) }, now);
             assert!(step.logs.iter().any(|l| l.text.contains("differs from the relay's by 15 min")), "{skew_label}");
             assert_eq!(m.stamp(now.wall_ms), relay_date, "{skew_label}");
             assert_eq!(m.stamp(now.wall_ms + 5_000), relay_date + 5_000);
@@ -974,7 +1009,7 @@ mod tests {
     fn a_small_offset_is_used_but_not_shown() {
         let mut m = machine();
         let now = at(0);
-        m.next(Event::Answer { sent_v: 2, answer: Answer::Stored, relay_date_ms: Some(now.wall_ms + 90_000) }, now);
+        m.next(Event::Answer { sent_v: 4, answer: Answer::Stored, relay_date_ms: Some(now.wall_ms + 90_000) }, now);
         assert_eq!(m.stamp(now.wall_ms), now.wall_ms + 90_000);
         assert_eq!(m.status(&now).unwrap().note, None);
     }
@@ -995,13 +1030,13 @@ mod tests {
         let relay_date = WALL - 15 * MIN;
         let step = m.next(
             Event::Answer {
-                sent_v: 2,
+                sent_v: 4,
                 answer: Answer::ClockRefused("published_at_ms is too far from the relay's clock".into()),
                 relay_date_ms: Some(relay_date),
             },
             at(0),
         );
-        assert_eq!(step.action, Action::Attempt { v: 2 });
+        assert_eq!(step.action, Action::Attempt { v: 4 });
         assert_eq!(m.stamp(WALL), relay_date);
         let step = m.next(
             answer(Answer::ClockRefused("published_at_ms is too far from the relay's clock".into())),
@@ -1052,7 +1087,7 @@ mod tests {
                 next_try_ms: Some(WALL + 30 * S + 2500),
                 relay_version: None,
                 offset_ms: None,
-                record_version: 2,
+                record_version: 4,
                 note: None,
                 off_reason: None,
             }

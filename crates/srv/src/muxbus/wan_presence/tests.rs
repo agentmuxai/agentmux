@@ -12,7 +12,7 @@ use super::*;
 use crate::backend::agent_state::{AgentState, AgentStatus};
 use crate::backend::fleet_feed::FleetObservation;
 use crate::backend::rpc_types::PresenceState;
-use agentmux_common::install_presence::PRESENCE_VERSION;
+use agentmux_common::install_presence::PRESENCE_VERSION_LINES;
 
 /// (instance id from the path, Authorization header, body) per PUT.
 type Seen = Vec<(String, Option<String>, serde_json::Value)>;
@@ -30,6 +30,8 @@ struct FakeRelay {
     v1_only: AtomicBool,
     /// Refuse v3 as malformed, like a relay that predates the goodbye.
     no_v3: AtomicBool,
+    /// Refuse v4 as malformed, like a relay that predates agent lines.
+    no_v4: AtomicBool,
 
     /// Refuse a record further than this from the relay's clock; 0: any.
     clock_window_ms: AtomicU64,
@@ -67,6 +69,9 @@ impl FakeRelay {
             return (StatusCode::BAD_REQUEST, serde_json::json!({ "error": MALFORMED_RECORD }));
         }
         if self.no_v3.load(Ordering::SeqCst) && body["v"] == 3 {
+            return (StatusCode::BAD_REQUEST, serde_json::json!({ "error": MALFORMED_RECORD }));
+        }
+        if self.no_v4.load(Ordering::SeqCst) && body["v"] == 4 {
             return (StatusCode::BAD_REQUEST, serde_json::json!({ "error": MALFORMED_RECORD }));
         }
         let window = self.clock_window_ms.load(Ordering::SeqCst);
@@ -151,6 +156,7 @@ fn feed() -> FleetFeed {
             ("Ghost".to_string(), AgentStatus { state: AgentState::Idle, since_ms: 5 }),
         ]
         .into(),
+        agent_lines: [("AgentX".to_string(), "Fixing the login race".to_string())].into(),
     });
     f
 }
@@ -200,11 +206,21 @@ fn the_record_carries_the_snapshot_and_verifies() {
     assert_eq!(
         record.agents,
         vec![
-            PresenceAgent { name: "AgentX".into(), kind: "container".into(), state: Some("working".into()) },
-            PresenceAgent { name: "Camper".into(), kind: "host".into(), state: None },
+            PresenceAgent { name: "AgentX".into(), kind: "container".into(), state: Some("working".into()), line: None },
+            PresenceAgent { name: "Camper".into(), kind: "host".into(), state: None, line: None },
         ],
-        "sorted, the agent of unknown kind left out, no state where none is known"
+        "sorted, the agent of unknown kind left out, no state where none is known, no line below v4"
     );
+}
+
+#[test]
+fn a_v4_record_carries_each_agents_line() {
+    let (_dir, instance) = instance();
+    let f = feed();
+    let record = build_record(&instance, &f, &f.snapshot(), PRESENCE_VERSION_LINES, 1_791_352_493_388).unwrap();
+    assert!(record.verify());
+    let lines: Vec<(&str, Option<&str>)> = record.agents.iter().map(|a| (a.name.as_str(), a.line.as_deref())).collect();
+    assert_eq!(lines, [("AgentX", Some("Fixing the login race")), ("Camper", None)]);
 }
 
 #[test]
@@ -225,6 +241,7 @@ fn observation(agents: &[&str], channels_running: u32, working: &[&str]) -> Flee
             .iter()
             .map(|n| (n.to_string(), AgentStatus { state: AgentState::Working, since_ms: 1 }))
             .collect(),
+        ..Default::default()
     }
 }
 
@@ -565,7 +582,18 @@ async fn a_relay_that_only_knows_v1_gets_v1() {
     assert_eq!(status.record_version, 1);
     assert!(status.note.as_deref().unwrap_or("").contains("older version"), "{status:?}");
     let versions: Vec<_> = stub.relay.seen.lock().unwrap().iter().map(|(_, _, b)| b["v"].clone()).collect();
-    assert_eq!(versions, vec![serde_json::json!(2), serde_json::json!(1)]);
+    assert_eq!(versions, vec![serde_json::json!(4), serde_json::json!(2), serde_json::json!(1)]);
+}
+
+#[tokio::test]
+async fn a_relay_that_predates_lines_gets_v2_with_its_states() {
+    let stub = fake_relay(FakeRelay { no_v4: AtomicBool::new(true), ..Default::default() }).await;
+    let run = drive(&stub.url, Some("tok"));
+    let status = run.until_state(PresenceState::Publishing).await;
+    assert_eq!(status.record_version, 2);
+    assert!(status.note.as_deref().unwrap_or("").contains("agent summaries"), "{status:?}");
+    let versions: Vec<_> = stub.relay.seen.lock().unwrap().iter().map(|(_, _, b)| b["v"].clone()).collect();
+    assert_eq!(versions, vec![serde_json::json!(4), serde_json::json!(2)]);
 }
 
 #[tokio::test]
@@ -717,7 +745,7 @@ mod rules {
             assert_eq!(state(&m, 3 * S), PresenceState::Off, "{event:?}");
         }
         let step = m.next(Event::Policy { off: None }, at(4 * S));
-        assert_eq!(step.action, Action::Attempt { v: 2 }, "turned on: at once");
+        assert_eq!(step.action, Action::Attempt { v: 4 }, "turned on: at once");
         m.next(answer(2, Answer::Stored), at(4 * S));
         assert_eq!(m.status(&at(4 * S)).unwrap().off_reason, None);
     }
@@ -772,11 +800,11 @@ mod rules {
         assert_eq!((status.state, status.next_try_ms), (PresenceState::SignedOff, None));
         assert_eq!(m.farewell(&at(S)), None);
         // The local recheck finds no sign-in: still signed off, no new line.
-        assert_eq!(m.next(Event::Due, at(61 * S)).action, Action::Attempt { v: 2 });
+        assert_eq!(m.next(Event::Due, at(61 * S)).action, Action::Attempt { v: 4 });
         assert!(m.next(Event::NoSignIn, at(61 * S)).logs.is_empty());
         assert_eq!(state(&m, 61 * S), PresenceState::SignedOff);
         assert_eq!(m.next(Event::Woke, at(62 * S)).action, Action::Wait);
-        assert_eq!(m.next(Event::SignIn, at(70 * S)).action, Action::Attempt { v: 2 });
+        assert_eq!(m.next(Event::SignIn, at(70 * S)).action, Action::Attempt { v: 4 });
         m.next(answer(2, Answer::Stored), at(70 * S));
         assert_eq!(state(&m, 70 * S), PresenceState::Publishing);
         assert!(m.farewell(&at(70 * S)).is_some(), "a goodbye is due again");
@@ -797,7 +825,7 @@ mod rules {
     #[test]
     fn a_sign_out_without_a_goodbye_is_signed_out() {
         let mut m = published();
-        assert_eq!(m.next(Event::Goodbye { stored: false }, at(S)).action, Action::Attempt { v: 2 });
+        assert_eq!(m.next(Event::Goodbye { stored: false }, at(S)).action, Action::Attempt { v: 4 });
         m.next(Event::NoSignIn, at(S));
         assert_eq!(state(&m, S), PresenceState::SignedOut);
     }
@@ -911,7 +939,7 @@ async fn an_install_off_by_default_sends_nothing_until_turned_on() {
     *run.session.off.lock().unwrap() = None;
     run.signals.send(Event::SettingsChanged).unwrap();
     run.until_state(PresenceState::Publishing).await;
-    assert_eq!(stub.relay.bodies()[0]["v"], PRESENCE_VERSION);
+    assert_eq!(stub.relay.bodies()[0]["v"], PRESENCE_VERSION_LINES);
 }
 
 #[tokio::test]
@@ -951,7 +979,7 @@ async fn a_sign_out_says_goodbye_holds_the_publisher_and_shows_signed_off() {
     run.signals.send(Event::PublishNow).unwrap();
     tokio::time::sleep(Duration::from_millis(150)).await;
     let versions: Vec<_> = stub.relay.bodies().iter().map(|b| b["v"].clone()).collect();
-    assert_eq!(versions, vec![serde_json::json!(2), serde_json::json!(3)], "the goodbye is the last record");
+    assert_eq!(versions, vec![serde_json::json!(4), serde_json::json!(3)], "the goodbye is the last record");
     // What `signed_out` does.
     run.shared.hold.store(false, Ordering::SeqCst);
     run.signals.send(Event::Goodbye { stored: true }).unwrap();

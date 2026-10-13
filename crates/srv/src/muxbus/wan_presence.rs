@@ -83,7 +83,7 @@ const OUT_OF_BOUNDS: &str = "the record is out of bounds (hostname, channel or v
 
 /// The record for `snapshot`, as version `v`. An agent whose kind isn't
 /// known is left out: the record requires one, and the feed doesn't guess.
-/// An agent whose state isn't known carries none.
+/// An agent whose state isn't known carries none, and one with no line no line.
 pub(crate) fn build_record(
     instance: &WanInstance,
     feed: &FleetFeed,
@@ -96,6 +96,7 @@ pub(crate) fn build_record(
             name: name.clone(),
             kind: (*kind).to_string(),
             state: snapshot.agent_status.get(name).map(|s| s.state.as_str().to_string()),
+            line: snapshot.agent_lines.get(name).cloned(),
         })
     });
     InstallPresence::sign_version(
@@ -608,15 +609,15 @@ const LIVE_TIMING: Timing = Timing {
     max_settle: machine::LIVE.interval,
 };
 
-/// Whether anything but agent states differs: the agents, their kinds or
-/// the channel count.
+/// Whether anything but agent states and lines differs: the agents, their
+/// kinds or the channel count.
 pub(crate) fn structure_changed(a: &FleetSnapshot, b: &FleetSnapshot) -> bool {
     a.agents != b.agents || a.agent_kinds != b.agent_kinds || a.channels_running != b.channels_running
 }
 
 /// After a change of the snapshot, wait until it is time to publish: a
 /// change of the agents, kinds or channel count once those have settled
-/// ([`settle`]); a change of agent states alone once
+/// ([`settle`]); a change of agent states or lines alone once
 /// [`STATE_MIN_INTERVAL`] has passed since `sent_at`. A structural change
 /// during that wait switches to settling. `false` on shutdown.
 async fn wait_to_publish(
