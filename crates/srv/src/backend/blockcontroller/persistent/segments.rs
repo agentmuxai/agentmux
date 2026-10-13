@@ -163,10 +163,7 @@ impl PersistentSubprocessController {
         let decision = segs::resume_gate(
             &input,
             |sid| provider_file_size(config_dir, cwd, sid),
-            |dir, at_cwd, sid| {
-                crate::backend::continuity_relocate::source_file(dir, at_cwd, sid)
-                    .is_some_and(|p| crate::backend::continuity_relocate::is_resumable_file(&p))
-            },
+            crate::backend::continuity_relocate::can_relocate,
         );
         // Copy a session file in from where it was recorded, for `--fork-session`.
         let place = |from_config_dir: &str, from_cwd: &str, head: &str| {

@@ -341,8 +341,9 @@ pub(crate) struct Head {
 ///
 /// `size_here(sid)`: the size of the session's file under the spawn's
 /// config dir and cwd, `None` when it isn't there. `resumable_at(config_dir,
-/// cwd, sid)`: a complete session file for that working dir exists under that
-/// config dir (§4.3).
+/// cwd, sid)`: a session file for that working dir exists under that config
+/// dir with a complete record to copy (§4.3; its last record may still be
+/// being written, and the copy is cut back to a complete one).
 pub(crate) fn resume_gate(
     input: &GateInput<'_>,
     size_here: impl Fn(&str) -> Option<u64>,
@@ -406,7 +407,8 @@ fn relocation_source<'h>(head: &'h Head, input: &GateInput<'_>) -> Option<&'h st
 
 /// `ResumeGate::ForkFrom` when this agent has no chain and the agent it was
 /// forked from is at the candidate: a Claude session, under the spawn's own
-/// identity (both known, I2), whose file is complete where it was recorded.
+/// identity (both known, I2), whose file holds a complete record where it
+/// was recorded.
 fn fork_from(input: &GateInput<'_>, resumable_at: &impl Fn(&str, &str, &str) -> bool) -> Option<ResumeGate> {
     let source = input.fork_source?;
     if source.session_id != input.candidate || !matches!(source.provider.as_str(), "claude" | "claude-code") {

@@ -675,6 +675,24 @@ fn a_forks_first_spawn_copies_the_conversation_it_was_forked_from() {
     assert_eq!(std::fs::read(&copy).unwrap(), std::fs::read(original).unwrap());
 }
 
+/// The parent is mid-way through writing a record: the fork still starts
+/// from it, with the copy cut back to the last complete record (#4748).
+#[test]
+fn a_fork_of_a_parent_mid_write_copies_up_to_its_last_complete_record() {
+    use std::io::Write;
+    let f = fixture(&[]);
+    let _key = sign_in(&f, "acc-1", "org-1");
+    let parent = parent_with_session(&f.gfs, "acc-1", "org-1", "p1");
+    let original = parent.path().join("projects").join(crate::backend::claude_layout::project_dir_name(PARENT_WORK)).join("p1.jsonl");
+    let complete = std::fs::read(&original).unwrap();
+    std::fs::OpenOptions::new().append(true).open(&original).unwrap().write_all(b"{\"type\":\"assi").unwrap();
+    let c = fork_holding("p1");
+    c.apply_resume_gate_with(&f.config, Some(&f.gfs), None);
+
+    let copy = c.inner.lock().unwrap().fork_copy.clone().expect("a copy to fork from").copy;
+    assert_eq!(std::fs::read(&copy).unwrap(), complete);
+}
+
 #[test]
 fn a_fork_under_another_identity_copies_nothing() {
     let f = fixture(&[]);

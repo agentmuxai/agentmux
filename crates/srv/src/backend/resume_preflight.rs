@@ -152,7 +152,7 @@ pub struct PreflightInput {
 /// mirrored: a candidate that isn't the chain head is redirected to the head
 /// when reachable here, else refused. `None` when the candidate stands.
 fn gate(input: &PreflightInput, candidate: &str, relocate_only: bool, steps: &mut Vec<Step>) -> Option<(Verdict, Option<String>)> {
-    use crate::backend::continuity_relocate::{is_resumable_file, source_file};
+    use crate::backend::continuity_relocate::can_relocate;
     use crate::backend::continuity_segments::{resume_gate, GateInput, ResumeGate};
     let t = Instant::now();
     let gate_input = GateInput {
@@ -172,7 +172,7 @@ fn gate(input: &PreflightInput, candidate: &str, relocate_only: bool, steps: &mu
                 .filter(|m| m.is_file())
                 .map(|m| m.len())
         },
-        |dir, cwd, sid| source_file(dir, cwd, sid).is_some_and(|p| is_resumable_file(&p)),
+        can_relocate,
     );
     if relocate_only && !matches!(decision, ResumeGate::Relocate { .. } | ResumeGate::ForkFrom { .. }) {
         return None;

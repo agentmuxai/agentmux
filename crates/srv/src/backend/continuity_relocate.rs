@@ -58,22 +58,41 @@ fn global_twin(config_dir: &str) -> Option<PathBuf> {
 /// Whether `path` is a session the CLI can resume: a non-empty file whose
 /// last record parses (spec H5 — a file cut mid-write is not resumed).
 pub(crate) fn is_resumable_file(path: &Path) -> bool {
+    read_tail(path).is_ok_and(|(_, tail)| last_record_parses(&tail))
+}
+
+/// Whether session `sid` for `cwd` under `config_dir` can be copied in by
+/// [`relocate`]: it exists ([`source_file`]) and holds a complete record. Its
+/// last record may still be being written, by a parent a fork starts from
+/// mid-turn: [`relocate`] cuts the copy back to its last complete one.
+pub(crate) fn can_relocate(config_dir: &str, cwd: &str, sid: &str) -> bool {
+    source_file(config_dir, cwd, sid)
+        .and_then(|p| read_tail(&p).ok())
+        .is_some_and(|(_, tail)| last_record_parses(&tail[..complete_end(&tail)]))
+}
+
+/// The last [`TAIL_CHECK_BYTES`] of `path`, and the offset they start at.
+fn read_tail(path: &Path) -> std::io::Result<(u64, Vec<u8>)> {
     use std::io::{Read, Seek, SeekFrom};
-    let Ok(mut f) = std::fs::File::open(path) else { return false };
-    let Ok(len) = f.metadata().map(|m| m.len()) else { return false };
-    if len == 0 {
-        return false;
-    }
-    let start = len.saturating_sub(TAIL_CHECK_BYTES);
-    if f.seek(SeekFrom::Start(start)).is_err() {
-        return false;
-    }
+    let mut f = std::fs::File::open(path)?;
+    let start = f.metadata()?.len().saturating_sub(TAIL_CHECK_BYTES);
+    f.seek(SeekFrom::Start(start))?;
     let mut tail = Vec::new();
-    if f.read_to_end(&mut tail).is_err() {
-        return false;
-    }
-    let text = String::from_utf8_lossy(&tail);
-    text.lines()
+    f.read_to_end(&mut tail)?;
+    Ok((start, tail))
+}
+
+/// Where the last complete (newline-ended) record of `tail` ends; all of it
+/// when it holds no newline, which leaves the judging to the parse.
+fn complete_end(tail: &[u8]) -> usize {
+    tail.iter().rposition(|b| *b == b'\n').map_or(tail.len(), |at| at + 1)
+}
+
+/// Whether the last non-blank line of `tail` parses as JSON (false when
+/// there is none: an empty file isn't resumable).
+fn last_record_parses(tail: &[u8]) -> bool {
+    String::from_utf8_lossy(tail)
+        .lines()
         .rev()
         .find(|l| !l.trim().is_empty())
         .is_some_and(|l| serde_json::from_str::<serde_json::Value>(l).is_ok())
@@ -138,23 +157,12 @@ pub(crate) fn relocate(src: &Path, dest_config_dir: &str, cwd: &str, sid: &str, 
 /// the kept length. A tail with no newline at all is left as it is; the
 /// resumability check that follows judges it.
 fn trim_to_complete_records(path: &Path) -> std::io::Result<u64> {
-    use std::io::{Read, Seek, SeekFrom};
-    let mut f = std::fs::OpenOptions::new().read(true).write(true).open(path)?;
-    let len = f.metadata()?.len();
-    let start = len.saturating_sub(TAIL_CHECK_BYTES);
-    f.seek(SeekFrom::Start(start))?;
-    let mut tail = Vec::new();
-    f.read_to_end(&mut tail)?;
-    match tail.iter().rposition(|b| *b == b'\n') {
-        Some(at) => {
-            let keep = start + at as u64 + 1;
-            if keep < len {
-                f.set_len(keep)?;
-            }
-            Ok(keep)
-        }
-        None => Ok(len),
+    let (start, tail) = read_tail(path)?;
+    let keep = start + complete_end(&tail) as u64;
+    if keep < start + tail.len() as u64 {
+        std::fs::OpenOptions::new().write(true).open(path)?.set_len(keep)?;
     }
+    Ok(keep)
 }
 
 /// Give the finished copy its real name, only if nothing has it: two spawns
@@ -279,6 +287,21 @@ mod tests {
         assert!(!is_resumable_file(&cut), "a file cut mid-record");
         assert!(!is_resumable_file(&empty));
         assert!(!is_resumable_file(&d.path().join("missing.jsonl")));
+    }
+
+    /// A parent mid-turn can still be forked from: the gate asks whether a
+    /// copy would hold a complete record, not whether the live file ends on
+    /// one (#4748).
+    #[test]
+    fn a_source_mid_record_can_be_relocated_but_not_resumed_in_place() {
+        let d = cfg();
+        let live = write_session(d.path(), "live", "{\"turn\":1}
+{\"tur");
+        let partial = write_session(d.path(), "partial", "{\"tur");
+        assert!(!is_resumable_file(&live));
+        assert!(can_relocate(&s(d.path()), CWD, "live"));
+        assert!(!can_relocate(&s(d.path()), CWD, "partial"), "no complete record");
+        assert!(!can_relocate(&s(d.path()), CWD, "missing"));
     }
 
     /// A source still being written may end mid-record: the copy stops at the
