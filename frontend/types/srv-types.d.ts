@@ -1277,11 +1277,6 @@ declare global {
         message: RpcMessage;
     };
 
-    // wconfig.WatcherUpdate
-    type WatcherUpdate = {
-        fullconfig: FullConfigType;
-    };
-
     // filestore.MuxFile
     type MuxFile = {
         zoneid: string;

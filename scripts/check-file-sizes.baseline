@@ -43,11 +43,11 @@
 1653 crates/srv/src/server/native_memory_handlers.rs
 2804 crates/srv/src/server/reactive.rs
 1598 crates/srv/src/server/ui_handlers.rs
-2283 crates/srv/src/server/websocket.rs
+2271 crates/srv/src/server/websocket.rs
 2036 frontend/app/store/agent-pane-state/reducer.ts
 1506 frontend/app/view/agent/agent-view.tsx
 1564 frontend/app/view/agent/components/AgentComposerStrip.tsx
 1860 frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx
 1513 frontend/app/view/editor/editor-model.ts
 1561 frontend/app/view/files/files-view.tsx
-2150 frontend/app/view/swarm/swarm-model.ts
+2144 frontend/app/view/swarm/swarm-model.ts

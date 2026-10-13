@@ -26,6 +26,24 @@
     "perId": true
   },
   {
+    "event": "agent:process-added",
+    "payloadTs": {
+      "imports": [
+        "ProcessAddedEvent"
+      ],
+      "name": "ProcessAddedEvent"
+    }
+  },
+  {
+    "event": "agent:process-exited",
+    "payloadTs": {
+      "imports": [
+        "ProcessExitedEvent"
+      ],
+      "name": "ProcessExitedEvent"
+    }
+  },
+  {
     "event": "agent:progress",
     "payloadTs": {
       "imports": [
@@ -59,6 +77,24 @@
         "ShutdownLineEvent"
       ],
       "name": "ShutdownLineEvent"
+    }
+  },
+  {
+    "event": "agent:shutdown-pending",
+    "payloadTs": {
+      "imports": [
+        "PendingView"
+      ],
+      "name": "PendingView"
+    }
+  },
+  {
+    "event": "agent:shutdown-pending-cleared",
+    "payloadTs": {
+      "imports": [
+        "PendingClearedEvent"
+      ],
+      "name": "PendingClearedEvent"
     }
   },
   {
@@ -171,6 +207,15 @@
     }
   },
   {
+    "event": "ambient:spent",
+    "payloadTs": {
+      "imports": [
+        "AmbientSpentEvent"
+      ],
+      "name": "AmbientSpentEvent"
+    }
+  },
+  {
     "event": "attachment:batch-done",
     "payloadTs": {
       "imports": [
@@ -216,6 +261,15 @@
     }
   },
   {
+    "event": "block:reveal",
+    "payloadTs": {
+      "imports": [
+        "BlockRevealEvent"
+      ],
+      "name": "BlockRevealEvent"
+    }
+  },
+  {
     "event": "blockfile",
     "payloadTs": {
       "imports": [
@@ -240,6 +294,15 @@
         "BtwAnswerChunkEvent"
       ],
       "name": "BtwAnswerChunkEvent"
+    }
+  },
+  {
+    "event": "config",
+    "payloadTs": {
+      "imports": [
+        "ConfigEvent"
+      ],
+      "name": "ConfigEvent"
     }
   },
   {
@@ -403,12 +466,48 @@
     }
   },
   {
+    "event": "notification",
+    "payloadTs": {
+      "imports": [
+        "OsNotification"
+      ],
+      "name": "OsNotification"
+    }
+  },
+  {
+    "event": "notification:activate",
+    "payloadTs": {
+      "imports": [
+        "NotificationActivateEvent"
+      ],
+      "name": "NotificationActivateEvent"
+    }
+  },
+  {
+    "event": "notification:retract",
+    "payloadTs": {
+      "imports": [
+        "NotificationRetractEvent"
+      ],
+      "name": "NotificationRetractEvent"
+    }
+  },
+  {
     "event": "notification:state",
     "payloadTs": {
       "imports": [
         "NotifyTrayState"
       ],
       "name": "NotifyTrayState"
+    }
+  },
+  {
+    "event": "openfloatingpane",
+    "payloadTs": {
+      "imports": [
+        "OpenFloatingPaneEvent"
+      ],
+      "name": "OpenFloatingPaneEvent"
     }
   },
   {
@@ -466,6 +565,15 @@
     "payloadTs": {
       "imports": [],
       "name": "null"
+    }
+  },
+  {
+    "event": "srvinfo",
+    "payloadTs": {
+      "imports": [
+        "SrvInfo"
+      ],
+      "name": "SrvInfo"
     }
   },
   {

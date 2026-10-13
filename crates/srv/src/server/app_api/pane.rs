@@ -184,16 +184,8 @@ pub(super) async fn open_pane_floating(
     };
     match window_id {
         Some(win) => {
-            state.broker.publish(crate::backend::mps::MuxEvent {
-                event: "openfloatingpane".to_string(),
-                scopes: vec![win],
-                sender: String::new(),
-                persist: 0,
-                data: Some(json!({
-                    "block_id": block_id,
-                    "workspace_id": new_ws_id,
-                })),
-            });
+            let open = crate::backend::mps_events::OpenFloatingPaneEvent { block_id: block_id.to_string(), workspace_id: new_ws_id.to_string() };
+            state.broker.publish_event::<crate::backend::mps_events::OpenFloatingPane>(&open, vec![win], 0);
         }
         None => {
             tracing::warn!(

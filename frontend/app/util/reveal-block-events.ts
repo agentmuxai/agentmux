@@ -9,7 +9,7 @@
  * the block itself — window tab, pane tab, pane focus, caret.
  */
 
-import { muxEventSubscribe } from "@/app/store/mps";
+import { onMuxEvent } from "@/app/store/mps";
 import { windowId } from "@/app/store/window-identity";
 import { revealBlockLocally } from "@/app/util/reveal-block";
 import type { BlockRevealEvent } from "@/types/rpc/BlockRevealEvent";
@@ -36,13 +36,8 @@ let installed = false;
 export function installBlockRevealEvents(): () => void {
     if (installed) return () => {};
     installed = true;
-    const unsub = muxEventSubscribe({
-        eventType: EVENT_BLOCK_REVEAL,
-        handler: (event) => {
-            void handleBlockReveal(event.data as BlockRevealEvent | undefined, windowId()).catch((e) =>
-                console.warn("[reveal-block] block:reveal failed", String(e))
-            );
-        },
+    const unsub = onMuxEvent(EVENT_BLOCK_REVEAL, (reveal) => {
+        void handleBlockReveal(reveal, windowId()).catch((e) => console.warn("[reveal-block] block:reveal failed", String(e)));
     });
     return () => {
         unsub();

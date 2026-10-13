@@ -181,6 +181,9 @@ export const WpsEvent = {
     IdentityNoDirectLinks: "identity:no-direct-links",
     /** One protocol frame from an app-server agent pane. */
     AppServerOutput: "output",
+    /** An OS notification to show, and one to take down (the host shows them). */
+    Notification: "notification",
+    NotificationRetract: "notification:retract",
     ToolChunk: "tool_chunk",
     ViewerPaired: "viewer:paired",
     AgentShutdown: "agent:shutdown",

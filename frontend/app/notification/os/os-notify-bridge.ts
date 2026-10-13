@@ -31,7 +31,7 @@ import type { AgentPaneEvent } from "@/app/store/agent-pane-state/types";
 import { focusManager } from "@/app/store/focusManager";
 import { getApi, getSettingsKeyAtom, workspace } from "@/app/store/global";
 import { revealBlockLocally } from "@/app/util/reveal-block";
-import { muxEventSubscribe, onMuxEvent } from "@/app/store/mps";
+import { onMuxEvent } from "@/app/store/mps";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { windowId } from "@/app/store/window-identity";
@@ -197,15 +197,11 @@ export function installOsNotifyBridge(): () => void {
     });
     const heartbeat = setInterval(() => report(true), FOCUS_HEARTBEAT_MS);
 
-    const activateUnsub = muxEventSubscribe({
-        eventType: EVENT_NOTIFICATION_ACTIVATE,
-        handler: (event) => {
-            const d = event.data as ActivatePayload | undefined;
-            if (!shouldActivateHere(d, windowId(), Date.now())) return;
-            void activateBlockLocally(d!.block_id!, d!.tab_id).catch((e) =>
-                console.warn("[os-notify] activation failed", { blockId: d!.block_id, error: String(e) })
-            );
-        },
+    const activateUnsub = onMuxEvent(EVENT_NOTIFICATION_ACTIVATE, (d) => {
+        if (!shouldActivateHere(d, windowId(), Date.now())) return;
+        void activateBlockLocally(d.block_id, d.tab_id).catch((e) =>
+            console.warn("[os-notify] activation failed", { blockId: d.block_id, error: String(e) })
+        );
     });
 
     let lastKey = "";

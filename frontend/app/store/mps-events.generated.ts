@@ -12,13 +12,16 @@ import type { AgentProgressEvent } from "@/types/rpc/AgentProgressEvent";
 import type { AgentRuntimeEvent } from "@/types/rpc/AgentRuntimeEvent";
 import type { AgentTurnEvent } from "@/types/rpc/AgentTurnEvent";
 import type { AmbientNarrationEvent } from "@/types/rpc/AmbientNarrationEvent";
+import type { AmbientSpentEvent } from "@/types/rpc/AmbientSpentEvent";
 import type { AttachmentBatchDoneEvent } from "@/types/rpc/AttachmentBatchDoneEvent";
 import type { AttachmentFailedEvent } from "@/types/rpc/AttachmentFailedEvent";
 import type { AttachmentProgressEvent } from "@/types/rpc/AttachmentProgressEvent";
 import type { AttachmentReadyEvent } from "@/types/rpc/AttachmentReadyEvent";
 import type { BlockControllerRuntimeStatus } from "@/types/rpc/BlockControllerRuntimeStatus";
 import type { BlockRefEvent } from "@/types/rpc/BlockRefEvent";
+import type { BlockRevealEvent } from "@/types/rpc/BlockRevealEvent";
 import type { BtwAnswerChunkEvent } from "@/types/rpc/BtwAnswerChunkEvent";
+import type { ConfigEvent } from "@/types/rpc/ConfigEvent";
 import type { ConnStatus } from "@/types/rpc/ConnStatus";
 import type { CredentialsRevokedEvent } from "@/types/rpc/CredentialsRevokedEvent";
 import type { DispatchActivityEvent } from "@/types/rpc/DispatchActivityEvent";
@@ -30,8 +33,16 @@ import type { InstallChunkEvent } from "@/types/rpc/InstallChunkEvent";
 import type { MessageAcceptedEvent } from "@/types/rpc/MessageAcceptedEvent";
 import type { MuxObjUpdate } from "@/types/rpc/MuxObjUpdate";
 import type { NoDirectLinksEvent } from "@/types/rpc/NoDirectLinksEvent";
+import type { NotificationActivateEvent } from "@/types/rpc/NotificationActivateEvent";
+import type { NotificationRetractEvent } from "@/types/rpc/NotificationRetractEvent";
 import type { NotifyTrayState } from "@/types/rpc/NotifyTrayState";
+import type { OpenFloatingPaneEvent } from "@/types/rpc/OpenFloatingPaneEvent";
+import type { OsNotification } from "@/types/rpc/OsNotification";
 import type { PathChangedEvent } from "@/types/rpc/PathChangedEvent";
+import type { PendingClearedEvent } from "@/types/rpc/PendingClearedEvent";
+import type { PendingView } from "@/types/rpc/PendingView";
+import type { ProcessAddedEvent } from "@/types/rpc/ProcessAddedEvent";
+import type { ProcessExitedEvent } from "@/types/rpc/ProcessExitedEvent";
 import type { ProcessStatus } from "@/types/rpc/ProcessStatus";
 import type { ProtocolFrame } from "@/types/rpc/ProtocolFrame";
 import type { ResumeRetryEvent } from "@/types/rpc/ResumeRetryEvent";
@@ -39,6 +50,7 @@ import type { RunEvent } from "@/types/rpc/RunEvent";
 import type { ShellChunkEvent } from "@/types/rpc/ShellChunkEvent";
 import type { ShellNodeCreateEvent } from "@/types/rpc/ShellNodeCreateEvent";
 import type { ShutdownLineEvent } from "@/types/rpc/ShutdownLineEvent";
+import type { SrvInfo } from "@/types/rpc/SrvInfo";
 import type { SubagentAbandonedEvent } from "@/types/rpc/SubagentAbandonedEvent";
 import type { SubagentActivityEvent } from "@/types/rpc/SubagentActivityEvent";
 import type { SubagentBackfillStatusEvent } from "@/types/rpc/SubagentBackfillStatusEvent";
@@ -59,10 +71,14 @@ import type { WidgetStorageEvent } from "@/types/rpc/WidgetStorageEvent";
 export type MuxEventPayloads = {
   "agent-message-accepted": MessageAcceptedEvent;
   "agent-resume-retry": ResumeRetryEvent;
+  "agent:process-added": ProcessAddedEvent;
+  "agent:process-exited": ProcessExitedEvent;
   "agent:progress": AgentProgressEvent;
   "agent:reactive-registered": BlockRefEvent;
   "agent:reactive-unregistered": BlockRefEvent;
   "agent:shutdown": ShutdownLineEvent;
+  "agent:shutdown-pending": PendingView;
+  "agent:shutdown-pending-cleared": PendingClearedEvent;
   "agentcontent:changed": null;
   agentcontextusage: AgentContextUsageEvent;
   agentfailure: AgentFailure;
@@ -72,14 +88,17 @@ export type MuxEventPayloads = {
   "agentskills:changed": null;
   agentturn: AgentTurnEvent;
   "ambient-narration": AmbientNarrationEvent;
+  "ambient:spent": AmbientSpentEvent;
   "attachment:batch-done": AttachmentBatchDoneEvent;
   "attachment:failed": AttachmentFailedEvent;
   "attachment:progress": AttachmentProgressEvent;
   "attachment:ready": AttachmentReadyEvent;
   "background-task-updated": BlockRefEvent;
+  "block:reveal": BlockRevealEvent;
   blockfile: WSFileEventData;
   blockstats: TimeSeriesData;
   btw_answer_chunk: BtwAnswerChunkEvent;
+  config: ConfigEvent;
   connchange: ConnStatus;
   controllerstatus: BlockControllerRuntimeStatus;
   cron_changed: null;
@@ -98,7 +117,11 @@ export type MuxEventPayloads = {
   "media:file_changed": PathChangedEvent;
   "memories:changed": null;
   "namedagents:changed": null;
+  notification: OsNotification;
+  "notification:activate": NotificationActivateEvent;
+  "notification:retract": NotificationRetractEvent;
   "notification:state": NotifyTrayState;
+  openfloatingpane: OpenFloatingPaneEvent;
   output: ProtocolFrame;
   "processbroker:status-changed": ProcessStatus;
   "processbroker:tracked-blocks-changed": null;
@@ -106,6 +129,7 @@ export type MuxEventPayloads = {
   shell_chunk: ShellChunkEvent;
   shell_node_create: ShellNodeCreateEvent;
   "skills:changed": null;
+  srvinfo: SrvInfo;
   "subagent:abandoned": SubagentAbandonedEvent;
   "subagent:activity": SubagentActivityEvent;
   "subagent:backfill_status": SubagentBackfillStatusEvent;
@@ -133,10 +157,14 @@ export type MuxEventPayloads = {
 export const TYPED_MUX_EVENTS = [
   "agent-message-accepted",
   "agent-resume-retry",
+  "agent:process-added",
+  "agent:process-exited",
   "agent:progress",
   "agent:reactive-registered",
   "agent:reactive-unregistered",
   "agent:shutdown",
+  "agent:shutdown-pending",
+  "agent:shutdown-pending-cleared",
   "agentcontent:changed",
   "agentcontextusage",
   "agentfailure",
@@ -146,14 +174,17 @@ export const TYPED_MUX_EVENTS = [
   "agentskills:changed",
   "agentturn",
   "ambient-narration",
+  "ambient:spent",
   "attachment:batch-done",
   "attachment:failed",
   "attachment:progress",
   "attachment:ready",
   "background-task-updated",
+  "block:reveal",
   "blockfile",
   "blockstats",
   "btw_answer_chunk",
+  "config",
   "connchange",
   "controllerstatus",
   "cron_changed",
@@ -172,7 +203,11 @@ export const TYPED_MUX_EVENTS = [
   "media:file_changed",
   "memories:changed",
   "namedagents:changed",
+  "notification",
+  "notification:activate",
+  "notification:retract",
   "notification:state",
+  "openfloatingpane",
   "output",
   "processbroker:status-changed",
   "processbroker:tracked-blocks-changed",
@@ -180,6 +215,7 @@ export const TYPED_MUX_EVENTS = [
   "shell_chunk",
   "shell_node_create",
   "skills:changed",
+  "srvinfo",
   "subagent:abandoned",
   "subagent:activity",
   "subagent:backfill_status",

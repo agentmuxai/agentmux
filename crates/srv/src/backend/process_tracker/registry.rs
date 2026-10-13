@@ -439,35 +439,23 @@ impl AgentProcessRegistry {
 
             for added_pid in current_pids.difference(&entry.last_pids) {
                 if let Some(p) = current_members.iter().find(|p| p.pid == *added_pid) {
-                    self.emit(
-                        "agent:process-added",
-                        block_id,
-                        serde_json::json!({ "block_id": block_id, "process": p }),
-                    );
+                    if let Some(broker) = &self.broker {
+                        let added = crate::backend::mps_events::ProcessAddedEvent { block_id: block_id.clone(), process: p.clone() };
+                        broker.publish_event::<crate::backend::mps_events::AgentProcessAdded>(&added, vec![format!("block:{}", block_id)], 0);
+                    }
                 }
             }
             for removed_pid in entry.last_pids.difference(&current_pids) {
-                self.emit(
-                    "agent:process-exited",
-                    block_id,
-                    serde_json::json!({ "block_id": block_id, "pid": removed_pid }),
-                );
+                if let Some(broker) = &self.broker {
+                    let exited = crate::backend::mps_events::ProcessExitedEvent { block_id: block_id.clone(), pid: *removed_pid };
+                    broker.publish_event::<crate::backend::mps_events::AgentProcessExited>(&exited, vec![format!("block:{}", block_id)], 0);
+                }
             }
 
             entry.last_pids = current_pids;
         }
     }
 
-    fn emit(&self, event_name: &str, block_id: &str, data: serde_json::Value) {
-        let Some(ref broker) = self.broker else { return };
-        broker.publish(mps::MuxEvent {
-            event: event_name.to_string(),
-            scopes: vec![format!("block:{}", block_id)],
-            sender: String::new(),
-            persist: 0,
-            data: Some(data),
-        });
-    }
 }
 
 /// Spawn the polling task. Drops when the registry's `Arc` refcount

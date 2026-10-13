@@ -11,7 +11,7 @@ import {
     type FleetTargetInfo,
 } from "./swarm-fleet-targets";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { muxEventSubscribe, onMuxEvent } from "@/app/store/mps";
+import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import { MOS } from "@/app/store/global";
 import { callBackendService } from "@/store/mos";
@@ -1280,16 +1280,10 @@ export class SwarmViewModel {
         if (unsubNamed) this.unsubs.push(unsubNamed);
 
         // When process trackers change, refresh the block list
-        const unsubProcAdded = muxEventSubscribe({
-            eventType: WpsEvent.AgentProcessAdded,
-            handler: () => void this.loadTrackedBlocks(),
-        });
+        const unsubProcAdded = onMuxEvent(WpsEvent.AgentProcessAdded, () => void this.loadTrackedBlocks());
         if (unsubProcAdded) this.unsubs.push(unsubProcAdded);
 
-        const unsubProcExited = muxEventSubscribe({
-            eventType: WpsEvent.AgentProcessExited,
-            handler: () => void this.loadTrackedBlocks(),
-        });
+        const unsubProcExited = onMuxEvent(WpsEvent.AgentProcessExited, () => void this.loadTrackedBlocks());
         if (unsubProcExited) this.unsubs.push(unsubProcExited);
 
         // When a reactive-handler agent (Claude Code pane) registers or

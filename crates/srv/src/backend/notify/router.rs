@@ -39,6 +39,27 @@ pub const EVENT_NOTIFICATION_STATE: &str = "notification:state";
 /// (`SPEC_REVEAL_BLOCK_ONE_PATH_2026_09_27.md` §4.3). Payload: `BlockRevealEvent`.
 pub const EVENT_BLOCK_REVEAL: &str = "block:reveal";
 
+/// `notification:retract`: take a shown notification down.
+#[derive(Clone, Debug, serde::Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct NotificationRetractEvent {
+    pub id: String,
+    pub tag: String,
+}
+
+/// `notification:activate`: the user clicked a notification; this window shows its block.
+#[derive(Clone, Debug, serde::Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct NotificationActivateEvent {
+    pub id: String,
+    pub block_id: String,
+    pub tab_id: String,
+    pub window_id: String,
+    pub workspace_id: Option<String>,
+    #[ts(type = "number")]
+    pub at_ms: i64,
+}
+
 /// Where `block.reveal` reveals a block — also the `block:reveal` payload.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
@@ -739,24 +760,19 @@ impl Router {
     }
 
     fn publish(&self, action: &Action) {
-        let (event, data) = match action {
-            Action::Show(n) => (EVENT_NOTIFICATION, serde_json::to_value(n).ok()),
-            Action::Retract { id, tag } => (EVENT_NOTIFICATION_RETRACT, Some(serde_json::json!({ "id": id, "tag": tag }))),
+        match action {
+            Action::Show(n) => self.publish_event::<crate::backend::mps_events::Notification>(n),
+            Action::Retract { id, tag } => {
+                self.publish_event::<crate::backend::mps_events::NotificationRetract>(&NotificationRetractEvent { id: id.clone(), tag: tag.clone() })
+            }
             // Resolved and published by `ack`.
-            Action::Activate { .. } => return,
-        };
-        self.publish_event(event, data);
+            Action::Activate { .. } => {}
+        }
     }
 
-    fn publish_event(&self, event: &str, data: Option<serde_json::Value>) {
-        tracing::info!(event, "notify: publish");
-        self.broker.publish(MuxEvent {
-            event: event.to_string(),
-            scopes: vec![],
-            sender: String::new(),
-            persist: 0,
-            data,
-        });
+    fn publish_event<E: crate::backend::mps_events::Event>(&self, payload: &E::Payload) {
+        tracing::info!(event = E::NAME, "notify: publish");
+        self.broker.publish_event::<E>(payload, vec![], 0);
     }
 
     // ── Source entry points ───────────────────────────────────────────────
@@ -867,17 +883,15 @@ impl Router {
         match (activated, target) {
             (Some((id, _)), Some(t)) => {
                 if let Some(window_id) = open_window {
-                    self.publish_event(
-                        EVENT_NOTIFICATION_ACTIVATE,
-                        Some(serde_json::json!({
-                            "id": id,
-                            "block_id": t.block_id,
-                            "tab_id": t.tab_id,
-                            "window_id": window_id,
-                            "workspace_id": t.workspace_id,
-                            "at_ms": now_ms(),
-                        })),
-                    );
+                    let activate = NotificationActivateEvent {
+                        id,
+                        block_id: t.block_id,
+                        tab_id: t.tab_id,
+                        window_id: window_id.clone(),
+                        workspace_id: t.workspace_id,
+                        at_ms: now_ms(),
+                    };
+                    self.publish_event::<crate::backend::mps_events::NotificationActivate>(&activate);
                     outcome.window_id = Some(window_id);
                     outcome.has_window = true;
                 } else {
@@ -920,7 +934,7 @@ impl Router {
 
     /// Tell `target.window_id`'s renderer to reveal the block.
     pub fn publish_block_reveal(&self, target: &BlockRevealEvent) {
-        self.publish_event(EVENT_BLOCK_REVEAL, serde_json::to_value(target).ok());
+        self.publish_event::<crate::backend::mps_events::BlockReveal>(target);
     }
 
     /// One-shot: the pane a click asked for while its workspace was open in

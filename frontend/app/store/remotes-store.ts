@@ -7,7 +7,7 @@
 // connection, the list or the settings change.
 
 import { createSignal, type Accessor } from "solid-js";
-import { muxEventSubscribe, onMuxEvent } from "@/app/store/mps";
+import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import { RpcApi } from "@/app/store/rpc-api";
 import type { RemoteRecord } from "@/app/store/rpc-api/remotes";
@@ -38,7 +38,7 @@ function scheduleRefresh(): void {
 export function remotesList(): Accessor<RemoteRecord[]> {
     if (!started) {
         started = true;
-        muxEventSubscribe({ eventType: WpsEvent.Config, handler: scheduleRefresh });
+        onMuxEvent(WpsEvent.Config, scheduleRefresh);
         onMuxEvent(WpsEvent.ConnChange, scheduleRefresh);
         onMuxEvent(WpsEvent.RemotesChange, scheduleRefresh);
         void refreshRemotes();

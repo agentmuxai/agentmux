@@ -10,13 +10,12 @@
  */
 
 import { createSignal, onCleanup, Show, type JSX } from "solid-js";
-import { muxEventSubscribe } from "@/app/store/mps";
+import { onMuxEvent } from "@/app/store/mps";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { playShutdownPendingTone } from "@/app/notification/sound/sound-service";
 import { PaneRow } from "../components/PaneRow";
 import {
-    clearedRequestId,
     EVENT_SHUTDOWN_PENDING,
     EVENT_SHUTDOWN_PENDING_CLEARED,
     LAST_CALL_MS,
@@ -26,7 +25,6 @@ import {
     secondsLeft,
     type PendingShutdown,
 } from "./shutdown-pending";
-import type { MuxEvent } from "@/types/rpc/MuxEvent";
 
 interface ShutdownPendingBannerProps {
     blockId: string;
@@ -52,25 +50,18 @@ export const ShutdownPendingBanner = (props: ShutdownPendingBannerProps): JSX.El
     };
 
     const scope = `block:${props.blockId}`;
-    const unsub = muxEventSubscribe(
-        {
-            eventType: EVENT_SHUTDOWN_PENDING,
-            scope,
-            handler: (event: MuxEvent) => {
-                sawLive = true;
-                show(parsePending(event?.data), true);
-            },
-        },
-        {
-            eventType: EVENT_SHUTDOWN_PENDING_CLEARED,
-            scope,
-            handler: (event: MuxEvent) => {
-                sawLive = true;
-                if (clearedRequestId(event?.data) === pending()?.request_id) setPending(null);
-            },
-        },
-    );
-    onCleanup(unsub);
+    const unsubPending = onMuxEvent(EVENT_SHUTDOWN_PENDING, (view) => {
+        sawLive = true;
+        show(parsePending(view), true);
+    }, scope);
+    const unsubCleared = onMuxEvent(EVENT_SHUTDOWN_PENDING_CLEARED, (cleared) => {
+        sawLive = true;
+        if (cleared.request_id === pending()?.request_id) setPending(null);
+    }, scope);
+    onCleanup(() => {
+        unsubPending();
+        unsubCleared();
+    });
 
     // A pane opened mid-countdown still shows it: both events are persisted.
     const history = (event: string) =>

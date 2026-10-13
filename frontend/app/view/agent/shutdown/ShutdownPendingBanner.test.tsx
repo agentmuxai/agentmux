@@ -6,12 +6,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 type Handler = (event: MuxEvent) => void;
 const handlers = new Map<string, Handler>();
-vi.mock("@/app/store/mps", () => ({
-    muxEventSubscribe: (...subs: { eventType: string; handler: Handler }[]) => {
-        for (const s of subs) handlers.set(s.eventType, s.handler);
-        return () => {};
-    },
-}));
+vi.mock("@/app/store/mps", async () => {
+    const { isNoPayloadMuxEvent } = await vi.importActual<typeof import("@/app/store/mps-events.generated")>("@/app/store/mps-events.generated");
+    const mock = {
+        muxEventSubscribe: (...subs: { eventType: string; handler: Handler }[]) => {
+            for (const s of subs) handlers.set(s.eventType, s.handler);
+            return () => {};
+        },
+    };
+    // As the real onMuxEvent: a typed subscription is a muxEventSubscribe whose handler gets the data.
+    const onMuxEvent = (eventType: string, handler: (data: unknown, event: unknown) => void, scope?: string) =>
+        (mock.muxEventSubscribe as (sub: unknown) => () => void)({ eventType, scope, handler: (e: any) => { if (e?.data != null) handler(e.data, e); else if (isNoPayloadMuxEvent(eventType)) handler(null, e); } } as any);
+    return { ...mock, onMuxEvent };
+});
 let resolveHistory: Array<(events: MuxEvent[]) => void> = [];
 const keepCommand = vi.fn();
 vi.mock("@/app/store/rpc-api", () => ({

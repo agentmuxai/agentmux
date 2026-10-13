@@ -181,6 +181,15 @@ impl EventBus {
         self.broadcast_event_lane(event, Lane::Priority);
     }
 
+    /// A typed event as the frame srv writes to one WebSocket itself (`srvinfo` and `config` on
+    /// connect): the same `rpc`/`eventrecv` frame a broadcast sends.
+    pub fn typed_frame<E: super::mps_events::Event>(payload: &E::Payload) -> serde_json::Value {
+        serde_json::json!({
+            "eventtype": WS_EVENT_RPC,
+            "data": { "command": "eventrecv", "data": { "event": E::NAME, "data": super::mps_events::payload_data(payload) } },
+        })
+    }
+
     /// Broadcast a typed event (`mps_events`) to every connection directly, not through the
     /// broker: no scopes, nothing persisted. The same `rpc`/`eventrecv` frame a broker event
     /// gets (a serialized `MuxEvent` omits its empty scopes, sender and persist).

@@ -12,11 +12,10 @@
  * that ask for a title, a name or a suggestion don't, so nothing is counted twice.
  */
 
-import { muxEventSubscribe } from "./mps";
+import { onMuxEvent } from "./mps";
 import { recordTurn, type ServiceUsage } from "./token-usage";
 
 import { WpsEvent } from "@/app/store/mps-events";
-import type { MuxEvent } from "@/types/rpc/MuxEvent";
 const EVENT_AMBIENT_SPENT = WpsEvent.AmbientSpent;
 
 let installed = false;
@@ -24,10 +23,7 @@ let installed = false;
 export function installAmbientSpendListener(): void {
     if (installed) return;
     installed = true;
-    muxEventSubscribe({
-        eventType: EVENT_AMBIENT_SPENT,
-        handler: (event: MuxEvent) => recordAmbientSpend(event?.data),
-    });
+    onMuxEvent(EVENT_AMBIENT_SPENT, (data) => recordAmbientSpend(data));
 }
 
 /** Record one `ambient:spent` payload. Exported for tests. */

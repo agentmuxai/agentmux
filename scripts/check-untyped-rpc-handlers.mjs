@@ -20,7 +20,11 @@
 // in backend/mps_events.rs, which the frontend gets as its Rust type
 // (SPEC_TYPED_EVENT_PAYLOADS_2026_10_13.md). MAX_EVENTS counts the hand-built
 // ones, and hand-built `eventrecv` frames sent around the broker (`EventBus::broadcast_typed`
-// is their typed form), outside tests, mps.rs and eventbus.rs.
+// is their typed form), outside tests, mps.rs and eventbus.rs. It is 0: every event is typed.
+//
+// A relay forwards an event built elsewhere, as it was built (the HTTP publish route, the
+// WebSocket lane forwarder), so it has no payload type of its own. It is marked with an
+// `// untyped-relay: <why>` comment just above, and counted against MAX_RELAYS instead.
 //
 //   node scripts/check-untyped-rpc-handlers.mjs          check
 //   node scripts/check-untyped-rpc-handlers.mjs --list   print each one
@@ -30,7 +34,8 @@ import { join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const MAX = 25;
-const MAX_EVENTS = 10;
+const MAX_EVENTS = 0;
+const MAX_RELAYS = 2;
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const SRC = join(ROOT, "crates/srv/src");
@@ -133,6 +138,7 @@ function withoutTestMods(text) {
 
 const found = [];
 const events = [];
+const relays = [];
 for (const file of rustFiles(SRC)) {
     const rel = relative(ROOT, file).split(sep).join("/");
     const lines = withoutTestMods(readFileSync(file, "utf8")).split("\n");
@@ -143,7 +149,10 @@ for (const file of rustFiles(SRC)) {
         // (`EventBus::broadcast_event`). mps.rs and eventbus.rs hold the typed helpers.
         const helper = rel.endsWith("backend/mps.rs") || rel.endsWith("backend/eventbus.rs");
         const built = (/\bMuxEvent\s*\{/.test(line) && !/\bstruct\s+MuxEvent\b/.test(line)) || /"command":\s*"eventrecv"/.test(line);
-        if (built && !helper) events.push(`${rel}:${i + 1}`);
+        if (built && !helper) {
+            const above = lines.slice(Math.max(0, i - 3), i).join("\n");
+            (/\/\/\s*untyped-relay:/.test(above) ? relays : events).push(`${rel}:${i + 1}`);
+        }
     });
 }
 
@@ -152,6 +161,8 @@ if (process.argv.includes("--list")) {
     console.log(`${found.length} untyped handler(s)`);
     for (const f of events) console.log(f);
     console.log(`${events.length} hand-built event(s)`);
+    for (const f of relays) console.log(f);
+    console.log(`${relays.length} relay(s)`);
     process.exit(0);
 }
 
@@ -159,6 +170,11 @@ if (events.length > MAX_EVENTS) {
     console.error(`check-untyped-rpc-handlers: ${events.length} hand-built events, allowed ${MAX_EVENTS}.`);
     console.error("Declare the event in crates/srv/src/backend/mps_events.rs and publish it with Broker::publish_event (or EventBus::broadcast_typed).");
     console.error("Run with --list to see them all.");
+    process.exit(1);
+}
+if (relays.length !== MAX_RELAYS) {
+    console.error(`check-untyped-rpc-handlers: ${relays.length} relay(s) marked untyped-relay, expected ${MAX_RELAYS}.`);
+    console.error("A relay only forwards an event built elsewhere. Anything that builds its own event declares it in mps_events.rs; when a relay goes, lower MAX_RELAYS.");
     process.exit(1);
 }
 if (events.length < MAX_EVENTS) {
