@@ -11,6 +11,7 @@ import { initApp } from "./app-init";
 import { tryAutoRecover, clearStartupReloadCount, StartupFailureHandled } from "./app/init/error-display";
 import { benchMark } from "@/util/startup-bench";
 import { initPerf } from "@/perf";
+import { isTerminalContext } from "@/app/platform/webgl-context-loss";
 
 // The host's early hooks (the desktop host pipes logs and uncaught errors to
 // its log file). Must run before any other code so early messages are captured.
@@ -62,6 +63,10 @@ function setContextLossReloadCount(n: number) {
 setTimeout(() => setContextLossReloadCount(0), 60_000);
 
 document.addEventListener("webglcontextlost", (event) => {
+    // A terminal's context is lost when the page's WebGL limit evicts it; the
+    // terminal falls back to the DOM renderer itself, and a reload would only
+    // evict again (webgl-context-loss.ts).
+    if (isTerminalContext(event.target)) return;
     event.preventDefault();
     if (contextLostReloading) return;
     const reloadCount = getContextLossReloadCount();
