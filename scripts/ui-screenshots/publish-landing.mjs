@@ -94,8 +94,8 @@ function sameBytes(a, b) {
     return existsSync(b) && statSync(a).size === statSync(b).size && readFileSync(a).equals(readFileSync(b));
 }
 
-/** Publishes the runs in `from` into the landing clone at `landing`; returns the plan. */
-/** `exec` runs ffmpeg (tests pass a stand-in). */
+/** Publishes the runs in `from` into the landing clone at `landing`; returns
+ *  the plan. `exec` runs ffmpeg (tests pass a stand-in). */
 export function publishLanding({ landing, from, ffmpeg, dryRun = false, log = console.log, exec = spawnSync }) {
     const shotsDir = join(landing, "public", "screenshots");
     const manifestPath = join(shotsDir, "manifest.json");
