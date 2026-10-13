@@ -152,10 +152,14 @@ class WindowServiceType {
     GetWindow(windowId: string): Promise<MuxWindow> {
         return MOS.callBackendService("window", "GetWindow", Array.from(arguments))
     }
-    // Copy `sourceWindowId`'s theme and opacity onto the new window whose host
-    // label is `hostLabel`, whether or not its row exists yet
-    // (SPEC_PER_WINDOW_THEME_AND_OPACITY_2026_10_12 §6).
-    InheritWindowAppearance(sourceWindowId: string, hostLabel: string): Promise<void> {
+    // Take before opening a window that should inherit appearance; pass to
+    // InheritWindowAppearance (SPEC_PER_WINDOW_THEME_AND_OPACITY_2026_10_12 §6).
+    MarkWindowOpen(): Promise<number> {
+        return MOS.callBackendService("window", "MarkWindowOpen", Array.from(arguments))
+    }
+    // Copy `sourceWindowId`'s theme and opacity onto the window with host label
+    // `hostLabel` opened after `mark`, whether or not its row exists yet.
+    InheritWindowAppearance(sourceWindowId: string, hostLabel: string, mark: number): Promise<void> {
         return MOS.callBackendService("window", "InheritWindowAppearance", Array.from(arguments))
     }
 

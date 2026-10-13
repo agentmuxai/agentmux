@@ -15,7 +15,7 @@ const h = vi.hoisted(() => ({
     DeleteWorkspace: vi.fn(),
     pushNotification: vi.fn(),
     openModal: vi.fn(),
-    inheritAppearanceInto: vi.fn(),
+    inherited: vi.fn(),
 }));
 const caps = vi.hoisted(() => ({ multiWindow: true }));
 
@@ -34,7 +34,13 @@ vi.mock("@/app/store/rpc-api", () => ({
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: { tag: "tab-client" } }));
 vi.mock("@/app/store/services", () => ({ WorkspaceService: { DeleteWorkspace: h.DeleteWorkspace } }));
 vi.mock("@/app/store/window-identity", () => ({ windowId: () => "win-7" }));
-vi.mock("@/app/store/window-appearance", () => ({ inheritAppearanceInto: h.inheritAppearanceInto }));
+vi.mock("@/app/store/window-appearance", () => ({
+    openWindowInheriting: async (open: () => Promise<string>) => {
+        const label = await open();
+        h.inherited(label);
+        return label;
+    },
+}));
 
 import { LayoutPreviewModal } from "./layout-preview-modal";
 import { applyLayout, openLayoutFromFile } from "./open-layout";
@@ -109,7 +115,7 @@ describe("applyLayout", () => {
         );
         expect(h.openWorkspaceInNewWindow).toHaveBeenCalledWith("ws-new");
         // The new window starts with this window's theme and opacity.
-        expect(h.inheritAppearanceInto).toHaveBeenCalledWith("win-label");
+        expect(h.inherited).toHaveBeenCalledWith("win-label");
         expect(h.DeleteWorkspace).not.toHaveBeenCalled();
         const notif = h.pushNotification.mock.calls[0][0];
         expect(notif.type).toBe("info");

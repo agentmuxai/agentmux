@@ -89,21 +89,43 @@ export function currentWindowLabel(): string | null {
 }
 
 /**
- * Ask srv to give the window with host label `newLabel` this window's theme
- * and opacity. Call it with the label `openNewWindow` or a tear-off returns;
- * srv applies it whether the new window's row exists yet or not.
+ * A mark to take before opening a window that should inherit this window's
+ * appearance. srv uses it to tell the window being opened from an earlier
+ * window that had the same host label. `null` when srv can't be asked; the
+ * window still opens, with the defaults.
  */
-export function inheritAppearanceInto(newLabel: string | null | undefined): void {
+export async function markWindowOpen(): Promise<number | null> {
+    if (!windowId()) return null;
+    try {
+        return await WindowService.MarkWindowOpen();
+    } catch (e) {
+        console.error("[window-appearance] MarkWindowOpen failed:", e);
+        return null;
+    }
+}
+
+/**
+ * Ask srv to give the window with host label `newLabel`, opened after `mark`,
+ * this window's theme and opacity. srv applies it whether the new window's
+ * row exists yet or not.
+ */
+export function inheritAppearanceInto(newLabel: string | null | undefined, mark: number | null): void {
     const source = windowId();
-    if (!source || !newLabel) return;
-    WindowService.InheritWindowAppearance(source, newLabel).catch((e: unknown) =>
+    if (!source || !newLabel || mark == null) return;
+    WindowService.InheritWindowAppearance(source, newLabel, mark).catch((e: unknown) =>
         console.error("[window-appearance] InheritWindowAppearance failed:", e)
     );
 }
 
-/** Open a new window that starts with this window's theme and opacity. */
-export async function openNewWindowFromHere(): Promise<string> {
-    const label = await getApi().openNewWindow();
-    inheritAppearanceInto(label);
+/** Open a window with `open` (which returns its host label) so that it starts with this window's theme and opacity. */
+export async function openWindowInheriting(open: () => Promise<string>): Promise<string> {
+    const mark = await markWindowOpen();
+    const label = await open();
+    inheritAppearanceInto(label, mark);
     return label;
+}
+
+/** Open a new window that starts with this window's theme and opacity. */
+export function openNewWindowFromHere(): Promise<string> {
+    return openWindowInheriting(() => getApi().openNewWindow());
 }

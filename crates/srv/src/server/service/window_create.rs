@@ -400,11 +400,11 @@ pub(crate) async fn handle_create_window(state: &AppState, call: &WebCallType) -
     // copied here (`InheritWindowAppearance`, keyed by host label). Taken
     // only after the row is recorded, so a request arriving in between
     // finds the row instead (see window_inherit.rs).
-    if !host_label.is_empty() {
-        super::window_inherit::record_created(&host_label, &window_id);
-    }
     let inherit_events = match (!host_label.is_empty())
-        .then(|| super::window_inherit::take_pending(&host_label))
+        .then(|| {
+            let row_seq = super::window_inherit::record_created(&host_label, &window_id);
+            super::window_inherit::take_pending(&host_label, row_seq)
+        })
         .flatten()
     {
         Some(source) => super::window_inherit::apply_inheritance(state, &source, &window_id).await,

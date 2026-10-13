@@ -17,7 +17,7 @@ import { openViewInNewTab } from "@/app/tab/tab-presets";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { getApi } from "@/store/global";
-import { inheritAppearanceInto } from "@/app/store/window-appearance";
+import { openWindowInheriting } from "@/app/store/window-appearance";
 import { fireAndForget } from "@/util/util";
 
 export interface WidgetOpenAction {
@@ -49,8 +49,7 @@ export function buildWidgetOpenActions(
     return [
         {
             label: "Open in New Window",
-            run: () =>
-                fireAndForget(async () => inheritAppearanceInto(await getApi().openNewWindowWithView(view, blockMeta))),
+            run: () => fireAndForget(() => openWindowInheriting(() => getApi().openNewWindowWithView(view, blockMeta))),
         },
         {
             label: "Open in Floating Pane",

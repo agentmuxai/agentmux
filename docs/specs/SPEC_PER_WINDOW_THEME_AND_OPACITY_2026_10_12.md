@@ -153,15 +153,22 @@ A floater is its own renderer, with its own srv `Window` row (`CreateWindow` min
 
 ### 6.1 The creator names the new window to srv
 
-Threading the creator through the host would touch every pool and cold-path window function on three platforms. It isn't needed: every creator path learns the new window's host label as soon as its request returns (`openNewWindow`, `openNewWindowWithView`, `tearOffPoolPromote`, and the tear-off's cold path all return it). The creator then calls a new srv method, `WindowService.InheritWindowAppearance(sourceWindowId, hostLabel)`. The frontend's `openNewWindowFromHere()` and `inheritAppearanceInto(label)` (`store/window-appearance.ts`) do this for every path in §1.3 that has a creator.
+Threading the creator through the host would touch every pool and cold-path window function on three platforms. It isn't needed: every creator path learns the new window's host label as soon as its request returns (`openNewWindow`, `openNewWindowWithView`, `openWorkspaceInNewWindow`, `tearOffPoolPromote`, and the tear-off's cold path all return it).
+
+Host labels are reused, though: a pool window can be demoted and promoted again straight away, and the old window's row can outlive that, because its close runs on another thread. So the label alone can't say which row is the new window's. The creator therefore:
+1. takes a mark from srv, `WindowService.MarkWindowOpen()`, before it opens the window;
+2. opens the window and gets its label;
+3. calls `WindowService.InheritWindowAppearance(sourceWindowId, hostLabel, mark)`.
+
+`openWindowInheriting(open)` and `openNewWindowFromHere()` (`store/window-appearance.ts`) do this for every path in §1.3 that has a creator. A tear-off asks for the mark alongside the open instead of before it, so the drag isn't slowed. If the mark arrives late, that window keeps the defaults; it can never select an older window.
 
 ### 6.2 srv copies, whichever call arrives first
 
-The new window's renderer calls `CreateWindow` at about the same moment, and already writes its host label on the new row as the `host:label` meta crumb. So the two calls race, and srv handles both orders (`server/service/window_inherit.rs`):
-- `InheritWindowAppearance` records a pending entry for the label, then looks for the row `CreateWindow` made for that label in the last 5 seconds. If there is one, it takes the entry and copies. It doesn't match rows by their `host:label` crumb: labels are reused, and a closed pool window's old row can still carry the label while its close runs on another thread.
-- `CreateWindow` records its row for the label, then takes any pending entry for it and copies before it returns, so the renderer renders with the inherited values.
+Marks and the rows `CreateWindow` records share one counter in srv, so a row recorded after a mark was opened after it, and any older row for the same label belongs to an earlier use of the label. The new window's renderer calls `CreateWindow` at about the same moment as the creator's request, so the two race, and srv handles both orders (`server/service/window_inherit.rs`):
+- `InheritWindowAppearance` records a pending entry (source, label, mark). Then, if `CreateWindow` has already recorded a row for the label **after the mark**, it takes the entry and copies.
+- `CreateWindow` records its row for the label, then takes the pending entry if its row came after the entry's mark, and copies before it returns, so the renderer renders with the inherited values.
 
-Taking an entry is atomic and each side publishes before it checks, so the copy happens exactly once in either order. An entry expires after 30 seconds, because host labels are reused when a pool window is demoted and promoted again.
+Taking an entry is atomic and each side publishes before it checks, so the copy happens exactly once in either order. An entry expires after 30 seconds.
 
 The copied keys are `window:theme` and `window:opacity`, each only if the source sets it. The copy is a snapshot: changing the creator's theme later doesn't change the new window. If the source window has closed in between, nothing is copied.
 
@@ -199,10 +206,11 @@ Built in three parts and shipped as one PR, verified live in a `task dev` build 
   - A terminal recomputes on a window theme change.
 
 **P3: Inheritance (§6).**
-- srv `InheritWindowAppearance` and the pending-entry take in `CreateWindow` (§6.2); `openNewWindowFromHere()` / `inheritAppearanceInto()` at every creator path.
+- srv `MarkWindowOpen`, `InheritWindowAppearance` and the pending-entry take in `CreateWindow` (§6.2); `openWindowInheriting()` at every creator path.
 - **Tests (srv):**
   - copies when the creator's call comes first, and when the window's row comes first;
   - an entry is used once;
+  - a row from an earlier use of the same label, even moments old, doesn't take it;
   - a source with no values of its own copies nothing;
   - empty arguments are refused.
 - **Live check:** New Window and tear-off from a window on a non-default theme open on that theme, with no flash, on Windows, macOS and Linux.
