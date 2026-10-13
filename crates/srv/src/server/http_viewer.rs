@@ -696,7 +696,15 @@ pub(crate) fn feed_stream(
                     }
                 }
                 _ = follow_tick.tick() => {
-                    if let Some(block) = (probe.block)().filter(|b| *b != source.block_id) {
+                    let moved = (probe.block)().filter(|b| *b != source.block_id);
+                    // Checked before anything is subscribed to or read: the
+                    // block followed to, or the shared transcript read below,
+                    // may belong to an agent hidden from paired devices.
+                    if (probe.hidden)(moved.as_deref().unwrap_or(&source.block_id)) {
+                        yield Ok(reset_event("hidden"));
+                        break;
+                    }
+                    if let Some(block) = moved {
                         tracing::info!(from = %source.block_id, to = %block, "viewer feed: the agent moved to another block; following it");
                         // Subscribed before the catch-up read below, as at
                         // the start, so nothing published in between is missed.

@@ -822,6 +822,44 @@ async fn a_feed_follows_its_agent_to_a_new_block() {
 }
 
 #[tokio::test]
+async fn a_feed_does_not_follow_its_agent_into_a_hidden_block() {
+    let state = test_state();
+    let (name, old_block, _) = register_defined(&state, "viewer-moved-hidden");
+    append(&state, &old_block, "{\"old\":1}");
+    let lease = state.viewer.open_feed("dev").unwrap();
+    let mut stream = Box::pin(feed_stream(
+        FeedSource::of(&state, &old_block),
+        "claude".into(),
+        None,
+        lease,
+        follow_timing(),
+        AgentProbe::of(&state, &name),
+    ));
+    next_bytes(&mut stream).await.unwrap();
+    assert_eq!(next_stream_event(&mut stream).await.unwrap().0, "snapshot");
+
+    // The name is re-registered on a block whose definition is hidden from
+    // paired devices, and that block has a transcript.
+    let def = uuid::Uuid::new_v4().to_string();
+    let mut hidden_def = crate::backend::storage::agents::test_agent_def(&def, &name, "claude", "standalone", 1, "");
+    state.mstore.agent_def_insert(&mut hidden_def).unwrap();
+    state.mstore.agent_hide_from_devices_set(&def, true).unwrap();
+    let new_block = uuid::Uuid::new_v4().to_string();
+    let mut block = crate::backend::obj::Block { oid: new_block.clone(), ..Default::default() };
+    block.meta.insert("agentId".into(), serde_json::json!(def));
+    state.mstore.insert(&mut block).unwrap();
+    append(&state, &new_block, "{\"private\":1}");
+    state.reactive_handler.register_agent(&name, &new_block, None).unwrap();
+
+    let mut rest = String::new();
+    while let Some(chunk) = next_bytes(&mut stream).await {
+        rest.push_str(&chunk);
+    }
+    assert_eq!(rest, "event: reset\ndata: {\"reason\":\"hidden\"}\n\n", "closed, and nothing of the hidden block sent");
+    assert_eq!(state.viewer.open_feeds(), 0);
+}
+
+#[tokio::test]
 async fn lines_another_writer_adds_to_the_shared_transcript_reach_the_feed_once() {
     let mut state = test_state();
     let (name, block, def) = register_defined(&state, "viewer-shared");
