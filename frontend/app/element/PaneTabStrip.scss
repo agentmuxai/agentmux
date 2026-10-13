@@ -628,6 +628,12 @@
     &:active {
         cursor: grabbing;
     }
+
+    // Magnified or ephemeral: the pane can't move, so no grab cursor.
+    &--no-drag,
+    &--no-drag:active {
+        cursor: default;
+    }
 }
 
 // The "+" glyph's own line box (centered by the button's flex align-items/

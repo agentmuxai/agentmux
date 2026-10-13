@@ -54,7 +54,7 @@ interface T {
 }
 
 function fakeNodeModel(): any {
-    return { isFocused: () => false, isMagnified: () => false, toggleMagnify: vi.fn(), onClose: vi.fn() };
+    return { isFocused: () => false, isMagnified: () => false, isEphemeral: () => false, toggleMagnify: vi.fn(), onClose: vi.fn() };
 }
 
 function renderStrip(tabs: T[], extra: Record<string, unknown> = {}) {

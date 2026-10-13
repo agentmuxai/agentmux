@@ -285,6 +285,10 @@ export interface PaneTabStripProps<T> {
      *  file-tab strip, the agent History strip) render inside a Pane's
      *  content, not its header, and leave this off.
      *  SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §3.6. */
+    /** The pane can't be dragged right now (magnified or ephemeral: the
+     *  header's `canDrag` vetoes it). The grip then offers only the menu:
+     *  no grab cursor, and its label and tooltip drop "move". */
+    dragDisabled?: boolean;
     reserveDragHandle?: boolean;
 
     /** Opt in to same-pane drag-reorder (Phase 3 of
@@ -652,11 +656,12 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
                             pane menu (SPEC_DRAG_SPACE_AFFORDANCE_2026_10_13 §5.2). */}
                         <div
                             class="pane-tab-strip-grip"
+                            classList={{ "pane-tab-strip-grip--no-drag": !!props.dragDisabled }}
                             role="button"
                             tabIndex={0}
-                            aria-label="Move pane / pane actions"
+                            aria-label={props.dragDisabled ? "Pane actions" : "Move pane / pane actions"}
                             aria-haspopup="menu"
-                            title="Drag to move this pane. Click for pane actions."
+                            title={props.dragDisabled ? "Pane actions" : "Drag to move this pane. Click for pane actions."}
                             onClick={(e) => openPaneMenuFrom(e.currentTarget)}
                             onKeyDown={(e) => {
                                 if (e.key !== "Enter" && e.key !== " ") return;

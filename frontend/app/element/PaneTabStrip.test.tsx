@@ -679,6 +679,30 @@ describe("PaneTabStrip — reserveDragHandle (SPEC_PANE_TAB_DRAG_AND_DROP_2026_0
         expect(grip!.querySelectorAll("svg circle").length).toBe(12); // a 4×3 grip
     });
 
+    it("a pane that can't be dragged (magnified, ephemeral) keeps the menu but drops 'move'", () => {
+        const onMenu = vi.fn();
+        const { container } = render(() => (
+            <div onContextMenu={(e) => onMenu(e)}>
+                <PaneTabStrip
+                    tabs={TABS}
+                    activeId="a"
+                    getId={(t: T) => t.id}
+                    getLabel={(t: T) => t.label}
+                    onActivate={vi.fn()}
+                    onAdd={vi.fn()}
+                    reserveDragHandle
+                    dragDisabled
+                />
+            </div>
+        ));
+        const grip = container.querySelector(".pane-tab-strip-grip")!;
+        expect(grip.classList.contains("pane-tab-strip-grip--no-drag")).toBe(true);
+        expect(grip.getAttribute("aria-label")).toBe("Pane actions");
+        expect(grip.getAttribute("title")).toBe("Pane actions");
+        fireEvent.click(grip);
+        expect(onMenu).toHaveBeenCalledTimes(1);
+    });
+
     it("clicking the grip opens the pane menu (the header's own contextmenu)", () => {
         const onMenu = vi.fn();
         const { container } = renderWithGrip(onMenu);
