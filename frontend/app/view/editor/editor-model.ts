@@ -42,7 +42,7 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { WorkspaceService } from "@/app/store/services";
 import { createBlockOnModel, waitForLayoutModel } from "@/app/tab/tab-presets";
 import { makeORef } from "@/app/store/mos";
-import { muxEventSubscribe } from "@/app/store/mps";
+import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import { fireAndForget } from "@/util/util";
 import { createEffect, createMemo, createRoot, createSignal, type Accessor } from "solid-js";
@@ -280,14 +280,9 @@ export class EditorViewModel {
 
         // Live-reload: one subscription per pane, scoped to this block.
         // Fires when a path open in one of this pane's tabs changes on disk.
-        this._unsubFileChanged = muxEventSubscribe({
-            eventType: WpsEvent.EditorFileChanged,
-            scope: makeORef("block", blockId),
-            handler: (event) => {
-                const path = (event as any)?.data?.path as string | undefined;
-                if (path) void this._handleExternalFileChanged(path);
-            },
-        });
+        this._unsubFileChanged = onMuxEvent(WpsEvent.EditorFileChanged, (data) => {
+                if (data.path) void this._handleExternalFileChanged(data.path);
+            }, makeORef("block", blockId));
 
         // Pane-reuse (SPEC_EDITOR_MCP_OPEN_BLANK_PREVIEW_AND_PANE_REUSE_2026_08_03.md
         // Part 2): reactively drains META_PENDING_OPEN_FILES whenever the

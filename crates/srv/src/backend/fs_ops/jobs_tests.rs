@@ -5,6 +5,7 @@
 //! `Jobs`, so tests don't share slots or ops.
 
 use super::*;
+use crate::backend::mps::MuxEvent;
 
 // ── Harness ──────────────────────────────────────────────────────────────
 

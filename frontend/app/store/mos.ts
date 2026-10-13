@@ -4,7 +4,7 @@
 //
 // MuxObjectStore — migrated to SolidJS signals.
 
-import { muxEventSubscribe } from "@/app/store/mps";
+import { onMuxEvent } from "@/app/store/mps";
 import { authHeaders } from "./auth-headers";
 import { WpsEvent } from "@/app/store/mps-events";
 import { getWebServerEndpoint, isWebServerEndpointSet } from "@/util/endpoints";
@@ -13,6 +13,7 @@ import { retryTransient } from "@/util/transient-network";
 import { type SignalAtom, fireAndForget } from "@/util/util";
 import { batch, createSignal, getOwner, onCleanup } from "solid-js";
 import { ObjectService } from "./services";
+import type { MuxObjUpdate } from "@/types/rpc/MuxObjUpdate";
 
 // ---------------------------------------------------------------------------
 // Internal types
@@ -99,13 +100,9 @@ function debugLogBackendCall(methodName: string, durationStr: string, args: any[
 }
 
 function mpsSubscribeToObject(oref: string): () => void {
-    return muxEventSubscribe({
-        eventType: WpsEvent.MuxObjUpdate,
-        scope: oref,
-        handler: (event) => {
-            updateMuxObject(event.data);
-        },
-    });
+    return onMuxEvent(WpsEvent.MuxObjUpdate, (update) => {
+            updateMuxObject(update);
+        }, oref);
 }
 
 function callBackendService(service: string, method: string, args: any[], noUIContext?: boolean): Promise<any> {

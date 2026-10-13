@@ -672,13 +672,7 @@ fn append_checked(broker: &mps::Broker, fs: &FileStore, block_id: &str, data: &[
         pos: Vec::new(),
         echo: None,
     };
-    broker.publish(mps::MuxEvent {
-        event: mps::EVENT_BLOCK_FILE.to_string(),
-        scopes: vec![format!("block:{block_id}")],
-        sender: String::new(),
-        persist: 0,
-        data: serde_json::to_value(&event_data).ok(),
-    });
+    broker.publish_event::<crate::backend::mps_events::BlockFile>(&event_data, vec![format!("block:{block_id}")], 0);
     true
 }
 

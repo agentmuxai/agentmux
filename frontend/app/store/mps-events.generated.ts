@@ -12,7 +12,11 @@ import type { AgentTurnEvent } from "@/types/rpc/AgentTurnEvent";
 import type { BlockControllerRuntimeStatus } from "@/types/rpc/BlockControllerRuntimeStatus";
 import type { DispatchActivityEvent } from "@/types/rpc/DispatchActivityEvent";
 import type { DispatchUpdatedEvent } from "@/types/rpc/DispatchUpdatedEvent";
+import type { FilesChangedEvent } from "@/types/rpc/FilesChangedEvent";
+import type { FsOpEvent } from "@/types/rpc/FsOpEvent";
 import type { MessageAcceptedEvent } from "@/types/rpc/MessageAcceptedEvent";
+import type { MuxObjUpdate } from "@/types/rpc/MuxObjUpdate";
+import type { PathChangedEvent } from "@/types/rpc/PathChangedEvent";
 import type { ResumeRetryEvent } from "@/types/rpc/ResumeRetryEvent";
 import type { ShutdownLineEvent } from "@/types/rpc/ShutdownLineEvent";
 import type { SubagentAbandonedEvent } from "@/types/rpc/SubagentAbandonedEvent";
@@ -25,6 +29,7 @@ import type { SubagentSpawnedEvent } from "@/types/rpc/SubagentSpawnedEvent";
 import type { SubagentUpdatedEvent } from "@/types/rpc/SubagentUpdatedEvent";
 import type { TimeSeriesData } from "@/types/rpc/TimeSeriesData";
 import type { UserAttentionEvent } from "@/types/rpc/UserAttentionEvent";
+import type { WSFileEventData } from "@/types/rpc/WSFileEventData";
 
 /** Each typed broker event's payload, by its wire name. Subscribe with `onMuxEvent`. */
 export type MuxEventPayloads = {
@@ -35,9 +40,15 @@ export type MuxEventPayloads = {
   agentfailure: AgentFailure;
   agentruntime: AgentRuntimeEvent;
   agentturn: AgentTurnEvent;
+  blockfile: WSFileEventData;
+  blockstats: TimeSeriesData;
   controllerstatus: BlockControllerRuntimeStatus;
   "dispatch:activity": DispatchActivityEvent;
   "dispatch:updated": DispatchUpdatedEvent;
+  "editor:file_changed": PathChangedEvent;
+  "files:changed": FilesChangedEvent;
+  "files:op": FsOpEvent;
+  "media:file_changed": PathChangedEvent;
   "subagent:abandoned": SubagentAbandonedEvent;
   "subagent:activity": SubagentActivityEvent;
   "subagent:backfill_status": SubagentBackfillStatusEvent;
@@ -48,6 +59,7 @@ export type MuxEventPayloads = {
   "subagent:updated": SubagentUpdatedEvent;
   sysinfo: TimeSeriesData;
   userattention: UserAttentionEvent;
+  "waveobj:update": MuxObjUpdate;
 };
 
 /** The typed events' wire names. */
@@ -59,9 +71,15 @@ export const TYPED_MUX_EVENTS = [
   "agentfailure",
   "agentruntime",
   "agentturn",
+  "blockfile",
+  "blockstats",
   "controllerstatus",
   "dispatch:activity",
   "dispatch:updated",
+  "editor:file_changed",
+  "files:changed",
+  "files:op",
+  "media:file_changed",
   "subagent:abandoned",
   "subagent:activity",
   "subagent:backfill_status",
@@ -72,4 +90,5 @@ export const TYPED_MUX_EVENTS = [
   "subagent:updated",
   "sysinfo",
   "userattention",
+  "waveobj:update",
 ] as const;

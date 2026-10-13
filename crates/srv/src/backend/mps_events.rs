@@ -74,6 +74,34 @@ events! {
     SubagentBlockPruned: "subagent:block_pruned" => crate::backend::subagent_watcher::events::SubagentBlockPrunedEvent,
     /// A resumed pane's subagent backfill started or finished.
     SubagentBackfillStatus: super::mps::EVENT_SUBAGENT_BACKFILL_STATUS => crate::backend::subagent_watcher::events::SubagentBackfillStatusEvent,
+    /// A block file changed: terminal output, an agent transcript append (`blockcontroller`).
+    BlockFile: super::mps::EVENT_BLOCK_FILE => super::mps::WSFileEventData,
+    /// One pane's process-tree stats sample (`sysinfo`).
+    BlockStats: super::mps::EVENT_BLOCK_STATS => crate::backend::rpc_types::TimeSeriesData,
+    /// A wave object changed (`wcore::event`).
+    MuxObjUpdated: super::mps::EVENT_MUX_OBJ_UPDATE => crate::backend::obj::MuxObjUpdate,
+    /// A file an editor pane shows changed on disk.
+    EditorFileChanged: crate::backend::editor_file_watcher::EVENT_EDITOR_FILE_CHANGED => PathChangedEvent,
+    /// A file a media pane shows changed on disk.
+    MediaFileChanged: crate::backend::media_file_watcher::EVENT_MEDIA_FILE_CHANGED => PathChangedEvent,
+    /// A folder a Files pane lists changed.
+    FilesChanged: crate::backend::files_watcher::EVENT_FILES_CHANGED => FilesChangedEvent,
+    /// A copy/move/delete job's progress (`fs_ops::jobs`).
+    FilesOp: crate::backend::fs_ops::jobs::EVENT_FILES_OP => crate::backend::rpc_types::FsOpEvent,
+}
+
+/// `editor:file_changed` / `media:file_changed`: the file that changed.
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct PathChangedEvent {
+    pub path: String,
+}
+
+/// `files:changed`: the folder that changed, as the Files pane shows it.
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct FilesChangedEvent {
+    pub dir: String,
 }
 
 /// The `agent-resume-retry` event's payload (`mps_events::AgentResumeRetry`).

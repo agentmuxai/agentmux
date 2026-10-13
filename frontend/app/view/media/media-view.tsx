@@ -25,7 +25,7 @@ import {
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { makeORef } from "@/app/store/mos";
-import { muxEventSubscribe } from "@/app/store/mps";
+import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import { fireAndForget } from "@/util/util";
 import { createEffect, createSignal, on, onCleanup, onMount, Show, type JSX } from "solid-js";
@@ -208,11 +208,8 @@ export function MediaView(props: {
                 extensions: ALL_MEDIA_EXTENSIONS,
             }),
         );
-        unsubFileChanged = muxEventSubscribe({
-            eventType: WpsEvent.MediaFileChanged,
-            scope: makeORef("block", blockId),
-            handler: (event) => {
-                const path = (event as { data?: { path?: string } } | undefined)?.data?.path;
+        unsubFileChanged = onMuxEvent(WpsEvent.MediaFileChanged, (data) => {
+                const path = data.path;
                 if (!path) return;
                 // Clear a stale "no files yet" message the moment a
                 // matching file actually arrives — both render branches
@@ -223,8 +220,7 @@ export function MediaView(props: {
                 setRevision((r) => r + 1);
                 // The tab follows: its title, and what a restart shows.
                 props.onPathChange(path);
-            },
-        });
+            }, makeORef("block", blockId));
     };
 
     // Show `path` directly, and start watching its containing directory —

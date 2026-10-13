@@ -14,7 +14,7 @@
 
 import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
 import { makeORef } from "@/app/store/mos";
-import { muxEventSubscribe } from "@/app/store/mps";
+import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
@@ -291,19 +291,15 @@ export class FilesModel {
             // copy into a folder this pane isn't watching) may not be seen.
             this.refresh();
         };
-        this.unsubscribe = muxEventSubscribe({
-            eventType: WpsEvent.FilesChanged,
-            scope: makeORef("block", ctx.blockId),
-            handler: (event) => {
-                const dir = (event as { data?: { dir?: unknown } })?.data?.dir;
-                if (typeof dir !== "string" || !this.path() || !samePath(dir, this.path())) return;
+        this.unsubscribe = onMuxEvent(WpsEvent.FilesChanged, (data) => {
+                const dir = data.dir;
+                if (!this.path() || !samePath(dir, this.path())) return;
                 if (this.ctx.visibility() !== "active") {
                     this.staleWhileHidden = true;
                     return;
                 }
                 void this.list(this.path(), { silent: true });
-            },
-        });
+            }, makeORef("block", ctx.blockId));
     }
 
     // ── Settings kept in block meta ──────────────────────────────────────────
