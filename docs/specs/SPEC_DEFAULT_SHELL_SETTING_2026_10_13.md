@@ -1,7 +1,7 @@
 # Default shell: a Settings picker that lists the shells installed, and shows the one in use
 
 **Date:** 2026-10-13
-**Status:** implemented: §4.1–4.3 in the PR that adds this document; §4.4, §4.5 and the WSL group are follow-ups. Where the build differs from the proposal, §7 says so.
+**Status:** implemented (#4837): §4.1–4.3; §4.4, §4.5 and the WSL group are follow-ups. Where the build differs from the proposal, §7 says so.
 **Author:** Camper
 **Trigger:** Repo owner, 2026-10-13: *"we want to be able to configure the shell users load. can you add a section in settings with best practice ease-of-use for selecting the default shell? We want an elegant way to know what shells are available per platform and make it easy for users to select, also to see the currently set default shell."*
 **Related:**
