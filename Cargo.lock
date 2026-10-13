@@ -1113,7 +1113,7 @@ dependencies = [
 [[package]]
 name = "cef-dll-sys"
 version = "154.2.0+154.0.28"
-source = "git+https://github.com/agentmuxai/cef-rs?rev=9568a644ce2fd471d1f8812d953228bfec28c4fc#9568a644ce2fd471d1f8812d953228bfec28c4fc"
+source = "git+https://github.com/agentmuxai/cef-rs?rev=87ed0accb0b3cf50f5bc8fe04a43ba47151dcd30#87ed0accb0b3cf50f5bc8fe04a43ba47151dcd30"
 dependencies = [
  "anyhow",
  "cc",
@@ -1703,7 +1703,7 @@ checksum = "75b325c5dbd37f80359721ad39aca5a29fb04c89279657cffdda8736d0c0b9d2"
 [[package]]
 name = "download-cef"
 version = "3.0.0"
-source = "git+https://github.com/agentmuxai/cef-rs?rev=9568a644ce2fd471d1f8812d953228bfec28c4fc#9568a644ce2fd471d1f8812d953228bfec28c4fc"
+source = "git+https://github.com/agentmuxai/cef-rs?rev=87ed0accb0b3cf50f5bc8fe04a43ba47151dcd30#87ed0accb0b3cf50f5bc8fe04a43ba47151dcd30"
 dependencies = [
  "bzip2",
  "clap",
