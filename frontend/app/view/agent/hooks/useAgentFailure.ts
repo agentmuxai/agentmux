@@ -39,7 +39,7 @@
  */
 
 import { createEffect, createSignal, onCleanup, onMount, type Accessor } from "solid-js";
-import { muxEventSubscribe } from "@/app/store/mps";
+import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import * as MOS from "@/app/store/mos";
 import { getBlockMetaKeyAtom } from "@/app/store/global";
@@ -49,6 +49,7 @@ import type { PaneFailure } from "@/app/store/agent-pane-state/types";
 import { failureToRow, isTransient, type FailureRow } from "../failure/failure-accessory";
 import { copyErrorReport } from "@/app/errors/CopyErrorButton";
 import { formatErrorReport } from "@/app/errors/error-report";
+import type { AgentFailure } from "@/types/rpc/AgentFailure";
 
 /** How long an armed Take over waits for its confirming click. */
 export const TAKEOVER_CONFIRM_MS = 5000;
@@ -277,25 +278,15 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
         // check is false and it just records the failure.
         if (pf) opts.model.dispatchPane({ type: "FailureObserved", failure: pf, at: Date.now() });
 
-        const unsubFailure = muxEventSubscribe({
-            eventType: WpsEvent.AgentFailure,
-            scope: MOS.makeORef("block", opts.blockId),
-            handler: (event) => {
-                const f = (event as any)?.data as AgentFailure | undefined;
-                if (!f) return;
+        const unsubFailure = onMuxEvent(WpsEvent.AgentFailure, (f) => {
                 cancelCountdown();
-                // A new failure never inherits an armed Take over: its row must
-                // start at the first click again (ReAgent P1 on #3742).
                 disarmTakeover();
                 setExpanded(false);
                 setRetrying(false);
                 resetCopyState();
-                // Reducer-side: records state.failure AND unconditionally ends
-                // a still-working turn — see FailureObserved's reducer case.
                 opts.model.dispatchPane({ type: "FailureObserved", failure: f, at: Date.now() });
                 if (isTransient(f.code)) armAutoRetry();
-            },
-        });
+            }, MOS.makeORef("block", opts.blockId));
 
         // Restore the full auto-retry budget once the LAST turn genuinely
         // succeeded — a later unrelated transient failure must get its own full

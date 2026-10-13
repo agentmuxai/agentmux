@@ -223,14 +223,13 @@ fn last_session_id_in_stream(tail: &[u8], starts_mid_line: bool, field: &str) ->
 /// posture as every other best-effort MPS publish in this file.
 fn publish_resume_retry_status(broker: &Option<Arc<mps::Broker>>, block_id: &str, status: &str) {
     let Some(broker) = broker else { return };
-    let mut data = serde_json::json!({ "status": status });
-    if status == "retrying" {
-        data["startedAt"] = serde_json::Value::String(chrono::Utc::now().to_rfc3339());
-    }
-    broker.publish(mps::MuxEvent {
-        event: mps::EVENT_AGENT_RESUME_RETRY.to_string(),
-        scopes: vec![format!("block:{}", block_id)],
-        sender: String::new(),
+    let payload = crate::backend::mps_events::ResumeRetryEvent {
+        status: status.to_string(),
+        started_at: (status == "retrying").then(|| chrono::Utc::now().to_rfc3339()),
+    };
+    broker.publish_event::<crate::backend::mps_events::AgentResumeRetry>(
+        &payload,
+        vec![format!("block:{}", block_id)],
         // `persist: 2`, not 1 — `Broker::persist_event` trims history down
         // to exactly this many MOST RECENT events per (event, scope): a
         // bare `persist: 1` would let the "resolved" publish immediately
@@ -242,10 +241,10 @@ fn publish_resume_retry_status(broker: &Option<Arc<mps::Broker>>, block_id: &str
         // retrying→resolved pair together; a later cascaded "retrying"
         // still correctly evicts the OLDER pair's "retrying", not this
         // one's "resolved".
-        persist: 2,
-        data: Some(data),
-    });
+        2,
+    );
 }
+
 
 /// Resolve the muxbus address (the agent's display name) from a spawn env map.
 /// `AGENTMUX_AGENT_ID` (= `agent.name`, set at block creation) is canonical;
@@ -1698,13 +1697,7 @@ fn surface_failure(
 ) {
     core::persist_last_failure(block_id, Some(failure), mstore, event_bus);
     if let Some(broker) = broker {
-        broker.publish(mps::MuxEvent {
-            event: mps::EVENT_AGENT_FAILURE.to_string(),
-            scopes: vec![format!("block:{}", block_id)],
-            sender: String::new(),
-            persist: 1,
-            data: serde_json::to_value(failure).ok(),
-        });
+        broker.publish_event::<crate::backend::mps_events::AgentFailed>(failure, vec![format!("block:{}", block_id)], 1);
     }
 }
 

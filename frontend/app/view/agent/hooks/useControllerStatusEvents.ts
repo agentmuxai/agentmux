@@ -10,7 +10,7 @@
  */
 
 import { onCleanup, onMount } from "solid-js";
-import { muxEventSubscribe, onMuxEvent } from "@/app/store/mps";
+import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import * as MOS from "@/app/store/mos";
 import type { LogFn } from "./useAgentControllerStatus";
@@ -116,16 +116,9 @@ export function useControllerStatusEvents(opts: UseControllerStatusEventsOptions
         // (SPEC_AGENT_FAILURE_DIAGNOSTICS Phase 2): surfaces the real reason —
         // auth, rate-limit, OOM, context, etc. — plus the stderr tail, instead of
         // just "exited with code N".
-        const unsubFailure = muxEventSubscribe({
-            eventType: WpsEvent.AgentFailure,
-            scope: MOS.makeORef("block", opts.blockId),
-            handler: (event) => {
-                const f = (event as any)?.data as AgentFailure | undefined;
-                if (!f) return;
+        const unsubFailure = onMuxEvent(WpsEvent.AgentFailure, (f) => {
                 let msg = f.title || "Agent run failed";
                 if (f.detail) msg += ` — ${f.detail}`;
-                // Prefer signal when present (matches AgentFailure::explain(); a
-                // signal kill stores exitCode as -1, so "[exit -1]" would mislead).
                 if (f.signal != null) msg += ` [signal ${f.signal}]`;
                 else if (f.exitCode != null) msg += ` [exit ${f.exitCode}]`;
                 if (f.retryable) msg += " (retryable)";
@@ -133,8 +126,7 @@ export function useControllerStatusEvents(opts: UseControllerStatusEventsOptions
                 if (f.stderrTail) {
                     opts.log("subprocess", `claude stderr (tail):\n${f.stderrTail}`, "error");
                 }
-            },
-        });
+            }, MOS.makeORef("block", opts.blockId));
 
         onCleanup(() => {
             unsubStatus();

@@ -1,6 +1,8 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+import type { AgentFailure } from "@/types/rpc/AgentFailure";
+
 // MPS event names: every `EVENT_*` constant in crates/srv/src/backend/mps.rs,
 // plus the events other backend modules publish by name (`files:changed`,
 // `waveobj:batchedupdates`, …). mps-events.test.ts checks them against the

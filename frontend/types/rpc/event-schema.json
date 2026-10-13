@@ -1,5 +1,68 @@
 [
   {
+    "event": "agent-message-accepted",
+    "payloadTs": {
+      "imports": [
+        "MessageAcceptedEvent"
+      ],
+      "name": "MessageAcceptedEvent"
+    }
+  },
+  {
+    "event": "agent-resume-retry",
+    "payloadTs": {
+      "imports": [
+        "ResumeRetryEvent"
+      ],
+      "name": "ResumeRetryEvent"
+    }
+  },
+  {
+    "event": "agent:shutdown",
+    "payloadTs": {
+      "imports": [
+        "ShutdownLineEvent"
+      ],
+      "name": "ShutdownLineEvent"
+    }
+  },
+  {
+    "event": "agentcontextusage",
+    "payloadTs": {
+      "imports": [
+        "AgentContextUsageEvent"
+      ],
+      "name": "AgentContextUsageEvent"
+    }
+  },
+  {
+    "event": "agentfailure",
+    "payloadTs": {
+      "imports": [
+        "AgentFailure"
+      ],
+      "name": "AgentFailure"
+    }
+  },
+  {
+    "event": "agentruntime",
+    "payloadTs": {
+      "imports": [
+        "AgentRuntimeEvent"
+      ],
+      "name": "AgentRuntimeEvent"
+    }
+  },
+  {
+    "event": "agentturn",
+    "payloadTs": {
+      "imports": [
+        "AgentTurnEvent"
+      ],
+      "name": "AgentTurnEvent"
+    }
+  },
+  {
     "event": "controllerstatus",
     "payloadTs": {
       "imports": [
@@ -15,6 +78,15 @@
         "TimeSeriesData"
       ],
       "name": "TimeSeriesData"
+    }
+  },
+  {
+    "event": "userattention",
+    "payloadTs": {
+      "imports": [
+        "UserAttentionEvent"
+      ],
+      "name": "UserAttentionEvent"
     }
   }
 ]

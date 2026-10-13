@@ -372,13 +372,7 @@ fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
                             &Some(mstore.clone()),
                             &Some(event_bus.clone()),
                         );
-                        broker.publish(crate::backend::mps::MuxEvent {
-                            event: crate::backend::mps::EVENT_AGENT_FAILURE.to_string(),
-                            scopes: vec![format!("block:{}", cmd.block_id)],
-                            sender: String::new(),
-                            persist: 1,
-                            data: serde_json::to_value(&gate_failure).ok(),
-                        });
+                        broker.publish_event::<crate::backend::mps_events::AgentFailed>(&gate_failure, vec![format!("block:{}", cmd.block_id)], 1);
                         return Err(format!("identity spawn gate: {gate}"));
                     }
                 };

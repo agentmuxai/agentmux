@@ -291,6 +291,59 @@ async fn queue_member_deletes(state: &AppState, tab_id: &str, block_ids: &[Strin
 /// (SPEC_AGENT_SELF_QUIT_2026_09_24.md §5.5, §12.1).
 pub(crate) const EVENT_AGENT_SHUTDOWN: &str = "agent:shutdown";
 
+/// One `agent:shutdown` line (`mps_events::AgentShutdown`): its order, step and text, and what
+/// the step adds.
+#[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct ShutdownLineEvent {
+    pub block_id: String,
+    #[ts(type = "number")]
+    pub seq: u64,
+    pub step: String,
+    pub text: String,
+    #[serde(flatten)]
+    pub extra: ShutdownExtra,
+}
+
+/// What a shutdown line can add beyond its step and text. Each is omitted when absent.
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct ShutdownExtra {
+    /// `kill`: how long the agent had before it was killed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub forced_after_ms: Option<u64>,
+    /// `error`: why the pane couldn't close.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub error: Option<String>,
+    /// `container`: a Compose container left running, and that it was left.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub container: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub outcome: Option<String>,
+    /// `process` / `survivor`: one of the agent's processes, and what became of it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub process: Option<ShutdownProcess>,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct ShutdownProcess {
+    pub pid: u32,
+    pub name: String,
+    /// `killed`, `stopped`, `survived` or `escaped`.
+    pub outcome: String,
+}
+
+/// The extra for a line about one of the agent's processes.
+pub(crate) fn process_extra(pid: u32, command: &str, outcome: &str) -> ShutdownExtra {
+    ShutdownExtra { process: Some(ShutdownProcess { pid, name: short_command(command), outcome: outcome.to_string() }), ..Default::default() }
+}
+
 /// Orders the lines: strictly increasing across the process, so per block too.
 static SHUTDOWN_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
@@ -324,39 +377,31 @@ pub(crate) fn exit_line(
     label: &str,
     outcome: &blockcontroller::StopOutcome,
     elapsed: std::time::Duration,
-) -> (&'static str, String, serde_json::Value) {
+) -> (&'static str, String, ShutdownExtra) {
     use blockcontroller::StopOutcome::*;
     match outcome {
         Killed => (
             "kill",
             clip(&format!("{label} — killed after {} s", elapsed.as_secs().max(1)), SHUTDOWN_LINE_MAX),
-            serde_json::json!({ "forced_after_ms": elapsed.as_millis() as u64 }),
+            ShutdownExtra { forced_after_ms: Some(elapsed.as_millis() as u64), ..Default::default() },
         ),
-        Exited => ("exit", clip(&format!("{label} — exited"), SHUTDOWN_LINE_MAX), serde_json::json!({})),
-        Stopped => ("exit", clip(&format!("{label} — stopped"), SHUTDOWN_LINE_MAX), serde_json::json!({})),
-        NotRunning => ("exit", clip(&format!("{label} — was not running"), SHUTDOWN_LINE_MAX), serde_json::json!({})),
+        Exited => ("exit", clip(&format!("{label} — exited"), SHUTDOWN_LINE_MAX), ShutdownExtra::default()),
+        Stopped => ("exit", clip(&format!("{label} — stopped"), SHUTDOWN_LINE_MAX), ShutdownExtra::default()),
+        NotRunning => ("exit", clip(&format!("{label} — was not running"), SHUTDOWN_LINE_MAX), ShutdownExtra::default()),
     }
 }
 
 /// Publish one `agent:shutdown` line, scoped to the block. Display only: the
 /// saga's own result stays the source of truth.
-pub(crate) fn publish_shutdown(state: &AppState, block_id: &str, step: &str, text: String, extra: serde_json::Value) {
-    let mut data = serde_json::json!({
-        "block_id": block_id,
-        "seq": SHUTDOWN_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
-        "step": step,
-        "text": text,
-    });
-    if let (Some(d), Some(e)) = (data.as_object_mut(), extra.as_object()) {
-        d.extend(e.clone());
-    }
-    state.broker.publish(crate::backend::mps::MuxEvent {
-        event: EVENT_AGENT_SHUTDOWN.to_string(),
-        scopes: vec![format!("block:{block_id}")],
-        sender: String::new(),
-        persist: 0,
-        data: Some(data),
-    });
+pub(crate) fn publish_shutdown(state: &AppState, block_id: &str, step: &str, text: String, extra: ShutdownExtra) {
+    let line = ShutdownLineEvent {
+        block_id: block_id.to_string(),
+        seq: SHUTDOWN_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+        step: step.to_string(),
+        text,
+        extra,
+    };
+    state.broker.publish_event::<crate::backend::mps_events::AgentShutdown>(&line, vec![format!("block:{block_id}")], 0);
 }
 
 /// A close that failed after its shutdown: the pane stays open showing why.
@@ -366,7 +411,7 @@ pub(crate) fn publish_shutdown_error(state: &AppState, block_id: &str, reason: &
         block_id,
         "error",
         clip(&format!("couldn't close: {reason}"), SHUTDOWN_LINE_MAX),
-        serde_json::json!({ "error": reason }),
+        ShutdownExtra { error: Some(reason.to_string()), ..Default::default() },
     );
 }
 
@@ -592,7 +637,7 @@ mod tests {
         let (step, text, extra) =
             exit_line("Camper", &blockcontroller::StopOutcome::Killed, std::time::Duration::from_millis(5_200));
         assert_eq!((step, text.as_str()), ("kill", "Camper — killed after 5 s"));
-        assert_eq!(extra["forced_after_ms"], 5_200);
+        assert_eq!(extra.forced_after_ms, Some(5_200));
         assert_eq!(exit_line("Camper", &blockcontroller::StopOutcome::Exited, Default::default()).1, "Camper — exited");
         assert_eq!(process_line("node dev-server.js", 4312, false), "node dev-server.js (pid 4312) — stopped");
         let long = process_line(&"x".repeat(200), 1, true);

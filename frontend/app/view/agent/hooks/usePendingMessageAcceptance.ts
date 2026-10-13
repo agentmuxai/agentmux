@@ -16,7 +16,7 @@
  */
 
 import { onCleanup } from "solid-js";
-import { muxEventSubscribe } from "@/app/store/mps";
+import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import * as MOS from "@/app/store/mos";
 import { trail } from "@/log/render-trail";
@@ -74,37 +74,18 @@ export function usePendingMessageAcceptance(opts: UsePendingMessageAcceptanceOpt
     // pending zone into a real `user_message` document node. That
     // color shift (amber → accent blue) is the user's visible
     // "accepted" transition for the user.
-    const acceptedUnsub = muxEventSubscribe({
-        eventType: WpsEvent.AgentMessageAccepted,
-        scope: MOS.makeORef("block", opts.blockId),
-        handler: (event) => {
-            const data = (event as any)?.data;
-            if (!data) return;
-            const messageId: string | undefined = data.message_id;
+    const acceptedUnsub = onMuxEvent(WpsEvent.AgentMessageAccepted, (data) => {
+            const messageId = data.message_id;
             if (!messageId) return;
             const pending = getPending().find((m) => m.id === messageId);
             if (!pending) {
-                // Accepted event for an id we don't know about.
-                // Can legitimately happen if the entry was already
-                // promoted or the pane was re-mounted mid-queue.
                 return;
             }
-            // Reducer removes the entry + emits pending-accepted.
             opts.model.dispatchPane({
                 type: "PendingMessageAccepted",
                 id: messageId,
             });
             opts.onPendingLeft?.();
-            // Queue-drain case: the prior turn ended (phase Done/Idle/
-            // Disconnected) and the backend is now picking up the next
-            // queued message. Re-enter Submitting so the working
-            // animation re-activates.
-            //
-            // For idle sends (phase Submitting/Streaming/Interrupting),
-            // TurnStart was already dispatched in handleSendMessage —
-            // a second fire here regresses Streaming → Submitting and
-            // re-arms the 30 s submit timeout unnecessarily.
-            // See ANALYSIS_IDLE_SEND_RACE_2026_06_11 (never committed to this repo).
             const currentPhase = paneSnapshot(opts.blockId)?.turnPhase;
             const needsTurnStart =
                 currentPhase?.kind === "Done" ||
@@ -117,18 +98,6 @@ export function usePendingMessageAcceptance(opts: UsePendingMessageAcceptanceOpt
                 trail("agent:dispatch:TurnStart:done", { messageId });
                 opts.onTurnStartFromQueue?.();
             }
-            // Append as a normal user_message so it joins the
-            // conversation stream. Keeps the same id so the new
-            // node ties back to the pending entry 1:1.
-            // The optimistic-acceptance path goes through the
-            // same `handleSendMessage` pipeline as the startup
-            // injection (see agent-view.tsx `onReadyFn`). Apply
-            // the same heuristic here as in the stream-parser
-            // so the startup payload is flagged on first
-            // render — otherwise UserMessageBlock would render
-            // it as a regular user message (the full Markdown
-            // wall, not the collapsed summary).
-            // Codex P1 round 2 on PR #1020.
             const node: UserMessageNode = {
                 type: "user_message",
                 id: pending.id,
@@ -143,7 +112,6 @@ export function usePendingMessageAcceptance(opts: UsePendingMessageAcceptanceOpt
                 opts.queue.pushNewNode(node);
                 opts.queue.scheduleFlush();
             }
-        },
-    });
+        }, MOS.makeORef("block", opts.blockId));
     onCleanup(() => acceptedUnsub());
 }

@@ -25,7 +25,6 @@ use crate::backend::blockcontroller::{
     core, publish_controller_status,
     session_stats, shell, STATUS_DONE, STATUS_RUNNING,
 };
-use crate::backend::mps;
 
 use super::{
     argv::{append_prompt_arg, args_for_log, build_turn_argv},
@@ -706,13 +705,7 @@ impl SubprocessController {
             // subscribers also receive the last failure without needing a
             // separate meta read (belt-and-suspenders with the meta write above).
             if let (Some(failure), Some(broker)) = (run_failure.as_ref(), broker_wait.as_ref()) {
-                broker.publish(mps::MuxEvent {
-                    event: mps::EVENT_AGENT_FAILURE.to_string(),
-                    scopes: vec![format!("block:{}", block_id_wait)],
-                    sender: String::new(),
-                    persist: 1,
-                    data: serde_json::to_value(failure).ok(),
-                });
+                broker.publish_event::<crate::backend::mps_events::AgentFailed>(failure, vec![format!("block:{}", block_id_wait)], 1);
             }
 
             // Signal the renewal task to stop BEFORE releasing the

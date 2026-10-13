@@ -5,12 +5,18 @@ import { createRoot } from "solid-js";
 import { describe, expect, it, vi } from "vitest";
 
 const handlers: Array<(event: unknown) => void> = [];
-vi.mock("@/app/store/mps", () => ({
-    muxEventSubscribe: (sub: { handler: (event: unknown) => void }) => {
-        handlers.push(sub.handler);
-        return () => {};
-    },
-}));
+vi.mock("@/app/store/mps", () => {
+    const mock = {
+        muxEventSubscribe: (sub: { handler: (event: unknown) => void }) => {
+            handlers.push(sub.handler);
+            return () => {};
+        },
+    };
+    // As the real onMuxEvent: a typed subscription is a muxEventSubscribe whose handler gets the data.
+    const onMuxEvent = (eventType: string, handler: (data: unknown, event: unknown) => void, scope?: string) =>
+        mock.muxEventSubscribe({ eventType, scope, handler: (e: any) => { if (e?.data != null) handler(e.data, e); } } as any);
+    return { ...mock, onMuxEvent };
+});
 
 import { cachedTurnLedger, useTurnLedger } from "./useTurnLedger";
 

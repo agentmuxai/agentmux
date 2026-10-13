@@ -72,6 +72,7 @@ import type {
     StreamingState,
     TurnTokens,
 } from "../../view/agent/types";
+import type { AgentFailure } from "@/types/rpc/AgentFailure";
 
 /**
  * Init lifecycle — covers the "history still loading" gap (issue #728 gap 1).

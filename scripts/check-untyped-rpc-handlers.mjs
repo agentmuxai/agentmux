@@ -29,7 +29,7 @@ import { join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const MAX = 25;
-const MAX_EVENTS = 149;
+const MAX_EVENTS = 136;
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const SRC = join(ROOT, "crates/srv/src");

@@ -36,12 +36,18 @@ const hub = vi.hoisted(() => ({
     persistedFailure: null as AgentFailure | null,
 }));
 
-vi.mock("@/app/store/mps", () => ({
-    muxEventSubscribe: vi.fn((sub: { eventType: string; handler: (e: unknown) => void }) => {
-        hub.handlers.set(sub.eventType, sub.handler);
-        return () => hub.handlers.delete(sub.eventType);
-    }),
-}));
+vi.mock("@/app/store/mps", () => {
+    const mock = {
+        muxEventSubscribe: vi.fn((sub: { eventType: string; handler: (e: unknown) => void }) => {
+            hub.handlers.set(sub.eventType, sub.handler);
+            return () => hub.handlers.delete(sub.eventType);
+        }),
+    };
+    // As the real onMuxEvent: a typed subscription is a muxEventSubscribe whose handler gets the data.
+    const onMuxEvent = (eventType: string, handler: (data: unknown, event: unknown) => void, scope?: string) =>
+        mock.muxEventSubscribe({ eventType, scope, handler: (e: any) => { if (e?.data != null) handler(e.data, e); } } as any);
+    return { ...mock, onMuxEvent };
+});
 vi.mock("@/app/store/mos", () => ({ makeORef: (a: string, b: string) => `${a}:${b}` }));
 vi.mock("@/app/store/global", () => ({
     getBlockMetaKeyAtom: (_blockId: string, _key: string) => () => hub.persistedFailure,
@@ -50,6 +56,7 @@ const writeTextMock = vi.fn();
 vi.mock("@/util/clipboard", () => ({ writeText: (text: string) => writeTextMock(text) }));
 
 import { jitteredBackoffSeconds, TAKEOVER_CONFIRM_MS, useAgentFailure, type UseAgentFailureResult } from "./useAgentFailure";
+import type { AgentFailure } from "@/types/rpc/AgentFailure";
 
 const BLOCK_ID = "b";
 const transient = (): AgentFailure => ({ code: "rate_limited", title: "Throttled", detail: "429", retryable: true });

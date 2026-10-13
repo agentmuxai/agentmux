@@ -31,7 +31,7 @@ import {
     type AutoCompactReport,
 } from "@/app/store/agent-pane-state/auto-compact";
 import * as MOS from "@/app/store/mos";
-import { muxEventSubscribe } from "@/app/store/mps";
+import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 
 import { getRuntimeConfig } from "../buildRuntimeArgs";
@@ -163,14 +163,10 @@ export function useContextMeter(
     // pane that mounts late still gets the latest).
     const [report, setReport] = createSignal<AutoCompactReport | null>(null);
     onMount(() => {
-        const unsub = muxEventSubscribe({
-            eventType: WpsEvent.AgentContextUsage,
-            scope: MOS.makeORef("block", blockId),
-            handler: (event) => {
-                const parsed = parseAutoCompactReport((event as { data?: unknown })?.data);
+        const unsub = onMuxEvent(WpsEvent.AgentContextUsage, (data) => {
+                const parsed = parseAutoCompactReport(data);
                 if (parsed) setReport(parsed);
-            },
-        });
+            }, MOS.makeORef("block", blockId));
         onCleanup(() => unsub?.());
     });
     const autoCompact = createMemo(() => autoCompactPoint(reading(), report()), null, {

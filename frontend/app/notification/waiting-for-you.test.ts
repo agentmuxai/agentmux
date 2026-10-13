@@ -60,7 +60,7 @@ describe("waiting for you", () => {
     });
 
     it("takes srv's announcements for this window, or for every window", () => {
-        const a: UserAttention = { key: "k1", block_id: "b2", kind: "browser", text: "Lark needs you: sign in", window_ids: ["w1"], active: true };
+        const a: UserAttention = { key: "k1", block_id: "b2", kind: "browser", text: "Lark needs you: sign in", window_ids: ["w1"], since_ms: 0, active: true };
         applyUserAttention(a, "w2");
         expect(events, "another window's pane").toHaveLength(0);
         applyUserAttention(a, "w1");

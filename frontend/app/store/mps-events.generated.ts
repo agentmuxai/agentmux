@@ -5,14 +5,41 @@
 // crates/srv/src/backend/mps_events.rs). DO NOT EDIT: declare the event there, then run
 // `cargo test -p agentmux-srv export_bindings` and `node scripts/gen-mux-events.mjs`.
 
+import type { AgentContextUsageEvent } from "@/types/rpc/AgentContextUsageEvent";
+import type { AgentFailure } from "@/types/rpc/AgentFailure";
+import type { AgentRuntimeEvent } from "@/types/rpc/AgentRuntimeEvent";
+import type { AgentTurnEvent } from "@/types/rpc/AgentTurnEvent";
 import type { BlockControllerRuntimeStatus } from "@/types/rpc/BlockControllerRuntimeStatus";
+import type { MessageAcceptedEvent } from "@/types/rpc/MessageAcceptedEvent";
+import type { ResumeRetryEvent } from "@/types/rpc/ResumeRetryEvent";
+import type { ShutdownLineEvent } from "@/types/rpc/ShutdownLineEvent";
 import type { TimeSeriesData } from "@/types/rpc/TimeSeriesData";
+import type { UserAttentionEvent } from "@/types/rpc/UserAttentionEvent";
 
 /** Each typed broker event's payload, by its wire name. Subscribe with `onMuxEvent`. */
 export type MuxEventPayloads = {
+  "agent-message-accepted": MessageAcceptedEvent;
+  "agent-resume-retry": ResumeRetryEvent;
+  "agent:shutdown": ShutdownLineEvent;
+  agentcontextusage: AgentContextUsageEvent;
+  agentfailure: AgentFailure;
+  agentruntime: AgentRuntimeEvent;
+  agentturn: AgentTurnEvent;
   controllerstatus: BlockControllerRuntimeStatus;
   sysinfo: TimeSeriesData;
+  userattention: UserAttentionEvent;
 };
 
 /** The typed events' wire names. */
-export const TYPED_MUX_EVENTS = ["controllerstatus", "sysinfo"] as const;
+export const TYPED_MUX_EVENTS = [
+  "agent-message-accepted",
+  "agent-resume-retry",
+  "agent:shutdown",
+  "agentcontextusage",
+  "agentfailure",
+  "agentruntime",
+  "agentturn",
+  "controllerstatus",
+  "sysinfo",
+  "userattention",
+] as const;

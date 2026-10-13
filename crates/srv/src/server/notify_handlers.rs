@@ -82,8 +82,7 @@ pub struct NotifyAckParams {
 #[derive(serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct NotifyAttentionResult {
-    #[ts(type = "Array<unknown>")]
-    pub attention: Vec<serde_json::Value>,
+    pub attention: Vec<crate::backend::user_attention::UserAttentionEvent>,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, ts_rs::TS)]

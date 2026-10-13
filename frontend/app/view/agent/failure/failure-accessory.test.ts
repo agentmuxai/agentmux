@@ -4,6 +4,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { failureToRow, isTransient, type FailureActions, type FailureViewState } from "./failure-accessory";
+import type { AgentFailure } from "@/types/rpc/AgentFailure";
 
 const mkFailure = (overrides: Partial<AgentFailure> = {}): AgentFailure => ({
     code: "unknown_non_zero",

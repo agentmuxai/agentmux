@@ -277,13 +277,7 @@ fn surface_failure(state: &AppState, block_id: &str, message: &str) {
         &Some(state.mstore.clone()),
         &Some(state.event_bus.clone()),
     );
-    state.broker.publish(crate::backend::mps::MuxEvent {
-        event: crate::backend::mps::EVENT_AGENT_FAILURE.to_string(),
-        scopes: vec![format!("block:{block_id}")],
-        sender: String::new(),
-        persist: 1,
-        data: serde_json::to_value(&failure).ok(),
-    });
+    state.broker.publish_event::<crate::backend::mps_events::AgentFailed>(&failure, vec![format!("block:{block_id}")], 1);
 }
 
 /// Who holds `agent` per the relay, when no local lease or running
