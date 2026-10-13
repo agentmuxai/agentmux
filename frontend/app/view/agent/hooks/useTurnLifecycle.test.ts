@@ -14,15 +14,21 @@ const hub = vi.hoisted(() => ({
     acceptedHistory: [] as Array<(e: unknown) => void>,
 }));
 
-vi.mock("@/app/store/mps", () => ({
-    muxEventSubscribe: vi.fn((sub: { eventType: string; handler: (e: unknown) => void }) => {
-        hub.handlers.set(sub.eventType, sub.handler);
-        if (sub.eventType === "agent-message-accepted") hub.acceptedHistory.push(sub.handler);
-        return () => {
-            hub.handlers.delete(sub.eventType);
-        };
-    }),
-}));
+vi.mock("@/app/store/mps", () => {
+    const mock = {
+        muxEventSubscribe: vi.fn((sub: { eventType: string; handler: (e: unknown) => void }) => {
+            hub.handlers.set(sub.eventType, sub.handler);
+            if (sub.eventType === "agent-message-accepted") hub.acceptedHistory.push(sub.handler);
+            return () => {
+                hub.handlers.delete(sub.eventType);
+            };
+        }),
+    };
+    // As the real onMuxEvent: a typed subscription is a muxEventSubscribe whose handler gets the data.
+    const onMuxEvent = (eventType: string, handler: (data: unknown, event: unknown) => void, scope?: string) =>
+        mock.muxEventSubscribe({ eventType, scope, handler: (e: any) => { if (e?.data != null) handler(e.data, e); } } as any);
+    return { ...mock, onMuxEvent };
+});
 vi.mock("@/app/store/mos", () => ({ makeORef: (a: string, b: string) => `${a}:${b}` }));
 vi.mock("@/app/store/agent-pane-state-store", () => ({ snapshot: () => null }));
 vi.mock("@/store/token-usage", () => ({ recordTurn: () => {} }));

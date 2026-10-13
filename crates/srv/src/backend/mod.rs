@@ -134,6 +134,7 @@ pub mod obj;
 pub mod wconfig;
 pub mod wcore;
 pub mod mps;
+pub mod mps_events;
 pub mod osc_extractor;
 pub mod tool_store;
 pub mod container;

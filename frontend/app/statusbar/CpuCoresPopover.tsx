@@ -18,10 +18,9 @@
 
 import { createEffect, createMemo, createSignal, Index, onCleanup, onMount, Show, type JSX } from "solid-js";
 import { AnchoredPopover, type PopoverAnchor } from "@/app/element/anchored-popover";
-import { muxEventSubscribe } from "@/app/store/mps";
+import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import { cpuColor, loadColor } from "./cpu-color";
-import type { MuxEvent } from "@/types/rpc/MuxEvent";
 
 interface Core {
     idx: number;
@@ -73,12 +72,8 @@ export const CpuCoresPopover = (props: CpuCoresPopoverProps): JSX.Element => {
     });
 
     onMount(() => {
-        const unsub = muxEventSubscribe({
-            eventType: WpsEvent.SysInfo,
-            scope: "local",
-            handler: (event) => {
-                const vals = (event as MuxEvent)?.data?.values;
-                if (vals == null) return;
+        const unsub = onMuxEvent(WpsEvent.SysInfo, (data) => {
+                const vals = data.values;
                 const next: Core[] = [];
                 for (const key in vals) {
                     const m = CPU_KEY.exec(key);
@@ -87,8 +82,7 @@ export const CpuCoresPopover = (props: CpuCoresPopoverProps): JSX.Element => {
                 next.sort((a, b) => a.idx - b.idx);
                 setCores(next);
                 setAggregate(vals["cpu"] ?? 0);
-            },
-        });
+            }, "local");
         onCleanup(() => unsub?.());
     });
 

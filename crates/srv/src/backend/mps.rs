@@ -489,6 +489,18 @@ impl Broker {
         }
     }
 
+    /// Publish a typed event (`mps_events`): `payload` is `E::Payload`, so its
+    /// frontend subscribers get it as that type.
+    pub fn publish_event<E: super::mps_events::Event>(&self, payload: &E::Payload, scopes: Vec<String>, persist: usize) {
+        self.publish(MuxEvent {
+            event: E::NAME.to_string(),
+            scopes,
+            sender: String::new(),
+            persist,
+            data: serde_json::to_value(payload).ok(),
+        });
+    }
+
     /// Publish an event to all matching subscribers.
     pub fn publish(&self, event: MuxEvent) {
         for o in self.observers.read().unwrap_or_else(|e| e.into_inner()).iter() {

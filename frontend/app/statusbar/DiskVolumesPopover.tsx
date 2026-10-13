@@ -15,10 +15,9 @@
 
 import { createSignal, Index, onCleanup, onMount, Show, type JSX } from "solid-js";
 import { AnchoredPopover, type PopoverAnchor } from "@/app/element/anchored-popover";
-import { muxEventSubscribe } from "@/app/store/mps";
+import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import { diskFreeColor, formatDiskGb, parseDiskVolumes, type DiskVolume } from "./disk-volumes";
-import type { MuxEvent } from "@/types/rpc/MuxEvent";
 
 interface DiskVolumesPopoverProps {
     /** The status bar's Disk readout. */
@@ -35,15 +34,10 @@ export const DiskVolumesPopover = (props: DiskVolumesPopoverProps): JSX.Element 
     const [volumes, setVolumes] = createSignal<DiskVolume[]>(props.initialVolumes ?? []);
 
     onMount(() => {
-        const unsub = muxEventSubscribe({
-            eventType: WpsEvent.SysInfo,
-            scope: "local",
-            handler: (event) => {
-                const vals = (event as MuxEvent)?.data?.values;
-                if (vals == null) return;
+        const unsub = onMuxEvent(WpsEvent.SysInfo, (data) => {
+                const vals = data.values;
                 setVolumes(parseDiskVolumes(vals));
-            },
-        });
+            }, "local");
         onCleanup(() => unsub?.());
     });
 

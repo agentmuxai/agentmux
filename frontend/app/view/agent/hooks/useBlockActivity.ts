@@ -32,7 +32,7 @@
  */
 
 import { onCleanup, onMount } from "solid-js";
-import { muxEventSubscribe } from "@/app/store/mps";
+import { muxEventSubscribe, onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import { makeORef } from "@/app/store/mos";
 import { ObjectService } from "@/app/store/services";
@@ -107,16 +107,12 @@ export function useBlockActivity(opts: UseBlockActivityOptions): void {
         // the label every time the pane remounts (tab switch), and Claude
         // Code only emits OSC titles once per session so no new event would
         // restore it.
-        const unsubStatus = muxEventSubscribe({
-            eventType: WpsEvent.ControllerStatus,
-            scope: makeORef("block", opts.blockId),
-            handler: (event) => {
-                if ((event as any)?.data?.shellprocstatus === "done") {
+        const unsubStatus = onMuxEvent(WpsEvent.ControllerStatus, (data) => {
+                if (data.shellprocstatus === "done") {
                     clearTimeout(debounceTimer);
                     clearActivity(opts.blockId);
                 }
-            },
-        });
+            }, makeORef("block", opts.blockId));
 
         onCleanup(() => {
             unsub();

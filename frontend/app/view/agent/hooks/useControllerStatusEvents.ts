@@ -10,7 +10,7 @@
  */
 
 import { onCleanup, onMount } from "solid-js";
-import { muxEventSubscribe } from "@/app/store/mps";
+import { muxEventSubscribe, onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import * as MOS from "@/app/store/mos";
 import type { LogFn } from "./useAgentControllerStatus";
@@ -88,12 +88,8 @@ export interface UseControllerStatusEventsOptions {
 
 export function useControllerStatusEvents(opts: UseControllerStatusEventsOptions): void {
     onMount(() => {
-        const unsubStatus = muxEventSubscribe({
-            eventType: WpsEvent.ControllerStatus,
-            scope: MOS.makeORef("block", opts.blockId),
-            handler: (event) => {
-                const data = (event as any)?.data;
-                const status = data?.shellprocstatus;
+        const unsubStatus = onMuxEvent(WpsEvent.ControllerStatus, (data) => {
+                const status = data.shellprocstatus;
                 if (status === "running") {
                     opts.log("subprocess", "spawned, waiting for response...");
                 } else if (status === "done") {
@@ -114,8 +110,7 @@ export function useControllerStatusEvents(opts: UseControllerStatusEventsOptions
                 if (active === true) {
                     opts.onActiveTurnConfirmed?.();
                 }
-            },
-        });
+            }, MOS.makeORef("block", opts.blockId));
 
         // Rich failure cause emitted alongside a non-zero exit
         // (SPEC_AGENT_FAILURE_DIAGNOSTICS Phase 2): surfaces the real reason —
