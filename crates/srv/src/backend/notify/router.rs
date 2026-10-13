@@ -39,7 +39,6 @@ pub const EVENT_NOTIFICATION_STATE: &str = "notification:state";
 /// (`SPEC_REVEAL_BLOCK_ONE_PATH_2026_09_27.md` §4.3). Payload: `BlockRevealEvent`.
 pub const EVENT_BLOCK_REVEAL: &str = "block:reveal";
 
-/// Where `block.reveal` reveals a block — also the `block:reveal` payload.
 /// `notification:retract`: take a shown notification down.
 #[derive(Clone, Debug, serde::Serialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
@@ -61,6 +60,7 @@ pub struct NotificationActivateEvent {
     pub at_ms: i64,
 }
 
+/// Where `block.reveal` reveals a block — also the `block:reveal` payload.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct BlockRevealEvent {

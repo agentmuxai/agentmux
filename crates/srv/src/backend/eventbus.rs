@@ -181,9 +181,6 @@ impl EventBus {
         self.broadcast_event_lane(event, Lane::Priority);
     }
 
-    /// Broadcast a typed event (`mps_events`) to every connection directly, not through the
-    /// broker: no scopes, nothing persisted. The same `rpc`/`eventrecv` frame a broker event
-    /// gets (a serialized `MuxEvent` omits its empty scopes, sender and persist).
     /// A typed event as the frame srv writes to one WebSocket itself (`srvinfo` and `config` on
     /// connect): the same `rpc`/`eventrecv` frame a broadcast sends.
     pub fn typed_frame<E: super::mps_events::Event>(payload: &E::Payload) -> serde_json::Value {
@@ -193,6 +190,9 @@ impl EventBus {
         })
     }
 
+    /// Broadcast a typed event (`mps_events`) to every connection directly, not through the
+    /// broker: no scopes, nothing persisted. The same `rpc`/`eventrecv` frame a broker event
+    /// gets (a serialized `MuxEvent` omits its empty scopes, sender and persist).
     pub fn broadcast_typed<E: super::mps_events::Event>(&self, payload: &E::Payload) {
         let event = MuxEvent {
             event: E::NAME.to_string(),
