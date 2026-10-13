@@ -835,6 +835,10 @@ impl Run {
                             self.conn
                         ))
                         .await;
+                        // The helper couldn't get there either: the host's
+                        // terminals are plain until srv restarts, and the
+                        // restart (which asks `wants` again) is one of them.
+                        crate::backend::remote::helper_consent::note_not_installed(&self.conn);
                         self.plain.store(true, Ordering::SeqCst);
                         return None;
                     }

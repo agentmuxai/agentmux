@@ -823,6 +823,11 @@ async fn a_new_host_never_reached_becomes_a_plain_terminal_by_default() {
     assert_eq!((ended, plain.load(Ordering::SeqCst)), (None, true), "a plain terminal instead");
     let tries = std::fs::read_to_string(&log).unwrap().lines().count();
     assert_eq!(tries, FIRST_REACH_TRIES as usize);
+    // The pane's restart asks `wants` again: it must say plain, or the
+    // restart refuses and the pane stops instead.
+    let mut meta = MetaMapType::new();
+    meta.insert(super::super::META_KEY_CONNECTION.into(), serde_json::json!("nosuchhost"));
+    assert!(!wants(&meta, None), "the restart becomes a plain terminal");
     let term = state.filestore.read_file("durable-unreachable-block", "term").unwrap().unwrap();
     assert!(String::from_utf8_lossy(&term).contains("Could not resolve hostname"));
 }
