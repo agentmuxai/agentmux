@@ -35,8 +35,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 "{}/agentmux/reactive/inject",
                 local_url.trim_end_matches('/')
             );
-            let req = sign_outgoing_jekt(source_agent.as_deref(), to, message)
-                .into_request(to.to_string(), message.to_string(), source_agent);
+            let req = signed_jekt(source_agent, to, message);
 
             let resp = client
                 .post(&url)
@@ -233,8 +232,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                     // fails, just via the inject endpoint's own "agent not
                     // found" rather than this pre-check.
                     let target_agent = block_to_agent.get(&target).cloned().unwrap_or_else(|| target.clone());
-                    let req = sign_outgoing_jekt(source_agent.as_deref(), &target_agent, message)
-                        .into_request(target_agent, message.to_string(), source_agent.clone());
+                    let req = signed_jekt(source_agent.clone(), &target_agent, message);
                     let outcome = async {
                         let resp = client
                             .post(&url)

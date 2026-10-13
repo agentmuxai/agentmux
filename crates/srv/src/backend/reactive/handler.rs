@@ -399,9 +399,8 @@ impl Handler {
         uid: Option<&str>,
         no_uid_counter: &'static str,
     ) -> Result<(), String> {
-        if !validate_agent_id(display) {
-            return Err(format!("invalid agent ID: {}", display));
-        }
+        // A display name that isn't a valid id ("Loap #3") binds by route name.
+        let display = &super::sanitize::registrable_id(display).ok_or_else(|| format!("invalid agent ID: {display}"))?;
         let stable = stable.filter(|s| validate_agent_id(s));
         let uid = uid
             .map(str::trim)
@@ -730,7 +729,7 @@ impl Handler {
     /// removed. Several → nothing is removed and the candidates are
     /// returned; the caller must not report success. None → `NotFound`.
     pub fn unregister_agent(&mut self, agent_id: &str) -> UnregisterOutcome {
-        let key = agent_id.to_lowercase();
+        let key = super::sanitize::route_name(agent_id).unwrap_or_default().to_lowercase();
         let live = self.live_blocks_for_key(&key);
         match live.len() {
             0 => UnregisterOutcome::NotFound,
@@ -863,8 +862,7 @@ impl Handler {
 
     /// Every name `block_id` is bound under (display first, then stable).
     /// Production teardown gets the same list back from [`unregister_block`];
-    /// this read-only form is for tests and diagnostics.
-    #[cfg_attr(not(test), allow(dead_code))]
+    /// this read-only form is what registration subscribes for cloud delivery.
     pub fn names_for_block(&self, block_id: &str) -> Vec<String> {
         let Some(names) = self.block_names.get(block_id) else {
             return Vec::new();
@@ -967,7 +965,8 @@ impl Handler {
             };
         }
 
-        // Validate agent ID
+        // Validate agent ID; a display name as the target means its route name.
+        req.target_agent = super::sanitize::route_name(&req.target_agent).unwrap_or_default();
         if !validate_agent_id(&req.target_agent) {
             return InjectionResponse {
                 deferred: None,
@@ -2061,7 +2060,6 @@ impl ReactiveHandler {
     }
 
     /// Every name `block_id` is bound under — see [`Handler::names_for_block`].
-    #[cfg_attr(not(test), allow(dead_code))]
     pub fn names_for_block(&self, block_id: &str) -> Vec<String> {
         self.inner.lock().unwrap().names_for_block(block_id)
     }

@@ -388,6 +388,27 @@ pub struct InjectionRequest {
     pub transcript_request_escalate_forced: bool,
 }
 
+impl InjectionRequest {
+    /// Whether a sender signature rides on this request. Each binds the
+    /// target as signed, so a signed request's target must reach every hop
+    /// unchanged; the sender's MCP already sends the route name
+    /// (`agentmux-mcp` `signed_jekt`).
+    pub fn is_signed(&self) -> bool {
+        [&self.jekt_sig, &self.reagent_sig, &self.lan_sig, &self.lan_sig_v2, &self.channel_sig, &self.channel_sig_v2, &self.wan_sig]
+            .iter()
+            .any(|s| s.is_some())
+    }
+
+    /// An unsigned request's target as its route name, so a display-name
+    /// target ("Loap #3") routes as "Loap-3" on every tier, not only the
+    /// local one. A signed one is left as it is (see `is_signed`).
+    pub fn route_unsigned_target(&mut self) {
+        if !self.is_signed() {
+            self.target_agent = super::sanitize::route_name(&self.target_agent).unwrap_or_default();
+        }
+    }
+}
+
 /// Response from a message injection attempt.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InjectionResponse {
