@@ -17,11 +17,13 @@ use super::*;
 /// many agents by design, so memory (inherently per-agent) needs its own,
 /// explicitly-scoped entry point rather than an implicit "whichever agent
 /// happens to be attached" guess.
-#[derive(serde::Deserialize, Default)]
+#[derive(serde::Deserialize, Default, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/", rename = "BundleExportForAgentReq")]
 pub(super) struct ExportForAgentReq {
     pub(crate) bundle_id: String,
     pub(crate) agent_id: String,
     #[serde(default)]
+    #[ts(as = "Option<String>", optional)]
     pub(crate) format: String,
 }
 
@@ -152,7 +154,7 @@ pub(super) async fn bundle_export_for_agent_impl(
     mstore: &crate::backend::storage::store::Store,
     identity_store: &crate::backend::storage::store::Store,
     req: ExportForAgentReq,
-) -> Result<serde_json::Value, String> {
+) -> Result<BundleExportResponse, String> {
     let (export, _agent, all_warnings, missing_skill_ids) =
         build_export_for_agent(id_store, mstore, identity_store, &req.bundle_id, &req.agent_id, "bundle.export_for_agent").await?;
 
@@ -161,27 +163,43 @@ pub(super) async fn bundle_export_for_agent_impl(
             .map_err(|e| format!("bundle.export_for_agent: {e}"))?;
         use base64::Engine as _;
         let encoded = base64::engine::general_purpose::STANDARD.encode(&zip_bytes);
-        return Ok(json!({
-            "root_slug": export.root_slug,
-            "skipped_skills": export.skipped_skills,
-            "warnings": all_warnings,
-            "missing_skill_ids": missing_skill_ids,
-            "zip_base64": encoded,
-        }));
+        return Ok(BundleExportResponse {
+            root_slug: export.root_slug,
+            files: None,
+            skipped_skills: export.skipped_skills,
+            warnings: all_warnings,
+            missing_skill_ids,
+            zip_base64: Some(encoded),
+        });
     }
 
-    let mut result = serde_json::to_value(&export).map_err(|e| e.to_string())?;
-    if let Some(obj) = result.as_object_mut() {
-        obj.insert("missing_skill_ids".to_string(), json!(missing_skill_ids));
-        obj.insert("warnings".to_string(), json!(all_warnings));
-    }
-    Ok(result)
+    Ok(BundleExportResponse {
+        root_slug: export.root_slug,
+        files: Some(export.files),
+        skipped_skills: export.skipped_skills,
+        warnings: all_warnings,
+        missing_skill_ids,
+        zip_base64: None,
+    })
 }
 
-#[derive(serde::Deserialize)]
+#[derive(serde::Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/", rename = "BundleExportForAgentWithHistoryReq")]
 pub(super) struct ExportForAgentWithHistoryReq {
     pub(crate) bundle_id: String,
     pub(crate) agent_id: String,
+}
+
+/// Response for `bundle.export_for_agent_with_history`, which always zips.
+#[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub(crate) struct BundleExportWithHistoryResponse {
+    pub(crate) root_slug: String,
+    pub(crate) skipped_skills: Vec<String>,
+    pub(crate) warnings: Vec<String>,
+    pub(crate) missing_skill_ids: Vec<String>,
+    pub(crate) history_session_count: u32,
+    pub(crate) zip_base64: String,
 }
 
 /// Per-transcript size ceiling for `bundle.export_for_agent_with_history`.
@@ -277,7 +295,7 @@ pub(super) async fn bundle_export_for_agent_with_history_impl(
     mstore: &crate::backend::storage::store::Store,
     history_service: Arc<crate::backend::history::HistoryService>,
     req: ExportForAgentWithHistoryReq,
-) -> Result<serde_json::Value, String> {
+) -> Result<BundleExportWithHistoryResponse, String> {
     let (export, _agent, all_warnings, missing_skill_ids) = build_export_for_agent(
         &id_store,
         mstore,
@@ -374,14 +392,14 @@ pub(super) async fn bundle_export_for_agent_with_history_impl(
             .map_err(|e| format!("bundle.export_for_agent_with_history: {e}"))?;
         use base64::Engine as _;
         let encoded = base64::engine::general_purpose::STANDARD.encode(&zip_bytes);
-        Ok(json!({
-            "root_slug": export.root_slug,
-            "skipped_skills": export.skipped_skills,
-            "warnings": all_warnings,
-            "missing_skill_ids": missing_skill_ids,
-            "history_session_count": included,
-            "zip_base64": encoded,
-        }))
+        Ok(BundleExportWithHistoryResponse {
+            root_slug: export.root_slug,
+            skipped_skills: export.skipped_skills,
+            warnings: all_warnings,
+            missing_skill_ids,
+            history_session_count: included,
+            zip_base64: encoded,
+        })
     })
     .await
     .map_err(|e| format!("bundle.export_for_agent_with_history: blocking task panicked: {e}"))?
@@ -391,18 +409,14 @@ pub(super) fn register_bundle_export_for_agent(engine: &Arc<WshRpcEngine>, state
     let id_store = state.id_store.clone();
     let mstore = state.mstore.clone();
     let identity_store = state.identity_store.clone();
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_BUNDLE_EXPORT_FOR_AGENT,
-        Box::new(move |data, _ctx| {
+        move |req: ExportForAgentReq, _ctx| {
             let id_store = id_store.clone();
             let mstore = mstore.clone();
             let identity_store = identity_store.clone();
-            Box::pin(async move {
-                let req: ExportForAgentReq = serde_json::from_value(data)
-                    .map_err(|e| format!("bundle.export_for_agent: {e}"))?;
-                bundle_export_for_agent_impl(&id_store, &mstore, &identity_store, req).await.map(Some)
-            })
-        }),
+            async move { bundle_export_for_agent_impl(&id_store, &mstore, &identity_store, req).await }
+        },
     );
 }
 
@@ -411,20 +425,16 @@ pub(super) fn register_bundle_export_for_agent_with_history(engine: &Arc<WshRpcE
     let identity_store = state.identity_store.clone();
     let mstore = state.mstore.clone();
     let history_service = state.history_service.clone();
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_BUNDLE_EXPORT_FOR_AGENT_WITH_HISTORY,
-        Box::new(move |data, _ctx| {
+        move |req: ExportForAgentWithHistoryReq, _ctx| {
             let id_store = id_store.clone();
             let identity_store = identity_store.clone();
             let mstore = mstore.clone();
             let history_service = history_service.clone();
-            Box::pin(async move {
-                let req: ExportForAgentWithHistoryReq = serde_json::from_value(data)
-                    .map_err(|e| format!("bundle.export_for_agent_with_history: {e}"))?;
-                bundle_export_for_agent_with_history_impl(id_store, identity_store, &mstore, history_service, req)
-                    .await
-                    .map(Some)
-            })
-        }),
+            async move {
+                bundle_export_for_agent_with_history_impl(id_store, identity_store, &mstore, history_service, req).await
+            }
+        },
     );
 }

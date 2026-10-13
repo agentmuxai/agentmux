@@ -174,12 +174,7 @@ async fn export_carries_ref_bound_components_the_inline_columns_never_had() {
     )
     .unwrap();
 
-    let paths: Vec<String> = result["files"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|f| f["path"].as_str().unwrap_or("").to_string())
-        .collect();
+    let paths: Vec<String> = result.files.unwrap().into_iter().map(|f| f.path).collect();
     assert!(
         paths.iter().any(|p| p.starts_with("skills/")),
         "ref-bound skill must be exported: {paths:?}"
@@ -248,16 +243,16 @@ async fn export_carries_project_instructions_with_their_owner() {
     .await
     .unwrap();
 
-    let files = result["files"].as_array().unwrap();
+    let files = result.files.unwrap();
     let carried = files
         .iter()
-        .find(|f| f["path"] == "instructions/project/CLAUDE.md")
+        .find(|f| f.path == "instructions/project/CLAUDE.md")
         .expect("the repository's own CLAUDE.md must be carried");
-    assert!(carried["content"].as_str().unwrap().contains("House rules"));
+    assert!(carried.content.contains("House rules"));
 
-    let manifest_file = files.iter().find(|f| f["path"] == "bundle.json").unwrap();
+    let manifest_file = files.iter().find(|f| f.path == "bundle.json").unwrap();
     let manifest: serde_json::Value =
-        serde_json::from_str(manifest_file["content"].as_str().unwrap()).unwrap();
+        serde_json::from_str(&manifest_file.content).unwrap();
     let entries = manifest["components"]["projectInstructions"].as_array().unwrap();
     let entry = entries.iter().find(|e| e["path"] == "CLAUDE.md").unwrap();
     assert_eq!(
@@ -294,14 +289,14 @@ async fn export_carries_a_readable_but_empty_instruction_file() {
     .await
     .unwrap();
 
-    let files = result["files"].as_array().unwrap();
+    let files = result.files.unwrap();
     assert!(
-        files.iter().any(|f| f["path"] == "instructions/project/CLAUDE.md"),
+        files.iter().any(|f| f.path == "instructions/project/CLAUDE.md"),
         "an empty-but-present CLAUDE.md must still be recorded"
     );
-    let manifest_file = files.iter().find(|f| f["path"] == "bundle.json").unwrap();
+    let manifest_file = files.iter().find(|f| f.path == "bundle.json").unwrap();
     let manifest: serde_json::Value =
-        serde_json::from_str(manifest_file["content"].as_str().unwrap()).unwrap();
+        serde_json::from_str(&manifest_file.content).unwrap();
     let entries = manifest["components"]["projectInstructions"].as_array().unwrap();
     assert!(
         entries.iter().any(|e| e["path"] == "CLAUDE.md"),
@@ -546,14 +541,14 @@ async fn export_for_agent_includes_normal_components_and_native_memory() {
         format: String::new(),
     }).await.unwrap();
 
-    let files = result["files"].as_array().unwrap();
-    assert!(files.iter().any(|f| f["path"] == "instructions/AGENTS.md" && f["content"] == "Be helpful."));
-    let memory_file = files.iter().find(|f| f["path"] == "memory/MEMORY.md")
+    let files = result.files.unwrap();
+    assert!(files.iter().any(|f| f.path == "instructions/AGENTS.md" && f.content == "Be helpful."));
+    let memory_file = files.iter().find(|f| f.path == "memory/MEMORY.md")
         .expect("expected memory/MEMORY.md in the export — live-FS refresh must have picked it up");
-    assert_eq!(memory_file["content"], "Learned fact.");
+    assert_eq!(memory_file.content, "Learned fact.");
 
-    let manifest_file = files.iter().find(|f| f["path"] == "bundle.json").unwrap();
-    let manifest: serde_json::Value = serde_json::from_str(manifest_file["content"].as_str().unwrap()).unwrap();
+    let manifest_file = files.iter().find(|f| f.path == "bundle.json").unwrap();
+    let manifest: serde_json::Value = serde_json::from_str(&manifest_file.content).unwrap();
     assert_eq!(manifest["components"]["memory"], json!(["memory/MEMORY.md"]));
 
     // The refresh must also have durably mirrored it, not just read it
@@ -577,10 +572,10 @@ async fn export_for_agent_omits_memory_component_when_agent_has_none() {
         format: String::new(),
     }).await.unwrap();
 
-    let files = result["files"].as_array().unwrap();
-    assert!(!files.iter().any(|f| f["path"].as_str().unwrap_or("").starts_with("memory/")));
-    let manifest_file = files.iter().find(|f| f["path"] == "bundle.json").unwrap();
-    let manifest: serde_json::Value = serde_json::from_str(manifest_file["content"].as_str().unwrap()).unwrap();
+    let files = result.files.unwrap();
+    assert!(!files.iter().any(|f| f.path.starts_with("memory/")));
+    let manifest_file = files.iter().find(|f| f.path == "bundle.json").unwrap();
+    let manifest: serde_json::Value = serde_json::from_str(&manifest_file.content).unwrap();
     assert!(manifest["components"].get("memory").is_none());
 }
 
@@ -649,14 +644,14 @@ async fn agent_less_export_warns_when_a_bound_agent_has_memory() {
         ExportReq { id: "bundle-1".to_string(), format: String::new(), widgets: vec![] },
     )
     .unwrap();
-    let warnings = result["warnings"].as_array().unwrap();
+    let warnings = &result.warnings;
     assert!(
         warnings.iter().any(|w| w == MEMORY_NOT_EXPORTED_WARNING),
         "bundle.export must announce the memory it is not carrying: {warnings:?}"
     );
     // ...and still not carry it: this path has no agent to read from.
-    let files = result["files"].as_array().unwrap();
-    assert!(!files.iter().any(|f| f["path"].as_str().unwrap_or("").starts_with("memory/")));
+    let files = result.files.unwrap();
+    assert!(!files.iter().any(|f| f.path.starts_with("memory/")));
 }
 
 #[tokio::test]
@@ -692,7 +687,7 @@ async fn agent_less_export_is_silent_without_memory_or_without_a_binding() {
         ExportReq { id: "bundle-2".to_string(), format: String::new(), widgets: vec![] },
     )
     .unwrap();
-    let warnings = result["warnings"].as_array().unwrap();
+    let warnings = &result.warnings;
     assert!(
         !warnings.iter().any(|w| w == MEMORY_NOT_EXPORTED_WARNING),
         "exporting a bundle nobody is bound to loses nothing: {warnings:?}"
@@ -806,21 +801,18 @@ async fn an_imported_bundle_exports_the_components_it_arrived_with() {
     .await
     .unwrap();
 
-    let bundle_id = result["bundle_id"]
-        .as_str()
-        .or_else(|| result["id"].as_str())
-        .expect("import must report the bundle it created")
-        .to_string();
+    let bundle_id = result.bundle_id.clone();
+    assert!(!bundle_id.is_empty(), "import must report the bundle it created");
 
     let components = resolve_bundle_components(&state.mstore, &state.identity_store, &bundle_id).unwrap();
     assert_eq!(
         components.skills.len(),
         1,
-        "imported skill must be bound to the bundle. import result: {result}"
+        "imported skill must be bound to the bundle. import result: {result:?}"
     );
-    let warnings = result["warnings"].as_array().unwrap();
+    let warnings = &result.warnings;
     assert!(
-        warnings.iter().any(|w| w.as_str().unwrap_or("").starts_with("mcpServers: not imported (github)")),
+        warnings.iter().any(|w| w.starts_with("mcpServers: not imported (github)")),
         "{warnings:?}"
     );
 
@@ -832,12 +824,7 @@ async fn an_imported_bundle_exports_the_components_it_arrived_with() {
         ExportReq { id: bundle_id, format: String::new(), widgets: vec![] },
     )
     .unwrap();
-    let paths: Vec<String> = exported["files"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|f| f["path"].as_str().unwrap_or("").to_string())
-        .collect();
+    let paths: Vec<String> = exported.files.unwrap().into_iter().map(|f| f.path).collect();
     assert!(paths.iter().any(|p| p.starts_with("skills/")), "got {paths:?}");
     assert!(!paths.iter().any(|p| p.starts_with("mcp/")), "got {paths:?}");
 }
@@ -959,7 +946,7 @@ async fn export_for_agent_warns_when_a_memory_file_is_truncated() {
         format: String::new(),
     }).await.unwrap();
 
-    let warnings: Vec<&str> = result["warnings"].as_array().unwrap().iter().map(|w| w.as_str().unwrap()).collect();
+    let warnings: Vec<&str> = result.warnings.iter().map(String::as_str).collect();
     assert!(
         warnings.iter().any(|w| w.contains("MEMORY.md") && w.contains("truncated")),
         "expected a truncation warning, got: {warnings:?}"
@@ -998,7 +985,7 @@ async fn export_for_agent_repeats_the_truncation_warning_on_an_unchanged_oversiz
         agent_id: "agent-1".to_string(),
         format: String::new(),
     }).await.unwrap();
-    let warnings: Vec<&str> = result["warnings"].as_array().unwrap().iter().map(|w| w.as_str().unwrap()).collect();
+    let warnings: Vec<&str> = result.warnings.iter().map(String::as_str).collect();
     assert!(
         warnings.iter().any(|w| w.contains("MEMORY.md") && w.contains("truncated")),
         "truncation warning must repeat on a second export of the same unchanged oversized file, got: {warnings:?}"
@@ -1019,8 +1006,8 @@ async fn import_for_agent_writes_memory_to_both_live_fs_and_mirror() {
         files: Some(files),
     }).await.unwrap();
 
-    assert_eq!(result["memory_files_written"], 1);
-    assert!(result["bundle_id"].as_str().unwrap().len() > 0);
+    assert_eq!(result.memory_files_written, 1);
+    assert!(result.bundle_id.len() > 0);
 
     // Live FS.
     let memory_dir = config_dir.path().join("projects").join("-work-proj").join("memory");
@@ -1034,7 +1021,7 @@ async fn import_for_agent_writes_memory_to_both_live_fs_and_mirror() {
     );
 
     // The bundle row itself was also created.
-    let bundle_id = result["bundle_id"].as_str().unwrap();
+    let bundle_id = result.bundle_id.as_str();
     let bundle = state.id_store.bundle_get(bundle_id).unwrap().unwrap();
     assert_eq!(bundle.instructions, "Be helpful.");
 }
@@ -1058,8 +1045,8 @@ async fn import_for_agent_does_not_falsely_claim_memory_was_ignored() {
         files: Some(files),
     }).await.unwrap();
 
-    assert_eq!(result["memory_files_written"], 1);
-    let warnings: Vec<&str> = result["warnings"].as_array().unwrap().iter().map(|w| w.as_str().unwrap()).collect();
+    assert_eq!(result.memory_files_written, 1);
+    let warnings: Vec<&str> = result.warnings.iter().map(String::as_str).collect();
     assert!(
         !warnings.iter().any(|w| w.contains("present but ignored")),
         "memory was actually processed; the 'ignored' warning must not appear: {warnings:?}"
@@ -1145,8 +1132,8 @@ async fn import_for_agent_rejects_an_unsafe_memory_filename() {
         zip_base64: None,
         files: Some(files),
     }).await.unwrap();
-    assert_eq!(result["memory_files_written"], 0);
-    let warnings: Vec<&str> = result["warnings"].as_array().unwrap().iter().map(|w| w.as_str().unwrap()).collect();
+    assert_eq!(result.memory_files_written, 0);
+    let warnings: Vec<&str> = result.warnings.iter().map(String::as_str).collect();
     assert!(
         warnings.iter().any(|w| w.contains("not a valid memory filename")),
         "got: {warnings:?}"
@@ -1182,8 +1169,8 @@ async fn import_for_agent_warns_when_a_declared_memory_path_has_no_matching_cont
         zip_base64: None,
         files: Some(files),
     }).await.unwrap();
-    assert_eq!(result["memory_files_written"], 0);
-    let warnings: Vec<&str> = result["warnings"].as_array().unwrap().iter().map(|w| w.as_str().unwrap()).collect();
+    assert_eq!(result.memory_files_written, 0);
+    let warnings: Vec<&str> = result.warnings.iter().map(String::as_str).collect();
     assert!(
         warnings.iter().any(|w| w.contains("MISSING.md") && w.contains("not found")),
         "got: {warnings:?}"
@@ -1209,11 +1196,8 @@ async fn round_trip_export_then_import_into_a_fresh_agent_preserves_memory() {
         format: String::new(),
     }).await.unwrap();
 
-    let files: Vec<FileEntry> = exported["files"].as_array().unwrap().iter()
-        .map(|f| FileEntry {
-            path: f["path"].as_str().unwrap().to_string(),
-            content: f["content"].as_str().unwrap().to_string(),
-        })
+    let files: Vec<FileEntry> = exported.files.unwrap().into_iter()
+        .map(|f| FileEntry { path: f.path, content: f.content })
         .collect();
 
     let imported = bundle_import_for_agent_impl(&state.id_store, &state.identity_store, &state.mstore, ImportForAgentReq {
@@ -1222,7 +1206,7 @@ async fn round_trip_export_then_import_into_a_fresh_agent_preserves_memory() {
         zip_base64: None,
         files: Some(files),
     }).await.unwrap();
-    assert_eq!(imported["memory_files_written"], 1);
+    assert_eq!(imported.memory_files_written, 1);
 
     assert_eq!(
         state.id_store.agent_native_memory_read("agent-b", "MEMORY.md").unwrap(),
@@ -1256,17 +1240,15 @@ async fn export_then_import_carries_provider_and_model_through() {
         format: String::new(),
     }).await.unwrap();
 
-    let manifest_file = exported["files"].as_array().unwrap().iter()
-        .find(|f| f["path"] == "bundle.json")
+    let exported_files = exported.files.unwrap();
+    let manifest_file = exported_files.iter()
+        .find(|f| f.path == "bundle.json")
         .expect("bundle.json must be present");
-    let manifest: serde_json::Value = serde_json::from_str(manifest_file["content"].as_str().unwrap()).unwrap();
+    let manifest: serde_json::Value = serde_json::from_str(&manifest_file.content).unwrap();
     assert_eq!(manifest["suggestedFor"], serde_json::json!({ "provider": "claude", "vendor": "anthropic" }));
 
-    let files: Vec<FileEntry> = exported["files"].as_array().unwrap().iter()
-        .map(|f| FileEntry {
-            path: f["path"].as_str().unwrap().to_string(),
-            content: f["content"].as_str().unwrap().to_string(),
-        })
+    let files: Vec<FileEntry> = exported_files.into_iter()
+        .map(|f| FileEntry { path: f.path, content: f.content })
         .collect();
     let imported = bundle_import_for_agent_impl(&state.id_store, &state.identity_store, &state.mstore, ImportForAgentReq {
         agent_id: "agent-b".to_string(),
@@ -1274,7 +1256,7 @@ async fn export_then_import_carries_provider_and_model_through() {
         zip_base64: None,
         files: Some(files),
     }).await.unwrap();
-    let new_bundle_id = imported["bundle_id"].as_str().expect("import response must include bundle_id");
+    let new_bundle_id = imported.bundle_id.as_str();
     let new_bundle = state.id_store.bundle_get(new_bundle_id).unwrap().unwrap();
     assert_eq!(new_bundle.provider, "claude");
     assert_eq!(new_bundle.model, "anthropic");
@@ -1293,10 +1275,11 @@ async fn an_agent_scoped_export_takes_the_hint_from_the_agent_not_the_bundle() {
         format: String::new(),
     }).await.unwrap();
 
-    let manifest_file = exported["files"].as_array().unwrap().iter()
-        .find(|f| f["path"] == "bundle.json")
+    let exported_files = exported.files.unwrap();
+    let manifest_file = exported_files.iter()
+        .find(|f| f.path == "bundle.json")
         .expect("bundle.json must be present");
-    let manifest: serde_json::Value = serde_json::from_str(manifest_file["content"].as_str().unwrap()).unwrap();
+    let manifest: serde_json::Value = serde_json::from_str(&manifest_file.content).unwrap();
     // The bundle carries no harness; the export names the agent it came from.
     assert_eq!(manifest["suggestedFor"], serde_json::json!({ "provider": "claude", "vendor": "anthropic" }));
 }
@@ -1422,15 +1405,15 @@ mod with_history_tests {
         .await
         .unwrap();
 
-        assert_eq!(result["history_session_count"], 1);
-        let paths = unzip_paths(result["zip_base64"].as_str().unwrap());
+        assert_eq!(result.history_session_count, 1);
+        let paths = unzip_paths(&result.zip_base64);
         assert!(paths.iter().any(|p| p.ends_with("instructions/AGENTS.md")), "base bundle files must still be present: {paths:?}");
         assert!(paths.iter().any(|p| p.ends_with("history/mock/sess-1.jsonl")), "session must be included under history/: {paths:?}");
 
         // SPEC_INSTRUCTION_AND_MEMORY_PORTABILITY_2026_09_09.md §3.5: the
         // files above were in the archive but invisible to anything reading
         // components.* to learn what the archive holds.
-        let manifest = unzip_manifest(result["zip_base64"].as_str().unwrap());
+        let manifest = unzip_manifest(&result.zip_base64);
         assert_eq!(
             manifest["components"]["history"],
             json!(["history/mock/sess-1.jsonl"]),
@@ -1461,8 +1444,8 @@ mod with_history_tests {
         .await
         .unwrap();
 
-        assert_eq!(result["history_session_count"], 0);
-        let manifest = unzip_manifest(result["zip_base64"].as_str().unwrap());
+        assert_eq!(result.history_session_count, 0);
+        let manifest = unzip_manifest(&result.zip_base64);
         assert!(
             manifest["components"].get("history").is_none(),
             "no sessions must leave the history component absent: {}",
@@ -1490,8 +1473,8 @@ mod with_history_tests {
         .await
         .unwrap();
 
-        assert_eq!(result["history_session_count"], 0);
-        let paths = unzip_paths(result["zip_base64"].as_str().unwrap());
+        assert_eq!(result.history_session_count, 0);
+        let paths = unzip_paths(&result.zip_base64);
         assert!(!paths.iter().any(|p| p.contains("history/")), "no history/ entries when nothing is linked: {paths:?}");
     }
 
@@ -1529,10 +1512,10 @@ mod with_history_tests {
         .await
         .unwrap();
 
-        assert_eq!(result["history_session_count"], 0, "unreadable session must not count as included");
-        let warnings = result["warnings"].as_array().unwrap();
+        assert_eq!(result.history_session_count, 0, "unreadable session must not count as included");
+        let warnings = &result.warnings;
         assert!(
-            warnings.iter().any(|w| w.as_str().unwrap_or("").contains("failed to read session")),
+            warnings.iter().any(|w| w.contains("failed to read session")),
             "must warn about the unreadable session: {warnings:?}"
         );
     }
@@ -1579,12 +1562,12 @@ mod with_history_tests {
         .await
         .unwrap();
 
-        assert_eq!(result["history_session_count"], 0, "oversized session must not count as included");
-        let paths = unzip_paths(result["zip_base64"].as_str().unwrap());
+        assert_eq!(result.history_session_count, 0, "oversized session must not count as included");
+        let paths = unzip_paths(&result.zip_base64);
         assert!(!paths.iter().any(|p| p.contains("sess-huge")), "oversized session must not be in the zip: {paths:?}");
-        let warnings = result["warnings"].as_array().unwrap();
+        let warnings = &result.warnings;
         assert!(
-            warnings.iter().any(|w| w.as_str().unwrap_or("").contains("exceeds") && w.as_str().unwrap_or("").contains("sess-huge")),
+            warnings.iter().any(|w| w.contains("exceeds") && w.contains("sess-huge")),
             "must warn about the size limit: {warnings:?}"
         );
     }

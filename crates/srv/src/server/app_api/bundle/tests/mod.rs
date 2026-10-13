@@ -8,3 +8,4 @@
 
 mod import_preview_commit;
 mod export_import_for_agent;
+mod wire_shapes;
