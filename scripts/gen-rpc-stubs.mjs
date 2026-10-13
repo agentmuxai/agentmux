@@ -208,9 +208,10 @@ export function generatedOnlyProblems({ hand, indexSource, sources }) {
         errors.push("rpc-api/index.ts: RpcApi must be exactly `export const RpcApi = GeneratedApi;`");
     }
     for (const [path, text] of sources) {
+        // Any call, whatever names the command (a literal, a variable), and the streaming form too.
         text.split(/\r?\n/).forEach((line, i) => {
-            const m = /\.rpcCall\(\s*["'`]([^"'`]+)["'`]/.exec(line) ?? (/\.rpcCall\(\s*$/.test(line) ? /^\s*["'`]([^"'`]+)["'`]/.exec(text.split(/\r?\n/)[i + 1] ?? "") : null);
-            if (m) errors.push(`${path}:${i + 1}: calls "${m[1]}" with rpcCall directly; call its generated stub on RpcApi instead`);
+            const m = /\.(rpcCall|rpcStream)\s*(?:<[^>]*>)?\(/.exec(line.replace(/\/\/.*$/, ""));
+            if (m) errors.push(`${path}:${i + 1}: calls srv with ${m[1]} directly; call the command's generated stub on RpcApi instead`);
         });
     }
     return errors;

@@ -203,14 +203,21 @@ describe("generatedOnlyProblems", () => {
         expect(errors[1]).toMatch(/RpcApi must be exactly/);
     });
 
-    it("refuses a raw rpcCall, on one line or with the command on the next", () => {
+    it("refuses any raw rpcCall or rpcStream, whatever names the command", () => {
         const sources = [
             ["frontend/x.ts", 'void TabRpcClient.rpcCall("pane.open", { view: "settings" }, {});'],
             ["frontend/y.ts", "await TabRpcClient.rpcCall(\n    \"pane.moveTab\",\n    { block_id: b },\n);"],
+            ["frontend/z.ts", "const cmd = pick();\nawait client.rpcCall(cmd, data, opts);"],
+            ["frontend/s.ts", 'for await (const x of TabRpcClient.rpcStream<Foo>("tail", {}, {})) use(x);'],
+            // A mention in a comment isn't a call.
+            ["frontend/c.ts", "// we used to call client.rpcCall(...) here"],
         ];
+        const msg = (where, fn) => `${where}: calls srv with ${fn} directly; call the command's generated stub on RpcApi instead`;
         expect(generatedOnlyProblems({ ...ok, sources })).toEqual([
-            'frontend/x.ts:1: calls "pane.open" with rpcCall directly; call its generated stub on RpcApi instead',
-            'frontend/y.ts:1: calls "pane.moveTab" with rpcCall directly; call its generated stub on RpcApi instead',
+            msg("frontend/x.ts:1", "rpcCall"),
+            msg("frontend/y.ts:1", "rpcCall"),
+            msg("frontend/z.ts:2", "rpcCall"),
+            msg("frontend/s.ts:1", "rpcStream"),
         ]);
     });
 });
