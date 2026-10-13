@@ -251,8 +251,10 @@ pub struct CommandVarResponseData {
 }
 
 /// Matches Go's `TimeSeriesData`
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct TimeSeriesData {
+    #[ts(type = "number")]
     pub ts: i64,
     pub values: HashMap<String, f64>,
     /// Backend uptime in seconds, from a MONOTONIC clock (`sysinfo::uptime_secs`)
@@ -266,6 +268,7 @@ pub struct TimeSeriesData {
     /// wall-clock `ts`, which goes permanently negative after any backwards
     /// clock step. See `frontend/app/statusbar/backend-uptime.ts`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
     pub uptime_secs: Option<u64>,
 }
 

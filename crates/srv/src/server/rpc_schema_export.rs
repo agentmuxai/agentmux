@@ -24,3 +24,13 @@ async fn export_bindings_rpc_schema() {
     json.push('\n');
     std::fs::write(&out, json).unwrap_or_else(|e| panic!("writing {}: {e}", out.display()));
 }
+
+/// The typed broker events (`backend::mps_events`), to `frontend/types/rpc/event-schema.json`:
+/// the input of the generated `MuxEventPayloads` map (`scripts/gen-rpc-stubs.mjs`).
+#[test]
+fn export_bindings_event_schema() {
+    let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../frontend/types/rpc/event-schema.json");
+    let mut json = serde_json::to_string_pretty(&crate::backend::mps_events::schema_json()).unwrap();
+    json.push('\n');
+    std::fs::write(&out, json).unwrap_or_else(|e| panic!("writing {}: {e}", out.display()));
+}

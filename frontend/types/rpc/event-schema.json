@@ -1,0 +1,20 @@
+[
+  {
+    "event": "controllerstatus",
+    "payloadTs": {
+      "imports": [
+        "BlockControllerRuntimeStatus"
+      ],
+      "name": "BlockControllerRuntimeStatus"
+    }
+  },
+  {
+    "event": "sysinfo",
+    "payloadTs": {
+      "imports": [
+        "TimeSeriesData"
+      ],
+      "name": "TimeSeriesData"
+    }
+  }
+]
