@@ -1283,7 +1283,8 @@ pub async fn run_sysinfo_loop(broker: Arc<Broker>, config_watcher: Arc<ConfigSta
                 block_values.insert("cpu".to_string(), total_cpu);
                 block_values.insert("mem".to_string(), total_mem as f64);
                 block_values.insert("pids".to_string(), live_count as f64);
-                let peak = peaks.observe(block_id, root_pid.as_u32(), total_mem);
+                let started = sys.process(root_pid).map_or(0, |p| p.start_time());
+                let peak = peaks.observe(block_id, (root_pid.as_u32(), started), total_mem);
                 block_values.insert("mem:peak".to_string(), peak as f64);
 
                 let block_ts = TimeSeriesData {

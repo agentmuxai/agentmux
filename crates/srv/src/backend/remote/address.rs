@@ -74,12 +74,15 @@ async fn ssh(dest: &super::conn::SshDest) -> RemoteAddress {
         return RemoteAddress::default();
     };
     let mut cmd = tokio::process::Command::new(binary);
+    // Not ours to configure, and it needs nothing of AgentMux's environment.
+    crate::backend::pane_env::sanitize_external_command(&mut cmd);
     cmd.arg("-G");
     if let Some(port) = dest.port {
         cmd.args(["-p", &port.to_string()]);
     }
     // `--` so a destination can never be read as an option.
-    cmd.args(["--", &dest.destination]).stdin(std::process::Stdio::null());
+    // Killed if it outlives the timeout below, rather than left running.
+    cmd.args(["--", &dest.destination]).stdin(std::process::Stdio::null()).kill_on_drop(true);
     #[cfg(windows)]
     {
         use agentmux_common::win32::NoWindow;
@@ -130,8 +133,10 @@ async fn wsl_address(distro: &str) -> Option<String> {
     {
         use agentmux_common::win32::NoWindow;
         let mut cmd = tokio::process::Command::new("wsl.exe");
+        crate::backend::pane_env::sanitize_external_command(&mut cmd);
         cmd.args(["-d", distro, "--exec", "cat", "/proc/net/route", "/proc/net/fib_trie"])
             .stdin(std::process::Stdio::null())
+            .kill_on_drop(true)
             .no_window();
         match tokio::time::timeout(STEP_TIMEOUT, cmd.output()).await {
             Ok(Ok(out)) if out.status.success() => linux_address(&String::from_utf8_lossy(&out.stdout)),

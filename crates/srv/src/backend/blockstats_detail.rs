@@ -87,15 +87,20 @@ fn display_name(name: &str) -> &str {
 /// watching its shell. A new shell in the same pane (a restart) starts over.
 #[derive(Debug, Default)]
 pub struct Peaks {
-    by_block: HashMap<String, (u32, u64)>,
+    by_block: HashMap<String, (Shell, u64)>,
 }
 
+/// Which shell a peak is for: its PID and start time, so a restarted shell
+/// that got the old one's PID back is still a new shell.
+pub type Shell = (u32, u64);
+
 impl Peaks {
-    /// Record the badge's `mem` for `block_id`; its peak so far.
-    pub fn observe(&mut self, block_id: &str, root_pid: u32, mem: u64) -> u64 {
-        let entry = self.by_block.entry(block_id.to_string()).or_insert((root_pid, mem));
-        if entry.0 != root_pid {
-            *entry = (root_pid, mem);
+    /// Record the badge's `mem` for `block_id`, whose shell is `shell`; its
+    /// peak so far.
+    pub fn observe(&mut self, block_id: &str, shell: Shell, mem: u64) -> u64 {
+        let entry = self.by_block.entry(block_id.to_string()).or_insert((shell, mem));
+        if entry.0 != shell {
+            *entry = (shell, mem);
         }
         entry.1 = entry.1.max(mem);
         entry.1
@@ -186,11 +191,12 @@ mod tests {
     #[test]
     fn a_peak_holds_until_the_shell_changes() {
         let mut peaks = Peaks::default();
-        assert_eq!(peaks.observe("b", 10, 100), 100);
-        assert_eq!(peaks.observe("b", 10, 180), 180);
-        assert_eq!(peaks.observe("b", 10, 90), 180, "a trim doesn't lower the peak");
-        assert_eq!(peaks.observe("b", 11, 50), 50, "a restarted shell starts over");
+        assert_eq!(peaks.observe("b", (10, 1_000), 100), 100);
+        assert_eq!(peaks.observe("b", (10, 1_000), 180), 180);
+        assert_eq!(peaks.observe("b", (10, 1_000), 90), 180, "a trim doesn't lower the peak");
+        assert_eq!(peaks.observe("b", (11, 2_000), 50), 50, "a restarted shell starts over");
+        assert_eq!(peaks.observe("b", (11, 3_000), 40), 40, "even with the old shell's PID");
         peaks.retain(|id| id != "b");
-        assert_eq!(peaks.observe("b", 11, 40), 40, "a forgotten pane starts over");
+        assert_eq!(peaks.observe("b", (11, 3_000), 30), 30, "a forgotten pane starts over");
     }
 }
