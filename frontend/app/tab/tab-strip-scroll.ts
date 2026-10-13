@@ -4,10 +4,10 @@
 // Keeps the active tab visible in a scrolling tab strip
 // (docs/specs/SPEC_TAB_BAR_DRAG_GUTTER_2026_10_04.md §3).
 //
-// The last tab scrolls the strip to its very end, so the blank drag square
-// after it (`.tab-bar-fill`'s min-width) shows too — a new tab on a full
-// strip would otherwise leave the square just off-screen. Any other tab
-// scrolls the least amount that brings it fully into view.
+// The last tab scrolls the strip to its very end, so it shows whole, with
+// its separator after it. Any other tab scrolls the least amount that brings
+// it fully into view. (The window's drag square is the fixed .tab-bar-grip
+// outside the strip, always in view.)
 //
 // Sets `scrollLeft` on the strip only, never `scrollIntoView`: that also
 // scrolls every scrollable ancestor, which is how the whole app once got

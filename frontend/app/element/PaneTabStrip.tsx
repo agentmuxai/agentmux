@@ -44,7 +44,7 @@ import "./PaneTabStrip.scss";
 // window-tab tags, so no existing target mistakes a pill for either.
 // SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §3.1.
 import { asDocTabDragData, docTabItemType, paneTabItemType, type DocTabDragData } from "@/app/drag/drag-types";
-import { GripDots } from "./GripDots";
+import { createScrollEdges } from "./scroll-edges";
 
 // Matches the other reveal-gate/cross-fade durations added alongside this
 // one in SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md §2.4.
@@ -269,22 +269,6 @@ export interface PaneTabStripProps<T> {
      *  terminal strips use, so labelling one pane can't widen the others. */
     addLabel?: string;
 
-    /** Opt in to the pane's grip: a 24px slot after the "+" holding the
-     *  grip button (drag it to move the pane, click it for the pane menu).
-     *  It keeps a place to grab the whole pane even when the tabs fill the
-     *  header row. Deliberately NOT a drag target or handler of its own: it
-     *  stays part of the header's ordinary "drag the whole pane" region
-     *  (see PaneHeaderTabStrip.tsx). Only meaningful for a strip used as a
-     *  Pane's own header (PaneHeaderTabStrip); other consumers (the editor's
-     *  file-tab strip, the agent History strip) render inside a Pane's
-     *  content, not its header, and leave this off.
-     *  SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §3.6,
-     *  SPEC_DRAG_SPACE_AFFORDANCE_2026_10_13.md §5.2. */
-    reserveDragHandle?: boolean;
-    /** The pane can't be dragged right now (magnified or ephemeral: the
-     *  header's `canDrag` vetoes it). The grip then offers only the menu:
-     *  no grab cursor, and its label and tooltip drop "move". */
-    dragDisabled?: boolean;
 
     /** Opt in to same-pane drag-reorder (Phase 3 of
      *  SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §3.2): `(blockId, targetId,
@@ -344,30 +328,6 @@ export interface PaneTabStripProps<T> {
      *  `paneKey`, `onReceiveForeignTab` and `sourceTabId`, which are for pane
      *  tabs. */
     docDrag?: DocTabDrag;
-}
-
-
-/** Screen position of the last press on a grip. A floating pane moves its
- *  window under the cursor, so the release can land on the same grip and the
- *  browser still fires `click`; the screen position is what moved. */
-let gripPress: { x: number; y: number } | null = null;
-
-/** A click on the grip after it was dragged more than a few pixels is the end
- *  of a move, not a request for the menu. */
-function gripClickWasDrag(e: MouseEvent): boolean {
-    const start = gripPress;
-    gripPress = null;
-    return !!start && Math.abs(e.screenX - start.x) + Math.abs(e.screenY - start.y) > 4;
-}
-
-/** Opens the pane header's own context menu (the header's `contextmenu`
- *  handler), anchored at `el`: the grip's click and keyboard route to the same
- *  actions a right-click gives. */
-function openPaneMenuFrom(el: HTMLElement): void {
-    const r = el.getBoundingClientRect();
-    el.dispatchEvent(
-        new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: r.left, clientY: r.bottom, button: 2 }),
-    );
 }
 
 export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
@@ -561,10 +521,17 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
         onCleanup(() => el.removeEventListener("wheel", handleWheel));
     });
 
+    // Edge fades while the tabs overflow (scroll-edge-fade, PaneTabStrip.scss).
+    const edges = createScrollEdges(() => stripRef);
+
     return (
         <div
             class="pane-tab-strip"
-            classList={{ "pane-tab-strip--foreign-hover": foreignHover() && highlightStrip() }}
+            classList={{
+                "pane-tab-strip--foreign-hover": foreignHover() && highlightStrip(),
+                "has-more-left": edges.moreLeft(),
+                "has-more-right": edges.moreRight(),
+            }}
             ref={(el) => { stripRef = el; }}
             // Double-click inside the strip should never bubble up and
             // maximize the pane — matches the icon-toggle pattern from
@@ -630,34 +597,6 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
                             </Show>
                         </button>
                     </Tooltip>
-                </Show>
-                <Show when={props.reserveDragHandle}>
-                    <div class="pane-tab-strip-drag-handle">
-                        {/* The pane's grip: drag it (the header's own drag covers
-                            it) to move the pane; click it, or Enter/Space, for the
-                            pane menu (SPEC_DRAG_SPACE_AFFORDANCE_2026_10_13 §5.2). */}
-                        <div
-                            class="pane-tab-strip-grip"
-                            classList={{ "pane-tab-strip-grip--no-drag": !!props.dragDisabled }}
-                            role="button"
-                            tabIndex={0}
-                            aria-label={props.dragDisabled ? "Pane actions" : "Move pane / pane actions"}
-                            aria-haspopup="menu"
-                            title={props.dragDisabled ? "Pane actions" : "Drag to move this pane. Click for pane actions."}
-                            onPointerDown={(e) => { gripPress = { x: e.screenX, y: e.screenY }; }}
-                            onClick={(e) => {
-                                if (gripClickWasDrag(e)) return;
-                                openPaneMenuFrom(e.currentTarget);
-                            }}
-                            onKeyDown={(e) => {
-                                if (e.key !== "Enter" && e.key !== " ") return;
-                                e.preventDefault();
-                                openPaneMenuFrom(e.currentTarget);
-                            }}
-                        >
-                            <GripDots />
-                        </div>
-                    </div>
                 </Show>
             </div>
         </div>

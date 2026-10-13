@@ -1,6 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+@use "../mixins.scss";
 @use "../drop-feedback.scss" as drop;
 
 // Shared tab-strip chrome, promoted from the editor's original
@@ -136,6 +137,9 @@
     &::-webkit-scrollbar {
         display: none; // Chrome/Safari/CEF
     }
+
+    // Edge fades while the tabs overflow (createScrollEdges, PaneTabStrip.tsx).
+    @include mixins.scroll-edge-fade(28px);
 
     // Cross-pane drop-to-append hover (SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md
     // §3.4) — a pill dragged from a DIFFERENT pane is hovering this strip,
@@ -571,54 +575,6 @@
 .pane-tab-strip-add-label {
     font-size: 11px;
     white-space: nowrap;
-}
-
-// The pane's grip slot (SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §3.6,
-// SPEC_DRAG_SPACE_AFFORDANCE_2026_10_13.md §5.2): the true last child of
-// .pane-tab-strip-inner, after the "+", exactly the grip's 24px target
-// (WCAG 2.5.8), overflowing or not. It carries no draggable/drop-target wiring
-// of its own (PaneTabStrip.tsx): it stays part of whichever "drag the whole
-// pane" region already covers the header it lives in.
-.pane-tab-strip-drag-handle {
-    flex: 0 0 24px;
-    width: 24px;
-    display: flex;
-    align-items: center;
-}
-
-// The pane's grip: dim at rest, full on header hover or focus, grab cursor.
-.pane-tab-strip-grip {
-    flex: 0 0 24px;
-    height: 24px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 12px;
-    color: var(--secondary-text-color);
-    opacity: 0.35;
-    cursor: grab;
-    transition: opacity 120ms ease;
-
-    &:focus-visible {
-        opacity: 1;
-        outline: 1px solid var(--accent-color);
-        outline-offset: -1px;
-    }
-
-    [data-role="block-header"]:hover &,
-    [data-role="block-header"]:focus-within & {
-        opacity: 1;
-    }
-
-    &:active {
-        cursor: grabbing;
-    }
-
-    // Magnified or ephemeral: the pane can't move, so no grab cursor.
-    &--no-drag,
-    &--no-drag:active {
-        cursor: default;
-    }
 }
 
 // The "+" glyph's own line box (centered by the button's flex align-items/
