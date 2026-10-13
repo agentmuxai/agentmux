@@ -28,7 +28,7 @@
 export const WEDGE_TIMEOUT_MS = 5000;
 
 /** Don't thrash a pane that keeps failing — recovery is disruptive. */
-export const WEDGE_RECOVERY_COOLDOWN_MS = 30000;
+const WEDGE_RECOVERY_COOLDOWN_MS = 30000;
 
 export interface WedgeState {
     /** Writes handed to xterm whose callback has not fired. */

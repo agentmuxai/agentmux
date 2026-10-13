@@ -219,4 +219,13 @@ impl ShellController {
     pub(super) fn pty_size_from_rt_opts(rt_opts: &Option<serde_json::Value>) -> PtySize {
         pty_size_from_rt_opts(rt_opts)
     }
+
+    /// The size `start()` opens the PTY at, recorded for a paired device that
+    /// watches the terminal (`blockcontroller::term_size`); resizes are
+    /// recorded as they are sent (`blockcontroller::send_input`).
+    pub(super) fn spawn_pty_size(&self, rt_opts: &Option<serde_json::Value>) -> PtySize {
+        let size = pty_size_from_rt_opts(rt_opts);
+        crate::backend::blockcontroller::term_size::record(&self.block_id, size.rows, size.cols);
+        size
+    }
 }

@@ -115,7 +115,7 @@ Same-account only, as the WAN signing is. A sender on another account is never l
 
 - **What leaves the machine.** Names only crosses to LAN and cloud peers in Phases 1 to 3. LAN peers already get names; the cloud tier newly sends agent names off the machine to the account's relay. Say so in the settings text for the feature.
 - **`status`** (running or idle) is activity metadata, not content. **`line`** is content: a paraphrase of what the user asked. A LAN peer holding the `lan_key` is only network-claimed, so a `line` on that route is readable by anything on the LAN that learns the key. Default off; if enabled it should be per-tier and opt-in.
-- **Found on the way, not part of this spec's scope:** the `laninstances` WS event serialises each peer's full `LanInstance` to the frontend, `auth_key` (the peer's `lan_key`) included, although the TypeScript type omits it. It goes to local clients only, but the frontend does not need it. It should be dropped from the event before the Swarm starts consuming peer data.
+- **Found on the way, not part of this spec's scope:** the `laninstances` WS event serialises each peer's full `LanInstance` to the frontend, `auth_key` (the peer's `lan_key`) included, although the TypeScript type omits it. It goes to local clients only, but the frontend does not need it. It should be dropped from the event before the Swarm starts consuming peer data. **Done 2026-10-13:** `auth_key` is no longer serialized at all, which also takes it out of `/api/lan-instances` and of `/agentmux/discovery`'s `lan` list, a route container agents may call.
 - Remote rows are display only in Phase 1, and carry no credentials to the frontend.
 
 ## 7. Not in scope

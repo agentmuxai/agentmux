@@ -49,7 +49,7 @@ import type { ProviderDefinition } from "./providers";
  * `cmd:args` + forcerestart so the change applies immediately. May throw on RPC
  * failure — callers decide how to surface it.
  */
-export async function applyRuntimeChange(
+async function applyRuntimeChange(
     blockId: string,
     provider: ProviderDefinition | undefined,
     updated: AgentRuntimeConfig,

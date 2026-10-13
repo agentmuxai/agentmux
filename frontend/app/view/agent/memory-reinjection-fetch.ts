@@ -52,7 +52,7 @@ export async function fetchGlobalMemoryEntries(client: RpcClient, blockId?: stri
  * Personal (native) memory entries for one agent — every non-index file,
  * full body content via a follow-up read per file.
  */
-export async function fetchPersonalMemoryEntries(client: RpcClient, agentId: string): Promise<MemoryEntryInput[]> {
+async function fetchPersonalMemoryEntries(client: RpcClient, agentId: string): Promise<MemoryEntryInput[]> {
     const { files } = await NativeMemoryApi.NativeMemoryListCommand(client, { agent_id: agentId });
     const contentFiles = files.filter((f) => !f.is_index);
 

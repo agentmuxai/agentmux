@@ -119,7 +119,7 @@ export function isTypingFocus(el: Element | null = document.activeElement): bool
 }
 
 /** Focus is in a terminal (its hidden textarea, or anywhere inside xterm). */
-export function isTerminalFocus(el: Element | null = document.activeElement): boolean {
+function isTerminalFocus(el: Element | null = document.activeElement): boolean {
     return el instanceof HTMLElement && (el.classList.contains("xterm-helper-textarea") || el.closest(".xterm") != null);
 }
 
@@ -131,7 +131,7 @@ function focusedViewType(): string {
 setKeyContextProvider(() => currentKeyContext());
 
 /** Where focus is, for the shortcut table's `when` clauses. */
-export function currentKeyContext(): KeyContext {
+function currentKeyContext(): KeyContext {
     const el = document.activeElement;
     const viewType = focusedViewType();
     return {
@@ -161,7 +161,7 @@ export function resolveKeyEvent(muxEvent: MuxKeyboardEvent, ctx: KeyContext): Re
 }
 
 /** Runs a command's key handler; false when it didn't apply. */
-export function runKeyCommand(command: string, muxEvent: MuxKeyboardEvent): boolean {
+function runKeyCommand(command: string, muxEvent: MuxKeyboardEvent): boolean {
     const handler = keyCommands.get(command);
     if (handler) return handler(muxEvent) === true;
     return commandRegistry.run(command);

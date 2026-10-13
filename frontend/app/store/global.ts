@@ -433,15 +433,7 @@ export {
 // Window identity — moved to window-identity.ts; re-exported below for
 // backward-compat (97 files import from this module). Also imported above
 // (see top of file) for use in the `atoms` object and initGlobalSignals.
-export {
-    staticTabId,
-    client,
-    muxWindow,
-    workspace,
-    tabAtom,
-    activeTabId,
-    uiContext,
-};
+export { staticTabId, workspace };
 
 // Block creation / layout actions — moved to block-layout-actions.ts;
 // re-exported below for backward-compat (97 files import from this module).
@@ -458,7 +450,6 @@ export {
     registerBlockComponentModel,
     unregisterBlockComponentModel,
     getBlockComponentModel,
-    getAllBlockComponentModels,
     getFocusedBlockId,
     refocusNode,
     openOrFocusPaneByView,
@@ -472,7 +463,6 @@ export { fetchMuxFile } from "./mux-file";
 // backward-compat (97 files import from this module). Also imported above
 // (see top of file) for use in the `atoms` object.
 export {
-    allConnStatus,
     loadConnStatus,
     subscribeToConnEvents,
     getConnStatusAtom,
@@ -483,10 +473,7 @@ export {
 // Also imported above (see top of file) for use in the `atoms` object.
 export {
     flashErrors,
-    notifications,
     setNotifications,
-    notificationPopoverMode,
-    setNotificationPopoverMode,
     pushFlashError,
     pushNotification,
     removeNotificationById,

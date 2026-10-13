@@ -37,7 +37,7 @@ import { GlobalBundleViewModel, utf8Bytes, type GlobalMemoryView } from "./globa
 import "./global-bundle.scss";
 
 /** "size · updated" for an entry tile. */
-export function entryMetaLabel(entry: Pick<Bundle, "instructions" | "updated_at">): string {
+function entryMetaLabel(entry: Pick<Bundle, "instructions" | "updated_at">): string {
     return [formatFileSize(utf8Bytes(entry.instructions ?? "")), formatFileAge(entry.updated_at)]
         .filter(Boolean)
         .join(" · ");

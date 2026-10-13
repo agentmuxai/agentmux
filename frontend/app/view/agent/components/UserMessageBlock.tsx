@@ -67,7 +67,7 @@ interface UserMessageBlockProps {
 }
 
 /** "Broadcast · 7 agents", or just "Broadcast" when the count is unknown or 1. */
-export function broadcastNoteLabel(broadcast: { recipients?: number }): string {
+function broadcastNoteLabel(broadcast: { recipients?: number }): string {
     const n = broadcast.recipients;
     return n != null && n > 1 ? `Broadcast · ${n} agents` : "Broadcast";
 }

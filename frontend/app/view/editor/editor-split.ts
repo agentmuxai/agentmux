@@ -11,7 +11,7 @@ import { isSshConnection } from "@/app/view/term/ssh-connection";
 /** The editor's per-pane settings a split carries across. Its documents
  *  (`doctabs`, `file`, `editor:line`, `editor:pending_open_files`,
  *  `editor:scratch`) are not among them. */
-export const EDITOR_SPLIT_SETTINGS = [
+const EDITOR_SPLIT_SETTINGS = [
     "editor:tree_width",
     "editor:tree_expanded",
     "editor:show_hidden",

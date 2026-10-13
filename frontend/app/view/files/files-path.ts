@@ -17,7 +17,7 @@ export interface Crumb {
 const isWindowsLike = (path: string): boolean => /^[A-Za-z]:([\\/]|$)/.test(path) || /^(\\\\|\/\/)[^\\/]/.test(path);
 
 /** The separator a path uses: `\` for a Windows drive or UNC path, else `/`. */
-export function sepOf(path: string): string {
+function sepOf(path: string): string {
     return isWindowsLike(path) && !path.startsWith("//") ? "\\" : "/";
 }
 

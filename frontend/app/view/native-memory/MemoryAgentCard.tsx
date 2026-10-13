@@ -41,7 +41,7 @@ interface MemoryAgentCardProps {
 
 /** The count line's text — pulled out so the render and its aria-label can't
  *  drift, and so the four-state mapping is unit-testable on its own. */
-export function memoryCountLabel(count: MemoryCountState): string {
+function memoryCountLabel(count: MemoryCountState): string {
     switch (count.kind) {
         case "loading":
             return "Loading…";

@@ -1,6 +1,6 @@
 # Report: forked ("iterative") agents — a fork showing up as a pane tab, and how isolated forks really are
 
-**Status:** active — F2 and F3 are fixed in the change that adds this report (§3 items 2 and 3, as built in §4); F1, F4 and F5 follow in their own changes.
+**Status:** implemented — F2 and F3 are fixed (§4, #4744), F4 (§5, #4746), F1 (#4747) and F5 (#4748); F6 is open.
 **Date:** 2026-10-12 · **Author:** agent2
 **Trigger:** the repo owner: *"I load an agent "Loap #3" in Tab 4, and somehow Loap from Tab 1 became a pane tab inside of Loap #3's pane. Meanwhile, if I click between Loap and Loap #3 in the pane tabs, it switches window tabs to get to the respective panes. lets make sure our iterative agents have solid support and are isolated."*
 **Written against:** `main` @ `9088493f5` (v0.59.21). The live evidence is from a local v0.59.20 build's own logs on 2026-10-12, summarized here without excerpts.
@@ -84,3 +84,11 @@ Recommendations 2 and 3 are the smallest changes with the largest effect, and th
 - **One rule turns a name into a valid agent id:** `agentmux_common::slug::agent_route_name`, a valid id unchanged, otherwise `definition_slug`'s rule without lowercasing (`Loap #3` → `Loap-3`). The registry's display binding (`register_agent_full`), the HTTP register and unregister, a message's target and srv's rowless fallback all use it; `validate_agent_id` delegates to the same module's `is_agent_id`.
 
 **Visible change.** An agent's `AGENTMUX_AGENT_ID` had been its display name (`Agent2`) only because F2 wiped the launch's slug at the first pane mount. With F2 fixed it stays the slug (`agent2`), so gh-agent signs PR titles and commits in the slug's casing (`agent2@narko`). The PR-title check accepts either casing. `SPEC_PR_TITLE_AGENT_HOST_PREFIX_2026_08_22.md`'s natural casing for titles conflicts with M4d's exact-slug signing; signing wins here, and a display-cased signature would come from `AGENTMUX_AGENT_DISPLAY` in gh-agent, not from changing the id.
+
+## 5. As built: F4
+
+- **A fork's slug is its lineage root's slug and its own label**, never its source's slug: `agentmux_common::slug::fork_slug`, in the rules module with the other naming rules. `Loap #3` is `loap-3` whether forked from Loap or from Loap #2; a label not starting with the root's name is prefixed once (`loap-experiment`).
+- **The automatic number is one past the highest "#N" in the lineage**, not a count, and a name some other agent already has is skipped (`suggest_fork_name`, `template.rs`). A typed label another user agent already has is refused, with the same `name_taken` check create-from-template uses.
+- **A collision suffix keeps a slug a valid agent id** (`resolve_slug_collision`, `name_keys.rs`): the base is trimmed so `-N` fits within 64 characters.
+
+Existing slugs are not rewritten: a slug names the agent's GitHub config directory, its MCP config and its signing keys, so renaming one moves them. The change applies to forks made from now on.

@@ -119,7 +119,7 @@ export interface WorkingIndicatorInput {
  * re-derivations of this predicate is exactly how the row and the bar came to
  * disagree in the first place (§3.1); do not inline a second one.
  */
-export function turnHeldOnlyByBackgroundWork(input: {
+function turnHeldOnlyByBackgroundWork(input: {
     turnPhase: TurnPhase;
     hasAttachedBackgroundWork: boolean;
     hasBlockingForegroundToolCall: boolean;

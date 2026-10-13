@@ -35,7 +35,7 @@ const cache = new Map<string, CodeToken[][]>();
 
 /** Tokens for each line of `code`, or null for plain text, too much text, or a
  *  grammar Shiki can't load. */
-export async function tokenize(code: string, lang: string | undefined): Promise<CodeToken[][] | null> {
+async function tokenize(code: string, lang: string | undefined): Promise<CodeToken[][] | null> {
     if (!code || !lang || lang === "text" || code.length > MAX_HIGHLIGHT_CHARS) return null;
     const key = `${lang}\u0000${code}`;
     const hit = cache.get(key);

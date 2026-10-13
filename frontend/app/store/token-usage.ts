@@ -316,24 +316,6 @@ export interface ServiceRow {
     cacheRead?: number;
 }
 
-export function getBreakdown(): ServiceRow[] {
-    const rows: ServiceRow[] = Object.entries(state.byService).map(([id, u]) => ({
-        id,
-        input: u.input,
-        output: u.output,
-        freshInput: u.freshInput,
-        cacheCreation: u.cacheCreation,
-        cacheRead: u.cacheRead,
-    }));
-    rows.sort((a, b) => {
-        const aTotal = a.input + a.output;
-        const bTotal = b.input + b.output;
-        if (bTotal !== aTotal) return bTotal - aTotal;
-        return a.id.localeCompare(b.id);
-    });
-    return rows;
-}
-
 /**
  * Per-agent breakdown, sorted by cost descending (falls back to token
  * total when cost is 0/unknown for every row — some providers never

@@ -50,7 +50,7 @@ export interface MemoryDraftOptions<T> {
 
 /** The server's refusal marker — see check_memory_base_sha256
  *  (native_memory_handlers.rs) and StoreError::Conflict. */
-export function isConflictError(e: unknown): boolean {
+function isConflictError(e: unknown): boolean {
     const msg = e instanceof Error ? e.message : String(e ?? "");
     return msg.includes("conflict:");
 }

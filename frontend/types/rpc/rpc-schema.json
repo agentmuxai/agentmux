@@ -1,0 +1,5003 @@
+[
+  {
+    "command": "account.oauth.cancel",
+    "request": "agentmux_srv::server::agent_handlers::identity::OAuthSessionReq",
+    "requestName": "OAuthSessionReq",
+    "requestTs": {
+      "imports": [
+        "OAuthSessionReq"
+      ],
+      "name": "OAuthSessionReq"
+    },
+    "response": "agentmux_srv::backend::rpc_types::identity::AccountOAuthCancelResult",
+    "responseName": "AccountOAuthCancelResult",
+    "responseTs": {
+      "imports": [
+        "AccountOAuthCancelResult"
+      ],
+      "name": "AccountOAuthCancelResult"
+    }
+  },
+  {
+    "command": "agent:memory:adoption_list",
+    "request": "agentmux_srv::backend::rpc_types::native_memory::CommandNativeMemoryAdoptionListData",
+    "requestName": "CommandNativeMemoryAdoptionListData",
+    "requestTs": {
+      "imports": [
+        "CommandNativeMemoryAdoptionListData"
+      ],
+      "name": "CommandNativeMemoryAdoptionListData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::native_memory::NativeMemoryAdoptionListResult",
+    "responseName": "NativeMemoryAdoptionListResult",
+    "responseTs": {
+      "imports": [
+        "NativeMemoryAdoptionListResult"
+      ],
+      "name": "NativeMemoryAdoptionListResult"
+    }
+  },
+  {
+    "command": "agent:memory:claims",
+    "request": "agentmux_srv::backend::rpc_types::native_memory::CommandNativeMemoryClaimsData",
+    "requestName": "CommandNativeMemoryClaimsData",
+    "requestTs": {
+      "imports": [
+        "CommandNativeMemoryClaimsData"
+      ],
+      "name": "CommandNativeMemoryClaimsData"
+    },
+    "response": "agentmux_srv::backend::memory_release::ClaimList",
+    "responseName": "ClaimList",
+    "responseTs": {
+      "imports": [
+        "NativeMemoryClaimList"
+      ],
+      "name": "NativeMemoryClaimList"
+    }
+  },
+  {
+    "command": "agent:memory:diff",
+    "request": "agentmux_srv::backend::rpc_types::native_memory::CommandNativeMemoryDiffData",
+    "requestName": "CommandNativeMemoryDiffData",
+    "requestTs": {
+      "imports": [
+        "CommandNativeMemoryDiffData"
+      ],
+      "name": "CommandNativeMemoryDiffData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::native_memory::NativeMemoryDiffResult",
+    "responseName": "NativeMemoryDiffResult",
+    "responseTs": {
+      "imports": [
+        "NativeMemoryDiffResult"
+      ],
+      "name": "NativeMemoryDiffResult"
+    }
+  },
+  {
+    "command": "agent:memory:history",
+    "request": "agentmux_srv::backend::rpc_types::native_memory::CommandNativeMemoryHistoryData",
+    "requestName": "CommandNativeMemoryHistoryData",
+    "requestTs": {
+      "imports": [
+        "CommandNativeMemoryHistoryData"
+      ],
+      "name": "CommandNativeMemoryHistoryData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::native_memory::NativeMemoryHistoryResult",
+    "responseName": "NativeMemoryHistoryResult",
+    "responseTs": {
+      "imports": [
+        "NativeMemoryHistoryResult"
+      ],
+      "name": "NativeMemoryHistoryResult"
+    }
+  },
+  {
+    "command": "agent:memory:list",
+    "request": "agentmux_srv::backend::rpc_types::native_memory::CommandNativeMemoryListData",
+    "requestName": "CommandNativeMemoryListData",
+    "requestTs": {
+      "imports": [
+        "CommandNativeMemoryListData"
+      ],
+      "name": "CommandNativeMemoryListData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::native_memory::NativeMemoryListResult",
+    "responseName": "NativeMemoryListResult",
+    "responseTs": {
+      "imports": [
+        "NativeMemoryListResult"
+      ],
+      "name": "NativeMemoryListResult"
+    }
+  },
+  {
+    "command": "agent:memory:read_file",
+    "request": "agentmux_srv::backend::rpc_types::native_memory::CommandNativeMemoryReadFileData",
+    "requestName": "CommandNativeMemoryReadFileData",
+    "requestTs": {
+      "imports": [
+        "CommandNativeMemoryReadFileData"
+      ],
+      "name": "CommandNativeMemoryReadFileData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::native_memory::NativeMemoryReadFileResult",
+    "responseName": "NativeMemoryReadFileResult",
+    "responseTs": {
+      "imports": [
+        "NativeMemoryReadFileResult"
+      ],
+      "name": "NativeMemoryReadFileResult"
+    }
+  },
+  {
+    "command": "agent:memory:revert",
+    "request": "agentmux_srv::backend::rpc_types::native_memory::CommandNativeMemoryRevertData",
+    "requestName": "CommandNativeMemoryRevertData",
+    "requestTs": {
+      "imports": [
+        "CommandNativeMemoryRevertData"
+      ],
+      "name": "CommandNativeMemoryRevertData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::native_memory::NativeMemoryRevertResult",
+    "responseName": "NativeMemoryRevertResult",
+    "responseTs": {
+      "imports": [
+        "NativeMemoryRevertResult"
+      ],
+      "name": "NativeMemoryRevertResult"
+    }
+  },
+  {
+    "command": "agent:memory:write_file",
+    "request": "agentmux_srv::backend::rpc_types::native_memory::CommandNativeMemoryWriteFileData",
+    "requestName": "CommandNativeMemoryWriteFileData",
+    "requestTs": {
+      "imports": [
+        "CommandNativeMemoryWriteFileData"
+      ],
+      "name": "CommandNativeMemoryWriteFileData"
+    },
+    "response": "()",
+    "responseName": "()",
+    "responseTs": {
+      "imports": [],
+      "name": "null"
+    }
+  },
+  {
+    "command": "agent:session:append_output",
+    "request": "agentmux_srv::backend::rpc_types::session::CommandAgentSessionAppendOutputData",
+    "requestName": "CommandAgentSessionAppendOutputData",
+    "requestTs": {
+      "imports": [
+        "CommandAgentSessionAppendOutputData"
+      ],
+      "name": "CommandAgentSessionAppendOutputData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::session::AgentSessionAppendOutputResult",
+    "responseName": "AgentSessionAppendOutputResult",
+    "responseTs": {
+      "imports": [
+        "AgentSessionAppendOutputResult"
+      ],
+      "name": "AgentSessionAppendOutputResult"
+    }
+  },
+  {
+    "command": "agent:session:archive",
+    "request": "agentmux_srv::backend::rpc_types::session::CommandAgentSessionArchiveData",
+    "requestName": "CommandAgentSessionArchiveData",
+    "requestTs": {
+      "imports": [
+        "CommandAgentSessionArchiveData"
+      ],
+      "name": "CommandAgentSessionArchiveData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::session::AgentSessionArchiveResult",
+    "responseName": "AgentSessionArchiveResult",
+    "responseTs": {
+      "imports": [
+        "AgentSessionArchiveResult"
+      ],
+      "name": "AgentSessionArchiveResult"
+    }
+  },
+  {
+    "command": "agent:session:list_archives",
+    "request": "agentmux_srv::backend::rpc_types::session::CommandAgentSessionListArchivesData",
+    "requestName": "CommandAgentSessionListArchivesData",
+    "requestTs": {
+      "imports": [
+        "CommandAgentSessionListArchivesData"
+      ],
+      "name": "CommandAgentSessionListArchivesData"
+    },
+    "response": "alloc::vec::Vec<agentmux_srv::backend::rpc_types::session::AgentArchiveRow>",
+    "responseName": "alloc::vec::Vec<agentmux_srv::backend::rpc_types::session::AgentArchiveRow>",
+    "responseTs": {
+      "imports": [
+        "AgentArchiveRow"
+      ],
+      "name": "Array<AgentArchiveRow>"
+    }
+  },
+  {
+    "command": "agent:session:read",
+    "request": "agentmux_srv::backend::rpc_types::session::CommandAgentSessionReadData",
+    "requestName": "CommandAgentSessionReadData",
+    "requestTs": {
+      "imports": [
+        "CommandAgentSessionReadData"
+      ],
+      "name": "CommandAgentSessionReadData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::session::AgentSessionReadResult",
+    "responseName": "AgentSessionReadResult",
+    "responseTs": {
+      "imports": [
+        "AgentSessionReadResult"
+      ],
+      "name": "AgentSessionReadResult"
+    }
+  },
+  {
+    "command": "agent:session:write_state",
+    "request": "agentmux_srv::backend::rpc_types::session::CommandAgentSessionWriteStateData",
+    "requestName": "CommandAgentSessionWriteStateData",
+    "requestTs": {
+      "imports": [
+        "CommandAgentSessionWriteStateData"
+      ],
+      "name": "CommandAgentSessionWriteStateData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::session::AgentSessionWriteStateResult",
+    "responseName": "AgentSessionWriteStateResult",
+    "responseTs": {
+      "imports": [
+        "AgentSessionWriteStateResult"
+      ],
+      "name": "AgentSessionWriteStateResult"
+    }
+  },
+  {
+    "command": "agentcancel",
+    "request": "agentmux_srv::backend::rpc_types::block::CommandAgentCancelData",
+    "requestName": "CommandAgentCancelData",
+    "requestTs": {
+      "imports": [
+        "CommandAgentCancelData"
+      ],
+      "name": "CommandAgentCancelData"
+    },
+    "response": "()",
+    "responseName": "()",
+    "responseTs": {
+      "imports": [],
+      "name": "null"
+    }
+  },
+  {
+    "command": "agentdefcreatefromtemplate",
+    "request": "agentmux_srv::backend::rpc_types::agent::CommandAgentDefCreateFromTemplateData",
+    "requestName": "CommandAgentDefCreateFromTemplateData",
+    "requestTs": {
+      "imports": [
+        "CommandAgentDefCreateFromTemplateData"
+      ],
+      "name": "CommandAgentDefCreateFromTemplateData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::agent::AgentDefCreateFromTemplateResult",
+    "responseName": "AgentDefCreateFromTemplateResult",
+    "responseTs": {
+      "imports": [
+        "AgentDefCreateFromTemplateResult"
+      ],
+      "name": "AgentDefCreateFromTemplateResult"
+    }
+  },
+  {
+    "command": "agentdefhide",
+    "request": "agentmux_srv::backend::rpc_types::agent::CommandAgentDefHideData",
+    "requestName": "CommandAgentDefHideData",
+    "requestTs": {
+      "imports": [
+        "CommandAgentDefHideData"
+      ],
+      "name": "CommandAgentDefHideData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::agent::AgentDefHideResult",
+    "responseName": "AgentDefHideResult",
+    "responseTs": {
+      "imports": [
+        "AgentDefHideResult"
+      ],
+      "name": "AgentDefHideResult"
+    }
+  },
+  {
+    "command": "agentdeflisthiddentemplates",
+    "request": "core::option::Option<agentmux_srv::backend::rpc_types::agent::CommandListHiddenTemplatesData>",
+    "requestName": "core::option::Option<agentmux_srv::backend::rpc_types::agent::CommandListHiddenTemplatesData>",
+    "requestTs": {
+      "imports": [
+        "CommandListHiddenTemplatesData"
+      ],
+      "name": "CommandListHiddenTemplatesData | null"
+    },
+    "response": "alloc::vec::Vec<agentmux_srv::backend::storage::agents::AgentDefinition>",
+    "responseName": "alloc::vec::Vec<agentmux_srv::backend::storage::agents::AgentDefinition>",
+    "responseTs": {
+      "imports": [
+        "AgentDefinition"
+      ],
+      "name": "Array<AgentDefinition>"
+    }
+  },
+  {
+    "command": "agentdefunhide",
+    "request": "agentmux_srv::backend::rpc_types::agent::CommandAgentDefHideData",
+    "requestName": "CommandAgentDefHideData",
+    "requestTs": {
+      "imports": [
+        "CommandAgentDefHideData"
+      ],
+      "name": "CommandAgentDefHideData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::agent::AgentDefHideResult",
+    "responseName": "AgentDefHideResult",
+    "responseTs": {
+      "imports": [
+        "AgentDefHideResult"
+      ],
+      "name": "AgentDefHideResult"
+    }
+  },
+  {
+    "command": "agentinput",
+    "request": "agentmux_srv::backend::rpc_types::block::CommandAgentInputData",
+    "requestName": "CommandAgentInputData",
+    "requestTs": {
+      "imports": [
+        "CommandAgentInputData"
+      ],
+      "name": "CommandAgentInputData"
+    },
+    "response": "()",
+    "responseName": "()",
+    "responseTs": {
+      "imports": [],
+      "name": "null"
+    }
+  },
+  {
+    "command": "agentlastruntime",
+    "request": "agentmux_srv::backend::rpc_types::instance::CommandAgentLastRuntimeData",
+    "requestName": "CommandAgentLastRuntimeData",
+    "requestTs": {
+      "imports": [
+        "CommandAgentLastRuntimeData"
+      ],
+      "name": "CommandAgentLastRuntimeData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::instance::AgentLastRuntime",
+    "responseName": "AgentLastRuntime",
+    "responseTs": {
+      "imports": [
+        "AgentLastRuntime"
+      ],
+      "name": "AgentLastRuntime"
+    }
+  },
+  {
+    "command": "agentshutdownkeep",
+    "request": "agentmux_srv::backend::rpc_types::block::CommandAgentShutdownKeepData",
+    "requestName": "CommandAgentShutdownKeepData",
+    "requestTs": {
+      "imports": [
+        "CommandAgentShutdownKeepData"
+      ],
+      "name": "CommandAgentShutdownKeepData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::block::AgentShutdownKeepResult",
+    "responseName": "AgentShutdownKeepResult",
+    "responseTs": {
+      "imports": [
+        "AgentShutdownKeepResult"
+      ],
+      "name": "AgentShutdownKeepResult"
+    }
+  },
+  {
+    "command": "agentstop",
+    "request": "agentmux_srv::backend::rpc_types::block::CommandAgentStopData",
+    "requestName": "CommandAgentStopData",
+    "requestTs": {
+      "imports": [
+        "CommandAgentStopData"
+      ],
+      "name": "CommandAgentStopData"
+    },
+    "response": "()",
+    "responseName": "()",
+    "responseTs": {
+      "imports": [],
+      "name": "null"
+    }
+  },
+  {
+    "command": "ambientnarrate",
+    "request": "agentmux_srv::backend::rpc_types::block::CommandAmbientNarrateData",
+    "requestName": "CommandAmbientNarrateData",
+    "requestTs": {
+      "imports": [
+        "CommandAmbientNarrateData"
+      ],
+      "name": "CommandAmbientNarrateData"
+    },
+    "response": "()",
+    "responseName": "()",
+    "responseTs": {
+      "imports": [],
+      "name": "null"
+    }
+  },
+  {
+    "command": "appendagenthistory",
+    "request": "agentmux_srv::backend::rpc_types::agent::CommandAppendAgentHistoryData",
+    "requestName": "CommandAppendAgentHistoryData",
+    "requestTs": {
+      "imports": [
+        "CommandAppendAgentHistoryData"
+      ],
+      "name": "CommandAppendAgentHistoryData"
+    },
+    "response": "agentmux_srv::backend::storage::history::AgentHistory",
+    "responseName": "AgentHistory",
+    "responseTs": {
+      "imports": [
+        "AgentHistory"
+      ],
+      "name": "AgentHistory"
+    }
+  },
+  {
+    "command": "asksidequestion",
+    "request": "agentmux_srv::backend::rpc_types::block::CommandAskSideQuestionData",
+    "requestName": "CommandAskSideQuestionData",
+    "requestTs": {
+      "imports": [
+        "CommandAskSideQuestionData"
+      ],
+      "name": "CommandAskSideQuestionData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::block::AskSideQuestionResult",
+    "responseName": "AskSideQuestionResult",
+    "responseTs": {
+      "imports": [
+        "AskSideQuestionResult"
+      ],
+      "name": "AskSideQuestionResult"
+    }
+  },
+  {
+    "command": "attachments.cancel",
+    "request": "agentmux_srv::backend::rpc_types::attachments::CommandAttachmentsCancelData",
+    "requestName": "CommandAttachmentsCancelData",
+    "requestTs": {
+      "imports": [
+        "CommandAttachmentsCancelData"
+      ],
+      "name": "CommandAttachmentsCancelData"
+    },
+    "response": "serde_json::value::Value",
+    "responseName": "Value",
+    "responseTs": {
+      "imports": [
+        "JsonValue"
+      ],
+      "name": "JsonValue"
+    }
+  },
+  {
+    "command": "attachments.copy-to-workdir",
+    "request": "agentmux_srv::backend::rpc_types::attachments::CommandAttachmentsCopyToWorkdirData",
+    "requestName": "CommandAttachmentsCopyToWorkdirData",
+    "requestTs": {
+      "imports": [
+        "CommandAttachmentsCopyToWorkdirData"
+      ],
+      "name": "CommandAttachmentsCopyToWorkdirData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::attachments::AttachmentsCopyToWorkdirResult",
+    "responseName": "AttachmentsCopyToWorkdirResult",
+    "responseTs": {
+      "imports": [
+        "AttachmentsCopyToWorkdirResult"
+      ],
+      "name": "AttachmentsCopyToWorkdirResult"
+    }
+  },
+  {
+    "command": "attachments.info",
+    "request": "agentmux_srv::backend::rpc_types::attachments::CommandAttachmentsInfoData",
+    "requestName": "CommandAttachmentsInfoData",
+    "requestTs": {
+      "imports": [
+        "CommandAttachmentsInfoData"
+      ],
+      "name": "CommandAttachmentsInfoData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::attachments::AttachmentsInfoResult",
+    "responseName": "AttachmentsInfoResult",
+    "responseTs": {
+      "imports": [
+        "AttachmentsInfoResult"
+      ],
+      "name": "AttachmentsInfoResult"
+    }
+  },
+  {
+    "command": "attachments.ingest",
+    "request": "agentmux_srv::backend::rpc_types::attachments::CommandAttachmentsIngestData",
+    "requestName": "CommandAttachmentsIngestData",
+    "requestTs": {
+      "imports": [
+        "CommandAttachmentsIngestData"
+      ],
+      "name": "CommandAttachmentsIngestData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::attachments::AttachmentsIngestResult",
+    "responseName": "AttachmentsIngestResult",
+    "responseTs": {
+      "imports": [
+        "AttachmentsIngestResult"
+      ],
+      "name": "AttachmentsIngestResult"
+    }
+  },
+  {
+    "command": "auth.cancel",
+    "request": "agentmux_srv::server::identity_handlers::CancelProviderAuthReq",
+    "requestName": "CancelProviderAuthReq",
+    "requestTs": {
+      "imports": [
+        "CancelProviderAuthReq"
+      ],
+      "name": "CancelProviderAuthReq"
+    },
+    "response": "agentmux_srv::server::identity_handlers::AckResp",
+    "responseName": "AckResp",
+    "responseTs": {
+      "imports": [
+        "AckResp"
+      ],
+      "name": "AckResp"
+    }
+  },
+  {
+    "command": "auth.poll",
+    "request": "agentmux_srv::server::identity_handlers::PollProviderAuthReq",
+    "requestName": "PollProviderAuthReq",
+    "requestTs": {
+      "imports": [
+        "PollProviderAuthReq"
+      ],
+      "name": "PollProviderAuthReq"
+    },
+    "response": "agentmux_srv::identity::auth_session::PollSessionResult",
+    "responseName": "PollSessionResult",
+    "responseTs": {
+      "imports": [
+        "PollSessionResult"
+      ],
+      "name": "PollSessionResult"
+    }
+  },
+  {
+    "command": "auth.start",
+    "request": "agentmux_srv::server::identity_handlers::StartProviderAuthReq",
+    "requestName": "StartProviderAuthReq",
+    "requestTs": {
+      "imports": [
+        "StartProviderAuthReq"
+      ],
+      "name": "StartProviderAuthReq"
+    },
+    "response": "agentmux_srv::identity::auth_session::StartSessionResult",
+    "responseName": "StartSessionResult",
+    "responseTs": {
+      "imports": [
+        "StartSessionResult"
+      ],
+      "name": "StartSessionResult"
+    }
+  },
+  {
+    "command": "auth.submitapikey",
+    "request": "agentmux_srv::server::identity_handlers::SubmitProviderApiKeyReq",
+    "requestName": "SubmitProviderApiKeyReq",
+    "requestTs": {
+      "imports": [
+        "SubmitProviderApiKeyReq"
+      ],
+      "name": "SubmitProviderApiKeyReq"
+    },
+    "response": "()",
+    "responseName": "()",
+    "responseTs": {
+      "imports": [],
+      "name": "null"
+    }
+  },
+  {
+    "command": "auth.submitcallback",
+    "request": "agentmux_srv::server::identity_handlers::SubmitAuthCallbackReq",
+    "requestName": "SubmitAuthCallbackReq",
+    "requestTs": {
+      "imports": [
+        "SubmitAuthCallbackReq"
+      ],
+      "name": "SubmitAuthCallbackReq"
+    },
+    "response": "agentmux_srv::server::identity_handlers::AckResp",
+    "responseName": "AckResp",
+    "responseTs": {
+      "imports": [
+        "AckResp"
+      ],
+      "name": "AckResp"
+    }
+  },
+  {
+    "command": "backgroundtaskcompletion",
+    "request": "agentmux_srv::backend::rpc_types::block::CommandBackgroundTaskCompletionData",
+    "requestName": "CommandBackgroundTaskCompletionData",
+    "requestTs": {
+      "imports": [
+        "CommandBackgroundTaskCompletionData"
+      ],
+      "name": "CommandBackgroundTaskCompletionData"
+    },
+    "response": "()",
+    "responseName": "()",
+    "responseTs": {
+      "imports": [],
+      "name": "null"
+    }
+  },
+  {
+    "command": "backgroundtaskpid",
+    "request": "agentmux_srv::backend::rpc_types::block::CommandBackgroundTaskPidData",
+    "requestName": "CommandBackgroundTaskPidData",
+    "requestTs": {
+      "imports": [
+        "CommandBackgroundTaskPidData"
+      ],
+      "name": "CommandBackgroundTaskPidData"
+    },
+    "response": "()",
+    "responseName": "()",
+    "responseTs": {
+      "imports": [],
+      "name": "null"
+    }
+  },
+  {
+    "command": "block.reveal",
+    "request": "agentmux_srv::server::notify_handlers::BlockRevealParams",
+    "requestName": "BlockRevealParams",
+    "requestTs": {
+      "imports": [
+        "BlockRevealParams"
+      ],
+      "name": "BlockRevealParams"
+    },
+    "response": "agentmux_srv::server::notify_handlers::BlockRevealResult",
+    "responseName": "BlockRevealResult",
+    "responseTs": {
+      "imports": [
+        "BlockRevealResult"
+      ],
+      "name": "BlockRevealResult"
+    }
+  },
+  {
+    "command": "blockfile:line_count",
+    "request": "agentmux_srv::backend::rpc_types::block::CommandBlockfileLineCountData",
+    "requestName": "CommandBlockfileLineCountData",
+    "requestTs": {
+      "imports": [
+        "CommandBlockfileLineCountData"
+      ],
+      "name": "CommandBlockfileLineCountData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::block::BlockfileLineCountResult",
+    "responseName": "BlockfileLineCountResult",
+    "responseTs": {
+      "imports": [
+        "BlockfileLineCountResult"
+      ],
+      "name": "BlockfileLineCountResult"
+    }
+  },
+  {
+    "command": "blockfile:read_range",
+    "request": "agentmux_srv::backend::rpc_types::block::CommandBlockfileReadRangeData",
+    "requestName": "CommandBlockfileReadRangeData",
+    "requestTs": {
+      "imports": [
+        "CommandBlockfileReadRangeData"
+      ],
+      "name": "CommandBlockfileReadRangeData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::block::BlockfileReadRangeResult",
+    "responseName": "BlockfileReadRangeResult",
+    "responseTs": {
+      "imports": [
+        "BlockfileReadRangeResult"
+      ],
+      "name": "BlockfileReadRangeResult"
+    }
+  },
+  {
+    "command": "blockfile:read_state",
+    "request": "agentmux_srv::backend::rpc_types::block::CommandBlockfileReadStateData",
+    "requestName": "CommandBlockfileReadStateData",
+    "requestTs": {
+      "imports": [
+        "CommandBlockfileReadStateData"
+      ],
+      "name": "CommandBlockfileReadStateData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::block::BlockfileReadStateResult",
+    "responseName": "BlockfileReadStateResult",
+    "responseTs": {
+      "imports": [
+        "BlockfileReadStateResult"
+      ],
+      "name": "BlockfileReadStateResult"
+    }
+  },
+  {
+    "command": "blockfile:write_state",
+    "request": "agentmux_srv::backend::rpc_types::block::CommandBlockfileWriteStateData",
+    "requestName": "CommandBlockfileWriteStateData",
+    "requestTs": {
+      "imports": [
+        "CommandBlockfileWriteStateData"
+      ],
+      "name": "CommandBlockfileWriteStateData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::block::BlockfileWriteStateResult",
+    "responseName": "BlockfileWriteStateResult",
+    "responseTs": {
+      "imports": [
+        "BlockfileWriteStateResult"
+      ],
+      "name": "BlockfileWriteStateResult"
+    }
+  },
+  {
+    "command": "bookmarks.list",
+    "request": "agentmux_srv::backend::rpc_types::misc::CommandBookmarksListData",
+    "requestName": "CommandBookmarksListData",
+    "requestTs": {
+      "imports": [
+        "CommandBookmarksListData"
+      ],
+      "name": "CommandBookmarksListData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::misc::BookmarksResult",
+    "responseName": "BookmarksResult",
+    "responseTs": {
+      "imports": [
+        "BookmarksResult"
+      ],
+      "name": "BookmarksResult"
+    }
+  },
+  {
+    "command": "bookmarks.set",
+    "request": "agentmux_srv::backend::rpc_types::misc::CommandBookmarksSetData",
+    "requestName": "CommandBookmarksSetData",
+    "requestTs": {
+      "imports": [
+        "CommandBookmarksSetData"
+      ],
+      "name": "CommandBookmarksSetData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::misc::BookmarksResult",
+    "responseName": "BookmarksResult",
+    "responseTs": {
+      "imports": [
+        "BookmarksResult"
+      ],
+      "name": "BookmarksResult"
+    }
+  },
+  {
+    "command": "browser_profiles.create",
+    "request": "agentmux_srv::backend::rpc_types::misc::CommandBrowserProfileCreateData",
+    "requestName": "CommandBrowserProfileCreateData",
+    "requestTs": {
+      "imports": [
+        "CommandBrowserProfileCreateData"
+      ],
+      "name": "CommandBrowserProfileCreateData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::misc::BrowserProfilesResult",
+    "responseName": "BrowserProfilesResult",
+    "responseTs": {
+      "imports": [
+        "BrowserProfilesResult"
+      ],
+      "name": "BrowserProfilesResult"
+    }
+  },
+  {
+    "command": "browser_profiles.delete",
+    "request": "agentmux_srv::backend::rpc_types::misc::CommandBrowserProfileDeleteData",
+    "requestName": "CommandBrowserProfileDeleteData",
+    "requestTs": {
+      "imports": [
+        "CommandBrowserProfileDeleteData"
+      ],
+      "name": "CommandBrowserProfileDeleteData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::misc::BrowserProfilesResult",
+    "responseName": "BrowserProfilesResult",
+    "responseTs": {
+      "imports": [
+        "BrowserProfilesResult"
+      ],
+      "name": "BrowserProfilesResult"
+    }
+  },
+  {
+    "command": "browser_profiles.list",
+    "request": "agentmux_srv::backend::rpc_types::misc::CommandBrowserProfilesListData",
+    "requestName": "CommandBrowserProfilesListData",
+    "requestTs": {
+      "imports": [
+        "CommandBrowserProfilesListData"
+      ],
+      "name": "CommandBrowserProfilesListData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::misc::BrowserProfilesResult",
+    "responseName": "BrowserProfilesResult",
+    "responseTs": {
+      "imports": [
+        "BrowserProfilesResult"
+      ],
+      "name": "BrowserProfilesResult"
+    }
+  },
+  {
+    "command": "browser_profiles.update",
+    "request": "agentmux_srv::backend::rpc_types::misc::CommandBrowserProfileUpdateData",
+    "requestName": "CommandBrowserProfileUpdateData",
+    "requestTs": {
+      "imports": [
+        "CommandBrowserProfileUpdateData"
+      ],
+      "name": "CommandBrowserProfileUpdateData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::misc::BrowserProfilesResult",
+    "responseName": "BrowserProfilesResult",
+    "responseTs": {
+      "imports": [
+        "BrowserProfilesResult"
+      ],
+      "name": "BrowserProfilesResult"
+    }
+  },
+  {
+    "command": "bundle.import.commit",
+    "request": "agentmux_srv::backend::rpc_types::bundle_import::CommandBundleImportCommitData",
+    "requestName": "CommandBundleImportCommitData",
+    "requestTs": {
+      "imports": [
+        "CommandBundleImportCommitData"
+      ],
+      "name": "CommandBundleImportCommitData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::bundle_import::BundleImportCommitResponse",
+    "responseName": "BundleImportCommitResponse",
+    "responseTs": {
+      "imports": [
+        "BundleImportCommitResponse"
+      ],
+      "name": "BundleImportCommitResponse"
+    }
+  },
+  {
+    "command": "bundle.import.preview",
+    "request": "agentmux_srv::backend::rpc_types::bundle_import::CommandBundleImportPreviewData",
+    "requestName": "CommandBundleImportPreviewData",
+    "requestTs": {
+      "imports": [
+        "CommandBundleImportPreviewData"
+      ],
+      "name": "CommandBundleImportPreviewData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::bundle_import::BundleImportPreviewResponse",
+    "responseName": "BundleImportPreviewResponse",
+    "responseTs": {
+      "imports": [
+        "BundleImportPreviewResponse"
+      ],
+      "name": "BundleImportPreviewResponse"
+    }
+  },
+  {
+    "command": "checkcliauth",
+    "request": "agentmux_srv::backend::rpc_types::block::CommandCheckCliAuthData",
+    "requestName": "CommandCheckCliAuthData",
+    "requestTs": {
+      "imports": [
+        "CommandCheckCliAuthData"
+      ],
+      "name": "CommandCheckCliAuthData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::block::CheckCliAuthResult",
+    "responseName": "CheckCliAuthResult",
+    "responseTs": {
+      "imports": [
+        "CheckCliAuthResult"
+      ],
+      "name": "CheckCliAuthResult"
+    }
+  },
+  {
+    "command": "containerimagecheck",
+    "request": "core::option::Option<agentmux_srv::backend::rpc_types::agent::CommandContainerImageCheckData>",
+    "requestName": "core::option::Option<agentmux_srv::backend::rpc_types::agent::CommandContainerImageCheckData>",
+    "requestTs": {
+      "imports": [
+        "CommandContainerImageCheckData"
+      ],
+      "name": "CommandContainerImageCheckData | null"
+    },
+    "response": "agentmux_srv::backend::rpc_types::agent::ContainerImageCheckResult",
+    "responseName": "ContainerImageCheckResult",
+    "responseTs": {
+      "imports": [
+        "ContainerImageCheckResult"
+      ],
+      "name": "ContainerImageCheckResult"
+    }
+  },
+  {
+    "command": "containerruntimeavailable",
+    "request": "core::option::Option<agentmux_srv::backend::rpc_types::agent::CommandContainerRuntimeAvailableData>",
+    "requestName": "core::option::Option<agentmux_srv::backend::rpc_types::agent::CommandContainerRuntimeAvailableData>",
+    "requestTs": {
+      "imports": [
+        "CommandContainerRuntimeAvailableData"
+      ],
+      "name": "CommandContainerRuntimeAvailableData | null"
+    },
+    "response": "agentmux_srv::backend::rpc_types::agent::ContainerRuntimeAvailableResult",
+    "responseName": "ContainerRuntimeAvailableResult",
+    "responseTs": {
+      "imports": [
+        "ContainerRuntimeAvailableResult"
+      ],
+      "name": "ContainerRuntimeAvailableResult"
+    }
+  },
+  {
+    "command": "controllerinput",
+    "request": "agentmux_srv::backend::rpc_types::block::CommandBlockInputData",
+    "requestName": "CommandBlockInputData",
+    "requestTs": {
+      "imports": [
+        "CommandBlockInputData"
+      ],
+      "name": "CommandBlockInputData"
+    },
+    "response": "()",
+    "responseName": "()",
+    "responseTs": {
+      "imports": [],
+      "name": "null"
+    }
+  },
+  {
+    "command": "createagent",
+    "request": "agentmux_srv::backend::rpc_types::agent::CommandCreateAgentDefinitionData",
+    "requestName": "CommandCreateAgentDefinitionData",
+    "requestTs": {
+      "imports": [
+        "CommandCreateAgentDefinitionData"
+      ],
+      "name": "CommandCreateAgentDefinitionData"
+    },
+    "response": "agentmux_srv::backend::storage::agents::AgentDefinition",
+    "responseName": "AgentDefinition",
+    "responseTs": {
+      "imports": [
+        "AgentDefinition"
+      ],
+      "name": "AgentDefinition"
+    }
+  },
+  {
+    "command": "createagentinstance",
+    "request": "agentmux_srv::backend::rpc_types::instance::CommandCreateAgentInstanceData",
+    "requestName": "CommandCreateAgentInstanceData",
+    "requestTs": {
+      "imports": [
+        "CommandCreateAgentInstanceData"
+      ],
+      "name": "CommandCreateAgentInstanceData"
+    },
+    "response": "agentmux_srv::backend::storage::agents::AgentInstance",
+    "responseName": "AgentInstance",
+    "responseTs": {
+      "imports": [
+        "AgentInstance"
+      ],
+      "name": "AgentInstance"
+    }
+  },
+  {
+    "command": "createagentskill",
+    "request": "agentmux_srv::backend::rpc_types::agent::CommandCreateAgentSkillData",
+    "requestName": "CommandCreateAgentSkillData",
+    "requestTs": {
+      "imports": [
+        "CommandCreateAgentSkillData"
+      ],
+      "name": "CommandCreateAgentSkillData"
+    },
+    "response": "agentmux_srv::backend::storage::skills::AgentSkill",
+    "responseName": "AgentSkill",
+    "responseTs": {
+      "imports": [
+        "AgentSkill"
+      ],
+      "name": "AgentSkill"
+    }
+  },
+  {
+    "command": "createeditordir",
+    "request": "agentmux_srv::backend::rpc_types::editor::CreateEditorDirReq",
+    "requestName": "CreateEditorDirReq",
+    "requestTs": {
+      "imports": [
+        "CreateEditorDirReq"
+      ],
+      "name": "CreateEditorDirReq"
+    },
+    "response": "agentmux_srv::backend::rpc_types::editor::CreateEditorDirResult",
+    "responseName": "CreateEditorDirResult",
+    "responseTs": {
+      "imports": [
+        "CreateEditorDirResult"
+      ],
+      "name": "CreateEditorDirResult"
+    }
+  },
+  {
+    "command": "createeditorfile",
+    "request": "agentmux_srv::backend::rpc_types::editor::CreateEditorFileReq",
+    "requestName": "CreateEditorFileReq",
+    "requestTs": {
+      "imports": [
+        "CreateEditorFileReq"
+      ],
+      "name": "CreateEditorFileReq"
+    },
+    "response": "agentmux_srv::backend::rpc_types::editor::CreateEditorFileResult",
+    "responseName": "CreateEditorFileResult",
+    "responseTs": {
+      "imports": [
+        "CreateEditorFileResult"
+      ],
+      "name": "CreateEditorFileResult"
+    }
+  },
+  {
+    "command": "createscratchfile",
+    "request": "agentmux_srv::backend::rpc_types::editor::CreateScratchFileReq",
+    "requestName": "CreateScratchFileReq",
+    "requestTs": {
+      "imports": [
+        "CreateScratchFileReq"
+      ],
+      "name": "CreateScratchFileReq"
+    },
+    "response": "agentmux_srv::backend::rpc_types::editor::CreateScratchFileResult",
+    "responseName": "CreateScratchFileResult",
+    "responseTs": {
+      "imports": [
+        "CreateScratchFileResult"
+      ],
+      "name": "CreateScratchFileResult"
+    }
+  },
+  {
+    "command": "deleteagent",
+    "request": "agentmux_srv::backend::rpc_types::agent::CommandDeleteAgentDefinitionData",
+    "requestName": "CommandDeleteAgentDefinitionData",
+    "requestTs": {
+      "imports": [
+        "CommandDeleteAgentDefinitionData"
+      ],
+      "name": "CommandDeleteAgentDefinitionData"
+    },
+    "response": "()",
+    "responseName": "()",
+    "responseTs": {
+      "imports": [],
+      "name": "null"
+    }
+  },
+  {
+    "command": "deleteagentinstance",
+    "request": "agentmux_srv::backend::rpc_types::instance::CommandDeleteAgentInstanceData",
+    "requestName": "CommandDeleteAgentInstanceData",
+    "requestTs": {
+      "imports": [
+        "CommandDeleteAgentInstanceData"
+      ],
+      "name": "CommandDeleteAgentInstanceData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::instance::DeleteAgentInstanceResult",
+    "responseName": "DeleteAgentInstanceResult",
+    "responseTs": {
+      "imports": [
+        "DeleteAgentInstanceResult"
+      ],
+      "name": "DeleteAgentInstanceResult"
+    }
+  },
+  {
+    "command": "deleteagentskill",
+    "request": "agentmux_srv::backend::rpc_types::agent::CommandDeleteAgentSkillData",
+    "requestName": "CommandDeleteAgentSkillData",
+    "requestTs": {
+      "imports": [
+        "CommandDeleteAgentSkillData"
+      ],
+      "name": "CommandDeleteAgentSkillData"
+    },
+    "response": "()",
+    "responseName": "()",
+    "responseTs": {
+      "imports": [],
+      "name": "null"
+    }
+  },
+  {
+    "command": "deletedrone",
+    "request": "agentmux_srv::server::drone_handlers::DeleteDroneReq",
+    "requestName": "DeleteDroneReq",
+    "requestTs": {
+      "imports": [
+        "DeleteDroneReq"
+      ],
+      "name": "DeleteDroneReq"
+    },
+    "response": "agentmux_srv::server::drone_handlers::DeleteResp",
+    "responseName": "DeleteResp",
+    "responseTs": {
+      "imports": [
+        "DeleteDroneResp"
+      ],
+      "name": "DeleteDroneResp"
+    }
+  },
+  {
+    "command": "deleteeditorfile",
+    "request": "agentmux_srv::backend::rpc_types::editor::DeleteEditorFileReq",
+    "requestName": "DeleteEditorFileReq",
+    "requestTs": {
+      "imports": [
+        "DeleteEditorFileReq"
+      ],
+      "name": "DeleteEditorFileReq"
+    },
+    "response": "()",
+    "responseName": "()",
+    "responseTs": {
+      "imports": [],
+      "name": "null"
+    }
+  },
+  {
+    "command": "deletememory",
+    "request": "agentmux_srv::backend::rpc_types::bundle::CommandDeleteBundleData",
+    "requestName": "CommandDeleteBundleData",
+    "requestTs": {
+      "imports": [
+        "CommandDeleteBundleData"
+      ],
+      "name": "CommandDeleteBundleData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::bundle::DeleteBundleResult",
+    "responseName": "DeleteBundleResult",
+    "responseTs": {
+      "imports": [
+        "DeleteBundleResult"
+      ],
+      "name": "DeleteBundleResult"
+    }
+  },
+  {
+    "command": "deletesubblock",
+    "request": "agentmux_srv::backend::rpc_types::block::CommandDeleteSubBlockData",
+    "requestName": "CommandDeleteSubBlockData",
+    "requestTs": {
+      "imports": [
+        "CommandDeleteSubBlockData"
+      ],
+      "name": "CommandDeleteSubBlockData"
+    },
+    "response": "()",
+    "responseName": "()",
+    "responseTs": {
+      "imports": [],
+      "name": "null"
+    }
+  },
+  {
+    "command": "deletesystemmemory",
+    "request": "agentmux_srv::backend::rpc_types::bundle::CommandDeleteBundleData",
+    "requestName": "CommandDeleteBundleData",
+    "requestTs": {
+      "imports": [
+        "CommandDeleteBundleData"
+      ],
+      "name": "CommandDeleteBundleData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::bundle::DeleteBundleResult",
+    "responseName": "DeleteBundleResult",
+    "responseTs": {
+      "imports": [
+        "DeleteBundleResult"
+      ],
+      "name": "DeleteBundleResult"
+    }
+  },
+  {
+    "command": "docknodestatus",
+    "request": "agentmux_srv::backend::rpc_types::block::CommandDockNodeStatusData",
+    "requestName": "CommandDockNodeStatusData",
+    "requestTs": {
+      "imports": [
+        "CommandDockNodeStatusData"
+      ],
+      "name": "CommandDockNodeStatusData"
+    },
+    "response": "()",
+    "responseName": "()",
+    "responseTs": {
+      "imports": [],
+      "name": "null"
+    }
+  },
+  {
+    "command": "eventreadhistory",
+    "request": "agentmux_srv::backend::rpc_types::misc::CommandEventReadHistoryData",
+    "requestName": "CommandEventReadHistoryData",
+    "requestTs": {
+      "imports": [
+        "CommandEventReadHistoryData"
+      ],
+      "name": "CommandEventReadHistoryData"
+    },
+    "response": "alloc::vec::Vec<agentmux_srv::backend::mps::MuxEvent>",
+    "responseName": "alloc::vec::Vec<agentmux_srv::backend::mps::MuxEvent>",
+    "responseTs": {
+      "imports": [
+        "MuxEvent"
+      ],
+      "name": "Array<MuxEvent>"
+    }
+  },
+  {
+    "command": "eventsub",
+    "request": "agentmux_srv::backend::mps::SubscriptionRequest",
+    "requestName": "SubscriptionRequest",
+    "requestTs": {
+      "imports": [
+        "SubscriptionRequest"
+      ],
+      "name": "SubscriptionRequest"
+    },
+    "response": "()",
+    "responseName": "()",
+    "responseTs": {
+      "imports": [],
+      "name": "null"
+    }
+  },
+  {
+    "command": "eventunsub",
+    "request": "serde_json::value::Value",
+    "requestName": "Value",
+    "requestTs": {
+      "imports": [
+        "JsonValue"
+      ],
+      "name": "JsonValue"
+    },
+    "response": "()",
+    "responseName": "()",
+    "responseTs": {
+      "imports": [],
+      "name": "null"
+    }
+  },
+  {
+    "command": "eventunsuball",
+    "request": "core::option::Option<agentmux_srv::backend::rpc_types::websocket::NoArgsReq>",
+    "requestName": "core::option::Option<agentmux_srv::backend::rpc_types::websocket::NoArgsReq>",
+    "requestTs": {
+      "imports": [
+        "NoArgsReq"
+      ],
+      "name": "NoArgsReq | null"
+    },
+    "response": "()",
+    "responseName": "()",
+    "responseTs": {
+      "imports": [],
+      "name": "null"
+    }
+  },
+  {
+    "command": "exportagents",
+    "request": "core::option::Option<agentmux_srv::backend::rpc_types::agent::CommandExportAgentsData>",
+    "requestName": "core::option::Option<agentmux_srv::backend::rpc_types::agent::CommandExportAgentsData>",
+    "requestTs": {
+      "imports": [
+        "CommandExportAgentsData"
+      ],
+      "name": "CommandExportAgentsData | null"
+    },
+    "response": "agentmux_srv::backend::rpc_types::agent::ExportAgentDefinitionsResult",
+    "responseName": "ExportAgentDefinitionsResult",
+    "responseTs": {
+      "imports": [
+        "ExportAgentDefinitionsResult"
+      ],
+      "name": "ExportAgentDefinitionsResult"
+    }
+  },
+  {
+    "command": "fleet.broadcast",
+    "request": "agentmux_srv::backend::rpc_types::fleet::CommandFleetBroadcastData",
+    "requestName": "CommandFleetBroadcastData",
+    "requestTs": {
+      "imports": [
+        "CommandFleetBroadcastData"
+      ],
+      "name": "CommandFleetBroadcastData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::fleet::FleetActionResult",
+    "responseName": "FleetActionResult",
+    "responseTs": {
+      "imports": [
+        "FleetActionResult"
+      ],
+      "name": "FleetActionResult"
+    }
+  },
+  {
+    "command": "fleet.bulk-stop",
+    "request": "agentmux_srv::backend::rpc_types::fleet::CommandFleetBulkStopData",
+    "requestName": "CommandFleetBulkStopData",
+    "requestTs": {
+      "imports": [
+        "CommandFleetBulkStopData"
+      ],
+      "name": "CommandFleetBulkStopData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::fleet::FleetActionResult",
+    "responseName": "FleetActionResult",
+    "responseTs": {
+      "imports": [
+        "FleetActionResult"
+      ],
+      "name": "FleetActionResult"
+    }
+  },
+  {
+    "command": "fleet.group.create",
+    "request": "agentmux_srv::backend::rpc_types::fleet::CommandFleetGroupCreateData",
+    "requestName": "CommandFleetGroupCreateData",
+    "requestTs": {
+      "imports": [
+        "CommandFleetGroupCreateData"
+      ],
+      "name": "CommandFleetGroupCreateData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::fleet::FleetGroup",
+    "responseName": "FleetGroup",
+    "responseTs": {
+      "imports": [
+        "FleetGroup"
+      ],
+      "name": "FleetGroup"
+    }
+  },
+  {
+    "command": "fleet.group.delete",
+    "request": "agentmux_srv::backend::rpc_types::fleet::CommandFleetGroupDeleteData",
+    "requestName": "CommandFleetGroupDeleteData",
+    "requestTs": {
+      "imports": [
+        "CommandFleetGroupDeleteData"
+      ],
+      "name": "CommandFleetGroupDeleteData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::fleet::FleetGroupDeleteResult",
+    "responseName": "FleetGroupDeleteResult",
+    "responseTs": {
+      "imports": [
+        "FleetGroupDeleteResult"
+      ],
+      "name": "FleetGroupDeleteResult"
+    }
+  },
+  {
+    "command": "fleet.group.list",
+    "request": "agentmux_srv::backend::rpc_types::fleet::CommandFleetGroupListData",
+    "requestName": "CommandFleetGroupListData",
+    "requestTs": {
+      "imports": [
+        "CommandFleetGroupListData"
+      ],
+      "name": "CommandFleetGroupListData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::fleet::FleetGroupListResult",
+    "responseName": "FleetGroupListResult",
+    "responseTs": {
+      "imports": [
+        "FleetGroupListResult"
+      ],
+      "name": "FleetGroupListResult"
+    }
+  },
+  {
+    "command": "fleet.group.update",
+    "request": "agentmux_srv::backend::rpc_types::fleet::CommandFleetGroupUpdateData",
+    "requestName": "CommandFleetGroupUpdateData",
+    "requestTs": {
+      "imports": [
+        "CommandFleetGroupUpdateData"
+      ],
+      "name": "CommandFleetGroupUpdateData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::fleet::FleetGroup",
+    "responseName": "FleetGroup",
+    "responseTs": {
+      "imports": [
+        "FleetGroup"
+      ],
+      "name": "FleetGroup"
+    }
+  },
+  {
+    "command": "forkagentdefinition",
+    "request": "agentmux_srv::backend::rpc_types::agent::CommandForkAgentDefinitionData",
+    "requestName": "CommandForkAgentDefinitionData",
+    "requestTs": {
+      "imports": [
+        "CommandForkAgentDefinitionData"
+      ],
+      "name": "CommandForkAgentDefinitionData"
+    },
+    "response": "agentmux_srv::backend::storage::agents::AgentDefinition",
+    "responseName": "AgentDefinition",
+    "responseTs": {
+      "imports": [
+        "AgentDefinition"
+      ],
+      "name": "AgentDefinition"
+    }
+  },
+  {
+    "command": "forkagentdefinitionsuggest",
+    "request": "agentmux_srv::backend::rpc_types::agent::CommandForkAgentDefinitionSuggestData",
+    "requestName": "CommandForkAgentDefinitionSuggestData",
+    "requestTs": {
+      "imports": [
+        "CommandForkAgentDefinitionSuggestData"
+      ],
+      "name": "CommandForkAgentDefinitionSuggestData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::agent::ForkAgentDefinitionSuggestResult",
+    "responseName": "ForkAgentDefinitionSuggestResult",
+    "responseTs": {
+      "imports": [
+        "ForkAgentDefinitionSuggestResult"
+      ],
+      "name": "ForkAgentDefinitionSuggestResult"
+    }
+  },
+  {
+    "command": "fs.create",
+    "request": "agentmux_srv::backend::rpc_types::fs::FsCreateReq",
+    "requestName": "FsCreateReq",
+    "requestTs": {
+      "imports": [
+        "FsCreateReq"
+      ],
+      "name": "FsCreateReq"
+    },
+    "response": "agentmux_srv::backend::rpc_types::fs::FsCreateResult",
+    "responseName": "FsCreateResult",
+    "responseTs": {
+      "imports": [
+        "FsCreateResult"
+      ],
+      "name": "FsCreateResult"
+    }
+  },
+  {
+    "command": "fs.delete",
+    "request": "agentmux_srv::backend::rpc_types::fs::FsDeleteReq",
+    "requestName": "FsDeleteReq",
+    "requestTs": {
+      "imports": [
+        "FsDeleteReq"
+      ],
+      "name": "FsDeleteReq"
+    },
+    "response": "agentmux_srv::backend::rpc_types::fs::FsOpResults",
+    "responseName": "FsOpResults",
+    "responseTs": {
+      "imports": [
+        "FsOpResults"
+      ],
+      "name": "FsOpResults"
+    }
+  },
+  {
+    "command": "fs.git_status",
+    "request": "agentmux_srv::backend::rpc_types::fs::FsPathReq",
+    "requestName": "FsPathReq",
+    "requestTs": {
+      "imports": [
+        "FsPathReq"
+      ],
+      "name": "FsPathReq"
+    },
+    "response": "agentmux_srv::backend::rpc_types::fs::FsGitStatus",
+    "responseName": "FsGitStatus",
+    "responseTs": {
+      "imports": [
+        "FsGitStatus"
+      ],
+      "name": "FsGitStatus"
+    }
+  },
+  {
+    "command": "fs.list",
+    "request": "agentmux_srv::backend::rpc_types::fs::FsListReq",
+    "requestName": "FsListReq",
+    "requestTs": {
+      "imports": [
+        "FsListReq"
+      ],
+      "name": "FsListReq"
+    },
+    "response": "agentmux_srv::backend::rpc_types::fs::FsListResult",
+    "responseName": "FsListResult",
+    "responseTs": {
+      "imports": [
+        "FsListResult"
+      ],
+      "name": "FsListResult"
+    }
+  },
+  {
+    "command": "fs.op.cancel",
+    "request": "agentmux_srv::backend::rpc_types::fs::FsOpCancelReq",
+    "requestName": "FsOpCancelReq",
+    "requestTs": {
+      "imports": [
+        "FsOpCancelReq"
+      ],
+      "name": "FsOpCancelReq"
+    },
+    "response": "agentmux_srv::backend::rpc_types::fs::FsEmptyResult",
+    "responseName": "FsEmptyResult",
+    "responseTs": {
+      "imports": [
+        "FsEmptyResult"
+      ],
+      "name": "FsEmptyResult"
+    }
+  },
+  {
+    "command": "fs.op.resolve",
+    "request": "agentmux_srv::backend::rpc_types::fs::FsOpResolveReq",
+    "requestName": "FsOpResolveReq",
+    "requestTs": {
+      "imports": [
+        "FsOpResolveReq"
+      ],
+      "name": "FsOpResolveReq"
+    },
+    "response": "agentmux_srv::backend::rpc_types::fs::FsEmptyResult",
+    "responseName": "FsEmptyResult",
+    "responseTs": {
+      "imports": [
+        "FsEmptyResult"
+      ],
+      "name": "FsEmptyResult"
+    }
+  },
+  {
+    "command": "fs.op.start",
+    "request": "agentmux_srv::backend::rpc_types::fs::FsOpStartReq",
+    "requestName": "FsOpStartReq",
+    "requestTs": {
+      "imports": [
+        "FsOpStartReq"
+      ],
+      "name": "FsOpStartReq"
+    },
+    "response": "agentmux_srv::backend::rpc_types::fs::FsOpStartResult",
+    "responseName": "FsOpStartResult",
+    "responseTs": {
+      "imports": [
+        "FsOpStartResult"
+      ],
+      "name": "FsOpStartResult"
+    }
+  },
+  {
+    "command": "fs.open",
+    "request": "agentmux_srv::backend::rpc_types::fs::FsPathReq",
+    "requestName": "FsPathReq",
+    "requestTs": {
+      "imports": [
+        "FsPathReq"
+      ],
+      "name": "FsPathReq"
+    },
+    "response": "agentmux_srv::backend::rpc_types::fs::FsEmptyResult",
+    "responseName": "FsEmptyResult",
+    "responseTs": {
+      "imports": [
+        "FsEmptyResult"
+      ],
+      "name": "FsEmptyResult"
+    }
+  },
+  {
+    "command": "fs.places",
+    "request": "core::option::Option<agentmux_srv::backend::rpc_types::fs::FsPlacesReq>",
+    "requestName": "core::option::Option<agentmux_srv::backend::rpc_types::fs::FsPlacesReq>",
+    "requestTs": {
+      "imports": [
+        "FsPlacesReq"
+      ],
+      "name": "FsPlacesReq | null"
+    },
+    "response": "agentmux_srv::backend::rpc_types::fs::FsPlacesResult",
+    "responseName": "FsPlacesResult",
+    "responseTs": {
+      "imports": [
+        "FsPlacesResult"
+      ],
+      "name": "FsPlacesResult"
+    }
+  },
+  {
+    "command": "fs.rename",
+    "request": "agentmux_srv::backend::rpc_types::fs::FsRenameReq",
+    "requestName": "FsRenameReq",
+    "requestTs": {
+      "imports": [
+        "FsRenameReq"
+      ],
+      "name": "FsRenameReq"
+    },
+    "response": "agentmux_srv::backend::rpc_types::fs::FsRenameResult",
+    "responseName": "FsRenameResult",
+    "responseTs": {
+      "imports": [
+        "FsRenameResult"
+      ],
+      "name": "FsRenameResult"
+    }
+  },
+  {
+    "command": "fs.restore",
+    "request": "agentmux_srv::backend::rpc_types::fs::FsRestoreReq",
+    "requestName": "FsRestoreReq",
+    "requestTs": {
+      "imports": [
+        "FsRestoreReq"
+      ],
+      "name": "FsRestoreReq"
+    },
+    "response": "agentmux_srv::backend::rpc_types::fs::FsOpResults",
+    "responseName": "FsOpResults",
+    "responseTs": {
+      "imports": [
+        "FsOpResults"
+      ],
+      "name": "FsOpResults"
+    }
+  },
+  {
+    "command": "fs.reveal",
+    "request": "agentmux_srv::backend::rpc_types::fs::FsPathReq",
+    "requestName": "FsPathReq",
+    "requestTs": {
+      "imports": [
+        "FsPathReq"
+      ],
+      "name": "FsPathReq"
+    },
+    "response": "agentmux_srv::backend::rpc_types::fs::FsEmptyResult",
+    "responseName": "FsEmptyResult",
+    "responseTs": {
+      "imports": [
+        "FsEmptyResult"
+      ],
+      "name": "FsEmptyResult"
+    }
+  },
+  {
+    "command": "fs.trash",
+    "request": "agentmux_srv::backend::rpc_types::fs::FsTrashReq",
+    "requestName": "FsTrashReq",
+    "requestTs": {
+      "imports": [
+        "FsTrashReq"
+      ],
+      "name": "FsTrashReq"
+    },
+    "response": "agentmux_srv::backend::rpc_types::fs::FsOpResults",
+    "responseName": "FsOpResults",
+    "responseTs": {
+      "imports": [
+        "FsOpResults"
+      ],
+      "name": "FsOpResults"
+    }
+  },
+  {
+    "command": "fs.unwatch",
+    "request": "agentmux_srv::backend::rpc_types::fs::FsUnwatchReq",
+    "requestName": "FsUnwatchReq",
+    "requestTs": {
+      "imports": [
+        "FsUnwatchReq"
+      ],
+      "name": "FsUnwatchReq"
+    },
+    "response": "agentmux_srv::backend::rpc_types::fs::FsEmptyResult",
+    "responseName": "FsEmptyResult",
+    "responseTs": {
+      "imports": [
+        "FsEmptyResult"
+      ],
+      "name": "FsEmptyResult"
+    }
+  },
+  {
+    "command": "fs.watch",
+    "request": "agentmux_srv::backend::rpc_types::fs::FsWatchReq",
+    "requestName": "FsWatchReq",
+    "requestTs": {
+      "imports": [
+        "FsWatchReq"
+      ],
+      "name": "FsWatchReq"
+    },
+    "response": "agentmux_srv::backend::rpc_types::fs::FsWatchResult",
+    "responseName": "FsWatchResult",
+    "responseTs": {
+      "imports": [
+        "FsWatchResult"
+      ],
+      "name": "FsWatchResult"
+    }
+  },
+  {
+    "command": "getagentbundles",
+    "request": "agentmux_srv::backend::rpc_types::bundle::CommandGetAgentBundlesData",
+    "requestName": "CommandGetAgentBundlesData",
+    "requestTs": {
+      "imports": [
+        "CommandGetAgentBundlesData"
+      ],
+      "name": "CommandGetAgentBundlesData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::bundle::AgentBundlesResult",
+    "responseName": "AgentBundlesResult",
+    "responseTs": {
+      "imports": [
+        "AgentBundlesResult"
+      ],
+      "name": "AgentBundlesResult"
+    }
+  },
+  {
+    "command": "getagentcontent",
+    "request": "agentmux_srv::backend::rpc_types::agent::CommandGetAgentContentData",
+    "requestName": "CommandGetAgentContentData",
+    "requestTs": {
+      "imports": [
+        "CommandGetAgentContentData"
+      ],
+      "name": "CommandGetAgentContentData"
+    },
+    "response": "core::option::Option<agentmux_srv::backend::storage::content::AgentContent>",
+    "responseName": "core::option::Option<agentmux_srv::backend::storage::content::AgentContent>",
+    "responseTs": {
+      "imports": [
+        "AgentContent"
+      ],
+      "name": "AgentContent | null"
+    }
+  },
+  {
+    "command": "getagentinstance",
+    "request": "agentmux_srv::backend::rpc_types::instance::CommandGetAgentInstanceData",
+    "requestName": "CommandGetAgentInstanceData",
+    "requestTs": {
+      "imports": [
+        "CommandGetAgentInstanceData"
+      ],
+      "name": "CommandGetAgentInstanceData"
+    },
+    "response": "agentmux_srv::backend::storage::agents::AgentInstance",
+    "responseName": "AgentInstance",
+    "responseTs": {
+      "imports": [
+        "AgentInstance"
+      ],
+      "name": "AgentInstance"
+    }
+  },
+  {
+    "command": "getallagentcontent",
+    "request": "agentmux_srv::backend::rpc_types::agent::CommandGetAllAgentContentData",
+    "requestName": "CommandGetAllAgentContentData",
+    "requestTs": {
+      "imports": [
+        "CommandGetAllAgentContentData"
+      ],
+      "name": "CommandGetAllAgentContentData"
+    },
+    "response": "alloc::vec::Vec<agentmux_srv::backend::storage::content::AgentContent>",
+    "responseName": "alloc::vec::Vec<agentmux_srv::backend::storage::content::AgentContent>",
+    "responseTs": {
+      "imports": [
+        "AgentContent"
+      ],
+      "name": "Array<AgentContent>"
+    }
+  },
+  {
+    "command": "getclaudeglobalconfig",
+    "request": "agentmux_srv::backend::rpc_types::bundle::CommandGetClaudeGlobalConfigData",
+    "requestName": "CommandGetClaudeGlobalConfigData",
+    "requestTs": {
+      "imports": [
+        "CommandGetClaudeGlobalConfigData"
+      ],
+      "name": "CommandGetClaudeGlobalConfigData"
+    },
+    "response": "agentmux_srv::server::agent_handlers::bundle::ClaudeGlobalConfig",
+    "responseName": "ClaudeGlobalConfig",
+    "responseTs": {
+      "imports": [
+        "ClaudeGlobalConfig"
+      ],
+      "name": "ClaudeGlobalConfig"
+    }
+  },
+  {
+    "command": "getdrone",
+    "request": "agentmux_srv::server::drone_handlers::GetDroneReq",
+    "requestName": "GetDroneReq",
+    "requestTs": {
+      "imports": [
+        "GetDroneReq"
+      ],
+      "name": "GetDroneReq"
+    },
+    "response": "core::option::Option<agentmux_srv::drone::types::DroneDefinition>",
+    "responseName": "core::option::Option<agentmux_srv::drone::types::DroneDefinition>",
+    "responseTs": {
+      "imports": [
+        "DroneDefinition"
+      ],
+      "name": "DroneDefinition | null"
+    }
+  },
+  {
+    "command": "geteditorhome",
+    "request": "core::option::Option<agentmux_srv::backend::rpc_types::editor_read::EditorRootsReq>",
+    "requestName": "core::option::Option<agentmux_srv::backend::rpc_types::editor_read::EditorRootsReq>",
+    "requestTs": {
+      "imports": [
+        "EditorRootsReq"
+      ],
+      "name": "EditorRootsReq | null"
+    },
+    "response": "agentmux_srv::backend::rpc_types::editor_read::GetEditorHomeResult",
+    "responseName": "GetEditorHomeResult",
+    "responseTs": {
+      "imports": [
+        "GetEditorHomeResult"
+      ],
+      "name": "GetEditorHomeResult"
+    }
+  },
+  {
+    "command": "geteditorroots",
+    "request": "core::option::Option<agentmux_srv::backend::rpc_types::editor_read::EditorRootsReq>",
+    "requestName": "core::option::Option<agentmux_srv::backend::rpc_types::editor_read::EditorRootsReq>",
+    "requestTs": {
+      "imports": [
+        "EditorRootsReq"
+      ],
+      "name": "EditorRootsReq | null"
+    },
+    "response": "agentmux_srv::backend::rpc_types::editor_read::GetEditorRootsResult",
+    "responseName": "GetEditorRootsResult",
+    "responseTs": {
+      "imports": [
+        "GetEditorRootsResult"
+      ],
+      "name": "GetEditorRootsResult"
+    }
+  },
+  {
+    "command": "getfullconfig",
+    "request": "core::option::Option<agentmux_srv::backend::rpc_types::websocket::NoArgsReq>",
+    "requestName": "core::option::Option<agentmux_srv::backend::rpc_types::websocket::NoArgsReq>",
+    "requestTs": {
+      "imports": [
+        "NoArgsReq"
+      ],
+      "name": "NoArgsReq | null"
+    },
+    "response": "serde_json::value::Value",
+    "responseName": "Value",
+    "responseTs": {
+      "imports": [
+        "JsonValue"
+      ],
+      "name": "JsonValue"
+    }
+  },
+  {
+    "command": "getidentityaccount",
+    "request": "agentmux_srv::backend::rpc_types::identity::CommandGetIdentityAccountData",
+    "requestName": "CommandGetIdentityAccountData",
+    "requestTs": {
+      "imports": [
+        "CommandGetIdentityAccountData"
+      ],
+      "name": "CommandGetIdentityAccountData"
+    },
+    "response": "agentmux_srv::backend::storage::identities::IdentityAccount",
+    "responseName": "IdentityAccount",
+    "responseTs": {
+      "imports": [
+        "IdentityAccount"
+      ],
+      "name": "IdentityAccount"
+    }
+  },
+  {
+    "command": "getmemory",
+    "request": "agentmux_srv::backend::rpc_types::bundle::CommandGetBundleData",
+    "requestName": "CommandGetBundleData",
+    "requestTs": {
+      "imports": [
+        "CommandGetBundleData"
+      ],
+      "name": "CommandGetBundleData"
+    },
+    "response": "agentmux_srv::backend::storage::bundles::Bundle",
+    "responseName": "Bundle",
+    "responseTs": {
+      "imports": [
+        "Bundle"
+      ],
+      "name": "Bundle"
+    }
+  },
+  {
+    "command": "gettoolstatus",
+    "request": "agentmux_srv::backend::rpc_types::misc::CommandGetToolStatusData",
+    "requestName": "CommandGetToolStatusData",
+    "requestTs": {
+      "imports": [
+        "CommandGetToolStatusData"
+      ],
+      "name": "CommandGetToolStatusData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::misc::GetToolStatusResult",
+    "responseName": "GetToolStatusResult",
+    "responseTs": {
+      "imports": [
+        "GetToolStatusResult"
+      ],
+      "name": "GetToolStatusResult"
+    }
+  },
+  {
+    "command": "getwaveairatelimit",
+    "request": "core::option::Option<agentmux_srv::backend::rpc_types::websocket::NoArgsReq>",
+    "requestName": "core::option::Option<agentmux_srv::backend::rpc_types::websocket::NoArgsReq>",
+    "requestTs": {
+      "imports": [
+        "NoArgsReq"
+      ],
+      "name": "NoArgsReq | null"
+    },
+    "response": "agentmux_srv::backend::rpc_types::websocket::AiRateLimitResult",
+    "responseName": "AiRateLimitResult",
+    "responseTs": {
+      "imports": [
+        "AiRateLimitResult"
+      ],
+      "name": "AiRateLimitResult"
+    }
+  },
+  {
+    "command": "globalmemory:diff",
+    "request": "agentmux_srv::backend::rpc_types::bundle::CommandGlobalMemoryDiffData",
+    "requestName": "CommandGlobalMemoryDiffData",
+    "requestTs": {
+      "imports": [
+        "CommandGlobalMemoryDiffData"
+      ],
+      "name": "CommandGlobalMemoryDiffData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::bundle::GlobalMemoryDiffResult",
+    "responseName": "GlobalMemoryDiffResult",
+    "responseTs": {
+      "imports": [
+        "GlobalMemoryDiffResult"
+      ],
+      "name": "GlobalMemoryDiffResult"
+    }
+  },
+  {
+    "command": "globalmemory:history",
+    "request": "agentmux_srv::backend::rpc_types::bundle::CommandGlobalMemoryHistoryData",
+    "requestName": "CommandGlobalMemoryHistoryData",
+    "requestTs": {
+      "imports": [
+        "CommandGlobalMemoryHistoryData"
+      ],
+      "name": "CommandGlobalMemoryHistoryData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::bundle::GlobalMemoryHistoryResult",
+    "responseName": "GlobalMemoryHistoryResult",
+    "responseTs": {
+      "imports": [
+        "GlobalMemoryHistoryResult"
+      ],
+      "name": "GlobalMemoryHistoryResult"
+    }
+  },
+  {
+    "command": "globalmemory:import",
+    "request": "agentmux_srv::backend::rpc_types::bundle::CommandGlobalMemoryImportData",
+    "requestName": "CommandGlobalMemoryImportData",
+    "requestTs": {
+      "imports": [
+        "CommandGlobalMemoryImportData"
+      ],
+      "name": "CommandGlobalMemoryImportData"
+    },
+    "response": "agentmux_srv::backend::global_memory_record::ImportReport",
+    "responseName": "ImportReport",
+    "responseTs": {
+      "imports": [
+        "GlobalMemoryImportReport"
+      ],
+      "name": "GlobalMemoryImportReport"
+    }
+  },
+  {
+    "command": "globalmemory:import_sources",
+    "request": "agentmux_srv::backend::rpc_types::bundle::CommandGlobalMemoryImportSourcesData",
+    "requestName": "CommandGlobalMemoryImportSourcesData",
+    "requestTs": {
+      "imports": [
+        "CommandGlobalMemoryImportSourcesData"
+      ],
+      "name": "CommandGlobalMemoryImportSourcesData"
+    },
+    "response": "agentmux_srv::backend::global_memory_record::ImportSources",
+    "responseName": "ImportSources",
+    "responseTs": {
+      "imports": [
+        "GlobalMemoryImportSources"
+      ],
+      "name": "GlobalMemoryImportSources"
+    }
+  },
+  {
+    "command": "globalmemory:revert",
+    "request": "agentmux_srv::backend::rpc_types::bundle::CommandGlobalMemoryRevertData",
+    "requestName": "CommandGlobalMemoryRevertData",
+    "requestTs": {
+      "imports": [
+        "CommandGlobalMemoryRevertData"
+      ],
+      "name": "CommandGlobalMemoryRevertData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::bundle::GlobalMemoryRevertResult",
+    "responseName": "GlobalMemoryRevertResult",
+    "responseTs": {
+      "imports": [
+        "GlobalMemoryRevertResult"
+      ],
+      "name": "GlobalMemoryRevertResult"
+    }
+  },
+  {
+    "command": "globalmemory:sections",
+    "request": "agentmux_srv::backend::rpc_types::bundle::CommandGlobalMemorySectionsData",
+    "requestName": "CommandGlobalMemorySectionsData",
+    "requestTs": {
+      "imports": [
+        "CommandGlobalMemorySectionsData"
+      ],
+      "name": "CommandGlobalMemorySectionsData"
+    },
+    "response": "alloc::vec::Vec<agentmux_srv::backend::storage::bundles::GlobalMemorySection>",
+    "responseName": "alloc::vec::Vec<agentmux_srv::backend::storage::bundles::GlobalMemorySection>",
+    "responseTs": {
+      "imports": [
+        "GlobalMemorySection"
+      ],
+      "name": "Array<GlobalMemorySection>"
+    }
+  },
+  {
+    "command": "hidenamedagent",
+    "request": "agentmux_srv::backend::rpc_types::instance::CommandHideNamedAgentData",
+    "requestName": "CommandHideNamedAgentData",
+    "requestTs": {
+      "imports": [
+        "CommandHideNamedAgentData"
+      ],
+      "name": "CommandHideNamedAgentData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::instance::HideNamedAgentResult",
+    "responseName": "HideNamedAgentResult",
+    "responseTs": {
+      "imports": [
+        "HideNamedAgentResult"
+      ],
+      "name": "HideNamedAgentResult"
+    }
+  },
+  {
+    "command": "identity.ensureaccountdir",
+    "request": "agentmux_srv::server::identity_handlers::EnsureAccountDirReq",
+    "requestName": "EnsureAccountDirReq",
+    "requestTs": {
+      "imports": [
+        "EnsureAccountDirReq"
+      ],
+      "name": "EnsureAccountDirReq"
+    },
+    "response": "agentmux_srv::server::identity_handlers::EnsureAccountDirResp",
+    "responseName": "EnsureAccountDirResp",
+    "responseTs": {
+      "imports": [
+        "EnsureAccountDirResp"
+      ],
+      "name": "EnsureAccountDirResp"
+    }
+  },
+  {
+    "command": "importagentfromclaw",
+    "request": "agentmux_srv::backend::rpc_types::agent::CommandImportAgentFromClawData",
+    "requestName": "CommandImportAgentFromClawData",
+    "requestTs": {
+      "imports": [
+        "CommandImportAgentFromClawData"
+      ],
+      "name": "CommandImportAgentFromClawData"
+    },
+    "response": "agentmux_srv::backend::storage::agents::AgentDefinition",
+    "responseName": "AgentDefinition",
+    "responseTs": {
+      "imports": [
+        "AgentDefinition"
+      ],
+      "name": "AgentDefinition"
+    }
+  },
+  {
+    "command": "importagents",
+    "request": "agentmux_srv::backend::rpc_types::agent::CommandImportAgentDefinitionsData",
+    "requestName": "CommandImportAgentDefinitionsData",
+    "requestTs": {
+      "imports": [
+        "CommandImportAgentDefinitionsData"
+      ],
+      "name": "CommandImportAgentDefinitionsData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::agent::ImportAgentDefinitionsResult",
+    "responseName": "ImportAgentDefinitionsResult",
+    "responseTs": {
+      "imports": [
+        "ImportAgentDefinitionsResult"
+      ],
+      "name": "ImportAgentDefinitionsResult"
+    }
+  },
+  {
+    "command": "install.cancel",
+    "request": "agentmux_srv::server::install_handlers::InstallCancelReq",
+    "requestName": "InstallCancelReq",
+    "requestTs": {
+      "imports": [
+        "InstallCancelReq"
+      ],
+      "name": "InstallCancelReq"
+    },
+    "response": "agentmux_srv::server::install_handlers::InstallCancelResult",
+    "responseName": "InstallCancelResult",
+    "responseTs": {
+      "imports": [
+        "InstallCancelResult"
+      ],
+      "name": "InstallCancelResult"
+    }
+  },
+  {
+    "command": "install.check",
+    "request": "agentmux_srv::server::install_handlers::InstallCheckReq",
+    "requestName": "InstallCheckReq",
+    "requestTs": {
+      "imports": [
+        "InstallCheckReq"
+      ],
+      "name": "InstallCheckReq"
+    },
+    "response": "agentmux_srv::server::install_handlers::InstallCheckResult",
+    "responseName": "InstallCheckResult",
+    "responseTs": {
+      "imports": [
+        "InstallCheckResult"
+      ],
+      "name": "InstallCheckResult"
+    }
+  },
+  {
+    "command": "install.start",
+    "request": "agentmux_srv::server::install_handlers::InstallStartReq",
+    "requestName": "InstallStartReq",
+    "requestTs": {
+      "imports": [
+        "InstallStartReq"
+      ],
+      "name": "InstallStartReq"
+    },
+    "response": "agentmux_srv::server::install_handlers::InstallStartResult",
+    "responseName": "InstallStartResult",
+    "responseTs": {
+      "imports": [
+        "InstallStartResult"
+      ],
+      "name": "InstallStartResult"
+    }
+  },
+  {
+    "command": "installtool",
+    "request": "agentmux_srv::backend::rpc_types::misc::CommandInstallToolData",
+    "requestName": "CommandInstallToolData",
+    "requestTs": {
+      "imports": [
+        "CommandInstallToolData"
+      ],
+      "name": "CommandInstallToolData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::misc::InstallToolResult",
+    "responseName": "InstallToolResult",
+    "responseTs": {
+      "imports": [
+        "InstallToolResult"
+      ],
+      "name": "InstallToolResult"
+    }
+  },
+  {
+    "command": "layout.open",
+    "request": "agentmux_srv::backend::rpc_types::layout::CommandLayoutOpenData",
+    "requestName": "CommandLayoutOpenData",
+    "requestTs": {
+      "imports": [
+        "CommandLayoutOpenData"
+      ],
+      "name": "CommandLayoutOpenData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::layout::LayoutOpenResult",
+    "responseName": "LayoutOpenResult",
+    "responseTs": {
+      "imports": [
+        "LayoutOpenResult"
+      ],
+      "name": "LayoutOpenResult"
+    }
+  },
+  {
+    "command": "layout.preview",
+    "request": "agentmux_srv::backend::rpc_types::layout::CommandLayoutPreviewData",
+    "requestName": "CommandLayoutPreviewData",
+    "requestTs": {
+      "imports": [
+        "CommandLayoutPreviewData"
+      ],
+      "name": "CommandLayoutPreviewData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::layout::LayoutPreviewResult",
+    "responseName": "LayoutPreviewResult",
+    "responseTs": {
+      "imports": [
+        "LayoutPreviewResult"
+      ],
+      "name": "LayoutPreviewResult"
+    }
+  },
+  {
+    "command": "layout.save",
+    "request": "agentmux_srv::backend::rpc_types::layout::CommandLayoutSaveData",
+    "requestName": "CommandLayoutSaveData",
+    "requestTs": {
+      "imports": [
+        "CommandLayoutSaveData"
+      ],
+      "name": "CommandLayoutSaveData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::layout::LayoutSaveResult",
+    "responseName": "LayoutSaveResult",
+    "responseTs": {
+      "imports": [
+        "LayoutSaveResult"
+      ],
+      "name": "LayoutSaveResult"
+    }
+  },
+  {
+    "command": "linkagentidentity",
+    "request": "agentmux_srv::backend::rpc_types::identity::CommandLinkAgentIdentityData",
+    "requestName": "CommandLinkAgentIdentityData",
+    "requestTs": {
+      "imports": [
+        "CommandLinkAgentIdentityData"
+      ],
+      "name": "CommandLinkAgentIdentityData"
+    },
+    "response": "()",
+    "responseName": "()",
+    "responseTs": {
+      "imports": [],
+      "name": "null"
+    }
+  },
+  {
+    "command": "listagenthistory",
+    "request": "agentmux_srv::backend::rpc_types::agent::CommandListAgentHistoryData",
+    "requestName": "CommandListAgentHistoryData",
+    "requestTs": {
+      "imports": [
+        "CommandListAgentHistoryData"
+      ],
+      "name": "CommandListAgentHistoryData"
+    },
+    "response": "alloc::vec::Vec<agentmux_srv::backend::storage::history::AgentHistory>",
+    "responseName": "alloc::vec::Vec<agentmux_srv::backend::storage::history::AgentHistory>",
+    "responseTs": {
+      "imports": [
+        "AgentHistory"
+      ],
+      "name": "Array<AgentHistory>"
+    }
+  },
+  {
+    "command": "listagentidentities",
+    "request": "agentmux_srv::backend::rpc_types::identity::CommandListAgentIdentitiesData",
+    "requestName": "CommandListAgentIdentitiesData",
+    "requestTs": {
+      "imports": [
+        "CommandListAgentIdentitiesData"
+      ],
+      "name": "CommandListAgentIdentitiesData"
+    },
+    "response": "alloc::vec::Vec<agentmux_srv::backend::storage::identities::AgentIdentityLink>",
+    "responseName": "alloc::vec::Vec<agentmux_srv::backend::storage::identities::AgentIdentityLink>",
+    "responseTs": {
+      "imports": [
+        "AgentIdentityLink"
+      ],
+      "name": "Array<AgentIdentityLink>"
+    }
+  },
+  {
+    "command": "listagentinstances",
+    "request": "core::option::Option<agentmux_srv::backend::rpc_types::instance::CommandListAgentInstancesData>",
+    "requestName": "core::option::Option<agentmux_srv::backend::rpc_types::instance::CommandListAgentInstancesData>",
+    "requestTs": {
+      "imports": [
+        "CommandListAgentInstancesData"
+      ],
+      "name": "CommandListAgentInstancesData | null"
+    },
+    "response": "alloc::vec::Vec<agentmux_srv::backend::storage::agents::AgentInstance>",
+    "responseName": "alloc::vec::Vec<agentmux_srv::backend::storage::agents::AgentInstance>",
+    "responseTs": {
+      "imports": [
+        "AgentInstance"
+      ],
+      "name": "Array<AgentInstance>"
+    }
+  },
+  {
+    "command": "listagentskills",
+    "request": "agentmux_srv::backend::rpc_types::agent::CommandListAgentSkillsData",
+    "requestName": "CommandListAgentSkillsData",
+    "requestTs": {
+      "imports": [
+        "CommandListAgentSkillsData"
+      ],
+      "name": "CommandListAgentSkillsData"
+    },
+    "response": "alloc::vec::Vec<agentmux_srv::backend::storage::skills::AgentSkill>",
+    "responseName": "alloc::vec::Vec<agentmux_srv::backend::storage::skills::AgentSkill>",
+    "responseTs": {
+      "imports": [
+        "AgentSkill"
+      ],
+      "name": "Array<AgentSkill>"
+    }
+  },
+  {
+    "command": "listallagentidentities",
+    "request": "agentmux_srv::backend::rpc_types::identity::CommandListAllAgentIdentitiesData",
+    "requestName": "CommandListAllAgentIdentitiesData",
+    "requestTs": {
+      "imports": [
+        "CommandListAllAgentIdentitiesData"
+      ],
+      "name": "CommandListAllAgentIdentitiesData"
+    },
+    "response": "alloc::vec::Vec<agentmux_srv::backend::storage::identities::AgentIdentityLink>",
+    "responseName": "alloc::vec::Vec<agentmux_srv::backend::storage::identities::AgentIdentityLink>",
+    "responseTs": {
+      "imports": [
+        "AgentIdentityLink"
+      ],
+      "name": "Array<AgentIdentityLink>"
+    }
+  },
+  {
+    "command": "listbackgroundtasks",
+    "request": "agentmux_srv::backend::rpc_types::block::CommandListBackgroundTasksData",
+    "requestName": "CommandListBackgroundTasksData",
+    "requestTs": {
+      "imports": [
+        "CommandListBackgroundTasksData"
+      ],
+      "name": "CommandListBackgroundTasksData"
+    },
+    "response": "alloc::vec::Vec<agentmux_srv::server::muxspect_handlers::BackgroundTaskView>",
+    "responseName": "alloc::vec::Vec<agentmux_srv::server::muxspect_handlers::BackgroundTaskView>",
+    "responseTs": {
+      "imports": [
+        "BackgroundTaskView"
+      ],
+      "name": "Array<BackgroundTaskView>"
+    }
+  },
+  {
+    "command": "listdroneruns",
+    "request": "agentmux_srv::server::drone_handlers::ListRunsReq",
+    "requestName": "ListRunsReq",
+    "requestTs": {
+      "imports": [
+        "ListRunsReq"
+      ],
+      "name": "ListRunsReq"
+    },
+    "response": "alloc::vec::Vec<agentmux_srv::drone::types::DroneRun>",
+    "responseName": "alloc::vec::Vec<agentmux_srv::drone::types::DroneRun>",
+    "responseTs": {
+      "imports": [
+        "DroneRun"
+      ],
+      "name": "Array<DroneRun>"
+    }
+  },
+  {
+    "command": "listdrones",
+    "request": "core::option::Option<agentmux_srv::server::drone_handlers::ListDronesReq>",
+    "requestName": "core::option::Option<agentmux_srv::server::drone_handlers::ListDronesReq>",
+    "requestTs": {
+      "imports": [
+        "ListDronesReq"
+      ],
+      "name": "ListDronesReq | null"
+    },
+    "response": "alloc::vec::Vec<agentmux_srv::drone::types::DroneDefinition>",
+    "responseName": "alloc::vec::Vec<agentmux_srv::drone::types::DroneDefinition>",
+    "responseTs": {
+      "imports": [
+        "DroneDefinition"
+      ],
+      "name": "Array<DroneDefinition>"
+    }
+  },
+  {
+    "command": "listeditordir",
+    "request": "agentmux_srv::backend::rpc_types::editor_read::ListEditorDirReq",
+    "requestName": "ListEditorDirReq",
+    "requestTs": {
+      "imports": [
+        "ListEditorDirReq"
+      ],
+      "name": "ListEditorDirReq"
+    },
+    "response": "agentmux_srv::backend::rpc_types::editor_read::ListEditorDirResult",
+    "responseName": "ListEditorDirResult",
+    "responseTs": {
+      "imports": [
+        "ListEditorDirResult"
+      ],
+      "name": "ListEditorDirResult"
+    }
+  },
+  {
+    "command": "listidentityaccounts",
+    "request": "agentmux_srv::backend::rpc_types::identity::CommandListIdentityAccountsData",
+    "requestName": "CommandListIdentityAccountsData",
+    "requestTs": {
+      "imports": [
+        "CommandListIdentityAccountsData"
+      ],
+      "name": "CommandListIdentityAccountsData"
+    },
+    "response": "alloc::vec::Vec<agentmux_srv::backend::storage::identities::IdentityAccount>",
+    "responseName": "alloc::vec::Vec<agentmux_srv::backend::storage::identities::IdentityAccount>",
+    "responseTs": {
+      "imports": [
+        "IdentityAccount"
+      ],
+      "name": "Array<IdentityAccount>"
+    }
+  },
+  {
+    "command": "listmemories",
+    "request": "agentmux_srv::backend::rpc_types::bundle::CommandListBundlesData",
+    "requestName": "CommandListBundlesData",
+    "requestTs": {
+      "imports": [
+        "CommandListBundlesData"
+      ],
+      "name": "CommandListBundlesData"
+    },
+    "response": "alloc::vec::Vec<agentmux_srv::backend::storage::bundles::Bundle>",
+    "responseName": "alloc::vec::Vec<agentmux_srv::backend::storage::bundles::Bundle>",
+    "responseTs": {
+      "imports": [
+        "Bundle"
+      ],
+      "name": "Array<Bundle>"
+    }
+  },
+  {
+    "command": "lspsend",
+    "request": "agentmux_srv::backend::rpc_types::lsp::LspSendReq",
+    "requestName": "LspSendReq",
+    "requestTs": {
+      "imports": [
+        "LspSendReq"
+      ],
+      "name": "LspSendReq"
+    },
+    "response": "()",
+    "responseName": "()",
+    "responseTs": {
+      "imports": [],
+      "name": "null"
+    }
+  },
+  {
+    "command": "lspstart",
+    "request": "agentmux_srv::backend::rpc_types::lsp::LspStartReq",
+    "requestName": "LspStartReq",
+    "requestTs": {
+      "imports": [
+        "LspStartReq"
+      ],
+      "name": "LspStartReq"
+    },
+    "response": "agentmux_srv::backend::rpc_types::lsp::LspStartResult",
+    "responseName": "LspStartResult",
+    "responseTs": {
+      "imports": [
+        "LspStartResult"
+      ],
+      "name": "LspStartResult"
+    }
+  },
+  {
+    "command": "lspstop",
+    "request": "agentmux_srv::backend::rpc_types::lsp::LspStopReq",
+    "requestName": "LspStopReq",
+    "requestTs": {
+      "imports": [
+        "LspStopReq"
+      ],
+      "name": "LspStopReq"
+    },
+    "response": "()",
+    "responseName": "()",
+    "responseTs": {
+      "imports": [],
+      "name": "null"
+    }
+  },
+  {
+    "command": "mcp.bind",
+    "request": "agentmux_srv::backend::rpc_types::mcp::McpAgentBindingData",
+    "requestName": "McpAgentBindingData",
+    "requestTs": {
+      "imports": [
+        "McpAgentBindingData"
+      ],
+      "name": "McpAgentBindingData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::mcp::McpBindResult",
+    "responseName": "McpBindResult",
+    "responseTs": {
+      "imports": [
+        "McpBindResult"
+      ],
+      "name": "McpBindResult"
+    }
+  },
+  {
+    "command": "mcp.catalog.bind",
+    "request": "agentmux_srv::backend::rpc_types::mcp::McpAgentBindingData",
+    "requestName": "McpAgentBindingData",
+    "requestTs": {
+      "imports": [
+        "McpAgentBindingData"
+      ],
+      "name": "McpAgentBindingData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::mcp::McpBindResult",
+    "responseName": "McpBindResult",
+    "responseTs": {
+      "imports": [
+        "McpBindResult"
+      ],
+      "name": "McpBindResult"
+    }
+  },
+  {
+    "command": "mcp.catalog.delete",
+    "request": "agentmux_srv::backend::rpc_types::mcp::McpCatalogItemData",
+    "requestName": "McpCatalogItemData",
+    "requestTs": {
+      "imports": [
+        "McpCatalogItemData"
+      ],
+      "name": "McpCatalogItemData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::mcp::McpDeleteResult",
+    "responseName": "McpDeleteResult",
+    "responseTs": {
+      "imports": [
+        "McpDeleteResult"
+      ],
+      "name": "McpDeleteResult"
+    }
+  },
+  {
+    "command": "mcp.catalog.list",
+    "request": "agentmux_srv::backend::rpc_types::mcp::McpCatalogListData",
+    "requestName": "McpCatalogListData",
+    "requestTs": {
+      "imports": [
+        "McpCatalogListData"
+      ],
+      "name": "McpCatalogListData"
+    },
+    "response": "alloc::vec::Vec<agentmux_srv::backend::storage::mcp_servers::McpServerCatalogItem>",
+    "responseName": "alloc::vec::Vec<agentmux_srv::backend::storage::mcp_servers::McpServerCatalogItem>",
+    "responseTs": {
+      "imports": [
+        "McpServerCatalogItem"
+      ],
+      "name": "Array<McpServerCatalogItem>"
+    }
+  },
+  {
+    "command": "mcp.catalog.list_for_agent",
+    "request": "agentmux_srv::backend::rpc_types::mcp::McpAgentScopeData",
+    "requestName": "McpAgentScopeData",
+    "requestTs": {
+      "imports": [
+        "McpAgentScopeData"
+      ],
+      "name": "McpAgentScopeData"
+    },
+    "response": "alloc::vec::Vec<agentmux_srv::backend::storage::mcp_servers::McpServerListItem>",
+    "responseName": "alloc::vec::Vec<agentmux_srv::backend::storage::mcp_servers::McpServerListItem>",
+    "responseTs": {
+      "imports": [
+        "McpServerListItem"
+      ],
+      "name": "Array<McpServerListItem>"
+    }
+  },
+  {
+    "command": "mcp.catalog.probe",
+    "request": "agentmux_srv::backend::rpc_types::mcp::McpCatalogItemData",
+    "requestName": "McpCatalogItemData",
+    "requestTs": {
+      "imports": [
+        "McpCatalogItemData"
+      ],
+      "name": "McpCatalogItemData"
+    },
+    "response": "agentmux_srv::backend::mcp_probe::ProbeResult",
+    "responseName": "ProbeResult",
+    "responseTs": {
+      "imports": [
+        "ProbeResult"
+      ],
+      "name": "ProbeResult"
+    }
+  },
+  {
+    "command": "mcp.catalog.set_reach",
+    "request": "agentmux_srv::backend::rpc_types::mcp::CommandMcpCatalogSetReachData",
+    "requestName": "CommandMcpCatalogSetReachData",
+    "requestTs": {
+      "imports": [
+        "CommandMcpCatalogSetReachData"
+      ],
+      "name": "CommandMcpCatalogSetReachData"
+    },
+    "response": "agentmux_srv::backend::storage::mcp_servers::McpServerReach",
+    "responseName": "McpServerReach",
+    "responseTs": {
+      "imports": [
+        "McpServerReach"
+      ],
+      "name": "McpServerReach"
+    }
+  },
+  {
+    "command": "mcp.catalog.unbind",
+    "request": "agentmux_srv::backend::rpc_types::mcp::McpAgentBindingData",
+    "requestName": "McpAgentBindingData",
+    "requestTs": {
+      "imports": [
+        "McpAgentBindingData"
+      ],
+      "name": "McpAgentBindingData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::mcp::McpUnbindResult",
+    "responseName": "McpUnbindResult",
+    "responseTs": {
+      "imports": [
+        "McpUnbindResult"
+      ],
+      "name": "McpUnbindResult"
+    }
+  },
+  {
+    "command": "mcp.catalog.upsert",
+    "request": "agentmux_srv::backend::rpc_types::mcp::CommandMcpCatalogUpsertData",
+    "requestName": "CommandMcpCatalogUpsertData",
+    "requestTs": {
+      "imports": [
+        "CommandMcpCatalogUpsertData"
+      ],
+      "name": "CommandMcpCatalogUpsertData"
+    },
+    "response": "agentmux_srv::backend::storage::mcp_servers::McpServer",
+    "responseName": "McpServer",
+    "responseTs": {
+      "imports": [
+        "McpServer"
+      ],
+      "name": "McpServer"
+    }
+  },
+  {
+    "command": "mcp.delete",
+    "request": "agentmux_srv::backend::rpc_types::mcp::McpAgentItemData",
+    "requestName": "McpAgentItemData",
+    "requestTs": {
+      "imports": [
+        "McpAgentItemData"
+      ],
+      "name": "McpAgentItemData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::mcp::McpDeleteResult",
+    "responseName": "McpDeleteResult",
+    "responseTs": {
+      "imports": [
+        "McpDeleteResult"
+      ],
+      "name": "McpDeleteResult"
+    }
+  },
+  {
+    "command": "mcp.get",
+    "request": "agentmux_srv::backend::rpc_types::mcp::McpAgentItemData",
+    "requestName": "McpAgentItemData",
+    "requestTs": {
+      "imports": [
+        "McpAgentItemData"
+      ],
+      "name": "McpAgentItemData"
+    },
+    "response": "core::option::Option<agentmux_srv::backend::storage::mcp_servers::McpServer>",
+    "responseName": "core::option::Option<agentmux_srv::backend::storage::mcp_servers::McpServer>",
+    "responseTs": {
+      "imports": [
+        "McpServer"
+      ],
+      "name": "McpServer | null"
+    }
+  },
+  {
+    "command": "mcp.list",
+    "request": "agentmux_srv::backend::rpc_types::mcp::McpAgentScopeData",
+    "requestName": "McpAgentScopeData",
+    "requestTs": {
+      "imports": [
+        "McpAgentScopeData"
+      ],
+      "name": "McpAgentScopeData"
+    },
+    "response": "alloc::vec::Vec<agentmux_srv::backend::storage::mcp_servers::McpServerListItem>",
+    "responseName": "alloc::vec::Vec<agentmux_srv::backend::storage::mcp_servers::McpServerListItem>",
+    "responseTs": {
+      "imports": [
+        "McpServerListItem"
+      ],
+      "name": "Array<McpServerListItem>"
+    }
+  },
+  {
+    "command": "mcp.observed.list",
+    "request": "agentmux_srv::backend::rpc_types::mcp::McpObservedListData",
+    "requestName": "McpObservedListData",
+    "requestTs": {
+      "imports": [
+        "McpObservedListData"
+      ],
+      "name": "McpObservedListData"
+    },
+    "response": "alloc::vec::Vec<agentmux_srv::backend::rpc_types::mcp::McpObservedAgent>",
+    "responseName": "alloc::vec::Vec<agentmux_srv::backend::rpc_types::mcp::McpObservedAgent>",
+    "responseTs": {
+      "imports": [
+        "McpObservedAgent"
+      ],
+      "name": "Array<McpObservedAgent>"
+    }
+  },
+  {
+    "command": "mcp.probe",
+    "request": "agentmux_srv::backend::rpc_types::mcp::McpAgentItemData",
+    "requestName": "McpAgentItemData",
+    "requestTs": {
+      "imports": [
+        "McpAgentItemData"
+      ],
+      "name": "McpAgentItemData"
+    },
+    "response": "agentmux_srv::backend::mcp_probe::ProbeResult",
+    "responseName": "ProbeResult",
+    "responseTs": {
+      "imports": [
+        "ProbeResult"
+      ],
+      "name": "ProbeResult"
+    }
+  },
+  {
+    "command": "mcp.unbind",
+    "request": "agentmux_srv::backend::rpc_types::mcp::McpAgentBindingData",
+    "requestName": "McpAgentBindingData",
+    "requestTs": {
+      "imports": [
+        "McpAgentBindingData"
+      ],
+      "name": "McpAgentBindingData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::mcp::McpUnbindResult",
+    "responseName": "McpUnbindResult",
+    "responseTs": {
+      "imports": [
+        "McpUnbindResult"
+      ],
+      "name": "McpUnbindResult"
+    }
+  },
+  {
+    "command": "mcp.upsert",
+    "request": "agentmux_srv::backend::rpc_types::mcp::CommandMcpUpsertData",
+    "requestName": "CommandMcpUpsertData",
+    "requestTs": {
+      "imports": [
+        "CommandMcpUpsertData"
+      ],
+      "name": "CommandMcpUpsertData"
+    },
+    "response": "agentmux_srv::backend::storage::mcp_servers::McpServer",
+    "responseName": "McpServer",
+    "responseTs": {
+      "imports": [
+        "McpServer"
+      ],
+      "name": "McpServer"
+    }
+  },
+  {
+    "command": "memorydelivery:claim_fallback",
+    "request": "agentmux_srv::backend::rpc_types::bundle::CommandMemoryDeliveryClaimFallbackData",
+    "requestName": "CommandMemoryDeliveryClaimFallbackData",
+    "requestTs": {
+      "imports": [
+        "CommandMemoryDeliveryClaimFallbackData"
+      ],
+      "name": "CommandMemoryDeliveryClaimFallbackData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::bundle::MemoryDeliveryClaimFallbackResult",
+    "responseName": "MemoryDeliveryClaimFallbackResult",
+    "responseTs": {
+      "imports": [
+        "MemoryDeliveryClaimFallbackResult"
+      ],
+      "name": "MemoryDeliveryClaimFallbackResult"
+    }
+  },
+  {
+    "command": "memorydelivery:compose",
+    "request": "agentmux_srv::backend::rpc_types::bundle::CommandMemoryDeliveryComposeData",
+    "requestName": "CommandMemoryDeliveryComposeData",
+    "requestTs": {
+      "imports": [
+        "CommandMemoryDeliveryComposeData"
+      ],
+      "name": "CommandMemoryDeliveryComposeData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::bundle::MemoryDeliveryComposeResult",
+    "responseName": "MemoryDeliveryComposeResult",
+    "responseTs": {
+      "imports": [
+        "MemoryDeliveryComposeResult"
+      ],
+      "name": "MemoryDeliveryComposeResult"
+    }
+  },
+  {
+    "command": "movescratchfile",
+    "request": "agentmux_srv::backend::rpc_types::editor::MoveScratchFileReq",
+    "requestName": "MoveScratchFileReq",
+    "requestTs": {
+      "imports": [
+        "MoveScratchFileReq"
+      ],
+      "name": "MoveScratchFileReq"
+    },
+    "response": "agentmux_srv::backend::rpc_types::editor::MoveScratchFileResult",
+    "responseName": "MoveScratchFileResult",
+    "responseTs": {
+      "imports": [
+        "MoveScratchFileResult"
+      ],
+      "name": "MoveScratchFileResult"
+    }
+  },
+  {
+    "command": "muxbus.cloudconfig",
+    "request": "agentmux_srv::server::muxbus_handlers::MuxBusCloudConfigReq",
+    "requestName": "MuxBusCloudConfigReq",
+    "requestTs": {
+      "imports": [
+        "MuxBusCloudConfigReq"
+      ],
+      "name": "MuxBusCloudConfigReq"
+    },
+    "response": "agentmux_srv::server::muxbus_handlers::MuxBusCloudConfigResp",
+    "responseName": "MuxBusCloudConfigResp",
+    "responseTs": {
+      "imports": [
+        "MuxBusCloudConfigResp"
+      ],
+      "name": "MuxBusCloudConfigResp"
+    }
+  },
+  {
+    "command": "muxbus.disconnect",
+    "request": "agentmux_srv::server::muxbus_handlers::MuxBusDisconnectReq",
+    "requestName": "MuxBusDisconnectReq",
+    "requestTs": {
+      "imports": [
+        "MuxBusDisconnectReq"
+      ],
+      "name": "MuxBusDisconnectReq"
+    },
+    "response": "agentmux_srv::server::muxbus_handlers::MuxBusDisconnectResp",
+    "responseName": "MuxBusDisconnectResp",
+    "responseTs": {
+      "imports": [
+        "MuxBusDisconnectResp"
+      ],
+      "name": "MuxBusDisconnectResp"
+    }
+  },
+  {
+    "command": "muxbus.login",
+    "request": "agentmux_srv::server::muxbus_handlers::MuxBusLoginReq",
+    "requestName": "MuxBusLoginReq",
+    "requestTs": {
+      "imports": [
+        "MuxBusLoginReq"
+      ],
+      "name": "MuxBusLoginReq"
+    },
+    "response": "agentmux_srv::server::muxbus_handlers::MuxBusLoginResp",
+    "responseName": "MuxBusLoginResp",
+    "responseTs": {
+      "imports": [
+        "MuxBusLoginResp"
+      ],
+      "name": "MuxBusLoginResp"
+    }
+  },
+  {
+    "command": "muxbus.login.cancel",
+    "request": "agentmux_srv::server::muxbus_handlers::MuxBusLoginCancelReq",
+    "requestName": "MuxBusLoginCancelReq",
+    "requestTs": {
+      "imports": [
+        "MuxBusLoginCancelReq"
+      ],
+      "name": "MuxBusLoginCancelReq"
+    },
+    "response": "agentmux_srv::server::muxbus_handlers::MuxBusLoginCancelResp",
+    "responseName": "MuxBusLoginCancelResp",
+    "responseTs": {
+      "imports": [
+        "MuxBusLoginCancelResp"
+      ],
+      "name": "MuxBusLoginCancelResp"
+    }
+  },
+  {
+    "command": "muxbus.status",
+    "request": "agentmux_srv::server::muxbus_handlers::MuxBusStatusReq",
+    "requestName": "MuxBusStatusReq",
+    "requestTs": {
+      "imports": [
+        "MuxBusStatusReq"
+      ],
+      "name": "MuxBusStatusReq"
+    },
+    "response": "agentmux_srv::server::muxbus_handlers::MuxBusStatusResp",
+    "responseName": "MuxBusStatusResp",
+    "responseTs": {
+      "imports": [
+        "MuxBusStatusResp"
+      ],
+      "name": "MuxBusStatusResp"
+    }
+  },
+  {
+    "command": "notify.ack",
+    "request": "agentmux_srv::server::notify_handlers::NotifyAckParams",
+    "requestName": "NotifyAckParams",
+    "requestTs": {
+      "imports": [
+        "NotifyAckParams"
+      ],
+      "name": "NotifyAckParams"
+    },
+    "response": "agentmux_srv::server::notify_handlers::NotifyAckResult",
+    "responseName": "NotifyAckResult",
+    "responseTs": {
+      "imports": [
+        "NotifyAckResult"
+      ],
+      "name": "NotifyAckResult"
+    }
+  },
+  {
+    "command": "notify.attention",
+    "request": "agentmux_srv::server::notify_handlers::NotifyNoArgs",
+    "requestName": "NotifyNoArgs",
+    "requestTs": {
+      "imports": [
+        "NotifyNoArgs"
+      ],
+      "name": "NotifyNoArgs"
+    },
+    "response": "agentmux_srv::server::notify_handlers::NotifyAttentionResult",
+    "responseName": "NotifyAttentionResult",
+    "responseTs": {
+      "imports": [
+        "NotifyAttentionResult"
+      ],
+      "name": "NotifyAttentionResult"
+    }
+  },
+  {
+    "command": "notify.emit",
+    "request": "agentmux_srv::server::notify_handlers::NotifyEmitParams",
+    "requestName": "NotifyEmitParams",
+    "requestTs": {
+      "imports": [
+        "NotifyEmitParams"
+      ],
+      "name": "NotifyEmitParams"
+    },
+    "response": "agentmux_srv::server::notify_handlers::NotifyOk",
+    "responseName": "NotifyOk",
+    "responseTs": {
+      "imports": [
+        "NotifyOk"
+      ],
+      "name": "NotifyOk"
+    }
+  },
+  {
+    "command": "notify.focus",
+    "request": "agentmux_srv::server::notify_handlers::NotifyFocusParams",
+    "requestName": "NotifyFocusParams",
+    "requestTs": {
+      "imports": [
+        "NotifyFocusParams"
+      ],
+      "name": "NotifyFocusParams"
+    },
+    "response": "agentmux_srv::server::notify_handlers::NotifyOk",
+    "responseName": "NotifyOk",
+    "responseTs": {
+      "imports": [
+        "NotifyOk"
+      ],
+      "name": "NotifyOk"
+    }
+  },
+  {
+    "command": "notify.takeactivation",
+    "request": "agentmux_srv::server::notify_handlers::NotifyTakeActivationParams",
+    "requestName": "NotifyTakeActivationParams",
+    "requestTs": {
+      "imports": [
+        "NotifyTakeActivationParams"
+      ],
+      "name": "NotifyTakeActivationParams"
+    },
+    "response": "agentmux_srv::server::notify_handlers::NotifyTakeActivationResult",
+    "responseName": "NotifyTakeActivationResult",
+    "responseTs": {
+      "imports": [
+        "NotifyTakeActivationResult"
+      ],
+      "name": "NotifyTakeActivationResult"
+    }
+  },
+  {
+    "command": "notify.test",
+    "request": "agentmux_srv::server::notify_handlers::NotifyNoArgs",
+    "requestName": "NotifyNoArgs",
+    "requestTs": {
+      "imports": [
+        "NotifyNoArgs"
+      ],
+      "name": "NotifyNoArgs"
+    },
+    "response": "agentmux_srv::server::notify_handlers::NotifyOk",
+    "responseName": "NotifyOk",
+    "responseTs": {
+      "imports": [
+        "NotifyOk"
+      ],
+      "name": "NotifyOk"
+    }
+  },
+  {
+    "command": "openinshell",
+    "request": "agentmux_srv::backend::rpc_types::editor::OpenInShellReq",
+    "requestName": "OpenInShellReq",
+    "requestTs": {
+      "imports": [
+        "OpenInShellReq"
+      ],
+      "name": "OpenInShellReq"
+    },
+    "response": "()",
+    "responseName": "()",
+    "responseTs": {
+      "imports": [],
+      "name": "null"
+    }
+  },
+  {
+    "command": "presence.publish-now",
+    "request": "core::option::Option<agentmux_srv::backend::rpc_types::websocket::NoArgsReq>",
+    "requestName": "core::option::Option<agentmux_srv::backend::rpc_types::websocket::NoArgsReq>",
+    "requestTs": {
+      "imports": [
+        "NoArgsReq"
+      ],
+      "name": "NoArgsReq | null"
+    },
+    "response": "agentmux_srv::backend::rpc_types::presence::PresencePublishNowResult",
+    "responseName": "PresencePublishNowResult",
+    "responseTs": {
+      "imports": [
+        "PresencePublishNowResult"
+      ],
+      "name": "PresencePublishNowResult"
+    }
+  },
+  {
+    "command": "presence.status",
+    "request": "core::option::Option<agentmux_srv::backend::rpc_types::websocket::NoArgsReq>",
+    "requestName": "core::option::Option<agentmux_srv::backend::rpc_types::websocket::NoArgsReq>",
+    "requestTs": {
+      "imports": [
+        "NoArgsReq"
+      ],
+      "name": "NoArgsReq | null"
+    },
+    "response": "agentmux_srv::backend::rpc_types::presence::PresenceStatusResult",
+    "responseName": "PresenceStatusResult",
+    "responseTs": {
+      "imports": [
+        "PresenceStatusResult"
+      ],
+      "name": "PresenceStatusResult"
+    }
+  },
+  {
+    "command": "provider.ensureauthdir",
+    "request": "agentmux_srv::backend::rpc_types::block::EnsureProviderAuthDirReq",
+    "requestName": "EnsureProviderAuthDirReq",
+    "requestTs": {
+      "imports": [
+        "EnsureProviderAuthDirReq"
+      ],
+      "name": "EnsureProviderAuthDirReq"
+    },
+    "response": "agentmux_srv::backend::rpc_types::block::EnsureProviderAuthDirResult",
+    "responseName": "EnsureProviderAuthDirResult",
+    "responseTs": {
+      "imports": [
+        "EnsureProviderAuthDirResult"
+      ],
+      "name": "EnsureProviderAuthDirResult"
+    }
+  },
+  {
+    "command": "providers.models",
+    "request": "agentmux_srv::server::providers_handlers::ProvidersModelsParams",
+    "requestName": "ProvidersModelsParams",
+    "requestTs": {
+      "imports": [
+        "ProvidersModelsParams"
+      ],
+      "name": "ProvidersModelsParams"
+    },
+    "response": "agentmux_srv::server::providers_handlers::ProvidersModelsResult",
+    "responseName": "ProvidersModelsResult",
+    "responseTs": {
+      "imports": [
+        "ProvidersModelsResult"
+      ],
+      "name": "ProvidersModelsResult"
+    }
+  },
+  {
+    "command": "reactive.registrations",
+    "request": "agentmux_srv::server::reactive::ReactiveRegistrationsParams",
+    "requestName": "ReactiveRegistrationsParams",
+    "requestTs": {
+      "imports": [
+        "ReactiveRegistrationsParams"
+      ],
+      "name": "ReactiveRegistrationsParams"
+    },
+    "response": "agentmux_srv::server::reactive::ReactiveRegistrationsResult",
+    "responseName": "ReactiveRegistrationsResult",
+    "responseTs": {
+      "imports": [
+        "ReactiveRegistrationsResult"
+      ],
+      "name": "ReactiveRegistrationsResult"
+    }
+  },
+  {
+    "command": "readeditorfile",
+    "request": "agentmux_srv::backend::rpc_types::editor_read::CommandReadEditorFileData",
+    "requestName": "CommandReadEditorFileData",
+    "requestTs": {
+      "imports": [
+        "CommandReadEditorFileData"
+      ],
+      "name": "CommandReadEditorFileData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::editor_read::CommandReadEditorFileResult",
+    "responseName": "CommandReadEditorFileResult",
+    "responseTs": {
+      "imports": [
+        "CommandReadEditorFileResult"
+      ],
+      "name": "CommandReadEditorFileResult"
+    }
+  },
+  {
+    "command": "remoteadd",
+    "request": "agentmux_srv::backend::rpc_types::remotes::CommandRemoteAddData",
+    "requestName": "CommandRemoteAddData",
+    "requestTs": {
+      "imports": [
+        "CommandRemoteAddData"
+      ],
+      "name": "CommandRemoteAddData"
+    },
+    "response": "()",
+    "responseName": "()",
+    "responseTs": {
+      "imports": [],
+      "name": "null"
+    }
+  },
+  {
+    "command": "remoteagentrevoke",
+    "request": "agentmux_srv::backend::rpc_types::remotes::CommandRemoteAgentRevokeData",
+    "requestName": "CommandRemoteAgentRevokeData",
+    "requestTs": {
+      "imports": [
+        "CommandRemoteAgentRevokeData"
+      ],
+      "name": "CommandRemoteAgentRevokeData"
+    },
+    "response": "()",
+    "responseName": "()",
+    "responseTs": {
+      "imports": [],
+      "name": "null"
+    }
+  },
+  {
+    "command": "remoteforget",
+    "request": "agentmux_srv::backend::rpc_types::remotes::CommandRemoteForgetData",
+    "requestName": "CommandRemoteForgetData",
+    "requestTs": {
+      "imports": [
+        "CommandRemoteForgetData"
+      ],
+      "name": "CommandRemoteForgetData"
+    },
+    "response": "()",
+    "responseName": "()",
+    "responseTs": {
+      "imports": [],
+      "name": "null"
+    }
+  },
+  {
+    "command": "remotehelperremove",
+    "request": "agentmux_srv::backend::rpc_types::remotes::CommandRemoteHelperRemoveData",
+    "requestName": "CommandRemoteHelperRemoveData",
+    "requestTs": {
+      "imports": [
+        "CommandRemoteHelperRemoveData"
+      ],
+      "name": "CommandRemoteHelperRemoveData"
+    },
+    "response": "()",
+    "responseName": "()",
+    "responseTs": {
+      "imports": [],
+      "name": "null"
+    }
+  },
+  {
+    "command": "remotesetconfig",
+    "request": "agentmux_srv::backend::rpc_types::remotes::CommandRemoteSetConfigData",
+    "requestName": "CommandRemoteSetConfigData",
+    "requestTs": {
+      "imports": [
+        "CommandRemoteSetConfigData"
+      ],
+      "name": "CommandRemoteSetConfigData"
+    },
+    "response": "()",
+    "responseName": "()",
+    "responseTs": {
+      "imports": [],
+      "name": "null"
+    }
+  },
+  {
+    "command": "remoteslist",
+    "request": "agentmux_srv::backend::rpc_types::remotes::CommandRemotesListData",
+    "requestName": "CommandRemotesListData",
+    "requestTs": {
+      "imports": [
+        "CommandRemotesListData"
+      ],
+      "name": "CommandRemotesListData"
+    },
+    "response": "alloc::vec::Vec<agentmux_srv::backend::rpc_types::remotes::RemoteRecord>",
+    "responseName": "alloc::vec::Vec<agentmux_srv::backend::rpc_types::remotes::RemoteRecord>",
+    "responseTs": {
+      "imports": [
+        "RemoteRecord"
+      ],
+      "name": "Array<RemoteRecord>"
+    }
+  },
+  {
+    "command": "remotesshlocate",
+    "request": "agentmux_srv::backend::rpc_types::remotes::CommandRemoteSshLocateData",
+    "requestName": "CommandRemoteSshLocateData",
+    "requestTs": {
+      "imports": [
+        "CommandRemoteSshLocateData"
+      ],
+      "name": "CommandRemoteSshLocateData"
+    },
+    "response": "core::option::Option<agentmux_srv::backend::rpc_types::remotes::RemoteSshLocation>",
+    "responseName": "core::option::Option<agentmux_srv::backend::rpc_types::remotes::RemoteSshLocation>",
+    "responseTs": {
+      "imports": [
+        "RemoteSshLocation"
+      ],
+      "name": "RemoteSshLocation | null"
+    }
+  },
+  {
+    "command": "remotetest",
+    "request": "agentmux_srv::backend::rpc_types::remotes::CommandRemoteTestData",
+    "requestName": "CommandRemoteTestData",
+    "requestTs": {
+      "imports": [
+        "CommandRemoteTestData"
+      ],
+      "name": "CommandRemoteTestData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::remotes::RemoteTestResult",
+    "responseName": "RemoteTestResult",
+    "responseTs": {
+      "imports": [
+        "RemoteTestResult"
+      ],
+      "name": "RemoteTestResult"
+    }
+  },
+  {
+    "command": "renameagentdefinitiontitle",
+    "request": "agentmux_srv::backend::rpc_types::agent::CommandRenameAgentDefinitionTitleData",
+    "requestName": "CommandRenameAgentDefinitionTitleData",
+    "requestTs": {
+      "imports": [
+        "CommandRenameAgentDefinitionTitleData"
+      ],
+      "name": "CommandRenameAgentDefinitionTitleData"
+    },
+    "response": "agentmux_srv::backend::storage::agents::AgentDefinition",
+    "responseName": "AgentDefinition",
+    "responseTs": {
+      "imports": [
+        "AgentDefinition"
+      ],
+      "name": "AgentDefinition"
+    }
+  },
+  {
+    "command": "renameeditorfile",
+    "request": "agentmux_srv::backend::rpc_types::editor::RenameEditorFileReq",
+    "requestName": "RenameEditorFileReq",
+    "requestTs": {
+      "imports": [
+        "RenameEditorFileReq"
+      ],
+      "name": "RenameEditorFileReq"
+    },
+    "response": "agentmux_srv::backend::rpc_types::editor::RenameEditorFileResult",
+    "responseName": "RenameEditorFileResult",
+    "responseTs": {
+      "imports": [
+        "RenameEditorFileResult"
+      ],
+      "name": "RenameEditorFileResult"
+    }
+  },
+  {
+    "command": "reorderglobalbrain",
+    "request": "agentmux_srv::backend::rpc_types::bundle::CommandReorderGlobalBundlesData",
+    "requestName": "CommandReorderGlobalBundlesData",
+    "requestTs": {
+      "imports": [
+        "CommandReorderGlobalBundlesData"
+      ],
+      "name": "CommandReorderGlobalBundlesData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::bundle::ReorderGlobalBundlesResult",
+    "responseName": "ReorderGlobalBundlesResult",
+    "responseTs": {
+      "imports": [
+        "ReorderGlobalBundlesResult"
+      ],
+      "name": "ReorderGlobalBundlesResult"
+    }
+  },
+  {
+    "command": "reseedagents",
+    "request": "core::option::Option<agentmux_srv::backend::rpc_types::agent::CommandReseedAgentsData>",
+    "requestName": "core::option::Option<agentmux_srv::backend::rpc_types::agent::CommandReseedAgentsData>",
+    "requestTs": {
+      "imports": [
+        "CommandReseedAgentsData"
+      ],
+      "name": "CommandReseedAgentsData | null"
+    },
+    "response": "agentmux_srv::backend::rpc_types::agent::ReseedAgentsResult",
+    "responseName": "ReseedAgentsResult",
+    "responseTs": {
+      "imports": [
+        "ReseedAgentsResult"
+      ],
+      "name": "ReseedAgentsResult"
+    }
+  },
+  {
+    "command": "resolve.prereqs",
+    "request": "agentmux_srv::server::install_handlers::ResolvePrereqsReq",
+    "requestName": "ResolvePrereqsReq",
+    "requestTs": {
+      "imports": [
+        "ResolvePrereqsReq"
+      ],
+      "name": "ResolvePrereqsReq"
+    },
+    "response": "agentmux_srv::server::install_handlers::ResolvePrereqsResult",
+    "responseName": "ResolvePrereqsResult",
+    "responseTs": {
+      "imports": [
+        "ResolvePrereqsResult"
+      ],
+      "name": "ResolvePrereqsResult"
+    }
+  },
+  {
+    "command": "resolvecli",
+    "request": "agentmux_srv::backend::rpc_types::block::CommandResolveCliData",
+    "requestName": "CommandResolveCliData",
+    "requestTs": {
+      "imports": [
+        "CommandResolveCliData"
+      ],
+      "name": "CommandResolveCliData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::block::ResolveCliResult",
+    "responseName": "ResolveCliResult",
+    "responseTs": {
+      "imports": [
+        "ResolveCliResult"
+      ],
+      "name": "ResolveCliResult"
+    }
+  },
+  {
+    "command": "routeannounce",
+    "request": "serde_json::value::Value",
+    "requestName": "Value",
+    "requestTs": {
+      "imports": [
+        "JsonValue"
+      ],
+      "name": "JsonValue"
+    },
+    "response": "()",
+    "responseName": "()",
+    "responseTs": {
+      "imports": [],
+      "name": "null"
+    }
+  },
+  {
+    "command": "routeunannounce",
+    "request": "serde_json::value::Value",
+    "requestName": "Value",
+    "requestTs": {
+      "imports": [
+        "JsonValue"
+      ],
+      "name": "JsonValue"
+    },
+    "response": "()",
+    "responseName": "()",
+    "responseTs": {
+      "imports": [],
+      "name": "null"
+    }
+  },
+  {
+    "command": "runclilogin",
+    "request": "agentmux_srv::backend::rpc_types::block::CommandRunCliLoginData",
+    "requestName": "CommandRunCliLoginData",
+    "requestTs": {
+      "imports": [
+        "CommandRunCliLoginData"
+      ],
+      "name": "CommandRunCliLoginData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::block::RunCliLoginResult",
+    "responseName": "RunCliLoginResult",
+    "responseTs": {
+      "imports": [
+        "RunCliLoginResult"
+      ],
+      "name": "RunCliLoginResult"
+    }
+  },
+  {
+    "command": "rundrone",
+    "request": "agentmux_srv::server::drone_handlers::RunDroneReq",
+    "requestName": "RunDroneReq",
+    "requestTs": {
+      "imports": [
+        "RunDroneReq"
+      ],
+      "name": "RunDroneReq"
+    },
+    "response": "agentmux_srv::server::drone_handlers::RunResp",
+    "responseName": "RunResp",
+    "responseTs": {
+      "imports": [
+        "RunDroneResp"
+      ],
+      "name": "RunDroneResp"
+    }
+  },
+  {
+    "command": "searchagenthistory",
+    "request": "agentmux_srv::backend::rpc_types::agent::CommandSearchAgentHistoryData",
+    "requestName": "CommandSearchAgentHistoryData",
+    "requestTs": {
+      "imports": [
+        "CommandSearchAgentHistoryData"
+      ],
+      "name": "CommandSearchAgentHistoryData"
+    },
+    "response": "alloc::vec::Vec<agentmux_srv::backend::storage::history::AgentHistory>",
+    "responseName": "alloc::vec::Vec<agentmux_srv::backend::storage::history::AgentHistory>",
+    "responseTs": {
+      "imports": [
+        "AgentHistory"
+      ],
+      "name": "Array<AgentHistory>"
+    }
+  },
+  {
+    "command": "session:activity_summary",
+    "request": "agentmux_srv::backend::rpc_types::session::CommandActivitySummaryData",
+    "requestName": "CommandActivitySummaryData",
+    "requestTs": {
+      "imports": [
+        "CommandActivitySummaryData"
+      ],
+      "name": "CommandActivitySummaryData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::session::ActivitySummaryResult",
+    "responseName": "ActivitySummaryResult",
+    "responseTs": {
+      "imports": [
+        "ActivitySummaryResult"
+      ],
+      "name": "ActivitySummaryResult"
+    }
+  },
+  {
+    "command": "session:archive",
+    "request": "agentmux_srv::backend::rpc_types::session::CommandSessionArchiveData",
+    "requestName": "CommandSessionArchiveData",
+    "requestTs": {
+      "imports": [
+        "CommandSessionArchiveData"
+      ],
+      "name": "CommandSessionArchiveData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::session::SessionArchiveResult",
+    "responseName": "SessionArchiveResult",
+    "responseTs": {
+      "imports": [
+        "SessionArchiveResult"
+      ],
+      "name": "SessionArchiveResult"
+    }
+  },
+  {
+    "command": "session:export",
+    "request": "agentmux_srv::backend::rpc_types::session::CommandSessionExportData",
+    "requestName": "CommandSessionExportData",
+    "requestTs": {
+      "imports": [
+        "CommandSessionExportData"
+      ],
+      "name": "CommandSessionExportData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::session::SessionExportResult",
+    "responseName": "SessionExportResult",
+    "responseTs": {
+      "imports": [
+        "SessionExportResult"
+      ],
+      "name": "SessionExportResult"
+    }
+  },
+  {
+    "command": "session:next_prompt_suggestion",
+    "request": "agentmux_srv::backend::rpc_types::session::CommandNextPromptSuggestionData",
+    "requestName": "CommandNextPromptSuggestionData",
+    "requestTs": {
+      "imports": [
+        "CommandNextPromptSuggestionData"
+      ],
+      "name": "CommandNextPromptSuggestionData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::session::NextPromptSuggestionResult",
+    "responseName": "NextPromptSuggestionResult",
+    "responseTs": {
+      "imports": [
+        "NextPromptSuggestionResult"
+      ],
+      "name": "NextPromptSuggestionResult"
+    }
+  },
+  {
+    "command": "session:restore",
+    "request": "agentmux_srv::backend::rpc_types::session::CommandSessionRestoreData",
+    "requestName": "CommandSessionRestoreData",
+    "requestTs": {
+      "imports": [
+        "CommandSessionRestoreData"
+      ],
+      "name": "CommandSessionRestoreData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::session::SessionRestoreResult",
+    "responseName": "SessionRestoreResult",
+    "responseTs": {
+      "imports": [
+        "SessionRestoreResult"
+      ],
+      "name": "SessionRestoreResult"
+    }
+  },
+  {
+    "command": "session:resume_preflight",
+    "request": "agentmux_srv::backend::rpc_types::session::CommandSessionResumePreflightData",
+    "requestName": "CommandSessionResumePreflightData",
+    "requestTs": {
+      "imports": [
+        "CommandSessionResumePreflightData"
+      ],
+      "name": "CommandSessionResumePreflightData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::session::SessionResumePreflightResult",
+    "responseName": "SessionResumePreflightResult",
+    "responseTs": {
+      "imports": [
+        "SessionResumePreflightResult"
+      ],
+      "name": "SessionResumePreflightResult"
+    }
+  },
+  {
+    "command": "setagentbundles",
+    "request": "agentmux_srv::backend::rpc_types::bundle::CommandSetAgentBundlesData",
+    "requestName": "CommandSetAgentBundlesData",
+    "requestTs": {
+      "imports": [
+        "CommandSetAgentBundlesData"
+      ],
+      "name": "CommandSetAgentBundlesData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::bundle::AgentBundlesResult",
+    "responseName": "AgentBundlesResult",
+    "responseTs": {
+      "imports": [
+        "AgentBundlesResult"
+      ],
+      "name": "AgentBundlesResult"
+    }
+  },
+  {
+    "command": "setagentcontent",
+    "request": "agentmux_srv::backend::rpc_types::agent::CommandSetAgentContentData",
+    "requestName": "CommandSetAgentContentData",
+    "requestTs": {
+      "imports": [
+        "CommandSetAgentContentData"
+      ],
+      "name": "CommandSetAgentContentData"
+    },
+    "response": "agentmux_srv::backend::storage::content::AgentContent",
+    "responseName": "AgentContent",
+    "responseTs": {
+      "imports": [
+        "AgentContent"
+      ],
+      "name": "AgentContent"
+    }
+  },
+  {
+    "command": "shellexec",
+    "request": "agentmux_srv::backend::rpc_types::block::CommandShellExecData",
+    "requestName": "CommandShellExecData",
+    "requestTs": {
+      "imports": [
+        "CommandShellExecData"
+      ],
+      "name": "CommandShellExecData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::block::ShellExecResult",
+    "responseName": "ShellExecResult",
+    "responseTs": {
+      "imports": [
+        "ShellExecResult"
+      ],
+      "name": "ShellExecResult"
+    }
+  },
+  {
+    "command": "shellstatus",
+    "request": "agentmux_srv::backend::rpc_types::block::CommandShellStatusData",
+    "requestName": "CommandShellStatusData",
+    "requestTs": {
+      "imports": [
+        "CommandShellStatusData"
+      ],
+      "name": "CommandShellStatusData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::block::ShellStatusResult",
+    "responseName": "ShellStatusResult",
+    "responseTs": {
+      "imports": [
+        "ShellStatusResult"
+      ],
+      "name": "ShellStatusResult"
+    }
+  },
+  {
+    "command": "shellstop",
+    "request": "agentmux_srv::backend::rpc_types::block::CommandShellStopData",
+    "requestName": "CommandShellStopData",
+    "requestTs": {
+      "imports": [
+        "CommandShellStopData"
+      ],
+      "name": "CommandShellStopData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::block::ShellStopResult",
+    "responseName": "ShellStopResult",
+    "responseTs": {
+      "imports": [
+        "ShellStopResult"
+      ],
+      "name": "ShellStopResult"
+    }
+  },
+  {
+    "command": "skill.bind",
+    "request": "agentmux_srv::backend::rpc_types::skill::SkillAgentBindingData",
+    "requestName": "SkillAgentBindingData",
+    "requestTs": {
+      "imports": [
+        "SkillAgentBindingData"
+      ],
+      "name": "SkillAgentBindingData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::skill::SkillBindResult",
+    "responseName": "SkillBindResult",
+    "responseTs": {
+      "imports": [
+        "SkillBindResult"
+      ],
+      "name": "SkillBindResult"
+    }
+  },
+  {
+    "command": "skill.catalog.bind",
+    "request": "agentmux_srv::backend::rpc_types::skill::SkillAgentBindingData",
+    "requestName": "SkillAgentBindingData",
+    "requestTs": {
+      "imports": [
+        "SkillAgentBindingData"
+      ],
+      "name": "SkillAgentBindingData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::skill::SkillBindResult",
+    "responseName": "SkillBindResult",
+    "responseTs": {
+      "imports": [
+        "SkillBindResult"
+      ],
+      "name": "SkillBindResult"
+    }
+  },
+  {
+    "command": "skill.catalog.bind_to_bundle",
+    "request": "agentmux_srv::backend::rpc_types::skill::SkillBundleBindingData",
+    "requestName": "SkillBundleBindingData",
+    "requestTs": {
+      "imports": [
+        "SkillBundleBindingData"
+      ],
+      "name": "SkillBundleBindingData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::skill::SkillBindResult",
+    "responseName": "SkillBindResult",
+    "responseTs": {
+      "imports": [
+        "SkillBindResult"
+      ],
+      "name": "SkillBindResult"
+    }
+  },
+  {
+    "command": "skill.catalog.delete",
+    "request": "agentmux_srv::backend::rpc_types::skill::SkillCatalogItemData",
+    "requestName": "SkillCatalogItemData",
+    "requestTs": {
+      "imports": [
+        "SkillCatalogItemData"
+      ],
+      "name": "SkillCatalogItemData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::skill::SkillDeleteResult",
+    "responseName": "SkillDeleteResult",
+    "responseTs": {
+      "imports": [
+        "SkillDeleteResult"
+      ],
+      "name": "SkillDeleteResult"
+    }
+  },
+  {
+    "command": "skill.catalog.list",
+    "request": "agentmux_srv::backend::rpc_types::skill::SkillCatalogListData",
+    "requestName": "SkillCatalogListData",
+    "requestTs": {
+      "imports": [
+        "SkillCatalogListData"
+      ],
+      "name": "SkillCatalogListData"
+    },
+    "response": "alloc::vec::Vec<agentmux_srv::backend::storage::skills::SkillCatalogItem>",
+    "responseName": "alloc::vec::Vec<agentmux_srv::backend::storage::skills::SkillCatalogItem>",
+    "responseTs": {
+      "imports": [
+        "SkillCatalogItem"
+      ],
+      "name": "Array<SkillCatalogItem>"
+    }
+  },
+  {
+    "command": "skill.catalog.list_for_agent",
+    "request": "agentmux_srv::backend::rpc_types::skill::SkillAgentScopeData",
+    "requestName": "SkillAgentScopeData",
+    "requestTs": {
+      "imports": [
+        "SkillAgentScopeData"
+      ],
+      "name": "SkillAgentScopeData"
+    },
+    "response": "alloc::vec::Vec<agentmux_srv::backend::storage::skills::SkillListItem>",
+    "responseName": "alloc::vec::Vec<agentmux_srv::backend::storage::skills::SkillListItem>",
+    "responseTs": {
+      "imports": [
+        "SkillListItem"
+      ],
+      "name": "Array<SkillListItem>"
+    }
+  },
+  {
+    "command": "skill.catalog.list_for_bundle",
+    "request": "agentmux_srv::backend::rpc_types::skill::SkillBundleScopeData",
+    "requestName": "SkillBundleScopeData",
+    "requestTs": {
+      "imports": [
+        "SkillBundleScopeData"
+      ],
+      "name": "SkillBundleScopeData"
+    },
+    "response": "alloc::vec::Vec<agentmux_srv::backend::storage::skills::SkillBundleListItem>",
+    "responseName": "alloc::vec::Vec<agentmux_srv::backend::storage::skills::SkillBundleListItem>",
+    "responseTs": {
+      "imports": [
+        "SkillBundleListItem"
+      ],
+      "name": "Array<SkillBundleListItem>"
+    }
+  },
+  {
+    "command": "skill.catalog.unbind",
+    "request": "agentmux_srv::backend::rpc_types::skill::SkillAgentBindingData",
+    "requestName": "SkillAgentBindingData",
+    "requestTs": {
+      "imports": [
+        "SkillAgentBindingData"
+      ],
+      "name": "SkillAgentBindingData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::skill::SkillUnbindResult",
+    "responseName": "SkillUnbindResult",
+    "responseTs": {
+      "imports": [
+        "SkillUnbindResult"
+      ],
+      "name": "SkillUnbindResult"
+    }
+  },
+  {
+    "command": "skill.catalog.unbind_from_bundle",
+    "request": "agentmux_srv::backend::rpc_types::skill::SkillBundleBindingData",
+    "requestName": "SkillBundleBindingData",
+    "requestTs": {
+      "imports": [
+        "SkillBundleBindingData"
+      ],
+      "name": "SkillBundleBindingData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::skill::SkillUnbindResult",
+    "responseName": "SkillUnbindResult",
+    "responseTs": {
+      "imports": [
+        "SkillUnbindResult"
+      ],
+      "name": "SkillUnbindResult"
+    }
+  },
+  {
+    "command": "skill.catalog.upsert",
+    "request": "agentmux_srv::backend::rpc_types::skill::CommandSkillCatalogUpsertData",
+    "requestName": "CommandSkillCatalogUpsertData",
+    "requestTs": {
+      "imports": [
+        "CommandSkillCatalogUpsertData"
+      ],
+      "name": "CommandSkillCatalogUpsertData"
+    },
+    "response": "agentmux_srv::backend::storage::skills::Skill",
+    "responseName": "Skill",
+    "responseTs": {
+      "imports": [
+        "Skill"
+      ],
+      "name": "Skill"
+    }
+  },
+  {
+    "command": "skill.catalog.upsert_for_bundle",
+    "request": "agentmux_srv::backend::rpc_types::skill::CommandSkillCatalogUpsertForBundleData",
+    "requestName": "CommandSkillCatalogUpsertForBundleData",
+    "requestTs": {
+      "imports": [
+        "CommandSkillCatalogUpsertForBundleData"
+      ],
+      "name": "CommandSkillCatalogUpsertForBundleData"
+    },
+    "response": "agentmux_srv::backend::storage::skills::Skill",
+    "responseName": "Skill",
+    "responseTs": {
+      "imports": [
+        "Skill"
+      ],
+      "name": "Skill"
+    }
+  },
+  {
+    "command": "skill.delete",
+    "request": "agentmux_srv::backend::rpc_types::skill::SkillAgentItemData",
+    "requestName": "SkillAgentItemData",
+    "requestTs": {
+      "imports": [
+        "SkillAgentItemData"
+      ],
+      "name": "SkillAgentItemData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::skill::SkillDeleteResult",
+    "responseName": "SkillDeleteResult",
+    "responseTs": {
+      "imports": [
+        "SkillDeleteResult"
+      ],
+      "name": "SkillDeleteResult"
+    }
+  },
+  {
+    "command": "skill.get",
+    "request": "agentmux_srv::backend::rpc_types::skill::SkillAgentItemData",
+    "requestName": "SkillAgentItemData",
+    "requestTs": {
+      "imports": [
+        "SkillAgentItemData"
+      ],
+      "name": "SkillAgentItemData"
+    },
+    "response": "core::option::Option<agentmux_srv::backend::storage::skills::Skill>",
+    "responseName": "core::option::Option<agentmux_srv::backend::storage::skills::Skill>",
+    "responseTs": {
+      "imports": [
+        "Skill"
+      ],
+      "name": "Skill | null"
+    }
+  },
+  {
+    "command": "skill.list",
+    "request": "agentmux_srv::backend::rpc_types::skill::SkillAgentScopeData",
+    "requestName": "SkillAgentScopeData",
+    "requestTs": {
+      "imports": [
+        "SkillAgentScopeData"
+      ],
+      "name": "SkillAgentScopeData"
+    },
+    "response": "alloc::vec::Vec<agentmux_srv::backend::storage::skills::SkillListItem>",
+    "responseName": "alloc::vec::Vec<agentmux_srv::backend::storage::skills::SkillListItem>",
+    "responseTs": {
+      "imports": [
+        "SkillListItem"
+      ],
+      "name": "Array<SkillListItem>"
+    }
+  },
+  {
+    "command": "skill.unbind",
+    "request": "agentmux_srv::backend::rpc_types::skill::SkillAgentBindingData",
+    "requestName": "SkillAgentBindingData",
+    "requestTs": {
+      "imports": [
+        "SkillAgentBindingData"
+      ],
+      "name": "SkillAgentBindingData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::skill::SkillUnbindResult",
+    "responseName": "SkillUnbindResult",
+    "responseTs": {
+      "imports": [
+        "SkillUnbindResult"
+      ],
+      "name": "SkillUnbindResult"
+    }
+  },
+  {
+    "command": "skill.upsert",
+    "request": "agentmux_srv::backend::rpc_types::skill::CommandSkillUpsertData",
+    "requestName": "CommandSkillUpsertData",
+    "requestTs": {
+      "imports": [
+        "CommandSkillUpsertData"
+      ],
+      "name": "CommandSkillUpsertData"
+    },
+    "response": "agentmux_srv::backend::storage::skills::Skill",
+    "responseName": "Skill",
+    "responseTs": {
+      "imports": [
+        "Skill"
+      ],
+      "name": "Skill"
+    }
+  },
+  {
+    "command": "subprocessspawn",
+    "request": "agentmux_srv::backend::rpc_types::block::CommandSubprocessSpawnData",
+    "requestName": "CommandSubprocessSpawnData",
+    "requestTs": {
+      "imports": [
+        "CommandSubprocessSpawnData"
+      ],
+      "name": "CommandSubprocessSpawnData"
+    },
+    "response": "()",
+    "responseName": "()",
+    "responseTs": {
+      "imports": [],
+      "name": "null"
+    }
+  },
+  {
+    "command": "toolchain.env",
+    "request": "core::option::Option<agentmux_srv::backend::rpc_types::toolchain::ToolchainEnvReq>",
+    "requestName": "core::option::Option<agentmux_srv::backend::rpc_types::toolchain::ToolchainEnvReq>",
+    "requestTs": {
+      "imports": [
+        "ToolchainEnvReq"
+      ],
+      "name": "ToolchainEnvReq | null"
+    },
+    "response": "agentmux_srv::backend::rpc_types::toolchain::ToolchainEnvResult",
+    "responseName": "ToolchainEnvResult",
+    "responseTs": {
+      "imports": [
+        "ToolchainEnvResult"
+      ],
+      "name": "ToolchainEnvResult"
+    }
+  },
+  {
+    "command": "toolchain.prune",
+    "request": "core::option::Option<agentmux_srv::backend::rpc_types::toolchain::ToolchainPruneReq>",
+    "requestName": "core::option::Option<agentmux_srv::backend::rpc_types::toolchain::ToolchainPruneReq>",
+    "requestTs": {
+      "imports": [
+        "ToolchainPruneReq"
+      ],
+      "name": "ToolchainPruneReq | null"
+    },
+    "response": "agentmux_srv::backend::rpc_types::toolchain::ToolchainPruneResult",
+    "responseName": "ToolchainPruneResult",
+    "responseTs": {
+      "imports": [
+        "ToolchainPruneResult"
+      ],
+      "name": "ToolchainPruneResult"
+    }
+  },
+  {
+    "command": "toolchain.versions",
+    "request": "agentmux_srv::backend::rpc_types::toolchain::ToolchainVersionsReq",
+    "requestName": "ToolchainVersionsReq",
+    "requestTs": {
+      "imports": [
+        "ToolchainVersionsReq"
+      ],
+      "name": "ToolchainVersionsReq"
+    },
+    "response": "std::collections::hash::map::HashMap<alloc::string::String, core::option::Option<alloc::string::String>>",
+    "responseName": "std::collections::hash::map::HashMap<alloc::string::String, core::option::Option<alloc::string::String>>",
+    "responseTs": {
+      "imports": [],
+      "name": "{ [key in string]?: string | null }"
+    }
+  },
+  {
+    "command": "tooldecision",
+    "request": "agentmux_srv::backend::rpc_types::block::CommandToolDecisionData",
+    "requestName": "CommandToolDecisionData",
+    "requestTs": {
+      "imports": [
+        "CommandToolDecisionData"
+      ],
+      "name": "CommandToolDecisionData"
+    },
+    "response": "()",
+    "responseName": "()",
+    "responseTs": {
+      "imports": [],
+      "name": "null"
+    }
+  },
+  {
+    "command": "tower.forget",
+    "request": "agentmux_srv::backend::rpc_types::tower::TowerForgetReq",
+    "requestName": "TowerForgetReq",
+    "requestTs": {
+      "imports": [
+        "TowerForgetReq"
+      ],
+      "name": "TowerForgetReq"
+    },
+    "response": "agentmux_srv::backend::rpc_types::tower::TowerPeersResult",
+    "responseName": "TowerPeersResult",
+    "responseTs": {
+      "imports": [
+        "TowerPeersResult"
+      ],
+      "name": "TowerPeersResult"
+    }
+  },
+  {
+    "command": "tower.pair",
+    "request": "agentmux_srv::backend::rpc_types::tower::TowerPairReq",
+    "requestName": "TowerPairReq",
+    "requestTs": {
+      "imports": [
+        "TowerPairReq"
+      ],
+      "name": "TowerPairReq"
+    },
+    "response": "agentmux_srv::backend::rpc_types::tower::TowerPeerInfo",
+    "responseName": "TowerPeerInfo",
+    "responseTs": {
+      "imports": [
+        "TowerPeerInfo"
+      ],
+      "name": "TowerPeerInfo"
+    }
+  },
+  {
+    "command": "tower.peers",
+    "request": "core::option::Option<agentmux_srv::backend::rpc_types::websocket::NoArgsReq>",
+    "requestName": "core::option::Option<agentmux_srv::backend::rpc_types::websocket::NoArgsReq>",
+    "requestTs": {
+      "imports": [
+        "NoArgsReq"
+      ],
+      "name": "NoArgsReq | null"
+    },
+    "response": "agentmux_srv::backend::rpc_types::tower::TowerPeersResult",
+    "responseName": "TowerPeersResult",
+    "responseTs": {
+      "imports": [
+        "TowerPeersResult"
+      ],
+      "name": "TowerPeersResult"
+    }
+  },
+  {
+    "command": "tower.sample",
+    "request": "agentmux_srv::backend::rpc_types::tower::TowerSampleReq",
+    "requestName": "TowerSampleReq",
+    "requestTs": {
+      "imports": [
+        "TowerSampleReq"
+      ],
+      "name": "TowerSampleReq"
+    },
+    "response": "agentmux_srv::backend::rpc_types::tower::TowerSnapshot",
+    "responseName": "TowerSnapshot",
+    "responseTs": {
+      "imports": [
+        "TowerSnapshot"
+      ],
+      "name": "TowerSnapshot"
+    }
+  },
+  {
+    "command": "unlinkagentidentity",
+    "request": "agentmux_srv::backend::rpc_types::identity::CommandUnlinkAgentIdentityData",
+    "requestName": "CommandUnlinkAgentIdentityData",
+    "requestTs": {
+      "imports": [
+        "CommandUnlinkAgentIdentityData"
+      ],
+      "name": "CommandUnlinkAgentIdentityData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::identity::UnlinkAgentIdentityResult",
+    "responseName": "UnlinkAgentIdentityResult",
+    "responseTs": {
+      "imports": [
+        "UnlinkAgentIdentityResult"
+      ],
+      "name": "UnlinkAgentIdentityResult"
+    }
+  },
+  {
+    "command": "unwatcheditorfile",
+    "request": "agentmux_srv::backend::rpc_types::editor_read::WatchEditorFileReq",
+    "requestName": "WatchEditorFileReq",
+    "requestTs": {
+      "imports": [
+        "WatchEditorFileReq"
+      ],
+      "name": "WatchEditorFileReq"
+    },
+    "response": "()",
+    "responseName": "()",
+    "responseTs": {
+      "imports": [],
+      "name": "null"
+    }
+  },
+  {
+    "command": "unwatchmediadir",
+    "request": "agentmux_srv::backend::rpc_types::editor_read::UnwatchMediaDirReq",
+    "requestName": "UnwatchMediaDirReq",
+    "requestTs": {
+      "imports": [
+        "UnwatchMediaDirReq"
+      ],
+      "name": "UnwatchMediaDirReq"
+    },
+    "response": "()",
+    "responseName": "()",
+    "responseTs": {
+      "imports": [],
+      "name": "null"
+    }
+  },
+  {
+    "command": "updateagent",
+    "request": "agentmux_srv::backend::rpc_types::agent::CommandUpdateAgentDefinitionData",
+    "requestName": "CommandUpdateAgentDefinitionData",
+    "requestTs": {
+      "imports": [
+        "CommandUpdateAgentDefinitionData"
+      ],
+      "name": "CommandUpdateAgentDefinitionData"
+    },
+    "response": "agentmux_srv::backend::storage::agents::AgentDefinition",
+    "responseName": "AgentDefinition",
+    "responseTs": {
+      "imports": [
+        "AgentDefinition"
+      ],
+      "name": "AgentDefinition"
+    }
+  },
+  {
+    "command": "updateagentinstance",
+    "request": "agentmux_srv::backend::rpc_types::instance::CommandUpdateAgentInstanceData",
+    "requestName": "CommandUpdateAgentInstanceData",
+    "requestTs": {
+      "imports": [
+        "CommandUpdateAgentInstanceData"
+      ],
+      "name": "CommandUpdateAgentInstanceData"
+    },
+    "response": "agentmux_srv::backend::storage::agents::AgentInstance",
+    "responseName": "AgentInstance",
+    "responseTs": {
+      "imports": [
+        "AgentInstance"
+      ],
+      "name": "AgentInstance"
+    }
+  },
+  {
+    "command": "updateagentskill",
+    "request": "agentmux_srv::backend::rpc_types::agent::CommandUpdateAgentSkillData",
+    "requestName": "CommandUpdateAgentSkillData",
+    "requestTs": {
+      "imports": [
+        "CommandUpdateAgentSkillData"
+      ],
+      "name": "CommandUpdateAgentSkillData"
+    },
+    "response": "agentmux_srv::backend::storage::skills::AgentSkill",
+    "responseName": "AgentSkill",
+    "responseTs": {
+      "imports": [
+        "AgentSkill"
+      ],
+      "name": "AgentSkill"
+    }
+  },
+  {
+    "command": "upsertdrone",
+    "request": "agentmux_srv::drone::types::DroneDefinition",
+    "requestName": "DroneDefinition",
+    "requestTs": {
+      "imports": [
+        "DroneDefinition"
+      ],
+      "name": "DroneDefinition"
+    },
+    "response": "agentmux_srv::drone::types::DroneDefinition",
+    "responseName": "DroneDefinition",
+    "responseTs": {
+      "imports": [
+        "DroneDefinition"
+      ],
+      "name": "DroneDefinition"
+    }
+  },
+  {
+    "command": "upsertmemory",
+    "request": "agentmux_srv::backend::rpc_types::bundle::CommandUpsertBundleData",
+    "requestName": "CommandUpsertBundleData",
+    "requestTs": {
+      "imports": [
+        "CommandUpsertBundleData"
+      ],
+      "name": "CommandUpsertBundleData"
+    },
+    "response": "agentmux_srv::backend::storage::bundles::Bundle",
+    "responseName": "Bundle",
+    "responseTs": {
+      "imports": [
+        "Bundle"
+      ],
+      "name": "Bundle"
+    }
+  },
+  {
+    "command": "upsertsystemmemory",
+    "request": "agentmux_srv::backend::rpc_types::bundle::CommandUpsertBundleData",
+    "requestName": "CommandUpsertBundleData",
+    "requestTs": {
+      "imports": [
+        "CommandUpsertBundleData"
+      ],
+      "name": "CommandUpsertBundleData"
+    },
+    "response": "agentmux_srv::backend::storage::bundles::Bundle",
+    "responseName": "Bundle",
+    "responseTs": {
+      "imports": [
+        "Bundle"
+      ],
+      "name": "Bundle"
+    }
+  },
+  {
+    "command": "viewer.agent-hidden",
+    "request": "agentmux_srv::backend::rpc_types::viewer::CommandViewerAgentHiddenData",
+    "requestName": "CommandViewerAgentHiddenData",
+    "requestTs": {
+      "imports": [
+        "CommandViewerAgentHiddenData"
+      ],
+      "name": "CommandViewerAgentHiddenData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::viewer::ViewerAgentHiddenResult",
+    "responseName": "ViewerAgentHiddenResult",
+    "responseTs": {
+      "imports": [
+        "ViewerAgentHiddenResult"
+      ],
+      "name": "ViewerAgentHiddenResult"
+    }
+  },
+  {
+    "command": "viewer.devices",
+    "request": "core::option::Option<agentmux_srv::backend::rpc_types::websocket::NoArgsReq>",
+    "requestName": "core::option::Option<agentmux_srv::backend::rpc_types::websocket::NoArgsReq>",
+    "requestTs": {
+      "imports": [
+        "NoArgsReq"
+      ],
+      "name": "NoArgsReq | null"
+    },
+    "response": "agentmux_srv::backend::rpc_types::viewer::ViewerDevicesResult",
+    "responseName": "ViewerDevicesResult",
+    "responseTs": {
+      "imports": [
+        "ViewerDevicesResult"
+      ],
+      "name": "ViewerDevicesResult"
+    }
+  },
+  {
+    "command": "viewer.pair-start",
+    "request": "core::option::Option<agentmux_srv::backend::rpc_types::websocket::NoArgsReq>",
+    "requestName": "core::option::Option<agentmux_srv::backend::rpc_types::websocket::NoArgsReq>",
+    "requestTs": {
+      "imports": [
+        "NoArgsReq"
+      ],
+      "name": "NoArgsReq | null"
+    },
+    "response": "agentmux_srv::backend::rpc_types::viewer::ViewerPairStartResult",
+    "responseName": "ViewerPairStartResult",
+    "responseTs": {
+      "imports": [
+        "ViewerPairStartResult"
+      ],
+      "name": "ViewerPairStartResult"
+    }
+  },
+  {
+    "command": "viewer.revoke",
+    "request": "agentmux_srv::backend::rpc_types::viewer::CommandViewerRevokeData",
+    "requestName": "CommandViewerRevokeData",
+    "requestTs": {
+      "imports": [
+        "CommandViewerRevokeData"
+      ],
+      "name": "CommandViewerRevokeData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::viewer::ViewerRevokeResult",
+    "responseName": "ViewerRevokeResult",
+    "responseTs": {
+      "imports": [
+        "ViewerRevokeResult"
+      ],
+      "name": "ViewerRevokeResult"
+    }
+  },
+  {
+    "command": "voice.checkPath",
+    "request": "agentmux_srv::backend::rpc_types::misc::CommandVoiceCheckPathData",
+    "requestName": "CommandVoiceCheckPathData",
+    "requestTs": {
+      "imports": [
+        "CommandVoiceCheckPathData"
+      ],
+      "name": "CommandVoiceCheckPathData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::misc::VoiceCheckPathResult",
+    "responseName": "VoiceCheckPathResult",
+    "responseTs": {
+      "imports": [
+        "VoiceCheckPathResult"
+      ],
+      "name": "VoiceCheckPathResult"
+    }
+  },
+  {
+    "command": "watcheditorfile",
+    "request": "agentmux_srv::backend::rpc_types::editor_read::WatchEditorFileReq",
+    "requestName": "WatchEditorFileReq",
+    "requestTs": {
+      "imports": [
+        "WatchEditorFileReq"
+      ],
+      "name": "WatchEditorFileReq"
+    },
+    "response": "()",
+    "responseName": "()",
+    "responseTs": {
+      "imports": [],
+      "name": "null"
+    }
+  },
+  {
+    "command": "watchmediadir",
+    "request": "agentmux_srv::backend::rpc_types::editor_read::WatchMediaDirReq",
+    "requestName": "WatchMediaDirReq",
+    "requestTs": {
+      "imports": [
+        "WatchMediaDirReq"
+      ],
+      "name": "WatchMediaDirReq"
+    },
+    "response": "()",
+    "responseName": "()",
+    "responseTs": {
+      "imports": [],
+      "name": "null"
+    }
+  },
+  {
+    "command": "waveinfo",
+    "request": "core::option::Option<agentmux_srv::backend::rpc_types::websocket::NoArgsReq>",
+    "requestName": "core::option::Option<agentmux_srv::backend::rpc_types::websocket::NoArgsReq>",
+    "requestTs": {
+      "imports": [
+        "NoArgsReq"
+      ],
+      "name": "NoArgsReq | null"
+    },
+    "response": "agentmux_srv::backend::rpc_types::websocket::AppInfoResult",
+    "responseName": "AppInfoResult",
+    "responseTs": {
+      "imports": [
+        "AppInfoResult"
+      ],
+      "name": "AppInfoResult"
+    }
+  },
+  {
+    "command": "widget.api",
+    "request": "serde_json::value::Value",
+    "requestName": "Value",
+    "requestTs": {
+      "imports": [
+        "JsonValue"
+      ],
+      "name": "JsonValue"
+    },
+    "response": "agentmux_srv::backend::rpc_types::toolchain::WidgetApiResult",
+    "responseName": "WidgetApiResult",
+    "responseTs": {
+      "imports": [
+        "WidgetApiResult"
+      ],
+      "name": "WidgetApiResult"
+    }
+  },
+  {
+    "command": "widget.health",
+    "request": "serde_json::value::Value",
+    "requestName": "Value",
+    "requestTs": {
+      "imports": [
+        "JsonValue"
+      ],
+      "name": "JsonValue"
+    },
+    "response": "agentmux_srv::backend::rpc_types::toolchain::WidgetHealthResult",
+    "responseName": "WidgetHealthResult",
+    "responseTs": {
+      "imports": [
+        "WidgetHealthResult"
+      ],
+      "name": "WidgetHealthResult"
+    }
+  },
+  {
+    "command": "widgets.call",
+    "request": "agentmux_srv::server::widget_access_handlers::WidgetCallReq",
+    "requestName": "WidgetCallReq",
+    "requestTs": {
+      "imports": [
+        "WidgetCallReq"
+      ],
+      "name": "WidgetCallReq"
+    },
+    "response": "agentmux_srv::server::widget_access_handlers::WidgetCallResult",
+    "responseName": "WidgetCallResult",
+    "responseTs": {
+      "imports": [
+        "WidgetCallResult"
+      ],
+      "name": "WidgetCallResult"
+    }
+  },
+  {
+    "command": "widgets.catalog",
+    "request": "serde_json::value::Value",
+    "requestName": "Value",
+    "requestTs": {
+      "imports": [
+        "JsonValue"
+      ],
+      "name": "JsonValue"
+    },
+    "response": "agentmux_srv::server::widget_handlers::WidgetCatalogResult",
+    "responseName": "WidgetCatalogResult",
+    "responseTs": {
+      "imports": [
+        "WidgetCatalogResult"
+      ],
+      "name": "WidgetCatalogResult"
+    }
+  },
+  {
+    "command": "widgets.catalog.install",
+    "request": "agentmux_srv::server::widget_handlers::WidgetIdReq",
+    "requestName": "WidgetIdReq",
+    "requestTs": {
+      "imports": [
+        "WidgetIdReq"
+      ],
+      "name": "WidgetIdReq"
+    },
+    "response": "agentmux_srv::server::widget_handlers::WidgetInstallResult",
+    "responseName": "WidgetInstallResult",
+    "responseTs": {
+      "imports": [
+        "WidgetInstallResult"
+      ],
+      "name": "WidgetInstallResult"
+    }
+  },
+  {
+    "command": "widgets.endsession",
+    "request": "agentmux_srv::server::widget_access_handlers::WidgetEndSessionReq",
+    "requestName": "WidgetEndSessionReq",
+    "requestTs": {
+      "imports": [
+        "WidgetEndSessionReq"
+      ],
+      "name": "WidgetEndSessionReq"
+    },
+    "response": "serde_json::value::Value",
+    "responseName": "Value",
+    "responseTs": {
+      "imports": [
+        "JsonValue"
+      ],
+      "name": "JsonValue"
+    }
+  },
+  {
+    "command": "widgets.install",
+    "request": "agentmux_srv::server::widget_handlers::WidgetInstallReq",
+    "requestName": "WidgetInstallReq",
+    "requestTs": {
+      "imports": [
+        "WidgetInstallReq"
+      ],
+      "name": "WidgetInstallReq"
+    },
+    "response": "agentmux_srv::server::widget_handlers::WidgetInstallResult",
+    "responseName": "WidgetInstallResult",
+    "responseTs": {
+      "imports": [
+        "WidgetInstallResult"
+      ],
+      "name": "WidgetInstallResult"
+    }
+  },
+  {
+    "command": "widgets.list",
+    "request": "serde_json::value::Value",
+    "requestName": "Value",
+    "requestTs": {
+      "imports": [
+        "JsonValue"
+      ],
+      "name": "JsonValue"
+    },
+    "response": "agentmux_srv::server::widget_handlers::WidgetPackagesResult",
+    "responseName": "WidgetPackagesResult",
+    "responseTs": {
+      "imports": [
+        "WidgetPackagesResult"
+      ],
+      "name": "WidgetPackagesResult"
+    }
+  },
+  {
+    "command": "widgets.readfile",
+    "request": "agentmux_srv::server::widget_handlers::WidgetReadFileReq",
+    "requestName": "WidgetReadFileReq",
+    "requestTs": {
+      "imports": [
+        "WidgetReadFileReq"
+      ],
+      "name": "WidgetReadFileReq"
+    },
+    "response": "agentmux_srv::server::widget_handlers::WidgetReadFileResult",
+    "responseName": "WidgetReadFileResult",
+    "responseTs": {
+      "imports": [
+        "WidgetReadFileResult"
+      ],
+      "name": "WidgetReadFileResult"
+    }
+  },
+  {
+    "command": "widgets.requests",
+    "request": "serde_json::value::Value",
+    "requestName": "Value",
+    "requestTs": {
+      "imports": [
+        "JsonValue"
+      ],
+      "name": "JsonValue"
+    },
+    "response": "agentmux_srv::server::widget_agent_handlers::WidgetRequestsResult",
+    "responseName": "WidgetRequestsResult",
+    "responseTs": {
+      "imports": [
+        "WidgetRequestsResult"
+      ],
+      "name": "WidgetRequestsResult"
+    }
+  },
+  {
+    "command": "widgets.rescan",
+    "request": "serde_json::value::Value",
+    "requestName": "Value",
+    "requestTs": {
+      "imports": [
+        "JsonValue"
+      ],
+      "name": "JsonValue"
+    },
+    "response": "agentmux_srv::server::widget_handlers::WidgetPackagesResult",
+    "responseName": "WidgetPackagesResult",
+    "responseTs": {
+      "imports": [
+        "WidgetPackagesResult"
+      ],
+      "name": "WidgetPackagesResult"
+    }
+  },
+  {
+    "command": "widgets.session",
+    "request": "agentmux_srv::server::widget_access_handlers::WidgetSessionReq",
+    "requestName": "WidgetSessionReq",
+    "requestTs": {
+      "imports": [
+        "WidgetSessionReq"
+      ],
+      "name": "WidgetSessionReq"
+    },
+    "response": "agentmux_srv::server::widget_access_handlers::WidgetSessionResult",
+    "responseName": "WidgetSessionResult",
+    "responseTs": {
+      "imports": [
+        "WidgetSessionResult"
+      ],
+      "name": "WidgetSessionResult"
+    }
+  },
+  {
+    "command": "widgets.setenabled",
+    "request": "agentmux_srv::server::widget_handlers::WidgetSetEnabledReq",
+    "requestName": "WidgetSetEnabledReq",
+    "requestTs": {
+      "imports": [
+        "WidgetSetEnabledReq"
+      ],
+      "name": "WidgetSetEnabledReq"
+    },
+    "response": "agentmux_srv::server::widget_handlers::WidgetPackagesResult",
+    "responseName": "WidgetPackagesResult",
+    "responseTs": {
+      "imports": [
+        "WidgetPackagesResult"
+      ],
+      "name": "WidgetPackagesResult"
+    }
+  },
+  {
+    "command": "widgets.uninstall",
+    "request": "agentmux_srv::server::widget_handlers::WidgetIdReq",
+    "requestName": "WidgetIdReq",
+    "requestTs": {
+      "imports": [
+        "WidgetIdReq"
+      ],
+      "name": "WidgetIdReq"
+    },
+    "response": "agentmux_srv::server::widget_handlers::WidgetPackagesResult",
+    "responseName": "WidgetPackagesResult",
+    "responseTs": {
+      "imports": [
+        "WidgetPackagesResult"
+      ],
+      "name": "WidgetPackagesResult"
+    }
+  },
+  {
+    "command": "writeagentconfig",
+    "request": "agentmux_srv::backend::rpc_types::block::CommandWriteAgentConfigData",
+    "requestName": "CommandWriteAgentConfigData",
+    "requestTs": {
+      "imports": [
+        "CommandWriteAgentConfigData"
+      ],
+      "name": "CommandWriteAgentConfigData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::block::CommandWriteAgentConfigResult",
+    "responseName": "CommandWriteAgentConfigResult",
+    "responseTs": {
+      "imports": [
+        "CommandWriteAgentConfigResult"
+      ],
+      "name": "CommandWriteAgentConfigResult"
+    }
+  },
+  {
+    "command": "writeeditorfile",
+    "request": "agentmux_srv::backend::rpc_types::editor_read::CommandWriteEditorFileData",
+    "requestName": "CommandWriteEditorFileData",
+    "requestTs": {
+      "imports": [
+        "CommandWriteEditorFileData"
+      ],
+      "name": "CommandWriteEditorFileData"
+    },
+    "response": "()",
+    "responseName": "()",
+    "responseTs": {
+      "imports": [],
+      "name": "null"
+    }
+  }
+]

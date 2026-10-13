@@ -17,7 +17,7 @@ import {
 } from "./types";
 
 /** Share of the two panes' combined size one key press moves. */
-export const KEYBOARD_RESIZE_STEP = 0.05;
+const KEYBOARD_RESIZE_STEP = 0.05;
 /** Neither pane shrinks below this share of the two. */
 const MIN_SHARE = 0.1;
 

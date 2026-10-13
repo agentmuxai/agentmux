@@ -722,7 +722,7 @@ pub struct ImportAgentDefinitionsResult {
 }
 
 /// Response for exportagents
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
 pub struct ExportAgentDefinitionsResult {
     pub version: u32,
     pub exported_at: String,
@@ -730,7 +730,7 @@ pub struct ExportAgentDefinitionsResult {
     pub agents: Vec<AgentDefinitionExport>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
 pub struct AgentDefinitionExport {
     pub id: String,
     pub name: String,
@@ -747,7 +747,7 @@ pub struct AgentDefinitionExport {
     pub skills: Vec<AgentSkillExport>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
 pub struct AgentSkillExport {
     pub name: String,
     pub trigger: String,

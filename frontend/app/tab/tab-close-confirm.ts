@@ -7,7 +7,7 @@
 // `tab:skipcloseconfirm` is no longer read.
 
 /** The setting: ask before closing a tab when `true`; unset is off. */
-export const TAB_CONFIRM_CLOSE = "tab:confirmclose";
+const TAB_CONFIRM_CLOSE = "tab:confirmclose";
 
 /** Whether a tab close opens the confirmation first. */
 export function asksBeforeClosingTab(settings: Record<string, unknown> | null | undefined): boolean {

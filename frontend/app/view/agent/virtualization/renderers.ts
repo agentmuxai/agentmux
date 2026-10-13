@@ -156,7 +156,7 @@ export function jektExpandedMaxEstimatePx(): number {
     return Math.round(previewCapPx() + 57);
 }
 
-export function estimateExpandedJekt(message: string): number {
+function estimateExpandedJekt(message: string): number {
     // The jekt cap bounds it, not the text estimate's own 320 px ceiling —
     // on a tall window the cap is higher (Codex P2 on #3934).
     return estimateTextHeight(message, TEXT_CHARS_PER_LINE, TEXT_LINE_HEIGHT_PX, jektExpandedMaxEstimatePx());

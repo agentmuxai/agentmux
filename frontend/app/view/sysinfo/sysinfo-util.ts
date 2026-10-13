@@ -152,7 +152,7 @@ export function computeAutoMaxY(
 }
 
 /** Half the width of the widest x tick label ("12:59 AM"), plus a px of clearance. */
-export const X_TICK_HALF_LABEL_PX = 26;
+const X_TICK_HALF_LABEL_PX = 26;
 
 /**
  * Whether the tick at time `d` has room for its (centred) label before the

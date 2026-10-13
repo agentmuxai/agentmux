@@ -48,7 +48,12 @@ pub(super) fn resolve_slug_collision(conn: &rusqlite::Connection, base: &str) ->
         if count == 0 {
             return Ok(candidate);
         }
-        candidate = format!("{base}-{n}");
+        // Trimmed so the suffixed slug stays a valid agent id (at most 64
+        // chars); an over-long one fails every registration.
+        let suffix = format!("-{n}");
+        let room = agentmux_common::slug::AGENT_ID_MAX_LEN.saturating_sub(suffix.len());
+        let stem: String = base.chars().take(room).collect();
+        candidate = format!("{}{suffix}", stem.trim_end_matches('-'));
         n += 1;
     }
 }
@@ -327,6 +332,25 @@ pub(crate) fn key_tombstones_for_tests(conn: &rusqlite::Connection) -> Vec<(Stri
 }
 
 impl Store {
+    /// The names deleted agents were known by, lowercased as they were
+    /// tombstoned before each delete. A fork's automatic number counts them,
+    /// so a deleted fork's number is never handed out again, even the
+    /// highest one (`suggest_fork_name`).
+    pub fn retired_agent_names(&self) -> Result<Vec<String>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT name FROM db_agent_key_tombstones")?;
+        let names = stmt.query_map([], |r| r.get::<_, String>(0))?.collect::<Result<Vec<_>, _>>()?;
+        Ok(names)
+    }
+
+    /// The names agent `id` had before its renames. A lineage root's former
+    /// names keep its deleted forks' numbers counted after it is renamed
+    /// (`suggest_fork_name`).
+    pub fn agent_former_names(&self, id: &str) -> Result<Vec<String>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        former_names(&conn, id)
+    }
+
     /// The slugs of every row whose slug equals `name` trimmed and folded
     /// (identity M4d-3's drift count; slug uniqueness is case-sensitive, so
     /// "Aria" and "aria" are two rows).

@@ -59,7 +59,7 @@ add(
 );
 
 /** The file name's extension, lowercased, without the dot. */
-export function extensionOf(name: string): string {
+function extensionOf(name: string): string {
     const m = /\.([A-Za-z0-9]{1,10})$/.exec(name);
     return m ? m[1].toLowerCase() : "";
 }

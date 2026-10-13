@@ -3,9 +3,11 @@
 
 //! The server-side half of the live feed: a [`FeedHub`] that watches every
 //! published `blockfile` event in-process (a broker observer, so no
-//! WebSocket route is involved) and hands each open feed the transcript
-//! changes of the one block it follows; plus the pure pieces of the feed's
-//! wire (cursor, frame truncation, SSE framing) the route assembles.
+//! WebSocket route is involved) and hands each open feed the changes of the
+//! one file it follows: an agent's transcript (`output`), or a terminal's
+//! output (`term`, for the terminal feed in [`super::terminal`]); plus the
+//! pure pieces of the feed's wire (cursor, frame truncation, SSE framing)
+//! the route assembles.
 //!
 //! Nothing is buffered without bound for a slow device: a subscription counts
 //! the bytes queued for it, and once more than [`MAX_BEHIND_BYTES`] wait it
@@ -26,6 +28,8 @@ use crate::backend::mps::{self, MuxEvent, StreamPos};
 
 /// A stream more than this far behind is reset and closed.
 pub const MAX_BEHIND_BYTES: usize = 1024 * 1024;
+/// A terminal block's output file: raw PTY bytes.
+pub const TERM_FILE: &str = "term";
 /// A frame longer than this is replaced by an `amx_truncated` frame.
 pub const MAX_FRAME_BYTES: usize = 64 * 1024;
 /// How much of a truncated frame is kept, in characters.
@@ -38,12 +42,23 @@ pub fn wire_size(records: &[u8]) -> usize {
     records.split(|b| *b == b'\n').map(|line| line.len().min(MAX_FRAME_BYTES) + 1).sum()
 }
 
+/// What `records` of `filename` cost a subscriber: a transcript's lines as
+/// the device gets them ([`wire_size`]); a terminal's bytes as they are.
+fn queued_size(filename: &str, records: &[u8]) -> usize {
+    if filename == TERM_FILE {
+        records.len()
+    } else {
+        wire_size(records)
+    }
+}
+
 /// What a subscription receives.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HubEvent {
-    /// Records appended to the block's transcript, as published: where they
-    /// landed per stream, and the records themselves.
-    Append { pos: Vec<StreamPos>, records: Vec<u8> },
+    /// Bytes appended to the file, as published: where they landed per
+    /// stream (transcripts), the byte offset they were written at when the
+    /// writer said (terminals), and the bytes themselves.
+    Append { pos: Vec<StreamPos>, offset: Option<u64>, records: Vec<u8> },
     /// The transcript was replaced, deleted or otherwise rewritten as a
     /// whole (`fileop`).
     Rewritten { fileop: String },
@@ -59,9 +74,9 @@ struct Subscriber {
     behind: Arc<AtomicBool>,
 }
 
-/// Every open feed's subscription, by the block it follows.
+/// Every open feed's subscription, by the block and file it follows.
 pub struct FeedHub {
-    subs: parking_lot::RwLock<HashMap<String, Vec<Subscriber>>>,
+    subs: parking_lot::RwLock<HashMap<(String, String), Vec<Subscriber>>>,
     next_id: AtomicU64,
     max_behind: usize,
 }
@@ -91,58 +106,68 @@ impl FeedHub {
     /// reading the snapshot, so nothing published in between is missed; the
     /// feed drops what the snapshot already holds by line number.
     pub fn subscribe(self: &Arc<Self>, block_id: &str) -> FeedSubscription {
+        self.subscribe_file(block_id, crate::backend::agent_session::OUTPUT_FILE)
+    }
+
+    /// Start receiving the changes of `block_id`'s `filename` (the
+    /// transcript, or [`TERM_FILE`]).
+    pub fn subscribe_file(self: &Arc<Self>, block_id: &str, filename: &str) -> FeedSubscription {
         let (tx, rx) = mpsc::unbounded_channel();
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let pending = Arc::new(AtomicUsize::new(0));
         let behind = Arc::new(AtomicBool::new(false));
-        self.subs.write().entry(block_id.to_string()).or_default().push(Subscriber {
+        let key = (block_id.to_string(), filename.to_string());
+        self.subs.write().entry(key.clone()).or_default().push(Subscriber {
             id,
             tx,
             pending: Arc::clone(&pending),
             behind,
         });
-        FeedSubscription { hub: Arc::clone(self), block_id: block_id.to_string(), id, rx, pending }
+        FeedSubscription { hub: Arc::clone(self), key, id, rx, pending }
     }
 
     #[cfg(test)]
     pub fn subscribers(&self, block_id: &str) -> usize {
-        self.subs.read().get(block_id).map_or(0, Vec::len)
+        let key = (block_id.to_string(), crate::backend::agent_session::OUTPUT_FILE.to_string());
+        self.subs.read().get(&key).map_or(0, Vec::len)
     }
 
-    fn unsubscribe(&self, block_id: &str, id: u64) {
+    fn unsubscribe(&self, key: &(String, String), id: u64) {
         let mut subs = self.subs.write();
-        if let Some(list) = subs.get_mut(block_id) {
+        if let Some(list) = subs.get_mut(key) {
             list.retain(|s| s.id != id);
             if list.is_empty() {
-                subs.remove(block_id);
+                subs.remove(key);
             }
         }
     }
 
     /// The broker observer. Runs on every publish, so it returns at once for
-    /// anything but a transcript event of a followed block, and never blocks.
+    /// anything but an event of a followed block's followed file, and never
+    /// blocks.
     pub fn observe(&self, event: &MuxEvent) {
         if event.event != mps::EVENT_BLOCK_FILE {
             return;
         }
         let Some(data) = event.data.as_ref() else { return };
-        if data.get("filename").and_then(|v| v.as_str()) != Some(crate::backend::agent_session::OUTPUT_FILE) {
+        let Some(filename) = data.get("filename").and_then(|v| v.as_str()) else { return };
+        if filename != crate::backend::agent_session::OUTPUT_FILE && filename != TERM_FILE {
             return;
         }
         let Some(block_id) = data.get("zoneid").and_then(|v| v.as_str()) else { return };
         let subs = self.subs.read();
-        let Some(list) = subs.get(block_id) else { return };
+        let Some(list) = subs.get(&(block_id.to_string(), filename.to_string())) else { return };
         let Ok(file) = serde_json::from_value::<mps::WSFileEventData>(data.clone()) else { return };
         let event = if file.fileop == mps::FILE_OP_APPEND {
             let Ok(records) = base64::engine::general_purpose::STANDARD.decode(file.data64.as_bytes()) else {
                 return;
             };
-            HubEvent::Append { pos: file.pos, records }
+            HubEvent::Append { pos: file.pos, offset: file.offset, records }
         } else {
             HubEvent::Rewritten { fileop: file.fileop }
         };
         let size = match &event {
-            HubEvent::Append { records, .. } => wire_size(records),
+            HubEvent::Append { records, .. } => queued_size(filename, records),
             _ => 0,
         };
         for sub in list {
@@ -163,7 +188,8 @@ impl FeedHub {
 /// One feed's subscription; unsubscribes when dropped.
 pub struct FeedSubscription {
     hub: Arc<FeedHub>,
-    block_id: String,
+    /// The block and file it follows.
+    key: (String, String),
     id: u64,
     rx: mpsc::UnboundedReceiver<HubEvent>,
     pending: Arc<AtomicUsize>,
@@ -173,7 +199,7 @@ impl FeedSubscription {
     pub async fn recv(&mut self) -> Option<HubEvent> {
         let event = self.rx.recv().await?;
         if let HubEvent::Append { records, .. } = &event {
-            self.pending.fetch_sub(wire_size(records), Ordering::Relaxed);
+            self.pending.fetch_sub(queued_size(&self.key.1, records), Ordering::Relaxed);
         }
         Some(event)
     }
@@ -181,7 +207,7 @@ impl FeedSubscription {
 
 impl Drop for FeedSubscription {
     fn drop(&mut self) {
-        self.hub.unsubscribe(&self.block_id, self.id);
+        self.hub.unsubscribe(&self.key, self.id);
     }
 }
 
@@ -451,7 +477,7 @@ mod tests {
         broker.publish(blockfile("b1", "replace", b"", vec![]));
         assert_eq!(
             sub.recv().await,
-            Some(HubEvent::Append { pos: pos("b:b1", "g", 0, 1), records: b"mine\n".to_vec() })
+            Some(HubEvent::Append { pos: pos("b:b1", "g", 0, 1), offset: None, records: b"mine\n".to_vec() })
         );
         assert_eq!(sub.recv().await, Some(HubEvent::Rewritten { fileop: "replace".into() }));
         assert_eq!(hub.subscribers("b1"), 1);

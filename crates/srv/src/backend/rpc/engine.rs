@@ -272,20 +272,22 @@ impl WshRpcEngine {
     /// Serialization failure is also an `Err` rather than a panic: a
     /// response type whose `Serialize` fails is a bug, but it is not worth
     /// taking the connection down for.
+    ///
+    /// Both types must derive `ts_rs::TS`: the schema records each as
+    /// TypeScript, which is what the generated frontend stubs
+    /// (`frontend/app/store/rpc-api/generated.ts`) are built from. A typed
+    /// command whose types have no TypeScript would be one the frontend has
+    /// to describe by hand again.
     pub fn register_typed<Req, Resp, F, Fut>(&self, command: &'static str, handler: F)
     where
-        Req: serde::de::DeserializeOwned + Send + 'static,
-        Resp: serde::Serialize + Send + 'static,
+        Req: serde::de::DeserializeOwned + ts_rs::TS + Send + 'static,
+        Resp: serde::Serialize + ts_rs::TS + Send + 'static,
         F: Fn(Req, RpcContext) -> Fut + Send + Sync + 'static,
         Fut: std::future::Future<Output = Result<Resp, String>> + Send + 'static,
     {
         {
             let mut inner = self.lock_inner();
-            inner.schema.record(
-                command,
-                std::any::type_name::<Req>(),
-                std::any::type_name::<Resp>(),
-            );
+            inner.schema.record_typed::<Req, Resp>(command);
         }
 
         let handler = std::sync::Arc::new(handler);
@@ -666,12 +668,12 @@ mod tests {
     /// that fails at runtime. A stale binding is worse than a missing one.
     #[tokio::test]
     async fn replacing_a_typed_command_through_an_untyped_path_clears_its_schema_entry() {
-        #[derive(serde::Deserialize)]
+        #[derive(serde::Deserialize, ts_rs::TS)]
         struct Req {
             #[allow(dead_code)]
             v: i32,
         }
-        #[derive(serde::Serialize)]
+        #[derive(serde::Serialize, ts_rs::TS)]
         struct Resp {
             ok: bool,
         }
@@ -729,12 +731,12 @@ mod tests {
         // real registration whose command it cannot resolve, and fails the
         // contract extractor. (This comment is deliberately phrased to
         // describe the trap without containing it.)
-        #[derive(serde::Deserialize)]
+        #[derive(serde::Deserialize, ts_rs::TS)]
         struct Req {
             #[allow(dead_code)]
             v: i32,
         }
-        #[derive(serde::Serialize)]
+        #[derive(serde::Serialize, ts_rs::TS)]
         struct Resp {
             ok: bool,
         }

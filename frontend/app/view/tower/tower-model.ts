@@ -36,7 +36,7 @@ const REMOTE_FILTER_DELAY_MS = 300;
 /** The rail's sparklines: the last minute at the 2 s refresh. */
 export const HISTORY_POINTS = 30;
 /** The detail's history charts: the last 10 minutes at the 2 s refresh. */
-export const CHART_POINTS = 300;
+const CHART_POINTS = 300;
 /** One sample of a rail entry, for its sparkline and history charts. */
 export interface HistoryPoint {
     /** The sample's time, unix ms. */

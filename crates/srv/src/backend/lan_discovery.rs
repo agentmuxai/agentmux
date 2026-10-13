@@ -225,6 +225,8 @@ pub struct LanInstance {
     pub os: String,
     pub address: String,
     pub port: u16,
+    /// The peer's `lan_key`; never serialized, as no reader of the JSON needs it.
+    #[serde(skip_serializing, default)]
     pub auth_key: String,
     pub agents: Vec<String>,
     /// Each listed agent's state as the peer reported it, by lower-cased name
@@ -234,10 +236,8 @@ pub struct LanInstance {
     pub first_seen: u64,
     pub last_seen: u64,
     /// Unix seconds of the last successful agent-name poll of this peer
-    /// (`agent_names_refresh_loop`), 0 for never. `last_seen` moves only when
-    /// mDNS re-resolves the peer, which can be tens of minutes apart, so the
-    /// Swarm judges liveness by the later of the two (Codex P1 on #4241). It
-    /// does not change when discovery drops a peer.
+    /// (`agent_names_refresh_loop`), 0 for never. The Swarm judges liveness by
+    /// the later of this and `last_seen`, which moves only on an mDNS re-resolve.
     #[serde(default)]
     pub last_polled_ok: u64,
     /// This peer's own advertised PTR/TXT record TTL (seconds), captured from

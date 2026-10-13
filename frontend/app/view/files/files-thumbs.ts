@@ -13,7 +13,7 @@ import { fetchMediaBlob, IMAGE_EXTENSIONS, INLINE_IMAGE_MAX_BYTES } from "@/app/
 import { extensionOf } from "./files-sort";
 
 /** The longer side of a thumbnail, in pixels (2× a 96 px tile). */
-export const THUMB_PX = 192;
+const THUMB_PX = 192;
 /** Thumbnails kept; past this the least recently used is released. */
 const MAX_CACHED = 300;
 /** Images decoded at once. */

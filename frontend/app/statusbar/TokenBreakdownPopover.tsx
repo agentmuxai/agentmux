@@ -43,9 +43,9 @@ function serviceDisplayName(id: string): string {
     return id.slice(0, 1).toUpperCase() + id.slice(1);
 }
 
-/** `AgentUsage.byService` as a sorted ServiceRow[] — same shape/order
- *  getBreakdown() produces globally, scoped to one agent row. Used by
- *  the "AgentMux internal" bucket's expanded per-service detail. */
+/** `AgentUsage.byService` as a ServiceRow[], biggest total first (ties by
+ *  service id), for one agent row. Used by the "AgentMux internal"
+ *  bucket's expanded per-service detail. */
 function serviceRowsOf(row: AgentUsage): ServiceRow[] {
     const rows: ServiceRow[] = Object.entries(row.byService).map(([id, u]) => ({
         id,

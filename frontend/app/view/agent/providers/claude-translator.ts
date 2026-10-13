@@ -6,7 +6,7 @@ import type { OutputTranslator } from "./translator";
 
 /** The text of a non-empty content-block array made only of `{type:"text",
  *  text}` blocks, joined by a blank line; null for anything else. */
-export function textOfContentBlocks(content: unknown): string | null {
+function textOfContentBlocks(content: unknown): string | null {
     if (!Array.isArray(content) || content.length === 0) return null;
     const texts: string[] = [];
     for (const b of content) {
@@ -145,7 +145,7 @@ const finite = (v: unknown): number | undefined => (typeof v === "number" && Num
  * neither an image nor a document.
  * docs/analysis/ANALYSIS_READ_TOOL_PREVIEW_2026_10_01.md §6.
  */
-export function mediaResultOf(content: unknown, structured: unknown): Record<string, unknown> | null {
+function mediaResultOf(content: unknown, structured: unknown): Record<string, unknown> | null {
     if (!Array.isArray(content)) return null;
     const texts: string[] = [];
     const images: ResultImage[] = [];

@@ -225,18 +225,8 @@ const ROLE_LABELS: Record<NonNullable<TowerProcess["role"]>, string> = {
     started: "started by the agent or in the terminal",
 };
 
-export function roleLabel(role: TowerProcess["role"]): string | undefined {
+function roleLabel(role: TowerProcess["role"]): string | undefined {
     return role ? ROLE_LABELS[role] : undefined;
-}
-
-const TRACKING_LABELS: Record<string, string> = {
-    high: "Every process it starts is tracked (Job Object or cgroup).",
-    best_effort: "Found by scanning: a process that detaches itself may be missed.",
-    tree: "Found from the pane's process tree: a process that detaches itself is followed until it exits.",
-};
-
-export function trackingLabel(tracking: string): string {
-    return TRACKING_LABELS[tracking] ?? tracking;
 }
 
 // ── The Agents view (SPEC_TOWER_AGENT_CENTRIC_VIEWS_2026_10_08.md §3.1) ──
@@ -245,10 +235,10 @@ export function trackingLabel(tracking: string): string {
  *  under the agents that make the rail add up to the machine. */
 export type RailKind = "agent" | "terminals" | "agentmux" | "other";
 
-export const TERMINALS_ID = "terminals";
-export const OTHER_ID = "other";
+const TERMINALS_ID = "terminals";
+const OTHER_ID = "other";
 /** `TowerTask::id` of AgentMux's own task (tower_sampler.rs). */
-export const AGENTMUX_ID = "agentmux";
+const AGENTMUX_ID = "agentmux";
 
 export interface RailEntry {
     /** The agent's task (its block id), or a fixed entry's id. */

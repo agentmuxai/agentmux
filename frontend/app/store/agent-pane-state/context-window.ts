@@ -25,7 +25,7 @@
  */
 
 /** Known Claude window tiers, ascending — the high-water upgrade promotes to these. */
-export const KNOWN_CONTEXT_WINDOW_TIERS: readonly number[] = [200_000, 1_000_000];
+const KNOWN_CONTEXT_WINDOW_TIERS: readonly number[] = [200_000, 1_000_000];
 
 /** The largest known tier. A prompt larger than this with no reported window
  *  is not a believable context size (see context-reading.ts). */

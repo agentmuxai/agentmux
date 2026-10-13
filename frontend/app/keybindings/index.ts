@@ -51,7 +51,7 @@ export function shortcutHelp(): HelpSection[] {
 
 /** A DOM key event as the matcher reads it. Field by field: a KeyboardEvent's
  *  fields are prototype getters, which a spread would drop. */
-export function keyEventLike(e: KeyboardEvent): KeyEventLike {
+function keyEventLike(e: KeyboardEvent): KeyEventLike {
     return {
         key: e.key,
         code: e.code,

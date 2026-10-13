@@ -63,6 +63,8 @@ pub(crate) mod widget_handlers;
 
 #[cfg(test)]
 pub(crate) mod tests;
+#[cfg(test)]
+mod rpc_schema_export;
 
 use std::sync::Arc;
 
@@ -108,6 +110,7 @@ mod routes;
 mod http_health;
 mod http_fleet;
 mod http_viewer;
+mod http_viewer_terminal;
 mod http_shell;
 mod http_pty_shell;
 mod http_open;

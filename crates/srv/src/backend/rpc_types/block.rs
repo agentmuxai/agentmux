@@ -140,7 +140,8 @@ pub struct CommandCreateSubBlockData {
 /// block delete, but routed to the sub-block teardown path (kills the
 /// controller, deletes the row, unlinks from the parent's `subblockids`;
 /// does not touch tab bookkeeping since sub-blocks are never tab-referenced).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandDeleteSubBlockData {
     pub blockid: String,
 }

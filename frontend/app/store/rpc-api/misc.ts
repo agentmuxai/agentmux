@@ -22,9 +22,6 @@ import type { WidgetHealthResult } from "@/types/rpc/WidgetHealthResult";
 export type { AiRateLimitResult } from "@/types/rpc/AiRateLimitResult";
 export type { AppInfoResult } from "@/types/rpc/AppInfoResult";
 
-import type { AiRateLimitResult } from "@/types/rpc/AiRateLimitResult";
-import type { AppInfoResult } from "@/types/rpc/AppInfoResult";
-
 // The muxbus and providers shapes are GENERATED from their Rust definitions by
 // ts-rs. They were private structs in the handler files, so the inline types
 // here were hand-maintained against nothing.
@@ -39,59 +36,34 @@ import type { AppInfoResult } from "@/types/rpc/AppInfoResult";
 //     which the handler answers with `{healthy:false}` rather than an error).
 //     A typed Req would turn those into deserialization failures -- the same
 //     reasoning that kept `bundle.validate` untyped.
+export type { CatalogModel } from "@/types/rpc/CatalogModel";
+export type { MuxBusCloudConfigResp } from "@/types/rpc/MuxBusCloudConfigResp";
+export type { MuxBusDeliveryState } from "@/types/rpc/MuxBusDeliveryState";
+export type { MuxBusDeliveryStatus } from "@/types/rpc/MuxBusDeliveryStatus";
+export type { MuxBusDisconnectResp } from "@/types/rpc/MuxBusDisconnectResp";
+export type { MuxBusLoginCancelResp } from "@/types/rpc/MuxBusLoginCancelResp";
 export type { MuxBusLoginReq } from "@/types/rpc/MuxBusLoginReq";
 export type { MuxBusLoginResp } from "@/types/rpc/MuxBusLoginResp";
-export type { MuxBusLoginCancelResp } from "@/types/rpc/MuxBusLoginCancelResp";
 export type { MuxBusStatusResp } from "@/types/rpc/MuxBusStatusResp";
-export type { MuxBusDeliveryStatus } from "@/types/rpc/MuxBusDeliveryStatus";
-export type { MuxBusDeliveryState } from "@/types/rpc/MuxBusDeliveryState";
-export type { MuxBusDisconnectResp } from "@/types/rpc/MuxBusDisconnectResp";
-export type { MuxBusCloudConfigResp } from "@/types/rpc/MuxBusCloudConfigResp";
 export type { ProvidersModelsParams } from "@/types/rpc/ProvidersModelsParams";
 export type { ProvidersModelsResult } from "@/types/rpc/ProvidersModelsResult";
-export type { CatalogModel } from "@/types/rpc/CatalogModel";
 
-import type { MuxBusLoginReq } from "@/types/rpc/MuxBusLoginReq";
-import type { MuxBusLoginResp } from "@/types/rpc/MuxBusLoginResp";
+import type { MuxBusCloudConfigReq } from "@/types/rpc/MuxBusCloudConfigReq";
+import type { MuxBusCloudConfigResp } from "@/types/rpc/MuxBusCloudConfigResp";
+import type { MuxBusDisconnectReq } from "@/types/rpc/MuxBusDisconnectReq";
+import type { MuxBusDisconnectResp } from "@/types/rpc/MuxBusDisconnectResp";
 import type { MuxBusLoginCancelReq } from "@/types/rpc/MuxBusLoginCancelReq";
 import type { MuxBusLoginCancelResp } from "@/types/rpc/MuxBusLoginCancelResp";
 import type { MuxBusStatusReq } from "@/types/rpc/MuxBusStatusReq";
 import type { MuxBusStatusResp } from "@/types/rpc/MuxBusStatusResp";
-import type { MuxBusDisconnectReq } from "@/types/rpc/MuxBusDisconnectReq";
-import type { MuxBusDisconnectResp } from "@/types/rpc/MuxBusDisconnectResp";
-import type { MuxBusCloudConfigReq } from "@/types/rpc/MuxBusCloudConfigReq";
-import type { MuxBusCloudConfigResp } from "@/types/rpc/MuxBusCloudConfigResp";
-import type { ProvidersModelsParams } from "@/types/rpc/ProvidersModelsParams";
-import type { ProvidersModelsResult } from "@/types/rpc/ProvidersModelsResult";
 
 export const MiscApi = {
     ActivityCommand(client: RpcClient, data: ActivityUpdate, opts?: RpcOpts): Promise<void> {
         return client.rpcCall("activity", data, opts);
     },
 
-    // command "providers.models" [call] — authoritative model catalog for a
-    // provider, fetched server-side from the Anthropic Models API with the
-    // account OAuth token. Returns [] (never throws for the model list) when
-    // the token is absent/expired; the frontend then keeps its static catalog.
-    ProvidersModelsCommand(
-        client: RpcClient,
-        data: ProvidersModelsParams,
-        opts?: RpcOpts,
-    ): Promise<ProvidersModelsResult> {
-        return client.rpcCall("providers.models", data, opts);
-    },
-
     RecordTEventCommand(client: RpcClient, data: TEvent, opts?: RpcOpts): Promise<void> {
         return client.rpcCall("recordtevent", data, opts);
-    },
-
-    // Answers `{ version }` and nothing else. The hand-written `MuxInfoData` (now deleted)
-    // this used to return also declared `clientid`, `buildtime`, `configdir`
-    // and `datadir` -- four fields the handler has never sent. Nothing reads
-    // them (this command has no caller at all today), so the generated type is
-    // a straight correction rather than a breaking narrowing.
-    MuxInfoCommand(client: RpcClient, opts?: RpcOpts): Promise<AppInfoResult> {
-        return client.rpcCall("waveinfo", null, opts);
     },
 
     // command "widget.health" [call] — HTTP liveness probe for an external widget
@@ -103,7 +75,7 @@ export const MiscApi = {
     WidgetHealthCommand(
         client: RpcClient,
         data: { port: number; health_check_path: string; health_check_body_contains?: string },
-        opts?: RpcOpts,
+        opts?: RpcOpts
     ): Promise<WidgetHealthResult> {
         return client.rpcCall("widget.health", data, opts);
     },
@@ -125,29 +97,15 @@ export const MiscApi = {
             headers?: Record<string, string>;
             body?: string;
         },
-        opts?: RpcOpts,
+        opts?: RpcOpts
     ): Promise<WidgetApiResult> {
         return client.rpcCall("widget.api", data, opts);
-    },
-
-    // ── MuxBus cloud connectivity ─────────────────────────────────────────────
-
-    // command "muxbus.login" — PKCE browser flow; blocks until login completes (up to 5 min)
-    MuxBusLoginCommand(
-        client: RpcClient,
-        data: MuxBusLoginReq,
-        opts?: RpcOpts,
-    ): Promise<MuxBusLoginResp> {
-        return client.rpcCall("muxbus.login", data, { timeout: 360000, ...opts });
     },
 
     // command "muxbus.login.cancel" — abort an in-flight muxbus.login (e.g.
     // user closed the browser without completing sign-in). Resolves the
     // pending MuxBusLoginCommand call with a "sign-in cancelled" error.
-    MuxBusLoginCancelCommand(
-        client: RpcClient,
-        opts?: RpcOpts,
-    ): Promise<MuxBusLoginCancelResp> {
+    MuxBusLoginCancelCommand(client: RpcClient, opts?: RpcOpts): Promise<MuxBusLoginCancelResp> {
         const data: MuxBusLoginCancelReq = {};
         return client.rpcCall("muxbus.login.cancel", data, opts);
     },

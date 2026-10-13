@@ -46,7 +46,7 @@ export interface QuestionCountdown {
 export const META_QUESTION_TIMER = "term:question_timer";
 
 /** How long after the last activity the countdown resumes. */
-export const QUESTION_QUIET_MS = 15_000;
+const QUESTION_QUIET_MS = 15_000;
 
 interface Owner {
     durationMs: number;
