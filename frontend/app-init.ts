@@ -553,6 +553,14 @@ async function initAppInner() {
                 const label = await getApi().getWindowLabel();
                 getApi().sendLog(`Initializing as new window: ${label}`);
                 const coldSearchParams = new URL(window.location.href).searchParams;
+                // A cold floating pane: the host deferred the pane-pool refill
+                // its open triggered until this window reveals, so tell it when
+                // that happens (a promoted floater does the same in pool.ts).
+                // SPEC_WINDOW_OPEN_LATENCY_AND_WARM_POOLS_2026_10_13.md §2.3.
+                if (coldSearchParams.has("floatingPaneId")) {
+                    const { onStartupReveal } = await import("@/app/init/startup-splash");
+                    onStartupReveal(() => getApi().setWindowInitStatus("revealed"));
+                }
                 const coldInitialView = coldSearchParams.get("initialView");
                 // "credential-approval" is not a real pane view — it's
                 // rendered by app.tsx as this window's ENTIRE content,

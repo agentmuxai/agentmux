@@ -62,6 +62,7 @@ When commit was Critical, the cold paths took 1–2 s more: a floating pane spen
 
 **3. A cold floating open refills the pane pool.**
 - After `post_create_floating_window`, call `defer_pane_pool_refill` (made `pub(crate)`): it spawns the pane-pool window once the floater reports its reveal, or after 2 s at most, so the refill doesn't compete with the open the user is watching. That is the path a promoted floater already uses.
+- A cold floater reports its reveal the same way a promoted one does: `app-init.ts` registers `setWindowInitStatus("revealed")` with `onStartupReveal` (`startup-splash.ts`) when the URL carries `floatingPaneId`. Without it every cold open waited the full 2 s, and a second floating pane opened in that window still went cold.
 - The next floating pane is then warm even if the pool was empty.
 
 **4. A cold new window uses the shared request context.**
