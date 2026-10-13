@@ -48,7 +48,6 @@ export type { ValidationIssue as BundleValidationIssue } from "@/types/rpc/Valid
 
 import type { Bundle as BundleT } from "@/types/rpc/Bundle";
 import type { CommandUpsertBundleData } from "@/types/rpc/CommandUpsertBundleData";
-import type { ValidationReport } from "@/types/rpc/ValidationReport";
 
 // The accurate request shape for the three upsert/validate commands, DERIVED
 // from the generated `Bundle` rather than hand-listed, so a new Rust field
@@ -108,13 +107,4 @@ export const BundleApi = {
     },
 };
 
-export const BundleImportApi = {
-    // Structural-only check (crates/srv/src/backend/bundle_validate.rs) —
-    // read-only, no Store write. Takes `BundleValidateInput`, which is
-    // `BundleUpsertInput` minus the `id` requirement, so it can validate an
-    // unsaved draft (including a brand-new bundle with no id yet), not just
-    // what's already persisted.
-    ValidateBundleCommand(client: RpcClient, data: BundleValidateInput, opts?: RpcOpts): Promise<ValidationReport> {
-        return client.rpcCall("bundle.validate", data, opts);
-    },
-};
+export const BundleImportApi = {};

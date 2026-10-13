@@ -4,8 +4,6 @@
 // Agent definitions, skills, history, instances, processes, drones, and the
 // agent run loop (input/stop/spawn). Split from the original rpc-api file.
 
-import { RpcClient } from "../rpc-client";
-
 // The agent-history shapes are GENERATED from their Rust definitions by ts-rs.
 // This covers agent_handlers/history.rs.
 export type { AgentHistory } from "@/types/rpc/AgentHistory";
@@ -197,7 +195,6 @@ export type { ContainerRuntimeAvailableResult } from "@/types/rpc/ContainerRunti
 export type { ImportAgentDefinitionsResult } from "@/types/rpc/ImportAgentDefinitionsResult";
 export type { ReseedAgentsResult } from "@/types/rpc/ReseedAgentsResult";
 
-import type { AgentDefinition } from "@/types/rpc/AgentDefinition";
 import type { CommandCreateAgentDefinitionData } from "@/types/rpc/CommandCreateAgentDefinitionData";
 import type { CommandUpdateAgentDefinitionData } from "@/types/rpc/CommandUpdateAgentDefinitionData";
 
@@ -232,59 +229,4 @@ import type { CommandForkAgentDefinitionData } from "@/types/rpc/CommandForkAgen
 export type ForkAgentDefinitionInput = Omit<CommandForkAgentDefinitionData, "branch_label"> &
     Partial<Pick<CommandForkAgentDefinitionData, "branch_label">>;
 
-export const AgentApi = {
-    //
-    // Two-tier picker — Phase 1 (SPEC_AGENT_PICKER_TWO_TIER_2026_05_24.md).
-    // Optional `is_seeded` filter: 1 = templates only, 0 = user-owned
-    // only, undefined = no filter (backward-compat: every existing
-    // caller passes nothing). Backend treats `null` / `{}` as no-filter.
-    //
-    // Phase 2 (Q2 Decision Y — hide templates): by default the backend
-    // excludes templates with `user_hidden = 1`. Pass `include_hidden:
-    // true` to opt back in — only the settings panel's unhide UI needs
-    // to do this. Hide filter never applies to user-owned rows.
-    ListAgentDefinitionsCommand(
-        client: RpcClient,
-        data?: { is_seeded?: 0 | 1; include_hidden?: boolean },
-        opts?: RpcOpts
-    ): Promise<AgentDefinition[]> {
-        return client.rpcCall("listagents", data ?? {}, opts);
-    },
-
-    // v8: powers the launch modal's "Continue agent" dropdown. Returns
-    // named instance rows joined with their definition, account and
-    // bundle names for one-shot rendering. Pass `definition_id`
-    // to filter server-side — required for the modal use case so an
-    // older instance of the current definition can't fall off the
-    // global limit when the user has many agents across definitions.
-    ListNamedAgentsCommand(
-        client: RpcClient,
-        data: { limit?: number; definition_id?: string },
-        opts?: RpcOpts
-    ): Promise<NamedAgentRow[]> {
-        return client.rpcCall("listnamedagents", data, opts);
-    },
-
-    // Cascade follow-up (2026-05-23) — powers the AgentPicker's
-    // "Recent sessions" surface. Each row joins an agent-instance
-    // record with the filestore `output.state.json` snapshot for that
-    // block, producing a conversation preview + node count so an
-    // orphaned conversation (e.g. after a renderer crash) becomes
-    // recoverable from normal UI. See docs/incident/MAKS_CONVERSATION_2026_05_23.md
-    // and PR #977 for the underlying continueOfId reattach plumbing.
-    // Response envelope (not a bare array) since the backend hardening in
-    // session.rs — every one of its data sources now degrades to empty on
-    // its own failure instead of aborting the whole RPC (retro
-    // docs/retro/retro-my-agents-fresh-channel-regression-2026-07-27.md).
-    // `degraded` lists which source(s), if any, fell back this call; the
-    // caller uses it to tell "genuinely zero agents" apart from "a source
-    // failed and we got nothing" — a distinction transport success/failure
-    // alone can no longer make once the RPC itself never throws for this.
-    ListRecentSessionsCommand(
-        client: RpcClient,
-        data: { limit?: number; identity_id?: string },
-        opts?: RpcOpts
-    ): Promise<{ rows: RecentSessionRow[]; degraded: string[] }> {
-        return client.rpcCall("listrecentsessions", data, opts);
-    },
-};
+export const AgentApi = {};

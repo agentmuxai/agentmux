@@ -569,6 +569,12 @@
             "method": "LinkAgentIdentityCommand"
         },
         {
+            "command": "listagents",
+            "method": "ListAgentDefinitionsCommand",
+            "send": "data ?? {}",
+            "dataType": "{ is_seeded?: 0 | 1; include_hidden?: boolean }"
+        },
+        {
             "command": "listagenthistory",
             "method": "ListAgentHistoryCommand"
         },
@@ -624,6 +630,16 @@
             "command": "listidentityaccounts",
             "method": "ListIdentityAccountsCommand",
             "send": "data ?? {}"
+        },
+        {
+            "command": "listnamedagents",
+            "method": "ListNamedAgentsCommand",
+            "dataType": "{ limit?: number; definition_id?: string }"
+        },
+        {
+            "command": "listrecentsessions",
+            "method": "ListRecentSessionsCommand",
+            "dataType": "{ limit?: number; identity_id?: string }"
         },
         {
             "command": "lspsend",
@@ -942,6 +958,10 @@
             "method": "SetBookmarksCommand"
         },
         {
+            "command": "browser_start_page.set",
+            "method": "SetBrowserStartPageCommand"
+        },
+        {
             "command": "shellexec",
             "method": "ShellExecCommand"
         },
@@ -1055,8 +1075,16 @@
             "send": "{}"
         },
         {
+            "command": "toolchain.install_system_tool",
+            "method": "ToolchainInstallSystemToolCommand"
+        },
+        {
             "command": "toolchain.prune",
             "method": "ToolchainPruneCommand"
+        },
+        {
+            "command": "toolchain.resolve_install_command",
+            "method": "ToolchainResolveInstallCommandCommand"
         },
         {
             "command": "toolchain.versions",
@@ -1133,6 +1161,11 @@
         {
             "command": "upsertdrone",
             "method": "UpsertDroneCommand"
+        },
+        {
+            "command": "bundle.validate",
+            "method": "ValidateBundleCommand",
+            "dataType": "import(\"@/app/store/rpc-api/bundle\").BundleValidateInput"
         },
         {
             "command": "viewer.agent-hidden",

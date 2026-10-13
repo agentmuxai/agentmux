@@ -252,6 +252,7 @@ import type { InstallCheckReq } from "@/types/rpc/InstallCheckReq";
 import type { InstallCheckResult } from "@/types/rpc/InstallCheckResult";
 import type { InstallStartReq } from "@/types/rpc/InstallStartReq";
 import type { InstallStartResult } from "@/types/rpc/InstallStartResult";
+import type { InstallSystemToolResult } from "@/types/rpc/InstallSystemToolResult";
 import type { InstallToolResult } from "@/types/rpc/InstallToolResult";
 import type { LayoutOpenResult } from "@/types/rpc/LayoutOpenResult";
 import type { LayoutPreviewResult } from "@/types/rpc/LayoutPreviewResult";
@@ -259,6 +260,7 @@ import type { LayoutSaveResult } from "@/types/rpc/LayoutSaveResult";
 import type { ListDronesReq } from "@/types/rpc/ListDronesReq";
 import type { ListEditorDirReq } from "@/types/rpc/ListEditorDirReq";
 import type { ListEditorDirResult } from "@/types/rpc/ListEditorDirResult";
+import type { ListRecentSessionsResult } from "@/types/rpc/ListRecentSessionsResult";
 import type { ListRunsReq } from "@/types/rpc/ListRunsReq";
 import type { LspSendReq } from "@/types/rpc/LspSendReq";
 import type { LspStartReq } from "@/types/rpc/LspStartReq";
@@ -317,6 +319,7 @@ import type { RenameEditorFileResult } from "@/types/rpc/RenameEditorFileResult"
 import type { ReorderGlobalBundlesResult } from "@/types/rpc/ReorderGlobalBundlesResult";
 import type { ReseedAgentsResult } from "@/types/rpc/ReseedAgentsResult";
 import type { ResolveCliResult } from "@/types/rpc/ResolveCliResult";
+import type { ResolveInstallCommandResult } from "@/types/rpc/ResolveInstallCommandResult";
 import type { ResolvePrereqsReq } from "@/types/rpc/ResolvePrereqsReq";
 import type { ResolvePrereqsResult } from "@/types/rpc/ResolvePrereqsResult";
 import type { RunCliLoginResult } from "@/types/rpc/RunCliLoginResult";
@@ -339,8 +342,11 @@ import type { SkillCatalogItemData } from "@/types/rpc/SkillCatalogItemData";
 import type { SkillCatalogListData } from "@/types/rpc/SkillCatalogListData";
 import type { SkillDeleteResult } from "@/types/rpc/SkillDeleteResult";
 import type { SkillUnbindResult } from "@/types/rpc/SkillUnbindResult";
+import type { StartPageSetReq } from "@/types/rpc/StartPageSetReq";
+import type { StartPageSetResult } from "@/types/rpc/StartPageSetResult";
 import type { SubmitAuthCallbackReq } from "@/types/rpc/SubmitAuthCallbackReq";
 import type { SubscriptionRequest } from "@/types/rpc/SubscriptionRequest";
+import type { ToolIdReq } from "@/types/rpc/ToolIdReq";
 import type { ToolchainEnvResult } from "@/types/rpc/ToolchainEnvResult";
 import type { ToolchainPruneReq } from "@/types/rpc/ToolchainPruneReq";
 import type { ToolchainPruneResult } from "@/types/rpc/ToolchainPruneResult";
@@ -353,6 +359,7 @@ import type { TowerSampleReq } from "@/types/rpc/TowerSampleReq";
 import type { TowerSnapshot } from "@/types/rpc/TowerSnapshot";
 import type { UnlinkAgentIdentityResult } from "@/types/rpc/UnlinkAgentIdentityResult";
 import type { UnwatchMediaDirReq } from "@/types/rpc/UnwatchMediaDirReq";
+import type { ValidationReport } from "@/types/rpc/ValidationReport";
 import type { ViewerAgentHiddenResult } from "@/types/rpc/ViewerAgentHiddenResult";
 import type { ViewerDevicesResult } from "@/types/rpc/ViewerDevicesResult";
 import type { ViewerPairStartResult } from "@/types/rpc/ViewerPairStartResult";
@@ -1187,6 +1194,14 @@ export const GeneratedApi = {
   LinkAgentIdentityCommand(client: RpcClient, data: CommandLinkAgentIdentityData, opts?: RpcOpts): Promise<void> {
     return client.rpcCall("linkagentidentity", data, opts);
   },
+  // command "listagents"
+  ListAgentDefinitionsCommand(
+    client: RpcClient,
+    data?: { is_seeded?: 0 | 1; include_hidden?: boolean },
+    opts?: RpcOpts
+  ): Promise<Array<AgentDefinition>> {
+    return client.rpcCall("listagents", data ?? {}, opts);
+  },
   // command "listagenthistory"
   ListAgentHistoryCommand(
     client: RpcClient,
@@ -1270,6 +1285,22 @@ export const GeneratedApi = {
     opts?: RpcOpts
   ): Promise<Array<IdentityAccount>> {
     return client.rpcCall("listidentityaccounts", data ?? {}, opts);
+  },
+  // command "listnamedagents"
+  ListNamedAgentsCommand(
+    client: RpcClient,
+    data: { limit?: number; definition_id?: string },
+    opts?: RpcOpts
+  ): Promise<Array<NamedAgentRow>> {
+    return client.rpcCall("listnamedagents", data, opts);
+  },
+  // command "listrecentsessions"
+  ListRecentSessionsCommand(
+    client: RpcClient,
+    data: { limit?: number; identity_id?: string },
+    opts?: RpcOpts
+  ): Promise<ListRecentSessionsResult> {
+    return client.rpcCall("listrecentsessions", data, opts);
   },
   // command "lspsend"
   LspSendCommand(client: RpcClient, data: LspSendReq, opts?: RpcOpts): Promise<void> {
@@ -1679,6 +1710,10 @@ export const GeneratedApi = {
   SetBookmarksCommand(client: RpcClient, data: CommandBookmarksSetData, opts?: RpcOpts): Promise<BookmarksResult> {
     return client.rpcCall("bookmarks.set", data, opts);
   },
+  // command "browser_start_page.set"
+  SetBrowserStartPageCommand(client: RpcClient, data: StartPageSetReq, opts?: RpcOpts): Promise<StartPageSetResult> {
+    return client.rpcCall("browser_start_page.set", data, opts);
+  },
   // command "shellexec"
   ShellExecCommand(client: RpcClient, data: CommandShellExecData, opts?: RpcOpts): Promise<ShellExecResult> {
     return client.rpcCall("shellexec", data, opts);
@@ -1812,6 +1847,14 @@ export const GeneratedApi = {
   ToolchainEnvCommand(client: RpcClient, opts?: RpcOpts): Promise<ToolchainEnvResult> {
     return client.rpcCall("toolchain.env", {}, opts);
   },
+  // command "toolchain.install_system_tool"
+  ToolchainInstallSystemToolCommand(
+    client: RpcClient,
+    data: ToolIdReq,
+    opts?: RpcOpts
+  ): Promise<InstallSystemToolResult> {
+    return client.rpcCall("toolchain.install_system_tool", data, opts);
+  },
   // command "toolchain.prune"
   ToolchainPruneCommand(
     client: RpcClient,
@@ -1819,6 +1862,14 @@ export const GeneratedApi = {
     opts?: RpcOpts
   ): Promise<ToolchainPruneResult> {
     return client.rpcCall("toolchain.prune", data, opts);
+  },
+  // command "toolchain.resolve_install_command"
+  ToolchainResolveInstallCommandCommand(
+    client: RpcClient,
+    data: ToolIdReq,
+    opts?: RpcOpts
+  ): Promise<ResolveInstallCommandResult> {
+    return client.rpcCall("toolchain.resolve_install_command", data, opts);
   },
   // command "toolchain.versions"
   ToolchainVersionsCommand(
@@ -1932,6 +1983,14 @@ export const GeneratedApi = {
   // command "upsertdrone"
   UpsertDroneCommand(client: RpcClient, data: DroneDefinition, opts?: RpcOpts): Promise<DroneDefinition> {
     return client.rpcCall("upsertdrone", data, opts);
+  },
+  // command "bundle.validate"
+  ValidateBundleCommand(
+    client: RpcClient,
+    data: import("@/app/store/rpc-api/bundle").BundleValidateInput,
+    opts?: RpcOpts
+  ): Promise<ValidationReport> {
+    return client.rpcCall("bundle.validate", data, opts);
   },
   // command "viewer.agent-hidden"
   ViewerAgentHiddenCommand(

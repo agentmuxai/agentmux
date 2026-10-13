@@ -159,51 +159,6 @@ export const IdentityApi = {
         return client.rpcCall("auth.poll", data, opts);
     },
 
-    // ── System-toolchain install (SPEC_SYSTEM_TOOLCHAIN_INSTALLER_2026_08_24.md) ──
-
-    // command "toolchain.resolve_install_command" — read-only preview:
-    // resolves what command WOULD run to install `toolId` (git/node/npm/
-    // python) via the platform's own package manager (winget/brew/a
-    // detected Linux package manager), without side effects. `available:
-    // false` means no installable command exists on this platform/machine
-    // (e.g. brew not installed on macOS, no known package manager found
-    // on Linux) — callers must fall back to the existing link+copy-command
-    // UI, never treat this as an error.
-    ToolchainResolveInstallCommandCommand(
-        client: RpcClient,
-        data: { toolId: string },
-        opts?: RpcOpts
-    ): Promise<
-        | { available: false }
-        | {
-              available: true;
-              program: string;
-              args: string[];
-              needsElevation: boolean;
-              commandPreview: string;
-              /** Version this exact command would install, queried live from
-               *  the package manager's own catalog — `null`/absent when the
-               *  query failed or isn't implemented for this platform's
-               *  package manager. Never a hardcoded guess (see #2942). */
-              resolvedVersion?: string | null;
-          }
-    > {
-        return client.rpcCall("toolchain.resolve_install_command", data, opts);
-    },
-
-    // command "toolchain.install_system_tool" — spawns the resolved
-    // install command and streams output via the SAME `install_chunk` MPS
-    // event shape `install.start` uses, scoped `install:<sessionId>`.
-    // `InstallCancelCommand` above already works unchanged for these
-    // sessions (shared session registry) — no separate cancel command.
-    ToolchainInstallSystemToolCommand(
-        client: RpcClient,
-        data: { toolId: string },
-        opts?: RpcOpts
-    ): Promise<{ sessionId: string }> {
-        return client.rpcCall("toolchain.install_system_tool", data, opts);
-    },
-
     // NOTE: the backend handler for this command currently returns `Err`
     // unconditionally -- API-key persistence is deferred ("bundle persistence
     // lands in PR C"). So the success shape below describes a response that
