@@ -1046,6 +1046,7 @@ declare global {
         "conn:wshenabled"?: boolean;
         "network:lan_discovery"?: boolean;
         "cloud:publishpresence"?: boolean;
+        "swarm:sharesummaries"?: boolean;
         "voice:enabled"?: boolean;
         "voice:engine"?: string;
         "voice:groqApiKey"?: string;

@@ -1929,6 +1929,49 @@ async fn agent_names_carries_status_and_now_ms() {
     assert!(status.get(&idle_no_controller).is_none(), "no controller, no state: {status}");
 }
 
+/// The names route carries each agent's summary line (`backend::agent_line`),
+/// leaving out an agent with none, and none at all with `swarm:sharesummaries`
+/// off.
+#[tokio::test]
+async fn agent_names_carries_summary_lines_unless_sharing_is_off() {
+    let state = test_state();
+    let unique = uuid::Uuid::new_v4();
+    let titled = format!("line-titled-{unique}");
+    let untitled = format!("line-none-{unique}");
+    for (agent, title) in [(&titled, Some("Fixing the login race")), (&untitled, None)] {
+        let mut block = crate::backend::obj::Block { oid: uuid::Uuid::new_v4().to_string(), ..Default::default() };
+        if let Some(title) = title {
+            block.meta.insert(crate::ambient::title::META_TITLE.to_string(), serde_json::json!(title));
+        }
+        state.mstore.insert(&mut block).expect("insert agent block");
+        state.reactive_handler.register_agent(agent, &block.oid, None).unwrap();
+    }
+    let ask = |state: AppState| async move {
+        let req = Request::builder()
+            .method(Method::GET)
+            .uri("/agentmux/reactive/agent-names")
+            .header("X-AuthKey", "test-lan-key")
+            .body(Body::empty())
+            .unwrap();
+        let resp = build_router(state).oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        serde_json::from_slice::<serde_json::Value>(&body).unwrap()
+    };
+
+    let json = ask(state.clone()).await;
+    let lines = &json["agent_lines"];
+    assert_eq!(lines[&titled], "Fixing the login race");
+    assert!(lines.get(&untitled).is_none(), "no line, no entry: {lines}");
+
+    state
+        .config_watcher
+        .update_settings(serde_json::from_value(serde_json::json!({ "swarm:sharesummaries": false })).unwrap());
+    let json = ask(state).await;
+    assert!(json.get("agent_lines").is_none(), "{json}");
+    assert!(json["agents"].as_array().unwrap().iter().any(|n| n == titled.as_str()));
+}
+
 #[tokio::test]
 async fn lan_key_is_rejected_on_other_reactive_routes() {
     let app = test_router();

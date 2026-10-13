@@ -3,7 +3,7 @@
 
 //! Reading an instance's `/agentmux/reactive/agent-names` answer: the names a
 //! LAN peer's poll (and the Swarm's ask of this machine's other channels) list,
-//! and each listed agent's state, for the Swarm's status chip on remote rows
+//! and each listed agent's state and summary line, for the Swarm's remote rows
 //! (SPEC_SWARM_OTHER_HOSTS_AND_CHANNELS_2026_10_02.md §3.4 Phase 4).
 
 use super::*;
@@ -16,13 +16,17 @@ pub(crate) struct PeerAgents {
     pub names: Vec<String>,
     /// Lower-cased name → state, for listed names only.
     pub status: BTreeMap<String, AgentState>,
+    /// Lower-cased name → summary line (`backend::agent_line`), for listed
+    /// names only, each cleaned again here.
+    pub lines: BTreeMap<String, String>,
 }
 
 /// Reads an `agent-names` body: the names, capped as above, and each listed
 /// agent's state from `agent_status` (`{name: {state, since_ms}}`). A state for
 /// a name the body doesn't list, or one this build doesn't know, is dropped,
-/// so the map is never larger than the name list. A body from a build before
-/// `agent_status` gives names only.
+/// so the map is never larger than the name list. The same goes for
+/// `agent_lines` (`{name: line}`). A body from a build before `agent_status`
+/// gives names only.
 pub(crate) fn parse_agent_names_body(value: &serde_json::Value) -> PeerAgents {
     let names: Vec<String> = value
         .get("agents")
@@ -51,28 +55,46 @@ pub(crate) fn parse_agent_names_body(value: &serde_json::Value) -> PeerAgents {
                 .collect()
         })
         .unwrap_or_default();
-    PeerAgents { names, status }
+    let lines = value
+        .get("agent_lines")
+        .and_then(|s| s.as_object())
+        .map(|map| {
+            map.iter()
+                .filter(|(name, _)| listed.contains(&name.to_lowercase()))
+                .filter_map(|(name, line)| {
+                    let line = crate::backend::agent_line::clean_line(line.as_str()?)?;
+                    Some((name.to_lowercase(), line))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    PeerAgents { names, status, lines }
 }
 
 /// Applies one poll of a peer's `agent-names` route to its entry, and says
 /// whether what the frontend shows changed. A failed poll keeps the last-known
 /// names, since a flapping list is worse than a slightly old one, but clears
-/// the states: mDNS can keep the peer looking fresh long after it stopped
-/// answering, and its last "working" would otherwise show indefinitely (#4703).
+/// the states and lines: mDNS can keep the peer looking fresh long after it
+/// stopped answering, and its last "working" would otherwise show indefinitely
+/// (#4703).
 pub(super) fn apply_agent_names_poll(
     entry: &mut LanInstance,
     peer: Option<PeerAgents>,
     now_secs: u64,
 ) -> bool {
     let Some(peer) = peer else {
-        let changed = !entry.agent_status.is_empty();
+        let changed = !entry.agent_status.is_empty() || !entry.agent_lines.is_empty();
         entry.agent_status.clear();
+        entry.agent_lines.clear();
         return changed;
     };
     entry.last_polled_ok = now_secs;
-    let changed = entry.agents != peer.names || entry.agent_status != peer.status;
+    let changed = entry.agents != peer.names
+        || entry.agent_status != peer.status
+        || entry.agent_lines != peer.lines;
     entry.agents = peer.names;
     entry.agent_status = peer.status;
+    entry.agent_lines = peer.lines;
     changed
 }
 
@@ -111,6 +133,26 @@ mod tests {
                 ("opaz", AgentState::Waiting)
             ]
         );
+    }
+
+    #[test]
+    fn agent_lines_are_kept_for_listed_agents_as_one_bounded_line() {
+        let body = serde_json::json!({
+            "agents": ["Manoz", "Opaz", "Loap"],
+            "agent_lines": {
+                "Manoz": "Fixing the\nlogin race",
+                "opaz": "x".repeat(500),
+                "Loap": 7,
+                "Ghost": "Not listed",
+            },
+        });
+        let peer = parse_agent_names_body(&body);
+        assert_eq!(peer.lines.get("manoz").map(String::as_str), Some("Fixing the login race"));
+        assert_eq!(
+            peer.lines.get("opaz").map(|l| l.chars().count()),
+            Some(crate::backend::agent_line::MAX_LINE_CHARS)
+        );
+        assert_eq!(peer.lines.len(), 2, "{:?}", peer.lines);
     }
 
     #[test]
@@ -162,6 +204,14 @@ mod tests {
         assert_eq!(inst.last_polled_ok, 77);
         // The same answer again changes nothing the frontend shows.
         assert!(!apply_agent_names_poll(&mut inst, Some(peer), 78));
+        // A new line alone is a change too.
+        let peer = parse_agent_names_body(&serde_json::json!({
+            "agents": ["Manoz", "Opaz"],
+            "agent_status": {"Manoz": {"state": "working", "since_ms": 1}},
+            "agent_lines": {"Manoz": "Fixing the login race"},
+        }));
+        assert!(apply_agent_names_poll(&mut inst, Some(peer), 79));
+        assert_eq!(inst.agent_lines.get("manoz").map(String::as_str), Some("Fixing the login race"));
     }
 
     /// A peer still advertising over mDNS but no longer answering polls must
@@ -171,10 +221,12 @@ mod tests {
         let mut inst = instance();
         inst.agent_status
             .insert("manoz".into(), AgentState::Working);
+        inst.agent_lines.insert("manoz".into(), "Fixing the login race".into());
         inst.last_polled_ok = 5;
         assert!(apply_agent_names_poll(&mut inst, None, 99));
         assert_eq!(inst.agents, ["Manoz"]);
         assert!(inst.agent_status.is_empty());
+        assert!(inst.agent_lines.is_empty());
         assert_eq!(
             inst.last_polled_ok, 5,
             "a failed poll is not a successful one"
@@ -195,6 +247,7 @@ mod tests {
             auth_key: "k".into(),
             agents: vec!["Manoz".into()],
             agent_status: Default::default(),
+            agent_lines: Default::default(),
             first_seen: 0,
             last_seen: 0,
             last_polled_ok: 0,

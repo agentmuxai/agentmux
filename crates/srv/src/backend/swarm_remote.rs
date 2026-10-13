@@ -17,8 +17,9 @@
 //! Phase 4 adds each agent's state (working, waiting, idle, ...) where its
 //! instance reports one: a LAN peer's from the `agent-names` poll the discovery
 //! loop already makes, another channel's from the same route asked over
-//! loopback ([`channel_statuses`]). State only, never what an agent says or
-//! does: the route's scope by the owner's decision of 2026-10-07.
+//! loopback ([`channel_statuses`]). With it, by the owner's decision of
+//! 2026-10-13, each agent's summary line where its instance shares one
+//! (`backend::agent_line`).
 //!
 //! Nothing here carries a credential to the frontend: the registry's `auth_key`
 //! and `local_url` are dropped.
@@ -52,10 +53,21 @@ pub struct RemoteAgent {
     /// gave no state (a build from before it did, or a terminal pane).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<AgentState>,
+    /// Its summary line as its instance last shared it; absent when that
+    /// instance shared none (an older build, or `swarm:sharesummaries` off).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub line: Option<String>,
 }
 
-/// Agents' states per channel of this machine, lower-cased name to state.
-pub type ChannelStatuses = HashMap<String, BTreeMap<String, AgentState>>;
+/// What one channel of this machine said about its agents, by lower-cased name.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ChannelReport {
+    pub status: BTreeMap<String, AgentState>,
+    pub lines: BTreeMap<String, String>,
+}
+
+/// Each channel's report, by channel.
+pub type ChannelStatuses = HashMap<String, ChannelReport>;
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct RemoteChannel {
@@ -122,13 +134,15 @@ pub fn other_channels(
         slot.0 = slot.0.max(e.updated_at);
         slot.1
             .entry(e.agent_id.to_lowercase())
-            .or_insert_with(|| RemoteAgent {
-                name: e.agent_id.clone(),
-                block_id: e.block_id.clone(),
-                status: statuses
-                    .get(&e.channel)
-                    .and_then(|s| s.get(&e.agent_id.to_lowercase()))
-                    .copied(),
+            .or_insert_with(|| {
+                let report = statuses.get(&e.channel);
+                let key = e.agent_id.to_lowercase();
+                RemoteAgent {
+                    name: e.agent_id.clone(),
+                    block_id: e.block_id.clone(),
+                    status: report.and_then(|r| r.status.get(&key)).copied(),
+                    line: report.and_then(|r| r.lines.get(&key)).cloned(),
+                }
             });
     }
     by_channel
@@ -209,6 +223,7 @@ pub fn lan_hosts(
                 name: name.clone(),
                 block_id: String::new(),
                 status: p.agent_status.get(&name.to_lowercase()).copied(),
+                line: p.agent_lines.get(&name.to_lowercase()).cloned(),
             })
             .collect();
         agents.sort_by_key(|a| a.name.to_lowercase());
@@ -333,7 +348,8 @@ pub fn channel_status_targets(
 }
 
 /// Asks each target's `agent-names` route, concurrently, for its agents'
-/// states. A target that fails, times out or answers badly contributes nothing.
+/// states and lines. A target that fails, times out or answers badly
+/// contributes nothing.
 pub async fn channel_statuses(
     http: &reqwest::Client,
     targets: &[ChannelStatusTarget],
@@ -356,13 +372,15 @@ pub async fn channel_statuses(
         let value: serde_json::Value = serde_json::from_slice(&body).ok()?;
         Some((
             t.channel.clone(),
-            crate::backend::lan_discovery::parse_agent_names_body(&value).status,
+            crate::backend::lan_discovery::parse_agent_names_body(&value),
         ))
     }))
     .await;
     let mut out = ChannelStatuses::new();
-    for (channel, status) in answers.into_iter().flatten() {
-        out.entry(channel).or_default().extend(status);
+    for (channel, peer) in answers.into_iter().flatten() {
+        let report = out.entry(channel).or_default();
+        report.status.extend(peer.status);
+        report.lines.extend(peer.lines);
     }
     out
 }
@@ -559,6 +577,7 @@ mod tests {
             auth_key: "lan-secret".to_string(),
             agents: agents.iter().map(|a| a.to_string()).collect(),
             agent_status: Default::default(),
+            agent_lines: Default::default(),
             first_seen: 0,
             last_seen: NOW / 1000 - age_secs,
             last_polled_ok: 0,
@@ -776,14 +795,11 @@ mod tests {
     // Phase 4: each agent's state (SPEC_SWARM_OTHER_HOSTS_AND_CHANNELS_2026_10_02.md §3.4).
     #[test]
     fn another_channels_agents_carry_the_state_that_channel_reported() {
-        let statuses: ChannelStatuses = [(
-            "dev".to_string(),
-            [("korp".to_string(), AgentState::Waiting)]
-                .into_iter()
-                .collect(),
-        )]
-        .into_iter()
-        .collect();
+        let report = ChannelReport {
+            status: [("korp".to_string(), AgentState::Waiting)].into_iter().collect(),
+            lines: [("korp".to_string(), "Fixing the login race".to_string())].into_iter().collect(),
+        };
+        let statuses: ChannelStatuses = [("dev".to_string(), report)].into_iter().collect();
         let chans = other_channels(
             &[entry("Korp", "dev", 0), entry("Loap", "dev", 0)],
             &statuses,
@@ -801,6 +817,9 @@ mod tests {
         let json = serde_json::to_value(&chans[0].agents).unwrap();
         assert_eq!(json[0]["status"], "waiting");
         assert!(json[1].get("status").is_none(), "{json}");
+        // The same for the line.
+        assert_eq!(json[0]["line"], "Fixing the login race");
+        assert!(json[1].get("line").is_none(), "{json}");
     }
 
     #[test]
@@ -814,13 +833,17 @@ mod tests {
             5,
         );
         p.agent_status.insert("manoz".into(), AgentState::Working);
+        p.agent_lines.insert("manoz".into(), "Fixing the login race".into());
         let hosts = lan_hosts(&[p], &HashSet::new(), NOW);
-        let got: Vec<Option<AgentState>> = hosts[0].channels[0]
+        let got: Vec<(Option<AgentState>, Option<&str>)> = hosts[0].channels[0]
             .agents
             .iter()
-            .map(|a| a.status)
+            .map(|a| (a.status, a.line.as_deref()))
             .collect();
-        assert_eq!(got, [Some(AgentState::Working), None]);
+        assert_eq!(
+            got,
+            [(Some(AgentState::Working), Some("Fixing the login race")), (None, None)]
+        );
     }
 
     #[test]
@@ -905,7 +928,7 @@ mod tests {
     #[tokio::test]
     async fn channel_statuses_asks_each_instance_and_skips_one_that_fails() {
         let (url, request) = serve_once(
-            r#"{"agents":["Korp"],"now_ms":1,"agent_status":{"Korp":{"state":"working","since_ms":1}}}"#,
+            r#"{"agents":["Korp"],"now_ms":1,"agent_status":{"Korp":{"state":"working","since_ms":1}},"agent_lines":{"Korp":"Building"}}"#,
         )
         .await;
         let targets = [
@@ -923,7 +946,8 @@ mod tests {
         ];
         let statuses = channel_statuses(&reqwest::Client::new(), &targets).await;
         assert_eq!(statuses.len(), 1, "{statuses:?}");
-        assert_eq!(statuses["dev"].get("korp"), Some(&AgentState::Working));
+        assert_eq!(statuses["dev"].status.get("korp"), Some(&AgentState::Working));
+        assert_eq!(statuses["dev"].lines.get("korp").map(String::as_str), Some("Building"));
         let request = request.await.unwrap().to_lowercase();
         assert!(
             request.starts_with("get /agentmux/reactive/agent-names "),
