@@ -19,7 +19,7 @@ import clsx from "clsx";
 import { Show, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js";
 import type { JSX } from "solid-js";
 import { Dynamic } from "solid-js/web";
-import { Key } from "@solid-primitives/keyed";
+import { Key } from "@/util/keyed";
 import { debounce, throttle } from "throttle-debounce";
 import { LayoutModel } from "./layoutModel";
 import { useNodeModel } from "./layoutModelHooks";
