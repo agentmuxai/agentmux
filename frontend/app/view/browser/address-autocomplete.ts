@@ -123,7 +123,11 @@ export function createAddressAutocomplete(query: AutocompleteQuery): AddressAuto
 /** The text to show after what was typed, when the engine's default match
  *  completes it inline (Chrome's "git" -> "git[hub.com]"). Empty while the user
  *  is deleting, and when the list answers other text. */
-export function inlineCompletion(typed: string, result: { matches: BrowserAutocompleteMatch[]; matchesFor: string }, deleting: boolean): string {
+export function inlineCompletion(
+    typed: string,
+    result: { matches: BrowserAutocompleteMatch[]; matchesFor: string },
+    deleting: boolean
+): string {
     if (deleting || result.matchesFor !== typed) return "";
     const top = result.matches[0];
     if (!top?.allowed_to_be_default || !top.inline_autocompletion) return "";

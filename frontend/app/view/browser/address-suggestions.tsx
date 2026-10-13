@@ -9,9 +9,9 @@
  * changes per keystroke at most, never per frame.
  */
 
-import { For, type JSX } from "solid-js";
-import clsx from "clsx";
 import { usePaneOverlay } from "@/app/platform/pane-overlay";
+import clsx from "clsx";
+import { For, type JSX } from "solid-js";
 
 /** Font Awesome icon for a Chrome match type. */
 export function suggestionIcon(type: string): string {
@@ -23,8 +23,9 @@ export function suggestionIcon(type: string): string {
 
 export function AddressSuggestions(props: {
     matches: BrowserAutocompleteMatch[];
+    /** The keyboard highlight. Hover is only a style (`:hover`): it never
+     *  changes what Enter opens, as in Chrome. */
     selected: number;
-    onHover: (index: number) => void;
     onChoose: (match: BrowserAutocompleteMatch) => void;
 }): JSX.Element {
     let el: HTMLDivElement | undefined;
@@ -39,7 +40,6 @@ export function AddressSuggestions(props: {
                         aria-selected={i() === props.selected}
                         // Keep focus in the address bar: a click must not blur it first.
                         onMouseDown={(e) => e.preventDefault()}
-                        onMouseEnter={() => props.onHover(i())}
                         onClick={() => props.onChoose(m)}
                         title={m.url}
                     >

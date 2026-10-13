@@ -73,7 +73,12 @@ describe("createAddressAutocomplete", () => {
         const ac = createAddressAutocomplete(query);
         ac.update("git");
         const top = match();
-        const suggest = match({ contents: "gitlab", url: "https://www.google.com/search?q=gitlab", type: "search-suggest", allowed_to_be_default: false });
+        const suggest = match({
+            contents: "gitlab",
+            url: "https://www.google.com/search?q=gitlab",
+            type: "search-suggest",
+            allowed_to_be_default: false,
+        });
         calls[0].resolve({ supported: true, matches: [top, suggest] });
         await settle();
         expect(ac.chosen("git")).toBe(top);

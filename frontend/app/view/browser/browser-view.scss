@@ -128,6 +128,7 @@
         color: var(--secondary-text-color);
     }
 
+    &:hover,
     &.selected {
         background: var(--highlight-bg-color, rgba(255, 255, 255, 0.08));
     }

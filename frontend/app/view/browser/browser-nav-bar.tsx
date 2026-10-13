@@ -531,78 +531,77 @@ export function BrowserNavBar(props: {
                 </FlyoutMenu>
                 <BrowserProfileButton model={model} home={home} />
                 <div class="browser-address-wrap">
-                <input
-                    ref={addressInputRef}
-                    class="browser-address-bar"
-                    type="text"
-                    value={addressBar()}
-                    role="combobox"
-                    aria-autocomplete="both"
-                    aria-expanded={suggestionsOpen()}
-                    onInput={(e) => {
-                        const value = e.currentTarget.value;
-                        deleting = (e as InputEvent).inputType?.startsWith("delete") ?? false;
-                        setAddressBar(value);
-                        setTyped(value);
-                        autocomplete.update(value);
-                    }}
-                    onKeyDown={handleAddressKeyDown}
-                    onContextMenu={showTextInputContextMenu}
-                    onMouseDown={() => {
-                        // Fire main_window_focus on mousedown — BEFORE focus
-                        // moves — so OS keyboard focus reclaims from the pane
-                        // HWND at the start of the click. Without this, the
-                        // first click on the address bar after the pane HWND
-                        // grabbed OS focus only moves DOM focus; OS focus
-                        // stays on the pane HWND and keystrokes route there
-                        // instead of reaching React. Subsequent clicks work
-                        // because OS focus has already transitioned.
-                        //
-                        // Buttons in the same nav bar work without this
-                        // because CEF/Chromium internally calls SetFocus on
-                        // <button> click; <input> doesn't get the same
-                        // treatment when the parent webview HWND lacks focus.
-                        diag(`input-mousedown value=${JSON.stringify(addressBar())}`);
-                        getApi().reclaimWindowFocus(windowLabel).catch(() => {});
-                    }}
-                    onFocus={(e) => {
-                        // relatedTarget = the element that LOST focus to us
-                        // (or null if focus came from outside the document,
-                        // e.g. from the embedded CEF browser pane).
-                        // document.activeElement is intentionally NOT logged
-                        // here — by the time onFocus fires it's already this
-                        // input, so it would only ever read as the input
-                        // itself.
-                        const related = e.relatedTarget as Element | null;
-                        diag(`input-focus value=${JSON.stringify(addressBar())} relatedTarget=${tagElement(related)}`);
-                        e.currentTarget.select();
-                        setTyped(e.currentTarget.value);
-                        // Always fire main_window_focus with window_label —
-                        // the IPC misrouting was the root cause of the bounce
-                        // (see the `main_window_focus` arm in ipc.rs). With
-                        // the correct window_label the IPC is a no-op when
-                        // the target window is already foreground, so it's safe to send on every
-                        // legitimate focus event without triggering loops.
-                        getApi().reclaimWindowFocus(windowLabel).catch(() => {});
-                    }}
-                    onBlur={(e) => {
-                        autocomplete.close();
-                        const next = e.relatedTarget as Element | null;
-                        // Microtask-deferred so we can see what landed focus AFTER the blur.
-                        queueMicrotask(() => {
-                            diag(`input-blur value=${JSON.stringify(addressBar())} relatedTarget=${tagElement(next)} now-active=${tagElement(document.activeElement)}`);
-                        });
-                    }}
-                    placeholder="Enter URL or search..."
-                />
-                <Show when={suggestionsOpen()}>
-                    <AddressSuggestions
-                        matches={autocomplete.matches()}
-                        selected={autocomplete.selected()}
-                        onHover={(i) => autocomplete.select(i)}
-                        onChoose={chooseSuggestion}
+                    <input
+                        ref={addressInputRef}
+                        class="browser-address-bar"
+                        type="text"
+                        value={addressBar()}
+                        role="combobox"
+                        aria-autocomplete="both"
+                        aria-expanded={suggestionsOpen()}
+                        onInput={(e) => {
+                            const value = e.currentTarget.value;
+                            deleting = (e as InputEvent).inputType?.startsWith("delete") ?? false;
+                            setAddressBar(value);
+                            setTyped(value);
+                            autocomplete.update(value);
+                        }}
+                        onKeyDown={handleAddressKeyDown}
+                        onContextMenu={showTextInputContextMenu}
+                        onMouseDown={() => {
+                            // Fire main_window_focus on mousedown — BEFORE focus
+                            // moves — so OS keyboard focus reclaims from the pane
+                            // HWND at the start of the click. Without this, the
+                            // first click on the address bar after the pane HWND
+                            // grabbed OS focus only moves DOM focus; OS focus
+                            // stays on the pane HWND and keystrokes route there
+                            // instead of reaching React. Subsequent clicks work
+                            // because OS focus has already transitioned.
+                            //
+                            // Buttons in the same nav bar work without this
+                            // because CEF/Chromium internally calls SetFocus on
+                            // <button> click; <input> doesn't get the same
+                            // treatment when the parent webview HWND lacks focus.
+                            diag(`input-mousedown value=${JSON.stringify(addressBar())}`);
+                            getApi().reclaimWindowFocus(windowLabel).catch(() => {});
+                        }}
+                        onFocus={(e) => {
+                            // relatedTarget = the element that LOST focus to us
+                            // (or null if focus came from outside the document,
+                            // e.g. from the embedded CEF browser pane).
+                            // document.activeElement is intentionally NOT logged
+                            // here — by the time onFocus fires it's already this
+                            // input, so it would only ever read as the input
+                            // itself.
+                            const related = e.relatedTarget as Element | null;
+                            diag(`input-focus value=${JSON.stringify(addressBar())} relatedTarget=${tagElement(related)}`);
+                            e.currentTarget.select();
+                            setTyped(e.currentTarget.value);
+                            // Always fire main_window_focus with window_label —
+                            // the IPC misrouting was the root cause of the bounce
+                            // (see the `main_window_focus` arm in ipc.rs). With
+                            // the correct window_label the IPC is a no-op when
+                            // the target window is already foreground, so it's safe to send on every
+                            // legitimate focus event without triggering loops.
+                            getApi().reclaimWindowFocus(windowLabel).catch(() => {});
+                        }}
+                        onBlur={(e) => {
+                            autocomplete.close();
+                            const next = e.relatedTarget as Element | null;
+                            // Microtask-deferred so we can see what landed focus AFTER the blur.
+                            queueMicrotask(() => {
+                                diag(`input-blur value=${JSON.stringify(addressBar())} relatedTarget=${tagElement(next)} now-active=${tagElement(document.activeElement)}`);
+                            });
+                        }}
+                        placeholder="Enter URL or search..."
                     />
-                </Show>
+                    <Show when={suggestionsOpen()}>
+                        <AddressSuggestions
+                            matches={autocomplete.matches()}
+                            selected={autocomplete.selected()}
+                            onChoose={chooseSuggestion}
+                        />
+                    </Show>
                 </div>
                 <button class="browser-nav-btn browser-go-btn" onClick={handleNavigate} title="Go">
                     <i class="fa fa-solid fa-arrow-right" aria-hidden="true" />
