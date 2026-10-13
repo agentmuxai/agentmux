@@ -12,6 +12,7 @@ import { openModal } from "@/app/store/modalmodel";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { WorkspaceService } from "@/app/store/services";
+import { inheritAppearanceInto } from "@/app/store/window-appearance";
 import { windowId } from "@/app/store/window-identity";
 import { LayoutPreviewModal, type LayoutOpenChoice } from "./layout-preview-modal";
 
@@ -48,7 +49,9 @@ export async function applyLayout(path: string, choice: LayoutOpenChoice): Promi
     const count = `${result.tab_ids.length} ${result.tab_ids.length === 1 ? "tab" : "tabs"}`;
     if (choice.newWindow) {
         try {
-            await getApi().openWorkspaceInNewWindow(result.workspace_id);
+            // It starts with this window's theme and opacity, like any window
+            // opened from here (SPEC_PER_WINDOW_THEME_AND_OPACITY §6).
+            inheritAppearanceInto(await getApi().openWorkspaceInNewWindow(result.workspace_id));
         } catch (err) {
             // Nothing shows the new workspace, so don't keep it (the same
             // rollback a tear-off whose window never opened does).
