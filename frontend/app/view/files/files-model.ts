@@ -87,7 +87,7 @@ export interface HangarRemote {
     color?: string;
 }
 
-/** The Remote section's hosts: SSH remotes in the Remotes pane's order
+/** The Remote section's hosts: SSH remotes in the order Connectors > Remotes shows them
  *  (pinned, SSH hosts, recent), hidden ones left out. */
 export function hangarRemotes(records: RemoteRecord[]): HangarRemote[] {
     return groupRemotes(records.filter((r) => r.kind === "ssh"))

@@ -250,9 +250,9 @@ Separate follow-ups:
    (`action-widgets-config.ts:152,168`, `action-widgets-menu.ts:37`, `action-widgets.tsx:336`), and the title-bar
    menu lists only `defwidget@` keys (`:85`). So `ext@…` entries only ever appear in More. Fix by moving
    `widget:pinned` to full keys, reading short names as `defwidget@<short>` for old files.
-6. **Two rename maps** that must agree: `RENAMED_PINS` in TS (includes `armory` → `connectors` + `memory`) and
-   `RENAMED_WIDGETS` in Rust (no `armory`, `user_widgets.rs:54-58`). Keep one in Rust and send the canonical names,
-   or at least add `armory` to Rust and a test that the two agree.
+6. ~~**Two rename maps**~~ Resolved 2026-10-13: both are gone. `m0037_retire_old_pane_names` rewrites the old names
+   (`armory`, `knowledge`, `remotes`) in stored pins, hidden entries and widgets.json once, so neither the frontend's
+   `RENAMED_PINS` nor srv's `RENAMED_WIDGETS` is needed.
 7. **Dead or leftover keys and fields:** `widget:showhelp` and `widget:*` (schema and types, no reader),
    `widget:order` (`MetaType`, template tests), the `widget:hidden@defwidget@…` example in a comment
    (`types.rs:518`, it would be confused with the new key), `FullConfigType.defaultwidgets` (never filled,

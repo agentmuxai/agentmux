@@ -62,13 +62,6 @@ describe("openRemotesInPane", () => {
         expect(h.setBlockMeta).toHaveBeenCalledWith("conn-1", { "connectors:section": "remotes" });
     });
 
-    it("reuses a saved Remotes tab not yet moved to Connectors", async () => {
-        h.views.set("remotes-1", "remotes");
-        h.stack = ["term-1", "remotes-1"];
-        await openRemotesInPane("term-1", "db1");
-        expect(h.addWidgetAsPaneTab).not.toHaveBeenCalled();
-        expect(h.setActiveBlockInStack).toHaveBeenCalledWith(expect.anything(), "node-1", "remotes-1");
-    });
 });
 
 describe("remoteSettingsMenuItems", () => {

@@ -1155,7 +1155,7 @@ impl Run {
     /// saying so in the pane, once the user has said yes
     /// (`helper_consent`). `Err` is the line for the pane.
     async fn install_helper(&self) -> Result<(), String> {
-        let plain = "For a plain SSH terminal, set \"Keep sessions alive\" to Off for this host in the Remotes pane.";
+        let plain = "For a plain SSH terminal, set \"Keep sessions alive\" to Off for this host in Connectors > Remotes.";
         if let Err(why) =
             crate::backend::remote::helper_consent::allow_install(&self.conn, Some(&self.block_id)).await
         {
