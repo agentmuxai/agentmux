@@ -729,13 +729,12 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let mstore = state.mstore.clone();
     let id_store_lna = state.id_store.clone();
     let identity_store_lna = state.identity_store.clone();
-    engine.register_handler(
-        COMMAND_LIST_NAMED_AGENTS,
-        Box::new(move |data, _ctx| {
-            let mstore = mstore.clone();
-            let id_store = id_store_lna.clone();
-            let identity_store = identity_store_lna.clone();
-            Box::pin(async move {
+    // `Value` request: a malformed one means the defaults (unwrap_or_default).
+    engine.register_typed(COMMAND_LIST_NAMED_AGENTS, move |data: serde_json::Value, _ctx| {
+        let mstore = mstore.clone();
+        let id_store = id_store_lna.clone();
+        let identity_store = identity_store_lna.clone();
+        async move {
                 let cmd: CommandListNamedAgentsData =
                     serde_json::from_value(data).unwrap_or_default();
                 let limit = if cmd.limit == 0 {
@@ -979,10 +978,9 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     }
                 };
 
-                Ok(Some(serde_json::to_value(&rows).unwrap_or_default()))
-            })
-        }),
-    );
+                Ok(rows)
+        }
+    });
 
     // hidenamedagent — soft-delete (sets display_hidden = 1) so the
     // row disappears from the dropdown. Working dir stays on disk.

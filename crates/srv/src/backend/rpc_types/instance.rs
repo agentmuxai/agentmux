@@ -100,7 +100,7 @@ pub struct CommandListNamedAgentsData {
 /// display name + provider), `db_agent_identity_links`/`db_accounts`
 /// (for the identity display name), and `db_bundles` (for bundle
 /// names) so the frontend renders without further lookups.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
 pub struct NamedAgentRow {
     pub instance_id: String,
     pub instance_name: String,
@@ -112,7 +112,9 @@ pub struct NamedAgentRow {
     pub identity_name: String,
     pub memory_id: String,
     pub memory_name: String,
+    #[ts(type = "number")]
     pub started_at: i64,
+    #[ts(type = "number")]
     pub ended_at: i64,
     pub status: String,
     pub block_id_hint: String,

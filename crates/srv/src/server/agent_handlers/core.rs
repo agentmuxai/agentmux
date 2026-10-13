@@ -54,11 +54,9 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // deliberately accepts loose input keeps its `Value` request. Its RESPONSE
     // is still `Vec<AgentDefinition>`, which IS generated -- that is where the
     // drift risk lived.
-    engine.register_handler(
-        COMMAND_LIST_AGENTS,
-        Box::new(move |data, _ctx| {
-            let mstore = mstore_lfa.clone();
-            Box::pin(async move {
+    engine.register_typed(COMMAND_LIST_AGENTS, move |data: serde_json::Value, _ctx| {
+        let mstore = mstore_lfa.clone();
+        async move {
                 // unwrap_or_default — both `null` and `{}` deserialize
                 // to the default (no filter). Anything malformed falls
                 // back to no-filter rather than erroring; older clients
@@ -84,10 +82,9 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         include_hidden || a.is_seeded != 1 || a.user_hidden == 0
                     })
                     .collect();
-                Ok(Some(serde_json::to_value(&filtered).unwrap_or_default()))
-            })
-        }),
-    );
+                Ok(filtered)
+        }
+    });
 
     // createagent → insert new agent, broadcast agents:changed
     let mstore_cfa = state.mstore.clone();
