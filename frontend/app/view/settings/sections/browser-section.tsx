@@ -35,7 +35,7 @@ export const BROWSER_SETTINGS = {
         id: "browser.search_suggestions",
         label: "Search suggestions while typing",
         description:
-            "The address bar also asks your search engine for suggestions as you type, which sends it what you type before you press Enter. Off: suggestions come only from this computer (your history and the addresses you typed).",
+            "The address bar also asks your search engine for suggestions as you type, as Chrome does, which sends it what you type before you press Enter. Incognito tabs never ask, as in Chrome. Turn it off to keep suggestions to this computer (your history and the addresses you typed).",
         section: "browser",
         keywords: ["autocomplete", "suggestions", "address bar", "omnibox", "google", "search", "privacy", "browser:searchsuggestions"],
     },
@@ -148,7 +148,7 @@ export function BrowserSection(): JSX.Element {
                 description={BROWSER_SETTINGS.searchSuggestions.description}
                 control={
                     <ToggleControl
-                        checked={!!(s()["browser:searchsuggestions"] as boolean)}
+                        checked={s()["browser:searchsuggestions"] !== false}
                         onChange={(v) => set("browser:searchsuggestions", v)}
                     />
                 }

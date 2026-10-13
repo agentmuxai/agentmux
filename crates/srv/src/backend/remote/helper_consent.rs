@@ -308,7 +308,7 @@ pub fn question(connection: &str, agent: Option<&str>) -> serde_json::Value {
         "message": format!(
             "{who}The helper enables file browsing and terminals that survive disconnects. \
              It is about 500 KB, in ~/.agentmux-remote on that machine; it needs no root, \
-             and you can remove it any time from Remotes."
+             and you can remove it any time from Connectors > Remotes."
         ),
         "checkbox": format!("Don't ask again for {connection}"),
         "ok_label": "Install",
@@ -399,7 +399,7 @@ async fn allow_install_with(deps: &Deps, connection: &str, block_id: Option<&str
         Step::Install => return Ok(()),
         Step::Refuse => {
             return Err(format!(
-                "installing AgentMux's helper on {connection} is set to Never (change it in Remotes)"
+                "installing AgentMux's helper on {connection} is set to Never (change it in Connectors > Remotes)"
             ))
         }
         Step::Ask => {}

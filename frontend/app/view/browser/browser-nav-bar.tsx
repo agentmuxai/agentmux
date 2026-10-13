@@ -5,6 +5,7 @@ import { createEffect, createMemo, createSignal, onCleanup, onMount, Show, type 
 import type { BrowserBookmark } from "@/types/rpc/BrowserBookmark";
 import clsx from "clsx";
 import { getApi } from "@/app/store/app-api";
+import { paneCommandFor } from "@/app/keybindings";
 import { ContextMenuModel, showTextInputContextMenu } from "@/app/store/contextmenu";
 import { browserStartPageAtom, settingsAtom } from "@/store/config-signals";
 import { FlyoutMenu } from "@/app/element/flyoutmenu";
@@ -79,13 +80,13 @@ export function BrowserNavBar(props: {
 
     // Chrome's address bar suggestions (address-autocomplete.ts). `typed` is
     // what the user typed, without an inline completion shown after it. The
-    // search engine is asked too only when the user turned that on.
+    // search engine is asked too unless the user turned that off.
     const autocomplete = createAddressAutocomplete(
         (text) =>
             getApi().browserPanes.autocomplete?.(
                 model.blockId,
                 text,
-                !!settingsAtom()?.["browser:searchsuggestions"]
+                settingsAtom()?.["browser:searchsuggestions"] !== false
             ) ?? Promise.resolve(undefined)
     );
     const [typed, setTyped] = createSignal("");
@@ -471,7 +472,17 @@ export function BrowserNavBar(props: {
 
     return (
         <Show when={model.showControlsAtom()}>
-            <div class="browser-nav-bar">
+            <div
+                class="browser-nav-bar"
+                // Ctrl/Cmd+Shift+N anywhere in the bar, the address bar included,
+                // opens an Incognito tab, as in Chrome, not the app's new window.
+                onKeyDown={(e) => {
+                    if (e.defaultPrevented || paneCommandFor(e, "browser") !== "browser:newIncognito") return;
+                    e.preventDefault();
+                    e.stopPropagation();
+                    openIncognitoTab(model, home());
+                }}
+            >
                 <button
                     class="browser-nav-btn"
                     disabled={!model.canGoBackAtom()}

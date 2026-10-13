@@ -7,4 +7,4 @@
  * `data` sends `null`, and serde accepts each of those from only one of `()`
  * and a struct.
  */
-export type ToolchainEnvReq = Record<string, never>;
+export type ToolchainEnvReq = Record<symbol, never>;

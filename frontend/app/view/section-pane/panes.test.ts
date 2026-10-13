@@ -8,41 +8,9 @@ vi.mock("@/app/store/block-component-registry", () => ({
 }));
 
 import { openOrFocusPaneByView } from "@/app/store/block-component-registry";
-import { armoryMigrationPatch, armoryTarget, openConnectors, openMemory } from "./panes";
+import { openConnectors, openMemory } from "./panes";
 
 afterEach(() => vi.mocked(openOrFocusPaneByView).mockClear());
-
-describe("armoryTarget", () => {
-    it.each([
-        [{}, "connectors", "accounts"],
-        [{ "armory:section": "accounts" }, "connectors", "accounts"],
-        [{ "armory:section": "mcp" }, "connectors", "mcp"],
-        [{ "armory:section": "memory" }, "memory", "global"],
-        [{ "armory:section": "memory", "armory:memory:subsection": "global" }, "memory", "global"],
-        [{ "armory:section": "memory", "armory:memory:subsection": "personal" }, "memory", "personal"],
-        [{ "armory:section": "native_memory" }, "memory", "personal"],
-        [{ "armory:section": "skills" }, "memory", "skills"],
-        [{ "armory:section": "bundles" }, "memory", "bundles"],
-        [{ "armory:section": "identities" }, "connectors", "accounts"],
-    ])("%j → %s / %s", (meta, view, section) => {
-        expect(armoryTarget(meta)).toMatchObject({ view, section });
-    });
-
-    it("treats missing meta as the Armory's default, Accounts", () => {
-        expect(armoryTarget(undefined)).toMatchObject({ view: "connectors", section: "accounts" });
-    });
-});
-
-describe("armoryMigrationPatch", () => {
-    it("sets the new view and section and clears the Armory's keys, nothing else", () => {
-        expect(armoryMigrationPatch({ view: "trust", "armory:section": "mcp", "term:zoom": 1.2 })).toEqual({
-            view: "connectors",
-            "connectors:section": "mcp",
-            "armory:section": null,
-            "armory:memory:subsection": null,
-        });
-    });
-});
 
 describe("openConnectors / openMemory", () => {
     it("open or focus the pane on the given section", async () => {

@@ -25,7 +25,8 @@ use crate::backend::storage::store::Store;
 pub const META_AWAITING_USER: &str = "term:awaiting_user";
 
 /// An agent's state as the wire reports it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "lowercase")]
 pub enum AgentState {
     Working,

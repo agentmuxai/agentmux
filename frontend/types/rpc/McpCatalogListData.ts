@@ -5,4 +5,4 @@
  * `()`, because the stub calls it with `{}` and serde deserializes `()` only
  * from JSON `null`.
  */
-export type McpCatalogListData = Record<string, never>;
+export type McpCatalogListData = Record<symbol, never>;

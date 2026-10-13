@@ -368,8 +368,8 @@ fn ratios(sizes: &[f64]) -> Vec<f64> {
 
 /// Where a saved Armory pane goes, by its section (and, for the old Memory
 /// section, its Global/Personal subsection): its pane, `connectors` or
-/// `memory`, and that pane's section. Mirrors `armoryTarget` in
-/// frontend/app/view/section-pane/panes.ts.
+/// `memory`, and that pane's section. The same mapping m0037_retire_old_pane_names.rs applied to
+/// stored blocks; layout files live outside AgentMux, so their import still needs it.
 fn armory_target(section: Option<&str>, subsection: Option<&str>) -> (&'static str, &'static str) {
     match section {
         Some("mcp") => ("connectors", "mcp"),

@@ -76,19 +76,21 @@ pub struct TsType {
 /// parameters: ts-rs reports `X` as a generic of `Option<X>`, not as a
 /// dependency, so `TS::dependencies()` alone would miss it.
 pub fn ts_type<T: ts_rs::TS + 'static + ?Sized>() -> TsType {
-    struct Collect(std::collections::BTreeSet<String>);
-    impl ts_rs::TypeVisitor for Collect {
+    // The same config the generated export tests use, so names and imports match the files.
+    let cfg = ts_rs::Config::from_env();
+    struct Collect<'a>(std::collections::BTreeSet<String>, &'a ts_rs::Config);
+    impl ts_rs::TypeVisitor for Collect<'_> {
         fn visit<U: ts_rs::TS + 'static + ?Sized>(&mut self) {
             if U::output_path().is_some() {
-                self.0.insert(U::ident());
+                self.0.insert(U::ident(self.1));
             } else {
                 U::visit_generics(self);
             }
         }
     }
-    let mut c = Collect(Default::default());
+    let mut c = Collect(Default::default(), &cfg);
     ts_rs::TypeVisitor::visit::<T>(&mut c);
-    TsType { name: T::name(), imports: c.0.into_iter().collect() }
+    TsType { name: T::name(&cfg), imports: c.0.into_iter().collect() }
 }
 
 impl RpcBinding {
@@ -231,6 +233,26 @@ impl RpcSchema {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// ts-rs 10 dropped a whole `#[serde(...)]` attribute when one item in it was unknown, so a
+    /// `rename` beside `skip_serializing_if` was lost and the binding named the Rust field (the
+    /// "My Agents empty" incident). ts-rs 12 parses each item: the rename and the optionality
+    /// both reach the binding, and `check-tsrs-serde-warnings` fails the build if an item doesn't.
+    #[test]
+    fn a_rename_beside_skip_serializing_if_reaches_the_binding() {
+        #[derive(serde::Serialize, ts_rs::TS)]
+        #[allow(dead_code)]
+        struct Probe {
+            #[serde(rename = "wireName", default, skip_serializing_if = "Option::is_none")]
+            rust_name: Option<String>,
+            #[serde(rename = "kept", skip_serializing_if = "String::is_empty")]
+            also_rust: String,
+        }
+        let decl = <Probe as ts_rs::TS>::decl(&ts_rs::Config::from_env());
+        assert!(decl.contains("wireName?: string"), "rename and optionality must both survive: {decl}");
+        assert!(decl.contains("kept"), "a rename beside skip_serializing_if must survive: {decl}");
+        assert!(!decl.contains("rust_name") && !decl.contains("also_rust"), "the Rust names must not leak: {decl}");
+    }
 
     #[derive(ts_rs::TS)]
     #[ts(export_to = "../../../frontend/types/rpc/")]

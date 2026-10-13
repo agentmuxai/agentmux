@@ -47,7 +47,7 @@ rusqlite = { version = "0.31", features = ["bundled"] }
 # attributes these structs already carry, so the emitted type matches the
 # wire shape serde actually produces rather than the Rust field names.
 # See docs/specs/SPEC_RPC_BINDINGS_CODEGEN_2026_09_07.md.
-ts-rs = { version = "10", features = ["serde-compat", "serde-json-impl"] }
+ts-rs = { version = "12", features = ["serde-compat", "serde-json-impl"] }
 base64 = "0.22"
 thiserror = "1"
 dirs = "5"

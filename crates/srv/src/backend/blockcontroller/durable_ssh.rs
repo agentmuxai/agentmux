@@ -334,17 +334,13 @@ impl DurableSshController {
             &self.event_bus,
             store.must_get::<obj::Block>(&self.block_id),
         ) {
-            bus.broadcast_event(&crate::backend::eventbus::WSEventType {
-                eventtype: "waveobj:update".to_string(),
-                oref: oref.clone(),
-                data: serde_json::to_value(&obj::MuxObjUpdate {
-                    updatetype: "update".into(),
-                    otype: "block".into(),
-                    oid: self.block_id.clone(),
-                    obj: Some(obj::mux_obj_to_value(&block)),
-                })
-                .ok(),
-            });
+            let update = obj::MuxObjUpdate {
+                updatetype: "update".into(),
+                otype: "block".into(),
+                oid: self.block_id.clone(),
+                obj: Some(obj::mux_obj_to_value(&block)),
+            };
+            bus.broadcast_event(&crate::backend::eventbus::EventBus::typed_ws_event::<crate::backend::mps_events::MuxObjUpdated>(&update, oref.clone()));
         }
     }
 
@@ -766,7 +762,7 @@ impl Run {
                         // stops, and says how to get a plain terminal.
                         if !declined && !self.by_default {
                             self.note(&format!(
-                                "This pane can't stay alive without AgentMux's helper on {}: {why}. For a plain SSH terminal, set \"Keep sessions alive\" to Off for this host in the Remotes pane.",
+                                "This pane can't stay alive without AgentMux's helper on {}: {why}. For a plain SSH terminal, set \"Keep sessions alive\" to Off for this host in Connectors > Remotes.",
                                 self.conn
                             ))
                             .await;

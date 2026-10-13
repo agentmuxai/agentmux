@@ -6,7 +6,7 @@
 // isn't subscribed the untyped way.
 
 import { describe, expect, it } from "vitest";
-import { renderEvents, untypedSubscriptions, wpsNames } from "./gen-mux-events.mjs";
+import { eventShapedHandlers, renderEvents, untypedSubscriptions, wpsNames } from "./gen-mux-events.mjs";
 
 const rows = [
     { event: "controllerstatus", payloadTs: { name: "BlockControllerRuntimeStatus", imports: ["BlockControllerRuntimeStatus"] } },
@@ -89,5 +89,34 @@ describe("untypedSubscriptions", () => {
             ["frontend/f.ts", "EventReadHistoryCommand(client, { event: WpsEvent.SysInfo, scope });\nconst EVENT_SYS = WpsEvent.SysInfo;"],
         ];
         expect(untypedSubscriptions(sources, typed, wps)).toEqual([]);
+    });
+});
+
+describe("eventShapedHandlers", () => {
+    it("refuses a handler that takes the event: typed any, unknown or MuxEvent, or reading .data", () => {
+        const sources = [
+            ["frontend/a.ts", "onMuxEvent(WpsEvent.SysInfo, (event: any) => use(event));"],
+            ["frontend/b.ts", "onMuxEvent(WpsEvent.SysInfo, (e: MuxEvent) => use(e));"],
+            ["frontend/c.ts", "onMuxEvent(WpsEvent.SysInfo, (ev) => {\n    const d = ev?.data;\n});"],
+            ["frontend/d.tsx", "onMuxEvent(`dronerun:${id}`, function (event: unknown) { use(event); });"],
+            ["frontend/i.ts", "onMuxEvent(WpsEvent.SysInfo, (event) => use((event as any)?.data?.values));"],
+        ];
+        expect(eventShapedHandlers(sources).map((e) => e.split(":").slice(0, 2).join(":"))).toEqual([
+            "frontend/a.ts:1",
+            "frontend/b.ts:1",
+            "frontend/c.ts:1",
+            "frontend/d.tsx:1",
+            "frontend/i.ts:1",
+        ]);
+    });
+
+    it("leaves handlers that take the payload alone, and a .data on something else", () => {
+        const sources = [
+            ["frontend/e.ts", "onMuxEvent(WpsEvent.SysInfo, (data) => use(data.values));"],
+            ["frontend/f.ts", "onMuxEvent(WpsEvent.SysInfo, ({ values }) => use(values));"],
+            ["frontend/g.ts", "onMuxEvent(WpsEvent.SysInfo, (data, event) => use(data, event.data));"],
+            ["frontend/h.ts", "onMuxEvent(WpsEvent.SysInfo, refresh);\nmuxEventSubscribe({ eventType: \"x\", handler: (e: any) => e.data });"],
+        ];
+        expect(eventShapedHandlers(sources)).toEqual([]);
     });
 });

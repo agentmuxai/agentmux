@@ -27,7 +27,7 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command};
 use tokio::sync::Mutex;
 
-use crate::backend::eventbus::{EventBus, WSEventType};
+use crate::backend::eventbus::EventBus;
 
 pub type ServerId = String;
 
@@ -335,14 +335,8 @@ async fn read_lsp_messages(stdout: ChildStdout, server_id: ServerId, event_bus: 
                 continue;
             }
         };
-        event_bus.broadcast_event(&WSEventType {
-            eventtype: "lsp:message".to_string(),
-            oref: String::new(),
-            data: Some(serde_json::json!({
-                "server_id": server_id,
-                "message": message,
-            })),
-        });
+        let event = crate::backend::mps_events::LspMessageEvent { server_id: server_id.to_string(), message };
+        event_bus.broadcast_event(&EventBus::typed_ws_event::<crate::backend::mps_events::LspMessage>(&event, String::new()));
     }
 }
 

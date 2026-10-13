@@ -13,7 +13,7 @@ status: string, started_at: number, ended_at: number,
 /**
  * Map of block_id → BlockState snapshot at run completion.
  */
-block_states: { [key in string]?: DroneBlockState }, 
+block_states: { [key in string]: DroneBlockState }, 
 /**
  * Final output captured by the Response block (stringified JSON).
  */

@@ -519,6 +519,11 @@ pub struct MuxObjUpdate {
     pub obj: Option<serde_json::Value>,
 }
 
+/// The `waveobj:batchedupdates` payload: the updates of one atomic backend transition, in order.
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct MuxObjBatch(pub Vec<MuxObjUpdate>);
+
 // ---- Helpers ----
 
 use crate::backend::rpc_types::is_zero_i64;

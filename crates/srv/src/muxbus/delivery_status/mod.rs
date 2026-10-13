@@ -33,7 +33,7 @@ pub use machine::Link;
 use machine::{Effect, Machine};
 use notes::{ExpiredItem, Note, NoteBook, RetryQueue};
 
-use crate::backend::eventbus::{EventBus, WSEventType};
+use crate::backend::eventbus::EventBus;
 use crate::backend::mps::Broker;
 use crate::backend::rpc_types::MuxBusDeliveryStatus;
 use crate::broker::CredentialState;
@@ -196,11 +196,7 @@ fn apply(effects: Vec<Effect>) {
                     "muxbus delivery: state changed"
                 );
                 if let Some(sinks) = rt().sinks.get() {
-                    sinks.event_bus.broadcast_event(&WSEventType {
-                        eventtype: EVENT_MUXBUS_STATUS.to_string(),
-                        oref: String::new(),
-                        data: serde_json::to_value(&status).ok(),
-                    });
+                    sinks.event_bus.broadcast_event(&crate::backend::eventbus::EventBus::typed_ws_event::<crate::backend::mps_events::MuxbusStatus>(&status, String::new()));
                 }
             }
             Effect::NotifySignInNeeded => {

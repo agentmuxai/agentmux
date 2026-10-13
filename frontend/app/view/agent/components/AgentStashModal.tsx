@@ -4,10 +4,9 @@
 /**
  * AgentStashModal — unified tabbed container for per-agent setup surfaces,
  * opened by the single "Stash" (backpack) icon in the agent pane header.
- * This is the per-agent-scoped analogue of the global Armory pane
- * (frontend/app/view/armory/) — "Stash" vs. "Armory" is a deliberate naming
- * split so the two are never confused for the same surface (see
- * docs/reports/REPORT_ARMORY_STASH_NAMING_2026_07_27.md). Consolidates
+ * This is the per-agent-scoped analogue of the app-wide Connectors and Memory
+ * panes (which replaced the Armory; "Stash" was named so the two are never
+ * confused, see docs/reports/REPORT_ARMORY_STASH_NAMING_2026_07_27.md). Consolidates
  * the former two icons (identity + native memory) into one modal with tabs:
  *   - Accounts    — read-only linked-accounts view (AgentIdentityLinksPanel).
  *                   New bindings are created from the agent-launch flow;

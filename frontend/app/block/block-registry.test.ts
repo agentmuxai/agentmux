@@ -17,7 +17,7 @@ import { getPaneTab, isKeepAliveView, paneTabCapability, resolvePaneTabView } fr
 
 const VIEWS = [
     "term", "cpuplot", "sysinfo", "help", "launcher", "agent", "swarm", "editor", "browser",
-    "memory", "media", "identity", "drone", "warden", "toolchain", "armory", "settings",
+    "memory", "media", "identity", "drone", "warden", "toolchain", "settings",
     "connectors",
 ];
 
@@ -34,16 +34,16 @@ const OLD_LABELS: Record<string, string> = {
 // Deliberate differences since the tables: "cpuplot" is sysinfo under an older
 // name, and as a native tab (Phase 2c) it names and icons itself like sysinfo
 // — its header always showed sysinfo's chart icon; only its tab pill didn't.
-// Warden and Armory likewise always showed their own icon in the header
-// (`shield-halved`, `vault`) but not in their pills; Armory had no label.
+// Warden likewise always showed its own icon in the header
+// (`shield-halved`) but not in its pills.
 // So did the last five legacy views, whose pills fell back to "square" and
 // three of them to their lowercase view name.
 const NEW_ICONS: Record<string, string> = {
-    cpuplot: "chart-line", warden: "shield-halved", armory: "vault", connectors: "plug",
+    cpuplot: "chart-line", warden: "shield-halved", connectors: "plug",
     launcher: "shapes", memory: "brain", identity: "user", toolchain: "wrench", settings: "cog",
 };
 const NEW_LABELS: Record<string, string> = {
-    cpuplot: "Sysinfo", armory: "Armory", connectors: "Connectors", launcher: "Launcher", toolchain: "Toolchain", settings: "Settings",
+    cpuplot: "Sysinfo", connectors: "Connectors", launcher: "Launcher", toolchain: "Toolchain", settings: "Settings",
 };
 
 describe("built-in pane tabs (block-registry.ts)", () => {
@@ -69,8 +69,6 @@ describe("built-in pane tabs (block-registry.ts)", () => {
     it("keeps the old migration aliases", () => {
         expect(resolvePaneTabView("forge")).toBe("agent");
         expect(resolvePaneTabView("workflows")).toBe("drone");
-        expect(resolvePaneTabView("trust")).toBe("armory");
-        expect(resolvePaneTabView("knowledge")).toBe("memory");
     });
 
     // Phase 5: each capability replaces a view-name check in shared code, so
@@ -88,9 +86,7 @@ describe("built-in pane tabs (block-registry.ts)", () => {
         expect(holders("hueBorder")).toEqual(["term"]);
         expect(holders("nativeSurface")).toEqual(["browser"]);
         // 5b: zoom.ts's allowlist and editor's base size, paste, Ctrl+F, cwd.
-        // The Armory's zoom went to the two panes that replaced it; the Armory
-        // shim renders one of them until its block remounts.
-        expect(holders("paneZoom")).toEqual(["agent", "armory", "connectors", "editor", "memory", "swarm", "term", "warden"]);
+        expect(holders("paneZoom")).toEqual(["agent", "connectors", "editor", "memory", "swarm", "term", "warden"]);
         expect(paneTabCapability("editor", "paneZoom")?.baseFontSize).toBe(13);
         expect(paneTabCapability("files", "paneZoom")?.baseFontSize).toBe(12);
         expect(paneTabCapability("term", "paneZoom")?.baseFontSize).toBeUndefined();
@@ -115,9 +111,9 @@ describe("built-in pane tabs (block-registry.ts)", () => {
 // back after trying another.
 describe("built-in widget colors", () => {
     const swatches = new Set(PANE_HUE_OPTIONS.map((o) => o.hue));
-    // Through widgetHueFor, so a legacy view (cpuplot, armory) is checked by
+    // Through widgetHueFor, so a legacy view (cpuplot) is checked by
     // the color it takes from the view it stands in for.
-    it.each([...VIEWS, "files", "remotes"])("%s has a default hue from the Pane Color palette", (view) => {
+    it.each([...VIEWS, "files"])("%s has a default hue from the Pane Color palette", (view) => {
         expect(swatches.has(widgetHueFor(view) as number)).toBe(true);
     });
 

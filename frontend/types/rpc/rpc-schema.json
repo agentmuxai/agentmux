@@ -4892,7 +4892,7 @@
     "responseName": "std::collections::hash::map::HashMap<alloc::string::String, core::option::Option<alloc::string::String>>",
     "responseTs": {
       "imports": [],
-      "name": "{ [key in string]?: string | null }"
+      "name": "{ [key in string]: string | null }"
     }
   },
   {

@@ -8,4 +8,4 @@
  * real call at runtime while compiling and passing every CI gate -- the
  * `bookmarks.list` bug.
  */
-export type MuxBusLoginCancelReq = Record<string, never>;
+export type MuxBusLoginCancelReq = Record<symbol, never>;

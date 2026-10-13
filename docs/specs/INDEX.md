@@ -431,6 +431,7 @@ partial list.
 | [`SPEC_RESIZE_DEFAULT_FLIP_AND_WINDOW_EDGE_SHIFT_2026_08_26`](SPEC_RESIZE_DEFAULT_FLIP_AND_WINDOW_EDGE_SHIFT_2026_08_26.md) | SPEC: Resize refinements — flip group/direct defaults, and Shift+window-resize feeding only the edge panes |
 | [`SPEC_RESIZE_THROUGH_COLLAPSED_PANES_2026_10_03`](SPEC_RESIZE_THROUGH_COLLAPSED_PANES_2026_10_03.md) | SPEC: resize through collapsed panes — every edge of a collapsed run resizes the expanded panes either side |
 | [`SPEC_RESPONSIVE_TAB_BAR_TOP_POSITION_2026_08_24`](SPEC_RESPONSIVE_TAB_BAR_TOP_POSITION_2026_08_24.md) | SPEC: Move the narrow-width responsive tab bar to the top (from the bottom) |
+| [`SPEC_RETIRE_ARMORY_CONNECTORS_AND_KNOWLEDGE_PANES_2026_10_05`](SPEC_RETIRE_ARMORY_CONNECTORS_AND_KNOWLEDGE_PANES_2026_10_05.md) | SPEC: Retire the Armory — two panes, Connectors and Knowledge |
 | [`SPEC_SETTINGS_ISOLATED_BY_CHANNEL_2026_08_19`](SPEC_SETTINGS_ISOLATED_BY_CHANNEL_2026_08_19.md) | Spec: Make `settings.json` isolated-by-default for every non-`stable` channel |
 | [`SPEC_SETTINGS_LIVE_COMMIT_AND_TERMINAL_APPLY_GAPS_2026_09_22`](SPEC_SETTINGS_LIVE_COMMIT_AND_TERMINAL_APPLY_GAPS_2026_09_22.md) | SPEC — Settings commit on blur, not on change; plus the remaining terminal live-apply gaps |
 | [`SPEC_SETTINGS_PANE_COMPLETION_2026_07_14`](SPEC_SETTINGS_PANE_COMPLETION_2026_07_14.md) | SPEC — Settings pane: fill out the remaining sections (completes SPEC_SETTINGS_PANE_2026_06_25) |
@@ -490,6 +491,8 @@ partial list.
 | [`SPEC_TOWER_AGENT_CENTRIC_VIEWS_2026_10_08`](SPEC_TOWER_AGENT_CENTRIC_VIEWS_2026_10_08.md) | SPEC: Tower, agent first: an Agents rail and a Processes list grouped by agent |
 | [`SPEC_TRANSCRIPT_NODE_HOVER_PEEK_2026_08_03`](SPEC_TRANSCRIPT_NODE_HOVER_PEEK_2026_08_03.md) | Spec: hover-to-peek on tool calls and thinking clumps |
 | [`SPEC_TRANSCRIPT_NODE_HOVER_PEEK_ALL_KINDS_2026_08_25`](SPEC_TRANSCRIPT_NODE_HOVER_PEEK_ALL_KINDS_2026_08_25.md) | Spec: hover-to-peek on EVERY transcript node kind, 50ms delay |
+| [`SPEC_TSRS_SERDE_ATTRIBUTE_WARNINGS_2026_10_13`](SPEC_TSRS_SERDE_ATTRIBUTE_WARNINGS_2026_10_13.md) | ts-rs drops serde attributes it can't parse |
+| [`SPEC_TYPED_EVENTS_EVERY_PATH_2026_10_13`](SPEC_TYPED_EVENTS_EVERY_PATH_2026_10_13.md) | Typed events on every path |
 | [`SPEC_TYPED_EVENT_PAYLOADS_2026_10_13`](SPEC_TYPED_EVENT_PAYLOADS_2026_10_13.md) | Typed event payloads |
 | [`SPEC_UI_MANUAL_SCREENSHOT_TOOLING_2026_09_19`](SPEC_UI_MANUAL_SCREENSHOT_TOOLING_2026_09_19.md) | SPEC: Reusable, cropped screenshot tooling for the user manual |
 | [`SPEC_USER_INPUT_VISIBILITY_AND_STARTUP_COLLAPSE_2026_05_24`](SPEC_USER_INPUT_VISIBILITY_AND_STARTUP_COLLAPSE_2026_05_24.md) | SPEC: User input visibility + startup-injection collapse |
@@ -637,7 +640,6 @@ partial list.
 | [`SPEC_REMOTE_TERMINALS_AND_DURABLE_SESSIONS_2026_10_02`](SPEC_REMOTE_TERMINALS_AND_DURABLE_SESSIONS_2026_10_02.md) | SPEC: Remote terminals (SSH, WSL) and durable remote sessions — implementation plan |
 | [`SPEC_RENAME_KNOWLEDGE_TO_MEMORY_2026_10_06`](SPEC_RENAME_KNOWLEDGE_TO_MEMORY_2026_10_06.md) | SPEC: Rename the Knowledge pane to Memory, and give "memory" one set of meanings |
 | [`SPEC_RESUME_GATE_AND_SAME_IDENTITY_CONTINUATION_2026_09_25`](SPEC_RESUME_GATE_AND_SAME_IDENTITY_CONTINUATION_2026_09_25.md) | SPEC: one resume gate, and native continuation across logins of the same identity |
-| [`SPEC_RETIRE_ARMORY_CONNECTORS_AND_KNOWLEDGE_PANES_2026_10_05`](SPEC_RETIRE_ARMORY_CONNECTORS_AND_KNOWLEDGE_PANES_2026_10_05.md) | SPEC: Retire the Armory — two panes, Connectors and Knowledge |
 | [`SPEC_REVEAL_BLOCK_ONE_PATH_2026_09_27`](SPEC_REVEAL_BLOCK_ONE_PATH_2026_09_27.md) | SPEC: one way to reveal a block — including a background tab in a multi-tab pane |
 | [`SPEC_RPC_BINDINGS_CODEGEN_2026_09_07`](SPEC_RPC_BINDINGS_CODEGEN_2026_09_07.md) | SPEC: Generate the Rust ↔ TypeScript RPC bindings from srv |
 | [`SPEC_SESSION_RESTORE_AND_SAVED_LAYOUTS_2026_08_13`](SPEC_SESSION_RESTORE_AND_SAVED_LAYOUTS_2026_08_13.md) | Spec: Restore-on-relaunch + named, reloadable "Layouts" |

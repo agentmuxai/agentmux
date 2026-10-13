@@ -9,7 +9,6 @@
 // reproduce the tables they replace exactly; a view with none there keeps
 // the defaults (its name, a square).
 
-import { armoryPaneTab } from "@/app/view/armory/armory";
 import { browserPaneTab } from "@/app/view/browser/browser";
 import { connectorsPaneTab } from "@/app/view/connectors/connectors";
 import { dronePaneTab } from "@/app/view/drone/drone";
@@ -19,7 +18,6 @@ import { identityPaneTab } from "@/app/view/identity/identity-pane";
 import { launcherPaneTab } from "@/app/view/launcher/launcher";
 import { mediaPaneTab } from "@/app/view/media/media";
 import { memoryPaneTab } from "@/app/view/memory/memory";
-import { remotesPaneTab } from "@/app/view/remotes/remotes";
 import { settingsPaneTab } from "@/app/view/settings/settings";
 import { swarmPaneTab } from "@/app/view/swarm/swarm";
 import { sysinfoPaneTab } from "@/app/view/sysinfo/sysinfo";
@@ -57,12 +55,8 @@ const builtins = [
     wardenPaneTab, // native — Phase 2c
     toolchainPaneTab, // native — Phase 2c
     towerPaneTab, // native: the read-only task manager
-    connectorsPaneTab, // native (the Armory's Accounts and MCP servers, and Remotes)
-    memoryPaneTab, // native (the rest of the Armory; was Knowledge)
-    // Moves a saved Armory block (or "trust") onto one of the two above.
-    armoryPaneTab,
-    // Moves a saved Remotes block onto Connectors → Remotes.
-    remotesPaneTab,
+    connectorsPaneTab, // native: Accounts, MCP servers, Remotes
+    memoryPaneTab, // native: Global, Personal, Skills, Bundles
     settingsPaneTab, // native — Phase 2c
 ];
 const unregisterBuiltins = builtins.map(registerPaneTab);

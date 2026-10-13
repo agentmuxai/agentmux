@@ -22,11 +22,14 @@ use serde_json::json;
 use tokio::net::UdpSocket;
 use tokio::sync::oneshot;
 
-use super::eventbus::{EventBus, WSEventType};
+use super::eventbus::EventBus;
 
 mod agent_names;
+mod events;
 mod lan_instances;
 mod udp_peers;
+
+pub use events::{LanDiscoverability, LanDiscoveryError, LanInstanceList};
 pub(crate) use agent_names::{parse_agent_names_body, PeerAgents};
 pub(crate) use udp_peers::DESKTOP_DISCOVERY_PORT;
 
@@ -207,7 +210,8 @@ fn is_lan_source(addr: &std::net::SocketAddr) -> bool {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct LanInstance {
     pub instance_id: String,
     pub hostname: String,
@@ -227,6 +231,7 @@ pub struct LanInstance {
     pub port: u16,
     /// The peer's `lan_key`; never serialized, as no reader of the JSON needs it.
     #[serde(skip_serializing, default)]
+    #[ts(skip)]
     pub auth_key: String,
     pub agents: Vec<String>,
     /// Each listed agent's state and summary line as the peer reported them, by
@@ -235,11 +240,14 @@ pub struct LanInstance {
     pub agent_status: BTreeMap<String, AgentState>,
     #[serde(default)]
     pub agent_lines: BTreeMap<String, String>,
+    #[ts(type = "number")]
     pub first_seen: u64,
+    #[ts(type = "number")]
     pub last_seen: u64,
     /// Unix seconds of the last answered agent-name poll, 0 for never. The Swarm
     /// judges liveness by the later of this and `last_seen` (mDNS re-resolves only).
     #[serde(default)]
+    #[ts(type = "number")]
     pub last_polled_ok: u64,
     /// This peer's advertised PTR/TXT record TTL (seconds) at its latest
     /// `ServiceResolved` (`get_other_ttl()`); drives `peer_staleness_window_secs`.
@@ -1258,11 +1266,7 @@ impl LanDiscovery {
         // reaches the frontend over the live `laninstances` event when the
         // REST/RPC path (which calls the same method) would already hide it.
         let instances: Vec<LanInstance> = self.get_instances();
-        self.event_bus.broadcast_event(&WSEventType {
-            eventtype: "laninstances".to_string(),
-            oref: String::new(),
-            data: Some(json!(instances)),
-        });
+        self.event_bus.broadcast_event(&EventBus::typed_ws_event::<crate::backend::mps_events::LanInstances>(&LanInstanceList(instances), String::new()));
     }
 
     /// Is this instance really announced on an IPv4 interface other machines
@@ -1779,11 +1783,7 @@ impl LanDiscoveryController {
                         // `e` is already a String, but `.to_string()` is the
                         // documented contract for the wire payload (frontend
                         // reads `event.data.error` as a string).
-                        self.event_bus.broadcast_event(&WSEventType {
-                            eventtype: "laninstances:error".to_string(),
-                            oref: String::new(),
-                            data: Some(json!({ "error": e.to_string() })),
-                        });
+                        self.event_bus.broadcast_event(&EventBus::typed_ws_event::<crate::backend::mps_events::LanInstancesError>(&LanDiscoveryError { error: e.to_string() }, String::new()));
                     }
                 }
             }
@@ -1802,11 +1802,7 @@ impl LanDiscoveryController {
                 }
                 *slot = None;
                 tracing::info!("LAN discovery disabled via setting");
-                self.event_bus.broadcast_event(&WSEventType {
-                    eventtype: "laninstances".to_string(),
-                    oref: String::new(),
-                    data: Some(json!([])),
-                });
+                self.event_bus.broadcast_event(&EventBus::typed_ws_event::<crate::backend::mps_events::LanInstances>(&LanInstanceList(Vec::new()), String::new()));
             }
             _ => {}
         }
@@ -1851,11 +1847,7 @@ impl LanDiscoveryController {
             Ok(fresh) => {
                 *slot = Some(fresh);
                 // Clears the error a failed rebuild showed, and resets the peer list.
-                self.event_bus.broadcast_event(&WSEventType {
-                    eventtype: "laninstances".to_string(),
-                    oref: String::new(),
-                    data: Some(json!([])),
-                });
+                self.event_bus.broadcast_event(&EventBus::typed_ws_event::<crate::backend::mps_events::LanInstances>(&LanInstanceList(Vec::new()), String::new()));
                 tracing::info!("mDNS daemon restarted after a failed rebuild");
                 true
             }
@@ -1886,21 +1878,13 @@ impl LanDiscoveryController {
             Ok(fresh) => {
                 *slot = Some(fresh);
                 // The peer list starts over with the new daemon.
-                self.event_bus.broadcast_event(&WSEventType {
-                    eventtype: "laninstances".to_string(),
-                    oref: String::new(),
-                    data: Some(json!([])),
-                });
+                self.event_bus.broadcast_event(&EventBus::typed_ws_event::<crate::backend::mps_events::LanInstances>(&LanInstanceList(Vec::new()), String::new()));
                 tracing::info!("mDNS daemon rebuilt");
                 true
             }
             Err(e) => {
                 tracing::warn!("mDNS daemon rebuild failed: {e}");
-                self.event_bus.broadcast_event(&WSEventType {
-                    eventtype: "laninstances:error".to_string(),
-                    oref: String::new(),
-                    data: Some(json!({ "error": e.to_string() })),
-                });
+                self.event_bus.broadcast_event(&EventBus::typed_ws_event::<crate::backend::mps_events::LanInstancesError>(&LanDiscoveryError { error: e.to_string() }, String::new()));
                 false
             }
         }
@@ -1995,15 +1979,12 @@ impl LanDiscoveryController {
     }
 
     fn publish_health(&self, state: &str, missing: &[Ipv4Addr], rebuilds: u32) {
-        self.event_bus.broadcast_event(&WSEventType {
-            eventtype: "laninstances:health".to_string(),
-            oref: String::new(),
-            data: Some(json!({
-                "state": state,
-                "missing": missing.iter().map(|a| a.to_string()).collect::<Vec<_>>(),
-                "rebuilds": rebuilds,
-            })),
-        });
+        let health = LanDiscoverability {
+            state: state.to_string(),
+            missing: missing.iter().map(|a| a.to_string()).collect(),
+            rebuilds,
+        };
+        self.event_bus.broadcast_event(&EventBus::typed_ws_event::<crate::backend::mps_events::LanInstancesHealth>(&health, String::new()));
     }
 
     /// Read the current peer list. Returns empty when the daemon is not
