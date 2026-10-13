@@ -1,6 +1,6 @@
 # Typed event payloads
 
-**Status:** proposed — step 1 (infrastructure, `controllerstatus`, `sysinfo`) is in review as #4791; steps 2–7 not started. Verified 2026-10-13.
+**Status:** active — step 1 (infrastructure, `controllerstatus`, `sysinfo`) shipped in #4791; step 2 (the agent events) in review; steps 3–7 not started. Verified 2026-10-13.
 **Follows:** the RPC stub generation (#4759 to #4777). Every RPC stub and every srv type the frontend reads is generated now. Event payloads are the one part of the srv↔frontend wire that is still untyped.
 
 ## The gap
