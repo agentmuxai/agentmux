@@ -433,11 +433,10 @@ pub fn spawn_pool_window(state: &Arc<AppState>) {
 
     // Commit-pressure guard (SPEC_MEMORY_COMMIT_ATTRIBUTION_CORRECTION_2026_07_02
     // §B.5(b)) — refuse to grow the warm pool while commit is critical. This
-    // is refill-suppression only: it never destroys an already-queued pool
-    // window (the heartbeat's eviction does that), it just stops the pool
-    // from re-filling back to POOL_TARGET_SIZE every time a window is
-    // promoted while the system is under pressure. Warn no longer counts:
-    // see memory_pressure::pool_spawn_allowed.
+    // is refill-suppression only (the heartbeat's eviction destroys queued
+    // pool windows): it stops the pool re-filling to POOL_TARGET_SIZE on every
+    // promote while pressure is critical. Warn no longer counts: see
+    // memory_pressure::pool_spawn_allowed.
     if !crate::memory_pressure::pool_spawn_allowed(crate::memory_pressure::current_level()) {
         tracing::debug!(
             target: "dnd:tearoff:pool",
