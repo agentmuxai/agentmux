@@ -787,3 +787,42 @@ async fn a_helper_still_missing_after_installing_leaves_a_plain_terminal_by_defa
     assert!(text.contains("plain SSH terminal") && text.contains("still"), "{text:?}");
     assert!(crate::backend::remote::helper_consent::not_installed("neverhost"));
 }
+
+/// A host ssh can't reach at all (a mistyped name): every attempt is ssh's
+/// own failure, 255.
+const FAKE_SSH_UNREACHABLE: &str = r#"
+import os, sys
+with open(os.environ['FAKE_SSH_LOG_UNREACHABLE'], 'ab') as log:
+    log.write(b'attempt\n')
+sys.stderr.write('ssh: Could not resolve hostname nosuchhost: nodename nor servname provided, or not known\n')
+sys.exit(255)
+"#;
+
+/// A first terminal on a host it can't reach, durable only by default and
+/// on a host the helper never ran on: after a few tries it becomes a plain
+/// SSH terminal (which shows ssh's error and ends, as before durable was the
+/// default) instead of reconnecting for ever.
+#[tokio::test]
+async fn a_new_host_never_reached_becomes_a_plain_terminal_by_default() {
+    let dir = tempfile::tempdir().unwrap();
+    let Some(ssh_path) = fake_ssh(dir.path(), "fake_ssh_unreachable", FAKE_SSH_UNREACHABLE) else {
+        eprintln!("skipped: no python to stand in for ssh");
+        return;
+    };
+    let log = dir.path().join("log");
+    std::env::set_var("FAKE_SSH_LOG_UNREACHABLE", &log);
+    let state = crate::server::tests::test_state();
+    let mut run = test_run(&state, "durable-unreachable-block", "nosuchhost", "amx-unreachable", ssh_path);
+    run.by_default = true;
+    let plain = run.plain.clone();
+    let (_input_tx, input_rx) = mpsc::unbounded_channel();
+    let (_leave_tx, leave_rx) = watch::channel(Leave::Stay);
+    let ended = tokio::time::timeout(Duration::from_secs(20), run.run(input_rx, leave_rx, Box::new(|_| {})))
+        .await
+        .expect("the run gives up on the host");
+    assert_eq!((ended, plain.load(Ordering::SeqCst)), (None, true), "a plain terminal instead");
+    let tries = std::fs::read_to_string(&log).unwrap().lines().count();
+    assert_eq!(tries, FIRST_REACH_TRIES as usize);
+    let term = state.filestore.read_file("durable-unreachable-block", "term").unwrap().unwrap();
+    assert!(String::from_utf8_lossy(&term).contains("Could not resolve hostname"));
+}

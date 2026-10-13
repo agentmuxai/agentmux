@@ -159,6 +159,9 @@ const EXIT_COMMAND_NOT_FOUND: i32 = 127;
 const EXIT_SSH_FAILED: i32 = 255;
 /// How long an `ssh` whose output ended has to exit before it is killed.
 const EXIT_GRACE: Duration = Duration::from_secs(5);
+/// Tries a pane durable only by default makes at a host it has never reached,
+/// and the helper never ran on, before it becomes a plain SSH terminal.
+const FIRST_REACH_TRIES: u32 = 3;
 
 /// ssh could not log in, and trying again would only fail (or ask) again:
 /// refused credentials, or a host key it will not accept.
@@ -665,6 +668,7 @@ impl Run {
         let mut attempt = 0u32;
         let mut noted_drop = false;
         let mut installed_once = false;
+        let mut ever_attached = false;
         // Whether the host has answered if it is Windows (asked until it has).
         let mut platform_known = false;
         loop {
@@ -810,6 +814,29 @@ impl Run {
                     if crate::backend::remote::link::held(&self.conn) {
                         let line = crate::backend::remote::link::disconnected_note(&self.conn);
                         return self.wait_for_user(&line, &mut leave_rx, stopped).await;
+                    }
+                    // A first terminal, durable only by default, on a host
+                    // it never reached and the helper never ran on (a
+                    // mistyped name, a host that's down): no session can be
+                    // waiting there, so after a few tries it becomes a plain
+                    // SSH terminal, which shows ssh's error, as before
+                    // durable was the default. A host the helper ran on
+                    // keeps trying: its session may be there.
+                    ever_attached |= attached;
+                    if self.by_default
+                        && !ever_attached
+                        && code == Some(EXIT_SSH_FAILED)
+                        && attempt + 1 >= FIRST_REACH_TRIES
+                        && !crate::backend::remote::helper_hosts::known(&self.conn)
+                    {
+                        let why = stderr.lines().last().unwrap_or("").trim();
+                        self.note(&format!(
+                            "Could not reach {} ({why}), so this is a plain SSH terminal.",
+                            self.conn
+                        ))
+                        .await;
+                        self.plain.store(true, Ordering::SeqCst);
+                        return None;
                     }
                     if attached {
                         attempt = 0;
