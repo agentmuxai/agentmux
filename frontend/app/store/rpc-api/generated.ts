@@ -644,7 +644,36 @@ export const GeneratedApi = {
   // command "createagent"
   CreateAgentDefinitionCommand(
     client: RpcClient,
-    data: CommandCreateAgentDefinitionData,
+    data: Omit<
+      CommandCreateAgentDefinitionData,
+      | "icon"
+      | "description"
+      | "working_directory"
+      | "shell"
+      | "provider_flags"
+      | "auto_start"
+      | "restart_on_crash"
+      | "idle_timeout_minutes"
+      | "agent_type"
+      | "environment"
+      | "agent_bus_id"
+    > &
+      Partial<
+        Pick<
+          CommandCreateAgentDefinitionData,
+          | "icon"
+          | "description"
+          | "working_directory"
+          | "shell"
+          | "provider_flags"
+          | "auto_start"
+          | "restart_on_crash"
+          | "idle_timeout_minutes"
+          | "agent_type"
+          | "environment"
+          | "agent_bus_id"
+        >
+      >,
     opts?: RpcOpts
   ): Promise<AgentDefinition> {
     return client.rpcCall("createagent", data, opts);
@@ -652,13 +681,27 @@ export const GeneratedApi = {
   // command "createagentinstance"
   CreateAgentInstanceCommand(
     client: RpcClient,
-    data: CommandCreateAgentInstanceData,
+    data: Omit<
+      CommandCreateAgentInstanceData,
+      "block_id" | "parent_instance_id" | "identity_id" | "memory_id" | "instance_name" | "working_directory"
+    > &
+      Partial<
+        Pick<
+          CommandCreateAgentInstanceData,
+          "block_id" | "parent_instance_id" | "identity_id" | "memory_id" | "instance_name" | "working_directory"
+        >
+      >,
     opts?: RpcOpts
   ): Promise<AgentInstance> {
     return client.rpcCall("createagentinstance", data, opts);
   },
   // command "createagentskill"
-  CreateAgentSkillCommand(client: RpcClient, data: CommandCreateAgentSkillData, opts?: RpcOpts): Promise<AgentSkill> {
+  CreateAgentSkillCommand(
+    client: RpcClient,
+    data: Omit<CommandCreateAgentSkillData, "trigger" | "skill_type" | "description" | "content"> &
+      Partial<Pick<CommandCreateAgentSkillData, "trigger" | "skill_type" | "description" | "content">>,
+    opts?: RpcOpts
+  ): Promise<AgentSkill> {
     return client.rpcCall("createagentskill", data, opts);
   },
   // command "browser_profiles.create"
@@ -1631,7 +1674,12 @@ export const GeneratedApi = {
     return client.rpcCall("skill.catalog.unbind_from_bundle", data, opts);
   },
   // command "skill.catalog.upsert"
-  SkillCatalogUpsertCommand(client: RpcClient, data: CommandSkillCatalogUpsertData, opts?: RpcOpts): Promise<Skill> {
+  SkillCatalogUpsertCommand(
+    client: RpcClient,
+    data: Omit<CommandSkillCatalogUpsertData, "id" | "trigger" | "skill_type" | "description" | "content"> &
+      Partial<Pick<CommandSkillCatalogUpsertData, "id" | "trigger" | "skill_type" | "description" | "content">>,
+    opts?: RpcOpts
+  ): Promise<Skill> {
     return client.rpcCall("skill.catalog.upsert", data, opts);
   },
   // command "skill.catalog.upsert_for_bundle"
@@ -1662,7 +1710,12 @@ export const GeneratedApi = {
     return client.rpcCall("skill.unbind", data, opts);
   },
   // command "skill.upsert"
-  SkillUpsertCommand(client: RpcClient, data: CommandSkillUpsertData, opts?: RpcOpts): Promise<Skill> {
+  SkillUpsertCommand(
+    client: RpcClient,
+    data: Omit<CommandSkillUpsertData, "id" | "trigger" | "skill_type" | "description" | "content"> &
+      Partial<Pick<CommandSkillUpsertData, "id" | "trigger" | "skill_type" | "description" | "content">>,
+    opts?: RpcOpts
+  ): Promise<Skill> {
     return client.rpcCall("skill.upsert", data, opts);
   },
   // command "subprocessspawn"
@@ -1712,7 +1765,7 @@ export const GeneratedApi = {
   // command "unlinkagentidentity"
   UnlinkAgentIdentityCommand(
     client: RpcClient,
-    data: CommandUnlinkAgentIdentityData,
+    data: Omit<CommandUnlinkAgentIdentityData, "silent"> & Partial<Pick<CommandUnlinkAgentIdentityData, "silent">>,
     opts?: RpcOpts
   ): Promise<UnlinkAgentIdentityResult> {
     return client.rpcCall("unlinkagentidentity", data, opts);
@@ -1855,7 +1908,11 @@ export const GeneratedApi = {
     return client.rpcCall("widgets.endsession", data, opts);
   },
   // command "widgets.install"
-  WidgetsInstallCommand(client: RpcClient, data: WidgetInstallReq, opts?: RpcOpts): Promise<WidgetInstallResult> {
+  WidgetsInstallCommand(
+    client: RpcClient,
+    data: Omit<WidgetInstallReq, "replace"> & Partial<Pick<WidgetInstallReq, "replace">>,
+    opts?: RpcOpts
+  ): Promise<WidgetInstallResult> {
     return client.rpcCall("widgets.install", data, opts);
   },
   // command "widgets.list"

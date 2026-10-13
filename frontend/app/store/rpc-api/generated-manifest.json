@@ -173,15 +173,42 @@
         },
         {
             "command": "createagent",
-            "method": "CreateAgentDefinitionCommand"
+            "method": "CreateAgentDefinitionCommand",
+            "optionalFields": [
+                "icon",
+                "description",
+                "working_directory",
+                "shell",
+                "provider_flags",
+                "auto_start",
+                "restart_on_crash",
+                "idle_timeout_minutes",
+                "agent_type",
+                "environment",
+                "agent_bus_id"
+            ]
         },
         {
             "command": "createagentinstance",
-            "method": "CreateAgentInstanceCommand"
+            "method": "CreateAgentInstanceCommand",
+            "optionalFields": [
+                "block_id",
+                "parent_instance_id",
+                "identity_id",
+                "memory_id",
+                "instance_name",
+                "working_directory"
+            ]
         },
         {
             "command": "createagentskill",
-            "method": "CreateAgentSkillCommand"
+            "method": "CreateAgentSkillCommand",
+            "optionalFields": [
+                "trigger",
+                "skill_type",
+                "description",
+                "content"
+            ]
         },
         {
             "command": "browser_profiles.create",
@@ -904,7 +931,14 @@
         },
         {
             "command": "skill.catalog.upsert",
-            "method": "SkillCatalogUpsertCommand"
+            "method": "SkillCatalogUpsertCommand",
+            "optionalFields": [
+                "id",
+                "trigger",
+                "skill_type",
+                "description",
+                "content"
+            ]
         },
         {
             "command": "skill.catalog.upsert_for_bundle",
@@ -935,7 +969,14 @@
         },
         {
             "command": "skill.upsert",
-            "method": "SkillUpsertCommand"
+            "method": "SkillUpsertCommand",
+            "optionalFields": [
+                "id",
+                "trigger",
+                "skill_type",
+                "description",
+                "content"
+            ]
         },
         {
             "command": "subprocessspawn",
@@ -976,7 +1017,10 @@
         },
         {
             "command": "unlinkagentidentity",
-            "method": "UnlinkAgentIdentityCommand"
+            "method": "UnlinkAgentIdentityCommand",
+            "optionalFields": [
+                "silent"
+            ]
         },
         {
             "command": "unwatcheditorfile",
@@ -1076,7 +1120,10 @@
         },
         {
             "command": "widgets.install",
-            "method": "WidgetsInstallCommand"
+            "method": "WidgetsInstallCommand",
+            "optionalFields": [
+                "replace"
+            ]
         },
         {
             "command": "widgets.list",
