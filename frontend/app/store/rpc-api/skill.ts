@@ -54,10 +54,6 @@ export type SkillCatalogUpsertForBundleInput = Pick<CommandSkillCatalogUpsertFor
     Partial<Omit<CommandSkillCatalogUpsertForBundleData, "bundle_id" | "name">>;
 
 export const SkillApi = {
-    SkillUpsertCommand(client: RpcClient, data: SkillUpsertInput, opts?: RpcOpts): Promise<Skill> {
-        return client.rpcCall("skill.upsert", data, opts);
-    },
-
     // ── Armory catalog (global skills only, no agent_id) ────────────────────
 
     SkillCatalogListCommand(
@@ -66,10 +62,6 @@ export const SkillApi = {
         opts?: RpcOpts
     ): Promise<SkillCatalogItem[]> {
         return client.rpcCall("skill.catalog.list", data, opts);
-    },
-
-    SkillCatalogUpsertCommand(client: RpcClient, data: SkillCatalogUpsertInput, opts?: RpcOpts): Promise<Skill> {
-        return client.rpcCall("skill.catalog.upsert", data, opts);
     },
 
     // Creates a NEW, PRIVATE skill scoped directly to a bundle (never

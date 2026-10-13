@@ -48,15 +48,6 @@ export type { MuxBusStatusResp } from "@/types/rpc/MuxBusStatusResp";
 export type { ProvidersModelsParams } from "@/types/rpc/ProvidersModelsParams";
 export type { ProvidersModelsResult } from "@/types/rpc/ProvidersModelsResult";
 
-import type { MuxBusCloudConfigReq } from "@/types/rpc/MuxBusCloudConfigReq";
-import type { MuxBusCloudConfigResp } from "@/types/rpc/MuxBusCloudConfigResp";
-import type { MuxBusDisconnectReq } from "@/types/rpc/MuxBusDisconnectReq";
-import type { MuxBusDisconnectResp } from "@/types/rpc/MuxBusDisconnectResp";
-import type { MuxBusLoginCancelReq } from "@/types/rpc/MuxBusLoginCancelReq";
-import type { MuxBusLoginCancelResp } from "@/types/rpc/MuxBusLoginCancelResp";
-import type { MuxBusStatusReq } from "@/types/rpc/MuxBusStatusReq";
-import type { MuxBusStatusResp } from "@/types/rpc/MuxBusStatusResp";
-
 export const MiscApi = {
     ActivityCommand(client: RpcClient, data: ActivityUpdate, opts?: RpcOpts): Promise<void> {
         return client.rpcCall("activity", data, opts);
@@ -100,32 +91,5 @@ export const MiscApi = {
         opts?: RpcOpts
     ): Promise<WidgetApiResult> {
         return client.rpcCall("widget.api", data, opts);
-    },
-
-    // command "muxbus.login.cancel" — abort an in-flight muxbus.login (e.g.
-    // user closed the browser without completing sign-in). Resolves the
-    // pending MuxBusLoginCommand call with a "sign-in cancelled" error.
-    MuxBusLoginCancelCommand(client: RpcClient, opts?: RpcOpts): Promise<MuxBusLoginCancelResp> {
-        const data: MuxBusLoginCancelReq = {};
-        return client.rpcCall("muxbus.login.cancel", data, opts);
-    },
-
-    // command "muxbus.status" — current credential state
-    MuxBusStatusCommand(client: RpcClient, opts?: RpcOpts): Promise<MuxBusStatusResp> {
-        const data: MuxBusStatusReq = {};
-        return client.rpcCall("muxbus.status", data, opts);
-    },
-
-    // command "muxbus.disconnect" — clear stored credentials
-    MuxBusDisconnectCommand(client: RpcClient, opts?: RpcOpts): Promise<MuxBusDisconnectResp> {
-        const data: MuxBusDisconnectReq = {};
-        return client.rpcCall("muxbus.disconnect", data, opts);
-    },
-
-    // command "muxbus.cloudconfig" — the cloud settings srv resolved (the
-    // relay's discovery document, else its defaults) and their source
-    MuxBusCloudConfigCommand(client: RpcClient, opts?: RpcOpts): Promise<MuxBusCloudConfigResp> {
-        const data: MuxBusCloudConfigReq = {};
-        return client.rpcCall("muxbus.cloudconfig", data, opts);
     },
 };

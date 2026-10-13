@@ -26,11 +26,6 @@ export type { ToolchainVersionsReq } from "@/types/rpc/ToolchainVersionsReq";
 
 import type { CommandResolveCliData } from "@/types/rpc/CommandResolveCliData";
 import type { ResolveCliResult } from "@/types/rpc/ResolveCliResult";
-import type { ToolchainEnvReq } from "@/types/rpc/ToolchainEnvReq";
-import type { ToolchainEnvResult } from "@/types/rpc/ToolchainEnvResult";
-import type { ToolchainPruneReq } from "@/types/rpc/ToolchainPruneReq";
-import type { ToolchainPruneResult } from "@/types/rpc/ToolchainPruneResult";
-import type { ToolchainVersionsReq } from "@/types/rpc/ToolchainVersionsReq";
 
 /**
  * What a `resolvecli` caller may send.
@@ -63,9 +58,6 @@ export type { InstallFailure } from "@/types/rpc/InstallFailure";
 export type { InstallToolResult } from "@/types/rpc/InstallToolResult";
 export type { ToolStatus } from "@/types/rpc/ToolStatus";
 export type { ToolStatusEntry } from "@/types/rpc/ToolStatusEntry";
-
-import type { CommandGetToolStatusData } from "@/types/rpc/CommandGetToolStatusData";
-import type { GetToolStatusResult } from "@/types/rpc/GetToolStatusResult";
 
 export const WorkspaceApi = {
     ConnConnectCommand(client: RpcClient, data: ConnRequest, opts?: RpcOpts): Promise<void> {
@@ -127,14 +119,6 @@ export const WorkspaceApi = {
         return client.rpcCall("resolveids", data, opts);
     },
 
-    RouteAnnounceCommand(client: RpcClient, opts?: RpcOpts): Promise<void> {
-        return client.rpcCall("routeannounce", null, opts);
-    },
-
-    RouteUnannounceCommand(client: RpcClient, opts?: RpcOpts): Promise<void> {
-        return client.rpcCall("routeunannounce", null, opts);
-    },
-
     SetConfigCommand(client: RpcClient, data: SettingsType, opts?: RpcOpts): Promise<void> {
         return client.rpcCall("setconfig", data, opts);
     },
@@ -157,38 +141,5 @@ export const WorkspaceApi = {
 
     ResolveCliCommand(client: RpcClient, data: ResolveCliInput, opts?: RpcOpts): Promise<ResolveCliResult> {
         return client.rpcCall("resolvecli", data, opts);
-    },
-
-    // Reports the effective PATH the srv resolves tools in, how it was derived, and OS/arch. Powers the
-    // Toolchain modal's Environment section. See SPEC_TOOLCHAIN_MANAGER.
-    ToolchainEnvCommand(client: RpcClient, opts?: RpcOpts): Promise<ToolchainEnvResult> {
-        // An empty struct rather than no request type: the client sends `{}`
-        // for a no-argument call, and serde deserializes `()` only from JSON
-        // `null`. The server takes `Option<ToolchainEnvReq>` so both work,
-        // but this stub keeps sending the object it always sent.
-        const data: ToolchainEnvReq = {};
-        return client.rpcCall("toolchain.env", data, opts);
-    },
-
-    // Finds (dry run, the default) or removes (`dry_run: false`) provider CLI installs nothing has used for
-    // 30 days and nothing is running. Never called except by the Toolchain view's "Check"/"Remove" buttons.
-    ToolchainPruneCommand(client: RpcClient, data: ToolchainPruneReq, opts?: RpcOpts): Promise<ToolchainPruneResult> {
-        return client.rpcCall("toolchain.prune", data, opts);
-    },
-
-    // command "toolchain.versions" [call] — fetch latest published npm versions for
-    // a list of packages. Input: { packages: [{id, package}] }. Output: {id: version|null}.
-    // Each lookup is independent; a network error yields null for that entry.
-    ToolchainVersionsCommand(
-        client: RpcClient,
-        data: ToolchainVersionsReq,
-        opts?: RpcOpts
-    ): Promise<Record<string, string | null>> {
-        return client.rpcCall("toolchain.versions", data, opts);
-    },
-
-    GetToolStatusCommand(client: RpcClient, opts?: RpcOpts): Promise<GetToolStatusResult> {
-        const data: CommandGetToolStatusData = {};
-        return client.rpcCall("gettoolstatus", data, opts);
     },
 };
