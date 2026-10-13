@@ -214,8 +214,9 @@ pub(super) fn pty_size_from_rt_opts(rt_opts: &Option<serde_json::Value>) -> PtyS
 
 impl ShellController {
     /// Inherent-method wrapper over [`pty_size_from_rt_opts`], preserving the
-    /// pre-split `ShellController::pty_size_from_rt_opts(...)` call site used by
-    /// `start()` and the unit tests.
+    /// pre-split `ShellController::pty_size_from_rt_opts(...)` call site the
+    /// unit tests use.
+    #[cfg(test)]
     pub(super) fn pty_size_from_rt_opts(rt_opts: &Option<serde_json::Value>) -> PtySize {
         pty_size_from_rt_opts(rt_opts)
     }

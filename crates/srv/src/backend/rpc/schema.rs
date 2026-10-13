@@ -137,6 +137,7 @@ impl RpcSchema {
     }
 
     /// Record (or replace) the binding for `command`, without TypeScript.
+    #[cfg(test)]
     pub fn record(&mut self, command: &str, request: &'static str, response: &'static str) {
         self.bindings.insert(
             command.to_string(),
