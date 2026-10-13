@@ -79,13 +79,13 @@ export function BrowserNavBar(props: {
 
     // Chrome's address bar suggestions (address-autocomplete.ts). `typed` is
     // what the user typed, without an inline completion shown after it. The
-    // search engine is asked too only when the user turned that on.
+    // search engine is asked too unless the user turned that off.
     const autocomplete = createAddressAutocomplete(
         (text) =>
             getApi().browserPanes.autocomplete?.(
                 model.blockId,
                 text,
-                !!settingsAtom()?.["browser:searchsuggestions"]
+                settingsAtom()?.["browser:searchsuggestions"] !== false
             ) ?? Promise.resolve(undefined)
     );
     const [typed, setTyped] = createSignal("");

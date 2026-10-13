@@ -135,9 +135,10 @@
 
     // -- Browser panes --
     // The address bar also asks the default search engine for suggestions
-    // while you type, sending it each edit before you press Enter. Off:
-    // suggestions come only from this computer (history, typed addresses).
-    // "browser:searchsuggestions": false,
+    // while you type, sending it each edit before you press Enter, as Chrome
+    // does. Off: suggestions come only from this computer (history, typed
+    // addresses).
+    // "browser:searchsuggestions": true,
 
     // -- Network --
     // Discover other AgentMux instances on your local network (mDNS/Bonjour)

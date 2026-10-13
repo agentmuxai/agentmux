@@ -147,9 +147,9 @@ pub struct SettingsType {
     pub term_shift_enter_newline: Option<bool>,
 
     /// A browser pane's address bar also asks the default search engine for
-    /// suggestions while you type (each edit is sent to it before you submit).
-    /// Unset: off, so suggestions come only from this computer (history,
-    /// typed URLs).
+    /// suggestions while you type (each edit is sent to it before you submit),
+    /// as Chrome does. Unset: on. Off: suggestions come only from this
+    /// computer (history, typed URLs).
     #[serde(rename = "browser:searchsuggestions", default, skip_serializing_if = "Option::is_none")]
     pub browser_search_suggestions: Option<bool>,
 

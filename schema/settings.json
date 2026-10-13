@@ -68,7 +68,8 @@
         },
         "browser:searchsuggestions": {
           "type": "boolean",
-          "description": "A browser pane's address bar also asks the default search engine for suggestions while you type, sending it each edit before you submit. Off: suggestions come only from this computer (history, typed addresses)."
+          "default": true,
+          "description": "A browser pane's address bar also asks the default search engine for suggestions while you type, sending it each edit before you submit, as Chrome does. On by default. Off: suggestions come only from this computer (history, typed addresses)."
         },
         "keybindings": {
           "type": "array",
