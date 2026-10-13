@@ -152,6 +152,25 @@ describe("CardGrid", () => {
         spy.mockRestore();
     });
 
+    it("keeps the open details when the list refreshes with new objects", () => {
+        const spy = widthOf(406);
+        const [list, setList] = createSignal([{ id: "a", n: 1 }, { id: "b", n: 1 }]);
+        render(() => (
+            <CardGrid
+                items={list()}
+                keyOf={(i) => i.id}
+                selectedKey="a"
+                renderCard={(i) => <Card title={`${i.id}:${i.n}`} aria-label={i.id} />}
+                renderDetail={() => <input aria-label="nickname" />}
+            />
+        ));
+        const input = screen.getByLabelText("nickname");
+        setList([{ id: "a", n: 2 }, { id: "b", n: 2 }]);
+        expect(screen.getByLabelText("nickname")).toBe(input);
+        expect(screen.getByText("a:2")).toBeTruthy();
+        spy.mockRestore();
+    });
+
     it("closes on Escape in the details and gives the card focus back", () => {
         const spy = widthOf(406);
         const [sel, setSel] = createSignal<string | null>("b");

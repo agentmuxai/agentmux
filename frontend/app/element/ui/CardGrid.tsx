@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import clsx from "clsx";
-import { createEffect, createSignal, For, type JSX, on, onCleanup, onMount, Show } from "solid-js";
+import { createEffect, createMemo, createSignal, For, type JSX, on, onCleanup, onMount, Show, untrack } from "solid-js";
 
 import "./card.scss";
 
@@ -58,10 +58,11 @@ export function CardGrid<T>(props: CardGridProps<T>): JSX.Element {
         onCleanup(() => ro.disconnect());
     });
 
+    const keys = createMemo(() => props.items.map((item) => props.keyOf(item)));
+    const byKey = createMemo(() => new Map(props.items.map((item) => [props.keyOf(item), item] as const)));
     const selectedIndex = () => {
         const key = props.selectedKey;
-        if (key == null) return -1;
-        return props.items.findIndex((item) => props.keyOf(item) === key);
+        return key == null ? -1 : keys().indexOf(key);
     };
     const detailAfter = () => {
         const i = selectedIndex();
@@ -115,11 +116,16 @@ export function CardGrid<T>(props: CardGridProps<T>): JSX.Element {
             role={props.ariaLabel ? "group" : undefined}
             aria-label={props.ariaLabel}
         >
-            <For each={props.items}>
-                {(item, index) => (
+            {/* Keyed by `keyOf`, not by object: a refreshed list brings new
+                objects, and keying on them would rebuild every card and the
+                open details. A changed item re-renders only its own card. */}
+            <For each={keys()}>
+                {(key, index) => (
                     <>
-                        <div class="ui-card-cell" data-card-key={props.keyOf(item)}>
-                            {props.renderCard(item)}
+                        <div class="ui-card-cell" data-card-key={key}>
+                            <Show when={byKey().get(key)} keyed>
+                                {(item) => props.renderCard(item)}
+                            </Show>
                         </div>
                         <Show when={index() === detailAfter()}>
                             <div
@@ -134,7 +140,7 @@ export function CardGrid<T>(props: CardGridProps<T>): JSX.Element {
                                     from their own model. */}
                                 <Show when={props.selectedKey ?? undefined} keyed>
                                     {(key) => {
-                                        const open = props.items.find((i) => props.keyOf(i) === key);
+                                        const open = untrack(() => byKey().get(key));
                                         return open !== undefined ? props.renderDetail?.(open) : null;
                                     }}
                                 </Show>

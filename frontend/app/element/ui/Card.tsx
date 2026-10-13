@@ -29,6 +29,8 @@ export interface CardProps extends Omit<JSX.HTMLAttributes<HTMLDivElement>, "tit
     muted?: boolean;
     /** Status that needs the user: a danger line. */
     attention?: boolean;
+    /** The native tooltip (`title` is the card's visible title). */
+    tooltip?: string;
     /** `chip`: one line, for an Add gallery. Default `card`. */
     size?: "card" | "chip";
     /** Click, Enter or Space; Escape too, while open. */
@@ -58,6 +60,7 @@ export function Card(props: CardProps): JSX.Element {
         "muted",
         "attention",
         "size",
+        "tooltip",
         "onSelect",
         "onOpen",
         "class",
@@ -93,6 +96,7 @@ export function Card(props: CardProps): JSX.Element {
                 local.class,
             )}
             style={local.edgeColor ? { "--ui-card-edge": local.edgeColor } : undefined}
+            title={local.tooltip}
             onClick={() => local.onSelect?.()}
             onDblClick={() => local.onOpen?.()}
             onKeyDown={onKeyDown}
