@@ -277,6 +277,21 @@ describe("sampleReducer — MERGE of history fetched for a gap", () => {
         expect(merge(state, [])).toBe(state);
     });
 
+    it("ignores history stamped later than the newest sample held, as after a backwards clock step", () => {
+        // Live samples run 1000..3000 after the clock stepped back; the ring still
+        // holds the pre-step ones, stamped far later. They must not become "newest".
+        const state = [sample(1000, 40), sample(2000, 41), sample(3000, 42)];
+        const preStep = [sample(900_000, 1), sample(901_000, 2), sample(2500, 7)];
+        const out = merge(state, preStep);
+        expect(out.some((d) => d.ts >= 900_000)).toBe(false);
+        expect(out.filter((d) => d.blank !== 1).map((d) => d.ts)).toEqual([1000, 2000, 2500, 3000]);
+    });
+
+    it("does nothing when the series holds no real sample to bound the history by", () => {
+        const state: DataItem[] = [];
+        expect(merge(state, [sample(1000, 40)])).toBe(state);
+    });
+
     it("trims to the visible window like any other update", () => {
         const newest = 1_000_000;
         const state = [sample(newest, 40)];

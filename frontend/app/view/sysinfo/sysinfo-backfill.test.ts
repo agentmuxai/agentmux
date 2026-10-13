@@ -85,6 +85,20 @@ describe("GapBackfiller", () => {
         log.mockRestore();
     });
 
+    it("forgets waiting gaps on reset, and lets later ones through", async () => {
+        const c = controlled();
+        const b = new GapBackfiller(c.fetchFrom, 5000);
+        b.noteGap(100);
+        b.noteGap(200);
+        b.reset();
+        c.finishers[0]();
+        await vi.advanceTimersByTimeAsync(60_000);
+        expect(c.calls).toEqual([100]);
+        b.noteGap(300);
+        await vi.advanceTimersByTimeAsync(0);
+        expect(c.calls).toEqual([100, 300]);
+    });
+
     it("stops after dispose", async () => {
         const c = controlled();
         const b = new GapBackfiller(c.fetchFrom, 5000);

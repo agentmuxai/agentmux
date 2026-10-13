@@ -6,7 +6,7 @@
  * fetch the samples it missed from history and merge them in, without clearing
  * the series (docs/reports/REPORT_SYSINFO_REWRITE_AND_MODERN_MONITOR_2026_10_13.md section 5.1).
  */
-import { createRoot } from "solid-js";
+import { createRoot, createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const history = vi.hoisted(() => ({ read: vi.fn(async (..._args: unknown[]): Promise<any[]> => []) }));
@@ -92,6 +92,29 @@ describe("SysinfoViewModel gap backfill", () => {
             await vi.advanceTimersByTimeAsync(60_000);
             expect(history.read.mock.calls.length).toBe(before + 1);
             expect(m.dataAtom().filter((d) => d.blank === 1)).toHaveLength(2);
+            dispose();
+        });
+    });
+
+    it("drops what a fetch returns if the pane switched machines meanwhile", async () => {
+        await createRoot(async (dispose) => {
+            const [meta, setMeta] = createSignal<Record<string, unknown>>({});
+            const ctx = { blockId: "s1", meta, setMeta: async () => {}, isFocused: () => false, visibility: () => "active" };
+            const m = new SysinfoViewModel(ctx as unknown as PaneTabHostContext, "sysinfo");
+            await vi.advanceTimersByTimeAsync(0);
+            m.appendData({ ts: BASE, cpu: 40 });
+            let finish!: (v: any[]) => void;
+            history.read.mockImplementationOnce(() => new Promise((r) => (finish = r)));
+            m.appendData({ ts: BASE + 30_000, cpu: 90 });
+            // The pane is pointed at another machine, which reloads its own series.
+            setMeta({ connection: "wsl://Ubuntu" });
+            expect(m.connection()).toBe("wsl://Ubuntu");
+            history.read.mockResolvedValue([]);
+            m.resetData([{ ts: BASE + 60_000, cpu: 5 }]);
+            // The old machine's samples arrive, inside the new series' window.
+            finish([event(BASE + 10_000, 70), event(BASE + 20_000, 71)]);
+            await vi.advanceTimersByTimeAsync(0);
+            expect(real(m).map((d) => d.ts)).toEqual([BASE + 60_000]);
             dispose();
         });
     });

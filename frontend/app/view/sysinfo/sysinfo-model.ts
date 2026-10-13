@@ -142,15 +142,22 @@ export function sampleReducer(state: DataItem[], action: SampleAction): DataItem
         // then laid out as RESET lays out history, so each gap still left gets its
         // break markers and a filled one loses them. Nothing is cleared, so the
         // chart never goes blank for it.
+        //
+        // Only history older than the newest sample held is taken. History only
+        // ever fills a gap behind the live samples; one stamped later than them is
+        // from before a backwards clock step (the ring still holds those), and as
+        // the newest it would make RESET's window drop the live samples.
         const byTs = new Map<number, DataItem>();
         let known = 0;
+        let newest = -Infinity;
         for (const d of state) {
             if (d.blank === 1) continue;
             byTs.set(d.ts, d);
             known++;
+            newest = Math.max(newest, d.ts);
         }
         for (const d of action.items) {
-            if (!byTs.has(d.ts)) byTs.set(d.ts, d);
+            if (d.ts < newest && !byTs.has(d.ts)) byTs.set(d.ts, d);
         }
         if (byTs.size === known) return state;
         const merged = [...byTs.values()].sort((a, b) => a.ts - b.ts);
@@ -280,12 +287,15 @@ class SysinfoViewModel {
 
     /** Merge the history newer than `fromTs` into the series, without clearing it. */
     private async backfillFrom(fromTs: number): Promise<void> {
+        const scope = this.connection();
         const history = await RpcApi.EventReadHistoryCommand(TabRpcClient, {
             event: WpsEvent.SysInfo,
-            scope: this.connection(),
+            scope,
             maxitems: this.numPoints(),
         });
-        if (history == null) return;
+        // The pane switched machines while this was fetching: its series was
+        // reloaded for the new one, and these samples belong to the old.
+        if (history == null || this.connection() !== scope) return;
         const items = history.map(convertMuxEventToDataItem).filter((d): d is DataItem => d != null && d.ts > fromTs);
         if (items.length === 0) return;
         this.dispatch({
@@ -384,6 +394,8 @@ class SysinfoViewModel {
     }
 
     async loadInitialData() {
+        // A gap noted for the previous connection means nothing for this one.
+        this.backfiller.reset();
         this.loadingAtom._set(true);
         try {
             const numPoints = this.numPoints();

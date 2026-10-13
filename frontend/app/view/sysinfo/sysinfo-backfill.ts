@@ -40,6 +40,13 @@ export class GapBackfiller {
         this.run();
     }
 
+    /** Forget the gaps waiting to be fetched; a fetch already running finishes on its own. */
+    reset(): void {
+        this.pendingFrom = null;
+        if (this.timer != null) clearTimeout(this.timer);
+        this.timer = null;
+    }
+
     dispose(): void {
         this.disposed = true;
         if (this.timer != null) clearTimeout(this.timer);
