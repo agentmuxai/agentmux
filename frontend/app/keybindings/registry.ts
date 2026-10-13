@@ -25,6 +25,7 @@ export const DOC_TAB_HOSTS = ["editor", "media"];
 
 /** The `when` a pane row implicitly has: its keys only reach it there. */
 const PANE_WHEN: Record<KeyPane, string> = {
+    browser: "viewType == browser",
     doctabs: "docTabsHost",
     editor: "viewType == editor",
     files: "viewType == files",
