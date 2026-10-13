@@ -24,6 +24,7 @@ import {
 import { browserStartPageAtom } from "@/store/config-signals";
 import { refocusNode } from "@/app/store/global";
 import { createMemo, createRoot, createSignal, type Accessor } from "solid-js";
+import { errorPageFailedUrl } from "./error-page-url";
 
 /**
  * One-time install of the slice #9 event sink. Hands `pane-clicked`
@@ -618,8 +619,10 @@ export class BrowserViewModel {
     navigate(url: string): void {
         this.diag(`navigate(url=${JSON.stringify(url)}) closed=${this.closed}`);
         if (this.closed) return;
-        // Normalize URL
+        // Normalize URL. A host error page's data: URI (saved by a pane that
+        // was showing one) means the address that failed (error-page-url.ts).
         let normalized = url.trim();
+        normalized = errorPageFailedUrl(normalized) ?? normalized;
         if (!normalized) return;
         if (!normalized.match(/^https?:\/\//i) && !normalized.startsWith("about:")) {
             if (normalized.includes(".") && !normalized.includes(" ")) {

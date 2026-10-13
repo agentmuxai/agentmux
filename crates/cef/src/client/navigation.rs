@@ -1175,9 +1175,40 @@ pub(crate) fn show_load_error_page(
     let html = render_load_error_html(failed_url, error_code_i32, error_text, is_browser_pane);
     let b64 = cef::base64_encode(Some(html.as_bytes()));
     let b64_str = CefString::from(&b64).to_string();
-    let data_uri = format!("data:text/html;base64,{}", b64_str);
+    let data_uri = format!("data:text/html;base64,{b64_str}{}", failed_url_fragment(failed_url));
     let uri = CefString::from(data_uri.as_str());
     frame.load_url(Some(&uri));
+}
+
+/// Marks a load-error page's `data:` URI with the URL that failed, hex-encoded,
+/// so a browser pane reports (and saves, and shows in its address bar) the
+/// address that failed, as Chrome does, never the error page's own URI.
+/// Without it the pane saved the `data:` URI, and on restore its address bar
+/// turned that into a Google search. A data URL's content ignores the
+/// fragment. Read back by `error_page_failed_url`; the frontend's
+/// `errorPageFailedUrl` (browser/error-page-url.ts) reads the same marker.
+const FAILED_URL_MARKER: &str = "#amux-failed-url=";
+
+fn failed_url_fragment(failed_url: &str) -> String {
+    let hex: String = failed_url.bytes().map(|b| format!("{b:02x}")).collect();
+    format!("{FAILED_URL_MARKER}{hex}")
+}
+
+/// The URL a load-error page (from `show_load_error_page`) stands for, or
+/// `None` for any other URL.
+pub(crate) fn error_page_failed_url(url: &str) -> Option<String> {
+    if !url.starts_with("data:text/html;base64,") {
+        return None;
+    }
+    let hex = &url[url.find(FAILED_URL_MARKER)? + FAILED_URL_MARKER.len()..];
+    if hex.len() % 2 != 0 {
+        return None;
+    }
+    let bytes = (0..hex.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(hex.get(i..i + 2)?, 16).ok())
+        .collect::<Option<Vec<u8>>>()?;
+    String::from_utf8(bytes).ok()
 }
 
 #[cfg(test)]
@@ -1270,7 +1301,7 @@ mod reveal_decision_tests {
 
 #[cfg(test)]
 mod load_error_page_tests {
-    use super::{is_permanent_load_error, render_load_error_html};
+    use super::{error_page_failed_url, failed_url_fragment, is_permanent_load_error, render_load_error_html};
     use cef::sys::cef_errorcode_t;
 
     const URL: &str = "http://localhost:6000/?ipc_port=1";
@@ -1334,5 +1365,23 @@ mod load_error_page_tests {
         ] {
             assert!(!is_permanent_load_error(code as i32), "{code:?} can clear");
         }
+    }
+
+    /// A pane on an error page reports the address that failed, so that is
+    /// what it saves and shows (it used to save the data: URI itself).
+    #[test]
+    fn an_error_page_uri_stands_for_the_url_that_failed() {
+        for failed in ["http://localhost:3000/", "https://example.com/a b?q=can't&x=ü#frag", ""] {
+            let uri = format!("data:text/html;base64,PCFET0NUWVBFIGh0bWw+{}", failed_url_fragment(failed));
+            assert_eq!(error_page_failed_url(&uri).as_deref(), Some(failed));
+        }
+    }
+
+    #[test]
+    fn other_urls_stand_for_themselves() {
+        assert_eq!(error_page_failed_url("https://example.com/#amux-failed-url=6869"), None);
+        assert_eq!(error_page_failed_url("data:text/html;base64,PGgxPg=="), None);
+        assert_eq!(error_page_failed_url("data:text/html;base64,PGgxPg==#amux-failed-url=6"), None);
+        assert_eq!(error_page_failed_url("data:text/html;base64,PGgxPg==#amux-failed-url=zz"), None);
     }
 }
