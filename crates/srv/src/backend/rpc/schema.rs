@@ -234,6 +234,26 @@ impl RpcSchema {
 mod tests {
     use super::*;
 
+    /// ts-rs 10 dropped a whole `#[serde(...)]` attribute when one item in it was unknown, so a
+    /// `rename` beside `skip_serializing_if` was lost and the binding named the Rust field (the
+    /// "My Agents empty" incident). ts-rs 12 parses each item: the rename and the optionality
+    /// both reach the binding, and `check-tsrs-serde-warnings` fails the build if an item doesn't.
+    #[test]
+    fn a_rename_beside_skip_serializing_if_reaches_the_binding() {
+        #[derive(serde::Serialize, ts_rs::TS)]
+        #[allow(dead_code)]
+        struct Probe {
+            #[serde(rename = "wireName", default, skip_serializing_if = "Option::is_none")]
+            rust_name: Option<String>,
+            #[serde(rename = "kept", skip_serializing_if = "String::is_empty")]
+            also_rust: String,
+        }
+        let decl = <Probe as ts_rs::TS>::decl(&ts_rs::Config::from_env());
+        assert!(decl.contains("wireName?: string"), "rename and optionality must both survive: {decl}");
+        assert!(decl.contains("kept"), "a rename beside skip_serializing_if must survive: {decl}");
+        assert!(!decl.contains("rust_name") && !decl.contains("also_rust"), "the Rust names must not leak: {decl}");
+    }
+
     #[derive(ts_rs::TS)]
     #[ts(export_to = "../../../frontend/types/rpc/")]
     #[ts(rename = "Renamed")]

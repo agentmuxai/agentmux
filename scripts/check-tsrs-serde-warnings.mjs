@@ -11,8 +11,12 @@
 // incident. A warning here means the generated type may not match the wire, so it fails the
 // build, unless its item is on ALLOWED with the reason it can't change the TypeScript.
 //
-//   node scripts/check-tsrs-serde-warnings.mjs              runs `cargo check -p agentmux-srv --tests`
-//   node scripts/check-tsrs-serde-warnings.mjs --log FILE   reads that build output instead
+//   node scripts/check-tsrs-serde-warnings.mjs                    runs `cargo check -p agentmux-srv --tests`
+//   node scripts/check-tsrs-serde-warnings.mjs -- <cargo args>    runs `cargo <cargo args>` instead
+//   node scripts/check-tsrs-serde-warnings.mjs --log FILE         reads that build output instead
+//
+// Cargo replays a cached crate's warnings, so in CI this repeats the job's own `cargo check`
+// command exactly: nothing recompiles, and the warnings are the ones that build produced.
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -53,7 +57,9 @@ function main() {
     if (at >= 0) {
         output = readFileSync(process.argv[at + 1], "utf8");
     } else {
-        const run = spawnSync("cargo", ["check", "-p", "agentmux-srv", "--tests", "--message-format", "short"], { encoding: "utf8", maxBuffer: 1 << 28 });
+        const dashes = process.argv.indexOf("--");
+        const args = dashes >= 0 ? process.argv.slice(dashes + 1) : ["check", "-p", "agentmux-srv", "--tests"];
+        const run = spawnSync("cargo", args, { encoding: "utf8", maxBuffer: 1 << 28 });
         output = `${run.stdout}\n${run.stderr}`;
         if (run.status !== 0) {
             console.error("check-tsrs-serde-warnings: cargo check failed; fix the build first.");
