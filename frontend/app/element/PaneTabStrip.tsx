@@ -347,9 +347,6 @@ export interface PaneTabStripProps<T> {
 }
 
 
-/** Opens the pane header's own context menu (the header's `contextmenu`
- *  handler), anchored at `el`: the grip's click and keyboard route to the same
- *  actions a right-click gives. */
 /** Screen position of the last press on a grip. A floating pane moves its
  *  window under the cursor, so the release can land on the same grip and the
  *  browser still fires `click`; the screen position is what moved. */
@@ -363,6 +360,9 @@ function gripClickWasDrag(e: MouseEvent): boolean {
     return !!start && Math.abs(e.screenX - start.x) + Math.abs(e.screenY - start.y) > 4;
 }
 
+/** Opens the pane header's own context menu (the header's `contextmenu`
+ *  handler), anchored at `el`: the grip's click and keyboard route to the same
+ *  actions a right-click gives. */
 function openPaneMenuFrom(el: HTMLElement): void {
     const r = el.getBoundingClientRect();
     el.dispatchEvent(
