@@ -31,5 +31,3 @@ export type { NativeMemoryListResult } from "@/types/rpc/NativeMemoryListResult"
 export type { NativeMemoryReadFileResult } from "@/types/rpc/NativeMemoryReadFileResult";
 export type { NativeMemoryRevertResult } from "@/types/rpc/NativeMemoryRevertResult";
 export type { NativeMemoryVersionMeta } from "@/types/rpc/NativeMemoryVersionMeta";
-
-export const NativeMemoryApi = {};

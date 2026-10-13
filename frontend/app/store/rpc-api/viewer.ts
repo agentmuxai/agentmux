@@ -7,5 +7,3 @@
 
 export type { ViewerDeviceInfo } from "@/types/rpc/ViewerDeviceInfo";
 export type { ViewerPairStartResult } from "@/types/rpc/ViewerPairStartResult";
-
-export const ViewerApi = {};

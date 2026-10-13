@@ -13,32 +13,9 @@
 // are identical to the original single-object export. None of the methods use
 // `this`, so composing them into one plain object is behaviour-preserving.
 
-import { AgentApi } from "./agent";
-import { AttachmentsApi } from "./attachments";
-import { BlockApi } from "./block";
-import { BookmarksApi } from "./bookmarks";
-import { BrowserProfilesApi } from "./browser-profiles";
-import { BrowserStartPageApi } from "./browser-start-page";
-import { BundleApi, BundleImportApi } from "./bundle";
-import { FileApi } from "./file";
-import { FleetApi } from "./fleet";
-import { FsApi } from "./fs";
 import { GeneratedApi } from "./generated";
 import { IdentityApi } from "./identity";
-import { LayoutApi } from "./layout";
-import { McpApi } from "./mcp";
-import { MiscApi } from "./misc";
-import { NativeMemoryApi } from "./native-memory";
-import { NotifyApi } from "./notify";
-import { PresenceApi } from "./presence";
-import { ReactiveApi } from "./reactive";
-import { RemotesApi } from "./remotes";
-import { SessionApi } from "./session";
-import { SkillApi } from "./skill";
-import { TowerApi } from "./tower";
-import { ViewerApi } from "./viewer";
-import { VoiceApi } from "./voice";
-import { WidgetsApi } from "./widgets";
+
 import { WorkspaceApi } from "./workspace";
 
 export type {
@@ -307,32 +284,7 @@ export type {
 
 // WshServerCommandToDeclMap
 export const RpcApi = {
-    ...MiscApi,
-    ...BlockApi,
-    ...FileApi,
-    ...FsApi,
     ...WorkspaceApi,
-    ...AgentApi,
     ...IdentityApi,
-    ...BundleApi,
-    ...NativeMemoryApi,
-    ...SessionApi,
-    ...McpApi,
-    ...SkillApi,
-    ...BundleImportApi,
-    ...FleetApi,
-    ...RemotesApi,
-    ...WidgetsApi,
-    ...ReactiveApi,
-    ...BookmarksApi,
-    ...BrowserProfilesApi,
-    ...LayoutApi,
-    ...BrowserStartPageApi,
-    ...VoiceApi,
-    ...NotifyApi,
-    ...AttachmentsApi,
-    ...ViewerApi,
-    ...PresenceApi,
-    ...TowerApi,
     ...GeneratedApi,
 };

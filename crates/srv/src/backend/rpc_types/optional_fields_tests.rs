@@ -14,15 +14,18 @@
 use serde_json::json;
 
 use super::agent::{CommandCreateAgentDefinitionData, CommandCreateAgentSkillData, CommandUpdateAgentDefinitionData};
+use super::block::{CommandBlockInputData, CommandResolveCliData};
+use super::bundle::CommandUpsertBundleData;
 use super::identity::CommandUnlinkAgentIdentityData;
 use super::instance::CommandCreateAgentInstanceData;
-use super::block::{CommandBlockInputData, CommandResolveCliData};
 use super::mcp::{CommandMcpCatalogUpsertData, CommandMcpUpsertData};
 use super::skill::{CommandSkillCatalogUpsertData, CommandSkillCatalogUpsertForBundleData, CommandSkillUpsertData};
+use crate::server::identity_handlers::StartProviderAuthReq;
 use crate::server::widget_handlers::WidgetInstallReq;
 
 /// Commands whose `optionalFields` this module proves.
 const PROVEN: &[&str] = &[
+    "auth.start",
     "controllerinput",
     "createagent",
     "createagentinstance",
@@ -35,6 +38,8 @@ const PROVEN: &[&str] = &[
     "skill.upsert",
     "unlinkagentidentity",
     "updateagent",
+    "upsertmemory",
+    "upsertsystemmemory",
     "widgets.install",
 ];
 
@@ -100,11 +105,35 @@ fn creates_and_upserts_take_just_their_required_fields() {
 }
 
 #[test]
+fn auth_start_takes_a_request_without_account_or_env() {
+    // What login-backend.ts sends.
+    let r: StartProviderAuthReq = serde_json::from_value(json!({
+        "providerId": "claude",
+        "cliPath": "claude",
+        "authLoginArgs": ["auth", "login"],
+        "authCheckArgs": ["auth", "status"],
+    }))
+    .unwrap();
+    assert!(!r.direct_account && !r.requires_tty);
+    assert_eq!(r.existing_account_id, "");
+    assert!(r.auth_env.is_empty());
+}
+
+#[test]
 fn mcp_upserts_take_a_new_server_without_id_transport_or_config() {
     let r: CommandMcpUpsertData = serde_json::from_value(json!({ "agent_id": "a1", "name": "files" })).unwrap();
     assert_eq!((r.id.as_str(), r.transport.as_str()), ("", "stdio"));
     let c: CommandMcpCatalogUpsertData = serde_json::from_value(json!({ "name": "files" })).unwrap();
     assert_eq!(c.transport, "stdio");
+}
+
+#[test]
+fn upsert_bundle_takes_just_id_and_name() {
+    // upsertmemory and upsertsystemmemory share this request (a Bundle, flattened).
+    let r: CommandUpsertBundleData = serde_json::from_value(json!({ "id": "b1", "name": "Bundle" })).unwrap();
+    assert_eq!(r.bundle.description, "");
+    assert_eq!(r.bundle.context_files, "[]", "context_files has a non-empty default");
+    assert_eq!(r.base_sha256, None);
 }
 
 #[test]

@@ -21,5 +21,3 @@ export type { WidgetStatusItemInfo } from "@/types/rpc/WidgetStatusItemInfo";
 export type { WidgetCatalogEntry } from "@/types/rpc/WidgetCatalogEntry";
 export type { WidgetCatalogItem } from "@/types/rpc/WidgetCatalogItem";
 export type { WidgetCatalogResult } from "@/types/rpc/WidgetCatalogResult";
-
-export const WidgetsApi = {};

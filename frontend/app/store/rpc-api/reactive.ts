@@ -20,5 +20,3 @@ export type { AgentRegistration as ReactiveAgentRegistration } from "@/types/rpc
 export type { MismatchAuditSummary as ReactiveMismatchSummary } from "@/types/rpc/MismatchAuditSummary";
 export type { ReactiveRegistrationsResult } from "@/types/rpc/ReactiveRegistrationsResult";
 export type { RemoteRegistrationEntry as ReactiveRemoteRegistration } from "@/types/rpc/RemoteRegistrationEntry";
-
-export const ReactiveApi = {};

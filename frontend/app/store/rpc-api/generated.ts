@@ -184,6 +184,7 @@ import type { CommandUnlinkAgentIdentityData } from "@/types/rpc/CommandUnlinkAg
 import type { CommandUpdateAgentDefinitionData } from "@/types/rpc/CommandUpdateAgentDefinitionData";
 import type { CommandUpdateAgentInstanceData } from "@/types/rpc/CommandUpdateAgentInstanceData";
 import type { CommandUpdateAgentSkillData } from "@/types/rpc/CommandUpdateAgentSkillData";
+import type { CommandUpsertBundleData } from "@/types/rpc/CommandUpsertBundleData";
 import type { CommandViewerAgentHiddenData } from "@/types/rpc/CommandViewerAgentHiddenData";
 import type { CommandViewerRevokeData } from "@/types/rpc/CommandViewerRevokeData";
 import type { CommandVoiceCheckPathData } from "@/types/rpc/CommandVoiceCheckPathData";
@@ -315,6 +316,8 @@ import type { NotifyTakeActivationParams } from "@/types/rpc/NotifyTakeActivatio
 import type { NotifyTakeActivationResult } from "@/types/rpc/NotifyTakeActivationResult";
 import type { OAuthSessionReq } from "@/types/rpc/OAuthSessionReq";
 import type { OpenInShellReq } from "@/types/rpc/OpenInShellReq";
+import type { PollProviderAuthReq } from "@/types/rpc/PollProviderAuthReq";
+import type { PollSessionResult } from "@/types/rpc/PollSessionResult";
 import type { PresencePublishNowResult } from "@/types/rpc/PresencePublishNowResult";
 import type { PresenceStatusResult } from "@/types/rpc/PresenceStatusResult";
 import type { ProbeResult } from "@/types/rpc/ProbeResult";
@@ -359,6 +362,8 @@ import type { SkillListItem } from "@/types/rpc/SkillListItem";
 import type { SkillUnbindResult } from "@/types/rpc/SkillUnbindResult";
 import type { StartPageSetReq } from "@/types/rpc/StartPageSetReq";
 import type { StartPageSetResult } from "@/types/rpc/StartPageSetResult";
+import type { StartProviderAuthReq } from "@/types/rpc/StartProviderAuthReq";
+import type { StartSessionResult } from "@/types/rpc/StartSessionResult";
 import type { SubmitAuthCallbackReq } from "@/types/rpc/SubmitAuthCallbackReq";
 import type { SubscriptionRequest } from "@/types/rpc/SubscriptionRequest";
 import type { ToolIdReq } from "@/types/rpc/ToolIdReq";
@@ -629,6 +634,19 @@ export const GeneratedApi = {
   // command "auth.cancel"
   AuthCancelCommand(client: RpcClient, data: CancelProviderAuthReq, opts?: RpcOpts): Promise<AckResp> {
     return client.rpcCall("auth.cancel", data, opts);
+  },
+  // command "auth.poll"
+  AuthPollCommand(client: RpcClient, data: PollProviderAuthReq, opts?: RpcOpts): Promise<PollSessionResult> {
+    return client.rpcCall("auth.poll", data, opts);
+  },
+  // command "auth.start"
+  AuthStartCommand(
+    client: RpcClient,
+    data: Omit<StartProviderAuthReq, "directAccount" | "existingAccountId" | "authEnv" | "requiresTty"> &
+      Partial<Pick<StartProviderAuthReq, "directAccount" | "existingAccountId" | "authEnv" | "requiresTty">>,
+    opts?: RpcOpts
+  ): Promise<StartSessionResult> {
+    return client.rpcCall("auth.start", data, opts);
   },
   // command "auth.submitcallback"
   AuthSubmitCallbackCommand(client: RpcClient, data: SubmitAuthCallbackReq, opts?: RpcOpts): Promise<AckResp> {
@@ -2070,6 +2088,49 @@ export const GeneratedApi = {
   ): Promise<BrowserProfilesResult> {
     return client.rpcCall("browser_profiles.update", data, opts);
   },
+  // command "upsertmemory"
+  UpsertBundleCommand(
+    client: RpcClient,
+    data: Omit<
+      CommandUpsertBundleData,
+      | "description"
+      | "is_blank"
+      | "is_global"
+      | "provider"
+      | "model"
+      | "instructions"
+      | "instructions_by_provider"
+      | "context_files"
+      | "mcp_servers"
+      | "skills"
+      | "sort_order"
+      | "is_system"
+      | "created_at"
+      | "updated_at"
+    > &
+      Partial<
+        Pick<
+          CommandUpsertBundleData,
+          | "description"
+          | "is_blank"
+          | "is_global"
+          | "provider"
+          | "model"
+          | "instructions"
+          | "instructions_by_provider"
+          | "context_files"
+          | "mcp_servers"
+          | "skills"
+          | "sort_order"
+          | "is_system"
+          | "created_at"
+          | "updated_at"
+        >
+      >,
+    opts?: RpcOpts
+  ): Promise<Bundle> {
+    return client.rpcCall("upsertmemory", data, opts);
+  },
   // command "upsertdrone"
   UpsertDroneCommand(client: RpcClient, data: DroneDefinition, opts?: RpcOpts): Promise<DroneDefinition> {
     return client.rpcCall("upsertdrone", data, opts);
@@ -2081,6 +2142,49 @@ export const GeneratedApi = {
     opts?: RpcOpts
   ): Promise<IdentityAccount> {
     return client.rpcCall("upsertidentityaccount", data, opts);
+  },
+  // command "upsertsystemmemory"
+  UpsertSystemBundleCommand(
+    client: RpcClient,
+    data: Omit<
+      CommandUpsertBundleData,
+      | "description"
+      | "is_blank"
+      | "is_global"
+      | "provider"
+      | "model"
+      | "instructions"
+      | "instructions_by_provider"
+      | "context_files"
+      | "mcp_servers"
+      | "skills"
+      | "sort_order"
+      | "is_system"
+      | "created_at"
+      | "updated_at"
+    > &
+      Partial<
+        Pick<
+          CommandUpsertBundleData,
+          | "description"
+          | "is_blank"
+          | "is_global"
+          | "provider"
+          | "model"
+          | "instructions"
+          | "instructions_by_provider"
+          | "context_files"
+          | "mcp_servers"
+          | "skills"
+          | "sort_order"
+          | "is_system"
+          | "created_at"
+          | "updated_at"
+        >
+      >,
+    opts?: RpcOpts
+  ): Promise<Bundle> {
+    return client.rpcCall("upsertsystemmemory", data, opts);
   },
   // command "bundle.validate"
   ValidateBundleCommand(

@@ -46,5 +46,3 @@ export type { FsTrashReq } from "@/types/rpc/FsTrashReq";
 export type { FsUnwatchReq } from "@/types/rpc/FsUnwatchReq";
 export type { FsWatchReq } from "@/types/rpc/FsWatchReq";
 export type { FsWatchResult } from "@/types/rpc/FsWatchResult";
-
-export const FsApi = {};

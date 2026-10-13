@@ -2,53 +2,52 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { UnseenTurnsDot } from "./UnseenTurnsDot";
 import { blockViewToIcon, blockViewToName, ConnectionButton, getBlockHeaderIcon, Input } from "@/app/block/blockutil";
 import { paneTabCapability, paneTabLabelFor } from "@/app/block/pane-tab-registry";
-import { writeText as clipboardWriteText } from "@/util/clipboard";
 import { Button } from "@/app/element/button";
+import { MicButton } from "@/app/element/MicButton";
+import { redactSecrets } from "@/app/errors/redact";
 import { ChangeConnectionBlockModal } from "@/app/modals/conntypeahead";
-import { ContextMenuModel } from "@/app/store/contextmenu";
+import { getApi } from "@/app/store/app-api";
 import { connBarShows } from "@/app/store/conn-status-rules";
+import { ContextMenuModel } from "@/app/store/contextmenu";
 import {
     atoms,
     getBlockComponentModel,
     getConnStatusAtom,
     getSettingsKeyAtom,
-    recordTEvent,
-    useBlockAtom,
     MOS,
+    useBlockAtom,
 } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
+import { computeMenuPosition } from "@/app/util/menu-position";
+import { remoteSettingsMenuItems } from "@/app/view/remotes/open-remotes";
+import { BlockStatsBadge } from "@/element/blockstats";
 import { ErrorBoundary } from "@/element/errorboundary";
 import { IconButton, ToggleIconButton } from "@/element/iconbutton";
-import { BlockStatsBadge } from "@/element/blockstats";
 import { MenuButton } from "@/element/menubutton";
-import { MicButton } from "@/app/element/MicButton";
-import { getApi } from "@/app/store/app-api";
 import { NodeModel } from "@/layout/index";
-import * as util from "@/util/util";
+import { writeText as clipboardWriteText } from "@/util/clipboard";
 import { computeBgStyleFromMeta } from "@/util/muxutil";
-import clsx from "clsx";
+import * as util from "@/util/util";
 import { autoUpdate } from "@floating-ui/dom";
-import { computeMenuPosition } from "@/app/util/menu-position";
+import clsx from "clsx";
 import type { Accessor, JSX } from "solid-js";
 import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import { Portal } from "solid-js/web";
 import { CopyButton } from "../element/copybutton";
 import { getEffectiveTitle, isUsableFocusRingColor, pickReadableTextColor } from "./autotitle";
-import { partitionHeaderElems } from "./header-elems";
-import { canTackFloatingPane, FloatingAlwaysOnTopButton } from "./floating-ontop";
+import { BlockFrameProps } from "./blocktypes";
 import { resolveContextMenuRegion } from "./context-menu-region";
+import { canTackFloatingPane, FloatingAlwaysOnTopButton } from "./floating-ontop";
+import { partitionHeaderElems } from "./header-elems";
 import { buildPaneContextMenu, joinMenuGroups, type PaneMenuSection } from "./pane-actions";
 import { applyHueToAllPanes, hueToActiveBorder, PANE_HUE_OPTIONS, setHue } from "./pane-color-menu";
 import { blockRoleColor, isLightThemeActive, widgetColorView, type PaneIdentityOptions } from "./pane-identity";
-import { BlockFrameProps } from "./blocktypes";
 import { PaneSizeBadge } from "./pane-size-badge";
 import { TitleBar } from "./titlebar";
-import { redactSecrets } from "@/app/errors/redact";
-import { remoteSettingsMenuItems } from "@/app/view/remotes/open-remotes";
+import { UnseenTurnsDot } from "./UnseenTurnsDot";
 
 const NumActiveConnColors = 8;
 
@@ -82,7 +81,10 @@ export function computeBlockTabPillBg(blockMeta: Block["meta"] | undefined, isLi
 /** The selected pane-tab pill's background (`pillActive`): this block's own
  * identity a step stronger than its inactive pill. Undefined when the block
  * has no colour of its own. */
-export function computeBlockTabPillActiveBg(blockMeta: Block["meta"] | undefined, isLightTheme: boolean): string | undefined {
+export function computeBlockTabPillActiveBg(
+    blockMeta: Block["meta"] | undefined,
+    isLightTheme: boolean
+): string | undefined {
     return blockRoleColor(blockMeta, isLightTheme, "pillActive");
 }
 
@@ -90,7 +92,10 @@ export function computeBlockTabPillActiveBg(blockMeta: Block["meta"] | undefined
  * underline. Normalised in OKLCH so it clears 3:1 against the pill and header
  * surfaces for every hue (pane-color-scheme.ts). Undefined when the block has
  * no colour of its own (callers fall back to the accent colour). */
-export function computeBlockIdentityColor(blockMeta: Block["meta"] | undefined, isLightTheme: boolean): string | undefined {
+export function computeBlockIdentityColor(
+    blockMeta: Block["meta"] | undefined,
+    isLightTheme: boolean
+): string | undefined {
     return blockRoleColor(blockMeta, isLightTheme, "identity");
 }
 
@@ -190,10 +195,7 @@ export function buildPaneColorSubmenu(blockData: Block): ContextMenuItem[] {
     // group that also starts with a separator. A trailing separator here would
     // collide with it and render two consecutive dividers for views that
     // implement getSettingsMenuItems (sysinfo).
-    return [
-        { type: "separator" as const },
-        { label: "Pane Color", type: "submenu" as const, submenu: colorItems },
-    ];
+    return [{ type: "separator" as const }, { label: "Pane Color", type: "submenu" as const, submenu: colorItems }];
 }
 
 function handleHeaderContextMenu(
@@ -208,12 +210,16 @@ function handleHeaderContextMenu(
     e.stopPropagation();
 
     // Start with the shared pane actions (copy, paste, split, magnify, close)
-    const menu: ContextMenuItem[] = buildPaneContextMenu(blockData, {
-        magnified,
-        onMagnifyToggle,
-        onClose,
-        inspectAt: { x: e.clientX, y: e.clientY },
-    }, viewModel);
+    const menu: ContextMenuItem[] = buildPaneContextMenu(
+        blockData,
+        {
+            magnified,
+            onMagnifyToggle,
+            onClose,
+            inspectAt: { x: e.clientX, y: e.clientY },
+        },
+        viewModel
+    );
 
     // Header-only: pane color submenu
     menu.push(...buildPaneColorSubmenu(blockData));
@@ -249,7 +255,10 @@ function ViewNameEditor(props: { name: string; onSave: (v: string) => void }): J
             fallback={
                 <div
                     class="block-frame-view-type block-frame-view-type--editable"
-                    onClick={() => { setDraft(props.name); setEditing(true); }}
+                    onClick={() => {
+                        setDraft(props.name);
+                        setEditing(true);
+                    }}
                     onDblClick={(e) => e.stopPropagation()}
                     title="Click to rename"
                 >
@@ -263,12 +272,23 @@ function ViewNameEditor(props: { name: string; onSave: (v: string) => void }): J
                 onInput={(e) => setDraft(e.currentTarget.value)}
                 onBlur={commit}
                 onKeyDown={(e) => {
-                    if (e.key === "Enter") { e.preventDefault(); commit(); }
-                    if (e.key === "Escape") { e.preventDefault(); cancel(); }
+                    if (e.key === "Enter") {
+                        e.preventDefault();
+                        commit();
+                    }
+                    if (e.key === "Escape") {
+                        e.preventDefault();
+                        cancel();
+                    }
                     e.stopPropagation();
                 }}
                 onDblClick={(e) => e.stopPropagation()}
-                ref={(el) => setTimeout(() => { el.focus(); el.select(); }, 0)}
+                ref={(el) =>
+                    setTimeout(() => {
+                        el.focus();
+                        el.select();
+                    }, 0)
+                }
             />
         </Show>
     );
@@ -333,9 +353,7 @@ function FloatingMaximizeButton(props: { label: string; blockId: string }): JSX.
         icon: "window-maximize",
         title: "Maximize",
         click: () => {
-            getApi().windows.toggleFloatingMaximize(props.label, props.blockId).catch(
-                console.error
-            );
+            getApi().windows.toggleFloatingMaximize(props.label, props.blockId).catch(console.error);
         },
     };
     return <IconButton decl={decl} className="block-frame-magnify" />;
@@ -385,9 +403,11 @@ function EndIcons(props: {
             <Show when={(endIconButtons()?.length ?? 0) > 0}>
                 <For each={endIconButtons()}>
                     {(button) =>
-                        button.elemtype === "toggleiconbutton"
-                            ? <ToggleIconButton decl={button} />
-                            : <IconButton decl={button} />
+                        button.elemtype === "toggleiconbutton" ? (
+                            <ToggleIconButton decl={button} />
+                        ) : (
+                            <IconButton decl={button} />
+                        )
                     }
                 </For>
                 <div class="block-frame-btn-separator" aria-hidden="true" />
@@ -426,34 +446,41 @@ function EndIcons(props: {
                 cached model — degrade to showing the button (the toggle's own
                 countExpandedLeaves guard still enforces the policy). */}
             <Show when={!ephemeral() && !magnified() && numLeafs() > 1 && (props.nodeModel.canMinimize?.() ?? true)}>
-                <OptMinimizeButton
-                    minimized={minimized()}
-                    toggleMinimize={props.nodeModel.toggleMinimize}
-                />
+                <OptMinimizeButton minimized={minimized()} toggleMinimize={props.nodeModel.toggleMinimize} />
             </Show>
 
-            <Show when={ephemeral()} fallback={
-                <Show when={floatingLabel()} fallback={
-                    <OptMagnifyButton
-                        magnified={magnified()}
-                        toggleMagnify={props.nodeModel.toggleMagnify}
-                        disabled={magnifyDisabled()}
-                    />
-                }>
-                    {/* "Always on top" tack, with the window controls
+            <Show
+                when={ephemeral()}
+                fallback={
+                    <Show
+                        when={floatingLabel()}
+                        fallback={
+                            <OptMagnifyButton
+                                magnified={magnified()}
+                                toggleMagnify={props.nodeModel.toggleMagnify}
+                                disabled={magnifyDisabled()}
+                            />
+                        }
+                    >
+                        {/* "Always on top" tack, with the window controls
                         (SPEC_FLOATING_PANE_ALWAYS_ON_TOP_2026_09_27 §4). */}
-                    <Show when={canTackFloatingPane(floatingLabel())}>
-                        <FloatingAlwaysOnTopButton label={floatingLabel()!} blockId={props.blockId()} />
+                        <Show when={canTackFloatingPane(floatingLabel())}>
+                            <FloatingAlwaysOnTopButton label={floatingLabel()!} blockId={props.blockId()} />
+                        </Show>
+                        <FloatingMaximizeButton label={floatingLabel()!} blockId={props.blockId()} />
                     </Show>
-                    <FloatingMaximizeButton label={floatingLabel()!} blockId={props.blockId()} />
-                </Show>
-            }>
-                <IconButton decl={{
-                    elemtype: "iconbutton",
-                    icon: "circle-plus",
-                    title: "Add to Layout",
-                    click: () => { props.nodeModel.addEphemeralNodeToLayout(); },
-                }} />
+                }
+            >
+                <IconButton
+                    decl={{
+                        elemtype: "iconbutton",
+                        icon: "circle-plus",
+                        title: "Add to Layout",
+                        click: () => {
+                            props.nodeModel.addEphemeralNodeToLayout();
+                        },
+                    }}
+                />
             </Show>
             <IconButton decl={closeDecl} className="block-frame-default-close" />
         </>
@@ -483,7 +510,11 @@ function EndIcons(props: {
  * boundaries; a bare `computePosition` does not, and this tooltip anchors
  * to a pane header that very often sits right next to a browser pane.
  */
-function AnchoredTooltip(props: { anchor: () => HTMLElement | null; visible: boolean; content: JSX.Element }): JSX.Element {
+function AnchoredTooltip(props: {
+    anchor: () => HTMLElement | null;
+    visible: boolean;
+    content: JSX.Element;
+}): JSX.Element {
     const [floatingStyle, setFloatingStyle] = createSignal<JSX.CSSProperties>({
         position: "fixed",
         left: "0px",
@@ -525,7 +556,9 @@ function AnchoredTooltip(props: { anchor: () => HTMLElement | null; visible: boo
         <Show when={props.visible}>
             <Portal>
                 <div
-                    ref={(el) => { floatingEl = el; }}
+                    ref={(el) => {
+                        floatingEl = el;
+                    }}
                     style={floatingStyle()}
                     class="bg-modalbg border border-border rounded-md px-2 py-1 text-xs text-foreground shadow-xl z-50"
                     data-pane-overlay
@@ -574,18 +607,6 @@ function BlockFrame_Header(
     const [headerHovering, setHeaderHovering] = createSignal(false);
     let headerRef: HTMLDivElement | undefined;
 
-    // Track previous magnified state for one-time activity report
-    let prevMagnifiedState = props.nodeModel.isMagnified();
-    createEffect(() => {
-        const isMag = props.nodeModel.isMagnified();
-        if (isMag && !prevMagnifiedState && !props.preview) {
-            RpcApi.ActivityCommand(TabRpcClient, { nummagnify: 1 });
-            const vn = util.useAtomValueSafe(props.viewModel?.viewName) ?? blockViewToName(blockData()?.meta?.view);
-            recordTEvent("action:magnify", { "block:view": vn });
-        }
-        prevMagnifiedState = isMag;
-    });
-
     const viewName = createMemo(() => {
         const bd = blockData();
         if (bd?.meta?.["frame:title"]) {
@@ -630,7 +651,9 @@ function BlockFrame_Header(
         // changes, so this won't spam.
         if (paneTabCapability(blockData()?.meta?.view, "nativeSurface")) {
             const vmId = (props.viewModel as any)?.__diagVmId ?? "?";
-            console.log(`[browser-pane:diag][${(blockData()?.oid ?? "").slice(0, 7)} vm=${vmId}] header-render favUrl=${JSON.stringify(favUrl ?? "")}`);
+            console.log(
+                `[browser-pane:diag][${(blockData()?.oid ?? "").slice(0, 7)} vm=${vmId}] header-render favUrl=${JSON.stringify(favUrl ?? "")}`
+            );
         }
         if (favUrl) {
             return (
@@ -649,11 +672,15 @@ function BlockFrame_Header(
                             // all subsequent valid favicons. Reset on every
                             // successful load.
                             (e.currentTarget as HTMLImageElement).style.display = "";
-                            console.log(`[browser-pane:diag][${(blockData()?.oid ?? "").slice(0, 7)}] favicon-load ok src=${JSON.stringify(favUrl)}`);
+                            console.log(
+                                `[browser-pane:diag][${(blockData()?.oid ?? "").slice(0, 7)}] favicon-load ok src=${JSON.stringify(favUrl)}`
+                            );
                         }}
                         onError={(e) => {
                             (e.currentTarget as HTMLImageElement).style.display = "none";
-                            console.log(`[browser-pane:diag][${(blockData()?.oid ?? "").slice(0, 7)}] favicon-load fail src=${JSON.stringify(favUrl)}`);
+                            console.log(
+                                `[browser-pane:diag][${(blockData()?.oid ?? "").slice(0, 7)}] favicon-load fail src=${JSON.stringify(favUrl)}`
+                            );
                         }}
                     />
                 </div>
@@ -676,7 +703,7 @@ function BlockFrame_Header(
         );
     });
     const preIconButtonElem = createMemo<JSX.Element>(() =>
-        preIconButton() ? <IconButton decl={preIconButton()} className="block-frame-preicon-button" /> : null,
+        preIconButton() ? <IconButton decl={preIconButton()} className="block-frame-preicon-button" /> : null
     );
 
     // Only *passive* header content moves into the hover tooltip; real
@@ -702,13 +729,7 @@ function BlockFrame_Header(
         // ellipsis` + the LRM mark) rather than routing it through
         // HeaderTextElem, which wraps text differently.
         if (typeof htu === "string") {
-            return util.isBlank(htu)
-                ? []
-                : [
-                      <div class="block-frame-text ellipsis">
-                          &lrm;{htu}
-                      </div>,
-                  ];
+            return util.isBlank(htu) ? [] : [<div class="block-frame-text ellipsis">&lrm;{htu}</div>];
         }
         return renderHeaderElements(splitHeaderElems().tooltip, props.preview);
     });
@@ -840,7 +861,16 @@ function HeaderTextElem({ elem, preview }: { elem: HeaderElem; preview: boolean 
     } else if (elem.elemtype == "text") {
         return (
             <div class={clsx("block-frame-text ellipsis", elem.className, { "flex-nogrow": elem.noGrow })}>
-                <span ref={preview ? undefined : (el) => { if (elem.ref) (elem.ref as any).current = el; }} onClick={(e) => elem?.onClick?.(e)}>
+                <span
+                    ref={
+                        preview
+                            ? undefined
+                            : (el) => {
+                                  if (elem.ref) (elem.ref as any).current = el;
+                              }
+                    }
+                    onClick={(e) => elem?.onClick?.(e)}
+                >
                     &lrm;{elem.text}
                 </span>
             </div>
@@ -858,9 +888,7 @@ function HeaderTextElem({ elem, preview }: { elem: HeaderElem; preview: boolean 
                 onMouseOver={elem.onMouseOver}
                 onMouseOut={elem.onMouseOut}
             >
-                <For each={elem.children}>
-                    {(child, childIdx) => <HeaderTextElem elem={child} preview={preview} />}
-                </For>
+                <For each={elem.children}>{(child, childIdx) => <HeaderTextElem elem={child} preview={preview} />}</For>
             </div>
         );
     } else if (elem.elemtype == "menubutton") {
@@ -949,7 +977,12 @@ function ConnStatusOverlay({
 
     return (
         <Show when={!isLayoutMode && connBarShows(connStatus()) && !connModalOpen}>
-            <div class="connstatus-overlay" ref={(el) => { overlayRef = el; }}>
+            <div
+                class="connstatus-overlay"
+                ref={(el) => {
+                    overlayRef = el;
+                }}
+            >
                 <div class="connstatus-content">
                     <div class={clsx("connstatus-status-icon-wrapper", { "has-error": showError() })}>
                         <i class="fa-solid fa-triangle-exclamation"></i>
@@ -965,10 +998,7 @@ function ConnStatusOverlay({
                     </div>
                     <div class="connstatus-actions">
                         <Button className={reconClassName()} onClick={handleTryReconnect}>
-                            <Show
-                                when={width() && width() < 350}
-                                fallback="Reconnect"
-                            >
+                            <Show when={width() && width() < 350} fallback="Reconnect">
                                 <i class="fa-solid fa-rotate-right"></i>
                             </Show>
                         </Button>
@@ -998,7 +1028,10 @@ function ConnStatusOverlay({
  * falls through here (typeof null !== "number") back to the agent's
  * default color rather than to no color at all.
  */
-export function computeBlockActiveBorderColor(blockMeta: Block["meta"] | undefined, isLightTheme: boolean): string | undefined {
+export function computeBlockActiveBorderColor(
+    blockMeta: Block["meta"] | undefined,
+    isLightTheme: boolean
+): string | undefined {
     // The identity at full strength in OKLCH (pane-color-scheme.ts
     // `identity`), the same colour as the active-tab underline. Since
     // 2026-10-02; before, `hsl(h, 65%, 52%)` or the raw hex, whose perceived
@@ -1134,12 +1167,10 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
     // Terminal-only: "term:showstatsbadge" (Settings → Terminal). Other view
     // types keep the badge unconditionally, matching prior behavior — this
     // setting exists specifically for the terminal pane's CPU%/mem overlay.
-    const showStatsBadge = createMemo(
-        () => {
-            const setting = paneTabCapability(blockData()?.meta?.view, "statsBadgeSetting");
-            return setting == null || getSettingsKeyAtom(setting as any)() !== false;
-        },
-    );
+    const showStatsBadge = createMemo(() => {
+        const setting = paneTabCapability(blockData()?.meta?.view, "statsBadgeSetting");
+        return setting == null || getSettingsKeyAtom(setting as any)() !== false;
+    });
     // Captured outer-frame ref for PaneSizeBadge. Live as long as the
     // frame is mounted; cleared on unmount via the callback ref.
     // SPEC_PANE_RESIZE_DIMENSION_OVERLAY_2026_05_26.md.
@@ -1228,7 +1259,12 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
     // switch without this header remounting.
     const headerBlockId: Accessor<string> = () => nodeModel.blockId;
     const headerElem = (
-        <BlockFrame_Header {...props} connBtnRef={connBtnRef} changeConnModalAtom={changeConnModalAtom} blockId={headerBlockId} />
+        <BlockFrame_Header
+            {...props}
+            connBtnRef={connBtnRef}
+            changeConnModalAtom={changeConnModalAtom}
+            blockId={headerBlockId}
+        />
     );
     const headerElemNoView = (
         <BlockFrame_Header
@@ -1259,13 +1295,17 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
         const menu = joinMenuGroups([
             region?.items?.() ?? [],
             omit.has("viewItems") ? [] : (props.viewModel?.getBodyContextMenuItems?.(browserCtx) ?? []),
-            buildPaneContextMenu(blockData(), {
-                magnified: isMagnified(),
-                onMagnifyToggle: nodeModel.toggleMagnify,
-                onClose: nodeModel.onClose,
-                inspectAt: { x: e.clientX, y: e.clientY },
-                omit,
-            }, props.viewModel),
+            buildPaneContextMenu(
+                blockData(),
+                {
+                    magnified: isMagnified(),
+                    onMagnifyToggle: nodeModel.toggleMagnify,
+                    onClose: nodeModel.onClose,
+                    inspectAt: { x: e.clientX, y: e.clientY },
+                    omit,
+                },
+                props.viewModel
+            ),
         ]);
         if (menu.length === 0) return;
         ContextMenuModel.showContextMenu(menu, e);
@@ -1299,9 +1339,7 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
             // which also contains the header/title bar/nav bar above the
             // content). Using frameEl's rect offset the menu downward by
             // that header chrome's height (reagentx P1 on PR #2599).
-            const rect = frameEl()
-                ?.querySelector<HTMLElement>(".browser-placeholder")
-                ?.getBoundingClientRect();
+            const rect = frameEl()?.querySelector<HTMLElement>(".browser-placeholder")?.getBoundingClientRect();
             if (!rect) return;
             const synthetic = {
                 clientX: rect.left + payload.x,
@@ -1319,7 +1357,9 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
                 canGoForward: payload.can_go_forward,
             });
         });
-        onCleanup(() => { void unsubPromise.then((unsub) => unsub()); });
+        onCleanup(() => {
+            void unsubPromise.then((unsub) => unsub());
+        });
     });
 
     return (
@@ -1365,7 +1405,11 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
                     <TitleBar
                         blockId={nodeModel.blockId}
                         blockMeta={blockData()?.meta}
-                        title={getEffectiveTitle(blockData(), false, atoms.fullConfigAtom()?.settings?.["cmd:env"] as Record<string, string> | undefined)}
+                        title={getEffectiveTitle(
+                            blockData(),
+                            false,
+                            atoms.fullConfigAtom()?.settings?.["cmd:env"] as Record<string, string> | undefined
+                        )}
                     />
                 </Show>
                 {props.preview ? previewElem : props.children}

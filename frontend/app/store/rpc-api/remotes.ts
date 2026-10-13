@@ -8,5 +8,3 @@ export type { RemoteHelper } from "@/types/rpc/RemoteHelper";
 export type { RemotePlatform } from "@/types/rpc/RemotePlatform";
 export type { RemoteRecord } from "@/types/rpc/RemoteRecord";
 export type { RemoteStatus } from "@/types/rpc/RemoteStatus";
-
-export const RemotesApi = {};

@@ -147,6 +147,20 @@
             "method": "AuthCancelCommand"
         },
         {
+            "command": "auth.poll",
+            "method": "AuthPollCommand"
+        },
+        {
+            "command": "auth.start",
+            "method": "AuthStartCommand",
+            "optionalFields": [
+                "directAccount",
+                "existingAccountId",
+                "authEnv",
+                "requiresTty"
+            ]
+        },
+        {
             "command": "auth.submitcallback",
             "method": "AuthSubmitCallbackCommand"
         },
@@ -1219,6 +1233,26 @@
             "method": "UpdateBrowserProfileCommand"
         },
         {
+            "command": "upsertmemory",
+            "method": "UpsertBundleCommand",
+            "optionalFields": [
+                "description",
+                "is_blank",
+                "is_global",
+                "provider",
+                "model",
+                "instructions",
+                "instructions_by_provider",
+                "context_files",
+                "mcp_servers",
+                "skills",
+                "sort_order",
+                "is_system",
+                "created_at",
+                "updated_at"
+            ]
+        },
+        {
             "command": "upsertdrone",
             "method": "UpsertDroneCommand"
         },
@@ -1226,6 +1260,26 @@
             "command": "upsertidentityaccount",
             "method": "UpsertIdentityAccountCommand",
             "dataType": "Partial<IdentityAccount>"
+        },
+        {
+            "command": "upsertsystemmemory",
+            "method": "UpsertSystemBundleCommand",
+            "optionalFields": [
+                "description",
+                "is_blank",
+                "is_global",
+                "provider",
+                "model",
+                "instructions",
+                "instructions_by_provider",
+                "context_files",
+                "mcp_servers",
+                "skills",
+                "sort_order",
+                "is_system",
+                "created_at",
+                "updated_at"
+            ]
         },
         {
             "command": "bundle.validate",

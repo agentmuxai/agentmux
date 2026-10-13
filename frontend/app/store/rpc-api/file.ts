@@ -4,8 +4,6 @@
 // File and remote-file operations, plus the editor file-tree commands. Split
 // from the original hand-maintained rpc-api file.
 
-import { RpcClient } from "../rpc-client";
-
 // The editor file-tree mutation shapes are GENERATED from their Rust
 // definitions by ts-rs. Each of them used to be a `struct Cmd` declared
 // inside its handler's own closure, with the response built by an inline
@@ -51,13 +49,3 @@ export type { ListEditorDirResult } from "@/types/rpc/ListEditorDirResult";
 export type { UnwatchMediaDirReq } from "@/types/rpc/UnwatchMediaDirReq";
 export type { WatchEditorFileReq } from "@/types/rpc/WatchEditorFileReq";
 export type { WatchMediaDirReq } from "@/types/rpc/WatchMediaDirReq";
-
-export const FileApi = {
-    FileAppendCommand(client: RpcClient, data: FileData, opts?: RpcOpts): Promise<void> {
-        return client.rpcCall("fileappend", data, opts);
-    },
-
-    FileJoinCommand(client: RpcClient, data: string[], opts?: RpcOpts): Promise<FileInfo> {
-        return client.rpcCall("filejoin", data, opts);
-    },
-};
