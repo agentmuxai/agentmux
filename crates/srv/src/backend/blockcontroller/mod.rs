@@ -27,6 +27,7 @@ pub mod session_recovery;
 pub mod session_stats;
 pub mod shell;
 pub mod subprocess;
+pub mod term_size;
 pub mod watchdog;
 
 use std::any::Any;
@@ -552,6 +553,7 @@ pub fn delete_controller(block_id: &str) {
         let _ = ctrl.stop(true, STATUS_DONE);
     }
     release_block_processes(block_id);
+    term_size::forget(block_id);
 }
 
 /// Remove a controller from `CONTROLLER_REGISTRY` and hand it back, without
