@@ -3,7 +3,8 @@
 **Date:** 2026-10-12
 **Author:** Maricon@charlie
 **Type:** Spec (three small, separable changes)
-**Status:** implemented in the PR that adds this file (changes A, B and C, with D1 = yes, D2 = one glyph, D3 = restore to the tile, D4 = no title change; D5 is left out of scope). The operator picked the three header states of the preview; the close X is unchanged.
+**Status:** implemented (#4838)
+**Decisions applied:** changes A, B and C, with D1 = yes, D2 = one glyph, D3 = restore to the tile, D4 = no title change; D5 is left out of scope. The operator picked the three header states of the preview; the close X is unchanged.
 **Requested by:** the operator: *"i like the windows maximize (reg) for the maximize button. Also, the restore button that appears when a pane is minimized is not really accurate since agentmux has tiled windows, no overlaid windows. can you design an icon that makes more sense? Finally, we want to be able to minimize a maximized pane directly (without having to first restore then minimize) so it would need to remember its minimize position when maximized."*
 **Related:** `docs/reports/REPORT_PANE_HEADER_ICONS_FA_FREE_2026_10_11.md` (§8 has the icon options this builds on), `SPEC_LAYOUT_MINIMIZE_LOCKED_STATE_REDESIGN_2026_07_16.md` §8 (minimize is a display mode), `SPEC_MAXIMIZE_ZOOM_ARCHITECTURE_2026-05-21.md` (magnify).
 
