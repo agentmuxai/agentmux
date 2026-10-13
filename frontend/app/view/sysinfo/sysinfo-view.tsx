@@ -46,8 +46,8 @@ function SysinfoView(props: SysinfoViewProps): JSX.Element {
     });
 
     // Subscribe to sysinfo events — hand every sample to the reducer.
-    // The reducer handles missing ticks via zero-order hold (≤3 missed) or
-    // a NaN sentinel (true break). No gap-triggered reload here: that caused
+    // The reducer joins a short gap between two real samples and breaks the
+    // series at a long one. No gap-triggered reload here: that caused
     // the chart to blank under load and created a drop/reload feedback loop.
     createEffect(() => {
         const cn = connName();
