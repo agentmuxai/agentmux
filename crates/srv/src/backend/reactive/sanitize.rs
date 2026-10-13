@@ -143,6 +143,13 @@ pub fn route_name(name: &str) -> Option<String> {
     (!name.trim().is_empty()).then(|| agentmux_common::slug::agent_route_name(name))
 }
 
+/// The id a name registers under: its route name, when that is a valid id.
+/// A name with '@' keeps it (it is kept for forwarding a target across
+/// tiers), and no message could reach it here, so it doesn't register (#4744).
+pub fn registrable_id(name: &str) -> Option<String> {
+    route_name(name).filter(|id| validate_agent_id(id))
+}
+
 /// Format a message with optional source agent prefix.
 pub fn format_injected_message(msg: &str, source_agent: Option<&str>, include_source: bool) -> String {
     if include_source {
