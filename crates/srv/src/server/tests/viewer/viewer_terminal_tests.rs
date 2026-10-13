@@ -207,6 +207,17 @@ async fn a_reconnect_gets_what_it_missed_and_a_stale_one_a_snapshot() {
     let (event, snap) = next_event(&mut stream).await.unwrap();
     assert_eq!(event, "snapshot", "past the end: the terminal was cleared");
     assert_eq!(bytes_of(&snap), b"abcdef");
+    drop(stream);
+
+    // More than a snapshot's worth missed: a snapshot, never one huge append.
+    let line = format!("{}\n", "y".repeat(1023));
+    for _ in 0..300 {
+        write(&state, &term, line.as_bytes());
+    }
+    let mut stream = Box::pin(open(&state, &term, Some(2)));
+    let (event, snap) = next_event(&mut stream).await.unwrap();
+    assert_eq!(event, "snapshot");
+    assert!(bytes_of(&snap).len() as u64 <= crate::backend::viewer::terminal::SNAPSHOT_TAIL_BYTES);
 }
 
 #[tokio::test]

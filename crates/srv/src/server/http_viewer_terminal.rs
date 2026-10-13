@@ -20,7 +20,8 @@
 //! `reset { reason }` before a fresh snapshot, or before the stream ends
 //! (`behind`, `hidden`, `not_shared`); `: hb` every 15 s. Ids are the byte
 //! offset after the event; a reconnect whose `Last-Event-ID` is still within
-//! 1 MB of the end gets the bytes it missed as one `append`.
+//! 256 KB of the end (a snapshot's worth) gets the bytes it missed as one
+//! `append`.
 
 use std::convert::Infallible;
 use std::time::Duration;
@@ -202,7 +203,9 @@ impl TermSource {
                 Err(_) => return None,
             };
             let start = from.unwrap_or_else(|| size.saturating_sub(terminal::SNAPSHOT_TAIL_BYTES));
-            if start >= size {
+            // Nothing to read, or more than one event may carry (a resume far
+            // behind on a terminal whose file has no cap): not read at all.
+            if start >= size || size - start > terminal::SNAPSHOT_TAIL_BYTES {
                 return Some((start, size, Vec::new()));
             }
             let (at, data) = fs.read_at(&block, TERM_FILE, start as i64, (size - start) as i64).ok()?;
@@ -222,11 +225,12 @@ impl TermSource {
     }
 
     /// The bytes from `from` on, for a reconnect: `None` when `from` is past
-    /// the end (the file was truncated) or more than a stream may fall behind
-    /// by was written since (a snapshot then).
+    /// the end (the file was truncated) or more than a snapshot holds was
+    /// written since (a snapshot then). One event never carries more than a
+    /// snapshot would: a device's event-stream parser bounds a line's length.
     async fn resume(&self, from: u64) -> Option<(u64, Vec<u8>)> {
         let (at, size, data) = self.read_from(Some(from)).await?;
-        if from > size || at != from || size - from > feed::MAX_BEHIND_BYTES as u64 {
+        if from > size || at != from || size - from > terminal::SNAPSHOT_TAIL_BYTES {
             return None;
         }
         Some((at, data))
