@@ -505,3 +505,7 @@ mod s1_tests;
 #[cfg(test)]
 #[path = "tests/self_owner_tests.rs"]
 mod self_owner_tests;
+
+#[cfg(test)]
+#[path = "tests/agent_io_open_wire_tests.rs"]
+mod agent_io_open_wire_tests;

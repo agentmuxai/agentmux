@@ -133,6 +133,44 @@
     }
   },
   {
+    "command": "agent.list",
+    "request": "serde_json::value::Value",
+    "requestName": "Value",
+    "requestTs": {
+      "imports": [
+        "JsonValue"
+      ],
+      "name": "JsonValue"
+    },
+    "response": "agentmux_srv::backend::rpc_types::agent::AgentListResult",
+    "responseName": "AgentListResult",
+    "responseTs": {
+      "imports": [
+        "AgentListResult"
+      ],
+      "name": "AgentListResult"
+    }
+  },
+  {
+    "command": "agent.open",
+    "request": "agentmux_srv::backend::rpc_types::agent::CommandAgentOpenData",
+    "requestName": "CommandAgentOpenData",
+    "requestTs": {
+      "imports": [
+        "CommandAgentOpenData"
+      ],
+      "name": "CommandAgentOpenData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::agent::AgentOpenResult",
+    "responseName": "AgentOpenResult",
+    "responseTs": {
+      "imports": [
+        "AgentOpenResult"
+      ],
+      "name": "AgentOpenResult"
+    }
+  },
+  {
     "command": "agent.open-panes",
     "request": "serde_json::value::Value",
     "requestName": "Value",
@@ -152,6 +190,25 @@
     }
   },
   {
+    "command": "agent.output",
+    "request": "agentmux_srv::backend::rpc_types::agent::CommandAgentOutputData",
+    "requestName": "CommandAgentOutputData",
+    "requestTs": {
+      "imports": [
+        "CommandAgentOutputData"
+      ],
+      "name": "CommandAgentOutputData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::agent::AgentOutputResult",
+    "responseName": "AgentOutputResult",
+    "responseTs": {
+      "imports": [
+        "AgentOutputResult"
+      ],
+      "name": "AgentOutputResult"
+    }
+  },
+  {
     "command": "agent.process-list",
     "request": "agentmux_srv::backend::rpc_types::agent::AgentProcessListCommand",
     "requestName": "AgentProcessListCommand",
@@ -168,6 +225,63 @@
         "AgentProcessListResult"
       ],
       "name": "AgentProcessListResult"
+    }
+  },
+  {
+    "command": "agent.send",
+    "request": "agentmux_srv::backend::rpc_types::agent::CommandAgentSendData",
+    "requestName": "CommandAgentSendData",
+    "requestTs": {
+      "imports": [
+        "CommandAgentSendData"
+      ],
+      "name": "CommandAgentSendData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::agent::AgentSendResult",
+    "responseName": "AgentSendResult",
+    "responseTs": {
+      "imports": [
+        "AgentSendResult"
+      ],
+      "name": "AgentSendResult"
+    }
+  },
+  {
+    "command": "agent.status",
+    "request": "agentmux_srv::backend::rpc_types::agent::CommandAgentStatusData",
+    "requestName": "CommandAgentStatusData",
+    "requestTs": {
+      "imports": [
+        "CommandAgentStatusData"
+      ],
+      "name": "CommandAgentStatusData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::agent::AgentStatusResult",
+    "responseName": "AgentStatusResult",
+    "responseTs": {
+      "imports": [
+        "AgentStatusResult"
+      ],
+      "name": "AgentStatusResult"
+    }
+  },
+  {
+    "command": "agent.stop",
+    "request": "agentmux_srv::backend::rpc_types::agent::CommandAgentStopApiData",
+    "requestName": "CommandAgentStopApiData",
+    "requestTs": {
+      "imports": [
+        "CommandAgentStopApiData"
+      ],
+      "name": "CommandAgentStopApiData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::agent::AgentStopResult",
+    "responseName": "AgentStopResult",
+    "responseTs": {
+      "imports": [
+        "AgentStopResult"
+      ],
+      "name": "AgentStopResult"
     }
   },
   {

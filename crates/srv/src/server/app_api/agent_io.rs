@@ -273,21 +273,16 @@ fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // auth key, as `agentinput` does.
     let auth_key = state.auth_key.clone();
 
-    engine.register_handler(
-        COMMAND_AGENT_SEND,
-        Box::new(move |data, _ctx| {
-            let mstore = mstore.clone();
-            let id_store = id_store.clone();
-            let identity_store = identity_store.clone();
-            let broker = broker.clone();
-            let container_manager = container_manager.clone();
-            let filestore = filestore.clone();
-            let event_bus = event_bus.clone();
-            let auth_key = auth_key.clone();
-            Box::pin(async move {
-                let cmd: CommandAgentSendData = serde_json::from_value(data)
-                    .map_err(|e| format!("agent.send: {e}"))?;
-
+    engine.register_typed(COMMAND_AGENT_SEND, move |cmd: CommandAgentSendData, _ctx| {
+        let mstore = mstore.clone();
+        let id_store = id_store.clone();
+        let identity_store = identity_store.clone();
+        let broker = broker.clone();
+        let container_manager = container_manager.clone();
+        let filestore = filestore.clone();
+        let event_bus = event_bus.clone();
+        let auth_key = auth_key.clone();
+        async move {
                 tracing::info!(block_id = %cmd.block_id, "agent.send");
 
                 let ctrl = blockcontroller::get_controller(&cmd.block_id)
@@ -594,14 +589,13 @@ fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     return Err("NOT_RUNNING: controller type not supported".to_string());
                 }
 
-                Ok(Some(serde_json::to_value(&AgentSendResult {
+                Ok(AgentSendResult {
                     block_id: cmd.block_id,
                     status: "running".to_string(),
                     session_id,
-                }).unwrap()))
-            })
-        }),
-    );
+                })
+        }
+    });
 }
 
 /// Core `agent.stop` logic, factored out so `fleet.bulk-stop`
@@ -630,31 +624,20 @@ pub(crate) async fn stop_one_agent_block(
 
 fn register_agent_stop(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let state = state.clone();
-    engine.register_handler(
-        COMMAND_AGENT_STOP_API,
-        Box::new(move |data, _ctx| {
-            let state = state.clone();
-            Box::pin(async move {
-                let cmd: CommandAgentStopApiData = serde_json::from_value(data)
-                    .map_err(|e| format!("agent.stop: {e}"))?;
-                let result = stop_one_agent_block(&state, &cmd.block_id, cmd.signal.as_deref(), cmd.stop_background).await?;
-                Ok(Some(serde_json::to_value(&result).unwrap()))
-            })
-        }),
-    );
+    engine.register_typed(COMMAND_AGENT_STOP_API, move |cmd: CommandAgentStopApiData, _ctx| {
+        let state = state.clone();
+        async move {
+                stop_one_agent_block(&state, &cmd.block_id, cmd.signal.as_deref(), cmd.stop_background).await
+        }
+    });
 }
 
 fn register_agent_status(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let mstore = state.mstore.clone();
 
-    engine.register_handler(
-        COMMAND_AGENT_STATUS,
-        Box::new(move |data, _ctx| {
-            let mstore = mstore.clone();
-            Box::pin(async move {
-                let cmd: CommandAgentStatusData = serde_json::from_value(data)
-                    .map_err(|e| format!("agent.status: {e}"))?;
-
+    engine.register_typed(COMMAND_AGENT_STATUS, move |cmd: CommandAgentStatusData, _ctx| {
+        let mstore = mstore.clone();
+        async move {
                 let block: Block = mstore
                     .get(&cmd.block_id)
                     .map_err(|e| format!("agent.status: {e}"))?
@@ -677,7 +660,7 @@ fn register_agent_status(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     .and_then(|v| v.as_str())
                     .map(|s| s.to_string());
 
-                Ok(Some(serde_json::to_value(&AgentStatusResult {
+                Ok(AgentStatusResult {
                     block_id: cmd.block_id,
                     agent_id,
                     provider,
@@ -686,20 +669,18 @@ fn register_agent_status(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     session_id,
                     pid,
                     exit_code,
-                }).unwrap()))
-            })
-        }),
-    );
+                })
+        }
+    });
 }
 
 fn register_agent_list(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let mstore = state.mstore.clone();
 
-    engine.register_handler(
-        COMMAND_AGENT_LIST,
-        Box::new(move |_data, _ctx| {
-            let mstore = mstore.clone();
-            Box::pin(async move {
+    // No argument: `Value` takes whatever the caller sends.
+    engine.register_typed(COMMAND_AGENT_LIST, move |_data: serde_json::Value, _ctx| {
+        let mstore = mstore.clone();
+        async move {
                 let tabs: Vec<Tab> = mstore.get_all::<Tab>()
                     .map_err(|e| format!("agent.list: {e}"))?;
 
@@ -731,23 +712,17 @@ fn register_agent_list(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     }
                 }
 
-                Ok(Some(serde_json::to_value(&AgentListResult { agents }).unwrap()))
-            })
-        }),
-    );
+                Ok(AgentListResult { agents })
+        }
+    });
 }
 
 fn register_agent_output(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let broker = state.broker.clone();
 
-    engine.register_handler(
-        COMMAND_AGENT_OUTPUT,
-        Box::new(move |data, _ctx| {
-            let broker = broker.clone();
-            Box::pin(async move {
-                let cmd: CommandAgentOutputData = serde_json::from_value(data)
-                    .map_err(|e| format!("agent.output: {e}"))?;
-
+    engine.register_typed(COMMAND_AGENT_OUTPUT, move |cmd: CommandAgentOutputData, _ctx| {
+        let broker = broker.clone();
+        async move {
                 let scope = format!("block:{}", cmd.block_id);
                 let max = cmd.max_lines.unwrap_or(1000);
                 let after = cmd.after_line.unwrap_or(0);
@@ -785,15 +760,14 @@ fn register_agent_output(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     .collect();
                 let has_more = after + lines.len() < total;
 
-                Ok(Some(serde_json::to_value(&AgentOutputResult {
+                Ok(AgentOutputResult {
                     block_id: cmd.block_id,
                     lines,
                     total_lines: total,
                     has_more,
-                }).unwrap()))
-            })
-        }),
-    );
+                })
+        }
+    });
 }
 
 #[cfg(test)]
