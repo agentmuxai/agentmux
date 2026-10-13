@@ -138,6 +138,17 @@ mod tests {
         assert!(back.agent_status.is_empty());
     }
 
+    /// The same JSON goes to the frontend, `/api/lan-instances` and
+    /// `/agentmux/discovery` (which container agents may call); a peer's
+    /// `lan_key` is in none of them.
+    #[test]
+    fn lan_instance_json_never_carries_the_peer_key() {
+        let json = serde_json::to_value(instance()).unwrap();
+        assert!(json.get("auth_key").is_none(), "{json}");
+        let back: LanInstance = serde_json::from_value(json).unwrap();
+        assert!(back.auth_key.is_empty());
+    }
+
     #[test]
     fn a_poll_that_answers_replaces_names_and_states() {
         let mut inst = instance();
