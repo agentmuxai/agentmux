@@ -10,9 +10,19 @@ import type { AgentFailure } from "@/types/rpc/AgentFailure";
 import type { AgentRuntimeEvent } from "@/types/rpc/AgentRuntimeEvent";
 import type { AgentTurnEvent } from "@/types/rpc/AgentTurnEvent";
 import type { BlockControllerRuntimeStatus } from "@/types/rpc/BlockControllerRuntimeStatus";
+import type { DispatchActivityEvent } from "@/types/rpc/DispatchActivityEvent";
+import type { DispatchUpdatedEvent } from "@/types/rpc/DispatchUpdatedEvent";
 import type { MessageAcceptedEvent } from "@/types/rpc/MessageAcceptedEvent";
 import type { ResumeRetryEvent } from "@/types/rpc/ResumeRetryEvent";
 import type { ShutdownLineEvent } from "@/types/rpc/ShutdownLineEvent";
+import type { SubagentAbandonedEvent } from "@/types/rpc/SubagentAbandonedEvent";
+import type { SubagentActivityEvent } from "@/types/rpc/SubagentActivityEvent";
+import type { SubagentBackfillStatusEvent } from "@/types/rpc/SubagentBackfillStatusEvent";
+import type { SubagentBlockPrunedEvent } from "@/types/rpc/SubagentBlockPrunedEvent";
+import type { SubagentCompletedEvent } from "@/types/rpc/SubagentCompletedEvent";
+import type { SubagentNamedEvent } from "@/types/rpc/SubagentNamedEvent";
+import type { SubagentSpawnedEvent } from "@/types/rpc/SubagentSpawnedEvent";
+import type { SubagentUpdatedEvent } from "@/types/rpc/SubagentUpdatedEvent";
 import type { TimeSeriesData } from "@/types/rpc/TimeSeriesData";
 import type { UserAttentionEvent } from "@/types/rpc/UserAttentionEvent";
 
@@ -26,6 +36,16 @@ export type MuxEventPayloads = {
   agentruntime: AgentRuntimeEvent;
   agentturn: AgentTurnEvent;
   controllerstatus: BlockControllerRuntimeStatus;
+  "dispatch:activity": DispatchActivityEvent;
+  "dispatch:updated": DispatchUpdatedEvent;
+  "subagent:abandoned": SubagentAbandonedEvent;
+  "subagent:activity": SubagentActivityEvent;
+  "subagent:backfill_status": SubagentBackfillStatusEvent;
+  "subagent:block_pruned": SubagentBlockPrunedEvent;
+  "subagent:completed": SubagentCompletedEvent;
+  "subagent:named": SubagentNamedEvent;
+  "subagent:spawned": SubagentSpawnedEvent;
+  "subagent:updated": SubagentUpdatedEvent;
   sysinfo: TimeSeriesData;
   userattention: UserAttentionEvent;
 };
@@ -40,6 +60,16 @@ export const TYPED_MUX_EVENTS = [
   "agentruntime",
   "agentturn",
   "controllerstatus",
+  "dispatch:activity",
+  "dispatch:updated",
+  "subagent:abandoned",
+  "subagent:activity",
+  "subagent:backfill_status",
+  "subagent:block_pruned",
+  "subagent:completed",
+  "subagent:named",
+  "subagent:spawned",
+  "subagent:updated",
   "sysinfo",
   "userattention",
 ] as const;

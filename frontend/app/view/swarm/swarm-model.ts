@@ -870,16 +870,12 @@ export function createDispatchDetail(dispatchId: string, backfillAgentId?: strin
         setEntries((prev) => mergeDispatchActivityEntries(prev, incoming));
     };
 
-    const unsub = muxEventSubscribe({
-        eventType: WpsEvent.DispatchActivity,
-        handler: (event: MuxEvent) => {
-            const data = event?.data as any;
-            if (data?.dispatchId !== dispatchId) return;
-            const members = (data?.members as { agentId: string; events: SubagentEvent[] }[]) ?? [];
+    const unsub = onMuxEvent(WpsEvent.DispatchActivity, (data) => {
+            if (data.dispatchId !== dispatchId) return;
+            const members = data.members;
             const relevant = backfillAgentId ? members.filter((m) => m.agentId === backfillAgentId) : members;
             mergeIncoming(relevant.flatMap((m) => (m.events ?? []).map((evt) => ({ agentId: m.agentId, event: evt }))));
-        },
-    });
+        });
 
     const soloAgentId = backfillAgentId ?? (dispatchId.startsWith("solo:") ? dispatchId.slice("solo:".length) : undefined);
     if (soloAgentId) {
@@ -1194,25 +1190,16 @@ export class SwarmViewModel {
         // handlers below — no response to await here.
         void callBackendService("subagent", "ResolveUnnamedBacklog", []);
 
-        const unsubSpawned = muxEventSubscribe({
-            eventType: WpsEvent.SubagentSpawned,
-            handler: () => this.scheduleLoadSubagents(),
-        });
+        const unsubSpawned = onMuxEvent(WpsEvent.SubagentSpawned, () => this.scheduleLoadSubagents());
         if (unsubSpawned) this.unsubs.push(unsubSpawned);
 
-        const unsubCompleted = muxEventSubscribe({
-            eventType: WpsEvent.SubagentCompleted,
-            handler: () => this.scheduleLoadSubagents(),
-        });
+        const unsubCompleted = onMuxEvent(WpsEvent.SubagentCompleted, () => this.scheduleLoadSubagents());
         if (unsubCompleted) this.unsubs.push(unsubCompleted);
 
         // A known subagent's `tool_use_id` arrived after its spawn (the CLI
         // writes the sidecar separately) — reload so its background tasks
         // move from the agent-level bucket to under its row.
-        const unsubUpdated = muxEventSubscribe({
-            eventType: WpsEvent.SubagentUpdated,
-            handler: () => this.scheduleLoadSubagents(),
-        });
+        const unsubUpdated = onMuxEvent(WpsEvent.SubagentUpdated, () => this.scheduleLoadSubagents());
         if (unsubUpdated) this.unsubs.push(unsubUpdated);
 
         // One or more subagents just reconciled active -> abandoned, either
@@ -1225,30 +1212,21 @@ export class SwarmViewModel {
         // listener is simply inert until #2234 lands (subagent:abandoned
         // is never emitted yet), not broken; #2234's own PR description
         // covers the same sequencing from the backend side.
-        const unsubAbandoned = muxEventSubscribe({
-            eventType: WpsEvent.SubagentAbandoned,
-            handler: () => this.scheduleLoadSubagents(),
-        });
+        const unsubAbandoned = onMuxEvent(WpsEvent.SubagentAbandoned, () => this.scheduleLoadSubagents());
         if (unsubAbandoned) this.unsubs.push(unsubAbandoned);
 
         // dispatch:updated fires for both Solo and Workflow kinds (SPEC §5) —
         // a member count/status change on either warrants the same reload
         // used for subagent spawn/completion (they're closely correlated:
         // a workflow member spawning/completing IS a dispatch update).
-        const unsubDispatchUpdated = muxEventSubscribe({
-            eventType: WpsEvent.DispatchUpdated,
-            handler: () => this.scheduleLoadSubagents(),
-        });
+        const unsubDispatchUpdated = onMuxEvent(WpsEvent.DispatchUpdated, () => this.scheduleLoadSubagents());
         if (unsubDispatchUpdated) this.unsubs.push(unsubDispatchUpdated);
 
         // A closed block's subagents/dispatches were just pruned server-side
         // (SubagentWatcher::prune_block, backstopped against BlockDeleted/
         // TabDeleted/WorkspaceDeleted) — reload so the ghost row this used
         // to leave behind (visible until srv restart) disappears promptly.
-        const unsubBlockPruned = muxEventSubscribe({
-            eventType: WpsEvent.SubagentBlockPruned,
-            handler: () => this.scheduleLoadSubagents(),
-        });
+        const unsubBlockPruned = onMuxEvent(WpsEvent.SubagentBlockPruned, () => this.scheduleLoadSubagents());
         if (unsubBlockPruned) this.unsubs.push(unsubBlockPruned);
 
         // Shell bucket (SPEC_SWARM_LONG_RUNNING_PROCESS_ROWS_2026_07_20 Phase 1).

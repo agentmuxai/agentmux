@@ -17,7 +17,13 @@ const rpc = vi.hoisted(() => ({
     other: vi.fn(),
 }));
 
-vi.mock("@/app/store/mps", () => ({ muxEventSubscribe: vi.fn(() => () => {}) }));
+vi.mock("@/app/store/mps", () => {
+    const mock = { muxEventSubscribe: vi.fn((_sub: unknown) => () => {}) };
+    // As the real onMuxEvent: a typed subscription is a muxEventSubscribe whose handler gets the data.
+    const onMuxEvent = (eventType: string, handler: (data: unknown, event: unknown) => void, scope?: string) =>
+        mock.muxEventSubscribe({ eventType, scope, handler: (e: any) => { if (e?.data != null) handler(e.data, e); } } as any);
+    return { ...mock, onMuxEvent };
+});
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 vi.mock("@/app/store/rpc-api", () => ({
     RpcApi: new Proxy(
