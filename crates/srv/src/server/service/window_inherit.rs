@@ -10,9 +10,16 @@
 //! The new window's renderer creates its Window row (`CreateWindow`) at about
 //! the same moment, so the two calls race. Each side first publishes what it
 //! has, then checks for the other: this handler records a pending entry and
-//! then looks for the row; `CreateWindow` writes the row's `host:label` crumb
-//! and then takes any pending entry. Whichever side takes the entry applies
-//! it, so it is applied exactly once whatever the order.
+//! then looks for the row; `CreateWindow` records its row and then takes any
+//! pending entry. Whichever side takes the entry applies it, so it is applied
+//! exactly once whatever the order.
+//!
+//! Host labels are reused (a closed pool window is demoted and promoted
+//! again), and the old row's `host:label` crumb can outlive the reuse: its
+//! close runs on another thread. So this handler doesn't look rows up by
+//! crumb. It only takes a row `CreateWindow` made for the label within
+//! `JUST_CREATED` (a new window creates its row within moments of the
+//! request that opened it); otherwise the entry waits for `CreateWindow`.
 
 use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex};
@@ -33,9 +40,34 @@ pub(crate) const INHERITED_KEYS: &[&str] = &["window:theme", "window:opacity"];
 /// window that happens to get the same label.
 const PENDING_TTL: Duration = Duration::from_secs(30);
 
+/// How recently `CreateWindow` must have made a label's row for a request
+/// to apply to it at once.
+const JUST_CREATED: Duration = Duration::from_secs(5);
+
 /// host label → (source window id, when recorded).
 static PENDING: LazyLock<Mutex<HashMap<String, (String, Instant)>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// host label → (the window id `CreateWindow` last made for it, when).
+static CREATED: LazyLock<Mutex<HashMap<String, (String, Instant)>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// Called by `CreateWindow` once the row exists, before it takes a pending
+/// entry.
+pub(crate) fn record_created(label: &str, window_id: &str) {
+    let mut created = CREATED.lock().unwrap_or_else(|e| e.into_inner());
+    created.retain(|_, (_, at)| at.elapsed() < PENDING_TTL);
+    created.insert(label.to_string(), (window_id.to_string(), Instant::now()));
+}
+
+/// The row `CreateWindow` made for `label` within `JUST_CREATED`, if any.
+fn just_created(label: &str) -> Option<String> {
+    let created = CREATED.lock().unwrap_or_else(|e| e.into_inner());
+    created
+        .get(label)
+        .filter(|(_, at)| at.elapsed() < JUST_CREATED)
+        .map(|(id, _)| id.clone())
+}
 
 fn record_pending(label: &str, source_window_id: &str) {
     let mut pending = PENDING.lock().unwrap_or_else(|e| e.into_inner());
@@ -102,25 +134,6 @@ pub(crate) async fn apply_inheritance(
     evs
 }
 
-/// The live window (in `Client.windowids`) whose `host:label` crumb is `label`.
-fn live_window_with_label(state: &AppState, label: &str) -> Option<String> {
-    let store = &state.mstore;
-    let live: Vec<String> = store
-        .get_all::<Client>()
-        .ok()
-        .and_then(|cs| cs.into_iter().next())
-        .map(|c| c.windowids)
-        .unwrap_or_default();
-    store
-        .get_all::<Window>()
-        .ok()?
-        .into_iter()
-        .find(|w| {
-            live.contains(&w.oid) && w.meta.get("host:label").and_then(|v| v.as_str()) == Some(label)
-        })
-        .map(|w| w.oid)
-}
-
 /// Args: `sourceWindowId`, `hostLabel` (the new window's host label).
 pub(crate) async fn handle_inherit_window_appearance(state: &AppState, call: &WebCallType) -> WebReturnType {
     let args = &call.args;
@@ -138,7 +151,7 @@ pub(crate) async fn handle_inherit_window_appearance(state: &AppState, call: &We
     record_pending(&label, &source_window_id);
     // The row may already exist (its renderer won the race). If so, and
     // CreateWindow hasn't already taken the entry, apply it here.
-    if let Some(target) = live_window_with_label(state, &label) {
+    if let Some(target) = just_created(&label) {
         if target != source_window_id {
             if let Some(source) = take_pending(&label) {
                 let evs = apply_inheritance(state, &source, &target).await;
@@ -249,6 +262,25 @@ mod tests {
         let second = create(&state, "inherit-new-d").await;
         assert_eq!(meta(&state, &first, "window:theme"), Some("dracula".into()));
         assert_eq!(meta(&state, &second, "window:theme"), None);
+    }
+
+    /// A reused label whose old row is still around, but wasn't just created,
+    /// doesn't take the entry: it waits for the new window's CreateWindow.
+    #[tokio::test]
+    async fn a_stale_row_with_a_reused_label_does_not_take_it() {
+        let state = test_state();
+        let source = create(&state, "inherit-src-f").await;
+        set_meta(&state, &source, serde_json::json!({ "window:theme": "nord" })).await;
+        let stale = create(&state, "inherit-new-f").await;
+        super::CREATED.lock().unwrap().insert(
+            "inherit-new-f".to_string(),
+            (stale.clone(), std::time::Instant::now() - super::JUST_CREATED),
+        );
+
+        inherit(&state, &source, "inherit-new-f").await;
+        assert_eq!(meta(&state, &stale, "window:theme"), None);
+        let new = create(&state, "inherit-new-f").await;
+        assert_eq!(meta(&state, &new, "window:theme"), Some("nord".into()));
     }
 
     /// A source with no appearance of its own copies nothing.

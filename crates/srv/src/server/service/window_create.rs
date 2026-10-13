@@ -398,8 +398,11 @@ pub(crate) async fn handle_create_window(state: &AppState, call: &WebCallType) -
     // SPEC_PER_WINDOW_THEME_AND_OPACITY_2026_10_12 §6 — the window that
     // opened this one may already have asked for its appearance to be
     // copied here (`InheritWindowAppearance`, keyed by host label). Taken
-    // only after the crumb is written, so a request arriving in between
+    // only after the row is recorded, so a request arriving in between
     // finds the row instead (see window_inherit.rs).
+    if !host_label.is_empty() {
+        super::window_inherit::record_created(&host_label, &window_id);
+    }
     let inherit_events = match (!host_label.is_empty())
         .then(|| super::window_inherit::take_pending(&host_label))
         .flatten()

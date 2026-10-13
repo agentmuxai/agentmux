@@ -158,8 +158,8 @@ Threading the creator through the host would touch every pool and cold-path wind
 ### 6.2 srv copies, whichever call arrives first
 
 The new window's renderer calls `CreateWindow` at about the same moment, and already writes its host label on the new row as the `host:label` meta crumb. So the two calls race, and srv handles both orders (`server/service/window_inherit.rs`):
-- `InheritWindowAppearance` records a pending entry for the label, then looks for a live window row with that label. If it finds one, it takes the entry and copies.
-- `CreateWindow` writes the crumb, then takes any pending entry for its label and copies before it returns, so the renderer renders with the inherited values.
+- `InheritWindowAppearance` records a pending entry for the label, then looks for the row `CreateWindow` made for that label in the last 5 seconds. If there is one, it takes the entry and copies. It doesn't match rows by their `host:label` crumb: labels are reused, and a closed pool window's old row can still carry the label while its close runs on another thread.
+- `CreateWindow` records its row for the label, then takes any pending entry for it and copies before it returns, so the renderer renders with the inherited values.
 
 Taking an entry is atomic and each side publishes before it checks, so the copy happens exactly once in either order. An entry expires after 30 seconds, because host labels are reused when a pool window is demoted and promoted again.
 
