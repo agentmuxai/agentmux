@@ -749,6 +749,7 @@ partial list.
 | [`SPEC_MACOS_LAUNCH_SPEED_AND_SPLASH_TELEMETRY_2026_07_02`](SPEC_MACOS_LAUNCH_SPEED_AND_SPLASH_TELEMETRY_2026_07_02.md) | SPEC: macOS Launch Speed + Splash Load-Time Telemetry |
 | [`SPEC_MACOS_PACKAGING_2026_05_30`](SPEC_MACOS_PACKAGING_2026_05_30.md) | Spec: macOS packaging — signed, launchable `AgentMux.app` / `.dmg` |
 | [`SPEC_MACOS_TEAROFF_STABILITY_2026_05_29`](SPEC_MACOS_TEAROFF_STABILITY_2026_05_29.md) | macOS Tear-off Stability — implementation spec |
+| [`SPEC_MEDIA_PANE_EMPTY_LOGO_2026_10_12`](SPEC_MEDIA_PANE_EMPTY_LOGO_2026_10_12.md) | Media pane: a faint AgentMux logo when no file is open |
 | [`SPEC_MEDIA_PANE_V2_AGENT_WORKFLOW_GAPS_2026_07_28`](SPEC_MEDIA_PANE_V2_AGENT_WORKFLOW_GAPS_2026_07_28.md) | Spec: Media pane v2 — gaps found running a real agent video-editing workflow through it |
 | [`SPEC_MEDIA_PANE_V3_BROWSER_AND_CUSTOM_TRANSPORT_2026_07_29`](SPEC_MEDIA_PANE_V3_BROWSER_AND_CUSTOM_TRANSPORT_2026_07_29.md) | Spec: Media pane v3 — persistent browser + custom playback/scrub UI |
 | [`SPEC_MEMORY_COMMIT_ATTRIBUTION_CORRECTION_2026_07_02`](SPEC_MEMORY_COMMIT_ATTRIBUTION_CORRECTION_2026_07_02.md) | SPEC — Commit-attribution correction + genuine AgentMux memory-hygiene fixes |
