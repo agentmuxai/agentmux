@@ -46,7 +46,6 @@ function fakeRpc(overrides: Partial<AuthRpc> = {}): AuthRpc {
         poll: async () => ({ status: "pending" }) as AuthSessionStatusWire,
         submitCallback: async () => {},
         cancel: async () => {},
-        submitApiKey: async () => ({ bundleId: "new-bundle" }),
         ...overrides,
     };
 }
@@ -292,37 +291,6 @@ describe("AuthFlowController", () => {
         });
     });
 
-    it("submitApiKey() is dropped from non-entry states", async () => {
-        // Codex P2 on #850 round 6: controller must mirror the
-        // reducer's ApiKeySubmitted gate so double-clicks and stale
-        // invocations don't double-submit.
-        await createRoot(async (dispose) => {
-            const timers = fakeTimers();
-            let submitCalls = 0;
-            const ctrl = new AuthFlowController({
-                rpc: fakeRpc({
-                    start: async () => ({ sessionId: "s1", authUrl: "https://x" }),
-                    submitApiKey: async () => {
-                        submitCalls += 1;
-                        return { bundleId: "b1" };
-                    },
-                }),
-                timers,
-            });
-            ctrl.selected("claude", "", "needs-account");
-            await ctrl.connect({
-                cliPath: "/x",
-                authLoginArgs: [],
-                authCheckArgs: [],
-            });
-            // Kind is now "waiting" — submitApiKey should be a no-op.
-            await ctrl.submitApiKey("sk-x", "acc");
-            expect(submitCalls).toBe(0);
-            expect(ctrl.state().kind).toBe("waiting");
-            dispose();
-        });
-    });
-
     it("cancel() during startup window drops in-flight auth.start", async () => {
         // Reagent P1 on #850: when the user clicks Cancel after
         // ConnectClicked dispatched but before SessionStarted (auth.start
@@ -392,46 +360,6 @@ describe("AuthFlowController", () => {
                 sessionId: "s1",
                 url: "https://cb?code=abc",
             });
-            dispose();
-        });
-    });
-
-    it("submitApiKey() transitions to ready with the persisted bundleId (single-phase)", async () => {
-        // API-key flow stays single-phase until backend C-2's
-        // auth.savebundle lands. Backend persists the bundle inside
-        // auth.submitapikey itself; controller dispatches the real
-        // bundleId straight through to `ready`.
-        await createRoot(async (dispose) => {
-            const timers = fakeTimers();
-            const ctrl = new AuthFlowController({
-                rpc: fakeRpc({
-                    submitApiKey: async () => ({ bundleId: "persisted-bundle" }),
-                }),
-                timers,
-            });
-            ctrl.selected("openclaw", "", "needs-account");
-            await ctrl.submitApiKey("sk-test", "my-key-account");
-            expect(ctrl.state().kind).toBe("ready");
-            expect(ctrl.state().bundleId).toBe("persisted-bundle");
-            dispose();
-        });
-    });
-
-    it("submitApiKey() transitions to failed on rejection", async () => {
-        await createRoot(async (dispose) => {
-            const timers = fakeTimers();
-            const ctrl = new AuthFlowController({
-                rpc: fakeRpc({
-                    submitApiKey: async () => {
-                        throw new Error("invalid key");
-                    },
-                }),
-                timers,
-            });
-            ctrl.selected("openclaw", "", "needs-account");
-            await ctrl.submitApiKey("sk-bad", "default");
-            expect(ctrl.state().kind).toBe("failed");
-            expect(ctrl.state().error).toBe("invalid key");
             dispose();
         });
     });

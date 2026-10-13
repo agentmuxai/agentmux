@@ -30,7 +30,7 @@ vi.mock("@/app/store/global", () => ({
     MOS: {
         makeORef: (_t: string, id: string) => id,
         getObjectValue: (id: string) => tabs[id],
-        reloadMuxObject: async (id: string) => tabs[id],
+        reloadMuxObject: async (id: string) => tabs[id] ?? otherWorkspaces.find((w) => w.workspacedata.oid === id)?.workspacedata,
     },
     setActiveTab: async (tabId: string) => calls.push(`setActiveTab:${tabId}`),
     getApi: () => ({
@@ -49,12 +49,15 @@ vi.mock("@/app/store/rpc-api", () => ({
             calls.push(`block.reveal:${d.block_id}`);
             return blockReveal(d);
         },
-        WorkspaceListCommand: async () => otherWorkspaces,
     },
 }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 vi.mock("@/app/store/services", () => ({
-    WorkspaceService: { SetActiveTab: async (ws: string, tab: string) => calls.push(`SetActiveTab:${ws}:${tab}`) },
+    WorkspaceService: {
+        SetActiveTab: async (ws: string, tab: string) => calls.push(`SetActiveTab:${ws}:${tab}`),
+        // Only ids and windows; the workspace objects come from MOS (reloadMuxObject above).
+        ListWorkspaces: async () => otherWorkspaces.map((w) => ({ workspaceid: w.workspacedata.oid, windowid: w.windowid })),
+    },
 }));
 
 import { revealBlock, revealBlockLocally, showBlockInPane, showBlockWithoutFocus } from "./reveal-block";

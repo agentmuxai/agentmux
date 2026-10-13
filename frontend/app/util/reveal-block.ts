@@ -165,17 +165,18 @@ async function activateTabInOtherWorkspace(blockId: string): Promise<void> {
     // We need Tab.blockids to find which tab holds the block: layout models for
     // other windows' tabs aren't available in this renderer.
     const ws = workspace();
-    const allWorkspaces = await RpcApi.WorkspaceListCommand(TabRpcClient);
-    for (const wsInfo of allWorkspaces) {
-        if (wsInfo.workspacedata.oid === ws?.oid) continue;
-        const wsData = wsInfo.workspacedata;
+    for (const entry of await WorkspaceService.ListWorkspaces()) {
+        if (entry.workspaceid === ws?.oid) continue;
+        const wsOref = MOS.makeORef("workspace", entry.workspaceid);
+        const wsData = MOS.getObjectValue<Workspace>(wsOref) ?? (await MOS.reloadMuxObject<Workspace>(wsOref));
+        if (!wsData) continue;
         const allTabIds = [...(wsData.pinnedtabids ?? []), ...(wsData.tabids ?? [])];
         for (const tabId of allTabIds) {
             const oref = MOS.makeORef("tab", tabId);
             const tab = MOS.getObjectValue<Tab>(oref) ?? (await MOS.reloadMuxObject<Tab>(oref));
             if (!tab?.blockids?.includes(blockId)) continue;
             await WorkspaceService.SetActiveTab(wsData.oid, tabId);
-            if (wsInfo.windowid) await raiseWindowById(wsInfo.windowid);
+            if (entry.windowid) await raiseWindowById(entry.windowid);
             return;
         }
     }

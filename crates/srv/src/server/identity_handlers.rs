@@ -3,7 +3,7 @@
 
 //! Pre-launch OAuth flow RPC handlers.
 //!
-//! Five commands per `docs/specs/SPEC_PRE_LAUNCH_OAUTH_FLOW_2026_05_14.md` §7
+//! Four commands per `docs/specs/SPEC_PRE_LAUNCH_OAUTH_FLOW_2026_05_14.md` §7
 //! (request types named after that section's RPCs), plus
 //! `identity.ensureaccountdir`:
 //!
@@ -11,13 +11,15 @@
 //!   * `auth.poll`            — `PollProviderAuthReq`
 //!   * `auth.submitcallback`  — `SubmitAuthCallbackReq`
 //!   * `auth.cancel`          — `CancelProviderAuthReq`
-//!   * `auth.submitapikey`    — `SubmitProviderApiKeyReq`
+//!
+//! The spec's fifth, `auth.submitapikey`, was removed: it was never built, and
+//! API-key accounts are added through `account.key.verify` and
+//! `upsertidentityaccount` instead.
 //!
 //! This module owns the RPC surface and dispatches into
 //! `crate::identity::auth_session::AuthSessionManager`. `auth.start` also
 //! spawns the provider CLI (`spawn_auth_cli`), which feeds stdout lines
-//! into the session via `record_line`. `auth.submitapikey` is not built:
-//! it always returns an error.
+//! into the session via `record_line`.
 //!
 //! Split across four files (module-organization pass, see
 //! `docs/specs/PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20.md`):
@@ -43,7 +45,6 @@ pub const COMMAND_AUTH_START: &str = "auth.start";
 pub const COMMAND_AUTH_POLL: &str = "auth.poll";
 pub const COMMAND_AUTH_SUBMIT_CALLBACK: &str = "auth.submitcallback";
 pub const COMMAND_AUTH_CANCEL: &str = "auth.cancel";
-pub const COMMAND_AUTH_SUBMIT_API_KEY: &str = "auth.submitapikey";
 /// Mints (or reuses) a per-account isolated config dir without spawning any
 /// CLI — a standalone entry point onto `compute_and_ensure_account_dir` for
 /// callers that need the dir BEFORE a credential exists in it — today the
@@ -129,23 +130,6 @@ pub struct SubmitAuthCallbackReq {
 #[serde(rename_all = "camelCase")]
 pub struct CancelProviderAuthReq {
     pub session_id: String,
-}
-
-#[derive(Debug, Deserialize, Serialize, ts_rs::TS)]
-#[ts(export, export_to = "../../../frontend/types/rpc/")]
-#[serde(rename_all = "camelCase")]
-pub struct SubmitProviderApiKeyReq {
-    pub provider_id: String,
-    /// Optional — same semantics as StartProviderAuth.into_bundle_id.
-    #[serde(default)]
-    #[ts(optional)]
-    pub into_bundle_id: Option<String>,
-    /// The API key the user pasted. Will be validated by running the
-    /// provider's authCheckCommand against it, then persisted as a
-    /// `SecretRef::PlaintextDev` (PR 1 of the storage spec) or
-    /// encrypted variant (PR 2).
-    pub api_key: String,
-    pub account_name: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, ts_rs::TS)]
@@ -324,30 +308,6 @@ pub fn register_identity_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) 
     );
 
     engine.register_typed(
-        COMMAND_AUTH_SUBMIT_API_KEY,
-        move |_req: SubmitProviderApiKeyReq, _ctx| {
-            async move {
-                // API-key path validates by running the provider's
-                // authCheckCommand with the key in the appropriate
-                // env var, then persists via mstore. That persistence
-                // is part of PR C (bundle auto-creation) per spec
-                // §10 — the validate-and-stash logic is here but
-                // mstore writes wait. For PR A we return an explicit
-                // error so frontend (PR B) sees a clear "not yet"
-                // signal while OAuth providers work end-to-end.
-                // `()` rather than `Option<serde_json::Value>`: this handler
-                // never succeeds, so the honest Resp is "there is no success
-                // payload". The old turbofish made the schema registry record
-                // `Option<Value>` as this command's response type, which
-                // describes nothing.
-                Err::<(), String>(
-                    "auth.submitapikey: bundle persistence lands in PR C".to_string(),
-                )
-            }
-        },
-    );
-
-    engine.register_typed(
         COMMAND_ENSURE_ACCOUNT_DIR,
         move |req: EnsureAccountDirReq, _ctx| {
             let mstore = mstore_for_ensure_dir.clone();
@@ -425,20 +385,6 @@ mod tests {
         let r: SubmitAuthCallbackReq = serde_json::from_value(v).unwrap();
         assert_eq!(r.session_id, "auth-xyz");
         assert!(r.callback_url.contains("code=abc"));
-    }
-
-    #[test]
-    fn submit_api_key_req_round_trips() {
-        let v = serde_json::json!({
-            "providerId": "openclaw",
-            "apiKey": "sk-test",
-            "accountName": "my-key"
-        });
-        let r: SubmitProviderApiKeyReq = serde_json::from_value(v).unwrap();
-        assert_eq!(r.provider_id, "openclaw");
-        assert_eq!(r.api_key, "sk-test");
-        assert_eq!(r.account_name, "my-key");
-        assert!(r.into_bundle_id.is_none());
     }
 
     #[test]

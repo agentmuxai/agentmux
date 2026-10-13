@@ -805,23 +805,6 @@
     }
   },
   {
-    "command": "auth.submitapikey",
-    "request": "agentmux_srv::server::identity_handlers::SubmitProviderApiKeyReq",
-    "requestName": "SubmitProviderApiKeyReq",
-    "requestTs": {
-      "imports": [
-        "SubmitProviderApiKeyReq"
-      ],
-      "name": "SubmitProviderApiKeyReq"
-    },
-    "response": "()",
-    "responseName": "()",
-    "responseTs": {
-      "imports": [],
-      "name": "null"
-    }
-  },
-  {
     "command": "auth.submitcallback",
     "request": "agentmux_srv::server::identity_handlers::SubmitAuthCallbackReq",
     "requestName": "SubmitAuthCallbackReq",

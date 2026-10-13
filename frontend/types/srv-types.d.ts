@@ -306,11 +306,6 @@ declare global {
         oref: ORef;
     };
 
-    // wshrpc.CommandGetRTInfoData
-    type CommandGetRTInfoData = {
-        oref: ORef;
-    };
-
     // wshrpc.CommandMessageData
     type CommandMessageData = {
         oref: ORef;
@@ -340,27 +335,10 @@ declare global {
         opts?: FileCopyOpts;
     };
 
-    // wshrpc.CommandResolveIdsData
-    type CommandResolveIdsData = {
-        blockid: string;
-        ids: string[];
-    };
-
-    // wshrpc.CommandResolveIdsRtnData
-    type CommandResolveIdsRtnData = {
-        resolvedids: {[key: string]: ORef};
-    };
-
     // wshrpc.CommandSetMetaData
     type CommandSetMetaData = {
         oref: ORef;
         meta: MetaType;
-    };
-
-    // wshrpc.CommandSetRTInfoData
-    type CommandSetRTInfoData = {
-        oref: ORef;
-        data: ObjRTInfo;
     };
 
     // wshrpc.CommandTermGetScrollbackLinesData
@@ -885,18 +863,6 @@ declare global {
 
     // waveobj.ORef
     type ORef = string;
-
-    // waveobj.ObjRTInfo
-    type ObjRTInfo = {
-        "cmd:hascurcwd"?: boolean;
-        "shell:state"?: string;
-        "shell:type"?: string;
-        "shell:version"?: string;
-        "shell:uname"?: string;
-        "shell:inputempty"?: boolean;
-        "shell:lastcmd"?: string;
-        "shell:lastcmdexitcode"?: number;
-    };
 
     // iochantypes.Packet
     type Packet = {
@@ -1550,12 +1516,6 @@ declare global {
         tabids: string[];
         pinnedtabids: string[];
         activetabid: string;
-    };
-
-    // wshrpc.WorkspaceInfoData
-    type WorkspaceInfoData = {
-        windowid: string;
-        workspacedata: Workspace;
     };
 
     // waveobj.WorkspaceListEntry

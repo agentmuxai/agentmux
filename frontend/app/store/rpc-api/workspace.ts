@@ -1,10 +1,9 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// Connections, config/meta/vars, events, routes, workspace/WSL, and toolchain
-// commands. Split from the original rpc-api file.
-
-import { RpcClient } from "../rpc-client";
+// Type re-exports for the connection, event, config and toolchain commands,
+// kept so `@/app/store/rpc-api` still exports these names. Their stubs are
+// generated (generated.ts).
 
 // The toolchain wire shapes are GENERATED from their Rust definitions by
 // ts-rs. `toolchain.env` and `toolchain.versions` built their responses from
@@ -30,29 +29,9 @@ export type { NoArgsReq } from "@/types/rpc/NoArgsReq";
 export type { SubscriptionRequest } from "@/types/rpc/SubscriptionRequest";
 
 // The tool-status shapes are GENERATED from their Rust definitions by ts-rs.
-// The rest of this file is still hand-written: workspace spans four handler
-// files and is being migrated one at a time.
 export type { CommandInstallToolData } from "@/types/rpc/CommandInstallToolData";
 export type { GetToolStatusResult } from "@/types/rpc/GetToolStatusResult";
 export type { InstallFailure } from "@/types/rpc/InstallFailure";
 export type { InstallToolResult } from "@/types/rpc/InstallToolResult";
 export type { ToolStatus } from "@/types/rpc/ToolStatus";
 export type { ToolStatusEntry } from "@/types/rpc/ToolStatusEntry";
-
-export const WorkspaceApi = {
-    ResolveIdsCommand(
-        client: RpcClient,
-        data: CommandResolveIdsData,
-        opts?: RpcOpts
-    ): Promise<CommandResolveIdsRtnData> {
-        return client.rpcCall("resolveids", data, opts);
-    },
-
-    SetRTInfoCommand(client: RpcClient, data: CommandSetRTInfoData, opts?: RpcOpts): Promise<void> {
-        return client.rpcCall("setrtinfo", data, opts);
-    },
-
-    WorkspaceListCommand(client: RpcClient, opts?: RpcOpts): Promise<WorkspaceInfoData[]> {
-        return client.rpcCall("workspacelist", null, opts);
-    },
-};

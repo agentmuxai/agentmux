@@ -200,18 +200,10 @@ function deriveContract(root: string): Contract {
 // ── Committed baselines (sorted). These may only shrink. ──────────────
 
 /** FE makes live calls to these, but the backend registers no handler. */
-const KNOWN_LIVE_UNREGISTERED = [
-    "resolveids",
-    "setrtinfo",
-    "workspacelist",
-];
+const KNOWN_LIVE_UNREGISTERED: string[] = [];
 
 /** rpc-api/ declares these methods, but no backend handler exists. */
-const KNOWN_DECLARED_UNREGISTERED = [
-    "resolveids",
-    "setrtinfo",
-    "workspacelist",
-];
+const KNOWN_DECLARED_UNREGISTERED: string[] = [];
 
 /**
  * Backend registers these handlers, but rpc-api/ has no method.

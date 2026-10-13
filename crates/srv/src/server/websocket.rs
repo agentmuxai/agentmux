@@ -1767,7 +1767,7 @@ pub(super) fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, con
     super::drone_handlers::register_drone_handlers(engine, &state);
 
     // Pre-launch OAuth handlers (auth.start / poll / submitcallback /
-    // cancel / submitapikey — see docs/specs/SPEC_PRE_LAUNCH_OAUTH_FLOW_2026_05_14.md)
+    // cancel — see docs/specs/SPEC_PRE_LAUNCH_OAUTH_FLOW_2026_05_14.md)
     super::identity_handlers::register_identity_handlers(engine, &state);
 
     // Install handlers (install.start / install.cancel — see
