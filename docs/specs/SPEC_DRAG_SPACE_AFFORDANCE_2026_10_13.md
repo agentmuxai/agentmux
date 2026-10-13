@@ -117,9 +117,7 @@ A known failure mode: a panel-header drag that moves the whole window instead of
 
 ### 5.2 Pane header: a grip button in the reserved space
 
-- **Where:** a 24×24 px button at the end of the pane's tab strip, after "+", in the space `.pane-tab-strip-drag-handle` reserves. Change that space from "45 px only when overflowing, else 0" to:
-  - always at least the button's 24 px;
-  - the 45 px gutter while overflowing stays, with the button at its start.
+- **Where:** a 24×24 px button at the end of the pane's tab strip, after "+", in the space `.pane-tab-strip-drag-handle` reserves. That space was "45 px only when overflowing, else 0"; it is now exactly the button's 24 px, overflowing or not. The owner, after trying v1: "we dont need all that extra space to the right of the grip", so the 45 px overflow gutter and the strip's overflow measurement are gone.
 - **Glyph:** the 4×3 dot grip (§5.6), 12 px.
 - **Visibility:** moving panes is secondary to working in them, so follow Atlassian's secondary-action rule.
   - At rest: `opacity` about 0.35 of `--secondary-text-color`.

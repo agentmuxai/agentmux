@@ -547,9 +547,8 @@ describe("foreignDropHighlightFor", () => {
 // a small, non-scrolling-content spacer after the "+" that stays part of the
 // ordinary whole-pane drag region (nothing here registers a competing drag
 // handler — see PaneHeaderTabStrip.tsx for how the header's own draggable
-// treats it). Zero width until the strip is actually overflowing, so it
-// doesn't waste space in the common (non-overflowing) case, where the
-// header's own natural dead space already serves this purpose.
+// treats it). It is exactly the grip's 24px slot, overflowing or not
+// (SPEC_DRAG_SPACE_AFFORDANCE_2026_10_13.md §5.2).
 describe("PaneTabStrip — reserveDragHandle (SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §3.6)", () => {
     let roCb: (() => void) | undefined;
     let scrollWidth = 100;
@@ -593,27 +592,7 @@ describe("PaneTabStrip — reserveDragHandle (SPEC_PANE_TAB_DRAG_AND_DROP_2026_0
         expect(container.querySelector(".pane-tab-strip-drag-handle")).toBeNull();
     });
 
-    it("keeps the spacer at its resting size (just the grip) when the strip is not overflowing", () => {
-        scrollWidth = 100;
-        clientWidth = 100;
-        const { container } = render(() => (
-            <PaneTabStrip
-                tabs={TABS}
-                activeId="a"
-                getId={(t: T) => t.id}
-                getLabel={(t: T) => t.label}
-                onActivate={vi.fn()}
-                onAdd={vi.fn()}
-                reserveDragHandle
-            />
-        ));
-        roCb?.();
-        const handle = container.querySelector(".pane-tab-strip-drag-handle");
-        expect(handle).not.toBeNull();
-        expect(handle?.classList.contains("pane-tab-strip-drag-handle--active")).toBe(false);
-    });
-
-    it("activates the spacer once the strip is overflowing", () => {
+    it("holds just the grip, overflowing or not", () => {
         scrollWidth = 250;
         clientWidth = 150;
         const { container } = render(() => (
@@ -629,7 +608,10 @@ describe("PaneTabStrip — reserveDragHandle (SPEC_PANE_TAB_DRAG_AND_DROP_2026_0
         ));
         roCb?.();
         const handle = container.querySelector(".pane-tab-strip-drag-handle");
-        expect(handle?.classList.contains("pane-tab-strip-drag-handle--active")).toBe(true);
+        expect(handle).not.toBeNull();
+        expect(handle!.className).toBe("pane-tab-strip-drag-handle");
+        expect(handle!.children.length).toBe(1);
+        expect(handle!.firstElementChild!.classList.contains("pane-tab-strip-grip")).toBe(true);
     });
 
     it("is the true last child of .pane-tab-strip-inner, after the + button", () => {

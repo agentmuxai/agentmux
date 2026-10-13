@@ -269,22 +269,17 @@ export interface PaneTabStripProps<T> {
      *  terminal strips use, so labelling one pane can't widen the others. */
     addLabel?: string;
 
-    /** Opt in to reserving a small, non-scrolling-content spacer after the
-     *  "+", present only once the strip is actually overflowing. Once a
-     *  Pane's tab strip fills its whole header row, there is otherwise no
-     *  space left in that row to grab for "drag the whole pane" — this
-     *  spacer restores it, reachable by scrolling the strip to its end.
-     *  Renders at zero width (and is skipped by the overflow measurement
-     *  itself — see PaneTabStrip.scss) until overflow is real, so it costs
-     *  nothing in the common case, where the header's own natural leftover
-     *  space already serves this purpose. Deliberately NOT a drag target or
-     *  handler of its own — it stays part of whichever ordinary "drag the
-     *  whole pane" region already covers the header
+    /** Opt in to the pane's grip: a 24px slot after the "+" holding the
+     *  grip button (drag it to move the pane, click it for the pane menu).
+     *  It keeps a place to grab the whole pane even when the tabs fill the
+     *  header row. Deliberately NOT a drag target or handler of its own: it
+     *  stays part of the header's ordinary "drag the whole pane" region
      *  (see PaneHeaderTabStrip.tsx). Only meaningful for a strip used as a
      *  Pane's own header (PaneHeaderTabStrip); other consumers (the editor's
      *  file-tab strip, the agent History strip) render inside a Pane's
      *  content, not its header, and leave this off.
-     *  SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §3.6. */
+     *  SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §3.6,
+     *  SPEC_DRAG_SPACE_AFFORDANCE_2026_10_13.md §5.2. */
     reserveDragHandle?: boolean;
     /** The pane can't be dragged right now (magnified or ephemeral: the
      *  header's `canDrag` vetoes it). The grip then offers only the menu:
@@ -367,29 +362,6 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
     let lastMeasuredWidth: number | undefined;
     let widthResetTimeout: ReturnType<typeof setTimeout> | undefined;
     onCleanup(() => clearTimeout(widthResetTimeout));
-
-    // `reserveDragHandle` (§3.6) — re-measured on every resize of the strip
-    // itself (tab add/remove, pane resize, window resize, zoom change all
-    // land here for free via ResizeObserver, unlike the width-transition
-    // effect above which only reacts to `tabs.length`). The spacer starts at
-    // zero width, so its own presence never feeds back into this
-    // measurement until AFTER overflow is already real from the tabs alone.
-    const [overflowing, setOverflowing] = createSignal(false);
-    onMount(() => {
-        const el = stripRef;
-        if (!el || !props.reserveDragHandle) return;
-        const measure = () => setOverflowing(el.scrollWidth > el.clientWidth);
-        // Read on the next frame, not in the observer callback: there, other
-        // observers have already written to the DOM, so each strip's read
-        // forced its own layout on every frame of a window drag.
-        let frame: number | undefined;
-        const ro = new ResizeObserver(() => {
-            if (frame == null) frame = requestAnimationFrame(() => { frame = undefined; measure(); });
-        });
-        ro.observe(el);
-        measure();
-        onCleanup(() => { ro.disconnect(); if (frame != null) cancelAnimationFrame(frame); });
-    });
 
     // Cross-pane drop-to-append (Phase 4, §3.4). A dwell-free hover flash —
     // unlike the outer Window Tab bar's spring-loaded switch (which needs a
@@ -647,10 +619,7 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
                     </Tooltip>
                 </Show>
                 <Show when={props.reserveDragHandle}>
-                    <div
-                        class="pane-tab-strip-drag-handle"
-                        classList={{ "pane-tab-strip-drag-handle--active": overflowing() }}
-                    >
+                    <div class="pane-tab-strip-drag-handle">
                         {/* The pane's grip: drag it (the header's own drag covers
                             it) to move the pane; click it, or Enter/Space, for the
                             pane menu (SPEC_DRAG_SPACE_AFFORDANCE_2026_10_13 §5.2). */}
