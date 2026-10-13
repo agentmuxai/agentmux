@@ -214,7 +214,8 @@ pub trait TrackerHandle: Send + Sync {
 }
 
 /// How reliable this platform's tracker is.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "snake_case")]
 pub enum TrackingConfidence {
     /// Descendants can't escape the tracker. Windows Job Objects +

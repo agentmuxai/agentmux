@@ -176,3 +176,10 @@ describe("optionalFields", () => {
         expect(errors.join()).toMatch(/needs a generated request type/);
     });
 });
+
+describe("module type overrides", () => {
+    it("an import(...) type in an override is left to tsc, not checked as a global", () => {
+        const names = namesUsed({ returns: 'import("@/app/store/ambient-outcomes").AmbientOutcomes', dataType: "Record<string, never>" }, row("a", "JsonValue", "JsonValue"));
+        expect([...names]).toEqual([]);
+    });
+});

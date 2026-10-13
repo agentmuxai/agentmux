@@ -19,6 +19,101 @@
     }
   },
   {
+    "command": "agent.kill-process",
+    "request": "agentmux_srv::backend::rpc_types::agent::AgentKillProcessCommand",
+    "requestName": "AgentKillProcessCommand",
+    "requestTs": {
+      "imports": [
+        "AgentKillProcessCommand"
+      ],
+      "name": "AgentKillProcessCommand"
+    },
+    "response": "agentmux_srv::backend::rpc_types::agent::AgentKillResult",
+    "responseName": "AgentKillResult",
+    "responseTs": {
+      "imports": [
+        "AgentKillResult"
+      ],
+      "name": "AgentKillResult"
+    }
+  },
+  {
+    "command": "agent.kill-tree",
+    "request": "agentmux_srv::backend::rpc_types::agent::AgentKillTreeCommand",
+    "requestName": "AgentKillTreeCommand",
+    "requestTs": {
+      "imports": [
+        "AgentKillTreeCommand"
+      ],
+      "name": "AgentKillTreeCommand"
+    },
+    "response": "agentmux_srv::backend::rpc_types::agent::AgentKillResult",
+    "responseName": "AgentKillResult",
+    "responseTs": {
+      "imports": [
+        "AgentKillResult"
+      ],
+      "name": "AgentKillResult"
+    }
+  },
+  {
+    "command": "agent.open-panes",
+    "request": "serde_json::value::Value",
+    "requestName": "Value",
+    "requestTs": {
+      "imports": [
+        "JsonValue"
+      ],
+      "name": "JsonValue"
+    },
+    "response": "agentmux_srv::backend::rpc_types::agent::AgentOpenPanesResult",
+    "responseName": "AgentOpenPanesResult",
+    "responseTs": {
+      "imports": [
+        "AgentOpenPanesResult"
+      ],
+      "name": "AgentOpenPanesResult"
+    }
+  },
+  {
+    "command": "agent.process-list",
+    "request": "agentmux_srv::backend::rpc_types::agent::AgentProcessListCommand",
+    "requestName": "AgentProcessListCommand",
+    "requestTs": {
+      "imports": [
+        "AgentProcessListCommand"
+      ],
+      "name": "AgentProcessListCommand"
+    },
+    "response": "agentmux_srv::backend::rpc_types::agent::AgentProcessListResult",
+    "responseName": "AgentProcessListResult",
+    "responseTs": {
+      "imports": [
+        "AgentProcessListResult"
+      ],
+      "name": "AgentProcessListResult"
+    }
+  },
+  {
+    "command": "agent.tracked-blocks",
+    "request": "serde_json::value::Value",
+    "requestName": "Value",
+    "requestTs": {
+      "imports": [
+        "JsonValue"
+      ],
+      "name": "JsonValue"
+    },
+    "response": "agentmux_srv::backend::rpc_types::agent::AgentTrackedBlocksResult",
+    "responseName": "AgentTrackedBlocksResult",
+    "responseTs": {
+      "imports": [
+        "AgentTrackedBlocksResult"
+      ],
+      "name": "AgentTrackedBlocksResult"
+    }
+  },
+  {
     "command": "agent:memory:adoption_list",
     "request": "agentmux_srv::backend::rpc_types::native_memory::CommandNativeMemoryAdoptionListData",
     "requestName": "CommandNativeMemoryAdoptionListData",
@@ -426,6 +521,25 @@
     "responseTs": {
       "imports": [],
       "name": "null"
+    }
+  },
+  {
+    "command": "ambient.outcomes",
+    "request": "serde_json::value::Value",
+    "requestName": "Value",
+    "requestTs": {
+      "imports": [
+        "JsonValue"
+      ],
+      "name": "JsonValue"
+    },
+    "response": "serde_json::value::Value",
+    "responseName": "Value",
+    "responseTs": {
+      "imports": [
+        "JsonValue"
+      ],
+      "name": "JsonValue"
     }
   },
   {
@@ -950,6 +1064,127 @@
         "CheckCliAuthResult"
       ],
       "name": "CheckCliAuthResult"
+    }
+  },
+  {
+    "command": "connconnect",
+    "request": "serde_json::value::Value",
+    "requestName": "Value",
+    "requestTs": {
+      "imports": [
+        "JsonValue"
+      ],
+      "name": "JsonValue"
+    },
+    "response": "()",
+    "responseName": "()",
+    "responseTs": {
+      "imports": [],
+      "name": "null"
+    }
+  },
+  {
+    "command": "conndisconnect",
+    "request": "serde_json::value::Value",
+    "requestName": "Value",
+    "requestTs": {
+      "imports": [
+        "JsonValue"
+      ],
+      "name": "JsonValue"
+    },
+    "response": "()",
+    "responseName": "()",
+    "responseTs": {
+      "imports": [],
+      "name": "null"
+    }
+  },
+  {
+    "command": "connensure",
+    "request": "serde_json::value::Value",
+    "requestName": "Value",
+    "requestTs": {
+      "imports": [
+        "JsonValue"
+      ],
+      "name": "JsonValue"
+    },
+    "response": "()",
+    "responseName": "()",
+    "responseTs": {
+      "imports": [],
+      "name": "null"
+    }
+  },
+  {
+    "command": "connlist",
+    "request": "serde_json::value::Value",
+    "requestName": "Value",
+    "requestTs": {
+      "imports": [
+        "JsonValue"
+      ],
+      "name": "JsonValue"
+    },
+    "response": "alloc::vec::Vec<alloc::string::String>",
+    "responseName": "alloc::vec::Vec<alloc::string::String>",
+    "responseTs": {
+      "imports": [],
+      "name": "Array<string>"
+    }
+  },
+  {
+    "command": "connlistaws",
+    "request": "serde_json::value::Value",
+    "requestName": "Value",
+    "requestTs": {
+      "imports": [
+        "JsonValue"
+      ],
+      "name": "JsonValue"
+    },
+    "response": "alloc::vec::Vec<alloc::string::String>",
+    "responseName": "alloc::vec::Vec<alloc::string::String>",
+    "responseTs": {
+      "imports": [],
+      "name": "Array<string>"
+    }
+  },
+  {
+    "command": "connsessionend",
+    "request": "serde_json::value::Value",
+    "requestName": "Value",
+    "requestTs": {
+      "imports": [
+        "JsonValue"
+      ],
+      "name": "JsonValue"
+    },
+    "response": "bool",
+    "responseName": "bool",
+    "responseTs": {
+      "imports": [],
+      "name": "boolean"
+    }
+  },
+  {
+    "command": "connsessions",
+    "request": "serde_json::value::Value",
+    "requestName": "Value",
+    "requestTs": {
+      "imports": [
+        "JsonValue"
+      ],
+      "name": "JsonValue"
+    },
+    "response": "alloc::vec::Vec<agentmux_srv::backend::remote::sessions::HostSession>",
+    "responseName": "alloc::vec::Vec<agentmux_srv::backend::remote::sessions::HostSession>",
+    "responseTs": {
+      "imports": [
+        "HostSession"
+      ],
+      "name": "Array<HostSession>"
     }
   },
   {
@@ -4236,6 +4471,25 @@
     }
   },
   {
+    "command": "swarm.other-instances",
+    "request": "serde_json::value::Value",
+    "requestName": "Value",
+    "requestTs": {
+      "imports": [
+        "JsonValue"
+      ],
+      "name": "JsonValue"
+    },
+    "response": "serde_json::value::Value",
+    "responseName": "Value",
+    "responseTs": {
+      "imports": [
+        "JsonValue"
+      ],
+      "name": "JsonValue"
+    }
+  },
+  {
     "command": "toolchain.env",
     "request": "core::option::Option<agentmux_srv::backend::rpc_types::toolchain::ToolchainEnvReq>",
     "requestName": "core::option::Option<agentmux_srv::backend::rpc_types::toolchain::ToolchainEnvReq>",
@@ -4998,6 +5252,23 @@
     "responseTs": {
       "imports": [],
       "name": "null"
+    }
+  },
+  {
+    "command": "wsllist",
+    "request": "serde_json::value::Value",
+    "requestName": "Value",
+    "requestTs": {
+      "imports": [
+        "JsonValue"
+      ],
+      "name": "JsonValue"
+    },
+    "response": "alloc::vec::Vec<alloc::string::String>",
+    "responseName": "alloc::vec::Vec<alloc::string::String>",
+    "responseTs": {
+      "imports": [],
+      "name": "Array<string>"
     }
   }
 ]

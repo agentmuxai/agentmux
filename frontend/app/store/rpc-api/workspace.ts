@@ -40,45 +40,6 @@ export type { ToolStatus } from "@/types/rpc/ToolStatus";
 export type { ToolStatusEntry } from "@/types/rpc/ToolStatusEntry";
 
 export const WorkspaceApi = {
-    ConnConnectCommand(client: RpcClient, data: ConnRequest, opts?: RpcOpts): Promise<void> {
-        return client.rpcCall("connconnect", data, opts);
-    },
-
-    ConnDisconnectCommand(client: RpcClient, data: string, opts?: RpcOpts): Promise<void> {
-        return client.rpcCall("conndisconnect", data, opts);
-    },
-
-    ConnEnsureCommand(client: RpcClient, data: ConnExtData, opts?: RpcOpts): Promise<void> {
-        return client.rpcCall("connensure", data, opts);
-    },
-
-    ConnListCommand(client: RpcClient, opts?: RpcOpts): Promise<string[]> {
-        return client.rpcCall("connlist", null, opts);
-    },
-
-    // The durable sessions on an SSH host; `blockid` is the asking pane,
-    // whose window shows any ssh prompt.
-    ConnSessionsCommand(
-        client: RpcClient,
-        data: { connname: string; blockid?: string },
-        opts?: RpcOpts
-    ): Promise<HostSession[]> {
-        return client.rpcCall("connsessions", data, opts);
-    },
-
-    // End one; `true` if the host had it.
-    ConnSessionEndCommand(
-        client: RpcClient,
-        data: { connname: string; sessionid: string; blockid?: string },
-        opts?: RpcOpts
-    ): Promise<boolean> {
-        return client.rpcCall("connsessionend", data, opts);
-    },
-
-    ConnListAWSCommand(client: RpcClient, opts?: RpcOpts): Promise<string[]> {
-        return client.rpcCall("connlistaws", null, opts);
-    },
-
     GetMetaCommand(client: RpcClient, data: CommandGetMetaData, opts?: RpcOpts): Promise<MetaType> {
         return client.rpcCall("getmeta", data, opts);
     },
@@ -105,9 +66,5 @@ export const WorkspaceApi = {
 
     WorkspaceListCommand(client: RpcClient, opts?: RpcOpts): Promise<WorkspaceInfoData[]> {
         return client.rpcCall("workspacelist", null, opts);
-    },
-
-    WslListCommand(client: RpcClient, opts?: RpcOpts): Promise<string[]> {
-        return client.rpcCall("wsllist", null, opts);
     },
 };
