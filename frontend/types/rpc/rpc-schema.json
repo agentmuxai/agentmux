@@ -1010,6 +1010,25 @@
     }
   },
   {
+    "command": "browser_start_page.set",
+    "request": "agentmux_srv::server::app_api::browser_start_page::StartPageSetReq",
+    "requestName": "StartPageSetReq",
+    "requestTs": {
+      "imports": [
+        "StartPageSetReq"
+      ],
+      "name": "StartPageSetReq"
+    },
+    "response": "agentmux_srv::server::app_api::browser_start_page::StartPageSetResult",
+    "responseName": "StartPageSetResult",
+    "responseTs": {
+      "imports": [
+        "StartPageSetResult"
+      ],
+      "name": "StartPageSetResult"
+    }
+  },
+  {
     "command": "bundle.import.commit",
     "request": "agentmux_srv::backend::rpc_types::bundle_import::CommandBundleImportCommitData",
     "requestName": "CommandBundleImportCommitData",
@@ -1045,6 +1064,25 @@
         "BundleImportPreviewResponse"
       ],
       "name": "BundleImportPreviewResponse"
+    }
+  },
+  {
+    "command": "bundle.validate",
+    "request": "serde_json::value::Value",
+    "requestName": "Value",
+    "requestTs": {
+      "imports": [
+        "JsonValue"
+      ],
+      "name": "JsonValue"
+    },
+    "response": "agentmux_srv::backend::bundle_validate::ValidationReport",
+    "responseName": "ValidationReport",
+    "responseTs": {
+      "imports": [
+        "ValidationReport"
+      ],
+      "name": "ValidationReport"
     }
   },
   {
@@ -2688,6 +2726,25 @@
     }
   },
   {
+    "command": "listagents",
+    "request": "serde_json::value::Value",
+    "requestName": "Value",
+    "requestTs": {
+      "imports": [
+        "JsonValue"
+      ],
+      "name": "JsonValue"
+    },
+    "response": "alloc::vec::Vec<agentmux_srv::backend::storage::agents::AgentDefinition>",
+    "responseName": "alloc::vec::Vec<agentmux_srv::backend::storage::agents::AgentDefinition>",
+    "responseTs": {
+      "imports": [
+        "AgentDefinition"
+      ],
+      "name": "Array<AgentDefinition>"
+    }
+  },
+  {
     "command": "listagentskills",
     "request": "agentmux_srv::backend::rpc_types::agent::CommandListAgentSkillsData",
     "requestName": "CommandListAgentSkillsData",
@@ -2837,6 +2894,44 @@
         "Bundle"
       ],
       "name": "Array<Bundle>"
+    }
+  },
+  {
+    "command": "listnamedagents",
+    "request": "serde_json::value::Value",
+    "requestName": "Value",
+    "requestTs": {
+      "imports": [
+        "JsonValue"
+      ],
+      "name": "JsonValue"
+    },
+    "response": "alloc::vec::Vec<agentmux_srv::backend::rpc_types::instance::NamedAgentRow>",
+    "responseName": "alloc::vec::Vec<agentmux_srv::backend::rpc_types::instance::NamedAgentRow>",
+    "responseTs": {
+      "imports": [
+        "NamedAgentRow"
+      ],
+      "name": "Array<NamedAgentRow>"
+    }
+  },
+  {
+    "command": "listrecentsessions",
+    "request": "serde_json::value::Value",
+    "requestName": "Value",
+    "requestTs": {
+      "imports": [
+        "JsonValue"
+      ],
+      "name": "JsonValue"
+    },
+    "response": "agentmux_srv::backend::rpc_types::instance::ListRecentSessionsResult",
+    "responseName": "ListRecentSessionsResult",
+    "responseTs": {
+      "imports": [
+        "ListRecentSessionsResult"
+      ],
+      "name": "ListRecentSessionsResult"
     }
   },
   {
@@ -4509,6 +4604,25 @@
     }
   },
   {
+    "command": "toolchain.install_system_tool",
+    "request": "agentmux_srv::server::system_install_handlers::ToolIdReq",
+    "requestName": "ToolIdReq",
+    "requestTs": {
+      "imports": [
+        "ToolIdReq"
+      ],
+      "name": "ToolIdReq"
+    },
+    "response": "agentmux_srv::server::system_install_handlers::InstallSystemToolResult",
+    "responseName": "InstallSystemToolResult",
+    "responseTs": {
+      "imports": [
+        "InstallSystemToolResult"
+      ],
+      "name": "InstallSystemToolResult"
+    }
+  },
+  {
     "command": "toolchain.prune",
     "request": "core::option::Option<agentmux_srv::backend::rpc_types::toolchain::ToolchainPruneReq>",
     "requestName": "core::option::Option<agentmux_srv::backend::rpc_types::toolchain::ToolchainPruneReq>",
@@ -4525,6 +4639,25 @@
         "ToolchainPruneResult"
       ],
       "name": "ToolchainPruneResult"
+    }
+  },
+  {
+    "command": "toolchain.resolve_install_command",
+    "request": "agentmux_srv::server::system_install_handlers::ToolIdReq",
+    "requestName": "ToolIdReq",
+    "requestTs": {
+      "imports": [
+        "ToolIdReq"
+      ],
+      "name": "ToolIdReq"
+    },
+    "response": "agentmux_srv::server::system_install_handlers::ResolveInstallCommandResult",
+    "responseName": "ResolveInstallCommandResult",
+    "responseTs": {
+      "imports": [
+        "ResolveInstallCommandResult"
+      ],
+      "name": "ResolveInstallCommandResult"
     }
   },
   {

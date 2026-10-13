@@ -56,15 +56,14 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let identity_store_lrs = state.identity_store.clone();
     let filestore = state.filestore.clone();
     let broker_lrs = state.broker.clone();
-    engine.register_handler(
-        COMMAND_LIST_RECENT_SESSIONS,
-        Box::new(move |data, _ctx| {
-            let mstore = mstore.clone();
-            let id_store = id_store_lrs.clone();
-            let identity_store = identity_store_lrs.clone();
-            let filestore = filestore.clone();
-            let broker = broker_lrs.clone();
-            Box::pin(async move {
+    // `Value` request: a malformed one means the defaults (unwrap_or_default).
+    engine.register_typed(COMMAND_LIST_RECENT_SESSIONS, move |data: serde_json::Value, _ctx| {
+        let mstore = mstore.clone();
+        let id_store = id_store_lrs.clone();
+        let identity_store = identity_store_lrs.clone();
+        let filestore = filestore.clone();
+        let broker = broker_lrs.clone();
+        async move {
                 let t0 = std::time::Instant::now();
                 let cmd: CommandListRecentSessionsData =
                     serde_json::from_value(data).unwrap_or_default();
@@ -679,10 +678,9 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     rows,
                     degraded: degraded.iter().map(|s| s.to_string()).collect(),
                 };
-                Ok(Some(serde_json::to_value(&result).unwrap_or_default()))
-            })
-        }),
-    );
+                Ok(result)
+        }
+    });
 
     // ---- agent:session:read ----
     let filestore = state.filestore.clone();

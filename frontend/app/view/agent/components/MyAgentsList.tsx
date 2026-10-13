@@ -37,6 +37,8 @@
  */
 
 import { useTick } from "@/app/hook/useTick";
+import type { RecentSessionRow } from "@/types/rpc/RecentSessionRow";
+import { eventBelongsToPaneOf } from "@/util/focusutil";
 import {
     createEffect,
     createMemo,
@@ -49,26 +51,25 @@ import {
     type JSX,
 } from "solid-js";
 import { createStore, reconcile } from "solid-js/store";
-import { eventBelongsToPaneOf } from "@/util/focusutil";
 import { TransitionGroup } from "solid-transition-group";
 
-import { pushNotification, prefersReducedMotionAtom } from "@/app/store/global";
+import { AnchoredPopover } from "@/app/element/anchored-popover";
+import { Button } from "@/app/element/ui";
+import { getOpenBlockIdsForDefinition } from "@/app/store/agent-pane-state-store";
+import { prefersReducedMotionAtom, pushNotification } from "@/app/store/global";
+import { muxEventSubscribe } from "@/app/store/mps";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { getOpenBlockIdsForDefinition } from "@/app/store/agent-pane-state-store";
-import { muxEventSubscribe } from "@/app/store/mps";
-import { literalFirstSearch } from "@/app/util/fuzzysearch";
-import { AnchoredPopover } from "@/app/element/anchored-popover";
-import { ConfirmModal } from "@/element/modal";
-import { DualProviderLogo } from "@/element/DualProviderLogo";
 import { ObjectService } from "@/app/store/services";
+import { literalFirstSearch } from "@/app/util/fuzzysearch";
+import { DualProviderLogo } from "@/element/DualProviderLogo";
+import { ConfirmModal } from "@/element/modal";
 import { formatTimeAgo } from "@/util/format-time";
 import { Logger } from "@/util/logger";
+import type { OpenAgentLocation } from "../open-agent-panes";
 import { resolveEffectiveVendor } from "../providers/catalog";
 import type { AgentSortOption } from "./AgentPickerFilterBar";
 import { RuntimeBadge } from "./RuntimeBadge";
-import type { OpenAgentLocation } from "../open-agent-panes";
-import { Button } from "@/app/element/ui";
 
 import { WpsEvent } from "@/app/store/mps-events";
 /** "type" sort groups Host before Sandbox (Container) before anything
@@ -91,15 +92,23 @@ const typeSortRank = (agentType: string): number => TYPE_SORT_RANK[agentType] ??
 function compareRows(sort: AgentSortOption, a: RecentSessionRow, b: RecentSessionRow): number {
     switch (sort) {
         case "name":
-            return (a.instance_name || a.definition_name).localeCompare(b.instance_name || b.definition_name, undefined, {
-                sensitivity: "base",
-            });
+            return (a.instance_name || a.definition_name).localeCompare(
+                b.instance_name || b.definition_name,
+                undefined,
+                {
+                    sensitivity: "base",
+                }
+            );
         case "type": {
             const rankDiff = typeSortRank(a.agent_type) - typeSortRank(b.agent_type);
             if (rankDiff !== 0) return rankDiff;
-            return (a.instance_name || a.definition_name).localeCompare(b.instance_name || b.definition_name, undefined, {
-                sensitivity: "base",
-            });
+            return (a.instance_name || a.definition_name).localeCompare(
+                b.instance_name || b.definition_name,
+                undefined,
+                {
+                    sensitivity: "base",
+                }
+            );
         }
         case "recent":
         default:
@@ -630,7 +639,11 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
         // The other half of `handleDuplicate`'s mutual exclusion — see the
         // comment there.
         setForkState(row.definition_id, { kind: "idle" });
-        setRenameState(row.definition_id, { label: row.instance_name || row.definition_name, loading: false, error: null });
+        setRenameState(row.definition_id, {
+            label: row.instance_name || row.definition_name,
+            loading: false,
+            error: null,
+        });
     };
     const handleRenameCancel = (definitionId: string): void => setRenameState(definitionId, null);
     const handleRenameSubmit = async (row: RecentSessionRow): Promise<void> => {
@@ -668,9 +681,7 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
      * would be read inside its own temporal dead zone.
      */
     const isRowExpanded = (definitionId: string): boolean =>
-        isMenuOpen(definitionId) ||
-        getRenameState(definitionId) !== null ||
-        getForkState(definitionId).kind !== "idle";
+        isMenuOpen(definitionId) || getRenameState(definitionId) !== null || getForkState(definitionId).kind !== "idle";
     const anyRowExpanded = (): boolean =>
         openMenuId() !== null ||
         renameStates().size > 0 ||
@@ -861,7 +872,9 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
     // cached value out from under Solid's stale-while-revalidate.
     const sortedRows = createMemo(() => {
         const sort = props.sortBy?.() ?? "recent";
-        return filteredRows().slice().sort((a, b) => compareRows(sort, a, b));
+        return filteredRows()
+            .slice()
+            .sort((a, b) => compareRows(sort, a, b));
     });
 
     return (
@@ -1004,315 +1017,332 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                             );
                         }}
                     >
-                    <For each={sortedRows()}>
-                        {(row) => {
-                            const isActive = () => (props.openDefinitions?.() ?? new Map()).has(row.definition_id);
-                            const openWhere = () =>
-                                props.openLocations?.().get(row.definition_id)?.label ?? "open in another pane";
-                            const forkState = () => getForkState(row.definition_id);
+                        <For each={sortedRows()}>
+                            {(row) => {
+                                const isActive = () => (props.openDefinitions?.() ?? new Map()).has(row.definition_id);
+                                const openWhere = () =>
+                                    props.openLocations?.().get(row.definition_id)?.label ?? "open in another pane";
+                                const forkState = () => getForkState(row.definition_id);
 
-                            // The tile is the `<li>` (the grid item): it owns the border,
-                            // background and hover, so the chevron and the panels are placed
-                            // against the box the user sees. See
-                            // docs/reports/REPORT_MY_AGENTS_TILE_ACTIONS_ALIGNMENT_2026_10_05.md.
-                            let tileEl: HTMLLIElement | undefined;
-                            let toggleEl: HTMLButtonElement | undefined;
+                                // The tile is the `<li>` (the grid item): it owns the border,
+                                // background and hover, so the chevron and the panels are placed
+                                // against the box the user sees. See
+                                // docs/reports/REPORT_MY_AGENTS_TILE_ACTIONS_ALIGNMENT_2026_10_05.md.
+                                let tileEl: HTMLLIElement | undefined;
+                                let toggleEl: HTMLButtonElement | undefined;
 
-                            return (
-                                <li
-                                    ref={tileEl}
-                                    class="agent-recent-sessions-row"
-                                    classList={{
-                                        "is-expanded": isRowExpanded(row.definition_id),
-                                        "agent-recent-sessions-row--active": isActive(),
-                                    }}
-                                    data-definition-id={row.definition_id}
-                                >
-                                    <DualProviderLogo
-                                        harness={row.provider}
-                                        vendor={resolveEffectiveVendor(row.provider, row.model_vendor_base_url)}
-                                        size={40}
-                                        class="agent-recent-sessions-icon"
-                                    />
-                                    <span class="agent-recent-sessions-body">
-                                        <span class="agent-recent-sessions-line1">
-                                            {/* The one control that opens the agent. Its ::after
+                                return (
+                                    <li
+                                        ref={tileEl}
+                                        class="agent-recent-sessions-row"
+                                        classList={{
+                                            "is-expanded": isRowExpanded(row.definition_id),
+                                            "agent-recent-sessions-row--active": isActive(),
+                                        }}
+                                        data-definition-id={row.definition_id}
+                                    >
+                                        <DualProviderLogo
+                                            harness={row.provider}
+                                            vendor={resolveEffectiveVendor(row.provider, row.model_vendor_base_url)}
+                                            size={40}
+                                            class="agent-recent-sessions-icon"
+                                        />
+                                        <span class="agent-recent-sessions-body">
+                                            <span class="agent-recent-sessions-line1">
+                                                {/* The one control that opens the agent. Its ::after
                                                 covers the whole tile (the "stretched button"
                                                 pattern), so a click anywhere on the tile opens it
                                                 while the text stays plain text and the chevron
                                                 stays a separate control: nested buttons are not
                                                 valid HTML. */}
-                                            <button
-                                                type="button"
-                                                class="agent-recent-sessions-entry"
-                                                onClick={() => handleRowClick(row)}
-                                                aria-label={`Continue ${row.instance_name}`}
-                                                data-testid="agent-my-agents-entry"
-                                            >
-                                                <span class="agent-recent-sessions-name">
-                                                    {row.instance_name || row.definition_name}
-                                                </span>
-                                            </button>
-                                            <Show when={isActive()}>
-                                                <span
-                                                    class="agent-active-badge"
-                                                    title={openWhere().charAt(0).toUpperCase() + openWhere().slice(1)}
-                                                    aria-label="Active"
-                                                />
-                                            </Show>
-                                            <Show when={row.agent_type === "host" || row.agent_type === "container"}>
-                                                {/* size="tag" — same HOST/SANDBOX wording + white/
+                                                <button
+                                                    type="button"
+                                                    class="agent-recent-sessions-entry"
+                                                    onClick={() => handleRowClick(row)}
+                                                    aria-label={`Continue ${row.instance_name}`}
+                                                    data-testid="agent-my-agents-entry"
+                                                >
+                                                    <span class="agent-recent-sessions-name">
+                                                        {row.instance_name || row.definition_name}
+                                                    </span>
+                                                </button>
+                                                <Show when={isActive()}>
+                                                    <span
+                                                        class="agent-active-badge"
+                                                        title={
+                                                            openWhere().charAt(0).toUpperCase() + openWhere().slice(1)
+                                                        }
+                                                        aria-label="Active"
+                                                    />
+                                                </Show>
+                                                <Show
+                                                    when={row.agent_type === "host" || row.agent_type === "container"}
+                                                >
+                                                    {/* size="tag" — same HOST/SANDBOX wording + white/
                                                     yellow styling as AgentComposerStrip's runtime
                                                     tag, so the badge reads as one consistent
                                                     vocabulary instead of two ("Container" here vs.
                                                     "SANDBOX" in the pane the row launches into). */}
-                                                <RuntimeBadge runtime={row.agent_type} size="tag" />
-                                            </Show>
-                                        </span>
-                                        {/* Own line, not squeezed onto line1 via flex:1 next to
+                                                    <RuntimeBadge runtime={row.agent_type} size="tag" />
+                                                </Show>
+                                            </span>
+                                            {/* Own line, not squeezed onto line1 via flex:1 next to
                                             the name — the account is as important as the name
                                             itself for a user managing multiple accounts, and
                                             needs reliable space rather than competing ellipsis
                                             with it. See
                                             docs/reports/REPORT_AGENT_PICKER_FIELD_ORDER_SORT_AND_DATA_GAPS_AUDIT_2026_08_24.md §2. */}
-                                        {/* "No auth", or the bound account; empty (so no line) when
+                                            {/* "No auth", or the bound account; empty (so no line) when
                                             the backend could not tell
                                             (SPEC_MY_AGENTS_TILES_AUTH_AND_HISTORY_2026_10_03.md §5.2). */}
-                                        <Show when={row.identity_name}>
-                                            <span class="agent-recent-sessions-account">{row.identity_name}</span>
-                                        </Show>
-                                        <Show
-                                            when={row.preview}
-                                            fallback={
-                                                <span class="agent-recent-sessions-preview agent-recent-sessions-preview--empty">
-                                                    {noPreviewText(row)}
+                                            <Show when={row.identity_name}>
+                                                <span class="agent-recent-sessions-account">{row.identity_name}</span>
+                                            </Show>
+                                            <Show
+                                                when={row.preview}
+                                                fallback={
+                                                    <span class="agent-recent-sessions-preview agent-recent-sessions-preview--empty">
+                                                        {noPreviewText(row)}
+                                                    </span>
+                                                }
+                                            >
+                                                <span class="agent-recent-sessions-preview">{row.preview}</span>
+                                            </Show>
+                                            <Show when={row.node_count > 0}>
+                                                <span class="agent-recent-sessions-line3">
+                                                    <span class="agent-recent-sessions-nodes">
+                                                        {row.node_count} message
+                                                        {row.node_count === 1 ? "" : "s"}
+                                                    </span>
                                                 </span>
-                                            }
-                                        >
-                                            <span class="agent-recent-sessions-preview">{row.preview}</span>
-                                        </Show>
-                                        <Show when={row.node_count > 0}>
-                                            <span class="agent-recent-sessions-line3">
-                                                <span class="agent-recent-sessions-nodes">
-                                                    {row.node_count} message
-                                                    {row.node_count === 1 ? "" : "s"}
-                                                </span>
-                                            </span>
-                                        </Show>
-                                    </span>
-                                    {/* Footer row: the timestamps and the chevron share one row at
+                                            </Show>
+                                        </span>
+                                        {/* Footer row: the timestamps and the chevron share one row at
                                         the bottom of the tile. Most-relevant-first, not
                                         chronological (Created → Launch → Active): a picker exists to
                                         answer "what did I last touch," which is Last Active (or Last
                                         Launch if never active) — not when the agent was originally
                                         created, which is the least actionable fact on the row. See
                                         docs/reports/REPORT_AGENT_PICKER_FIELD_ORDER_SORT_AND_DATA_GAPS_AUDIT_2026_08_24.md §2. */}
-                                    <span class="agent-recent-sessions-timestamps">
-                                        <Show
-                                            when={
-                                                row.has_snapshot && row.started_at > 0 && row.last_active_at > row.started_at
-                                            }
-                                        >
-                                            <span class="agent-recent-sessions-ts">
-                                                <span class="agent-recent-sessions-ts-label">Last Active</span>
-                                                <span class="agent-recent-sessions-ts-value">
-                                                    {formatTimeAgo(row.last_active_at, now())}
+                                        <span class="agent-recent-sessions-timestamps">
+                                            <Show
+                                                when={
+                                                    row.has_snapshot &&
+                                                    row.started_at > 0 &&
+                                                    row.last_active_at > row.started_at
+                                                }
+                                            >
+                                                <span class="agent-recent-sessions-ts">
+                                                    <span class="agent-recent-sessions-ts-label">Last Active</span>
+                                                    <span class="agent-recent-sessions-ts-value">
+                                                        {formatTimeAgo(row.last_active_at, now())}
+                                                    </span>
                                                 </span>
-                                            </span>
-                                        </Show>
-                                        <Show when={row.started_at > 0}>
-                                            <span class="agent-recent-sessions-ts">
-                                                <span class="agent-recent-sessions-ts-label">Last Launch</span>
-                                                <span class="agent-recent-sessions-ts-value">
-                                                    {formatTimeAgo(row.started_at, now())}
+                                            </Show>
+                                            <Show when={row.started_at > 0}>
+                                                <span class="agent-recent-sessions-ts">
+                                                    <span class="agent-recent-sessions-ts-label">Last Launch</span>
+                                                    <span class="agent-recent-sessions-ts-value">
+                                                        {formatTimeAgo(row.started_at, now())}
+                                                    </span>
                                                 </span>
-                                            </span>
-                                        </Show>
-                                        <Show when={row.agent_created_at > 0}>
-                                            <span class="agent-recent-sessions-ts">
-                                                <span class="agent-recent-sessions-ts-label">Created</span>
-                                                <span class="agent-recent-sessions-ts-value">
-                                                    {formatTimeAgo(row.agent_created_at, now())}
+                                            </Show>
+                                            <Show when={row.agent_created_at > 0}>
+                                                <span class="agent-recent-sessions-ts">
+                                                    <span class="agent-recent-sessions-ts-label">Created</span>
+                                                    <span class="agent-recent-sessions-ts-value">
+                                                        {formatTimeAgo(row.agent_created_at, now())}
+                                                    </span>
                                                 </span>
-                                            </span>
-                                        </Show>
-                                    </span>
+                                            </Show>
+                                        </span>
 
-                                    {/* Row actions menu toggle. A sibling of the entry button, not
+                                        {/* Row actions menu toggle. A sibling of the entry button, not
                                         nested inside it (nested buttons are invalid HTML). See
                                         docs/specs/SPEC_AGENT_DELETE_2026_09_16.md §4.1. */}
-                                    <button
-                                        ref={toggleEl}
-                                        type="button"
-                                        class="agent-recent-sessions-menu-toggle"
-                                        classList={{ "is-open": isMenuOpen(row.definition_id) }}
-                                        aria-label={`Actions for ${row.instance_name || row.definition_name}`}
-                                        aria-expanded={isMenuOpen(row.definition_id)}
-                                        onClick={(e) => {
-                                            e.stopPropagation();
-                                            toggleMenu(row.definition_id);
-                                        }}
-                                        data-testid="agent-my-agents-menu-toggle"
-                                    >
-                                        <i class="fa-solid fa-chevron-down" aria-hidden="true" />
-                                    </button>
+                                        <button
+                                            ref={toggleEl}
+                                            type="button"
+                                            class="agent-recent-sessions-menu-toggle"
+                                            classList={{ "is-open": isMenuOpen(row.definition_id) }}
+                                            aria-label={`Actions for ${row.instance_name || row.definition_name}`}
+                                            aria-expanded={isMenuOpen(row.definition_id)}
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                toggleMenu(row.definition_id);
+                                            }}
+                                            data-testid="agent-my-agents-menu-toggle"
+                                        >
+                                            <i class="fa-solid fa-chevron-down" aria-hidden="true" />
+                                        </button>
 
-                                    {/* The menu and the Rename / Duplicate panels float in
+                                        {/* The menu and the Rename / Duplicate panels float in
                                         `AnchoredPopover` (portaled, positioned against a live
                                         anchor) rather than being absolutely positioned inside the
                                         grid item. The menu is not given `onDismiss`: it keeps this
                                         list's own outside-click and pane-scoped Escape handling
                                         above, which the popover's document-wide Escape would not
                                         honour. */}
-                                    <Show when={isMenuOpen(row.definition_id)}>
-                                        <AnchoredPopover
-                                            anchor={toggleEl}
-                                            placement="bottom-end"
-                                            class="agent-row-menu"
-                                            role="group"
-                                            aria-label={`Actions for ${row.instance_name || row.definition_name}`}
-                                        >
-                                            <div data-testid="agent-row-menu" class="agent-row-menu-items">
-                                                <button
-                                                    type="button"
-                                                    class="agent-row-menu-item"
-                                                    onClick={() => handleRenameOpen(row)}
-                                                >
-                                                    <i class="fa-solid fa-pen" aria-hidden="true" /> Rename
-                                                </button>
-                                                <button
-                                                    type="button"
-                                                    class="agent-row-menu-item"
-                                                    onClick={() => handleDuplicate(row)}
-                                                >
-                                                    <i class="fa-solid fa-clone" aria-hidden="true" /> Duplicate
-                                                </button>
-                                                <button
-                                                    type="button"
-                                                    class="agent-row-menu-item"
-                                                    onClick={() => handleViewHistory(row)}
-                                                >
-                                                    <i class="fa-solid fa-clock-rotate-left" aria-hidden="true" />{" "}
-                                                    View History
-                                                </button>
-                                                <button
-                                                    type="button"
-                                                    class="agent-row-menu-item agent-row-menu-item--danger"
-                                                    onClick={() => handleDeleteOpen(row)}
-                                                    data-testid="agent-my-agents-delete"
-                                                >
-                                                    <i class="fa-solid fa-trash-can" aria-hidden="true" /> Delete
-                                                </button>
-                                            </div>
-                                        </AnchoredPopover>
-                                    </Show>
-
-                                    {/* Inline rename input — same panel pattern as the fork
-                                        prompt below. */}
-                                    <Show when={getRenameState(row.definition_id)}>
-                                        {(rs) => (
-                                            <AnchoredPopover anchor={tileEl} placement="bottom-start" class="agent-fork-prompt">
-                                                <div data-testid="agent-rename-prompt">
-                                                    <NamePrompt
-                                                        label="Rename to:"
-                                                        placeholder="Agent name"
-                                                        value={rs().label}
-                                                        loading={rs().loading}
-                                                        error={rs().error}
-                                                        submitLabel="Save"
-                                                        inputTestid="agent-rename-input"
-                                                        submitTestid="agent-rename-save"
-                                                        onInput={(label) =>
-                                                            setRenameState(row.definition_id, { ...rs(), label })
-                                                        }
-                                                        onSubmit={() => void handleRenameSubmit(row)}
-                                                        onCancel={() => handleRenameCancel(row.definition_id)}
-                                                    />
+                                        <Show when={isMenuOpen(row.definition_id)}>
+                                            <AnchoredPopover
+                                                anchor={toggleEl}
+                                                placement="bottom-end"
+                                                class="agent-row-menu"
+                                                role="group"
+                                                aria-label={`Actions for ${row.instance_name || row.definition_name}`}
+                                            >
+                                                <div data-testid="agent-row-menu" class="agent-row-menu-items">
+                                                    <button
+                                                        type="button"
+                                                        class="agent-row-menu-item"
+                                                        onClick={() => handleRenameOpen(row)}
+                                                    >
+                                                        <i class="fa-solid fa-pen" aria-hidden="true" /> Rename
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        class="agent-row-menu-item"
+                                                        onClick={() => handleDuplicate(row)}
+                                                    >
+                                                        <i class="fa-solid fa-clone" aria-hidden="true" /> Duplicate
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        class="agent-row-menu-item"
+                                                        onClick={() => handleViewHistory(row)}
+                                                    >
+                                                        <i class="fa-solid fa-clock-rotate-left" aria-hidden="true" />{" "}
+                                                        View History
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        class="agent-row-menu-item agent-row-menu-item--danger"
+                                                        onClick={() => handleDeleteOpen(row)}
+                                                        data-testid="agent-my-agents-delete"
+                                                    >
+                                                        <i class="fa-solid fa-trash-can" aria-hidden="true" /> Delete
+                                                    </button>
                                                 </div>
                                             </AnchoredPopover>
-                                        )}
-                                    </Show>
+                                        </Show>
 
-                                    {/* Fork prompt — floats below the tile */}
-                                    <Show when={forkState().kind !== "idle"}>
-                                        <AnchoredPopover anchor={tileEl} placement="bottom-start" class="agent-fork-prompt">
-                                            <div data-testid="agent-fork-prompt">
-                                                {/* Only true when reached via the "already open" row
+                                        {/* Inline rename input — same panel pattern as the fork
+                                        prompt below. */}
+                                        <Show when={getRenameState(row.definition_id)}>
+                                            {(rs) => (
+                                                <AnchoredPopover
+                                                    anchor={tileEl}
+                                                    placement="bottom-start"
+                                                    class="agent-fork-prompt"
+                                                >
+                                                    <div data-testid="agent-rename-prompt">
+                                                        <NamePrompt
+                                                            label="Rename to:"
+                                                            placeholder="Agent name"
+                                                            value={rs().label}
+                                                            loading={rs().loading}
+                                                            error={rs().error}
+                                                            submitLabel="Save"
+                                                            inputTestid="agent-rename-input"
+                                                            submitTestid="agent-rename-save"
+                                                            onInput={(label) =>
+                                                                setRenameState(row.definition_id, { ...rs(), label })
+                                                            }
+                                                            onSubmit={() => void handleRenameSubmit(row)}
+                                                            onCancel={() => handleRenameCancel(row.definition_id)}
+                                                        />
+                                                    </div>
+                                                </AnchoredPopover>
+                                            )}
+                                        </Show>
+
+                                        {/* Fork prompt — floats below the tile */}
+                                        <Show when={forkState().kind !== "idle"}>
+                                            <AnchoredPopover
+                                                anchor={tileEl}
+                                                placement="bottom-start"
+                                                class="agent-fork-prompt"
+                                            >
+                                                <div data-testid="agent-fork-prompt">
+                                                    {/* Only true when reached via the "already open" row
                                                     click (kind === "prompt") — Duplicate (this spec's
                                                     new entry point) jumps straight to "naming" without
                                                     that being the reason, so the message must not
                                                     assume it. Still shown for "naming" too when the row
                                                     genuinely happens to be open elsewhere. */}
-                                                <Show when={forkState().kind === "prompt" || isActive()}>
-                                                    <span class="agent-fork-prompt-msg">
-                                                        <strong>{row.instance_name || row.definition_name}</strong> is
-                                                        already {openWhere()}.
-                                                    </span>
-                                                </Show>
-                                                <Show when={forkState().kind === "prompt"}>
-                                                    <div class="agent-fork-prompt-actions">
-                                                        <Button
-                                                            tone="accent"
-                                                            class="agent-fork-btn agent-fork-btn--primary"
-                                                            onClick={() => handleOpenNewSession(row)}
-                                                            data-testid="agent-fork-open-new"
-                                                        >
-                                                            Open new session
-                                                        </Button>
-                                                        <Button
-                                                            class="agent-fork-btn agent-fork-btn--secondary"
-                                                            onClick={() => handleSwitchToExisting(row)}
-                                                            data-testid="agent-fork-switch"
-                                                        >
-                                                            Switch to existing
-                                                        </Button>
-                                                        <Button
-                                                            tone="quiet"
-                                                            class="agent-fork-btn agent-fork-btn--ghost"
-                                                            onClick={() => handleForkCancel(row.definition_id)}
-                                                            aria-label="Cancel"
-                                                        >
-                                                            ✕
-                                                        </Button>
-                                                    </div>
-                                                </Show>
-                                                <Show
-                                                    when={
-                                                        forkState().kind === "naming"
-                                                            ? (forkState() as Extract<ForkState, { kind: "naming" }>)
-                                                            : null
-                                                    }
-                                                >
-                                                    {(ns) => (
-                                                        <NamePrompt
-                                                            label="Name for new session:"
-                                                            placeholder="Session name"
-                                                            value={ns().label}
-                                                            loading={ns().loading}
-                                                            error={ns().error}
-                                                            submitLabel="Start"
-                                                            inputTestid="agent-fork-name-input"
-                                                            submitTestid="agent-fork-start"
-                                                            onInput={(label) =>
-                                                                setForkState(row.definition_id, {
-                                                                    kind: "naming",
-                                                                    label,
-                                                                    loading: false,
-                                                                    error: null,
-                                                                })
-                                                            }
-                                                            onSubmit={() => void handleForkStart(row)}
-                                                            onCancel={() => handleForkCancel(row.definition_id)}
-                                                        />
-                                                    )}
-                                                </Show>
-                                            </div>
-                                        </AnchoredPopover>
-                                    </Show>
-                                </li>
-                            );
-                        }}
-                    </For>
+                                                    <Show when={forkState().kind === "prompt" || isActive()}>
+                                                        <span class="agent-fork-prompt-msg">
+                                                            <strong>{row.instance_name || row.definition_name}</strong>{" "}
+                                                            is already {openWhere()}.
+                                                        </span>
+                                                    </Show>
+                                                    <Show when={forkState().kind === "prompt"}>
+                                                        <div class="agent-fork-prompt-actions">
+                                                            <Button
+                                                                tone="accent"
+                                                                class="agent-fork-btn agent-fork-btn--primary"
+                                                                onClick={() => handleOpenNewSession(row)}
+                                                                data-testid="agent-fork-open-new"
+                                                            >
+                                                                Open new session
+                                                            </Button>
+                                                            <Button
+                                                                class="agent-fork-btn agent-fork-btn--secondary"
+                                                                onClick={() => handleSwitchToExisting(row)}
+                                                                data-testid="agent-fork-switch"
+                                                            >
+                                                                Switch to existing
+                                                            </Button>
+                                                            <Button
+                                                                tone="quiet"
+                                                                class="agent-fork-btn agent-fork-btn--ghost"
+                                                                onClick={() => handleForkCancel(row.definition_id)}
+                                                                aria-label="Cancel"
+                                                            >
+                                                                ✕
+                                                            </Button>
+                                                        </div>
+                                                    </Show>
+                                                    <Show
+                                                        when={
+                                                            forkState().kind === "naming"
+                                                                ? (forkState() as Extract<
+                                                                      ForkState,
+                                                                      { kind: "naming" }
+                                                                  >)
+                                                                : null
+                                                        }
+                                                    >
+                                                        {(ns) => (
+                                                            <NamePrompt
+                                                                label="Name for new session:"
+                                                                placeholder="Session name"
+                                                                value={ns().label}
+                                                                loading={ns().loading}
+                                                                error={ns().error}
+                                                                submitLabel="Start"
+                                                                inputTestid="agent-fork-name-input"
+                                                                submitTestid="agent-fork-start"
+                                                                onInput={(label) =>
+                                                                    setForkState(row.definition_id, {
+                                                                        kind: "naming",
+                                                                        label,
+                                                                        loading: false,
+                                                                        error: null,
+                                                                    })
+                                                                }
+                                                                onSubmit={() => void handleForkStart(row)}
+                                                                onCancel={() => handleForkCancel(row.definition_id)}
+                                                            />
+                                                        )}
+                                                    </Show>
+                                                </div>
+                                            </AnchoredPopover>
+                                        </Show>
+                                    </li>
+                                );
+                            }}
+                        </For>
                     </TransitionGroup>
                 </ul>
             </Show>

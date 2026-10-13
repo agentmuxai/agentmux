@@ -378,55 +378,6 @@ declare global {
         block_id_hint: string;
     };
 
-    /** Cascade follow-up (2026-05-23) — one row of the AgentPicker's
-     * "Recent sessions" list. Mirrors NamedAgentRow + adds a preview
-     * (first user message text) and node count read from the filestore
-     * `output.state.json` snapshot. has_snapshot: false means the
-     * pane never wrote a snapshot (legacy / pre-persistence row); the
-     * row still surfaces so the user can reattach. */
-    type RecentSessionRow = {
-        instance_id: string;
-        instance_name: string;
-        definition_id: string;
-        definition_name: string;
-        provider: string;
-        /** Custom model vendor base URL override, mirrored from
-         *  AgentDefinition.model_vendor_base_url. Empty means the harness
-         *  talks to its own default vendor. See providers/catalog.ts's
-         *  resolveEffectiveVendor. */
-        model_vendor_base_url?: string;
-        working_directory: string;
-        identity_id: string;
-        identity_name: string;
-        memory_id: string;
-        memory_name: string;
-        block_id_hint: string;
-        /**
-         * CLI-emitted session id captured during the prior run. Empty
-         * when the row predates the capture or the CLI didn't emit a
-         * session id. Used by the picker reattach to populate
-         * `agent:sessionid` on the new block's meta so the spawned
-         * subprocess gets a real `--resume <sid>` on the FIRST turn.
-         */
-        session_id?: string;
-        preview: string;
-        node_count: number;
-        last_active_at: number;
-        has_snapshot: boolean;
-        /**
-         * True when `has_snapshot` is false because the filestore lookup
-         * itself ERRORED (I/O error, lock contention, DB read failure) —
-         * distinct from a genuine "the block never wrote a snapshot".
-         */
-        snapshot_check_failed?: boolean;
-        /** When the agent definition was first created (ms epoch). */
-        agent_created_at: number;
-        /** When this instance was most recently launched (ms epoch). */
-        started_at: number;
-        /** "host" or "container" — drives the runtime badge in the My Agents list. */
-        agent_type?: string;
-    };
-
 
     // wshrpc.CommandDeleteFileData
     type CommandDeleteFileData = {

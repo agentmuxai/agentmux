@@ -11,6 +11,7 @@
  * open / close behaviour.
  */
 
+import type { RecentSessionRow } from "@/types/rpc/RecentSessionRow";
 import { cleanup, render, screen } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
