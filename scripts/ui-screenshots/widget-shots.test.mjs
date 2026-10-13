@@ -37,7 +37,7 @@ describe("widget suite", () => {
         "defwidget@slack": {
             label: "Slack",
             icon: "brands@slack",
-            "display:hidden": true,
+            "display:grouponly": true,
             blockdef: { meta: { view: "browser" } },
         },
         "defwidget@browser": { label: "Browser", icon: "globe", blockdef: { meta: { view: "browser" } } },

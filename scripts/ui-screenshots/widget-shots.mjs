@@ -81,7 +81,7 @@ export function widgetEntries(config = JSON.parse(readFileSync(WIDGETS_JSON, "ut
             label: w.label ?? key,
             icon: w.icon,
             view: w.blockdef?.meta?.view,
-            hidden: !!w["display:hidden"],
+            hidden: !!(w["display:grouponly"] || w["display:hidden"]),
         }))
         .filter((w) => !w.hidden && !EXCLUDE[w.name] && (w.view || w.name === "agent"));
 }
