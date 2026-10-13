@@ -1,6 +1,6 @@
 # Drag space in the window and pane headers: does it need a grip?
 
-**Status:** active — v1 in PR #PRNUM: the dim grip in the window drag square (§5.1), the pane grip button (§5.2), the separator after the last tab (§5.5). Next: the Move menu (§5.3).
+**Status:** active — v1 in PR #4800: the dim grip in the window drag square (§5.1), the pane grip button (§5.2), the separator after the last tab (§5.5). Next: the Move menu (§5.3).
 **Date:** 2026-10-13
 **Author:** AgentA (Area54)
 **Trigger:** Owner request: "there is a small piece of dragable space, both on the window header and on the pane header. It is always reserved so users have a space to right click or drag. there is actually a best practice grid like icon that simulatates a sort of grip. is that the best practice solution to indicate? research best practices online, write a spect to file."
@@ -167,7 +167,7 @@ Owner, 2026-10-13: "there is a missing seperator at the end of the last window t
 
 ## 7. Phases
 
-1. **v1 (PR #PRNUM):** the window grip (§5.1), the pane grip button (§5.2), the last tab's separator (§5.5).
+1. **v1 (PR #4800):** the window grip (§5.1), the pane grip button (§5.2), the last tab's separator (§5.5).
 2. **Next, the Move menu items (§5.3):** the WCAG 2.5.7 fix; needs the layout's swap and tear-off operations exposed to the menu.
 
 ### Tests
