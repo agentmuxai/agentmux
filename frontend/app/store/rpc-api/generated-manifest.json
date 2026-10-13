@@ -14,6 +14,23 @@
             "method": "AgentCancelCommand"
         },
         {
+            "command": "agentdefcreatefromtemplate",
+            "method": "AgentDefCreateFromTemplateCommand"
+        },
+        {
+            "command": "agentdefhide",
+            "method": "AgentDefHideCommand"
+        },
+        {
+            "command": "agentdeflisthiddentemplates",
+            "method": "AgentDefListHiddenTemplatesCommand",
+            "send": "{}"
+        },
+        {
+            "command": "agentdefunhide",
+            "method": "AgentDefUnhideCommand"
+        },
+        {
             "command": "agentinput",
             "method": "AgentInputCommand"
         },
@@ -114,6 +131,27 @@
             "method": "CheckCliAuthCommand"
         },
         {
+            "command": "containerimagecheck",
+            "method": "ContainerImageCheckCommand"
+        },
+        {
+            "command": "containerruntimeavailable",
+            "method": "ContainerRuntimeAvailableCommand",
+            "send": "{}"
+        },
+        {
+            "command": "createagent",
+            "method": "CreateAgentDefinitionCommand"
+        },
+        {
+            "command": "createagentinstance",
+            "method": "CreateAgentInstanceCommand"
+        },
+        {
+            "command": "createagentskill",
+            "method": "CreateAgentSkillCommand"
+        },
+        {
             "command": "browser_profiles.create",
             "method": "CreateBrowserProfileCommand"
         },
@@ -128,6 +166,10 @@
         {
             "command": "deleteagent",
             "method": "DeleteAgentDefinitionCommand"
+        },
+        {
+            "command": "deleteagentinstance",
+            "method": "DeleteAgentInstanceCommand"
         },
         {
             "command": "deleteagentskill",
@@ -148,6 +190,10 @@
         {
             "command": "deleteeditorfile",
             "method": "DeleteEditorFileCommand"
+        },
+        {
+            "command": "deletesubblock",
+            "method": "DeleteSubBlockCommand"
         },
         {
             "command": "deletesystemmemory",
@@ -179,12 +225,25 @@
             "send": "null"
         },
         {
+            "command": "exportagents",
+            "method": "ExportAgentDefinitionsCommand",
+            "send": "{}"
+        },
+        {
             "command": "fleet.group.delete",
             "method": "FleetGroupDeleteCommand"
         },
         {
             "command": "fleet.group.list",
             "method": "FleetGroupListCommand"
+        },
+        {
+            "command": "forkagentdefinition",
+            "method": "ForkAgentDefinitionCommand"
+        },
+        {
+            "command": "forkagentdefinitionsuggest",
+            "method": "ForkAgentDefinitionSuggestCommand"
         },
         {
             "command": "fs.create",
@@ -292,6 +351,10 @@
             "method": "GlobalMemoryRevertCommand"
         },
         {
+            "command": "hidenamedagent",
+            "method": "HideNamedAgentCommand"
+        },
+        {
             "command": "importagents",
             "method": "ImportAgentDefinitionsCommand"
         },
@@ -320,6 +383,10 @@
             "method": "LinkAgentIdentityCommand"
         },
         {
+            "command": "listagenthistory",
+            "method": "ListAgentHistoryCommand"
+        },
+        {
             "command": "listagentidentities",
             "method": "ListAgentIdentitiesCommand"
         },
@@ -334,6 +401,10 @@
         {
             "command": "listbackgroundtasks",
             "method": "ListBackgroundTasksCommand"
+        },
+        {
+            "command": "listdroneruns",
+            "method": "ListDroneRunsCommand"
         },
         {
             "command": "listdrones",
@@ -372,8 +443,20 @@
             "method": "McpCatalogListForAgentCommand"
         },
         {
+            "command": "mcp.catalog.probe",
+            "method": "McpCatalogProbeCommand"
+        },
+        {
+            "command": "mcp.catalog.set_reach",
+            "method": "McpCatalogSetReachCommand"
+        },
+        {
             "command": "mcp.catalog.unbind",
             "method": "McpCatalogUnbindCommand"
+        },
+        {
+            "command": "mcp.catalog.upsert",
+            "method": "McpCatalogUpsertCommand"
         },
         {
             "command": "mcp.delete",
@@ -388,8 +471,21 @@
             "method": "McpListCommand"
         },
         {
+            "command": "mcp.observed.list",
+            "method": "McpObservedListCommand",
+            "send": "{}"
+        },
+        {
+            "command": "mcp.probe",
+            "method": "McpProbeCommand"
+        },
+        {
             "command": "mcp.unbind",
             "method": "McpUnbindCommand"
+        },
+        {
+            "command": "mcp.upsert",
+            "method": "McpUpsertCommand"
         },
         {
             "command": "movescratchfile",
@@ -490,6 +586,11 @@
             "method": "ReorderGlobalBundlesCommand"
         },
         {
+            "command": "reseedagents",
+            "method": "ReseedAgentDefinitionsCommand",
+            "send": "{}"
+        },
+        {
             "command": "resolve.prereqs",
             "method": "ResolvePrereqsCommand"
         },
@@ -504,6 +605,10 @@
         {
             "command": "layout.save",
             "method": "SaveLayoutCommand"
+        },
+        {
+            "command": "searchagenthistory",
+            "method": "SearchAgentHistoryCommand"
         },
         {
             "command": "session:archive",
@@ -532,6 +637,10 @@
         {
             "command": "bookmarks.set",
             "method": "SetBookmarksCommand"
+        },
+        {
+            "command": "shellexec",
+            "method": "ShellExecCommand"
         },
         {
             "command": "shellstatus",
@@ -590,6 +699,10 @@
             "method": "SkillUnbindCommand"
         },
         {
+            "command": "subprocessspawn",
+            "method": "SubprocessSpawnCommand"
+        },
+        {
             "command": "tooldecision",
             "method": "ToolDecisionCommand"
         },
@@ -640,6 +753,62 @@
         {
             "command": "watchmediadir",
             "method": "WatchMediaDirCommand"
+        },
+        {
+            "command": "widgets.call",
+            "method": "WidgetsCallCommand"
+        },
+        {
+            "command": "widgets.catalog",
+            "method": "WidgetsCatalogCommand",
+            "send": "{}"
+        },
+        {
+            "command": "widgets.catalog.install",
+            "method": "WidgetsCatalogInstallCommand"
+        },
+        {
+            "command": "widgets.endsession",
+            "method": "WidgetsEndSessionCommand"
+        },
+        {
+            "command": "widgets.install",
+            "method": "WidgetsInstallCommand"
+        },
+        {
+            "command": "widgets.list",
+            "method": "WidgetsListCommand",
+            "send": "{}"
+        },
+        {
+            "command": "widgets.readfile",
+            "method": "WidgetsReadFileCommand"
+        },
+        {
+            "command": "widgets.requests",
+            "method": "WidgetsRequestsCommand",
+            "send": "{}"
+        },
+        {
+            "command": "widgets.rescan",
+            "method": "WidgetsRescanCommand",
+            "send": "{}"
+        },
+        {
+            "command": "widgets.session",
+            "method": "WidgetsSessionCommand"
+        },
+        {
+            "command": "widgets.setenabled",
+            "method": "WidgetsSetEnabledCommand"
+        },
+        {
+            "command": "widgets.uninstall",
+            "method": "WidgetsUninstallCommand"
+        },
+        {
+            "command": "writeagentconfig",
+            "method": "WriteAgentConfigCommand"
         },
         {
             "command": "writeeditorfile",

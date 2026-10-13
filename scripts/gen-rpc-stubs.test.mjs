@@ -57,9 +57,25 @@ describe("renderStub", () => {
         expect(src).toContain('rpcCall("l", data, { timeout: 360000, ...opts })');
     });
 
+    it("a struct request whose fields all default can be sent as {} with no data parameter", () => {
+        expect(renderStub({ command: "s", method: "SCommand", send: "{}" }, row("s", "SReq", "SResp"))).toContain("SCommand(client: RpcClient, opts?: RpcOpts)");
+    });
+
+    it("an optional request the stub always sends empty keeps a no-data signature", () => {
+        const src = renderStub({ command: "m", method: "MCommand", send: "{}" }, row("m", "MReq | null", "MResp"));
+        expect(src).toContain('MCommand(client: RpcClient, opts?: RpcOpts): Promise<MResp> {\n        return client.rpcCall("m", {}, opts);');
+    });
+
+    it("data ?? {} makes a required request's parameter optional", () => {
+        const src = renderStub({ command: "r", method: "RCommand", send: "data ?? {}" }, row("r", "RReq", "RResp"));
+        expect(src).toContain("data?: RReq, opts?: RpcOpts");
+        expect(src).toContain('rpcCall("r", data ?? {}, opts)');
+    });
+
     it("rejects a send value that doesn't fit the request", () => {
-        expect(() => renderStub({ command: "r", method: "RCommand", send: "data ?? {}" }, row("r", "RReq", "RResp"))).toThrow(/only makes sense for an optional request/);
+        expect(() => renderStub({ command: "r", method: "RCommand", send: "null" }, row("r", "RReq", "RResp"))).toThrow(/needs an Option or \(\) request/);
         expect(() => renderStub({ command: "n", method: "NCommand", send: "data" }, row("n", "NoArgsReq", "null"))).toThrow(/no-argument/);
+        expect(() => renderStub({ command: "x", method: "XCommand", send: "whatever" }, row("x", "XReq", "XResp"))).toThrow(/"send" is/);
     });
 });
 
