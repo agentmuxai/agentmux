@@ -4,12 +4,9 @@
 // Block lifecycle, controller I/O, blockfile access. Split from the original
 // hand-maintained rpc-api file. Keep in sync with agentmux-srv RPC handlers.
 
-import { RpcClient } from "../rpc-client";
-
 export type { CommandAgentAnswerData } from "@/types/rpc/CommandAgentAnswerData";
 export type { CommandBlockInputData } from "@/types/rpc/CommandBlockInputData";
 
-import type { CommandAgentAnswerData } from "@/types/rpc/CommandAgentAnswerData";
 import type { CommandBlockInputData } from "@/types/rpc/CommandBlockInputData";
 
 /**
@@ -48,18 +45,4 @@ export type { CommandDockNodeStatusData } from "@/types/rpc/CommandDockNodeStatu
 export type { CommandListBackgroundTasksData } from "@/types/rpc/CommandListBackgroundTasksData";
 export type { CommandToolDecisionData } from "@/types/rpc/CommandToolDecisionData";
 
-export const BlockApi = {
-    // Deliver an AskUserQuestion answer to the running agent CLI as a
-    // tool_result. Spec: docs/specs/SPEC_ASK_USER_QUESTION_2026_06_15.md.
-    AgentAnswerCommand(client: RpcClient, data: CommandAgentAnswerData, opts?: RpcOpts): Promise<void> {
-        return client.rpcCall("agentanswer", data, opts);
-    },
-
-    ControllerResyncCommand(client: RpcClient, data: CommandControllerResyncData, opts?: RpcOpts): Promise<void> {
-        return client.rpcCall("controllerresync", data, opts);
-    },
-
-    CreateSubBlockCommand(client: RpcClient, data: CommandCreateSubBlockData, opts?: RpcOpts): Promise<ORef> {
-        return client.rpcCall("createsubblock", data, opts);
-    },
-};
+export const BlockApi = {};

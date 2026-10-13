@@ -882,12 +882,12 @@ pub(super) fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, con
     // setmeta → update object metadata in the DB, broadcast update event
     let mstore_sm = state.mstore.clone();
     let event_bus_sm = state.event_bus.clone();
-    engine.register_handler(
-        COMMAND_SET_META,
-        Box::new(move |data, _ctx| {
+    // `Value` request, parsed into its struct below (which uses the hand-written ORef/MetaType); the stub keeps its
+    // hand-written request type (generated-manifest.json `dataType`).
+    engine.register_typed(COMMAND_SET_META, move |data: serde_json::Value, _ctx| {
             let mstore = mstore_sm.clone();
             let event_bus = event_bus_sm.clone();
-            Box::pin(async move {
+        async move {
                 let cmd: CommandSetMetaData =
                     serde_json::from_value(data).map_err(|e| format!("setmeta: {e}"))?;
                 let oref_str = cmd.oref.to_string();
@@ -935,18 +935,17 @@ pub(super) fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, con
                     oref: oref_str,
                     data: update_data,
                 });
-                Ok(None)
-            })
-        }),
-    );
+                Ok(())
+        }
+    });
 
     // getmeta → return metadata for a wave object
     let mstore_gm = state.mstore.clone();
-    engine.register_handler(
-        COMMAND_GET_META,
-        Box::new(move |data, _ctx| {
+    // `Value` request and response: the meta map is what the frontend models as
+    // MetaType (generated-manifest.json `dataType` / `returns`).
+    engine.register_typed(COMMAND_GET_META, move |data: serde_json::Value, _ctx| {
             let mstore = mstore_gm.clone();
-            Box::pin(async move {
+        async move {
                 let cmd: CommandGetMetaData =
                     serde_json::from_value(data).map_err(|e| format!("getmeta: {e}"))?;
                 let obj: Option<serde_json::Value> = mstore
@@ -956,13 +955,12 @@ pub(super) fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, con
                     Some(val) => {
                         // Return the "meta" field if present, otherwise the full object
                         let meta = val.get("meta").cloned().unwrap_or(val);
-                        Ok(Some(meta))
+                        Ok(meta)
                     }
                     None => Err(format!("getmeta: object {} not found", cmd.oref)),
                 }
-            })
-        }),
-    );
+        }
+    });
 
     // waveinfo → return version and build info
     let version_info = state.version.clone();
@@ -999,9 +997,9 @@ pub(super) fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, con
     let boot_id_resync = state.boot_id.clone();
     let auth_key_resync = state.auth_key.clone();
     let config_watcher_resync = state.config_watcher.clone();
-    engine.register_handler(
-        COMMAND_CONTROLLER_RESYNC,
-        Box::new(move |data, _ctx| {
+    // `Value` request, parsed into its struct below (termsize and the rest); the stub keeps its
+    // hand-written request type (generated-manifest.json `dataType`).
+    engine.register_typed(COMMAND_CONTROLLER_RESYNC, move |data: serde_json::Value, _ctx| {
             let mstore = mstore_resync.clone();
             let broker = broker_resync.clone();
             let event_bus = event_bus_resync.clone();
@@ -1011,7 +1009,7 @@ pub(super) fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, con
             let boot_id = boot_id_resync.clone();
             let auth_key = auth_key_resync.clone();
             let config_watcher = config_watcher_resync.clone();
-            Box::pin(async move {
+        async move {
                 let cmd: CommandControllerResyncData = serde_json::from_value(data)
                     .map_err(|e| format!("controllerresync: {e}"))?;
                 tracing::info!(
@@ -1046,10 +1044,9 @@ pub(super) fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, con
                     &auth_key,
                     Some(config_watcher),
                 )?;
-                Ok(None)
-            })
-        }),
-    );
+                Ok(())
+        }
+    });
 
     // controllerinput → route keyboard input / signals / resize to block controller
     //
@@ -1100,11 +1097,11 @@ pub(super) fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, con
     // parented to an existing block, e.g. a `term`-view PTY embedded in an
     // agent pane's details drawer.
     let mstore_csb = state.mstore.clone();
-    engine.register_handler(
-        COMMAND_CREATE_SUB_BLOCK,
-        Box::new(move |data, _ctx| {
+    // `Value` request, parsed into its struct below (a BlockDef); the stub keeps its
+    // hand-written request type (generated-manifest.json `dataType`).
+    engine.register_typed(COMMAND_CREATE_SUB_BLOCK, move |data: serde_json::Value, _ctx| {
             let mstore = mstore_csb.clone();
-            Box::pin(async move {
+        async move {
                 let cmd: CommandCreateSubBlockData = serde_json::from_value(data)
                     .map_err(|e| format!("createsubblock: {e}"))?;
 
@@ -1171,10 +1168,9 @@ pub(super) fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, con
                 // TS `CreateSubBlockCommand` resolves `Promise<ORef>`, and
                 // `ORef` (srv-types.d.ts) is a plain string — return the
                 // bare "block:<id>" string, not a wrapper object.
-                Ok(Some(serde_json::Value::String(format!("block:{child_id}"))))
-            })
-        }),
-    );
+                Ok(format!("block:{child_id}"))
+        }
+    });
 
     // deletesubblock → tear down a sub-block created via createsubblock.
     // Kill-first ordering matches sagas/delete_block.rs; unlike that saga,
@@ -1608,10 +1604,10 @@ pub(super) fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, con
     // §2/§3.) Only the persistent controller speaks the control protocol;
     // container/one-shot subprocess agents return UNSUPPORTED_CONTROLLER (Phase 2).
     // Spec: docs/specs/SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md.
-    engine.register_handler(
-        COMMAND_AGENT_ANSWER,
-        Box::new(|data, _ctx| {
-            Box::pin(async move {
+    // `Value` request, parsed into its struct below (an answer to a question); the stub keeps its
+    // hand-written request type (generated-manifest.json `dataType`).
+    engine.register_typed(COMMAND_AGENT_ANSWER, move |data: serde_json::Value, _ctx| {
+        async move {
                 let cmd: CommandAgentAnswerData = serde_json::from_value(data)
                     .map_err(|e| format!("agent.answer: {e}"))?;
                 with_question_controller("agent.answer", "answering", &cmd.blockid, &cmd.tool_use_id, |ctrl| {
@@ -1622,10 +1618,9 @@ pub(super) fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, con
                     tool_use_id = %cmd.tool_use_id,
                     "[agent.answer] control_response delivered to persistent stdin"
                 );
-                Ok(None)
-            })
-        }),
-    );
+                Ok(())
+        }
+    });
 
     // agent.cancel → a REAL protocol-level decline of a pending AskUserQuestion
     // (Cancel button / Escape in AgentQuestionPanel.tsx), not a UI-only dismiss.
@@ -1722,14 +1717,14 @@ pub(super) fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, con
     let event_bus_setconfig = state.event_bus.clone();
 
     let lan_listeners_setconfig = state.lan_listeners.clone();
-    engine.register_handler(
-        COMMAND_SET_CONFIG,
-        Box::new(move |data, _ctx| {
+    // `Value` request, parsed into its struct below (a partial settings object); the stub keeps its
+    // hand-written request type (generated-manifest.json `dataType`).
+    engine.register_typed(COMMAND_SET_CONFIG, move |data: serde_json::Value, _ctx| {
             let cw = config_watcher_setconfig.clone();
             let eb = event_bus_setconfig.clone();
 
             let lan_listeners = lan_listeners_setconfig.clone();
-            Box::pin(async move {
+        async move {
                 let new_keys: serde_json::Map<String, serde_json::Value> =
                     serde_json::from_value(data).map_err(|e| format!("setconfig: {e}"))?;
 
@@ -1761,10 +1756,9 @@ pub(super) fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, con
                 //    browser-start-page watcher — see its own doc comment
                 //    for why this used to be duplicated inline here.
                 crate::backend::config_watcher_fs::broadcast_full_config(&cw, &eb);
-                Ok(None)
-            })
-        }),
-    );
+                Ok(())
+        }
+    });
 
     // Agent handlers (definitions, content, skills, history, import, reseed)
     super::agent_handlers::register_agent_handlers(engine, &state);

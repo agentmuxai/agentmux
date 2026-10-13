@@ -40,11 +40,9 @@ export type { SubmitAuthCallbackReq } from "@/types/rpc/SubmitAuthCallbackReq";
 export type { SubmitProviderApiKeyReq } from "@/types/rpc/SubmitProviderApiKeyReq";
 export type { UnlinkAgentIdentityResult } from "@/types/rpc/UnlinkAgentIdentityResult";
 
-import type { IdentityAccount } from "@/types/rpc/IdentityAccount";
 import type { PollProviderAuthReq } from "@/types/rpc/PollProviderAuthReq";
 import type { StartProviderAuthReq } from "@/types/rpc/StartProviderAuthReq";
 import type { SubmitProviderApiKeyReq } from "@/types/rpc/SubmitProviderApiKeyReq";
-import type { OAuthFlowStatus } from "./types";
 
 // `directAccount`, `existingAccountId`, `authEnv` and `requiresTty` are all
 // `#[serde(default)]` on non-`Option` Rust fields, so they are omittable on the
@@ -60,86 +58,6 @@ export type AuthStartInput = Pick<StartProviderAuthReq, "providerId" | "cliPath"
 export type { AgentIdentityLink as AgentDefinitionIdentity } from "@/types/rpc/AgentIdentityLink";
 
 export const IdentityApi = {
-    UpsertIdentityAccountCommand(
-        client: RpcClient,
-        data: Partial<IdentityAccount>,
-        opts?: RpcOpts
-    ): Promise<IdentityAccount> {
-        return client.rpcCall("upsertidentityaccount", data, opts);
-    },
-
-    DeleteIdentityAccountCommand(
-        client: RpcClient,
-        data: { id: string },
-        opts?: RpcOpts
-    ): Promise<{
-        deleted: boolean;
-        /** Agent (definition) ids whose `db_agent_identity_links` rows were
-         *  cascaded by this delete. Any of them with a live process still
-         *  holds the account's tokens until restarted — drives the Armory
-         *  delete-time disclosure (SPEC_ACCOUNT_DELETE_DEAUTH_LAYERS_2_4
-         *  §4). Optional so older backends' `{ deleted }` shape stays
-         *  assignable. */
-        affectedAgents?: string[];
-        /** What removing the saved login did; null when there was no row
-         *  (SPEC_ARMORY_ACCOUNTS_DELETE_AND_INLINE_DETAIL_2026_10_04 §3.4).
-         *  Optional so older backends' shape stays assignable. */
-        cleanup?: {
-            outcome: "removed" | "absent" | "skipped" | "failed" | "none";
-            path?: string;
-            detail?: string;
-            historyKept?: boolean;
-            historyPath?: string;
-        } | null;
-    }> {
-        return client.rpcCall("deleteidentityaccount", data, opts);
-    },
-
-    // Armory: optionally validate (validate=true → single user-initiated
-    // outbound probe) then store an API key in the OS keychain. The plaintext
-    // is never returned; on success the response carries only the masked tail +
-    // non-secret metadata. See docs/specs/archive/SPEC_TRUST_CENTER_2026_06_15.md §5/§6.
-    AccountKeyVerifyCommand(
-        client: RpcClient,
-        data: {
-            provider: string;
-            name: string;
-            displayName?: string;
-            kind?: string;
-            apiKey: string;
-            validate: boolean;
-            accountId?: string;
-            context?: Record<string, unknown>;
-        },
-        opts?: RpcOpts
-    ): Promise<{
-        valid: boolean;
-        error?: string;
-        accountId?: string;
-        maskedTail?: string;
-        status?: string;
-        metadata?: Record<string, unknown>;
-    }> {
-        return client.rpcCall("account.key.verify", data, opts);
-    },
-
-    // Armory service OAuth (SPEC_TRUST_CENTER §4.2/§12.1). Resolves the
-    // provider's OAuth config (built-in public client id, or BYO clientId/secret),
-    // spawns the flow (PKCE loopback or device), and returns a session id + the
-    // initial status. A "not configured" / unknown-provider case comes back as a
-    // clean `error` field (not an RPC failure) so the UI can surface it.
-    AccountOAuthStartCommand(
-        client: RpcClient,
-        data: { provider: string; name: string; clientId?: string; clientSecret?: string },
-        opts?: RpcOpts
-    ): Promise<{ sessionId?: string; status?: OAuthFlowStatus; error?: string }> {
-        return client.rpcCall("account.oauth.start", data, opts);
-    },
-
-    AccountOAuthPollCommand(client: RpcClient, data: { sessionId: string }, opts?: RpcOpts): Promise<OAuthFlowStatus> {
-        return client.rpcCall("account.oauth.poll", data, opts);
-    },
-
     // ── Pre-launch OAuth (spec: SPEC_PRE_LAUNCH_OAUTH_FLOW_2026_05_14.md)
 
     AuthStartCommand(

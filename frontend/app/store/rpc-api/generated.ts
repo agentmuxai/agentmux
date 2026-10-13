@@ -5,7 +5,9 @@
 // typed commands) and generated-manifest.json. DO NOT EDIT: change the Rust types or the
 // manifest, then run `node scripts/gen-rpc-stubs.mjs`.
 
+import type { AccountKeyVerifyResult } from "@/types/rpc/AccountKeyVerifyResult";
 import type { AccountOAuthCancelResult } from "@/types/rpc/AccountOAuthCancelResult";
+import type { AccountOAuthStartResult } from "@/types/rpc/AccountOAuthStartResult";
 import type { AckResp } from "@/types/rpc/AckResp";
 import type { ActivitySummaryResult } from "@/types/rpc/ActivitySummaryResult";
 import type { AgentArchiveRow } from "@/types/rpc/AgentArchiveRow";
@@ -52,6 +54,7 @@ import type { CancelProviderAuthReq } from "@/types/rpc/CancelProviderAuthReq";
 import type { CheckCliAuthResult } from "@/types/rpc/CheckCliAuthResult";
 import type { ClaudeGlobalConfig } from "@/types/rpc/ClaudeGlobalConfig";
 import type { CommandActivitySummaryData } from "@/types/rpc/CommandActivitySummaryData";
+import type { CommandAgentAnswerData } from "@/types/rpc/CommandAgentAnswerData";
 import type { CommandAgentCancelData } from "@/types/rpc/CommandAgentCancelData";
 import type { CommandAgentDefCreateFromTemplateData } from "@/types/rpc/CommandAgentDefCreateFromTemplateData";
 import type { CommandAgentDefHideData } from "@/types/rpc/CommandAgentDefHideData";
@@ -95,6 +98,7 @@ import type { CommandDeleteAgentDefinitionData } from "@/types/rpc/CommandDelete
 import type { CommandDeleteAgentInstanceData } from "@/types/rpc/CommandDeleteAgentInstanceData";
 import type { CommandDeleteAgentSkillData } from "@/types/rpc/CommandDeleteAgentSkillData";
 import type { CommandDeleteBundleData } from "@/types/rpc/CommandDeleteBundleData";
+import type { CommandDeleteIdentityAccountData } from "@/types/rpc/CommandDeleteIdentityAccountData";
 import type { CommandDeleteSubBlockData } from "@/types/rpc/CommandDeleteSubBlockData";
 import type { CommandDockNodeStatusData } from "@/types/rpc/CommandDockNodeStatusData";
 import type { CommandEventReadHistoryData } from "@/types/rpc/CommandEventReadHistoryData";
@@ -199,6 +203,7 @@ import type { DeleteBundleResult } from "@/types/rpc/DeleteBundleResult";
 import type { DeleteDroneReq } from "@/types/rpc/DeleteDroneReq";
 import type { DeleteDroneResp } from "@/types/rpc/DeleteDroneResp";
 import type { DeleteEditorFileReq } from "@/types/rpc/DeleteEditorFileReq";
+import type { DeleteIdentityAccountResult } from "@/types/rpc/DeleteIdentityAccountResult";
 import type { DroneDefinition } from "@/types/rpc/DroneDefinition";
 import type { DroneRun } from "@/types/rpc/DroneRun";
 import type { EditorRootsReq } from "@/types/rpc/EditorRootsReq";
@@ -386,6 +391,23 @@ import type { WidgetSetEnabledReq } from "@/types/rpc/WidgetSetEnabledReq";
 import { RpcClient } from "../rpc-client";
 
 export const GeneratedApi = {
+  // command "account.key.verify"
+  AccountKeyVerifyCommand(
+    client: RpcClient,
+    data: {
+      provider: string;
+      name: string;
+      displayName?: string;
+      kind?: string;
+      apiKey: string;
+      validate: boolean;
+      accountId?: string;
+      context?: Record<string, unknown>;
+    },
+    opts?: RpcOpts
+  ): Promise<AccountKeyVerifyResult> {
+    return client.rpcCall("account.key.verify", data, opts);
+  },
   // command "account.oauth.cancel"
   AccountOAuthCancelCommand(
     client: RpcClient,
@@ -394,6 +416,22 @@ export const GeneratedApi = {
   ): Promise<AccountOAuthCancelResult> {
     return client.rpcCall("account.oauth.cancel", data, opts);
   },
+  // command "account.oauth.poll"
+  AccountOAuthPollCommand(
+    client: RpcClient,
+    data: OAuthSessionReq,
+    opts?: RpcOpts
+  ): Promise<import("@/app/store/rpc-api/types").OAuthFlowStatus> {
+    return client.rpcCall("account.oauth.poll", data, opts);
+  },
+  // command "account.oauth.start"
+  AccountOAuthStartCommand(
+    client: RpcClient,
+    data: { provider: string; name: string; clientId?: string; clientSecret?: string },
+    opts?: RpcOpts
+  ): Promise<AccountOAuthStartResult> {
+    return client.rpcCall("account.oauth.start", data, opts);
+  },
   // command "session:activity_summary"
   AgentActivitySummaryCommand(
     client: RpcClient,
@@ -401,6 +439,10 @@ export const GeneratedApi = {
     opts?: RpcOpts
   ): Promise<ActivitySummaryResult> {
     return client.rpcCall("session:activity_summary", data, opts);
+  },
+  // command "agentanswer"
+  AgentAnswerCommand(client: RpcClient, data: CommandAgentAnswerData, opts?: RpcOpts): Promise<void> {
+    return client.rpcCall("agentanswer", data, opts);
   },
   // command "agentcancel"
   AgentCancelCommand(client: RpcClient, data: CommandAgentCancelData, opts?: RpcOpts): Promise<void> {
@@ -727,6 +769,10 @@ export const GeneratedApi = {
   ): Promise<void> {
     return client.rpcCall("controllerinput", data, opts);
   },
+  // command "controllerresync"
+  ControllerResyncCommand(client: RpcClient, data: CommandControllerResyncData, opts?: RpcOpts): Promise<void> {
+    return client.rpcCall("controllerresync", data, opts);
+  },
   // command "createagent"
   CreateAgentDefinitionCommand(
     client: RpcClient,
@@ -818,6 +864,10 @@ export const GeneratedApi = {
   ): Promise<CreateScratchFileResult> {
     return client.rpcCall("createscratchfile", data ?? {}, opts);
   },
+  // command "createsubblock"
+  CreateSubBlockCommand(client: RpcClient, data: CommandCreateSubBlockData, opts?: RpcOpts): Promise<string> {
+    return client.rpcCall("createsubblock", data, opts);
+  },
   // command "deleteagent"
   DeleteAgentDefinitionCommand(
     client: RpcClient,
@@ -857,6 +907,14 @@ export const GeneratedApi = {
   // command "deleteeditorfile"
   DeleteEditorFileCommand(client: RpcClient, data: DeleteEditorFileReq, opts?: RpcOpts): Promise<void> {
     return client.rpcCall("deleteeditorfile", data, opts);
+  },
+  // command "deleteidentityaccount"
+  DeleteIdentityAccountCommand(
+    client: RpcClient,
+    data: CommandDeleteIdentityAccountData,
+    opts?: RpcOpts
+  ): Promise<DeleteIdentityAccountResult> {
+    return client.rpcCall("deleteidentityaccount", data, opts);
   },
   // command "deletesubblock"
   DeleteSubBlockCommand(client: RpcClient, data: CommandDeleteSubBlockData, opts?: RpcOpts): Promise<void> {
@@ -1093,6 +1151,10 @@ export const GeneratedApi = {
     opts?: RpcOpts
   ): Promise<IdentityAccount> {
     return client.rpcCall("getidentityaccount", data, opts);
+  },
+  // command "getmeta"
+  GetMetaCommand(client: RpcClient, data: CommandGetMetaData, opts?: RpcOpts): Promise<MetaType> {
+    return client.rpcCall("getmeta", data, opts);
   },
   // command "reactive.registrations"
   GetReactiveRegistrationsCommand(
@@ -1714,6 +1776,14 @@ export const GeneratedApi = {
   SetBrowserStartPageCommand(client: RpcClient, data: StartPageSetReq, opts?: RpcOpts): Promise<StartPageSetResult> {
     return client.rpcCall("browser_start_page.set", data, opts);
   },
+  // command "setconfig"
+  SetConfigCommand(client: RpcClient, data: SettingsType, opts?: RpcOpts): Promise<void> {
+    return client.rpcCall("setconfig", data, opts);
+  },
+  // command "setmeta"
+  SetMetaCommand(client: RpcClient, data: CommandSetMetaData, opts?: RpcOpts): Promise<void> {
+    return client.rpcCall("setmeta", data, opts);
+  },
   // command "shellexec"
   ShellExecCommand(client: RpcClient, data: CommandShellExecData, opts?: RpcOpts): Promise<ShellExecResult> {
     return client.rpcCall("shellexec", data, opts);
@@ -1983,6 +2053,14 @@ export const GeneratedApi = {
   // command "upsertdrone"
   UpsertDroneCommand(client: RpcClient, data: DroneDefinition, opts?: RpcOpts): Promise<DroneDefinition> {
     return client.rpcCall("upsertdrone", data, opts);
+  },
+  // command "upsertidentityaccount"
+  UpsertIdentityAccountCommand(
+    client: RpcClient,
+    data: Partial<IdentityAccount>,
+    opts?: RpcOpts
+  ): Promise<IdentityAccount> {
+    return client.rpcCall("upsertidentityaccount", data, opts);
   },
   // command "bundle.validate"
   ValidateBundleCommand(

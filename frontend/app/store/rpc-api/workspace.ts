@@ -40,24 +40,12 @@ export type { ToolStatus } from "@/types/rpc/ToolStatus";
 export type { ToolStatusEntry } from "@/types/rpc/ToolStatusEntry";
 
 export const WorkspaceApi = {
-    GetMetaCommand(client: RpcClient, data: CommandGetMetaData, opts?: RpcOpts): Promise<MetaType> {
-        return client.rpcCall("getmeta", data, opts);
-    },
-
     ResolveIdsCommand(
         client: RpcClient,
         data: CommandResolveIdsData,
         opts?: RpcOpts
     ): Promise<CommandResolveIdsRtnData> {
         return client.rpcCall("resolveids", data, opts);
-    },
-
-    SetConfigCommand(client: RpcClient, data: SettingsType, opts?: RpcOpts): Promise<void> {
-        return client.rpcCall("setconfig", data, opts);
-    },
-
-    SetMetaCommand(client: RpcClient, data: CommandSetMetaData, opts?: RpcOpts): Promise<void> {
-        return client.rpcCall("setmeta", data, opts);
     },
 
     SetRTInfoCommand(client: RpcClient, data: CommandSetRTInfoData, opts?: RpcOpts): Promise<void> {
