@@ -46,6 +46,9 @@ export function renderEvents(rows) {
         "/** The typed events' wire names. */",
         `export const TYPED_MUX_EVENTS = [${rows.map((r) => JSON.stringify(r.event)).join(", ")}] as const;`,
         "",
+        "/** The typed events that carry no payload: srv sends them with no `data`. */",
+        `export const NO_PAYLOAD_MUX_EVENTS: ReadonlySet<string> = new Set([${rows.filter((r) => r.payloadTs.name === "null").map((r) => JSON.stringify(r.event)).join(", ")}]);`,
+        "",
     ].join("\n");
 }
 
@@ -73,6 +76,16 @@ export function untypedSubscriptions(sources, typed, wps) {
             if (!name || !typed.has(name)) continue;
             const line = text.slice(0, m.index).split("\n").length;
             errors.push(`${path}:${line}: "${name}" has a typed payload; subscribe with onMuxEvent(WpsEvent.${m[1] ?? "…"}, (data) => …), not muxEventSubscribe`);
+        }
+        // Any other use of a typed event's WpsEvent name, such as a list mapped into
+        // `muxEventSubscribe({ eventType, … })`, hides how it is subscribed. Allowed: onMuxEvent's
+        // first argument, `eventType:` (checked above), an RPC's `event:` field, and a named constant.
+        for (const m of text.matchAll(/WpsEvent\.(\w+)\b/g)) {
+            const name = wps.get(m[1]);
+            if (!name || !typed.has(name)) continue;
+            if (/(?:onMuxEvent\(|eventType:|\bevent:|\bconst\s+\w+\s*(?::\s*string\s*)?=)\s*$/.test(text.slice(Math.max(0, m.index - 60), m.index))) continue;
+            const line = text.slice(0, m.index).split("\n").length;
+            errors.push(`${path}:${line}: WpsEvent.${m[1]} has a typed payload; pass it straight to onMuxEvent(WpsEvent.${m[1]}, (data) => …)`);
         }
     }
     return errors;

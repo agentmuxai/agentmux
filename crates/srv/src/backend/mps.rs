@@ -505,7 +505,7 @@ impl Broker {
             scopes,
             sender: String::new(),
             persist,
-            data: serde_json::to_value(payload).ok(),
+            data: super::mps_events::payload_data(payload),
         });
     }
 
@@ -727,6 +727,23 @@ mod tests {
             b.publish(MuxEvent { event: name.into(), scopes: vec![], sender: String::new(), persist: 0, data: None });
         }
         assert_eq!(*seen.lock().unwrap(), vec!["agentfailure".to_string(), "config".to_string()]);
+    }
+
+    #[test]
+    fn a_signal_event_goes_out_with_no_data_and_a_payload_event_with_its_payload() {
+        use crate::backend::mps_events::{AgentsChanged, FilesChanged, FilesChangedEvent};
+        let b = Broker::new();
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::<MuxEvent>::new()));
+        let s2 = seen.clone();
+        b.add_observer(std::sync::Arc::new(move |e: &MuxEvent| s2.lock().unwrap().push(e.clone())));
+        b.publish_event::<AgentsChanged>(&(), vec![], 0);
+        b.publish_event::<FilesChanged>(&FilesChangedEvent { dir: "/tmp".into() }, vec![], 0);
+        let seen = seen.lock().unwrap();
+        // As the hand-built `data: None` it replaces: no `data` key on the wire at all.
+        let signal = serde_json::to_value(&seen[0]).unwrap();
+        assert_eq!(signal["event"], "agents:changed");
+        assert!(signal.get("data").is_none(), "{signal}");
+        assert_eq!(seen[1].data, Some(serde_json::json!({ "dir": "/tmp" })));
     }
 
     use super::*;

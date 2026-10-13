@@ -36,7 +36,7 @@ import { formatErrorReport } from "@/app/errors/error-report";
 import { subscribeToPaneLifecycle } from "@/app/store/agent-pane-registration";
 import { getOpenDefinitionMap } from "@/app/store/agent-pane-state-store";
 import { ContextMenuModel } from "@/app/store/contextmenu";
-import { muxEventSubscribe } from "@/app/store/mps";
+import { onMuxEvent } from "@/app/store/mps";
 import { trackPaneContent } from "@/app/store/pane-content-holds";
 import { createPaneReadiness } from "@/app/store/pane-readiness";
 import type { AgentDefinition, AgentOpenPane } from "@/app/store/rpc-api";
@@ -155,10 +155,7 @@ export function useAgentDefinitions(): [() => AgentDefinition[], () => boolean] 
 
         load();
 
-        const unsub = muxEventSubscribe({
-            eventType: WpsEvent.AgentsChanged,
-            handler: () => load(),
-        });
+        const unsub = onMuxEvent(WpsEvent.AgentsChanged, () => load());
 
         onCleanup(() => {
             cancelled = true;
@@ -181,10 +178,7 @@ export function useOpenDefinitionMap(): [() => Map<string, string>, () => void] 
     const [openDefinitions, setOpenDefinitions] = createSignal<Map<string, string>>(new Map());
     const refresh = () => setOpenDefinitions(getOpenDefinitionMap());
     onMount(refresh);
-    const unsubAgentsChanged = muxEventSubscribe({
-        eventType: WpsEvent.AgentsChanged,
-        handler: refresh,
-    });
+    const unsubAgentsChanged = onMuxEvent(WpsEvent.AgentsChanged, refresh);
     const unsubPaneLifecycle = subscribeToPaneLifecycle(refresh);
     onCleanup(unsubAgentsChanged);
     onCleanup(unsubPaneLifecycle);
@@ -229,10 +223,7 @@ function useInstanceOpenDefinitions(): [
         }
     };
     onMount(() => void fetchPanes());
-    const unsub = muxEventSubscribe({
-        eventType: WpsEvent.ProcessBrokerTrackedBlocksChanged,
-        handler: () => void fetchPanes(),
-    });
+    const unsub = onMuxEvent(WpsEvent.ProcessBrokerTrackedBlocksChanged, () => void fetchPanes());
     onCleanup(unsub);
     // Tear-off, redock and tab moves keep the pane's controller, so they emit
     // no tracked-blocks event; refetch when the user comes back to this

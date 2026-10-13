@@ -15,7 +15,7 @@
 import { createMemo, createSignal, type Accessor } from "solid-js";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { muxEventSubscribe } from "@/app/store/mps";
+import { onMuxEvent } from "@/app/store/mps";
 import type { McpPreloadEntry } from "./mcp-preload-catalog";
 import type { AgentDefinition } from "@/app/store/rpc-api";
 
@@ -95,10 +95,7 @@ export class McpCatalogModel {
         });
         void this.refresh();
         void this.loadAgents();
-        this.unsubChanged = muxEventSubscribe({
-            eventType: WpsEvent.McpChanged,
-            handler: () => void this.refresh(),
-        });
+        this.unsubChanged = onMuxEvent(WpsEvent.McpChanged, () => void this.refresh());
     }
 
     async refresh(): Promise<void> {

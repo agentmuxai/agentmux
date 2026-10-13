@@ -286,13 +286,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 mstore
                     .identity_upsert_with_mirror(&identity_store, &account)
                     .map_err(|e| format!("upsertidentityaccount: {e}"))?;
-                broker.publish(crate::backend::mps::MuxEvent {
-                    event: "identityaccounts:changed".to_string(),
-                    scopes: vec![],
-                    sender: String::new(),
-                    persist: 0,
-                    data: None,
-                });
+                broker.publish_event::<crate::backend::mps_events::IdentityAccountsChanged>(&(), vec![], 0);
                 Ok(account)
         }
     });
@@ -434,13 +428,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     }
                     return Err(format!("account.key.verify: {e}"));
                 }
-                broker.publish(crate::backend::mps::MuxEvent {
-                    event: "identityaccounts:changed".to_string(),
-                    scopes: vec![],
-                    sender: String::new(),
-                    persist: 0,
-                    data: None,
-                });
+                broker.publish_event::<crate::backend::mps_events::IdentityAccountsChanged>(&(), vec![], 0);
                 Ok(AccountKeyVerifyResult {
                     valid,
                     error: None,
@@ -598,13 +586,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     "identity.delete: account removed (deleteidentityaccount)"
                 );
                 if deleted {
-                    broker.publish(crate::backend::mps::MuxEvent {
-                        event: "identityaccounts:changed".to_string(),
-                        scopes: vec![],
-                        sender: String::new(),
-                        persist: 0,
-                        data: None,
-                    });
+                    broker.publish_event::<crate::backend::mps_events::IdentityAccountsChanged>(&(), vec![], 0);
                     // Layer 2 — running-agent reconciliation (spec
                     // SPEC_ACCOUNT_DELETE_DEAUTH_LAYERS_2_4_2026_07_14.md §3):
                     // the cascaded links name agents that may have a LIVE
@@ -1043,13 +1025,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     .instance_set_hidden(&cmd.id, true)
                     .map_err(|e| format!("hidenamedagent: {e}"))?;
                 if hidden {
-                    broker.publish(crate::backend::mps::MuxEvent {
-                        event: "namedagents:changed".to_string(),
-                        scopes: vec![],
-                        sender: String::new(),
-                        persist: 0,
-                        data: None,
-                    });
+                    broker.publish_event::<crate::backend::mps_events::NamedAgentsChanged>(&(), vec![], 0);
                 }
                 Ok(HideNamedAgentResult { hidden })
             }

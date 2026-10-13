@@ -26,7 +26,7 @@ use cron::Schedule;
 
 use crate::backend::storage::store::Store;
 use crate::backend::storage::cron::CronJob;
-use crate::backend::mps::{Broker, MuxEvent, EVENT_CRON_CHANGED};
+use crate::backend::mps::Broker;
 use crate::backend::reactive::types::InjectionRequest;
 
 /// Abort handles for every currently scheduled cron task.
@@ -84,13 +84,7 @@ impl CronScheduler {
     }
 
     fn publish_changed(&self) {
-        self.broker.publish(MuxEvent {
-            event: EVENT_CRON_CHANGED.to_string(),
-            scopes: vec![],
-            sender: String::new(),
-            persist: 0,
-            data: None,
-        });
+        self.broker.publish_event::<crate::backend::mps_events::CronChanged>(&(), vec![], 0);
     }
 
     /// Load all enabled jobs from the DB and schedule them. Call once at startup.

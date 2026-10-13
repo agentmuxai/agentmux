@@ -1252,10 +1252,7 @@ export class SwarmViewModel {
         // Cron bucket (SPEC_SWARM_LONG_RUNNING_PROCESS_ROWS_2026_07_20 Phase 2).
         // Payload-free — any create/fire/pause/resume/delete just triggers a
         // full reload of the (already-cheap, unfiltered) active list.
-        const unsubCronChanged = muxEventSubscribe({
-            eventType: WpsEvent.CronChanged,
-            handler: () => this.scheduleLoadCrons(),
-        });
+        const unsubCronChanged = onMuxEvent(WpsEvent.CronChanged, () => this.scheduleLoadCrons());
         if (unsubCronChanged) this.unsubs.push(unsubCronChanged);
 
         // Background tasks. Payload-free invalidation, scoped to the block
@@ -1345,10 +1342,7 @@ export class SwarmViewModel {
         // restored agent's controller could register successfully server-side
         // while this list stayed stale client-side indefinitely. See
         // docs/reports/REPORT_SWARM_MOUNT_DEPENDENT_TRACKING_GAP_2026_09_15.md.
-        const unsubTrackedBlocksChanged = muxEventSubscribe({
-            eventType: WpsEvent.ProcessBrokerTrackedBlocksChanged,
-            handler: () => void this.loadTrackedBlocks(),
-        });
+        const unsubTrackedBlocksChanged = onMuxEvent(WpsEvent.ProcessBrokerTrackedBlocksChanged, () => void this.loadTrackedBlocks());
         if (unsubTrackedBlocksChanged) this.unsubs.push(unsubTrackedBlocksChanged);
 
         // Bounded self-healing safety net: re-poll regardless of whether any

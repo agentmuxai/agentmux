@@ -43,10 +43,18 @@ describe("untypedSubscriptions", () => {
         expect(errors[1]).toMatch(/^frontend\/b\.ts:1: "sysinfo"/);
     });
 
-    it("leaves untyped events, and onMuxEvent, alone", () => {
+    it("refuses a typed event's name used any other way, such as a list mapped into muxEventSubscribe", () => {
+        const sources = [["frontend/e.ts", "[WpsEvent.BlockClose, WpsEvent.SysInfo].map((eventType) =>\n    muxEventSubscribe({ eventType, handler }));"]];
+        expect(untypedSubscriptions(sources, typed, wps)).toEqual([
+            "frontend/e.ts:1: WpsEvent.SysInfo has a typed payload; pass it straight to onMuxEvent(WpsEvent.SysInfo, (data) => …)",
+        ]);
+    });
+
+    it("leaves untyped events, onMuxEvent, an RPC's event field and a named constant alone", () => {
         const sources = [
             ["frontend/c.ts", "muxEventSubscribe({ eventType: WpsEvent.BlockClose, handler: () => {} });"],
             ["frontend/d.ts", "onMuxEvent(WpsEvent.SysInfo, (data) => use(data.values));"],
+            ["frontend/f.ts", "EventReadHistoryCommand(client, { event: WpsEvent.SysInfo, scope });\nconst EVENT_SYS = WpsEvent.SysInfo;"],
         ];
         expect(untypedSubscriptions(sources, typed, wps)).toEqual([]);
     });

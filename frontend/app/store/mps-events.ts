@@ -169,6 +169,13 @@ export const WpsEvent = {
     // New events from one subagent. Typed in srv; nothing subscribes yet (Swarm uses dispatch:activity).
     SubagentActivity: "subagent:activity",
     SubagentUpdated: "subagent:updated",
+    // No-payload signals typed in srv that nothing subscribes to yet.
+    AgentContentChanged: "agentcontent:changed",
+    AgentHistoryChanged: "agenthistory:changed",
+    AgentSkillsChanged: "agentskills:changed",
+    DronesChanged: "drones:changed",
+    NamedAgentsChanged: "namedagents:changed",
+    WorkQueueChanged: "workqueue:changed",
     ToolChunk: "tool_chunk",
     ViewerPaired: "viewer:paired",
     AgentShutdown: "agent:shutdown",

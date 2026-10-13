@@ -88,6 +88,42 @@ events! {
     FilesChanged: crate::backend::files_watcher::EVENT_FILES_CHANGED => FilesChangedEvent,
     /// A copy/move/delete job's progress (`fs_ops::jobs`).
     FilesOp: crate::backend::fs_ops::jobs::EVENT_FILES_OP => crate::backend::rpc_types::FsOpEvent,
+
+    // Signals with no payload: something changed, and a subscriber refetches what it shows.
+    /// The agents list changed.
+    AgentsChanged: "agents:changed" => (),
+    /// An agent's stored content changed (`setagentcontent`).
+    AgentContentChanged: "agentcontent:changed" => (),
+    /// An entry was appended to an agent's history.
+    AgentHistoryChanged: "agenthistory:changed" => (),
+    /// A named agent was hidden.
+    NamedAgentsChanged: "namedagents:changed" => (),
+    /// The skills installed for an agent changed.
+    AgentSkillsChanged: "agentskills:changed" => (),
+    /// Memory entries changed.
+    MemoriesChanged: "memories:changed" => (),
+    /// The skill library changed.
+    SkillsChanged: "skills:changed" => (),
+    /// The MCP servers changed.
+    McpChanged: "mcp:changed" => (),
+    /// The provider accounts changed.
+    IdentityAccountsChanged: "identityaccounts:changed" => (),
+    /// Scheduled jobs changed.
+    CronChanged: super::mps::EVENT_CRON_CHANGED => (),
+    /// The drones changed.
+    DronesChanged: "drones:changed" => (),
+    /// The configured remotes changed.
+    RemotesChanged: super::mps::EVENT_REMOTES_CHANGE => (),
+    /// The process broker's set of tracked blocks changed.
+    TrackedBlocksChanged: crate::broker::process::EVENT_TRACKED_BLOCKS_CHANGED => (),
+    /// The work queue changed.
+    WorkQueueChanged: "workqueue:changed" => (),
+}
+
+/// An event's `data`: its payload as JSON, or none for an event that carries none (`()`, a
+/// pure "something changed" signal), so such an event goes out with no `data` field at all.
+pub fn payload_data<P: Serialize>(payload: &P) -> Option<serde_json::Value> {
+    serde_json::to_value(payload).ok().filter(|v| !v.is_null())
 }
 
 /// `editor:file_changed` / `media:file_changed`: the file that changed.

@@ -116,13 +116,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 mstore
                     .bundle_upsert_with_version_based(&memory, "armory-ui", "", "human", "{}", base_sha256.as_deref())
                     .map_err(|e| format!("upsertmemory: {e}"))?;
-                broker.publish(crate::backend::mps::MuxEvent {
-                    event: "memories:changed".to_string(),
-                    scopes: vec![],
-                    sender: String::new(),
-                    persist: 0,
-                    data: None,
-                });
+                broker.publish_event::<crate::backend::mps_events::MemoriesChanged>(&(), vec![], 0);
                 Ok(memory)
             }
         },
@@ -151,13 +145,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         &component_store,
                         &cmd.id,
                     );
-                    broker.publish(crate::backend::mps::MuxEvent {
-                        event: "memories:changed".to_string(),
-                        scopes: vec![],
-                        sender: String::new(),
-                        persist: 0,
-                        data: None,
-                    });
+                    broker.publish_event::<crate::backend::mps_events::MemoriesChanged>(&(), vec![], 0);
                 }
                 Ok(DeleteBundleResult { deleted })
             }
@@ -175,13 +163,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let updated = mstore
                     .bundle_reorder(&cmd.ids)
                     .map_err(|e| format!("reorderglobalbrain: {e}"))?;
-                broker.publish(crate::backend::mps::MuxEvent {
-                    event: "memories:changed".to_string(),
-                    scopes: vec![],
-                    sender: String::new(),
-                    persist: 0,
-                    data: None,
-                });
+                broker.publish_event::<crate::backend::mps_events::MemoriesChanged>(&(), vec![], 0);
                 Ok(ReorderGlobalBundlesResult { updated })
             }
         },
@@ -229,13 +211,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 mstore
                     .bundle_upsert_system_if_changed_based(&memory, "armory-ui", "human", "{}", base_sha256.as_deref())
                     .map_err(|e| format!("upsertsystemmemory: {e}"))?;
-                broker.publish(crate::backend::mps::MuxEvent {
-                    event: "memories:changed".to_string(),
-                    scopes: vec![],
-                    sender: String::new(),
-                    persist: 0,
-                    data: None,
-                });
+                broker.publish_event::<crate::backend::mps_events::MemoriesChanged>(&(), vec![], 0);
                 // Return the row actually persisted, not the client-supplied
                 // struct — bundle_upsert_system hardcodes
                 // is_blank/is_global/is_system server-side regardless of
@@ -266,13 +242,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     .bundle_delete_system(&cmd.id)
                     .map_err(|e| format!("deletesystemmemory: {e}"))?;
                 if deleted {
-                    broker.publish(crate::backend::mps::MuxEvent {
-                        event: "memories:changed".to_string(),
-                        scopes: vec![],
-                        sender: String::new(),
-                        persist: 0,
-                        data: None,
-                    });
+                    broker.publish_event::<crate::backend::mps_events::MemoriesChanged>(&(), vec![], 0);
                 }
                 Ok(DeleteBundleResult { deleted })
             }
@@ -327,13 +297,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
             let broker = broker.clone();
             async move {
                 let result = global_memory_ui_revert(&mstore, &cmd)?;
-                broker.publish(crate::backend::mps::MuxEvent {
-                    event: "memories:changed".to_string(),
-                    scopes: vec![],
-                    sender: String::new(),
-                    persist: 0,
-                    data: None,
-                });
+                broker.publish_event::<crate::backend::mps_events::MemoriesChanged>(&(), vec![], 0);
                 Ok(result)
             }
         },
@@ -436,13 +400,7 @@ pub(crate) fn register_global_memory_import(engine: &WshRpcEngine, state: &AppSt
                 .await
                 .map_err(|e| format!("globalmemory:import: {e}"))?
                 .map_err(|e| format!("globalmemory:import: {e}"))?;
-                broker.publish(crate::backend::mps::MuxEvent {
-                    event: "memories:changed".to_string(),
-                    scopes: vec![],
-                    sender: String::new(),
-                    persist: 0,
-                    data: None,
-                });
+                broker.publish_event::<crate::backend::mps_events::MemoriesChanged>(&(), vec![], 0);
                 Ok(report)
             }
         },

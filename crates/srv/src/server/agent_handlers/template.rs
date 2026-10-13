@@ -276,13 +276,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         .map_err(|e| format!("agentdefcreatefromtemplate: bundles: {e}"))?;
                 }
 
-                broker.publish(crate::backend::mps::MuxEvent {
-                    event: "agents:changed".to_string(),
-                    scopes: vec![],
-                    sender: String::new(),
-                    persist: 0,
-                    data: None,
-                });
+                broker.publish_event::<crate::backend::mps_events::AgentsChanged>(&(), vec![], 0);
 
                 let resp = AgentDefCreateFromTemplateResult {
                     definition_id: new_def.id.clone(),
@@ -331,13 +325,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     .agent_def_set_hidden(&cmd.definition_id, true)
                     .map_err(|e| format!("agentdefhide: {e}"))?;
                 if ok {
-                    broker.publish(crate::backend::mps::MuxEvent {
-                        event: "agents:changed".to_string(),
-                        scopes: vec![],
-                        sender: String::new(),
-                        persist: 0,
-                        data: None,
-                    });
+                    broker.publish_event::<crate::backend::mps_events::AgentsChanged>(&(), vec![], 0);
                     tracing::info!(
                         definition_id = %cmd.definition_id,
                         "agentdefhide: hid template"
@@ -363,13 +351,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     .agent_def_set_hidden(&cmd.definition_id, false)
                     .map_err(|e| format!("agentdefunhide: {e}"))?;
                 if ok {
-                    broker.publish(crate::backend::mps::MuxEvent {
-                        event: "agents:changed".to_string(),
-                        scopes: vec![],
-                        sender: String::new(),
-                        persist: 0,
-                        data: None,
-                    });
+                    broker.publish_event::<crate::backend::mps_events::AgentsChanged>(&(), vec![], 0);
                     tracing::info!(
                         definition_id = %cmd.definition_id,
                         "agentdefunhide: unhid template"
@@ -542,13 +524,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         .map_err(|e| format!("forkagentdefinition skill: {e}"))?;
                 }
 
-                broker.publish(crate::backend::mps::MuxEvent {
-                    event: "agents:changed".to_string(),
-                    scopes: vec![],
-                    sender: String::new(),
-                    persist: 0,
-                    data: None,
-                });
+                broker.publish_event::<crate::backend::mps_events::AgentsChanged>(&(), vec![], 0);
 
                 Ok(fork)
             }
@@ -647,13 +623,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     );
                 }
 
-                broker.publish(crate::backend::mps::MuxEvent {
-                    event: "agents:changed".to_string(),
-                    scopes: vec![],
-                    sender: String::new(),
-                    persist: 0,
-                    data: None,
-                });
+                broker.publish_event::<crate::backend::mps_events::AgentsChanged>(&(), vec![], 0);
 
                 Ok(updated)
             }

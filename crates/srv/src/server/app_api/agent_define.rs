@@ -530,13 +530,7 @@ pub(crate) async fn agent_define_core(
                     (None, false)
                 };
                 if stub_new {
-                    broker.publish(crate::backend::mps::MuxEvent {
-                        event: "agents:changed".to_string(),
-                        scopes: vec![],
-                        sender: String::new(),
-                        persist: 0,
-                        data: None,
-                    });
+                    broker.publish_event::<crate::backend::mps_events::AgentsChanged>(&(), vec![], 0);
                 }
                 tracing::info!(id = %existing.id, slug = %existing.slug, stub = stub_id.is_some(), "agent.define: skipped (exists)");
                 return Ok(AgentDefineResult {
@@ -607,13 +601,7 @@ pub(crate) async fn agent_define_core(
                 } else {
                     None
                 };
-                broker.publish(crate::backend::mps::MuxEvent {
-                    event: "agents:changed".to_string(),
-                    scopes: vec![],
-                    sender: String::new(),
-                    persist: 0,
-                    data: None,
-                });
+                broker.publish_event::<crate::backend::mps_events::AgentsChanged>(&(), vec![], 0);
                 tracing::info!(id = %updated.id, slug = %updated.slug, stub = stub_id.is_some(), "agent.define: updated");
                 return Ok(AgentDefineResult {
                     definition_id: updated.id.clone(),
@@ -651,13 +639,7 @@ pub(crate) async fn agent_define_core(
     } else {
         None
     };
-    broker.publish(crate::backend::mps::MuxEvent {
-        event: "agents:changed".to_string(),
-        scopes: vec![],
-        sender: String::new(),
-        persist: 0,
-        data: None,
-    });
+    broker.publish_event::<crate::backend::mps_events::AgentsChanged>(&(), vec![], 0);
     agent_define::persist_define_content(&mstore, &def.id, &cmd, now);
 
     tracing::info!(

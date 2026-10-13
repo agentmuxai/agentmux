@@ -21,7 +21,6 @@ use serde_json::{json, Value};
 use uuid::Uuid;
 
 use crate::backend::storage::cron::CronJob;
-use crate::backend::mps::{MuxEvent, EVENT_CRON_CHANGED};
 use super::AppState;
 
 #[derive(Debug, Deserialize)]
@@ -156,13 +155,7 @@ pub(crate) fn to_summary(job: &CronJob, block_id: String) -> CronSummary {
 }
 
 fn publish_cron_changed(state: &AppState) {
-    state.broker.publish(MuxEvent {
-        event: EVENT_CRON_CHANGED.to_string(),
-        scopes: vec![],
-        sender: String::new(),
-        persist: 0,
-        data: None,
-    });
+    state.broker.publish_event::<crate::backend::mps_events::CronChanged>(&(), vec![], 0);
 }
 
 pub(super) async fn handle_cron_create(
