@@ -245,7 +245,6 @@ fn publish_resume_retry_status(broker: &Option<Arc<mps::Broker>>, block_id: &str
     );
 }
 
-
 /// Resolve the muxbus address (the agent's display name) from a spawn env map.
 /// `AGENTMUX_AGENT_ID` (= `agent.name`, set at block creation) is canonical;
 /// `WAVEMUX_AGENT_ID` is the legacy fallback. Returns `None` — i.e. not

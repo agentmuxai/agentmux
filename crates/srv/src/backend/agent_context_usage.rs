@@ -93,7 +93,6 @@ pub fn context_usage_from_control_response(frame: &Value) -> Option<AgentContext
     })
 }
 
-/// The `agentcontextusage` event data for one pane.
 /// The `agentcontextusage` event's payload (`mps_events::AgentContextUsageChanged`). An
 /// unknown value is null, not omitted.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, ts_rs::TS)]
@@ -108,6 +107,7 @@ pub struct AgentContextUsageEvent {
     pub auto_compact_enabled: bool,
 }
 
+/// The `agentcontextusage` event data for one pane.
 pub fn agent_context_usage_event(block_id: &str, usage: &AgentContextUsage) -> AgentContextUsageEvent {
     AgentContextUsageEvent {
         blockid: block_id.to_string(),

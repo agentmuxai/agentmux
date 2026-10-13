@@ -17,6 +17,7 @@ export function installTurnAwarenessService(): () => void {
     const windowFocused = makeWindowFocusSignal();
     return installTurnAwareness({
         subscribe: (handler) =>
+            // No scope: every block's.
             onMuxEvent(WpsEvent.AgentTurn, (data) => {
                     handler(data.block_id, data);
                 }),

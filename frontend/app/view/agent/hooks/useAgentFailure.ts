@@ -49,7 +49,6 @@ import type { PaneFailure } from "@/app/store/agent-pane-state/types";
 import { failureToRow, isTransient, type FailureRow } from "../failure/failure-accessory";
 import { copyErrorReport } from "@/app/errors/CopyErrorButton";
 import { formatErrorReport } from "@/app/errors/error-report";
-import type { AgentFailure } from "@/types/rpc/AgentFailure";
 
 /** How long an armed Take over waits for its confirming click. */
 export const TAKEOVER_CONFIRM_MS = 5000;
@@ -280,10 +279,14 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
 
         const unsubFailure = onMuxEvent(WpsEvent.AgentFailure, (f) => {
                 cancelCountdown();
+                // A new failure never inherits an armed Take over: its row must
+                // start at the first click again (ReAgent P1 on #3742).
                 disarmTakeover();
                 setExpanded(false);
                 setRetrying(false);
                 resetCopyState();
+                // Reducer-side: records state.failure AND unconditionally ends
+                // a still-working turn — see FailureObserved's reducer case.
                 opts.model.dispatchPane({ type: "FailureObserved", failure: f, at: Date.now() });
                 if (isTransient(f.code)) armAutoRetry();
             }, MOS.makeORef("block", opts.blockId));

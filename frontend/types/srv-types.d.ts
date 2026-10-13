@@ -778,7 +778,7 @@ declare global {
         "agent:historyTabFor"?: string;
         "agent:historySourceBlockId"?: string;
         /** Last classified agent failure; set on error exit, cleared on clean exit. */
-        "agent:last_failure"?: AgentFailure;
+        "agent:last_failure"?: import("@/types/rpc/AgentFailure").AgentFailure;
         "agent:runtime"?: {
             permissionMode?: string;
             model?: string | null;

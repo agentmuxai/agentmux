@@ -159,10 +159,6 @@ pub fn effective_from_control_response(frame: &Value) -> Option<EffectiveRuntime
     Some(EffectiveRuntime { model: field("model"), effort: field("effort") })
 }
 
-/// The `agentruntime` event for one pane (persisted, so a menu that mounts late
-/// still gets the latest). `running` is `None` when no process is alive — then
-/// there is nothing for the menu to compare against. `effective` is what the
-/// CLI reported using, when it has (see [`EffectiveRuntime`]).
 /// The `agentruntime` event's payload (`mps_events::AgentRuntime`). An absent value is
 /// omitted, not null; what the CLI reported is sent only while a process runs.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, ts_rs::TS)]
@@ -188,6 +184,10 @@ pub struct AgentRuntimeEvent {
     pub effective_effort: Option<String>,
 }
 
+/// The `agentruntime` event for one pane (persisted, so a menu that mounts late
+/// still gets the latest). `running` is `None` when no process is alive — then
+/// there is nothing for the menu to compare against. `effective` is what the
+/// CLI reported using, when it has (see [`EffectiveRuntime`]).
 pub fn agent_runtime_event(
     block_id: &str,
     running: Option<&SpawnRuntime>,

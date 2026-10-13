@@ -119,6 +119,8 @@ export function useControllerStatusEvents(opts: UseControllerStatusEventsOptions
         const unsubFailure = onMuxEvent(WpsEvent.AgentFailure, (f) => {
                 let msg = f.title || "Agent run failed";
                 if (f.detail) msg += ` — ${f.detail}`;
+                // Prefer signal when present (matches AgentFailure::explain(); a
+                // signal kill stores exitCode as -1, so "[exit -1]" would mislead).
                 if (f.signal != null) msg += ` [signal ${f.signal}]`;
                 else if (f.exitCode != null) msg += ` [exit ${f.exitCode}]`;
                 if (f.retryable) msg += " (retryable)";
