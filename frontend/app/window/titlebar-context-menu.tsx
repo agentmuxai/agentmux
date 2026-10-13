@@ -103,7 +103,8 @@ const TitleBarContextMenu = (props: TitleBarContextMenuProps): JSX.Element => {
             items.push({
                 type: "section",
                 label: "Pin Widgets",
-                defaultOpen: true,
+                // A heading for the list below, not a fold: always open.
+                collapsible: false,
                 items: widgetEntries.map(([key, cfg]: [string, any]) => {
                     const shortName = key.replace("defwidget@", "");
                     return {
