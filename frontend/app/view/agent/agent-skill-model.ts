@@ -17,6 +17,7 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { muxEventSubscribe } from "@/app/store/mps";
 
 import { WpsEvent } from "@/app/store/mps-events";
+import type { SkillListItem } from "@/types/rpc/SkillListItem";
 export class AgentSkillModel {
     readonly agentId: string;
 

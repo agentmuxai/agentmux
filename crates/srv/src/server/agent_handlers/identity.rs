@@ -1146,9 +1146,13 @@ mod ambient_home_dir_binding_tests {
             .expect("hidenamedagent missing from the schema");
         assert_eq!(row["requestName"], "CommandHideNamedAgentData");
         assert_eq!(row["responseName"], "HideNamedAgentResult");
-        assert!(
-            rows.iter().all(|r| r["command"] != COMMAND_LIST_NAMED_AGENTS),
-            "listnamedagents is not migrated and must not appear in the schema",
-        );
+        // listnamedagents keeps a loose `Value` request (a malformed body means the
+        // defaults), but its response is recorded, so the generated stub returns NamedAgentRow.
+        let list = rows
+            .iter()
+            .find(|r| r["command"] == COMMAND_LIST_NAMED_AGENTS)
+            .expect("listnamedagents missing from the schema");
+        assert_eq!(list["requestName"], "Value");
+        assert_eq!(list["responseTs"]["name"], "Array<NamedAgentRow>");
     }
 }

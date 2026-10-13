@@ -101,6 +101,7 @@ pub struct CommandListNamedAgentsData {
 /// (for the identity display name), and `db_bundles` (for bundle
 /// names) so the frontend renders without further lookups.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct NamedAgentRow {
     pub instance_id: String,
     pub instance_name: String,

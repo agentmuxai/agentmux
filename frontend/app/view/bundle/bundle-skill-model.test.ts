@@ -29,6 +29,8 @@ vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 
 import { RpcApi } from "@/app/store/rpc-api";
 import { BundleSkillModel } from "./bundle-skill-model";
+import type { Skill } from "@/types/rpc/Skill";
+import type { SkillBundleListItem } from "@/types/rpc/SkillBundleListItem";
 
 const skill = (id: string, overrides: Partial<SkillBundleListItem> = {}): SkillBundleListItem => ({
     id,

@@ -734,6 +734,7 @@ pub struct ImportAgentDefinitionsResult {
 
 /// Response for exportagents
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct ExportAgentDefinitionsResult {
     pub version: u32,
     pub exported_at: String,
@@ -742,6 +743,7 @@ pub struct ExportAgentDefinitionsResult {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct AgentDefinitionExport {
     pub id: String,
     pub name: String,
@@ -759,6 +761,7 @@ pub struct AgentDefinitionExport {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct AgentSkillExport {
     pub name: String,
     pub trigger: String,

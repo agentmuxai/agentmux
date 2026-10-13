@@ -18,6 +18,7 @@ use super::store::Store;
 
 /// A standalone MCP Server primitive (v1 composable model).
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct McpServer {
     pub id: String,
     pub name: String,
@@ -110,6 +111,7 @@ impl ManagedResource for McpServer {
 /// `bound_to_agent`, bind/unbind in the per-agent modal has no way to render
 /// as a stateful toggle (see docs/specs, "bound to me" gap tracked in #1960).
 #[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct McpServerListItem {
     #[serde(flatten)]
     pub server: McpServer,
@@ -120,6 +122,7 @@ pub struct McpServerListItem {
 /// agents currently hold a `db_agent_mcp_ref` to it — the Armory catalog's
 /// "used by N agents" count (gap #2 of #1960).
 #[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct McpServerCatalogItem {
     #[serde(flatten)]
     pub server: McpServer,
