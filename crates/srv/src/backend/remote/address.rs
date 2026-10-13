@@ -17,7 +17,7 @@
 
 use std::collections::HashMap;
 use std::net::IpAddr;
-use std::sync::OnceLock;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use super::ConnTarget;
@@ -44,11 +44,13 @@ pub async fn of(name: &str) -> Option<RemoteAddress> {
     if target == ConnTarget::Local {
         return None;
     }
-    static CACHE: OnceLock<tokio::sync::Mutex<HashMap<String, (Instant, RemoteAddress)>>> = OnceLock::new();
-    // Held across the lookup: a second tooltip asking for the same
-    // connection meanwhile waits for this answer instead of starting another.
-    let mut cache = CACHE.get_or_init(Default::default).lock().await;
-    if let Some((at, found)) = cache.get(name) {
+    // One slot per connection, its lock held across the lookup: a second
+    // tooltip asking for the same connection meanwhile waits for this answer
+    // instead of starting another, and one slow host holds up no other.
+    static SLOTS: OnceLock<Mutex<HashMap<String, Slot>>> = OnceLock::new();
+    let slot = SLOTS.get_or_init(Default::default).lock().unwrap().entry(name.to_string()).or_default().clone();
+    let mut cached = slot.lock().await;
+    if let Some((at, found)) = cached.as_ref() {
         if at.elapsed() < TTL {
             return Some(found.clone());
         }
@@ -61,9 +63,11 @@ pub async fn of(name: &str) -> Option<RemoteAddress> {
         },
         ConnTarget::Local => unreachable!(),
     };
-    cache.insert(name.to_string(), (Instant::now(), found.clone()));
+    *cached = Some((Instant::now(), found.clone()));
     Some(found)
 }
+
+type Slot = Arc<tokio::sync::Mutex<Option<(Instant, RemoteAddress)>>>;
 
 async fn ssh(dest: &super::conn::SshDest) -> RemoteAddress {
     let Some(binary) = super::ssh::binary_for_user() else {

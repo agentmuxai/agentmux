@@ -30,7 +30,7 @@ So a remote pane's badge is either misleading (WSL, plain SSH) or missing (durab
 ### Phase 0: say what is measured, and where (built)
 
 - The tooltip shows immediately, with no fade.
-- For a remote pane it names the connection and its machine: for SSH, the host `ssh -G` resolves the destination to (an alias's `HostName`) and its IP address from a DNS lookup; for WSL, the distribution and its first address (`hostname -I` inside it). Both are cached for 5 minutes (`backend/remote/address.rs`).
+- For a remote pane it names the connection and its machine: for SSH, the host `ssh -G` resolves the destination to (an alias's `HostName`) and its IP address from a DNS lookup; for WSL, the distribution and its address on the interface its default route uses, read from `/proc/net/route` and `/proc/net/fib_trie` inside it (BusyBox's `hostname` has no `-I`). Both are cached for 5 minutes (`backend/remote/address.rs`).
 - It says the figures are this computer's `ssh` (or `wsl.exe`), not the remote shell's, until phases 1-3 replace them.
 
 ### Phase 1: WSL panes measure the distro's shell

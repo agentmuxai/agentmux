@@ -1,6 +1,6 @@
 # The terminal's CPU/memory badge: what it measures, why a PowerShell pane's number is large and keeps rising, and a hover tooltip for it
 
-**Status:** analysis, with a proposal (§5). Nothing implemented yet.
+**Status:** analysis, with a proposal (§5), now implemented: the tooltip is built (§5.3). Measuring a remote pane's shell is `SPEC_TERMINAL_STATS_BADGE_REMOTE_PANES_2026_10_12.md`.
 **Date:** 2026-10-12 | **Version:** main at `ed7d038a3` (0.59.20). Measured on Windows 11 with PowerShell 7.6.6 and PSReadLine 2.4.5.
 **Requested by:** repo owner: "I opened a bunch of terminals on Tab 5 and I kept typing `ll` <enter> in one of them... every time, the memory indicator on the top right grows indefinitely by 2mb.. why is it so large? what is the indicator? we want to add a quick pop tooltip that explains it when hovering over it in the terminal with the mouse."
 **Author:** Loap.
