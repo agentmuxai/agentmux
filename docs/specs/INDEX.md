@@ -652,7 +652,6 @@ partial list.
 | [`SPEC_TOPBAR_LABELS_DROP_BEFORE_TABS_SHRINK_2026_10_07`](SPEC_TOPBAR_LABELS_DROP_BEFORE_TABS_SHRINK_2026_10_07.md) | Top bar: widget labels drop before tabs shrink |
 | [`SPEC_TOWER_TASK_MANAGER_PANE_2026_10_08`](SPEC_TOWER_TASK_MANAGER_PANE_2026_10_08.md) | SPEC: Tower, a read-only task manager pane (CPU and memory per task) |
 | [`SPEC_TRAY_OPTIONAL_BACKGROUND_SERVICE_2026_09_04`](SPEC_TRAY_OPTIONAL_BACKGROUND_SERVICE_2026_09_04.md) | Spec: optional system-tray + persistent background service, cross-platform |
-| [`SPEC_TYPED_EVENT_PAYLOADS_2026_10_13`](SPEC_TYPED_EVENT_PAYLOADS_2026_10_13.md) | Typed event payloads |
 | [`SPEC_UI_LINE_STYLE_COMPONENT_SYSTEM_2026_10_05`](SPEC_UI_LINE_STYLE_COMPONENT_SYSTEM_2026_10_05.md) | Spec: one line-style UI component set (buttons, tabs, menus, form controls) |
 | [`SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09`](SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md) | User widgets and the widget API |
 | [`SPEC_VERSION_DRIFT_UPGRADES_AND_PROVIDER_HARNESS_TESTS_2026_10_01`](SPEC_VERSION_DRIFT_UPGRADES_AND_PROVIDER_HARNESS_TESTS_2026_10_01.md) | Version drift upgrades (2026-10-01 report) and provider harness tests |
@@ -817,6 +816,7 @@ partial list.
 | [`SPEC_TOOL_BLOCK_SINGLE_LEFT_BAR_2026_06_27`](SPEC_TOOL_BLOCK_SINGLE_LEFT_BAR_2026_06_27.md) | SPEC: Tool Block Single Left Bar |
 | [`SPEC_TOOL_BLOCK_UX_POLISH_2026_05_23`](SPEC_TOOL_BLOCK_UX_POLISH_2026_05_23.md) | SPEC: Tool Block UX Polish — Hover Delay, Collapse Animation, Post-Completion Hold, Thinking Label, Scroll Isolation |
 | [`SPEC_TRANSPARENCY_MACOS_LINUX_2026_07_01`](SPEC_TRANSPARENCY_MACOS_LINUX_2026_07_01.md) | SPEC: Window Transparency on macOS and Linux |
+| [`SPEC_TYPED_EVENT_PAYLOADS_2026_10_13`](SPEC_TYPED_EVENT_PAYLOADS_2026_10_13.md) | Typed event payloads |
 | [`SPEC_UNIFIED_MENU_SYSTEM_2026_05_11`](SPEC_UNIFIED_MENU_SYSTEM_2026_05_11.md) | Unified menu system |
 | [`SPEC_UNIFIED_TOOL_HOVER_OVERLAY_2026_05_13`](SPEC_UNIFIED_TOOL_HOVER_OVERLAY_2026_05_13.md) | Spec: Unified tool-block hover overlay (no double-popup) |
 | [`SPEC_UNIVERSAL_INSTALL_DIALOG_2026_09_23`](SPEC_UNIVERSAL_INSTALL_DIALOG_2026_09_23.md) | SPEC: Universal install dialog — plain-language steps by default, full console under "Details" |
