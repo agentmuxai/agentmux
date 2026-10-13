@@ -199,6 +199,10 @@
         opacity: 0.35;
         pointer-events: none;
         transition: opacity 120ms ease;
+        // The fill's box sits 1.5px lower than the widget bar's (its bottom
+        // hairline and the strip's own offset); lift the grip onto the
+        // widget icons' centre line.
+        transform: translateY(-1.5px);
     }
 
     .tab-bar-fill:hover .tab-bar-fill-grip {
