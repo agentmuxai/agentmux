@@ -129,6 +129,22 @@ async fn a_hidden_agents_shell_is_hidden_with_it() {
 }
 
 #[tokio::test]
+async fn a_hidden_agent_running_in_a_terminal_pane_is_hidden() {
+    let state = test_state();
+    share(&state, true);
+    let token = pair_device(&state);
+    let def = uuid::Uuid::new_v4().to_string();
+    let mut d = crate::backend::storage::agents::test_agent_def(&def, "InATerm", "claude", "standalone", 1, "");
+    state.mstore.agent_def_insert(&mut d).unwrap();
+    // An agent CLI in a terminal pane: a `term` block that names its agent.
+    let pane = block(&state, "term", &[("agentId", &def)]);
+    assert_eq!(terminal_watchable(&state, &pane), Ok(()), "shown while its agent is");
+    state.mstore.agent_hide_from_devices_set(&def, true).unwrap();
+    assert_eq!(terminal_watchable(&state, &pane), Err(Unwatchable::Hidden));
+    assert_eq!(status_of(&state, &feed_uri(&pane), Some(&token)).await, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
 async fn a_terminal_feed_sends_its_output_then_each_write_once_with_the_ptys_size() {
     let state = test_state();
     share(&state, true);

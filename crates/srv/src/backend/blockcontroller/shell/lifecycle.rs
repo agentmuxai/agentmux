@@ -581,8 +581,7 @@ impl Controller for ShellController {
         // historical 25x200 when no size was supplied (e.g. programmatic
         // spawns). See docs/analysis/AGENT_PANE_PTY_RESIZE_RACE_2026_06_16.md.
         let pty_system = native_pty_system();
-        let pty_size = Self::pty_size_from_rt_opts(&rt_opts);
-        crate::backend::blockcontroller::term_size::record(&self.block_id, pty_size.rows, pty_size.cols);
+        let pty_size = self.spawn_pty_size(&rt_opts);
 
         let pair = pty_system.openpty(pty_size).map_err(|e| {
             tracing::error!(block_id = %self.block_id, error = %e, "failed to open PTY");
@@ -1310,7 +1309,6 @@ impl Controller for ShellController {
         // Spawn input task (routes input channel → PTY writer + resize + signals)
         // Owns writer and master — dropping them closes the PTY, causing child to exit.
         let master = pair.master;
-        let block_id_input = self.block_id.clone();
         tokio::spawn(async move {
             let mut writer = writer;
             let mut input_rx = input_rx;
@@ -1331,8 +1329,6 @@ impl Controller for ShellController {
                     };
                     if let Err(e) = master.resize(pty_size) {
                         tracing::debug!("PTY resize error: {}", e);
-                    } else {
-                        crate::backend::blockcontroller::term_size::record(&block_id_input, pty_size.rows, pty_size.cols);
                     }
                 }
                 if input.sig_name.is_some() {

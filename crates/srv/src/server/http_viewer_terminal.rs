@@ -69,6 +69,11 @@ pub(crate) fn terminal_watchable(state: &AppState, block_id: &str) -> Result<(),
     if meta_get_string(&block.meta, "view", "") != "term" {
         return Err(Unwatchable::NotATerminal);
     }
+    // An agent CLI can run in a terminal pane: that pane is the agent's, and
+    // hidden with it.
+    if agent_hidden(state, block_id) {
+        return Err(Unwatchable::Hidden);
+    }
     let key = crate::backend::blockcontroller::META_KEY_SHELL_SUBBLOCK_ID;
     let parent = state
         .mstore

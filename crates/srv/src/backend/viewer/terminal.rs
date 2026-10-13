@@ -3,7 +3,7 @@
 
 //! The pure pieces of a paired device's terminal feed
 //! (`GET /agentmux/viewer/terminals/:block_id/feed`, the route in
-//! `server::http_viewer`): where a snapshot of a terminal's output starts,
+//! `server::http_viewer_terminal`): where a snapshot of a terminal's output starts,
 //! and how each published append moves the feed's byte cursor.
 //!
 //! A terminal's output is the block's `term` file: the PTY's raw bytes, ANSI

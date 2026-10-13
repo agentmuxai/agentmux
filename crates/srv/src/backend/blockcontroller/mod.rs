@@ -674,8 +674,20 @@ pub fn stop_block_controller(block_id: &str) -> Result<(), String> {
 
 /// Send input to a block's controller.
 pub fn send_input(block_id: &str, input: BlockInputUnion, seq: Option<u64>) -> Result<(), String> {
+    let resize = input
+        .term_size
+        .as_ref()
+        .filter(|ts| ts.rows > 0 && ts.cols > 0)
+        .map(|ts| (ts.rows.min(u16::MAX as i64) as u16, ts.cols.min(u16::MAX as i64) as u16));
     match get_controller(block_id) {
-        Some(ctrl) => ctrl.send_input(input, seq),
+        Some(ctrl) => {
+            ctrl.send_input(input, seq)?;
+            // The size a paired device watching the terminal renders at.
+            if let Some((rows, cols)) = resize {
+                term_size::record(block_id, rows, cols);
+            }
+            Ok(())
+        }
         None => Err(format!("no controller for block {block_id}")),
     }
 }
