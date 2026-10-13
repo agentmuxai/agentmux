@@ -6,7 +6,8 @@
  * pin/unpin RPC persistence. Extracted from action-widgets.tsx.
  *
  * Settings keys:
- *   widget:pinned   — ordered short-name array (e.g. ["agent","terminal","sysinfo"])
+ *   widget:pinned   — ordered pin ids (e.g. ["agent","terminal","ext@acme.board/main"]): a built-in's
+ *                     short name, or a package widget's full key (pinIdOf / keyOfPinId)
  *   widget:hidden   — full keys hidden from the bar, More and the pane pickers
  *                     (SPEC_WIDGET_BAR_VISIBILITY_SETTINGS_2026_10_12.md)
  *   widget:icononly — icons only, no labels

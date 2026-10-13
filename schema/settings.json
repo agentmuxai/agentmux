@@ -158,7 +158,7 @@
         "widget:pinned": {
           "type": "array",
           "items": { "type": "string" },
-          "description": "The widget bar's pinned icons, in order, as short names (\"agent\" for defwidget@agent). Absent means the fresh-install default."
+          "description": "The widget bar's pinned icons, in order: a built-in's short name (\"agent\" for defwidget@agent) or an installed package widget's full key (\"ext@acme.board/main\"). Absent means the fresh-install default."
         },
         "widget:hidden": {
           "type": "array",
