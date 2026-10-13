@@ -395,11 +395,6 @@ pub(crate) async fn handle_create_window(state: &AppState, call: &WebCallType) -
         }
         evs
     };
-    // SPEC_PER_WINDOW_THEME_AND_OPACITY_2026_10_12 §6 — the window that
-    // opened this one may already have asked for its appearance to be
-    // copied here (`InheritWindowAppearance`, keyed by host label). Taken
-    // only after the row is recorded, so a request arriving in between
-    // finds the row instead (see window_inherit.rs).
     // SPEC_PER_WINDOW_THEME_AND_OPACITY_2026_10_12 §4.6 — a reloaded window
     // other than the main one gets a new row each load (optional arg 6 is
     // the row it had before), so its own theme and opacity come across.
@@ -408,6 +403,11 @@ pub(crate) async fn handle_create_window(state: &AppState, call: &WebCallType) -
         Some(prev) => super::window_inherit::apply_inheritance(state, &prev, &window_id).await,
         None => Vec::new(),
     };
+    // SPEC_PER_WINDOW_THEME_AND_OPACITY_2026_10_12 §6 — the window that
+    // opened this one may already have asked for its appearance to be
+    // copied here (`InheritWindowAppearance`, keyed by host label). Taken
+    // only after the row is recorded, so a request arriving in between
+    // finds the row instead (see window_inherit.rs).
     let inherit_events = match (!host_label.is_empty())
         .then(|| {
             let row_seq = super::window_inherit::record_created(&host_label, &window_id);
