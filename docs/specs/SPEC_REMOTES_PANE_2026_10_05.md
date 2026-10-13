@@ -245,7 +245,7 @@ The tab of such a pane shows the swatch too. With no colour set, there is no str
 
 This builds decision 2 of the remote-terminals spec (§11.1), still outstanding there.
 
-**When the helper is first needed on a host** (a durable pane, the host's files, or an agent's file access), and `conn:helper` is `ask` (the default), srv asks before uploading anything.
+**When the helper is first needed on a host** (a durable pane, the host's files, or an agent's file access), and `conn:helper` is `ask` (the default), srv asks before uploading anything. Terminals are durable by default on every SSH host (remote-terminals spec §7.1), so a host's first terminal asks too; that is how a user learns that durable sessions exist (#4513 finding 7). While a question is open for a host, the user's other panes there wait for its answer instead of each asking: a restart brings all of a host's terminals back at once. An agent's question is its own, since it names the agent.
 
 **The question appears in the host's approval window** (remote-terminals spec §5.3), which agents cannot reach or answer:
 
