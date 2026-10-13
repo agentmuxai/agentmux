@@ -241,6 +241,52 @@ describe("LayoutModel", () => {
         expect(requestNodeFocusCaptures).toHaveLength(0);
     });
 
+    // SPEC_PANE_CONTROLS_TILED_RESTORE_ICON_AND_MINIMIZE_FROM_MAXIMIZED_2026_10_12 §5:
+    // minimizing a maximized pane ends the maximize and sets the flag in one commit,
+    // with no focus request, and leaves the tree's shape and sizes alone.
+    it("minimizeNodeToggle on the maximized pane ends the maximize and minimizes it in one persisted commit", () => {
+        const model = createLayoutModel();
+        const first = newLayoutNode(undefined, undefined, undefined, { blockId: "left" });
+        model.treeReducer({
+            type: LayoutTreeActionType.InsertNode,
+            node: first,
+            magnified: false,
+            focused: true,
+        } as LayoutTreeInsertNodeAction);
+        const second = newLayoutNode(undefined, undefined, undefined, { blockId: "right" });
+        model.treeReducer(
+            {
+                type: LayoutTreeActionType.SplitHorizontal,
+                targetNodeId: model.treeState.rootNode!.id,
+                newNode: second,
+                position: "after",
+                focused: false,
+            } as LayoutTreeSplitHorizontalAction,
+            false
+        );
+        model.updateTree();
+        model.magnifyNodeToggle(second.id);
+        expect(model.magnifiedNodeId).toBe(second.id);
+        const sizesBefore = JSON.stringify(model.treeState.rootNode!.children!.map((c) => c.size));
+
+        requestNodeFocusCaptures.length = 0;
+        const persist = vi.spyOn(model, "persistToBackend");
+        model.minimizeNodeToggle(second.id);
+
+        expect(model.magnifiedNodeId).toBeUndefined();
+        expect(model.treeState.magnifiedNodeId).toBeUndefined();
+        expect(model.localTreeStateAtom().magnifiedNodeId).toBeUndefined();
+        expect(model.minimizedNodeIds().has(second.id)).toBe(true);
+        expect(persist).toHaveBeenCalledTimes(1);
+        expect(requestNodeFocusCaptures).toHaveLength(0);
+        expect(JSON.stringify(model.treeState.rootNode!.children!.map((c) => c.size))).toBe(sizesBefore);
+
+        // Restore goes back to the tile, not to maximized.
+        model.minimizeNodeToggle(second.id);
+        expect(model.minimizedNodeIds().has(second.id)).toBe(false);
+        expect(model.magnifiedNodeId).toBeUndefined();
+    });
+
     // SPEC_FOCUS_FOLLOWS_SELECTION_2026_10_08.md R1: closing the selected pane
     // moves the selection to a neighbour without any FocusNode action, so no
     // requestNodeFocus(); the model's own selection observer hands the caret on.

@@ -788,3 +788,130 @@ describe("resize handles span a slipped (zero-width) minimized pane", () => {
         expect(pairs(kids, slip)).toEqual([]);
     });
 });
+
+// ── Minimizing a maximized pane ───────────────────────────────
+// SPEC_PANE_CONTROLS_TILED_RESTORE_ICON_AND_MINIMIZE_FROM_MAXIMIZED_2026_10_12 §5.
+// Maximize ("magnify") is `treeState.magnifiedNodeId`, a layer over the tree:
+// the pane keeps its slot, so minimizing it is the tiled minimize plus ending
+// the maximize, in one commit.
+
+function makeMagnifyMock(rootNode: LayoutNode, magnifiedNodeId: string | undefined) {
+    const model: any = makeMockModel(rootNode);
+    model.treeState.magnifiedNodeId = magnifiedNodeId;
+    const calls: string[] = [];
+    const realUpdateTree = model.updateTree;
+    model.updateTree = () => {
+        calls.push("updateTree");
+        realUpdateTree();
+    };
+    model.persistToBackend = () => calls.push("persist");
+    model.magnifyCalls = [] as { nodeId: string; setState: boolean; focused: boolean; minimizedAtCall: boolean | undefined }[];
+    // Mirrors the reducer's toggle (layoutTree.ts magnifyNodeToggle) without the commit when setState is false.
+    model.magnifyNodeToggle = (nodeId: string, setState = true, focused = true) => {
+        model.magnifyCalls.push({ nodeId, setState, focused, minimizedAtCall: findLeaf(model.treeState.rootNode, nodeId)?.minimized });
+        model.treeState.magnifiedNodeId = model.treeState.magnifiedNodeId === nodeId ? undefined : nodeId;
+        if (setState) model.updateTree();
+    };
+    model.calls = calls;
+    return model;
+}
+
+function findLeaf(n: LayoutNode | undefined, id: string): LayoutNode | undefined {
+    if (!n) return undefined;
+    if (n.id === id) return n;
+    for (const c of n.children ?? []) {
+        const f = findLeaf(c, id);
+        if (f) return f;
+    }
+    return undefined;
+}
+
+// A Row of three panes (the minimized chip's Row-parent case) for the Row/Column comparison.
+function buildThreePaneRow() {
+    const a = newLayoutNode(FlexDirection.Row, PANE_SIZE, undefined, { blockId: "a" });
+    const b = newLayoutNode(FlexDirection.Row, PANE_SIZE, undefined, { blockId: "b" });
+    const c = newLayoutNode(FlexDirection.Row, PANE_SIZE, undefined, { blockId: "c" });
+    const root = newLayoutNode(FlexDirection.Row, PANE_SIZE, [a, b, c]);
+    return { root, a, b, c };
+}
+
+describe("minimizing a maximized pane", () => {
+    it("ends the maximize and sets the flag, touching no size and no structure", () => {
+        const { root, paneA1, paneA2, colA, colB, paneB } = buildTwoColumnLayout();
+        const model = makeMagnifyMock(root, paneA1.id);
+        const before = JSON.stringify(root);
+
+        minimizeNodeToggle(model, paneA1.id);
+
+        expect(model.treeState.magnifiedNodeId).toBeUndefined();
+        expect(paneA1.minimized).toBe(true);
+        expect(model.getMinimizedSet().has(paneA1.id)).toBe(true);
+        expect([paneA1.size, paneA2.size, colA.size, colB.size, paneB.size]).toEqual(Array(5).fill(PANE_SIZE));
+        // Same tree as before apart from the flag.
+        paneA1.minimized = undefined;
+        expect(JSON.stringify(root)).toBe(before);
+    });
+
+    it("is one commit: one updateTree, one persist, the maximize ended first without a commit or a focus request", () => {
+        const { root, paneA1 } = buildTwoColumnLayout();
+        const model = makeMagnifyMock(root, paneA1.id);
+
+        minimizeNodeToggle(model, paneA1.id);
+
+        expect(model.magnifyCalls).toEqual([{ nodeId: paneA1.id, setState: false, focused: false, minimizedAtCall: undefined }]);
+        expect(model.calls).toEqual(["updateTree", "persist"]);
+    });
+
+    it("produces the same tree as minimizing the same pane while tiled (Column parent and Row parent)", () => {
+        for (const build of [
+            () => { const l = buildTwoColumnLayout(); return { root: l.root, target: l.paneA1 }; },
+            () => { const l = buildThreePaneRow(); return { root: l.root, target: l.b }; },
+        ]) {
+            const tiled = build();
+            minimizeNodeToggle(makeMockModel(tiled.root) as any, tiled.target.id);
+            const maximized = build();
+            minimizeNodeToggle(makeMagnifyMock(maximized.root, maximized.target.id), maximized.target.id);
+            // Node ids differ between the two builds; compare the shape and flags without them.
+            const strip = (n: LayoutNode): unknown => ({ size: n.size, minimized: n.minimized, flexDirection: n.flexDirection, children: n.children?.map(strip) });
+            expect(strip(maximized.root)).toEqual(strip(tiled.root));
+        }
+    });
+
+    it("refuses when it would leave no expanded pane, and leaves the maximize alone", () => {
+        const { root, paneA1, paneA2, paneB } = buildTwoColumnLayout();
+        paneA2.minimized = true;
+        paneB.minimized = true;
+        const model = makeMagnifyMock(root, paneA1.id);
+
+        minimizeNodeToggle(model, paneA1.id);
+
+        expect(paneA1.minimized).toBeUndefined();
+        expect(model.treeState.magnifiedNodeId).toBe(paneA1.id);
+        expect(model.magnifyCalls).toEqual([]);
+        expect(model.calls).toEqual([]);
+    });
+
+    it("restoring it afterwards returns the pane to its tile, not to maximized", () => {
+        const { root, paneA1 } = buildTwoColumnLayout();
+        const original = JSON.stringify(root);
+        const model = makeMagnifyMock(root, paneA1.id);
+
+        minimizeNodeToggle(model, paneA1.id);
+        minimizeNodeToggle(model, paneA1.id);
+
+        expect(paneA1.minimized).toBeUndefined();
+        expect(model.treeState.magnifiedNodeId).toBeUndefined();
+        expect(JSON.stringify(root)).toBe(original);
+    });
+
+    it("leaves another pane's maximize alone when a different pane is minimized", () => {
+        const { root, paneA1, paneA2 } = buildTwoColumnLayout();
+        const model = makeMagnifyMock(root, paneA1.id);
+
+        minimizeNodeToggle(model, paneA2.id);
+
+        expect(paneA2.minimized).toBe(true);
+        expect(model.treeState.magnifiedNodeId).toBe(paneA1.id);
+        expect(model.magnifyCalls).toEqual([]);
+    });
+});

@@ -108,6 +108,19 @@ export function minimizeNodeToggle(model: LayoutModel, nodeId: string) {
     // guard for programmatic callers.
     if (countExpandedLeaves(model.treeState.rootNode) <= 1) return;
 
+    // A maximized pane can be minimized directly (SPEC_PANE_CONTROLS_TILED_
+    // RESTORE_ICON_AND_MINIMIZE_FROM_MAXIMIZED_2026_10_12 §5). Maximize is a
+    // layer over the tree (`magnifiedNodeId`), so the pane still holds its
+    // slot and the chip is derived from it: ending the maximize and setting
+    // the flag in one commit IS "remember the minimize position". Un-magnify
+    // through its own reducer (as removeLeafEmptiedByMove does) so the overlay
+    // state stays consistent; setState=false defers the commit to
+    // _finishToggle below (one updateTree, one persist), and focused=false
+    // leaves focus where minimizing a tiled pane leaves it.
+    if (model.treeState.magnifiedNodeId === nodeId) {
+        model.magnifyNodeToggle(nodeId, false, false);
+    }
+
     node.minimized = true;
     _finishToggle(model, nodeId, true);
 }
