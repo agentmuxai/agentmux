@@ -68,6 +68,25 @@ export function wpsNames(source) {
     return new Map([...source.matchAll(/^\s*(\w+):\s*"([^"]+)"/gm)].map((m) => [m[1], m[2]]));
 }
 
+/** Whether `at` in `text` falls inside a `//` or `/* … *\/` comment, not a string or code. */
+function inComment(text, at) {
+    for (let i = 0; i < at; i++) {
+        const c = text[i];
+        if (c === "/" && text[i + 1] === "/") {
+            const end = text.indexOf("\n", i);
+            if (end === -1 || end > at) return true;
+            i = end;
+        } else if (c === "/" && text[i + 1] === "*") {
+            const end = text.indexOf("*/", i + 2);
+            if (end === -1 || end + 2 > at) return true;
+            i = end + 1;
+        } else if (c === '"' || c === "'" || c === "`") {
+            for (i++; i < at && text[i] !== c && !(c !== "`" && text[i] === "\n"); i++) if (text[i] === "\\") i++;
+        }
+    }
+    return false;
+}
+
 /** Where a typed event is subscribed with `muxEventSubscribe` instead of `onMuxEvent`, in
  *  `sources` ([path, text]). A subscription names its event as `WpsEvent.<Key>` or a literal, or a
  *  per-id event as a template literal starting with one of `perIdPrefixes`. */
@@ -102,8 +121,7 @@ export function untypedSubscriptions(sources, typed, wps, perIdPrefixes = new Se
             if (!name || !typed.has(name)) continue;
             if (/(?:onMuxEvent\(|eventType:|\bevent:|\bconst\s+\w+\s*(?::\s*string\s*)?=)\s*$/.test(text.slice(Math.max(0, m.index - 60), m.index))) continue;
             // A comment naming the event subscribes nothing.
-            const lineHead = text.slice(text.lastIndexOf("\n", m.index) + 1, m.index);
-            if (/^\s*(?:\*|\/\*)|\/\//.test(lineHead)) continue;
+            if (inComment(text, m.index)) continue;
             const line = text.slice(0, m.index).split("\n").length;
             errors.push(`${path}:${line}: WpsEvent.${m[1]} has a typed payload; pass it straight to onMuxEvent(WpsEvent.${m[1]}, (data) => …)`);
         }

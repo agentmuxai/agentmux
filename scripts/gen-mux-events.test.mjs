@@ -71,6 +71,14 @@ describe("untypedSubscriptions", () => {
         ]);
     });
 
+    it("still refuses a use after a comment or a `//` inside a string on the same line", () => {
+        const sources = [
+            ["frontend/i.ts", "/* why */ [WpsEvent.SysInfo].map((eventType) => muxEventSubscribe({ eventType, handler }));"],
+            ["frontend/j.ts", 'const url = "http://x"; [WpsEvent.SysInfo].map((eventType) => muxEventSubscribe({ eventType, handler }));'],
+        ];
+        expect(untypedSubscriptions(sources, typed, wps).map((e) => e.split(":")[0])).toEqual(["frontend/i.ts", "frontend/j.ts"]);
+    });
+
     it("leaves untyped events, onMuxEvent, an RPC's event field and a named constant alone", () => {
         const sources = [
             ["frontend/c.ts", "muxEventSubscribe({ eventType: WpsEvent.BlockClose, handler: () => {} });"],
