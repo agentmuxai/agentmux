@@ -63,6 +63,8 @@ pub(crate) mod widget_handlers;
 
 #[cfg(test)]
 pub(crate) mod tests;
+#[cfg(test)]
+mod rpc_schema_export;
 
 use std::sync::Arc;
 

@@ -35,7 +35,8 @@ use tokio::time::timeout;
 const PROBE_TIMEOUT: Duration = Duration::from_secs(8);
 const PROTOCOL_VERSION: &str = "2024-11-05";
 
-#[derive(Debug, Clone, Copy, Serialize)]
+#[derive(Debug, Clone, Copy, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "snake_case")]
 pub enum ProbeStatus {
     Connected,
@@ -44,9 +45,11 @@ pub enum ProbeStatus {
     InvalidConfig,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct ProbeResult {
     pub status: ProbeStatus,
+    #[ts(type = "number | null")]
     pub tool_count: Option<usize>,
     pub server_name: Option<String>,
     pub server_version: Option<String>,

@@ -1,9 +1,11 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// Hand-maintained RPC bindings. Keep in sync with the agentmux-srv RPC
-// handlers (backend/rpc_types/, server/websocket.rs). The original Go
-// generator (cmd/generate/main-generatets.go) was removed with the Go backend.
+// RPC bindings. `generated.ts` (`GeneratedApi`) is generated from srv's typed
+// commands by scripts/gen-rpc-stubs.mjs; the domain files hold the stubs not
+// moved there yet, still hand-maintained against the agentmux-srv RPC
+// handlers (backend/rpc_types/, server/websocket.rs). To move one, add it to
+// generated-manifest.json, delete its method here, and run the generator.
 //
 // This module was split from a single ~1,454-line rpc-api file into domain
 // files. `RpcApi` is composed here from the per-domain partials; its public
@@ -21,6 +23,7 @@ import { BundleApi, BundleImportApi } from "./bundle";
 import { FileApi } from "./file";
 import { FleetApi } from "./fleet";
 import { FsApi } from "./fs";
+import { GeneratedApi } from "./generated";
 import { IdentityApi } from "./identity";
 import { LayoutApi } from "./layout";
 import { McpApi } from "./mcp";
@@ -332,4 +335,5 @@ export const RpcApi = {
     ...ViewerApi,
     ...PresenceApi,
     ...TowerApi,
+    ...GeneratedApi,
 };
