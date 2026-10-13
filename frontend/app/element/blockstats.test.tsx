@@ -24,6 +24,7 @@ import {
     describeProcesses,
     formatBytes,
     formatSince,
+    hostCoverage,
     isRemoteConnection,
     remoteBadge,
 } from "./blockstats";
@@ -42,7 +43,14 @@ function figures(over: Partial<BlockStatsFigures> = {}): BlockStatsFigures {
 
 const local = (over: Partial<BlockStatsFigures> = {}): BlockStatsDetail => ({ local: figures(over) });
 
-const HOST = { cpu_count: 8, cpu: 300, mem: 6 * 1024 * MB, processes: 400, memory_metric: "anonymous resident + swap" };
+const HOST = {
+    cpu_count: 8,
+    cpu: 300,
+    mem: 6 * 1024 * MB,
+    processes: 400,
+    unmeasured: 0,
+    memory_metric: "anonymous resident + swap",
+};
 
 function remote(r: Partial<BlockStatsRemote>): BlockStatsDetail {
     return {
@@ -194,6 +202,13 @@ describe("formatting", () => {
             "Connected to WSL Ubuntu (198.51.100.5)"
         );
         expect(describeConnection({ name: "far", kind: "ssh" })).toBe("Connected to far");
+    });
+
+    it("says when a host's figures leave out processes it wouldn't measure", () => {
+        expect(hostCoverage({ processes: 400, unmeasured: 0 })).toBe("all its 400 processes");
+        expect(hostCoverage({ processes: 600, unmeasured: 210 })).toBe(
+            "your 390 processes only; 210 others' can't be read"
+        );
     });
 
     it("tells a remote connection from a local one", () => {

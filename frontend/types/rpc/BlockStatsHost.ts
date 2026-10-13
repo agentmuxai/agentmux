@@ -11,4 +11,9 @@ cpu?: number,
 /**
  * Private memory, bytes, as `memory_metric` says.
  */
-mem: number, processes: number, memory_metric: string, };
+mem: number, processes: number, 
+/**
+ * Of `processes`, those the machine wouldn't measure (other users' on
+ * macOS): `cpu` and `mem` are then only the rest's, not the host's.
+ */
+unmeasured: number, memory_metric: string, };

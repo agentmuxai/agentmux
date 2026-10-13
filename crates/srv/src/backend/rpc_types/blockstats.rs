@@ -86,6 +86,9 @@ pub struct BlockStatsHost {
     #[ts(type = "number")]
     pub mem: u64,
     pub processes: u32,
+    /// Of `processes`, those the machine wouldn't measure (other users' on
+    /// macOS): `cpu` and `mem` are then only the rest's, not the host's.
+    pub unmeasured: u32,
     pub memory_metric: String,
 }
 

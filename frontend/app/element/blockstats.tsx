@@ -98,6 +98,16 @@ function privateMeaning(metric: string): string {
     }
 }
 
+/**
+ * What a remote host's CPU and memory rows cover: every process, or, where
+ * the machine wouldn't measure some (other users' on macOS), only the rest.
+ */
+export function hostCoverage(h: { processes: number; unmeasured: number }): string {
+    if (h.unmeasured === 0) return `all its ${h.processes} processes`;
+    const mine = h.processes - h.unmeasured;
+    return `your ${mine} processes only; ${h.unmeasured} others' can't be read`;
+}
+
 /** The badge's two figures for a remote pane, and whether they are the whole host's. */
 export function remoteBadge(r: BlockStatsRemote): { cpu: string; mem: string; host: boolean } | null {
     const cpu = (v: number | undefined) => (v == null ? "–%" : `${v.toFixed(1)}%`);
@@ -253,12 +263,12 @@ function RemoteTooltip(props: { detail: BlockStatsDetail }) {
                             <Row
                                 label="Host CPU"
                                 value={h().cpu == null ? "–" : `${h().cpu!.toFixed(1)}%`}
-                                meaning={`of one core, across ${h().cpu_count} cores`}
+                                meaning={`of one core, across ${h().cpu_count} cores; ${hostCoverage(h())}`}
                             />
                             <Row
                                 label="Host memory"
                                 value={formatBytes(h().mem)}
-                                meaning={`private memory of all its ${h().processes} processes`}
+                                meaning={`private memory of ${hostCoverage(h())}`}
                             />
                         </>
                     )}

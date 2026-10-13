@@ -153,6 +153,9 @@ pub struct PaneFrame {
     pub host_cpu_milli: Option<u64>,
     pub host_mem: u64,
     pub host_processes: u32,
+    /// Of `host_processes`, those listed without CPU or memory (other users'
+    /// on macOS): the host's CPU and memory leave them out.
+    pub host_unmeasured: u32,
 }
 
 /// One process in a [`ProcFrame`]. Absent values are ones the host's OS
@@ -646,7 +649,8 @@ impl Reply {
                     .u32(f.cpu_count)
                     .opt_u64(f.host_cpu_milli)
                     .u64(f.host_mem)
-                    .u32(f.host_processes);
+                    .u32(f.host_processes)
+                    .u32(f.host_unmeasured);
             }
             Reply::Err { kind, message } => {
                 w.u8(status::ERR).u8(*kind as u8).str(message);
@@ -733,6 +737,7 @@ impl Reply {
                     host_cpu_milli: r.opt_u64()?,
                     host_mem: r.u64()?,
                     host_processes: r.u32()?,
+                    host_unmeasured: r.u32()?,
                 })
             }
             status::ERR => Reply::Err {
@@ -918,6 +923,7 @@ mod tests {
                 host_cpu_milli: None,
                 host_mem: 6 << 30,
                 host_processes: 412,
+                host_unmeasured: 0,
             }),
             // Nothing found: the host's totals only.
             Reply::PaneProcs(PaneFrame {
@@ -933,6 +939,7 @@ mod tests {
                 host_cpu_milli: Some(3_100),
                 host_mem: 9 << 30,
                 host_processes: 600,
+                host_unmeasured: 210,
             }),
         ];
         let mut stream = Vec::new();

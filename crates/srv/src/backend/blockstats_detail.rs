@@ -90,6 +90,7 @@ pub fn remote(block_id: &str, f: PaneFrame) -> BlockStatsRemote {
         cpu: f.host_cpu_milli.map(percent),
         mem: f.host_mem,
         processes: f.host_processes,
+        unmeasured: f.host_unmeasured,
         memory_metric: f.memory_metric.clone(),
     };
     let found = match f.found {
@@ -274,6 +275,7 @@ mod tests {
             host_cpu_milli: Some(3_000),
             host_mem: 6 << 30,
             host_processes: 400,
+            host_unmeasured: 0,
         }
     }
 

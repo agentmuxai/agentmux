@@ -197,6 +197,7 @@ pub fn pane_frame(procs: &[ProcInfo], rates: &[Option<f64>], roots: &[usize], fo
         host_cpu_milli: rates.iter().flatten().fold(None, |acc: Option<u64>, &r| Some(acc.unwrap_or(0) + milli(r) as u64)),
         host_mem: procs.iter().filter_map(|p| p.mem_private).sum(),
         host_processes: procs.len() as u32,
+        host_unmeasured: procs.iter().filter(|p| !p.measured()).count() as u32,
     }
 }
 
@@ -351,7 +352,7 @@ mod tests {
         assert_eq!(f.cpu_milli, Some(10 + 500 + 250));
         assert_eq!(f.mem, Some(4 + 50 + 30 + 2 + 3));
         assert_eq!(f.mem_resident, Some(2 * (4 + 50 + 30 + 2 + 3)));
-        assert_eq!((f.cpu_count, f.host_processes, f.host_mem), (4, 7, 95));
+        assert_eq!((f.cpu_count, f.host_processes, f.host_mem, f.host_unmeasured), (4, 7, 95, 0));
     }
 
     #[test]
@@ -361,6 +362,12 @@ mod tests {
         let f = pane_frame(&procs, &rates, &[], PaneFound::None, 2);
         assert_eq!((f.processes, f.names.len(), f.mem, f.cpu_milli), (0, 0, None, None));
         assert_eq!((f.host_processes, f.host_cpu_milli), (7, None), "no rate yet: unknown, not 0");
+        // Another user's process on macOS: listed, but not in the totals.
+        let mut procs = pane_table();
+        procs[6].cpu_ns = None;
+        procs[6].mem_private = None;
+        let f = pane_frame(&procs, &rates, &[], PaneFound::None, 2);
+        assert_eq!((f.host_processes, f.host_unmeasured, f.host_mem), (7, 1, 94));
     }
 
     #[test]
