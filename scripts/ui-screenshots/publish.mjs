@@ -12,13 +12,18 @@
 // publishable (`containsWorkspaceData` false, or "review": a person checks it);
 // one marked true, or not marked at all, never is.
 //
-//   node scripts/ui-screenshots/publish.mjs --docs <agentmux-docs clone> --from <run dir> [--from ...] [--dry-run]
+//   node scripts/ui-screenshots/publish.mjs [--docs <agentmux-docs clone>] [--landing <agentmux-landing clone>]
+//       --from <run dir> [--from ...] [--ffmpeg PATH] [--dry-run]
 //
-// Review the docs clone's `git diff` (and the images) before committing.
+// `--landing` publishes into the landing site from its own manifest instead
+// (publish-landing.mjs). Review each clone's `git diff` (and the images)
+// before committing.
 
 import { copyFileSync, existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { basename, extname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { findFfmpeg } from "./lib/recorder.mjs";
+import { publishLanding } from "./publish-landing.mjs";
 
 /** The images a run directory holds: from its manifest.json, each with the
  *  name the docs use for it. */
@@ -110,19 +115,30 @@ function main() {
     const argv = process.argv.slice(2);
     const from = [];
     let docs = null;
+    let landing = null;
+    let ffmpeg = null;
     let dryRun = false;
     for (let i = 0; i < argv.length; i++) {
         if (argv[i] === "--from") from.push(resolve(argv[++i]));
         else if (argv[i] === "--docs") docs = resolve(argv[++i]);
+        else if (argv[i] === "--landing") landing = resolve(argv[++i]);
+        else if (argv[i] === "--ffmpeg") ffmpeg = argv[++i];
         else if (argv[i] === "--dry-run") dryRun = true;
     }
-    if (!docs || from.length === 0) {
-        console.error("usage: publish.mjs --docs <agentmux-docs clone> --from <run dir> [--from ...] [--dry-run]");
+    if ((!docs && !landing) || from.length === 0) {
+        console.error("usage: publish.mjs [--docs <agentmux-docs clone>] [--landing <agentmux-landing clone>] --from <run dir> [--from ...] [--ffmpeg PATH] [--dry-run]");
         process.exit(2);
     }
     try {
-        const steps = publish({ docs, from, dryRun });
-        if (steps.some((s) => s.action === "ambiguous")) process.exitCode = 1;
+        if (docs) {
+            const steps = publish({ docs, from, dryRun });
+            if (steps.some((s) => s.action === "ambiguous")) process.exitCode = 1;
+        }
+        if (landing) {
+            if (docs) console.log(`\n=== landing ===`);
+            const steps = publishLanding({ landing, from, ffmpeg: findFfmpeg(ffmpeg), dryRun });
+            if (steps.some((s) => s.action === "ambiguous")) process.exitCode = 1;
+        }
     } catch (err) {
         console.error(err.message);
         process.exit(2);
