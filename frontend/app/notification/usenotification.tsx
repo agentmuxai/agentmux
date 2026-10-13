@@ -4,7 +4,7 @@
 
 import { atoms, getApi, setNotifications } from "@/store/global";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
-import { createEffect, createSignal, untrack } from "solid-js";
+import { createEffect, createRoot, createSignal, untrack } from "solid-js";
 import { useTick } from "@/app/hook/useTick";
 
 const notificationActions: { [key: string]: () => void } = {
@@ -14,15 +14,51 @@ const notificationActions: { [key: string]: () => void } = {
     // Add other action functions here
 };
 
+// Actions registered at runtime live only as long as a notification offers them: once a
+// notification that offered one leaves the list (expired, dismissed, or its button used), the
+// action goes too. Built-in actions above are never pruned.
+const runtimeActions = new Set<string>();
+const offeredRuntimeActions = new Set<string>();
+let pruning = false;
+
+function startPruningRuntimeActions(): void {
+    if (pruning) return;
+    pruning = true;
+    createRoot(() =>
+        createEffect(() => {
+            const offered = new Set(atoms.notifications().flatMap((n) => (n.actions ?? []).map((a) => a.actionKey)));
+            for (const key of [...runtimeActions]) {
+                if (offered.has(key)) {
+                    offeredRuntimeActions.add(key);
+                } else if (offeredRuntimeActions.has(key)) {
+                    // Offered before and gone now. A key registered but not yet offered is kept.
+                    clearNotificationAction(key);
+                }
+            }
+        })
+    );
+}
+
 /** Register (or replace) the function a notification action button runs, for actions
- *  whose effect is only known when the notification is raised (an Undo, say). */
+ *  whose effect is only known when the notification is raised (an Undo, say). It is
+ *  forgotten once no notification offers it any more. */
 export function setNotificationAction(actionKey: string, fn: () => void): void {
     notificationActions[actionKey] = fn;
+    runtimeActions.add(actionKey);
+    startPruningRuntimeActions();
 }
 
 /** Forget an action registered with `setNotificationAction`. */
 export function clearNotificationAction(actionKey: string): void {
+    if (!runtimeActions.has(actionKey)) return;
+    runtimeActions.delete(actionKey);
+    offeredRuntimeActions.delete(actionKey);
     delete notificationActions[actionKey];
+}
+
+/** True while an action key has a handler; exported for tests. */
+export function hasNotificationAction(actionKey: string): boolean {
+    return actionKey in notificationActions;
 }
 
 export function useNotification() {
