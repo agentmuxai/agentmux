@@ -8,9 +8,7 @@
  * Pinned widgets appear directly in the bar. Everything else lives in the More
  * dropdown. Users can pin/unpin via right-click on any widget.
  *
- * Settings keys:
- *   widget:pinned   — ordered short-name array (e.g. ["agent","terminal","sysinfo"])
- *   widget:icononly — icons only, no labels
+ * Settings keys: see action-widgets-config.ts.
  *
  * Split (see also):
  *   action-widgets-config.ts    — pure/RPC config helpers (pinned/more derivation, pin/unpin)
@@ -31,11 +29,14 @@ import {
     getMoreWidgets,
     getPinnedKeys,
     getPinnedWidgets,
+    getSavedPinNames,
     handleWidgetSelect,
     pinWidget,
+    UNHIDEABLE_WIDGET_KEYS,
     unpinWidget,
     widgetIconStyle,
 } from "./action-widgets-config";
+import { hideFromWidgetBar } from "./widget-bar-hide";
 import { buildWidgetOpenActions } from "./action-widgets-menu";
 import { MoreDropdown } from "./more-dropdown";
 import { PinnedWidgetFlyout } from "./pinned-widget-flyout";
@@ -127,6 +128,7 @@ const ActionWidgets = (): JSX.Element => {
     } = useWidgetDragReorder({
         containerRef: () => containerRef,
         pinnedWidgets,
+        savedPins: () => getSavedPinNames(settings(), wmap()),
     });
 
     // ── Pinned-parent flyout (Case A, SPEC_WIDGET_BAR_PARENT_SUBMENUS_2026_08_12.md §3.3) ──
@@ -229,6 +231,14 @@ const ActionWidgets = (): JSX.Element => {
         parentOpenConfirmedByClick = true;
     };
 
+    // A group hidden (Settings → Widgets, a file edit) or unpinned while its flyout is open loses
+    // its slot on the bar; close the flyout too, or it would stay up with the group's children
+    // still launchable from it.
+    createEffect(() => {
+        const key = openParentKey();
+        if (key !== null && !pinnedWidgets().some((e) => e.key === key)) closeParentFlyout(key);
+    });
+
     // Close on outside click / Escape — mirrors the More dropdown's own
     // outside-click effect below, scoped to whichever parent is open.
     createEffect(() => {
@@ -311,6 +321,7 @@ const ActionWidgets = (): JSX.Element => {
     // in the JSX below; null means closed.
     const [itemMenuState, setItemMenuState] = createSignal<{
         pos: { x: number; y: number };
+        key: string;
         shortName: string;
     } | null>(null);
 
@@ -329,13 +340,20 @@ const ActionWidgets = (): JSX.Element => {
     const isItemMenuOpen = () => itemMenuState() !== null;
 
     const handleItemContextMenu = (pos: { x: number; y: number }, key: string) => {
-        setItemMenuState({ pos, shortName: key.replace("defwidget@", "") });
+        setItemMenuState({ pos, key, shortName: key.replace("defwidget@", "") });
     };
 
     const resolveWidgetDef = (shortName: string) =>
         wmap()[`defwidget@${shortName}`] ?? null;
 
-    const buildItemMenuItems = (shortName: string): PopoverMenuItem[] => {
+    /** "Hide from widget bar": off the bar, out of More and the pane "+" picker until it's
+     *  shown again in Settings → Widgets. Settings itself can't be hidden. */
+    const hideItem = (key: string, group: boolean) =>
+        UNHIDEABLE_WIDGET_KEYS.has(key)
+            ? []
+            : [{ label: group ? "Hide group from widget bar" : "Hide from widget bar", click: () => hideFromWidgetBar(key, settings(), wmap()) }];
+
+    const buildItemMenuItems = (key: string, shortName: string): PopoverMenuItem[] => {
         const widgetDef = resolveWidgetDef(shortName);
         // A parent row's right-click is scoped to the group as a whole (§3.5)
         // — no "Open in New Window"/"Open in Floating Pane" (no single pane a
@@ -346,6 +364,7 @@ const ActionWidgets = (): JSX.Element => {
                 getPinnedKeys(settings(), wmap()).includes(shortName)
                     ? { label: "Unpin group from bar", click: () => { unpinWidget(shortName, settings(), wmap()); } }
                     : { label: "Pin group to bar", click: () => { pinWidget(shortName, settings(), wmap()); } },
+                ...hideItem(key, true),
             ];
         }
         const items: PopoverMenuItem[] = buildWidgetOpenActions(shortName, wmap()).map((action) => ({
@@ -371,6 +390,7 @@ const ActionWidgets = (): JSX.Element => {
                 ? { label: "Unpin from bar", click: () => { unpinWidget(shortName, settings(), wmap()); } }
                 : { label: "Pin to bar", click: () => { pinWidget(shortName, settings(), wmap()); } }
         );
+        items.push(...hideItem(key, false));
         return items;
     };
 
@@ -434,7 +454,7 @@ const ActionWidgets = (): JSX.Element => {
         if (isParent) {
             closeParentFlyout(key);
             ContextMenuModel.showContextMenu(
-                [{ label: "Unpin group from bar", click: () => unpinWidget(shortName, settings(), wmap()) }],
+                [{ label: "Unpin group from bar", click: () => unpinWidget(shortName, settings(), wmap()) }, ...hideItem(key, true)],
                 e
             );
             return;
@@ -445,6 +465,7 @@ const ActionWidgets = (): JSX.Element => {
                 ...actions.map((action) => ({ label: action.label, click: action.run })),
                 { type: "separator" },
                 { label: "Unpin from bar", click: () => unpinWidget(shortName, settings(), wmap()) },
+                ...hideItem(key, false),
             ],
             e
         );
@@ -634,7 +655,7 @@ const ActionWidgets = (): JSX.Element => {
                 <PopoverMenu
                     pos={itemMenuState()!.pos}
                     onClose={() => setItemMenuState(null)}
-                    items={buildItemMenuItems(itemMenuState()!.shortName)}
+                    items={buildItemMenuItems(itemMenuState()!.key, itemMenuState()!.shortName)}
                 />
             </Show>
         </>

@@ -150,6 +150,16 @@
         "widget:icononly": {
           "type": "boolean"
         },
+        "widget:pinned": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "The widget bar's pinned icons, in order, as short names (\"agent\" for defwidget@agent). Absent means the fresh-install default."
+        },
+        "widget:hidden": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Widget-bar entries hidden from the bar, More and the pane + picker, as full keys (\"defwidget@drone\"). Set in Settings > Widgets. See docs/specs/SPEC_WIDGET_BAR_VISIBILITY_SETTINGS_2026_10_12.md."
+        },
         "statusbar:showmuxbuscloud": {
           "type": "boolean",
           "description": "Show MuxBus Cloud in the status bar: the dot after the host name and the sign-in block in the host menu. Default true (absent means shown); set false to hide both. LAN discovery is unaffected. See docs/specs/SPEC_STATUSBAR_HIDE_MUXBUS_SETTING_2026_10_08.md."

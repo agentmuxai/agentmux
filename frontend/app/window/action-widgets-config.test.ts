@@ -8,8 +8,13 @@ import {
     getEffectiveGroupedChildKeys,
     getGroupedChildKeys,
     getMoreWidgets,
+    getHiddenKeys,
     getPinnedKeys,
     getPinnedWidgets,
+    getWidgetBarModel,
+    isWidgetHidden,
+    nextWidgetBarConfig,
+    withVisibleOrder,
 } from "./action-widgets-config";
 
 function widget(overrides: Partial<WidgetConfigType> = {}): WidgetConfigType {
@@ -242,5 +247,133 @@ describe("buildPaneWidgetMenuItems", () => {
         expect(items.map((i) => i.label)).toContain("Slack");
         const messengers = items.find((i) => i.label === "Messengers");
         expect(messengers?.submenu?.map((c) => c.label)).toEqual(["Discord"]);
+    });
+});
+
+// ── Hidden entries: SPEC_WIDGET_BAR_VISIBILITY_SETTINGS_2026_10_12.md ────────────
+
+function barWmap(): Record<string, WidgetConfigType> {
+    return {
+        ...messengersWmap(),
+        "defwidget@editor": widget({ "display:order": 2, "display:pinned": true, label: "Editor", blockdef: { meta: { view: "editor" } } }),
+        "defwidget@drone": widget({ "display:order": 12, label: "Drone", blockdef: { meta: { view: "drone" } } }),
+        "defwidget@settings": widget({ "display:order": 99, label: "Settings", blockdef: { meta: { view: "settings" } } }),
+        "ext@acme.board/main": widget({ "display:order": 50, label: "Board", blockdef: { meta: { view: "ext:acme.board/main" } } }),
+    };
+}
+
+describe("widget:hidden", () => {
+    it("reads full keys, maps old names, and never hides Settings", () => {
+        const hidden = getHiddenKeys({ "widget:hidden": ["defwidget@remotes", "ext@acme.board/main", "defwidget@settings", 7] });
+        expect(hidden).toEqual(new Set(["defwidget@connectors", "ext@acme.board/main"]));
+    });
+
+    it("takes a hidden entry off the bar, out of More and out of the + picker", () => {
+        const settings = { "widget:hidden": ["defwidget@editor", "defwidget@drone", "ext@acme.board/main"] };
+        expect(getPinnedKeys(settings, barWmap())).toEqual(["agent"]);
+        expect(getMoreWidgets(settings, barWmap()).map((e) => e.key)).not.toContain("defwidget@drone");
+        expect(getMoreWidgets(settings, barWmap()).map((e) => e.key)).not.toContain("ext@acme.board/main");
+        const labels = buildPaneWidgetMenuItems(barWmap(), settings, vi.fn()).map((i) => i.label);
+        expect(labels).not.toContain("Editor");
+        expect(labels).not.toContain("Drone");
+        expect(labels).not.toContain("Board");
+        expect(labels).toContain("Agent");
+    });
+
+    it("drops a hidden child from its group, and hides the group once every child is hidden", () => {
+        const one = { "widget:hidden": ["defwidget@discord"] };
+        expect(getChildWidgets(barWmap()["defwidget@messengers"], barWmap(), one).map((c) => c.key)).toEqual(["defwidget@slack"]);
+        expect(isWidgetHidden("defwidget@messengers", barWmap(), one)).toBe(false);
+        const both = { "widget:hidden": ["defwidget@discord", "defwidget@slack"] };
+        expect(isWidgetHidden("defwidget@messengers", barWmap(), both)).toBe(true);
+        expect(getMoreWidgets(both, barWmap()).map((e) => e.key)).not.toContain("defwidget@messengers");
+        expect(buildPaneWidgetMenuItems(barWmap(), both, vi.fn()).map((i) => i.label)).not.toContain("Messengers");
+    });
+});
+
+describe("nextWidgetBarConfig", () => {
+    it("hiding a pinned entry unpins it in the same write", () => {
+        expect(nextWidgetBarConfig("defwidget@editor", "hidden", {}, barWmap())).toEqual({
+            "widget:hidden": ["defwidget@editor"],
+            "widget:pinned": ["agent"],
+        });
+    });
+
+    it("showing an entry again puts it in More and clears the list when it empties", () => {
+        const settings = { "widget:hidden": ["defwidget@drone"] };
+        expect(nextWidgetBarConfig("defwidget@drone", "more", settings, barWmap())).toEqual({ "widget:hidden": null });
+    });
+
+    it("pinning a hidden entry un-hides it and appends it to the pins", () => {
+        const settings = { "widget:pinned": ["agent"], "widget:hidden": ["defwidget@drone", "ext@gone/x"] };
+        expect(nextWidgetBarConfig("defwidget@drone", "pinned", settings, barWmap())).toEqual({
+            "widget:hidden": ["ext@gone/x"],
+            "widget:pinned": ["agent", "drone"],
+        });
+    });
+
+    it("showing a group hidden only through its children brings the children back", () => {
+        const settings = { "widget:hidden": ["defwidget@discord", "defwidget@slack", "defwidget@drone"] };
+        expect(isWidgetHidden("defwidget@messengers", barWmap(), settings)).toBe(true);
+        expect(nextWidgetBarConfig("defwidget@messengers", "more", settings, barWmap())).toEqual({ "widget:hidden": ["defwidget@drone"] });
+        expect(nextWidgetBarConfig("defwidget@messengers", "pinned", settings, barWmap())).toEqual({
+            "widget:hidden": ["defwidget@drone"],
+            "widget:pinned": ["agent", "editor", "messengers"],
+        });
+    });
+
+    it("keeps the pin of a group hidden only through its children when something else changes", () => {
+        const settings = { "widget:pinned": ["agent", "messengers"], "widget:hidden": ["defwidget@discord", "defwidget@slack"] };
+        expect(getPinnedKeys(settings, barWmap())).toEqual(["agent"]); // off the bar while its children are hidden
+        expect(nextWidgetBarConfig("defwidget@agent", "hidden", settings, barWmap())).toEqual({
+            "widget:hidden": ["defwidget@discord", "defwidget@slack", "defwidget@agent"],
+            "widget:pinned": ["messengers"],
+        });
+        expect(nextWidgetBarConfig("defwidget@drone", "pinned", settings, barWmap())["widget:pinned"]).toEqual(["agent", "messengers", "drone"]);
+    });
+
+    it("reorders the visible pins without dropping a pin that is hidden right now", () => {
+        expect(withVisibleOrder(["agent", "messengers", "editor"], ["editor", "agent"])).toEqual(["editor", "messengers", "agent"]);
+    });
+
+    it("refuses to hide Settings", () => {
+        expect(nextWidgetBarConfig("defwidget@settings", "hidden", {}, barWmap())).toEqual({});
+    });
+
+    it("un-hides an entry stored under its old name", () => {
+        const wmap = { ...barWmap(), "defwidget@connectors": widget({ label: "Connectors" }) };
+        const settings = { "widget:hidden": ["defwidget@remotes"] };
+        expect(nextWidgetBarConfig("defwidget@connectors", "more", settings, wmap)).toEqual({ "widget:hidden": null });
+    });
+});
+
+describe("getWidgetBarModel", () => {
+    it("lists pinned in pin order, then More, then hidden, with group children nested", () => {
+        const settings = { "widget:pinned": ["editor", "agent"], "widget:hidden": ["defwidget@drone", "defwidget@slack"] };
+        const model = getWidgetBarModel(settings, barWmap());
+        expect(model.map((e) => [e.key, e.state])).toEqual([
+            ["defwidget@editor", "pinned"],
+            ["defwidget@agent", "pinned"],
+            ["defwidget@help", "more"],
+            ["defwidget@messengers", "more"],
+            ["ext@acme.board/main", "more"],
+            ["defwidget@settings", "more"],
+            ["defwidget@drone", "hidden"],
+        ]);
+        const messengers = model.find((e) => e.key === "defwidget@messengers")!;
+        expect(messengers.children.map((c) => [c.key, c.state])).toEqual([
+            ["defwidget@discord", "group"],
+            ["defwidget@slack", "hidden"],
+        ]);
+        expect(model.find((e) => e.key === "defwidget@settings")!.canHide).toBe(false);
+    });
+
+    it("gives every pinned entry, a promoted child too, its place on the bar", () => {
+        const model = getWidgetBarModel({ "widget:pinned": ["slack", "agent"] }, barWmap());
+        const agent = model.find((e) => e.key === "defwidget@agent")!;
+        const slack = model.find((e) => e.key === "defwidget@messengers")!.children.find((c) => c.key === "defwidget@slack")!;
+        expect([slack.state, slack.pinIndex, slack.pinCount]).toEqual(["pinned", 0, 2]);
+        expect([agent.pinIndex, agent.pinCount]).toEqual([1, 2]);
+        expect(model.find((e) => e.key === "ext@acme.board/main")!.canPin).toBe(false);
     });
 });
