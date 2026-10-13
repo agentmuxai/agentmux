@@ -393,6 +393,7 @@ partial list.
 | [`SPEC_PANE_CLICK_THROUGH_INPUT_FOCUS_2026_09_23`](SPEC_PANE_CLICK_THROUGH_INPUT_FOCUS_2026_09_23.md) | Clicking an input in an unselected pane should focus that input — in one click |
 | [`SPEC_PANE_CLOSE_REOPEN_CONTINUITY_GUARANTEE_2026_07_27`](SPEC_PANE_CLOSE_REOPEN_CONTINUITY_GUARANTEE_2026_07_27.md) | Spec: pane close/reopen must guarantee conversation continuity, or say so |
 | [`SPEC_PANE_COLOR_SYSTEM_CONSOLIDATION_2026_09_20`](SPEC_PANE_COLOR_SYSTEM_CONSOLIDATION_2026_09_20.md) | SPEC: consolidate pane/tab color systems — persist explicit agent-pane picks, unify the tab-select indicator |
+| [`SPEC_PANE_CONTROLS_TILED_RESTORE_ICON_AND_MINIMIZE_FROM_MAXIMIZED_2026_10_12`](SPEC_PANE_CONTROLS_TILED_RESTORE_ICON_AND_MINIMIZE_FROM_MAXIMIZED_2026_10_12.md) | Spec — Pane controls: the outline maximize icon, a restore icon for a tiled layout, and minimizing a maximized pane directly |
 | [`SPEC_PANE_DRAG_TO_TAB_2026_07_10`](SPEC_PANE_DRAG_TO_TAB_2026_07_10.md) | Spec: Pane Drag-to-Tab (Cross-Tab Pane Relocation via Drag & Drop) |
 | [`SPEC_PANE_ENV_ISOLATION_2026_09_17`](SPEC_PANE_ENV_ISOLATION_2026_09_17.md) | SPEC: an instance's identity must not be inheritable by its panes |
 | [`SPEC_PANE_FILE_DROP_2026_05_30`](SPEC_PANE_FILE_DROP_2026_05_30.md) | SPEC: Drag-and-drop files into Terminal and Agent panes |
@@ -761,6 +762,7 @@ partial list.
 | [`SPEC_MACOS_LAUNCH_SPEED_AND_SPLASH_TELEMETRY_2026_07_02`](SPEC_MACOS_LAUNCH_SPEED_AND_SPLASH_TELEMETRY_2026_07_02.md) | SPEC: macOS Launch Speed + Splash Load-Time Telemetry |
 | [`SPEC_MACOS_PACKAGING_2026_05_30`](SPEC_MACOS_PACKAGING_2026_05_30.md) | Spec: macOS packaging — signed, launchable `AgentMux.app` / `.dmg` |
 | [`SPEC_MACOS_TEAROFF_STABILITY_2026_05_29`](SPEC_MACOS_TEAROFF_STABILITY_2026_05_29.md) | macOS Tear-off Stability — implementation spec |
+| [`SPEC_MEDIA_OPEN_SHOWS_THE_MEDIA_PANE_2026_10_12`](SPEC_MEDIA_OPEN_SHOWS_THE_MEDIA_PANE_2026_10_12.md) | Spec: Clicking an image shows the Media pane it lands in |
 | [`SPEC_MEDIA_PANE_EMPTY_LOGO_2026_10_12`](SPEC_MEDIA_PANE_EMPTY_LOGO_2026_10_12.md) | Media pane: a faint AgentMux logo when no file is open |
 | [`SPEC_MEDIA_PANE_V2_AGENT_WORKFLOW_GAPS_2026_07_28`](SPEC_MEDIA_PANE_V2_AGENT_WORKFLOW_GAPS_2026_07_28.md) | Spec: Media pane v2 — gaps found running a real agent video-editing workflow through it |
 | [`SPEC_MEDIA_PANE_V3_BROWSER_AND_CUSTOM_TRANSPORT_2026_07_29`](SPEC_MEDIA_PANE_V3_BROWSER_AND_CUSTOM_TRANSPORT_2026_07_29.md) | Spec: Media pane v3 — persistent browser + custom playback/scrub UI |
