@@ -1546,33 +1546,24 @@ pub(super) async fn handle_reactive_agents(
     Json(serde_json::to_value(&agents).unwrap_or(json!([])))
 }
 
-/// Agent NAMES only, for LAN peers — deliberately NOT
-/// [`handle_reactive_agents`], which serializes full `AgentRegistration`
-/// records (`block_id`, `tab_id`, `registered_at`, `last_seen`,
-/// `registration_nonce`). Those are internal delivery/routing details and
-/// stay behind full auth.
+/// Agent NAMES only, for LAN peers: not [`handle_reactive_agents`], whose
+/// full `AgentRegistration` records (`block_id`, `tab_id`, `registration_nonce`,
+/// ...) are routing details that stay behind full auth.
 ///
-/// This route is reachable with the broadcast `lan_key`
-/// (`lan_or_full_auth_middleware`), so treat its output as public to anyone
-/// on the local network: the LAN trust work deliberately shrank what a captured `lan_key` is worth, and
-/// this widens it by exactly one thing — enumerating agent names. That was
-/// an explicit, repo-owner-confirmed decision (2026-09-08): a `lan_key`
-/// holder could already confirm any *specific* name via
-/// `/agentmux/reactive/agent?id=…`, so this makes enumeration cheap rather
-/// than newly possible, and it's what lets a peer show which agents live on
-/// another host instead of the empty `agents: []` every LAN peer reported
-/// before. **Do not extend this response with anything beyond names, kinds
-/// and status** without revisiting those decisions.
+/// Reachable with the broadcast `lan_key` (`lan_or_full_auth_middleware`), so
+/// its output is public to anyone on the local network. **Do not extend it**
+/// without the owner's decision. Each field so far had one:
+/// - `agents`, enumerating names (2026-09-08): a `lan_key` holder could
+///   already confirm a specific name via `/agentmux/reactive/agent?id=…`.
+/// - `agent_kinds` (`{name: "host" | "container"}`, 2026-10-06, agentmux-mobile's
+///   SPEC_FLEET_HOST_TAGS_AND_CLOUD_HOSTS_2026_10_06 §5.2, §11).
+/// - `agent_status` (`{name: {state, since_ms}}`) and `now_ms`, decision D1 of
+///   2026-10-07 (agentmux-mobile's SPEC_AGENT_STATUS_AND_LIVE_PANE_FEED_2026_10_07
+///   §3.4, §11), also on the fleet feed this route is the fallback for.
+/// - `agent_lines` (`{name: line}`, 2026-10-13): content, each agent's Swarm
+///   summary line (`backend::agent_line`); absent with `swarm:sharesummaries` off.
 ///
-/// Two widenings since, both activity or placement metadata, never content.
-/// `agent_kinds` (`{name: "host" | "container"}`, an agent whose block can't
-/// be read left out): where an agent runs, by the owner's decision of
-/// 2026-10-06 (agentmux-mobile's SPEC_FLEET_HOST_TAGS_AND_CLOUD_HOSTS_2026_10_06
-/// §5.2, §11). `agent_status` (`{name: {state, since_ms}}`, an agent with no
-/// known state left out) and `now_ms`: whether an agent is busy and since
-/// when, nothing it says or does, by the owner's decision D1 of 2026-10-07
-/// (agentmux-mobile's SPEC_AGENT_STATUS_AND_LIVE_PANE_FEED_2026_10_07 §3.4,
-/// §11). The same fields are on the fleet feed this route is the fallback for.
+/// An agent with no kind, state or line is left out of that map.
 pub(super) async fn handle_reactive_agent_names(
     State(state): State<AppState>,
 ) -> Json<serde_json::Value> {
@@ -1590,12 +1581,18 @@ pub(super) async fn handle_reactive_agent_names(
         .collect();
     let status = serde_json::to_value(status).unwrap_or_else(|_| json!({}));
     let names: Vec<String> = agents.iter().map(|a| a.agent_id.clone()).collect();
-    Json(json!({
+    let mut body = json!({
         "agents": names,
         "agent_kinds": kinds,
         "now_ms": agentmux_common::time::now_ms_u64(),
         "agent_status": status,
-    }))
+    });
+    let settings = state.config_watcher.get_full_config();
+    let pairs = agents.iter().map(|a| (a.agent_id.as_str(), a.block_id.as_str()));
+    if let Some(lines) = crate::backend::agent_line::lines_by_name(&state.mstore, &settings.settings, pairs) {
+        body["agent_lines"] = json!(lines);
+    }
+    Json(body)
 }
 
 #[derive(serde::Deserialize)]

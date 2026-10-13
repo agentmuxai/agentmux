@@ -66,8 +66,8 @@ const data: SwarmOtherInstances = {
             display_name: "narko",
             tier: "host",
             channels: [
-                { channel: "dev-fix-lan", seen_at_ms: Date.now(), stale: false, os: "windows", agents: [{ name: "Loap", block_id: "b1", status: "working" }, { name: "Korp", block_id: "b2", status: "waiting" }] },
-                { channel: "old", seen_at_ms: Date.now() - 120_000, stale: true, os: "windows", agents: [{ name: "Opaz", block_id: "b3", status: "working" }] },
+                { channel: "dev-fix-lan", seen_at_ms: Date.now(), stale: false, os: "windows", agents: [{ name: "Loap", block_id: "b1", status: "working", line: "Fixing the login race" }, { name: "Korp", block_id: "b2", status: "waiting" }] },
+                { channel: "old", seen_at_ms: Date.now() - 120_000, stale: true, os: "windows", agents: [{ name: "Opaz", block_id: "b3", status: "working", line: "Old news" }] },
             ],
         },
         {
@@ -152,6 +152,17 @@ describe("OtherInstanceSections", () => {
             [["idle", "Stopped"], null],
             [null],
         ]);
+    });
+
+    it("shows an agent's summary line under its row, and none when it shared none or its section is stale", () => {
+        const { container } = render(() => <OtherInstanceSections model={modelWith(data)} />);
+        const lines = sections(container).map((s) =>
+            [...s.querySelectorAll(".swarm-remote-agent-line")].map((e) => e.textContent)
+        );
+        // Loap shared one, Korp none; the stale section's "Old news" is not shown.
+        expect(lines).toEqual([["Fixing the login race"], [], [], []]);
+        const line = sections(container)[0].querySelector(".swarm-remote-agent-line")!;
+        expect(line.previousElementSibling?.querySelector(".swarm-remote-agent-name")?.textContent).toBe("Loap");
     });
 
     it("renders nothing with no other instances", () => {

@@ -1165,3 +1165,15 @@
     margin-left: auto;
     flex-shrink: 0;
 }
+
+// The agent's own summary line, styled as a local row's generated line and
+// aligned with the name (past the row's checkbox).
+.swarm-remote-agent-line {
+    padding: 0 10px 4px 32px;
+    font-size: 11px;
+    color: var(--secondary-text-color);
+    font-style: italic;
+    line-height: 1.4;
+    word-break: break-word;
+    overflow-wrap: break-word;
+}

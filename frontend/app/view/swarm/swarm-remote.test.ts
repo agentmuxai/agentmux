@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { platformLabel, remoteChip, remoteSections, seenAgo, type RemoteHost, type SwarmOtherInstances } from "./swarm-remote";
+import { platformLabel, remoteChip, remoteLine, remoteSections, seenAgo, type RemoteHost, type SwarmOtherInstances } from "./swarm-remote";
 
 const agent = (name: string) => ({ name, block_id: `blk-${name}` });
 const channel = (name: string, agents: string[], stale = false) => ({
@@ -141,5 +141,17 @@ describe("remoteChip", () => {
         expect(remoteChip("dreaming", false)).toBeNull();
         expect(remoteChip("toString", false)).toBeNull();
         expect(remoteChip("working", true)).toBeNull();
+    });
+});
+
+describe("remoteLine", () => {
+    it("shows a shared line, and nothing for none, a blank one, a non-string or a stale section", () => {
+        expect(remoteLine("Fixing the login race", false)).toBe("Fixing the login race");
+        expect(remoteLine("  Building  ", false)).toBe("Building");
+        expect(remoteLine(undefined, false)).toBeNull();
+        expect(remoteLine("   ", false)).toBeNull();
+        // Self-reported by another instance: anything but a string is ignored.
+        expect(remoteLine(7 as unknown as string, false)).toBeNull();
+        expect(remoteLine("Fixing the login race", true)).toBeNull();
     });
 });
