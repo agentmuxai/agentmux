@@ -33,13 +33,9 @@ export type { McpObservedAgent } from "@/types/rpc/McpObservedAgent";
 export type { McpObservedServer } from "@/types/rpc/McpObservedServer";
 export type { McpUnbindResult } from "@/types/rpc/McpUnbindResult";
 
-import type { CommandMcpCatalogSetReachData } from "@/types/rpc/CommandMcpCatalogSetReachData";
 import type { CommandMcpCatalogUpsertData } from "@/types/rpc/CommandMcpCatalogUpsertData";
 import type { CommandMcpUpsertData } from "@/types/rpc/CommandMcpUpsertData";
-import type { McpAgentItemData } from "@/types/rpc/McpAgentItemData";
-import type { McpCatalogItemData } from "@/types/rpc/McpCatalogItemData";
 import type { McpCatalogListData } from "@/types/rpc/McpCatalogListData";
-import type { McpObservedAgent } from "@/types/rpc/McpObservedAgent";
 
 // `id`, `transport` and `config` are all `#[serde(default)]` on the Rust side,
 // so they are omittable on the wire, but ts-rs generates them as required (it
@@ -53,15 +49,6 @@ export type McpCatalogUpsertInput = Pick<CommandMcpCatalogUpsertData, "name"> &
     Partial<Omit<CommandMcpCatalogUpsertData, "name">>;
 
 export const McpApi = {
-    McpUpsertCommand(client: RpcClient, data: McpUpsertInput, opts?: RpcOpts): Promise<McpServer> {
-        return client.rpcCall("mcp.upsert", data, opts);
-    },
-
-    /** Health/prerequisite probe — see McpProbeResult (srv-types.d.ts). */
-    McpProbeCommand(client: RpcClient, data: McpAgentItemData, opts?: RpcOpts): Promise<McpProbeResult> {
-        return client.rpcCall("mcp.probe", data, opts);
-    },
-
     // ── Armory catalog (global servers only, no agent_id) ──────────────────
 
     McpCatalogListCommand(
@@ -70,31 +57,5 @@ export const McpApi = {
         opts?: RpcOpts
     ): Promise<McpServerCatalogItem[]> {
         return client.rpcCall("mcp.catalog.list", data, opts);
-    },
-
-    McpCatalogUpsertCommand(client: RpcClient, data: McpCatalogUpsertInput, opts?: RpcOpts): Promise<McpServer> {
-        return client.rpcCall("mcp.catalog.upsert", data, opts);
-    },
-
-    /** Who a catalog server reaches beyond its binds: every agent, and
-     *  container agents too. Upsert leaves both as they are. */
-    McpCatalogSetReachCommand(
-        client: RpcClient,
-        data: CommandMcpCatalogSetReachData,
-        opts?: RpcOpts
-    ): Promise<{ all_agents: boolean; in_containers: boolean }> {
-        return client.rpcCall("mcp.catalog.set_reach", data, opts);
-    },
-
-    /** The MCP servers each running agent's CLI reports having, with the
-     *  source of each (`builtin`, `catalog`, or the CLI's own label). */
-    McpObservedListCommand(client: RpcClient, opts?: RpcOpts): Promise<McpObservedAgent[]> {
-        return client.rpcCall("mcp.observed.list", {}, opts);
-    },
-
-    /** Health/prerequisite probe for a global catalog server — no agent_id
-     *  (mirrors mcp.catalog.*'s window-scoped shape). See McpProbeResult. */
-    McpCatalogProbeCommand(client: RpcClient, data: McpCatalogItemData, opts?: RpcOpts): Promise<McpProbeResult> {
-        return client.rpcCall("mcp.catalog.probe", data, opts);
     },
 };

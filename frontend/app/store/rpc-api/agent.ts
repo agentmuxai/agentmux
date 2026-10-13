@@ -13,7 +13,6 @@ export type { CommandAppendAgentHistoryData } from "@/types/rpc/CommandAppendAge
 export type { CommandListAgentHistoryData } from "@/types/rpc/CommandListAgentHistoryData";
 export type { CommandSearchAgentHistoryData } from "@/types/rpc/CommandSearchAgentHistoryData";
 
-import type { AgentHistory } from "@/types/rpc/AgentHistory";
 import type { CommandListAgentHistoryData } from "@/types/rpc/CommandListAgentHistoryData";
 import type { CommandSearchAgentHistoryData } from "@/types/rpc/CommandSearchAgentHistoryData";
 
@@ -62,13 +61,10 @@ export type { ShellExecResult } from "@/types/rpc/ShellExecResult";
 export type { ShellStatusResult } from "@/types/rpc/ShellStatusResult";
 export type { ShellStopResult } from "@/types/rpc/ShellStopResult";
 
-import type { AgentDefCreateFromTemplateResult } from "@/types/rpc/AgentDefCreateFromTemplateResult";
 import type { CommandAgentStopData } from "@/types/rpc/CommandAgentStopData";
 import type { CommandShellExecData } from "@/types/rpc/CommandShellExecData";
 import type { CommandSubprocessSpawnData } from "@/types/rpc/CommandSubprocessSpawnData";
 import type { CommandWriteAgentConfigData } from "@/types/rpc/CommandWriteAgentConfigData";
-import type { CommandWriteAgentConfigResult } from "@/types/rpc/CommandWriteAgentConfigResult";
-import type { ShellExecResult } from "@/types/rpc/ShellExecResult";
 
 /**
  * What a `subprocessspawn` caller may send.
@@ -101,7 +97,6 @@ export type { CommandGetAgentInstanceData } from "@/types/rpc/CommandGetAgentIns
 export type { CommandListAgentInstancesData } from "@/types/rpc/CommandListAgentInstancesData";
 export type { CommandUpdateAgentInstanceData } from "@/types/rpc/CommandUpdateAgentInstanceData";
 
-import type { AgentInstance } from "@/types/rpc/AgentInstance";
 import type { CommandCreateAgentInstanceData } from "@/types/rpc/CommandCreateAgentInstanceData";
 
 /**
@@ -124,7 +119,6 @@ export type { CommandDeleteAgentSkillData } from "@/types/rpc/CommandDeleteAgent
 export type { CommandListAgentSkillsData } from "@/types/rpc/CommandListAgentSkillsData";
 export type { CommandUpdateAgentSkillData } from "@/types/rpc/CommandUpdateAgentSkillData";
 
-import type { AgentSkill } from "@/types/rpc/AgentSkill";
 import type { CommandCreateAgentSkillData } from "@/types/rpc/CommandCreateAgentSkillData";
 
 // An agent's Bundles list (agent_handlers/bundle.rs).
@@ -164,7 +158,6 @@ export type { ListDronesReq } from "@/types/rpc/ListDronesReq";
 export type { RunDroneReq } from "@/types/rpc/RunDroneReq";
 export type { RunDroneResp } from "@/types/rpc/RunDroneResp";
 
-import type { DroneRun } from "@/types/rpc/DroneRun";
 import type { ListRunsReq } from "@/types/rpc/ListRunsReq";
 
 /**
@@ -205,10 +198,8 @@ export type { ImportAgentDefinitionsResult } from "@/types/rpc/ImportAgentDefini
 export type { ReseedAgentsResult } from "@/types/rpc/ReseedAgentsResult";
 
 import type { AgentDefinition } from "@/types/rpc/AgentDefinition";
-import type { CommandContainerImageCheckData } from "@/types/rpc/CommandContainerImageCheckData";
 import type { CommandCreateAgentDefinitionData } from "@/types/rpc/CommandCreateAgentDefinitionData";
 import type { CommandUpdateAgentDefinitionData } from "@/types/rpc/CommandUpdateAgentDefinitionData";
-import type { ContainerImageCheckResult } from "@/types/rpc/ContainerImageCheckResult";
 
 // Most fields on the create/update commands are `#[serde(default)]` on
 // non-`Option` Rust fields, so they are omittable on the wire but ts-rs
@@ -227,7 +218,6 @@ export type { CommandListHiddenTemplatesData } from "@/types/rpc/CommandListHidd
 export type { CommandRenameAgentDefinitionTitleData } from "@/types/rpc/CommandRenameAgentDefinitionTitleData";
 
 import type { CommandForkAgentDefinitionData } from "@/types/rpc/CommandForkAgentDefinitionData";
-import type { CommandListHiddenTemplatesData } from "@/types/rpc/CommandListHiddenTemplatesData";
 
 /**
  * What a fork caller may send.
@@ -261,146 +251,12 @@ export const AgentApi = {
         return client.rpcCall("listagents", data ?? {}, opts);
     },
 
-    //
-    // Two-tier picker — Phase 2 (SPEC_AGENT_PICKER_TWO_TIER_2026_05_24.md
-    // Q2 Decision Y). Set `user_hidden = 1` on a seeded template so it
-    // disappears from the default `+ New from template` tier. Idempotent;
-    // rejects user-owned definitions (they have their own delete path).
-    AgentDefHideCommand(client: RpcClient, data: { definition_id: string }, opts?: RpcOpts): Promise<{ ok: boolean }> {
-        return client.rpcCall("agentdefhide", data, opts);
-    },
-
-    //
-    // Two-tier picker — Phase 2. Inverse of `agentdefhide`. Used by the
-    // settings panel's "Hidden templates" unhide affordance.
-    AgentDefUnhideCommand(
-        client: RpcClient,
-        data: { definition_id: string },
-        opts?: RpcOpts
-    ): Promise<{ ok: boolean }> {
-        return client.rpcCall("agentdefunhide", data, opts);
-    },
-
-    //
-    // Two-tier picker — Phase 2. Return only templates the user has
-    // hidden (`is_seeded = 1 AND user_hidden = 1`). The picker itself
-    // never calls this — it uses `listagents` with the default-filter-
-    // out behaviour; this is for the settings "Hidden templates" list.
-    AgentDefListHiddenTemplatesCommand(client: RpcClient, opts?: RpcOpts): Promise<AgentDefinition[]> {
-        // An empty struct rather than no request type: the client sends `{}`
-        // for a call with no argument, and serde deserializes `()` only from
-        // JSON `null`, so a unit Req would reject every call this stub makes.
-        // The server takes `Option<_>` of it, so a client that omits the
-        // payload entirely still works — but this stub always sends the object.
-        const data: CommandListHiddenTemplatesData = {};
-        return client.rpcCall("agentdeflisthiddentemplates", data, opts);
-    },
-
-    //
-    // Two-tier picker — Phase 1 (SPEC_AGENT_PICKER_TWO_TIER_2026_05_24.md).
-    // Clone a seeded template into a new user-owned agent. The
-    // template stays pristine. Validates: template must exist + have
-    // `is_seeded = 1`; name must be non-empty, ≤200 chars, and not
-    // collide with another user-owned agent.
-    AgentDefCreateFromTemplateCommand(
-        client: RpcClient,
-        data: {
-            template_id: string;
-            name: string;
-            identity_id?: string;
-            memory_id?: string;
-            /** The new agent's Bundles list, in order. */
-            bundle_ids?: string[];
-            /** Runtime to persist on the cloned definition ("host" |
-             *  "container"). Omitted → backend keeps the template's. */
-            agent_type?: string;
-            /** Custom model vendor base URL override for the cloned
-             *  agent. Omitted → backend keeps the template's own value.
-             *  `""` explicitly clears a template-inherited override. */
-            model_vendor_base_url?: string;
-        },
-        opts?: RpcOpts
-    ): Promise<AgentDefCreateFromTemplateResult> {
-        return client.rpcCall("agentdefcreatefromtemplate", data, opts);
-    },
-
-    //
-    // True only when the Docker daemon answers a live ping — NOT merely
-    // that the `docker` CLI is on PATH (which `resolvecli` checks). Used
-    // by the create-from-template modal to gate/default the container
-    // runtime so a daemon-down box doesn't get steered into a container
-    // agent that can't start.
-    ContainerRuntimeAvailableCommand(client: RpcClient, opts?: RpcOpts): Promise<{ available: boolean }> {
-        return client.rpcCall("containerruntimeavailable", {}, opts);
-    },
-
-    // Whether a container image can be had here: already in the Docker daemon,
-    // or readable from its registry without credentials. Empty `image` means
-    // the default image. Only "denied" and "not_found" mean it cannot start.
-    ContainerImageCheckCommand(
-        client: RpcClient,
-        data: CommandContainerImageCheckData,
-        opts?: RpcOpts
-    ): Promise<ContainerImageCheckResult> {
-        return client.rpcCall("containerimagecheck", data, opts);
-    },
-
-    CreateAgentDefinitionCommand(
-        client: RpcClient,
-        data: AgentDefinitionCreateInput,
-        opts?: RpcOpts
-    ): Promise<AgentDefinition> {
-        return client.rpcCall("createagent", data, opts);
-    },
-
     UpdateAgentDefinitionCommand(
         client: RpcClient,
         data: AgentDefinitionUpdateInput,
         opts?: RpcOpts
     ): Promise<AgentDefinition> {
         return client.rpcCall("updateagent", data, opts);
-    },
-
-    CreateAgentSkillCommand(client: RpcClient, data: CreateAgentSkillInput, opts?: RpcOpts): Promise<AgentSkill> {
-        return client.rpcCall("createagentskill", data, opts);
-    },
-
-    ListAgentHistoryCommand(client: RpcClient, data: ListAgentHistoryInput, opts?: RpcOpts): Promise<AgentHistory[]> {
-        return client.rpcCall("listagenthistory", data, opts);
-    },
-
-    SearchAgentHistoryCommand(
-        client: RpcClient,
-        data: SearchAgentHistoryInput,
-        opts?: RpcOpts
-    ): Promise<AgentHistory[]> {
-        return client.rpcCall("searchagenthistory", data, opts);
-    },
-
-    ExportAgentDefinitionsCommand(client: RpcClient, opts?: RpcOpts): Promise<ExportAgentDefinitionsResult> {
-        return client.rpcCall("exportagents", {}, opts);
-    },
-
-    ReseedAgentDefinitionsCommand(client: RpcClient, opts?: RpcOpts): Promise<void> {
-        return client.rpcCall("reseedagents", {}, opts);
-    },
-
-    ListDroneRunsCommand(client: RpcClient, data: ListDroneRunsInput, opts?: RpcOpts): Promise<DroneRun[]> {
-        return client.rpcCall("listdroneruns", data, opts);
-    },
-
-    CreateAgentInstanceCommand(
-        client: RpcClient,
-        // The per-field notes that used to live here are now doc comments on
-        // the Rust fields, and ts-rs carries them into the generated type.
-        data: CreateAgentInstanceInput,
-        opts?: RpcOpts
-    ): Promise<AgentInstance> {
-        return client.rpcCall("createagentinstance", data, opts);
-    },
-
-    DeleteAgentInstanceCommand(client: RpcClient, data: { id: string }, opts?: RpcOpts): Promise<{ deleted: boolean }> {
-        return client.rpcCall("deleteagentinstance", data, opts);
     },
 
     // v8: powers the launch modal's "Continue agent" dropdown. Returns
@@ -415,12 +271,6 @@ export const AgentApi = {
         opts?: RpcOpts
     ): Promise<NamedAgentRow[]> {
         return client.rpcCall("listnamedagents", data, opts);
-    },
-
-    // v8: soft-deletes a named instance from the dropdown (row +
-    // working dir remain on disk for audit + recovery).
-    HideNamedAgentCommand(client: RpcClient, data: { id: string }, opts?: RpcOpts): Promise<{ hidden: boolean }> {
-        return client.rpcCall("hidenamedagent", data, opts);
     },
 
     // Cascade follow-up (2026-05-23) — powers the AgentPicker's
@@ -444,32 +294,6 @@ export const AgentApi = {
         opts?: RpcOpts
     ): Promise<{ rows: RecentSessionRow[]; degraded: string[] }> {
         return client.rpcCall("listrecentsessions", data, opts);
-    },
-
-    ForkAgentDefinitionCommand(
-        client: RpcClient,
-        data: ForkAgentDefinitionInput,
-        opts?: RpcOpts
-    ): Promise<AgentDefinition> {
-        return client.rpcCall("forkagentdefinition", data, opts);
-    },
-
-    ForkAgentDefinitionSuggestCommand(
-        client: RpcClient,
-        data: { source_id: string },
-        opts?: RpcOpts
-    ): Promise<{ suggested_label: string }> {
-        return client.rpcCall("forkagentdefinitionsuggest", data, opts);
-    },
-
-    SubprocessSpawnCommand(client: RpcClient, data: SubprocessSpawnInput, opts?: RpcOpts): Promise<void> {
-        return client.rpcCall("subprocessspawn", data, opts);
-    },
-
-    // Run a shell command in the agent's working directory. Invoked by the
-    // `!cmd` composer prefix. Returns buffered stdout/stderr after completion.
-    ShellExecCommand(client: RpcClient, data: ShellExecInput, opts?: RpcOpts): Promise<ShellExecResult> {
-        return client.rpcCall("shellexec", data, opts);
     },
 
     // Returns the OS processes currently tracked under a given agent
@@ -543,13 +367,5 @@ export const AgentApi = {
     // Terminate the entire process tree for a block.
     AgentKillTreeCommand(client: RpcClient, data: { block_id: string }, opts?: RpcOpts): Promise<{ ok: boolean }> {
         return client.rpcCall("agent.kill-tree", data, opts);
-    },
-
-    WriteAgentConfigCommand(
-        client: RpcClient,
-        data: WriteAgentConfigInput,
-        opts?: RpcOpts
-    ): Promise<CommandWriteAgentConfigResult> {
-        return client.rpcCall("writeagentconfig", data, opts);
     },
 };

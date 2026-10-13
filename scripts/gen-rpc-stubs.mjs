@@ -56,23 +56,30 @@ export function renderStub(entry, row) {
     const ret = resp === "null" ? "void" : tsOf(resp);
     const opts = entry.opts ?? "opts";
     const lines = [`    // command "${entry.command}"`];
-    if (NO_ARGS.has(req)) {
+    const optional = req.endsWith(" | null");
+    // No data parameter: a no-argument command, or a request the stub always sends empty
+    // (`send` "{}" for an Option or a struct whose fields all default, "null" for an Option),
+    // so existing `(client, opts)` calls keep binding opts.
+    if (NO_ARGS.has(req) || entry.send === "{}" || entry.send === "null") {
         // A Rust `()` request (ts-rs: `null`) deserializes only from JSON null, so it sends null;
         // an empty struct (`NoArgsReq`) only from `{}`; `Option<NoArgsReq>` takes either.
         const unit = req === "null";
         const send = entry.send ?? (unit ? "null" : "{}");
+        // serde_json::Value (JsonValue) takes anything, null included.
+        if (send === "null" && !unit && !optional && !NO_ARGS.has(req) && req !== "JsonValue") throw new Error(`${entry.command}: "send": "null" needs an Option or () request; ${req} doesn't deserialize from null`);
         if (send !== "{}" && send !== "null") throw new Error(`${entry.command}: "send" for a no-argument command is "{}" or "null", not ${send}`);
         if (unit && send !== "null") throw new Error(`${entry.command}: its Rust request is (), which only deserializes from null, so "send" must be "null"`);
         if (/^(NoArgsReq|NotifyNoArgs)$/.test(req) && send !== "{}") throw new Error(`${entry.command}: its Rust request is ${req}, an empty struct, which only deserializes from {}, so "send" must be "{}"`);
         lines.push(`    ${entry.method}(client: RpcClient, opts?: RpcOpts): Promise<${ret}> {`);
         lines.push(`        return client.rpcCall(${JSON.stringify(entry.command)}, ${send}, ${opts});`);
     } else {
-        const optional = req.endsWith(" | null");
         const dataType = tsOf(optional ? req.slice(0, -" | null".length) : req);
         const send = entry.send ?? "data";
-        if (send !== "data" && send !== "data ?? {}") throw new Error(`${entry.command}: "send" is "data" or "data ?? {}", not ${send}`);
-        if (send !== "data" && !optional) throw new Error(`${entry.command}: "send": "${send}" only makes sense for an optional request`);
-        const param = optional ? `data?: ${dataType} | null` : `data: ${dataType}`;
+        if (send !== "data" && send !== "data ?? {}") throw new Error(`${entry.command}: "send" is "data", "data ?? {}", "{}" or "null", not ${send}`);
+        // `data ?? {}` makes the parameter optional even for a non-Option request: the struct
+        // must then deserialize from `{}` (every field defaulted), which the manifest entry
+        // vouches for.
+        const param = optional ? `data?: ${dataType} | null` : send === "data ?? {}" ? `data?: ${dataType}` : `data: ${dataType}`;
         lines.push(`    ${entry.method}(client: RpcClient, ${param}, opts?: RpcOpts): Promise<${ret}> {`);
         lines.push(`        return client.rpcCall(${JSON.stringify(entry.command)}, ${send}, ${opts});`);
     }

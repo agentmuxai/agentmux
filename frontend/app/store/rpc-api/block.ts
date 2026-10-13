@@ -48,8 +48,6 @@ export type { CommandDockNodeStatusData } from "@/types/rpc/CommandDockNodeStatu
 export type { CommandListBackgroundTasksData } from "@/types/rpc/CommandListBackgroundTasksData";
 export type { CommandToolDecisionData } from "@/types/rpc/CommandToolDecisionData";
 
-import type { CommandDeleteBlockData } from "@/types/rpc/CommandDeleteBlockData";
-
 export const BlockApi = {
     ControllerInputCommand(client: RpcClient, data: BlockInputInput, opts?: RpcOpts): Promise<void> {
         return client.rpcCall("controllerinput", data, opts);
@@ -67,9 +65,5 @@ export const BlockApi = {
 
     CreateSubBlockCommand(client: RpcClient, data: CommandCreateSubBlockData, opts?: RpcOpts): Promise<ORef> {
         return client.rpcCall("createsubblock", data, opts);
-    },
-
-    DeleteSubBlockCommand(client: RpcClient, data: CommandDeleteBlockData, opts?: RpcOpts): Promise<void> {
-        return client.rpcCall("deletesubblock", data, opts);
     },
 };
