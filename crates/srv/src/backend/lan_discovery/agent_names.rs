@@ -54,6 +54,28 @@ pub(crate) fn parse_agent_names_body(value: &serde_json::Value) -> PeerAgents {
     PeerAgents { names, status }
 }
 
+/// Applies one poll of a peer's `agent-names` route to its entry, and says
+/// whether what the frontend shows changed. A failed poll keeps the last-known
+/// names, since a flapping list is worse than a slightly old one, but clears
+/// the states: mDNS can keep the peer looking fresh long after it stopped
+/// answering, and its last "working" would otherwise show indefinitely (#4703).
+pub(super) fn apply_agent_names_poll(
+    entry: &mut LanInstance,
+    peer: Option<PeerAgents>,
+    now_secs: u64,
+) -> bool {
+    let Some(peer) = peer else {
+        let changed = !entry.agent_status.is_empty();
+        entry.agent_status.clear();
+        return changed;
+    };
+    entry.last_polled_ok = now_secs;
+    let changed = entry.agents != peer.names || entry.agent_status != peer.status;
+    entry.agents = peer.names;
+    entry.agent_status = peer.status;
+    changed
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -106,7 +128,52 @@ mod tests {
     /// from before the field reads as none.
     #[test]
     fn lan_instance_agent_status_round_trips_and_defaults_to_empty() {
-        let mut inst = LanInstance {
+        let mut inst = instance();
+        inst.agent_status.insert("manoz".into(), AgentState::Idle);
+        let json = serde_json::to_value(&inst).unwrap();
+        assert_eq!(json["agent_status"], serde_json::json!({"manoz": "idle"}));
+        let mut old = json.clone();
+        old.as_object_mut().unwrap().remove("agent_status");
+        let back: LanInstance = serde_json::from_value(old).unwrap();
+        assert!(back.agent_status.is_empty());
+    }
+
+    #[test]
+    fn a_poll_that_answers_replaces_names_and_states() {
+        let mut inst = instance();
+        let peer = parse_agent_names_body(&serde_json::json!({
+            "agents": ["Manoz", "Opaz"],
+            "agent_status": {"Manoz": {"state": "working", "since_ms": 1}},
+        }));
+        assert!(apply_agent_names_poll(&mut inst, Some(peer.clone()), 77));
+        assert_eq!(inst.agents, ["Manoz", "Opaz"]);
+        assert_eq!(inst.agent_status.get("manoz"), Some(&AgentState::Working));
+        assert_eq!(inst.last_polled_ok, 77);
+        // The same answer again changes nothing the frontend shows.
+        assert!(!apply_agent_names_poll(&mut inst, Some(peer), 78));
+    }
+
+    /// A peer still advertising over mDNS but no longer answering polls must
+    /// not keep showing its last state (#4703).
+    #[test]
+    fn a_failed_poll_keeps_the_names_and_clears_the_states() {
+        let mut inst = instance();
+        inst.agent_status
+            .insert("manoz".into(), AgentState::Working);
+        inst.last_polled_ok = 5;
+        assert!(apply_agent_names_poll(&mut inst, None, 99));
+        assert_eq!(inst.agents, ["Manoz"]);
+        assert!(inst.agent_status.is_empty());
+        assert_eq!(
+            inst.last_polled_ok, 5,
+            "a failed poll is not a successful one"
+        );
+        // Failing again, with nothing left to clear, changes nothing.
+        assert!(!apply_agent_names_poll(&mut inst, None, 100));
+    }
+
+    fn instance() -> LanInstance {
+        LanInstance {
             instance_id: "area54-29700".into(),
             hostname: "Area54".into(),
             version: "0".into(),
@@ -121,13 +188,6 @@ mod tests {
             last_seen: 0,
             last_polled_ok: 0,
             other_ttl_secs: 4500,
-        };
-        inst.agent_status.insert("manoz".into(), AgentState::Idle);
-        let json = serde_json::to_value(&inst).unwrap();
-        assert_eq!(json["agent_status"], serde_json::json!({"manoz": "idle"}));
-        let mut old = json.clone();
-        old.as_object_mut().unwrap().remove("agent_status");
-        let back: LanInstance = serde_json::from_value(old).unwrap();
-        assert!(back.agent_status.is_empty());
+        }
     }
 }
