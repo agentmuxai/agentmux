@@ -88,7 +88,6 @@ pub enum SecretRef {
     /// union simply never matches at runtime) and check-rpc-bindings passes
     /// (the type exists and is current).
     #[serde(rename = "oauth_config_dir", alias = "o_auth_config_dir")]
-    #[ts(rename = "oauth_config_dir")]
     OAuthConfigDir {
         /// Absolute path to the per-bundle, per-provider config
         /// directory — e.g. `~/.agentmux/shared/identities/<id>/claude/`,

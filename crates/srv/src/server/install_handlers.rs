@@ -47,14 +47,12 @@ pub const COMMAND_RESOLVE_PREREQS: &str = "resolve.prereqs";
 pub enum InstallChunkEvent {
     Line {
         #[serde(rename = "sessionId")]
-        #[ts(rename = "sessionId")]
         session_id: String,
         line: String,
         stream: InstallStream,
     },
     Done {
         #[serde(rename = "sessionId")]
-        #[ts(rename = "sessionId")]
         session_id: String,
         op: InstallDoneOp,
         ok: bool,

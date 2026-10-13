@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Four checks on the Rust -> TypeScript RPC codegen, each written because the
+// Three checks on the Rust -> TypeScript RPC codegen, each written because the
 // same defect got through review more than once.
 //
 // None of these is covered by an existing gate, and that is the point:
@@ -81,55 +81,14 @@ function ambientDuplicates() {
 }
 
 // ---------------------------------------------------------------------------
-// 2. ts-rs ignores per-field and per-variant `#[serde(rename = "...")]`.
+// (2. retired) A `#[serde(rename)]` without a matching `#[ts(rename)]`.
 //
-// The field generates under its RUST name -- a key nothing sends and nothing
-// reads. Seen three times: `oauth_config_dir` (#3320), `FlowNode.type` ->
-// `node_type` (#3329), `pathSource` -> `path_source` (#3344).
-//
-// `serde(rename_all)` is NOT checked here, on purpose: ts-rs DOES honour it, on
-// structs and enums both. An earlier version of this check matched it too and
-// reported 44 false positives -- investigating those is what disproved the
-// claim that it was ignored. See #3345.
+// ts-rs 10 dropped a whole `#[serde(...)]` attribute when one item in it was
+// unknown, so a rename beside `skip_serializing_if` was lost. ts-rs 12 parses
+// each item, and check-tsrs-serde-warnings.mjs fails the build on any item it
+// still can't (SPEC_TSRS_SERDE_ATTRIBUTE_WARNINGS_2026_10_13.md).
+// `a_rename_beside_skip_serializing_if_reaches_the_binding` pins it.
 // ---------------------------------------------------------------------------
-function serdeRenameWithoutTsRename() {
-    const SERDE = /#\[serde\([^\]]*\brename\s*=/;
-    const TS = /#\[ts\([^\]]*\brename\s*=/;
-    const hits = [];
-
-    for (const f of walk("crates/srv/src", ".rs")) {
-        const lines = fs.readFileSync(f, "utf8").replace(/\r\n/g, "\n").split("\n");
-        for (let i = 0; i < lines.length; i++) {
-            if (!/^#\[derive\(.*\bts_rs::TS\b.*\)\]/.test(lines[i])) continue;
-            let end = i + 1, opened = false;
-            for (; end < lines.length; end++) {
-                if (!opened && /[{;]\s*$/.test(lines[end])) {
-                    if (/;\s*$/.test(lines[end])) break;
-                    opened = true;
-                    continue;
-                }
-                if (opened && /^\}/.test(lines[end])) break;
-            }
-            for (let j = i; j <= end && j < lines.length; j++) {
-                if (!SERDE.test(lines[j])) continue;
-                // Scan the contiguous attribute/doc run around this line.
-                let k = j, found = false;
-                while (k > i && /^\s*#\[/.test(lines[k])) { if (TS.test(lines[k])) found = true; k--; }
-                k = j;
-                while (k < lines.length && /^\s*(#\[|\/\/)/.test(lines[k])) { if (TS.test(lines[k])) found = true; k++; }
-                if (!found) hits.push(`${rel(f)}:${j + 1}  ${lines[j].trim()}`);
-            }
-        }
-    }
-    if (hits.length) {
-        failures.push(
-            `${hits.length} serde(rename) on a ts_rs::TS type with no matching ts(rename) -- ` +
-            `these generate the RUST field name, which nothing sends:\n  ` + hits.join("\n  ")
-        );
-    } else {
-        note("  ok  every serde(rename) on a generated type has a matching ts(rename)");
-    }
-}
 
 // ---------------------------------------------------------------------------
 // 3. A `register_typed` handler that hand-serializes its response.
@@ -225,7 +184,6 @@ function deadGeneratedImports() {
 
 console.log("check-rpc-codegen-hygiene:");
 ambientDuplicates();
-serdeRenameWithoutTsRename();
 typedHandlersHandSerializing();
 deadGeneratedImports();
 
@@ -238,4 +196,4 @@ if (failures.length) {
     );
     process.exit(1);
 }
-console.log("check-rpc-codegen-hygiene: ok (4 checks)");
+console.log("check-rpc-codegen-hygiene: ok (3 checks)");

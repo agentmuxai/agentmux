@@ -408,7 +408,6 @@ pub struct ProcessExitedEvent {
 /// `output`: one app-server protocol frame, as the agent sent it.
 #[derive(Debug, Clone, Serialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
-#[serde(transparent)]
 pub struct ProtocolFrame(#[ts(type = "unknown")] pub serde_json::Value);
 
 /// `agentcredentials:revoked:<agent id>`: the agent still holds the provider's tokens until it restarts.

@@ -522,7 +522,6 @@ pub struct MuxObjUpdate {
 /// The `waveobj:batchedupdates` payload: the updates of one atomic backend transition, in order.
 #[derive(Debug, Clone, Serialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
-#[serde(transparent)]
 pub struct MuxObjBatch(pub Vec<MuxObjUpdate>);
 
 // ---- Helpers ----
