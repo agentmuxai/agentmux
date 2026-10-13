@@ -581,7 +581,7 @@ impl Controller for ShellController {
         // historical 25x200 when no size was supplied (e.g. programmatic
         // spawns). See docs/analysis/AGENT_PANE_PTY_RESIZE_RACE_2026_06_16.md.
         let pty_system = native_pty_system();
-        let pty_size = Self::pty_size_from_rt_opts(&rt_opts);
+        let pty_size = self.spawn_pty_size(&rt_opts);
 
         let pair = pty_system.openpty(pty_size).map_err(|e| {
             tracing::error!(block_id = %self.block_id, error = %e, "failed to open PTY");

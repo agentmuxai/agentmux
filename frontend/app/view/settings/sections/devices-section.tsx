@@ -29,6 +29,14 @@ export const DEVICES_SETTINGS = {
         section: "devices",
         keywords: ["mobile", "device", "tablet", "pair", "revoke", "viewer", "live feed", "qr code"],
     },
+    shareTerminals: {
+        id: "devices.share_terminals",
+        label: "Share terminals with paired devices",
+        description:
+            "Paired devices can watch this computer's terminals, read-only: what they show, as it happens. Terminals often show passwords and keys, so this is off unless you turn it on. An agent hidden from paired devices keeps its shell hidden too.",
+        section: "devices",
+        keywords: ["terminal", "shell", "mobile", "device", "share", "watch", "viewer", "viewer:shareterminals"],
+    },
     muxbus: MUXBUS_SIGN_IN_SETTING,
     cloudPresence: CLOUD_PRESENCE_SETTING,
     publishPresence: {
@@ -147,6 +155,18 @@ export function DevicesSection(): JSX.Element {
                     )}
                 </Show>
             </div>
+            <SettingRow
+                id={DEVICES_SETTINGS.shareTerminals.id}
+                label={DEVICES_SETTINGS.shareTerminals.label}
+                description={DEVICES_SETTINGS.shareTerminals.description}
+                control={
+                    <ToggleControl
+                        checked={!!settingsAtom()?.["viewer:shareterminals"]}
+                        // Off is the absent key, not false: off by default.
+                        onChange={(v) => set("viewer:shareterminals", v ? true : null)}
+                    />
+                }
+            />
             <SectionHeader label={DEVICES_SETTINGS.muxbus.label} />
             <MuxBusSignIn />
             <SectionHeader label={DEVICES_SETTINGS.cloudPresence.label} />

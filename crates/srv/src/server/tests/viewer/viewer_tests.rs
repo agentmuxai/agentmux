@@ -341,6 +341,7 @@ async fn panes_lists_every_tab_pane_with_agent_names_and_leaves_hidden_agents_ou
     assert_eq!(resp.status(), StatusCode::OK);
     let json = json_of(resp).await;
     assert!(json["now_ms"].as_u64().unwrap() > 0);
+    assert_eq!(json["terminals_shared"], false, "terminals open on the device only once shared");
     // Tests share one object store, so only this test's window is looked at.
     let panes: Vec<&serde_json::Value> =
         json["panes"].as_array().unwrap().iter().filter(|p| p["window_id"] == window.oid.as_str()).collect();

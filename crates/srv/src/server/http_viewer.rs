@@ -9,8 +9,10 @@
 //! - `POST /agentmux/viewer/pair`: a pairing code for a viewer token. The
 //!   only route without a token.
 //! - `GET /agentmux/viewer/hello`, `GET /agentmux/viewer/agents`,
-//!   `GET /agentmux/viewer/agents/:name/feed`, `GET /agentmux/viewer/panes`
-//!   and `GET /agentmux/viewer/procs`: `Authorization: Bearer amxv_…` only. Neither the `lan_key` nor the instance `auth_key` opens
+//!   `GET /agentmux/viewer/agents/:name/feed`, `GET /agentmux/viewer/panes`,
+//!   `GET /agentmux/viewer/terminals/:block_id/feed`
+//!   (`server::http_viewer_terminal`) and `GET /agentmux/viewer/procs`:
+//!   `Authorization: Bearer amxv_…` only. Neither the `lan_key` nor the instance `auth_key` opens
 //!   them, and the token opens nothing else: no other router knows it.
 //!
 //! Read-only throughout. An agent hidden from paired devices is left out of
@@ -47,8 +49,8 @@ const SNAPSHOT_TAIL_TURNS: u32 = 50;
 const SNAPSHOT_TAIL_BYTES: u64 = 256 * 1024;
 /// The most lines one bounded read returns (`blockfile:read_range`'s cap).
 const READ_LIMIT: u64 = 10_000;
-const RETRY_PREAMBLE: &[u8] = b"retry: 3000\n\n";
-const HEARTBEAT: &[u8] = b": hb\n\n";
+pub(crate) const RETRY_PREAMBLE: &[u8] = b"retry: 3000\n\n";
+pub(crate) const HEARTBEAT: &[u8] = b": hb\n\n";
 
 /// The paired device a request authenticated as.
 #[derive(Debug, Clone)]
@@ -64,6 +66,10 @@ pub fn build_viewer_router(state: AppState) -> Router {
         .route("/agentmux/viewer/agents/:name/feed", get(handle_viewer_feed))
         .route("/agentmux/viewer/procs", get(handle_viewer_procs))
         .route("/agentmux/viewer/panes", get(handle_viewer_panes))
+        .route(
+            "/agentmux/viewer/terminals/:block_id/feed",
+            get(super::http_viewer_terminal::handle_viewer_terminal_feed),
+        )
         .route_layer(middleware::from_fn_with_state(state.clone(), viewer_auth_middleware));
     Router::new()
         .route("/agentmux/viewer/pair", post(handle_viewer_pair))
@@ -346,7 +352,12 @@ async fn handle_viewer_panes(State(state): State<AppState>) -> Response {
     .map_err(|e| e.to_string())
     .and_then(|r| r);
     match panes {
-        Ok(panes) => Json(json!({ "now_ms": agentmux_common::time::now_ms_u64(), "panes": panes })).into_response(),
+        Ok(panes) => Json(json!({
+            "now_ms": agentmux_common::time::now_ms_u64(),
+            "terminals_shared": super::http_viewer_terminal::terminals_shared(&state),
+            "panes": panes,
+        }))
+        .into_response(),
         Err(error) => {
             tracing::warn!(%error, "viewer: could not list panes");
             (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": "could not list panes" }))).into_response()
@@ -729,7 +740,7 @@ pub(crate) fn feed_stream(
                         break;
                     }
                     Some(HubEvent::Rewritten { fileop }) => resync = Some(fileop),
-                    Some(HubEvent::Append { pos, records }) => match feed::apply_append(current, &pos, &records) {
+                    Some(HubEvent::Append { pos, records, .. }) => match feed::apply_append(current, &pos, &records) {
                         AppendStep::Send { line, lines } => yield Ok(append_event(current, line, lines)),
                         AppendStep::Skip => {
                             if !pos.iter().any(|p| p.stream == current.stream) {
