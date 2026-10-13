@@ -410,7 +410,7 @@ const FOREIGN_REF =
 // folder in front (`docs/notes.md`) they name a repo file and are checked. (comment-hygiene: allow)
 const FOREIGN_BARE = /^(?:(?:system_prompt|notes)\.md|lib(?:\.[\w-]+)+\.d\.ts)$/;
 const FOREIGN_PREFIX =
-    /^(?:\.claude|\.codex|\.gemini|\.qwen|\.pi|\.copilot|\.agentmux|\.github\/instructions|~|HOME|agentmux-cloud|agentmux-ai|muxbus|reagent|src-tauri|node_modules|vite|shiki|xtermjs|[\w-]+-\d+\.\d+\.\d+)\//;
+    /^(?:\.claude|\.codex|\.gemini|\.qwen|\.pi|\.copilot|\.agentmux|\.github\/instructions|~|HOME|agentmux-cloud|agentmux-mobile|agentmux-ai|muxbus|reagent|src-tauri|node_modules|vite|shiki|xtermjs|[\w-]+-\d+\.\d+\.\d+)\//;
 const DOC_NAME = /^(?:SPEC|REPORT|PLAN|RUNBOOK|RETRO|ADR|PRD|AUDIT)_[A-Za-z0-9_.-]+\.md$/;
 
 const baseName = (p) => p.slice(p.lastIndexOf("/") + 1);
