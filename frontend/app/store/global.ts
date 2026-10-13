@@ -288,19 +288,29 @@ export function initGlobalEventSubs(initOpts: AgentMuxInitOpts) {
         },
         initOpts.windowId
     );
+    onMuxEvent(WpsEvent.MuxObjBatchedUpdates, (updates) => {
+        // All updates from one atomic backend transition, applied in
+        // one batch() flush (updateMuxObjects) so the UI can't paint
+        // a half-applied state — e.g. CloseTab's tab delete blanking
+        // the still-mounted tab before the workspace update unmounts
+        // it. See SPEC_TAB_CLOSE_BUTTON_SELECT_FLASH_2026_08_25.md §7.
+        MOS.updateMuxObjects(updates);
+    });
+    // Cloud delivery's state changed (srv `muxbus::delivery_status`).
+    onMuxEvent(MUXBUS_STATUS_EVENT, (status) => acceptMuxbusDelivery(status));
+    onMuxEvent(WpsEvent.ViewerPaired, (d) => {
+        const deviceName = String(d.device_name || "A device");
+        setViewerPairedAtom({ deviceId: d.device_id, deviceName });
+        pushNotification({
+            icon: "fa-mobile-screen",
+            title: "Device paired",
+            message: `${deviceName} can now watch this computer's agents. Settings > Paired devices can revoke it.`,
+            timestamp: new Date().toISOString(),
+            type: "info",
+            expiration: Date.now() + 8000,
+        });
+    });
     muxEventSubscribe(
-        {
-            eventType: WpsEvent.MuxObjBatchedUpdates,
-            handler: (event) => {
-                // All updates from one atomic backend transition, applied in
-                // one batch() flush (updateMuxObjects) so the UI can't paint
-                // a half-applied state — e.g. CloseTab's tab delete blanking
-                // the still-mounted tab before the workspace update unmounts
-                // it. See SPEC_TAB_CLOSE_BUTTON_SELECT_FLASH_2026_08_25.md §7.
-                const updates: MuxObjUpdate[] = event.data ?? [];
-                MOS.updateMuxObjects(updates);
-            },
-        },
         {
             eventType: WpsEvent.UserInput,
             handler: (event) => {
@@ -317,11 +327,6 @@ export function initGlobalEventSubs(initOpts: AgentMuxInitOpts) {
                 // A successful broadcast clears any prior error state.
                 setLanDiscoveryErrorAtom(null);
             },
-        },
-        {
-            // Cloud delivery's state changed (srv `muxbus::delivery_status`).
-            eventType: MUXBUS_STATUS_EVENT,
-            handler: (event) => acceptMuxbusDelivery(event.data),
         },
         {
             eventType: WpsEvent.LanInstancesError,
@@ -350,23 +355,6 @@ export function initGlobalEventSubs(initOpts: AgentMuxInitOpts) {
                     status,
                     adapters: Array.isArray(d?.adapters) ? d.adapters : [],
                     localRulesIgnored: d?.localRulesIgnored === true,
-                });
-            },
-        },
-        {
-            eventType: WpsEvent.ViewerPaired,
-            handler: (event) => {
-                const d = event.data as { device_id?: string; device_name?: string } | null | undefined;
-                if (!d?.device_id) return;
-                const deviceName = String(d.device_name || "A device");
-                setViewerPairedAtom({ deviceId: d.device_id, deviceName });
-                pushNotification({
-                    icon: "fa-mobile-screen",
-                    title: "Device paired",
-                    message: `${deviceName} can now watch this computer's agents. Settings > Paired devices can revoke it.`,
-                    timestamp: new Date().toISOString(),
-                    type: "info",
-                    expiration: Date.now() + 8000,
                 });
             },
         },

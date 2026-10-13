@@ -52,7 +52,14 @@ vi.mock("@/app/store/toolchain-capabilities", () => ({
     ensureCapability: (...args: unknown[]) => hub.ensureCapability(...args),
     getCapability: (...args: unknown[]) => hub.getCapability(...args),
 }));
-vi.mock("@/app/store/mps", () => ({ muxEventSubscribe: (...args: unknown[]) => hub.muxEventSubscribe(...args) }));
+vi.mock("@/app/store/mps", async () => {
+    const { isNoPayloadMuxEvent } = await vi.importActual<typeof import("@/app/store/mps-events.generated")>("@/app/store/mps-events.generated");
+    const mock = { muxEventSubscribe: (...args: unknown[]) => hub.muxEventSubscribe(...args) };
+    // As the real onMuxEvent: a typed subscription is a muxEventSubscribe whose handler gets the data.
+    const onMuxEvent = (eventType: string, handler: (data: unknown, event: unknown) => void, scope?: string) =>
+        (mock.muxEventSubscribe as (sub: unknown) => () => void)({ eventType, scope, handler: (e: any) => { if (e?.data != null) handler(e.data, e); else if (isNoPayloadMuxEvent(eventType)) handler(null, e); } } as any);
+    return { ...mock, onMuxEvent };
+});
 vi.mock("@/app/store/mps-events", () => ({ WpsEvent: { InstallProgress: "install_progress" } }));
 vi.mock("@/app/store/mos", () => ({
     makeORef: (kind: string, id: string) => `${kind}:${id}`,

@@ -32,7 +32,7 @@ use std::sync::Arc;
 use agentmux_common::ipc::Event;
 use tokio::sync::broadcast;
 
-use crate::backend::eventbus::{EventBus, WSEventType};
+use crate::backend::eventbus::EventBus;
 use crate::backend::obj::{
     mux_obj_to_value, Client, Tab, StoreObj, OTYPE_BLOCK, OTYPE_CLIENT, OTYPE_LAYOUT, OTYPE_TAB,
     OTYPE_WINDOW, OTYPE_WORKSPACE,
@@ -48,27 +48,15 @@ fn build_update_payload(
     otype: &str,
     oid: &str,
     obj: Option<serde_json::Value>,
-) -> serde_json::Value {
-    let mut map = serde_json::Map::with_capacity(4);
-    map.insert("updatetype".into(), serde_json::Value::String(updatetype.into()));
-    map.insert("otype".into(), serde_json::Value::String(otype.into()));
-    map.insert("oid".into(), serde_json::Value::String(oid.into()));
-    if let Some(o) = obj {
-        map.insert("obj".into(), o);
-    }
-    serde_json::Value::Object(map)
+) -> crate::backend::obj::MuxObjUpdate {
+    crate::backend::obj::MuxObjUpdate { updatetype: updatetype.into(), otype: otype.into(), oid: oid.into(), obj }
 }
 
 /// Push one `MuxObjUpdate` payload to all connected WS clients via the
 /// shared event_bus — the single-update counterpart of the batched response
 /// broadcast in `service/mod.rs`'s `run_service_call`.
-fn emit(event_bus: &EventBus, otype: &str, oid: &str, payload: serde_json::Value) {
-    let oref = format!("{otype}:{oid}");
-    event_bus.broadcast_event(&WSEventType {
-        eventtype: "waveobj:update".to_string(),
-        oref,
-        data: Some(payload),
-    });
+fn emit(event_bus: &EventBus, otype: &str, oid: &str, payload: crate::backend::obj::MuxObjUpdate) {
+    event_bus.broadcast_event(&EventBus::typed_ws_event::<crate::backend::mps_events::MuxObjUpdated>(&payload, format!("{otype}:{oid}")));
 }
 
 /// Fetch one StoreObj by oid and broadcast it as a `waveobj:update`. The

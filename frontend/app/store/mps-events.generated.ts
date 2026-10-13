@@ -17,6 +17,7 @@ import type { AttachmentBatchDoneEvent } from "@/types/rpc/AttachmentBatchDoneEv
 import type { AttachmentFailedEvent } from "@/types/rpc/AttachmentFailedEvent";
 import type { AttachmentProgressEvent } from "@/types/rpc/AttachmentProgressEvent";
 import type { AttachmentReadyEvent } from "@/types/rpc/AttachmentReadyEvent";
+import type { BlockActivityEvent } from "@/types/rpc/BlockActivityEvent";
 import type { BlockControllerRuntimeStatus } from "@/types/rpc/BlockControllerRuntimeStatus";
 import type { BlockRefEvent } from "@/types/rpc/BlockRefEvent";
 import type { BlockRevealEvent } from "@/types/rpc/BlockRevealEvent";
@@ -30,7 +31,11 @@ import type { DockClearEvent } from "@/types/rpc/DockClearEvent";
 import type { FilesChangedEvent } from "@/types/rpc/FilesChangedEvent";
 import type { FsOpEvent } from "@/types/rpc/FsOpEvent";
 import type { InstallChunkEvent } from "@/types/rpc/InstallChunkEvent";
+import type { InstallProgressEvent } from "@/types/rpc/InstallProgressEvent";
+import type { LspMessageEvent } from "@/types/rpc/LspMessageEvent";
 import type { MessageAcceptedEvent } from "@/types/rpc/MessageAcceptedEvent";
+import type { MuxBusDeliveryStatus } from "@/types/rpc/MuxBusDeliveryStatus";
+import type { MuxObjBatch } from "@/types/rpc/MuxObjBatch";
 import type { MuxObjUpdate } from "@/types/rpc/MuxObjUpdate";
 import type { NoDirectLinksEvent } from "@/types/rpc/NoDirectLinksEvent";
 import type { NotificationActivateEvent } from "@/types/rpc/NotificationActivateEvent";
@@ -61,6 +66,7 @@ import type { SubagentSpawnedEvent } from "@/types/rpc/SubagentSpawnedEvent";
 import type { SubagentUpdatedEvent } from "@/types/rpc/SubagentUpdatedEvent";
 import type { TimeSeriesData } from "@/types/rpc/TimeSeriesData";
 import type { UserAttentionEvent } from "@/types/rpc/UserAttentionEvent";
+import type { ViewerPairedEvent } from "@/types/rpc/ViewerPairedEvent";
 import type { WSFileEventData } from "@/types/rpc/WSFileEventData";
 import type { WidgetPackagesEvent } from "@/types/rpc/WidgetPackagesEvent";
 import type { WidgetRequestsEvent } from "@/types/rpc/WidgetRequestsEvent";
@@ -94,6 +100,7 @@ export type MuxEventPayloads = {
   "attachment:progress": AttachmentProgressEvent;
   "attachment:ready": AttachmentReadyEvent;
   "background-task-updated": BlockRefEvent;
+  "block:activity": BlockActivityEvent;
   "block:reveal": BlockRevealEvent;
   blockfile: WSFileEventData;
   blockstats: TimeSeriesData;
@@ -112,10 +119,13 @@ export type MuxEventPayloads = {
   "identity:no-direct-links": NoDirectLinksEvent;
   "identityaccounts:changed": null;
   install_chunk: InstallChunkEvent;
+  install_progress: InstallProgressEvent;
+  "lsp:message": LspMessageEvent;
   "mcp:changed": null;
   "mcp:observed": BlockRefEvent;
   "media:file_changed": PathChangedEvent;
   "memories:changed": null;
+  "muxbus:status": MuxBusDeliveryStatus;
   "namedagents:changed": null;
   notification: OsNotification;
   "notification:activate": NotificationActivateEvent;
@@ -140,6 +150,8 @@ export type MuxEventPayloads = {
   "subagent:updated": SubagentUpdatedEvent;
   sysinfo: TimeSeriesData;
   userattention: UserAttentionEvent;
+  "viewer:paired": ViewerPairedEvent;
+  "waveobj:batchedupdates": MuxObjBatch;
   "waveobj:update": MuxObjUpdate;
   widgetpackages: WidgetPackagesEvent;
   widgetrequests: WidgetRequestsEvent;
@@ -180,6 +192,7 @@ export const TYPED_MUX_EVENTS = [
   "attachment:progress",
   "attachment:ready",
   "background-task-updated",
+  "block:activity",
   "block:reveal",
   "blockfile",
   "blockstats",
@@ -198,10 +211,13 @@ export const TYPED_MUX_EVENTS = [
   "identity:no-direct-links",
   "identityaccounts:changed",
   "install_chunk",
+  "install_progress",
+  "lsp:message",
   "mcp:changed",
   "mcp:observed",
   "media:file_changed",
   "memories:changed",
+  "muxbus:status",
   "namedagents:changed",
   "notification",
   "notification:activate",
@@ -226,6 +242,8 @@ export const TYPED_MUX_EVENTS = [
   "subagent:updated",
   "sysinfo",
   "userattention",
+  "viewer:paired",
+  "waveobj:batchedupdates",
   "waveobj:update",
   "widgetpackages",
   "widgetrequests",

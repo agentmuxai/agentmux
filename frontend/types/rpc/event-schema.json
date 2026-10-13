@@ -261,6 +261,15 @@
     }
   },
   {
+    "event": "block:activity",
+    "payloadTs": {
+      "imports": [
+        "BlockActivityEvent"
+      ],
+      "name": "BlockActivityEvent"
+    }
+  },
+  {
     "event": "block:reveal",
     "payloadTs": {
       "imports": [
@@ -427,6 +436,24 @@
     }
   },
   {
+    "event": "install_progress",
+    "payloadTs": {
+      "imports": [
+        "InstallProgressEvent"
+      ],
+      "name": "InstallProgressEvent"
+    }
+  },
+  {
+    "event": "lsp:message",
+    "payloadTs": {
+      "imports": [
+        "LspMessageEvent"
+      ],
+      "name": "LspMessageEvent"
+    }
+  },
+  {
     "event": "mcp:changed",
     "payloadTs": {
       "imports": [],
@@ -456,6 +483,15 @@
     "payloadTs": {
       "imports": [],
       "name": "null"
+    }
+  },
+  {
+    "event": "muxbus:status",
+    "payloadTs": {
+      "imports": [
+        "MuxBusDeliveryStatus"
+      ],
+      "name": "MuxBusDeliveryStatus"
     }
   },
   {
@@ -664,6 +700,24 @@
         "UserAttentionEvent"
       ],
       "name": "UserAttentionEvent"
+    }
+  },
+  {
+    "event": "viewer:paired",
+    "payloadTs": {
+      "imports": [
+        "ViewerPairedEvent"
+      ],
+      "name": "ViewerPairedEvent"
+    }
+  },
+  {
+    "event": "waveobj:batchedupdates",
+    "payloadTs": {
+      "imports": [
+        "MuxObjBatch"
+      ],
+      "name": "MuxObjBatch"
     }
   },
   {

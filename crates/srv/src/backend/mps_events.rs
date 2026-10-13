@@ -177,6 +177,18 @@ events! {
     NotificationActivate: crate::backend::notify::router::EVENT_NOTIFICATION_ACTIVATE => crate::backend::notify::router::NotificationActivateEvent,
     /// Ask one window to open a pane as its own floating OS window (`app_api::pane`).
     OpenFloatingPane: "openfloatingpane" => OpenFloatingPaneEvent,
+    /// Several object updates from one atomic transition, applied in one flush (`EventBus::broadcast_mux_obj_updates`).
+    MuxObjBatchedUpdates: super::eventbus::WS_EVENT_MUX_OBJ_BATCHED_UPDATES => crate::backend::obj::MuxObjBatch,
+    /// A line of an agent CLI's install progress, for its pane (`mps::publish_install_progress`).
+    InstallProgress: super::mps::EVENT_INSTALL_PROGRESS => InstallProgressEvent,
+    /// An agent pane's activity, from its terminal title (`mps::publish_block_activity`).
+    BlockActivity: super::mps::EVENT_BLOCK_ACTIVITY => BlockActivityEvent,
+    /// One message from a language server (`lsp::supervisor`).
+    LspMessage: "lsp:message" => LspMessageEvent,
+    /// Cloud delivery's state changed (`muxbus::delivery_status`).
+    MuxbusStatus: crate::muxbus::delivery_status::EVENT_MUXBUS_STATUS => crate::backend::rpc_types::MuxBusDeliveryStatus,
+    /// A mobile viewer paired with this machine (`http_viewer`).
+    ViewerPaired: "viewer:paired" => ViewerPairedEvent,
     /// Tell a window's renderer to reveal a block (`notify::router`).
     BlockReveal: crate::backend::notify::router::EVENT_BLOCK_REVEAL => crate::backend::notify::router::BlockRevealEvent,
 
@@ -328,6 +340,39 @@ pub struct ConfigEvent {
     pub fullconfig: serde_json::Value,
 }
 
+/// `install_progress`: one line of install progress.
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct InstallProgressEvent {
+    pub message: String,
+}
+
+/// `block:activity`: what an agent pane is doing, from its terminal title.
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+#[serde(rename_all = "camelCase")]
+pub struct BlockActivityEvent {
+    pub block_id: String,
+    pub activity: String,
+}
+
+/// `lsp:message`: one JSON-RPC message from a language server, as it sent it.
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct LspMessageEvent {
+    pub server_id: String,
+    #[ts(type = "unknown")]
+    pub message: serde_json::Value,
+}
+
+/// `viewer:paired`: the device that just paired.
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct ViewerPairedEvent {
+    pub device_id: String,
+    pub device_name: String,
+}
+
 /// `openfloatingpane`: the pane to float, now alone in its own workspace.
 #[derive(Debug, Clone, Serialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
@@ -452,6 +497,25 @@ mod tests {
         );
         let frame = ProtocolFrame(serde_json::json!({ "method": "turn/started" }));
         assert_eq!(serde_json::to_value(&frame).unwrap(), serde_json::json!({ "method": "turn/started" }));
+    }
+
+    #[test]
+    fn raw_event_payloads_serialize_as_the_json_they_replace() {
+        use crate::backend::eventbus::EventBus;
+        let progress = EventBus::typed_ws_event::<InstallProgress>(&InstallProgressEvent { message: "npm i".into() }, "block:b1");
+        assert_eq!((progress.eventtype.as_str(), progress.oref.as_str()), ("install_progress", "block:b1"));
+        assert_eq!(progress.data, Some(serde_json::json!({ "message": "npm i" })));
+        let activity = BlockActivityEvent { block_id: "b1".into(), activity: "auth refactor".into() };
+        assert_eq!(serde_json::to_value(&activity).unwrap(), serde_json::json!({ "blockId": "b1", "activity": "auth refactor" }));
+        let lsp = LspMessageEvent { server_id: "rust".into(), message: serde_json::json!({ "id": 1 }) };
+        assert_eq!(serde_json::to_value(&lsp).unwrap(), serde_json::json!({ "server_id": "rust", "message": { "id": 1 } }));
+        let paired = ViewerPairedEvent { device_id: "d1".into(), device_name: "Phone".into() };
+        assert_eq!(serde_json::to_value(&paired).unwrap(), serde_json::json!({ "device_id": "d1", "device_name": "Phone" }));
+        // The batch goes out as the bare array, as it did before.
+        let update = crate::backend::obj::MuxObjUpdate { updatetype: "delete".into(), otype: "tab".into(), oid: "t1".into(), obj: None };
+        let batch = EventBus::typed_ws_event::<MuxObjBatchedUpdates>(&crate::backend::obj::MuxObjBatch(vec![update]), String::new());
+        assert_eq!(batch.eventtype, "waveobj:batchedupdates");
+        assert_eq!(batch.data, Some(serde_json::json!([{ "updatetype": "delete", "otype": "tab", "oid": "t1" }])));
     }
 
     #[test]
