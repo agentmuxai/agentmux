@@ -28,6 +28,9 @@ type PopoverMenuSection = {
     label: string;
     /** Whether the section starts expanded. Default true. */
     defaultOpen?: boolean;
+    /** Whether clicking the header collapses the section. Default true. When
+     *  false the header is a plain label: no chevron, no click, no hover. */
+    collapsible?: boolean;
     items: PopoverMenuActionItem[];
 };
 
@@ -153,7 +156,8 @@ const PopoverMenuSectionRenderer = (props: {
     section: PopoverMenuSection;
     onClose: () => void;
 }): JSX.Element => {
-    const [open, setOpen] = createSignal(props.section.defaultOpen ?? true);
+    const collapsible = props.section.collapsible ?? true;
+    const [open, setOpen] = createSignal(!collapsible || (props.section.defaultOpen ?? true));
 
     const handleHeaderClick = (e: MouseEvent) => {
         e.stopPropagation();
@@ -163,15 +167,24 @@ const PopoverMenuSectionRenderer = (props: {
 
     return (
         <div class="popover-menu-section">
-            <div class="menu-item popover-menu-section-header" onClick={handleHeaderClick}>
-                <i
-                    class={clsx(
-                        "fa-solid fa-fw menu-item-icon",
-                        open() ? "fa-chevron-down" : "fa-chevron-right",
-                    )}
-                />
-                <span class="label">{props.section.label}</span>
-            </div>
+            <Show
+                when={collapsible}
+                fallback={
+                    <div class="menu-item popover-menu-section-header popover-menu-section-header--static">
+                        <span class="label">{props.section.label}</span>
+                    </div>
+                }
+            >
+                <div class="menu-item popover-menu-section-header" onClick={handleHeaderClick}>
+                    <i
+                        class={clsx(
+                            "fa-solid fa-fw menu-item-icon",
+                            open() ? "fa-chevron-down" : "fa-chevron-right",
+                        )}
+                    />
+                    <span class="label">{props.section.label}</span>
+                </div>
+            </Show>
             <Show when={open()}>
                 <div class="popover-menu-section-items">
                     <For each={props.section.items}>
