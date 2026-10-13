@@ -945,3 +945,68 @@ describe("PaneTabStrip activity flash", () => {
         expect(animate).not.toHaveBeenCalled();
     });
 });
+
+// Edge fades while the tabs overflow (owner, 2026-10-13: "make the right edge
+// of the overflow a gradient fade out").
+describe("PaneTabStrip — edge fades", () => {
+    let geom = { scrollLeft: 0, clientWidth: 100, scrollWidth: 100 };
+    beforeEach(() => {
+        geom = { scrollLeft: 0, clientWidth: 100, scrollWidth: 100 };
+        for (const k of ["scrollLeft", "clientWidth", "scrollWidth"] as const) {
+            Object.defineProperty(HTMLElement.prototype, k, {
+                configurable: true,
+                get() { return geom[k]; },
+                set() {},
+            });
+        }
+        (globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver = class {
+            observe() {}
+            unobserve() {}
+            disconnect() {}
+        };
+    });
+    afterEach(() => {
+        for (const k of ["scrollLeft", "clientWidth", "scrollWidth"] as const) {
+            delete (HTMLElement.prototype as unknown as Record<string, unknown>)[k];
+        }
+    });
+
+    const strip = () =>
+        render(() => (
+            <PaneTabStrip
+                tabs={TABS}
+                activeId="a"
+                getId={(t: T) => t.id}
+                getLabel={(t: T) => t.label}
+                onActivate={vi.fn()}
+            />
+        )).container.querySelector(".pane-tab-strip")!;
+
+    it("no fade while every tab fits", () => {
+        const el = strip();
+        expect(el.classList.contains("pane-tab-strip--more-left")).toBe(false);
+        expect(el.classList.contains("pane-tab-strip--more-right")).toBe(false);
+    });
+
+    it("fades the right edge while more tabs are to the right", () => {
+        geom = { scrollLeft: 0, clientWidth: 100, scrollWidth: 300 };
+        const el = strip();
+        expect(el.classList.contains("pane-tab-strip--more-right")).toBe(true);
+        expect(el.classList.contains("pane-tab-strip--more-left")).toBe(false);
+    });
+
+    it("fades both edges in the middle, and only the left at the end", async () => {
+        geom = { scrollLeft: 0, clientWidth: 100, scrollWidth: 300 };
+        const el = strip();
+        geom.scrollLeft = 100;
+        fireEvent.scroll(el);
+        await new Promise((r) => requestAnimationFrame(() => r(null)));
+        expect(el.classList.contains("pane-tab-strip--more-left")).toBe(true);
+        expect(el.classList.contains("pane-tab-strip--more-right")).toBe(true);
+        geom.scrollLeft = 200;
+        fireEvent.scroll(el);
+        await new Promise((r) => requestAnimationFrame(() => r(null)));
+        expect(el.classList.contains("pane-tab-strip--more-left")).toBe(true);
+        expect(el.classList.contains("pane-tab-strip--more-right")).toBe(false);
+    });
+});

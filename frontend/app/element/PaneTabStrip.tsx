@@ -561,10 +561,44 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
         onCleanup(() => el.removeEventListener("wheel", handleWheel));
     });
 
+    // Edge fades: while the tabs overflow, the side with more tabs past it
+    // fades out (PaneTabStrip.scss), the usual "more this way" cue for a
+    // scrolling strip with a hidden scrollbar. Measured on scroll and on any
+    // resize of the strip or its content, at most once per frame: reads in a
+    // ResizeObserver callback force layout on every frame of a window drag.
+    const [moreLeft, setMoreLeft] = createSignal(false);
+    const [moreRight, setMoreRight] = createSignal(false);
+    onMount(() => {
+        const el = stripRef;
+        if (!el) return;
+        const measure = () => {
+            setMoreLeft(el.scrollLeft > 1);
+            setMoreRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 1);
+        };
+        let frame: number | undefined;
+        const schedule = () => {
+            if (frame == null) frame = requestAnimationFrame(() => { frame = undefined; measure(); });
+        };
+        const ro = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(schedule);
+        ro?.observe(el);
+        if (el.firstElementChild) ro?.observe(el.firstElementChild);
+        el.addEventListener("scroll", schedule, { passive: true });
+        measure();
+        onCleanup(() => {
+            ro?.disconnect();
+            el.removeEventListener("scroll", schedule);
+            if (frame != null) cancelAnimationFrame(frame);
+        });
+    });
+
     return (
         <div
             class="pane-tab-strip"
-            classList={{ "pane-tab-strip--foreign-hover": foreignHover() && highlightStrip() }}
+            classList={{
+                "pane-tab-strip--foreign-hover": foreignHover() && highlightStrip(),
+                "pane-tab-strip--more-left": moreLeft(),
+                "pane-tab-strip--more-right": moreRight(),
+            }}
             ref={(el) => { stripRef = el; }}
             // Double-click inside the strip should never bubble up and
             // maximize the pane — matches the icon-toggle pattern from
