@@ -24,6 +24,7 @@ function SysinfoView(props: SysinfoViewProps): JSX.Element {
     // The chart is empty until its history arrives: hold the pane until then
     // (pane-content-holds.ts).
     onCleanup(trackPaneContent(blockId));
+    onCleanup(() => model.dispose());
     const releaseContent = holdPaneContent(blockId);
     onCleanup(releaseContent);
     createEffect(() => {

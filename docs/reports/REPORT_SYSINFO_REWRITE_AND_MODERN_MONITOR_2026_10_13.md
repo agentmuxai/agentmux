@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-13
 **Author:** AgentX@narko
-**Status:** active. Phase 0 (§6) built 2026-10-13: gaps draw as breaks, the area is no longer stacked, and the x axis has real second and minute ticks. Phases 1 to 5 not started; the open questions in §7 are unanswered.
+**Status:** active. Phase 0 (§6) built 2026-10-13: gaps draw as breaks, the area is no longer stacked, and the x axis has real second and minute ticks. Phase 1 built 2026-10-13, in a narrower form than §5.1 described (see §6). Phases 2 to 5 not started; the open questions in §7 are unanswered.
 **Origin:** investigation to decide between fixing and rewriting, and to scope a redesign.
 **Inputs:**
 - the owner's two screenshots of the CPU chart during heavy load (2026-10-13, 08:52 to 08:54);
@@ -235,7 +235,7 @@ A lease that is not renewed expires, so a crashed window doesn't keep sources ru
 | Phase | Scope | Fixes |
 |---|---|---|
 | 0. Hotfix (**built**) | unstacked area (`y1: 0`), NaN markers on both gap edges, no hold-last-value (a gap up to the threshold is joined by the line between two real samples), x ticks on round second or minute boundaries sized to the window; not done: the y axis, whose missing labels in the large view were not reproduced | the ramp and the duplicate labels, without the redesign |
-| 1. Transport | `since seq N` read from the ring; batch instead of latest-only on the background lane; backfill after any gap | the 10 to 30 s holes |
+| 1. Transport (**built, as a pane-side backfill**) | when a live sample arrives after a gap, the pane reads srv's history ring (`EventReadHistoryCommand`) and merges the samples it missed, without clearing the chart or pausing live events; one fetch at a time, at least 5 s apart. The live lane is unchanged: still latest-only, so the status bar and popovers stay cheap and terminal input keeps its priority. Not built: batching on the lane, a `since seq N` read, and gap markers from the sampler | the 10 to 30 s holes |
 | 2. Data layer and scheduler | §5.5: one scheduler thread with sources, leases and budgets; one process snapshot, grouping and rate calculation; `procstats` extended to cover Sysinfo's metrics; diagnostics as a slow source; per-core metadata for any core count | duplicate scans, numbers that disagree between panes, skipped ticks, 32+ cores |
 | 3. Move the consumers | the status bar, popovers, pane headers (`blockstats`) and Tower read from the data layer; the old sysinfo loop and Tower's own sampling are removed | one source of truth |
 | 4. New pane | uPlot charts (one component, also for Tower's history), tiles, heatmap, mirrored I/O, crosshair, window selector, table view | the redesign in §5.3 |

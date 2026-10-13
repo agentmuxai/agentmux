@@ -234,3 +234,55 @@ describe("sampleReducer — no duplicate x", () => {
         expect(out[out.length - 1].cpu).toBe(99);
     });
 });
+
+describe("sampleReducer — MERGE of history fetched for a gap", () => {
+    const merge = (state: DataItem[], items: DataItem[]) =>
+        sampleReducer(state, { type: "MERGE", items, intervalSecs: INTERVAL, numPoints: NUM_POINTS });
+
+    it("fills a gap with the samples taken in it and drops the break markers", () => {
+        let state = [sample(1000, 40)];
+        state = append(state, sample(20000, 80));
+        expect(state.filter((d) => d.blank === 1)).toHaveLength(2);
+        const history = Array.from({ length: 18 }, (_, i) => sample(2000 + i * 1000, 50 + i));
+        const out = merge(state, history);
+        // Every second from 1000 to 20000 is there, in order, each once.
+        const real = out.filter((d) => d.blank !== 1).map((d) => d.ts);
+        expect(real).toEqual(Array.from({ length: 20 }, (_, i) => 1000 + i * 1000));
+        // No marker inside the filled stretch.
+        expect(out.some((d) => d.blank === 1 && d.ts > 1000 && d.ts < 20000)).toBe(false);
+    });
+
+    it("leaves a break where the history has a hole too", () => {
+        let state = [sample(1000, 40)];
+        state = append(state, sample(60000, 80));
+        // History covers only 2 s to 10 s: the rest of the gap stays a gap.
+        const out = merge(state, Array.from({ length: 9 }, (_, i) => sample(2000 + i * 1000, 50)));
+        const markers = out.filter((d) => d.blank === 1).map((d) => d.ts);
+        expect(markers.some((t) => t > 10000 && t < 60000)).toBe(true);
+        expect(out.filter((d) => d.blank !== 1).map((d) => d.ts)).toEqual([
+            1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000, 9000, 10000, 60000,
+        ]);
+    });
+
+    it("keeps the sample already held when history has the same timestamp", () => {
+        const state = [sample(1000, 40), sample(2000, 41)];
+        const out = merge(state, [sample(1000, 99), sample(1500, 55)]);
+        expect(out.find((d) => d.ts === 1000)?.cpu).toBe(40);
+        expect(out.some((d) => d.ts === 1500)).toBe(true);
+    });
+
+    it("returns the same state when history has nothing new", () => {
+        const state = [sample(1000, 40), sample(2000, 41)];
+        expect(merge(state, [sample(1000, 40), sample(2000, 41)])).toBe(state);
+        expect(merge(state, [])).toBe(state);
+    });
+
+    it("trims to the visible window like any other update", () => {
+        const newest = 1_000_000;
+        const state = [sample(newest, 40)];
+        const tooOld = sample(newest - INTERVAL_MS * (NUM_POINTS + 50), 10);
+        const out = merge(state, [tooOld, sample(newest - 1000, 39)]);
+        expect(out.some((d) => d.ts === tooOld.ts)).toBe(false);
+        expect(out.some((d) => d.ts === newest - 1000)).toBe(true);
+    });
+});

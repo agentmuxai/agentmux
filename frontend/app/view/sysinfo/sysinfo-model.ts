@@ -15,12 +15,24 @@ import { WpsEvent } from "@/app/store/mps-events";
 import { TabRpcClient } from "@/app/store/rpc-util";
 
 import { DataItem, DefaultNumPoints, DefaultPlotMeta, PlotTypes } from "./sysinfo-types";
+import { GapBackfiller } from "./sysinfo-backfill";
 import { convertMuxEventToDataItem, getGapThresholdMs } from "./sysinfo-util";
 import type { ConnStatus } from "@/types/rpc/ConnStatus";
 
 // ---------------------------------------------------------------------------
 // Sample ring-buffer reducer
 // ---------------------------------------------------------------------------
+
+/** Least time between two gap backfills, so a machine that stalls often isn't asked for history in a loop. */
+const BACKFILL_MIN_INTERVAL_MS = 5000;
+
+/** The newest sample that is a reading, not a gap marker. */
+function lastRealSample(state: DataItem[]): DataItem | null {
+    for (let i = state.length - 1; i >= 0; i--) {
+        if (state[i].blank !== 1) return state[i];
+    }
+    return null;
+}
 
 function makeBlankItem(template: DataItem, ts: number): DataItem {
     const blank: DataItem = { ts };
@@ -33,6 +45,7 @@ function makeBlankItem(template: DataItem, ts: number): DataItem {
 
 type SampleAction =
     | { type: "RESET"; items: DataItem[]; intervalSecs: number; numPoints: number }
+    | { type: "MERGE"; items: DataItem[]; intervalSecs: number; numPoints: number }
     | { type: "APPEND"; item: DataItem; intervalSecs: number; numPoints: number };
 
 /**
@@ -121,6 +134,27 @@ export function sampleReducer(state: DataItem[], action: SampleAction): DataItem
             result.push(cur);
         }
         return result;
+    }
+
+    if (action.type === "MERGE") {
+        // Samples fetched from history for a gap, added to what the series already
+        // has: the union by timestamp (a sample already here wins), in time order,
+        // then laid out as RESET lays out history, so each gap still left gets its
+        // break markers and a filled one loses them. Nothing is cleared, so the
+        // chart never goes blank for it.
+        const byTs = new Map<number, DataItem>();
+        let known = 0;
+        for (const d of state) {
+            if (d.blank === 1) continue;
+            byTs.set(d.ts, d);
+            known++;
+        }
+        for (const d of action.items) {
+            if (!byTs.has(d.ts)) byTs.set(d.ts, d);
+        }
+        if (byTs.size === known) return state;
+        const merged = [...byTs.values()].sort((a, b) => a.ts - b.ts);
+        return sampleReducer([], { ...action, type: "RESET", items: merged });
     }
 
     if (action.type === "APPEND") {
@@ -227,15 +261,46 @@ class SysinfoViewModel {
 
     appendData(item: DataItem) {
         try {
+            const previous = lastRealSample(this.dataAtom());
             this.dispatch({
                 type: "APPEND",
                 item,
                 intervalSecs: this.getConfiguredInterval(),
                 numPoints: this.numPoints(),
             });
+            // The live lane delivers only the newest sample after a stall; the rest
+            // are in srv's history. A forward gap past the threshold is fetched.
+            if (previous != null && item.ts - previous.ts > getGapThresholdMs(this.getConfiguredInterval())) {
+                this.backfiller.noteGap(previous.ts);
+            }
         } catch (e) {
             console.error("sysinfo: appendData error", e);
         }
+    }
+
+    /** Merge the history newer than `fromTs` into the series, without clearing it. */
+    private async backfillFrom(fromTs: number): Promise<void> {
+        const history = await RpcApi.EventReadHistoryCommand(TabRpcClient, {
+            event: WpsEvent.SysInfo,
+            scope: this.connection(),
+            maxitems: this.numPoints(),
+        });
+        if (history == null) return;
+        const items = history.map(convertMuxEventToDataItem).filter((d): d is DataItem => d != null && d.ts > fromTs);
+        if (items.length === 0) return;
+        this.dispatch({
+            type: "MERGE",
+            items,
+            intervalSecs: this.getConfiguredInterval(),
+            numPoints: this.numPoints(),
+        });
+    }
+
+    private backfiller = new GapBackfiller((fromTs) => this.backfillFrom(fromTs), BACKFILL_MIN_INTERVAL_MS);
+
+    /** Stop any pending backfill; the pane is gone. */
+    dispose() {
+        this.backfiller.dispose();
     }
 
     // A native pane tab (Pane Tab contract Phase 2c): built by `create(ctx)`
