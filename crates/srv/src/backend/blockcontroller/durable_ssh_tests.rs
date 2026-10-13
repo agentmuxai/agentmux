@@ -831,3 +831,60 @@ async fn a_new_host_never_reached_becomes_a_plain_terminal_by_default() {
     let term = state.filestore.read_file("durable-unreachable-block", "term").unwrap().unwrap();
     assert!(String::from_utf8_lossy(&term).contains("Could not resolve hostname"));
 }
+
+/// A host with no helper; every call is logged, so a test can see whether an
+/// install was tried.
+const FAKE_SSH_NO_HELPER: &str = r#"
+import os, sys
+remote = sys.argv[-1]
+with open(os.environ['FAKE_SSH_LOG_NO_HELPER'], 'ab') as log:
+    log.write(b'probe\n' if 'uname -sm' in remote else b'attach-missing\n')
+if 'uname -sm' in remote:
+    sys.stdout.write('Linux x86_64\n')
+    sys.exit(0)
+sys.exit(127)
+"#;
+
+/// A pane durable only by default that gets to a host after the helper
+/// already failed to get there (another pane's question closed, its install
+/// failed) becomes plain at once: no second question, no second install.
+#[tokio::test]
+async fn a_host_already_declined_or_failed_isnt_asked_or_tried_again() {
+    let dir = tempfile::tempdir().unwrap();
+    let Some(ssh_path) = fake_ssh(dir.path(), "fake_ssh_no_helper", FAKE_SSH_NO_HELPER) else {
+        eprintln!("skipped: no python to stand in for ssh");
+        return;
+    };
+    let log = dir.path().join("log");
+    std::env::set_var("FAKE_SSH_LOG_NO_HELPER", &log);
+    crate::backend::remote::helper_consent::install_answering_yes();
+    crate::backend::remote::helper_consent::note_not_installed("failed-before-host");
+    let state = crate::server::tests::test_state();
+    let ssh_path_again = ssh_path.clone();
+    let mut run = test_run(&state, "durable-failed-before-block", "failed-before-host", "amx-failed-before", ssh_path);
+    run.by_default = true;
+    let plain = run.plain.clone();
+    let (_input_tx, input_rx) = mpsc::unbounded_channel();
+    let (_leave_tx, leave_rx) = watch::channel(Leave::Stay);
+    let ended = tokio::time::timeout(Duration::from_secs(20), run.run(input_rx, leave_rx, Box::new(|_| {})))
+        .await
+        .expect("the run ends");
+    assert_eq!((ended, plain.load(Ordering::SeqCst)), (None, true), "a plain terminal");
+    assert_eq!(std::fs::read_to_string(&log).unwrap(), "attach-missing\n", "no install tried");
+
+    // The same after another pane's Not now, whatever the mode.
+    std::fs::remove_file(&log).unwrap();
+    crate::backend::remote::helper_consent::note_answer(
+        "declined-before-host",
+        crate::backend::remote::helper_consent::Answer { answered: true, approve: false, remember: false },
+    );
+    let run = test_run(&state, "durable-declined-before-block", "declined-before-host", "amx-declined-before", ssh_path_again);
+    let plain = run.plain.clone();
+    let (_input_tx, input_rx) = mpsc::unbounded_channel();
+    let (_leave_tx, leave_rx) = watch::channel(Leave::Stay);
+    let ended = tokio::time::timeout(Duration::from_secs(20), run.run(input_rx, leave_rx, Box::new(|_| {})))
+        .await
+        .expect("the run ends");
+    assert_eq!((ended, plain.load(Ordering::SeqCst)), (None, true), "a plain terminal");
+    assert_eq!(std::fs::read_to_string(&log).unwrap(), "attach-missing\n", "not asked, no install tried");
+}

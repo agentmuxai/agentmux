@@ -750,6 +750,14 @@ impl Run {
                         // installing it failed the same way.
                         let why = if installed_once {
                             format!("it still isn't runnable after installing it ({})", helper_path())
+                        } else if crate::backend::remote::helper_consent::plain_instead(&self.conn)
+                            || (self.by_default && crate::backend::remote::helper_consent::not_installed(&self.conn))
+                        {
+                            // Another pane's question on this host was just
+                            // answered Not now, or its try failed (question
+                            // closed, install failed): no second question or
+                            // install until srv restarts.
+                            "it didn't install on this host earlier".to_string()
                         } else {
                             installed_once = true;
                             match self.install_helper().await {

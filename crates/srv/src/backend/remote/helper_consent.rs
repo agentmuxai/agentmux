@@ -417,7 +417,9 @@ async fn allow_install_with(deps: &Deps, connection: &str, block_id: Option<&str
                 "installing AgentMux's helper on {connection} is set to Never (change it in Connectors > Remotes)"
             ))
         }
-        // Install, answered for this host since srv started.
+        // Install, answered for this host since srv started. (Not now isn't
+        // held here: Files' Reconnect asks again. A terminal checks it
+        // itself, `plain_instead`.)
         Step::Ask if !by_agent && approved().contains(&host_key(connection)) => return Ok(()),
         Step::Ask => {}
     }
@@ -479,6 +481,7 @@ mod tests {
         let later = allow_install_with(&deps, "me@shared-question-host", Some("blk-shared-4")).await;
         assert_eq!(later, Ok(()));
         assert_eq!(asked.load(Ordering::SeqCst), 2, "Install holds until srv restarts");
+
     }
 
     /// The pane asking is closed mid-question: a pane waiting on its answer
