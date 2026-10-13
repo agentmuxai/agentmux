@@ -105,13 +105,19 @@ vi.mock("@/app/element/local-media", async (orig) => ({
     fetchMediaBlob: media.blob,
 }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: { rpcCall: h.rpcCall } }));
-vi.mock("@/app/store/mps", () => ({
-    muxEventSubscribe: (sub: { eventType: string; handler: (e: unknown) => void }) => {
-        h.state.handlers.push(sub.handler);
-        h.state.byType.set(sub.eventType, [...(h.state.byType.get(sub.eventType) ?? []), sub.handler]);
-        return () => {};
-    },
-}));
+vi.mock("@/app/store/mps", () => {
+    const mock = {
+        muxEventSubscribe: (sub: { eventType: string; handler: (e: unknown) => void }) => {
+            h.state.handlers.push(sub.handler);
+            h.state.byType.set(sub.eventType, [...(h.state.byType.get(sub.eventType) ?? []), sub.handler]);
+            return () => {};
+        },
+    };
+    // As the real onMuxEvent: a typed subscription is a muxEventSubscribe whose handler gets the data.
+    const onMuxEvent = (eventType: string, handler: (data: unknown, event: unknown) => void, scope?: string) =>
+        mock.muxEventSubscribe({ eventType, scope, handler: (e: any) => { if (e?.data != null) handler(e.data, e); } } as any);
+    return { ...mock, onMuxEvent };
+});
 
 import { getPaneTab } from "@/app/block/pane-tab-registry";
 import { runCommand } from "@/app/keybindings/app-api";

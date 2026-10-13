@@ -63,6 +63,24 @@
     }
   },
   {
+    "event": "blockfile",
+    "payloadTs": {
+      "imports": [
+        "WSFileEventData"
+      ],
+      "name": "WSFileEventData"
+    }
+  },
+  {
+    "event": "blockstats",
+    "payloadTs": {
+      "imports": [
+        "TimeSeriesData"
+      ],
+      "name": "TimeSeriesData"
+    }
+  },
+  {
     "event": "controllerstatus",
     "payloadTs": {
       "imports": [
@@ -87,6 +105,42 @@
         "DispatchUpdatedEvent"
       ],
       "name": "DispatchUpdatedEvent"
+    }
+  },
+  {
+    "event": "editor:file_changed",
+    "payloadTs": {
+      "imports": [
+        "PathChangedEvent"
+      ],
+      "name": "PathChangedEvent"
+    }
+  },
+  {
+    "event": "files:changed",
+    "payloadTs": {
+      "imports": [
+        "FilesChangedEvent"
+      ],
+      "name": "FilesChangedEvent"
+    }
+  },
+  {
+    "event": "files:op",
+    "payloadTs": {
+      "imports": [
+        "FsOpEvent"
+      ],
+      "name": "FsOpEvent"
+    }
+  },
+  {
+    "event": "media:file_changed",
+    "payloadTs": {
+      "imports": [
+        "PathChangedEvent"
+      ],
+      "name": "PathChangedEvent"
     }
   },
   {
@@ -177,6 +231,15 @@
         "UserAttentionEvent"
       ],
       "name": "UserAttentionEvent"
+    }
+  },
+  {
+    "event": "waveobj:update",
+    "payloadTs": {
+      "imports": [
+        "MuxObjUpdate"
+      ],
+      "name": "MuxObjUpdate"
     }
   }
 ]

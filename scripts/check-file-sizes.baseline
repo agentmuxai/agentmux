@@ -17,7 +17,7 @@
 1677 crates/srv/src/backend/blockcontroller/acp.rs
 1531 crates/srv/src/backend/blockcontroller/app_server.rs
 2647 crates/srv/src/backend/blockcontroller/app_server_protocol.rs
-1880 crates/srv/src/backend/blockcontroller/durable_ssh.rs
+1874 crates/srv/src/backend/blockcontroller/durable_ssh.rs
 1734 crates/srv/src/backend/blockcontroller/persistent/mod.rs
 3058 crates/srv/src/backend/blockcontroller/shell/lifecycle.rs
 1501 crates/srv/src/backend/bundle_import.rs
@@ -48,6 +48,6 @@
 1506 frontend/app/view/agent/agent-view.tsx
 1564 frontend/app/view/agent/components/AgentComposerStrip.tsx
 1860 frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx
-1518 frontend/app/view/editor/editor-model.ts
+1513 frontend/app/view/editor/editor-model.ts
 1561 frontend/app/view/files/files-view.tsx
 2185 frontend/app/view/swarm/swarm-model.ts

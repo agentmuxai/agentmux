@@ -24,11 +24,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use serde_json::json;
 use tokio::sync::broadcast;
 
 use super::fs_watch::{FsWatchEventKind, FsWatchPool, Subscription};
-use super::mps::{Broker, MuxEvent};
+use super::mps::Broker;
 
 /// MPS event fired when a file open in at least one editor tab changes on
 /// disk. Scoped per-block (`block:<id>`) via `MuxEvent::scopes`, matching
@@ -221,18 +220,17 @@ impl EditorFileWatcher {
 /// open on `path`. Mirrors `publish_block_activity`'s per-block scoping
 /// (`crates/srv/src/backend/mps.rs`) — not a global broadcast.
 fn publish_editor_file_changed(broker: &Broker, path: &Path, block_ids: &[String]) {
-    broker.publish(MuxEvent {
-        event: EVENT_EDITOR_FILE_CHANGED.to_string(),
-        scopes: block_ids.iter().map(|id| format!("block:{id}")).collect(),
-        sender: String::new(),
-        persist: 0,
-        data: Some(json!({ "path": path.to_string_lossy() })),
-    });
+    broker.publish_event::<crate::backend::mps_events::EditorFileChanged>(
+        &crate::backend::mps_events::PathChangedEvent { path: path.to_string_lossy().into_owned() },
+        block_ids.iter().map(|id| format!("block:{id}")).collect(),
+        0,
+    );
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::backend::mps::MuxEvent;
     use std::sync::Mutex as StdMutex;
 
     struct TestClient {

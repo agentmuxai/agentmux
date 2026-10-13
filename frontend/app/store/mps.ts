@@ -8,6 +8,7 @@ import { sendRawRpcMessage } from "./ws";
 import type { SubscriptionRequest } from "@/app/store/rpc-api";
 import type { MuxEvent } from "@/types/rpc/MuxEvent";
 import type { MuxEventPayloads } from "./mps-events.generated";
+import type { WSFileEventData } from "@/types/rpc/WSFileEventData";
 
 type MuxEventSubject = {
     handler: (event: MuxEvent) => void;

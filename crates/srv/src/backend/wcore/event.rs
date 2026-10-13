@@ -7,7 +7,7 @@
 use crate::backend::oref::ORef;
 use crate::backend::storage::store::Store;
 use crate::backend::obj::*;
-use crate::backend::mps::{self, Broker, MuxEvent};
+use crate::backend::mps::Broker;
 
 /// Publish a StoreObj update event through the broker.
 pub fn send_mux_obj_update(broker: &Broker, store: &Store, oref: &ORef) {
@@ -46,17 +46,12 @@ pub fn send_mux_obj_update(broker: &Broker, store: &Store, oref: &ORef) {
     };
 
     if let Some(obj) = obj_json {
-        broker.publish(MuxEvent {
-            event: mps::EVENT_MUX_OBJ_UPDATE.to_string(),
-            scopes: vec![oref.to_string()],
-            sender: String::new(),
-            persist: 0,
-            data: Some(serde_json::json!({
-                "updatetype": UPDATE_TYPE_UPDATE,
-                "otype": oref.otype,
-                "oid": oref.oid,
-                "obj": obj,
-            })),
-        });
+        let update = crate::backend::obj::MuxObjUpdate {
+            updatetype: UPDATE_TYPE_UPDATE.to_string(),
+            otype: oref.otype.to_string(),
+            oid: oref.oid.to_string(),
+            obj: Some(obj),
+        };
+        broker.publish_event::<crate::backend::mps_events::MuxObjUpdated>(&update, vec![oref.to_string()], 0);
     }
 }

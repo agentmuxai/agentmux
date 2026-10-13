@@ -378,13 +378,7 @@ pub(super) fn append_transcript(
     };
     // No broker (a controller built without one): written, not announced.
     if let Some(broker) = broker {
-        broker.publish(mps::MuxEvent {
-            event: mps::EVENT_BLOCK_FILE.to_string(),
-            scopes: vec![format!("block:{block_id}")],
-            sender: String::new(),
-            persist: 0,
-            data: serde_json::to_value(&event_data).ok(),
-        });
+        broker.publish_event::<crate::backend::mps_events::BlockFile>(&event_data, vec![format!("block:{block_id}")], 0);
     }
 }
 
@@ -423,13 +417,7 @@ pub fn publish_transcript_changed(broker: &mps::Broker, block_id: &str, fileop: 
         pos,
         echo: None,
     };
-    broker.publish(mps::MuxEvent {
-        event: mps::EVENT_BLOCK_FILE.to_string(),
-        scopes: vec![format!("block:{block_id}")],
-        sender: String::new(),
-        persist: 0,
-        data: serde_json::to_value(&event_data).ok(),
-    });
+    broker.publish_event::<crate::backend::mps_events::BlockFile>(&event_data, vec![format!("block:{block_id}")], 0);
 }
 
 /// Serializes one block's transcript appends with their publish (see
