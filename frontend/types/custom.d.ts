@@ -206,8 +206,9 @@ declare global {
         navigate(blockId: string, url: string): Promise<void>;
         /** Chrome's address bar suggestions for `text` in the pane's profile
          *  (browser_panes/autocomplete.rs). Absent on hosts without native panes;
-         *  `supported: false` on a libcef without the API. */
-        autocomplete?(blockId: string, text: string): Promise<BrowserAutocompleteResult>;
+         *  `supported: false` on a libcef without the API. `searchSuggestions`:
+         *  also ask the default search engine (`browser:searchsuggestions`). */
+        autocomplete?(blockId: string, text: string, searchSuggestions: boolean): Promise<BrowserAutocompleteResult>;
         /** Bring a popup window a pane's page opened (`popup-…`) to the front. */
         showPopup(popupId: string): Promise<void>;
         /** Close a popup window a pane's page opened. */

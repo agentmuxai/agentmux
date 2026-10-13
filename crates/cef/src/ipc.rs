@@ -528,7 +528,9 @@ async fn route_command(
             // without the API: the address bar keeps its plain behavior.
             let block_id = args.get("block_id").and_then(|v| v.as_str()).unwrap_or("");
             let text = args.get("text").and_then(|v| v.as_str()).unwrap_or("");
-            Ok(state.browser_panes.autocomplete(state, block_id, text).await)
+            // The `browser:searchsuggestions` setting; off unless said.
+            let search_suggestions = args.get("search_suggestions").and_then(|v| v.as_bool()).unwrap_or(false);
+            Ok(state.browser_panes.autocomplete(state, block_id, text, search_suggestions).await)
         }
         "browser_pane_resize" => {
             let block_id = args.get("block_id").and_then(|v| v.as_str()).unwrap_or("");

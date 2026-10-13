@@ -12,6 +12,13 @@
 //! and the answer says `supported: false`: the frontend keeps its plain address
 //! bar. Same runtime-size guard as `begin_window_drag` (`ui_tasks/drag.rs`).
 //!
+//! Remote search suggestions (the default engine's suggest service, which
+//! sees each edit before it is submitted) only when the user turned on the
+//! `browser:searchsuggestions` setting. Chrome's own profile pref
+//! `search.suggest_enabled` switches them, set before each query; with it off
+//! only local matches come back. If the pref can't be turned off, no query
+//! runs at all.
+//!
 //! Spike and design: docs/analysis/ANALYSIS_BROWSER_ADDRESS_BAR_AUTOCOMPLETE_SPIKE_2026_10_12.md.
 
 use std::sync::Arc;
@@ -27,6 +34,9 @@ use tokio::sync::oneshot;
 use crate::state::AppState;
 
 use super::BrowserPaneManager;
+
+/// Chrome's pref for the default search engine's live suggestions.
+const SEARCH_SUGGEST_PREF: &str = "search.suggest_enabled";
 
 /// How long a query may take before the frontend gets the newest partial set.
 /// The local providers answer within milliseconds; this only bounds a slow
@@ -74,10 +84,23 @@ impl Pending {
 impl BrowserPaneManager {
     /// Chrome's address bar suggestions for `text` in `block_id`'s profile.
     /// `{"supported": false}` when the pane's libcef lacks the API.
-    pub async fn autocomplete(&self, state: &Arc<AppState>, block_id: &str, text: &str) -> serde_json::Value {
+    /// `search_suggestions`: also ask the default search engine (the setting).
+    pub async fn autocomplete(
+        &self,
+        state: &Arc<AppState>,
+        block_id: &str,
+        text: &str,
+        search_suggestions: bool,
+    ) -> serde_json::Value {
         let (tx, rx) = oneshot::channel();
         let pending = Arc::new(Pending { tx: Mutex::new(Some(tx)), ..Default::default() });
-        let mut task = StartAutocompleteTask::new(state.clone(), block_id.to_string(), text.to_string(), pending.clone());
+        let mut task = StartAutocompleteTask::new(
+            state.clone(),
+            block_id.to_string(),
+            text.to_string(),
+            search_suggestions,
+            pending.clone(),
+        );
         if post_task(ThreadId::UI, Some(&mut task)) == 0 {
             // No UI thread (shutting down).
             return serde_json::json!({ "supported": true, "matches": [] });
@@ -99,6 +122,7 @@ wrap_task! {
         state: Arc<AppState>,
         block_id: String,
         text: String,
+        search_suggestions: bool,
         pending: Arc<Pending>,
     }
 
@@ -108,7 +132,7 @@ wrap_task! {
                 self.pending.answer(Some(Vec::new()));
                 return;
             };
-            if !start(&browser, &self.text, self.pending.clone()) {
+            if !start(&browser, &self.text, self.search_suggestions, self.pending.clone()) {
                 self.pending.answer(None);
             }
         }
@@ -116,7 +140,7 @@ wrap_task! {
 }
 
 /// Start the query on the UI thread. False when this libcef has no API for it.
-fn start(browser: &Browser, text: &str, pending: Arc<Pending>) -> bool {
+fn start(browser: &Browser, text: &str, search_suggestions: bool, pending: Arc<Pending>) -> bool {
     let Some(context) = browser.host().and_then(|host| host.request_context()) else {
         pending.answer(Some(Vec::new()));
         return true;
@@ -132,6 +156,11 @@ fn start(browser: &Browser, text: &str, pending: Arc<Pending>) -> bool {
         let Some(get_autocomplete_suggestions) = (*raw).get_autocomplete_suggestions else {
             return false;
         };
+        if !set_search_suggestions(&context, search_suggestions) && !search_suggestions {
+            // Fail closed: never let typed text reach the engine against the setting.
+            pending.answer(Some(Vec::new()));
+            return true;
+        }
         let callback = RcImpl::new(
             _cef_autocomplete_callback_t {
                 // RcImpl::new fills in the base (size and reference counting).
@@ -144,6 +173,27 @@ fn start(browser: &Browser, text: &str, pending: Arc<Pending>) -> bool {
         let text_raw: *const _cef_string_utf16_t = (&text).into();
         // Hands libcef the callback's one reference; it releases it when done.
         get_autocomplete_suggestions(raw, text_raw, callback.cast());
+    }
+    true
+}
+
+/// Switch the profile's live search suggestions to `on`, unless already so.
+/// False when the pref couldn't be read or written.
+fn set_search_suggestions(context: &RequestContext, on: bool) -> bool {
+    let name = CefString::from(SEARCH_SUGGEST_PREF);
+    if let Some(current) = ImplPreferenceManager::preference(context, Some(&name)) {
+        if (current.bool() != 0) == on {
+            return true;
+        }
+    }
+    let Some(mut value) = value_create() else {
+        return false;
+    };
+    value.set_bool(on as std::os::raw::c_int);
+    let mut error = CefString::default();
+    if ImplPreferenceManager::set_preference(context, Some(&name), Some(&mut value), Some(&mut error)) == 0 {
+        tracing::warn!(on, error = %error, "[autocomplete] couldn't set {SEARCH_SUGGEST_PREF}");
+        return false;
     }
     true
 }

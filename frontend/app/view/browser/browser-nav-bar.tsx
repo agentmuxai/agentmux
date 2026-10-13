@@ -6,7 +6,7 @@ import type { BrowserBookmark } from "@/types/rpc/BrowserBookmark";
 import clsx from "clsx";
 import { getApi } from "@/app/store/app-api";
 import { ContextMenuModel, showTextInputContextMenu } from "@/app/store/contextmenu";
-import { browserStartPageAtom } from "@/store/config-signals";
+import { browserStartPageAtom, settingsAtom } from "@/store/config-signals";
 import { FlyoutMenu } from "@/app/element/flyoutmenu";
 import { IconButton } from "@/app/element/ui";
 import { RpcApi } from "@/app/store/rpc-api";
@@ -75,9 +75,15 @@ export function BrowserNavBar(props: {
     let addressInputRef: HTMLInputElement | undefined;
 
     // Chrome's address bar suggestions (address-autocomplete.ts). `typed` is
-    // what the user typed, without an inline completion shown after it.
+    // what the user typed, without an inline completion shown after it. The
+    // search engine is asked too only when the user turned that on.
     const autocomplete = createAddressAutocomplete(
-        (text) => getApi().browserPanes.autocomplete?.(model.blockId, text) ?? Promise.resolve(undefined)
+        (text) =>
+            getApi().browserPanes.autocomplete?.(
+                model.blockId,
+                text,
+                !!settingsAtom()?.["browser:searchsuggestions"]
+            ) ?? Promise.resolve(undefined)
     );
     const [typed, setTyped] = createSignal("");
     let deleting = false;
