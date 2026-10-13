@@ -141,9 +141,6 @@ export function eventShapedHandlers(sources) {
     return errors;
 }
 
-/** Where a typed event is subscribed with `muxEventSubscribe` instead of `onMuxEvent`, in
- *  `sources` ([path, text]). A subscription names its event as `WpsEvent.<Key>` or a literal, or a
- *  per-id event as a template literal starting with one of `perIdPrefixes`. */
 /** Event-name constants declared in any source (`const EVENT_AGENT_SHUTDOWN = "agent:shutdown"`,
  *  or `= WpsEvent.X`), by name. */
 function eventConsts(sources, wps) {
@@ -192,6 +189,9 @@ export function untypedHistoryReads(sources, typed, wps, perIdPrefixes = new Set
     return errors;
 }
 
+/** Where a typed event is subscribed with `muxEventSubscribe` instead of `onMuxEvent`, in
+ *  `sources` ([path, text]). A subscription names its event as `WpsEvent.<Key>` or a literal, or a
+ *  per-id event as a template literal starting with one of `perIdPrefixes`. */
 export function untypedSubscriptions(sources, typed, wps, perIdPrefixes = new Set()) {
     const errors = [];
     // A subscription can also name its event through a string constant of its own.
