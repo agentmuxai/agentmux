@@ -15,7 +15,9 @@
 //! Remote search suggestions (the default engine's suggest service, which
 //! sees each edit before it is submitted) only while the
 //! `browser:searchsuggestions` setting is on (the default, as in Chrome; the
-//! user can turn it off). Chrome's own profile pref
+//! user can turn it off). Never in Incognito: Chrome's
+//! `BaseSearchProvider::CanSendSuggestRequest` refuses suggest requests from
+//! an off-the-record profile, so those panes get local matches only. Chrome's own profile pref
 //! `search.suggest_enabled` switches them, set before each query; with it off
 //! only local matches come back. If the pref can't be turned off, no query
 //! runs at all.
