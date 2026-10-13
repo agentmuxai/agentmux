@@ -46,7 +46,6 @@ struct AppServerInner {
 
 /// Controller for one isolated `codex app-server --listen stdio://` child.
 pub struct AppServerController {
-    tab_id: String,
     block_id: String,
     inner: Arc<Mutex<AppServerInner>>,
     broker: Option<Arc<mps::Broker>>,
@@ -59,7 +58,6 @@ pub struct AppServerController {
 
 impl AppServerController {
     pub fn new(
-        tab_id: String,
         block_id: String,
         broker: Option<Arc<mps::Broker>>,
         event_bus: Option<Arc<EventBus>>,
@@ -68,7 +66,6 @@ impl AppServerController {
     ) -> Self {
         let broker_for_turns = broker.clone();
         Self {
-            tab_id,
             block_id: block_id.clone(),
             inner: Arc::new(Mutex::new(AppServerInner {
                 proc_status: STATUS_INIT.to_string(),
@@ -632,7 +629,6 @@ mod tests {
         };
         store.insert(&mut block).unwrap();
         let ctrl = AppServerController::new(
-            "tab".to_string(),
             "block-appsrv".to_string(),
             None,
             None,
@@ -660,7 +656,6 @@ mod tests {
 
     fn controller() -> AppServerController {
         AppServerController::new(
-            "tab-1".to_string(),
             "block-1".to_string(),
             None,
             None,
@@ -716,7 +711,6 @@ mod tests {
     fn controller_with_broker() -> (Arc<AppServerController>, Arc<mps::Broker>) {
         let broker = Arc::new(mps::Broker::new());
         let controller = Arc::new(AppServerController::new(
-            "tab-1".to_string(),
             "block-1".to_string(),
             Some(broker.clone()),
             None,

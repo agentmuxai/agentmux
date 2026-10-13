@@ -88,15 +88,6 @@ pub fn run_srv_ipc_server(
     })
 }
 
-#[cfg(not(target_os = "windows"))]
-pub fn run_srv_ipc_server(
-    _pipe_name: String,
-    _ctx: ServerCtx,
-) -> tokio::task::JoinHandle<()> {
-    // Phase 7 will add Unix domain socket support.
-    tokio::spawn(async {})
-}
-
 #[cfg(target_os = "windows")]
 async fn handle_connection(stream: NamedPipeServer, ctx: Arc<ServerCtx>) {
     let (read_half, write_half) = tokio::io::split(stream);
@@ -183,7 +174,7 @@ async fn handle_connection(stream: NamedPipeServer, ctx: Arc<ServerCtx>) {
         };
 
         // Enforce Register-first at the connection level.
-        if let Some(reply) = enforce_register_first(&cmd, &registered_kind, &ctx).await {
+        if let Some(reply) = enforce_register_first(&cmd, &registered_kind).await {
             let close = matches!(&reply, Event::Error { fatal: true, .. });
             let _ = send_event(&writer, reply).await;
             if close {
@@ -252,11 +243,9 @@ async fn handle_connection(stream: NamedPipeServer, ctx: Arc<ServerCtx>) {
             continue;
         }
 
-        let now_rfc3339 = chrono::Utc::now().to_rfc3339();
         let events = {
             let mut state = ctx.state.lock().await;
             let rctx = reducer::Ctx {
-                now_rfc3339,
                 registered_pid,
             };
             reducer::update(&mut state, cmd.clone(), &rctx)
@@ -320,11 +309,9 @@ async fn dispatch_synthetic_goodbye(
     let Some(pid) = registered_pid else {
         return;
     };
-    let now_rfc3339 = chrono::Utc::now().to_rfc3339();
     let events = {
         let mut state = ctx.state.lock().await;
         let rctx = reducer::Ctx {
-            now_rfc3339,
             registered_pid: Some(pid),
         };
         reducer::update(&mut state, Command::Goodbye, &rctx)
@@ -351,7 +338,6 @@ static NEXT_CONN_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64
 async fn enforce_register_first(
     cmd: &Command,
     registered_kind: &Option<ClientKind>,
-    ctx: &Arc<ServerCtx>,
 ) -> Option<Event> {
     if registered_kind.is_some() {
         return None;

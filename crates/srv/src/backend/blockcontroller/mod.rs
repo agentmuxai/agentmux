@@ -1137,7 +1137,6 @@ pub fn resync_controller(
         }
         BLOCK_CONTROLLER_APP_SERVER => {
             let ctrl = app_server_controller::AppServerController::new(
-                tab_id.to_string(),
                 block_id.to_string(),
                 broker,
                 event_bus,

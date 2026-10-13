@@ -12,7 +12,6 @@ use crate::state::{ProcessRecord, ProcessState};
 
 pub(super) fn handle_register(
     state: &mut State,
-    ctx: &Ctx,
     kind: ClientKind,
     pid: u32,
     version: String,
@@ -43,10 +42,8 @@ pub(super) fn handle_register(
     state.processes.insert(
         pid,
         ProcessRecord {
-            pid,
-            kind,
             state: ProcessState::Running,
-            spawned_at: ctx.now_rfc3339.clone(),
+            #[cfg(test)]
             version: version.clone(),
         },
     );

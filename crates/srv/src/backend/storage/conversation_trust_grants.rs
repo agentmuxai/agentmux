@@ -64,6 +64,7 @@ impl Store {
     /// schema level too; `INSERT OR REPLACE` keeps this call site simple
     /// rather than requiring callers to distinguish "insert" from
     /// "already exists").
+    #[allow(dead_code)] // No grant UI/CLI yet: SPEC_MUXSPECT_PHASE_B_POLICY_AND_TIER_ENFORCEMENT_2026_08_22.md §3.
     pub fn conversation_trust_grant_add(
         &self,
         agent_id: &str,
@@ -83,6 +84,7 @@ impl Store {
 
     /// Revoke a previously-granted peer. A no-op (not an error) if no such
     /// grant exists — revoking is idempotent, same as granting.
+    #[allow(dead_code)] // No grant UI/CLI yet: SPEC_MUXSPECT_PHASE_B_POLICY_AND_TIER_ENFORCEMENT_2026_08_22.md §3.
     pub fn conversation_trust_grant_revoke(
         &self,
         agent_id: &str,
@@ -102,6 +104,7 @@ impl Store {
 
     /// List every peer `agent_id` has granted access to, across all tiers —
     /// for a settings UI/CLI to show the current allowlist.
+    #[allow(dead_code)] // No grant UI/CLI yet: SPEC_MUXSPECT_PHASE_B_POLICY_AND_TIER_ENFORCEMENT_2026_08_22.md §3.
     pub fn conversation_trust_grant_list(
         &self,
         agent_id: &str,

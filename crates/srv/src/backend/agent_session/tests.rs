@@ -12,7 +12,7 @@ use super::zone_naming::{agent_archive_zone, validate_and_current};
 use crate::backend::obj::{Block, MetaMapType};
 use crate::backend::storage::filestore::{FileMeta, FileOpts, FileStore};
 use crate::backend::storage::store::Store;
-use crate::backend::storage::Bundle;
+use crate::backend::storage::bundles::Bundle;
 use std::path::Path;
 use std::sync::Arc;
 use tempfile::tempdir;

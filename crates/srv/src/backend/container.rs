@@ -1489,6 +1489,7 @@ impl ContainerManager {
 enum RuntimeSlot {
     /// Test/no-docker-expected fixtures — `get()` never attempts a real
     /// connect, always reports unavailable.
+    #[cfg(test)]
     Disabled,
     /// No manager yet: never connected, or the last connect attempt
     /// failed. `get()` retries `ContainerManager::connect()` on every
@@ -1540,6 +1541,7 @@ impl ContainerRuntimeHandle {
     /// Test-only constructor: permanently reports unavailable and never
     /// attempts a real connect, keeping host-only unit tests hermetic and
     /// deterministic regardless of whether the test box has Docker.
+    #[cfg(test)]
     pub fn disabled() -> Self {
         Self {
             slot: tokio::sync::RwLock::new(RuntimeSlot::Disabled),
@@ -1575,6 +1577,7 @@ impl ContainerRuntimeHandle {
             let slot = self.slot.read().await;
             match &*slot {
                 RuntimeSlot::Connected(mgr) => return Some(mgr.clone()),
+                #[cfg(test)]
                 RuntimeSlot::Disabled => return None,
                 RuntimeSlot::Empty => {}
             }
@@ -1585,6 +1588,7 @@ impl ContainerRuntimeHandle {
         if let RuntimeSlot::Connected(mgr) = &*slot {
             return Some(mgr.clone());
         }
+        #[cfg(test)]
         if matches!(&*slot, RuntimeSlot::Disabled) {
             return None;
         }

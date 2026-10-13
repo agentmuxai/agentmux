@@ -117,9 +117,11 @@ pub fn background_env_for(args: &[String]) -> Vec<(&'static str, &'static str)> 
 /// name, the LaunchAgent label's suffix, and the `.desktop` filename stem.
 /// Stable, because `disable()` has to find what `enable()` created —
 /// including across upgrades, so it deliberately carries no version.
+#[cfg(any(target_os = "windows", target_os = "linux", test))]
 pub const AUTOSTART_ID: &str = "AgentMux";
 
 /// Reverse-DNS label for the macOS LaunchAgent, which requires that form.
+#[cfg(any(not(target_os = "windows"), test))]
 pub const MACOS_LABEL: &str = "com.agentmux.launcher";
 
 /// Windows Task Scheduler registration XML.
@@ -138,6 +140,7 @@ pub const MACOS_LABEL: &str = "com.agentmux.launcher";
 /// deliberately: the defaults are *true*, which would make a laptop user's
 /// background service silently not start, or die mid-turn on unplug — the
 /// exact "is it actually running?" unreliability WS4 warns about.
+#[cfg(any(target_os = "windows", test))]
 pub fn scheduled_task_xml(exe: &Path, channel: &str) -> String {
     let exe = xml_escape(&exe.display().to_string());
     let channel = xml_escape(channel);
@@ -205,6 +208,7 @@ const TASK_CHANNEL_MARKER: &str = "[agentmux-channel=";
 /// so letting `launchd` also restart it would give two supervisors fighting
 /// over the same process — and would make a user-requested Quit from the tray
 /// come straight back, which is worse than useless.
+#[cfg(any(not(target_os = "windows"), test))]
 pub fn launch_agent_plist(exe: &Path, channel: &str) -> String {
     let exe = xml_escape(&exe.display().to_string());
     let channel = xml_escape(channel);
@@ -252,6 +256,7 @@ const PLIST_CHANNEL_KEY: &str = "AgentMuxChannel";
 /// (`SPEC_START_WITH_OS_2026_09_25.md` §3.1). `X-GNOME-Autostart-Delay` gives
 /// the tray host time to come up first (§3.4). `X-AgentMux-Channel` records
 /// which build owns the entry (§3.5).
+#[cfg(any(not(target_os = "windows"), test))]
 pub fn xdg_desktop_entry(exe: &Path, channel: &str) -> String {
     format!(
         "[Desktop Entry]\n\
@@ -278,6 +283,7 @@ const XDG_CHANNEL_KEY: &str = "X-AgentMux-Channel";
 /// Escape a plain desktop-entry string value (`TryExec`, vendor keys), per the
 /// Desktop Entry spec's `\\`, `\n`, `\t`, `\r` escapes. A raw newline would
 /// end the line and let a path inject keys, as `desktop_exec_escape` explains.
+#[cfg(any(not(target_os = "windows"), test))]
 fn desktop_string_escape(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
@@ -330,6 +336,7 @@ fn desktop_string_unescape(s: &str) -> String {
 ///
 /// Same injection class the XML path already handles via `xml_escape`; this
 /// is the desktop-entry grammar's version of it.
+#[cfg(any(not(target_os = "windows"), test))]
 fn desktop_exec_escape(exe: &Path) -> String {
     let raw = exe.display().to_string();
     let mut out = String::with_capacity(raw.len());
@@ -373,8 +380,9 @@ fn xml_escape(s: &str) -> String {
 }
 
 /// Where the artifact lives, for the platforms that use a plain file.
-/// `None` on Windows, whose artifact lives in the Task Scheduler store rather
-/// than a path we own.
+/// Not used on Windows, whose artifact lives in the Task Scheduler store
+/// rather than a path we own.
+#[cfg(not(target_os = "windows"))]
 pub fn artifact_path() -> Option<std::path::PathBuf> {
     #[cfg(target_os = "macos")]
     {

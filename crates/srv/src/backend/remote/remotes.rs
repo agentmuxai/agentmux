@@ -132,9 +132,11 @@ pub fn recent_in(config_home: &Path) -> Vec<RecentEntry> {
     recent
 }
 
+#[cfg(not(test))]
 use agentmux_common::time::now_ms_u64 as now_ms;
 
 /// [`record_recent_in`] under this instance's config dir, now. Best effort.
+#[cfg(not(test))]
 pub fn record_recent(connection: &str) -> bool {
     record_recent_in(&crate::backend::base::get_mux_config_dir(), connection, now_ms()).unwrap_or_else(|e| {
         tracing::warn!(connection = %connection, error = %e, "could not record a recent connection");

@@ -953,7 +953,7 @@ impl AppState {
         };
 
         // FFI only after the lock is dropped.
-        for (block_id, mut candidate) in candidates {
+        for (block_id, candidate) in candidates {
             if candidate.is_same(Some(browser)) != 0 {
                 return Some(block_id);
             }
@@ -1565,11 +1565,6 @@ fn log_host_event(ev: &crate::reducer::HostEvent) {
             event = "BrowserPaneCreateRequested",
             block_id = %block_id, label = %label, version,
         ),
-        HostEvent::BrowserPaneLive { block_id, label, version } => tracing::info!(
-            target: "host-reducer",
-            event = "BrowserPaneLive",
-            block_id = %block_id, label = %label, version,
-        ),
         HostEvent::BrowserPaneClosing { block_id, version } => tracing::info!(
             target: "host-reducer",
             event = "BrowserPaneClosing",
@@ -1579,11 +1574,6 @@ fn log_host_event(ev: &crate::reducer::HostEvent) {
             target: "host-reducer",
             event = "BrowserPaneClosed",
             block_id = %block_id, version,
-        ),
-        HostEvent::BrowserPaneCreationFailed { block_id, reason, version } => tracing::warn!(
-            target: "host-reducer",
-            event = "BrowserPaneCreationFailed",
-            block_id = %block_id, reason = %reason, version,
         ),
         // ── H.2 browsers ─────────────────────────────────────────────────
         HostEvent::BrowserRegistered { label, kind, version } => tracing::info!(
@@ -1618,11 +1608,6 @@ fn log_host_event(ev: &crate::reducer::HostEvent) {
             event = "PoolWindowLeft",
             label = %label, queue_len_after, reason = ?reason, version,
         ),
-        HostEvent::PoolEmpty { version } => tracing::info!(
-            target: "host-reducer",
-            event = "PoolEmpty",
-            version,
-        ),
         // ── H.5 quit ─────────────────────────────────────────────────────
         HostEvent::QuitDraining { reason, version } => tracing::warn!(
             target: "host-reducer",
@@ -1656,6 +1641,7 @@ fn log_host_event(ev: &crate::reducer::HostEvent) {
             restore_rect = ?restore_rect,
             version,
         ),
+        #[cfg(any(target_os = "windows", test))]
         HostEvent::FloatingAlwaysOnTopChanged { label, on, version } => tracing::info!(
             target: "host-reducer",
             event = "FloatingAlwaysOnTopChanged",

@@ -272,10 +272,6 @@ impl AuthSessionManager {
                     session.captured_email = email.clone();
                 }
             }
-            AuthPatternMatch::LoginFailure { message: _ } => {
-                // Same — handler decides Failed status (it has more
-                // context: CLI exit code, auth check result, etc.).
-            }
         }
         Some(m)
     }

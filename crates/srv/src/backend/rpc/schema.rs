@@ -97,11 +97,13 @@ impl RpcBinding {
     /// Kept alongside the full path rather than replacing it: the short name
     /// is what a binding is called in TypeScript, but two modules can hold
     /// same-named types, so the full path stays authoritative.
+    #[cfg(test)]
     pub fn request_name(&self) -> &str {
         short_name(self.request)
     }
 
     /// Last path segment of `response`.
+    #[cfg(test)]
     pub fn response_name(&self) -> &str {
         short_name(self.response)
     }
@@ -109,6 +111,7 @@ impl RpcBinding {
 
 /// `a::b::Foo` -> `Foo`; also strips a generic tail so `Vec<a::B>` reads as
 /// `Vec<a::B>` rather than being truncated at a `::` inside the parameter.
+#[cfg(test)]
 fn short_name(path: &str) -> &str {
     match path.find('<') {
         // Generic: leave it whole. Truncating `Vec<crate::x::Y>` at the last
@@ -134,6 +137,7 @@ impl RpcSchema {
     }
 
     /// Record (or replace) the binding for `command`, without TypeScript.
+    #[cfg(test)]
     pub fn record(&mut self, command: &str, request: &'static str, response: &'static str) {
         self.bindings.insert(
             command.to_string(),
@@ -168,6 +172,7 @@ impl RpcSchema {
 
     /// Bindings in command order. `BTreeMap` makes this stable across runs,
     /// which is what lets a generated artifact be diffed in CI.
+    #[cfg(test)]
     pub fn bindings(&self) -> Vec<&RpcBinding> {
         self.bindings.values().collect()
     }
@@ -182,19 +187,23 @@ impl RpcSchema {
         self.bindings.remove(command);
     }
 
+    #[cfg(test)]
     pub fn len(&self) -> usize {
         self.bindings.len()
     }
 
+    #[cfg(test)]
     pub fn is_empty(&self) -> bool {
         self.bindings.is_empty()
     }
 
+    #[cfg(test)]
     pub fn get(&self, command: &str) -> Option<&RpcBinding> {
         self.bindings.get(command)
     }
 
     /// Stable JSON, sorted by command, for the dump + CI gate.
+    #[cfg(test)]
     pub fn to_json(&self) -> serde_json::Value {
         serde_json::Value::Array(
             self.bindings

@@ -214,11 +214,11 @@ wrap_task! {
     }
 }
 
-/// Apply a user's answer on the UI thread, recording a grant when allowed.
-///
-/// The grant is recorded only on the resolve path that actually found a live
-/// entry — a duplicate or timed-out answer must not retroactively create a
-/// grant for a request that was already denied.
+// Apply a user's answer on the UI thread, recording a grant when allowed.
+//
+// The grant is recorded only on the resolve path that actually found a live
+// entry — a duplicate or timed-out answer must not retroactively create a
+// grant for a request that was already denied.
 wrap_task! {
     pub(crate) struct RespondTask {
         id: u64,

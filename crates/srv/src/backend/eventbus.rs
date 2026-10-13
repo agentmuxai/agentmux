@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
 
-use super::mps::{MuxEvent, WpsClient, EVENT_SYS_INFO, EVENT_BLOCK_STATS, EVENT_BLOCK_FILE};
+use super::mps::{MuxEvent, WpsClient, EVENT_SYS_INFO, EVENT_BLOCK_STATS};
 
 // ---- Event type constants ----
 
@@ -154,6 +154,7 @@ impl EventBus {
 
     /// Send an event to a single connection by conn_id on a specific lane.
     /// No-op if not found.
+    #[cfg(test)]
     pub fn send_to_conn_lane(&self, conn_id: &str, event: &WSEventType, lane: Lane) {
         let data = match serde_json::to_value(event) {
             Ok(v) => v,
@@ -357,6 +358,7 @@ fn rpc_eventrecv_value(event: &MuxEvent) -> Option<serde_json::Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::backend::mps::EVENT_BLOCK_FILE;
 
     #[test]
     fn test_register_unregister() {

@@ -312,11 +312,13 @@ impl WshRpcEngine {
     /// Snapshot of every typed command's request/response pair, in command
     /// order. Handlers registered through the untyped [`Self::register_handler`]
     /// are absent — that is what lets the migration proceed one at a time.
+    #[cfg(test)]
     pub fn schema_json(&self) -> serde_json::Value {
         self.lock_inner().schema.to_json()
     }
 
     /// Number of commands registered through the typed path.
+    #[cfg(test)]
     pub fn typed_command_count(&self) -> usize {
         self.lock_inner().schema.len()
     }

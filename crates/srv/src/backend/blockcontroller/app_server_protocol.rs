@@ -147,8 +147,6 @@ pub enum CodexAppServerProtocolError {
     MissingObjectField(&'static str),
     #[error("App Server response is missing a boolean field: {0}")]
     MissingBoolField(&'static str),
-    #[error("App Server event is missing a string field: {0}")]
-    MissingEventField(&'static str),
     #[error("App Server event belongs to thread {actual}, but active thread is {expected}")]
     ThreadScopeMismatch { expected: String, actual: String },
     #[error("App Server event belongs to turn {actual}, but active turn is {expected}")]
@@ -217,6 +215,7 @@ pub struct ThreadForkOptions {
 /// pinned schema's `ThreadListCwdFilter` (`string | string[]`).
 #[derive(Debug, Clone, Serialize)]
 #[serde(untagged)]
+#[allow(dead_code)] // Unwired until SPEC_CODEX_APP_SERVER_FIRST_CLASS_PROVIDER_2026_09_12.md §15 Slice 6.
 pub enum ThreadListCwdFilter {
     Single(String),
     Many(Vec<String>),
@@ -241,6 +240,7 @@ pub struct ThreadListOptions {
 /// in this typed request only and are never included in protocol events/logs.
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type", rename_all_fields = "camelCase")]
+#[allow(dead_code)] // Unwired until SPEC_CODEX_APP_SERVER_FIRST_CLASS_PROVIDER_2026_09_12.md §15 Slice 4.
 pub enum AccountLoginOptions {
     #[serde(rename = "chatgptDeviceCode")]
     ChatgptDeviceCode,
@@ -456,6 +456,7 @@ impl CodexAppServerSession {
     /// Fork the active thread without changing this session's thread identity.
     /// The returned id is independent and must be persisted by the caller that
     /// creates the new AgentMux pane.
+    #[allow(dead_code)] // Unwired until SPEC_CODEX_APP_SERVER_FIRST_CLASS_PROVIDER_2026_09_12.md §15 Slice 6.
     pub async fn fork_thread(
         &self,
         options: ThreadForkOptions,
@@ -486,6 +487,7 @@ impl CodexAppServerSession {
         extract_thread_id(&result)
     }
 
+    #[allow(dead_code)] // Unwired until SPEC_CODEX_APP_SERVER_FIRST_CLASS_PROVIDER_2026_09_12.md §15 Slice 6.
     pub async fn read_thread(
         &self,
         include_turns: bool,
@@ -508,6 +510,7 @@ impl CodexAppServerSession {
             .await?)
     }
 
+    #[allow(dead_code)] // Unwired until SPEC_CODEX_APP_SERVER_FIRST_CLASS_PROVIDER_2026_09_12.md §15 Slice 6.
     pub async fn list_threads(
         &self,
         options: ThreadListOptions,
@@ -524,6 +527,7 @@ impl CodexAppServerSession {
             .await?)
     }
 
+    #[allow(dead_code)] // Unwired until SPEC_CODEX_APP_SERVER_FIRST_CLASS_PROVIDER_2026_09_12.md §15 Slice 6.
     pub async fn archive_thread(
         &self,
         timeout: Duration,
@@ -541,6 +545,7 @@ impl CodexAppServerSession {
             .await?)
     }
 
+    #[allow(dead_code)] // Unwired until SPEC_CODEX_APP_SERVER_FIRST_CLASS_PROVIDER_2026_09_12.md §15 Slice 6.
     pub async fn compact_thread(
         &self,
         timeout: Duration,
@@ -563,6 +568,7 @@ impl CodexAppServerSession {
     }
 
     /// Verify the account selected by the caller's isolated CODEX_HOME.
+    #[allow(dead_code)] // Unwired until SPEC_CODEX_APP_SERVER_FIRST_CLASS_PROVIDER_2026_09_12.md §15 Slice 4.
     pub async fn read_account(
         &self,
         refresh_token: bool,
@@ -578,6 +584,7 @@ impl CodexAppServerSession {
             .await?)
     }
 
+    #[allow(dead_code)] // Unwired until SPEC_CODEX_APP_SERVER_FIRST_CLASS_PROVIDER_2026_09_12.md §15 Slice 4.
     pub async fn logout_account(
         &self,
         timeout: Duration,
@@ -588,6 +595,7 @@ impl CodexAppServerSession {
             .await?)
     }
 
+    #[allow(dead_code)] // Unwired until SPEC_CODEX_APP_SERVER_FIRST_CLASS_PROVIDER_2026_09_12.md §15 Slice 4.
     pub async fn login_account(
         &self,
         options: AccountLoginOptions,
@@ -604,6 +612,7 @@ impl CodexAppServerSession {
             .await?)
     }
 
+    #[allow(dead_code)] // Unwired until SPEC_CODEX_APP_SERVER_FIRST_CLASS_PROVIDER_2026_09_12.md §15 Slice 4.
     pub async fn cancel_login(
         &self,
         login_id: String,
@@ -621,6 +630,7 @@ impl CodexAppServerSession {
 
     /// Add input to the active turn only when the caller supplies the exact
     /// turn precondition. Ordinary queued messages should not call this API.
+    #[allow(dead_code)] // Unwired until SPEC_CODEX_APP_SERVER_FIRST_CLASS_PROVIDER_2026_09_12.md §15 Slice 3.
     pub async fn steer_turn(
         &self,
         text: String,
@@ -650,6 +660,7 @@ impl CodexAppServerSession {
 
     /// Interrupt the active turn. The turn remains active locally until its
     /// authoritative `turn/completed` notification arrives.
+    #[allow(dead_code)] // Unwired until SPEC_CODEX_APP_SERVER_FIRST_CLASS_PROVIDER_2026_09_12.md §15 Slice 3.
     pub async fn interrupt_turn(
         &self,
         timeout: Duration,
@@ -767,6 +778,7 @@ impl CodexAppServerSession {
 
     /// Send a decision for a queued request. The request remains pending if the
     /// transport write fails, allowing a retry; successful responses consume it.
+    #[allow(dead_code)] // Unwired until SPEC_CODEX_APP_SERVER_FIRST_CLASS_PROVIDER_2026_09_12.md §15 Slice 3.
     pub async fn respond_server_request(
         &self,
         id: &RpcId,
@@ -858,6 +870,7 @@ impl CodexAppServerSession {
         outcome.map_err(Into::into)
     }
 
+    #[allow(dead_code)] // Unwired until SPEC_CODEX_APP_SERVER_FIRST_CLASS_PROVIDER_2026_09_12.md §15 Slice 3.
     pub fn pending_server_requests(&self) -> Vec<PendingServerRequest> {
         self.state
             .lock()
@@ -868,6 +881,7 @@ impl CodexAppServerSession {
             .collect()
     }
 
+    #[allow(dead_code)] // Unwired until SPEC_CODEX_APP_SERVER_FIRST_CLASS_PROVIDER_2026_09_12.md §15 Slice 6.
     pub fn snapshot(&self) -> SessionSnapshot {
         let state = self.state.lock().unwrap();
         SessionSnapshot {

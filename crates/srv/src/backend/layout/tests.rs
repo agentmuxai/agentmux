@@ -6,7 +6,6 @@
 //! TypeScript test suite is the behavioral oracle.
 
 use agentmux_common::{FlexDirection, LayoutNode, LayoutNodeData, ResizeOp, SplitPosition, StackMovePosition};
-use uuid::Uuid;
 use super::*;
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -940,15 +939,6 @@ fn split_horizontal_missing_target_returns_error() {
     let new = leaf("new", "b2", 10.0);
     let result = split_horizontal(&mut root, "ghost", new, SplitPosition::After);
     assert!(matches!(result, Err(LayoutError::NodeNotFound { .. })));
-}
-
-// ── clearTree ────────────────────────────────────────────────────────────────
-
-#[test]
-fn clear_tree_sets_root_to_none() {
-    let mut root: Option<LayoutNode> = Some(leaf("root", "b1", 10.0));
-    clear_tree_node(&mut root);
-    assert!(root.is_none());
 }
 
 // ── replaceNode ──────────────────────────────────────────────────────────────

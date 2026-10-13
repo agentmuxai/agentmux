@@ -322,7 +322,6 @@ mod route_agent_message_tests {
         register_controller(
             block_id,
             Arc::new(backend::blockcontroller::app_server_controller::AppServerController::new(
-                "tab-route".to_string(),
                 block_id.to_string(),
                 None,
                 None,

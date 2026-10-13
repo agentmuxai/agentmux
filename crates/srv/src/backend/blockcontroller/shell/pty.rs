@@ -127,7 +127,7 @@ pub(super) const FLUSHER_EOF_GRACE: std::time::Duration = std::time::Duration::f
 /// is unchanged from before the barrier existed, rather than doubled (muxreview
 /// P2 on PR #3261).
 pub(super) const FLUSHER_BARRIER_TIMEOUT: std::time::Duration =
-    std::time::Duration::from_millis(900);
+    FLUSHER_DRAIN_TIMEOUT.saturating_sub(FLUSHER_EOF_GRACE);
 
 /// Detect the best available interactive shell on Windows.
 ///
@@ -214,8 +214,9 @@ pub(super) fn pty_size_from_rt_opts(rt_opts: &Option<serde_json::Value>) -> PtyS
 
 impl ShellController {
     /// Inherent-method wrapper over [`pty_size_from_rt_opts`], preserving the
-    /// pre-split `ShellController::pty_size_from_rt_opts(...)` call site used by
-    /// `start()` and the unit tests.
+    /// pre-split `ShellController::pty_size_from_rt_opts(...)` call site the
+    /// unit tests use.
+    #[cfg(test)]
     pub(super) fn pty_size_from_rt_opts(rt_opts: &Option<serde_json::Value>) -> PtySize {
         pty_size_from_rt_opts(rt_opts)
     }

@@ -582,6 +582,7 @@ pub(crate) mod testing {
 
     /// [`helper`] that takes `delay` over each request, as a slow link
     /// would: long enough to cancel something halfway.
+    #[cfg(target_os = "linux")]
     pub(crate) fn slow_helper(
         home: std::path::PathBuf,
         delay: Duration,

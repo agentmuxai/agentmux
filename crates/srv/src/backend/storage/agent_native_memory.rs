@@ -48,8 +48,6 @@ pub struct NativeMemoryMirrorRowWithAgent {
     pub agent_id: String,
     pub filename: String,
     pub content: String,
-    pub metadata_type: Option<String>,
-    pub updated_at: i64,
 }
 
 impl Store {
@@ -61,17 +59,14 @@ impl Store {
     pub fn agent_native_memory_list_all_rows(&self) -> Result<Vec<NativeMemoryMirrorRowWithAgent>, StoreError> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT agent_id, filename, content, metadata_type, updated_at FROM db_agent_native_memory",
+            "SELECT agent_id, filename, content FROM db_agent_native_memory",
         )?;
         let rows = stmt
             .query_map(params![], |row| {
-                let metadata_type: String = row.get(3)?;
                 Ok(NativeMemoryMirrorRowWithAgent {
                     agent_id: row.get(0)?,
                     filename: row.get(1)?,
                     content: row.get(2)?,
-                    metadata_type: if metadata_type.is_empty() { None } else { Some(metadata_type) },
-                    updated_at: row.get(4)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;

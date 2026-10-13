@@ -20,15 +20,19 @@ impl BrowserPaneManager {
     /// pane type, for a consistent feel even though this path never touches
     /// that frontend module (browser-pane content is unreachable from the
     /// DOM — see the doc comment on `AppState::browser_pane_zoom`).
+    #[cfg(target_os = "windows")]
     const ZOOM_STEP: f64 = 0.05;
 
+    #[cfg(target_os = "windows")]
     pub fn zoom_in(&self, block_id: &str, state: &Arc<AppState>) {
         self.step_zoom(block_id, state, Self::ZOOM_STEP);
     }
+    #[cfg(target_os = "windows")]
     pub fn zoom_out(&self, block_id: &str, state: &Arc<AppState>) {
         self.step_zoom(block_id, state, -Self::ZOOM_STEP);
     }
 
+    #[cfg(target_os = "windows")]
     fn step_zoom(&self, block_id: &str, state: &Arc<AppState>, delta: f64) {
         let new_factor = {
             let mut map = state.browser_pane_zoom.lock();
@@ -79,6 +83,7 @@ impl BrowserPaneManager {
 /// `BrowserPaneCloseOps` exists as its own trait (see that trait's doc
 /// comment in `mod.rs`): the CEF/HWND side can't be unit-tested meaningfully,
 /// but the logic feeding it can.
+#[cfg(any(target_os = "windows", test))]
 fn next_zoom_factor(current: f64, delta: f64) -> f64 {
     (current + delta).clamp(0.5, 2.0)
 }

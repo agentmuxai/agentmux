@@ -12,48 +12,6 @@ use super::{DispatchOutput, HostEvent, HostLifecyclePhase, HostState, RegisterRe
 
 // ── H.1 — pane lifecycle ─────────────────────────────────────────────────
 
-pub(super) fn handle_enqueue_browser_pane_create(
-    state: &mut HostState,
-    block_id: String,
-    label: String,
-) -> DispatchOutput {
-    if state.lifecycle == HostLifecyclePhase::ShuttingDown {
-        return emit_error(state, format!("enqueue_browser_pane_create: shutting down (block_id={})", block_id));
-    }
-    if state.browser_panes.contains_key(&block_id) {
-        return emit_error(state, format!("enqueue_browser_pane_create: block_id {} already has a pane", block_id));
-    }
-    state.browser_panes.insert(
-        block_id.clone(),
-        BrowserPaneEntry {
-            block_id: block_id.clone(),
-            label: label.clone(),
-            lifecycle: BrowserPaneLifecycle::Live,
-            // Legacy path (no production caller); window unknown here.
-            window_label: String::new(),
-        },
-    );
-    let v = state.bump_version();
-    DispatchOutput {
-        events: vec![HostEvent::BrowserPaneCreateRequested { block_id, label, version: v }],
-        ..Default::default()
-    }
-}
-
-pub(super) fn handle_complete_browser_pane_create(state: &mut HostState, block_id: String) -> DispatchOutput {
-    let entry = match state.browser_panes.get(&block_id) {
-        Some(e) => e.clone(),
-        None => return DispatchOutput::default(), // late callback for already-removed pane; idempotent no-op
-    };
-    // Already Live by EnqueueBrowserPaneCreate's invariant; this is a no-op
-    // confirmation event for observers.
-    let v = state.bump_version();
-    DispatchOutput {
-        events: vec![HostEvent::BrowserPaneLive { block_id, label: entry.label, version: v }],
-        ..Default::default()
-    }
-}
-
 pub(super) fn handle_enqueue_browser_pane_close(state: &mut HostState, block_id: String) -> DispatchOutput {
     let entry = match state.browser_panes.get_mut(&block_id) {
         Some(e) => e,
@@ -217,19 +175,6 @@ pub(super) fn handle_complete_browser_pane_close(state: &mut HostState, block_id
     DispatchOutput {
         events: vec![HostEvent::BrowserPaneClosed { block_id, version: v }],
         pending_browser_pane_create_to_replay: replay,
-        ..Default::default()
-    }
-}
-
-pub(super) fn handle_abort_browser_pane_create(
-    state: &mut HostState,
-    block_id: String,
-    reason: String,
-) -> DispatchOutput {
-    state.browser_panes.remove(&block_id);
-    let v = state.bump_version();
-    DispatchOutput {
-        events: vec![HostEvent::BrowserPaneCreationFailed { block_id, reason, version: v }],
         ..Default::default()
     }
 }

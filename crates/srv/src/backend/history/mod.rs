@@ -1685,7 +1685,7 @@ mod tests {
         let registry =
             crate::registry::Registry::open(tmp.path().join("agents").join("registry")).unwrap();
 
-        let mut rec = |instance_id: &str, name: &str, def: &str, dir: &str| {
+        let rec = |instance_id: &str, name: &str, def: &str, dir: &str| {
             registry
                 .upsert(&crate::registry::NamedAgentRecord {
                     schema_version: 3,
@@ -1887,7 +1887,7 @@ mod tests {
         // A new session appears on disk after that first population.
         write_session(&dir, "second");
 
-        let (stale, total_stale, _) =
+        let (_, total_stale, _) =
             service.sessions_for_agent(&store, "agent-1", 0, 10, "created_at", "desc", false).unwrap();
         assert_eq!(total_stale, 1, "force_refresh=false must NOT see the new session (index already non-empty)");
 

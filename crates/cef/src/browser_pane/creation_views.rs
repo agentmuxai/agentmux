@@ -63,8 +63,10 @@ use std::sync::Arc;
 
 use cef::{
     browser_view_create, BrowserSettings, CefString, DockingMode, ImplBrowser, ImplBrowserHost,
-    ImplOverlayController, ImplPanel, ImplView, ImplWindow, Point, Rect, RuntimeStyle, Size, View,
+    ImplOverlayController, ImplView, ImplWindow, Rect, RuntimeStyle, View,
 };
+#[cfg(not(target_os = "macos"))]
+use cef::{ImplPanel, Point, Size};
 
 use crate::state::AppState;
 
@@ -383,7 +385,7 @@ pub fn create_browser_pane_view(
     //     causing the "black pane + frozen UI" bug. Explicitly refocus the main
     //     window browser here; the user can then click inside the pane to focus it.
     if let Some(main_browser) = state.get_browser(&window_label) {
-        if let Some(mut host) = main_browser.host() {
+        if let Some(host) = main_browser.host() {
             host.set_focus(1);
             tracing::info!(
                 window_label = %window_label,
@@ -615,7 +617,7 @@ pub fn detach_browser_pane_view(state: &Arc<AppState>, label: &str) {
     #[cfg(not(target_os = "windows"))]
     state.browser_pane_physical_rects.lock().remove(label);
     crate::browser_panes::bounds::note_layout_base(label, None);
-    let Some((window_label, controller)) = entry else {
+    let Some((_, controller)) = entry else {
         tracing::debug!(
             label = %label,
             "[browser-pane] views: detach requested but no OverlayController found"
@@ -643,7 +645,7 @@ pub fn detach_browser_pane_view(state: &Arc<AppState>, label: &str) {
     //     destroying synchronously is safe.
     let live_host = state
         .get_browser(label)
-        .and_then(|mut b| b.host());
+        .and_then(|b| b.host());
 
     if let Some(host) = live_host {
         state

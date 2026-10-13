@@ -491,7 +491,6 @@ fn deliver_agent_message_routes_to_the_app_server_controller_not_pty() {
     register_controller(
         block_id,
         Arc::new(app_server_controller::AppServerController::new(
-            "tab-jekt".to_string(),
             block_id.to_string(),
             None,
             None,

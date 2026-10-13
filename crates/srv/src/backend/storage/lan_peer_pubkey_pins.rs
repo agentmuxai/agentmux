@@ -35,6 +35,7 @@ use agentmux_common::time::now_secs;
 
 impl Store {
     /// Look up the pinned public key for a remote agent_id, if one exists.
+    #[cfg(test)]
     pub fn lan_peer_pubkey_pin_load(&self, agent_id: &str) -> Result<Option<String>, StoreError> {
         let key = agent_id.to_lowercase();
         let conn = self.conn.lock().unwrap();

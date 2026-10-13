@@ -228,7 +228,6 @@ impl Jobs {
                     match result {
                         Ok(Ok(())) => Ending::Done,
                         Ok(Err(HostStop::Canceled)) => Ending::Canceled,
-                        Ok(Err(HostStop::Failed(e))) => Ending::Failed(e),
                         Err(_) => {
                             tracing::error!(op_id = %id, "fs.op: a host transfer panicked");
                             Ending::Failed("The operation stopped unexpectedly.".to_string())
@@ -319,8 +318,6 @@ impl Jobs {
 pub(super) enum HostStop {
     /// Canceled, or nobody answered a conflict (the job says why).
     Canceled,
-    /// It couldn't go on at all.
-    Failed(String),
 }
 
 /// A host transfer's handle on its op: the same progress, failures, cancel

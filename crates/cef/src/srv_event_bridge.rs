@@ -15,6 +15,8 @@
 // Filtering: pool windows (`window-pool-*`) and browser-pane child
 // HWNDs (`browser-pane-*`) are skipped — they have no UI.
 
+#![cfg(target_os = "windows")]
+
 use std::sync::Arc;
 
 use agentmux_common::ipc::Event;

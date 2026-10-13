@@ -104,25 +104,13 @@ pub struct Entry {
     pub path: Option<String>,
 }
 
-impl Entry {
-    /// What this entry adds to a delivery, in bytes.
-    pub fn size_bytes(&self) -> usize {
-        self.text.len()
-    }
-
-    /// The same estimate the pane's notice uses (`estimateTokenCount`): one
-    /// token per four characters, rounded up.
-    pub fn estimated_tokens(&self) -> usize {
-        self.text.chars().count().div_ceil(4)
-    }
-}
-
 /// The text delivered to the model: the Global Memory block (its sections
 /// joined exactly as the startup file joins them), the Personal Memory files,
 /// and — after a compaction — AgentMux's running summary, which the provider's
 /// own compaction summary can't drop.
 ///
 /// `None` when there is nothing to deliver.
+#[cfg(test)]
 pub fn compose(entries: &[Entry], reason: Reason, running_summary: Option<&str>) -> Option<String> {
     compose_items(entries, reason, running_summary).map(|c| c.text)
 }
@@ -163,6 +151,7 @@ impl Tracked {
 
 /// [`compose`], also recording where each item landed so the notice can say
 /// which items a cut delivery carried whole, in part, or not at all.
+#[cfg(test)]
 pub fn compose_items(entries: &[Entry], reason: Reason, running_summary: Option<&str>) -> Option<Composed> {
     compose_items_with(entries, reason, running_summary, false)
 }
@@ -345,6 +334,7 @@ impl Delivered {
 /// one falls in the second half of a part, else mid-line. More than
 /// `max_parts` parts: the text is cut, and the last part ends with a note
 /// giving how much was left out.
+#[cfg(test)]
 pub fn split_into_parts(text: &str, max_chars: usize, max_parts: usize) -> Vec<String> {
     split_into_parts_counted(text, max_chars, max_parts).0
 }
@@ -558,13 +548,6 @@ mod tests {
         assert!(parts.iter().all(|p| p.chars().count() <= MAX_PART_CHARS));
         let rebuilt: String = parts.iter().map(|p| p.split_once('\n').unwrap().1).collect();
         assert_eq!(rebuilt, text);
-    }
-
-    #[test]
-    fn entry_sizes_match_what_the_notice_shows() {
-        let e = entry("a", Tier::Personal, "12345");
-        assert_eq!(e.size_bytes(), 5);
-        assert_eq!(e.estimated_tokens(), 2);
     }
 
     /// The fallback's wire format is the frontend's `composeReinjectionMessage`

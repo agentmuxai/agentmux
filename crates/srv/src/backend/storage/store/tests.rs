@@ -890,20 +890,6 @@
         assert!(store.instance_get("inst1").unwrap().is_none());
     }
 
-    #[test]
-    fn test_instance_status_enum_roundtrip() {
-        for s in &[
-            InstanceStatus::Running,
-            InstanceStatus::Paused,
-            InstanceStatus::Stopped,
-            InstanceStatus::Crashed,
-            InstanceStatus::Detached,
-        ] {
-            assert_eq!(Some(*s), InstanceStatus::parse(s.as_str()));
-        }
-        assert_eq!(None, InstanceStatus::parse("nonsense"));
-    }
-
     // ── v7 — Bundle accessors ─────────────────────────────────────
 
     #[test]

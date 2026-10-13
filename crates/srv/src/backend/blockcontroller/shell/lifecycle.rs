@@ -26,9 +26,8 @@ use super::controller::KILL_GRACE_SECS;
 use super::controller::{ShellController, SHELL_INPUT_CH_SIZE};
 use super::file_ops::handle_append_block_file;
 use super::pty::{
-    detect_local_shell_path_windows, FLUSHER_BARRIER_TIMEOUT, FLUSHER_DRAIN_TIMEOUT,
-    FLUSHER_EOF_GRACE, PTY_CHANNEL_CAPACITY,
-    PTY_COALESCE_MAX_BYTES, PTY_READ_BUF_SIZE,
+    detect_local_shell_path_windows, FLUSHER_BARRIER_TIMEOUT, FLUSHER_EOF_GRACE,
+    PTY_CHANNEL_CAPACITY, PTY_COALESCE_MAX_BYTES, PTY_READ_BUF_SIZE,
 };
 use super::translation::accumulate_and_translate;
 use crate::backend::obj::{self, MetaMapType};

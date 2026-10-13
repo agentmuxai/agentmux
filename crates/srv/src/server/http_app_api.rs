@@ -117,7 +117,7 @@ pub(super) async fn handle_agent_memory_write(
         actor::ActorSite::MemoryWrite,
         Some(&req.agent_id),
     );
-    let mut detail_str = String::new();
+    let detail_str;
     let provenance = if let Some(p) = req.provenance.as_ref() {
         detail_str = p.detail.to_string();
         Some(app_api::MemoryWriteProvenance { source: &p.source, detail: &detail_str })
@@ -376,7 +376,7 @@ pub(super) async fn handle_agent_globalmemory_write(
         actor::ActorSite::GlobalMemoryWrite,
         Some(&req.agent_id),
     );
-    let mut detail_str = String::new();
+    let detail_str;
     let provenance = if let Some(p) = req.provenance.as_ref() {
         detail_str = p.detail.to_string();
         Some(app_api::GlobalMemoryWriteProvenance { source: &p.source, detail: &detail_str })

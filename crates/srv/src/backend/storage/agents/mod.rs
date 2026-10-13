@@ -269,16 +269,6 @@ impl InstanceStatus {
             Self::Detached => "detached",
         }
     }
-    pub fn parse(s: &str) -> Option<Self> {
-        match s {
-            "running" => Some(Self::Running),
-            "paused" => Some(Self::Paused),
-            "stopped" => Some(Self::Stopped),
-            "crashed" => Some(Self::Crashed),
-            "detached" => Some(Self::Detached),
-            _ => None,
-        }
-    }
 }
 
 /// Partial-update payload for [`Store::instance_update_partial`]. Each

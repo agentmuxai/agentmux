@@ -19,9 +19,11 @@ use std::sync::{Arc, Mutex};
 
 use tokio::io::{AsyncBufReadExt, BufReader};
 
+#[cfg(unix)]
+use crate::backend::blockcontroller::DEFAULT_GRACEFUL_KILL_WAIT_MS;
 use crate::backend::blockcontroller::{
     core, publish_controller_status,
-    session_stats, shell, DEFAULT_GRACEFUL_KILL_WAIT_MS, STATUS_DONE, STATUS_RUNNING,
+    session_stats, shell, STATUS_DONE, STATUS_RUNNING,
 };
 use crate::backend::mps;
 
@@ -189,7 +191,7 @@ impl SubprocessController {
             // map_err below takes the inner lock that publish_status needs.
             self.health_monitor.set_active_turn(false);
         }
-        let mut child = spawned.map_err(|e| {
+        let child = spawned.map_err(|e| {
             let mut inner = self.inner.lock().unwrap();
             Self::set_status(&mut inner, STATUS_DONE);
             inner.proc_exit_code = -1;

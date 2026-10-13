@@ -531,6 +531,7 @@ impl Store {
 
     /// [`Self::bundle_upsert_system_unobserved`], then tell the Global Memory record's
     /// observer (`GlobalMemoryChange`).
+    #[cfg(test)]
     pub fn bundle_upsert_system(&self, memory: &Bundle) -> Result<(), StoreError> {
         let r = self.bundle_upsert_system_unobserved(memory);
         if r.is_ok() {
@@ -546,6 +547,7 @@ impl Store {
     /// `is_blank`/`is_global`/`is_system` are hardcoded (not read from
     /// `memory`) so this method can never produce anything other than a
     /// well-formed system row regardless of what the caller passed in.
+    #[cfg(test)]
     fn bundle_upsert_system_unobserved(&self, memory: &Bundle) -> Result<(), StoreError> {
         let conn = self.conn.lock().unwrap();
         if self.bundle_is_system(&conn, &memory.id)? == Some(false) {
@@ -594,6 +596,7 @@ impl Store {
 
     /// [`Self::bundle_upsert_system_with_version_unobserved`], then tell the Global Memory record's
     /// observer (`GlobalMemoryChange`).
+    #[cfg(test)]
     pub fn bundle_upsert_system_with_version(&self, memory: &Bundle, written_by: &str, source: &str, source_detail: &str) -> Result<BundleVersion, StoreError> {
         let r = self.bundle_upsert_system_with_version_unobserved(memory, written_by, source, source_detail);
         if r.is_ok() {
@@ -616,6 +619,7 @@ impl Store {
     /// Shares `bundle_upsert_system`'s exact guard and SQL, duplicated for
     /// the same non-reentrant-`Mutex` reason `bundle_upsert_with_version`
     /// documents on itself.
+    #[cfg(test)]
     fn bundle_upsert_system_with_version_unobserved(
         &self,
         memory: &Bundle,

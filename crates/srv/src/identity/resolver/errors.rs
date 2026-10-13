@@ -125,6 +125,7 @@ pub enum ResolverError {
     SecretsManagerUnsupported,
 
     #[error("PlaintextDev secrets are disabled in release builds")]
+    #[cfg(not(debug_assertions))]
     PlaintextDevDisabledInRelease,
 
     /// `OAuthConfigDir` is a filesystem pointer, not a secret string —

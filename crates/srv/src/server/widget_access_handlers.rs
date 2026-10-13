@@ -65,7 +65,7 @@ fn packages() -> Vec<WidgetPackageInfo> {
 
 pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     engine.register_typed("widgets.session", |req: WidgetSessionReq, _ctx| async move {
-        let token = widget_access::sessions().open(&packages(), &req.id, &req.hash, &req.blockid).map_err(|e| e.to_rpc())?;
+        let token = widget_access::sessions().open(&packages(), &req.id, &req.hash).map_err(|e| e.to_rpc())?;
         Ok(WidgetSessionResult { token })
     });
 
@@ -243,7 +243,7 @@ mod tests {
     async fn srv_refuses_each_call_without_its_grant() {
         let st = crate::server::tests::test_state();
         let none = vec![pkg(&[])];
-        let token = widget_access::sessions().open(&none, "acme.calls", "h1", "b1").unwrap();
+        let token = widget_access::sessions().open(&none, "acme.calls", "h1").unwrap();
         let cases = [
             ("storage.get", json!({ "key": "k" }), "storage"),
             ("storage.set", json!({ "key": "k", "value": 1 }), "storage"),

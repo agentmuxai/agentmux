@@ -55,11 +55,6 @@ struct StarterSkill {
 /// `crates/srv/src/config/starter-skills.json`.
 const STARTER_SKILLS_JSON: &str = include_str!("../config/starter-skills.json");
 
-/// Report returned after a seed attempt.
-pub struct SkillSeedReport {
-    pub created: usize,
-}
-
 /// Deterministic row id for a starter skill, derived from its `trigger`.
 ///
 /// A bare name match is not a safe way to recognize "the same skill" across
@@ -107,6 +102,7 @@ pub(crate) fn starter_skill_id(trigger: &str) -> Uuid {
 /// `is_global = 1` with the six starters. Only a recognized starter has a
 /// canonical id to converge onto; everything else keeps whatever id survives
 /// the migration's ordinary first-wins dedup.
+#[cfg(test)]
 pub(crate) fn starter_skill_trigger_for_name(name: &str) -> Option<String> {
     let manifest: Vec<StarterSkill> = serde_json::from_str(STARTER_SKILLS_JSON).ok()?;
     manifest.into_iter().find(|s| s.name == name).map(|s| s.trigger)
@@ -190,7 +186,7 @@ pub(crate) fn any_starter_skill_name_exists(mstore: &Arc<Store>) -> Result<bool,
 /// migration returns `Err`, since it's never marked applied) would hit
 /// `skill_upsert_unique_global`'s name-uniqueness rejection on the skills
 /// already stranded from the failed attempt (reagent P2, PR #2141 round 1).
-pub(crate) fn seed_starter_skills(mstore: &Arc<Store>) -> Result<SkillSeedReport, StoreError> {
+pub(crate) fn seed_starter_skills(mstore: &Arc<Store>) -> Result<usize, StoreError> {
     let manifest: Vec<StarterSkill> = serde_json::from_str(STARTER_SKILLS_JSON)
         .map_err(|e| StoreError::Other(format!("skill seed: parse manifest: {e}")))?;
     reject_duplicate_triggers(&manifest)?;
@@ -223,7 +219,7 @@ pub(crate) fn seed_starter_skills(mstore: &Arc<Store>) -> Result<SkillSeedReport
         inserted_ids.push(skill.id);
     }
 
-    Ok(SkillSeedReport { created: inserted_ids.len() })
+    Ok(inserted_ids.len())
 }
 
 #[cfg(test)]
@@ -315,9 +311,9 @@ mod tests {
         let mstore = Arc::new(Store::open_in_memory().unwrap());
         assert!(mstore.skill_list_global(&mstore).unwrap().is_empty());
 
-        let report = seed_starter_skills(&mstore).unwrap();
+        let created = seed_starter_skills(&mstore).unwrap();
 
-        assert_eq!(report.created, 6);
+        assert_eq!(created, 6);
         let after = mstore.skill_list_global(&mstore).unwrap();
         assert_eq!(after.len(), 6, "all six starter skills should be seeded");
         assert!(after.iter().all(|item| item.skill.is_global));
