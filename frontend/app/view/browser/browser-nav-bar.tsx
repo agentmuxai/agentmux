@@ -96,6 +96,17 @@ export function BrowserNavBar(props: {
         setAddressBar(value);
         if (addressInputRef) addressInputRef.value = value;
     };
+    let goButtonRef: HTMLButtonElement | undefined;
+    // Focus left the address bar and the Go button (which submits the choice,
+    // so moving between the two keeps it). A suggestion previewed with the
+    // arrow keys or completed inline was never opened: show the page's own
+    // address again.
+    const abandonSuggestions = () => {
+        if (addressBar() !== typed() && autocomplete.matches().length > 0) {
+            showInInput(model.urlAtom() || typed());
+        }
+        autocomplete.close();
+    };
 
     // Inline completion: when the engine's default match completes what was
     // typed ("git" -> "github.com"), show the rest selected after the caret,
@@ -612,14 +623,8 @@ export function BrowserNavBar(props: {
                             getApi().reclaimWindowFocus(windowLabel).catch(() => {});
                         }}
                         onBlur={(e) => {
-                            // Leaving with a suggestion previewed (arrow keys)
-                            // or completed inline: that text was never opened,
-                            // so show the page's own address again.
-                            if (addressBar() !== typed() && autocomplete.matches().length > 0) {
-                                showInInput(model.urlAtom() || typed());
-                            }
-                            autocomplete.close();
                             const next = e.relatedTarget as Element | null;
+                            if (next !== goButtonRef) abandonSuggestions();
                             // Microtask-deferred so we can see what landed focus AFTER the blur.
                             queueMicrotask(() => {
                                 diag(`input-blur value=${JSON.stringify(addressBar())} relatedTarget=${tagElement(next)} now-active=${tagElement(document.activeElement)}`);
@@ -636,11 +641,15 @@ export function BrowserNavBar(props: {
                     </Show>
                 </div>
                 <button
+                    ref={goButtonRef}
                     class="browser-nav-btn browser-go-btn"
-                    // Keep focus in the address bar: a blur would close the
-                    // suggestions, and with them the highlighted choice, before
-                    // this click submits it.
+                    // Keep focus in the address bar on a click. Reaching Go with
+                    // Tab keeps the choice too (the address bar's blur above);
+                    // leaving Go for anywhere but the address bar drops it.
                     onMouseDown={(e) => e.preventDefault()}
+                    onBlur={(e) => {
+                        if (e.relatedTarget !== addressInputRef) abandonSuggestions();
+                    }}
                     onClick={handleNavigate}
                     title="Go"
                 >
