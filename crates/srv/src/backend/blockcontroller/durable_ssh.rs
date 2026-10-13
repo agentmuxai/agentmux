@@ -750,14 +750,6 @@ impl Run {
                         // installing it failed the same way.
                         let why = if installed_once {
                             format!("it still isn't runnable after installing it ({})", helper_path())
-                        } else if crate::backend::remote::helper_consent::plain_instead(&self.conn)
-                            || (self.by_default && crate::backend::remote::helper_consent::not_installed(&self.conn))
-                        {
-                            // Another pane's question on this host was just
-                            // answered Not now, or its try failed (question
-                            // closed, install failed): no second question or
-                            // install until srv restarts.
-                            "it didn't install on this host earlier".to_string()
                         } else {
                             installed_once = true;
                             match self.install_helper().await {
@@ -1173,7 +1165,10 @@ impl Run {
     /// saying so in the pane, once the user has said yes
     /// (`helper_consent`). `Err` says why not.
     async fn install_helper(&self) -> Result<(), String> {
-        crate::backend::remote::helper_consent::allow_install(&self.conn, Some(&self.block_id)).await?;
+        // After another pane's Not now, or (durable only by default) its
+        // failed try, this asks nothing and installs nothing (`Need`).
+        let need = crate::backend::remote::helper_consent::Need::Terminal { by_default: self.by_default };
+        crate::backend::remote::helper_consent::allow_install(&self.conn, Some(&self.block_id), need).await?;
         crate::backend::remote::helper_install::ensure(&self.host, &self.conn, &self.session, |size| {
             self.note_owned(format!(
                 "Installing AgentMux's helper on {} ({} KB, in ~/.agentmux-remote) so this pane can stay alive…",
