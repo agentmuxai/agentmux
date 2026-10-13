@@ -1,5 +1,20 @@
 {
     "$schema": "https://unpkg.com/knip@5/schema.json",
+    "entry": [
+        "scripts/**/*.{js,mjs,cjs}",
+        "tools/**/*.{js,mjs}",
+        "sdk/**/*.{js,mjs,ts}",
+        "crates/**/*.js"
+    ],
+    "ignore": [
+        "frontend/types/rpc/**",
+        "public/**",
+        "docs/examples/**",
+        "sdk/**/*.css",
+        "**/*.darwin.*",
+        "**/*.linux.*",
+        "**/*.win32.scss"
+    ],
     "ignoreDependencies": [
         "@emnapi/core",
         "@emnapi/runtime",

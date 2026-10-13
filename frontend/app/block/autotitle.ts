@@ -257,8 +257,6 @@ export function generateAutoTitle(block: Block, settingsEnv?: Record<string, str
             return "Help";
         case "sysinfo":
             return "System Info";
-        case "tsunami":
-            return "Tsunami";
         default:
             return generateDefaultTitle(block, view);
     }
