@@ -14,7 +14,6 @@ export const MEMORY_VIEW = "memory";
 export const CONNECTORS_SECTION_KEY = "connectors:section";
 export const MEMORY_SECTION_KEY = "memory:section";
 
-
 export type ConnectorsSection = "accounts" | "mcp" | "remotes";
 export type MemorySection = "global" | "personal" | "skills" | "bundles";
 

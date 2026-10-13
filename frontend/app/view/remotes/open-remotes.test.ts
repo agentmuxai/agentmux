@@ -61,7 +61,6 @@ describe("openRemotesInPane", () => {
         await openRemotesInPane("term-1");
         expect(h.setBlockMeta).toHaveBeenCalledWith("conn-1", { "connectors:section": "remotes" });
     });
-
 });
 
 describe("remoteSettingsMenuItems", () => {

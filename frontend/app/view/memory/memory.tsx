@@ -48,7 +48,6 @@ const MEMORY_SPEC: SectionPaneSpec<MemorySection> = {
 export const memoryPaneTab: PaneTabManifest = {
     apiVersion: 1,
     view: MEMORY_VIEW,
-    // Its former id, still in saved blocks and layouts.
     label: "Memory",
     icon: "brain",
     defaultHue: 150,

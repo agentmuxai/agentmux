@@ -23,12 +23,10 @@
 //! srv's own loaders already treat it as unreadable; the block and snapshot rewrite fails the
 //! migration (retried on the next boot) when the store can't be read.
 //!
-//! The mapping below is a frozen copy of `armoryTarget` / `armoryMigrationPatch`
-//! (frontend/app/view/section-pane/panes.ts), the Remotes manifest's patch
-//! (frontend/app/view/remotes/remotes.tsx), the Knowledge alias and section-key fallback
-//! (frontend/app/view/memory/memory.tsx), `RENAMED_PINS` (frontend/app/window/action-widgets-config.ts)
-//! and `RENAMED_WIDGETS` / `retarget_remotes` (crates/srv/src/backend/user_widgets.rs) as of
-//! 0.59.21, the release these shims are removed after.
+//! The mapping below is a frozen copy, as of 0.59.21, of the shims removed alongside it: the
+//! frontend's `armoryTarget` / `armoryMigrationPatch`, the Remotes legacy manifest, Memory's
+//! Knowledge alias and section-key fallback, `RENAMED_PINS`, and srv's `RENAMED_WIDGETS` /
+//! `retarget_remotes`.
 
 use std::path::Path;
 use std::sync::Arc;
