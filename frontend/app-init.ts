@@ -42,6 +42,7 @@ import { setKeyUtilPlatform } from "@/util/keyutil";
 import { render } from "solid-js/web";
 import { benchMark, benchDump } from "@/util/startup-bench";
 import { ContextMenuModel } from "@/app/store/contextmenu";
+import { forgetWindowId, previousWindowId, rememberWindowId } from "@/app/init/reload-window-id";
 import { isHostApp } from "@/app/init/host-detect";
 import { failStartup, showStartupError, StartupFailureHandled } from "@/app/init/error-display";
 import { describeError, formatDescribedError } from "@/app/errors/error-report";
@@ -321,12 +322,15 @@ async function initHostNewWindow(seedView?: string | null, seedMeta?: Record<str
                 currentWindowLabel(),
                 false,
                 seedView ?? undefined,
-                seedMeta ?? undefined
+                seedMeta ?? undefined,
+                // A reload keeps this window's own theme and opacity.
+                previousWindowId()
             ),
             RPC_TIMEOUT,
             "CreateWindow"
         );
         tlog("CreateWindow", t);
+        rememberWindowId(newWindow.oid);
 
         // Register label→window_id with the host NOW, not at the end of
         // initMux (which also registers — idempotently — after render):
@@ -521,6 +525,8 @@ async function initAppInner() {
         // initHostNewWindow branches on workspaceId presence automatically.
         const { isPoolMode, awaitPoolPromote, isPanePoolMode, awaitPanePoolPromote, markPoolWaiting } = await import("@/app/init/pool");
         if (isPoolMode()) {
+            // Whatever window this renderer was before, it's about to be another.
+            forgetWindowId();
             markPoolWaiting("window");
             getApi().sendLog("[initApp] pool mode — deferring init until pool:promote or pool:new-window");
             const { initialView, initialMeta } = await awaitPoolPromote();
@@ -531,6 +537,7 @@ async function initAppInner() {
             // Window" on a widget opens with ONLY that widget.
             await initHostNewWindow(initialView, initialMeta);
         } else if (isPanePoolMode()) {
+            forgetWindowId();
             markPoolWaiting("pane");
             // Pane pool: wait for pool:pane-promote which injects floatingPaneId+workspaceId
             // into the URL, then initHostNewWindow reattaches and wave renders FloatingPaneWorkspace.

@@ -321,6 +321,38 @@ mod tests {
         assert_eq!(meta(&state, &new, "window:theme"), Some("nord".into()));
     }
 
+    /// A reloaded window other than the main one gets a new row; passing the
+    /// row it had before (CreateWindow arg 6) brings its own theme and
+    /// opacity across.
+    #[tokio::test]
+    async fn a_reload_keeps_the_windows_own_appearance() {
+        let state = test_state();
+        let before = create(&state, "inherit-reload-a").await;
+        set_meta(&state, &before, serde_json::json!({ "window:theme": "nord", "window:opacity": 0.5 })).await;
+
+        let ret = handle_window_service(
+            &state,
+            &call(
+                "CreateWindow",
+                vec![
+                    serde_json::Value::Null,
+                    "".into(),
+                    "inherit-reload-a".into(),
+                    serde_json::Value::Null,
+                    serde_json::Value::Null,
+                    serde_json::Value::Null,
+                    before.clone().into(),
+                ],
+            ),
+        )
+        .await;
+        assert!(ret.success, "CreateWindow failed: {:?}", ret.error);
+        let after = ret.data.as_ref().and_then(|d| d.get("oid")).and_then(|v| v.as_str()).unwrap().to_string();
+        assert_ne!(after, before);
+        assert_eq!(meta(&state, &after, "window:theme"), Some("nord".into()));
+        assert_eq!(meta(&state, &after, "window:opacity"), Some(serde_json::json!(0.5)));
+    }
+
     /// A source with no appearance of its own copies nothing.
     #[tokio::test]
     async fn a_default_source_copies_nothing() {

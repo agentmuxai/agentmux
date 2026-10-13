@@ -119,7 +119,13 @@ The hamburger stops writing settings. Its submenu keeps its 100%–35% steps; th
 
 ### 4.5 Settings → Appearance → Opacity
 
-It becomes the channel default: the value windows without one of their own use. Its label and description say so ("Default opacity for windows"). See §8 Q1.
+It becomes the channel default: the value windows without one of their own use. Its description says so. As before, the row shows only while **Window transparency** is on, since the default applies only to a see-through channel; a window's own opacity needs no switch. See §8 Q1.
+
+### 4.6 A reload keeps the window's own values
+
+The main window reuses its srv row when it reloads, but any other window (opened by New Window, a tear-off, a widget or a layout) creates a new row each time its page loads, including a reload. Its own theme and opacity would stay on the old row. Found by the Linux test run on #4798.
+
+The renderer remembers its row id in `sessionStorage`, which survives a reload, and passes it to `CreateWindow` as the optional `previousWindowId` (arg 6). srv copies the old row's `window:theme` and `window:opacity` onto the new row before it returns, so the window renders with them. A pool renderer keeps its `sessionStorage` when it is demoted and promoted again for a different window, so the pool's boot path forgets the id (`app/init/reload-window-id.ts`). Reusing the row on reload, as the main window does, would be the fuller fix; it is out of scope here.
 
 ## 5. Design: theme
 
