@@ -44,6 +44,39 @@ export function reachLabel(server: McpServerCatalogItem): string {
     return `${server.bound_count} ${server.bound_count === 1 ? "agent" : "agents"}`;
 }
 
+/** A card's subtitle: the transport and what it runs or reaches ("stdio ·
+ *  uvx", "http · mcp.example.com/sse"). Only the command's name, or the
+ *  URL's host and path: arguments, env, headers and a URL's query or
+ *  user info can hold secrets. */
+export function connectionSummary(transport: string, config: string): string {
+    let target = "";
+    try {
+        const c = JSON.parse(config || "{}") as { command?: unknown; url?: unknown };
+        if (typeof c?.command === "string") target = commandName(c.command);
+        else if (typeof c?.url === "string") target = urlSummary(c.url);
+    } catch {
+        // Not JSON: the transport alone.
+    }
+    return [transport || "stdio", target].filter(Boolean).join(" · ");
+}
+
+function commandName(command: string): string {
+    // Up to the first flag or assignment, then the program's file name.
+    const cmd = command.trim().split(/\s+(?=-|\S*=)/)[0];
+    const isPath = /^([a-zA-Z]:)?[\\/]/.test(cmd);
+    const name = cmd.split(/[\\/]/).pop() || cmd;
+    return isPath ? name : name.split(/\s+/)[0];
+}
+
+function urlSummary(url: string): string {
+    try {
+        const u = new URL(url);
+        return u.host + (u.pathname === "/" ? "" : u.pathname);
+    } catch {
+        return "";
+    }
+}
+
 export class McpCatalogModel {
     // Cross-window reactivity (SPEC_ARMORY_REACTIVE_UPDATES_2026_09_02.md) —
     // a bind/unbind/add/edit made elsewhere refreshes Connectors →
@@ -79,11 +112,6 @@ export class McpCatalogModel {
     private _bindAgentId = createSignal<string>("");
     bindAgentIdAtom: Accessor<string> = this._bindAgentId[0];
     setBindAgentId = this._bindAgentId[1];
-
-    // "+ Browse catalog" picker (SPEC_MCP_INTEGRATION_PARITY_ABLETON_PILOT_2026_07_08.md §4.6).
-    private _catalogPickerOpen = createSignal<boolean>(false);
-    catalogPickerOpenAtom: Accessor<boolean> = this._catalogPickerOpen[0];
-    setCatalogPickerOpen = this._catalogPickerOpen[1];
 
     selectedAtom: Accessor<McpServerCatalogItem | null>;
 
@@ -157,16 +185,7 @@ export class McpCatalogModel {
         this.setSelectedId(null);
     }
 
-    openCatalogPicker(): void {
-        this.setError(null);
-        this.setCatalogPickerOpen(true);
-    }
-
-    closeCatalogPicker(): void {
-        this.setCatalogPickerOpen(false);
-    }
-
-    /** Catalog entry pick — pre-fill the normal draft form, name included
+    /** A preset chip in the Add gallery — pre-fill the normal draft form, name included
      *  (unlike a from-scratch draft, the name is meaningful and rarely
      *  needs editing) — and drop straight into it, same form as "+ New". */
     startFromCatalog(entry: McpPreloadEntry): void {
@@ -178,7 +197,6 @@ export class McpCatalogModel {
             transport: entry.transport,
             config: JSON.stringify(entry.config, null, 2),
         });
-        this.setCatalogPickerOpen(false);
     }
 
     startEdit(server: McpServer): void {
@@ -222,6 +240,24 @@ export class McpCatalogModel {
         } finally {
             this.setSaving(false);
         }
+    }
+
+    /** The agents a server is bound to, by name, for the delete
+     *  confirmation. The catalog only counts them, so each agent is asked;
+     *  one that can't be asked is left out. */
+    async boundAgentNames(server: McpServerCatalogItem): Promise<string[]> {
+        if (server.bound_count === 0) return [];
+        const names = await Promise.all(
+            this.agentsAtom().map(async (agent) => {
+                try {
+                    const list = await RpcApi.McpCatalogListForAgentCommand(TabRpcClient, { agent_id: agent.id });
+                    return list.some((s) => s.id === server.id && s.bound_to_agent) ? agent.name : null;
+                } catch {
+                    return null;
+                }
+            }),
+        );
+        return names.filter((n): n is string => n !== null).sort((a, b) => a.localeCompare(b));
     }
 
     async deleteServer(id: string): Promise<void> {
