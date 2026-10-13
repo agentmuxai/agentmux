@@ -540,182 +540,6 @@ describe("foreignDropHighlightFor", () => {
     });
 });
 
-// SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §3.6: once the tab strip
-// overflows and the user scrolls to its end, there's otherwise no space left
-// in a Pane's header to grab for "drag the whole pane" — the strip itself
-// has claimed the whole row. `reserveDragHandle` opts a strip into rendering
-// a small, non-scrolling-content spacer after the "+" that stays part of the
-// ordinary whole-pane drag region (nothing here registers a competing drag
-// handler — see PaneHeaderTabStrip.tsx for how the header's own draggable
-// treats it). It is exactly the grip's 24px slot, overflowing or not
-// (SPEC_DRAG_SPACE_AFFORDANCE_2026_10_13.md §5.2).
-describe("PaneTabStrip — reserveDragHandle (SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §3.6)", () => {
-    let roCb: (() => void) | undefined;
-    let scrollWidth = 100;
-    let clientWidth = 100;
-
-    beforeEach(() => {
-        roCb = undefined;
-        scrollWidth = 100;
-        clientWidth = 100;
-        Object.defineProperty(HTMLElement.prototype, "scrollWidth", {
-            configurable: true,
-            get() { return scrollWidth; },
-        });
-        Object.defineProperty(HTMLElement.prototype, "clientWidth", {
-            configurable: true,
-            get() { return clientWidth; },
-        });
-        (globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver = class {
-            constructor(cb: () => void) { roCb = cb; }
-            observe() {}
-            unobserve() {}
-            disconnect() {}
-        };
-    });
-
-    afterEach(() => {
-        vi.restoreAllMocks();
-    });
-
-    it("omits the drag-handle spacer entirely when reserveDragHandle is not passed", () => {
-        const { container } = render(() => (
-            <PaneTabStrip
-                tabs={TABS}
-                activeId="a"
-                getId={(t: T) => t.id}
-                getLabel={(t: T) => t.label}
-                onActivate={vi.fn()}
-                onAdd={vi.fn()}
-            />
-        ));
-        expect(container.querySelector(".pane-tab-strip-drag-handle")).toBeNull();
-    });
-
-    it("holds just the grip, overflowing or not", () => {
-        scrollWidth = 250;
-        clientWidth = 150;
-        const { container } = render(() => (
-            <PaneTabStrip
-                tabs={TABS}
-                activeId="a"
-                getId={(t: T) => t.id}
-                getLabel={(t: T) => t.label}
-                onActivate={vi.fn()}
-                onAdd={vi.fn()}
-                reserveDragHandle
-            />
-        ));
-        roCb?.();
-        const handle = container.querySelector(".pane-tab-strip-drag-handle");
-        expect(handle).not.toBeNull();
-        expect(handle!.className).toBe("pane-tab-strip-drag-handle");
-        expect(handle!.children.length).toBe(1);
-        expect(handle!.firstElementChild!.classList.contains("pane-tab-strip-grip")).toBe(true);
-    });
-
-    it("is the true last child of .pane-tab-strip-inner, after the + button", () => {
-        scrollWidth = 250;
-        clientWidth = 150;
-        const { container } = render(() => (
-            <PaneTabStrip
-                tabs={TABS}
-                activeId="a"
-                getId={(t: T) => t.id}
-                getLabel={(t: T) => t.label}
-                onActivate={vi.fn()}
-                onAdd={vi.fn()}
-                addTitle="New tab"
-                reserveDragHandle
-            />
-        ));
-        roCb?.();
-        const inner = container.querySelector(".pane-tab-strip-inner");
-        expect(inner?.lastElementChild?.classList.contains("pane-tab-strip-drag-handle")).toBe(true);
-    });
-
-    // SPEC_DRAG_SPACE_AFFORDANCE_2026_10_13.md §5.2: the grip in the spacer.
-    const renderWithGrip = (onMenu: (e: MouseEvent) => void) =>
-        render(() => (
-            <div onContextMenu={(e) => onMenu(e)}>
-                <PaneTabStrip
-                    tabs={TABS}
-                    activeId="a"
-                    getId={(t: T) => t.id}
-                    getLabel={(t: T) => t.label}
-                    onActivate={vi.fn()}
-                    onAdd={vi.fn()}
-                    reserveDragHandle
-                />
-            </div>
-        ));
-
-    it("puts a grip in the spacer: a named button that offers a menu", () => {
-        const { container } = renderWithGrip(vi.fn());
-        const grip = container.querySelector(".pane-tab-strip-drag-handle .pane-tab-strip-grip");
-        expect(grip).not.toBeNull();
-        expect(grip!.getAttribute("role")).toBe("button");
-        expect(grip!.getAttribute("tabindex")).toBe("0");
-        expect(grip!.getAttribute("aria-label")).toBe("Move pane / pane actions");
-        expect(grip!.getAttribute("aria-haspopup")).toBe("menu");
-        expect(grip!.querySelectorAll("svg circle").length).toBe(12); // a 4×3 grip
-    });
-
-    it("a pane that can't be dragged (magnified, ephemeral) keeps the menu but drops 'move'", () => {
-        const onMenu = vi.fn();
-        const { container } = render(() => (
-            <div onContextMenu={(e) => onMenu(e)}>
-                <PaneTabStrip
-                    tabs={TABS}
-                    activeId="a"
-                    getId={(t: T) => t.id}
-                    getLabel={(t: T) => t.label}
-                    onActivate={vi.fn()}
-                    onAdd={vi.fn()}
-                    reserveDragHandle
-                    dragDisabled
-                />
-            </div>
-        ));
-        const grip = container.querySelector(".pane-tab-strip-grip")!;
-        expect(grip.classList.contains("pane-tab-strip-grip--no-drag")).toBe(true);
-        expect(grip.getAttribute("aria-label")).toBe("Pane actions");
-        expect(grip.getAttribute("title")).toBe("Pane actions");
-        fireEvent.click(grip);
-        expect(onMenu).toHaveBeenCalledTimes(1);
-    });
-
-    it("clicking the grip opens the pane menu (the header's own contextmenu)", () => {
-        const onMenu = vi.fn();
-        const { container } = renderWithGrip(onMenu);
-        fireEvent.click(container.querySelector(".pane-tab-strip-grip")!);
-        expect(onMenu).toHaveBeenCalledTimes(1);
-    });
-
-    it("a click that ends a drag (a floating pane moved by its grip) doesn't open the menu", () => {
-        const onMenu = vi.fn();
-        const { container } = renderWithGrip(onMenu);
-        const grip = container.querySelector(".pane-tab-strip-grip")!;
-        fireEvent.pointerDown(grip, { screenX: 100, screenY: 100 });
-        fireEvent.click(grip, { screenX: 180, screenY: 130 });
-        expect(onMenu).not.toHaveBeenCalled();
-        // A press and release in place is a click.
-        fireEvent.pointerDown(grip, { screenX: 100, screenY: 100 });
-        fireEvent.click(grip, { screenX: 101, screenY: 100 });
-        expect(onMenu).toHaveBeenCalledTimes(1);
-    });
-
-    it("Enter and Space on the grip open the pane menu too", () => {
-        const onMenu = vi.fn();
-        const { container } = renderWithGrip(onMenu);
-        const grip = container.querySelector(".pane-tab-strip-grip")!;
-        fireEvent.keyDown(grip, { key: "Enter" });
-        fireEvent.keyDown(grip, { key: " " });
-        fireEvent.keyDown(grip, { key: "a" });
-        expect(onMenu).toHaveBeenCalledTimes(2);
-    });
-});
-
 // SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md §2.4 / Codex's review of
 // PR #2768: a plain CSS `transition: width` never fires for this box (width
 // stays `auto` the whole time — only its DOM-content-driven USED size
@@ -984,15 +808,15 @@ describe("PaneTabStrip — edge fades", () => {
 
     it("no fade while every tab fits", () => {
         const el = strip();
-        expect(el.classList.contains("pane-tab-strip--more-left")).toBe(false);
-        expect(el.classList.contains("pane-tab-strip--more-right")).toBe(false);
+        expect(el.classList.contains("has-more-left")).toBe(false);
+        expect(el.classList.contains("has-more-right")).toBe(false);
     });
 
     it("fades the right edge while more tabs are to the right", () => {
         geom = { scrollLeft: 0, clientWidth: 100, scrollWidth: 300 };
         const el = strip();
-        expect(el.classList.contains("pane-tab-strip--more-right")).toBe(true);
-        expect(el.classList.contains("pane-tab-strip--more-left")).toBe(false);
+        expect(el.classList.contains("has-more-right")).toBe(true);
+        expect(el.classList.contains("has-more-left")).toBe(false);
     });
 
     it("fades both edges in the middle, and only the left at the end", async () => {
@@ -1001,12 +825,12 @@ describe("PaneTabStrip — edge fades", () => {
         geom.scrollLeft = 100;
         fireEvent.scroll(el);
         await new Promise((r) => requestAnimationFrame(() => r(null)));
-        expect(el.classList.contains("pane-tab-strip--more-left")).toBe(true);
-        expect(el.classList.contains("pane-tab-strip--more-right")).toBe(true);
+        expect(el.classList.contains("has-more-left")).toBe(true);
+        expect(el.classList.contains("has-more-right")).toBe(true);
         geom.scrollLeft = 200;
         fireEvent.scroll(el);
         await new Promise((r) => requestAnimationFrame(() => r(null)));
-        expect(el.classList.contains("pane-tab-strip--more-left")).toBe(true);
-        expect(el.classList.contains("pane-tab-strip--more-right")).toBe(false);
+        expect(el.classList.contains("has-more-left")).toBe(true);
+        expect(el.classList.contains("has-more-right")).toBe(false);
     });
 });

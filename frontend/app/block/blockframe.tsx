@@ -2,6 +2,7 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+import { PaneGrip } from "@/app/element/PaneGrip";
 import { blockViewToIcon, blockViewToName, ConnectionButton, getBlockHeaderIcon, Input } from "@/app/block/blockutil";
 import { paneTabCapability, paneTabLabelFor } from "@/app/block/pane-tab-registry";
 import { Button } from "@/app/element/button";
@@ -838,6 +839,13 @@ function BlockFrame_Header(
                 visible={headerHovering() && tooltipHeaderElems().length > 0}
                 content={<>{tooltipHeaderElems()}</>}
             />
+            {/* The pane's grip, outside the scrolling tab strip, just left of
+                the pane controls. The header's whole-pane drag is vetoed for a
+                magnified or ephemeral pane (TileLayout.core.tsx canDrag); the
+                grip says so. */}
+            <Show when={!props.preview}>
+                <PaneGrip dragDisabled={props.nodeModel.isMagnified() || props.nodeModel.isEphemeral()} />
+            </Show>
             <div class="block-frame-end-icons" onDblClick={(e) => e.stopPropagation()}>
                 <EndIcons
                     viewModel={props.viewModel}

@@ -516,3 +516,20 @@
     margin-left:  calc((#{$line} - #{$slot-snapped}) / 2);
     margin-right: calc((#{$slot-snapped} - #{$line}) / 2);
 }
+
+// Edge fade for a horizontally scrolling strip with a hidden scrollbar: the
+// side with more content past it fades out over $width, the usual "more this
+// way" cue. A mask, not an overlay, so it works on any background. The
+// `has-more-left` / `has-more-right` classes come from createScrollEdges
+// (frontend/app/element/scroll-edges.ts); with neither, nothing fades.
+@mixin scroll-edge-fade($width: 28px) {
+    &.has-more-right {
+        mask-image: linear-gradient(to right, #000 calc(100% - #{$width}), transparent);
+    }
+    &.has-more-left {
+        mask-image: linear-gradient(to right, transparent, #000 #{$width});
+    }
+    &.has-more-left.has-more-right {
+        mask-image: linear-gradient(to right, transparent, #000 #{$width}, #000 calc(100% - #{$width}), transparent);
+    }
+}

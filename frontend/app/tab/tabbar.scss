@@ -58,6 +58,9 @@
             display: none; // Chrome/Safari
         }
 
+        // Edge fades while the tabs overflow (createScrollEdges, tabbar.tsx).
+        @include mixins.scroll-edge-fade(28px);
+
         // Override tab.scss absolute positioning — render tabs in flex flow.
         // Each tab uses its measured natural width as flex-basis (set by
         // DroppableTab as `--tab-natural-width`). grow=0 so tabs don't
@@ -185,28 +188,34 @@
         // extends the hairline that .tab:not(.active) draws across the fill
         // area so the full-width line is unbroken except under the active tab.
         border-bottom: var(--snap-chrome) solid var(--border-color);
+    }
+
+    // The window's grip (tabbar.tsx): a fixed drag square after the scrolling
+    // tabs, just left of the widgets (SPEC_DRAG_SPACE_AFFORDANCE_2026_10_13
+    // §5.1, §5.8). Same hairline as the fill so the line stays unbroken.
+    .tab-bar-grip {
+        flex: 0 0 var(--tab-bar-drag-gutter);
+        height: 100%;
+        align-self: stretch;
         display: flex;
         align-items: center;
-    }
-
-    // The drag square's dim grip, centred in its first --tab-bar-drag-gutter,
-    // right after the last tab (SPEC_DRAG_SPACE_AFFORDANCE_2026_10_13).
-    .tab-bar-fill-grip {
-        flex: 0 0 var(--tab-bar-drag-gutter);
-        text-align: center;
+        justify-content: center;
+        border-bottom: var(--snap-chrome) solid var(--border-color);
         font-size: 12px;
         color: var(--secondary-text-color);
-        opacity: 0.35;
-        pointer-events: none;
-        transition: opacity 120ms ease;
-        // The fill's box sits 1.5px lower than the widget bar's (its bottom
-        // hairline and the strip's own offset); lift the grip onto the
-        // widget icons' centre line.
-        transform: translateY(-1.5px);
-    }
 
-    .tab-bar-fill:hover .tab-bar-fill-grip {
-        opacity: 0.7;
+        svg {
+            opacity: 0.35;
+            pointer-events: none;
+            transition: opacity 120ms ease;
+            // The bar's box sits 1.5px lower than the widget bar's (its bottom
+            // hairline); lift the dots onto the widget icons' centre line.
+            transform: translateY(-1.5px);
+        }
+
+        &:hover svg {
+            opacity: 0.7;
+        }
     }
 
 }
