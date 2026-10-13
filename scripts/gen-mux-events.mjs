@@ -77,6 +77,16 @@ export function untypedSubscriptions(sources, typed, wps) {
             const line = text.slice(0, m.index).split("\n").length;
             errors.push(`${path}:${line}: "${name}" has a typed payload; subscribe with onMuxEvent(WpsEvent.${m[1] ?? "…"}, (data) => …), not muxEventSubscribe`);
         }
+        // Any other use of a typed event's WpsEvent name, such as a list mapped into
+        // `muxEventSubscribe({ eventType, … })`, hides how it is subscribed. Allowed: onMuxEvent's
+        // first argument, `eventType:` (checked above), an RPC's `event:` field, and a named constant.
+        for (const m of text.matchAll(/WpsEvent\.(\w+)\b/g)) {
+            const name = wps.get(m[1]);
+            if (!name || !typed.has(name)) continue;
+            if (/(?:onMuxEvent\(|eventType:|\bevent:|\bconst\s+\w+\s*(?::\s*string\s*)?=)\s*$/.test(text.slice(Math.max(0, m.index - 60), m.index))) continue;
+            const line = text.slice(0, m.index).split("\n").length;
+            errors.push(`${path}:${line}: WpsEvent.${m[1]} has a typed payload; pass it straight to onMuxEvent(WpsEvent.${m[1]}, (data) => …)`);
+        }
     }
     return errors;
 }
