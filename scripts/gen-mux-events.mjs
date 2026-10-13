@@ -170,18 +170,30 @@ export function untypedHistoryReads(sources, typed, wps, perIdPrefixes = new Set
     for (const [path, text] of sources) {
         if (path.endsWith("app/store/mps-history.ts") || !text.includes("EventReadHistoryCommand")) continue;
         const sf = sourceFile(path, text);
+        const lineOf = (n) => sf.getLineAndCharacterOfPosition(n.getStart(sf)).line + 1;
         const visit = (node) => {
-            if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression) && node.expression.name.text === "EventReadHistoryCommand") {
-                // Allowed only when the event is named inline and isn't typed. A request built
-                // elsewhere, or an event this can't resolve, is refused: it may be a typed one.
-                const line = sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1;
-                const request = node.arguments.find((a) => ts.isObjectLiteralExpression(a));
-                const prop = request?.properties.find((p) => ts.isPropertyAssignment(p) && p.name.getText(sf) === "event");
-                const name = prop && nameOf(prop.initializer);
-                if (!name) {
-                    errors.push(`${path}:${line}: EventReadHistoryCommand without an event named inline (\`event: WpsEvent.X\`, a literal or a constant); a typed event's history is read with readMuxEventHistory (app/store/mps-history.ts)`);
-                } else if (typed.has(name) || name.endsWith("<id>")) {
-                    errors.push(`${path}:${line}: "${name}" has a typed payload; read its history with readMuxEventHistory (app/store/mps-history.ts), not EventReadHistoryCommand`);
+            if (ts.isIdentifier(node) && node.text === "EventReadHistoryCommand") {
+                // Only a direct call (`X.EventReadHistoryCommand(…)`) can be checked; an alias or a
+                // destructured reference would hide the call, so any other reference is refused.
+                const access = node.parent;
+                const call = access?.parent;
+                const direct = ts.isPropertyAccessExpression(access) && access.name === node && ts.isCallExpression(call) && call.expression === access;
+                // The stub's own declaration (`EventReadHistoryCommand(client, …) {`) names it too.
+                const declared = (ts.isMethodDeclaration(access) || ts.isMethodSignature(access) || ts.isPropertySignature(access)) && access.name === node;
+                if (!declared && !direct) {
+                    errors.push(`${path}:${lineOf(node)}: EventReadHistoryCommand referenced other than by calling it; call it directly, or read a typed event's history with readMuxEventHistory (app/store/mps-history.ts)`);
+                } else if (direct) {
+                    // Allowed only when the event is named inline and isn't typed. A request built
+                    // elsewhere, or an event this can't resolve, is refused: it may be a typed one.
+                    const request = call.arguments.find((a) => ts.isObjectLiteralExpression(a));
+                    const prop = request?.properties.find((p) => ts.isPropertyAssignment(p) && p.name.getText(sf) === "event");
+                    const name = prop && nameOf(prop.initializer);
+                    const perId = name && [...perIdPrefixes].some((p) => name.startsWith(p));
+                    if (!name) {
+                        errors.push(`${path}:${lineOf(call)}: EventReadHistoryCommand without an event named inline (\`event: WpsEvent.X\`, a literal or a constant); a typed event's history is read with readMuxEventHistory (app/store/mps-history.ts)`);
+                    } else if (typed.has(name) || perId) {
+                        errors.push(`${path}:${lineOf(call)}: "${name}" has a typed payload; read its history with readMuxEventHistory (app/store/mps-history.ts), not EventReadHistoryCommand`);
+                    }
                 }
             }
             ts.forEachChild(node, visit);

@@ -153,6 +153,24 @@ describe("untypedHistoryReads", () => {
         ]);
     });
 
+    it("refuses an aliased or destructured reference, and a concrete per-id name", () => {
+        const sources = [
+            ["frontend/j.ts", "const readHistory = RpcApi.EventReadHistoryCommand;\nreadHistory(client, { event: WpsEvent.SysInfo, scope });"],
+            ["frontend/k.ts", "const { EventReadHistoryCommand } = RpcApi;"],
+            ["frontend/l.ts", 'RpcApi.EventReadHistoryCommand(client, { event: "dronerun:known-id", scope: "" });'],
+        ];
+        expect(untypedHistoryReads(sources, typed, wps, new Set(["dronerun:"])).map((e) => e.split(":").slice(0, 2).join(":"))).toEqual([
+            "frontend/j.ts:1",
+            "frontend/k.ts:1",
+            "frontend/l.ts:1",
+        ]);
+    });
+
+    it("leaves the generated stub's own declaration alone", () => {
+        const sources = [["frontend/app/store/rpc-api/generated.ts", "export const RpcApi = {\n  EventReadHistoryCommand(client: RpcClient, data: X) {\n    return call(client);\n  },\n};"]];
+        expect(untypedHistoryReads(sources, typed, wps)).toEqual([]);
+    });
+
     it("leaves untyped events, and the typed helper itself, alone", () => {
         const sources = [
             ["frontend/e.ts", "RpcApi.EventReadHistoryCommand(client, { event: WpsEvent.SingletonClaim, scope, maxitems: 1 });"],
