@@ -13,8 +13,9 @@
 //! helper stays dependency-free (a few hundred KB on the host), and a file's
 //! bytes need no escaping.
 
-/// The protocol version both ends must share (`Hello`). 2 added `Procs`.
-pub const PROTOCOL: u32 = 2;
+/// The protocol version both ends must share (`Hello`). 2 added `Procs`,
+/// 3 `PaneProcs`.
+pub const PROTOCOL: u32 = 3;
 
 /// Largest message accepted; a longer length means a broken stream.
 pub const MAX_MESSAGE: usize = 40 << 20;
@@ -98,6 +99,60 @@ pub enum Request {
         top: u32,
         filter: String,
     },
+    /// What one AgentMux pane's processes on this host use, for its stats
+    /// badge (`crate::procs::Sampler::pane`): the shell of durable `session`
+    /// and what it started, else the processes whose environment holds
+    /// `AGENTMUX_BLOCKID=<block_id>`. Either may be empty. [`Reply::PaneProcs`].
+    PaneProcs {
+        block_id: String,
+        session: String,
+    },
+}
+
+/// How [`Request::PaneProcs`] found the pane's processes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PaneFound {
+    /// Neither way found any: the frame has the host's totals only.
+    None = 0,
+    /// From the durable session's shell, which the daemon spawned.
+    Session = 1,
+    /// From `AGENTMUX_BLOCKID` in the processes' environments.
+    Marker = 2,
+}
+
+impl PaneFound {
+    fn from_u8(v: u8) -> Self {
+        match v {
+            1 => Self::Session,
+            2 => Self::Marker,
+            _ => Self::None,
+        }
+    }
+}
+
+/// The answer to [`Request::PaneProcs`]. Absent values are ones the host's
+/// OS wouldn't give, never zeros.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PaneFrame {
+    pub found: PaneFound,
+    pub processes: u32,
+    /// Each executable's name and how many of it run, the pane's shell first.
+    pub names: Vec<(String, u32)>,
+    /// When the pane's shell started, Unix ms.
+    pub started_at_ms: Option<u64>,
+    /// The pane's processes' CPU since the previous request, thousandths of
+    /// one core; absent on a connection's first.
+    pub cpu_milli: Option<u64>,
+    /// Their private memory, bytes (`memory_metric`).
+    pub mem: Option<u64>,
+    /// Their resident memory, bytes, shared pages included.
+    pub mem_resident: Option<u64>,
+    pub memory_metric: String,
+    /// The whole host, as [`ProcFrame`]'s totals.
+    pub cpu_count: u32,
+    pub host_cpu_milli: Option<u64>,
+    pub host_mem: u64,
+    pub host_processes: u32,
 }
 
 /// One process in a [`ProcFrame`]. Absent values are ones the host's OS
@@ -233,6 +288,7 @@ pub enum Reply {
     /// A path ([`Request::Realpath`]).
     Path(String),
     Procs(ProcFrame),
+    PaneProcs(PaneFrame),
     Err {
         kind: ErrKind,
         message: String,
@@ -254,6 +310,7 @@ mod op {
     pub const SETMETA: u8 = 12;
     pub const SYNC: u8 = 13;
     pub const PROCS: u8 = 14;
+    pub const PANE_PROCS: u8 = 15;
 }
 
 mod status {
@@ -264,6 +321,7 @@ mod status {
     pub const DONE: u8 = 5;
     pub const PATH: u8 = 6;
     pub const PROCS: u8 = 7;
+    pub const PANE_PROCS: u8 = 8;
     pub const ERR: u8 = 255;
 }
 
@@ -461,6 +519,9 @@ impl Request {
             Request::Procs { top, filter } => {
                 w.u8(op::PROCS).u32(*top).str(filter);
             }
+            Request::PaneProcs { block_id, session } => {
+                w.u8(op::PANE_PROCS).str(block_id).str(session);
+            }
         }
         w.message()
     }
@@ -511,6 +572,10 @@ impl Request {
             op::PROCS => Request::Procs {
                 top: r.u32()?,
                 filter: r.str()?,
+            },
+            op::PANE_PROCS => Request::PaneProcs {
+                block_id: r.str()?,
+                session: r.str()?,
             },
             op::SETMETA => Request::SetMeta {
                 path: r.str()?,
@@ -564,6 +629,24 @@ impl Reply {
                 for p in &f.rows {
                     w.proc_row(p);
                 }
+            }
+            Reply::PaneProcs(f) => {
+                w.u8(status::PANE_PROCS)
+                    .u8(f.found as u8)
+                    .u32(f.processes)
+                    .u32(f.names.len() as u32);
+                for (name, count) in &f.names {
+                    w.str(name).u32(*count);
+                }
+                w.opt_u64(f.started_at_ms)
+                    .opt_u64(f.cpu_milli)
+                    .opt_u64(f.mem)
+                    .opt_u64(f.mem_resident)
+                    .str(&f.memory_metric)
+                    .u32(f.cpu_count)
+                    .opt_u64(f.host_cpu_milli)
+                    .u64(f.host_mem)
+                    .u32(f.host_processes);
             }
             Reply::Err { kind, message } => {
                 w.u8(status::ERR).u8(*kind as u8).str(message);
@@ -624,6 +707,32 @@ impl Reply {
                     cpu_milli,
                     mem,
                     rows,
+                })
+            }
+            status::PANE_PROCS => {
+                let (found, processes) = (PaneFound::from_u8(r.u8()?), r.u32()?);
+                let n = r.u32()? as usize;
+                // Each name is at least 8 bytes: a count past that is a lie.
+                if n > body.len() / 8 {
+                    return Err("pane procs: impossible name count".into());
+                }
+                let mut names = Vec::with_capacity(n);
+                for _ in 0..n {
+                    names.push((r.str()?, r.u32()?));
+                }
+                Reply::PaneProcs(PaneFrame {
+                    found,
+                    processes,
+                    names,
+                    started_at_ms: r.opt_u64()?,
+                    cpu_milli: r.opt_u64()?,
+                    mem: r.opt_u64()?,
+                    mem_resident: r.opt_u64()?,
+                    memory_metric: r.str()?,
+                    cpu_count: r.u32()?,
+                    host_cpu_milli: r.opt_u64()?,
+                    host_mem: r.u64()?,
+                    host_processes: r.u32()?,
                 })
             }
             status::ERR => Reply::Err {
@@ -738,6 +847,10 @@ mod tests {
                 top: 100,
                 filter: "node agent".into(),
             },
+            Request::PaneProcs {
+                block_id: "0b6c-block".into(),
+                session: "".into(),
+            },
         ];
         let replies = vec![
             Reply::Hello {
@@ -791,6 +904,35 @@ mod tests {
                         mem_resident: None,
                     },
                 ],
+            }),
+            Reply::PaneProcs(PaneFrame {
+                found: PaneFound::Marker,
+                processes: 3,
+                names: vec![("bash".into(), 1), ("node".into(), 2)],
+                started_at_ms: Some(1_700_000_000_000),
+                cpu_milli: Some(250),
+                mem: Some(80 << 20),
+                mem_resident: Some(120 << 20),
+                memory_metric: "anonymous resident + swap".into(),
+                cpu_count: 16,
+                host_cpu_milli: None,
+                host_mem: 6 << 30,
+                host_processes: 412,
+            }),
+            // Nothing found: the host's totals only.
+            Reply::PaneProcs(PaneFrame {
+                found: PaneFound::None,
+                processes: 0,
+                names: vec![],
+                started_at_ms: None,
+                cpu_milli: None,
+                mem: None,
+                mem_resident: None,
+                memory_metric: "memory footprint".into(),
+                cpu_count: 8,
+                host_cpu_milli: Some(3_100),
+                host_mem: 9 << 30,
+                host_processes: 600,
             }),
         ];
         let mut stream = Vec::new();
