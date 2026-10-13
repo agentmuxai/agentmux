@@ -437,7 +437,15 @@ export function nextWidgetBarConfig(
         if (shortName && pinned.includes(shortName)) out["widget:pinned"] = pinned.filter((n) => n !== shortName);
         return out;
     }
-    if (withoutKey.length !== rawHidden.length) out["widget:hidden"] = withoutKey.length > 0 ? withoutKey : null;
+    // A group hidden only because every child is hidden (isWidgetHidden): showing or pinning the
+    // group brings those children back into it, or the click would change nothing.
+    let nextHidden = withoutKey;
+    const children = wmap[key]?.children ?? [];
+    if (children.length > 0 && isWidgetHidden(key, wmap, { ...settings, "widget:hidden": withoutKey })) {
+        const childKeys = new Set(children.map((name) => DEFWIDGET + name));
+        nextHidden = withoutKey.filter((k) => ![...getHiddenKeys({ "widget:hidden": [k] })].some((h) => childKeys.has(h)));
+    }
+    if (nextHidden.length !== rawHidden.length) out["widget:hidden"] = nextHidden.length > 0 ? nextHidden : null;
     if (state === "pinned") {
         if (shortName && !pinned.includes(shortName)) out["widget:pinned"] = [...pinned, shortName];
     } else if (shortName && pinned.includes(shortName)) {

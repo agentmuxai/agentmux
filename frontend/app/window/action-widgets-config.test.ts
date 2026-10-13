@@ -311,6 +311,16 @@ describe("nextWidgetBarConfig", () => {
         });
     });
 
+    it("showing a group hidden only through its children brings the children back", () => {
+        const settings = { "widget:hidden": ["defwidget@discord", "defwidget@slack", "defwidget@drone"] };
+        expect(isWidgetHidden("defwidget@messengers", barWmap(), settings)).toBe(true);
+        expect(nextWidgetBarConfig("defwidget@messengers", "more", settings, barWmap())).toEqual({ "widget:hidden": ["defwidget@drone"] });
+        expect(nextWidgetBarConfig("defwidget@messengers", "pinned", settings, barWmap())).toEqual({
+            "widget:hidden": ["defwidget@drone"],
+            "widget:pinned": ["agent", "editor", "messengers"],
+        });
+    });
+
     it("refuses to hide Settings", () => {
         expect(nextWidgetBarConfig("defwidget@settings", "hidden", {}, barWmap())).toEqual({});
     });
