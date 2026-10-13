@@ -138,8 +138,8 @@ export class RemotesViewModel {
 
     /** A terminal on the remote, beside this pane. */
     async newTerminal(name: string): Promise<void> {
-        await TabRpcClient.rpcCall(
-            "pane.open",
+        await RpcApi.PaneOpenCommand(
+            TabRpcClient,
             { view: "term", connection: name, split_direction: "right", split_reference_block_id: this.blockId },
             {}
         );
@@ -147,8 +147,8 @@ export class RemotesViewModel {
 
     /** Hangar on the remote's home folder, beside this pane. */
     async browseFiles(name: string): Promise<void> {
-        await TabRpcClient.rpcCall(
-            "pane.open",
+        await RpcApi.PaneOpenCommand(
+            TabRpcClient,
             { view: "files", cwd: "~", connection: name, split_direction: "right", split_reference_block_id: this.blockId },
             {}
         );
@@ -277,8 +277,8 @@ export class RemotesViewModel {
     async editInSshConfig(name: string): Promise<void> {
         const where = await RpcApi.RemoteSshLocateCommand(TabRpcClient, { connection: name });
         if (!where) throw new Error(`your ssh config doesn't define ${name}`);
-        await TabRpcClient.rpcCall(
-            "pane.open",
+        await RpcApi.PaneOpenCommand(
+            TabRpcClient,
             {
                 view: "editor",
                 file: where.path,

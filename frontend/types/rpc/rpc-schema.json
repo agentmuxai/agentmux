@@ -3723,6 +3723,42 @@
     }
   },
   {
+    "command": "pane.moveTab",
+    "request": "agentmux_srv::backend::rpc_types::block::CommandPaneMoveTabData",
+    "requestName": "CommandPaneMoveTabData",
+    "requestTs": {
+      "imports": [
+        "CommandPaneMoveTabData"
+      ],
+      "name": "CommandPaneMoveTabData"
+    },
+    "response": "()",
+    "responseName": "()",
+    "responseTs": {
+      "imports": [],
+      "name": "null"
+    }
+  },
+  {
+    "command": "pane.open",
+    "request": "agentmux_srv::backend::rpc_types::block::CommandPaneOpenData",
+    "requestName": "CommandPaneOpenData",
+    "requestTs": {
+      "imports": [
+        "CommandPaneOpenData"
+      ],
+      "name": "CommandPaneOpenData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::block::PaneOpenResult",
+    "responseName": "PaneOpenResult",
+    "responseTs": {
+      "imports": [
+        "PaneOpenResult"
+      ],
+      "name": "PaneOpenResult"
+    }
+  },
+  {
     "command": "presence.publish-now",
     "request": "core::option::Option<agentmux_srv::backend::rpc_types::websocket::NoArgsReq>",
     "requestName": "core::option::Option<agentmux_srv::backend::rpc_types::websocket::NoArgsReq>",

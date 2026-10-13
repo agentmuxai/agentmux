@@ -16,6 +16,8 @@ const rpc = vi.hoisted(() => ({
     RemoteAgentRevokeCommand: vi.fn(),
     ConnConnectCommand: vi.fn(),
     ConnDisconnectCommand: vi.fn(),
+    // As the generated stub does: forwards to the client, which the tests assert on.
+    PaneOpenCommand: vi.fn((client: { rpcCall: (...a: unknown[]) => unknown }, data: unknown, opts: unknown) => client.rpcCall("pane.open", data, opts)),
 }));
 const tabRpcCall = vi.hoisted(() => vi.fn());
 
@@ -54,6 +56,7 @@ async function renderWith(records: RemoteRecord[]) {
 describe("RemotesView", () => {
     beforeEach(() => {
         Object.values(rpc).forEach((f) => f.mockReset().mockResolvedValue(undefined));
+        rpc.PaneOpenCommand.mockImplementation((client, data, opts) => client.rpcCall("pane.open", data, opts));
         tabRpcCall.mockReset().mockResolvedValue(undefined);
     });
     afterEach(() => cleanup());

@@ -24,9 +24,13 @@
 //
 // It refuses to write anything rather than emit a stub it can't vouch for: a manifest command
 // srv doesn't register as typed, a type name that is neither a generated import nor a
-// hand-written global, a method still hand-written elsewhere in rpc-api/, a duplicate.
+// hand-written global, a duplicate.
+//
+// Every RPC stub is generated, and nothing else may call srv's commands: a hand-written stub
+// in rpc-api/, an `RpcApi` that is anything but `GeneratedApi`, or a raw
+// `client.rpcCall("<command>", …)` outside generated.ts fails it too (generatedOnlyProblems).
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -192,8 +196,49 @@ export function generate({ schema, manifest, ambient, generatedTypes, hand, fiel
     return { source: [...head, ...stubs, "};", ""].join("\n") };
 }
 
+/** Why the frontend isn't calling srv through generated stubs only: a hand-written stub
+ *  (`hand`: method -> rpc-api file), an `RpcApi` other than `GeneratedApi` (`indexSource`, the
+ *  text of rpc-api/index.ts), or a raw `.rpcCall("<command>"` in `sources` ([path, text]). */
+export function generatedOnlyProblems({ hand, indexSource, sources }) {
+    const errors = [];
+    for (const [method, file] of hand) {
+        errors.push(`rpc-api/${file}: ${method} is a hand-written stub; every stub is generated. Add its command to generated-manifest.json (srv must register it with register_typed) and delete the method`);
+    }
+    if (!/^export const RpcApi = GeneratedApi;$/m.test(indexSource)) {
+        errors.push("rpc-api/index.ts: RpcApi must be exactly `export const RpcApi = GeneratedApi;`");
+    }
+    for (const [path, text] of sources) {
+        text.split(/\r?\n/).forEach((line, i) => {
+            const m = /\.rpcCall\(\s*["'`]([^"'`]+)["'`]/.exec(line) ?? (/\.rpcCall\(\s*$/.test(line) ? /^\s*["'`]([^"'`]+)["'`]/.exec(text.split(/\r?\n/)[i + 1] ?? "") : null);
+            if (m) errors.push(`${path}:${i + 1}: calls "${m[1]}" with rpcCall directly; call its generated stub on RpcApi instead`);
+        });
+    }
+    return errors;
+}
+
+/** The frontend's non-test sources, except the generated stubs and the RPC client itself. */
+function frontendSources() {
+    const out = [];
+    const walk = (dir) => {
+        for (const e of readdirSync(dir, { withFileTypes: true })) {
+            const p = join(dir, e.name);
+            if (e.isDirectory()) { if (e.name !== "node_modules") walk(p); }
+            else if (/\.tsx?$/.test(e.name) && !/\.(test|spec)\.tsx?$/.test(e.name) && p !== OUT && !p.endsWith(join("store", "rpc-client.ts"))) {
+                out.push([relative(ROOT, p).replace(/\\/g, "/"), readFileSync(p, "utf8")]);
+            }
+        }
+    };
+    walk(join(ROOT, "frontend"));
+    return out;
+}
+
 async function main() {
     const check = process.argv.includes("--check");
+    const only = generatedOnlyProblems({ hand: handWritten(), indexSource: readFileSync(join(API_DIR, "index.ts"), "utf8"), sources: frontendSources() });
+    if (only.length) {
+        console.error(`gen-rpc-stubs: ${only.length} RPC call(s) not through a generated stub:\n${only.map((e) => `  - ${e}`).join("\n")}`);
+        process.exit(1);
+    }
     const schema = JSON.parse(readFileSync(SCHEMA, "utf8"));
     const manifest = JSON.parse(readFileSync(MANIFEST, "utf8"));
     const generatedTypes = new Set(readdirSync(RPC_TYPES).filter((f) => f.endsWith(".ts")).map((f) => f.slice(0, -3)));

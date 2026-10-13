@@ -53,8 +53,8 @@ export async function openInPane(
 ): Promise<void> {
     if (connection && view === "media") throw new Error(`Media files on ${connection} can't be shown yet`);
     if (view === "media" && (await openInMediaPaneOnScreen(path))) return;
-    await TabRpcClient.rpcCall(
-        "pane.open",
+    await RpcApi.PaneOpenCommand(
+        TabRpcClient,
         {
             view,
             file: path,
@@ -78,8 +78,8 @@ export async function revealInOs(path: string): Promise<void> {
 /** Opens a terminal in `dir`, to the right of the Files pane; on
  *  `connection` (an SSH host) when given, as the folder is there. */
 export async function openTerminalHere(dir: string, besideBlockId: string, connection?: string): Promise<void> {
-    await TabRpcClient.rpcCall(
-        "pane.open",
+    await RpcApi.PaneOpenCommand(
+        TabRpcClient,
         {
             view: "term",
             cwd: dir,

@@ -883,6 +883,14 @@
             "method": "OpenInShellCommand"
         },
         {
+            "command": "pane.open",
+            "method": "PaneOpenCommand"
+        },
+        {
+            "command": "pane.moveTab",
+            "method": "PaneMoveTabCommand"
+        },
+        {
             "command": "layout.open",
             "method": "OpenLayoutCommand"
         },
