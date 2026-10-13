@@ -426,16 +426,6 @@ declare global {
         logblockid?: string;
     };
 
-    // wshrpc.ConnStatus
-    type ConnStatus = {
-        status: string;
-        connection: string;
-        connected: boolean;
-        hasconnected: boolean;
-        activeconnnum: number;
-        error?: string;
-    };
-
     // wshrpc.CpuDataRequest
     type CpuDataRequest = {
         id: string;

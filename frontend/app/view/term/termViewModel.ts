@@ -44,6 +44,7 @@ import { META_OSC_TITLE } from "@/app/store/meta-keys";
 
 import type { BlockControllerRuntimeStatus } from "@/types/rpc/BlockControllerRuntimeStatus";
 import { isNewerControllerStatus } from "./controller-status";
+import type { ConnStatus } from "@/types/rpc/ConnStatus";
 /** The terminal's state behind its native pane tab (`terminalPaneTab`,
  *  term.tsx). */
 class TermViewModel {

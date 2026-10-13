@@ -38,10 +38,8 @@ function scheduleRefresh(): void {
 export function remotesList(): Accessor<RemoteRecord[]> {
     if (!started) {
         started = true;
-        muxEventSubscribe(
-            { eventType: WpsEvent.ConnChange, handler: scheduleRefresh },
-            { eventType: WpsEvent.Config, handler: scheduleRefresh }
-        );
+        muxEventSubscribe({ eventType: WpsEvent.Config, handler: scheduleRefresh });
+        onMuxEvent(WpsEvent.ConnChange, scheduleRefresh);
         onMuxEvent(WpsEvent.RemotesChange, scheduleRefresh);
         void refreshRemotes();
     }

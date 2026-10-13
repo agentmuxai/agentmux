@@ -174,19 +174,14 @@ pub(super) async fn handle_shell_create(
     // shells lost their create event while their shell_chunk events at
     // persist: 1024 still replayed, causing the reducer to silently drop
     // orphaned chunks.)
-    state.broker.publish(crate::backend::mps::MuxEvent {
-        event: crate::backend::mps::EVENT_SHELL_NODE_CREATE.to_string(),
-        scopes: vec![format!("block:{}", req.agent_block_id)],
-        sender: String::new(),
-        persist: 64,
-        data: Some(json!({
-            "shell_id": shell_id,
-            "cmd": req.cmd,
-            "cwd": effective_cwd,
-            "title": title,
-            "timestamp": now_ms,
-        })),
-    });
+    let created = crate::backend::shell_node::ShellNodeCreateEvent {
+        shell_id: shell_id.clone(),
+        cmd: req.cmd.clone(),
+        cwd: effective_cwd.clone(),
+        title: title.clone(),
+        timestamp: now_ms,
+    };
+    state.broker.publish_event::<crate::backend::mps_events::ShellNodeCreate>(&created, vec![format!("block:{}", req.agent_block_id)], 64);
 
     // Spawn the runner — fire-and-forget; events flow independently.
     let runner = crate::backend::shell_node::ShellNodeRunner {

@@ -11,6 +11,7 @@ import clsx from "clsx";
 import type { JSX } from "solid-js";
 import { createEffect, createMemo, createSignal, onCleanup, Show } from "solid-js";
 import dotsUrl from "../asset/dots-anim-4.svg?url";
+import type { ConnStatus } from "@/types/rpc/ConnStatus";
 
 const colorRegex = /^((#[0-9a-f]{6,8})|([a-z]+))$/;
 

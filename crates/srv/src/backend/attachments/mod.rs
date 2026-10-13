@@ -19,9 +19,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-use serde::Serialize;
-
-use crate::backend::mps::{self, Broker, MuxEvent};
+use crate::backend::mps::Broker;
 use crate::backend::rpc_types::{
     AttachmentBatchDoneEvent, AttachmentFailedEvent, AttachmentInfo, AttachmentPending,
     AttachmentProgressEvent, AttachmentReadyEvent, AttachmentRejected, AttachmentsIngestResult,
@@ -491,18 +489,14 @@ impl Service {
                     .run_item(&block_id, &batch_id, item, limits, &cancel)
                     .await;
                 match outcome {
-                    Ok(info) => svc.publish(
-                        &block_id,
-                        mps::EVENT_ATTACHMENT_READY,
+                    Ok(info) => svc.publish::<crate::backend::mps_events::AttachmentReady>(&block_id,
                         &AttachmentReadyEvent {
                             batch_id,
                             index,
                             info,
                         },
                     ),
-                    Err(e) => svc.publish(
-                        &block_id,
-                        mps::EVENT_ATTACHMENT_FAILED,
+                    Err(e) => svc.publish::<crate::backend::mps_events::AttachmentFailed>(&block_id,
                         &AttachmentFailedEvent {
                             batch_id,
                             index,
@@ -517,9 +511,7 @@ impl Service {
             let _ = t.await;
         }
         self.batches.lock().unwrap().remove(&batch_id);
-        self.publish(
-            &block_id,
-            mps::EVENT_ATTACHMENT_BATCH_DONE,
+        self.publish::<crate::backend::mps_events::AttachmentBatchDone>(&block_id,
             &AttachmentBatchDoneEvent { batch_id },
         );
     }
@@ -599,9 +591,7 @@ impl Service {
         if cancel.load(Ordering::SeqCst) {
             return Err(cancelled());
         }
-        self.publish(
-            block_id,
-            mps::EVENT_ATTACHMENT_PROGRESS,
+        self.publish::<crate::backend::mps_events::AttachmentProgress>(block_id,
             &AttachmentProgressEvent {
                 batch_id: batch_id.to_string(),
                 index: item.index,
@@ -636,9 +626,7 @@ impl Service {
             }
             if last.elapsed() >= PROGRESS_INTERVAL || done >= item.bytes {
                 last = Instant::now();
-                self.publish(
-                    block_id,
-                    mps::EVENT_ATTACHMENT_PROGRESS,
+                self.publish::<crate::backend::mps_events::AttachmentProgress>(block_id,
                     &AttachmentProgressEvent {
                         batch_id: batch_id.to_string(),
                         index: item.index,
@@ -675,14 +663,8 @@ impl Service {
         Ok((id, blob, kind, guard))
     }
 
-    fn publish<T: Serialize>(&self, block_id: &str, event: &str, data: &T) {
-        self.broker.publish(MuxEvent {
-            event: event.to_string(),
-            scopes: vec![format!("block:{block_id}")],
-            sender: String::new(),
-            persist: 0,
-            data: serde_json::to_value(data).ok(),
-        });
+    fn publish<E: crate::backend::mps_events::Event>(&self, block_id: &str, data: &E::Payload) {
+        self.broker.publish_event::<E>(data, vec![format!("block:{block_id}")], 0);
     }
 }
 

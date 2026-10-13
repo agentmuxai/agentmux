@@ -22,7 +22,7 @@ use serde::Serialize;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
 use tokio::sync::{mpsc, oneshot};
 
-use crate::backend::mps::{Broker, MuxEvent, EVENT_SHELL_CHUNK};
+use crate::backend::mps::Broker;
 use agentmux_common::api_types::ShellInputFailure;
 
 use agentmux_common::time::now_ms_u64 as now_ms;
@@ -562,25 +562,70 @@ fn shell_scopes(shell_id: &str) -> Vec<String> {
     vec![format!("shell:{shell_id}")]
 }
 
+/// `shell_chunk`: one line a Shell command wrote, or its exit. Scoped `shell:<shell_id>`.
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+#[serde(tag = "op", rename_all = "lowercase")]
+pub enum ShellChunkEvent {
+    Chunk {
+        shell_id: String,
+        #[ts(type = r#""stdout" | "stderr" | "system""#)]
+        kind: String,
+        content: String,
+        #[ts(type = "number")]
+        timestamp: u64,
+    },
+    Exit {
+        shell_id: String,
+        exit_code: i32,
+        /// The exit was caused by ShellStop (tree-killed), so the frontend shows the grey
+        /// "stopped" status instead of exited-err.
+        stopped: bool,
+        #[ts(type = "number")]
+        timestamp: u64,
+    },
+}
+
+/// `shell_node_create`: a Shell command started, so the agent pane adds its row before the first
+/// chunk. Scoped `block:<agent block>`.
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct ShellNodeCreateEvent {
+    pub shell_id: String,
+    pub cmd: String,
+    pub cwd: Option<String>,
+    pub title: String,
+    #[ts(type = "number")]
+    pub timestamp: u64,
+}
+
 fn publish_chunk(broker: &Broker, _block_id: &str, shell_id: &str, kind: &str, content: &str, ts: u64) {
-    broker.publish(MuxEvent {
-        event: EVENT_SHELL_CHUNK.to_string(),
-        scopes: shell_scopes(shell_id),
-        sender: String::new(),
-        persist: 1024,
-        data: Some(serde_json::json!({
-            "shell_id": shell_id,
-            "op": "chunk",
-            "kind": kind,
-            "content": content,
-            "timestamp": ts,
-        })),
-    });
+    let event = ShellChunkEvent::Chunk { shell_id: shell_id.to_string(), kind: kind.to_string(), content: content.to_string(), timestamp: ts };
+    broker.publish_event::<crate::backend::mps_events::ShellChunk>(&event, shell_scopes(shell_id), 1024);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shell_events_serialize_as_before() {
+        let chunk = ShellChunkEvent::Chunk { shell_id: "s1".into(), kind: "stdout".into(), content: "ok".into(), timestamp: 5 };
+        assert_eq!(
+            serde_json::to_value(&chunk).unwrap(),
+            serde_json::json!({ "shell_id": "s1", "op": "chunk", "kind": "stdout", "content": "ok", "timestamp": 5 })
+        );
+        let exit = ShellChunkEvent::Exit { shell_id: "s1".into(), exit_code: 1, stopped: true, timestamp: 6 };
+        assert_eq!(
+            serde_json::to_value(&exit).unwrap(),
+            serde_json::json!({ "shell_id": "s1", "op": "exit", "exit_code": 1, "stopped": true, "timestamp": 6 })
+        );
+        let created = ShellNodeCreateEvent { shell_id: "s1".into(), cmd: "npm test".into(), cwd: None, title: "npm test".into(), timestamp: 7 };
+        assert_eq!(
+            serde_json::to_value(&created).unwrap(),
+            serde_json::json!({ "shell_id": "s1", "cmd": "npm test", "cwd": null, "title": "npm test", "timestamp": 7 })
+        );
+    }
 
     #[tokio::test]
     async fn stop_signals_then_is_idempotent() {
@@ -687,19 +732,6 @@ mod tests {
 }
 
 fn publish_exit(broker: &Broker, _block_id: &str, shell_id: &str, exit_code: i32, stopped: bool, ts: u64) {
-    broker.publish(MuxEvent {
-        event: EVENT_SHELL_CHUNK.to_string(),
-        scopes: shell_scopes(shell_id),
-        sender: String::new(),
-        persist: 1024,
-        data: Some(serde_json::json!({
-            "shell_id": shell_id,
-            "op": "exit",
-            "exit_code": exit_code,
-            // True when the exit was caused by ShellStop (tree-killed), so the
-            // frontend renders the grey "stopped" status instead of exited-err.
-            "stopped": stopped,
-            "timestamp": ts,
-        })),
-    });
+    let event = ShellChunkEvent::Exit { shell_id: shell_id.to_string(), exit_code, stopped, timestamp: ts };
+    broker.publish_event::<crate::backend::mps_events::ShellChunk>(&event, shell_scopes(shell_id), 1024);
 }

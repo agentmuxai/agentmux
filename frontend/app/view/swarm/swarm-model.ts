@@ -1231,21 +1231,14 @@ export class SwarmViewModel {
 
         // Shell bucket (SPEC_SWARM_LONG_RUNNING_PROCESS_ROWS_2026_07_20 Phase 1).
         // shell_node_create — a new shell appeared, reload the active list.
-        const unsubShellCreate = muxEventSubscribe({
-            eventType: WpsEvent.ShellNodeCreate,
-            handler: () => this.scheduleLoadShells(),
-        });
+        const unsubShellCreate = onMuxEvent(WpsEvent.ShellNodeCreate, () => this.scheduleLoadShells());
         if (unsubShellCreate) this.unsubs.push(unsubShellCreate);
 
         // shell_chunk fires per output line too — only reload on the
         // terminal "exit" op, not every line of stdout/stderr (that would
         // re-fetch the whole active-shells list on every chunk).
-        const unsubShellChunk = muxEventSubscribe({
-            eventType: WpsEvent.ShellChunk,
-            handler: (event: MuxEvent) => {
-                const data = event?.data as any;
-                if (data?.op === "exit") this.scheduleLoadShells();
-            },
+        const unsubShellChunk = onMuxEvent(WpsEvent.ShellChunk, (data) => {
+            if (data.op === "exit") this.scheduleLoadShells();
         });
         if (unsubShellChunk) this.unsubs.push(unsubShellChunk);
 
