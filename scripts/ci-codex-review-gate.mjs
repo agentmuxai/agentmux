@@ -37,16 +37,16 @@
 //
 // Codex only reviews when asked by a5af, not a bot. muxreview decides when
 // to ask (agentmuxai/muxreview lambdas/codex_policy.py): after it approves a head,
-// then again only when a push touches a file Codex flagged, or when a
-// write-access commenter says "@reagentx-workflow codex re-review". After an
-// OK it does NOT re-ask for a docs-only diff, so this gate carries an OK
-// across exactly that diff. After findings it does NOT re-ask when only doc
-// files Codex flagged changed, so findings whose inline comments (matched to
-// the review by pull_request_review_id) are all on docs pass on the head, and
-// carry to a later head like an OK: only while they are Codex's latest word
-// and only docs changed since (a code change makes muxreview re-ask). Findings
-// on any non-doc file, or on files unknown, fail or wait as before. This
-// gate only reads.
+// then again after it approves a push that changes code (any non-doc file,
+// flagged by Codex or not), or when a write-access commenter says
+// "@muxreview codex re-review". After an OK or findings it does NOT re-ask
+// for a docs-only diff. So this gate carries an OK across exactly that diff;
+// findings whose inline comments (matched to the review by
+// pull_request_review_id) are all on docs pass on the head and carry to a
+// later head like an OK, only while they are Codex's latest word and only
+// docs changed since. Other findings on an earlier head wait for the re-ask
+// when code changed since, and fail when only docs did: nothing will ask
+// Codex again, so the PR needs the fix. This gate only reads.
 
 export const CODEX_LOGIN = "chatgpt-codex-connector[bot]";
 export const STATUS_CONTEXT = "Codex review";
@@ -244,6 +244,19 @@ export function latestCodexOutput({ comments = [], reviews = [], reviewComments 
 }
 
 /**
+ * Whether `evaluateCodexGate` needs the files changed since Codex's latest
+ * verdict: an OK or findings about an earlier commit. An OK or docs-only
+ * findings carry across a docs-only diff, and other findings with only docs
+ * since fail; any other answer decides without it.
+ */
+export function needsDiffSince(latest, headSha) {
+    return (
+        (latest?.kind === "ok" || latest?.kind === "findings") &&
+        !String(headSha).toLowerCase().startsWith(latest.sha)
+    );
+}
+
+/**
  * Decide the status for `headSha` from the PR's issue comments, reviews and
  * review comments (GitHub REST shapes). The latest Codex output naming this
  * head wins, so a spontaneous findings review after an OK takes the OK back.
@@ -291,7 +304,7 @@ export function evaluateCodexGate({
     if (onHead?.kind === "findings") {
         return {
             state: "failure",
-            description: `Codex left findings on ${short}; muxreview re-asks once a push touches a flagged file`,
+            description: `Codex left findings on ${short}; push a fix and muxreview asks again once it approves`,
         };
     }
     if (onHead) {
@@ -299,8 +312,8 @@ export function evaluateCodexGate({
     }
 
     const latest = all.at(-1);
-    // muxreview re-asks for any non-doc change after either verdict, so both
-    // carry only across a docs-only diff; a code change waits for Codex.
+    // muxreview re-asks for any non-doc change after either verdict, so an OK
+    // or docs-only findings carry only across a docs-only diff.
     const onlyDocsSince = Array.isArray(filesSinceLatest) && filesSinceLatest.every(isDocsOnlyPath);
     if (latest?.kind === "ok" && onlyDocsSince) {
         return { state: "success", description: `Codex OK on ${latest.sha}; only docs changed since` };
@@ -311,6 +324,20 @@ export function evaluateCodexGate({
     // Only where it would otherwise wait: a verdict Codex did give still counts.
     if (dependencyBot) {
         return { state: "success", description: `Dependency bot PR: Codex isn't asked; ${short} passes without it` };
+    }
+    // Findings on an earlier head: a code change since is asked about once
+    // muxreview approves it; with only docs since, nothing will ask again.
+    if (latest?.kind === "findings") {
+        if (onlyDocsSince) {
+            return {
+                state: "failure",
+                description: `Codex's findings on ${latest.sha} are unanswered: only docs changed since. Push the fix, or '@muxreview codex re-review'`,
+            };
+        }
+        return {
+            state: "pending",
+            description: `Codex's findings on ${latest.sha}: muxreview asks about ${short} once it approves, or comment '@muxreview codex re-review'`,
+        };
     }
     return {
         state: "pending",
@@ -373,13 +400,8 @@ async function main() {
         // Inline comments: the files each findings review flagged.
         ghAll(`/repos/${repo}/pulls/${pr}/comments`, token),
     ]);
-    // Only an OK or docs-only findings on an earlier commit can carry, so
-    // only then is the diff worth fetching.
     const latest = latestCodexOutput({ comments, reviews, reviewComments });
-    const filesSinceLatest =
-        (latest?.kind === "ok" || isDocsOnlyFindings(latest)) && !headSha.toLowerCase().startsWith(latest.sha)
-            ? await changedFiles(repo, latest.sha, headSha, token)
-            : null;
+    const filesSinceLatest = needsDiffSince(latest, headSha) ? await changedFiles(repo, latest.sha, headSha, token) : null;
     // The pulls commits API lists at most 250; a longer PR isn't a bot bump.
     const dependencyBot =
         DEPENDENCY_BOTS.has(String(pull.user?.login ?? "").toLowerCase()) &&
