@@ -77,14 +77,80 @@ describe("RemotesView", () => {
         const headings = Array.from(document.querySelectorAll(".remotes-section-heading")).map((h) => h.textContent);
         expect(headings).toEqual(["SSH hosts", "Recent", "WSL"]);
 
-        const row = document.querySelector('[data-remote="db1"]')!;
-        expect(row.textContent).toContain("prod-db");
-        expect(row.querySelector(".remotes-realname")?.textContent).toBe("db1");
-        expect(row.textContent).toContain("Linux · x86_64");
-        expect(row.textContent).toContain("Helper 0.59.9");
-        expect(row.textContent).toContain("2 sessions · 1 agent");
-        expect(row.querySelector(".remotes-dot")?.classList.contains("is-connected")).toBe(true);
-        expect((row.querySelector(".remotes-swatch") as HTMLElement).style.background).not.toBe("");
+        const card = document.querySelector('[data-remote="db1"]') as HTMLElement;
+        expect(card.classList.contains("ui-card")).toBe(true);
+        expect(card.querySelector(".ui-card-title")?.textContent).toBe("prod-db");
+        expect(card.querySelector(".remotes-realname")?.textContent).toBe("db1");
+        expect(card.querySelector(".ui-card-subtitle")?.textContent).toContain("Linux · x86_64");
+        expect(card.querySelector(".ui-card-meta")?.textContent).toContain("Helper 0.59.9");
+        expect(card.querySelector(".ui-card-meta")?.textContent).toContain("2 sessions · 1 agent");
+        expect(card.querySelector(".ui-card-status")?.classList.contains("ui-status-dot--ok")).toBe(true);
+        expect(card.style.getPropertyValue("--ui-card-edge")).toBe("#e5484d");
+        expect(card.querySelector(".fa-terminal")).not.toBeNull();
+        expect(document.querySelector('[data-remote="Ubuntu"] .fa-linux')).not.toBeNull();
+    });
+
+    it("shows a remote's connection on its status dot, with the error in the tooltip", async () => {
+        await renderWith([
+            remote("a", { status: { state: "connected", error: "" } }),
+            remote("b", { status: { state: "connecting", error: "" } }),
+            remote("c", { status: { state: "error", error: "Connection refused" } }),
+            remote("d", { status: { state: "disconnected", error: "" } }),
+        ]);
+        const dot = (name: string) => document.querySelector(`[data-remote="${name}"] .ui-card-status`)!;
+        expect(dot("a").classList.contains("ui-status-dot--ok")).toBe(true);
+        expect(dot("b").classList.contains("ui-status-dot--busy")).toBe(true);
+        expect(dot("c").classList.contains("ui-status-dot--error")).toBe(true);
+        expect(dot("d").classList.contains("ui-status-dot--idle")).toBe(true);
+        expect(dot("a").getAttribute("title")).toBe("Connected");
+        expect(dot("c").getAttribute("title")).toBe("Error: Connection refused");
+        expect(dot("d").getAttribute("title")).toBe("Not connected");
+        // Only the failed one asks for attention.
+        expect(document.querySelector('[data-remote="c"]')!.classList.contains("is-attention")).toBe(true);
+        expect(document.querySelector('[data-remote="a"]')!.classList.contains("is-attention")).toBe(false);
+    });
+
+    it("draws the colour edge only for a remote with a colour, and dims a hidden one", async () => {
+        await renderWith([
+            remote("red", { settings: { "display:color": "#e5484d" } }),
+            remote("plain"),
+            remote("gone", { settings: { "display:hidden": true } }),
+        ]);
+        const card = (name: string) => document.querySelector(`[data-remote="${name}"]`) as HTMLElement;
+        expect(card("red").classList.contains("has-edge")).toBe(true);
+        expect(card("red").style.getPropertyValue("--ui-card-edge")).toBe("#e5484d");
+        expect(card("plain").classList.contains("has-edge")).toBe(false);
+        expect(card("plain").style.getPropertyValue("--ui-card-edge")).toBe("");
+        fireEvent.click(screen.getByRole("button", { name: /Hidden \(1\)/ }));
+        expect(card("gone").classList.contains("is-muted")).toBe(true);
+        expect(card("red").classList.contains("is-muted")).toBe(false);
+    });
+
+    it("opens a card's details below its row, and keeps them through a refresh", async () => {
+        const { model } = await renderWith([remote("db1"), remote("web")]);
+        expect(document.querySelector(".remotes-detail")).toBeNull();
+        const card = document.querySelector('[data-remote="db1"]') as HTMLElement;
+        fireEvent.click(card);
+        expect(card.getAttribute("aria-expanded")).toBe("true");
+        const detail = document.querySelector(".ui-card-detail")!;
+        expect(detail.querySelector(".remotes-detail")).not.toBeNull();
+        // The grid's own row after the card's cell, not inside the card.
+        expect(detail.parentElement?.classList.contains("ui-card-grid")).toBe(true);
+        expect(card.contains(detail)).toBe(false);
+        const cells = [...detail.parentElement!.children];
+        expect(cells.indexOf(detail)).toBeGreaterThan(cells.indexOf(card.closest(".ui-card-cell")!));
+
+        // A refresh brings new record objects: the card and its details stay
+        // (a half-typed nickname isn't lost), and show the new state.
+        const nick = screen.getByPlaceholderText("db1");
+        rpc.RemotesListCommand.mockResolvedValue([remote("db1", { sessions: 1, status: { state: "connected", error: "" } }), remote("web")]);
+        await model.refresh();
+        expect(screen.getByPlaceholderText("db1")).toBe(nick);
+        expect(document.querySelector('[data-remote="db1"]')).toBe(card);
+        expect(screen.getByRole("button", { name: "Disconnect" })).toBeTruthy();
+
+        fireEvent.click(card);
+        expect(document.querySelector(".remotes-detail")).toBeNull();
     });
 
     it("keeps Hidden collapsed until opened", async () => {
