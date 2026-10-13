@@ -17,6 +17,7 @@ import { useTick } from "@/app/hook/useTick";
 import { estimateTokenCount, formatCompactNumber } from "@/util/format-count";
 import { formatElapsedClock, formatExactTime, formatTimeAgo } from "@/util/format-time";
 import { useNodePeek } from "../hooks/useNodePeek";
+import { createBodyMount } from "./body-mount";
 import { ChunkPreview } from "./ChunkPreview";
 import { PeekOverlay } from "./PeekOverlay";
 import { PeekMetaRow } from "./PeekMetaRow";
@@ -64,6 +65,9 @@ export const PersistentShellBlock = (props: PersistentShellBlockProps): JSX.Elem
 
     // Pin-to-expand only (virtualization/disclosure.ts).
     const expanded = () => rowDisclosure(props.node, { pinned: props.pinned }).open;
+    // The log is built only while the panel is open, and for a moment after
+    // (SPEC_TOOL_BODY_UNMOUNT_ON_COLLAPSE_2026_10_12.md §3).
+    const logMounted = createBodyMount(expanded);
 
     // Peek tooltip (SPEC_TRANSCRIPT_NODE_HOVER_PEEK_ALL_KINDS_2026_08_25).
     // Suppressed once expanded — the full command is already visible in the
@@ -156,10 +160,13 @@ export const PersistentShellBlock = (props: PersistentShellBlockProps): JSX.Elem
                     </div>
                     <div class="agent-tool-overlay-log">
                         {/* Joined into lines, collapsed and capped the way every
-                            streamed log is (ChunkPreview.tsx). */}
-                        <ChunkPreview chunks={props.node.log.chunks} linkify />
-                        <Show when={props.node.log.open}>
-                            <div class="agent-shell-streaming-indicator" />
+                            streamed log is (ChunkPreview.tsx). Only while the
+                            panel is open (and briefly after), like a tool's body. */}
+                        <Show when={logMounted()}>
+                            <ChunkPreview chunks={props.node.log.chunks} linkify />
+                            <Show when={props.node.log.open}>
+                                <div class="agent-shell-streaming-indicator" />
+                            </Show>
                         </Show>
                     </div>
                 </div>
