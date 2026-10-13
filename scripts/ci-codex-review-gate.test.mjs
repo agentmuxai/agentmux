@@ -12,6 +12,7 @@ import {
     isDependencyBotPr,
     isDocsOnlyPath,
     latestCodexOutput,
+    needsDiffSince,
     reviewedCommit,
     SKIP_AUTHOR,
     skippedHead,
@@ -584,5 +585,19 @@ describe("dependency bot PRs", () => {
 
     it("without the flag the same PR still waits", () => {
         expect(evaluateCodexGate({ headSha: HEAD }).state).toBe("pending");
+    });
+});
+
+describe("needsDiffSince", () => {
+    it("fetches the diff for an OK or any findings on an earlier commit", () => {
+        expect(needsDiffSince({ kind: "ok", sha: OLD.slice(0, 10) }, HEAD)).toBe(true);
+        // Code findings too: with only docs since, the gate fails instead of waiting.
+        expect(needsDiffSince({ kind: "findings", sha: OLD.slice(0, 10), files: new Set(["src/a.rs"]) }, HEAD)).toBe(true);
+    });
+
+    it("skips it for the head itself, a quota answer, or no answer", () => {
+        expect(needsDiffSince({ kind: "findings", sha: HEAD.slice(0, 10) }, HEAD)).toBe(false);
+        expect(needsDiffSince({ kind: "quota", sha: OLD.slice(0, 10) }, HEAD)).toBe(false);
+        expect(needsDiffSince(null, HEAD)).toBe(false);
     });
 });

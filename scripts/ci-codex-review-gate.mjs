@@ -244,6 +244,19 @@ export function latestCodexOutput({ comments = [], reviews = [], reviewComments 
 }
 
 /**
+ * Whether `evaluateCodexGate` needs the files changed since Codex's latest
+ * verdict: an OK or findings about an earlier commit. An OK or docs-only
+ * findings carry across a docs-only diff, and other findings with only docs
+ * since fail; any other answer decides without it.
+ */
+export function needsDiffSince(latest, headSha) {
+    return (
+        (latest?.kind === "ok" || latest?.kind === "findings") &&
+        !String(headSha).toLowerCase().startsWith(latest.sha)
+    );
+}
+
+/**
  * Decide the status for `headSha` from the PR's issue comments, reviews and
  * review comments (GitHub REST shapes). The latest Codex output naming this
  * head wins, so a spontaneous findings review after an OK takes the OK back.
@@ -301,7 +314,6 @@ export function evaluateCodexGate({
     const latest = all.at(-1);
     // muxreview re-asks for any non-doc change after either verdict, so an OK
     // or docs-only findings carry only across a docs-only diff.
-    // carry only across a docs-only diff; a code change waits for Codex.
     const onlyDocsSince = Array.isArray(filesSinceLatest) && filesSinceLatest.every(isDocsOnlyPath);
     if (latest?.kind === "ok" && onlyDocsSince) {
         return { state: "success", description: `Codex OK on ${latest.sha}; only docs changed since` };
@@ -388,13 +400,8 @@ async function main() {
         // Inline comments: the files each findings review flagged.
         ghAll(`/repos/${repo}/pulls/${pr}/comments`, token),
     ]);
-    // Only an OK or docs-only findings on an earlier commit can carry, so
-    // only then is the diff worth fetching.
     const latest = latestCodexOutput({ comments, reviews, reviewComments });
-    const filesSinceLatest =
-        (latest?.kind === "ok" || isDocsOnlyFindings(latest)) && !headSha.toLowerCase().startsWith(latest.sha)
-            ? await changedFiles(repo, latest.sha, headSha, token)
-            : null;
+    const filesSinceLatest = needsDiffSince(latest, headSha) ? await changedFiles(repo, latest.sha, headSha, token) : null;
     // The pulls commits API lists at most 250; a longer PR isn't a bot bump.
     const dependencyBot =
         DEPENDENCY_BOTS.has(String(pull.user?.login ?? "").toLowerCase()) &&
