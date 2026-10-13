@@ -817,8 +817,6 @@
             "command": "resolvecli",
             "method": "ResolveCliCommand",
             "optionalFields": [
-                "windows_install_command",
-                "unix_install_command",
                 "block_id"
             ]
         },

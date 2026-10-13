@@ -46,15 +46,20 @@ fn controllerinput_takes_a_signal_a_resize_or_input_alone() {
 }
 
 #[test]
-fn resolvecli_takes_a_request_without_install_commands_or_block() {
+fn resolvecli_takes_a_request_without_a_block() {
+    // Only block_id is optional in the stub. The install commands are defaulted too, but
+    // stay required there: resolving with a silently empty install command is a worse
+    // failure than a compile error.
     let r: CommandResolveCliData = serde_json::from_value(json!({
         "provider_id": "claude",
         "cli_command": "claude",
         "npm_package": "@anthropic-ai/claude-code",
         "pinned_version": "latest",
+        "windows_install_command": "irm https://claude.ai/install.ps1 | iex",
+        "unix_install_command": "curl -fsSL https://claude.ai/install.sh | bash",
     }))
     .unwrap();
-    assert_eq!((r.windows_install_command.as_str(), r.unix_install_command.as_str(), r.block_id.as_str()), ("", "", ""));
+    assert_eq!(r.block_id, "");
 }
 
 #[test]

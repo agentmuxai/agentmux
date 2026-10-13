@@ -1515,8 +1515,7 @@ export const GeneratedApi = {
   // command "resolvecli"
   ResolveCliCommand(
     client: RpcClient,
-    data: Omit<CommandResolveCliData, "windows_install_command" | "unix_install_command" | "block_id"> &
-      Partial<Pick<CommandResolveCliData, "windows_install_command" | "unix_install_command" | "block_id">>,
+    data: Omit<CommandResolveCliData, "block_id"> & Partial<Pick<CommandResolveCliData, "block_id">>,
     opts?: RpcOpts
   ): Promise<ResolveCliResult> {
     return client.rpcCall("resolvecli", data, opts);

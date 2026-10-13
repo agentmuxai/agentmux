@@ -24,25 +24,6 @@ export type { ToolchainPruneResult } from "@/types/rpc/ToolchainPruneResult";
 export type { ToolchainPruneSkip } from "@/types/rpc/ToolchainPruneSkip";
 export type { ToolchainVersionsReq } from "@/types/rpc/ToolchainVersionsReq";
 
-import type { CommandResolveCliData } from "@/types/rpc/CommandResolveCliData";
-
-/**
- * What a `resolvecli` caller may send.
- *
- * `block_id` is `#[serde(default)]` on a `String` -- omitting it means "do
- * not stream install output anywhere", which is what every caller but the
- * Toolchain modal wants. ts-rs can only mark a field optional for
- * `Option<T>`, so the generated type calls it required; deriving restores
- * exactly what the hand-written declaration said.
- *
- * The two install-command fields are `serde(default)` too, but stay REQUIRED
- * here: the hand-written type required them, every caller passes them, and a
- * resolve that silently falls back to an empty install command is a worse
- * failure than a compile error.
- */
-export type ResolveCliInput = Omit<CommandResolveCliData, "block_id"> &
-    Partial<Pick<CommandResolveCliData, "block_id">>;
-
 // The connection-scoped event/config shapes are GENERATED from Rust by ts-rs.
 export type { CommandEventReadHistoryData } from "@/types/rpc/CommandEventReadHistoryData";
 export type { NoArgsReq } from "@/types/rpc/NoArgsReq";
