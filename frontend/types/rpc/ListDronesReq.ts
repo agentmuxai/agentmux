@@ -7,4 +7,4 @@
  * `data` sends `null`, and serde accepts each of those from only one of
  * `()` and a struct. `Option<Self>` takes both.
  */
-export type ListDronesReq = Record<string, never>;
+export type ListDronesReq = Record<symbol, never>;

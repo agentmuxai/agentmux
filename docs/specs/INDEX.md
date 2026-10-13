@@ -491,6 +491,7 @@ partial list.
 | [`SPEC_TOWER_AGENT_CENTRIC_VIEWS_2026_10_08`](SPEC_TOWER_AGENT_CENTRIC_VIEWS_2026_10_08.md) | SPEC: Tower, agent first: an Agents rail and a Processes list grouped by agent |
 | [`SPEC_TRANSCRIPT_NODE_HOVER_PEEK_2026_08_03`](SPEC_TRANSCRIPT_NODE_HOVER_PEEK_2026_08_03.md) | Spec: hover-to-peek on tool calls and thinking clumps |
 | [`SPEC_TRANSCRIPT_NODE_HOVER_PEEK_ALL_KINDS_2026_08_25`](SPEC_TRANSCRIPT_NODE_HOVER_PEEK_ALL_KINDS_2026_08_25.md) | Spec: hover-to-peek on EVERY transcript node kind, 50ms delay |
+| [`SPEC_TSRS_SERDE_ATTRIBUTE_WARNINGS_2026_10_13`](SPEC_TSRS_SERDE_ATTRIBUTE_WARNINGS_2026_10_13.md) | ts-rs drops serde attributes it can't parse |
 | [`SPEC_TYPED_EVENTS_EVERY_PATH_2026_10_13`](SPEC_TYPED_EVENTS_EVERY_PATH_2026_10_13.md) | Typed events on every path |
 | [`SPEC_TYPED_EVENT_PAYLOADS_2026_10_13`](SPEC_TYPED_EVENT_PAYLOADS_2026_10_13.md) | Typed event payloads |
 | [`SPEC_UI_MANUAL_SCREENSHOT_TOOLING_2026_09_19`](SPEC_UI_MANUAL_SCREENSHOT_TOOLING_2026_09_19.md) | SPEC: Reusable, cropped screenshot tooling for the user manual |

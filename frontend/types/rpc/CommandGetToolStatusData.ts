@@ -5,4 +5,4 @@
  * be a struct rather than `()`: the stub calls it with no argument, which the
  * RPC client sends as `{}`, and serde deserializes `()` only from JSON `null`.
  */
-export type CommandGetToolStatusData = Record<string, never>;
+export type CommandGetToolStatusData = Record<symbol, never>;

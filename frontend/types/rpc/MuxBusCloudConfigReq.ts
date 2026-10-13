@@ -4,4 +4,4 @@
  * Empty request for `muxbus.cloudconfig`: a struct rather than `()` so the
  * stub's `{}` deserializes, like the request shapes above.
  */
-export type MuxBusCloudConfigReq = Record<string, never>;
+export type MuxBusCloudConfigReq = Record<symbol, never>;

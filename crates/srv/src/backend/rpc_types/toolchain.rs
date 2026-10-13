@@ -34,7 +34,6 @@ pub struct ToolchainEnvResult {
     /// the `ts` one the generated binding would say `path_source` — a key
     /// nothing sends and nothing reads.
     #[serde(rename = "pathSource")]
-    #[ts(rename = "pathSource")]
     pub path_source: String,
     pub os: String,
     pub arch: String,

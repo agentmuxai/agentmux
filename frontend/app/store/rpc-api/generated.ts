@@ -1998,7 +1998,7 @@ export const GeneratedApi = {
     client: RpcClient,
     data: ToolchainVersionsReq,
     opts?: RpcOpts
-  ): Promise<{ [key in string]?: string | null }> {
+  ): Promise<{ [key in string]: string | null }> {
     return client.rpcCall("toolchain.versions", data, opts);
   },
   // command "tooldecision"

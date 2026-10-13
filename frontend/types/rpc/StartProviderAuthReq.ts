@@ -45,7 +45,7 @@ authCheckArgs: Array<string>,
  * isolation env vars come here (CLAUDE_CONFIG_DIR, CODEX_HOME,
  * GEMINI_CLI_HOME, etc.).
  */
-authEnv: { [key in string]?: string }, 
+authEnv: { [key in string]: string }, 
 /**
  * Spawn the auth login subprocess under a PTY (instead of plain
  * piped stdio). Required by providers whose auth subcommand

@@ -9,4 +9,4 @@
  * `bookmarks.list`. An empty struct generates `Record<string, never>`, which
  * is what the hand-written stub already declared.
  */
-export type CommandFleetGroupListData = Record<string, never>;
+export type CommandFleetGroupListData = Record<symbol, never>;

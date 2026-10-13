@@ -4,4 +4,4 @@
  * The empty answer of `fs.unwatch`, `fs.open`, `fs.reveal`, `fs.op.resolve`
  * and `fs.op.cancel`.
  */
-export type FsEmptyResult = Record<string, never>;
+export type FsEmptyResult = Record<symbol, never>;

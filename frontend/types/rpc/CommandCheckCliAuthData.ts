@@ -17,4 +17,4 @@ auth_check_args: Array<string>,
  * Must match the env vars used when spawning the actual subprocess so the check
  * reads credentials from the same isolated directory.
  */
-auth_env: { [key in string]?: string }, };
+auth_env: { [key in string]: string }, };

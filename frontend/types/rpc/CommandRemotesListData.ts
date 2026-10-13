@@ -3,4 +3,4 @@
 /**
  * `remoteslist`: no arguments.
  */
-export type CommandRemotesListData = Record<string, never>;
+export type CommandRemotesListData = Record<symbol, never>;

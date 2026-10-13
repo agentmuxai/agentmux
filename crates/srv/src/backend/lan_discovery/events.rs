@@ -10,7 +10,6 @@ use super::LanInstance;
 /// `laninstances`: the LAN peers this instance sees now.
 #[derive(Debug, Clone, Serialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
-#[serde(transparent)]
 pub struct LanInstanceList(pub Vec<LanInstance>);
 
 /// `laninstances:error`: why LAN discovery couldn't start, or a rebuild failed.

@@ -3,4 +3,4 @@
 /**
  * `mcp.observed.list` — window-scoped, no parameters.
  */
-export type McpObservedListData = Record<string, never>;
+export type McpObservedListData = Record<symbol, never>;

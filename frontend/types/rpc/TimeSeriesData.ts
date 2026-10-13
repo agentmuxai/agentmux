@@ -3,7 +3,7 @@
 /**
  * Matches Go's `TimeSeriesData`
  */
-export type TimeSeriesData = { ts: number, values: { [key in string]?: number }, 
+export type TimeSeriesData = { ts: number, values: { [key in string]: number }, 
 /**
  * Backend uptime in seconds, from a MONOTONIC clock (`sysinfo::uptime_secs`)
  * — NOT `ts` minus some earlier wall-clock stamp. Only the top-level

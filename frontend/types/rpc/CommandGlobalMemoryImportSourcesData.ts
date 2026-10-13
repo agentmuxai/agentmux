@@ -3,4 +3,4 @@
 /**
  * `globalmemory:import_sources` — no arguments.
  */
-export type CommandGlobalMemoryImportSourcesData = Record<string, never>;
+export type CommandGlobalMemoryImportSourcesData = Record<symbol, never>;
