@@ -24,6 +24,7 @@ import {
     onMount,
     type Accessor,
 } from "solid-js";
+import { describeTermRenderer, termRendererOf } from "@/app/store/term-renderer";
 import "./blockstats.scss";
 import { Tooltip } from "./tooltip";
 
@@ -145,6 +146,17 @@ function Row(props: { label: string; value: string; meaning?: string }) {
     );
 }
 
+/** The terminal's renderer: WebGL, DOM, or WebGL with its context lost (store/term-renderer.ts). */
+function RendererRow(props: { blockId: string }) {
+    return (
+        <Show when={termRendererOf(props.blockId)}>
+            {(r) => (
+                <Row label="Renderer" value={describeTermRenderer(r()).value} meaning={describeTermRenderer(r()).meaning} />
+            )}
+        </Show>
+    );
+}
+
 /**
  * A local pane's tooltip. Mounted only while it is open, so it asks srv for
  * the processes' detail (a process snapshot, tens of milliseconds) only then.
@@ -205,6 +217,7 @@ function LocalTooltip(props: { blockId: string; stats: BlockStats }) {
                     />
                 </Show>
                 <Row label="Peak" value={formatBytes(props.stats.peak)} meaning="the highest Memory has been" />
+                <RendererRow blockId={props.blockId} />
             </div>
             <div class="bst-footer">
                 The shell and everything started in it. Updated every second; hide with term:showstatsbadge.
@@ -214,7 +227,7 @@ function LocalTooltip(props: { blockId: string; stats: BlockStats }) {
 }
 
 /** A remote pane's tooltip: what its machine said on the badge's last ask. */
-function RemoteTooltip(props: { detail: BlockStatsDetail }) {
+function RemoteTooltip(props: { blockId: string; detail: BlockStatsDetail }) {
     const remote = () => props.detail.remote;
     const figures = () => remote()?.figures;
     const host = () => remote()?.host;
@@ -291,6 +304,7 @@ function RemoteTooltip(props: { detail: BlockStatsDetail }) {
                         </>
                     )}
                 </Show>
+                <RendererRow blockId={props.blockId} />
             </div>
             <div class="bst-footer">
                 Updated every 2 seconds while the pane is visible; hide with term:showstatsbadge.
@@ -350,7 +364,7 @@ function RemoteBadge(props: { blockId: string; noHeader?: boolean }) {
                         placement="bottom"
                         immediate
                         divClassName={`block-stats-badge remote ${shown()?.host ? "host" : ""} ${cpuClass()} ${props.noHeader ? "no-header" : ""}`}
-                        content={<RemoteTooltip detail={d()} />}
+                        content={<RemoteTooltip blockId={props.blockId} detail={d()} />}
                     >
                         <span class="stats-cpu">
                             {shown() ? (shown()!.host ? `host ${shown()!.cpu}` : shown()!.cpu) : "–"}
