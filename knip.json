@@ -4,16 +4,15 @@
         "scripts/**/*.{js,mjs,cjs}",
         "tools/**/*.{js,mjs}",
         "sdk/**/*.{js,mjs,ts}",
-        "crates/**/*.js"
+        "crates/**/*.js",
+        "frontend/**/*.{darwin,linux}.{ts,tsx}"
     ],
-    "ignore": [
+    "ignore": ["docs/examples/**"],
+    "ignoreFiles": [
         "frontend/types/rpc/**",
         "public/**",
-        "docs/examples/**",
         "sdk/**/*.css",
-        "**/*.darwin.*",
-        "**/*.linux.*",
-        "**/*.win32.scss"
+        "frontend/**/*.{darwin,linux,win32}.scss"
     ],
     "ignoreDependencies": [
         "@emnapi/core",

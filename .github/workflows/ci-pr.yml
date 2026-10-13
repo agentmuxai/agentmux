@@ -747,8 +747,9 @@ jobs:
       # that only resolves because npm hoisted someone else's dependency.
       # Also fails on a source file nothing imports: delete it, or if it
       # is run or loaded another way, say so in knip.json (`entry` for a
-      # script or tool run by hand, `ignore` for generated, platform-resolved
-      # or URL-loaded files).
+      # script or tool run by hand and the macOS/Linux variants the
+      # platformResolve plugin picks, so their imports are still checked;
+      # `ignoreFiles` for generated or URL-loaded files).
       # knip.json's ignores: @emnapi/* are pinned on purpose (#2448, npm ci
       # on Linux); "react" is a dead `/// <reference types>` in
       # frontend/types/jsx.d.ts; `task` is the go-task binary.
