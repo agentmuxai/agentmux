@@ -1,7 +1,7 @@
 # Spec: `<Key>` slots must not keep old rows alive
 
 **Date:** 2026-10-12
-**Status:** Active, implemented together with this spec. Item 1 of `PLAN_RENDERER_MEMORY_FIXES_2026_10_12.md`.
+**Status:** Active, implemented together with this spec in #4751. Item 1 of `PLAN_RENDERER_MEMORY_FIXES_2026_10_12.md`.
 **Evidence:** `docs/reports/REPORT_RENDERER_MEMORY_ROOT_CAUSES_2026_10_12.md` §4.2.
 
 ## 1. The problem
