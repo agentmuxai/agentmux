@@ -1169,6 +1169,10 @@
             "method": "ToolDecisionCommand"
         },
         {
+            "command": "blockstats.detail",
+            "method": "BlockStatsDetailCommand"
+        },
+        {
             "command": "tower.forget",
             "method": "TowerForgetCommand"
         },

@@ -1090,6 +1090,9 @@ pub async fn run_sysinfo_loop(broker: Arc<Broker>, config_watcher: Arc<ConfigSta
     #[cfg(target_os = "windows")]
     let mut last_urgent_attribution: Option<Instant> = None;
 
+    // Each pane badge's highest memory, for its tooltip.
+    let mut peaks = crate::backend::blockstats_detail::Peaks::default();
+
     let mut current_interval = get_interval_secs(&config_watcher);
     let mut ticker = tokio::time::interval(Duration::from_secs_f64(current_interval));
     ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
@@ -1204,6 +1207,7 @@ pub async fn run_sysinfo_loop(broker: Arc<Broker>, config_watcher: Arc<ConfigSta
         // Per-pane process tree metrics: aggregate CPU/mem across each block's
         // shell process and all its descendants.
         let block_pids = pidregistry::get_all();
+        peaks.retain(|id| block_pids.iter().any(|(b, _)| b == id));
         if !block_pids.is_empty() {
             // Pass 1: cheap minimal refresh of all processes to populate parent()
             // links. ProcessRefreshKind::nothing() skips CPU/mem — just PID/PPID.
@@ -1279,6 +1283,8 @@ pub async fn run_sysinfo_loop(broker: Arc<Broker>, config_watcher: Arc<ConfigSta
                 block_values.insert("cpu".to_string(), total_cpu);
                 block_values.insert("mem".to_string(), total_mem as f64);
                 block_values.insert("pids".to_string(), live_count as f64);
+                let peak = peaks.observe(block_id, root_pid.as_u32(), total_mem);
+                block_values.insert("mem:peak".to_string(), peak as f64);
 
                 let block_ts = TimeSeriesData {
                     ts: now,

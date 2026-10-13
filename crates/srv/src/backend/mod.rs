@@ -117,6 +117,7 @@ pub mod posix_shell;
 pub mod shellintegration;
 pub mod swarm_remote;
 pub mod sysinfo;
+pub mod blockstats_detail;
 pub mod tower_agentmux;
 pub mod tower_peers;
 pub mod tower_remote;

@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 
 mod agent;
 mod attachments;
+mod blockstats;
 mod block;
 mod commands;
 mod editor;
@@ -43,6 +44,7 @@ mod optional_fields_tests;
 
 pub use agent::*;
 pub use attachments::*;
+pub use blockstats::*;
 pub use block::*;
 pub use commands::*;
 pub use editor::*;
