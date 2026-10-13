@@ -280,25 +280,6 @@ declare global {
               durationMs: number;
           };
 
-    /**
-     * Wire shape of one pre-launch OAuth session's current status.
-     * Mirror of `crates/srv/src/identity/auth_session.rs::AuthSessionStatus`
-     * (`#[serde(tag = "status", rename_all = "kebab-case",
-     * rename_all_fields = "camelCase")]`). Spec:
-     * `docs/specs/SPEC_PRE_LAUNCH_OAUTH_FLOW_2026_05_14.md` §7.
-     */
-    type AuthSessionStatus =
-        | { status: "pending" }
-        | { status: "url-available"; authUrl: string }
-        | { status: "code-emitted"; deviceCode: string; verificationUrl: string }
-        | { status: "success"; bundleId: string; email: string | null; accountId?: string }
-        | { status: "failed"; error: string };
-
-    /** What `auth.poll` answers: crates/srv/src/identity/auth_session.rs's
-     *  PollSessionResult, `{ providerId, ...AuthSessionStatus }` (the status is
-     *  serde-flattened, which ts-rs can't render, so this stays hand-written). */
-    type PollSessionResult = AuthSessionStatus & { providerId: string };
-
     type AgentRunResult = {
         response: string;
         tokens: TokenCounts;

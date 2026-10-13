@@ -40,6 +40,7 @@ const FINISHED_RETENTION_SECS: u64 = 300;
 const SWEEP_INTERVAL_SECS: u64 = 30;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(
     tag = "status",
     rename_all = "kebab-case",
@@ -70,6 +71,7 @@ pub enum AuthSessionStatus {
         /// that mode; existing bundle-mode callers never populate
         /// this field, so it's skipped on the wire when absent.
         #[serde(skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
         account_id: Option<String>,
     },
     /// Auth attempt failed. `error` is a short human-readable phrase
@@ -153,6 +155,7 @@ pub struct StartSessionResult {
 /// Snapshot returned by `poll_session`. Mirrors `AuthSessionStatus`
 /// plus the provider id for renderer dispatch.
 #[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "camelCase")]
 pub struct PollSessionResult {
     pub provider_id: String,

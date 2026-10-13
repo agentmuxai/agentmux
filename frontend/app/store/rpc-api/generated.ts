@@ -317,6 +317,7 @@ import type { NotifyTakeActivationResult } from "@/types/rpc/NotifyTakeActivatio
 import type { OAuthSessionReq } from "@/types/rpc/OAuthSessionReq";
 import type { OpenInShellReq } from "@/types/rpc/OpenInShellReq";
 import type { PollProviderAuthReq } from "@/types/rpc/PollProviderAuthReq";
+import type { PollSessionResult } from "@/types/rpc/PollSessionResult";
 import type { PresencePublishNowResult } from "@/types/rpc/PresencePublishNowResult";
 import type { PresenceStatusResult } from "@/types/rpc/PresenceStatusResult";
 import type { ProbeResult } from "@/types/rpc/ProbeResult";
