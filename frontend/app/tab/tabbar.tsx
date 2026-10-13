@@ -314,9 +314,9 @@ function TabBar(props: TabBarProps): JSX.Element {
 
     const activeIndex = () => tabIds().indexOf(displayActiveTabId());
 
-    // Keep the active tab visible when the strip scrolls; the last tab also
-    // brings the drag square after it into view (SPEC_TAB_BAR_DRAG_GUTTER_2026_10_04
-    // §3). After a frame, so a just-created tab has mounted and been laid out.
+    // Keep the active tab visible when the strip scrolls; the last tab scrolls
+    // the strip to its end (SPEC_TAB_BAR_DRAG_GUTTER_2026_10_04 §3). After a
+    // frame, so a just-created tab has mounted and been laid out.
     createEffect(
         on(displayActiveTabId, (tabId) => {
             if (!tabId) return;

@@ -43,6 +43,17 @@ describe("PaneGrip", () => {
         expect(onMenu).toHaveBeenCalledTimes(1);
     });
 
+    it("a double-click on the grip doesn't reach the header (no magnify)", () => {
+        const onDbl = vi.fn();
+        const { container } = render(() => (
+            <div onDblClick={onDbl}>
+                <PaneGrip />
+            </div>
+        ));
+        fireEvent.dblClick(container.querySelector(".pane-grip")!);
+        expect(onDbl).not.toHaveBeenCalled();
+    });
+
     it("Enter and Space open the pane menu too", () => {
         const { grip, onMenu } = mount();
         fireEvent.keyDown(grip, { key: "Enter" });

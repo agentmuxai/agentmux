@@ -59,6 +59,9 @@ export const PaneGrip = (props: {
             if (gripClickWasDrag(e)) return;
             openPaneMenuFrom(e.currentTarget);
         }}
+        // A double-click on the header magnifies the pane; on the grip it is
+        // two clicks on a control, like the pane controls beside it.
+        onDblClick={(e) => e.stopPropagation()}
         onKeyDown={(e) => {
             if (e.key !== "Enter" && e.key !== " ") return;
             e.preventDefault();
