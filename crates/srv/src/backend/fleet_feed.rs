@@ -18,7 +18,9 @@
 //! SPEC_AGENT_STATUS_AND_LIVE_PANE_FEED_2026_10_07 §3.2, §13.1) each agent's
 //! state and since when (`agent_status`, `backend::agent_state`), with this
 //! machine's clock (`now_ms`); and, while it is up, the viewer listener's port
-//! (same spec §13.2), which opens nothing by itself. The cloud presence publisher
+//! (same spec §13.2), which opens nothing by itself; and (owner decision
+//! 2026-10-13) each agent's summary line (`agent_lines`, `backend::agent_line`),
+//! absent while `swarm:sharesummaries` is off. The cloud presence publisher
 //! (`muxbus::wan_presence`) reads the same snapshot.
 
 use std::collections::BTreeMap;
@@ -62,6 +64,8 @@ pub struct FleetSnapshot {
     /// This channel plus the other running channels of this machine, 1..=99.
     pub channels_running: u32,
     pub agent_status: Arc<BTreeMap<String, AgentStatus>>,
+    /// Each agent's summary line, by name, for agents that have one.
+    pub agent_lines: Arc<BTreeMap<String, String>>,
     /// The viewer listener's port while it is up (`backend::viewer`), so a
     /// paired device finds it again after an address change.
     pub viewer_port: Option<u16>,
@@ -75,6 +79,7 @@ pub struct FleetObservation {
     pub agents: Vec<(String, Option<AgentKind>)>,
     pub channels_running: u32,
     pub agent_status: BTreeMap<String, AgentStatus>,
+    pub agent_lines: BTreeMap<String, String>,
 }
 
 /// The `/agentmux/fleet` body, in the contract's field order.
@@ -93,6 +98,8 @@ struct FleetBody<'a> {
     agent_kinds: &'a BTreeMap<String, AgentKind>,
     now_ms: u64,
     agent_status: &'a BTreeMap<String, AgentStatus>,
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    agent_lines: &'a BTreeMap<String, String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     viewer_port: Option<u16>,
 }
@@ -150,6 +157,7 @@ impl FleetFeed {
             agent_kinds: Arc::new(BTreeMap::new()),
             channels_running: 1,
             agent_status: Arc::new(BTreeMap::new()),
+            agent_lines: Arc::new(BTreeMap::new()),
             viewer_port: None,
         });
         Self {
@@ -235,6 +243,7 @@ impl FleetFeed {
             agent_kinds: &snapshot.agent_kinds,
             now_ms,
             agent_status: &snapshot.agent_status,
+            agent_lines: &snapshot.agent_lines,
             viewer_port: snapshot.viewer_port,
         })
         .unwrap_or_default()
@@ -242,18 +251,21 @@ impl FleetFeed {
 
     /// Record the current fleet; bumps `rev` and wakes every stream only if
     /// it differs from the last one (names, kinds, channel count, any
-    /// agent's state or the viewer port). Returns whether it did.
+    /// agent's state or line, or the viewer port). Returns whether it did.
     pub fn observe_fleet(&self, observation: FleetObservation) -> bool {
         let (names, kinds) = normalize_agents(observation.agents);
         let channels_running = observation.channels_running.clamp(1, 99);
         let mut status = observation.agent_status;
         status.retain(|name, _| names.contains(name));
+        let mut lines = observation.agent_lines;
+        lines.retain(|name, _| names.contains(name));
         let viewer_port = Some(self.viewer_port.load(Ordering::Relaxed)).filter(|p| *p != 0);
         self.tx.send_if_modified(|current| {
             if *current.agents == names
                 && *current.agent_kinds == kinds
                 && current.channels_running == channels_running
                 && *current.agent_status == status
+                && *current.agent_lines == lines
                 && current.viewer_port == viewer_port
             {
                 return false;
@@ -263,6 +275,7 @@ impl FleetFeed {
             current.agent_kinds = Arc::new(kinds);
             current.channels_running = channels_running;
             current.agent_status = Arc::new(status);
+            current.agent_lines = Arc::new(lines);
             current.viewer_port = viewer_port;
             true
         })
@@ -277,6 +290,7 @@ impl FleetFeed {
             agents: names.into_iter().map(|n| (n, None)).collect(),
             channels_running,
             agent_status: BTreeMap::new(),
+            agent_lines: BTreeMap::new(),
         })
     }
 
@@ -489,6 +503,7 @@ mod tests {
             agents: agents.iter().map(|n| (n.to_string(), Some("host"))).collect(),
             channels_running: 1,
             agent_status: status.iter().map(|(n, s)| (n.to_string(), *s)).collect(),
+            ..Default::default()
         }
     }
 
@@ -549,6 +564,24 @@ mod tests {
             }),
             "Clamk has no state; Gone is not listed"
         );
+    }
+
+    #[test]
+    fn agent_lines_are_carried_for_listed_agents_and_a_change_bumps_rev() {
+        let f = feed();
+        let with_lines = |lines: &[(&str, &str)]| FleetObservation {
+            agent_lines: lines.iter().map(|(n, l)| (n.to_string(), l.to_string())).collect(),
+            ..with_status(&["AgentY", "Camper"], &[])
+        };
+        assert!(f.observe_fleet(with_lines(&[("AgentY", "Fixing the login race"), ("Gone", "x")])));
+        let v: serde_json::Value = serde_json::from_str(&f.body_json(&f.snapshot())).unwrap();
+        assert_eq!(v["agent_lines"], serde_json::json!({"AgentY": "Fixing the login race"}), "Gone is not listed");
+        let rev = f.snapshot().rev;
+        assert!(f.observe_fleet(with_lines(&[("AgentY", "Writing the tests")])), "a new line alone is a change");
+        assert_eq!(f.snapshot().rev, rev + 1);
+        assert!(f.observe_fleet(with_lines(&[])));
+        let v: serde_json::Value = serde_json::from_str(&f.body_json(&f.snapshot())).unwrap();
+        assert!(v.get("agent_lines").is_none(), "no lines, no field: {v}");
     }
 
     #[test]

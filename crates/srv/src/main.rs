@@ -257,6 +257,7 @@ async fn main() {
     let fleet_source = backend::fleet_source::FleetSource::live(
         state.reactive_handler,
         Arc::clone(&state.mstore),
+        Arc::clone(&state.config_watcher),
         state.local_web_url.clone(),
     );
     let presence_id_store = Arc::clone(&state.id_store);
