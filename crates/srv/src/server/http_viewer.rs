@@ -378,25 +378,30 @@ impl Default for FeedTiming {
 type StatusProbe = Box<dyn Fn(&str) -> Option<crate::backend::agent_state::AgentStatus> + Send>;
 
 /// What a feed asks about its agent while it runs: the block it runs in now,
-/// whether it has been hidden from paired devices, and its state.
+/// whether it has been hidden from paired devices, its state, and the
+/// provider of a block it moves to.
 pub(crate) struct AgentProbe {
     pub block: Box<dyn Fn() -> Option<String> + Send>,
     pub hidden: Box<dyn Fn(&str) -> bool + Send>,
     pub status: StatusProbe,
+    pub provider: Box<dyn Fn(&str) -> String + Send>,
 }
 
 impl AgentProbe {
     /// The agent registered as `name`: its block from the registry (it moves
-    /// on a respawn), hidden per its definition, and its state from the
-    /// tracker the LAN feed uses (`agent_state::agent_status_of_block`).
+    /// on a respawn), hidden per its definition, its state from the tracker
+    /// the LAN feed uses (`agent_state::agent_status_of_block`), and the
+    /// provider per the block's meta.
     pub(crate) fn of(state: &AppState, name: &str) -> Self {
         let (registry, name) = (state.reactive_handler, name.to_string());
         let hidden_state = state.clone();
+        let provider_state = state.clone();
         let mstore = state.mstore.clone();
         Self {
             block: Box::new(move || registry.get_agent(&name).map(|a| a.block_id.clone())),
             hidden: Box::new(move |block_id| agent_hidden(&hidden_state, block_id)),
             status: Box::new(move |block_id| crate::backend::agent_state::agent_status_of_block(&mstore, block_id)),
+            provider: Box::new(move |block_id| provider_of(&provider_state, block_id)),
         }
     }
 }
@@ -504,13 +509,11 @@ impl FeedSource {
     /// ([`feed::apply_append`]), so nothing is sent twice.
     ///
     /// A cursor on the block's own transcript is left to its events, unless
-    /// it started before any transcript existed and the transcript now read
-    /// is another stream.
+    /// the transcript is now read from another stream: the agent's shared
+    /// transcript started after the snapshot (another srv instance may have
+    /// begun it, and its appends reach no event here).
     async fn catch_up(&self, cursor: &mut Cursor) -> CatchUp {
         let shared = cursor.stream.starts_with("g:");
-        if !shared && !cursor.gen.is_empty() {
-            return CatchUp::Nothing;
-        }
         let Some((stream, gen, total)) = self.position().await else {
             return CatchUp::Nothing;
         };
@@ -623,6 +626,7 @@ pub(crate) fn feed_stream(
     async_stream::stream! {
         let lease = lease;
         let mut source = source;
+        let mut provider = provider;
         // The state last sent to the device; `None` until one exists.
         let mut shown = None;
         // Subscribed before anything is read, so nothing published between
@@ -709,6 +713,8 @@ pub(crate) fn feed_stream(
                         // Subscribed before the catch-up read below, as at
                         // the start, so nothing published in between is missed.
                         sub = source.hub.subscribe(&block);
+                        // Its snapshots are labelled with its own provider.
+                        provider = (probe.provider)(&block);
                         source.block_id = block;
                         if current.stream.starts_with("b:") {
                             // The old block's own transcript: the new one is

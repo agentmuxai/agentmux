@@ -804,8 +804,12 @@ async fn a_feed_follows_its_agent_to_a_new_block() {
     assert_eq!(event, "snapshot");
     assert_eq!(lines_of(&snap), vec!["{\"old\":1}"]);
 
-    // The agent respawns in another block, which writes its own transcript.
+    // The agent respawns in another block, with another provider, which
+    // writes its own transcript.
     let new_block = uuid::Uuid::new_v4().to_string();
+    let mut block = crate::backend::obj::Block { oid: new_block.clone(), ..Default::default() };
+    block.meta.insert("agentProvider".into(), serde_json::json!("codex"));
+    state.mstore.insert(&mut block).unwrap();
     state.reactive_handler.register_agent(&name, &new_block, None).unwrap();
     append(&state, &new_block, "{\"new\":1}");
     let (event, reset) = next_stream_event(&mut stream).await.unwrap();
@@ -813,6 +817,7 @@ async fn a_feed_follows_its_agent_to_a_new_block() {
     let (event, snap) = next_stream_event(&mut stream).await.unwrap();
     assert_eq!(event, "snapshot");
     assert_eq!(lines_of(&snap), vec!["{\"new\":1}"]);
+    assert_eq!(snap["provider"], "codex", "labelled with the new block's provider");
 
     // And its appends now reach the device.
     append(&state, &new_block, "{\"new\":2}");
@@ -894,6 +899,35 @@ async fn lines_another_writer_adds_to_the_shared_transcript_reach_the_feed_once(
     shared_append(&gfs, &zone, b"{\"n\":4}\n");
     let (_, data) = next_stream_event(&mut stream).await.unwrap();
     assert_eq!((data["line"].as_u64(), lines_of(&data)), (Some(4), vec!["{\"n\":4}".to_string()]));
+}
+
+#[tokio::test]
+async fn a_feed_on_the_blocks_own_transcript_moves_to_a_shared_one_that_starts_later() {
+    let mut state = test_state();
+    let (name, block, def) = register_defined(&state, "viewer-shared-after-local");
+    let (gfs, zone) = with_shared_zone(&mut state, &def);
+    append(&state, &block, "{\"local\":1}");
+    let lease = state.viewer.open_feed("dev").unwrap();
+    let mut stream = Box::pin(feed_stream(
+        FeedSource::of(&state, &block),
+        "claude".into(),
+        None,
+        lease,
+        follow_timing(),
+        AgentProbe::of(&state, &name),
+    ));
+    next_bytes(&mut stream).await.unwrap();
+    let (event, snap) = next_stream_event(&mut stream).await.unwrap();
+    assert_eq!(event, "snapshot");
+    assert_eq!(lines_of(&snap), vec!["{\"local\":1}"], "the block's own transcript, no shared one yet");
+
+    // Another srv instance starts the agent's shared transcript.
+    shared_append(&gfs, &zone, b"{\"shared\":1}\n");
+    let (event, reset) = next_stream_event(&mut stream).await.unwrap();
+    assert_eq!((event.as_str(), reset["reason"].as_str()), ("reset", Some("stream")));
+    let (event, snap) = next_stream_event(&mut stream).await.unwrap();
+    assert_eq!(event, "snapshot");
+    assert_eq!(lines_of(&snap), vec!["{\"shared\":1}"]);
 }
 
 #[tokio::test]
