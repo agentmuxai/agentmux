@@ -1414,7 +1414,11 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
                 </Show>
                 {props.preview ? previewElem : props.children}
                 <Show when={showStatsBadge()}>
-                    <BlockStatsBadge blockId={nodeModel.blockId} noHeader={noHeader()} />
+                    <BlockStatsBadge
+                        blockId={nodeModel.blockId}
+                        noHeader={noHeader()}
+                        connection={blockData()?.meta?.connection as string | undefined}
+                    />
                 </Show>
             </div>
             <Show when={!props.preview && props.viewModel != null && connModalOpen()}>

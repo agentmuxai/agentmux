@@ -278,6 +278,21 @@ impl RemoteFiles {
 
     /// The host's processes for Tower: the `top` busiest and largest among
     /// those matching `filter`, with totals (`agentmux_remote::procs`).
+    /// One pane's processes on the host (`PaneProcs`): durable `session`'s
+    /// shell, else those marked with `block_id`.
+    pub async fn pane_procs(&self, block_id: &str, session: &str) -> Result<fsproto::PaneFrame, RemoteError> {
+        match self
+            .call(Request::PaneProcs {
+                block_id: block_id.to_string(),
+                session: session.to_string(),
+            })
+            .await?
+        {
+            Reply::PaneProcs(f) => Ok(f),
+            r => Err(unexpected(&r)),
+        }
+    }
+
     pub async fn procs(&self, top: u32, filter: &str) -> Result<fsproto::ProcFrame, RemoteError> {
         match self
             .call(Request::Procs {
@@ -532,6 +547,27 @@ pub async fn connect(conn: &str, ask: Option<AskIn<'_>>) -> Result<Arc<RemoteFil
     // a listing that had loaded (#4513), since nothing said so.
     super::helper_hosts::remember(&name);
     super::link::used(&name);
+    *s = Some(files.clone());
+    Ok(files)
+}
+
+/// [`connect`] for something that asks every few seconds on its own (a
+/// pane's stats badge), not on the user's word: the open connection, or a new
+/// one only on a host the helper is known to be on (`helper_hosts`), never an
+/// install, a consent question or an ssh prompt (a login that needs one
+/// fails instead; a pane's shared connection usually makes it unneeded).
+pub async fn connect_quiet(conn: &str) -> Result<Arc<RemoteFiles>, RemoteError> {
+    let name = canonical(conn)?;
+    let slot = pool().lock().unwrap().entry(name.clone()).or_default().clone();
+    let mut s = slot.lock().await;
+    if let Some(f) = s.as_ref().filter(|f| f.is_open()) {
+        return Ok(f.clone());
+    }
+    if !super::helper_hosts::known(conn) {
+        return Err(RemoteError::link(format!("AgentMux's helper isn't on {name}")));
+    }
+    let host = HostSsh::for_connection(conn).map_err(RemoteError::link)?;
+    let files = start(&name, host, None).await.map_err(|(e, _)| e)?;
     *s = Some(files.clone());
     Ok(files)
 }

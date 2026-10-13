@@ -175,6 +175,20 @@ pub fn launch(
     args
 }
 
+/// Name the pane in [`launch`]'s `SetEnv` too (`AGENTMUX_BLOCKID`), so a host
+/// that accepts it (`AcceptEnv AGENTMUX_*`) lets the pane's stats badge find
+/// its shell there (`PaneProcs`). Dropped quietly by any other host, like the
+/// rest of that `SetEnv`. A block id is AgentMux's own UUID; anything with
+/// another character is left out rather than quoted.
+pub fn set_pane_env(args: &mut [String], block_id: &str) {
+    if block_id.is_empty() || !block_id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+        return;
+    }
+    if let Some(set_env) = args.iter_mut().find(|a| a.starts_with("SetEnv=")) {
+        set_env.push_str(&format!(" AGENTMUX_BLOCKID={block_id}"));
+    }
+}
+
 /// The port, if any, then `--` and the destination: `--` ends ssh's options,
 /// so the destination can never be read as one (conn.rs also refuses a
 /// leading `-`).
@@ -490,6 +504,19 @@ mod tests {
         assert!(set_env.starts_with("SetEnv=TERM_PROGRAM=agentmux "));
         assert!(set_env.contains(&format!("AGENTMUX_VERSION={}", env!("CARGO_PKG_VERSION"))));
         assert_eq!(args.last().unwrap(), "claude", "durable panes' control commands go through here unchanged");
+    }
+
+    #[test]
+    fn a_plain_pane_names_itself_in_set_env() {
+        let mut args = launch(&dest("area54", None), "", &[], "", None);
+        let before = args.clone();
+        set_pane_env(&mut args, "6f1c2b9e-0a4d-4c3e-9b1a-2f5e7d8c9a01");
+        let set_env = args.iter().find(|a| a.starts_with("SetEnv=")).unwrap();
+        assert!(set_env.ends_with(" AGENTMUX_BLOCKID=6f1c2b9e-0a4d-4c3e-9b1a-2f5e7d8c9a01"), "{set_env}");
+        assert_eq!(args.len(), before.len(), "no argument added, only the SetEnv value");
+        let mut odd = before.clone();
+        set_pane_env(&mut odd, "x y=z");
+        assert_eq!(odd, before, "an id with any other character is left out");
     }
 
     #[test]

@@ -745,7 +745,7 @@ impl Controller for ShellController {
             let cwd = obj::meta_get_string(&block_meta, super::super::META_KEY_CMD_CWD, "");
             tracing::info!(block_id = %self.block_id, "ssh spawn");
             let what = (cmd_str.as_str(), cmd_args.as_slice(), cwd.as_str());
-            super::ssh_pane::command(ssh_path, dest, what, askpass_secret.as_deref(), &self.auth_key)
+            super::ssh_pane::command(ssh_path, dest, what, askpass_secret.as_deref(), &self.auth_key, &self.block_id)
         } else if !cmd_str.is_empty() && (!cmd_args.is_empty() || interactive) {
             // Direct spawn: cmd:args provided or cmd:interactive set.
             // Spawn the CLI directly (no sh -c wrapper) so args are passed correctly.
