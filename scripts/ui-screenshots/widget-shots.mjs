@@ -108,7 +108,7 @@ export const visibleCenter = (selector) => `(() => {
  *  class comes from widgets.json), its entry in the top bar's More list, the
  *  hamburger menu, and the command palette ("Open <label>"). Returns which
  *  route was used. */
-async function openWidget(session, w) {
+export async function openWidget(session, w) {
     if (w.icon && !w.icon.includes("@")) {
         const pt = await session.evaluate(visibleCenter(`.action-widgets .action-widget-slot .fa-${w.icon}`));
         if (pt) {

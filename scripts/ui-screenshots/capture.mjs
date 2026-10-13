@@ -11,14 +11,15 @@
 //
 // Usage:
 //   node scripts/ui-screenshots/capture.mjs [--port N] [--out DIR] [--only id1,id2]
-//       [--suite manual|widgets|chrome|agent|memory] [--sizes small,medium,large|all]
+//       [--suite manual|widgets|chrome|agent|memory|landing] [--sizes small,medium,large|all]
 //       [--redact from=to]... [--no-redact]
 //
 // --suite picks the manifest: `manual` (shots.mjs, the default), `widgets`
 // (widget-shots.mjs, every widget in every size) or `chrome` (chrome-shots.mjs:
 // menus, the status bar and Settings, spec §9) or `agent` (agent-shots.mjs: the
 // agent pane, driven by a scripted Claude Code, spec §10) or `memory`
-// (memory-shots.mjs: Memory, Connectors and a widget approval, spec §11).
+// (memory-shots.mjs: Memory, Connectors and a widget approval, spec §11) or
+// `landing` (landing-shots.mjs: shots for agentmux.ai, each proving one claim).
 // --sizes limits which of
 // sizes.mjs's sizes a shot with `sizes: true` is captured in (default: all);
 // see the spec's §8.
@@ -49,7 +50,7 @@ import { CdpSession, NO_DIALOGS, findMainTarget, resolveClip } from "./lib/sessi
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 /** Suite name → manifest module (relative to this directory). */
-const SUITES = { manual: "./shots.mjs", widgets: "./widget-shots.mjs", chrome: "./chrome-shots.mjs", agent: "./agent-shots.mjs", memory: "./memory-shots.mjs" };
+const SUITES = { manual: "./shots.mjs", widgets: "./widget-shots.mjs", chrome: "./chrome-shots.mjs", agent: "./agent-shots.mjs", memory: "./memory-shots.mjs", landing: "./landing-shots.mjs" };
 
 function parseArgs(argv) {
     const args = {
