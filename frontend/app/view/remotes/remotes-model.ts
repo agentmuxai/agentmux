@@ -8,7 +8,7 @@
 
 import { createSignal, type Accessor } from "solid-js";
 import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
-import { muxEventSubscribe } from "@/app/store/mps";
+import { muxEventSubscribe, onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import { RpcApi } from "@/app/store/rpc-api";
 import type { RemoteRecord } from "@/app/store/rpc-api/remotes";
@@ -80,11 +80,14 @@ export class RemotesViewModel {
         [this.testResults, this.setTestResults] = createSignal<Record<string, true | string>>({});
         [this.testing, this.setTesting] = createSignal<string | null>(null);
         if (opts.subscribe !== false) {
-            this.unsubscribe = muxEventSubscribe(
-                { eventType: WpsEvent.ConnChange, handler: () => this.scheduleRefresh() },
-                { eventType: WpsEvent.RemotesChange, handler: () => this.scheduleRefresh() },
-                { eventType: WpsEvent.Config, handler: () => this.scheduleRefresh() }
-            );
+            const unsubs = [
+                muxEventSubscribe(
+                    { eventType: WpsEvent.ConnChange, handler: () => this.scheduleRefresh() },
+                    { eventType: WpsEvent.Config, handler: () => this.scheduleRefresh() }
+                ),
+                onMuxEvent(WpsEvent.RemotesChange, () => this.scheduleRefresh()),
+            ];
+            this.unsubscribe = () => unsubs.forEach((unsub) => unsub());
             void this.refresh();
         }
     }

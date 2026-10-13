@@ -18,7 +18,7 @@
 import { createMemo, createSignal, type Accessor } from "solid-js";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { muxEventSubscribe } from "@/app/store/mps";
+import { onMuxEvent } from "@/app/store/mps";
 
 import { WpsEvent } from "@/app/store/mps-events";
 import type { SkillBundleListItem } from "@/types/rpc/SkillBundleListItem";
@@ -53,10 +53,7 @@ export class BundleSkillModel {
             return this.skillsAtom().find((s) => s.id === id) ?? null;
         });
         void this.refresh();
-        this.unsubChanged = muxEventSubscribe({
-            eventType: WpsEvent.SkillsChanged,
-            handler: () => void this.refresh(),
-        });
+        this.unsubChanged = onMuxEvent(WpsEvent.SkillsChanged, () => void this.refresh());
     }
 
     async refresh(): Promise<void> {

@@ -132,10 +132,7 @@ fn register_skill_upsert(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // `Store::managed_upsert_unique`'s doc comment.
                 mstore.skill_upsert_unique(&identity_store, &req.agent_id, &skill, req.id.is_empty())
                     .map_err(|e| format!("skill.upsert: {e}"))?;
-                broker.publish(crate::backend::mps::MuxEvent {
-                    event: "skills:changed".to_string(),
-                    scopes: vec![], sender: String::new(), persist: 0, data: None,
-                });
+                broker.publish_event::<crate::backend::mps_events::SkillsChanged>(&(), vec![], 0);
                 Ok(skill)
             }
         },
@@ -169,10 +166,7 @@ fn register_skill_delete(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let deleted = mstore.skill_delete(&identity_store, &req.id)
                     .map_err(|e| format!("skill.delete: {e}"))?;
                 if deleted {
-                    broker.publish(crate::backend::mps::MuxEvent {
-                        event: "skills:changed".to_string(),
-                        scopes: vec![], sender: String::new(), persist: 0, data: None,
-                    });
+                    broker.publish_event::<crate::backend::mps_events::SkillsChanged>(&(), vec![], 0);
                 }
                 Ok(SkillDeleteResult { deleted })
             }
@@ -213,10 +207,7 @@ fn register_skill_bind(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // connection should reach an already-open Stash Skills tab for
                 // that agent too — same reactivity as the catalog-tier bind.
                 // reagentx P2 on PR #2329.
-                broker.publish(crate::backend::mps::MuxEvent {
-                    event: "skills:changed".to_string(),
-                    scopes: vec![], sender: String::new(), persist: 0, data: None,
-                });
+                broker.publish_event::<crate::backend::mps_events::SkillsChanged>(&(), vec![], 0);
                 Ok(SkillBindResult { bound: true })
             }
         },
@@ -236,10 +227,7 @@ fn register_skill_unbind(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let unbound = mstore.skill_unbind(&req.agent_id, &req.skill_id)
                     .map_err(|e| format!("skill.unbind: {e}"))?;
                 if unbound {
-                    broker.publish(crate::backend::mps::MuxEvent {
-                        event: "skills:changed".to_string(),
-                        scopes: vec![], sender: String::new(), persist: 0, data: None,
-                    });
+                    broker.publish_event::<crate::backend::mps_events::SkillsChanged>(&(), vec![], 0);
                 }
                 Ok(SkillUnbindResult { unbound })
             }
@@ -310,10 +298,7 @@ fn register_skill_catalog_upsert(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // directly on identity_store.
                 identity_store.skill_upsert_unique_global(&skill)
                     .map_err(|e| format!("skill.catalog.upsert: {e}"))?;
-                broker.publish(crate::backend::mps::MuxEvent {
-                    event: "skills:changed".to_string(),
-                    scopes: vec![], sender: String::new(), persist: 0, data: None,
-                });
+                broker.publish_event::<crate::backend::mps_events::SkillsChanged>(&(), vec![], 0);
                 Ok(skill)
             }
         },
@@ -362,10 +347,7 @@ fn register_skill_catalog_bind(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // Lets any other open Stash/Armory view for this agent pick up
                 // the new binding without a manual refresh — skill.bind (the
                 // check_s1 agent-self-service path) intentionally left alone.
-                broker.publish(crate::backend::mps::MuxEvent {
-                    event: "skills:changed".to_string(),
-                    scopes: vec![], sender: String::new(), persist: 0, data: None,
-                });
+                broker.publish_event::<crate::backend::mps_events::SkillsChanged>(&(), vec![], 0);
                 Ok(SkillBindResult { bound: true })
             }
         },
@@ -435,10 +417,7 @@ fn register_skill_catalog_unbind(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let unbound = mstore.skill_unbind(&req.agent_id, &req.skill_id)
                     .map_err(|e| format!("skill.catalog.unbind: {e}"))?;
                 if unbound {
-                    broker.publish(crate::backend::mps::MuxEvent {
-                        event: "skills:changed".to_string(),
-                        scopes: vec![], sender: String::new(), persist: 0, data: None,
-                    });
+                    broker.publish_event::<crate::backend::mps_events::SkillsChanged>(&(), vec![], 0);
                 }
                 Ok(SkillUnbindResult { unbound })
             }
@@ -483,10 +462,7 @@ fn register_skill_catalog_bind_to_bundle(engine: &Arc<WshRpcEngine>, state: &App
                 }
                 mstore.bundle_skill_bind(&identity_store, &id_store, &req.bundle_id, &req.skill_id)
                     .map_err(|e| format!("skill.catalog.bind_to_bundle: {e}"))?;
-                broker.publish(crate::backend::mps::MuxEvent {
-                    event: "skills:changed".to_string(),
-                    scopes: vec![], sender: String::new(), persist: 0, data: None,
-                });
+                broker.publish_event::<crate::backend::mps_events::SkillsChanged>(&(), vec![], 0);
                 Ok(SkillBindResult { bound: true })
             }
         },
@@ -567,10 +543,7 @@ fn register_skill_catalog_upsert_for_bundle(engine: &Arc<WshRpcEngine>, state: &
                 };
                 mstore.bundle_skill_upsert_unique(&identity_store, &id_store, &req.bundle_id, &skill, req.id.is_empty())
                     .map_err(|e| format!("skill.catalog.upsert_for_bundle: {e}"))?;
-                broker.publish(crate::backend::mps::MuxEvent {
-                    event: "skills:changed".to_string(),
-                    scopes: vec![], sender: String::new(), persist: 0, data: None,
-                });
+                broker.publish_event::<crate::backend::mps_events::SkillsChanged>(&(), vec![], 0);
                 Ok(skill)
             }
         },
@@ -592,10 +565,7 @@ fn register_skill_catalog_unbind_from_bundle(engine: &Arc<WshRpcEngine>, state: 
                 let unbound = mstore.bundle_skill_unbind(&req.bundle_id, &req.skill_id)
                     .map_err(|e| format!("skill.catalog.unbind_from_bundle: {e}"))?;
                 if unbound {
-                    broker.publish(crate::backend::mps::MuxEvent {
-                        event: "skills:changed".to_string(),
-                        scopes: vec![], sender: String::new(), persist: 0, data: None,
-                    });
+                    broker.publish_event::<crate::backend::mps_events::SkillsChanged>(&(), vec![], 0);
                 }
                 Ok(SkillUnbindResult { unbound })
             }
@@ -624,10 +594,7 @@ fn register_skill_catalog_delete(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let deleted = mstore.skill_delete(&identity_store, &req.id)
                     .map_err(|e| format!("skill.catalog.delete: {e}"))?;
                 if deleted {
-                    broker.publish(crate::backend::mps::MuxEvent {
-                        event: "skills:changed".to_string(),
-                        scopes: vec![], sender: String::new(), persist: 0, data: None,
-                    });
+                    broker.publish_event::<crate::backend::mps_events::SkillsChanged>(&(), vec![], 0);
                 }
                 Ok(SkillDeleteResult { deleted })
             }

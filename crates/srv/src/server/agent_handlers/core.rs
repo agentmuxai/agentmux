@@ -157,13 +157,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     content: crate::backend::agent_color::pick_agent_color(&agent.id).to_string(),
                     updated_at: now,
                 });
-                broker.publish(crate::backend::mps::MuxEvent {
-                    event: "agents:changed".to_string(),
-                    scopes: vec![],
-                    sender: String::new(),
-                    persist: 0,
-                    data: None,
-                });
+                broker.publish_event::<crate::backend::mps_events::AgentsChanged>(&(), vec![], 0);
                 Ok(agent)
             }
         },
@@ -274,13 +268,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 if !found {
                     return Err(format!("updateagent: agent {} not found", agent.id));
                 }
-                broker.publish(crate::backend::mps::MuxEvent {
-                    event: "agents:changed".to_string(),
-                    scopes: vec![],
-                    sender: String::new(),
-                    persist: 0,
-                    data: None,
-                });
+                broker.publish_event::<crate::backend::mps_events::AgentsChanged>(&(), vec![], 0);
                 Ok(agent)
             }
         },
@@ -301,13 +289,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
             async move {
                 mstore.agent_def_delete(&cmd.id).map_err(|e| format!("deleteagent: {e}"))?;
                 super::purge_identity_store_rows(&identity_store, &id_store, &cmd.id, "deleteagent");
-                broker.publish(crate::backend::mps::MuxEvent {
-                    event: "agents:changed".to_string(),
-                    scopes: vec![],
-                    sender: String::new(),
-                    persist: 0,
-                    data: None,
-                });
+                broker.publish_event::<crate::backend::mps_events::AgentsChanged>(&(), vec![], 0);
                 Ok(())
             }
         },
@@ -388,13 +370,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     updated_at: now,
                 };
                 mstore.agent_content_set(&content).map_err(|e| format!("setagentcontent: {e}"))?;
-                broker.publish(crate::backend::mps::MuxEvent {
-                    event: "agentcontent:changed".to_string(),
-                    scopes: vec![],
-                    sender: String::new(),
-                    persist: 0,
-                    data: None,
-                });
+                broker.publish_event::<crate::backend::mps_events::AgentContentChanged>(&(), vec![], 0);
                 Ok(content)
             }
         },
@@ -514,13 +490,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     }
                 }
 
-                broker.publish(crate::backend::mps::MuxEvent {
-                    event: "agents:changed".to_string(),
-                    scopes: vec![],
-                    sender: String::new(),
-                    persist: 0,
-                    data: None,
-                });
+                broker.publish_event::<crate::backend::mps_events::AgentsChanged>(&(), vec![], 0);
                 Ok(agent)
             }
         },
@@ -543,13 +513,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let report = crate::backend::agent_seed::seed_agents(&mstore)
                     .map_err(|e| format!("reseedagents: seed: {e}"))?;
 
-                broker.publish(crate::backend::mps::MuxEvent {
-                    event: "agents:changed".to_string(),
-                    scopes: vec![],
-                    sender: String::new(),
-                    persist: 0,
-                    data: None,
-                });
+                broker.publish_event::<crate::backend::mps_events::AgentsChanged>(&(), vec![], 0);
                 Ok(ReseedAgentsResult {
                     deleted,
                     created: report.created,
@@ -669,13 +633,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     }
                 }
 
-                broker.publish(crate::backend::mps::MuxEvent {
-                    event: "agents:changed".to_string(),
-                    scopes: vec![],
-                    sender: String::new(),
-                    persist: 0,
-                    data: None,
-                });
+                broker.publish_event::<crate::backend::mps_events::AgentsChanged>(&(), vec![], 0);
 
                 let result = ImportAgentDefinitionsResult { imported, skipped, failed };
                 Ok(result)

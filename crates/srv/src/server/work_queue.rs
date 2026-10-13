@@ -29,7 +29,6 @@ use serde_json::{json, Value};
 use uuid::Uuid;
 
 use crate::backend::storage::work_queue::{ClaimFilter, HolderMatch, WorkItem};
-use crate::backend::mps::MuxEvent;
 
 use super::AppState;
 
@@ -39,20 +38,10 @@ use super::AppState;
 /// rather than blocking the item for an hour.
 const DEFAULT_LEASE_MS: i64 = 120_000;
 
-/// Emitted whenever the queue changes so any live view can refresh without
-/// polling. Named alongside the existing `EVENT_CRON_CHANGED` convention.
-const EVENT_WORK_QUEUE_CHANGED: &str = "workqueue:changed";
-
 use agentmux_common::time::now_ms;
 
 pub(crate) fn publish_changed(state: &AppState) {
-    state.broker.publish(MuxEvent {
-        event: EVENT_WORK_QUEUE_CHANGED.to_string(),
-        scopes: vec![],
-        sender: String::new(),
-        persist: 0,
-        data: None,
-    });
+    state.broker.publish_event::<crate::backend::mps_events::WorkQueueChanged>(&(), vec![], 0);
 }
 
 fn err(code: StatusCode, msg: impl Into<String>) -> (StatusCode, Json<Value>) {

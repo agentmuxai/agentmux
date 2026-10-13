@@ -46,6 +46,9 @@ export function renderEvents(rows) {
         "/** The typed events' wire names. */",
         `export const TYPED_MUX_EVENTS = [${rows.map((r) => JSON.stringify(r.event)).join(", ")}] as const;`,
         "",
+        "/** The typed events that carry no payload: srv sends them with no `data`. */",
+        `export const NO_PAYLOAD_MUX_EVENTS: ReadonlySet<string> = new Set([${rows.filter((r) => r.payloadTs.name === "null").map((r) => JSON.stringify(r.event)).join(", ")}]);`,
+        "",
     ].join("\n");
 }
 

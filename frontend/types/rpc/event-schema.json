@@ -27,6 +27,13 @@
     }
   },
   {
+    "event": "agentcontent:changed",
+    "payloadTs": {
+      "imports": [],
+      "name": "null"
+    }
+  },
+  {
     "event": "agentcontextusage",
     "payloadTs": {
       "imports": [
@@ -45,12 +52,33 @@
     }
   },
   {
+    "event": "agenthistory:changed",
+    "payloadTs": {
+      "imports": [],
+      "name": "null"
+    }
+  },
+  {
     "event": "agentruntime",
     "payloadTs": {
       "imports": [
         "AgentRuntimeEvent"
       ],
       "name": "AgentRuntimeEvent"
+    }
+  },
+  {
+    "event": "agents:changed",
+    "payloadTs": {
+      "imports": [],
+      "name": "null"
+    }
+  },
+  {
+    "event": "agentskills:changed",
+    "payloadTs": {
+      "imports": [],
+      "name": "null"
     }
   },
   {
@@ -90,6 +118,13 @@
     }
   },
   {
+    "event": "cron_changed",
+    "payloadTs": {
+      "imports": [],
+      "name": "null"
+    }
+  },
+  {
     "event": "dispatch:activity",
     "payloadTs": {
       "imports": [
@@ -105,6 +140,13 @@
         "DispatchUpdatedEvent"
       ],
       "name": "DispatchUpdatedEvent"
+    }
+  },
+  {
+    "event": "drones:changed",
+    "payloadTs": {
+      "imports": [],
+      "name": "null"
     }
   },
   {
@@ -135,12 +177,61 @@
     }
   },
   {
+    "event": "identityaccounts:changed",
+    "payloadTs": {
+      "imports": [],
+      "name": "null"
+    }
+  },
+  {
+    "event": "mcp:changed",
+    "payloadTs": {
+      "imports": [],
+      "name": "null"
+    }
+  },
+  {
     "event": "media:file_changed",
     "payloadTs": {
       "imports": [
         "PathChangedEvent"
       ],
       "name": "PathChangedEvent"
+    }
+  },
+  {
+    "event": "memories:changed",
+    "payloadTs": {
+      "imports": [],
+      "name": "null"
+    }
+  },
+  {
+    "event": "namedagents:changed",
+    "payloadTs": {
+      "imports": [],
+      "name": "null"
+    }
+  },
+  {
+    "event": "processbroker:tracked-blocks-changed",
+    "payloadTs": {
+      "imports": [],
+      "name": "null"
+    }
+  },
+  {
+    "event": "remoteschange",
+    "payloadTs": {
+      "imports": [],
+      "name": "null"
+    }
+  },
+  {
+    "event": "skills:changed",
+    "payloadTs": {
+      "imports": [],
+      "name": "null"
     }
   },
   {
@@ -240,6 +331,13 @@
         "MuxObjUpdate"
       ],
       "name": "MuxObjUpdate"
+    }
+  },
+  {
+    "event": "workqueue:changed",
+    "payloadTs": {
+      "imports": [],
+      "name": "null"
     }
   }
 ]

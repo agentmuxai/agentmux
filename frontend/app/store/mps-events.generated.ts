@@ -36,19 +36,32 @@ export type MuxEventPayloads = {
   "agent-message-accepted": MessageAcceptedEvent;
   "agent-resume-retry": ResumeRetryEvent;
   "agent:shutdown": ShutdownLineEvent;
+  "agentcontent:changed": null;
   agentcontextusage: AgentContextUsageEvent;
   agentfailure: AgentFailure;
+  "agenthistory:changed": null;
   agentruntime: AgentRuntimeEvent;
+  "agents:changed": null;
+  "agentskills:changed": null;
   agentturn: AgentTurnEvent;
   blockfile: WSFileEventData;
   blockstats: TimeSeriesData;
   controllerstatus: BlockControllerRuntimeStatus;
+  cron_changed: null;
   "dispatch:activity": DispatchActivityEvent;
   "dispatch:updated": DispatchUpdatedEvent;
+  "drones:changed": null;
   "editor:file_changed": PathChangedEvent;
   "files:changed": FilesChangedEvent;
   "files:op": FsOpEvent;
+  "identityaccounts:changed": null;
+  "mcp:changed": null;
   "media:file_changed": PathChangedEvent;
+  "memories:changed": null;
+  "namedagents:changed": null;
+  "processbroker:tracked-blocks-changed": null;
+  remoteschange: null;
+  "skills:changed": null;
   "subagent:abandoned": SubagentAbandonedEvent;
   "subagent:activity": SubagentActivityEvent;
   "subagent:backfill_status": SubagentBackfillStatusEvent;
@@ -60,6 +73,7 @@ export type MuxEventPayloads = {
   sysinfo: TimeSeriesData;
   userattention: UserAttentionEvent;
   "waveobj:update": MuxObjUpdate;
+  "workqueue:changed": null;
 };
 
 /** The typed events' wire names. */
@@ -67,19 +81,32 @@ export const TYPED_MUX_EVENTS = [
   "agent-message-accepted",
   "agent-resume-retry",
   "agent:shutdown",
+  "agentcontent:changed",
   "agentcontextusage",
   "agentfailure",
+  "agenthistory:changed",
   "agentruntime",
+  "agents:changed",
+  "agentskills:changed",
   "agentturn",
   "blockfile",
   "blockstats",
   "controllerstatus",
+  "cron_changed",
   "dispatch:activity",
   "dispatch:updated",
+  "drones:changed",
   "editor:file_changed",
   "files:changed",
   "files:op",
+  "identityaccounts:changed",
+  "mcp:changed",
   "media:file_changed",
+  "memories:changed",
+  "namedagents:changed",
+  "processbroker:tracked-blocks-changed",
+  "remoteschange",
+  "skills:changed",
   "subagent:abandoned",
   "subagent:activity",
   "subagent:backfill_status",
@@ -91,4 +118,23 @@ export const TYPED_MUX_EVENTS = [
   "sysinfo",
   "userattention",
   "waveobj:update",
+  "workqueue:changed",
 ] as const;
+
+/** The typed events that carry no payload: srv sends them with no `data`. */
+export const NO_PAYLOAD_MUX_EVENTS: ReadonlySet<string> = new Set([
+  "agentcontent:changed",
+  "agenthistory:changed",
+  "agents:changed",
+  "agentskills:changed",
+  "cron_changed",
+  "drones:changed",
+  "identityaccounts:changed",
+  "mcp:changed",
+  "memories:changed",
+  "namedagents:changed",
+  "processbroker:tracked-blocks-changed",
+  "remoteschange",
+  "skills:changed",
+  "workqueue:changed",
+]);

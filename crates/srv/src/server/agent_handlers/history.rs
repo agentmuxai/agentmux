@@ -25,13 +25,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
             async move {
                 let entry = mstore.agent_history_append(&cmd.agent_id, &cmd.entry)
                     .map_err(|e| format!("appendagenthistory: {e}"))?;
-                broker.publish(crate::backend::mps::MuxEvent {
-                    event: "agenthistory:changed".to_string(),
-                    scopes: vec![],
-                    sender: String::new(),
-                    persist: 0,
-                    data: None,
-                });
+                broker.publish_event::<crate::backend::mps_events::AgentHistoryChanged>(&(), vec![], 0);
                 Ok(entry)
             }
         },

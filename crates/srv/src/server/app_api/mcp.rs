@@ -135,10 +135,7 @@ fn register_mcp_upsert(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // `Store::managed_upsert_unique`'s doc comment.
                 mstore.mcp_server_upsert_unique(&identity_store, &req.agent_id, &server, req.id.is_empty())
                     .map_err(|e| format!("mcp.upsert: {e}"))?;
-                broker.publish(crate::backend::mps::MuxEvent {
-                    event: "mcp:changed".to_string(),
-                    scopes: vec![], sender: String::new(), persist: 0, data: None,
-                });
+                broker.publish_event::<crate::backend::mps_events::McpChanged>(&(), vec![], 0);
                 Ok(server)
             }
         },
@@ -172,10 +169,7 @@ fn register_mcp_delete(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let deleted = mstore.mcp_server_delete(&identity_store, &req.id)
                     .map_err(|e| format!("mcp.delete: {e}"))?;
                 if deleted {
-                    broker.publish(crate::backend::mps::MuxEvent {
-                        event: "mcp:changed".to_string(),
-                        scopes: vec![], sender: String::new(), persist: 0, data: None,
-                    });
+                    broker.publish_event::<crate::backend::mps_events::McpChanged>(&(), vec![], 0);
                 }
                 Ok(McpDeleteResult { deleted })
             }
@@ -216,10 +210,7 @@ fn register_mcp_bind(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // connection should reach an already-open Stash MCP Servers tab
                 // for that agent too — same reactivity as the catalog-tier bind.
                 // reagentx P2 on PR #2329.
-                broker.publish(crate::backend::mps::MuxEvent {
-                    event: "mcp:changed".to_string(),
-                    scopes: vec![], sender: String::new(), persist: 0, data: None,
-                });
+                broker.publish_event::<crate::backend::mps_events::McpChanged>(&(), vec![], 0);
                 Ok(McpBindResult { bound: true })
             }
         },
@@ -239,10 +230,7 @@ fn register_mcp_unbind(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let unbound = mstore.mcp_server_unbind(&req.agent_id, &req.mcp_id)
                     .map_err(|e| format!("mcp.unbind: {e}"))?;
                 if unbound {
-                    broker.publish(crate::backend::mps::MuxEvent {
-                        event: "mcp:changed".to_string(),
-                        scopes: vec![], sender: String::new(), persist: 0, data: None,
-                    });
+                    broker.publish_event::<crate::backend::mps_events::McpChanged>(&(), vec![], 0);
                 }
                 Ok(McpUnbindResult { unbound })
             }
@@ -352,10 +340,7 @@ fn register_mcp_catalog_upsert(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // Pure single-table op — called directly on identity_store.
                 identity_store.mcp_server_upsert_unique_global(&server)
                     .map_err(|e| format!("mcp.catalog.upsert: {e}"))?;
-                broker.publish(crate::backend::mps::MuxEvent {
-                    event: "mcp:changed".to_string(),
-                    scopes: vec![], sender: String::new(), persist: 0, data: None,
-                });
+                broker.publish_event::<crate::backend::mps_events::McpChanged>(&(), vec![], 0);
                 Ok(server)
             }
         },
@@ -405,10 +390,7 @@ fn register_mcp_catalog_bind(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // Lets any other open Stash/Armory view for this agent pick up
                 // the new binding without a manual refresh — mcp.bind (the
                 // check_s1 agent-self-service path) intentionally left alone.
-                broker.publish(crate::backend::mps::MuxEvent {
-                    event: "mcp:changed".to_string(),
-                    scopes: vec![], sender: String::new(), persist: 0, data: None,
-                });
+                broker.publish_event::<crate::backend::mps_events::McpChanged>(&(), vec![], 0);
                 Ok(McpBindResult { bound: true })
             }
         },
@@ -477,10 +459,7 @@ fn register_mcp_catalog_unbind(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let unbound = mstore.mcp_server_unbind(&req.agent_id, &req.mcp_id)
                     .map_err(|e| format!("mcp.catalog.unbind: {e}"))?;
                 if unbound {
-                    broker.publish(crate::backend::mps::MuxEvent {
-                        event: "mcp:changed".to_string(),
-                        scopes: vec![], sender: String::new(), persist: 0, data: None,
-                    });
+                    broker.publish_event::<crate::backend::mps_events::McpChanged>(&(), vec![], 0);
                 }
                 Ok(McpUnbindResult { unbound })
             }
@@ -509,10 +488,7 @@ fn register_mcp_catalog_delete(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let deleted = mstore.mcp_server_delete(&identity_store, &req.id)
                     .map_err(|e| format!("mcp.catalog.delete: {e}"))?;
                 if deleted {
-                    broker.publish(crate::backend::mps::MuxEvent {
-                        event: "mcp:changed".to_string(),
-                        scopes: vec![], sender: String::new(), persist: 0, data: None,
-                    });
+                    broker.publish_event::<crate::backend::mps_events::McpChanged>(&(), vec![], 0);
                 }
                 Ok(McpDeleteResult { deleted })
             }
@@ -545,10 +521,7 @@ fn register_mcp_catalog_set_reach(engine: &Arc<WshRpcEngine>, state: &AppState) 
                 identity_store
                     .mcp_server_set_reach(&req.id, reach, now_ms())
                     .map_err(|e| format!("mcp.catalog.set_reach: {e}"))?;
-                broker.publish(crate::backend::mps::MuxEvent {
-                    event: "mcp:changed".to_string(),
-                    scopes: vec![], sender: String::new(), persist: 0, data: None,
-                });
+                broker.publish_event::<crate::backend::mps_events::McpChanged>(&(), vec![], 0);
                 Ok(reach)
             }
         },

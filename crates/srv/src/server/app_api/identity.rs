@@ -182,10 +182,7 @@ fn register_identity_account_upsert(engine: &Arc<WshRpcEngine>, state: &AppState
                     return Err(format!("identity.account.upsert: link: {e}"));
                 }
 
-                broker.publish(crate::backend::mps::MuxEvent {
-                    event: "identityaccounts:changed".to_string(),
-                    scopes: vec![], sender: String::new(), persist: 0, data: None,
-                });
+                broker.publish_event::<crate::backend::mps_events::IdentityAccountsChanged>(&(), vec![], 0);
                 broker.publish(crate::backend::mps::MuxEvent {
                     event: format!("agentidentities:changed:{}", req.agent_id),
                     scopes: vec![], sender: String::new(), persist: 0, data: None,

@@ -30,7 +30,7 @@
 2448 crates/srv/src/backend/reactive/handler.rs
 3127 crates/srv/src/backend/storage/migrations.rs
 1799 crates/srv/src/backend/storage/muxbus.rs
-3385 crates/srv/src/identity/resolver/inject.rs
+3379 crates/srv/src/identity/resolver/inject.rs
 1539 crates/srv/src/migrations/runner.rs
 2193 crates/srv/src/muxbus/cloud_subscriber.rs
 2426 crates/srv/src/persist_subscriber.rs
@@ -50,4 +50,4 @@
 1860 frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx
 1513 frontend/app/view/editor/editor-model.ts
 1561 frontend/app/view/files/files-view.tsx
-2185 frontend/app/view/swarm/swarm-model.ts
+2179 frontend/app/view/swarm/swarm-model.ts

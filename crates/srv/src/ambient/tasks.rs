@@ -165,13 +165,7 @@ pub(crate) async fn generate_definition_activity_summary(
     let now = agentmux_common::time::now_ms();
     match mstore.agent_activity_summary_set(definition_id, &summary, now) {
         Ok(()) => {
-            broker.publish(crate::backend::mps::MuxEvent {
-                event: "agents:changed".to_string(),
-                scopes: vec![],
-                sender: String::new(),
-                persist: 0,
-                data: None,
-            });
+            broker.publish_event::<crate::backend::mps_events::AgentsChanged>(&(), vec![], 0);
         }
         Err(e) => {
             // reagent P2, PR #2786: the caller's definition_summary_attempted()

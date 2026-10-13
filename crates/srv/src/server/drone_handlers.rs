@@ -149,13 +149,7 @@ pub fn register_drone_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 id_store
                     .drone_upsert(&cmd)
                     .map_err(|e| format!("upsertdrone: {e}"))?;
-                broker.publish(MuxEvent {
-                    event: "drones:changed".to_string(),
-                    scopes: vec![],
-                    sender: String::new(),
-                    persist: 0,
-                    data: None,
-                });
+                broker.publish_event::<crate::backend::mps_events::DronesChanged>(&(), vec![], 0);
                 Ok(cmd)
             }
         },
@@ -173,13 +167,7 @@ pub fn register_drone_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     .drone_delete(&cmd.id)
                     .map_err(|e| format!("deletedrone: {e}"))?;
                 if deleted {
-                    broker.publish(MuxEvent {
-                        event: "drones:changed".to_string(),
-                        scopes: vec![],
-                        sender: String::new(),
-                        persist: 0,
-                        data: None,
-                    });
+                    broker.publish_event::<crate::backend::mps_events::DronesChanged>(&(), vec![], 0);
                 }
                 Ok(DeleteResp { deleted })
             }

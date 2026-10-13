@@ -248,15 +248,9 @@ pub(super) fn register_bundle_import(engine: &Arc<WshRpcEngine>, state: &AppStat
                 ));
                 warnings.extend(mcp_servers_not_imported_warning(&parsed.mcp_servers));
 
-                broker.publish(crate::backend::mps::MuxEvent {
-                    event: "memories:changed".to_string(),
-                    scopes: vec![], sender: String::new(), persist: 0, data: None,
-                });
+                broker.publish_event::<crate::backend::mps_events::MemoriesChanged>(&(), vec![], 0);
                 if !imported_skill_ids.is_empty() {
-                    broker.publish(crate::backend::mps::MuxEvent {
-                        event: "skills:changed".to_string(),
-                        scopes: vec![], sender: String::new(), persist: 0, data: None,
-                    });
+                    broker.publish_event::<crate::backend::mps_events::SkillsChanged>(&(), vec![], 0);
                 }
 
                 Ok(Some(json!({
@@ -878,15 +872,9 @@ pub(super) async fn bundle_import_commit_impl(
                 ));
                 warnings.extend(mcp_servers_not_imported_warning(&parsed.mcp_servers));
 
-                broker.publish(crate::backend::mps::MuxEvent {
-                    event: "memories:changed".to_string(),
-                    scopes: vec![], sender: String::new(), persist: 0, data: None,
-                });
+                broker.publish_event::<crate::backend::mps_events::MemoriesChanged>(&(), vec![], 0);
                 if !imported_skill_ids.is_empty() {
-                    broker.publish(crate::backend::mps::MuxEvent {
-                        event: "skills:changed".to_string(),
-                        scopes: vec![], sender: String::new(), persist: 0, data: None,
-                    });
+                    broker.publish_event::<crate::backend::mps_events::SkillsChanged>(&(), vec![], 0);
                 }
 
                 // codex P1, PR #2381 round 9: bounded the same as preview's

@@ -64,13 +64,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     created_at: now,
                 };
                 mstore.agent_skill_insert(&skill).map_err(|e| format!("createagentskill: {e}"))?;
-                broker.publish(crate::backend::mps::MuxEvent {
-                    event: "agentskills:changed".to_string(),
-                    scopes: vec![],
-                    sender: String::new(),
-                    persist: 0,
-                    data: None,
-                });
+                broker.publish_event::<crate::backend::mps_events::AgentSkillsChanged>(&(), vec![], 0);
                 Ok(skill)
             }
         },
@@ -102,13 +96,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 if !found {
                     return Err(format!("updateagentskill: skill {} not found", skill.id));
                 }
-                broker.publish(crate::backend::mps::MuxEvent {
-                    event: "agentskills:changed".to_string(),
-                    scopes: vec![],
-                    sender: String::new(),
-                    persist: 0,
-                    data: None,
-                });
+                broker.publish_event::<crate::backend::mps_events::AgentSkillsChanged>(&(), vec![], 0);
                 Ok(skill)
             }
         },
@@ -124,13 +112,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
             let broker = broker_dfs.clone();
             async move {
                 mstore.agent_skill_delete(&cmd.id).map_err(|e| format!("deleteagentskill: {e}"))?;
-                broker.publish(crate::backend::mps::MuxEvent {
-                    event: "agentskills:changed".to_string(),
-                    scopes: vec![],
-                    sender: String::new(),
-                    persist: 0,
-                    data: None,
-                });
+                broker.publish_event::<crate::backend::mps_events::AgentSkillsChanged>(&(), vec![], 0);
                 Ok(())
             }
         },

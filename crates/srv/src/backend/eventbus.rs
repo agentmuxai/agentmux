@@ -190,7 +190,7 @@ impl EventBus {
             scopes: vec![],
             sender: String::new(),
             persist: 0,
-            data: serde_json::to_value(payload).ok(),
+            data: super::mps_events::payload_data(payload),
         };
         self.broadcast_event(&WSEventType {
             eventtype: WS_EVENT_RPC.to_string(),
