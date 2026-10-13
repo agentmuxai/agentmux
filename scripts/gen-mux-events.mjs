@@ -172,14 +172,16 @@ export function untypedHistoryReads(sources, typed, wps, perIdPrefixes = new Set
         const sf = sourceFile(path, text);
         const visit = (node) => {
             if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression) && node.expression.name.text === "EventReadHistoryCommand") {
-                for (const arg of node.arguments) {
-                    if (!ts.isObjectLiteralExpression(arg)) continue;
-                    const prop = arg.properties.find((p) => ts.isPropertyAssignment(p) && p.name.getText(sf) === "event");
-                    const name = prop && nameOf(prop.initializer);
-                    if (name && (typed.has(name) || name.endsWith("<id>"))) {
-                        const line = sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1;
-                        errors.push(`${path}:${line}: "${name}" has a typed payload; read its history with readMuxEventHistory (app/store/mps-history.ts), not EventReadHistoryCommand`);
-                    }
+                // Allowed only when the event is named inline and isn't typed. A request built
+                // elsewhere, or an event this can't resolve, is refused: it may be a typed one.
+                const line = sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1;
+                const request = node.arguments.find((a) => ts.isObjectLiteralExpression(a));
+                const prop = request?.properties.find((p) => ts.isPropertyAssignment(p) && p.name.getText(sf) === "event");
+                const name = prop && nameOf(prop.initializer);
+                if (!name) {
+                    errors.push(`${path}:${line}: EventReadHistoryCommand without an event named inline (\`event: WpsEvent.X\`, a literal or a constant); a typed event's history is read with readMuxEventHistory (app/store/mps-history.ts)`);
+                } else if (typed.has(name) || name.endsWith("<id>")) {
+                    errors.push(`${path}:${line}: "${name}" has a typed payload; read its history with readMuxEventHistory (app/store/mps-history.ts), not EventReadHistoryCommand`);
                 }
             }
             ts.forEachChild(node, visit);

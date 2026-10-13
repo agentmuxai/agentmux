@@ -140,6 +140,19 @@ describe("untypedHistoryReads", () => {
         ]);
     });
 
+    it("refuses a read whose event it can't see: a request built elsewhere, or an unknown name", () => {
+        const sources = [
+            ["frontend/g.ts", "const request = { event: WpsEvent.SysInfo, scope, maxitems: 1 };\nRpcApi.EventReadHistoryCommand(client, request);"],
+            ["frontend/h.ts", "RpcApi.EventReadHistoryCommand(client, { event: pick(), scope, maxitems: 1 });"],
+            ["frontend/i.ts", "RpcApi.EventReadHistoryCommand(client, { event, scope, maxitems: 1 });"],
+        ];
+        expect(untypedHistoryReads(sources, typed, wps).map((e) => e.split(":").slice(0, 2).join(":"))).toEqual([
+            "frontend/g.ts:2",
+            "frontend/h.ts:1",
+            "frontend/i.ts:1",
+        ]);
+    });
+
     it("leaves untyped events, and the typed helper itself, alone", () => {
         const sources = [
             ["frontend/e.ts", "RpcApi.EventReadHistoryCommand(client, { event: WpsEvent.SingletonClaim, scope, maxitems: 1 });"],
