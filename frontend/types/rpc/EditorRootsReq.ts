@@ -7,4 +7,4 @@
  * `{}` and a client that omits `data` sends `null`, and serde accepts each of
  * those from only one of `()` and a struct.
  */
-export type EditorRootsReq = Record<string, never>;
+export type EditorRootsReq = Record<symbol, never>;

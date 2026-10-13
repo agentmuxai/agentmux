@@ -6,4 +6,4 @@
  * deserializes `()` ONLY from JSON `null`, so a unit Req would reject every
  * real call at runtime while passing every CI gate (the `bookmarks.list` bug).
  */
-export type CommandListBundlesData = Record<string, never>;
+export type CommandListBundlesData = Record<symbol, never>;

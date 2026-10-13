@@ -13,4 +13,4 @@
  * real call while compiling and passing every CI gate (the `bookmarks.list`
  * bug); a bare struct rejects the older shape. `Option<Self>` takes both.
  */
-export type CommandContainerRuntimeAvailableData = Record<string, never>;
+export type CommandContainerRuntimeAvailableData = Record<symbol, never>;

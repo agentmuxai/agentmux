@@ -6,4 +6,4 @@
  * serde deserializes `()` only from JSON `null`, so a unit Req would reject
  * every real call at runtime while passing every CI gate.
  */
-export type CommandListAllAgentIdentitiesData = Record<string, never>;
+export type CommandListAllAgentIdentitiesData = Record<symbol, never>;

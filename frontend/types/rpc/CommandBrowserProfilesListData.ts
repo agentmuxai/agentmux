@@ -3,4 +3,4 @@
 /**
  * `browser_profiles.list`: no arguments (a struct, so `{}` deserializes).
  */
-export type CommandBrowserProfilesListData = Record<string, never>;
+export type CommandBrowserProfilesListData = Record<symbol, never>;

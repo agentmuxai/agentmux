@@ -3,4 +3,4 @@
 /**
  * Input for RunCliLoginCommand — spawns the CLI login flow and extracts the OAuth URL
  */
-export type CommandRunCliLoginData = { cli_path: string, login_args: Array<string>, auth_env: { [key in string]?: string }, };
+export type CommandRunCliLoginData = { cli_path: string, login_args: Array<string>, auth_env: { [key in string]: string }, };

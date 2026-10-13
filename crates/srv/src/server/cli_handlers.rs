@@ -1271,7 +1271,7 @@ mod tests {
         // field names `path_source` on purpose (explaining why the rename
         // exists), and a bare substring check matched that instead of the
         // field and failed on a correct binding.
-        let ts = <ToolchainEnvResult as ts_rs::TS>::inline();
+        let ts = <ToolchainEnvResult as ts_rs::TS>::inline(&ts_rs::Config::from_env());
         assert!(ts.contains("pathSource: string"), "generated TS lost the rename: {ts}");
         assert!(
             !ts.contains("path_source: string"),

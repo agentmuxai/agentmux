@@ -76,19 +76,21 @@ pub struct TsType {
 /// parameters: ts-rs reports `X` as a generic of `Option<X>`, not as a
 /// dependency, so `TS::dependencies()` alone would miss it.
 pub fn ts_type<T: ts_rs::TS + 'static + ?Sized>() -> TsType {
-    struct Collect(std::collections::BTreeSet<String>);
-    impl ts_rs::TypeVisitor for Collect {
+    // The same config the generated export tests use, so names and imports match the files.
+    let cfg = ts_rs::Config::from_env();
+    struct Collect<'a>(std::collections::BTreeSet<String>, &'a ts_rs::Config);
+    impl ts_rs::TypeVisitor for Collect<'_> {
         fn visit<U: ts_rs::TS + 'static + ?Sized>(&mut self) {
             if U::output_path().is_some() {
-                self.0.insert(U::ident());
+                self.0.insert(U::ident(self.1));
             } else {
                 U::visit_generics(self);
             }
         }
     }
-    let mut c = Collect(Default::default());
+    let mut c = Collect(Default::default(), &cfg);
     ts_rs::TypeVisitor::visit::<T>(&mut c);
-    TsType { name: T::name(), imports: c.0.into_iter().collect() }
+    TsType { name: T::name(&cfg), imports: c.0.into_iter().collect() }
 }
 
 impl RpcBinding {
