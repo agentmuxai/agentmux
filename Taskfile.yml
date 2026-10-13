@@ -479,6 +479,10 @@ tasks:
             - cmd: '{{.RMRF}} "dist"'
               ignore_error: true
 
+    # ========================================
+    # Host Build Tasks
+    # ========================================
+
     build:host:
         desc: Build the host binary for the current platform.
         cmds:
