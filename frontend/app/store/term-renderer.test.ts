@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { describeTermRenderer, forgetTermRenderer, setTermRendererOf, termRendererOf } from "./term-renderer";
+import { claimTermRenderer, describeTermRenderer, forgetTermRenderer, setTermRendererOf, termRendererOf } from "./term-renderer";
 
 describe("term renderer, per terminal", () => {
     it("keeps each terminal's renderer apart", () => {
@@ -15,14 +15,22 @@ describe("term renderer, per terminal", () => {
         expect(termRendererOf("b")?.kind).toBe("dom");
     });
 
-    it("a closing terminal clears only the entry it set, not a newer mount's", () => {
+    it("only the newest mount of a block sets or clears its renderer", () => {
         const oldMount = {};
         const newMount = {};
+        claimTermRenderer("c", oldMount);
         setTermRendererOf("c", { kind: "webgl", owner: oldMount });
-        setTermRendererOf("c", { kind: "dom", owner: newMount });
+        // The block mounts again before the old mount is disposed.
+        claimTermRenderer("c", newMount);
+        setTermRendererOf("c", { kind: "webgl", owner: newMount });
+        // The old mount's canvas still loses its context, then the old mount closes.
+        setTermRendererOf("c", { kind: "lost", owner: oldMount });
         forgetTermRenderer("c", oldMount);
-        expect(termRendererOf("c")?.kind).toBe("dom");
+        expect(termRendererOf("c")?.kind).toBe("webgl");
         forgetTermRenderer("c", newMount);
+        expect(termRendererOf("c")).toBeUndefined();
+        // Nothing can bring it back once the claim is gone.
+        setTermRendererOf("c", { kind: "dom", owner: newMount });
         expect(termRendererOf("c")).toBeUndefined();
     });
 

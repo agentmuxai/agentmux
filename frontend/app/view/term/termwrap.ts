@@ -31,7 +31,7 @@ import * as wedge from "./parser-wedge";
 import { PredictiveEcho } from "./predictive-echo";
 import { resolveTermScrollSensitivity } from "./termscrollsensitivity";
 import { paintRows, resizeAndPaint } from "./term-paint";
-import { forgetTermRenderer, setTermRendererOf } from "@/app/store/term-renderer";
+import { claimTermRenderer, forgetTermRenderer, setTermRendererOf } from "@/app/store/term-renderer";
 import type { WSFileEventData } from "@/types/rpc/WSFileEventData";
 
 const dlog = debug("wave:termwrap");
@@ -131,6 +131,7 @@ export class TermWrap {
     ) {
         this.loaded = false;
         this.blockId = blockId;
+        claimTermRenderer(blockId, this);
         this.sendDataHandler = muxOptions.sendDataHandler;
         this.ptyOffset = 0;
         this.dataBytesProcessed = 0;
