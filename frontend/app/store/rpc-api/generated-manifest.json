@@ -79,6 +79,10 @@
             "method": "AskSideQuestionCommand"
         },
         {
+            "command": "attachments.cancel",
+            "method": "AttachmentsCancelCommand"
+        },
+        {
             "command": "attachments.copy-to-workdir",
             "method": "AttachmentsCopyToWorkdirCommand"
         },
@@ -127,8 +131,20 @@
             "method": "BlockRevealCommand"
         },
         {
+            "command": "bundle.import.commit",
+            "method": "BundleImportCommitCommand"
+        },
+        {
+            "command": "bundle.import.preview",
+            "method": "BundleImportPreviewCommand"
+        },
+        {
             "command": "checkcliauth",
             "method": "CheckCliAuthCommand"
+        },
+        {
+            "command": "voice.checkPath",
+            "method": "CheckPathCommand"
         },
         {
             "command": "containerimagecheck",
@@ -230,12 +246,28 @@
             "send": "{}"
         },
         {
+            "command": "fleet.broadcast",
+            "method": "FleetBroadcastCommand"
+        },
+        {
+            "command": "fleet.bulk-stop",
+            "method": "FleetBulkStopCommand"
+        },
+        {
+            "command": "fleet.group.create",
+            "method": "FleetGroupCreateCommand"
+        },
+        {
             "command": "fleet.group.delete",
             "method": "FleetGroupDeleteCommand"
         },
         {
             "command": "fleet.group.list",
             "method": "FleetGroupListCommand"
+        },
+        {
+            "command": "fleet.group.update",
+            "method": "FleetGroupUpdateCommand"
         },
         {
             "command": "forkagentdefinition",
@@ -323,6 +355,10 @@
             "method": "GetAllAgentContentCommand"
         },
         {
+            "command": "getmemory",
+            "method": "GetBundleCommand"
+        },
+        {
             "command": "getdrone",
             "method": "GetDroneCommand"
         },
@@ -339,12 +375,30 @@
             "method": "GetIdentityAccountCommand"
         },
         {
+            "command": "reactive.registrations",
+            "method": "GetReactiveRegistrationsCommand"
+        },
+        {
+            "command": "gettoolstatus",
+            "method": "GetToolStatusCommand",
+            "send": "{}"
+        },
+        {
             "command": "globalmemory:diff",
             "method": "GlobalMemoryDiffCommand"
         },
         {
             "command": "globalmemory:history",
             "method": "GlobalMemoryHistoryCommand"
+        },
+        {
+            "command": "globalmemory:import",
+            "method": "GlobalMemoryImportCommand"
+        },
+        {
+            "command": "globalmemory:import_sources",
+            "method": "GlobalMemoryImportSourcesCommand",
+            "send": "{}"
         },
         {
             "command": "globalmemory:revert",
@@ -492,14 +546,58 @@
             "method": "MoveScratchFileCommand"
         },
         {
+            "command": "muxbus.cloudconfig",
+            "method": "MuxBusCloudConfigCommand",
+            "send": "{}"
+        },
+        {
+            "command": "muxbus.disconnect",
+            "method": "MuxBusDisconnectCommand",
+            "send": "{}"
+        },
+        {
+            "command": "muxbus.login.cancel",
+            "method": "MuxBusLoginCancelCommand",
+            "send": "{}"
+        },
+        {
             "command": "muxbus.login",
             "method": "MuxBusLoginCommand",
             "opts": "{ timeout: 360000, ...opts }"
         },
         {
+            "command": "muxbus.status",
+            "method": "MuxBusStatusCommand",
+            "send": "{}"
+        },
+        {
             "command": "waveinfo",
             "method": "MuxInfoCommand",
             "send": "null"
+        },
+        {
+            "command": "agent:memory:adoption_list",
+            "method": "NativeMemoryAdoptionListCommand"
+        },
+        {
+            "command": "agent:memory:claims",
+            "method": "NativeMemoryClaimsCommand"
+        },
+        {
+            "command": "agent:memory:diff",
+            "method": "NativeMemoryDiffCommand"
+        },
+        {
+            "command": "agent:memory:history",
+            "method": "NativeMemoryHistoryCommand"
+        },
+        {
+            "command": "agent:memory:revert",
+            "method": "NativeMemoryRevertCommand"
+        },
+        {
+            "command": "agent:memory:write_file",
+            "method": "NativeMemoryWriteFileCommand"
         },
         {
             "command": "session:next_prompt_suggestion",
@@ -534,6 +632,14 @@
             "method": "OpenLayoutCommand"
         },
         {
+            "command": "presence.publish-now",
+            "method": "PresencePublishNowCommand"
+        },
+        {
+            "command": "presence.status",
+            "method": "PresenceStatusCommand"
+        },
+        {
             "command": "layout.preview",
             "method": "PreviewLayoutCommand"
         },
@@ -566,6 +672,11 @@
             "method": "RemoteSetConfigCommand"
         },
         {
+            "command": "remoteslist",
+            "method": "RemotesListCommand",
+            "send": "{}"
+        },
+        {
             "command": "remotesshlocate",
             "method": "RemoteSshLocateCommand"
         },
@@ -593,6 +704,16 @@
         {
             "command": "resolve.prereqs",
             "method": "ResolvePrereqsCommand"
+        },
+        {
+            "command": "routeannounce",
+            "method": "RouteAnnounceCommand",
+            "send": "null"
+        },
+        {
+            "command": "routeunannounce",
+            "method": "RouteUnannounceCommand",
+            "send": "null"
         },
         {
             "command": "runclilogin",
@@ -683,6 +804,10 @@
             "method": "SkillCatalogUnbindFromBundleCommand"
         },
         {
+            "command": "skill.catalog.upsert",
+            "method": "SkillCatalogUpsertCommand"
+        },
+        {
             "command": "skill.delete",
             "method": "SkillDeleteCommand"
         },
@@ -699,12 +824,49 @@
             "method": "SkillUnbindCommand"
         },
         {
+            "command": "skill.upsert",
+            "method": "SkillUpsertCommand"
+        },
+        {
             "command": "subprocessspawn",
             "method": "SubprocessSpawnCommand"
         },
         {
+            "command": "toolchain.env",
+            "method": "ToolchainEnvCommand",
+            "send": "{}"
+        },
+        {
+            "command": "toolchain.prune",
+            "method": "ToolchainPruneCommand"
+        },
+        {
+            "command": "toolchain.versions",
+            "method": "ToolchainVersionsCommand"
+        },
+        {
             "command": "tooldecision",
             "method": "ToolDecisionCommand"
+        },
+        {
+            "command": "tower.forget",
+            "method": "TowerForgetCommand"
+        },
+        {
+            "command": "tower.pair",
+            "method": "TowerPairCommand"
+        },
+        {
+            "command": "tower.peers",
+            "method": "TowerPeersCommand"
+        },
+        {
+            "command": "tower.sample",
+            "method": "TowerSampleCommand"
+        },
+        {
+            "command": "unlinkagentidentity",
+            "method": "UnlinkAgentIdentityCommand"
         },
         {
             "command": "unwatcheditorfile",

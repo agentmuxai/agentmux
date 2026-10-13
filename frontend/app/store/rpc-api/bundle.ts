@@ -6,10 +6,7 @@
 // gate, same as the rest of `bundle.*`. See
 // docs/specs/SPEC_ABF_IMPORT_UI_PHASE3_2026_08_02.md.
 
-import type { CommandGlobalMemoryImportData } from "@/types/rpc/CommandGlobalMemoryImportData";
 import type { CommandGlobalMemorySectionsData } from "@/types/rpc/CommandGlobalMemorySectionsData";
-import type { GlobalMemoryImportReport as GlobalMemoryImportReportT } from "@/types/rpc/GlobalMemoryImportReport";
-import type { GlobalMemoryImportSources as GlobalMemoryImportSourcesT } from "@/types/rpc/GlobalMemoryImportSources";
 import type { GlobalMemorySection as GlobalMemorySectionT } from "@/types/rpc/GlobalMemorySection";
 import { RpcClient } from "../rpc-client";
 
@@ -52,12 +49,7 @@ export type { IssueSeverity as BundleValidationSeverity } from "@/types/rpc/Issu
 export type { ValidationIssue as BundleValidationIssue } from "@/types/rpc/ValidationIssue";
 
 import type { Bundle as BundleT } from "@/types/rpc/Bundle";
-import type { BundleImportCommitResponse as BundleImportCommitResponseT } from "@/types/rpc/BundleImportCommitResponse";
-import type { BundleImportPreviewResponse as BundleImportPreviewResponseT } from "@/types/rpc/BundleImportPreviewResponse";
 import type { ClaudeGlobalConfig } from "@/types/rpc/ClaudeGlobalConfig";
-import type { CommandBundleImportCommitData } from "@/types/rpc/CommandBundleImportCommitData";
-import type { CommandBundleImportPreviewData } from "@/types/rpc/CommandBundleImportPreviewData";
-import type { CommandGetBundleData } from "@/types/rpc/CommandGetBundleData";
 import type { CommandGetClaudeGlobalConfigData } from "@/types/rpc/CommandGetClaudeGlobalConfigData";
 import type { CommandListBundlesData } from "@/types/rpc/CommandListBundlesData";
 import type { CommandUpsertBundleData } from "@/types/rpc/CommandUpsertBundleData";
@@ -112,10 +104,6 @@ export const BundleApi = {
         return client.rpcCall("listmemories", data, opts);
     },
 
-    GetBundleCommand(client: RpcClient, data: CommandGetBundleData, opts?: RpcOpts): Promise<BundleT> {
-        return client.rpcCall("getmemory", data, opts);
-    },
-
     UpsertBundleCommand(client: RpcClient, data: BundleUpsertRequest, opts?: RpcOpts): Promise<BundleT> {
         return client.rpcCall("upsertmemory", data, opts);
     },
@@ -146,19 +134,6 @@ export const BundleApi = {
         return client.rpcCall("getclaudeglobalconfig", data, opts);
     },
 
-    // Global Memory version history for the Armory UI — the WebSocket
-    // counterparts of the GlobalMemory{History,Diff,Revert} MCP tools
-    // (#3448), system-tier entries included. Revert records a NEW version
-    // (source "revert"); `version` is null only for a no-op system revert.
-    /**
-     * The other scopes an isolated channel can bring Global Memory from, and
-     * what each has that this channel lacks — SPEC_MEMORY_FOLLOWS_THE_AGENT
-     * §2.1.6. Empty unless this channel is isolated.
-     */
-    GlobalMemoryImportSourcesCommand(client: RpcClient, opts?: RpcOpts): Promise<GlobalMemoryImportSourcesT> {
-        return client.rpcCall("globalmemory:import_sources", {}, opts);
-    },
-
     /**
      * The Global Memory block agents' startup files carry, as its sections
      * (Operator Config first) — what memory reinjection re-delivers. See
@@ -171,38 +146,9 @@ export const BundleApi = {
     ): Promise<GlobalMemorySectionT[]> {
         return client.rpcCall("globalmemory:sections", data, opts);
     },
-
-    /** Import what source `index` of list `list_id` has that this channel lacks. */
-    GlobalMemoryImportCommand(
-        client: RpcClient,
-        data: CommandGlobalMemoryImportData,
-        opts?: RpcOpts
-    ): Promise<GlobalMemoryImportReportT> {
-        return client.rpcCall("globalmemory:import", data, opts);
-    },
 };
 
 export const BundleImportApi = {
-    // `data` takes all three input modes the server actually supports
-    // (`file_path`, `zip_base64`, `files`), which the previous hand-written
-    // `{ file_path: string }` did not -- two of them were unreachable through
-    // this client even though `resolve_import_input` has always accepted them.
-    BundleImportPreviewCommand(
-        client: RpcClient,
-        data: CommandBundleImportPreviewData,
-        opts?: RpcOpts
-    ): Promise<BundleImportPreviewResponseT> {
-        return client.rpcCall("bundle.import.preview", data, opts);
-    },
-
-    BundleImportCommitCommand(
-        client: RpcClient,
-        data: CommandBundleImportCommitData,
-        opts?: RpcOpts
-    ): Promise<BundleImportCommitResponseT> {
-        return client.rpcCall("bundle.import.commit", data, opts);
-    },
-
     // Structural-only check (crates/srv/src/backend/bundle_validate.rs) —
     // read-only, no Store write. Takes `BundleValidateInput`, which is
     // `BundleUpsertInput` minus the `id` requirement, so it can validate an

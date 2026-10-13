@@ -46,7 +46,6 @@ import type { IdentityAccount } from "@/types/rpc/IdentityAccount";
 import type { PollProviderAuthReq } from "@/types/rpc/PollProviderAuthReq";
 import type { StartProviderAuthReq } from "@/types/rpc/StartProviderAuthReq";
 import type { SubmitProviderApiKeyReq } from "@/types/rpc/SubmitProviderApiKeyReq";
-import type { UnlinkAgentIdentityResult } from "@/types/rpc/UnlinkAgentIdentityResult";
 import type { OAuthFlowStatus } from "./types";
 
 // `directAccount`, `existingAccountId`, `authEnv` and `requiresTty` are all
@@ -151,21 +150,6 @@ export const IdentityApi = {
 
     AccountOAuthPollCommand(client: RpcClient, data: { sessionId: string }, opts?: RpcOpts): Promise<OAuthFlowStatus> {
         return client.rpcCall("account.oauth.poll", data, opts);
-    },
-
-    UnlinkAgentIdentityCommand(
-        client: RpcClient,
-        data: {
-            agent_id: string;
-            provider: string;
-            /** Skip the agentcredentials:revoked broadcast — for an alias
-             *  migration (same credential staying bound under its canonical
-             *  provider id), not a real unbind. Default false. */
-            silent?: boolean;
-        },
-        opts?: RpcOpts
-    ): Promise<UnlinkAgentIdentityResult> {
-        return client.rpcCall("unlinkagentidentity", data, opts);
     },
 
     // Every direct link across every agent — powers the Armory "Identities"
