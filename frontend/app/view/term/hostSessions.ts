@@ -10,6 +10,7 @@ import { ContextMenuModel } from "@/app/store/contextmenu";
 import { createBlock } from "@/app/store/block-layout-actions";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { formatBytes } from "@/util/format-bytes";
+import type { HostSession } from "@/types/rpc/HostSession";
 
 export type HostSessionActions = {
     /** Open the session in a new durable pane. */

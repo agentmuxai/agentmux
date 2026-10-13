@@ -18,22 +18,26 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     register_browser_start_page_set(engine, state);
 }
 
-#[derive(serde::Deserialize)]
+#[derive(serde::Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 struct StartPageSetReq {
+    url: String,
+}
+
+/// What `browser_start_page.set` answers: the start page it saved.
+#[derive(serde::Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+struct StartPageSetResult {
     url: String,
 }
 
 fn register_browser_start_page_set(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let config_watcher = state.config_watcher.clone();
     let event_bus = state.event_bus.clone();
-    engine.register_handler(
-        COMMAND_BROWSER_START_PAGE_SET,
-        Box::new(move |data, _ctx| {
-            let config_watcher = config_watcher.clone();
-            let event_bus = event_bus.clone();
-            Box::pin(async move {
-                let req: StartPageSetReq = serde_json::from_value(data)
-                    .map_err(|e| format!("browser_start_page.set: {e}"))?;
+    engine.register_typed(COMMAND_BROWSER_START_PAGE_SET, move |req: StartPageSetReq, _ctx| {
+        let config_watcher = config_watcher.clone();
+        let event_bus = event_bus.clone();
+        async move {
                 if req.url.trim().is_empty() {
                     return Err("browser_start_page.set: url must not be empty".to_string());
                 }
@@ -57,10 +61,9 @@ fn register_browser_start_page_set(engine: &Arc<WshRpcEngine>, state: &AppState)
                 // 3. Broadcast now.
                 crate::backend::config_watcher_fs::broadcast_full_config(&config_watcher, &event_bus);
 
-                Ok(Some(json!({ "url": req.url })))
-            })
-        }),
-    );
+                Ok(StartPageSetResult { url: req.url })
+        }
+    });
 }
 
 #[cfg(test)]

@@ -11,6 +11,7 @@
  * open / close behaviour.
  */
 
+import type { RecentSessionRow } from "@/types/rpc/RecentSessionRow";
 import { cleanup, render, screen } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -50,6 +51,10 @@ const makeRow = (overrides: Partial<RecentSessionRow> = {}): RecentSessionRow =>
     has_snapshot: true,
     agent_created_at: Date.now() - 7_776_000_000,
     started_at: Date.now() - 3_600_000,
+    model_vendor_base_url: "",
+    session_id: "",
+    snapshot_check_failed: false,
+    agent_type: "",
     ...overrides,
 });
 

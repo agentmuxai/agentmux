@@ -1,5 +1,24 @@
 [
   {
+    "command": "account.key.verify",
+    "request": "serde_json::value::Value",
+    "requestName": "Value",
+    "requestTs": {
+      "imports": [
+        "JsonValue"
+      ],
+      "name": "JsonValue"
+    },
+    "response": "agentmux_srv::server::agent_handlers::identity::AccountKeyVerifyResult",
+    "responseName": "AccountKeyVerifyResult",
+    "responseTs": {
+      "imports": [
+        "AccountKeyVerifyResult"
+      ],
+      "name": "AccountKeyVerifyResult"
+    }
+  },
+  {
     "command": "account.oauth.cancel",
     "request": "agentmux_srv::server::agent_handlers::identity::OAuthSessionReq",
     "requestName": "OAuthSessionReq",
@@ -16,6 +35,44 @@
         "AccountOAuthCancelResult"
       ],
       "name": "AccountOAuthCancelResult"
+    }
+  },
+  {
+    "command": "account.oauth.poll",
+    "request": "agentmux_srv::server::agent_handlers::identity::OAuthSessionReq",
+    "requestName": "OAuthSessionReq",
+    "requestTs": {
+      "imports": [
+        "OAuthSessionReq"
+      ],
+      "name": "OAuthSessionReq"
+    },
+    "response": "serde_json::value::Value",
+    "responseName": "Value",
+    "responseTs": {
+      "imports": [
+        "JsonValue"
+      ],
+      "name": "JsonValue"
+    }
+  },
+  {
+    "command": "account.oauth.start",
+    "request": "serde_json::value::Value",
+    "requestName": "Value",
+    "requestTs": {
+      "imports": [
+        "JsonValue"
+      ],
+      "name": "JsonValue"
+    },
+    "response": "agentmux_srv::server::agent_handlers::identity::AccountOAuthStartResult",
+    "responseName": "AccountOAuthStartResult",
+    "responseTs": {
+      "imports": [
+        "AccountOAuthStartResult"
+      ],
+      "name": "AccountOAuthStartResult"
     }
   },
   {
@@ -356,6 +413,23 @@
         "AgentSessionWriteStateResult"
       ],
       "name": "AgentSessionWriteStateResult"
+    }
+  },
+  {
+    "command": "agentanswer",
+    "request": "serde_json::value::Value",
+    "requestName": "Value",
+    "requestTs": {
+      "imports": [
+        "JsonValue"
+      ],
+      "name": "JsonValue"
+    },
+    "response": "()",
+    "responseName": "()",
+    "responseTs": {
+      "imports": [],
+      "name": "null"
     }
   },
   {
@@ -1010,6 +1084,25 @@
     }
   },
   {
+    "command": "browser_start_page.set",
+    "request": "agentmux_srv::server::app_api::browser_start_page::StartPageSetReq",
+    "requestName": "StartPageSetReq",
+    "requestTs": {
+      "imports": [
+        "StartPageSetReq"
+      ],
+      "name": "StartPageSetReq"
+    },
+    "response": "agentmux_srv::server::app_api::browser_start_page::StartPageSetResult",
+    "responseName": "StartPageSetResult",
+    "responseTs": {
+      "imports": [
+        "StartPageSetResult"
+      ],
+      "name": "StartPageSetResult"
+    }
+  },
+  {
     "command": "bundle.import.commit",
     "request": "agentmux_srv::backend::rpc_types::bundle_import::CommandBundleImportCommitData",
     "requestName": "CommandBundleImportCommitData",
@@ -1045,6 +1138,25 @@
         "BundleImportPreviewResponse"
       ],
       "name": "BundleImportPreviewResponse"
+    }
+  },
+  {
+    "command": "bundle.validate",
+    "request": "serde_json::value::Value",
+    "requestName": "Value",
+    "requestTs": {
+      "imports": [
+        "JsonValue"
+      ],
+      "name": "JsonValue"
+    },
+    "response": "agentmux_srv::backend::bundle_validate::ValidationReport",
+    "responseName": "ValidationReport",
+    "responseTs": {
+      "imports": [
+        "ValidationReport"
+      ],
+      "name": "ValidationReport"
     }
   },
   {
@@ -1243,6 +1355,23 @@
     }
   },
   {
+    "command": "controllerresync",
+    "request": "serde_json::value::Value",
+    "requestName": "Value",
+    "requestTs": {
+      "imports": [
+        "JsonValue"
+      ],
+      "name": "JsonValue"
+    },
+    "response": "()",
+    "responseName": "()",
+    "responseTs": {
+      "imports": [],
+      "name": "null"
+    }
+  },
+  {
     "command": "createagent",
     "request": "agentmux_srv::backend::rpc_types::agent::CommandCreateAgentDefinitionData",
     "requestName": "CommandCreateAgentDefinitionData",
@@ -1357,6 +1486,23 @@
     }
   },
   {
+    "command": "createsubblock",
+    "request": "serde_json::value::Value",
+    "requestName": "Value",
+    "requestTs": {
+      "imports": [
+        "JsonValue"
+      ],
+      "name": "JsonValue"
+    },
+    "response": "alloc::string::String",
+    "responseName": "String",
+    "responseTs": {
+      "imports": [],
+      "name": "string"
+    }
+  },
+  {
     "command": "deleteagent",
     "request": "agentmux_srv::backend::rpc_types::agent::CommandDeleteAgentDefinitionData",
     "requestName": "CommandDeleteAgentDefinitionData",
@@ -1443,6 +1589,25 @@
     "responseTs": {
       "imports": [],
       "name": "null"
+    }
+  },
+  {
+    "command": "deleteidentityaccount",
+    "request": "agentmux_srv::backend::rpc_types::identity::CommandDeleteIdentityAccountData",
+    "requestName": "CommandDeleteIdentityAccountData",
+    "requestTs": {
+      "imports": [
+        "CommandDeleteIdentityAccountData"
+      ],
+      "name": "CommandDeleteIdentityAccountData"
+    },
+    "response": "agentmux_srv::server::agent_handlers::identity::DeleteIdentityAccountResult",
+    "responseName": "DeleteIdentityAccountResult",
+    "responseTs": {
+      "imports": [
+        "DeleteIdentityAccountResult"
+      ],
+      "name": "DeleteIdentityAccountResult"
     }
   },
   {
@@ -2253,6 +2418,25 @@
     }
   },
   {
+    "command": "getmeta",
+    "request": "serde_json::value::Value",
+    "requestName": "Value",
+    "requestTs": {
+      "imports": [
+        "JsonValue"
+      ],
+      "name": "JsonValue"
+    },
+    "response": "serde_json::value::Value",
+    "responseName": "Value",
+    "responseTs": {
+      "imports": [
+        "JsonValue"
+      ],
+      "name": "JsonValue"
+    }
+  },
+  {
     "command": "gettoolstatus",
     "request": "agentmux_srv::backend::rpc_types::misc::CommandGetToolStatusData",
     "requestName": "CommandGetToolStatusData",
@@ -2688,6 +2872,25 @@
     }
   },
   {
+    "command": "listagents",
+    "request": "serde_json::value::Value",
+    "requestName": "Value",
+    "requestTs": {
+      "imports": [
+        "JsonValue"
+      ],
+      "name": "JsonValue"
+    },
+    "response": "alloc::vec::Vec<agentmux_srv::backend::storage::agents::AgentDefinition>",
+    "responseName": "alloc::vec::Vec<agentmux_srv::backend::storage::agents::AgentDefinition>",
+    "responseTs": {
+      "imports": [
+        "AgentDefinition"
+      ],
+      "name": "Array<AgentDefinition>"
+    }
+  },
+  {
     "command": "listagentskills",
     "request": "agentmux_srv::backend::rpc_types::agent::CommandListAgentSkillsData",
     "requestName": "CommandListAgentSkillsData",
@@ -2837,6 +3040,44 @@
         "Bundle"
       ],
       "name": "Array<Bundle>"
+    }
+  },
+  {
+    "command": "listnamedagents",
+    "request": "serde_json::value::Value",
+    "requestName": "Value",
+    "requestTs": {
+      "imports": [
+        "JsonValue"
+      ],
+      "name": "JsonValue"
+    },
+    "response": "alloc::vec::Vec<agentmux_srv::backend::rpc_types::instance::NamedAgentRow>",
+    "responseName": "alloc::vec::Vec<agentmux_srv::backend::rpc_types::instance::NamedAgentRow>",
+    "responseTs": {
+      "imports": [
+        "NamedAgentRow"
+      ],
+      "name": "Array<NamedAgentRow>"
+    }
+  },
+  {
+    "command": "listrecentsessions",
+    "request": "serde_json::value::Value",
+    "requestName": "Value",
+    "requestTs": {
+      "imports": [
+        "JsonValue"
+      ],
+      "name": "JsonValue"
+    },
+    "response": "agentmux_srv::backend::rpc_types::instance::ListRecentSessionsResult",
+    "responseName": "ListRecentSessionsResult",
+    "responseTs": {
+      "imports": [
+        "ListRecentSessionsResult"
+      ],
+      "name": "ListRecentSessionsResult"
     }
   },
   {
@@ -4093,6 +4334,40 @@
     }
   },
   {
+    "command": "setconfig",
+    "request": "serde_json::value::Value",
+    "requestName": "Value",
+    "requestTs": {
+      "imports": [
+        "JsonValue"
+      ],
+      "name": "JsonValue"
+    },
+    "response": "()",
+    "responseName": "()",
+    "responseTs": {
+      "imports": [],
+      "name": "null"
+    }
+  },
+  {
+    "command": "setmeta",
+    "request": "serde_json::value::Value",
+    "requestName": "Value",
+    "requestTs": {
+      "imports": [
+        "JsonValue"
+      ],
+      "name": "JsonValue"
+    },
+    "response": "()",
+    "responseName": "()",
+    "responseTs": {
+      "imports": [],
+      "name": "null"
+    }
+  },
+  {
     "command": "shellexec",
     "request": "agentmux_srv::backend::rpc_types::block::CommandShellExecData",
     "requestName": "CommandShellExecData",
@@ -4509,6 +4784,25 @@
     }
   },
   {
+    "command": "toolchain.install_system_tool",
+    "request": "agentmux_srv::server::system_install_handlers::ToolIdReq",
+    "requestName": "ToolIdReq",
+    "requestTs": {
+      "imports": [
+        "ToolIdReq"
+      ],
+      "name": "ToolIdReq"
+    },
+    "response": "agentmux_srv::server::system_install_handlers::InstallSystemToolResult",
+    "responseName": "InstallSystemToolResult",
+    "responseTs": {
+      "imports": [
+        "InstallSystemToolResult"
+      ],
+      "name": "InstallSystemToolResult"
+    }
+  },
+  {
     "command": "toolchain.prune",
     "request": "core::option::Option<agentmux_srv::backend::rpc_types::toolchain::ToolchainPruneReq>",
     "requestName": "core::option::Option<agentmux_srv::backend::rpc_types::toolchain::ToolchainPruneReq>",
@@ -4525,6 +4819,25 @@
         "ToolchainPruneResult"
       ],
       "name": "ToolchainPruneResult"
+    }
+  },
+  {
+    "command": "toolchain.resolve_install_command",
+    "request": "agentmux_srv::server::system_install_handlers::ToolIdReq",
+    "requestName": "ToolIdReq",
+    "requestTs": {
+      "imports": [
+        "ToolIdReq"
+      ],
+      "name": "ToolIdReq"
+    },
+    "response": "agentmux_srv::server::system_install_handlers::ResolveInstallCommandResult",
+    "responseName": "ResolveInstallCommandResult",
+    "responseTs": {
+      "imports": [
+        "ResolveInstallCommandResult"
+      ],
+      "name": "ResolveInstallCommandResult"
     }
   },
   {
@@ -4764,6 +5077,25 @@
         "DroneDefinition"
       ],
       "name": "DroneDefinition"
+    }
+  },
+  {
+    "command": "upsertidentityaccount",
+    "request": "serde_json::value::Value",
+    "requestName": "Value",
+    "requestTs": {
+      "imports": [
+        "JsonValue"
+      ],
+      "name": "JsonValue"
+    },
+    "response": "agentmux_srv::backend::storage::identities::IdentityAccount",
+    "responseName": "IdentityAccount",
+    "responseTs": {
+      "imports": [
+        "IdentityAccount"
+      ],
+      "name": "IdentityAccount"
     }
   },
   {

@@ -197,41 +197,6 @@ declare global {
     // Mirrors crates/srv/src/backend/storage/mcp_servers.rs::McpServer and
     // skills.rs::Skill (the v1 struct, not the legacy agent-scoped AgentSkill).
 
-    /** A standalone MCP Server primitive. `config` is a JSON-encoded object
-     *  (command/args/env for stdio; url/headers for sse) merged into
-     *  `.mcp.json` at agent launch. Global servers (`is_global`) are visible
-     *  to every agent and cannot be mutated/deleted by agent-scoped RPCs. */
-    type McpServer = {
-        id: string;
-        name: string;
-        transport: string; // "stdio" | "sse"
-        config: string;
-        is_global: boolean;
-        created_at: number;
-        updated_at: number;
-    };
-
-    /** A standalone Skill primitive — an on-demand instruction/knowledge
-     *  module, loaded when invoked. Global skills (`is_global`) are visible
-     *  to every agent and cannot be mutated/deleted by agent-scoped RPCs. */
-    type Skill = {
-        id: string;
-        name: string;
-        trigger: string;
-        skill_type: string; // "prompt" | ...
-        description: string;
-        content: string;
-        is_global: boolean;
-        created_at: number;
-        updated_at: number;
-    };
-
-    /** `mcp.list`'s response shape: an McpServer plus whether the requesting
-     *  agent specifically holds the bind ref (as opposed to just being able
-     *  to see it because it's global). Only `mcp.list` (agent-scoped) carries
-     *  this — `mcp.get`/`mcp.upsert`/`mcp.catalog.list` return bare McpServer. */
-    type McpServerListItem = McpServer & { bound_to_agent: boolean };
-
     /** `mcp.probe`/`mcp.catalog.probe`'s response shape — a protocol-level
      *  health check (SPEC_MCP_INTEGRATION_PARITY_ABLETON_PILOT_2026_07_08.md
      *  §4.4). "connected" means the MCP handshake succeeded, not that any
@@ -243,29 +208,6 @@ declare global {
         server_version: string | null;
         error: string | null;
     };
-
-    /** `skill.list`'s response shape — see McpServerListItem. */
-    type SkillListItem = Skill & { bound_to_agent: boolean };
-
-    /** `mcp.catalog.list`'s response shape: an McpServer plus how many
-     *  agents currently bind it — the Armory catalog's "used by N agents"
-     *  count (#1960 gap #2). */
-    type McpServerCatalogItem = McpServer & {
-        bound_count: number;
-        /** Reaches every agent, not only the bound ones (`mcp.catalog.set_reach`). */
-        all_agents: boolean;
-        /** Container agents get it too. */
-        in_containers: boolean;
-    };
-
-    /** `skill.catalog.list`'s response shape — see McpServerCatalogItem. */
-    type SkillCatalogItem = Skill & { bound_count: number };
-
-    /** `skill.catalog.list_for_bundle`'s response shape — a Skill plus
-     *  whether the given bundle specifically holds the `db_bundle_skills_ref`
-     *  bind (as opposed to just being visible because it's global).
-     *  Composable model v2, docs/specs/SPEC_BUNDLE_AS_CONTAINER_V2_2026_08_17.md. */
-    type SkillBundleListItem = Skill & { bound_to_bundle: boolean };
 
     type AgentInstanceStatus = "running" | "paused" | "stopped" | "crashed" | "detached";
 
@@ -357,74 +299,6 @@ declare global {
         tokens: TokenCounts;
         costUsd: number;
         transcript: AgentTurn[];
-    };
-
-    /** v8 — one row of the launch modal's "Continue agent" dropdown.
-     * Server-side join across instance + definition + bundle tables. */
-    type NamedAgentRow = {
-        instance_id: string;
-        instance_name: string;
-        definition_id: string;
-        definition_name: string;
-        provider: string;
-        working_directory: string;
-        identity_id: string;
-        identity_name: string;
-        memory_id: string;
-        memory_name: string;
-        started_at: number;
-        ended_at: number;
-        status: string;
-        block_id_hint: string;
-    };
-
-    /** Cascade follow-up (2026-05-23) — one row of the AgentPicker's
-     * "Recent sessions" list. Mirrors NamedAgentRow + adds a preview
-     * (first user message text) and node count read from the filestore
-     * `output.state.json` snapshot. has_snapshot: false means the
-     * pane never wrote a snapshot (legacy / pre-persistence row); the
-     * row still surfaces so the user can reattach. */
-    type RecentSessionRow = {
-        instance_id: string;
-        instance_name: string;
-        definition_id: string;
-        definition_name: string;
-        provider: string;
-        /** Custom model vendor base URL override, mirrored from
-         *  AgentDefinition.model_vendor_base_url. Empty means the harness
-         *  talks to its own default vendor. See providers/catalog.ts's
-         *  resolveEffectiveVendor. */
-        model_vendor_base_url?: string;
-        working_directory: string;
-        identity_id: string;
-        identity_name: string;
-        memory_id: string;
-        memory_name: string;
-        block_id_hint: string;
-        /**
-         * CLI-emitted session id captured during the prior run. Empty
-         * when the row predates the capture or the CLI didn't emit a
-         * session id. Used by the picker reattach to populate
-         * `agent:sessionid` on the new block's meta so the spawned
-         * subprocess gets a real `--resume <sid>` on the FIRST turn.
-         */
-        session_id?: string;
-        preview: string;
-        node_count: number;
-        last_active_at: number;
-        has_snapshot: boolean;
-        /**
-         * True when `has_snapshot` is false because the filestore lookup
-         * itself ERRORED (I/O error, lock contention, DB read failure) —
-         * distinct from a genuine "the block never wrote a snapshot".
-         */
-        snapshot_check_failed?: boolean;
-        /** When the agent definition was first created (ms epoch). */
-        agent_created_at: number;
-        /** When this instance was most recently launched (ms epoch). */
-        started_at: number;
-        /** "host" or "container" — drives the runtime badge in the My Agents list. */
-        agent_type?: string;
     };
 
 
@@ -621,17 +495,6 @@ declare global {
         hasconnected: boolean;
         activeconnnum: number;
         error?: string;
-    };
-
-    // remote::sessions::HostSession: one durable session on an SSH host.
-    type HostSession = {
-        id: string;
-        /** Output the session has produced, in bytes. */
-        bytes: number;
-        /** The shell's exit code, once it has exited. */
-        exited?: number;
-        /** The pane on this connection holding it; absent for an orphan. */
-        blockid?: string;
     };
 
     // wshrpc.CpuDataRequest
@@ -1732,38 +1595,6 @@ declare global {
     type NativeMemoryWriteProvenance = {
         source: string; // "human" | "agent_inferred" | "jekt" | ...
         detail?: unknown;
-    };
-
-    // ExportAgentDefinitionsResult
-    type AgentSkillExport = {
-        name: string;
-        trigger: string;
-        skill_type: string;
-        description: string;
-        content: string;
-    };
-
-    type AgentDefinitionExport = {
-        id: string;
-        name: string;
-        icon: string;
-        description: string;
-        provider: string;
-        shell: string;
-        working_directory: string;
-        agent_bus_id: string;
-        agent_type: string;
-        environment: string;
-        restart_on_crash: boolean;
-        content: Record<string, string>;
-        skills: AgentSkillExport[];
-    };
-
-    type ExportAgentDefinitionsResult = {
-        version: number;
-        exported_at: string;
-        source: string;
-        agents: AgentDefinitionExport[];
     };
 
 }

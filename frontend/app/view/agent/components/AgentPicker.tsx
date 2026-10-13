@@ -33,39 +33,39 @@
 import { PaneLoadingCover } from "@/app/element/PaneLoadingCover";
 import { CopyErrorButton } from "@/app/errors/CopyErrorButton";
 import { formatErrorReport } from "@/app/errors/error-report";
-import { trackPaneContent } from "@/app/store/pane-content-holds";
-import { createPaneReadiness } from "@/app/store/pane-readiness";
-import { useWindowTabDisplayed } from "@/app/workspace/window-tab-visibility";
 import { subscribeToPaneLifecycle } from "@/app/store/agent-pane-registration";
 import { getOpenDefinitionMap } from "@/app/store/agent-pane-state-store";
 import { ContextMenuModel } from "@/app/store/contextmenu";
-import { atoms } from "@/app/store/global";
-import { revealBlock } from "@/app/util/reveal-block";
+import { muxEventSubscribe } from "@/app/store/mps";
+import { trackPaneContent } from "@/app/store/pane-content-holds";
+import { createPaneReadiness } from "@/app/store/pane-readiness";
+import type { AgentDefinition, AgentOpenPane } from "@/app/store/rpc-api";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { muxEventSubscribe } from "@/app/store/mps";
+import { windowId } from "@/app/store/window-identity";
+import { readZoom } from "@/app/store/zoom-factor";
+import { revealBlock } from "@/app/util/reveal-block";
 import { refreshAccountCache } from "@/app/view/identity/identity-model";
+import { useWindowTabDisplayed } from "@/app/workspace/window-tab-visibility";
 import { useModalLayer, type LaunchFormStateWire } from "@/element/modal-layer";
+import type { RecentSessionRow } from "@/types/rpc/RecentSessionRow";
 import { getPlatform } from "@/util/platformutil";
 import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show, untrack, type JSX } from "solid-js";
 import { resolveEffectiveLaunchProvider } from "../agent-launch-env";
-import { checkProviderInstalled, invalidateInstallCheck } from "../install-check-cache";
 import type { AgentViewModel } from "../agent-model";
 import { realAccountIdOrEmpty } from "../identity-carry-over";
+import { checkProviderInstalled, invalidateInstallCheck } from "../install-check-cache";
+import { mergeOpenDefinitions, openAgentLocations, type OpenAgentLocation } from "../open-agent-panes";
 import { openOrFocusHistoryTab } from "../open-history-tab";
+import { beginAgentOpen, finishAgentOpen } from "../open-trace";
 import { getProvider } from "../providers";
-import { AgentCard } from "./AgentCard";
-import { resolveDrift, type PinDrift } from "../providers/version-drift";
 import { needsProbe, prereqShortfall, shortfallLabel, type PrereqProbe } from "../providers/prereq-check";
+import { resolveDrift, type PinDrift } from "../providers/version-drift";
+import { AgentCard } from "./AgentCard";
 import type { LaunchOverrides } from "./AgentLaunchModal";
 import { AgentPickerFilterBar, DEFAULT_AGENT_SORT, type AgentSortOption } from "./AgentPickerFilterBar";
 import { HiddenTemplatesSection } from "./HiddenTemplatesSection";
 import { MyAgentsList } from "./MyAgentsList";
-import type { AgentDefinition, AgentOpenPane } from "@/app/store/rpc-api";
-import { windowId } from "@/app/store/window-identity";
-import { mergeOpenDefinitions, openAgentLocations, type OpenAgentLocation } from "../open-agent-panes";
-import { beginAgentOpen, finishAgentOpen } from "../open-trace";
-import { readZoom } from "@/app/store/zoom-factor";
 
 import { WpsEvent } from "@/app/store/mps-events";
 /** This-machine-only preference — no cross-device sync, no existing
@@ -229,7 +229,10 @@ function useInstanceOpenDefinitions(): [
         }
     };
     onMount(() => void fetchPanes());
-    const unsub = muxEventSubscribe({ eventType: WpsEvent.ProcessBrokerTrackedBlocksChanged, handler: () => void fetchPanes() });
+    const unsub = muxEventSubscribe({
+        eventType: WpsEvent.ProcessBrokerTrackedBlocksChanged,
+        handler: () => void fetchPanes(),
+    });
     onCleanup(unsub);
     // Tear-off, redock and tab moves keep the pane's controller, so they emit
     // no tracked-blocks event; refetch when the user comes back to this
@@ -1188,7 +1191,9 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                                 <CopyErrorButton
                                     variant="icon"
                                     className="agent-nodejs-notice-copy"
-                                    report={() => formatErrorReport({ title: "Launch aborted", message: launchError() ?? "" })}
+                                    report={() =>
+                                        formatErrorReport({ title: "Launch aborted", message: launchError() ?? "" })
+                                    }
                                 />
                             </div>
                         </Show>

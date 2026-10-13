@@ -7,14 +7,4 @@
 // docs/specs/SPEC_BROWSER_PANE_START_PAGE_2026_09_16.md and
 // crates/srv/src/server/app_api/browser_start_page.rs.
 
-import { RpcClient } from "../rpc-client";
-
-export const BrowserStartPageApi = {
-    SetBrowserStartPageCommand(
-        client: RpcClient,
-        data: { url: string },
-        opts?: RpcOpts,
-    ): Promise<{ url: string }> {
-        return client.rpcCall("browser_start_page.set", data, opts);
-    },
-};
+export const BrowserStartPageApi = {};

@@ -26,6 +26,7 @@ const EXIT_COMMAND_NOT_FOUND: i32 = 127;
 const LIMIT: Duration = Duration::from_secs(150);
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct HostSession {
     /// The session id (`remote:session_id` of the pane that made it).
     pub id: String,
@@ -35,9 +36,11 @@ pub struct HostSession {
     /// The shell's exit code, once it has exited (the daemon keeps an exited
     /// session for a few minutes so a reattach still sees how it ended).
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub exited: Option<i32>,
     /// The pane on this connection holding the session; none for an orphan.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub blockid: Option<String>,
 }
 

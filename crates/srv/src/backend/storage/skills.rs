@@ -218,6 +218,7 @@ impl Store {
 /// Standalone skill primitive (v1 composable model).
 /// Not bound to a specific agent at rest — agents reference via db_agent_skills_ref.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct Skill {
     pub id: String,
     pub name: String,
@@ -292,6 +293,7 @@ impl ManagedResource for Skill {
 /// `McpServerListItem` — see its doc comment for why `is_global` alone isn't
 /// enough to render bind/unbind as a stateful toggle (tracked in #1960).
 #[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct SkillListItem {
     #[serde(flatten)]
     pub skill: Skill,
@@ -302,6 +304,7 @@ pub struct SkillListItem {
 /// currently hold a `db_agent_skills_ref` to it — the Armory catalog's
 /// "used by N agents" count (gap #2 of #1960).
 #[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct SkillCatalogItem {
     #[serde(flatten)]
     pub skill: Skill,
@@ -314,6 +317,7 @@ pub struct SkillCatalogItem {
 /// agent's `db_agent_skills_ref` row. Composable model v2,
 /// docs/specs/SPEC_BUNDLE_AS_CONTAINER_V2_2026_08_17.md.
 #[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct SkillBundleListItem {
     #[serde(flatten)]
     pub skill: Skill,

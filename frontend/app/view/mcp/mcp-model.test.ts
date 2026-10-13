@@ -30,6 +30,7 @@ vi.mock("@/app/store/mps", () => ({
 }));
 
 import { McpCatalogModel, reachLabel } from "./mcp-model";
+import type { McpServerCatalogItem } from "@/types/rpc/McpServerCatalogItem";
 
 beforeEach(() => {
     mcpCatalogListMock.mockClear();

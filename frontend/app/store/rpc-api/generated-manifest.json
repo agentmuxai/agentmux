@@ -2,12 +2,32 @@
     "$comment": "Commands whose frontend stubs are generated (scripts/gen-rpc-stubs.mjs -> generated.ts). Each entry: command, method (the RpcApi method name callers use), and optionally send (a no-argument command: \"{}\" (default) or \"null\"; an optional request: \"data\" (default) or \"data ?? {}\") and opts (an expression replacing opts, e.g. a longer timeout). Moving a command here: add its entry, delete its hand-written method, run the generator.",
     "stubs": [
         {
+            "command": "account.key.verify",
+            "method": "AccountKeyVerifyCommand",
+            "dataType": "{ provider: string; name: string; displayName?: string; kind?: string; apiKey: string; validate: boolean; accountId?: string; context?: Record<string, unknown> }"
+        },
+        {
             "command": "account.oauth.cancel",
             "method": "AccountOAuthCancelCommand"
         },
         {
+            "command": "account.oauth.poll",
+            "method": "AccountOAuthPollCommand",
+            "returns": "import(\"@/app/store/rpc-api/types\").OAuthFlowStatus"
+        },
+        {
+            "command": "account.oauth.start",
+            "method": "AccountOAuthStartCommand",
+            "dataType": "{ provider: string; name: string; clientId?: string; clientSecret?: string }"
+        },
+        {
             "command": "session:activity_summary",
             "method": "AgentActivitySummaryCommand"
+        },
+        {
+            "command": "agentanswer",
+            "method": "AgentAnswerCommand",
+            "dataType": "CommandAgentAnswerData"
         },
         {
             "command": "agentcancel",
@@ -235,6 +255,11 @@
             ]
         },
         {
+            "command": "controllerresync",
+            "method": "ControllerResyncCommand",
+            "dataType": "CommandControllerResyncData"
+        },
+        {
             "command": "createagent",
             "method": "CreateAgentDefinitionCommand",
             "optionalFields": [
@@ -291,6 +316,11 @@
             "send": "data ?? {}"
         },
         {
+            "command": "createsubblock",
+            "method": "CreateSubBlockCommand",
+            "dataType": "CommandCreateSubBlockData"
+        },
+        {
             "command": "deleteagent",
             "method": "DeleteAgentDefinitionCommand"
         },
@@ -317,6 +347,10 @@
         {
             "command": "deleteeditorfile",
             "method": "DeleteEditorFileCommand"
+        },
+        {
+            "command": "deleteidentityaccount",
+            "method": "DeleteIdentityAccountCommand"
         },
         {
             "command": "deletesubblock",
@@ -502,6 +536,12 @@
             "method": "GetIdentityAccountCommand"
         },
         {
+            "command": "getmeta",
+            "method": "GetMetaCommand",
+            "dataType": "CommandGetMetaData",
+            "returns": "MetaType"
+        },
+        {
             "command": "reactive.registrations",
             "method": "GetReactiveRegistrationsCommand"
         },
@@ -569,6 +609,12 @@
             "method": "LinkAgentIdentityCommand"
         },
         {
+            "command": "listagents",
+            "method": "ListAgentDefinitionsCommand",
+            "send": "data ?? {}",
+            "dataType": "{ is_seeded?: 0 | 1; include_hidden?: boolean }"
+        },
+        {
             "command": "listagenthistory",
             "method": "ListAgentHistoryCommand"
         },
@@ -626,6 +672,16 @@
             "send": "data ?? {}"
         },
         {
+            "command": "listnamedagents",
+            "method": "ListNamedAgentsCommand",
+            "dataType": "{ limit?: number; definition_id?: string }"
+        },
+        {
+            "command": "listrecentsessions",
+            "method": "ListRecentSessionsCommand",
+            "dataType": "{ limit?: number; identity_id?: string }"
+        },
+        {
             "command": "lspsend",
             "method": "LspSendCommand"
         },
@@ -672,7 +728,12 @@
         },
         {
             "command": "mcp.catalog.upsert",
-            "method": "McpCatalogUpsertCommand"
+            "method": "McpCatalogUpsertCommand",
+            "optionalFields": [
+                "id",
+                "transport",
+                "config"
+            ]
         },
         {
             "command": "mcp.delete",
@@ -701,7 +762,12 @@
         },
         {
             "command": "mcp.upsert",
-            "method": "McpUpsertCommand"
+            "method": "McpUpsertCommand",
+            "optionalFields": [
+                "id",
+                "transport",
+                "config"
+            ]
         },
         {
             "command": "movescratchfile",
@@ -942,6 +1008,20 @@
             "method": "SetBookmarksCommand"
         },
         {
+            "command": "browser_start_page.set",
+            "method": "SetBrowserStartPageCommand"
+        },
+        {
+            "command": "setconfig",
+            "method": "SetConfigCommand",
+            "dataType": "SettingsType"
+        },
+        {
+            "command": "setmeta",
+            "method": "SetMetaCommand",
+            "dataType": "CommandSetMetaData"
+        },
+        {
             "command": "shellexec",
             "method": "ShellExecCommand"
         },
@@ -1055,8 +1135,16 @@
             "send": "{}"
         },
         {
+            "command": "toolchain.install_system_tool",
+            "method": "ToolchainInstallSystemToolCommand"
+        },
+        {
             "command": "toolchain.prune",
             "method": "ToolchainPruneCommand"
+        },
+        {
+            "command": "toolchain.resolve_install_command",
+            "method": "ToolchainResolveInstallCommandCommand"
         },
         {
             "command": "toolchain.versions",
@@ -1133,6 +1221,16 @@
         {
             "command": "upsertdrone",
             "method": "UpsertDroneCommand"
+        },
+        {
+            "command": "upsertidentityaccount",
+            "method": "UpsertIdentityAccountCommand",
+            "dataType": "Partial<IdentityAccount>"
+        },
+        {
+            "command": "bundle.validate",
+            "method": "ValidateBundleCommand",
+            "dataType": "import(\"@/app/store/rpc-api/bundle\").BundleValidateInput"
         },
         {
             "command": "viewer.agent-hidden",
