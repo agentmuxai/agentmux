@@ -351,6 +351,14 @@ describe("getWidgetBarModel", () => {
             ["defwidget@slack", "hidden"],
         ]);
         expect(model.find((e) => e.key === "defwidget@settings")!.canHide).toBe(false);
+    });
+
+    it("gives every pinned entry, a promoted child too, its place on the bar", () => {
+        const model = getWidgetBarModel({ "widget:pinned": ["slack", "agent"] }, barWmap());
+        const agent = model.find((e) => e.key === "defwidget@agent")!;
+        const slack = model.find((e) => e.key === "defwidget@messengers")!.children.find((c) => c.key === "defwidget@slack")!;
+        expect([slack.state, slack.pinIndex, slack.pinCount]).toEqual(["pinned", 0, 2]);
+        expect([agent.pinIndex, agent.pinCount]).toEqual([1, 2]);
         expect(model.find((e) => e.key === "ext@acme.board/main")!.canPin).toBe(false);
     });
 });

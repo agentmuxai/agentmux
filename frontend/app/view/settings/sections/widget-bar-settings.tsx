@@ -77,7 +77,6 @@ export function WidgetBarSettings(): JSX.Element {
     const settings = (): Record<string, any> => atoms.fullConfigAtom()?.settings ?? {};
     const wmap = (): Record<string, WidgetConfigType> => atoms.fullConfigAtom()?.widgets ?? {};
     const model = () => getWidgetBarModel(settings(), wmap());
-    const pinnedCount = () => model().filter((e) => e.state === "pinned").length;
     const [error, setError] = createSignal<string | null>(null);
 
     // Every write goes through SetConfigCommand; the config event that follows re-renders this
@@ -91,7 +90,7 @@ export function WidgetBarSettings(): JSX.Element {
     const setState = (entry: WidgetBarEntry, state: WidgetBarState) =>
         write(() => setWidgetBarState(entry.key, state, settings(), wmap()));
 
-    const Row = (p: { entry: WidgetBarEntry; index?: number; child?: boolean }): JSX.Element => (
+    const Row = (p: { entry: WidgetBarEntry; child?: boolean }): JSX.Element => (
         <div
             class="widget-bar-row"
             classList={{ "widget-bar-row--child": !!p.child, "widget-bar-row--hidden": p.entry.state === "hidden" }}
@@ -108,17 +107,18 @@ export function WidgetBarSettings(): JSX.Element {
                 </Show>
             </span>
             <span class="widget-bar-row-move">
-                <Show when={!p.child && p.entry.state === "pinned"}>
+                {/* Any pinned entry, a promoted child too: limits from its place on the bar. */}
+                <Show when={p.entry.state === "pinned"}>
                     <IconButton
                         icon="arrow-up"
                         label="Move left on the bar"
-                        disabled={p.index === 0}
+                        disabled={p.entry.pinIndex === 0}
                         onClick={() => write(() => movePinnedWidget(p.entry.shortName, -1, settings(), wmap()))}
                     />
                     <IconButton
                         icon="arrow-down"
                         label="Move right on the bar"
-                        disabled={p.index === pinnedCount() - 1}
+                        disabled={p.entry.pinIndex === (p.entry.pinCount ?? 0) - 1}
                         onClick={() => write(() => movePinnedWidget(p.entry.shortName, 1, settings(), wmap()))}
                     />
                 </Show>
@@ -140,9 +140,9 @@ export function WidgetBarSettings(): JSX.Element {
                 <div class="setting-devices-description">{WIDGET_BAR_SETTINGS.bar.description}</div>
                 <div class="widget-bar-list" role="list" aria-label="Widget bar entries">
                     <For each={model()}>
-                        {(entry, i) => (
+                        {(entry) => (
                             <div role="listitem">
-                                <Row entry={entry} index={i()} />
+                                <Row entry={entry} />
                                 <For each={entry.children}>{(child) => <Row entry={child} child />}</For>
                             </div>
                         )}

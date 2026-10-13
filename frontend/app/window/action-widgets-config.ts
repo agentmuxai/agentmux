@@ -361,6 +361,11 @@ export interface WidgetBarEntry {
     canPin: boolean;
     /** A group's children, each with its own state ("group", "pinned" or "hidden"). */
     children: WidgetBarEntry[];
+    /** For a pinned entry (a promoted child too): its place on the bar, and how many are pinned.
+     *  Reorder limits come from here, not from the top-level rows, since a promoted child sits on
+     *  the bar but is listed under its group. */
+    pinIndex?: number;
+    pinCount?: number;
 }
 
 function byOrder(a: WidgetConfigType, b: WidgetConfigType): number {
@@ -382,15 +387,19 @@ export function getWidgetBarModel(
     const pinned = getPinnedKeys(settings, wmap);
     const pinnedSet = new Set(pinned);
     const structuralChildren = getGroupedChildKeys(wmap);
-    const entry = (key: string, widget: WidgetConfigType, state: WidgetBarState, children: WidgetBarEntry[] = []): WidgetBarEntry => ({
-        key,
-        shortName: key.startsWith(DEFWIDGET) ? key.slice(DEFWIDGET.length) : key,
-        widget,
-        state,
-        canHide: !UNHIDEABLE_WIDGET_KEYS.has(key),
-        canPin: key.startsWith(DEFWIDGET),
-        children,
-    });
+    const entry = (key: string, widget: WidgetConfigType, state: WidgetBarState, children: WidgetBarEntry[] = []): WidgetBarEntry => {
+        const shortName = key.startsWith(DEFWIDGET) ? key.slice(DEFWIDGET.length) : key;
+        return {
+            key,
+            shortName,
+            widget,
+            state,
+            canHide: !UNHIDEABLE_WIDGET_KEYS.has(key),
+            canPin: key.startsWith(DEFWIDGET),
+            children,
+            ...(state === "pinned" ? { pinIndex: pinned.indexOf(shortName), pinCount: pinned.length } : {}),
+        };
+    };
     const childrenOf = (widget: WidgetConfigType): WidgetBarEntry[] =>
         (widget.children ?? [])
             .map((name) => [DEFWIDGET + name, wmap[DEFWIDGET + name]] as const)
