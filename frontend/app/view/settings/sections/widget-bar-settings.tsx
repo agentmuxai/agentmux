@@ -53,7 +53,7 @@ export const WIDGET_BAR_SETTINGS = {
 
 function topLevelOptions(entry: WidgetBarEntry): SegmentedOption<WidgetBarState>[] {
     return [
-        { value: "pinned", label: "Pinned", disabled: !entry.canPin, title: entry.canPin ? undefined : "Installed widgets can't be pinned yet" },
+        { value: "pinned", label: "Pinned" },
         { value: "more", label: "More" },
         { value: "hidden", label: "Hidden", disabled: !entry.canHide },
     ];

@@ -246,7 +246,7 @@ In this change (small and needed for the above):
 
 Separate follow-ups:
 
-5. **Package widgets can't be pinned.** Pin logic always looks up `defwidget@${short}`
+5. ~~**Package widgets can't be pinned.**~~ Resolved 2026-10-13: `widget:pinned` holds a built-in's short name (so old files read as before) and a package widget's full key (`ext@<id>/<pane>`); `pinIdOf` / `keyOfPinId` in `action-widgets-config.ts` convert, and every pin path (bar, drag, right-click, title-bar menu, Settings) uses them. The original finding: Pin logic always looks up `defwidget@${short}`
    (`action-widgets-config.ts:152,168`, `action-widgets-menu.ts:37`, `action-widgets.tsx:336`), and the title-bar
    menu lists only `defwidget@` keys (`:85`). So `ext@…` entries only ever appear in More. Fix by moving
    `widget:pinned` to full keys, reading short names as `defwidget@<short>` for old files.

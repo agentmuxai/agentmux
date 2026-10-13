@@ -31,6 +31,8 @@ import {
     getPinnedWidgets,
     getSavedPinNames,
     handleWidgetSelect,
+    keyOfPinId,
+    pinIdOf,
     pinWidget,
     UNHIDEABLE_WIDGET_KEYS,
     unpinWidget,
@@ -340,11 +342,11 @@ const ActionWidgets = (): JSX.Element => {
     const isItemMenuOpen = () => itemMenuState() !== null;
 
     const handleItemContextMenu = (pos: { x: number; y: number }, key: string) => {
-        setItemMenuState({ pos, key, shortName: key.replace("defwidget@", "") });
+        setItemMenuState({ pos, key, shortName: pinIdOf(key) });
     };
 
     const resolveWidgetDef = (shortName: string) =>
-        wmap()[`defwidget@${shortName}`] ?? null;
+        wmap()[keyOfPinId(shortName)] ?? null;
 
     /** "Hide from widget bar": off the bar, out of More and the pane "+" picker until it's
      *  shown again in Settings → Widgets. Settings itself can't be hidden. */
@@ -442,7 +444,7 @@ const ActionWidgets = (): JSX.Element => {
         e.stopPropagation();
         handlePointerCancel();
         armContextMenuDismiss(key);
-        const shortName = key.replace("defwidget@", "");
+        const shortName = pinIdOf(key);
         const isParent = (wmap()[key]?.children?.length ?? 0) > 0;
         // A parent's right-click is scoped to group-level actions (§3.5) —
         // no "Open in New Window" (no single pane a parent represents), and

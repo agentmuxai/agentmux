@@ -9,7 +9,7 @@ import { createTab } from "@/store/global";
 import { openNewWindowFromHere } from "@/app/store/window-appearance";
 import { fireAndForget } from "@/util/util";
 import { createEffect, createSignal, untrack, type JSX } from "solid-js";
-import { getEffectiveGroupedChildKeys, getHiddenKeys, getSavedPinNames, isWidgetHidden } from "./action-widgets-config";
+import { getEffectiveGroupedChildKeys, getHiddenKeys, getSavedPinNames, isWidgetHidden, pinIdOf } from "./action-widgets-config";
 
 interface TitleBarContextMenuProps {
     pos: { x: number; y: number };
@@ -93,7 +93,7 @@ const TitleBarContextMenu = (props: TitleBarContextMenuProps): JSX.Element => {
         const grouped = getEffectiveGroupedChildKeys(widgets(), settings());
         const hidden = getHiddenKeys(settings());
         const widgetEntries = Object.entries(widgets())
-            .filter(([key]) => key.startsWith("defwidget@") && !grouped.has(key.replace("defwidget@", "")))
+            .filter(([key]) => !grouped.has(pinIdOf(key)))
             // Hidden in Settings → Widgets: not offered for pinning until it's shown again there.
             .filter(([key]) => !isWidgetHidden(key, widgets(), settings(), hidden))
             .sort(([, a]: any, [, b]: any) => (a["display:order"] ?? 0) - (b["display:order"] ?? 0));
@@ -106,7 +106,7 @@ const TitleBarContextMenu = (props: TitleBarContextMenuProps): JSX.Element => {
                 // A heading for the list below, not a fold: always open.
                 collapsible: false,
                 items: widgetEntries.map(([key, cfg]: [string, any]) => {
-                    const shortName = key.replace("defwidget@", "");
+                    const shortName = pinIdOf(key);
                     return {
                         type: "checkbox" as const,
                         label: cfg.label ?? shortName,
