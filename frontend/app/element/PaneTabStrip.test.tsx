@@ -692,6 +692,19 @@ describe("PaneTabStrip — reserveDragHandle (SPEC_PANE_TAB_DRAG_AND_DROP_2026_0
         expect(onMenu).toHaveBeenCalledTimes(1);
     });
 
+    it("a click that ends a drag (a floating pane moved by its grip) doesn't open the menu", () => {
+        const onMenu = vi.fn();
+        const { container } = renderWithGrip(onMenu);
+        const grip = container.querySelector(".pane-tab-strip-grip")!;
+        fireEvent.pointerDown(grip, { screenX: 100, screenY: 100 });
+        fireEvent.click(grip, { screenX: 180, screenY: 130 });
+        expect(onMenu).not.toHaveBeenCalled();
+        // A press and release in place is a click.
+        fireEvent.pointerDown(grip, { screenX: 100, screenY: 100 });
+        fireEvent.click(grip, { screenX: 101, screenY: 100 });
+        expect(onMenu).toHaveBeenCalledTimes(1);
+    });
+
     it("Enter and Space on the grip open the pane menu too", () => {
         const onMenu = vi.fn();
         const { container } = renderWithGrip(onMenu);

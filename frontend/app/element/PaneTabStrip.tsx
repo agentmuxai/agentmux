@@ -350,6 +350,19 @@ export interface PaneTabStripProps<T> {
 /** Opens the pane header's own context menu (the header's `contextmenu`
  *  handler), anchored at `el`: the grip's click and keyboard route to the same
  *  actions a right-click gives. */
+/** Screen position of the last press on a grip. A floating pane moves its
+ *  window under the cursor, so the release can land on the same grip and the
+ *  browser still fires `click`; the screen position is what moved. */
+let gripPress: { x: number; y: number } | null = null;
+
+/** A click on the grip after it was dragged more than a few pixels is the end
+ *  of a move, not a request for the menu. */
+function gripClickWasDrag(e: MouseEvent): boolean {
+    const start = gripPress;
+    gripPress = null;
+    return !!start && Math.abs(e.screenX - start.x) + Math.abs(e.screenY - start.y) > 4;
+}
+
 function openPaneMenuFrom(el: HTMLElement): void {
     const r = el.getBoundingClientRect();
     el.dispatchEvent(
@@ -631,7 +644,11 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
                             aria-label={props.dragDisabled ? "Pane actions" : "Move pane / pane actions"}
                             aria-haspopup="menu"
                             title={props.dragDisabled ? "Pane actions" : "Drag to move this pane. Click for pane actions."}
-                            onClick={(e) => openPaneMenuFrom(e.currentTarget)}
+                            onPointerDown={(e) => { gripPress = { x: e.screenX, y: e.screenY }; }}
+                            onClick={(e) => {
+                                if (gripClickWasDrag(e)) return;
+                                openPaneMenuFrom(e.currentTarget);
+                            }}
                             onKeyDown={(e) => {
                                 if (e.key !== "Enter" && e.key !== " ") return;
                                 e.preventDefault();
