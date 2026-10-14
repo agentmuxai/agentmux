@@ -691,6 +691,22 @@ function BlockFrame_Header(
         return getViewIconElem(viewIconUnion(), blockData());
     });
 
+    // With the tab strip in place of the iconview, the view icon itself is
+    // gone. Keep it only when it's a real control, not when it's just the
+    // pane's identity (the pill shows that). No built-in view uses this now,
+    // but the v1 pane-tab contract lets a tab's `headerIcon` be clickable,
+    // and trusted widgets register through that contract
+    // (SPEC_PANE_TAB_CONTRACT_V1_2026_09_24.md).
+    const viewIconControlElem = createMemo<JSX.Element>(() => {
+        const vi = viewIconUnion();
+        if (!props.leadingTabStrip || vi == null || typeof vi === "string") return null;
+        if (vi.elemtype !== "iconbutton" || vi.noAction || !vi.click) return null;
+        return (
+            <span onDblClick={(e) => e.stopPropagation()}>
+                <IconButton decl={vi} className="block-frame-view-icon-control" />
+            </span>
+        );
+    });
     const preIconButtonElem = createMemo<JSX.Element>(() =>
         preIconButton() ? <IconButton decl={preIconButton()} className="block-frame-preicon-button" /> : null
     );
@@ -782,6 +798,7 @@ function BlockFrame_Header(
             style={headerStyle()}
         >
             {preIconButtonElem()}
+            {viewIconControlElem()}
             <Show
                 when={!props.leadingTabStrip}
                 fallback={<div class="block-frame-default-header-tabstrip">{props.leadingTabStrip}</div>}
