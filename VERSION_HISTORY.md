@@ -1,5 +1,45 @@
 # AgentMux Version History
 
+## 0.59.26 — 2026-10-14
+
+- Opening and closing windows no longer leaves memory behind: a recycled window now replaces its page instead of keeping every previous one in the browser's back/forward cache
+- Sysinfo opens on a new Overview: tiles with sparklines and low/high for CPU, memory, network and disk, a per-core heatmap, network and disk drawn in above / out below, a 1m/2m/5m/15m window kept per pane, pause, and a table view. CPU, Memory, Disk and Network buttons show one area alone in up to three charts that fit a small pane, such as the busiest core against the average, committed memory against its limit, and each volume's free space
+- The dot for turns that finished while you were away now sits on that tab's own pill, so it stays visible after you switch to another tab in the pane, instead of beside the + for the active tab only.
+- A tab added to a pane no longer disappears when the window saves its layout at the same moment; switching and closing pane tabs also reach the backend right away.
+- Pi now shows its own three-colour logo instead of a plain letter
+- AgentMux now logs, once and loudly, any tab block left in no pane and any broken stored pane layout, so a lost pane tab is noticed.
+- After a reload, an agent's replies from separate turns with nothing between them (such as answers to two messages sent while it worked) no longer run together into one paragraph
+- With agent:followcontroller on (the default in development builds), a running tool's preview and the install log follow their output by the same rules as the agent pane: only your own scroll up stops following, and scrolling back to the bottom starts it again
+- After an account switch or a resume the CLI rejected, and after a manual /compact, the agent now catches up on its own: the Given to the agent card appears, the agent works through what it was given, then tells you in its own words where it is picking up and suggests next steps. It replaces the one-line pick-up note, which a reload lost.
+- Copilot, OpenClaw and Pi agents are no longer launched with Claude's --dangerously-skip-permissions flag; ACP agents ask for permission inside the protocol
+- fix(srv): a signal reaching srv's launcher watcher no longer quits the whole app; the Linux poll() and macOS kevent() waits retry on EINTR
+- ACP agents (Copilot, OpenClaw, Pi and the new ACP harnesses) get AgentMux's MCP server and the agent's own MCP servers, so they have the AgentMux tools
+- The Codex review gate retries GitHub's transient errors (5xx, rate limits, dropped connections), so one bad response no longer leaves a PR's required Codex review status stuck.
+- Messages between agents on different computers of the same account are signed again: since 0.59.x every one went out unsigned (TRUST=network-claimed) because an agent signed with a different key than the one AgentMux checks and publishes
+- Every 30 minutes, the Codex review gate re-checks open PRs whose status missed a Codex answer (a GitHub outage, a dropped webhook), so a stuck Codex review status clears on its own without spending a Codex review.
+- Three new agent harnesses: Kilo Code CLI, Cline CLI and OpenCode, each launched over ACP from the New Agent cards
+- Repo scripts decide whether they were run directly with one shared check, so check-new-spec-status.mjs now actually runs on Windows (it used to exit 0 without checking anything).
+- fix(agent): a memory re-delivery shows one card, not a card plus a "Memory reinjected" row, when history loads in pages or arrives after a reconnect
+- AgentMux now signs an agent's messages to other computers itself, for the agent the request's own token names, so agents no longer hold a signing key; muxsh agent send from an agent's shell is signed too
+- When you resume an agent from My agents (or the launch dialog's Continue), the agent now catches up like it does after an account switch: it works through the conversation, then says where it is picking up and suggests next steps. A conversation that continues in a fresh session keeps its title, and agents driven only by messages get their title and next-prompt suggestion back after a memory re-delivery.
+- fix(linux): on native Wayland a torn-off floater moves when its header is dragged, and a tear-off no longer leaves a ghost sliding back into the window
+- Three more agent harnesses over ACP: goose, Grok Build and DeepSeek Harness (preview)
+- fix(memory): a compaction the pane notices late no longer sends the agent its memory a second time
+- Three harnesses in a new terminal tier, each opening its own UI in a terminal pane: Aider, Crush and Muse Code
+- The next-prompt suggestion in the composer is no longer wiped when AgentMux re-delivers memory behind the scenes (for example after an automatic compaction); it stays until you send something.
+- Internal: the memory-delivery endpoint tests moved to their own file, which brings the source file back under the repository's size limit; nothing changes for users.
+- Closes a way for an agent to be signed for as another agent whose name differs only in case, and signs messages from agents whose names have capitals (most of them)
+- fix(agent): a slash command's output ("Compacted …" after /compact) shows as a small card, not as a message you sent
+- Downloads in a browser pane now open the system Save As dialog, so a file a page offers can be saved where you choose (before, they were cancelled).
+- Closes two ways a message from another agent could skip the stop-and-ask-the-human step without proving who sent it, and makes the credential-keyword check see through invisible and fullwidth characters
+- fix(agent): the Swarm line, pane titles and My Agents tiles show what you asked, not AgentMux's startup message or Claude Code's compaction summary
+- perf(linux): browser panes move with the window as it is resized, lay out once per batch, and follow a layout change within a frame
+- AgentMux no longer logs part of its auth key at startup, and a paired phone is never shown an agent the desktop couldn't confirm is visible to it
+- fix(agent): after a compaction the memory card sits under "Context compacted" whichever way the memory was delivered
+- An ACP agent's error shows its detail when the message alone is generic (for example goose's "Internal error" now names the missing GOOSE_PROVIDER)
+- Internal: the code that writes the Given to the agent card, and the text it shares with the compaction check, is now defined once; nothing changes for users.
+- After an account switch the agent now reliably catches up: AgentMux tells the pane when the new session started with nobody talking to it, instead of the pane guessing from a turn state that the switch can leave stale. A deferred catch-up also fires when the pane goes quiet without a turn-end, and the memory-delivery log now says why a session start delivered nothing.
+
 ## 0.59.25 — 2026-10-14
 
 - Agent panes keep much less tool output in memory: finished results are released in the current turn too, smaller results and turns driven by agent messages are covered, and hidden panes let go of rows they were holding open.
