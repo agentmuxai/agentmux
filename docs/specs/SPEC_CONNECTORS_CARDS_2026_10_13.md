@@ -1,6 +1,6 @@
 # Spec: Connectors shows everything connected as cards
 
-**Status:** proposed, not built.
+**Status:** implemented, 2026-10-14, in #4851 (all three sections; §9 lists what was built and what differs from the plan).
 **Date:** 2026-10-13 · **Author:** agent2
 **Trigger:** the repo owner, 2026-10-13: *"update the look of the connectors view. Just like the top section, we want cards for all the connected accounts"*, then *"we also want a similar look of cards for MCP servers and remotes .. we want a consistent style across all of connectors"*.
 **Written against:** `main` @ `84e05ef4b`.
