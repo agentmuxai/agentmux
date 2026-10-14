@@ -4,8 +4,9 @@
 // ── Quit state (H.5) ─────────────────────────────────────────────────────
 
 /// Host process quit lifecycle. Replaces `is_quitting: AtomicBool` at
-/// `state.rs::AppState`. Three states; transitions are monotonic
-/// (Running → Draining → Quit, no regression).
+/// `state.rs::AppState`. Monotonic: Running → Draining, never back. There
+/// is no terminal state after Draining: the Stage-2 executors exit the
+/// message loop from Draining, and the process ends.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[allow(dead_code)]
 pub enum QuitState {
@@ -14,8 +15,6 @@ pub enum QuitState {
     /// `BeginDrain` dispatched. Pool refills suppressed; awaiting pool +
     /// browsers to drain.
     Draining { reason: QuitReason },
-    /// `ConfirmDrained` dispatched. Host quitting; no further commands.
-    Quit,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

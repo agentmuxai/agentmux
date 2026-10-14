@@ -316,21 +316,22 @@ impl State {
     /// the reducer when constructing an Event so version numbers
     /// stay strictly monotonic.
     ///
-    /// Strict (non-wrapping) add: Phase D's GetSnapshot resync
+    /// Saturating add, same as srv's: Phase D's GetSnapshot resync
     /// protocol relies on monotonicity (`event.version >
-    /// snapshot.version`), and a wrap to 0 would silently break
-    /// that contract. u64 at one event/ns would take 584 years to
-    /// overflow — never going to happen in practice; if it ever
-    /// does, the panic is the right failure mode.
+    /// snapshot.version`), and a wrap to 0 would silently break that
+    /// contract. A plain `+=` panics in debug builds but wraps in
+    /// release, where overflow checks are off. u64 at one event/ns
+    /// takes 584 years to get there, so this never matters in
+    /// practice; saturating keeps the reducer total either way.
     /// (gemini MEDIUM PR #574 round-1.)
     pub fn bump_version(&mut self) -> u64 {
-        self.event_version += 1;
+        self.event_version = self.event_version.saturating_add(1);
         self.event_version
     }
 
     /// Bump and return the next client_id. Client IDs are stable
-    /// per launcher run; not persisted across restart. Same strict-
-    /// add reasoning as bump_version.
+    /// per launcher run; not persisted across restart. u64, so it
+    /// never runs out in practice.
     pub fn alloc_client_id(&mut self) -> u64 {
         let id = self.next_client_id;
         self.next_client_id += 1;

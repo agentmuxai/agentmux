@@ -483,8 +483,8 @@ pub struct AppState {
     /// so an HWND key risks a stale entry colliding with a recreated pane.
     ///
     /// Why a wrong-skip can't happen:
-    /// - **Labels are globally unique and never reused** (monotonic
-    ///   `BROWSER_PANE_LABEL_SEQ`; see `next_browser_pane_label`). A
+    /// - **Labels are unique and never reused within the process** (monotonic
+    ///   `HostState::next_browser_pane_label_seq`; see `next_browser_pane_label`). A
     ///   close→recreate registers the new pane under a brand-new label, so the
     ///   label-keyed cache always *misses* and re-applies. This is the primary
     ///   guarantee.
@@ -548,7 +548,7 @@ pub struct AppState {
     // PR #5 H.5 — `is_quitting` AtomicBool deleted; the host reducer's
     // `HostState.quit_state: QuitState` is the sole source of truth.
     // Reads go through `AppState::is_quitting()`; transitions through
-    // `HostCommand::BeginDrain` and `ConfirmDrained`.
+    // `HostCommand::BeginDrain`.
 
     /// Version-specific data directory (e.g. ai.agentmux.cef.v0-32-111/)
     pub version_data_dir: Mutex<Option<String>>,
@@ -770,7 +770,12 @@ impl Default for AppState {
             owned_panes: Mutex::new(std::collections::HashSet::new()),
             site_limits: Default::default(),
             popup_openers: Mutex::new(std::collections::HashMap::new()),
-            host_state: Mutex::new(crate::reducer::HostState::default()),
+            // The reducer reads no environment; background-service mode is
+            // read here, once, and handed to it (presence-based, see
+            // `HostState::background_service_enabled`).
+            host_state: Mutex::new(crate::reducer::HostState::new(
+                std::env::var("AGENTMUX_BACKGROUND_SERVICE").is_ok(),
+            )),
             media_grants: Mutex::new(
                 crate::browser_panes::media_grants::MediaGrantStore::new(),
             ),
@@ -1614,12 +1619,6 @@ fn log_host_event(ev: &crate::reducer::HostEvent) {
             event = "QuitDraining",
             reason = ?reason, version,
             "[host-reducer] entering drain mode",
-        ),
-        HostEvent::QuitReady { version } => tracing::warn!(
-            target: "host-reducer",
-            event = "QuitReady",
-            version,
-            "[host-reducer] drain complete; host quitting",
         ),
         // ── Opacity ──────────────────────────────────────────────────────
         HostEvent::WindowOpacityApplied { label, opacity, version } => tracing::debug!(

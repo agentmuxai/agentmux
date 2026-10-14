@@ -16,8 +16,10 @@
 //! The first request for a window releases the hold and shows "main" instead
 //! of opening a second one: `open_new_window` (tray "New Window", a relaunch,
 //! the macOS Dock) and `focus_window` for "main" (a notification click). While
-//! held, the unattended period goes into the WS4 audit log, like a period with
-//! every window closed.
+//! held, the instance is unattended: the hold is reported to the host reducer
+//! (`HostCommand::SetStartHiddenHeld`), which moves `background_unattended`
+//! and records the period in the WS4 audit log, like a period with every
+//! window closed.
 
 use std::sync::{Arc, Mutex};
 
@@ -157,23 +159,15 @@ pub fn release_for_request(state: &Arc<AppState>, why: &str) -> bool {
     }
 }
 
-/// Record the start or end of the held (unattended) period in the WS4 audit
-/// log. Called under the hold lock (so a skip and a release are logged in the
-/// order they happened) and sent under `host_state`, like `host_dispatch`'s own
-/// transitions, so it cannot be reordered against them either. Lock order is
-/// hold → `host_state`; nothing takes the hold while holding `host_state`.
+/// Report the start or end of the held (unattended) period to the host
+/// reducer, which owns the attended/unattended flag. It moves
+/// `background_unattended` and, on a crossing, `host_dispatch` records the
+/// WS4 audit entry under `host_state`, like every other transition. Called
+/// under the hold lock, so a skip and a release reach the reducer in the order
+/// they happened. Lock order is hold → `host_state`; nothing takes the hold
+/// while holding `host_state`.
 fn record_attention(state: &Arc<AppState>, unattended: bool) {
-    let _order = state.host_state.lock();
-    if let Some(tx) = state.background_audit_tx.get() {
-        let _ = tx.send(crate::background_audit::AuditEntry {
-            at_ms: crate::background_audit::now_ms(),
-            kind: if unattended {
-                crate::background_audit::AuditKind::WentUnattended
-            } else {
-                crate::background_audit::AuditKind::Observed
-            },
-        });
-    }
+    state.host_dispatch(crate::reducer::HostCommand::SetStartHiddenHeld { held: unattended });
 }
 
 #[cfg(test)]
