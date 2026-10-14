@@ -4,6 +4,8 @@
 import { describe, expect, it } from "vitest";
 
 import { AcpTranslator } from "./acp-translator";
+import { PROVIDERS } from "./catalog";
+import { createTranslator } from "./translator-factory";
 
 // Frames as srv writes them to the transcript: whole JSON-RPC lines. Shapes
 // from https://agentclientprotocol.com/protocol/prompt-turn and /tool-calls.
@@ -213,5 +215,59 @@ describe("AcpTranslator — JSON-RPC errors", () => {
         expect(t.translate({ jsonrpc: "2.0", result: { stopReason: "error" } })).toEqual([
             { type: "session_end", stats: {} },
         ]);
+    });
+});
+
+// Prompt responses as OpenCode 1.19.0 sent them (measured 2026-10-14).
+describe("AcpTranslator — the turn's usage, for an agent measured to report it", () => {
+    const end = (usage: unknown) => ({ jsonrpc: "2.0", id: 4, result: { stopReason: "end_turn", usage } });
+
+    it("is left out unless the agent's format reads it", () => {
+        const t = new AcpTranslator();
+        expect(t.translate(end({ inputTokens: 463, outputTokens: 3, cachedReadTokens: 15232 }))).toEqual([{ type: "session_end", stats: {} }]);
+    });
+
+    it("reads the input as the uncached share beside the cache, and adds thought tokens to the output", () => {
+        const t = new AcpTranslator({ readsPromptUsage: true });
+        const usage = { inputTokens: 13511, outputTokens: 2, totalTokens: 15344, thoughtTokens: 39, cachedReadTokens: 1792 };
+        expect(t.translate(end(usage))).toEqual([
+            {
+                type: "session_end",
+                stats: {
+                    input_tokens: 15303,
+                    fresh_input_tokens: 13511,
+                    cache_creation_input_tokens: 0,
+                    cache_read_input_tokens: 1792,
+                    output_tokens: 41,
+                },
+            },
+        ]);
+    });
+
+    it("keeps the breakdown summing to the input when the cache is written", () => {
+        const t = new AcpTranslator({ readsPromptUsage: true });
+        const [ev] = t.translate(end({ inputTokens: 100, outputTokens: 5, cachedReadTokens: 900, cachedWriteTokens: 200 }));
+        if (ev?.type !== "session_end") throw new Error("expected session_end");
+        const { input_tokens, fresh_input_tokens, cache_creation_input_tokens, cache_read_input_tokens } = ev.stats;
+        expect(input_tokens).toBe(1200);
+        expect((fresh_input_tokens ?? 0) + (cache_creation_input_tokens ?? 0) + (cache_read_input_tokens ?? 0)).toBe(input_tokens);
+    });
+
+    it("ends the turn with no stats for missing, null or malformed usage", () => {
+        for (const usage of [undefined, null, "lots", { inputTokens: "13511", outputTokens: -2 }]) {
+            const t = new AcpTranslator({ readsPromptUsage: true });
+            expect(t.translate(end(usage))).toEqual([{ type: "session_end", stats: {} }]);
+        }
+    });
+
+    it("is read for OpenCode, live and in history, and for no other ACP agent", () => {
+        expect(PROVIDERS.opencode.styledOutputFormat).toBe("opencode-acp");
+        const usage = { inputTokens: 463, outputTokens: 3, cachedReadTokens: 15232 };
+        for (const t of [createTranslator("opencode-acp"), createTranslator("opencode-acp", { replay: true })]) {
+            expect(t.translate(end(usage))).toEqual([
+                { type: "session_end", stats: { input_tokens: 15695, fresh_input_tokens: 463, cache_creation_input_tokens: 0, cache_read_input_tokens: 15232, output_tokens: 3 } },
+            ]);
+        }
+        expect(createTranslator("acp").translate(end(usage))).toEqual([{ type: "session_end", stats: {} }]);
     });
 });

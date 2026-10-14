@@ -837,7 +837,7 @@ mod activity_from_entries_tests {
         for format in ["", "claude-stream-json", "qwen-stream-json"] {
             assert!(reads_output_format(format), "{format}");
         }
-        for format in ["codex-json", "gemini-json", "kimi-stream-json", "acp", "agy-stream-json"] {
+        for format in ["codex-json", "gemini-json", "kimi-stream-json", "acp", "opencode-acp", "agy-stream-json"] {
             assert!(!reads_output_format(format), "{format}");
         }
     }

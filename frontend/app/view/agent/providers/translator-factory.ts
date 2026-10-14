@@ -35,6 +35,10 @@ export function createTranslator(outputFormat: string, opts: { replay?: boolean 
             return new AgyTranslator({ replay: opts.replay });
         case "acp":
             return new AcpTranslator();
+        // OpenCode's ACP, whose prompt responses carry the turn's usage
+        // (measured on 1.19.0; acp-translator.ts `promptUsageStats`).
+        case "opencode-acp":
+            return new AcpTranslator({ readsPromptUsage: true });
         default:
             console.warn(`[translator-factory] Unknown output format "${outputFormat}", falling back to Claude translator`);
             return new ClaudeTranslator({ replay: opts.replay });
