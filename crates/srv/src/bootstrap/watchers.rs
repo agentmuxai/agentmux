@@ -95,31 +95,50 @@ fn start_parent_watcher(parent_pid: u32) {
                 std::process::exit(0);
             }
 
-            // Block until the parent exits.
+            // Block until the parent exits. A signal srv catches (SIGCHLD
+            // from any exiting child) can interrupt the wait with EINTR
+            // while the parent is alive: wait again.
             let mut eventlist: [libc::kevent; 1] = std::mem::zeroed();
-            let n = libc::kevent(
-                kq,
-                std::ptr::null(),
-                0,
-                eventlist.as_mut_ptr(),
-                1,
-                std::ptr::null(),
-            );
+            let waited = loop {
+                let n = libc::kevent(
+                    kq,
+                    std::ptr::null(),
+                    0,
+                    eventlist.as_mut_ptr(),
+                    1,
+                    std::ptr::null(),
+                );
+                if n > 0 {
+                    break Ok(());
+                }
+                if n == 0 {
+                    continue;
+                }
+                let err = std::io::Error::last_os_error();
+                if err.raw_os_error() != Some(libc::EINTR) {
+                    break Err(err);
+                }
+            };
             libc::close(kq);
 
-            if n > 0 {
-                eprintln_lossy!(
-                    "parent process {} exited (kqueue EVFILT_PROC), shutting down",
-                    parent_pid
-                );
-            } else {
-                eprintln_lossy!(
-                    "kevent() wait returned {} (errno={}), shutting down",
-                    n,
-                    *libc::__error()
-                );
+            match waited {
+                Ok(()) => {
+                    eprintln_lossy!(
+                        "parent process {} exited (kqueue EVFILT_PROC), shutting down",
+                        parent_pid
+                    );
+                    std::process::exit(0);
+                }
+                Err(e) => {
+                    // A failed wait says nothing about the parent: keep
+                    // watching it the slow way rather than shutting down.
+                    eprintln_lossy!(
+                        "kevent() wait failed ({}), falling back to ppid watchdog",
+                        e
+                    );
+                    start_ppid_watchdog();
+                }
             }
-            std::process::exit(0);
         }
     });
 }
@@ -164,31 +183,57 @@ fn start_parent_watcher(parent_pid: u32) {
                 std::process::exit(0);
             }
 
-            // poll() on the pidfd — blocks until the process exits
-            let mut pfd = libc::pollfd {
-                fd: pidfd,
-                events: libc::POLLIN,
-                revents: 0,
-            };
-
-            let ret = libc::poll(&mut pfd, 1, -1); // infinite timeout
+            let waited = wait_for_pidfd_exit(pidfd);
             libc::close(pidfd);
 
-            if ret > 0 {
-                eprintln_lossy!(
-                    "parent process {} exited (pidfd poll), shutting down",
-                    parent_pid
-                );
-            } else {
-                eprintln_lossy!(
-                    "poll() on pidfd returned {} (errno={}), shutting down",
-                    ret,
-                    *libc::__errno_location()
-                );
+            match waited {
+                Ok(()) => {
+                    eprintln_lossy!(
+                        "parent process {} exited (pidfd poll), shutting down",
+                        parent_pid
+                    );
+                    std::process::exit(0);
+                }
+                Err(e) => {
+                    // A failed wait says nothing about the parent: keep
+                    // watching it the slow way rather than shutting down.
+                    eprintln_lossy!(
+                        "poll() on pidfd failed ({}), falling back to ppid watchdog",
+                        e
+                    );
+                    start_ppid_watchdog();
+                }
             }
-            std::process::exit(0);
         }
     });
+}
+
+/// Blocks until the process behind `pidfd` exits.
+///
+/// poll() is never restarted after a signal handler runs (signal(7)), and
+/// srv catches SIGCHLD, which every exiting child sends. When the kernel
+/// delivers one to this thread, poll() fails with EINTR while the parent is
+/// still alive, so retry; only a readable pidfd means the parent exited.
+#[cfg(target_os = "linux")]
+fn wait_for_pidfd_exit(pidfd: libc::c_int) -> std::io::Result<()> {
+    let mut pfd = libc::pollfd {
+        fd: pidfd,
+        events: libc::POLLIN,
+        revents: 0,
+    };
+    loop {
+        let ret = unsafe { libc::poll(&mut pfd, 1, -1) }; // infinite timeout
+        if ret > 0 {
+            return Ok(());
+        }
+        if ret == 0 {
+            continue;
+        }
+        let err = std::io::Error::last_os_error();
+        if err.raw_os_error() != Some(libc::EINTR) {
+            return Err(err);
+        }
+    }
 }
 
 /// Step -1: Crash monitor branch — must be checked before any other initialization.
@@ -233,4 +278,71 @@ pub fn install_process_watchers() {
 #[cfg(windows)]
 pub fn install_crash_guard() -> Option<crate::crash_monitor::CrashHandlerGuard> {
     crate::crash_monitor::spawn_and_attach()
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod tests {
+    use super::wait_for_pidfd_exit;
+    use std::process::Command;
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    extern "C" fn ignore_signal(_: libc::c_int) {}
+
+    /// On 2026-10-14 srv exited while its launcher was alive: a signal it
+    /// catches landed on the watcher thread, poll() returned EINTR, and the
+    /// watcher took that for the launcher exiting. The whole app quit.
+    #[test]
+    fn a_signal_does_not_end_the_wait_only_the_process_exiting_does() {
+        // A caught signal without SA_RESTART, as srv's SIGCHLD is to poll().
+        unsafe {
+            let mut action: libc::sigaction = std::mem::zeroed();
+            action.sa_sigaction = ignore_signal as *const () as usize;
+            libc::sigemptyset(&mut action.sa_mask);
+            assert_eq!(
+                libc::sigaction(libc::SIGUSR1, &action, std::ptr::null_mut()),
+                0
+            );
+        }
+
+        let mut parent = Command::new("sleep")
+            .arg("60")
+            .spawn()
+            .expect("spawn sleep");
+        let pidfd = unsafe { libc::syscall(libc::SYS_pidfd_open, parent.id() as libc::c_int, 0) };
+        assert!(
+            pidfd >= 0,
+            "pidfd_open: {}",
+            std::io::Error::last_os_error()
+        );
+        let pidfd = pidfd as libc::c_int;
+
+        let (thread_tx, thread_rx) = mpsc::channel();
+        let (done_tx, done_rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            thread_tx.send(unsafe { libc::pthread_self() }).unwrap();
+            done_tx
+                .send(wait_for_pidfd_exit(pidfd).map_err(|e| e.to_string()))
+                .unwrap();
+        });
+        let waiter = thread_rx.recv().unwrap();
+
+        for _ in 0..10 {
+            std::thread::sleep(Duration::from_millis(20));
+            assert_eq!(unsafe { libc::pthread_kill(waiter, libc::SIGUSR1) }, 0);
+        }
+        let early = done_rx.recv_timeout(Duration::from_millis(300));
+        assert!(
+            early.is_err(),
+            "the wait ended while the process was alive: {early:?}"
+        );
+
+        parent.kill().unwrap();
+        parent.wait().unwrap();
+        let result = done_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("the wait never ended");
+        unsafe { libc::close(pidfd) };
+        assert_eq!(result, Ok(()));
+    }
 }
