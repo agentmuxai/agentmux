@@ -19,6 +19,7 @@
  */
 
 import { Show, createEffect, createMemo, createSignal, getOwner, onCleanup, runWithOwner, untrack, type JSX } from "solid-js";
+import { UnseenTurnsDot } from "@/app/block/UnseenTurnsDot";
 import {
     computeBlockColorBg,
     computeBlockIdentityColor,
@@ -413,6 +414,9 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
                             {(color) => <span class="pane-tab-swatch" style={{ background: color() }} />}
                         </Show>
                         <span class="pane-tab-label">{labelOf(id)}</span>
+                        {/* Turns that finished unseen in this tab: on its own
+                            pill, so it stays visible after switching tabs. */}
+                        <UnseenTurnsDot blockId={id} />
                     </>
                 )
             }

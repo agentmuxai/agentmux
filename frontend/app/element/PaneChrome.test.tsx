@@ -378,6 +378,23 @@ describe("renderPaneChromeShell — remote swatch on a tab", () => {
     });
 });
 
+describe("renderPaneChromeShell — unseen turns on a tab", () => {
+    it("a tab whose turns finished unseen carries the dot on its own pill, whichever tab is active", async () => {
+        const { noteTurnLedger, resetTurnAwareness } = await import("@/app/store/turn-awareness");
+        resetTurnAwareness();
+        setObjectValue("block:b1", { meta: { view: "term" } });
+        setObjectValue("block:b2", { meta: { view: "term" } });
+        mockLayoutModel = fakeLayoutModel(["b1", "b2"]);
+        noteTurnLedger("b2", { turnId: "t1", end: "completed", trigger: { kind: "schedule", external: true } } as any, false);
+        render(() => renderPaneChromeShell(fakeNodeModel(), <div>content</div>) as any);
+
+        const dot = (id: string) => screen.getByTestId(`tab-${id}`).querySelector(".block-frame-unseen-turns");
+        expect(dot("b2")).not.toBeNull();
+        expect(dot("b1")).toBeNull();
+        resetTurnAwareness();
+    });
+});
+
 describe("renderPaneChromeShell — per-tab pane color", () => {
     it("each stack member's own color survives independently — no collapse to a shared value", () => {
         setObjectValue("block:b1", { meta: { "frame:hue": 10 } });
