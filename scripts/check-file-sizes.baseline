@@ -8,7 +8,7 @@
 2225 crates/cef/src/commands/window_pool.rs
 1515 crates/cef/src/lib.rs
 1659 crates/cef/src/state/mod.rs
-2211 crates/cef/src/ui_tasks/window.rs
+2210 crates/cef/src/ui_tasks/window.rs
 2606 crates/common/src/data_paths.rs
 2268 crates/common/src/ipc.rs
 1848 crates/common/src/jekt_sign.rs

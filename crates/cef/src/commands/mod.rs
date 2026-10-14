@@ -22,82 +22,41 @@ pub mod palette;
 pub mod orphan_reconcile;
 pub mod floating_pane;
 
-use std::sync::Arc;
-use crate::state::AppState;
 
-/// Create an isolated CEF RequestContext for a new browser window.
+
+/// The RequestContext a secondary top-level AgentMux window is created with
+/// (a cold "Open in New Window", a tear-off target, a warm pool window):
+/// `None`, the shared default context — the one the main window, floating
+/// panes and browser panes already use.
 ///
-/// Each browser window needs its own renderer process to get an isolated
-/// JavaScript context (own `document`, own module state, own SolidJS render tree).
-/// CEF assigns a separate renderer process when the RequestContext maps to a
-/// unique profile. We request that with an EMPTY `cache_path`: Chrome's profile
-/// initializer (chrome_browser_context.cc) then creates a new/unique
-/// OffTheRecord profile — isolation without any on-disk profile. That is
-/// deliberate, not a compromise:
+/// Until 2026-10-13 each of these windows got its own unique off-the-record
+/// profile (an empty `cache_path`), on the belief that a window needs its own
+/// profile to get its own renderer process and JavaScript context. It
+/// doesn't: every top-level browser has its own document, globals and module
+/// state whichever process it lands in, and Chromium gives a new top-level
+/// browser of the same site its own process anyway (measured: a floating pane
+/// on the shared context runs in a renderer of its own). What the private
+/// profile did cost was its in-memory-only cache: a cold new window
+/// re-downloaded and recompiled the whole app (7 of 7 JS files, 4.4 MB, none
+/// from cache), where a floating pane on the shared context loads all of them
+/// from the disk cache and V8's code cache. It also ran Chrome's profile
+/// initialization on the UI thread for every window (the subject of the
+/// 2026-05-02 freeze investigation). Same-origin storage (`localStorage`,
+/// cookies) is shared with the main window, exactly as it already is for
+/// floating panes; `sessionStorage` stays per window.
 ///
-/// - Labels embed a per-run UUID, so a disk-backed profile could never be
-///   reused across runs — persistence has no value here. (Browser panes,
-///   where cookie/storage persistence DOES matter, use the shared default
-///   context — `None` — which is disk-backed.)
-/// - A non-empty `cache_path` must be a DIRECT child of
-///   `Settings.root_cache_path` (`cache_path.DirName() == user_data_dir`);
-///   anything deeper logs `Cannot create profile at path …` and falls back to
-///   the same unique-OTR profile. The old `<root>/browser-contexts/<label>/`
-///   layout was one level too deep and hit that error on every isolated
-///   window since v0.33.x (2–22 log lines per launch).
-/// - A VALID direct-child path (`<root>/ctx-<label>`) creates a real Chrome
-///   profile — but browser creation then stalls indefinitely in this host
-///   (no on_after_created / page load; verified live 2026-07-09 on a dev
-///   build). Real per-window profiles are NOT safe in AgentMux's
-///   alloy-style-views-on-chrome-bootstrap setup.
-///
-/// So: empty path = the same unique-OTR behavior the error-fallback has been
-/// (accidentally) providing all along, minus the error line and the risk.
-/// SPEC_CEF_LOG_ROBUSTNESS_2026_06_20.md §1.6.
-pub fn create_isolated_request_context(_state: &Arc<AppState>, label: &str) -> Option<cef::RequestContext> {
-    // Phase 1 diagnostic tracing (added 2026-05-02 freeze investigation). The freeze
-    // wedges the UI thread inside CEF's Chrome profile-init under concurrent
-    // load; we need to find the EXACT line that silences before committing
-    // to the runner-based serialization fix.
-    let t0 = std::time::Instant::now();
-    tracing::info!(label = %label, "[cef-profile-init] entering create_isolated_request_context");
-
-    // Empty cache_path → chrome_browser_context.cc skips the disk-profile
-    // branches entirely and creates a new/unique OffTheRecord profile, with
-    // no error logged and nothing written to disk. See doc comment above for
-    // why the disk-backed alternatives are wrong (grandchild path → error +
-    // this same fallback; direct-child path → browser creation stalls).
-    let settings = cef::RequestContextSettings {
-        cache_path: cef::CefString::from(""),
-        persist_session_cookies: 0,
-        ..Default::default()
-    };
-
-    tracing::info!(
-        label = %label,
-        elapsed_us = t0.elapsed().as_micros() as u64,
-        "[cef-profile-init] calling request_context_create_context"
-    );
-    let ctx = cef::request_context_create_context(Some(&settings), None);
-    tracing::info!(
-        label = %label,
-        elapsed_us = t0.elapsed().as_micros() as u64,
-        ok = ctx.is_some(),
-        "[cef-profile-init] request_context_create_context returned"
-    );
-
-    if ctx.is_some() {
-        tracing::info!(label = %label, "[cef] created isolated RequestContext (unique off-the-record profile)");
-    } else {
-        tracing::warn!(label = %label, "[cef] failed to create isolated RequestContext — falling back to shared");
-    }
-    ctx
+/// Real per-window disk profiles (`<root>/ctx-<label>`) remain unsafe here —
+/// browser creation stalls (verified 2026-07-09) — and are not used.
+/// docs/specs/SPEC_WINDOW_OPEN_LATENCY_AND_WARM_POOLS_2026_10_13.md §2.4.
+pub fn secondary_window_request_context() -> Option<cef::RequestContext> {
+    None
 }
 
 /// Delete on-disk litter left by earlier isolated-context path schemes.
 ///
-/// Isolated contexts are in-memory (empty cache_path) as of the 2026-07-09
-/// fix, so nothing under cef-cache belongs to them anymore. Two legacy
+/// Per-window contexts were in-memory (empty cache_path) from the 2026-07-09
+/// fix until 2026-10-13 (secondary windows now share the default context), so
+/// nothing under cef-cache belongs to them anymore. Two legacy
 /// layouts left dirs behind:
 /// - `browser-contexts/<label>/` — the grandchild layout (≤0.51.x). The
 ///   profile itself never initialized (fell back to OTR), but CEF's

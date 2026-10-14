@@ -272,7 +272,12 @@ fn pending_refills() -> &'static Mutex<std::collections::HashSet<String>> {
     REFILL_AFTER_REVEAL.get_or_init(Default::default)
 }
 
-fn defer_pane_pool_refill(state: &Arc<AppState>, promoted_label: &str) {
+/// Also used after a COLD floating open (`open_floating_pane_window`): with
+/// the pool empty, that open is exactly the moment to make the next one warm
+/// — before this, an empty pane pool refilled only after a pressure episode,
+/// so every floating pane on a pressured machine took the cold path.
+/// SPEC_WINDOW_OPEN_LATENCY_AND_WARM_POOLS_2026_10_13.md §2.3.
+pub(crate) fn defer_pane_pool_refill(state: &Arc<AppState>, promoted_label: &str) {
     if let Ok(mut pending) = pending_refills().lock() {
         pending.insert(promoted_label.to_string());
     }
@@ -308,7 +313,7 @@ pub fn spawn_pane_pool_window(state: &Arc<AppState>) {
         return;
     }
     // Commit-pressure guard — see the matching comment in spawn_pool_window.
-    if crate::memory_pressure::current_level() != crate::memory_pressure::PressureLevel::Normal {
+    if !crate::memory_pressure::pool_spawn_allowed(crate::memory_pressure::current_level()) {
         tracing::debug!(
             target: "pool:pane",
             level = crate::memory_pressure::current_level().as_str(),
