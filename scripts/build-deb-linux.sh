@@ -142,6 +142,8 @@ fpm -s dir -t deb \
     --url "https://agentmux.ai" \
     --license Apache-2.0 \
     --category utils \
+    --deb-compression xz \
+    --deb-compression-level 9 \
     --package "$OUTPUT" \
     -C "$PKGROOT" .
 

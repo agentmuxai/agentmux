@@ -280,7 +280,7 @@ jobs:
           APPIMAGE=$(ls "$OUT"/AgentMux_*_amd64.AppImage | head -1)
           DEB=$(ls "$OUT"/AgentMux_*_amd64.deb | head -1)
           RPM=$(ls "$OUT"/AgentMux-*.x86_64.rpm | head -1)
-          TARBALL=$(ls "$OUT"/AgentMux_*_amd64-portable.tar.gz | head -1)
+          TARBALL=$(ls "$OUT"/AgentMux_*_amd64-portable.tar.xz | head -1)
           echo "appimage_path=$APPIMAGE" >> "$GITHUB_OUTPUT"
           echo "deb_path=$DEB"           >> "$GITHUB_OUTPUT"
           echo "rpm_path=$RPM"           >> "$GITHUB_OUTPUT"

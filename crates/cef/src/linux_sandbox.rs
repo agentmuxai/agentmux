@@ -41,7 +41,7 @@ pub const APPARMOR_PROFILE_INSTALL_PATH: &str = "/etc/apparmor.d/agentmux-userns
 /// after every single AgentMux upgrade, defeating the entire point of a
 /// one-time fix. See spec §1.3.
 ///
-/// **Does NOT cover the portable `.tar.gz`** — that format has no fixed
+/// **Does NOT cover the portable `.tar.xz`** — that format has no fixed
 /// install path by design (extract anywhere), so a static AppArmor profile
 /// fundamentally cannot name its binary's location in advance. A user on
 /// an AppArmor-restricted system who hits this with the tarball needs to
