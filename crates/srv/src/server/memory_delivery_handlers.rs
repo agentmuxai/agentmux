@@ -155,7 +155,18 @@ struct DeliveryState {
     /// ask at once; the first composes while the rest wait here and then read
     /// its result, instead of each reading the memory and composing it again.
     compose_gates: HashMap<DeliveryKey, std::sync::Arc<tokio::sync::Mutex<()>>>,
+    /// A compaction's notice that finished before this block's stdout showed
+    /// the boundary (the CLI runs its `SessionStart` hooks first): block →
+    /// (delivery composed at, notice line). The stdout reader writes them
+    /// after the boundary and its summary ([`take_parked_notices`]); a timer
+    /// writes any left after [`PARKED_NOTICE_WAIT`]
+    /// (SPEC_CONTEXT_DELIVERY_2026_09_30.md §9 C2).
+    parked: HashMap<String, Vec<(i64, String)>>,
 }
+
+/// How long a compaction's notice waits for its boundary before it is written
+/// anyway, so a CLI that never writes one still leaves the card.
+const PARKED_NOTICE_WAIT: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// What the fallback's claim found.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -272,6 +283,32 @@ impl DeliveryState {
             return FallbackClaim::Skip;
         }
         self.claim_fallback(block_id, reason, now, since)
+    }
+
+    /// Holds a compaction's notice until this block's stdout shows the
+    /// boundary, so the card lands under "Context compacted", not above it.
+    /// `Some(line)` when the boundary was already written: write it now. A
+    /// boundary from up to [`EVENT_SLACK_MS`] before the delivery was composed
+    /// counts, as the hook can be asked just before the reader sees the line.
+    fn park_compaction_notice(&mut self, block_id: &str, created_ms: i64, line: String) -> Option<String> {
+        let since = created_ms.saturating_sub(EVENT_SLACK_MS);
+        if self.boundary_origins.iter().any(|(_, b, at)| b == block_id && *at >= since) {
+            return Some(line);
+        }
+        self.parked.entry(block_id.to_string()).or_default().push((created_ms, line));
+        None
+    }
+
+    /// The notices parked for `block_id`, oldest first, taken once. With
+    /// `created_ms`, only that delivery's (the timer's own).
+    fn take_parked(&mut self, block_id: &str, created_ms: Option<i64>) -> Vec<String> {
+        let Some(list) = self.parked.get_mut(block_id) else { return Vec::new() };
+        let (taken, kept): (Vec<_>, Vec<_>) = list.drain(..).partition(|(at, _)| created_ms.map_or(true, |c| c == *at));
+        *list = kept;
+        if list.is_empty() {
+            self.parked.remove(block_id);
+        }
+        taken.into_iter().map(|(_, line)| line).collect()
     }
 
     /// The hook finished a delivery: its notice went out.
@@ -454,29 +491,66 @@ pub(crate) async fn handle_session_start_ack(State(state): State<AppState>, Json
         return Json(serde_json::json!({ "complete": false }));
     };
     let key = DeliveryKey { block_id: req.block_id.clone(), session_id: req.session_id.clone(), reason };
-    let notice = {
+    let (complete, write_now, parked_at) = {
         let mut st = state_lock();
         let done = st.deliveries.get_mut(&key).and_then(|d| acknowledge(d, req.part).then(|| (notice_frame(&key, d), d.created_ms)));
-        done.map(|(frame, created_ms)| {
-            st.note_completed(&key, created_ms);
-            frame
-        })
+        match done {
+            None => (false, None, None),
+            Some((frame, created_ms)) => {
+                st.note_completed(&key, created_ms);
+                let line = frame.to_string();
+                if reason == Reason::Compact {
+                    let now = st.park_compaction_notice(&req.block_id, created_ms, line);
+                    let parked = now.is_none().then_some(created_ms);
+                    (true, now, parked)
+                } else {
+                    (true, Some(line), None)
+                }
+            }
+        }
     };
-    let complete = notice.is_some();
-    if let Some(frame) = notice {
-        tracing::info!(block_id = %req.block_id, reason = reason.as_str(), "memory delivery: complete, notice sent");
-        let line = format!("{frame}\n");
-        let zone = crate::backend::blockcontroller::shell::resolve_global_output_zone(&Some(state.mstore.clone()), &req.block_id);
-        crate::backend::blockcontroller::shell::handle_append_block_file(
-            &state.broker,
-            &req.block_id,
-            crate::backend::blockcontroller::persistent::PERSISTENT_OUTPUT_SUBJECT,
-            line.as_bytes(),
-            Some(&state.filestore),
-            zone.as_deref(),
-        );
+    if complete {
+        tracing::info!(block_id = %req.block_id, reason = reason.as_str(), parked = parked_at.is_some(), "memory delivery: complete, notice sent");
+    }
+    if let Some(line) = write_now {
+        append_notice(&state, &req.block_id, &line);
+    }
+    // The boundary hasn't been written yet: the stdout reader writes the card
+    // after it. If no boundary comes, write it anyway.
+    if let Some(created_ms) = parked_at {
+        let block_id = req.block_id.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(PARKED_NOTICE_WAIT).await;
+            let left = state_lock().take_parked(&block_id, Some(created_ms));
+            for line in left {
+                tracing::warn!(block_id = %block_id, "memory delivery: no compaction boundary came; card written without it");
+                append_notice(&state, &block_id, &line);
+            }
+        });
     }
     Json(serde_json::json!({ "complete": complete }))
+}
+
+/// Appends one notice line to the block's output and its transcript zone.
+fn append_notice(state: &AppState, block_id: &str, line: &str) {
+    let line = format!("{line}\n");
+    let zone = crate::backend::blockcontroller::shell::resolve_global_output_zone(&Some(state.mstore.clone()), block_id);
+    crate::backend::blockcontroller::shell::handle_append_block_file(
+        &state.broker,
+        block_id,
+        crate::backend::blockcontroller::persistent::PERSISTENT_OUTPUT_SUBJECT,
+        line.as_bytes(),
+        Some(&state.filestore),
+        zone.as_deref(),
+    );
+}
+
+/// The compaction notices parked for `block_id`, taken once: its stdout
+/// reader writes them after the boundary and the summary that follows it, so
+/// the card lands under "Context compacted" (SPEC_CONTEXT_DELIVERY_2026_09_30.md
+/// §9 C2).
+pub(crate) fn take_parked_notices(block_id: &str) -> Vec<String> {
+    state_lock().take_parked(block_id, None)
 }
 
 /// The event a frontend reinjection reason stands for: a compaction, or a

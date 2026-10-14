@@ -494,3 +494,44 @@ fn an_uncut_delivery_reports_every_item_whole() {
     assert!(json.get("tier").is_none() && json.get("bundle_id").is_none(), "{json}");
     assert_eq!(json["path"], "/mem/n.md");
 }
+
+// A compaction's card waits for its boundary (SPEC_CONTEXT_DELIVERY_2026_09_30.md §9 C2).
+
+#[test]
+fn a_compaction_notice_before_its_boundary_is_parked_and_taken_once() {
+    let mut st = DeliveryState::default();
+    assert_eq!(st.park_compaction_notice("b", NOW, "card".into()), None, "no boundary yet: wait for it");
+    assert_eq!(st.take_parked("other", None), Vec::<String>::new(), "another block has none");
+    assert_eq!(st.take_parked("b", None), vec!["card".to_string()]);
+    assert_eq!(st.take_parked("b", None), Vec::<String>::new(), "taken once");
+}
+
+#[test]
+fn a_compaction_notice_after_its_boundary_is_written_at_once() {
+    let mut st = DeliveryState::default();
+    st.record_boundary("u1", "b", NOW + 50);
+    assert_eq!(st.park_compaction_notice("b", NOW, "card".into()), Some("card".to_string()));
+    // The hook can be asked just before the reader sees the boundary line.
+    let mut st = DeliveryState::default();
+    st.record_boundary("u1", "b", NOW - 2_000);
+    assert_eq!(st.park_compaction_notice("b", NOW, "card".into()), Some("card".to_string()));
+    assert!(st.parked.is_empty());
+}
+
+#[test]
+fn an_earlier_compactions_boundary_or_another_blocks_does_not_release_the_card() {
+    let mut st = DeliveryState::default();
+    st.record_boundary("u0", "b", NOW - 3_600_000);
+    st.record_boundary("u1", "other", NOW + 50);
+    assert_eq!(st.park_compaction_notice("b", NOW, "card".into()), None);
+}
+
+#[test]
+fn the_timer_takes_only_its_own_delivery() {
+    let mut st = DeliveryState::default();
+    assert_eq!(st.park_compaction_notice("b", NOW, "first".into()), None);
+    assert_eq!(st.park_compaction_notice("b", NOW + 600_000, "second".into()), None);
+    assert_eq!(st.take_parked("b", Some(NOW)), vec!["first".to_string()]);
+    assert_eq!(st.take_parked("b", None), vec!["second".to_string()], "the reader takes the rest");
+    assert!(st.parked.is_empty());
+}

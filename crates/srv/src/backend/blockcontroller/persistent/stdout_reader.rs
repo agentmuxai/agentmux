@@ -62,6 +62,12 @@ impl PersistentSubprocessController {
         // lines drive the background-task registry, including tasks a
         // subagent owns (see `background_task_feed.rs`).
         let mut task_feed = crate::backend::background_task_feed::TaskFeed::default();
+        // Set by a compaction boundary: the memory card the hook finished
+        // before the boundary was written waits for the first line after the
+        // boundary that isn't the CLI's own user-turn text (its summary, a
+        // command's output), and is written just ahead of it
+        // (SPEC_CONTEXT_DELIVERY_2026_09_30.md §9 C2).
+        let mut parked_notices_due = false;
 
         // NOTE: OSC window-title extraction is NOT done here.
         // PersistentSubprocessController uses piped stdout with stream-json
@@ -93,6 +99,7 @@ impl PersistentSubprocessController {
             // `held_error_line`. `false` for every other line, matching
             // today's behavior exactly.
             let mut hold_back_for_resume_retry = false;
+            let mut release_parked_notices = false;
             // Parse JSON for control-frame handling, turn-active tracking,
             // and session ID capture
             if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&line) {
@@ -225,6 +232,12 @@ impl PersistentSubprocessController {
                     if let Some(uuid) = parsed.get("uuid").and_then(|v| v.as_str()) {
                         crate::server::memory_delivery_handlers::record_compaction_boundary(&block_id_read, uuid);
                     }
+                    parked_notices_due = true;
+                } else if parked_notices_due
+                    && !matches!(parsed.get("type").and_then(|v| v.as_str()), Some("user") | Some("system"))
+                {
+                    release_parked_notices = true;
+                    parked_notices_due = false;
                 }
                 let is_result_frame =
                     parsed.get("type").and_then(|v| v.as_str()) == Some("result");
@@ -710,6 +723,17 @@ impl PersistentSubprocessController {
                 "persistent stdout → blockfile"
             );
             if let Some(ref broker) = broker_read {
+                if release_parked_notices {
+                    for notice in crate::server::memory_delivery_handlers::take_parked_notices(&block_id_read) {
+                        super::super::shell::append_output_line(
+                            broker,
+                            &block_id_read,
+                            &notice,
+                            filestore_read.as_ref(),
+                            crate::backend::agent_admission::fenced_zone(global_output_zone.as_deref(), &record_fence),
+                        );
+                    }
+                }
                 super::super::shell::append_output_line(
                     broker,
                     &block_id_read,
