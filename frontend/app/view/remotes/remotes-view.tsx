@@ -1,9 +1,10 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Connectors → Remotes (docs/specs/SPEC_REMOTES_PANE_2026_10_05.md §4.2–§4.3):
-// every remote machine in sections, a row per remote, and an inline detail
-// panel with its actions and settings.
+// The Remotes section of Connectors (docs/specs/SPEC_REMOTES_PANE_2026_10_05.md
+// §4.2–§4.3): every remote machine as a card, grouped, with its actions and
+// settings opening below the card's row
+// (docs/specs/SPEC_CONNECTORS_CARDS_2026_10_13.md §3.5).
 
 import { createEffect, createMemo, createSignal, For, Show, type JSX } from "solid-js";
 import { ContextMenu, type ContextMenuItem } from "@/app/components/context-menu";
@@ -23,7 +24,7 @@ import {
     type RemoteGroup,
 } from "./remotes-sections";
 import "./remotes-view.scss";
-import { Button, FilterInput, IconButton } from "@/app/element/ui";
+import { Button, Card, CardGrid, FilterInput, IconButton, Select, TextInput, type StatusTone } from "@/app/element/ui";
 import { focusOnOpen } from "@/util/focusutil";
 import { connectionName, parseDestination } from "./add-remote";
 
@@ -33,13 +34,25 @@ interface MenuState {
     y: number;
 }
 
+/** The status dot's tone for a remote's connection state. */
+const STATUS_TONES: Record<string, StatusTone> = {
+    connected: "ok",
+    connecting: "busy",
+    error: "error",
+    disconnected: "idle",
+};
+
 export function RemotesView(props: { model: RemotesViewModel }): JSX.Element {
     const model = props.model;
     const groups = createMemo(() => groupRemotes(model.records(), model.filter()));
+    // Sections are keyed by id and the grids by name, not by object: a refresh
+    // brings new records and groups, and keying on those would rebuild every
+    // card and the open details (losing focus and a half-typed nickname).
+    const byName = createMemo(() => new Map(model.records().map((r) => [r.name, r])));
     const [hiddenOpen, setHiddenOpen] = createSignal(false);
     const [menu, setMenu] = createSignal<MenuState | null>(null);
     const [adding, setAdding] = createSignal(false);
-    // Another pane's link named a host: show its row.
+    // Another pane's link named a host: open its card.
     createEffect(() => {
         const want = model.expandRequest();
         if (want) model.takeExpandRequest(want);
@@ -52,11 +65,20 @@ export function RemotesView(props: { model: RemotesViewModel }): JSX.Element {
     };
 
     return (
-        <div class="remotes-view">
-            <div class="remotes-toolbar">
-                <FilterInput value={model.filter()} onInput={model.setFilter} placeholder="Filter remotes" />
-                <IconButton icon="rotate-right" label="Refresh" class="remotes-icon-button" onClick={() => void model.refresh()} />
-                <Button icon="plus" class="remotes-add-button" aria-expanded={adding()} onClick={() => setAdding(!adding())}>
+        <div class="remotes-view ui-card-section ui-density-compact">
+            <div class="ui-card-section-header">
+                <span class="ui-card-section-title">Remotes</span>
+                <Show when={model.loaded()}>
+                    <span class="ui-card-section-count">{model.records().length}</span>
+                </Show>
+                <FilterInput
+                    class="ui-card-section-filter"
+                    value={model.filter()}
+                    onInput={model.setFilter}
+                    placeholder="Filter remotes"
+                />
+                <IconButton icon="rotate-right" label="Refresh" onClick={() => void model.refresh()} />
+                <Button tone="accent" icon="plus" aria-expanded={adding()} onClick={() => setAdding(!adding())}>
                     Add remote
                 </Button>
             </div>
@@ -71,23 +93,28 @@ export function RemotesView(props: { model: RemotesViewModel }): JSX.Element {
             <Show when={model.notice()}>
                 <div class="remotes-notice" role="status">
                     <span>{model.notice()}</span>
-                    <Button tone="quiet" class="remotes-link" onClick={() => model.setNotice("")}>
+                    <Button tone="quiet" onClick={() => model.setNotice("")}>
                         Dismiss
                     </Button>
                 </div>
             </Show>
             <div class="remotes-list">
-                <Show when={model.loaded()} fallback={<div class="remotes-empty">Loading…</div>}>
+                <Show when={model.loaded()} fallback={<div class="ui-card-empty">Loading…</div>}>
                     <Show when={groups().length > 0} fallback={<EmptyList filter={model.filter()} />}>
-                        <For each={groups()}>
-                            {(group) => (
-                                <Section
-                                    group={group}
-                                    model={model}
-                                    open={group.section !== "hidden" || hiddenOpen() || !!model.filter().trim()}
-                                    onToggle={group.section === "hidden" ? () => setHiddenOpen(!hiddenOpen()) : undefined}
-                                    onMenu={showMenu}
-                                />
+                        <For each={groups().map((g) => g.section)}>
+                            {(section) => (
+                                <Show when={groups().find((g) => g.section === section)}>
+                                    {(group) => (
+                                        <Section
+                                            group={group()}
+                                            byName={byName()}
+                                            model={model}
+                                            open={section !== "hidden" || hiddenOpen() || !!model.filter().trim()}
+                                            onToggle={section === "hidden" ? () => setHiddenOpen(!hiddenOpen()) : undefined}
+                                            onMenu={showMenu}
+                                        />
+                                    )}
+                                </Show>
                             )}
                         </For>
                     </Show>
@@ -102,7 +129,7 @@ export function RemotesView(props: { model: RemotesViewModel }): JSX.Element {
 
 function EmptyList(props: { filter: string }): JSX.Element {
     return (
-        <div class="remotes-empty">
+        <div class="ui-card-empty">
             <Show
                 when={props.filter.trim()}
                 fallback={
@@ -120,112 +147,110 @@ function EmptyList(props: { filter: string }): JSX.Element {
 
 function Section(props: {
     group: RemoteGroup;
+    byName: Map<string, RemoteRecord>;
     model: RemotesViewModel;
     open: boolean;
     onToggle?: () => void;
     onMenu: (r: RemoteRecord, e: MouseEvent) => void;
 }): JSX.Element {
+    const names = createMemo(() => props.group.records.map((r) => r.name));
     return (
         <section class="remotes-section" data-section={props.group.section}>
             <Show
                 when={props.onToggle}
-                fallback={<h3 class="remotes-section-heading">{props.group.label}</h3>}
+                fallback={<h3 class="remotes-section-heading ui-card-group-heading">{props.group.label}</h3>}
             >
-                <h3 class="remotes-section-heading">
-                    <button class="remotes-section-toggle" aria-expanded={props.open} onClick={() => props.onToggle?.()}>
-                        <i class={`fa fa-chevron-${props.open ? "down" : "right"}`} />
+                <h3 class="remotes-section-heading ui-card-group-heading">
+                    <Button
+                        tone="quiet"
+                        class="remotes-section-toggle"
+                        icon={props.open ? "chevron-down" : "chevron-right"}
+                        aria-expanded={props.open}
+                        onClick={() => props.onToggle?.()}
+                    >
                         {props.group.label} ({props.group.records.length})
-                    </button>
+                    </Button>
                 </h3>
             </Show>
             <Show when={props.open}>
-                <For each={props.group.records}>
-                    {(r) => <Row record={r} model={props.model} onMenu={props.onMenu} />}
-                </For>
+                <CardGrid
+                    items={names()}
+                    keyOf={(name) => name}
+                    selectedKey={props.model.expanded()}
+                    onClose={() => props.model.setExpanded(null)}
+                    renderCard={(name) => (
+                        <Show when={props.byName.get(name)}>
+                            {(r) => <RemoteCard record={r()} model={props.model} onMenu={props.onMenu} />}
+                        </Show>
+                    )}
+                    renderDetail={(name) => (
+                        <Show when={props.byName.get(name)}>{(r) => <Detail record={r()} model={props.model} />}</Show>
+                    )}
+                />
             </Show>
         </section>
     );
 }
 
-function Row(props: {
+function RemoteCard(props: {
     record: RemoteRecord;
     model: RemotesViewModel;
     onMenu: (r: RemoteRecord, e: MouseEvent) => void;
 }): JSX.Element {
     const model = props.model;
     const r = () => props.record;
-    const expanded = () => model.expanded() === r().name;
-    const nick = () => displayName(r()) !== r().name;
+    const state = () => r().status.state || "disconnected";
+    // The real name under a nickname, and the platform: "db1 · Linux · x86_64".
+    const subtitle = createMemo(() => {
+        const out: JSX.Element[] = [];
+        if (displayName(r()) !== r().name) out.push(<span class="remotes-realname">{r().name}</span>);
+        const platform = platformLabel(r().platform);
+        if (platform) out.push(<span class="remotes-platform">{platform}</span>);
+        return out.length > 0 ? out : undefined;
+    });
     const activity = () => {
         const parts: string[] = [];
         if (r().sessions != null && r().sessions! > 0) parts.push(plural(r().sessions!, "session"));
         if (r().agents.length > 0) parts.push(plural(r().agents.length, "agent"));
         return parts.join(" · ");
     };
-    const stop = (e: MouseEvent) => e.stopPropagation();
+    const meta = createMemo(() => {
+        const out: JSX.Element[] = [];
+        const helper = helperLabel(r().helper);
+        if (helper) out.push(<span class={`remotes-helper is-${r().helper.state}`}>{helper}</span>);
+        if (activity()) out.push(<span class="remotes-activity">{activity()}</span>);
+        return out;
+    });
+    const newTerminal = () => void model.run("New terminal", () => model.newTerminal(r().name));
 
     return (
-        <div class="remotes-item" classList={{ "is-expanded": expanded() }}>
-            <div
-                class="remotes-row"
-                role="button"
-                tabIndex={0}
-                aria-expanded={expanded()}
-                data-remote={r().name}
-                onClick={() => model.toggleExpanded(r().name)}
-                onDblClick={() => void model.run("New terminal", () => model.newTerminal(r().name))}
-                onKeyDown={(e) => {
-                    // Keys from the quick buttons inside the row are theirs.
-                    if (e.target !== e.currentTarget) return;
-                    if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault();
-                        model.toggleExpanded(r().name);
-                    }
-                }}
-                onContextMenu={(e) => props.onMenu(r(), e)}
-            >
-                <span
-                    class="remotes-swatch"
-                    classList={{ "is-empty": !remoteColor(r()) }}
-                    style={remoteColor(r()) ? { background: remoteColor(r()) } : undefined}
-                />
-                <span class={`remotes-dot is-${r().status.state || "disconnected"}`} title={statusLabel(r().status)} />
-                <span class="remotes-name">
-                    {displayName(r())}
-                    <Show when={nick()}>
-                        <span class="remotes-realname">{r().name}</span>
-                    </Show>
-                </span>
-                <Show when={platformLabel(r().platform)}>
-                    <span class="remotes-tag">{platformLabel(r().platform)}</span>
-                </Show>
-                <span class="remotes-meta">
-                    <Show when={helperLabel(r().helper)}>
-                        <span class={`remotes-helper is-${r().helper.state}`}>{helperLabel(r().helper)}</span>
-                    </Show>
-                    <Show when={activity()}>
-                        <span class="remotes-activity">{activity()}</span>
-                    </Show>
-                </span>
-                <span class="remotes-row-actions" onClick={stop} onDblClick={stop}>
-                    <IconButton
-                        icon="terminal"
-                        label={`New terminal on ${r().name}`}
-                        class="remotes-icon-button"
-                        onClick={() => void model.run("New terminal", () => model.newTerminal(r().name))}
-                    />
+        <Card
+            class="remotes-card"
+            data-remote={r().name}
+            aria-label={`${displayName(r())}, ${statusLabel(r().status)}`}
+            icon={<i class={r().kind === "wsl" ? "fa-brands fa-linux" : "fa fa-terminal"} />}
+            title={displayName(r())}
+            subtitle={subtitle()}
+            meta={meta()}
+            edgeColor={remoteColor(r())}
+            status={{ tone: STATUS_TONES[state()] ?? "idle", label: statusLabel(r().status) }}
+            attention={state() === "error"}
+            muted={isHidden(r())}
+            selected={model.expanded() === r().name}
+            onSelect={() => model.toggleExpanded(r().name)}
+            onOpen={newTerminal}
+            onContextMenu={(e) => props.onMenu(r(), e)}
+            actions={
+                <>
+                    <IconButton icon="terminal" label={`New terminal on ${r().name}`} onClick={newTerminal} />
                     <IconButton
                         icon="folder-open"
                         label={`Browse files on ${r().name}`}
-                        class="remotes-icon-button"
                         onClick={() => void model.run("Browse files", () => model.browseFiles(r().name))}
                     />
-                </span>
-            </div>
-            <Show when={expanded()}>
-                <Detail record={r()} model={model} />
-            </Show>
-        </div>
+                </>
+            }
+        />
     );
 }
 
@@ -249,37 +274,35 @@ function Detail(props: { record: RemoteRecord; model: RemotesViewModel }): JSX.E
             </Show>
             <div class="remotes-detail-actions">
                 <Show when={connection()}>
-                    {(action) => (
-                        <button onClick={run(action(), () => runConnectionAction(model, r(), action()))}>{action()}</button>
-                    )}
+                    {(action) => <Button onClick={run(action(), () => runConnectionAction(model, r(), action()))}>{action()}</Button>}
                 </Show>
                 <Show when={r().kind === "ssh"}>
-                    <button onClick={run("Sessions", () => model.showSessions(r().name))}>Sessions…</button>
+                    <Button onClick={run("Sessions", () => model.showSessions(r().name))}>Sessions…</Button>
                 </Show>
-                <button onClick={run(isPinned(r()) ? "Unpin" : "Pin", () => model.setPinned(r().name, !isPinned(r())))}>
+                <Button onClick={run(isPinned(r()) ? "Unpin" : "Pin", () => model.setPinned(r().name, !isPinned(r())))}>
                     {isPinned(r()) ? "Unpin" : "Pin"}
-                </button>
-                <button onClick={run(isHidden(r()) ? "Unhide" : "Hide", () => model.setHidden(r().name, !isHidden(r())))}>
+                </Button>
+                <Button onClick={run(isHidden(r()) ? "Unhide" : "Hide", () => model.setHidden(r().name, !isHidden(r())))}>
                     {isHidden(r()) ? "Unhide" : "Hide"}
-                </button>
+                </Button>
                 <Show when={r().sources.includes("recent")}>
-                    <button onClick={run("Forget", () => model.forget(r().name))}>Forget</button>
+                    <Button onClick={run("Forget", () => model.forget(r().name))}>Forget</Button>
                 </Show>
                 <Show when={r().helper.installed}>
-                    <button onClick={run("Remove helper", () => model.removeHelper(r().name))}>Remove helper</button>
+                    <Button tone="danger" onClick={run("Remove helper", () => model.removeHelper(r().name))}>
+                        Remove helper
+                    </Button>
                 </Show>
                 <Show when={r().kind === "ssh"}>
-                    <button
+                    <Button
                         disabled={model.testing() === r().name}
                         onClick={run("Test connection", () => model.testConnection(r().name))}
                     >
                         {model.testing() === r().name ? "Testing…" : "Test connection"}
-                    </button>
+                    </Button>
                 </Show>
                 <Show when={r().sources.includes("ssh_config")}>
-                    <button onClick={run("Edit in ssh config", () => model.editInSshConfig(r().name))}>
-                        Edit in ssh config
-                    </button>
+                    <Button onClick={run("Edit in ssh config", () => model.editInSshConfig(r().name))}>Edit in ssh config</Button>
                 </Show>
             </div>
             <Show when={model.testResults()[r().name]}>
@@ -292,8 +315,7 @@ function Detail(props: { record: RemoteRecord; model: RemotesViewModel }): JSX.E
             <div class="remotes-settings">
                 <label class="remotes-setting">
                     <span>Nickname</span>
-                    <input
-                        type="text"
+                    <TextInput
                         placeholder={r().name}
                         value={(r().settings?.["display:name"] as string | undefined) ?? ""}
                         onBlur={(e) => commitNickname(e.currentTarget.value)}
@@ -306,8 +328,9 @@ function Detail(props: { record: RemoteRecord; model: RemotesViewModel }): JSX.E
                 <div class="remotes-setting">
                     <span>Colour</span>
                     <div class="remotes-colors" role="radiogroup" aria-label="Colour">
-                        <button
-                            class="remotes-color is-none"
+                        <Button
+                            class="remotes-color"
+                            icon="ban"
                             role="radio"
                             aria-checked={!remoteColor(r())}
                             title="None"
@@ -316,15 +339,16 @@ function Detail(props: { record: RemoteRecord; model: RemotesViewModel }): JSX.E
                         />
                         <For each={REMOTE_COLORS}>
                             {(c) => (
-                                <button
+                                <Button
                                     class="remotes-color"
                                     role="radio"
                                     aria-checked={remoteColor(r())?.toLowerCase() === c.value}
                                     title={c.name}
                                     aria-label={c.name}
-                                    style={{ background: c.value }}
                                     onClick={run("Colour", () => model.setColor(r().name, c.value))}
-                                />
+                                >
+                                    <span class="remotes-color-chip" style={{ background: c.value }} />
+                                </Button>
                             )}
                         </For>
                     </div>
@@ -332,33 +356,31 @@ function Detail(props: { record: RemoteRecord; model: RemotesViewModel }): JSX.E
                 <Show when={r().kind === "ssh"}>
                     <label class="remotes-setting">
                         <span>Keep sessions alive</span>
-                        <select
+                        <Select
                             value={durable() === true ? "on" : durable() === false ? "off" : "default"}
-                            onChange={(e) => {
-                                const v = e.currentTarget.value;
+                            onChange={(v) =>
                                 void model.run("Keep sessions alive", () =>
                                     model.setDurable(r().name, v === "on" ? true : v === "off" ? false : null)
-                                );
-                            }}
-                        >
-                            <option value="default">As in Settings</option>
-                            <option value="on">On</option>
-                            <option value="off">Off</option>
-                        </select>
+                                )
+                            }
+                            options={[
+                                { value: "default", label: "As in Settings" },
+                                { value: "on", label: "On" },
+                                { value: "off", label: "Off" },
+                            ]}
+                        />
                     </label>
                     <label class="remotes-setting">
                         <span>Install the helper</span>
-                        <select
+                        <Select
                             value={(r().settings?.["conn:helper"] as string | undefined) || "ask"}
-                            onChange={(e) => {
-                                const v = e.currentTarget.value;
-                                void model.run("Install the helper", () => model.setHelperPolicy(r().name, v));
-                            }}
-                        >
-                            <option value="ask">As in Settings</option>
-                            <option value="always">Always</option>
-                            <option value="never">Never</option>
-                        </select>
+                            onChange={(v) => void model.run("Install the helper", () => model.setHelperPolicy(r().name, v))}
+                            options={[
+                                { value: "ask", label: "As in Settings" },
+                                { value: "always", label: "Always" },
+                                { value: "never", label: "Never" },
+                            ]}
+                        />
                     </label>
                 </Show>
             </div>
@@ -372,7 +394,6 @@ function Detail(props: { record: RemoteRecord; model: RemotesViewModel }): JSX.E
                                     <span class="remotes-agent-name">{agent}</span>
                                     <Button
                                         tone="quiet"
-                                        class="remotes-link"
                                         aria-label={`Revoke ${agent} on ${r().name}`}
                                         onClick={run("Revoke", () => model.revokeAgent(r().name, agent))}
                                     >
@@ -421,9 +442,8 @@ function AddRemoteForm(props: { model: RemotesViewModel; onDone: () => void }): 
     };
     return (
         <form class="remotes-add" onSubmit={(e) => void submit(e)}>
-            <input
+            <TextInput
                 class="remotes-add-destination"
-                type="text"
                 aria-label="Connect to"
                 placeholder="user@host:port"
                 value={destination()}
@@ -435,8 +455,7 @@ function AddRemoteForm(props: { model: RemotesViewModel; onDone: () => void }): 
                 <div class="remotes-settings">
                     <label class="remotes-setting">
                         <span>Name</span>
-                        <input
-                            type="text"
+                        <TextInput
                             placeholder={(() => {
                                 const d = parsed();
                                 return d ? connectionName(d) : "user@host:port";
@@ -447,8 +466,7 @@ function AddRemoteForm(props: { model: RemotesViewModel; onDone: () => void }): 
                     </label>
                     <label class="remotes-setting">
                         <span>Identity file</span>
-                        <input
-                            type="text"
+                        <TextInput
                             placeholder="~/.ssh/id_ed25519"
                             value={identityfile()}
                             onInput={(e) => setIdentityfile(e.currentTarget.value)}
@@ -456,12 +474,7 @@ function AddRemoteForm(props: { model: RemotesViewModel; onDone: () => void }): 
                     </label>
                     <label class="remotes-setting" title="An SSH server to hop through to reach this one (ssh's ProxyJump)">
                         <span>Connect through</span>
-                        <input
-                            type="text"
-                            placeholder="user@bastion"
-                            value={proxyjump()}
-                            onInput={(e) => setProxyjump(e.currentTarget.value)}
-                        />
+                        <TextInput placeholder="user@bastion" value={proxyjump()} onInput={(e) => setProxyjump(e.currentTarget.value)} />
                     </label>
                 </div>
                 <div class="remotes-add-note">
@@ -473,20 +486,18 @@ function AddRemoteForm(props: { model: RemotesViewModel; onDone: () => void }): 
                 <div class="remotes-detail-error">{error()}</div>
             </Show>
             <div class="remotes-detail-actions">
-                <button type="submit" disabled={busy()}>
+                <Button type="submit" tone="accent" disabled={busy()}>
                     {busy() ? (writesSshConfig() ? "Waiting for you to confirm…" : "Adding…") : "Add"}
-                </button>
-                <button type="button" onClick={() => props.onDone()}>
-                    Cancel
-                </button>
+                </Button>
+                <Button onClick={() => props.onDone()}>Cancel</Button>
             </div>
         </form>
     );
 }
 
-/** A row's connection action: Connect when it is down, Disconnect when it is
- *  up, and neither while a login is under way (an ssh at a password prompt):
- *  nothing is up to close yet, and Connect would start a second login. */
+/** A remote's connection action: Connect when it is down, Disconnect when it
+ *  is up, and neither while a login is under way (an ssh at a password
+ *  prompt): nothing is up to close yet, and Connect would start a second login. */
 function connectionAction(r: RemoteRecord): "Connect" | "Disconnect" | null {
     switch (r.status.state) {
         case "connected":
@@ -498,12 +509,12 @@ function connectionAction(r: RemoteRecord): "Connect" | "Disconnect" | null {
     }
 }
 
-/** Run a row's {@link connectionAction}. */
+/** Run a remote's {@link connectionAction}. */
 function runConnectionAction(model: RemotesViewModel, r: RemoteRecord, action: "Connect" | "Disconnect"): Promise<void> {
     return action === "Connect" ? model.connect(r.name) : model.disconnect(r.name);
 }
 
-/** The right-click menu: the row's actions (§4.2). */
+/** The right-click menu: the card's actions (§4.2). */
 export function rowMenu(model: RemotesViewModel, r: RemoteRecord): ContextMenuItem[] {
     const act = (label: string, action: () => Promise<void>, extra: Partial<ContextMenuItem> = {}): ContextMenuItem => ({
         type: "action",

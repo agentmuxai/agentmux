@@ -1,203 +1,86 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Connectors → Remotes (SPEC_REMOTES_PANE_2026_10_05.md §4.2).
+// The Remotes section of Connectors (SPEC_REMOTES_PANE_2026_10_05.md §4.2).
+// The header, cards, groups and details come from element/ui's card.scss
+// (SPEC_CONNECTORS_CARDS_2026_10_13.md §3); this is only what is Remotes' own.
 
 .remotes-view {
-    display: flex;
-    flex-direction: column;
+    box-sizing: border-box;
     width: 100%;
     height: 100%;
     overflow: hidden;
     color: var(--main-text-color);
-    font-size: 13px;
+    font-size: var(--text-sm);
 }
-
-.remotes-toolbar {
-    display: flex;
-    gap: var(--space-2, 8px);
-    align-items: center;
-    padding: var(--space-2, 8px);
-    border-bottom: 1px solid var(--border-color);
-}
-
-// Row actions are element/ui IconButtons.
 
 .remotes-error,
 .remotes-notice {
-    margin: var(--space-2, 8px);
-    padding: 6px 10px;
-    border-radius: var(--radius-md, 4px);
+    padding: var(--space-1-5) var(--space-2);
+    border: 1px solid var(--ui-line-danger);
+    border-radius: var(--radius-sm);
 }
 
 .remotes-error {
     color: var(--error-color);
-    background: var(--panel-bg-alt);
 }
 
 .remotes-notice {
     display: flex;
-    gap: var(--space-2, 8px);
+    gap: var(--space-2);
+    align-items: center;
     justify-content: space-between;
-    color: var(--warning-text-color, var(--warning-color));
-    background: var(--panel-bg-alt);
+    border-color: color-mix(in srgb, var(--warning-color) 45%, transparent);
+    color: var(--warning-text-color);
 }
 
+// The one scroll container. The padding keeps the cards' focus ring in view.
 .remotes-list {
+    display: flex;
     flex: 1 1 auto;
+    flex-direction: column;
+    gap: var(--space-1);
     min-height: 0;
     overflow-y: auto;
-    padding-bottom: var(--space-3, 12px);
+    padding: 2px;
 }
 
-.remotes-empty {
-    padding: var(--space-4, 16px);
-    color: var(--secondary-text-color);
+.remotes-section {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1-5);
 }
 
-.remotes-section-heading {
-    margin: 0;
-    padding: 10px 10px 4px;
-    font-size: 11px;
-    font-weight: 600;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    color: var(--secondary-text-color);
-}
-
-.remotes-section-toggle {
-    display: inline-flex;
-    gap: 6px;
-    align-items: center;
+// Hidden's heading is a toggle that reads as the heading (two classes, to
+// win over .ui-button whatever order the sheets load in).
+.remotes-section-heading .remotes-section-toggle {
+    min-height: 0;
     padding: 0;
-    border: none;
-    background: none;
+    border: 0;
     font: inherit;
     letter-spacing: inherit;
     text-transform: inherit;
     color: inherit;
-    cursor: pointer;
 }
 
-.remotes-row {
-    display: flex;
-    gap: 8px;
-    align-items: center;
-    min-height: 30px;
-    padding: 2px 6px 2px 10px;
-    cursor: pointer;
-    outline: none;
-
-    &:hover,
-    &:focus-visible {
-        background: var(--hover-bg-color);
-    }
-
-    &:hover .remotes-row-actions,
-    &:focus-visible .remotes-row-actions,
-    &:focus-within .remotes-row-actions {
-        visibility: visible;
-    }
-}
-
-.remotes-item.is-expanded > .remotes-row {
-    background: var(--highlight-bg, var(--hover-bg-color));
-
-    .remotes-row-actions {
-        visibility: visible;
-    }
-}
-
-.remotes-swatch {
-    flex: 0 0 auto;
-    width: 4px;
-    height: 18px;
-    border-radius: 2px;
-
-    &.is-empty {
-        background: transparent;
-    }
-}
-
-.remotes-dot {
-    flex: 0 0 auto;
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    border: 1px solid var(--secondary-text-color);
-
-    &.is-connected {
-        background: var(--success-color);
-        border-color: var(--success-color);
-    }
-
-    &.is-connecting {
-        background: var(--warning-color);
-        border-color: var(--warning-color);
-    }
-
-    &.is-error {
-        background: var(--error-color);
-        border-color: var(--error-color);
-    }
-}
-
-.remotes-name {
-    flex: 0 1 auto;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.remotes-realname {
-    margin-left: 6px;
-    color: var(--secondary-text-color);
-
-    &::before {
-        content: "· ";
-    }
-}
-
-.remotes-tag {
-    flex: 0 0 auto;
-    padding: 0 6px;
-    border: 1px solid var(--border-color);
-    border-radius: 8px;
-    font-size: 11px;
-    color: var(--secondary-text-color);
-}
-
-.remotes-meta {
-    display: flex;
-    flex: 1 1 auto;
-    gap: 8px;
-    justify-content: flex-end;
-    min-width: 0;
-    overflow: hidden;
-    white-space: nowrap;
-    font-size: 11px;
-    color: var(--secondary-text-color);
+// "db1 · Linux · x86_64", dotted like the card's meta line.
+.remotes-card .ui-card-subtitle > * + *::before {
+    content: "·";
+    margin: 0 var(--space-1);
 }
 
 .remotes-helper.is-never,
 .remotes-helper.is-unsupported {
-    color: var(--tertiary-text-color, var(--secondary-text-color));
+    color: var(--grey-text-color);
 }
 
-.remotes-row-actions {
-    display: flex;
-    flex: 0 0 auto;
-    visibility: hidden;
-}
+// ── Details, below the card's row ───────────────────────────────────────────
 
 .remotes-detail {
     display: flex;
     flex-direction: column;
-    gap: 10px;
-    padding: 8px 12px 12px 34px;
-    border-bottom: 1px solid var(--border-color);
-    background: var(--panel-bg-alt);
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-3) var(--space-3);
 }
 
 .remotes-detail-error {
@@ -208,26 +91,13 @@
 .remotes-detail-actions {
     display: flex;
     flex-wrap: wrap;
-    gap: 6px;
-
-    button {
-        padding: 3px 10px;
-        border: 1px solid var(--border-color);
-        border-radius: var(--radius-md, 4px);
-        background: var(--main-bg-color);
-        color: var(--main-text-color);
-        cursor: pointer;
-
-        &:hover {
-            background: var(--hover-bg-color);
-        }
-    }
+    gap: var(--space-1-5);
 }
 
 .remotes-settings {
     display: grid;
     grid-template-columns: max-content minmax(0, 260px);
-    gap: 8px 12px;
+    gap: var(--space-2) var(--space-3);
     align-items: center;
 }
 
@@ -237,61 +107,40 @@
     > span {
         color: var(--secondary-text-color);
     }
-
-    input,
-    select {
-        padding: 3px 6px;
-        border: 1px solid var(--border-color);
-        border-radius: var(--radius-md, 4px);
-        background: var(--main-bg-color);
-        color: var(--main-text-color);
-    }
 }
 
 .remotes-colors {
     display: flex;
-    gap: 6px;
+    gap: var(--space-1);
 }
 
-.remotes-color {
-    width: 18px;
-    height: 18px;
+// A colour choice: a square line button around a sample of the colour.
+.remotes-colors .remotes-color {
+    width: var(--ui-height);
     padding: 0;
-    border: 2px solid transparent;
-    border-radius: 50%;
-    cursor: pointer;
+}
 
-    &[aria-checked="true"] {
-        border-color: var(--main-text-color);
-    }
-
-    &.is-none {
-        border: 1px dashed var(--secondary-text-color);
-        background: transparent;
-
-        &[aria-checked="true"] {
-            border: 2px solid var(--main-text-color);
-        }
-    }
+.remotes-color-chip {
+    width: 10px;
+    height: 10px;
 }
 
 .remotes-agents {
-    font-size: 12px;
     color: var(--secondary-text-color);
 
     > span {
-        margin-right: 4px;
+        margin-right: var(--space-1);
     }
 
     ul {
-        margin: 4px 0 0;
+        margin: var(--space-1) 0 0;
         padding: 0;
         list-style: none;
     }
 
     li {
         display: flex;
-        gap: 10px;
+        gap: var(--space-2);
         align-items: baseline;
     }
 }
@@ -300,29 +149,29 @@
     color: var(--main-text-color);
 }
 
-// Add remote (§4.4).
-// "Add remote" and the inline Dismiss / Revoke links are element/ui Buttons.
+.remotes-test-ok {
+    color: var(--success-color);
+}
+
+// ── Add remote (§4.4), opened from the header, styled as a details panel ────
 
 .remotes-add {
     display: flex;
     flex-direction: column;
-    gap: 10px;
-    padding: 10px 12px 12px;
-    border-bottom: 1px solid var(--border-color);
-    background: var(--panel-bg-alt);
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-3) var(--space-3);
+    border: 1px solid var(--accent-color);
+    background: var(--panel-bg-color);
 }
 
-// Add remote's one field.
 .remotes-add-destination {
     width: 100%;
     max-width: 420px;
 }
 
-// Add remote's name, identity file and jump host, folded away (most hosts
-// need none of them).
+// The name, identity file and jump host, folded away (most hosts need none).
 .remotes-add-more > summary {
     cursor: pointer;
-    font-size: 12px;
     color: var(--secondary-text-color);
     user-select: none;
 
@@ -336,10 +185,6 @@
 }
 
 .remotes-add-note {
-    font-size: 12px;
+    font-size: var(--text-xs);
     color: var(--secondary-text-color);
-}
-
-.remotes-test-ok {
-    color: var(--success-color);
 }
