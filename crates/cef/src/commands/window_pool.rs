@@ -1052,7 +1052,7 @@ pub fn demote_promoted_pool_window(
     let url = pool_frontend_url(state, label);
     if let Some(browser) = state.get_browser(label) {
         if let Some(frame) = browser.main_frame() {
-            replace_page(&frame, &url);
+            super::replace_page::replace_page(&frame, &url);
         }
     }
 
@@ -1063,32 +1063,6 @@ pub fn demote_promoted_pool_window(
     );
     crate::client::dlog(&format!("demote({}): demoted back into pool", label));
     true
-}
-
-/// The script that navigates a page to `url` by REPLACING its history entry.
-///
-/// A recycled window (demoted into the pool, or parked and blanked) is
-/// navigated away from the page it hosted. A plain `load_url` adds a history
-/// entry, which makes the old page eligible for Chromium's back/forward cache,
-/// and the cache keeps it (up to six per window, the whole workspace app with
-/// its DOM and heap): in the lab, 24 demotes left every recycled pool window
-/// at 16 documents and ~10,800 DOM nodes, against 1 document and 143 nodes
-/// with the cache off (docs/specs/SPEC_WINDOW_CHURN_RENDERER_LEAK_2026_10_13.md
-/// §3.2, §4). AgentMux never navigates back in these windows. A replacing
-/// navigation leaves nothing to restore, so nothing is cached, while browser
-/// panes keep the cache for their own Back/Forward.
-fn replace_page_script(url: &str) -> String {
-    // A JSON string is a valid JS string literal.
-    format!("location.replace({})", serde_json::to_string(url).unwrap_or_else(|_| "\"about:blank\"".to_string()))
-}
-
-/// Navigate `frame` to `url`, replacing its history entry (see
-/// `replace_page_script`).
-fn replace_page(frame: &cef::Frame, url: &str) {
-    use cef::ImplFrame;
-    let code = cef::CefString::from(replace_page_script(url).as_str());
-    let empty = cef::CefString::from("");
-    frame.execute_java_script(Some(&code), Some(&empty), 0);
 }
 
 /// SPEC_PARK_AND_BLANK_CLOSE_2026_07_09.md — close path for `window-*`
@@ -1161,7 +1135,7 @@ pub fn park_and_blank_window(state: &Arc<AppState>, label: &str) -> bool {
     // proven for months.
     if let Some(browser) = state.get_browser(label) {
         if let Some(frame) = browser.main_frame() {
-            replace_page(&frame, "about:blank");
+            super::replace_page::replace_page(&frame, "about:blank");
         }
     }
 
@@ -2247,27 +2221,5 @@ pub fn promote_pool_window_for_new_window(
         spawn_pool_window(state);
 
         Some(label)
-    }
-}
-
-/// A recycled window navigates by replacing its history entry, so the page it
-/// hosted is not kept by the back/forward cache.
-#[cfg(test)]
-mod replace_page_tests {
-    use super::replace_page_script;
-
-    #[test]
-    fn replaces_rather_than_pushes() {
-        assert_eq!(replace_page_script("about:blank"), r#"location.replace("about:blank")"#);
-    }
-
-    #[test]
-    fn the_url_is_a_js_string_literal() {
-        let js = replace_page_script(r#"http://localhost:5173/?pool=1&label=window-pool-1"#);
-        assert_eq!(js, r#"location.replace("http://localhost:5173/?pool=1&label=window-pool-1")"#);
-        // Quotes and backslashes can't break out of the literal.
-        let js = replace_page_script(r#"x"); alert(1); ("#);
-        assert!(js.starts_with("location.replace(\"") && js.ends_with("\")"), "{js}");
-        assert!(!js.contains(r#"x"); alert"#), "{js}");
     }
 }
