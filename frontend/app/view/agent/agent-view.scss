@@ -267,6 +267,14 @@
 }
 
 // === Marching-ants Progress Bar ===
+// Runs INSIDE the pane border: the band is the selection ring's own band
+// (`padding: var(--pane-ring-width)` over `.pane-stack::after`'s border of
+// the same width), painted in two colours, the ring's and an "off" colour
+// mixed toward the background, so the border reads as a marching dashed line
+// and never changes thickness. It used to be a separate 1px band inside the
+// ring, whose bright and dim segments read as teeth growing off the border
+// (SPEC_AGENT_PANE_BUSY_RING_IN_BORDER_2026_10_14.md).
+//
 // Fills the chrome's .pane-progress-bar-slot (PaneChrome.scss) — no
 // zoom-compensation math needed here (unlike its previous home nested
 // inside .agent-view), since that slot lives in the chrome's tree,
@@ -329,17 +337,14 @@
     opacity: 0;
     transition: opacity 200ms ease;
     border-radius: var(--block-border-radius);
-    padding: 1px;
+    padding: var(--pane-ring-width, 2px);
     -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
     -webkit-mask-composite: xor;
     mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
     mask-composite: exclude;
-    // Opaque base so the ring fully covers whatever's behind it in its
-    // own slot. Without this the translucent stripe gaps would reveal
-    // the slot's background and the marching pattern would be lost.
-    // Matches .agent-view's surface (--main-bg-color) so the bar reads as
-    // chrome, consistent with the rest of the pane.
-    background: var(--main-bg-color);
+    // The ring's own colour under the pattern, so anything the rotating
+    // layer leaves uncovered reads as ring, not as a gap.
+    background: var(--progress-bar-color, var(--accent-color));
 
     &::before {
         content: "";
@@ -348,9 +353,10 @@
         // Solid fallback for browsers without conic-gradient() support —
         // ignored (declaration below wins) wherever it's understood.
         background: var(--progress-bar-color, var(--accent-color));
-        // Every stop is fully opaque (the faded wedge mixes against the
-        // pane background, NOT transparent) so the pattern stays crisp
-        // over any theme. 10deg wedges (18 pairs around the circle) —
+        // Every stop is fully opaque (the off wedge mixes against the pane
+        // background, NOT transparent) so the pattern stays crisp over any
+        // theme. The off colour is `--busy-ring-off` (PaneChrome.scss),
+        // swapped for a closer one while stopping. 10deg wedges (18 pairs around the circle) —
         // roughly matches the original linear version's stripe density
         // at typical pane sizes; exact apparent width naturally varies
         // with distance from center, an inherent (and accepted)
@@ -359,8 +365,8 @@
             from 0deg,
             var(--progress-bar-color, var(--accent-color)) 0deg,
             var(--progress-bar-color, var(--accent-color)) 10deg,
-            color-mix(in srgb, var(--progress-bar-color, var(--accent-color)) 25%, var(--main-bg-color)) 10deg,
-            color-mix(in srgb, var(--progress-bar-color, var(--accent-color)) 25%, var(--main-bg-color)) 20deg
+            var(--busy-ring-off) 10deg,
+            var(--busy-ring-off) 20deg
         );
     }
 
@@ -374,8 +380,17 @@
         }
     }
 
+    // Stopping: lower contrast, still marching. Not a whole-band opacity,
+    // which over the ring would blend into a muddy third colour.
     &--active#{&}--stopping {
-        opacity: 0.55;
+        --busy-ring-off: var(--busy-ring-off-stopping);
+    }
+
+    // The same broken pattern, still: the colours alone say "working".
+    @media (prefers-reduced-motion: reduce) {
+        &--active::before {
+            animation: none;
+        }
     }
 }
 

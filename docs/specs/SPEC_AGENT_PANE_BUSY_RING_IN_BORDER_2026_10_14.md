@@ -1,6 +1,6 @@
 # SPEC: the busy ring runs inside the pane border, as colour, not teeth
 
-**Status:** proposed
+**Status:** implemented — in PR #4934 (spec and change together); the live check in §3 runs on a dev build.
 **Date:** 2026-10-14
 **Author:** AgentA@Area54
 **Verified against:** `agentmux` `main` @ `5a8c98829`, by reading code and a

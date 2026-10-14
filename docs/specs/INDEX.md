@@ -222,6 +222,7 @@ partial list.
 | [`SPEC_AGENT_OPEN_LATENCY_2026_09_27`](SPEC_AGENT_OPEN_LATENCY_2026_09_27.md) | SPEC: opening an agent from My Agents should be near-instant — where the time goes, and what to change |
 | [`SPEC_AGENT_PANE_ARMORY_HEADER_ICON_2026_07_20`](SPEC_AGENT_PANE_ARMORY_HEADER_ICON_2026_07_20.md) | SPEC: Vault Icon on the Agent-Setup Button + Responsive Tabs in the Per-Agent "Armory" |
 | [`SPEC_AGENT_PANE_AUTH_NOTIFICATIONS_2026_07_26`](SPEC_AGENT_PANE_AUTH_NOTIFICATIONS_2026_07_26.md) | Agent Pane Mount/Auth Notifications & Launch-Auth Reducer |
+| [`SPEC_AGENT_PANE_BUSY_RING_IN_BORDER_2026_10_14`](SPEC_AGENT_PANE_BUSY_RING_IN_BORDER_2026_10_14.md) | SPEC: the busy ring runs inside the pane border, as colour, not teeth |
 | [`SPEC_AGENT_PANE_FIRST_OVERFLOW_SCROLL_PIN_FIX_2026_08_29`](SPEC_AGENT_PANE_FIRST_OVERFLOW_SCROLL_PIN_FIX_2026_08_29.md) | Spec: force stick-to-bottom on an agent pane's first-ever overflow |
 | [`SPEC_AGENT_PANE_FORKS_AND_AUX_PINS_2026_06_15`](SPEC_AGENT_PANE_FORKS_AND_AUX_PINS_2026_06_15.md) | SPEC: Agent pane forks + a cohesive auxiliary-pins architecture |
 | [`SPEC_AGENT_PANE_HOVER_CLOSE_FOCUS_REFINEMENTS_2026_09_23`](SPEC_AGENT_PANE_HOVER_CLOSE_FOCUS_REFINEMENTS_2026_09_23.md) | SPEC: Agent pane refinements — expanded tool-call hover text, close-last-tab returns to My Agents, composer autofocus on launch |
@@ -721,7 +722,6 @@ partial list.
 | [`SPEC_AGENT_GENERIC_PANE_OPEN_TOOL_2026_08_21`](SPEC_AGENT_GENERIC_PANE_OPEN_TOOL_2026_08_21.md) | Spec: `OpenPane` — a general-purpose, agent-facing "open any pane" MCP tool |
 | [`SPEC_AGENT_MCP_SELF_HEAL_2026_10_10`](SPEC_AGENT_MCP_SELF_HEAL_2026_10_10.md) | SPEC: Agent MCP self-heal — notice when an agent's AgentMux tools are down, and repair it without the operator |
 | [`SPEC_AGENT_MODEL_DROPDOWN_CLI_PIN_LOG_2026_07_02`](SPEC_AGENT_MODEL_DROPDOWN_CLI_PIN_LOG_2026_07_02.md) | SPEC — Versioned model dropdowns (CLI-aware), Claude CLI pin-to-latest, single-toggle Log |
-| [`SPEC_AGENT_PANE_BUSY_RING_IN_BORDER_2026_10_14`](SPEC_AGENT_PANE_BUSY_RING_IN_BORDER_2026_10_14.md) | SPEC: the busy ring runs inside the pane border, as colour, not teeth |
 | [`SPEC_AGENT_PANE_LIFECYCLE_CONTROL_2026_09_10`](SPEC_AGENT_PANE_LIFECYCLE_CONTROL_2026_09_10.md) | SPEC: Agent Pane Lifecycle Control — Close / Maximize / Minimize / Split / Float |
 | [`SPEC_AGENT_PANE_MESSAGE_ENTER_ANIMATION_2026_05_30`](SPEC_AGENT_PANE_MESSAGE_ENTER_ANIMATION_2026_05_30.md) | SPEC: Agent Pane — New Message Enter Animation |
 | [`SPEC_AGENT_PANE_RESPONSIVE_AUX_INFO_2026_06_09`](SPEC_AGENT_PANE_RESPONSIVE_AUX_INFO_2026_06_09.md) | SPEC: Responsive Aux Info + Color System for Agent Pane Tool Blocks |
