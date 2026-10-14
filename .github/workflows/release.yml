@@ -357,7 +357,7 @@ jobs:
         # deploy that reads it (Codex review, PR #3234; see
         # docs/specs/SPEC_LINUX_DISTRO_TARGETS_AND_DOWNLOADS_PAGE_2026_09_15.md
         # §2.5). *.deb and *.tar.gz added for that spec's Phase 1
-        # (AppImage/deb/tar.gz; the tarball is .tar.xz since v0.59.24, see
+        # (AppImage/deb/tar.gz; the tarball is .tar.xz after v0.59.24, see
         # docs/specs/SPEC_LINUX_PACKAGES_XZ_2026_10_14.md); *.rpm added for Phase 2 (.pacman lands here
         # too once Phase 3 ships). *.7z is the Windows portable, which replaced
         # the only *.zip (docs/specs/SPEC_WINDOWS_PORTABLE_7Z_2026_10_11.md).

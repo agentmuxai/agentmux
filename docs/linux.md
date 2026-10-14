@@ -143,7 +143,7 @@ Opening a second instance sends an `open_new_window` command to the running laun
 "Produced by CI builder (`agentmuxai/agentmux-builder`) only" —
 `agentmuxai/agentmux-builder` does not exist in the org and never did as far
 as this repo's history shows; that line was stale since at least
-2026-06-06. `.deb` (and a portable `.tar.xz`, a `.tar.gz` before v0.59.24) are now built by this repo's
+2026-06-06. `.deb` (and a portable `.tar.xz`, a `.tar.gz` through v0.59.24) are now built by this repo's
 own `build-linux.yml` / `task package:linux:deb` / `task package:linux:tarball`
 — see the Package formats section below.
 

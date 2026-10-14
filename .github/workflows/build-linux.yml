@@ -2,10 +2,10 @@ name: build-linux
 
 # Linux release pipeline for AgentMux.
 # Builds a patched-libcef.so-backed AppImage, .deb, .rpm, and portable
-# .tar.gz (all x86_64, from one compile — see the "Build AppImage + deb +
+# .tar.xz (all x86_64, from one compile — see the "Build AppImage + deb +
 # rpm + tarball" step below) and uploads them to the corresponding GitHub
 # release. docs/specs/SPEC_LINUX_DISTRO_TARGETS_AND_DOWNLOADS_PAGE_2026_09_15.md
-# Phase 1 widened this from AppImage-only (.deb + .tar.gz); Phase 2 added
+# Phase 1 widened this from AppImage-only (.deb + tarball); Phase 2 added
 # .rpm.
 #
 # The upstream cef-dll-sys libcef.so lacks BeginWindowDrag; building from source
