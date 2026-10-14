@@ -192,22 +192,39 @@ pub(crate) async fn handle_viewer_input(
         }
     }
 
+    // Delivered and recorded in a task of its own: a phone that drops the
+    // connection mid-request must not leave the id in flight (a retry would
+    // get `in_flight` for 10 minutes) or a delivery half done.
     let text = device_turn_message(message);
-    origin::expect(
-        &agent.block_id,
-        &text,
-        DeviceOrigin { device: device.device_name.clone(), message_id: input.message_id.clone() },
-    );
-    let outcome = deliver(&state, &agent.block_id, &text).await;
-    state.viewer.sends.lock().finish(&device.device_id, &input.message_id, outcome.as_ref().ok().copied());
-    match outcome {
-        Ok(sent) => {
-            tracing::info!(device = %device.device_id, agent = %name, state = sent.as_str(), "viewer input: sent");
-            (StatusCode::ACCEPTED, Json(json!({ "message_id": input.message_id, "state": sent.as_str() }))).into_response()
+    let block_id = agent.block_id.clone();
+    let message_id = input.message_id.clone();
+    let task = tokio::spawn({
+        let state = state.clone();
+        let device_id = device.device_id.clone();
+        let origin = DeviceOrigin { device: device.device_name.clone(), message_id: message_id.clone() };
+        let message_id = message_id.clone();
+        async move {
+            origin::expect(&block_id, &text, origin);
+            let outcome = deliver(&state, &block_id, &text).await;
+            state.viewer.sends.lock().finish(&device_id, &message_id, outcome.as_ref().ok().copied());
+            if outcome.is_err() {
+                origin::forget(&block_id, &message_id);
+            }
+            outcome
         }
-        Err(resp) => {
-            origin::forget(&agent.block_id, &input.message_id);
-            resp
+    });
+    match task.await {
+        Ok(Ok(sent)) => {
+            tracing::info!(device = %device.device_id, agent = %name, state = sent.as_str(), "viewer input: sent");
+            (StatusCode::ACCEPTED, Json(json!({ "message_id": message_id, "state": sent.as_str() }))).into_response()
+        }
+        Ok(Err(resp)) => resp,
+        Err(e) => {
+            // The task panicked: nothing recorded it as sent, so a retry tries again.
+            tracing::warn!(error = %e, "viewer input: delivery task failed");
+            state.viewer.sends.lock().finish(&device.device_id, &message_id, None);
+            origin::forget(&agent.block_id, &message_id);
+            refuse(StatusCode::INTERNAL_SERVER_ERROR, Some("failed"), "delivery failed")
         }
     }
 }
