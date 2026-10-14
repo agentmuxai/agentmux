@@ -212,6 +212,9 @@ struct AcpInner {
     mcp_json: Option<String>,
     /// Its servers in ACP's shape, for what `initialize` said the agent takes.
     mcp_servers: Vec<serde_json::Value>,
+    /// The agent's `cmd:env`, which `.mcp.json`'s `${VAR}` placeholders expand from
+    /// (then srv's own environment, which the agent inherits).
+    mcp_env: HashMap<String, String>,
 }
 
 /// AcpController manages an ACP-speaking agent process.
@@ -274,6 +277,7 @@ impl AcpController {
                 session_cwd: String::new(),
                 mcp_json: None,
                 mcp_servers: Vec::new(),
+                mcp_env: HashMap::new(),
             })),
             broker,
             event_bus,
@@ -520,9 +524,13 @@ impl AcpController {
                                     .and_then(|v| v.as_bool())
                                     .unwrap_or(false)
                             };
-                            inner.mcp_servers = inner.mcp_json.as_deref().map_or_else(Vec::new, |raw| {
-                                super::acp_mcp::acp_mcp_servers(raw, takes("http"), takes("sse"), super::acp_mcp::resolve_command)
+                            let env = &inner.mcp_env;
+                            let lookup = |k: &str| env.get(k).cloned().or_else(|| std::env::var(k).ok());
+                            let servers = inner.mcp_json.as_deref().map_or_else(Vec::new, |raw| {
+                                let (http, sse) = (takes("http"), takes("sse"));
+                                super::acp_mcp::acp_mcp_servers(raw, http, sse, super::acp_mcp::resolve_command, lookup)
                             });
+                            inner.mcp_servers = servers;
                             let resume = inner.resume_session_id.clone();
                             let loading = if can_load { resume.clone() } else { None };
                             let req = session_request(resume.as_deref(), can_load, &inner.session_cwd, &inner.mcp_servers);
@@ -954,10 +962,14 @@ impl Controller for AcpController {
         // AgentMux's MCP servers: the `.mcp.json` the launch wrote where the
         // session runs (startup_files). None when there is none.
         let mcp_path = std::path::Path::new(&session_cwd(&cwd)).join(".mcp.json");
-        self.inner.lock().unwrap().mcp_json = std::fs::read_to_string(mcp_path).ok();
         let mut env_vars = self.spawn_env(&block_meta);
         if let Some(pi) = crate::backend::providers::pi_beside_pi_acp(&cmd) {
             env_vars.entry("PI_ACP_PI_COMMAND".to_string()).or_insert(pi);
+        }
+        {
+            let mut inner = self.inner.lock().unwrap();
+            inner.mcp_json = std::fs::read_to_string(mcp_path).ok();
+            inner.mcp_env = env_vars.clone();
         }
 
         self.spawn_process(cmd, args, cwd, env_vars)
