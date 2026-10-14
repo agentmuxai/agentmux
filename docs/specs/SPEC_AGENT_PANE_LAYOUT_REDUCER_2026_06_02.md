@@ -1,6 +1,6 @@
 # Agent-Pane Layout State Machine — unify zoom + virtualization + tool-expansion into one reducer
 
-**Status:** implemented — every phase shipped: 0, 2, 3 (#1270), 4 (#1281), and Phase 1's last local signal was removed in #3906. The unused `UserExpanded`/`UserCollapsed` and `AutoExpand*` commands were deleted (#4866, this PR). Verified against code 2026-10-14 ([triage](../analysis/REPORT_REDUCER_STACK_TRIAGE_2026_10_13.md)).
+**Status:** implemented — every phase shipped: 0, 2, 3 (#1270), 4 (#1281), and Phase 1's last local signal was removed in #3906. The unused `UserExpanded`/`UserCollapsed` and `AutoExpand*` commands were deleted (#4866, #4874). Verified against code 2026-10-14 ([triage](../analysis/REPORT_REDUCER_STACK_TRIAGE_2026_10_13.md)).
 **Last verified against code:** 2026-09-17 (see §6 — each phase now carries how to check it)
 **Date:** 2026-06-02
 **Author:** AgentA
