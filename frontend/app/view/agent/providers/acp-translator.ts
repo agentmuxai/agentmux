@@ -25,7 +25,7 @@ import { ToolCorrelator, wrapOutput } from "./tool-correlation";
  *   user_message_chunk   — not rendered
  *
  * The turn ends with the `session/prompt` response's `result.stopReason`; its
- * `result.usage` (ACP, unstable: OpenCode and Kilo send it) is the turn's tokens.
+ * `result.usage` (ACP, unstable: OpenCode and Kilo send it) gives its tokens.
  *
  * The first version read a flat `params.type` (`agent_message_chunk`,
  * `tool_call`, `tool_result` with `content`/`toolName`/`input`), which no ACP
@@ -175,16 +175,16 @@ export class AcpTranslator implements OutputTranslator {
     }
 }
 
-/** A prompt response's `usage` as session stats: ACP gives input, output and
- *  cache counts, not how much of the input was fresh. */
+/** A prompt response's `usage` as session stats: input and output only. ACP
+ *  doesn't say whether `inputTokens` includes its cache counts, and a cache
+ *  split without the fresh share reads elsewhere as all-fresh input
+ *  (`recordTurn`), so it is left out until the protocol settles it. */
 function turnUsage(usage: any): SessionStats {
     if (!usage || typeof usage !== "object") return {};
     const n = (v: unknown) => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : undefined);
     const stats: SessionStats = {
         input_tokens: n(usage.inputTokens),
         output_tokens: n(usage.outputTokens),
-        cache_read_input_tokens: n(usage.cachedReadTokens),
-        cache_creation_input_tokens: n(usage.cachedWriteTokens),
     };
     return Object.fromEntries(Object.entries(stats).filter(([, v]) => v !== undefined)) as SessionStats;
 }

@@ -105,7 +105,8 @@ describe("AcpTranslator — standard session/update", () => {
         expect(end({ inputTokens: 1200, outputTokens: 80, cachedReadTokens: 900, cachedWriteTokens: 100, totalTokens: 1280 })).toEqual([
             {
                 type: "session_end",
-                stats: { input_tokens: 1200, output_tokens: 80, cache_read_input_tokens: 900, cache_creation_input_tokens: 100 },
+                // No cache split: ACP doesn't say whether inputTokens includes it.
+                stats: { input_tokens: 1200, output_tokens: 80 },
             },
         ]);
         // Only what the agent sent; nothing for a missing, null or malformed usage.
