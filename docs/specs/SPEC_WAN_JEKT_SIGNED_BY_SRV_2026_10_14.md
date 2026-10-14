@@ -122,9 +122,7 @@ reach the cloud tier at all, and is signed there.
 
 **Accepted:** a program an agent runs inherits its token (the token is in the
 agent's shell environment) and can send as that agent. That is the agent's
-own session acting; it can't send as any other agent. The agent's shell also
-holds the instance key (`AGENTMUX_AUTH_KEY`), which is broader than any token;
-that is outside this spec and noted in §6.
+own session acting; it can't send as any other agent.
 
 ## 5. Tests
 
@@ -144,5 +142,3 @@ that is outside this spec and noted in §6.
   cross-channel receivers are other srv instances that check a public key,
   so the same move would work for them; the host-tier HMAC is already
   backed by the token (M4d-4). A later spec can do the same there.
-- **`AGENTMUX_AUTH_KEY` in agent shells.** The instance key gives an agent's
-  shell more than its token does. Worth its own look.
