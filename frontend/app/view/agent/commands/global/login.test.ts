@@ -336,3 +336,48 @@ describe("/login retains auth gating when the controller refresh itself fails (c
         expect(ctx.clearAuthFailure).not.toHaveBeenCalled();
     });
 });
+
+describe("/login on the shared login-and-confirm core", () => {
+    it("hands its cancel flag to the provider login, so a pane close stops a terminal wait too", async () => {
+        const ctx = makeCtx();
+        hub.runProviderLogin.mockReset().mockResolvedValue("terminal-unavailable");
+        await loginCommand.handler(ctx, "");
+        expect(hub.runProviderLogin).toHaveBeenCalledWith(expect.objectContaining({ isCancelled: ctx.isCancelled }));
+    });
+
+    it("a cancelled terminal wait is a silent ok, like a cancelled link wait", async () => {
+        const ctx = makeCtx();
+        ctx.isCancelled = () => true;
+        hub.runProviderLogin.mockReset().mockResolvedValue("terminal-timeout");
+        expect(await loginCommand.handler(ctx, "")).toEqual({ kind: "ok" });
+    });
+
+    it("an uncancelled terminal timeout is still an error", async () => {
+        const ctx = makeCtx();
+        hub.runProviderLogin.mockReset().mockResolvedValue("terminal-timeout");
+        expect(await loginCommand.handler(ctx, "")).toEqual({
+            kind: "error",
+            message:
+                "/login: opened a terminal window, but no login was detected within 5 minutes. " +
+                "Complete the login there, then run /login again.",
+        });
+    });
+
+    it("a login superseded by another surface returns ok instead of nothing", async () => {
+        const ctx = makeCtx();
+        hub.runProviderLogin.mockReset().mockResolvedValue("inapp-timeout");
+        expect(await loginCommand.handler(ctx, "")).toEqual({ kind: "ok" });
+        expect(ctx.endRecoveryFlow).toHaveBeenCalledOnce();
+    });
+
+    it("a terminal success without a saved account is an error", async () => {
+        const ctx = makeCtx();
+        hub.runProviderLogin.mockReset().mockResolvedValue("terminal-success");
+        const result = await loginCommand.handler(ctx, "");
+        expect(result).toEqual({
+            kind: "error",
+            message: "/login: the login succeeded, but AgentMux couldn't save the account record. Try again in a moment.",
+        });
+        expect(ctx.notifyControllerHealthy).not.toHaveBeenCalled();
+    });
+});

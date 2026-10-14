@@ -2,30 +2,23 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * useAgentControllerStatus — owns all the agent-launch state and the
- * functions that drive it.
+ * useAgentControllerStatus — runs an agent pane's launch and login flows.
  *
  * Step 4 of docs/specs/SPEC_AGENT_VIEW_MODULARIZATION_2026_04_13.md.
  *
- * State managed:
- *   - authUrl       — the OAuth URL to display when login is needed
- *   - canRetry      — whether the retry button is shown after auth_failed
- *   - flowRunning   — true while the launch flow is actively executing
- *   - agentReady    — true once the controller is registered and ready
- *   - isLoading     — derived: flowRunning OR not agentReady
- *   - loginWaiting  — true during the OAuth poll phase
- *
- * Mutable internal state:
- *   - loginCancelled — flipped by cancelLogin() and by onCleanup
+ * Every piece of state here (the footer phase, `canRetry`, `authStatus`,
+ * the auth URL and notice, `loginWaiting`, the in-flight login, the cancel
+ * flag and the recovery intent) lives in one per-pane reducer,
+ * `store/launch-phase-state`. This hook does the I/O and reports each step
+ * to it as a command. The provider steps (resolve the CLI, check auth, log
+ * in and confirm, restart the controller) come from
+ * flows/login-and-confirm.ts, shared with the mount-time launch flow and
+ * `/login`.
  *
  * Functions exposed:
- *   - startLaunchFlow() — runs the full launch flow once
- *   - cancelLogin()     — flips the cancellation flag and kills the host CLI
- *
- * Dependencies (passed as options):
- *   - blockId   — the block this status belongs to
- *   - provider  — accessor returning the current provider definition
- *   - log       — LogFn from useActivityLog (or any compatible)
+ *   - startLaunchFlow() — runs the mount-time launch flow once
+ *   - relogin() / loginViaTerminal() — the pane's login actions
+ *   - cancelLogin() — cancels the login in flight and kills the host CLI
  *
  * `setAuthUrl` is exposed alongside the accessor because the slash-command
  * `/login` handler in agent-view.tsx needs to manually set the OAuth URL
@@ -33,36 +26,38 @@
  * flow's auto-login phase).
  */
 
-import { createMemo, createSignal, onCleanup, type Accessor } from "solid-js";
+import { createMemo, onCleanup, type Accessor } from "solid-js";
 import { withLoginWindow } from "../flows/login-window";
 import { loginBackend } from "../flows/login-backend";
-import { getBlockMetaKeyAtom, staticTabId } from "@/app/store/global";
+import { getBlockMetaKeyAtom } from "@/app/store/global";
 import { sleep } from "@/util/util";
 import { RpcApi } from "@/app/store/rpc-api";
-import { BlockService } from "@/app/store/services";
 import * as MOS from "@/app/store/mos";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { runLaunchFlow } from "../flows/launch-flow";
-import { persistAndLinkAccount, runProviderLogin } from "../flows/run-provider-login";
-import { LOGIN_LINK_CAPTURE_LABEL_MS, type LaunchPhase } from "../flows/launch-phase";
-import { lastLinkedAccountId } from "../providers/provider-id-aliases";
+import {
+    checkCliAuth,
+    linkedAccountFor,
+    logInAndConfirm,
+    resolveProviderCli,
+} from "../flows/login-and-confirm";
+import { registerController } from "../flows/register-controller";
+import type { LaunchPhase } from "../flows/launch-phase";
 import type { ProviderDefinition } from "../providers";
 import { bindAccountToAgent, type BindCandidate } from "@/app/view/identity/bind-to-agent-menu";
 import type { Account } from "@/app/view/identity/identity-model";
+import {
+    createLaunchPhaseStore,
+    type AuthStatus,
+    type LoginVia,
+    type MountResult,
+} from "@/app/store/launch-phase-state";
+import type { LoginStep } from "@/app/store/launch-phase-state/types";
 
 import type { LogFn } from "../types";
 import { ensureProviderAuthDir } from "../agent-launch-env";
 import type { BlockControllerRuntimeStatus } from "@/types/rpc/BlockControllerRuntimeStatus";
 export type { LogFn };
-
-/**
- * Durable logged-in/logged-out signal for the composer strip's status tag —
- * distinct from the transient `launchPhase`/`canRetry` signals, which only
- * describe the in-progress launch/recovery flow and get cleared the instant
- * it finishes. "unknown" only applies before the very first auth check
- * resolves (or after a fatal, non-auth error where the check never ran).
- */
-type AuthStatus = "authenticated" | "unauthenticated" | "unknown";
 
 export interface UseAgentControllerStatusOptions {
     blockId: string;
@@ -181,7 +176,7 @@ export interface UseAgentControllerStatus {
     isCancelled: () => boolean;
     /**
      * Reset the cancellation flag `isCancelled()` reads, mirroring the
-     * `loginCancelled = false` every OTHER login-starting function
+     * reset every OTHER login-starting function
      * (relogin()/loginViaTerminal()) already does at its
      * own start. /login (commands/global/login.ts) is the one login-
      * starting flow that lives outside this hook and never called any of
@@ -302,230 +297,107 @@ async function buildAuthEnv(
     }
 }
 
+/** The string entries of this block's `cmd:env` meta. */
+function blockAuthEnv(blockId: string): Record<string, string> {
+    const envMeta = getBlockMetaKeyAtom(blockId, "cmd:env")();
+    const authEnv: Record<string, string> = {};
+    if (envMeta && typeof envMeta === "object") {
+        for (const [k, v] of Object.entries(envMeta as Record<string, unknown>)) {
+            if (typeof v === "string") authEnv[k] = v;
+        }
+    }
+    return authEnv;
+}
+
 export function useAgentControllerStatus(
     opts: UseAgentControllerStatusOptions,
 ): UseAgentControllerStatus {
-    const [authUrl, setAuthUrl] = createSignal<string | null>(null);
-    const [authNotice, setAuthNotice] = createSignal<string | null>(null);
-    const [canRetry, setCanRetry] = createSignal(false);
-    /**
-     * `retryAfterLogin` of the recovery currently in flight — the caller's
-     * "was a turn ever attempted?" intent, which outlives the individual call
-     * that started the flow.
-     *
-     * Exists because "Use terminal instead" (`useTerminalInstead`) CANCELS the
-     * in-flight relogin and starts a terminal login as a continuation of the
-     * SAME user intent. Without remembering it, that hand-off silently
-     * defaulted to `true`, so a pre-launch "Log in" that escaped to the
-     * terminal came back through onRecovered -> retryLastTurn and resent the
-     * agent's last old message — the exact never-started-agent stale-resend
-     * this PR removes from the row's own buttons, reintroduced on the escape
-     * path. reagent P1 on PR #2951.
-     *
-     * SCOPED TO ONE FLOW: cleared by `endRecoveryFlow` once nothing is in
-     * flight, and `false` at rest.
-     *
-     * An earlier revision left it unreset, on the reasoning that the only
-     * reader (`useTerminalInstead`) is reachable only from the in-flight OAuth
-     * panel and so could only ever read a live flow's value. That reasoning
-     * was wrong, and the counterexample is `/login`: it drives its own OAuth
-     * directly, shares only the `activeRecoveryFlows` counter, and NEVER
-     * writes this — yet its session shows the same AuthUrlBox and therefore
-     * the same "Use terminal instead" handler. So a `/login` session read
-     * whatever an unrelated earlier relogin had left behind, and branched on
-     * it. reagent P1 on PR #2951, correcting a rationale manoz and I had both
-     * signed off on.
-     *
-     * `false` at rest is deliberate rather than incidental: it is the right
-     * answer for a flow that never declared intent. `/login` is a command the
-     * user ran explicitly — there is no failed turn to re-run — so the
-     * no-retry branch (`onReady`, which self-guards on `agent:sessionid`) is
-     * a no-op rather than a surprise resend of their last message. Callers
-     * that DO have an intent set it explicitly at entry and are unaffected.
-     */
-    let inFlightRetryAfterLogin = false;
-    const [flowRunning, setFlowRunning] = createSignal(false);
-    const [agentReady, setAgentReady] = createSignal(false);
-    const [loginWaiting, setLoginWaiting] = createSignal(false);
-    // What the flow is actually doing right now — see launch-phase.ts. Lets
-    // AgentFooter show a specific status (and, for timed phases, a "waiting
-    // on X, up to Ys" label) instead of a generic "Working…" for every phase.
-    const [launchPhase, setLaunchPhase] = createSignal<LaunchPhase | null>(null);
-    const [authStatus, setAuthStatus] = createSignal<AuthStatus>("unknown");
+    const store = createLaunchPhaseStore(opts.blockId);
+    const { dispatch } = store;
 
     // Derived spinner state — caller wires this into the AgentFooter loading prop
-    const isLoading = createMemo(() => flowRunning() || !agentReady());
+    const isLoading = createMemo(() => store.mountRunning() || !store.agentReady());
 
-    // Shared counter behind loginWaiting: relogin()/loginViaTerminal() are
-    // guarded by a single in-flight flag (reloginInFlight) — nothing
-    // disables the failure-row's OTHER
-    // recovery buttons while one is running, so a user can genuinely start
-    // both concurrently. A plain boolean loginWaiting, set/cleared
-    // independently by each function, lets whichever one finishes first
-    // clear the flag while the other is still polling for credentials —
-    // reopening the exact "send during an unconfirmed recovery" window this
-    // signal exists to close. Codex P2 on PR #2338 (fourth re-review). Each
-    // caller must call endRecoveryFlow() EXACTLY once per beginRecoveryFlow()
-    // call — see relogin()'s recoveryEnded guard for how a function that
-    // clears early (before onRecovered, per the reagent P0 fix) avoids a
-    // double-decrement from its own trailing finally.
-    let activeRecoveryFlows = 0;
-    /**
-     * THE only writer of `inFlightRetryAfterLogin`. First flow wins: an intent
-     * is recorded only when nothing is already in flight, so a flow that joins
-     * cannot redefine what the running one is recovering — and it is the
-     * running one whose AuthUrlBox (and "Use terminal instead") the user is
-     * looking at.
-     *
-     * A chokepoint rather than the same condition repeated at each writer,
-     * because the previous revision put the guard inside `beginRecoveryFlow`
-     * only. That closed `/login`-joins-relogin but NOT the mirror case:
-     * `relogin`/`loginViaTerminal` wrote directly, bypassing it, so `/login`
-     * first and a row button second still clobbered. `/login` is never gated by
-     * `reloginInFlight` and the row's buttons are never disabled while
-     * `loginWaiting()` is true, so both orderings are reachable. reagent P1 on
-     * PR #2951 — including that the previous commit's "closes it for every
-     * caller" was wrong: it closed it for callers routed through this
-     * function's parameter.
-     */
-    const recordRecoveryIntent = (retryAfterLogin: boolean) => {
-        if (activeRecoveryFlows === 0) inFlightRetryAfterLogin = retryAfterLogin;
+    const setAuthUrl = (url: string | null) => {
+        dispatch({ type: "AuthUrlSet", url });
     };
+    const setAuthNotice = (notice: string | null) => {
+        dispatch({ type: "AuthNoticeSet", notice });
+    };
+    const isCancelled = () => store.snapshot().cancelled;
 
+    // /login and binds join the same counter behind loginWaiting() as the
+    // pane's own logins: a plain boolean let whichever flow finished first
+    // clear it while another was still waiting on a credential. Each begin
+    // needs exactly one end.
     const beginRecoveryFlow = (retryAfterLogin?: boolean) => {
-        // `/login` drives its own OAuth and never writes the intent directly,
-        // but its session shows the same AuthUrlBox — and therefore the same
-        // "Use terminal instead" handler — as relogin's. Letting it declare
-        // the intent here is what stops the two entry points disagreeing about
-        // the same pending failure. relogin/loginViaTerminal set the value
-        // themselves before calling this and pass nothing, so they are
-        // unaffected. reagent P1 + manoz on PR #2951.
-        //
-        // `bindExistingAccount` (SPEC_AGENT_LOGIN_FLOW_TIGHTENING_2026_09_04.md
-        // §3.4) is a THIRD no-intent caller, same shape as `/login`: it never
-        // retries a turn, so it has no `retryAfterLogin` to declare, and its
-        // `beginRecoveryFlow()` call only participates in the shared
-        // `activeRecoveryFlows`/`loginWaiting()` counter — not the intent
-        // chokepoint.
-        if (retryAfterLogin !== undefined) recordRecoveryIntent(retryAfterLogin);
-        activeRecoveryFlows += 1;
-        setLoginWaiting(true);
+        dispatch({ type: "RecoveryBegan", retryAfterLogin });
     };
     const endRecoveryFlow = () => {
-        activeRecoveryFlows = Math.max(0, activeRecoveryFlows - 1);
-        if (activeRecoveryFlows === 0) {
-            setLoginWaiting(false);
-            // Drop the recorded intent once nothing is in flight, so it cannot
-            // leak into a LATER flow that never declares one. `/login` is
-            // exactly that flow: it drives its own OAuth directly and shares
-            // only this counter, yet its session shows the same AuthUrlBox and
-            // therefore the same "Use terminal instead" handler. Without this
-            // it read whatever a previous relogin left behind. reagent P1 on
-            // PR #2951.
-            inFlightRetryAfterLogin = false;
-        }
+        dispatch({ type: "RecoveryEnded" });
     };
 
-    // Mutable cancellation flag. Flipped by cancelLogin() and by onCleanup.
-    // Read inside startLaunchFlow's polling loop via the isCancelled callback.
-    let loginCancelled = false;
-
     const startLaunchFlow = async () => {
-        if (flowRunning()) return;
-        loginCancelled = false;
-        setFlowRunning(true);
-        setCanRetry(false);
-        // Any fresh launch/retry supersedes a prior recovery attempt — clear a
-        // stale authNotice (e.g. "no login URL captured" from an earlier
-        // relogin) so it can't linger past a "Retry Login" the user just
-        // clicked and mislead them about this attempt's outcome.
-        setAuthNotice(null);
-        setLaunchPhase(null);
+        const started = dispatch({ type: "MountStarted" }).some((e) => e.type === "mount-started");
+        if (!started) return;
         const prov = opts.provider();
-        // "success" from runLaunchFlow means "controller registered, ready
-        // for input" — NOT "login confirmed" (its own doc comment is
-        // explicit about this: Phase 2 proceeds on an unconfirmed auth
-        // check rather than blocking launch on a transient RPC failure).
-        // Without tracking this separately, every "success" got mapped
-        // straight to authStatus "authenticated", showing a false green
-        // "Logged in" tag for a credential that was never actually checked
-        // (reagent/codex P2 on PR #2318).
+        // "success" means the controller registered, not that the login was
+        // confirmed: the auth check may have failed transiently and been
+        // skipped. Only a confirmed check shows the "Logged in" tag.
         let authConfirmed = false;
+        let result: MountResult;
         try {
             const authEnv = await buildAuthEnv(prov);
-            const result = await runLaunchFlow({
+            result = await runLaunchFlow({
                 blockId: opts.blockId,
                 provider: prov,
                 log: opts.log,
-                setAuthUrl,
-                isCancelled: () => loginCancelled,
-                setLoginWaiting,
-                setLaunchPhase,
+                setLaunchPhase: (phase) => {
+                    dispatch({ type: "MountPhaseReported", phase });
+                },
                 authEnv,
-                onLoginSuccess: opts.onLoginSuccess,
                 onNotify: opts.onNotify,
                 getInitialTermSize: opts.getInitialTermSize,
                 onControllerStatus: opts.onControllerStatus,
                 onAuthCheckResult: (confirmed) => { authConfirmed = confirmed; },
             });
-            if (result === "success") {
-                setAgentReady(true);
-                setAuthStatus(authConfirmed ? "authenticated" : "unknown");
-                opts.onReady?.();
-            } else if (result === "auth_failed" && !loginCancelled) {
-                setCanRetry(true);
-                setAgentReady(true); // clear spinner so retry button is usable
-                setAuthStatus("unauthenticated");
-            }
         } catch (err: any) {
             opts.log("error", err?.message ?? String(err), "error");
-            setAgentReady(true); // clear spinner on error
+            result = "error";
+        }
+        try {
+            dispatch({ type: "MountFinished", result, authConfirmed });
+            if (result === "success") opts.onReady?.();
+        } catch (err: any) {
+            opts.log("error", err?.message ?? String(err), "error");
         } finally {
-            setFlowRunning(false);
-            setLaunchPhase(null);
+            dispatch({ type: "MountEnded" });
         }
     };
 
-    // Guard against double-firing while a re-login's runCliLogin RPC is in
-    // flight (the user double-clicks "Login Again"). Separate from flowRunning
-    // — relogin must work even when the gated flow believes it already finished.
-    let reloginInFlight = false;
-
     /**
      * Resolve the provider CLI directly when block meta has no `cmd` yet.
-     * The old fallback here ran the GATED launch flow — which trusts
-     * `CheckCliAuth`'s expired-but-present false positive and skips login,
-     * degrading "Login Again" into exactly the no-op it exists to bypass
-     * (retro-agent-auth-relogin-noop-2026-07-01 H2). Resolving the CLI and
-     * proceeding with the forced login keeps the user's explicit intent.
-     * Returns null (with a visible notice) if resolution fails.
+     * Falling back to the gated launch flow would trust `CheckCliAuth`'s
+     * expired-but-present false positive and skip the login the user asked
+     * for (retro-agent-auth-relogin-noop-2026-07-01 H2).
      */
-    const resolveCliForRecovery = async (prov: ProviderDefinition, action: string): Promise<string | null> => {
+    const resolveCliForRecovery = async (
+        prov: ProviderDefinition,
+        action: string,
+    ): Promise<{ cliPath: string } | { error: string }> => {
         opts.log("auth", `${action}: CLI path not in block meta — resolving it directly`, "warn");
         try {
-            const r = await RpcApi.ResolveCliCommand(TabRpcClient, {
-                provider_id: prov.id,
-                cli_command: prov.cliCommand,
-                npm_package: prov.npmPackage,
-                pinned_version: prov.pinnedVersion,
-                windows_install_command: prov.windowsInstallCommand,
-                unix_install_command: prov.unixInstallCommand,
-                block_id: opts.blockId,
-            }, { timeout: 300000 });
-            // Persist the resolved path back to block meta (mirrors
-            // launch-flow.ts) so a subsequent recovery click reuses it instead
-            // of re-running the full resolution RPC. Best-effort — a failed
-            // write just means the next click re-resolves.
+            const r = await resolveProviderCli(prov, opts.blockId);
+            // Persist it so the next click reuses it. Best-effort.
             try {
                 const oref = MOS.makeORef("block", opts.blockId);
                 await RpcApi.SetMetaCommand(TabRpcClient, { oref, meta: { cmd: r.cli_path } });
             } catch { /* non-fatal: next click re-resolves */ }
-            return r.cli_path;
+            return { cliPath: r.cli_path };
         } catch (err: any) {
             const msg = `Couldn't find the ${prov.cliCommand} CLI to run the login: ${err?.message ?? String(err)}`;
             opts.log("auth", msg, "error");
-            setAuthNotice(msg);
-            return null;
+            return { error: msg };
         }
     };
 
@@ -534,47 +406,21 @@ export function useAgentControllerStatus(
      *  account. `send_message` only spawns a fresh process when one isn't
      *  already running — an agent whose CLI was already alive (spawned
      *  earlier with the old/missing credential) keeps running on that stale
-     *  env forever otherwise, so a successful login changes nothing for it
-     *  until the pane is manually closed and reopened. `forcerestart: true`
-     *  is a no-op when no controller exists yet (the first-ever-login case —
-     *  this just performs the Phase-3-equivalent registration launch-flow.ts
-     *  itself skipped when it bailed on auth_failed) and kills+recreates one
-     *  that does, so the new `cmd:env` (from `finalizeAccount`'s
-     *  own SetMetaCommand) actually takes effect. Best-effort: a failure here
-     *  just means the stale process persists until its own next natural
-     *  respawn. See REPORT_LOGIN_PERSIST_FAILURE_AND_STUCK_WORKING_2026_07_27.md
-     *  G4/G5.
+     *  env forever otherwise. `forcerestart: true` is a no-op when no
+     *  controller exists yet (the first-ever-login case — this is that
+     *  pane's only registration, since launch-flow.ts bailed on auth_failed
+     *  before its own). See
+     *  REPORT_LOGIN_PERSIST_FAILURE_AND_STUCK_WORKING_2026_07_27.md G4/G5.
      *
-     *  Mirrors launch-flow.ts's Phase 3 registration (termsize seed +
-     *  onControllerStatus) rather than just the bare resync call — for the
-     *  first-ever-login path this IS that pane's only registration, so
-     *  omitting either left a freshly spawned CLI's PTY at the default width
-     *  until the next manual resize, and callers relying on
-     *  `onControllerStatus` never heard about it (reagent P2 on PR #2318).
-     *
-     *  `context` picks the catch-block's log message — currently only
-     *  "login" (the login-recovery case) is defined; kept as a parameter
-     *  rather than inlined so a future distinct caller can add its own
-     *  message without threading a new parameter through every call site.
-     *
-     *  Returns whether the resync RPC actually succeeded. /login's
-     *  slash-command handler consumes this — it must NOT declare the
-     *  controller healthy (notifyControllerHealthy/clearAuthFailure) when
-     *  the refresh itself failed, or every fast-fail guard this PR added
-     *  gets cleared while the controller is still on the stale credential.
-     *  Codex P1 on PR #2338 (tenth re-review). The three original callers
-     *  (relogin/loginViaTerminal) still ignore the return
-     *  value, unchanged — same best-effort contract they've always had. */
+     *  Returns whether the restart succeeded: /login must not declare the
+     *  pane healthy when it failed. The pane's own logins ignore it
+     *  (best-effort). */
     const forceControllerRefresh = async (_context: "login" = "login"): Promise<boolean> => {
         try {
-            const initialTermSize = opts.getInitialTermSize?.();
-            await RpcApi.ControllerResyncCommand(TabRpcClient, {
-                tabid: staticTabId(),
-                blockid: opts.blockId,
-                forcerestart: true,
-                ...(initialTermSize ? { rtopts: { termsize: initialTermSize } } : {}),
+            const rts = await registerController(opts.blockId, {
+                forceRestart: true,
+                termSize: opts.getInitialTermSize?.(),
             });
-            const rts = await BlockService.GetControllerStatus(opts.blockId);
             if (rts) opts.onControllerStatus?.(rts);
             return true;
         } catch (e: any) {
@@ -588,784 +434,170 @@ export function useAgentControllerStatus(
         }
     };
 
-    /** Look up the account already bound to THIS agent for `providerId`, if
-     *  any — pass as `runProviderLogin`'s `existingAccountId` so a recovery
-     *  action reuses/refreshes the same account instead of minting and
-     *  orphaning a new one on every retry (the same class of gap reagent
-     *  caught in launch-flow.ts's Phase 2 — this hook's `relogin`/
-     *  `loginViaTerminal` had it too, just never flagged directly since
-     *  neither reported "auth_failed" the same visible way Phase 2 did).
-     *
-     *  Uses `lastLinkedAccountId` (codex P1 on PR #2377, second round), not
-     *  a raw `.find()`: a strict comparison misses a link stored under a
-     *  legacy alias, so `runProviderLogin` would mint and link a NEW
-     *  canonical account without replacing the alias row — leaving both
-     *  rows present, and since spawn injection processes the canonical row
-     *  first and the alias row last, the stale alias directory would
-     *  silently overwrite the freshly-authenticated one. Recovery would
-     *  report success while the very next spawn still used the expired
-     *  credential. */
-    const existingAccountIdFor = async (providerId: string): Promise<string | undefined> => {
-        const agentDefinitionId = getBlockMetaKeyAtom(opts.blockId, "agentId")() as string | undefined;
-        if (!agentDefinitionId) return undefined;
-        try {
-            const links = await RpcApi.ListAgentIdentitiesCommand(TabRpcClient, { agent_id: agentDefinitionId });
-            return lastLinkedAccountId(links, providerId);
-        } catch {
-            return undefined;
-        }
+    /** Auth env for recovery actions: block meta `cmd:env` when present, else
+     *  the isolated-dir env the launch flow would have used (agent never
+     *  launched), so the login lands where the agent will read it. */
+    const recoveryAuthEnv = async (prov: ProviderDefinition): Promise<Record<string, string>> => {
+        const authEnv = blockAuthEnv(opts.blockId);
+        if (Object.keys(authEnv).length > 0) return authEnv;
+        return (await buildAuthEnv(prov)) ?? {};
     };
 
-    /** Auth env for recovery actions: block meta `cmd:env` when present, else rebuilt. */
-    const recoveryAuthEnv = async (prov: ProviderDefinition): Promise<Record<string, string>> => {
-        const envMeta = getBlockMetaKeyAtom(opts.blockId, "cmd:env")();
-        const authEnv: Record<string, string> = {};
-        if (envMeta && typeof envMeta === "object") {
-            for (const [k, v] of Object.entries(envMeta as Record<string, unknown>)) {
-                if (typeof v === "string") authEnv[k] = v;
-            }
+    /** The pane's own login: "Log in" / "Login Again" (relogin) or "Login via
+     *  terminal". One at a time; the reducer drops a second request. */
+    const runPaneLogin = async (via: LoginVia, retryAfterLogin: boolean) => {
+        if (store.snapshot().login) return;
+        const prov = opts.provider();
+        if (!prov) {
+            opts.log("auth", `${via === "relogin" ? "re-login" : "login via terminal"}: no active provider`, "warn");
+            return;
         }
-        if (Object.keys(authEnv).length > 0) return authEnv;
-        // Meta env missing (agent never launched) — rebuild the isolated-dir
-        // env the launch flow would have used, so the login lands in the same
-        // store the agent will read.
-        return (await buildAuthEnv(prov)) ?? {};
+        const startedEvent = dispatch({ type: "LoginRequested", via, retryAfterLogin }, "user")
+            .find((e) => e.type === "login-started");
+        if (!startedEvent || startedEvent.type !== "login-started") return;
+        const id = startedEvent.id;
+        const step = (s: LoginStep) => {
+            dispatch({ type: "LoginStepReported", id, ...s });
+        };
+        try {
+            // The CLI path and auth env are in block meta once the agent has
+            // launched; reuse them.
+            let cliPath = getBlockMetaKeyAtom(opts.blockId, "cmd")() as string | undefined;
+            if (!cliPath) {
+                step({ step: "resolving-cli" });
+                const resolved = await resolveCliForRecovery(prov, via === "relogin" ? "re-login" : "login via terminal");
+                if ("error" in resolved) {
+                    dispatch({ type: "LoginFailed", id, failure: { kind: "error", message: resolved.error } });
+                    return;
+                }
+                cliPath = resolved.cliPath;
+            }
+            step({ step: "cli-ready" });
+            const authEnv = await recoveryAuthEnv(prov);
+            const agentDefinitionId = getBlockMetaKeyAtom(opts.blockId, "agentId")() as string | undefined;
+            // A terminal login skips the link capture; so does a provider
+            // whose CLI never prints a link.
+            const skipTier1 = via === "terminal" || prov.headlessLoginUrlUnsupported === true;
+            step({ step: "provider-login", linkCapture: !skipTier1 });
+            const result = await logInAndConfirm({
+                provider: prov,
+                cliPath,
+                authEnv,
+                setAuthUrl,
+                log: opts.log,
+                isCancelled,
+                // Links a new account to THIS agent
+                // (PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20.md §7).
+                linkTarget: agentDefinitionId ? { blockId: opts.blockId, agentDefinitionId } : undefined,
+                // Refresh the account already bound here instead of minting
+                // and orphaning a new one on every retry.
+                existingAccountId: agentDefinitionId ? await linkedAccountFor(agentDefinitionId, prov.id) : undefined,
+                skipTier1,
+                // Relogin keeps the in-app session open in runProviderLogin
+                // (SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md §3.1).
+                ...(via === "relogin" ? { awaitTier1Completion: true } : {}),
+                onTierChange: (event) => {
+                    step(event.tier === "fallback" ? { step: "fallback" } : { step: "awaiting-completion", deadlineMs: event.deadlineMs });
+                },
+            });
+            if (result.kind === "signed-in") {
+                opts.log("auth", retryAfterLogin ? "Login successful — retrying…" : "Login successful");
+                dispatch({ type: "LoginSucceeded", id });
+                // Restart a stale process BEFORE anything is resent to it.
+                await forceControllerRefresh();
+                opts.onLoginSuccess?.(result.email);
+                // loginWaiting() must read false before the resend below:
+                // useAgentCommands' fast-fail guard checks it on every send.
+                dispatch({ type: "LoginRecoveryReleased", id });
+                if (retryAfterLogin) {
+                    opts.onRecovered?.();
+                } else {
+                    // No turn ever ran: send the startup sequence instead.
+                    // onReady self-guards on `agent:sessionid`.
+                    opts.onReady?.();
+                }
+            } else {
+                const failed = dispatch({ type: "LoginFailed", id, failure: result }).find((e) => e.type === "login-failed");
+                if (via === "terminal" && result.kind === "not-detected" && failed?.type === "login-failed" && failed.notice) {
+                    opts.log("auth", failed.notice, "warn");
+                }
+            }
+        } catch (err: any) {
+            const msg = `${via === "relogin" ? "Re-login failed" : "Terminal login failed"}: ${err?.message ?? String(err)}`;
+            opts.log("auth", msg, "error");
+            dispatch({ type: "LoginFailed", id, failure: { kind: "error", message: msg } });
+        } finally {
+            dispatch({ type: "LoginEnded", id });
+        }
     };
 
     // The login's window opens inside the click (its URL comes later), and is
     // closed on every way out of the flow if no URL used it (login-window.ts).
     const relogin = (reloginOpts: { retryAfterLogin?: boolean } = {}) =>
-        reloginInFlight ? Promise.resolve() : withLoginWindow(opts.provider(), () => reloginFlow(reloginOpts));
-    const reloginFlow = async (reloginOpts: { retryAfterLogin?: boolean } = {}) => {
-        if (reloginInFlight) return;
-        const retryAfterLogin = reloginOpts.retryAfterLogin ?? true;
-        const prov = opts.provider();
-        if (!prov) {
-            opts.log("auth", "re-login: no active provider", "warn");
-            return;
-        }
-        // Past every bail-out: same rule as the in-flight guard above — a call
-        // that returns without starting a flow must not leave its intent
-        // behind. Nothing would reset it (no beginRecoveryFlow, so no paired
-        // endRecoveryFlow), and a later `/login` session — which declares its
-        // own intent only when a failure is pending — could read the stale
-        // value from its "Use terminal instead". reagent P2 on PR #2951.
-        recordRecoveryIntent(retryAfterLogin);
-        // Clears the "Log in" button immediately on click — this is also the
-        // action the mount-time launch flow's first-login/auth-expired
-        // states hand off to (they never trigger a login themselves; see
-        // launch-flow.ts), so a stale canRetry=true must not survive into
-        // this attempt's own outcome.
-        setCanRetry(false);
-        setAuthNotice(null);
-        // Clear any OAuth URL box left by a PRIOR attempt before starting a
-        // fresh one — otherwise a subsequent no-progress outcome would stack
-        // the error notice below a stale, contradictory URL box (reagent P2).
-        setAuthUrl(null);
-        loginCancelled = false;
-        // The CLI path + auth env are written to block meta at launch; reuse
-        // them instead of re-resolving (the agent is already running, so the
-        // CLI is installed). If `cmd` is missing, resolve it directly — see
-        // resolveCliForRecovery for why this must NOT fall back to the gated
-        // launch flow.
-        let cliPath = getBlockMetaKeyAtom(opts.blockId, "cmd")() as string | undefined;
-        reloginInFlight = true;
-        beginRecoveryFlow();
-        // Guards against double-decrementing activeRecoveryFlows: the
-        // success branches below call this early (before onRecovered, so
-        // that callback doesn't see a stale loginWaiting — reagent P0), and
-        // the trailing finally also calls it unconditionally for the
-        // failure paths. Exactly one of those two call sites should ever
-        // actually decrement per invocation.
-        let recoveryEnded = false;
-        const endThisRecoveryFlow = () => {
-            if (recoveryEnded) return;
-            recoveryEnded = true;
-            endRecoveryFlow();
-        };
-        setLaunchPhase({ kind: "checking-auth" });
-        // Tracks whether this attempt actually reached a genuine success
-        // branch below — declared outside the try so the `finally` block
-        // (which needs to read it) can see it. Used to decide whether to
-        // restore the mount-time "Log in" button (reagent/codex P1 on
-        // PR #2318: every failure exit — timeout, terminal-unavailable,
-        // persistence failure, cancellation, or a thrown exception —
-        // previously left `canRetry` stuck at false with no way back into
-        // a login attempt short of reopening the pane).
-        let succeeded = false;
-        try {
-            if (!cliPath) {
-                // reagent P2 on PR #2300: this step is resolving the CLI path,
-                // not checking auth — "checking-auth" here mislabeled a wait
-                // that can take up to 5 minutes (resolveCliForRecovery's own
-                // install wait) as the wrong, much shorter step.
-                setLaunchPhase({ kind: "resolving-cli" });
-                cliPath = (await resolveCliForRecovery(prov, "re-login")) ?? undefined;
-                if (!cliPath) return;
-            }
-            setLaunchPhase({ kind: "checking-auth" });
-            const authEnv = await recoveryAuthEnv(prov);
-            // runProviderLogin falls through URL-capture -> global-login-copy ->
-            // real-terminal-with-poll before giving up (retro-headless-login-
-            // browser-open-2026-07-20) — "Login Again" used to dead-end the
-            // instant the CLI produced no URL, which is every time for Claude
-            // Code v2.1.x. linkTarget lets a tier-3 success register a real
-            // account and bind it to THIS agent (single-point
-            // enforcement, PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20.md
-            // §7) instead of just seeding a file nothing tracks.
-            const agentDefinitionId = getBlockMetaKeyAtom(opts.blockId, "agentId")() as string | undefined;
-            // Tier 1 mints the account dir but does NOT persist/link it (it
-            // returns "opened" before confirming completion) — captured here
-            // so a poll below can call persistAndLinkAccount once IT confirms
-            // the login actually finished. reagent P1: without this, a tier-1
-            // login that succeeds for any provider whose CLI actually prints
-            // a URL (not requiresLoginTty, e.g. codex) via "Login Again" left
-            // the minted account unpersisted/unlinked — the resolver's spawn
-            // gate then blocks the agent on its very next spawn with no error
-            // ever surfaced, since relogin's own "opened" case used to just
-            // `break` and report nothing.
-            let openedAccountId: string | undefined;
-            let openedAccountDir: string | undefined;
-            let recheckAuthEnv = authEnv;
-            setLaunchPhase(
-                prov.headlessLoginUrlUnsupported
-                    ? { kind: "opening-login-terminal" }
-                    : { kind: "waiting-for-login-link", deadlineMs: Date.now() + LOGIN_LINK_CAPTURE_LABEL_MS },
-            );
-            const outcome = await runProviderLogin({
-                provider: prov,
-                cliPath,
-                authEnv,
-                setAuthUrl,
-                log: opts.log,
-                isCancelled: () => loginCancelled,
-                linkTarget: agentDefinitionId
-                    ? { blockId: opts.blockId, agentDefinitionId }
-                    : undefined,
-                existingAccountId: await existingAccountIdFor(prov.id),
-                onAccountRegistered: (accountId, dir) => {
-                    openedAccountId = accountId;
-                    openedAccountDir = dir;
-                    if (prov.authConfigDirEnvVar) {
-                        recheckAuthEnv = { ...authEnv, [prov.authConfigDirEnvVar]: dir };
-                    }
-                },
-                // Behavior-gate only (no catalog provider sets the flag
-                // since Claude's was dropped — see catalog.ts and
-                // SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md §3.2): kept
-                // for defense-in-depth, matching PreLaunchAuthPanel.tsx's
-                // and login.ts's identical expression, in case a future
-                // provider needs tier 1 skipped again.
-                //
-                // reagent P1 on PR #2410 (against PR1 alone, before this PR
-                // existed): dropping headlessLoginUrlUnsupported here without
-                // ALSO adding awaitTier1Completion would let tier 1 run for
-                // this existingAccountId-bearing (reconnect) call, but the
-                // "opened" branch's completion poll only checks
-                // CheckCliAuthCommand against the SAME isolated dir the
-                // stale/expired credential already lives in — reporting
-                // authenticated:true on the first tick, before the user does
-                // anything. awaitTier1Completion below is exactly the fix:
-                // it's the reason this PR exists, not a leftover default.
-                skipTier1: prov.headlessLoginUrlUnsupported === true,
-                // The whole in-app session now lives inside runProviderLogin
-                // (spec §3.1/§3.3 surface 2): it polls for child-exit +
-                // credential-landed, persists and links the account, and
-                // resolves with "inapp-success"/"inapp-timeout" — no
-                // hand-rolled "opened" completion poll needed for the case
-                // that actually happens now (tier 1 succeeding for Claude).
-                // The "opened" branch below is kept as the fallback for the
-                // one case awaitTier1Completion doesn't cover itself — see
-                // its own comment.
-                awaitTier1Completion: true,
-                // See launch-flow.ts's identical wiring — without this the
-                // phase set just above never updates again for the rest of
-                // this call, even though tier 3 inside it can run for up
-                // to 5 more minutes. reagent P1 on PR #2300.
-                onTierChange: (event) => {
-                    if (event.tier === "fallback") {
-                        setLaunchPhase({ kind: "opening-login-terminal" });
-                    } else {
-                        setLaunchPhase({ kind: "waiting-for-login-completion", deadlineMs: event.deadlineMs });
-                    }
-                },
-            });
-            switch (outcome) {
-                case "opened": {
-                    // With awaitTier1Completion:true above, tier 1 only
-                    // still returns bare "opened" (instead of resolving the
-                    // awaited session itself) when the account-dir mint
-                    // failed — see run-provider-login.ts's own tier-1 doc
-                    // comment ("also the fallback when the dir mint
-                    // failed"). Kept as a hand-rolled poll for that one
-                    // remaining case; the case that actually happens now
-                    // (Claude's tier 1 succeeding) resolves via
-                    // "inapp-success"/"inapp-timeout" below instead.
-                    opts.log("auth", "waiting for login to complete...");
-                    let authenticated = false;
-                    let authedEmail: string | null = null;
-                    const deadline = Date.now() + 5 * 60 * 1000;
-                    setLaunchPhase({ kind: "waiting-for-login-completion", deadlineMs: deadline });
-                    while (!loginCancelled && Date.now() < deadline && !authenticated) {
-                        await sleep(2000);
-                        if (loginCancelled) break;
-                        try {
-                            const recheck = await RpcApi.CheckCliAuthCommand(TabRpcClient, {
-                                cli_path: cliPath,
-                                auth_check_args: prov.authCheckCommand,
-                                auth_env: recheckAuthEnv,
-                            }, { timeout: 10000 });
-                            if (recheck.authenticated) {
-                                authenticated = true;
-                                authedEmail = recheck.email ?? null;
-                            }
-                        } catch {
-                            // keep polling on transient RPC errors
-                        }
-                    }
-                    if (authenticated && openedAccountId && openedAccountDir) {
-                        // Tier 1's mint-only registration can still fail to
-                        // persist (the same DB-write failure mode this PR's
-                        // own report documents) — the `seeded`/
-                        // `terminal-success` branch below already gates its
-                        // success actions on this; this branch previously
-                        // discarded the return value and reported success
-                        // unconditionally, reproducing the exact "Error: not
-                        // logged in" bug this PR set out to fix (reagent/
-                        // codex P1 on the re-review of PR #2318).
-                        const persisted = await persistAndLinkAccount(
-                            {
-                                provider: prov,
-                                cliPath,
-                                authEnv,
-                                setAuthUrl,
-                                log: opts.log,
-                                linkTarget: agentDefinitionId
-                                    ? { blockId: opts.blockId, agentDefinitionId }
-                                    : undefined,
-                            },
-                            openedAccountId,
-                            openedAccountDir,
-                        );
-                        if (persisted) {
-                            opts.log("auth", retryAfterLogin ? "Login successful — retrying…" : "Login successful");
-                            setAuthNotice(null);
-                            setAuthStatus("authenticated");
-                            // Before onRecovered (which may immediately resend the
-                            // failed turn) — an already-running stale process must
-                            // be refreshed BEFORE anything is sent to it, or the
-                            // resend just hits the same stale credential again.
-                            await forceControllerRefresh();
-                            // Post a visible confirmation into the pane itself — this used to
-                            // ONLY happen on the very first auto-login (launch-flow.ts); "Login
-                            // Again" retried the failed turn silently, so a user with nothing
-                            // queued to retry (or who didn't notice the retry) never saw ANY
-                            // acknowledgement that the login actually succeeded.
-                            opts.onLoginSuccess?.(authedEmail);
-                            succeeded = true;
-                            // Clear BEFORE onRecovered — that callback can
-                            // synchronously resend the failed turn, and
-                            // useAgentCommands.ts's fast-fail guard checks
-                            // loginWaiting() before every send. Clearing only
-                            // in this function's trailing `finally` (which
-                            // runs AFTER onRecovered returns) let that resend
-                            // get spuriously rejected as "not logged in yet"
-                            // even though recovery just succeeded. reagent P0
-                            // on PR #2338 (this is genuinely done at this
-                            // point — forceControllerRefresh already
-                            // completed above).
-                            endThisRecoveryFlow();
-                            if (retryAfterLogin) {
-                                opts.onRecovered?.();
-                            } else {
-                                // Mount-time "Log in" success on an agent that never
-                                // reached Phase 3 (no turn ever started — see
-                                // launch-flow.ts's needsLogin bail). onReadyFn only
-                                // ever fires from startLaunchFlow's own success
-                                // branch, so without this a first-time login via
-                                // this button left the agent running with no
-                                // startup sequence ever sent (no instructions,
-                                // identity, or context) — reagent/codex P1 on
-                                // PR #2318. onReadyFn self-guards on
-                                // `agent:sessionid` already being set, so this is a
-                                // safe no-op for anything but a genuine first login.
-                                opts.onReady?.();
-                            }
-                        } else {
-                            setAuthStatus("unauthenticated");
-                            setAuthNotice(
-                                "Your login succeeded, but AgentMux couldn't save the account record. Try again in a moment.",
-                            );
-                        }
-                    } else if (!loginCancelled) {
-                        setAuthNotice(
-                            "Opened a login page, but no login was detected within 5 minutes. " +
-                            "Complete the login there, then click “Login Again”.",
-                        );
-                    }
-                    break;
-                }
-                case "inapp-success":
-                case "terminal-success":
-                case "terminal-cli-signed-in":
-                    // openedAccountId/openedAccountDir are only set by
-                    // onAccountRegistered, which run-provider-login.ts fires
-                    // ONLY once the account row is actually persisted — a
-                    // credential can be validly seeded/typed-in on disk while
-                    // that persist call itself fails (was previously silent;
-                    // see REPORT_LOGIN_PERSIST_FAILURE_AND_STUCK_WORKING_2026_07_27.md).
-                    // Trusting the outcome string alone reported "Login
-                    // successful" for a login the resolver's spawn gate would
-                    // then block on the very next turn with no account ever
-                    // having existed. "inapp-success" is subject to the exact
-                    // same gate — runProviderLogin's own persist call can
-                    // fail even though the credential is genuinely on disk
-                    // (see its doc comment) — so it's handled identically
-                    // here, not given its own branch.
-                    // A cli-managed CLI (Pi) keeps its own login: no account.
-                    if (outcome === "terminal-cli-signed-in" || (openedAccountId && openedAccountDir)) {
-                        // The "Signed in from your global login" wording was
-                        // the tier-2 seed-from-personal-~/.claude case, removed
-                        // 2026-08-31 — every success is now a real login.
-                        opts.log("auth", retryAfterLogin ? "Login successful — retrying…" : "Login successful");
-                        setAuthNotice(null);
-                        // codex P2 on PR #2413: "inapp-success" follows a
-                        // setAuthUrl(url) call from tier 1 — without clearing
-                        // it here, AuthUrlBox stayed mounted after a
-                        // successful login, still offering paste/cancel/"use
-                        // terminal instead" against a session that already
-                        // finished. No-op for seeded/terminal-success (authUrl
-                        // was never set for those tiers).
-                        setAuthUrl(null);
-                        setAuthStatus("authenticated");
-                        await forceControllerRefresh();
-                        opts.onLoginSuccess?.(null);
-                        succeeded = true;
-                        // See the "opened" branch above — must clear before
-                        // onRecovered, not in the trailing finally. reagent
-                        // P0 on PR #2338.
-                        endThisRecoveryFlow();
-                        if (retryAfterLogin) {
-                            opts.onRecovered?.();
-                        } else {
-                            // See the identical "opened" case above — first-time
-                            // login via the mount-time "Log in" button never
-                            // otherwise triggers the startup sequence.
-                            opts.onReady?.();
-                        }
-                    } else {
-                        // reagent P2 on PR #2413 (re-review): this branch is
-                        // exactly as terminal for the session as the success
-                        // branch above — runProviderLogin already reaped the
-                        // login child; the same setAuthUrl(null) applies, or
-                        // AuthUrlBox stays mounted offering paste/cancel/"use
-                        // terminal instead" against a session that's gone.
-                        setAuthUrl(null);
-                        setAuthStatus("unauthenticated");
-                        setAuthNotice(
-                            "Your login succeeded, but AgentMux couldn't save the account record. Try again in a moment.",
-                        );
-                    }
-                    break;
-                case "inapp-timeout":
-                    // codex P2 on PR #2413: by the time runProviderLogin
-                    // returns this outcome, it has already cancelled and
-                    // reaped the login child (run-provider-login.ts's
-                    // pollForInAppLoginCompletion timeout path) — the
-                    // AuthUrlBox's URL/paste box is for a session that no
-                    // longer exists. Clear it instead of leaving it mounted
-                    // (it would silently accept a paste that goes nowhere),
-                    // and point at a fresh attempt rather than "finish there".
-                    setAuthUrl(null);
-                    // reagent P2 on PR #2413 (round 3): mirror the "opened"
-                    // case's identical guard above — a real timeout and an
-                    // explicit user cancel (e.g. clicking "Use terminal
-                    // instead", which sets loginCancelled then calls
-                    // loginViaTerminal()) can both surface here, and
-                    // without this check the timeout message would
-                    // overwrite whatever notice the terminal path just set.
-                    if (!loginCancelled) {
-                        setAuthNotice(
-                            "The login link timed out before you finished authorizing. " +
-                            "Click “Login Again” to get a new link, or try “Login via terminal”.",
-                        );
-                    }
-                    break;
-                case "terminal-timeout":
-                    // Never fail silently (retro §5.1): tell the user nothing
-                    // completed and point at the recovery path that's left.
-                    setAuthNotice(
-                        "Opened a terminal window for login, but no login was detected within 5 minutes. " +
-                        "Complete the login in that terminal, then click “Login Again”.",
-                    );
-                    break;
-                case "terminal-unavailable":
-                    setAuthNotice(
-                        // No provider-specific hint any more: the Claude-only
-                        // "Use existing login" escape hatch is gone (it reused
-                        // the operator's personal credential), and a login in
-                        // another channel or another app can no longer satisfy
-                        // this one by design.
-                        "Couldn't start a browser login or open a terminal window on this platform. " +
-                        "Sign in to this provider from Connectors → Accounts, then try again.",
-                    );
-                    break;
-            }
-        } catch (err: any) {
-            const msg = `Re-login failed: ${err?.message ?? String(err)}`;
-            opts.log("auth", msg, "error");
-            setAuthNotice(msg);
-        } finally {
-            reloginInFlight = false;
-            endThisRecoveryFlow();
-            setLaunchPhase(null);
-            // Restore the mount-time not-signed-in state on any unsuccessful
-            // outcome — timeout, terminal-unavailable, persistence failure,
-            // cancellation, or a thrown exception all fall through to here
-            // via `return`/`break`/the catch above. Scoped to
-            // `!retryAfterLogin`: that's the only case where THIS call set
-            // `canRetry` false in the first place (the pre-launch "Log in"
-            // action); the `retryAfterLogin: true` ("Login Again") call site
-            // guards against a stale true from a *different* origin and was
-            // never in the pre-launch state to begin with, so it must not
-            // enter it now (reagent/codex on PR #2318).
-            //
-            // `canRetry` no longer renders a bar of its own — the blue "Log
-            // in" bar it used to gate was removed in
-            // PLAN_LOGIN_CTA_SURFACE_CONSOLIDATION_2026_09_02 and that case now
-            // goes through the shared failure row. The signal is still
-            // load-bearing for two NON-display consumers: useAgentCommands
-            // fast-fails sends into an unauthenticated agent on it, and
-            // /login reads it. It also re-raises the row indirectly, via
-            // agent-view's synthetic pre-launch FailureObserved effect. Do not
-            // delete it as dead display state.
-            if (!succeeded && !retryAfterLogin) {
-                setCanRetry(true);
-            }
-        }
-    };
+        store.snapshot().login
+            ? Promise.resolve()
+            : withLoginWindow(opts.provider(), () => runPaneLogin("relogin", reloginOpts.retryAfterLogin ?? true));
 
-    // "Use my existing login" REMOVED 2026-08-31 — it seeded this agent's
-    // isolated dir from the operator's personal ~/.claude, defeating
-    // per-channel isolation. See
-    // docs/analysis/ANALYSIS_PER_CHANNEL_AUTH_BYPASSES_2026_08_31.md #3.
-    // relogin() and loginViaTerminal() are the remaining recovery paths,
-    // both of which perform a real login in THIS channel.
-
-    // Open a real visible terminal window so the browser OAuth flow works,
-    // then poll for credentials landing (or for the CLI itself to report
-    // authenticated, for non-Claude providers). Shares runProviderLogin's
-    // tier-3 logic (skipTier1 — the user explicitly asked for a terminal
-    // login, no point trying headless first) instead of reimplementing it.
-    // This used to be a separate, hand-rolled copy of the same logic —
-    // reagent caught it reproducing a bug (codex/openclaw could never
-    // actually complete a login here: minting was claude-only and the poll
-    // called a host command that hard-rejects every other provider) already
-    // fixed once in runProviderLogin itself. A second hand-rolled copy would
-    // only let that exact class of bug reappear the next time one of the two
-    // was fixed and the other wasn't.
-    const loginViaTerminal = async (terminalOpts: { retryAfterLogin?: boolean } = {}) => {
-        const retryAfterLogin = terminalOpts.retryAfterLogin ?? true;
-        // Guard BEFORE the write, matching relogin (:530-532). A call the guard
-        // rejects must not leave its intent behind: it no-ops, so recording its
-        // value would corrupt the flag for the flow that IS running.
-        //
-        // Reachable via the inline transcript CTA this PR deliberately keeps
-        // (DocumentRow.tsx, surface C), which can coexist with a
-        // different-valued failure row: start a relogin from the old inline
-        // "Login Again" (retryAfterLogin true, reloginInFlight true), then
-        // click the current row's "Login via terminal" (false) — that call
-        // no-ops but used to write false, so the original flow's later
-        // "Use terminal instead" read false and silently dropped the retry of
-        // a turn that genuinely ran. reagent P1 + manoz, on PR #2951.
-        if (reloginInFlight) return;
-        loginCancelled = false;
-        const prov = opts.provider();
-        if (!prov) {
-            opts.log("auth", "login via terminal: no active provider", "warn");
-            return;
-        }
-        // Past every bail-out: same rule as the in-flight guard above — a call
-        // that returns without starting a flow must not leave its intent
-        // behind. Nothing would reset it (no beginRecoveryFlow, so no paired
-        // endRecoveryFlow), and a later `/login` session — which declares its
-        // own intent only when a failure is pending — could read the stale
-        // value from its "Use terminal instead". reagent P2 on PR #2951.
-        recordRecoveryIntent(retryAfterLogin);
-        setAuthNotice(null);
-        // Claim the in-flight guard BEFORE any await. The CLI resolve below
-        // can take up to 300 s, and the recovery buttons have no disabled
-        // binding — so setting the flag only after the awaits (the previous
-        // bug) let a rapid double-click pass the top guard twice and open two
-        // terminal windows with overlapping poll loops. Mirror relogin: flag
-        // first, reset in finally.
-        reloginInFlight = true;
-        // Shared counter, not a bare boolean — see beginRecoveryFlow's own
-        // doc comment. (The concurrent peer this originally guarded against,
-        // useGlobalLogin(), was removed 2026-08-31; the counter is kept — it
-        // is still correct, and Codex P2 on PR #2338 established that the
-        // bare-boolean form is the fragile shape here.)
-        let recoveryEnded = false;
-        const endThisRecoveryFlow = () => {
-            if (recoveryEnded) return;
-            recoveryEnded = true;
-            endRecoveryFlow();
-        };
-        beginRecoveryFlow();
-        setLaunchPhase({ kind: "opening-login-terminal" });
-        try {
-            let cliPath = getBlockMetaKeyAtom(opts.blockId, "cmd")() as string | undefined;
-            if (!cliPath) {
-                // Same H2 trap as relogin: the gated launch flow would trust the
-                // auth check and skip the login the user explicitly asked for.
-                // reagent P2 on PR #2300: label this step "resolving-cli", not
-                // "opening-login-terminal" — no terminal opens until after this
-                // resolve, which can itself take up to 5 minutes on a fresh install.
-                setLaunchPhase({ kind: "resolving-cli" });
-                cliPath = (await resolveCliForRecovery(prov, "login via terminal")) ?? undefined;
-                if (!cliPath) return;
-            }
-            setLaunchPhase({ kind: "opening-login-terminal" });
-            const authEnv = await recoveryAuthEnv(prov);
-            const agentDefinitionId = getBlockMetaKeyAtom(opts.blockId, "agentId")() as string | undefined;
-            // Captured so the switch below can gate its "Login successful"
-            // messaging on the account having actually been persisted, not
-            // just on the outcome string — see relogin()'s matching check
-            // and REPORT_LOGIN_PERSIST_FAILURE_AND_STUCK_WORKING_2026_07_27.md.
-            let registeredAccountId: string | undefined;
-            let registeredAccountDir: string | undefined;
-            const outcome = await runProviderLogin({
-                provider: prov,
-                cliPath,
-                authEnv,
-                setAuthUrl,
-                log: opts.log,
-                isCancelled: () => loginCancelled,
-                skipTier1: true,
-                linkTarget: agentDefinitionId
-                    ? { blockId: opts.blockId, agentDefinitionId }
-                    : undefined,
-                existingAccountId: await existingAccountIdFor(prov.id),
-                onAccountRegistered: (accountId, dir) => {
-                    registeredAccountId = accountId;
-                    registeredAccountDir = dir;
-                },
-                // "fallback" still fires here even though skipTier1 is true —
-                // run-provider-login.ts fires it unconditionally right after
-                // the (skipped) tier-1 block, not conditioned on skipTier1 —
-                // but this flow has nothing displayed for tier 1 to begin
-                // with, so there's nothing to update on that event; only
-                // "polling" (once the terminal actually opens) needs a phase
-                // update here, giving an accurate deadline instead of leaving
-                // the phase on a static "opening terminal" for the whole wait.
-                onTierChange: (event) => {
-                    if (event.tier === "polling") {
-                        setLaunchPhase({ kind: "waiting-for-login-completion", deadlineMs: event.deadlineMs });
-                    }
-                },
-            });
-            switch (outcome) {
-                case "opened":
-                    break;
-                case "terminal-success":
-                case "terminal-cli-signed-in":
-                    if (outcome === "terminal-cli-signed-in" || (registeredAccountId && registeredAccountDir)) {
-                        opts.log("auth", "Login successful — retrying…");
-                        setAuthNotice(null);
-                        setAuthStatus("authenticated");
-                        // reagent P1 on PR #2951. relogin() clears this
-                        // synchronously on click (see its own setCanRetry(false)
-                        // above); loginViaTerminal never did, and the only other
-                        // clear — notifyControllerHealthy — needs an ACTIVE TURN,
-                        // which checkAuthGuard will not let start while canRetry
-                        // is true. That is a deadlock: canRetry stays true
-                        // forever and every subsequent send is fast-failed as
-                        // "not logged in" on an agent that just logged in
-                        // successfully.
-                        //
-                        // Cleared on SUCCESS only, deliberately not at the start
-                        // like relogin: relogin pairs its early clear with a
-                        // restore-on-failure in its finally, and clearing here
-                        // without that pairing would drop both the send guard
-                        // and the failure row after a FAILED terminal login.
-                        // Success is precisely when "this agent is
-                        // unauthenticated" stops being true.
-                        //
-                        // Must precede onRecovered() below: that callback's
-                        // send-startup path issues a real send, which reads
-                        // canRetry through checkAuthGuard.
-                        setCanRetry(false);
-                        await forceControllerRefresh();
-                        opts.onLoginSuccess?.(null);
-                        // See relogin()'s identical comment — reagent P0 on
-                        // PR #2338.
-                        endThisRecoveryFlow();
-                        // Branch exactly as relogin does (:732/745, :800/805).
-                        // This asymmetry — relogin deciding from an explicit
-                        // argument while this path inferred it from pane state
-                        // afterwards — was the root of BOTH the dropped-startup
-                        // bug and the cross-hook race on PR #2951. The caller
-                        // now decides at click time, so nothing here depends on
-                        // what `setCanRetry(false)` above may have triggered.
-                        if (retryAfterLogin) {
-                            opts.onRecovered?.();
-                        } else {
-                            // No turn was ever attempted — send the startup
-                            // sequence instead of retrying. onReadyFn
-                            // self-guards on `agent:sessionid`, so this is a
-                            // no-op for anything but a genuine first login.
-                            opts.onReady?.();
-                        }
-                    } else {
-                        setAuthStatus("unauthenticated");
-                        setAuthNotice(
-                            "Your login succeeded, but AgentMux couldn't save the account record. Try again in a moment.",
-                        );
-                    }
-                    break;
-                case "terminal-timeout":
-                    if (!loginCancelled) {
-                        const msg = "No login detected after 5 minutes. Complete the login in the terminal, then click “Login Again”.";
-                        opts.log("auth", msg, "warn");
-                        setAuthNotice(msg);
-                    }
-                    break;
-                case "terminal-unavailable":
-                    setAuthNotice("Couldn't open a terminal window for login on this platform.");
-                    break;
-            }
-        } catch (err: any) {
-            const msg = `Terminal login failed: ${err?.message ?? String(err)}`;
-            opts.log("auth", msg, "error");
-            setAuthNotice(msg);
-        } finally {
-            reloginInFlight = false;
-            endThisRecoveryFlow();
-            setLaunchPhase(null);
-        }
-    };
+    // A real visible terminal, so the browser OAuth works: runProviderLogin's
+    // tier 3, with tier 1 skipped since the user asked for a terminal.
+    const loginViaTerminal = (terminalOpts: { retryAfterLogin?: boolean } = {}) =>
+        runPaneLogin("terminal", terminalOpts.retryAfterLogin ?? true);
 
     const cancelLogin = () => {
-        loginCancelled = true;
+        dispatch({ type: "CancelRequested" }, "user");
         loginBackend().cancel().catch(() => {});
         opts.log("auth", "login cancelled", "warn");
-        // Immediate UI feedback — the in-flight poll loop notices
-        // loginCancelled on its own next tick (up to 2s), but the phase
-        // label/cancel button should disappear the instant the user clicks.
-        setLaunchPhase(null);
     };
 
-    // "Use terminal instead" — AuthUrlBox's secondary action alongside
-    // Cancel (SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md §3.3 surface 2).
-    // Shown for BOTH relogin()-driven and /login-driven sessions (both
-    // populate authUrl), so this can't just call loginViaTerminal()
-    // directly: it guards on `reloginInFlight`, which /login never sets,
-    // and cancelLogin() only flips a boolean the in-flight poll notices on
-    // its own next tick rather than synchronously unwinding — an immediate
-    // loginViaTerminal() call would race the still-live login child.
-    //
-    // Polls `loginWaiting()` (rather than the flow-specific
-    // `reloginInFlight`) with a generous backstop timeout so a genuinely
-    // wedged flow can't hang this forever — codex P2 on PR #2413: a fixed
-    // short bound could expire before cancellation is actually observed,
-    // since pollForInAppLoginCompletion's poll tick can be blocked inside a
-    // CheckCliAuthCommand RPC (its own ~10s timeout, which doesn't itself
-    // recheck isCancelled).
+    // "Use terminal instead" — AuthUrlBox's secondary action
+    // (SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md §3.3 surface 2). Shown for
+    // relogin's sessions and /login's, so it waits on the shared recovery
+    // counter (which both feed) rather than the pane's own login, then starts
+    // the terminal login once the cancelled one has torn down. The backstop
+    // is generous: a poll tick can sit inside a 10 s auth-check RPC.
     const useTerminalInstead = async () => {
-        // Capture BEFORE cancelling: the wait below is a wait for THIS flow to
-        // tear down, and teardown clears the intent (endRecoveryFlow). Reading
-        // it after would always see the cleared value — the same
-        // read-after-the-thing-that-clears-it mistake as the cross-hook race
-        // earlier on this PR, one layer out.
-        //
-        // For a `/login`-driven session nothing ever wrote it, so this is
-        // `false`: onReady rather than a retry. That is correct — the user
-        // ran a command explicitly, there is no failed turn to re-run, and
-        // onReadyFn self-guards on `agent:sessionid` so an existing session
-        // is a no-op rather than a surprise resend.
-        const intent = inFlightRetryAfterLogin;
+        // Read before cancelling: teardown resets it. For a /login session
+        // that declared nothing this is false, so onReady rather than a retry.
+        const intent = store.snapshot().retryIntent;
         cancelLogin();
-        // reagent P1 on PR #2413 (round 3): AuthUrlBox's "Use terminal
-        // instead" is also shown while a `/login`-driven session is in
-        // flight (commands/global/login.ts), not just relogin()'s. That
-        // path never touches reloginInFlight/reloginDonePromise — only
-        // relogin()/loginViaTerminal() do — so waiting on
-        // reloginDonePromise alone raced an ALREADY-RESOLVED promise during
-        // a /login session and fell straight through to loginViaTerminal()
-        // below, starting a second concurrent login child while /login's
-        // own poll was still tearing the first one down.
-        // `loginWaiting()` is the one signal both relogin() and /login
-        // drive through the same activeRecoveryFlows counter (see the
-        // comment above its declaration), so polling it instead correctly
-        // waits out EITHER flow's teardown.
+        const waiting = () => store.snapshot().recoveryFlows > 0;
         const deadline = Date.now() + 20_000;
-        while (loginWaiting() && Date.now() < deadline) {
+        while (waiting() && Date.now() < deadline) {
             await sleep(200);
         }
-        if (loginWaiting()) {
-            // Still wedged after the backstop — same silent-failure shape
-            // retro-agent-auth-relogin-noop-2026-07-01 §5.1 exists to ban,
-            // so surface it instead of proceeding into loginViaTerminal()'s
-            // own reloginInFlight guard (which /login never sets, so it
-            // wouldn't even catch this case).
+        if (waiting()) {
+            // Never fail silently (retro-agent-auth-relogin-noop-2026-07-01 §5.1).
             setAuthNotice(
                 "The previous login attempt is taking longer than expected to stop. " +
                 "Please wait a moment and try “Login via terminal” again.",
             );
             return;
         }
-        // Suppress whatever notice relogin()'s own cancelled-poll branch
-        // just set (e.g. "inapp-timeout"'s message) — the user asked to
-        // switch flows, not to be told their login attempt failed.
+        // The user switched flows; the cancelled one's notice doesn't apply.
         setAuthNotice(null);
-        // Continue the SAME intent the cancelled flow was started with — this
-        // is a switch of mechanism, not a new decision by the user. Defaulting
-        // to `true` here is what reintroduced the stale-resend on this path.
+        // A switch of mechanism, not a new decision: keep the same intent.
         await loginViaTerminal({ retryAfterLogin: intent });
     };
 
     const notifyControllerHealthy = () => {
-        setCanRetry(false);
-        setAuthNotice(null);
-        // A live controllerstatus event proves the CLI is running turns right
-        // now, independent of whichever recovery path (or none) got it there
-        // — the same independent-proof reasoning this function already
-        // applies to canRetry/authNotice above.
-        setAuthStatus("authenticated");
+        dispatch({ type: "ControllerHealthy" });
     };
 
     const recheckAuthAfterBind = async (): Promise<boolean> => {
         const prov = opts.provider();
         if (!prov) return false;
-        // Reuse whatever this pane already has on disk — after a bind's
-        // live-apply step (bindAccountToAgent) refreshed `cmd:env`, this is
-        // the newly-bound account's dir; before any bind, it's whatever the
-        // last launch/recovery attempt wrote. Never re-derive a fresh env
-        // here — that would risk checking a DIFFERENT dir than the one the
-        // running controller will actually use next.
+        // Check the env this pane will actually spawn with (after a bind,
+        // the newly-bound account's dir), never a freshly derived one.
         const cliPath = getBlockMetaKeyAtom(opts.blockId, "cmd")() as string | undefined;
         if (!cliPath) return false;
-        const envMeta = getBlockMetaKeyAtom(opts.blockId, "cmd:env")();
-        const authEnv: Record<string, string> = {};
-        if (envMeta && typeof envMeta === "object") {
-            for (const [k, v] of Object.entries(envMeta as Record<string, unknown>)) {
-                if (typeof v === "string") authEnv[k] = v;
-            }
-        }
         try {
-            const result = await RpcApi.CheckCliAuthCommand(TabRpcClient, {
-                cli_path: cliPath,
-                auth_check_args: prov.authCheckCommand,
-                auth_env: authEnv,
-            }, { timeout: 10000 });
+            const result = await checkCliAuth(cliPath, prov.authCheckCommand, blockAuthEnv(opts.blockId), 10000);
             if (!result.authenticated) return false;
             notifyControllerHealthy();
             return true;
         } catch {
-            // Transient RPC error — treated as "still blocked," matching
-            // every other best-effort auth check in this hook. The pane
-            // simply stays as it was; the next bind event (or a manual
-            // retry) gets another chance.
+            // Transient RPC error: still blocked. The next bind event or a
+            // manual retry gets another chance.
             return false;
         }
     };
@@ -1373,11 +605,8 @@ export function useAgentControllerStatus(
     const bindExistingAccount = async (account: Account): Promise<void> => {
         const agentDefinitionId = getBlockMetaKeyAtom(opts.blockId, "agentId")() as string | undefined;
         if (!agentDefinitionId) return;
-        // No retryAfterLogin declared — this flow never retries a turn (spec
-        // §3.4), so there is no intent to record. Still goes through
-        // beginRecoveryFlow/endRecoveryFlow so loginWaiting()'s shared
-        // counter (and therefore the fast-fail send guard) sees this as an
-        // in-flight recovery, same as every other entry point.
+        // Never retries a turn, so it declares no intent, but it is still an
+        // in-flight recovery for loginWaiting().
         beginRecoveryFlow();
         setAuthNotice(null);
         try {
@@ -1390,16 +619,8 @@ export function useAgentControllerStatus(
             };
             await bindAccountToAgent(account, candidate);
         } catch (e: any) {
-            // bindAccountToAgent throws on a failed link upsert (its own
-            // live-apply steps are already best-effort/non-throwing — see
-            // its doc comment). Surface it the same way every other failed
-            // recovery action in this hook does: `authNotice`, not a
-            // console-only log or an unhandled rejection at the caller
-            // (agent-view.tsx's `void status.bindExistingAccount(...)` call
-            // sites don't — and shouldn't have to — attach their own
-            // `.catch()`). Connectors → Accounts' own Bind-to-Agent menu
-            // surfaces this via `onBindError` (#2971); this entry point had
-            // no equivalent until now.
+            // A failed link upsert surfaces as a notice, like every other
+            // failed recovery here (callers don't attach their own catch).
             const msg = `Couldn't bind "${account.name}": ${e?.message ?? String(e)}`;
             opts.log("auth", msg, "error");
             setAuthNotice(msg);
@@ -1408,32 +629,26 @@ export function useAgentControllerStatus(
         }
     };
 
-    // If the pane is closed while login is in progress, cancel and kill
-    // the host CLI process. This onCleanup is registered against the
-    // SolidJS owner context that called useAgentControllerStatus — the
-    // agent presentation view's component scope.
+    // Pane closed: cancel unconditionally. The login CLI can already be
+    // spawned before loginWaiting() turns true, and the host cancel is
+    // idempotent, so gating on it could orphan the child.
     onCleanup(() => {
-        // Cancel unconditionally. The login CLI can already be spawned during
-        // the window between runCliLogin() and setLoginWaiting(true) flipping
-        // true, so gating on loginWaiting() can leave the child orphaned if the
-        // pane closes inside that window. cancelCliLogin is idempotent and
-        // swallows errors, so calling it when no login is in flight is safe.
-        loginCancelled = true;
+        dispatch({ type: "Disposed" });
         loginBackend().cancel().catch(() => {});
     });
 
     return {
-        authUrl,
+        authUrl: store.authUrl,
         setAuthUrl,
-        authNotice,
+        authNotice: store.authNotice,
         setAuthNotice,
-        canRetry,
-        flowRunning,
-        agentReady,
+        canRetry: store.canRetry,
+        flowRunning: store.mountRunning,
+        agentReady: store.agentReady,
         isLoading,
-        loginWaiting,
-        launchPhase,
-        authStatus,
+        loginWaiting: store.loginWaiting,
+        launchPhase: store.phase,
+        authStatus: store.authStatus,
         startLaunchFlow,
         relogin,
         loginViaTerminal,
@@ -1441,8 +656,10 @@ export function useAgentControllerStatus(
         notifyControllerHealthy,
         forceControllerRefresh,
         cancelLogin,
-        isCancelled: () => loginCancelled,
-        resetCancelled: () => { loginCancelled = false; },
+        isCancelled,
+        resetCancelled: () => {
+            dispatch({ type: "CancelReset" });
+        },
         beginRecoveryFlow,
         endRecoveryFlow,
         recheckAuthAfterBind,
