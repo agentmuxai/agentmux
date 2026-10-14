@@ -357,8 +357,9 @@ export class HistoryParser {
 
             for (const event of streamEvents) {
                 if (event.type === "session_end") {
-                    // The turn ended: a jekt held for its last block goes out now.
-                    parser.releaseHeld();
+                    // The turn ended: a jekt held for its last block goes out
+                    // now, and the next turn's text starts a node of its own.
+                    parser.endTurn();
                     putReleased();
                     // Its stats are the turn's totals — every call summed —
                     // and are deliberately NOT a context size; the meter's

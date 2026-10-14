@@ -429,6 +429,20 @@ export class ClaudeCodeStreamParser {
         this.releaseHeldJekts();
     }
 
+    /**
+     * The turn ended: release held jekts and close the open text and thinking
+     * runs, so the next turn's text starts a node of its own. Live gets the
+     * same from finalizeTurn → flushPending; history replay and other
+     * parseLine callers get it here. Without it, replay appended the next
+     * turn's text to this one's: replies to two queued messages read
+     * "…instruction.Got …" after a reload.
+     */
+    endTurn(): void {
+        this.releaseHeldJekts();
+        this.currentTextNode = null;
+        this.currentThinkingNode = null;
+    }
+
     private releaseHeldJekts(): void {
         if (this.heldJekts.length === 0) return;
         this.releasedJekts.push(...this.heldJekts);
@@ -533,8 +547,9 @@ export class ClaudeCodeStreamParser {
             case "session_end":
                 // The turn ended, so its last block did: release held jekts
                 // for whoever drains next (Codex P2 on #3977 — parseEvent /
-                // parseLine callers see session_end here, not in their own code).
-                this.releaseHeldJekts();
+                // parseLine callers see session_end here, not in their own
+                // code), and close the open runs (`endTurn`).
+                this.endTurn();
                 return null;
             case "provider_waiting":
                 return null;

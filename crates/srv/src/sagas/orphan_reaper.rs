@@ -26,6 +26,12 @@
 // - blocks already closing;
 // - blocks in a tab whose layout tree is empty — "no tree yet" can't be told
 //   apart from "not loaded yet" from here.
+//
+// Every sweep also checks each tab's pane invariants
+// (SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md §3.1) and logs each
+// violation once, at error level, with full tab and block ids: a block of any
+// kind that stays in no pane past `MIN_ORPHAN_AGE` (I1; only agents are
+// reaped), and whatever `validate_layout_invariants` finds in a stored tree.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
@@ -68,9 +74,9 @@ pub fn install(state: &AppState) {
     let state = state.clone();
     tokio::spawn(async move {
         tokio::time::sleep(FIRST_SWEEP_DELAY).await;
-        let mut first_seen: HashMap<String, Instant> = HashMap::new();
+        let mut watch = Watch::default();
         loop {
-            let reaped = sweep(&state, &mut first_seen, Instant::now(), MIN_ORPHAN_AGE).await;
+            let reaped = sweep(&state, &mut watch, Instant::now(), MIN_ORPHAN_AGE).await;
             if !reaped.is_empty() {
                 tracing::warn!(count = reaped.len(), blocks = ?reaped, "orphan_reaper: closed unplaced agent blocks");
             }
@@ -79,64 +85,107 @@ pub fn install(state: &AppState) {
     });
 }
 
-/// One sweep. `first_seen` carries each candidate's first sighting across
-/// sweeps; a block that got placed (or deleted) in between drops out of it.
-/// Returns the block ids it closed.
-pub(crate) async fn sweep(
-    state: &AppState,
-    first_seen: &mut HashMap<String, Instant>,
-    now: Instant,
-    min_age: Duration,
-) -> Vec<String> {
-    let candidates = unplaced_agent_blocks(state).await;
-    let candidate_count = candidates.len();
-    first_seen.retain(|id, _| candidates.contains(id));
+/// What sweeps carry between runs: each unplaced block's first sighting (a
+/// block that got placed, or deleted, in between drops out), and the
+/// violations already logged, so each is logged once while it lasts.
+#[derive(Default)]
+pub(crate) struct Watch {
+    pub(crate) first_seen: HashMap<String, Instant>,
+    reported: HashSet<String>,
+}
+
+/// One sweep. Returns the block ids it closed.
+pub(crate) async fn sweep(state: &AppState, watch: &mut Watch, now: Instant, min_age: Duration) -> Vec<String> {
+    let scan = scan(state).await;
+    let mut still_violated = HashSet::new();
+    for (tab_id, violation) in &scan.tree_violations {
+        let key = format!("tree:{tab_id}:{violation}");
+        if watch.reported.insert(key.clone()) {
+            tracing::error!(tab_id = %tab_id, violation = %violation, "layout-doctor: stored layout tree violates an invariant");
+        }
+        still_violated.insert(key);
+    }
+
+    watch.first_seen.retain(|id, _| scan.unplaced.iter().any(|u| &u.block_id == id));
     let mut due = Vec::new();
-    for id in candidates {
-        let seen = *first_seen.entry(id.clone()).or_insert(now);
-        if now.duration_since(seen) >= min_age {
-            due.push(id);
+    for u in &scan.unplaced {
+        let seen = *watch.first_seen.entry(u.block_id.clone()).or_insert(now);
+        let age = now.duration_since(seen);
+        if age < min_age {
+            continue;
+        }
+        let key = format!("unplaced:{}", u.block_id);
+        still_violated.insert(key.clone());
+        if watch.reported.insert(key) {
+            tracing::error!(
+                tab_id = %u.tab_id,
+                block_id = %u.block_id,
+                view = %u.view,
+                unplaced_secs = age.as_secs(),
+                reaped = u.is_agent(),
+                "layout-doctor: I1 violation: a block of this tab has been in no pane of it for too long"
+            );
+        }
+        if u.is_agent() {
+            due.push(u.block_id.clone());
         }
     }
+    watch.reported.retain(|key| still_violated.contains(key));
 
     let mut reaped = Vec::new();
     for id in due {
         tracing::warn!(block_id = %id, "orphan_reaper: agent block has been in no pane for too long — closing it");
         match super::close_pane::run(state, vec![id.clone()]).await {
             Ok(_) => {
-                first_seen.remove(&id);
+                watch.first_seen.remove(&id);
                 reaped.push(id);
             }
             Err(e) => tracing::warn!(block_id = %id, error = %e, "orphan_reaper: close failed; will retry next sweep"),
         }
     }
 
-    LAST_CANDIDATES.store(candidate_count, Ordering::Relaxed);
-    LAST_FIRST_SEEN_LEN.store(first_seen.len(), Ordering::Relaxed);
+    LAST_CANDIDATES.store(scan.unplaced.iter().filter(|u| u.is_agent()).count(), Ordering::Relaxed);
+    LAST_FIRST_SEEN_LEN.store(watch.first_seen.len(), Ordering::Relaxed);
     if !reaped.is_empty() {
         REAPED_CUMULATIVE.fetch_add(reaped.len() as u64, Ordering::Relaxed);
     }
     reaped
 }
 
-/// Agent blocks that are in their tab's `block_ids` but in no leaf of the
-/// tab's layout, minus everything the module doc lists as never reaped.
-async fn unplaced_agent_blocks(state: &AppState) -> HashSet<String> {
-    let unplaced: Vec<(String, String)> = {
+/// A block in its tab's `block_ids` but in no pane of the tab's layout.
+struct Unplaced {
+    tab_id: String,
+    block_id: String,
+    view: String,
+}
+
+impl Unplaced {
+    fn is_agent(&self) -> bool {
+        self.view == "agent"
+    }
+}
+
+/// What one sweep finds: unplaced blocks (minus everything the module doc
+/// lists as never reaped, whatever their kind), and each stored tree's
+/// `validate_layout_invariants` findings by tab.
+struct Scan {
+    unplaced: Vec<Unplaced>,
+    tree_violations: Vec<(String, String)>,
+}
+
+async fn scan(state: &AppState) -> Scan {
+    let (unplaced, tree_violations) = {
         let s = state.srv_state.lock().await;
-        let mut out = Vec::new();
-        for tab in s.tabs.values() {
-            let Some(root) = tab.rootnode.as_ref() else { continue };
-            let mut placed = HashSet::new();
-            collect_members(root, &mut placed);
-            out.extend(
-                tab.block_ids
-                    .iter()
-                    .filter(|b| !placed.contains(*b))
-                    .map(|b| (tab.tab_id.clone(), b.clone())),
-            );
+        let (mut unplaced, mut violations) = (Vec::new(), Vec::new());
+        for tab in s.tabs.values().filter(|t| t.rootnode.is_some()) {
+            for block_id in crate::backend::layout::unplaced_blocks(&tab.rootnode, &tab.block_ids) {
+                unplaced.push((tab.tab_id.clone(), block_id));
+            }
+            for v in crate::backend::layout::validate_layout_invariants(&tab.rootnode) {
+                violations.push((tab.tab_id.clone(), v));
+            }
         }
-        out
+        (unplaced, violations)
     };
     // A block the backend has queued for placement (`agent.open`, docked
     // `pane.open`, redock) is in no leaf until a frontend applies the action
@@ -149,13 +198,9 @@ async fn unplaced_agent_blocks(state: &AppState) -> HashSet<String> {
         .into_iter()
         .flat_map(|tab_id| pending_placement_blocks(state, tab_id))
         .collect();
-    let unplaced: Vec<String> = unplaced
-        .into_iter()
-        .map(|(_, b)| b)
-        .filter(|b| !pending.contains(b))
-        .collect();
+    let unplaced: Vec<(String, String)> = unplaced.into_iter().filter(|(_, b)| !pending.contains(b)).collect();
     if unplaced.is_empty() {
-        return HashSet::new();
+        return Scan { unplaced: Vec::new(), tree_violations };
     }
 
     let blocks: Vec<Block> = state.mstore.get_all::<Block>().unwrap_or_default();
@@ -164,16 +209,19 @@ async fn unplaced_agent_blocks(state: &AppState) -> HashSet<String> {
         .filter_map(|b| b.subblockids.as_ref())
         .flatten()
         .collect();
-    let agent_blocks: HashSet<&String> = blocks
+    let views: HashMap<&String, String> = blocks
         .iter()
-        .filter(|b| crate::backend::obj::meta_get_string(&b.meta, "view", "") == "agent")
-        .map(|b| &b.oid)
+        .map(|b| (&b.oid, crate::backend::obj::meta_get_string(&b.meta, "view", "")))
         .collect();
-
-    unplaced
+    let unplaced = unplaced
         .into_iter()
-        .filter(|id| agent_blocks.contains(id) && !sub_blocks.contains(id) && !blockcontroller::is_closing(id))
-        .collect()
+        .filter(|(_, id)| !sub_blocks.contains(id) && !blockcontroller::is_closing(id))
+        .map(|(tab_id, block_id)| {
+            let view = views.get(&block_id).cloned().unwrap_or_default();
+            Unplaced { tab_id, block_id, view }
+        })
+        .collect();
+    Scan { unplaced, tree_violations }
 }
 
 /// Blocks named by a queued, not-yet-applied placement action
@@ -192,15 +240,6 @@ fn pending_placement_blocks(state: &AppState, tab_id: &str) -> Vec<String> {
         .filter(|a| a.actiontype != "delete")
         .map(|a| a.blockid)
         .collect()
-}
-
-fn collect_members(node: &agentmux_common::LayoutNode, out: &mut HashSet<String>) {
-    if let Some(data) = node.data.as_ref() {
-        out.extend(crate::backend::layout::leaf_members(data));
-    }
-    for child in &node.children {
-        collect_members(child, out);
-    }
 }
 
 #[cfg(test)]
@@ -292,7 +331,7 @@ mod tests {
         place(&state, &tab, &[&placed]).await;
 
         let t0 = Instant::now();
-        let mut seen = HashMap::new();
+        let mut seen = Watch::default();
         let age = Duration::from_secs(90);
 
         assert!(sweep(&state, &mut seen, t0, age).await.is_empty(), "first sighting: too young");
@@ -328,7 +367,7 @@ mod tests {
 
         let (_, _, before) = last_sweep_stats();
         let t0 = Instant::now();
-        let mut seen = HashMap::new();
+        let mut seen = Watch::default();
         let age = Duration::from_secs(90);
         sweep(&state, &mut seen, t0, age).await; // first sighting, not yet due
         let reaped = sweep(&state, &mut seen, t0 + age, age).await;
@@ -352,14 +391,14 @@ mod tests {
         place(&state, &tab, &[&a]).await;
 
         let t0 = Instant::now();
-        let mut seen = HashMap::new();
+        let mut seen = Watch::default();
         let age = Duration::from_secs(90);
         sweep(&state, &mut seen, t0, age).await;
-        assert!(seen.contains_key(&fresh));
+        assert!(seen.first_seen.contains_key(&fresh));
 
         place(&state, &tab, &[&a, &fresh]).await;
         assert!(sweep(&state, &mut seen, t0 + age, age).await.is_empty());
-        assert!(!seen.contains_key(&fresh), "placed → dropped from the watch list");
+        assert!(!seen.first_seen.contains_key(&fresh), "placed → dropped from the watch list");
         assert!(state.srv_state.lock().await.blocks.contains_key(&fresh));
     }
 
@@ -377,7 +416,7 @@ mod tests {
         state.mstore.update(&mut parent).unwrap();
 
         let t0 = Instant::now();
-        let mut seen = HashMap::new();
+        let mut seen = Watch::default();
         let age = Duration::from_secs(90);
         sweep(&state, &mut seen, t0, age).await;
         assert!(sweep(&state, &mut seen, t0 + age, age).await.is_empty());
@@ -399,7 +438,7 @@ mod tests {
             .unwrap();
 
         let t0 = Instant::now();
-        let mut seen = HashMap::new();
+        let mut seen = Watch::default();
         let age = Duration::from_secs(90);
         sweep(&state, &mut seen, t0, age).await;
         assert!(sweep(&state, &mut seen, t0 + age, age).await.is_empty());
@@ -414,7 +453,7 @@ mod tests {
         let a = seed_block(&state, &tab, "agent").await;
 
         let t0 = Instant::now();
-        let mut seen = HashMap::new();
+        let mut seen = Watch::default();
         let age = Duration::from_secs(90);
         sweep(&state, &mut seen, t0, age).await;
         assert!(sweep(&state, &mut seen, t0 + age, age).await.is_empty());
@@ -448,10 +487,58 @@ mod tests {
         .await;
 
         let t0 = Instant::now();
-        let mut seen = HashMap::new();
+        let mut seen = Watch::default();
         let age = Duration::from_secs(90);
         sweep(&state, &mut seen, t0, age).await;
         assert!(sweep(&state, &mut seen, t0 + age, age).await.is_empty());
         assert!(state.srv_state.lock().await.blocks.contains_key(&background));
+    }
+
+    /// A non-agent block left in no pane is reported once (I1), never
+    /// reaped, and forgotten once it is placed again.
+    #[tokio::test]
+    async fn an_unplaced_non_agent_block_is_reported_once_and_left_running() {
+        let state = test_state();
+        let tab = seed_tab(&state).await;
+        let placed = seed_block(&state, &tab, "agent").await;
+        let term = seed_block(&state, &tab, "term").await;
+        place(&state, &tab, &[&placed]).await;
+
+        let t0 = Instant::now();
+        let mut seen = Watch::default();
+        let age = Duration::from_secs(90);
+        sweep(&state, &mut seen, t0, age).await;
+        let key = format!("unplaced:{term}");
+        assert!(!seen.reported.contains(&key), "too young to report");
+        assert!(sweep(&state, &mut seen, t0 + age, age).await.is_empty());
+        assert!(seen.reported.contains(&key));
+        assert!(state.srv_state.lock().await.blocks.contains_key(&term), "only agents are reaped");
+
+        place(&state, &tab, &[&placed, &term]).await;
+        sweep(&state, &mut seen, t0 + age + age, age).await;
+        assert!(!seen.reported.contains(&key), "placed again: no longer a violation");
+    }
+
+    /// A stored tree that breaks an invariant (here I1's other half: one
+    /// block in two panes) is reported with its tab, once while it lasts.
+    #[tokio::test]
+    async fn a_block_in_two_panes_is_reported_with_its_tab() {
+        let state = test_state();
+        let tab = seed_tab(&state).await;
+        let a = seed_block(&state, &tab, "term").await;
+        let pane = |id: &str| agentmux_common::LayoutNode {
+            id: id.into(),
+            size: 1.0,
+            data: Some(agentmux_common::LayoutNodeData { block_id: a.clone(), ..Default::default() }),
+            ..Default::default()
+        };
+        let tree = agentmux_common::LayoutNode { id: "root".into(), children: vec![pane("p1"), pane("p2")], ..Default::default() };
+        let set = Command::LayoutSetTree { tab_id: tab.clone(), new_tree: Some(tree), correlation_id: String::new(), slices: None };
+        dispatch_apply(&state, set).await;
+
+        let mut seen = Watch::default();
+        sweep(&state, &mut seen, Instant::now(), Duration::from_secs(90)).await;
+        let prefix = format!("tree:{tab}:BLOCK_IN_TWO_PANES");
+        assert!(seen.reported.iter().any(|k| k.starts_with(&prefix)), "{:?}", seen.reported);
     }
 }
