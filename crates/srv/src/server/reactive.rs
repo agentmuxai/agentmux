@@ -369,9 +369,7 @@ pub(super) fn verify_jekt_signature(state: &AppState, req: &mut InjectionRequest
                 &key, &msgid, &claimed, &req.target_agent, ts, &req.message, sig,
             )
         });
-    if !verified {
-        tracing::warn!(agent_id = %claimed, fresh = within_freshness_window, "host jekt signature missing or did not verify");
-    }
+    if !verified { tracing::warn!(agent_id = %claimed, fresh = within_freshness_window, "host jekt signature missing or did not verify"); }
     req.sig_verified = Some(verified);
 }
 
@@ -495,21 +493,15 @@ pub(super) async fn verify_lan_signature(state: &AppState, req: &mut InjectionRe
         }
     };
 
-    // Trust-on-first-use pin (reagentx P0 — mDNS peer discovery is
-    // unauthenticated, so "whichever peer answers first" is not a safe
-    // trust anchor on its own; see lan_peer_pubkey_pins.rs's module doc and
-    // docs/specs/SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md §2.2). The first
-    // key ever observed for a claimed sender is pinned; a LATER lookup
-    // returning a DIFFERENT key is itself treated as an active red flag —
-    // someone is now claiming a different identity than what was already
-    // established — not silently trusted as an update.
+    // Trust-on-first-use pin (mDNS discovery is unauthenticated; see
+    // lan_peer_pubkey_pins.rs and SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md
+    // §2.2): the first key seen for a sender is pinned, and a LATER,
+    // DIFFERENT key is an active red flag, never a silent update.
     use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
     let observed_key_b64 = BASE64.encode(&observed_key);
     let Ok(pinned_key_b64) = state.mstore.lan_peer_pubkey_pin_get_or_set(&claimed, &observed_key_b64) else {
-        // A signature was carried and couldn't be checked against the pin:
-        // fail closed, never as "unverified but harmless".
         tracing::warn!(agent_id = %claimed, "LAN pubkey pin store unreadable: signature counted as failed");
-        req.lan_verified = Some(false);
+        req.lan_verified = Some(false); // fail closed
         return;
     };
     if pinned_key_b64 != observed_key_b64 {
@@ -534,9 +526,7 @@ pub(super) async fn verify_lan_signature(state: &AppState, req: &mut InjectionRe
             &req.message,
             sig,
         );
-    if !verified {
-        tracing::warn!(agent_id = %claimed, fresh = within_freshness_window, "LAN jekt signature did not verify");
-    }
+    if !verified { tracing::warn!(agent_id = %claimed, fresh = within_freshness_window, "LAN jekt signature did not verify"); }
     req.lan_verified = Some(verified);
     lan_v2::claim_uid(state, req, &claimed);
 }

@@ -1308,12 +1308,9 @@ impl Handler {
         // construction, never simultaneously "verified" on that same tier.
         //
         // `channel_verified` (SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md
-        // §D3, Phase B) joins the list on the same terms: a cross-channel
-        // signature that verified against the sender's published public
-        // key is proof of exactly who sent it. Its `Some(false)` is NOT yet
-        // among the forcing rules above — Phase C, deliberately held back
-        // until published keys have propagated (spec §6/§10) — so today
-        // this field can only ever relax, never escalate.
+        // §D3) joins on the same terms. Its `Some(false)` is not among the
+        // forcing rules above (Phase C, held until keys propagate, §6/§10),
+        // but like every failed verdict it blocks the relaxation.
         //
         // `wan_verified` (W3-S §2.6, amended 2026-09-26) joins for any
         // verified same-account install that isn't revoked — `approved` or
@@ -1325,14 +1322,9 @@ impl Handler {
         // from disk is the accepted residual, spec open question 5).
         // `revoked` is forcing, above; a verdict with no instance proves no
         // install and relaxes nothing.
-        // Any check that ran and FAILED rules the relaxation out: a sender
-        // can't cancel one with another tier's success. Before, a LAN jekt
-        // claiming a name this instance hosts failed the local HMAC check
-        // (`sig_verified == Some(false)`) yet relaxed to ESCALATE=none on a
-        // LAN key pinned on first sight from whoever answered for the name.
-        let any_check_failed = [req.sig_verified, req.reagent_verified, req.lan_verified, req.channel_verified, req.wan_verified]
-            .contains(&Some(false));
-        let is_cryptographically_verified = !any_check_failed
+        // A FAILED check rules the relaxation out: another tier's success can't cancel it.
+        let any_failed = [req.sig_verified, req.reagent_verified, req.lan_verified, req.channel_verified, req.wan_verified].contains(&Some(false));
+        let is_cryptographically_verified = !any_failed
             && (req.sig_verified == Some(true)
             || req.reagent_verified == Some(true)
             || req.lan_verified == Some(true)
