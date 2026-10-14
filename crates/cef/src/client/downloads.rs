@@ -176,26 +176,25 @@ impl WaitingDownloads {
         true
     }
 
-    /// The dialog for `id` was answered (or the download ended). A repeat for
-    /// the same id, or an id never added, changes nothing.
-    pub(crate) fn release(&mut self, id: u32) {
-        self.by_pane.retain(|_, ids| {
-            ids.remove(&id);
-            !ids.is_empty()
-        });
+    /// The dialog for `id` in `pane` was answered (or the download ended).
+    /// Returns whether it was waiting; a repeat, or an id never added, changes
+    /// nothing. Ids are only unique within one request context (incognito jars
+    /// and named profiles each have their own download manager), so the pane
+    /// is part of the key and one pane's update can never free another's slot.
+    pub(crate) fn release(&mut self, pane: &str, id: u32) -> bool {
+        let Some(ids) = self.by_pane.get_mut(pane) else {
+            return false;
+        };
+        let was_waiting = ids.remove(&id);
+        if ids.is_empty() {
+            self.by_pane.remove(pane);
+        }
+        was_waiting
     }
 
     /// The pane closed: nothing of its can still be waiting.
     pub(crate) fn clear_pane(&mut self, pane: &str) {
         self.by_pane.remove(pane);
-    }
-
-    /// The pane a waiting download belongs to.
-    fn pane_of(&self, id: u32) -> Option<&str> {
-        self.by_pane
-            .iter()
-            .find(|(_, ids)| ids.contains(&id))
-            .map(|(p, _)| p.as_str())
     }
 }
 
@@ -321,7 +320,7 @@ wrap_download_handler! {
 
         fn on_download_updated(
             &self,
-            _browser: Option<&mut Browser>,
+            browser: Option<&mut Browser>,
             download_item: Option<&mut DownloadItem>,
             _callback: Option<&mut DownloadItemCallback>,
         ) {
@@ -335,15 +334,16 @@ wrap_download_handler! {
             if path.is_empty() && !ended {
                 return;
             }
-            let pane = with_waiting(|w| {
-                let pane = w.pane_of(id).map(str::to_string);
-                w.release(id);
-                pane
-            });
+            // Ids repeat across panes that use different request contexts, so
+            // the pane comes from the browser, not from the id. A pane that is
+            // already gone had its entries cleared when it closed.
+            if let Some(block_id) = browser.and_then(|b| self.state.block_id_for_browser(b)) {
+                with_waiting(|w| w.release(&block_id, id));
+            }
             if !path.is_empty() {
                 remember_download_dir(Path::new(&path));
             }
-            if ended && pane.is_some() {
+            if ended {
                 tracing::info!(
                     target: "pane-download",
                     id,
@@ -491,16 +491,32 @@ mod tests {
         for id in 1..=3 {
             assert!(w.add("p1", id));
         }
-        w.release(2);
+        assert!(w.release("p1", 2));
         assert!(w.has_room("p1"));
         // A repeat update for the same download frees nothing more.
-        w.release(2);
-        w.release(2);
+        assert!(!w.release("p1", 2));
+        assert!(!w.release("p1", 2));
         assert!(w.add("p1", 4));
         assert!(!w.has_room("p1"));
         // An id that was never waiting changes nothing.
-        w.release(99);
+        assert!(!w.release("p1", 99));
         assert!(!w.has_room("p1"));
+    }
+
+    #[test]
+    fn the_same_id_in_two_panes_is_two_downloads() {
+        // Panes in different request contexts count ids separately, so both
+        // can have a download "1" waiting; one finishing frees only its own.
+        let mut w = WaitingDownloads::default();
+        for id in 1..=3 {
+            assert!(w.add("p1", id));
+        }
+        assert!(w.add("p2", 1));
+        assert!(w.release("p2", 1));
+        assert!(!w.has_room("p1"), "p2's update must not free a p1 slot");
+        assert!(!w.release("p2", 2), "p1's id 2 is not p2's");
+        assert!(w.release("p1", 1));
+        assert!(w.has_room("p1"));
     }
 
     #[test]
@@ -512,8 +528,11 @@ mod tests {
         assert!(w.add("p2", 7));
         w.clear_pane("p1");
         assert!(w.has_room("p1"));
-        assert_eq!(w.pane_of(7), Some("p2"));
-        assert_eq!(w.pane_of(1), None);
+        assert!(
+            w.release("p2", 7),
+            "the other pane's download is still waiting"
+        );
+        assert!(!w.release("p1", 1), "the closed pane's are gone");
         w.clear_pane("never-had-one");
     }
 

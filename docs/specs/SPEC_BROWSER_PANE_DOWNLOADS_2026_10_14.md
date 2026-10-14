@@ -1,6 +1,6 @@
 # SPEC: Downloads in a browser pane open the system "Save as" dialog
 
-**Status:** active — D1 (the download handler, the name sanitiser, the default folder, the per-pane limit) is built in the PR that adds `crates/cef/src/client/downloads.rs`. Not yet observed on a running build: the Save As dialog itself on Windows, macOS and Linux (D0 below). Not built: D2 (progress strip, Cancel, Show in folder), D3.
+**Status:** active — D1 (the download handler, the name sanitiser, the default folder, the per-pane limit) is built in PR #4916. Not yet observed on a running build: the Save As dialog itself on Windows, macOS and Linux (D0 below). Not built: D2 (progress strip, Cancel, Show in folder), D3.
 **Author:** Korp@narko, 2026-10-14, at the operator's request
 **Trigger (operator, 2026-10-14):** "i downloaded it, but where do agentmux browser pane downloads go?" … "lets pivot to implement downloads … write a spec to file, clicking a download opens a system save menu where users can choose the path to save."
 **Builds on:** `SPEC_AGENT_DRIVEN_BROWSER_PANES_2026_10_07.md` §13 Q4 (downloads, left open) and §5.3 (the OS file dialog never opens for an agent-owned pane), `SPEC_BROWSER_PANE_CAMERA_ACCESS_2026_09_01.md` (the precedent for a CEF callback answered later and a prompt shown by the window that owns the pane).
@@ -111,7 +111,7 @@ The dialog shows the result, and the user may change it. The host never writes t
 A page can start downloads without a click. The dialog is the consent, so the limit is on how many may wait for one:
 
 - **At most 3 downloads per pane waiting for a Save-As answer.** `can_download` returns 0 for a fourth, and the pane gets one line in its strip: "This page tried to start more downloads. Ignored." (D2; D1 just logs.)
-- A download counts as waiting from `on_before_download` until its first `running`/`cancelled` update; the pane closing clears the count.
+- A download counts as waiting from `on_before_download` until its first `running`/`cancelled` update; the pane closing clears the count. Download ids repeat across panes that use different request contexts (incognito jars, named profiles), so a waiting download is keyed by (pane, id) and the pane comes from the browser in each callback.
 - The counter is a plain struct (pending-per-pane map plus limit) so it is unit-tested without CEF.
 
 ### 7.3 Opening, executing, marking
