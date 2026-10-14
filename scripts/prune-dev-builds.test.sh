@@ -97,6 +97,30 @@ touch "$DIST/cef-dev-file"
 run >/dev/null
 { exists cef-dev && exists frontend && [ -f "$DIST/cef-dev-file" ]; } && ok || bad "only cef-dev-<name> folders are candidates ('cef-dev' without a dash is the Unix folder)"
 
+# 6b. A clone on a `subst` drive: the process path and the folder we hold can be
+# spelled differently (z:\... vs the physical path behind it), either way round.
+winlow() { # <posix path> -> lowercase Windows form, no trailing slash
+  local p="$1"
+  if command -v cygpath >/dev/null 2>&1; then p="$(cygpath -w "$p")"; else p="${p//\//\\}"; fi
+  printf '%s' "$p" | tr 'A-Z' 'a-z'
+}
+SUBST="$TMP/subst.txt"
+printf 'Z:\\: => %s\r\n' "$(winlow "$TMP")" >"$SUBST"
+
+setup cef-dev-1 cef-dev-2
+other_process
+printf '%s\n' 'z:\dist\cef-dev-1\runtime\agentmux-cef.exe' >>"$PROCS"
+PRUNE_SUBST="$SUBST" run >/dev/null
+{ exists cef-dev-1 && [ -f "$DIST/cef-dev-1/runtime/agentmux-cef.exe" ]; } && ok || bad "a build running from its subst-drive path stays whole"
+! exists cef-dev-2 && ok || bad "an idle build is still deleted when subst drives exist"
+
+out="$(PRUNE_SUBST="$SUBST" PRUNE_PRINT_PREFIXES="z:/dist/cef-dev-1" bash "$SUT" 2>&1)"
+case "$out" in *"$(winlow "$TMP")\\dist\\cef-dev-1\\"*) ok ;; *) bad "a subst-drive folder also matches its physical path ($out)" ;; esac
+out="$(PRUNE_SUBST="$SUBST" PRUNE_PRINT_PREFIXES="$DIST/cef-dev-1" bash "$SUT" 2>&1)"
+case "$out" in *'z:\dist\cef-dev-1\'*) ok ;; *) bad "a physical folder also matches its subst-drive path ($out)" ;; esac
+out="$(PRUNE_SUBST="$SUBST" PRUNE_PRINT_PREFIXES="$TMP-elsewhere/dist/cef-dev-1" bash "$SUT" 2>&1)"
+case "$out" in *'z:\'*) bad "an unrelated folder doesn't gain a subst spelling ($out)" ;; *) ok ;; esac
+
 # 7. A missing dist is not an error.
 rm -rf "$DIST"
 PRUNE_DIST_DIR="$DIST" PRUNE_PROCESS_LIST="$PROCS" bash "$SUT" >/dev/null 2>&1 && ok || bad "a missing dist exits 0"

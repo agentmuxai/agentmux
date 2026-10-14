@@ -48,16 +48,6 @@ while [ $# -gt 0 ]; do
 done
 case "$WAIT" in '' | *[!0-9]*) echo "prune-dev-builds: --wait takes whole seconds" >&2; exit 2 ;; esac
 
-HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DIST="${PRUNE_DIST_DIR:-$HERE/../dist}"
-[ -d "$DIST" ] || exit 0
-DIST="$(cd "$DIST" && pwd)"
-
-case "$(uname -s 2>/dev/null)" in
-  MINGW* | MSYS* | CYGWIN*) ;;
-  *) [ -n "${PRUNE_PROCESS_LIST:-}" ] || exit 0 ;;
-esac
-
 # Lowercased executable path of every running process, one per line. Empty means
 # the query failed (powershell itself is always in the list), so callers treat
 # it as "unknown" and delete nothing.
@@ -71,28 +61,70 @@ process_paths() {
     2>/dev/null | tr -d '\r'
 }
 
-# Windows form of a folder with a trailing backslash, lowercased, so a prefix
-# match can't confuse cef-dev-17 with cef-dev-170.
-win_prefix() {
-  local p="$1"
+# Active `subst` drives as "<drive>:<TAB><target>" lines, lowercased with
+# backslashes: `K:\: => C:\Users\me\clone` becomes `k:<TAB>c:\users\me\clone`.
+# Test seam: PRUNE_SUBST=<file> holds `subst`'s output instead.
+subst_pairs() {
+  if [ -n "${PRUNE_SUBST:-}" ]; then cat "$PRUNE_SUBST" 2>/dev/null; else subst 2>/dev/null; fi |
+    tr -d '\r' | tr 'A-Z' 'a-z' | awk -F' => ' 'NF == 2 { d = $1; sub(/\\?:?$/, "", d); print d "\t" $2 }'
+}
+
+# Every Windows spelling of a folder, lowercased with a trailing backslash (so a
+# prefix match can't confuse cef-dev-17 with cef-dev-170), one per line. The
+# running app's executable path can use a different one than the path we hold
+# when the clone sits on a `subst` drive (the MAX_PATH workaround in the run
+# skill): the folder as given, the physical path behind a subst drive, and the
+# subst drive for a physical path.
+win_prefixes() {
+  local p="$1" drive target
   if command -v cygpath >/dev/null 2>&1; then p="$(cygpath -w "$p")"; fi
   # Backslashes either way: without cygpath (the CI test runs on Linux) the
   # path is POSIX, and the process list is always in Windows form.
   p="${p//\//\\}"
-  printf '%s\\' "$(printf '%s' "$p" | tr 'A-Z' 'a-z')"
+  p="$(printf '%s' "$p" | tr 'A-Z' 'a-z')"
+  printf '%s\\\n' "$p"
+  while IFS=$'\t' read -r drive target; do
+    [ -n "$drive" ] && [ -n "$target" ] || continue
+    target="${target%\\}"
+    case "$p" in
+      "$drive"\\*) printf '%s\\\n' "$target${p#"$drive"}" ;;
+    esac
+    case "$p" in
+      "$target"\\*) printf '%s\\\n' "$drive${p#"$target"}" ;;
+    esac
+  done <<EOF
+$(subst_pairs)
+EOF
 }
 
 in_use() { # <folder>; reads $PROCS
   local prefix
-  prefix="$(win_prefix "$1")"
   # A bash string match, not grep: Git for Windows' grep aborts (SIGABRT) on a
   # fixed-string pattern ending in a backslash, and as a pipeline reader its
   # early exit would trip pipefail. Both sides are already lowercased.
-  case "$PROCS" in
-    *"$prefix"*) return 0 ;;
-    *) return 1 ;;
-  esac
+  while IFS= read -r prefix; do
+    [ -n "$prefix" ] || continue
+    case "$PROCS" in
+      *"$prefix"*) return 0 ;;
+    esac
+  done <<EOF
+$(win_prefixes "$1")
+EOF
+  return 1
 }
+
+# Test hook: print the spellings checked for a folder, then stop.
+if [ -n "${PRUNE_PRINT_PREFIXES:-}" ]; then win_prefixes "$PRUNE_PRINT_PREFIXES"; exit 0; fi
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DIST="${PRUNE_DIST_DIR:-$HERE/../dist}"
+[ -d "$DIST" ] || exit 0
+DIST="$(cd "$DIST" && pwd)"
+
+case "$(uname -s 2>/dev/null)" in
+  MINGW* | MSYS* | CYGWIN*) ;;
+  *) [ -n "${PRUNE_PROCESS_LIST:-}" ] || exit 0 ;;
+esac
 
 # The folders to consider. find, not ls: `ls -d` prints a trailing slash on
 # these shells and an exact-name exclusion then silently matches nothing.

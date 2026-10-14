@@ -16,7 +16,7 @@ The Taskfile said why it didn't prune: `rm -rf` on a folder a live app runs from
 [`scripts/prune-dev-builds.sh`](../../scripts/prune-dev-builds.sh) deletes `dist/cef-dev-*` folders, and only a folder that no process runs from:
 
 1. It lists every running process's executable path, lowercased. If that list is empty (the query failed), it deletes nothing.
-2. For each `dist/cef-dev-*` folder except the one named by `--keep`, it deletes the folder unless a path in the list starts with the folder's path plus a backslash (so `cef-dev-1` is not mistaken for `cef-dev-10`).
+2. For each `dist/cef-dev-*` folder except the one named by `--keep`, it deletes the folder unless a path in the list starts with the folder's path plus a backslash (so `cef-dev-1` is not mistaken for `cef-dev-10`). A clone built on a `subst` drive (the `MAX_PATH` workaround in the run skill) has two spellings: a program started through `Z:` reports `Z:\…`, while the script may hold the physical path behind it. The script checks the folder under both spellings, using `subst`'s own mapping list, in either direction.
 3. A folder that is still in use after `--wait <seconds>` stays; the next run's prune takes it.
 4. A folder it couldn't fully delete (a process started between the check and the delete) is reported and left.
 
@@ -35,4 +35,4 @@ It only ever touches folders named `cef-dev-<something>` directly under this clo
 
 ## 4. Tests
 
-[`scripts/prune-dev-builds.test.sh`](../../scripts/prune-dev-builds.test.sh) runs in CI against fake build folders and a fake process list: idle builds are deleted, the `--keep` build and a build with a running process are left whole, a similar folder name doesn't protect an idle build, an unreadable process list deletes nothing, `--dry-run` deletes nothing, and unrelated folders are never touched. It was also run by hand against a real running program on Windows (a copy of `ping.exe` started from one fake build folder): the idle folder was deleted, the one with the running program stayed whole, including through `--wait 3`, and was deleted once the program exited.
+[`scripts/prune-dev-builds.test.sh`](../../scripts/prune-dev-builds.test.sh) runs in CI against fake build folders and a fake process list: idle builds are deleted, the `--keep` build and a build with a running process are left whole, a similar folder name doesn't protect an idle build, an unreadable process list deletes nothing, `--dry-run` deletes nothing, and unrelated folders are never touched. It was also run by hand against a real running program on Windows (a copy of `ping.exe` started from one fake build folder): the idle folder was deleted, the one with the running program stayed whole, including through `--wait 3`, and was deleted once the program exited. The same was done through a real `subst Z:` drive: the program reports `Z:\dist\…` while the script holds the physical path, and the build stays whole when the script is given either spelling.
