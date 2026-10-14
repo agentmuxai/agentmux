@@ -13,6 +13,11 @@ describe("readAgentmuxEnv", () => {
         });
     });
 
+    it("reads the agent token when the shell is an agent's", () => {
+        expect(readAgentmuxEnv({ AGENTMUX_AGENT_TOKEN: "amxt_x" }).agentToken).toBe("amxt_x");
+        expect(readAgentmuxEnv({ AGENTMUX_AGENT_TOKEN: "" }).agentToken).toBeUndefined();
+    });
+
     it("returns undefined fields rather than throwing when absent", () => {
         expect(readAgentmuxEnv({})).toEqual({ url: undefined, authKey: undefined });
     });
@@ -60,6 +65,25 @@ describe("agentmuxFetch", () => {
             headers: { "X-AuthKey": "k", "Content-Type": "application/json" },
             body: JSON.stringify({ view: "editor", file: "/tmp/x" }),
         });
+    });
+
+    it("sends X-Agent-Token only when given one", async () => {
+        const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+        vi.stubGlobal("fetch", fetchMock);
+
+        await agentmuxFetch("http://127.0.0.1:1", "k", "/agentmux/reactive/inject", {
+            method: "POST",
+            body: { target_agent: "a", message: "m" },
+            agentToken: "amxt_x",
+        });
+        expect(fetchMock.mock.calls[0][1].headers).toEqual({
+            "X-AuthKey": "k",
+            "X-Agent-Token": "amxt_x",
+            "Content-Type": "application/json",
+        });
+
+        await agentmuxFetch("http://127.0.0.1:1", "k", "/api/v1/self", { agentToken: "" });
+        expect(fetchMock.mock.calls[1][1].headers).toEqual({ "X-AuthKey": "k" });
     });
 
     it("strips a trailing slash from the base URL before joining the path", async () => {

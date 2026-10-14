@@ -208,15 +208,9 @@ pub(crate) fn build_block_to_agent_map(discovery: &Value) -> std::collections::H
 /// Returned as a named struct rather than a tuple: the three signatures are
 /// consecutive `Option<String>`s and a transposition at any of the call
 /// sites would compile clean and silently mislabel trust on the receiver.
-/// The WAN signature (`wan_sig`) rides along on exactly the
-/// same terms as `lan_sig`, for the same reason: this process cannot know
-/// which tier a send will take — it posts every send to the local reactive
-/// endpoint and srv decides among local, cross-channel, LAN and cloud
-/// afterwards. Computing it unconditionally is therefore the only
-/// implementable shape, and an irrelevant signature costs nothing because srv
-/// only consults `wan_sig` once it has itself determined the delivery is WAN.
-/// It signs a domain-separated payload under this agent's own
-/// `AGENTMUX_WAN_KEY`, which is a different key from `AGENTMUX_LAN_KEY`.
+/// There is no WAN signature: srv makes it, at the origin, for the agent the
+/// request's `X-Agent-Token` names, with a key this process never holds
+/// (docs/specs/SPEC_WAN_JEKT_SIGNED_BY_SRV_2026_10_14.md).
 pub(crate) struct OutgoingJektSignatures {
     request_id: String,
     ts_secs: i64,
@@ -227,8 +221,6 @@ pub(crate) struct OutgoingJektSignatures {
     source_uid: Option<String>,
     channel_sig_v2: Option<String>,
     lan_sig_v2: Option<String>,
-    wan_sig: Option<String>,
-    wan_source_host: Option<String>,
 }
 
 impl OutgoingJektSignatures {
@@ -248,8 +240,6 @@ impl OutgoingJektSignatures {
             source_uid: self.source_uid,
             channel_sig_v2: self.channel_sig_v2,
             lan_sig_v2: self.lan_sig_v2,
-            wan_sig: self.wan_sig,
-            wan_source_host: self.wan_source_host,
         }
     }
 }
@@ -309,38 +299,7 @@ pub(crate) fn sign_outgoing_jekt(
         }
         _ => (None, None, None),
     };
-    // The WAN signature uses its own key, not
-    // AGENTMUX_LAN_KEY. An agent whose `.mcp.json` predates this feature has
-    // no AGENTMUX_WAN_KEY and simply sends unsigned, exactly as it does today
-    // for every other tier.
-    //
-    // The WAN signature binds this agent's INSTANCE — host and channel — not
-    // just its name (§2.1.2): one account can run the same agent name on
-    // several machines, and on several build channels of one machine, and
-    // each instance mints its own keypair because each has its own database.
-    // The instance is what selects which published key a receiver checks
-    // against, so it has to be inside the signature.
-    let source_host = std::env::var("AGENTMUX_HOST_LABEL").ok().filter(|s| !s.is_empty());
-    let wan_sig = (|| {
-        let key = crate::self_keys::wan_key()?;
-        let src = source_agent?;
-        // Same defaulting discipline as `channel` above: an unset var must
-        // resolve to the identical string srv publishes under, never to a
-        // second spelling of "unknown".
-        let host = source_host.as_deref().unwrap_or("unknown");
-        let channel = source_channel.as_deref().unwrap_or("stable");
-        agentmux_common::jekt_sign::sign_wan_jekt(
-            &key, &msgid, src, host, channel, target_agent, ts_secs, message,
-        )
-    })();
-    // Only declare an instance component when some signature is bound to it —
-    // a bare label with nothing to verify is noise on the wire. `wan_sig` now
-    // binds the channel too, so the channel ships when EITHER signature
-    // exists, not only the cross-channel one.
-    let wan_source_host = wan_sig
-        .as_ref()
-        .map(|_| source_host.unwrap_or_else(|| "unknown".to_string()));
-    let source_channel = (channel_sig.is_some() || channel_sig_v2.is_some() || wan_sig.is_some())
+    let source_channel = (channel_sig.is_some() || channel_sig_v2.is_some())
         .then(|| source_channel.unwrap_or_else(|| "stable".to_string()));
     OutgoingJektSignatures {
         request_id: msgid,
@@ -352,8 +311,6 @@ pub(crate) fn sign_outgoing_jekt(
         source_uid,
         channel_sig_v2,
         lan_sig_v2,
-        wan_sig,
-        wan_source_host,
     }
 }
 

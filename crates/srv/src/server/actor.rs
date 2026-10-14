@@ -134,6 +134,31 @@ pub(crate) fn uid_has_slug(store: &Store, uid: &str, name: &str) -> bool {
     matches!(store.agent_names_by_id(uid), Ok(Some(row)) if !row.slug.is_empty() && row.slug == name)
 }
 
+/// A caller its token names that sent no source (`muxsh agent send` in an
+/// agent's shell) is that agent: the source becomes its slug, so tier 4 can
+/// relay it and srv can sign it (SPEC_WAN_JEKT_SIGNED_BY_SRV_2026_10_14.md
+/// §3.1 rule 2). A source the caller did send is kept, and is signed only if
+/// it is the token's own (`wan_signer`).
+pub(crate) fn source_from_token(store: &Store, caller_uid: &str, req: &mut crate::backend::reactive::InjectionRequest) {
+    if caller_uid.is_empty() || req.source_agent.as_deref().is_some_and(|s| !s.trim().is_empty()) {
+        return;
+    }
+    if let Ok(Some(row)) = store.agent_names_by_id(caller_uid) {
+        if !row.slug.is_empty() {
+            req.source_agent = Some(row.slug);
+        }
+    }
+}
+
+/// The agent srv may sign a WAN jekt as: its `source_agent`, when the
+/// request's own token names that agent by its slug (§3.1 rules 1 and 2).
+/// `None` on a forwarded hop, which carries no token (`audit_source_uid` is
+/// set from the Caller and never rides a hop).
+pub(crate) fn wan_signer<'a>(store: &Store, req: &'a crate::backend::reactive::InjectionRequest) -> Option<&'a str> {
+    let source = req.source_agent.as_deref()?;
+    (!req.audit_source_uid.is_empty() && uid_has_slug(store, &req.audit_source_uid, source)).then_some(source)
+}
+
 /// Identity M4d-4: whether a host-tier jekt is from the agent it claims by
 /// its token (`audit_source_uid` is the request's Caller). Far-side receivers
 /// have no Caller and keep checking the signature, which is still sent.
@@ -213,6 +238,63 @@ pub(crate) fn check_carried_uid(caller: Option<&Caller>, carried_uid: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// SPEC_WAN_JEKT_SIGNED_BY_SRV_2026_10_14.md §3.1: who srv signs as.
+    mod wan_signing {
+        use super::super::*;
+        use crate::backend::reactive::InjectionRequest;
+
+        fn store_with_camper() -> Store {
+            let store = Store::open_in_memory().unwrap();
+            let mut def = crate::backend::storage::agents::test_agent_def("uid-camper", "Camper", "claude", "agent", 1, "");
+            def.slug = "camper".into();
+            store.agent_def_insert(&mut def).unwrap();
+            store
+        }
+
+        fn req(source: Option<&str>, caller_uid: &str) -> InjectionRequest {
+            InjectionRequest {
+                target_agent: "agent2".into(),
+                message: "hi".into(),
+                source_agent: source.map(str::to_string),
+                audit_source_uid: caller_uid.into(),
+                ..Default::default()
+            }
+        }
+
+        #[test]
+        fn a_token_with_no_source_sends_as_its_own_slug() {
+            let store = store_with_camper();
+            let mut r = req(None, "uid-camper");
+            source_from_token(&store, "uid-camper", &mut r);
+            assert_eq!(r.source_agent.as_deref(), Some("camper"));
+            let mut blank = req(Some("  "), "uid-camper");
+            source_from_token(&store, "uid-camper", &mut blank);
+            assert_eq!(blank.source_agent.as_deref(), Some("camper"));
+            // A source the caller sent is kept, even another agent's.
+            let mut other = req(Some("agent5"), "uid-camper");
+            source_from_token(&store, "uid-camper", &mut other);
+            assert_eq!(other.source_agent.as_deref(), Some("agent5"));
+            // No token, nothing filled: a terminal's muxsh stays sourceless.
+            let mut anon = req(None, "");
+            source_from_token(&store, "", &mut anon);
+            assert_eq!(anon.source_agent, None);
+            let mut unknown = req(None, "uid-nobody");
+            source_from_token(&store, "uid-nobody", &mut unknown);
+            assert_eq!(unknown.source_agent, None);
+        }
+
+        #[test]
+        fn srv_signs_only_as_the_agent_the_token_names() {
+            let store = store_with_camper();
+            assert_eq!(wan_signer(&store, &req(Some("camper"), "uid-camper")), Some("camper"));
+            assert_eq!(wan_signer(&store, &req(Some("agent5"), "uid-camper")), None, "another agent's name");
+            assert_eq!(wan_signer(&store, &req(Some("Camper"), "uid-camper")), None, "the slug, exactly");
+            assert_eq!(wan_signer(&store, &req(Some("camper"), "")), None, "no token: a forwarded hop, a script");
+            assert_eq!(wan_signer(&store, &req(Some("camper"), "uid-nobody")), None);
+            assert_eq!(wan_signer(&store, &req(None, "uid-camper")), None);
+        }
+    }
 
     fn row(id: &str, name: &str, slug: &str, instance_name: &str) -> AgentNameMatch {
         AgentNameMatch {

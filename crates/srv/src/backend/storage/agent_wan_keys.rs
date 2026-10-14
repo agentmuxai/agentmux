@@ -6,12 +6,13 @@
 //! v36).
 //!
 //! Mirrors `agent_lan_keys.rs`: one row per locally-registered agent_id,
-//! minted once (first call to `agent_wan_key_ensure`), with the PRIVATE half
-//! leaving this srv instance only by being injected into that ONE agent's own
-//! MCP server process env (`AGENTMUX_WAN_KEY`) — never into any other agent's
-//! env, never returned over any RPC. The public half is not secret: it is what
-//! gets published to muxbus's agent-ownership registry so a WAN counterpart
-//! can verify this agent's outgoing signatures.
+//! minted once (first call to `agent_wan_key_ensure`). Since W3-S the key in
+//! use is the channel-wide `wan.db`'s, imported from here once
+//! (`Store::channel_wan_key`). The PRIVATE half never leaves srv: srv signs
+//! WAN jekts itself (SPEC_WAN_JEKT_SIGNED_BY_SRV_2026_10_14.md); before that
+//! it was injected into the agent's MCP env as `AGENTMUX_WAN_KEY`. The public
+//! half is what gets published to the account's key directory so a WAN
+//! counterpart can verify this agent's outgoing signatures.
 //!
 //! **Why this is a separate table from `db_agent_lan_keys` rather than a reuse
 //! of the same keypair.** The two tiers need different key *lifecycles*, and
@@ -60,15 +61,13 @@ pub struct AgentWanKeypair {
 }
 
 impl Store {
-    /// The agent's WAN signing key: the channel-wide `wan.db`'s, the key srv
-    /// publishes and checks a signature against before it carries one over
-    /// the relay (`muxbus::relay::wan_carry_gate`). This version's key above
-    /// is carried over only the first time. Every place that hands an agent
-    /// its WAN key (the `.mcp.json` env in `agent_config` and
-    /// `GET /agentmux/agents/self/keys`) must use this one: from 2026-10-09
-    /// the fetch served this table's key instead, so an agent whose two keys
-    /// differed signed with one and was checked against the other, and its
-    /// WAN jekts all went out unsigned ("signature does not verify locally").
+    /// The agent's WAN signing key: the channel-wide `wan.db`'s, the one
+    /// srv publishes and signs with at the origin
+    /// (`muxbus::relay::wan_sign_at_origin`). This version's key above is
+    /// carried over only the first time. No agent holds a copy
+    /// (SPEC_WAN_JEKT_SIGNED_BY_SRV_2026_10_14.md): from 2026-10-09 to #4896
+    /// the agent signed with this table's key while srv checked `wan.db`'s,
+    /// and every WAN jekt went out unsigned.
     pub fn channel_wan_key(
         &self,
         wan: &super::wan_identity::WanIdentityStore,

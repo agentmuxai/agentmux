@@ -37,7 +37,6 @@ struct Wire {
     #[serde(default)]
     jekt_key_expires_at: Option<i64>,
     lan_key: Option<String>,
-    wan_key: Option<String>,
     #[serde(default)]
     uid: String,
     uid_lan_key: Option<String>,
@@ -108,11 +107,6 @@ pub(crate) fn jekt_key() -> Option<Vec<u8>> {
 /// The LAN (and cross-channel) private key: fetched when ours, else the env's.
 pub(crate) fn lan_key() -> Option<Vec<u8>> {
     name_key(|k| k.lan_key.as_ref()).or_else(|| env_key("AGENTMUX_LAN_KEY"))
-}
-
-/// The WAN private key: fetched when ours, else the env's.
-pub(crate) fn wan_key() -> Option<Vec<u8>> {
-    name_key(|k| k.wan_key.as_ref()).or_else(|| env_key("AGENTMUX_WAN_KEY"))
 }
 
 /// This agent's UID and its UID-keyed LAN private key, for the v2 signature

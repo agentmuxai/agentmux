@@ -454,7 +454,7 @@ export async function main() {
         return;
     }
 
-    const { url, authKey } = readAgentmuxEnv();
+    const { url, authKey, agentToken } = readAgentmuxEnv();
     if (!url || !authKey) {
         fail(
             "AGENTMUX_LOCAL_URL / AGENTMUX_AUTH_KEY not set — run from a pane " +
@@ -528,9 +528,14 @@ export async function main() {
             return;
         }
         case "agent-send": {
+            // From an agent's shell, its token names it as the sender, so
+            // the message is signed for it on every tier srv signs
+            // (docs/specs/SPEC_WAN_JEKT_SIGNED_BY_SRV_2026_10_14.md §3.4).
+            // From a person's terminal there is none, and it goes unsigned.
             const body = await apiCall(url, authKey, "/agentmux/reactive/inject", {
                 method: "POST",
                 body: buildAgentSendBody(parsed),
+                agentToken,
             }, "/agentmux/reactive/inject");
             // /agentmux/reactive/inject returns HTTP 200 even when delivery
             // fails (success: false, e.g. "agent not found") — apiCall's

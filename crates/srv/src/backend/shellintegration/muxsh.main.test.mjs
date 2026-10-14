@@ -25,6 +25,7 @@ class FakeProcessExit extends Error {
 const ENV_KEYS = [
     "AGENTMUX_LOCAL_URL",
     "AGENTMUX_AUTH_KEY",
+    "AGENTMUX_AGENT_TOKEN",
     "AGENTMUX_BLOCKID",
     "AGENTMUX_TABID",
     "AGENTMUX_CONFIG_DIR",
@@ -327,6 +328,20 @@ describe("muxsh main() — dispatch reaches the right route", () => {
             expect.stringContaining("/agentmux/reactive/inject"),
             expect.objectContaining({ method: "POST" }),
         );
+    });
+
+    it("'agent send' from an agent's shell names the agent by its token, and a terminal's doesn't", async () => {
+        setArgv("agent", "send", "Scouto", "hi");
+        setBaseEnv();
+        process.env.AGENTMUX_AGENT_TOKEN = "amxt_agent";
+        let fetchMock = okFetch({ success: true });
+        await main();
+        expect(fetchMock.mock.calls[0][1].headers["X-Agent-Token"]).toBe("amxt_agent");
+
+        delete process.env.AGENTMUX_AGENT_TOKEN;
+        fetchMock = okFetch({ success: true });
+        await main();
+        expect(fetchMock.mock.calls[0][1].headers["X-Agent-Token"]).toBeUndefined();
     });
 
     it("'run-create' without AGENTMUX_BLOCKID exits 1 without calling fetch", async () => {
