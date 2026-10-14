@@ -151,6 +151,10 @@ struct DeliveryState {
     /// composed. Unlike `deliveries` it isn't pruned, so a fallback deferred
     /// behind a long turn still finds it. One entry per block and reason.
     completed: HashMap<(String, Reason), i64>,
+    /// One gate per delivery being composed. The 8 parts of a session start
+    /// ask at once; the first composes while the rest wait here and then read
+    /// its result, instead of each reading the memory and composing it again.
+    compose_gates: HashMap<DeliveryKey, std::sync::Arc<tokio::sync::Mutex<()>>>,
 }
 
 /// What the fallback's claim found.
@@ -229,6 +233,13 @@ impl DeliveryState {
     /// stdout here wrote (another srv instance's) is not this block's either.
     /// A hook delivery from before the block's previous boundary was that
     /// compaction's, not this one's.
+    ///
+    /// Dated by when this srv read the boundary, like [`Self::claim_event`]:
+    /// a hook delivery finished after it is this compaction's however late the
+    /// claim comes, so a pane that reads the boundary minutes later (a
+    /// reconnect, a remount reading the gap) doesn't deliver the memory twice
+    /// (SPEC_CONTEXT_DELIVERY_2026_09_30.md §9 B2). The hook's first part can
+    /// reach srv before the stdout reader sees the boundary, hence the slack.
     fn claim_boundary(&mut self, block_id: &str, reason: Reason, boundary_uuid: Option<&str>, now: i64) -> FallbackClaim {
         let mut since = i64::MIN;
         if let Some(uuid) = boundary_uuid {
@@ -237,6 +248,12 @@ impl DeliveryState {
             };
             if let Some((_, _, at)) = self.boundary_origins.range(..idx).rev().find(|(_, b, _)| b == block_id) {
                 since = *at;
+            }
+            let read_at = self.boundary_origins[idx].2;
+            let this_compaction = since.max(read_at.saturating_sub(EVENT_SLACK_MS));
+            let hook_finished = self.completed.get(&(block_id.to_string(), reason)).is_some_and(|at| *at > this_compaction);
+            if hook_finished && !self.fallback_claimed(block_id, reason) {
+                return FallbackClaim::Skip;
             }
         }
         self.claim_fallback(block_id, reason, now, since)
@@ -338,6 +355,23 @@ pub(crate) async fn handle_session_start_part(
     let delivery = match cached {
         Some(d) => d,
         None => {
+            let gate = state_lock().compose_gates.entry(key.clone()).or_default().clone();
+            let _composing = gate.lock().await;
+            // Dropped on every way out, a cancelled request included, so the
+            // gate never outlives the part that took it.
+            let _gate_entry = GateEntry(key.clone());
+            // A part that held the gate before this one may have composed it, or
+            // the fallback may have claimed the event while this one waited.
+            let (composed_meanwhile, claimed) = {
+                let st = state_lock();
+                (st.deliveries.get(&key).cloned(), st.fallback_claimed(&req.block_id, reason))
+            };
+            if claimed {
+                return Json(PartResponse { text: None, part: req.part, of: 0 });
+            }
+            if let Some(d) = composed_meanwhile {
+                return finish_part(&state, &key, d, req.part);
+            }
             let uid = caller.as_ref().and_then(|c| c.uid()).map(str::to_string);
             let launch = LaunchDirs::from_request(&req);
             let composed = {
@@ -365,10 +399,25 @@ pub(crate) async fn handle_session_start_part(
             st.deliveries.entry(key.clone()).or_insert(composed).clone()
         }
     };
-    if delivery.parts.is_empty() {
-        send_partless_notice(&state, &key);
+    finish_part(&state, &key, delivery, req.part)
+}
+
+/// Removes a delivery's compose gate when the part that took it is done.
+struct GateEntry(DeliveryKey);
+
+impl Drop for GateEntry {
+    fn drop(&mut self) {
+        state_lock().compose_gates.remove(&self.0);
     }
-    Json(part_response(&delivery, req.part))
+}
+
+/// The reply for one part of a composed delivery. A delivery with nothing for
+/// the hook to carry still gets its card, on the first part asked for.
+fn finish_part(state: &AppState, key: &DeliveryKey, delivery: Delivery, part: usize) -> Json<PartResponse> {
+    if delivery.parts.is_empty() {
+        send_partless_notice(state, key);
+    }
+    Json(part_response(&delivery, part))
 }
 
 /// A delivery with nothing for the hook to carry (its Global Memory is in the
@@ -1080,6 +1129,26 @@ mod tests {
     }
 
     #[test]
+    fn the_parts_of_one_delivery_share_a_compose_gate_and_a_finished_one_leaves_none() {
+        let mut st = DeliveryState::default();
+        let key = startup_key("b");
+        let first = st.compose_gates.entry(key.clone()).or_default().clone();
+        let second = st.compose_gates.entry(key.clone()).or_default().clone();
+        assert!(std::sync::Arc::ptr_eq(&first, &second), "parts wait on the one composing");
+        st.compose_gates.remove(&key);
+        let next = st.compose_gates.entry(key).or_default().clone();
+        assert!(!std::sync::Arc::ptr_eq(&first, &next), "a new delivery gets its own gate");
+    }
+
+    #[test]
+    fn a_gate_entry_takes_its_gate_with_it_when_dropped() {
+        let key = startup_key("gate-entry-test");
+        state_lock().compose_gates.entry(key.clone()).or_default();
+        drop(GateEntry(key.clone()));
+        assert!(!state_lock().compose_gates.contains_key(&key), "a cancelled part leaves no gate behind");
+    }
+
+    #[test]
     fn a_dated_claim_is_per_block_and_reason() {
         let mut st = DeliveryState::default();
         st.note_completed(&startup_key("b"), NOW);
@@ -1153,6 +1222,51 @@ mod tests {
         st.record_boundary("u2", "b", NOW - 100);
         assert_eq!(st.claim_boundary("b", Reason::Compact, Some("u1"), NOW), FallbackClaim::Skip);
         assert_eq!(st.claim_boundary("b", Reason::Compact, Some("u2"), NOW), FallbackClaim::Deliver);
+    }
+
+    fn compact_key(block: &str) -> DeliveryKey {
+        DeliveryKey { block_id: block.into(), session_id: "s".into(), reason: Reason::Compact }
+    }
+
+    #[test]
+    fn a_boundary_claimed_long_after_the_hook_delivered_it_stands_down() {
+        // The pane read the boundary late (a reconnect, a remounted pane
+        // reading the gap): the hook's delivery is past the claim window and
+        // pruned, but it finished after this boundary (SPEC_CONTEXT_DELIVERY
+        // §9 B2).
+        let mut st = DeliveryState::default();
+        st.record_boundary("u1", "b", NOW);
+        st.note_completed(&compact_key("b"), NOW + 300);
+        let late = NOW + 10 * 60_000;
+        st.prune(late);
+        assert_eq!(st.claim_boundary("b", Reason::Compact, Some("u1"), late), FallbackClaim::Skip);
+    }
+
+    #[test]
+    fn a_late_boundary_claim_counts_a_delivery_composed_just_before_srv_read_the_boundary() {
+        // The hook's first part can reach srv before the stdout reader sees
+        // the boundary line.
+        let mut st = DeliveryState::default();
+        st.record_boundary("u1", "b", NOW);
+        st.note_completed(&compact_key("b"), NOW - 2_000);
+        assert_eq!(st.claim_boundary("b", Reason::Compact, Some("u1"), NOW + 10 * 60_000), FallbackClaim::Skip);
+    }
+
+    #[test]
+    fn an_earlier_compactions_finished_delivery_does_not_cover_a_late_claim() {
+        let mut st = DeliveryState::default();
+        st.record_boundary("u1", "b", NOW);
+        st.note_completed(&compact_key("b"), NOW + 300);
+        st.record_boundary("u2", "b", NOW + 3_600_000);
+        assert_eq!(st.claim_boundary("b", Reason::Compact, Some("u2"), NOW + 3_700_000), FallbackClaim::Deliver);
+    }
+
+    #[test]
+    fn a_finished_delivery_is_per_block() {
+        let mut st = DeliveryState::default();
+        st.record_boundary("u1", "b", NOW);
+        st.note_completed(&compact_key("other"), NOW + 300);
+        assert_eq!(st.claim_boundary("b", Reason::Compact, Some("u1"), NOW + 10 * 60_000), FallbackClaim::Deliver);
     }
 
     #[test]

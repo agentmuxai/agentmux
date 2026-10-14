@@ -6,8 +6,6 @@
 // could wrongly succeed.
 
 import { readFileSync } from "node:fs";
-import { dirname, join, relative } from "node:path";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { createGitHubClient } from "./lib/github-rest.mjs";
 import {
@@ -19,9 +17,8 @@ import {
     latestCodexOutput,
     needsDiffSince,
     reviewedCommit,
-    SKIP_AUTHOR,
     SKIP_AUTHORS,
-    skippedHead,
+    skipNote,
     sweep,
     sweepReason,
     TRIGGER_AUTHOR,
@@ -417,6 +414,7 @@ describe("findings only on docs", () => {
 
 // While Codex's quota is exhausted muxreview doesn't ask; it keeps one comment
 // per PR naming the head it skipped (spec §2).
+const SKIP_AUTHOR = "muxreview[bot]";
 const skipComment = (sha, { login = SKIP_AUTHOR, created = "2026-09-30T10:00:00Z", updated } = {}) => ({
     user: { login },
     created_at: created,
@@ -503,9 +501,9 @@ describe("muxreview quota skip marker", () => {
 
     it("reads a short or upper-case sha and rejects a malformed one", () => {
         const c = skipComment(HEAD);
-        expect(skippedHead({ ...c, body: c.body.replace(HEAD, HEAD.slice(0, 7).toUpperCase()) })).toBe(HEAD.slice(0, 7));
-        expect(skippedHead({ ...c, body: c.body.replace(HEAD, "abc12") })).toBeNull();
-        expect(skippedHead({ ...c, body: c.body.replace("reason=quota", "reason=other") })).toBeNull();
+        expect(skipNote({ ...c, body: c.body.replace(HEAD, HEAD.slice(0, 7).toUpperCase()) })?.sha).toBe(HEAD.slice(0, 7));
+        expect(skipNote({ ...c, body: c.body.replace(HEAD, "abc12") })).toBeNull();
+        expect(skipNote({ ...c, body: c.body.replace("reason=quota", "reason=other") })).toBeNull();
     });
 });
 
@@ -535,7 +533,7 @@ describe("muxreview skip reasons", () => {
     });
 
     it("an unknown reason doesn't count", () => {
-        expect(skippedHead(note("other"))).toBeNull();
+        expect(skipNote(note("other"))).toBeNull();
     });
 
     it("a skip note never outranks Codex's own findings on the head", () => {
@@ -638,49 +636,13 @@ describe("changedFiles", () => {
     });
 });
 
+// That each job's sparse checkout covers the gate's imports is checked for
+// every workflow by scripts/workflow-sparse-checkout.test.mjs.
 describe("the workflow that runs the gate", () => {
-    const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
-    const workflow = readFileSync(join(repoRoot, ".github/workflows/codex-review-gate.yml"), "utf8");
+    // WORKFLOW_FILE is the file the sweep dispatches; reading it proves it exists.
+    const workflow = readFileSync(new URL(`../.github/workflows/${WORKFLOW_FILE}`, import.meta.url), "utf8");
 
-    /** Repo-relative paths of the gate and every module it imports, transitively. */
-    function gateModules(entry = "scripts/ci-codex-review-gate.mjs", seen = new Set()) {
-        if (seen.has(entry)) return seen;
-        seen.add(entry);
-        const source = readFileSync(join(repoRoot, entry), "utf8");
-        for (const [, spec] of source.matchAll(/^\s*(?:import|export)\b[^;]*?\bfrom\s+["'](\.{1,2}\/[^"']+)["']/gm)) {
-            gateModules(relative(repoRoot, join(repoRoot, dirname(entry), spec)).replace(/\\/g, "/"), seen);
-        }
-        return seen;
-    }
-
-    /** The paths under each `sparse-checkout:` key, one list per checkout. */
-    function sparseCheckouts() {
-        const lines = workflow.split("\n");
-        const lists = [];
-        lines.forEach((line, i) => {
-            const m = /^(\s*)sparse-checkout:\s*(.*)$/.exec(line);
-            if (!m) return;
-            if (m[2].trim() !== "|") return lists.push([m[2].trim()]);
-            const paths = [];
-            for (const next of lines.slice(i + 1)) {
-                if (next.trim() === "" || next.search(/\S/) <= m[1].length) break;
-                paths.push(next.trim());
-            }
-            lists.push(paths);
-        });
-        return lists;
-    }
-
-    it("checks out every module the gate imports, in every job that runs it", () => {
-        const modules = [...gateModules()];
-        expect(modules).toContain("scripts/lib/github-rest.mjs");
-        const lists = sparseCheckouts();
-        expect(lists).toHaveLength(workflow.match(/run: node scripts\/ci-codex-review-gate\.mjs/g).length);
-        for (const paths of lists) expect(paths).toEqual(expect.arrayContaining(modules));
-    });
-
-    it("is the workflow the sweep dispatches, with the pr input it sends", () => {
-        expect(readFileSync(join(repoRoot, ".github/workflows", WORKFLOW_FILE), "utf8")).toBe(workflow);
+    it("takes the pr input the sweep sends, and runs the sweep on its schedule", () => {
         expect(workflow).toMatch(/workflow_dispatch:\s*\n\s*inputs:\s*\n\s*pr:/);
         expect(workflow).toMatch(/sweep:\s*\n\s*if: github\.event_name == 'schedule'/);
     });

@@ -33,7 +33,7 @@
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
+import { isMain } from "./lib/is-main.mjs";
 
 const TERMINAL_STATUSES = new Set(["historical", "superseded"]);
 const CANONICAL_STATUSES = new Set(["draft", "proposed", "active", "implemented", "living", "historical", "superseded"]);
@@ -429,7 +429,7 @@ function parseArgs(argv) {
     return opts;
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
+if (isMain(import.meta.url)) {
     const opts = parseArgs(process.argv.slice(2));
     const report = sweep({ root: opts.root, weeks: opts.weeks });
     process.stdout.write(opts.json ? JSON.stringify(report, null, 2) + "\n" : renderMarkdown(report, opts.limit));

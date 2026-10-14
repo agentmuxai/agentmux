@@ -39,7 +39,7 @@ import { getFileSubject } from "@/app/store/mps";
 import { getObjectValue, makeORef } from "@/app/store/mos";
 import { blockRoleColor, isLightThemeActive } from "@/app/block/pane-identity";
 import { noteToolCall, noteToolResult } from "@/app/store/touched-files";
-import { onCleanup, onMount, type Accessor } from "solid-js";
+import { createEffect, onCleanup, onMount, type Accessor } from "solid-js";
 import { createTranslator } from "./providers/translator-factory";
 import { modelTurnCommand } from "./model-turn-signal";
 import {
@@ -66,6 +66,9 @@ import { getNodeIdSet } from "@/app/store/agent-document-store";
 import type { AgentPaneModel } from "@/app/store/agent-pane-model";
 import { createStreamFlushQueue, type StreamFlushQueue } from "./stream-flush-queue";
 import { createHidingStreamFlushQueue } from "./hiding-stream-flush-queue";
+import { getBlockMetaKeyAtom } from "@/app/store/global";
+import { restoreTitleOnContinue } from "./hooks/useBlockActivity";
+import { CATCH_UP_META_KEY, clearCatchUpRequest, parseCatchUpRequest } from "./catch-up-request";
 import { createMemoryReinjectionController } from "./memory-reinjection-controller";
 import { FALLBACK_CONTEXT_WINDOW } from "./memory-reinjection";
 import { buildMemoryInjectedNode, supersededCard } from "./memory-injected";
@@ -431,6 +434,17 @@ export function useAgentStream({
 
     const queue = createHidingStreamFlushQueue(rawQueue, memoryReinjectionController.isHiding);
 
+    // The user resumed this conversation (catch-up-request.ts): the agent says
+    // where it is picking up. The request is cleared whether or not it is acted
+    // on, so it cannot fire again.
+    createEffect(() => {
+        const stored = blockId ? getBlockMetaKeyAtom(blockId, CATCH_UP_META_KEY as never)() : undefined;
+        if (!enabled || !blockId || stored === undefined || stored === null) return;
+        const reason = parseCatchUpRequest(stored, Date.now());
+        void clearCatchUpRequest(blockId).catch(() => {});
+        if (reason) void memoryReinjectionController.catchUp(null, reason);
+    });
+
     // Tool-chunk and persistent-shell streaming subscriptions, installed at
     // body scope (not inside onMount) so they tear down even if onMount
     // below early-returns (e.g. enabled:false). Both push into `queue`
@@ -699,6 +713,8 @@ export function useAgentStream({
                 // resume is still in flight). SPEC_HIDDEN_MEMORY_REINJECTION_
                 // AFTER_COMPACTION_2026_09_22.md §3.3a.
                 if (sessionOutcome.outcome === "fresh") {
+                    // A session that carries the record is still about the same goal.
+                    if (sessionOutcome.continued) restoreTitleOnContinue(blockId);
                     // The meter's reading measured the conversation that is now gone.
                     model.dispatchPane({ type: "ContextInvalidated", reason: "fresh_session" });
                     awaitingCompactionSize = null;

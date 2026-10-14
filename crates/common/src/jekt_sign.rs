@@ -430,10 +430,10 @@ const WAN_DOMAIN: &str = "amx-jekt-wan-v1";
 /// would let a sender pick which account's key it is checked against. The
 /// account is resolved server-side from the authenticated caller instead
 /// (§3.4.1) and selects the key; the signature then proves the agent and its
-/// instance. Host and channel are different: both are injected into the
-/// agent's env at spawn, so the sending process knows them reliably, and a
-/// wrong value selects a key the signature cannot verify under — it grants
-/// nothing.
+/// instance. Host and channel are different: the signer is the sending
+/// srv itself, which knows both (its `wan.db` instance id and its channel),
+/// and a wrong value selects a key the signature cannot verify under — it
+/// grants nothing.
 fn wan_signed_material(
     msgid: &str,
     source_agent: &str,
@@ -466,9 +466,9 @@ pub fn generate_wan_keypair(seed: [u8; 32]) -> ([u8; 32], [u8; 32]) {
     (signing_key.verifying_key().to_bytes(), seed)
 }
 
-/// Sign a jekt with the sending agent's own WAN private key (read from its
-/// `AGENTMUX_WAN_KEY` process env var, client-side inside `agentmux-mcp`,
-/// never server-side — same placement as [`sign_lan_jekt`]).
+/// Sign a jekt with the sending agent's WAN private key, by the sending srv
+/// for the agent its token names (`muxbus::relay::wan_sign_at_origin`,
+/// SPEC_WAN_JEKT_SIGNED_BY_SRV_2026_10_14.md); no agent holds the key.
 ///
 /// `private_key` must be exactly 32 bytes (the seed [`generate_wan_keypair`]
 /// produced); any other length returns `None` rather than panicking, matching

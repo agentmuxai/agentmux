@@ -46,7 +46,7 @@ pub(crate) fn set_hidden_reinjection_active(block_id: &str, hidden: bool) {
     }
 }
 
-fn is_hidden_reinjection_active(block_id: &str) -> bool {
+pub(crate) fn is_hidden_reinjection_active(block_id: &str) -> bool {
     HIDDEN_REINJECTION_BLOCKS.read().unwrap().contains(block_id)
 }
 

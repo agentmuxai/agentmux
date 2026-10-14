@@ -1049,9 +1049,9 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
         -- v36: per-agent Ed25519 keypair for general agent-to-agent WAN-tier
         -- jekt signing.
         -- Same local-to-this-instance guarantee as db_agent_jekt_keys and
-        -- db_agent_lan_keys: the private half leaves only by being injected
-        -- into that ONE agent's own MCP process env (AGENTMUX_WAN_KEY) at
-        -- spawn, never over any RPC. The public half is not secret — it is
+        -- db_agent_lan_keys. Imported once into wan.db (W3-S); srv signs with
+        -- that copy and no agent holds one (SPEC_WAN_JEKT_SIGNED_BY_SRV_2026_10_14
+        -- §3.3), never over any RPC. The public half is not secret — it is
         -- what gets published to muxbus's agent-ownership registry so a
         -- WAN counterpart can verify this agent's signatures.
         --

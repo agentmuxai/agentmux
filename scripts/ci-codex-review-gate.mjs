@@ -26,17 +26,17 @@
 //     (#3562 sat pending). See quotaAttribution for overlapping requests.
 //     A later real verdict on the head still wins.
 //
-// What muxreview posts (agentmuxai/muxreview spec codex-efficiency-2026-09-30):
+// What muxreview posts:
 //   - quota skip: while Codex's quota is exhausted muxreview stops asking and
 //     instead keeps one ISSUE COMMENT per PR, edited in place for each head
 //     it skips, carrying `<!-- reagent:codex-skipped reason=quota
-//     head=<sha> -->`. From reagentx-workflow[bot] only (anyone can type the
-//     marker), it counts as a quota answer for that head, but only when
+//     head=<sha> -->`. From muxreview's App only (SKIP_AUTHORS; anyone can
+//     type the marker), it counts as a quota answer for that head, but only when
 //     Codex itself has said nothing about the head: muxreview may write it
 //     before reading Codex's answers. It is never carried to a later head.
 //
 // Codex only reviews when asked by a5af, not a bot. muxreview decides when
-// to ask (agentmuxai/muxreview lambdas/codex_policy.py): after it approves a head,
+// to ask: after it approves a head,
 // then again after it approves a push that changes code (any non-doc file,
 // flagged by Codex or not), or when a write-access commenter says
 // "@muxreview codex re-review". After an OK or findings it does NOT re-ask
@@ -56,19 +56,26 @@
 // imports (a test checks it).
 
 import { createGitHubClient, GitHubError } from "./lib/github-rest.mjs";
+import { isMain } from "./lib/is-main.mjs";
 
 export const CODEX_LOGIN = "chatgpt-codex-connector[bot]";
 export const STATUS_CONTEXT = "Codex review";
 
-// Only muxreview's trigger names the head it asked about; reagent's
-// codex_policy.py reads the same marker from the same author.
+// Only muxreview's trigger names the head it asked about; muxreview reads the
+// same marker from the same author.
 export const TRIGGER_AUTHOR = "a5af";
 
 // muxreview's GitHub App, the only author whose quota-skip marker counts.
 // The App was renamed reagentx-workflow -> muxreview on 2026-10-07; markers
-// posted before the rename keep the old login.
+// posted before the rename keep the old login. The `reagent:` prefix of the
+// markers is muxreview's wire format and stays.
 export const SKIP_AUTHORS = new Set(["muxreview[bot]", "reagentx-workflow[bot]"]);
-export const SKIP_AUTHOR = "muxreview[bot]";
+
+const isCodex = (x) => x?.user?.login === CODEX_LOGIN;
+// GitHub's ISO-8601 timestamps sort as strings.
+const byAt = (a, b) => String(a.at).localeCompare(String(b.at));
+/** Whether `sha` (full or abbreviated) is the commit Codex's `prefix` names. */
+const namesCommit = (sha, prefix) => String(sha).toLowerCase().startsWith(prefix);
 
 // Dependency bots. muxreview doesn't review their PRs, so it never asks Codex,
 // and the gate would wait forever. A pure version bump is a manifest and
@@ -104,12 +111,12 @@ const TRIGGER_HEAD = /reagent:codex-trigger\s+head=([0-9a-f]{7,40})/i;
 // its per-PR cap of automatic rounds) or docs-only (a PR of only docs).
 const SKIPPED_HEAD = /<!--\s*reagent:codex-skipped\s+reason=(quota|round-cap|docs-only)\s+head=([0-9a-f]{7,40})\s*-->/i;
 
-// Mirrors is_docs_only_path in reagent's codex_policy.py; keep them in step.
+// muxreview keeps a mirror of this rule; keep the two in step.
 // Narrower than ci-classify-changes.mjs's rule on purpose: CLAUDE.md, AGENTS.md
 // and prompt files are markdown that agents act on, so changing them is a
 // behavior change Codex should see.
 const NEVER_DOCS_PREFIXES = [".github/", "scripts/", "tools/", "prompts/"];
-// Both changeset spellings, matching reagent: plural here, singular upstream.
+// Both changeset spellings, matching muxreview: plural here, singular upstream.
 const DOCS_PREFIXES = ["docs/", ".changesets/", ".changeset/"];
 const DOCS_NAMES = /^(README|CHANGELOG)(\.[a-z]+)?$|^(LICENSE|NOTICE)$/i;
 
@@ -145,36 +152,30 @@ function quotaAttribution({ comments, reviews }) {
         if (c.user?.login === TRIGGER_AUTHOR) {
             const m = TRIGGER_HEAD.exec(c.body ?? "");
             if (m) events.push({ at, order: 0, request: m[1].toLowerCase() });
-        } else if (c.user?.login === CODEX_LOGIN) {
-            const body = c.body ?? "";
-            if (USAGE_LIMIT.test(body)) events.push({ at, order: 1, quota: c });
-            else if (reviewedCommit(body)) events.push({ at, order: 1, names: reviewedCommit(body) });
+        } else if (isCodex(c)) {
+            const names = reviewedCommit(c.body);
+            if (USAGE_LIMIT.test(c.body ?? "")) events.push({ at, order: 1, quota: c });
+            else if (names) events.push({ at, order: 1, names });
         }
     }
     for (const r of reviews) {
-        if (r.user?.login === CODEX_LOGIN && reviewedCommit(r.body)) {
-            events.push({ at: String(r.submitted_at), order: 1, names: reviewedCommit(r.body) });
-        }
+        const names = isCodex(r) ? reviewedCommit(r.body) : null;
+        if (names) events.push({ at: String(r.submitted_at), order: 1, names });
     }
     // Requests sort before answers posted in the same second.
-    events.sort((a, b) => a.at.localeCompare(b.at) || a.order - b.order);
+    events.sort((a, b) => byAt(a, b) || a.order - b.order);
 
     const attributed = new Map();
     let outstanding = [];
     for (const e of events) {
         if (e.request) outstanding.push(e.request);
-        else if (e.names) outstanding = outstanding.filter((head) => !head.startsWith(e.names));
+        else if (e.names) outstanding = outstanding.filter((head) => !namesCommit(head, e.names));
         else if (e.quota) {
             if (outstanding.length === 1) attributed.set(e.quota, outstanding[0]);
             outstanding = [];
         }
     }
     return attributed;
-}
-
-/** The head a muxreview skip comment names, or null. */
-export function skippedHead(comment) {
-    return skipNote(comment)?.sha ?? null;
 }
 
 /** A muxreview skip comment's { sha, reason }, or null. */
@@ -205,11 +206,13 @@ function isDocsOnlyFindings(o) {
  * comment in place per outage, so its last edit dates the skip of the head
  * it now names. Not Codex verdicts: see evaluateCodexGate for precedence.
  */
-function reagentSkips(comments = []) {
+function muxreviewSkips(comments = []) {
     return comments
-        .filter((c) => skipNote(c))
-        .map((c) => ({ kind: "quota", reason: skipNote(c).reason, at: c.updated_at ?? c.created_at, sha: skipNote(c).sha }))
-        .sort((a, b) => String(a.at).localeCompare(String(b.at)));
+        .flatMap((c) => {
+            const note = skipNote(c);
+            return note ? [{ kind: "quota", ...note, at: c.updated_at ?? c.created_at }] : [];
+        })
+        .sort(byAt);
 }
 
 /**
@@ -222,7 +225,7 @@ function codexOutputs({ comments = [], reviews = [], reviewComments = [] }) {
     const flagged = filesByReview(reviewComments);
     return [
         ...comments
-            .filter((c) => c.user?.login === CODEX_LOGIN)
+            .filter(isCodex)
             .map((c) =>
                 USAGE_LIMIT.test(c.body ?? "")
                     ? { kind: "quota", at: c.created_at, sha: quotaHeads.get(c) ?? null }
@@ -235,7 +238,7 @@ function codexOutputs({ comments = [], reviews = [], reviewComments = [] }) {
         // A dismissed findings review no longer counts against a commit. It
         // does not count for it either: only a Codex OK passes.
         ...reviews
-            .filter((r) => r.user?.login === CODEX_LOGIN && r.state !== "DISMISSED")
+            .filter((r) => isCodex(r) && r.state !== "DISMISSED")
             .map((r) => ({
                 kind: "findings",
                 at: r.submitted_at,
@@ -244,7 +247,7 @@ function codexOutputs({ comments = [], reviews = [], reviewComments = [] }) {
             })),
     ]
         .filter((o) => o.sha !== null)
-        .sort((a, b) => String(a.at).localeCompare(String(b.at)));
+        .sort(byAt);
 }
 
 /** Codex's most recent verdict on any commit of the PR, or null. */
@@ -259,11 +262,17 @@ export function latestCodexOutput({ comments = [], reviews = [], reviewComments 
  * since fail; any other answer decides without it.
  */
 export function needsDiffSince(latest, headSha) {
-    return (
-        (latest?.kind === "ok" || latest?.kind === "findings") &&
-        !String(headSha).toLowerCase().startsWith(latest.sha)
-    );
+    return (latest?.kind === "ok" || latest?.kind === "findings") && !namesCommit(headSha, latest.sha);
 }
+
+// How a quota-kind answer on the head passes, by the skip note's reason.
+// Codex's own out-of-quota notice carries no reason and reads as `quota`.
+const PASSES_WITHOUT_CODEX = {
+    quota: (short) => `Codex is out of review quota; ${short} passes without it`,
+    "round-cap": (short) =>
+        `muxreview stopped asking Codex after this PR's round cap; ${short} passes without it ('@muxreview codex re-review' asks anyway)`,
+    "docs-only": (short) => `Docs-only PR: Codex isn't asked; ${short} passes without it`,
+};
 
 /**
  * Decide the status for `headSha` from the PR's issue comments, reviews and
@@ -288,24 +297,14 @@ export function evaluateCodexGate({
     const head = headSha.toLowerCase();
     const short = head.slice(0, 10);
     const all = codexOutputs({ comments, reviews, reviewComments });
-    const namesHead = (o) => head.startsWith(o.sha);
-    const onHead = all.filter(namesHead).at(-1) ?? reagentSkips(comments).filter(namesHead).at(-1);
+    const namesHead = (o) => namesCommit(head, o.sha);
+    const onHead = all.filter(namesHead).at(-1) ?? muxreviewSkips(comments).filter(namesHead).at(-1);
 
     if (onHead?.kind === "ok") {
         return { state: "success", description: `Codex found no major issues in ${short}` };
     }
     if (onHead?.kind === "quota") {
-        // A muxreview skip names why it didn't ask; Codex's own notice is quota.
-        if (onHead.reason === "round-cap") {
-            return {
-                state: "success",
-                description: `muxreview stopped asking Codex after this PR's round cap; ${short} passes without it ('@muxreview codex re-review' asks anyway)`,
-            };
-        }
-        if (onHead.reason === "docs-only") {
-            return { state: "success", description: `Docs-only PR: Codex isn't asked; ${short} passes without it` };
-        }
-        return { state: "success", description: `Codex is out of review quota; ${short} passes without it` };
+        return { state: "success", description: PASSES_WITHOUT_CODEX[onHead.reason ?? "quota"](short) };
     }
     if (isDocsOnlyFindings(onHead)) {
         return { state: "success", description: `Codex only flagged docs in ${short}; see its comments` };
@@ -360,12 +359,7 @@ export function evaluateCodexGate({
  * the two together).
  */
 export function isGateInput(comment) {
-    return comment?.user?.login === CODEX_LOGIN || skipNote(comment) !== null;
-}
-
-/** A PR review the gate reacts to: one by Codex. */
-export function isGateReview(review) {
-    return review?.user?.login === CODEX_LOGIN;
+    return isCodex(comment) || skipNote(comment) !== null;
 }
 
 /**
@@ -384,7 +378,7 @@ export function sweepReason({ pull, status, comments = [], reviews = [] }) {
     if (comments.some((c) => isGateInput(c) && newer(c.updated_at ?? c.created_at))) {
         return "a Codex answer or muxreview note is newer than its pending status";
     }
-    if (reviews.some((r) => isGateReview(r) && newer(r.submitted_at))) {
+    if (reviews.some((r) => isCodex(r) && newer(r.submitted_at))) {
         return "a Codex review is newer than its pending status";
     }
     return null;
@@ -500,7 +494,7 @@ async function main() {
     });
 }
 
-if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith("ci-codex-review-gate.mjs")) {
+if (isMain(import.meta.url)) {
     main().catch((err) => {
         console.error(err.message);
         process.exit(1);

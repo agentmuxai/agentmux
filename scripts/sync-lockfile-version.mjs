@@ -33,6 +33,7 @@
  */
 
 import { readFileSync, writeFileSync } from "node:fs";
+import { isMain } from "./lib/is-main.mjs";
 
 const DEFAULT_INDENT = 4; // this repo's actual package-lock.json convention
 
@@ -79,10 +80,7 @@ export function syncLockfileVersion(text, version) {
     return { text: JSON.stringify(lock, null, indent) + "\n", indent };
 }
 
-const isMain =
-    process.argv[1] &&
-    import.meta.url.endsWith(process.argv[1].replace(/\\/g, "/").split("/").pop());
-if (isMain) {
+if (isMain(import.meta.url)) {
     const [version, lockfilePath = "package-lock.json"] = process.argv.slice(2);
     if (!version) {
         console.error("Usage: sync-lockfile-version.mjs <version> [lockfile-path]");
