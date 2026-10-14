@@ -5,6 +5,7 @@
 // Sysinfo module barrel — its native pane tab manifest (and the model).
 
 import type { PaneTabManifest } from "@/app/block/pane-tab-registry";
+import { remoteOf, remoteTabIcon, remoteTabName } from "@/app/block/pane-tab-remote";
 import { SysinfoViewModel } from "./sysinfo-model";
 import { SysinfoView } from "./sysinfo-view";
 
@@ -20,6 +21,20 @@ export function sysinfoPaneTab(view: "sysinfo" | "cpuplot"): PaneTabManifest {
         icon: "chart-line",
         ...(view === "sysinfo" ? { defaultHue: 300 } : { legacyOf: "sysinfo" }),
         capabilities: { connection: true, noPadding: true },
+        // On a remote machine the pill says which ("CPU · devbox", the
+        // remote's icon); on this one it keeps the plot type from liveTitle.
+        tab: {
+            label: ({ meta }) => {
+                const remote = remoteOf(meta);
+                if (!remote) return undefined;
+                const plot = (meta?.["sysinfo:type"] as string | undefined) || "CPU";
+                return `${plot} · ${remoteTabName(remote)}`;
+            },
+            icon: ({ meta }) => {
+                const remote = remoteOf(meta);
+                return remote ? remoteTabIcon(remote) : undefined;
+            },
+        },
         create: (ctx) => {
             const model = new SysinfoViewModel(ctx, view);
             return {

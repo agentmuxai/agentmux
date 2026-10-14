@@ -814,7 +814,11 @@ function BlockFrame_Header(
                 </div>
             </Show>
             <UnseenTurnsDot blockId={props.blockId()} />
-            <Show when={manageConnection()}>
+            {/* With a tab strip, a remote terminal's pill names its remote
+                (term-pane-tab.ts) instead: a chip here showed only while that
+                tab was active. The picker still opens with Change connection
+                (⌘⇧G), placed by the pane. */}
+            <Show when={manageConnection() && !props.leadingTabStrip}>
                 <ConnectionButton
                     ref={props.connBtnRef}
                     connection={blockData()?.meta?.connection}
