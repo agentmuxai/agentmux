@@ -91,6 +91,11 @@ fn antigravity_is_found_where_its_installer_puts_it() {
     assert!(super::antigravity_install_paths(None, None).is_empty());
     // Every other provider either installs through npm or relies on PATH.
     assert!(known_install_paths("kimi").is_empty());
+    let home = std::path::PathBuf::from("/h");
+    let (goose, grok) = (super::goose_install_paths(Some(home.clone())), super::grok_install_paths(Some(home.clone())));
+    assert!(goose.contains(&home.join(".local").join("bin").join(if cfg!(windows) { "goose.exe" } else { "goose" })));
+    assert_eq!(grok, vec![home.join(".grok").join("bin").join(if cfg!(windows) { "grok.exe" } else { "grok" })]);
+    assert!(super::goose_install_paths(None).is_empty() && super::grok_install_paths(None).is_empty());
     assert!(known_install_paths("claude").is_empty());
 }
 
@@ -161,6 +166,9 @@ fn all_providers_covers_every_registered_id_exactly_once() {
         "kilo",
         "cline",
         "opencode",
+        "goose",
+        "grok",
+        "dsh",
     ] {
         assert_eq!(
             ids.iter().filter(|id| **id == expected).count(),
@@ -168,7 +176,7 @@ fn all_providers_covers_every_registered_id_exactly_once() {
             "expected exactly one entry for {expected}, got {ids:?}"
         );
     }
-    assert_eq!(ids.len(), 13, "must not silently gain/lose a provider: {ids:?}");
+    assert_eq!(ids.len(), 16, "must not silently gain/lose a provider: {ids:?}");
 }
 
 #[test]

@@ -40,6 +40,10 @@ const PROVIDER_ID_ALIASES: Record<string, string> = {
     "cline-cli": "cline",
     "opencode-ai": "opencode",
     "open-code": "opencode",
+    "goose-cli": "goose",
+    "grok-build": "grok",
+    "grok-cli": "grok",
+    "deepseek-harness": "dsh",
 };
 
 /** Resolve a possibly-legacy provider ID to its canonical form. Returns the

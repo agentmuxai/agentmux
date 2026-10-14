@@ -246,9 +246,9 @@ export const CORE_TOOLS: CoreTool[] = [
  * `toolchain-capabilities.ts` and the one-click installer never treat them
  * as tools AgentMux itself needs.
  *
- * The agent entries (Goose, Crush, Aider) are NOT launchable as AgentMux
- * panes yet — they are listed so users can see what's installed. OpenCode
- * is a provider now, listed with the others in the Toolchain pane.
+ * The agent entries (Crush, Aider) are NOT launchable as AgentMux panes
+ * yet — they are listed so users can see what's installed. OpenCode and
+ * goose are providers now, listed with the others in the Toolchain pane.
  */
 export const LOCAL_MODEL_TOOLS: CoreTool[] = [
     {
@@ -325,24 +325,6 @@ export const LOCAL_MODEL_TOOLS: CoreTool[] = [
             windows: "scoop install llmfit",
             macos: "brew install llmfit",
             linux: "curl -fsSL https://llmfit.axjns.dev/install.sh | sh",
-        },
-    },
-    {
-        id: "goose",
-        cliCommand: "goose",
-        label: "Goose",
-        icon: "feather",
-        optional: true,
-        description: "Open-source coding agent (Agentic AI Foundation) with native Ollama support. Not yet launchable as an AgentMux pane.",
-        docsUrl: "https://goose-docs.ai/docs/getting-started/installation/",
-        installUrls: {
-            windows: "https://goose-docs.ai/docs/getting-started/installation/",
-            macos: "https://goose-docs.ai/docs/getting-started/installation/",
-            linux: "https://goose-docs.ai/docs/getting-started/installation/",
-        },
-        installCommand: {
-            macos: "brew install block-goose-cli",
-            linux: "curl -fsSL https://github.com/aaif-goose/goose/releases/download/stable/download_cli.sh | bash",
         },
     },
     {

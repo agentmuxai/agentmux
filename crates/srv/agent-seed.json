@@ -1,5 +1,5 @@
 {
-  "version": 12,
+  "version": 13,
   "agents": [
     {
       "id": "claude",
@@ -254,6 +254,78 @@
       "agent_bus_id": "opencode",
       "content": {
         "env": "AGENT_NAME=opencode\nAGENTMUX_AGENT_ID=OpenCode",
+        "startup": "__SKIP__"
+      },
+      "skills": [
+        {
+          "name": "Startup Verification",
+          "trigger": "startup",
+          "skill_type": "prompt",
+          "description": "Re-run tool verification checks and report status table",
+          "content": "Check your GitHub identity with `gh-agent auth status` where `gh-agent` is installed (plain `gh` reports \"not logged in\" for agents on purpose; never run `gh auth login`, and run `gh-agent doctor` if the check fails; if neither `gh-agent` nor `gh` is installed, as in some containers, report GitHub as N/A), your git identity (`git config user.name` and `git config user.email`), and that the AgentMux MCP server is connected (list peer agents). Report a status table with OK/FAIL for each check. Fix any failures automatically if possible."
+        }
+      ]
+    },
+    {
+      "id": "goose",
+      "name": "goose",
+      "icon": "G",
+      "provider": "goose",
+      "agent_type": "host",
+      "description": "Open-source agent from the Linux Foundation",
+      "working_directory": "",
+      "shell": "pwsh",
+      "agent_bus_id": "goose",
+      "content": {
+        "env": "AGENT_NAME=goose\nAGENTMUX_AGENT_ID=goose",
+        "startup": "__SKIP__"
+      },
+      "skills": [
+        {
+          "name": "Startup Verification",
+          "trigger": "startup",
+          "skill_type": "prompt",
+          "description": "Re-run tool verification checks and report status table",
+          "content": "Check your GitHub identity with `gh-agent auth status` where `gh-agent` is installed (plain `gh` reports \"not logged in\" for agents on purpose; never run `gh auth login`, and run `gh-agent doctor` if the check fails; if neither `gh-agent` nor `gh` is installed, as in some containers, report GitHub as N/A), your git identity (`git config user.name` and `git config user.email`), and that the AgentMux MCP server is connected (list peer agents). Report a status table with OK/FAIL for each check. Fix any failures automatically if possible."
+        }
+      ]
+    },
+    {
+      "id": "grok",
+      "name": "Grok Build",
+      "icon": "X",
+      "provider": "grok",
+      "agent_type": "host",
+      "description": "xAI's coding agent",
+      "working_directory": "",
+      "shell": "pwsh",
+      "agent_bus_id": "grok",
+      "content": {
+        "env": "AGENT_NAME=grok\nAGENTMUX_AGENT_ID=Grok Build",
+        "startup": "__SKIP__"
+      },
+      "skills": [
+        {
+          "name": "Startup Verification",
+          "trigger": "startup",
+          "skill_type": "prompt",
+          "description": "Re-run tool verification checks and report status table",
+          "content": "Check your GitHub identity with `gh-agent auth status` where `gh-agent` is installed (plain `gh` reports \"not logged in\" for agents on purpose; never run `gh auth login`, and run `gh-agent doctor` if the check fails; if neither `gh-agent` nor `gh` is installed, as in some containers, report GitHub as N/A), your git identity (`git config user.name` and `git config user.email`), and that the AgentMux MCP server is connected (list peer agents). Report a status table with OK/FAIL for each check. Fix any failures automatically if possible."
+        }
+      ]
+    },
+    {
+      "id": "dsh",
+      "name": "DeepSeek Harness",
+      "icon": "D",
+      "provider": "dsh",
+      "agent_type": "host",
+      "description": "DeepSeek's open-source harness (preview)",
+      "working_directory": "",
+      "shell": "pwsh",
+      "agent_bus_id": "dsh",
+      "content": {
+        "env": "AGENT_NAME=dsh\nAGENTMUX_AGENT_ID=DeepSeek Harness",
         "startup": "__SKIP__"
       },
       "skills": [

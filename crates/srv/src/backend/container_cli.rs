@@ -186,7 +186,7 @@ rm -rf "$STAGE"
 mkdir -p "$STAGE"
 export npm_config_cache=/tmp/agentmux-npm-cache npm_config_update_notifier=false
 trap 'rm -rf /tmp/agentmux-npm-cache "$STAGE"' EXIT
-timeout -k 15 "$LIMIT" npm install --prefix "$STAGE" --no-audit --no-fund --no-progress --loglevel=error "$@"
+timeout -k 15 "$LIMIT" npm install --prefix "$STAGE" --no-audit --no-fund --no-progress --legacy-peer-deps=false --loglevel=error "$@"
 "$STAGE/node_modules/.bin/$BIN" --version >/dev/null
 rm -f "$DIR"/.installed-*
 rm -rf "$DIR/node_modules"

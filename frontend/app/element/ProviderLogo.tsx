@@ -22,6 +22,9 @@ import awsSvg from "@lobehub/icons-static-svg/icons/aws-color.svg?raw";
 import kilocodeSvg from "@lobehub/icons-static-svg/icons/kilocode.svg?raw";
 import clineSvg from "@lobehub/icons-static-svg/icons/cline.svg?raw";
 import opencodeSvg from "@lobehub/icons-static-svg/icons/opencode.svg?raw";
+import gooseSvg from "@lobehub/icons-static-svg/icons/goose.svg?raw";
+import grokSvg from "@lobehub/icons-static-svg/icons/grok.svg?raw";
+import deepseekColorSvg from "@lobehub/icons-static-svg/icons/deepseek-color.svg?raw";
 import plandexUrl from "@/app/element/icons/plandex.png?url";
 import piUrl from "@/app/element/icons/pi.svg?url";
 import brainSvg from "@/app/asset/logo-brain.svg?raw";
@@ -62,6 +65,10 @@ export const ProviderLogo = (props: ProviderLogoProps): JSX.Element => {
         if (p === "kilo") return { html: kilocodeSvg };
         if (p === "cline") return { html: clineSvg };
         if (p === "opencode") return { html: opencodeSvg };
+        if (p === "goose") return { html: gooseSvg };
+        if (p === "grok") return { html: grokSvg };
+        // DeepSeek's company mark: the harness has none of its own in the set.
+        if (p === "dsh") return { html: deepseekColorSvg };
         // Plandex only: Pi (pi-coding-agent) is a different project, and
         // showing Plandex's mark on it named the wrong product.
         if (p === "plandex") return { png: plandexUrl };

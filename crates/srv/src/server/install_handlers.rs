@@ -761,6 +761,8 @@ fn spawn_install_task(
                 "--no-fund".to_string(),
                 "--progress=false".to_string(),
                 "--loglevel=verbose".to_string(),
+                // A user's legacy-peer-deps would skip a package's peers.
+                "--legacy-peer-deps=false".to_string(),
             ])
             .collect();
         // AgentMux's own packages come from the public registry whatever the
