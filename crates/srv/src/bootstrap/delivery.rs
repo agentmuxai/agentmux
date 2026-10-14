@@ -67,6 +67,10 @@ pub(crate) fn route_agent_message_from(
     let Some(ctrl) = backend::blockcontroller::get_controller(block_id) else {
         return Err(format!("no controller for block {block_id}"));
     };
+    // A jekt, cron or broadcast is a real turn: it ends the hidden-reinjection
+    // window as a person typing does, so ambient reads resume for an agent
+    // that is only ever driven by messages.
+    crate::ambient::digest::set_hidden_reinjection_active(block_id, false);
     let is_subprocess = ctrl
         .as_any()
         .downcast_ref::<backend::blockcontroller::subprocess::SubprocessController>()
@@ -313,6 +317,28 @@ mod route_agent_message_tests {
             route_agent_message(block_id, "hi"),
             Ok(AgentRoute::StartTurn { subprocess: true })
         ));
+        delete_controller(block_id);
+    }
+
+    #[test]
+    fn a_delivered_message_ends_the_hidden_reinjection_window() {
+        let block_id = "route-test-window";
+        register_controller(
+            block_id,
+            Arc::new(backend::blockcontroller::subprocess::SubprocessController::new(
+                "tab-route".to_string(),
+                block_id.to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                Arc::from("test-boot"),
+            )),
+        );
+        crate::ambient::digest::set_hidden_reinjection_active(block_id, true);
+        let _ = route_agent_message(block_id, "hi");
+        assert!(!crate::ambient::digest::is_hidden_reinjection_active(block_id));
         delete_controller(block_id);
     }
 

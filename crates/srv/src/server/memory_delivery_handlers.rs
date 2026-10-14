@@ -151,6 +151,10 @@ struct DeliveryState {
     /// composed. Unlike `deliveries` it isn't pruned, so a fallback deferred
     /// behind a long turn still finds it. One entry per block and reason.
     completed: HashMap<(String, Reason), i64>,
+    /// One gate per delivery being composed. The 8 parts of a session start
+    /// ask at once; the first composes while the rest wait here and then read
+    /// its result, instead of each reading the memory and composing it again.
+    compose_gates: HashMap<DeliveryKey, std::sync::Arc<tokio::sync::Mutex<()>>>,
 }
 
 /// What the fallback's claim found.
@@ -338,6 +342,13 @@ pub(crate) async fn handle_session_start_part(
     let delivery = match cached {
         Some(d) => d,
         None => {
+            let gate = state_lock().compose_gates.entry(key.clone()).or_default().clone();
+            let _composing = gate.lock().await;
+            // A part that held the gate before this one may have composed it.
+            let composed_meanwhile = state_lock().deliveries.get(&key).cloned();
+            if let Some(d) = composed_meanwhile {
+                return finish_part(&state, &key, d, req.part);
+            }
             let uid = caller.as_ref().and_then(|c| c.uid()).map(str::to_string);
             let launch = LaunchDirs::from_request(&req);
             let composed = {
@@ -353,22 +364,30 @@ pub(crate) async fn handle_session_start_part(
                     })
             };
             let Some(composed) = composed else {
+                state_lock().compose_gates.remove(&key);
                 return Json(PartResponse { text: None, part: req.part, of: 0 });
             };
             // A concurrent part may have composed first: keep that one, so
             // every part of this session start is from the same composition.
             // And the fallback may have claimed the event meanwhile.
             let mut st = state_lock();
+            st.compose_gates.remove(&key);
             if st.fallback_claimed(&req.block_id, reason) {
                 return Json(PartResponse { text: None, part: req.part, of: 0 });
             }
             st.deliveries.entry(key.clone()).or_insert(composed).clone()
         }
     };
+    finish_part(&state, &key, delivery, req.part)
+}
+
+/// The reply for one part of a composed delivery. A delivery with nothing for
+/// the hook to carry still gets its card, on the first part asked for.
+fn finish_part(state: &AppState, key: &DeliveryKey, delivery: Delivery, part: usize) -> Json<PartResponse> {
     if delivery.parts.is_empty() {
-        send_partless_notice(&state, &key);
+        send_partless_notice(state, key);
     }
-    Json(part_response(&delivery, req.part))
+    Json(part_response(&delivery, part))
 }
 
 /// A delivery with nothing for the hook to carry (its Global Memory is in the
@@ -1077,6 +1096,18 @@ mod tests {
         let mut st = state_with_hook_delivery("b", Reason::Startup, false);
         let created = st.deliveries.values().next().unwrap().created_ms;
         assert_eq!(st.claim_event("b", Reason::Startup, created - 1_000, NOW), FallbackClaim::Pending);
+    }
+
+    #[test]
+    fn the_parts_of_one_delivery_share_a_compose_gate_and_a_finished_one_leaves_none() {
+        let mut st = DeliveryState::default();
+        let key = startup_key("b");
+        let first = st.compose_gates.entry(key.clone()).or_default().clone();
+        let second = st.compose_gates.entry(key.clone()).or_default().clone();
+        assert!(std::sync::Arc::ptr_eq(&first, &second), "parts wait on the one composing");
+        st.compose_gates.remove(&key);
+        let next = st.compose_gates.entry(key).or_default().clone();
+        assert!(!std::sync::Arc::ptr_eq(&first, &next), "a new delivery gets its own gate");
     }
 
     #[test]
