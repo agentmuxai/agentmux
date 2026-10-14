@@ -127,7 +127,8 @@ pub struct SettingsType {
 
     /// SSH terminal panes durable (their shell kept on the host by AgentMux's
     /// helper) or not, unless a pane or its connection says otherwise. Unset:
-    /// durable on a host the helper has answered on (`durable_ssh::wants`).
+    /// durable, asking before the helper is installed on a host without it,
+    /// and plain there if it isn't (`durable_mode::mode`).
     #[serde(rename = "term:durable", default, skip_serializing_if = "Option::is_none")]
     pub term_durable: Option<bool>,
 

@@ -64,7 +64,7 @@ export const TERMINAL_SETTINGS = {
         id: "terminal.durable_ssh",
         label: "Keep SSH sessions alive",
         description:
-            "Durable SSH terminals keep their shell running on the host (in AgentMux's small helper there), so a dropped link, sleep or a restart reconnects instead of ending it. Connectors → Remotes can set it per host.",
+            "Durable SSH terminals keep their shell running on the host (in AgentMux's small helper there), so a dropped link, sleep or a restart reconnects instead of ending it. On a host without the helper, the first terminal asks before installing it, and is a plain terminal if it isn't installed. Connectors → Remotes can set it per host.",
         section: "terminal",
         keywords: ["durable", "ssh", "reconnect", "remote", "session", "term:durable"],
     },
@@ -245,7 +245,7 @@ export function TerminalSection(): JSX.Element {
                             set("term:durable", v === "on" ? true : v === "off" ? false : null);
                         }}
                     >
-                        <option value="auto">On hosts that have the helper</option>
+                        <option value="auto">On, else a plain terminal</option>
                         <option value="on">Always (needs the helper)</option>
                         <option value="off">Never</option>
                     </Select>

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { parseSshApprovalMeta } from "./SshApprovalWindow";
+import { parseSshApprovalMeta, sshApprovalAnswer } from "./SshApprovalWindow";
 
 describe("parseSshApprovalMeta", () => {
     it("reads a consent request with its labels and checkbox", () => {
@@ -51,5 +51,19 @@ describe("parseSshApprovalMeta", () => {
         expect(parseSshApprovalMeta(null)).toBeNull();
         expect(parseSshApprovalMeta("{")).toBeNull();
         expect(parseSshApprovalMeta(JSON.stringify({ kind: "consent" }))).toBeNull();
+    });
+});
+
+describe("sshApprovalAnswer", () => {
+    it("sends the box as ticked, whichever button: Not now with it ticked is Never", () => {
+        expect(sshApprovalAnswer("consent", false, "", true)).toEqual({ approve: false, text: "", checkbox: true });
+        expect(sshApprovalAnswer("consent", true, "", true)).toEqual({ approve: true, text: "", checkbox: true });
+        expect(sshApprovalAnswer("consent", true, "", false).checkbox).toBe(false);
+    });
+
+    it("sends a secret only with OK", () => {
+        expect(sshApprovalAnswer("secret", true, "hunter2", false).text).toBe("hunter2");
+        expect(sshApprovalAnswer("secret", false, "hunter2", false).text).toBe("");
+        expect(sshApprovalAnswer("consent", true, "typed", false).text).toBe("");
     });
 });
