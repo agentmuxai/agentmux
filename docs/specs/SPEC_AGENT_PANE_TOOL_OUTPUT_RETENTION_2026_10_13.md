@@ -91,3 +91,21 @@ Passes run only on events: history ready, turn end, next send, going hidden, and
 - **Memory:** the 12-agent run from the root-cause report, with #4751 and #4756 in. Expect the main window's strings under 20 MB, against 97 MB, and the JS heap to fall by about that much.
 - **Reloads:** open 20 unloaded rows across panes and record reload time and failures. Expect zero failures and p95 under 50 ms.
 - **The jekt case:** one agent driven only by jekts for 100 turns. Its pane stays within the budget.
+
+### 5.1 Results (2026-10-13)
+
+Isolated production portables built from the same `main` (with #4751 and #4756), with and without this change; 12 scripted agents over 4 tabs, 40 rounds of one turn per agent; measured after a forced GC.
+
+| Main window renderer | `main` | With this change |
+|---|---|---|
+| Private working set | 962 MB | 842 MB (−120 MB) |
+| JS heap used | 247 MB | 162 MB (−35%) |
+| Strings in the heap snapshot | 98.6 MB | 27.9 MB (−72%) |
+| Heap snapshot, all objects | 355 MB | 242 MB |
+| DOM nodes | 107,000 | 66,000 |
+
+Strings came down by 71 MB but not under the 20 MB this section expected; what remains is not yet broken down.
+
+Reloads: 30 finished rows opened across the visible panes after 5 rounds, 16 of them unloaded and read back: no failures, p50 17 ms, p95 39 ms, max 39 ms.
+
+The jekt case has not been run: the lab drives agents by sending them messages, not jekts.
