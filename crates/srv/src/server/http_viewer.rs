@@ -293,7 +293,7 @@ async fn handle_viewer_procs(State(state): State<AppState>, Query(q): Query<Proc
             true,
             &st.hostname,
             || crate::server::app_api::tower_pane::inputs(&st.process_tracker),
-            |id| crate::server::app_api::tower_pane::block_label(&st.mstore, id),
+            |id| crate::backend::tower_sampler::block_label(&st.mstore, id),
             // What each renderer serves names this computer's windows and
             // pages; a paired viewer sees only that it is a renderer.
             |_| None,
@@ -327,7 +327,7 @@ async fn handle_viewer_panes(State(state): State<AppState>) -> Response {
         let tabs = st.mstore.get_all::<Tab>().map_err(|e| e.to_string())?;
         let blocks = st.mstore.get_all::<Block>().map_err(|e| e.to_string())?;
         let label = |b: &Block| {
-            crate::server::app_api::tower_pane::block_label(&st.mstore, &b.oid)
+            crate::backend::tower_sampler::block_label(&st.mstore, &b.oid)
                 .map(|l| (l.label, l.agent))
                 .unwrap_or_default()
         };

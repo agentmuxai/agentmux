@@ -392,6 +392,13 @@ impl Tower {
         GLOBAL.get_or_init(Tower::new)
     }
 
+    /// The PIDs in the process table the last sample read; empty before the
+    /// first. What is missing from it has exited.
+    pub fn live_pids(&self) -> HashSet<u32> {
+        let st = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        st.last.as_ref().map(|l| l.procs.iter().map(|p| p.pid).collect()).unwrap_or_default()
+    }
+
     /// A sample (module doc). BLOCKING: reads the process table, and `labels`
     /// and `renderer` may read the store; call it off the async workers.
     /// `renderer` says what a renderer PID serves ("window Main"), for the
@@ -432,6 +439,31 @@ impl Tower {
         let last = st.last.as_ref().expect("measured above");
         Ok(render(last, want_host, hostname, &labels, &renderer))
     }
+}
+
+/// A pane's name in Tower and on its stats badge: the agent's name, else what
+/// the terminal runs. `None` for a block that no longer exists.
+pub fn block_label(mstore: &crate::backend::storage::store::Store, block_id: &str) -> Option<BlockLabel> {
+    use crate::backend::{blockcontroller, obj};
+    let block = mstore.get::<obj::Block>(block_id).ok().flatten()?;
+    let meta = |key: &str| obj::meta_get_string(&block.meta, key, "");
+    let agent_name = [meta("agentName"), meta("agentId")].into_iter().find(|s| !s.is_empty());
+    let agent = agent_name.is_some()
+        || blockcontroller::get_controller(block_id).is_some_and(|c| c.get_runtime_status().is_agent_pane);
+    let label = agent_name.unwrap_or_else(|| {
+        let title = meta("frame:title");
+        let connection = meta("connection");
+        if !title.is_empty() {
+            title
+        } else if !connection.is_empty() && connection != "local" {
+            format!("Terminal ({connection})")
+        } else if agent {
+            "Agent".to_string()
+        } else {
+            "Terminal".to_string()
+        }
+    });
+    Some(BlockLabel { label, agent })
 }
 
 /// Measure: group the table, take every process's and task account's rate
