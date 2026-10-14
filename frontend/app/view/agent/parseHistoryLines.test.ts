@@ -612,6 +612,32 @@ describe("parseHistoryLines", () => {
     });
 });
 
+describe("parseHistoryLines — a reply after a turn ends starts its own paragraph", () => {
+    it("keeps two replies apart when only a turn end separates them, as live does", () => {
+        // Two messages queued while the agent worked: both user records come
+        // first, then a reply to each, each ending its own turn.
+        const user = (text: string) => JSON.stringify({ type: "user", message: { role: "user", content: text } });
+        // As Claude writes a reply: the text streams as deltas, then the
+        // whole message, which ends the turn.
+        const reply = (text: string) => [
+            JSON.stringify({
+                type: "stream_event",
+                event: { type: "content_block_delta", index: 0, delta: { type: "text_delta", text } },
+            }),
+            JSON.stringify({
+                type: "assistant",
+                message: { role: "assistant", stop_reason: "end_turn", content: [{ type: "text", text }] },
+            }),
+        ];
+        const { nodes } = parseHistoryLines(
+            [user("race D"), user("race P"), ...reply("Got race D."), ...reply("Got race P.")],
+            "claude-stream-json"
+        );
+        const texts = nodes.filter((n) => n.type === "markdown").map((n) => (n as { content: string }).content);
+        expect(texts).toEqual(["Got race D.", "Got race P."]);
+    });
+});
+
 describe("parseHistoryLines — Gemini-family transcripts keep the user's messages", () => {
     it("restores the user message from the CLI's echo", () => {
         const lines = [
