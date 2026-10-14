@@ -2,11 +2,11 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+import { windowResizing } from "@/app/platform/window-resize";
 import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
-import clsx from "clsx";
 import { holdPaneContent, trackPaneContent } from "@/app/store/pane-content-holds";
-import { windowResizing } from "@/app/platform/window-resize";
+import clsx from "clsx";
 import type { JSX } from "solid-js";
 import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show } from "solid-js";
 
@@ -53,12 +53,16 @@ function SysinfoView(props: SysinfoViewProps): JSX.Element {
     // the chart to blank under load and created a drop/reload feedback loop.
     createEffect(() => {
         const cn = connName();
-        const unsubFn = onMuxEvent(WpsEvent.SysInfo, (data) => {
+        const unsubFn = onMuxEvent(
+            WpsEvent.SysInfo,
+            (data) => {
                 if (model.loadingAtom()) return;
                 const dataItem = convertTimeSeriesToDataItem(data);
                 if (dataItem == null) return;
                 model.appendData(dataItem);
-            }, cn);
+            },
+            cn
+        );
         console.log("subscribe to sysinfo", cn);
         onCleanup(() => unsubFn());
     });
@@ -144,34 +148,36 @@ function SysinfoViewInner(props: SysinfoViewProps): JSX.Element {
                         setPaused(p);
                         if (!p) setPlotData(model.dataAtom());
                     }}
+                    focus={model.focus()}
+                    onFocus={(area) => model.setFocus(area)}
                     syncKey={`sysinfo-${model.blockId}`}
                 />
             }
         >
-        <div class="flex flex-col flex-grow mb-0 overflow-y-auto">
-            <div
-                class={clsx("w-full h-full grid grid-rows-[repeat(auto-fit,minmax(100px,1fr))] gap-[10px]", {
-                    "grid-cols-1": cols1(),
-                    "grid-cols-2": cols2(),
-                })}
-            >
-                <For each={yvals()}>
-                    {(yval) => (
-                        <SingleLinePlot
-                            plotData={plotData()}
-                            yval={yval}
-                            yvalMeta={plotMeta().get(yval)}
-                            blockId={model.blockId}
-                            defaultColor={"var(--accent-color)"}
-                            title={title()}
-                            targetLen={targetLen()}
-                            intervalSecs={intervalSecs()}
-                            syncKey={`sysinfo-${model.blockId}`}
-                        />
-                    )}
-                </For>
+            <div class="flex flex-col flex-grow mb-0 overflow-y-auto">
+                <div
+                    class={clsx("w-full h-full grid grid-rows-[repeat(auto-fit,minmax(100px,1fr))] gap-[10px]", {
+                        "grid-cols-1": cols1(),
+                        "grid-cols-2": cols2(),
+                    })}
+                >
+                    <For each={yvals()}>
+                        {(yval) => (
+                            <SingleLinePlot
+                                plotData={plotData()}
+                                yval={yval}
+                                yvalMeta={plotMeta().get(yval)}
+                                blockId={model.blockId}
+                                defaultColor={"var(--accent-color)"}
+                                title={title()}
+                                targetLen={targetLen()}
+                                intervalSecs={intervalSecs()}
+                                syncKey={`sysinfo-${model.blockId}`}
+                            />
+                        )}
+                    </For>
+                </div>
             </div>
-        </div>
         </Show>
     );
 }

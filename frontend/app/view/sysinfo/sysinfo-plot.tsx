@@ -63,6 +63,8 @@ export type TimeChartProps = {
     syncKey?: string;
     /** No axes and no tooltip: a tile's sparkline. */
     sparkline?: boolean;
+    /** `false`: no time labels, for a chart stacked above another that has them. */
+    timeAxis?: boolean;
     /** The chart's name, over its top-left corner. */
     title?: string;
     class?: string;
@@ -131,7 +133,9 @@ export function TimeChart(props: TimeChartProps): JSX.Element {
                           grid,
                           ticks,
                           space: X_LABEL_SPACE_PX,
-                          values: (_u, splits, _axisIdx, _space, incr) => timeAxisLabels(splits, incr),
+                          values: (_u, splits, _axisIdx, _space, incr) =>
+                              props.timeAxis === false ? splits.map(() => "") : timeAxisLabels(splits, incr),
+                          ...(props.timeAxis === false ? { size: 4 } : {}),
                       },
                       {
                           stroke: muted,
@@ -202,7 +206,7 @@ export function TimeChart(props: TimeChartProps): JSX.Element {
 
     // A new chart when what it draws changes (series, colors, axes), or when it
     // has none yet; otherwise only a new size, or new data.
-    createEffect(on([() => props.series, () => props.sparkline], () => build(), { defer: true }));
+    createEffect(on([() => props.series, () => props.sparkline, () => props.timeAxis], () => build(), { defer: true }));
     createEffect(
         on(size, (s) => {
             if (!chart) build();
@@ -220,7 +224,10 @@ export function TimeChart(props: TimeChartProps): JSX.Element {
             <Show when={props.title}>
                 <div class="sysinfo-chart-title">{props.title}</div>
             </Show>
-            <div ref={container} classList={{ "sysinfo-chart-canvas": true, "sysinfo-chart-canvas--titled": !!props.title }} />
+            <div
+                ref={container}
+                classList={{ "sysinfo-chart-canvas": true, "sysinfo-chart-canvas--titled": !!props.title }}
+            />
             <div ref={tip} class="sysinfo-chart-tip" style={{ display: "none" }} />
         </div>
     );

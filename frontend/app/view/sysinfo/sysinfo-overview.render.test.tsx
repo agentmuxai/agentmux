@@ -3,7 +3,8 @@
 
 /**
  * The Overview as rendered: its tiles' figures, the window and pause controls,
- * the table instead of the charts, and an in/out chart drawing out below the axis.
+ * the table instead of the charts, an in/out chart drawing out below the axis,
+ * and each area shown alone in at most three charts.
  * docs/reports/REPORT_SYSINFO_REWRITE_AND_MODERN_MONITOR_2026_10_13.md section 5.3.
  */
 import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
@@ -67,6 +68,9 @@ const sample = (i: number, cpu: number): DataItem => ({
     "net:bytessent": 0.4,
     "disk:read": 0.05,
     "disk:write": 1.2,
+    "mem:available": 20,
+    "disk:vol:/data:free_gb": 100,
+    "disk:vol:/data:total_gb": 500,
 });
 const DATA = [sample(0, 20), sample(1, 60), sample(2, 40)];
 
@@ -79,6 +83,8 @@ function mount(over: Partial<Parameters<typeof Overview>[0]> = {}) {
         onWindow: vi.fn(),
         paused: false,
         onPause: vi.fn(),
+        focus: null,
+        onFocus: vi.fn(),
         syncKey: "sysinfo-b",
         ...over,
     };
@@ -151,5 +157,67 @@ describe("Overview", () => {
     it("names its core heatmap with the number of cores", () => {
         mount();
         expect(screen.getByText("Cores (2)")).toBeTruthy();
+    });
+
+    it("offers each area alone, and every area again", () => {
+        const props = mount();
+        fireEvent.click(screen.getByRole("radio", { name: "Network" }));
+        expect(props.onFocus).toHaveBeenCalledWith("net");
+        fireEvent.click(screen.getByRole("radio", { name: "Overview" }));
+        expect(props.onFocus).toHaveBeenLastCalledWith(null);
+    });
+});
+
+const titles = () => [...document.querySelectorAll(".sysinfo-chart-title")].map((t) => t.textContent);
+
+describe("An area alone", () => {
+    it("CPU: no tiles; the CPU, its busiest core against the average, and the cores, titled with their figures", async () => {
+        mount({ focus: "cpu" });
+        await vi.advanceTimersByTimeAsync(200);
+        expect(document.querySelector(".sysinfo-overview-tiles")).toBeNull();
+        expect(titles()).toEqual(["CPU: 40% now, 20% – 60%", "Busiest core: 60% now, 60% – 80%", "Cores (2)"]);
+        const busiest = made.charts.find((c) => c.opts.series[1].label === "Busiest core");
+        // Each sample's higher core: 80, 60, 60.
+        expect(busiest.data[1]).toEqual([80, 60, 60]);
+    });
+
+    it("network: in and out together, then each on its own scale", async () => {
+        mount({ focus: "net" });
+        await vi.advanceTimersByTimeAsync(200);
+        expect(titles()).toEqual([
+            "In above, out below",
+            "In: 2.5 MB/s now, 2.5 MB/s – 2.5 MB/s",
+            "Out: 400 KB/s now, 400 KB/s – 400 KB/s",
+        ]);
+        expect(made.charts).toHaveLength(3);
+    });
+
+    it("memory: committed only where the machine reports it", async () => {
+        mount({ focus: "mem" });
+        await vi.advanceTimersByTimeAsync(200);
+        expect(titles()).toEqual(["Used: 12.0 GB now, 12.0 GB – 12.0 GB", "Available: 20.0 GB now, 20.0 GB – 20.0 GB"]);
+        cleanup();
+        made.charts.length = 0;
+        const withCommit = DATA.map((d) => ({ ...d, "mem:commit:used": 30, "mem:commit:total": 64 }));
+        mount({ focus: "mem", plotData: withCommit });
+        await vi.advanceTimersByTimeAsync(200);
+        expect(titles()).toHaveLength(3);
+        const committed = made.charts.find((c) => c.opts.series[1].label === "Committed");
+        // Its scale ends at the commit limit.
+        expect(committed.opts.scales.y.range()).toEqual([0, 64]);
+    });
+
+    it("disk: three charts and each volume's free space", async () => {
+        mount({ focus: "disk" });
+        await vi.advanceTimersByTimeAsync(200);
+        expect(made.charts).toHaveLength(3);
+        expect(screen.getByRole("list", { name: "Volumes" }).textContent).toBe("/data100.0 GB free of 500.0 GB");
+    });
+
+    it("lists only its own measures as a table", () => {
+        mount({ focus: "net" });
+        fireEvent.click(screen.getByRole("button", { name: "Show as a table" }));
+        const names = [...document.querySelectorAll(".sysinfo-overview-table tbody th")].map((c) => c.textContent);
+        expect(names).toEqual(["Network in", "Network out"]);
     });
 });

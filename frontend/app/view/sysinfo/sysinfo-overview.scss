@@ -16,6 +16,7 @@
 
 .sysinfo-overview-controls {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 6px;
 }
@@ -130,4 +131,35 @@
         font-weight: normal;
         color: var(--grey-text-color);
     }
+}
+
+// One area alone (sysinfo-focus.tsx): its charts share the pane's height, so a
+// small pane still shows all of them without scrolling.
+.sysinfo-focus {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    flex: 1 1 auto;
+    min-height: 0;
+}
+
+.sysinfo-focus .sysinfo-focus-chart {
+    flex: 1 1 0;
+    min-height: 70px;
+}
+
+.sysinfo-focus-volumes {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px 14px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    font-size: 11px;
+    color: var(--grey-text-color);
+}
+
+.sysinfo-focus-volume-name {
+    margin-right: 6px;
+    color: var(--main-text-color);
 }

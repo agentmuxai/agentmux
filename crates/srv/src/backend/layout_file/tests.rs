@@ -79,7 +79,7 @@ fn seeded_store() -> Store {
         "url": "https://example.com/docs/page?token=abc123&x=1#frag",
     }));
     block(&store, "b-edit", json!({ "view": "editor", "file": under_home("notes/todo.md") }));
-    block(&store, "b-sys", json!({ "view": "sysinfo", "sysinfo:type": "CPU" }));
+    block(&store, "b-sys", json!({ "view": "sysinfo", "sysinfo:type": "Overview", "sysinfo:focus": "net" }));
 
     let main_tree = LayoutNode {
         id: "n-root".into(),
@@ -212,7 +212,8 @@ fn views_are_written_from_the_allowlist_only() {
     let edit = &main.panes["p3"].views[0];
     assert_eq!(edit.config["file"], "~/notes/todo.md");
     let sys = &doc.windows[0].tabs[1].panes["p1"].views[0];
-    assert_eq!(sys.config["sysinfo_type"], "CPU");
+    assert_eq!(sys.config["sysinfo_type"], "Overview");
+    assert_eq!(sys.config["sysinfo_focus"], "net");
 }
 
 #[test]
@@ -699,4 +700,14 @@ fn connectors_memory_and_old_armory_or_knowledge_entries_open_the_new_panes() {
         assert!(!m.contains_key("armory:section"), "{view}");
         assert!(plan.notes.is_empty(), "{:?}", plan.notes);
     }
+}
+
+#[test]
+fn a_sysinfo_pane_opens_on_its_plot_type_and_area() {
+    let home = tempfile::tempdir().unwrap();
+    let store = Store::open_in_memory().unwrap();
+    let view = json!({ "type": "sysinfo", "config": { "sysinfo_type": "Overview", "sysinfo_focus": "disk" } });
+    let plan = plan_from_doc(&store, &one_pane(view), &opts(home.path(), false));
+    let m = block_meta(&plan, 0, 0);
+    assert_eq!((m["sysinfo:type"].as_str(), m["sysinfo:focus"].as_str()), (Some("Overview"), Some("disk")));
 }

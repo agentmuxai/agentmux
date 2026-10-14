@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-/** The pane's own window: chosen in the Overview, kept in its meta, ahead of the global setting. */
+/** The pane's own window and area: chosen in the Overview, kept in its meta; the window ahead of the global setting. */
 import { createRoot, createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -71,6 +71,39 @@ describe("SysinfoViewModel window", () => {
             const { model: m } = model();
             m.setWindow(5000);
             expect(m.numPoints()).toBe(1024);
+            dispose();
+        });
+    });
+});
+
+describe("SysinfoViewModel focus", () => {
+    it("shows every area until one is chosen, and reads one saved in the meta", () => {
+        createRoot((dispose) => {
+            expect(model().model.focus()).toBeNull();
+            expect(model({ "sysinfo:focus": "mem" }).model.focus()).toBe("mem");
+            expect(model({ "sysinfo:focus": "bogus" }).model.focus()).toBeNull();
+            dispose();
+        });
+    });
+
+    it("takes an area at once, saves it, and is named for it; every area again clears it", () => {
+        createRoot((dispose) => {
+            const { model: m, setMeta } = model();
+            expect(m.viewName()).toBe("Overview");
+            m.setFocus("cpu");
+            expect(m.focus()).toBe("cpu");
+            expect(m.viewName()).toBe("CPU");
+            expect(setMeta).toHaveBeenCalledWith({ "sysinfo:focus": "cpu" });
+            m.setFocus(null);
+            expect(m.viewName()).toBe("Overview");
+            expect(setMeta).toHaveBeenLastCalledWith({ "sysinfo:focus": null });
+            dispose();
+        });
+    });
+
+    it("leaves a classic plot type's name alone", () => {
+        createRoot((dispose) => {
+            expect(model({ "sysinfo:type": "Mem", "sysinfo:focus": "cpu" }).model.viewName()).toBe("Mem");
             dispose();
         });
     });

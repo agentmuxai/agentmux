@@ -4,8 +4,9 @@
 /**
  * Sysinfo's Overview: the machine at a glance, then over time.
  *
- * - One row of controls: the window (1 to 15 minutes), pause, and a table of the
- *   figures instead of the charts.
+ * - One row of controls: every area or one alone (`sysinfo-focus.tsx`), the
+ *   window (1 to 15 minutes), pause, and a table of the figures instead of the
+ *   charts. In a narrow pane the area buttons take a row of their own.
  * - A tile per area (CPU, memory, network, disk): its value now, its low and
  *   high over the window, and a sparkline.
  * - Charts, one per measure on its own scale (never two y axes), sharing one
@@ -23,9 +24,12 @@ import { IconButton, SegmentedControl } from "@/app/element/ui";
 import "./sysinfo-overview.scss";
 
 import { formatValue, type SeriesSpec, yRange } from "./sysinfo-chart";
+import { FocusView } from "./sysinfo-focus";
 import { CoreHeatmap } from "./sysinfo-heatmap";
 import {
     coreKeys,
+    FOCUS_CHOICES,
+    type FocusArea,
     formatGB,
     formatRate,
     mirroredRange,
@@ -34,14 +38,14 @@ import {
     type WindowStats,
 } from "./sysinfo-overview-data";
 import { TimeChart } from "./sysinfo-plot";
-import { DefaultPlotMeta, type DataItem } from "./sysinfo-types";
+import { type DataItem, DefaultPlotMeta } from "./sysinfo-types";
 
 const CPU = "var(--sysinfo-cpu-color)";
 const MEM = "var(--sysinfo-mem-color)";
 const IN = "var(--sysinfo-in-color)";
 const OUT = "var(--sysinfo-out-color)";
 
-export type OverviewProps = {
+type OverviewProps = {
     plotData: DataItem[];
     targetLen: number;
     intervalSecs: number;
@@ -50,6 +54,9 @@ export type OverviewProps = {
     onWindow: (points: number) => void;
     paused: boolean;
     onPause: (paused: boolean) => void;
+    /** The area shown alone, or `null` for every area, and a way to change it. */
+    focus: FocusArea | null;
+    onFocus: (area: FocusArea | null) => void;
     syncKey: string;
 };
 
@@ -144,20 +151,42 @@ export function Overview(props: OverviewProps): JSX.Element {
             max: st ? f(st.max) : "–",
             avg: st ? f(st.avg) : "–",
         });
-        return [
+        const cpu = [
             line("CPU", s.cpu, pct),
-            line("Memory used", s.mem, formatGB),
-            line("Network in", s.recv, formatRate),
-            line("Network out", s.sent, formatRate),
-            line("Disk read", s.read, formatRate),
-            line("Disk write", s.write, formatRate),
             ...cores().map((k) => line(`Core ${k.slice(4)}`, windowStats(rows(), k), pct)),
         ];
+        const mem = [
+            line("Memory used", s.mem, formatGB),
+            line("Memory available", windowStats(rows(), "mem:available"), formatGB),
+            line("Memory committed", windowStats(rows(), "mem:commit:used"), formatGB),
+        ];
+        const net = [line("Network in", s.recv, formatRate), line("Network out", s.sent, formatRate)];
+        const disk = [line("Disk read", s.read, formatRate), line("Disk write", s.write, formatRate)];
+        // An area alone lists only its own measures.
+        switch (props.focus) {
+            case "cpu":
+                return cpu;
+            case "mem":
+                return mem.filter((r) => r.now !== "–");
+            case "net":
+                return net;
+            case "disk":
+                return disk;
+            default:
+                return [cpu[0], mem[0], ...net, ...disk, ...cpu.slice(1)];
+        }
     });
 
     return (
         <div class="sysinfo-overview">
             <div class="sysinfo-overview-controls">
+                <SegmentedControl
+                    ariaLabel="Area"
+                    density="compact"
+                    options={FOCUS_CHOICES.map((c) => ({ value: c.value, label: c.label }))}
+                    value={props.focus ?? "overview"}
+                    onChange={(v) => props.onFocus(v === "overview" ? null : (v as FocusArea))}
+                />
                 <SegmentedControl
                     ariaLabel="Time window"
                     density="compact"
@@ -183,27 +212,29 @@ export function Overview(props: OverviewProps): JSX.Element {
                 />
             </div>
 
-            <div class="sysinfo-overview-tiles">
-                <For each={tiles()}>
-                    {(t) => (
-                        <div class="sysinfo-tile">
-                            <div class="sysinfo-tile-name">{t.name}</div>
-                            <div class="sysinfo-tile-value">{t.value}</div>
-                            <div class="sysinfo-tile-range">{t.range}</div>
-                            <TimeChart
-                                plotData={rows()}
-                                series={[{ key: t.sparkKey, label: t.name, color: t.color }]}
-                                yRange={t.range0}
-                                format={t.format}
-                                targetLen={props.targetLen}
-                                intervalSecs={props.intervalSecs}
-                                sparkline
-                                class="sysinfo-tile-spark"
-                            />
-                        </div>
-                    )}
-                </For>
-            </div>
+            <Show when={!props.focus}>
+                <div class="sysinfo-overview-tiles">
+                    <For each={tiles()}>
+                        {(t) => (
+                            <div class="sysinfo-tile">
+                                <div class="sysinfo-tile-name">{t.name}</div>
+                                <div class="sysinfo-tile-value">{t.value}</div>
+                                <div class="sysinfo-tile-range">{t.range}</div>
+                                <TimeChart
+                                    plotData={rows()}
+                                    series={[{ key: t.sparkKey, label: t.name, color: t.color }]}
+                                    yRange={t.range0}
+                                    format={t.format}
+                                    targetLen={props.targetLen}
+                                    intervalSecs={props.intervalSecs}
+                                    sparkline
+                                    class="sysinfo-tile-spark"
+                                />
+                            </div>
+                        )}
+                    </For>
+                </div>
+            </Show>
 
             <Show
                 when={!table()}
@@ -234,56 +265,69 @@ export function Overview(props: OverviewProps): JSX.Element {
                     </table>
                 }
             >
-                <div class="sysinfo-overview-charts">
-                    <TimeChart
-                        plotData={rows()}
-                        series={[{ key: "cpu", label: "CPU", color: CPU }]}
-                        yRange={() => [0, 100]}
-                        format={pct}
-                        targetLen={props.targetLen}
-                        intervalSecs={props.intervalSecs}
-                        syncKey={props.syncKey}
-                        title="CPU"
-                        class="sysinfo-overview-wide"
-                    />
-                    <Show when={cores().length > 0}>
-                        <div class="sysinfo-overview-wide sysinfo-overview-cores">
-                            <div class="sysinfo-chart-title">{`Cores (${cores().length})`}</div>
-                            <CoreHeatmap plotData={rows()} cores={cores()} color={CPU} />
-                        </div>
-                    </Show>
-                    <TimeChart
-                        plotData={rows()}
-                        series={[{ key: "mem:used", label: "Memory", color: MEM }]}
-                        yRange={(r) => yRange(r, "mem:used", DefaultPlotMeta["mem:used"])}
-                        format={formatGB}
-                        targetLen={props.targetLen}
-                        intervalSecs={props.intervalSecs}
-                        syncKey={props.syncKey}
-                        title="Memory used"
-                    />
-                    <TimeChart
-                        plotData={rows()}
-                        series={netSeries}
-                        yRange={(r) => mirroredRange(r, "net:bytesrecv", "net:bytessent", 1)}
-                        format={formatRate}
-                        targetLen={props.targetLen}
-                        intervalSecs={props.intervalSecs}
-                        syncKey={props.syncKey}
-                        title="Network: in above, out below"
-                    />
-                    <TimeChart
-                        plotData={rows()}
-                        series={diskSeries}
-                        yRange={(r) => mirroredRange(r, "disk:read", "disk:write", 1)}
-                        format={formatRate}
-                        targetLen={props.targetLen}
-                        intervalSecs={props.intervalSecs}
-                        syncKey={props.syncKey}
-                        title="Disk: read above, write below"
-                        class="sysinfo-overview-wide"
-                    />
-                </div>
+                <Show
+                    when={!props.focus}
+                    fallback={
+                        <FocusView
+                            area={props.focus as FocusArea}
+                            plotData={rows()}
+                            targetLen={props.targetLen}
+                            intervalSecs={props.intervalSecs}
+                            syncKey={props.syncKey}
+                        />
+                    }
+                >
+                    <div class="sysinfo-overview-charts">
+                        <TimeChart
+                            plotData={rows()}
+                            series={[{ key: "cpu", label: "CPU", color: CPU }]}
+                            yRange={() => [0, 100]}
+                            format={pct}
+                            targetLen={props.targetLen}
+                            intervalSecs={props.intervalSecs}
+                            syncKey={props.syncKey}
+                            title="CPU"
+                            class="sysinfo-overview-wide"
+                        />
+                        <Show when={cores().length > 0}>
+                            <div class="sysinfo-overview-wide sysinfo-overview-cores">
+                                <div class="sysinfo-chart-title">{`Cores (${cores().length})`}</div>
+                                <CoreHeatmap plotData={rows()} cores={cores()} color={CPU} />
+                            </div>
+                        </Show>
+                        <TimeChart
+                            plotData={rows()}
+                            series={[{ key: "mem:used", label: "Memory", color: MEM }]}
+                            yRange={(r) => yRange(r, "mem:used", DefaultPlotMeta["mem:used"])}
+                            format={formatGB}
+                            targetLen={props.targetLen}
+                            intervalSecs={props.intervalSecs}
+                            syncKey={props.syncKey}
+                            title="Memory used"
+                        />
+                        <TimeChart
+                            plotData={rows()}
+                            series={netSeries}
+                            yRange={(r) => mirroredRange(r, "net:bytesrecv", "net:bytessent", 1)}
+                            format={formatRate}
+                            targetLen={props.targetLen}
+                            intervalSecs={props.intervalSecs}
+                            syncKey={props.syncKey}
+                            title="Network: in above, out below"
+                        />
+                        <TimeChart
+                            plotData={rows()}
+                            series={diskSeries}
+                            yRange={(r) => mirroredRange(r, "disk:read", "disk:write", 1)}
+                            format={formatRate}
+                            targetLen={props.targetLen}
+                            intervalSecs={props.intervalSecs}
+                            syncKey={props.syncKey}
+                            title="Disk: read above, write below"
+                            class="sysinfo-overview-wide"
+                        />
+                    </div>
+                </Show>
             </Show>
         </div>
     );

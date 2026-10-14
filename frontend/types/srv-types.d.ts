@@ -666,6 +666,7 @@ declare global {
         "graph:numpoints"?: number;
         "graph:metrics"?: string[];
         "sysinfo:type"?: string;
+        "sysinfo:focus"?: string | null;
         "bg:*"?: boolean;
         bg?: string;
         "bg:opacity"?: number;

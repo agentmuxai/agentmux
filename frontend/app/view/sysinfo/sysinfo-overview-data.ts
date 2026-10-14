@@ -87,6 +87,59 @@ export function formatGB(gb: number | null | undefined): string {
     return `${gb.toFixed(1)} GB`;
 }
 
+/** One area shown alone, in a pane too small for the whole Overview. */
+export type FocusArea = "cpu" | "mem" | "disk" | "net";
+
+/** The area choices; `overview` is every area at once. */
+export const FOCUS_CHOICES = [
+    { value: "overview", label: "Overview" },
+    { value: "cpu", label: "CPU" },
+    { value: "mem", label: "Memory" },
+    { value: "disk", label: "Disk" },
+    { value: "net", label: "Network" },
+] as const;
+
+/** A saved area, or `null` (the Overview) for anything else. */
+export function toFocusArea(v: unknown): FocusArea | null {
+    return v === "cpu" || v === "mem" || v === "disk" || v === "net" ? v : null;
+}
+
+/** The key `withBusiestCore` adds: the busiest core's reading in each sample. */
+export const BUSIEST_CORE = "cpu:busiest";
+
+/** `rows` with each sample's busiest core added, which shows one thread maxing out a core while the average stays low. */
+export function withBusiestCore(rows: DataItem[], cores: string[]): DataItem[] {
+    if (cores.length === 0) return rows;
+    return rows.map((row) => {
+        if (row.blank === 1) return { ...row, [BUSIEST_CORE]: NaN };
+        let busiest = -Infinity;
+        for (const k of cores) busiest = Math.max(busiest, reading(row, k) ?? -Infinity);
+        return { ...row, [BUSIEST_CORE]: Number.isFinite(busiest) ? busiest : NaN };
+    });
+}
+
+/** One mounted volume's space, from the newest sample. */
+interface Volume {
+    mount: string;
+    freeGB: number;
+    totalGB: number;
+}
+
+/** The volumes a sample carries (`disk:vol:<mount>:free_gb` and `:total_gb`), in mount order. */
+export function volumes(row: DataItem | undefined): Volume[] {
+    if (!row) return [];
+    const out: Volume[] = [];
+    for (const key of Object.keys(row)) {
+        const m = /^disk:vol:(.+):free_gb$/.exec(key);
+        if (!m) continue;
+        const total = reading(row, `disk:vol:${m[1]}:total_gb`);
+        const free = reading(row, key);
+        if (total == null || free == null || total <= 0) continue;
+        out.push({ mount: m[1], freeGB: free, totalGB: total });
+    }
+    return out.sort((a, b) => a.mount.localeCompare(b.mount));
+}
+
 /** The window choices, in samples at the default 1 s interval. */
 export const WINDOW_CHOICES = [
     { points: 60, label: "1m" },

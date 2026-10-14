@@ -19,7 +19,7 @@ import type { DataItem } from "./sysinfo-types";
 const MIN_ALPHA = 0.08;
 
 /** The alpha a load in percent is drawn with. */
-export function cellAlpha(pct: number): number {
+function cellAlpha(pct: number): number {
     const v = Math.max(0, Math.min(100, pct)) / 100;
     return MIN_ALPHA + (1 - MIN_ALPHA) * v;
 }
@@ -73,7 +73,10 @@ export function CoreHeatmap(props: { plotData: DataItem[]; cores: string[]; colo
         if (!rows.length || !props.cores.length || width <= 0) return;
         const rect = host.getBoundingClientRect();
         const c = Math.min(rows.length - 1, Math.max(0, Math.floor(((e.clientX - rect.left) / width) * rows.length)));
-        const r = Math.min(props.cores.length - 1, Math.max(0, Math.floor(((e.clientY - rect.top) / height) * props.cores.length)));
+        const r = Math.min(
+            props.cores.length - 1,
+            Math.max(0, Math.floor(((e.clientY - rect.top) / height) * props.cores.length))
+        );
         const row = rows[c];
         const v = row.blank === 1 ? null : row[props.cores[r]];
         if (typeof v !== "number" || !Number.isFinite(v)) {

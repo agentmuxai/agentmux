@@ -3,7 +3,18 @@
 
 import { describe, expect, it } from "vitest";
 
-import { coreGrid, coreKeys, formatGB, formatRate, mirroredRange, windowStats } from "./sysinfo-overview-data";
+import {
+    BUSIEST_CORE,
+    coreGrid,
+    coreKeys,
+    formatGB,
+    formatRate,
+    mirroredRange,
+    toFocusArea,
+    volumes,
+    windowStats,
+    withBusiestCore,
+} from "./sysinfo-overview-data";
 import type { DataItem } from "./sysinfo-types";
 
 const row = (ts: number, v: Record<string, number>): DataItem => ({ ts, ...v });
@@ -66,5 +77,36 @@ describe("formatting", () => {
     it("formatGB rounds to one decimal", () => {
         expect(formatGB(12.345)).toBe("12.3 GB");
         expect(formatGB(undefined)).toBe("–");
+    });
+});
+
+describe("an area alone", () => {
+    it("reads a saved area, and anything else as the Overview", () => {
+        expect(toFocusArea("net")).toBe("net");
+        expect(toFocusArea("overview")).toBeNull();
+        expect(toFocusArea(undefined)).toBeNull();
+        expect(toFocusArea(3)).toBeNull();
+    });
+
+    it("adds each sample's busiest core, and keeps a gap a gap", () => {
+        const rows = [row(1, { "cpu:0": 10, "cpu:1": 90 }), marker(2), row(3, { "cpu:0": 50 })];
+        const out = withBusiestCore(rows, ["cpu:0", "cpu:1"]);
+        expect(out.map((r) => r[BUSIEST_CORE])).toEqual([90, NaN, 50]);
+        expect(out[1].blank).toBe(1);
+        expect(withBusiestCore(rows, [])).toBe(rows);
+    });
+
+    it("lists the volumes a sample carries, a Windows mount with its colon included", () => {
+        const win = "disk:vol:C:" + String.fromCharCode(92);
+        const r = row(1, {
+            [`${win}:free_gb`]: 100,
+            [`${win}:total_gb`]: 500,
+            [`${win}:is_system_drive`]: 1,
+            "disk:vol:/data:free_gb": 5,
+            "disk:vol:/data:total_gb": 0,
+        });
+        // A volume without a size is left out.
+        expect(volumes(r)).toEqual([{ mount: "C:" + String.fromCharCode(92), freeGB: 100, totalGB: 500 }]);
+        expect(volumes(undefined)).toEqual([]);
     });
 });

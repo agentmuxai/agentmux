@@ -14,6 +14,7 @@ import { WpsEvent } from "@/app/store/mps-events";
 
 import { DataItem, DefaultNumPoints, DefaultPlotMeta, DefaultPlotType, PlotTypes } from "./sysinfo-types";
 import { GapBackfiller } from "./sysinfo-backfill";
+import { FOCUS_CHOICES, type FocusArea, toFocusArea } from "./sysinfo-overview-data";
 import { convertTimeSeriesToDataItem, getGapThresholdMs } from "./sysinfo-util";
 import type { ConnStatus } from "@/types/rpc/ConnStatus";
 import { readMuxEventHistory } from "@/app/store/mps-history";
@@ -242,6 +243,10 @@ class SysinfoViewModel {
     numPoints: () => number;
     /** The window chosen in this pane this session, until its meta catches up. */
     private windowChoice: SignalAtom<number | null>;
+    /** The Overview's area shown alone (`sysinfo:focus`), or `null` for every area. */
+    focus: () => FocusArea | null;
+    /** The area chosen in this pane this session, until its meta catches up; `undefined` before any. */
+    private focusChoice: SignalAtom<FocusArea | null | undefined>;
     metrics: () => string[];
     connection: () => string;
     manageConnection: () => boolean;
@@ -322,6 +327,7 @@ class SysinfoViewModel {
 
         this.dataAtom = createSignalAtom<DataItem[]>([]);
         this.windowChoice = createSignalAtom<number | null>(null);
+        this.focusChoice = createSignalAtom<FocusArea | null | undefined>(undefined);
         this.loadingAtom = createSignalAtom(true);
         this.plotMetaAtom = createSignalAtom(new Map(Object.entries(DefaultPlotMeta)));
         this.manageConnection = createMemo(() => true);
@@ -359,7 +365,17 @@ class SysinfoViewModel {
 
         this.viewIcon = createMemo(() => "chart-line");
 
-        this.viewName = createMemo(() => this.plotTypeSelectedAtom());
+        this.focus = createMemo(() => {
+            const chosen = this.focusChoice();
+            return chosen !== undefined ? chosen : toFocusArea(this.meta()?.["sysinfo:focus"]);
+        });
+
+        // An Overview showing one area is named for it ("CPU", "Memory").
+        this.viewName = createMemo(() => {
+            const plotType = this.plotTypeSelectedAtom();
+            const area = plotType === DefaultPlotType ? this.focus() : null;
+            return area ? (FOCUS_CHOICES.find((c) => c.value === area)?.label ?? plotType) : plotType;
+        });
 
         this.viewText = createMemo(() => "");
 
@@ -392,6 +408,12 @@ class SysinfoViewModel {
         this.windowChoice._set(points);
         void this.ctx.setMeta({ "graph:numpoints": points });
         void this.loadInitialData();
+    }
+
+    /** Show one area alone, or every area (`null`): saved in the pane's meta. */
+    setFocus(area: FocusArea | null) {
+        this.focusChoice._set(area);
+        void this.ctx.setMeta({ "sysinfo:focus": area });
     }
 
     getConfiguredInterval(): number {
