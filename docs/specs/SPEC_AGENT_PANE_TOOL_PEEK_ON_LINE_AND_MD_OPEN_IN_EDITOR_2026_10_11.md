@@ -97,6 +97,17 @@ A tool's preview is capped at a third of half the window height (`$transcript-pr
 
 Tests: every tool's preview has the toggle and a Markdown one has both buttons; the toggle sets and clears `--tall` and swaps its label (`open-in-editor.test.tsx`).
 
+### 3.1 Only while there is more to see
+
+The toggle exists to show more of a preview that is cut off, so a preview that fits has none. It is there while the preview's scrolling box has a vertical scroll (its content is taller than the box by more than a pixel), and also while the preview is already tall, so a tall preview can always be made short again even when everything now fits. A Markdown file preview that fits keeps its Open in editor button and loses only the toggle; a preview with neither has no actions strip at all.
+
+- `ToolOverlayLog` reports whether its box scrolls, on the resizes it already watches for pinning to the latest output ([`overflow-report.ts`](../../frontend/app/view/agent/components/overflow-report.ts)), and `ToolBlock` shows the toggle from that.
+- A reading waits for transitions in the panel to end. The panel opens by a `max-height` transition and the height FLIP pins the box while it eases, so mid-way the box is clipped to part of its height and a preview that fits would read as scrolling. Endless animations (a blinking cursor) are not waited for.
+- It reads nothing while the panel is collapsed (its subtree is `content-visibility: hidden`, where reading layout forces a render), and starts again when the body mounts.
+- Output that grows past the box while the tool runs gains the toggle at that moment; output that shrinks back loses it, unless it was made tall.
+
+Tests: [`tool-height-toggle.test.tsx`](../../frontend/app/view/agent/components/tool-height-toggle.test.tsx) (a preview that scrolls has the toggle and one that fits has none, the toggle appears and goes as output grows and shrinks, a tall preview keeps it, a Markdown preview that fits keeps Open in editor, and the panel opening isn't read as scrolling) and [`overflow-report.test.ts`](../../frontend/app/view/agent/components/overflow-report.test.ts).
+
 ## 4. Open questions
 
 1. **Container agents (decided).** Hidden: the paths are inside the container, and the editor has no way into it.
