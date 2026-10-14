@@ -353,8 +353,8 @@ describe("PaneTabStrip", () => {
         // Named by the label, not the tooltip — the visible text is what a
         // screen reader should announce once there is one.
         const addBtn = screen.getByRole("button", { name: "New Agent" });
-        expect(addBtn.textContent).toContain("+");
-        expect(addBtn.textContent).toContain("New Agent");
+        expect(addBtn.querySelector(".pane-tab-strip-add-glyph")).not.toBeNull();
+        expect(addBtn.textContent).toBe("New Agent");
         expect(container.querySelector(".pane-tab-strip-add-labeled")).toBe(addBtn);
     });
 
@@ -371,7 +371,9 @@ describe("PaneTabStrip", () => {
             />
         ));
         const addBtn = screen.getByRole("button", { name: "New shell tab" });
-        expect(addBtn.textContent).toBe("+");
+        // The "+" is drawn (no text glyph to sit off centre); the aria-label names it.
+        expect(addBtn.textContent).toBe("");
+        expect(addBtn.querySelector(".pane-tab-strip-add-glyph")?.getAttribute("aria-hidden")).toBe("true");
         expect(container.querySelector(".pane-tab-strip-add-label")).toBeNull();
         expect(container.querySelector(".pane-tab-strip-add-labeled")).toBeNull();
     });
