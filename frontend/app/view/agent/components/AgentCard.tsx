@@ -165,7 +165,7 @@ export const AgentCard = (props: AgentCardProps): JSX.Element => {
             role="button"
             tabIndex={props.disabled ? -1 : 0}
             aria-disabled={props.disabled}
-            aria-label={`Launch ${caption()}`}
+            aria-label={`Launch ${title()}`}
         >
             {/* Harness icon only — no vendor badge. This section is
                 explicitly about picking a harness (see the section hint
@@ -219,7 +219,7 @@ export const AgentCard = (props: AgentCardProps): JSX.Element => {
                     class="agent-card-new-session-btn"
                     onClick={handleNewClick}
                     title="Archive current session and start a new one"
-                    aria-label={`Start a new session for ${caption()} (archives the current one)`}
+                    aria-label={`Start a new session for ${title()} (archives the current one)`}
                     tabIndex={props.disabled ? -1 : 0}
                 >
                     {"+ New"}

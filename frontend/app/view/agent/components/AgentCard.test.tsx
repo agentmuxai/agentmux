@@ -131,10 +131,17 @@ describe("AgentCard other rendering", () => {
 
     it("titles the card with the CLI name and captions it with the provider blurb", () => {
         const { container } = render(() => (
-            <AgentCard agent={makeAgent()} launching={false} disabled={false} onLaunch={() => {}} />
+            <AgentCard agent={makeAgent()} launching={false} disabled={false} installed={true} onLaunch={() => {}} />
         ));
         expect(container.querySelector(".agent-card-title")?.textContent).toBe("Claude Code");
         expect(container.querySelector(".agent-card-caption")?.textContent).toBe("Anthropic's coding agent");
+    });
+
+    it("names the launch action after the CLI, not the blurb", () => {
+        render(() => (
+            <AgentCard agent={makeAgent()} launching={false} disabled={false} installed={true} onLaunch={() => {}} />
+        ));
+        expect(screen.getByRole("button", { name: "Launch Claude Code" })).toBeTruthy();
     });
 });
 
