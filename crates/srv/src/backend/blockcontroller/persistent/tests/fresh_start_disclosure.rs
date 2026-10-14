@@ -46,11 +46,13 @@ fn generation_zero_is_not_treated_as_a_first_spawn() {
 fn a_continued_fresh_outcome_keeps_its_outcome_and_adds_the_flag() {
     use super::super::{persistent_resume::SessionOutcome, session_outcome_line, session_outcome_line_with};
     let v: serde_json::Value =
-        serde_json::from_str(session_outcome_line_with(SessionOutcome::Fresh, String::new(), None, true).trim()).unwrap();
+        serde_json::from_str(session_outcome_line_with(SessionOutcome::Fresh, String::new(), None, true, true).trim()).unwrap();
     assert_eq!(v["subtype"], "agentmux_session_outcome");
     assert_eq!(v["outcome"], "fresh");
     assert_eq!(v["continued"], true);
+    assert_eq!(v["idle_start"], true);
     let plain: serde_json::Value =
         serde_json::from_str(session_outcome_line(SessionOutcome::Resumed, "a".into(), Some("a".into())).trim()).unwrap();
     assert_eq!(plain["continued"], false);
+    assert_eq!(plain["idle_start"], false, "only a spawn with nothing queued behind it starts idle");
 }

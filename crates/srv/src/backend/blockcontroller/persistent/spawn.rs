@@ -402,7 +402,10 @@ impl PersistentSubprocessController {
                 continued = continuation.is_some(),
                 "spawned with no --resume while prior history exists — disclosing a fresh start"
             );
-            self.emit_fresh_outcome_now(String::new(), continuation.is_some());
+            // Idle when no message flows with this spawn (the same test as the
+            // turn-active check below).
+            let idle_start = !had_retry_payload && self.inner.lock().unwrap().pending_send_messages.is_empty();
+            self.emit_fresh_outcome_now(String::new(), continuation.is_some(), idle_start);
         }
         let pid = child.id().unwrap_or(0);
 

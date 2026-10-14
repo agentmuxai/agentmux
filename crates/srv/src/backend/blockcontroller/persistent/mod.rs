@@ -48,6 +48,7 @@ use super::{
 use super::core;
 use super::health::TurnActivityTracker;
 use super::persistent_resume;
+use outcome_line::{session_outcome_line, session_outcome_line_with};
 use crate::backend::eventbus::EventBus;
 use crate::backend::storage::filestore::FileStore;
 use crate::backend::storage::store::Store;
@@ -120,47 +121,6 @@ fn next_registration_nonce() -> u64 {
     NEXT_REGISTRATION_NONCE.fetch_add(1, Ordering::Relaxed) + 1
 }
 
-/// Builds the NDJSON line for a `persistent_resume::ResumeEffect::
-/// EmitSessionOutcome` — a free function (not a method) so it's callable
-/// directly from the stdout-reader, process-waiter, and stop-path match
-/// arms below, which only hold `_read`/`_wait`-suffixed clones, not
-/// `&self`. See SPEC_AGENT_PANE_HISTORY_ALIGNMENT_2026_08_05.md §2.1.
-fn session_outcome_line(
-    outcome: persistent_resume::SessionOutcome,
-    attempted_sid: String,
-    actual_sid: Option<String>,
-) -> String {
-    session_outcome_line_with(outcome, attempted_sid, actual_sid, false)
-}
-
-/// [`session_outcome_line`], plus whether the fresh session was given
-/// AgentMux's record of the conversation (`continued`, SPEC_DURABLE_
-/// CONVERSATION_MEMORY_2026_09_23.md §4.8). The outcome stays `fresh`: the
-/// provider session is new, and every consumer that scopes scrollback on
-/// `fresh` keeps doing so. Only the pane's label changes.
-fn session_outcome_line_with(
-    outcome: persistent_resume::SessionOutcome,
-    attempted_sid: String,
-    actual_sid: Option<String>,
-    continued: bool,
-) -> String {
-    let outcome_str = match outcome {
-        persistent_resume::SessionOutcome::Resumed => "resumed",
-        persistent_resume::SessionOutcome::Fresh => "fresh",
-    };
-    format!(
-        "{}\n",
-        serde_json::json!({
-            "type": "system",
-            "subtype": "agentmux_session_outcome",
-            "outcome": outcome_str,
-            "attempted_sid": attempted_sid,
-            "actual_sid": actual_sid,
-            "continued": continued,
-            "timestamp": chrono::Utc::now().to_rfc3339(),
-        })
-    )
-}
 
 /// Should a spawn that attached NO `--resume` disclose itself as a fresh
 /// start (subject to the caller also confirming prior history actually
@@ -1720,6 +1680,7 @@ fn surface_error_line(
 mod eager_resume;
 mod input;
 mod lifecycle;
+mod outcome_line;
 mod process_waiter;
 mod queue;
 mod resume_retry;

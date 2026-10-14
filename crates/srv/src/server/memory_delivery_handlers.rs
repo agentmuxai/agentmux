@@ -413,6 +413,7 @@ pub(crate) async fn handle_session_start_part(
         st.prune(now);
         // The frontend's fallback already delivered this event: stand down.
         if st.fallback_claimed(&req.block_id, reason) {
+            tracing::info!(block_id = %req.block_id, reason = reason.as_str(), part = req.part, "memory delivery: part stood down, the fallback claimed the event");
             return Json(PartResponse { text: None, part: req.part, of: 0 });
         }
         st.deliveries.get(&key).cloned()
@@ -432,6 +433,7 @@ pub(crate) async fn handle_session_start_part(
                 (st.deliveries.get(&key).cloned(), st.fallback_claimed(&req.block_id, reason))
             };
             if claimed {
+                tracing::info!(block_id = %req.block_id, reason = reason.as_str(), part = req.part, "memory delivery: part stood down, the fallback claimed the event");
                 return Json(PartResponse { text: None, part: req.part, of: 0 });
             }
             if let Some(d) = composed_meanwhile {
@@ -452,8 +454,13 @@ pub(crate) async fn handle_session_start_part(
                     })
             };
             let Some(composed) = composed else {
+                tracing::info!(block_id = %req.block_id, session_id = %req.session_id, reason = reason.as_str(), part = req.part, cwd_known = !req.cwd.is_empty(), "memory delivery: nothing to deliver for this session start");
                 return Json(PartResponse { text: None, part: req.part, of: 0 });
             };
+            tracing::info!(
+                block_id = %req.block_id, session_id = %req.session_id, reason = reason.as_str(),
+                parts = composed.parts.len(), items = composed.entries.len(), "memory delivery: composed"
+            );
             // A concurrent part may have composed first: keep that one, so
             // every part of this session start is from the same composition.
             // And the fallback may have claimed the event meanwhile.

@@ -27,6 +27,14 @@ export interface SessionOutcomeData {
      */
     continued?: boolean;
     /**
+     * A `fresh` session that starts with no message behind it (an eager spawn,
+     * a resume the gate refused): nobody is talking to the agent yet, so the
+     * pane has it catch up. `false` when a message started the session;
+     * absent on frames that predate it, where the pane falls back on its own
+     * turn state.
+     */
+    idleStart?: boolean;
+    /**
      * The frame's own `timestamp` field, verbatim — used only to build a
      * stable node id shared by both consumers (same rationale as
      * `compact-boundary.ts`'s `frameTimestamp`: a live-seen event and the
@@ -55,7 +63,8 @@ export function parseSessionOutcomeFrame(rawEvent: unknown): SessionOutcomeData 
     const actualSid = typeof e.actual_sid === "string" ? e.actual_sid : null;
     const frameTimestamp = typeof e.timestamp === "string" ? e.timestamp : null;
     const continued = e.continued === true;
-    return { outcome, attemptedSid, actualSid, continued, frameTimestamp };
+    const idleStart = typeof e.idle_start === "boolean" ? e.idle_start : undefined;
+    return { outcome, attemptedSid, actualSid, continued, ...(idleStart === undefined ? {} : { idleStart }), frameTimestamp };
 }
 
 /**
