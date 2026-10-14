@@ -219,6 +219,7 @@ dependencies = [
  "quick-xml 0.39.4",
  "rcgen",
  "reqwest",
+ "ring",
  "rusqlite",
  "rustls",
  "serde",

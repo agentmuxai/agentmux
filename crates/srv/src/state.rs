@@ -7,18 +7,10 @@
 // pipe IPC server; mutex held only during reducer dispatch
 // (sub-millisecond).
 //
-// What's here:
-//   * `LifecyclePhase` (re-exported from agentmux-common::ipc) — E.1b
-//   * `ProcessRecord` — state — E.1b
-//   * `ProcessState` — Running / Exited — E.1b
-//   * `WorkspaceRecord` — workspace_id, name — E.2
-//   * `State` — top-level: lifecycle + process map + workspaces +
-//     monotonic counters
-//
-// What's intentionally NOT here yet:
-//   * Tab / Block / Layout domain state — E.2b+
-//   * `persistence_hwm` field — E.2c (lands with the persist
-//     subscriber that mirrors pipe-event effects back to SQLite)
+// Holds lifecycle, processes, workspaces, tabs (with their layout tree
+// and focus/magnify), blocks, and the window→workspace map. SQLite is a
+// projection: `persist::bootstrap_state_from_mstore` loads it at startup
+// and the persist subscriber writes each reducer event back.
 
 use std::collections::HashMap;
 
@@ -72,32 +64,17 @@ pub struct TabRecord {
     /// Phase E.3 — ordered list of block ids in this tab. Mirrors
     /// the persistent `Tab.blockids` field.
     pub block_ids: Vec<String>,
-    /// Phase E.4 (Option A) — focused layout node id. Empty when no
-    /// pane in this tab is focused. Mirrors
-    /// `LayoutState.focusednodeid` for the tab's layout row. Mutated
-    /// by `Command::SetFocusedNode` and bootstrap-loaded from the
-    /// LayoutState row at startup. The remaining LayoutState fields
-    /// (rootnode/leaforder/pendingbackendactions) stay on the
-    /// existing wcore-direct path until Option B.
+    /// Focused layout node id; empty when no pane in this tab is
+    /// focused. Mirrors `LayoutState.focusednodeid`.
     pub focused_node_id: String,
     /// Phase E.4 (Option A) — magnified layout node id. Empty when
     /// no pane is magnified (toggle-off). Mirrors
     /// `LayoutState.magnifiednodeid`.
     pub magnified_node_id: String,
-    /// Phase E.4.B (Option B) — layout tree root.
-    ///
-    /// Mirrors the persisted `LayoutState.rootnode`. Mutated by the
-    /// `LayoutClear` / `LayoutSetTree` / `LayoutInsertNode` /
-    /// `LayoutDeleteNode` reducer arms (and the rest of the 11 in
-    /// follow-up PRs). `None` represents an empty tree (no panes).
-    ///
-    /// **Status: scaffolded; bootstrap-loaded.** `persist::
-    /// bootstrap_state_from_mstore` populates this from
-    /// `LayoutState.rootnode` at startup. Production writers still
-    /// go through the wcore-direct path (per
-    /// `srv-phase-e4b-implementation-plan-2026-05-03.md` Phase 7);
-    /// reducer arms mutate this field but no production code
-    /// dispatches to them yet.
+    /// Layout tree root; `None` is an empty tree (no panes). The
+    /// reducer is its writer (`LayoutSetTree`, `LayoutDeleteNode*`, the
+    /// pane-tab stack arms); `LayoutState.rootnode` is persisted from
+    /// their events and bootstrap-loaded at startup.
     pub rootnode: Option<agentmux_common::LayoutNode>,
 }
 
@@ -135,13 +112,9 @@ pub struct State {
     pub processes: HashMap<u32, ProcessRecord>,
     pub event_version: u64,
     pub next_client_id: u64,
-    /// Phase E.2 — workspaces canonical to the srv reducer.
-    /// Bootstrapped from SQLite at startup; subsequent transitions
-    /// flow through `update`. In E.2 the reducer is a session-only
-    /// projection — pipe-originated mutations live only in this
-    /// map until the process restarts. E.2c adds the persist
-    /// subscriber that mirrors changes back to SQLite (idempotent,
-    /// version-gated) and migrates HTTP/WS RPC through the reducer.
+    /// Workspaces canonical to the srv reducer. Bootstrapped from
+    /// SQLite at startup; subsequent transitions flow through `update`
+    /// and are written back by the persist subscriber.
     pub workspaces: HashMap<String, WorkspaceRecord>,
     /// Phase E.2b — tabs canonical to the srv reducer. Keyed by
     /// `tab_id`; ordering within a workspace is held in
@@ -158,8 +131,6 @@ pub struct State {
     /// CloseWindow/SwitchWorkspace commands; sagas use it to keep
     /// window+workspace lifecycle coherent.
     pub windows: HashMap<String, WindowRecord>,
-    // `persistence_hwm` deferred to E.2c when the persist subscriber
-    // lands and there's actually something to track.
 }
 
 impl Default for State {

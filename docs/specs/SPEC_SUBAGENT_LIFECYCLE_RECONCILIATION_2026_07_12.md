@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-12
 **Author:** AgentX
-**Status:** Draft
+**Status:** implemented — #2134, #2132, #2235. Verified against code 2026-10-14 ([triage](../analysis/REPORT_REDUCER_STACK_TRIAGE_2026_10_13.md)).
 **Scope:** `SubagentInfo`/`ActiveSubagent` status end to end —
 `agentmux-srv/src/backend/subagent_watcher.rs` (backend) and
 [`frontend/app/view/swarm/swarm-model.ts`](../../frontend/app/view/swarm/swarm-model.ts) / `swarm-view.tsx` (frontend).

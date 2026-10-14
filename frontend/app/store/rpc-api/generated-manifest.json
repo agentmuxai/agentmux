@@ -1307,6 +1307,10 @@
             "method": "ViewerAgentHiddenCommand"
         },
         {
+            "command": "viewer.can-send",
+            "method": "ViewerCanSendCommand"
+        },
+        {
             "command": "viewer.devices",
             "method": "ViewerDevicesCommand"
         },

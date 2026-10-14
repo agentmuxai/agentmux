@@ -23,6 +23,7 @@ pub mod client;
 pub mod feed;
 pub mod pairing;
 pub mod panes;
+pub mod signing;
 pub mod terminal;
 
 use std::collections::HashMap;

@@ -238,6 +238,11 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
     // The preview at three times its usual height, toggled from its top-right
     // actions (SPEC_AGENT_PANE_TOOL_PEEK_ON_LINE_AND_MD_OPEN_IN_EDITOR_2026_10_11.md §3).
     const [tall, setTall] = createSignal(false);
+    // Whether the preview scrolls (ToolOverlayLog reports it). The toggle is for
+    // seeing more of a preview that is cut off, so a preview that fits has none,
+    // unless it is already tall: that one has to be able to shrink back.
+    const [scrolls, setScrolls] = createSignal(false);
+    const showHeightToggle = () => tall() || scrolls();
     // The panel's body (full tool output: diffs, file previews, Bash output,
     // all highlighted with shiki) mounts while the panel is open and for a
     // short linger after it closes, so the collapse transition runs on the
@@ -249,6 +254,10 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
     // call opens while it runs — so a session kept every tool's full output
     // (SPEC_TOOL_BODY_UNMOUNT_ON_COLLAPSE_2026_10_12.md).
     const bodyMounted = createBodyMount(expanded);
+    // The body is gone, and with it the box that reported; the next one reports afresh.
+    createEffect(() => {
+        if (!bodyMounted()) setScrolls(false);
+    });
     // The header click flips whichever set the rule says this row uses:
     // collapsedNodes for an open-by-default (content-first) tool, else the pin.
     const onHeaderClick = () =>
@@ -606,22 +615,26 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
                     onClick={(e) => e.stopPropagation()}
                 >
                     <Show when={bodyMounted()}>
-                        <div class="agent-tool-panel-actions">
-                            <Show when={markdownPreviewPath(props.node)}>
-                                {(path) => <OpenInEditorButton path={path()} />}
-                            </Show>
-                            <IconButton
-                                class="agent-tool-panel-height"
-                                icon={tall() ? "compress" : "expand"}
-                                label={tall() ? "Shorter preview" : "Taller preview"}
-                                density="compact"
-                                // The label says the state; no aria-pressed on top.
-                                onClick={(e: MouseEvent) => {
-                                    e.stopPropagation();
-                                    setTall(!tall());
-                                }}
-                            />
-                        </div>
+                        <Show when={markdownPreviewPath(props.node) || showHeightToggle()}>
+                            <div class="agent-tool-panel-actions">
+                                <Show when={markdownPreviewPath(props.node)}>
+                                    {(path) => <OpenInEditorButton path={path()} />}
+                                </Show>
+                                <Show when={showHeightToggle()}>
+                                    <IconButton
+                                        class="agent-tool-panel-height"
+                                        icon={tall() ? "compress" : "expand"}
+                                        label={tall() ? "Shorter preview" : "Taller preview"}
+                                        density="compact"
+                                        // The label says the state; no aria-pressed on top.
+                                        onClick={(e: MouseEvent) => {
+                                            e.stopPropagation();
+                                            setTall(!tall());
+                                        }}
+                                    />
+                                </Show>
+                            </div>
+                        </Show>
                         <Show
                             when={!props.node.resultUnloaded}
                             fallback={
@@ -632,7 +645,7 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
                                 </div>
                             }
                         >
-                            <ToolBlockOverlay node={props.node} dispatchMatch={props.dispatchMatch} />
+                            <ToolBlockOverlay node={props.node} dispatchMatch={props.dispatchMatch} onOverflowChange={setScrolls} />
                         </Show>
                     </Show>
                 </div>

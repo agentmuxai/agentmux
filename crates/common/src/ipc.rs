@@ -458,19 +458,19 @@ pub enum Command {
     /// * If `tab_id` was the source workspace's `active_tab_id`, the
     ///   source's active reverts to its first remaining tab (or
     ///   `None` if the source becomes empty).
-    /// Errors if any of: source workspace, dest workspace, or tab is
-    /// missing; if `tab.workspace_id != src_workspace_id`; or if
-    /// the tab is the source workspace's last tab AND no caller has
-    /// arranged a fallback (callers like tear-off should reject the
-    /// move at the saga layer if removing the tab would empty the
-    /// source — preserving the "workspaces have at least one tab"
-    /// invariant most UI paths assume). Used by the TearOffTab,
-    /// MoveTabToWorkspace, and RestoreTornOffTab sagas.
+    ///
+    /// Errors if the source, dest or tab is missing, the tab isn't in the
+    /// source, or it is the source's last tab and `allow_empty_source` is
+    /// false. Used by TearOffTab, MoveTabToWorkspace and RestoreTornOffTab.
     MoveTab {
         tab_id: String,
         src_workspace_id: String,
         dst_workspace_id: String,
         dst_index: u32,
+        /// Bypass the last-tab guard, for flows that drain a workspace and
+        /// then delete it. Defaults to `false`, like `DeleteTab.force`.
+        #[serde(default)]
+        allow_empty_source: bool,
     },
     /// Phase E.5.5 — move a block from one tab to another (or to a
     /// different position in the same tab).

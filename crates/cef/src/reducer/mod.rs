@@ -5,30 +5,30 @@
 //
 // Third reducer in the multi-reducer architecture, after the launcher
 // (Phase B) and srv (Phase E). Same pure-functional shape as the
-// other two: `update(&mut HostState, HostCommand) -> Vec<HostEvent>`,
+// other two: `update(&mut HostState, HostCommand) -> DispatchOutput`,
 // no I/O, no async, sub-millisecond mutex hold time.
 //
-// **Scope of F.1 (this PR):** skeleton + the `pending_window_creations`
-// arm. Per `docs/specs/SPEC_PHASE_F_HOST_REDUCER_2026-05-01.md` §3.1,
-// pending_window_creations is the lowest-risk migration:
-// single-producer/single-consumer queue with a clean enqueue/dequeue
-// lifecycle and no FFI handles inside.
+// **What it owns:** pending window creations, browser panes, the browser
+// handle registry, the drag session, the window and pane pools, quit,
+// per-window opacity, floating-pane placement and the background-service
+// attended/unattended flag (see the `HostState` fields). Every production
+// mutation goes through `AppState::host_dispatch`; readers take the lock,
+// snapshot what they need and drop it (spec §6).
 //
-// **NOT in F.1:** drag arms (F.3), tear-off hook arms (F.4 — folds
-// into the tear-off spec). The CEF `browsers` map and warm pool stay
-// outside the reducer indefinitely (snapshot-and-drop discipline at
-// every read site, see spec §3.2 / §6).
+// **Deterministic:** arms read no clock, global counter or environment.
+// Times arrive in the command (`RegisterBrowser::registered_at`,
+// `EnqueueBrowserPaneClose::now`), the pane-label sequence lives in
+// `HostState`, and env-derived config is read by `AppState::default` when it
+// builds the state. Arms don't log either; `host_dispatch` logs the
+// returned events after the reducer returns.
 //
-// **Wire protocol:** F.1's `HostCommand` and `HostEvent` are
-// host-internal. They do NOT cross IPC. When a future PR adds a
-// command that needs frontend or launcher access, that PR promotes
-// the relevant variants to `agentmux-common::ipc::Command` /
-// `agentmux-common::ipc::Event` and adds the IPC plumbing. Keeping
-// F.1 in-process avoids serializing `PendingWindowCreation` over a
-// pipe just to satisfy a pattern that has no current consumer.
+// **Wire protocol:** `HostCommand` and `HostEvent` are host-internal. They
+// do NOT cross IPC. A command that needs frontend or launcher access gets
+// promoted to `agentmux-common::ipc::Command` / `Event`, with IPC plumbing,
+// in the PR that needs it.
 
 use std::collections::{HashMap, VecDeque};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Instant;
 
 use cef::Browser;
 
@@ -37,17 +37,6 @@ use crate::state::{
     PanePoolState, PaneWindowState, PendingWindowCreation, PoolState, QuitReason, QuitState,
     WindowPlacement,
 };
-
-/// Lifecycle phase of the host reducer. Mirrors the launcher and srv
-/// reducers' phase enum.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum HostLifecyclePhase {
-    /// Normal operation: all commands accepted.
-    Running,
-    /// Shutting down: only cleanup commands accepted; producers
-    /// short-circuit with no-op events.
-    ShuttingDown,
-}
 
 /// State owned by the host reducer.
 ///
@@ -70,9 +59,9 @@ pub struct HostState {
     ///   never has a corresponding entry here.
     pub pending_window_creations: VecDeque<PendingWindowCreation>,
 
-    // ── Phase H — added in PR #1 (h1-foundations); populated by reducer
-    // arms below; no production callers yet. PRs #2-#5 wire each through
-    // the a→e migration ratchet. See SPEC_HOST_REDUCER_5PR_PLAN_2026-05-02.md.
+    // ── Phase H (SPEC_HOST_REDUCER_5PR_PLAN_2026-05-02.md) — each field
+    // below replaced an `AppState` field or a standalone state machine and is
+    // now the only copy, mutated only through `host_dispatch`.
 
     /// H.1 — pane lifecycle map. Replaces the deleted
     /// `pane::lifecycle::PaneStateMachine`. Keyed by `block_id`.
@@ -121,9 +110,11 @@ pub struct HostState {
     /// `LastWindowClosed` drain — closing the last window hides the app
     /// instead of tearing down `host`/`srv`/`launcher`. Read once at
     /// process start from `AGENTMUX_BACKGROUND_SERVICE` (presence-based,
-    /// matching the `AGENTMUX_DEV` idiom elsewhere in this crate); there is
-    /// no live-toggle path yet. Defaults off, so today's close-quits-the-app
-    /// behavior is unchanged for anyone who hasn't opted in. `wrr::win_event`'s
+    /// matching the `AGENTMUX_DEV` idiom elsewhere in this crate) by
+    /// `AppState::default`, which passes it to `HostState::new`; the reducer
+    /// itself never reads the environment. There is no live-toggle path
+    /// yet. Defaults off, so today's close-quits-the-app behavior is
+    /// unchanged for anyone who hasn't opted in. `wrr::win_event`'s
     /// quit watchdog (Windows) also reads this field (from the same locked
     /// `HostState`, alongside `registered`/`draining`) so it does not treat
     /// the resulting "0 registered, not draining" steady state as a desync
@@ -167,9 +158,17 @@ pub struct HostState {
     /// caused it. Holding it anywhere else meant two concurrent dispatches
     /// could apply out of order and drop a transition.
     ///
-    /// Seeded from the persisted log at startup, so an unattended period that
-    /// began before a host crash is still correctly open.
+    /// Seeded from the persisted log at startup (`SeedBackgroundUnattended`),
+    /// so an unattended period that began before a host crash is still
+    /// correctly open. Also set while a login start holds "main" hidden
+    /// (`SetStartHiddenHeld`).
     pub background_unattended: bool,
+
+    /// A login start (`start_hidden`) is holding "main" hidden. "main" is
+    /// registered and counts as a live user window, but nobody can see it, so
+    /// the instance is unattended until the hold is released. While set, the
+    /// window-count rule in `attention_after` stands down: the hold decides.
+    pub start_hidden_held: bool,
 
     /// Per-window opacity state. Keyed by label, value is clamped [0.0, 1.0].
     /// Absent means fully opaque (1.0). Mutated by `SetWindowOpacity`; read by
@@ -201,21 +200,31 @@ pub struct HostState {
     /// docs/analysis/ANALYSIS_BROWSER_PANE_REDOCK_LOAD_RACE_2026_05_29.md.
     pub pending_browser_pane_creates: HashMap<String, crate::state::PendingBrowserPaneCreate>,
 
-    /// Lifecycle phase. `Running` is the operating state; the others
-    /// gate command acceptance.
-    pub lifecycle: HostLifecyclePhase,
+    /// Next sequence number for a browser-pane label (`next_browser_pane_label`).
+    /// Starts at 1 and only grows, so a close-then-recreate of the same
+    /// block_id never reuses a label.
+    pub next_browser_pane_label_seq: u64,
 
     /// Monotonic event-version counter (per host-process run). Same
     /// invariant as launcher / srv reducers.
     pub event_version: u64,
 }
 
+/// Background-service mode off. Production builds the state with
+/// `HostState::new`, passing the env-derived flag.
 impl Default for HostState {
     fn default() -> Self {
+        Self::new(false)
+    }
+}
+
+impl HostState {
+    /// Initial state. `background_service_enabled` comes from the caller
+    /// (`AppState::default` reads `AGENTMUX_BACKGROUND_SERVICE`) so the reducer
+    /// never reads the environment.
+    pub fn new(background_service_enabled: bool) -> Self {
         Self {
             pending_window_creations: VecDeque::new(),
-            // Phase H foundations (PR #1) — empty defaults; populated as
-            // PRs #2-#5 wire callers through the reducer.
             browser_panes: HashMap::new(),
             browsers: HashMap::new(),
             active_drag: None,
@@ -223,36 +232,37 @@ impl Default for HostState {
             pane_pool: PanePoolState::default(),
             quit_state: QuitState::default(),
             saw_live_user_window: false,
-            background_service_enabled: std::env::var("AGENTMUX_BACKGROUND_SERVICE").is_ok(),
+            background_service_enabled,
             background_unattended: false,
+            start_hidden_held: false,
             window_opacities: HashMap::new(),
             pane_window_states: HashMap::new(),
             pending_browser_pane_creates: HashMap::new(),
-            lifecycle: HostLifecyclePhase::Running,
+            next_browser_pane_label_seq: 1,
             event_version: 0,
         }
     }
-}
 
-impl HostState {
     /// Allocate the next event version. Called inside reducer arms
-    /// when emitting an event.
+    /// when emitting an event. Saturating, like srv's and the launcher's:
+    /// a wrap to 0 would break the monotonic-version contract.
     fn bump_version(&mut self) -> u64 {
-        self.event_version += 1;
+        self.event_version = self.event_version.saturating_add(1);
         self.event_version
     }
 }
 
 // ── Pane label generator ──────
 //
-// Monotonic counter appended to every pane label so a close-then-recreate of
+// Monotonic sequence appended to every pane label so a close-then-recreate of
 // the same block_id doesn't collide: if the old browser's `on_before_close`
 // fires after the new pane's create has already run, `DrainBrowserPaneByLabel`
-// would otherwise find and wipe the NEW entry.
-pub(super) static BROWSER_PANE_LABEL_SEQ: AtomicU64 = AtomicU64::new(1);
-
-pub(super) fn next_browser_pane_label(block_id: &str) -> String {
-    let seq = BROWSER_PANE_LABEL_SEQ.fetch_add(1, Ordering::Relaxed);
+// would otherwise find and wipe the NEW entry. The sequence lives in
+// `HostState`, so it is per host process (as the old global was) and tests
+// start from a known value.
+pub(super) fn next_browser_pane_label(state: &mut HostState, block_id: &str) -> String {
+    let seq = state.next_browser_pane_label_seq;
+    state.next_browser_pane_label_seq = seq.saturating_add(1);
     format!("browser-pane-{}-{}", block_id, seq)
 }
 
@@ -336,7 +346,8 @@ pub enum HostCommand {
     /// returns the entry's label via `DispatchOutput::closed_browser_pane_label`
     /// iff the transition actually fired (was `Live`). Returns `None` for
     /// missing or already-Closing entries (idempotent).
-    EnqueueBrowserPaneClose { block_id: String },
+    /// `now` stamps the `Closing` state; the caller reads the clock.
+    EnqueueBrowserPaneClose { block_id: String, now: Instant },
 
     /// CEF on_before_close fired for a pane; remove entry from map.
     CompleteBrowserPaneClose { block_id: String },
@@ -356,10 +367,12 @@ pub enum HostCommand {
     /// Insert browser into `browsers` map. Caller is on the CEF UI thread
     /// (e.g., client.rs::on_after_created). Reject (with Error) if label
     /// already present (collision indicates a bug).
+    /// `registered_at` is read by the caller, not the reducer.
     RegisterBrowser {
         label: String,
         browser: Browser,
         kind: BrowserKind,
+        registered_at: Instant,
     },
 
     /// Remove browser from `browsers` map. Idempotent; no-op if absent.
@@ -458,13 +471,6 @@ pub enum HostCommand {
     /// drain completion.
     BeginDrain { reason: QuitReason },
 
-    /// All drainable resources are gone (pool empty, browsers empty).
-    /// Transition Draining → Quit.
-    // Not dispatched yet; kept for SPEC_INSTANCE_LIFECYCLE_CONSOLIDATION_2026_06_21.md
-    // §5.1/§7.2 (`Draining` + last pool/browser gone ⇒ `ConfirmDrained`).
-    #[allow(dead_code)]
-    ConfirmDrained,
-
     /// Pure no-op poke: mutates nothing, but is quit-relevant, so `update`
     /// recomputes `reconcile_quit` and surfaces it via
     /// `DispatchOutput::request_drain`. Exists for executors that reach a
@@ -473,6 +479,19 @@ pub enum HostCommand {
     /// nothing-to-close-but-maybe-drain arm. NOT a polling mechanism — never
     /// wire it into hot paths. SPEC_PILLAR2_SANITIZE_THEN_DECIDE §1.H.
     ReconcileQuit,
+
+    // ── Background-service attention (issue #2977 WS4) ──────────────────────
+
+    /// Seed `background_unattended` from the persisted audit log at startup,
+    /// so an unattended period that began before a host crash is still open.
+    /// Sets the flag only: no event, no audit entry (the log already has it).
+    SeedBackgroundUnattended { unattended: bool },
+
+    /// A login start began (`held: true`) or stopped (`held: false`) holding
+    /// "main" hidden (`start_hidden`). Moves `background_unattended` with it
+    /// and reports a crossing through `DispatchOutput::background_attention`,
+    /// so `host_dispatch` records it in the audit log like any other.
+    SetStartHiddenHeld { held: bool },
 
     // ── Opacity ─────────────────────────────────────────────────────────────
 
@@ -540,7 +559,7 @@ impl std::fmt::Debug for HostCommand {
                 .field("block_id", block_id)
                 .field("has_pending", &pending.is_some())
                 .finish(),
-            HostCommand::EnqueueBrowserPaneClose { block_id } => f
+            HostCommand::EnqueueBrowserPaneClose { block_id, .. } => f
                 .debug_struct("EnqueueBrowserPaneClose")
                 .field("block_id", block_id)
                 .finish(),
@@ -617,8 +636,15 @@ impl std::fmt::Debug for HostCommand {
                 .debug_struct("BeginDrain")
                 .field("reason", reason)
                 .finish(),
-            HostCommand::ConfirmDrained => f.write_str("ConfirmDrained"),
             HostCommand::ReconcileQuit => f.write_str("ReconcileQuit"),
+            HostCommand::SeedBackgroundUnattended { unattended } => f
+                .debug_struct("SeedBackgroundUnattended")
+                .field("unattended", unattended)
+                .finish(),
+            HostCommand::SetStartHiddenHeld { held } => f
+                .debug_struct("SetStartHiddenHeld")
+                .field("held", held)
+                .finish(),
             HostCommand::SetWindowOpacity { label, opacity } => f
                 .debug_struct("SetWindowOpacity")
                 .field("label", label)
@@ -657,23 +683,18 @@ pub enum DragOutcome {
 
 /// Reason a pool window left the pool.
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[allow(dead_code)]
 pub enum PoolLeaveReason {
     /// Promoted into a user-visible top-level (tear-off, etc.).
     Promoted,
     /// Destroyed before promote (e.g., user closed externally).
     DestroyedBeforePromote,
-    /// Drained on shutdown.
-    DrainedOnShutdown,
 }
 
 /// Events emitted by the host reducer.
 ///
-/// F.1 keeps these in-host: subscribers log them via tracing for
-/// observability, but no IPC propagation. When a future PR adds a
-/// wire-level consumer (host→launcher event for cross-process saga
-/// observability, frontend dispatcher in E.6), that PR promotes the
-/// relevant variants to `agentmux-common::ipc::Event`.
+/// Host-internal: `host_dispatch` logs them via tracing for observability;
+/// they don't cross IPC. A wire-level consumer would promote the variants it
+/// needs to `agentmux-common::ipc::Event`.
 #[derive(Debug, Clone)]
 pub enum HostEvent {
     /// A `PendingWindowCreation` was enqueued. Carries a snapshot of
@@ -763,7 +784,6 @@ pub enum HostEvent {
         reason: QuitReason,
         version: u64,
     },
-    QuitReady { version: u64 },
 
     // ── Opacity events ──────────────────────────────────────────────────
 
@@ -972,11 +992,6 @@ impl std::fmt::Debug for DispatchOutput {
     }
 }
 
-/// Pure functional core of the host reducer.
-///
-/// Returns the events emitted by the command. Side-effecting wiring
-/// (logging, future event broadcast) lives in `host_dispatch` — this
-/// function takes only `&mut HostState` and produces no I/O.
 mod browsers;
 mod drag;
 mod pane_pool;
@@ -985,18 +1000,19 @@ mod panes;
 mod pool;
 mod quit;
 
-/// Shared with `AppState::count_live_user_windows` (the live last-window quit
-/// gate) so the count has a single definition. (`is_live_user_window` stays
-/// internal to `quit` — used by `count_live_user_windows` and its tests.)
-/// Test-only re-export so `background_audit`'s tests can mirror the exact
-/// decision `update` makes, rather than duplicating the rule and drifting.
 /// The WS4 attended/unattended crossing for this state once `live_after` user
 /// windows remain — every input read from `state`, so a quit in progress
 /// (`quit_state` past `Running`) is never mistaken for going to the background.
+/// `None` while a login start holds "main" hidden: "main" counts as a live
+/// window but nobody can see it, so the hold (`SetStartHiddenHeld`), not the
+/// window count, decides until it is released.
 /// Split out of `update` with the live count as a parameter so it can be tested:
 /// unit tests can't register a live window (a `BrowserHandle` needs a real
 /// `cef::Browser`).
 pub(crate) fn attention_after(state: &HostState, live_after: usize) -> Option<bool> {
+    if state.start_hidden_held {
+        return None;
+    }
     quit::background_attention_transition(
         state.background_service_enabled,
         !matches!(state.quit_state, crate::state::QuitState::Running),
@@ -1005,6 +1021,8 @@ pub(crate) fn attention_after(state: &HostState, live_after: usize) -> Option<bo
     )
 }
 
+/// Test-only re-export so `background_audit`'s tests can mirror the exact
+/// decision `update` makes, rather than duplicating the rule and drifting.
 #[cfg(test)]
 pub(crate) fn background_attention_transition_for_test(
     enabled: bool,
@@ -1014,6 +1032,9 @@ pub(crate) fn background_attention_transition_for_test(
     quit::background_attention_transition(enabled, false, currently_unattended, live_after)
 }
 
+/// Shared with `AppState::count_live_user_windows` (the live last-window quit
+/// gate) so the count has a single definition. (`is_live_user_window` stays
+/// internal to `quit` — used by `count_live_user_windows` and its tests.)
 pub(crate) use quit::{count_live_user_windows, live_user_window_labels};
 
 /// Whether a command can change the quit decision's inputs — the live
@@ -1036,7 +1057,11 @@ fn is_quit_relevant(cmd: &HostCommand) -> bool {
         | HostCommand::TryRegisterBrowserPaneLive { .. }
         | HostCommand::EnqueueBrowserPaneClose { .. }
         | HostCommand::CompleteBrowserPaneClose { .. }
-        | HostCommand::DrainBrowserPaneByLabel { .. } => false,
+        | HostCommand::DrainBrowserPaneByLabel { .. }
+        // The attended/unattended flag is not a quit input, and these two set
+        // it themselves; the post-dispatch recompute must not second-guess them.
+        | HostCommand::SeedBackgroundUnattended { .. }
+        | HostCommand::SetStartHiddenHeld { .. } => false,
         #[cfg(any(target_os = "windows", test))]
         HostCommand::SetFloatingAlwaysOnTop { .. } => false,
         #[cfg(target_os = "windows")]
@@ -1045,6 +1070,12 @@ fn is_quit_relevant(cmd: &HostCommand) -> bool {
     }
 }
 
+/// Pure functional core of the host reducer.
+///
+/// Returns what the command produced (events plus any value-returning
+/// fields). Side-effecting wiring (logging, the audit-log enqueue) lives in
+/// `host_dispatch`; this function takes only `&mut HostState` and the
+/// command, and does no I/O.
 pub fn update(state: &mut HostState, cmd: HostCommand) -> DispatchOutput {
     let quit_relevant = is_quit_relevant(&cmd);
 
@@ -1062,8 +1093,8 @@ pub fn update(state: &mut HostState, cmd: HostCommand) -> DispatchOutput {
         HostCommand::TryRegisterBrowserPaneLive { block_id, pending } => {
             panes::handle_try_register_browser_pane_live(state, block_id, pending)
         }
-        HostCommand::EnqueueBrowserPaneClose { block_id } => {
-            panes::handle_enqueue_browser_pane_close(state, block_id)
+        HostCommand::EnqueueBrowserPaneClose { block_id, now } => {
+            panes::handle_enqueue_browser_pane_close(state, block_id, now)
         }
         HostCommand::CompleteBrowserPaneClose { block_id } => {
             panes::handle_complete_browser_pane_close(state, block_id)
@@ -1072,8 +1103,8 @@ pub fn update(state: &mut HostState, cmd: HostCommand) -> DispatchOutput {
             panes::handle_drain_browser_pane_by_label(state, label)
         }
         // H.2 browsers
-        HostCommand::RegisterBrowser { label, browser, kind } => {
-            browsers::handle_register_browser(state, label, browser, kind)
+        HostCommand::RegisterBrowser { label, browser, kind, registered_at } => {
+            browsers::handle_register_browser(state, label, browser, kind, registered_at)
         }
         HostCommand::UnregisterBrowser { label } => {
             browsers::handle_unregister_browser(state, label)
@@ -1107,10 +1138,15 @@ pub fn update(state: &mut HostState, cmd: HostCommand) -> DispatchOutput {
         HostCommand::PopFrontPanePoolWindowForEviction => pane_pool::handle_pop_front_pane_pool_for_eviction(state),
         // H.5 quit
         HostCommand::BeginDrain { reason } => quit::handle_begin_drain(state, reason),
-        HostCommand::ConfirmDrained => quit::handle_confirm_drained(state),
         // Pure poke — no state change; the quit-relevant recomputation below
         // does the only work this command exists for.
         HostCommand::ReconcileQuit => DispatchOutput::default(),
+        // WS4 attended/unattended flag
+        HostCommand::SeedBackgroundUnattended { unattended } => {
+            state.background_unattended = unattended;
+            DispatchOutput::default()
+        }
+        HostCommand::SetStartHiddenHeld { held } => quit::handle_set_start_hidden_held(state, held),
         // Opacity
         HostCommand::SetWindowOpacity { label, opacity } => {
             handle_set_window_opacity(state, label, opacity)
@@ -1157,18 +1193,6 @@ fn handle_enqueue_pending_window_creation(
     state: &mut HostState,
     entry: PendingWindowCreation,
 ) -> DispatchOutput {
-    if state.lifecycle == HostLifecyclePhase::ShuttingDown {
-        // No new windows accepted during shutdown. Mirrors the
-        // launcher reducer's shutdown gating from B.9.3.
-        let v = state.bump_version();
-        return DispatchOutput {
-            events: vec![HostEvent::Error {
-                message: "enqueue_pending_window_creation: host is shutting down".to_string(),
-                version: v,
-            }],
-            ..Default::default()
-        };
-    }
     let label = entry.label.clone();
     state.pending_window_creations.push_back(entry);
     let queue_len_after = state.pending_window_creations.len();
@@ -1235,9 +1259,9 @@ fn handle_dequeue_pending_window_creation(state: &mut HostState) -> DispatchOutp
 // Phase H reducer arms — added in PR #1 (h1-foundations)
 //
 // All arms are pure: `&mut HostState` in, `DispatchOutput` (events) out.
-// No I/O, no async, no logging (logging happens in `state::log_host_event`
-// after dispatch returns). Side effects are applied by the caller after
-// dispatch. The dormant H.6 `Effect` carrier and top-level creation runner
+// No I/O, no async, no clock, no logging (logging happens in
+// `state::log_host_event` after dispatch returns). Side effects are applied
+// by the caller after dispatch. The dormant H.6 `Effect` carrier and top-level creation runner
 // were removed (design: docs/specs/SPEC_HOST_REDUCER_PHASE_H_2026-05-02.md).
 // ─────────────────────────────────────────────────────────────────────────
 

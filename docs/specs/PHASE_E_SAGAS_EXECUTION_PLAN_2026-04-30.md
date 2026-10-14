@@ -1,5 +1,7 @@
 # Phase E.5 Sagas — Execution Plan
 
+**Status:** historical — executed; the sagas it planned are in `crates/srv/src/sagas/`. Verified against code 2026-10-14 ([triage](../analysis/REPORT_REDUCER_STACK_TRIAGE_2026_10_13.md)).
+
 **Date:** 2026-04-30
 **Companion to:** [`docs/specs/SPEC_PHASE_E_SAGAS_2026-04-30.md`](SPEC_PHASE_E_SAGAS_2026-04-30.md) (the design spec)
 **Goal:** finish migrating every wcore-direct mutation through the srv reducer via saga or atomic command, removing the inconsistency window that produced the tear-off → CreateTab regression.
