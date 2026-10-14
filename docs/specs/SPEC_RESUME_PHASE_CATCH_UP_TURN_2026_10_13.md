@@ -1,6 +1,6 @@
 # SPEC: Resume phases: the "Given to the agent" card in its place, then the agent catches up and tells the user where it is
 
-**Status:** active. Phase 1 (the catch-up turn for a fresh session and a manual compaction, and retiring the side-model note from #4707) is in the PR that adds this file; the rest is not started. Verified by reading `main` @ `c9bcafb47`, 2026-10-13; not reproduced in a running app.
+**Status:** active. Phase 1 (#4888: the catch-up turn for a fresh session and a manual compaction, and retiring the side-model note from #4707) is merged. Phase 2 (a catch-up when the user resumes an agent, the compose gate, the hidden-reinjection window ended by a message, the title kept across an account switch) is in the PR that edits this line; the ghost-text fix and phase 3 are not started. Verified by reading `main` @ `c9bcafb47`, 2026-10-13; not reproduced in a running app.
 **Date:** 2026-10-13
 **Related:**
 - `SPEC_CONTEXT_DELIVERY_2026_09_30.md`: the card (CD1, CD2a/b shipped; CD4 "continuation packet" card never built).
@@ -181,7 +181,7 @@ The sequence the operator expects, for every resume phase:
 | Phase | Scope | Fixes |
 |---|---|---|
 | **P1** (this PR) | The catch-up turn for a fresh session on a quiet pane and for a manual compaction; `foreign` claim answers; the catch-up message and its recognisers (srv and the stream parser); retire the note from #4707 | Bug 2 for the account-switch and manual-compact cases; bug 1's quiet-pane path |
-| **P2** | `Resumed`: a catch-up when the user resumes an agent from My agents (a hand-off from the picker to the pane's controller); hook in-flight lock; `HIDDEN_REINJECTION_BLOCKS` cleared when a hidden turn ends; goal title kept across an account switch; ghost text after a hidden re-delivery | Bug 2 for resume; the ambient gaps |
+| **P2** (built) | `Resumed`: a catch-up when the user resumes a conversation. The launch (`launchAgentDefinition`, which My agents and the launch modal's Continue both use) leaves a request on the pane's block meta (`agent:catchup`, `catch-up-request.ts`) and the pane's stream hook reads and clears it once running, so the picker needs no handle on the pane's controller; a fork is a new branch and asks for none. The compose gate: the 8 parts of a session start no longer each read and compose the memory, the first composes and the rest wait for it. The hidden-reinjection window for ambient reads ends on a jekt, cron or broadcast delivery, as it does on a person typing, so an agent only ever driven by messages gets its title and ghost text back. A fresh session that continues the conversation puts back the title the controller's stop moved to `term:restored_summary`. Not built: ghost text after a hidden re-delivery (an auto-compaction's memory-only fallback still clears it) | Bug 2 for resume; the ambient gaps |
 | **P3** | `resume_pipeline.rs`: one composer, one card writer, one reason vocabulary, generated TS literals; delete the TS composer; the packet's card (§3.1, §2.4) | The DRY findings |
 
 Each phase ships alone.

@@ -151,6 +151,10 @@ struct DeliveryState {
     /// composed. Unlike `deliveries` it isn't pruned, so a fallback deferred
     /// behind a long turn still finds it. One entry per block and reason.
     completed: HashMap<(String, Reason), i64>,
+    /// One gate per delivery being composed. The 8 parts of a session start
+    /// ask at once; the first composes while the rest wait here and then read
+    /// its result, instead of each reading the memory and composing it again.
+    compose_gates: HashMap<DeliveryKey, std::sync::Arc<tokio::sync::Mutex<()>>>,
 }
 
 /// What the fallback's claim found.
@@ -338,6 +342,23 @@ pub(crate) async fn handle_session_start_part(
     let delivery = match cached {
         Some(d) => d,
         None => {
+            let gate = state_lock().compose_gates.entry(key.clone()).or_default().clone();
+            let _composing = gate.lock().await;
+            // Dropped on every way out, a cancelled request included, so the
+            // gate never outlives the part that took it.
+            let _gate_entry = GateEntry(key.clone());
+            // A part that held the gate before this one may have composed it, or
+            // the fallback may have claimed the event while this one waited.
+            let (composed_meanwhile, claimed) = {
+                let st = state_lock();
+                (st.deliveries.get(&key).cloned(), st.fallback_claimed(&req.block_id, reason))
+            };
+            if claimed {
+                return Json(PartResponse { text: None, part: req.part, of: 0 });
+            }
+            if let Some(d) = composed_meanwhile {
+                return finish_part(&state, &key, d, req.part);
+            }
             let uid = caller.as_ref().and_then(|c| c.uid()).map(str::to_string);
             let launch = LaunchDirs::from_request(&req);
             let composed = {
@@ -365,10 +386,25 @@ pub(crate) async fn handle_session_start_part(
             st.deliveries.entry(key.clone()).or_insert(composed).clone()
         }
     };
-    if delivery.parts.is_empty() {
-        send_partless_notice(&state, &key);
+    finish_part(&state, &key, delivery, req.part)
+}
+
+/// Removes a delivery's compose gate when the part that took it is done.
+struct GateEntry(DeliveryKey);
+
+impl Drop for GateEntry {
+    fn drop(&mut self) {
+        state_lock().compose_gates.remove(&self.0);
     }
-    Json(part_response(&delivery, req.part))
+}
+
+/// The reply for one part of a composed delivery. A delivery with nothing for
+/// the hook to carry still gets its card, on the first part asked for.
+fn finish_part(state: &AppState, key: &DeliveryKey, delivery: Delivery, part: usize) -> Json<PartResponse> {
+    if delivery.parts.is_empty() {
+        send_partless_notice(state, key);
+    }
+    Json(part_response(&delivery, part))
 }
 
 /// A delivery with nothing for the hook to carry (its Global Memory is in the
@@ -1077,6 +1113,26 @@ mod tests {
         let mut st = state_with_hook_delivery("b", Reason::Startup, false);
         let created = st.deliveries.values().next().unwrap().created_ms;
         assert_eq!(st.claim_event("b", Reason::Startup, created - 1_000, NOW), FallbackClaim::Pending);
+    }
+
+    #[test]
+    fn the_parts_of_one_delivery_share_a_compose_gate_and_a_finished_one_leaves_none() {
+        let mut st = DeliveryState::default();
+        let key = startup_key("b");
+        let first = st.compose_gates.entry(key.clone()).or_default().clone();
+        let second = st.compose_gates.entry(key.clone()).or_default().clone();
+        assert!(std::sync::Arc::ptr_eq(&first, &second), "parts wait on the one composing");
+        st.compose_gates.remove(&key);
+        let next = st.compose_gates.entry(key).or_default().clone();
+        assert!(!std::sync::Arc::ptr_eq(&first, &next), "a new delivery gets its own gate");
+    }
+
+    #[test]
+    fn a_gate_entry_takes_its_gate_with_it_when_dropped() {
+        let key = startup_key("gate-entry-test");
+        state_lock().compose_gates.entry(key.clone()).or_default();
+        drop(GateEntry(key.clone()));
+        assert!(!state_lock().compose_gates.contains_key(&key), "a cancelled part leaves no gate behind");
     }
 
     #[test]
