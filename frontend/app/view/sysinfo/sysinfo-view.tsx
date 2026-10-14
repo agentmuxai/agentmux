@@ -132,6 +132,16 @@ function SysinfoViewInner(props: SysinfoViewProps): JSX.Element {
     const cols2 = createMemo(() => yvals().length > 2 && !cols1());
 
     const overview = createMemo(() => model.plotTypeSelectedAtom() === "Overview");
+    // A pause belongs to the Overview, which has the control to resume it: the
+    // classic plot types have none, so leaving it resumes.
+    createEffect(
+        on(overview, (shown) => {
+            if (!shown && paused()) {
+                setPaused(false);
+                setPlotData(model.dataAtom());
+            }
+        })
+    );
 
     return (
         <Show
