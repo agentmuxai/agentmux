@@ -827,4 +827,26 @@ describe("ToolOverlayLog — no rebuild when the stream closes, none at all whil
         expect(container.querySelector(".agent-tool-loading")).toBeNull();
         expect(container.textContent).toContain("done");
     });
+
+    it("a log that mounts while it can't be seen builds nothing until it can", () => {
+        const [open, setOpen] = createSignal(false);
+        const { container } = render(() => <ToolOverlayLog node={terminalNode} open={open()} />);
+        expect(container.querySelector(".agent-preview-line")).toBeNull();
+        expect(container.textContent).not.toContain("done");
+        setOpen(true);
+        expect(container.textContent).toContain("done");
+    });
+
+    it("a dormant log whose tool finishes lets go of its chunk view and builds the result when shown", () => {
+        const [node, setNode] = createSignal<ToolNode>(streamingNode);
+        const [open, setOpen] = createSignal(true);
+        const { container } = render(() => <ToolOverlayLog node={node()} open={open()} dormant={!open()} />);
+        expect(container.querySelector(".agent-tool-log-feed .agent-preview-line")).not.toBeNull();
+        setOpen(false); // the pane goes hidden
+        setNode({ ...terminalNode, log: { open: false, chunks: [] } }); // finishes; the reducer frees the chunks
+        expect(container.querySelector(".agent-tool-log-feed")).toBeNull();
+        expect(container.textContent).not.toContain("line 1");
+        setOpen(true);
+        expect(container.textContent).toContain("done");
+    });
 });

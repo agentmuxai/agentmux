@@ -643,7 +643,7 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
                                 </div>
                             }
                         >
-                            <ToolBlockOverlay node={props.node} dispatchMatch={props.dispatchMatch} open={bodyShowing()} />
+                            <ToolBlockOverlay node={props.node} dispatchMatch={props.dispatchMatch} open={bodyShowing()} dormant={dormant()} />
                         </Show>
                     </Show>
                 </div>

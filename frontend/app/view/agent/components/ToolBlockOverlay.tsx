@@ -39,6 +39,8 @@ export interface ToolBlockOverlayProps {
     dispatchMatch?: AgentDispatch;
     /** Whether the panel is open (ToolBlock's `expanded`); see ToolOverlayLog's `open`. */
     open?: boolean;
+    /** Whether the pane is dormant; see ToolOverlayLog's `dormant`. */
+    dormant?: boolean;
 }
 
 export const ToolBlockOverlay = (props: ToolBlockOverlayProps): JSX.Element => (
@@ -56,7 +58,7 @@ export const ToolBlockOverlay = (props: ToolBlockOverlayProps): JSX.Element => (
                 {TOOL_STATUS[props.node.status]?.label}
             </span>
         </div>
-        <ToolOverlayLog node={props.node} dispatchMatch={props.dispatchMatch} open={props.open} />
+        <ToolOverlayLog node={props.node} dispatchMatch={props.dispatchMatch} open={props.open} dormant={props.dormant} />
     </div>
 );
 

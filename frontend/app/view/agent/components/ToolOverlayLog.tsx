@@ -41,6 +41,9 @@ interface ToolOverlayLogProps {
      *  dormant (ToolBlock's `bodyShowing`). While it can't, the log keeps
      *  showing what it showed: see `branch`. Undefined counts as open. */
     open?: boolean;
+    /** Whether the pane is dormant (hidden). A dormant log whose tool finishes
+     *  lets go of the chunk view it was holding: see `branch`. */
+    dormant?: boolean;
 }
 
 /** Same window as the pane's own (`AgentDocumentVirtualList.tsx`'s
@@ -148,9 +151,21 @@ export const ToolOverlayLog = (props: ToolOverlayLogProps): JSX.Element => {
         if (!hasChunks() && !hasResult()) return "empty";
         return "none";
     };
-    const branch = createMemo<LogBranch | undefined>((prev) =>
-        props.open === false && prev !== undefined ? prev : currentBranch()
-    ) as () => LogBranch;
+    // - A log that mounts while it can't be seen shows nothing until it can
+    //   (a restored tool in an already-hidden tab, a row mounted hidden).
+    // - A dormant log whose tool finished lets go of the chunk view it held:
+    //   the reducer freed the node's chunks, and holding the stale array (and
+    //   its lines) until the tab is shown would defeat that. It builds the
+    //   result when shown. A closing panel (not dormant) keeps the view for
+    //   its collapse animation.
+    const branch = createMemo<LogBranch | undefined>((prev) => {
+        if (props.open === false) {
+            if (prev === undefined) return "none";
+            if (prev === "chunks" && props.dormant && !isStreaming() && hasResult()) return "none";
+            return prev;
+        }
+        return currentBranch();
+    }) as () => LogBranch;
     // The node the branches draw from, held with the branch while the panel is
     // closed: the reducer frees a tool's chunks once its result arrives (a
     // closing panel still showing the chunk view must not empty out
@@ -158,7 +173,7 @@ export const ToolOverlayLog = (props: ToolOverlayLogProps): JSX.Element => {
     // result inside ToolOverlayResult as its status changes. Held for at most
     // the body's linger (body-mount.ts), then unmounted.
     const shownNode = createMemo<ToolNode | undefined>((prev) =>
-        props.open === false && prev !== undefined ? prev : props.node
+        props.open === false && prev !== undefined && branch() !== "none" ? prev : props.node
     ) as () => ToolNode;
     const shownChunks = (): ReadonlyArray<LogChunk> => shownNode().log?.chunks ?? [];
 
