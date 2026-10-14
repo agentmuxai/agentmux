@@ -42,6 +42,7 @@ vi.mock("@/app/store/contextmenu", () => ({
 }));
 
 import { McpManager } from "./mcp-manager";
+import { MCP_PRELOAD_CATALOG } from "./mcp-preload-catalog";
 
 function server(id: string, name: string, over: Partial<McpServerCatalogItem> = {}): McpServerCatalogItem {
     return {
@@ -146,6 +147,18 @@ describe("McpManager", () => {
         expect((within(form).getByLabelText("Name") as HTMLInputElement).value).toBe("TouchDesigner");
         const grid = screen.getByRole("group", { name: "Your servers" });
         expect(grid.querySelector(".ui-card-cell")?.textContent).toContain("TouchDesigner");
+    });
+
+    it("shows a preset's risk and setup notes in the form, before Save", async () => {
+        await renderManager();
+        const entry = MCP_PRELOAD_CATALOG.find((e) => e.name === "TouchDesigner")!;
+        expect(entry.riskNote).toBeTruthy();
+        fireEvent.click(screen.getByRole("button", { name: "Add TouchDesigner" }));
+        const form = await screen.findByRole("form", { name: "New MCP server" });
+        expect(within(form).getByRole("note").textContent).toContain(entry.riskNote!);
+        expect(form.textContent).toContain(entry.prereqNote);
+        expect(rpc.McpCatalogUpsertCommand).not.toHaveBeenCalled();
+        expect(probe.watch).not.toHaveBeenCalled();
     });
 
     it("shows the catalog under Your servers and the rest under Also in use", async () => {

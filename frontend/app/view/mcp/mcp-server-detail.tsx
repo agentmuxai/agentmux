@@ -15,7 +15,7 @@ import { focusOnOpen } from "@/util/focusutil";
 import { McpUsesList } from "./mcp-in-use";
 import { reachLabel, type McpCatalogModel, type McpDraft } from "./mcp-model";
 import type { ServerUse } from "./mcp-observed";
-import { findPreloadEntryByName } from "./mcp-preload-catalog";
+import { findPreloadEntryByName, MCP_PRELOAD_CATALOG } from "./mcp-preload-catalog";
 
 const PROBE: Record<McpCapabilityStatus, { tone: StatusTone; label: string }> = {
     unknown: { tone: "idle", label: "Not checked" },
@@ -144,6 +144,9 @@ export function McpServerForm(props: { model: McpCatalogModel; draft: McpDraft }
     const model = props.model;
     const draft = () => props.draft;
     const configId = `mcp-config-${createUniqueId()}`;
+    // A preset's notes come before Save: saving selects the server, which
+    // starts probing (launching) it.
+    const preset = () => MCP_PRELOAD_CATALOG.find((e) => e.id === draft().presetId);
     return (
         <form
             class="mcp-detail mcp-server-form"
@@ -153,6 +156,18 @@ export function McpServerForm(props: { model: McpCatalogModel; draft: McpDraft }
                 void model.saveDraft();
             }}
         >
+            <Show when={preset()}>
+                {(p) => (
+                    <>
+                        <Show when={p().riskNote}>
+                            <p class="mcp-probe-risk" role="note">
+                                ⚠ {p().riskNote}
+                            </p>
+                        </Show>
+                        <p class="mcp-probe-remediation">{p().prereqNote}</p>
+                    </>
+                )}
+            </Show>
             <Field label="Name" layout="stacked">
                 <TextInput
                     value={draft().name}

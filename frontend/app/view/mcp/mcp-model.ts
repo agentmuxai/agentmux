@@ -27,6 +27,9 @@ export interface McpDraft {
     name: string;
     transport: string;
     config: string;
+    /** The preset it was started from: the form shows that preset's notes,
+     *  its risk above all, before Save (saving starts probing the server). */
+    presetId?: string;
 }
 
 function emptyMcpDraft(): McpDraft {
@@ -196,6 +199,7 @@ export class McpCatalogModel {
             name: entry.name,
             transport: entry.transport,
             config: JSON.stringify(entry.config, null, 2),
+            presetId: entry.id,
         });
     }
 
