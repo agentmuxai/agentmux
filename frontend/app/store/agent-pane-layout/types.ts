@@ -30,17 +30,17 @@
  *  in flow), so it is NOT a layout input. Layout is binary. */
 export type ExpansionState = "collapsed" | "expanded";
 
-/** Why a row is open:
- *  - `pin`     — user explicitly pinned it open. Outlives an auto-expand:
- *                a hold expiry collapses an `auto` row but is a no-op on a pin.
- *  - `auto`    — auto-expanded because the tool is running / in its
- *                post-completion hold (decided by `rowDisclosure()` in
- *                frontend/app/view/agent/virtualization/disclosure.ts).
+/** Why a row is open (decided by `rowDisclosure()` in
+ *  frontend/app/view/agent/virtualization/disclosure.ts and sent here with
+ *  `ExpansionResolved`):
+ *  - `pin`     — user explicitly pinned it open.
+ *  - `auto`    — open because the tool is running, or because the row is in
+ *                `documentState.heldOpenNodes` (held open after arriving live,
+ *                until it scrolls off).
  *  - `default` — open by KIND default (agent_message, normal markdown / user
  *                message, subagent link, open section) rather than by a user or
- *                lifecycle action. Like `auto`/`pin` for height, but a hold
- *                expiry never touches it (it has no hold). Added in Phase 1 so
- *                default-open kinds are modeled (Phase 0 assumed default-closed).
+ *                lifecycle action. Added in Phase 1 so default-open kinds are
+ *                modeled (Phase 0 assumed default-closed).
  *  Collapsed rows are stored as ABSENT from the expansion map, keeping it small. */
 export type Expansion =
     | { open: false }

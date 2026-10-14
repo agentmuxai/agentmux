@@ -311,9 +311,9 @@ reducer would add state with no layout meaning.
   *Verify:* `grep -rn "ExpansionResolved" frontend/app --include=*.tsx`
   — user toggles reach the slice through `documentState` and this one command.
   `UserExpanded`/`UserCollapsed` never got a caller and were deleted on
-  2026-10-14, as were `AutoExpandStarted`/`AutoExpandHoldExpired` (the 3s hold they modelled
-  no longer exists; auto-expansion reaches the slice through `ExpansionResolved` like every
-  other source). A remaining in-flow toggle should go the same way, not revive them.
+  2026-10-14, as were `AutoExpandStarted`/`AutoExpandHoldExpired` (the 3s timer they modelled
+  was replaced by `documentState.heldOpenNodes`, which, like running state, reaches the slice
+  through `ExpansionResolved`). A remaining in-flow toggle should go the same way, not revive them.
 
   **Audit 2026-09-17 — three of the five scattered sources in §5 are already
   resolved.** `documentState.collapsedNodes`/`pinnedNodes` reach the slice via

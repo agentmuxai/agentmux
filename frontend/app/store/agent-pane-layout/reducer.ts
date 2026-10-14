@@ -182,7 +182,6 @@ export function update(
             if (!state.idSet.has(command.nodeId)) return droppedUnknownExpansion(state);
             return setExpansion(state, command.nodeId, command.to);
 
-
         case "RowMeasured":
             return measureRows(state, [command]);
 
