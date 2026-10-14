@@ -120,6 +120,11 @@ impl LayoutBase {
         Some(Self { viewport, layout })
     }
 
+    /// The width of the viewport the batch was laid out in.
+    pub(crate) fn viewport_width(&self) -> i32 {
+        self.viewport.0
+    }
+
     /// Where `rect`, laid out against this base, goes in a viewport of
     /// `width` x `height`.
     pub(crate) fn predict(&self, rect: &Rect, width: i32, height: i32) -> Rect {
@@ -176,6 +181,23 @@ pub(crate) fn follow_window_resize(state: &Arc<AppState>, window_label: &str) {
         let wnum = state.browser_pane_overlay_wnums.try_lock().and_then(|m| m.get(&label).copied()).unwrap_or(0);
         crate::ui_tasks::move_shown_pane_overlay(&controller, wnum, &Rect { x, y, width, height }, Some(&base));
     }
+}
+
+/// The window's size changed (Linux). Logs its client area in the rects'
+/// physical pixels, the unit of `LayoutBase::viewport`. UI thread only.
+#[cfg(target_os = "linux")]
+pub(crate) fn window_resized(_state: &Arc<AppState>, window_label: &str, window: &Window) {
+    let (width, height) = window_client_px(window);
+    tracing::debug!(window = window_label, width, height, "[pane-bounds] window resized");
+}
+
+/// `window`'s client area in physical pixels: what the page's viewport
+/// measures (`innerWidth * devicePixelRatio`).
+#[cfg(target_os = "linux")]
+fn window_client_px(window: &Window) -> (i32, i32) {
+    let scale = window.display().map(|d| d.device_scale_factor()).filter(|s| *s > 0.0).unwrap_or(1.0) as f64;
+    let client = window.client_area_bounds_in_screen();
+    ((client.width as f64 * scale).round() as i32, (client.height as f64 * scale).round() as i32)
 }
 
 /// A window's rects waiting for the UI thread, and who is waiting on them.
@@ -274,6 +296,8 @@ wrap_task! {
 /// Apply on the UI thread: only live panes that still belong to `window_label`.
 /// Each pane's base is installed with its rect (`note_layout_base`).
 fn apply(state: &Arc<AppState>, window_label: &str, rects: &[(PaneBounds, Option<LayoutBase>)]) {
+    #[cfg(not(target_os = "windows"))]
+    let started = std::time::Instant::now();
     let mut live: Vec<(&PaneBounds, String)> = Vec::with_capacity(rects.len());
     for (r, base) in rects {
         if state.browser_pane_window_label(&r.block_id).as_deref() != Some(window_label) {
@@ -290,8 +314,18 @@ fn apply(state: &Arc<AppState>, window_label: &str, rects: &[(PaneBounds, Option
     #[cfg(target_os = "windows")]
     apply_windows(state, &live);
     #[cfg(not(target_os = "windows"))]
-    for (r, label) in &live {
-        crate::browser_pane::creation_views::resize_browser_pane_view(state, label, r.rect());
+    {
+        for (r, label) in &live {
+            crate::browser_pane::creation_views::resize_browser_pane_view(state, label, r.rect());
+        }
+        let viewport_w = rects.iter().find_map(|(_, b)| b.map(|b| b.viewport_width()));
+        tracing::debug!(
+            window = window_label,
+            panes = live.len(),
+            ms = started.elapsed().as_secs_f64() * 1000.0,
+            viewport_w,
+            "[pane-bounds] applied"
+        );
     }
 }
 
