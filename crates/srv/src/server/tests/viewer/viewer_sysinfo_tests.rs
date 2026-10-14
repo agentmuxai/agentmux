@@ -147,7 +147,7 @@ async fn the_feed_sends_history_after_since_then_new_samples() {
     assert!(rest.is_none());
 }
 
-/// Codex on #4857: a clock that goes back must not hide new samples.
+/// A clock that goes back must not hide new samples.
 #[tokio::test]
 async fn a_clock_that_goes_back_does_not_stop_the_feed() {
     let state = test_state();
@@ -162,7 +162,7 @@ async fn a_clock_that_goes_back_does_not_stop_the_feed() {
     assert_eq!(ids(&read_samples(&mut stream, 2).await), vec![1_000, 2_000]);
 }
 
-/// Codex on #4857: a stream that wasn't read for longer than one poll's
+/// A stream that wasn't read for longer than one poll's
 /// read still gets every kept sample it missed.
 #[tokio::test]
 async fn a_stalled_feed_gets_every_kept_sample_it_missed() {
