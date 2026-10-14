@@ -135,6 +135,7 @@
         "unified": "^11.0.5",
         "unist-util-visit": "^5.0.0",
         "unist-util-visit-parents": "^6.0.2",
+        "uplot": "^1.6.32",
         "vite-plugin-solid": "^2.11.10",
         "ws": "^8.21.1"
     },

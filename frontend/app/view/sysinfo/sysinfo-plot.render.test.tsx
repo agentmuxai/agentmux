@@ -2,22 +2,49 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The chart as drawn, not just its data: a gap in the samples must show as a
- * break in the line and the area, and the x ticks must tell neighbours apart.
- * docs/reports/REPORT_SYSINFO_REWRITE_AND_MODERN_MONITOR_2026_10_13.md section 2.
+ * The chart component against a recording stand-in for uPlot (jsdom has no
+ * canvas): it is built with gaps as breaks and a time axis, is given `null` at a
+ * gap, and takes new data by `setData` instead of being built again.
+ * docs/reports/REPORT_SYSINFO_REWRITE_AND_MODERN_MONITOR_2026_10_13.md section 5.2.
  */
 import { cleanup, render } from "@solidjs/testing-library";
+import { createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { SingleLinePlot } from "./sysinfo-plot";
+const made = vi.hoisted(() => ({ charts: [] as any[] }));
+
+vi.mock("uplot", () => {
+    class FakeUPlot {
+        opts: any;
+        data: any;
+        setDataCalls: any[] = [];
+        sizes: any[] = [];
+        destroyed = false;
+        constructor(opts: any, data: any, el: HTMLElement) {
+            this.opts = opts;
+            this.data = data;
+            el.appendChild(document.createElement("canvas"));
+            made.charts.push(this);
+        }
+        setData(d: any) {
+            this.data = d;
+            this.setDataCalls.push(d);
+        }
+        setSize(s: any) {
+            this.sizes.push(s);
+        }
+        destroy() {
+            this.destroyed = true;
+        }
+    }
+    return { default: FakeUPlot };
+});
+vi.mock("uplot/dist/uPlot.min.css", () => ({}));
+
 import { sampleReducer } from "./sysinfo-model";
+import { SingleLinePlot } from "./sysinfo-plot";
 import type { DataItem } from "./sysinfo-types";
 
-const INTERVAL_SECS = 1;
-const NUM_POINTS = 300;
-const META = { name: "CPU", label: "%", color: "#a3e635", decimalPlaces: 0 } as TimeSeriesMeta;
-
-/** jsdom has no layout: report a fixed size so the chart draws. */
 class FixedSizeObserver {
     constructor(private cb: ResizeObserverCallback) {}
     observe(el: Element) {
@@ -28,100 +55,87 @@ class FixedSizeObserver {
 }
 
 beforeEach(() => {
+    made.charts.length = 0;
+    vi.useFakeTimers();
     vi.stubGlobal("ResizeObserver", FixedSizeObserver);
 });
 
 afterEach(() => {
     cleanup();
+    vi.useRealTimers();
     vi.unstubAllGlobals();
 });
 
+const META = { name: "CPU", label: "%", color: "#a3e635", decimalPlaces: 0, maxy: 100 } as TimeSeriesMeta;
 const sample = (ts: number, cpu: number): DataItem => ({ ts, cpu });
+const series = (...items: DataItem[]) =>
+    items.reduce<DataItem[]>((s, item) => sampleReducer(s, { type: "APPEND", item, intervalSecs: 1, numPoints: 300 }), []);
 
-function series(...items: DataItem[]): DataItem[] {
-    return items.reduce<DataItem[]>(
-        (state, item) => sampleReducer(state, { type: "APPEND", item, intervalSecs: INTERVAL_SECS, numPoints: NUM_POINTS }),
-        []
-    );
-}
-
-function draw(data: DataItem[], targetLen = NUM_POINTS): HTMLElement {
-    const { container } = render(() => (
+function mount(data: () => DataItem[]) {
+    return render(() => (
         <SingleLinePlot
-            plotData={data}
+            plotData={data()}
             yval="cpu"
             yvalMeta={META}
             blockId="b"
             defaultColor="#a3e635"
-            targetLen={targetLen}
-            intervalSecs={INTERVAL_SECS}
+            targetLen={300}
+            intervalSecs={1}
+            syncKey="sysinfo-b"
         />
     ));
-    return container as HTMLElement;
 }
 
-/** The `d` of the first path in the group Plot draws for a mark. */
-function pathOf(container: HTMLElement, mark: "area" | "line"): string {
-    const group = container.querySelector(`[aria-label="${mark}"]`);
-    return group?.querySelector("path")?.getAttribute("d") ?? "";
-}
-
-const runs = (d: string) => (d.match(/M/g) ?? []).length;
-
-describe("SingleLinePlot with a gap in the samples", () => {
+describe("SingleLinePlot on uPlot", () => {
     const base = 1_791_900_000_000;
-    // Three real samples, a 20 s silence, then three more.
-    const gapped = () =>
-        series(
-            sample(base, 40),
-            sample(base + 1000, 42),
-            sample(base + 2000, 44),
-            sample(base + 22_000, 80),
-            sample(base + 23_000, 82),
-            sample(base + 24_000, 84)
-        );
 
-    it("draws the line and the area as two runs, not one joined by a ramp", () => {
-        const c = draw(gapped());
-        expect(runs(pathOf(c, "line"))).toBe(2);
-        expect(runs(pathOf(c, "area"))).toBe(2);
+    it("is built once its size is known, with gaps as breaks, a time x axis and a shared crosshair", async () => {
+        mount(() => series(sample(base, 40), sample(base + 1000, 42)));
+        await vi.advanceTimersByTimeAsync(200);
+        expect(made.charts).toHaveLength(1);
+        const { opts } = made.charts[0];
+        expect(opts.series[1].spanGaps).toBe(false);
+        expect(opts.scales.x.time).toBe(true);
+        expect(opts.cursor.sync.key).toBe("sysinfo-b");
+        expect([opts.width, opts.height]).toEqual([600, 200]);
+        expect(opts.scales.y.range()).toEqual([0, 100]);
+        // The x window ends at the newest sample and spans five minutes.
+        expect(opts.scales.x.range()).toEqual([(base + 1000) / 1000 - 300, (base + 1000) / 1000]);
     });
 
-    it("draws an unbroken series as one run", () => {
-        const c = draw(series(sample(base, 40), sample(base + 1000, 42), sample(base + 2000, 44)));
-        expect(runs(pathOf(c, "line"))).toBe(1);
-        expect(runs(pathOf(c, "area"))).toBe(1);
+    it("hands uPlot null at a gap, so the line and area break there", async () => {
+        mount(() => series(sample(base, 40), sample(base + 1000, 42), sample(base + 25_000, 90)));
+        await vi.advanceTimersByTimeAsync(200);
+        const [xs, ys] = made.charts[0].data;
+        expect(xs.length).toBe(ys.length);
+        expect(ys).toEqual([40, 42, null, null, 90]);
     });
 
-    it("never puts the area's edge on the baseline between the two runs", () => {
-        const c = draw(gapped());
-        const area = pathOf(c, "area");
-        // Each run is a closed polygon from the baseline up to its values and back;
-        // a ramp would be a third polygon whose top edge runs from the baseline.
-        expect(area.split("Z").filter((s) => s.includes("M"))).toHaveLength(2);
-    });
-});
-
-describe("SingleLinePlot x axis", () => {
-    const start = new Date(2026, 9, 13, 8, 52, 0).getTime();
-    const tickLabels = (c: HTMLElement) =>
-        Array.from(c.querySelectorAll('[aria-label="x-axis tick label"] text'))
-            .map((t) => t.textContent ?? "")
-            .filter(Boolean);
-
-    it("labels ticks to the second on a window of a couple of minutes, all different", () => {
-        const data = series(...Array.from({ length: 120 }, (_, i) => sample(start + i * 1000, 40 + (i % 7))));
-        const labels = tickLabels(draw(data, 120));
-        expect(labels.length).toBeGreaterThanOrEqual(2);
-        expect(new Set(labels).size).toBe(labels.length);
-        for (const l of labels) expect(l).toMatch(/^\d{1,2}:\d{2}:\d{2}$/);
+    it("takes new samples with setData, not a new chart", async () => {
+        const [data, setData] = createSignal(series(sample(base, 40)));
+        mount(data);
+        await vi.advanceTimersByTimeAsync(200);
+        setData(series(sample(base, 40), sample(base + 1000, 55)));
+        setData(series(sample(base, 40), sample(base + 1000, 55), sample(base + 2000, 60)));
+        expect(made.charts).toHaveLength(1);
+        const calls = made.charts[0].setDataCalls;
+        expect(calls.length).toBe(2);
+        expect(calls[1][1]).toEqual([40, 55, 60]);
     });
 
-    it("labels ticks by the minute on the default five-minute window, all different", () => {
-        const data = series(...Array.from({ length: 300 }, (_, i) => sample(start + i * 1000, 40 + (i % 7))));
-        const labels = tickLabels(draw(data));
-        expect(labels.length).toBeGreaterThanOrEqual(2);
-        expect(new Set(labels).size).toBe(labels.length);
-        for (const l of labels) expect(l).toMatch(/^\d{1,2}:\d{2} (AM|PM)$/);
+    it("labels the time axis to the second on a short window, and the y axis without a unit", async () => {
+        mount(() => series(sample(base, 40)));
+        await vi.advanceTimersByTimeAsync(200);
+        const [x, y] = made.charts[0].opts.axes;
+        const t = new Date(2026, 9, 13, 8, 52, 30).getTime() / 1000;
+        expect(x.values(null, [t, t + 30], 0, 80, 30)).toEqual(["8:52:30", "8:53:00"]);
+        expect(y.values(null, [0, 50, 100])).toEqual(["0", "50", "100"]);
+    });
+
+    it("is destroyed with the pane", async () => {
+        const { unmount } = mount(() => series(sample(base, 40)));
+        await vi.advanceTimersByTimeAsync(200);
+        unmount();
+        expect(made.charts[0].destroyed).toBe(true);
     });
 });

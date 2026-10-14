@@ -70,20 +70,18 @@ function SysinfoView(props: SysinfoViewProps): JSX.Element {
     );
 }
 
-// Chart rebuild interval. The chart shows 5-min history so a 2s lag is
-// imperceptible, but the full 1Hz SVG rebuild (font hinting + Temporal
-// API for every axis tick) caused ~13% sustained GPU process CPU.
-const CHART_UPDATE_INTERVAL_MS = 2000;
+// How often the charts take new samples. They used to rebuild an SVG each
+// time, which at 1 Hz cost ~13% sustained GPU process CPU, so this was 2 s.
+// uPlot redraws its canvas instead (sysinfo-plot.tsx), so the charts follow
+// the default 1 Hz sampling.
+const CHART_UPDATE_INTERVAL_MS = 1000;
 
 function SysinfoViewInner(props: SysinfoViewProps): JSX.Element {
     const { model } = props;
 
-    // Throttle chart data to avoid rebuilding the SVG on every sysinfo
-    // event (default 1Hz). At 1Hz, full SVG recreation forced font
-    // hinting + Temporal date formatting for every x-axis label each
-    // second, causing ~13% sustained GPU process CPU. This throttle
-    // reduces repaints to ~0.5Hz while the status-bar stats still
-    // update at the full sysinfo rate (cheap text DOM updates).
+    // The charts take the model's samples on a timer (CHART_UPDATE_INTERVAL_MS)
+    // rather than on every event, so a burst (a backfill, a resumed lane) is one
+    // redraw, not many.
     const [plotData, setPlotData] = createSignal(model.dataAtom());
     onMount(() => {
         // Skipped while the window is being resized: rebuilding the chart reads
@@ -155,6 +153,7 @@ function SysinfoViewInner(props: SysinfoViewProps): JSX.Element {
                             title={title()}
                             targetLen={targetLen()}
                             intervalSecs={intervalSecs()}
+                            syncKey={`sysinfo-${model.blockId}`}
                         />
                     )}
                 </For>
