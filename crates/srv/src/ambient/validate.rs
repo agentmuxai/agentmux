@@ -30,9 +30,6 @@ pub const NAME: Limits = Limits { max_words: 12, max_chars: 100 };
 pub const PREVIEW: Limits = Limits { max_words: 24, max_chars: 240 };
 /// A one-sentence narration (asked for under 20 words).
 pub const NARRATION: Limits = Limits { max_words: 40, max_chars: 300 };
-/// A continued session's pick-up note: two or three sentences (asked for under
-/// 60 words), still one line.
-pub const CONTINUED_NOTE: Limits = Limits { max_words: 80, max_chars: 520 };
 /// A next-prompt suggestion is one short imperative; anything longer is an
 /// explanation, not a command.
 pub const NEXT_PROMPT: Limits = Limits { max_words: 28, max_chars: 160 };

@@ -32,7 +32,7 @@ import {
     ToolResultSource,
     UserMessageEvent,
 } from "./types";
-import { buildMemoryReinjectionNodeFromReplay } from "./memory-reinjection";
+import { buildMemoryReinjectionNodeFromReplay, isCatchUpMessage } from "./memory-reinjection";
 import { splitAttachedImages } from "./attachments/attached-images";
 import { toolDetailOf, toolIcon } from "./tool-meta/tool-descriptors";
 
@@ -500,6 +500,18 @@ export class ClaudeCodeStreamParser {
                 return this.agentMessageToNode(event as AgentMessageEvent);
 
             case "user_message": {
+                // A catch-up turn's input: AgentMux's, not the user's, and shown
+                // as the card srv writes for it rather than as a row. Unlike a
+                // reinjection it does not hide what follows: the agent's reply
+                // is the point (SPEC_RESUME_PHASE_CATCH_UP_TURN_2026_10_13.md
+                // §3.3).
+                if (isCatchUpMessage((event as UserMessageEvent).message)) {
+                    this.hidingUntilNextUserMessage = false;
+                    this.releaseHeldJekts();
+                    this.currentTextNode = null;
+                    this.currentThinkingNode = null;
+                    return null;
+                }
                 const node = this.userMessageToNode(event as UserMessageEvent);
                 const echoOfCard = this.fallbackCardShown && node.type === "memory_reinjection";
                 this.fallbackCardShown = false;

@@ -2,7 +2,8 @@
 
 /**
  * Reply to `memorydelivery:compose`. All three are absent when there is no
- * memory to deliver.
+ * memory to deliver. A catch-up always has `text`; `delivery_id` and `frame`
+ * (the card) are present only when the message carries memory.
  */
 export type MemoryDeliveryComposeResult = { 
 /**

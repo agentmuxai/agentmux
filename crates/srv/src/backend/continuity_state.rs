@@ -283,10 +283,14 @@ fn summary_section(state: &StateVersion) -> String {
     )
 }
 
-/// Inserts the summary as the reinjection's last section.
+/// Inserts the summary as the reinjection's last section: before the
+/// catch-up block of a catch-up turn's message, so the instruction stays last.
 fn append_state_to_reinjection(message: String, state: &StateVersion) -> String {
     const CLOSE: &str = "</system-reminder>";
-    let Some(at) = message.rfind(CLOSE) else { return message };
+    let catch_up = format!("\n{}", crate::backend::memory_delivery::CATCH_UP_SIGNATURE);
+    let Some(at) = message.rfind(&catch_up).map(|i| i + 1).or_else(|| message.rfind(CLOSE)) else {
+        return message;
+    };
     let before = &message[..at];
     let separator = if before.ends_with('\n') { "" } else { "\n" };
     format!("{before}{separator}{}{}", summary_section(state), &message[at..])
@@ -560,6 +564,19 @@ mod tests {
         assert!(out.ends_with("</system-reminder>\n"));
         assert_eq!(out.matches("</system-reminder>").count(), 1);
         assert!(crate::ambient::digest::is_hidden_reinjection_text(&out), "still recognized as hidden");
+    }
+
+    #[test]
+    fn the_summary_comes_before_a_catch_up_block_so_the_instruction_stays_last() {
+        use crate::backend::memory_delivery::{compose_catch_up, CatchUpKind, CATCH_UP_SIGNATURE};
+        let message = compose_catch_up(CatchUpKind::Compaction, Some(&reinjection(COMPACTION_CLAUSE)));
+        let out = append_state_to_reinjection(message, &version(3, 10, 1_790_000_000_000));
+        let summary = out.find("# Running summary of this conversation").unwrap();
+        let block = out.find(CATCH_UP_SIGNATURE).unwrap();
+        let personal = out.find("# Personal Memory (1 entry)\nP\n").unwrap();
+        assert!(personal < summary && summary < block, "{out}");
+        assert!(out.ends_with("</system-reminder>\n"));
+        assert_eq!(out.matches("</system-reminder>").count(), 1);
     }
 
     #[test]

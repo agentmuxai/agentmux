@@ -4,4 +4,9 @@
  * Reply to `memorydelivery:claim_fallback`: `false` when Claude Code's
  * `SessionStart` hook already delivered this event.
  */
-export type MemoryDeliveryClaimFallbackResult = { deliver: boolean, };
+export type MemoryDeliveryClaimFallbackResult = { deliver: boolean, 
+/**
+ * The event was another block's, not the hook's: a compaction this
+ * block's own CLI did not write. A catch-up turn is not for such a block.
+ */
+foreign?: boolean, };
