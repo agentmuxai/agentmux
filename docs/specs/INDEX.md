@@ -669,6 +669,7 @@ partial list.
 | [`SPEC_WIDGET_SHARING_2026_10_10`](SPEC_WIDGET_SHARING_2026_10_10.md) | Sharing widgets: signed packages, widgets in agent bundles, a catalog |
 | [`SPEC_WINDOWS_LIFECYCLE_ROBUSTNESS_2026_06_26`](SPEC_WINDOWS_LIFECYCLE_ROBUSTNESS_2026_06_26.md) | Windows Lifecycle Robustness — Surviving External Termination |
 | [`SPEC_WINDOWS_PORTABLE_7Z_2026_10_11`](SPEC_WINDOWS_PORTABLE_7Z_2026_10_11.md) | Spec: ship the Windows portable as `.7z` instead of `.zip` |
+| [`SPEC_WINDOW_CHURN_RENDERER_LEAK_2026_10_13`](SPEC_WINDOW_CHURN_RENDERER_LEAK_2026_10_13.md) | Spec: opening and closing windows must not leave renderers behind |
 | [`SPEC_WINDOW_NAME_API_HARDENING_2026_08_08`](SPEC_WINDOW_NAME_API_HARDENING_2026_08_08.md) | SPEC: Window-name MuxAPI hardening (phantom-id success + status codes) |
 | [`SPEC_WINDOW_RESIZE_NO_PAINT_DELAY_2026_09_24`](SPEC_WINDOW_RESIZE_NO_PAINT_DELAY_2026_09_24.md) | SPEC — Window resize repaints pane content every frame, with no settle delay |
 | [`SPEC_WINGET_PACKAGE_BOOTSTRAP_2026_09_10`](SPEC_WINGET_PACKAGE_BOOTSTRAP_2026_09_10.md) | WinGet package bootstrap: `AgentMux.AI` |
