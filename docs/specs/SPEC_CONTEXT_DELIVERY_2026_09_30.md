@@ -2,9 +2,10 @@
 
 **Status:** active — CD1 (#4037), CD2a (#4041) and CD2b (#4130) implemented; startup-file items implemented under the launch-context spec (#4129, #4131); CD3 proposed (awaits the owner's decision on storing bodies); CD4 moved to the resume-phase spec (§6); CD5 narrowed to the narration tag. None of it has been checked live (§5.1).
 **Date:** 2026-09-30. **Revised:** 2026-10-14 (§0.1, §1.3, the §2 note, §3–§9).
-**Verified against:** `agentmux` `main` @ `5c0d603ec` (2026-10-14), by reading code;
-#4888 at `40623c1ba` where marked. §2 is the 2026-09-30 baseline and its line numbers
-refer to the tree before the October history rewrite. Paths are relative
+**Verified against:** `agentmux` `main` @ `5c0d603ec` (2026-10-14), by reading code,
+and #4888 at `40623c1ba` for what it changes (§1.3, §3.5, §9). §2 is the
+2026-09-30 baseline: its line numbers refer to the tree before the October
+history rewrite. Elsewhere code is cited by file and symbol. Paths are relative
 to the repo root; `frontend/…/agent/` means [`frontend/app/view/agent/`](../../frontend/app/view/agent).
 **Related:**
 - `SPEC_RESUME_PHASE_CATCH_UP_TURN_2026_10_13.md` (#4888): **owns resume
@@ -45,7 +46,7 @@ From the owner, 2026-09-30:
 | See each memory item, not "3 injections" | **Built.** One row per item on every hook and fallback delivery (CD2a, CD2b), plus each startup file the CLI read on a new session (launch-context LC2, LC3). Rows carry no text yet (CD3). |
 | The compaction summary isn't a user message | **Built.** A card with an excerpt, pinnable to read the whole summary (CD1). |
 | Is "ambient" the right word? | **Decided** (§1) and in the public glossary. Only the narration tag still shows "ambient" (CD5). |
-| Card after a resume, account switch or compaction, and what the agent does next | **Moved** to the resume-phase spec, which also found that cards can land late (§9). |
+| *Later (2026-10-13):* the card right after a resume, account switch or compaction, then the agent saying where it is picking up | **Owned by** the resume-phase spec (#4888), which also found that cards can land late (§9). |
 
 Nothing here has been seen in a running app. The live check (§5.1) is the
 next step, and it runs together with #4888's.
@@ -57,7 +58,7 @@ next step, and it runs together with #4888's.
 - **Ambient** means one thing: **a model call AgentMux makes on its own**,
   not driven by the user. Titles, activity summaries, ghost text,
   narration and the running summary are all ambient calls. This is the
-  existing meaning (`agentmux-srv/src/ambient/mod.rs:4-8`, the AMC
+  existing meaning (`crates/srv/src/ambient/mod.rs`, the AMC
   framework). "Ambient" says **how** something was produced, never where
   it goes.
 - **Context delivery** (new) means **content the agent is given without
@@ -68,8 +69,8 @@ next step, and it runs together with #4888's.
   delivery" says **where** something goes: into the agent's context.
 
 The two can overlap. The running summary is an ambient call whose output
-becomes an item in a context delivery (`backend/continuity_state.rs:51,
-261-306`).
+becomes an item in a context delivery (`backend/continuity_state.rs`,
+`running_summary_section`).
 
 ### 1.2 Why a new term
 
@@ -78,8 +79,8 @@ becomes an item in a context delivery (`backend/continuity_state.rs:51,
 | Meaning | Where |
 |---|---|
 | model calls AgentMux makes itself | `ambient/`, `term:ambient_summary`, the `__ambient__` token bucket |
-| the host's own CLI login and home dir | `use_ambient_login` (189 occurrences), `AmbientHomeDirNotAllowed` (`identity/resolver/errors.rs:47`) |
-| a sound | "looping ambient tone" ([`frontend/app/view/settings/sections/sounds-section.tsx:99`](../../frontend/app/view/settings/sections/sounds-section.tsx)) |
+| the host's own CLI login and home dir | `use_ambient_login` (189 occurrences), `AmbientHomeDirNotAllowed` (`identity/resolver/errors.rs`) |
+| a sound | "looping ambient tone" ([`frontend/app/view/settings/sections/sounds-section.tsx`](../../frontend/app/view/settings/sections/sounds-section.tsx)) |
 
 None of the mechanisms that send content to the agent is called ambient
 today. Between them they use four names instead: "hidden turn",
@@ -87,7 +88,7 @@ today. Between them they use four names instead: "hidden turn",
 
 The pane already shows users the word **"ambient"** as a tag on narration,
 which is text that **never** reaches the agent
-(`frontend/…/agent/components/AmbientNarrationBlock.tsx:29-30,58`; `frontend/…/agent/types.ts:936`). Using the same
+(`frontend/…/agent/components/AmbientNarrationBlock.tsx`, `AMBIENT_TAG_LABEL`). Using the same
 word for text that **does** reach the agent would give one visible word
 opposite meanings.
 
