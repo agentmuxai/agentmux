@@ -718,6 +718,7 @@ partial list.
 | [`SPEC_CODEX_APP_SERVER_FIRST_CLASS_PROVIDER_2026_09_12`](SPEC_CODEX_APP_SERVER_FIRST_CLASS_PROVIDER_2026_09_12.md) | Codex App Server as a First-Class AgentMux Provider |
 | [`SPEC_COMPOSER_STRIP_DROP_CENTER_STATS_2026_08_31`](SPEC_COMPOSER_STRIP_DROP_CENTER_STATS_2026_08_31.md) | Spec: Drop the composer strip's centered token/elapsed stats |
 | [`SPEC_COMPOSER_STRIP_ROW_BASED_LAYOUT_2026_08_26`](SPEC_COMPOSER_STRIP_ROW_BASED_LAYOUT_2026_08_26.md) | SPEC: Composer Strip — Row-Based Layout (Rev 7) |
+| [`SPEC_CONNECTORS_CARDS_2026_10_13`](SPEC_CONNECTORS_CARDS_2026_10_13.md) | Spec: Connectors shows everything connected as cards |
 | [`SPEC_CONTINUOUS_SESSION_PERSISTENCE_2026_09_08`](SPEC_CONTINUOUS_SESSION_PERSISTENCE_2026_09_08.md) | SPEC: Continuous session persistence + trustworthy shutdown |
 | [`SPEC_CROSS_HOST_AGENT_ACCESS_2026_10_01`](SPEC_CROSS_HOST_AGENT_ACCESS_2026_10_01.md) | SPEC: Cross-host agent access — any agent can work on any AgentMux host, with gated privilege |
 | [`SPEC_CROSS_INSTANCE_GLOBAL_MEMORY_SYNC_2026_09_20`](SPEC_CROSS_INSTANCE_GLOBAL_MEMORY_SYNC_2026_09_20.md) | Spec: Cross-Instance Global Memory Sync |
