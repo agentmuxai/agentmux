@@ -237,7 +237,15 @@ fn contains_whole_word(haystack: &str, needle: &str, allow_plural: bool) -> bool
 
 /// Returns true if the message body contains keywords indicating a sensitive operation.
 pub fn is_sensitive_message(msg: &str) -> bool {
-    let lower = msg.to_lowercase();
+    // Matched on what a model reads, not the code points sent: joiners and
+    // other invisibles dropped, fullwidth letters as ASCII, so "pass<ZWJ>word"
+    // and "ｔｏｋｅｎ" still escalate.
+    let lower: String = msg
+        .chars()
+        .filter(|&c| !is_invisible(c) && !matches!(c, '\u{200C}' | '\u{200D}'))
+        .map(fold)
+        .collect::<String>()
+        .to_lowercase();
     SENSITIVE_SUBSTRING_KEYWORDS.iter().any(|kw| lower.contains(kw))
         || SENSITIVE_WHOLE_WORD_KEYWORDS
             .iter()
