@@ -2,6 +2,7 @@
 
 **Date:** 2026-10-14
 **Author:** Opaz
+**Status:** analysis; the changes in §1 are implemented in the PR that adds this document.
 **Follows:** `ANALYSIS_LINUX_WINDOW_PAINT_2026_10_11.md` (L1, L2), #4690 (macOS
 predict-on-resize)
 
