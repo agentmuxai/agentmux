@@ -24,6 +24,7 @@ function make(
         claim?: (() => Promise<boolean | ClaimAnswer>) | null;
         composeCatchUp?: (reason: CatchUpReason, memory: boolean) => Promise<ComposedDelivery | null>;
         sendRpc?: (message: string, deliveryId?: string) => Promise<void>;
+        entries?: { label: string; source: "global" | "personal"; body: string; sizeBytes: number }[];
     } = {},
 ) {
     const working = vi.fn(over.working ?? (() => false));
@@ -40,7 +41,7 @@ function make(
         contextWindow: () => 10_000,
         now: () => NOW,
         isPaneWorking: working,
-        fetchEntries: async () => [],
+        fetchEntries: async () => over.entries ?? [],
         sendRpc,
         composeCatchUp,
         ...(claimFn ? { claimFallback: claimFn } : {}),
@@ -211,6 +212,30 @@ describe("catchUp: the turn's lifetime", () => {
         // The user is already talking to the agent: nothing to catch up on, now or later.
         expect(t.sendRpc).not.toHaveBeenCalled();
         expect(t.dispatchTurnStart).not.toHaveBeenCalled();
+    });
+
+    it("still delivers the memory it claimed, as a plain reinjection, when a turn starts during the claim", async () => {
+        let busy = false;
+        const t = make({
+            working: () => busy,
+            entries: [{ label: "g1", source: "global", body: "global body", sizeBytes: 11 }],
+            claim: async () => {
+                busy = true; // the user sent something while srv was answering
+                return true;
+            },
+        });
+        await t.controller.catchUp(RECENT, "fresh_session");
+        // Not a catch-up: the user is already talking to the agent.
+        expect(t.composeCatchUp).not.toHaveBeenCalled();
+        expect(t.sendRpc).not.toHaveBeenCalled();
+
+        // The claim made the hook stand down, so the memory goes out once the pane is quiet.
+        busy = false;
+        t.controller.maybeFireDeferred();
+        await vi.waitFor(() => expect(t.sendRpc).toHaveBeenCalledTimes(1));
+        expect(t.claimFn).toHaveBeenCalledTimes(1);
+        expect(t.sendRpc.mock.calls[0][0]).toContain("global body");
+        expect(t.controller.isHiding()).toBe(true);
     });
 
     it("keeps a manual compaction's catch-up for when the turn that started ends", async () => {

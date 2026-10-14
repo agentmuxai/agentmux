@@ -325,9 +325,13 @@ export function createMemoryReinjectionController(opts: MemoryReinjectionControl
      */
     // A catch-up that finds the pane busy waits only when it may (a manual
     // compaction, found mid-way through its own turn). Any other has lost its
-    // point: a user already talking to the agent needs no catching up.
+    // point: a user already talking to the agent needs no catching up. But a
+    // memory event it already claimed is srv's to expect from us (the hook
+    // stood down for it), so that memory still goes out, as the ordinary hidden
+    // reinjection once the pane is quiet.
     function postpone(t: DeferredTrigger): void {
         if (t.canDefer) deferred = t;
+        else if (t.claimed && t.memory) deferred = { ...t, catchUp: false };
     }
 
     async function doCatchUp(t: DeferredTrigger): Promise<void> {
