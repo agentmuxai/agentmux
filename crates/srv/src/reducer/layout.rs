@@ -105,7 +105,7 @@ pub(super) fn handle_layout_set_tree(
     // would just move the divergence downstream instead of closing it.
     let pruned = crate::backend::layout::prune_dangling_block_refs(&mut tab.rootnode, &live_blocks);
     if pruned > 0 {
-        reconcile_focus_magnify(tab);
+        clear_dangling_focus_magnify(tab);
         tracing::warn!(
             tab_id = %tab_id,
             pruned,
@@ -123,16 +123,7 @@ pub(super) fn handle_layout_set_tree(
             "reducer: LayoutSetTree snapped minimize-locked node size(s) back to their locked values"
         );
     }
-    // Layout doctor (issue #2179): loudly attribute any surviving structural
-    // corruption to this write instead of letting it persist silently.
-    let violations = crate::backend::layout::validate_layout_invariants(&tab.rootnode);
-    if !violations.is_empty() {
-        tracing::error!(
-            tab_id = %tab_id,
-            violations = ?violations,
-            "layout-doctor: invariant violation(s) in tree persisted by LayoutSetTree"
-        );
-    }
+    report_layout_violations(&tab_id, "LayoutSetTree", &tab.rootnode);
     let new_tree = tab.rootnode.clone();
     // A prune can clear focus/magnify; the persisted row must get the same
     // values. With slices they ride the event; without, they get their own.
@@ -177,10 +168,6 @@ pub(super) fn handle_layout_delete_node(
             version: v,
         }];
     };
-    // Snapshot pre-delete focus/magnify so we can both detect
-    // direct-target hits AND post-walk for indirect orphaning.
-    let pre_focused = tab.focused_node_id.clone();
-    let pre_magnified = tab.magnified_node_id.clone();
     let Some(root) = tab.rootnode.as_mut() else {
         // Empty tree — nothing to delete; idempotent no-op (no event).
         return Vec::new();
@@ -211,10 +198,10 @@ pub(super) fn handle_layout_delete_node(
     //        node remains.
     //   - Deleting a container removes all descendants. If
     //        focused/magnified was a descendant, it's gone too.
-    // Direct-target match (`pre_focused == node_id`) doesn't catch
+    // A direct-target match (`focused == node_id`) doesn't catch
     // either case. Reconcile by walking the post-delete tree and
     // clearing any focus/magnify id that no longer resolves.
-    let (was_focused, was_magnified) = clear_dangling_focus_magnify(tab, &pre_focused, &pre_magnified);
+    let (was_focused, was_magnified) = clear_dangling_focus_magnify(tab);
 
     // SPEC_864 site #6 — carry the resulting tree so the persist
     // subscriber can write db_layout without re-running the algebra
@@ -238,27 +225,21 @@ pub(super) fn handle_layout_delete_node(
 }
 
 /// Clear the tab's focus/magnify ids when they no longer resolve to a node
-/// in its (already-edited) tree, given their values from BEFORE the edit.
-/// Returns `(was_focused, was_magnified)`: whether each one was cleared.
-/// Shared by every edit that can remove a leaf — a node delete, and a pane
-/// tab move that empties its source pane — see `handle_layout_delete_node`
-/// for the two ways an id can dangle after a delete.
-fn clear_dangling_focus_magnify(
-    tab: &mut crate::state::TabRecord,
-    pre_focused: &str,
-    pre_magnified: &str,
-) -> (bool, bool) {
-    let id_resolves = |id: &str| -> bool {
-        if id.is_empty() {
-            return true;
-        }
-        match tab.rootnode.as_ref() {
-            None => false,
-            Some(root) => crate::backend::layout::find_node_by_id(root, id).is_some(),
-        }
+/// in its (already-edited) tree. Returns `(was_focused, was_magnified)`:
+/// whether each one was cleared. Shared by every edit that can remove a leaf
+/// (a node delete, a pane tab move that empties its source pane, a
+/// `LayoutSetTree` prune); see `handle_layout_delete_node` for the two ways
+/// an id can dangle after a delete.
+fn clear_dangling_focus_magnify(tab: &mut crate::state::TabRecord) -> (bool, bool) {
+    let dangles = |id: &str| -> bool {
+        !id.is_empty()
+            && tab
+                .rootnode
+                .as_ref()
+                .is_none_or(|root| crate::backend::layout::find_node_by_id(root, id).is_none())
     };
-    let was_focused = !pre_focused.is_empty() && !id_resolves(pre_focused);
-    let was_magnified = !pre_magnified.is_empty() && !id_resolves(pre_magnified);
+    let was_focused = dangles(&tab.focused_node_id);
+    let was_magnified = dangles(&tab.magnified_node_id);
     if was_focused {
         tab.focused_node_id = String::new();
     }
@@ -266,6 +247,15 @@ fn clear_dangling_focus_magnify(
         tab.magnified_node_id = String::new();
     }
     (was_focused, was_magnified)
+}
+
+/// Layout doctor (#2179): attribute any structural corruption to the write
+/// that made it, loudly, instead of letting it persist silently.
+fn report_layout_violations(tab_id: &str, op: &str, tree: &Option<agentmux_common::LayoutNode>) {
+    let violations = crate::backend::layout::validate_layout_invariants(tree);
+    if !violations.is_empty() {
+        tracing::error!(tab_id, op, violations = ?violations, "layout-doctor: invariant violation(s) after a layout write");
+    }
 }
 
 /// SPEC_864 site #6 — delete the layout node holding `block_id`.
@@ -398,10 +388,7 @@ fn stack_tree_edit(
         return op_error(state, format!("{op}: {not_found} (tab {tab_id})"));
     }
     let new_tree = state.tabs.get(&tab_id).and_then(|tab| tab.rootnode.clone());
-    let violations = crate::backend::layout::validate_layout_invariants(&new_tree);
-    if !violations.is_empty() {
-        tracing::error!(tab_id = %tab_id, op, violations = ?violations, "layout-doctor: invariant violation(s) after a pane-tab edit");
-    }
+    report_layout_violations(&tab_id, op, &new_tree);
     let v = state.bump_version();
     vec![Event::LayoutTreeReplaced {
         tab_id,
@@ -515,20 +502,15 @@ pub(super) fn handle_layout_stack_move(
     // The emptied-pane case. `source_leaf_emptied_by_move` only returns Some
     // for a tab that exists with a tree, so both lookups below succeed.
     let tab = state.tabs.get_mut(&tab_id).expect("resolved above");
-    let pre_focused = tab.focused_node_id.clone();
-    let pre_magnified = tab.magnified_node_id.clone();
     let applied = tab.rootnode.as_mut().is_some_and(|root| {
         crate::backend::layout::move_stack_member(root, &block_id, &target_block_id, position, activate)
     });
     if !applied {
         return op_error(state, format!("LayoutStackMove: {not_found} (tab {tab_id})"));
     }
-    let (was_focused, was_magnified) = clear_dangling_focus_magnify(tab, &pre_focused, &pre_magnified);
+    let (was_focused, was_magnified) = clear_dangling_focus_magnify(tab);
     let new_tree = tab.rootnode.clone();
-    let violations = crate::backend::layout::validate_layout_invariants(&new_tree);
-    if !violations.is_empty() {
-        tracing::error!(tab_id = %tab_id, op = "LayoutStackMove", violations = ?violations, "layout-doctor: invariant violation(s) after a pane-tab edit");
-    }
+    report_layout_violations(&tab_id, "LayoutStackMove", &new_tree);
     let v = state.bump_version();
     vec![Event::LayoutNodeDeleted {
         tab_id,
@@ -563,29 +545,6 @@ fn op_error(state: &mut State, message: String) -> Vec<Event> {
         fatal: false,
         version: v,
     }]
-}
-
-/// Clear focused/magnified ids that no longer resolve in the tab's tree
-/// (e.g. after `LayoutSetTree` pruned a dangling leaf) — same intent as
-/// `handle_layout_delete_node`'s post-walk.
-fn reconcile_focus_magnify(tab: &mut crate::state::TabRecord) {
-    let resolves = |id: &str| -> bool {
-        if id.is_empty() {
-            return true;
-        }
-        match tab.rootnode.as_ref() {
-            Some(root) => crate::backend::layout::find_node_by_id(root, id).is_some(),
-            None => false,
-        }
-    };
-    let drop_focus = !resolves(&tab.focused_node_id);
-    let drop_magnify = !resolves(&tab.magnified_node_id);
-    if drop_focus {
-        tab.focused_node_id.clear();
-    }
-    if drop_magnify {
-        tab.magnified_node_id.clear();
-    }
 }
 
 #[cfg(test)]

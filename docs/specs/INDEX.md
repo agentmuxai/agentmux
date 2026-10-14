@@ -411,6 +411,7 @@ partial list.
 | [`SPEC_PANE_HEADER_TEXT_HOVER_TOOLTIP_2026_09_21`](SPEC_PANE_HEADER_TEXT_HOVER_TOOLTIP_2026_09_21.md) | SPEC: pane header informational text becomes a hover tooltip |
 | [`SPEC_PANE_RESIZE_DIMENSION_OVERLAY_2026_05_26`](SPEC_PANE_RESIZE_DIMENSION_OVERLAY_2026_05_26.md) | SPEC: Pane resize dimension overlay (WxH badge) |
 | [`SPEC_PANE_SELECT_AUTOFOCUS_2026_09_22`](SPEC_PANE_SELECT_AUTOFOCUS_2026_09_22.md) | Selecting a pane should focus its input — not just opening one |
+| [`SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18`](SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md) | SPEC: Pane tabs as reducer commands — one writer for "which blocks are in which pane" |
 | [`SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19`](SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md) | SPEC + PLAN: Pane Tab Drag-and-Drop — reorder, cross-pane move, tear-off-to-floating-pane, and reserved whole-pane-drag space |
 | [`SPEC_PANE_TAB_DRAG_LANDING_FLASH_AND_LAST_TAB_CLOSE_2026_09_24`](SPEC_PANE_TAB_DRAG_LANDING_FLASH_AND_LAST_TAB_CLOSE_2026_09_24.md) | SPEC: Pane Tab drag — Window-Tab-style landing flash on the destination, moving a pane's last tab closes that pane, and removing `pane:tabstrip = "multi-only"` |
 | [`SPEC_PANE_TAB_STRIP_AGENT_TERMINAL_2026_07_20`](SPEC_PANE_TAB_STRIP_AGENT_TERMINAL_2026_07_20.md) | SPEC: Pane tab strip — editor-style in-pane tabs for agent and terminal panes |
@@ -651,7 +652,6 @@ partial list.
 | [`SPEC_NO_WINDOW_SPAWN_AND_META_ROW_TYPE_SCALE_DRY_2026_10_01`](SPEC_NO_WINDOW_SPAWN_AND_META_ROW_TYPE_SCALE_DRY_2026_10_01.md) | Spec: DRY the no-window spawn flag, and the meta-row type scale |
 | [`SPEC_OS_NOTIFICATIONS_SYSTEM_2026_09_24`](SPEC_OS_NOTIFICATIONS_SYSTEM_2026_09_24.md) | SPEC: OS notification system (native toasts) + tray re-enablement |
 | [`SPEC_PANE_LOADING_CONSOLIDATION_2026_09_20`](SPEC_PANE_LOADING_CONSOLIDATION_2026_09_20.md) | SPEC — Consolidate pane loading into one readiness system |
-| [`SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18`](SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md) | SPEC: Pane tabs as reducer commands — one writer for "which blocks are in which pane" |
 | [`SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17`](SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17.md) | SPEC: Universal Pane Tabs — Every Pane Header Becomes a Tab Strip (cmux-Style Redesign) |
 | [`SPEC_PANE_TAB_CONTRACT_V1_2026_09_24`](SPEC_PANE_TAB_CONTRACT_V1_2026_09_24.md) | SPEC: Pane Tab contract v1 — one general interface for every pane tab (and future user-loaded widgets), starting with the Help "ghost" fix |
 | [`SPEC_PER_WINDOW_THEME_AND_OPACITY_2026_10_12`](SPEC_PER_WINDOW_THEME_AND_OPACITY_2026_10_12.md) | Per-window theme and opacity: one opacity per window, a theme per window, new windows inherit |
