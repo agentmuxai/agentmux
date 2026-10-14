@@ -46,7 +46,12 @@ vi.mock("@/app/store/mps", async () => {
         (mock.muxEventSubscribe as (sub: unknown) => () => void)({ eventType, scope, handler: (e: any) => { if (e?.data != null) handler(e.data, e); else if (isNoPayloadMuxEvent(eventType)) handler(null, e); } } as any);
     return { ...mock, onMuxEvent };
 });
-vi.mock("@/app/store/global", () => ({ getApi: () => ({ openExternal: vi.fn() }) }));
+vi.mock("@/app/store/global", () => ({
+    getApi: () => ({ openExternal: vi.fn() }),
+    // The install console reads agent:followcontroller (unset here).
+    getSettingsKeyAtom: () => () => undefined,
+    isDev: false,
+}));
 
 afterEach(() => {
     cleanup();
