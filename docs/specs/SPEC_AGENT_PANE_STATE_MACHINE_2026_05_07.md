@@ -1,7 +1,7 @@
 # Spec: Agent Pane State Machine Refinement
 
 **Date:** 2026-05-07  
-**Status:** Draft  
+**Status:** implemented — Init*, PendingMessageExpired, StreamWatchdogTick and nodeIdSet exist in `frontend/app/store/agent-pane-state/`. Moving DocumentState into the reducer was declined (A6). Verified against code 2026-10-14 ([triage](../analysis/REPORT_REDUCER_STACK_TRIAGE_2026_10_13.md)).
 **Area:** [`frontend/app/store/`](../../frontend/app/store), [`frontend/app/view/agent/`](../../frontend/app/view/agent)
 
 ---

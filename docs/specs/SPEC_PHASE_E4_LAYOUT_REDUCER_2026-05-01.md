@@ -1,7 +1,7 @@
 # SPEC: Phase E.4 — Layout reducer migration
 
 **Date:** 2026-05-01
-**Status:** Draft — granularity decision pending review.
+**Status:** implemented — the srv layout reducer arms live in `crates/srv/src/reducer/layout.rs`. Verified against code 2026-10-14 ([triage](../analysis/REPORT_REDUCER_STACK_TRIAGE_2026_10_13.md)).
 **Author:** AgentA
 **Reads-this-first:**
 - [`docs/retro/next-steps-architecture-completeness-2026-05-01.md`](../retro/next-steps-architecture-completeness-2026-05-01.md) — step 3.

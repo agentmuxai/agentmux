@@ -2,7 +2,7 @@
 
 **Author:** AgentC (with Explore + research subagents)
 **Date:** 2026-04-27
-**Status:** Draft for review
+**Status:** implemented — built as the launcher reducer (`crates/launcher/src/reducer/`, which cites this spec). Verified against code 2026-10-14 ([triage](../analysis/REPORT_REDUCER_STACK_TRIAGE_2026_10_13.md)).
 **Repo:** `agentmuxai/agentmux` @ `main` (current `0.33.435`)
 **Related (read first):**
 - `specs/ANALYSIS_WINDOW_PROCESS_STATE_INVENTORY_2026_04_27.md` —

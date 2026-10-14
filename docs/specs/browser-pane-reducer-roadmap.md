@@ -1,6 +1,6 @@
 # Browser-pane reducer migration — diagnostic-first roadmap
 
-**Status:** Proposed
+**Status:** implemented — Phases 0–6: the `browser-pane-state` slice owns every field and the model writes only through projections (`frontend/app/view/browser/browser-model.ts`). Verified against code 2026-10-14 ([triage](../analysis/REPORT_REDUCER_STACK_TRIAGE_2026_10_13.md)).
 **Owner:** AgentA
 **Date:** 2026-05-08
 **Replaces (in spirit):** the discarded PR #737. The catalog at [`browser-pane-state-catalog.md`](./browser-pane-state-catalog.md) (commit `5af7474f` in git history) is the precondition input.

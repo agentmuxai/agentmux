@@ -1,6 +1,7 @@
 # Multi-reducer architecture — status & roadmap
 
-**Status:** Active reference. Synthesis of current state across launcher / host / srv reducers, what's been built, and what's left.
+**Status:** superseded — a point-in-time synthesis; the reducer stack's current state is in the triage report. Verified against code 2026-10-14 ([triage](../analysis/REPORT_REDUCER_STACK_TRIAGE_2026_10_13.md)).
+**Superseded-by:** [`REPORT_REDUCER_STACK_TRIAGE_2026_10_13.md`](../analysis/REPORT_REDUCER_STACK_TRIAGE_2026_10_13.md)
 **Date:** 2026-04-29 (post-#608 / Phase D done).
 **Author:** AgentA.
 

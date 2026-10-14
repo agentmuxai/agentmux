@@ -1,7 +1,7 @@
 # Plan: srv reducer modularization
 
 **Date:** 2026-05-07
-**Status:** Draft — operational plan
+**Status:** implemented — `crates/srv/src/reducer/{block,layout,lifecycle,snapshot,tab,window,workspace}.rs`. Verified against code 2026-10-14 ([triage](../analysis/REPORT_REDUCER_STACK_TRIAGE_2026_10_13.md)).
 **Companion PR:** #716 (originally an empty-tree-explicit-parent fix; expanded to absorb this refactor per user direction)
 
 ## Why

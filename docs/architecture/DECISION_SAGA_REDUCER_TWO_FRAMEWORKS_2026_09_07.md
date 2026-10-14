@@ -36,3 +36,11 @@ Reasons: the divergence is designed, not accidental. The srv header and the 04-3
 - No code changes in this decision. **Done on acceptance:** the four header cross-references landed as a comments-only PR (`agentmux-launcher/src/saga/mod.rs`, `agentmux-srv/src/sagas/mod.rs`, `agentmux-launcher/src/reducer/mod.rs`, `agentmux-srv/src/reducer.rs`), and this page moved to `active`.
 - The audit's Phase 5 line item closes as "decided: separate, documented".
 - Re-open if a saga needs to coordinate launcher and srv state in one run, or if a third saga or reducer framework appears anywhere in the workspace.
+
+## Addendum 2026-10-14: what the 09-07 reading missed
+
+Found by the [reducer stack triage](../analysis/REPORT_REDUCER_STACK_TRIAGE_2026_10_13.md). The decision itself is unchanged; these are facts for whoever weighs the re-open trigger above.
+
+- **There is a third reducer, and it predates this decision.** The host's `crates/cef/src/reducer/` (Phase H, May 2026) has its own `HostCommand` enum (30 variants) and returns a `DispatchOutput` the caller applies as Win32/CEF effects, instead of `Vec<Event>` over the shared `ipc::Command`. It isn't a saga framework, and it doesn't share the launcher/srv signature. Read literally, the trigger "a third saga or reducer framework appears" has already fired. Whether it should re-open option 1 or 3's optional `Reducer` trait is the owner's call.
+- **"Pure, total, deterministic, no I/O" was not true of all three.** The launcher logged to a file from inside `apply_hwnd_position_changed`, srv generates UUIDs inside reduce, and the host reducer reads the clock, a global counter and an env var. The triage's §2 lists each one.
+- **The sizes have moved on.** srv's reducer is now `crates/srv/src/reducer.rs` (349 lines) plus per-domain submodules (~6.3K lines with tests). The paths above predate the 2026-10 move of the crates to `crates/<name>/`.

@@ -1,7 +1,7 @@
 # SPEC: Saga durability — durable saga log
 
 **Date:** 2026-05-01
-**Status:** Draft — design choices below need user/reviewer sign-off before code.
+**Status:** implemented — `crates/srv/src/sagas/log.rs` and `recovery.rs`, run at startup from `crates/srv/src/main.rs`. Verified against code 2026-10-14 ([triage](../analysis/REPORT_REDUCER_STACK_TRIAGE_2026_10_13.md)).
 **Author:** AgentA
 **Reads-this-first:**
 - [`docs/retro/next-steps-architecture-completeness-2026-05-01.md`](../retro/next-steps-architecture-completeness-2026-05-01.md) — step 4.

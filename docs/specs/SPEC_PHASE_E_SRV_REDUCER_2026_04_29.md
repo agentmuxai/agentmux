@@ -1,6 +1,6 @@
 # SPEC: Phase E — srv reducer + saga coordinator (first multi-reducer validation)
 
-**Status:** Draft for review (rev 2 — coordinator integrated).
+**Status:** implemented — the srv reducer and saga coordinator exist (`crates/srv/src/reducer.rs`, `crates/srv/src/reducer/`, `crates/srv/src/sagas/`). Verified against code 2026-10-14 ([triage](../analysis/REPORT_REDUCER_STACK_TRIAGE_2026_10_13.md)).
 **Date:** 2026-04-29 (post Phase B + D).
 **Author:** AgentA.
 

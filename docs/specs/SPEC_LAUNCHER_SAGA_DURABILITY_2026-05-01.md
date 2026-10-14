@@ -1,7 +1,8 @@
 # Launcher Saga Durability + Recovery
 
 **Date:** 2026-05-01
-**Status:** Draft 1 — for review
+**Status:** superseded — the durable launcher saga log this proposed was collapsed to an in-memory registry by Pillar 1 Step 6 (#2191). Verified against code 2026-10-14 ([triage](../analysis/REPORT_REDUCER_STACK_TRIAGE_2026_10_13.md)).
+**Superseded-by:** [`SPEC_PILLAR1_STEP6_SAGA_COLLAPSE_2026_07_16.md`](./SPEC_PILLAR1_STEP6_SAGA_COLLAPSE_2026_07_16.md)
 **Depends on:** [`SPEC_SAGA_ARCHITECTURE_TARGET_2026-05-01.md`](./SPEC_SAGA_ARCHITECTURE_TARGET_2026-05-01.md)
 **Companion:** [`SPEC_CROSS_PROCESS_DISPATCH_2026-05-01.md`](./SPEC_CROSS_PROCESS_DISPATCH_2026-05-01.md)
 
