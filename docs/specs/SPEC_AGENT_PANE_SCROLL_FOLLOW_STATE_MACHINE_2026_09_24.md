@@ -1,6 +1,6 @@
 # Agent pane scroll-follow: one owner, one intent-based state machine
 
-**Status:** active — Phase 0 (the hotfix for both reported symptoms, §8) shipped with this spec in PR #3652; invariant I4 (follow-transition logging, §5.3) shipped ahead of Phase 1 as Phase 0b; Phases 1 and 2 implemented (the reducer and its binding, wired into the transcript behind `agent:followcontroller`, on by default in dev builds only; §8.1 lists where they differ from §5); Phase 3 waits for the open `ToolOverlayLog` work (#4845); Phases 4–5 not started. Tracking: issue #3655.
+**Status:** active — Phase 0 (the hotfix for both reported symptoms, §8) shipped with this spec in PR #3652; invariant I4 (follow-transition logging, §5.3) shipped ahead of Phase 1 as Phase 0b; Phases 1 and 2 implemented in #4871 (the reducer and its binding, wired into the transcript behind `agent:followcontroller`, on by default in dev builds only; §8.1 lists where they differ from §5); Phase 3 implemented in #PRNUM (the tool preview and the install log on the same controller, behind the same setting; §8.2); Phases 4–5 not started. Tracking: issue #3655.
 **Date:** 2026-09-24.
 **Requested by:** repo owner (asafebgi): "rock solid scrollbar for agent panes … this may need an architecture rethink, perhaps a DRY round."
 **Author:** Agent2.
@@ -257,6 +257,7 @@ Out of scope: the content-resize contract's pending steps 4–6 (shrinks at the 
 4. **Phase 2:** `createFollowScroll` binding, wired into `AgentDocumentVirtualList` behind a setting, `agent:followcontroller` (default **on** in dev builds, off in release). Keep the old path for one release as a kill switch, the same pattern as `agent:turnscopedtail`.
    **Implemented** (Phases 1 and 2): see §8.1.
 5. **Phase 3:** move `ToolOverlayLog` and `SystemToolInstallInline` onto the primitive.
+   **Implemented**: see §8.2.
 6. **Phase 4:** live soak passes; default on everywhere; delete the old path, `anchor.ts`'s threshold helpers, and the dead flags. The history catalog in §3 becomes this spec's status note.
 7. **Phase 5:** the "↓ New activity" pill (§5.7).
 
@@ -272,6 +273,14 @@ Out of scope: the content-resize contract's pending steps 4–6 (shrinks at the 
 - **What counts as the user.** Inside the 250 ms window, a held scrollbar, or a pointer held anywhere on the transcript (a selection drag can autoscroll it). Scroll keys count when focus is inside the transcript, or when nothing is focused and the last press was on it; this closes the document-wide keys gap in #3655 §7. A non-collapsed selection that starts in the transcript while the pointer is held escapes (`cause=user-escape:selection`).
 - **Telemetry causes** (I4), in addition to Phase 0b's: `user-escape:wheel-up|key|selection`, `no-overflow`, `reset`, and, for SUSPENDED, `following→suspended cause=zero-size` / `suspended→following cause=sized`. A SUSPENDED pane keeps `stickToBottom` (and `data-follow-state`) at the state it will return to. `load-older` no longer appears: paging happens only once the pane is already DETACHED.
 - **Still open from §5.** The "new activity" indicator (Phase 5), observers attached through ref callbacks (§5.6), middle-click autoscroll (no gesture event), and the live soak (Phase 4). The old path, `anchor.ts`'s threshold helpers and the Phase 0 flags stay until the soak passes.
+
+
+### 8.2 Phase 3 as implemented
+
+- **Which copies moved.** `ToolOverlayLog.tsx`, the tool preview, whose #3801 local copy is now [`frontend/app/view/agent/scroll/preview-follow.ts`](../../frontend/app/view/agent/scroll/preview-follow.ts). The install log, [`frontend/app/element/install/LogView.tsx`](../../frontend/app/element/install/LogView.tsx): `SystemToolInstallInline.tsx`'s follow code (§6) moved there when the install console became shared (#3684), and `SystemToolInstallInline.tsx` itself no longer follows anything.
+- **Same setting.** Both read `agent:followcontroller` once at mount, through `followControllerOn()` ([`frontend/app/view/agent/scroll/follow-setting.ts`](../../frontend/app/view/agent/scroll/follow-setting.ts)), which the transcript uses too, so one setting switches all three. Off, each keeps its previous rules: the preview's local copy (`legacyPreviewFollow`) and the install log's 40 px geometry rule. Phase 4 deletes both.
+- **What changes with it on.** The preview and the install log follow the transcript's rules (§5.4, §8.1). A wheel-up escapes at once, however small: the preview's copy needed a move of more than 24 px, so a same-frame pin could pull a small wheel-up back. A browser-made scroll never detaches the install log; its 40 px rule detached on any scroll it hadn't made itself. A selection drag in either detaches it, and a pointer held on either counts as the user's input, as on the transcript. The install log treats a closed Details (0 px) as SUSPENDED and pins when it opens. A preview that starts at the top and then streams follows through `JumpToBottom`, logged as `cause=streaming-started` as before.
+- **What stays the preview's own.** The pin (its ResizeObserver, skipped while its panel is `content-visibility: hidden`), the start-at-top default for documents, and a fresh state when a different tool node takes over its slot. The preview keeps its `[scroll-follow] tool=<id>` lines for follow changes only (hidden / shown is not logged there); the install log logs nothing, as before. The binding's wheel-up escape skips nested hand-off boxes, but not the scroller itself when it is one (the preview is).
 
 ## 9. Decisions (owner, 2026-09-24: "proceed" on the recommendations)
 
