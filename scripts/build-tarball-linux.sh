@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build AgentMux as a portable .tar.gz for Linux x86_64 — extract and run,
+# Build AgentMux as a portable .tar.xz for Linux x86_64 — extract and run,
 # no install step, no fpm/appimagetool dependency. Portable-archive
 # counterpart to Windows' portable ZIP (`task package`) and waveterm's `.zip`.
 #
@@ -9,17 +9,24 @@
 #   bash scripts/build-tarball-linux.sh [output-dir]
 #
 #   output-dir defaults to ~/Desktop. The archive is named
-#   AgentMux_{version}_amd64-portable.tar.gz in that directory and extracts
-#   to a single top-level AgentMux/ directory.
+#   AgentMux_{version}_amd64-portable.tar.xz in that directory and extracts
+#   to a single top-level AgentMux/ directory (`tar xf` needs xz-utils).
+#   xz -9e: 129.7 MiB against gzip's 183.0 MiB on the 0.59.22 payload
+#   (docs/specs/SPEC_LINUX_PACKAGES_XZ_2026_10_14.md).
 #
 # Prerequisites (one-time):
 #   - Same build artifacts stage-linux-runtime.sh requires (dist/, target/release/).
-#   - No fpm, no appimagetool — this format needs no packaging tool at all.
+#   - xz on PATH (xz-utils). No fpm, no appimagetool.
 
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
+
+if ! command -v xz >/dev/null 2>&1; then
+    echo "ERROR: xz not found on PATH — install xz-utils (apt install xz-utils)" >&2
+    exit 1
+fi
 
 VERSION="$(node -p "require('./package.json').version")"
 OUTDIR="${1:-$HOME/Desktop}"
@@ -27,9 +34,9 @@ STAGEDIR="$REPO_ROOT/build/AgentMux-portable"
 # Same local-build-label convention as build-appimage-linux.sh — see that
 # script's comment for the full rationale.
 if [ -n "${AGENTMUX_BUILD_LABEL:-}" ]; then
-    OUTPUT="$OUTDIR/AgentMux_${AGENTMUX_BUILD_LABEL}_amd64-portable.tar.gz"
+    OUTPUT="$OUTDIR/AgentMux_${AGENTMUX_BUILD_LABEL}_amd64-portable.tar.xz"
 else
-    OUTPUT="$OUTDIR/AgentMux_${VERSION}_amd64-portable.tar.gz"
+    OUTPUT="$OUTDIR/AgentMux_${VERSION}_amd64-portable.tar.xz"
 fi
 
 echo "Building AgentMux v$VERSION portable tarball → $OUTPUT"
@@ -61,7 +68,7 @@ chmod +x "$STAGEDIR/AgentMux/agentmux.sh"
 # --- 3. Archive ---
 mkdir -p "$OUTDIR"
 rm -f "$OUTPUT"
-tar czf "$OUTPUT" -C "$STAGEDIR" AgentMux
+tar -cf - -C "$STAGEDIR" AgentMux | xz -9e -T0 -c > "$OUTPUT"
 
 echo ""
 echo "✓ Built portable tarball: $OUTPUT"

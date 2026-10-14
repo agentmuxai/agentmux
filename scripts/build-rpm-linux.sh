@@ -132,6 +132,8 @@ fpm -s dir -t rpm \
     --url "https://agentmux.ai" \
     --license Apache-2.0 \
     --category Utilities \
+    --rpm-compression xz \
+    --rpm-compression-level 9 \
     --package "$OUTPUT" \
     -C "$PKGROOT" .
 
