@@ -111,7 +111,9 @@ export function TimeChart(props: TimeChartProps): JSX.Element {
             height,
             legend: { show: false },
             cursor: {
-                sync: props.syncKey ? { key: props.syncKey } : undefined,
+                // Only the time is shared: each chart has its own y scale, and by
+                // default uPlot would also draw the hovered chart's y value on the others.
+                sync: props.syncKey ? { key: props.syncKey, scales: ["x", null] } : undefined,
                 drag: { x: false, y: false },
                 points: { size: 6 },
             },

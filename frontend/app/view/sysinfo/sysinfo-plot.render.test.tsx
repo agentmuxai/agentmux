@@ -97,6 +97,8 @@ describe("SingleLinePlot on uPlot", () => {
         expect(opts.series[1].spanGaps).toBe(false);
         expect(opts.scales.x.time).toBe(true);
         expect(opts.cursor.sync.key).toBe("sysinfo-b");
+        // Only the time is shared between the pane's charts, never a y value.
+        expect(opts.cursor.sync.scales).toEqual(["x", null]);
         expect([opts.width, opts.height]).toEqual([600, 200]);
         expect(opts.scales.y.range()).toEqual([0, 100]);
         // The x window ends at the newest sample and spans five minutes.

@@ -94,22 +94,11 @@ function SysinfoViewInner(props: SysinfoViewProps): JSX.Element {
         }, CHART_UPDATE_INTERVAL_MS);
         onCleanup(() => clearInterval(id));
     });
-    // Sync immediately whenever the initial (or a reconnect-triggered) load
-    // finishes, instead of waiting for the next throttle tick. `plotData`'s
-    // initial value above is a one-time snapshot taken at mount — if the
-    // pane mounts before loadInitialData()'s RPC resolves (the common
-    // case), it captures `[]`, and without this effect the chart would sit
-    // blank until the interval above happened to fire, up to
-    // CHART_UPDATE_INTERVAL_MS (2s) after the real data was already ready.
-    // That interval exists to throttle STEADY-STATE repaints, not to gate
-    // the first paint — this was the actual cause of a slow-feeling first
-    // load, not a missing loading indicator or slow RPC.
-    //
-    // `on()` scopes tracking to loadingAtom() ONLY — model.dataAtom() is
-    // read for its current value but deliberately NOT tracked, or this
-    // effect would re-fire on every ~1Hz sample and defeat the throttle
-    // above entirely (the exact ~13% sustained GPU cost the throttle was
-    // added to fix, see CHART_UPDATE_INTERVAL_MS's comment).
+    // Take the samples at once when a load (first, or after a reconnect)
+    // finishes, rather than at the next tick: a pane that mounted before its
+    // history arrived would otherwise sit empty for up to a whole
+    // CHART_UPDATE_INTERVAL_MS. Only `loadingAtom` is tracked; tracking
+    // `dataAtom` too would take every sample as it comes and undo the timer.
     createEffect(
         on(
             () => model.loadingAtom(),
