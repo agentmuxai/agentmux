@@ -15,7 +15,7 @@ import { createEffect, createSignal, onCleanup, onMount } from "solid-js";
 
 import { appliedWindowTheme } from "@/app/store/window-appearance";
 
-import { PLOT_LEFT_PX, PLOT_RIGHT_PX, resolveCssColor, withAlpha, xWindowSecs } from "./sysinfo-chart";
+import { PLOT_LEFT_PX, PLOT_RIGHT_PX, resolveCssColor, xWindowSecs } from "./sysinfo-chart";
 import { columnSpan, coreGrid } from "./sysinfo-overview-data";
 import type { DataItem } from "./sysinfo-types";
 
@@ -73,18 +73,20 @@ export function CoreHeatmap(props: CoreHeatmapProps): JSX.Element {
         const w = win(rows);
         const pw = plotWidth(width);
         if (!w || pw <= 0 || grid.length === 0) return;
-        const color = resolveCssColor(host, props.color);
+        // One color for every cell, its opacity set per cell: no color string per cell.
+        ctx.fillStyle = resolveCssColor(host, props.color);
         const rh = height / grid.length;
         const spans = rows.map((row) => columnSpan(row.ts, w, props.intervalSecs, pw));
         grid.forEach((cells, r) => {
             cells.forEach((v, c) => {
                 const span = spans[c];
                 if (v == null || !span) return;
-                ctx.fillStyle = withAlpha(color, cellAlpha(v));
+                ctx.globalAlpha = cellAlpha(v);
                 // A hairline between rows keeps cores apart without a grid.
                 ctx.fillRect(PLOT_LEFT_PX + span[0], r * rh, Math.ceil(span[1] - span[0]), Math.max(1, rh - 1));
             });
         });
+        ctx.globalAlpha = 1;
     });
 
     const onMove = (e: MouseEvent) => {

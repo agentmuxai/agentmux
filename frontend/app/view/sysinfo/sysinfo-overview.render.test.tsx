@@ -84,7 +84,7 @@ function mount(over: Partial<Parameters<typeof Overview>[0]> = {}) {
         onWindow: vi.fn(),
         paused: false,
         onPause: vi.fn(),
-        focus: null,
+        focus: "advanced" as const,
         onFocus: vi.fn(),
         syncKey: "sysinfo-b",
         ...over,
@@ -178,7 +178,7 @@ describe("Overview", () => {
                 onWindow={vi.fn()}
                 paused={false}
                 onPause={vi.fn()}
-                focus={null}
+                focus="advanced"
                 onFocus={vi.fn()}
                 syncKey="sysinfo-b"
             />
@@ -193,12 +193,19 @@ describe("Overview", () => {
         expect(tileValue("CPU")).toBe("40%");
     });
 
-    it("offers each area alone, and every area again", () => {
+    it("offers each area alone, then every area last, as Advanced", () => {
         const props = mount();
+        const names = screen.getAllByRole("radio").map((r) => r.textContent);
+        expect(names.slice(0, 5)).toEqual(["CPU", "Memory", "Disk", "Network", "Advanced"]);
         fireEvent.click(screen.getByRole("radio", { name: "Network" }));
         expect(props.onFocus).toHaveBeenCalledWith("net");
-        fireEvent.click(screen.getByRole("radio", { name: "Overview" }));
-        expect(props.onFocus).toHaveBeenLastCalledWith(null);
+        fireEvent.click(screen.getByRole("radio", { name: "Advanced" }));
+        expect(props.onFocus).toHaveBeenLastCalledWith("advanced");
+    });
+
+    it("computes no tiles outside Advanced", () => {
+        mount({ focus: "cpu" });
+        expect(document.querySelector(".sysinfo-overview-tiles")).toBeNull();
     });
 });
 

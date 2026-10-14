@@ -67,11 +67,11 @@ describe("sysinfoPaneTab", () => {
         });
     });
 
-    it("defaults to the Overview and offers a Plot Type settings menu", () => {
+    it("opens on CPU and offers a Plot Type settings menu", () => {
         createRoot((dispose) => {
             const { ctx } = fakeCtx({});
             const inst = sysinfoPaneTab("sysinfo").create!(ctx);
-            expect(inst.liveTitle!().text).toBe("Overview");
+            expect(inst.liveTitle!().text).toBe("CPU");
             expect(inst.settingsMenu!().map((i) => i.label)).toContain("Plot Type");
             dispose();
         });
