@@ -10,7 +10,7 @@ use cef::Browser;
 
 use crate::state::*;
 
-use super::{DispatchOutput, HostEvent, HostLifecyclePhase, HostState, emit_error};
+use super::{DispatchOutput, HostEvent, HostState, emit_error};
 
 // ── H.2 — browser handle registry ────────────────────────────────────────
 
@@ -19,10 +19,8 @@ pub(super) fn handle_register_browser(
     label: String,
     browser: Browser,
     kind: BrowserKind,
+    registered_at: Instant,
 ) -> DispatchOutput {
-    if state.lifecycle == HostLifecyclePhase::ShuttingDown {
-        return emit_error(state, format!("register_browser: shutting down (label={})", label));
-    }
     if state.browsers.contains_key(&label) {
         return emit_error(state, format!("register_browser: label {} already registered", label));
     }
@@ -32,7 +30,7 @@ pub(super) fn handle_register_browser(
             label: label.clone(),
             browser,
             kind: kind.clone(),
-            registered_at: Instant::now(),
+            registered_at,
         },
     );
     // Quit arming (SPEC_PILLAR2_SANITIZE_THEN_DECIDE §1.E): the first live
@@ -73,7 +71,8 @@ pub(super) fn handle_register_browser(
 /// live on `AppState` and are re-keyed by the caller
 /// (`promote_pane_pool_window`). Errors if `old_label` is absent or `new_label`
 /// is already registered. Emits no event — the frontend learns the new label
-/// via the `pool:pane-promote` payload, not a host event.
+/// via the `pool:pane-promote` payload, not a host event — and doesn't log:
+/// the caller logs the re-key when `relabel_ok` comes back true.
 /// See `SPEC_FLOATING_PANE_POOL_RELABEL_2026_06_30`.
 #[cfg(target_os = "windows")]
 pub(super) fn handle_relabel_browser(
@@ -114,14 +113,8 @@ pub(super) fn handle_relabel_browser(
         state.window_opacities.insert(new_label.clone(), opacity);
     }
     if let Some(win_state) = state.pane_window_states.remove(&old_label) {
-        state.pane_window_states.insert(new_label.clone(), win_state);
+        state.pane_window_states.insert(new_label, win_state);
     }
-    tracing::info!(
-        target: "pool:pane",
-        old_label = %old_label,
-        new_label = %new_label,
-        "[relabel] browser re-keyed on pane-pool promotion"
-    );
     DispatchOutput {
         relabel_ok: true,
         ..Default::default()

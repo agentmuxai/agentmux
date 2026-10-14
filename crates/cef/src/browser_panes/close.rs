@@ -63,6 +63,7 @@ impl BrowserPaneManager {
         let close_out = state.host_dispatch(
             crate::reducer::HostCommand::EnqueueBrowserPaneClose {
                 block_id: block_id.to_string(),
+                now: std::time::Instant::now(),
             },
         );
         let label = match close_out.closed_browser_pane_label {

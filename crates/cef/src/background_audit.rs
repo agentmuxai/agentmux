@@ -421,7 +421,8 @@ pub fn init_for_state(state: &std::sync::Arc<crate::state::AppState>, dir: &std:
         return; // already initialised
     };
     let _ = state.background_audit_tx.set(tx);
-    state.host_state.lock().background_unattended = seeded;
+    // Through the reducer, which owns the flag, rather than writing the field.
+    state.host_dispatch(crate::reducer::HostCommand::SeedBackgroundUnattended { unattended: seeded });
     if seeded {
         tracing::info!(
             target: "wrr",

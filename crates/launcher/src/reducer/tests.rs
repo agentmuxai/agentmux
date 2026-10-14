@@ -6,6 +6,13 @@ use agentmux_common::ipc::{HwndDriftKind, WindowKind};
 use agentmux_common::ipc::{ClientKind, ErrorCode};
 use crate::state::{LifecyclePhase, ProcessState};
 
+/// Most tests only look at the events; this shadows the glob-imported
+/// `update` so they can keep asserting on a `Vec<Event>`. Tests that check
+/// the diagnostic lines call `super::update` directly.
+fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
+    super::update(state, cmd, ctx).events
+}
+
 fn ctx(conn_id: u64) -> Ctx {
     Ctx {
         now_rfc3339: "2026-04-28T00:00:00Z".to_string(),
@@ -2572,7 +2579,7 @@ fn wrr_double_link_with_different_hwnd_for_same_label_repairs_silently() {
     // HWND is the Repaired path: the launcher's drain wrong-picked
     // earlier and the explicit on_after_created is correcting it.
     // This is normal self-healing — mirror.hwnd is overwritten,
-    // no drift event is emitted (logged via crate::log for visibility).
+    // no drift event is emitted (returned as a diagnostic log line for visibility).
     //
     // Rationale: in v0.33.696 smoke this fired 6 false-positive
     // HwndWithoutBrowser drifts in a clean session because the drain-
@@ -2939,7 +2946,7 @@ fn wrr_burst_creates_with_drain_then_repair() {
         !evs1.iter().any(|e| matches!(e, Event::HwndDriftDetected {
             kind: HwndDriftKind::HwndWithoutBrowser, ..
         })),
-        "plain Repair must NOT emit drift event (logged via crate::log instead), got {:?}", evs1
+        "plain Repair must NOT emit drift event (returned as a diagnostic log line instead), got {:?}", evs1
     );
 
     // on_after_created for w2 arrives with 0xBB. CRUCIAL: w1's
@@ -3100,7 +3107,7 @@ fn wrr_apply_hwnd_opened_repairs_stale_link() {
         state.windows["w1"].hwnd, Some(0xAA),
         "stale link must be REPAIRED to the authoritative HWND"
     );
-    // Repair logged via crate::log; no drift event (would otherwise
+    // Repair returned as a diagnostic log line; no drift event (would otherwise
     // fire on every routine drain wrong-pick correction). See the
     // wrr_double_link_with_different_hwnd_for_same_label_repairs_silently
     // test for the contract.
@@ -4192,4 +4199,179 @@ proptest! {
         // residue of an open NOT followed by a successful close.
         assert_f7_invariants(&state);
     }
+}
+
+// ── Reducer purity: diagnostics instead of file I/O ─────────────────
+//
+// `crate::log` opens, rotates and appends to the launcher log file. It
+// used to run inside the reducer, under the state lock, on every
+// window-position event. The reducer now returns the same lines as
+// `Reduced::diagnostics` and `ipc/server.rs` writes them after the lock
+// is released.
+
+#[test]
+fn position_change_returns_its_wrr_pos_line_as_a_diagnostic() {
+    let (mut state, c) = registered_host_state();
+    let _ = update(&mut state, Command::ReportMonitorTopologyChanged {
+        rects: vec![Rect { left: 0, top: 0, right: 1920, bottom: 1080 }],
+    }, &c);
+    let _ = update(&mut state, Command::ReportWindowOpened {
+        label: "w1".into(), kind: WindowKind::FullInstance, parent_label: None,
+    }, &c);
+    let _ = update(&mut state, Command::ReportHwndOpened {
+        hwnd: 0xAA, class_name: "Chrome_WidgetWin_1".into(),
+        title: "".into(), label_hint: Some("w1".into()),
+    }, &c);
+
+    let out = super::update(
+        &mut state,
+        Command::ReportHwndPositionChanged {
+            hwnd: 0xAA,
+            rect: Rect { left: 10, top: 20, right: 810, bottom: 620 },
+        },
+        &c,
+    );
+    assert_eq!(
+        out.diagnostics,
+        vec![
+            "[ipc] WRR-POS hwnd=0xaa rect=(10,20)-(810,620) linked=Some(\"w1\") monitors=1 pending=0"
+                .to_string()
+        ],
+    );
+    assert!(out.events.is_empty(), "on-monitor move emits no events, got {:?}", out.events);
+}
+
+#[test]
+fn position_change_for_unknown_hwnd_still_reports_its_diagnostic() {
+    let (mut state, c) = registered_host_state();
+    let out = super::update(
+        &mut state,
+        Command::ReportHwndPositionChanged {
+            hwnd: 0x1234,
+            rect: Rect { left: 0, top: 0, right: 100, bottom: 100 },
+        },
+        &c,
+    );
+    assert_eq!(
+        out.diagnostics,
+        vec!["[ipc] WRR-POS hwnd=0x1234 rect=(0,0)-(100,100) linked=None monitors=0 pending=0".to_string()],
+    );
+}
+
+#[test]
+fn hwnd_repair_returns_its_line_as_a_diagnostic() {
+    let (mut state, c) = registered_host_state();
+    let _ = update(&mut state, Command::ReportWindowOpened {
+        label: "w1".into(), kind: WindowKind::FullInstance, parent_label: None,
+    }, &c);
+    state.windows.get_mut("w1").unwrap().hwnd = Some(0xBAD);
+
+    let out = super::update(&mut state, Command::ReportHwndOpened {
+        hwnd: 0xAA, class_name: "Chrome_WidgetWin_1".into(),
+        title: "".into(), label_hint: Some("w1".into()),
+    }, &c);
+    assert_eq!(
+        out.diagnostics,
+        vec![format!("[wrr] hwnd_repaired label=w1 prior_hwnd={} new_hwnd={}", 0xBAD, 0xAA)],
+    );
+    assert!(out.events.is_empty());
+}
+
+#[test]
+fn commands_without_diagnostics_return_none() {
+    let (mut state, c) = registered_host_state();
+    let out = super::update(&mut state, Command::Ping { nonce: 7 }, &c);
+    assert!(out.diagnostics.is_empty());
+    // A rejected (non-host) WRR report doesn't reach the arm, so it logs nothing.
+    let mut fresh = State::default();
+    let out = super::update(
+        &mut fresh,
+        Command::ReportHwndPositionChanged {
+            hwnd: 1,
+            rect: Rect { left: 0, top: 0, right: 1, bottom: 1 },
+        },
+        &ctx(9),
+    );
+    assert!(out.diagnostics.is_empty());
+    assert!(matches!(out.events.as_slice(), [Event::Error { .. }]));
+}
+
+// ── ReportHwndIconicChanged ─────────────────────────────────────────
+
+#[test]
+fn iconic_change_updates_the_linked_mirror_without_events() {
+    let (mut state, c) = registered_host_state();
+    let _ = update(&mut state, Command::ReportWindowOpened {
+        label: "w1".into(), kind: WindowKind::FullInstance, parent_label: None,
+    }, &c);
+    let _ = update(&mut state, Command::ReportHwndOpened {
+        hwnd: 0xAA, class_name: "Chrome_WidgetWin_1".into(),
+        title: "".into(), label_hint: Some("w1".into()),
+    }, &c);
+    assert!(!state.windows["w1"].iconic);
+    let version_before = state.event_version;
+
+    let evs = update(&mut state, Command::ReportHwndIconicChanged { hwnd: 0xAA, iconic: true }, &c);
+    assert!(evs.is_empty(), "iconic change emits no events, got {:?}", evs);
+    assert!(state.windows["w1"].iconic);
+    assert_eq!(state.event_version, version_before, "no event, so no version bump");
+
+    let evs = update(&mut state, Command::ReportHwndIconicChanged { hwnd: 0xAA, iconic: false }, &c);
+    assert!(evs.is_empty());
+    assert!(!state.windows["w1"].iconic);
+}
+
+#[test]
+fn iconic_change_for_unlinked_hwnd_is_a_no_op() {
+    let (mut state, c) = registered_host_state();
+    let _ = update(&mut state, Command::ReportWindowOpened {
+        label: "w1".into(), kind: WindowKind::FullInstance, parent_label: None,
+    }, &c);
+    let evs = update(&mut state, Command::ReportHwndIconicChanged { hwnd: 0xAA, iconic: true }, &c);
+    assert!(evs.is_empty());
+    assert!(!state.windows["w1"].iconic, "w1 has no HWND yet, so nothing matches 0xAA");
+}
+
+#[test]
+fn iconic_change_from_non_host_is_rejected() {
+    let mut state = State::default();
+    let evs = update(&mut state, Command::ReportHwndIconicChanged { hwnd: 0xAA, iconic: true }, &ctx(1));
+    assert!(matches!(evs.as_slice(), [Event::Error { .. }]), "got {:?}", evs);
+}
+
+// ── Misrouted commands ──────────────────────────────────────────────
+
+#[test]
+fn misrouted_commands_reply_with_a_non_fatal_invalid_command_error() {
+    let (mut state, c) = registered_host_state();
+    let cases: Vec<(Command, &str)> = vec![
+        (
+            Command::GetSrvSnapshot,
+            "GetSrvSnapshot is a srv-pipe command; sent to launcher pipe by mistake",
+        ),
+        (
+            Command::ReapPanes { label: "w1".into(), saga_id: 0 },
+            "ReapPanes is a launcher→host command; sent to launcher pipe by mistake",
+        ),
+    ];
+    for (cmd, want) in cases {
+        let v_before = state.event_version;
+        let evs = update(&mut state, cmd, &c);
+        match evs.as_slice() {
+            [Event::Error { code, message, fatal, version }] => {
+                assert_eq!(*code, ErrorCode::InvalidCommand);
+                assert_eq!(message, want);
+                assert!(!fatal);
+                assert_eq!(*version, v_before + 1);
+            }
+            other => panic!("expected one Error, got {:?}", other),
+        }
+    }
+}
+
+#[test]
+fn bump_version_saturates_instead_of_wrapping() {
+    let mut state = State { event_version: u64::MAX - 1, ..State::default() };
+    assert_eq!(state.bump_version(), u64::MAX);
+    assert_eq!(state.bump_version(), u64::MAX, "must not wrap to 0");
 }
