@@ -14,6 +14,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     register_devices(engine, state);
     register_revoke(engine, state);
     register_agent_hidden(engine, state);
+    register_can_send(engine, state);
 }
 
 /// Why there is no QR to show: the viewer listener is not up.
@@ -64,6 +65,8 @@ fn register_devices(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     device_name: d.device_name,
                     created_ms: d.created_ms,
                     last_seen_ms: d.last_seen_ms,
+                    can_send: d.can_send,
+                    has_key: !d.device_key.is_empty(),
                 })
                 .collect();
             Ok(ViewerDevicesResult { devices })
@@ -109,5 +112,35 @@ fn register_agent_hidden(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 .map_err(|e| format!("viewer.agent-hidden: {e}"))?;
             Ok(ViewerAgentHiddenResult { hidden })
         }
+    });
+}
+
+/// Turn a device's send grant on or off. On needs a key on file: a device
+/// that paired without one can't sign, so it must pair again first.
+pub(crate) fn can_send_impl(state: &AppState, device_id: &str, can_send: bool) -> Result<ViewerCanSendResult, String> {
+    let device = state
+        .mstore
+        .viewer_device_get(device_id)
+        .map_err(|e| format!("viewer.can-send: {e}"))?
+        .ok_or_else(|| format!("viewer.can-send: no paired device {device_id}"))?;
+    if can_send && device.device_key.is_empty() {
+        return Err(format!(
+            "{} paired before devices had keys. Pair it again to let it send.",
+            device.device_name
+        ));
+    }
+    state
+        .mstore
+        .viewer_device_set_can_send(device_id, can_send)
+        .map_err(|e| format!("viewer.can-send: {e}"))?;
+    tracing::info!(%device_id, can_send, "viewer: send grant changed");
+    Ok(ViewerCanSendResult { can_send })
+}
+
+fn register_can_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let state = state.clone();
+    engine.register_typed(COMMAND_VIEWER_CAN_SEND, move |cmd: CommandViewerCanSendData, _ctx| {
+        let state = state.clone();
+        async move { can_send_impl(&state, &cmd.device_id, cmd.can_send) }
     });
 }
