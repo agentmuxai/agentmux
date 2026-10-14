@@ -154,7 +154,8 @@ export function useLiveFeedRollOff(opts: {
     // transition, not on every flush. A pass made while the reader was up in
     // older rows may keep them all, so it runs again once they're back at the
     // bottom.
-    const size = createMemo(() => (liveFeedOn() ? feedSize(paneModel.document()) : null));
+    const docSize = createMemo(() => feedSize(paneModel.document()));
+    const size = createMemo(() => (liveFeedOn() ? docSize() : null));
     const feedOverBudget = createMemo(() => {
         const s = size();
         return s !== null && sizeOverLimits(s, liveFeedTurns);
@@ -224,10 +225,10 @@ export function useLiveFeedRollOff(opts: {
     // budget plus room for the turn in flight), a pass runs every
     // BUDGET_PASS_MS: a long turn has no turn end or send to trigger one, and
     // `feedOverBudget` fires only on its transition (§2.6).
-    const overTextBudget = createMemo(() => {
-        const s = size();
-        return s !== null && s.bytes > LIVE_FEED_MAX_FINISHED_BYTES + IN_FLIGHT_TEXT_BUDGET;
-    });
+    // Independent of the live feed: results unload with it off too (the app-server
+    // controller, `agent:livefeed` disabled), and tool completions schedule no
+    // pass of their own.
+    const overTextBudget = createMemo(() => docSize().bytes > LIVE_FEED_MAX_FINISHED_BYTES + IN_FLIGHT_TEXT_BUDGET);
     createEffect(
         on(overTextBudget, (over) => {
             if (!over) return;

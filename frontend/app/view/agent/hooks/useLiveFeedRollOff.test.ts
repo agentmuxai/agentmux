@@ -184,6 +184,20 @@ describe("useLiveFeedRollOff — holds in hidden panes, and passes while over bu
         m.dispose();
     });
 
+    it("runs the periodic pass with the live feed off too, without rolling turns off", () => {
+        const huge = "x".repeat(LIVE_FEED_MAX_FINISHED_BYTES + IN_FLIGHT_TEXT_BUDGET + 1_000);
+        const nodes = [userMsg("u1"), { type: "markdown", id: "m1", content: huge } as unknown as DocumentNode];
+        const m = mount({ nodes, outputFormat: "some-other-format" });
+        expect(m.feed.liveFeedOn()).toBe(false);
+        vi.advanceTimersByTime(2_000);
+        const first = m.dispatched.filter((c) => c.type === "UnloadToolResults").length;
+        vi.advanceTimersByTime(BUDGET_PASS_MS * 3 + 2_000);
+        const later = m.dispatched.filter((c) => c.type === "UnloadToolResults").length;
+        expect(later - first).toBeGreaterThanOrEqual(3);
+        expect(m.dispatched.filter((c) => c.type === "RollOff")).toHaveLength(0);
+        m.dispose();
+    });
+
     it("runs no periodic pass under budget", () => {
         const m = mount();
         vi.advanceTimersByTime(BUDGET_PASS_MS * 3);
