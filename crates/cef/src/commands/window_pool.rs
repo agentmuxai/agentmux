@@ -941,7 +941,6 @@ pub fn demote_promoted_pool_window(
     label: &str,
     window: &cef::Window,
 ) -> bool {
-    use cef::ImplBrowser;
 
     // 0. Capacity: the pool self-refills to POOL_TARGET_SIZE after every
     // promote, so in steady state the pool is ALWAYS at target when a close
@@ -1050,11 +1049,7 @@ pub fn demote_promoted_pool_window(
     // origin); page state resets fully; `pool_window_ready` re-arrives on
     // boot and completes the queue re-entry.
     let url = pool_frontend_url(state, label);
-    if let Some(browser) = state.get_browser(label) {
-        if let Some(frame) = browser.main_frame() {
-            super::replace_page::replace_page(&frame, &url);
-        }
-    }
+    super::replace_page::navigate_demoted_window(state, label, url);
 
     tracing::info!(
         target: "dnd:tearoff:pool",
