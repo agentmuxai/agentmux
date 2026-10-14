@@ -114,8 +114,6 @@ export type AgentPaneLayoutCommand =
     // ── document shape ──────────────────────────────────────────────
     | { type: "NodesChanged"; orderedIds: ReadonlyArray<string> }
     // ── expansion (unified; replaces the scattered component signals) ─
-    | { type: "AutoExpandStarted"; nodeId: string }
-    | { type: "AutoExpandHoldExpired"; nodeId: string }
     // Set a row's expansion to a fully-resolved value. The Phase-1 wiring
     // computes `currentExpansion(node, documentState)` (which already encodes
     // the pin > auto > default precedence per kind) and pushes it here, so the
