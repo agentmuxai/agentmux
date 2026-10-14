@@ -1,40 +1,23 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Phase E.2c.1+E.2c.2 — persist subscriber. A tokio task that
-// consumes the srv reducer's broadcast bus and mirrors
-// workspace/tab/block lifecycle events back to SQLite via wcore.
+// Persist subscriber: a tokio task that consumes the srv reducer's event
+// bus and writes each domain event (workspaces, tabs, blocks, windows,
+// meta, the layout tree and its focus/magnify, the backend-action queue)
+// to SQLite through `apply_event_to_mstore`. The reducer owns that state;
+// SQLite is its projection, loaded back at startup by
+// `persist::bootstrap_state_from_mstore`.
 //
-// Status:
-//   * E.2c.1 (#614) shipped the per-event apply path. Subscriber was
-//     dead-code in production because no producer existed.
-//   * E.2c.2 (this) wires the workspace HTTP/WS RPC handlers through
-//     the reducer, making the subscriber LIVE for workspace events.
-//     Adds full-resync-on-`Lagged` for workspaces (RPC-migrated
-//     entities only — tab/block resync lands in E.2c.3 / E.2c.4).
+// RPC handlers and saga steps also call `apply_event_to_mstore` right after
+// dispatching, so a follow-up read sees the write; every arm is idempotent,
+// so this task's second apply of the same event is a no-op. Events from the
+// srv IPC pipe (`srv_ipc/server.rs`) get no such synchronous apply and reach
+// SQLite only through this task.
 //
-// Bus-lag handling:
-//   On RecvError::Lagged(n) the subscriber drops `n` events.
-//   Naive HWM advancement past dropped events would permanently
-//   diverge SQLite from reducer state. Instead we do a workspace-
-//   scoped resync: snapshot `state.workspaces` under the reducer
-//   mutex, write each workspace into SQLite (idempotent insert /
-//   no-op / update). The resync is INSERT/UPDATE only — no deletes —
-//   because workspaces can also be created OUTSIDE the reducer
-//   during the migration window (e.g., the still-wcore-direct
-//   `CreateWindow` flow calls `wcore::create_window_full` which
-//   creates a workspace under the hood). Deleting workspaces
-//   missing from the reducer snapshot would lose those legitimate
-//   rows. Stale workspaces deleted-via-reducer that the subscriber
-//   missed on Lagged linger on disk until the next user-driven
-//   DeleteWorkspace cleans them up via the wcore fallback in
-//   service.rs. (codex P1 #615.)
-//
-//   IMPORTANT: tab/block resync is NOT done here yet. Tabs and
-//   blocks remain RPC-direct via wcore; the reducer's view of them
-//   is FROZEN at bootstrap. Doing tab/block resync before E.2c.3
-//   and E.2c.4 land would clobber RPC-driven writes the reducer
-//   doesn't see. Resync expands as each entity migrates.
+// Bus lag: on `RecvError::Lagged` the dropped events are lost, so
+// `resync_workspaces` rewrites workspaces from the reducer's snapshot.
+// Tabs, blocks and layout are not resynced; a lag leaves them stale on
+// disk until their next event.
 
 use std::sync::Arc;
 
@@ -80,13 +63,9 @@ async fn run_persist_subscriber(
                 }
             }
             Err(broadcast::error::RecvError::Lagged(n)) => {
-                // Workspace-scoped full resync. Subscriber dropped
-                // `n` events; rather than guess which entities were
-                // affected, snapshot the reducer's workspace map and
-                // reconcile SQLite against it. RPC-migrated entities
-                // (workspaces in E.2c.2) are correctly recovered;
-                // not-yet-migrated entities (tab/block) are left
-                // alone — see module-level docs.
+                // Dropped `n` events; rather than guess which were
+                // lost, reconcile SQLite's workspaces against the
+                // reducer's (see the module header for what isn't).
                 tracing::warn!(
                     target: "srv-persist-subscriber",
                     "[srv-persist-subscriber] dropped {} event(s) — running workspace resync",
@@ -109,26 +88,9 @@ async fn run_persist_subscriber(
 }
 
 /// Snapshot `state.workspaces` and reconcile against SQLite —
-/// INSERT/UPDATE only, no deletes. Workspace-scoped (tab/block
-/// resync expands here as each entity's RPC layer migrates).
-///
-/// Why no delete-phase: during the migration window, workspaces
-/// can be created OUTSIDE the reducer (e.g., the still-wcore-direct
-/// `CreateWindow` flow calls `wcore::create_window_full` which
-/// creates a workspace under the hood). Those workspaces aren't in
-/// `state.workspaces`. If the subscriber lagged and we did a
-/// delete-not-in-snapshot pass, we'd cascade-delete legitimate
-/// workspaces — data loss triggered by bus pressure rather than a
-/// user action. Far better for a stale workspace deleted-via-reducer
-/// to linger on disk after a Lagged event than to lose a real one.
-/// (codex P1 #615.)
-///
-/// Stale-after-Lagged scenario: reducer fires WorkspaceDeleted, the
-/// subscriber drops it on Lagged, resync runs but only insert/updates.
-/// SQLite still has the deleted workspace's row. The next user-driven
-/// DeleteWorkspace (which falls through to `wcore::delete_workspace`
-/// for unknown-to-reducer rows) cleans it up. Acceptable behaviour
-/// during the migration; tightens once all RPC is reducer-driven.
+/// INSERT/UPDATE only, no deletes: a delete pass triggered by bus pressure
+/// rather than a user action risks losing rows (#615). The cost is that a
+/// workspace whose `WorkspaceDeleted` was dropped lingers on disk.
 ///
 /// Strategy:
 ///   1. Lock state, snapshot the workspace map (ids + names),

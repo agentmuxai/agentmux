@@ -459,20 +459,16 @@ pub enum Command {
     ///   source's active reverts to its first remaining tab (or
     ///   `None` if the source becomes empty).
     ///
-    /// Errors if any of: source workspace, dest workspace, or tab is
-    /// missing; if `tab.workspace_id != src_workspace_id`; or if
-    /// the tab is the source workspace's last tab and
-    /// `allow_empty_source` is false. Used by the TearOffTab,
-    /// MoveTabToWorkspace, and RestoreTornOffTab sagas.
+    /// Errors if the source, dest or tab is missing, the tab isn't in the
+    /// source, or it is the source's last tab and `allow_empty_source` is
+    /// false. Used by TearOffTab, MoveTabToWorkspace and RestoreTornOffTab.
     MoveTab {
         tab_id: String,
         src_workspace_id: String,
         dst_workspace_id: String,
         dst_index: u32,
-        /// Bypass the reducer's atomic last-tab guard, for flows that
-        /// drain a workspace and then delete it (`RestoreTornOffTab`,
-        /// saga-recovery inverses). Defaults to `false`, the guarded
-        /// behavior, same as `DeleteTab.force`.
+        /// Bypass the last-tab guard, for flows that drain a workspace and
+        /// then delete it. Defaults to `false`, like `DeleteTab.force`.
         #[serde(default)]
         allow_empty_source: bool,
     },
