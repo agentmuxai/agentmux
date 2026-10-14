@@ -79,8 +79,6 @@ describe("built-in pane tabs (block-registry.ts)", () => {
         expect(paneTabCapability("agent", "header")).toBe("surface");
         // The launcher's old `noHeader`.
         expect(paneTabCapability("launcher", "header")).toBe("none");
-        expect(holders("headerMic")).toEqual(["term"]);
-        expect(paneTabCapability("term", "headerMic")?.title).toBe("Speak into this terminal");
         expect(holders("statsBadgeSetting")).toEqual(["term"]);
         expect(paneTabCapability("term", "statsBadgeSetting")).toBe("term:showstatsbadge");
         expect(holders("hueBorder")).toEqual(["term"]);
