@@ -51,6 +51,7 @@ import { OpenInEditorButton } from "../agent-open-in-editor";
 import type { ToolNode } from "../types";
 import { AnsweredQuestionMessage } from "./AnsweredQuestionMessage";
 import { createBodyMount } from "./body-mount";
+import { useAgentDormant } from "../agent-dormancy";
 import { PeekOverlay } from "./PeekOverlay";
 import { PeekMetaRow } from "./PeekMetaRow";
 import { ShellTokens } from "./shell-highlight/ShellCommand";
@@ -249,6 +250,16 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
     // call opens while it runs — so a session kept every tool's full output
     // (SPEC_TOOL_BODY_UNMOUNT_ON_COLLAPSE_2026_10_12.md).
     const bodyMounted = createBodyMount(expanded);
+    // Whether the body's output can be seen now: the panel is open and the
+    // pane isn't dormant (a hidden pane-stack member, or a window tab not
+    // displayed). While it can't, the body keeps showing what it showed
+    // instead of building new output (ToolOverlayLog's `open`): with a dozen
+    // agents streaming, panes on hidden tabs built more tool output than the
+    // visible ones (SPEC_AGENT_PANE_STREAM_FRAME_BUDGET_2026_10_13.md §2.3).
+    // The body stays mounted, so the row keeps its height and nothing moves
+    // when the pane is shown again; it catches up then.
+    const dormant = useAgentDormant();
+    const bodyShowing = (): boolean => expanded() && !dormant();
     // The header click flips whichever set the rule says this row uses:
     // collapsedNodes for an open-by-default (content-first) tool, else the pin.
     const onHeaderClick = () =>
@@ -632,7 +643,7 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
                                 </div>
                             }
                         >
-                            <ToolBlockOverlay node={props.node} dispatchMatch={props.dispatchMatch} />
+                            <ToolBlockOverlay node={props.node} dispatchMatch={props.dispatchMatch} open={bodyShowing()} />
                         </Show>
                     </Show>
                 </div>

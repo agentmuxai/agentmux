@@ -16,9 +16,10 @@ import { cleanup, fireEvent, render } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { ToolNode } from "../types";
+import type { ToolLogChunk, ToolNode } from "../types";
 import { ToolBlock } from "./ToolBlock";
 import { BODY_LINGER_MS } from "./body-mount";
+import { AgentDormancyProvider } from "../agent-dormancy";
 
 afterEach(() => {
     cleanup();
@@ -1089,5 +1090,29 @@ describe("an Edit's and a Write's line range in the header", () => {
             />
         ));
         expect(container.querySelector(".agent-tool-name")?.textContent).toBe("📝 Write 1:3 src/a.ts");
+    });
+});
+
+describe("ToolBlock — a dormant pane's tool output waits until the pane is shown", () => {
+    it("builds no new output while the pane is dormant, and catches up when it is shown", () => {
+        const chunk = (n: number): ToolLogChunk => ({ kind: "stdout", content: `line ${n}\n`, timestamp: n });
+        const running: ToolNode = { ...baseTool, status: "running", collapsed: false, log: { open: true, chunks: [chunk(1)] } };
+        const [node, setNode] = createSignal<ToolNode>(running);
+        const [dormant, setDormant] = createSignal(false);
+        const { container } = render(() => (
+            <AgentDormancyProvider dormant={dormant}>
+                <ToolBlock node={node()} pinned={false} onTogglePin={() => {}} />
+            </AgentDormancyProvider>
+        ));
+        // The panel's body; the row's header (which shows the latest line) keeps updating.
+        const body = (): string => container.querySelector(".agent-tool-overlay-log")?.textContent ?? "";
+        expect(body()).toContain("line 1");
+        setDormant(true);
+        setNode({ ...running, log: { open: true, chunks: [chunk(1), chunk(2)] } });
+        expect(body()).not.toContain("line 2");
+        // Still mounted: the row keeps its content and height while hidden.
+        expect(body()).toContain("line 1");
+        setDormant(false);
+        expect(body()).toContain("line 2");
     });
 });

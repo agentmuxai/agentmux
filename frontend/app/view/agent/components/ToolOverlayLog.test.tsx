@@ -16,7 +16,7 @@ import { cleanup, render } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createSignal } from "solid-js";
 
-import { ToolOverlayLog } from "./ToolOverlayLog";
+import { ToolOverlayLog, sameToolNode } from "./ToolOverlayLog";
 import type { ToolLogChunk, ToolNode } from "../types";
 
 let reducedMotion = false;
@@ -740,5 +740,91 @@ describe("ToolOverlayLog shows no Bash command", () => {
         const node: ToolNode = { ...streamingNode, tool: "Grep", params: { pattern: "x" } };
         const { container } = render(() => <ToolOverlayLog node={node} />);
         expect(container.querySelector(".agent-bash-cmd")).toBeNull();
+    });
+});
+
+describe("ToolOverlayLog — a finished tool's result is built once, not on every node update", () => {
+    it("keeps the result's DOM when a new node object with the same fields arrives", () => {
+        const [node, setNode] = createSignal<ToolNode>(terminalNode);
+        const { container } = render(() => <ToolOverlayLog node={node()} />);
+        const before = [...container.querySelectorAll(".agent-preview-line")];
+        expect(before.length).toBeGreaterThan(0);
+        // What every stream flush does to a mounted tool: a new object, nothing changed.
+        setNode({ ...terminalNode });
+        setNode({ ...terminalNode });
+        const after = [...container.querySelectorAll(".agent-preview-line")];
+        expect(after).toHaveLength(before.length);
+        after.forEach((el, i) => expect(el).toBe(before[i]));
+    });
+
+    it("rebuilds the result when one of the node's fields really changed", () => {
+        const [node, setNode] = createSignal<ToolNode>(terminalNode);
+        const { container } = render(() => <ToolOverlayLog node={node()} />);
+        expect(container.textContent).toContain("done");
+        setNode({ ...terminalNode, result: { exitCode: 0, stdout: "line 1\nchanged", stderr: "" } as ToolNode["result"] });
+        expect(container.textContent).toContain("changed");
+        expect(container.textContent).not.toContain("done");
+    });
+});
+
+describe("sameToolNode", () => {
+    it("is the same node for the same object, or one with all the same field values", () => {
+        expect(sameToolNode(terminalNode, terminalNode)).toBe(true);
+        expect(sameToolNode(terminalNode, { ...terminalNode })).toBe(true);
+    });
+
+    it("differs when a field's value or reference changed, or a field was added or removed", () => {
+        expect(sameToolNode(terminalNode, { ...terminalNode, status: "failed" })).toBe(false);
+        // Nested objects by reference: the reducer replaces what it changes.
+        expect(sameToolNode(terminalNode, { ...terminalNode, log: { ...terminalNode.log! } })).toBe(false);
+        expect(sameToolNode(terminalNode, { ...terminalNode, collapsed: undefined } as ToolNode)).toBe(false);
+        const without: Partial<ToolNode> = { ...terminalNode };
+        delete without.summary;
+        expect(sameToolNode(terminalNode, without as ToolNode)).toBe(false);
+    });
+});
+
+describe("ToolOverlayLog — no rebuild when the stream closes, none at all while the panel is closed", () => {
+    const closedStream: ToolNode = { ...streamingNode, log: { open: false, chunks: streamingNode.log!.chunks } };
+
+    it("keeps the streamed lines' DOM when the stream closes before a result arrives", () => {
+        const [node, setNode] = createSignal<ToolNode>(streamingNode);
+        const { container } = render(() => <ToolOverlayLog node={node()} />);
+        const before = [...container.querySelectorAll(".agent-tool-log-feed .agent-preview-line")];
+        expect(before.length).toBe(1);
+        setNode(closedStream);
+        const after = [...container.querySelectorAll(".agent-tool-log-feed .agent-preview-line")];
+        expect(after).toHaveLength(1);
+        expect(after[0]).toBe(before[0]);
+    });
+
+    it("a closed panel keeps showing its streamed output when the result arrives, and builds the result once opened", () => {
+        const [node, setNode] = createSignal<ToolNode>(streamingNode);
+        const [open, setOpen] = createSignal(true);
+        const { container } = render(() => <ToolOverlayLog node={node()} open={open()} />);
+        const line = container.querySelector(".agent-tool-log-feed .agent-preview-line");
+        // The result arrives as the panel closes: the reducer frees the chunks.
+        setOpen(false);
+        setNode({ ...terminalNode, log: { open: false, chunks: [] } });
+        expect(container.querySelector(".agent-tool-log-feed .agent-preview-line")).toBe(line);
+        expect(container.textContent).not.toContain("done");
+        setOpen(true);
+        expect(container.querySelector(".agent-tool-log-feed")).toBeNull();
+        expect(container.textContent).toContain("done");
+    });
+
+    it("a closed panel of a tool that never streamed keeps its placeholder until it is opened", () => {
+        const running: ToolNode = { ...streamingNode, log: undefined };
+        const [node, setNode] = createSignal<ToolNode>(running);
+        const [open, setOpen] = createSignal(true);
+        const { container } = render(() => <ToolOverlayLog node={node()} open={open()} />);
+        expect(container.querySelector(".agent-tool-loading")).not.toBeNull();
+        setOpen(false);
+        setNode({ ...terminalNode, log: undefined });
+        expect(container.querySelector(".agent-tool-loading")).not.toBeNull();
+        expect(container.textContent).not.toContain("done");
+        setOpen(true);
+        expect(container.querySelector(".agent-tool-loading")).toBeNull();
+        expect(container.textContent).toContain("done");
     });
 });

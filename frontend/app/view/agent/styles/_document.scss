@@ -245,7 +245,13 @@
         // in SPEC_TOOL_HOVER_CONSOLIDATION_2026_05_28 (it only expands
         // in-flow via pin / auto-expand, which needs no elevation), so
         // its `--overlay-{below,above}` selectors are gone with it.
-        &:has(.agent-user-message--expanded.agent-user-message--startup:not(.agent-user-message--pinned)) {
+        //
+        // Scoped to user-message rows, the only ones that can match: as a bare
+        // `:has()` every row was an anchor, so every node inserted anywhere in
+        // any row (each streamed line of a tool's output) made Blink check the
+        // row's style again, about a thousand times a second with a dozen agents
+        // streaming (SPEC_AGENT_PANE_STREAM_FRAME_BUDGET_2026_10_13.md §2.4).
+        &[data-node-type="user_message"]:has(.agent-user-message--expanded.agent-user-message--startup:not(.agent-user-message--pinned)) {
             position: relative;
             z-index: 100;
         }
