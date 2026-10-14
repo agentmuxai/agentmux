@@ -5,6 +5,7 @@
 **Trigger:** Operator report — "with the fontawesome free migration, we got some quirks in placement. On the agent panes, the X should be made larger, and should turn to our standard windows close button red when hovering over it. Also, the briefcase appears offset relative to the other icons, like it is too high. Can you check the structure?"
 **Extended:** 2026-10-12 — §8 adds the full spectrum of options for the window control icons (minimize, maximize/restore, close), on request.
 **Status:** proposed — analysis only; this report changes no code. §5 is the proposal; flip this line to `implemented` when it lands.
+**Update 2026-10-13:** §5.1 (a bigger close X that turns the Windows red on hover) has landed in the follow-up to #4838, as decided by the operator's request: D1 all panes, D2 the inset tile, D4 the reds as tokens in `theme.scss` shared with the title bar. §5.2 (the Stash icon, D3) is still open.
 
 ## 1. Summary
 

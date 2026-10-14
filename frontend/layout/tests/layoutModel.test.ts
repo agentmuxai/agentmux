@@ -287,6 +287,45 @@ describe("LayoutModel", () => {
         expect(model.magnifiedNodeId).toBeUndefined();
     });
 
+    // A minimized chip that is then maximized is both. The header's Minimize
+    // (collapseMaximizedNode) puts it back as a chip; minimizeNodeToggle, which
+    // showBlockInPane calls to make a pane visible, still restores it.
+    it("collapseMaximizedNode keeps a minimized-and-maximized pane a chip; minimizeNodeToggle restores it", () => {
+        const model = createLayoutModel();
+        const first = newLayoutNode(undefined, undefined, undefined, { blockId: "left" });
+        model.treeReducer({
+            type: LayoutTreeActionType.InsertNode,
+            node: first,
+            magnified: false,
+            focused: true,
+        } as LayoutTreeInsertNodeAction);
+        const second = newLayoutNode(undefined, undefined, undefined, { blockId: "right" });
+        model.treeReducer(
+            {
+                type: LayoutTreeActionType.SplitHorizontal,
+                targetNodeId: model.treeState.rootNode!.id,
+                newNode: second,
+                position: "after",
+                focused: false,
+            } as LayoutTreeSplitHorizontalAction,
+            false
+        );
+        model.updateTree();
+        model.minimizeNodeToggle(second.id);
+        model.magnifyNodeToggle(second.id);
+        expect(model.minimizedNodeIds().has(second.id)).toBe(true);
+        expect(model.magnifiedNodeId).toBe(second.id);
+
+        model.collapseMaximizedNode(second.id);
+        expect(model.magnifiedNodeId).toBeUndefined();
+        expect(model.minimizedNodeIds().has(second.id)).toBe(true);
+
+        model.magnifyNodeToggle(second.id);
+        model.minimizeNodeToggle(second.id); // the programmatic toggle: a restore
+        expect(model.minimizedNodeIds().has(second.id)).toBe(false);
+        expect(model.magnifiedNodeId).toBe(second.id);
+    });
+
     // SPEC_FOCUS_FOLLOWS_SELECTION_2026_10_08.md R1: closing the selected pane
     // moves the selection to a neighbour without any FocusNode action, so no
     // requestNodeFocus(); the model's own selection observer hands the caret on.
