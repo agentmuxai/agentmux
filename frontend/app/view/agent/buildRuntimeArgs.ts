@@ -124,7 +124,12 @@ export function buildRuntimeArgs(
     // (--dangerously-bypass-approvals-and-sandbox) is baked into its base args,
     // `codex exec` has no --permission-mode, and its prompt positional `-` must
     // stay last (anything appended after it is parsed as a stray arg).
-    if (providerId === "kimi" || providerId === "gemini" || providerId === "qwen") {
+    // An ACP agent takes none either: permission is asked inside the protocol
+    // (`session/request_permission`), which srv's ACP controller answers, so a
+    // CLI flag would only be one its ACP mode never declared.
+    if (providerId && getProvider(providerId)?.controllerType === "acp") {
+        // No flag for any mode.
+    } else if (providerId === "kimi" || providerId === "gemini" || providerId === "qwen") {
         // Kimi, Gemini, and Qwen (a Gemini-CLI fork) only support --yolo
         // (bypass) vs no flag (default) — not --permission-mode / --dangerously-skip-permissions
         if (config.permissionMode !== "default") {

@@ -264,3 +264,16 @@ describe("buildRuntimeArgs — antigravity", () => {
         expect(getProvider("antigravity")!.promptArgFlag).toBe("-p");
     });
 });
+
+describe("buildRuntimeArgs — ACP agents", () => {
+    // Permission is asked inside ACP (session/request_permission), so an ACP
+    // agent's launch args stay exactly its catalog's in every mode.
+    for (const id of ["copilot", "openclaw", "pi"]) {
+        it(`${id}: no permission, model or effort flag in any mode`, () => {
+            const base = getProvider(id)!.launchArgs;
+            for (const permissionMode of ["default", "auto", "acceptEdits", "plan", "bypass"] as const) {
+                expect(buildRuntimeArgs(base, { permissionMode, model: "opus", effort: "high" }, id)).toEqual(base);
+            }
+        });
+    }
+});

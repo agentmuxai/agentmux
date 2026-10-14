@@ -47,11 +47,11 @@ function flagValue(args: string[], flag: string): string | undefined {
 const count = (args: string[], flag: string) => args.filter((a) => a === flag).length;
 
 /** Providers whose rebuilt args gain `--dangerously-skip-permissions` although
- *  their catalog args never declared it. `buildRuntimeArgs` only special-cases
- *  kimi/gemini/qwen (`--yolo`) and codex (baked in); everything else falls into
- *  the Claude branch on every send. Whether each CLI tolerates the flag is
- *  unverified. Report §4 G1. */
-const KNOWN_STRAY_BYPASS_FLAG = new Set(["muxcode", "openclaw", "copilot", "pi"]);
+ *  their catalog args never declared it. `buildRuntimeArgs` special-cases
+ *  kimi/gemini/qwen (`--yolo`), codex (baked in) and ACP agents (permission is
+ *  in the protocol); muxcode, a Claude-compatible CLI, still falls into the
+ *  Claude branch. Report §4 G1. */
+const KNOWN_STRAY_BYPASS_FLAG = new Set(["muxcode"]);
 
 /** Providers whose catalog `--yolo` is stripped and not restored. Report §4 G1. */
 const KNOWN_YOLO_DROPPED = new Set<string>([]);
