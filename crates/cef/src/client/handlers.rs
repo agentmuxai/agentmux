@@ -79,6 +79,19 @@ wrap_client! {
             }
         }
 
+        fn download_handler(&self) -> Option<DownloadHandler> {
+            // Real web panes only: `drag_capture` is true for every client that
+            // renders the AgentMux frontend (main windows, tear-offs, floating
+            // panes), and the app's own UI must never start a file save. Without
+            // a handler CEF cancels the download, which is what a pane did
+            // before this. SPEC_BROWSER_PANE_DOWNLOADS_2026_10_14.md §4.1.
+            if !self.is_browser_pane || self.drag_capture {
+                return None;
+            }
+            let state = self.inner.lock().state.clone();
+            Some(super::downloads::AgentMuxDownloadHandler::new(state))
+        }
+
         fn permission_handler(&self) -> Option<PermissionHandler> {
             // Two different policies, deliberately two different handlers.
             //

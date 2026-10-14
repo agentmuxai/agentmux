@@ -83,6 +83,7 @@ impl BrowserPaneManager {
         // SPEC_BROWSER_PANE_CAMERA_ACCESS_2026_09_01.md §3.2.
         state.media_grants.lock().clear_pane(block_id);
         crate::browser_panes::media_prompt::cancel_pane_any_thread(block_id);
+        crate::client::downloads::forget_pane(block_id);
         #[cfg(target_os = "windows")]
         {
             let ops = AppStateCloseOps(state);
@@ -212,6 +213,7 @@ impl BrowserPaneManager {
             // after (codex P2 on PR #2897).
             state.media_grants.lock().clear_pane(&block_id);
             crate::browser_panes::media_prompt::cancel_pane_any_thread(&block_id);
+            crate::client::downloads::forget_pane(&block_id);
             // Same keyboard-focus orphaning fix as close() — the async
             // on_before_close drain also destroys the pane HWND.
             #[cfg(target_os = "windows")]

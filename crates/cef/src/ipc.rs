@@ -1011,6 +1011,7 @@ async fn route_command(
             }
             state.media_grants.lock().clear_pane(&block_id);
             crate::browser_panes::media_prompt::cancel_pane_any_thread(&block_id);
+            crate::client::downloads::forget_pane(&block_id);
             tracing::info!(
                 target: "pane-media",
                 %block_id,
