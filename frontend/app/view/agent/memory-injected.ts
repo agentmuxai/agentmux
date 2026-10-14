@@ -19,6 +19,7 @@
  * the delivery, so a live frame and a replay of the same line render once.
  */
 
+import { isTextCard } from "./context-delivery";
 import { FALLBACK_CONTEXT_WINDOW, memorySizeBand } from "./memory-reinjection";
 import type { ContextDeliveryNode, ContextItem, DocumentNode } from "./types";
 
@@ -124,7 +125,9 @@ export function supersededCard(nodes: readonly DocumentNode[], card: ContextDeli
     if (card.reason !== "startup") return undefined;
     for (let i = nodes.length - 1; i >= 0; i--) {
         const node = nodes[i];
-        if (node.type === "context_delivery") return node.id === card.id ? undefined : node;
+        // A summary or a command's output means that session did something:
+        // it isn't a card to replace, and nothing before it is either.
+        if (node.type === "context_delivery") return node.id === card.id || isTextCard(node) ? undefined : node;
         if (!NOT_AGENT_WORK.has(node.type)) return undefined;
     }
     return undefined;

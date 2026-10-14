@@ -5,8 +5,8 @@
  * The raw stream frames the pane reads itself, before the provider
  * translator: frames the translator has no StreamEvent shape for (a
  * compaction boundary, AgentMux's own session outcome and notices) and the
- * ones it would show as something else (Claude Code's compaction summary
- * would read as a user message).
+ * ones it would show as something else (Claude Code's compaction summary and
+ * a slash command's output would read as user messages).
  *
  * The live stream (useAgentStream.ts) and history replay
  * (parseHistoryLines.ts) both run every frame through `interceptFrame`, so
@@ -19,7 +19,7 @@
 
 import { parseCliNoticeFrame } from "./cli-notice";
 import { parseCompactBoundaryFrame, type CompactBoundaryData } from "./compact-boundary";
-import type { CompactionSummaryTracker } from "./context-delivery";
+import { commandOutputNode, EMPTY_COMMAND_OUTPUT, type CompactionSummaryTracker } from "./context-delivery";
 import { isMemoryInjectedFrame } from "./memory-injected";
 import { parseSessionOutcomeFrame, type SessionOutcomeData } from "@/app/store/agent-document/session-outcome";
 import type { ClaudeCodeStreamParser } from "./stream-parser";
@@ -88,6 +88,14 @@ export function interceptFrame(raw: Record<string, unknown>, st: FrameInterceptS
     if (summary) {
         closeBlock();
         sink.node(summary, false);
+        return true;
+    }
+
+    // A local slash command's output: a card too, not a user message (§9 C1).
+    const output = commandOutputNode(raw, at ?? 0);
+    if (output) {
+        closeBlock();
+        if (output !== EMPTY_COMMAND_OUTPUT) sink.node(output, false);
         return true;
     }
 

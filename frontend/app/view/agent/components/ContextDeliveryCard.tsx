@@ -5,8 +5,8 @@
  * ContextDeliveryCard — what the agent was given without the user typing it,
  * as one card with a row per item.
  *
- * - Claude Code's compaction summary (CD1): a title, a size and a one-line
- *   excerpt; pinned open, the full summary.
+ * - Claude Code's compaction summary (CD1), and a slash command's output
+ *   (§9 C1): a title, a size and a one-line excerpt; pinned open, the full text.
  * - Memory deliveries (CD2a): a row per item, always visible: kind, name,
  *   tier (AgentMux system, workspace, personal), file, size, and a "cut" mark
  *   when the part cap cut it.
@@ -18,7 +18,7 @@
 import { formatCompactNumber } from "@/util/format-count";
 import clsx from "clsx";
 import { For, Show, createMemo, type JSX } from "solid-js";
-import { contextDeliveryTitle, isCompactionSummaryCard } from "../context-delivery";
+import { contextDeliveryTitle, isTextCard } from "../context-delivery";
 import { proseDoc } from "../preview-text/docs";
 import type { ContextDeliveryNode, ContextItem } from "../types";
 import { CollapsibleMessage } from "./CollapsibleMessage";
@@ -36,6 +36,7 @@ const ITEM_ICON: Record<ContextItem["kind"], string> = {
     personal_memory: "👤",
     running_summary: "🧭",
     compaction_summary: "📋",
+    command_output: "⌨️",
     continuation_packet: "🔁",
     startup_file: "📄",
 };
@@ -129,7 +130,8 @@ const ItemHead = (props: { item: ContextItem; globalSentTwice: boolean }): JSX.E
 );
 
 export const ContextDeliveryCard = (props: ContextDeliveryCardProps): JSX.Element => {
-    const summaryCard = (): boolean => isCompactionSummaryCard(props.node);
+    // The compaction summary and a command's output: an excerpt, not item rows.
+    const summaryCard = (): boolean => isTextCard(props.node);
     const bodies = (): ContextItem[] => props.node.items.filter((i) => i.body);
     const bigMemory = (): boolean => props.node.sizeBand === "high" || props.node.sizeBand === "critical";
     const classes = (): Record<string, boolean> => ({
@@ -138,7 +140,7 @@ export const ContextDeliveryCard = (props: ContextDeliveryCardProps): JSX.Elemen
     });
     const summary = (): JSX.Element => (
         <>
-            <span class="agent-context-delivery-icon">{summaryCard() ? ITEM_ICON.compaction_summary : "📥"}</span>
+            <span class="agent-context-delivery-icon">{summaryCard() ? ITEM_ICON[props.node.items[0].kind] : "📥"}</span>
             <span class="agent-context-delivery-title">{contextDeliveryTitle(props.node)}</span>
             <span class="agent-context-delivery-size">~{fmt(totalTokens(props.node))} tok (est.)</span>
             <Show when={summaryCard() && props.collapsed && props.node.items[0]?.excerpt}>

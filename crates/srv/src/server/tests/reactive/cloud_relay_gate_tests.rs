@@ -26,7 +26,7 @@ fn req(source: Option<&str>, delivery_tier: Option<&str>) -> InjectionRequest {
 #[tokio::test]
 async fn a_message_that_arrived_over_wan_is_never_re_relayed() {
     let state = test_state();
-    let out = try_cloud_relay(&state, &req(Some("agent2"), Some("wan"))).await;
+    let out = try_cloud_relay(&state, &req(Some("agent2"), Some("wan")), "").await;
     assert!(out.is_none(), "a wan-delivered message must not re-enter tier 4");
 }
 
@@ -37,9 +37,9 @@ async fn a_message_that_arrived_over_wan_is_never_re_relayed() {
 #[tokio::test]
 async fn a_caller_with_no_source_agent_has_no_tier_4() {
     let state = test_state();
-    assert!(try_cloud_relay(&state, &req(None, Some("host"))).await.is_none());
+    assert!(try_cloud_relay(&state, &req(None, Some("host")), "").await.is_none());
     assert!(
-        try_cloud_relay(&state, &req(Some(""), Some("host")))
+        try_cloud_relay(&state, &req(Some(""), Some("host")), "")
             .await
             .is_none(),
         "an empty source_agent is as unusable as a missing one"
@@ -52,7 +52,7 @@ async fn a_caller_with_no_source_agent_has_no_tier_4() {
 #[tokio::test]
 async fn host_and_lan_messages_are_eligible_but_need_a_credential() {
     let state = test_state();
-    assert!(try_cloud_relay(&state, &req(Some("agent2"), Some("host"))).await.is_none());
-    assert!(try_cloud_relay(&state, &req(Some("agent2"), Some("lan"))).await.is_none());
-    assert!(try_cloud_relay(&state, &req(Some("agent2"), None)).await.is_none());
+    assert!(try_cloud_relay(&state, &req(Some("agent2"), Some("host")), "").await.is_none());
+    assert!(try_cloud_relay(&state, &req(Some("agent2"), Some("lan")), "").await.is_none());
+    assert!(try_cloud_relay(&state, &req(Some("agent2"), None), "").await.is_none());
 }
