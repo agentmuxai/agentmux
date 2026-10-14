@@ -123,8 +123,12 @@ pub fn spawn_background_subsystems(
     // Start sysinfo collection loop (interval configurable via telemetry:interval)
     let sysinfo_broker = broker.clone();
     let sysinfo_config = config_watcher.clone();
+    let label_store = Arc::clone(mstore);
+    let pane_sampler = backend::sampler::panes::tower_sampler(move |id| {
+        backend::tower_sampler::block_label(&label_store, id)
+    });
     tokio::spawn(async move {
-        sysinfo::run_sysinfo_loop(sysinfo_broker, sysinfo_config, "local".to_string()).await;
+        sysinfo::run_sysinfo_loop(sysinfo_broker, sysinfo_config, "local".to_string(), pane_sampler).await;
     });
 
     // Start agent process watchdog (kills panes that exceed max-runtime or idle-output limits)
