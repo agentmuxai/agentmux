@@ -23,6 +23,15 @@ describe("showStartupError", () => {
         expect(document.body.classList.contains("is-transparent")).toBe(false);
     });
 
+    it("shows the app root too: the startup guard hides #main, not the body", () => {
+        const main = document.getElementById("main")!;
+        main.style.visibility = "hidden";
+        main.style.opacity = "0";
+        showStartupError("test error");
+        expect(main.style.visibility).toBe("visible");
+        expect(main.style.opacity).toBe("1");
+    });
+
     it("removes the startup loader", () => {
         showStartupError("test error");
         expect(document.getElementById("startup-loading")).toBeNull();

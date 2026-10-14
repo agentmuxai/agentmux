@@ -486,8 +486,14 @@ async function initAppInner() {
     const bareStart = performance.now();
     window.__startupPerfStart = bareStart;
     getApi().sendLog("Init Bare");
-    document.body.style.visibility = "hidden";
-    document.body.style.opacity = "0";
+    // Hide the app root, not <body>: the startup splash is a child of <body>, and an
+    // ancestor's `opacity: 0` hides it whatever its own `opacity: 1 !important` says.
+    // On a cold boot (a floating pane or window with no warm pool window behind it)
+    // the splash has already painted by now, so hiding <body> made the logo vanish
+    // here and come back when the root was shown again.
+    const appRoot = document.getElementById("main") ?? document.body;
+    appRoot.style.visibility = "hidden";
+    appRoot.style.opacity = "0";
     document.body.classList.add("is-transparent");
 
     setKeyUtilPlatform(platform);
@@ -608,11 +614,12 @@ async function initAppInner() {
     // drop the splash. The reveal gate (MAX_GATE_MS = 800ms) normally fades
     // the splash long before this; this only fires if init wedged.
     setTimeout(() => {
-        if (document.body.style.visibility === "hidden") {
+        const root = document.getElementById("main") ?? document.body;
+        if (root.style.visibility === "hidden") {
             console.warn("[initApp] Safety timeout: forcing body visible after 30s");
             getApi().sendLog("[initApp] Safety timeout: forcing body visible after 30s");
-            document.body.style.visibility = "visible";
-            document.body.style.opacity = "1";
+            root.style.visibility = "visible";
+            root.style.opacity = "1";
             document.body.classList.remove("is-transparent");
         }
         import("@/app/init/startup-splash").then((m) => m.fadeOutStartupSplash());
@@ -684,8 +691,9 @@ async function initMuxWrap(initOpts: AgentMuxInitOpts) {
         // resetting its detector, so the prior call from createTab /
         // setActiveTab (if any) is just superseded.
         scheduleRevealLift();
-        document.body.style.visibility = null;
-        document.body.style.opacity = null;
+        const root = document.getElementById("main") ?? document.body;
+        root.style.visibility = null;
+        root.style.opacity = null;
         document.body.classList.remove("is-transparent");
     }
 }
