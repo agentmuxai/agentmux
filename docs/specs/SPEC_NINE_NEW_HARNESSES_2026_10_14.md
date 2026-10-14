@@ -1,6 +1,6 @@
 # Spec: Nine new harnesses — OpenCode, Kilo Code, Cline, goose, Grok Build, DeepSeek Harness, Muse Code, Crush, Aider
 
-**Status:** proposed. Analysis and plan; nothing is built yet. Phase 0 (shared work) comes first, then one PR per harness (§8).
+**Status:** active. Shipped: Phase 0 (#4889, #4890, #4893, #4895), the six ACP harnesses (#4899, #4908), the terminal tier with Aider, Crush and Muse Code (#4926), and OpenCode's token usage (§5 item 4). Remaining: Muse Code's structured tier (§7.7), token usage for the other ACP agents, and the context meter from `usage_update`.
 **Date:** 2026-10-14
 **Author:** Lazo
 
@@ -139,7 +139,10 @@ One PR each.
    - Send `agentmux-mcp` in `session/new` / `session/load` `mcpServers` when the agent's `initialize` response advertises MCP capabilities. Fall back to `[]` otherwise.
    - This gives every ACP harness, including today's Copilot, OpenClaw and Pi, the MuxAPI tools (WhoAmI, messaging, memory). It is the follow-up `SPEC_ACP_CLIENT_CONFORMANCE_2026_10_07.md` left out of scope.
    - Without it, none of the nine has AgentMux's tools.
-4. **Token usage over ACP.** Read `usage_update` (OpenCode reports cost too) into the existing token-usage store. Optional, but cheap, and it applies to all ACP harnesses.
+4. **Token usage over ACP.** Read the `session/prompt` response's `usage` into the turn's stats.
+   - ACP leaves open whether it is per-turn or cumulative, and whether `inputTokens` includes the cache (agent-client-protocol#1860). So it is read only for an agent whose semantics were measured, through its own output format (`opencode-acp`, the way `qwen-stream-json` reuses the Claude translator).
+   - OpenCode 1.19.0, measured: the turn's last model call; `inputTokens` is the uncached share, beside `cachedReadTokens`. Kilo Code, a fork, couldn't be measured signed out.
+   - `usage_update` (`used` of `size`, and cost) is the context window's fill. Feeding the context meter from it is a follow-up.
 5. **A version source for non-npm harnesses.**
    - Add `versionSource?: { kind: "npm" | "pypi" | "github-release" | "vendor"; package?: string; repo?: string }` to `ProviderDefinition`. Its pin goes in `pinnedVersion` as for npm.
    - The version drift report reads `catalog.ts` and today monitors only `npmPackage`. A provider without one is reported as "unmonitored" and never flagged.
@@ -315,7 +318,7 @@ One PR per numbered item, each merged before the next harness that depends on it
 1. Split `providers.rs` and lower the size baseline.
 2. No Claude fallbacks for ACP providers; generalise `prompt_arg_flag`.
 3. `agentmux-mcp` in ACP `mcpServers`.
-4. ACP `usage_update` into token usage.
+4. ACP token usage, per agent once measured (§5 item 4).
 5. `versionSource` in the catalog.
 6. The terminal tier.
 7. Seed generator fixed and checked.
