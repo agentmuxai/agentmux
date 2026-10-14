@@ -1,7 +1,7 @@
 # Spec: opening and closing windows must not leave renderers behind
 
 **Date:** 2026-10-13
-**Status:** active. §3.2 is confirmed and fixed (§4.2); the other changes are still open.
+**Status:** active. §3.2 is confirmed and fixed in #4858 (§4.2, §4.3); the other changes are still open.
 **Plan item:** #8 of `PLAN_RENDERER_MEMORY_FIXES_2026_10_12.md`.
 **Background:** `docs/retro/retro-window-lifecycle-leak-2026-07-04.md` (round 6, demote-into-pool) and `SPEC_PARK_AND_BLANK` (the blank fallback).
 
