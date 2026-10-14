@@ -1,6 +1,6 @@
 # SPEC — Reducer single-source-of-truth (SSOT) consolidation
 
-- **Status:** Draft (audit + roadmap; spec-first, rides with code per no-doc-only-PR rule)
+- **Status:** active — L1 (#2083), L2 (#2080), L4 (#1703), L7 (deleted in #4284), L8 (#2081) and the window-count resync (#1701) done; L3, R5, R6 and srv-events gap handling open. Verified against code 2026-10-14 ([triage](../analysis/REPORT_REDUCER_STACK_TRIAGE_2026_10_13.md)).
 - **Date:** 2026-06-22
 - **Author:** AgentA
 - **Origin:** the stale/desynced window-count bug (`SPEC_WINDOW_COUNT_STALE_ON_VIEWS_CLOSE_2026_06_22.md`)
