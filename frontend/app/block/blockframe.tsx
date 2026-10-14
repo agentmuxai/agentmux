@@ -791,7 +791,10 @@ function BlockFrame_Header(
                     </Show>
                 </div>
             </Show>
-            <UnseenTurnsDot blockId={props.blockId()} />
+            {/* With a tab strip, each pill carries its own tab's dot (PaneChrome). */}
+            <Show when={!props.leadingTabStrip}>
+                <UnseenTurnsDot blockId={props.blockId()} />
+            </Show>
             {/* With a tab strip, a remote terminal's pill names its remote
                 (term-pane-tab.ts) instead: a chip here showed only while that
                 tab was active. The picker still opens with Change connection

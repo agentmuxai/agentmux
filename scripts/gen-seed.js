@@ -69,6 +69,15 @@ const CLI_DEFS = [
         containerSupported: false,
     },
     {
+        id: "antigravity",
+        name: "Antigravity",
+        provider: "antigravity",
+        icon: "\u269B",                  // ⚛
+        description: "Google's agentic coding CLI harness (AGY)",
+        bus: "antigravity",
+        containerSupported: false,
+    },
+    {
         id: "kimi",
         name: "Kimi",
         provider: "kimi",
@@ -83,7 +92,7 @@ const CLI_DEFS = [
         name: "Pi",
         provider: "pi",
         icon: "\u03C0",                  // π
-        description: "Plandex's multi-provider agent",
+        description: "Minimal multi-provider coding agent",
         bus: "pi",
         // No container image built yet — host-only until agentmux/pi ships.
         containerSupported: false,
@@ -192,7 +201,16 @@ merging. P2 findings should also be fixed if feasible.
 **NEVER kill AgentMux by image name** — use PID only. Multiple instances share
 the same binary name; killing by name kills ALL of them.`;
 
+const MEMORY_AGENT_MEMORY = "## Agent Memory\n\nYour persistent memory lives in `~/.claude/projects/<path>/memory/`. Claude Code reads it automatically at session start.\n\n### Structure\n\n- **`MEMORY.md`** - Index file. Loaded into *every* session (200-line / ~25 KB limit). Keep it as a pointer list. Entries past 200 lines are truncated.\n- **Topic files** (`*.md`) - Detail files (e.g. `user_role.md`, `feedback_testing.md`). Loaded on-demand when relevant. Store depth here, not in MEMORY.md.\n\n### File format\n\nEach topic file:\n```markdown\n---\nname: short-kebab-slug\ndescription: one-line summary\nmetadata:\n  type: user | feedback | project | reference\n---\n\nBody content here.\n```\n\nMEMORY.md - one line per entry:\n```markdown\n- [Title](file.md) - one-line hook\n```\n\n### When to save\n\nSave when you learn something non-obvious that would help future sessions:\n- User preferences, role, expertise (type: user)\n- Corrections or confirmed approaches: avoid X, always do Y (type: feedback)\n- Project context not in code/git: deadlines, stakeholder decisions, why (type: project)\n- Where things live in external systems: Slack, dashboards, Linear (type: reference)\n\nDo NOT save:\n- Things derivable from code or git history\n- Ephemeral task state or in-progress work\n- Duplicates - update existing entries instead\n- Anything already in CLAUDE.md files\n\n### When to update\n\n- End of a session where you learned something worth keeping\n- When the user corrects you\n- When you discover project context the user has not written down\n- When you find where something lives in an external system\n\n### Discipline\n\n- MEMORY.md stays under 200 lines. Consolidate if it grows past ~150.\n- One file per topic - do not dump everything in MEMORY.md body.\n- Link topic files from MEMORY.md with [[name]] cross-references.\n- Stale memories rot - update or remove when things change.";
+
 const SEED_MEMORIES = [
+    {
+        id: "seed-agent-memory",
+        name: "Agent Memory",
+        description: "When and how agents read and update their persistent native memory",
+        is_global: true,
+        instructions: MEMORY_AGENT_MEMORY,
+    },
     {
         id: "seed-workspace-rules",
         name: "Workspace Rules",
@@ -248,7 +266,7 @@ const manifest = {
 //
 // Kept the stdout emit too for callers that pipe elsewhere (e.g.
 // diff tools); gated behind `--stdout`.
-import { writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 
@@ -256,10 +274,17 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const json = JSON.stringify(manifest, null, 2) + "\n";
 
-if (process.argv.includes("--stdout")) {
+const outPath = resolve(__dirname, "..", "crates", "srv", "agent-seed.json");
+if (process.argv.includes("--check")) {
+    const committed = JSON.parse(readFileSync(outPath, "utf8"));
+    if (JSON.stringify(committed) !== JSON.stringify(manifest)) {
+        process.stderr.write("gen-seed: crates/srv/agent-seed.json differs from scripts/gen-seed.js; edit the script and run it.\n");
+        process.exit(1);
+    }
+    process.stdout.write("gen-seed: agent-seed.json matches.\n");
+} else if (process.argv.includes("--stdout")) {
     process.stdout.write(json);
 } else {
-    const outPath = resolve(__dirname, "..", "crates", "srv", "agent-seed.json");
     writeFileSync(outPath, json, { encoding: "utf8" });
     process.stdout.write(`wrote ${outPath}\n`);
 }

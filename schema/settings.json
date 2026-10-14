@@ -560,7 +560,7 @@
         },
         "agent:followcontroller": {
           "type": "boolean",
-          "description": "Agent panes decide whether to follow the conversation with one state machine: only your own scroll up (wheel, keys, scrollbar, a text selection) stops following, and scrolling back to the bottom or sending a message starts it again. Unset: on in development builds, off in releases until it has been soak-tested. Set false to restore the previous follow logic. Takes effect when a pane is next opened. See docs/specs/SPEC_AGENT_PANE_SCROLL_FOLLOW_STATE_MACHINE_2026_09_24.md."
+          "description": "Agent panes, their tool previews and install logs decide whether to follow their output with one state machine: only your own scroll up (wheel, keys, scrollbar, a text selection) stops following, and scrolling back to the bottom or sending a message starts it again. Unset: on in development builds, off in releases until it has been soak-tested. Set false to restore the previous follow logic. Takes effect when a pane is next opened. See docs/specs/SPEC_AGENT_PANE_SCROLL_FOLLOW_STATE_MACHINE_2026_09_24.md."
         },
         "agent:livefeed": {
           "type": "boolean",

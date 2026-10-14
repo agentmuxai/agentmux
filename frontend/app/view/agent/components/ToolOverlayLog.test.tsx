@@ -13,20 +13,23 @@
  */
 
 import { cleanup, render } from "@solidjs/testing-library";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createSignal } from "solid-js";
 
 import { ToolOverlayLog, sameToolNode } from "./ToolOverlayLog";
 import type { ToolLogChunk, ToolNode } from "../types";
 
 let reducedMotion = false;
+/** `agent:followcontroller` as the preview reads it at mount. */
+let followFlag: boolean | undefined;
 vi.mock("@/app/store/global", () => ({
     atoms: {
         prefersReducedMotionAtom: () => reducedMotion,
     },
     // Previews render through Markdown, which reads its
     // `markdown:streamtailinplace` kill switch on mount.
-    getSettingsKeyAtom: () => () => undefined,
+    getSettingsKeyAtom: (key: string) => () => (key === "agent:followcontroller" ? followFlag : undefined),
+    isDev: () => false,
 }));
 
 afterEach(() => {
@@ -500,7 +503,10 @@ describe("ToolOverlayLog — hides bashwrap's internal starting-chunk (2026-09-0
 // clamped scrollTop over a settable scrollHeight/clientHeight) and drives a
 // fake ResizeObserver, the same approach as AgentDocumentVirtualList.pin.test.
 
-describe("ToolOverlayLog — follows the latest output", () => {
+describe.each([false, true])("ToolOverlayLog — follows the latest output (agent:followcontroller=%s)", (flag) => {
+    beforeEach(() => {
+        followFlag = flag;
+    });
     type ROCallback = () => void;
     let roCallbacks: ROCallback[] = [];
     class FakeResizeObserver {
@@ -517,6 +523,7 @@ describe("ToolOverlayLog — follows the latest output", () => {
 
     afterEach(() => {
         roCallbacks = [];
+        followFlag = undefined;
         vi.unstubAllGlobals();
     });
 
@@ -712,6 +719,125 @@ describe("ToolOverlayLog — follows the latest output", () => {
             fireResize(); // box grows from 0 when shown
             expect(geo.top).toBe(geo.bottom());
         });
+    });
+});
+
+// What only the shared follow controller does (agent:followcontroller on);
+// the local copy kept for the flag-off path does neither.
+describe("ToolOverlayLog — on the shared follow controller", () => {
+    type ROCallback = () => void;
+    let roCallbacks: ROCallback[] = [];
+    class FakeResizeObserver {
+        constructor(private cb: ROCallback) {
+            roCallbacks.push(cb);
+        }
+        observe() {}
+        unobserve() {}
+        disconnect() {
+            roCallbacks = roCallbacks.filter((c) => c !== this.cb);
+        }
+    }
+    const fireResize = () => roCallbacks.forEach((cb) => cb());
+    let info: ReturnType<typeof vi.spyOn>;
+    beforeEach(() => {
+        info = vi.spyOn(console, "info").mockImplementation(() => {});
+    });
+    afterEach(() => {
+        roCallbacks = [];
+        followFlag = undefined;
+        vi.unstubAllGlobals();
+    });
+    const lines = () => info.mock.calls.filter((c) => c[0] === "[scroll-follow]").map((c) => c.slice(1).join(" "));
+
+    function mount(node: () => ToolNode, flag: boolean, initial = { scrollHeight: 1000, clientHeight: 200 }) {
+        followFlag = flag;
+        vi.stubGlobal("ResizeObserver", FakeResizeObserver);
+        const { container } = render(() => <ToolOverlayLog node={node()} />);
+        const el = container.querySelector(".agent-tool-overlay-log") as HTMLElement;
+        const g = { ...initial };
+        let top = 0;
+        Object.defineProperty(el, "scrollHeight", { configurable: true, get: () => g.scrollHeight });
+        Object.defineProperty(el, "clientHeight", { configurable: true, get: () => g.clientHeight });
+        Object.defineProperty(el, "scrollTop", {
+            configurable: true,
+            get: () => top,
+            set: (v: number) => {
+                top = Math.max(0, Math.min(v, g.scrollHeight - g.clientHeight));
+            },
+        });
+        fireResize();
+        return { el, g, top: () => top };
+    }
+    const running = (n: number): ToolNode => ({
+        ...streamingNode,
+        log: { open: true, chunks: Array.from({ length: n }, (_, i) => ({ kind: "stdout", content: `l${i}`, timestamp: i })) },
+    });
+
+    it("a wheel up over the preview detaches before any scroll, so a same-frame pin can't pull it back", () => {
+        const [node, setNode] = createSignal(running(40));
+        const { el, g, top } = mount(node, true);
+        expect(el.classList.contains("scroll-handoff-box")).toBe(true); // the box is a hand-off box itself
+        el.dispatchEvent(new WheelEvent("wheel", { deltaY: -10, bubbles: true }));
+        setNode(running(60));
+        g.scrollHeight = 1400;
+        fireResize(); // the content grew before the wheel's scroll landed
+        expect(top()).toBe(800);
+        expect(lines()).toEqual(["tool=tc-1 following→detached cause=user-escape:wheel-up gap=0px"]);
+    });
+
+    it("with the flag off, the same small wheel up near the bottom keeps following (the old rule)", () => {
+        const [node, setNode] = createSignal(running(40));
+        const { el, g, top } = mount(node, false);
+        el.dispatchEvent(new WheelEvent("wheel", { deltaY: -10, bubbles: true }));
+        el.scrollTop = 790;
+        el.dispatchEvent(new Event("scroll"));
+        setNode(running(60));
+        g.scrollHeight = 1400;
+        fireResize();
+        expect(top()).toBe(1200);
+    });
+
+    it("a document preview that starts streaming follows, logging the cause", () => {
+        const write = (n: number): ToolNode => ({
+            ...running(n),
+            id: "tc-write",
+            tool: "Write",
+            params: { file_path: "/tmp/a.ts", content: "x" },
+            log: n === 0 ? undefined : running(n).log,
+        });
+        const [node, setNode] = createSignal(write(0));
+        const { g, top } = mount(node, true);
+        expect(top()).toBe(0);
+        setNode(write(5));
+        g.scrollHeight = 1200;
+        fireResize();
+        expect(top()).toBe(1000);
+        expect(lines()).toEqual(["tool=c-write detached→following cause=streaming-started"]);
+    });
+
+    // The box mounts while the tool is still running, on a short placeholder
+    // with nothing to scroll. That must not re-follow it (DETACHED + no
+    // overflow), or the result would land pinned to the bottom (#4891).
+    it.each([false, true])("a document preview that mounts before its result still opens at the top (flag=%s)", (flag) => {
+        const readNode = (done: boolean): ToolNode => ({
+            type: "tool",
+            id: "tc-read2",
+            tool: "Read",
+            params: { file_path: "/tmp/a.ts" },
+            status: done ? "success" : "running",
+            collapsed: false,
+            summary: "Read /tmp/a.ts",
+            ...(done ? { result: { content: "const a = 1;\nconst b = 2;" } as any } : {}),
+        });
+        const [node, setNode] = createSignal(readNode(false));
+        const { g, top } = mount(node, flag, { scrollHeight: 40, clientHeight: 200 });
+        fireResize(); // the placeholder settles: no overflow
+        expect(top()).toBe(0);
+        setNode(readNode(true));
+        g.scrollHeight = 1200; // the result lands and overflows
+        fireResize();
+        expect(top()).toBe(0);
+        expect(lines()).toEqual([]);
     });
 });
 

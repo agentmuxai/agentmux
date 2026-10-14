@@ -3,10 +3,13 @@
 
 import { render, cleanup, waitFor, fireEvent } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/app/store/contextmenu", () => ({ ContextMenuModel: { showContextMenu: vi.fn() } }));
 vi.mock("@/util/clipboard", () => ({ writeText: vi.fn().mockResolvedValue(undefined) }));
+// `agent:followcontroller` as LogView reads it at mount (off unless a test turns it on).
+let followFlag = false;
+vi.mock("@/app/view/agent/scroll/follow-setting", () => ({ followControllerOn: () => followFlag }));
 
 import { ContextMenuModel } from "@/app/store/contextmenu";
 
@@ -191,5 +194,101 @@ describe("LogView", () => {
             setLines(makeLines(1));
             await vi.waitFor(() => expect(el.scrollTop).toBe(400));
         });
+    });
+});
+
+// Phase 3 of SPEC_AGENT_PANE_SCROLL_FOLLOW_STATE_MACHINE_2026_09_24.md: with
+// `agent:followcontroller` on, the install log runs the agent pane's follow
+// state machine. The tests above run with it off (the 40px rule).
+describe("LogView on the shared follow controller (agent:followcontroller on)", () => {
+    beforeEach(() => {
+        followFlag = true;
+    });
+    afterEach(() => {
+        followFlag = false;
+        vi.restoreAllMocks();
+    });
+    const stub = (scrollHeight: number, clientHeight: number) => ({
+        scroll: vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockReturnValue(scrollHeight),
+        client: vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(clientHeight),
+    });
+    const wheel = (el: HTMLElement, deltaY: number) => el.dispatchEvent(new WheelEvent("wheel", { deltaY, bubbles: true }));
+
+    it("follows new lines while at the bottom", async () => {
+        const { scroll } = stub(100, 50);
+        const { el, setLines } = renderLog(makeLines(1));
+        scroll.mockReturnValue(120);
+        setLines(makeLines(2));
+        await vi.waitFor(() => expect(el.scrollTop).toBe(120));
+    });
+
+    it("a scroll nobody made (no gesture) never stops following", async () => {
+        const { scroll } = stub(200, 50);
+        const { el, setLines } = renderLog(makeLines(1));
+        await vi.waitFor(() => expect(el.scrollTop).toBe(200));
+        el.scrollTop = 0; // a clamp or anchoring move, far from the bottom
+        fireEvent.scroll(el);
+        scroll.mockReturnValue(300);
+        setLines(makeLines(2));
+        await vi.waitFor(() => expect(el.scrollTop).toBe(300));
+    });
+
+    it("a wheel up detaches at once; new lines then leave the reader alone", async () => {
+        const { scroll } = stub(200, 50);
+        const { el, setLines } = renderLog(makeLines(1));
+        await vi.waitFor(() => expect(el.scrollTop).toBe(200));
+        wheel(el, -40);
+        el.scrollTop = 160;
+        fireEvent.scroll(el);
+        scroll.mockReturnValue(400);
+        setLines(makeLines(2));
+        await new Promise((r) => setTimeout(r, 30));
+        expect(el.scrollTop).toBe(160);
+    });
+
+    it("a user scroll back within 24 px of the bottom follows again; 30 px short doesn't", async () => {
+        const { scroll } = stub(200, 50);
+        const { el, setLines } = renderLog(makeLines(1));
+        await vi.waitFor(() => expect(el.scrollTop).toBe(200));
+        wheel(el, -100);
+        el.scrollTop = 50;
+        fireEvent.scroll(el);
+        wheel(el, 70);
+        el.scrollTop = 120; // 30 px short of the bottom (200 - 50)
+        fireEvent.scroll(el);
+        setLines(makeLines(2));
+        await new Promise((r) => setTimeout(r, 30));
+        expect(el.scrollTop).toBe(120);
+        wheel(el, 20);
+        el.scrollTop = 140; // 10 px short
+        fireEvent.scroll(el);
+        scroll.mockReturnValue(300);
+        setLines(makeLines(3));
+        await vi.waitFor(() => expect(el.scrollTop).toBe(300));
+    });
+
+    it("hidden (closed Details) waits, and following resumes when shown", async () => {
+        const { client } = stub(300, 0);
+        const { el, api, setLines } = renderLog(makeLines(5));
+        setLines(makeLines(6));
+        await new Promise((r) => setTimeout(r, 30));
+        expect(el.scrollTop).toBe(0); // nothing to pin while it has no size
+        client.mockReturnValue(50);
+        api().refresh();
+        await vi.waitFor(() => expect(el.scrollTop).toBe(300));
+    });
+
+    it("scrolling to a line detaches; a log cleared for a new run follows again", async () => {
+        const { scroll } = stub(200, 50);
+        const { el, api, setLines } = renderLog(makeLines(30));
+        api().scrollToLine(10);
+        const at = el.scrollTop;
+        scroll.mockReturnValue(400);
+        setLines(makeLines(31));
+        await new Promise((r) => setTimeout(r, 30));
+        expect(el.scrollTop).toBe(at);
+        setLines([]); // Retry
+        setLines(makeLines(1));
+        await vi.waitFor(() => expect(el.scrollTop).toBe(400));
     });
 });
