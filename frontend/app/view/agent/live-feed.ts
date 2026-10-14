@@ -147,17 +147,25 @@ export interface FeedSize {
     rows: number;
     turns: number;
     bytes: number;
+    /** Bytes in the turn in flight: from the last turn-starting node to the end. */
+    lastTurnBytes: number;
 }
 
 /** One pass over the feed, shared by `sizeOverLimits` and `sizeAtBudget`. */
 export function feedSize(nodes: readonly DocumentNode[]): FeedSize {
     let turns = 0;
     let bytes = 0;
+    let lastTurnBytes = 0;
     for (const n of nodes) {
-        if (startsTurn(n)) turns++;
-        bytes += nodeBytesFull(n);
+        if (startsTurn(n)) {
+            turns++;
+            lastTurnBytes = 0;
+        }
+        const nb = nodeBytesFull(n);
+        bytes += nb;
+        lastTurnBytes += nb;
     }
-    return { rows: nodes.length, turns, bytes };
+    return { rows: nodes.length, turns, bytes, lastTurnBytes };
 }
 
 /** `feedOverLimits` on a measured size. */

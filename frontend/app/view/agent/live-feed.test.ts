@@ -341,4 +341,15 @@ describe("startsTurn: jekts and incoming agent messages start turns", () => {
         ]);
         expect(feedSize(nodes).turns).toBe(3);
     });
+
+    it("feedSize reports the bytes of the turn in flight apart from the whole", () => {
+        const big = (id: string, n: number) => ({ type: "markdown", id, content: "x".repeat(n) }) as unknown as DocumentNode;
+        const nodes = [user("u0"), big("a", 5000), user("u1"), big("b", 700), big("c", 300)];
+        const s = feedSize(nodes);
+        expect(s.lastTurnBytes).toBeGreaterThanOrEqual(1000);
+        expect(s.lastTurnBytes).toBeLessThan(s.bytes);
+        // With no turn start at all the whole feed is the turn.
+        const lone = feedSize([big("z", 900)]);
+        expect(lone.lastTurnBytes).toBe(lone.bytes);
+    });
 });

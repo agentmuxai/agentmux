@@ -228,7 +228,13 @@ export function useLiveFeedRollOff(opts: {
     // Independent of the live feed: results unload with it off too (the app-server
     // controller, `agent:livefeed` disabled), and tool completions schedule no
     // pass of their own.
-    const overTextBudget = createMemo(() => docSize().bytes > LIVE_FEED_MAX_FINISHED_BYTES + IN_FLIGHT_TEXT_BUDGET);
+    // The turn in flight has its own bound: a long turn of completed tool results
+    // is trimmed at IN_FLIGHT_TEXT_BUDGET, not only once the whole pane also
+    // holds the finished turns' allowance.
+    const overTextBudget = createMemo(() => {
+        const s = docSize();
+        return s.lastTurnBytes > IN_FLIGHT_TEXT_BUDGET || s.bytes > LIVE_FEED_MAX_FINISHED_BYTES + IN_FLIGHT_TEXT_BUDGET;
+    });
     createEffect(
         on(overTextBudget, (over) => {
             if (!over) return;

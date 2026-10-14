@@ -198,6 +198,17 @@ describe("useLiveFeedRollOff — holds in hidden panes, and passes while over bu
         m.dispose();
     });
 
+    it("runs the periodic pass once the turn in flight passes IN_FLIGHT_TEXT_BUDGET, well under the combined limit", () => {
+        const turn = "x".repeat(IN_FLIGHT_TEXT_BUDGET + 50_000);
+        const nodes = [userMsg("u1"), { type: "markdown", id: "m1", content: turn } as unknown as DocumentNode];
+        const m = mount({ nodes, outputFormat: "some-other-format" });
+        vi.advanceTimersByTime(2_000);
+        const first = m.dispatched.filter((c) => c.type === "UnloadToolResults").length;
+        vi.advanceTimersByTime(BUDGET_PASS_MS * 2 + 2_000);
+        expect(m.dispatched.filter((c) => c.type === "UnloadToolResults").length - first).toBeGreaterThanOrEqual(2);
+        m.dispose();
+    });
+
     it("runs no periodic pass under budget", () => {
         const m = mount();
         vi.advanceTimersByTime(BUDGET_PASS_MS * 3);
