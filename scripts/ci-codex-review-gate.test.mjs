@@ -19,9 +19,8 @@ import {
     latestCodexOutput,
     needsDiffSince,
     reviewedCommit,
-    SKIP_AUTHOR,
     SKIP_AUTHORS,
-    skippedHead,
+    skipNote,
     sweep,
     sweepReason,
     TRIGGER_AUTHOR,
@@ -417,6 +416,7 @@ describe("findings only on docs", () => {
 
 // While Codex's quota is exhausted muxreview doesn't ask; it keeps one comment
 // per PR naming the head it skipped (spec §2).
+const SKIP_AUTHOR = "muxreview[bot]";
 const skipComment = (sha, { login = SKIP_AUTHOR, created = "2026-09-30T10:00:00Z", updated } = {}) => ({
     user: { login },
     created_at: created,
@@ -503,9 +503,9 @@ describe("muxreview quota skip marker", () => {
 
     it("reads a short or upper-case sha and rejects a malformed one", () => {
         const c = skipComment(HEAD);
-        expect(skippedHead({ ...c, body: c.body.replace(HEAD, HEAD.slice(0, 7).toUpperCase()) })).toBe(HEAD.slice(0, 7));
-        expect(skippedHead({ ...c, body: c.body.replace(HEAD, "abc12") })).toBeNull();
-        expect(skippedHead({ ...c, body: c.body.replace("reason=quota", "reason=other") })).toBeNull();
+        expect(skipNote({ ...c, body: c.body.replace(HEAD, HEAD.slice(0, 7).toUpperCase()) })?.sha).toBe(HEAD.slice(0, 7));
+        expect(skipNote({ ...c, body: c.body.replace(HEAD, "abc12") })).toBeNull();
+        expect(skipNote({ ...c, body: c.body.replace("reason=quota", "reason=other") })).toBeNull();
     });
 });
 
@@ -535,7 +535,7 @@ describe("muxreview skip reasons", () => {
     });
 
     it("an unknown reason doesn't count", () => {
-        expect(skippedHead(note("other"))).toBeNull();
+        expect(skipNote(note("other"))).toBeNull();
     });
 
     it("a skip note never outranks Codex's own findings on the head", () => {
