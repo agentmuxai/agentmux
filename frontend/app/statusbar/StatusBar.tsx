@@ -8,6 +8,7 @@ import { ConfigStatus } from "./ConfigStatus";
 import { GpuStatus } from "./GpuStatus";
 import { HostPopover } from "./HostPopover";
 import { InstancePanel } from "./InstancePanel";
+import { MultiInputStatus } from "./MultiInputStatus";
 import { MuxBusIndicator } from "./MuxBusIndicator";
 import { registerStatusBarItem, statusBarItems } from "./status-bar-registry";
 import { StatusBarTip } from "./StatusBarTip";
@@ -93,6 +94,7 @@ function registerBuiltinStatusBarItems(): void {
         ["backend", "left", () => <BackendStatus />],
         ["system-stats", "left", () => <SystemStats />],
         ["gpu", "left", () => <GpuStatus />],
+        ["multi-input", "right", () => <MultiInputStatus />],
         ["token-usage", "right", () => <TokenUsageIndicator />],
         ["config", "right", () => <ConfigStatus />],
         ["muxbus", "right", () => <MuxBusIndicator />],
