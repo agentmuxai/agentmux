@@ -1,7 +1,7 @@
 # Plan — the Codex review gate survives a transient GitHub error, and the CI script clean-ups around it
 
 **Date:** 2026-10-14
-**Status:** active — step 1 in review (#4896); steps 2–4 not started. Four steps, one PR each (§4).
+**Status:** active — step 1 in review (#4897); steps 2–4 not started. Four steps, one PR each (§4).
 **Author:** Clamk@narko
 **Touches:** `scripts/ci-codex-review-gate.mjs`, `scripts/ci-codex-review-gate.test.mjs`, `.github/workflows/codex-review-gate.yml`, a new `scripts/lib/`, and the "is this script being run directly" check in 16 scripts (step 4).
 
