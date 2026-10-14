@@ -236,13 +236,17 @@ async fn handle_viewer_hello(State(state): State<AppState>, Extension(caller): E
 }
 
 /// Whether the agent in `block_id` is hidden from paired devices: its
-/// definition (the block's `agentId`) has `hide_from_devices` set.
+/// definition (the block's `agentId`) has `hide_from_devices` set. A store
+/// that can't answer hides it: a device never sees, or sends to, an agent
+/// because a read failed.
 pub(crate) fn agent_hidden(state: &AppState, block_id: &str) -> bool {
-    let Ok(Some(block)) = state.mstore.get::<crate::backend::obj::Block>(block_id) else {
-        return false;
+    let block = match state.mstore.get::<crate::backend::obj::Block>(block_id) {
+        Ok(Some(block)) => block,
+        Ok(None) => return false,
+        Err(_) => return true,
     };
     let def_id = crate::backend::obj::meta_get_string(&block.meta, "agentId", "");
-    !def_id.is_empty() && state.mstore.agent_hide_from_devices_get(&def_id).unwrap_or(false)
+    !def_id.is_empty() && state.mstore.agent_hide_from_devices_get(&def_id).unwrap_or(true)
 }
 
 /// The agent's provider id (`claude`, `codex`, …), '' when unknown.
