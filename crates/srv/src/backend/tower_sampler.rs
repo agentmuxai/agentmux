@@ -347,6 +347,9 @@ struct State {
 /// and each task's CPU account rate. [`render`] turns it into an answer.
 struct Sampled {
     at: Instant,
+    /// When the process-table read began: a process started after this may
+    /// be missing from `procs` though it is running.
+    read_started: Instant,
     ts_ms: u64,
     procs: Vec<ProcInfo>,
     rates: Vec<Option<f64>>,
@@ -392,14 +395,14 @@ impl Tower {
         GLOBAL.get_or_init(Tower::new)
     }
 
-    /// The PIDs in the process table of the last sample, if that sample was read
-    /// at or after `since`: what is missing from it had exited by then. `None`
-    /// for an older sample (one reused within [`REUSE_WITHIN`], or the last
-    /// good one before a failed read), which can't speak for a process that
-    /// started after it.
+    /// The PIDs in the process table of the last sample, if that sample's read
+    /// began at or after `since`: what is missing from it had exited by then.
+    /// `None` for an older sample (one reused within [`REUSE_WITHIN`], the last
+    /// good one before a failed read, or one whose read was already under way),
+    /// which can't speak for a process that started after it.
     pub fn live_pids_since(&self, since: Instant) -> Option<HashSet<u32>> {
         let st = self.state.lock().unwrap_or_else(|e| e.into_inner());
-        let last = st.last.as_ref().filter(|l| l.at >= since)?;
+        let last = st.last.as_ref().filter(|l| l.read_started >= since)?;
         Some(last.procs.iter().map(|p| p.pid).collect())
     }
 
@@ -431,13 +434,15 @@ impl Tower {
         let mut st = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let fresh = st.last.as_ref().is_some_and(|l| l.at.elapsed() < REUSE_WITHIN);
         if !fresh {
+            let read_started = Instant::now();
             let procs = snapshot()?;
             let now = Instant::now();
             if st.last.as_ref().is_some_and(|l| now.duration_since(l.at) > STALE_AFTER) {
                 st.procs = RateMeter::new();
                 st.tasks = RateMeter::new();
             }
-            let sampled = advance(&mut st, procs, &inputs(), now, &agentmux_procstats::command_line_of);
+            let mut sampled = advance(&mut st, procs, &inputs(), now, &agentmux_procstats::command_line_of);
+            sampled.read_started = read_started;
             st.last = Some(sampled);
         }
         let last = st.last.as_ref().expect("measured above");
@@ -505,6 +510,7 @@ fn advance(
     st.sticky = sticky;
     Sampled {
         at: now,
+        read_started: now,
         ts_ms: agentmux_common::time::now_ms() as u64,
         procs,
         rates,
@@ -725,6 +731,22 @@ mod tests {
         assert_eq!(tower.live_pids_since(before), Some(HashSet::from([42])));
         let later = Instant::now() + Duration::from_millis(1);
         assert_eq!(tower.live_pids_since(later), None, "that sample was read before `later`");
+    }
+
+    /// A read already under way when a shell registered finishes after that
+    /// moment but can still miss the shell: it doesn't count either.
+    #[test]
+    fn a_read_that_began_before_the_moment_asked_does_not_count_though_it_ended_after() {
+        let tower = Tower::new();
+        let mid = std::cell::Cell::new(None);
+        let slow = || {
+            std::thread::sleep(Duration::from_millis(3));
+            mid.set(Some(Instant::now()));
+            std::thread::sleep(Duration::from_millis(3));
+            Ok(vec![p(42, 1, "sh")])
+        };
+        tower.sample_from(slow, false, "", Inputs::default, |_| None, |_| None).unwrap();
+        assert_eq!(tower.live_pids_since(mid.get().unwrap()), None);
     }
     use super::*;
 
