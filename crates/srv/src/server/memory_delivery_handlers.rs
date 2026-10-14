@@ -344,8 +344,18 @@ pub(crate) async fn handle_session_start_part(
         None => {
             let gate = state_lock().compose_gates.entry(key.clone()).or_default().clone();
             let _composing = gate.lock().await;
-            // A part that held the gate before this one may have composed it.
-            let composed_meanwhile = state_lock().deliveries.get(&key).cloned();
+            // Dropped on every way out, a cancelled request included, so the
+            // gate never outlives the part that took it.
+            let _gate_entry = GateEntry(key.clone());
+            // A part that held the gate before this one may have composed it, or
+            // the fallback may have claimed the event while this one waited.
+            let (composed_meanwhile, claimed) = {
+                let st = state_lock();
+                (st.deliveries.get(&key).cloned(), st.fallback_claimed(&req.block_id, reason))
+            };
+            if claimed {
+                return Json(PartResponse { text: None, part: req.part, of: 0 });
+            }
             if let Some(d) = composed_meanwhile {
                 return finish_part(&state, &key, d, req.part);
             }
@@ -364,14 +374,12 @@ pub(crate) async fn handle_session_start_part(
                     })
             };
             let Some(composed) = composed else {
-                state_lock().compose_gates.remove(&key);
                 return Json(PartResponse { text: None, part: req.part, of: 0 });
             };
             // A concurrent part may have composed first: keep that one, so
             // every part of this session start is from the same composition.
             // And the fallback may have claimed the event meanwhile.
             let mut st = state_lock();
-            st.compose_gates.remove(&key);
             if st.fallback_claimed(&req.block_id, reason) {
                 return Json(PartResponse { text: None, part: req.part, of: 0 });
             }
@@ -379,6 +387,15 @@ pub(crate) async fn handle_session_start_part(
         }
     };
     finish_part(&state, &key, delivery, req.part)
+}
+
+/// Removes a delivery's compose gate when the part that took it is done.
+struct GateEntry(DeliveryKey);
+
+impl Drop for GateEntry {
+    fn drop(&mut self) {
+        state_lock().compose_gates.remove(&self.0);
+    }
 }
 
 /// The reply for one part of a composed delivery. A delivery with nothing for
@@ -1108,6 +1125,14 @@ mod tests {
         st.compose_gates.remove(&key);
         let next = st.compose_gates.entry(key).or_default().clone();
         assert!(!std::sync::Arc::ptr_eq(&first, &next), "a new delivery gets its own gate");
+    }
+
+    #[test]
+    fn a_gate_entry_takes_its_gate_with_it_when_dropped() {
+        let key = startup_key("gate-entry-test");
+        state_lock().compose_gates.entry(key.clone()).or_default();
+        drop(GateEntry(key.clone()));
+        assert!(!state_lock().compose_gates.contains_key(&key), "a cancelled part leaves no gate behind");
     }
 
     #[test]
