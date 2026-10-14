@@ -1,7 +1,7 @@
 # Report: a floating pane flashes white and its logo flickers when it opens
 
 **Date:** 2026-10-14
-**Status:** both causes fixed in the same PR. Cause 2 (the logo) is verified (§6). Cause 1 (the white) is fixed by F2 (§7) but not yet measured with the recorder.
+**Status:** implemented. Both causes are fixed in the same PR. Cause 2 (the logo) is verified (§6). Cause 1 (the white) is fixed by F2 (§7) but not yet measured with the recorder.
 **Platform:** Windows, CEF 154, `main` @ `78f171c56` (includes #4767).
 **Related:** `SPEC_WINDOW_OPEN_LATENCY_AND_WARM_POOLS_2026_10_13.md` (the pools), `SPEC_TEAROFF_PAINT_LATENCY_2026_09_30.md` (the splash and the tear-off snapshot), `docs/analysis/cef-white-flash-retro.md` (the original startup flash).
 
