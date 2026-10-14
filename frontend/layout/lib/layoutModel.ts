@@ -156,6 +156,17 @@ export class LayoutModel {
      */
     processedActionIds: Set<string>;
     /**
+     * Layout revisions this model's own pane-tab commands were queued at;
+     * they count as seen when it pushes (layoutPersistence.ts `pushBaseRevision`).
+     * @internal
+     */
+    ownLayoutRevisions = new Set<number>();
+    /**
+     * Pushes refused in a row as stale, reset by one that is applied.
+     * @internal
+     */
+    stalePushStreak = 0;
+    /**
      * Read a signal value (signal accessor — call to read, returns current value).
      * Kept for compatibility with modules that call model.getter(signal).
      */

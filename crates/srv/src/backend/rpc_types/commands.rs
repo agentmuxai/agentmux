@@ -505,6 +505,11 @@ pub const COMMAND_PANE_OPEN: &str = "pane.open";
 /// pane — `Command::LayoutStackMove`.
 /// SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §4.1, Phase 3.
 pub const COMMAND_PANE_MOVE_TAB: &str = "pane.moveTab";
+/// Make a Pane Tab its pane's visible one — `Command::LayoutStackActivate`.
+pub const COMMAND_PANE_ACTIVATE_TAB: &str = "pane.activateTab";
+/// Take a Pane Tab out of its pane (the block is closed separately, by
+/// `ClosePane`) — `Command::LayoutDeleteNodeByBlock`.
+pub const COMMAND_PANE_REMOVE_TAB: &str = "pane.removeTab";
 
 // MuxAPI Tier 1 — blockfile pagination commands
 pub const COMMAND_BLOCKFILE_LINE_COUNT: &str = "blockfile:line_count";

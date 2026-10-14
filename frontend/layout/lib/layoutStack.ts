@@ -44,6 +44,7 @@ import { findNode, findNodeByBlockId } from "./layoutNode";
 import type { LayoutModel } from "./layoutModel";
 import { focusNode } from "./layoutFocus";
 import { closeNode, removeLeafEmptiedByMove } from "./layoutMagnify";
+import { sendStackCommand } from "./layoutPersistence";
 import { effectiveStack, moveMemberAcrossStacks, moveMemberInStack, removeMemberFromStack } from "./stackMembers";
 
 export { effectiveStack };
@@ -176,6 +177,9 @@ export function setActiveBlockInStack(model: LayoutModel, nodeId: string, blockI
     model.updateTree(false);
     model.setter(model.localTreeStateAtom, { ...model.treeState });
     model.persistToBackend();
+    void sendStackCommand(model, "pane.activateTab", (action_id) =>
+        RpcApi.PaneActivateTabCommand(TabRpcClient, { block_id: blockId, action_id }, {})
+    );
 }
 
 /** Close one tab in a pane's stack. If `blockId` is the leaf's only/last
@@ -236,6 +240,10 @@ export async function closeBlockInStack(
     model.updateTree(false);
     model.setter(model.localTreeStateAtom, { ...model.treeState });
     model.persistToBackend();
+    // Out of the stored pane before ClosePane deletes the block.
+    await sendStackCommand(model, "pane.removeTab", (action_id) =>
+        RpcApi.PaneRemoveTabCommand(TabRpcClient, { block_id: blockId, action_id }, {})
+    );
 
     await model.onNodeDelete?.({ blockId } as TabLayoutData);
 }
@@ -251,13 +259,10 @@ export async function closeBlockInStack(
  * does. Applies the local optimistic
  * edit immediately (so the tab strip reacts instantly to a drag) — same
  * "local mutation is this client's own source of truth" pattern every
- * mutator in this file uses. Also fires the matching `pane.moveTab` RPC,
- * fire-and-forget (not awaited — a failure is logged only, same posture as
- * every other mutator here, none of which reconciles against RPC failure):
- * it exists so OTHER windows/tabs watching this same layout see the move
- * too, via the queued `stackmove` action `pane.moveTab` sends (this
- * client's own local edit already reflects it, so it doesn't need to wait
- * on or re-apply its own queued action).
+ * mutator in this file uses. Also sends the matching `pane.moveTab`
+ * (`sendStackCommand`, not awaited), so srv's tree has the move at once and
+ * OTHER views of this layout get the queued `stackmove`; this client skips
+ * its own copy by action id.
  *
  * Returns whether the move was applied, so a drop handler can tell a real
  * landing from a refused one (e.g. to play the landing bounce only when the
@@ -319,10 +324,12 @@ export function moveBlockInStack(
         if (landedIn) focusNode(model, landedIn.id);
     }
 
-    RpcApi.PaneMoveTabCommand(
-        TabRpcClient,
-        { block_id: blockId, target_block_id: targetBlockId, position, activate },
-        {}
-    ).catch((e) => console.error("moveBlockInStack: pane.moveTab RPC failed", e));
+    void sendStackCommand(model, "pane.moveTab", (action_id) =>
+        RpcApi.PaneMoveTabCommand(
+            TabRpcClient,
+            { block_id: blockId, target_block_id: targetBlockId, position, activate, action_id },
+            {}
+        )
+    );
     return true;
 }

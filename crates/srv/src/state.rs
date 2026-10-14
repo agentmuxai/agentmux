@@ -76,6 +76,10 @@ pub struct TabRecord {
     /// pane-tab stack arms); `LayoutState.rootnode` is persisted from
     /// their events and bootstrap-loaded at startup.
     pub rootnode: Option<agentmux_common::LayoutNode>,
+    /// Bumped once per batch of queued backend layout actions, which carry it
+    /// as `rev`; mirrors `LayoutState.layoutrevision`. A frontend tree push
+    /// built on an older revision is refused (`reducer::layout::stale_push_revision`).
+    pub layout_revision: u64,
 }
 
 /// Phase E.3 — block as held by the srv reducer's canonical state.

@@ -891,6 +891,14 @@
             "method": "PaneMoveTabCommand"
         },
         {
+            "command": "pane.activateTab",
+            "method": "PaneActivateTabCommand"
+        },
+        {
+            "command": "pane.removeTab",
+            "method": "PaneRemoveTabCommand"
+        },
+        {
             "command": "layout.open",
             "method": "OpenLayoutCommand"
         },

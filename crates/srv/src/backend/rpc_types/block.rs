@@ -836,6 +836,30 @@ pub struct CommandPaneMoveTabData {
     #[ts(type = r#""before" | "after" | "end""#)]
     pub position: String,
     pub activate: bool,
+    /// The caller's id for the queued `stackmove`, which it then skips (it
+    /// already made the move). SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md §3.3.
+    #[ts(optional)]
+    pub action_id: Option<String>,
+}
+
+/// Request for pane.activateTab and pane.removeTab: one Pane Tab, by its
+/// block id. `action_id` as in [`CommandPaneMoveTabData`].
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+#[serde(rename_all = "snake_case")]
+pub struct CommandPaneTabData {
+    pub block_id: String,
+    #[ts(optional)]
+    pub action_id: Option<String>,
+}
+
+/// Response from pane.moveTab, pane.activateTab and pane.removeTab: the tab's
+/// `layout_revision` the change was queued at, which the caller counts as seen.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct PaneTabEditResult {
+    #[ts(type = "number")]
+    pub layout_revision: u64,
 }
 
 /// Request for blockfile:line_count — count total lines in a blockfile.

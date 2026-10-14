@@ -258,6 +258,7 @@ async fn move_tab_reorders_within_the_same_pane_and_queues_a_stackmove() {
             target_block_id: b.clone(),
             position: "before".into(),
             activate: false,
+            action_id: None,
         },
     )
     .await
@@ -360,6 +361,7 @@ async fn move_tab_moves_a_tab_across_panes_and_queues_a_cross_pane_stackmove() {
             target_block_id: b.clone(),
             position: "end".into(),
             activate: true,
+            action_id: None,
         },
     )
     .await
@@ -456,6 +458,7 @@ async fn move_tab_of_a_panes_only_tab_moves_it_and_removes_the_emptied_pane() {
             target_block_id: y.clone(),
             position: "end".into(),
             activate: true,
+            action_id: None,
         },
     )
     .await

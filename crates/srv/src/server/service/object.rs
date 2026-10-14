@@ -488,6 +488,8 @@ async fn update_layout_via_reducer(
     let get_json = |key: &str| -> Option<serde_json::Value> {
         mux_obj_value.get(key).filter(|v| !v.is_null()).cloned()
     };
+    // Absent from older clients, which skip the stale check.
+    let base_revision = mux_obj_value.get("layoutrevision").and_then(|v| v.as_u64());
     let slices = agentmux_common::LayoutClientSlices {
         leaforder: get_json("leaforder"),
         focused_node_id: get_str("focusednodeid"),
@@ -497,6 +499,7 @@ async fn update_layout_via_reducer(
     // ── single critical section: snapshot + dispatch + persist (+ rollback) ──
     let mut apply_err: Option<String> = None;
     let mut early_err: Option<String> = None;
+    let stale_at: Option<u64>;
     let events = {
         let mut s = state.srv_state.lock().await;
         // Snapshot the current row for the rollback path INSIDE the
@@ -518,7 +521,11 @@ async fn update_layout_via_reducer(
                 LayoutState::default()
             }
         };
-        if early_err.is_some() {
+        stale_at = base_revision.and_then(|b| crate::reducer::stale_push_revision(&s, &tab_id, b));
+        if let Some(current) = stale_at {
+            tracing::info!(tab_id = %tab_id, base_revision = ?base_revision, current, "UpdateObject: layout push refused, built on a stale layout revision");
+        }
+        if early_err.is_some() || stale_at.is_some() {
             Vec::new()
         } else {
             // Resolved under the lock so a concurrent push can't change the
@@ -586,6 +593,9 @@ async fn update_layout_via_reducer(
     if let Some(err) = early_err {
         return WebReturnType::error(err);
     }
+    if let Some(current) = stale_at {
+        return refuse_stale_layout_push(store, &oid, current);
+    }
     if let Some(err_msg) = events.iter().find_map(|e| match e {
         agentmux_common::ipc::Event::Error { message, .. } => Some(message.clone()),
         _ => None,
@@ -607,5 +617,24 @@ async fn update_layout_via_reducer(
             obj: Some(obj_val),
         }]),
         Err(e) => WebReturnType::error(format!("UpdateObject: re-read failed: {}", e)),
+    }
+}
+
+/// The answer to a stale layout push: nothing applied, `{stale, layoutrevision}`
+/// as data, and the row as stored, whose queue holds the actions the pusher
+/// missed. SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md §3.5.
+fn refuse_stale_layout_push(store: &crate::backend::storage::store::Store, oid: &str, current: u64) -> WebReturnType {
+    let updates = match get_object_by_oref(store, &format!("{}:{}", OTYPE_LAYOUT, oid)) {
+        Ok(obj_val) => vec![MuxObjUpdate {
+            updatetype: "update".into(),
+            otype: OTYPE_LAYOUT.to_string(),
+            oid: oid.to_string(),
+            obj: Some(obj_val),
+        }],
+        Err(e) => return WebReturnType::error(format!("UpdateObject: re-read failed: {}", e)),
+    };
+    WebReturnType {
+        data: Some(serde_json::json!({ "stale": true, "layoutrevision": current })),
+        ..WebReturnType::success_with_updates(updates)
     }
 }

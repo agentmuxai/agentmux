@@ -10,17 +10,6 @@ use crate::state::BlockRecord;
 
 use super::invalid_command;
 
-/// `create_block_with_id` with an id minted here, for `CreateBlockInStack`
-/// (`layout::handle_create_block_in_stack`), the one create arm that
-/// doesn't take its id from `Ctx::new_id` yet.
-pub(super) fn handle_create_block(
-    state: &mut State,
-    tab_id: String,
-    meta: serde_json::Value,
-) -> Vec<Event> {
-    create_block_with_id(state, tab_id, uuid::Uuid::new_v4().to_string(), meta)
-}
-
 /// Phase E.3 — create a block with the caller-minted `block_id`
 /// (`Ctx::new_id`) inside a tab. Refuses (non-fatal `Event::Error`) a
 /// missing tab or an id already in use. On success: appends to the tab's

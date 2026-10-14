@@ -454,8 +454,16 @@ pub struct LayoutState {
     pub leaforder: Option<Vec<LeafOrderEntry>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pendingbackendactions: Option<Vec<LayoutActionData>>,
+    /// The reducer's `TabRecord::layout_revision` as of the last queued
+    /// action. A frontend push echoes the revision it built on.
+    #[serde(default, skip_serializing_if = "is_zero_u64")]
+    pub layoutrevision: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub meta: Option<MetaMapType>,
+}
+
+fn is_zero_u64(v: &u64) -> bool {
+    *v == 0
 }
 
 // LayoutState has meta as Option<MetaMapType> (Go uses omitempty), so manual impl:

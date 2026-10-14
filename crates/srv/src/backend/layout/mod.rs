@@ -814,8 +814,41 @@ pub fn validate_layout_invariants(root: &Option<LayoutNode>) -> Vec<String> {
                 leaves
             ));
         }
+        // I11 — a block is in at most one pane (the tree half of
+        // SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md §3.1 I1; the other
+        // half, "in at least one", needs the tab's blocks: `unplaced_blocks`).
+        let mut pane_of: std::collections::HashMap<String, &str> = std::collections::HashMap::new();
+        for_each_leaf(tree, &mut |leaf, data| {
+            for member in leaf_members(data) {
+                if let Some(first) = pane_of.insert(member.clone(), &leaf.id).filter(|first| *first != leaf.id) {
+                    violations.push(format!("BLOCK_IN_TWO_PANES @ {}: also in {}", short(&member), short(first)));
+                }
+            }
+        });
     }
     violations
+}
+
+/// The tab's blocks that are in no pane of its tree: the other half of I1
+/// (SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md §3.1). Briefly true of a
+/// block on its way into a pane (a queued placement the frontend hasn't
+/// applied yet); a block that stays unplaced is an orphan.
+pub fn unplaced_blocks(root: &Option<LayoutNode>, block_ids: &[String]) -> Vec<String> {
+    let mut placed = std::collections::HashSet::new();
+    if let Some(tree) = root {
+        for_each_leaf(tree, &mut |_, data| placed.extend(leaf_members(data)));
+    }
+    block_ids.iter().filter(|b| !placed.contains(*b)).cloned().collect()
+}
+
+/// Visit every leaf (a node with `data`), depth first.
+fn for_each_leaf<'a>(node: &'a LayoutNode, f: &mut impl FnMut(&'a LayoutNode, &'a agentmux_common::LayoutNodeData)) {
+    if let Some(data) = node.data.as_ref() {
+        f(node, data);
+    }
+    for child in &node.children {
+        for_each_leaf(child, f);
+    }
 }
 
 /// First leaf (depth-first) whose `data.block_id` is set but not present in

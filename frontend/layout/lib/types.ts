@@ -70,6 +70,9 @@ export enum LayoutTreeActionType {
     // relative to `targetblockid` — a same-pane reorder or a cross-pane move
     // (`LayoutStackMove`). SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §4.1.
     StackMove = "stackmove",
+    // Backend-originated: `blockid` became the visible tab of its pane
+    // (`LayoutStackActivate`). SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md §3.3.
+    StackActivate = "stackactivate",
 }
 
 export interface LayoutTreeAction {

@@ -785,7 +785,7 @@ fn apply_layout_tree_replaced(
 /// `LayoutState.pendingbackendactions`. The queue is a backend→frontend
 /// mailbox: the backend appends here; the frontend drains it by pushing
 /// a full slice without the processed actions (the REPLACE path in
-/// `apply_layout_tree_replaced`).
+/// `apply_layout_tree_replaced`). Each action's `rev` sets `layoutrevision`.
 ///
 /// Idempotency: the event is applied twice on the happy path (sync in
 /// `queue_layout_actions_via_reducer`, again by the subscriber task
@@ -810,17 +810,17 @@ fn apply_layout_backend_actions_queued(
     let incoming: Vec<LayoutActionData> = serde_json::from_value(actions.clone())?;
     let mut pending = layout.pendingbackendactions.take().unwrap_or_default();
     let before = pending.len();
+    let revision = actions.as_array().into_iter().flatten().filter_map(|a| a.get("rev")?.as_u64()).fold(layout.layoutrevision, u64::max);
     for action in incoming {
         if !pending.iter().any(|p| p.actionid == action.actionid) {
             pending.push(action);
         }
     }
-    if pending.len() == before {
-        // Every action already queued (double-apply) — no version churn.
-        layout.pendingbackendactions = Some(pending);
-        return Ok(());
+    if pending.len() == before && revision == layout.layoutrevision {
+        return Ok(()); // a double-apply: no version churn
     }
     layout.pendingbackendactions = Some(pending);
+    layout.layoutrevision = revision;
     mstore.update(&mut layout)?;
     Ok(())
 }

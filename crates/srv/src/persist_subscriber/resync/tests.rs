@@ -199,3 +199,30 @@ async fn resync_moves_a_block_row_to_its_reducer_parent() {
     assert_eq!(tab(&mstore, "t1").blockids, vec!["blk-1"]);
     assert!(tab(&mstore, "t2").blockids.is_empty());
 }
+
+/// A dropped queue append leaves the row's layout revision behind the
+/// reducer's; the resync raises it, and never lowers one that is ahead.
+#[tokio::test]
+async fn resync_writes_the_layout_revision_and_never_lowers_it() {
+    let mstore = store();
+    let mut s = State::default();
+    for e in build(&mut s) {
+        apply_event_to_mstore(&e, &mstore).unwrap();
+    }
+    let queue = Command::LayoutQueueBackendActions {
+        tab_id: "t2".into(),
+        actions: serde_json::json!([{ "actiontype": "delete", "actionid": "a1", "blockid": "blk-1" }]),
+        correlation_id: String::new(),
+    };
+    dispatch(&mut s, queue, "-"); // its event is lost
+    assert_eq!(layout(&mstore, "t2").layoutrevision, 0);
+    let state = Arc::new(Mutex::new(s));
+    resync_from_reducer(&state, &mstore).await.unwrap();
+    assert_eq!(layout(&mstore, "t2").layoutrevision, 1);
+
+    let mut row = layout(&mstore, "t2");
+    row.layoutrevision = 5;
+    mstore.update(&mut row).unwrap();
+    resync_from_reducer(&state, &mstore).await.unwrap();
+    assert_eq!(layout(&mstore, "t2").layoutrevision, 5);
+}
