@@ -1128,7 +1128,8 @@ pub fn resync_controller(
                 event_bus,
                 mstore,
                 filestore,
-            );
+            )
+            .with_auth_key(auth_key.to_string());
             let ctrl = Arc::new(ctrl);
             register_controller(block_id, ctrl.clone());
             let result = ctrl.start(block_meta.clone(), rt_opts, force);

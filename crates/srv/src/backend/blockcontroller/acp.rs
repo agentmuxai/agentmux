@@ -244,9 +244,20 @@ pub struct AcpController {
     /// Serializes `ensure_started`, so two deliveries that find the agent
     /// stopped can't both start it.
     start_lock: Mutex<()>,
+    /// srv's auth key, for the agent's `agentmux-mcp` (`with_auth_key`):
+    /// srv removes it from its own environment at startup, so nothing else
+    /// would pass it on. Empty in tests.
+    auth_key: String,
 }
 
 impl AcpController {
+    /// The server auth key `agentmux-mcp` needs to reach srv (the same key
+    /// `build_persistent_spawn_env` gives Claude's).
+    pub fn with_auth_key(mut self, auth_key: String) -> Self {
+        self.auth_key = auth_key;
+        self
+    }
+
     pub fn new(
         tab_id: String,
         block_id: String,
@@ -287,6 +298,7 @@ impl AcpController {
             next_rpc_id: Arc::new(AtomicU64::new(1)),
             outstanding_prompt_ids: Arc::new(Mutex::new(HashSet::new())),
             start_lock: Mutex::new(()),
+            auth_key: String::new(),
         }
     }
 
@@ -924,6 +936,12 @@ impl AcpController {
         }
         // The workspace the "Your workspace" Operator Config entry points at.
         crate::server::agent_handlers::input::carry_agent_workdir_env(&mut env_vars, block_meta);
+        // The agent's `agentmux-mcp` reaches srv with these, as on the
+        // persistent path: reserved values, so they replace any in `cmd:env`.
+        if !self.auth_key.is_empty() {
+            env_vars.insert("AGENTMUX_AUTH_KEY".to_string(), self.auth_key.clone());
+        }
+        env_vars.insert("AGENTMUX_BLOCKID".to_string(), self.block_id.clone());
         crate::server::browser_uploads::record_launch_workspace(&self.block_id, &env_vars);
         crate::backend::gh_guard::apply_gh_guard(&mut env_vars);
         crate::backend::account_login_guard::strip_account_login(&mut env_vars);

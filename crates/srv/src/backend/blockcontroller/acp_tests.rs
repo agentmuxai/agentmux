@@ -141,6 +141,22 @@ fn an_acp_spawn_env_carries_the_agent_workdir() {
     assert_eq!(std::path::PathBuf::from(&ctrl.spawn_env(&meta)["AGENTMUX_AGENT_WORKDIR"]), ws);
 }
 
+/// The agent's `agentmux-mcp` reaches srv with the server's key and the real
+/// block id, which replace any stale ones a persisted `cmd:env` carries.
+#[test]
+fn an_acp_spawn_env_carries_the_auth_key_and_block_id_for_agentmux_mcp() {
+    let mut meta = super::super::super::obj::MetaMapType::new();
+    meta.insert(
+        "cmd:env".to_string(),
+        serde_json::json!({"AGENTMUX_AUTH_KEY": "stale", "AGENTMUX_BLOCKID": "other"}),
+    );
+    let ctrl = AcpController::new("tab".to_string(), "block-acp-mcp".to_string(), None, None, None, None)
+        .with_auth_key("srv-key".to_string());
+    let env = ctrl.spawn_env(&meta);
+    assert_eq!(env["AGENTMUX_AUTH_KEY"], "srv-key");
+    assert_eq!(env["AGENTMUX_BLOCKID"], "block-acp-mcp");
+}
+
 /// No agent env carries the account's cloud login, even from a
 /// `cmd:env` persisted before `account_login_guard` existed.
 #[test]
