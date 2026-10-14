@@ -181,6 +181,25 @@ describe("AcpTranslator — JSON-RPC errors", () => {
         ]);
     });
 
+    it("adds the error's data when it says more than the message", () => {
+        const t = new AcpTranslator();
+        const err = (data: unknown, message = "Internal error") =>
+            t.translate({ jsonrpc: "2.0", id: 4, error: { code: -32603, message, data } });
+        // goose, before a provider is configured.
+        expect(err("Failed to resolve provider: Configuration value not found: GOOSE_PROVIDER")).toEqual([
+            {
+                type: "text",
+                content: "**Error:** Internal error: Failed to resolve provider: Configuration value not found: GOOSE_PROVIDER",
+            },
+        ]);
+        // Grok, whose data only repeats what's known; structured data is left out.
+        expect(err("no auth method id provided", "Authentication required")[0].content).toBe(
+            "**Error:** Authentication required: no auth method id provided"
+        );
+        expect(err("Internal error")[0].content).toBe("**Error:** Internal error");
+        expect(err({ details: 1 })[0].content).toBe("**Error:** Internal error");
+    });
+
     it("still says something for an error with no message", () => {
         const t = new AcpTranslator();
         expect(t.translate({ jsonrpc: "2.0", id: 3, error: { code: -32603 } })).toEqual([
