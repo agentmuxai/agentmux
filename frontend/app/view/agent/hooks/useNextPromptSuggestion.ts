@@ -61,7 +61,9 @@
  *   1. Cleared the instant a new turn starts (`Submitting`) — a suggestion
  *      from turn N is meaningless (and misleading) once turn N+1 has begun.
  *      `term:ambient_summary` deliberately persists across turns; this key
- *      deliberately does not.
+ *      deliberately does not. A hidden memory-reinjection turn is exempt: it is
+ *      not the user's turn N+1, so the suggestion on screen is still the right
+ *      one. A catch-up turn is not exempt (its reply is followed by a new one).
  *   2. `activeTurnId !== myTurnId` at write time — a newer turn has already
  *      started (same belt-and-suspenders pattern as
  *      useAgentActivitySummary.ts, on top of the backend gateway's own
@@ -203,11 +205,17 @@ export function useNextPromptSuggestion(opts: UseNextPromptSuggestionOptions): v
 
     createEffect(on(turnPhase, (phase) => {
         if (phase.kind === "Submitting") {
-            activeTurnId++;
             // A catch-up turn is hidden in its input only: its reply is shown, so
             // the suggestion that follows it is wanted.
             lastTurnWasHidden = phase.hidden === true && phase.pendingContent !== CATCH_UP_TURN_PLACEHOLDER_CONTENT;
-            clearSuggestion(blockId); // guard 1 — see module doc comment
+            // A hidden reinjection is not the user's turn: it asks for no
+            // suggestion at its end, so it must neither wipe the one on screen
+            // nor supersede a request still in flight for the turn before it (an
+            // automatic compaction's fallback starts right as that turn ends).
+            if (!lastTurnWasHidden) {
+                activeTurnId++;
+                clearSuggestion(blockId); // guard 1 — see module doc comment
+            }
         }
     }));
 
