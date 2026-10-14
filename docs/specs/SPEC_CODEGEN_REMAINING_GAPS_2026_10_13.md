@@ -1,6 +1,6 @@
 # What codegen still doesn't cover
 
-**Status:** active — step 1 (typed history reads) in #4830; steps 2 and 3 next. Written 2026-10-13, after `SPEC_TYPED_EVENT_PAYLOADS_2026_10_13.md`, `SPEC_TYPED_EVENTS_EVERY_PATH_2026_10_13.md` and `SPEC_TSRS_SERDE_ATTRIBUTE_WARNINGS_2026_10_13.md` shipped. The owner asked for "anything missing".
+**Status:** active — step 1 (typed history reads) shipped in #4830; step 2 (typed client events) and step 3 (typed MuxAPI handlers, batch 1 in #4840) in review. Written 2026-10-13, after `SPEC_TYPED_EVENT_PAYLOADS_2026_10_13.md`, `SPEC_TYPED_EVENTS_EVERY_PATH_2026_10_13.md` and `SPEC_TSRS_SERDE_ATTRIBUTE_WARNINGS_2026_10_13.md` shipped. The owner asked for "anything missing".
 
 ## The gaps
 

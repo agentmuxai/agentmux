@@ -18,7 +18,7 @@
  */
 
 import { onCleanup } from "solid-js";
-import { muxEventSubscribe } from "@/app/store/mps";
+import { onMuxEvent } from "@/app/store/mps";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import type { StreamFlushQueue } from "../stream-flush-queue";
@@ -60,12 +60,11 @@ export function useToolChunkStream(opts: UseToolChunkStreamOptions): void {
     // frontend to learn the tool_use_id — closes the late-subscribe
     // race that the previous per-tool subscription model could not.
     // See `docs/specs/SPEC_STREAMING_BASH_RUNNER_2026_05_11.md` §6.
-    const blockChunkUnsub = muxEventSubscribe({
-        eventType: WpsEvent.ToolChunk,
-        scope: `block:${opts.blockId}`,
-        handler: (event: any) => {
-            const data = event?.data;
-            if (!data || typeof data !== "object") return;
+    // srv refuses a `tool_chunk` that isn't a `ToolChunk` (mps_events::client_events!), so `data`
+    // is one of its ops.
+    const blockChunkUnsub = onMuxEvent(
+        WpsEvent.ToolChunk,
+        (data) => {
             if (data.op === "pid") {
                 // Not renderable stream content, so it bypasses the
                 // queue/RAF machinery entirely — a plain fire-and-forget
@@ -81,27 +80,28 @@ export function useToolChunkStream(opts: UseToolChunkStreamOptions): void {
                 }
                 return;
             }
-            const toolId = typeof data.tool_id === "string" ? data.tool_id : "";
+            const toolId = data.tool_id;
             if (!toolId) return;
             if (data.op === "terminal") {
                 opts.queue.pushToolChunk(toolId, {
                     kind: "system",
-                    content: `[exited ${data.exit_code ?? "?"}]`,
-                    timestamp: data.timestamp ?? Date.now(),
+                    content: `[exited ${data.exit_code}]`,
+                    timestamp: data.timestamp,
                 });
                 opts.queue.scheduleFlush();
                 return;
             }
             if (data.op !== "chunk") return;
-            if (opts.onOutput && typeof data.content === "string") opts.onOutput(toolId, data.content);
+            opts.onOutput?.(toolId, data.content);
             opts.queue.pushToolChunk(toolId, {
-                kind: data.kind ?? "stdout",
-                content: data.content ?? "",
-                timestamp: data.timestamp ?? Date.now(),
+                kind: data.kind,
+                content: data.content,
+                timestamp: data.timestamp,
             });
             opts.queue.scheduleFlush();
         },
-    });
+        `block:${opts.blockId}`
+    );
 
     // Own the tool_chunk subscription at body scope so it is torn down even if
     // the caller's onMount early-returns (e.g. enabled:false). Without this

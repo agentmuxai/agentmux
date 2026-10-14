@@ -15,6 +15,7 @@
 
 use agentmux_common::AUTH_KEY_HEADER;
 use agentmux_common::api_types::WpsPublishRequest;
+use agentmux_common::client_events::{CompactionStarted, ToolChunk};
 use anyhow::Result;
 use serde::Serialize;
 use std::sync::Arc;
@@ -102,10 +103,10 @@ impl WpsClient {
     /// Persists with `TOOL_CHUNK_PERSIST` so late subscribers (the
     /// frontend, which learns about the tool_use only after Claude
     /// buffers the stream) get the full history on subscribe.
-    pub async fn publish_chunk<T: Serialize>(
+    pub async fn publish_chunk(
         &self,
         block_id: Option<&str>,
-        payload: &T,
+        payload: &ToolChunk,
     ) -> Result<()> {
         self.publish(TOOL_CHUNK_EVENT, TOOL_CHUNK_PERSIST, block_id, payload, None)
             .await
@@ -118,10 +119,10 @@ impl WpsClient {
     /// `COMPACTION_STARTED_TIMEOUT` (much shorter than the client-wide
     /// default) since this call sits on a synchronous hook Claude Code
     /// blocks compaction on — see that constant's doc comment.
-    pub async fn publish_compaction_started<T: Serialize>(
+    pub async fn publish_compaction_started(
         &self,
         block_id: Option<&str>,
-        payload: &T,
+        payload: &CompactionStarted,
     ) -> Result<()> {
         self.publish(
             COMPACTION_STARTED_EVENT,

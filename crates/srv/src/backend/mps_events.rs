@@ -200,6 +200,14 @@ events! {
     /// Tell a window's renderer to reveal a block (`notify::router`).
     BlockReveal: crate::backend::notify::router::EVENT_BLOCK_REVEAL => crate::backend::notify::router::BlockRevealEvent,
 
+    // Published by a client through the HTTP relay, which checks the payload (`client_events!`).
+    /// A line of a Bash call's output, its exit, its pid or which call it is (`agentmux-bashwrap`).
+    ToolChunk: "tool_chunk" => agentmux_common::client_events::ToolChunk,
+    /// Claude Code began compacting (`agentmux-bashwrap precompact`).
+    CompactionStarted: "compaction_started" => agentmux_common::client_events::CompactionStarted,
+    /// A window claimed or released a singleton modal (`frontend/app/store/singleton-modal.ts`).
+    SingletonClaim: "singleton:claim" => SingletonClaimEvent,
+
     // Signals with no payload: something changed, and a subscriber refetches what it shows.
     /// The agents list changed.
     AgentsChanged: "agents:changed" => (),
@@ -246,10 +254,58 @@ per_id_events! {
     AgentEventStream: "agent_event:" => crate::agents::types::AgentEvent,
 }
 
+macro_rules! client_events {
+    ($($marker:ident,)*) => {
+        /// Publishes an event a process outside srv sent (`POST /agentmux/wps/publish`) if it is a
+        /// client event: `None` if `name` isn't one, an error if `data` isn't its payload type.
+        pub fn publish_client_event(
+            broker: &super::mps::Broker,
+            name: &str,
+            data: &serde_json::Value,
+            scopes: &[String],
+            persist: usize,
+        ) -> Option<Result<(), String>> {
+            $(
+                if name == <$marker as Event>::NAME {
+                    return Some(match <<$marker as Event>::Payload as serde::Deserialize>::deserialize(data) {
+                        Ok(payload) => {
+                            broker.publish_event::<$marker>(&payload, scopes.to_vec(), persist);
+                            Ok(())
+                        }
+                        Err(e) => Err(format!("{name}: {e}")),
+                    });
+                }
+            )*
+            None
+        }
+    };
+}
+
+// The events, declared in `events!`, that a client publishes: the relay refuses one whose data
+// isn't its payload, and relays any other event as sent.
+client_events! {
+    ToolChunk,
+    CompactionStarted,
+    SingletonClaim,
+}
+
 /// An event's `data`: its payload as JSON, or none for an event that carries none (`()`, a
 /// pure "something changed" signal), so such an event goes out with no `data` field at all.
 pub fn payload_data<P: Serialize>(payload: &P) -> Option<serde_json::Value> {
     serde_json::to_value(payload).ok().filter(|v| !v.is_null())
+}
+
+/// `singleton:claim`, to `singleton:<kind>` with `persist: 1`: the latest one names the window
+/// holding that kind of singleton modal.
+#[derive(Debug, Clone, PartialEq, Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct SingletonClaimEvent {
+    pub kind: String,
+    /// The holding window's label, or `null` once released.
+    pub holder: Option<String>,
+    /// The publishing window's claim counter.
+    #[ts(type = "number")]
+    pub epoch: u64,
 }
 
 /// `editor:file_changed` / `media:file_changed`: the file that changed.
@@ -556,6 +612,34 @@ mod tests {
             serde_json::to_value(&activate).unwrap(),
             serde_json::json!({ "id": "n1", "block_id": "b1", "tab_id": "t1", "window_id": "w1", "workspace_id": null, "at_ms": 7 })
         );
+    }
+
+    #[test]
+    fn a_client_event_is_published_only_with_its_payload() {
+        use super::super::mps::Broker;
+        use serde_json::json;
+        let broker = Broker::new();
+        let scopes = vec!["block:b1".to_string()];
+        let chunk = json!({ "op": "chunk", "tool_id": "toolu_1", "kind": "stdout", "content": "hi\n", "timestamp": 5 });
+        assert_eq!(publish_client_event(&broker, "tool_chunk", &chunk, &scopes, 8), Some(Ok(())));
+        let stored = broker.read_event_history("tool_chunk", "block:b1", 8);
+        assert_eq!(stored.len(), 1);
+        assert_eq!(stored[0].data, Some(chunk), "goes out as it came in");
+
+        let wrong = json!({ "op": "chunk", "tool_id": "toolu_1", "kind": "tty", "content": "", "timestamp": 0 });
+        let refused = publish_client_event(&broker, "tool_chunk", &wrong, &scopes, 8).expect("a client event");
+        assert!(refused.unwrap_err().starts_with("tool_chunk: unknown variant `tty`"));
+        let claim = json!({ "kind": "bundles", "holder": "main", "epoch": "1" });
+        assert!(publish_client_event(&broker, "singleton:claim", &claim, &["singleton:bundles".to_string()], 1).unwrap().is_err());
+        assert_eq!(broker.read_event_history("tool_chunk", "block:b1", 8).len(), 1, "a refused event isn't stored");
+
+        assert_eq!(publish_client_event(&broker, "someones:event", &json!({ "any": 1 }), &scopes, 1), None, "not a client event");
+    }
+
+    #[test]
+    fn a_released_singleton_claim_names_no_holder() {
+        let release = SingletonClaimEvent { kind: "bundles".into(), holder: None, epoch: 3 };
+        assert_eq!(serde_json::to_value(&release).unwrap(), serde_json::json!({ "kind": "bundles", "holder": null, "epoch": 3 }));
     }
 
     #[test]
