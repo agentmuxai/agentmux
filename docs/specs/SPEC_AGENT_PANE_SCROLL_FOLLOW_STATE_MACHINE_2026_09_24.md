@@ -1,6 +1,6 @@
 # Agent pane scroll-follow: one owner, one intent-based state machine
 
-**Status:** active — Phase 0 (the hotfix for both reported symptoms, §8) shipped with this spec in PR #3652; invariant I4 (follow-transition logging, §5.3) shipped ahead of Phase 1 as Phase 0b; Phases 1–5 not started. Tracking: issue #3655.
+**Status:** active — Phase 0 (the hotfix for both reported symptoms, §8) shipped with this spec in PR #3652; invariant I4 (follow-transition logging, §5.3) shipped ahead of Phase 1 as Phase 0b; Phases 1 and 2 implemented (the reducer and its binding, wired into the transcript behind `agent:followcontroller`, on by default in dev builds only; §8.1 lists where they differ from §5); Phase 3 waits for the open `ToolOverlayLog` work (#4845); Phases 4–5 not started. Tracking: issue #3655.
 **Date:** 2026-09-24.
 **Requested by:** repo owner (asafebgi): "rock solid scrollbar for agent panes … this may need an architecture rethink, perhaps a DRY round."
 **Author:** Agent2.
@@ -255,9 +255,23 @@ Out of scope: the content-resize contract's pending steps 4–6 (shrinks at the 
    - **Tests:** "follow-state transition log (I4)" in `AgentDocumentVirtualList.pin.test.tsx`.
 3. **Phase 1:** the pure reducer and its table tests. No behavior change.
 4. **Phase 2:** `createFollowScroll` binding, wired into `AgentDocumentVirtualList` behind a setting, `agent:followcontroller` (default **on** in dev builds, off in release). Keep the old path for one release as a kill switch, the same pattern as `agent:turnscopedtail`.
+   **Implemented** (Phases 1 and 2): see §8.1.
 5. **Phase 3:** move `ToolOverlayLog` and `SystemToolInstallInline` onto the primitive.
 6. **Phase 4:** live soak passes; default on everywhere; delete the old path, `anchor.ts`'s threshold helpers, and the dead flags. The history catalog in §3 becomes this spec's status note.
 7. **Phase 5:** the "↓ New activity" pill (§5.7).
+
+### 8.1 Phases 1 and 2 as implemented
+
+- **Where it lives.** The pure reducer is [`frontend/app/view/agent/scroll/follow-controller.ts`](../../frontend/app/view/agent/scroll/follow-controller.ts) (`followReducer`, `REATTACH_PX`, `NEAR_TOP_PX`); its table tests are `follow-controller.test.ts`. The DOM binding is a second file, [`frontend/app/view/agent/scroll/follow-scroll.ts`](../../frontend/app/view/agent/scroll/follow-scroll.ts) (`createFollowScroll`), so the reducer file stays free of DOM types. The binding tests are `AgentDocumentVirtualList.follow-controller.test.tsx`, run on both pin paths.
+- **The setting.** `agent:followcontroller`: `true` or `false` wins; unset means on in dev builds and off in release (`resolveFollowController`). Read once when a pane mounts. With it off, VL runs exactly the Phase 0 code. `.agent-document` carries `data-follow-controller` when it is on.
+- **The binding does not own the ResizeObservers.** §5.1 has it own every observer. Since 2026-10-07 the pin itself belongs to whichever path is on: VL's content and viewport observers (`agent:onewayflow` off) or `OneWayFlow`'s single observer (`SPEC_AGENT_PANE_ONE_WAY_FLOW_2026_10_07.md` R4), which also compensates and eases. So the binding owns the gestures, the user-intent window and the follow state, and those observers report each observation to it (`observed()`), pinning only when it says so. I3 holds per path: one bottom writer each. Moving the observers into the binding belongs with Phase 4, when one of the paths is deleted.
+- **What the controller decides on the one-way path.** Only the intent. `OneWayFlow.userScrolled` no longer decides the escape; it only re-baselines its rows and spacer.
+- **Re-attach.** A user scroll re-attaches only if it ended within `REATTACH_PX` **and did not move up**. Otherwise a 10 px wheel-up near the bottom (an escape) would re-attach in its own scroll batch.
+- **No overflow means FOLLOWING.** A DETACHED pane whose content no longer overflows (`scrollHeight ≤ clientHeight`) follows again on the next observation: there is nothing to read and nothing the user could scroll to re-attach.
+- **Escape guards.** A wheel-up escapes synchronously unless the pane can't scroll up (a new pane that doesn't overflow yet) or the wheel is over a nested preview box (`.scroll-handoff-box`), which may use it; the scroll that box relays is then classified like any user scroll. A user scroll counts as moving up only when `scrollHeight` is unchanged (§5.4), so a clamp during a gesture never escapes.
+- **What counts as the user.** Inside the 250 ms window, a held scrollbar, or a pointer held anywhere on the transcript (a selection drag can autoscroll it). Scroll keys count when focus is inside the transcript, or when nothing is focused and the last press was on it; this closes the document-wide keys gap in #3655 §7. A non-collapsed selection that starts in the transcript while the pointer is held escapes (`cause=user-escape:selection`).
+- **Telemetry causes** (I4), in addition to Phase 0b's: `user-escape:wheel-up|key|selection`, `no-overflow`, `reset`, and, for SUSPENDED, `following→suspended cause=zero-size` / `suspended→following cause=sized`. A SUSPENDED pane keeps `stickToBottom` (and `data-follow-state`) at the state it will return to. `load-older` no longer appears: paging happens only once the pane is already DETACHED.
+- **Still open from §5.** The "new activity" indicator (Phase 5), observers attached through ref callbacks (§5.6), middle-click autoscroll (no gesture event), and the live soak (Phase 4). The old path, `anchor.ts`'s threshold helpers and the Phase 0 flags stay until the soak passes.
 
 ## 9. Decisions (owner, 2026-09-24: "proceed" on the recommendations)
 

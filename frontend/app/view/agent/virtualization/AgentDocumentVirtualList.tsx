@@ -44,6 +44,8 @@ import {
 import { DocumentRow } from "./DocumentRow";
 import { attachOneWayRecorder, noteOneWay, sampleOneWayFrame } from "../scroll/one-way-recorder";
 import { OneWayFlow } from "../scroll/one-way-flow";
+import { followStateLabel, intentOf, REATTACH_PX } from "../scroll/follow-controller";
+import { createFollowScroll, type FollowScroll } from "../scroll/follow-scroll";
 import { ShrinkTrace, attribute, formatAttribution, type RowSample } from "./shrink-trace";
 import { estimateNode, estimateNodeForState, previewCapPx } from "./renderers";
 import { currentExpansion } from "./expansion-source";
@@ -83,9 +85,6 @@ interface ScrollGeometry {
  * coalesced), short enough that an unrelated later scroll never inherits it.
  */
 const USER_INPUT_WINDOW_MS = 250;
-
-/** One-way path: how close to the true bottom a reader must scroll to follow again (spec 09-24 §5.5). */
-const ONE_WAY_REATTACH_PX = 24;
 
 export interface AgentDocumentVirtualListProps {
     viewState: AgentViewState;
@@ -162,6 +161,13 @@ export interface AgentDocumentVirtualListProps {
      * SPEC_AGENT_PANE_ONE_WAY_FLOW_2026_10_07.md.
      */
     oneWayFlow?: boolean;
+    /**
+     * The follow state machine (`agent:followcontroller`): one reducer decides
+     * whether the pane follows, and only a user gesture can stop it. False keeps
+     * the older engage/disengage code in `handleScrollNow`. Read once at mount.
+     * SPEC_AGENT_PANE_SCROLL_FOLLOW_STATE_MACHINE_2026_09_24.md §8 Phase 2.
+     */
+    followController?: boolean;
 }
 
 export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): JSX.Element {
@@ -275,6 +281,60 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
     };
     console.info("[scroll-follow]", `pane=${paneTag()}`, `mount ${followLabel(lastLoggedFollow)}`);
     createEffect(() => logFollowIfChanged(props.viewState.stickToBottom()));
+
+    // ── Follow state machine (props.followController) ───────────────────
+    // When on, `follow` alone decides whether the pane follows; stickToBottom
+    // is its projection (written only in `transition` below), so every
+    // existing reader keeps working. The pin writers stay where they are: the
+    // ResizeObservers below (or OneWayFlow) report each observation to it and
+    // pin when it says so. Created on mount: it needs the scroller.
+    const useFollowController = untrack(() => props.followController === true);
+    let follow: FollowScroll | null = null;
+    onMount(() => {
+        if (!useFollowController || !scrollRef) return;
+        follow = createFollowScroll(
+            scrollRef,
+            {
+                pin: (cause) => {
+                    noteOneWay(paneTag(), `pin:${cause}`);
+                    // A send or a queued turn starting is a commit point for the
+                    // one-way path (it gives up spacer room); typing is not.
+                    if (oneWayFlow) oneWayFlow.jumpToBottom(cause === "jump-to-bottom:sent" || cause === "jump-to-bottom:queued-turn");
+                    else scrollToTrueBottom();
+                },
+                loadOlder: (geo) => loadOlderFrom(geo.scrollTop), // perf:allow-layout-read — the batch's stored geometry, not a DOM read
+                transition: (from, to, cause, detail) => {
+                    const following = intentOf(to) === "FOLLOWING";
+                    if (intentOf(from) !== intentOf(to)) {
+                        transitionFollow(cause, detail, () =>
+                            following ? props.viewState.engageStickToBottom() : props.viewState.disengageStickToBottom(),
+                        );
+                    } else {
+                        // Hidden / shown: the intent (stickToBottom) is unchanged.
+                        console.info(
+                            "[scroll-follow]",
+                            `pane=${paneTag()}`,
+                            `${followStateLabel(from)}→${followStateLabel(to)}`,
+                            `cause=${cause}${detail ? ` ${detail}` : ""}`,
+                        );
+                    }
+                },
+                hasOlderHistory: () => !!props.onLoadOlder && (props.hasOlderHistory?.() ?? true),
+                loadingOlder: () => loadingOlderInFlight || !!props.loadingOlder?.(),
+                gesture: () => cancelGlides(),
+                released: () => oneWayFlow?.recheckSoon(),
+            },
+        );
+        onCleanup(() => follow?.dispose());
+    });
+    /** Inside the user-intent window (or holding the scrollbar). */
+    const userScrollInputOpen = (): boolean => (follow ? follow.inputWindowOpen() : hasRecentUserScrollInput());
+    /** Geometry read in a ResizeObserver callback, where layout is clean. */
+    const observedGeometry = (): ScrollGeometry => ({
+        scrollTop: scrollRef.scrollTop, // perf:allow-layout-read — ResizeObserver callback (layout clean)
+        scrollHeight: scrollRef.scrollHeight, // perf:allow-layout-read — ResizeObserver callback (layout clean)
+        clientHeight: scrollRef.clientHeight, // perf:allow-layout-read — ResizeObserver callback (layout clean)
+    });
     // Last scrollHeight observed at a pin-correction call — diagnostic only,
     // see docs/analysis/ANALYSIS_TOOL_CALL_SCROLL_OSCILLATION_2026_08_17.md.
     // A shrink between two consecutive calls means content that was already
@@ -392,6 +452,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
             pendingProgrammaticScroll = false;
             pinnedGeometry = null;
         }
+        follow?.noteGeometry({ scrollTop: after, scrollHeight: h, clientHeight });
         return after - before;
     }
 
@@ -1040,7 +1101,9 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
             const h = scrollRef.clientHeight; // perf:allow-layout-read — clientHeight ResizeObserver callback (layout clean)
             // Unconditional — see syncOverflowState's own doc comment.
             syncOverflowState();
-            if (h > 0 && props.viewState.stickToBottom() && !oneWay) {
+            // The follow controller also sees hidden (0 px) and shown here.
+            const pinNow = follow ? follow.observed("viewport", observedGeometry()) : h > 0 && props.viewState.stickToBottom();
+            if (pinNow && !oneWay) {
                 noteOneWay(paneTag(), "pin:viewport");
                 scrollToTrueBottom();
                 // Every pin source runs the held-open-tool collapse itself: the
@@ -1094,11 +1157,13 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         if (typeof ResizeObserver === "undefined") return;
         const ro = new ResizeObserver(() => {
             if (!scrollRef) return;
+            const geo = follow ? observedGeometry() : undefined;
             // Unconditional — see syncOverflowState's own doc comment.
-            syncOverflowState();
+            syncOverflowState(geo);
+            const pinNow = follow && geo ? follow.observed("content", geo) : props.viewState.stickToBottom();
             // The one-way path pins from its own observer (OneWayFlow).
             if (oneWay) return;
-            if (!props.viewState.stickToBottom()) {
+            if (!pinNow) {
                 rowAppended = false;
                 return;
             }
@@ -1140,6 +1205,10 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
             if (oneWayFlow && props.viewState.stickToBottom()) oneWayFlow.commit();
             return;
         }
+        if (follow) {
+            follow.jumpToBottom(reason ?? "unspecified"); // FOLLOWING, then its pin effect
+            return;
+        }
         transitionFollow(`jump-to-bottom:${reason ?? "unspecified"}`, undefined, () => props.viewState.engageStickToBottom());
         noteOneWay(paneTag(), `pin:jump:${reason ?? "unspecified"}`);
         // A send or a queued turn starting is a commit point (it gives up
@@ -1157,6 +1226,8 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         if (!scrollRef) return;
         const idx = props.viewState.indexOf(nodeId);
         if (idx < 0) return;
+        // Detach first, so no pin can pull the pane back while it scrolls there.
+        follow?.jumpToNode(nodeId);
         const p = partition();
         if (idx < p.splitIndex) {
             // Virtualized region — center the row from the slice's position
@@ -1178,7 +1249,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
             const center = elTop - scrollRef.clientHeight / 2 + el.clientHeight / 2; // perf:allow-layout-read — user-initiated scrollToNode
             scrollRef.scrollTo({ top: Math.max(0, center), behavior: "smooth" });
         }
-        transitionFollow("jump-to-node", `node=${nodeId.slice(0, 8)}`, () => props.viewState.disengageStickToBottom());
+        if (!follow) transitionFollow("jump-to-node", `node=${nodeId.slice(0, 8)}`, () => props.viewState.disengageStickToBottom());
     };
 
     // React to jump commands from the parent's useScrollToNode hook.
@@ -1239,7 +1310,11 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         // On the one-way path a pointer held on the content counts too: a
         // text-selection drag past the pane's edge autoscrolls it, and that
         // scroll is the user's (it must be able to release follow).
-        const hadUserInput = hasRecentUserScrollInput() || (oneWay && pointerHeld);
+        // With the follow controller, a held pointer counts on both paths: its
+        // reducer tells a clamp from a user scroll by scrollHeight, not by input.
+        const hadUserInput = follow
+            ? follow.inputWindowOpen() || follow.pointerHeld()
+            : hasRecentUserScrollInput() || (oneWay && pointerHeld);
 
         // A batch that is purely our own pin reuses the geometry the pin read
         // after layout (see pinnedGeometry) — no layout read here. Anything the
@@ -1269,6 +1344,25 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
             // the margin changes — this call is the safety net for user
             // scrolling, so a trusted pin batch skips it.
             if (!trustPin) dispatchScrollMargin();
+        }
+
+        // Follow controller: the reducer makes every follow decision for this
+        // batch (detach, re-attach, paging); nothing below runs.
+        if (follow) {
+            const wasFollowing = follow.following();
+            follow.scrolled(geo, hadUserInput);
+            // One-way path: re-baseline the rows and let go of spacer room now
+            // below the viewport. Not after a re-attach: its pin did both. The
+            // controller's next comparison must see the scrollHeight that left.
+            if (oneWayFlow && hadUserInput && (wasFollowing || !follow.following())) {
+                const spacerBefore = oneWayFlow.spacerHeight;
+                oneWayFlow.userScrolled(geo);
+                const freed = spacerBefore - oneWayFlow.spacerHeight;
+                if (freed !== 0) follow.noteGeometry({ ...geo, scrollHeight: scrollHeight - freed });
+            }
+            if (props.viewState.stickToBottom() && !trustPin) releaseScrolledOffHolds();
+            syncOverflowState(geo);
+            return;
         }
 
         // One-way path: a user scroll re-baselines the rows it keeps in place and
@@ -1308,7 +1402,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         // The one-way path re-attaches only at the true bottom (24 px, spec 09-24
         // §5.5): a reader 100 px up is reading, not following.
         const nearBottom = oneWay
-            ? scrollHeight - clientHeight - scrollTop <= ONE_WAY_REATTACH_PX
+            ? scrollHeight - clientHeight - scrollTop <= REATTACH_PX
             : isNearBottom(scrollTop, scrollHeight, clientHeight);
         if (!oneWay && isFirstOverflow && props.viewState.stickToBottom() && !nearBottom) {
             // A pane that was still following when it hit its first overflow
@@ -1413,93 +1507,98 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
             !loadingOlderInFlight &&
             !(props.loadingOlder?.())
         ) {
-            // Capture anchor from the topmost visible node. Two cases:
-            //   1) Document is large enough to virtualize → anchor on the
-            //      topmost visible row from the slice's window. row.start
-            //      already includes scrollMargin, so it's read directly
-            //      without re-adding the margin (same basis as the old
-            //      TanStack v3 virtualItem.start).
-            //   2) Document fits entirely in the streaming buffer
-            //      (≤ STREAMING_BUFFER_SIZE nodes) → the window is empty, so
-            //      fall back to the streaming buffer's first node via DOM.
-            //      This is the common initial-pagination case (codex P2 #784).
-            const v = props.layoutView?.();
-            const topRow = v && v.window.endIndex >= v.window.startIndex
-                ? v.rows[v.window.startIndex]
-                : undefined;
-            let anchorId: string | null = null;
-            let anchorOffsetPx = 0;
-            if (topRow) {
-                anchorId = topRow.nodeId;
-                anchorOffsetPx = topRow.start;
-            } else if (partition().streamingNodes.length > 0) {
-                anchorId = partition().streamingNodes[0].id;
-                const el = scrollRef.querySelector(
-                    `[data-node-id="${anchorId}"]`,
-                ) as HTMLElement | null;
-                anchorOffsetPx = el?.offsetTop ?? 0; // perf:allow-layout-read — user scrolled near the top: older-history anchor capture
-            }
-            if (anchorId != null) {
-                const anchor = captureTopmostAnchor(
-                    [{ id: anchorId, offsetPx: anchorOffsetPx }],
-                    scrollTop,
-                );
-                if (anchor) {
-                    transitionFollow("load-older", `scrollTop=${Math.round(scrollTop)}`, () => props.viewState.captureHeadAnchor(anchor));
-                }
-            }
+            loadOlderFrom(scrollTop);
+        }
+    };
 
-            loadingOlderInFlight = true;
-            props.onLoadOlder().then(() => {
-                requestAnimationFrame(() => {
-                    // Restore from anchor by id — partition reflects the
-                    // new prepended nodes, so the anchor's new index
-                    // gives a fresh measured offset.
-                    //
-                    // Use the same `partition()` memo the DOM is
-                    // rendered from. Recomputing via the raw
-                    // `partitionForVirtualization()` here would use a
-                    // count-based split that ignores the sticky
-                    // frontier, so an anchor that's actually in the
-                    // streaming buffer could be misclassified as
-                    // virtualized and read a slice row index past the
-                    // virtualized region, and the restore would
-                    // silently fail. Codex P2 on PR #1101.
-                    const anchor = props.viewState.headAnchor();
-                    if (anchor != null && scrollRef) {
-                        const newIdx = props.viewState.indexOf(anchor.nodeId);
-                        if (newIdx >= 0) {
-                            const newP = partition();
-                            if (newIdx < newP.splitIndex) {
-                                // Still virtualized — read the new offset from a
-                                // FRESH slice snapshot (the prepend shifted every
-                                // position). Synchronous, so no projection-timing
-                                // dependency. start includes scrollMargin — same
-                                // basis as the captured anchorOffsetPx.
-                                const snap = props.blockId ? snapshotLayout(props.blockId) : null;
-                                const offset = snap ? computeLayoutView(snap).rows[newIdx]?.start : undefined;
-                                if (offset != null) {
-                                    const target = restoreScrollFromAnchor(anchor, offset);
-                                    scrollRef.scrollTo({ top: target, behavior: "auto" });
-                                }
-                            } else {
-                                // Now in streaming buffer — query DOM.
-                                const el = scrollRef.querySelector(
-                                    `[data-node-id="${anchor.nodeId}"]`,
-                                ) as HTMLElement | null;
-                                if (el) {
-                                    const target = restoreScrollFromAnchor(anchor, el.offsetTop); // perf:allow-layout-read — older-history restore, one rAF after the page loaded
-                                    scrollRef.scrollTo({ top: target, behavior: "auto" });
-                                }
+    /** Capture the topmost visible row as an anchor, page in older history, restore the anchor. */
+    const loadOlderFrom = (scrollTop: number): void => {
+        // Capture anchor from the topmost visible node. Two cases:
+        //   1) Document is large enough to virtualize → anchor on the
+        //      topmost visible row from the slice's window. row.start
+        //      already includes scrollMargin, so it's read directly
+        //      without re-adding the margin (same basis as the old
+        //      TanStack v3 virtualItem.start).
+        //   2) Document fits entirely in the streaming buffer
+        //      (≤ STREAMING_BUFFER_SIZE nodes) → the window is empty, so
+        //      fall back to the streaming buffer's first node via DOM.
+        //      This is the common initial-pagination case (codex P2 #784).
+        const v = props.layoutView?.();
+        const topRow = v && v.window.endIndex >= v.window.startIndex
+            ? v.rows[v.window.startIndex]
+            : undefined;
+        let anchorId: string | null = null;
+        let anchorOffsetPx = 0;
+        if (topRow) {
+            anchorId = topRow.nodeId;
+            anchorOffsetPx = topRow.start;
+        } else if (partition().streamingNodes.length > 0) {
+            anchorId = partition().streamingNodes[0].id;
+            const el = scrollRef.querySelector(
+                `[data-node-id="${anchorId}"]`,
+            ) as HTMLElement | null;
+            anchorOffsetPx = el?.offsetTop ?? 0; // perf:allow-layout-read — user scrolled near the top: older-history anchor capture
+        }
+        if (anchorId != null) {
+            const anchor = captureTopmostAnchor(
+                [{ id: anchorId, offsetPx: anchorOffsetPx }],
+                scrollTop,
+            );
+            if (anchor) {
+                transitionFollow("load-older", `scrollTop=${Math.round(scrollTop)}`, () => props.viewState.captureHeadAnchor(anchor));
+            }
+        }
+
+        loadingOlderInFlight = true;
+        props.onLoadOlder().then(() => {
+            requestAnimationFrame(() => {
+                // Restore from anchor by id — partition reflects the
+                // new prepended nodes, so the anchor's new index
+                // gives a fresh measured offset.
+                //
+                // Use the same `partition()` memo the DOM is
+                // rendered from. Recomputing via the raw
+                // `partitionForVirtualization()` here would use a
+                // count-based split that ignores the sticky
+                // frontier, so an anchor that's actually in the
+                // streaming buffer could be misclassified as
+                // virtualized and read a slice row index past the
+                // virtualized region, and the restore would
+                // silently fail. Codex P2 on PR #1101.
+                const anchor = props.viewState.headAnchor();
+                if (anchor != null && scrollRef) {
+                    const newIdx = props.viewState.indexOf(anchor.nodeId);
+                    if (newIdx >= 0) {
+                        const newP = partition();
+                        if (newIdx < newP.splitIndex) {
+                            // Still virtualized — read the new offset from a
+                            // FRESH slice snapshot (the prepend shifted every
+                            // position). Synchronous, so no projection-timing
+                            // dependency. start includes scrollMargin — same
+                            // basis as the captured anchorOffsetPx.
+                            const snap = props.blockId ? snapshotLayout(props.blockId) : null;
+                            const offset = snap ? computeLayoutView(snap).rows[newIdx]?.start : undefined;
+                            if (offset != null) {
+                                const target = restoreScrollFromAnchor(anchor, offset);
+                                scrollRef.scrollTo({ top: target, behavior: "auto" });
+                            }
+                        } else {
+                            // Now in streaming buffer — query DOM.
+                            const el = scrollRef.querySelector(
+                                `[data-node-id="${anchor.nodeId}"]`,
+                            ) as HTMLElement | null;
+                            if (el) {
+                                const target = restoreScrollFromAnchor(anchor, el.offsetTop); // perf:allow-layout-read — older-history restore, one rAF after the page loaded
+                                scrollRef.scrollTo({ top: target, behavior: "auto" });
                             }
                         }
                     }
-                    loadingOlderInFlight = false;
-                });
-            }).catch(() => {
+                }
                 loadingOlderInFlight = false;
             });
-        }
+        }).catch(() => {
+            loadingOlderInFlight = false;
+        });
     };
 
     // Record user scroll input (see lastUserScrollInputAt). On the scroller:
@@ -1519,7 +1618,8 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
     });
 
     onMount(() => {
-        if (!scrollRef) return;
+        // The follow controller owns these gestures (follow-scroll.ts).
+        if (!scrollRef || useFollowController) return;
         const el = scrollRef;
         // The user's own scroll, or a press to select or click, ends any glide
         // at once, so what's under the pointer is where it's drawn.
@@ -1653,11 +1753,12 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
     const oneWayFlow = oneWay
         ? new OneWayFlow({
             following: () => untrack(props.viewState.stickToBottom),
-            userActive: () => pointerHeld || hasRecentUserScrollInput(),
+            userActive: () => (follow ? follow.pointerHeld() : pointerHeld) || userScrollInputOpen(),
             reducedMotion,
             wrote: (geo) => {
                 pendingProgrammaticScroll = true;
                 pinnedGeometry = geo;
+                follow?.noteGeometry(geo);
             },
             // Collapsing held-open tools that scrolled off the top changes
             // layout, so it runs before the observation is measured and its
@@ -1676,10 +1777,13 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
             oneWayFlow.attach(scrollRef, bottomSpacerRef, [virtualContainerRef, streamingBufferRef]);
         }
     });
-    if (oneWayFlow) {
-        // `/clear` or a fresh session: no room is owed to anything.
+    if (oneWayFlow || useFollowController) {
+        // `/clear` or a fresh session: no room is owed to anything, and the
+        // pane follows the new conversation.
         createEffect(() => {
-            if (props.viewState.nodes().length === 0) oneWayFlow.reset();
+            if (props.viewState.nodes().length !== 0) return;
+            oneWayFlow?.reset();
+            follow?.reset();
         });
     }
 
@@ -1707,6 +1811,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
             onScroll={handleScroll}
             data-follow-state={followLabel(props.viewState.stickToBottom())}
             data-one-way={oneWay || undefined}
+            data-follow-controller={useFollowController || undefined}
         >
             {/* Virtualized head — only present when document > buffer size.
                 Uses <Key by={r => r.nodeId}> (identity-keyed) so each DOM
