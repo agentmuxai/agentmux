@@ -21,7 +21,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const PROVIDERS_RS = join(here, "..", "..", "crates", "srv", "src", "backend", "providers.rs");
+const PROVIDERS_RS = join(here, "..", "..", "crates", "srv", "src", "backend", "providers", "claude.rs");
 export const COMPLETE_MARKER = ".agentmux-install-complete";
 const PACKAGE_DIR = "agentmux-fake-claude";
 
@@ -30,7 +30,7 @@ const PACKAGE_DIR = "agentmux-fake-claude";
 export function pinnedClaudeVersion(source = readFileSync(PROVIDERS_RS, "utf8")) {
     const at = source.indexOf('npm_package: "@anthropic-ai/claude-code"');
     const m = at >= 0 ? /pinned_version:\s*"([^"]+)"/.exec(source.slice(at)) : null;
-    if (!m) throw new Error("couldn't find Claude's pinned_version in providers.rs");
+    if (!m) throw new Error("couldn't find Claude's pinned_version in providers/claude.rs");
     return m[1];
 }
 

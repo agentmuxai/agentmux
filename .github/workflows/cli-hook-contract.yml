@@ -19,6 +19,7 @@ on:
         paths:
             - "crates/bashwrap/**"
             - "crates/srv/src/backend/providers.rs"
+            - "crates/srv/src/backend/providers/**"
             - "crates/srv/src/backend/mcp_observed.rs"
             - "frontend/app/view/agent/providers/catalog.ts"
             - "scripts/cli-contract/**"
@@ -53,8 +54,8 @@ jobs:
 
             - name: Install the Claude Code CLI (the pinned version; latest on the weekly run)
               run: |
-                  pinned=$(awk '/npm_package: "@anthropic-ai\/claude-code"/ { f = 1 } f && /pinned_version:/ { match($0, /"[^"]+"/); print substr($0, RSTART + 1, RLENGTH - 2); exit }' crates/srv/src/backend/providers.rs)
-                  if [ -z "$pinned" ]; then echo "::error::no Claude Code pin found in providers.rs"; exit 1; fi
+                  pinned=$(awk '/npm_package: "@anthropic-ai\/claude-code"/ { f = 1 } f && /pinned_version:/ { match($0, /"[^"]+"/); print substr($0, RSTART + 1, RLENGTH - 2); exit }' crates/srv/src/backend/providers/claude.rs)
+                  if [ -z "$pinned" ]; then echo "::error::no Claude Code pin found in providers/claude.rs"; exit 1; fi
                   version=$pinned
                   if [ "${{ github.event_name }}" = "schedule" ]; then version=latest; fi
                   echo "Claude Code pin: $pinned; testing: $version"

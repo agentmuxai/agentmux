@@ -9,7 +9,7 @@
 //
 //   1. frontend/app/view/agent/providers/catalog.ts `pinnedVersion`
 //      (re-exported as PROVIDERS via ./index)
-//   2. crates/srv/src/backend/providers.rs        `pinned_version`
+//   2. crates/srv/src/backend/providers/<id>.rs   `pinned_version`
 //      (also what container agents install on first start)
 //
 // History: the 2026-07-02 pin bump (2.1.185 → 2.1.198) updated the frontend
@@ -25,7 +25,7 @@
 // docs/specs/SPEC_DEPENDENCY_UPGRADE_PROCESS_2026_08_27.md for the fuller
 // story of why a written checklist alone wasn't enough here.
 import { describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { PROVIDERS } from "./index";
@@ -34,6 +34,13 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../../../.
 
 function read(rel: string): string {
     return readFileSync(resolve(repoRoot, rel), "utf8");
+}
+
+/** srv's provider registry: providers.rs plus one file per provider in providers/. */
+function readSrvProviders(): string {
+    const dir = "crates/srv/src/backend/providers";
+    const files = readdirSync(resolve(repoRoot, dir)).filter((f) => f.endsWith(".rs"));
+    return [read(`${dir}.rs`), ...files.sort().map((f) => read(`${dir}/${f}`))].join("\n");
 }
 
 /** Extract `pinned_version: "X"` from a named `static NAME: ProviderConfig` block. */
@@ -63,7 +70,7 @@ function srvArgs(source: string, staticName: string, field: string): string[] | 
 }
 
 describe("CLI pin consistency across registries", () => {
-    const srvSource = read("crates/srv/src/backend/providers.rs");
+    const srvSource = readSrvProviders();
 
     // provider key in PROVIDERS → srv static name
     const registries: Array<[keyof typeof PROVIDERS & string, string]> = [
@@ -119,7 +126,7 @@ describe("CLI pin consistency across registries", () => {
     ].map((m) => [m[2] as keyof typeof PROVIDERS & string, m[1]]);
 
     it("both registries define the same providers", () => {
-        expect(argRegistries.length, "no ProviderConfig statics found in providers.rs").toBeGreaterThan(0);
+        expect(argRegistries.length, "no ProviderConfig statics found in srv's providers").toBeGreaterThan(0);
         expect(argRegistries.map(([key]) => key).sort()).toEqual(Object.keys(PROVIDERS).sort());
     });
 
