@@ -195,7 +195,7 @@ describe("catchUp: the turn's lifetime", () => {
         expect(t.sendRpc).toHaveBeenCalledTimes(2);
     });
 
-    it("waits when a turn starts while srv is composing", async () => {
+    it("drops a fresh-session catch-up when a turn starts while srv is composing", async () => {
         let busy = false;
         const t = make({
             working: () => busy,
@@ -205,8 +205,32 @@ describe("catchUp: the turn's lifetime", () => {
             },
         });
         await t.controller.catchUp(RECENT, "fresh_session");
+        busy = false;
+        t.controller.maybeFireDeferred();
 
+        // The user is already talking to the agent: nothing to catch up on, now or later.
         expect(t.sendRpc).not.toHaveBeenCalled();
         expect(t.dispatchTurnStart).not.toHaveBeenCalled();
+    });
+
+    it("keeps a manual compaction's catch-up for when the turn that started ends", async () => {
+        let busy = false;
+        let first = true;
+        const t = make({
+            working: () => busy,
+            composeCatchUp: async (_reason, memory) => {
+                if (first) {
+                    first = false;
+                    busy = true;
+                }
+                return memory ? { text: "x", deliveryId: "d" } : { text: "y" };
+            },
+        });
+        await t.controller.catchUp(RECENT, "compaction", { boundaryUuid: "u1", deferIfBusy: true });
+        expect(t.sendRpc).not.toHaveBeenCalled();
+
+        busy = false;
+        t.controller.maybeFireDeferred();
+        await vi.waitFor(() => expect(t.sendRpc).toHaveBeenCalledTimes(1));
     });
 });

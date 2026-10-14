@@ -235,6 +235,8 @@ interface DeferredTrigger {
     catchUp: boolean;
     /** A catch-up only: carry the memory too (false once the hook delivered it). */
     memory: boolean;
+    /** A catch-up only: wait out a turn that starts (a manual compaction); otherwise drop. */
+    canDefer: boolean;
 }
 
 /** Boundary uuids a controller remembers, to ignore one seen twice. */
@@ -321,10 +323,17 @@ export function createMemoryReinjectionController(opts: MemoryReinjectionControl
      * it with nothing hidden. Reads `isPaneWorking()` after every await, as
      * `doTrigger` does, and re-defers if a turn started.
      */
+    // A catch-up that finds the pane busy waits only when it may (a manual
+    // compaction, found mid-way through its own turn). Any other has lost its
+    // point: a user already talking to the agent needs no catching up.
+    function postpone(t: DeferredTrigger): void {
+        if (t.canDefer) deferred = t;
+    }
+
     async function doCatchUp(t: DeferredTrigger): Promise<void> {
         if (!opts.composeCatchUp) return;
         if (opts.isPaneWorking()) {
-            deferred = t;
+            postpone(t);
             return;
         }
         if (!t.claimed && opts.claimFallback) {
@@ -334,7 +343,7 @@ export function createMemoryReinjectionController(opts: MemoryReinjectionControl
             t.memory = answer.deliver;
             t.claimed = true;
             if (opts.isPaneWorking()) {
-                deferred = t;
+                postpone(t);
                 return;
             }
         }
@@ -343,7 +352,7 @@ export function createMemoryReinjectionController(opts: MemoryReinjectionControl
         if (opts.isPaneWorking() || catchingUp || hiding) {
             // A turn started while srv composed. The message stays unsent; it is
             // composed again, from fresh state, when the pane next goes quiet.
-            deferred = t;
+            postpone(t);
             return;
         }
         pendingNode = composed.node ?? null;
@@ -436,7 +445,7 @@ export function createMemoryReinjectionController(opts: MemoryReinjectionControl
         if (hiding || catchingUp) return; // re-entrancy guard — see doc comment
         if (deferred !== undefined) return; // already have one queued — first wins, arbitrary but simple
 
-        const t: DeferredTrigger = { frameTimestamp, reason, boundaryUuid, claimed: false, catchUp: false, memory: true };
+        const t: DeferredTrigger = { frameTimestamp, reason, boundaryUuid, claimed: false, catchUp: false, memory: true, canDefer: true };
         // A compaction is claimed now, not when it fires: the SessionStart
         // hook delivered moments ago, inside srv's claim window. Claimed at
         // the end of a long turn, that window has passed and both would send.
@@ -486,6 +495,7 @@ export function createMemoryReinjectionController(opts: MemoryReinjectionControl
             claimed: reason === "resumed",
             catchUp: true,
             memory: reason !== "resumed",
+            canDefer: catchUpOpts.deferIfBusy === true,
         };
         // A compaction is claimed now, not when the turn fires: the hook
         // delivered moments ago, inside srv's claim window, and a manual
