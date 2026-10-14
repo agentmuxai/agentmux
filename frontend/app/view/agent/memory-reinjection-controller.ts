@@ -383,7 +383,9 @@ export function createMemoryReinjectionController(opts: MemoryReinjectionControl
             // try again, and still deliver any memory it claimed (the hook stood
             // down for the claim), as the plain reinjection, at the next quiet.
             for (const key of t.seenKeys) seenBoundaries.delete(key);
-            if (t.claimed && t.memory) deferred = { ...t, catchUp: false };
+            // At once, not at a later session_end: no turn started, so an idle
+            // pane never reaches one.
+            if (t.claimed && t.memory) void doTrigger({ ...t, catchUp: false });
         }
     }
 

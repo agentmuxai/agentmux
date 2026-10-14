@@ -446,13 +446,13 @@ describe("parseHistoryLines", () => {
      */
     describe("catch-up turn replay", () => {
         const bare =
-            "<system-reminder>\nAgentMux catch-up: You are picking up this conversation after it was resumed. Reply in a few lines.\n</system-reminder>\n";
+            "<system-reminder>\nAgentMux catch-up: You are picking up this conversation after it was resumed. Reply in a few lines. Then stop and wait for them.\n</system-reminder>\n";
         const withMemory = composeReinjectionMessage(
             [{ label: "g1", source: "global", body: "global body", sizeBytes: 11 }],
             "fresh_session",
         ).replace(
             "</system-reminder>\n",
-            "\nAgentMux catch-up: You are picking up this conversation in a new session.\n</system-reminder>\n",
+            "\nAgentMux catch-up: You are picking up this conversation in a new session. Then stop and wait for them.\n</system-reminder>\n",
         );
         const cardLine = (): string =>
             line({

@@ -93,9 +93,22 @@ export type CatchUpReason = ReinjectionReason | "resumed";
  */
 export const CATCH_UP_SIGNATURE = "AgentMux catch-up:";
 
-/** True for a catch-up turn's message, with or without memory in it. */
+/** The last words of every catch-up block: Rust's `CATCH_UP_TAIL`. */
+export const CATCH_UP_TAIL = "Then stop and wait for them.";
+
+/**
+ * True for a catch-up turn's message, with or without memory in it. Structural,
+ * as Rust's `is_catch_up_text`: the block is the single last line, so a memory
+ * body that contains the marker is not taken for one.
+ */
 export function isCatchUpMessage(text: string): boolean {
-    return text.startsWith("<system-reminder>") && text.includes(CATCH_UP_SIGNATURE);
+    const suffix = "\n</system-reminder>\n";
+    if (!text.startsWith("<system-reminder>") || !text.endsWith(suffix)) return false;
+    const body = text.slice(0, -suffix.length);
+    const at = body.lastIndexOf(`\n${CATCH_UP_SIGNATURE} `);
+    if (at < 0) return false;
+    const block = body.slice(at + 1);
+    return !block.includes("\n") && block.endsWith(CATCH_UP_TAIL);
 }
 
 const REASON_CLAUSE: Record<ReinjectionReason, string> = {

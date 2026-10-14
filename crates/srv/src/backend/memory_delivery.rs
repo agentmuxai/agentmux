@@ -368,13 +368,27 @@ pub fn compose_catch_up(kind: CatchUpKind, memory: Option<&str>) -> String {
     out
 }
 
+/// The last words of the instruction, which end every catch-up block. The
+/// frontend's `isCatchUpMessage` matches the block by them too.
+pub const CATCH_UP_TAIL: &str = "Then stop and wait for them.";
+
 /// Whether `text` is a catch-up message, which has no reinjection signature
 /// when it carries no memory. Its input is hidden, but the agent's reply is
 /// shown and read: the ambient digest and the continuation record skip the
 /// input without hiding what follows, and the hidden-reinjection gate
 /// (`set_hidden_reinjection_active`) is not set for it.
+///
+/// Structural, not a substring: the block is the single last line of the
+/// message, so a memory body that happens to contain the marker is not taken
+/// for one.
 pub fn is_catch_up_text(text: &str) -> bool {
-    text.starts_with("<system-reminder>") && text.contains(CATCH_UP_SIGNATURE)
+    if !text.starts_with("<system-reminder>") {
+        return false;
+    }
+    let Some(body) = text.strip_suffix("\n</system-reminder>\n") else { return false };
+    let Some(at) = body.rfind(&format!("\n{CATCH_UP_SIGNATURE} ")) else { return false };
+    let block = &body[at + 1..];
+    !block.contains('\n') && block.ends_with(CATCH_UP_TAIL)
 }
 
 /// How much of one item a delivery carried.
@@ -727,10 +741,8 @@ mod tests {
     #[test]
     fn a_catch_up_without_memory_is_the_block_alone() {
         let text = compose_catch_up(CatchUpKind::Resumed, None);
-        assert!(text.starts_with("<system-reminder>
-AgentMux catch-up: "), "{text}");
-        assert!(text.ends_with("</system-reminder>
-"));
+        assert!(text.starts_with("<system-reminder>\nAgentMux catch-up: "), "{text}");
+        assert!(text.ends_with("</system-reminder>\n"));
         assert!(!text.contains(REINJECTION_SIGNATURE));
         assert!(is_catch_up_text(&text));
         assert!(text.contains("suggested next steps"));
@@ -756,13 +768,42 @@ AgentMux catch-up: "), "{text}");
         assert_eq!(text.matches("<system-reminder>").count(), 1);
         assert_eq!(text.matches("</system-reminder>").count(), 1);
         assert!(text.contains(REINJECTION_SIGNATURE) && is_catch_up_text(&text));
-        assert!(text.ends_with("</system-reminder>
-"));
+        assert!(text.ends_with("</system-reminder>\n"));
     }
 
     #[test]
     fn ordinary_text_is_not_a_catch_up() {
         assert!(!is_catch_up_text("AgentMux catch-up: please"));
         assert!(!is_catch_up_text("<system-reminder>unrelated</system-reminder>"));
+    }
+
+    #[test]
+    fn the_instruction_ends_with_the_tail_the_matchers_use() {
+        assert!(CATCH_UP_INSTRUCTION.ends_with(CATCH_UP_TAIL));
+    }
+
+    /// A memory body is copied into a reinjection verbatim: one that happens to
+    /// contain the marker, even as its last line, is still a reinjection.
+    #[test]
+    fn a_memory_body_that_contains_the_marker_is_not_a_catch_up() {
+        for body in [
+            "notes\nAgentMux catch-up: how this works\nmore notes".to_string(),
+            "notes\nAgentMux catch-up: how this works".to_string(),
+            format!("notes\nAgentMux catch-up: how this works. {CATCH_UP_TAIL}\nmore notes"),
+        ] {
+            let entries = vec![Entry {
+                label: "notes.md".into(),
+                tier: Tier::Personal,
+                text: body,
+                name: "notes.md".into(),
+                system: false,
+                bundle_id: None,
+                path: None,
+            }];
+            let memory = compose_fallback(&entries, FallbackReason::Compaction).unwrap();
+            assert!(!is_catch_up_text(&memory.text), "{}", memory.text);
+            // And appending the real block still makes it one.
+            assert!(is_catch_up_text(&compose_catch_up(CatchUpKind::Compaction, Some(&memory.text))));
+        }
     }
 }
