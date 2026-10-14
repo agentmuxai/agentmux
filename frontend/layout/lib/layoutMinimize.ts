@@ -95,7 +95,11 @@ export function minimizeNodeToggle(model: LayoutModel, nodeId: string) {
     }
 
     // ── Restore ───────────────────────────────────────────────────────────────
-    if (node.minimized) {
+    // While the pane is maximized, the header's minimize button reads "Minimize"
+    // whatever its flag says (a minimized chip that was maximized is both), so a
+    // toggle then means "put it back as a chip", not "restore".
+    const maximized = model.treeState.magnifiedNodeId === nodeId;
+    if (node.minimized && !maximized) {
         node.minimized = undefined;
         _finishToggle(model, nodeId, false);
         return;
@@ -106,7 +110,9 @@ export function minimizeNodeToggle(model: LayoutModel, nodeId: string) {
     // at least one pane showing content. The header already hides the minimize
     // button in this state (NodeModel.canMinimize); this is the authoritative
     // guard for programmatic callers.
-    if (countExpandedLeaves(model.treeState.rootNode) <= 1) return;
+    // (A pane that is already minimized is not counted as expanded, so it needs one other.)
+    const otherExpanded = countExpandedLeaves(model.treeState.rootNode) - (isNodeLocked(node) ? 0 : 1);
+    if (otherExpanded < 1) return;
 
     // A maximized pane can be minimized directly (SPEC_PANE_CONTROLS_TILED_
     // RESTORE_ICON_AND_MINIMIZE_FROM_MAXIMIZED_2026_10_12 §5). Maximize is a
@@ -117,7 +123,7 @@ export function minimizeNodeToggle(model: LayoutModel, nodeId: string) {
     // state stays consistent; setState=false defers the commit to
     // _finishToggle below (one updateTree, one persist), and focused=false
     // leaves focus where minimizing a tiled pane leaves it.
-    if (model.treeState.magnifiedNodeId === nodeId) {
+    if (maximized) {
         model.magnifyNodeToggle(nodeId, false, false);
     }
 

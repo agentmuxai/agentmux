@@ -448,7 +448,7 @@ function EndIcons(props: {
                 cached model — degrade to showing the button (the toggle's own
                 countExpandedLeaves guard still enforces the policy). */}
             <Show when={!ephemeral() && numLeafs() > 1 && (props.nodeModel.canMinimize?.() ?? true)}>
-                <OptMinimizeButton minimized={minimized()} toggleMinimize={props.nodeModel.toggleMinimize} />
+                <OptMinimizeButton minimized={minimized() && !magnified()} toggleMinimize={props.nodeModel.toggleMinimize} />
             </Show>
 
             <Show

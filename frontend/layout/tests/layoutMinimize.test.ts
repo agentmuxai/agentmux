@@ -915,3 +915,44 @@ describe("minimizing a maximized pane", () => {
         expect(model.magnifyCalls).toEqual([]);
     });
 });
+
+// A minimized chip that was maximized is both. The header then reads "Restore"
+// (maximize button) and "Minimize" (minimize button), never "Restore" twice.
+describe("a pane that is both minimized and maximized", () => {
+    it("Minimize puts it back as a chip: the maximize ends and the flag stays (it does not restore)", () => {
+        const { root, paneA1 } = buildTwoColumnLayout();
+        paneA1.minimized = true;
+        const model = makeMagnifyMock(root, paneA1.id);
+
+        minimizeNodeToggle(model, paneA1.id);
+
+        expect(paneA1.minimized).toBe(true);
+        expect(model.treeState.magnifiedNodeId).toBeUndefined();
+        expect(model.magnifyCalls).toEqual([{ nodeId: paneA1.id, setState: false, focused: false, minimizedAtCall: true }]);
+        expect(model.calls).toEqual(["updateTree", "persist"]);
+    });
+
+    it("needs one other expanded pane, like any minimize: with none it does nothing", () => {
+        const { root, paneA1, paneA2, paneB } = buildTwoColumnLayout();
+        paneA1.minimized = true;
+        paneA2.minimized = true;
+        paneB.minimized = true;
+        const model = makeMagnifyMock(root, paneA1.id);
+
+        minimizeNodeToggle(model, paneA1.id);
+
+        expect(model.treeState.magnifiedNodeId).toBe(paneA1.id);
+        expect(paneA1.minimized).toBe(true);
+        expect(model.calls).toEqual([]);
+    });
+
+    it("a minimized pane that is NOT maximized still restores on toggle (unchanged)", () => {
+        const { root, paneA1 } = buildTwoColumnLayout();
+        paneA1.minimized = true;
+        const model = makeMagnifyMock(root, undefined);
+
+        minimizeNodeToggle(model, paneA1.id);
+
+        expect(paneA1.minimized).toBeUndefined();
+    });
+});

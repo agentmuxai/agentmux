@@ -147,7 +147,12 @@ export function getNodeModel(model: LayoutModel, node: LayoutNode): NodeModel {
                     // Restoring is always allowed; minimizing requires at
                     // least one OTHER expanded pane to remain (the window
                     // must never become all-headers).
-                    if (minimizedIds.has(nodeid)) return true;
+                    if (minimizedIds.has(nodeid)) {
+                        // A minimized pane that is also maximized offers "Minimize" (back to its
+                        // chip), which needs one other expanded pane; otherwise it is "Restore".
+                        const maximized = model.localTreeStateAtom().magnifiedNodeId === nodeid;
+                        return !maximized || model.numLeafs() - minimizedIds.size >= 1;
+                    }
                     return model.numLeafs() - minimizedIds.size > 1;
                 }),
                 isEphemeral: createMemo(() => {
