@@ -368,6 +368,7 @@ partial list.
 | [`SPEC_MACOS_MUXBUS_KEYCHAIN_NOTICE_2026_09_16`](SPEC_MACOS_MUXBUS_KEYCHAIN_NOTICE_2026_09_16.md) | SPEC: Warn macOS/Linux users up front that MuxBus sign-in will prompt for a password |
 | [`SPEC_MACOS_TAB_REDOCK_PARITY_2026_07_24`](SPEC_MACOS_TAB_REDOCK_PARITY_2026_07_24.md) | macOS Tab Redock Parity — Implementation Scoping |
 | [`SPEC_MCP_LOOP_TOOL_2026_06_16`](SPEC_MCP_LOOP_TOOL_2026_06_16.md) | SPEC: MCP `Loop` / `LoopStop` tools — recurring prompt injection |
+| [`SPEC_MEDIA_OPEN_SHOWS_THE_MEDIA_PANE_2026_10_12`](SPEC_MEDIA_OPEN_SHOWS_THE_MEDIA_PANE_2026_10_12.md) | Spec: Clicking an image shows the Media pane it lands in |
 | [`SPEC_MEDIA_PANE_2026_07_26`](SPEC_MEDIA_PANE_2026_07_26.md) | Spec: Media pane — live-updating image/video viewer for agent-generated files |
 | [`SPEC_MEDIA_PANE_V4_MCP_OPEN_TOOL_2026_08_03`](SPEC_MEDIA_PANE_V4_MCP_OPEN_TOOL_2026_08_03.md) | Spec: Media pane v4 — agent-facing `OpenMedia` MCP tool |
 | [`SPEC_MEMORY_VERSION_CONTROL_AND_ARMORY_AUDIT_2026_08_19`](SPEC_MEMORY_VERSION_CONTROL_AND_ARMORY_AUDIT_2026_08_19.md) | Spec: Native Memory Version Control — Single Source of Truth, Two Views (Stash + Armory) |
@@ -764,7 +765,6 @@ partial list.
 | [`SPEC_MACOS_LAUNCH_SPEED_AND_SPLASH_TELEMETRY_2026_07_02`](SPEC_MACOS_LAUNCH_SPEED_AND_SPLASH_TELEMETRY_2026_07_02.md) | SPEC: macOS Launch Speed + Splash Load-Time Telemetry |
 | [`SPEC_MACOS_PACKAGING_2026_05_30`](SPEC_MACOS_PACKAGING_2026_05_30.md) | Spec: macOS packaging — signed, launchable `AgentMux.app` / `.dmg` |
 | [`SPEC_MACOS_TEAROFF_STABILITY_2026_05_29`](SPEC_MACOS_TEAROFF_STABILITY_2026_05_29.md) | macOS Tear-off Stability — implementation spec |
-| [`SPEC_MEDIA_OPEN_SHOWS_THE_MEDIA_PANE_2026_10_12`](SPEC_MEDIA_OPEN_SHOWS_THE_MEDIA_PANE_2026_10_12.md) | Spec: Clicking an image shows the Media pane it lands in |
 | [`SPEC_MEDIA_PANE_EMPTY_LOGO_2026_10_12`](SPEC_MEDIA_PANE_EMPTY_LOGO_2026_10_12.md) | Media pane: a faint AgentMux logo when no file is open |
 | [`SPEC_MEDIA_PANE_V2_AGENT_WORKFLOW_GAPS_2026_07_28`](SPEC_MEDIA_PANE_V2_AGENT_WORKFLOW_GAPS_2026_07_28.md) | Spec: Media pane v2 — gaps found running a real agent video-editing workflow through it |
 | [`SPEC_MEDIA_PANE_V3_BROWSER_AND_CUSTOM_TRANSPORT_2026_07_29`](SPEC_MEDIA_PANE_V3_BROWSER_AND_CUSTOM_TRANSPORT_2026_07_29.md) | Spec: Media pane v3 — persistent browser + custom playback/scrub UI |
