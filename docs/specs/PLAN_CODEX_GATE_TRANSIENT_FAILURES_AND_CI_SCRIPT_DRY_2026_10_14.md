@@ -1,7 +1,7 @@
 # Plan — the Codex review gate survives a transient GitHub error, and the CI script clean-ups around it
 
 **Date:** 2026-10-14
-**Status:** active — step 1 in review (#4897); steps 2–4 not started. Four steps, one PR each (§4).
+**Status:** active — step 1 merged (#4897, verified in production 2026-10-14 16:24 UTC); step 2 in review (#4900); steps 3–4 built, opened after step 2 merges. Four steps, one PR each (§4).
 **Author:** Clamk@narko
 **Touches:** `scripts/ci-codex-review-gate.mjs`, `scripts/ci-codex-review-gate.test.mjs`, `.github/workflows/codex-review-gate.yml`, a new `scripts/lib/`, and the "is this script being run directly" check in 16 scripts (step 4).
 
@@ -74,22 +74,24 @@ Backoff: 2 s, 4 s, 8 s, each plus 0–1 s jitter; at most 4 attempts. Worst case
 - `sparse-checkout:` lists `scripts/ci-codex-review-gate.mjs` and `scripts/lib/github-rest.mjs` (step 4 adds `scripts/lib/is-main.mjs`). Still main's copy only, still no PR code: the security property is unchanged.
 - A test (§3.4) reads the gate's relative imports and fails if the workflow's sparse list misses one.
 
+**Found while verifying step 1: the script and the list must come from the same commit.** The checkout used `ref: <default branch>`, which is the branch's head when the job *starts*, while GitHub reads the workflow file (and so the sparse list) from the commit the *event* saw. An `issue_comment` on #4898 at 16:19:23 was queued against `d1a38e4cd`, the parent of #4897's merge; its job started at 16:19:32, two seconds after the merge, checked out the new script with the old one-file list, and failed with `ERR_MODULE_NOT_FOUND`. (A later event re-evaluated #4898 within two minutes, so nothing stuck.) Any merge that changes the gate's imports opens that window, step 4's included. Step 2 therefore checks out `github.sha`, the event's own commit, whenever `github.ref` is the default branch (pull_request_target into it, issue_comment, workflow_dispatch on it). It keeps the default branch for `pull_request_review`, whose `github.sha` is the PR's merge commit, so PR code still never runs. A test pins the expression.
+
 ### 3.2 A scheduled sweep that re-evaluates only PRs that missed an input
 
 Add a `schedule` trigger to `codex-review-gate.yml` (`cron: '17,47 * * * *'`, off the top of the hour, where GitHub delays scheduled runs most) and a second job, `sweep`, in its own concurrency group `codex-review-gate-sweep`, with `actions: write` added to that job only.
 
 The sweep **does not evaluate or post statuses itself.** For each PR it decides needs a look, it dispatches the existing `workflow_dispatch` path (`POST /repos/{repo}/actions/workflows/codex-review-gate.yml/dispatches`, `inputs: { pr }`, `ref: main`). Dispatches made with `GITHUB_TOKEN` do start workflow runs (GitHub's documented exception to the "token events don't trigger workflows" rule), and each runs in that PR's own `codex-review-gate-<pr>` concurrency group, serialized with event-driven runs. That is why the sweep dispatches instead of evaluating: a sweep evaluating dozens of PRs in one job can't join their per-PR groups, so it could read a PR just before Codex's comment and post a stale pending over the fresh success an event run posted a second later.
 
-Which PRs need a look (`sweepCandidates`, a pure function next to `evaluateCodexGate`), among open, non-draft PRs:
+Which PRs need a look (`sweepReason`, a pure function next to `evaluateCodexGate`), among open, non-draft PRs:
 
 1. **No `Codex review` status on the head at all.** The push-time run failed or never ran.
-2. **Status is `pending`, and a gate input is newer than the status:** a Codex comment or review, or a muxreview skip note, created or edited after the status's `updated_at`. "Gate input" is the same predicate the workflow's `if:` encodes, exported from the gate module (`isGateInput(comment)`, `isGateReview(review)`), so the sweep, the event filter and the tests can't disagree about it.
+2. **Status is `pending`, and a gate input is newer than the status:** a Codex comment or review, or a muxreview skip note, created or edited after the status's `updated_at`. "Gate input" is the same predicate the workflow's `if:` encodes, exported from the gate module (`isGateInput(comment)`; a review counts when Codex wrote it), so the sweep, the event filter and the tests can't disagree about it.
 
 A PR legitimately waiting (no Codex answer yet, muxreview not yet approved) matches neither rule, so it is not dispatched. Typical sweep: one call for open PRs, then for each one status read plus its issue comments and reviews: about 3 calls a PR, so ~60–90 requests for 20–30 open PRs, twice an hour, against `GITHUB_TOKEN`'s 1,000 an hour. It costs no Codex reviews (the gate never asks Codex), and Actions minutes on this public repo are free on standard runners.
 
 Worst case after this plan: a missed input heals within ~30 minutes plus one gate run.
 
-The sweep is a mode of the same script (`SWEEP=1`), reusing the client and the predicates. `main()` splits into `evaluateOne(client, repo, pr)` (today's body) and `sweep(client, repo)`.
+The sweep is a mode of the same script (`SWEEP=1`), reusing the client and the predicates. `main()` runs `sweep(client, repo, { ref })` when `SWEEP` is set, and today's single-PR evaluation otherwise.
 
 ### 3.3 Re-evaluating by hand, documented
 
@@ -114,7 +116,7 @@ It reads state and posts a status; it never asks Codex, so unlike `@muxreview co
 - `paginate`: stops on a short page, and a page that fails transiently is retried, not dropped.
 
 `scripts/ci-codex-review-gate.test.mjs`, added:
-- `sweepCandidates`: missing status → candidate; pending with a Codex quota notice newer than it → candidate; pending with only an older Codex answer → not; pending with a newer comment by someone else → not; success → not, whatever came after; an edited muxreview skip note whose `updated_at` is newer → candidate; draft PR → not.
+- `sweepReason`: missing status → candidate; pending with a Codex quota notice newer than it → candidate; pending with only an older Codex answer → not; pending with a newer comment by someone else → not; success → not, whatever came after; an edited muxreview skip note whose `updated_at` is newer → candidate; draft PR → not.
 - **Workflow pins** (read the YAML as text, no parser needed): the `if:` names `CODEX_LOGIN`, every login in `SKIP_AUTHORS` and the `reagent:codex-skipped` marker (the 2026-10-07 App rename had to edit both places by hand); and every relative import of the gate module, followed transitively, appears in `sparse-checkout:` (§3.1).
 - `changedFiles`: 404 → `null`; a 500 that persists after retries → throws.
 
@@ -171,8 +173,8 @@ Each step is one PR with its own changeset. Step 1 fixes the live bug and goes f
 | Step | PR | Contents | Size |
 |---|---|---|---|
 | 1 | fix(ci): the Codex review gate retries transient GitHub errors | §3.1, its tests (§3.4), the workflow pins test, the §3.3 paragraph, `changedFiles` error split | ~250 lines, half tests |
-| 2 | fix(ci): a scheduled sweep re-runs the Codex gate for PRs that missed an input | §3.2, `sweepCandidates` and its tests, `actions: write` on the sweep job only | ~200 lines |
-| 3 | refactor(ci): tidy the Codex gate's policy code | §3.5 a–h; no behaviour change, the existing 69 tests unchanged except (f) | ~100 lines net negative |
+| 2 | fix(ci): a scheduled sweep re-runs the Codex gate for PRs that missed an input | §3.2 (`sweepReason`, `sweep` and their tests, `actions: write` on the sweep job only), and §3.1's same-commit checkout | ~300 lines, most of it tests |
+| 3 | refactor(ci): tidy the Codex gate's policy code | §3.5 a–h; no behaviour change, the existing tests unchanged except (f) | slightly net negative |
 | 4 | fix(scripts): one `isMain` for every script, so check-new-spec-status runs on Windows | §3.6 | the new module and its test, plus a few lines in each of the 16 scripts |
 
 ## 5. Out of scope, with reasons

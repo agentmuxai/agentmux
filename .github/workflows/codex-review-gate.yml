@@ -20,7 +20,11 @@ name: Codex review gate
 #                        place for a later head)
 #   pull_request_review  Codex's findings review
 #   workflow_dispatch    re-evaluate one PR by hand (e.g. PRs opened before
-#                        this workflow existed)
+#                        this workflow existed), or by the sweep
+#   schedule             the sweep: dispatches the above for each open PR whose
+#                        head has no status, or a pending one older than a
+#                        Codex answer or muxreview note (an evaluation lost to
+#                        an outage, a dropped webhook or a cancelled run)
 #
 # pull_request_target and issue_comment run main's copy of this workflow
 # with a write token, so a PR cannot edit the gate that judges it. Nothing
@@ -39,6 +43,9 @@ on:
       pr:
         description: PR number to re-evaluate
         required: true
+  # Off the top of the hour, where GitHub delays scheduled runs most.
+  schedule:
+    - cron: "17,47 * * * *"
 
 permissions:
   contents: read
@@ -72,7 +79,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.repository.default_branch }}
+          # The commit this workflow file was read from, when that is the
+          # default branch (pull_request_target into it, issue_comment,
+          # workflow_dispatch on it), so the script and the sparse list below
+          # always come from the same commit. Checking out the branch's head
+          # instead let a run queued just before a merge pair the old list with
+          # the new script, which failed on a module it didn't check out.
+          # Otherwise (pull_request_review, whose sha is the PR's own merge
+          # commit) the default branch, so PR code never runs here.
+          ref: ${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && github.sha || github.event.repository.default_branch }}
           # Every module the gate imports, or it crashes on every PR once
           # merged. ci-codex-review-gate.test.mjs fails when one is missing.
           sparse-checkout: |
@@ -85,4 +100,38 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number || inputs.pr }}
+        run: node scripts/ci-codex-review-gate.mjs
+
+  # Dispatches `evaluate` (workflow_dispatch) rather than posting statuses
+  # itself, so each PR's evaluation runs in that PR's concurrency group above
+  # and can't race an event-driven run. Dispatches made with GITHUB_TOKEN do
+  # start runs, unlike other events it causes. It never asks Codex anything.
+  sweep:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      statuses: read
+      pull-requests: read
+      issues: read
+      actions: write
+    concurrency:
+      group: codex-review-gate-sweep
+      cancel-in-progress: true
+    steps:
+      # A schedule only ever runs on the default branch, so this is main's copy.
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            scripts/ci-codex-review-gate.mjs
+            scripts/lib/github-rest.mjs
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      - name: Dispatch the gate for PRs that missed an input
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          SWEEP: "1"
+          DISPATCH_REF: ${{ github.ref_name }}
         run: node scripts/ci-codex-review-gate.mjs

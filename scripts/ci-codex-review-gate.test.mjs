@@ -22,7 +22,10 @@ import {
     SKIP_AUTHOR,
     SKIP_AUTHORS,
     skippedHead,
+    sweep,
+    sweepReason,
     TRIGGER_AUTHOR,
+    WORKFLOW_FILE,
 } from "./ci-codex-review-gate.mjs";
 
 const HEAD = "4dba2e3755aa00000000000000000000000000bb";
@@ -650,28 +653,152 @@ describe("the workflow that runs the gate", () => {
         return seen;
     }
 
-    /** The paths under `sparse-checkout: |`. */
-    function sparseCheckout() {
+    /** The paths under each `sparse-checkout:` key, one list per checkout. */
+    function sparseCheckouts() {
         const lines = workflow.split("\n");
-        const start = lines.findIndex((l) => /^\s*sparse-checkout:\s*\|\s*$/.test(l));
-        expect(start, "sparse-checkout is a block list").toBeGreaterThan(-1);
-        const indent = lines[start].search(/\S/);
-        const paths = [];
-        for (const line of lines.slice(start + 1)) {
-            if (line.trim() === "" || line.search(/\S/) <= indent) break;
-            paths.push(line.trim());
-        }
-        return paths;
+        const lists = [];
+        lines.forEach((line, i) => {
+            const m = /^(\s*)sparse-checkout:\s*(.*)$/.exec(line);
+            if (!m) return;
+            if (m[2].trim() !== "|") return lists.push([m[2].trim()]);
+            const paths = [];
+            for (const next of lines.slice(i + 1)) {
+                if (next.trim() === "" || next.search(/\S/) <= m[1].length) break;
+                paths.push(next.trim());
+            }
+            lists.push(paths);
+        });
+        return lists;
     }
 
-    it("checks out every module the gate imports", () => {
+    it("checks out every module the gate imports, in every job that runs it", () => {
         const modules = [...gateModules()];
         expect(modules).toContain("scripts/lib/github-rest.mjs");
-        expect(sparseCheckout()).toEqual(expect.arrayContaining(modules));
+        const lists = sparseCheckouts();
+        expect(lists).toHaveLength(workflow.match(/run: node scripts\/ci-codex-review-gate\.mjs/g).length);
+        for (const paths of lists) expect(paths).toEqual(expect.arrayContaining(modules));
+    });
+
+    it("is the workflow the sweep dispatches, with the pr input it sends", () => {
+        expect(readFileSync(join(repoRoot, ".github/workflows", WORKFLOW_FILE), "utf8")).toBe(workflow);
+        expect(workflow).toMatch(/workflow_dispatch:\s*\n\s*inputs:\s*\n\s*pr:/);
+        expect(workflow).toMatch(/sweep:\s*\n\s*if: github\.event_name == 'schedule'/);
+    });
+
+    it("checks out the workflow's own commit on the default branch, and never PR code", () => {
+        // A bare github.sha would be the PR's merge commit on pull_request_review.
+        expect(workflow).toContain(
+            "ref: ${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && github.sha || github.event.repository.default_branch }}",
+        );
+        expect(workflow).not.toMatch(/ref: \$\{\{ github\.sha \}\}/);
     });
 
     it("runs on comments from every login the gate reads", () => {
         for (const login of [CODEX_LOGIN, ...SKIP_AUTHORS]) expect(workflow).toContain(`'${login}'`);
         expect(workflow).toContain("'reagent:codex-skipped'");
+    });
+});
+
+describe("sweepReason", () => {
+    const pull = { number: 7, draft: false, head: { sha: HEAD } };
+    const pending = (at) => ({ context: "Codex review", state: "pending", updated_at: at });
+
+    it("picks a head with no Codex review status at all", () => {
+        expect(sweepReason({ pull, status: null })).toMatch(/no Codex review status/);
+    });
+
+    it("picks a pending status older than Codex's quota notice (#4863)", () => {
+        const reason = sweepReason({ pull, status: pending("2026-10-14T07:14:39Z"), comments: [quotaComment("2026-10-14T07:15:48Z")] });
+        expect(reason).toMatch(/newer than its pending status/);
+    });
+
+    it("picks a pending status older than a Codex findings review", () => {
+        const reason = sweepReason({ pull, status: pending("2026-09-23T05:00:00Z"), reviews: [findingsReview(HEAD)] });
+        expect(reason).toMatch(/Codex review is newer/);
+    });
+
+    it("picks a pending status older than a muxreview skip note's latest edit", () => {
+        const note = skipComment(HEAD, { created: "2026-09-30T10:00:00Z", updated: "2026-09-30T12:00:00Z" });
+        expect(sweepReason({ pull, status: pending("2026-09-30T11:00:00Z"), comments: [note] })).not.toBeNull();
+    });
+
+    it("leaves a pending status alone when every gate input is older", () => {
+        const comments = [quotaComment("2026-10-14T07:15:48Z")];
+        expect(sweepReason({ pull, status: pending("2026-10-14T07:15:59Z"), comments })).toBeNull();
+    });
+
+    it("leaves a PR alone that is only waiting, whatever else was said", () => {
+        const comments = [okComment(HEAD, "2026-10-14T08:00:00Z", "someone"), skipComment(HEAD, { login: "someone", created: "2026-10-14T08:00:00Z" })];
+        expect(sweepReason({ pull, status: pending("2026-10-14T07:00:00Z"), comments })).toBeNull();
+    });
+
+    it("never touches a decided status or a draft", () => {
+        const comments = [quotaComment("2026-10-14T09:00:00Z")];
+        for (const state of ["success", "failure", "error"]) {
+            expect(sweepReason({ pull, status: { state, updated_at: "2026-10-14T07:00:00Z" }, comments })).toBeNull();
+        }
+        expect(sweepReason({ pull: { ...pull, draft: true }, status: null })).toBeNull();
+    });
+});
+
+describe("sweep", () => {
+    const pr = (number, sha, extra = {}) => ({ number, draft: false, head: { sha }, ...extra });
+    const SHA = { a: "a".repeat(40), b: "b".repeat(40), c: "c".repeat(40), d: "d".repeat(40) };
+
+    /** A fake client over canned responses, recording dispatches. */
+    function fakeClient({ pulls, statuses, comments = {}, failStatusFor = null }) {
+        const dispatched = [];
+        const reads = [];
+        return {
+            dispatched,
+            reads,
+            paginate: async (path) => {
+                reads.push(path);
+                if (path.endsWith("/pulls?state=open")) return pulls;
+                const n = Number(/\/(\d+)\/(comments|reviews)$/.exec(path)?.[1]);
+                return path.endsWith("/comments") ? (comments[n] ?? []) : [];
+            },
+            json: async (path) => {
+                const sha = /commits\/([0-9a-f]+)\/status$/.exec(path)[1];
+                if (sha === failStatusFor) throw new Error("boom");
+                return { statuses: statuses[sha] ? [statuses[sha]] : [] };
+            },
+            request: async (path, init) => {
+                dispatched.push({ path, body: JSON.parse(init.body) });
+            },
+        };
+    }
+
+    it("dispatches the gate only for PRs that missed an input", async () => {
+        const client = fakeClient({
+            pulls: [pr(1, SHA.a), pr(2, SHA.b), pr(3, SHA.c), pr(4, SHA.d, { draft: true })],
+            statuses: {
+                // 1: none at all. 2: pending, older than Codex's quota notice. 3: decided.
+                [SHA.b]: { context: "Codex review", state: "pending", updated_at: "2026-10-14T07:14:39Z" },
+                [SHA.c]: { context: "Codex review", state: "success", updated_at: "2026-10-14T07:00:00Z" },
+            },
+            comments: { 2: [quotaComment("2026-10-14T07:15:48Z")] },
+        });
+        const logs = [];
+        expect(await sweep(client, "o/r", { ref: "main", log: (l) => logs.push(l) })).toEqual([1, 2]);
+        expect(client.dispatched).toEqual([
+            { path: `/repos/o/r/actions/workflows/${WORKFLOW_FILE}/dispatches`, body: { ref: "main", inputs: { pr: "1" } } },
+            { path: `/repos/o/r/actions/workflows/${WORKFLOW_FILE}/dispatches`, body: { ref: "main", inputs: { pr: "2" } } },
+        ]);
+        expect(logs.at(-1)).toBe("sweep: 4 open PR(s), 2 dispatched, 0 failed");
+        // Comments are read only where a pending status could be stale.
+        expect(client.reads.filter((p) => p.includes("/issues/"))).toEqual(["/repos/o/r/issues/2/comments"]);
+    });
+
+    it("dispatches nothing on a dry run", async () => {
+        const client = fakeClient({ pulls: [pr(1, SHA.a)], statuses: {} });
+        expect(await sweep(client, "o/r", { ref: "main", dryRun: true, log: () => {} })).toEqual([1]);
+        expect(client.dispatched).toEqual([]);
+    });
+
+    it("carries on past one PR's error, then fails the run", async () => {
+        const client = fakeClient({ pulls: [pr(1, SHA.a), pr(2, SHA.b)], statuses: {}, failStatusFor: SHA.a });
+        await expect(sweep(client, "o/r", { ref: "main", log: () => {} })).rejects.toThrow("sweep failed for #1");
+        expect(client.dispatched.map((d) => d.body.inputs.pr)).toEqual(["2"]);
     });
 });
