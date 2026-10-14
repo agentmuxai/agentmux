@@ -101,7 +101,7 @@ export function SettingsSearchBar(props: SettingsSearchBarProps): JSX.Element {
                         aria-label="Clear search"
                         data-testid="settings-search-clear"
                     >
-                        &times;
+                        <i class="fa-solid fa-xmark" aria-hidden="true" />
                     </button>
                 </Show>
             </div>
