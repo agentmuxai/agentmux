@@ -700,9 +700,10 @@ impl PersistentSubprocessController {
             Self::set_status(&mut inner, STATUS_DONE);
         }
         if recovered.is_none() {
-            // Nothing was queued behind the failed resume (this settles an empty
-            // batch), so the session starts idle.
-            self.emit_fresh_outcome_now(attempted_sid, continued, true);
+            // This settles an empty retry batch, but a prompt accepted behind
+            // the claim can still be waiting: then a message is about to start
+            // the session, and it is not idle.
+            self.emit_fresh_outcome_now(attempted_sid, continued, !queued_behind_claim);
         }
         if queued_behind_claim {
             drop(inner);
