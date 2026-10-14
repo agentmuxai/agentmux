@@ -212,8 +212,10 @@ describe("launchController", () => {
         expect(launchController(subprocess, "host")).toBe("subprocess");
     });
 
-    it("runs a terminal-tier harness on the cmd controller, whatever the mode", () => {
+    it("runs a terminal-tier harness on the cmd controller on the host", () => {
         const terminal = { controllerType: "terminal", launchArgs: [] } as any;
-        for (const mode of ["host", "container", undefined]) expect(launchController(terminal, mode)).toBe("cmd");
+        for (const mode of ["host", undefined]) expect(launchController(terminal, mode)).toBe("cmd");
+        // A container is checked first, as srv does; the launch refuses the pair.
+        expect(launchController(terminal, "container")).toBe("subprocess");
     });
 });

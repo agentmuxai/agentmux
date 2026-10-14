@@ -543,6 +543,7 @@ async fn open_agent_inner(
                 }
 
                 // 6. Build metadata
+                if agent.agent_type == "container" && provider.controller_type == providers::ControllerType::Terminal { return Err(format!("{} runs in a terminal pane on the host, not in a container", provider.id)); }
                 let controller_type = provider.controller_type_str();
                 // Container agents use per-turn docker exec; the subprocess controller
                 // is required regardless of what the provider defaults to (claude returns
@@ -831,12 +832,7 @@ async fn open_agent_inner(
                     meta.insert("agent:sessionid".to_string(), json!(sid));
                 }
 
-                // A terminal-tier harness runs its own UI in a terminal pane.
-                if provider.controller_type == crate::backend::providers::ControllerType::Terminal {
-                    meta.insert("view".to_string(), json!("term"));
-                    meta.insert("cmd:interactive".to_string(), json!(true));
-                    meta.insert("cmd:runonstart".to_string(), json!(true));
-                }
+                providers::apply_terminal_pane_meta(provider, &mut meta);
 
                 // 7. Create block + insert into layout tree.
                 // Through the reducer (#1681), not wcore-direct: a store-only
@@ -975,10 +971,10 @@ async fn open_agent_inner(
                 // #3584).
                 record_agent_open_launch(&mstore, &agent.id, &block_id)?;
 
-                // 9. Register controller (resync)
+                // 9. Register controller (resync). Not for a terminal-tier CLI: its term view starts it once attached.
                 let block_for_resync = mstore.must_get::<Block>(&block_id)
                     .map_err(|e| format!("agent.open: reload block: {e}"))?;
-                blockcontroller::resync_controller(
+                if provider.controller_type != providers::ControllerType::Terminal { blockcontroller::resync_controller(
                     &block_for_resync,
                     &tab_id,
                     None,
@@ -994,7 +990,7 @@ async fn open_agent_inner(
                     app_state.boot_id.clone(),
                     &app_state.auth_key,
                     Some(app_state.config_watcher.clone()),
-                )?;
+                )?; }
 
                 // 10. Broadcast block + tab + layout updates to frontend
                 {

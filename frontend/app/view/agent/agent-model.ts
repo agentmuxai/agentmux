@@ -358,12 +358,16 @@ export class AgentViewModel {
                 ...(provider.controllerType === "terminal" ? TERMINAL_PANE_META : {}),
             });
 
-            // Create SubprocessController (no-op start — waits for first message)
-            await RpcApi.ControllerResyncCommand(TabRpcClient, {
-                tabid: atoms.staticTabId(),
-                blockid: blockId,
-                forcerestart: true,
-            });
+            // Create SubprocessController (no-op start — waits for first message).
+            // A terminal-tier CLI is started by its term view instead (see
+            // launchAgentDefinition).
+            if (provider.controllerType !== "terminal") {
+                await RpcApi.ControllerResyncCommand(TabRpcClient, {
+                    tabid: atoms.staticTabId(),
+                    blockid: blockId,
+                    forcerestart: true,
+                });
+            }
         } catch (e: any) {
             Logger.error("agent", "Failed to launch agent", { error: String(e) });
         }
@@ -520,6 +524,10 @@ export class AgentViewModel {
         // `is_persistent` AFTER applying this same container override; this is
         // that rule, in the path the UI actually launches through.
         const agentMode = overrides?.agentType ?? agent.agent_type ?? "host";
+        if (provider.controllerType === "terminal" && agentMode === "container") {
+            this.launchError = `${provider.displayName} runs in a terminal pane on this computer, not in a container.`;
+            return false;
+        }
         const isPersistent = isPersistentLaunch(provider, agentMode);
         // The runtime config the strip will show, resolved BEFORE the args so
         // the two are built from the same value. `cmd:args` must already carry
@@ -873,12 +881,17 @@ export class AgentViewModel {
                 meta,
                 createInstance,
                 setMeta: (m) => RpcApi.SetMetaCommand(TabRpcClient, { oref, meta: m }),
+                // A terminal-tier CLI is started by its term view once the
+                // terminal is attached: one that queries the terminal at
+                // startup (Aider) would otherwise wait for an answer forever.
                 resync: () =>
-                    RpcApi.ControllerResyncCommand(TabRpcClient, {
-                        tabid: targetTabId ?? atoms.staticTabId(),
-                        blockid: blockId,
-                        forcerestart: true,
-                    }),
+                    provider.controllerType === "terminal"
+                        ? Promise.resolve()
+                        : RpcApi.ControllerResyncCommand(TabRpcClient, {
+                              tabid: targetTabId ?? atoms.staticTabId(),
+                              blockid: blockId,
+                              forcerestart: true,
+                          }),
                 warn: (msg) => Logger.warn("agent", msg),
             });
             if (committed.ok !== false) markAgentOpen(blockId, "committed");

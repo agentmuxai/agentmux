@@ -57,8 +57,8 @@ export function launchController(
     provider: LaunchArgsProvider & { controllerType?: string },
     agentMode: string | undefined,
 ): "persistent" | "subprocess" | "acp" | "cmd" {
-    if (provider.controllerType === "terminal") return "cmd";
     if (agentMode === "container") return "subprocess";
+    if (provider.controllerType === "terminal") return "cmd";
     if (provider.controllerType === "acp") return "acp";
     return isPersistentLaunch(provider, agentMode) ? "persistent" : "subprocess";
 }

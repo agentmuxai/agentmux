@@ -432,6 +432,16 @@ pub fn known_install_paths(provider_id: &str) -> Vec<std::path::PathBuf> {
 /// `%LOCALAPPDATA%\agy\bin\agy.exe` on Windows and `~/.local/bin/agy`
 /// elsewhere: the default `TARGET_DIR` of Google's installers,
 /// https://antigravity.google/cli/install.ps1 and the `.sh` one beside it.
+/// A terminal-tier provider's pane (`agent.open`): a terminal running the
+/// CLI's own UI, started at once. The frontend's `TERMINAL_PANE_META` is the same.
+pub fn apply_terminal_pane_meta(provider: &ProviderConfig, meta: &mut crate::backend::obj::MetaMapType) {
+    if provider.controller_type == ControllerType::Terminal {
+        meta.insert("view".to_string(), serde_json::json!("term"));
+        meta.insert("cmd:interactive".to_string(), serde_json::json!(true));
+        meta.insert("cmd:runonstart".to_string(), serde_json::json!(true));
+    }
+}
+
 /// Where goose's own installers put it: the PowerShell one in `~/.local/bin`,
 /// the shell one under Git Bash in `~/goose`; elsewhere `~/.local/bin`.
 fn goose_install_paths(home: Option<std::path::PathBuf>) -> Vec<std::path::PathBuf> {

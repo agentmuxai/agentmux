@@ -665,3 +665,15 @@ fn muse_resolves_to_the_binary_its_launcher_installed() {
         assert_eq!(super::muse_install_paths(None, Some(home.clone())), vec![home.join(".local").join("bin").join("muse")]);
     }
 }
+
+#[test]
+fn a_terminal_tier_pane_is_a_terminal_started_at_once() {
+    let mut meta = crate::backend::obj::MetaMapType::new();
+    apply_terminal_pane_meta(get_provider("aider").unwrap(), &mut meta);
+    assert_eq!(meta["view"], "term");
+    assert_eq!(meta["cmd:interactive"], true);
+    assert_eq!(meta["cmd:runonstart"], true);
+    let mut other = crate::backend::obj::MetaMapType::new();
+    apply_terminal_pane_meta(get_provider("kilo").unwrap(), &mut other);
+    assert!(other.is_empty());
+}
