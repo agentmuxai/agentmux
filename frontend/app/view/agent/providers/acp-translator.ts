@@ -175,7 +175,6 @@ export class AcpTranslator implements OutputTranslator {
     }
 }
 
-/** The text of a ContentBlock (`{type: "text", text}`); "" for anything else. */
 /** A prompt response's `usage` as session stats: ACP gives input, output and
  *  cache counts, not how much of the input was fresh. */
 function turnUsage(usage: any): SessionStats {
@@ -190,6 +189,7 @@ function turnUsage(usage: any): SessionStats {
     return Object.fromEntries(Object.entries(stats).filter(([, v]) => v !== undefined)) as SessionStats;
 }
 
+/** The text of a ContentBlock (`{type: "text", text}`); "" for anything else. */
 function blockText(block: any): string {
     if (typeof block === "string") return block;
     if (block && typeof block === "object" && block.type === "text" && typeof block.text === "string") return block.text;
