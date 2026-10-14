@@ -127,7 +127,7 @@ Related open issues not owned by a reducer doc: #3338 (process/turn-state consol
 - `SPEC_AGENT_PANE_UNIFIED_FAILURE_REDUCER_2026_07_06`: implemented in #1987. The retry countdown stays in the hook by decision.
 - `SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18`: add #3441 (`LayoutStackMove`).
 - `SPEC_REDUCER_SSOT_CONSOLIDATION_2026_06_22`: L1, L2, L4, L7 and L8 are done; L3, R5, R6 and srv-events gap handling are open.
-- `SPEC_STRONG_REDUCER_AUTHORITY_LAYOUT_2026_06_30`: Phases 2–3 are done.
+- `SPEC_STRONG_REDUCER_AUTHORITY_LAYOUT_2026_06_30`: Phases 2–3 are done (#1866, #1868).
 - `SPEC_LAUNCH_MODAL_STATE_MACHINE_2026_05_19`: the modal now has 5 local signals, not 2.
 - `docs/retro/multi-reducer-status-2026-04-29`: still says "Active reference"; mark it superseded.
 
