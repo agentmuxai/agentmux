@@ -216,6 +216,7 @@ enum PropOp {
     DeleteTab,
     DeleteBlock,
     DeleteWorkspace,
+    QueueBackendAction,
 }
 
 fn op_strategy() -> impl Strategy<Value = PropOp> {
@@ -229,6 +230,7 @@ fn op_strategy() -> impl Strategy<Value = PropOp> {
         1 => Just(PropOp::DeleteTab),
         1 => Just(PropOp::DeleteBlock),
         1 => Just(PropOp::DeleteWorkspace),
+        2 => Just(PropOp::QueueBackendAction),
     ]
 }
 
@@ -304,6 +306,18 @@ fn apply_prop_op(state: &mut State, op: PropOp, conn_id: u64) -> Vec<Event> {
                 Vec::new()
             }
         }
+        PropOp::QueueBackendAction => match state.tabs.keys().next().cloned() {
+            Some(tab_id) => update(
+                state,
+                Command::LayoutQueueBackendActions {
+                    tab_id,
+                    actions: serde_json::json!([{ "actiontype": "delete", "actionid": format!("a{conn_id}"), "blockid": "b" }]),
+                    correlation_id: String::new(),
+                },
+                &ctx(conn_id),
+            ),
+            None => Vec::new(),
+        },
     }
 }
 
@@ -377,6 +391,9 @@ proptest! {
     fn invariants_hold_across_random_sequences(ops in prop::collection::vec(op_strategy(), 0..40)) {
         let mut state = State::default();
         let mut last_version: u64 = 0;
+        // (5) A tab's layout_revision counts its queued batches, each stamped
+        // with it, and a push is stale exactly when built on an older one.
+        let mut batches: std::collections::HashMap<String, u64> = Default::default();
         for (i, op) in ops.into_iter().enumerate() {
             let events = apply_prop_op(&mut state, op, (i + 1) as u64);
             for ev in &events {
@@ -389,8 +406,21 @@ proptest! {
                     ev
                 );
                 last_version = v;
+                if let Event::LayoutBackendActionsQueued { tab_id, actions, .. } = ev {
+                    let n = batches.entry(tab_id.clone()).or_default();
+                    *n += 1;
+                    prop_assert_eq!(actions[0]["rev"].as_u64(), Some(*n));
+                }
             }
             assert_invariants(&state);
+            for (tab_id, tab) in &state.tabs {
+                let rev = batches.get(tab_id).copied().unwrap_or(0);
+                prop_assert_eq!(tab.layout_revision, rev);
+                prop_assert_eq!(stale_push_revision(&state, tab_id, rev), None);
+                if rev > 0 {
+                    prop_assert_eq!(stale_push_revision(&state, tab_id, rev - 1), Some(rev));
+                }
+            }
         }
     }
 
@@ -550,7 +580,9 @@ fn layout_queue_backend_actions_passes_through_and_emits_event() {
             ..
         } => {
             assert_eq!(ev_tab_id, &tab_id);
-            assert_eq!(ev_actions, &actions);
+            let mut stamped = actions.clone();
+            stamped[0]["rev"] = 1.into();
+            assert_eq!(ev_actions, &stamped);
             assert_eq!(correlation_id, "corr-q1");
         }
         other => panic!("expected LayoutBackendActionsQueued, got {other:?}"),
@@ -1548,4 +1580,97 @@ fn layout_delete_node_clears_focused_when_target_was_focused() {
         Event::LayoutNodeDeleted { was_focused: true, .. }
     ));
     assert_eq!(state.tabs[&tab_id].focused_node_id, "");
+}
+
+// ── layout_revision (SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md §3.5) ────
+
+fn queue(state: &mut State, tab_id: &str, ids: &[&str]) -> Vec<Event> {
+    let actions: Vec<serde_json::Value> =
+        ids.iter().map(|id| serde_json::json!({ "actiontype": "stackpush", "actionid": id, "blockid": "b" })).collect();
+    update(
+        state,
+        Command::LayoutQueueBackendActions {
+            tab_id: tab_id.into(),
+            actions: serde_json::Value::Array(actions),
+            correlation_id: String::new(),
+        },
+        &ctx(1),
+    )
+}
+
+#[test]
+fn each_queued_batch_bumps_the_revision_once_and_stamps_every_action() {
+    let (mut state, tab_id) = fresh_tab();
+    assert_eq!(state.tabs[&tab_id].layout_revision, 0);
+    let events = queue(&mut state, &tab_id, &["a1", "a2"]);
+    let Event::LayoutBackendActionsQueued { actions, .. } = &events[0] else {
+        panic!("expected LayoutBackendActionsQueued, got {events:?}");
+    };
+    assert_eq!(actions[0]["rev"], 1);
+    assert_eq!(actions[1]["rev"], 1);
+    assert_eq!(state.tabs[&tab_id].layout_revision, 1);
+    queue(&mut state, &tab_id, &["a3"]);
+    assert_eq!(state.tabs[&tab_id].layout_revision, 2);
+}
+
+#[test]
+fn a_refused_queue_leaves_the_revision_alone() {
+    let (mut state, tab_id) = fresh_tab();
+    let events = queue(&mut state, &tab_id, &[]);
+    assert!(matches!(&events[0], Event::Error { .. }));
+    assert_eq!(state.tabs[&tab_id].layout_revision, 0);
+}
+
+#[test]
+fn a_push_is_stale_only_when_built_on_an_older_revision() {
+    let (mut state, tab_id) = fresh_tab();
+    assert_eq!(stale_push_revision(&state, &tab_id, 0), None, "nothing queued yet");
+    queue(&mut state, &tab_id, &["a1"]);
+    queue(&mut state, &tab_id, &["a2"]);
+    assert_eq!(stale_push_revision(&state, &tab_id, 0), Some(2));
+    assert_eq!(stale_push_revision(&state, &tab_id, 1), Some(2));
+    assert_eq!(stale_push_revision(&state, &tab_id, 2), None);
+    assert_eq!(stale_push_revision(&state, &tab_id, 3), None, "ahead is not stale");
+    assert_eq!(stale_push_revision(&state, "ghost", 0), None, "an unknown tab is the arm's error, not stale");
+}
+
+/// SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md §5: the stack commands keep
+/// I1 (each block in exactly one pane) and I2 (a consistent stack).
+#[test]
+fn stack_push_activate_and_remove_keep_every_block_in_exactly_one_pane() {
+    let (mut state, tab_id) = fresh_tab();
+    let (a, b, c) = (create_block(&mut state, &tab_id), create_block(&mut state, &tab_id), create_block(&mut state, &tab_id));
+    let tree = agentmux_common::LayoutNode {
+        id: "root".into(),
+        size: 1.0,
+        children: vec![leaf_node("pa", &a), leaf_node("pc", &c)],
+        ..Default::default()
+    };
+    state.tabs.get_mut(&tab_id).unwrap().rootnode = Some(tree);
+    let check = |state: &State, unplaced: &[&String]| {
+        let tab = &state.tabs[&tab_id];
+        assert!(crate::backend::layout::validate_layout_invariants(&tab.rootnode).is_empty());
+        let expected: Vec<String> = unplaced.iter().map(|s| s.to_string()).collect();
+        assert_eq!(crate::backend::layout::unplaced_blocks(&tab.rootnode, &tab.block_ids), expected);
+    };
+    check(&state, &[&b]);
+
+    let push = Command::LayoutStackPush {
+        tab_id: tab_id.clone(),
+        target_block_id: a.clone(),
+        block_id: b.clone(),
+        activate: true,
+        correlation_id: String::new(),
+    };
+    assert!(matches!(update(&mut state, push, &ctx(1))[0], Event::LayoutTreeReplaced { .. }));
+    check(&state, &[]);
+
+    let activate = Command::LayoutStackActivate { tab_id: tab_id.clone(), block_id: a.clone(), correlation_id: String::new() };
+    assert!(matches!(update(&mut state, activate, &ctx(1))[0], Event::LayoutTreeReplaced { .. }));
+    check(&state, &[]);
+
+    // The tab leaves its pane first; its block goes with the ClosePane after.
+    let remove = Command::LayoutDeleteNodeByBlock { tab_id: tab_id.clone(), block_id: b.clone(), correlation_id: String::new() };
+    assert!(matches!(update(&mut state, remove, &ctx(1))[0], Event::LayoutTreeReplaced { .. }));
+    check(&state, &[&b]);
 }

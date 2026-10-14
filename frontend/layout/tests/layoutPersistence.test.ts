@@ -10,7 +10,12 @@ import { createSignal } from "solid-js";
 import { LayoutModel } from "@/layout/lib/layoutModel";
 import { findNodeByBlockId, newLayoutNode } from "@/layout/lib/layoutNode";
 import { LayoutTreeActionType, LayoutTreeInsertNodeAction } from "@/layout/lib/types";
-import { processPendingBackendActions, pruneDanglingLeaves, markBlockRecentlyCreated } from "@/layout/lib/layoutPersistence";
+import {
+    processPendingBackendActions,
+    pruneDanglingLeaves,
+    markBlockRecentlyCreated,
+    pushBaseRevision,
+} from "@/layout/lib/layoutPersistence";
 import { beginDrag, endDrag, markReleased } from "@/app/drag/drag-session";
 import type { SignalAtom } from "@/util/util";
 
@@ -754,5 +759,86 @@ describe("a disposed model", () => {
         const getter = vi.spyOn(model, "getter");
         model.onBackendUpdate();
         expect(getter).not.toHaveBeenCalled();
+    });
+});
+
+// SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md §3.3, §3.5.
+describe("layout revisions and pane-tab actions", () => {
+    beforeEach(() => {
+        layoutStateSignals.clear();
+        vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+        vi.useRealTimers();
+    });
+
+    function stackAction(actiontype: LayoutTreeActionType, actionid: string, blockid: string, targetblockid = "") {
+        return { actiontype, actionid, blockid, targetblockid, focused: true, magnified: false, ephemeral: false };
+    }
+
+    it("a stackactivate switches the visible tab, and a model skips its own", async () => {
+        const model = createLayoutModel();
+        insertBlock(model, "existing");
+        setPendingActions(model, [stackAction(LayoutTreeActionType.StackPush, "push-1", "new-block", "existing")]);
+        await processPendingBackendActions(model);
+        expect(findBlock(model, "existing")!.data!.blockId).toBe("new-block");
+
+        model.processedActionIds.add("own-1");
+        setPendingActions(model, [stackAction(LayoutTreeActionType.StackActivate, "own-1", "existing")]);
+        await processPendingBackendActions(model);
+        expect(findBlock(model, "existing")!.data!.blockId).toBe("new-block");
+
+        setPendingActions(model, [stackAction(LayoutTreeActionType.StackActivate, "other-1", "existing")]);
+        await processPendingBackendActions(model);
+        const data = findBlock(model, "existing")!.data!;
+        expect(data.blockId).toBe("existing");
+        expect(data.activeBlockId).toBe("existing");
+        expect(data.blockStack).toEqual(["existing", "new-block"]);
+    });
+
+    it("a push is built on the row's revision, then on through this model's own", () => {
+        const model = createLayoutModel();
+        expect(pushBaseRevision(model, 3)).toBe(3);
+        model.ownLayoutRevisions.add(4);
+        model.ownLayoutRevisions.add(5);
+        model.ownLayoutRevisions.add(7);
+        // 6 is someone else's action this model hasn't seen: stop before it.
+        expect(pushBaseRevision(model, 3)).toBe(5);
+        expect([...model.ownLayoutRevisions]).toEqual([7]);
+        expect(pushBaseRevision(model, 6)).toBe(7);
+        expect(model.ownLayoutRevisions.size).toBe(0);
+    });
+
+    it("a refused stale push applies the missed stackpush and pushes again on the newer revision", async () => {
+        const model = createLayoutModel();
+        insertBlock(model, "existing");
+        const pushes: LayoutState[] = [];
+        (model.muxObjectAtom as any)._push = vi.fn(async (value: LayoutState) => {
+            pushes.push(structuredClone(value));
+            if (pushes.length > 1) return null;
+            // srv queued a stackpush (revision 1) this push never saw: it
+            // answers with the row as stored, then `stale`.
+            const sig = layoutStateSignals.get(value.oid)!;
+            sig._set({
+                ...value,
+                version: value.version + 1,
+                layoutrevision: 1,
+                pendingbackendactions: [stackAction(LayoutTreeActionType.StackPush, "srv-1", "new-block", "existing")],
+            });
+            return { stale: true, layoutrevision: 1 };
+        });
+
+        model.persistToBackend();
+        await vi.advanceTimersByTimeAsync(100);
+        expect(pushes).toHaveLength(1);
+        expect(pushes[0].layoutrevision).toBe(0);
+
+        await vi.advanceTimersByTimeAsync(100);
+        expect(pushes).toHaveLength(2);
+        expect(pushes[1].layoutrevision).toBe(1);
+        expect(pushes[1].rootnode.data.blockStack).toEqual(["existing", "new-block"]);
+        expect(pushes[1].pendingbackendactions).toBeUndefined();
+        expect(model.stalePushStreak).toBe(0);
     });
 });

@@ -326,17 +326,26 @@ pub(super) fn handle_layout_delete_node_by_block(
 /// `actions` must be a non-empty JSON array of `LayoutActionData`
 /// objects (the type lives in `agentmux-srv::backend::obj`, not the
 /// common crate — hence the raw-value carriage).
+///
+/// Each batch bumps the tab's `layout_revision` and stamps it on every action
+/// as `rev`, so a frontend push that never saw this batch is refused instead
+/// of erasing it (`stale_push_revision`).
 pub(super) fn handle_layout_queue_backend_actions(
     state: &mut State,
     tab_id: String,
-    actions: serde_json::Value,
+    mut actions: serde_json::Value,
     correlation_id: String,
 ) -> Vec<Event> {
-    if !state.tabs.contains_key(&tab_id) {
+    let Some(tab) = state.tabs.get_mut(&tab_id) else {
         return unknown_tab(state, "LayoutQueueBackendActions", &tab_id);
-    }
-    match actions.as_array() {
-        Some(arr) if !arr.is_empty() => {}
+    };
+    match actions.as_array_mut() {
+        Some(arr) if !arr.is_empty() => {
+            tab.layout_revision += 1;
+            for action in arr.iter_mut().filter_map(|a| a.as_object_mut()) {
+                action.insert("rev".into(), tab.layout_revision.into());
+            }
+        }
         _ => {
             return op_error(
                 state,
@@ -354,6 +363,17 @@ pub(super) fn handle_layout_queue_backend_actions(
         correlation_id,
         version: v,
     }]
+}
+
+/// The tab's current `layout_revision` when a frontend tree push built on
+/// `base_revision` is stale, else `None`. A stale push never saw some queued
+/// backend action (a tab pushed into a pane, a pane removed), and applying it
+/// would drop that change from the tree and erase it from the queue the push
+/// replaces. The pusher resyncs: it applies the actions it missed, then pushes
+/// again. SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md §3.5.
+pub(crate) fn stale_push_revision(state: &State, tab_id: &str, base_revision: u64) -> Option<u64> {
+    let current = state.tabs.get(tab_id)?.layout_revision;
+    (base_revision < current).then_some(current)
 }
 
 // ── Pane tabs (SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md §3.2) ─────────
@@ -424,11 +444,12 @@ pub(super) fn handle_layout_stack_activate(
 
 /// Create a block and place it in a pane's tab stack in one step. Placement
 /// is validated FIRST: if no pane holds `target_block_id`, nothing is created
-/// — a block never exists without a pane.
+/// — a block never exists without a pane. `block_id` is the dispatcher's `Ctx::new_id`.
 pub(super) fn handle_create_block_in_stack(
     state: &mut State,
     tab_id: String,
     target_block_id: String,
+    block_id: String,
     meta: serde_json::Value,
     activate: bool,
 ) -> Vec<Event> {
@@ -445,7 +466,7 @@ pub(super) fn handle_create_block_in_stack(
             format!("CreateBlockInStack: no pane holds block {target_block_id} (tab {tab_id})"),
         );
     }
-    let mut events = super::block::handle_create_block(state, tab_id.clone(), meta);
+    let mut events = super::block::create_block_with_id(state, tab_id.clone(), block_id, meta);
     let Some(block_id) = events.iter().find_map(|e| match e {
         Event::BlockCreated { block_id, .. } => Some(block_id.clone()),
         _ => None,

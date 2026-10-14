@@ -21,6 +21,8 @@ mod host_ipc;
 mod introspect;
 mod memory_adopt;
 pub(crate) mod layout_helpers;
+#[cfg(test)]
+mod layout_revision_tests;
 mod misc;
 mod object;
 pub(crate) mod object_helpers;

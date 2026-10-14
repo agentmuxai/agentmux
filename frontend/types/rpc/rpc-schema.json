@@ -4196,6 +4196,25 @@
     }
   },
   {
+    "command": "pane.activateTab",
+    "request": "agentmux_srv::backend::rpc_types::block::CommandPaneTabData",
+    "requestName": "CommandPaneTabData",
+    "requestTs": {
+      "imports": [
+        "CommandPaneTabData"
+      ],
+      "name": "CommandPaneTabData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::block::PaneTabEditResult",
+    "responseName": "PaneTabEditResult",
+    "responseTs": {
+      "imports": [
+        "PaneTabEditResult"
+      ],
+      "name": "PaneTabEditResult"
+    }
+  },
+  {
     "command": "pane.moveTab",
     "request": "agentmux_srv::backend::rpc_types::block::CommandPaneMoveTabData",
     "requestName": "CommandPaneMoveTabData",
@@ -4205,11 +4224,13 @@
       ],
       "name": "CommandPaneMoveTabData"
     },
-    "response": "()",
-    "responseName": "()",
+    "response": "agentmux_srv::backend::rpc_types::block::PaneTabEditResult",
+    "responseName": "PaneTabEditResult",
     "responseTs": {
-      "imports": [],
-      "name": "null"
+      "imports": [
+        "PaneTabEditResult"
+      ],
+      "name": "PaneTabEditResult"
     }
   },
   {
@@ -4229,6 +4250,25 @@
         "PaneOpenResult"
       ],
       "name": "PaneOpenResult"
+    }
+  },
+  {
+    "command": "pane.removeTab",
+    "request": "agentmux_srv::backend::rpc_types::block::CommandPaneTabData",
+    "requestName": "CommandPaneTabData",
+    "requestTs": {
+      "imports": [
+        "CommandPaneTabData"
+      ],
+      "name": "CommandPaneTabData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::block::PaneTabEditResult",
+    "responseName": "PaneTabEditResult",
+    "responseTs": {
+      "imports": [
+        "PaneTabEditResult"
+      ],
+      "name": "PaneTabEditResult"
     }
   },
   {

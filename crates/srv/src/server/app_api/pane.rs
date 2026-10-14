@@ -4,6 +4,7 @@ use agentmux_common::AUTH_KEY_HEADER;
 pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     register_pane_open(engine, state);
     register_pane_move_tab(engine, state);
+    register_pane_tab_edits(engine, state);
 }
 
 fn register_pane_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
@@ -31,6 +32,21 @@ fn register_pane_move_tab(engine: &Arc<WshRpcEngine>, state: &AppState) {
     engine.register_typed(COMMAND_PANE_MOVE_TAB, move |cmd: CommandPaneMoveTabData, _ctx| {
         let state = state.clone();
         async move { super::move_tab(&state, cmd).await }
+    });
+}
+
+/// SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md §3.3: a tab switch and a tab
+/// close, as reducer commands the frontend sends beside its own local edit.
+fn register_pane_tab_edits(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let st = state.clone();
+    engine.register_typed(COMMAND_PANE_ACTIVATE_TAB, move |cmd: CommandPaneTabData, _ctx| {
+        let state = st.clone();
+        async move { activate_tab(&state, cmd).await }
+    });
+    let st = state.clone();
+    engine.register_typed(COMMAND_PANE_REMOVE_TAB, move |cmd: CommandPaneTabData, _ctx| {
+        let state = st.clone();
+        async move { remove_tab(&state, cmd).await }
     });
 }
 
@@ -1327,18 +1343,15 @@ pub async fn open_pane(state: &AppState, cmd: CommandPaneOpenData) -> Result<Pan
 /// `stackmove` layout action so any OTHER window/tab viewing the same
 /// `db_layout` sees the change (mirrors `stack_onto_block_id`'s `stackpush`
 /// queue above); the calling frontend applies its own optimistic local edit
-/// directly and does not wait on the queue for itself.
+/// directly and skips the queued copy by its `action_id`.
 /// SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §4.1, Phase 3.
-pub(crate) async fn move_tab(state: &AppState, cmd: CommandPaneMoveTabData) -> Result<(), String> {
-    let mstore = &state.mstore;
+pub(crate) async fn move_tab(state: &AppState, cmd: CommandPaneMoveTabData) -> Result<PaneTabEditResult, String> {
     let position = match cmd.position.as_str() {
         "before" => agentmux_common::StackMovePosition::Before,
         "after" => agentmux_common::StackMovePosition::After,
         "end" => agentmux_common::StackMovePosition::End,
         other => return Err(format!("pane.moveTab: invalid position '{other}' (expected before/after/end)")),
     };
-    let tab_id = resolve_tab_id_for_block(mstore, &cmd.block_id)
-        .map_err(|e| format!("pane.moveTab: {e}"))?;
     // Cross-pane moves (Phase 4, SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md
     // §3.4) were rejected here through Phase 3 (Codex P2 on PR #3444) —
     // the frontend's pending-action handler didn't yet mirror a cross-leaf
@@ -1347,42 +1360,97 @@ pub(crate) async fn move_tab(state: &AppState, cmd: CommandPaneMoveTabData) -> R
     // moveMemberAcrossStacks), so both same-pane and cross-pane targets are
     // accepted here — Command::LayoutStackMove already validates everything
     // else (existence, non-empty source, etc.) via move_stack_member.
-    let events = crate::server::service::dispatch_to_reducer(
-        state,
+    let (tab_id, _) = apply_pane_tab_command(state, "pane.moveTab", &cmd.block_id, |tab_id| {
         agentmux_common::ipc::Command::LayoutStackMove {
-            tab_id: tab_id.clone(),
+            tab_id,
             block_id: cmd.block_id.clone(),
             target_block_id: cmd.target_block_id.clone(),
             position,
             activate: cmd.activate,
             correlation_id: String::new(),
-        },
-    )
-    .await;
-    if let Some(msg) = events.iter().find_map(|e| match e {
-        agentmux_common::ipc::Event::Error { message, .. } => Some(message.clone()),
-        _ => None,
-    }) {
-        return Err(format!("pane.moveTab: {msg}"));
-    }
-    for ev in &events {
-        if let Err(e) = crate::persist_subscriber::apply_event_to_mstore(ev, mstore) {
-            tracing::warn!("pane.moveTab: mstore apply failed: {e}");
         }
-    }
-    crate::server::service::publish_events(state, &events);
-    if let Err(e) = crate::server::service::layout_helpers::queue_target_stack_move(
+    })
+    .await?;
+    let queued = crate::server::service::layout_helpers::queue_target_stack_move(
         state,
         &tab_id,
         &cmd.block_id,
         &cmd.target_block_id,
         &cmd.position,
         cmd.activate,
+        cmd.action_id.as_deref().unwrap_or_default(),
     )
-    .await
-    {
-        tracing::warn!(block_id = %cmd.block_id, "pane.moveTab: stackmove queue failed: {e}");
-    }
+    .await;
     tracing::info!(block_id = %cmd.block_id, target = %cmd.target_block_id, position = %cmd.position, "pane.moveTab");
-    Ok(())
+    Ok(queued_revision("pane.moveTab", &cmd.block_id, queued))
+}
+
+/// `pane.activateTab`: make `block_id` its pane's visible tab
+/// (`Command::LayoutStackActivate`), then queue a `stackactivate` under the
+/// caller's action id for any other view of the tab.
+pub(crate) async fn activate_tab(state: &AppState, cmd: CommandPaneTabData) -> Result<PaneTabEditResult, String> {
+    let block_id = cmd.block_id.clone();
+    let (tab_id, _) = apply_pane_tab_command(state, "pane.activateTab", &cmd.block_id, |tab_id| {
+        agentmux_common::ipc::Command::LayoutStackActivate { tab_id, block_id, correlation_id: String::new() }
+    })
+    .await?;
+    let action_id = cmd.action_id.as_deref().unwrap_or_default();
+    let queued = crate::server::service::layout_helpers::queue_stack_activate(state, &tab_id, &cmd.block_id, action_id).await;
+    Ok(queued_revision("pane.activateTab", &cmd.block_id, queued))
+}
+
+/// `pane.removeTab`: take `block_id` out of its pane — that one tab of a
+/// stack, or the pane with its last tab (`Command::LayoutDeleteNodeByBlock`) —
+/// then queue the `delete` under the caller's action id. The block itself is
+/// closed by `ClosePane`, which the caller sends next. A block in no pane is a
+/// no-op: nothing is queued and the revision is 0.
+pub(crate) async fn remove_tab(state: &AppState, cmd: CommandPaneTabData) -> Result<PaneTabEditResult, String> {
+    let block_id = cmd.block_id.clone();
+    let (tab_id, changed) = apply_pane_tab_command(state, "pane.removeTab", &cmd.block_id, |tab_id| {
+        agentmux_common::ipc::Command::LayoutDeleteNodeByBlock { tab_id, block_id, correlation_id: String::new() }
+    })
+    .await?;
+    if !changed {
+        return Ok(PaneTabEditResult { layout_revision: 0 });
+    }
+    let action_id = cmd.action_id.as_deref().unwrap_or_default();
+    let queued = crate::server::service::layout_helpers::queue_stack_remove(state, &tab_id, &cmd.block_id, action_id).await;
+    Ok(queued_revision("pane.removeTab", &cmd.block_id, queued))
+}
+
+/// Resolve `block_id`'s tab, then dispatch `cmd` → mstore → publish, the
+/// shape every pane-tab RPC shares. Returns the tab and whether the reducer
+/// changed anything.
+async fn apply_pane_tab_command(
+    state: &AppState,
+    op: &str,
+    block_id: &str,
+    cmd: impl FnOnce(String) -> agentmux_common::ipc::Command,
+) -> Result<(String, bool), String> {
+    let tab_id = resolve_tab_id_for_block(&state.mstore, block_id).map_err(|e| format!("{op}: {e}"))?;
+    let events = crate::server::service::dispatch_to_reducer(state, cmd(tab_id.clone())).await;
+    if let Some(msg) = events.iter().find_map(|e| match e {
+        agentmux_common::ipc::Event::Error { message, .. } => Some(message.clone()),
+        _ => None,
+    }) {
+        return Err(format!("{op}: {msg}"));
+    }
+    for ev in &events {
+        if let Err(e) = crate::persist_subscriber::apply_event_to_mstore(ev, &state.mstore) {
+            tracing::warn!("{op}: mstore apply failed: {e}");
+        }
+    }
+    crate::server::service::publish_events(state, &events);
+    Ok((tab_id, !events.is_empty()))
+}
+
+/// The revision a pane-tab RPC answers with. A failed queue is logged, not
+/// returned: the tree change already happened, and 0 means the caller counts
+/// nothing as seen.
+fn queued_revision(op: &str, block_id: &str, queued: Result<u64, String>) -> PaneTabEditResult {
+    let layout_revision = queued.unwrap_or_else(|e| {
+        tracing::warn!(block_id, "{op}: queueing the frontend action failed: {e}");
+        0
+    });
+    PaneTabEditResult { layout_revision }
 }

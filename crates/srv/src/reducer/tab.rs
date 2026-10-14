@@ -50,6 +50,7 @@ pub(super) fn handle_create_tab(
             focused_node_id: String::new(),
             magnified_node_id: String::new(),
             rootnode: None,
+            layout_revision: 0,
         },
     );
     let workspace = state.workspaces.get_mut(&workspace_id).expect("checked");

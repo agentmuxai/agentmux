@@ -40,6 +40,8 @@ mod workspace;
 use agentmux_common::ipc::{Command, ErrorCode, Event};
 use crate::state::State;
 
+pub(crate) use layout::stale_push_revision;
+
 /// Text in the `MoveTab` last-tab refusal; `MoveTabToWorkspace` matches on
 /// it to return its long-standing error string unchanged.
 pub const MOVE_TAB_LAST_TAB_ERROR: &str = "cannot move last tab out of workspace";
@@ -161,7 +163,7 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
             target_block_id,
             meta,
             activate,
-        } => layout::handle_create_block_in_stack(state, tab_id, target_block_id, meta, activate),
+        } => layout::handle_create_block_in_stack(state, tab_id, target_block_id, ctx.new_id.clone(), meta, activate),
         // SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §4.1 — reorder within a
         // pane or move a tab into a different pane.
         Command::LayoutStackMove {
