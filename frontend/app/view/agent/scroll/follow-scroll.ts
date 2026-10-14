@@ -122,7 +122,8 @@ export function createFollowScroll(
         mark();
         const target = e.target instanceof Element ? e.target : null;
         const nested = target?.closest(NESTED_SCROLLER);
-        if (e.deltaY < 0 && !(nested && scroller.contains(nested))) escape("wheel-up");
+        // The scroller may be such a box itself (a tool preview): only one inside it defers.
+        if (e.deltaY < 0 && !(nested && nested !== scroller && scroller.contains(nested))) escape("wheel-up");
     };
     const onTouch = (): void => mark();
     const onPointerDown = (e: PointerEvent): void => {

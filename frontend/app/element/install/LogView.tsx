@@ -14,8 +14,11 @@
  * to line N" exact.
  *
  * Sticks to the bottom while output streams unless the user scrolled up
- * (40px threshold, re-checked inside the rAF — the pattern proven in
- * ToolOverlayLog.tsx and SystemToolInstallInline, codex P2 on PR #3165).
+ * (40px threshold, re-checked inside the rAF; #3165). With
+ * `agent:followcontroller` on, the agent pane's follow state machine decides
+ * instead: only a user gesture detaches, and a user scroll back within 24 px
+ * re-attaches (SPEC_AGENT_PANE_SCROLL_FOLLOW_STATE_MACHINE_2026_09_24.md
+ * Phase 3).
  */
 
 import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, type JSX } from "solid-js";
@@ -23,6 +26,8 @@ import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, ty
 import { ContextMenuModel } from "@/app/store/contextmenu";
 import { redactSecrets } from "@/app/errors/redact";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
+import { followControllerOn } from "@/app/view/agent/scroll/follow-setting";
+import { createFollowScroll, type FollowScroll } from "@/app/view/agent/scroll/follow-scroll";
 
 import { parseAnsi } from "./ansi";
 import type { LogLine } from "./install-session";
@@ -58,6 +63,10 @@ interface Row {
 export const LogView = (props: LogViewProps): JSX.Element => {
     let el: HTMLDivElement | undefined;
     let stickToBottom = true;
+    // The follow state machine, when `agent:followcontroller` is on (bound on mount).
+    const controller = followControllerOn();
+    let follow: FollowScroll | null = null;
+    const geometry = (e: HTMLElement) => ({ scrollTop: e.scrollTop, scrollHeight: e.scrollHeight, clientHeight: e.clientHeight });
     // Where this component last scrolled itself. A programmatic scroll's
     // event arrives a frame later, often after a burst of lines has grown
     // the log, so it reads as "the user left the bottom". An event at the
@@ -100,7 +109,12 @@ export const LogView = (props: LogViewProps): JSX.Element => {
         requestAnimationFrame(() => {
             // Re-check at execution time: the user may have scrolled away
             // between scheduling and now.
-            if (stickToBottom && el && el.isConnected) {
+            if (follow) {
+                if (!el?.isConnected || !follow.observed("content", geometry(el))) return;
+                scrollTo(el.scrollHeight);
+                follow.noteGeometry(geometry(el));
+                measure();
+            } else if (stickToBottom && el && el.isConnected) {
                 scrollTo(el.scrollHeight);
                 measure();
             }
@@ -109,7 +123,8 @@ export const LogView = (props: LogViewProps): JSX.Element => {
 
     const onScroll = () => {
         if (!el) return;
-        if (el.scrollTop !== ownScrollTop) {
+        if (follow) follow.scrolled(geometry(el), follow.windowOpen() || follow.pointerHeld());
+        else if (el.scrollTop !== ownScrollTop) {
             ownScrollTop = null;
             stickToBottom = el.scrollHeight - el.scrollTop - el.clientHeight < STICK_THRESHOLD_PX;
         }
@@ -123,13 +138,26 @@ export const LogView = (props: LogViewProps): JSX.Element => {
         on(
             () => props.lines().length + props.trimmedLines(),
             (size, prev) => {
-                if (prev !== undefined && size < prev) stickToBottom = true;
+                if (prev !== undefined && size < prev) {
+                    stickToBottom = true;
+                    follow?.reset();
+                }
                 followIfStuck();
             },
         ),
     );
 
     onMount(() => {
+        if (controller && el) {
+            follow = createFollowScroll(el, {
+                pin: followIfStuck,
+                loadOlder: () => {},
+                hasOlderHistory: () => false,
+                loadingOlder: () => false,
+                transition: () => {},
+            });
+            onCleanup(() => follow?.dispose());
+        }
         measure();
         // A resize with no scroll — the narrow-pane breakpoint changing the
         // box from 200px to 140px, a window resize, Details opening — would
@@ -144,6 +172,7 @@ export const LogView = (props: LogViewProps): JSX.Element => {
             scrollToLine: (index) => {
                 if (!el) return;
                 stickToBottom = false;
+                follow?.jumpToNode(`line-${index}`);
                 scrollTo(Math.max(0, (index + markerRows() - 2) * LOG_ROW_PX));
                 measure();
             },
