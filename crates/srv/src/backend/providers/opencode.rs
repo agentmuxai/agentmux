@@ -15,7 +15,8 @@ pub(super) static OPENCODE: ProviderConfig = ProviderConfig {
     persistent_launch_args: None,
     resume_flag: None,
     session_id_field: "sessionId",
-    styled_output_format: "acp",
+    // ACP, read with the turn's token usage (the frontend's translator-factory.ts).
+    styled_output_format: "opencode-acp",
     // OpenCode keeps auth.json and its session database under
     // XDG_DATA_HOME/opencode; OPENCODE_CONFIG_DIR doesn't move them.
     auth_config_dir_env_var: "XDG_DATA_HOME",

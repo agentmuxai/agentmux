@@ -644,8 +644,9 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         cliCommand: "opencode",
         defaultArgs: [],
         styledArgs: [],
-        outputFormat: "acp",
-        styledOutputFormat: "acp",
+        // ACP read with the turn's token usage (translator-factory.ts).
+        outputFormat: "opencode-acp",
+        styledOutputFormat: "opencode-acp",
         // Runs signed out on OpenCode Zen's free models and keeps its own sign-in
         // (`opencode auth login`): nothing to bind, no check to gate a launch on.
         authType: "cli-managed",

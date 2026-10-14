@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { StreamEvent } from "../types";
+import type { SessionStats, StreamEvent } from "../types";
 import type { OutputTranslator } from "./translator";
 import { ToolCorrelator, wrapOutput } from "./tool-correlation";
 
@@ -24,7 +24,10 @@ import { ToolCorrelator, wrapOutput } from "./tool-correlation";
  *   plan, usage_update, available_commands_update, current_mode_update,
  *   user_message_chunk   — not rendered
  *
- * The turn ends with the `session/prompt` response's `result.stopReason`.
+ * The turn ends with the `session/prompt` response's `result.stopReason`. Its
+ * `usage` is read only with `readsPromptUsage`: ACP leaves open whether it is
+ * per-turn or cumulative and whether `inputTokens` includes the cache
+ * (agent-client-protocol#1860), so it is turned on per agent once measured.
  *
  * The first version read a flat `params.type` (`agent_message_chunk`,
  * `tool_call`, `tool_result` with `content`/`toolName`/`input`), which no ACP
@@ -42,6 +45,8 @@ export class AcpTranslator implements OutputTranslator {
     // `named`: the name came from the call's own `name`/`title`, not its `kind`.
     private calls = new Map<string, { name: string; named: boolean; input: Record<string, any> }>();
 
+    constructor(private readonly opts: { readsPromptUsage?: boolean } = {}) {}
+
     translate(rawEvent: any): StreamEvent[] {
         if (!rawEvent || typeof rawEvent !== "object") return [];
 
@@ -51,7 +56,8 @@ export class AcpTranslator implements OutputTranslator {
         if (typeof stopReason === "string") {
             this.ended.clear();
             this.calls.clear();
-            return [{ type: "session_end", stats: {} }];
+            const stats = this.opts.readsPromptUsage ? promptUsageStats(rawEvent.result.usage) : {};
+            return [{ type: "session_end", stats }];
         }
 
         // A JSON-RPC error: a failed prompt, or a session the agent refused to
@@ -177,6 +183,32 @@ export class AcpTranslator implements OutputTranslator {
         this.ended.clear();
         this.calls.clear();
     }
+}
+
+/**
+ * A prompt response's `usage` as the turn's stats, for an agent measured to
+ * report it the way OpenCode 1.19 does: the turn's last model call, with
+ * `inputTokens` the uncached share beside `cachedReadTokens` and
+ * `cachedWriteTokens` (their sum is that call's whole prompt, `usage_update`'s
+ * `used`). Output is that call's too, plus its `thoughtTokens`.
+ */
+function promptUsageStats(usage: any): SessionStats {
+    if (!usage || typeof usage !== "object") return {};
+    const count = (v: unknown) => (typeof v === "number" && Number.isFinite(v) && v > 0 ? v : 0);
+    const fresh = count(usage.inputTokens);
+    const cacheRead = count(usage.cachedReadTokens);
+    const cacheCreation = count(usage.cachedWriteTokens);
+    const output = count(usage.outputTokens) + count(usage.thoughtTokens);
+    const stats: SessionStats = {};
+    const input = fresh + cacheRead + cacheCreation;
+    if (input > 0) {
+        stats.input_tokens = input;
+        stats.fresh_input_tokens = fresh;
+        stats.cache_creation_input_tokens = cacheCreation;
+        stats.cache_read_input_tokens = cacheRead;
+    }
+    if (output > 0) stats.output_tokens = output;
+    return stats;
 }
 
 /** The text of a ContentBlock (`{type: "text", text}`); "" for anything else. */
