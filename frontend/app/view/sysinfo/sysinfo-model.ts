@@ -14,7 +14,7 @@ import { WpsEvent } from "@/app/store/mps-events";
 
 import { DataItem, DefaultNumPoints, DefaultPlotMeta, DefaultPlotType, PlotTypes } from "./sysinfo-types";
 import { GapBackfiller } from "./sysinfo-backfill";
-import { FOCUS_CHOICES, type FocusArea, toFocusArea } from "./sysinfo-overview-data";
+import { FOCUS_CHOICES, type FocusArea, MAX_WINDOW_POINTS, toFocusArea } from "./sysinfo-overview-data";
 import { convertTimeSeriesToDataItem, getGapThresholdMs } from "./sysinfo-util";
 import type { ConnStatus } from "@/types/rpc/ConnStatus";
 import { readMuxEventHistory } from "@/app/store/mps-history";
@@ -336,7 +336,7 @@ class SysinfoViewModel {
         // its meta) before the global setting, before the default. A choice takes
         // effect at once, before the meta write comes back.
         this.numPoints = createMemo(() => {
-            const clamp = (n: number) => Math.max(30, Math.min(1024, n));
+            const clamp = (n: number) => Math.max(30, Math.min(MAX_WINDOW_POINTS, n));
             const chosen = this.windowChoice() ?? this.meta()?.["graph:numpoints"];
             if (chosen != null && chosen > 0) return clamp(chosen);
             const settingsNumPoints = atoms.fullConfigAtom()?.settings?.["telemetry:numpoints"];

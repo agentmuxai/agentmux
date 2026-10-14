@@ -33,7 +33,7 @@ import {
     formatGB,
     formatRate,
     mirroredRange,
-    WINDOW_CHOICES,
+    windowChoices,
     windowStats,
     type WindowStats,
 } from "./sysinfo-overview-data";
@@ -195,7 +195,10 @@ export function Overview(props: OverviewProps): JSX.Element {
                 <SegmentedControl
                     ariaLabel="Time window"
                     density="compact"
-                    options={WINDOW_CHOICES.map((c) => ({ value: String(c.points), label: c.label }))}
+                    options={windowChoices(props.intervalSecs).map((c) => ({
+                        value: String(c.points),
+                        label: c.label,
+                    }))}
                     value={String(props.windowPoints)}
                     onChange={(v) => props.onWindow(Number(v))}
                 />

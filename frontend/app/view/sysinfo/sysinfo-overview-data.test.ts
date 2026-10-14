@@ -12,6 +12,7 @@ import {
     formatRate,
     mirroredRange,
     toFocusArea,
+    windowChoices,
     volumes,
     windowStats,
     withBusiestCore,
@@ -129,5 +130,21 @@ describe("columnSpan", () => {
         expect(columnSpan(100_500, win, 1, 600)).toEqual([0, 5]);
         expect(columnSpan(90_000, win, 1, 600)).toBeNull();
         expect(columnSpan(130_000, [100, 100], 1, 600)).toBeNull();
+    });
+});
+
+describe("windowChoices", () => {
+    it("spans the labelled time at the sample interval", () => {
+        expect(windowChoices(1).map((c) => c.points)).toEqual([60, 120, 300, 900]);
+        expect(windowChoices(2)).toEqual([
+            { points: 30, label: "1m" },
+            { points: 60, label: "2m" },
+            { points: 150, label: "5m" },
+            { points: 450, label: "15m" },
+        ]);
+    });
+
+    it("leaves out a window longer than srv's history holds", () => {
+        expect(windowChoices(0.5).map((c) => c.label)).toEqual(["1m", "2m", "5m"]);
     });
 });

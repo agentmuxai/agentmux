@@ -160,10 +160,24 @@ export function columnSpan(
     return x1 > x0 ? [x0, x1] : null;
 }
 
-/** The window choices, in samples at the default 1 s interval. */
-export const WINDOW_CHOICES = [
-    { points: 60, label: "1m" },
-    { points: 120, label: "2m" },
-    { points: 300, label: "5m" },
-    { points: 900, label: "15m" },
+/** The most samples srv's history keeps, so the longest window a pane can fill. */
+export const MAX_WINDOW_POINTS = 1024;
+
+const WINDOWS = [
+    { secs: 60, label: "1m" },
+    { secs: 120, label: "2m" },
+    { secs: 300, label: "5m" },
+    { secs: 900, label: "15m" },
 ] as const;
+
+/**
+ * The window choices for samples `intervalSecs` apart, each as the number of
+ * samples it spans. A window longer than srv's history holds is left out
+ * rather than shown under a label it can't fill.
+ */
+export function windowChoices(intervalSecs: number): { points: number; label: string }[] {
+    const interval = intervalSecs > 0 ? intervalSecs : 1;
+    return WINDOWS.map((w) => ({ points: Math.round(w.secs / interval), label: w.label })).filter(
+        (c) => c.points <= MAX_WINDOW_POINTS
+    );
+}
