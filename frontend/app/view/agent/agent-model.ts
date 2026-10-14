@@ -525,8 +525,8 @@ export class AgentViewModel {
         // `is_persistent` AFTER applying this same container override; this is
         // that rule, in the path the UI actually launches through.
         const agentMode = overrides?.agentType ?? agent.agent_type ?? "host";
-        if (provider.controllerType === "terminal" && agentMode === "container") {
-            this.launchError = `${provider.displayName} runs in a terminal pane on this computer, not in a container.`;
+        if ((provider.controllerType === "terminal" || provider.controllerType === "msp") && agentMode === "container") {
+            this.launchError = `${provider.displayName} runs on this computer, not in a container.`;
             return false;
         }
         const isPersistent = isPersistentLaunch(provider, agentMode);

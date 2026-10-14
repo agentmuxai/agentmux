@@ -82,6 +82,7 @@ pub fn decide(inputs: &StateInputs) -> Option<AgentState> {
         blockcontroller::BLOCK_CONTROLLER_SUBPROCESS => true,
         blockcontroller::BLOCK_CONTROLLER_PERSISTENT
         | blockcontroller::BLOCK_CONTROLLER_ACP
+        | blockcontroller::BLOCK_CONTROLLER_MSP
         | blockcontroller::BLOCK_CONTROLLER_APP_SERVER => false,
         _ => return None,
     };
@@ -226,7 +227,7 @@ pub(crate) mod test_support {
 mod tests {
     use super::*;
     use crate::backend::blockcontroller::{
-        BLOCK_CONTROLLER_ACP, BLOCK_CONTROLLER_APP_SERVER, BLOCK_CONTROLLER_CMD, BLOCK_CONTROLLER_PERSISTENT,
+        BLOCK_CONTROLLER_ACP, BLOCK_CONTROLLER_APP_SERVER, BLOCK_CONTROLLER_CMD, BLOCK_CONTROLLER_MSP, BLOCK_CONTROLLER_PERSISTENT,
         BLOCK_CONTROLLER_SHELL, BLOCK_CONTROLLER_SUBPROCESS, STATUS_DONE, STATUS_INIT,
         STATUS_RUNNING,
     };
@@ -280,7 +281,7 @@ mod tests {
 
     #[test]
     fn every_agent_controller_reports_a_state() {
-        for t in [BLOCK_CONTROLLER_PERSISTENT, BLOCK_CONTROLLER_ACP, BLOCK_CONTROLLER_APP_SERVER, BLOCK_CONTROLLER_SUBPROCESS] {
+        for t in [BLOCK_CONTROLLER_PERSISTENT, BLOCK_CONTROLLER_ACP, BLOCK_CONTROLLER_MSP, BLOCK_CONTROLLER_APP_SERVER, BLOCK_CONTROLLER_SUBPROCESS] {
             assert_eq!(decide(&inputs(t, true, STATUS_RUNNING)), Some(AgentState::Working), "{t}");
         }
     }

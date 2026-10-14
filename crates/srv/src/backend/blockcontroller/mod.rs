@@ -22,10 +22,14 @@ pub mod core;
 pub mod durable_mode;
 pub mod durable_ssh;
 pub mod health;
+pub mod msp;
+mod msp_protocol;
+mod msp_session;
 pub mod persistent;
 mod persistent_resume;
 pub mod pidregistry;
 pub mod process_tree;
+pub mod session_agent;
 pub mod session_recovery;
 pub mod session_stats;
 pub mod shell;
@@ -68,6 +72,8 @@ pub const BLOCK_CONTROLLER_CMD: &str = "cmd";
 pub const BLOCK_CONTROLLER_SUBPROCESS: &str = "subprocess";
 pub const BLOCK_CONTROLLER_PERSISTENT: &str = "persistent";
 pub const BLOCK_CONTROLLER_ACP: &str = "acp";
+/// Muse Code over MSP (`muse serve`): msp.rs.
+pub const BLOCK_CONTROLLER_MSP: &str = "msp";
 pub const BLOCK_CONTROLLER_APP_SERVER: &str = "app-server";
 
 // ---- Block metadata key constants (match Go) ----
@@ -776,7 +782,7 @@ pub fn deliver_agent_message_from(
         });
     }
 
-    if ctrl.controller_type() == BLOCK_CONTROLLER_ACP {
+    if session_agent::is_session_agent_type(ctrl.controller_type()) {
         ctrl.send_input(BlockInputUnion::data(message.as_bytes().to_vec()), None)?;
         return Ok(AgentDelivery::Structured);
     }
@@ -1131,6 +1137,15 @@ pub fn resync_controller(
                 filestore,
             )
             .with_auth_key(auth_key.to_string());
+            let ctrl = Arc::new(ctrl);
+            register_controller(block_id, ctrl.clone());
+            let result = ctrl.start(block_meta.clone(), rt_opts, force);
+            notify_tracked_blocks_changed();
+            result
+        }
+        BLOCK_CONTROLLER_MSP => {
+            let ctrl = msp::MspController::new(block_id.to_string(), broker, event_bus, mstore, filestore)
+                .with_auth_key(auth_key.to_string());
             let ctrl = Arc::new(ctrl);
             register_controller(block_id, ctrl.clone());
             let result = ctrl.start(block_meta.clone(), rt_opts, force);

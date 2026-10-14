@@ -577,9 +577,8 @@ fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         };
                         subprocess_ctrl.spawn_turn(config)?;
                     }
-                } else if let Some(acp_ctrl) = ctrl
-                    .as_any()
-                    .downcast_ref::<blockcontroller::acp::AcpController>()
+                } else if let Some(acp_ctrl) =
+                    blockcontroller::session_agent::session_agent(ctrl.as_ref())
                 {
                     // If the agent exited, start it again; the message waits
                     // for the new session.

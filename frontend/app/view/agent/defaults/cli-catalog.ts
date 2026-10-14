@@ -279,9 +279,9 @@ const CLI_CATALOG: CliCatalogEntry[] = [
         primaryContextFile: "AGENTS.md",
         mcpSupport: "stdio+http",
         popoverMarkdown:
-            "Meta's coding agent, running Muse Spark, in its own terminal UI. Install it with Meta's installer and sign in with `muse login` or META_API_KEY. A Muse subscription runs in contributor mode by default, which lets Meta train on your content; change it in Muse's settings. It opens in a terminal pane for now.",
+            "Meta's coding agent, running Muse Spark. Install it with Meta's installer, then sign in with /login (Muse's own `muse login`) or set META_API_KEY. A Muse subscription runs in contributor mode by default, which lets Meta train on your content; change it in Muse's settings.",
         hostSupported: true,
-        // A terminal pane on the host.
+        // MSP runs on the host only (`muse serve`, no container path).
         containerSupported: false,
     },
 ];

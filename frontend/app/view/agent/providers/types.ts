@@ -57,8 +57,8 @@ export interface ProviderDefinition {
     cliCommand: string;
     defaultArgs: string[];
     styledArgs: string[];        // CLI flags for JSON streaming mode (documentation; use launchArgs for actual invocation)
-    outputFormat: "claude-stream-json" | "qwen-stream-json" | "gemini-json" | "codex-json" | "kimi-stream-json" | "agy-stream-json" | "acp" | "opencode-acp" | "raw";
-    styledOutputFormat: "claude-stream-json" | "qwen-stream-json" | "gemini-json" | "codex-json" | "kimi-stream-json" | "agy-stream-json" | "acp" | "opencode-acp" | "raw";
+    outputFormat: "claude-stream-json" | "qwen-stream-json" | "gemini-json" | "codex-json" | "kimi-stream-json" | "agy-stream-json" | "acp" | "opencode-acp" | "msp" | "raw";
+    styledOutputFormat: "claude-stream-json" | "qwen-stream-json" | "gemini-json" | "codex-json" | "kimi-stream-json" | "agy-stream-json" | "acp" | "opencode-acp" | "msp" | "raw";
     // "oauth": a per-account login AgentMux isolates and binds to the agent
     // (launch is blocked until an account is chosen). "api-key": a key from
     // the agent's bound account. "cli-managed": the CLI keeps its own sign-in for
@@ -105,8 +105,9 @@ export interface ProviderDefinition {
     // Controller type: "persistent" keeps a long-running process with stdin streaming,
     // "subprocess" spawns a fresh process per turn with --resume,
     // "acp" uses the Agent Client Protocol (JSON-RPC 2.0 over stdio).
+    // "msp": Muse Code's own protocol (`muse serve`, JSON-RPC 2.0 over stdio).
     // "terminal": the CLI's own UI in a terminal pane (no structured interface).
-    controllerType: "persistent" | "subprocess" | "acp" | "terminal";
+    controllerType: "persistent" | "subprocess" | "acp" | "msp" | "terminal";
     // Launch args for persistent mode (--input-format stream-json, no -p).
     // Only used when controllerType is "persistent".
     persistentLaunchArgs?: string[];

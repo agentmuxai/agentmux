@@ -8,6 +8,7 @@ import { CodexTranslator } from "./codex-translator";
 import { AcpTranslator } from "./acp-translator";
 import { KimiTranslator } from "./kimi-translator";
 import { AgyTranslator } from "./agy-translator";
+import { MspTranslator } from "./msp-translator";
 
 /**
  * Create an OutputTranslator for the given output format.
@@ -39,6 +40,8 @@ export function createTranslator(outputFormat: string, opts: { replay?: boolean 
         // (measured on 1.19.0; acp-translator.ts `promptUsageStats`).
         case "opencode-acp":
             return new AcpTranslator({ readsPromptUsage: true });
+        case "msp":
+            return new MspTranslator({ replay: opts.replay });
         default:
             console.warn(`[translator-factory] Unknown output format "${outputFormat}", falling back to Claude translator`);
             return new ClaudeTranslator({ replay: opts.replay });

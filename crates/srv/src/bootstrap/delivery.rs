@@ -100,15 +100,13 @@ pub(crate) fn route_agent_message_from(
             // false for a live process whose delivery failed for another reason;
             // both keep returning the original error rather than start a second
             // turn.
-            // An ACP agent whose process exited likewise: the turn path
-            // starts it again (`AcpController::ensure_started`).
+            // An ACP or MSP agent whose process exited likewise: the turn
+            // path starts it again (`SessionAgent::ensure_started`).
             let recoverable = ctrl
                 .as_any()
                 .downcast_ref::<backend::blockcontroller::persistent::PersistentSubprocessController>()
                 .is_some_and(|p| p.needs_spawn())
-                || ctrl
-                    .as_any()
-                    .downcast_ref::<backend::blockcontroller::acp::AcpController>()
+                || backend::blockcontroller::session_agent::session_agent(ctrl.as_ref())
                     .is_some_and(|a| !a.is_running());
             if !recoverable {
                 return Err(e);

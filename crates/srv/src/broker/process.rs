@@ -141,7 +141,8 @@ impl ProcessStatus {
         match self.controller_type.as_str() {
             blockcontroller::BLOCK_CONTROLLER_SUBPROCESS
             | blockcontroller::BLOCK_CONTROLLER_PERSISTENT
-            | blockcontroller::BLOCK_CONTROLLER_ACP => true,
+            | blockcontroller::BLOCK_CONTROLLER_ACP
+            | blockcontroller::BLOCK_CONTROLLER_MSP => true,
             _ => self.is_agent_pane,
         }
     }
@@ -411,6 +412,7 @@ mod tests {
         for ty in [
             blockcontroller::BLOCK_CONTROLLER_PERSISTENT,
             blockcontroller::BLOCK_CONTROLLER_ACP,
+            blockcontroller::BLOCK_CONTROLLER_MSP,
         ] {
             let status = process_status_with(ty, false);
             assert!(status.is_agent(), "{ty} should always classify as agent");

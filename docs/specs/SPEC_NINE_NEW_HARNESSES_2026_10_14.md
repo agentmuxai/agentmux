@@ -114,7 +114,7 @@ The agent pane drops any output line that isn't JSON, so **a CLI with plain-text
 - It has no ACP.
 - Its documented, typed interface is MSP. MSP is ACP-like JSON-RPC over stdio, with item and delta notifications and token usage.
 - `muse exec --json` streams JSONL, but its event schema is undocumented.
-- A spike decides between an MSP controller and a subprocess translator. Until then it uses the terminal tier.
+- The spike (2026-10-14) chose MSP: an `msp` controller, like the ACP one, drives `muse serve` in an agent pane. See §7.7.
 
 **Isolation is verified against the real binary, not assumed.**
 - Pi's `PI_HOME` and Antigravity's `ANTIGRAVITY_CONFIG_DIR` turned out to be variables the CLIs never read.
@@ -243,7 +243,7 @@ Every harness PR does all of these, and the PR body ticks them.
 - **Two ways to drive it:**
   - **MSP:** `muse serve`, documented, typed, pre-1.0. Pin its schema fingerprint. This means a new controller, shaped like the ACP one.
   - **`muse exec --json`:** a subprocess translator, but its event schema is undocumented.
-  - A spike runs both against the installed binary and picks one. The terminal tier covers it until then.
+  - **Spike result (1.4.7-R6101.1):** MSP. `exec --json` prints Muse's internal log records, not a published contract, one process per prompt. `muse serve` is typed, reports its schema fingerprint in `initialize` (pinned in `blockcontroller/msp_protocol.rs`), takes MCP servers in `session/start`, and fails a signed-out turn with `authRequired` instead of hanging.
 - **Auth:** `META_API_KEY` or browser sign-in. Credentials are in `~/.config/muse/auth.json`; `MUSE_AUTH_PATH` overrides it.
 - **Terms and trust:**
   - Meta's subscription "works only through the Muse Code CLI". Spawning the CLI, which is what AgentMux does, is consistent with that. Reusing its key elsewhere is not.
