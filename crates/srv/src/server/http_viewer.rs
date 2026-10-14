@@ -17,9 +17,13 @@
 //!   `Authorization: Bearer amxv_…` only. Neither the `lan_key` nor the instance `auth_key` opens
 //!   them, and the token opens nothing else: no other router knows it.
 //!
-//! Read-only throughout. An agent hidden from paired devices is left out of
-//! the list and its feed is 404; agents of other channels on this machine
-//! are 404 too for now (they are not in this channel's registry).
+//! - `POST /agentmux/viewer/agents/:name/input` (`server::http_viewer_input`):
+//!   a message to an agent, as the user, from a device the owner allowed to
+//!   send, signed by the device's key.
+//!
+//! Read-only otherwise. An agent hidden from paired devices is left out of
+//! the list and its feed and input are 404; agents of other channels on this
+//! machine are 404 too for now (they are not in this channel's registry).
 
 use std::convert::Infallible;
 use std::net::SocketAddr;
@@ -66,6 +70,11 @@ pub fn build_viewer_router(state: AppState) -> Router {
         .route("/agentmux/viewer/hello", get(handle_viewer_hello))
         .route("/agentmux/viewer/agents", get(handle_viewer_agents))
         .route("/agentmux/viewer/agents/:name/feed", get(handle_viewer_feed))
+        .route(
+            "/agentmux/viewer/agents/:name/input",
+            post(super::http_viewer_input::handle_viewer_input)
+                .layer(axum::extract::DefaultBodyLimit::max(super::http_viewer_input::MAX_INPUT_BODY)),
+        )
         .route("/agentmux/viewer/procs", get(handle_viewer_procs))
         .route("/agentmux/viewer/panes", get(handle_viewer_panes))
         .route("/agentmux/viewer/sysinfo", get(super::http_viewer_sysinfo::handle_viewer_sysinfo))

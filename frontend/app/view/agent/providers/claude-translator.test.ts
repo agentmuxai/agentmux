@@ -5,6 +5,20 @@ import { describe, expect, it } from "vitest";
 import { ClaudeTranslator } from "./claude-translator";
 
 describe("ClaudeTranslator", () => {
+    // ── A message the user sent from a paired device ────────────────────────
+    describe("user message sent from a paired device", () => {
+        it("carries the device from the record's amx, and nothing else does", () => {
+            const t = new ClaudeTranslator();
+            const message = { role: "user", content: "Run the tests again" };
+            const [sent] = t.translate({ type: "user", message, amx: { via: "viewer", device: "Pixel 9", message_id: "m1" } });
+            expect(sent).toMatchObject({ type: "user_message", message: "Run the tests again", fromDevice: "Pixel 9" });
+            const [typed] = t.translate({ type: "user", message });
+            expect(typed).not.toHaveProperty("fromDevice");
+            const [odd] = t.translate({ type: "user", message, amx: { via: "swarm", device: "Pixel 9" } });
+            expect(odd).not.toHaveProperty("fromDevice");
+        });
+    });
+
     // ── User messages sent with images ───────────────────────────────────────
 
     describe("user message with image blocks", () => {

@@ -210,6 +210,11 @@ export const UserMessageBlock = (props: UserMessageBlockProps): JSX.Element => {
                     <span>{broadcastNoteLabel(props.node.broadcast!)}</span>
                 </div>
             </Show>
+            <Show when={props.node.fromDevice}>
+                <div class="agent-user-message-broadcast-note" title="Sent from a paired device">
+                    <i class="fa-solid fa-mobile-screen" aria-hidden="true" /> <span>From {props.node.fromDevice}</span>
+                </div>
+            </Show>
             <Show when={props.node.attachments?.length}>
                 <AttachmentStrip attachments={props.node.attachments!} />
             </Show>
