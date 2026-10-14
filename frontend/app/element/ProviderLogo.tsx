@@ -1,9 +1,10 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// Brand icons sourced from @lobehub/icons-static-svg (MIT) and one
-// vendor PNG. The SVGs use width="1em"/height="1em", so the wrapping
-// span's font-size drives the rendered pixel size. Mono icons inherit
+// Brand icons sourced from @lobehub/icons-static-svg (MIT) and two
+// vendor images (Plandex's PNG, Pi's SVG). The lobehub SVGs use
+// width="1em"/height="1em", so the wrapping span's font-size drives the
+// rendered pixel size. Mono icons inherit
 // fill="currentColor" — set `color` on the wrapper to flip them with
 // the theme.
 
@@ -19,6 +20,7 @@ import moonshotSvg from "@lobehub/icons-static-svg/icons/moonshot.svg?raw";
 import githubSvg from "@lobehub/icons-static-svg/icons/github.svg?raw";
 import awsSvg from "@lobehub/icons-static-svg/icons/aws-color.svg?raw";
 import plandexUrl from "@/app/element/icons/plandex.png?url";
+import piUrl from "@/app/element/icons/pi.svg?url";
 import brainSvg from "@/app/asset/logo-brain.svg?raw";
 import agentmuxIconUrl from "@/app/asset/agentmux-icon.png?url";
 import type { JSX } from "solid-js";
@@ -55,9 +57,12 @@ export const ProviderLogo = (props: ProviderLogoProps): JSX.Element => {
         if (p === "openclaw") return { html: openclawColorSvg };
         if (p === "aws") return { html: awsSvg };
         // Plandex only: Pi (pi-coding-agent) is a different project, and
-        // showing Plandex's mark on it named the wrong product. Pi falls
-        // through to the letter mark below.
+        // showing Plandex's mark on it named the wrong product.
         if (p === "plandex") return { png: plandexUrl };
+        // Pi's own mark, the three-colour logo from https://pi.dev/logo.svg
+        // (MIT, earendil-works/pi). It has no width/height, so it renders as
+        // an <img> at the requested size, like Plandex's PNG.
+        if (p === "pi") return { png: piUrl };
 
         if (p === "muxcode" || p === "mux-code" || p === "mux_code") return { html: brainSvg };
 
