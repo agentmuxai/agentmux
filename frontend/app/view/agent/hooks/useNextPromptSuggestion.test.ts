@@ -90,6 +90,24 @@ describe("useNextPromptSuggestion — hidden-turn suppression (reagentx P0, PR #
         dispose();
     });
 
+    it("leaves the suggestion on screen when a hidden reinjection starts, and clears it for a real turn", async () => {
+        const { setPhase, dispose } = setup();
+
+        setPhase({ kind: "Submitting", submittedAt: 1, pendingContent: "[agentmux: hidden memory reinjection]", hidden: true });
+        await Promise.resolve();
+        // Not the user's turn: whatever the composer shows stays.
+        expect(hub.updateMeta).not.toHaveBeenCalled();
+
+        setPhase({ kind: "Done", outcome: "completed", finishedAt: 2 });
+        setPhase({ kind: "Submitting", submittedAt: 3, pendingContent: "a real message", hidden: false });
+        await Promise.resolve();
+        expect(hub.updateMeta).toHaveBeenCalledWith(
+            "block:b",
+            expect.objectContaining({ "term:next_prompt_suggestion": null }),
+        );
+        dispose();
+    });
+
     it("DOES call it after a catch-up turn: its input is hidden but its reply, with suggested next steps, is shown", async () => {
         const { setPhase, bumpTurnEnded, dispose } = setup();
 
