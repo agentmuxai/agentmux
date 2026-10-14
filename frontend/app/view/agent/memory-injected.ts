@@ -162,5 +162,8 @@ export function buildMemoryInjectedNode(
         items,
         timestamp: Number.isNaN(parsed) ? opts.now : parsed,
         sizeBand: memorySizeBand(personalTokens, opts.contextWindow ?? FALLBACK_CONTEXT_WINDOW),
+        // The document pairs it with its hidden message's row where pages
+        // meet (`agent-document/fallback-echo.ts`).
+        ...(e.fallback === true ? { fallback: true } : {}),
     };
 }
