@@ -1325,7 +1325,15 @@ impl Handler {
         // from disk is the accepted residual, spec open question 5).
         // `revoked` is forcing, above; a verdict with no instance proves no
         // install and relaxes nothing.
-        let is_cryptographically_verified = req.sig_verified == Some(true)
+        // Any check that ran and FAILED rules the relaxation out: a sender
+        // can't cancel one with another tier's success. Before, a LAN jekt
+        // claiming a name this instance hosts failed the local HMAC check
+        // (`sig_verified == Some(false)`) yet relaxed to ESCALATE=none on a
+        // LAN key pinned on first sight from whoever answered for the name.
+        let any_check_failed = [req.sig_verified, req.reagent_verified, req.lan_verified, req.channel_verified, req.wan_verified]
+            .contains(&Some(false));
+        let is_cryptographically_verified = !any_check_failed
+            && (req.sig_verified == Some(true)
             || req.reagent_verified == Some(true)
             || req.lan_verified == Some(true)
             || req.channel_verified == Some(true)
@@ -1334,7 +1342,7 @@ impl Handler {
                 && matches!(
                     wan_instance_status,
                     Some(super::types::WanInstanceStatus::Approved | super::types::WanInstanceStatus::New)
-                ));
+                )));
         // SPEC_JEKT_TRANSCRIPT_REQUEST_TIER_RULES_2026_08_22.md rule 2: the
         // ONE named exception to the verified-sender relaxation above. A
         // transcript_request's ESCALATE=required is not relaxed by a

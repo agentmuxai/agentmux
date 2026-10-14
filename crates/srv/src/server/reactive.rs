@@ -369,6 +369,9 @@ pub(super) fn verify_jekt_signature(state: &AppState, req: &mut InjectionRequest
                 &key, &msgid, &claimed, &req.target_agent, ts, &req.message, sig,
             )
         });
+    if !verified {
+        tracing::warn!(agent_id = %claimed, fresh = within_freshness_window, "host jekt signature missing or did not verify");
+    }
     req.sig_verified = Some(verified);
 }
 
@@ -503,6 +506,10 @@ pub(super) async fn verify_lan_signature(state: &AppState, req: &mut InjectionRe
     use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
     let observed_key_b64 = BASE64.encode(&observed_key);
     let Ok(pinned_key_b64) = state.mstore.lan_peer_pubkey_pin_get_or_set(&claimed, &observed_key_b64) else {
+        // A signature was carried and couldn't be checked against the pin:
+        // fail closed, never as "unverified but harmless".
+        tracing::warn!(agent_id = %claimed, "LAN pubkey pin store unreadable: signature counted as failed");
+        req.lan_verified = Some(false);
         return;
     };
     if pinned_key_b64 != observed_key_b64 {
@@ -527,6 +534,9 @@ pub(super) async fn verify_lan_signature(state: &AppState, req: &mut InjectionRe
             &req.message,
             sig,
         );
+    if !verified {
+        tracing::warn!(agent_id = %claimed, fresh = within_freshness_window, "LAN jekt signature did not verify");
+    }
     req.lan_verified = Some(verified);
     lan_v2::claim_uid(state, req, &claimed);
 }
