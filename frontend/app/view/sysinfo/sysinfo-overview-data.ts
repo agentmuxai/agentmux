@@ -170,14 +170,37 @@ const WINDOWS = [
     { secs: 900, label: "15m" },
 ] as const;
 
+/** A window's length as a button reads it: "90s", "4m", "2.5m". */
+export function formatWindow(secs: number): string {
+    if (secs < 60) return `${secs}s`;
+    const m = secs / 60;
+    return Number.isInteger(m) ? `${m}m` : `${m.toFixed(1)}m`;
+}
+
 /**
  * The window choices for samples `intervalSecs` apart, each as the number of
  * samples it spans. A window longer than srv's history holds is left out
- * rather than shown under a label it can't fill.
+ * rather than shown under a label it can't fill. `currentSecs`, the window
+ * shown now, is added in its place when it is none of them (one set as a
+ * sample count before the pane chose a time), so a button is always selected.
  */
-export function windowChoices(intervalSecs: number): { secs: number; points: number; label: string }[] {
+export function windowChoices(
+    intervalSecs: number,
+    currentSecs?: number
+): { secs: number; points: number; label: string }[] {
     const interval = intervalSecs > 0 ? intervalSecs : 1;
-    return WINDOWS.map((w) => ({ secs: w.secs, points: Math.round(w.secs / interval), label: w.label })).filter(
-        (c) => c.points <= MAX_WINDOW_POINTS
-    );
+    const choices: { secs: number; points: number; label: string }[] = WINDOWS.map((w) => ({
+        secs: w.secs,
+        points: Math.round(w.secs / interval),
+        label: w.label,
+    })).filter((c) => c.points <= MAX_WINDOW_POINTS);
+    if (currentSecs != null && currentSecs > 0 && !choices.some((c) => c.secs === currentSecs)) {
+        choices.push({
+            secs: currentSecs,
+            points: Math.round(currentSecs / interval),
+            label: formatWindow(currentSecs),
+        });
+        choices.sort((a, b) => a.secs - b.secs);
+    }
+    return choices;
 }

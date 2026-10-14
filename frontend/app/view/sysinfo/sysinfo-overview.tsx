@@ -204,7 +204,7 @@ export function Overview(props: OverviewProps): JSX.Element {
                 <SegmentedControl
                     ariaLabel="Time window"
                     density="compact"
-                    options={windowChoices(props.intervalSecs).map((c) => ({
+                    options={windowChoices(props.intervalSecs, props.windowSecs).map((c) => ({
                         value: String(c.secs),
                         label: c.label,
                     }))}

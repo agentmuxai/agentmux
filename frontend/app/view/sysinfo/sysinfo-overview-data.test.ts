@@ -12,6 +12,7 @@ import {
     formatRate,
     mirroredRange,
     toFocusArea,
+    formatWindow,
     windowChoices,
     volumes,
     windowStats,
@@ -146,5 +147,23 @@ describe("windowChoices", () => {
 
     it("leaves out a window longer than srv's history holds", () => {
         expect(windowChoices(0.5).map((c) => c.label)).toEqual(["1m", "2m", "5m"]);
+    });
+});
+
+describe("a window set as a sample count", () => {
+    it("shows as a button of its own when it is none of the choices", () => {
+        // 120 samples at 2 s: four minutes.
+        expect(windowChoices(2, 240).map((c) => [c.label, c.secs])).toEqual([
+            ["1m", 60],
+            ["2m", 120],
+            ["4m", 240],
+            ["5m", 300],
+            ["15m", 900],
+        ]);
+        expect(windowChoices(1, 300)).toHaveLength(4);
+    });
+
+    it("reads in seconds or minutes", () => {
+        expect([formatWindow(45), formatWindow(240), formatWindow(150)]).toEqual(["45s", "4m", "2.5m"]);
     });
 });
