@@ -205,13 +205,17 @@ export function useNextPromptSuggestion(opts: UseNextPromptSuggestionOptions): v
 
     createEffect(on(turnPhase, (phase) => {
         if (phase.kind === "Submitting") {
-            activeTurnId++;
             // A catch-up turn is hidden in its input only: its reply is shown, so
             // the suggestion that follows it is wanted.
             lastTurnWasHidden = phase.hidden === true && phase.pendingContent !== CATCH_UP_TURN_PLACEHOLDER_CONTENT;
-            // A hidden reinjection is not the user's turn and asks for no
-            // suggestion at its end, so it must not wipe the one on screen.
-            if (!lastTurnWasHidden) clearSuggestion(blockId); // guard 1 — see module doc comment
+            // A hidden reinjection is not the user's turn: it asks for no
+            // suggestion at its end, so it must neither wipe the one on screen
+            // nor supersede a request still in flight for the turn before it (an
+            // automatic compaction's fallback starts right as that turn ends).
+            if (!lastTurnWasHidden) {
+                activeTurnId++;
+                clearSuggestion(blockId); // guard 1 — see module doc comment
+            }
         }
     }));
 
