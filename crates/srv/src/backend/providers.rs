@@ -404,9 +404,6 @@ pub fn known_install_paths(provider_id: &str) -> Vec<std::path::PathBuf> {
     }
 }
 
-/// `%LOCALAPPDATA%\agy\bin\agy.exe` on Windows and `~/.local/bin/agy`
-/// elsewhere: the default `TARGET_DIR` of Google's installers,
-/// https://antigravity.google/cli/install.ps1 and the `.sh` one beside it.
 /// Where goose's own installers put it: the PowerShell one in `~/.local/bin`,
 /// the shell one under Git Bash in `~/goose`; elsewhere `~/.local/bin`.
 fn goose_install_paths(home: Option<std::path::PathBuf>) -> Vec<std::path::PathBuf> {
@@ -424,6 +421,9 @@ fn grok_install_paths(home: Option<std::path::PathBuf>) -> Vec<std::path::PathBu
     home.map(|h| h.join(".grok").join("bin").join(exe)).into_iter().collect()
 }
 
+/// `%LOCALAPPDATA%\agy\bin\agy.exe` on Windows and `~/.local/bin/agy`
+/// elsewhere: the default `TARGET_DIR` of Google's installers,
+/// https://antigravity.google/cli/install.ps1 and the `.sh` one beside it.
 fn antigravity_install_paths(
     local_app_data: Option<std::path::PathBuf>,
     home: Option<std::path::PathBuf>,
