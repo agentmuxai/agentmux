@@ -423,7 +423,7 @@ fn run_npm_install(dir: &Path, package: &str, background: bool) -> std::io::Resu
             let prefix = dir.to_string_lossy().replace('/', "\\");
             let registry = npm_registry_args(package).join(" ");
             let cmdline = format!(
-                "npm install --loglevel=http --no-audit --no-fund --no-progress {registry} --prefix \"{prefix}\" {package}"
+                "npm install --loglevel=http --no-audit --no-fund --no-progress --legacy-peer-deps=false {registry} --prefix \"{prefix}\" {package}"
             );
             let mut c = std::process::Command::new("cmd");
             // `npm install` runs arbitrary postinstall scripts — no instance
@@ -446,6 +446,7 @@ fn run_npm_install(dir: &Path, package: &str, background: bool) -> std::io::Resu
                 "--no-audit",
                 "--no-fund",
                 "--no-progress",
+                "--legacy-peer-deps=false",
             ])
             .args(npm_registry_args(package))
             .arg("--prefix")

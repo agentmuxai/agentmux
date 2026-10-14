@@ -46,6 +46,9 @@ const HARNESS_NAMES: Record<string, string> = {
     kilo: "Kilo Code CLI",
     cline: "Cline CLI",
     opencode: "OpenCode",
+    goose: "goose",
+    grok: "Grok Build",
+    dsh: "DeepSeek Harness",
 };
 
 const VENDOR_NAMES: Record<string, string> = {

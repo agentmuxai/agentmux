@@ -988,6 +988,8 @@ impl Controller for AcpController {
         if let Some(pi) = crate::backend::providers::pi_beside_pi_acp(&cmd) {
             env_vars.entry("PI_ACP_PI_COMMAND".to_string()).or_insert(pi);
         }
+        let provider = super::super::obj::meta_get_string(&block_meta, "agentProvider", "");
+        super::acp_prelaunch::prepare(&provider, &env_vars, &session_cwd(&cwd));
         {
             let mut inner = self.inner.lock().unwrap();
             inner.mcp_json = std::fs::read_to_string(mcp_path).ok();

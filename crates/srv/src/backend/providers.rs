@@ -291,6 +291,9 @@ mod muxcode;
 mod copilot;
 mod antigravity;
 mod cline;
+mod dsh;
+mod goose;
+mod grok;
 mod kilo;
 mod opencode;
 
@@ -305,6 +308,9 @@ use muxcode::MUX_CODE;
 use copilot::COPILOT;
 use antigravity::ANTIGRAVITY;
 use cline::CLINE;
+use dsh::DSH;
+use goose::GOOSE;
+use grok::GROK;
 use kilo::KILO;
 use opencode::OPENCODE;
 
@@ -325,6 +331,9 @@ static REGISTRY: LazyLock<HashMap<&'static str, &'static ProviderConfig>> = Lazy
     m.insert(KILO.id, &KILO);
     m.insert(CLINE.id, &CLINE);
     m.insert(OPENCODE.id, &OPENCODE);
+    m.insert(GOOSE.id, &GOOSE);
+    m.insert(GROK.id, &GROK);
+    m.insert(DSH.id, &DSH);
     m
 });
 
@@ -354,6 +363,10 @@ static ALIASES: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(||
     m.insert("cline-cli", "cline");
     m.insert("opencode-ai", "opencode");
     m.insert("open-code", "opencode");
+    m.insert("goose-cli", "goose");
+    m.insert("grok-build", "grok");
+    m.insert("grok-cli", "grok");
+    m.insert("deepseek-harness", "dsh");
     m
 });
 
@@ -385,8 +398,27 @@ pub fn known_install_paths(provider_id: &str) -> Vec<std::path::PathBuf> {
             std::env::var_os("LOCALAPPDATA").map(std::path::PathBuf::from),
             dirs::home_dir(),
         ),
+        "goose" => goose_install_paths(dirs::home_dir()),
+        "grok" => grok_install_paths(dirs::home_dir()),
         _ => Vec::new(),
     }
+}
+
+/// Where goose's own installers put it: the PowerShell one in `~/.local/bin`,
+/// the shell one under Git Bash in `~/goose`; elsewhere `~/.local/bin`.
+fn goose_install_paths(home: Option<std::path::PathBuf>) -> Vec<std::path::PathBuf> {
+    let Some(h) = home else { return Vec::new() };
+    if cfg!(windows) {
+        vec![h.join(".local").join("bin").join("goose.exe"), h.join("goose").join("goose.exe")]
+    } else {
+        vec![h.join(".local").join("bin").join("goose")]
+    }
+}
+
+/// Where xAI's installers put Grok Build: `~/.grok/bin`.
+fn grok_install_paths(home: Option<std::path::PathBuf>) -> Vec<std::path::PathBuf> {
+    let exe = if cfg!(windows) { "grok.exe" } else { "grok" };
+    home.map(|h| h.join(".grok").join("bin").join(exe)).into_iter().collect()
 }
 
 /// `%LOCALAPPDATA%\agy\bin\agy.exe` on Windows and `~/.local/bin/agy`

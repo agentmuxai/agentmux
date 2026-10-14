@@ -206,6 +206,45 @@ const CLI_CATALOG: CliCatalogEntry[] = [
         // ACP runs on the host only (no container ACP path yet).
         containerSupported: false,
     },
+    {
+        provider: "goose",
+        displayName: "goose",
+        icon: "G",
+        blurb: "Open-source agent from the Linux Foundation",
+        primaryContextFile: "AGENTS.md",
+        mcpSupport: "stdio+http",
+        popoverMarkdown:
+            "An open-source, extensible agent (Agentic AI Foundation, Linux Foundation) that works with 15+ model providers. Install it with goose's own installer, then run `goose configure` once to pick a provider and key.",
+        hostSupported: true,
+        // ACP runs on the host only (no container ACP path yet).
+        containerSupported: false,
+    },
+    {
+        provider: "grok",
+        displayName: "Grok Build",
+        icon: "X",
+        blurb: "xAI's coding agent",
+        primaryContextFile: "AGENTS.md",
+        mcpSupport: "stdio+http",
+        popoverMarkdown:
+            "xAI's coding agent, running Grok 4.6 by default. Install it with xAI's installer, then sign in with `grok login` (a SuperGrok or X Premium+ account) or set XAI_API_KEY.",
+        hostSupported: true,
+        // ACP runs on the host only (no container ACP path yet).
+        containerSupported: false,
+    },
+    {
+        provider: "dsh",
+        displayName: "DeepSeek Harness",
+        icon: "D",
+        blurb: "DeepSeek's open-source harness (preview)",
+        primaryContextFile: "AGENTS.md",
+        mcpSupport: "stdio+http",
+        popoverMarkdown:
+            "DeepSeek's open-source agent harness. A preview: upstream ships prereleases and promises breaking changes. Set a DeepSeek API key in its web UI (`dsh web`) or as DEEPSEEK_API_KEY. AgentMux turns off its session-log upload to DeepSeek.",
+        hostSupported: true,
+        // ACP runs on the host only (no container ACP path yet).
+        containerSupported: false,
+    },
 ];
 
 /**

@@ -73,6 +73,10 @@ export interface ProviderDefinition {
     // its own registry (`ProviderConfig::companion_npm_packages`).
     companionNpmPackages?: { name: string; version: string }[];
     pinnedVersion: string;       // version to install ("latest" or specific)
+    // Where the newest release is published, for a CLI that isn't on npm
+    // (with npm, `npmPackage` says it). Read by the version drift report from
+    // this file, so keep each on one line.
+    versionSource?: { kind: "pypi" | "github-release" | "vendor"; package?: string; repo?: string; url?: string };
     docsUrl: string;
     windowsInstallCommand: string;  // official installer for Windows (powershell)
     unixInstallCommand: string;      // official installer for macOS/Linux (bash)

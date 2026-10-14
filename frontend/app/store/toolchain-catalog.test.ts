@@ -47,7 +47,7 @@ describe("CORE_TOOLS brand icons", () => {
 describe("LOCAL_MODEL_TOOLS", () => {
     it("lists the local runtimes and local-capable agent CLIs", () => {
         expect(LOCAL_MODEL_TOOLS.map((t) => t.id)).toEqual([
-            "ollama", "llama-cpp", "lmstudio", "llmfit", "goose", "crush", "aider",
+            "ollama", "llama-cpp", "lmstudio", "llmfit", "crush", "aider",
         ]);
     });
 

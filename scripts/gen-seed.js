@@ -144,6 +144,33 @@ const CLI_DEFS = [
         bus: "opencode",
         containerSupported: false,
     },
+    {
+        id: "goose",
+        name: "goose",
+        provider: "goose",
+        icon: "G",
+        description: "Open-source agent from the Linux Foundation",
+        bus: "goose",
+        containerSupported: false,
+    },
+    {
+        id: "grok",
+        name: "Grok Build",
+        provider: "grok",
+        icon: "X",
+        description: "xAI's coding agent",
+        bus: "grok",
+        containerSupported: false,
+    },
+    {
+        id: "dsh",
+        name: "DeepSeek Harness",
+        provider: "dsh",
+        icon: "D",
+        description: "DeepSeek's open-source harness (preview)",
+        bus: "dsh",
+        containerSupported: false,
+    },
 ];
 
 // ── Seeded bundles ─────────────────────────────────────────────────────
@@ -258,7 +285,7 @@ const SEED_MEMORIES = [
 ];
 
 const manifest = {
-    version: 12,
+    version: 13,
     agents: CLI_DEFS.map((d) => ({
         id: d.id,
         name: d.name,
