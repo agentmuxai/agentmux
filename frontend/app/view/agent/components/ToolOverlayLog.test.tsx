@@ -849,4 +849,50 @@ describe("ToolOverlayLog — no rebuild when the stream closes, none at all whil
         setOpen(true);
         expect(container.textContent).toContain("done");
     });
+
+    it("a dormant log whose tool finishes reads no geometry or computed style (no height FLIP for output nobody sees)", () => {
+        const [node, setNode] = createSignal<ToolNode>(streamingNode);
+        const [open, setOpen] = createSignal(true);
+        render(() => <ToolOverlayLog node={node()} open={open()} dormant={!open()} />);
+        setOpen(false);
+        const reads = { geometry: 0, style: 0 };
+        const realGetComputedStyle = window.getComputedStyle;
+        vi.spyOn(window, "getComputedStyle").mockImplementation((el: Element, pseudo?: string | null) => {
+            reads.style++;
+            return realGetComputedStyle(el, pseudo);
+        });
+        for (const prop of ["scrollHeight", "offsetHeight", "clientHeight"] as const) {
+            vi.spyOn(HTMLElement.prototype, prop, "get").mockImplementation(() => (reads.geometry++, 0));
+        }
+        setNode({ ...terminalNode, log: { open: false, chunks: [] } }); // branch changes: chunks -> none
+        expect(reads.style).toBe(0);
+        expect(reads.geometry).toBe(0);
+    });
+
+    it("holds the dispatch match with the node while the log can't be seen, and catches up when shown", () => {
+        const dispatch = (done: number) =>
+            ({
+                dispatch_id: "d1",
+                kind: "workflow",
+                parent_agent: "a",
+                parent_block_id: "b",
+                session_id: "s",
+                member_count: 4,
+                members_done: done,
+                status: "running",
+                last_event_at: 1,
+                display_name: "wf",
+            }) as unknown as import("../../swarm/swarm-model").AgentDispatch;
+        const workflowNode: ToolNode = { ...terminalNode, tool: "Workflow", log: undefined };
+        const [match, setMatch] = createSignal(dispatch(1));
+        const [open, setOpen] = createSignal(true);
+        const { container } = render(() => <ToolOverlayLog node={workflowNode} dispatchMatch={match()} open={open()} />);
+        expect(container.textContent).toContain("1/4 done");
+        setOpen(false);
+        setMatch(dispatch(3)); // a correlated dispatch update while the pane is dormant
+        expect(container.textContent).toContain("1/4 done");
+        expect(container.textContent).not.toContain("3/4 done");
+        setOpen(true);
+        expect(container.textContent).toContain("3/4 done");
+    });
 });

@@ -176,6 +176,11 @@ export const ToolOverlayLog = (props: ToolOverlayLogProps): JSX.Element => {
         props.open === false && prev !== undefined && branch() !== "none" ? prev : props.node
     ) as () => ToolNode;
     const shownChunks = (): ReadonlyArray<LogChunk> => shownNode().log?.chunks ?? [];
+    // The dispatch card's live data is held with the node: a correlated
+    // dispatch update must not rebuild a result while its pane is dormant.
+    const shownDispatch = createMemo<AgentDispatch | undefined>((prev) =>
+        props.open === false && branch() !== "none" ? prev : props.dispatchMatch
+    );
 
     // Scroll hand-off to the outer pane at this box's edges, with the skid, as
     // every preview box has (scroll-handoff.ts `previewBox`; this box carries
@@ -451,7 +456,11 @@ export const ToolOverlayLog = (props: ToolOverlayLogProps): JSX.Element => {
         }
         const el = scrollRef;
         // `el` is unset only on the very first run, during setup.
-        if (el && lastBranch !== undefined && b !== lastBranch) {
+        // Not while the log can't be seen: its branch changes when a dormant
+        // tool finishes, and measuring (computed style up the ancestors,
+        // scrollHeight, offsetHeight) and easing a height nobody sees would
+        // force the layout the dormancy gate exists to avoid.
+        if (el && lastBranch !== undefined && b !== lastBranch && props.open !== false) {
             pendingCommit = beginHeightContinuity(el, measureHeight, measureRenderedHeight);
         }
         lastBranch = b;
@@ -499,7 +508,7 @@ export const ToolOverlayLog = (props: ToolOverlayLogProps): JSX.Element => {
                 {/* One branch for the placeholder and the result: ToolOverlayResult
                     swaps them itself, without remounting. */}
                 <Match when={branch() === "result" || branch() === "empty"}>
-                    <ToolOverlayResult node={shownNode()} dispatchMatch={props.dispatchMatch} />
+                    <ToolOverlayResult node={shownNode()} dispatchMatch={shownDispatch()} />
                 </Match>
             </Switch>
             </div>
