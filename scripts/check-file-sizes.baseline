@@ -25,7 +25,6 @@
 2217 crates/srv/src/backend/history/index.rs
 1901 crates/srv/src/backend/history/mod.rs
 3275 crates/srv/src/backend/lan_discovery.rs
-1890 crates/srv/src/backend/providers.rs
 2448 crates/srv/src/backend/reactive/handler.rs
 3127 crates/srv/src/backend/storage/migrations.rs
 1799 crates/srv/src/backend/storage/muxbus.rs
