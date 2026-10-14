@@ -77,7 +77,7 @@ describe("identity-model SecretRef field-name translation", () => {
         // Live repro 2026-07-14: a Claude OAuth login persists a backend
         // SecretRef::OAuthConfigDir, which secretRefFromBackend's switch
         // didn't handle — it fell through and returned `undefined`, so
-        // opening the account in Armory → Accounts threw
+        // opening the account in Connectors → Accounts threw
         // "Cannot read properties of undefined (reading 'backend')".
         const wire = { backend: "oauth_config_dir", dir: "C:\\Users\\x\\.agentmux\\shared\\identities\\abc\\claude" } as const;
         const fe = __internal__.secretRefFromBackend(wire);

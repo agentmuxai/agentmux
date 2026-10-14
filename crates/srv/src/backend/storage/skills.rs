@@ -26,7 +26,7 @@ pub struct AgentSkill {
     pub agent_id: String,
     pub name: String,
     pub trigger: String,
-    /// Free-form rather than an enum: rows written by the Armory catalog and
+    /// Free-form rather than an enum: rows written by Memory → Skills and
     /// by older builds both land here, so a closed set would fail to read
     /// them back. `createagentskill` defaults it to "prompt".
     pub skill_type: String,
@@ -301,7 +301,7 @@ pub struct SkillListItem {
 }
 
 /// `skill_list_global`'s response shape: the skill plus how many agents
-/// currently hold a `db_agent_skills_ref` to it — the Armory catalog's
+/// currently hold a `db_agent_skills_ref` to it — Memory → Skills'
 /// "used by N agents" count (gap #2 of #1960).
 #[derive(Debug, Clone, Serialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
@@ -350,8 +350,8 @@ impl Store {
     /// path) and the `listagentskills` RPC handler, which the frontend's
     /// pre-launch `ListAgentSkillsCommand` call depends on for its own
     /// `buildConfigFiles` mirror. Before this was extracted, `listagentskills`
-    /// returned only legacy skills — silently hiding every standalone/Armory-
-    /// catalog skill (including any Agent-Skills-format one, see
+    /// returned only legacy skills — silently hiding every standalone/Memory →
+    /// Skills skill (including any Agent-Skills-format one, see
     /// SKILL_TYPE_AGENT_SKILL) from the actual "click Launch" flow, since
     /// that RPC is window-scoped (no `check_s1`) and can't call the
     /// agent-scoped `skill.list` RPC the way an already-running, authenticated
@@ -395,7 +395,7 @@ impl Store {
         }
     }
 
-    /// List every GLOBAL skill — the Armory catalog view. Unlike
+    /// List every GLOBAL skill — Memory → Skills. Unlike
     /// `skill_list`, this takes no `agent_id` and never includes an agent's
     /// private skills; it backs the window-scoped `skill.catalog.*` MuxAPI
     /// (no `check_s1`, so there is no agent context to scope by). Each row
@@ -420,8 +420,8 @@ impl Store {
     /// can carry sensitive agent-authored material) for an arbitrary
     /// caller-chosen `agent_id` would let any window connection read any
     /// agent's private skills. Global rows carry nothing per-agent-secret —
-    /// they're already fully visible via `skill_list_global` (the Armory
-    /// catalog) — so exposing them alongside a caller-chosen agent's bind
+    /// they're already fully visible via `skill_list_global` (Memory →
+    /// Skills) — so exposing them alongside a caller-chosen agent's bind
     /// status is safe. reagentx P0 on PR #2329.
     pub fn skill_list_global_for_agent(&self, catalog: &Store, agent_id: &str) -> Result<Vec<SkillListItem>, StoreError> {
         Ok(self
@@ -448,7 +448,7 @@ impl Store {
     /// Errors if `agent_id` isn't a LOCAL agent:
     /// `db_agent_skills_ref.agent_id` has an ON-enforced FK to
     /// `db_agents(id)` (store.rs; was `db_agent_definitions(id)` before
-    /// Phase 3c, #3088), but the Armory's agent
+    /// Phase 3c, #3088), but Memory's agent
     /// picker (`ListAgentDefinitionsCommand` → `agent_def_list()`) also
     /// lists cross-channel agents that only exist in another channel's
     /// local database. Binding one of those would otherwise have the FK

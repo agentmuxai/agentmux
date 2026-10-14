@@ -26,7 +26,7 @@ use super::controller::KILL_GRACE_SECS;
 use super::controller::{ShellController, SHELL_INPUT_CH_SIZE};
 use super::file_ops::handle_append_block_file;
 use super::pty::{
-    detect_local_shell_path_windows, FLUSHER_BARRIER_TIMEOUT, FLUSHER_EOF_GRACE,
+    FLUSHER_BARRIER_TIMEOUT, FLUSHER_EOF_GRACE,
     PTY_CHANNEL_CAPACITY, PTY_COALESCE_MAX_BYTES, PTY_READ_BUF_SIZE,
 };
 use super::translation::accumulate_and_translate;
@@ -762,13 +762,9 @@ impl Controller for ShellController {
                 Err(e) => return self.refuse_start(e),
             }
         } else {
-            // "shell" controller: interactive shell with AgentMux integration
-            // On Windows: prefer pwsh (PowerShell 7), fall back to powershell.exe (5.x), then cmd.exe
-            let shell_path = if cfg!(windows) {
-                detect_local_shell_path_windows()
-            } else {
-                std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string())
-            };
+            // "shell" controller: the block's or the default shell, with AgentMux integration (backend::shells).
+            let (shell_path, shell_opts) = crate::backend::shells::for_block(&self.block_id, &block_meta, &self.live_settings());
+            let shell_path = shell_path.display().to_string();
 
             let shell_type = crate::backend::shellintegration::detect_shell_type(&shell_path);
 
@@ -790,13 +786,11 @@ impl Controller for ShellController {
 
 
             // Apply shell-specific startup args (--rcfile, -File, etc.)
-            if let Some(startup) = crate::backend::shellintegration::get_shell_startup(shell_type, &shell_home) {
-                for arg in &startup.extra_args {
-                    c.arg(arg);
-                }
-                for (k, v) in &startup.env_vars {
-                    c.env(k, v);
-                }
+            let startup = crate::backend::shellintegration::get_shell_startup(shell_type, &shell_home);
+            let integration = startup.as_ref().map(|s| s.extra_args.as_slice()).unwrap_or_default();
+            c.args(crate::backend::shells::with_user_opts(integration, &shell_opts));
+            for (k, v) in startup.iter().flat_map(|s| &s.env_vars) {
+                c.env(k, v);
             }
 
             // Inject terminal capability env vars into the PTY environment.

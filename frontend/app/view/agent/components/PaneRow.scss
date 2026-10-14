@@ -95,7 +95,7 @@
 }
 
 // Labelled / primary / disabled action buttons — the failure-recovery row uses
-// text buttons (Retry now, Login Again, Armory) rather than bare glyphs.
+// text buttons (Retry now, Login Again, Connectors → Accounts) rather than bare glyphs.
 .pane-row-action {
     gap: var(--space-0-5);
 
@@ -126,7 +126,7 @@
 }
 
 // Labelled-action rows (failure recovery: Log in / Login via terminal / Bind /
-// Armory) wrap their buttons instead of clipping them. Buttons keep their normal
+// Connectors → Accounts) wrap their buttons instead of clipping them. Buttons keep their normal
 // look; only the flow changes.
 //
 // Wrapping is content-driven, NOT tied to a pane-width breakpoint: how wide the

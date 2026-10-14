@@ -2,13 +2,13 @@
 # (scripts/check-file-sizes.mjs). A file here may only shrink: run
 # `node scripts/check-file-sizes.mjs --update` after shrinking one. Adding a
 # file or raising a number is a hand edit that the PR has to justify.
-3706 crates/bashwrap/src/bash_wrap.rs
+3667 crates/bashwrap/src/bash_wrap.rs
 1972 crates/cef/src/client/lifecycle.rs
 1549 crates/cef/src/commands/cli_login.rs
 2225 crates/cef/src/commands/window_pool.rs
 1515 crates/cef/src/lib.rs
 1659 crates/cef/src/state/mod.rs
-2211 crates/cef/src/ui_tasks/window.rs
+2210 crates/cef/src/ui_tasks/window.rs
 2606 crates/common/src/data_paths.rs
 2268 crates/common/src/ipc.rs
 1848 crates/common/src/jekt_sign.rs
@@ -17,9 +17,8 @@
 1677 crates/srv/src/backend/blockcontroller/acp.rs
 1531 crates/srv/src/backend/blockcontroller/app_server.rs
 2647 crates/srv/src/backend/blockcontroller/app_server_protocol.rs
-1870 crates/srv/src/backend/blockcontroller/durable_ssh.rs
 1734 crates/srv/src/backend/blockcontroller/persistent/mod.rs
-3054 crates/srv/src/backend/blockcontroller/shell/lifecycle.rs
+3048 crates/srv/src/backend/blockcontroller/shell/lifecycle.rs
 1501 crates/srv/src/backend/bundle_import.rs
 2356 crates/srv/src/backend/container.rs
 1774 crates/srv/src/backend/fs_ops/host_jobs.rs
@@ -37,7 +36,7 @@
 3284 crates/srv/src/reducer/layout.rs
 1509 crates/srv/src/registry/migrate.rs
 2253 crates/srv/src/server/agent_handlers/input.rs
-1883 crates/srv/src/server/app_api/agent_open.rs
+1875 crates/srv/src/server/app_api/agent_open.rs
 1572 crates/srv/src/server/editor_handlers.rs
 2112 crates/srv/src/server/muxspect_handlers.rs
 1653 crates/srv/src/server/native_memory_handlers.rs

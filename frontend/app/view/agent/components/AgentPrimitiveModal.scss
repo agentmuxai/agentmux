@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Shared styles for the agent-scoped primitive list/detail tabs (MCP
-// Servers, Skills) hosted inside AgentStashModal, and reused by Armory's
-// own Skills/MCP Servers tabs (skill-manager.tsx / mcp-manager.tsx). Content
+// Servers, Skills) hosted inside AgentStashModal, and reused by the
+// Skills/MCP servers sections (skill-manager.tsx / mcp-manager.tsx). Content
 // styling only — the outer list/detail layout and the list-vs-detail toggle
 // live in PrimitiveListDetail (frontend/app/element/primitive-list-detail.tsx).
 // This used to be a fixed-width side-by-side split with no narrow-pane

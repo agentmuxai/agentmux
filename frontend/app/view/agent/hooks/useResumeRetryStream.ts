@@ -36,9 +36,8 @@
 import { onCleanup } from "solid-js";
 import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
-import { RpcApi } from "@/app/store/rpc-api";
-import { TabRpcClient } from "@/app/store/rpc-util";
 import type { AgentPaneModel } from "@/app/store/agent-pane-model";
+import { readMuxEventHistory } from "@/app/store/mps-history";
 
 export interface UseResumeRetryStreamOptions {
     blockId: string;
@@ -96,15 +95,11 @@ export function useResumeRetryStream(opts: UseResumeRetryStreamOptions): void {
     // isn't enough on a same-connection pane remount. `maxitems: 1` only
     // needs the single most recent status; `read_event_history` returns
     // oldest-first, so the last (only) element is current truth.
-    void RpcApi.EventReadHistoryCommand(TabRpcClient, {
-        event: WpsEvent.AgentResumeRetry,
-        scope: `block:${opts.blockId}`,
-        maxitems: 1,
-    })
+    void readMuxEventHistory(WpsEvent.AgentResumeRetry, `block:${opts.blockId}`, 1)
         .then((history) => {
             if (receivedLiveEvent) return;
-            const latest = history?.[history.length - 1];
-            if (latest) applyEvent(latest.data);
+            const latest = history[history.length - 1];
+            if (latest) applyEvent(latest);
         })
         .catch((e) => {
             console.log("[useResumeRetryStream] failed to load initial reconnect status", e);

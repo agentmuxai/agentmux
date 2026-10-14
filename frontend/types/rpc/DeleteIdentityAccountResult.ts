@@ -5,7 +5,7 @@
  */
 export type DeleteIdentityAccountResult = { deleted: boolean, 
 /**
- * Agents whose link to the account was removed (Armory delete-time disclosure).
+ * Agents whose link to the account was removed (delete-time disclosure).
  */
 affectedAgents: Array<string>, 
 /**

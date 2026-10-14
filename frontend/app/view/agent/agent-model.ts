@@ -75,8 +75,8 @@ export class AgentViewModel {
     // it's currently open, without holding a SolidJS context in the model.
     // Replaced the former separate _openIdentityModal / _openBundleModal
     // pair (Phase 3 slice 1 — one "Stash" icon opens a unified tabbed
-    // modal). Named "Stash" (not "Armory") to distinguish it from the
-    // global Armory pane — see
+    // modal). Named "Stash" to distinguish it from the app-wide
+    // Connectors and Memory panes — see
     // docs/reports/REPORT_ARMORY_STASH_NAMING_2026_07_27.md.
     //
     // _closeAgentStashModal / _isAgentStashOpen added so the button can be
@@ -212,9 +212,9 @@ export class AgentViewModel {
             return [
                 {
                     elemtype: "toggleiconbutton",
-                    // Deliberately NOT the "vault" icon the global Armory
-                    // pane uses — this opens AgentStashModal, the per-agent
-                    // analogue of Armory, and a distinct name/icon is the
+                    // Deliberately NOT an icon the app-wide Connectors or
+                    // Memory panes use — this opens AgentStashModal, the
+                    // per-agent analogue of them, and a distinct name/icon is the
                     // whole point of the rename (previously shared "vault"
                     // "for parity," which was exactly the confusion between
                     // the two surfaces this fixes). See

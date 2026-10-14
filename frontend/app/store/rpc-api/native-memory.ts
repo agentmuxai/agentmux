@@ -3,7 +3,7 @@
 
 // Native (per-agent) memory files — `agent:memory:*` RPCs backed by
 // db_agent_native_memory. This is the agent-written Memory concept, NOT the
-// Armory Bundle (see ./bundle.ts). Split from the old `memory` module in Phase 1 of
+// Bundle (see ./bundle.ts). Split from the old `memory` module in Phase 1 of
 // docs/specs/SPEC_ARMORY_NAMING_CONSOLIDATION_2026_09_09.md.
 
 // The result shapes below are GENERATED from their Rust definitions by ts-rs

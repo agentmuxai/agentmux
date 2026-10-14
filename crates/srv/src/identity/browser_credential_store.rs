@@ -6,7 +6,7 @@
 //! reachable through another identity's browsing session.
 //!
 //! Reuses [`crate::identity::secret_store`]'s existing `keyring`-crate
-//! wrapper (already backing `SecretRef::Keychain` for Armory API keys) —
+//! wrapper (already backing `SecretRef::Keychain` for account API keys) —
 //! this module only builds the right account-key string and JSON-encodes
 //! the `{username, password}` pair; no new keychain code, no filesystem
 //! path involved (so `agentmux_common::data_paths::sanitize_path_segment`

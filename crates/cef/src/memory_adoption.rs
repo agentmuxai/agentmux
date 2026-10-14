@@ -4,17 +4,17 @@
 //! The human's confirmation for adopting an agent's memory from its earlier
 //! accounts (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.1.4).
 //!
-//! The Armory lists the candidates (`agent:memory:adoption_list`) and asks
+//! Memory → Personal lists the candidates (`agent:memory:adoption_list`) and asks
 //! for an adoption here (`memory_adoption_request`). That opens a separate
 //! approval subwindow — never a modal in the main window: the same reasoning
 //! as `credential_broker` (see `CredentialApprovalWindow.tsx`), since
 //! anything in the main window outside a pane is reachable by every agent's
 //! `UIQuery`/`UIClick`. Only the subwindow knows the `approval_id`; its
 //! `memory_adoption_decide` makes the host call srv's host-only
-//! `memoryadopt.Adopt`, and the outcome goes back to the Armory's window as
+//! `memoryadopt.Adopt`, and the outcome goes back to Memory's window as
 //! `memory-adoption-result`.
 //!
-//! An agent can click the Armory's button and open the subwindow; it can't
+//! An agent can click Memory's button and open the subwindow; it can't
 //! approve in it.
 //!
 //! The same window confirms releasing an agent's claim on a memory folder
@@ -60,7 +60,7 @@ fn pending() -> &'static Mutex<HashMap<String, Pending>> {
 }
 
 /// Open the approval subwindow for adopting `choices` of list `list_id`
-/// into `agent_id`, over the window `parent_label` (the Armory's). `summary`
+/// into `agent_id`, over the window `parent_label` (Memory's). `summary`
 /// is only what the human is shown; srv decides from the list it issued.
 pub fn request(
     state: &Arc<AppState>,
@@ -140,7 +140,7 @@ fn open(
 }
 
 /// The human decided in the subwindow. On approve, the host adopts through
-/// srv; either way the outcome goes to the Armory's window and the
+/// srv; either way the outcome goes to Memory's window and the
 /// subwindow closes.
 pub async fn decide(state: &Arc<AppState>, approval_id: &str, approve: bool) -> Result<serde_json::Value, String> {
     let Some(p) = pending().lock().remove(approval_id).filter(|p| p.at.elapsed() < APPROVAL_TTL) else {
@@ -180,7 +180,7 @@ pub async fn decide(state: &Arc<AppState>, approval_id: &str, approve: bool) -> 
 }
 
 /// The approval subwindow `label` closed before the human decided (or its
-/// parent window closed): drop the request and tell the Armory, so it isn't
+/// parent window closed): drop the request and tell Memory, so it isn't
 /// left waiting.
 pub fn cancel_for_window(state: &AppState, label: &str) {
     let dropped: Vec<Pending> = {

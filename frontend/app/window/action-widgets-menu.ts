@@ -19,6 +19,7 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { getApi } from "@/store/global";
 import { openWindowInheriting } from "@/app/store/window-appearance";
 import { fireAndForget } from "@/util/util";
+import { keyOfPinId } from "./action-widgets-config";
 
 export interface WidgetOpenAction {
     label: string;
@@ -36,7 +37,7 @@ export function buildWidgetOpenActions(
     shortName: string,
     wmap: Record<string, WidgetConfigType>
 ): WidgetOpenAction[] {
-    const widgetDef = wmap[`defwidget@${shortName}`];
+    const widgetDef = wmap[keyOfPinId(shortName)];
     const blockMeta = widgetDef?.blockdef?.meta as Record<string, unknown> | undefined;
     const view = (blockMeta?.["view"] as string) ?? null;
     if (!view) return [];

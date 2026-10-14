@@ -6,7 +6,7 @@
  * — SPEC_AGENT_LOGIN_FLOW_TIGHTENING_2026_09_04.md §3.3.
  *
  * The inverse of `bind-to-agent-menu.ts`'s `computeBindCandidates` (one
- * account → many agents, the Armory's perspective): this is one agent → many
+ * account → many agents, Connectors → Accounts' perspective): this is one agent → many
  * accounts, the failure row's perspective. Filtering RULES mostly follow
  * `SPEC_ACCOUNT_ADOPTION_PIGGYBACK_LOGIN_2026_08_09.md` §2.3 — alias
  * canonicalization on both sides, OAuth-class accounts only, exclude the

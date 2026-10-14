@@ -4,14 +4,14 @@
 /**
  * Preloaded MCP Server catalog — Phase B of
  * docs/specs/SPEC_MCP_INTEGRATION_PARITY_ABLETON_PILOT_2026_07_08.md §4.6.
- * A small built-in manifest list shown in the Armory's "+ Browse catalog"
+ * A small built-in manifest list shown in Connectors' "+ Browse catalog"
  * picker: selecting an entry pre-fills the existing add-server form instead
  * of requiring the user to hand-type a command/args JSON blob.
  *
  * `prereqNote` is deliberately NOT a `db_mcp_servers` column — §5's schema
  * migration for that (plus `config_hash`/`disabled_tools`) never shipped in
  * #2030 (that PR was scoped to just the probe + mcp-capabilities.ts). This
- * file is the source of truth for prereq text instead; the Armory joins a
+ * file is the source of truth for prereq text instead; Connectors joins a
  * created server back to its catalog entry by exact `name` match to show it
  * (see mcp-manager.tsx). That join breaks if a user renames the server after
  * creating it from the catalog — acceptable known limitation for Phase B,
@@ -33,7 +33,7 @@ export interface McpPreloadEntry {
     /** Static remediation text — shown in the picker, and next to a created
      *  server's probe status when that status isn't "connected" (spec §6's
      *  acceptance bar: a user who hasn't opened the app yet should see this
-     *  sentence in the Armory, not a bare "Error"). */
+     *  sentence in Connectors, not a bare "Error"). */
     prereqNote: string;
     /** Set only for Tier B entries with real code-exec risk inside the
      *  third-party app (SPEC_ARMORY_PRELOADED_CREATIVE_MCP_CONNECTORS

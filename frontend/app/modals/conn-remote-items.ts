@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// The connection picker's remote sections: the Remotes pane's list in a
+// The connection picker's remote sections: the Connectors → Remotes list in a
 // smaller form (SPEC_REMOTES_PANE_2026_10_05.md §4.7): Pinned, SSH hosts,
 // Recent and WSL, each remote with its nickname and colour. Hidden remotes
 // stay out, unless the pane is on one.

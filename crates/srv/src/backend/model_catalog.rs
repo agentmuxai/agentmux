@@ -39,7 +39,7 @@ use crate::identity::secret_store;
 /// `identity::secret_store::put`/`get`. Those wrap it in `account_key()`
 /// (`"acct:{account_id}"`), so the actual keychain entry is
 /// `"acct:system:claude-code-oauth-token"` — this constant only needs to be
-/// distinct as an *account id* from the per-identity Armory account ids used
+/// distinct as an *account id* from the per-identity account ids used
 /// elsewhere (see `identity::resolver`, `identity::oauth_client`), which are
 /// account UUIDs and would never collide with this sentinel string. This is a
 /// single, system-wide fallback token, not tied to any AgentMux identity.

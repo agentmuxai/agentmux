@@ -1035,10 +1035,10 @@ pub fn run(windows_sandbox_info: *mut std::ffi::c_void) -> i32 {
     }
     tracing::info!("CEF cache dir: {}", data_dir.display());
     let cache_dir = CefString::from(data_dir.to_str().unwrap_or(""));
-    // Expose root_cache_path. Per-window RequestContexts no longer place
-    // anything under it (they are in-memory — see
-    // `create_isolated_request_context`), but the legacy-litter sweep below
-    // and future consumers still need the resolved path.
+    // Expose root_cache_path. Secondary windows share the default context
+    // (`commands::secondary_window_request_context`) and create nothing under
+    // it, but the legacy-litter sweep below and future consumers still need
+    // the resolved path.
     *app_state.cef_cache_dir.lock() = Some(data_dir.to_string_lossy().to_string());
     // Remove dirs left by the earlier isolated-context path schemes
     // (`browser-contexts/`, `ctx-*`) — labels are per-run UUIDs, so they can

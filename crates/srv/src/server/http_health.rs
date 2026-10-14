@@ -189,6 +189,8 @@ pub(super) async fn stub_501() -> impl IntoResponse {
 /// (SPEC_STREAMING_BASH_RUNNER_2026_05_11.md §3.2). `agentmux-bashwrap`
 /// POSTs here while running a Bash command; we forward to the
 /// in-process MPS broker so subscribed frontends receive the event.
+/// A client event declared in `mps_events` (`client_events!`) must carry its
+/// payload type, or it is refused with 400.
 pub(super) async fn handle_wps_publish(
     State(state): State<AppState>,
     Json(req): Json<WpsPublishRequest>,
@@ -211,8 +213,14 @@ pub(super) async fn handle_wps_publish(
             return (StatusCode::OK, Json(json!({"ok": true})));
         }
     }
-    // untyped-relay: publishes an event a process outside srv built (agentmux-bashwrap, wsh), as
-    // it was sent.
+    // A declared client event goes out typed, or not at all if its data isn't its payload.
+    match crate::backend::mps_events::publish_client_event(&state.broker, &req.event, &req.data, &req.scopes, req.persist) {
+        Some(Ok(())) => return (StatusCode::OK, Json(json!({"ok": true}))),
+        Some(Err(e)) => return (StatusCode::BAD_REQUEST, Json(json!({"error": e}))),
+        None => {}
+    }
+    // untyped-relay: publishes any other event a process outside srv built (wsh, an external
+    // tool), as it was sent.
     let event = crate::backend::mps::MuxEvent {
         event: req.event,
         scopes: req.scopes,

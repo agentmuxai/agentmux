@@ -149,7 +149,7 @@ async function runLogin(ctx: SlashCommandContext): Promise<SlashResult> {
         // (useAgentControllerStatus.relogin) — opens the OAuth in an in-app
         // browser pane, or falls through to the global-login copy / real-terminal
         // tiers when the CLI produces no scrapeable URL. See run-provider-login.ts.
-        // linkTarget lets a tier-3 success register a real Armory account
+        // linkTarget lets a tier-3 success register a real account
         // bound to this agent (PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20.md §7).
         const agentDefinitionId = ctx.block()?.meta?.["agentId"] as string | undefined;
         const linkTarget = agentDefinitionId

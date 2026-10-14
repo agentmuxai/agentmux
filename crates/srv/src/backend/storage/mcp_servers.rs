@@ -119,7 +119,7 @@ pub struct McpServerListItem {
 }
 
 /// `mcp_server_list_global`'s response shape: the server plus how many
-/// agents currently hold a `db_agent_mcp_ref` to it — the Armory catalog's
+/// agents currently hold a `db_agent_mcp_ref` to it — Connectors → MCP servers'
 /// "used by N agents" count (gap #2 of #1960).
 #[derive(Debug, Clone, Serialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
@@ -216,7 +216,7 @@ impl Store {
         Ok(())
     }
 
-    /// List every GLOBAL MCP server — the Armory catalog view. Unlike
+    /// List every GLOBAL MCP server — Connectors → MCP servers. Unlike
     /// `mcp_server_list`, this takes no `agent_id` and never includes an
     /// agent's private servers; it backs the window-scoped `mcp.catalog.*`
     /// MuxAPI (no `check_s1`, so there is no agent context to scope by).
@@ -245,7 +245,7 @@ impl Store {
     /// arbitrary caller-chosen `agent_id` would let any window connection
     /// read any agent's private server config. Global rows carry no
     /// per-agent secret — they're already fully visible via
-    /// `mcp_server_list_global` (the Armory catalog) — so exposing them
+    /// `mcp_server_list_global` (Connectors → MCP servers) — so exposing them
     /// alongside a caller-chosen agent's bind status is safe.
     /// reagentx P0 on PR #2329.
     pub fn mcp_server_list_global_for_agent(&self, catalog: &Store, agent_id: &str) -> Result<Vec<McpServerListItem>, StoreError> {
@@ -281,7 +281,7 @@ impl Store {
     /// Errors if `agent_id` isn't a LOCAL agent:
     /// `db_agent_mcp_ref.agent_id` has an ON-enforced FK to
     /// `db_agents(id)` (store.rs; was `db_agent_definitions(id)` before
-    /// Phase 3c, #3088), but the Armory's agent
+    /// Phase 3c, #3088), but Connectors' agent
     /// picker (`ListAgentDefinitionsCommand` → `agent_def_list()`) also
     /// lists cross-channel agents that only exist in another channel's
     /// local database. Binding one of those would otherwise have the FK

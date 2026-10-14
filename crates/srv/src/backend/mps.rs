@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 pub const EVENT_BLOCK_CLOSE: &str = "blockclose";
 #[allow(dead_code)]
 pub const EVENT_CONN_CHANGE: &str = "connchange";
-/// The Remotes pane's list changed in a way `connchange` doesn't cover: a
+/// The Connectors → Remotes list changed in a way `connchange` doesn't cover: a
 /// remote's settings, or a recent one forgotten (SPEC_REMOTES_PANE_2026_10_05.md §4.6).
 pub const EVENT_REMOTES_CHANGE: &str = "remoteschange";
 /// The widget packages changed: installed, approved, edited, removed
@@ -448,6 +448,13 @@ impl Broker {
         for event in to_send {
             client.send_event(route_id, event);
         }
+    }
+
+    /// Whether any route is subscribed to `event_name`, in any scope. For a
+    /// publisher that can skip measuring what nobody reads.
+    pub fn has_subscribers(&self, event_name: &str) -> bool {
+        let inner = self.inner.lock().unwrap();
+        inner.sub_map.get(event_name).is_some_and(|bs| !bs.is_empty())
     }
 
     /// Unsubscribe a route from a specific event.
@@ -973,6 +980,31 @@ mod tests {
         });
 
         assert!(client.received_events().is_empty());
+    }
+
+    /// A publisher that measures something for a subscriber asks this before
+    /// doing the work: any route, any scope, and gone again once the last
+    /// route unsubscribes.
+    #[test]
+    fn test_has_subscribers_follows_any_subscription_of_the_event() {
+        let broker = Broker::new();
+        assert!(!broker.has_subscribers(EVENT_BLOCK_STATS));
+        let sub = |event: &str, scopes: Vec<&str>, allscopes: bool| SubscriptionRequest {
+            event: event.to_string(),
+            scopes: scopes.into_iter().map(String::from).collect(),
+            allscopes,
+        };
+        broker.subscribe("route-1", sub(EVENT_BLOCK_STATS, vec!["block:abc"], false));
+        assert!(broker.has_subscribers(EVENT_BLOCK_STATS), "an exact scope counts");
+        assert!(!broker.has_subscribers(EVENT_SYS_INFO), "another event doesn't");
+        broker.subscribe("route-2", sub(EVENT_BLOCK_STATS, vec![], true));
+        broker.unsubscribe("route-1", EVENT_BLOCK_STATS);
+        assert!(broker.has_subscribers(EVENT_BLOCK_STATS), "route-2 still watches every scope");
+        broker.subscribe("route-3", sub(EVENT_BLOCK_STATS, vec!["block:*"], false));
+        broker.unsubscribe_all("route-2");
+        assert!(broker.has_subscribers(EVENT_BLOCK_STATS), "a wildcard scope counts");
+        broker.unsubscribe_all("route-3");
+        assert!(!broker.has_subscribers(EVENT_BLOCK_STATS));
     }
 
     /// Regression: replay-on-subscribe delivers persisted events that

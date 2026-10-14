@@ -33,7 +33,7 @@ const records = [
 ];
 
 describe("the picker's remote sections", () => {
-    it("are the Remotes pane's sections, without Hidden", () => {
+    it("are the Connectors → Remotes sections, without Hidden", () => {
         const scopes = remoteSuggestionScopes(records, "", undefined, () => 2);
         expect(scopes.map((s) => [s.headerText, s.items.map((i) => i.value)])).toEqual([
             ["Pinned", ["db1"]],

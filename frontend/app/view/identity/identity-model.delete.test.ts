@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// The Armory's delete flow: one confirmation reached from the row menu and
+// Connectors → Accounts' delete flow: one confirmation reached from the row menu and
 // the detail panel, and a result the user always sees
 // (SPEC_ARMORY_ACCOUNTS_DELETE_AND_INLINE_DETAIL_2026_10_04.md §3.1, §3.3, §3.5).
 
@@ -43,7 +43,7 @@ function modelWith(accounts: Account[]): IdentityViewModel {
     return model;
 }
 
-describe("Armory delete flow", () => {
+describe("account delete flow", () => {
     beforeEach(() => {
         deleteMock.mockReset();
     });

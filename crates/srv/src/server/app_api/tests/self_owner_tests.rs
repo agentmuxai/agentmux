@@ -54,14 +54,14 @@ async fn an_attributed_self_call_is_about_the_callers_row() {
     state.mstore.agent_identity_link("uid-so-y", "acct-so-y", "claude").unwrap();
     let y2 = SelfOwner::Uid("uid-so-y2");
 
-    let accounts = |v: serde_json::Value| v["accounts"].as_array().unwrap().len();
+    let accounts = |v: identity::IdentitySelfAccountsResult| v.accounts.len();
     assert_eq!(accounts(identity_self_accounts_impl(&state, y2).await.unwrap()), 0);
     assert_eq!(accounts(identity_self_accounts_impl(&state, "agenty").await.unwrap()), 1);
     let err = identity_account_validate_stored_impl(&state, y2, "acct-so-y").await.unwrap_err();
     assert!(err.starts_with("FORBIDDEN"), "{err}");
 
-    assert_eq!(bundle_self_get_impl(&state, y2).await.unwrap()["id"], "bundle-so-y2");
-    assert_eq!(bundle_self_get_impl(&state, "agenty").await.unwrap()["id"], "bundle-so-y");
+    assert_eq!(bundle_self_get_impl(&state, y2).await.unwrap().id, "bundle-so-y2");
+    assert_eq!(bundle_self_get_impl(&state, "agenty").await.unwrap().id, "bundle-so-y");
 
     let gone = SelfOwner::Uid("uid-so-gone");
     for err in [

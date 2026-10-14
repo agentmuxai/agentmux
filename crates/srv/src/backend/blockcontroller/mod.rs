@@ -17,6 +17,7 @@ pub mod app_server;
 pub mod app_server_controller;
 pub mod app_server_protocol;
 pub mod core;
+pub mod durable_mode;
 pub mod durable_ssh;
 pub mod health;
 pub mod persistent;
@@ -134,9 +135,7 @@ pub const META_KEY_CMD_INIT_SCRIPT_ZSH: &str = "cmd:initscript.zsh";
 pub const META_KEY_CMD_INIT_SCRIPT_FISH: &str = "cmd:initscript.fish";
 #[allow(dead_code)]
 pub const META_KEY_CMD_INIT_SCRIPT_PWSH: &str = "cmd:initscript.pwsh";
-#[allow(dead_code)]
 pub const META_KEY_TERM_LOCAL_SHELL_PATH: &str = "term:localshellpath";
-#[allow(dead_code)]
 pub const META_KEY_TERM_LOCAL_SHELL_OPTS: &str = "term:localshellopts";
 
 // ---- Default timeouts ----
@@ -997,14 +996,14 @@ pub fn resync_controller(
         // host, reached over ssh (durable_ssh.rs). Same `shell` type and
         // connection name as the meta says, so a resync keeps it.
         BLOCK_CONTROLLER_SHELL
-            if durable_ssh::wants(
+            if durable_mode::wants(
                 block_meta,
                 config.as_ref().map(|c| c.get_full_config()).as_deref(),
             ) =>
         {
             // When the user declines the helper, the pane restarts as a plain
             // SSH terminal: the same resync, forced, which then finds the
-            // pane no longer durable (durable_ssh::wants).
+            // pane no longer durable (durable_mode::wants).
             let fallback: durable_ssh::Fallback = {
                 let (block_id, tab_id, rt_opts) = (block_id.to_string(), tab_id.to_string(), rt_opts.clone());
                 let (broker, event_bus, mstore, filestore) =
@@ -1017,7 +1016,7 @@ pub fn resync_controller(
                     };
                     // Still durable: a restart would only start the same
                     // durable controller again. Leave the pane stopped.
-                    if durable_ssh::wants(&block.meta, config.as_ref().map(|c| c.get_full_config()).as_deref()) {
+                    if durable_mode::wants(&block.meta, config.as_ref().map(|c| c.get_full_config()).as_deref()) {
                         tracing::warn!(block_id = %block_id, "durable ssh: still durable, not falling back");
                         return false;
                     }

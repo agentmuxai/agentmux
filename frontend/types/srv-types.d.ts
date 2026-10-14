@@ -505,7 +505,6 @@ declare global {
     type FullConfigType = {
         settings: SettingsType;
         mimetypes: {[key: string]: MimeTypeConfigType};
-        defaultwidgets: {[key: string]: WidgetConfigType};
         widgets: {[key: string]: WidgetConfigType};
         presets: {[key: string]: MetaType};
         termthemes: {[key: string]: TermThemeType};
@@ -714,7 +713,6 @@ declare global {
         "onboarding:githubstar"?: boolean;
         "onboarding:lastversion"?: string;
         count?: number;
-        "widget:order"?: string[];
         "agent:*"?: boolean;
         agentId?: string;
         /** v6 — DB row id of the AgentInstance currently bound to this pane. */
@@ -907,9 +905,8 @@ declare global {
         "app:showtray"?: boolean;
         "app:startatlogin"?: boolean;
         "widget:*"?: boolean;
-        "widget:showhelp"?: boolean;
         "widget:icononly"?: boolean;
-        /** Pinned widget-bar icons, in order, as short names (`agent` for `defwidget@agent`). */
+        /** Pinned widget-bar icons, in order: a built-in's short name (`agent` for `defwidget@agent`), or an installed package widget's full key (`ext@<id>/<pane>`). */
         "widget:pinned"?: string[];
         /** Widget-bar entries the user hid, as full keys (`defwidget@drone`). */
         "widget:hidden"?: string[];
@@ -1355,7 +1352,8 @@ declare global {
     // wconfig.WidgetConfigType
     type WidgetConfigType = {
         "display:order"?: number;
-        "display:hidden"?: boolean;
+        /** Shown only inside its parent group's flyout, not on the bar, in More or in the pane pickers. Not the user's Hidden (`widget:hidden`). Older files call this `display:hidden`. */
+        "display:grouponly"?: boolean;
         "display:pinned"?: boolean;
         icon?: string;
         color?: string;

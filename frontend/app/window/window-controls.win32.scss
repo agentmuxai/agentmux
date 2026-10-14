@@ -8,16 +8,13 @@
 //   - 10×10 glyph centered
 //   - Minimize/Maximize hover/press: theme-relative neutral overlay
 //     (via --win-caption-hover-bg / --win-caption-press-bg below)
-//   - Close hover:         solid #c42b1c red with white glyph
-//   - Close press:         #b7201b slightly darker
+//   - Close hover:         solid red with white glyph
+//   - Close press:         slightly darker red
 //
-// Close button's red hover stays the exact OS value (#c42b1c / #b7201b)
-// since it's a brand colour, not surface-relative.
-
-/* stylelint-disable color-no-hex --
-   The Windows 11 close-button hover (#c42b1c) and press (#b7201b) red
-   are OS brand colours that must match Windows exactly — they aren't
-   theme-relative and don't map to a semantic token. */
+// The close reds are the exact Windows OS values, defined once as
+// --window-close-hover-bg / --window-close-press-bg / --window-close-fg in
+// theme.scss (shared with the pane headers' close button): a brand colour, not
+// surface-relative.
 
 .window-action-buttons {
     display: flex;
@@ -102,13 +99,13 @@
 
         &.close-btn {
             &:hover {
-                background-color: #c42b1c;
-                color: #ffffff;
+                background-color: var(--window-close-hover-bg);
+                color: var(--window-close-fg);
             }
 
             &:active {
-                background-color: #b7201b;
-                color: #ffffff;
+                background-color: var(--window-close-press-bg);
+                color: var(--window-close-fg);
             }
         }
     }

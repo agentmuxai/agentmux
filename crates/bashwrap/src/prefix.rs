@@ -56,19 +56,6 @@ pub struct CallRecord {
 /// The longest description reported for a call.
 const MAX_DESCRIPTION_CHARS: usize = 200;
 
-/// Reported once per linked call, so srv can say which tool call a process
-/// tree is (Tower's "started by"): this wrapper's pid, the call and what it
-/// does. srv keeps it and does not forward it to the pane, which would take
-/// an unknown op for output. SPEC_TOWER_AGENT_CENTRIC_VIEWS_2026_10_08.md §5.3.
-#[derive(Serialize)]
-struct CallMessage<'a> {
-    op: &'static str, // "call"
-    tool_id: &'a str,
-    pid: u32,
-    description: &'a str,
-    timestamp: u64,
-}
-
 /// The script, when this process was started as the CLI's shell prefix:
 /// exactly one argument, which is neither a subcommand nor a flag.
 ///
@@ -333,12 +320,15 @@ pub async fn run(script: String) -> Result<i32> {
     result
 }
 
-/// Tell srv which call this process runs (`CallMessage`). Best effort.
+/// Tell srv which call this process runs, once per linked call, so srv can say which tool call
+/// a process tree is (Tower's "started by"): this wrapper's pid, the call and what it does. srv
+/// keeps it and does not forward it to the pane, which would take an unknown op for output.
+/// SPEC_TOWER_AGENT_CENTRIC_VIEWS_2026_10_08.md §5.3. Best effort.
 async fn report_call(tool_id: String, description: String) {
     let Some(client) = crate::mps_client::WpsClient::from_env() else { return };
     let block_id = std::env::var("AGENTMUX_BLOCKID").ok().filter(|b| !b.is_empty());
     let description: String = description.chars().take(MAX_DESCRIPTION_CHARS).collect();
-    let msg = CallMessage { op: "call", tool_id: &tool_id, pid: std::process::id(), description: &description, timestamp: now_ms() };
+    let msg = agentmux_common::client_events::ToolChunk::Call { tool_id: tool_id.clone(), pid: std::process::id(), description, timestamp: now_ms() };
     if let Err(e) = client.publish_chunk(block_id.as_deref(), &msg).await {
         tracing::warn!(target: "bashwrap", tool_id, error = %e, "call report failed");
     }

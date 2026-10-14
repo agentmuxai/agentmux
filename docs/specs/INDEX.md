@@ -301,6 +301,7 @@ partial list.
 | [`SPEC_CI_COMPLETION_NOTIFICATIONS_2026_08_16`](SPEC_CI_COMPLETION_NOTIFICATIONS_2026_08_16.md) | SPEC: jekt notification when a PR's CI run completes (pass or fail) |
 | [`SPEC_CI_PATH_CONDITIONAL_CHECKS_2026_09_21`](SPEC_CI_PATH_CONDITIONAL_CHECKS_2026_09_21.md) | SPEC: skip the build on documentation-only PRs, safely |
 | [`SPEC_CLAUDE_MD_OWNERSHIP_PROTECTION_2026_08_22`](SPEC_CLAUDE_MD_OWNERSHIP_PROTECTION_2026_08_22.md) | Spec: protect a pre-existing project `CLAUDE.md` from AgentMux's overwrite |
+| [`SPEC_CODEGEN_REMAINING_GAPS_2026_10_13`](SPEC_CODEGEN_REMAINING_GAPS_2026_10_13.md) | What codegen still doesn't cover |
 | [`SPEC_CODEX_JSONL_CONTRACT_2026_08_08`](SPEC_CODEX_JSONL_CONTRACT_2026_08_08.md) | Codex CLI JSONL Adapter Contract |
 | [`SPEC_COLOR_THEME_TOKEN_HARDENING_2026_09_21`](SPEC_COLOR_THEME_TOKEN_HARDENING_2026_09_21.md) | SPEC: harden the Tailwind color system against silent per-theme breakage |
 | [`SPEC_COMPACTION_STARTED_RECONCILIATION_RACE_2026_09_02`](SPEC_COMPACTION_STARTED_RECONCILIATION_RACE_2026_09_02.md) | Spec: `compaction_started` Arriving Before Turn-Phase Reconciliation Drops the Ping Permanently |
@@ -318,6 +319,7 @@ partial list.
 | [`SPEC_CRATES_DIRECTORY_REORGANIZATION_2026_09_30`](SPEC_CRATES_DIRECTORY_REORGANIZATION_2026_09_30.md) | Move the Rust crates under `crates/`, with a merge freeze and a rebase plan |
 | [`SPEC_CREATE_AGENT_NAME_NO_PREFILL_2026_10_06`](SPEC_CREATE_AGENT_NAME_NO_PREFILL_2026_10_06.md) | Spec: The new-agent Name field starts empty, with ghost text |
 | [`SPEC_CTRL_SHIFT_SCROLL_ZOOM_ALL_PANES_2026_09_07`](SPEC_CTRL_SHIFT_SCROLL_ZOOM_ALL_PANES_2026_09_07.md) | Spec: Ctrl+Shift+Scroll zooms every pane in the window at once |
+| [`SPEC_DEFAULT_SHELL_SETTING_2026_10_13`](SPEC_DEFAULT_SHELL_SETTING_2026_10_13.md) | Default shell: a Settings picker that lists the shells installed, and shows the one in use |
 | [`SPEC_DEV_ENV_ISOLATION`](SPEC_DEV_ENV_ISOLATION.md) | Dev-Build Environment Isolation |
 | [`SPEC_DEV_INSTANCE_ISOLATION_DIAGNOSTICS_2026_09_19`](SPEC_DEV_INSTANCE_ISOLATION_DIAGNOSTICS_2026_09_19.md) | SPEC: Fix misleading guidance when a second `task dev` instance collides |
 | [`SPEC_DEV_MODE_LAUNCHER_IPC_2026_05_16`](SPEC_DEV_MODE_LAUNCHER_IPC_2026_05_16.md) | SPEC: Restore Launcher IPC in `task dev` Mode |
@@ -393,6 +395,7 @@ partial list.
 | [`SPEC_PANE_CLICK_THROUGH_INPUT_FOCUS_2026_09_23`](SPEC_PANE_CLICK_THROUGH_INPUT_FOCUS_2026_09_23.md) | Clicking an input in an unselected pane should focus that input — in one click |
 | [`SPEC_PANE_CLOSE_REOPEN_CONTINUITY_GUARANTEE_2026_07_27`](SPEC_PANE_CLOSE_REOPEN_CONTINUITY_GUARANTEE_2026_07_27.md) | Spec: pane close/reopen must guarantee conversation continuity, or say so |
 | [`SPEC_PANE_COLOR_SYSTEM_CONSOLIDATION_2026_09_20`](SPEC_PANE_COLOR_SYSTEM_CONSOLIDATION_2026_09_20.md) | SPEC: consolidate pane/tab color systems — persist explicit agent-pane picks, unify the tab-select indicator |
+| [`SPEC_PANE_CONTROLS_TILED_RESTORE_ICON_AND_MINIMIZE_FROM_MAXIMIZED_2026_10_12`](SPEC_PANE_CONTROLS_TILED_RESTORE_ICON_AND_MINIMIZE_FROM_MAXIMIZED_2026_10_12.md) | Spec — Pane controls: the outline maximize icon, a restore icon for a tiled layout, and minimizing a maximized pane directly |
 | [`SPEC_PANE_DRAG_TO_TAB_2026_07_10`](SPEC_PANE_DRAG_TO_TAB_2026_07_10.md) | Spec: Pane Drag-to-Tab (Cross-Tab Pane Relocation via Drag & Drop) |
 | [`SPEC_PANE_ENV_ISOLATION_2026_09_17`](SPEC_PANE_ENV_ISOLATION_2026_09_17.md) | SPEC: an instance's identity must not be inheritable by its panes |
 | [`SPEC_PANE_FILE_DROP_2026_05_30`](SPEC_PANE_FILE_DROP_2026_05_30.md) | SPEC: Drag-and-drop files into Terminal and Agent panes |
@@ -667,6 +670,7 @@ partial list.
 | [`SPEC_WINDOWS_LIFECYCLE_ROBUSTNESS_2026_06_26`](SPEC_WINDOWS_LIFECYCLE_ROBUSTNESS_2026_06_26.md) | Windows Lifecycle Robustness — Surviving External Termination |
 | [`SPEC_WINDOWS_PORTABLE_7Z_2026_10_11`](SPEC_WINDOWS_PORTABLE_7Z_2026_10_11.md) | Spec: ship the Windows portable as `.7z` instead of `.zip` |
 | [`SPEC_WINDOW_NAME_API_HARDENING_2026_08_08`](SPEC_WINDOW_NAME_API_HARDENING_2026_08_08.md) | SPEC: Window-name MuxAPI hardening (phantom-id success + status codes) |
+| [`SPEC_WINDOW_OPEN_LATENCY_AND_WARM_POOLS_2026_10_13`](SPEC_WINDOW_OPEN_LATENCY_AND_WARM_POOLS_2026_10_13.md) | Spec: opening a widget in a new window or a floating pane is fast every time |
 | [`SPEC_WINDOW_RESIZE_NO_PAINT_DELAY_2026_09_24`](SPEC_WINDOW_RESIZE_NO_PAINT_DELAY_2026_09_24.md) | SPEC — Window resize repaints pane content every frame, with no settle delay |
 | [`SPEC_WINGET_PACKAGE_BOOTSTRAP_2026_09_10`](SPEC_WINGET_PACKAGE_BOOTSTRAP_2026_09_10.md) | WinGet package bootstrap: `AgentMux.AI` |
 | [`linux-pool-startup-fill-2026-05-08`](linux-pool-startup-fill-2026-05-08.md) | Linux/macOS: wire startup-time window-pool fill |
@@ -760,6 +764,7 @@ partial list.
 | [`SPEC_MACOS_LAUNCH_SPEED_AND_SPLASH_TELEMETRY_2026_07_02`](SPEC_MACOS_LAUNCH_SPEED_AND_SPLASH_TELEMETRY_2026_07_02.md) | SPEC: macOS Launch Speed + Splash Load-Time Telemetry |
 | [`SPEC_MACOS_PACKAGING_2026_05_30`](SPEC_MACOS_PACKAGING_2026_05_30.md) | Spec: macOS packaging — signed, launchable `AgentMux.app` / `.dmg` |
 | [`SPEC_MACOS_TEAROFF_STABILITY_2026_05_29`](SPEC_MACOS_TEAROFF_STABILITY_2026_05_29.md) | macOS Tear-off Stability — implementation spec |
+| [`SPEC_MEDIA_OPEN_SHOWS_THE_MEDIA_PANE_2026_10_12`](SPEC_MEDIA_OPEN_SHOWS_THE_MEDIA_PANE_2026_10_12.md) | Spec: Clicking an image shows the Media pane it lands in |
 | [`SPEC_MEDIA_PANE_EMPTY_LOGO_2026_10_12`](SPEC_MEDIA_PANE_EMPTY_LOGO_2026_10_12.md) | Media pane: a faint AgentMux logo when no file is open |
 | [`SPEC_MEDIA_PANE_V2_AGENT_WORKFLOW_GAPS_2026_07_28`](SPEC_MEDIA_PANE_V2_AGENT_WORKFLOW_GAPS_2026_07_28.md) | Spec: Media pane v2 — gaps found running a real agent video-editing workflow through it |
 | [`SPEC_MEDIA_PANE_V3_BROWSER_AND_CUSTOM_TRANSPORT_2026_07_29`](SPEC_MEDIA_PANE_V3_BROWSER_AND_CUSTOM_TRANSPORT_2026_07_29.md) | Spec: Media pane v3 — persistent browser + custom playback/scrub UI |

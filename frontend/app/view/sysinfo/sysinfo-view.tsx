@@ -12,7 +12,7 @@ import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Sh
 
 import type { SysinfoViewModel } from "./sysinfo-model";
 import { SingleLinePlot } from "./sysinfo-plot";
-import { convertMuxEventToDataItem } from "./sysinfo-util";
+import { convertTimeSeriesToDataItem } from "./sysinfo-util";
 
 type SysinfoViewProps = {
     blockId: string;
@@ -52,9 +52,9 @@ function SysinfoView(props: SysinfoViewProps): JSX.Element {
     // the chart to blank under load and created a drop/reload feedback loop.
     createEffect(() => {
         const cn = connName();
-        const unsubFn = onMuxEvent(WpsEvent.SysInfo, (_data, event) => {
+        const unsubFn = onMuxEvent(WpsEvent.SysInfo, (data) => {
                 if (model.loadingAtom()) return;
-                const dataItem = convertMuxEventToDataItem(event);
+                const dataItem = convertTimeSeriesToDataItem(data);
                 if (dataItem == null) return;
                 model.appendData(dataItem);
             }, cn);

@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * "Bring Global Memory from…" — shown in Armory → Memory → Global on an
+ * "Bring Global Memory from…" — shown in Memory → Global on an
  * isolated channel (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.1.6).
  *
- * An isolated channel keeps its own Global Memory, so Armory testing there
+ * An isolated channel keeps its own Global Memory, so testing there
  * can't touch the real one. That also means it starts without the entries
  * people added elsewhere; this offers them, from the other scopes' records,
  * and adds only what this channel lacks. Nothing is shared silently.

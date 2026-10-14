@@ -301,18 +301,10 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
 fn register_agent_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let app_state = state.clone();
 
-    engine.register_handler(
-        COMMAND_AGENT_OPEN,
-        Box::new(move |data, _ctx| {
-            let app_state = app_state.clone();
-            Box::pin(async move {
-                let cmd: CommandAgentOpenData = serde_json::from_value(data)
-                    .map_err(|e| format!("agent.open: {e}"))?;
-                let result = open_agent_impl(&app_state, cmd).await?;
-                Ok(Some(serde_json::to_value(&result).unwrap()))
-            })
-        }),
-    );
+    engine.register_typed(COMMAND_AGENT_OPEN, move |cmd: CommandAgentOpenData, _ctx| {
+        let app_state = app_state.clone();
+        async move { open_agent_impl(&app_state, cmd).await }
+    });
 }
 
 /// The `agent.open` implementation — load the definition, resolve the

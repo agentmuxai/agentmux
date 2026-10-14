@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // AccountsManager — the context-free Accounts management UI, rendered as the
-// **Accounts** tab of the Armory (bundle-manager-modal). Phase 1 of
+// **Accounts** section of Connectors. Phase 1 of
 // docs/specs/archive/SPEC_TRUST_CENTER_2026_06_15.md: surface the existing IdentityAccount model
 // app-wide with no backend changes.
 //
@@ -39,7 +39,7 @@ export function AccountsManager(): JSX.Element {
     // module-level cache + `*IdentityAccountCommand` RPCs, so a synthetic id
     // and a stub nodeModel are safe. Created once per mount (SolidJS component
     // bodies run a single time).
-    const model = new IdentityViewModel("armory:accounts", {} as BlockNodeModel);
+    const model = new IdentityViewModel("connectors:accounts", {} as BlockNodeModel);
     onCleanup(() => model.dispose());
 
     // Shared AgentMux Cloud session controller — single source of truth for the
@@ -59,7 +59,7 @@ export function AccountsManager(): JSX.Element {
     };
 
     return (
-        // `accounts-manager` scopes the Armory-only density overrides in
+        // `accounts-manager` scopes the Connectors-only density overrides in
         // accounts-gallery.scss; the agent pane's Identity tab shares the
         // `.identity-*` row/header classes and keeps its own spacing.
         <div class="identity-view accounts-manager">
@@ -147,7 +147,7 @@ export function AccountsManager(): JSX.Element {
             </Show>
 
             <Show when={claudePanelOpen()}>
-                {/* Armory has no ModalLayer/PaneModalScope ancestor — "tab"
+                {/* Connectors has no ModalLayer/PaneModalScope ancestor — "tab"
                     resolves via tabcontent.tsx's outer ModalLayer scope="tab". */}
                 <ClaudeLoginPanel onClose={() => setClaudePanelOpen(false)} scope="tab" />
             </Show>

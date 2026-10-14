@@ -668,7 +668,7 @@ async fn write_file_records_a_version_with_default_provenance() {
     assert_eq!(history.versions[0].parent_version_id, None);
 }
 
-// SPEC_ARMORY_REACTIVE_UPDATES_2026_09_02.md: the Armory Personal Bundle
+// SPEC_ARMORY_REACTIVE_UPDATES_2026_09_02.md: the Memory → Personal
 // grid can only refresh a card the instant its agent's memory changes if
 // this handler actually publishes when it succeeds.
 #[tokio::test]
@@ -762,7 +762,7 @@ async fn write_file_refuses_an_unverified_blank_working_directory() {
 
 /// list's OLD behavior for a blank working_directory was to silently
 /// return an empty file list rather than error — indistinguishable in
-/// the Armory grid from "this agent genuinely has no memories" (the
+/// the Memory → Personal grid from "this agent genuinely has no memories" (the
 /// exact trap SPEC_ARMORY_PERSONAL_MEMORY_AGENT_BLOCKS_2026_09_01.md's
 /// four-state card design exists to avoid). This proves list now finds
 /// files that were written directly to the derived-default directory —
@@ -1356,7 +1356,7 @@ fn non_blank_working_directory_still_resolves_from_the_instance_row() {
 /// A blank `working_directory` — the DEFAULT for a newly defined agent —
 /// must resolve to the same path `agent.open` itself substitutes, not
 /// fail. Before the fix `memory_dir_for_agent` returned
-/// "agent <x> has no working directory" and Armory → Bundle → Personal
+/// "agent <x> has no working directory" and Memory → Personal
 /// (and the MemoryList MCP tool) were broken for the common case, while
 /// the agent's memory files sat on disk intact. Reproduced live:
 ///   memory/list failed: HTTP 500 — "memory: agent manoz has no working directory"

@@ -48,7 +48,7 @@ pub enum StoreError {
     },
 
     /// A conditional write whose base no longer matches the stored row — the
-    /// `base_sha256` check on the Armory's Global Memory save
+    /// `base_sha256` check on Memory → Global's save
     /// (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.4). The `conflict:`
     /// prefix is load-bearing: the frontend keys its "changed since you
     /// started editing" banner on it.

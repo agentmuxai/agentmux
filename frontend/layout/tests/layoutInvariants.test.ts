@@ -51,7 +51,7 @@ describe("validateLayoutInvariants", () => {
     //   │   └── branch (Row, minimizedSize=9)   ← illegal: MIN marker on branch
     //   │       ├── leaf term  (slipMinimize)
     //   │       └── leaf agent
-    //   └── leaf armory
+    //   └── leaf memory
     it("flags the corrupted tree recovered from the live 0.53.6 instance", () => {
         const term = newLayoutNode(FlexDirection.Column, 2.2, undefined, { blockId: "term" });
         term.slipMinimize = { targetColumnId: "x", originalRowSize: 10, originalRowIndex: 0, targetWasLeaf: true };
@@ -60,8 +60,8 @@ describe("validateLayoutInvariants", () => {
         midBranch.minimizedSize = 9;
         const outerCol = newLayoutNode(FlexDirection.Column, 30, [midBranch]);
         outerCol._slipAnchor = true;
-        const armory = newLayoutNode(FlexDirection.Column, 10, undefined, { blockId: "armory" });
-        const root = newLayoutNode(FlexDirection.Row, 10, [outerCol, armory]);
+        const memory = newLayoutNode(FlexDirection.Column, 10, undefined, { blockId: "memory" });
+        const root = newLayoutNode(FlexDirection.Row, 10, [outerCol, memory]);
 
         const violations = validateLayoutInvariants(root);
         expect(violations.map((v) => v.code)).toContain("MIN_MARKER_ON_BRANCH");

@@ -124,8 +124,8 @@ describe("provider/model round-trip", () => {
     });
 });
 
-// validateDraft() (Armory Bundle Format (ABF) UI-alignment pass) — the
-// Armory bundle editor's "Validate" button. Mocks RpcApi entirely since
+// validateDraft() (ABF UI-alignment pass) — the
+// Memory → Bundles editor's "Validate" button. Mocks RpcApi entirely since
 // BundleViewModel's constructor fires an unawaited ListBundlesCommand
 // refresh(); ValidateBundleCommand is the one under test.
 const listMemoriesMock = vi.fn().mockResolvedValue([]);

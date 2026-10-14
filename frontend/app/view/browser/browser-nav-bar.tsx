@@ -614,6 +614,12 @@ export function BrowserNavBar(props: {
                             // because CEF/Chromium internally calls SetFocus on
                             // <button> click; <input> doesn't get the same
                             // treatment when the parent webview HWND lacks focus.
+                            //
+                            // Known limit: this is a round trip to the host, so
+                            // on Windows OS focus moves back 11-38 ms after the
+                            // click, and a key typed sooner (scripted input only)
+                            // still goes to the page (agentmux#4828). Scripted
+                            // input should wait ~50 ms after clicking the bar.
                             diag(`input-mousedown value=${JSON.stringify(addressBar())}`);
                             getApi().reclaimWindowFocus(windowLabel).catch(() => {});
                         }}

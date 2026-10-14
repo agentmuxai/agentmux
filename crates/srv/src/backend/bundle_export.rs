@@ -39,7 +39,8 @@ use super::storage::Skill;
 
 /// One file within an exported bundle, path relative to the bundle root
 /// (e.g. `"bundle.json"`, `"instructions/AGENTS.md"`).
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct BundleExportFile {
     pub path: String,
     pub content: String,

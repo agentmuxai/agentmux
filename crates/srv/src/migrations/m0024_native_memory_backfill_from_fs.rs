@@ -21,7 +21,7 @@
 //! mirror — it reads the real filesystem, which is authoritative here
 //! (`SPEC_NATIVE_MEMORY_DURABLE_SYNC_2026_08_07.md`). Starting moments
 //! after migrations finish, it finds those same files, sees no recorded
-//! version, and records each as `external_fs_write` — rendered in Armory
+//! version, and records each as `external_fs_write` — rendered in Memory
 //! as **"Detected outside AgentMux — provenance unknown"**.
 //!
 //! Net effect on every install that upgraded with an unpopulated mirror:

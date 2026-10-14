@@ -34,8 +34,9 @@
 //! is best-effort observability only, matching the "degrade silently"
 //! philosophy already documented in `mps_client.rs`.
 
+use agentmux_common::client_events::{CompactionStarted, CompactionTrigger};
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::io::Read;
 
 use crate::mps_client::WpsClient;
@@ -75,17 +76,6 @@ pub struct Args {
 struct PreCompactInput {
     #[serde(default)]
     session_id: String,
-}
-
-/// Payload published on the `compaction_started` MPS event. camelCase
-/// on the wire, matching `agentmux-srv`'s `AgentEvent` convention
-/// (`types.rs`) so the frontend never has to special-case this event.
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct CompactionStartedPayload<'a> {
-    trigger: &'a str,
-    session_id: &'a str,
-    started_at: String,
 }
 
 /// Entry point. Always returns `Ok(())` — every failure mode degrades
@@ -146,10 +136,14 @@ fn parse_session_id(stdin_payload: &str) -> String {
         .unwrap_or_default()
 }
 
-fn build_payload(trigger: Trigger, session_id: &str) -> CompactionStartedPayload<'_> {
-    CompactionStartedPayload {
-        trigger: trigger.as_str(),
-        session_id,
+/// The `compaction_started` payload (`agentmux_common::client_events`), which srv declares too.
+fn build_payload(trigger: Trigger, session_id: &str) -> CompactionStarted {
+    CompactionStarted {
+        trigger: match trigger {
+            Trigger::Manual => CompactionTrigger::Manual,
+            Trigger::Auto => CompactionTrigger::Auto,
+        },
+        session_id: session_id.to_string(),
         started_at: chrono::Utc::now().to_rfc3339(),
     }
 }

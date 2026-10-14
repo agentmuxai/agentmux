@@ -7,6 +7,7 @@ import { blockViewToIcon, blockViewToName, ConnectionButton, getBlockHeaderIcon,
 import { paneTabCapability, paneTabLabelFor } from "@/app/block/pane-tab-registry";
 import { Button } from "@/app/element/button";
 import { MicButton } from "@/app/element/MicButton";
+import { PaneRestoreGlyph } from "@/app/element/pane-control-glyphs";
 import { redactSecrets } from "@/app/errors/redact";
 import { ChangeConnectionBlockModal } from "@/app/modals/conntypeahead";
 import { getApi } from "@/app/store/app-api";
@@ -318,7 +319,7 @@ function OptMinimizeButton(props: { minimized: boolean; toggleMinimize: () => vo
     // rather than a minimize control.
     const decl = createMemo<IconButtonDecl>(() => ({
         elemtype: "iconbutton",
-        icon: props.minimized ? "window-restore" : "window-minimize",
+        icon: props.minimized ? <PaneRestoreGlyph /> : "regular@window-minimize",
         title: props.minimized ? "Restore" : "Minimize",
         click: props.toggleMinimize,
     }));
@@ -328,7 +329,7 @@ function OptMinimizeButton(props: { minimized: boolean; toggleMinimize: () => vo
 function OptMagnifyButton(props: { magnified: boolean; toggleMagnify: () => void; disabled: boolean }): JSX.Element {
     const magnifyDecl = createMemo<IconButtonDecl>(() => ({
         elemtype: "iconbutton",
-        icon: props.magnified ? "window-restore" : "window-maximize",
+        icon: props.magnified ? <PaneRestoreGlyph /> : "regular@window-maximize",
         title: props.magnified ? "Restore" : "Maximize",
         click: props.toggleMagnify,
         disabled: props.disabled,
@@ -351,7 +352,7 @@ function OptMagnifyButton(props: { magnified: boolean; toggleMagnify: () => void
 function FloatingMaximizeButton(props: { label: string; blockId: string }): JSX.Element {
     const decl: IconButtonDecl = {
         elemtype: "iconbutton",
-        icon: "window-maximize",
+        icon: "regular@window-maximize",
         title: "Maximize",
         click: () => {
             getApi().windows.toggleFloatingMaximize(props.label, props.blockId).catch(console.error);
@@ -446,8 +447,8 @@ function EndIcons(props: {
                 hot-reload can pair this (new) header with a pre-canMinimize
                 cached model — degrade to showing the button (the toggle's own
                 countExpandedLeaves guard still enforces the policy). */}
-            <Show when={!ephemeral() && !magnified() && numLeafs() > 1 && (props.nodeModel.canMinimize?.() ?? true)}>
-                <OptMinimizeButton minimized={minimized()} toggleMinimize={props.nodeModel.toggleMinimize} />
+            <Show when={!ephemeral() && numLeafs() > 1 && (props.nodeModel.canMinimize?.() ?? true)}>
+                <OptMinimizeButton minimized={minimized() && !magnified()} toggleMinimize={props.nodeModel.toggleMinimize} />
             </Show>
 
             <Show
@@ -813,7 +814,11 @@ function BlockFrame_Header(
                 </div>
             </Show>
             <UnseenTurnsDot blockId={props.blockId()} />
-            <Show when={manageConnection()}>
+            {/* With a tab strip, a remote terminal's pill names its remote
+                (term-pane-tab.ts) instead: a chip here showed only while that
+                tab was active. The picker still opens with Change connection
+                (⌘⇧G), placed by the pane. */}
+            <Show when={manageConnection() && !props.leadingTabStrip}>
                 <ConnectionButton
                     ref={props.connBtnRef}
                     connection={blockData()?.meta?.connection}

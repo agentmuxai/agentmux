@@ -360,9 +360,19 @@ mod tests {
                 .widgets
                 .get(&key)
                 .unwrap_or_else(|| panic!("{key} should still be in widgets.json"));
-            assert!(child.display_hidden, "{key} should be display:hidden now that it's grouped");
+            assert!(child.display_grouponly, "{key} should be display:grouponly now that it's grouped");
             assert!(child.children.is_empty(), "{key} is a leaf, not itself a parent");
             assert!(!child.block_def.meta.is_empty(), "{key} should still carry its own blockdef");
         }
+    }
+
+    #[test]
+    fn a_widget_saved_with_the_old_display_hidden_name_still_reads_as_group_only() {
+        let old: WidgetConfigType = serde_json::from_str(r#"{ "display:hidden": true }"#).unwrap();
+        assert!(old.display_grouponly);
+        let new: WidgetConfigType = serde_json::from_str(r#"{ "display:grouponly": true }"#).unwrap();
+        assert!(new.display_grouponly);
+        // Written back under the new name.
+        assert_eq!(serde_json::to_value(&old).unwrap()["display:grouponly"], true);
     }
 }

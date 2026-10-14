@@ -352,7 +352,6 @@ mod tests {
                 }
             },
             "widgets": {},
-            "defaultwidgets": {},
             "presets": {}
         }"##;
         let parsed: FullConfigType = serde_json::from_str(json).unwrap();
@@ -414,15 +413,6 @@ mod tests {
         config.settings.term_theme = "dracula".to_string();
         let watcher = ConfigState::with_config(config);
         assert_eq!(watcher.get_settings().term_theme, "dracula");
-    }
-
-    #[test]
-    fn test_config_watcher_set_config() {
-        let watcher = ConfigState::new();
-        let mut config = FullConfigType::default();
-        config.settings.term_font_size = 16.0;
-        watcher.set_config(config);
-        assert_eq!(watcher.get_settings().term_font_size, 16.0);
     }
 
     #[test]

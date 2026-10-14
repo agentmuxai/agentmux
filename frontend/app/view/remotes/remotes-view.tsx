@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// The Remotes pane (docs/specs/SPEC_REMOTES_PANE_2026_10_05.md §4.2–§4.3):
+// Connectors → Remotes (docs/specs/SPEC_REMOTES_PANE_2026_10_05.md §4.2–§4.3):
 // every remote machine in sections, a row per remote, and an inline detail
 // panel with its actions and settings.
 

@@ -26,6 +26,18 @@ const PROMOTED_FADE_MS = 90;
 
 let promotedAt: number | null = null;
 let onPromotedReveal: (() => void) | undefined;
+let onRevealOnce: (() => void) | undefined;
+
+/**
+ * Runs `cb` once, when the startup splash starts to fade: this window's
+ * content has revealed. A cold floating pane uses it to release the
+ * pane-pool refill its open deferred (a promoted pool window uses
+ * `markPoolPromoted`'s callback instead).
+ * SPEC_WINDOW_OPEN_LATENCY_AND_WARM_POOLS_2026_10_13.md §2.3.
+ */
+export function onStartupReveal(cb: () => void): void {
+    onRevealOnce = cb;
+}
 
 /**
  * Called when the host promotes this pool window. `onReveal` runs once, when
@@ -78,6 +90,8 @@ export function fadeOutStartupSplash(): void {
     const el = document.getElementById("startup-loading");
     if (!el || el.dataset.amFading === "1") return;
     el.dataset.amFading = "1";
+    onRevealOnce?.();
+    onRevealOnce = undefined;
     let fadeMs = FADE_MS;
     if (promotedAt != null) {
         fadeMs = PROMOTED_FADE_MS;

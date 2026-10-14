@@ -641,7 +641,7 @@ interface AgentComposerStripProps {
      *  strip doesn't flash a wrong color for an instant on every mount. */
     authStatus?: "authenticated" | "unauthenticated" | "unknown";
     /** Login email of the account this agent is bound to, when the provider
-     *  recorded one (Armory's `context.email`). Replaces "Logged in" with the
+     *  recorded one (the account's `context.email`). Replaces "Logged in" with the
      *  address, shortened to 22 characters (`shortenEmail`); the tooltip keeps
      *  it whole. Ignored unless `authStatus` is "authenticated". */
     authEmail?: string;

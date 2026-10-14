@@ -90,6 +90,7 @@ pub(crate) mod viewer;
 mod presence;
 pub(crate) mod tower_pane;
 mod blockstats;
+mod shells;
 
 /// Register all MuxAPI handlers on the RPC engine.
 pub fn register_app_api_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
@@ -116,6 +117,7 @@ pub fn register_app_api_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     presence::register(engine, state);
     tower_pane::register(engine, state);
     blockstats::register(engine, state);
+    shells::register(engine, state);
 }
 
 #[cfg(test)]
@@ -503,3 +505,7 @@ mod s1_tests;
 #[cfg(test)]
 #[path = "tests/self_owner_tests.rs"]
 mod self_owner_tests;
+
+#[cfg(test)]
+#[path = "tests/agent_io_open_wire_tests.rs"]
+mod agent_io_open_wire_tests;

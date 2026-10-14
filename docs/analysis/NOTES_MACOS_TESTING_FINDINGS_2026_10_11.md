@@ -87,7 +87,7 @@ So in both occurrences the crash comes right after the pane for the same block i
 
 ---
 
-## F3. The window-paint report is out of date
+## F3. The window-paint report is out of date (done)
 
 `ANALYSIS_MACOS_WINDOW_PAINT_2026_10_10.md` (#4615) was written before the fixes. It still lists terminal refits (§6.1, M1) and the pane geometry task (§6.2, M2) as open. They are now fixed:
 
@@ -98,7 +98,7 @@ So in both occurrences the crash comes right after the pane for the same block i
 | (new, not in the report) pane follows the window | #4690 | edge pane p90 off the window edge 90–120 pt → 5 pt |
 | (new, not in the report) | #4688 | with a browser pane open, no window edge or corner could start a resize (a mouse hook skipped AppKit's resize tracking). Present since the hook was added; reproduced on a `main` dev build, and reported by the owner on the installed 0.59.16 |
 
-**To do:** a short "what shipped" section in the report, and strike M1 and M2 from its open list. M3 (a real-mouse drag) was in effect done by the owner testing the build by hand: "very smooth".
+**Done 2026-10-13:** the report has a "What shipped" section (§0), and M1 and M2 are marked shipped. M3 (a real-mouse drag) was in effect done by the owner testing the build by hand: "very smooth".
 
 ---
 
@@ -125,6 +125,27 @@ So in both occurrences the crash comes right after the pane for the same block i
 ## F8. After a crash, the restored torn-off window opens over the main window
 
 After the tear-off crash (F1) the app restarted itself and restored its windows. The torn-off window came back empty ("Window 2 - Tab 1", `restoring=1`) at (100,100), 1200x800, in front of the main window at (300,201), covering most of its tab strip. A test that drags in the main window's tab strip then hits the wrong window (this is how a second agent's scripted drags ended up in the wrong window, F1). It was moved aside with the host's `set_window_rect`.
+
+**Follow-up 2026-10-13: reproduced, and wider than a crash.** On macOS no restored secondary window keeps its position, after a crash or after a plain restart, and the test profile had collected 13 more restorable windows than were open.
+
+- **Positions are never saved on macOS.** Every restore in the runs below logged `[reproject] recreated window ... had_rect=false`, so each secondary window opened at the default (100,100), 1200x800, stacked on the main window. Two restore paths, neither has a rect on macOS:
+  - A plain restart (the launcher died too) takes the slow path, which rebuilds the windows from srv's rows. The srv write-through of a window's position and size (`commands/window/position_persist.rs`, fed by `wrr/win_event.rs`) uses HWNDs and WinEvents and is Windows-only.
+  - A crash restart (the launcher survives) takes the fast path from the launcher's live snapshot, whose entries were `(label, FullInstance, None, None)`: no `last_rect` either.
+  - Test: three windows moved to the left edge with `set_window_rect`, then the tree stopped and restarted. None came back there.
+- **Too many windows came back.** Restarting this profile (only 2 secondary windows open when it was last stopped) opened 15, each an empty default "Window N - Tab 1": `slow path: recreating windows from srv window_count=16`. Each had a persisted kind, so the orphan collector (rows that never registered) rightly skipped them. Where they came from is **not known**: the logs of the earlier runs on this profile, including the three F1 crash restarts, were overwritten. Controlled runs since then did not add any:
+  - plain restart: 16 rows before, 16 after;
+  - crash restart (old framework, F1 crash) followed by a plain restart: 16 and 16. Every recreated window registered and its old row was closed (`new window confirmed live — closing the old srv window_id`).
+  - Pool windows never call `register_backend_window`, so they are not the source.
+  - Unverified hypothesis: a stop or crash in the seconds between a recreated window registering (new row) and its old row being closed. That gap was 3–4 minutes under load in one run.
+- **`backend_close_window` reports success as failure under load.** In the crash restart, 8 of 16 closes logged `CloseWindow request did not succeed ... response=(empty)`: the 2 s read timeout expired while srv was busy. The next restart showed those rows were closed after all, so the error is misleading rather than a leak.
+- **The restore waits on Vite in a dev build.** With Vite down, the recreated windows never load, never register, and their old rows stay (correctly) until they do.
+
+Cleanup: the 15 extra windows were closed with `api.closeWindowByLabel`, leaving the main window.
+
+**To do (not built):**
+- Save window positions on macOS: a move/resize observer on each window's `NSWindow` feeding the same `SetWindowPosAndSize` write-through, plus `last_rect` in the launcher snapshot.
+- Find the source of the extra rows: log `Client.windowids` count at every launch and quit, then repeat crash restarts at different moments of a restore.
+- Read `backend_close_window`'s response with a longer timeout, or log a timeout as a timeout rather than as a failed close.
 
 ---
 

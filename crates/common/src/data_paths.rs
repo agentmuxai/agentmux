@@ -383,7 +383,7 @@ impl DataPaths {
     /// every channel by default
     /// (`docs/specs/SPEC_SHARED_AUTH_ACROSS_CHANNELS_2026_10_03.md`).
     /// Originally scoped to destructive
-    /// Armory testing (delete-account flows) that must never touch the
+    /// account testing (delete-account flows) that must never touch the
     /// real global identity store other channels/instances use.
     ///
     /// **Isolating this directory isolates a provider's conversation
@@ -406,7 +406,7 @@ impl DataPaths {
     /// — ALWAYS this location, regardless of [`isolated_auth_enabled`].
     /// Conversation transcripts must survive a channel/build change even
     /// when the surrounding credential directory ([`identities_dir`]) is
-    /// isolated per-channel for Armory testing — history and credentials
+    /// isolated per-channel for account testing — history and credentials
     /// are different data-persistence categories (CONVERSATION HISTORY
     /// vs CREDENTIAL in
     /// `docs/specs/SPEC_AGENT_IDENTITY_HISTORY_PERSISTENCE_PROTOCOL_2026_08_16.md`
@@ -735,7 +735,7 @@ pub fn isolated_auth_enabled() -> bool {
 
 /// Which rule decided [`isolated_auth_enabled`]'s result — for boot-time
 /// diagnostics (see `bootstrap/stores.rs`'s "shared store: attached" log line)
-/// so a developer staring at an empty Armory can tell at a glance whether
+/// so a developer staring at an empty Connectors → Accounts can tell at a glance whether
 /// that is an explicit choice, rather than re-deriving it from the env by
 /// hand. Callers that only need the boolean should use
 /// [`isolated_auth_enabled`] directly — this exists purely so the two never
@@ -904,7 +904,7 @@ pub fn isolated_settings_reason() -> IsolatedSettingsReason {
 ///    This is a **deliberate narrowing** relative to
 ///    [`isolated_auth_enabled`]/[`isolated_settings_enabled`], which
 ///    isolate `dev-*` too — those exist to make local testing exercise
-///    the real Armory/settings flow, a goal `dev-*`'s stability doesn't
+///    the real accounts/settings flow, a goal `dev-*`'s stability doesn't
 ///    undermine the same way it undermines this flag's actual, narrower
 ///    motivation (avoiding a repeat OS prompt from a randomized
 ///    per-build identity).

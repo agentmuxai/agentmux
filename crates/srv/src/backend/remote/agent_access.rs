@@ -115,7 +115,7 @@ pub fn revoke(agent: &str, connection: &str) -> std::io::Result<bool> {
     revoke_in(&crate::backend::base::get_mux_config_dir(), agent, connection)
 }
 
-/// Every "always" grant, as `(agent, connection)` (the Remotes pane lists them
+/// Every "always" grant, as `(agent, connection)` (Connectors → Remotes lists them
 /// per host, SPEC_REMOTES_PANE_2026_10_05.md §4.10).
 pub fn all_in(config_home: &Path) -> Vec<(String, String)> {
     let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());

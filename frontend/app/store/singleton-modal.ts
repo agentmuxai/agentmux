@@ -27,7 +27,7 @@
  *      claim and replays it to any window that subscribes later — so the
  *      "which window holds kind K" registry is simply the most-recent
  *      persisted event. No bespoke registry RPC, no Rust change.
- *   2. **Cross-window delivery.** `muxEventSubscribe` in every window
+ *   2. **Cross-window delivery.** `onMuxEvent` in every window
  *      receives every claim/release; non-holders react (render a banner).
  *   3. **Focus action.** The banner's button calls the existing
  *      `getApi().focusWindow(label)` (same primitive InstancePanel uses).
@@ -54,7 +54,8 @@
  * `eventunsub` / `eventunsuball` / `eventreadhistory`). The
  * auth-gated HTTP endpoint `POST /agentmux/wps/publish` *does* forward
  * arbitrary `{event, scopes, persist, data}` to the broker — that is the
- * publish path `agentmux-bashwrap` uses, and the one we use here.
+ * publish path `agentmux-bashwrap` uses, and the one we use here. srv
+ * refuses a claim whose `data` isn't a `SingletonClaimEvent`.
  */
 
 import { createSignal, type Accessor } from "solid-js";
@@ -62,13 +63,12 @@ import { createSignal, type Accessor } from "solid-js";
 import { authHeaders } from "./auth-headers";
 import { getApi, openWindowEntriesAtom } from "@/store/global";
 import { getWebServerEndpoint } from "@/util/endpoints";
-import { RpcApi } from "@/app/store/rpc-api";
-import { TabRpcClient } from "@/app/store/rpc-util";
-import { muxEventSubscribe } from "@/app/store/mps";
+import { onMuxEvent } from "@/app/store/mps";
+import { readMuxEventHistory } from "@/app/store/mps-history";
 import { subscribeLauncherEvent } from "@/util/launcher-events";
 
 import { WpsEvent } from "@/app/store/mps-events";
-import type { MuxEvent } from "@/types/rpc/MuxEvent";
+import type { SingletonClaimEvent } from "@/types/rpc/SingletonClaimEvent";
 /** MPS event name carrying singleton claim/release broadcasts. */
 const EVENT_SINGLETON_CLAIM = WpsEvent.SingletonClaim;
 
@@ -87,12 +87,11 @@ export type SingletonKind = string;
  *  - `epoch` = monotonically-increasing-per-window claim counter; used
  *    only to break ties when two windows race a claim (higher epoch from
  *    the same logical moment is irrelevant — see `applyClaim`).
+ *
+ * Declared in srv (`SingletonClaimEvent`), which refuses a publish whose
+ * `data` isn't one.
  */
-interface ClaimPayload {
-    kind: SingletonKind;
-    holder: string | null;
-    epoch: number;
-}
+type ClaimPayload = SingletonClaimEvent;
 
 /** Scope string for a kind — keeps each kind's claims isolated. */
 function scopeFor(kind: SingletonKind): string {
@@ -210,16 +209,6 @@ function applyClaim(payload: ClaimPayload): void {
     st.setHolder(payload.holder);
 }
 
-function parsePayload(raw: unknown): ClaimPayload | null {
-    if (raw == null || typeof raw !== "object") return null;
-    const r = raw as Record<string, unknown>;
-    if (typeof r.kind !== "string") return null;
-    const holder = r.holder;
-    if (holder !== null && typeof holder !== "string") return null;
-    const epoch = typeof r.epoch === "number" ? r.epoch : 0;
-    return { kind: r.kind, holder: holder as string | null, epoch };
-}
-
 // ── Wiring: MPS subscription + history replay + crash release ───────────
 
 function ensureWired(kind: SingletonKind, st: KindState): void {
@@ -235,27 +224,21 @@ function ensureWired(kind: SingletonKind, st: KindState): void {
     void resolveMyLabel();
 
     // 1. Subscribe to live claim/release broadcasts for this kind.
-    muxEventSubscribe({
-        eventType: EVENT_SINGLETON_CLAIM,
-        scope: scopeFor(kind),
-        handler: (event: MuxEvent) => {
-            const payload = parsePayload(event.data);
-            if (payload && payload.kind === kind) applyClaim(payload);
+    onMuxEvent(
+        EVENT_SINGLETON_CLAIM,
+        (payload) => {
+            if (payload.kind === kind) applyClaim(payload);
         },
-    });
+        scopeFor(kind)
+    );
 
     // 2. Replay the persisted latest claim so a window that opens AFTER
     //    a holder claimed still learns the current holder. Without this,
     //    a window started late would think the singleton is free.
-    void RpcApi.EventReadHistoryCommand(TabRpcClient, {
-        event: EVENT_SINGLETON_CLAIM,
-        scope: scopeFor(kind),
-        maxitems: 1,
-    })
-        .then((events) => {
-            if (!events || events.length === 0) return;
-            const payload = parsePayload(events[events.length - 1].data);
-            if (payload && payload.kind === kind) applyClaim(payload);
+    void readMuxEventHistory(EVENT_SINGLETON_CLAIM, scopeFor(kind), 1)
+        .then((claims) => {
+            const payload = claims.at(-1);
+            if (payload?.kind === kind) applyClaim(payload);
         })
         .catch((e) => console.error("[singleton] history replay failed:", e));
 }

@@ -163,7 +163,7 @@
 }
 
 // Markdown's own root sets `height: 100%; overflow: hidden`, so the wrapper
-// is what fills the region. Body text is the Armory's menu size (the
+// is what fills the region. Body text is the Memory pane's menu size (the
 // Global/Personal sub-nav, card titles, the editor textarea) instead of
 // Markdown's 14px default; headings are em-based and scale with it.
 .memory-content-markdown {

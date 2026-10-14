@@ -614,10 +614,10 @@ pub struct AppState {
     /// pane targets. See `docs/specs/SPEC_BROWSER_DOM_API.md` §6.
     pub debug_port: Mutex<u16>,
 
-    /// CEF `root_cache_path` (the version's `cef-cache` dir). Per-window
-    /// RequestContexts are in-memory (unique off-the-record profiles — see
-    /// `create_isolated_request_context`) and place nothing under it; the
-    /// resolved path is kept for the startup legacy-litter sweep
+    /// CEF `root_cache_path` (the version's `cef-cache` dir). Secondary
+    /// windows share the default context
+    /// (`commands::secondary_window_request_context`) and place nothing
+    /// under it of their own; the resolved path is kept for the startup legacy-litter sweep
     /// (`cleanup_legacy_context_dirs`) and any future consumers. See
     /// SPEC_CEF_LOG_ROBUSTNESS_2026_06_20.md §1.6.
     pub cef_cache_dir: Mutex<Option<String>>,

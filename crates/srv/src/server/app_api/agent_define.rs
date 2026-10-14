@@ -156,20 +156,12 @@ fn register_agent_define(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let id_store = state.id_store.clone();
     let broker = state.broker.clone();
 
-    engine.register_handler(
-        COMMAND_AGENT_DEFINE,
-        Box::new(move |data, _ctx| {
-            let mstore = mstore.clone();
-            let id_store = id_store.clone();
-            let broker = broker.clone();
-            Box::pin(async move {
-                let cmd: CommandAgentDefineData = serde_json::from_value(data)
-                    .map_err(|e| format!("agent.define: {e}"))?;
-                agent_define_core(mstore, id_store, broker, cmd).await
-                    .map(|r| Some(serde_json::to_value(&r).unwrap()))
-            })
-        }),
-    );
+    engine.register_typed(COMMAND_AGENT_DEFINE, move |cmd: CommandAgentDefineData, _ctx| {
+        let mstore = mstore.clone();
+        let id_store = id_store.clone();
+        let broker = broker.clone();
+        async move { agent_define_core(mstore, id_store, broker, cmd).await }
+    });
 }
 
 #[cfg(test)]

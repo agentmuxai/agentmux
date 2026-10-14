@@ -36,8 +36,18 @@
         "display:order": {
           "type": "number"
         },
+        "display:grouponly": {
+          "type": "boolean",
+          "description": "Shown only inside its parent group's flyout, not on the bar, in More or in the pane pickers. Not the user's Hidden (widget:hidden)."
+        },
         "display:hidden": {
-          "type": "boolean"
+          "type": "boolean",
+          "deprecated": true,
+          "description": "The old name of display:grouponly, still read."
+        },
+        "display:pinned": {
+          "type": "boolean",
+          "description": "Pinned to the widget bar by default on a fresh install. Ignored once the user has a widget:pinned setting."
         },
         "icon": {
           "type": "string"
@@ -59,6 +69,10 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "module": {
+          "type": "string",
+          "description": "A v1 third-party widget: path to its ES module, relative to ~/.agentmux/widgets/ or absolute."
         },
         "blockdef": {
           "$ref": "#/$defs/BlockDef"

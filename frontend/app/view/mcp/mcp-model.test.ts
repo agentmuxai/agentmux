@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// McpCatalogModel — the standalone Armory "MCP Servers" tab's model. Scoped
+// McpCatalogModel — the Connectors → MCP servers model. Scoped
 // to the reactive-updates wiring added by
 // docs/specs/SPEC_ARMORY_REACTIVE_UPDATES_2026_09_02.md; this model had no
 // prior test coverage, and full CRUD coverage is out of scope here.

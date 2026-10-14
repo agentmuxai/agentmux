@@ -161,7 +161,7 @@ function getDisconnectItem(
     return disconnectSuggestionItem;
 }
 
-/** "Manage remotes…": the Remotes pane, in this pane (SPEC_REMOTES_PANE_2026_10_05.md §4.7). */
+/** "Manage remotes…": Connectors → Remotes, in this pane (SPEC_REMOTES_PANE_2026_10_05.md §4.7). */
 function getManageRemotesItem(
     blockId: string,
     connection: string | undefined,

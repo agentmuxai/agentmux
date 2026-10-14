@@ -603,7 +603,7 @@ fn validate_invariants_flags_the_recovered_0_53_6_corruption() {
         "root",
         FlexDirection::Row,
         10.0,
-        vec![outer, leaf("armory", "b-armory", 10.0)],
+        vec![outer, leaf("memory", "b-memory", 10.0)],
     ));
 
     let violations = validate_layout_invariants(&root);

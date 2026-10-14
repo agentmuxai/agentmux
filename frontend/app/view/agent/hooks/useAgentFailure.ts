@@ -21,7 +21,7 @@
  * the same class as a `<Show>` toggle — so there's no drift risk in keeping
  * them here (same rationale the spec used to leave `expanded` local).
  *
- * The actual recovery *effects* (re-run the turn, re-auth, open Armory) are
+ * The actual recovery *effects* (re-run the turn, re-auth, open Connectors) are
  * passed in by the caller so this hook stays presentation-only otherwise.
  *
  * Auto-retry: for transient classes (rate-limit / overload / network) a
@@ -145,7 +145,7 @@ export interface UseAgentFailureOptions {
      * (bind-account-candidates.ts). Reactive: the row re-derives its
      * "Bind: <name>" / "Bind account" vs. "Connectors → Accounts" action every
      * time this changes. Optional so callers that haven't wired the account
-     * cache yet (e.g. tests) fall back to the pre-existing Armory-only
+     * cache yet (e.g. tests) fall back to the pre-existing Connectors-only
      * behavior. See docs/specs/SPEC_AGENT_LOGIN_FLOW_TIGHTENING_2026_09_04.md §3.
      */
     bindCandidates?: Accessor<{ id: string; name: string }[]>;

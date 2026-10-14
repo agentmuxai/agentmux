@@ -1,8 +1,8 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// PrimitiveListDetail — shared single-pane list/detail layout for Armory's
-// Bundles/Skills/MCP Servers tabs (and any future list+CRUD-form primitive
+// PrimitiveListDetail — shared single-pane list/detail layout for the
+// Bundles/Skills/MCP servers sections (and any future list+CRUD-form primitive
 // with the same shape). Renders exactly ONE of {list, detail} at a time —
 // never both, at any pane width. Replaces the previous fixed-width
 // side-by-side split (and, for Bundles, a stacked-but-still-both-visible

@@ -71,7 +71,7 @@
 
 import { createEffect, onCleanup } from "solid-js";
 import type { Accessor } from "solid-js";
-import { muxEventSubscribe } from "@/app/store/mps";
+import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import type { AgentPaneModel } from "@/app/store/agent-pane-model";
 import type { CompactionState } from "@/app/store/agent-pane-state/types";
@@ -164,11 +164,10 @@ export function compactionStartedNodeId(startedAt: number): string {
 }
 
 export function useCompactionStream(opts: UseCompactionStreamOptions): void {
-    const unsub = muxEventSubscribe({
-        eventType: WpsEvent.CompactionStarted,
-        scope: `block:${opts.blockId}`,
-        handler: (event: any) => {
-            const resolved = resolveCompactionStart(event?.data, Date.now());
+    const unsub = onMuxEvent(
+        WpsEvent.CompactionStarted,
+        (data) => {
+            const resolved = resolveCompactionStart(data, Date.now());
             if (!resolved) return;
             // Dispatch only — the reducer decides accept / buffer / reject.
             // The `compacting` effect below pushes the transcript node
@@ -176,7 +175,8 @@ export function useCompactionStream(opts: UseCompactionStreamOptions): void {
             // buffered) promoted later by a different dispatch entirely.
             opts.model.dispatchPane({ type: "CompactionStarted", trigger: resolved.trigger, at: resolved.startedAt });
         },
-    });
+        `block:${opts.blockId}`
+    );
 
     // Pushes the "Compacting conversation…" transcript node exactly once
     // per real compaction, the instant `state.compacting` is confirmed set

@@ -127,7 +127,8 @@ pub struct SettingsType {
 
     /// SSH terminal panes durable (their shell kept on the host by AgentMux's
     /// helper) or not, unless a pane or its connection says otherwise. Unset:
-    /// durable on a host the helper has answered on (`durable_ssh::wants`).
+    /// durable, asking before the helper is installed on a host without it,
+    /// and plain there if it isn't (`durable_mode::mode`).
     #[serde(rename = "term:durable", default, skip_serializing_if = "Option::is_none")]
     pub term_durable: Option<bool>,
 
@@ -186,14 +187,11 @@ pub struct SettingsType {
     #[serde(rename = "widget:*", default, skip_serializing_if = "is_false")]
     pub widget_clear: bool,
 
-    #[serde(rename = "widget:showhelp", default, skip_serializing_if = "Option::is_none")]
-    pub widget_show_help: Option<bool>,
-
     #[serde(rename = "widget:icononly", default, skip_serializing_if = "Option::is_none")]
     pub widget_icon_only: Option<bool>,
 
-    /// The widget bar's pinned icons, in order, as short names (`agent` for
-    /// `defwidget@agent`). Absent means the fresh-install default: the entries with
+    /// The widget bar's pinned icons, in order: a built-in's short name (`agent` for
+    /// `defwidget@agent`), or an installed package widget's full key (`ext@<id>/<pane>`). Absent means the fresh-install default: the entries with
     /// `display:pinned`. Written whole by the bar, its drag reorder and Settings → Widgets.
     #[serde(
         rename = "widget:pinned",
@@ -613,8 +611,10 @@ pub struct WidgetConfigType {
     #[serde(rename = "display:order", default, skip_serializing_if = "is_zero_f64")]
     pub display_order: f64,
 
-    #[serde(rename = "display:hidden", default, skip_serializing_if = "is_false")]
-    pub display_hidden: bool,
+    /// Shown only inside its parent group's flyout, not on the bar, in More or in the pane
+    /// pickers. Not the user's Hidden (`widget:hidden`). Older files call this `display:hidden`.
+    #[serde(rename = "display:grouponly", alias = "display:hidden", default, skip_serializing_if = "is_false")]
+    pub display_grouponly: bool,
 
     /// Whether this widget is pinned to the action bar by default on new installs.
     /// Once the user has a `widget:pinned` setting this field is ignored.
@@ -896,9 +896,6 @@ pub struct FullConfigType {
 
     #[serde(rename = "mimetypes", default)]
     pub mime_types: HashMap<String, MimeTypeConfigType>,
-
-    #[serde(rename = "defaultwidgets", default)]
-    pub default_widgets: HashMap<String, WidgetConfigType>,
 
     #[serde(default)]
     pub widgets: HashMap<String, WidgetConfigType>,

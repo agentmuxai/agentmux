@@ -51,7 +51,7 @@ pub fn resolve_secret(secret_ref: &SecretRef) -> Result<String, ResolverError> {
             Err(ResolverError::OAuthConfigDirNotASecret)
         }
         SecretRef::Keychain { account, .. } => {
-            // Armory API keys: pull the plaintext from the OS
+            // Account API keys: pull the plaintext from the OS
             // keychain at spawn time. The account string is
             // `acct:<account_id>`; secret_store reconstructs the key
             // from the id, so strip the namespace prefix here.

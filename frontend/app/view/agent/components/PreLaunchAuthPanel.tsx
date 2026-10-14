@@ -574,7 +574,7 @@ async function startConnect(
                     if (registeredAccountId) {
                         controller.markSeeded(registeredAccountId);
                     } else {
-                        // The credential landed but the Armory account row
+                        // The credential landed but the account row
                         // couldn't be persisted — don't show fake-ready state
                         // (the resolver's spawn gate requires a real bound
                         // account, so a fake-ready panel would let Launch

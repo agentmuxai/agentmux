@@ -1,5 +1,59 @@
 # AgentMux Version History
 
+## 0.59.24 — 2026-10-13
+
+- Opening a widget in a new window or a floating pane is faster: the pre-warmed windows are kept unless memory is critically low, a floating pane warms one for the next, and new windows load the app from cache.
+- Terminal text stays solid while you resize the window, instead of flickering
+- Opening many terminals no longer makes the window reload itself three times
+- An SSH terminal on a host without AgentMux's helper now offers to keep its session alive. The first terminal there asks whether to install the helper (Install, Always for this host, Not now, Never for this host). If it is installed, the terminal survives a dropped link, sleep or a restart. If not, the terminal is a plain SSH terminal, as before, and the host isn't asked again until AgentMux restarts, or never with "Never". A host's terminals share one question, so a restart with several of them open asks once. Before, only hosts that already had the helper got durable terminals, and nothing said they existed. A durable terminal on a real host without the helper also kept "reconnecting" instead of installing it: the pane lost ssh's exit code, which says the helper is missing. The same loss kept a terminal whose password went unanswered asking for it again, instead of stopping. Also fixed: "Not now" with "Don't ask again" ticked now saves Never for the host (the box was only sent with Install), and a terminal whose helper was removed from the host after it installed it asks to install it again, instead of stopping with "still is not runnable". A first terminal on a host it can't reach (a mistyped name, a host that's down) becomes a plain terminal showing ssh's error after a few tries, rather than reconnecting for ever.
+- A browser pane that couldn't load a page now keeps showing and saving that page's address, as Chrome does, instead of the error page's internal data: URL; restoring such a pane no longer turns it into a Google search.
+- Settings → Browser now says that Incognito tabs never ask your search engine for suggestions, as in Chrome.
+- The LAN discovery events (peer list, errors, health, firewall verdict) are typed, and the frontend's LAN peer type is generated: it gains the os, agent status and agent line fields srv already sent.
+- Ctrl+Shift+N (Cmd+Shift+N on macOS) in a browser pane's address bar or toolbar now opens an Incognito tab, as in Chrome, instead of a new AgentMux window.
+- The retired Armory, Knowledge and Remotes panes are gone for good: saved panes, pins, colors, keybindings and widgets.json entries that still used those names are moved to Connectors and Memory once, on upgrade
+- ts-rs 12: generated TypeScript types now mark fields the server omits as optional and keep every serde rename, and CI fails on any serde attribute ts-rs can't read.
+- The pane header's maximize is the outline window icon, restore is a tiled-layout icon (a frame with the pane's tile filled) instead of two overlapping windows, and a maximized pane can be minimized directly: it goes back to its slot as a header chip
+- Event history reads (resume retry, subagent backfill, shutdown pending, sysinfo) return typed payloads, and CI refuses an untyped history read of a typed event.
+- A terminal's hover panel says whether it draws with WebGL or DOM, and a terminal waiting for its graphics context shows dark instead of white
+- AgentMux stops scanning every pane's processes once a second when no pane stats badge is showing; the scan runs only while one is, and every 30 seconds otherwise.
+- Widgets from installed packages can now be pinned to the widget bar, from its right-click menu or from Settings → Widgets, and keep their place when you reorder
+- A widget in widgets.json that should appear only inside its group now uses display:grouponly; the old display:hidden name still works
+- Settings → Terminal has a Default shell picker: it lists the shells installed on this machine (PowerShell, Command Prompt, Git Bash, zsh, fish and others), shows which one new terminals open with, and the term:localshellpath setting now takes effect
+- The MuxAPI memory, identity and agent.define commands have generated request and response types.
+- srv refuses a tool_chunk, compaction_started or singleton:claim publish whose data isn't its declared payload type; bashwrap and the frontend publish and subscribe to these events typed
+- The MuxAPI agent io and agent open handlers are typed, so their requests and responses are in the generated bindings
+- A terminal on a remote machine names the remote in its pane tab (its nickname from Remotes, else the host), with the remote's icon, instead of "Terminal" plus a chip beside the + that vanished when you switched tabs. A system info pane on a remote reads "CPU · host".
+- The MuxAPI bundle handlers are typed, so every srv RPC handler now has a generated request and response type
+
+## 0.59.23 — 2026-10-13
+
+- Theme and opacity are per window. The ☰ menu's Theme and Opacity change only the window they're opened in, and Opacity there is the same setting as the window list's slider in the status bar, so each follows the other. A new window or a torn-off tab starts with the theme and opacity of the window it came from. Settings → Appearance sets the default for windows without their own.
+- SSH and WSL terminals' CPU/memory badge now shows the remote shell's figures, measured on that machine, instead of the local ssh or wsl.exe.
+- The pane size shown while dragging a splitter now appears on browser panes too, in the same bottom-left corner as on every other pane.
+- Every frontend RPC call goes through a generated stub: pane.open and pane.moveTab are typed, and CI rejects hand-written stubs and raw rpcCall calls
+- Screenshot tooling: a landing-workspace shot (the default layout plus the Hangar and a terminal on the demo project), and posterAt for a landing clip's poster frame
+- Browser panes' address bar now suggests as you type, from Chrome's own engine: your history and typed sites (completed inline), and "search for what you typed". Suggestions from your search engine as you type are off unless you turn on Settings → Browser → Search suggestions while typing, since they send it what you type before you press Enter.
+- Broker events can carry a typed payload: controllerstatus and sysinfo subscribers get srv's Rust type through onMuxEvent, and CI keeps new events typed
+- Agent broker events are typed: agentturn, agentfailure, agentruntime, agentcontextusage, agent-message-accepted, agent-resume-retry, agent:shutdown and userattention reach their subscribers as srv's Rust types
+- Subagent and dispatch broker events are typed (spawned, completed, named, updated, abandoned, block_pruned, backfill_status, dispatch updated/activity); the Swarm and the activity dock get srv's Rust types
+- File and block broker events are typed: blockfile, blockstats, waveobj:update, editor/media file changes, files:changed and files:op reach their subscribers as srv's Rust types
+- The no-payload change signals (agents, memories, skills, MCP, accounts, cron, drones, remotes, the work queue) are typed broker events, subscribed through onMuxEvent.
+- Install, Shell, attachment and connection broker events are typed (install_chunk, shell_chunk, shell_node_create, attachment:*, connchange), subscribed through onMuxEvent.
+- Broker events sent under a name per id (agent:memory:changed:<id>, agentidentities:changed:<id>, agentcredentials:revoked:<id>, dronerun:<id> and others) are typed, subscribed through onMuxEvent.
+- The remaining fixed-name broker events (widgets, notification tray, agent progress, narration, process status, side-question answers, dock clears, reactive panes, app-server output) are typed, subscribed through onMuxEvent.
+- A dim grip marks the drag space in the window and pane headers; the pane grip opens the pane menu; the last window tab gets its separator
+- With search suggestions off, the browser address bar still suggests from your history and typed addresses: the setting is now applied, where before no suggestions came back at all.
+- Every broker event srv sends is typed: the notification, process, shutdown, spend, srvinfo, config and floating-pane events too, and the ratchet on hand-built events is at zero.
+- Clicking into a browser pane's address bar selects the whole address, as in Chrome, so typing replaces it; a second click places the cursor, and a drag selects just what you drag over.
+- A remote terminal's CPU/memory badge no longer asks its machine twice every 2 seconds.
+- fix(cef-build): cef-verify-patches.sh works on a module-enabled macOS build
+- Grips sit outside the scrolling tab strips (left of the widgets, left of the pane controls); overflowing tab strips fade at the edges
+- Pinning a widget on a full widget bar no longer makes every widget jump; the title bar menu's Pin Widgets heading doesn't collapse
+- AgentMux now ships CEF 154 r3 on Windows, macOS and Linux, which turns on the browser address bar's suggestions as you type: your history and typed addresses with inline completion, and your search engine's suggestions (Settings → Browser turns those off).
+- The Sysinfo charts show a gap in the samples as a break instead of a ramp up from zero, no longer repeat the last reading to fill short gaps, and label the time axis to the second so neighbouring ticks differ.
+- Raw WebSocket events (object updates, LSP messages, MuxBus status, device pairing) and install progress and block activity are typed broker events, and CI refuses an onMuxEvent handler written against the event.
+- Browser address bar suggestions from your search engine are now on by default, as in Chrome. To keep what you type on this computer until you press Enter, turn off Settings → Browser → Search suggestions while typing.
+
 ## 0.59.22 — 2026-10-13
 
 - Tests: the remote Swarm chip test reads the chip's label, not the spinner glyph beside it

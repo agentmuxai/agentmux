@@ -31,6 +31,7 @@ import * as wedge from "./parser-wedge";
 import { PredictiveEcho } from "./predictive-echo";
 import { resolveTermScrollSensitivity } from "./termscrollsensitivity";
 import { paintRows, resizeAndPaint } from "./term-paint";
+import { claimTermRenderer, forgetTermRenderer, setTermRendererOf } from "@/app/store/term-renderer";
 import type { WSFileEventData } from "@/types/rpc/WSFileEventData";
 
 const dlog = debug("wave:termwrap");
@@ -130,6 +131,7 @@ export class TermWrap {
     ) {
         this.loaded = false;
         this.blockId = blockId;
+        claimTermRenderer(blockId, this);
         this.sendDataHandler = muxOptions.sendDataHandler;
         this.ptyOffset = 0;
         this.dataBytesProcessed = 0;
@@ -535,6 +537,7 @@ export class TermWrap {
             this.wedgeTimer = null;
         }
         this.disposed = true;
+        forgetTermRenderer(this.blockId, this);
         // Cancel pending PSReadLine-thaw callbacks so they don't fire
         // on a disposed Terminal. dispose() doesn't null `this.terminal`
         // (xterm.Terminal stays in memory until its own dispose finishes
@@ -825,6 +828,22 @@ export class TermWrap {
         if (resizeAndPaint(this.terminal, dims)) this.notePainted();
     }
 
+    /** The WebGL context was lost and this terminal now draws with the DOM renderer. */
+    private webglFellBack = false;
+    /** The WebGL addon was loaded; open() creates its renderer, or fails to. */
+    private webglRequested = false;
+
+    /**
+     * Record WebGL only once open() has created its canvas: the addon is loaded
+     * before open(), and a WebGL2 renderer that fails to start there leaves the
+     * terminal on the DOM renderer.
+     */
+    private recordRendererAfterOpen(canvas: HTMLCanvasElement | null | undefined) {
+        if (!this.webglRequested) return;
+        if (canvas) setTermRendererOf(this.blockId, { kind: "webgl", owner: this });
+        else setTermRendererOf(this.blockId, { kind: "dom", why: "WebGL couldn't start for this terminal", owner: this });
+    }
+
     /** The WebGL canvas, and its size when it was last painted here. */
     private glCanvas: HTMLCanvasElement | null = null;
     private paintedSize = { width: 0, height: 0 };
@@ -843,6 +862,7 @@ export class TermWrap {
      */
     private repaintOnCanvasResize() {
         const canvas = this.terminal.element?.querySelector<HTMLCanvasElement>("canvas:not(.xterm-link-layer)");
+        this.recordRendererAfterOpen(canvas);
         if (!canvas || typeof ResizeObserver === "undefined") return;
         this.glCanvas = canvas;
         this.paintedSize = { width: canvas.width, height: canvas.height };
@@ -854,6 +874,37 @@ export class TermWrap {
         });
         observer.observe(canvas, { box: "device-pixel-content-box" });
         this.toDispose.push({ dispose: () => observer.disconnect() });
+        this.hideCanvasWhileContextLost(canvas);
+    }
+
+    /**
+     * While the canvas's WebGL context is lost, show the pane's own background
+     * instead of the dead canvas. The page's limit of 16 contexts evicts the
+     * oldest when terminals open quickly past it, and xterm waits 3 s for a
+     * restore before this terminal falls back to the DOM renderer
+     * (RCA_TERMINAL_WEBGL_CONTEXT_CAP_RELOAD_LOOP_2026_10_13.md); those panes
+     * showed white meanwhile.
+     */
+    private hideCanvasWhileContextLost(canvas: HTMLCanvasElement) {
+        const onLost = () => {
+            canvas.style.visibility = "hidden";
+            setTermRendererOf(this.blockId, { kind: "lost", why: "its WebGL context was lost; waiting 3 s for it back, then DOM", owner: this });
+        };
+        const onRestored = () => {
+            // After the DOM fallback the canvas is detached; a late restore
+            // must not claim the terminal is back on WebGL.
+            if (this.webglFellBack) return;
+            canvas.style.visibility = "";
+            setTermRendererOf(this.blockId, { kind: "webgl", owner: this });
+        };
+        canvas.addEventListener("webglcontextlost", onLost);
+        canvas.addEventListener("webglcontextrestored", onRestored);
+        this.toDispose.push({
+            dispose: () => {
+                canvas.removeEventListener("webglcontextlost", onLost);
+                canvas.removeEventListener("webglcontextrestored", onRestored);
+            },
+        });
     }
 
     private loadRendererAddon(useWebGl: boolean) {
@@ -870,14 +921,23 @@ export class TermWrap {
                 const webglAddon = new WebglAddon();
                 this.toDispose.push(
                     webglAddon.onContextLoss(() => {
+                        this.webglFellBack = true;
                         webglAddon.dispose();
                         console.warn("WebGL context lost, falling back to DOM renderer");
                         setTermRendererAtom("dom"); // GPU context lost → DOM fallback
+                        setTermRendererOf(this.blockId, {
+                            kind: "dom",
+                            why: "its WebGL context was lost and not restored (too many terminals, or a GPU reset)",
+                            owner: this,
+                        });
                         // DOM renderer is active by default when no addon is loaded
                     })
                 );
                 this.terminal.loadAddon(webglAddon);
                 setTermRendererAtom("webgl");
+                // xterm creates the WebGL renderer in open(); recordRendererAfterOpen
+                // says whether it did.
+                this.webglRequested = true;
                 if (!loggedWebGL) {
                     console.log("loaded webgl renderer!");
                     loggedWebGL = true;
@@ -885,6 +945,7 @@ export class TermWrap {
             } catch (e) {
                 console.warn("WebGL renderer unavailable, using DOM renderer:", e);
                 setTermRendererAtom("dom");
+                setTermRendererOf(this.blockId, { kind: "dom", why: "WebGL couldn't start for this terminal", owner: this });
                 if (!loggedWebGL) {
                     console.log("loaded DOM renderer (webgl fallback)!");
                     loggedWebGL = true;
@@ -893,6 +954,11 @@ export class TermWrap {
         } else {
             // WebGL unsupported (GPU disabled) or disabled by setting — DOM renderer.
             setTermRendererAtom("dom");
+            setTermRendererOf(this.blockId, {
+                kind: "dom",
+                why: useWebGl ? "WebGL isn't available on this machine" : "WebGL is turned off (term:disablewebgl)",
+                owner: this,
+            });
         }
     }
 

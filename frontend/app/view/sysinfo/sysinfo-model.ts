@@ -10,14 +10,13 @@ import type { SignalAtom } from "@/util/util";
 import { createSignalAtom } from "@/util/util";
 
 import { getConnStatusAtom } from "@/store/global";
-import { RpcApi } from "@/app/store/rpc-api";
 import { WpsEvent } from "@/app/store/mps-events";
-import { TabRpcClient } from "@/app/store/rpc-util";
 
 import { DataItem, DefaultNumPoints, DefaultPlotMeta, PlotTypes } from "./sysinfo-types";
 import { GapBackfiller } from "./sysinfo-backfill";
-import { convertMuxEventToDataItem, getGapThresholdMs } from "./sysinfo-util";
+import { convertTimeSeriesToDataItem, getGapThresholdMs } from "./sysinfo-util";
 import type { ConnStatus } from "@/types/rpc/ConnStatus";
+import { readMuxEventHistory } from "@/app/store/mps-history";
 
 // ---------------------------------------------------------------------------
 // Sample ring-buffer reducer
@@ -288,15 +287,11 @@ class SysinfoViewModel {
     /** Merge the history newer than `fromTs` into the series, without clearing it. */
     private async backfillFrom(fromTs: number): Promise<void> {
         const scope = this.connection();
-        const history = await RpcApi.EventReadHistoryCommand(TabRpcClient, {
-            event: WpsEvent.SysInfo,
-            scope,
-            maxitems: this.numPoints(),
-        });
+        const history = await readMuxEventHistory(WpsEvent.SysInfo, scope, this.numPoints());
         // The pane switched machines while this was fetching: its series was
         // reloaded for the new one, and these samples belong to the old.
-        if (history == null || this.connection() !== scope) return;
-        const items = history.map(convertMuxEventToDataItem).filter((d): d is DataItem => d != null && d.ts > fromTs);
+        if (this.connection() !== scope) return;
+        const items = history.map(convertTimeSeriesToDataItem).filter((d): d is DataItem => d != null && d.ts > fromTs);
         if (items.length === 0) return;
         this.dispatch({
             type: "MERGE",
@@ -400,13 +395,8 @@ class SysinfoViewModel {
         try {
             const numPoints = this.numPoints();
             const connName = this.connection();
-            const initialData = await RpcApi.EventReadHistoryCommand(TabRpcClient, {
-                event: WpsEvent.SysInfo,
-                scope: connName,
-                maxitems: numPoints,
-            });
-            if (initialData == null) return;
-            const initialDataItems: DataItem[] = initialData.map(convertMuxEventToDataItem);
+            const initialData = await readMuxEventHistory(WpsEvent.SysInfo, connName, numPoints);
+            const initialDataItems: DataItem[] = initialData.map(convertTimeSeriesToDataItem);
             this.resetData(initialDataItems);
         } catch (e) {
             console.log("Error loading initial data for sysinfo", e);

@@ -41,6 +41,19 @@ export type SshApprovalMeta = {
 
 const KINDS: SshApprovalKind[] = ["consent", "secret", "yesno", "info"];
 
+/** What the window sends: the secret only with OK, and the box as the user
+ *  left it, whichever button. Each question decides what a ticked box means
+ *  with its answer: Not now with "Don't ask again" ticked is Never for the
+ *  helper's install, and agent access reads it only with Allow. */
+export function sshApprovalAnswer(
+    kind: SshApprovalKind,
+    approve: boolean,
+    secret: string,
+    checked: boolean,
+): { approve: boolean; text: string; checkbox: boolean } {
+    return { approve, text: approve && kind === "secret" ? secret : "", checkbox: checked };
+}
+
 export function parseSshApprovalMeta(raw: string | null): SshApprovalMeta | null {
     if (!raw) return null;
     try {
@@ -72,12 +85,12 @@ export const SshApprovalWindow = (): JSX.Element => {
     const decide = (approve: boolean) => {
         if (!meta || busy()) return;
         setBusy(true);
-        const text = approve && meta.kind === "secret" ? (input?.value ?? "") : "";
+        const answer = sshApprovalAnswer(meta.kind, approve, input?.value ?? "", checked());
         if (input) input.value = "";
         // The host hands the answer to srv's waiting request and closes this
         // window itself.
         void getApi()
-            .approvals.decideSsh(meta.approvalId, approve, text, approve && checked())
+            .approvals.decideSsh(meta.approvalId, answer.approve, answer.text, answer.checkbox)
             .catch(() => setBusy(false));
     };
 

@@ -199,9 +199,7 @@ pub fn context_for_block(block: &str, cache_root: Option<&str>) -> Result<PaneJa
     if r.jars.len() >= MAX_INCOGNITO_JARS {
         return Err(format!("at most {MAX_INCOGNITO_JARS} Incognito tabs at once"));
     }
-    // Empty cache_path: a unique in-memory profile, nothing written to disk,
-    // the same path every secondary window already uses
-    // (commands::create_isolated_request_context).
+    // Empty cache_path: a unique in-memory profile, nothing written to disk.
     let settings = cef::RequestContextSettings {
         cache_path: cef::CefString::from(""),
         persist_session_cookies: 0,

@@ -41,7 +41,7 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const MAX = 25;
+const MAX = 0;
 const MAX_EVENTS = 0;
 const MAX_RELAYS = 2;
 const MAX_TYPED_HELPERS = 6;

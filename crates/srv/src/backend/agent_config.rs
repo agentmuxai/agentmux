@@ -1256,8 +1256,8 @@ pub const MCP_JSON_WRITE_LOCK: &str = ".claude/.agentmux-mcp-json.lock";
 ///
 /// - **Merge.** Every existing `mcpServers` entry is kept, except the ones a
 ///   previous materialization wrote (per [`MANAGED_MCP_SERVERS_MANIFEST`]),
-///   which are replaced by this launch's set — so a server unbound in the
-///   Armory still disappears. Other top-level keys in the existing file are
+///   which are replaced by this launch's set — so a server unbound in
+///   Connectors still disappears. Other top-level keys in the existing file are
 ///   kept too. On a name clash this launch's entry wins (the `agentmux` entry
 ///   must always be ours).
 /// - **No manifest yet** (first launch after this change, or a user's file):
@@ -3098,7 +3098,7 @@ mod mcp_json_tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join(".mcp.json"), r#"{"mcpServers":{"postgres":{"command":"pg-mcp"}}}"#).unwrap();
         write_mcp_json_respecting_user_servers(dir.path(), GENERATED_MCP).unwrap();
-        // Next launch: `github` was unbound in the Armory.
+        // Next launch: `github` was unbound in Connectors.
         write_mcp_json_respecting_user_servers(dir.path(), r#"{"mcpServers":{"agentmux":{"command":"agentmux-mcp"}}}"#)
             .unwrap();
         let servers = mcp_servers_of(dir.path());

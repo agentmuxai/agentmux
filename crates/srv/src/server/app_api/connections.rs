@@ -77,7 +77,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
         }
     });
 
-    // A host's durable sessions, for the Remotes pane's "Sessions…"
+    // A host's durable sessions, for Connectors → Remotes' "Sessions…"
     // (spec §7.6). Listing runs one fixed, read-only command over ssh, as the
     // UI's other connection calls do. Ending one is the user's decision,
     // made in the host's own window (`ask_user`): anything holding srv's
@@ -93,7 +93,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     auth_key: &auth_key,
                 });
                 let list = sessions::list(&store, &conn, ask).await?;
-                // The Remotes pane shows the count without opening ssh itself.
+                // Connectors → Remotes shows the count without opening ssh itself.
                 remotes::note_sessions(&conn, list.len());
                 Ok(list)
         }
@@ -123,7 +123,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
         }
     });
 
-    // The Remotes pane (docs/specs/SPEC_REMOTES_PANE_2026_10_05.md §4.6): its list,
+    // Connectors → Remotes (docs/specs/SPEC_REMOTES_PANE_2026_10_05.md §4.6): its list,
     // a remote's settings, and forgetting a recent one.
     let config = state.config_watcher.clone();
     engine.register_typed(COMMAND_REMOTES_LIST, move |_cmd: CommandRemotesListData, _ctx| {
@@ -352,6 +352,8 @@ async fn remove_helper(state: &AppState, connection: &str, block: &str) -> Resul
     if let Err(e) = helper_hosts::forget_helper(&name) {
         tracing::warn!(connection = %name, error = %e, "could not forget the removed helper");
     }
+    // Its next need asks again (spec §4.9), whatever was answered before.
+    crate::backend::remote::helper_consent::forget_answers(&name);
     remotes::note_sessions(&name, 0);
     remotes::publish_change(&state.broker);
     tracing::info!(connection = %name, sessions = running.len(), "removed the helper");

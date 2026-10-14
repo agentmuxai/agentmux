@@ -7,10 +7,18 @@ import { For, Show, type JSX } from "solid-js";
 import { fullConfigAtom, settingsAtom } from "@/app/store/global";
 import type { SettingsIndexEntry } from "../settings-model";
 import { NumberControl, set, SettingRow, SliderControl, ToggleControl } from "../settings-controls";
+import { DefaultShellSetting } from "./default-shell";
 
 // ── Search index — see appearance-section.tsx's header comment for the pattern. ──
 
 export const TERMINAL_SETTINGS = {
+    defaultShell: {
+        id: "terminal.default_shell",
+        label: "Default shell",
+        description: "The shell new local terminals open with. Agents' shells and SSH or WSL terminals keep their own.",
+        section: "terminal",
+        keywords: ["shell", "default shell", "pwsh", "powershell", "bash", "zsh", "fish", "git bash", "cmd", "nushell", "term:localshellpath"],
+    },
     fontSize: {
         id: "terminal.font_size",
         label: "Font size",
@@ -56,7 +64,7 @@ export const TERMINAL_SETTINGS = {
         id: "terminal.durable_ssh",
         label: "Keep SSH sessions alive",
         description:
-            "Durable SSH terminals keep their shell running on the host (in AgentMux's small helper there), so a dropped link, sleep or a restart reconnects instead of ending it. Connectors → Remotes can set it per host.",
+            "Durable SSH terminals keep their shell running on the host (in AgentMux's small helper there), so a dropped link, sleep or a restart reconnects instead of ending it. On a host without the helper, the first terminal asks before installing it, and is a plain terminal if it isn't installed. Connectors → Remotes can set it per host.",
         section: "terminal",
         keywords: ["durable", "ssh", "reconnect", "remote", "session", "term:durable"],
     },
@@ -135,6 +143,13 @@ export function TerminalSection(): JSX.Element {
 
     return (
         <div class="settings-section-body">
+            <SettingRow
+                id={TERMINAL_SETTINGS.defaultShell.id}
+                label={TERMINAL_SETTINGS.defaultShell.label}
+                description={TERMINAL_SETTINGS.defaultShell.description}
+                stacked
+                control={<DefaultShellSetting />}
+            />
             <SettingRow
                 id={TERMINAL_SETTINGS.fontSize.id}
                 label={TERMINAL_SETTINGS.fontSize.label}
@@ -230,7 +245,7 @@ export function TerminalSection(): JSX.Element {
                             set("term:durable", v === "on" ? true : v === "off" ? false : null);
                         }}
                     >
-                        <option value="auto">On hosts that have the helper</option>
+                        <option value="auto">On, else a plain terminal</option>
                         <option value="on">Always (needs the helper)</option>
                         <option value="off">Never</option>
                     </Select>
