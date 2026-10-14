@@ -31,6 +31,21 @@ export function toAlignedData(rows: DataItem[], keys: string[]): AlignedData {
     return [xs, ...ys] as AlignedData;
 }
 
+/** One series of a chart: which metric, its name and color, and whether it is drawn below the axis. */
+export interface SeriesSpec {
+    key: string;
+    label: string;
+    color: string;
+    /** Drawn below the axis (sent, written), opposite the series above it. */
+    below?: boolean;
+}
+
+/** uPlot's data for `specs`: as `toAlignedData`, with a series drawn below the axis negated. */
+export function toSeriesData(rows: DataItem[], specs: SeriesSpec[]): AlignedData {
+    const [xs, ...ys] = toAlignedData(rows, specs.map((s) => s.key));
+    return [xs, ...ys.map((y, i) => (specs[i].below ? (y as (number | null)[]).map((v) => (v == null ? null : -v)) : y))] as AlignedData;
+}
+
 /** The visible window in seconds: `targetLen` intervals ending at the newest sample; `null` with no data. */
 export function xWindowSecs(rows: DataItem[], targetLen: number, intervalSecs: number): [number, number] | null {
     if (rows.length === 0) return null;

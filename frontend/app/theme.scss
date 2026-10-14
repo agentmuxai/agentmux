@@ -277,6 +277,12 @@
     --sysinfo-cpu-color: var(--accent-color);
     --sysinfo-mem-color: #58c142; // green: CPU is the theme's primary colour, so Mem needs a different one
     --sysinfo-net-color: #ff69b4; // Pink for network I/O
+    // In and out on one in/out chart (Sysinfo's Overview: in above the axis, out
+    // below), from the data-viz dark palette's magenta and yellow steps; together
+    // they pass its lightness, chroma, colour-blind and contrast checks on this
+    // dark surface.
+    --sysinfo-in-color: #d55181;
+    --sysinfo-out-color: #c98500;
 
     --bulb-color: rgb(255, 221, 51);
 

@@ -3,8 +3,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * One Sysinfo chart, drawn by uPlot on a canvas. It is built once and given new
- * data with `setData` on each update, instead of a new SVG every time, so a
+ * Sysinfo's charts, drawn by uPlot on a canvas. A chart is built once and given
+ * new data with `setData` on each update, instead of a new SVG every time, so a
  * busy pane costs a redraw, not a rebuild. What it draws (the series, window,
  * range and labels) comes from sysinfo-chart.ts.
  * docs/reports/REPORT_SYSINFO_REWRITE_AND_MODERN_MONITOR_2026_10_13.md section 5.2.
@@ -21,27 +21,14 @@ import "./sysinfo-plot.scss";
 import {
     formatValue,
     resolveCssColor,
+    type SeriesSpec,
     timeAxisLabels,
-    toAlignedData,
+    toSeriesData,
     withAlpha,
     xWindowSecs,
     yRange,
 } from "./sysinfo-chart";
 import type { DataItem } from "./sysinfo-types";
-
-type SingleLinePlotProps = {
-    plotData: Array<DataItem>;
-    yval: string;
-    yvalMeta: TimeSeriesMeta;
-    blockId: string;
-    defaultColor: string;
-    title?: boolean;
-    sparkline?: boolean;
-    targetLen: number;
-    intervalSecs: number;
-    /** Charts with the same key move one crosshair together. */
-    syncKey?: string;
-};
 
 /** At most one resize per this many ms while the pane is being dragged. */
 const CHART_RESIZE_MS = 100;
@@ -61,7 +48,26 @@ function yAxisSize(self: uPlot, values: string[] | null, axisIdx: number, cycleN
     return Math.ceil(size);
 }
 
-function SingleLinePlot(props: SingleLinePlotProps): JSX.Element {
+export type TimeChartProps = {
+    plotData: Array<DataItem>;
+    series: SeriesSpec[];
+    /** The y range for the rows on screen. */
+    yRange: (rows: DataItem[]) => [number, number];
+    /** How a value reads on the y axis and in the tooltip. */
+    format: (v: number) => string;
+    targetLen: number;
+    intervalSecs: number;
+    /** Charts with the same key move one crosshair together. */
+    syncKey?: string;
+    /** No axes and no tooltip: a tile's sparkline. */
+    sparkline?: boolean;
+    /** The chart's name, over its top-left corner. */
+    title?: string;
+    class?: string;
+};
+
+/** A time chart of one or more series, the ones marked `below` drawn under the axis. */
+export function TimeChart(props: TimeChartProps): JSX.Element {
     let container!: HTMLDivElement;
     let tip!: HTMLDivElement;
     let chart: uPlot | null = null;
@@ -70,28 +76,36 @@ function SingleLinePlot(props: SingleLinePlotProps): JSX.Element {
     let xWindow: [number, number] = [0, 1];
     let yWindow: [number, number] = [0, 100];
 
-    const unit = () => props.yvalMeta?.label ?? "";
-    const decimals = () => props.yvalMeta?.decimalPlaces ?? 0;
-
     const showTip = (u: uPlot) => {
         const idx = u.cursor.idx;
-        const y = idx == null ? null : (u.data[1][idx] as number | null);
-        if (idx == null || y == null || props.sparkline) {
+        if (props.sparkline || idx == null) {
+            tip.style.display = "none";
+            return;
+        }
+        const parts: string[] = [];
+        let anchor: number | null = null;
+        props.series.forEach((s, i) => {
+            const v = u.data[i + 1][idx] as number | null;
+            if (v == null) return;
+            anchor ??= v;
+            parts.push(props.series.length > 1 ? `${s.label} ${props.format(Math.abs(v))}` : props.format(Math.abs(v)));
+        });
+        if (anchor == null) {
             tip.style.display = "none";
             return;
         }
         const ts = (u.data[0][idx] as number) * 1000;
-        tip.textContent = `${new Date(ts).toLocaleTimeString()}  ${formatValue(y, decimals(), unit())}`;
+        tip.textContent = `${new Date(ts).toLocaleTimeString()}  ${parts.join("  ")}`;
         tip.style.display = "block";
         tip.style.left = `${u.over.offsetLeft + (u.cursor.left ?? 0)}px`;
-        tip.style.top = `${Math.max(0, u.over.offsetTop + u.valToPos(y, "y") - 30)}px`;
+        tip.style.top = `${Math.max(0, u.over.offsetTop + u.valToPos(anchor, "y") - 30)}px`;
     };
 
     const options = (width: number, height: number): uPlot.Options => {
-        const color = resolveCssColor(container, props.yvalMeta?.color || props.defaultColor);
         const muted = resolveCssColor(container, "var(--grey-text-color)");
         const grid = { stroke: withAlpha(muted, 0.25), width: 1 };
         const ticks = { stroke: withAlpha(muted, 0.4), width: 1, size: 4 };
+        const single = props.series.length === 1;
         return {
             width,
             height,
@@ -99,7 +113,7 @@ function SingleLinePlot(props: SingleLinePlotProps): JSX.Element {
             cursor: {
                 sync: props.syncKey ? { key: props.syncKey } : undefined,
                 drag: { x: false, y: false },
-                points: { size: 6, fill: color },
+                points: { size: 6 },
             },
             scales: {
                 x: { time: true, range: () => xWindow },
@@ -120,25 +134,32 @@ function SingleLinePlot(props: SingleLinePlotProps): JSX.Element {
                           grid,
                           ticks,
                           size: yAxisSize,
-                          values: (_u, splits) => splits.map((v) => formatValue(v, decimals(), "")),
+                          // Below the axis is still an amount: no minus signs.
+                          values: (_u, splits) => splits.map((v) => props.format(Math.abs(v))),
                       },
                   ],
             series: [
                 {},
-                {
-                    label: props.yvalMeta?.name ?? props.yval,
-                    stroke: color,
-                    width: 2,
-                    // A missing sample is a break in the line and the area.
-                    spanGaps: false,
-                    points: { show: false },
-                    fill: (u: uPlot) => {
-                        const g = u.ctx.createLinearGradient(0, u.bbox.top, 0, u.bbox.top + u.bbox.height);
-                        g.addColorStop(0, withAlpha(color, 0.7));
-                        g.addColorStop(1, withAlpha(color, 0));
-                        return g;
-                    },
-                },
+                ...props.series.map((s) => {
+                    const color = resolveCssColor(container, s.color);
+                    return {
+                        label: s.label,
+                        stroke: color,
+                        width: props.sparkline ? 1.5 : 2,
+                        // A missing sample is a break in the line and the area.
+                        spanGaps: false,
+                        points: { show: false },
+                        fillTo: 0,
+                        fill: single
+                            ? (u: uPlot) => {
+                                  const g = u.ctx.createLinearGradient(0, u.bbox.top, 0, u.bbox.top + u.bbox.height);
+                                  g.addColorStop(0, withAlpha(color, 0.7));
+                                  g.addColorStop(1, withAlpha(color, 0));
+                                  return g;
+                              }
+                            : withAlpha(color, 0.25),
+                    } as uPlot.Series;
+                }),
             ],
             hooks: { setCursor: [(u) => showTip(u)] },
         };
@@ -148,8 +169,8 @@ function SingleLinePlot(props: SingleLinePlotProps): JSX.Element {
         const rows = props.plotData ?? [];
         const win = xWindowSecs(rows, props.targetLen, props.intervalSecs);
         if (win) xWindow = win;
-        yWindow = yRange(rows, props.yval, props.yvalMeta);
-        return toAlignedData(rows, [props.yval]);
+        yWindow = props.yRange(rows);
+        return toSeriesData(rows, props.series);
     };
 
     const build = () => {
@@ -175,13 +196,9 @@ function SingleLinePlot(props: SingleLinePlotProps): JSX.Element {
         });
     });
 
-    // A new chart when what it draws changes (metric, color, axes), or when it
+    // A new chart when what it draws changes (series, colors, axes), or when it
     // has none yet; otherwise only a new size, or new data.
-    createEffect(
-        on([() => props.yval, () => props.yvalMeta, () => props.defaultColor, () => props.sparkline], () => build(), {
-            defer: true,
-        })
-    );
+    createEffect(on([() => props.series, () => props.sparkline], () => build(), { defer: true }));
     createEffect(
         on(size, (s) => {
             if (!chart) build();
@@ -195,9 +212,9 @@ function SingleLinePlot(props: SingleLinePlotProps): JSX.Element {
     );
 
     return (
-        <div class="sysinfo-chart min-h-[100px]">
-            <Show when={props.title && props.yvalMeta?.name}>
-                <div class="sysinfo-chart-title">{props.yvalMeta?.name}</div>
+        <div class={`sysinfo-chart ${props.class ?? ""}`}>
+            <Show when={props.title}>
+                <div class="sysinfo-chart-title">{props.title}</div>
             </Show>
             <div ref={container} class="sysinfo-chart-canvas" />
             <div ref={tip} class="sysinfo-chart-tip" style={{ display: "none" }} />
@@ -205,4 +222,40 @@ function SingleLinePlot(props: SingleLinePlotProps): JSX.Element {
     );
 }
 
-export { SingleLinePlot };
+type SingleLinePlotProps = {
+    plotData: Array<DataItem>;
+    yval: string;
+    yvalMeta: TimeSeriesMeta;
+    blockId: string;
+    defaultColor: string;
+    title?: boolean;
+    sparkline?: boolean;
+    targetLen: number;
+    intervalSecs: number;
+    syncKey?: string;
+};
+
+/** One metric, as the plot types show it: its color, unit and range from its metadata. */
+export function SingleLinePlot(props: SingleLinePlotProps): JSX.Element {
+    const series = (): SeriesSpec[] => [
+        {
+            key: props.yval,
+            label: props.yvalMeta?.name ?? props.yval,
+            color: props.yvalMeta?.color || props.defaultColor,
+        },
+    ];
+    return (
+        <TimeChart
+            plotData={props.plotData}
+            series={series()}
+            yRange={(rows) => yRange(rows, props.yval, props.yvalMeta)}
+            format={(v) => formatValue(v, props.yvalMeta?.decimalPlaces ?? 0, props.yvalMeta?.label ?? "")}
+            targetLen={props.targetLen}
+            intervalSecs={props.intervalSecs}
+            syncKey={props.syncKey}
+            sparkline={props.sparkline}
+            title={props.title ? props.yvalMeta?.name : undefined}
+            class="min-h-[100px]"
+        />
+    );
+}
