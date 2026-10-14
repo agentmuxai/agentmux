@@ -305,6 +305,8 @@ mod spawn_site_coverage {
          "sanitized: an SSH pane's system ssh, built here and sanitized by lifecycle.rs's sanitize_pty_command"),
         ("src/backend/blockcontroller/shell/tests.rs", "\"sleep\"", 1,
          "test: disposable `sleep 30` made its own process-group leader, to prove a group-kill reaches an isolated group"),
+        ("src/bootstrap/watchers.rs", "\"sleep\"", 1,
+         "test: disposable `sleep 60` the launcher-watcher test waits on through a pidfd, to prove a signal doesn't end the wait"),
         ("src/backend/claude_layout.rs", "\"git\"", 1,
          "test: builds a throwaway repository with a linked worktree in a temp dir, to check the CLI's memory-folder rule"),
         ("src/backend/container_cli.rs", "\"sh\"", 2,
