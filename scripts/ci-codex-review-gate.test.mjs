@@ -5,8 +5,13 @@
 // green for a commit Codex has not OK'd, so most cases here are ways it
 // could wrongly succeed.
 
+import { readFileSync } from "node:fs";
+import { dirname, join, relative } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { createGitHubClient } from "./lib/github-rest.mjs";
 import {
+    changedFiles,
     CODEX_LOGIN,
     evaluateCodexGate,
     isDependencyBotPr,
@@ -15,6 +20,7 @@ import {
     needsDiffSince,
     reviewedCommit,
     SKIP_AUTHOR,
+    SKIP_AUTHORS,
     skippedHead,
     TRIGGER_AUTHOR,
 } from "./ci-codex-review-gate.mjs";
@@ -599,5 +605,73 @@ describe("needsDiffSince", () => {
         expect(needsDiffSince({ kind: "findings", sha: HEAD.slice(0, 10) }, HEAD)).toBe(false);
         expect(needsDiffSince({ kind: "quota", sha: OLD.slice(0, 10) }, HEAD)).toBe(false);
         expect(needsDiffSince(null, HEAD)).toBe(false);
+    });
+});
+
+describe("changedFiles", () => {
+    const client = (...responses) =>
+        createGitHubClient({ token: "t", fetch: async () => responses.shift(), sleep: async () => {}, log: () => {} });
+    const json = (body) => new Response(JSON.stringify(body), { status: 200 });
+
+    it("lists the files compare names", async () => {
+        const files = await changedFiles(client(json({ files: [{ filename: "a.rs" }] })), "o/r", OLD, HEAD);
+        expect(files).toEqual(["a.rs"]);
+    });
+
+    it("treats a commit compare can't reach as an unknown diff", async () => {
+        for (const code of [404, 422]) {
+            expect(await changedFiles(client(new Response("", { status: code })), "o/r", OLD, HEAD)).toBeNull();
+        }
+    });
+
+    it("fails on an error that outlasts the retries, rather than guessing", async () => {
+        const fivehundreds = [1, 2, 3, 4].map(() => new Response("", { status: 500 }));
+        await expect(changedFiles(client(...fivehundreds), "o/r", OLD, HEAD)).rejects.toMatchObject({ status: 500 });
+    });
+
+    it("recovers from a transient error", async () => {
+        const files = await changedFiles(client(new Response("", { status: 502 }), json({ files: [] })), "o/r", OLD, HEAD);
+        expect(files).toEqual([]);
+    });
+});
+
+describe("the workflow that runs the gate", () => {
+    const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
+    const workflow = readFileSync(join(repoRoot, ".github/workflows/codex-review-gate.yml"), "utf8");
+
+    /** Repo-relative paths of the gate and every module it imports, transitively. */
+    function gateModules(entry = "scripts/ci-codex-review-gate.mjs", seen = new Set()) {
+        if (seen.has(entry)) return seen;
+        seen.add(entry);
+        const source = readFileSync(join(repoRoot, entry), "utf8");
+        for (const [, spec] of source.matchAll(/^\s*(?:import|export)\b[^;]*?\bfrom\s+["'](\.{1,2}\/[^"']+)["']/gm)) {
+            gateModules(relative(repoRoot, join(repoRoot, dirname(entry), spec)).replace(/\\/g, "/"), seen);
+        }
+        return seen;
+    }
+
+    /** The paths under `sparse-checkout: |`. */
+    function sparseCheckout() {
+        const lines = workflow.split("\n");
+        const start = lines.findIndex((l) => /^\s*sparse-checkout:\s*\|\s*$/.test(l));
+        expect(start, "sparse-checkout is a block list").toBeGreaterThan(-1);
+        const indent = lines[start].search(/\S/);
+        const paths = [];
+        for (const line of lines.slice(start + 1)) {
+            if (line.trim() === "" || line.search(/\S/) <= indent) break;
+            paths.push(line.trim());
+        }
+        return paths;
+    }
+
+    it("checks out every module the gate imports", () => {
+        const modules = [...gateModules()];
+        expect(modules).toContain("scripts/lib/github-rest.mjs");
+        expect(sparseCheckout()).toEqual(expect.arrayContaining(modules));
+    });
+
+    it("runs on comments from every login the gate reads", () => {
+        for (const login of [CODEX_LOGIN, ...SKIP_AUTHORS]) expect(workflow).toContain(`'${login}'`);
+        expect(workflow).toContain("'reagent:codex-skipped'");
     });
 });

@@ -544,6 +544,7 @@ partial list.
 |---|---|
 | [`ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14`](ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14.md) | Architecture rethink: making ABF mandatory ("every agent must have an ABF") |
 | [`PLAN_CI_TEST_SPEED_AND_DRY_FOLLOWUPS_2026_10_09`](PLAN_CI_TEST_SPEED_AND_DRY_FOLLOWUPS_2026_10_09.md) | Plan — faster CI tests, and the open architecture / DRY follow-ups |
+| [`PLAN_CODEX_GATE_TRANSIENT_FAILURES_AND_CI_SCRIPT_DRY_2026_10_14`](PLAN_CODEX_GATE_TRANSIENT_FAILURES_AND_CI_SCRIPT_DRY_2026_10_14.md) | Plan — the Codex review gate survives a transient GitHub error, and the CI script clean-ups around it |
 | [`PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20`](PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20.md) | Plan — collapse every provider-login code path onto one |
 | [`PLAN_MACOS_COMPILE_GATE_2026_10_09`](PLAN_MACOS_COMPILE_GATE_2026_10_09.md) | Plan — a macOS compile check on PRs, and a nightly macOS leg that can fail |
 | [`PLAN_PANE_TABS_UNIVERSAL_IMPLEMENTATION_2026_09_17`](PLAN_PANE_TABS_UNIVERSAL_IMPLEMENTATION_2026_09_17.md) | PLAN: Universal Pane Tabs — Implementation Task Breakdown |
