@@ -941,7 +941,7 @@ pub fn demote_promoted_pool_window(
     label: &str,
     window: &cef::Window,
 ) -> bool {
-    use cef::{ImplBrowser, ImplFrame};
+    use cef::ImplBrowser;
 
     // 0. Capacity: the pool self-refills to POOL_TARGET_SIZE after every
     // promote, so in steady state the pool is ALWAYS at target when a close
@@ -1090,7 +1090,7 @@ pub fn demote_promoted_pool_window(
 /// all state untouched.
 #[cfg(target_os = "windows")]
 pub fn park_and_blank_window(state: &Arc<AppState>, label: &str) -> bool {
-    use cef::{ImplBrowser, ImplFrame};
+    use cef::ImplBrowser;
 
     // 1. Strict HWND only — never EnumWindows (round-5 safety note: a loose
     // fallback can resolve MAIN for an unknown label).

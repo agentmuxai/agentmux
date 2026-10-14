@@ -23,10 +23,25 @@ pub(crate) fn replace_page_script(url: &str) -> String {
     )
 }
 
+/// Whether the page itself can navigate to `url`. Chromium blocks a
+/// page-initiated top-frame navigation to a `data:` URL, and the
+/// install-broken page `pool_frontend_url` falls back to is one; the
+/// frontend itself is always served over http.
+pub(crate) fn page_can_navigate_to(url: &str) -> bool {
+    let url = url.trim_start().to_ascii_lowercase();
+    url.starts_with("http://") || url.starts_with("https://") || url == "about:blank"
+}
+
 /// Navigate `frame` to `url`, replacing its history entry (see
-/// `replace_page_script`).
+/// `replace_page_script`). Falls back to `load_url` when the page can't do
+/// it: a target it may not navigate to, or a frame whose renderer is gone,
+/// which runs no script while `load_url` starts a new renderer.
 pub(crate) fn replace_page(frame: &cef::Frame, url: &str) {
     use cef::ImplFrame;
+    if !page_can_navigate_to(url) || frame.is_valid() == 0 {
+        frame.load_url(Some(&cef::CefString::from(url)));
+        return;
+    }
     let code = cef::CefString::from(replace_page_script(url).as_str());
     let empty = cef::CefString::from("");
     frame.execute_java_script(Some(&code), Some(&empty), 0);
@@ -34,7 +49,19 @@ pub(crate) fn replace_page(frame: &cef::Frame, url: &str) {
 
 #[cfg(test)]
 mod tests {
-    use super::replace_page_script;
+    use super::{page_can_navigate_to, replace_page_script};
+
+    #[test]
+    fn the_page_navigates_only_to_http_and_blank() {
+        assert!(page_can_navigate_to("http://127.0.0.1:1234/?pool=1"));
+        assert!(page_can_navigate_to("http://localhost:5173"));
+        assert!(page_can_navigate_to("https://example.com"));
+        assert!(page_can_navigate_to("about:blank"));
+        // The install-broken page: Chromium refuses it from the page.
+        assert!(!page_can_navigate_to("data:text/html;base64,PGh0bWw+"));
+        assert!(!page_can_navigate_to("DATA:text/html,x"));
+        assert!(!page_can_navigate_to("file:///C:/x.html"));
+    }
 
     #[test]
     fn replaces_rather_than_pushes() {
