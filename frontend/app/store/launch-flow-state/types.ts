@@ -45,6 +45,13 @@ export interface LaunchForm {
     /** The launch's record of a bundle (the agent's first, or a continued
      *  row's). `""` = none. */
     bundleId: string;
+    /** The agent's Bundles list: the one handed back from the `+ New
+     *  bundle` round-trip, else the agent's saved one once it loads. */
+    bundleIds: string[];
+    /** The user edited `bundleIds` (or it came back from the round-trip).
+     *  Launch saves the list only then, so a list that never loaded can't
+     *  overwrite the saved one. */
+    bundleIdsEdited: boolean;
     /** When set, this launch is a continuation of a prior named
      *  agent — pulled from the user's "Continue agent" dropdown.
      *  Drives the per-row lock semantics in §3.2.2 of the spec. */
@@ -57,6 +64,8 @@ export const initialForm = (): LaunchForm => ({
     image: "",
     accountId: "",
     bundleId: "",
+    bundleIds: [],
+    bundleIdsEdited: false,
     continueOfId: null,
 });
 
@@ -80,6 +89,14 @@ export interface SubmitStatus {
     error: string | null;
 }
 
+/** The agent's saved Bundles list, loaded once per open. */
+export interface AgentBundlesStatus {
+    /** Loaded or failed. The Bundles editor stays disabled until then. */
+    ready: boolean;
+    /** The agent's own bundle, which the editor shows apart from the list. */
+    ownBundleId: string;
+}
+
 const initialSubmit = (): SubmitStatus => ({
     inFlight: false,
     error: null,
@@ -97,6 +114,7 @@ export interface LaunchFlowState {
      *  below). */
     accounts: ResourceList<Account>;
     bundles: ResourceList<Bundle>;
+    agentBundles: AgentBundlesStatus;
     submit: SubmitStatus;
     /** Folded-in OAuth state machine. The `Auth` command wraps an
      *  `AuthCommand` from auth-state.ts; the reducer delegates to
@@ -111,6 +129,7 @@ export const initialState = (): LaunchFlowState => ({
     form: initialForm(),
     accounts: initialResourceList<Account>(),
     bundles: initialResourceList<Bundle>(),
+    agentBundles: { ready: false, ownBundleId: "" },
     submit: initialSubmit(),
     auth: initialAuthState(),
     closed: false,
@@ -119,8 +138,8 @@ export const initialState = (): LaunchFlowState => ({
 /** All transitions the view can dispatch. */
 export type LaunchFlowCommand =
     /** Modal opened — initial form values (preselect / continuation
-     *  carry-over from the picker). */
-    | { type: "Opened"; initial?: Partial<LaunchForm> }
+     *  carry-over from the picker) and the agent's own bundle id. */
+    | { type: "Opened"; initial?: Partial<LaunchForm>; ownBundleId?: string }
     /** Form field commands. Each is idempotent (set-to-current is a
      *  no-op the reducer's identity check filters out). */
     | { type: "NameChanged"; name: string }
@@ -130,6 +149,8 @@ export type LaunchFlowCommand =
      *  continuation with no carry-over). */
     | { type: "AccountChanged"; accountId: string }
     | { type: "BundleChanged"; bundleId: string }
+    /** The user edited the agent's Bundles list. */
+    | { type: "BundleIdsChanged"; bundleIds: string[] }
     /** Continue dropdown — `null` = "— New agent —". Setting to a
      *  real instance id locks per-row selectors with the carry-over
      *  values. */
@@ -145,6 +166,10 @@ export type LaunchFlowCommand =
     | { type: "BundlesLoading" }
     | { type: "BundlesLoaded"; list: Bundle[] }
     | { type: "BundlesFailed"; error: string }
+    /** The agent's saved Bundles list. It replaces `bundleIds` only if
+     *  the user hasn't edited them meanwhile. */
+    | { type: "AgentBundlesLoaded"; bundleIds: string[]; ownBundleId: string }
+    | { type: "AgentBundlesFailed" }
     /** Submit lifecycle. */
     | { type: "SubmitClicked" }
     | { type: "SubmitSucceeded" }

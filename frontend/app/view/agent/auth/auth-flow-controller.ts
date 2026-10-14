@@ -206,17 +206,7 @@ export class AuthFlowController {
         // running until timeout because `Selected` wipes `sessionId`
         // and dispose()/cancel() can't find it anymore.
         const prev = this.state();
-        // #853 also covers `authenticated` and `saving` — same
-        // orphan-CLI hazard: OAuth has authenticated→saving→ready,
-        // so a selection swap mid-savebundle would leak the backend
-        // session. Reagent P1 on #853 round 10 caught the `saving`
-        // gap; cancel/dispose already cover it.
-        if (
-            (prev.kind === "waiting" ||
-                prev.kind === "authenticated" ||
-                prev.kind === "saving") &&
-            prev.sessionId !== ""
-        ) {
+        if (prev.kind === "waiting" && prev.sessionId !== "") {
             void this.rpc.cancel(prev.sessionId).catch(() => {});
         }
         // Bump the action token so any in-flight RPC completions for
@@ -307,24 +297,13 @@ export class AuthFlowController {
 
     async cancel(): Promise<void> {
         const s = this.state();
-        // Reagent P1 on #853: also honor `authenticated` — backend
-        // session is held alive there too (awaiting the planned
-        // auth.savebundle, which is not built yet).
-        // Clicking Cancel from the SaveBundle panel must fire
-        // auth.cancel so the orphan session is released. Mirrors
-        // dispose()'s coverage of both kinds.
-        //
         // Reagent P1 on #850: bump actionToken even when sessionId is
         // still "" (the startup window between ConnectClicked dispatch
         // and SessionStarted dispatch — auth.start in flight). The bump
         // invalidates the pending connect()'s actionToken gate so its
         // SessionStarted is dropped and the orphan session gets
         // cancelled by connect()'s stale-token path. User intent wins.
-        // Reagent P1 on #853 round 9: also cover `saving` — the
-        // backend session is still alive during the planned `auth.savebundle`
-        // RPC (cleared only by `BundleSaved`); Cancel clicked there
-        // must release it like in `waiting`/`authenticated`.
-        if (s.kind !== "waiting" && s.kind !== "authenticated" && s.kind !== "saving") {
+        if (s.kind !== "waiting") {
             return;
         }
         this.actionToken += 1;
@@ -436,7 +415,7 @@ export class AuthFlowController {
      *  Uses the `ConnectFailed` command, which the reducer honors
      *  only from connect-attempt kinds (`unauthenticated`/`expired`/
      *  `failed`/`waiting`). If the user has already moved to
-     *  `authenticated`/`saving`/`ready`/`idle`, a stale rejection from
+     *  `ready`/`idle`, a stale rejection from
      *  an abandoned connect is dropped instead of clobbering the
      *  newer state — codex P2 on #853 round 7 + codex P2 on #854. */
     failConnect(error: unknown): void {
@@ -464,17 +443,10 @@ export class AuthFlowController {
 
     dispose(): void {
         // Fire-and-forget auth.cancel for any in-flight session so we
-        // don't leave an orphan CLI subprocess on the backend. muxreview
-        // P1 on #853: covers `authenticated` (CLI is done, backend
-        // session held alive awaiting the planned `auth.savebundle`) AND `saving`
-        // (savebundle RPC in flight, session cleared only by
-        // BundleSaved) — unmounting from any of these kinds must
-        // still tell the backend to release the session.
+        // don't leave an orphan CLI subprocess on the backend.
         this.actionToken += 1;
         const s = this.state();
-        const hasLiveSession =
-            (s.kind === "waiting" || s.kind === "authenticated" || s.kind === "saving") &&
-            s.sessionId !== "";
+        const hasLiveSession = s.kind === "waiting" && s.sessionId !== "";
         if (hasLiveSession) {
             void this.rpc.cancel(s.sessionId).catch(() => {});
         }

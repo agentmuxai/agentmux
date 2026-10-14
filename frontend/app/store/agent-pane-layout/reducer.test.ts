@@ -108,7 +108,7 @@ describe("agent-pane-layout reducer", () => {
             s = apply(s, { type: "ScrollMarginChanged", px: 12 });
             s = apply(s, { type: "RowMeasured", nodeId: "a", state: "collapsed", cssPx: 23 });
             s = apply(s, { type: "EstimateSet", nodeId: "b", state: "collapsed", cssPx: 40 });
-            s = apply(s, { type: "UserExpanded", nodeId: "c" });
+            s = apply(s, { type: "ExpansionResolved", nodeId: "c", to: { open: true, via: "pin" } });
             s = apply(s, { type: "RowMeasured", nodeId: "c", state: "expanded", cssPx: 180 });
             // d: no measurement, no estimate → DEFAULT_ROW_PX
             assertPrefixSum(s);
@@ -139,10 +139,10 @@ describe("agent-pane-layout reducer", () => {
                             cmd = { type: "EstimateSet", nodeId: id, state: st, cssPx: Math.floor(rand() * 400) };
                             break;
                         case 2:
-                            cmd = { type: "UserExpanded", nodeId: id };
+                            cmd = { type: "ExpansionResolved", nodeId: id, to: { open: true, via: "pin" } };
                             break;
                         case 3:
-                            cmd = { type: "UserCollapsed", nodeId: id };
+                            cmd = { type: "ExpansionResolved", nodeId: id, to: { open: false } };
                             break;
                         case 4:
                             cmd = { type: "AutoExpandStarted", nodeId: id };
@@ -241,7 +241,7 @@ describe("agent-pane-layout reducer", () => {
             s = apply(s, { type: "RowMeasured", nodeId: "x", state: "collapsed", cssPx: 24 });
             expect(effectiveHeight(s, "x")).toBe(24); // collapsed by default
 
-            s = apply(s, { type: "UserExpanded", nodeId: "x" });
+            s = apply(s, { type: "ExpansionResolved", nodeId: "x", to: { open: true, via: "pin" } });
             // expanded slot unmeasured → falls back to default
             expect(effectiveHeight(s, "x")).toBe(DEFAULT_ROW_PX);
 
@@ -249,7 +249,7 @@ describe("agent-pane-layout reducer", () => {
             expect(effectiveHeight(s, "x")).toBe(200);
 
             // collapse again → original collapsed measurement intact
-            s = apply(s, { type: "UserCollapsed", nodeId: "x" });
+            s = apply(s, { type: "ExpansionResolved", nodeId: "x", to: { open: false } });
             expect(effectiveHeight(s, "x")).toBe(24);
         });
 
@@ -280,7 +280,7 @@ describe("agent-pane-layout reducer", () => {
         it("a user pin survives a hold expiry (no-op, audited)", () => {
             let s = withRow();
             s = apply(s, { type: "AutoExpandStarted", nodeId: "t" });
-            s = apply(s, { type: "UserExpanded", nodeId: "t" }); // pin during hold
+            s = apply(s, { type: "ExpansionResolved", nodeId: "t", to: { open: true, via: "pin" } }); // pin during hold
             expect(s.expansion.get("t")).toEqual({ open: true, via: "pin" });
             const r = update(s, { type: "AutoExpandHoldExpired", nodeId: "t" });
             expect(r.state).toBe(s); // unchanged
@@ -289,17 +289,10 @@ describe("agent-pane-layout reducer", () => {
 
         it("AutoExpandStarted does not downgrade an existing pin", () => {
             let s = withRow();
-            s = apply(s, { type: "UserExpanded", nodeId: "t" });
+            s = apply(s, { type: "ExpansionResolved", nodeId: "t", to: { open: true, via: "pin" } });
             const r = update(s, { type: "AutoExpandStarted", nodeId: "t" });
             expect(r.state).toBe(s);
             expect(s.expansion.get("t")).toEqual({ open: true, via: "pin" });
-        });
-
-        it("drops an expansion command for an id not in the document", () => {
-            const s = withRow();
-            const r = update(s, { type: "UserExpanded", nodeId: "ghost" });
-            expect(r.state).toBe(s);
-            expect(r.events[0]).toMatchObject({ type: "command-dropped", reason: "expansion-unknown-id" });
         });
 
         it("ExpansionResolved sets the exact value (incl. via:default, which survives a hold-expiry)", () => {
@@ -328,7 +321,7 @@ describe("agent-pane-layout reducer", () => {
             s = apply(s, { type: "NodesChanged", orderedIds: ["a", "b", "c"] });
             s = apply(s, { type: "RowMeasured", nodeId: "a", state: "collapsed", cssPx: 10 });
             s = apply(s, { type: "RowMeasured", nodeId: "b", state: "collapsed", cssPx: 20 });
-            s = apply(s, { type: "UserExpanded", nodeId: "b" });
+            s = apply(s, { type: "ExpansionResolved", nodeId: "b", to: { open: true, via: "pin" } });
             s = apply(s, { type: "EstimateSet", nodeId: "c", state: "collapsed", cssPx: 30 });
 
             const r = update(s, { type: "NodesChanged", orderedIds: ["a", "c"] });
@@ -449,7 +442,7 @@ describe("agent-pane-layout reducer", () => {
             expect(update(s, { type: "Scrolled", scrollTop: 10, viewportPx: 100 }).state).toBe(s);
             s = apply(s, { type: "RowMeasured", nodeId: "a", state: "collapsed", cssPx: 24 });
             expect(update(s, { type: "RowMeasured", nodeId: "a", state: "collapsed", cssPx: 24 }).state).toBe(s);
-            expect(update(s, { type: "UserCollapsed", nodeId: "a" }).state).toBe(s); // already collapsed
+            expect(update(s, { type: "ExpansionResolved", nodeId: "a", to: { open: false } }).state).toBe(s); // already collapsed
             // EstimateSet with the same value is also a no-op (same ref).
             s = apply(s, { type: "EstimateSet", nodeId: "a", state: "expanded", cssPx: 200 });
             expect(update(s, { type: "EstimateSet", nodeId: "a", state: "expanded", cssPx: 200 }).state).toBe(s);

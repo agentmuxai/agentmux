@@ -6,10 +6,9 @@
  * docs/specs/frontend-reducer-architecture-2026-05-03.md (PR-B
  * convergence). Pattern matches the host/launcher Rust reducers.
  *
- * Behavior verbatim from the prior in-place dispatch in
- * launcher-event-reducer.ts — this is a refactor PR, not a redesign.
- * The seed-vs-close race fixes (codex P1/P2 #603, #604) are preserved
- * exactly; tests verify each scenario.
+ * The I/O shell (state cell, effect, atom projection) is
+ * `../launcher-event-store.ts`. The tests pin each seed-vs-close race
+ * (#603, #604).
  */
 
 import type { LauncherEvent } from "@/util/launcher-events";
