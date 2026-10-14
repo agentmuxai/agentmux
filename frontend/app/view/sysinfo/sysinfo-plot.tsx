@@ -220,7 +220,7 @@ export function TimeChart(props: TimeChartProps): JSX.Element {
             <Show when={props.title}>
                 <div class="sysinfo-chart-title">{props.title}</div>
             </Show>
-            <div ref={container} class="sysinfo-chart-canvas" />
+            <div ref={container} classList={{ "sysinfo-chart-canvas": true, "sysinfo-chart-canvas--titled": !!props.title }} />
             <div ref={tip} class="sysinfo-chart-tip" style={{ display: "none" }} />
         </div>
     );

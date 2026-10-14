@@ -18,6 +18,11 @@
     overflow: hidden;
 }
 
+// A titled chart starts below its title, so the title never sits on the top y label.
+.sysinfo-chart-canvas--titled {
+    margin-top: 16px;
+}
+
 .sysinfo-chart-title {
     position: absolute;
     top: 2px;
