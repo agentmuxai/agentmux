@@ -24,10 +24,23 @@ pub struct ViewerDevice {
     pub created_ms: i64,
     /// 0 until the device's first request after pairing.
     pub last_seen_ms: i64,
+    /// The owner let it send to agents as the user.
+    pub can_send: bool,
+}
+
+fn device_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ViewerDevice> {
+    Ok(ViewerDevice {
+        device_id: row.get(0)?,
+        device_name: row.get(1)?,
+        device_key: row.get(2)?,
+        created_ms: row.get(3)?,
+        last_seen_ms: row.get(4)?,
+        can_send: row.get::<_, i64>(5)? != 0,
+    })
 }
 
 impl Store {
-    /// Record a new paired device.
+    /// Record a new paired device. It can't send until the owner allows it.
     pub fn viewer_device_insert(
         &self,
         device_id: &str,
@@ -50,19 +63,37 @@ impl Store {
     pub fn viewer_device_list(&self) -> Result<Vec<ViewerDevice>, StoreError> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT device_id, device_name, device_key, created_ms, last_seen_ms \
+            "SELECT device_id, device_name, device_key, created_ms, last_seen_ms, can_send \
              FROM db_viewer_devices ORDER BY created_ms, device_id",
         )?;
-        let rows = stmt.query_map([], |row| {
-            Ok(ViewerDevice {
-                device_id: row.get(0)?,
-                device_name: row.get(1)?,
-                device_key: row.get(2)?,
-                created_ms: row.get(3)?,
-                last_seen_ms: row.get(4)?,
-            })
-        })?;
+        let rows = stmt.query_map([], device_row)?;
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
+    /// One paired device, None when there is no such device (revoked).
+    pub fn viewer_device_get(&self, device_id: &str) -> Result<Option<ViewerDevice>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        match conn.query_row(
+            "SELECT device_id, device_name, device_key, created_ms, last_seen_ms, can_send \
+             FROM db_viewer_devices WHERE device_id = ?1",
+            params![device_id],
+            device_row,
+        ) {
+            Ok(d) => Ok(Some(d)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    /// Turn a device's send grant on or off. False when there was no such
+    /// device.
+    pub fn viewer_device_set_can_send(&self, device_id: &str, can_send: bool) -> Result<bool, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let rows = conn.execute(
+            "UPDATE db_viewer_devices SET can_send = ?2 WHERE device_id = ?1",
+            params![device_id, can_send as i64],
+        )?;
+        Ok(rows > 0)
     }
 
     /// `(device_id, token_hash)` of every paired device, for the bearer check,
@@ -147,6 +178,24 @@ mod tests {
         assert!(!store.viewer_device_delete("d1").unwrap(), "already gone");
         assert!(!store.viewer_device_touch("d1", 6_000).unwrap());
         assert_eq!(store.viewer_device_list().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn the_send_grant_defaults_off_and_is_kept_per_device() {
+        let store = Store::open_in_memory().unwrap();
+        store.viewer_device_insert("d1", "aa", "Pixel", "a2V5", 1).unwrap();
+        store.viewer_device_insert("d2", "bb", "Tablet", "", 2).unwrap();
+        assert!(!store.viewer_device_get("d1").unwrap().unwrap().can_send, "off until allowed");
+        assert!(store.viewer_device_set_can_send("d1", true).unwrap());
+        assert!(store.viewer_device_get("d1").unwrap().unwrap().can_send);
+        assert!(!store.viewer_device_get("d2").unwrap().unwrap().can_send, "another device is unaffected");
+        assert!(store.viewer_device_list().unwrap()[0].can_send);
+        assert!(store.viewer_device_set_can_send("d1", false).unwrap());
+        assert!(!store.viewer_device_get("d1").unwrap().unwrap().can_send);
+        assert!(!store.viewer_device_set_can_send("nope", true).unwrap());
+        assert!(store.viewer_device_get("nope").unwrap().is_none());
+        store.viewer_device_delete("d1").unwrap();
+        assert!(store.viewer_device_get("d1").unwrap().is_none(), "revoked");
     }
 
     #[test]

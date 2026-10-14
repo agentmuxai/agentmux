@@ -115,7 +115,7 @@ async fn a_pair_request_is_validated_before_the_code_is_spent() {
         assert_eq!(resp.status(), StatusCode::BAD_REQUEST, "{body}");
     }
     use base64::Engine as _;
-    let key = base64::engine::general_purpose::STANDARD.encode([7u8; 32]);
+    let key = base64::engine::general_purpose::STANDARD.encode(p256_public(&p256_pair()));
     let ok = serde_json::json!({ "code": code, "device_name": "x".repeat(64), "device_key": key });
     let resp = app.oneshot(pair_request(&code, [198, 51, 100, 3], Some(ok))).await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK, "the code survived the bad requests");
@@ -245,6 +245,71 @@ async fn hello_stamps_last_seen() {
     assert_eq!(send(&viewer_router(&state), Method::GET, "/agentmux/viewer/hello", bearer(&token)).await, StatusCode::OK);
     let device = state.mstore.viewer_device_list().unwrap().into_iter().find(|d| d.device_id == device_id).unwrap();
     assert!(device.last_seen_ms > 1, "stamped on use");
+}
+
+// ---- The send grant (agentmux-mobile's SPEC_SEND_FROM_THE_PHONE_2026_10_13 §4) ----
+
+pub(super) fn p256_pair() -> ring::signature::EcdsaKeyPair {
+    use ring::signature::{EcdsaKeyPair, ECDSA_P256_SHA256_ASN1_SIGNING};
+    let rng = ring::rand::SystemRandom::new();
+    let pkcs8 = EcdsaKeyPair::generate_pkcs8(&ECDSA_P256_SHA256_ASN1_SIGNING, &rng).unwrap();
+    EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_ASN1_SIGNING, pkcs8.as_ref(), &rng).unwrap()
+}
+
+pub(super) fn p256_public(pair: &ring::signature::EcdsaKeyPair) -> Vec<u8> {
+    use ring::signature::KeyPair as _;
+    pair.public_key().as_ref().to_vec()
+}
+
+#[tokio::test]
+async fn pairing_takes_a_p256_or_an_ed25519_key_and_nothing_else() {
+    use base64::Engine as _;
+    let b64 = |b: &[u8]| base64::engine::general_purpose::STANDARD.encode(b);
+    let state = test_state();
+    let app = viewer_router(&state);
+    let ed = ed25519_dalek::SigningKey::from_bytes(&[9u8; 32]).verifying_key();
+    for (key, ok) in [
+        (b64(&p256_public(&p256_pair())), true),
+        (b64(ed.as_bytes()), true),
+        (b64(&[4u8; 64]), false),
+        (b64(&[2u8; 33]), false),
+    ] {
+        let (code, _) = state.viewer.pairing.start();
+        let body = serde_json::json!({ "code": code, "device_name": "Pixel", "device_key": key });
+        let resp = app.clone().oneshot(pair_request(&code, [198, 51, 100, 9], Some(body))).await.unwrap();
+        assert_eq!(resp.status() == StatusCode::OK, ok, "{key}");
+    }
+}
+
+async fn hello_send(app: &Router, token: &str) -> String {
+    let resp = app.clone().oneshot(request(Method::GET, "/agentmux/viewer/hello", Some(("Authorization", &format!("Bearer {token}"))), None)).await.unwrap();
+    json_of(resp).await["send"].as_str().unwrap().to_string()
+}
+
+#[tokio::test]
+async fn hello_says_whether_the_device_may_send() {
+    use base64::Engine as _;
+    let state = test_state();
+    let app = viewer_router(&state);
+    let token = pairing::new_token();
+    let key = base64::engine::general_purpose::STANDARD.encode(p256_public(&p256_pair()));
+    state.mstore.viewer_device_insert("keyed", &pairing::token_hash(&token), "Pixel", &key, 1).unwrap();
+    assert_eq!(hello_send(&app, &token).await, "off", "off until the owner allows it");
+    crate::server::app_api::viewer::can_send_impl(&state, "keyed", true).unwrap();
+    assert_eq!(hello_send(&app, &token).await, "allowed");
+    crate::server::app_api::viewer::can_send_impl(&state, "keyed", false).unwrap();
+    assert_eq!(hello_send(&app, &token).await, "off", "turned off again");
+
+    // A device that paired without a key can't be allowed: it must pair again.
+    let (old, old_token) = pair_device(&state, "Old phone");
+    let err = crate::server::app_api::viewer::can_send_impl(&state, &old, true).unwrap_err();
+    assert!(err.contains("Pair it again"), "{err}");
+    assert_eq!(hello_send(&app, &old_token).await, "off");
+    // A grant set before its key was lost (not reachable today) reads as pair_again.
+    state.mstore.viewer_device_set_can_send(&old, true).unwrap();
+    assert_eq!(hello_send(&app, &old_token).await, "pair_again");
+
+    assert!(crate::server::app_api::viewer::can_send_impl(&state, "nope", true).is_err());
 }
 
 // ---- Agents ----

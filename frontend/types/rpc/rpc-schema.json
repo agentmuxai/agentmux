@@ -5686,6 +5686,25 @@
     }
   },
   {
+    "command": "viewer.can-send",
+    "request": "agentmux_srv::backend::rpc_types::viewer::CommandViewerCanSendData",
+    "requestName": "CommandViewerCanSendData",
+    "requestTs": {
+      "imports": [
+        "CommandViewerCanSendData"
+      ],
+      "name": "CommandViewerCanSendData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::viewer::ViewerCanSendResult",
+    "responseName": "ViewerCanSendResult",
+    "responseTs": {
+      "imports": [
+        "ViewerCanSendResult"
+      ],
+      "name": "ViewerCanSendResult"
+    }
+  },
+  {
     "command": "viewer.devices",
     "request": "core::option::Option<agentmux_srv::backend::rpc_types::websocket::NoArgsReq>",
     "requestName": "core::option::Option<agentmux_srv::backend::rpc_types::websocket::NoArgsReq>",
