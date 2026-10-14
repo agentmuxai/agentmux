@@ -568,3 +568,12 @@ fn a_session_request_carries_the_agents_mcp_servers() {
         assert_eq!(p["mcpServers"], serde_json::json!(servers));
     }
 }
+
+/// Without a server key, a stale one from `cmd:env` is dropped, not passed on.
+#[test]
+fn an_acp_spawn_env_without_a_server_key_drops_a_stale_one() {
+    let mut meta = super::super::super::obj::MetaMapType::new();
+    meta.insert("cmd:env".to_string(), serde_json::json!({"AGENTMUX_AUTH_KEY": "stale"}));
+    let ctrl = AcpController::new("tab".to_string(), "block-acp-nokey".to_string(), None, None, None, None);
+    assert!(!ctrl.spawn_env(&meta).contains_key("AGENTMUX_AUTH_KEY"));
+}

@@ -938,7 +938,9 @@ impl AcpController {
         crate::server::agent_handlers::input::carry_agent_workdir_env(&mut env_vars, block_meta);
         // The agent's `agentmux-mcp` reaches srv with these, as on the
         // persistent path: reserved values, so they replace any in `cmd:env`.
-        if !self.auth_key.is_empty() {
+        if self.auth_key.is_empty() {
+            env_vars.remove("AGENTMUX_AUTH_KEY");
+        } else {
             env_vars.insert("AGENTMUX_AUTH_KEY".to_string(), self.auth_key.clone());
         }
         env_vars.insert("AGENTMUX_BLOCKID".to_string(), self.block_id.clone());
