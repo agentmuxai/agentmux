@@ -106,22 +106,23 @@ fn expand_vars(s: &str, lookup: &impl Fn(&str) -> Option<String>) -> String {
 }
 
 /// An absolute path for a stdio server's command: as given when it is one,
-/// else the copy beside srv's own executable (where AgentMux ships
-/// `agentmux-mcp`), else the first on srv's PATH.
-pub(super) fn resolve_command(cmd: &str) -> Option<String> {
+/// else AgentMux's own tool dirs (bundled `<srv-dir>/tools/bin`, where a
+/// packaged build ships `agentmux-mcp`, then the user tools dir `task dev`
+/// uses), else beside srv, else the first on `path` (the agent's PATH, srv's
+/// when the agent sets none).
+pub(super) fn resolve_command(cmd: &str, path: Option<&str>) -> Option<String> {
     if std::path::Path::new(cmd).is_absolute() {
         return Some(cmd.to_string());
     }
-    let beside_srv = std::env::current_exe().ok().and_then(|exe| {
-        let dir = exe.parent()?.to_path_buf();
-        [format!("{cmd}{}", std::env::consts::EXE_SUFFIX), cmd.to_string()]
-            .into_iter()
-            .map(|name| dir.join(name))
-            .find(|p| p.is_file())
-    });
-    beside_srv
-        .or_else(|| which::which(cmd).ok())
-        .map(|p| p.to_string_lossy().into_owned())
+    let beside_srv = std::env::current_exe().ok().and_then(|exe| exe.parent().map(|d| d.to_path_buf()));
+    let dirs = [crate::backend::tool_store::bundled_tools_dir(), crate::backend::tool_store::user_tools_dir(), beside_srv];
+    let names = [format!("{cmd}{}", std::env::consts::EXE_SUFFIX), cmd.to_string()];
+    let in_tool_dirs = dirs.into_iter().flatten().find_map(|dir| names.iter().map(|n| dir.join(n)).find(|p| p.is_file()));
+    let on_path = || {
+        let path = path.map(str::to_string).or_else(|| std::env::var("PATH").ok())?;
+        which::which_in(cmd, Some(path), std::env::current_dir().ok()?).ok()
+    };
+    in_tool_dirs.or_else(on_path).map(|p| p.to_string_lossy().into_owned())
 }
 
 #[cfg(test)]
@@ -217,6 +218,22 @@ mod tests {
     #[test]
     fn an_absolute_command_is_kept_as_given() {
         let given = if cfg!(windows) { r"C:\tools\x.exe" } else { "/usr/bin/x" };
-        assert_eq!(resolve_command(given).as_deref(), Some(given));
+        assert_eq!(resolve_command(given, None).as_deref(), Some(given));
+    }
+
+    #[test]
+    fn a_bare_command_is_found_on_the_agents_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let name = format!("acp-mcp-probe-tool{}", std::env::consts::EXE_SUFFIX);
+        std::fs::write(dir.path().join(&name), b"").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(dir.path().join(&name), std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let path = dir.path().to_string_lossy().into_owned();
+        let found = resolve_command("acp-mcp-probe-tool", Some(&path)).unwrap();
+        assert_eq!(std::path::Path::new(&found), dir.path().join(&name));
+        assert_eq!(resolve_command("acp-mcp-probe-tool-missing", Some(&path)), None);
     }
 }

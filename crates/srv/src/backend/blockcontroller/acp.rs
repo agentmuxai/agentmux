@@ -528,7 +528,9 @@ impl AcpController {
                             let lookup = |k: &str| env.get(k).cloned().or_else(|| std::env::var(k).ok());
                             let servers = inner.mcp_json.as_deref().map_or_else(Vec::new, |raw| {
                                 let (http, sse) = (takes("http"), takes("sse"));
-                                super::acp_mcp::acp_mcp_servers(raw, http, sse, super::acp_mcp::resolve_command, lookup)
+                                let path = env.get("PATH").map(String::as_str);
+                                let resolve = |c: &str| super::acp_mcp::resolve_command(c, path);
+                                super::acp_mcp::acp_mcp_servers(raw, http, sse, resolve, lookup)
                             });
                             inner.mcp_servers = servers;
                             let resume = inner.resume_session_id.clone();
