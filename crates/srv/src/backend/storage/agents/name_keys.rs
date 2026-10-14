@@ -41,7 +41,10 @@ pub(super) fn resolve_slug_collision(conn: &rusqlite::Connection, base: &str) ->
     let mut n: u32 = 2;
     loop {
         let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM db_agents WHERE slug = ?1",
+            // Case-insensitive: every per-name key table folds the name, so
+            // `Victim` beside `victim` would get victim's keys. Slugs are
+            // ASCII (`slug::is_valid_agent_id`), so NOCASE folds all of them.
+            "SELECT COUNT(*) FROM db_agents WHERE slug = ?1 COLLATE NOCASE",
             params![candidate],
             |row| row.get(0),
         )?;

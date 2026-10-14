@@ -48,7 +48,10 @@ pub(crate) struct SelfKeys {
 pub(crate) fn self_keys_for(mstore: &crate::backend::storage::store::Store, uid: &str) -> Option<SelfKeys> {
     let def = mstore.agent_def_get(uid).ok().flatten()?;
     let slug = def.slug.trim().to_string();
-    let named = !slug.is_empty();
+    // Name-keyed keys are stored under the folded name: when another row's
+    // slug folds to the same one (`Victim` beside `victim`), they aren't this
+    // row's alone, so none are served (`actor::uid_owns_name`).
+    let named = !slug.is_empty() && super::actor::uid_owns_name(mstore, uid, &slug);
     let jekt_key = named.then(|| mstore.agent_jekt_key_ensure(&slug).ok()).flatten().map(|k| BASE64.encode(k));
     let jekt_key_expires_at = named.then(|| mstore.agent_jekt_key_expires_at(&slug).ok().flatten()).flatten();
     let lan_key = named.then(|| mstore.agent_lan_key_ensure(&slug).ok()).flatten().map(|k| k.private_key);

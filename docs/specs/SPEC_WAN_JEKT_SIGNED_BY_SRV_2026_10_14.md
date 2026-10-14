@@ -1,7 +1,7 @@
 # SPEC: srv signs WAN jekts for the agent its token names
 
 **Date:** 2026-10-14
-**Status:** implemented — #4902.
+**Status:** implemented — #4902; the review fixes in §7 in the PR that adds §7.
 **Builds on:** `SPEC_WAN_JEKT_VERIFICATION_2026_09_24.md` (W3-S: the signed
 tuple, `wan.db`, publishing, the receiver's checks, which this spec leaves
 unchanged), `SPEC_AGENT_IDENTITY_CARRIED_NOT_DERIVED_2026_09_23.md` (the agent
@@ -35,9 +35,9 @@ unless it had verified the sender itself (the host-tier HMAC,
 the agent's own copy only added places for the key to leak (`.mcp.json` on
 disk) and to go stale.
 
-**Paths that never signed now do.** `muxsh agent send` from an agent's shell,
-cron jobs an agent created, and container agents (which can't fetch
-`self/keys`) sent unsigned. Each carries, or runs as, an identified agent.
+**Paths that never signed now do.** `muxsh agent send` from an agent's shell
+and container agents (which can't fetch `self/keys`) sent unsigned. Each
+carries an identified agent's token.
 
 ## 3. Design
 
@@ -45,14 +45,20 @@ cron jobs an agent created, and container agents (which can't fetch
 
 srv signs a WAN jekt when all of these hold, at the instance that relays it:
 
-1. **An identified agent sent it.** `deliver`'s `caller_uid` is non-empty:
-   the request carried a token this srv minted (`Caller::Agent`, including a
-   container agent's pinned token), or it is a cron job whose creator was an
-   identified agent (`creator_uid`).
-2. **It sends as itself.** The token's row has the jekt's `source_agent` as
-   its slug, exactly (`actor::uid_has_slug`, the M4d-4 rule). A request with
-   no `source_agent` gets the token's slug as its source; one naming another
-   agent is not signed (and is counted, `check_actor`).
+1. **An identified agent sent it.** `deliver`'s own `caller_uid` is
+   non-empty: the request carried a token this srv minted (`Caller::Agent`,
+   including a container agent's pinned token). It is passed to the signer
+   directly, never read back from the request, which a verified hop may have
+   annotated. A cron fire's source is `cron`, which no agent owns, so it is
+   not signed.
+2. **It sends as itself, and the name is its alone.** The token's row has
+   the jekt's `source_agent` as its slug, ignoring case (SendMessage sends
+   `QTest`; the slug is `qtest`), and no other row's slug folds to the same
+   name (`actor::uid_owns_name`). Every per-name key is stored under the
+   folded name, so two rows differing only in case would share one; neither
+   is signed for. A request with no `source_agent` gets the token's slug as
+   its source; one naming another agent is not signed (and is counted,
+   `check_actor`).
 3. **This is the origin.** The request reached this srv from the agent, not
    from another srv. Forwarded hops (same-host instances, LAN peers) carry
    only an instance or LAN key, so they have no `caller_uid` and are never
@@ -112,6 +118,7 @@ reach the cloud tier at all, and is signed there.
 |---|---|
 | A process without an agent token asks srv to sign | Rule 1: no token, no signature |
 | Agent A asks srv to sign as agent B | Rule 2: the token names A; A's request naming B is relayed unsigned |
+| Agent A creates a row whose name differs from B's only in case | New slugs collide case-insensitively and get a suffix; existing pairs own neither name: no signature, no keys (§7) |
 | A forwarding srv signs a jekt it didn't originate | Rule 3: forwarded hops have no caller |
 | A caller picks the instance, channel, time or msgid in the signature | §3.2: srv sets them |
 | A replayed signed jekt | Unchanged: the receiver's msgid replay check and freshness window |
@@ -142,3 +149,23 @@ own session acting; it can't send as any other agent.
   cross-channel receivers are other srv instances that check a public key,
   so the same move would work for them; the host-tier HMAC is already
   backed by the token (M4d-4). A later spec can do the same there.
+
+## 7. Found in review (2026-10-14, after #4902)
+
+An adversarial review of the merged code found:
+
+- **A name differing only in case.** Slug collisions were checked exactly
+  while every key table folds the name, so an agent could create `Victim`
+  beside `victim` and be handed its host, LAN and WAN keys (and, through
+  rule 2's exact compare, a srv signature). Fixed: slug collisions are
+  case-insensitive (`resolve_slug_collision`), and a name two rows fold to
+  has no owner (`uid_owns_name`): neither row is signed for, served keys by
+  `self/keys`, or given keys in `.mcp.json`. The host tier's token rule
+  (`jekt_sender_by_token`) uses the same check.
+- **Most agents went unsigned.** Rule 2 compared the slug exactly, and
+  SendMessage sends the capitalised `AGENTMUX_AGENT_ID`. Now compared
+  ignoring case, with the uniqueness above.
+- **A verified channel hop could be signed.** The signer read
+  `audit_source_uid`, which `channel_v2` sets on a verified hop. It now takes
+  `deliver`'s own `caller_uid`.
+- **Cron** fires as `cron`, so it is not signed; the spec said it was.
