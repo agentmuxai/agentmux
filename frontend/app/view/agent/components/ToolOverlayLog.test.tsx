@@ -486,8 +486,8 @@ describe("ToolOverlayLog — hides bashwrap's internal starting-chunk (2026-09-0
                 ],
             },
         };
-        // Terminal + no structured result -> falls into the "chunks-final"
-        // branch (still ChunkList), per the branch() logic in the component.
+        // Terminal + no structured result -> falls into the "chunks"
+        // branch (still ChunkList), per currentBranch() in the component.
         const { container } = render(() => <ToolOverlayLog node={{ ...node, result: undefined }} />);
         expect(container.textContent).not.toContain("bashwrap");
         expect(container.textContent).toContain("line 1");
