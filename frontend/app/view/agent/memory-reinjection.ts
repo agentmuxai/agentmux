@@ -79,6 +79,25 @@ export function shouldReinject(entries: MemoryEntryInput[]): boolean {
  */
 export type ReinjectionReason = "compaction" | "fresh_session";
 
+/**
+ * What a catch-up turn follows: a reinjection's reasons, plus a conversation
+ * the user resumed, which re-delivers no memory.
+ * SPEC_RESUME_PHASE_CATCH_UP_TURN_2026_10_13.md.
+ */
+export type CatchUpReason = ReinjectionReason | "resumed";
+
+/**
+ * What opens a catch-up turn's block: Rust's `CATCH_UP_SIGNATURE`
+ * (`memory_delivery.rs`). The message is AgentMux's, never the user's, and the
+ * pane shows a card for it instead of the text, but the agent's reply is shown.
+ */
+export const CATCH_UP_SIGNATURE = "AgentMux catch-up:";
+
+/** True for a catch-up turn's message, with or without memory in it. */
+export function isCatchUpMessage(text: string): boolean {
+    return text.startsWith("<system-reminder>") && text.includes(CATCH_UP_SIGNATURE);
+}
+
 const REASON_CLAUSE: Record<ReinjectionReason, string> = {
     compaction: "Your recent conversation was just compacted into a summary.",
     fresh_session:

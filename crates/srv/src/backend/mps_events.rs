@@ -140,7 +140,7 @@ events! {
     ConnChange: super::mps::EVENT_CONN_CHANGE => crate::backend::rpc_types::ConnStatus,
     /// A pane's background tasks changed; the dashboard reads the list again.
     BackgroundTaskUpdated: "background-task-updated" => BlockRefEvent,
-    /// A line of narration for an agent pane (`continued_note`, the narrate route).
+    /// A line of narration for an agent pane (the narrate route).
     AmbientNarration: "ambient-narration" => AmbientNarrationEvent,
     /// A pane's reported MCP servers changed (`mcp_observed`).
     McpObserved: "mcp:observed" => BlockRefEvent,

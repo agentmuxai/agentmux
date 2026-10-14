@@ -294,7 +294,11 @@ fn clip_entry(part: &str) -> String {
 /// this one match suppresses both without needing to track which reason
 /// fired.
 pub(crate) fn is_hidden_reinjection_text(text: &str) -> bool {
-    text.starts_with("<system-reminder>") && text.contains(crate::backend::memory_delivery::REINJECTION_SIGNATURE)
+    text.starts_with("<system-reminder>")
+        && (text.contains(crate::backend::memory_delivery::REINJECTION_SIGNATURE)
+            // A catch-up turn's message with no memory in it: AgentMux's own
+            // text, never the user's.
+            || crate::backend::memory_delivery::is_catch_up_text(text))
 }
 
 /// Extract meaningful text from raw stream-json lines for digest summarization.
@@ -501,6 +505,12 @@ mod extract_digest_text_tests {
         // whole point of keeping the signature reason-independent (see the
         // function's own doc comment).
         assert!(is_hidden_reinjection_text(FRESH_SESSION_REINJECTION_TEXT));
+    }
+
+    #[test]
+    fn is_hidden_reinjection_text_recognizes_a_catch_up_without_memory() {
+        use crate::backend::memory_delivery::{compose_catch_up, CatchUpKind};
+        assert!(is_hidden_reinjection_text(&compose_catch_up(CatchUpKind::Resumed, None)));
     }
 
     #[test]
