@@ -44,8 +44,9 @@ import {
 import { DocumentRow } from "./DocumentRow";
 import { attachOneWayRecorder, noteOneWay, sampleOneWayFrame } from "../scroll/one-way-recorder";
 import { OneWayFlow } from "../scroll/one-way-flow";
-import { followStateLabel, intentOf, REATTACH_PX } from "../scroll/follow-controller";
+import { REATTACH_PX } from "../scroll/follow-controller";
 import { createFollowScroll, type FollowScroll } from "../scroll/follow-scroll";
+import { attachLegacyScrollInput, createFollowLog, NO_SCROLL_INPUT, type ScrollInput } from "../scroll/follow-wiring";
 import { ShrinkTrace, attribute, formatAttribution, type RowSample } from "./shrink-trace";
 import { estimateNode, estimateNodeForState, previewCapPx } from "./renderers";
 import { currentExpansion } from "./expansion-source";
@@ -77,14 +78,6 @@ interface ScrollGeometry {
     scrollHeight: number;
     clientHeight: number;
 }
-
-/**
- * How long after the last user scroll input (wheel, touch, scroll key,
- * scrollbar release) a scroll batch still counts as the user's. Long enough
- * for a wheel/keyboard gesture's scroll events to land (they are rAF-
- * coalesced), short enough that an unrelated later scroll never inherits it.
- */
-const USER_INPUT_WINDOW_MS = 250;
 
 export interface AgentDocumentVirtualListProps {
     viewState: AgentViewState;
@@ -180,9 +173,6 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
     // One-way path (props.oneWayFlow): the trailing spacer it sizes.
     let bottomSpacerRef: HTMLDivElement | undefined;
     const oneWay = untrack(() => props.oneWayFlow === true);
-    // A pointer held anywhere on the transcript (a selection drag, a scrollbar
-    // drag): the one-way path neither compensates nor follows under it.
-    let pointerHeld = false;
     // Guard against concurrent older-history fetches triggered by scroll.
     let loadingOlderInFlight = false;
     // RAF-coalesced scroll handling (task #39): native `scroll` events can
@@ -220,67 +210,12 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
     // uses this instead. Cleared by every handleScrollNow. Phase 1 of
     // SPEC_AGENT_PANE_BOUNDED_LIVE_WINDOW_MIGRATION_2026_09_23.md §6.1.
     let pinnedGeometry: ScrollGeometry | null = null;
-    // User scroll intent is a short WINDOW, not a flag. Opened by any input
-    // that can scroll this container (wheel, touch, scroll keys, or a pointer
-    // held on the scroller itself, i.e. its scrollbar) and closed
-    // USER_INPUT_WINDOW_MS after the last such event. A batch inside the
-    // window reads live geometry, is never attributed to the pin, and is the
-    // ONLY kind of batch that can disengage stick-to-bottom.
-    //
-    // This used to be a boolean consumed by the next scroll batch, however
-    // late it came. A click that scrolled nothing (focusing the pane,
-    // selecting text, expanding a tool) left it set indefinitely, so the next
-    // pin — often minutes later, with new content already landed in the same
-    // frame — read as the user scrolling away and silently stopped the
-    // follow. Phase 0 of
-    // docs/specs/SPEC_AGENT_PANE_SCROLL_FOLLOW_STATE_MACHINE_2026_09_24.md §2.2 (B1).
-    let lastUserScrollInputAt = Number.NEGATIVE_INFINITY;
-    let scrollbarPointerHeld = false;
-    const hasRecentUserScrollInput = (): boolean =>
-        scrollbarPointerHeld || performance.now() - lastUserScrollInputAt <= USER_INPUT_WINDOW_MS;
-
-    // ── Follow-state transition log (spec invariant I4) ──────────────────
-    // Every stickToBottom change emits exactly one line:
-    //   [scroll-follow] pane=abc1234 following→detached cause=user-scroll gap=412px
-    // so a pane that stopped following always says why in
-    // `muxlog fe grep scroll-follow`. Bug A (spec §2.1) was invisible for
-    // months precisely because its disengage path logged nothing.
-    //
-    // Call sites go through transitionFollow(), which publishes its cause
-    // BEFORE applying the change. Solid may run the effect below either
-    // synchronously inside apply() (a setter called outside an update) or
-    // later (a setter called from inside another effect); whichever of the
-    // two observes the change first logs it, with that cause, exactly once —
-    // `lastLoggedFollow` is the dedupe. A change that did NOT come through
-    // transitionFollow() has no published cause and logs as cause=external,
-    // so no path can be silent. `data-follow-state` on the scroller mirrors
-    // the state for CDP / tests.
     const paneTag = (): string => props.blockId?.slice(0, 7) ?? "?";
-    const followLabel = (on: boolean): string => (on ? "following" : "detached");
-    let lastLoggedFollow = untrack(props.viewState.stickToBottom);
-    let pendingFollowCause: { cause: string; detail?: string } | null = null;
-    const logFollowIfChanged = (now: boolean): void => {
-        if (now === lastLoggedFollow) return;
-        const { cause, detail } = pendingFollowCause ?? { cause: "external" };
-        console.info(
-            "[scroll-follow]",
-            `pane=${paneTag()}`,
-            `${followLabel(lastLoggedFollow)}→${followLabel(now)}`,
-            `cause=${cause}${detail ? ` ${detail}` : ""}`,
-        );
-        lastLoggedFollow = now;
-    };
-    const transitionFollow = (cause: string, detail: string | undefined, apply: () => void): void => {
-        pendingFollowCause = { cause, detail };
-        try {
-            apply();
-            logFollowIfChanged(untrack(props.viewState.stickToBottom));
-        } finally {
-            pendingFollowCause = null;
-        }
-    };
-    console.info("[scroll-follow]", `pane=${paneTag()}`, `mount ${followLabel(lastLoggedFollow)}`);
-    createEffect(() => logFollowIfChanged(props.viewState.stickToBottom()));
+    // The `[scroll-follow]` transition log (spec I4).
+    const followLog = createFollowLog(paneTag, props.viewState);
+    const transitionFollow = followLog.transitionFollow;
+    // User scroll input: the follow controller's, or the legacy listeners (set on mount).
+    let input: ScrollInput = NO_SCROLL_INPUT;
 
     // ── Follow state machine (props.followController) ───────────────────
     // When on, `follow` alone decides whether the pane follows; stickToBottom
@@ -291,8 +226,14 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
     const useFollowController = untrack(() => props.followController === true);
     let follow: FollowScroll | null = null;
     onMount(() => {
-        if (!useFollowController || !scrollRef) return;
-        follow = createFollowScroll(
+        if (!scrollRef) return;
+        if (!useFollowController) {
+            const legacy = attachLegacyScrollInput(scrollRef, { gesture: cancelGlides, released: () => oneWayFlow?.recheckSoon() });
+            input = legacy;
+            onCleanup(() => legacy.dispose());
+            return;
+        }
+        input = follow = createFollowScroll(
             scrollRef,
             {
                 pin: (cause) => {
@@ -303,22 +244,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                     else scrollToTrueBottom();
                 },
                 loadOlder: (geo) => loadOlderFrom(geo.scrollTop), // perf:allow-layout-read — the batch's stored geometry, not a DOM read
-                transition: (from, to, cause, detail) => {
-                    const following = intentOf(to) === "FOLLOWING";
-                    if (intentOf(from) !== intentOf(to)) {
-                        transitionFollow(cause, detail, () =>
-                            following ? props.viewState.engageStickToBottom() : props.viewState.disengageStickToBottom(),
-                        );
-                    } else {
-                        // Hidden / shown: the intent (stickToBottom) is unchanged.
-                        console.info(
-                            "[scroll-follow]",
-                            `pane=${paneTag()}`,
-                            `${followStateLabel(from)}→${followStateLabel(to)}`,
-                            `cause=${cause}${detail ? ` ${detail}` : ""}`,
-                        );
-                    }
-                },
+                transition: followLog.project,
                 hasOlderHistory: () => !!props.onLoadOlder && (props.hasOlderHistory?.() ?? true),
                 loadingOlder: () => loadingOlderInFlight || !!props.loadingOlder?.(),
                 gesture: () => cancelGlides(),
@@ -327,8 +253,6 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         );
         onCleanup(() => follow?.dispose());
     });
-    /** Inside the user-intent window (or holding the scrollbar). */
-    const userScrollInputOpen = (): boolean => (follow ? follow.inputWindowOpen() : hasRecentUserScrollInput());
     /** Geometry read in a ResizeObserver callback, where layout is clean. */
     const observedGeometry = (): ScrollGeometry => ({
         scrollTop: scrollRef.scrollTop, // perf:allow-layout-read — ResizeObserver callback (layout clean)
@@ -1312,9 +1236,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         // scroll is the user's (it must be able to release follow).
         // With the follow controller, a held pointer counts on both paths: its
         // reducer tells a clamp from a user scroll by scrollHeight, not by input.
-        const hadUserInput = follow
-            ? follow.inputWindowOpen() || follow.pointerHeld()
-            : hasRecentUserScrollInput() || (oneWay && pointerHeld);
+        const hadUserInput = input.windowOpen() || ((follow !== null || oneWay) && input.pointerHeld());
 
         // A batch that is purely our own pin reuses the geometry the pin read
         // after layout (see pinnedGeometry) — no layout read here. Anything the
@@ -1370,7 +1292,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         // up while following releases follow at once, however small the move.
         if (oneWayFlow && hadUserInput && !trustPin && oneWayFlow.userScrolled(geo) && props.viewState.stickToBottom()) {
             transitionFollow(
-                scrollbarPointerHeld ? "user-scroll:scrollbar" : "user-scroll-up",
+                input.scrollbarHeld() ? "user-scroll:scrollbar" : "user-scroll-up",
                 `gap=${Math.round(scrollHeight - clientHeight - scrollTop)}px`,
                 () => props.viewState.disengageStickToBottom(),
             );
@@ -1479,7 +1401,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                         `disengage — scrollTop=${scrollTop} scrollHeight=${scrollHeight} clientHeight=${clientHeight} gap=${gapPx}px`,
                     );
                     transitionFollow(
-                        scrollbarPointerHeld ? "user-scroll:scrollbar" : "user-scroll",
+                        input.scrollbarHeld() ? "user-scroll:scrollbar" : "user-scroll",
                         `gap=${Math.round(gapPx)}px`,
                         () => props.viewState.disengageStickToBottom(),
                     );
@@ -1601,68 +1523,11 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         });
     };
 
-    // Record user scroll input (see lastUserScrollInputAt). On the scroller:
-    // wheel and touch. A pointer counts only when pressed on the scroller
-    // element ITSELF — the scrollbar track/thumb (content clicks target a
-    // child row, and cannot scroll this container) — and keeps the window
-    // open for as long as it is held, so a slow scrollbar drag stays the
-    // user's. On the document: the scrolling keys, unless typed into an
-    // editable element (typing in the composer never scrolls this container).
-    // Target identity, not a clientWidth hit-test: no layout read in an input
-    // handler (tools/lint/check-input-handler-layout-reads.sh).
     // One-way-flow recorder (opt-in, `__agentmuxOneWay.enable()`): checks every
     // painted frame for content moving down or blank space taken back while
     // following. Phase 0 of SPEC_AGENT_PANE_ONE_WAY_FLOW_2026_10_07.md.
     onMount(() => {
         if (scrollRef) onCleanup(attachOneWayRecorder(paneTag(), scrollRef));
-    });
-
-    onMount(() => {
-        // The follow controller owns these gestures (follow-scroll.ts).
-        if (!scrollRef || useFollowController) return;
-        const el = scrollRef;
-        // The user's own scroll, or a press to select or click, ends any glide
-        // at once, so what's under the pointer is where it's drawn.
-        const mark = (): void => {
-            lastUserScrollInputAt = performance.now();
-            cancelGlides();
-        };
-        const onPointerDown = (e: PointerEvent): void => {
-            cancelGlides();
-            pointerHeld = true;
-            if (e.target !== el) return;
-            scrollbarPointerHeld = true;
-            mark();
-        };
-        const onPointerUp = (): void => {
-            // Let go of the pane: look again shortly (a timer, not a layout
-            // read in this handler) in case content arrived meanwhile.
-            if (pointerHeld) oneWayFlow?.recheckSoon();
-            pointerHeld = false;
-            if (!scrollbarPointerHeld) return;
-            scrollbarPointerHeld = false;
-            mark(); // the drag's trailing scroll events are still the user's
-        };
-        const SCROLL_KEYS = new Set(["PageUp", "PageDown", "Home", "End", "ArrowUp", "ArrowDown", " "]);
-        const onKey = (e: KeyboardEvent): void => {
-            const t = e.target as HTMLElement | null;
-            if (t && (t.isContentEditable || t.tagName === "TEXTAREA" || t.tagName === "INPUT")) return;
-            if (SCROLL_KEYS.has(e.key)) mark();
-        };
-        const opts: AddEventListenerOptions = { passive: true, capture: true };
-        const types = ["wheel", "touchstart", "touchmove"] as const;
-        for (const type of types) el.addEventListener(type, mark, opts);
-        el.addEventListener("pointerdown", onPointerDown, opts);
-        window.addEventListener("pointerup", onPointerUp, opts);
-        window.addEventListener("pointercancel", onPointerUp, opts);
-        document.addEventListener("keydown", onKey, opts);
-        onCleanup(() => {
-            for (const type of types) el.removeEventListener(type, mark, opts);
-            el.removeEventListener("pointerdown", onPointerDown, opts);
-            window.removeEventListener("pointerup", onPointerUp, opts);
-            window.removeEventListener("pointercancel", onPointerUp, opts);
-            document.removeEventListener("keydown", onKey, opts);
-        });
     });
 
     // Coalesce native `scroll` events to at most one `handleScrollNow` call
@@ -1753,7 +1618,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
     const oneWayFlow = oneWay
         ? new OneWayFlow({
             following: () => untrack(props.viewState.stickToBottom),
-            userActive: () => (follow ? follow.pointerHeld() : pointerHeld) || userScrollInputOpen(),
+            userActive: () => input.pointerHeld() || input.windowOpen(),
             reducedMotion,
             wrote: (geo) => {
                 pendingProgrammaticScroll = true;
@@ -1809,7 +1674,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
             class="agent-document"
             ref={scrollRef}
             onScroll={handleScroll}
-            data-follow-state={followLabel(props.viewState.stickToBottom())}
+            data-follow-state={props.viewState.stickToBottom() ? "following" : "detached"}
             data-one-way={oneWay || undefined}
             data-follow-controller={useFollowController || undefined}
         >

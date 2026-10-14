@@ -23,6 +23,7 @@ import {
     type FollowState,
     type ScrollGeometry,
 } from "./follow-controller";
+import type { ScrollInput } from "./follow-wiring";
 
 /**
  * How long after the last gesture event a scroll batch still counts as the
@@ -58,15 +59,11 @@ export interface FollowScrollHost {
     now?(): number;
 }
 
-export interface FollowScroll {
+/** `windowOpen()` is the user-intent window above (or a held scrollbar). */
+export interface FollowScroll extends ScrollInput {
     state(): FollowState;
     /** The follow intent (FOLLOWING, or SUSPENDED from FOLLOWING). */
     following(): boolean;
-    /** Inside the user-intent window, or holding the scrollbar. */
-    inputWindowOpen(): boolean;
-    /** A pointer is held anywhere on the transcript (a selection or scrollbar drag). */
-    pointerHeld(): boolean;
-    scrollbarHeld(): boolean;
     /**
      * A ResizeObserver observation, layout clean. Returns true when the caller
      * should pin now (it is the pin's only caller for resizes).
@@ -74,7 +71,7 @@ export interface FollowScroll {
     observed(kind: "content" | "viewport", geo: ScrollGeometry): boolean;
     /** Geometry after one of our own scrollTop writes. */
     noteGeometry(geo: ScrollGeometry): void;
-    /** A scroll batch. `user` comes from `inputWindowOpen()` / `pointerHeld()` when the batch ran. */
+    /** A scroll batch. `user` comes from `windowOpen()` / `pointerHeld()` when the batch ran. */
     scrolled(geo: ScrollGeometry, user: boolean): void;
     jumpToBottom(reason: string): void;
     jumpToNode(nodeId: string): void;
@@ -183,7 +180,7 @@ export function createFollowScroll(
     return {
         state: () => state,
         following: () => intentOf(state) === "FOLLOWING",
-        inputWindowOpen: () => scrollbarHeld || now() - lastGestureAt <= INTENT_WINDOW_MS,
+        windowOpen: () => scrollbarHeld || now() - lastGestureAt <= INTENT_WINDOW_MS,
         pointerHeld: () => pointerHeld,
         scrollbarHeld: () => scrollbarHeld,
         observed(kind, geo) {
