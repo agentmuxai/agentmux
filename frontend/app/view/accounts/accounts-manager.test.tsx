@@ -80,6 +80,8 @@ describe("Accounts as cards", () => {
         expect(screen.getByRole("img", { name: "Expired" })).toBeTruthy();
         expect(screen.getByRole("img", { name: "Invalid" })).toBeTruthy();
         expect(screen.getByText("Token")).toBeTruthy();
+        // The stored name, which the card's title (the email) hides, is its tooltip.
+        expect(screen.getByRole("button", { name: /^octo@example\.com/ }).getAttribute("title")).toBe("github-a1");
         // One fetch of the agent links for every card.
         expect(rpc.ListAllAgentIdentitiesCommand).toHaveBeenCalledTimes(1);
     });

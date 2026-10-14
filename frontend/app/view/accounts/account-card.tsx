@@ -120,6 +120,7 @@ export function AccountCard(props: {
             aria-controls={`identity-account-panel-${a().id}`}
             title={accountLabel(a())}
             subtitle={a().display_name || brand()}
+            tooltip={a().name}
             icon={<ProviderLogo provider={a().provider} size={18} />}
             status={status()}
             attention={a().status === "invalid"}
