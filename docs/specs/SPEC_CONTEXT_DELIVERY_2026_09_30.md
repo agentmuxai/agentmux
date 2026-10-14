@@ -522,17 +522,17 @@ The parser alias planned here (`memory_reinjection` read as
 
 **What exists (2026-10-14):** the compaction card's cases
 (`context-delivery.test.ts`, `parseHistoryLines.test.ts`); the hook
-frame's items, old-label recovery, size bands, the card-first fallback
-replay, and the superseded card (`memory-injected.test.ts`); claims,
+frame's items, old-label recovery, size bands, the fallback card's
+replay in either order around its hidden line, and the superseded card
+(`memory-injected.test.ts`); claims,
 acknowledgements, the cut and the fallback card's id and ownership
 (`memory_delivery_handlers.rs` tests); the fallback's wire format
 (`compose_fallback_writes_the_frontends_exact_message`); hidden-turn
 recognition in the digest (`digest.rs` tests).
 
 **Missing:**
-- replay of a fallback card written after its hidden line (the order
-  `agent_handlers/input.rs` says it writes), and of the two on different
-  history pages (§9 B1);
+- replay of a fallback card and its hidden line on different history
+  pages (§9 B1);
 - the fallback card built from the stored frame when memory changes
   between compose and send (the frame is stored, so this should hold,
   but nothing pins it);
@@ -555,7 +555,8 @@ onto history):
   "memory delivery: complete, notice sent" or "fallback delivers", once
   per event;
 - in the transcript, whether a fallback card sits before or after its
-  hidden line (§5, missing tests).
+  hidden line. Replay handles both; the answer says which one B1's fix
+  must expect in practice.
 
 ## 6. Phases
 
