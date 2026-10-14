@@ -41,6 +41,12 @@ pub(crate) fn turns_from_stream(tail: &[u8], starts_mid_line: bool) -> Vec<Turn>
         match v.get("type").and_then(Value::as_str) {
             Some("user") => {
                 let Some(said) = user_text(&v["message"]["content"]) else { continue };
+                // A catch-up input is AgentMux's, but its reply is the agent's own
+                // account of where it stands: kept in the record.
+                if crate::backend::memory_delivery::is_catch_up_text(&said) {
+                    hiding = false;
+                    continue;
+                }
                 if crate::ambient::digest::is_hidden_reinjection_text(&said) {
                     hiding = true;
                     continue;
@@ -441,6 +447,21 @@ mod tests {
         ]);
         assert!(!p.contains("reinjected") && !p.contains("ACK OF HIDDEN TURN"));
         assert!(p.contains("next real question"));
+    }
+
+    /// A catch-up turn's input is AgentMux's, but the reply is the agent's own
+    /// account of where it stands, and the next session should be told it.
+    #[test]
+    fn a_catch_up_input_is_skipped_but_its_reply_is_kept() {
+        use crate::backend::memory_delivery::{compose_catch_up, CatchUpKind};
+        let p = packet(&[
+            user("real question"),
+            say("real answer"),
+            user(&compose_catch_up(CatchUpKind::Resumed, None)),
+            say("Picking up: the real question is answered."),
+        ]);
+        assert!(!p.contains("AgentMux catch-up"), "{p}");
+        assert!(p.contains("Picking up: the real question is answered."), "{p}");
     }
 
     #[test]

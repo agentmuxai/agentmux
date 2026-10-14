@@ -369,7 +369,10 @@ pub fn compose_catch_up(kind: CatchUpKind, memory: Option<&str>) -> String {
 }
 
 /// Whether `text` is a catch-up message, which has no reinjection signature
-/// when it carries no memory.
+/// when it carries no memory. Its input is hidden, but the agent's reply is
+/// shown and read: the ambient digest and the continuation record skip the
+/// input without hiding what follows, and the hidden-reinjection gate
+/// (`set_hidden_reinjection_active`) is not set for it.
 pub fn is_catch_up_text(text: &str) -> bool {
     text.starts_with("<system-reminder>") && text.contains(CATCH_UP_SIGNATURE)
 }

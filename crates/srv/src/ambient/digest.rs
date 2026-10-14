@@ -294,11 +294,7 @@ fn clip_entry(part: &str) -> String {
 /// this one match suppresses both without needing to track which reason
 /// fired.
 pub(crate) fn is_hidden_reinjection_text(text: &str) -> bool {
-    text.starts_with("<system-reminder>")
-        && (text.contains(crate::backend::memory_delivery::REINJECTION_SIGNATURE)
-            // A catch-up turn's message with no memory in it: AgentMux's own
-            // text, never the user's.
-            || crate::backend::memory_delivery::is_catch_up_text(text))
+    text.starts_with("<system-reminder>") && text.contains(crate::backend::memory_delivery::REINJECTION_SIGNATURE)
 }
 
 /// Extract meaningful text from raw stream-json lines for digest summarization.
@@ -373,6 +369,16 @@ fn extract_digest_parts(lines: &[&str]) -> Vec<String> {
                     // tryParseMemoryReinjection ordering: recognizing a new
                     // hidden turn always wins over generic "real message"
                     // handling for the same event.
+                    // A catch-up turn's input is AgentMux's, but its reply is
+                    // read: skip the input and hide nothing after it.
+                    let is_catch_up = content.iter().any(|block| {
+                        block.get("type").and_then(|v| v.as_str()) == Some("text")
+                            && block.get("text").and_then(|v| v.as_str()).is_some_and(crate::backend::memory_delivery::is_catch_up_text)
+                    });
+                    if is_catch_up {
+                        hiding = false;
+                        continue;
+                    }
                     let starts_hidden_turn = content.iter().any(|block| {
                         block.get("type").and_then(|v| v.as_str()) == Some("text")
                             && block.get("text").and_then(|v| v.as_str())
@@ -508,9 +514,35 @@ mod extract_digest_text_tests {
     }
 
     #[test]
-    fn is_hidden_reinjection_text_recognizes_a_catch_up_without_memory() {
+    fn a_catch_up_input_is_skipped_but_its_reply_is_read() {
         use crate::backend::memory_delivery::{compose_catch_up, CatchUpKind};
-        assert!(is_hidden_reinjection_text(&compose_catch_up(CatchUpKind::Resumed, None)));
+        for message in [compose_catch_up(CatchUpKind::Resumed, None), compose_catch_up(CatchUpKind::FreshSession, Some(REINJECTION_TEXT))] {
+            let lines = vec![
+                user_text_line("fix the login bug"),
+                assistant_text_line("Fixed."),
+                user_text_line(&message),
+                assistant_text_line("Picking up: the login fix is merged."),
+            ];
+            let refs: Vec<&str> = lines.iter().map(|s| s.as_str()).collect();
+            let digest = extract_digest_text(&refs);
+            assert!(!digest.contains("catch-up"), "the input stays out: {digest}");
+            assert!(digest.contains("[assistant] Picking up: the login fix is merged."), "{digest}");
+        }
+    }
+
+    #[test]
+    fn a_catch_up_ends_a_hidden_window_so_its_reply_is_read() {
+        use crate::backend::memory_delivery::{compose_catch_up, CatchUpKind};
+        let lines = vec![
+            user_text_line(REINJECTION_TEXT),
+            assistant_text_line("reply to the hidden reinjection"),
+            user_text_line(&compose_catch_up(CatchUpKind::Compaction, None)),
+            assistant_text_line("reply to the catch-up"),
+        ];
+        let refs: Vec<&str> = lines.iter().map(|s| s.as_str()).collect();
+        let digest = extract_digest_text(&refs);
+        assert!(!digest.contains("reply to the hidden reinjection"), "{digest}");
+        assert!(digest.contains("reply to the catch-up"), "{digest}");
     }
 
     #[test]

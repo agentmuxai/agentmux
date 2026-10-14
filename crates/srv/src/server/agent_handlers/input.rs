@@ -1435,12 +1435,6 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
                 // (next_prompt_suggestion / activity_summary / activity_watcher)
                 // — set here, not reconstructed from transcript bytes. See
                 // crate::ambient::digest::set_hidden_reinjection_active's doc comment.
-                //
-                // Not for a catch-up turn (SPEC_RESUME_PHASE_CATCH_UP_TURN_
-                // 2026_10_13.md §3.3): its input is hidden, but the agent's
-                // reply is shown and the ambient reads should see it. The
-                // gate is cleared only by a later non-hidden input, so
-                // setting it here would silence them until a person typed.
                 crate::ambient::digest::set_hidden_reinjection_active(
                     &cmd.blockid,
                     cmd.hidden.unwrap_or(false) && !crate::backend::memory_delivery::is_catch_up_text(&cmd.message),
