@@ -190,7 +190,8 @@ pub(super) async fn stub_501() -> impl IntoResponse {
 /// POSTs here while running a Bash command; we forward to the
 /// in-process MPS broker so subscribed frontends receive the event.
 /// A client event declared in `mps_events` (`client_events!`) must carry its
-/// payload type, or it is refused with 400.
+/// payload type, or it is refused with 400; any other event `mps_events`
+/// declares is srv's alone, and refused with 400.
 pub(super) async fn handle_wps_publish(
     State(state): State<AppState>,
     Json(req): Json<WpsPublishRequest>,
@@ -219,7 +220,11 @@ pub(super) async fn handle_wps_publish(
         Some(Err(e)) => return (StatusCode::BAD_REQUEST, Json(json!({"error": e}))),
         None => {}
     }
-    // untyped-relay: publishes any other event a process outside srv built (wsh, an external
+    // Any other declared event is srv's: its subscribers read it as its payload type.
+    if crate::backend::mps_events::is_srv_event(&req.event) {
+        return (StatusCode::BAD_REQUEST, Json(json!({"error": format!("{}: only srv publishes this event", req.event)})));
+    }
+    // untyped-relay: publishes an undeclared event a process outside srv built (an external
     // tool), as it was sent.
     let event = crate::backend::mps::MuxEvent {
         event: req.event,
