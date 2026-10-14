@@ -87,7 +87,7 @@ So in both occurrences the crash comes right after the pane for the same block i
 
 ---
 
-## F3. The window-paint report is out of date
+## F3. The window-paint report is out of date (done)
 
 `ANALYSIS_MACOS_WINDOW_PAINT_2026_10_10.md` (#4615) was written before the fixes. It still lists terminal refits (§6.1, M1) and the pane geometry task (§6.2, M2) as open. They are now fixed:
 
@@ -98,7 +98,7 @@ So in both occurrences the crash comes right after the pane for the same block i
 | (new, not in the report) pane follows the window | #4690 | edge pane p90 off the window edge 90–120 pt → 5 pt |
 | (new, not in the report) | #4688 | with a browser pane open, no window edge or corner could start a resize (a mouse hook skipped AppKit's resize tracking). Present since the hook was added; reproduced on a `main` dev build, and reported by the owner on the installed 0.59.16 |
 
-**To do:** a short "what shipped" section in the report, and strike M1 and M2 from its open list. M3 (a real-mouse drag) was in effect done by the owner testing the build by hand: "very smooth".
+**Done 2026-10-13:** the report has a "What shipped" section (§0), and M1 and M2 are marked shipped. M3 (a real-mouse drag) was in effect done by the owner testing the build by hand: "very smooth".
 
 ---
 
