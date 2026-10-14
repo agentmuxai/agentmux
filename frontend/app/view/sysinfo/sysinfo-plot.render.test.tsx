@@ -41,6 +41,7 @@ vi.mock("uplot", () => {
 });
 vi.mock("uplot/dist/uPlot.min.css", () => ({}));
 
+import { markWindowThemeApplied } from "@/app/store/window-appearance";
 import { sampleReducer } from "./sysinfo-model";
 import { SingleLinePlot } from "./sysinfo-plot";
 import type { DataItem } from "./sysinfo-types";
@@ -132,6 +133,15 @@ describe("SingleLinePlot on uPlot", () => {
         const t = new Date(2026, 9, 13, 8, 52, 30).getTime() / 1000;
         expect(x.values(null, [t, t + 30], 0, 80, 30)).toEqual(["8:52:30", "8:53:00"]);
         expect(y.values(null, [0, 50, 100])).toEqual(["0", "50", "100"]);
+    });
+
+    it("is built again when the theme changes, so its canvas takes the new colors", async () => {
+        mount(() => series(sample(base, 40)));
+        await vi.advanceTimersByTimeAsync(200);
+        markWindowThemeApplied("monokai");
+        expect(made.charts).toHaveLength(2);
+        expect(made.charts[0].destroyed).toBe(true);
+        markWindowThemeApplied("default");
     });
 
     it("is destroyed with the pane", async () => {

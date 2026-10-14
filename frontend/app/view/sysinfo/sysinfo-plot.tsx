@@ -15,6 +15,8 @@ import { createEffect, createSignal, on, onCleanup, onMount, Show } from "solid-
 import { throttle } from "throttle-debounce";
 import uPlot from "uplot";
 
+import { appliedWindowTheme } from "@/app/store/window-appearance";
+
 import "uplot/dist/uPlot.min.css";
 import "./sysinfo-plot.scss";
 
@@ -177,12 +179,21 @@ function SingleLinePlot(props: SingleLinePlotProps): JSX.Element {
         });
     });
 
-    // A new chart when what it draws changes (metric, color, axes), or when it
+    // A new chart when what it draws changes (metric, color, axes, or the
+    // theme, whose colors the canvas resolved when it was built), or when it
     // has none yet; otherwise only a new size, or new data.
     createEffect(
-        on([() => props.yval, () => props.yvalMeta, () => props.defaultColor, () => props.sparkline], () => build(), {
-            defer: true,
-        })
+        on(
+            [
+                () => props.yval,
+                () => props.yvalMeta,
+                () => props.defaultColor,
+                () => props.sparkline,
+                appliedWindowTheme,
+            ],
+            () => build(),
+            { defer: true }
+        )
     );
     createEffect(
         on(size, (s) => {
