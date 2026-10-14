@@ -1605,7 +1605,7 @@ pub fn inject_jekt_signing_keys_into_mcp_json(
     // Keys are stored under the folded name: two rows folding to it (`Victim`
     // beside `victim`) get none, and old ones are removed (actor::uid_owns_name).
     if mstore.agent_ids_for_slug_folded(agent_slug).is_ok_and(|ids| ids.len() > 1) {
-        ["AGENTMUX_JEKT_KEY", "AGENTMUX_LAN_KEY", "AGENTMUX_WAN_KEY", "AGENTMUX_HOST_LABEL"].map(|k| env.remove(k));
+        for k in ["AGENTMUX_JEKT_KEY", "AGENTMUX_LAN_KEY", "AGENTMUX_WAN_KEY", "AGENTMUX_HOST_LABEL"] { env.remove(k); }
         return serde_json::to_string_pretty(&mcp_json).ok();
     }
     if let Ok(key) = mstore.agent_jekt_key_ensure(agent_slug) {

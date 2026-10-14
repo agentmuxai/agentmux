@@ -355,8 +355,9 @@ impl Store {
     }
 
     /// The slugs of every row whose slug equals `name` trimmed and folded
-    /// (identity M4d-3's drift count; slug uniqueness is case-sensitive, so
-    /// "Aria" and "aria" are two rows).
+    /// (identity M4d-3's drift count). New slugs collide case-insensitively
+    /// (`resolve_slug_collision`), so only rows from before that can differ
+    /// by case alone.
     pub fn agent_slugs_folded(&self, name: &str) -> Result<Vec<String>, StoreError> {
         // Folded in Rust as the key tables fold, never SQLite's ASCII-only lower().
         let folded = name.trim().to_lowercase();
