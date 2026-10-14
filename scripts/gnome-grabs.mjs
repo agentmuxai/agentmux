@@ -24,6 +24,7 @@
 import { execFileSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import path from "node:path";
+import { isMain } from "./lib/is-main.mjs";
 
 const SCHEMAS = [
     "org.gnome.desktop.wm.keybindings",
@@ -136,4 +137,4 @@ async function main() {
     }
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) await main();
+if (isMain(import.meta.url)) await main();
