@@ -37,6 +37,8 @@ const SCHEDULER_COALESCE_MS: u64 = 50;
 /// How often the panes' processes are scanned with no badge watching: enough to
 /// evict a pane whose shell exited without normal cleanup.
 const PANE_JANITOR_MS: u64 = 30_000;
+/// A budget no run exceeds: the source keeps its interval whatever a run costs.
+const NEVER_STRETCHED: u64 = u64::MAX / 4;
 const HOLDER_TELEMETRY: &str = "telemetry";
 const HOLDER_JANITOR: &str = "pane-janitor";
 const HOLDER_BADGES: &str = "pane-badges";
@@ -1081,7 +1083,12 @@ fn get_interval_secs(config_watcher: &ConfigState) -> f64 {
 /// Run the sysinfo collection loop. Uses `tokio::time::interval` for steady
 /// tick rate regardless of refresh duration. Interval is re-read from config
 /// each tick and the timer is reset if it changes.
-pub async fn run_sysinfo_loop(broker: Arc<Broker>, config_watcher: Arc<ConfigState>, conn_name: String) {
+pub async fn run_sysinfo_loop(
+    broker: Arc<Broker>,
+    config_watcher: Arc<ConfigState>,
+    conn_name: String,
+    panes: crate::backend::sampler::panes::PaneSampler,
+) {
     let mut sys = sysinfo::System::new_all();
     let mut networks = Networks::new_with_refreshed_list();
     let mut net_state = NetState::new();
@@ -1113,7 +1120,10 @@ pub async fn run_sysinfo_loop(broker: Arc<Broker>, config_watcher: Arc<ConfigSta
     let min_interval_ms = (MIN_INTERVAL_SECS * 1000.0) as u64;
     let mut sched = Scheduler::new(
         vec![
-            SourceSpec { id: SourceId::Machine, min_interval_ms, budget_ms: 250, needs: &[] },
+            // Never stretched: the machine's counters are what the CPU chart shows,
+            // and a busy machine is exactly when they must keep coming. Only the
+            // costly pane scan slows down under load.
+            SourceSpec { id: SourceId::Machine, min_interval_ms, budget_ms: NEVER_STRETCHED, needs: &[] },
             SourceSpec { id: SourceId::Panes, min_interval_ms, budget_ms: 400, needs: &[] },
         ],
         SCHEDULER_COALESCE_MS,
@@ -1242,104 +1252,50 @@ pub async fn run_sysinfo_loop(broker: Arc<Broker>, config_watcher: Arc<ConfigSta
         if due.contains(&SourceId::Panes) {
             let run_started = Instant::now();
             let now = agentmux_common::time::now_ms();
-            // Per-pane process tree metrics: aggregate CPU/mem across each block's
-            // shell process and all its descendants.
-            let block_pids = pidregistry::get_all();
-            peaks.retain(|id| block_pids.iter().any(|(b, _)| b == id));
-            if !block_pids.is_empty() {
-                // Pass 1: cheap minimal refresh of all processes to populate parent()
-                // links. ProcessRefreshKind::nothing() skips CPU/mem — just PID/PPID.
-                // On a VM with many Chromium/CEF helper processes this can take 5–20ms;
-                // block_in_place keeps the Tokio runtime unblocked during the scan.
-                tokio::task::block_in_place(|| {
-                    sys.refresh_processes_specifics(
-                        ProcessesToUpdate::All,
-                        false, // keep stale entries — pass 2 removes dead ones
-                        ProcessRefreshKind::nothing(),
-                    );
-                });
-
-                // For each block, BFS the process tree from the shell PID.
-                let mut block_trees: Vec<(String, Vec<Pid>)> = block_pids
-                    .iter()
-                    .map(|(block_id, pid)| {
-                        let root = Pid::from(*pid as usize);
-                        let tree = process_tree::collect_descendants(
-                            &sys,
-                            root,
-                            process_tree::MAX_PIDS_PER_BLOCK,
-                        );
-                        (block_id.clone(), tree)
-                    })
-                    .collect();
-
-                // Pass 2: targeted deep refresh (CPU + mem) for only the PIDs we care about.
-                // Deduplicate across blocks so each PID is refreshed at most once.
-                let mut all_pids: Vec<Pid> = block_trees
-                    .iter()
-                    .flat_map(|(_, pids)| pids.iter().copied())
-                    .collect();
-                all_pids.sort_unstable();
-                all_pids.dedup();
-                tokio::task::block_in_place(|| {
-                    sys.refresh_processes_specifics(
-                        ProcessesToUpdate::Some(&all_pids),
-                        true, // remove dead processes on this authoritative pass
-                        ProcessRefreshKind::everything(),
-                    );
-                });
-
-                // Aggregate per block and publish.
-                // After Pass 2 (remove_dead=true), sys.process() returns None for any
-                // PID that no longer exists — use this to detect orphaned registry entries.
-                let mut dead_block_ids: Vec<String> = Vec::new();
-
-                for (block_id, pids) in &mut block_trees {
-                    // collect_descendants() always puts the root PID first.
-                    let root_pid = pids.first().copied().unwrap_or(Pid::from(0usize));
-                    let mut total_cpu: f64 = 0.0;
-                    let mut total_mem: u64 = 0;
-                    let mut live_count: u32 = 0;
-
-                    for pid in pids.iter() {
-                        if let Some(proc) = sys.process(*pid) {
-                            total_cpu += proc.cpu_usage() as f64;
-                            total_mem += proc.memory();
-                            live_count += 1;
+            // Each pane's processes as Tower groups them (its Job Object or cgroup,
+            // else its shell's tree), from Tower's own sample, so the badge, its
+            // detail and Tower count the same processes (`sampler::panes`).
+            // Read before the sample: a shell registered after it was read can't be
+            // judged by it.
+            let registered = pidregistry::get_all();
+            let asked = Instant::now();
+            match tokio::task::block_in_place(|| panes()) {
+                Ok(stats) => {
+                    peaks.retain(|id| stats.iter().any(|s| s.block_id == id));
+                    for s in &stats {
+                        let mut values = HashMap::new();
+                        if let Some(cpu) = s.cpu_pct {
+                            values.insert("cpu".to_string(), cpu);
                         }
-                    }
-
-                    // Root process is gone — evict from registry.  This is the last-resort
-                    // cleanup for processes that exit without normal wait-task teardown
-                    // (SIGKILL by the OS, unexpected crash, or stop() race).
-                    if sys.process(root_pid).is_none() {
-                        dead_block_ids.push(block_id.clone());
-                        continue; // skip publishing stale stats for a dead block
-                    }
-
-                    let mut block_values = HashMap::new();
-                    block_values.insert("cpu".to_string(), total_cpu);
-                    block_values.insert("mem".to_string(), total_mem as f64);
-                    block_values.insert("pids".to_string(), live_count as f64);
-                    let started = sys.process(root_pid).map_or(0, |p| p.start_time());
-                    let peak = peaks.observe(block_id, (root_pid.as_u32(), started), total_mem);
-                    block_values.insert("mem:peak".to_string(), peak as f64);
-
-                    let block_ts = TimeSeriesData {
-                        ts: now,
-                        values: block_values,
+                        values.insert("mem".to_string(), s.mem as f64);
+                        values.insert("pids".to_string(), f64::from(s.pids));
+                        let peak = peaks.observe(&s.block_id, s.shell, s.mem);
+                        values.insert("mem:peak".to_string(), peak as f64);
                         // Per-block process stats, not the backend's own uptime.
-                        uptime_secs: None,
-                    };
-                    broker.publish_event::<crate::backend::mps_events::BlockStats>(&block_ts, vec![format!("block:{block_id}")], 0);
+                        let block_ts = TimeSeriesData { ts: now, values, uptime_secs: None };
+                        broker.publish_event::<crate::backend::mps_events::BlockStats>(
+                            &block_ts,
+                            vec![format!("block:{}", s.block_id)],
+                            0,
+                        );
+                    }
                 }
-
-                for block_id in &dead_block_ids {
-                    pidregistry::unregister(block_id);
-                    tracing::warn!(
-                        block_id = %block_id,
-                        "sysinfo: evicted dead root PID — process exited without normal cleanup"
-                    );
+                Err(e) => tracing::debug!(error = %e, "sysinfo: pane stats sample failed"),
+            }
+            // Last-resort cleanup for a shell that exited without the normal
+            // teardown (killed by the OS, a crash, a stop() race): its PID is
+            // missing from a process table read after it was registered. Only a
+            // sample taken in this pass counts; a reused or failed one is skipped,
+            // and the next pass decides.
+            if let Some(live) = crate::backend::tower_sampler::Tower::global().live_pids_since(asked) {
+                for (block_id, pid) in registered {
+                    if !live.contains(&pid) {
+                        pidregistry::unregister(&block_id);
+                        tracing::warn!(
+                            block_id = %block_id,
+                            "sysinfo: evicted dead root PID — process exited without normal cleanup"
+                        );
+                    }
                 }
             }
             sched.finished(SourceId::Panes, since_epoch(run_started), run_started.elapsed().as_millis() as u64);

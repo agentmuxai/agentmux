@@ -347,6 +347,9 @@ struct State {
 /// and each task's CPU account rate. [`render`] turns it into an answer.
 struct Sampled {
     at: Instant,
+    /// When the process-table read began: a process started after this may
+    /// be missing from `procs` though it is running.
+    read_started: Instant,
     ts_ms: u64,
     procs: Vec<ProcInfo>,
     rates: Vec<Option<f64>>,
@@ -392,6 +395,17 @@ impl Tower {
         GLOBAL.get_or_init(Tower::new)
     }
 
+    /// The PIDs in the process table of the last sample, if that sample's read
+    /// began at or after `since`: what is missing from it had exited by then.
+    /// `None` for an older sample (one reused within [`REUSE_WITHIN`], the last
+    /// good one before a failed read, or one whose read was already under way),
+    /// which can't speak for a process that started after it.
+    pub fn live_pids_since(&self, since: Instant) -> Option<HashSet<u32>> {
+        let st = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        let last = st.last.as_ref().filter(|l| l.read_started >= since)?;
+        Some(last.procs.iter().map(|p| p.pid).collect())
+    }
+
     /// A sample (module doc). BLOCKING: reads the process table, and `labels`
     /// and `renderer` may read the store; call it off the async workers.
     /// `renderer` says what a renderer PID serves ("window Main"), for the
@@ -420,18 +434,45 @@ impl Tower {
         let mut st = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let fresh = st.last.as_ref().is_some_and(|l| l.at.elapsed() < REUSE_WITHIN);
         if !fresh {
+            let read_started = Instant::now();
             let procs = snapshot()?;
             let now = Instant::now();
             if st.last.as_ref().is_some_and(|l| now.duration_since(l.at) > STALE_AFTER) {
                 st.procs = RateMeter::new();
                 st.tasks = RateMeter::new();
             }
-            let sampled = advance(&mut st, procs, &inputs(), now, &agentmux_procstats::command_line_of);
+            let mut sampled = advance(&mut st, procs, &inputs(), now, &agentmux_procstats::command_line_of);
+            sampled.read_started = read_started;
             st.last = Some(sampled);
         }
         let last = st.last.as_ref().expect("measured above");
         Ok(render(last, want_host, hostname, &labels, &renderer))
     }
+}
+
+/// A pane's name in Tower and on its stats badge: the agent's name, else what
+/// the terminal runs. `None` for a block that no longer exists.
+pub fn block_label(mstore: &crate::backend::storage::store::Store, block_id: &str) -> Option<BlockLabel> {
+    use crate::backend::{blockcontroller, obj};
+    let block = mstore.get::<obj::Block>(block_id).ok().flatten()?;
+    let meta = |key: &str| obj::meta_get_string(&block.meta, key, "");
+    let agent_name = [meta("agentName"), meta("agentId")].into_iter().find(|s| !s.is_empty());
+    let agent = agent_name.is_some()
+        || blockcontroller::get_controller(block_id).is_some_and(|c| c.get_runtime_status().is_agent_pane);
+    let label = agent_name.unwrap_or_else(|| {
+        let title = meta("frame:title");
+        let connection = meta("connection");
+        if !title.is_empty() {
+            title
+        } else if !connection.is_empty() && connection != "local" {
+            format!("Terminal ({connection})")
+        } else if agent {
+            "Agent".to_string()
+        } else {
+            "Terminal".to_string()
+        }
+    });
+    Some(BlockLabel { label, agent })
 }
 
 /// Measure: group the table, take every process's and task account's rate
@@ -469,6 +510,7 @@ fn advance(
     st.sticky = sticky;
     Sampled {
         at: now,
+        read_started: now,
         ts_ms: agentmux_common::time::now_ms() as u64,
         procs,
         rates,
@@ -674,6 +716,38 @@ fn render(
 
 #[cfg(test)]
 mod tests {
+
+    /// A sample reused from before a moment, or none at all, can't say a
+    /// process that started after it has exited.
+    #[test]
+    fn live_pids_answer_only_for_a_sample_read_at_or_after_the_moment_asked() {
+        let tower = Tower::new();
+        let before = Instant::now();
+        assert_eq!(tower.live_pids_since(before), None, "no sample yet");
+        let one = || {
+            Ok(vec![p(42, 1, "sh")])
+        };
+        tower.sample_from(one, false, "", Inputs::default, |_| None, |_| None).unwrap();
+        assert_eq!(tower.live_pids_since(before), Some(HashSet::from([42])));
+        let later = Instant::now() + Duration::from_millis(1);
+        assert_eq!(tower.live_pids_since(later), None, "that sample was read before `later`");
+    }
+
+    /// A read already under way when a shell registered finishes after that
+    /// moment but can still miss the shell: it doesn't count either.
+    #[test]
+    fn a_read_that_began_before_the_moment_asked_does_not_count_though_it_ended_after() {
+        let tower = Tower::new();
+        let mid = std::cell::Cell::new(None);
+        let slow = || {
+            std::thread::sleep(Duration::from_millis(3));
+            mid.set(Some(Instant::now()));
+            std::thread::sleep(Duration::from_millis(3));
+            Ok(vec![p(42, 1, "sh")])
+        };
+        tower.sample_from(slow, false, "", Inputs::default, |_| None, |_| None).unwrap();
+        assert_eq!(tower.live_pids_since(mid.get().unwrap()), None);
+    }
     use super::*;
 
     fn build(

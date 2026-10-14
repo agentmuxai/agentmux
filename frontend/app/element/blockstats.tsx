@@ -408,9 +408,10 @@ function LocalBadge(props: { blockId: string; noHeader?: boolean }) {
 }
 
 /**
- * A terminal's CPU/memory badge. A local pane's figures come from srv every
- * second; a remote pane's (SSH, WSL) from its machine, asked while the pane
- * is visible (SPEC_TERMINAL_STATS_BADGE_REMOTE_PANES_2026_10_12.md).
+ * A pane's CPU/memory badge: a terminal's, or an agent's. A local pane's figures
+ * come from srv every second while a badge is shown, counted as Tower counts
+ * them (srv `sampler::panes`); a remote pane's (SSH, WSL) from its machine,
+ * asked while the pane is visible (SPEC_TERMINAL_STATS_BADGE_REMOTE_PANES_2026_10_12.md).
  */
 export function BlockStatsBadge(props: { blockId: string; noHeader?: boolean; connection?: string }) {
     return (
