@@ -34,7 +34,7 @@ export interface CliCatalogEntry {
     /** Primary context file the CLI reads at startup — shown as a badge. */
     primaryContextFile: string;
     /** Short MCP-support summary; "none" hides the badge. */
-    mcpSupport: "stdio+http" | "stdio+http+oauth" | "none";
+    mcpSupport: "stdio" | "stdio+http" | "stdio+http+oauth" | "none";
     /** Long description shown in the card's ⓘ popover. Markdown-ish
      *  (one paragraph, short lines). */
     popoverMarkdown: string;
@@ -164,6 +164,46 @@ const CLI_CATALOG: CliCatalogEntry[] = [
             "GitHub's coding agent. Integrates closely with GitHub repos and pull requests. Has a switch between Interactive, Plan, and Autopilot so you can choose how much freedom it gets. Best if you mostly work on GitHub and have a Copilot subscription.",
         hostSupported: true,
         // No container image built yet — host-only until agentmux/copilot ships.
+        containerSupported: false,
+    },
+    {
+        provider: "kilo",
+        displayName: "Kilo Code CLI",
+        icon: "K",
+        blurb: "Open-source agent with 500+ models",
+        primaryContextFile: "AGENTS.md",
+        mcpSupport: "stdio+http",
+        popoverMarkdown:
+            "An open-source coding agent with access to hundreds of models through Kilo's gateway, including free ones, so it runs before you sign in. Sign in with `kilo auth login` for your own account or keys.",
+        hostSupported: true,
+        // ACP runs on the host only (no container ACP path yet).
+        containerSupported: false,
+    },
+    {
+        provider: "cline",
+        displayName: "Cline CLI",
+        icon: "C",
+        blurb: "Plan-then-act agent, any model",
+        primaryContextFile: "AGENTS.md",
+        // Every ACP agent takes stdio MCP servers; Cline advertises no http or sse.
+        mcpSupport: "stdio",
+        popoverMarkdown:
+            "Cline's coding agent from the command line. It plans before it acts and works with most model providers. It needs a sign-in first: run `cline auth` (a Cline account, a ChatGPT subscription or your own API key).",
+        hostSupported: true,
+        // ACP runs on the host only (no container ACP path yet).
+        containerSupported: false,
+    },
+    {
+        provider: "opencode",
+        displayName: "OpenCode",
+        icon: "O",
+        blurb: "Open-source agent, 75+ providers",
+        primaryContextFile: "AGENTS.md",
+        mcpSupport: "stdio+http",
+        popoverMarkdown:
+            "The most-used open-source coding agent. Works with 75+ model providers and comes with free models, so it runs before you sign in. Sign in with `opencode auth login` to use your own providers.",
+        hostSupported: true,
+        // ACP runs on the host only (no container ACP path yet).
         containerSupported: false,
     },
 ];

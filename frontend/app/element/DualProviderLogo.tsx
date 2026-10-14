@@ -43,6 +43,9 @@ const HARNESS_NAMES: Record<string, string> = {
     muxcode: "Mux Code",
     copilot: "GitHub Copilot CLI",
     antigravity: "Antigravity (AGY)",
+    kilo: "Kilo Code CLI",
+    cline: "Cline CLI",
+    opencode: "OpenCode",
 };
 
 const VENDOR_NAMES: Record<string, string> = {

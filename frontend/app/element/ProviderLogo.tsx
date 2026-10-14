@@ -19,6 +19,9 @@ import kimiSvg from "@lobehub/icons-static-svg/icons/kimi.svg?raw";
 import moonshotSvg from "@lobehub/icons-static-svg/icons/moonshot.svg?raw";
 import githubSvg from "@lobehub/icons-static-svg/icons/github.svg?raw";
 import awsSvg from "@lobehub/icons-static-svg/icons/aws-color.svg?raw";
+import kilocodeSvg from "@lobehub/icons-static-svg/icons/kilocode.svg?raw";
+import clineSvg from "@lobehub/icons-static-svg/icons/cline.svg?raw";
+import opencodeSvg from "@lobehub/icons-static-svg/icons/opencode.svg?raw";
 import plandexUrl from "@/app/element/icons/plandex.png?url";
 import piUrl from "@/app/element/icons/pi.svg?url";
 import brainSvg from "@/app/asset/logo-brain.svg?raw";
@@ -56,6 +59,9 @@ export const ProviderLogo = (props: ProviderLogoProps): JSX.Element => {
         if (p === "moonshot") return { html: moonshotSvg };
         if (p === "openclaw") return { html: openclawColorSvg };
         if (p === "aws") return { html: awsSvg };
+        if (p === "kilo") return { html: kilocodeSvg };
+        if (p === "cline") return { html: clineSvg };
+        if (p === "opencode") return { html: opencodeSvg };
         // Plandex only: Pi (pi-coding-agent) is a different project, and
         // showing Plandex's mark on it named the wrong product.
         if (p === "plandex") return { png: plandexUrl };
