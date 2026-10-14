@@ -1,6 +1,6 @@
 # Agent pane scroll-follow: one owner, one intent-based state machine
 
-**Status:** active — Phase 0 (the hotfix for both reported symptoms, §8) shipped with this spec in PR #3652; invariant I4 (follow-transition logging, §5.3) shipped ahead of Phase 1 as Phase 0b; Phases 1 and 2 implemented in #4871 (the reducer and its binding, wired into the transcript behind `agent:followcontroller`, on by default in dev builds only; §8.1 lists where they differ from §5); Phase 3 implemented in #PRNUM (the tool preview and the install log on the same controller, behind the same setting; §8.2); Phases 4–5 not started. Tracking: issue #3655.
+**Status:** active — Phase 0 (the hotfix for both reported symptoms, §8) shipped with this spec in PR #3652; invariant I4 (follow-transition logging, §5.3) shipped ahead of Phase 1 as Phase 0b; Phases 1 and 2 implemented in #4871 (the reducer and its binding, wired into the transcript behind `agent:followcontroller`, on by default in dev builds only; §8.1 lists where they differ from §5); Phase 3 implemented in #4891 (the tool preview and the install log on the same controller, behind the same setting; §8.2); Phases 4–5 not started. Tracking: issue #3655.
 **Date:** 2026-09-24.
 **Requested by:** repo owner (asafebgi): "rock solid scrollbar for agent panes … this may need an architecture rethink, perhaps a DRY round."
 **Author:** Agent2.
