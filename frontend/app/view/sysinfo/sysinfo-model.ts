@@ -12,7 +12,7 @@ import { createSignalAtom } from "@/util/util";
 import { getConnStatusAtom } from "@/store/global";
 import { WpsEvent } from "@/app/store/mps-events";
 
-import { DataItem, DefaultNumPoints, DefaultPlotMeta, PlotTypes } from "./sysinfo-types";
+import { DataItem, DefaultNumPoints, DefaultPlotMeta, DefaultPlotType, PlotTypes } from "./sysinfo-types";
 import { GapBackfiller } from "./sysinfo-backfill";
 import { convertTimeSeriesToDataItem, getGapThresholdMs } from "./sysinfo-util";
 import type { ConnStatus } from "@/types/rpc/ConnStatus";
@@ -240,6 +240,8 @@ class SysinfoViewModel {
     dataAtom: SignalAtom<Array<DataItem>>;
     loadingAtom: SignalAtom<boolean>;
     numPoints: () => number;
+    /** The window chosen in this pane this session, until its meta catches up. */
+    private windowChoice: SignalAtom<number | null>;
     metrics: () => string[];
     connection: () => string;
     manageConnection: () => boolean;
@@ -319,26 +321,27 @@ class SysinfoViewModel {
         this.meta = ctx.meta;
 
         this.dataAtom = createSignalAtom<DataItem[]>([]);
+        this.windowChoice = createSignalAtom<number | null>(null);
         this.loadingAtom = createSignalAtom(true);
         this.plotMetaAtom = createSignalAtom(new Map(Object.entries(DefaultPlotMeta)));
         this.manageConnection = createMemo(() => true);
 
+        // The window: the one chosen in this pane (its window control, saved in
+        // its meta) before the global setting, before the default. A choice takes
+        // effect at once, before the meta write comes back.
         this.numPoints = createMemo(() => {
-            const fullConfig = atoms.fullConfigAtom();
-            const settingsNumPoints = fullConfig?.settings?.["telemetry:numpoints"];
-            if (settingsNumPoints != null && settingsNumPoints > 0) {
-                return Math.max(30, Math.min(1024, settingsNumPoints));
-            }
-            const blockData = { meta: this.meta() };
-            const metaNumPoints = blockData?.meta?.["graph:numpoints"];
-            if (metaNumPoints == null || metaNumPoints <= 0) return DefaultNumPoints;
-            return metaNumPoints;
+            const clamp = (n: number) => Math.max(30, Math.min(1024, n));
+            const chosen = this.windowChoice() ?? this.meta()?.["graph:numpoints"];
+            if (chosen != null && chosen > 0) return clamp(chosen);
+            const settingsNumPoints = atoms.fullConfigAtom()?.settings?.["telemetry:numpoints"];
+            if (settingsNumPoints != null && settingsNumPoints > 0) return clamp(settingsNumPoints);
+            return DefaultNumPoints;
         });
 
         this.plotTypeSelectedAtom = createMemo(() => {
             const blockData = { meta: this.meta() };
             const plotType = blockData?.meta?.["sysinfo:type"];
-            if (plotType == null || typeof plotType != "string") return "CPU";
+            if (plotType == null || typeof plotType != "string") return DefaultPlotType;
             return plotType;
         });
 
@@ -382,6 +385,13 @@ class SysinfoViewModel {
         });
 
         this.loadInitialData();
+    }
+
+    /** Show the last `points` samples in this pane: saved in its meta, and its history read again to fill the new window. */
+    setWindow(points: number) {
+        this.windowChoice._set(points);
+        void this.ctx.setMeta({ "graph:numpoints": points });
+        void this.loadInitialData();
     }
 
     getConfiguredInterval(): number {

@@ -53,8 +53,10 @@ export type TimeChartProps = {
     series: SeriesSpec[];
     /** The y range for the rows on screen. */
     yRange: (rows: DataItem[]) => [number, number];
-    /** How a value reads on the y axis and in the tooltip. */
+    /** How a value reads in the tooltip, and on the y axis unless `axisFormat` is given. */
     format: (v: number) => string;
+    /** How a value reads on the y axis, if not as in the tooltip. */
+    axisFormat?: (v: number) => string;
     targetLen: number;
     intervalSecs: number;
     /** Charts with the same key move one crosshair together. */
@@ -137,7 +139,7 @@ export function TimeChart(props: TimeChartProps): JSX.Element {
                           ticks,
                           size: yAxisSize,
                           // Below the axis is still an amount: no minus signs.
-                          values: (_u, splits) => splits.map((v) => props.format(Math.abs(v))),
+                          values: (_u, splits) => splits.map((v) => (props.axisFormat ?? props.format)(Math.abs(v))),
                       },
                   ],
             series: [
@@ -252,6 +254,7 @@ export function SingleLinePlot(props: SingleLinePlotProps): JSX.Element {
             series={series()}
             yRange={(rows) => yRange(rows, props.yval, props.yvalMeta)}
             format={(v) => formatValue(v, props.yvalMeta?.decimalPlaces ?? 0, props.yvalMeta?.label ?? "")}
+            axisFormat={(v) => formatValue(v, props.yvalMeta?.decimalPlaces ?? 0, "")}
             targetLen={props.targetLen}
             intervalSecs={props.intervalSecs}
             syncKey={props.syncKey}

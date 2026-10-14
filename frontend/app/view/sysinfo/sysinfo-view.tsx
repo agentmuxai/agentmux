@@ -11,6 +11,7 @@ import type { JSX } from "solid-js";
 import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show } from "solid-js";
 
 import type { SysinfoViewModel } from "./sysinfo-model";
+import { Overview } from "./sysinfo-overview";
 import { SingleLinePlot } from "./sysinfo-plot";
 import { convertTimeSeriesToDataItem } from "./sysinfo-util";
 
@@ -84,13 +85,15 @@ function SysinfoViewInner(props: SysinfoViewProps): JSX.Element {
     // rather than on every event, so a burst (a backfill, a resumed lane) is one
     // redraw, not many.
     const [plotData, setPlotData] = createSignal(model.dataAtom());
+    // Paused: the charts hold what they show while samples keep arriving.
+    const [paused, setPaused] = createSignal(false);
     onMount(() => {
         // Skipped while the window is being resized: rebuilding the chart reads
         // layout, which mid-resize forced the frame's whole layout early
         // (ANALYSIS_WINDOW_RESIZE_REPAINT_LAG_2026_10_06.md §2.3). The next tick
         // after the resize catches up.
         const id = setInterval(() => {
-            if (!windowResizing()) setPlotData(model.dataAtom());
+            if (!windowResizing() && !paused()) setPlotData(model.dataAtom());
         }, CHART_UPDATE_INTERVAL_MS);
         onCleanup(() => clearInterval(id));
     });
@@ -124,7 +127,27 @@ function SysinfoViewInner(props: SysinfoViewProps): JSX.Element {
     const cols1 = createMemo(() => model.plotTypeSelectedAtom() === "CPU + Mem + Net");
     const cols2 = createMemo(() => yvals().length > 2 && !cols1());
 
+    const overview = createMemo(() => model.plotTypeSelectedAtom() === "Overview");
+
     return (
+        <Show
+            when={!overview()}
+            fallback={
+                <Overview
+                    plotData={plotData()}
+                    targetLen={targetLen()}
+                    intervalSecs={intervalSecs()}
+                    windowPoints={model.numPoints()}
+                    onWindow={(points) => model.setWindow(points)}
+                    paused={paused()}
+                    onPause={(p) => {
+                        setPaused(p);
+                        if (!p) setPlotData(model.dataAtom());
+                    }}
+                    syncKey={`sysinfo-${model.blockId}`}
+                />
+            }
+        >
         <div class="flex flex-col flex-grow mb-0 overflow-y-auto">
             <div
                 class={clsx("w-full h-full grid grid-rows-[repeat(auto-fit,minmax(100px,1fr))] gap-[10px]", {
@@ -149,6 +172,7 @@ function SysinfoViewInner(props: SysinfoViewProps): JSX.Element {
                 </For>
             </div>
         </div>
+        </Show>
     );
 }
 
