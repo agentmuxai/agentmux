@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-/** The pane's own window and area: chosen in the Overview, kept in its meta; the window ahead of the global setting. */
+/** The pane's own window and area, kept in its meta (the window ahead of the global setting), and whether it is on screen. */
 import { createRoot, createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -21,10 +21,10 @@ import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
 import { SysinfoViewModel } from "./sysinfo-model";
 import { DefaultNumPoints } from "./sysinfo-types";
 
-function model(meta: Record<string, unknown> = {}) {
+function model(meta: Record<string, unknown> = {}, visibility: () => string = () => "active") {
     const [m, setM] = createSignal<Record<string, unknown>>(meta);
     const setMeta = vi.fn(async (patch: Record<string, unknown>) => setM({ ...m(), ...patch }));
-    const ctx = { blockId: "s1", meta: m, setMeta, isFocused: () => false, visibility: () => "active" };
+    const ctx = { blockId: "s1", meta: m, setMeta, isFocused: () => false, visibility };
     return { model: new SysinfoViewModel(ctx as unknown as PaneTabHostContext, "sysinfo"), setMeta };
 }
 
@@ -109,26 +109,39 @@ describe("SysinfoViewModel window", () => {
 });
 
 describe("SysinfoViewModel focus", () => {
-    it("shows every area until one is chosen, and reads one saved in the meta", () => {
+    it("shows CPU until an area is chosen, and reads one saved in the meta", () => {
         createRoot((dispose) => {
-            expect(model().model.focus()).toBeNull();
+            expect(model().model.focus()).toBe("cpu");
+            expect(model().model.viewName()).toBe("CPU");
             expect(model({ "sysinfo:focus": "mem" }).model.focus()).toBe("mem");
-            expect(model({ "sysinfo:focus": "bogus" }).model.focus()).toBeNull();
+            expect(model({ "sysinfo:focus": "bogus" }).model.focus()).toBe("cpu");
             dispose();
         });
     });
 
-    it("takes an area at once, saves it, and is named for it; every area again clears it", () => {
+    it("is visible only while its pane is active", () => {
+        createRoot((dispose) => {
+            const [vis, setVis] = createSignal("active");
+            const { model: m } = model({}, vis);
+            expect(m.visible()).toBe(true);
+            setVis("dormant");
+            expect(m.visible()).toBe(false);
+            setVis("windowHidden");
+            expect(m.visible()).toBe(false);
+            dispose();
+        });
+    });
+
+    it("takes an area at once, saves it, and is named for it", () => {
         createRoot((dispose) => {
             const { model: m, setMeta } = model();
-            expect(m.viewName()).toBe("Overview");
-            m.setFocus("cpu");
-            expect(m.focus()).toBe("cpu");
-            expect(m.viewName()).toBe("CPU");
-            expect(setMeta).toHaveBeenCalledWith({ "sysinfo:focus": "cpu" });
-            m.setFocus(null);
-            expect(m.viewName()).toBe("Overview");
-            expect(setMeta).toHaveBeenLastCalledWith({ "sysinfo:focus": null });
+            m.setFocus("net");
+            expect(m.focus()).toBe("net");
+            expect(m.viewName()).toBe("Network");
+            expect(setMeta).toHaveBeenCalledWith({ "sysinfo:focus": "net" });
+            m.setFocus("advanced");
+            expect(m.viewName()).toBe("Advanced");
+            expect(setMeta).toHaveBeenLastCalledWith({ "sysinfo:focus": "advanced" });
             dispose();
         });
     });

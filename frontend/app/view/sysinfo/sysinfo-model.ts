@@ -15,7 +15,7 @@ import { getConnStatusAtom } from "@/store/global";
 import { readMuxEventHistory } from "@/app/store/mps-history";
 import type { ConnStatus } from "@/types/rpc/ConnStatus";
 import { GapBackfiller } from "./sysinfo-backfill";
-import { FOCUS_CHOICES, type FocusArea, MAX_WINDOW_POINTS, toFocusArea } from "./sysinfo-overview-data";
+import { type AreaChoice, FOCUS_CHOICES, MAX_WINDOW_POINTS, toAreaChoice } from "./sysinfo-overview-data";
 import { DataItem, DefaultNumPoints, DefaultPlotMeta, DefaultPlotType, PlotTypes } from "./sysinfo-types";
 import { convertTimeSeriesToDataItem, getGapThresholdMs } from "./sysinfo-util";
 
@@ -247,10 +247,12 @@ class SysinfoViewModel {
     windowSecs: () => number;
     /** Counts history loads, so one overtaken by a newer load is dropped. */
     private loadGeneration = 0;
-    /** The Overview's area shown alone (`sysinfo:focus`), or `null` for every area. */
-    focus: () => FocusArea | null;
+    /** The area the pane shows (`sysinfo:focus`): one alone, or every area (`advanced`). */
+    focus: () => AreaChoice;
+    /** Whether the pane is on screen: a hidden one takes no samples and draws nothing. */
+    visible: () => boolean;
     /** The area chosen in this pane this session, until its meta catches up; `undefined` before any. */
-    private focusChoice: SignalAtom<FocusArea | null | undefined>;
+    private focusChoice: SignalAtom<AreaChoice | undefined>;
     metrics: () => string[];
     connection: () => string;
     manageConnection: () => boolean;
@@ -331,7 +333,7 @@ class SysinfoViewModel {
 
         this.dataAtom = createSignalAtom<DataItem[]>([]);
         this.windowChoice = createSignalAtom<number | null>(null);
-        this.focusChoice = createSignalAtom<FocusArea | null | undefined>(undefined);
+        this.focusChoice = createSignalAtom<AreaChoice | undefined>(undefined);
         this.loadingAtom = createSignalAtom(true);
         this.plotMetaAtom = createSignalAtom(new Map(Object.entries(DefaultPlotMeta)));
         this.manageConnection = createMemo(() => true);
@@ -383,14 +385,16 @@ class SysinfoViewModel {
 
         this.focus = createMemo(() => {
             const chosen = this.focusChoice();
-            return chosen !== undefined ? chosen : toFocusArea(this.meta()?.["sysinfo:focus"]);
+            return chosen !== undefined ? chosen : toAreaChoice(this.meta()?.["sysinfo:focus"]);
         });
 
-        // An Overview showing one area is named for it ("CPU", "Memory").
+        this.visible = createMemo(() => ctx.visibility() === "active");
+
+        // The pane is named for the area it shows ("CPU", "Advanced").
         this.viewName = createMemo(() => {
             const plotType = this.plotTypeSelectedAtom();
-            const area = plotType === DefaultPlotType ? this.focus() : null;
-            return area ? (FOCUS_CHOICES.find((c) => c.value === area)?.label ?? plotType) : plotType;
+            if (plotType !== DefaultPlotType) return plotType;
+            return FOCUS_CHOICES.find((c) => c.value === this.focus())?.label ?? plotType;
         });
 
         this.viewText = createMemo(() => "");
@@ -421,8 +425,8 @@ class SysinfoViewModel {
         void this.loadInitialData();
     }
 
-    /** Show one area alone, or every area (`null`): saved in the pane's meta. */
-    setFocus(area: FocusArea | null) {
+    /** Show one area alone, or every area (`advanced`): saved in the pane's meta. */
+    setFocus(area: AreaChoice) {
         this.focusChoice._set(area);
         void this.ctx.setMeta({ "sysinfo:focus": area });
     }

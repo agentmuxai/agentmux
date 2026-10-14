@@ -11,7 +11,7 @@ import {
     formatGB,
     formatRate,
     mirroredRange,
-    toFocusArea,
+    toAreaChoice,
     formatWindow,
     windowChoices,
     volumes,
@@ -84,11 +84,13 @@ describe("formatting", () => {
 });
 
 describe("an area alone", () => {
-    it("reads a saved area, and anything else as the Overview", () => {
-        expect(toFocusArea("net")).toBe("net");
-        expect(toFocusArea("overview")).toBeNull();
-        expect(toFocusArea(undefined)).toBeNull();
-        expect(toFocusArea(3)).toBeNull();
+    it("reads a saved area, and anything else as CPU", () => {
+        expect(toAreaChoice("net")).toBe("net");
+        expect(toAreaChoice("advanced")).toBe("advanced");
+        // Nothing saved, or a value from an older build, shows CPU.
+        expect(toAreaChoice(undefined)).toBe("cpu");
+        expect(toAreaChoice("overview")).toBe("cpu");
+        expect(toAreaChoice(3)).toBe("cpu");
     });
 
     it("adds each sample's busiest core, and keeps a gap a gap", () => {

@@ -51,8 +51,11 @@ function SysinfoView(props: SysinfoViewProps): JSX.Element {
     // The reducer joins a short gap between two real samples and breaks the
     // series at a long one. No gap-triggered reload here: that caused
     // the chart to blank under load and created a drop/reload feedback loop.
+    // Only while the pane is on screen: a pane in a background tab or a hidden
+    // window takes no samples and draws nothing.
     createEffect(() => {
         const cn = connName();
+        if (!model.visible()) return;
         const unsubFn = onMuxEvent(
             WpsEvent.SysInfo,
             (data) => {
@@ -63,9 +66,19 @@ function SysinfoView(props: SysinfoViewProps): JSX.Element {
             },
             cn
         );
-        console.log("subscribe to sysinfo", cn);
         onCleanup(() => unsubFn());
     });
+
+    // Shown again: read what it missed while hidden from srv's history.
+    createEffect(
+        on(
+            model.visible,
+            (visible, wasVisible) => {
+                if (visible && wasVisible === false) void model.loadInitialData();
+            },
+            { defer: true }
+        )
+    );
 
     // Keep the chart visible while a reload is in flight — the reducer holds
     // the previous data until resetData() replaces it with fresh history.
@@ -97,7 +110,7 @@ function SysinfoViewInner(props: SysinfoViewProps): JSX.Element {
         // (ANALYSIS_WINDOW_RESIZE_REPAINT_LAG_2026_10_06.md §2.3). The next tick
         // after the resize catches up.
         const id = setInterval(() => {
-            if (!windowResizing() && !paused()) setPlotData(model.dataAtom());
+            if (!windowResizing() && !paused() && model.visible()) setPlotData(model.dataAtom());
         }, CHART_UPDATE_INTERVAL_MS);
         onCleanup(() => clearInterval(id));
     });

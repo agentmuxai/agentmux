@@ -87,21 +87,27 @@ export function formatGB(gb: number | null | undefined): string {
     return `${gb.toFixed(1)} GB`;
 }
 
-/** One area shown alone, in a pane too small for the whole Overview. */
+/** One area shown alone, in up to three charts. */
 export type FocusArea = "cpu" | "mem" | "disk" | "net";
 
-/** The area choices; `overview` is every area at once. */
+/** What the pane shows: one area, or `advanced`, every area at once. */
+export type AreaChoice = FocusArea | "advanced";
+
+/** The area a pane shows until one is chosen. */
+const DEFAULT_AREA: AreaChoice = "cpu";
+
+/** The area buttons, in order. */
 export const FOCUS_CHOICES = [
-    { value: "overview", label: "Overview" },
     { value: "cpu", label: "CPU" },
     { value: "mem", label: "Memory" },
     { value: "disk", label: "Disk" },
     { value: "net", label: "Network" },
+    { value: "advanced", label: "Advanced" },
 ] as const;
 
-/** A saved area, or `null` (the Overview) for anything else. */
-export function toFocusArea(v: unknown): FocusArea | null {
-    return v === "cpu" || v === "mem" || v === "disk" || v === "net" ? v : null;
+/** A saved area, or the default for anything else. */
+export function toAreaChoice(v: unknown): AreaChoice {
+    return FOCUS_CHOICES.some((c) => c.value === v) ? (v as AreaChoice) : DEFAULT_AREA;
 }
 
 /** The key `withBusiestCore` adds: the busiest core's reading in each sample. */
