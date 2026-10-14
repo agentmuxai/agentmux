@@ -1,5 +1,38 @@
 # AgentMux Version History
 
+## 0.59.25 — 2026-10-14
+
+- Agent panes keep much less tool output in memory: finished results are released in the current turn too, smaller results and turns driven by agent messages are covered, and hidden panes let go of rows they were holding open.
+- The Sysinfo chart fills in the samples it missed during a stall from the app's history, so a busy machine shows its CPU curve instead of long holes.
+- Connectors shows every connected account, MCP server and remote as a card, with the same look in all three sections: a filter and Add button on top, and a card's details opening below its row.
+- A maximized pane that had been minimized shows Minimize and Restore instead of two Restore buttons, and a pane's close X is bigger and turns Windows-red when you hover it
+- Agent panes stay smoother with several agents streaming: a finished tool's output is built once instead of up to three times, panes on hidden tabs no longer build tool output nobody can see, and a CSS rule no longer re-checks every row on each streamed line
+- srv's publish route refuses an event only srv publishes, so a typed event's subscribers can't be sent another shape from outside srv
+- A pane's CPU and memory badge counts the same processes Tower does, including everything an agent started, and now shows for agent panes too.
+- task dev on Windows deletes its old dist/cef-dev-* builds (about 1 GB each) once nothing runs from them: before a run starts and after the app exits
+- Paired phones can read this computer's CPU and memory: the latest sample, and a live feed that starts with the kept history, for the phone's Sysinfo view.
+- The Sysinfo charts are drawn on a canvas with uPlot: they update every second without rebuilding, and every chart in the pane moves one crosshair together.
+- Pane header comments now say why a clickable header icon is still supported (trusted widgets may use it), and the Editor tree-toggle spec records it
+- Clicking an image, video or audio file now shows the Media pane it opens in: a minimized pane is restored, a hidden stack tab is brought forward, and a Media pane that was a background tab is reused instead of opening another
+- Every close button is the same X (the window tab, pane tab, filter and search clears now match the pane header's), and the Stash button is a toolbox that sits on the line with its neighbours
+- Internal cleanup of the browser-pane, launcher-event, pane-layout and launch-modal state code; the launch modal no longer carries an unreachable 'awaiting bundle save' state.
+- The launcher no longer writes its log file while holding its state lock on every window move, and a login start that keeps the first window hidden now marks AgentMux as running unattended in the same place as closing every window does.
+- Agent picker: harness cards are titled with the CLI name (Claude Code) and captioned with the provider blurb, instead of the other way round
+- Agent panes in development builds decide whether to follow the conversation with one state machine: only your own scroll up, a scroll key or a text selection stops following, and scrolling back to the bottom starts it again (setting agent:followcontroller)
+- A terminal's stats badge tooltip now lists the same processes the badge counts
+- A tool preview's taller/shorter button shows only when the preview has a vertical scrollbar (or is already tall), so a preview that fits no longer has a pointless one
+- Fix tab moves and layout writes that could leave the backend's in-memory state and the database out of step: a workspace can no longer be emptied by two tab moves at once, focus/magnify changes from layout edits are saved, and whole-row object writes can no longer overwrite workspace, tab, block or window structure
+- Paired devices can be allowed to send: Settings › Paired devices has a Can send switch per device (off by default), pairing takes the phone's hardware-backed key, and the phone can ask whether it may send
+- Terminal pane: remove the microphone button from the header (the agent composer keeps its own, and Ctrl+Shift+V still works)
+- A phone paired with this computer and allowed to send can now message an agent as you; the message appears in the agent pane with a From <phone> note
+- Dropping a pane or tab over a floating pane, and redocking a floating pane, now pick the target window by what each window is rather than by its name, so a floating pane under the cursor is never mistaken for a drop target.
+- Build tooling packages (vite-plugin-solid, semver, ws) are dev dependencies, not runtime ones; nothing the app ships changes
+- Agent pane login: after you cancel a login, its status label and "no login detected" notice no longer reappear; a successful terminal login also closes a leftover login-link box; and closing a pane stops a /login that is still waiting on a terminal window.
+- A phone resuming an agent's feed after a long gap no longer gets one event larger than the limit the feed promises; quotes and escapes in the transcript now count toward it
+- The Linux .deb, .rpm and portable tarball are compressed with xz instead of gzip, about 53 MiB smaller for the tarball (183 to 130 MiB on 0.59.22). The tarball is now a .tar.xz
+- srv: when the backend falls behind on saving, tabs, panes, windows and layouts are now restored from its live state too, not just workspaces; moving the active tab to another workspace now activates its neighbour, as closing it does
+- Type into all terminals (Multi Input) shows once in the status bar while it's on, and a click there turns it off, instead of a button in every terminal's header.
+
 ## 0.59.24 — 2026-10-13
 
 - Opening a widget in a new window or a floating pane is faster: the pre-warmed windows are kept unless memory is critically low, a floating pane warms one for the next, and new windows load the app from cache.
