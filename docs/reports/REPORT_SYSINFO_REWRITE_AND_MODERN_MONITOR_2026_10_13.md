@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-13
 **Author:** AgentX@narko
-**Status:** active. Phase 0 (§6) built 2026-10-13: gaps draw as breaks, the area is no longer stacked, and the x axis has real second and minute ticks. Phase 1 built 2026-10-13, in a narrower form than §5.1 described (see §6). Phases 2 to 5 not started; the open questions in §7 are unanswered.
+**Status:** active. Phase 0 (§6) built 2026-10-13: gaps draw as breaks, the area is no longer stacked, and the x axis has real second and minute ticks. Phase 1 built 2026-10-13, in a narrower form than §5.1 described (see §6). Phase 2 begun and Phase 4 built 2026-10-14; Phase 5 moved to Tower (§5.3). The open questions in §7 were answered with the defaults the owner accepted on 2026-10-13.
 **Origin:** investigation to decide between fixing and rewriting, and to scope a redesign.
 **Inputs:**
 - the owner's two screenshots of the CPU chart during heavy load (2026-10-13, 08:52 to 08:54);
@@ -138,15 +138,18 @@ sampler thread (own OS thread, ABOVE_NORMAL, monotonic clock)
 
 ### 5.3 Layout (small multiples, one shared time axis)
 
-1. **Header tiles:** CPU, Memory, Network, Disk, and *Agents*. Each shows its current value, the min and max in the window, and a sparkline. Clicking a tile focuses that chart.
+**Sysinfo shows the machine; Tower shows the agents** (owner, 2026-10-14). The *Agents* tile, the agents-versus-rest split, the top consumers by agent and the agent and build annotations below belong in Tower, which already groups processes by pane and adds up "everything else". Sysinfo keeps the machine's own measures.
+
+1. **Header tiles:** CPU, Memory, Network, Disk (~~and *Agents*~~: Tower). Each shows its current value, the min and max in the window, and a sparkline.
 2. **CPU:**
-   - an area split into *AgentMux agents* and *rest of the system*, both from job/cgroup accounting;
+   - ~~an area split into *AgentMux agents* and *rest of the system*~~ (Tower);
    - a per-core heatmap below, replacing "All CPU" lines and working for any core count.
 3. **Memory:** composition (used, cache or standby, commit on Windows) plus a pressure strip (PSI on Linux, memory pressure on macOS, commit against the limit on Windows).
 4. **Network and disk:** received or read above the axis, sent or written below it, on one shared axis with automatic units.
-5. **Top consumers:** grouped by agent or pane first, then other processes, each with a CPU sparkline. Clicking an agent focuses its pane.
-6. **Annotations on the time axis:** an agent turn started, a build started, AgentMux restarted, a sampling gap.
+5. **Top consumers** (Tower, not Sysinfo): grouped by agent or pane first, then other processes, each with a CPU sparkline. Clicking an agent focuses its pane.
+6. **Annotations on the time axis:** AgentMux restarted, a sampling gap. Agent turns and builds are Tower's.
 7. **Controls in one row:** 1m / 5m / 15m window, pause, and a synced crosshair whose tooltip lists every chart's value at that moment.
+8. **One area alone** (owner, 2026-10-14): Overview, CPU, Memory, Disk and Network buttons. An area alone has no tiles and at most three charts that share the pane's height, so it fits a pane too small for the Overview: CPU, the busiest core against the average, and the core heatmap; memory used, available, and committed against its limit (Windows); network or disk in and out together, then each on its own scale, with each volume's free space.
 
 **Colour and accessibility:**
 - One sequential hue for the heatmap; a fixed categorical order for agents versus the rest, validated for colour blindness against the dark surface.
@@ -238,8 +241,8 @@ A lease that is not renewed expires, so a crashed window doesn't keep sources ru
 | 1. Transport (**built, as a pane-side backfill**) | when a live sample arrives after a gap, the pane reads srv's history ring (`readMuxEventHistory`) and merges the samples it missed, without clearing the chart or pausing live events; one fetch at a time, at least 5 s apart. The live lane is unchanged: still latest-only, so the status bar and popovers stay cheap and terminal input keeps its priority. Not built: batching on the lane, a `since seq N` read, and gap markers from the sampler | the 10 to 30 s holes |
 | 2. Data layer and scheduler (**begun**: `backend/sampler/schedule.rs`, a pure core with leases, per-source minimum intervals, budgets that stretch a slow source, and no catch-up bursts, tested on a fake clock; the sysinfo loop now runs on it, with the machine's counters as the baseline and the panes' processes scanned at the telemetry rate only while something subscribes to `blockstats`, otherwise every 30 s to evict dead panes. Not yet: one shared process snapshot, `procstats` coverage, `sampler.want` / `sampler.status` RPCs, Tower on it) | §5.5: one scheduler thread with sources, leases and budgets; one process snapshot, grouping and rate calculation; `procstats` extended to cover Sysinfo's metrics; diagnostics as a slow source; per-core metadata for any core count | duplicate scans, numbers that disagree between panes, skipped ticks, 32+ cores |
 | 3. Move the consumers | the status bar, popovers, pane headers (`blockstats`) and Tower read from the data layer; the old sysinfo loop and Tower's own sampling are removed | one source of truth |
-| 4. New pane (**begun**: the charts are uPlot on a canvas, built once and updated with `setData`; a gap is `null` and draws as a break; the pane's charts share one crosshair; they follow the 1 Hz samples) | uPlot charts (one component, also for Tower's history), tiles, heatmap, mirrored I/O, crosshair, window selector, table view | the redesign in §5.3 |
-| 5. Attribution | per-agent CPU and memory from the shared grouping; top-consumers list; agent and build annotations | "what are my agents costing me" |
+| 4. New pane (**built**: the charts are uPlot on a canvas, built once and updated with `setData`; a gap is `null` and draws as a break; the pane's charts share one crosshair; they follow the 1 Hz samples. The Overview is the default plot type: tiles with sparklines and the window's low and high, the CPU, a per-core heatmap, memory, network and disk mirrored in and out, a 1, 2, 5 or 15 minute window and an area kept in the pane's meta, pause, and a table view. Each area can be shown alone, §5.3 item 8. Not built: Tower's history on the same chart component, memory composition and a pressure strip) | uPlot charts (one component, also for Tower's history), tiles, heatmap, mirrored I/O, crosshair, window selector, table view | the redesign in §5.3 |
+| 5. Attribution (**Tower's, not Sysinfo's**, §5.3) | per-agent CPU and memory from the shared grouping; top-consumers list; agent and build annotations | "what are my agents costing me" |
 
 Phase 0 is worth shipping on its own: the pane stops showing readings that never happened. Phases 1 to 3 make every view truthful under load and agree with each other. Phases 4 and 5 are the redesign.
 
@@ -249,6 +252,8 @@ Phase 0 is worth shipping on its own: the pane stops showing readings that never
 - a sampler test: a stall becomes a gap record, not a skipped interval silently merged.
 
 ## 7. Open questions
+
+**Answered** by the owner on 2026-10-13, taking the proposed defaults: (1) uPlot, yes; (2) busy time; (3) 15 minutes, no coarse series; (4) GPU and temperatures later; (5) remote hosts after local; (6) machine totals as the baseline; (7) counter-based busy time.
 
 1. **New dependency:** is uPlot acceptable? The cheaper path keeps Observable Plot with the phase 0 fixes; §5.2 compares them.
 2. **CPU measure:** busy time (what we show now) or Task Manager's Utility on Windows? Showing both is possible but busier.
