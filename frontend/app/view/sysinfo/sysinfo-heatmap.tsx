@@ -11,6 +11,8 @@
 import type { JSX } from "solid-js";
 import { createEffect, createSignal, onCleanup, onMount } from "solid-js";
 
+import { appliedWindowTheme } from "@/app/store/window-appearance";
+
 import { resolveCssColor, withAlpha } from "./sysinfo-chart";
 import { coreGrid } from "./sysinfo-overview-data";
 import type { DataItem } from "./sysinfo-types";
@@ -40,6 +42,8 @@ export function CoreHeatmap(props: { plotData: DataItem[]; cores: string[]; colo
     });
 
     createEffect(() => {
+        // Drawn again on a theme change too, even while paused: the color is read from it.
+        appliedWindowTheme();
         const { width, height } = size();
         const rows = props.plotData ?? [];
         const grid = coreGrid(rows, props.cores);
