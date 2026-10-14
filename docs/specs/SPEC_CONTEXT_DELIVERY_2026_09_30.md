@@ -1,7 +1,7 @@
 # SPEC: Context deliveries — what the agent was given, one item at a time
 
 **Status:** active — CD1 (#4037), CD2a (#4041) and CD2b (#4130) implemented; startup-file items implemented under the launch-context spec (#4129, #4131); CD3 proposed (awaits the owner's decision on storing bodies); CD4 moved to the resume-phase spec (§6); CD5 narrowed to the narration tag. B1 (#4901), B2 (#4909), C1 (#4915), C3 (#4919) and C2 (#4921) fixed and seen live (§5.3); the live checks found C1–C4 (§9), and C4 is with the resume-phase spec.
-**Date:** 2026-09-30. **Revised:** 2026-10-14 (§0.1, §1.3, the §2 note, §3–§9; live results §5.2).
+**Date:** 2026-09-30. **Revised:** 2026-10-14 (§0.1, §1.3, the §2 note, §3–§9; live results §5.2, §5.3).
 **Verified against:** `agentmux` `main` @ `5c0d603ec` (2026-10-14), by reading code,
 and #4888 at `40623c1ba` for what it changes (§1.3, §3.5, §9). §2 is the
 2026-09-30 baseline: its line numbers refer to the tree before the October
