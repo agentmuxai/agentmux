@@ -124,7 +124,19 @@ pub fn append_to_pane(
     block_id: &str,
     frame: &Value,
 ) {
-    let line = format!("{frame}\n");
+    append_line_to_pane(broker, filestore, mstore, block_id, &frame.to_string());
+}
+
+/// [`append_to_pane`] for a frame already serialized to its one line (no
+/// trailing newline).
+pub fn append_line_to_pane(
+    broker: &Arc<crate::backend::mps::Broker>,
+    filestore: &Arc<crate::backend::storage::filestore::FileStore>,
+    mstore: &Arc<crate::backend::storage::store::Store>,
+    block_id: &str,
+    line: &str,
+) {
+    let line = format!("{line}\n");
     let zone = crate::backend::blockcontroller::shell::resolve_global_output_zone(&Some(mstore.clone()), block_id);
     crate::backend::blockcontroller::shell::handle_append_block_file(
         broker,
