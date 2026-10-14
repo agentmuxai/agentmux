@@ -6,8 +6,8 @@
 //! the same way: a pane's Job Object or cgroup, which nothing it starts can
 //! leave, else its shell's process tree. A Tower pane open at the same time
 //! shares the process snapshot (Tower reuses one taken within the last second).
-//! The badge's tooltip detail (`blockstats_detail`) still walks the shell's
-//! tree; moving it onto the same grouping is a follow-up.
+//! The badge's tooltip (`blockstats.detail`) reads the same task from
+//! [`tower_snapshot`], so it lists the processes the badge counts.
 //! docs/reports/REPORT_SYSINFO_REWRITE_AND_MODERN_MONITOR_2026_10_13.md section 5.5.
 
 use std::sync::Arc;
@@ -57,17 +57,20 @@ pub fn from_snapshot(snap: &TowerSnapshot) -> Vec<PaneStat> {
 /// The live sampler: Tower's sample of this machine, with each pane named by
 /// `labels` (a pane `labels` doesn't know, such as one that was closed, is left out).
 pub fn tower_sampler(labels: impl Fn(&str) -> Option<BlockLabel> + Send + Sync + 'static) -> PaneSampler {
-    Arc::new(move || {
-        let inputs = || Inputs {
-            blocks: crate::backend::process_tracker::registry::global()
-                .map(|t| t.members_by_block())
-                .unwrap_or_default(),
-            roots: pidregistry::get_all(),
-            own_pid: std::process::id(),
-        };
-        let snap = Tower::global().sample(false, "", inputs, &labels, |_| None)?;
-        Ok(from_snapshot(&snap))
-    })
+    Arc::new(move || Ok(from_snapshot(&tower_snapshot(&labels)?)))
+}
+
+/// Tower's sample of this machine's panes, each named by `labels`. Blocking:
+/// reads the process table, unless Tower read it within the last 900 ms.
+pub fn tower_snapshot(labels: impl Fn(&str) -> Option<BlockLabel>) -> std::io::Result<TowerSnapshot> {
+    let inputs = || Inputs {
+        blocks: crate::backend::process_tracker::registry::global()
+            .map(|t| t.members_by_block())
+            .unwrap_or_default(),
+        roots: pidregistry::get_all(),
+        own_pid: std::process::id(),
+    };
+    Tower::global().sample(false, "", inputs, labels, |_| None)
 }
 
 #[cfg(test)]
