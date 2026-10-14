@@ -572,6 +572,7 @@ export interface ContextItem {
         | "personal_memory"
         | "running_summary"
         | "compaction_summary"
+        | "command_output"
         | "continuation_packet"
         | "startup_file";
     /** Entry name, file name, or a fixed label for the kind. */
@@ -626,7 +627,8 @@ export interface ContextDeliveryNode {
     type: "context_delivery";
     /** Deterministic, so live and replay land on the same node. */
     id: string;
-    reason: "startup" | "clear" | "compaction" | "resume_fresh";
+    /** `command`: a local slash command's output the CLI put in the conversation. */
+    reason: "startup" | "clear" | "compaction" | "resume_fresh" | "command";
     /** Compaction only. */
     trigger?: "manual" | "auto";
     items: ContextItem[];
