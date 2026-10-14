@@ -345,13 +345,17 @@ pub(super) fn handle_reorder_tabs_bulk(
 /// * `tab.workspace_id != src_workspace_id` (caller-side bug),
 /// * `src_workspace_id == dst_workspace_id` (use `ReorderTab` for
 ///   intra-workspace reorders — same-workspace moves through this
-///   path would create ambiguity around `dst_index` semantics).
+///   path would create ambiguity around `dst_index` semantics),
+/// * the tab is the source's last tab and `allow_empty_source` is
+///   false. The guard lives here, not in callers, so two concurrent
+///   moves out of a two-tab workspace can't both pass a stale count.
 pub(super) fn handle_move_tab(
     state: &mut State,
     tab_id: String,
     src_workspace_id: String,
     dst_workspace_id: String,
     dst_index: u32,
+    allow_empty_source: bool,
 ) -> Vec<Event> {
     if src_workspace_id == dst_workspace_id {
         let v = state.bump_version();
@@ -412,6 +416,19 @@ pub(super) fn handle_move_tab(
             }];
         }
         Some(_) => {}
+    }
+    if !allow_empty_source && state.workspaces[&src_workspace_id].tab_ids.len() <= 1 {
+        let v = state.bump_version();
+        return vec![Event::Error {
+            code: ErrorCode::InvalidCommand,
+            message: format!(
+                "MoveTab: {} {} (pass allow_empty_source=true for draining flows)",
+                crate::reducer::MOVE_TAB_LAST_TAB_ERROR,
+                src_workspace_id,
+            ),
+            fatal: false,
+            version: v,
+        }];
     }
 
     // Remove from src.
@@ -1189,6 +1206,7 @@ mod tests {
                 src_workspace_id: src.clone(),
                 dst_workspace_id: dst.clone(),
                 dst_index: 0,
+                allow_empty_source: false,
             },
             &ctx(99),
         );
@@ -1229,6 +1247,7 @@ mod tests {
                 src_workspace_id: src,
                 dst_workspace_id: dst.clone(),
                 dst_index: 999,
+                allow_empty_source: false,
             },
             &ctx(2),
         );
@@ -1252,6 +1271,7 @@ mod tests {
                 src_workspace_id: src.clone(),
                 dst_workspace_id: dst,
                 dst_index: 0,
+                allow_empty_source: true,
             },
             &ctx(2),
         );
@@ -1278,6 +1298,7 @@ mod tests {
                 src_workspace_id: ws.clone(),
                 dst_workspace_id: ws,
                 dst_index: 0,
+                allow_empty_source: false,
             },
             &ctx(2),
         );
@@ -1298,6 +1319,7 @@ mod tests {
                 src_workspace_id: "no-such-src".into(),
                 dst_workspace_id: dst.clone(),
                 dst_index: 0,
+                allow_empty_source: false,
             },
             &ctx(2),
         );
@@ -1310,6 +1332,7 @@ mod tests {
                 src_workspace_id: src.clone(),
                 dst_workspace_id: "no-such-dst".into(),
                 dst_index: 0,
+                allow_empty_source: false,
             },
             &ctx(3),
         );
@@ -1327,6 +1350,7 @@ mod tests {
                 src_workspace_id: src,
                 dst_workspace_id: dst,
                 dst_index: 0,
+                allow_empty_source: false,
             },
             &ctx(4),
         );
@@ -1351,6 +1375,7 @@ mod tests {
                 src_workspace_id: src,
                 dst_workspace_id: dst,
                 dst_index: 0,
+                allow_empty_source: false,
             },
             &ctx(2),
         );
@@ -1391,6 +1416,7 @@ mod tests {
                 src_workspace_id: other.clone(),
                 dst_workspace_id: dst.clone(),
                 dst_index: 0,
+                allow_empty_source: false,
             },
             &ctx(2),
         );
@@ -1411,5 +1437,69 @@ mod tests {
         assert_eq!(state.workspaces[&real_src].tab_ids, vec![t1]);
         assert_eq!(state.workspaces[&other].tab_ids, vec![filler]);
         assert!(state.workspaces[&dst].tab_ids.is_empty());
+    }
+
+    fn move_tab(state: &mut State, tab: &str, src: &str, dst: &str, allow_empty_source: bool) -> Vec<Event> {
+        update(
+            state,
+            Command::MoveTab {
+                tab_id: tab.into(),
+                src_workspace_id: src.into(),
+                dst_workspace_id: dst.into(),
+                dst_index: 0,
+                allow_empty_source,
+            },
+            &ctx(2),
+        )
+    }
+
+    #[test]
+    fn move_tab_refuses_last_tab_without_allow_empty_source() {
+        let mut state = State::default();
+        let src = create_workspace(&mut state, "src");
+        let dst = create_workspace(&mut state, "dst");
+        let only = create_tab(&mut state, &src, "only");
+        let events = move_tab(&mut state, &only, &src, &dst, false);
+        match &events[..] {
+            [Event::Error { code, message, .. }] => {
+                assert_eq!(*code, ErrorCode::InvalidCommand);
+                assert!(message.contains(crate::reducer::MOVE_TAB_LAST_TAB_ERROR), "got: {}", message);
+            }
+            other => panic!("expected one Error, got {:?}", other),
+        }
+        assert_eq!(state.workspaces[&src].tab_ids, vec![only.clone()]);
+        assert_eq!(state.workspaces[&src].active_tab_id, Some(only.clone()));
+        assert!(state.workspaces[&dst].tab_ids.is_empty());
+        assert_eq!(state.tabs[&only].workspace_id, src);
+    }
+
+    #[test]
+    fn move_tab_allow_empty_source_drains_workspace() {
+        let mut state = State::default();
+        let src = create_workspace(&mut state, "src");
+        let dst = create_workspace(&mut state, "dst");
+        let only = create_tab(&mut state, &src, "only");
+        let events = move_tab(&mut state, &only, &src, &dst, true);
+        assert!(matches!(&events[..], [Event::TabMoved { .. }]), "got {:?}", events);
+        assert!(state.workspaces[&src].tab_ids.is_empty());
+        assert_eq!(state.workspaces[&dst].tab_ids, vec![only]);
+    }
+
+    /// Two moves out of a two-tab workspace, each of which passed a
+    /// caller-side count of 2: the second must be refused.
+    #[test]
+    fn move_tab_two_sequential_moves_leave_one_tab() {
+        let mut state = State::default();
+        let src = create_workspace(&mut state, "src");
+        let dst = create_workspace(&mut state, "dst");
+        let t1 = create_tab(&mut state, &src, "t1");
+        let t2 = create_tab(&mut state, &src, "t2");
+        let first = move_tab(&mut state, &t1, &src, &dst, false);
+        assert!(matches!(&first[..], [Event::TabMoved { .. }]), "got {:?}", first);
+        let second = move_tab(&mut state, &t2, &src, &dst, false);
+        assert!(matches!(&second[..], [Event::Error { .. }]), "got {:?}", second);
+        assert_eq!(state.workspaces[&src].tab_ids, vec![t2.clone()]);
+        assert_eq!(state.workspaces[&src].active_tab_id, Some(t2));
+        assert_eq!(state.workspaces[&dst].tab_ids, vec![t1]);
     }
 }
