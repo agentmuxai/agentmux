@@ -56,6 +56,7 @@
 // imports (a test checks it).
 
 import { createGitHubClient, GitHubError } from "./lib/github-rest.mjs";
+import { isMain } from "./lib/is-main.mjs";
 
 export const CODEX_LOGIN = "chatgpt-codex-connector[bot]";
 export const STATUS_CONTEXT = "Codex review";
@@ -493,7 +494,7 @@ async function main() {
     });
 }
 
-if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith("ci-codex-review-gate.mjs")) {
+if (isMain(import.meta.url)) {
     main().catch((err) => {
         console.error(err.message);
         process.exit(1);

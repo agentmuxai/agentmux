@@ -37,6 +37,7 @@ import { spawnSync } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { isMain } from "./lib/is-main.mjs";
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const FRONTEND = join(REPO_ROOT, "frontend");
@@ -361,9 +362,7 @@ function filesAtRef(ref) {
 
 // ── Main ────────────────────────────────────────────────────────────────────
 
-const isMain = process.argv[1] && import.meta.url.endsWith(process.argv[1].replace(/\\/g, "/").split("/").pop());
-
-if (isMain) {
+if (isMain(import.meta.url)) {
     const base = baseCommit();
     if (!base) {
         console.log("check-ui-primitives: cannot resolve the base branch (shallow clone?) — skipping.");

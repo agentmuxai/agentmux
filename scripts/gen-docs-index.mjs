@@ -90,14 +90,13 @@ import {
     readFileSync,
     readSync,
     readdirSync,
-    realpathSync,
     renameSync,
     rmSync,
     statSync,
     writeFileSync,
 } from "node:fs";
-import { join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
+import { isMain } from "./lib/is-main.mjs";
 
 export const INDEX = "docs/specs/INDEX.md";
 export const BEGIN = "<!-- BEGIN GENERATED INDEX — edit scripts/gen-docs-index.sh, not this section -->";
@@ -687,17 +686,6 @@ export function main(argv, { root = process.cwd(), env = process.env, out, err, 
     return 0;
 }
 
-function isEntryPoint() {
-    if (!process.argv[1]) return false;
-    try {
-        const self = realpathSync(fileURLToPath(import.meta.url));
-        const invoked = realpathSync(resolve(process.argv[1]));
-        return process.platform === "win32" ? self.toLowerCase() === invoked.toLowerCase() : self === invoked;
-    } catch {
-        return false;
-    }
-}
-
-if (isEntryPoint()) {
+if (isMain(import.meta.url)) {
     process.exitCode = main(process.argv.slice(2));
 }

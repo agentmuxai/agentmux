@@ -40,6 +40,8 @@
  *   version_only=true|false  the PR only moves the release version (R7)
  */
 
+import { isMain } from "./lib/is-main.mjs";
+
 /**
  * Paths that can change what scripts/gen-docs-index.mjs produces on some OS, or
  * how its cross-platform job runs. Its output is a pure function of file bytes,
@@ -278,8 +280,7 @@ async function readStdin() {
 
 // Entry point only when executed directly, so the test can import the pure
 // functions above without this running.
-const isMain = process.argv[1] && import.meta.url.endsWith(process.argv[1].replace(/\\/g, "/").split("/").pop());
-if (isMain) {
+if (isMain(import.meta.url)) {
     const fromArgs = process.argv.slice(2);
     const input = fromArgs.length > 0 ? null : await readStdin();
     let result;
