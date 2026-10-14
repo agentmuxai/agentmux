@@ -121,6 +121,42 @@ case "$out" in *'z:\dist\cef-dev-1\'*) ok ;; *) bad "a physical folder also matc
 out="$(PRUNE_SUBST="$SUBST" PRUNE_PRINT_PREFIXES="$TMP-elsewhere/dist/cef-dev-1" bash "$SUT" 2>&1)"
 case "$out" in *'z:\'*) bad "an unrelated folder doesn't gain a subst spelling ($out)" ;; *) ok ;; esac
 
+# 6c. --only touches one build and nothing else; --grace spares recent builds.
+age() { touch -d "$2" "$DIST/$1" 2>/dev/null || touch -t "$(date -d "$2" +%Y%m%d%H%M 2>/dev/null)" "$DIST/$1"; }
+setup cef-dev-1 cef-dev-2 cef-dev-3
+other_process
+run --only cef-dev-2 >/dev/null
+{ exists cef-dev-1 && ! exists cef-dev-2 && exists cef-dev-3; } && ok || bad "--only deletes just the named build"
+
+setup cef-dev-1 cef-dev-2
+other_process
+running_from cef-dev-2
+run --only cef-dev-2 >/dev/null
+exists cef-dev-2 && [ -f "$DIST/cef-dev-2/runtime/agentmux-cef.exe" ] && ok || bad "--only still leaves a build with a running process whole"
+
+for bad_only in not-a-build ../cef-dev-1 'cef-dev-1/x' 'cef-dev-1\x'; do
+  setup cef-dev-1
+  other_process
+  PRUNE_DIST_DIR="$DIST" PRUNE_PROCESS_LIST="$PROCS" bash "$SUT" --only "$bad_only" >/dev/null 2>&1
+  { [ $? = 2 ] && exists cef-dev-1; } && ok || bad "--only '$bad_only' is refused and deletes nothing"
+done
+
+setup cef-dev-old cef-dev-new
+other_process
+age cef-dev-old "3 hours ago"
+run --grace 10 >/dev/null
+{ ! exists cef-dev-old && exists cef-dev-new; } && ok || bad "--grace deletes an old idle build and spares a fresh one"
+
+setup cef-dev-new
+other_process
+run --only cef-dev-new --grace 10 >/dev/null
+! exists cef-dev-new && ok || bad "--grace doesn't protect the run's own build under --only"
+
+setup cef-dev-1
+other_process
+PRUNE_DIST_DIR="$DIST" PRUNE_PROCESS_LIST="$PROCS" bash "$SUT" --grace soon >/dev/null 2>&1
+[ $? = 2 ] && exists cef-dev-1 && ok || bad "a non-numeric --grace exits 2 and deletes nothing"
+
 # 7. A missing dist is not an error.
 rm -rf "$DIST"
 PRUNE_DIST_DIR="$DIST" PRUNE_PROCESS_LIST="$PROCS" bash "$SUT" >/dev/null 2>&1 && ok || bad "a missing dist exits 0"

@@ -927,8 +927,10 @@ tasks:
                 # running dir exits non-zero and the subsequent cp fails (exit 201).
                 # Each run leaves a ~1 GB cef-dev-<epoch> behind, so two prunes
                 # run via scripts/prune-dev-builds.sh: here, which clears older
-                # builds of a session that was killed before it could clean up, and
-                # after the launcher exits (end of this block). It deletes a build
+                # builds of a session that was killed before it could clean up
+                # (skipping any made in the last 10 minutes, which another run in
+                # this clone may be about to start), and after the launcher exits
+                # (end of this block), for this run's own build only. It deletes a build
                 # only when no process runs from it, because rm -rf on a live dir
                 # partially succeeds (unlocked files like agentmux-mcp are deleted
                 # while locked DLLs/EXE survive), leaving the running session with
@@ -938,7 +940,7 @@ tasks:
                 # writes a stable Exec= path that survives across dev sessions.
                 if [ "{{OS}}" = "windows" ]; then
                   DEV_DIR="dist/cef-dev-$(date +%s 2>/dev/null || echo dev)"
-                  bash scripts/prune-dev-builds.sh --keep "$(basename "$DEV_DIR")" || true
+                  bash scripts/prune-dev-builds.sh --keep "$(basename "$DEV_DIR")" --grace 10 || true
                 else
                   DEV_DIR="dist/cef-dev"
                   rm -rf "$DEV_DIR" 2>/dev/null || true
@@ -1283,7 +1285,7 @@ tasks:
                   # next run's prune. The launcher's exit code is the task's. The
                   # `||` matters: a task block exits on the first failing command,
                   # which would skip the prune after a crash.
-                  bash scripts/prune-dev-builds.sh --wait 20 || true
+                  bash scripts/prune-dev-builds.sh --only "$(basename "$DEV_DIR")" --wait 20 || true
                   exit $launcher_rc
                 else
                   # Phase 1: launch via the launcher (it spawns srv, hands the

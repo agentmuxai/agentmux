@@ -16,9 +16,16 @@
 # docs/specs/SPEC_TASK_DEV_PRUNE_OLD_BUILDS_2026_10_14.md.
 #
 # Usage:
-#   prune-dev-builds.sh [--keep <name>] [--wait <seconds>] [--dry-run]
+#   prune-dev-builds.sh [--keep <name> | --only <name>] [--grace <minutes>]
+#                       [--wait <seconds>] [--dry-run]
 #
 #   --keep <name>   never delete dist/<name> (the build `task dev` is starting)
+#   --only <name>   consider dist/<name> and nothing else. The exit-time call
+#                   uses it, so one run never touches another run's build.
+#   --grace <min>   leave a build alone if it was modified in the last <min>
+#                   minutes (default 0). A second `task dev` in the same clone
+#                   may have just built its folder and not yet started the app
+#                   from it, so no process runs from it. Not applied to --only.
 #   --wait <secs>   give processes still running from a build this long to
 #                   exit before leaving it for the next run (default 0). The
 #                   exit-time call uses it: the app's helper processes take a
@@ -36,17 +43,27 @@
 set -uo pipefail
 
 KEEP=""
+ONLY=""
+GRACE=0
 WAIT=0
 DRY=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --keep) KEEP="${2:-}"; shift 2 2>/dev/null || shift ;;
+    --only) ONLY="${2:-}"; shift 2 2>/dev/null || shift ;;
+    --grace) GRACE="${2:-0}"; shift 2 2>/dev/null || shift ;;
     --wait) WAIT="${2:-0}"; shift 2 2>/dev/null || shift ;;
     --dry-run) DRY=1; shift ;;
     *) echo "prune-dev-builds: unknown argument '$1'" >&2; exit 2 ;;
   esac
 done
 case "$WAIT" in '' | *[!0-9]*) echo "prune-dev-builds: --wait takes whole seconds" >&2; exit 2 ;; esac
+case "$GRACE" in '' | *[!0-9]*) echo "prune-dev-builds: --grace takes whole minutes" >&2; exit 2 ;; esac
+case "$ONLY" in
+  '' | cef-dev-*) ;;
+  *) echo "prune-dev-builds: --only takes a cef-dev-<name> folder" >&2; exit 2 ;;
+esac
+case "$ONLY" in */* | *[\\]*) echo "prune-dev-builds: --only takes a folder name, not a path" >&2; exit 2 ;; esac
 
 # Lowercased executable path of every running process, one per line. Empty means
 # the query failed (powershell itself is always in the list), so callers treat
@@ -128,7 +145,11 @@ esac
 
 # The folders to consider. find, not ls: `ls -d` prints a trailing slash on
 # these shells and an exact-name exclusion then silently matches nothing.
-CANDIDATES="$(find "$DIST" -mindepth 1 -maxdepth 1 -type d -name 'cef-dev-*' 2>/dev/null | sort)"
+if [ -n "$ONLY" ]; then
+  CANDIDATES="$(find "$DIST" -mindepth 1 -maxdepth 1 -type d -name "$ONLY" 2>/dev/null)"
+else
+  CANDIDATES="$(find "$DIST" -mindepth 1 -maxdepth 1 -type d -name 'cef-dev-*' 2>/dev/null | sort)"
+fi
 [ -n "$CANDIDATES" ] || exit 0
 
 deadline=$((SECONDS + WAIT))
@@ -145,6 +166,9 @@ while :; do
     [ -n "$dir" ] || continue
     name="$(basename "$dir")"
     [ "$name" = "$KEEP" ] && continue
+    if [ "$GRACE" -gt 0 ] && [ -z "$ONLY" ] && [ -n "$(find "$dir" -maxdepth 0 -mmin "-$GRACE" 2>/dev/null)" ]; then
+      continue
+    fi
     if in_use "$dir"; then
       pending="$pending$dir"$'\n'
       continue
