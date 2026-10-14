@@ -28,7 +28,7 @@ import { resolveForkSessionArgs } from "./fork-session-args";
 import { HISTORY_TAB_FOR_META_KEY, historyTabLabel, openOrFocusHistoryTab } from "./open-history-tab";
 import { quickForkAgent } from "./quick-fork";
 import { cancelComposerFocusRequest, focusComposer, requestComposerFocus } from "./composer-focus";
-import { isPersistentLaunch, launchController, PROVIDER_FLAGS_META_KEY } from "./launch-args";
+import { isPersistentLaunch, launchController, PROVIDER_FLAGS_META_KEY, TERMINAL_PANE_META } from "./launch-args";
 import { recallRuntime } from "./remembered-runtime";
 import { buildPaneArgs } from "./buildRuntimeArgs";
 import type { AgentContent, AgentDefinition, AgentSkill } from "@/app/store/rpc-api";
@@ -356,14 +356,19 @@ export class AgentViewModel {
                 "agent:resume_strategy": provider.resumeStrategy ?? (provider.resumeFlag ? "flag" : "none"),
                 "agent:session_id_field": provider.sessionIdField,
                 "agent:prompt_arg_flag": provider.promptArgFlag ?? "",
+                ...(provider.controllerType === "terminal" ? TERMINAL_PANE_META : {}),
             });
 
-            // Create SubprocessController (no-op start — waits for first message)
-            await RpcApi.ControllerResyncCommand(TabRpcClient, {
-                tabid: atoms.staticTabId(),
-                blockid: blockId,
-                forcerestart: true,
-            });
+            // Create SubprocessController (no-op start — waits for first message).
+            // A terminal-tier CLI is started by its term view instead (see
+            // launchAgentDefinition).
+            if (provider.controllerType !== "terminal") {
+                await RpcApi.ControllerResyncCommand(TabRpcClient, {
+                    tabid: atoms.staticTabId(),
+                    blockid: blockId,
+                    forcerestart: true,
+                });
+            }
         } catch (e: any) {
             Logger.error("agent", "Failed to launch agent", { error: String(e) });
         }
@@ -520,6 +525,10 @@ export class AgentViewModel {
         // `is_persistent` AFTER applying this same container override; this is
         // that rule, in the path the UI actually launches through.
         const agentMode = overrides?.agentType ?? agent.agent_type ?? "host";
+        if (provider.controllerType === "terminal" && agentMode === "container") {
+            this.launchError = `${provider.displayName} runs in a terminal pane on this computer, not in a container.`;
+            return false;
+        }
         const isPersistent = isPersistentLaunch(provider, agentMode);
         // The runtime config the strip will show, resolved BEFORE the args so
         // the two are built from the same value. `cmd:args` must already carry
@@ -855,11 +864,14 @@ export class AgentViewModel {
                 ...zoomMeta,
                 "frame:activebordercolor": agentColor,
                 "frame:bordercolor": dimAgentColor(agentColor),
+                // A terminal-tier harness: this pane becomes a terminal running
+                // the CLI's own UI, in the agent's folder.
+                ...(provider.controllerType === "terminal" ? { ...TERMINAL_PANE_META, "frame:title": instanceName } : {}),
             };
             // The composer mounts as soon as the meta write below lands; ask
             // it to take focus so the user can type right away instead of
             // clicking into it (SPEC_AGENT_PANE_HOVER_CLOSE_FOCUS_REFINEMENTS_2026_09_23.md §3).
-            requestComposerFocus(blockId);
+            if (provider.controllerType !== "terminal") requestComposerFocus(blockId);
             // Identity M4b-3 (spec §6.5.8): record the launch row, THEN one
             // SetMeta carrying the block meta and its stamp, THEN resync —
             // see `commitLaunch`. Resync creates the controller (a no-op
@@ -870,12 +882,17 @@ export class AgentViewModel {
                 meta,
                 createInstance,
                 setMeta: (m) => RpcApi.SetMetaCommand(TabRpcClient, { oref, meta: m }),
+                // A terminal-tier CLI is started by its term view once the
+                // terminal is attached: one that queries the terminal at
+                // startup (Aider) would otherwise wait for an answer forever.
                 resync: () =>
-                    RpcApi.ControllerResyncCommand(TabRpcClient, {
-                        tabid: targetTabId ?? atoms.staticTabId(),
-                        blockid: blockId,
-                        forcerestart: true,
-                    }),
+                    provider.controllerType === "terminal"
+                        ? Promise.resolve()
+                        : RpcApi.ControllerResyncCommand(TabRpcClient, {
+                              tabid: targetTabId ?? atoms.staticTabId(),
+                              blockid: blockId,
+                              forcerestart: true,
+                          }),
                 warn: (msg) => Logger.warn("agent", msg),
             });
             if (committed.ok !== false) markAgentOpen(blockId, "committed");

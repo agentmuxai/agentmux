@@ -27,6 +27,7 @@ import grokSvg from "@lobehub/icons-static-svg/icons/grok.svg?raw";
 import deepseekColorSvg from "@lobehub/icons-static-svg/icons/deepseek-color.svg?raw";
 import plandexUrl from "@/app/element/icons/plandex.png?url";
 import piUrl from "@/app/element/icons/pi.svg?url";
+import aiderUrl from "@/app/element/icons/aider.svg?url";
 import brainSvg from "@/app/asset/logo-brain.svg?raw";
 import agentmuxIconUrl from "@/app/asset/agentmux-icon.png?url";
 import type { JSX } from "solid-js";
@@ -76,6 +77,10 @@ export const ProviderLogo = (props: ProviderLogoProps): JSX.Element => {
         // (MIT, earendil-works/pi). It has no width/height, so it renders as
         // an <img> at the requested size, like Plandex's PNG.
         if (p === "pi") return { png: piUrl };
+        // Aider's own logo (aider.chat/assets/logo.svg, Apache-2.0). Crush and
+        // Muse Code keep the letter mark: Charm's license grants no use of its
+        // marks, and Muse has no mark of its own to use.
+        if (p === "aider") return { png: aiderUrl };
 
         if (p === "muxcode" || p === "mux-code" || p === "mux_code") return { html: brainSvg };
 

@@ -742,21 +742,26 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
         // caller (the fork prompt just needs *a* pane to switch to); a
         // sweep needs all of them.
         //
-        // KNOWN LIMITATION, this renderer only: `slots` is module-local, so
-        // a pane for this agent in ANOTHER window (or a floating-pane
-        // window) is not swept and keeps running against a deleted agent
-        // (codex P2, second round). Closing it needs a backend-global block
-        // query or a cross-window broadcast — real work, not a wider
-        // `filter` here — so it is called out rather than silently implied
-        // to be handled. Tracked in SPEC_AGENT_DELETE_2026_09_16.md §5.2.
+        // `slots` is this renderer's agent panes only, so srv's list of every
+        // open agent pane (`agent.open-panes`) is added: a pane in another
+        // window, and a terminal-tier agent's `term` pane, which has no slot
+        // (SPEC_AGENT_DELETE_2026_09_16.md §5.2, #4911).
         //
         // Failures are reported, not swallowed: the agent and its
         // credentials are already gone by this point, so a pane that
         // wouldn't close is a live pane attached to a deleted agent, and
         // the user is the only one who can do anything about it.
+        const sweep = new Set(getOpenBlockIdsForDefinition(row.definition_id));
+        try {
+            const open = await RpcApi.AgentOpenPanesCommand(TabRpcClient, {});
+            for (const p of open?.panes ?? []) if (p.agent_id === row.definition_id) sweep.add(p.block_id);
+        } catch (e) {
+            // This renderer's own panes are still swept.
+            Logger.warn("agent", "agent.open-panes failed during delete", { error: String(e) });
+        }
         const failedBlockIds = (
             await Promise.all(
-                getOpenBlockIdsForDefinition(row.definition_id).map((blockId) =>
+                [...sweep].map((blockId) =>
                     ObjectService.DeleteBlock(blockId).then(
                         () => null,
                         () => blockId

@@ -49,6 +49,9 @@ const HARNESS_NAMES: Record<string, string> = {
     goose: "goose",
     grok: "Grok Build",
     dsh: "DeepSeek Harness",
+    aider: "Aider",
+    crush: "Crush",
+    muse: "Muse Code",
 };
 
 const VENDOR_NAMES: Record<string, string> = {

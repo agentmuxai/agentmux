@@ -157,11 +157,13 @@ struct Unplaced {
     tab_id: String,
     block_id: String,
     view: String,
+    /// Block meta `agentId` is set: a terminal-tier agent is a `term` block.
+    has_agent_id: bool,
 }
 
 impl Unplaced {
     fn is_agent(&self) -> bool {
-        self.view == "agent"
+        self.view == "agent" || (self.view == "term" && self.has_agent_id)
     }
 }
 
@@ -209,16 +211,19 @@ async fn scan(state: &AppState) -> Scan {
         .filter_map(|b| b.subblockids.as_ref())
         .flatten()
         .collect();
-    let views: HashMap<&String, String> = blocks
+    let views: HashMap<&String, (String, bool)> = blocks
         .iter()
-        .map(|b| (&b.oid, crate::backend::obj::meta_get_string(&b.meta, "view", "")))
+        .map(|b| {
+            let view = crate::backend::obj::meta_get_string(&b.meta, "view", "");
+            (&b.oid, (view, !crate::backend::obj::meta_get_string(&b.meta, "agentId", "").is_empty()))
+        })
         .collect();
     let unplaced = unplaced
         .into_iter()
         .filter(|(_, id)| !sub_blocks.contains(id) && !blockcontroller::is_closing(id))
         .map(|(tab_id, block_id)| {
-            let view = views.get(&block_id).cloned().unwrap_or_default();
-            Unplaced { tab_id, block_id, view }
+            let (view, has_agent_id) = views.get(&block_id).cloned().unwrap_or_default();
+            Unplaced { tab_id, block_id, view, has_agent_id }
         })
         .collect();
     Scan { unplaced, tree_violations }
@@ -540,5 +545,20 @@ mod tests {
         sweep(&state, &mut seen, Instant::now(), Duration::from_secs(90)).await;
         let prefix = format!("tree:{tab}:BLOCK_IN_TWO_PANES");
         assert!(seen.reported.iter().any(|k| k.starts_with(&prefix)), "{:?}", seen.reported);
+    }
+
+    #[test]
+    fn a_term_block_with_an_agent_is_reaped_like_an_agent() {
+        let u = |view: &str, has_agent_id: bool| super::Unplaced {
+            tab_id: "t".into(),
+            block_id: "b".into(),
+            view: view.into(),
+            has_agent_id,
+        };
+        assert!(u("agent", false).is_agent());
+        // A terminal-tier agent (Aider, Crush, Muse Code) is a `term` block.
+        assert!(u("term", true).is_agent());
+        assert!(!u("term", false).is_agent());
+        assert!(!u("preview", true).is_agent());
     }
 }

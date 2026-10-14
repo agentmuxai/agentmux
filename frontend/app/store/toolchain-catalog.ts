@@ -246,9 +246,8 @@ export const CORE_TOOLS: CoreTool[] = [
  * `toolchain-capabilities.ts` and the one-click installer never treat them
  * as tools AgentMux itself needs.
  *
- * The agent entries (Crush, Aider) are NOT launchable as AgentMux panes
- * yet — they are listed so users can see what's installed. OpenCode and
- * goose are providers now, listed with the others in the Toolchain pane.
+ * The agent CLIs once listed here (OpenCode, goose, Crush, Aider) are
+ * providers now, listed with the others in the Toolchain pane.
  */
 export const LOCAL_MODEL_TOOLS: CoreTool[] = [
     {
@@ -325,44 +324,6 @@ export const LOCAL_MODEL_TOOLS: CoreTool[] = [
             windows: "scoop install llmfit",
             macos: "brew install llmfit",
             linux: "curl -fsSL https://llmfit.axjns.dev/install.sh | sh",
-        },
-    },
-    {
-        id: "crush",
-        cliCommand: "crush",
-        label: "Crush",
-        icon: "wand-magic-sparkles",
-        optional: true,
-        description: "Terminal coding agent with Ollama / LM Studio / llama.cpp provider types. Not yet launchable as an AgentMux pane.",
-        docsUrl: "https://github.com/charmbracelet/crush",
-        installUrls: {
-            windows: "https://github.com/charmbracelet/crush#installation",
-            macos: "https://github.com/charmbracelet/crush#installation",
-            linux: "https://github.com/charmbracelet/crush#installation",
-        },
-        installCommand: {
-            windows: "winget install charmbracelet.crush",
-            macos: "brew install charmbracelet/tap/crush",
-            linux: "npm install -g @charmland/crush",
-        },
-    },
-    {
-        id: "aider",
-        cliCommand: "aider",
-        label: "Aider",
-        icon: "user-pen",
-        optional: true,
-        description: "Terminal pair programmer; runs local models via Ollama. Not yet launchable as an AgentMux pane.",
-        docsUrl: "https://aider.chat/docs/install.html",
-        installUrls: {
-            windows: "https://aider.chat/docs/install.html",
-            macos: "https://aider.chat/docs/install.html",
-            linux: "https://aider.chat/docs/install.html",
-        },
-        installCommand: {
-            windows: 'powershell -ExecutionPolicy ByPass -c "irm https://aider.chat/install.ps1 | iex"',
-            macos: "curl -LsSf https://aider.chat/install.sh | sh",
-            linux: "curl -LsSf https://aider.chat/install.sh | sh",
         },
     },
 ];

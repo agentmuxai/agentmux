@@ -96,6 +96,10 @@ fn antigravity_is_found_where_its_installer_puts_it() {
     assert!(goose.contains(&home.join(".local").join("bin").join(if cfg!(windows) { "goose.exe" } else { "goose" })));
     assert_eq!(grok, vec![home.join(".grok").join("bin").join(if cfg!(windows) { "grok.exe" } else { "grok" })]);
     assert!(super::goose_install_paths(None).is_empty() && super::grok_install_paths(None).is_empty());
+    assert_eq!(
+        super::aider_install_paths(Some(home.clone())),
+        vec![home.join(".local").join("bin").join(if cfg!(windows) { "aider.exe" } else { "aider" })]
+    );
     assert!(known_install_paths("claude").is_empty());
 }
 
@@ -169,6 +173,9 @@ fn all_providers_covers_every_registered_id_exactly_once() {
         "goose",
         "grok",
         "dsh",
+        "aider",
+        "crush",
+        "muse",
     ] {
         assert_eq!(
             ids.iter().filter(|id| **id == expected).count(),
@@ -176,7 +183,7 @@ fn all_providers_covers_every_registered_id_exactly_once() {
             "expected exactly one entry for {expected}, got {ids:?}"
         );
     }
-    assert_eq!(ids.len(), 16, "must not silently gain/lose a provider: {ids:?}");
+    assert_eq!(ids.len(), 19, "must not silently gain/lose a provider: {ids:?}");
 }
 
 #[test]
@@ -628,4 +635,45 @@ mod prepare_provider_auth_dir_tests {
         let err = prepare_provider_auth_dir(claude, "   ").unwrap_err();
         assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
     }
+}
+
+#[test]
+fn terminal_tier_harnesses_run_on_the_cmd_controller() {
+    for id in ["aider", "crush", "muse"] {
+        let p = get_provider(id).unwrap();
+        assert_eq!(p.controller_type, ControllerType::Terminal, "{id}");
+        assert_eq!(p.controller_type_str(), "cmd", "{id}");
+    }
+}
+
+#[test]
+fn muse_resolves_to_the_binary_its_launcher_installed() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = std::path::PathBuf::from("/h");
+    if cfg!(windows) {
+        // No .muse-version yet: nothing to run.
+        assert!(super::muse_install_paths(Some(dir.path().to_path_buf()), None).is_empty());
+        std::fs::write(dir.path().join(".muse-version"), "1.4.7-R6101.1\n").unwrap();
+        assert_eq!(
+            super::muse_install_paths(Some(dir.path().to_path_buf()), None),
+            vec![dir.path().join("muse-bin-1.4.7-R6101.1.exe")]
+        );
+        // A version that would leave the directory is refused.
+        std::fs::write(dir.path().join(".muse-version"), "../x").unwrap();
+        assert!(super::muse_install_paths(Some(dir.path().to_path_buf()), None).is_empty());
+    } else {
+        assert_eq!(super::muse_install_paths(None, Some(home.clone())), vec![home.join(".local").join("bin").join("muse")]);
+    }
+}
+
+#[test]
+fn a_terminal_tier_pane_is_a_terminal_started_at_once() {
+    let mut meta = crate::backend::obj::MetaMapType::new();
+    apply_terminal_pane_meta(get_provider("aider").unwrap(), &mut meta);
+    assert_eq!(meta["view"], "term");
+    assert_eq!(meta["cmd:interactive"], true);
+    assert_eq!(meta["cmd:runonstart"], true);
+    let mut other = crate::backend::obj::MetaMapType::new();
+    apply_terminal_pane_meta(get_provider("kilo").unwrap(), &mut other);
+    assert!(other.is_empty());
 }
