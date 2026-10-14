@@ -76,6 +76,9 @@ process_paths() {
 win_prefix() {
   local p="$1"
   if command -v cygpath >/dev/null 2>&1; then p="$(cygpath -w "$p")"; fi
+  # Backslashes either way: without cygpath (the CI test runs on Linux) the
+  # path is POSIX, and the process list is always in Windows form.
+  p="${p//\//\\}"
   printf '%s\\' "$(printf '%s' "$p" | tr 'A-Z' 'a-z')"
 }
 
