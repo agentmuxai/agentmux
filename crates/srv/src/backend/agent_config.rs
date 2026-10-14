@@ -1602,6 +1602,12 @@ pub fn inject_jekt_signing_keys_into_mcp_json(
         .and_then(|v| v.as_object_mut())?;
 
     let mut patched = false;
+    // Keys are stored under the folded name: two rows folding to it (`Victim`
+    // beside `victim`) get none, and old ones are removed (actor::uid_owns_name).
+    if mstore.agent_ids_for_slug_folded(agent_slug).is_ok_and(|ids| ids.len() > 1) {
+        for k in ["AGENTMUX_JEKT_KEY", "AGENTMUX_LAN_KEY", "AGENTMUX_WAN_KEY", "AGENTMUX_HOST_LABEL"] { env.remove(k); }
+        return serde_json::to_string_pretty(&mcp_json).ok();
+    }
     if let Ok(key) = mstore.agent_jekt_key_ensure(agent_slug) {
         use base64::Engine as _;
         let key_b64 = base64::engine::general_purpose::STANDARD.encode(&key);
@@ -1625,23 +1631,17 @@ pub fn inject_jekt_signing_keys_into_mcp_json(
         );
         patched = true;
     }
-    // WAN-tier signing: srv signs at the origin with the agent's `wan.db` key
-    // (SPEC_WAN_JEKT_SIGNED_BY_SRV_2026_10_14.md), so the agent gets no WAN
-    // key. An `.mcp.json` written before that still holds one: drop it, so a
-    // private key srv no longer needs the agent to have leaves the disk.
+    // srv signs WAN jekts (SPEC_WAN_JEKT_SIGNED_BY_SRV): drop an old WAN key.
     for stale in ["AGENTMUX_WAN_KEY", "AGENTMUX_HOST_LABEL"] {
         patched |= env.remove(stale).is_some();
     }
-    // The key is still ensured and published here, at spawn, so it is in the
-    // cloud directory before the agent's first WAN jekt; until then they go
-    // unsigned. With no `wan.db` attached, nothing is minted anywhere else.
+    // Still ensured and published at spawn, so it is in the directory before
+    // the first WAN jekt. No `wan.db`, nothing minted anywhere else.
     if let Some(wan) = mstore.wan_identity() {
         match (
             wan.instance_ensure(&crate::backend::reactive::registry::local_host_label()),
             mstore.channel_wan_key(&wan, agent_slug),
         ) {
-            // Always: only the publisher knows the current directory (relay
-            // + account), and a pass with nothing pending sends nothing.
             (Ok(_), Ok(_)) => crate::muxbus::wan_publish::nudge(),
             (instance, key) => tracing::warn!(
                 agent = agent_slug,

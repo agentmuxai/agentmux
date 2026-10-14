@@ -151,21 +151,43 @@ pub(crate) fn source_from_token(store: &Store, caller_uid: &str, req: &mut crate
 }
 
 /// The agent srv may sign a WAN jekt as: its `source_agent`, when the
-/// request's own token names that agent by its slug (§3.1 rules 1 and 2).
-/// `None` on a forwarded hop, which carries no token (`audit_source_uid` is
-/// set from the Caller and never rides a hop).
-pub(crate) fn wan_signer<'a>(store: &Store, req: &'a crate::backend::reactive::InjectionRequest) -> Option<&'a str> {
+/// request's own caller (`caller_uid`, from its token or a cron job's
+/// creator; never anything a hop carries) owns that name (`uid_owns_name`,
+/// §3.1 rules 1 and 2). The name is compared ignoring case, as the keys are
+/// stored: an agent sends as `QTest`, its slug is `qtest`.
+pub(crate) fn wan_signer<'a>(
+    store: &Store,
+    caller_uid: &str,
+    req: &'a crate::backend::reactive::InjectionRequest,
+) -> Option<&'a str> {
     let source = req.source_agent.as_deref()?;
-    (!req.audit_source_uid.is_empty() && uid_has_slug(store, &req.audit_source_uid, source)).then_some(source)
+    (!caller_uid.is_empty() && uid_owns_name(store, caller_uid, source)).then_some(source)
+}
+
+/// Whether `uid`'s row is the one agent this instance knows by `name`: its
+/// slug is `name` ignoring case, and no other row's slug folds to `name`.
+/// Every per-name key (host HMAC, LAN, WAN) is stored under the folded name,
+/// so a second row differing only in case (`Victim` beside `victim`) would
+/// hold the first one's keys; for such a name nobody is its owner.
+pub(crate) fn uid_owns_name(store: &Store, uid: &str, name: &str) -> bool {
+    let folded = name.trim().to_lowercase();
+    if folded.is_empty() {
+        return false;
+    }
+    let owns = matches!(store.agent_names_by_id(uid), Ok(Some(row)) if row.slug.trim().to_lowercase() == folded);
+    owns && matches!(store.agent_ids_for_slug_folded(&folded), Ok(ids) if ids.len() == 1 && ids[0] == uid)
 }
 
 /// Identity M4d-4: whether a host-tier jekt is from the agent it claims by
 /// its token (`audit_source_uid` is the request's Caller). Far-side receivers
 /// have no Caller and keep checking the signature, which is still sent.
 pub(crate) fn jekt_sender_by_token(store: &Store, req: &crate::backend::reactive::InjectionRequest, claimed: &str) -> bool {
+    // Rule ii keeps the slug exact here; `uid_owns_name` adds that no other
+    // row folds to it, so a case-only alias can't claim the shared key.
     req.delivery_tier.as_deref() == Some("host")
         && !req.audit_source_uid.is_empty()
         && uid_has_slug(store, &req.audit_source_uid, claimed)
+        && uid_owns_name(store, &req.audit_source_uid, claimed)
 }
 
 /// Identity M4d-4: the pane of a caller whose token names it under its own
@@ -287,12 +309,70 @@ mod tests {
         #[test]
         fn srv_signs_only_as_the_agent_the_token_names() {
             let store = store_with_camper();
-            assert_eq!(wan_signer(&store, &req(Some("camper"), "uid-camper")), Some("camper"));
-            assert_eq!(wan_signer(&store, &req(Some("agent5"), "uid-camper")), None, "another agent's name");
-            assert_eq!(wan_signer(&store, &req(Some("Camper"), "uid-camper")), None, "the slug, exactly");
-            assert_eq!(wan_signer(&store, &req(Some("camper"), "")), None, "no token: a forwarded hop, a script");
-            assert_eq!(wan_signer(&store, &req(Some("camper"), "uid-nobody")), None);
-            assert_eq!(wan_signer(&store, &req(None, "uid-camper")), None);
+            let sign = |source: Option<&str>, caller: &str| wan_signer(&store, caller, &req(source, caller)).map(str::to_string);
+            assert_eq!(sign(Some("camper"), "uid-camper").as_deref(), Some("camper"));
+            // SendMessage sends AGENTMUX_AGENT_ID, which keeps the name's capitals.
+            assert_eq!(sign(Some("Camper"), "uid-camper").as_deref(), Some("Camper"), "the slug, ignoring case");
+            assert_eq!(sign(Some("agent5"), "uid-camper"), None, "another agent's name");
+            assert_eq!(sign(Some("camper"), ""), None, "no caller: a forwarded hop, a script");
+            assert_eq!(sign(Some("camper"), "uid-nobody"), None);
+            assert_eq!(sign(None, "uid-camper"), None);
+            // A hop that set audit_source_uid (a verified channel v2 hop) is
+            // still not this request's caller.
+            let mut hop = req(Some("camper"), "uid-camper");
+            hop.audit_source_uid = "uid-camper".into();
+            assert_eq!(wan_signer(&store, "", &hop), None);
+        }
+
+        #[test]
+        fn a_name_two_rows_fold_to_has_no_owner() {
+            // Rows created before slugs collided case-insensitively: both
+            // would hold the same folded keys, so neither is signed for.
+            let store = store_with_camper();
+            {
+                let conn = store.conn().lock().unwrap();
+                conn.execute_batch(
+                    "INSERT INTO db_agents (id, name, slug, provider, created_at) VALUES ('uid-alias', 'Camper', 'Camper', 'claude', 0);",
+                )
+                .unwrap();
+            }
+            assert!(!uid_owns_name(&store, "uid-camper", "camper"));
+            assert!(!uid_owns_name(&store, "uid-alias", "Camper"));
+            assert_eq!(wan_signer(&store, "uid-alias", &req(Some("Camper"), "uid-alias")), None);
+            assert_eq!(wan_signer(&store, "uid-camper", &req(Some("camper"), "uid-camper")), None);
+        }
+
+        /// Two rows whose names differ only in case share the folded keys, so
+        /// neither gets them in its `.mcp.json`.
+        #[test]
+        fn inject_jekt_signing_keys_writes_none_when_two_rows_fold_to_the_name() {
+            let store = crate::backend::storage::store::Store::open_in_memory().unwrap();
+            {
+                let conn = store.conn().lock().unwrap();
+                conn.execute_batch(
+                    "INSERT INTO db_agents (id, name, slug, provider, created_at) VALUES ('a', 'victim', 'victim', 'claude', 0);
+                     INSERT INTO db_agents (id, name, slug, provider, created_at) VALUES ('b', 'Victim', 'Victim', 'claude', 0);",
+                )
+                .unwrap();
+            }
+            let content = serde_json::to_string(&serde_json::json!({
+                "mcpServers": { "agentmux": { "env": { "AGENTMUX_AGENT_ID": "Victim", "AGENTMUX_LAN_KEY": "old" } } }
+            }))
+            .unwrap();
+            let rewritten = crate::backend::agent_config::inject_jekt_signing_keys_into_mcp_json(&content, &store, "Victim").expect("the old key removed");
+            let env = serde_json::from_str::<serde_json::Value>(&rewritten).unwrap()["mcpServers"]["agentmux"]["env"].clone();
+            assert!(env.get("AGENTMUX_JEKT_KEY").is_none() && env.get("AGENTMUX_LAN_KEY").is_none(), "{env}");
+            assert!(store.agent_jekt_key_load("victim").unwrap().is_none(), "nothing minted for the name");
+        }
+
+        #[test]
+        fn a_new_slug_differing_only_in_case_gets_a_suffix() {
+            let store = store_with_camper();
+            let mut def = crate::backend::storage::agents::test_agent_def("uid-v", "Camper", "claude", "agent", 1, "");
+            def.slug = "Camper".into();
+            store.agent_def_insert(&mut def).unwrap();
+            assert_eq!(def.slug, "Camper-2", "not a second owner of camper's keys");
+            assert!(uid_owns_name(&store, "uid-camper", "Camper"));
         }
     }
 

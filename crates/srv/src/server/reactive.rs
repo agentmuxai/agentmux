@@ -1113,7 +1113,7 @@ pub(crate) async fn deliver(
                 return held;
             }
         }
-        if let Some(body) = try_cloud_relay(&state, &req).await {
+        if let Some(body) = try_cloud_relay(&state, &req, caller_uid).await {
             return body;
         }
         // 5. No tier knew the target: hold it for the agent's return, when
@@ -1413,7 +1413,7 @@ impl HoldReason {
 /// here therefore means "handed to the relay" — which is the strongest claim
 /// any WAN tier can make, and is what `DELIVERY=wan` on the echoed marker
 /// already tells the sender.
-async fn try_cloud_relay(state: &AppState, req: &InjectionRequest) -> Option<serde_json::Value> {
+async fn try_cloud_relay(state: &AppState, req: &InjectionRequest, caller_uid: &str) -> Option<serde_json::Value> {
     // Never re-relay something that ARRIVED over the cloud. An agent unknown to
     // every instance would otherwise bounce between the relay and each
     // subscriber indefinitely, re-queueing on every hop. `forward_hops` cannot
@@ -1448,7 +1448,7 @@ async fn try_cloud_relay(state: &AppState, req: &InjectionRequest) -> Option<ser
         .map(|sub| crate::muxbus::wan_publish::directory_id(&crate::muxbus::relay::rest_base_url(), sub));
     let (carried, unsigned_reason) = match crate::muxbus::relay::wan_sign_at_origin(
         req,
-        super::actor::wan_signer(&state.mstore, req),
+        super::actor::wan_signer(&state.mstore, caller_uid, req),
         state.mstore.wan_identity().as_deref(),
         directory.as_deref(),
         &crate::backend::reactive::registry::local_channel_id(),
