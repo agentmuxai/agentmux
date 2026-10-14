@@ -749,12 +749,12 @@ describe("ToolOverlayLog — on the shared follow controller", () => {
     });
     const lines = () => info.mock.calls.filter((c) => c[0] === "[scroll-follow]").map((c) => c.slice(1).join(" "));
 
-    function mount(node: () => ToolNode, flag: boolean) {
+    function mount(node: () => ToolNode, flag: boolean, initial = { scrollHeight: 1000, clientHeight: 200 }) {
         followFlag = flag;
         vi.stubGlobal("ResizeObserver", FakeResizeObserver);
         const { container } = render(() => <ToolOverlayLog node={node()} />);
         const el = container.querySelector(".agent-tool-overlay-log") as HTMLElement;
-        const g = { scrollHeight: 1000, clientHeight: 200 };
+        const g = { ...initial };
         let top = 0;
         Object.defineProperty(el, "scrollHeight", { configurable: true, get: () => g.scrollHeight });
         Object.defineProperty(el, "clientHeight", { configurable: true, get: () => g.clientHeight });
@@ -813,6 +813,31 @@ describe("ToolOverlayLog — on the shared follow controller", () => {
         fireResize();
         expect(top()).toBe(1000);
         expect(lines()).toEqual(["tool=c-write detached→following cause=streaming-started"]);
+    });
+
+    // The box mounts while the tool is still running, on a short placeholder
+    // with nothing to scroll. That must not re-follow it (DETACHED + no
+    // overflow), or the result would land pinned to the bottom (#4891).
+    it.each([false, true])("a document preview that mounts before its result still opens at the top (flag=%s)", (flag) => {
+        const readNode = (done: boolean): ToolNode => ({
+            type: "tool",
+            id: "tc-read2",
+            tool: "Read",
+            params: { file_path: "/tmp/a.ts" },
+            status: done ? "success" : "running",
+            collapsed: false,
+            summary: "Read /tmp/a.ts",
+            ...(done ? { result: { content: "const a = 1;\nconst b = 2;" } as any } : {}),
+        });
+        const [node, setNode] = createSignal(readNode(false));
+        const { g, top } = mount(node, flag, { scrollHeight: 40, clientHeight: 200 });
+        fireResize(); // the placeholder settles: no overflow
+        expect(top()).toBe(0);
+        setNode(readNode(true));
+        g.scrollHeight = 1200; // the result lands and overflows
+        fireResize();
+        expect(top()).toBe(0);
+        expect(lines()).toEqual([]);
     });
 });
 
