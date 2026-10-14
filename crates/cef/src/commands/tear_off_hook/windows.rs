@@ -676,37 +676,27 @@ pub(crate) fn window_label_at(
     }
     let root = unsafe { GetAncestor(hwnd, GA_ROOT) };
     let root = if root.is_null() { hwnd } else { root };
-    label_for_top_level(state, browsers, root).filter(|label| is_instance_label(label))
+    label_for_top_level(state, browsers, root)
 }
 
-/// The label of the browser whose top-level window is `root`, from the live
-/// window under the cursor back to its owner. `BrowserHost::window_handle()`
-/// alone can't answer this: in CEF Views mode it is often null, and
-/// otherwise a child of the top-level window, so comparing it with the root
-/// never matched and every release reported no target. Only window labels
-/// count: a browser pane's browser sits inside its window, so its host
-/// handle has the same root.
+/// The label of the user window whose top-level window is `root`, decided by
+/// its registered `BrowserKind`, never its label: a floating pane, a pool
+/// window, a pane or a popup under the cursor is no target (#2873: a pane
+/// dropped over a floater went to the floater, which ignored it).
 ///
-/// A cached HWND can be stale, and Windows reuses a destroyed window's HWND
-/// value, so a stale entry can equal a live window. Each step guards that:
+/// `BrowserHost::window_handle()` alone can't answer this: in CEF Views mode
+/// it is often null, and otherwise a child of the top-level window. A cached
+/// HWND can be stale, and Windows reuses a destroyed window's HWND value, so
+/// each step guards that:
 /// 1. `root` must be a visible CEF Views top-level window of this process,
 ///    so not another app's window, a menu or a tooltip a reused value could
 ///    land on.
-/// 2. A window's own host handle, when CEF gives one, says for certain.
-/// 3. Otherwise `window_hwnds`, bound at Views window creation (app/mod.rs)
-///    and evicted on close (client/lifecycle.rs), trusted only when exactly
-///    one window label is cached for `root` and that label's browser doesn't
-///    place itself in another window. Two labels on one HWND means one is
-///    stale and nothing says which: no target. Past that there is no
-///    identity to check off the UI thread (a Views window's own handle is
-///    only reachable there); the rest of the host trusts `window_hwnds` the
-///    same way.
-///    A promoted pool window serving the primary keeps its `window-pool-*`
-///    entry, while its renderer registered "main" and has no backend window
-///    of its own under the pool label; that is "main", the same rule the
-///    redock resolver uses (commands/window/motion.rs). It doesn't consult
-///    `window_hwnds["main"]`, whose value could be stale or reused; only the
-///    live main browser's own host handle can veto it.
+/// 2. A user window's own host handle, when CEF gives one, says for certain.
+///    (A floater's host handle can't: its root is the window that owns it.)
+/// 3. Otherwise the reducer's HWND registry (`AppState::drop_target_at`):
+///    exactly one label bound to `root`, and its browser doesn't place itself
+///    in another window. That also names "main" for a window serving the
+///    primary under another label (`reducer::window_hwnds`).
 #[cfg(target_os = "windows")]
 fn label_for_top_level(
     state: &crate::state::AppState,
@@ -717,34 +707,21 @@ fn label_for_top_level(
         return None;
     }
 
+    let user_windows = state.user_window_labels();
     for (label, browser) in browsers.iter() {
-        if is_instance_label(label) && host_top_level(browser) == Some(root) {
+        if user_windows.contains(label) && host_top_level(browser) == Some(root) {
             return Some(label.clone());
         }
     }
 
-    let cached = cached_window_labels(state, root);
-    let [label] = cached.as_slice() else {
+    let crate::reducer::DropTarget::Window(label) = state.drop_target_at(root as isize) else {
         return None;
     };
-    if let Some(browser) = browsers.get(label) {
-        // Its host handle names a different window: this entry is stale.
-        return match host_top_level(browser) {
-            Some(_) => None,
-            None => Some(label.clone()),
-        };
+    match browsers.get(&label).and_then(host_top_level) {
+        // Its host handle names a different window: the binding is stale.
+        Some(elsewhere) if elsewhere != root => None,
+        _ => Some(label),
     }
-    // A pool window serving the primary: its renderer registered "main",
-    // so the pool label has no backend window of its own. The live main
-    // browser vetoes it when its own host handle places main elsewhere.
-    if label.starts_with("window-pool-") && state.backend_window_id(label).is_none() {
-        let main = browsers.get("main")?;
-        return match host_top_level(main) {
-            Some(elsewhere) if elsewhere != root => None,
-            _ => Some("main".to_string()),
-        };
-    }
-    None
 }
 
 /// A visible CEF Views top-level window (class `Chrome_WidgetWin_*`) of
@@ -777,21 +754,4 @@ fn host_top_level(browser: &cef::Browser) -> Option<*mut std::ffi::c_void> {
     }
     let top = unsafe { GetAncestor(h as _, GA_ROOT) } as *mut std::ffi::c_void;
     Some(if top.is_null() { h } else { top })
-}
-
-/// The window labels `window_hwnds` has cached for `hwnd`.
-#[cfg(target_os = "windows")]
-fn cached_window_labels(state: &crate::state::AppState, hwnd: *mut std::ffi::c_void) -> Vec<String> {
-    state
-        .window_hwnds
-        .lock()
-        .iter()
-        .filter(|(l, &h)| h == hwnd as isize && is_instance_label(l))
-        .map(|(l, _)| l.clone())
-        .collect()
-}
-
-#[cfg(target_os = "windows")]
-fn is_instance_label(label: &str) -> bool {
-    label == "main" || label.starts_with("window-")
 }

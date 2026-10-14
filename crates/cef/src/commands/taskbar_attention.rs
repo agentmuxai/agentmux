@@ -33,7 +33,7 @@ pub fn set_taskbar_attention(state: &Arc<AppState>, args: &serde_json::Value) ->
     let input_count = args.get("input_count").and_then(|v| v.as_u64()).unwrap_or(count);
     #[cfg(target_os = "windows")]
     {
-        let hwnd = state.window_hwnds.lock().get(label).copied();
+        let hwnd = state.window_hwnd(label);
         match hwnd {
             Some(h) => win::post(h, count.min(99) as u32, input_count.min(99) as u32),
             None => tracing::debug!(label, "set_taskbar_attention: no HWND for label"),

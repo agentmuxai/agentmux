@@ -183,7 +183,7 @@ pub fn open_floating_pane_window(
             let direct = parsed
                 .source_window_label
                 .as_deref()
-                .and_then(|lbl| state.window_hwnds.lock().get(lbl).copied())
+                .and_then(|lbl| state.window_hwnd(lbl))
                 .unwrap_or(0);
             if direct != 0 {
                 direct
@@ -196,7 +196,7 @@ pub fn open_floating_pane_window(
                     .map(|m| m.label.clone());
                 let fallback = fallback_label
                     .as_deref()
-                    .and_then(|lbl| state.window_hwnds.lock().get(lbl).copied())
+                    .and_then(|lbl| state.window_hwnd(lbl))
                     .unwrap_or(0);
                 if fallback == 0 {
                     tracing::warn!(
@@ -237,7 +237,7 @@ pub fn open_floating_pane_window(
                 if let Some(src_hwnd) = parsed
                     .source_window_label
                     .as_deref()
-                    .and_then(|lbl| state.window_hwnds.lock().get(lbl).copied())
+                    .and_then(|lbl| state.window_hwnd(lbl))
                     .filter(|&h| h != 0)
                 {
                     crate::ui_tasks::post_resize_mother_window_win32(state, src_hwnd, new_w_dip);
@@ -263,7 +263,7 @@ pub fn open_floating_pane_window(
             if let Some(src_hwnd) = parsed
                 .source_window_label
                 .as_deref()
-                .and_then(|lbl| state.window_hwnds.lock().get(lbl).copied())
+                .and_then(|lbl| state.window_hwnd(lbl))
                 .filter(|&h| h != 0)
             {
                 crate::ui_tasks::post_resize_mother_window_win32(state, src_hwnd, new_w_dip);

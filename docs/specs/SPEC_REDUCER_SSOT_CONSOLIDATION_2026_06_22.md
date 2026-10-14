@@ -1,6 +1,6 @@
 # SPEC — Reducer single-source-of-truth (SSOT) consolidation
 
-- **Status:** active — L1 (#2083), L2 (#2080), L4 (#1703), L7 (deleted in #4284), L8 (#2081) and the window-count resync (#1701) done; L3, R5, R6 and srv-events gap handling open. Verified against code 2026-10-14 ([triage](../analysis/REPORT_REDUCER_STACK_TRIAGE_2026_10_13.md)).
+- **Status:** active — L1 (#2083), L2 (#2080), L4 (#1703), L7 (deleted in #4284), L8 (#2081), the window-count resync (#1701), L3 (#4864), and R5 + R6 (#4877) done; srv-events gap handling open. Verified against code 2026-10-14 ([triage](../analysis/REPORT_REDUCER_STACK_TRIAGE_2026_10_13.md)).
 - **Date:** 2026-06-22
 - **Author:** AgentA
 - **Origin:** the stale/desynced window-count bug (`SPEC_WINDOW_COUNT_STALE_ON_VIEWS_CLOSE_2026_06_22.md`)
@@ -168,6 +168,13 @@ once the host self-reconciles (do NOT re-propose launcher quit authority — it 
 regression root cause #1.
 → Owner: a reducer holding `label ↔ outer-HWND ↔ role` so the walk looks role up by HWND.
 
+*Done 2026-10-14 (this PR):* `reducer/window_hwnds.rs` classifies the window bound to an HWND by its
+registered `BrowserKind` (`classify_drop_target` → `Window` / `Floater` / `Untracked` / `Nothing`).
+Both hit tests use it: the redock Z-order walk (`motion.rs`) and the cross-window drop / tab tear-off
+lookup (`tear_off_hook/windows.rs`, `window_label_at`). No `window-pool-` / `floating-` / `main|window-`
+prefix test is left in either. The "pool window serving the primary is `main`" rule became typed:
+a user window with no backend window of its own, while `main` has a backend window but no frame.
+
 **R6 🟠 — `window_hwnds` HWND cache is an uncoupled `Mutex<HashMap>` on `AppState`.**
 `AppState.window_hwnds: Mutex<HashMap<String,isize>>` (state.rs:822), authoritative for window
 resolution (consulted first, lifecycle.rs:260-281), populated by `capture_hwnd_for_label`
@@ -181,6 +188,13 @@ separate locks → a promoted window's HWND can cache under the wrong label.
 `pane_window_states` reducer, mod.rs:142, already proves the pattern). *Caveat: the cache's EXISTENCE
 is defensible (CEF Views hides the main HWND; `host.window_handle()` returns an inner WS_CHILD,
 lifecycle.rs:442-454). The violation is that it is authoritative AND uncoupled, not that it exists.*
+
+*Done 2026-10-14 (this PR):* the map is `HostState.window_hwnds`, written only by `BindWindowHwnd`
+(`replace: false` makes `capture_hwnd_for_label`'s check-then-insert one step), `EvictWindowHwnd`, and
+`RelabelBrowser`, which now moves the HWND with the browser under one lock. `AppState` reads it through
+`window_hwnd` / `label_for_hwnd` / `drop_target_at`. One leftover: `commands/window_pool.rs` still calls
+`state.window_hwnds.lock()` (it was being changed by another open PR), served by a shim whose writes go
+through the same reducer arms; convert those calls and delete the shim once that PR lands.
 
 ### Track 3 — Reliable launcher→renderer delivery
 

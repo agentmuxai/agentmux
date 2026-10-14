@@ -111,7 +111,7 @@ wrap_window_delegate! {
                 window.set_bounds(Some(&Rect { x, y, width: w, height: h }));
             }
 
-            // Windows: bind (label, HWND) into state.window_hwnds right here,
+            // Windows: bind (label, HWND) into the HWND registry right here,
             // at Views window-creation time — CefWindow::GetWindowHandle() is
             // reliable at this exact synchronous callback (BrowserHost::
             // window_handle(), used by capture_hwnd_for_label's fast path,
@@ -146,7 +146,7 @@ wrap_window_delegate! {
             if let Some((state, label)) = self.window_registration.as_ref() {
                 let raw_hwnd = window.window_handle().0 as *mut std::ffi::c_void;
                 if !raw_hwnd.is_null() {
-                    state.window_hwnds.lock().insert(label.clone(), raw_hwnd as isize);
+                    state.bind_window_hwnd(label, raw_hwnd as isize);
                 }
 
                 // Pool windows additionally need the taskbar-hiding /
