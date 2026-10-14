@@ -300,38 +300,8 @@ pub(crate) async fn handle_move_tab_to_workspace(state: &AppState, call: &WebCal
     if source_ws_id == dest_ws_id {
         return WebReturnType::success_empty();
     }
-    // Last-tab guard mirrors wcore::move_tab_to_workspace —
-    // the reducer's MoveTab doesn't enforce this (intentionally,
-    // for sagas that legitimately drain a workspace to delete
-    // it). Keep the guard at the RPC layer where the policy
-    // belongs. Reads SQLite rather than reducer state — as of
-    // SPEC_864 Phase 5 every tab-set mutation (CreateTab, MoveTab,
-    // and the PromoteBlockToTab/TearOffBlock/TearOffTab sagas) is
-    // reducer-routed, so the two are expected to agree; SQLite is
-    // just the existing read path here, not a staleness workaround
-    // (codex P1 round-2 #621, which motivated it, predates that).
-    match store.get::<Workspace>(&source_ws_id) {
-        Ok(Some(src_ws)) => {
-            let total_tabs = src_ws.tabids.len() + src_ws.pinnedtabids.len();
-            if total_tabs <= 1 {
-                return WebReturnType::error(
-                    "cannot move last tab out of workspace".to_string(),
-                );
-            }
-        }
-        Ok(None) => {
-            return WebReturnType::error(format!(
-                "MoveTabToWorkspace: source workspace not found: {}",
-                source_ws_id
-            ));
-        }
-        Err(e) => {
-            return WebReturnType::error(format!(
-                "MoveTabToWorkspace: workspace read failed: {}",
-                e
-            ));
-        }
-    }
+    // The last-tab guard is the reducer's (`allow_empty_source: false`),
+    // so a concurrent move can't slip past a stale count.
     let dst_index = insert_index.unwrap_or(u32::MAX);
     let events = dispatch_to_reducer(
         state,
@@ -340,6 +310,7 @@ pub(crate) async fn handle_move_tab_to_workspace(state: &AppState, call: &WebCal
             src_workspace_id: source_ws_id.clone(),
             dst_workspace_id: dest_ws_id.clone(),
             dst_index,
+            allow_empty_source: false,
         },
     )
     .await;
@@ -347,6 +318,9 @@ pub(crate) async fn handle_move_tab_to_workspace(state: &AppState, call: &WebCal
         agentmux_common::ipc::Event::Error { message, .. } => Some(message.clone()),
         _ => None,
     }) {
+        if err_msg.contains(crate::reducer::MOVE_TAB_LAST_TAB_ERROR) {
+            return WebReturnType::error(crate::reducer::MOVE_TAB_LAST_TAB_ERROR.to_string());
+        }
         return WebReturnType::error(err_msg);
     }
     for ev in &events {

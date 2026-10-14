@@ -44,8 +44,11 @@ pub(super) fn get_object_by_oref(store: &Store, oref_str: &str) -> Result<serde_
 
 /// Update a wave object by replacing it wholesale in the store.
 /// The incoming value must have `otype` and `oid` fields.
-/// Matches Go's ObjectService.UpdateObject behavior.
 /// Returns (otype, oid, updated_value_with_new_version) on success.
+///
+/// Only for objects the srv reducer doesn't own: a client row, or a layout
+/// row no tab references. Workspace/tab/block/window rows are refused —
+/// a whole-row write would overwrite reducer-owned fields behind its back.
 pub(super) fn update_object(
     store: &Store,
     mut value: serde_json::Value,
@@ -61,9 +64,14 @@ pub(super) fn update_object(
         .ok_or_else(|| "UpdateObject: missing oid field".to_string())?
         .to_string();
 
-    // Validate the otype is known
     match otype.as_str() {
-        OTYPE_CLIENT | OTYPE_WINDOW | OTYPE_WORKSPACE | OTYPE_TAB | OTYPE_LAYOUT | OTYPE_BLOCK => {}
+        OTYPE_CLIENT | OTYPE_LAYOUT => {}
+        OTYPE_WINDOW | OTYPE_WORKSPACE | OTYPE_TAB | OTYPE_BLOCK => {
+            return Err(format!(
+                "UpdateObject: {otype} objects are owned by the srv reducer; \
+                 use UpdateObjectMeta or the {otype}'s own RPCs"
+            ))
+        }
         _ => return Err(format!("UpdateObject: unsupported otype: {}", otype)),
     }
 

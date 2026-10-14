@@ -619,6 +619,7 @@ async fn crash_recovery_mid_step_failure_compensates_succeeded_prefix() {
         src_workspace_id: "ws-bad".into(),
         dst_workspace_id: "ws-also-bad".into(),
         dst_index: 0,
+        allow_empty_source: false,
     };
     saga_log.start_step(7777, 1, "MoveTab", &move_cmd).unwrap();
     saga_log.fail_step(7777, 1, "reducer rejected").unwrap();
