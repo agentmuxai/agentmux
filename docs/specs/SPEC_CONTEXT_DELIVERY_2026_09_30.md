@@ -1,7 +1,7 @@
 # SPEC: Context deliveries — what the agent was given, one item at a time
 
-**Status:** active — CD1 (#4037), CD2a (#4041) and CD2b (#4130) implemented; startup-file items implemented under the launch-context spec (#4129, #4131); CD3 proposed (awaits the owner's decision on storing bodies); CD4 moved to the resume-phase spec (§6); CD5 narrowed to the narration tag. B1 (#4901), B2 (#4909), C1 (#4915), C3 (#4919) and C2 fixed; checked live on 2026-10-14 (§5.2), which found C1–C3 (§9).
-**Date:** 2026-09-30. **Revised:** 2026-10-14 (§0.1, §1.3, the §2 note, §3–§9; live results §5.2).
+**Status:** active — CD1 (#4037), CD2a (#4041) and CD2b (#4130) implemented; startup-file items implemented under the launch-context spec (#4129, #4131); CD3 proposed (awaits the owner's decision on storing bodies); CD4 moved to the resume-phase spec (§6); CD5 narrowed to the narration tag. B1 (#4901), B2 (#4909), C1 (#4915), C3 (#4919) and C2 (#4921) fixed and seen live (§5.3); the live checks found C1–C4 (§9), and C4 is with the resume-phase spec.
+**Date:** 2026-09-30. **Revised:** 2026-10-14 (§0.1, §1.3, the §2 note, §3–§9; live results §5.2, §5.3).
 **Verified against:** `agentmux` `main` @ `5c0d603ec` (2026-10-14), by reading code,
 and #4888 at `40623c1ba` for what it changes (§1.3, §3.5, §9). §2 is the
 2026-09-30 baseline: its line numbers refer to the tree before the October
@@ -577,6 +577,19 @@ afterwards. Details: #4888, issuecomment-6174342680.
 The My Agents tile and the Swarm row showed delivered text as the agent's
 last prompt (C3).
 
+### 5.3 Second live run: the fixes, and a real account switch (2026-10-14)
+
+A dev build at `880e0556f` (main with #4904, #4913, #4915, #4919, plus
+#4921), Windows, the same CDP method, a throwaway agent with two linked
+Claude accounts, deleted afterwards.
+
+| Check | Result |
+|---|---|
+| C1 | `/compact`'s output is a "Claude Code command output" card; no user message. |
+| C2 | Order after a manual `/compact`: Context compacted → summary card → command card → the hook's memory card → catch-up reply. srv logged the card parked until its boundary (`parked: true`). |
+| C3 | The My Agents tile shows "/compact", the last thing typed, not the summary that followed it. |
+| Account switch (agent on account A, which had hit its weekly limit; switched to B from the composer's account menu, pane idle) | srv: resume gate refused, record carried, `fresh` outcome with `continued: true`. But **no catch-up turn and no card**; the deferred memory fallback fired only after the next typed message ended (C4). |
+
 ## 6. Phases
 
 | Phase | What ships | State |
@@ -588,7 +601,7 @@ last prompt (C3).
 | **CD3** | Bodies on expand (§3.4 step 4): storage, RPC, expanded rows. | proposed; needs the owner's decision (§7 Q1) |
 | ~~CD4~~ | Continuation-packet card. | **moved** to the resume-phase spec, Phase 3 (§3.5) |
 | **CD5** | The narration tag "ambient" → "AgentMux" (§1.3), and the ambient framework spec's note (§8). The reason and title renames moved to the resume-phase spec, Phase 3. | proposed |
-| **CD6** | Fix the card bugs in §9 that this spec owns, add the missing tests (§5), run the live check (§5.1). | B1, B2, C1, C2, C3 fixed; live check run (§5.2); the fixes still to be seen live |
+| **CD6** | Fix the card bugs in §9 that this spec owns, add the missing tests (§5), run the live check (§5.1). | B1, B2, C1, C2 (#4921), C3 fixed and seen live (§5.3); C4 with the resume-phase spec |
 
 **Every phase ships its docs with it** (§8). CD2a and CD2b did not: the
 public memory page still describes the old one-line notice. That is owed
@@ -654,4 +667,5 @@ its author (agreed on #4888).
 | B4 | Another block's lines in the shared transcript zone can trigger this pane's fallback (`fresh` outcome). | resume-phase spec, Phase 1 (`foreign`, recency) |
 | **C1** (fixed, this PR) | **The CLI's `<local-command-stdout>` frame showed as a user message.** After `/compact` (and other local slash commands) Claude Code echoes a plain-string user frame wrapped in `<local-command-stdout>…</local-command-stdout>`, here "Compacted PreCompact [agentmux-bashwrap precompact --trigger=manual] completed successfully". Nothing recognised the tag, so the translator made it a `user_message`, live and on replay. Now `commandOutputNode` (`context-delivery.ts`) turns it into a one-item card, "Claude Code command output", with an excerpt that opens to the text, in `interceptFrame` for live and replay alike; an empty one is dropped. A text card also stops `supersededCard`, so a later new-session card never replaces it. | this spec, CD6 |
 | **C2** (fixed, this PR) | **The memory card's place depended on which path delivered.** The hook's card is written when its parts are acknowledged, which can be before the stream reaches the compaction boundary, so it lands above "Context compacted". The fallback's card lands after the summary card. Now srv parks a compaction's hook notice that finishes before the block's stdout shows the boundary (`park_compaction_notice`), and the stdout reader writes it just ahead of the first line after the boundary that is neither `user` nor `system` (`take_parked_notices`): after the summary and the command's output, where the fallback's card lands too. A notice whose boundary never comes is written after 30 s. | this spec, CD6 (handed over on #4888) |
+| **C4** | **A real account switch leaves the pane with no catch-up turn and no card** (§5.3). The pane was still counted busy from the interrupted turn, so the outcome took the memory-only branch, deferred to a `session_end` that never came. The new session's hook also wrote no card (an LC3 partless delivery, which the first session did get). | resume-phase spec (Agent1, fix in progress; details on #4904) |
 | **C3** (fixed, #4919) | **Readers outside the pane took deliveries for the user's prompt.** The My Agents tile showed Claude Code's compaction summary ("This session is being continued…") as the last prompt, and the Swarm row showed the "# Session Context" startup message as the activity line. §3.6 covered the digest, titles and ghost text, but not these two. Now the tile's reader (`history_summary.rs`, `user_prompt_in_line`) skips `isSynthetic` user frames and the summary's opening words, and the pane (`useAgentActivitySummary.ts`) neither stores the startup message as `term:last_prompt` nor sends it to the title model. | this spec, CD6 |
