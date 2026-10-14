@@ -633,6 +633,8 @@ export interface ContextDeliveryNode {
     timestamp: number;
     /** Memory deliveries: how large Personal Memory is against the context window. */
     sizeBand?: "low" | "mid" | "high" | "critical";
+    /** A fallback re-delivery's card (CD2b): it stands for its hidden message. */
+    fallback?: boolean;
 }
 
 /**
