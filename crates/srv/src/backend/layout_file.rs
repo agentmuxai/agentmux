@@ -523,6 +523,12 @@ fn view_from_block(store: &Store, meta: &MetaMapType, ctx: &ExportContext, warni
             if let Some(kind) = meta_str(meta, "sysinfo:type") {
                 config.insert("sysinfo_type".into(), Value::String(kind.to_string()));
             }
+            if let Some(area) = meta_str(meta, "sysinfo:focus") {
+                config.insert("sysinfo_focus".into(), Value::String(area.to_string()));
+            }
+            if let Some(secs) = meta.get("graph:windowsecs").and_then(Value::as_u64).filter(|&s| s > 0) {
+                config.insert("window_secs".into(), Value::from(secs));
+            }
         }
         "connectors" | "memory" => {
             if let Some(section) = meta_str(meta, &format!("{view_type}:section")) {
@@ -954,6 +960,14 @@ impl PlanBuilder<'_> {
                 meta.insert("view".into(), "sysinfo".into());
                 if let Some(k) = cfg_str(view, "sysinfo_type") {
                     meta.insert("sysinfo:type".into(), Value::String(k.to_string()));
+                }
+                if let Some(area) = cfg_str(view, "sysinfo_focus") {
+                    meta.insert("sysinfo:focus".into(), Value::String(area.to_string()));
+                }
+                // A window from a file is a whole number of seconds, at most a day.
+                let secs = view.config.get("window_secs").and_then(Value::as_u64);
+                if let Some(secs) = secs.filter(|&s| s > 0 && s <= 86_400) {
+                    meta.insert("graph:windowsecs".into(), Value::from(secs));
                 }
                 self.summary.push("System info".to_string());
             }

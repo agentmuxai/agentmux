@@ -2,21 +2,22 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { atoms } from "@/store/global";
 import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
-import * as util from "@/util/util";
-import { createMemo } from "solid-js";
+import { atoms } from "@/store/global";
 import type { SignalAtom } from "@/util/util";
+import * as util from "@/util/util";
 import { createSignalAtom } from "@/util/util";
+import { createMemo } from "solid-js";
 
-import { getConnStatusAtom } from "@/store/global";
 import { WpsEvent } from "@/app/store/mps-events";
+import { getConnStatusAtom } from "@/store/global";
 
-import { DataItem, DefaultNumPoints, DefaultPlotMeta, PlotTypes } from "./sysinfo-types";
-import { GapBackfiller } from "./sysinfo-backfill";
-import { convertTimeSeriesToDataItem, getGapThresholdMs } from "./sysinfo-util";
-import type { ConnStatus } from "@/types/rpc/ConnStatus";
 import { readMuxEventHistory } from "@/app/store/mps-history";
+import type { ConnStatus } from "@/types/rpc/ConnStatus";
+import { GapBackfiller } from "./sysinfo-backfill";
+import { FOCUS_CHOICES, type FocusArea, MAX_WINDOW_POINTS, toFocusArea } from "./sysinfo-overview-data";
+import { DataItem, DefaultNumPoints, DefaultPlotMeta, DefaultPlotType, PlotTypes } from "./sysinfo-types";
+import { convertTimeSeriesToDataItem, getGapThresholdMs } from "./sysinfo-util";
 
 // ---------------------------------------------------------------------------
 // Sample ring-buffer reducer
@@ -240,6 +241,16 @@ class SysinfoViewModel {
     dataAtom: SignalAtom<Array<DataItem>>;
     loadingAtom: SignalAtom<boolean>;
     numPoints: () => number;
+    /** The window chosen in this pane this session, in seconds, until its meta catches up. */
+    private windowChoice: SignalAtom<number | null>;
+    /** The window shown now, in seconds. */
+    windowSecs: () => number;
+    /** Counts history loads, so one overtaken by a newer load is dropped. */
+    private loadGeneration = 0;
+    /** The Overview's area shown alone (`sysinfo:focus`), or `null` for every area. */
+    focus: () => FocusArea | null;
+    /** The area chosen in this pane this session, until its meta catches up; `undefined` before any. */
+    private focusChoice: SignalAtom<FocusArea | null | undefined>;
     metrics: () => string[];
     connection: () => string;
     manageConnection: () => boolean;
@@ -319,26 +330,40 @@ class SysinfoViewModel {
         this.meta = ctx.meta;
 
         this.dataAtom = createSignalAtom<DataItem[]>([]);
+        this.windowChoice = createSignalAtom<number | null>(null);
+        this.focusChoice = createSignalAtom<FocusArea | null | undefined>(undefined);
         this.loadingAtom = createSignalAtom(true);
         this.plotMetaAtom = createSignalAtom(new Map(Object.entries(DefaultPlotMeta)));
         this.manageConnection = createMemo(() => true);
 
-        this.numPoints = createMemo(() => {
+        // Read by the window below.
+        this.intervalSecsAtom = createMemo(() => {
             const fullConfig = atoms.fullConfigAtom();
-            const settingsNumPoints = fullConfig?.settings?.["telemetry:numpoints"];
-            if (settingsNumPoints != null && settingsNumPoints > 0) {
-                return Math.max(30, Math.min(1024, settingsNumPoints));
-            }
-            const blockData = { meta: this.meta() };
-            const metaNumPoints = blockData?.meta?.["graph:numpoints"];
-            if (metaNumPoints == null || metaNumPoints <= 0) return DefaultNumPoints;
-            return metaNumPoints;
+            const val = fullConfig?.settings?.["telemetry:interval"];
+            if (val == null || val <= 0) return 1.0;
+            return val as number;
+        });
+
+        // The window: the time chosen in this pane (its window control, saved in
+        // its meta as seconds, so it spans the same time at any sample interval),
+        // else a sample count saved before there was a window control, else the
+        // global setting, else the default. A choice takes effect at once,
+        // before the meta write comes back.
+        this.numPoints = createMemo(() => {
+            const clamp = (n: number) => Math.max(30, Math.min(MAX_WINDOW_POINTS, n));
+            const secs = this.windowChoice() ?? this.meta()?.["graph:windowsecs"];
+            if (secs != null && secs > 0) return clamp(Math.round(secs / this.intervalSecsAtom()));
+            const chosen = this.meta()?.["graph:numpoints"];
+            if (chosen != null && chosen > 0) return clamp(chosen);
+            const settingsNumPoints = atoms.fullConfigAtom()?.settings?.["telemetry:numpoints"];
+            if (settingsNumPoints != null && settingsNumPoints > 0) return clamp(settingsNumPoints);
+            return DefaultNumPoints;
         });
 
         this.plotTypeSelectedAtom = createMemo(() => {
             const blockData = { meta: this.meta() };
             const plotType = blockData?.meta?.["sysinfo:type"];
-            if (plotType == null || typeof plotType != "string") return "CPU";
+            if (plotType == null || typeof plotType != "string") return DefaultPlotType;
             return plotType;
         });
 
@@ -356,9 +381,21 @@ class SysinfoViewModel {
 
         this.viewIcon = createMemo(() => "chart-line");
 
-        this.viewName = createMemo(() => this.plotTypeSelectedAtom());
+        this.focus = createMemo(() => {
+            const chosen = this.focusChoice();
+            return chosen !== undefined ? chosen : toFocusArea(this.meta()?.["sysinfo:focus"]);
+        });
+
+        // An Overview showing one area is named for it ("CPU", "Memory").
+        this.viewName = createMemo(() => {
+            const plotType = this.plotTypeSelectedAtom();
+            const area = plotType === DefaultPlotType ? this.focus() : null;
+            return area ? (FOCUS_CHOICES.find((c) => c.value === area)?.label ?? plotType) : plotType;
+        });
 
         this.viewText = createMemo(() => "");
+
+        this.windowSecs = createMemo(() => Math.round(this.numPoints() * this.intervalSecsAtom()));
 
         this.connection = createMemo(() => {
             const blockData = { meta: this.meta() };
@@ -374,14 +411,20 @@ class SysinfoViewModel {
             return connAtom();
         });
 
-        this.intervalSecsAtom = createMemo(() => {
-            const fullConfig = atoms.fullConfigAtom();
-            const val = fullConfig?.settings?.["telemetry:interval"];
-            if (val == null || val <= 0) return 1.0;
-            return val as number;
-        });
-
         this.loadInitialData();
+    }
+
+    /** Show the last `secs` seconds in this pane: saved in its meta, and its history read again to fill the new window. */
+    setWindow(secs: number) {
+        this.windowChoice._set(secs);
+        void this.ctx.setMeta({ "graph:windowsecs": secs });
+        void this.loadInitialData();
+    }
+
+    /** Show one area alone, or every area (`null`): saved in the pane's meta. */
+    setFocus(area: FocusArea | null) {
+        this.focusChoice._set(area);
+        void this.ctx.setMeta({ "sysinfo:focus": area });
     }
 
     getConfiguredInterval(): number {
@@ -392,16 +435,20 @@ class SysinfoViewModel {
         // A gap noted for the previous connection means nothing for this one.
         this.backfiller.reset();
         this.loadingAtom._set(true);
+        const generation = ++this.loadGeneration;
         try {
             const numPoints = this.numPoints();
             const connName = this.connection();
             const initialData = await readMuxEventHistory(WpsEvent.SysInfo, connName, numPoints);
+            // A newer load (another window, another machine) owns the series now;
+            // this one's shorter or older history would replace it.
+            if (generation !== this.loadGeneration) return;
             const initialDataItems: DataItem[] = initialData.map(convertTimeSeriesToDataItem);
             this.resetData(initialDataItems);
         } catch (e) {
             console.log("Error loading initial data for sysinfo", e);
         } finally {
-            this.loadingAtom._set(false);
+            if (generation === this.loadGeneration) this.loadingAtom._set(false);
         }
     }
 

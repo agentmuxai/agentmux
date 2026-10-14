@@ -7,6 +7,7 @@
 import type { PaneTabManifest } from "@/app/block/pane-tab-registry";
 import { remoteOf, remoteTabIcon, remoteTabName } from "@/app/block/pane-tab-remote";
 import { SysinfoViewModel } from "./sysinfo-model";
+import { DefaultPlotType } from "./sysinfo-types";
 import { SysinfoView } from "./sysinfo-view";
 
 /**
@@ -27,7 +28,7 @@ export function sysinfoPaneTab(view: "sysinfo" | "cpuplot"): PaneTabManifest {
             label: ({ meta }) => {
                 const remote = remoteOf(meta);
                 if (!remote) return undefined;
-                const plot = (meta?.["sysinfo:type"] as string | undefined) || "CPU";
+                const plot = (meta?.["sysinfo:type"] as string | undefined) || DefaultPlotType;
                 return `${plot} · ${remoteTabName(remote)}`;
             },
             icon: ({ meta }) => {

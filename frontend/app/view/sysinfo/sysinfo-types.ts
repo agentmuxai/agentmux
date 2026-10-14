@@ -69,7 +69,15 @@ function defaultDiskMeta(name: string): TimeSeriesMeta {
     };
 }
 
+/** The plot type a pane shows until one is chosen. */
+export const DefaultPlotType = "Overview";
+
 export const PlotTypes: Record<string, (dataItem: DataItem) => string[]> = {
+    // CPU, memory, network, disk and every core at once (sysinfo-overview.tsx);
+    // its metrics list is only what the other plot types' code expects.
+    Overview: function (dataItem: DataItem): Array<string> {
+        return ["cpu"];
+    },
     CPU: function (dataItem: DataItem): Array<string> {
         return ["cpu"];
     },

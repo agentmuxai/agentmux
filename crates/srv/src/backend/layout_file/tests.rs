@@ -79,7 +79,7 @@ fn seeded_store() -> Store {
         "url": "https://example.com/docs/page?token=abc123&x=1#frag",
     }));
     block(&store, "b-edit", json!({ "view": "editor", "file": under_home("notes/todo.md") }));
-    block(&store, "b-sys", json!({ "view": "sysinfo", "sysinfo:type": "CPU" }));
+    block(&store, "b-sys", json!({ "view": "sysinfo", "sysinfo:type": "Overview", "sysinfo:focus": "net", "graph:windowsecs": 900 }));
 
     let main_tree = LayoutNode {
         id: "n-root".into(),
@@ -212,7 +212,9 @@ fn views_are_written_from_the_allowlist_only() {
     let edit = &main.panes["p3"].views[0];
     assert_eq!(edit.config["file"], "~/notes/todo.md");
     let sys = &doc.windows[0].tabs[1].panes["p1"].views[0];
-    assert_eq!(sys.config["sysinfo_type"], "CPU");
+    assert_eq!(sys.config["sysinfo_type"], "Overview");
+    assert_eq!(sys.config["sysinfo_focus"], "net");
+    assert_eq!(sys.config["window_secs"], 900);
 }
 
 #[test]
@@ -698,5 +700,22 @@ fn connectors_memory_and_old_armory_or_knowledge_entries_open_the_new_panes() {
         assert_eq!(m[key], section, "{view}");
         assert!(!m.contains_key("armory:section"), "{view}");
         assert!(plan.notes.is_empty(), "{:?}", plan.notes);
+    }
+}
+
+#[test]
+fn a_sysinfo_pane_opens_on_its_plot_type_area_and_window() {
+    let home = tempfile::tempdir().unwrap();
+    let store = Store::open_in_memory().unwrap();
+    let view = json!({ "type": "sysinfo", "config": { "sysinfo_type": "Overview", "sysinfo_focus": "disk", "window_secs": 300 } });
+    let plan = plan_from_doc(&store, &one_pane(view), &opts(home.path(), false));
+    let m = block_meta(&plan, 0, 0);
+    assert_eq!((m["sysinfo:type"].as_str(), m["sysinfo:focus"].as_str()), (Some("Overview"), Some("disk")));
+    assert_eq!(m["graph:windowsecs"], 300);
+    // A window that isn't a sane number of seconds is left out.
+    for bad in [json!(0), json!(-5), json!(1e9), json!("15m")] {
+        let view = json!({ "type": "sysinfo", "config": { "window_secs": bad } });
+        let plan = plan_from_doc(&store, &one_pane(view), &opts(home.path(), false));
+        assert!(block_meta(&plan, 0, 0).get("graph:windowsecs").is_none(), "{bad}");
     }
 }

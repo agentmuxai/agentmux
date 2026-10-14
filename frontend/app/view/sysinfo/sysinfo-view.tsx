@@ -2,15 +2,16 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+import { windowResizing } from "@/app/platform/window-resize";
 import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
-import clsx from "clsx";
 import { holdPaneContent, trackPaneContent } from "@/app/store/pane-content-holds";
-import { windowResizing } from "@/app/platform/window-resize";
+import clsx from "clsx";
 import type { JSX } from "solid-js";
 import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show } from "solid-js";
 
 import type { SysinfoViewModel } from "./sysinfo-model";
+import { Overview } from "./sysinfo-overview";
 import { SingleLinePlot } from "./sysinfo-plot";
 import { convertTimeSeriesToDataItem } from "./sysinfo-util";
 
@@ -52,12 +53,16 @@ function SysinfoView(props: SysinfoViewProps): JSX.Element {
     // the chart to blank under load and created a drop/reload feedback loop.
     createEffect(() => {
         const cn = connName();
-        const unsubFn = onMuxEvent(WpsEvent.SysInfo, (data) => {
+        const unsubFn = onMuxEvent(
+            WpsEvent.SysInfo,
+            (data) => {
                 if (model.loadingAtom()) return;
                 const dataItem = convertTimeSeriesToDataItem(data);
                 if (dataItem == null) return;
                 model.appendData(dataItem);
-            }, cn);
+            },
+            cn
+        );
         console.log("subscribe to sysinfo", cn);
         onCleanup(() => unsubFn());
     });
@@ -84,13 +89,15 @@ function SysinfoViewInner(props: SysinfoViewProps): JSX.Element {
     // rather than on every event, so a burst (a backfill, a resumed lane) is one
     // redraw, not many.
     const [plotData, setPlotData] = createSignal(model.dataAtom());
+    // Paused: the charts hold what they show while samples keep arriving.
+    const [paused, setPaused] = createSignal(false);
     onMount(() => {
         // Skipped while the window is being resized: rebuilding the chart reads
         // layout, which mid-resize forced the frame's whole layout early
         // (ANALYSIS_WINDOW_RESIZE_REPAINT_LAG_2026_10_06.md §2.3). The next tick
         // after the resize catches up.
         const id = setInterval(() => {
-            if (!windowResizing()) setPlotData(model.dataAtom());
+            if (!windowResizing() && !paused()) setPlotData(model.dataAtom());
         }, CHART_UPDATE_INTERVAL_MS);
         onCleanup(() => clearInterval(id));
     });
@@ -124,31 +131,64 @@ function SysinfoViewInner(props: SysinfoViewProps): JSX.Element {
     const cols1 = createMemo(() => model.plotTypeSelectedAtom() === "CPU + Mem + Net");
     const cols2 = createMemo(() => yvals().length > 2 && !cols1());
 
+    const overview = createMemo(() => model.plotTypeSelectedAtom() === "Overview");
+    // A pause belongs to the Overview, which has the control to resume it: the
+    // classic plot types have none, so leaving it resumes.
+    createEffect(
+        on(overview, (shown) => {
+            if (!shown && paused()) {
+                setPaused(false);
+                setPlotData(model.dataAtom());
+            }
+        })
+    );
+
     return (
-        <div class="flex flex-col flex-grow mb-0 overflow-y-auto">
-            <div
-                class={clsx("w-full h-full grid grid-rows-[repeat(auto-fit,minmax(100px,1fr))] gap-[10px]", {
-                    "grid-cols-1": cols1(),
-                    "grid-cols-2": cols2(),
-                })}
-            >
-                <For each={yvals()}>
-                    {(yval) => (
-                        <SingleLinePlot
-                            plotData={plotData()}
-                            yval={yval}
-                            yvalMeta={plotMeta().get(yval)}
-                            blockId={model.blockId}
-                            defaultColor={"var(--accent-color)"}
-                            title={title()}
-                            targetLen={targetLen()}
-                            intervalSecs={intervalSecs()}
-                            syncKey={`sysinfo-${model.blockId}`}
-                        />
-                    )}
-                </For>
+        <Show
+            when={!overview()}
+            fallback={
+                <Overview
+                    plotData={plotData()}
+                    targetLen={targetLen()}
+                    intervalSecs={intervalSecs()}
+                    windowSecs={model.windowSecs()}
+                    onWindow={(secs) => model.setWindow(secs)}
+                    paused={paused()}
+                    onPause={(p) => {
+                        setPaused(p);
+                        if (!p) setPlotData(model.dataAtom());
+                    }}
+                    focus={model.focus()}
+                    onFocus={(area) => model.setFocus(area)}
+                    syncKey={`sysinfo-${model.blockId}`}
+                />
+            }
+        >
+            <div class="flex flex-col flex-grow mb-0 overflow-y-auto">
+                <div
+                    class={clsx("w-full h-full grid grid-rows-[repeat(auto-fit,minmax(100px,1fr))] gap-[10px]", {
+                        "grid-cols-1": cols1(),
+                        "grid-cols-2": cols2(),
+                    })}
+                >
+                    <For each={yvals()}>
+                        {(yval) => (
+                            <SingleLinePlot
+                                plotData={plotData()}
+                                yval={yval}
+                                yvalMeta={plotMeta().get(yval)}
+                                blockId={model.blockId}
+                                defaultColor={"var(--accent-color)"}
+                                title={title()}
+                                targetLen={targetLen()}
+                                intervalSecs={intervalSecs()}
+                                syncKey={`sysinfo-${model.blockId}`}
+                            />
+                        )}
+                    </For>
+                </div>
             </div>
-        </div>
+        </Show>
     );
 }
 

@@ -1,0 +1,165 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// Sysinfo's Overview (sysinfo-overview.tsx): controls, then tiles, then the
+// charts as small multiples, two to a row where the pane is wide enough.
+.sysinfo-overview {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    padding: 6px;
+    overflow-y: auto;
+}
+
+.sysinfo-overview-controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+}
+
+.sysinfo-overview-spacer {
+    flex: 1 1 auto;
+}
+
+.sysinfo-overview-paused {
+    font-size: 11px;
+    color: var(--grey-text-color);
+}
+
+.sysinfo-overview-tiles {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 6px;
+}
+
+.sysinfo-tile {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 6px 8px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    min-width: 0;
+}
+
+.sysinfo-tile-name,
+.sysinfo-tile-value,
+.sysinfo-tile-range {
+    // The sparkline takes what is left; these rows keep their height.
+    flex-shrink: 0;
+}
+
+.sysinfo-tile-name {
+    font-size: 11px;
+    color: var(--grey-text-color);
+}
+
+.sysinfo-tile-value {
+    font-size: 15px;
+    line-height: 1.3;
+    color: var(--main-text-color);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.sysinfo-tile-range {
+    min-height: 14px;
+    font-size: 11px;
+    color: var(--grey-text-color);
+}
+
+.sysinfo-tile .sysinfo-tile-spark {
+    flex: 0 0 28px;
+    height: 28px;
+    min-height: 28px;
+}
+
+.sysinfo-overview-charts {
+    display: grid;
+    // Two to a row at most: a third column would leave an empty slot beside
+    // the rows the CPU, core and disk charts take whole.
+    grid-template-columns: repeat(auto-fit, minmax(max(260px, calc(50% - 10px)), 1fr));
+    grid-auto-rows: minmax(120px, 1fr);
+    gap: 10px;
+    flex: 1 1 auto;
+    min-height: 0;
+}
+
+.sysinfo-overview-wide {
+    grid-column: 1 / -1;
+}
+
+.sysinfo-overview-cores {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    min-height: 60px;
+}
+
+.sysinfo-heatmap {
+    position: relative;
+    flex: 1 1 auto;
+    min-height: 40px;
+    margin-top: 16px;
+
+    canvas {
+        display: block;
+    }
+}
+
+.sysinfo-overview-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+
+    th,
+    td {
+        padding: 3px 8px;
+        text-align: right;
+        border-bottom: 1px solid var(--border-color);
+        white-space: nowrap;
+    }
+
+    th[scope="row"],
+    th[scope="col"]:first-child {
+        text-align: left;
+        font-weight: normal;
+        color: var(--grey-text-color);
+    }
+}
+
+// One area alone (sysinfo-focus.tsx): its charts share the pane's height, so a
+// small pane still shows all of them without scrolling.
+.sysinfo-focus {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    flex: 1 1 auto;
+    min-height: 0;
+}
+
+.sysinfo-focus .sysinfo-focus-chart {
+    flex: 1 1 0;
+    min-height: 70px;
+}
+
+.sysinfo-focus-volumes {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px 14px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    font-size: 11px;
+    color: var(--grey-text-color);
+}
+
+.sysinfo-focus-volume-name {
+    margin-right: 6px;
+    color: var(--main-text-color);
+}
