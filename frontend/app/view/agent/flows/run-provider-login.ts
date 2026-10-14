@@ -149,10 +149,9 @@ export interface RunProviderLoginParams extends ForceLoginParams {
      *  return "inapp-success" (or "inapp-timeout" on timeout/cancel). The
      *  pasted-code path needs nothing extra here — the caller's auth-url UI
      *  delivers codes to the SAME child via `setProviderAuth`, and this
-     *  poll observes the resulting completion. Default false: existing
-     *  callers that hand-roll their own "opened" completion poll
-     *  (login.ts, useAgentControllerStatus.ts's relogin, launch-flow.ts)
-     *  keep their contract unchanged. */
+     *  poll observes the resulting completion. Default false: the caller
+     *  polls an "opened" login itself (login-and-confirm.ts does, for
+     *  /login). */
     awaitTier1Completion?: boolean;
     /** Reports tier transitions as they actually happen, so a caller
      *  showing a phase/deadline (see launch-phase.ts) can keep it accurate
@@ -219,8 +218,8 @@ async function finalizeAccount(
  *  (it returns immediately so the caller can show the auth-url box), and
  *  persisting an account row before anything has actually logged in would
  *  be premature. A caller that does its own completion polling for the
- *  "opened" case (launch-flow.ts's Phase 2, useAgentControllerStatus.ts's
- *  relogin()) must call this once ITS OWN poll confirms `authenticated:
+ *  "opened" case (login-and-confirm.ts's `logInAndConfirm`) must call
+ *  this once ITS OWN poll confirms `authenticated:
  *  true` — using the `accountId`/`dir` it captured from
  *  `onAccountRegistered` — to actually persist and link the account.
  *  Without this call, a tier-1 login that appears to succeed still leaves
@@ -449,7 +448,7 @@ export async function runProviderLogin(p: RunProviderLoginParams): Promise<Provi
     // premature (nothing has actually logged in yet), so tier 1 only fires
     // `onAccountRegistered` with the minted (not-yet-persisted) account —
     // a caller that does its own completion polling for the "opened" case
-    // (launch-flow.ts, relogin()) is responsible for calling the exported
+    // (login-and-confirm.ts) is responsible for calling the exported
     // `persistAndLinkAccount` once ITS OWN poll confirms success.
     const minted = await ensureAccountDir(p.provider.id, p.log, p.existingAccountId);
     const authEnvForTiers = minted
@@ -628,8 +627,8 @@ export async function runProviderLogin(p: RunProviderLoginParams): Promise<Provi
             // Deliberately does NOT change the return value — callers gate
             // their own "Login successful" messaging on whether
             // onAccountRegistered fired (it didn't), not on this string
-            // alone. See relogin()/loginViaTerminal()/login.ts's matching
-            // `openedAccountId && openedAccountDir` checks.
+            // alone. See logInAndConfirm (login-and-confirm.ts), which maps
+            // a missing account to "save-failed".
             p.log(
                 "auth",
                 "your login succeeded, but AgentMux couldn't save the account record — it may still show as not logged in; try again in a moment",

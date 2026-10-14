@@ -121,9 +121,6 @@ describe("runLaunchFlow — no auto-login on Phase 2", () => {
             blockId: "block-1",
             provider: claude,
             log: vi.fn(),
-            setAuthUrl: vi.fn(),
-            isCancelled: () => false,
-            setLoginWaiting: vi.fn(),
             setLaunchPhase: (p) => { if (p) phases.push(p.kind); },
             onNotify: (text, style) => notices.push({ text, style }),
         });
@@ -146,9 +143,6 @@ describe("runLaunchFlow — no auto-login on Phase 2", () => {
             blockId: "block-1",
             provider: claude,
             log: vi.fn(),
-            setAuthUrl: vi.fn(),
-            isCancelled: () => false,
-            setLoginWaiting: vi.fn(),
             setLaunchPhase: (p) => { if (p) phases.push(p.kind); },
             onNotify: (text, style) => notices.push({ text, style }),
         });
@@ -165,9 +159,6 @@ describe("runLaunchFlow — no auto-login on Phase 2", () => {
             blockId: "block-1",
             provider: claude,
             log: vi.fn(),
-            setAuthUrl: vi.fn(),
-            isCancelled: () => false,
-            setLoginWaiting: vi.fn(),
         });
 
         expect(result).toBe("auth_failed");
@@ -185,9 +176,6 @@ describe("runLaunchFlow — Phase 3 (already authenticated)", () => {
             blockId: "block-1",
             provider: claude,
             log: vi.fn(),
-            setAuthUrl: vi.fn(),
-            isCancelled: () => false,
-            setLoginWaiting: vi.fn(),
             setLaunchPhase: (p) => { if (p) phases.push(p.kind); },
         });
 
@@ -209,9 +197,6 @@ describe("runLaunchFlow — Phase 3 (already authenticated)", () => {
             blockId: "block-1",
             provider: claude,
             log: vi.fn(),
-            setAuthUrl: vi.fn(),
-            isCancelled: () => false,
-            setLoginWaiting: vi.fn(),
             setLaunchPhase: (p) => { if (p) phases.push(p.kind); },
             onNotify: (text, style) => notices.push({ text, style }),
         });
@@ -230,9 +215,6 @@ describe("runLaunchFlow — Phase 3 (already authenticated)", () => {
             blockId: "block-1",
             provider: claude,
             log: vi.fn(),
-            setAuthUrl: vi.fn(),
-            isCancelled: () => false,
-            setLoginWaiting: vi.fn(),
             setLaunchPhase: (p) => { if (p) phases.push(p.kind); },
             onNotify: (text, style) => notices.push({ text, style }),
         });
@@ -254,9 +236,6 @@ describe("runLaunchFlow — Phase 3 (already authenticated)", () => {
             blockId: "block-1",
             provider: claude,
             log: vi.fn(),
-            setAuthUrl: vi.fn(),
-            isCancelled: () => false,
-            setLoginWaiting: vi.fn(),
             onNotify: (text, style) => notices.push({ text, style }),
         });
 
@@ -273,9 +252,6 @@ describe("runLaunchFlow — Phase 3 (already authenticated)", () => {
             blockId: "block-1",
             provider: claude,
             log: vi.fn(),
-            setAuthUrl: vi.fn(),
-            isCancelled: () => false,
-            setLoginWaiting: vi.fn(),
             onAuthCheckResult: (confirmed) => results.push(confirmed),
         });
 
@@ -294,9 +270,6 @@ describe("runLaunchFlow — Phase 3 (already authenticated)", () => {
             blockId: "block-1",
             provider: claude,
             log: vi.fn(),
-            setAuthUrl: vi.fn(),
-            isCancelled: () => false,
-            setLoginWaiting: vi.fn(),
             onAuthCheckResult: (confirmed) => results.push(confirmed),
         });
 
@@ -334,9 +307,6 @@ describe("runLaunchFlow — mount-time auth check resolves the linked account's 
             blockId: "block-1",
             provider: claude,
             log: vi.fn(),
-            setAuthUrl: vi.fn(),
-            isCancelled: () => false,
-            setLoginWaiting: vi.fn(),
             authEnv: { CLAUDE_CONFIG_DIR: "/generic/shared/dir" },
         });
 
@@ -383,9 +353,6 @@ describe("runLaunchFlow — mount-time auth check resolves the linked account's 
             blockId: "block-1",
             provider: claude,
             log: vi.fn(),
-            setAuthUrl: vi.fn(),
-            isCancelled: () => false,
-            setLoginWaiting: vi.fn(),
             authEnv: { CLAUDE_CONFIG_DIR: "/generic/shared/dir" },
         });
 
@@ -422,9 +389,6 @@ describe("runLaunchFlow — mount-time auth check resolves the linked account's 
             blockId: "block-1",
             provider: claude,
             log: vi.fn(),
-            setAuthUrl: vi.fn(),
-            isCancelled: () => false,
-            setLoginWaiting: vi.fn(),
             authEnv: { CLAUDE_CONFIG_DIR: "/generic/shared/dir" },
         });
 
@@ -450,9 +414,6 @@ describe("runLaunchFlow — mount-time auth check resolves the linked account's 
             blockId: "block-1",
             provider: kimi,
             log: vi.fn(),
-            setAuthUrl: vi.fn(),
-            isCancelled: () => false,
-            setLoginWaiting: vi.fn(),
             authEnv: { KIMI_SHARE_DIR: "/generic/shared/dir" },
         });
 
@@ -474,9 +435,6 @@ describe("runLaunchFlow — mount-time auth check resolves the linked account's 
             blockId: "block-1",
             provider: claude,
             log: vi.fn(),
-            setAuthUrl: vi.fn(),
-            isCancelled: () => false,
-            setLoginWaiting: vi.fn(),
             authEnv: { CLAUDE_CONFIG_DIR: "/generic/shared/dir" },
         });
 
@@ -504,9 +462,6 @@ describe("runLaunchFlow — mount-time auth check resolves the linked account's 
             blockId: "block-1",
             provider: claude,
             log: vi.fn(),
-            setAuthUrl: vi.fn(),
-            isCancelled: () => false,
-            setLoginWaiting: vi.fn(),
             authEnv: { CLAUDE_CONFIG_DIR: "/generic/shared/dir" },
         });
 
@@ -527,9 +482,6 @@ describe("runLaunchFlow — mount-time auth check resolves the linked account's 
             blockId: "block-1",
             provider: claude,
             log: vi.fn(),
-            setAuthUrl: vi.fn(),
-            isCancelled: () => false,
-            setLoginWaiting: vi.fn(),
             authEnv: { CLAUDE_CONFIG_DIR: "/generic/shared/dir" },
         });
 

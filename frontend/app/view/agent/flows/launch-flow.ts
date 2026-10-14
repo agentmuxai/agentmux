@@ -31,10 +31,10 @@
  *      messages mixed into transcript content" rule as #2420/6191a1928.
  *
  * The caller provides a log sink and a phase/notify callback. All other
- * state is derived from the block_id + provider definition. `setAuthUrl`/
- * `isCancelled`/`setLoginWaiting` remain on `LaunchFlowOptions` for callers
- * that still pass them, but this function itself no longer drives a login
- * attempt, so it never touches them.
+ * state is derived from the block_id + provider definition. The provider
+ * steps (resolve the CLI, find the linked account, check auth, register the
+ * controller) are shared with the pane's login actions in
+ * login-and-confirm.ts and register-controller.ts.
  *
  * Return values:
  *   - "success"     — controller registered, ready for user input
@@ -51,10 +51,9 @@ import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import * as MOS from "@/app/store/mos";
 import { blockEnv } from "@/app/store/block-meta";
-import { BlockService } from "@/app/store/services";
-import { staticTabId } from "@/app/store/global";
-import { lastLinkedAccountId } from "../providers/provider-id-aliases";
 import type { LaunchPhase } from "./launch-phase";
+import { checkCliAuth, linkedAccountFor, resolveProviderCli } from "./login-and-confirm";
+import { registerController } from "./register-controller";
 import type { ProviderDefinition } from "../providers";
 
 import type { LogFn } from "../types";
@@ -66,19 +65,14 @@ export interface LaunchFlowOptions {
     blockId: string;
     provider: ProviderDefinition | undefined;
     log: LogFn;
-    setAuthUrl: (url: string | null) => void;
-    isCancelled: () => boolean;
-    setLoginWaiting: (v: boolean) => void;
     /** Reports which phase of the flow is currently running, so the caller
      *  can show a specific status (and, for phases carrying a deadline, a
      *  "waiting on X, up to Ys" label) instead of a generic spinner. See
      *  launch-phase.ts. Optional so existing callers/tests are unaffected. */
     setLaunchPhase?: (phase: LaunchPhase | null) => void;
     authEnv?: Record<string, string>;
-    /** Called once when login is confirmed — append a success message to the chat. */
-    onLoginSuccess?: (email: string | null) => void;
     /** Posts a permanent, visible line into the pane's conversation — for
-     *  anything that isn't a login *success* (that's `onLoginSuccess`) but
+     *  anything that isn't a login *success* (the hook's `onLoginSuccess`) but
      *  still shouldn't be silent: a warning before an automatic relogin
      *  attempt, or the end-of-mount "ready"/"resumed" summary. See
      *  docs/specs/SPEC_AGENT_PANE_AUTH_NOTIFICATIONS_2026_07_26.md. */
@@ -181,14 +175,7 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
     let effectiveAuthEnv = authEnv;
     if (agentDefinitionId && provider.authType === "oauth") {
         linkLookupDone = true;
-        try {
-            const links = await RpcApi.ListAgentIdentitiesCommand(TabRpcClient, {
-                agent_id: agentDefinitionId,
-            });
-            linkedAccountId = lastLinkedAccountId(links, provider.id);
-        } catch {
-            // Best-effort — treated as "no linked account" if this lookup fails.
-        }
+        linkedAccountId = await linkedAccountFor(agentDefinitionId, provider.id);
         if (linkedAccountId) {
             try {
                 const account = await RpcApi.GetIdentityAccountCommand(TabRpcClient, { id: linkedAccountId });
@@ -228,15 +215,7 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
 
     let cliResult: ResolveCliResult;
     try {
-        cliResult = await RpcApi.ResolveCliCommand(TabRpcClient, {
-            provider_id: provider.id,
-            cli_command: provider.cliCommand,
-            npm_package: provider.npmPackage,
-            pinned_version: provider.pinnedVersion,
-            windows_install_command: provider.windowsInstallCommand,
-            unix_install_command: provider.unixInstallCommand,
-            block_id: blockId,
-        }, { timeout: 300000 });
+        cliResult = await resolveProviderCli(provider, blockId);
     } catch (err: any) {
         unsubInstall();
         // Route through translateError so typed wire-format errors
@@ -287,11 +266,7 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
     log("auth", `checking ${provider.cliCommand} authentication...`);
     let needsLogin = false;
     try {
-        const authResult = await RpcApi.CheckCliAuthCommand(TabRpcClient, {
-            cli_path: cliResult.cli_path,
-            auth_check_args: provider.authCheckCommand,
-            auth_env: effectiveAuthEnv,
-        }, { timeout: 30000 });
+        const authResult = await checkCliAuth(cliResult.cli_path, provider.authCheckCommand, effectiveAuthEnv, 30000);
         if (authResult.authenticated) {
             const emailPart = authResult.email ? ` as ${authResult.email}` : "";
             const methodPart = authResult.auth_method ? ` (${authResult.auth_method})` : "";
@@ -322,14 +297,7 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
         // ListAgentIdentitiesCommand a second time per mount.
         let existingAccountId: string | undefined = linkedAccountId;
         if (!linkLookupDone && agentDefinitionId) {
-            try {
-                const links = await RpcApi.ListAgentIdentitiesCommand(TabRpcClient, {
-                    agent_id: agentDefinitionId,
-                });
-                existingAccountId = lastLinkedAccountId(links, provider.id);
-            } catch {
-                // Best-effort — treated as "no existing account" if this lookup fails.
-            }
+            existingAccountId = await linkedAccountFor(agentDefinitionId, provider.id);
         }
 
         // DELIBERATELY DOES NOT open a browser/terminal here. This function
@@ -366,14 +334,7 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
         // size (shell.rs `pty_size_from_rt_opts`), avoiding the post-spawn
         // resize race. Omitted when the pane isn't laid out yet; the live
         // ResizeObserver in usePtyWidth corrects any later change.
-        const initialTermSize = opts.getInitialTermSize?.();
-        await RpcApi.ControllerResyncCommand(TabRpcClient, {
-            tabid: staticTabId(),
-            blockid: blockId,
-            forcerestart: false,
-            ...(initialTermSize ? { rtopts: { termsize: initialTermSize } } : {}),
-        });
-        const rts = await BlockService.GetControllerStatus(blockId);
+        const rts = await registerController(blockId, { forceRestart: false, termSize: opts.getInitialTermSize?.() });
         const status = rts?.shellprocstatus ?? "init";
         log("controller", `status: ${status}`);
         if (rts) opts.onControllerStatus?.(rts);
