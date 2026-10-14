@@ -6,15 +6,30 @@
 
 use super::*;
 
-#[derive(serde::Deserialize, Default)]
+#[derive(serde::Deserialize, Default, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/", rename = "BundleImportForAgentReq")]
 pub(super) struct ImportForAgentReq {
     pub(crate) agent_id: String,
     #[serde(default)]
+    #[ts(optional)]
     pub(crate) file_path: Option<String>,
     #[serde(default)]
+    #[ts(optional)]
     pub(crate) zip_base64: Option<String>,
     #[serde(default)]
+    #[ts(optional)]
     pub(crate) files: Option<Vec<FileEntry>>,
+}
+
+/// Response for `bundle.import_for_agent`.
+#[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub(crate) struct BundleImportForAgentResponse {
+    pub(crate) bundle_id: String,
+    #[ts(type = "number")]
+    pub(crate) memory_files_written: usize,
+    pub(crate) skipped_skills: Vec<String>,
+    pub(crate) warnings: Vec<String>,
 }
 
 /// `bundle.import_for_agent` — ABF v0.2 §2.3. The only import path that
@@ -35,7 +50,7 @@ pub(super) async fn bundle_import_for_agent_impl(
     identity_store: &crate::backend::storage::store::Store,
     mstore: &crate::backend::storage::store::Store,
     req: ImportForAgentReq,
-) -> Result<serde_json::Value, String> {
+) -> Result<BundleImportForAgentResponse, String> {
     use crate::backend::bundle_import as bi;
 
     let agent = mstore
@@ -308,30 +323,26 @@ pub(super) async fn bundle_import_for_agent_impl(
         }
     }
 
-    Ok(json!({
-        "bundle_id": bundle_id,
-        "memory_files_written": memory_files_written,
-        "skipped_skills": parsed.skipped_skills,
-        "warnings": warnings,
-    }))
+    Ok(BundleImportForAgentResponse {
+        bundle_id,
+        memory_files_written,
+        skipped_skills: parsed.skipped_skills,
+        warnings,
+    })
 }
 
 pub(super) fn register_bundle_import_for_agent(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let id_store = state.id_store.clone();
     let identity_store = state.identity_store.clone();
     let mstore = state.mstore.clone();
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_BUNDLE_IMPORT_FOR_AGENT,
-        Box::new(move |data, _ctx| {
+        move |req: ImportForAgentReq, _ctx| {
             let id_store = id_store.clone();
             let identity_store = identity_store.clone();
             let mstore = mstore.clone();
-            Box::pin(async move {
-                let req: ImportForAgentReq = serde_json::from_value(data)
-                    .map_err(|e| format!("bundle.import_for_agent: {e}"))?;
-                bundle_import_for_agent_impl(&id_store, &identity_store, &mstore, req).await.map(Some)
-            })
-        }),
+            async move { bundle_import_for_agent_impl(&id_store, &identity_store, &mstore, req).await }
+        },
     );
 }
 

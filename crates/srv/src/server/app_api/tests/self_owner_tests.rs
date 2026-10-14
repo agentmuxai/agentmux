@@ -60,8 +60,8 @@ async fn an_attributed_self_call_is_about_the_callers_row() {
     let err = identity_account_validate_stored_impl(&state, y2, "acct-so-y").await.unwrap_err();
     assert!(err.starts_with("FORBIDDEN"), "{err}");
 
-    assert_eq!(bundle_self_get_impl(&state, y2).await.unwrap()["id"], "bundle-so-y2");
-    assert_eq!(bundle_self_get_impl(&state, "agenty").await.unwrap()["id"], "bundle-so-y");
+    assert_eq!(bundle_self_get_impl(&state, y2).await.unwrap().id, "bundle-so-y2");
+    assert_eq!(bundle_self_get_impl(&state, "agenty").await.unwrap().id, "bundle-so-y");
 
     let gone = SelfOwner::Uid("uid-so-gone");
     for err in [

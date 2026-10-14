@@ -56,6 +56,6 @@ async fn falls_back_to_the_registrys_own_bound_bundle_when_no_local_instance_row
     }
 
     let resp = resp.expect("bundle.self.get must succeed via the registry fallback");
-    assert_eq!(resp["id"], "bundle-agenty-test");
-    assert_eq!(resp["is_blank"], false);
+    assert_eq!(resp.id, "bundle-agenty-test");
+    assert!(!resp.is_blank);
 }

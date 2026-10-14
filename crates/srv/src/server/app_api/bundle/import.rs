@@ -7,6 +7,29 @@
 
 use super::*;
 
+#[derive(serde::Deserialize, Default, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub(super) struct BundleImportReq {
+    #[serde(default)]
+    #[ts(optional)]
+    zip_base64: Option<String>,
+    #[serde(default)]
+    #[ts(optional)]
+    files: Option<Vec<FileEntry>>,
+}
+
+/// Response for `bundle.import`.
+#[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub(crate) struct BundleImportResponse {
+    pub(crate) bundle_id: String,
+    pub(crate) imported_skill_ids: Vec<String>,
+    pub(crate) skipped_skills: Vec<String>,
+    pub(crate) resolved_requirement_ids: Vec<String>,
+    pub(crate) unresolved_requirements: Vec<crate::backend::rpc_types::BundleImportUnresolvedRequirement>,
+    pub(crate) warnings: Vec<String>,
+}
+
 /// `bundle.import` — ABF importer, Phase 2 of
 /// docs/specs/SPEC_ABF_V0_1_SINGLE_FILE_AND_IMPORTER_2026_08_01.md. Window-
 /// scoped like `bundle.export` (bundles aren't agent-specific). Accepts
@@ -24,24 +47,14 @@ pub(super) fn register_bundle_import(engine: &Arc<WshRpcEngine>, state: &AppStat
     let identity_store = state.identity_store.clone();
     let mstore = state.mstore.clone();
     let broker = state.broker.clone();
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_BUNDLE_IMPORT,
-        Box::new(move |data, _ctx| {
+        move |req: BundleImportReq, _ctx| {
             let id_store = id_store.clone();
             let identity_store = identity_store.clone();
             let mstore = mstore.clone();
             let broker = broker.clone();
-            Box::pin(async move {
-                #[derive(serde::Deserialize, Default)]
-                struct Req {
-                    #[serde(default)]
-                    zip_base64: Option<String>,
-                    #[serde(default)]
-                    files: Option<Vec<FileEntry>>,
-                }
-                let req: Req = serde_json::from_value(data)
-                    .map_err(|e| format!("bundle.import: {e}"))?;
-
+            async move {
                 let (files, mut warnings): (Vec<crate::backend::bundle_import::BundleImportFile>, Vec<String>) =
                     match (req.zip_base64, req.files) {
                         (Some(_), Some(_)) => {
@@ -101,15 +114,15 @@ pub(super) fn register_bundle_import(engine: &Arc<WshRpcEngine>, state: &AppStat
                     .map_err(|e| format!("bundle.import: {e}"))?;
                 let resolved_requirement_ids: Vec<String> =
                     resolved.iter().filter(|r| r.resolved()).map(|r| r.id.clone()).collect();
-                let unresolved_requirements: Vec<serde_json::Value> = resolved
+                let unresolved_requirements: Vec<crate::backend::rpc_types::BundleImportUnresolvedRequirement> = resolved
                     .iter()
                     .filter(|r| !r.resolved())
-                    .map(|r| json!({
-                        "id": r.id,
-                        "provider": r.provider,
-                        "env": r.env,
-                        "match_count": r.match_count,
-                    }))
+                    .map(|r| crate::backend::rpc_types::BundleImportUnresolvedRequirement {
+                        id: r.id.clone(),
+                        provider: r.provider.clone(),
+                        env: r.env.clone(),
+                        match_count: r.match_count,
+                    })
                     .collect();
 
                 // Skills — global, not bound to any agent (mirrors
@@ -253,16 +266,16 @@ pub(super) fn register_bundle_import(engine: &Arc<WshRpcEngine>, state: &AppStat
                     broker.publish_event::<crate::backend::mps_events::SkillsChanged>(&(), vec![], 0);
                 }
 
-                Ok(Some(json!({
-                    "bundle_id": memory.id,
-                    "imported_skill_ids": imported_skill_ids,
-                    "skipped_skills": skipped_skills,
-                    "resolved_requirement_ids": resolved_requirement_ids,
-                    "unresolved_requirements": unresolved_requirements,
-                    "warnings": warnings,
-                })))
-            })
-        }),
+                Ok(BundleImportResponse {
+                    bundle_id: memory.id,
+                    imported_skill_ids,
+                    skipped_skills,
+                    resolved_requirement_ids,
+                    unresolved_requirements,
+                    warnings,
+                })
+            }
+        },
     );
 }
 
