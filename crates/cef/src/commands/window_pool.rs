@@ -941,7 +941,6 @@ pub fn demote_promoted_pool_window(
     label: &str,
     window: &cef::Window,
 ) -> bool {
-    use cef::{ImplBrowser, ImplFrame};
 
     // 0. Capacity: the pool self-refills to POOL_TARGET_SIZE after every
     // promote, so in steady state the pool is ALWAYS at target when a close
@@ -1050,11 +1049,7 @@ pub fn demote_promoted_pool_window(
     // origin); page state resets fully; `pool_window_ready` re-arrives on
     // boot and completes the queue re-entry.
     let url = pool_frontend_url(state, label);
-    if let Some(browser) = state.get_browser(label) {
-        if let Some(frame) = browser.main_frame() {
-            frame.load_url(Some(&cef::CefString::from(url.as_str())));
-        }
-    }
+    super::replace_page::navigate_demoted_window(state, label, url);
 
     tracing::info!(
         target: "dnd:tearoff:pool",
@@ -1090,7 +1085,7 @@ pub fn demote_promoted_pool_window(
 /// all state untouched.
 #[cfg(target_os = "windows")]
 pub fn park_and_blank_window(state: &Arc<AppState>, label: &str) -> bool {
-    use cef::{ImplBrowser, ImplFrame};
+    use cef::ImplBrowser;
 
     // 1. Strict HWND only — never EnumWindows (round-5 safety note: a loose
     // fallback can resolve MAIN for an unknown label).
@@ -1135,7 +1130,7 @@ pub fn park_and_blank_window(state: &Arc<AppState>, label: &str) -> bool {
     // proven for months.
     if let Some(browser) = state.get_browser(label) {
         if let Some(frame) = browser.main_frame() {
-            frame.load_url(Some(&cef::CefString::from("about:blank")));
+            super::replace_page::replace_page(&frame, "about:blank");
         }
     }
 
