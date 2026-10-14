@@ -152,8 +152,14 @@
             }
         }
 
+        // Half the gap on each side, in whole pixels: down on top and left, up
+        // on bottom and right, so two neighbours still add up to the gap. An
+        // odd gap (3px, the default) halved to 1.5px put every split pane's
+        // chrome on a half pixel, where its text and its painted boxes round
+        // apart (docs/investigations/RCA_PANE_TAB_PLUS_OFF_CENTER_2026_10_14.md).
         &:not(:only-child) .tile-leaf {
-            padding: calc(var(--gap-size-px) / 2);
+            $half: calc(var(--gap-size-px) / 2);
+            padding: round(down, $half, 1px) round(up, $half, 1px) round(up, $half, 1px) round(down, $half, 1px);
         }
     }
 

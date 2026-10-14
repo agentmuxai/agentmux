@@ -589,10 +589,11 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
                             aria-label={props.addLabel ?? props.addTitle ?? "New tab"}
                             onClick={(e) => props.onAdd!(e)}
                         >
-                            {/* Wrapped so the glyph itself can be nudged (PaneTabStrip.scss's
-                                .pane-tab-strip-add-glyph) without moving the button's own
-                                box/hover-background/border — see that rule's comment. */}
-                            <span class="pane-tab-strip-add-glyph">+</span>
+                            {/* Drawn, not a "+" character: a glyph is centred by its
+                                font's line box, not its ink, so it sat off centre
+                                (PaneTabStrip.scss's .pane-tab-strip-add-glyph). The
+                                button's aria-label names it. */}
+                            <span class="pane-tab-strip-add-glyph" aria-hidden="true" />
                             <Show when={props.addLabel}>
                                 <span class="pane-tab-strip-add-label">{props.addLabel}</span>
                             </Show>
