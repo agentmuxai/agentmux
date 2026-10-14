@@ -41,10 +41,7 @@ fn trust_grok_folder(grok_home: &Path, cwd: &str) -> std::io::Result<()> {
     }
     std::fs::create_dir_all(grok_home)?;
     let sep = if existing.is_empty() || existing.ends_with('\n') { "" } else { "\n" };
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
+    let now = agentmux_common::time::now_secs();
     std::fs::write(&file, format!("{existing}{sep}{header}\ntrusted = true\ndecided_at = {now}\n"))
 }
 
