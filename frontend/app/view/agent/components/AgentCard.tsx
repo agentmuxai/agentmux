@@ -5,9 +5,9 @@
  * AgentCard — a definition tile in the agent picker.
  *
  * Per SPEC_AGENT_DEFINITIONS_MODAL_2026_04_23 the card is driven
- * by the CLI catalog when one exists for the provider — title reads
- * as a capability blurb ("Anthropic's coding agent") and the CLI
- * brand name ("Claude Code") sits as a caption below. Providers
+ * by the CLI catalog when one exists for the provider — the title is
+ * the CLI brand name ("Claude Code") and the capability blurb
+ * ("Anthropic's coding agent") sits as a caption below. Providers
  * without a catalog entry fall back to the AgentDefinition row's own
  * description/name fields.
  *
@@ -80,8 +80,8 @@ interface AgentCardProps {
 
 export const AgentCard = (props: AgentCardProps): JSX.Element => {
     const catalog = createMemo(() => getCliCatalogEntry(props.agent.provider));
-    const title = () => catalog()?.blurb || props.agent.description || props.agent.name;
-    const caption = () => catalog()?.displayName || props.agent.name;
+    const title = () => catalog()?.displayName || props.agent.name;
+    const caption = () => catalog()?.blurb || props.agent.description || props.agent.name;
 
     let cardEl: HTMLDivElement | undefined;
     onMount(() => {
@@ -165,7 +165,7 @@ export const AgentCard = (props: AgentCardProps): JSX.Element => {
             role="button"
             tabIndex={props.disabled ? -1 : 0}
             aria-disabled={props.disabled}
-            aria-label={`Launch ${caption()}`}
+            aria-label={`Launch ${title()}`}
         >
             {/* Harness icon only — no vendor badge. This section is
                 explicitly about picking a harness (see the section hint
@@ -219,7 +219,7 @@ export const AgentCard = (props: AgentCardProps): JSX.Element => {
                     class="agent-card-new-session-btn"
                     onClick={handleNewClick}
                     title="Archive current session and start a new one"
-                    aria-label={`Start a new session for ${caption()} (archives the current one)`}
+                    aria-label={`Start a new session for ${title()} (archives the current one)`}
                     tabIndex={props.disabled ? -1 : 0}
                 >
                     {"+ New"}

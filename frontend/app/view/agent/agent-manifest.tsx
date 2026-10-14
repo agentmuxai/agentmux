@@ -43,8 +43,7 @@ export const agentPaneTabManifest: PaneTabManifest = {
             headerActions: () => model.endIconButtons(),
             contextMenu: () => model.getBodyContextMenuItems(),
             // Voice lands beside the composer (AgentFooter), not in the
-            // header — the manifest declares no `headerMic` — but
-            // Ctrl+Shift+V still targets it.
+            // header, and Ctrl+Shift+V still targets it.
             voice: () => model.voiceHandle(),
             progressMount: (el) => model.setProgressBarMount(el),
             focus: () => model.giveFocus(),

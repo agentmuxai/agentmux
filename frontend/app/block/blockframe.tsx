@@ -6,7 +6,6 @@ import { PaneGrip } from "@/app/element/PaneGrip";
 import { blockViewToIcon, blockViewToName, ConnectionButton, getBlockHeaderIcon, Input } from "@/app/block/blockutil";
 import { paneTabCapability, paneTabLabelFor } from "@/app/block/pane-tab-registry";
 import { Button } from "@/app/element/button";
-import { MicButton } from "@/app/element/MicButton";
 import { PaneRestoreGlyph } from "@/app/element/pane-control-glyphs";
 import { redactSecrets } from "@/app/errors/redact";
 import { ChangeConnectionBlockModal } from "@/app/modals/conntypeahead";
@@ -365,9 +364,6 @@ function EndIcons(props: {
     viewModel: ViewModel;
     nodeModel: NodeModel;
     onContextMenu: (e: MouseEvent) => void;
-    /** View key from `blockData.meta.view`, used to render a context-aware
-     *  tooltip on the per-pane mic button (e.g. "Speak into this terminal"). */
-    blockView?: string;
     /** The currently active blockId, reactive — NOT `nodeModel.blockId`
      *  (frozen for this component's mount lifetime, see NodeModel.blockId's
      *  own doc comment). Every existing caller passes
@@ -414,31 +410,10 @@ function EndIcons(props: {
                 </For>
                 <div class="block-frame-btn-separator" aria-hidden="true" />
             </Show>
-            {/* Agent panes render their own mic pinned beside the composer
-                input (AgentFooter.tsx) instead of here — see
-                SPEC_AGENT_WORKING_INDICATOR_SHIMMER_AND_MIC_RELOCATION_2026_07_08.md.
-                Terminal keeps the header mic unchanged. */}
-            {/* POSITIVE guard, deliberately. This used to read
-                `props.blockView !== "agent"`, which shows the mic whenever the view
-                type is merely UNKNOWN — and `blockView` comes from
-                `blockData()?.meta?.view` (below), which is null while the block's
-                MuxObject is still loading. So an unresolved pane could render a
-                stray header mic that then vanished. Only `term` wants one here
-                (agent panes render their own beside the composer,
-                SPEC_AGENT_WORKING_INDICATOR_SHIMMER_AND_MIC_RELOCATION_2026_07_08.md;
-                browser/editor expose no voiceHandle at all — see keymodel.ts's
-                Ctrl+Shift+V handler), so naming it makes the unresolved state
-                render nothing, which is the safe default. See SPEC_PANE_LOADING_CONSOLIDATION_2026_09_20.md §5.4.
-                The name check is now the `headerMic` capability (term's
-                manifest, Pane Tab contract Phase 5): still positive, still
-                nothing while the view is unresolved. */}
-            <Show when={props.viewModel?.voiceHandle && paneTabCapability(props.blockView, "headerMic")}>
-                <MicButton
-                    blockId={props.blockId()}
-                    handle={props.viewModel.voiceHandle!()}
-                    paneTitle={paneTabCapability(props.blockView, "headerMic")?.title}
-                />
-            </Show>
+            {/* No header mic on any pane. Agent panes put their mic beside the
+                composer (AgentFooter.tsx); terminals had one here, removed
+                because nobody speaks into a terminal. The terminal's
+                voiceHandle stays for the Ctrl+Shift+V shortcut (keymodel.ts). */}
 
             {/* canMinimize: the last expanded pane loses its minimize button —
                 the window must always keep at least one expanded pane, so
@@ -859,7 +834,6 @@ function BlockFrame_Header(
                     viewModel={props.viewModel}
                     nodeModel={props.nodeModel}
                     onContextMenu={onContextMenu}
-                    blockView={blockData()?.meta?.view}
                     blockId={props.blockId}
                 />
             </div>
