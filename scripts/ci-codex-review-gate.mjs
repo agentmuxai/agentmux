@@ -47,6 +47,15 @@
 // docs changed since. Other findings on an earlier head wait for the re-ask
 // when code changed since, and fail when only docs did: nothing will ask
 // Codex again, so the PR needs the fix. This gate only reads.
+//
+// If the status looks stuck (Codex answered but the status didn't move),
+// re-evaluate the PR without asking Codex anything:
+//   gh workflow run codex-review-gate.yml -f pr=<number>
+// GitHub calls go through scripts/lib/github-rest.mjs, which retries 5xx and
+// rate limits; the workflow's sparse checkout must list every module this one
+// imports (a test checks it).
+
+import { createGitHubClient, GitHubError } from "./lib/github-rest.mjs";
 
 export const CODEX_LOGIN = "chatgpt-codex-connector[bot]";
 export const STATUS_CONTEXT = "Codex review";
@@ -345,44 +354,22 @@ export function evaluateCodexGate({
     };
 }
 
-async function gh(path, token, init = {}) {
-    const res = await fetch(`https://api.github.com${path}`, {
-        ...init,
-        headers: {
-            Authorization: `Bearer ${token}`,
-            Accept: "application/vnd.github+json",
-            "X-GitHub-Api-Version": "2022-11-28",
-            ...(init.headers ?? {}),
-        },
-    });
-    if (!res.ok) {
-        throw new Error(`${init.method ?? "GET"} ${path} -> HTTP ${res.status}: ${(await res.text()).slice(0, 300)}`);
-    }
-    return res;
-}
-
-async function ghAll(path, token) {
-    const items = [];
-    for (let page = 1; ; page++) {
-        const sep = path.includes("?") ? "&" : "?";
-        const batch = await (await gh(`${path}${sep}per_page=100&page=${page}`, token)).json();
-        items.push(...batch);
-        if (batch.length < 100) return items;
-    }
-}
-
 // The compare API lists at most 300 files; a list that long may be cut short.
 const COMPARE_FILE_CAP = 300;
+// What compare answers when the reviewed commit can't be compared with the
+// head (a force-push orphaned it). Anything else, after the client's retries,
+// fails the run rather than posting a wrong pending.
+const COMPARE_UNKNOWN_STATUSES = new Set([404, 422]);
 
 /** Files changed base...head, or null when that can't be known completely. */
-async function changedFiles(repo, base, head, token) {
+export async function changedFiles(client, repo, base, head) {
     try {
-        const cmp = await (await gh(`/repos/${repo}/compare/${base}...${head}`, token)).json();
+        const cmp = await client.json(`/repos/${repo}/compare/${base}...${head}`);
         const files = (cmp.files ?? []).map((f) => f.filename);
         return files.length >= COMPARE_FILE_CAP ? null : files;
     } catch (err) {
-        // A force-push can orphan the reviewed commit; treat as unknown.
-        console.log(`compare ${base}...${head.slice(0, 10)} failed: ${err.message}`);
+        if (!(err instanceof GitHubError) || !COMPARE_UNKNOWN_STATUSES.has(err.status)) throw err;
+        console.log(`compare ${base}...${head.slice(0, 10)}: HTTP ${err.status}, treating the diff as unknown`);
         return null;
     }
 }
@@ -392,25 +379,26 @@ async function main() {
     if (!token || !repo || !pr) {
         throw new Error("GITHUB_TOKEN, GITHUB_REPOSITORY and PR_NUMBER are required");
     }
-    const pull = await (await gh(`/repos/${repo}/pulls/${pr}`, token)).json();
+    const client = createGitHubClient({ token });
+    const pull = await client.json(`/repos/${repo}/pulls/${pr}`);
     const headSha = pull.head.sha;
     const [comments, reviews, reviewComments] = await Promise.all([
-        ghAll(`/repos/${repo}/issues/${pr}/comments`, token),
-        ghAll(`/repos/${repo}/pulls/${pr}/reviews`, token),
+        client.paginate(`/repos/${repo}/issues/${pr}/comments`),
+        client.paginate(`/repos/${repo}/pulls/${pr}/reviews`),
         // Inline comments: the files each findings review flagged.
-        ghAll(`/repos/${repo}/pulls/${pr}/comments`, token),
+        client.paginate(`/repos/${repo}/pulls/${pr}/comments`),
     ]);
     const latest = latestCodexOutput({ comments, reviews, reviewComments });
-    const filesSinceLatest = needsDiffSince(latest, headSha) ? await changedFiles(repo, latest.sha, headSha, token) : null;
+    const filesSinceLatest = needsDiffSince(latest, headSha) ? await changedFiles(client, repo, latest.sha, headSha) : null;
     // The pulls commits API lists at most 250; a longer PR isn't a bot bump.
     const dependencyBot =
         DEPENDENCY_BOTS.has(String(pull.user?.login ?? "").toLowerCase()) &&
         pull.commits <= 250 &&
-        isDependencyBotPr(pull.user.login, await ghAll(`/repos/${repo}/pulls/${pr}/commits`, token));
+        isDependencyBotPr(pull.user.login, await client.paginate(`/repos/${repo}/pulls/${pr}/commits`));
     const result = evaluateCodexGate({ headSha, comments, reviews, reviewComments, filesSinceLatest, dependencyBot });
     console.log(`#${pr} ${headSha.slice(0, 10)}: ${result.state} — ${result.description}`);
     if (DRY_RUN) return;
-    await gh(`/repos/${repo}/statuses/${headSha}`, token, {
+    await client.request(`/repos/${repo}/statuses/${headSha}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
