@@ -1478,19 +1478,7 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
                 // Right after the hidden message's own transcript line: replay
                 // shows this card in its place (parseHistoryLines.ts).
                 if let Some(frame) = fallback_card {
-                    let line = format!("{frame}\n");
-                    let zone = crate::backend::blockcontroller::shell::resolve_global_output_zone(
-                        &Some(deps.mstore.clone()),
-                        &block_id,
-                    );
-                    crate::backend::blockcontroller::shell::handle_append_block_file(
-                        &deps.broker,
-                        &block_id,
-                        crate::backend::blockcontroller::persistent::PERSISTENT_OUTPUT_SUBJECT,
-                        line.as_bytes(),
-                        Some(&deps.filestore_gate),
-                        zone.as_deref(),
-                    );
+                    crate::backend::cli_notice::append_to_pane(&deps.broker, &deps.filestore_gate, &deps.mstore, &block_id, &frame);
                 }
                 Ok(())
             }

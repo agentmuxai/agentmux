@@ -93,6 +93,34 @@ pub(crate) struct EntrySize {
     pub via: Option<&'static str>,
 }
 
+impl EntrySize {
+    /// The running summary's row: what a compaction delivery carries last.
+    fn running_summary(
+        size_bytes: usize,
+        tokens: usize,
+        delivered: &'static str,
+        source_size_bytes: usize,
+        source_tokens: usize,
+    ) -> Self {
+        Self {
+            label: "Running summary".into(),
+            source: "summary",
+            size_bytes,
+            tokens,
+            kind: "running_summary",
+            name: "Running summary (AgentMux)".into(),
+            tier: None,
+            bundle_id: None,
+            path: None,
+            delivered,
+            source_size_bytes,
+            source_tokens,
+            startup: None,
+            via: None,
+        }
+    }
+}
+
 /// What a `startup_file` item adds (SPEC_LAUNCH_CONTEXT_WORKSPACE_RULE_AND_
 /// STARTUP_FILES_2026_09_30.md §4.1, `backend::startup_files`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -473,16 +501,7 @@ fn send_partless_notice(state: &AppState, key: &DeliveryKey) {
             _ => return,
         }
     };
-    let line = format!("{frame}\n");
-    let zone = crate::backend::blockcontroller::shell::resolve_global_output_zone(&Some(state.mstore.clone()), &key.block_id);
-    crate::backend::blockcontroller::shell::handle_append_block_file(
-        &state.broker,
-        &key.block_id,
-        crate::backend::blockcontroller::persistent::PERSISTENT_OUTPUT_SUBJECT,
-        line.as_bytes(),
-        Some(&state.filestore),
-        zone.as_deref(),
-    );
+    crate::backend::cli_notice::append_to_pane(&state.broker, &state.filestore, &state.mstore, &key.block_id, &frame);
 }
 
 /// `POST /api/v1/agent/memory/session-start/ack`
@@ -533,16 +552,7 @@ pub(crate) async fn handle_session_start_ack(State(state): State<AppState>, Json
 
 /// Appends one notice line to the block's output and its transcript zone.
 fn append_notice(state: &AppState, block_id: &str, line: &str) {
-    let line = format!("{line}\n");
-    let zone = crate::backend::blockcontroller::shell::resolve_global_output_zone(&Some(state.mstore.clone()), block_id);
-    crate::backend::blockcontroller::shell::handle_append_block_file(
-        &state.broker,
-        block_id,
-        crate::backend::blockcontroller::persistent::PERSISTENT_OUTPUT_SUBJECT,
-        line.as_bytes(),
-        Some(&state.filestore),
-        zone.as_deref(),
-    );
+    crate::backend::cli_notice::append_line_to_pane(&state.broker, &state.filestore, &state.mstore, block_id, line);
 }
 
 /// The compaction notices parked for `block_id`, taken once: its stdout
@@ -732,22 +742,7 @@ fn compose_fallback_delivery(
         .flatten();
     if let Some(summary) = &summary {
         let (size, tokens) = (summary.len(), summary.chars().count().div_ceil(4));
-        items.push(EntrySize {
-            label: "Running summary".into(),
-            source: "summary",
-            size_bytes: size,
-            tokens,
-            kind: "running_summary",
-            name: "Running summary (AgentMux)".into(),
-            tier: None,
-            bundle_id: None,
-            path: None,
-            delivered: "full",
-            source_size_bytes: size,
-            source_tokens: tokens,
-            startup: None,
-            via: None,
-        });
+        items.push(EntrySize::running_summary(size, tokens, "full", size, tokens));
     }
     let delivery_id = format!("fb-{}", uuid::Uuid::new_v4());
     let frame = fallback_frame(&delivery_id, reason, &items, summary.as_ref().map_or(0, |s| s.len()), now);
@@ -764,20 +759,43 @@ fn fallback_frame(
     summary_bytes: usize,
     now: i64,
 ) -> serde_json::Value {
-    serde_json::json!({
-        "type": "system",
-        "subtype": "agentmux_memory_injected",
-        "id": format!("memory-injected-{delivery_id}"),
-        "reason": match reason {
+    card_frame(
+        format!("memory-injected-{delivery_id}"),
+        match reason {
             memory_delivery::FallbackReason::Compaction => "compact",
             memory_delivery::FallbackReason::FreshSession => "resume_fresh",
         },
-        "fallback": true,
-        "delivery_id": delivery_id,
+        entries,
+        summary_bytes,
+        now,
+        serde_json::json!({ "fallback": true, "delivery_id": delivery_id }),
+    )
+}
+
+/// The `agentmux_memory_injected` frame both delivery routes write: the
+/// fields the card reads, then `extra` (the route's own: the hook's session
+/// and part count, the fallback's delivery id).
+fn card_frame(
+    id: String,
+    reason: &str,
+    entries: &[EntrySize],
+    summary_bytes: usize,
+    at_ms: i64,
+    extra: serde_json::Value,
+) -> serde_json::Value {
+    let mut frame = serde_json::json!({
+        "type": "system",
+        "subtype": "agentmux_memory_injected",
+        "id": id,
+        "reason": reason,
         "entries": entries,
         "summary_bytes": summary_bytes,
-        "timestamp": chrono::DateTime::from_timestamp_millis(now).unwrap_or_default().to_rfc3339(),
-    })
+        "timestamp": chrono::DateTime::from_timestamp_millis(at_ms).unwrap_or_default().to_rfc3339(),
+    });
+    if let (Some(fields), serde_json::Value::Object(more)) = (frame.as_object_mut(), extra) {
+        fields.extend(more);
+    }
+    frame
 }
 
 /// Records that `block_id`'s CLI wrote the compaction boundary `uuid`. Called
@@ -1036,22 +1054,7 @@ fn delivery_items(entries: &[Entry], composed: &memory_delivery::Composed, deliv
                     startup: None,
                     via: None,
                 },
-                None => EntrySize {
-                    label: "Running summary".into(),
-                    source: "summary",
-                    size_bytes,
-                    tokens,
-                    kind: "running_summary",
-                    name: "Running summary (AgentMux)".into(),
-                    tier: None,
-                    bundle_id: None,
-                    path: None,
-                    delivered: delivered.as_str(),
-                    source_size_bytes,
-                    source_tokens,
-                    startup: None,
-                    via: None,
-                },
+                None => EntrySize::running_summary(size_bytes, tokens, delivered.as_str(), source_size_bytes, source_tokens),
             }
         })
         .collect()
@@ -1079,18 +1082,14 @@ fn acknowledge(d: &mut Delivery, part: usize) -> bool {
 /// size. `id` is stable for the delivery, so a live frame and a replay of the
 /// same line render once.
 fn notice_frame(key: &DeliveryKey, d: &Delivery) -> serde_json::Value {
-    let timestamp = chrono::DateTime::from_timestamp_millis(d.created_ms).map(|t| t.to_rfc3339()).unwrap_or_default();
-    serde_json::json!({
-        "type": "system",
-        "subtype": "agentmux_memory_injected",
-        "id": format!("memory-injected-{}-{}-{}", key.session_id, key.reason.as_str(), d.created_ms),
-        "reason": key.reason.as_str(),
-        "session_id": key.session_id,
-        "parts": d.parts.len(),
-        "entries": d.entries,
-        "summary_bytes": d.summary_bytes,
-        "timestamp": timestamp,
-    })
+    card_frame(
+        format!("memory-injected-{}-{}-{}", key.session_id, key.reason.as_str(), d.created_ms),
+        key.reason.as_str(),
+        &d.entries,
+        d.summary_bytes,
+        d.created_ms,
+        serde_json::json!({ "session_id": key.session_id, "parts": d.parts.len() }),
+    )
 }
 
 #[cfg(test)]

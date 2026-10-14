@@ -237,7 +237,7 @@ fn eligible(meta: &MetaMapType) -> Option<(String, String)> {
 
 /// The clause `memory-reinjection.ts` (`REASON_CLAUSE.compaction`) puts in a
 /// reinjection sent after the provider compacted the conversation.
-const COMPACTION_CLAUSE: &str = "Your recent conversation was just compacted into a summary.";
+use crate::backend::memory_delivery::COMPACTION_CLAUSE;
 
 /// `message` with the agent's running summary added, when it is the hidden
 /// memory reinjection sent after a compaction (§4.4, "Compaction reuse"): the

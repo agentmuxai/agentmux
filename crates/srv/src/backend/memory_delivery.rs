@@ -63,7 +63,7 @@ impl Reason {
         match self {
             Reason::Startup => "This is the start of a new session.",
             Reason::Clear => "The conversation was just cleared.",
-            Reason::Compact => "Your recent conversation was just compacted into a summary.",
+            Reason::Compact => COMPACTION_CLAUSE,
         }
     }
 }
@@ -233,6 +233,11 @@ fn push_sections(b: &mut Tracked, entries: &[Entry], global: &[usize], personal:
     wrote_section
 }
 
+/// The sentence after the signature when a compaction caused the delivery:
+/// one definition for the hook's text, the fallback's, and the check that
+/// adds the running summary (`continuity_state`).
+pub const COMPACTION_CLAUSE: &str = "Your recent conversation was just compacted into a summary.";
+
 /// The sentence every hidden memory re-delivery opens with, whatever the
 /// reason: what `is_hidden_reinjection_text` (srv) and
 /// `isMemoryReinjectionMessage` (frontend) recognise it by.
@@ -260,7 +265,7 @@ impl FallbackReason {
     /// The second sentence — the frontend's `REASON_CLAUSE`, verbatim.
     pub fn clause(self) -> &'static str {
         match self {
-            Self::Compaction => "Your recent conversation was just compacted into a summary.",
+            Self::Compaction => COMPACTION_CLAUSE,
             Self::FreshSession => {
                 "AgentMux could not resume this agent's prior session, so a fresh one was started. Any record \
                  of the prior conversation AgentMux had came with your first message, in an \
