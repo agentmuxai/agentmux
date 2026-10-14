@@ -64,6 +64,8 @@ use cef::*;
 
 use crate::state::AppState;
 
+pub(crate) mod reveal;
+
 // ---------------------------------------------------------------------------
 // Global floater HWND registry — used by the main-window cascade hook to
 // minimize/restore/destroy/z-order floaters without the owned-window
@@ -1314,9 +1316,9 @@ fn create_popup(
     }
 
     // A cold floater is shown cloaked until its page paints (no white frame
-    // before the browser's first one); see `floater_reveal`.
+    // before the browser's first one); see `reveal`.
     if cloak_until_painted {
-        crate::floater_reveal::cloak_until_painted(window_label, hwnd as isize);
+        reveal::cloak_until_painted(window_label, hwnd as isize);
     }
     unsafe {
         ShowWindow(hwnd, SW_SHOWNOACTIVATE);

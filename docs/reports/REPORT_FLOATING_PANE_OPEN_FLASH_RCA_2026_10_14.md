@@ -68,7 +68,7 @@ A warm floater never shows this: its pool page ran "Init Bare" while hidden, lon
 | | Change | Status |
 |---|---|---|
 | F1 | Hide `#main`, not `<body>`, in `app-init.ts` (three places) and in `error-display.ts`'s `mountRoot` | Done; the 10/10 → 0/10 result above |
-| F2 | Cold floater: shown cloaked (`DWMWA_CLOAK`) and uncloaked on the page's `report_first_paint`, with a 2 s backstop (`crates/cef/src/floater_reveal.rs`) | Done; not yet measured. Cloaked rather than hidden so the page loads and paints exactly as before (a hidden window's page may never present a frame). Cost: the cold window appears ~200 ms later than today, with no white. |
+| F2 | Cold floater: shown cloaked (`DWMWA_CLOAK`) and uncloaked on the page's `report_first_paint`, with a 2 s backstop (`crates/cef/src/floating_pane/reveal.rs`) | Done; not yet measured. Cloaked rather than hidden so the page loads and paints exactly as before (a hidden window's page may never present a frame). Cost: the cold window appears ~200 ms later than today, with no white. |
 | F3 | Fewer cold opens: refill the pane pool when a window is promoted, not after its reveal; or hold two. Each pooled window is ~55 MB of renderer. | Not done; trades against the memory work |
 
 F1 is frontend-only and independent of the others. F2 is host-only. To verify it, repeat §6's A/B with the recorder, which already starts at the first frame of a visible, un-cloaked window, so it sees what the user sees; the host log's `cold floater revealed` line gives the reason (`first-paint` or `backstop`) and how long the window stayed cloaked. Of F3, "refill on promote" costs CPU during the reveal, which is why it was deferred; the measured 0.47–1.4 s ready-again time is the number to beat.
