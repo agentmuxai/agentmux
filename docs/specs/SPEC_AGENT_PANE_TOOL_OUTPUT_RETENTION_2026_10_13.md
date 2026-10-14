@@ -1,7 +1,7 @@
 # Spec: an agent pane holds a bounded amount of tool output text
 
 **Date:** 2026-10-13
-**Status:** active. Phase 1 (§2 items 1–4 and 6–8) is implemented with this spec; phase 2 (item 5, inputs) has its own PR.
+**Status:** active. Phase 1 (§2 items 1–4 and 6–8) is implemented in #4847; phase 2 (item 5, inputs) will have its own PR.
 **Plan item:** #7 of `PLAN_RENDERER_MEMORY_FIXES_2026_10_12.md`.
 **Builds on:**
 - `SPEC_AGENT_PANE_TOOL_RESULT_UNLOADING_2026_10_01.md`: U1 and U2 shipped in #4125/#4126. That spec's status line still says "proposed — nothing here is built", which this PR corrects.
