@@ -4,6 +4,7 @@
 //! Shared utilities for AgentMux crates.
 
 pub mod api_types;
+pub mod client_events;
 mod cli;
 pub mod copy_into_dir;
 pub mod data_paths;

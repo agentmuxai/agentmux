@@ -1643,6 +1643,26 @@ async fn wps_publish_omits_persist_defaults_to_zero() {
     assert_eq!(resp.status(), StatusCode::OK);
 }
 
+#[tokio::test]
+async fn wps_publish_refuses_a_client_event_that_isnt_its_payload() {
+    // `tool_chunk` is a declared client event (mps_events::client_events!): its data must be a
+    // `ToolChunk`. An undeclared event is still relayed as sent.
+    for (body, status) in [
+        (serde_json::json!({ "event": "tool_chunk", "scopes": ["block:abc123"], "data": { "op": "chunk", "tool_id": "t" } }), StatusCode::BAD_REQUEST),
+        (serde_json::json!({ "event": "custom:thing", "scopes": ["block:abc123"], "data": { "anything": true } }), StatusCode::OK),
+    ] {
+        let req = Request::builder()
+            .method("POST")
+            .uri("/agentmux/wps/publish")
+            .header("X-AuthKey", "test-secret-key")
+            .header("Content-Type", "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap();
+        let resp = test_router().oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), status, "{body}");
+    }
+}
+
 // ---- First-class agent API (SPEC_AGENT_API_FIRST_CLASS_SURFACE) ----
 
 /// `GET /api/v1/self` resolves the seeded agent block to its tab / window /

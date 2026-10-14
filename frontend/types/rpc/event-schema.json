@@ -306,6 +306,15 @@
     }
   },
   {
+    "event": "compaction_started",
+    "payloadTs": {
+      "imports": [
+        "CompactionStarted"
+      ],
+      "name": "CompactionStarted"
+    }
+  },
+  {
     "event": "config",
     "payloadTs": {
       "imports": [
@@ -633,6 +642,15 @@
     }
   },
   {
+    "event": "singleton:claim",
+    "payloadTs": {
+      "imports": [
+        "SingletonClaimEvent"
+      ],
+      "name": "SingletonClaimEvent"
+    }
+  },
+  {
     "event": "skills:changed",
     "payloadTs": {
       "imports": [],
@@ -727,6 +745,15 @@
         "TimeSeriesData"
       ],
       "name": "TimeSeriesData"
+    }
+  },
+  {
+    "event": "tool_chunk",
+    "payloadTs": {
+      "imports": [
+        "ToolChunk"
+      ],
+      "name": "ToolChunk"
     }
   },
   {

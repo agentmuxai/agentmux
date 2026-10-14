@@ -45,7 +45,6 @@ use agentmux_common::win32::NoWindow;
 use anyhow::{Context, Result, anyhow};
 use clap::Parser;
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
-use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
@@ -429,48 +428,13 @@ fn kill_process_tree(pid: u32) {
     }
 }
 
-/// Wire payload published on the `tool_chunk` event. The tool_use_id
-/// rides in the payload (not the event name) so the frontend opens
-/// a single per-block subscription on mount and routes by `tool_id`
-/// rather than per-tool subscriptions racing the tool's execution.
-#[derive(Serialize)]
-struct ChunkMessage<'a> {
-    op: &'static str, // "chunk"
-    tool_id: &'a str,
-    kind: &'a str,    // "stdout" | "stderr" | "system"
-    content: &'a str,
-    timestamp: u64,
-}
-
-#[derive(Serialize)]
-struct TerminalMessage<'a> {
-    op: &'static str, // "terminal"
-    tool_id: &'a str,
-    exit_code: i32,
-    timestamp: u64,
-}
-
-/// Published once, only for a `--declared-background` invocation, so srv can
-/// record a real OS pid in `db_background_tasks` (that column exists today
-/// but nothing in production ever writes it — see
-/// docs/specs/SPEC_BACKGROUND_TASK_PID_CAPTURE_2026_08_20.md). Carries THIS
-/// process's own pid (the wrapper), not the inner `bash -c` child's — see
-/// that spec §2 for why the wrapper is the correct attachment point.
-#[derive(Serialize)]
-struct PidMessage<'a> {
-    op: &'static str, // "pid"
-    tool_id: &'a str,
-    pid: u32,
-    timestamp: u64,
-}
-
 /// Internal channel payload: a single line tagged with its source.
 /// Bytes are raw — UTF-8 conversion is deferred to the publish /
 /// aggregation site so non-UTF-8 output (binary `cat`, Windows
 /// legacy-encoded tools) doesn't abort the reader.
 #[derive(Debug)]
 struct LineEvent {
-    kind: &'static str, // "stdout" or "stderr"
+    kind: ToolChunkKind, // Stdout or Stderr
     /// Raw bytes including the trailing `\n` if present. May be the
     /// final fragment before EOF without a newline, in which case it
     /// has no trailing delimiter.
@@ -605,9 +569,8 @@ pub(crate) async fn run_command(mut args: Args, command: String) -> Result<i32> 
         let _ = client
             .publish_chunk(
                 args.block_id.as_deref(),
-                &TerminalMessage {
-                    op: "terminal",
-                    tool_id: &args.tool_id,
+                &ToolChunk::Terminal {
+                    tool_id: args.tool_id.clone(),
                     exit_code: status,
                     timestamp: now_ms(),
                 },
@@ -633,6 +596,7 @@ fn decode_command(b64: &str) -> Result<String> {
     Ok(String::from_utf8(bytes).context("--b64-cmd is not valid UTF-8")?)
 }
 
+use agentmux_common::client_events::{ToolChunk, ToolChunkKind};
 use agentmux_common::time::now_ms_u64 as now_ms;
 
 /// Log which streaming-relevant env vars the wrapper actually received,
@@ -663,11 +627,10 @@ async fn publish_system(
     client
         .publish_chunk(
             block_id,
-            &ChunkMessage {
-                op: "chunk",
-                tool_id,
-                kind: "system",
-                content: msg,
+            &ToolChunk::Chunk {
+                tool_id: tool_id.to_string(),
+                kind: ToolChunkKind::System,
+                content: msg.to_string(),
                 timestamp: now_ms(),
             },
         )
@@ -692,9 +655,8 @@ async fn publish_system(
 /// handlers). An earlier version of this comment claimed this retry
 /// covered that race — it never did (Codex P1, reagentx P2, PR #2681).
 async fn publish_pid(client: &WpsClient, tool_id: &str, block_id: Option<&str>, pid: u32) {
-    let msg = PidMessage {
-        op: "pid",
-        tool_id,
+    let msg = ToolChunk::Pid {
+        tool_id: tool_id.to_string(),
         pid,
         timestamp: now_ms(),
     };
@@ -711,17 +673,16 @@ async fn publish_line(
     client: &WpsClient,
     tool_id: &str,
     block_id: Option<&str>,
-    kind: &str,
+    kind: ToolChunkKind,
     line: &str,
 ) -> Result<()> {
     client
         .publish_chunk(
             block_id,
-            &ChunkMessage {
-                op: "chunk",
-                tool_id,
+            &ToolChunk::Chunk {
+                tool_id: tool_id.to_string(),
                 kind,
-                content: line,
+                content: line.to_string(),
                 timestamp: now_ms(),
             },
         )
@@ -788,7 +749,7 @@ pub(crate) fn locate_bash() -> Result<PathBuf> {
 ///    next byte to trigger a natural flush.
 async fn stream_reader<R>(
     mut reader: R,
-    kind: &'static str,
+    kind: ToolChunkKind,
     tx: mpsc::Sender<LineEvent>,
     last_activity: Arc<std::sync::Mutex<std::time::Instant>>,
 )
@@ -887,7 +848,7 @@ where
                 }
             }
             Ok(Err(e)) => {
-                tracing::warn!(target: "bashwrap", error = %e, kind, "read error");
+                tracing::warn!(target: "bashwrap", error = %e, ?kind, "read error");
                 return;
             }
             Err(_elapsed) => {
@@ -1341,8 +1302,8 @@ async fn run_via_pipes(
     let last_activity = Arc::new(std::sync::Mutex::new(std::time::Instant::now()));
 
     let (tx, rx) = mpsc::channel::<LineEvent>(1024);
-    let stdout_reader = tokio::spawn(stream_reader(stdout, "stdout", tx.clone(), last_activity.clone()));
-    let stderr_reader = tokio::spawn(stream_reader(stderr, "stderr", tx.clone(), last_activity.clone()));
+    let stdout_reader = tokio::spawn(stream_reader(stdout, ToolChunkKind::Stdout, tx.clone(), last_activity.clone()));
+    let stderr_reader = tokio::spawn(stream_reader(stderr, ToolChunkKind::Stderr, tx.clone(), last_activity.clone()));
     drop(tx);
 
     let publisher_handle = spawn_publisher_loop(args, mps.cloned(), buffered.clone(), rx);
@@ -1492,7 +1453,7 @@ fn pty_reader_loop(
     // labelled "stdout" because there is no way to recover the
     // original FD distinction from the master read. The pipe path
     // (`run_via_pipes`) preserves the split.
-    let kind: &'static str = "stdout";
+    let kind = ToolChunkKind::Stdout;
 
     // Offload the blocking read to a dedicated thread so the main
     // loop can use recv_timeout for the quiet-window flush. Bound the
@@ -2101,12 +2062,12 @@ fn spawn_publisher_loop(
 
         // Pending leading-\r spinner frame: holds (content_after_cr, kind).
         // Flushed on the next non-\r line or at EOF.
-        let mut pending_cr_line: Option<(String, &'static str)> = None;
+        let mut pending_cr_line: Option<(String, ToolChunkKind)> = None;
 
         while let Some(event) = rx.recv().await {
             {
                 let mut buf = buffered.lock().await;
-                if event.kind == "stderr" {
+                if event.kind == ToolChunkKind::Stderr {
                     buf.extend_from_slice(b"[stderr] ");
                 }
                 // Strip a single leading `\r` carried by a collapsed leading-\r

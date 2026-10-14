@@ -22,6 +22,7 @@ import type { BlockControllerRuntimeStatus } from "@/types/rpc/BlockControllerRu
 import type { BlockRefEvent } from "@/types/rpc/BlockRefEvent";
 import type { BlockRevealEvent } from "@/types/rpc/BlockRevealEvent";
 import type { BtwAnswerChunkEvent } from "@/types/rpc/BtwAnswerChunkEvent";
+import type { CompactionStarted } from "@/types/rpc/CompactionStarted";
 import type { ConfigEvent } from "@/types/rpc/ConfigEvent";
 import type { ConnStatus } from "@/types/rpc/ConnStatus";
 import type { CredentialsRevokedEvent } from "@/types/rpc/CredentialsRevokedEvent";
@@ -59,6 +60,7 @@ import type { RunEvent } from "@/types/rpc/RunEvent";
 import type { ShellChunkEvent } from "@/types/rpc/ShellChunkEvent";
 import type { ShellNodeCreateEvent } from "@/types/rpc/ShellNodeCreateEvent";
 import type { ShutdownLineEvent } from "@/types/rpc/ShutdownLineEvent";
+import type { SingletonClaimEvent } from "@/types/rpc/SingletonClaimEvent";
 import type { SrvInfo } from "@/types/rpc/SrvInfo";
 import type { SubagentAbandonedEvent } from "@/types/rpc/SubagentAbandonedEvent";
 import type { SubagentActivityEvent } from "@/types/rpc/SubagentActivityEvent";
@@ -69,6 +71,7 @@ import type { SubagentNamedEvent } from "@/types/rpc/SubagentNamedEvent";
 import type { SubagentSpawnedEvent } from "@/types/rpc/SubagentSpawnedEvent";
 import type { SubagentUpdatedEvent } from "@/types/rpc/SubagentUpdatedEvent";
 import type { TimeSeriesData } from "@/types/rpc/TimeSeriesData";
+import type { ToolChunk } from "@/types/rpc/ToolChunk";
 import type { UserAttentionEvent } from "@/types/rpc/UserAttentionEvent";
 import type { ViewerPairedEvent } from "@/types/rpc/ViewerPairedEvent";
 import type { WSFileEventData } from "@/types/rpc/WSFileEventData";
@@ -109,6 +112,7 @@ export type MuxEventPayloads = {
   blockfile: WSFileEventData;
   blockstats: TimeSeriesData;
   btw_answer_chunk: BtwAnswerChunkEvent;
+  compaction_started: CompactionStarted;
   config: ConfigEvent;
   connchange: ConnStatus;
   controllerstatus: BlockControllerRuntimeStatus;
@@ -146,6 +150,7 @@ export type MuxEventPayloads = {
   remoteschange: null;
   shell_chunk: ShellChunkEvent;
   shell_node_create: ShellNodeCreateEvent;
+  "singleton:claim": SingletonClaimEvent;
   "skills:changed": null;
   srvinfo: SrvInfo;
   "subagent:abandoned": SubagentAbandonedEvent;
@@ -157,6 +162,7 @@ export type MuxEventPayloads = {
   "subagent:spawned": SubagentSpawnedEvent;
   "subagent:updated": SubagentUpdatedEvent;
   sysinfo: TimeSeriesData;
+  tool_chunk: ToolChunk;
   userattention: UserAttentionEvent;
   "viewer:paired": ViewerPairedEvent;
   "waveobj:batchedupdates": MuxObjBatch;
@@ -205,6 +211,7 @@ export const TYPED_MUX_EVENTS = [
   "blockfile",
   "blockstats",
   "btw_answer_chunk",
+  "compaction_started",
   "config",
   "connchange",
   "controllerstatus",
@@ -242,6 +249,7 @@ export const TYPED_MUX_EVENTS = [
   "remoteschange",
   "shell_chunk",
   "shell_node_create",
+  "singleton:claim",
   "skills:changed",
   "srvinfo",
   "subagent:abandoned",
@@ -253,6 +261,7 @@ export const TYPED_MUX_EVENTS = [
   "subagent:spawned",
   "subagent:updated",
   "sysinfo",
+  "tool_chunk",
   "userattention",
   "viewer:paired",
   "waveobj:batchedupdates",
