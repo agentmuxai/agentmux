@@ -1,7 +1,7 @@
 # SPEC: Context deliveries — what the agent was given, one item at a time
 
-**Status:** active — CD1 (#4037), CD2a (#4041) and CD2b (#4130) implemented; startup-file items implemented under the launch-context spec (#4129, #4131); CD3 proposed (awaits the owner's decision on storing bodies); CD4 moved to the resume-phase spec (§6); CD5 narrowed to the narration tag. None of it has been checked live (§5.1).
-**Date:** 2026-09-30. **Revised:** 2026-10-14 (§0.1, §1.3, the §2 note, §3–§9).
+**Status:** active — CD1 (#4037), CD2a (#4041) and CD2b (#4130) implemented; startup-file items implemented under the launch-context spec (#4129, #4131); CD3 proposed (awaits the owner's decision on storing bodies); CD4 moved to the resume-phase spec (§6); CD5 narrowed to the narration tag. B1 (#4901), B2 (#4909), C1 (#4915), C3 (#4919) and C2 fixed; checked live on 2026-10-14 (§5.2), which found C1–C3 (§9).
+**Date:** 2026-09-30. **Revised:** 2026-10-14 (§0.1, §1.3, the §2 note, §3–§9; live results §5.2).
 **Verified against:** `agentmux` `main` @ `5c0d603ec` (2026-10-14), by reading code,
 and #4888 at `40623c1ba` for what it changes (§1.3, §3.5, §9). §2 is the
 2026-09-30 baseline: its line numbers refer to the tree before the October
@@ -48,8 +48,8 @@ From the owner, 2026-09-30:
 | Is "ambient" the right word? | **Decided** (§1) and in the public glossary. Only the narration tag still shows "ambient" (CD5). |
 | *Later (2026-10-13):* the card right after a resume, account switch or compaction, then the agent saying where it is picking up | **Owned by** the resume-phase spec (#4888), which also found that cards can land late (§9). |
 
-Nothing here has been seen in a running app. The live check (§5.1) is the
-next step, and it runs together with #4888's.
+Checked live on 2026-10-14 (§5.2): the cards work, and the run found three
+more places where a delivery still reads as something else (§9, C1–C3).
 
 ## 1. Terms
 
@@ -558,6 +558,25 @@ onto history):
   hidden line. Replay handles both; the answer says which one B1's fix
   must expect in practice.
 
+### 5.2 Live results (2026-10-14)
+
+A local build at `40623c1ba` (#4888's merged head), Windows, CEF 154,
+driven over CDP. Each pane's document state was read from the store, so
+the results don't depend on scrolling. The agent was a throwaway, deleted
+afterwards. Details: #4888, issuecomment-6174342680.
+
+| Event | Result |
+|---|---|
+| New session | One card: 5 startup files, 11 Global Memory entries "in startup file". Correct. |
+| Manual `/compact` | Compacted row, summary card, memory card, then #4888's catch-up reply. The hook's card landed **above** the compacted row (C2). The CLI's `<local-command-stdout>` line showed as a user message (C1). |
+| Reload | Same nodes, no duplicates, the catch-up reply kept. |
+| `/compact` queued behind a turn | As above, but the **fallback** delivered, so the memory card landed after the summary card (C2). |
+| Fresh session onto history | Not reached: stopping the CLI and moving its session file aside starts a brand-new session, not a rejected resume. A real account switch needs a second account. |
+| Transcript order | A fallback card is written **after** its hidden message (B1's fix handles both orders). |
+
+The My Agents tile and the Swarm row showed delivered text as the agent's
+last prompt (C3).
+
 ## 6. Phases
 
 | Phase | What ships | State |
@@ -569,7 +588,7 @@ onto history):
 | **CD3** | Bodies on expand (§3.4 step 4): storage, RPC, expanded rows. | proposed; needs the owner's decision (§7 Q1) |
 | ~~CD4~~ | Continuation-packet card. | **moved** to the resume-phase spec, Phase 3 (§3.5) |
 | **CD5** | The narration tag "ambient" → "AgentMux" (§1.3), and the ambient framework spec's note (§8). The reason and title renames moved to the resume-phase spec, Phase 3. | proposed |
-| **CD6** | Fix the card bugs in §9 that this spec owns (B1, B2), add the missing tests (§5), run the live check (§5.1). | next, after #4888 |
+| **CD6** | Fix the card bugs in §9 that this spec owns, add the missing tests (§5), run the live check (§5.1). | B1, B2, C1, C2, C3 fixed; live check run (§5.2); the fixes still to be seen live |
 
 **Every phase ships its docs with it** (§8). CD2a and CD2b did not: the
 public memory page still describes the old one-line notice. That is owed
@@ -629,7 +648,10 @@ its author (agreed on #4888).
 
 | # | Bug | Owner |
 |---|---|---|
-| **B1** | **A fallback card shows twice on replay** when its hidden line and the card fall on different history pages. Each page is parsed separately, so the page with the hidden line makes an "Entry N" row (`buildMemoryReinjectionNodeFromReplay`) and the other page makes the card. Fix: when pages are joined, drop a `memory_reinjection` row that sits next to a `fallback` card with no agent work between them (the reply is hidden, so nothing should be). | this spec, CD6 |
-| **B2** | **A compaction seen late can re-deliver memory the hook already delivered.** `claim_boundary` looks only at hook deliveries from the last 60 s (`CLAIM_WINDOW_MS`), never at `completed`. A boundary that reaches the pane more than a minute after the CLI wrote it (a reconnect, a remounted pane reading the gap) gets "deliver", and the agent gets its memory twice in a hidden turn. Fix: date the claim by the boundary's own arrival on srv (`boundary_origins` already records it) and stand down when `completed` has a hook delivery after it, as `claim_event` does for a fresh session. | this spec, CD6 |
+| **B1** (fixed, #4901) | **A fallback card shows twice on replay** when its hidden line and the card fall on different history pages. Each page is parsed separately, so the page with the hidden line makes an "Entry N" row (`buildMemoryReinjectionNodeFromReplay`) and the other page makes the card. Fix: when pages are joined, drop a `memory_reinjection` row that sits next to a `fallback` card with no agent work between them (the reply is hidden, so nothing should be). | this spec, CD6 |
+| **B2** (fixed, #4909) | **A compaction seen late can re-deliver memory the hook already delivered.** `claim_boundary` looks only at hook deliveries from the last 60 s (`CLAIM_WINDOW_MS`), never at `completed`. A boundary that reaches the pane more than a minute after the CLI wrote it (a reconnect, a remounted pane reading the gap) gets "deliver", and the agent gets its memory twice in a hidden turn. Fix: date the claim by the boundary's own arrival on srv (`boundary_origins` already records it) and stand down when `completed` has a hook delivery after it, as `claim_event` does for a fresh session. | this spec, CD6 |
 | B3 | Cards written after the conversation moved on (late fallback, a mid-session respawn, a compaction claim racing the hook). | resume-phase spec, §2.1 (1–3) |
 | B4 | Another block's lines in the shared transcript zone can trigger this pane's fallback (`fresh` outcome). | resume-phase spec, Phase 1 (`foreign`, recency) |
+| **C1** (fixed, this PR) | **The CLI's `<local-command-stdout>` frame showed as a user message.** After `/compact` (and other local slash commands) Claude Code echoes a plain-string user frame wrapped in `<local-command-stdout>…</local-command-stdout>`, here "Compacted PreCompact [agentmux-bashwrap precompact --trigger=manual] completed successfully". Nothing recognised the tag, so the translator made it a `user_message`, live and on replay. Now `commandOutputNode` (`context-delivery.ts`) turns it into a one-item card, "Claude Code command output", with an excerpt that opens to the text, in `interceptFrame` for live and replay alike; an empty one is dropped. A text card also stops `supersededCard`, so a later new-session card never replaces it. | this spec, CD6 |
+| **C2** (fixed, this PR) | **The memory card's place depended on which path delivered.** The hook's card is written when its parts are acknowledged, which can be before the stream reaches the compaction boundary, so it lands above "Context compacted". The fallback's card lands after the summary card. Now srv parks a compaction's hook notice that finishes before the block's stdout shows the boundary (`park_compaction_notice`), and the stdout reader writes it just ahead of the first line after the boundary that is neither `user` nor `system` (`take_parked_notices`): after the summary and the command's output, where the fallback's card lands too. A notice whose boundary never comes is written after 30 s. | this spec, CD6 (handed over on #4888) |
+| **C3** (fixed, #4919) | **Readers outside the pane took deliveries for the user's prompt.** The My Agents tile showed Claude Code's compaction summary ("This session is being continued…") as the last prompt, and the Swarm row showed the "# Session Context" startup message as the activity line. §3.6 covered the digest, titles and ghost text, but not these two. Now the tile's reader (`history_summary.rs`, `user_prompt_in_line`) skips `isSynthetic` user frames and the summary's opening words, and the pane (`useAgentActivitySummary.ts`) neither stores the startup message as `term:last_prompt` nor sends it to the title model. | this spec, CD6 |

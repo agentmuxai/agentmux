@@ -59,8 +59,14 @@ fn verify_channel_v2(
     let sig = req.channel_sig_v2.as_deref()?;
     let uid = req.source_uid.as_deref().filter(|u| !u.is_empty())?;
     let source = req.source_agent.as_deref()?;
+    // Only the keys this UID published under the name it claims, in the
+    // channel it claims: a UID's key proves the UID, and without this any
+    // agent could sign with its own UID key under another agent's name.
+    let claimed = source.trim().to_lowercase();
+    let channel = req.source_channel.as_deref().unwrap_or("");
     let keys: Vec<Vec<u8>> = agent_registry::lookup_shared_by_uid(shared_dir, uid)
         .into_iter()
+        .filter(|e| e.agent_id.trim().to_lowercase() == claimed && e.channel == channel)
         .filter_map(|e| agentmux_common::jekt_sign::decode_key(&e.uid_public_key))
         .collect();
     if keys.is_empty() {
@@ -69,7 +75,6 @@ fn verify_channel_v2(
     let ts = req.ts_secs.unwrap_or(0);
     let fresh = ts > 0 && (now_secs - ts).abs() <= CHANNEL_SIG_MAX_AGE_SECS;
     let msgid = req.request_id.as_deref().unwrap_or("");
-    let channel = req.source_channel.as_deref().unwrap_or("");
     Some(
         fresh
             && keys.iter().any(|key| {

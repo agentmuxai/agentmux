@@ -13,6 +13,7 @@
 // (implicitly non-draggable). No explicit draggable="false" on any parent →
 // no WebKitGTK breakage, and drag is correctly restricted to the header.
 
+import { notifyPaneReflow } from "@/app/platform/pane-anim";
 import { getApi } from "@/app/store/global";
 import { preventUnhandled } from "@atlaskit/pragmatic-drag-and-drop/prevent-unhandled";
 import clsx from "clsx";
@@ -102,6 +103,13 @@ const linux: TileLayoutPlatform = {
     boundsCheckRequiresTileDrag: true,
 
     clearDraggingWhenInactive: false,
+
+    // Native browser panes re-sample their placeholder per frame for a moment
+    // after a layout change, so a pane that only moves (a swap, a neighbour
+    // closing) follows within a frame instead of waiting for the 200 ms
+    // safety poll; one that also resizes is already caught by its
+    // ResizeObserver. See SPEC_PANE_REFLOW_ANIMATION_2026_05_29.md.
+    onLeafGeometryChange: notifyPaneReflow,
 
     beforeDragStart: () => {
         // Suppress WebKitGTK's "drop rejected" snapback — a pane

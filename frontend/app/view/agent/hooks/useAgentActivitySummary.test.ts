@@ -154,6 +154,19 @@ describe("useAgentActivitySummary — trigger", () => {
         dispose();
     });
 
+    it("ignores AgentMux's startup message: not a prompt, not a title's input (context delivery §9 C3)", async () => {
+        const { setPhase, dispose } = setup();
+
+        setPhase({ kind: "Submitting", submittedAt: 1, pendingContent: "# Session Context\n## Identity\n- **Name:** Cdtest" });
+        await Promise.resolve();
+        await Promise.resolve();
+
+        expect(hub.activitySummary).not.toHaveBeenCalled();
+        expect(hub.updateMeta).not.toHaveBeenCalled();
+        expect(hub.meta["term:last_prompt"]).toBeUndefined();
+        dispose();
+    });
+
     it("still fires normally when hidden is explicitly false or omitted", async () => {
         hub.activitySummary.mockResolvedValue({ summary: "t", tokens: null });
         const { setPhase, dispose } = setup();

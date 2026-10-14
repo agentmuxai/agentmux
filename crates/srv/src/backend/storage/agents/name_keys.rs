@@ -41,7 +41,10 @@ pub(super) fn resolve_slug_collision(conn: &rusqlite::Connection, base: &str) ->
     let mut n: u32 = 2;
     loop {
         let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM db_agents WHERE slug = ?1",
+            // Case-insensitive: every per-name key table folds the name, so
+            // `Victim` beside `victim` would get victim's keys. Slugs are
+            // ASCII (`slug::is_valid_agent_id`), so NOCASE folds all of them.
+            "SELECT COUNT(*) FROM db_agents WHERE slug = ?1 COLLATE NOCASE",
             params![candidate],
             |row| row.get(0),
         )?;
@@ -352,8 +355,9 @@ impl Store {
     }
 
     /// The slugs of every row whose slug equals `name` trimmed and folded
-    /// (identity M4d-3's drift count; slug uniqueness is case-sensitive, so
-    /// "Aria" and "aria" are two rows).
+    /// (identity M4d-3's drift count). New slugs collide case-insensitively
+    /// (`resolve_slug_collision`), so only rows from before that can differ
+    /// by case alone.
     pub fn agent_slugs_folded(&self, name: &str) -> Result<Vec<String>, StoreError> {
         // Folded in Rust as the key tables fold, never SQLite's ASCII-only lower().
         let folded = name.trim().to_lowercase();

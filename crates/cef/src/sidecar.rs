@@ -263,10 +263,8 @@ pub async fn spawn_backend(state: &Arc<AppState>) -> Result<BackendSpawnResult, 
     // Spawn the process
     let auth_key = state.auth_key.lock().clone();
     let host_reg_secret = state.host_reg_secret.lock().clone();
-    tracing::info!(
-        "Spawning agentmux-srv with auth key: {}...",
-        &auth_key[..8.min(auth_key.len())]
-    );
+    // Never log any part of the auth key: it opens every instance route.
+    tracing::info!("Spawning agentmux-srv");
 
     // GUI launches (Finder / Dock / mounted DMG) inherit launchd's stripped
     // PATH, so the srv can't find nvm/Homebrew node/npm/git — `npm install`

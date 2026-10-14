@@ -436,7 +436,7 @@ impl Store {
             // launch rows to exclude in the first place.
             let mut stmt = conn.prepare(&format!(
                 "{AGENT_DEFINITION_SELECT}
-                 WHERE (lower(trim(name)) = ?1 OR slug = ?2)
+                 WHERE (lower(trim(name)) = ?1 OR slug = ?2 COLLATE NOCASE)
                    AND is_seeded = 0
                  ORDER BY CASE WHEN lower(trim(name)) = ?1 THEN 0 ELSE 1 END
                  LIMIT 1"
@@ -458,21 +458,8 @@ impl Store {
             } else {
                 agent.slug.clone()
             };
-            let mut candidate = base.clone();
-            let mut n: u32 = 2;
-            loop {
-                let count: i64 = conn.query_row(
-                    "SELECT COUNT(*) FROM db_agents WHERE slug = ?1",
-                    params![candidate],
-                    |row| row.get(0),
-                )?;
-                if count == 0 {
-                    break;
-                }
-                candidate = format!("{}-{}", base, n);
-                n += 1;
-            }
-            agent.slug = candidate;
+            // The shared resolver: case-insensitive, like the key tables.
+            agent.slug = super::name_keys::resolve_slug_collision(&conn, &base)?;
             let is_template = if agent.is_seeded == 1 { 1_i64 } else { 0_i64 };
             let parent_template_id = if agent.is_seeded == 1 { String::new() } else { agent.parent_id.clone() };
             conn.execute(
