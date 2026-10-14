@@ -999,6 +999,7 @@ declare global {
         "agent:mcpselfheal"?: boolean;
         "agent:turnscopedtail"?: boolean;
         "agent:onewayflow"?: boolean;
+        "agent:followcontroller"?: boolean;
         "agent:livefeed"?: boolean;
         "agent:livefeedturns"?: number;
         "markdown:streamtailinplace"?: boolean;

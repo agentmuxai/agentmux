@@ -3,7 +3,9 @@
 **Status:** active — Phase 0 (recorder + soak) and Phase 1 (the one-way path behind `agent:onewayflow`, default on)
 in #4438; the soak baseline, Phase 2 (sources) and Phase 3 (default on everywhere, delete the old path) remain. §3–§5
 were revised after an adversarial review of the first draft (§9). Builds on, and does not replace, the follow state machine
-(`SPEC_AGENT_PANE_SCROLL_FOLLOW_STATE_MACHINE_2026_09_24.md`; its Phase 0/0b shipped in #3652/#3658, Phases 1–5 open).
+(`SPEC_AGENT_PANE_SCROLL_FOLLOW_STATE_MACHINE_2026_09_24.md`; its Phase 0/0b shipped in #3652/#3658, Phases 1–2 are
+implemented behind `agent:followcontroller`, Phases 3–5 open; with it on, that state machine decides follow and detach
+on this path too, and `OneWayFlow` keeps the pin, the compensation and the spacer: its §8.1).
 **Date:** 2026-10-07.
 **Requested by:** repo owner (asafebgi): "what i continue to see in the agent pane is the overshoot followed by
 correction. That model for new conversation content may be no good, it may need a rethink. the UX we want is a simple
