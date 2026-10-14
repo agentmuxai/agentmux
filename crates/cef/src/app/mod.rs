@@ -276,6 +276,8 @@ wrap_window_delegate! {
             #[cfg(not(target_os = "windows"))]
             if let Some((state, label)) = self.window_registration.as_ref() {
                 state.windows.lock().remove(label);
+                #[cfg(target_os = "linux")]
+                crate::browser_panes::bounds::forget_window(label);
                 tracing::info!(
                     window_label = %label,
                     "[browser-pane] unregistered Window on destroy"

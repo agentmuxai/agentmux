@@ -192,6 +192,11 @@ pub(crate) fn follow_window_resize(state: &Arc<AppState>, window_label: &str) {
 pub(crate) fn window_resized(state: &Arc<AppState>, window_label: &str, window: &Window) {
     let started = std::time::Instant::now();
     let (width, height) = window_client_px(window);
+    // The callback also fires when the window only moves (X11). Panes sit
+    // relative to the window, so a move needs nothing from them.
+    if CLIENT_SIZES.lock().insert(window_label.to_string(), (width, height)) == Some((width, height)) {
+        return;
+    }
     tracing::debug!(window = window_label, width, height, "[pane-bounds] window resized");
     let panes: Vec<(String, cef::OverlayController)> = state
         .browser_pane_overlays
@@ -224,6 +229,16 @@ pub(crate) fn window_resized(state: &Arc<AppState>, window_label: &str, window: 
         ms = started.elapsed().as_secs_f64() * 1000.0,
         "[pane-bounds] followed"
     );
+}
+
+/// Each window's client size when `window_resized` last saw it, by label.
+#[cfg(target_os = "linux")]
+static CLIENT_SIZES: LazyLock<Mutex<HashMap<String, (i32, i32)>>> = LazyLock::new(Default::default);
+
+/// The window `window_label` is gone: forget its size.
+#[cfg(target_os = "linux")]
+pub(crate) fn forget_window(window_label: &str) {
+    CLIENT_SIZES.lock().remove(window_label);
 }
 
 /// `window`'s client area in physical pixels: what the page's viewport
