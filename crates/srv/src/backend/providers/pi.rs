@@ -22,7 +22,7 @@ pub(super) static PI: ProviderConfig = ProviderConfig {
     auth_config_dir_env_var: "PI_CODING_AGENT_DIR",
     auth_dir_name: "pi",
     // Not OAuth-class -- never reaches ensure_history_link. Also
-    // ACP-native (see the "openclaw" entry above) if that changes.
+    // ACP-native (see providers/openclaw.rs) if that changes.
     history_native_subdir: None,
     auth_extra_env: &[],
     unset_env: &[],

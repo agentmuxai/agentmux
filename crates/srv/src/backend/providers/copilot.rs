@@ -19,7 +19,7 @@ pub(super) static COPILOT: ProviderConfig = ProviderConfig {
     styled_output_format: "acp",
     auth_config_dir_env_var: "COPILOT_HOME",
     auth_dir_name: "copilot",
-    // ACP-native, same as "openclaw" above -- no fixed on-disk history
+    // ACP-native, same as openclaw (providers/openclaw.rs) -- no fixed on-disk history
     // directory to redirect.
     history_native_subdir: None,
     auth_extra_env: &[],
