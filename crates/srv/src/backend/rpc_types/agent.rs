@@ -8,18 +8,24 @@
 use serde::{Deserialize, Serialize};
 
 /// Request for agent.open — find or create an agent pane for the given agent_id.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "snake_case")]
 pub struct CommandAgentOpenData {
     pub agent_id: String,
+    #[ts(optional)]
     pub tab_id: Option<String>,
+    #[ts(optional)]
     pub split_direction: Option<String>,
+    #[ts(optional)]
     pub split_reference_block_id: Option<String>,
+    #[ts(optional)]
     pub focus: Option<bool>,
 }
 
 /// Request for agent.send — send a message to an agent pane.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "snake_case")]
 pub struct CommandAgentSendData {
     pub block_id: String,
@@ -27,30 +33,37 @@ pub struct CommandAgentSendData {
 }
 
 /// Request for agent.stop — stop a running agent subprocess.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "snake_case")]
 pub struct CommandAgentStopApiData {
     pub block_id: String,
+    #[ts(optional)]
     pub signal: Option<String>,
     /// Also stop the agent's `run_in_background` tasks? Absent: the user's
     /// `agent:stopkeepsbackground` setting (default keep).
     #[serde(default)]
+    #[ts(optional)]
     pub stop_background: Option<bool>,
 }
 
 /// Request for agent.status — query status of an agent pane.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "snake_case")]
 pub struct CommandAgentStatusData {
     pub block_id: String,
 }
 
 /// Request for agent.output — read buffered output lines from an agent pane.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "snake_case")]
 pub struct CommandAgentOutputData {
     pub block_id: String,
+    #[ts(optional, type = "number")]
     pub after_line: Option<usize>,
+    #[ts(optional, type = "number")]
     pub max_lines: Option<usize>,
 }
 
@@ -62,7 +75,8 @@ pub struct CommandAgentStreamData {
 }
 
 /// Response from agent.open.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "snake_case")]
 pub struct AgentOpenResult {
     pub block_id: String,
@@ -165,7 +179,8 @@ pub struct AgentDefineResult {
 }
 
 /// Response from agent.send.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "snake_case")]
 pub struct AgentSendResult {
     pub block_id: String,
@@ -174,7 +189,8 @@ pub struct AgentSendResult {
 }
 
 /// Response from agent.stop.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "snake_case")]
 pub struct AgentStopResult {
     pub block_id: String,
@@ -183,7 +199,8 @@ pub struct AgentStopResult {
 }
 
 /// Response from agent.status.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "snake_case")]
 pub struct AgentStatusResult {
     pub block_id: String,
@@ -197,7 +214,8 @@ pub struct AgentStatusResult {
 }
 
 /// A single entry in the agent.list response.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "snake_case")]
 pub struct AgentListEntry {
     pub block_id: String,
@@ -209,18 +227,21 @@ pub struct AgentListEntry {
 }
 
 /// Response from agent.list.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "snake_case")]
 pub struct AgentListResult {
     pub agents: Vec<AgentListEntry>,
 }
 
 /// Response from agent.output.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "snake_case")]
 pub struct AgentOutputResult {
     pub block_id: String,
     pub lines: Vec<String>,
+    #[ts(type = "number")]
     pub total_lines: usize,
     pub has_more: bool,
 }
