@@ -520,10 +520,9 @@ fn apply_srv_window_opened(
     Ok(())
 }
 
-/// Phase E.5 — delete the persisted Window row + remove the id
-/// from `Client.windowids`. Mirrors `wcore::close_window`'s order:
-/// prune client.windowids FIRST (so any read between the two ops
-/// doesn't see a dangling id), then delete the Window row.
+/// Phase E.5 — remove the id from `Client.windowids`, then delete the
+/// persisted Window row, in one transaction. Pruning FIRST means any
+/// read between the two ops doesn't see a dangling id.
 /// (codex P1 #619.)
 ///
 /// `pub(crate)`: besides the `SrvWindowClosed` subscriber arm, the
@@ -536,9 +535,9 @@ pub(crate) fn apply_srv_window_closed(
     window_id: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // F1.A — Client.windowids prune + Window-row delete in one tx.
-    // Order matters (mirrors `wcore::close_window`): prune client
-    // FIRST so any read between the two ops doesn't see a dangling
-    // id pointing at a Window row that's already been removed.
+    // Order matters: prune the client list FIRST so any read between
+    // the two ops doesn't see a dangling id pointing at a Window row
+    // that's already been removed.
     mstore.with_tx(|tx| {
         let window_exists = tx.get::<Window>(window_id)?.is_some();
         // Always defensively prune the client list — handles the
