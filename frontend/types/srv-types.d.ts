@@ -667,6 +667,7 @@ declare global {
         "editor:fontsize"?: number;
         "graph:*"?: boolean;
         "graph:numpoints"?: number;
+        "graph:windowsecs"?: number;
         "graph:metrics"?: string[];
         "sysinfo:type"?: string;
         "sysinfo:focus"?: string | null;

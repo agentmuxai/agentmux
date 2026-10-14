@@ -175,9 +175,9 @@ const WINDOWS = [
  * samples it spans. A window longer than srv's history holds is left out
  * rather than shown under a label it can't fill.
  */
-export function windowChoices(intervalSecs: number): { points: number; label: string }[] {
+export function windowChoices(intervalSecs: number): { secs: number; points: number; label: string }[] {
     const interval = intervalSecs > 0 ? intervalSecs : 1;
-    return WINDOWS.map((w) => ({ points: Math.round(w.secs / interval), label: w.label })).filter(
+    return WINDOWS.map((w) => ({ secs: w.secs, points: Math.round(w.secs / interval), label: w.label })).filter(
         (c) => c.points <= MAX_WINDOW_POINTS
     );
 }

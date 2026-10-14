@@ -49,9 +49,9 @@ type OverviewProps = {
     plotData: DataItem[];
     targetLen: number;
     intervalSecs: number;
-    /** Samples in the window now, and a way to change it. */
-    windowPoints: number;
-    onWindow: (points: number) => void;
+    /** The window shown now, in seconds, and a way to change it. */
+    windowSecs: number;
+    onWindow: (secs: number) => void;
     paused: boolean;
     onPause: (paused: boolean) => void;
     /** The area shown alone, or `null` for every area, and a way to change it. */
@@ -74,6 +74,15 @@ interface Tile {
     color: string;
     format: (v: number) => string;
     range0: (rows: DataItem[]) => [number, number];
+}
+
+/** Both directions' peaks over the window ("peak ↓ 2.5 MB/s  ↑ 400 KB/s"), leaving out one with no readings. */
+function peaks(inLabel: string, inStats: WindowStats | null, outLabel: string, outStats: WindowStats | null): string {
+    const parts = [
+        inStats ? `${inLabel} ${formatRate(inStats.max)}` : "",
+        outStats ? `${outLabel} ${formatRate(outStats.max)}` : "",
+    ].filter(Boolean);
+    return parts.length ? `peak ${parts.join("  ")}` : "";
 }
 
 function lowHigh(s: WindowStats | null, f: (v: number) => string): string {
@@ -121,7 +130,7 @@ export function Overview(props: OverviewProps): JSX.Element {
         {
             name: "Network",
             value: (s) => (s.recv || s.sent ? `↓ ${formatRate(s.recv?.now)}  ↑ ${formatRate(s.sent?.now)}` : "–"),
-            range: (s) => (s.recv ? `↓ peak ${formatRate(s.recv.max)}` : ""),
+            range: (s) => peaks("↓", s.recv, "↑", s.sent),
             sparkKey: "net:bytesrecv",
             color: IN,
             format: formatRate,
@@ -130,7 +139,7 @@ export function Overview(props: OverviewProps): JSX.Element {
         {
             name: "Disk",
             value: (s) => (s.read || s.write ? `R ${formatRate(s.read?.now)}  W ${formatRate(s.write?.now)}` : "–"),
-            range: (s) => (s.read ? `R peak ${formatRate(s.read.max)}` : ""),
+            range: (s) => peaks("R", s.read, "W", s.write),
             sparkKey: "disk:read",
             color: IN,
             format: formatRate,
@@ -196,10 +205,10 @@ export function Overview(props: OverviewProps): JSX.Element {
                     ariaLabel="Time window"
                     density="compact"
                     options={windowChoices(props.intervalSecs).map((c) => ({
-                        value: String(c.points),
+                        value: String(c.secs),
                         label: c.label,
                     }))}
-                    value={String(props.windowPoints)}
+                    value={String(props.windowSecs)}
                     onChange={(v) => props.onWindow(Number(v))}
                 />
                 <Show when={props.paused}>

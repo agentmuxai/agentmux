@@ -137,10 +137,10 @@ describe("windowChoices", () => {
     it("spans the labelled time at the sample interval", () => {
         expect(windowChoices(1).map((c) => c.points)).toEqual([60, 120, 300, 900]);
         expect(windowChoices(2)).toEqual([
-            { points: 30, label: "1m" },
-            { points: 60, label: "2m" },
-            { points: 150, label: "5m" },
-            { points: 450, label: "15m" },
+            { secs: 60, points: 30, label: "1m" },
+            { secs: 120, points: 60, label: "2m" },
+            { secs: 300, points: 150, label: "5m" },
+            { secs: 900, points: 450, label: "15m" },
         ]);
     });
 

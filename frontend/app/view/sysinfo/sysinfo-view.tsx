@@ -141,8 +141,8 @@ function SysinfoViewInner(props: SysinfoViewProps): JSX.Element {
                     plotData={plotData()}
                     targetLen={targetLen()}
                     intervalSecs={intervalSecs()}
-                    windowPoints={model.numPoints()}
-                    onWindow={(points) => model.setWindow(points)}
+                    windowSecs={model.windowSecs()}
+                    onWindow={(secs) => model.setWindow(secs)}
                     paused={paused()}
                     onPause={(p) => {
                         setPaused(p);

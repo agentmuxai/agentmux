@@ -53,15 +53,47 @@ describe("SysinfoViewModel window", () => {
         });
     });
 
-    it("takes a new window at once, saves it, and reads enough history to fill it", async () => {
+    it("takes a new window at once, saves it as a time, and reads enough history to fill it", async () => {
         await createRoot(async (dispose) => {
             const { model: m, setMeta } = model();
             m.setWindow(900);
             expect(m.numPoints()).toBe(900);
-            expect(setMeta).toHaveBeenCalledWith({ "graph:numpoints": 900 });
+            expect(m.windowSecs()).toBe(900);
+            expect(setMeta).toHaveBeenCalledWith({ "graph:windowsecs": 900 });
             await Promise.resolve();
             const last = env.read.mock.calls[env.read.mock.calls.length - 1];
             expect((last[1] as { maxitems: number }).maxitems).toBe(900);
+            dispose();
+        });
+    });
+
+    it("spans the chosen time at any sample interval", () => {
+        createRoot((dispose) => {
+            env.settings = { "telemetry:interval": 2 };
+            const { model: m } = model({ "graph:windowsecs": 300 });
+            expect(m.numPoints()).toBe(150);
+            expect(m.windowSecs()).toBe(300);
+            dispose();
+        });
+    });
+
+    it("keeps the newest load's history when an older, slower one finishes after it", async () => {
+        await createRoot(async (dispose) => {
+            const pending: ((items: any[]) => void)[] = [];
+            env.read.mockImplementation(() => new Promise((resolve) => pending.push(resolve)));
+            const { model: m } = model();
+            await Promise.resolve();
+            m.setWindow(900);
+            await Promise.resolve();
+            const at = (ts: number) => ({ event: "sysinfo", scopes: ["local"], data: { ts, values: { cpu: 1 } } });
+            // The 900-sample load answers first, then the pane's first, shorter one.
+            pending[1]([at(1_000), at(2_000), at(3_000)]);
+            await new Promise((r) => setTimeout(r, 0));
+            pending[0]([at(3_000)]);
+            await new Promise((r) => setTimeout(r, 0));
+            expect(m.dataAtom().filter((d) => d.blank !== 1)).toHaveLength(3);
+            expect(m.loadingAtom()).toBe(false);
+            env.read.mockImplementation(async () => []);
             dispose();
         });
     });

@@ -80,7 +80,7 @@ function mount(over: Partial<Parameters<typeof Overview>[0]> = {}) {
         plotData: DATA,
         targetLen: 121,
         intervalSecs: 1,
-        windowPoints: 120,
+        windowSecs: 120,
         onWindow: vi.fn(),
         paused: false,
         onPause: vi.fn(),
@@ -108,6 +108,13 @@ describe("Overview", () => {
         expect(tileValue("Disk")).toBe("R 50 KB/s  W 1.2 MB/s");
         const cpuTile = [...document.querySelectorAll(".sysinfo-tile")][0];
         expect(cpuTile.querySelector(".sysinfo-tile-range")?.textContent).toBe("20% – 60%");
+        // In and out each give their peak.
+        const range = (name: string) =>
+            [...document.querySelectorAll(".sysinfo-tile")]
+                .find((t) => t.querySelector(".sysinfo-tile-name")?.textContent === name)
+                ?.querySelector(".sysinfo-tile-range")?.textContent;
+        expect(range("Network")).toBe("peak ↓ 2.5 MB/s  ↑ 400 KB/s");
+        expect(range("Disk")).toBe("peak R 50 KB/s  W 1.2 MB/s");
     });
 
     it("draws network out below the axis, on the same chart as in", async () => {
@@ -167,7 +174,7 @@ describe("Overview", () => {
                 plotData={data()}
                 targetLen={121}
                 intervalSecs={1}
-                windowPoints={120}
+                windowSecs={120}
                 onWindow={vi.fn()}
                 paused={false}
                 onPause={vi.fn()}
