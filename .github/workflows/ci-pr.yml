@@ -617,6 +617,13 @@ jobs:
       - name: vite-port self-test
         run: bash scripts/vite-port.test.sh
 
+      # `task dev` on Windows deletes its old dist/cef-dev-<epoch> builds, but
+      # only ones no process runs from (rm -rf on a live one deletes the helper
+      # tools the running app still needs).
+      # docs/specs/SPEC_TASK_DEV_PRUNE_OLD_BUILDS_2026_10_14.md
+      - name: prune-dev-builds self-test
+        run: bash scripts/prune-dev-builds.test.sh
+
       # bundle:windows refuses a CEF runtime that isn't the pinned tracer-off
       # build (a tracer-on libcef.dll deadlocks the app at a random later
       # moment). These are the ways that guard could wrongly pass.
