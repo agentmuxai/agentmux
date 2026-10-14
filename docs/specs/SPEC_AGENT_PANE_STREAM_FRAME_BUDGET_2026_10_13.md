@@ -1,7 +1,7 @@
 # Spec: streaming must not stall while the user types, then flood
 
 **Date:** 2026-10-13
-**Status:** active. Fixes R1–R4 (§3) implemented in their own PR; §5 lists what is still open.
+**Status:** active. Fixes R1–R4 (§3) implemented in #4845; §5 lists what is still open.
 **Plan item:** new, found while measuring typing for item #7 of `PLAN_RENDERER_MEMORY_FIXES_2026_10_12.md`.
 **Related:** `stream-scheduler.ts` (input-first flushing, PR #3599), `agent-dormancy.tsx` (rendering pauses for hidden panes), `SPEC_TOOL_BODY_UNMOUNT_ON_COLLAPSE_2026_10_12.md` (tool bodies dropped after collapse), `SPEC_CONTENT_RESIZE_CONTRACT_2026_08_31.md` (height FLIP).
 
