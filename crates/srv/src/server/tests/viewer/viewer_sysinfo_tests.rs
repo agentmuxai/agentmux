@@ -147,6 +147,49 @@ async fn the_feed_sends_history_after_since_then_new_samples() {
     assert!(rest.is_none());
 }
 
+/// Codex on #4857: a clock that goes back must not hide new samples.
+#[tokio::test]
+async fn a_clock_that_goes_back_does_not_stop_the_feed() {
+    let state = test_state();
+    publish(&state, 5_000, 1.0);
+    let lease = state.viewer.open_feed("dev").unwrap();
+    let timing = SysinfoTiming { heartbeat: Duration::from_secs(60), poll: Duration::from_millis(10) };
+    let mut stream = Box::pin(sysinfo_stream(state.broker.clone(), None, lease, timing));
+    assert_eq!(ids(&read_samples(&mut stream, 1).await), vec![5_000]);
+    // The clock is set back a minute: the next samples are "older".
+    publish(&state, 1_000, 2.0);
+    publish(&state, 2_000, 3.0);
+    assert_eq!(ids(&read_samples(&mut stream, 2).await), vec![1_000, 2_000]);
+}
+
+/// Codex on #4857: a stream that wasn't read for longer than one poll's
+/// read still gets every kept sample it missed.
+#[tokio::test]
+async fn a_stalled_feed_gets_every_kept_sample_it_missed() {
+    let state = test_state();
+    publish(&state, 1, 0.0);
+    let lease = state.viewer.open_feed("dev").unwrap();
+    let timing = SysinfoTiming { heartbeat: Duration::from_secs(60), poll: Duration::from_millis(10) };
+    let mut stream = Box::pin(sysinfo_stream(state.broker.clone(), None, lease, timing));
+    assert_eq!(ids(&read_samples(&mut stream, 1).await), vec![1]);
+    // More than POLL_READ arrive before the stream is read again.
+    for ts in 2..=101 {
+        publish(&state, ts, 0.0);
+    }
+    let got = ids(&read_samples(&mut stream, 100).await);
+    assert_eq!(got, (2..=101).collect::<Vec<_>>());
+}
+
+#[test]
+fn a_resume_after_the_clock_went_back_gets_everything_kept() {
+    let kept = |tss: &[i64]| tss.iter().map(|ts| (*ts, serde_json::json!({ "ts": ts }))).collect::<Vec<_>>();
+    let tss = |v: Vec<(i64, serde_json::Value)>| v.into_iter().map(|(ts, _)| ts).collect::<Vec<_>>();
+    assert_eq!(tss(history_after(kept(&[1, 2, 3]), Some(2))), vec![3]);
+    assert_eq!(tss(history_after(kept(&[1, 2, 3]), Some(3))), Vec::<i64>::new(), "up to date");
+    assert_eq!(tss(history_after(kept(&[1, 2, 3]), None)), vec![1, 2, 3]);
+    assert_eq!(tss(history_after(kept(&[1, 2, 3]), Some(9_000))), vec![1, 2, 3], "every kept sample is older");
+}
+
 #[tokio::test]
 async fn the_feed_without_since_sends_everything_kept_and_resumes_by_last_event_id() {
     let state = test_state();

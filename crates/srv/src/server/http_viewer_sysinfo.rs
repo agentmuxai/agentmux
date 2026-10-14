@@ -119,6 +119,35 @@ fn sample_event(ts: i64, data: &serde_json::Value) -> Bytes {
     Bytes::from(format!("event: sample\nid: {ts}\ndata: {data}\n\n"))
 }
 
+/// The kept samples a resume asks for: those after `since`, by their time.
+/// All of them with no `since`, or when every kept sample is older than it
+/// (the computer's clock went back since the device's last one).
+fn history_after(kept: Vec<(i64, serde_json::Value)>, since: Option<i64>) -> Vec<(i64, serde_json::Value)> {
+    let Some(since) = since else { return kept };
+    if kept.iter().all(|(ts, _)| *ts < since) {
+        return kept;
+    }
+    kept.into_iter().filter(|(ts, _)| *ts > since).collect()
+}
+
+/// The samples kept after `cursor` (the last one sent), by their place in
+/// the ring, not their time: a clock that goes back doesn't hide new ones.
+/// The newest `POLL_READ` usually hold it; when they don't (a stalled
+/// stream), the whole ring is read, so nothing kept is skipped. A cursor
+/// no longer kept means everything kept is newer.
+fn samples_after(broker: &Broker, cursor: Option<&serde_json::Value>) -> Vec<(i64, serde_json::Value)> {
+    let recent = samples(broker, POLL_READ);
+    let Some(cursor) = cursor else { return recent };
+    if let Some(at) = recent.iter().rposition(|(_, d)| d == cursor) {
+        return recent[at + 1..].to_vec();
+    }
+    let kept = samples(broker, HISTORY_READ);
+    match kept.iter().rposition(|(_, d)| d == cursor) {
+        Some(at) => kept[at + 1..].to_vec(),
+        None => kept,
+    }
+}
+
 /// The kept samples after `since` (all of them with none), then each new
 /// one; a heartbeat when nothing new came for `timing.heartbeat`. Ends when
 /// the device is revoked or goes away.
@@ -131,12 +160,12 @@ pub(crate) fn sysinfo_stream(
     async_stream::stream! {
         let lease = lease;
         yield Ok(Bytes::from_static(RETRY_PREAMBLE));
-        let mut last = since.unwrap_or(i64::MIN);
-        for (ts, data) in samples(&broker, HISTORY_READ) {
-            if ts > last {
-                last = ts;
-                yield Ok(sample_event(ts, &data));
-            }
+        let kept = samples(&broker, HISTORY_READ);
+        // The newest kept sample is where the live part starts, whether or
+        // not the resume sent it.
+        let mut cursor: Option<serde_json::Value> = kept.last().map(|(_, d)| d.clone());
+        for (ts, data) in history_after(kept, since) {
+            yield Ok(sample_event(ts, &data));
         }
         let mut poll = tokio::time::interval_at(tokio::time::Instant::now() + timing.poll, timing.poll);
         poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -147,12 +176,10 @@ pub(crate) fn sysinfo_stream(
                 _ = lease.token.cancelled() => break,
                 _ = poll.tick() => {
                     let mut sent = false;
-                    for (ts, data) in samples(&broker, POLL_READ) {
-                        if ts > last {
-                            last = ts;
-                            sent = true;
-                            yield Ok(sample_event(ts, &data));
-                        }
+                    for (ts, data) in samples_after(&broker, cursor.as_ref()) {
+                        sent = true;
+                        yield Ok(sample_event(ts, &data));
+                        cursor = Some(data);
                     }
                     if sent {
                         quiet_since = tokio::time::Instant::now();
