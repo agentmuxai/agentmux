@@ -1,7 +1,7 @@
 # SPEC: srv signs WAN jekts for the agent its token names
 
 **Date:** 2026-10-14
-**Status:** active — built in the PR that adds this file.
+**Status:** implemented — #4902.
 **Builds on:** `SPEC_WAN_JEKT_VERIFICATION_2026_09_24.md` (W3-S: the signed
 tuple, `wan.db`, publishing, the receiver's checks, which this spec leaves
 unchanged), `SPEC_AGENT_IDENTITY_CARRIED_NOT_DERIVED_2026_09_23.md` (the agent
