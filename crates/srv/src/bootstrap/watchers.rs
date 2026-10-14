@@ -310,11 +310,18 @@ mod tests {
             .spawn()
             .expect("spawn sleep");
         let pidfd = unsafe { libc::syscall(libc::SYS_pidfd_open, parent.id() as libc::c_int, 0) };
-        assert!(
-            pidfd >= 0,
-            "pidfd_open: {}",
-            std::io::Error::last_os_error()
-        );
+        if pidfd < 0 {
+            let err = std::io::Error::last_os_error();
+            parent.kill().unwrap();
+            parent.wait().unwrap();
+            // A kernel before 5.3, or a seccomp policy that blocks it: srv
+            // uses the ppid watchdog there, and there is no pidfd to test.
+            if matches!(err.raw_os_error(), Some(libc::ENOSYS) | Some(libc::EPERM)) {
+                eprintln!("skipping: pidfd_open unavailable ({err})");
+                return;
+            }
+            panic!("pidfd_open: {err}");
+        }
         let pidfd = pidfd as libc::c_int;
 
         let (thread_tx, thread_rx) = mpsc::channel();
