@@ -43,6 +43,8 @@ mod memory_adoption;
 mod ssh_approval;
 #[cfg(target_os = "windows")]
 mod floating_pane;
+#[cfg(target_os = "windows")]
+mod floater_reveal;
 mod reducer;
 mod renderer_map;
 mod saga_dispatch;
