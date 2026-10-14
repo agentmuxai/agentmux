@@ -11,7 +11,9 @@
 //! - `GET /agentmux/viewer/hello`, `GET /agentmux/viewer/agents`,
 //!   `GET /agentmux/viewer/agents/:name/feed`, `GET /agentmux/viewer/panes`,
 //!   `GET /agentmux/viewer/terminals/:block_id/feed`
-//!   (`server::http_viewer_terminal`) and `GET /agentmux/viewer/procs`:
+//!   (`server::http_viewer_terminal`), `GET /agentmux/viewer/procs`, and
+//!   `GET /agentmux/viewer/sysinfo` and `…/sysinfo/feed`
+//!   (`server::http_viewer_sysinfo`):
 //!   `Authorization: Bearer amxv_…` only. Neither the `lan_key` nor the instance `auth_key` opens
 //!   them, and the token opens nothing else: no other router knows it.
 //!
@@ -66,6 +68,8 @@ pub fn build_viewer_router(state: AppState) -> Router {
         .route("/agentmux/viewer/agents/:name/feed", get(handle_viewer_feed))
         .route("/agentmux/viewer/procs", get(handle_viewer_procs))
         .route("/agentmux/viewer/panes", get(handle_viewer_panes))
+        .route("/agentmux/viewer/sysinfo", get(super::http_viewer_sysinfo::handle_viewer_sysinfo))
+        .route("/agentmux/viewer/sysinfo/feed", get(super::http_viewer_sysinfo::handle_viewer_sysinfo_feed))
         .route(
             "/agentmux/viewer/terminals/:block_id/feed",
             get(super::http_viewer_terminal::handle_viewer_terminal_feed),
