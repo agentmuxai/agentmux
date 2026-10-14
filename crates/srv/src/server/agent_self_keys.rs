@@ -58,8 +58,15 @@ pub(crate) fn self_keys_for(mstore: &crate::backend::storage::store::Store, uid:
     let wan_key = named
         .then(|| mstore.wan_identity())
         .flatten()
-        .and_then(|wan| crate::backend::agent_config::channel_wan_key(mstore, &wan, &slug).ok())
-        .map(|k| k.private_key);
+        .and_then(|wan| mstore.channel_wan_key(&wan, &slug).ok())
+        .map(|k| {
+            // This may be the first time wan.db holds the key (a long-running
+            // agent fetching after an upgrade): get it published now, as
+            // spawn does, not after the publisher's idle sleep. The carry
+            // gate sends unsigned until it is.
+            crate::muxbus::wan_publish::nudge();
+            k.private_key
+        });
     let uid_keys = mstore.agent_uid_keys_ensure(uid).ok().flatten().map(|(keys, _)| keys);
     Some(SelfKeys {
         slug,

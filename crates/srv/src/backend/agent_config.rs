@@ -1648,7 +1648,7 @@ pub fn inject_jekt_signing_keys_into_mcp_json(
     if let Some(wan) = mstore.wan_identity() {
         match (
             wan.instance_ensure(&crate::backend::reactive::registry::local_host_label()),
-            channel_wan_key(mstore, &wan, agent_slug),
+            mstore.channel_wan_key(&wan, agent_slug),
         ) {
             (Ok(instance), Ok(key)) => {
                 env.insert("AGENTMUX_WAN_KEY".to_string(), json!(key.private_key));
@@ -1679,25 +1679,6 @@ pub fn inject_jekt_signing_keys_into_mcp_json(
         return None;
     }
     serde_json::to_string_pretty(&mcp_json).ok()
-}
-
-/// The agent's WAN signing key: the channel-wide `wan.db`'s, the key srv
-/// publishes and checks a signature against before it carries one over the
-/// relay (`muxbus::relay::wan_carry_gate`). This version's
-/// `db_agent_wan_keys` key is carried over only the first time. Every place
-/// that hands an agent its WAN key (the `.mcp.json` env here and
-/// `GET /agentmux/agents/self/keys`) must use this one: from 2026-10-09 the
-/// fetch served the `db_agent_wan_keys` key instead, so every agent whose two
-/// keys differed signed with one and was checked against the other, and all
-/// its WAN jekts went out unsigned ("signature does not verify locally").
-pub(crate) fn channel_wan_key(
-    mstore: &crate::backend::storage::store::Store,
-    wan: &crate::backend::storage::wan_identity::WanIdentityStore,
-    agent_slug: &str,
-) -> Result<crate::backend::storage::wan_identity::WanAgentKey, crate::backend::storage::error::StoreError> {
-    let legacy = mstore.agent_wan_key_load(agent_slug).ok().flatten();
-    let import = legacy.as_ref().map(|k| (k.public_key.as_str(), k.private_key.as_str()));
-    wan.agent_key_ensure(agent_slug, import)
 }
 
 // ============================================================
