@@ -548,6 +548,9 @@ export function buildCefApi(): AppApi {
         getMouseButtonState: async () => {
             return await invokeCommand<boolean>("get_mouse_button_state");
         },
+        getWindowSystem: async () => {
+            return await invokeCommand<"wayland" | "x11" | "windows" | "macos">("get_window_system");
+        },
     };
 
     return api;
