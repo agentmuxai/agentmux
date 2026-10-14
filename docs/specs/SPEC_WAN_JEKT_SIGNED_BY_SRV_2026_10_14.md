@@ -122,7 +122,7 @@ reach the cloud tier at all, and is signed there.
 | A forwarding srv signs a jekt it didn't originate | Rule 3: forwarded hops have no caller |
 | A caller picks the instance, channel, time or msgid in the signature | §3.2: srv sets them |
 | A replayed signed jekt | Unchanged: the receiver's msgid replay check and freshness window |
-| An agent's WAN key leaks from its `.mcp.json` or env | It isn't there any more (§3.3) |
+| An agent's WAN key in its `.mcp.json` or env | No longer written there, and removed when srv rewrites the file (§3.3) |
 | A key drifts between copies (the #4572 bug) | One copy, in `wan.db` |
 | A compromised srv | Unchanged: it held every key before, too |
 | Another account's install | Unchanged: the receiver verifies same-account only |

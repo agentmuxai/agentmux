@@ -52,6 +52,7 @@ import { makeORef } from "@/app/store/mos";
 import { ObjectService } from "@/app/store/services";
 import { fireAndForget } from "@/util/util";
 import { AMBIENT_PULL_TIMEOUT_MS } from "./ambient-rpc";
+import { STARTUP_HEADING_RE } from "../stream-parser";
 import { isUsableTitle } from "@/app/store/ambient-title";
 import { lastPromptToStore, META_LAST_PROMPT } from "@/app/store/swarm-line";
 import { META_HUMAN_TURNS, nextHumanTurn, shouldRequestTitle } from "@/app/store/title-schedule";
@@ -84,6 +85,10 @@ export function useAgentActivitySummary(opts: UseAgentActivitySummaryOptions): v
         // top of, not instead of, never putting real content in
         // `pendingContent` for a hidden turn in the first place.
         if (phase.hidden) return;
+        // AgentMux's "# Session Context" startup message isn't the user's
+        // prompt either: kept, it became the Swarm row's line and the title
+        // model's input (SPEC_CONTEXT_DELIVERY_2026_09_30.md §9 C3).
+        if (STARTUP_HEADING_RE.test(phase.pendingContent)) return;
         // Remember what the user asked, for the swarm row's fallback line when no
         // generated title exists (store/swarm-line.ts). Only a message with a goal
         // in it is kept, so "u there" never overwrites the real one. Written now,

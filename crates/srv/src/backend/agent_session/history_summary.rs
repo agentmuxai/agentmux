@@ -238,6 +238,11 @@ fn user_prompt_in_line(line: &[u8]) -> Option<String> {
     if v.get("parent_tool_use_id").map_or(false, |p| !p.is_null()) {
         return None;
     }
+    // Text the CLI wrote into the user turn itself, such as its compaction
+    // summary (SPEC_CONTEXT_DELIVERY_2026_09_30.md §9 C3).
+    if v.get("isSynthetic").and_then(|s| s.as_bool()) == Some(true) {
+        return None;
+    }
     let content = v.get("message")?.get("content")?;
     let text = match content {
         serde_json::Value::String(s) => s.clone(),
@@ -273,6 +278,8 @@ fn is_scaffolding(text: &str) -> bool {
         "<local-command",
         "Caveat:",
         "[Request interrupted",
+        // Claude Code's compaction summary, when the frame isn't flagged.
+        "This session is being continued from a previous conversation",
     ];
     PREFIXES.iter().any(|p| text.starts_with(p))
 }
@@ -324,6 +331,26 @@ mod tests {
             r#"{"type":"user","parent_tool_use_id":"toolu_1","message":{"role":"user","content":"sub-agent prompt"}}"#.to_string(),
             user("[JEKT:FROM=someone TIER=coord]\nbody"),
             delta(),
+        ]
+        .join("\n");
+        put(&fs, "agent:agent-1:current", body.as_bytes());
+        match read(&fs, "agent-1") {
+            HistoryRead::Transcript(h) => assert_eq!(h.last_user_message, "fix the login race"),
+            other => panic!("expected a transcript, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn skips_the_compaction_summary_the_cli_writes_into_the_user_turn() {
+        // As a live /compact left it (SPEC_CONTEXT_DELIVERY_2026_09_30.md §9 C3):
+        // the summary flagged, then the same text unflagged, then the command's output.
+        let summary = "This session is being continued from a previous conversation that ran out of context.";
+        let fs = FileStore::open_in_memory().unwrap();
+        let body = [
+            user("fix the login race"),
+            serde_json::json!({"type":"user","isSynthetic":true,"message":{"role":"user","content":summary}}).to_string(),
+            user(summary),
+            user("<local-command-stdout>Compacted</local-command-stdout>"),
         ]
         .join("\n");
         put(&fs, "agent:agent-1:current", body.as_bytes());
