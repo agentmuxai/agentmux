@@ -85,6 +85,18 @@ describe("catchUp: a fresh session on a quiet pane", () => {
         expect(t.sendRpc).toHaveBeenCalledTimes(1);
     });
 
+    it("waits out a stale busy state when srv says the session started idle, and catches up once the pane is quiet", async () => {
+        let busy = true; // the turn an account switch interrupted: never ends with a session_end
+        const t = make({ working: () => busy });
+        await t.controller.catchUp(RECENT, "fresh_session", { deferIfBusy: true });
+        expect(t.sendRpc).not.toHaveBeenCalled();
+
+        busy = false;
+        t.controller.maybeFireDeferred();
+        await vi.waitFor(() => expect(t.sendRpc).toHaveBeenCalledTimes(1));
+        expect(t.composeCatchUp).toHaveBeenCalledWith("fresh_session", true);
+    });
+
     it("does nothing on a busy pane: the user is already talking to the agent", async () => {
         const t = make({ working: () => true });
         await t.controller.catchUp(RECENT, "fresh_session");

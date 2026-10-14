@@ -26,6 +26,13 @@ describe("parseSessionOutcomeFrame", () => {
         expect(parseSessionOutcomeFrame(frame({ outcome: "fresh" }))?.continued).toBe(false);
     });
 
+    it("reads whether the session started idle, and leaves it absent on a frame that predates the field", () => {
+        expect(parseSessionOutcomeFrame(frame({ outcome: "fresh", idle_start: true }))?.idleStart).toBe(true);
+        expect(parseSessionOutcomeFrame(frame({ outcome: "fresh", idle_start: false }))?.idleStart).toBe(false);
+        const old = parseSessionOutcomeFrame(frame({ outcome: "fresh" }));
+        expect(old && "idleStart" in old).toBe(false);
+    });
+
     it("extracts a resumed outcome", () => {
         expect(parseSessionOutcomeFrame(frame())).toEqual({
             outcome: "resumed",

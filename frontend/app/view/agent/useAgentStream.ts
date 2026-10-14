@@ -434,6 +434,14 @@ export function useAgentStream({
 
     const queue = createHidingStreamFlushQueue(rawQueue, memoryReinjectionController.isHiding);
 
+    // A deferred reinjection or catch-up fires when the pane goes quiet, by
+    // whatever route: a turn the controller dropped (an account switch) ends
+    // with no session_end, and nothing else would drain it.
+    createEffect(() => {
+        if (!enabled || !blockId) return;
+        if (!workingFromPhase(turnPhase())) memoryReinjectionController.maybeFireDeferred();
+    });
+
     // The user resumed this conversation (catch-up-request.ts): the agent says
     // where it is picking up. The request is cleared whether or not it is acted
     // on, so it cannot fire again.
@@ -724,10 +732,21 @@ export function useAgentStream({
                     // catches up and tells the user where it is picking up.
                     // With a turn in flight the user already is, so only the
                     // memory fallback applies.
-                    if (workingFromPhase(paneSnapshot(blockId)?.turnPhase ?? { kind: "Idle" })) {
-                        void memoryReinjectionController.trigger(sessionOutcome.frameTimestamp, "fresh_session");
+                    //
+                    // Whether a message started the session is srv's to say
+                    // (`idleStart`): this pane's own turn state can be stale, left
+                    // by the very turn an account switch interrupted, and a
+                    // catch-up it took for busy would wait on a session_end that
+                    // never comes. An older srv says nothing, so the pane's own
+                    // state decides then.
+                    const idleStart =
+                        sessionOutcome.idleStart ?? !workingFromPhase(paneSnapshot(blockId)?.turnPhase ?? { kind: "Idle" });
+                    if (idleStart) {
+                        void memoryReinjectionController.catchUp(sessionOutcome.frameTimestamp, "fresh_session", {
+                            deferIfBusy: sessionOutcome.idleStart === true,
+                        });
                     } else {
-                        void memoryReinjectionController.catchUp(sessionOutcome.frameTimestamp, "fresh_session");
+                        void memoryReinjectionController.trigger(sessionOutcome.frameTimestamp, "fresh_session");
                     }
                 }
             },
