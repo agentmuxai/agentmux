@@ -354,6 +354,42 @@ export function evaluateCodexGate({
     };
 }
 
+/**
+ * An issue comment the gate reacts to: anything Codex says, or a muxreview
+ * skip note. The workflow's `if:` filter encodes the same rule (a test pins
+ * the two together).
+ */
+export function isGateInput(comment) {
+    return comment?.user?.login === CODEX_LOGIN || skipNote(comment) !== null;
+}
+
+/** A PR review the gate reacts to: one by Codex. */
+export function isGateReview(review) {
+    return review?.user?.login === CODEX_LOGIN;
+}
+
+/**
+ * Why the sweep should re-evaluate a PR, or null when it shouldn't. `status`
+ * is the head's latest `Codex review` status (null when it has none). Only a
+ * missing status, or a pending one some gate input is newer than, means an
+ * evaluation was lost; a PR still waiting on Codex or on muxreview's approval
+ * has no such input, so it is left alone.
+ */
+export function sweepReason({ pull, status, comments = [], reviews = [] }) {
+    if (pull?.draft) return null;
+    if (!status) return "its head has no Codex review status";
+    if (status.state !== "pending") return null;
+    const since = Date.parse(status.updated_at);
+    const newer = (at) => Date.parse(at) > since;
+    if (comments.some((c) => isGateInput(c) && newer(c.updated_at ?? c.created_at))) {
+        return "a Codex answer or muxreview note is newer than its pending status";
+    }
+    if (reviews.some((r) => isGateReview(r) && newer(r.submitted_at))) {
+        return "a Codex review is newer than its pending status";
+    }
+    return null;
+}
+
 // The compare API lists at most 300 files; a list that long may be cut short.
 const COMPARE_FILE_CAP = 300;
 // What compare answers when the reviewed commit can't be compared with the
@@ -374,12 +410,66 @@ export async function changedFiles(client, repo, base, head) {
     }
 }
 
+export const WORKFLOW_FILE = "codex-review-gate.yml";
+
+/** The head's latest `Codex review` status, or null. */
+async function gateStatus(client, repo, sha) {
+    const combined = await client.json(`/repos/${repo}/commits/${sha}/status`);
+    return (combined.statuses ?? []).find((s) => s.context === STATUS_CONTEXT) ?? null;
+}
+
+/**
+ * Dispatches the gate's workflow for every open PR `sweepReason` picks.
+ * One PR's error doesn't stop the others; any error fails the run at the end.
+ * Returns the PR numbers dispatched.
+ */
+export async function sweep(client, repo, { ref, dryRun = false, log = console.log } = {}) {
+    const pulls = await client.paginate(`/repos/${repo}/pulls?state=open`);
+    const dispatched = [];
+    const failed = [];
+    for (const pull of pulls) {
+        try {
+            if (pull.draft) continue;
+            const status = await gateStatus(client, repo, pull.head.sha);
+            // Only a pending status can be older than an input it missed.
+            const [comments, reviews] =
+                status?.state === "pending"
+                    ? await Promise.all([
+                          client.paginate(`/repos/${repo}/issues/${pull.number}/comments`),
+                          client.paginate(`/repos/${repo}/pulls/${pull.number}/reviews`),
+                      ])
+                    : [[], []];
+            const reason = sweepReason({ pull, status, comments, reviews });
+            if (!reason) continue;
+            log(`#${pull.number} ${pull.head.sha.slice(0, 10)}: ${reason}; ${dryRun ? "would dispatch" : "dispatching"}`);
+            if (!dryRun) {
+                await client.request(`/repos/${repo}/actions/workflows/${WORKFLOW_FILE}/dispatches`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ ref, inputs: { pr: String(pull.number) } }),
+                });
+            }
+            dispatched.push(pull.number);
+        } catch (err) {
+            log(`#${pull.number}: ${err.message}`);
+            failed.push(pull.number);
+        }
+    }
+    log(`sweep: ${pulls.length} open PR(s), ${dispatched.length} ${dryRun ? "to dispatch" : "dispatched"}, ${failed.length} failed`);
+    if (failed.length) throw new Error(`sweep failed for #${failed.join(", #")}`);
+    return dispatched;
+}
+
 async function main() {
-    const { GITHUB_TOKEN: token, GITHUB_REPOSITORY: repo, PR_NUMBER: pr, DRY_RUN } = process.env;
-    if (!token || !repo || !pr) {
-        throw new Error("GITHUB_TOKEN, GITHUB_REPOSITORY and PR_NUMBER are required");
+    const { GITHUB_TOKEN: token, GITHUB_REPOSITORY: repo, PR_NUMBER: pr, SWEEP, DISPATCH_REF, DRY_RUN } = process.env;
+    if (!token || !repo || !(pr || SWEEP)) {
+        throw new Error("GITHUB_TOKEN, GITHUB_REPOSITORY and PR_NUMBER (or SWEEP) are required");
     }
     const client = createGitHubClient({ token });
+    if (SWEEP) {
+        await sweep(client, repo, { ref: DISPATCH_REF || "main", dryRun: Boolean(DRY_RUN) });
+        return;
+    }
     const pull = await client.json(`/repos/${repo}/pulls/${pr}`);
     const headSha = pull.head.sha;
     const [comments, reviews, reviewComments] = await Promise.all([
