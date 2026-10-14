@@ -554,10 +554,14 @@ impl PersistentSubprocessController {
         let Some(ref broker) = self.broker else { return };
         let global_zone =
             super::super::shell::resolve_global_output_zone(&self.mstore, &self.block_id);
+        // A paired device's message is stored with who sent it
+        // (`viewer::origin`); the agent's stdin got it without.
+        let stamped = crate::backend::viewer::origin::stamp(&self.block_id, json_str.as_bytes())
+            .and_then(|l| String::from_utf8(l).ok());
         super::super::shell::append_output_line(
             broker,
             &self.block_id,
-            json_str,
+            stamped.as_deref().unwrap_or(json_str),
             self.filestore.as_ref(),
             global_zone.as_deref(),
         );

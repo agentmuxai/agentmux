@@ -825,6 +825,7 @@ export class ClaudeCodeStreamParser {
             ...(broadcast
                 ? { broadcast: { ...(broadcast.recipients ? { recipients: broadcast.recipients } : {}), ...(broadcast.msgId ? { msgId: broadcast.msgId } : {}) } }
                 : {}),
+            ...(event.fromDevice ? { fromDevice: event.fromDevice } : {}),
             // Replay: no invented "now" — parseHistoryLines fills the line's
             // stored receive time (ReAgent P1, #3620).
             timestamp: event.timestamp || (this.isReplay ? undefined : Date.now()),
