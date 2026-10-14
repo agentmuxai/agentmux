@@ -910,8 +910,7 @@ async fn open_agent_inner(
 
                 // Enqueue a layout insert action for the frontend to process.
                 // The frontend's LayoutModel watches pendingbackendactions on the
-                // LayoutState and applies them via treeReducer — same mechanism
-                // used by cross-window drag-and-drop (dnd.rs).
+                // LayoutState and applies them via treeReducer.
                 // SPEC_864 Phase 4 — append through the reducer (single
                 // writer of db_layout). Best-effort like the store-direct
                 // write it replaces.

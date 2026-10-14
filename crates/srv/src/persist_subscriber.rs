@@ -15,9 +15,9 @@
 // SQLite only through this task.
 //
 // Bus lag: on `RecvError::Lagged` the dropped events are lost, so
-// `resync_workspaces` rewrites workspaces from the reducer's snapshot.
-// Tabs, blocks and layout are not resynced; a lag leaves them stale on
-// disk until their next event.
+// `resync::resync_from_reducer` rewrites the workspace, tab, block, window
+// and layout rows from the reducer's snapshot (what it can't rebuild is in
+// that module's header).
 
 use std::sync::Arc;
 
@@ -32,10 +32,12 @@ use crate::backend::storage::store::Store;
 use crate::backend::wcore;
 use crate::state::State;
 
+mod resync;
+
 /// Spawn the persist subscriber task. Runs until the broadcast
 /// channel closes (i.e., the reducer's bus is dropped at process
-/// shutdown). The `state` handle is used for workspace-scoped
-/// full-resync after a `RecvError::Lagged`.
+/// shutdown). The `state` handle is read for the full resync after a
+/// `RecvError::Lagged`.
 pub fn spawn_persist_subscriber(
     events_rx: broadcast::Receiver<Event>,
     mstore: Arc<Store>,
@@ -64,14 +66,13 @@ async fn run_persist_subscriber(
             }
             Err(broadcast::error::RecvError::Lagged(n)) => {
                 // Dropped `n` events; rather than guess which were
-                // lost, reconcile SQLite's workspaces against the
-                // reducer's (see the module header for what isn't).
+                // lost, rewrite SQLite's reducer-owned rows from the reducer.
                 tracing::warn!(
                     target: "srv-persist-subscriber",
-                    "[srv-persist-subscriber] dropped {} event(s) — running workspace resync",
+                    "[srv-persist-subscriber] dropped {} event(s) — resyncing from the reducer",
                     n
                 );
-                if let Err(e) = resync_workspaces(&state, &mstore).await {
+                if let Err(e) = resync::resync_from_reducer(&state, &mstore).await {
                     tracing::error!(
                         target: "srv-persist-subscriber",
                         "[srv-persist-subscriber] resync failed: {} — SQLite may diverge from reducer until next event",
@@ -85,51 +86,6 @@ async fn run_persist_subscriber(
             }
         }
     }
-}
-
-/// Snapshot `state.workspaces` and reconcile against SQLite —
-/// INSERT/UPDATE only, no deletes: a delete pass triggered by bus pressure
-/// rather than a user action risks losing rows (#615). The cost is that a
-/// workspace whose `WorkspaceDeleted` was dropped lingers on disk.
-///
-/// Strategy:
-///   1. Lock state, snapshot the workspace map (ids + names),
-///      release the lock.
-///   2. For each workspace in the snapshot: insert if missing,
-///      no-op if name matches, update if name differs.
-async fn resync_workspaces(
-    state: &Arc<Mutex<State>>,
-    mstore: &Store,
-) -> Result<(), Box<dyn std::error::Error>> {
-    // Snapshot under lock; release before any I/O.
-    let snapshot: Vec<(String, String)> = {
-        let s = state.lock().await;
-        s.workspaces
-            .values()
-            .map(|w| (w.workspace_id.clone(), w.name.clone()))
-            .collect()
-    };
-
-    for (workspace_id, name) in &snapshot {
-        match mstore.get::<Workspace>(workspace_id)? {
-            Some(existing) if existing.name == *name => {
-                // Already in sync.
-            }
-            Some(mut existing) => {
-                existing.name = name.clone();
-                mstore.update(&mut existing)?;
-            }
-            None => {
-                let mut ws = Workspace {
-                    oid: workspace_id.clone(),
-                    name: name.clone(),
-                    ..Default::default()
-                };
-                mstore.insert(&mut ws)?;
-            }
-        }
-    }
-    Ok(())
 }
 
 /// Apply one reducer event to the on-disk store. Idempotent: each

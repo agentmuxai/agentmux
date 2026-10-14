@@ -19,9 +19,7 @@ pub(crate) async fn dispatch_to_reducer(
     cmd: agentmux_common::ipc::Command,
 ) -> Vec<agentmux_common::ipc::Event> {
     let mut s = state.srv_state.lock().await;
-    let ctx = crate::reducer::Ctx {
-        registered_pid: None,
-    };
+    let ctx = crate::reducer::Ctx::new(None);
     crate::reducer::update(&mut s, cmd, &ctx)
 }
 
@@ -100,9 +98,7 @@ pub(crate) async fn seed_layout_via_reducer(
     let mut apply_err: Option<String> = None;
     let events = {
         let mut s = state.srv_state.lock().await;
-        let ctx = crate::reducer::Ctx {
-            registered_pid: None,
-        };
+        let ctx = crate::reducer::Ctx::new(None);
         let events = crate::reducer::update(&mut s, cmd, &ctx);
         let has_error = events
             .iter()
@@ -182,9 +178,7 @@ pub(crate) async fn queue_layout_actions_via_reducer(
     let mut apply_err: Option<String> = None;
     let events = {
         let mut s = state.srv_state.lock().await;
-        let ctx = crate::reducer::Ctx {
-            registered_pid: None,
-        };
+        let ctx = crate::reducer::Ctx::new(None);
         let events = crate::reducer::update(&mut s, cmd, &ctx);
         let has_error = events
             .iter()

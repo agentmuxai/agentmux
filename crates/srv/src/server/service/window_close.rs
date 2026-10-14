@@ -17,10 +17,8 @@ use super::reducer_helpers::{dispatch_to_reducer, publish_events};
 //      SrvWindowClosed; subscriber prunes Client.windowids.
 //   3. If no other window points at the same workspace, dispatch
 //      Command::DeleteWorkspace which cascades through tabs+blocks.
-// Mirrors `wcore::close_window` behaviour where each window
-// owns one workspace, but uses the reducer-routed conditional
-// pattern so future multi-window-on-same-workspace flows
-// don't accidentally drop user state.
+// Each window owns one workspace today; the conditional delete keeps
+// a future multi-window-on-same-workspace flow from dropping user state.
 pub(crate) async fn handle_close_window(state: &AppState, call: &WebCallType) -> WebReturnType {
     let store = &state.mstore;
     let args = &call.args;
