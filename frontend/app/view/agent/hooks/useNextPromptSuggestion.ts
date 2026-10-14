@@ -100,6 +100,7 @@ import { fireAndForget } from "@/util/util";
 import { AMBIENT_PULL_TIMEOUT_MS } from "./ambient-rpc";
 import { hasPendingStreamFlushForBlock } from "../stream-scheduler";
 import { recentActivityEntries } from "../ambient-activity";
+import { CATCH_UP_TURN_PLACEHOLDER_CONTENT } from "../memory-reinjection-controller";
 import type { DocumentNode } from "../types";
 import type { TurnPhase } from "@/app/store/agent-pane-state/types";
 import { META_SUGGESTION, META_SUGGESTION_GEN } from "@/app/store/meta-keys";
@@ -203,7 +204,9 @@ export function useNextPromptSuggestion(opts: UseNextPromptSuggestionOptions): v
     createEffect(on(turnPhase, (phase) => {
         if (phase.kind === "Submitting") {
             activeTurnId++;
-            lastTurnWasHidden = phase.hidden === true;
+            // A catch-up turn is hidden in its input only: its reply is shown, so
+            // the suggestion that follows it is wanted.
+            lastTurnWasHidden = phase.hidden === true && phase.pendingContent !== CATCH_UP_TURN_PLACEHOLDER_CONTENT;
             clearSuggestion(blockId); // guard 1 — see module doc comment
         }
     }));

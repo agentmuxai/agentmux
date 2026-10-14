@@ -82,7 +82,7 @@
  */
 
 import { buildMemoryReinjectionNode, composeReinjectionMessage, shouldReinject } from "./memory-reinjection";
-import type { MemoryEntryInput, ReinjectionReason } from "./memory-reinjection";
+import type { CatchUpReason, MemoryEntryInput, ReinjectionReason } from "./memory-reinjection";
 import type { ContextDeliveryNode, MemoryReinjectionNode } from "./types";
 
 /**
@@ -90,9 +90,10 @@ import type { ContextDeliveryNode, MemoryReinjectionNode } from "./types";
  * message, the id to send it with, and the card srv writes when it arrives.
  */
 export interface ComposedDelivery {
-    deliveryId: string;
+    /** Absent for a catch-up that carries no memory: there is no card to write. */
+    deliveryId?: string;
     text: string;
-    node: ContextDeliveryNode;
+    node?: ContextDeliveryNode;
 }
 
 /**
@@ -101,6 +102,25 @@ export interface ComposedDelivery {
  * `pendingContent` learns nothing about the real memory content from it.
  */
 export const HIDDEN_TURN_PLACEHOLDER_CONTENT = "[agentmux: hidden memory reinjection]";
+
+/**
+ * A catch-up turn's `TurnStart` content: as content-free as the reinjection's,
+ * but a distinct value, because the turn is hidden only in its input. Its reply
+ * is the agent's account of where it stands, so the composer's next-prompt
+ * suggestion still follows it (`useNextPromptSuggestion.ts`), which it skips
+ * after a fully hidden reinjection.
+ */
+export const CATCH_UP_TURN_PLACEHOLDER_CONTENT = "[agentmux: catch-up]";
+
+/**
+ * srv's answer to a claim. `foreign`: the event was another block's (a
+ * compaction this block's CLI did not write), not the hook's, so a catch-up
+ * turn has no business here either.
+ */
+export interface ClaimAnswer {
+    deliver: boolean;
+    foreign?: boolean;
+}
 
 export interface MemoryReinjectionControllerOpts {
     /** The pane's current context window (tokens) — threaded to buildMemoryReinjectionNode's size-band computation, §3.4.2. */
@@ -120,6 +140,14 @@ export interface MemoryReinjectionControllerOpts {
      * older srv), falls back to `fetchEntries` and composing here.
      */
     compose?: (reason: ReinjectionReason) => Promise<ComposedDelivery | null>;
+    /**
+     * srv's catch-up message: the memory re-delivery when `memory` (else the
+     * hook already delivered it, or the phase has none), then the block that
+     * has the agent say where it is picking up
+     * (`memorydelivery:compose` with `catch_up`). Absent, or a rejection, means
+     * no catch-up turn.
+     */
+    composeCatchUp?: (reason: CatchUpReason, memory: boolean) => Promise<ComposedDelivery | null>;
     /** Starts real turn-state bookkeeping — expected to be the actual `TurnStart` dispatch, reused unmodified, called ONLY with `HIDDEN_TURN_PLACEHOLDER_CONTENT` and `hidden: true` (the controller enforces this — the caller's implementation should just forward both args verbatim). */
     dispatchTurnStart: (content: string, hidden: boolean) => void;
     /** Reverts turn-state bookkeeping on a send failure — expected to be the actual `TurnStartFailed` dispatch
@@ -142,7 +170,11 @@ export interface MemoryReinjectionControllerOpts {
      * session's first turn, long after the hook delivered; the time lets srv
      * still match the hook's delivery to this session.
      */
-    claimFallback?: (reason: ReinjectionReason, boundaryUuid?: string, eventAtMs?: number) => Promise<boolean>;
+    claimFallback?: (
+        reason: ReinjectionReason,
+        boundaryUuid?: string,
+        eventAtMs?: number,
+    ) => Promise<boolean | ClaimAnswer>;
 }
 
 export interface MemoryReinjectionController {
@@ -169,6 +201,21 @@ export interface MemoryReinjectionController {
      */
     trigger: (frameTimestamp: string | null, reason: ReinjectionReason, boundaryUuid?: string | null) => Promise<void>;
     /**
+     * The turn after a resume phase (SPEC_RESUME_PHASE_CATCH_UP_TURN_2026_10_13.md
+     * §3.3): AgentMux hands the agent what it needs (memory the hook didn't
+     * deliver, then an instruction to say where it is picking up), the pane
+     * shows a card for the input, and the agent's reply is shown, unlike a
+     * reinjection's. Fires only on a quiet pane: with the user already
+     * talking to the agent there is nothing to catch up on, so a busy pane
+     * makes this a no-op. Waits out a turn already in flight when
+     * `deferIfBusy` (a manual compaction, found mid-way through its own turn).
+     */
+    catchUp: (
+        frameTimestamp: string | null,
+        reason: CatchUpReason,
+        opts?: { boundaryUuid?: string | null; deferIfBusy?: boolean },
+    ) => Promise<void>;
+    /**
      * Call at every `session_end`, unconditionally — including for
      * perfectly ordinary, unrelated turns. Returns the completed
      * `MemoryReinjectionNode` (and clears hiding) ONLY if a hidden turn was
@@ -189,17 +236,31 @@ export interface MemoryReinjectionController {
 
 interface DeferredTrigger {
     frameTimestamp: string | null;
-    reason: ReinjectionReason;
+    reason: CatchUpReason;
     boundaryUuid: string | null;
     /** srv already answered "deliver" for this event: don't ask again. */
     claimed: boolean;
+    /** A catch-up turn rather than a bare reinjection. */
+    catchUp: boolean;
+    /** A catch-up only: carry the memory too (false once the hook delivered it). */
+    memory: boolean;
+    /** A catch-up only: wait out a turn that starts (a manual compaction); otherwise drop. */
+    canDefer: boolean;
+    /** The once-per-event keys this catch-up marked seen, released if its send fails. */
+    seenKeys: string[];
 }
 
 /** Boundary uuids a controller remembers, to ignore one seen twice. */
 const SEEN_BOUNDARIES_MAX = 64;
 
+/** A fresh-session outcome older than this is not a session starting now. */
+const FRESH_SESSION_MAX_AGE_MS = 60_000;
+
 export function createMemoryReinjectionController(opts: MemoryReinjectionControllerOpts): MemoryReinjectionController {
     let hiding = false;
+    // A catch-up turn is in flight, from its send until its own session_end.
+    // Unlike `hiding` it hides nothing.
+    let catchingUp = false;
     let pendingNode: MemoryReinjectionNode | ContextDeliveryNode | null = null;
     let deferred: DeferredTrigger | undefined = undefined; // undefined = nothing deferred
     const seenBoundaries = new Set<string>();
@@ -213,11 +274,19 @@ export function createMemoryReinjectionController(opts: MemoryReinjectionControl
         return true;
     }
 
-    function claim(t: DeferredTrigger): Promise<boolean> {
+    async function claimAnswer(t: DeferredTrigger): Promise<ClaimAnswer> {
         // Only a fresh session's frame is srv's own, so only it dates the claim.
         const at = t.reason === "fresh_session" && t.frameTimestamp ? Date.parse(t.frameTimestamp) : NaN;
         const eventAtMs = Number.isNaN(at) ? undefined : at;
-        return opts.claimFallback!(t.reason, t.boundaryUuid ?? undefined, eventAtMs).catch(() => true);
+        // A failed claim means deliver: a duplicate beats no memory.
+        const answer = await opts
+            .claimFallback!(t.reason as ReinjectionReason, t.boundaryUuid ?? undefined, eventAtMs)
+            .catch(() => true);
+        return typeof answer === "boolean" ? { deliver: answer } : answer;
+    }
+
+    async function claim(t: DeferredTrigger): Promise<boolean> {
+        return (await claimAnswer(t)).deliver;
     }
 
     /**
@@ -259,8 +328,70 @@ export function createMemoryReinjectionController(opts: MemoryReinjectionControl
         };
     }
 
+    /**
+     * A catch-up turn: claim the memory event first (the hook may have
+     * delivered it), ask srv for the message with or without memory, then send
+     * it with nothing hidden. Reads `isPaneWorking()` after every await, as
+     * `doTrigger` does, and re-defers if a turn started.
+     */
+    // A catch-up that finds the pane busy waits only when it may (a manual
+    // compaction, found mid-way through its own turn). Any other has lost its
+    // point: a user already talking to the agent needs no catching up. But a
+    // memory event it already claimed is srv's to expect from us (the hook
+    // stood down for it), so that memory still goes out, as the ordinary hidden
+    // reinjection once the pane is quiet.
+    function postpone(t: DeferredTrigger): void {
+        if (t.canDefer) deferred = t;
+        else if (t.claimed && t.memory) deferred = { ...t, catchUp: false };
+    }
+
+    async function doCatchUp(t: DeferredTrigger): Promise<void> {
+        if (!opts.composeCatchUp) return;
+        if (opts.isPaneWorking()) {
+            postpone(t);
+            return;
+        }
+        if (!t.claimed && opts.claimFallback) {
+            const answer = await claimAnswer(t);
+            // Another block's compaction: this block's agent was not compacted.
+            if (answer.foreign) return;
+            t.memory = answer.deliver;
+            t.claimed = true;
+            if (opts.isPaneWorking()) {
+                postpone(t);
+                return;
+            }
+        }
+        const composed = await opts.composeCatchUp(t.reason as CatchUpReason, t.memory).catch(() => null);
+        if (!composed) return;
+        if (opts.isPaneWorking() || catchingUp || hiding) {
+            // A turn started while srv composed. The message stays unsent; it is
+            // composed again, from fresh state, when the pane next goes quiet.
+            postpone(t);
+            return;
+        }
+        pendingNode = composed.node ?? null;
+        catchingUp = true;
+        opts.dispatchTurnStart(CATCH_UP_TURN_PLACEHOLDER_CONTENT, true);
+        try {
+            await opts.sendRpc(composed.text, composed.deliveryId);
+        } catch {
+            catchingUp = false;
+            pendingNode = null;
+            opts.dispatchTurnStartFailed();
+            // The event was not caught up after all: let a second sighting of it
+            // try again, and still deliver any memory it claimed (the hook stood
+            // down for the claim), as the plain reinjection, at the next quiet.
+            for (const key of t.seenKeys) seenBoundaries.delete(key);
+            // At once, not at a later session_end: no turn started, so an idle
+            // pane never reaches one.
+            if (t.claimed && t.memory) void doTrigger({ ...t, catchUp: false });
+        }
+    }
+
     async function doTrigger(t: DeferredTrigger): Promise<void> {
-        const prepared = await prepare(t.frameTimestamp, t.reason, t.boundaryUuid);
+        if (t.catchUp) return doCatchUp(t);
+        const prepared = await prepare(t.frameTimestamp, t.reason as ReinjectionReason, t.boundaryUuid);
         if (!prepared) return;
 
         // Re-check busy-ness HERE, after the async fetchEntries() await —
@@ -333,10 +464,10 @@ export function createMemoryReinjectionController(opts: MemoryReinjectionControl
         boundaryUuid: string | null = null,
     ): Promise<void> {
         if (boundaryUuid && !firstSighting(boundaryUuid)) return; // once per boundary
-        if (hiding) return; // re-entrancy guard — see doc comment
+        if (hiding || catchingUp) return; // re-entrancy guard — see doc comment
         if (deferred !== undefined) return; // already have one queued — first wins, arbitrary but simple
 
-        const t: DeferredTrigger = { frameTimestamp, reason, boundaryUuid, claimed: false };
+        const t: DeferredTrigger = { frameTimestamp, reason, boundaryUuid, claimed: false, catchUp: false, memory: true, canDefer: true, seenKeys: [] };
         // A compaction is claimed now, not when it fires: the SessionStart
         // hook delivered moments ago, inside srv's claim window. Claimed at
         // the end of a long turn, that window has passed and both would send.
@@ -359,7 +490,65 @@ export function createMemoryReinjectionController(opts: MemoryReinjectionControl
         await doTrigger(t);
     }
 
+    async function catchUp(
+        frameTimestamp: string | null,
+        reason: CatchUpReason,
+        catchUpOpts: { boundaryUuid?: string | null; deferIfBusy?: boolean } = {},
+    ): Promise<void> {
+        const boundaryUuid = catchUpOpts.boundaryUuid ?? null;
+        const seenKeys: string[] = [];
+        if (boundaryUuid) {
+            if (!firstSighting(boundaryUuid)) return; // once per boundary
+            seenKeys.push(boundaryUuid);
+        }
+        // One per fresh session: the same outcome seen twice (a re-read, a second
+        // writer) must not start a second turn.
+        if (reason === "fresh_session" && frameTimestamp) {
+            if (!firstSighting(`fresh:${frameTimestamp}`)) return;
+            seenKeys.push(`fresh:${frameTimestamp}`);
+        }
+        if (hiding || catchingUp || deferred !== undefined) return;
+        // An outcome that is not recent (a re-read after a reconnect, a line
+        // another writer appended) is not a session starting now.
+        if (reason === "fresh_session" && frameTimestamp) {
+            const at = Date.parse(frameTimestamp);
+            if (!Number.isNaN(at) && opts.now() - at > FRESH_SESSION_MAX_AGE_MS) return;
+        }
+        // A user already talking to the agent has nothing to be caught up on.
+        if (opts.isPaneWorking() && !catchUpOpts.deferIfBusy) return;
+        const t: DeferredTrigger = {
+            frameTimestamp,
+            reason,
+            boundaryUuid,
+            // A resumed conversation re-delivers no memory, so there is no event to claim.
+            claimed: reason === "resumed",
+            catchUp: true,
+            memory: reason !== "resumed",
+            canDefer: catchUpOpts.deferIfBusy === true,
+            seenKeys,
+        };
+        // A compaction is claimed now, not when the turn fires: the hook
+        // delivered moments ago, inside srv's claim window, and a manual
+        // compaction's own turn can outlast it.
+        if (reason === "compaction" && opts.claimFallback) {
+            const answer = await claimAnswer(t);
+            if (answer.foreign) return;
+            t.memory = answer.deliver;
+            t.claimed = true;
+            if (hiding || catchingUp || deferred !== undefined) return;
+        }
+        await doCatchUp(t);
+    }
+
     function onSessionEnd(): MemoryReinjectionNode | ContextDeliveryNode | null {
+        if (catchingUp) {
+            // The catch-up turn is over. Its card was written to the pane when
+            // srv accepted the message; this copy is the backstop, deduped by id.
+            const node = pendingNode;
+            catchingUp = false;
+            pendingNode = null;
+            return node;
+        }
         if (!hiding) return null;
         const node = pendingNode;
         hiding = false;
@@ -378,6 +567,7 @@ export function createMemoryReinjectionController(opts: MemoryReinjectionControl
     return {
         isHiding: () => hiding,
         trigger,
+        catchUp,
         onSessionEnd,
         maybeFireDeferred,
     };

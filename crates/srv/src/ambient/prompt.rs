@@ -160,24 +160,6 @@ pub fn narration_prompt(kind: &str, context: &str) -> Option<String> {
     }
 }
 
-/// The note a pane shows when a fresh session continues the conversation from
-/// AgentMux's record (`backend::continued_note`). `record` is that record: the
-/// running summary, then the latest exchange. The user has typed nothing yet,
-/// so the note says where things stand and asks what's next.
-pub fn continued_note_prompt(record: &str) -> String {
-    let instruction = [
-        "Write what you say to the user when you pick this conversation back up. The material is the record of the conversation so far: a running summary, then the most recent exchange.",
-        "Two or three short sentences, first person, addressed to the user: open by saying you have picked up where you left off, then say what was last done and what is in progress or waiting on the user. Name concrete things from the record, such as PR numbers.",
-        "End with exactly: How can I help?",
-        "Do not mention sessions, accounts or the record itself, and do not offer to do anything. Under 60 words.",
-        "Reply SKIP if the record shows no work at all.",
-        PLAIN_TEXT_RULES,
-        FORMAT_RULES,
-    ]
-    .join(" ");
-    with_material(&instruction, "conversation_record", record)
-}
-
 /// The one-shot preview for a definition with no structured snapshot.
 pub fn build_definition_summary_prompt(digest: &str) -> String {
     with_material(
@@ -227,18 +209,6 @@ mod tests {
     }
 
     #[test]
-    fn the_continued_note_carries_the_record_and_ends_with_the_question() {
-        let p = continued_note_prompt("## Current goal
-merge #4692");
-        assert!(p.contains("<conversation_record>
-## Current goal
-merge #4692
-</conversation_record>"));
-        assert!(p.contains("End with exactly: How can I help?"));
-        assert!(p.contains("Under 60 words"));
-    }
-
-    #[test]
     fn the_background_task_kind_carries_the_command_into_the_prompt() {
         let p = narration_prompt("background_task", "task dev").expect("known kind");
         assert!(p.contains("<command>\ntask dev\n</command>"));
@@ -260,7 +230,6 @@ merge #4692
             build_session_title_prompt("", None, Some("[user] fix login"), 7),
             build_next_prompt_prompt("[user] fix login"),
             narration_prompt("background_task", "fix login").unwrap(),
-            continued_note_prompt("[user] fix login"),
             build_definition_summary_prompt("[user] fix login"),
             build_subagent_name_prompt("fix login"),
             build_dispatch_name_prompt("fix login"),

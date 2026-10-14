@@ -79,6 +79,38 @@ export function shouldReinject(entries: MemoryEntryInput[]): boolean {
  */
 export type ReinjectionReason = "compaction" | "fresh_session";
 
+/**
+ * What a catch-up turn follows: a reinjection's reasons, plus a conversation
+ * the user resumed, which re-delivers no memory.
+ * SPEC_RESUME_PHASE_CATCH_UP_TURN_2026_10_13.md.
+ */
+export type CatchUpReason = ReinjectionReason | "resumed";
+
+/**
+ * What opens a catch-up turn's block: Rust's `CATCH_UP_SIGNATURE`
+ * (`memory_delivery.rs`). The message is AgentMux's, never the user's, and the
+ * pane shows a card for it instead of the text, but the agent's reply is shown.
+ */
+export const CATCH_UP_SIGNATURE = "AgentMux catch-up:";
+
+/** The last words of every catch-up block: Rust's `CATCH_UP_TAIL`. */
+export const CATCH_UP_TAIL = "Then stop and wait for them.";
+
+/**
+ * True for a catch-up turn's message, with or without memory in it. Structural,
+ * as Rust's `is_catch_up_text`: the block is the single last line, so a memory
+ * body that contains the marker is not taken for one.
+ */
+export function isCatchUpMessage(text: string): boolean {
+    const suffix = "\n</system-reminder>\n";
+    if (!text.startsWith("<system-reminder>") || !text.endsWith(suffix)) return false;
+    const body = text.slice(0, -suffix.length);
+    const at = body.lastIndexOf(`\n${CATCH_UP_SIGNATURE} `);
+    if (at < 0) return false;
+    const block = body.slice(at + 1);
+    return !block.includes("\n") && block.endsWith(CATCH_UP_TAIL);
+}
+
 const REASON_CLAUSE: Record<ReinjectionReason, string> = {
     compaction: "Your recent conversation was just compacted into a summary.",
     fresh_session:

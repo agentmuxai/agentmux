@@ -439,6 +439,73 @@ describe("parseHistoryLines", () => {
         });
     });
 
+    /**
+     * A catch-up turn (SPEC_RESUME_PHASE_CATCH_UP_TURN_2026_10_13.md §3.3): its
+     * input is AgentMux's, shown as a card (or not at all, with no memory), and
+     * unlike a hidden reinjection the agent's reply is shown.
+     */
+    describe("catch-up turn replay", () => {
+        const bare =
+            "<system-reminder>\nAgentMux catch-up: You are picking up this conversation after it was resumed. Reply in a few lines. Then stop and wait for them.\n</system-reminder>\n";
+        const withMemory = composeReinjectionMessage(
+            [{ label: "g1", source: "global", body: "global body", sizeBytes: 11 }],
+            "fresh_session",
+        ).replace(
+            "</system-reminder>\n",
+            "\nAgentMux catch-up: You are picking up this conversation in a new session. Then stop and wait for them.\n</system-reminder>\n",
+        );
+        const cardLine = (): string =>
+            line({
+                type: "system",
+                subtype: "agentmux_memory_injected",
+                id: "memory-injected-fb-1",
+                reason: "resume_fresh",
+                fallback: true,
+                delivery_id: "fb-1",
+                entries: [{ label: "g1", source: "global", size_bytes: 11, tokens: 3, kind: "global_memory", name: "g1", delivered: "full" }],
+                timestamp: "2026-10-14T10:00:00+00:00",
+            });
+        const markdown = (nodes: { type: string }[]): string[] =>
+            nodes.filter((n) => n.type === "markdown").map((n) => (n as unknown as { content: string }).content);
+
+        it("a catch-up with no memory leaves no row of its own, and the reply stays visible", () => {
+            const { nodes } = parseHistoryLines(
+                [line({ type: "user_message", message: bare }), line({ type: "text", content: "Picking up: the release PR is merged." })],
+                "claude-stream-json",
+            );
+            expect(markdown(nodes)).toContain("Picking up: the release PR is merged.");
+            expect(nodes.some((n) => n.type === "user_message" || n.type === "memory_reinjection")).toBe(false);
+        });
+
+        it("a catch-up with memory shows its card, not the memory, and the reply stays visible", () => {
+            const { nodes } = parseHistoryLines(
+                [line({ type: "user_message", message: withMemory }), cardLine(), line({ type: "text", content: "Where I am: waiting on CI." })],
+                "claude-stream-json",
+            );
+            expect(markdown(nodes)).toContain("Where I am: waiting on CI.");
+            expect(nodes.filter((n) => n.type === "context_delivery")).toHaveLength(1);
+            expect(nodes.some((n) => n.type === "user_message" || n.type === "memory_reinjection")).toBe(false);
+        });
+
+        it("a reinjection before it still hides its own reply, but not the catch-up's", () => {
+            const hidden = line({
+                type: "user_message",
+                message: composeReinjectionMessage([{ label: "g1", source: "global", body: "b", sizeBytes: 1 }], "compaction"),
+            });
+            const { nodes } = parseHistoryLines(
+                [
+                    hidden,
+                    line({ type: "text", content: "reply to the hidden reinjection" }),
+                    line({ type: "user_message", message: bare }),
+                    line({ type: "text", content: "reply to the catch-up" }),
+                ],
+                "claude-stream-json",
+            );
+            expect(markdown(nodes)).not.toContain("reply to the hidden reinjection");
+            expect(markdown(nodes)).toContain("reply to the catch-up");
+        });
+    });
+
     describe("compact_boundary replay (Codex P2, PR #2378 round 2)", () => {
         // Before this fix, a raw `system`/`compact_boundary` frame had no
         // StreamEvent shape in the provider translator, so parseHistoryLines

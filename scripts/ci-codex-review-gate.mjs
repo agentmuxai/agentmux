@@ -26,17 +26,17 @@
 //     (#3562 sat pending). See quotaAttribution for overlapping requests.
 //     A later real verdict on the head still wins.
 //
-// What muxreview posts (agentmuxai/muxreview spec codex-efficiency-2026-09-30):
+// What muxreview posts:
 //   - quota skip: while Codex's quota is exhausted muxreview stops asking and
 //     instead keeps one ISSUE COMMENT per PR, edited in place for each head
 //     it skips, carrying `<!-- reagent:codex-skipped reason=quota
-//     head=<sha> -->`. From reagentx-workflow[bot] only (anyone can type the
-//     marker), it counts as a quota answer for that head, but only when
+//     head=<sha> -->`. From muxreview's App only (SKIP_AUTHORS; anyone can
+//     type the marker), it counts as a quota answer for that head, but only when
 //     Codex itself has said nothing about the head: muxreview may write it
 //     before reading Codex's answers. It is never carried to a later head.
 //
 // Codex only reviews when asked by a5af, not a bot. muxreview decides when
-// to ask (agentmuxai/muxreview lambdas/codex_policy.py): after it approves a head,
+// to ask: after it approves a head,
 // then again after it approves a push that changes code (any non-doc file,
 // flagged by Codex or not), or when a write-access commenter says
 // "@muxreview codex re-review". After an OK or findings it does NOT re-ask
@@ -47,19 +47,34 @@
 // docs changed since. Other findings on an earlier head wait for the re-ask
 // when code changed since, and fail when only docs did: nothing will ask
 // Codex again, so the PR needs the fix. This gate only reads.
+//
+// If the status looks stuck (Codex answered but the status didn't move),
+// re-evaluate the PR without asking Codex anything:
+//   gh workflow run codex-review-gate.yml -f pr=<number>
+// GitHub calls go through scripts/lib/github-rest.mjs, which retries 5xx and
+// rate limits; the workflow's sparse checkout must list every module this one
+// imports (a test checks it).
+
+import { createGitHubClient, GitHubError } from "./lib/github-rest.mjs";
 
 export const CODEX_LOGIN = "chatgpt-codex-connector[bot]";
 export const STATUS_CONTEXT = "Codex review";
 
-// Only muxreview's trigger names the head it asked about; reagent's
-// codex_policy.py reads the same marker from the same author.
+// Only muxreview's trigger names the head it asked about; muxreview reads the
+// same marker from the same author.
 export const TRIGGER_AUTHOR = "a5af";
 
 // muxreview's GitHub App, the only author whose quota-skip marker counts.
 // The App was renamed reagentx-workflow -> muxreview on 2026-10-07; markers
-// posted before the rename keep the old login.
+// posted before the rename keep the old login. The `reagent:` prefix of the
+// markers is muxreview's wire format and stays.
 export const SKIP_AUTHORS = new Set(["muxreview[bot]", "reagentx-workflow[bot]"]);
-export const SKIP_AUTHOR = "muxreview[bot]";
+
+const isCodex = (x) => x?.user?.login === CODEX_LOGIN;
+// GitHub's ISO-8601 timestamps sort as strings.
+const byAt = (a, b) => String(a.at).localeCompare(String(b.at));
+/** Whether `sha` (full or abbreviated) is the commit Codex's `prefix` names. */
+const namesCommit = (sha, prefix) => String(sha).toLowerCase().startsWith(prefix);
 
 // Dependency bots. muxreview doesn't review their PRs, so it never asks Codex,
 // and the gate would wait forever. A pure version bump is a manifest and
@@ -95,12 +110,12 @@ const TRIGGER_HEAD = /reagent:codex-trigger\s+head=([0-9a-f]{7,40})/i;
 // its per-PR cap of automatic rounds) or docs-only (a PR of only docs).
 const SKIPPED_HEAD = /<!--\s*reagent:codex-skipped\s+reason=(quota|round-cap|docs-only)\s+head=([0-9a-f]{7,40})\s*-->/i;
 
-// Mirrors is_docs_only_path in reagent's codex_policy.py; keep them in step.
+// muxreview keeps a mirror of this rule; keep the two in step.
 // Narrower than ci-classify-changes.mjs's rule on purpose: CLAUDE.md, AGENTS.md
 // and prompt files are markdown that agents act on, so changing them is a
 // behavior change Codex should see.
 const NEVER_DOCS_PREFIXES = [".github/", "scripts/", "tools/", "prompts/"];
-// Both changeset spellings, matching reagent: plural here, singular upstream.
+// Both changeset spellings, matching muxreview: plural here, singular upstream.
 const DOCS_PREFIXES = ["docs/", ".changesets/", ".changeset/"];
 const DOCS_NAMES = /^(README|CHANGELOG)(\.[a-z]+)?$|^(LICENSE|NOTICE)$/i;
 
@@ -136,36 +151,30 @@ function quotaAttribution({ comments, reviews }) {
         if (c.user?.login === TRIGGER_AUTHOR) {
             const m = TRIGGER_HEAD.exec(c.body ?? "");
             if (m) events.push({ at, order: 0, request: m[1].toLowerCase() });
-        } else if (c.user?.login === CODEX_LOGIN) {
-            const body = c.body ?? "";
-            if (USAGE_LIMIT.test(body)) events.push({ at, order: 1, quota: c });
-            else if (reviewedCommit(body)) events.push({ at, order: 1, names: reviewedCommit(body) });
+        } else if (isCodex(c)) {
+            const names = reviewedCommit(c.body);
+            if (USAGE_LIMIT.test(c.body ?? "")) events.push({ at, order: 1, quota: c });
+            else if (names) events.push({ at, order: 1, names });
         }
     }
     for (const r of reviews) {
-        if (r.user?.login === CODEX_LOGIN && reviewedCommit(r.body)) {
-            events.push({ at: String(r.submitted_at), order: 1, names: reviewedCommit(r.body) });
-        }
+        const names = isCodex(r) ? reviewedCommit(r.body) : null;
+        if (names) events.push({ at: String(r.submitted_at), order: 1, names });
     }
     // Requests sort before answers posted in the same second.
-    events.sort((a, b) => a.at.localeCompare(b.at) || a.order - b.order);
+    events.sort((a, b) => byAt(a, b) || a.order - b.order);
 
     const attributed = new Map();
     let outstanding = [];
     for (const e of events) {
         if (e.request) outstanding.push(e.request);
-        else if (e.names) outstanding = outstanding.filter((head) => !head.startsWith(e.names));
+        else if (e.names) outstanding = outstanding.filter((head) => !namesCommit(head, e.names));
         else if (e.quota) {
             if (outstanding.length === 1) attributed.set(e.quota, outstanding[0]);
             outstanding = [];
         }
     }
     return attributed;
-}
-
-/** The head a muxreview skip comment names, or null. */
-export function skippedHead(comment) {
-    return skipNote(comment)?.sha ?? null;
 }
 
 /** A muxreview skip comment's { sha, reason }, or null. */
@@ -196,11 +205,13 @@ function isDocsOnlyFindings(o) {
  * comment in place per outage, so its last edit dates the skip of the head
  * it now names. Not Codex verdicts: see evaluateCodexGate for precedence.
  */
-function reagentSkips(comments = []) {
+function muxreviewSkips(comments = []) {
     return comments
-        .filter((c) => skipNote(c))
-        .map((c) => ({ kind: "quota", reason: skipNote(c).reason, at: c.updated_at ?? c.created_at, sha: skipNote(c).sha }))
-        .sort((a, b) => String(a.at).localeCompare(String(b.at)));
+        .flatMap((c) => {
+            const note = skipNote(c);
+            return note ? [{ kind: "quota", ...note, at: c.updated_at ?? c.created_at }] : [];
+        })
+        .sort(byAt);
 }
 
 /**
@@ -213,7 +224,7 @@ function codexOutputs({ comments = [], reviews = [], reviewComments = [] }) {
     const flagged = filesByReview(reviewComments);
     return [
         ...comments
-            .filter((c) => c.user?.login === CODEX_LOGIN)
+            .filter(isCodex)
             .map((c) =>
                 USAGE_LIMIT.test(c.body ?? "")
                     ? { kind: "quota", at: c.created_at, sha: quotaHeads.get(c) ?? null }
@@ -226,7 +237,7 @@ function codexOutputs({ comments = [], reviews = [], reviewComments = [] }) {
         // A dismissed findings review no longer counts against a commit. It
         // does not count for it either: only a Codex OK passes.
         ...reviews
-            .filter((r) => r.user?.login === CODEX_LOGIN && r.state !== "DISMISSED")
+            .filter((r) => isCodex(r) && r.state !== "DISMISSED")
             .map((r) => ({
                 kind: "findings",
                 at: r.submitted_at,
@@ -235,7 +246,7 @@ function codexOutputs({ comments = [], reviews = [], reviewComments = [] }) {
             })),
     ]
         .filter((o) => o.sha !== null)
-        .sort((a, b) => String(a.at).localeCompare(String(b.at)));
+        .sort(byAt);
 }
 
 /** Codex's most recent verdict on any commit of the PR, or null. */
@@ -250,11 +261,17 @@ export function latestCodexOutput({ comments = [], reviews = [], reviewComments 
  * since fail; any other answer decides without it.
  */
 export function needsDiffSince(latest, headSha) {
-    return (
-        (latest?.kind === "ok" || latest?.kind === "findings") &&
-        !String(headSha).toLowerCase().startsWith(latest.sha)
-    );
+    return (latest?.kind === "ok" || latest?.kind === "findings") && !namesCommit(headSha, latest.sha);
 }
+
+// How a quota-kind answer on the head passes, by the skip note's reason.
+// Codex's own out-of-quota notice carries no reason and reads as `quota`.
+const PASSES_WITHOUT_CODEX = {
+    quota: (short) => `Codex is out of review quota; ${short} passes without it`,
+    "round-cap": (short) =>
+        `muxreview stopped asking Codex after this PR's round cap; ${short} passes without it ('@muxreview codex re-review' asks anyway)`,
+    "docs-only": (short) => `Docs-only PR: Codex isn't asked; ${short} passes without it`,
+};
 
 /**
  * Decide the status for `headSha` from the PR's issue comments, reviews and
@@ -279,24 +296,14 @@ export function evaluateCodexGate({
     const head = headSha.toLowerCase();
     const short = head.slice(0, 10);
     const all = codexOutputs({ comments, reviews, reviewComments });
-    const namesHead = (o) => head.startsWith(o.sha);
-    const onHead = all.filter(namesHead).at(-1) ?? reagentSkips(comments).filter(namesHead).at(-1);
+    const namesHead = (o) => namesCommit(head, o.sha);
+    const onHead = all.filter(namesHead).at(-1) ?? muxreviewSkips(comments).filter(namesHead).at(-1);
 
     if (onHead?.kind === "ok") {
         return { state: "success", description: `Codex found no major issues in ${short}` };
     }
     if (onHead?.kind === "quota") {
-        // A muxreview skip names why it didn't ask; Codex's own notice is quota.
-        if (onHead.reason === "round-cap") {
-            return {
-                state: "success",
-                description: `muxreview stopped asking Codex after this PR's round cap; ${short} passes without it ('@muxreview codex re-review' asks anyway)`,
-            };
-        }
-        if (onHead.reason === "docs-only") {
-            return { state: "success", description: `Docs-only PR: Codex isn't asked; ${short} passes without it` };
-        }
-        return { state: "success", description: `Codex is out of review quota; ${short} passes without it` };
+        return { state: "success", description: PASSES_WITHOUT_CODEX[onHead.reason ?? "quota"](short) };
     }
     if (isDocsOnlyFindings(onHead)) {
         return { state: "success", description: `Codex only flagged docs in ${short}; see its comments` };
@@ -345,72 +352,136 @@ export function evaluateCodexGate({
     };
 }
 
-async function gh(path, token, init = {}) {
-    const res = await fetch(`https://api.github.com${path}`, {
-        ...init,
-        headers: {
-            Authorization: `Bearer ${token}`,
-            Accept: "application/vnd.github+json",
-            "X-GitHub-Api-Version": "2022-11-28",
-            ...(init.headers ?? {}),
-        },
-    });
-    if (!res.ok) {
-        throw new Error(`${init.method ?? "GET"} ${path} -> HTTP ${res.status}: ${(await res.text()).slice(0, 300)}`);
-    }
-    return res;
+/**
+ * An issue comment the gate reacts to: anything Codex says, or a muxreview
+ * skip note. The workflow's `if:` filter encodes the same rule (a test pins
+ * the two together).
+ */
+export function isGateInput(comment) {
+    return isCodex(comment) || skipNote(comment) !== null;
 }
 
-async function ghAll(path, token) {
-    const items = [];
-    for (let page = 1; ; page++) {
-        const sep = path.includes("?") ? "&" : "?";
-        const batch = await (await gh(`${path}${sep}per_page=100&page=${page}`, token)).json();
-        items.push(...batch);
-        if (batch.length < 100) return items;
+/**
+ * Why the sweep should re-evaluate a PR, or null when it shouldn't. `status`
+ * is the head's latest `Codex review` status (null when it has none). Only a
+ * missing status, or a pending one some gate input is newer than, means an
+ * evaluation was lost; a PR still waiting on Codex or on muxreview's approval
+ * has no such input, so it is left alone.
+ */
+export function sweepReason({ pull, status, comments = [], reviews = [] }) {
+    if (pull?.draft) return null;
+    if (!status) return "its head has no Codex review status";
+    if (status.state !== "pending") return null;
+    const since = Date.parse(status.updated_at);
+    const newer = (at) => Date.parse(at) > since;
+    if (comments.some((c) => isGateInput(c) && newer(c.updated_at ?? c.created_at))) {
+        return "a Codex answer or muxreview note is newer than its pending status";
     }
+    if (reviews.some((r) => isCodex(r) && newer(r.submitted_at))) {
+        return "a Codex review is newer than its pending status";
+    }
+    return null;
 }
 
 // The compare API lists at most 300 files; a list that long may be cut short.
 const COMPARE_FILE_CAP = 300;
+// What compare answers when the reviewed commit can't be compared with the
+// head (a force-push orphaned it). Anything else, after the client's retries,
+// fails the run rather than posting a wrong pending.
+const COMPARE_UNKNOWN_STATUSES = new Set([404, 422]);
 
 /** Files changed base...head, or null when that can't be known completely. */
-async function changedFiles(repo, base, head, token) {
+export async function changedFiles(client, repo, base, head) {
     try {
-        const cmp = await (await gh(`/repos/${repo}/compare/${base}...${head}`, token)).json();
+        const cmp = await client.json(`/repos/${repo}/compare/${base}...${head}`);
         const files = (cmp.files ?? []).map((f) => f.filename);
         return files.length >= COMPARE_FILE_CAP ? null : files;
     } catch (err) {
-        // A force-push can orphan the reviewed commit; treat as unknown.
-        console.log(`compare ${base}...${head.slice(0, 10)} failed: ${err.message}`);
+        if (!(err instanceof GitHubError) || !COMPARE_UNKNOWN_STATUSES.has(err.status)) throw err;
+        console.log(`compare ${base}...${head.slice(0, 10)}: HTTP ${err.status}, treating the diff as unknown`);
         return null;
     }
 }
 
-async function main() {
-    const { GITHUB_TOKEN: token, GITHUB_REPOSITORY: repo, PR_NUMBER: pr, DRY_RUN } = process.env;
-    if (!token || !repo || !pr) {
-        throw new Error("GITHUB_TOKEN, GITHUB_REPOSITORY and PR_NUMBER are required");
+export const WORKFLOW_FILE = "codex-review-gate.yml";
+
+/** The head's latest `Codex review` status, or null. */
+async function gateStatus(client, repo, sha) {
+    const combined = await client.json(`/repos/${repo}/commits/${sha}/status`);
+    return (combined.statuses ?? []).find((s) => s.context === STATUS_CONTEXT) ?? null;
+}
+
+/**
+ * Dispatches the gate's workflow for every open PR `sweepReason` picks.
+ * One PR's error doesn't stop the others; any error fails the run at the end.
+ * Returns the PR numbers dispatched.
+ */
+export async function sweep(client, repo, { ref, dryRun = false, log = console.log } = {}) {
+    const pulls = await client.paginate(`/repos/${repo}/pulls?state=open`);
+    const dispatched = [];
+    const failed = [];
+    for (const pull of pulls) {
+        try {
+            if (pull.draft) continue;
+            const status = await gateStatus(client, repo, pull.head.sha);
+            // Only a pending status can be older than an input it missed.
+            const [comments, reviews] =
+                status?.state === "pending"
+                    ? await Promise.all([
+                          client.paginate(`/repos/${repo}/issues/${pull.number}/comments`),
+                          client.paginate(`/repos/${repo}/pulls/${pull.number}/reviews`),
+                      ])
+                    : [[], []];
+            const reason = sweepReason({ pull, status, comments, reviews });
+            if (!reason) continue;
+            log(`#${pull.number} ${pull.head.sha.slice(0, 10)}: ${reason}; ${dryRun ? "would dispatch" : "dispatching"}`);
+            if (!dryRun) {
+                await client.request(`/repos/${repo}/actions/workflows/${WORKFLOW_FILE}/dispatches`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ ref, inputs: { pr: String(pull.number) } }),
+                });
+            }
+            dispatched.push(pull.number);
+        } catch (err) {
+            log(`#${pull.number}: ${err.message}`);
+            failed.push(pull.number);
+        }
     }
-    const pull = await (await gh(`/repos/${repo}/pulls/${pr}`, token)).json();
+    log(`sweep: ${pulls.length} open PR(s), ${dispatched.length} ${dryRun ? "to dispatch" : "dispatched"}, ${failed.length} failed`);
+    if (failed.length) throw new Error(`sweep failed for #${failed.join(", #")}`);
+    return dispatched;
+}
+
+async function main() {
+    const { GITHUB_TOKEN: token, GITHUB_REPOSITORY: repo, PR_NUMBER: pr, SWEEP, DISPATCH_REF, DRY_RUN } = process.env;
+    if (!token || !repo || !(pr || SWEEP)) {
+        throw new Error("GITHUB_TOKEN, GITHUB_REPOSITORY and PR_NUMBER (or SWEEP) are required");
+    }
+    const client = createGitHubClient({ token });
+    if (SWEEP) {
+        await sweep(client, repo, { ref: DISPATCH_REF || "main", dryRun: Boolean(DRY_RUN) });
+        return;
+    }
+    const pull = await client.json(`/repos/${repo}/pulls/${pr}`);
     const headSha = pull.head.sha;
     const [comments, reviews, reviewComments] = await Promise.all([
-        ghAll(`/repos/${repo}/issues/${pr}/comments`, token),
-        ghAll(`/repos/${repo}/pulls/${pr}/reviews`, token),
+        client.paginate(`/repos/${repo}/issues/${pr}/comments`),
+        client.paginate(`/repos/${repo}/pulls/${pr}/reviews`),
         // Inline comments: the files each findings review flagged.
-        ghAll(`/repos/${repo}/pulls/${pr}/comments`, token),
+        client.paginate(`/repos/${repo}/pulls/${pr}/comments`),
     ]);
     const latest = latestCodexOutput({ comments, reviews, reviewComments });
-    const filesSinceLatest = needsDiffSince(latest, headSha) ? await changedFiles(repo, latest.sha, headSha, token) : null;
+    const filesSinceLatest = needsDiffSince(latest, headSha) ? await changedFiles(client, repo, latest.sha, headSha) : null;
     // The pulls commits API lists at most 250; a longer PR isn't a bot bump.
     const dependencyBot =
         DEPENDENCY_BOTS.has(String(pull.user?.login ?? "").toLowerCase()) &&
         pull.commits <= 250 &&
-        isDependencyBotPr(pull.user.login, await ghAll(`/repos/${repo}/pulls/${pr}/commits`, token));
+        isDependencyBotPr(pull.user.login, await client.paginate(`/repos/${repo}/pulls/${pr}/commits`));
     const result = evaluateCodexGate({ headSha, comments, reviews, reviewComments, filesSinceLatest, dependencyBot });
     console.log(`#${pr} ${headSha.slice(0, 10)}: ${result.state} — ${result.description}`);
     if (DRY_RUN) return;
-    await gh(`/repos/${repo}/statuses/${headSha}`, token, {
+    await client.request(`/repos/${repo}/statuses/${headSha}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

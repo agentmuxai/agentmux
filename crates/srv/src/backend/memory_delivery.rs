@@ -297,6 +297,100 @@ pub fn compose_fallback(entries: &[Entry], reason: FallbackReason) -> Option<Com
     Some(Composed { text: b.out, spans })
 }
 
+/// What opens the catch-up block of a resume phase's message, and what
+/// `is_hidden_reinjection_text` (srv) and the stream parser (frontend) know
+/// the message by when it carries no memory. The block is AgentMux's, not the
+/// user's: the pane shows a card for it, never the text, but the agent's reply
+/// is shown (SPEC_RESUME_PHASE_CATCH_UP_TURN_2026_10_13.md §3.3).
+pub const CATCH_UP_SIGNATURE: &str = "AgentMux catch-up:";
+
+/// Which resume phase a catch-up turn follows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CatchUpKind {
+    /// A fresh session started and carries AgentMux's record of the
+    /// conversation (an account switch, a refused or rejected resume).
+    FreshSession,
+    /// The conversation was compacted.
+    Compaction,
+    /// The user resumed the conversation; the provider kept its context.
+    Resumed,
+}
+
+impl CatchUpKind {
+    pub fn from_wire(reason: &str) -> Option<Self> {
+        match reason {
+            "fresh_session" => Some(Self::FreshSession),
+            "compaction" => Some(Self::Compaction),
+            "resumed" => Some(Self::Resumed),
+            _ => None,
+        }
+    }
+
+    /// The memory event this phase shares with the `SessionStart` hook, when
+    /// the phase delivers memory at all.
+    pub fn memory_reason(self) -> Option<FallbackReason> {
+        match self {
+            Self::FreshSession => Some(FallbackReason::FreshSession),
+            Self::Compaction => Some(FallbackReason::Compaction),
+            Self::Resumed => None,
+        }
+    }
+
+    fn situation(self) -> &'static str {
+        match self {
+            Self::FreshSession => {
+                "You are picking up this conversation in a new session, for example after an account switch."
+            }
+            Self::Compaction => "You are picking up this conversation after a compaction.",
+            Self::Resumed => "You are picking up this conversation after it was resumed.",
+        }
+    }
+}
+
+/// What the agent is told to do once it has read what it was given. One
+/// constant so every resume phase says the same thing.
+const CATCH_UP_INSTRUCTION: &str = "Review the conversation and anything AgentMux just gave you. Before replying you may re-check real state \
+read-only (git status, open pull requests, files) to confirm what is still true; do not change anything yet. \
+Then reply to the user in a few lines: where you are picking up (the last thing they asked and whether it was \
+done), anything in flight or waiting on them, and two or three suggested next steps they can choose from. Then \
+stop and wait for them.";
+
+/// The message of a catch-up turn: the memory re-delivery when `memory` is the
+/// text of one (`compose_fallback`), then the catch-up block, in one
+/// `<system-reminder>`. Without memory the block stands alone: the hook
+/// already delivered it, or the phase delivers none.
+pub fn compose_catch_up(kind: CatchUpKind, memory: Option<&str>) -> String {
+    let mut out = match memory {
+        Some(text) => text.trim_end().trim_end_matches("</system-reminder>").trim_end().to_string() + "\n\n",
+        None => "<system-reminder>\n".to_string(),
+    };
+    out.push_str(&format!("{CATCH_UP_SIGNATURE} {} {CATCH_UP_INSTRUCTION}\n</system-reminder>\n", kind.situation()));
+    out
+}
+
+/// The last words of the instruction, which end every catch-up block. The
+/// frontend's `isCatchUpMessage` matches the block by them too.
+pub const CATCH_UP_TAIL: &str = "Then stop and wait for them.";
+
+/// Whether `text` is a catch-up message, which has no reinjection signature
+/// when it carries no memory. Its input is hidden, but the agent's reply is
+/// shown and read: the ambient digest and the continuation record skip the
+/// input without hiding what follows, and the hidden-reinjection gate
+/// (`set_hidden_reinjection_active`) is not set for it.
+///
+/// Structural, not a substring: the block is the single last line of the
+/// message, so a memory body that happens to contain the marker is not taken
+/// for one.
+pub fn is_catch_up_text(text: &str) -> bool {
+    if !text.starts_with("<system-reminder>") {
+        return false;
+    }
+    let Some(body) = text.strip_suffix("\n</system-reminder>\n") else { return false };
+    let Some(at) = body.rfind(&format!("\n{CATCH_UP_SIGNATURE} ")) else { return false };
+    let block = &body[at + 1..];
+    !block.contains('\n') && block.ends_with(CATCH_UP_TAIL)
+}
+
 /// How much of one item a delivery carried.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Delivered {
@@ -633,5 +727,83 @@ mod tests {
         assert!(!c.text.contains("# Global Memory"));
         assert!(c.text.contains("# Personal Memory (1 entry)\nP1\n"));
         assert_eq!(compose_items_with(&[], Reason::Startup, None, true), None);
+    }
+    #[test]
+    fn catch_up_kinds_are_the_frontends() {
+        assert_eq!(CatchUpKind::from_wire("fresh_session"), Some(CatchUpKind::FreshSession));
+        assert_eq!(CatchUpKind::from_wire("compaction"), Some(CatchUpKind::Compaction));
+        assert_eq!(CatchUpKind::from_wire("resumed"), Some(CatchUpKind::Resumed));
+        assert_eq!(CatchUpKind::from_wire("startup"), None);
+        assert_eq!(CatchUpKind::Resumed.memory_reason(), None);
+        assert_eq!(CatchUpKind::FreshSession.memory_reason(), Some(FallbackReason::FreshSession));
+    }
+
+    #[test]
+    fn a_catch_up_without_memory_is_the_block_alone() {
+        let text = compose_catch_up(CatchUpKind::Resumed, None);
+        assert!(text.starts_with("<system-reminder>\nAgentMux catch-up: "), "{text}");
+        assert!(text.ends_with("</system-reminder>\n"));
+        assert!(!text.contains(REINJECTION_SIGNATURE));
+        assert!(is_catch_up_text(&text));
+        assert!(text.contains("suggested next steps"));
+    }
+
+    #[test]
+    fn a_catch_up_with_memory_keeps_the_reinjection_message_whole_and_adds_one_block() {
+        let entries = vec![Entry {
+            label: "notes.md".into(),
+            tier: Tier::Personal,
+            text: "P1".into(),
+            name: "notes.md".into(),
+            system: false,
+            bundle_id: None,
+            path: None,
+        }];
+        let memory = compose_fallback(&entries, FallbackReason::FreshSession).unwrap();
+        let text = compose_catch_up(CatchUpKind::FreshSession, Some(&memory.text));
+        // Everything before the closing tag is the re-delivery, unchanged, so
+        // the card's item spans still index into it.
+        let body = memory.text.trim_end().trim_end_matches("</system-reminder>");
+        assert!(text.starts_with(body), "{text}");
+        assert_eq!(text.matches("<system-reminder>").count(), 1);
+        assert_eq!(text.matches("</system-reminder>").count(), 1);
+        assert!(text.contains(REINJECTION_SIGNATURE) && is_catch_up_text(&text));
+        assert!(text.ends_with("</system-reminder>\n"));
+    }
+
+    #[test]
+    fn ordinary_text_is_not_a_catch_up() {
+        assert!(!is_catch_up_text("AgentMux catch-up: please"));
+        assert!(!is_catch_up_text("<system-reminder>unrelated</system-reminder>"));
+    }
+
+    #[test]
+    fn the_instruction_ends_with_the_tail_the_matchers_use() {
+        assert!(CATCH_UP_INSTRUCTION.ends_with(CATCH_UP_TAIL));
+    }
+
+    /// A memory body is copied into a reinjection verbatim: one that happens to
+    /// contain the marker, even as its last line, is still a reinjection.
+    #[test]
+    fn a_memory_body_that_contains_the_marker_is_not_a_catch_up() {
+        for body in [
+            "notes\nAgentMux catch-up: how this works\nmore notes".to_string(),
+            "notes\nAgentMux catch-up: how this works".to_string(),
+            format!("notes\nAgentMux catch-up: how this works. {CATCH_UP_TAIL}\nmore notes"),
+        ] {
+            let entries = vec![Entry {
+                label: "notes.md".into(),
+                tier: Tier::Personal,
+                text: body,
+                name: "notes.md".into(),
+                system: false,
+                bundle_id: None,
+                path: None,
+            }];
+            let memory = compose_fallback(&entries, FallbackReason::Compaction).unwrap();
+            assert!(!is_catch_up_text(&memory.text), "{}", memory.text);
+            // And appending the real block still makes it one.
+            assert!(is_catch_up_text(&compose_catch_up(CatchUpKind::Compaction, Some(&memory.text))));
+        }
     }
 }
