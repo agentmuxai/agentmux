@@ -90,19 +90,20 @@ pub(crate) fn parse_set_rects_args(args: &serde_json::Value) -> Result<(String, 
 /// The page learns a window's new size a frame or more after the window has
 /// it, and a pane only moves once the page has laid out and sent its rect,
 /// so during a drag the pane's content trails the page's chrome around it.
-/// On macOS the host moves shown panes as soon as the window's size changes
-/// (`follow_window_resize`), stretching the page's last rects by the change:
+/// On macOS and Linux the host moves shown panes as soon as the window's size
+/// changes (`follow_window_resize`, `window_resized`), stretching the page's
+/// last rects by the change:
 /// the tile layout keeps its insets from the window's edges and every pane
 /// scales with it. The page's own rect for the new size replaces the guess.
 #[derive(Debug, Clone, Copy, PartialEq)]
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+#[cfg_attr(target_os = "windows", allow(dead_code))]
 pub(crate) struct LayoutBase {
     viewport: (i32, i32),
     /// x, y, width, height of the tile layout; the whole viewport if unknown.
     layout: (i32, i32, i32, i32),
 }
 
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+#[cfg_attr(target_os = "windows", allow(dead_code))]
 impl LayoutBase {
     /// `{ viewport: { width, height }, layout?: { x, y, width, height } }` from a batch.
     pub(crate) fn parse(args: &serde_json::Value) -> Option<Self> {
@@ -143,12 +144,12 @@ impl LayoutBase {
 /// per pane, not per window: a batch can carry only some of a window's panes
 /// (a display's scale changed and only some panes' timers have reported), and
 /// a pane's rect must always be read against the base it was measured with.
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+#[cfg_attr(target_os = "windows", allow(dead_code))]
 static LAYOUT_BASES: LazyLock<Mutex<HashMap<String, LayoutBase>>> = LazyLock::new(Default::default);
 
 /// Remember what pane `label`'s rect was laid out against (`None`: a rect
 /// with no base, which is used as sent). UI thread, as the rect is applied.
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+#[cfg_attr(target_os = "windows", allow(dead_code))]
 pub(crate) fn note_layout_base(label: &str, base: Option<LayoutBase>) {
     let mut bases = LAYOUT_BASES.lock();
     match base {
@@ -157,7 +158,7 @@ pub(crate) fn note_layout_base(label: &str, base: Option<LayoutBase>) {
     };
 }
 
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+#[cfg_attr(target_os = "windows", allow(dead_code))]
 pub(crate) fn layout_base(label: &str) -> Option<LayoutBase> {
     LAYOUT_BASES.lock().get(label).copied()
 }
@@ -183,18 +184,52 @@ pub(crate) fn follow_window_resize(state: &Arc<AppState>, window_label: &str) {
     }
 }
 
-/// The window's size changed (Linux). Logs its client area in the rects'
-/// physical pixels, the unit of `LayoutBase::viewport`. UI thread only.
+/// The window's size changed (Linux): move its shown panes to where the page
+/// will put them, without waiting for it, and lay the window out once. The
+/// page's own rects for the new size replace the guess (`apply`). UI thread
+/// only.
 #[cfg(target_os = "linux")]
-pub(crate) fn window_resized(_state: &Arc<AppState>, window_label: &str, window: &Window) {
+pub(crate) fn window_resized(state: &Arc<AppState>, window_label: &str, window: &Window) {
+    let started = std::time::Instant::now();
     let (width, height) = window_client_px(window);
     tracing::debug!(window = window_label, width, height, "[pane-bounds] window resized");
+    let panes: Vec<(String, cef::OverlayController)> = state
+        .browser_pane_overlays
+        .lock()
+        .iter()
+        .filter(|(_, (w, _))| w == window_label)
+        .map(|(label, (_, c))| (label.clone(), c.clone()))
+        .collect();
+    let mut moved = 0;
+    for (label, controller) in panes {
+        if controller.is_visible() == 0 {
+            continue;
+        }
+        let Some(base) = layout_base(&label) else { continue };
+        let Some((x, y, w, h)) = state.browser_pane_physical_rects.lock().get(&label).copied() else {
+            continue;
+        };
+        let to = base.predict(&Rect { x, y, width: w, height: h }, width, height);
+        controller.set_size(Some(&Size { width: to.width, height: to.height }));
+        controller.set_position(Some(&Point { x: to.x, y: to.y }));
+        moved += 1;
+    }
+    if moved > 0 {
+        window.layout();
+    }
+    tracing::debug!(
+        window = window_label,
+        width,
+        panes = moved,
+        ms = started.elapsed().as_secs_f64() * 1000.0,
+        "[pane-bounds] followed"
+    );
 }
 
 /// `window`'s client area in physical pixels: what the page's viewport
 /// measures (`innerWidth * devicePixelRatio`).
 #[cfg(target_os = "linux")]
-fn window_client_px(window: &Window) -> (i32, i32) {
+pub(crate) fn window_client_px(window: &Window) -> (i32, i32) {
     let scale = window.display().map(|d| d.device_scale_factor()).filter(|s| *s > 0.0).unwrap_or(1.0) as f64;
     let client = window.client_area_bounds_in_screen();
     ((client.width as f64 * scale).round() as i32, (client.height as f64 * scale).round() as i32)
@@ -313,11 +348,26 @@ fn apply(state: &Arc<AppState>, window_label: &str, rects: &[(PaneBounds, Option
     }
     #[cfg(target_os = "windows")]
     apply_windows(state, &live);
+    #[cfg(target_os = "macos")]
+    for (r, label) in &live {
+        crate::browser_pane::creation_views::resize_browser_pane_view(state, label, r.rect());
+    }
+    // Linux: move every pane, then lay the window out once, not once per pane.
+    #[cfg(target_os = "linux")]
+    {
+        let mut moved = false;
+        for (r, label) in &live {
+            moved |= crate::browser_pane::creation_views::resize_browser_pane_view_inner(state, label, r.rect(), false)
+                .is_some();
+        }
+        if moved {
+            if let Some(window) = state.windows.lock().get(window_label).cloned() {
+                window.layout();
+            }
+        }
+    }
     #[cfg(not(target_os = "windows"))]
     {
-        for (r, label) in &live {
-            crate::browser_pane::creation_views::resize_browser_pane_view(state, label, r.rect());
-        }
         let viewport_w = rects.iter().find_map(|(_, b)| b.map(|b| b.viewport_width()));
         tracing::debug!(
             window = window_label,
