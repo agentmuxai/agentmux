@@ -146,7 +146,7 @@ mod tests {
         // the SAME change, not as a follow-up.
         const FRONTEND_OAUTH_TYPED: &[&str] = &["claude", "codex", "gemini", "openclaw", "copilot"];
         const ALL_KNOWN_PROVIDERS: &[&str] = &[
-            "claude", "codex", "muxcode", "gemini", "qwen", "openclaw", "kimi", "copilot", "pi",
+            "claude", "codex", "muxcode", "gemini", "qwen", "openclaw", "kimi", "copilot", "pi", "kilo", "cline", "opencode",
         ];
         for p in ALL_KNOWN_PROVIDERS {
             let is_oauth_class = matches!(provider_class(p), Some(ProviderClass::OAuth { .. }));

@@ -158,6 +158,9 @@ fn all_providers_covers_every_registered_id_exactly_once() {
         "copilot",
         "muxcode",
         "antigravity",
+        "kilo",
+        "cline",
+        "opencode",
     ] {
         assert_eq!(
             ids.iter().filter(|id| **id == expected).count(),
@@ -165,7 +168,7 @@ fn all_providers_covers_every_registered_id_exactly_once() {
             "expected exactly one entry for {expected}, got {ids:?}"
         );
     }
-    assert_eq!(ids.len(), 10, "must not silently gain/lose a provider: {ids:?}");
+    assert_eq!(ids.len(), 13, "must not silently gain/lose a provider: {ids:?}");
 }
 
 #[test]

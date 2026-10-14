@@ -35,6 +35,11 @@ const PROVIDER_ID_ALIASES: Record<string, string> = {
     agy: "antigravity",
     "antigravity-cli": "antigravity",
     antigravity_cli: "antigravity",
+    kilocode: "kilo",
+    "kilo-code": "kilo",
+    "cline-cli": "cline",
+    "opencode-ai": "opencode",
+    "open-code": "opencode",
 };
 
 /** Resolve a possibly-legacy provider ID to its canonical form. Returns the

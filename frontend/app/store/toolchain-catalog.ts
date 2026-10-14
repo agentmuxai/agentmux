@@ -246,8 +246,9 @@ export const CORE_TOOLS: CoreTool[] = [
  * `toolchain-capabilities.ts` and the one-click installer never treat them
  * as tools AgentMux itself needs.
  *
- * The agent entries (OpenCode, Goose, Crush, Aider) are NOT launchable as
- * AgentMux panes yet — they are listed so users can see what's installed.
+ * The agent entries (Goose, Crush, Aider) are NOT launchable as AgentMux
+ * panes yet — they are listed so users can see what's installed. OpenCode
+ * is a provider now, listed with the others in the Toolchain pane.
  */
 export const LOCAL_MODEL_TOOLS: CoreTool[] = [
     {
@@ -324,25 +325,6 @@ export const LOCAL_MODEL_TOOLS: CoreTool[] = [
             windows: "scoop install llmfit",
             macos: "brew install llmfit",
             linux: "curl -fsSL https://llmfit.axjns.dev/install.sh | sh",
-        },
-    },
-    {
-        id: "opencode",
-        cliCommand: "opencode",
-        label: "OpenCode",
-        icon: "terminal",
-        optional: true,
-        description: "Open-source coding agent with built-in Ollama / LM Studio / llama.cpp support. Not yet launchable as an AgentMux pane.",
-        docsUrl: "https://opencode.ai/docs/",
-        installUrls: {
-            windows: "https://opencode.ai/docs/",
-            macos: "https://opencode.ai/docs/",
-            linux: "https://opencode.ai/docs/",
-        },
-        installCommand: {
-            windows: "npm install -g opencode-ai",
-            macos: "brew install anomalyco/tap/opencode",
-            linux: "curl -fsSL https://opencode.ai/install | bash",
         },
     },
     {

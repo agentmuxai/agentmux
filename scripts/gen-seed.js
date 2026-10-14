@@ -117,6 +117,33 @@ const CLI_DEFS = [
         // No container image built yet — host-only until agentmux/copilot ships.
         containerSupported: false,
     },
+    {
+        id: "kilo",
+        name: "Kilo",
+        provider: "kilo",
+        icon: "K",
+        description: "Open-source agent with 500+ models",
+        bus: "kilo",
+        containerSupported: false,
+    },
+    {
+        id: "cline",
+        name: "Cline",
+        provider: "cline",
+        icon: "C",
+        description: "Plan-then-act agent, any model",
+        bus: "cline",
+        containerSupported: false,
+    },
+    {
+        id: "opencode",
+        name: "OpenCode",
+        provider: "opencode",
+        icon: "O",
+        description: "Open-source agent, 75+ providers",
+        bus: "opencode",
+        containerSupported: false,
+    },
 ];
 
 // ── Seeded bundles ─────────────────────────────────────────────────────
@@ -231,7 +258,7 @@ const SEED_MEMORIES = [
 ];
 
 const manifest = {
-    version: 11,
+    version: 12,
     agents: CLI_DEFS.map((d) => ({
         id: d.id,
         name: d.name,
