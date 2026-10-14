@@ -193,11 +193,12 @@ describe("AcpTranslator — JSON-RPC errors", () => {
             },
         ]);
         // Grok, whose data only repeats what's known; structured data is left out.
-        expect(err("no auth method id provided", "Authentication required")[0].content).toBe(
-            "**Error:** Authentication required: no auth method id provided"
+        const text = (content: string) => [{ type: "text", content }];
+        expect(err("no auth method id provided", "Authentication required")).toEqual(
+            text("**Error:** Authentication required: no auth method id provided")
         );
-        expect(err("Internal error")[0].content).toBe("**Error:** Internal error");
-        expect(err({ details: 1 })[0].content).toBe("**Error:** Internal error");
+        expect(err("Internal error")).toEqual(text("**Error:** Internal error"));
+        expect(err({ details: 1 })).toEqual(text("**Error:** Internal error"));
     });
 
     it("still says something for an error with no message", () => {
