@@ -1,7 +1,7 @@
 # RCA: the pane header's "+" sits off centre vertically
 
 **Date:** 2026-10-14 · **Author:** AgentA@Area54
-**Status:** analysis — causes measured; fix proposed in §5, not built.
+**Status:** analysis — causes measured; fixes 1 and 2 of §5 built in #4933 (the "+" drawn as a 10px icon, tiles padded in whole pixels), fix 3 not built.
 **Seen in:** the operator's 0.59.24 window (app zoom 0.85) and a local build at `40623c1ba` (#4888's head, Windows, CEF 154), measured over CDP.
 **Code:** [`frontend/app/element/PaneTabStrip.tsx`](../../frontend/app/element/PaneTabStrip.tsx) (the button), [`frontend/app/element/PaneTabStrip.scss`](../../frontend/app/element/PaneTabStrip.scss) (`.pane-tab-strip-add`, `.pane-tab-strip-add-glyph`), [`frontend/app/mixins.scss`](../../frontend/app/mixins.scss) (`block-frame-default-header-layout`), [`frontend/layout/lib/tilelayout.scss`](../../frontend/layout/lib/tilelayout.scss) (`.tile-leaf` padding).
 
