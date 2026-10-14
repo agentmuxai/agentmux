@@ -91,6 +91,10 @@ for `eprintln_lossy!`; the exit-on-any-error logic predates the split of
   about the launcher, so the watcher logs it and falls back to the existing ppid
   watchdog, which polls `getppid()` every 2 s. Only a real exit event shuts srv
   down.
+- **The ppid watchdog takes the launcher's pid from its caller** instead of
+  reading `getppid()` when it starts, and checks once before its first sleep. A
+  fallback that starts after the launcher already died (srv reparented) would
+  otherwise take the new parent as its baseline and never fire.
 
 ## 5. Test
 

@@ -7,13 +7,15 @@
 /// If the parent process dies, getppid() changes (reparented to init/launchd).
 /// This is safer than PR_SET_PDEATHSIG which tracks the parent *thread*, not process,
 /// and can fire spuriously with async runtimes like Tokio.
+///
+/// `original_ppid` is the parent read at startup, not a fresh getppid(): a
+/// fallback can start after the parent already died and srv was reparented,
+/// and a fresh baseline would then never change. Checks once before sleeping.
 #[cfg(any(target_os = "linux", target_os = "macos"))]
-fn start_ppid_watchdog() {
-    let original_ppid = unsafe { libc::getppid() };
+fn start_ppid_watchdog(original_ppid: u32) {
     std::thread::spawn(move || {
         loop {
-            std::thread::sleep(std::time::Duration::from_secs(2));
-            let current_ppid = unsafe { libc::getppid() };
+            let current_ppid = unsafe { libc::getppid() } as u32;
             if current_ppid != original_ppid {
                 eprintln_lossy!(
                     "parent process died (ppid changed {} -> {}), shutting down",
@@ -21,6 +23,7 @@ fn start_ppid_watchdog() {
                 );
                 std::process::exit(0);
             }
+            std::thread::sleep(std::time::Duration::from_secs(2));
         }
     });
 }
@@ -39,7 +42,7 @@ fn start_parent_watcher(parent_pid: u32) {
                     *libc::__error()
                 );
                 let _ = kq;
-                start_ppid_watchdog();
+                start_ppid_watchdog(parent_pid);
                 return;
             }
 
@@ -78,7 +81,7 @@ fn start_parent_watcher(parent_pid: u32) {
                     "kevent() registration failed (errno={}), falling back to ppid watchdog",
                     errno
                 );
-                start_ppid_watchdog();
+                start_ppid_watchdog(parent_pid);
                 return;
             }
 
@@ -136,7 +139,7 @@ fn start_parent_watcher(parent_pid: u32) {
                         "kevent() wait failed ({}), falling back to ppid watchdog",
                         e
                     );
-                    start_ppid_watchdog();
+                    start_ppid_watchdog(parent_pid);
                 }
             }
         }
@@ -167,7 +170,7 @@ fn start_parent_watcher(parent_pid: u32) {
                     "pidfd_open() failed (errno={}), falling back to ppid watchdog",
                     errno
                 );
-                start_ppid_watchdog();
+                start_ppid_watchdog(parent_pid);
                 return;
             }
 
@@ -201,7 +204,7 @@ fn start_parent_watcher(parent_pid: u32) {
                         "poll() on pidfd failed ({}), falling back to ppid watchdog",
                         e
                     );
-                    start_ppid_watchdog();
+                    start_ppid_watchdog(parent_pid);
                 }
             }
         }
@@ -263,7 +266,7 @@ pub fn install_process_watchers() {
         let ppid = unsafe { libc::getppid() } as u32;
         if ppid <= 1 {
             // Parent is init/launchd — can't meaningfully watch it, use polling fallback
-            start_ppid_watchdog();
+            start_ppid_watchdog(ppid);
         } else {
             start_parent_watcher(ppid);
         }
