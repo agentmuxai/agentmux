@@ -474,6 +474,7 @@ partial list.
 | [`SPEC_TAB_CONTENT_REVEAL_GATE`](SPEC_TAB_CONTENT_REVEAL_GATE.md) | Tab content reveal gate |
 | [`SPEC_TAB_CREATION_REVEAL_ARCHITECTURE_2026_09_16`](SPEC_TAB_CREATION_REVEAL_ARCHITECTURE_2026_09_16.md) | SPEC: Window-Tab Creation Flashing — Root Cause and an Architecture Cleanup |
 | [`SPEC_TAB_SWITCH_DECOUPLE_SELECT_FROM_PAINT_2026_09_04`](SPEC_TAB_SWITCH_DECOUPLE_SELECT_FROM_PAINT_2026_09_04.md) | Instant tab-bar selection, decoupled from destination-pane reveal cost (window-level tabs) |
+| [`SPEC_TASK_DEV_PRUNE_OLD_BUILDS_2026_10_14`](SPEC_TASK_DEV_PRUNE_OLD_BUILDS_2026_10_14.md) | SPEC: `task dev` removes its old builds once nothing runs from them |
 | [`SPEC_TERMINAL_LATENCY_BENCHMARK_2026_05_19`](SPEC_TERMINAL_LATENCY_BENCHMARK_2026_05_19.md) | SPEC: Terminal Input Echo-Latency Benchmark |
 | [`SPEC_TERMINAL_SCROLLBACK_PERSISTENCE_2026_07_23`](SPEC_TERMINAL_SCROLLBACK_PERSISTENCE_2026_07_23.md) | SPEC: Terminal scrollback doesn't survive reconnect (all `view:"term"` panes) |
 | [`SPEC_TERMINAL_STATS_BADGE_REMOTE_PANES_2026_10_12`](SPEC_TERMINAL_STATS_BADGE_REMOTE_PANES_2026_10_12.md) | The terminal stats badge on SSH and WSL panes: the remote shell's figures, not the local client's |
