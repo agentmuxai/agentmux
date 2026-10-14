@@ -34,7 +34,7 @@ export interface CliCatalogEntry {
     /** Primary context file the CLI reads at startup — shown as a badge. */
     primaryContextFile: string;
     /** Short MCP-support summary; "none" hides the badge. */
-    mcpSupport: "stdio+http" | "stdio+http+oauth" | "none";
+    mcpSupport: "stdio" | "stdio+http" | "stdio+http+oauth" | "none";
     /** Long description shown in the card's ⓘ popover. Markdown-ish
      *  (one paragraph, short lines). */
     popoverMarkdown: string;
@@ -185,7 +185,8 @@ const CLI_CATALOG: CliCatalogEntry[] = [
         icon: "C",
         blurb: "Plan-then-act agent, any model",
         primaryContextFile: "AGENTS.md",
-        mcpSupport: "stdio+http",
+        // Every ACP agent takes stdio MCP servers; Cline advertises no http or sse.
+        mcpSupport: "stdio",
         popoverMarkdown:
             "Cline's coding agent from the command line. It plans before it acts and works with most model providers. It needs a sign-in first: run `cline auth` (a Cline account, a ChatGPT subscription or your own API key).",
         hostSupported: true,
