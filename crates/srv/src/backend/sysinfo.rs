@@ -1255,6 +1255,10 @@ pub async fn run_sysinfo_loop(
             // Each pane's processes as Tower groups them (its Job Object or cgroup,
             // else its shell's tree), from Tower's own sample, so the badge, its
             // detail and Tower count the same processes (`sampler::panes`).
+            // Read before the sample: a shell registered after it was read can't be
+            // judged by it.
+            let registered = pidregistry::get_all();
+            let asked = Instant::now();
             match tokio::task::block_in_place(|| panes()) {
                 Ok(stats) => {
                     peaks.retain(|id| stats.iter().any(|s| s.block_id == id));
@@ -1280,10 +1284,11 @@ pub async fn run_sysinfo_loop(
             }
             // Last-resort cleanup for a shell that exited without the normal
             // teardown (killed by the OS, a crash, a stop() race): its PID is
-            // missing from the process table the sample just read.
-            let live = crate::backend::tower_sampler::Tower::global().live_pids();
-            if !live.is_empty() {
-                for (block_id, pid) in pidregistry::get_all() {
+            // missing from a process table read after it was registered. Only a
+            // sample taken in this pass counts; a reused or failed one is skipped,
+            // and the next pass decides.
+            if let Some(live) = crate::backend::tower_sampler::Tower::global().live_pids_since(asked) {
+                for (block_id, pid) in registered {
                     if !live.contains(&pid) {
                         pidregistry::unregister(&block_id);
                         tracing::warn!(

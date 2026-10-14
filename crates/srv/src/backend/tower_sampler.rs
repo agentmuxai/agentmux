@@ -392,11 +392,15 @@ impl Tower {
         GLOBAL.get_or_init(Tower::new)
     }
 
-    /// The PIDs in the process table the last sample read; empty before the
-    /// first. What is missing from it has exited.
-    pub fn live_pids(&self) -> HashSet<u32> {
+    /// The PIDs in the process table of the last sample, if that sample was read
+    /// at or after `since`: what is missing from it had exited by then. `None`
+    /// for an older sample (one reused within [`REUSE_WITHIN`], or the last
+    /// good one before a failed read), which can't speak for a process that
+    /// started after it.
+    pub fn live_pids_since(&self, since: Instant) -> Option<HashSet<u32>> {
         let st = self.state.lock().unwrap_or_else(|e| e.into_inner());
-        st.last.as_ref().map(|l| l.procs.iter().map(|p| p.pid).collect()).unwrap_or_default()
+        let last = st.last.as_ref().filter(|l| l.at >= since)?;
+        Some(last.procs.iter().map(|p| p.pid).collect())
     }
 
     /// A sample (module doc). BLOCKING: reads the process table, and `labels`
@@ -706,6 +710,22 @@ fn render(
 
 #[cfg(test)]
 mod tests {
+
+    /// A sample reused from before a moment, or none at all, can't say a
+    /// process that started after it has exited.
+    #[test]
+    fn live_pids_answer_only_for_a_sample_read_at_or_after_the_moment_asked() {
+        let tower = Tower::new();
+        let before = Instant::now();
+        assert_eq!(tower.live_pids_since(before), None, "no sample yet");
+        let one = || {
+            Ok(vec![p(42, 1, "sh")])
+        };
+        tower.sample_from(one, false, "", Inputs::default, |_| None, |_| None).unwrap();
+        assert_eq!(tower.live_pids_since(before), Some(HashSet::from([42])));
+        let later = Instant::now() + Duration::from_millis(1);
+        assert_eq!(tower.live_pids_since(later), None, "that sample was read before `later`");
+    }
     use super::*;
 
     fn build(

@@ -2,11 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Each pane's CPU and memory for its stats badge, taken from Tower's sample
-//! (`backend::tower_sampler`), so the badge, the badge's detail and Tower all
-//! count the same processes the same way: a pane's Job Object or cgroup, which
-//! nothing it starts can leave, else its shell's process tree. A Tower pane open
-//! at the same time shares the process snapshot (Tower reuses one taken within
-//! the last second).
+//! (`backend::tower_sampler`), so the badge and Tower count the same processes
+//! the same way: a pane's Job Object or cgroup, which nothing it starts can
+//! leave, else its shell's process tree. A Tower pane open at the same time
+//! shares the process snapshot (Tower reuses one taken within the last second).
+//! The badge's tooltip detail (`blockstats_detail`) still walks the shell's
+//! tree; moving it onto the same grouping is a follow-up.
 //! docs/reports/REPORT_SYSINFO_REWRITE_AND_MODERN_MONITOR_2026_10_13.md section 5.5.
 
 use std::sync::Arc;

@@ -4,10 +4,12 @@
 //! What a terminal's stats badge tooltip shows beyond the badge's own CPU and
 //! memory (`blockstats.detail`), and the badge's peak memory.
 //!
-//! The badge (`sysinfo::run_sysinfo_loop`) sums its pane's shell and every
-//! process under it. The tooltip describes the same processes: their names,
-//! when the shell started, and two more memory figures from one
-//! `agentmux_procstats` snapshot, private and committed. A snapshot costs
+//! The badge (`sysinfo::run_sysinfo_loop`, through `sampler::panes`) counts
+//! the pane's processes as Tower groups them: its Job Object or cgroup, else
+//! its shell's tree. The tooltip describes the shell and every process under it:
+//! their names, when the shell started, and two more memory figures from one
+//! `agentmux_procstats` snapshot, private and committed. A process that left
+//! the shell's tree is in the badge's figures but not in the tooltip's. A snapshot costs
 //! tens of milliseconds, so it is taken only while a tooltip is open, never
 //! on the badge's every-second tick.
 //!
