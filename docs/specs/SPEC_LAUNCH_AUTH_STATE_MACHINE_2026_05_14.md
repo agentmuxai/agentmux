@@ -2,7 +2,9 @@
 
 **Date:** 2026-05-14
 **Author:** AgentA
-**Status:** proposed — Design — supersedes the §8 sketch in `SPEC_PRE_LAUNCH_OAUTH_FLOW_2026_05_14.md` with a full enumeration of paths and an extended reducer state machine.
+**Status:** historical — C-1's states shipped (`frontend/app/store/launch-flow-state/auth-state.ts`). C-2..C-6 were overtaken by the direct-account login flow; the `auth.savebundle` RPC was never built. Verified against code 2026-10-14 ([triage](../analysis/REPORT_REDUCER_STACK_TRIAGE_2026_10_13.md)).
+
+> **2026-10-14:** the 2-phase save (`authenticated` → `saving` → `ready`, `SaveBundleClicked`/`BundleSaved`/`BundleSaveFailed`) was removed from `frontend/app/store/launch-flow-state/auth-state.ts`. The `auth.savebundle` RPC was never built and srv's `AuthSessionStatus` has no `authenticated` status, so nothing could reach those states. The backend saves the login itself and reports `success`, which goes straight to `ready`. Read the stories and tables below that mention them as unbuilt design.
 
 ---
 

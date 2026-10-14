@@ -161,6 +161,12 @@
 
     .close {
         visibility: hidden;
+
+        // The close X is Font Awesome's `xmark`, the same shape as every other close.
+        i {
+            font-size: 13px;
+            line-height: 1;
+        }
     }
 
     // Custom tab color — the pane-tab pill tones for the picked hue (tab.tsx

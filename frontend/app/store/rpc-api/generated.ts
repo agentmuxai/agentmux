@@ -190,6 +190,7 @@ import type { CommandUpdateAgentInstanceData } from "@/types/rpc/CommandUpdateAg
 import type { CommandUpdateAgentSkillData } from "@/types/rpc/CommandUpdateAgentSkillData";
 import type { CommandUpsertBundleData } from "@/types/rpc/CommandUpsertBundleData";
 import type { CommandViewerAgentHiddenData } from "@/types/rpc/CommandViewerAgentHiddenData";
+import type { CommandViewerCanSendData } from "@/types/rpc/CommandViewerCanSendData";
 import type { CommandViewerRevokeData } from "@/types/rpc/CommandViewerRevokeData";
 import type { CommandVoiceCheckPathData } from "@/types/rpc/CommandVoiceCheckPathData";
 import type { CommandWriteAgentConfigData } from "@/types/rpc/CommandWriteAgentConfigData";
@@ -388,6 +389,7 @@ import type { UnlinkAgentIdentityResult } from "@/types/rpc/UnlinkAgentIdentityR
 import type { UnwatchMediaDirReq } from "@/types/rpc/UnwatchMediaDirReq";
 import type { ValidationReport } from "@/types/rpc/ValidationReport";
 import type { ViewerAgentHiddenResult } from "@/types/rpc/ViewerAgentHiddenResult";
+import type { ViewerCanSendResult } from "@/types/rpc/ViewerCanSendResult";
 import type { ViewerDevicesResult } from "@/types/rpc/ViewerDevicesResult";
 import type { ViewerPairStartResult } from "@/types/rpc/ViewerPairStartResult";
 import type { ViewerRevokeResult } from "@/types/rpc/ViewerRevokeResult";
@@ -2224,6 +2226,14 @@ export const GeneratedApi = {
     opts?: RpcOpts
   ): Promise<ViewerAgentHiddenResult> {
     return client.rpcCall("viewer.agent-hidden", data, opts);
+  },
+  // command "viewer.can-send"
+  ViewerCanSendCommand(
+    client: RpcClient,
+    data: CommandViewerCanSendData,
+    opts?: RpcOpts
+  ): Promise<ViewerCanSendResult> {
+    return client.rpcCall("viewer.can-send", data, opts);
   },
   // command "viewer.devices"
   ViewerDevicesCommand(client: RpcClient, opts?: RpcOpts): Promise<ViewerDevicesResult> {

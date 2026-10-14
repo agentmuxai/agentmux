@@ -37,6 +37,8 @@ export interface ToolBlockOverlayProps {
     /** Ordinal-matched live dispatch for an Agent/Task/Workflow tool call —
      *  see `activity/dispatch-correlation.ts`. */
     dispatchMatch?: AgentDispatch;
+    /** See ToolOverlayLog. */
+    onOverflowChange?: (overflows: boolean) => void;
 }
 
 export const ToolBlockOverlay = (props: ToolBlockOverlayProps): JSX.Element => (
@@ -54,7 +56,7 @@ export const ToolBlockOverlay = (props: ToolBlockOverlayProps): JSX.Element => (
                 {TOOL_STATUS[props.node.status]?.label}
             </span>
         </div>
-        <ToolOverlayLog node={props.node} dispatchMatch={props.dispatchMatch} />
+        <ToolOverlayLog node={props.node} dispatchMatch={props.dispatchMatch} onOverflowChange={props.onOverflowChange} />
     </div>
 );
 

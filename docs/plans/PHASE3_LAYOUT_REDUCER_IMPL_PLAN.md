@@ -1,5 +1,7 @@
 # Phase 3 impl plan — slice owns positions, retire TanStack from the agent pane
 
+**Status:** historical — executed in #1270 (the TanStack virtualizer is gone from the agent view and from package.json). Verified against code 2026-10-14 ([triage](../analysis/REPORT_REDUCER_STACK_TRIAGE_2026_10_13.md)).
+
 Issue #1235 · spec `SPEC_AGENT_PANE_LAYOUT_REDUCER_2026_06_02.md` §6 Phase 3 / §4.1-B / §11.1
 Branch builds on Phase 2 (`659f5600`). Render from the slice's pure selectors; delete TanStack.
 

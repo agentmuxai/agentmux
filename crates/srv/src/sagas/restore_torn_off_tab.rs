@@ -120,12 +120,14 @@ async fn run_inner(
     dest_workspace_id: String,
     dst_index: u32,
 ) -> Result<Value, String> {
-    // Step 1: move the tab.
+    // Step 1: move the tab. The torn-off workspace usually holds only
+    // this tab, so the move may drain it; step 2 then deletes it.
     ctx.dispatch(Command::MoveTab {
         tab_id: tab_id.clone(),
         src_workspace_id: source_workspace_id.clone(),
         dst_workspace_id: dest_workspace_id.clone(),
         dst_index,
+        allow_empty_source: true,
     })
     .await
     .map_err(|e| format!("RestoreTornOffTab step 1 (MoveTab): {}", e))?;

@@ -20,9 +20,9 @@
  * every prerequisite the server itself depends on is satisfied (e.g.
  * ableton-mcp's process starts and answers `initialize` whether or not
  * Ableton Live is actually running; that gap is why each preload catalog
- * entry's static `prereqNote` (mcp-preload-catalog.ts, shown by
- * McpCatalogPicker and mcp-manager) matters alongside this dynamic check,
- * not instead of it. Only the spec's `db_mcp_servers` column for it
+ * entry's static `prereqNote` (mcp-preload-catalog.ts, shown in a
+ * server's details by mcp-server-detail.tsx) matters alongside this
+ * dynamic check, not instead of it. Only the spec's `db_mcp_servers` column for it
  * (§4.4/§6) is not built).
  */
 

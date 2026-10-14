@@ -198,6 +198,12 @@
     --accent-text-color: #fff;  // text/icon color on an --accent-color-filled surface (e.g. active pill states)
     --button-color: #fff;       // text color on an --accent-color-filled primary button — distinct from --button-text-color below, which is for the brighter green/yellow buttons
     --error-text-color: #ff8080;
+    // The standard Windows close-button reds (hover, pressed) and its glyph. One
+    // definition for the title bar (window-controls.win32.scss) and the pane
+    // headers' close button (mixins.scss).
+    --window-close-hover-bg: #c42b1c;
+    --window-close-press-bg: #b7201b;
+    --window-close-fg: #ffffff;
     --success-text-color: #10b981;
     --warning-text-color: #d97706;
     // Own literal, NOT an alias to --form-element-bg-color: that resolves to

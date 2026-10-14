@@ -5,6 +5,11 @@
 **Trigger:** Operator report — "with the fontawesome free migration, we got some quirks in placement. On the agent panes, the X should be made larger, and should turn to our standard windows close button red when hovering over it. Also, the briefcase appears offset relative to the other icons, like it is too high. Can you check the structure?"
 **Extended:** 2026-10-12 — §8 adds the full spectrum of options for the window control icons (minimize, maximize/restore, close), on request.
 **Status:** proposed — analysis only; this report changes no code. §5 is the proposal; flip this line to `implemented` when it lands.
+**Update 2026-10-13:** §5.1 (a bigger close X that turns the Windows red on hover) has landed in the follow-up to #4838, as decided by the operator's request: D1 all panes, D2 the inset tile, D4 the reds as tokens in `theme.scss` shared with the title bar. §5.2 (the Stash icon, D3) and §8.8 landed in the next PR, with the recommendations taken:
+- **D3:** the Stash button is `toolbox` (it lines up with the maximize icon; the suitcase sat 0.56px high).
+- **D5:** one close shape. The window tab's close (was the codicon SVG), the pane tab's close (was a text `×`), and the clear or close buttons of the filter input, the agent search bar and the settings search (were text `×`) are now Font Awesome's `xmark`, the same glyph as the pane header's close and the dozen `fa-xmark` closes already there. Left as they are, on purpose: the title bar's Windows-style X and the macOS traffic lights (the platform's own look), and the failure chips' `×` (a text glyph in a chip API, shared with `■` and `⌫`).
+- **D6:** closes use the solid `xmark`; the outline maximize and the tile restore shipped in #4838.
+- **D7:** the title bar's maximize stays a fixed button. **D8:** Linux keeps the Windows look.
 
 ## 1. Summary
 

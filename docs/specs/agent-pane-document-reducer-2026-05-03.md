@@ -1,7 +1,7 @@
 # Agent Pane Document Reducer — root-cause + architecture spec
 
 **Date:** 2026-05-03
-**Status:** Draft — awaiting review
+**Status:** implemented — #681 (`frontend/app/store/agent-document/`). Verified against code 2026-10-14 ([triage](../analysis/REPORT_REDUCER_STACK_TRIAGE_2026_10_13.md)).
 **Scope:** [`frontend/app/view/agent/`](../../frontend/app/view/agent)
 **Triggering bug:** Mid-Claude-session, the agent pane chat history disappears and only a "skeleton" (empty pane shell) remains.
 

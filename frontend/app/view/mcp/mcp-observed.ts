@@ -2,10 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * What Connectors → MCP servers shows under "In use now": every MCP server a
- * running agent's CLI reports having, from every source, with each agent's
- * status (`mcp.observed.list`, crates/srv/src/backend/mcp_observed.rs).
- * SPEC_CONNECTORS_MCP_WHAT_AGENTS_RUN_2026_10_10.md §4.
+ * What Connectors → MCP servers knows about running agents: every MCP server
+ * a running agent's CLI reports having, from every source, with each agent's
+ * status (`mcp.observed.list`, crates/srv/src/backend/mcp_observed.rs). It
+ * sets each card's status, and lists the servers outside the catalog under
+ * "Also in use". SPEC_CONNECTORS_MCP_WHAT_AGENTS_RUN_2026_10_10.md §4.
  */
 
 import { onMuxEvent } from "@/app/store/mps";

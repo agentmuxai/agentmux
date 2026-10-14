@@ -448,7 +448,7 @@ function EndIcons(props: {
                 cached model — degrade to showing the button (the toggle's own
                 countExpandedLeaves guard still enforces the policy). */}
             <Show when={!ephemeral() && numLeafs() > 1 && (props.nodeModel.canMinimize?.() ?? true)}>
-                <OptMinimizeButton minimized={minimized()} toggleMinimize={props.nodeModel.toggleMinimize} />
+                <OptMinimizeButton minimized={minimized() && !magnified()} toggleMinimize={props.nodeModel.toggleMinimize} />
             </Show>
 
             <Show
@@ -692,8 +692,11 @@ function BlockFrame_Header(
     });
 
     // With the tab strip in place of the iconview, the view icon itself is
-    // gone — keep it only when it's a real control (the editor's file-tree
-    // toggle), not when it's just the pane's identity (the pill shows that).
+    // gone. Keep it only when it's a real control, not when it's just the
+    // pane's identity (the pill shows that). No built-in view uses this now,
+    // but the v1 pane-tab contract lets a tab's `headerIcon` be clickable,
+    // and trusted widgets register through that contract
+    // (SPEC_PANE_TAB_CONTRACT_V1_2026_09_24.md).
     const viewIconControlElem = createMemo<JSX.Element>(() => {
         const vi = viewIconUnion();
         if (!props.leadingTabStrip || vi == null || typeof vi === "string") return null;

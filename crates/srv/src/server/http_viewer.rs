@@ -11,7 +11,9 @@
 //! - `GET /agentmux/viewer/hello`, `GET /agentmux/viewer/agents`,
 //!   `GET /agentmux/viewer/agents/:name/feed`, `GET /agentmux/viewer/panes`,
 //!   `GET /agentmux/viewer/terminals/:block_id/feed`
-//!   (`server::http_viewer_terminal`) and `GET /agentmux/viewer/procs`:
+//!   (`server::http_viewer_terminal`), `GET /agentmux/viewer/procs`, and
+//!   `GET /agentmux/viewer/sysinfo` and `…/sysinfo/feed`
+//!   (`server::http_viewer_sysinfo`):
 //!   `Authorization: Bearer amxv_…` only. Neither the `lan_key` nor the instance `auth_key` opens
 //!   them, and the token opens nothing else: no other router knows it.
 //!
@@ -31,7 +33,7 @@ use serde::Deserialize;
 use super::*;
 use crate::backend::rpc_types::CommandBlockfileReadRangeData;
 use crate::backend::viewer::feed::{self, AppendStep, Cursor, HubEvent};
-use crate::backend::viewer::{pairing, FeedLease, FeedRefused};
+use crate::backend::viewer::{pairing, signing, FeedLease, FeedRefused};
 
 /// Heartbeat comment on a quiet feed.
 pub(crate) const FEED_HEARTBEAT: Duration = Duration::from_secs(15);
@@ -66,6 +68,8 @@ pub fn build_viewer_router(state: AppState) -> Router {
         .route("/agentmux/viewer/agents/:name/feed", get(handle_viewer_feed))
         .route("/agentmux/viewer/procs", get(handle_viewer_procs))
         .route("/agentmux/viewer/panes", get(handle_viewer_panes))
+        .route("/agentmux/viewer/sysinfo", get(super::http_viewer_sysinfo::handle_viewer_sysinfo))
+        .route("/agentmux/viewer/sysinfo/feed", get(super::http_viewer_sysinfo::handle_viewer_sysinfo_feed))
         .route(
             "/agentmux/viewer/terminals/:block_id/feed",
             get(super::http_viewer_terminal::handle_viewer_terminal_feed),
@@ -146,15 +150,13 @@ async fn handle_viewer_pair(
     if !(1..=64).contains(&name_len) || device_name.chars().any(char::is_control) {
         return bad_request("device_name must be 1 to 64 characters");
     }
+    // The key the device signs send requests with (`viewer::signing`).
     let device_key = match body.device_key.as_deref().map(str::trim).filter(|k| !k.is_empty()) {
         None => String::new(),
-        Some(key) => {
-            use base64::Engine as _;
-            match base64::engine::general_purpose::STANDARD.decode(key) {
-                Ok(bytes) if bytes.len() == 32 => key.to_string(),
-                _ => return bad_request("device_key must be standard base64 of a 32-byte public key"),
-            }
-        }
+        Some(key) => match signing::DeviceKey::parse(key) {
+            Ok(_) => key.to_string(),
+            Err(msg) => return bad_request(msg),
+        },
     };
     let from = peer.map(|Extension(ConnectInfo(addr))| addr.ip());
     match state.viewer.pairing.redeem(&body.code, from) {
@@ -192,13 +194,31 @@ async fn handle_viewer_pair(
     Json(out).into_response()
 }
 
-/// `GET /agentmux/viewer/hello`: who this is, and which device is asking.
+/// Whether a device may send to agents: `allowed` (the owner's grant and a
+/// key on file), `off` (no grant), or `pair_again` (a grant, but the device
+/// paired without a key, so it can't sign). agentmux-mobile's
+/// SPEC_SEND_FROM_THE_PHONE_2026_10_13 §4.
+pub(crate) fn send_state(device: &crate::backend::storage::viewer_devices::ViewerDevice) -> &'static str {
+    match (device.can_send, device.device_key.is_empty()) {
+        (false, _) => "off",
+        (true, true) => "pair_again",
+        (true, false) => "allowed",
+    }
+}
+
+/// `GET /agentmux/viewer/hello`: who this is, which device is asking, and
+/// whether it may send.
 async fn handle_viewer_hello(State(state): State<AppState>, Extension(caller): Extension<ViewerCaller>) -> Response {
+    let send = match state.mstore.viewer_device_get(&caller.device_id) {
+        Ok(Some(device)) => send_state(&device),
+        _ => "off",
+    };
     let mut out = json!({
         "hostname": state.hostname,
         "channel": crate::backend::reactive::registry::local_channel_id(),
         "version": state.version,
         "device_id": caller.device_id,
+        "send": send,
     });
     if let Some(id) = crate::backend::fleet_source::install_id() {
         out["install_id"] = json!(id);
@@ -293,7 +313,7 @@ async fn handle_viewer_procs(State(state): State<AppState>, Query(q): Query<Proc
             true,
             &st.hostname,
             || crate::server::app_api::tower_pane::inputs(&st.process_tracker),
-            |id| crate::server::app_api::tower_pane::block_label(&st.mstore, id),
+            |id| crate::backend::tower_sampler::block_label(&st.mstore, id),
             // What each renderer serves names this computer's windows and
             // pages; a paired viewer sees only that it is a renderer.
             |_| None,
@@ -327,7 +347,7 @@ async fn handle_viewer_panes(State(state): State<AppState>) -> Response {
         let tabs = st.mstore.get_all::<Tab>().map_err(|e| e.to_string())?;
         let blocks = st.mstore.get_all::<Block>().map_err(|e| e.to_string())?;
         let label = |b: &Block| {
-            crate::server::app_api::tower_pane::block_label(&st.mstore, &b.oid)
+            crate::backend::tower_sampler::block_label(&st.mstore, &b.oid)
                 .map(|l| (l.label, l.agent))
                 .unwrap_or_default()
         };

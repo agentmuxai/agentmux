@@ -1,0 +1,306 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// Card, CardGrid and StatusDot: how Connectors shows what is connected
+// (docs/specs/SPEC_CONNECTORS_CARDS_2026_10_13.md §3). Line style, square
+// corners, tokens only (SPEC_UI_LINE_STYLE_COMPONENT_SYSTEM_2026_10_05.md
+// L1, L2, L6). Sizes read the density variables (L3); Connectors sets
+// `ui-density-compact`.
+
+@use "../../mixins.scss";
+
+// ── Grid ──────────────────────────────────────────────────────────────────────
+
+.ui-card-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(var(--ui-card-min, 200px), 1fr));
+    gap: var(--space-1-5);
+    min-width: 0;
+
+    &--chip {
+        gap: var(--space-1);
+    }
+}
+
+.ui-card-cell {
+    display: flex;
+    min-width: 0;
+
+    > .ui-card {
+        flex: 1;
+    }
+}
+
+// The open card's details: a full-width row under the card's row, with a
+// caret pointing up at the card.
+.ui-card-detail {
+    grid-column: 1 / -1;
+    position: relative;
+    min-width: 0;
+    margin-top: var(--space-1);
+    border: 1px solid var(--accent-color);
+    background: var(--panel-bg-color);
+
+    &::before {
+        content: "";
+        position: absolute;
+        top: -6px;
+        left: var(--ui-card-caret-left, 50%);
+        width: 10px;
+        height: 10px;
+        transform: translateX(-50%) rotate(45deg);
+        border-top: 1px solid var(--accent-color);
+        border-left: 1px solid var(--accent-color);
+        background: var(--panel-bg-color);
+    }
+}
+
+// ── Card ──────────────────────────────────────────────────────────────────────
+
+.ui-card {
+    position: relative;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-areas:
+        "icon text status"
+        "icon text actions";
+    align-items: start;
+    column-gap: var(--space-2);
+    min-width: 0;
+    padding: var(--space-1-5) var(--space-2);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: color-mix(in srgb, var(--main-text-color) 3%, transparent);
+    color: var(--main-text-color);
+    text-align: left;
+    cursor: default;
+    transition:
+        background 90ms ease,
+        border-color 90ms ease;
+
+    &:hover {
+        border-color: var(--accent-color);
+        background: var(--hover-bg-color);
+    }
+
+    &:focus-visible {
+        @include mixins.focus-ring;
+    }
+
+    &.is-selected {
+        border-color: var(--accent-color);
+        background: color-mix(in srgb, var(--accent-color) var(--ui-tint-rest), transparent);
+    }
+
+    &.is-attention:not(.is-selected) {
+        border-color: var(--ui-line-danger);
+    }
+
+    &.is-muted .ui-card-icon,
+    &.is-muted .ui-card-text {
+        opacity: 0.6;
+    }
+
+    &.has-edge {
+        box-shadow: inset 3px 0 0 var(--ui-card-edge);
+        padding-left: calc(var(--space-2) + 3px);
+    }
+
+    // Actions show on hover, focus and while open.
+    &:hover .ui-card-actions,
+    &:focus-within .ui-card-actions,
+    &.is-selected .ui-card-actions {
+        visibility: visible;
+    }
+}
+
+.ui-card-icon {
+    grid-area: icon;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    color: var(--secondary-text-color);
+    font-size: var(--text-sm);
+}
+
+.ui-card-text {
+    grid-area: text;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    min-width: 0;
+    line-height: 1.25;
+}
+
+.ui-card-title,
+.ui-card-subtitle,
+.ui-card-meta {
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.ui-card-title {
+    font-size: var(--text-sm);
+    font-weight: 600;
+    color: var(--main-text-color);
+}
+
+.ui-card-subtitle {
+    font-size: var(--text-2xs);
+    color: var(--secondary-text-color);
+}
+
+.ui-card-meta {
+    margin-top: var(--space-0-5);
+    font-size: var(--text-2xs);
+    color: var(--secondary-text-color);
+
+    // "OAuth · Used by 2 agents": the dots come from here, not the markup.
+    > * + *::before {
+        content: "·";
+        margin: 0 var(--space-1);
+        color: var(--grey-text-color);
+    }
+}
+
+.ui-card-status {
+    grid-area: status;
+    justify-self: end;
+    margin-top: 4px;
+}
+
+.ui-card-badge {
+    grid-area: status;
+    justify-self: end;
+    align-self: center;
+    min-width: 14px;
+    padding: 0 var(--space-1);
+    border: 1px solid var(--ui-line-accent);
+    border-radius: var(--radius-full);
+    background: color-mix(in srgb, var(--accent-color) var(--ui-tint-hover), transparent);
+    color: var(--accent-color);
+    font-size: var(--text-2xs);
+    font-weight: 700;
+    line-height: 14px;
+    text-align: center;
+}
+
+.ui-card-actions {
+    grid-area: actions;
+    justify-self: end;
+    align-self: end;
+    display: inline-flex;
+    gap: var(--space-0-5);
+    visibility: hidden;
+}
+
+// ── Chip: one line, for an Add gallery ────────────────────────────────────────
+
+.ui-card--chip {
+    grid-template-areas: "icon text status";
+    align-items: center;
+    column-gap: var(--space-1-5);
+    padding: var(--space-1) var(--space-1-5);
+
+    .ui-card-title {
+        font-size: var(--text-xs);
+    }
+}
+
+// ── Status dot ────────────────────────────────────────────────────────────────
+
+.ui-status-dot {
+    display: inline-block;
+    flex: none;
+    width: 8px;
+    height: 8px;
+    border-radius: var(--radius-full);
+    border: 1px solid transparent;
+
+    &--ok {
+        background: var(--success-color);
+    }
+
+    &--warn {
+        background: var(--warning-color);
+    }
+
+    &--error {
+        background: var(--error-color);
+    }
+
+    &--busy {
+        background: var(--warning-color);
+        animation: ui-status-dot-pulse 1.2s ease-in-out infinite;
+
+        @media (prefers-reduced-motion: reduce) {
+            animation: none;
+        }
+    }
+
+    &--idle {
+        background: transparent;
+        border-color: var(--secondary-text-color);
+    }
+}
+
+@keyframes ui-status-dot-pulse {
+    50% {
+        opacity: 0.35;
+    }
+}
+
+// ── A Connectors section: header, Add gallery, groups ─────────────────────────
+
+.ui-card-section {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    padding: var(--space-1-5) var(--space-2) var(--space-2);
+    min-width: 0;
+}
+
+.ui-card-section-header {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1-5);
+    min-width: 0;
+
+    .ui-card-section-title {
+        font-size: var(--text-sm);
+        font-weight: 600;
+        color: var(--main-text-color);
+        white-space: nowrap;
+    }
+
+    .ui-card-section-count {
+        font-size: var(--text-2xs);
+        color: var(--secondary-text-color);
+    }
+
+    .ui-card-section-filter {
+        flex: 1;
+        min-width: 80px;
+        max-width: 240px;
+        margin-left: auto;
+    }
+}
+
+.ui-card-group-heading {
+    margin: var(--space-1) 0 0;
+    font-size: var(--text-2xs);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--secondary-text-color);
+}
+
+.ui-card-empty {
+    padding: var(--space-2) 0;
+    font-size: var(--text-2xs);
+    color: var(--secondary-text-color);
+}

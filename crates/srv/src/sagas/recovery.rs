@@ -396,6 +396,8 @@ pub fn derive_inverse_command(forward: &Command, step: &UnresolvedStep) -> Optio
             src_workspace_id: dst_workspace_id.clone(),
             dst_workspace_id: src_workspace_id.clone(),
             dst_index: 0,
+            // Undoing a tear-off drains the workspace the saga created.
+            allow_empty_source: true,
         }),
         Command::MoveBlock {
             block_id,
@@ -562,6 +564,7 @@ mod tests {
             src_workspace_id: "ws-src".into(),
             dst_workspace_id: "ws-dst".into(),
             dst_index: 5,
+            allow_empty_source: false,
         };
         let step = dummy_step("succeeded", "{}", None);
         let inv = derive_inverse_command(&cmd, &step).expect("should derive");
@@ -571,6 +574,7 @@ mod tests {
                 src_workspace_id,
                 dst_workspace_id,
                 dst_index,
+                allow_empty_source,
             } => {
                 assert_eq!(tab_id, "tab-1");
                 // src/dst swapped.
@@ -578,6 +582,7 @@ mod tests {
                 assert_eq!(dst_workspace_id, "ws-src");
                 // Limitation: original src index lost; goes to 0.
                 assert_eq!(dst_index, 0);
+                assert!(allow_empty_source, "undoing a tear-off drains its new workspace");
             }
             other => panic!("expected MoveTab, got {:?}", other),
         }
@@ -753,6 +758,7 @@ mod tests {
             src_workspace_id: "src-ws".into(),
             dst_workspace_id: "new-ws".into(),
             dst_index: 0,
+            allow_empty_source: false,
         };
         saga_log.start_step(1, 1, "MoveTab", &move_cmd).unwrap();
         saga_log
@@ -831,6 +837,7 @@ mod tests {
             src_workspace_id: "ws-src".into(),
             dst_workspace_id: "ws-dst".into(),
             dst_index: 0,
+            allow_empty_source: false,
         };
         saga_log.start_step(2, 1, "MoveTab", &cmd_b).unwrap();
         saga_log.fail_step(2, 1, "reducer rejected").unwrap();

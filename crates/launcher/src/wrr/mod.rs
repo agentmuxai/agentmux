@@ -21,6 +21,10 @@
 //     it can determine at this transition.
 //   * `severity_for(kind)`: the per-kind severity floor classifier.
 //
+// No I/O here: these run under the launcher's state lock. Arms that
+// want a log line push it onto the `diagnostics` sink they're given;
+// `ipc/server.rs` writes those lines after the lock is released.
+//
 // Pure event-driven. There is no clock task, no heartbeat — drift
 // is emitted at the moment the OS-driven Command is dispatched
 // through the reducer. See the design doc for the trade-off ("we
@@ -67,6 +71,7 @@ pub fn apply_hwnd_opened(
     title: String,
     label_hint: Option<String>,
     now_ms: u64,
+    diagnostics: &mut Vec<String>,
 ) -> Vec<Event> {
     // Case 1: label_hint maps to an existing WindowMirror that's
     // waiting for an HWND. Happy path — link them, no drift.
@@ -199,7 +204,7 @@ pub fn apply_hwnd_opened(
                 // top-level (6 in a clean v0.33.696 session) and made
                 // genuine drifts harder to spot.
                 //
-                // Now: log via tracing only, no event. The pure-state
+                // Now: a diagnostic line only, no event. The pure-state
                 // mutation (mirror.hwnd overwrite + drain_pending +
                 // optional steal-clear on the prior holder) still
                 // happens above. Linked + stole still emits drift —
@@ -210,7 +215,7 @@ pub fn apply_hwnd_opened(
                     .as_deref()
                     .map(|s| format!(" (stole from label={})", s))
                     .unwrap_or_default();
-                crate::log(&format!(
+                diagnostics.push(format!(
                     "[wrr] hwnd_repaired label={} prior_hwnd={} new_hwnd={}{}",
                     label, existing, hwnd, stolen_suffix
                 ));
@@ -509,18 +514,24 @@ pub fn apply_hwnd_iconic_changed(state: &mut State, hwnd: u64, iconic: bool) -> 
 /// Suppressed when `state.monitors` is empty (we don't yet know
 /// the topology — first `ReportMonitorTopologyChanged` will
 /// reconcile every label's `last_rect` against fresh monitors).
-pub fn apply_hwnd_position_changed(state: &mut State, hwnd: u64, new_rect: Rect) -> Vec<Event> {
+pub fn apply_hwnd_position_changed(
+    state: &mut State,
+    hwnd: u64,
+    new_rect: Rect,
+    diagnostics: &mut Vec<String>,
+) -> Vec<Event> {
     let mut events: Vec<Event> = Vec::new();
     let monitors = state.monitors.clone();
 
     // Phase B.9.1 diagnostic — single line per position event so
-    // operators can correlate with host-side hook activity.
+    // operators can correlate with host-side hook activity. Returned
+    // to the caller, which writes it after releasing the state lock.
     let linked_label_diag: Option<String> = state
         .windows
         .iter()
         .find(|(_, m)| m.hwnd == Some(hwnd))
         .map(|(label, _)| label.clone());
-    crate::log(&format!(
+    diagnostics.push(format!(
         "[ipc] WRR-POS hwnd={:#x} rect=({},{})-({},{}) linked={:?} monitors={} pending={}",
         hwnd, new_rect.left, new_rect.top, new_rect.right, new_rect.bottom,
         linked_label_diag, monitors.len(), state.pending_hwnds.len()

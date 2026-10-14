@@ -1,5 +1,7 @@
 # Saga Architecture — Execution Plan
 
+**Status:** historical — executed ([retro](../retro/saga-architecture-migration-complete-2026-05-02.md)). Verified against code 2026-10-14 ([triage](../analysis/REPORT_REDUCER_STACK_TRIAGE_2026_10_13.md)).
+
 **Date:** 2026-05-01
 **Specs:**
 - [`SPEC_SAGA_ARCHITECTURE_TARGET_2026-05-01.md`](./SPEC_SAGA_ARCHITECTURE_TARGET_2026-05-01.md) (target)

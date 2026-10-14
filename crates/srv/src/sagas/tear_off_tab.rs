@@ -28,13 +28,13 @@
 // §4.2 — host CEF window creation stays outside the saga.
 //
 // **Pre-condition:** the source workspace has more than one tab.
-// `wcore::tear_off_tab` enforced this; the reducer's `MoveTab`
-// doesn't (intentionally — the same command supports legitimate
-// "drain workspace" flows). The saga checks before issuing any
-// commands so the user-visible error is clear.
+// The reducer's `MoveTab` enforces this atomically
+// (`allow_empty_source: false`); the saga also checks before issuing
+// any commands so the common case fails fast with a clear error.
 //
 // **Compensation:**
-// * Step 2 fails after step 1 succeeded → `DeleteWorkspace { new_ws_id }`
+// * Step 2 fails after step 1 succeeded (including a concurrent move
+//   that left the source with one tab) → `DeleteWorkspace { new_ws_id }`
 //   (the reducer cascades any tabs in it; the new workspace will be
 //   empty here since step 2 failed before moving the tab).
 // * Step 1 fails → nothing to compensate (reducer rejected without
@@ -56,20 +56,11 @@ pub async fn run(
     tab_id: String,
     source_workspace_id: String,
 ) -> Result<Value, String> {
-    // Pre-condition: source workspace must have more than one tab.
-    // We're about to move one out; if it's the only tab, we'd leave
-    // an empty workspace behind, which the UI doesn't represent
-    // gracefully. Mirrors `wcore::tear_off_tab`'s "cannot tear off
-    // last tab" guard.
-    //
-    // **Read SQLite, not reducer state.** During the migration
-    // window, some tab-creating/moving paths (e.g.
-    // `PromoteBlockToTab`) are still wcore-direct — their writes
-    // don't flow through the reducer, so `state.workspaces[ws].tab_ids`
-    // can lag SQLite. A reducer-state pre-check would falsely reject
-    // valid tear-off requests (codex P1 round-2 #621). SQLite is the
-    // source of truth; check there. Also include `pinnedtabids` in
-    // the membership check — bootstrap merges them into the reducer's
+    // Fast-fail pre-check: source workspace must have more than one
+    // tab. Advisory only; the reducer's `MoveTab` guard in step 2 is
+    // the authority, so a concurrent move between this read and the
+    // dispatch is refused there and compensated. Include
+    // `pinnedtabids` — bootstrap merges them into the reducer's
     // `tab_ids`, but legacy SQLite rows may still carry the entry.
     {
         let src_ws = match state.mstore.get::<crate::backend::obj::Workspace>(&source_workspace_id) {
@@ -148,6 +139,7 @@ async fn run_inner(
             src_workspace_id: source_workspace_id.clone(),
             dst_workspace_id: new_workspace_id.clone(),
             dst_index: 0,
+            allow_empty_source: false,
         })
         .await
     {
@@ -290,5 +282,44 @@ mod tests {
             .unwrap();
         let err = run(&state, only_tab, ws_id).await.unwrap_err();
         assert!(err.contains("last tab"), "got: {}", err);
+    }
+
+    /// The SQLite pre-check sees two tabs, but a concurrent move has
+    /// already left the reducer with one: the reducer refuses step 2
+    /// and the saga removes the workspace it created.
+    #[tokio::test]
+    async fn reducer_guard_refuses_when_precheck_is_stale() {
+        let (state, src_ws, tab_a, tab_b) = seed_workspace_with_two_tabs().await;
+        let other_ws = crate::server::service::dispatch_to_reducer(
+            &state,
+            Command::CreateWorkspace { name: "other".into() },
+        )
+        .await
+        .iter()
+        .find_map(|e| match e {
+            Event::WorkspaceCreated { workspace_id, .. } => Some(workspace_id.clone()),
+            _ => None,
+        })
+        .unwrap();
+        // Reducer-only move: SQLite still lists both tabs in src_ws.
+        let moved = crate::server::service::dispatch_to_reducer(
+            &state,
+            Command::MoveTab {
+                tab_id: tab_b,
+                src_workspace_id: src_ws.clone(),
+                dst_workspace_id: other_ws.clone(),
+                dst_index: 0,
+                allow_empty_source: false,
+            },
+        )
+        .await;
+        assert!(matches!(&moved[..], [Event::TabMoved { .. }]), "got {:?}", moved);
+        let workspaces_before = state.srv_state.lock().await.workspaces.len();
+
+        let err = run(&state, tab_a.clone(), src_ws.clone()).await.unwrap_err();
+        assert!(err.contains(crate::reducer::MOVE_TAB_LAST_TAB_ERROR), "got: {}", err);
+        let s = state.srv_state.lock().await;
+        assert_eq!(s.workspaces[&src_ws].tab_ids, vec![tab_a]);
+        assert_eq!(s.workspaces.len(), workspaces_before, "compensation removes the new workspace");
     }
 }

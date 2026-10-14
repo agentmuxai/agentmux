@@ -908,6 +908,107 @@ describe("browser-pane-state reducer (Phase 1A — multi-tab)", () => {
                 expect(r.events).toEqual([]);
             }
         });
+
+        it("Tab* commands emit events carrying the applied value", () => {
+            const { state, idA } = setupTwoTabs();
+            expect(
+                update(state, { type: "TabUrlChanged", tabId: idA, url: "https://a/next" }).events,
+            ).toEqual([{ type: "tab-url-changed", tabId: idA, url: "https://a/next" }]);
+            expect(
+                update(state, { type: "TabTitleChanged", tabId: idA, title: "   " }).events,
+            ).toEqual([{ type: "tab-title-changed", tabId: idA, title: TITLE_FALLBACK }]);
+            const overridden = update(state, {
+                type: "TabFaviconChanged",
+                tabId: idA,
+                faviconUrl: "https://a/real.ico",
+            }).state;
+            // An empty CEF favicon falls back to the URL-derived one.
+            expect(
+                update(overridden, { type: "TabFaviconChanged", tabId: idA, faviconUrl: "" }).events,
+            ).toEqual([
+                { type: "tab-favicon-changed", tabId: idA, faviconUrl: deriveFaviconUrl("https://a") },
+            ]);
+            expect(update(state, { type: "TabLoadFailed", tabId: idA, error: "e" }).events).toEqual([
+                { type: "tab-load-failed", tabId: idA, error: "e" },
+            ]);
+        });
+
+        it("Tab* commands that change nothing return the same state and no events", () => {
+            const setup = setupTwoTabs();
+            const idA = setup.idA;
+            // A page title is an override, so repeat one already applied.
+            const state = update(setup.state, { type: "TabTitleChanged", tabId: idA, title: "A" }).state;
+            const tA = state.tabs[0];
+            for (const cmd of [
+                { type: "TabUrlChanged" as const, tabId: idA, url: tA.url },
+                { type: "TabTitleChanged" as const, tabId: idA, title: "A" },
+                { type: "TabFaviconChanged" as const, tabId: idA, faviconUrl: "" },
+                {
+                    type: "TabLoadingChanged" as const,
+                    tabId: idA,
+                    loading: tA.loading,
+                    canGoBack: tA.canGoBack,
+                    canGoForward: tA.canGoForward,
+                },
+            ]) {
+                const r = update(state, cmd);
+                expect(r.state).toBe(state);
+                expect(r.events).toEqual([]);
+            }
+        });
+
+        it("TabLoadingChanged keeps a load error when loading goes false", () => {
+            const { state, idA } = setupTwoTabs();
+            const failed = update(state, { type: "TabLoadFailed", tabId: idA, error: "dns" }).state;
+            const r = update(failed, {
+                type: "TabLoadingChanged",
+                tabId: idA,
+                loading: false,
+                canGoBack: true,
+                canGoForward: false,
+            });
+            expect(r.state.tabs[0].error).toBe("dns");
+            const retry = update(r.state, {
+                type: "TabLoadingChanged",
+                tabId: idA,
+                loading: true,
+                canGoBack: true,
+                canGoForward: false,
+            });
+            expect(retry.state.tabs[0].error).toBeNull();
+        });
+    });
+
+    describe("active-tab commands with no tabs", () => {
+        it("are no-ops", () => {
+            const state = initialState();
+            for (const cmd of [
+                { type: "Navigate" as const, url: "https://a" },
+                { type: "LoadStarted" as const },
+                { type: "LoadFinished" as const },
+                { type: "LoadFailed" as const, reason: "x" },
+                { type: "HistoryUpdated" as const, canGoBack: true },
+                { type: "TitleChanged" as const, title: "T" },
+                { type: "UrlConfirmed" as const, url: "https://a" },
+                { type: "UrlCleared" as const },
+                { type: "FaviconUrlsReceived" as const, urls: ["https://a/f.ico"] },
+            ]) {
+                const r = update(state, cmd);
+                expect(r.state).toBe(state);
+                expect(r.events).toEqual([]);
+            }
+        });
+
+        it("FaviconUrlsReceived with no URLs falls back to the derived favicon", () => {
+            let s = bootOneTab("https://example.com/page");
+            s = update(s, { type: "FaviconUrlsReceived", urls: ["https://example.com/x.ico"] }).state;
+            const r = update(s, { type: "FaviconUrlsReceived", urls: [] });
+            expect(activeTab(r.state).faviconUrl).toBe(deriveFaviconUrl("https://example.com/page"));
+            expect(activeTab(r.state).faviconOverridden).toBe(false);
+            expect(r.events).toEqual([
+                { type: "favicon-urls-received", url: deriveFaviconUrl("https://example.com/page") },
+            ]);
+        });
     });
 
     describe("recentlyClosed stack", () => {

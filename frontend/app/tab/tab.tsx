@@ -339,24 +339,9 @@ function Tab(props: TabProps): JSX.Element {
                         title="Close Tab"
                         draggable={false}
                     >
-                        {/* VS Code's "close" codicon, inlined as SVG so we
-                            don't pull in the codicons font. Path verbatim
-                            from microsoft/vscode-codicons (close.svg) —
-                            the same glyph VS Code uses for tab-close. */}
-                        <svg
-                            width="16"
-                            height="16"
-                            viewBox="0 0 16 16"
-                            fill="currentColor"
-                            xmlns="http://www.w3.org/2000/svg"
-                            aria-hidden="true"
-                        >
-                            <path
-                                fill-rule="evenodd"
-                                clip-rule="evenodd"
-                                d="M8 8.707l3.646 3.647.708-.707L8.707 8l3.647-3.646-.707-.708L8 7.293 4.354 3.646l-.707.708L7.293 8l-3.646 3.646.707.708L8 8.707z"
-                            />
-                        </svg>
+                        {/* The same X as every other close in the app: Free's `xmark`
+                            (docs/reports/REPORT_PANE_HEADER_ICONS_FA_FREE_2026_10_11.md §8, D5). */}
+                        <i class="fa-solid fa-xmark" aria-hidden="true" />
                     </Button>
                 </div>
             </div>

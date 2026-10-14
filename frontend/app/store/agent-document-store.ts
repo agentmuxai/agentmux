@@ -13,7 +13,7 @@
  * issue #1549 — it used to be a view-owned `documentAtom` signal whose
  * setter was handed in at registration).
  *
- * Pattern modeled on `launcher-event-reducer.ts`: single module,
+ * Pattern modeled on `launcher-event-store.ts`: single module,
  * in-memory mirror, audit-friendly.
  */
 

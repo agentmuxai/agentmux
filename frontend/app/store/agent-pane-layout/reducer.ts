@@ -182,14 +182,6 @@ export function update(
             if (!state.idSet.has(command.nodeId)) return droppedUnknownExpansion(state);
             return setExpansion(state, command.nodeId, command.to);
 
-        case "UserExpanded":
-            if (!state.idSet.has(command.nodeId)) return droppedUnknownExpansion(state);
-            return setExpansion(state, command.nodeId, { open: true, via: "pin" });
-
-        case "UserCollapsed":
-            if (!state.idSet.has(command.nodeId)) return droppedUnknownExpansion(state);
-            return setExpansion(state, command.nodeId, { open: false });
-
         case "AutoExpandStarted": {
             if (!state.idSet.has(command.nodeId)) return droppedUnknownExpansion(state);
             const cur = state.expansion.get(command.nodeId);

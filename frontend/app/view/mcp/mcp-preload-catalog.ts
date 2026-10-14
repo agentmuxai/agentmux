@@ -4,16 +4,17 @@
 /**
  * Preloaded MCP Server catalog — Phase B of
  * docs/specs/SPEC_MCP_INTEGRATION_PARITY_ABLETON_PILOT_2026_07_08.md §4.6.
- * A small built-in manifest list shown in Connectors' "+ Browse catalog"
- * picker: selecting an entry pre-fills the existing add-server form instead
- * of requiring the user to hand-type a command/args JSON blob.
+ * A small built-in manifest list, shown as chips in the Add gallery of
+ * Connectors → MCP servers (SPEC_CONNECTORS_CARDS_2026_10_13.md §3.5):
+ * picking one pre-fills the existing add-server form instead of requiring
+ * the user to hand-type a command/args JSON blob.
  *
  * `prereqNote` is deliberately NOT a `db_mcp_servers` column — §5's schema
  * migration for that (plus `config_hash`/`disabled_tools`) never shipped in
  * #2030 (that PR was scoped to just the probe + mcp-capabilities.ts). This
  * file is the source of truth for prereq text instead; Connectors joins a
  * created server back to its catalog entry by exact `name` match to show it
- * (see mcp-manager.tsx). That join breaks if a user renames the server after
+ * (see mcp-server-detail.tsx). That join breaks if a user renames the server after
  * creating it from the catalog — acceptable known limitation for Phase B,
  * not silently hidden.
  *
@@ -28,9 +29,12 @@
 export interface McpPreloadEntry {
     id: string;
     name: string;
+    /** Font Awesome icon name, for its chip in the Add gallery and the card
+     *  of a server made from it. */
+    icon: string;
     transport: string;
     config: Record<string, unknown>;
-    /** Static remediation text — shown in the picker, and next to a created
+    /** Static remediation text — shown next to a created
      *  server's probe status when that status isn't "connected" (spec §6's
      *  acceptance bar: a user who hasn't opened the app yet should see this
      *  sentence in Connectors, not a bare "Error"). */
@@ -49,6 +53,7 @@ export const MCP_PRELOAD_CATALOG: McpPreloadEntry[] = [
     {
         id: "ableton-live",
         name: "Ableton Live",
+        icon: "music",
         transport: "stdio",
         config: { command: "uvx", args: ["ableton-mcp"] },
         prereqNote:
@@ -61,6 +66,7 @@ export const MCP_PRELOAD_CATALOG: McpPreloadEntry[] = [
     {
         id: "touchdesigner",
         name: "TouchDesigner",
+        icon: "diagram-project",
         transport: "stdio",
         // Pinned per spec §4 policy #1 — validated against 1.5.0 this session
         // (real TD + Ableton instance, router up with all 12 routes). Bump

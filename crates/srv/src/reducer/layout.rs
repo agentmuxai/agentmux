@@ -58,31 +58,6 @@ pub(super) fn handle_set_magnified_node(state: &mut State, tab_id: String, node_
     }]
 }
 
-pub(super) fn handle_layout_clear(
-    state: &mut State,
-    tab_id: String,
-    correlation_id: String,
-) -> Vec<Event> {
-    let Some(tab) = state.tabs.get_mut(&tab_id) else {
-        let v = state.bump_version();
-        return vec![Event::Error {
-            code: ErrorCode::InvalidCommand,
-            message: format!("LayoutClear: unknown tab {}", tab_id),
-            fatal: false,
-            version: v,
-        }];
-    };
-    tab.rootnode = None;
-    tab.focused_node_id = String::new();
-    tab.magnified_node_id = String::new();
-    let v = state.bump_version();
-    vec![Event::LayoutCleared {
-        tab_id,
-        correlation_id,
-        version: v,
-    }]
-}
-
 pub(super) fn handle_layout_set_tree(
     state: &mut State,
     tab_id: String,
@@ -111,13 +86,13 @@ pub(super) fn handle_layout_set_tree(
         tab.focused_node_id = s.focused_node_id.clone();
         tab.magnified_node_id = s.magnified_node_id.clone();
     }
-    // when the tree is wiped, focused/
-    // magnified ids would point at non-existent nodes. Match
-    // `handle_layout_clear`'s contract for the empty-tree case.
+    // When the tree is wiped, focused/magnified ids would point at
+    // non-existent nodes; clear them (the persist side does the same).
     if new_tree.is_none() {
         tab.focused_node_id = String::new();
         tab.magnified_node_id = String::new();
     }
+    let (pushed_focused, pushed_magnified) = (tab.focused_node_id.clone(), tab.magnified_node_id.clone());
     // Referential-integrity enforcement (see
     // `backend::layout::prune_dangling_block_refs`'s doc comment): this is
     // the exact vector — a wholesale tree push — that let a stale frontend
@@ -159,156 +134,32 @@ pub(super) fn handle_layout_set_tree(
         );
     }
     let new_tree = tab.rootnode.clone();
+    // A prune can clear focus/magnify; the persisted row must get the same
+    // values. With slices they ride the event; without, they get their own.
+    let (focused, magnified) = (tab.focused_node_id.clone(), tab.magnified_node_id.clone());
+    let mut slices = slices;
+    if let Some(s) = slices.as_mut() {
+        s.focused_node_id = focused.clone();
+        s.magnified_node_id = magnified.clone();
+    }
+    let slices_carry_focus = slices.is_some();
     let v = state.bump_version();
-    vec![Event::LayoutTreeReplaced {
-        tab_id,
+    let mut events = vec![Event::LayoutTreeReplaced {
+        tab_id: tab_id.clone(),
         new_tree,
         correlation_id,
         slices,
         version: v,
-    }]
-}
-
-pub(super) fn handle_layout_insert_node(
-    state: &mut State,
-    tab_id: String,
-    node: agentmux_common::LayoutNode,
-    parent_id: Option<String>,
-    index: Option<usize>,
-    focus_after: bool,
-    magnify_after: bool,
-    correlation_id: String,
-) -> Vec<Event> {
-    let Some(tab) = state.tabs.get_mut(&tab_id) else {
+    }];
+    if !slices_carry_focus && focused != pushed_focused {
         let v = state.bump_version();
-        return vec![Event::Error {
-            code: ErrorCode::InvalidCommand,
-            message: format!("LayoutInsertNode: unknown tab {}", tab_id),
-            fatal: false,
-            version: v,
-        }];
-    };
-    // Three insert paths, in priority order:
-    //   1. Empty tree → promote new node to root.
-    //   2. parent_id given → insert under that specific parent at
-    //      `index` (or append if None). If parent_id is given but
-    //      doesn't resolve to a group node, REJECT with
-    //      Event::Error rather than fall back to the heuristic.
-    //      A silent-fallback path is a consistency hole: the
-    //      emitted event would echo the requested parent_id while
-    //      the actual mutation
-    //      went elsewhere, diverging the persist subscriber and
-    //      replay consumers from the reducer.
-    //   3. parent_id None → `findNextInsertLocation` heuristic.
-    let empty_tree = tab.rootnode.is_none();
-    if empty_tree {
-        // Empty-tree promotion must reject any explicit `parent_id`/
-        // `index` for the same divergence reason as the explicit-
-        // parent path below — the event would echo a target the
-        // tree cannot resolve, and a replay consumer or the persist
-        // subscriber would diverge from the reducer. Per
-        // `srv-phase-e4b-formal-spec-2026-05-03.md` §7.1, both
-        // fields must be `None` for empty-tree promote.
-        if parent_id.is_some() || index.is_some() {
-            let v = state.bump_version();
-            return vec![Event::Error {
-                code: ErrorCode::InvalidCommand,
-                message: format!(
-                    "LayoutInsertNode: empty tree cannot honour explicit parent_id={:?} / index={:?} (tab {})",
-                    parent_id, index, tab_id
-                ),
-                fatal: false,
-                version: v,
-            }];
-        }
-        tab.rootnode = Some(node.clone());
-    } else if let Some(pid) = parent_id.as_deref() {
-        let root = tab.rootnode.as_mut().expect("non-empty checked above");
-        match crate::backend::layout::find_node_by_id_mut(root, pid) {
-            // Minimize-locked parents (a dissolved column has `data: None`,
-            // so it would otherwise satisfy the group-node arm below) cannot
-            // host inserts — minimized is a locked state
-            // (SPEC_LAYOUT_MINIMIZE_LOCKED_STATE_REDESIGN_2026_07_16.md).
-            Some(parent_node) if crate::backend::layout::is_effectively_minimized(parent_node) => {
-                let v = state.bump_version();
-                return vec![Event::Error {
-                    code: ErrorCode::InvalidCommand,
-                    message: format!(
-                        "LayoutInsertNode: parent_id {:?} is minimize-locked, cannot host inserts (tab {})",
-                        pid, tab_id
-                    ),
-                    fatal: false,
-                    version: v,
-                }];
-            }
-            Some(parent_node) if parent_node.data.is_none() => {
-                let len = parent_node.children.len();
-                let target = index.map(|i| i.min(len)).unwrap_or(len);
-                parent_node.children.insert(target, node.clone());
-            }
-            Some(_) => {
-                // parent_id resolves to a leaf — can't host children.
-                let v = state.bump_version();
-                return vec![Event::Error {
-                    code: ErrorCode::InvalidCommand,
-                    message: format!(
-                        "LayoutInsertNode: parent_id {:?} is a leaf node, cannot host children (tab {})",
-                        pid, tab_id
-                    ),
-                    fatal: false,
-                    version: v,
-                }];
-            }
-            None => {
-                let v = state.bump_version();
-                return vec![Event::Error {
-                    code: ErrorCode::InvalidCommand,
-                    message: format!(
-                        "LayoutInsertNode: parent_id {:?} not found in tree (tab {})",
-                        pid, tab_id
-                    ),
-                    fatal: false,
-                    version: v,
-                }];
-            }
-        }
-    } else {
-        let root = tab.rootnode.as_mut().expect("non-empty checked above");
-        crate::backend::layout::insert_node(root, node.clone());
+        events.push(Event::FocusedNodeChanged { tab_id: tab_id.clone(), node_id: focused, version: v });
     }
-    // honour focus_after / magnify_after.
-    // The schema documents these as the side effects callers rely on
-    // for "insert + activate" flows; ignoring them desyncs the snapshot
-    // from the event the caller's handler observed.
-    //
-    // a magnified node must also be the
-    // focused one. Without this, a `magnify_after=true,
-    // focus_after=false` insert leaves `focused_node_id` pointing at
-    // the prior pane while `magnified_node_id` points at the new one
-    // — a UI invariant violation (frontend treats magnify-implies-
-    // focus). Treat magnify as implying focus.
-    if focus_after || magnify_after {
-        tab.focused_node_id = node.id.clone();
+    if !slices_carry_focus && magnified != pushed_magnified {
+        let v = state.bump_version();
+        events.push(Event::MagnifiedNodeChanged { tab_id, node_id: magnified, version: v });
     }
-    if magnify_after {
-        tab.magnified_node_id = node.id.clone();
-    }
-    let v = state.bump_version();
-    vec![Event::LayoutNodeInserted {
-        tab_id,
-        node,
-        // pass the command's
-        // parent_id / index through to the event so subscribers see
-        // what the caller asked for, not a hardcoded `None, None`.
-        // The pure helper currently uses the `findNextInsertLocation`
-        // heuristic and ignores these hints — but the event is the
-        // record of what was *requested*; subscribers can correlate
-        // with the resulting tree by inspecting `node` itself.
-        parent_id,
-        index,
-        correlation_id,
-        version: v,
-    }]
+    events
 }
 
 pub(super) fn handle_layout_delete_node(
@@ -505,15 +356,6 @@ pub(super) fn handle_layout_queue_backend_actions(
     }]
 }
 
-// ── Phase 3 — remaining structural arms ─────────────────────────────────────
-//
-// Each arm resolves the tab, calls the existing pure fn in `backend::layout`,
-// runs `balance_node` (matching the frontend's post-action normalize so the
-// reducer's tree equals what the frontend would produce), reconciles any
-// dangling focus/magnify, and emits the granular event. The pure fns and the
-// commands/events already exist; this wires them.
-
-/// `Event::Error` for an unknown tab.
 // ── Pane tabs (SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md §3.2) ─────────
 
 /// Apply a pane-tab edit to the tab's tree and emit the tree-only
@@ -680,6 +522,7 @@ pub(super) fn handle_layout_stack_move(
     }]
 }
 
+/// `Event::Error` for an unknown tab.
 fn unknown_tab(state: &mut State, op: &str, tab_id: &str) -> Vec<Event> {
     let v = state.bump_version();
     vec![Event::Error {
@@ -701,10 +544,9 @@ fn op_error(state: &mut State, message: String) -> Vec<Event> {
     }]
 }
 
-/// Clear focused/magnified ids that no longer resolve in the (post-op,
-/// post-balance) tree. `balance_node`'s single-leaf collapse can rewrite a
-/// parent's id and structural ops can remove nodes, so every structural arm
-/// reconciles — same intent as `handle_layout_delete_node`'s post-walk.
+/// Clear focused/magnified ids that no longer resolve in the tab's tree
+/// (e.g. after `LayoutSetTree` pruned a dangling leaf) — same intent as
+/// `handle_layout_delete_node`'s post-walk.
 fn reconcile_focus_magnify(tab: &mut crate::state::TabRecord) {
     let resolves = |id: &str| -> bool {
         if id.is_empty() {
@@ -723,355 +565,6 @@ fn reconcile_focus_magnify(tab: &mut crate::state::TabRecord) {
     if drop_magnify {
         tab.magnified_node_id.clear();
     }
-}
-
-pub(super) fn handle_layout_move_node(
-    state: &mut State,
-    tab_id: String,
-    node_id: String,
-    new_parent_id: String,
-    index: usize,
-    correlation_id: String,
-) -> Vec<Event> {
-    if let Err(events) = apply_atomic(state, &tab_id, "LayoutMoveNode", |root| {
-        crate::backend::layout::move_node(root, &node_id, &new_parent_id, index)
-    }) {
-        return events;
-    }
-    let tab = state.tabs.get_mut(&tab_id).expect("tab present after apply_atomic");
-    reconcile_focus_magnify(tab);
-    let new_tree = tab.rootnode.clone();
-    let v = state.bump_version();
-    vec![Event::LayoutNodeMoved {
-        tab_id,
-        new_tree,
-        node_id,
-        new_parent_id,
-        index,
-        correlation_id,
-        version: v,
-    }]
-}
-
-pub(super) fn handle_layout_swap_nodes(
-    state: &mut State,
-    tab_id: String,
-    node1_id: String,
-    node2_id: String,
-    correlation_id: String,
-) -> Vec<Event> {
-    if let Err(events) = apply_atomic(state, &tab_id, "LayoutSwapNodes", |root| {
-        crate::backend::layout::swap_nodes(root, &node1_id, &node2_id)
-    }) {
-        return events;
-    }
-    let tab = state.tabs.get_mut(&tab_id).expect("tab present after apply_atomic");
-    reconcile_focus_magnify(tab);
-    let new_tree = tab.rootnode.clone();
-    let v = state.bump_version();
-    vec![Event::LayoutNodesSwapped {
-        tab_id,
-        new_tree,
-        node1_id,
-        node2_id,
-        correlation_id,
-        version: v,
-    }]
-}
-
-pub(super) fn handle_layout_resize_nodes(
-    state: &mut State,
-    tab_id: String,
-    ops: Vec<agentmux_common::ResizeOp>,
-    correlation_id: String,
-) -> Vec<Event> {
-    if let Err(events) = apply_atomic(state, &tab_id, "LayoutResizeNodes", |root| {
-        crate::backend::layout::resize_nodes(root, &ops)
-    }) {
-        return events;
-    }
-    let tab = state.tabs.get_mut(&tab_id).expect("tab present after apply_atomic");
-    reconcile_focus_magnify(tab);
-    let new_tree = tab.rootnode.clone();
-    let v = state.bump_version();
-    vec![Event::LayoutNodesResized {
-        tab_id,
-        new_tree,
-        ops,
-        correlation_id,
-        version: v,
-    }]
-}
-
-pub(super) fn handle_layout_replace_node(
-    state: &mut State,
-    tab_id: String,
-    target_id: String,
-    new_node: agentmux_common::LayoutNode,
-    focus_after: bool,
-    correlation_id: String,
-) -> Vec<Event> {
-    let new_id = new_node.id.clone();
-    let new_node_event = new_node.clone();
-    if let Err(events) = apply_atomic(state, &tab_id, "LayoutReplaceNode", |root| {
-        crate::backend::layout::replace_node(root, &target_id, new_node)
-    }) {
-        return events;
-    }
-    let tab = state.tabs.get_mut(&tab_id).expect("tab present after apply_atomic");
-    if focus_after {
-        tab.focused_node_id = new_id;
-    }
-    reconcile_focus_magnify(tab);
-    let new_tree = tab.rootnode.clone();
-    let v = state.bump_version();
-    vec![Event::LayoutNodeReplaced {
-        tab_id,
-        new_tree,
-        target_id,
-        new_node: new_node_event,
-        correlation_id,
-        version: v,
-    }]
-}
-
-pub(super) fn handle_layout_split_horizontal(
-    state: &mut State,
-    tab_id: String,
-    target_id: String,
-    new_node: agentmux_common::LayoutNode,
-    position: agentmux_common::SplitPosition,
-    focus_after: bool,
-    correlation_id: String,
-) -> Vec<Event> {
-    let new_id = new_node.id.clone();
-    let new_node_event = new_node.clone();
-    if let Err(events) = apply_atomic(state, &tab_id, "LayoutSplitHorizontal", |root| {
-        crate::backend::layout::split_horizontal(root, &target_id, new_node, position)
-    }) {
-        return events;
-    }
-    let tab = state.tabs.get_mut(&tab_id).expect("tab present after apply_atomic");
-    if focus_after {
-        tab.focused_node_id = new_id;
-    }
-    reconcile_focus_magnify(tab);
-    let new_tree = tab.rootnode.clone();
-    let v = state.bump_version();
-    vec![Event::LayoutSplitHorizontalApplied {
-        tab_id,
-        new_tree,
-        target_id,
-        new_node: new_node_event,
-        position,
-        correlation_id,
-        version: v,
-    }]
-}
-
-pub(super) fn handle_layout_split_vertical(
-    state: &mut State,
-    tab_id: String,
-    target_id: String,
-    new_node: agentmux_common::LayoutNode,
-    position: agentmux_common::SplitPosition,
-    focus_after: bool,
-    correlation_id: String,
-) -> Vec<Event> {
-    let new_id = new_node.id.clone();
-    let new_node_event = new_node.clone();
-    if let Err(events) = apply_atomic(state, &tab_id, "LayoutSplitVertical", |root| {
-        crate::backend::layout::split_vertical(root, &target_id, new_node, position)
-    }) {
-        return events;
-    }
-    let tab = state.tabs.get_mut(&tab_id).expect("tab present after apply_atomic");
-    if focus_after {
-        tab.focused_node_id = new_id;
-    }
-    reconcile_focus_magnify(tab);
-    let new_tree = tab.rootnode.clone();
-    let v = state.bump_version();
-    vec![Event::LayoutSplitVerticalApplied {
-        tab_id,
-        new_tree,
-        target_id,
-        new_node: new_node_event,
-        position,
-        correlation_id,
-        version: v,
-    }]
-}
-
-pub(super) fn handle_layout_insert_node_at_index(
-    state: &mut State,
-    tab_id: String,
-    node: agentmux_common::LayoutNode,
-    index_arr: Vec<usize>,
-    focus_after: bool,
-    magnify_after: bool,
-    correlation_id: String,
-) -> Vec<Event> {
-    let new_id = node.id.clone();
-    let node_event = node.clone();
-    let live_blocks: std::collections::HashSet<String> = state.blocks.keys().cloned().collect();
-    let Some(tab) = state.tabs.get_mut(&tab_id) else {
-        return unknown_tab(state, "LayoutInsertNodeAtIndex", &tab_id);
-    };
-    // Build the new tree on a clone, balance, and commit only on success
-    // (atomic — no partial mutation on error). Matches the frontend oracle:
-    // `insertNodeAtIndex` PROMOTES the node to root when the tree is empty
-    // (frontend/layout/lib/layoutTree.ts), so strong-reducer authority
-    // promotes too rather than rejecting — `index_arr` is moot on an empty
-    // tree. (Replay stays consistent: the same insert-at-index semantics
-    // promote on empty; the event documents the request.)
-    let working_result: Result<agentmux_common::LayoutNode, String> = match tab.rootnode.as_ref() {
-        Some(root) => {
-            let mut w = root.clone();
-            crate::backend::layout::insert_node_at_index(&mut w, node, &index_arr)
-                .map(|_| w)
-                .map_err(|e| format!("LayoutInsertNodeAtIndex: {} (tab {})", e, tab_id))
-        }
-        None => Ok(node),
-    };
-    let mut working = match working_result {
-        Ok(w) => w,
-        Err(msg) => return op_error(state, msg),
-    };
-    if let Err(e) = crate::backend::layout::balance_node(&mut working) {
-        return op_error(
-            state,
-            format!("LayoutInsertNodeAtIndex balance: {} (tab {})", e, tab_id),
-        );
-    }
-    tab.rootnode = Some(working);
-    // magnify implies focus (frontend invariant; see handle_layout_insert_node).
-    if focus_after || magnify_after {
-        tab.focused_node_id = new_id.clone();
-    }
-    if magnify_after {
-        tab.magnified_node_id = new_id;
-    }
-    // Referential-integrity enforcement, same choke point as
-    // `handle_layout_set_tree` — see `prune_dangling_block_refs`'s doc
-    // comment. The caller-supplied `node` could carry a stale `block_id`.
-    let pruned = crate::backend::layout::prune_dangling_block_refs(&mut tab.rootnode, &live_blocks);
-    if pruned > 0 {
-        tracing::warn!(
-            tab_id = %tab_id,
-            pruned,
-            "reducer: LayoutInsertNodeAtIndex pruned dangling layout leaf/leaves referencing since-deleted blocks"
-        );
-    }
-    // Minimize-lock enforcement, same choke point (see handle_layout_set_tree).
-    let snapped = crate::backend::layout::enforce_minimized_locks(&mut tab.rootnode);
-    if snapped > 0 {
-        tracing::warn!(
-            tab_id = %tab_id,
-            snapped,
-            "reducer: LayoutInsertNodeAtIndex snapped minimize-locked node size(s) back to their locked values"
-        );
-    }
-    // Layout doctor (issue #2179), same rationale as handle_layout_set_tree.
-    let violations = crate::backend::layout::validate_layout_invariants(&tab.rootnode);
-    if !violations.is_empty() {
-        tracing::error!(
-            tab_id = %tab_id,
-            violations = ?violations,
-            "layout-doctor: invariant violation(s) in tree persisted by LayoutInsertNodeAtIndex"
-        );
-    }
-    reconcile_focus_magnify(tab);
-    let new_tree = tab.rootnode.clone();
-    let v = state.bump_version();
-    vec![Event::LayoutNodeInsertedAtIndex {
-        tab_id,
-        new_tree,
-        node: node_event,
-        index_arr,
-        correlation_id,
-        version: v,
-    }]
-}
-
-/// Apply a fallible structural mutation to a tab's layout tree atomically:
-/// operate on a *clone*, run `balance_node`, and commit back to
-/// `tab.rootnode` only if both succeed. On any error the tab's tree is left
-/// untouched — no partial mutation is visible to a later snapshot or to the
-/// next operation. [codex P2 #1868]
-///
-/// On error, returns the `Event::Error` vec the caller should return verbatim
-/// (unknown tab, empty tree, op failure, or balance failure). On success,
-/// returns `Ok(())`; the caller re-fetches the tab for focus/magnify
-/// reconciliation and to emit the granular event.
-fn apply_atomic<F>(
-    state: &mut State,
-    tab_id: &str,
-    op: &str,
-    f: F,
-) -> Result<(), Vec<Event>>
-where
-    F: FnOnce(&mut agentmux_common::LayoutNode) -> Result<(), crate::backend::layout::LayoutError>,
-{
-    let Some(tab) = state.tabs.get_mut(tab_id) else {
-        return Err(unknown_tab(state, op, tab_id));
-    };
-    let Some(current) = tab.rootnode.as_ref() else {
-        return Err(op_error(state, format!("{}: empty tree (tab {})", op, tab_id)));
-    };
-    let mut working = current.clone();
-    if let Err(e) = f(&mut working) {
-        return Err(op_error(state, format!("{}: {} (tab {})", op, e, tab_id)));
-    }
-    if let Err(e) = crate::backend::layout::balance_node(&mut working) {
-        return Err(op_error(state, format!("{} balance: {} (tab {})", op, e, tab_id)));
-    }
-    tab.rootnode = Some(working);
-    // Referential-integrity enforcement, same choke point as
-    // `handle_layout_set_tree` — see `prune_dangling_block_refs`'s doc
-    // comment. `replace_node`/`split_horizontal`/`split_vertical` accept a
-    // caller-supplied new node that could carry a stale `block_id`; this
-    // also opportunistically cleans up any pre-existing dangling leaf a
-    // move/swap/resize just happened to touch, for free. Every caller of
-    // `apply_atomic` already calls `reconcile_focus_magnify` on its own
-    // next line, so a pruned focused/magnified id is handled there — no
-    // need to duplicate that call here.
-    let live_blocks: std::collections::HashSet<String> = state.blocks.keys().cloned().collect();
-    let tab = state.tabs.get_mut(tab_id).expect("tab present — just written above");
-    let pruned = crate::backend::layout::prune_dangling_block_refs(&mut tab.rootnode, &live_blocks);
-    if pruned > 0 {
-        tracing::warn!(
-            tab_id = %tab_id,
-            op,
-            pruned,
-            "reducer: pruned dangling layout leaf/leaves referencing since-deleted blocks"
-        );
-    }
-    // Minimize-lock enforcement, same choke point (see handle_layout_set_tree).
-    // The per-op guards (`LayoutError::NodeLocked`) reject ops that *target* a
-    // locked node; this pass additionally corrects indirect damage — e.g. a
-    // legitimate resize pair whose unit redistribution squeezed a locked
-    // sibling through `balance_node`'s rebuild.
-    let snapped = crate::backend::layout::enforce_minimized_locks(&mut tab.rootnode);
-    if snapped > 0 {
-        tracing::warn!(
-            tab_id = %tab_id,
-            op,
-            snapped,
-            "reducer: snapped minimize-locked node size(s) back to their locked values"
-        );
-    }
-    // Layout doctor (issue #2179), same rationale as handle_layout_set_tree.
-    let violations = crate::backend::layout::validate_layout_invariants(&tab.rootnode);
-    if !violations.is_empty() {
-        tracing::error!(
-            tab_id = %tab_id,
-            op,
-            violations = ?violations,
-            "layout-doctor: invariant violation(s) in tree persisted by structural op"
-        );
-    }
-    Ok(())
 }
 
 #[cfg(test)]
@@ -1546,13 +1039,10 @@ mod tests {
         }
     }
 
-    // ── Phase E.4.B Phase 5 — layout reducer arms ─────────────────
+    // ── Layout tree arms ──────────────────────────────────────────
     //
-    // Tests for the 4 arms shipped in this PR. All arms share the
-    // same shape (lookup tab → mutate `tab.rootnode` via pure helper
-    // → emit Event::Layout*); the unit tests below verify state
-    // mutation and event shape per arm. The pure helpers themselves
-    // have their own ~40 tests in `crates/srv/src/backend/layout/`.
+    // State mutation and event shape per arm. The pure helpers have
+    // their own tests in `crates/srv/src/backend/layout/`.
 
     fn leaf_node(id: &str, block_id: &str) -> agentmux_common::LayoutNode {
         agentmux_common::LayoutNode {
@@ -1592,34 +1082,6 @@ mod tests {
                 tab_id: tab_id.to_string(),
             },
         );
-    }
-
-    #[test]
-    fn layout_clear_wipes_rootnode_focus_magnify_and_emits_event() {
-        let (mut state, tab_id) = fresh_tab();
-        // Pre-load some state.
-        state.tabs.get_mut(&tab_id).unwrap().rootnode = Some(leaf_node("n1", "b1"));
-        state.tabs.get_mut(&tab_id).unwrap().focused_node_id = "n1".into();
-        state.tabs.get_mut(&tab_id).unwrap().magnified_node_id = "n1".into();
-
-        let events = update(
-            &mut state,
-            Command::LayoutClear {
-                tab_id: tab_id.clone(),
-                correlation_id: "corr-1".into(),
-            },
-            &ctx(1),
-        );
-
-        assert_eq!(events.len(), 1);
-        assert!(matches!(
-            &events[0],
-            Event::LayoutCleared { correlation_id, .. } if correlation_id == "corr-1"
-        ));
-        let tab = &state.tabs[&tab_id];
-        assert!(tab.rootnode.is_none(), "rootnode wiped");
-        assert_eq!(tab.focused_node_id, "");
-        assert_eq!(tab.magnified_node_id, "");
     }
 
     #[test]
@@ -1693,20 +1155,6 @@ mod tests {
         );
         assert_eq!(events.len(), 1);
         assert!(matches!(&events[0], Event::Error { .. }));
-    }
-
-    #[test]
-    fn layout_clear_unknown_tab_emits_error() {
-        let mut state = State::default();
-        let events = update(
-            &mut state,
-            Command::LayoutClear {
-                tab_id: "nope".into(),
-                correlation_id: "corr".into(),
-            },
-            &ctx(1),
-        );
-        assert!(matches!(&events[0], Event::Error { code: ErrorCode::InvalidCommand, .. }));
     }
 
     #[test]
@@ -1794,6 +1242,83 @@ mod tests {
         }
     }
 
+    fn tree_with_dangling_leaf() -> agentmux_common::LayoutNode {
+        agentmux_common::LayoutNode {
+            id: "root".into(),
+            children: vec![leaf_node("a", "ba"), leaf_node("b", "gone")],
+            ..Default::default()
+        }
+    }
+
+    /// A prune that drops the focused/magnified leaf must hand the persist
+    /// side the cleared ids: in the slices when the push carries them...
+    #[test]
+    fn layout_set_tree_prune_clears_focus_in_the_emitted_slices() {
+        let (mut state, tab_id) = fresh_tab();
+        seed_block(&mut state, &tab_id, "ba");
+        let events = update(
+            &mut state,
+            Command::LayoutSetTree {
+                tab_id: tab_id.clone(),
+                new_tree: Some(tree_with_dangling_leaf()),
+                correlation_id: "corr".into(),
+                slices: Some(agentmux_common::LayoutClientSlices {
+                    focused_node_id: "b".into(),
+                    magnified_node_id: "b".into(),
+                    ..Default::default()
+                }),
+            },
+            &ctx(1),
+        );
+        match &events[..] {
+            [Event::LayoutTreeReplaced { slices: Some(s), .. }] => {
+                assert_eq!(s.focused_node_id, "");
+                assert_eq!(s.magnified_node_id, "");
+            }
+            other => panic!("expected one LayoutTreeReplaced with slices, got {:?}", other),
+        }
+        assert_eq!(state.tabs[&tab_id].focused_node_id, "");
+        assert_eq!(state.tabs[&tab_id].magnified_node_id, "");
+    }
+
+    /// ...and as their own events when it doesn't.
+    #[test]
+    fn layout_set_tree_prune_without_slices_emits_focus_and_magnify_changes() {
+        let (mut state, tab_id) = fresh_tab();
+        seed_block(&mut state, &tab_id, "ba");
+        state.tabs.get_mut(&tab_id).unwrap().focused_node_id = "b".into();
+        state.tabs.get_mut(&tab_id).unwrap().magnified_node_id = "b".into();
+        let events = update(
+            &mut state,
+            Command::LayoutSetTree {
+                tab_id: tab_id.clone(),
+                new_tree: Some(tree_with_dangling_leaf()),
+                correlation_id: "corr".into(),
+                slices: None,
+            },
+            &ctx(1),
+        );
+        match &events[..] {
+            [Event::LayoutTreeReplaced { .. }, Event::FocusedNodeChanged { node_id: f, .. }, Event::MagnifiedNodeChanged { node_id: m, .. }] => {
+                assert_eq!((f.as_str(), m.as_str()), ("", ""));
+            }
+            other => panic!("expected tree + focus + magnify events, got {:?}", other),
+        }
+
+        // No prune, focus still resolves: just the tree event.
+        let events = update(
+            &mut state,
+            Command::LayoutSetTree {
+                tab_id,
+                new_tree: Some(leaf_node("a", "ba")),
+                correlation_id: "corr".into(),
+                slices: None,
+            },
+            &ctx(2),
+        );
+        assert!(matches!(&events[..], [Event::LayoutTreeReplaced { .. }]), "got {:?}", events);
+    }
+
     /// Minimize-lock enforcement at the set-tree choke point
     /// (SPEC_LAYOUT_MINIMIZE_LOCKED_STATE_REDESIGN_2026_07_16.md): a pushed
     /// tree in which a minimized node's size was tampered with (e.g. a
@@ -1842,56 +1367,6 @@ mod tests {
         if let Event::LayoutTreeReplaced { new_tree, .. } = &events[0] {
             assert_eq!(new_tree.as_ref().unwrap().children[0].size, 33.0);
         }
-    }
-
-    /// Minimize-lock guard on the explicit-parent insert path (reagent P1,
-    /// PR #2180): a dissolved column has `data: None`, so without its own
-    /// locked check it would satisfy the "is a group node" arm and accept
-    /// the insert — letting an agent/API caller seed a full pane inside a
-    /// header strip.
-    #[test]
-    fn layout_insert_node_rejects_minimize_locked_parent() {
-        let (mut state, tab_id) = fresh_tab();
-        seed_block(&mut state, &tab_id, "b1");
-        seed_block(&mut state, &tab_id, "b2");
-        seed_block(&mut state, &tab_id, "b3");
-
-        let mut l1 = leaf_node("l1", "b1");
-        l1.extra.insert("minimizedSize".into(), serde_json::json!(200.0));
-        let mut l2 = leaf_node("l2", "b2");
-        l2.extra.insert("minimizedSize".into(), serde_json::json!(200.0));
-        let mut dissolved = agentmux_common::LayoutNode {
-            id: "colA".into(),
-            children: vec![l1, l2],
-            ..Default::default()
-        };
-        dissolved
-            .extra
-            .insert("columnDissolve".into(), serde_json::json!({"targetColumnId": "root"}));
-        state.tabs.get_mut(&tab_id).unwrap().rootnode = Some(agentmux_common::LayoutNode {
-            id: "root".into(),
-            children: vec![dissolved, leaf_node("content", "b3")],
-            ..Default::default()
-        });
-
-        let events = update(
-            &mut state,
-            Command::LayoutInsertNode {
-                tab_id: tab_id.clone(),
-                node: leaf_node("new", "b3"),
-                parent_id: Some("colA".into()),
-                index: None,
-                focus_after: false,
-                magnify_after: false,
-                correlation_id: "corr-locked".into(),
-            },
-            &ctx(1),
-        );
-
-        assert!(matches!(&events[0], Event::Error { code: ErrorCode::InvalidCommand, .. }));
-        // Dissolved column untouched.
-        let root = state.tabs[&tab_id].rootnode.as_ref().unwrap();
-        assert_eq!(root.children[0].children.len(), 2);
     }
 
     /// SPEC_864 Phase 2 — a slice-carrying full-row push applies focus/
@@ -1954,68 +1429,6 @@ mod tests {
         assert!(state.tabs[&tab_id].magnified_node_id.is_empty());
     }
 
-    #[test]
-    fn layout_insert_node_into_empty_tree_promotes_to_root() {
-        let (mut state, tab_id) = fresh_tab();
-        let node = leaf_node("first", "b1");
-        let events = update(
-            &mut state,
-            Command::LayoutInsertNode {
-                tab_id: tab_id.clone(),
-                node: node.clone(),
-                parent_id: None,
-                index: None,
-                focus_after: false,
-                magnify_after: false,
-                correlation_id: "corr-ins".into(),
-            },
-            &ctx(1),
-        );
-        assert!(matches!(&events[0], Event::LayoutNodeInserted { .. }));
-        assert_eq!(state.tabs[&tab_id].rootnode.as_ref().map(|n| n.id.as_str()), Some("first"));
-    }
-
-    #[test]
-    fn layout_insert_node_into_existing_tree_uses_helper() {
-        let (mut state, tab_id) = fresh_tab();
-        // Pre-load a single-leaf tree.
-        state.tabs.get_mut(&tab_id).unwrap().rootnode = Some(leaf_node("root", "b1"));
-        let new_node = leaf_node("added", "b2");
-        let events = update(
-            &mut state,
-            Command::LayoutInsertNode {
-                tab_id: tab_id.clone(),
-                node: new_node,
-                parent_id: None,
-                index: None,
-                focus_after: false,
-                magnify_after: false,
-                correlation_id: "corr".into(),
-            },
-            &ctx(1),
-        );
-        assert!(matches!(&events[0], Event::LayoutNodeInserted { .. }));
-        // Helper turned the leaf root into a group with both leaves;
-        // exact shape is the helper's contract — we just assert the
-        // tree changed and contains both block ids.
-        let root = state.tabs[&tab_id].rootnode.as_ref().expect("rootnode set");
-        let collected = collect_block_ids(root);
-        assert!(collected.contains(&"b1".to_string()));
-        assert!(collected.contains(&"b2".to_string()));
-    }
-
-    fn collect_block_ids(node: &agentmux_common::LayoutNode) -> Vec<String> {
-        let mut ids = Vec::new();
-        if let Some(d) = &node.data {
-            if !d.block_id.is_empty() {
-                ids.push(d.block_id.clone());
-            }
-        }
-        for c in &node.children {
-            ids.extend(collect_block_ids(c));
-        }
-        ids
-    }
 
     #[test]
     fn layout_delete_node_on_empty_tree_is_noop() {
@@ -2035,8 +1448,7 @@ mod tests {
 
     #[test]
     fn layout_set_tree_to_none_also_clears_focused_and_magnified() {
-        // empty-tree set must match
-        // `LayoutClear`'s contract — focused/magnified ids would
+        // An empty-tree set clears focus/magnify; the ids would
         // otherwise dangle past the wipe.
         let (mut state, tab_id) = fresh_tab();
         state.tabs.get_mut(&tab_id).unwrap().rootnode = Some(leaf_node("n", "b"));
@@ -2081,553 +1493,11 @@ mod tests {
         assert_eq!(tab.magnified_node_id, "n");
     }
 
-    #[test]
-    fn layout_insert_node_honours_focus_after() {
-        // focus_after=true must update
-        // focused_node_id so the snapshot matches the event.
-        let (mut state, tab_id) = fresh_tab();
-        let node = leaf_node("new", "b1");
-        let _ = update(
-            &mut state,
-            Command::LayoutInsertNode {
-                tab_id: tab_id.clone(),
-                node,
-                parent_id: None,
-                index: None,
-                focus_after: true,
-                magnify_after: false,
-                correlation_id: "corr".into(),
-            },
-            &ctx(1),
-        );
-        assert_eq!(state.tabs[&tab_id].focused_node_id, "new");
-        assert_eq!(state.tabs[&tab_id].magnified_node_id, "");
-    }
-
-    #[test]
-    fn layout_insert_node_magnify_after_implies_focus() {
-        // magnify-implies-focus. Even when
-        // focus_after=false, setting magnify_after=true must also
-        // update focused_node_id so it doesn't dangle on the prior
-        // pane (UI invariant: a magnified pane is the focused pane).
-        let (mut state, tab_id) = fresh_tab();
-        state.tabs.get_mut(&tab_id).unwrap().focused_node_id = "prev".into();
-        let node = leaf_node("new", "b1");
-        let _ = update(
-            &mut state,
-            Command::LayoutInsertNode {
-                tab_id: tab_id.clone(),
-                node,
-                parent_id: None,
-                index: None,
-                focus_after: false,
-                magnify_after: true,
-                correlation_id: "corr".into(),
-            },
-            &ctx(1),
-        );
-        assert_eq!(
-            state.tabs[&tab_id].focused_node_id, "new",
-            "magnify_after must imply focus_after"
-        );
-        assert_eq!(state.tabs[&tab_id].magnified_node_id, "new");
-    }
-
-    #[test]
-    fn layout_insert_node_honours_explicit_parent_id_and_index() {
-        // with parent_id given, insert at
-        // that node at the requested index instead of running the
-        // heuristic helper.
-        let (mut state, tab_id) = fresh_tab();
-        let mut group = leaf_node("group", "");
-        group.data = None;
-        group.children = vec![leaf_node("a", "ba"), leaf_node("c", "bc")];
-        state.tabs.get_mut(&tab_id).unwrap().rootnode = Some(group);
-
-        let _ = update(
-            &mut state,
-            Command::LayoutInsertNode {
-                tab_id: tab_id.clone(),
-                node: leaf_node("b", "bb"),
-                parent_id: Some("group".into()),
-                index: Some(1), // between a and c
-                focus_after: false,
-                magnify_after: false,
-                correlation_id: "corr".into(),
-            },
-            &ctx(1),
-        );
-
-        let root = state.tabs[&tab_id].rootnode.as_ref().expect("root");
-        let ids: Vec<_> = root.children.iter().map(|c| c.id.as_str()).collect();
-        assert_eq!(ids, vec!["a", "b", "c"], "explicit index honoured");
-    }
-
-    #[test]
-    fn layout_insert_node_index_clamps_when_out_of_range() {
-        // Out-of-range index clamps to the end (matches frontend
-        // `findNextInsertLocation` defensive semantics).
-        let (mut state, tab_id) = fresh_tab();
-        let mut group = leaf_node("group", "");
-        group.data = None;
-        group.children = vec![leaf_node("a", "ba")];
-        state.tabs.get_mut(&tab_id).unwrap().rootnode = Some(group);
-
-        let _ = update(
-            &mut state,
-            Command::LayoutInsertNode {
-                tab_id: tab_id.clone(),
-                node: leaf_node("b", "bb"),
-                parent_id: Some("group".into()),
-                index: Some(99),
-                focus_after: false,
-                magnify_after: false,
-                correlation_id: "corr".into(),
-            },
-            &ctx(1),
-        );
-        let root = state.tabs[&tab_id].rootnode.as_ref().expect("root");
-        let ids: Vec<_> = root.children.iter().map(|c| c.id.as_str()).collect();
-        assert_eq!(ids, vec!["a", "b"], "out-of-range index clamps to end");
-    }
-
-    // ── Phase 3 — the 7 remaining structural arms ──────────────────────────
-    fn group_node(id: &str, children: Vec<agentmux_common::LayoutNode>) -> agentmux_common::LayoutNode {
-        agentmux_common::LayoutNode {
-            id: id.to_string(),
-            size: 10.0,
-            children,
-            ..Default::default()
-        }
-    }
 
     fn tree_has(state: &State, tab_id: &str, node_id: &str) -> bool {
         state.tabs[tab_id].rootnode.as_ref().is_some_and(|r| {
             crate::backend::layout::find_node_by_id(r, node_id).is_some()
         })
-    }
-
-    #[test]
-    fn layout_move_node_reparents_and_emits_event() {
-        let (mut state, tab_id) = fresh_tab();
-        seed_block(&mut state, &tab_id, "ba");
-        seed_block(&mut state, &tab_id, "bb");
-        seed_block(&mut state, &tab_id, "bc");
-        state.tabs.get_mut(&tab_id).unwrap().rootnode = Some(group_node(
-            "root",
-            vec![
-                group_node("g1", vec![leaf_node("a", "ba"), leaf_node("b", "bb")]),
-                leaf_node("c", "bc"),
-            ],
-        ));
-        let events = update(
-            &mut state,
-            Command::LayoutMoveNode {
-                tab_id: tab_id.clone(),
-                node_id: "c".into(),
-                new_parent_id: "g1".into(),
-                index: 0,
-                correlation_id: "corr".into(),
-            },
-            &ctx(1),
-        );
-        assert!(matches!(&events[0], Event::LayoutNodeMoved { .. }));
-        assert!(tree_has(&state, &tab_id, "c"), "c still in tree");
-        let root = state.tabs[&tab_id].rootnode.as_ref().unwrap();
-        assert!(
-            !root.children.iter().any(|ch| ch.id == "c"),
-            "c reparented out of root's direct children"
-        );
-    }
-
-    #[test]
-    fn layout_swap_nodes_swaps_positions() {
-        let (mut state, tab_id) = fresh_tab();
-        seed_block(&mut state, &tab_id, "ba");
-        seed_block(&mut state, &tab_id, "bb");
-        state.tabs.get_mut(&tab_id).unwrap().rootnode =
-            Some(group_node("root", vec![leaf_node("a", "ba"), leaf_node("b", "bb")]));
-        let events = update(
-            &mut state,
-            Command::LayoutSwapNodes {
-                tab_id: tab_id.clone(),
-                node1_id: "a".into(),
-                node2_id: "b".into(),
-                correlation_id: "corr".into(),
-            },
-            &ctx(1),
-        );
-        assert!(matches!(&events[0], Event::LayoutNodesSwapped { .. }));
-        let root = state.tabs[&tab_id].rootnode.as_ref().unwrap();
-        let ids: Vec<_> = root.children.iter().map(|c| c.id.as_str()).collect();
-        assert_eq!(ids, vec!["b", "a"], "positions swapped");
-    }
-
-    #[test]
-    fn layout_resize_nodes_applies_sizes() {
-        let (mut state, tab_id) = fresh_tab();
-        seed_block(&mut state, &tab_id, "ba");
-        seed_block(&mut state, &tab_id, "bb");
-        state.tabs.get_mut(&tab_id).unwrap().rootnode =
-            Some(group_node("root", vec![leaf_node("a", "ba"), leaf_node("b", "bb")]));
-        let events = update(
-            &mut state,
-            Command::LayoutResizeNodes {
-                tab_id: tab_id.clone(),
-                ops: vec![
-                    agentmux_common::ResizeOp { node_id: "a".into(), size: 30.0 },
-                    agentmux_common::ResizeOp { node_id: "b".into(), size: 70.0 },
-                ],
-                correlation_id: "corr".into(),
-            },
-            &ctx(1),
-        );
-        assert!(matches!(&events[0], Event::LayoutNodesResized { .. }));
-        let root = state.tabs[&tab_id].rootnode.as_ref().unwrap();
-        let a = crate::backend::layout::find_node_by_id(root, "a").unwrap();
-        assert_eq!(a.size, 30.0);
-    }
-
-    #[test]
-    fn layout_replace_node_swaps_in_new_and_honours_focus() {
-        let (mut state, tab_id) = fresh_tab();
-        seed_block(&mut state, &tab_id, "ba");
-        seed_block(&mut state, &tab_id, "bb");
-        seed_block(&mut state, &tab_id, "bx");
-        state.tabs.get_mut(&tab_id).unwrap().rootnode =
-            Some(group_node("root", vec![leaf_node("a", "ba"), leaf_node("b", "bb")]));
-        let events = update(
-            &mut state,
-            Command::LayoutReplaceNode {
-                tab_id: tab_id.clone(),
-                target_id: "a".into(),
-                new_node: leaf_node("x", "bx"),
-                focus_after: true,
-                correlation_id: "corr".into(),
-            },
-            &ctx(1),
-        );
-        assert!(matches!(&events[0], Event::LayoutNodeReplaced { .. }));
-        assert!(tree_has(&state, &tab_id, "x"));
-        assert!(!tree_has(&state, &tab_id, "a"), "a replaced");
-        assert_eq!(state.tabs[&tab_id].focused_node_id, "x");
-    }
-
-    #[test]
-    fn layout_replace_with_malformed_node_is_atomic() {
-        // A new_node with neither data nor children fails balance AFTER
-        // replace_node has swapped it in. The arm must leave the tab's tree
-        // untouched (operate on a clone, commit only on success) and emit
-        // only Error — no partial mutation. [codex P2 #1868]
-        let (mut state, tab_id) = fresh_tab();
-        let original = group_node("root", vec![leaf_node("a", "ba"), leaf_node("b", "bb")]);
-        state.tabs.get_mut(&tab_id).unwrap().rootnode = Some(original.clone());
-        let malformed = agentmux_common::LayoutNode {
-            id: "bad".into(),
-            // BOTH data and children violates leaf-XOR-branch → balance_node
-            // returns Err(InvalidNode) after replace_node has swapped it in.
-            data: Some(agentmux_common::LayoutNodeData {
-                block_id: "x".into(),
-                ..Default::default()
-            }),
-            children: vec![leaf_node("inner", "bi")],
-            ..Default::default()
-        };
-        let events = update(
-            &mut state,
-            Command::LayoutReplaceNode {
-                tab_id: tab_id.clone(),
-                target_id: "a".into(),
-                new_node: malformed,
-                focus_after: false,
-                correlation_id: "c".into(),
-            },
-            &ctx(1),
-        );
-        assert!(matches!(&events[0], Event::Error { .. }));
-        assert_eq!(
-            state.tabs[&tab_id].rootnode,
-            Some(original),
-            "tree left untouched on error (atomic)"
-        );
-    }
-
-    #[test]
-    fn layout_split_horizontal_wraps_root_and_focuses_new() {
-        let (mut state, tab_id) = fresh_tab();
-        seed_block(&mut state, &tab_id, "ba");
-        seed_block(&mut state, &tab_id, "bx");
-        state.tabs.get_mut(&tab_id).unwrap().rootnode = Some(leaf_node("a", "ba"));
-        let events = update(
-            &mut state,
-            Command::LayoutSplitHorizontal {
-                tab_id: tab_id.clone(),
-                target_id: "a".into(),
-                new_node: leaf_node("x", "bx"),
-                position: agentmux_common::SplitPosition::After,
-                focus_after: true,
-                correlation_id: "corr".into(),
-            },
-            &ctx(1),
-        );
-        assert!(matches!(&events[0], Event::LayoutSplitHorizontalApplied { .. }));
-        assert!(tree_has(&state, &tab_id, "a"));
-        assert!(tree_has(&state, &tab_id, "x"));
-        let root = state.tabs[&tab_id].rootnode.as_ref().unwrap();
-        assert!(root.data.is_none(), "root became a group");
-        assert_eq!(root.children.len(), 2);
-        assert_eq!(state.tabs[&tab_id].focused_node_id, "x");
-    }
-
-    #[test]
-    fn layout_split_vertical_wraps_root() {
-        let (mut state, tab_id) = fresh_tab();
-        seed_block(&mut state, &tab_id, "ba");
-        seed_block(&mut state, &tab_id, "bx");
-        state.tabs.get_mut(&tab_id).unwrap().rootnode = Some(leaf_node("a", "ba"));
-        let events = update(
-            &mut state,
-            Command::LayoutSplitVertical {
-                tab_id: tab_id.clone(),
-                target_id: "a".into(),
-                new_node: leaf_node("x", "bx"),
-                position: agentmux_common::SplitPosition::Before,
-                focus_after: false,
-                correlation_id: "corr".into(),
-            },
-            &ctx(1),
-        );
-        assert!(matches!(&events[0], Event::LayoutSplitVerticalApplied { .. }));
-        assert!(tree_has(&state, &tab_id, "a"));
-        assert!(tree_has(&state, &tab_id, "x"));
-        assert_eq!(state.tabs[&tab_id].rootnode.as_ref().unwrap().children.len(), 2);
-    }
-
-    #[test]
-    fn layout_insert_node_at_index_inserts_after_path() {
-        let (mut state, tab_id) = fresh_tab();
-        seed_block(&mut state, &tab_id, "ba");
-        seed_block(&mut state, &tab_id, "bb");
-        seed_block(&mut state, &tab_id, "bx");
-        state.tabs.get_mut(&tab_id).unwrap().rootnode =
-            Some(group_node("root", vec![leaf_node("a", "ba"), leaf_node("b", "bb")]));
-        let events = update(
-            &mut state,
-            Command::LayoutInsertNodeAtIndex {
-                tab_id: tab_id.clone(),
-                node: leaf_node("x", "bx"),
-                index_arr: vec![0],
-                focus_after: false,
-                magnify_after: false,
-                correlation_id: "corr".into(),
-            },
-            &ctx(1),
-        );
-        assert!(matches!(&events[0], Event::LayoutNodeInsertedAtIndex { .. }));
-        let root = state.tabs[&tab_id].rootnode.as_ref().unwrap();
-        let ids: Vec<_> = root.children.iter().map(|c| c.id.as_str()).collect();
-        assert_eq!(ids, vec!["a", "x", "b"], "inserted after index 0");
-    }
-
-    #[test]
-    fn layout_insert_node_at_index_into_empty_promotes_to_root() {
-        // Matches the frontend oracle (insertNodeAtIndex promotes to root on
-        // an empty tree, in layoutTree.ts) — not a reject.
-        let (mut state, tab_id) = fresh_tab();
-        seed_block(&mut state, &tab_id, "b");
-        let events = update(
-            &mut state,
-            Command::LayoutInsertNodeAtIndex {
-                tab_id: tab_id.clone(),
-                node: leaf_node("only", "b"),
-                index_arr: vec![0],
-                focus_after: false,
-                magnify_after: false,
-                correlation_id: "corr".into(),
-            },
-            &ctx(1),
-        );
-        assert!(matches!(&events[0], Event::LayoutNodeInsertedAtIndex { .. }));
-        assert_eq!(
-            state.tabs[&tab_id].rootnode.as_ref().map(|n| n.id.as_str()),
-            Some("only"),
-            "empty-tree insert-at-index promotes the node to root"
-        );
-    }
-
-    #[test]
-    fn layout_move_node_unknown_tab_errors() {
-        let mut state = State::default();
-        let events = update(
-            &mut state,
-            Command::LayoutMoveNode {
-                tab_id: "nope".into(),
-                node_id: "a".into(),
-                new_parent_id: "b".into(),
-                index: 0,
-                correlation_id: "c".into(),
-            },
-            &ctx(1),
-        );
-        assert!(matches!(
-            &events[0],
-            Event::Error { code: ErrorCode::InvalidCommand, .. }
-        ));
-    }
-
-    #[test]
-    fn layout_swap_nodes_empty_tree_errors() {
-        let (mut state, tab_id) = fresh_tab();
-        let events = update(
-            &mut state,
-            Command::LayoutSwapNodes {
-                tab_id: tab_id.clone(),
-                node1_id: "a".into(),
-                node2_id: "b".into(),
-                correlation_id: "c".into(),
-            },
-            &ctx(1),
-        );
-        assert!(matches!(&events[0], Event::Error { .. }));
-    }
-
-    #[test]
-    fn layout_insert_node_into_empty_tree_with_explicit_parent_id_emits_error() {
-        // empty-tree
-        // promotion must reject explicit parent_id — otherwise the
-        // event echoes a target that subscribers can't resolve.
-        let (mut state, tab_id) = fresh_tab();
-        let events = update(
-            &mut state,
-            Command::LayoutInsertNode {
-                tab_id: tab_id.clone(),
-                node: leaf_node("first", "b1"),
-                parent_id: Some("does-not-exist".into()),
-                index: None,
-                focus_after: false,
-                magnify_after: false,
-                correlation_id: "corr".into(),
-            },
-            &ctx(1),
-        );
-        assert!(matches!(
-            &events[0],
-            Event::Error { code: ErrorCode::InvalidCommand, .. }
-        ));
-        assert!(
-            state.tabs[&tab_id].rootnode.is_none(),
-            "tree must stay empty on rejection"
-        );
-    }
-
-    #[test]
-    fn layout_insert_node_into_empty_tree_with_explicit_index_emits_error() {
-        // Same rationale but with `index` only — the spec §7.1
-        // requires both fields be `None` for empty-tree promote.
-        let (mut state, tab_id) = fresh_tab();
-        let events = update(
-            &mut state,
-            Command::LayoutInsertNode {
-                tab_id: tab_id.clone(),
-                node: leaf_node("first", "b1"),
-                parent_id: None,
-                index: Some(0),
-                focus_after: false,
-                magnify_after: false,
-                correlation_id: "corr".into(),
-            },
-            &ctx(1),
-        );
-        assert!(matches!(
-            &events[0],
-            Event::Error { code: ErrorCode::InvalidCommand, .. }
-        ));
-        assert!(state.tabs[&tab_id].rootnode.is_none());
-    }
-
-    #[test]
-    fn layout_insert_node_with_unknown_parent_id_emits_error() {
-        // silent fallback to heuristic
-        // diverges the event from the actual mutation. Reject
-        // explicit-but-invalid parent_id with Event::Error so
-        // subscribers (especially the persist subscriber, future)
-        // see a consistent record.
-        let (mut state, tab_id) = fresh_tab();
-        state.tabs.get_mut(&tab_id).unwrap().rootnode = Some(leaf_node("only", "b1"));
-
-        let events = update(
-            &mut state,
-            Command::LayoutInsertNode {
-                tab_id: tab_id.clone(),
-                node: leaf_node("added", "b2"),
-                parent_id: Some("does-not-exist".into()),
-                index: None,
-                focus_after: false,
-                magnify_after: false,
-                correlation_id: "corr".into(),
-            },
-            &ctx(1),
-        );
-        assert!(matches!(
-            &events[0],
-            Event::Error { code: ErrorCode::InvalidCommand, .. }
-        ));
-        // Tree must be unchanged.
-        let root = state.tabs[&tab_id].rootnode.as_ref().expect("root");
-        assert_eq!(root.id, "only");
-        assert!(root.children.is_empty());
-    }
-
-    #[test]
-    fn layout_insert_node_with_leaf_parent_id_emits_error() {
-        // parent_id resolves to a leaf (has data) — leaf can't host
-        // children, so treat as invalid the same as a missing parent.
-        let (mut state, tab_id) = fresh_tab();
-        let mut root = leaf_node("group", "");
-        root.data = None;
-        root.children = vec![leaf_node("a", "ba")];
-        state.tabs.get_mut(&tab_id).unwrap().rootnode = Some(root);
-
-        let events = update(
-            &mut state,
-            Command::LayoutInsertNode {
-                tab_id: tab_id.clone(),
-                node: leaf_node("b", "bb"),
-                parent_id: Some("a".into()), // leaf, not a group
-                index: None,
-                focus_after: false,
-                magnify_after: false,
-                correlation_id: "corr".into(),
-            },
-            &ctx(1),
-        );
-        assert!(matches!(
-            &events[0],
-            Event::Error { code: ErrorCode::InvalidCommand, .. }
-        ));
-    }
-
-    #[test]
-    fn layout_insert_node_with_neither_flag_leaves_state_alone() {
-        // Anti-vacuity guard: confirm the false-flag path is the
-        // baseline (otherwise the focus_after/magnify_after tests
-        // wouldn't be measuring anything).
-        let (mut state, tab_id) = fresh_tab();
-        state.tabs.get_mut(&tab_id).unwrap().focused_node_id = "prev".into();
-        let _ = update(
-            &mut state,
-            Command::LayoutInsertNode {
-                tab_id: tab_id.clone(),
-                node: leaf_node("new", "b1"),
-                parent_id: None,
-                index: None,
-                focus_after: false,
-                magnify_after: false,
-                correlation_id: "corr".into(),
-            },
-            &ctx(1),
-        );
-        assert_eq!(state.tabs[&tab_id].focused_node_id, "prev");
     }
 
     #[test]
@@ -3220,40 +2090,6 @@ mod tests {
         }
         assert_eq!(state.tabs[&tab_id].focused_node_id, "");
         assert_eq!(state.tabs[&tab_id].magnified_node_id, "");
-    }
-
-    #[test]
-    fn layout_insert_node_event_echoes_parent_id_and_index() {
-        // The emitted event must echo the command's parent_id /
-        // index so subscribers see what was requested. Tree pre-
-        // populated with a group so the explicit-parent path
-        // doesn't take the empty-tree rejection branch.
-        let (mut state, tab_id) = fresh_tab();
-        let mut group = leaf_node("group", "");
-        group.data = None;
-        group.children = vec![leaf_node("a", "ba")];
-        state.tabs.get_mut(&tab_id).unwrap().rootnode = Some(group);
-
-        let events = update(
-            &mut state,
-            Command::LayoutInsertNode {
-                tab_id: tab_id.clone(),
-                node: leaf_node("new", "b1"),
-                parent_id: Some("group".into()),
-                index: Some(0),
-                focus_after: false,
-                magnify_after: false,
-                correlation_id: "corr".into(),
-            },
-            &ctx(1),
-        );
-        match &events[0] {
-            Event::LayoutNodeInserted { parent_id, index, .. } => {
-                assert_eq!(parent_id.as_deref(), Some("group"));
-                assert_eq!(*index, Some(0));
-            }
-            other => panic!("expected LayoutNodeInserted, got {:?}", other),
-        }
     }
 
     #[test]

@@ -349,27 +349,32 @@ impl SagaActionRunner for LiveActionRunner {
     }
 
     fn drain_pool_if_last(&self, label: &str) -> bool {
-        // Compute the same condition `on_before_close` uses to
-        // decide drain. MUST mirror that gate exactly: same pool
-        // inventory (unpromoted ∪ queue), same atomic-snapshot
-        // discipline. A two-lock variant or unpromoted-only check
-        // here lets a queued pool window inflate `user_count` and
-        // suppress the drain when the user actually did close
-        // their last visible window.
-        let (pool_inventory, browsers) = self.state.user_visibility_snapshot();
-        let labels: Vec<String> = browsers.into_iter().map(|(l, _)| l).collect();
-        let user_count = labels
-            .iter()
-            .filter(|k| !pool_inventory.contains(k.as_str()) && !k.starts_with("browser-pane-"))
-            .count();
-        // `was_last` semantics: closing window is the last user-
-        // visible window. Caller's `label` should be subtracted —
-        // but at saga-dispatch time the close hasn't happened yet
-        // (or has just happened); count of 0 OR count of 1 with
-        // the closing window in the set both indicate "last."
-        let label_present = labels.iter().any(|k| k == label);
-        user_count == 0 || (user_count == 1 && label_present)
+        // Count user windows exactly as `on_before_close`'s last-window gate
+        // does: `count_live_user_windows`, which classifies by `BrowserKind`
+        // (`TopLevel { is_pool: false }`), never by label. This used to filter
+        // labels by pool inventory and the `browser-pane-` prefix, which
+        // counted floaters as user windows and could disagree with the gate.
+        // Both reads under one `host_state` lock, so a concurrent promote
+        // can't land between them.
+        let (live_user_windows, closing_is_live_user_window) = {
+            let st = self.state.host_state.lock();
+            (
+                crate::reducer::count_live_user_windows(&st),
+                crate::reducer::live_user_window_labels(&st)
+                    .iter()
+                    .any(|l| l == label),
+            )
+        };
+        was_last_user_window(live_user_windows, closing_is_live_user_window)
     }
+}
+
+/// `was_last` for `DrainPoolIfLast`: the closing window is the last user
+/// window. At saga-dispatch time the close may or may not have unregistered
+/// it yet, so zero live user windows, or exactly one that is the closing
+/// window itself, both mean "last".
+fn was_last_user_window(live_user_windows: usize, closing_is_live_user_window: bool) -> bool {
+    live_user_windows == 0 || (live_user_windows == 1 && closing_is_live_user_window)
 }
 
 // ── Tests ─────────────────────────────────────────────────────────
@@ -725,5 +730,23 @@ mod tests {
         assert_eq!(lru.oldest_saga_id(), Some(3));
         assert!(lru.get(2, CommandKind::SpawnPoolWindow).is_none());
         assert!(lru.get(1, CommandKind::SpawnPoolWindow).is_some());
+    }
+
+    /// `DrainPoolIfLast` answers from `count_live_user_windows`, the same
+    /// count as `on_before_close`'s gate. The count and the closing window's
+    /// membership are read from the reducer by `LiveActionRunner`; this is the
+    /// decision over them.
+    #[test]
+    fn was_last_user_window_decision() {
+        // Already unregistered: nothing left.
+        assert!(was_last_user_window(0, false));
+        // Not yet unregistered: the one live window is the closing one.
+        assert!(was_last_user_window(1, true));
+        // One live window, but it's a different one (the closing label is a
+        // floater, pool window or pane, which `count_live_user_windows` never
+        // counts): not last.
+        assert!(!was_last_user_window(1, false));
+        assert!(!was_last_user_window(2, true));
+        assert!(!was_last_user_window(2, false));
     }
 }

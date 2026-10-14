@@ -32,7 +32,10 @@
 //      injected via the `Reducer` context if needed (B.4 will need
 //      it for spawned_at timestamps; for B.3 the conn carries one).
 //   3. **No I/O**. update never blocks or awaits. Mutex is held for
-//      the duration of update — must stay sub-millisecond.
+//      the duration of update — must stay sub-millisecond. That includes
+//      logging: `crate::log` opens, rotates and appends to a file, so an
+//      arm that wants a log line pushes it onto `Reduced::diagnostics`
+//      and the caller writes it after releasing the lock.
 //
 // Connection context: every command arrives over a specific
 // connection and the resulting events that are *replies* (Registered,
@@ -49,7 +52,7 @@
 //     register. Running → Quitting on Quit (B.3 placeholder).
 //     Quitting → Dead on cleanup-done (B.3 placeholder). No skipping.
 
-use agentmux_common::ipc::{Command, DriftKind, Event};
+use agentmux_common::ipc::{Command, DriftKind, ErrorCode, Event};
 
 use crate::state::State;
 
@@ -86,11 +89,23 @@ mod window;
 mod saga;
 mod connection;
 
-/// Apply one Command to State, returning the resulting Events. State
-/// is mutated in place. Total function — never panics on input
-/// (panics are reserved for internal invariant violations).
-pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
+/// What one `update` call produced.
+#[derive(Debug, Default)]
+pub struct Reduced {
+    /// Events to log, broadcast and reply with.
+    pub events: Vec<Event>,
+    /// Log lines for `crate::log`. The reducer does no I/O; the caller
+    /// writes these after releasing the state lock.
+    pub diagnostics: Vec<String>,
+}
+
+/// Apply one Command to State, returning the resulting Events and any
+/// diagnostic log lines. State is mutated in place. Total function —
+/// never panics on input (panics are reserved for internal invariant
+/// violations).
+pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Reduced {
     let _ = ctx.conn_id; // reserved for B.4 routing
+    let mut diagnostics: Vec<String> = Vec::new();
 
     let mut cmd_events = match cmd {
         Command::Register {
@@ -122,13 +137,13 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
             parent_label,
         } => {
             if let Some(err) = connection::enforce_host_only(state, ctx, "ReportWindowOpened") {
-                return vec![err];
+                return Reduced { events: vec![err], diagnostics };
             }
             window::handle_report_window_opened(state, ctx, label, kind, parent_label)
         }
         Command::ReportWindowClosed { label } => {
             if let Some(err) = connection::enforce_host_only(state, ctx, "ReportWindowClosed") {
-                return vec![err];
+                return Reduced { events: vec![err], diagnostics };
             }
             window::handle_report_window_closed(state, label)
         }
@@ -136,19 +151,19 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
             if let Some(err) =
                 connection::enforce_host_only(state, ctx, "ReportBackgroundServiceEnabled")
             {
-                return vec![err];
+                return Reduced { events: vec![err], diagnostics };
             }
             window::handle_report_background_service_enabled(state, enabled)
         }
         Command::ReportPoolWindowAdded { label, saga_id } => {
             if let Some(err) = connection::enforce_host_only(state, ctx, "ReportPoolWindowAdded") {
-                return vec![err];
+                return Reduced { events: vec![err], diagnostics };
             }
             pool::handle_report_pool_window_added(state, label, saga_id)
         }
         Command::ReportPoolWindowRemoved { label } => {
             if let Some(err) = connection::enforce_host_only(state, ctx, "ReportPoolWindowRemoved") {
-                return vec![err];
+                return Reduced { events: vec![err], diagnostics };
             }
             pool::handle_report_pool_window_removed(state, label)
         }
@@ -160,7 +175,7 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
         // saga) lives in the saga coordinator's bus subscription.
         Command::ReportPoolWindowPromoted { label } => {
             if let Some(err) = connection::enforce_host_only(state, ctx, "ReportPoolWindowPromoted") {
-                return vec![err];
+                return Reduced { events: vec![err], diagnostics };
             }
             pool::handle_report_pool_window_promoted(state, label)
         }
@@ -170,15 +185,7 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
         // error so the client knows the dispatch was wrong (vs silently
         // appearing successful with no reply). Same misrouted-error
         // pattern as the srv-pipe commands below.
-        Command::SpawnPoolWindow { .. } => {
-            let v = state.bump_version();
-            vec![Event::Error {
-                code: agentmux_common::ipc::ErrorCode::InvalidCommand,
-                message: "SpawnPoolWindow is a launcher→host command; sent to launcher pipe by mistake".into(),
-                fatal: false,
-                version: v,
-            }]
-        }
+        Command::SpawnPoolWindow { .. } => host_pipe_only(state, "SpawnPoolWindow"),
         // Phase F.6 — host-only signal that all browser-pane HWNDs
         // belonging to a closing top-level window have been reaped.
         // Pure-reducer arm: emits the typed event so the
@@ -190,7 +197,7 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
         // transition for subscribers.
         Command::ReportPanesReaped { label, saga_id } => {
             if let Some(err) = connection::enforce_host_only(state, ctx, "ReportPanesReaped") {
-                return vec![err];
+                return Reduced { events: vec![err], diagnostics };
             }
             saga::handle_report_panes_reaped(state, label, saga_id)
         }
@@ -205,7 +212,7 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
             saga_id,
         } => {
             if let Some(err) = connection::enforce_host_only(state, ctx, "ReportPoolDrainDecision") {
-                return vec![err];
+                return Reduced { events: vec![err], diagnostics };
             }
             pool::handle_report_pool_drain_decision(state, label, was_last, saga_id)
         }
@@ -213,24 +220,8 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
         // launcher→host direction commands, NOT host→launcher
         // reports. Same misrouted-error pattern as `SpawnPoolWindow`
         // above.
-        Command::ReapPanes { .. } => {
-            let v = state.bump_version();
-            vec![Event::Error {
-                code: agentmux_common::ipc::ErrorCode::InvalidCommand,
-                message: "ReapPanes is a launcher→host command; sent to launcher pipe by mistake".into(),
-                fatal: false,
-                version: v,
-            }]
-        }
-        Command::DrainPoolIfLast { .. } => {
-            let v = state.bump_version();
-            vec![Event::Error {
-                code: agentmux_common::ipc::ErrorCode::InvalidCommand,
-                message: "DrainPoolIfLast is a launcher→host command; sent to launcher pipe by mistake".into(),
-                fatal: false,
-                version: v,
-            }]
-        }
+        Command::ReapPanes { .. } => host_pipe_only(state, "ReapPanes"),
+        Command::DrainPoolIfLast { .. } => host_pipe_only(state, "DrainPoolIfLast"),
         // Phase CPD-1 — host-emitted report that a saga-issued action
         // failed. Pure pass-through arm: translates the wire command
         // into `Event::SagaActionFailed`. The saga coordinator's bus
@@ -239,7 +230,7 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
         // gate same as other Report* arms.
         Command::ReportSagaActionFailed { saga_id, reason } => {
             if let Some(err) = connection::enforce_host_only(state, ctx, "ReportSagaActionFailed") {
-                return vec![err];
+                return Reduced { events: vec![err], diagnostics };
             }
             saga::handle_report_saga_action_failed(state, saga_id, reason)
         }
@@ -253,25 +244,25 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
         }
         Command::ReportHostCounts { windows, pool } => {
             if let Some(err) = connection::enforce_host_only(state, ctx, "ReportHostCounts") {
-                return vec![err];
+                return Reduced { events: vec![err], diagnostics };
             }
             handle_report_host_counts(state, windows, pool)
         }
         Command::ReportHostPoolCount { count } => {
             if let Some(err) = connection::enforce_host_only(state, ctx, "ReportHostPoolCount") {
-                return vec![err];
+                return Reduced { events: vec![err], diagnostics };
             }
             pool::handle_report_host_pool_count(state, count)
         }
         Command::ReportBackendWindowIdRegistered { label, window_id } => {
             if let Some(err) = connection::enforce_host_only(state, ctx, "ReportBackendWindowIdRegistered") {
-                return vec![err];
+                return Reduced { events: vec![err], diagnostics };
             }
             window::handle_report_backend_window_id_registered(state, label, window_id)
         }
         Command::ReportBackendWindowIdUnregistered { label } => {
             if let Some(err) = connection::enforce_host_only(state, ctx, "ReportBackendWindowIdUnregistered") {
-                return vec![err];
+                return Reduced { events: vec![err], diagnostics };
             }
             window::handle_report_backend_window_id_unregistered(state, label)
         }
@@ -281,44 +272,52 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
         // observability reports.
         Command::ReportHwndOpened { hwnd, class_name, title, label_hint } => {
             if let Some(err) = connection::enforce_host_only(state, ctx, "ReportHwndOpened") {
-                return vec![err];
+                return Reduced { events: vec![err], diagnostics };
             }
-            crate::wrr::apply_hwnd_opened(state, hwnd, class_name, title, label_hint, ctx.now_ms)
+            crate::wrr::apply_hwnd_opened(
+                state,
+                hwnd,
+                class_name,
+                title,
+                label_hint,
+                ctx.now_ms,
+                &mut diagnostics,
+            )
         }
         Command::ReportHwndDestroyed { hwnd } => {
             if let Some(err) = connection::enforce_host_only(state, ctx, "ReportHwndDestroyed") {
-                return vec![err];
+                return Reduced { events: vec![err], diagnostics };
             }
             let host_running = connection::host_is_running(state);
             crate::wrr::apply_hwnd_destroyed(state, hwnd, host_running)
         }
         Command::ReportHwndVisibilityChanged { hwnd, visible } => {
             if let Some(err) = connection::enforce_host_only(state, ctx, "ReportHwndVisibilityChanged") {
-                return vec![err];
+                return Reduced { events: vec![err], diagnostics };
             }
             crate::wrr::apply_hwnd_visibility_changed(state, hwnd, visible, ctx.now_ms)
         }
         Command::ReportHwndForegroundChanged { hwnd } => {
             if let Some(err) = connection::enforce_host_only(state, ctx, "ReportHwndForegroundChanged") {
-                return vec![err];
+                return Reduced { events: vec![err], diagnostics };
             }
             crate::wrr::apply_hwnd_foreground_changed(state, hwnd, ctx.now_ms)
         }
         Command::ReportHwndIconicChanged { hwnd, iconic } => {
             if let Some(err) = connection::enforce_host_only(state, ctx, "ReportHwndIconicChanged") {
-                return vec![err];
+                return Reduced { events: vec![err], diagnostics };
             }
             crate::wrr::apply_hwnd_iconic_changed(state, hwnd, iconic)
         }
         Command::ReportHwndPositionChanged { hwnd, rect } => {
             if let Some(err) = connection::enforce_host_only(state, ctx, "ReportHwndPositionChanged") {
-                return vec![err];
+                return Reduced { events: vec![err], diagnostics };
             }
-            crate::wrr::apply_hwnd_position_changed(state, hwnd, rect)
+            crate::wrr::apply_hwnd_position_changed(state, hwnd, rect, &mut diagnostics)
         }
         Command::ReportMonitorTopologyChanged { rects } => {
             if let Some(err) = connection::enforce_host_only(state, ctx, "ReportMonitorTopologyChanged") {
-                return vec![err];
+                return Reduced { events: vec![err], diagnostics };
             }
             crate::wrr::apply_monitor_topology_changed(state, rects)
         }
@@ -340,218 +339,42 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
         Command::GetEvents { .. } => Vec::new(),
         // Phase E.2 — srv-pipe domain commands routed to launcher
         // pipe by mistake.
-        Command::CreateWorkspace { .. } => {
-            let v = state.bump_version();
-            vec![Event::Error {
-                code: agentmux_common::ipc::ErrorCode::InvalidCommand,
-                message: "CreateWorkspace is a srv-pipe command; sent to launcher pipe by mistake".into(),
-                fatal: false,
-                version: v,
-            }]
-        }
-        Command::DeleteWorkspace { .. } => {
-            let v = state.bump_version();
-            vec![Event::Error {
-                code: agentmux_common::ipc::ErrorCode::InvalidCommand,
-                message: "DeleteWorkspace is a srv-pipe command; sent to launcher pipe by mistake".into(),
-                fatal: false,
-                version: v,
-            }]
-        }
+        Command::CreateWorkspace { .. } => srv_pipe_only(state, "CreateWorkspace"),
+        Command::DeleteWorkspace { .. } => srv_pipe_only(state, "DeleteWorkspace"),
         // Phase E.2b — Tab arms are also srv-pipe commands.
-        Command::CreateTab { .. } => {
-            let v = state.bump_version();
-            vec![Event::Error {
-                code: agentmux_common::ipc::ErrorCode::InvalidCommand,
-                message: "CreateTab is a srv-pipe command; sent to launcher pipe by mistake".into(),
-                fatal: false,
-                version: v,
-            }]
-        }
-        Command::DeleteTab { .. } => {
-            let v = state.bump_version();
-            vec![Event::Error {
-                code: agentmux_common::ipc::ErrorCode::InvalidCommand,
-                message: "DeleteTab is a srv-pipe command; sent to launcher pipe by mistake".into(),
-                fatal: false,
-                version: v,
-            }]
-        }
-        Command::SetActiveTab { .. } => {
-            let v = state.bump_version();
-            vec![Event::Error {
-                code: agentmux_common::ipc::ErrorCode::InvalidCommand,
-                message: "SetActiveTab is a srv-pipe command; sent to launcher pipe by mistake".into(),
-                fatal: false,
-                version: v,
-            }]
-        }
-        Command::ReorderTab { .. } => {
-            let v = state.bump_version();
-            vec![Event::Error {
-                code: agentmux_common::ipc::ErrorCode::InvalidCommand,
-                message: "ReorderTab is a srv-pipe command; sent to launcher pipe by mistake".into(),
-                fatal: false,
-                version: v,
-            }]
-        }
+        Command::CreateTab { .. } => srv_pipe_only(state, "CreateTab"),
+        Command::DeleteTab { .. } => srv_pipe_only(state, "DeleteTab"),
+        Command::SetActiveTab { .. } => srv_pipe_only(state, "SetActiveTab"),
+        Command::ReorderTab { .. } => srv_pipe_only(state, "ReorderTab"),
         // Phase E.5 — window↔workspace mapping commands are srv-pipe.
-        Command::CreateWindow { .. } => {
-            let v = state.bump_version();
-            vec![Event::Error {
-                code: agentmux_common::ipc::ErrorCode::InvalidCommand,
-                message: "CreateWindow is a srv-pipe command; sent to launcher pipe by mistake".into(),
-                fatal: false,
-                version: v,
-            }]
-        }
-        Command::CloseWindowInternal { .. } => {
-            let v = state.bump_version();
-            vec![Event::Error {
-                code: agentmux_common::ipc::ErrorCode::InvalidCommand,
-                message: "CloseWindowInternal is a srv-pipe command; sent to launcher pipe by mistake".into(),
-                fatal: false,
-                version: v,
-            }]
-        }
-        Command::SwitchWorkspace { .. } => {
-            let v = state.bump_version();
-            vec![Event::Error {
-                code: agentmux_common::ipc::ErrorCode::InvalidCommand,
-                message: "SwitchWorkspace is a srv-pipe command; sent to launcher pipe by mistake".into(),
-                fatal: false,
-                version: v,
-            }]
-        }
+        Command::CreateWindow { .. } => srv_pipe_only(state, "CreateWindow"),
+        Command::CloseWindowInternal { .. } => srv_pipe_only(state, "CloseWindowInternal"),
+        Command::SwitchWorkspace { .. } => srv_pipe_only(state, "SwitchWorkspace"),
         // Phase E.5.3 — atomic single-step domain commands are srv-pipe.
-        Command::ReorderTabsBulk { .. } => {
-            let v = state.bump_version();
-            vec![Event::Error {
-                code: agentmux_common::ipc::ErrorCode::InvalidCommand,
-                message: "ReorderTabsBulk is a srv-pipe command; sent to launcher pipe by mistake".into(),
-                fatal: false,
-                version: v,
-            }]
-        }
-        Command::RenameWorkspace { .. } => {
-            let v = state.bump_version();
-            vec![Event::Error {
-                code: agentmux_common::ipc::ErrorCode::InvalidCommand,
-                message: "RenameWorkspace is a srv-pipe command; sent to launcher pipe by mistake".into(),
-                fatal: false,
-                version: v,
-            }]
-        }
-        Command::RenameTab { .. } => {
-            let v = state.bump_version();
-            vec![Event::Error {
-                code: agentmux_common::ipc::ErrorCode::InvalidCommand,
-                message: "RenameTab is a srv-pipe command; sent to launcher pipe by mistake".into(),
-                fatal: false,
-                version: v,
-            }]
-        }
-        Command::UpdateWorkspaceMeta { .. } => {
-            let v = state.bump_version();
-            vec![Event::Error {
-                code: agentmux_common::ipc::ErrorCode::InvalidCommand,
-                message: "UpdateWorkspaceMeta is a srv-pipe command; sent to launcher pipe by mistake".into(),
-                fatal: false,
-                version: v,
-            }]
-        }
-        Command::UpdateTabMeta { .. } => {
-            let v = state.bump_version();
-            vec![Event::Error {
-                code: agentmux_common::ipc::ErrorCode::InvalidCommand,
-                message: "UpdateTabMeta is a srv-pipe command; sent to launcher pipe by mistake".into(),
-                fatal: false,
-                version: v,
-            }]
-        }
-        Command::UpdateBlockMeta { .. } => {
-            let v = state.bump_version();
-            vec![Event::Error {
-                code: agentmux_common::ipc::ErrorCode::InvalidCommand,
-                message: "UpdateBlockMeta is a srv-pipe command; sent to launcher pipe by mistake".into(),
-                fatal: false,
-                version: v,
-            }]
-        }
+        Command::ReorderTabsBulk { .. } => srv_pipe_only(state, "ReorderTabsBulk"),
+        Command::RenameWorkspace { .. } => srv_pipe_only(state, "RenameWorkspace"),
+        Command::RenameTab { .. } => srv_pipe_only(state, "RenameTab"),
+        Command::UpdateWorkspaceMeta { .. } => srv_pipe_only(state, "UpdateWorkspaceMeta"),
+        Command::UpdateTabMeta { .. } => srv_pipe_only(state, "UpdateTabMeta"),
+        Command::UpdateBlockMeta { .. } => srv_pipe_only(state, "UpdateBlockMeta"),
         // Phase E.3 — Block arms are also srv-pipe commands.
-        Command::CreateBlock { .. } => {
-            let v = state.bump_version();
-            vec![Event::Error {
-                code: agentmux_common::ipc::ErrorCode::InvalidCommand,
-                message: "CreateBlock is a srv-pipe command; sent to launcher pipe by mistake".into(),
-                fatal: false,
-                version: v,
-            }]
-        }
-        Command::DeleteBlock { .. } => {
-            let v = state.bump_version();
-            vec![Event::Error {
-                code: agentmux_common::ipc::ErrorCode::InvalidCommand,
-                message: "DeleteBlock is a srv-pipe command; sent to launcher pipe by mistake".into(),
-                fatal: false,
-                version: v,
-            }]
-        }
+        Command::CreateBlock { .. } => srv_pipe_only(state, "CreateBlock"),
+        Command::DeleteBlock { .. } => srv_pipe_only(state, "DeleteBlock"),
         // Phase E.5.5 — saga-driven move commands are srv-pipe.
-        Command::MoveTab { .. } => {
-            let v = state.bump_version();
-            vec![Event::Error {
-                code: agentmux_common::ipc::ErrorCode::InvalidCommand,
-                message: "MoveTab is a srv-pipe command; sent to launcher pipe by mistake".into(),
-                fatal: false,
-                version: v,
-            }]
-        }
-        Command::MoveBlock { .. } => {
-            let v = state.bump_version();
-            vec![Event::Error {
-                code: agentmux_common::ipc::ErrorCode::InvalidCommand,
-                message: "MoveBlock is a srv-pipe command; sent to launcher pipe by mistake".into(),
-                fatal: false,
-                version: v,
-            }]
-        }
+        Command::MoveTab { .. } => srv_pipe_only(state, "MoveTab"),
+        Command::MoveBlock { .. } => srv_pipe_only(state, "MoveBlock"),
         // Phase E.4 (Option A) — layout-focused/magnified setters are
         // srv-pipe commands. Misrouted to the launcher pipe, return
         // a non-fatal error so the client knows the dispatch was wrong.
-        Command::SetFocusedNode { .. } => {
-            let v = state.bump_version();
-            vec![Event::Error {
-                code: agentmux_common::ipc::ErrorCode::InvalidCommand,
-                message: "SetFocusedNode is a srv-pipe command; sent to launcher pipe by mistake".into(),
-                fatal: false,
-                version: v,
-            }]
-        }
-        Command::SetMagnifiedNode { .. } => {
-            let v = state.bump_version();
-            vec![Event::Error {
-                code: agentmux_common::ipc::ErrorCode::InvalidCommand,
-                message: "SetMagnifiedNode is a srv-pipe command; sent to launcher pipe by mistake".into(),
-                fatal: false,
-                version: v,
-            }]
-        }
+        Command::SetFocusedNode { .. } => srv_pipe_only(state, "SetFocusedNode"),
+        Command::SetMagnifiedNode { .. } => srv_pipe_only(state, "SetMagnifiedNode"),
         // Phase E.1b — `GetSrvSnapshot` is a srv-pipe command. If a
         // registered client misroutes it to the launcher pipe, return
         // an explicit error so the client knows the dispatch was
         // wrong (vs silently appearing successful with no reply).
         // Pre-Register, `enforce_register_first` already returns a
         // soft error. (codex P2 #610.)
-        Command::GetSrvSnapshot => {
-            let v = state.bump_version();
-            vec![Event::Error {
-                code: agentmux_common::ipc::ErrorCode::InvalidCommand,
-                message: "GetSrvSnapshot is a srv-pipe command; sent to launcher pipe by mistake".to_string(),
-                fatal: false,
-                version: v,
-            }]
-        }
+        Command::GetSrvSnapshot => srv_pipe_only(state, "GetSrvSnapshot"),
         // Phase E.4.B — layout-tree commands are srv-pipe only; same
         // soft-error treatment as GetSrvSnapshot above.
         Command::LayoutInsertNode { .. }
@@ -571,15 +394,10 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
         | Command::LayoutSplitVertical { .. }
         | Command::LayoutClear { .. }
         | Command::LayoutSetTree { .. }
-        | Command::UpdateWindowMeta { .. } => {
-            let v = state.bump_version();
-            vec![Event::Error {
-                code: agentmux_common::ipc::ErrorCode::InvalidCommand,
-                message: "Srv-pipe command (Layout/UpdateWindowMeta) sent to launcher pipe by mistake".to_string(),
-                fatal: false,
-                version: v,
-            }]
-        }
+        | Command::UpdateWindowMeta { .. } => misrouted(
+            state,
+            "Srv-pipe command (Layout/UpdateWindowMeta) sent to launcher pipe by mistake".to_string(),
+        ),
     };
 
     // Heartbeat-via-traffic: drain any deferred hidden-since-open
@@ -594,10 +412,37 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
     // past the grace promotes the deferred state to a fired drift.
     let mut deferred = crate::wrr::drain_deferred_hidden_since_open(state, ctx.now_ms);
     cmd_events.append(&mut deferred);
-    cmd_events
+    Reduced { events: cmd_events, diagnostics }
 }
 
+/// A command that belongs on another pipe reached the launcher's. Reply
+/// with a non-fatal error so the client knows its dispatch was wrong,
+/// rather than seeing no reply at all.
+fn misrouted(state: &mut State, message: String) -> Vec<Event> {
+    let v = state.bump_version();
+    vec![Event::Error {
+        code: ErrorCode::InvalidCommand,
+        message,
+        fatal: false,
+        version: v,
+    }]
+}
 
+/// `misrouted` for a command only srv's pipe handles.
+fn srv_pipe_only(state: &mut State, command: &str) -> Vec<Event> {
+    misrouted(
+        state,
+        format!("{command} is a srv-pipe command; sent to launcher pipe by mistake"),
+    )
+}
+
+/// `misrouted` for a command the launcher sends to the host, never receives.
+fn host_pipe_only(state: &mut State, command: &str) -> Vec<Event> {
+    misrouted(
+        state,
+        format!("{command} is a launcher→host command; sent to launcher pipe by mistake"),
+    )
+}
 
 /// Phase B.4 follow-up — drift check. Compares host-reported counts
 /// to launcher mirror counts; emits `DriftDetected` for each
@@ -631,15 +476,6 @@ fn handle_report_host_counts(state: &mut State, host_windows: u32, host_pool: u3
     }
     out
 }
-
-
-
-
-
-
-
-
-
 
 #[cfg(test)]
 mod tests;

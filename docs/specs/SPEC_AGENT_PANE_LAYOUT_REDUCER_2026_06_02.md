@@ -1,6 +1,6 @@
 # Agent-Pane Layout State Machine — unify zoom + virtualization + tool-expansion into one reducer
 
-**Status:** implemented — Phases 0, 2, 3 (#1270), 4 (#1281) shipped; **Phase 1 is the only one left** (§6)
+**Status:** implemented — every phase shipped: 0, 2, 3 (#1270), 4 (#1281), and Phase 1's last local signal was removed in #3906. The `UserExpanded`/`UserCollapsed` arms have no callers. Verified against code 2026-10-14 ([triage](../analysis/REPORT_REDUCER_STACK_TRIAGE_2026_10_13.md)).
 **Last verified against code:** 2026-09-17 (see §6 — each phase now carries how to check it)
 **Date:** 2026-06-02
 **Author:** AgentA
@@ -308,8 +308,10 @@ reducer would add state with no layout meaning.
   entry implies — see the audit note below it.** Move `collapsed/pinned/hold/hover/cancel`
   into the slice; components dispatch `UserExpanded/UserCollapsed`. **This alone removes the
   component-local desync** and makes expansion testable. Still TanStack-measured.
-  *Verify:* `grep -rn "UserExpanded\|UserCollapsed" frontend/app --include=*.tsx`
-  — today the only hits are the slice's own tests, so nothing dispatches them.
+  *Verify:* `grep -rn "ExpansionResolved" frontend/app --include=*.tsx`
+  — user toggles reach the slice through `documentState` and this one command.
+  `UserExpanded`/`UserCollapsed` never got a caller and were deleted on
+  2026-10-14; a remaining in-flow toggle should go the same way, not revive them.
 
   **Audit 2026-09-17 — three of the five scattered sources in §5 are already
   resolved.** `documentState.collapsedNodes`/`pinnedNodes` reach the slice via

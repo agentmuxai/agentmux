@@ -1,6 +1,6 @@
 # Agent pane: a tool call's hover peek only on its line, and "Open in editor" on Markdown file previews
 
-**Status:** implemented (#4680).
+**Status:** implemented (#4680; §3.1 in #4868).
 **Date:** 2026-10-11 | **Version:** main at `cc94d15e0`.
 **Requested by:** repo owner: "in the agent pane, when hovering over tool calls (like bash) we want to display the popover only hovering over the actual tool call line. the expandable result/preview should not show the hover. this is so we can see it but also select it. the hover over the tool preview blocks that. Additionally, on the top right of md file previews, add a button to the top right which opens it in an editor pane (with collapsed tree)." Then: "if an editor is open and not minimized in the same window tab, then open the doc in another document tab in the same editor pane tab. If the editor is not on the same window tab, or is minimized or not shown, open a new editor pane", and "a button for all tools (md previews and normal, so that md's have 2 buttons, and normal have 1) … an extend/shorten button, that makes the preview 3x the height (or revert back to original preview height)."
 **Author:** Loap.
@@ -96,6 +96,17 @@ A tool's preview is capped at a third of half the window height (`$transcript-pr
 - The state is the tool block's own (`ToolBlock`, a signal): not saved, and back to normal if the block is unmounted (scrolled far out of the virtualized list). The class is only set while the panel is shown, so a collapsed tool's `--hidden` height of 0 still wins.
 
 Tests: every tool's preview has the toggle and a Markdown one has both buttons; the toggle sets and clears `--tall` and swaps its label (`open-in-editor.test.tsx`).
+
+### 3.1 Only while there is more to see
+
+The toggle exists to show more of a preview that is cut off, so a preview that fits has none. It is there while the preview's scrolling box has a vertical scroll (its content is taller than the box by more than a pixel), and also while the preview is already tall, so a tall preview can always be made short again even when everything now fits. A Markdown file preview that fits keeps its Open in editor button and loses only the toggle; a preview with neither has no actions strip at all.
+
+- `ToolOverlayLog` reports whether its box scrolls, on the resizes it already watches for pinning to the latest output ([`overflow-report.ts`](../../frontend/app/view/agent/components/overflow-report.ts)), and `ToolBlock` shows the toggle from that.
+- A reading waits for transitions in the panel to end. The panel opens by a `max-height` transition and the height FLIP pins the box while it eases, so mid-way the box is clipped to part of its height and a preview that fits would read as scrolling. Endless animations (a blinking cursor) are not waited for.
+- It reads nothing while the panel is collapsed (its subtree is `content-visibility: hidden`, where reading layout forces a render), and starts again when the body mounts.
+- Output that grows past the box while the tool runs gains the toggle at that moment; output that shrinks back loses it, unless it was made tall.
+
+Tests: [`tool-height-toggle.test.tsx`](../../frontend/app/view/agent/components/tool-height-toggle.test.tsx) (a preview that scrolls has the toggle and one that fits has none, the toggle appears and goes as output grows and shrinks, a tall preview keeps it, a Markdown preview that fits keeps Open in editor, and the panel opening isn't read as scrolling) and [`overflow-report.test.ts`](../../frontend/app/view/agent/components/overflow-report.test.ts).
 
 ## 4. Open questions
 

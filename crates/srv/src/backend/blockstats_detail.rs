@@ -4,83 +4,61 @@
 //! What a terminal's stats badge tooltip shows beyond the badge's own CPU and
 //! memory (`blockstats.detail`), and the badge's peak memory.
 //!
-//! The badge (`sysinfo::run_sysinfo_loop`) sums its pane's shell and every
-//! process under it. The tooltip describes the same processes: their names,
-//! when the shell started, and two more memory figures from one
-//! `agentmux_procstats` snapshot, private and committed. A snapshot costs
-//! tens of milliseconds, so it is taken only while a tooltip is open, never
-//! on the badge's every-second tick.
+//! The badge (`sysinfo::run_sysinfo_loop`, through `sampler::panes`) counts
+//! the pane's processes as Tower groups them: its Job Object or cgroup, else
+//! its shell's tree. The tooltip reads the same Tower task ([`from_task`]), so
+//! it lists the processes the badge counts: their names, when the shell
+//! started, and two more memory figures, private and committed. It shares
+//! Tower's process snapshot, which is reused within 900 ms, so an open
+//! tooltip adds no second read of the process table.
 //!
 //! A remote pane (SSH, WSL) is measured on the machine it is connected to,
 //! by AgentMux's helper there (`PaneProcs`); [`remote`] turns its answer
 //! into the badge's figures, with a peak kept here.
 //! SPEC_TERMINAL_STATS_BADGE_REMOTE_PANES_2026_10_12.md.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-use agentmux_procstats::ProcInfo;
 use agentmux_remote::fsproto::{PaneFound, PaneFrame};
 
-use crate::backend::rpc_types::{BlockStatsFigures, BlockStatsHost, BlockStatsName, BlockStatsRemote};
+use crate::backend::rpc_types::{
+    BlockStatsFigures, BlockStatsHost, BlockStatsName, BlockStatsRemote, TowerProcess, TowerProcessRole, TowerTask,
+};
 
-/// The tooltip's numbers for the process tree under `root_pid`, at most
-/// `max` processes (the badge's own cap). `None` when the shell isn't in the
-/// snapshot (it exited).
-pub fn detail(snap: &[ProcInfo], root_pid: u32, max: usize) -> Option<BlockStatsFigures> {
-    let root = snap.iter().position(|p| p.pid == root_pid)?;
-    let by_pid: HashMap<u32, usize> = snap.iter().enumerate().map(|(i, p)| (p.pid, i)).collect();
-    // Parent → children, trusting a parent only if it really is one (a
-    // Windows parent PID can name a newer process that reused it).
-    let mut children: HashMap<usize, Vec<usize>> = HashMap::new();
-    for (i, p) in snap.iter().enumerate() {
-        if let Some(&parent) = p.ppid.and_then(|pp| by_pid.get(&pp)) {
-            if p.is_child_of(&snap[parent]) {
-                children.entry(parent).or_default().push(i);
-            }
-        }
-    }
-    let mut tree = vec![root];
-    let mut queue = VecDeque::from([root]);
-    'walk: while let Some(i) = queue.pop_front() {
-        for &c in children.get(&i).into_iter().flatten() {
-            if tree.len() >= max {
-                break 'walk;
-            }
-            if !tree.contains(&c) {
-                tree.push(c);
-                queue.push_back(c);
-            }
-        }
-    }
-
-    let sum = |f: fn(&ProcInfo) -> Option<u64>| -> Option<u64> {
-        tree.iter().filter_map(|&i| f(&snap[i])).reduce(|a, b| a + b)
-    };
+/// The tooltip's numbers for a pane's Tower task. `memory_metric` is the
+/// snapshot's: what each process's private memory measures.
+pub fn from_task(task: &TowerTask, memory_metric: &str) -> BlockStatsFigures {
+    let procs = &task.processes;
+    let main = procs.iter().position(|p| p.role == Some(TowerProcessRole::Main));
+    // The shell first, then the rest in the task's order.
+    let ordered = main.into_iter().chain((0..procs.len()).filter(|&i| Some(i) != main));
     let mut names: Vec<BlockStatsName> = Vec::new();
-    for &i in &tree {
-        let name = display_name(&snap[i].name);
+    for i in ordered {
+        let name = display_name(&procs[i].name);
         match names.iter_mut().find(|n| n.name == name) {
             Some(n) => n.count += 1,
             None => names.push(BlockStatsName { name: name.to_string(), count: 1 }),
         }
     }
     // The shell stays first; the rest, most numerous first (stable: ties keep
-    // the order the walk met them in).
-    names[1..].sort_by(|a, b| b.count.cmp(&a.count));
+    // the task's order).
+    names[usize::from(main.is_some())..].sort_by(|a, b| b.count.cmp(&a.count));
 
-    Some(BlockStatsFigures {
-        processes: tree.len() as u32,
+    // A figure no process reports is absent, not zero.
+    let sum = |f: fn(&TowerProcess) -> Option<u64>| procs.iter().filter_map(f).reduce(|a, b| a + b);
+    BlockStatsFigures {
+        processes: procs.len() as u32,
         names,
-        started_at_ms: snap[root].started_at_ms,
+        started_at_ms: main.and_then(|i| procs[i].started_at_ms),
         cpu: None,
         mem_resident: None,
-        mem_private: sum(|p| p.mem_private),
+        mem_private: sum(|p| p.mem),
         mem_commit: sum(|p| p.mem_commit),
         unmeasured: None,
-        memory_metric: agentmux_procstats::MEMORY_METRIC.to_string(),
-    })
+        memory_metric: memory_metric.to_string(),
+    }
 }
 
 /// A remote pane's helper answer as the badge's figures, with its peak.
@@ -191,67 +169,87 @@ impl Peaks {
 mod tests {
     use super::*;
 
-    fn proc(pid: u32, ppid: Option<u32>, started: u64, name: &str, private: u64, commit: Option<u64>) -> ProcInfo {
-        ProcInfo {
+    fn proc(pid: u32, role: TowerProcessRole, started: u64, name: &str, private: u64, commit: Option<u64>) -> TowerProcess {
+        TowerProcess {
             pid,
-            ppid,
-            start_key: started,
+            role: Some(role),
             started_at_ms: Some(started),
             name: name.to_string(),
-            cpu_ns: Some(0),
-            mem_private: Some(private),
+            mem: Some(private),
             mem_resident: Some(private * 2),
             mem_commit: commit,
+            ..Default::default()
         }
     }
 
-    fn table() -> Vec<ProcInfo> {
-        vec![
-            proc(1, None, 100, "agentmux-srv.exe", 500, Some(900)),
-            proc(10, Some(1), 1_000, "pwsh.exe", 10, Some(90)),
-            proc(11, Some(10), 2_000, "node.exe", 20, Some(40)),
-            proc(12, Some(11), 3_000, "node.exe", 5, Some(8)),
-            proc(13, Some(10), 2_500, "git.exe", 1, Some(2)),
-            // Claims pwsh as its parent but started before it: a reused PID.
-            proc(14, Some(10), 500, "stranger.exe", 999, Some(999)),
-            proc(20, Some(1), 1_500, "bash", 7, None),
-        ]
+    fn task(processes: Vec<TowerProcess>) -> TowerTask {
+        TowerTask {
+            id: "term-1".to_string(),
+            kind: crate::backend::rpc_types::TowerTaskKind::Terminal,
+            label: "Terminal".to_string(),
+            tracking: "high".to_string(),
+            cpu: None,
+            cpu_account: false,
+            mem: 0,
+            processes,
+            exited: None,
+        }
+    }
+
+    /// A tracked pane: its shell isn't first in the tracker's list.
+    fn tracked() -> TowerTask {
+        use TowerProcessRole::{Main, Started, Support};
+        task(vec![
+            proc(13, Started, 2_500, "git.exe", 1, Some(2)),
+            proc(11, Started, 2_000, "node.exe", 20, Some(40)),
+            proc(10, Main, 1_000, "pwsh.exe", 10, Some(90)),
+            proc(15, Support, 900, "conhost.exe", 3, Some(6)),
+            proc(12, Started, 3_000, "node.exe", 5, Some(8)),
+        ])
     }
 
     #[test]
-    fn sums_the_shell_and_everything_under_it() {
-        let d = detail(&table(), 10, 64).unwrap();
-        assert_eq!(d.processes, 4);
-        assert_eq!(d.started_at_ms, Some(1_000));
-        assert_eq!(d.mem_private, Some(10 + 20 + 5 + 1));
-        assert_eq!(d.mem_commit, Some(90 + 40 + 8 + 2));
-        assert_eq!(d.memory_metric, agentmux_procstats::MEMORY_METRIC);
+    fn sums_every_process_of_the_task() {
+        let d = from_task(&tracked(), "private working set");
+        assert_eq!(d.processes, 5);
+        assert_eq!(d.started_at_ms, Some(1_000), "the shell's start");
+        assert_eq!(d.mem_private, Some(1 + 20 + 10 + 3 + 5));
+        assert_eq!(d.mem_commit, Some(2 + 40 + 90 + 6 + 8));
+        assert_eq!((d.cpu, d.mem_resident, d.unmeasured), (None, None, None));
+        assert_eq!(d.memory_metric, "private working set");
     }
 
     #[test]
     fn names_the_shell_first_then_the_most_numerous() {
-        let d = detail(&table(), 10, 64).unwrap();
+        let d = from_task(&tracked(), "");
         let names: Vec<(&str, u32)> = d.names.iter().map(|n| (n.name.as_str(), n.count)).collect();
-        assert_eq!(names, [("pwsh", 1), ("node", 2), ("git", 1)]);
+        // Ties keep the task's order: git before conhost.
+        assert_eq!(names, [("pwsh", 1), ("node", 2), ("git", 1), ("conhost", 1)]);
     }
 
     #[test]
     fn a_figure_no_process_reports_is_absent_not_zero() {
-        let d = detail(&table(), 20, 64).unwrap();
+        let d = from_task(&task(vec![proc(20, TowerProcessRole::Main, 1_500, "bash", 7, None)]), "");
         assert_eq!(d.processes, 1);
         assert_eq!(d.mem_private, Some(7));
         assert_eq!(d.mem_commit, None, "committed memory is Windows-only");
+        let empty = from_task(&task(vec![]), "");
+        assert_eq!((empty.processes, empty.mem_private, empty.names.len()), (0, None, 0));
     }
 
     #[test]
-    fn stops_at_the_badges_cap() {
-        let d = detail(&table(), 10, 2).unwrap();
-        assert_eq!(d.processes, 2);
-    }
-
-    #[test]
-    fn an_exited_shell_has_no_detail() {
-        assert_eq!(detail(&table(), 99, 64), None);
+    fn a_task_without_its_shell_has_no_start_and_sorts_every_name() {
+        use TowerProcessRole::Support;
+        let d = from_task(
+            &task(vec![
+                proc(30, Support, 5, "git", 1, None),
+                proc(31, Support, 6, "node", 1, None),
+                proc(32, Support, 7, "node", 1, None),
+            ]),
+            "",
+        );
+        assert_eq!(d.started_at_ms, None);
+        assert_eq!(d.names[0].name, "node");
     }
 
     #[test]
