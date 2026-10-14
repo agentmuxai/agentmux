@@ -3,8 +3,8 @@
 
 import { describe, expect, it, vi } from "vitest";
 import {
+    CATCH_UP_TURN_PLACEHOLDER_CONTENT,
     createMemoryReinjectionController,
-    HIDDEN_TURN_PLACEHOLDER_CONTENT,
     type ClaimAnswer,
     type ComposedDelivery,
 } from "./memory-reinjection-controller";
@@ -58,7 +58,8 @@ describe("catchUp: a fresh session on a quiet pane", () => {
 
         expect(t.claimFn).toHaveBeenCalledTimes(1);
         expect(t.composeCatchUp).toHaveBeenCalledWith("fresh_session", true);
-        expect(t.dispatchTurnStart).toHaveBeenCalledWith(HIDDEN_TURN_PLACEHOLDER_CONTENT, true);
+        // Hidden input, but a distinct marker: the reply is shown and a suggestion follows it.
+        expect(t.dispatchTurnStart).toHaveBeenCalledWith(CATCH_UP_TURN_PLACEHOLDER_CONTENT, true);
         expect(t.sendRpc).toHaveBeenCalledWith("memory + catch-up", "fb-1");
         // The point of a catch-up over a reinjection: the reply is shown.
         expect(t.controller.isHiding()).toBe(false);
@@ -194,6 +195,30 @@ describe("catchUp: the turn's lifetime", () => {
         fail = false;
         await t.controller.catchUp(null, "resumed");
         expect(t.sendRpc).toHaveBeenCalledTimes(2);
+    });
+
+    it("after a failed send lets the same outcome try again, and still owes the memory it claimed", async () => {
+        let fail = true;
+        const t = make({
+            entries: [{ label: "g1", source: "global", body: "global body", sizeBytes: 11 }],
+            sendRpc: async () => {
+                if (fail) throw new Error("send failed");
+            },
+        });
+        await t.controller.catchUp(RECENT, "fresh_session");
+        expect(t.dispatchTurnStartFailed).toHaveBeenCalledTimes(1);
+
+        // The hook stood down for the claim, so the memory goes out as a plain
+        // reinjection at the next quiet.
+        fail = false;
+        t.controller.maybeFireDeferred();
+        await vi.waitFor(() => expect(t.sendRpc).toHaveBeenCalledTimes(2));
+        expect(t.sendRpc.mock.calls[1][0]).toContain("global body");
+        t.controller.onSessionEnd();
+
+        // And the outcome itself is not spent: a second sighting catches up.
+        await t.controller.catchUp(RECENT, "fresh_session");
+        expect(t.composeCatchUp).toHaveBeenCalledTimes(2);
     });
 
     it("drops a fresh-session catch-up when a turn starts while srv is composing", async () => {

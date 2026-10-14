@@ -90,6 +90,20 @@ describe("useNextPromptSuggestion — hidden-turn suppression (reagentx P0, PR #
         dispose();
     });
 
+    it("DOES call it after a catch-up turn: its input is hidden but its reply, with suggested next steps, is shown", async () => {
+        const { setPhase, bumpTurnEnded, dispose } = setup();
+
+        setPhase({ kind: "Submitting", submittedAt: 1, pendingContent: "[agentmux: catch-up]", hidden: true });
+        await Promise.resolve();
+        setPhase({ kind: "Done", outcome: "completed", finishedAt: 2 });
+        bumpTurnEnded();
+        await Promise.resolve();
+        await Promise.resolve();
+
+        expect(hub.nextPromptSuggestion).toHaveBeenCalledTimes(1);
+        dispose();
+    });
+
     it("still calls NextPromptSuggestionCommand normally for an ordinary (non-hidden) turn", async () => {
         const { setPhase, bumpTurnEnded, dispose } = setup();
 

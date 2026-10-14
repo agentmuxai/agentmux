@@ -104,6 +104,15 @@ export interface ComposedDelivery {
 export const HIDDEN_TURN_PLACEHOLDER_CONTENT = "[agentmux: hidden memory reinjection]";
 
 /**
+ * A catch-up turn's `TurnStart` content: as content-free as the reinjection's,
+ * but a distinct value, because the turn is hidden only in its input. Its reply
+ * is the agent's account of where it stands, so the composer's next-prompt
+ * suggestion still follows it (`useNextPromptSuggestion.ts`), which it skips
+ * after a fully hidden reinjection.
+ */
+export const CATCH_UP_TURN_PLACEHOLDER_CONTENT = "[agentmux: catch-up]";
+
+/**
  * srv's answer to a claim. `foreign`: the event was another block's (a
  * compaction this block's CLI did not write), not the hook's, so a catch-up
  * turn has no business here either.
@@ -237,6 +246,8 @@ interface DeferredTrigger {
     memory: boolean;
     /** A catch-up only: wait out a turn that starts (a manual compaction); otherwise drop. */
     canDefer: boolean;
+    /** The once-per-event keys this catch-up marked seen, released if its send fails. */
+    seenKeys: string[];
 }
 
 /** Boundary uuids a controller remembers, to ignore one seen twice. */
@@ -361,13 +372,18 @@ export function createMemoryReinjectionController(opts: MemoryReinjectionControl
         }
         pendingNode = composed.node ?? null;
         catchingUp = true;
-        opts.dispatchTurnStart(HIDDEN_TURN_PLACEHOLDER_CONTENT, true);
+        opts.dispatchTurnStart(CATCH_UP_TURN_PLACEHOLDER_CONTENT, true);
         try {
             await opts.sendRpc(composed.text, composed.deliveryId);
         } catch {
             catchingUp = false;
             pendingNode = null;
             opts.dispatchTurnStartFailed();
+            // The event was not caught up after all: let a second sighting of it
+            // try again, and still deliver any memory it claimed (the hook stood
+            // down for the claim), as the plain reinjection, at the next quiet.
+            for (const key of t.seenKeys) seenBoundaries.delete(key);
+            if (t.claimed && t.memory) deferred = { ...t, catchUp: false };
         }
     }
 
@@ -449,7 +465,7 @@ export function createMemoryReinjectionController(opts: MemoryReinjectionControl
         if (hiding || catchingUp) return; // re-entrancy guard — see doc comment
         if (deferred !== undefined) return; // already have one queued — first wins, arbitrary but simple
 
-        const t: DeferredTrigger = { frameTimestamp, reason, boundaryUuid, claimed: false, catchUp: false, memory: true, canDefer: true };
+        const t: DeferredTrigger = { frameTimestamp, reason, boundaryUuid, claimed: false, catchUp: false, memory: true, canDefer: true, seenKeys: [] };
         // A compaction is claimed now, not when it fires: the SessionStart
         // hook delivered moments ago, inside srv's claim window. Claimed at
         // the end of a long turn, that window has passed and both would send.
@@ -478,10 +494,17 @@ export function createMemoryReinjectionController(opts: MemoryReinjectionControl
         catchUpOpts: { boundaryUuid?: string | null; deferIfBusy?: boolean } = {},
     ): Promise<void> {
         const boundaryUuid = catchUpOpts.boundaryUuid ?? null;
-        if (boundaryUuid && !firstSighting(boundaryUuid)) return; // once per boundary
+        const seenKeys: string[] = [];
+        if (boundaryUuid) {
+            if (!firstSighting(boundaryUuid)) return; // once per boundary
+            seenKeys.push(boundaryUuid);
+        }
         // One per fresh session: the same outcome seen twice (a re-read, a second
         // writer) must not start a second turn.
-        if (reason === "fresh_session" && frameTimestamp && !firstSighting(`fresh:${frameTimestamp}`)) return;
+        if (reason === "fresh_session" && frameTimestamp) {
+            if (!firstSighting(`fresh:${frameTimestamp}`)) return;
+            seenKeys.push(`fresh:${frameTimestamp}`);
+        }
         if (hiding || catchingUp || deferred !== undefined) return;
         // An outcome that is not recent (a re-read after a reconnect, a line
         // another writer appended) is not a session starting now.
@@ -500,6 +523,7 @@ export function createMemoryReinjectionController(opts: MemoryReinjectionControl
             catchUp: true,
             memory: reason !== "resumed",
             canDefer: catchUpOpts.deferIfBusy === true,
+            seenKeys,
         };
         // A compaction is claimed now, not when the turn fires: the hook
         // delivered moments ago, inside srv's claim window, and a manual
