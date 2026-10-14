@@ -1,6 +1,6 @@
 # Agent pane: a tool call's hover peek only on its line, and "Open in editor" on Markdown file previews
 
-**Status:** implemented (#4680).
+**Status:** implemented (#4680; §3.1 in #4868).
 **Date:** 2026-10-11 | **Version:** main at `cc94d15e0`.
 **Requested by:** repo owner: "in the agent pane, when hovering over tool calls (like bash) we want to display the popover only hovering over the actual tool call line. the expandable result/preview should not show the hover. this is so we can see it but also select it. the hover over the tool preview blocks that. Additionally, on the top right of md file previews, add a button to the top right which opens it in an editor pane (with collapsed tree)." Then: "if an editor is open and not minimized in the same window tab, then open the doc in another document tab in the same editor pane tab. If the editor is not on the same window tab, or is minimized or not shown, open a new editor pane", and "a button for all tools (md previews and normal, so that md's have 2 buttons, and normal have 1) … an extend/shorten button, that makes the preview 3x the height (or revert back to original preview height)."
 **Author:** Loap.
