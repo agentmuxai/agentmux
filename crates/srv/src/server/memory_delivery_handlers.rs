@@ -229,6 +229,13 @@ impl DeliveryState {
     /// stdout here wrote (another srv instance's) is not this block's either.
     /// A hook delivery from before the block's previous boundary was that
     /// compaction's, not this one's.
+    ///
+    /// Dated by when this srv read the boundary, like [`Self::claim_event`]:
+    /// a hook delivery finished after it is this compaction's however late the
+    /// claim comes, so a pane that reads the boundary minutes later (a
+    /// reconnect, a remount reading the gap) doesn't deliver the memory twice
+    /// (SPEC_CONTEXT_DELIVERY_2026_09_30.md §9 B2). The hook's first part can
+    /// reach srv before the stdout reader sees the boundary, hence the slack.
     fn claim_boundary(&mut self, block_id: &str, reason: Reason, boundary_uuid: Option<&str>, now: i64) -> FallbackClaim {
         let mut since = i64::MIN;
         if let Some(uuid) = boundary_uuid {
@@ -237,6 +244,12 @@ impl DeliveryState {
             };
             if let Some((_, _, at)) = self.boundary_origins.range(..idx).rev().find(|(_, b, _)| b == block_id) {
                 since = *at;
+            }
+            let read_at = self.boundary_origins[idx].2;
+            let this_compaction = since.max(read_at.saturating_sub(EVENT_SLACK_MS));
+            let hook_finished = self.completed.get(&(block_id.to_string(), reason)).is_some_and(|at| *at > this_compaction);
+            if hook_finished && !self.fallback_claimed(block_id, reason) {
+                return FallbackClaim::Skip;
             }
         }
         self.claim_fallback(block_id, reason, now, since)
@@ -1153,6 +1166,51 @@ mod tests {
         st.record_boundary("u2", "b", NOW - 100);
         assert_eq!(st.claim_boundary("b", Reason::Compact, Some("u1"), NOW), FallbackClaim::Skip);
         assert_eq!(st.claim_boundary("b", Reason::Compact, Some("u2"), NOW), FallbackClaim::Deliver);
+    }
+
+    fn compact_key(block: &str) -> DeliveryKey {
+        DeliveryKey { block_id: block.into(), session_id: "s".into(), reason: Reason::Compact }
+    }
+
+    #[test]
+    fn a_boundary_claimed_long_after_the_hook_delivered_it_stands_down() {
+        // The pane read the boundary late (a reconnect, a remounted pane
+        // reading the gap): the hook's delivery is past the claim window and
+        // pruned, but it finished after this boundary (SPEC_CONTEXT_DELIVERY
+        // §9 B2).
+        let mut st = DeliveryState::default();
+        st.record_boundary("u1", "b", NOW);
+        st.note_completed(&compact_key("b"), NOW + 300);
+        let late = NOW + 10 * 60_000;
+        st.prune(late);
+        assert_eq!(st.claim_boundary("b", Reason::Compact, Some("u1"), late), FallbackClaim::Skip);
+    }
+
+    #[test]
+    fn a_late_boundary_claim_counts_a_delivery_composed_just_before_srv_read_the_boundary() {
+        // The hook's first part can reach srv before the stdout reader sees
+        // the boundary line.
+        let mut st = DeliveryState::default();
+        st.record_boundary("u1", "b", NOW);
+        st.note_completed(&compact_key("b"), NOW - 2_000);
+        assert_eq!(st.claim_boundary("b", Reason::Compact, Some("u1"), NOW + 10 * 60_000), FallbackClaim::Skip);
+    }
+
+    #[test]
+    fn an_earlier_compactions_finished_delivery_does_not_cover_a_late_claim() {
+        let mut st = DeliveryState::default();
+        st.record_boundary("u1", "b", NOW);
+        st.note_completed(&compact_key("b"), NOW + 300);
+        st.record_boundary("u2", "b", NOW + 3_600_000);
+        assert_eq!(st.claim_boundary("b", Reason::Compact, Some("u2"), NOW + 3_700_000), FallbackClaim::Deliver);
+    }
+
+    #[test]
+    fn a_finished_delivery_is_per_block() {
+        let mut st = DeliveryState::default();
+        st.record_boundary("u1", "b", NOW);
+        st.note_completed(&compact_key("other"), NOW + 300);
+        assert_eq!(st.claim_boundary("b", Reason::Compact, Some("u1"), NOW + 10 * 60_000), FallbackClaim::Deliver);
     }
 
     #[test]
