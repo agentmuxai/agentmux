@@ -1,7 +1,7 @@
 # SPEC: `task dev` removes its old builds once nothing runs from them
 
 **Date:** 2026-10-14
-**Status:** implemented, in the PR that adds this file.
+**Status:** implemented — in PR #4856.
 **Author:** AgentA (Area54), at the operator's request
 **Affects:** `Taskfile.yml` (`dev:serve`), [`scripts/prune-dev-builds.sh`](../../scripts/prune-dev-builds.sh) (new), [`scripts/prune-dev-builds.test.sh`](../../scripts/prune-dev-builds.test.sh) (new), [`.github/workflows/ci-pr.yml`](../../.github/workflows/ci-pr.yml)
 
