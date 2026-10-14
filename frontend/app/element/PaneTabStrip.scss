@@ -583,12 +583,14 @@
 // that once corrected that scaled with zoom and display scaling while the
 // font's error didn't, so it ended up high (up to ~3.7 device px at zoom 0.85
 // and 2x). Measured in docs/investigations/RCA_PANE_TAB_PLUS_OFF_CENTER_2026_10_14.md.
+// 10px with 2px bars, both even like the 28px button, so at zoom 1 the box and
+// its bars start on whole pixels (a 9px box began 9.5px down, a half pixel).
 .pane-tab-strip-add-glyph {
     display: block;
     flex: 0 0 auto;
-    width: 9px;
-    height: 9px;
+    width: 10px;
+    height: 10px;
     background:
-        linear-gradient(currentColor, currentColor) center / 100% 1.5px no-repeat,
-        linear-gradient(currentColor, currentColor) center / 1.5px 100% no-repeat;
+        linear-gradient(currentColor, currentColor) center / 100% 2px no-repeat,
+        linear-gradient(currentColor, currentColor) center / 2px 100% no-repeat;
 }
