@@ -425,9 +425,9 @@ impl Controller for MspController {
             }
             let mut inner = self.inner.lock().unwrap();
             let Some(tx) = inner.stdin_tx.clone() else {
-                // Not running: kept for the next start's session.
-                let _ = inner.session.prompt(&message);
-                return Err("Muse Code is not running — message queued for next start()".to_string());
+                // Not running: not kept. The caller starts a turn, which
+                // sends the message once the process is up (delivery.rs).
+                return Err("Muse Code is not running".to_string());
             };
             match inner.session.prompt(&message)? {
                 PromptOutcome::Send { id, line } => {

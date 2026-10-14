@@ -304,11 +304,14 @@ fn the_controller_is_an_msp_session_agent() {
 }
 
 #[test]
-fn a_message_to_a_stopped_agent_waits_for_its_next_start() {
+fn a_message_to_a_stopped_agent_is_refused_and_not_kept() {
+    // Kept, it would be sent twice: the delivery path starts a turn that
+    // sends the same message again.
     let c = controller();
     let err = c.send_input(BlockInputUnion::data(b"hello".to_vec()), None).unwrap_err();
-    assert!(err.contains("queued"), "{err}");
-    assert!(c.inner.lock().unwrap().session.turn_active());
+    assert!(err.contains("not running"), "{err}");
+    // Nothing waits for the session, so the turn's own copy is the only one.
+    assert!(!c.inner.lock().unwrap().session.turn_active());
 }
 
 #[test]
