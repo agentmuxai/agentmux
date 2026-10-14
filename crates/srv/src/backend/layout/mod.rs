@@ -7,11 +7,18 @@
 //! Ports the 11 pure-ish action handlers from
 //! `frontend/layout/lib/layoutTree.ts` to Rust. These functions take
 //! `&mut LayoutNode` (the tree root) and operation params; they have no
-//! I/O and no side effects. The reducer arms (Phase 5) will call these.
+//! I/O and no side effects.
 //!
 //! Test oracle: the 30 tests in `frontend/layout/tests/layoutTree.test.ts`
 //! (shipped in PR #686) — the Rust implementations must produce identical
 //! state transitions for identical inputs.
+//!
+//! The structural ops (insert, move, swap, resize, replace, split, balance)
+//! have no reducer arm: nothing produced those commands. They stay, with
+//! their oracle tests, for the layout-intents work in
+//! `docs/specs/SPEC_STRONG_REDUCER_AUTHORITY_LAYOUT_2026_06_30.md`; outside
+//! tests they are unused, hence the `dead_code` allowance.
+#![cfg_attr(not(test), allow(dead_code))]
 
 use agentmux_common::{FlexDirection, LayoutNode, ResizeOp, SplitPosition, StackMovePosition};
 use uuid::Uuid;

@@ -329,6 +329,7 @@ impl AgentMuxHandler {
                 label: label.clone(),
                 browser: browser.clone(),
                 kind,
+                registered_at: std::time::Instant::now(),
             },
         );
 

@@ -23,16 +23,51 @@ pub(super) fn handle_begin_drain(state: &mut HostState, reason: QuitReason) -> D
     }
 }
 
-pub(super) fn handle_confirm_drained(state: &mut HostState) -> DispatchOutput {
-    if !matches!(state.quit_state, QuitState::Draining { .. }) {
-        return DispatchOutput::default(); // not draining; idempotent
+/// `SetStartHiddenHeld`: a login start began or stopped holding "main"
+/// hidden. Applies the crossing (if any) to `background_unattended` under this
+/// lock and reports it via `background_attention`, which `host_dispatch` turns
+/// into the audit-log entry `start_hidden` used to send itself.
+pub(super) fn handle_set_start_hidden_held(state: &mut HostState, held: bool) -> DispatchOutput {
+    state.start_hidden_held = held;
+    let crossing = start_hidden_attention_transition(
+        held,
+        state.background_service_enabled,
+        !matches!(state.quit_state, QuitState::Running),
+        state.background_unattended,
+        count_live_user_windows(state),
+    );
+    if let Some(now_unattended) = crossing {
+        state.background_unattended = now_unattended;
     }
-    state.quit_state = QuitState::Quit;
-    let v = state.bump_version();
     DispatchOutput {
-        events: vec![HostEvent::QuitReady { version: v }],
+        background_attention: crossing,
         ..Default::default()
     }
+}
+
+/// The attended/unattended crossing caused by a start-hidden hold changing.
+///
+/// Held: unattended, whatever the mode — a login start's hidden "main" is an
+/// unattended period even without background-service mode (that is how it was
+/// always recorded). Released: back to the window-count rule, which only says
+/// "unattended" in background-service mode with no live window and no quit in
+/// progress. `None` when the flag already reads that way (no crossing).
+///
+/// Pure, with the live count as a parameter, for the same reason as
+/// `background_attention_transition`: tests can't register a live window.
+pub(crate) fn start_hidden_attention_transition(
+    held: bool,
+    background_service_enabled: bool,
+    quitting: bool,
+    currently_unattended: bool,
+    live_user_windows: usize,
+) -> Option<bool> {
+    let now_unattended =
+        held || (background_service_enabled && !quitting && live_user_windows == 0);
+    if now_unattended == currently_unattended {
+        return None;
+    }
+    Some(now_unattended)
 }
 
 // ── Level-triggered quit reconciliation ──────────────────────────────────────

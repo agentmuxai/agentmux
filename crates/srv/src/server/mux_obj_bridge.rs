@@ -436,27 +436,24 @@ async fn dispatch_event(event: Event, mstore: Arc<Store>, event_bus: Arc<EventBu
         }
 
         // ----- Layout (Phase 2 — partial) -----
-        // Focused/Magnified + Cleared/TreeReplaced are now persisted by
+        // Focused/Magnified + TreeReplaced are persisted by
         // `apply_event_to_mstore` (persist_subscriber.rs), so the bridge
         // can safely re-read LayoutState and broadcast it: the HTTP RPC
         // path applies SQLite synchronously before publishing the event
         // (see the post-event-state guarantee above), so the read sees
         // post-event tree state.
         //
-        // The remaining tree events ARE persisted by the subscriber now
-        // (SPEC_864 phases 2-5, #1970-#1981 — wcore-direct layout writes
-        // are retired; this comment predated that migration). They are
-        // still deliberately NOT bridged, but for a different reason than
-        // the original wcore-direct race: see the srv-IPC-path caveat on
-        // the granular-events note below. They remain covered by their
-        // handlers' existing `success_with_updates(...)` response
-        // broadcasts (Codex P2 on PR #861).
+        // `LayoutNodeDeleted` is persisted too but deliberately NOT bridged:
+        // on the srv-IPC path `srv_ipc/server.rs` publishes without a
+        // synchronous apply, so a re-read could race ahead of the persist
+        // subscriber and emit pre-event state (#1883). Its handlers'
+        // `success_with_updates(...)` responses cover it (#861).
         Event::FocusedNodeChanged { tab_id, .. }
         | Event::MagnifiedNodeChanged { tab_id, .. } => {
             emit_layout_for_tab(&mstore, &event_bus, tab_id, "Focused/MagnifiedNodeChanged").await;
         }
-        Event::LayoutCleared { tab_id, .. } | Event::LayoutTreeReplaced { tab_id, .. } => {
-            emit_layout_for_tab(&mstore, &event_bus, tab_id, "LayoutCleared/TreeReplaced").await;
+        Event::LayoutTreeReplaced { tab_id, .. } => {
+            emit_layout_for_tab(&mstore, &event_bus, tab_id, "LayoutTreeReplaced").await;
         }
         // Without this, a backend-queued layout action reaches a frontend
         // ONLY if that frontend happens to construct its `LayoutModel`
@@ -484,18 +481,6 @@ async fn dispatch_event(event: Event, mstore: Arc<Store>, event_bus: Arc<EventBu
         Event::LayoutBackendActionsQueued { tab_id, .. } => {
             emit_layout_for_tab(&mstore, &event_bus, tab_id, "LayoutBackendActionsQueued").await;
         }
-        // The 7 granular structural events (LayoutNodeMoved/…/InsertedAtIndex)
-        // are persisted by the subscriber (they carry `new_tree`), but are
-        // deliberately NOT bridged here. `emit_layout_for_tab` re-reads
-        // LayoutState, which is only guaranteed post-event on the HTTP-RPC
-        // path (synchronous apply before publish). On the srv-IPC path,
-        // `srv_ipc/server.rs` publishes to `events_tx` without a synchronous
-        // apply, so a bridge broadcast could race ahead of the persist
-        // subscriber and emit pre-event state (codex P2 on #1883 — the IPC-path
-        // caveat documented above). These events have no production dispatcher
-        // yet; their bridge projection lands in the Phase-4 frontend
-        // intent-flip, where the path is HTTP-RPC (synchronous, race-free).
-
         // Saga lifecycle, launcher-domain events, OS facts, etc. — not
         // StoreObj changes. The catch-all keeps the bridge future-proof
         // for new event variants the reducer may add.

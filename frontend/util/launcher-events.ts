@@ -185,8 +185,7 @@ export function launcherEventDedupStats(): { tracked: number; suppressed: number
 
 /**
  * Reset the dedup cache. Test-only by convention — the `__` prefix is
- * the project's marker for non-production APIs (see `__snapshot` /
- * `__resetState` in `app/store/launcher-event-reducer.ts`). Production
+ * the project's marker for non-production APIs. Production
  * code MUST NOT call this; the only legitimate cache reset is the
  * launcher-restart sentinel inside `shouldDispatchLauncherEvent`.
  */

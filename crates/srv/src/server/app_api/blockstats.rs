@@ -5,15 +5,17 @@
 //! (`backend::blockstats_detail`). The window's, not an agent API: a
 //! connection registered as an agent is refused.
 //!
-//! - A local pane: its processes here, from one snapshot.
+//! - A local pane: its processes here, the same Tower task the badge counts
+//!   (`sampler::panes::tower_snapshot`).
 //! - A remote pane (SSH, WSL): its processes on that machine, asked of
 //!   AgentMux's helper there, and the machine's name and address.
 
 use super::*;
 use super::tower_pane::not_an_agent_api;
 use crate::backend::blockcontroller::durable_ssh::META_KEY_SESSION_ID;
-use crate::backend::blockcontroller::process_tree::MAX_PIDS_PER_BLOCK;
 use crate::backend::blockstats_detail;
+use crate::backend::sampler::panes;
+use crate::backend::tower_sampler::{block_label, BlockLabel};
 use crate::backend::remote::address as remote_address;
 use crate::backend::remote::ConnTarget;
 
@@ -40,16 +42,23 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let (connection, remote) = tokio::join!(connection(&conn), remote(&conn, &req.block_id, &session));
                 return Ok(BlockStatsDetail { local: None, connection, remote: Some(remote) });
             }
-            let root = blockcontroller::pidregistry::get_all()
-                .into_iter()
-                .find(|(id, _)| *id == req.block_id)
-                .map(|(_, pid)| pid)
-                .ok_or("no process for this pane")?;
-            // The process table: off the async workers.
+            // The process table and the store: off the async workers.
+            let block_id = req.block_id;
             let local = tokio::task::spawn_blocking(move || {
-                let snap = agentmux_procstats::snapshot().map_err(|e| format!("blockstats.detail: {e}"))?;
-                blockstats_detail::detail(&snap, root, MAX_PIDS_PER_BLOCK)
-                    .ok_or_else(|| "the pane's shell has exited".to_string())
+                // Named as the badge names panes; the pane asked about is
+                // grouped even if the store doesn't know it.
+                let labels = |id: &str| {
+                    block_label(&mstore, id).or_else(|| {
+                        (id == block_id).then(|| BlockLabel { label: "Terminal".to_string(), agent: false })
+                    })
+                };
+                let snap = panes::tower_snapshot(labels).map_err(|e| format!("blockstats.detail: {e}"))?;
+                let task = snap
+                    .tasks
+                    .iter()
+                    .find(|t| t.id == block_id && t.kind != TowerTaskKind::Agentmux)
+                    .ok_or("no process for this pane")?;
+                Ok::<_, String>(blockstats_detail::from_task(task, &snap.memory_metric))
             })
             .await
             .map_err(|e| format!("blockstats.detail: {e}"))??;
@@ -115,13 +124,33 @@ mod tests {
         (resp.data.unwrap_or_default(), resp.error)
     }
 
+    /// A process that lives long enough to be measured.
+    fn sleeper() -> std::process::Child {
+        let mut cmd = if cfg!(windows) {
+            let mut c = std::process::Command::new("ping");
+            c.args(["-n", "30", "127.0.0.1"]);
+            c
+        } else {
+            let mut c = std::process::Command::new("sleep");
+            c.arg("30");
+            c
+        };
+        cmd.stdout(std::process::Stdio::null()).spawn().expect("spawn a stand-in shell")
+    }
+
     #[tokio::test(flavor = "multi_thread")]
-    async fn a_registered_pane_gets_its_process_tree() {
-        // This test process stands in for the pane's shell.
+    async fn a_registered_pane_gets_its_tower_task() {
+        // A child stands in for the pane's shell: this test process is
+        // another test's (`sampler::loop_tests`), and one process is in one task.
+        let mut shell = sleeper();
         let block_id = "blockstats-detail-test-block";
-        blockcontroller::pidregistry::register(block_id, std::process::id());
+        blockcontroller::pidregistry::register(block_id, shell.id());
+        // Past Tower's reuse window, so the sample sees the new pane.
+        tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
         let (data, err) = call(json!({ "block_id": block_id }), "").await;
         blockcontroller::pidregistry::unregister(block_id);
+        let _ = shell.kill();
+        let _ = shell.wait();
         assert_eq!(err, "");
         let d: BlockStatsDetail = serde_json::from_value(data).unwrap();
         assert!(d.connection.is_none() && d.remote.is_none(), "{d:?}");

@@ -2279,64 +2279,14 @@ async fn update_object_layout_push_single_write_and_coherent_reducer() {
     assert_eq!(rec.focused_node_id, "n-root");
 }
 
-/// Reagent P1 (#1970 review 3) — the owned-row PARSE-FAILURE fallback must
-/// keep the pre-Phase-2 Option-A behavior: legacy wholesale write PLUS the
-/// focus/magnify reducer dispatch, so `TabRecord` focus state can't
-/// silently diverge on the degenerate branch.
-#[tokio::test]
-async fn update_object_layout_parse_failure_falls_back_with_focus_dispatch() {
-    use agentmux_common::ipc::{Command, Event};
-    use crate::backend::obj::Tab;
+/// POST one `object.UpdateObject` call; returns the response JSON.
+async fn post_update_object(state: AppState, obj: serde_json::Value) -> serde_json::Value {
+    post_service(state, "object", "UpdateObject", serde_json::json!([obj])).await
+}
 
-    let state = test_state();
-    let mstore = state.mstore.clone();
-    let srv_state = state.srv_state.clone();
-
-    async fn dispatch_apply(state: &AppState, cmd: Command) -> Vec<Event> {
-        let events = crate::server::service::dispatch_to_reducer(state, cmd).await;
-        for ev in &events {
-            crate::persist_subscriber::apply_event_to_mstore(ev, &state.mstore).unwrap();
-        }
-        events
-    }
-    let ws_evs = dispatch_apply(&state, Command::CreateWorkspace { name: "ws".into() }).await;
-    let ws_id = ws_evs
-        .iter()
-        .find_map(|e| match e {
-            Event::WorkspaceCreated { workspace_id, .. } => Some(workspace_id.clone()),
-            _ => None,
-        })
-        .unwrap();
-    let tab_evs = dispatch_apply(
-        &state,
-        Command::CreateTab {
-            workspace_id: ws_id,
-            name: "t".into(),
-        },
-    )
-    .await;
-    let tab_id = tab_evs
-        .iter()
-        .find_map(|e| match e {
-            Event::TabCreated { tab_id, .. } => Some(tab_id.clone()),
-            _ => None,
-        })
-        .unwrap();
-    let layout_oid = mstore.get::<Tab>(&tab_id).unwrap().unwrap().layoutstate;
-
-    // rootnode.id must be a string — a numeric id fails the typed parse and
-    // forces the legacy fallback branch.
-    let push = serde_json::json!({
-        "service": "object",
-        "method": "UpdateObject",
-        "args": [{
-            "otype": "layout",
-            "oid": layout_oid,
-            "rootnode": { "id": 12345 },
-            "focusednodeid": "n-fallback"
-        }]
-    });
-    let app = build_router(state);
+/// POST one `/agentmux/service` call; returns the response JSON.
+async fn post_service(state: AppState, service: &str, method: &str, args: serde_json::Value) -> serde_json::Value {
+    let push = serde_json::json!({ "service": service, "method": method, "args": args });
     let req = Request::builder()
         .uri("/agentmux/service")
         .method("POST")
@@ -2344,33 +2294,140 @@ async fn update_object_layout_parse_failure_falls_back_with_focus_dispatch() {
         .header("Content-Type", "application/json")
         .body(Body::from(push.to_string()))
         .unwrap();
-    let resp = app.oneshot(req).await.unwrap();
+    let resp = build_router(state).oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
-    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
-        .await
-        .unwrap();
-    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    assert!(
-        json["success"].as_bool().unwrap_or(false),
-        "fallback push must still succeed: {}",
-        json["error"]
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    serde_json::from_slice(&body).unwrap()
+}
+
+/// A workspace + tab created through the reducer (and persisted), as
+/// bootstrap would leave them. Returns `(workspace_id, tab_id)`.
+async fn seed_reducer_workspace_and_tab(state: &AppState) -> (String, String) {
+    use agentmux_common::ipc::{Command, Event};
+    let events =
+        crate::server::service::dispatch_to_reducer(state, Command::CreateWorkspace { name: "ws".into() }).await;
+    let mut ws_id = None;
+    for ev in &events {
+        crate::persist_subscriber::apply_event_to_mstore(ev, &state.mstore).unwrap();
+        if let Event::WorkspaceCreated { workspace_id, .. } = ev {
+            ws_id = Some(workspace_id.clone());
+        }
+    }
+    let ws_id = ws_id.unwrap();
+    let events = crate::server::service::dispatch_to_reducer(
+        state,
+        Command::CreateTab { workspace_id: ws_id.clone(), name: "t".into() },
+    )
+    .await;
+    let mut tab_id = None;
+    for ev in &events {
+        crate::persist_subscriber::apply_event_to_mstore(ev, &state.mstore).unwrap();
+        if let Event::TabCreated { tab_id: t, .. } = ev {
+            tab_id = Some(t.clone());
+        }
+    }
+    (ws_id, tab_id.unwrap())
+}
+
+/// An owned layout row whose pushed rootnode fails the typed parse must not
+/// be written raw (the reducer's copy would go stale and the next structural
+/// edit would clobber it). The reducer's tree stays, the client slices
+/// apply, and SQLite matches the reducer.
+#[tokio::test]
+async fn update_object_layout_parse_failure_keeps_reducer_tree() {
+    use crate::backend::obj::{LayoutState, Tab};
+
+    let state = test_state();
+    let mstore = state.mstore.clone();
+    let srv_state = state.srv_state.clone();
+    let (_ws_id, tab_id) = seed_reducer_workspace_and_tab(&state).await;
+    let layout_oid = mstore.get::<Tab>(&tab_id).unwrap().unwrap().layoutstate;
+    srv_state.lock().await.blocks.insert(
+        "b-1".to_string(),
+        crate::state::BlockRecord { block_id: "b-1".to_string(), tab_id: tab_id.clone() },
     );
 
-    // Row was written wholesale (raw JSON survives even though typed parse failed).
-    let raw = mstore
-        .get_raw("layout", &layout_oid)
-        .unwrap()
-        .expect("row present");
-    assert_eq!(raw["focusednodeid"], "n-fallback");
-    assert_eq!(raw["rootnode"]["id"], 12345);
+    let good = post_update_object(
+        state.clone(),
+        serde_json::json!({
+            "otype": "layout",
+            "oid": layout_oid,
+            "rootnode": { "id": "n-root", "data": { "blockId": "b-1" } },
+        }),
+    )
+    .await;
+    assert!(good["success"].as_bool().unwrap_or(false), "seed push failed: {}", good["error"]);
 
-    // The focus slice still reached the reducer (pre-Phase-2 Option-A behavior).
+    // rootnode.id must be a string — a numeric id fails the typed parse.
+    let json = post_update_object(
+        state.clone(),
+        serde_json::json!({
+            "otype": "layout",
+            "oid": layout_oid,
+            "rootnode": { "id": 12345 },
+            "focusednodeid": "n-root"
+        }),
+    )
+    .await;
+    assert!(json["success"].as_bool().unwrap_or(false), "push must still succeed: {}", json["error"]);
+    assert_eq!(
+        json["updates"][0]["obj"]["rootnode"]["id"], "n-root",
+        "the reply carries the stored row so the pusher resyncs: {json}"
+    );
+
+    let layout = mstore.get::<LayoutState>(&layout_oid).unwrap().unwrap();
+    assert_eq!(layout.rootnode.as_ref().unwrap().id, "n-root", "malformed tree not written");
+    assert_eq!(layout.focusednodeid, "n-root", "client slices still applied");
     let s = srv_state.lock().await;
     let rec = s.tabs.get(&tab_id).expect("reducer knows the tab");
-    assert_eq!(
-        rec.focused_node_id, "n-fallback",
-        "parse-failure fallback must still dispatch focus to the reducer"
-    );
+    assert_eq!(rec.rootnode, layout.rootnode, "reducer and SQLite agree");
+    assert_eq!(rec.focused_node_id, "n-root");
+}
+
+/// `MoveTabToWorkspace` relies on the reducer's last-tab guard and keeps
+/// its error text for callers.
+#[tokio::test]
+async fn move_tab_to_workspace_refuses_last_tab_with_the_same_error() {
+    let state = test_state();
+    let (src_ws, tab_id) = seed_reducer_workspace_and_tab(&state).await;
+    let (dst_ws, _) = seed_reducer_workspace_and_tab(&state).await;
+    let json = post_service(
+        state.clone(),
+        "workspace",
+        "MoveTabToWorkspace",
+        serde_json::json!([tab_id, src_ws, dst_ws]),
+    )
+    .await;
+    assert!(!json["success"].as_bool().unwrap_or(false), "last tab must stay: {json}");
+    assert_eq!(json["error"], "cannot move last tab out of workspace");
+    let s = state.srv_state.lock().await;
+    assert_eq!(s.workspaces[&src_ws].tab_ids, vec![tab_id]);
+}
+
+/// Workspace/tab/block/window rows carry reducer-owned fields; a whole-row
+/// `UpdateObject` must be refused and leave the row untouched.
+#[tokio::test]
+async fn update_object_refuses_reducer_owned_rows() {
+    use crate::backend::obj::{Tab, Workspace};
+
+    let state = test_state();
+    let mstore = state.mstore.clone();
+    let (ws_id, tab_id) = seed_reducer_workspace_and_tab(&state).await;
+
+    let mut ws_row = serde_json::to_value(mstore.get::<Workspace>(&ws_id).unwrap().unwrap()).unwrap();
+    ws_row["otype"] = "workspace".into();
+    ws_row["tabids"] = serde_json::json!([]);
+    let json = post_update_object(state.clone(), ws_row).await;
+    assert!(!json["success"].as_bool().unwrap_or(false), "workspace write must be refused: {json}");
+    assert!(json["error"].as_str().unwrap_or("").contains("owned by the srv reducer"), "got: {json}");
+    assert_eq!(mstore.get::<Workspace>(&ws_id).unwrap().unwrap().tabids, vec![tab_id.clone()]);
+
+    let mut tab_row = serde_json::to_value(mstore.get::<Tab>(&tab_id).unwrap().unwrap()).unwrap();
+    tab_row["otype"] = "tab".into();
+    tab_row["name"] = "renamed behind the reducer".into();
+    let json = post_update_object(state.clone(), tab_row).await;
+    assert!(!json["success"].as_bool().unwrap_or(false), "tab write must be refused: {json}");
+    assert_eq!(mstore.get::<Tab>(&tab_id).unwrap().unwrap().name, "t");
 }
 
 /// SPEC_864 Phase 3 — the seeders route through the reducer: after
@@ -2510,17 +2567,17 @@ async fn layout_seed_unknown_tab_errors() {
 /// SPEC_864 Phase 5, DoD #3 — `TabRecord.rootnode` (reducer) must equal
 /// `db_layout.rootnode` (persisted) after EVERY layout-mutating op, not
 /// just immediately post-seed. This is the capstone coherence check for
-/// the single-writer collapse: chains split → resize → swap → replace →
-/// Phase-4 queue-append → frontend-ack (LayoutSetTree) → delete-by-block
-/// (twice, ending in a root-orphan clear), asserting coherence after
-/// every step. A regression that only manifests a few ops into a real
-/// session (e.g. a granular arm's `new_tree` going stale, or the queue's
-/// append/replace semantics interacting badly) wouldn't be caught by a
-/// single seed-then-check test.
+/// the single-writer collapse: chains a tree-only push → Phase-4
+/// queue-append → frontend-ack (LayoutSetTree) → delete-by-block (three
+/// times, ending in a root-orphan clear), asserting tree AND focus/magnify
+/// coherence after every step. A regression that only manifests a few ops
+/// into a real session (e.g. a delete clearing focus in the reducer but
+/// not on disk, or the queue's append/replace semantics interacting badly)
+/// wouldn't be caught by a single seed-then-check test.
 #[tokio::test]
 async fn layout_stays_coherent_across_full_mutation_lifecycle() {
     use agentmux_common::ipc::{Command, Event};
-    use agentmux_common::{LayoutNode, LayoutNodeData, LayoutClientSlices, ResizeOp, SplitPosition};
+    use agentmux_common::{LayoutNode, LayoutNodeData, LayoutClientSlices};
     use crate::backend::obj::{LayoutState, Tab};
 
     let state = test_state();
@@ -2552,6 +2609,11 @@ async fn layout_stays_coherent_across_full_mutation_lifecycle() {
         assert_eq!(
             rec.rootnode, db_layout.rootnode,
             "TabRecord.rootnode != db_layout.rootnode after {step}"
+        );
+        assert_eq!(
+            (&rec.focused_node_id, &rec.magnified_node_id),
+            (&db_layout.focusednodeid, &db_layout.magnifiednodeid),
+            "focus/magnify differ between TabRecord and db_layout after {step}"
         );
     }
 
@@ -2597,7 +2659,7 @@ async fn layout_stays_coherent_across_full_mutation_lifecycle() {
     // layout-tree write in this lifecycle — see
     // docs/investigations/INVESTIGATION_LAYOUT_DEAD_SPACE_STALE_TREE_RESURRECTION_2026_07_08.md)
     // now prunes any leaf whose block_id isn't live.
-    for bid in ["b1", "b2", "b3", "b-fe"] {
+    for bid in ["b1", "b3", "b-fe"] {
         srv_state.lock().await.blocks.insert(
             bid.to_string(),
             crate::state::BlockRecord { block_id: bid.to_string(), tab_id: tab_id.clone() },
@@ -2614,62 +2676,22 @@ async fn layout_stays_coherent_across_full_mutation_lifecycle() {
         s.tabs[&tab_id].rootnode.as_ref().unwrap().id.clone()
     };
 
-    // Split: wrap root in a new group, adding a second leaf.
+    // Tree-only push (no slices), as the sagas send: a second pane.
     dispatch_apply(
         &state,
-        Command::LayoutSplitVertical {
+        Command::LayoutSetTree {
             tab_id: tab_id.clone(),
-            target_id: root_id.clone(),
-            new_node: leaf("n2", "b2"),
-            position: SplitPosition::After,
-            focus_after: true,
+            new_tree: Some(LayoutNode {
+                id: "root-two".into(),
+                children: vec![leaf(&root_id, "b1"), leaf("n3", "b3")],
+                ..Default::default()
+            }),
             correlation_id: String::new(),
+            slices: None,
         },
     )
     .await;
-    assert_coherent(&state, &tab_id, "split").await;
-
-    // Resize both leaves.
-    dispatch_apply(
-        &state,
-        Command::LayoutResizeNodes {
-            tab_id: tab_id.clone(),
-            ops: vec![
-                ResizeOp { node_id: root_id.clone(), size: 3.0 },
-                ResizeOp { node_id: "n2".into(), size: 7.0 },
-            ],
-            correlation_id: String::new(),
-        },
-    )
-    .await;
-    assert_coherent(&state, &tab_id, "resize").await;
-
-    // Swap the two leaves.
-    dispatch_apply(
-        &state,
-        Command::LayoutSwapNodes {
-            tab_id: tab_id.clone(),
-            node1_id: root_id.clone(),
-            node2_id: "n2".into(),
-            correlation_id: String::new(),
-        },
-    )
-    .await;
-    assert_coherent(&state, &tab_id, "swap").await;
-
-    // Replace the second leaf with a brand-new one (b2 -> b3).
-    dispatch_apply(
-        &state,
-        Command::LayoutReplaceNode {
-            tab_id: tab_id.clone(),
-            target_id: "n2".into(),
-            new_node: leaf("n3", "b3"),
-            focus_after: false,
-            correlation_id: String::new(),
-        },
-    )
-    .await;
-    assert_coherent(&state, &tab_id, "replace").await;
+    assert_coherent(&state, &tab_id, "tree-only push").await;
 
     // Phase 4: queue-append a backend action (does not touch the tree).
     let action = serde_json::json!([{

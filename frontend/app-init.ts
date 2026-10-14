@@ -58,7 +58,7 @@ import { installFloatingRedockHoverListener } from "@/app/workspace/redock-ghost
 import {
     seedKnownEntriesFromSnapshot,
     startLauncherEventReducer,
-} from "@/app/store/launcher-event-reducer";
+} from "@/app/store/launcher-event-store";
 import { startSingletonCrashRelease } from "@/app/store/singleton-modal";
 import { installFileDropController } from "@/app/drag/file-drop";
 import { installWindowDragEvents } from "@/app/drag/window-drag-events";
@@ -100,7 +100,7 @@ const RPC_TIMEOUT = 5_000; // 5 seconds for individual RPC calls
 /**
  * Initialize the window-instance-number atom and seed the reducer
  * with the current snapshot. Subsequent updates to the panel atoms
- * come from typed launcher events via `launcher-event-reducer.ts`.
+ * come from typed launcher events via `launcher-event-store.ts`.
  *
  * Phase B.7.3.3 — bespoke `window-instances-changed` channel and
  * its retry/fallback paths are gone. The init RPC's only job is to
