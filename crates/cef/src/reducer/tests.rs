@@ -1589,3 +1589,157 @@ fn attention_commands_are_not_quit_relevant() {
     assert!(!is_quit_relevant(&HostCommand::SeedBackgroundUnattended { unattended: true }));
     assert!(!is_quit_relevant(&HostCommand::SetStartHiddenHeld { held: true }));
 }
+
+// ── Outer-window HWND registry and drop-target classification (R5/R6) ────
+
+#[test]
+fn bind_window_hwnd_replaces_unless_asked_to_keep() {
+    let mut state = HostState::default();
+    let bind = |label: &str, hwnd: isize, replace: bool| HostCommand::BindWindowHwnd {
+        label: label.to_string(),
+        hwnd,
+        replace,
+    };
+    update(&mut state, bind("floating-a", 0x10, true));
+    assert_eq!(state.window_hwnds.get("floating-a"), Some(&0x10));
+    // A guess (capture_hwnd_for_label) never overwrites the creator's bind.
+    update(&mut state, bind("floating-a", 0x20, false));
+    assert_eq!(state.window_hwnds.get("floating-a"), Some(&0x10));
+    update(&mut state, bind("main", 0x30, false));
+    assert_eq!(state.window_hwnds.get("main"), Some(&0x30));
+    update(&mut state, bind("floating-a", 0x20, true));
+    assert_eq!(state.window_hwnds.get("floating-a"), Some(&0x20));
+}
+
+#[test]
+fn evict_window_hwnd_returns_the_binding_once() {
+    let mut state = HostState::default();
+    update(&mut state, HostCommand::BindWindowHwnd { label: "main".into(), hwnd: 0x30, replace: true });
+    let out = update(&mut state, HostCommand::EvictWindowHwnd { label: "main".into() });
+    assert_eq!(out.evicted_window_hwnd, Some(0x30));
+    assert!(out.events.is_empty());
+    let again = update(&mut state, HostCommand::EvictWindowHwnd { label: "main".into() });
+    assert_eq!(again.evicted_window_hwnd, None, "idempotent");
+}
+
+/// `state::window_hwnds`'s shim calls `update` directly; that is only the same
+/// as `host_dispatch` while these arms stay out of the quit reconcile.
+#[test]
+fn window_hwnd_commands_are_not_quit_relevant() {
+    use super::is_quit_relevant;
+    assert!(!is_quit_relevant(&HostCommand::BindWindowHwnd { label: "main".into(), hwnd: 1, replace: true }));
+    assert!(!is_quit_relevant(&HostCommand::EvictWindowHwnd { label: "main".into() }));
+}
+
+#[cfg(target_os = "windows")]
+#[test]
+fn failed_relabel_leaves_the_hwnd_binding_alone() {
+    let mut state = HostState::default();
+    update(&mut state, HostCommand::BindWindowHwnd { label: "floating-pool-a".into(), hwnd: 0x10, replace: true });
+    // No browser under the old label, so the relabel fails and moves nothing.
+    let out = update(
+        &mut state,
+        HostCommand::RelabelBrowser { old_label: "floating-pool-a".into(), new_label: "floating-a".into() },
+    );
+    assert!(!out.relabel_ok);
+    assert_eq!(state.window_hwnds.get("floating-pool-a"), Some(&0x10));
+    assert!(!state.window_hwnds.contains_key("floating-a"));
+}
+
+#[test]
+fn labels_at_hwnd_is_sorted_and_exact() {
+    let hwnds: HashMap<String, isize> =
+        [("window-b", 7), ("main", 7), ("floating-c", 8)].into_iter().map(|(l, h)| (l.to_string(), h)).collect();
+    assert_eq!(super::labels_at_hwnd(&hwnds, 7), vec!["main", "window-b"]);
+    assert_eq!(super::labels_at_hwnd(&hwnds, 8), vec!["floating-c"]);
+    assert!(super::labels_at_hwnd(&hwnds, 9).is_empty());
+}
+
+mod drop_target {
+    use super::super::window_hwnds::classify_drop_target;
+    use super::super::DropTarget;
+    use crate::state::BrowserKind;
+
+    const USER: BrowserKind = BrowserKind::TopLevel { is_pool: false };
+
+    /// Classify `labels` where every label has `kind`, "main" has a frame of
+    /// its own, and `with_backend` lists the labels whose renderer registered
+    /// a backend window.
+    fn classify(labels: &[&str], kind: Option<BrowserKind>, main_has_frame: bool, with_backend: &[&str]) -> DropTarget {
+        classify_drop_target(labels, &|_| kind.clone(), main_has_frame, &|l| with_backend.contains(&l))
+    }
+
+    #[test]
+    fn floaters_are_never_a_target_whatever_their_label() {
+        for label in ["floating-a", "floating-pool-a", "window-a"] {
+            for is_pool in [false, true] {
+                assert_eq!(
+                    classify(&[label], Some(BrowserKind::Floater { is_pool }), true, &[label]),
+                    DropTarget::Floater(label.to_string()),
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_user_window_is_a_target_by_type_not_label() {
+        assert_eq!(classify(&["main"], Some(USER), true, &["main"]), DropTarget::Window("main".into()));
+        assert_eq!(classify(&["window-a"], Some(USER), true, &["main", "window-a"]), DropTarget::Window("window-a".into()));
+        // Promoted from the pool: keeps its `window-pool-*` label, is a user window.
+        assert_eq!(
+            classify(&["window-pool-a"], Some(USER), true, &["main", "window-pool-a"]),
+            DropTarget::Window("window-pool-a".into()),
+        );
+        // A tear-off whose renderer hasn't registered yet, while main has its frame.
+        assert_eq!(classify(&["window-a"], Some(USER), true, &["main"]), DropTarget::Window("window-a".into()));
+    }
+
+    #[test]
+    fn nothing_else_takes_a_drop() {
+        let not_targets = [
+            Some(BrowserKind::TopLevel { is_pool: true }),
+            Some(BrowserKind::Pane { block_id: "b".into() }),
+            Some(BrowserKind::Popup),
+            None, // bound at window creation, browser not registered yet
+        ];
+        for kind in not_targets {
+            assert_eq!(classify(&["window-pool-a"], kind.clone(), true, &["main"]), DropTarget::Nothing, "{kind:?}");
+        }
+    }
+
+    #[test]
+    fn untracked_and_ambiguous_hwnds() {
+        assert_eq!(classify(&[], Some(USER), true, &["main"]), DropTarget::Untracked);
+        // Two labels on one HWND: one is stale, and nothing says which.
+        assert_eq!(classify(&["main", "window-a"], Some(USER), true, &["main", "window-a"]), DropTarget::Nothing);
+    }
+
+    #[test]
+    fn a_window_serving_the_primary_is_main() {
+        // Its renderer registered as "main", it has no backend window of its
+        // own, and "main" has no frame of its own.
+        assert_eq!(classify(&["window-pool-a"], Some(USER), false, &["main"]), DropTarget::Window("main".into()));
+        assert_eq!(classify(&["window-a"], Some(USER), false, &["main"]), DropTarget::Window("main".into()));
+        // Any one of those facts missing: its own label.
+        assert_eq!(classify(&["window-pool-a"], Some(USER), true, &["main"]), DropTarget::Window("window-pool-a".into()));
+        assert_eq!(
+            classify(&["window-pool-a"], Some(USER), false, &["main", "window-pool-a"]),
+            DropTarget::Window("window-pool-a".into()),
+        );
+        assert_eq!(classify(&["window-pool-a"], Some(USER), false, &[]), DropTarget::Window("window-pool-a".into()));
+    }
+
+    #[test]
+    fn drop_target_at_reads_the_registry() {
+        let mut state = super::HostState::default();
+        super::update(
+            &mut state,
+            super::HostCommand::BindWindowHwnd { label: "main".into(), hwnd: 0x30, replace: true },
+        );
+        let none: &dyn Fn(&str) -> bool = &|_| false;
+        assert_eq!(super::super::drop_target_at(&state, 0x99, none), DropTarget::Untracked);
+        // Bound, but no browser registered under the label (unit tests can't
+        // register one: a `BrowserHandle` needs a real `cef::Browser`).
+        assert_eq!(super::super::drop_target_at(&state, 0x30, none), DropTarget::Nothing);
+    }
+}

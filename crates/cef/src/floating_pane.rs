@@ -641,7 +641,7 @@ wrap_task! {
                 "[floating-pane] outer HWND created",
             );
 
-            // Register the outer HWND in `state.window_hwnds` under the
+            // Bind the outer HWND in the reducer's `window_hwnds` under the
             // floater's label. Without this, `resolve_window_hwnd(label)`
             // falls through to the reducer-registry path which goes
             // host.window_handle() (returns the CEF inner WS_CHILD) →
@@ -653,10 +653,7 @@ wrap_task! {
             // Capturing the known-good outer HWND here ensures the
             // cache lookup (added to resolve_window_hwnd) returns the
             // right window for floater-targeted IPCs.
-            self.state
-                .window_hwnds
-                .lock()
-                .insert(self.window_label.clone(), outer_hwnd as isize);
+            self.state.bind_window_hwnd(&self.window_label, outer_hwnd as isize);
             // Register in the global cascade registry so the main-window
             // WM_ACTIVATE/WM_SIZE/WM_DESTROY hook can reach this floater.
             // parent_main_hwnd binds this floater to its source window so
@@ -900,12 +897,8 @@ wrap_task! {
                 );
             }
 
-            // Register in window_hwnds so promote_pane_pool_window can reach
-            // the outer HWND via state.window_hwnds if needed.
-            self.state
-                .window_hwnds
-                .lock()
-                .insert(self.label.clone(), outer_hwnd as isize);
+            // Bind the outer HWND so promote_pane_pool_window can reach it.
+            self.state.bind_window_hwnd(&self.label, outer_hwnd as isize);
 
             // Embed CEF browser as WS_CHILD of the outer WS_POPUP.
             let rect = Rect {
@@ -950,8 +943,8 @@ wrap_task! {
                     use windows_sys::Win32::UI::WindowsAndMessaging::DestroyWindow;
                     DestroyWindow(outer_hwnd as *mut std::ffi::c_void);
                 }
-                // Remove from window_hwnds (inserted above before browser creation).
-                self.state.window_hwnds.lock().remove(&self.label);
+                // Unbind the HWND (bound above before browser creation).
+                self.state.evict_window_hwnd(&self.label);
                 // Clean up reducer + HWND cache without triggering a refill spawn.
                 // on_pane_pool_window_destroyed must NOT be used here — it triggers
                 // spawn_pane_pool_window which would re-enter this failure → loop.

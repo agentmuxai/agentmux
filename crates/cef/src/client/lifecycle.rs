@@ -1379,11 +1379,10 @@ impl AgentMuxHandler {
             // main restart) leaves a stale entry that breaks WM_CLOSE
             // routing. See
             // docs/specs/SPEC_WINDOW_HWND_CACHE_STALE_FIX_2026_05_28.md.
-            // Windows-only because `AppState::window_hwnds` is itself
-            // `#[cfg(target_os = "windows")]` in `state/mod.rs` (#1133).
+            // Windows-only because the HWND registry is (#1133).
             #[cfg(target_os = "windows")]
             {
-                let removed = self.state.window_hwnds.lock().remove(lbl);
+                let removed = self.state.evict_window_hwnd(lbl);
                 if removed.is_some() {
                     tracing::debug!(
                         target: "win-resolve",

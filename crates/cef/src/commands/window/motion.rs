@@ -271,9 +271,9 @@ pub fn start_window_drag(state: &Arc<AppState>, args: &serde_json::Value) -> Res
 /// `BackendWindowIdRegistered` projection — frontend uses it to
 /// load the MuxWindow / Workspace and figure out the active tab.
 ///
-/// Instance / version isolation is free: another agentmux instance's
-/// HWNDs are NOT in this process's `window_hwnds` map, so cross-
-/// process drag-over-then-drop won't accidentally re-dock there.
+/// Instance / version isolation is free: the walk only considers this
+/// process's windows, so cross-process drag-over-then-drop won't
+/// accidentally re-dock in another instance.
 pub fn resolve_window_at_cursor(
     state: &Arc<AppState>,
     args: &serde_json::Value,
@@ -287,6 +287,7 @@ pub fn resolve_window_at_cursor(
 
     #[cfg(target_os = "windows")]
     unsafe {
+        use crate::reducer::DropTarget;
         use windows_sys::Win32::Foundation::RECT;
         use windows_sys::Win32::System::Threading::GetCurrentProcessId;
         use windows_sys::Win32::UI::WindowsAndMessaging::{
@@ -310,153 +311,73 @@ pub fn resolve_window_at_cursor(
             }
         };
 
-        // Snapshot the label↔HWND map once, then walk top-level
-        // windows in Z-order (front to back) until we find a visible
-        // same-process window whose rect contains the cursor AND
-        // whose label isn't the excluded source.
-        let hwnds_by_label: std::collections::HashMap<String, isize> = {
-            state.window_hwnds.lock().clone()
-        };
-        // Reverse map for O(1) HWND → label lookup.
-        let label_by_hwnd: std::collections::HashMap<isize, String> = hwnds_by_label
-            .iter()
-            .map(|(k, v)| (*v, k.clone()))
-            .collect();
+        // The dragged floater follows the cursor, so it is always topmost
+        // there: exclude it by HWND. Before its bind lands (a brief race with
+        // CreateFloatingWindowTask) fall back to the label-aware lookup
+        // start_window_drag uses.
         let exclude_hwnd: Option<isize> = if exclude_label.is_empty() {
             None
         } else {
-            hwnds_by_label.get(exclude_label).copied().or_else(|| {
-                // Cache miss: floater HWND was created but its label hasn't
-                // been inserted into window_hwnds yet (brief race between
-                // CreateFloatingWindowTask::execute and the caller). Fall back
-                // to the label-aware HWND lookup used by start_window_drag so
-                // the floater is always excluded from its own hit-test.
+            state.window_hwnd(exclude_label).or_else(|| {
                 let h = resolve_window_hwnd(state, exclude_label);
                 if h.is_null() { None } else { Some(h as isize) }
             })
         };
 
-        // Deterministic "main" fallback. `window_hwnds["main"]` is populated
-        // by a startup capture that races the main window becoming
-        // enumerable — when it loses, "main" is absent from the map and the
-        // reverse lookup below can't recognise the main frame, so a floater
-        // dropped onto the main window silently fails to re-dock (the redock
-        // intermittency). `find_main_window()` resolves the real on-screen
-        // main frame independently of the cache (it skips floaters and
-        // off-screen pool windows), so we can recognise main by HWND even
-        // when it never made it into `window_hwnds`. Resolved once here, not
-        // per-iteration. `null` if unresolved → the comparison just never
-        // matches (no regression).
+        // The on-screen main frame, independent of the HWND registry (it
+        // skips floaters and off-screen pool windows): names a main window
+        // whose own bind hasn't landed yet. Resolved once, not per window.
         let main_hwnd: isize = find_main_window() as isize;
 
+        // Walk top-level windows front to back for the first visible window
+        // of this process under the cursor that takes a drop, by its
+        // registered kind (`AppState::drop_target_at`).
         let our_pid = GetCurrentProcessId();
         let mut hwnd = GetTopWindow(std::ptr::null_mut());
         while !hwnd.is_null() {
-            if IsWindowVisible(hwnd) != 0 {
-                let mut window_pid: u32 = 0;
-                GetWindowThreadProcessId(hwnd, &mut window_pid);
-                if window_pid == our_pid {
-                    let h_isize = hwnd as isize;
-                    let is_excluded = exclude_hwnd == Some(h_isize);
-                    // Skip click-through / transparent windows
-                    // (defensive — agentmux doesn't currently create
-                    // any, but we don't want a hypothetical overlay
-                    // to swallow the hit-test).
-                    let ex_style = GetWindowLongW(hwnd, GWL_EXSTYLE) as u32;
-                    let is_transparent = (ex_style & WS_EX_TRANSPARENT) != 0;
-                    if !is_excluded && !is_transparent {
-                        let mut rect: RECT = std::mem::zeroed();
-                        if GetWindowRect(hwnd, &mut rect) != 0
-                            && x >= rect.left
-                            && x < rect.right
-                            && y >= rect.top
-                            && y < rect.bottom
-                        {
-                            tracing::info!(
-                                target: "redock-resolve",
-                                hwnd = %format!("{:#x}", h_isize),
-                                class = %class_of(h_isize),
-                                label = ?label_by_hwnd.get(&h_isize),
-                                is_main_hwnd = (main_hwnd != 0 && h_isize == main_hwnd),
-                                main_hwnd = %format!("{:#x}", main_hwnd),
-                                "cursor inside window"
-                            );
-                            // Resolution (R3 identity, #1681). The redock ghost
-                            // only renders when the host-emitted `target_label`
-                            // === the target window's frontend `windowLabel`, so
-                            // resolve must return the label the frontend actually
-                            // uses for this HWND.
-                            //
-                            // window_hwnds maps this HWND to a `window-pool-*`
-                            // label (inserted at Views window-creation time,
-                            // in on_window_created, well before promote;
-                            // promote's own window_hwnds insert in
-                            // window_pool.rs re-affirms the SAME (label,
-                            // hwnd) pair rather than repointing the label at
-                            // a different window). Two different windows
-                            // wear a pool label, and they need OPPOSITE answers:
-                            //
-                            //  - A genuine promoted SECONDARY keeps its pool label
-                            //    as its real `windowLabel` and registers it via
-                            //    register_backend_window → it HAS a
-                            //    `backend_window_id`. Return the pool label
-                            //    verbatim so it matches.
-                            //  - The PRIMARY window can be served by a promoted
-                            //    pool window whose renderer re-identifies as
-                            //    "main" (it registers "main", NOT the pool label,
-                            //    so the pool label has NO backend_window_id, and
-                            //    window_hwnds never gets a "main" entry —
-                            //    capture_hwnd_for_label can't claim the
-                            //    already-pool-mapped HWND). Map to "main" when this
-                            //    is the main frame so its ghost matches.
-                            //
-                            // Using the registration (authoritative) instead of
-                            // find_main_window alone is what makes BOTH the first
-                            // window and secondary windows work: a registered pool
-                            // label is never rewritten, so find_main_window picking
-                            // the wrong frame can't mislabel a real secondary.
-                            let is_main_frame = main_hwnd != 0 && h_isize == main_hwnd;
-                            let resolved_label: Option<&str> = match label_by_hwnd.get(&h_isize) {
-                                Some(l) if l.starts_with("window-pool-") => {
-                                    if state.backend_window_id(l).is_some() {
-                                        // Registered → the frontend's real label.
-                                        Some(l.as_str())
-                                    } else if is_main_frame {
-                                        // Unregistered pool label on the main frame
-                                        // → primary served by a promoted pool
-                                        // window; its renderer is "main".
-                                        Some("main")
-                                    } else {
-                                        Some(l.as_str())
-                                    }
-                                }
-                                // Real label (e.g. "main", "floating-*") → verbatim.
-                                Some(l) => Some(l.as_str()),
-                                // Untracked but it IS the main frame: best-effort
-                                // "main" for the genuine cold-main-before-cache case.
-                                None if is_main_frame => Some("main"),
-                                None => None,
-                            };
-                            if let Some(label) = resolved_label {
-                                // Floating panes are never valid redock targets.
-                                // Continue the Z-order walk so the docked main
-                                // window behind the floater can still be found.
-                                if label.starts_with("floating-") {
-                                    hwnd = GetWindow(hwnd, GW_HWNDNEXT);
-                                    continue;
-                                }
-                                let wid = state.backend_window_id(label);
-                                return Ok(serde_json::json!({
-                                    "label": label,
-                                    "window_id": wid,
-                                }));
-                            }
-                            // Owned but untracked and not the main frame (very
-                            // early startup or a window we don't track). Treat
-                            // as "no agentmux match" and continue the Z-order
-                            // walk in case a tracked window sits behind it.
-                        }
-                    }
+            let h_isize = hwnd as isize;
+            let mut window_pid: u32 = 0;
+            GetWindowThreadProcessId(hwnd, &mut window_pid);
+            let mut rect: RECT = std::mem::zeroed();
+            // Click-through windows can't take a drop (agentmux creates none
+            // today; this keeps a future overlay from swallowing the test).
+            let under_cursor = IsWindowVisible(hwnd) != 0
+                && window_pid == our_pid
+                && exclude_hwnd != Some(h_isize)
+                && (GetWindowLongW(hwnd, GWL_EXSTYLE) as u32 & WS_EX_TRANSPARENT) == 0
+                && GetWindowRect(hwnd, &mut rect) != 0
+                && x >= rect.left
+                && x < rect.right
+                && y >= rect.top
+                && y < rect.bottom;
+            if under_cursor {
+                let is_main_frame = main_hwnd != 0 && h_isize == main_hwnd;
+                let target = state.drop_target_at(h_isize);
+                tracing::info!(
+                    target: "redock-resolve",
+                    hwnd = %format!("{:#x}", h_isize),
+                    class = %class_of(h_isize),
+                    target = ?target,
+                    is_main_hwnd = is_main_frame,
+                    main_hwnd = %format!("{:#x}", main_hwnd),
+                    "cursor inside window"
+                );
+                // The label must be the one the target's frontend uses: the
+                // redock ghost renders only when the emitted `target_label`
+                // equals its `windowLabel` (R3 identity, #1681). A floater, a
+                // pool window or an unregistered window is never a target;
+                // the walk goes on to the window behind it.
+                let label = match target {
+                    DropTarget::Window(label) => Some(label),
+                    DropTarget::Untracked if is_main_frame => Some("main".to_string()),
+                    _ => None,
+                };
+                if let Some(label) = label {
+                    let wid = state.backend_window_id(&label);
+                    return Ok(serde_json::json!({
+                        "label": label,
+                        "window_id": wid,
+                    }));
                 }
             }
             hwnd = GetWindow(hwnd, GW_HWNDNEXT);

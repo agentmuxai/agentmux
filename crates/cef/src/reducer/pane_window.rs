@@ -7,7 +7,7 @@
 //! state and the rect to restore to — keyed by the floating-window label
 //! (`floating-<uuid>`) in `HostState.pane_window_states`. Lifecycle
 //! (Live/Closing) is NOT here; it stays in `HostState.browser_panes`
-//! (`panes.rs`). Floaters live in `AppState.window_hwnds`, never in
+//! (`panes.rs`). Floaters live in `HostState.window_hwnds`, never in
 //! `browser_panes`, which is why eviction is keyed by label here (not by
 //! block_id via the `browser_panes` close path).
 //!
