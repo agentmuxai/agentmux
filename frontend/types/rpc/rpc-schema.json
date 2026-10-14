@@ -228,6 +228,25 @@
     }
   },
   {
+    "command": "agent.project_instructions",
+    "request": "agentmux_srv::server::app_api::bundle::AgentProjectInstructionsReq",
+    "requestName": "AgentProjectInstructionsReq",
+    "requestTs": {
+      "imports": [
+        "AgentProjectInstructionsReq"
+      ],
+      "name": "AgentProjectInstructionsReq"
+    },
+    "response": "agentmux_srv::server::app_api::bundle::AgentProjectInstructionsResponse",
+    "responseName": "AgentProjectInstructionsResponse",
+    "responseTs": {
+      "imports": [
+        "AgentProjectInstructionsResponse"
+      ],
+      "name": "AgentProjectInstructionsResponse"
+    }
+  },
+  {
     "command": "agent.send",
     "request": "agentmux_srv::backend::rpc_types::agent::CommandAgentSendData",
     "requestName": "CommandAgentSendData",
@@ -1238,6 +1257,120 @@
     }
   },
   {
+    "command": "bundle.delete",
+    "request": "agentmux_srv::backend::rpc_types::bundle::CommandDeleteBundleData",
+    "requestName": "CommandDeleteBundleData",
+    "requestTs": {
+      "imports": [
+        "CommandDeleteBundleData"
+      ],
+      "name": "CommandDeleteBundleData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::bundle::DeleteBundleResult",
+    "responseName": "DeleteBundleResult",
+    "responseTs": {
+      "imports": [
+        "DeleteBundleResult"
+      ],
+      "name": "DeleteBundleResult"
+    }
+  },
+  {
+    "command": "bundle.export",
+    "request": "agentmux_srv::server::app_api::bundle::export::ExportReq",
+    "requestName": "ExportReq",
+    "requestTs": {
+      "imports": [
+        "BundleExportReq"
+      ],
+      "name": "BundleExportReq"
+    },
+    "response": "agentmux_srv::server::app_api::bundle::export::BundleExportResponse",
+    "responseName": "BundleExportResponse",
+    "responseTs": {
+      "imports": [
+        "BundleExportResponse"
+      ],
+      "name": "BundleExportResponse"
+    }
+  },
+  {
+    "command": "bundle.export_for_agent",
+    "request": "agentmux_srv::server::app_api::bundle::export_for_agent::ExportForAgentReq",
+    "requestName": "ExportForAgentReq",
+    "requestTs": {
+      "imports": [
+        "BundleExportForAgentReq"
+      ],
+      "name": "BundleExportForAgentReq"
+    },
+    "response": "agentmux_srv::server::app_api::bundle::export::BundleExportResponse",
+    "responseName": "BundleExportResponse",
+    "responseTs": {
+      "imports": [
+        "BundleExportResponse"
+      ],
+      "name": "BundleExportResponse"
+    }
+  },
+  {
+    "command": "bundle.export_for_agent_with_history",
+    "request": "agentmux_srv::server::app_api::bundle::export_for_agent::ExportForAgentWithHistoryReq",
+    "requestName": "ExportForAgentWithHistoryReq",
+    "requestTs": {
+      "imports": [
+        "BundleExportForAgentWithHistoryReq"
+      ],
+      "name": "BundleExportForAgentWithHistoryReq"
+    },
+    "response": "agentmux_srv::server::app_api::bundle::export_for_agent::BundleExportWithHistoryResponse",
+    "responseName": "BundleExportWithHistoryResponse",
+    "responseTs": {
+      "imports": [
+        "BundleExportWithHistoryResponse"
+      ],
+      "name": "BundleExportWithHistoryResponse"
+    }
+  },
+  {
+    "command": "bundle.get",
+    "request": "agentmux_srv::server::app_api::bundle::BundleGetReq",
+    "requestName": "BundleGetReq",
+    "requestTs": {
+      "imports": [
+        "BundleGetReq"
+      ],
+      "name": "BundleGetReq"
+    },
+    "response": "agentmux_srv::backend::storage::bundles::Bundle",
+    "responseName": "Bundle",
+    "responseTs": {
+      "imports": [
+        "Bundle"
+      ],
+      "name": "Bundle"
+    }
+  },
+  {
+    "command": "bundle.import",
+    "request": "agentmux_srv::server::app_api::bundle::import::BundleImportReq",
+    "requestName": "BundleImportReq",
+    "requestTs": {
+      "imports": [
+        "BundleImportReq"
+      ],
+      "name": "BundleImportReq"
+    },
+    "response": "agentmux_srv::server::app_api::bundle::import::BundleImportResponse",
+    "responseName": "BundleImportResponse",
+    "responseTs": {
+      "imports": [
+        "BundleImportResponse"
+      ],
+      "name": "BundleImportResponse"
+    }
+  },
+  {
     "command": "bundle.import.commit",
     "request": "agentmux_srv::backend::rpc_types::bundle_import::CommandBundleImportCommitData",
     "requestName": "CommandBundleImportCommitData",
@@ -1273,6 +1406,82 @@
         "BundleImportPreviewResponse"
       ],
       "name": "BundleImportPreviewResponse"
+    }
+  },
+  {
+    "command": "bundle.import_for_agent",
+    "request": "agentmux_srv::server::app_api::bundle::import_for_agent::ImportForAgentReq",
+    "requestName": "ImportForAgentReq",
+    "requestTs": {
+      "imports": [
+        "BundleImportForAgentReq"
+      ],
+      "name": "BundleImportForAgentReq"
+    },
+    "response": "agentmux_srv::server::app_api::bundle::import_for_agent::BundleImportForAgentResponse",
+    "responseName": "BundleImportForAgentResponse",
+    "responseTs": {
+      "imports": [
+        "BundleImportForAgentResponse"
+      ],
+      "name": "BundleImportForAgentResponse"
+    }
+  },
+  {
+    "command": "bundle.list",
+    "request": "core::option::Option<agentmux_srv::backend::rpc_types::websocket::NoArgsReq>",
+    "requestName": "core::option::Option<agentmux_srv::backend::rpc_types::websocket::NoArgsReq>",
+    "requestTs": {
+      "imports": [
+        "NoArgsReq"
+      ],
+      "name": "NoArgsReq | null"
+    },
+    "response": "agentmux_srv::server::app_api::bundle::BundleListResponse",
+    "responseName": "BundleListResponse",
+    "responseTs": {
+      "imports": [
+        "BundleListResponse"
+      ],
+      "name": "BundleListResponse"
+    }
+  },
+  {
+    "command": "bundle.self.get",
+    "request": "agentmux_srv::server::app_api::bundle::BundleSelfGetReq",
+    "requestName": "BundleSelfGetReq",
+    "requestTs": {
+      "imports": [
+        "BundleSelfGetReq"
+      ],
+      "name": "BundleSelfGetReq"
+    },
+    "response": "agentmux_srv::backend::storage::bundles::Bundle",
+    "responseName": "Bundle",
+    "responseTs": {
+      "imports": [
+        "Bundle"
+      ],
+      "name": "Bundle"
+    }
+  },
+  {
+    "command": "bundle.upsert",
+    "request": "serde_json::value::Value",
+    "requestName": "Value",
+    "requestTs": {
+      "imports": [
+        "JsonValue"
+      ],
+      "name": "JsonValue"
+    },
+    "response": "agentmux_srv::backend::storage::bundles::Bundle",
+    "responseName": "Bundle",
+    "responseTs": {
+      "imports": [
+        "Bundle"
+      ],
+      "name": "Bundle"
     }
   },
   {
