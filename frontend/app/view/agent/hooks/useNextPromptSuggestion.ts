@@ -61,7 +61,9 @@
  *   1. Cleared the instant a new turn starts (`Submitting`) — a suggestion
  *      from turn N is meaningless (and misleading) once turn N+1 has begun.
  *      `term:ambient_summary` deliberately persists across turns; this key
- *      deliberately does not.
+ *      deliberately does not. A hidden memory-reinjection turn is exempt: it is
+ *      not the user's turn N+1, so the suggestion on screen is still the right
+ *      one. A catch-up turn is not exempt (its reply is followed by a new one).
  *   2. `activeTurnId !== myTurnId` at write time — a newer turn has already
  *      started (same belt-and-suspenders pattern as
  *      useAgentActivitySummary.ts, on top of the backend gateway's own
