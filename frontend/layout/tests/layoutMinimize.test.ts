@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import { newLayoutNode, balanceNode } from "../lib/layoutNode";
 import {
     minimizeNodeToggle,
+    collapseMaximizedNode,
     rebuildMinimizedSet,
     countExpandedLeaves,
     isNodeLocked,
@@ -918,13 +919,15 @@ describe("minimizing a maximized pane", () => {
 
 // A minimized chip that was maximized is both. The header then reads "Restore"
 // (maximize button) and "Minimize" (minimize button), never "Restore" twice.
+// The header's Minimize is `collapseMaximizedNode`; `minimizeNodeToggle` keeps
+// restoring a minimized pane for programmatic callers (showBlockInPane).
 describe("a pane that is both minimized and maximized", () => {
-    it("Minimize puts it back as a chip: the maximize ends and the flag stays (it does not restore)", () => {
+    it("the header's Minimize puts it back as a chip: the maximize ends and the flag stays", () => {
         const { root, paneA1 } = buildTwoColumnLayout();
         paneA1.minimized = true;
         const model = makeMagnifyMock(root, paneA1.id);
 
-        minimizeNodeToggle(model, paneA1.id);
+        collapseMaximizedNode(model, paneA1.id);
 
         expect(paneA1.minimized).toBe(true);
         expect(model.treeState.magnifiedNodeId).toBeUndefined();
@@ -939,20 +942,33 @@ describe("a pane that is both minimized and maximized", () => {
         paneB.minimized = true;
         const model = makeMagnifyMock(root, paneA1.id);
 
-        minimizeNodeToggle(model, paneA1.id);
+        collapseMaximizedNode(model, paneA1.id);
 
         expect(model.treeState.magnifiedNodeId).toBe(paneA1.id);
         expect(paneA1.minimized).toBe(true);
         expect(model.calls).toEqual([]);
     });
 
-    it("a minimized pane that is NOT maximized still restores on toggle (unchanged)", () => {
+    it("does nothing for a pane that is not maximized", () => {
         const { root, paneA1 } = buildTwoColumnLayout();
-        paneA1.minimized = true;
         const model = makeMagnifyMock(root, undefined);
 
-        minimizeNodeToggle(model, paneA1.id);
+        collapseMaximizedNode(model, paneA1.id);
 
         expect(paneA1.minimized).toBeUndefined();
+        expect(model.calls).toEqual([]);
+    });
+
+    it("minimizeNodeToggle still RESTORES it, whether or not it is maximized (what showBlockInPane relies on)", () => {
+        for (const magnified of [undefined, "self"] as const) {
+            const { root, paneA1 } = buildTwoColumnLayout();
+            paneA1.minimized = true;
+            const model = makeMagnifyMock(root, magnified && paneA1.id);
+
+            minimizeNodeToggle(model, paneA1.id);
+
+            expect(paneA1.minimized).toBeUndefined();
+            expect(model.magnifyCalls).toEqual([]); // restoring never touches the maximize
+        }
     });
 });

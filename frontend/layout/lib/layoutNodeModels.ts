@@ -167,7 +167,12 @@ export function getNodeModel(model: LayoutModel, node: LayoutNode): NodeModel {
                     fireAndForget(() => model.closeNode(nodeid));
                 },
                 toggleMagnify: () => model.magnifyNodeToggle(nodeid),
-                toggleMinimize: () => model.minimizeNodeToggle(nodeid),
+                // While maximized the header's button reads "Minimize" even for a chip that was
+                // maximized, so it must not restore it; every other caller toggles.
+                toggleMinimize: () =>
+                    model.localTreeStateAtom().magnifiedNodeId === nodeid
+                        ? model.collapseMaximizedNode(nodeid)
+                        : model.minimizeNodeToggle(nodeid),
                 focusNode: () => model.focusNode(nodeid),
                 dragHandleRef: { current: null as HTMLDivElement | null },
                 displayContainerRef: model.displayContainerRef,
