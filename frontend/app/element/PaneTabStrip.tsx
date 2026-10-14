@@ -905,7 +905,7 @@ function PaneTabStripItem<T>(props: PaneTabStripItemProps<T>): JSX.Element {
                         {/* Always in the DOM for attention tabs (closing
                             those may need confirmation); hover-shown
                             otherwise, purely via CSS opacity. */}
-                        ×
+                        <i class="fa-solid fa-xmark" aria-hidden="true" />
                     </button>
                 </Show>
             </div>

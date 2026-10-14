@@ -313,6 +313,7 @@ partial list.
 | [`SPEC_COMPOSER_STRIP_LEFT_JUSTIFIED_TIERED_WRAP_2026_08_03`](SPEC_COMPOSER_STRIP_LEFT_JUSTIFIED_TIERED_WRAP_2026_08_03.md) | SPEC — Composer strip: left-justified, tiered wrap (up to 3 levels) |
 | [`SPEC_COMPOSER_STRIP_MODE_TOPLEVEL_2026_07_02`](SPEC_COMPOSER_STRIP_MODE_TOPLEVEL_2026_07_02.md) | SPEC — Promote Mode to the composer strip; retire the nested "Controls" panel under Log |
 | [`SPEC_COMPOSER_STRIP_TWO_LINE_RESPONSIVE_2026_07_30`](SPEC_COMPOSER_STRIP_TWO_LINE_RESPONSIVE_2026_07_30.md) | SPEC — Composer strip: two-line wrap when the pane narrows |
+| [`SPEC_CONNECTORS_CARDS_2026_10_13`](SPEC_CONNECTORS_CARDS_2026_10_13.md) | Spec: Connectors shows everything connected as cards |
 | [`SPEC_CONTAINER_AGENTS_WORK_FOR_EVERYONE_2026_10_07`](SPEC_CONTAINER_AGENTS_WORK_FOR_EVERYONE_2026_10_07.md) | SPEC: container agents that work for everyone, not only for people who can already pull our image |
 | [`SPEC_CONTEXT_MENU_PASTE_KEEPS_TERMINAL_FOCUS_2026_10_07`](SPEC_CONTEXT_MENU_PASTE_KEEPS_TERMINAL_FOCUS_2026_10_07.md) | Pasting into a terminal from the right-click menu should leave the terminal ready for Enter |
 | [`SPEC_COPY_BUTTON_FALSE_POSITIVE_FIX_2026_08_10`](SPEC_COPY_BUTTON_FALSE_POSITIVE_FIX_2026_08_10.md) | SPEC: Copy Button Silently Failing (Three Stacked Bugs) |
@@ -332,6 +333,7 @@ partial list.
 | [`SPEC_EDITOR_FIRST_KEYSTROKE_NOT_RENDERED_2026_09_15`](SPEC_EDITOR_FIRST_KEYSTROKE_NOT_RENDERED_2026_09_15.md) | Editor: the first keystroke after focusing is accepted but not rendered |
 | [`SPEC_EDITOR_MEDIA_SPLIT_OPENS_EMPTY_2026_10_10`](SPEC_EDITOR_MEDIA_SPLIT_OPENS_EMPTY_2026_10_10.md) | Spec: Splitting an editor or media pane opens an empty one |
 | [`SPEC_EDITOR_REUSE_RESTORES_MINIMIZED_PANE_2026_09_30`](SPEC_EDITOR_REUSE_RESTORES_MINIMIZED_PANE_2026_09_30.md) | Spec: An agent opening a file shows the Editor pane it lands in |
+| [`SPEC_EDITOR_TREE_TOGGLE_IN_DOC_TAB_BAR_2026_10_04`](SPEC_EDITOR_TREE_TOGGLE_IN_DOC_TAB_BAR_2026_10_04.md) | SPEC: The Editor's file-tree toggle moves into its document tab bar |
 | [`SPEC_ESBUILD_OVERRIDE_VITE_INCOMPAT_2026_09_17`](SPEC_ESBUILD_OVERRIDE_VITE_INCOMPAT_2026_09_17.md) | SPEC: Remove the `esbuild >=0.28.2` override — it broke `task dev` and never protected the bundle |
 | [`SPEC_EXTERNAL_HOST_BUILD_2026_10_09`](SPEC_EXTERNAL_HOST_BUILD_2026_10_09.md) | SPEC: Build the frontend for a host other than the desktop app |
 | [`SPEC_FLEET_BROADCAST_CROSS_TIER_TARGETING_2026_08_22`](SPEC_FLEET_BROADCAST_CROSS_TIER_TARGETING_2026_08_22.md) | SPEC: `FleetBroadcast` reaches cross-channel/LAN/WAN targets |
@@ -368,6 +370,7 @@ partial list.
 | [`SPEC_MACOS_MUXBUS_KEYCHAIN_NOTICE_2026_09_16`](SPEC_MACOS_MUXBUS_KEYCHAIN_NOTICE_2026_09_16.md) | SPEC: Warn macOS/Linux users up front that MuxBus sign-in will prompt for a password |
 | [`SPEC_MACOS_TAB_REDOCK_PARITY_2026_07_24`](SPEC_MACOS_TAB_REDOCK_PARITY_2026_07_24.md) | macOS Tab Redock Parity — Implementation Scoping |
 | [`SPEC_MCP_LOOP_TOOL_2026_06_16`](SPEC_MCP_LOOP_TOOL_2026_06_16.md) | SPEC: MCP `Loop` / `LoopStop` tools — recurring prompt injection |
+| [`SPEC_MEDIA_OPEN_SHOWS_THE_MEDIA_PANE_2026_10_12`](SPEC_MEDIA_OPEN_SHOWS_THE_MEDIA_PANE_2026_10_12.md) | Spec: Clicking an image shows the Media pane it lands in |
 | [`SPEC_MEDIA_PANE_2026_07_26`](SPEC_MEDIA_PANE_2026_07_26.md) | Spec: Media pane — live-updating image/video viewer for agent-generated files |
 | [`SPEC_MEDIA_PANE_V4_MCP_OPEN_TOOL_2026_08_03`](SPEC_MEDIA_PANE_V4_MCP_OPEN_TOOL_2026_08_03.md) | Spec: Media pane v4 — agent-facing `OpenMedia` MCP tool |
 | [`SPEC_MEMORY_VERSION_CONTROL_AND_ARMORY_AUDIT_2026_08_19`](SPEC_MEMORY_VERSION_CONTROL_AND_ARMORY_AUDIT_2026_08_19.md) | Spec: Native Memory Version Control — Single Source of Truth, Two Views (Stash + Armory) |
@@ -764,7 +767,6 @@ partial list.
 | [`SPEC_MACOS_LAUNCH_SPEED_AND_SPLASH_TELEMETRY_2026_07_02`](SPEC_MACOS_LAUNCH_SPEED_AND_SPLASH_TELEMETRY_2026_07_02.md) | SPEC: macOS Launch Speed + Splash Load-Time Telemetry |
 | [`SPEC_MACOS_PACKAGING_2026_05_30`](SPEC_MACOS_PACKAGING_2026_05_30.md) | Spec: macOS packaging — signed, launchable `AgentMux.app` / `.dmg` |
 | [`SPEC_MACOS_TEAROFF_STABILITY_2026_05_29`](SPEC_MACOS_TEAROFF_STABILITY_2026_05_29.md) | macOS Tear-off Stability — implementation spec |
-| [`SPEC_MEDIA_OPEN_SHOWS_THE_MEDIA_PANE_2026_10_12`](SPEC_MEDIA_OPEN_SHOWS_THE_MEDIA_PANE_2026_10_12.md) | Spec: Clicking an image shows the Media pane it lands in |
 | [`SPEC_MEDIA_PANE_EMPTY_LOGO_2026_10_12`](SPEC_MEDIA_PANE_EMPTY_LOGO_2026_10_12.md) | Media pane: a faint AgentMux logo when no file is open |
 | [`SPEC_MEDIA_PANE_V2_AGENT_WORKFLOW_GAPS_2026_07_28`](SPEC_MEDIA_PANE_V2_AGENT_WORKFLOW_GAPS_2026_07_28.md) | Spec: Media pane v2 — gaps found running a real agent video-editing workflow through it |
 | [`SPEC_MEDIA_PANE_V3_BROWSER_AND_CUSTOM_TRANSPORT_2026_07_29`](SPEC_MEDIA_PANE_V3_BROWSER_AND_CUSTOM_TRANSPORT_2026_07_29.md) | Spec: Media pane v3 — persistent browser + custom playback/scrub UI |

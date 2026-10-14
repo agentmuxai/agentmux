@@ -59,7 +59,7 @@ export function FilterInput(props: FilterInputProps): JSX.Element {
                     aria-label="Clear filter"
                     data-testid={props.testId ? `${props.testId}-clear` : undefined}
                 >
-                    &times;
+                    <i class="fa-solid fa-xmark" aria-hidden="true" />
                 </button>
             </Show>
         </>

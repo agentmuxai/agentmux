@@ -1,0 +1,166 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// Connectors → MCP servers (mcp-manager.tsx): what the shared card classes
+// (element/ui/card.scss) don't cover, which is the inside of a card's
+// details. SPEC_CONNECTORS_CARDS_2026_10_13.md §3.5; line style per
+// SPEC_UI_LINE_STYLE_COMPONENT_SYSTEM_2026_10_05.md §5.1.
+
+// The section's scroll container: its pane is absolutely positioned with
+// overflow hidden, so without this a long list or an open form is cut off.
+.mcp-cards {
+    box-sizing: border-box;
+    height: 100%;
+    overflow-y: auto;
+}
+
+.mcp-cards-error {
+    padding: var(--space-1-5) var(--space-2);
+    border: 1px solid var(--ui-line-danger);
+    color: var(--error-color);
+    font-size: var(--text-xs);
+}
+
+.mcp-cards-empty {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+}
+
+// ── A card's details ──────────────────────────────────────────────────────────
+
+.mcp-detail {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1-5);
+    padding: var(--space-2);
+    min-width: 0;
+    font-size: var(--text-xs);
+}
+
+.mcp-detail-note {
+    margin: 0;
+    color: var(--secondary-text-color);
+}
+
+.mcp-detail-label {
+    margin-top: var(--space-1);
+    font-size: var(--text-2xs);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--secondary-text-color);
+}
+
+.mcp-detail-value {
+    margin: 0;
+    padding: var(--space-1-5);
+    border: 1px solid var(--border-color);
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    color: var(--main-text-color);
+    white-space: pre-wrap;
+    overflow-wrap: break-word;
+}
+
+.mcp-detail-row {
+    display: flex;
+    gap: var(--space-1);
+    align-items: center;
+
+    > select {
+        flex: 1;
+        min-width: 0;
+    }
+}
+
+.mcp-detail-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--space-1);
+    margin-top: var(--space-1);
+}
+
+.mcp-config-input {
+    width: 100%;
+    padding: var(--space-1) var(--space-2);
+    font-family: var(--font-mono);
+    resize: vertical;
+}
+
+// A catalog server some running agents should have by now but don't: they
+// started before it was bound or switched on.
+.mcp-not-loaded {
+    margin: 0;
+    color: var(--warning-color);
+}
+
+// ── The live probe ────────────────────────────────────────────────────────────
+
+.mcp-probe {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+}
+
+.mcp-probe-line {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1-5);
+    color: var(--main-text-color);
+}
+
+.mcp-probe-remediation,
+.mcp-probe-risk {
+    margin: 0;
+    padding: var(--space-1-5) var(--space-2);
+    border-left: 2px solid var(--border-color);
+    color: var(--main-text-color);
+}
+
+// Persistent risk disclosure (spec §4 policy #2): shown whatever the
+// connection status, unlike the remediation note.
+.mcp-probe-risk {
+    border-left-color: var(--warning-color);
+    color: var(--warning-color);
+}
+
+// ── Agents that report a server ───────────────────────────────────────────────
+
+.mcp-uses {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-0-5);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.mcp-use {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1-5);
+    min-width: 0;
+}
+
+.mcp-use-agent {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--main-text-color);
+}
+
+.mcp-use-status,
+.mcp-use-tools {
+    white-space: nowrap;
+    color: var(--secondary-text-color);
+}
+
+.mcp-use-tools {
+    margin-left: auto;
+}
+
+.mcp-delete-confirm p {
+    margin: 0 0 var(--space-1-5);
+}
