@@ -745,7 +745,7 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
         // `slots` is this renderer's agent panes only, so srv's list of every
         // open agent pane (`agent.open-panes`) is added: a pane in another
         // window, and a terminal-tier agent's `term` pane, which has no slot
-        // (SPEC_AGENT_DELETE_2026_09_16.md §5.2; Codex on #4911).
+        // (SPEC_AGENT_DELETE_2026_09_16.md §5.2, #4911).
         //
         // Failures are reported, not swallowed: the agent and its
         // credentials are already gone by this point, so a pane that
