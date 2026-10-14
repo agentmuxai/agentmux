@@ -1646,11 +1646,9 @@ pub fn inject_jekt_signing_keys_into_mcp_json(
     // time. With no `wan.db` attached, the agent gets no WAN key at all —
     // never one minted somewhere else.
     if let Some(wan) = mstore.wan_identity() {
-        let legacy = mstore.agent_wan_key_load(agent_slug).ok().flatten();
-        let import = legacy.as_ref().map(|k| (k.public_key.as_str(), k.private_key.as_str()));
         match (
             wan.instance_ensure(&crate::backend::reactive::registry::local_host_label()),
-            wan.agent_key_ensure(agent_slug, import),
+            mstore.channel_wan_key(&wan, agent_slug),
         ) {
             (Ok(instance), Ok(key)) => {
                 env.insert("AGENTMUX_WAN_KEY".to_string(), json!(key.private_key));

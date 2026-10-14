@@ -74,15 +74,6 @@ pub const NARRATION: Purpose =
 pub const CONTINUITY_STATE: Purpose =
     Purpose { tag: "continuity_state", timeout: Duration::from_secs(90), class: Class::Background, logs_reply: false };
 
-/// The note a pane shows when a fresh session continues its conversation from
-/// AgentMux's record (`backend::continued_note`): where things stand, then "How
-/// can I help?". It waits in the interactive queue, since the user is looking
-/// at the pane, but gets the longer limit: its material runs to 12k characters
-/// and a note that lands late still helps. It restates the conversation, so,
-/// like the continuity state, its text stays out of the srv log.
-pub const SESSION_CONTINUED_NOTE: Purpose =
-    Purpose { tag: "session_continued_note", timeout: BACKGROUND_TIMEOUT, class: Class::Interactive, logs_reply: false };
-
 /// Every purpose, for anything that lists them.
 #[cfg(test)]
 pub const ALL: &[&Purpose] = &[
@@ -94,7 +85,6 @@ pub const ALL: &[&Purpose] = &[
     &NEXT_PROMPT_SUGGESTION,
     &NARRATION,
     &CONTINUITY_STATE,
-    &SESSION_CONTINUED_NOTE,
 ];
 
 #[cfg(test)]
@@ -109,12 +99,11 @@ mod tests {
         assert_eq!(tags.len(), ALL.len(), "two purposes share a tag, so they would cancel each other");
     }
 
-    /// The continuity state and the continued-session note restate the
-    /// conversation (its goal, the latest request, exact identifiers): their
-    /// text never goes to the srv log (#4501).
+    /// The continuity state restates the conversation (its goal, the latest
+    /// request, exact identifiers): its text never goes to the srv log (#4501).
     #[test]
     fn only_replies_that_restate_the_conversation_stay_out_of_the_log() {
         let quiet: Vec<&str> = ALL.iter().filter(|p| !p.logs_reply).map(|p| p.tag).collect();
-        assert_eq!(quiet, vec![CONTINUITY_STATE.tag, SESSION_CONTINUED_NOTE.tag]);
+        assert_eq!(quiet, vec![CONTINUITY_STATE.tag]);
     }
 }

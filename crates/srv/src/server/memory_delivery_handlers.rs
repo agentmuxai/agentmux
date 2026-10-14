@@ -163,6 +163,10 @@ enum FallbackClaim {
     Skip,
     /// The hook is delivering this event right now.
     Pending,
+    /// A compaction boundary this block's own CLI did not write: another
+    /// block of the agent reading the shared zone, or another srv instance's.
+    /// Nothing to deliver, and (for a catch-up turn) nothing to catch up on.
+    Foreign,
 }
 
 impl DeliveryState {
@@ -229,7 +233,7 @@ impl DeliveryState {
         let mut since = i64::MIN;
         if let Some(uuid) = boundary_uuid {
             let Some(idx) = self.boundary_origins.iter().position(|(u, b, _)| u == uuid && b == block_id) else {
-                return FallbackClaim::Skip;
+                return FallbackClaim::Foreign;
             };
             if let Some((_, _, at)) = self.boundary_origins.range(..idx).rev().find(|(_, b, _)| b == block_id) {
                 since = *at;
@@ -308,13 +312,6 @@ pub(crate) struct AckRequest {
     session_id: String,
     source: String,
     part: usize,
-}
-
-/// Whether `block_id`'s new-session card went out for a delivery composed
-/// after `since_ms`: what the continued-session note waits for
-/// (`backend::continued_note`).
-pub(crate) fn startup_card_written_since(block_id: &str, since_ms: i64) -> bool {
-    state_lock().completed.get(&(block_id.to_string(), Reason::Startup)).is_some_and(|at| *at > since_ms)
 }
 
 /// `POST /api/v1/agent/memory/session-start/part`
@@ -452,8 +449,8 @@ fn reason_for_fallback(reason: &str) -> Option<Reason> {
 /// `boundary_uuid`, only the block whose CLI compacted can deliver. With
 /// `event_at_ms` (a fresh session's time), the hook's delivery for that
 /// session counts however late the claim comes.
-pub(crate) async fn claim_fallback(block_id: &str, reason: &str, boundary_uuid: Option<&str>, event_at_ms: Option<i64>) -> bool {
-    let Some(reason) = reason_for_fallback(reason) else { return true };
+pub(crate) async fn claim_fallback(block_id: &str, reason: &str, boundary_uuid: Option<&str>, event_at_ms: Option<i64>) -> ClaimResult {
+    let Some(reason) = reason_for_fallback(reason) else { return ClaimResult { deliver: true, foreign: false } };
     let deadline = tokio::time::Instant::now() + PENDING_WAIT;
     let boundary_uuid = boundary_uuid.filter(|u| !u.is_empty());
     loop {
@@ -467,19 +464,31 @@ pub(crate) async fn claim_fallback(block_id: &str, reason: &str, boundary_uuid: 
             }
         };
         match claim {
-            FallbackClaim::Deliver => return true,
+            FallbackClaim::Deliver => return ClaimResult { deliver: true, foreign: false },
             FallbackClaim::Skip => {
-                tracing::info!(block_id, reason = reason.as_str(), "memory delivery: the hook delivered, or not this block's compaction; fallback stands down");
-                return false;
+                tracing::info!(block_id, reason = reason.as_str(), "memory delivery: the hook delivered; fallback stands down");
+                return ClaimResult { deliver: false, foreign: false };
+            }
+            FallbackClaim::Foreign => {
+                tracing::info!(block_id, reason = reason.as_str(), "memory delivery: not this block's compaction; fallback stands down");
+                return ClaimResult { deliver: false, foreign: true };
             }
             FallbackClaim::Pending if tokio::time::Instant::now() >= deadline => {
                 tracing::warn!(block_id, reason = reason.as_str(), "memory delivery: hook still unfinished; fallback delivers instead");
                 state_lock().take_over_from_hook(block_id, reason, agentmux_common::time::now_ms());
-                return true;
+                return ClaimResult { deliver: true, foreign: false };
             }
             FallbackClaim::Pending => tokio::time::sleep(PENDING_POLL).await,
         }
     }
+}
+
+/// What a fallback's claim found: `deliver`, or stand down because the hook
+/// delivered, or because the event was another block's (`foreign`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ClaimResult {
+    pub deliver: bool,
+    pub foreign: bool,
 }
 
 /// Registers `memorydelivery:claim_fallback` — the frontend's hidden memory
@@ -496,16 +505,52 @@ pub(crate) fn register_memory_delivery_handlers(
     engine.register_typed(
         COMMAND_MEMORY_DELIVERY_CLAIM_FALLBACK,
         |req: CommandMemoryDeliveryClaimFallbackData, _ctx| async move {
-            Ok::<_, String>(MemoryDeliveryClaimFallbackResult { deliver: claim_fallback(&req.block_id, &req.reason, req.boundary_uuid.as_deref(), req.event_at_ms).await })
+            Ok::<_, String>({
+                let r = claim_fallback(&req.block_id, &req.reason, req.boundary_uuid.as_deref(), req.event_at_ms).await;
+                MemoryDeliveryClaimFallbackResult { deliver: r.deliver, foreign: r.foreign.then_some(true) }
+            })
         },
     );
     let state = state.clone();
     engine.register_typed(COMMAND_MEMORY_DELIVERY_COMPOSE, move |req: CommandMemoryDeliveryComposeData, _ctx| {
         let state = state.clone();
         async move {
+            let now = agentmux_common::time::now_ms();
+            if req.catch_up.unwrap_or(false) {
+                let kind = memory_delivery::CatchUpKind::from_wire(&req.reason)
+                    .ok_or_else(|| format!("memorydelivery:compose: unknown reason {:?}", req.reason))?;
+                let memory_reason = kind.memory_reason().filter(|_| req.memory.unwrap_or(true));
+                let block_id = req.block_id.clone();
+                let composed = match memory_reason {
+                    Some(reason) => tokio::task::spawn_blocking(move || compose_fallback_delivery(&state, &block_id, reason, now))
+                        .await
+                        .map_err(|e| format!("memorydelivery:compose: {e}"))?,
+                    None => None,
+                };
+                return Ok::<_, String>(match composed {
+                    Some(mut f) => {
+                        f.text = memory_delivery::compose_catch_up(kind, Some(&f.text));
+                        let reply = MemoryDeliveryComposeResult {
+                            delivery_id: Some(f.delivery_id.clone()),
+                            text: Some(f.text.clone()),
+                            frame: Some(f.frame.clone()),
+                        };
+                        let mut st = state_lock();
+                        st.prune(now);
+                        st.fallbacks.insert(f.delivery_id.clone(), f);
+                        reply
+                    }
+                    // No memory to deliver (the hook did, or the phase has
+                    // none): the catch-up block alone, and no card.
+                    None => MemoryDeliveryComposeResult {
+                        delivery_id: None,
+                        text: Some(memory_delivery::compose_catch_up(kind, None)),
+                        frame: None,
+                    },
+                });
+            }
             let reason = memory_delivery::FallbackReason::from_wire(&req.reason)
                 .ok_or_else(|| format!("memorydelivery:compose: unknown reason {:?}", req.reason))?;
-            let now = agentmux_common::time::now_ms();
             let composed = tokio::task::spawn_blocking(move || compose_fallback_delivery(&state, &req.block_id, reason, now))
                 .await
                 .map_err(|e| format!("memorydelivery:compose: {e}"))?;
@@ -1069,12 +1114,12 @@ mod tests {
         st.record_boundary("u1", "b", NOW);
         assert_eq!(
             st.claim_boundary("other", Reason::Compact, Some("u1"), NOW),
-            FallbackClaim::Skip,
+            FallbackClaim::Foreign,
             "another block of the agent, reading the shared zone"
         );
         assert_eq!(
             st.claim_boundary("b", Reason::Compact, Some("u2"), NOW),
-            FallbackClaim::Skip,
+            FallbackClaim::Foreign,
             "a boundary no stdout here wrote"
         );
         assert_eq!(st.claim_boundary("b", Reason::Compact, Some("u1"), NOW), FallbackClaim::Deliver);

@@ -10,6 +10,7 @@ import {
     buildMemoryReinjectionNodeFromReplay,
     composeReinjectionMessage,
     GLOBAL_SECTION_SEPARATOR,
+    isCatchUpMessage,
     RUNNING_SUMMARY_HEADING,
     isMemoryReinjectionMessage,
     memoryReinjectionNodeId,
@@ -438,5 +439,40 @@ describe("composeReinjectionMessage — srv's compose_fallback writes the same (
                 "P1\n" +
                 "</system-reminder>\n",
         );
+    });
+});
+
+// The catch-up block (SPEC_RESUME_PHASE_CATCH_UP_TURN_2026_10_13.md), shaped as
+// Rust's `compose_catch_up` writes it (`memory_delivery.rs`): one last line that
+// starts with the marker and ends with the shared tail.
+describe("isCatchUpMessage", () => {
+    const BLOCK =
+        "AgentMux catch-up: You are picking up this conversation after it was resumed. Review the conversation and anything AgentMux just gave you. Then stop and wait for them.";
+    const bare = `<system-reminder>\n${BLOCK}\n</system-reminder>\n`;
+
+    it("knows a catch-up with no memory", () => {
+        expect(isCatchUpMessage(bare)).toBe(true);
+    });
+
+    it("knows a catch-up that follows a memory re-delivery", () => {
+        const memory = composeReinjectionMessage([{ label: "g1", source: "global", body: "global body", sizeBytes: 11 }], "compaction");
+        const text = memory.replace(`\n</system-reminder>\n`, `\n\n${BLOCK}\n</system-reminder>\n`);
+        expect(isCatchUpMessage(text)).toBe(true);
+    });
+
+    it("does not take a memory body that contains the marker for one", () => {
+        for (const body of [
+            `notes\nAgentMux catch-up: how this works\nmore notes`,
+            `notes\nAgentMux catch-up: how this works`,
+            `notes\nAgentMux catch-up: how this works. Then stop and wait for them.\nmore notes`,
+        ]) {
+            const memory = composeReinjectionMessage([{ label: "n", source: "personal", body, sizeBytes: body.length }], "compaction");
+            expect(isCatchUpMessage(memory)).toBe(false);
+        }
+    });
+
+    it("does not know ordinary text", () => {
+        expect(isCatchUpMessage("AgentMux catch-up: please")).toBe(false);
+        expect(isCatchUpMessage(`<system-reminder>unrelated</system-reminder>\n`)).toBe(false);
     });
 });

@@ -7,6 +7,18 @@
  */
 export type CommandMemoryDeliveryComposeData = { block_id: string, 
 /**
- * `compaction` or `fresh_session`.
+ * `compaction` or `fresh_session`; with `catch_up` also `resumed`.
  */
-reason: string, };
+reason: string, 
+/**
+ * Compose a catch-up turn's message (the memory re-delivery, if any, then
+ * the catch-up block that has the agent say where it is picking up)
+ * instead of the bare re-delivery. SPEC_RESUME_PHASE_CATCH_UP_TURN_
+ * 2026_10_13.md §3.3.
+ */
+catch_up?: boolean, 
+/**
+ * A catch-up only: `false` leaves the memory out, because the hook
+ * already delivered it (or the phase delivers none). Absent means `true`.
+ */
+memory?: boolean, };

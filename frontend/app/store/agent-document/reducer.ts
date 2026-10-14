@@ -17,6 +17,7 @@ import type { DocumentNode, ShellNode, ToolLogChunk, ToolNode, ToolStreamingLog 
 import { isAcceptedBackgroundLaunch, isFinishedDockedTool } from "../../view/agent/activity/tool-adapter";
 import { planRollOff } from "../../view/agent/live-feed";
 import { planLogFree, planUnload, unloadResult } from "../../view/agent/tool-result-unload";
+import { fallbackEchoIndexes, isFallbackEchoPart } from "./fallback-echo";
 import { lastFreshBoundaryIndex } from "@/app/store/agent-document/session-outcome";
 import {
     AgentDocumentCommand,
@@ -247,6 +248,26 @@ function scrubOrphanedInProgress(
     return { nodes: next, markdownCanceled, toolsCanceled, resolvedToolNodes };
 }
 
+/**
+ * `nodes` without the "Memory reinjected" rows a fallback card stands for
+ * among `nodes[from, to)` (`fallbackEchoIndexes`), with both id maps rebuilt
+ * to match; `null` when there are none. Called only where nodes are joined,
+ * so the O(n) rebuild runs only when a row is dropped.
+ */
+function withoutFallbackEchoes(
+    nodes: DocumentNode[],
+    idSet: ReadonlySet<string>,
+    from: number,
+    to: number,
+): Pick<AgentDocumentState, "nodes" | "nodeIdSet" | "nodeIndexById"> | null {
+    const drop = new Set(fallbackEchoIndexes(nodes, from, to));
+    if (drop.size === 0) return null;
+    const nodeIdSet = new Set(idSet);
+    for (const i of drop) nodeIdSet.delete(nodes[i].id);
+    const kept = nodes.filter((_, i) => !drop.has(i));
+    return { nodes: kept, nodeIdSet, nodeIndexById: new Map(kept.map((n, i) => [n.id, i])) };
+}
+
 export function update(
     state: AgentDocumentState,
     command: AgentDocumentCommand,
@@ -369,12 +390,17 @@ export function update(
                 });
             }
             const mergedLoaded = [...scrubbedFresh, ...state.nodes];
+            // A fallback card and its hidden message's row on either side
+            // of the seam are one delivery (SPEC_CONTEXT_DELIVERY §9 B1).
+            const seam = scrubbedFresh.length;
+            const joined = withoutFallbackEchoes(mergedLoaded, nextIdSet, seam - 1, seam + 1);
             return {
                 state: {
                     ...state,
                     nodes: mergedLoaded,
                     nodeIdSet: nextIdSet,
                     nodeIndexById: nextIndexById,
+                    ...joined,
                 },
                 events: loadEvents,
             };
@@ -449,6 +475,10 @@ export function update(
                     resolvedToolNodes: scrubResult.resolvedToolNodes,
                 });
             }
+            // As in HistoryLoaded: the seam may split a fallback card from
+            // its hidden message's row.
+            const restoreSeam = scrubbedFresh.length;
+            const restoreJoined = withoutFallbackEchoes(mergedNodes, nextIdSet, restoreSeam - 1, restoreSeam + 1);
             return {
                 state: {
                     ...state,
@@ -456,6 +486,7 @@ export function update(
                     nodeIdSet: nextIdSet,
                     nodeIndexById: nextIndexById,
                     sessionPhase: "active",
+                    ...restoreJoined,
                 },
                 events: restoreEvents,
             };
@@ -566,12 +597,22 @@ export function update(
                     flushEvents.push({ type: "orphans-scrubbed", ...ended.counts });
                 }
             }
+            // Lines read live through the transcript cursor (a reconnect,
+            // another block's lines) bring a fallback card and its hidden
+            // message's row with no parser state between them
+            // (SPEC_CONTEXT_DELIVERY §9 B1). Gated on the batch carrying one,
+            // so the per-chunk hot path pays one scan of the batch.
+            const flushJoined =
+                appendedNew > 0 && command.newNodes.some(isFallbackEchoPart)
+                    ? withoutFallbackEchoes(next, nextIdSet ?? state.nodeIdSet, state.nodes.length - 1, next.length)
+                    : null;
             return {
                 state: {
                     ...state,
                     nodes: next,
                     nodeIdSet: nextIdSet ?? state.nodeIdSet,
                     nodeIndexById: indexById,
+                    ...flushJoined,
                 },
                 events: flushEvents,
             };

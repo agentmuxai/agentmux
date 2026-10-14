@@ -352,27 +352,6 @@ pub(crate) async fn generate_ambient_narration(
     Some(text)
 }
 
-/// How much of the continuation record the continued-session note reads: the
-/// running summary at its head, the latest exchange at its tail.
-const RECORD_HEAD_CHARS: usize = 6000;
-const RECORD_TAIL_CHARS: usize = 6000;
-
-/// The note a pane shows once a fresh session continues its conversation from
-/// AgentMux's `record` (`backend::continued_note`). Keyed on the block, so a
-/// newer spawn's note supersedes an older one still in flight. Best-effort:
-/// every failure is `None`, and the pane says nothing.
-pub(crate) async fn generate_continued_note(mstore: &Store, block_id: &str, generation: u64, record: &str) -> Option<String> {
-    let slot = call::admit(&purpose::SESSION_CONTINUED_NOTE, block_id, generation).await?;
-    let block: Block = mstore.get(block_id).ok().flatten()?;
-    let target = CliTarget::from_meta(&block.meta)?;
-    let prompt = prompt::continued_note_prompt(&prompt::clip_material(record, RECORD_HEAD_CHARS, RECORD_TAIL_CHARS));
-    let (text, _tokens) = slot
-        .run(&target, &prompt, |raw| judge_line(raw, |t| validate::accept_line(t, &validate::CONTINUED_NOTE)))
-        .await
-        .into_option()?;
-    Some(text)
-}
-
 /// reagent P1, PR #2786: `generate_definition_activity_summary` falls back
 /// to this resolver when the instance's `Block` row is gone (the closed-
 /// pane case this feature actually targets). Only the cheap, deterministic

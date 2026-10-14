@@ -387,6 +387,22 @@ export function useAgentStream({
             });
             return node ? { deliveryId: r.delivery_id, text: r.text, node } : null;
         },
+        // The catch-up turn's message (SPEC_RESUME_PHASE_CATCH_UP_TURN_
+        // 2026_10_13.md): memory when asked for, then the block telling the
+        // agent to say where it is picking up. A catch-up with no memory has no
+        // card, so no delivery id and no node.
+        composeCatchUp: async (reason, memory) => {
+            const r = await RpcApi.ComposeCommand(TabRpcClient, { block_id: blockId, reason, catch_up: true, memory });
+            if (!r.text) return null;
+            const node = r.frame
+                ? buildMemoryInjectedNode(r.frame, { contextWindow: currentContextWindow(), now: Date.now() })
+                : null;
+            return {
+                text: r.text,
+                ...(r.delivery_id ? { deliveryId: r.delivery_id } : {}),
+                ...(node ? { node } : {}),
+            };
+        },
         // Claude Code's SessionStart hook now delivers the same memory at a
         // session start and after a compaction; this fallback fires only when
         // the hook didn't (SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27.md §7 P2).
@@ -396,7 +412,7 @@ export function useAgentStream({
                 reason,
                 ...(boundaryUuid ? { boundary_uuid: boundaryUuid } : {}),
                 ...(eventAtMs !== undefined ? { event_at_ms: eventAtMs } : {}),
-            }).then((r) => r.deliver),
+            }).then((r) => ({ deliver: r.deliver, ...(r.foreign ? { foreign: true } : {}) })),
         // Reuses the REAL TurnStart/TurnStartFailed commands unmodified — a hidden
         // reinjection is a completely genuine turn state-machine-wise; only
         // its rendering differs. See memory-reinjection-controller.ts's
@@ -641,7 +657,20 @@ export function useAgentStream({
                 // Fire-and-forget: trigger() handles its own fetch/send
                 // failures and re-entrancy. See
                 // SPEC_HIDDEN_MEMORY_REINJECTION_AFTER_COMPACTION_2026_09_22.md §1.2/§3.3.
-                void memoryReinjectionController.trigger(compactBoundary.frameTimestamp, "compaction", compactBoundary.uuid);
+                //
+                // A manual compaction is the user asking the agent to compact:
+                // once its own turn ends, the agent says where it is picking up
+                // (a catch-up turn). An automatic one lands mid-turn and the
+                // agent's reply to that turn already follows, so only the
+                // memory fallback applies.
+                if (compactBoundary.trigger === "manual") {
+                    void memoryReinjectionController.catchUp(compactBoundary.frameTimestamp, "compaction", {
+                        boundaryUuid: compactBoundary.uuid,
+                        deferIfBusy: true,
+                    });
+                } else {
+                    void memoryReinjectionController.trigger(compactBoundary.frameTimestamp, "compaction", compactBoundary.uuid);
+                }
             },
             sessionOutcome: (sessionOutcome) => {
                 // `resumed` is demoted out of the working transcript, as in
@@ -673,7 +702,17 @@ export function useAgentStream({
                     // The meter's reading measured the conversation that is now gone.
                     model.dispatchPane({ type: "ContextInvalidated", reason: "fresh_session" });
                     awaitingCompactionSize = null;
-                    void memoryReinjectionController.trigger(sessionOutcome.frameTimestamp, "fresh_session");
+                    //
+                    // With the pane quiet nobody is talking to the agent yet (an
+                    // account switch, a resume the CLI rejected): the agent
+                    // catches up and tells the user where it is picking up.
+                    // With a turn in flight the user already is, so only the
+                    // memory fallback applies.
+                    if (workingFromPhase(paneSnapshot(blockId)?.turnPhase ?? { kind: "Idle" })) {
+                        void memoryReinjectionController.trigger(sessionOutcome.frameTimestamp, "fresh_session");
+                    } else {
+                        void memoryReinjectionController.catchUp(sessionOutcome.frameTimestamp, "fresh_session");
+                    }
                 }
             },
             memoryInjected: (raw) => {

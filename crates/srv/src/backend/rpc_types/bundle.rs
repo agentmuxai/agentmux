@@ -183,6 +183,11 @@ pub struct CommandMemoryDeliveryClaimFallbackData {
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct MemoryDeliveryClaimFallbackResult {
     pub deliver: bool,
+    /// The event was another block's, not the hook's: a compaction this
+    /// block's own CLI did not write. A catch-up turn is not for such a block.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub foreign: Option<bool>,
 }
 
 /// `memorydelivery:compose` — srv composes the hidden memory re-delivery the
@@ -192,12 +197,25 @@ pub struct MemoryDeliveryClaimFallbackResult {
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandMemoryDeliveryComposeData {
     pub block_id: String,
-    /// `compaction` or `fresh_session`.
+    /// `compaction` or `fresh_session`; with `catch_up` also `resumed`.
     pub reason: String,
+    /// Compose a catch-up turn's message (the memory re-delivery, if any, then
+    /// the catch-up block that has the agent say where it is picking up)
+    /// instead of the bare re-delivery. SPEC_RESUME_PHASE_CATCH_UP_TURN_
+    /// 2026_10_13.md §3.3.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub catch_up: Option<bool>,
+    /// A catch-up only: `false` leaves the memory out, because the hook
+    /// already delivered it (or the phase delivers none). Absent means `true`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub memory: Option<bool>,
 }
 
 /// Reply to `memorydelivery:compose`. All three are absent when there is no
-/// memory to deliver.
+/// memory to deliver. A catch-up always has `text`; `delivery_id` and `frame`
+/// (the card) are present only when the message carries memory.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct MemoryDeliveryComposeResult {

@@ -290,6 +290,9 @@ mod pi;
 mod muxcode;
 mod copilot;
 mod antigravity;
+mod cline;
+mod kilo;
+mod opencode;
 
 use claude::CLAUDE;
 use codex::CODEX;
@@ -301,6 +304,9 @@ use pi::PI;
 use muxcode::MUX_CODE;
 use copilot::COPILOT;
 use antigravity::ANTIGRAVITY;
+use cline::CLINE;
+use kilo::KILO;
+use opencode::OPENCODE;
 
 // ─── Static registry ─────────────────────────────────────────────────────────
 
@@ -316,6 +322,9 @@ static REGISTRY: LazyLock<HashMap<&'static str, &'static ProviderConfig>> = Lazy
     m.insert(COPILOT.id, &COPILOT);
     m.insert(MUX_CODE.id, &MUX_CODE);
     m.insert(ANTIGRAVITY.id, &ANTIGRAVITY);
+    m.insert(KILO.id, &KILO);
+    m.insert(CLINE.id, &CLINE);
+    m.insert(OPENCODE.id, &OPENCODE);
     m
 });
 
@@ -340,6 +349,11 @@ static ALIASES: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(||
     m.insert("agy", "antigravity");
     m.insert("antigravity-cli", "antigravity");
     m.insert("antigravity_cli", "antigravity");
+    m.insert("kilocode", "kilo");
+    m.insert("kilo-code", "kilo");
+    m.insert("cline-cli", "cline");
+    m.insert("opencode-ai", "opencode");
+    m.insert("open-code", "opencode");
     m
 });
 
