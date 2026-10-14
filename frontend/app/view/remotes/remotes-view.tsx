@@ -25,6 +25,7 @@ import {
 } from "./remotes-sections";
 import "./remotes-view.scss";
 import { Button, Card, CardGrid, FilterInput, IconButton, Select, TextInput, type StatusTone } from "@/app/element/ui";
+import { focusOnOpen } from "@/util/focusutil";
 import { connectionName, parseDestination } from "./add-remote";
 
 interface MenuState {
@@ -447,7 +448,7 @@ function AddRemoteForm(props: { model: RemotesViewModel; onDone: () => void }): 
                 placeholder="user@host:port"
                 value={destination()}
                 onInput={(e) => setDestination(e.currentTarget.value)}
-                autofocus
+                ref={focusOnOpen}
             />
             <details class="remotes-add-more">
                 <summary>Advanced</summary>

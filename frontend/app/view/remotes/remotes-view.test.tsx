@@ -288,6 +288,8 @@ describe("RemotesView", () => {
         fireEvent.click(screen.getByRole("button", { name: /Add remote/ }));
         const field = screen.getByLabelText("Connect to") as HTMLInputElement;
         expect(field.placeholder).toBe("user@host:port");
+        await Promise.resolve();
+        expect(document.activeElement).toBe(field);
         fireEvent.input(field, { target: { value: "me@db1.example.com:2222" } });
         fireEvent.click(screen.getByRole("button", { name: "Add" }));
         await new Promise((r) => setTimeout(r, 0));
