@@ -363,7 +363,7 @@ export const shots = [
         title: "Connectors — MCP servers",
         description: "MCP servers: the catalog of tool servers agents can be given.",
         inPane: (s, p) => selectTab(s, p, "MCP servers"),
-        verify: ".agent-primitive-modal-list-item",
+        verify: ".mcp-server-card",
     }),
     connectorsShot({
         id: "connectors-mcp-new",
@@ -371,9 +371,9 @@ export const shots = [
         description: "Adding an MCP server to the catalog.",
         inPane: async (s, p) => {
             await selectTab(s, p, "MCP servers");
-            await clickIn(s, p, ".agent-primitive-modal-new-btn", "New MCP server");
+            await clickIn(s, p, ".mcp-cards-add", "Add server");
         },
-        verify: ".agent-primitive-modal-form",
+        verify: ".mcp-server-form",
     }),
     paneShot({
         id: "settings-widget-approval",

@@ -40,8 +40,8 @@
     &.block-frame-default-header--has-tabstrip {
         padding-left: 0;
 
-        // …but a view-icon control ahead of them (the editor's file-tree
-        // toggle, blockframe.tsx's `viewIconControlElem`) keeps the inset an
+        // …but a view-icon control ahead of them (a clickable `headerIcon`,
+        // blockframe.tsx's `viewIconControlElem`) keeps the inset an
         // ordinary header gives its icon, instead of touching the pane edge.
         .block-frame-view-icon-control {
             margin-left: 10px;

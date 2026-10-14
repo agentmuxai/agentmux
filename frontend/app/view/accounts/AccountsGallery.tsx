@@ -10,6 +10,7 @@
  */
 
 import { createSignal, For, Show, type JSX } from "solid-js";
+import { Card, CardGrid } from "@/app/element/ui";
 import { ProviderLogo } from "@/element/ProviderLogo";
 import type { AccountKind, AccountProvider, IdentityViewModel } from "@/app/view/identity/identity-model";
 import { SERVICE_CATALOG, modeLabel, type AuthMode, type ServiceTile } from "./accounts-catalog";
@@ -63,38 +64,36 @@ export function AccountsGallery(props: {
 
     return (
         <div class="accounts-gallery">
-            <div class="accounts-gallery-grid">
-                <For each={SERVICE_CATALOG}>
-                    {(tile) => {
-                        const n = () => countFor(tile.id);
-                        return (
-                            <button
-                                type="button"
-                                class="account-tile"
-                                classList={{ "account-tile--connected": n() > 0 }}
-                                onClick={() => openTile(tile)}
-                                aria-label={`${tile.displayName} — ${n()} connected, add account`}
-                            >
-                                <Show when={n() > 0}>
-                                    <span class="account-tile-count" title={`${n()} connected`}>{n()}</span>
-                                </Show>
-                                <span class="account-tile-logo">
-                                    <ProviderLogo provider={tile.id} size={20} />
-                                </span>
-                                {/* Name + status stack beside the logo (chip
-                                    layout) rather than under it — see the
-                                    density note in accounts-gallery.scss. */}
-                                <span class="account-tile-text">
-                                    <span class="account-tile-name">{tile.displayName}</span>
-                                    <span class="account-tile-status">
-                                        {n() > 0 ? `${n()} connected` : (tile.blurb ?? "Connect")}
+            {/* Chip cards, the same component as the connected accounts below
+                (SPEC_CONNECTORS_CARDS_2026_10_13.md §3.2). */}
+            <CardGrid
+                size="chip"
+                class="accounts-gallery-grid"
+                ariaLabel="Add an account"
+                items={SERVICE_CATALOG}
+                keyOf={(tile) => tile.id}
+                renderCard={(tile) => {
+                    const n = () => countFor(tile.id);
+                    return (
+                        <Card
+                            size="chip"
+                            class={n() > 0 ? "account-tile account-tile--connected" : "account-tile"}
+                            aria-label={`${tile.displayName} — ${n()} connected, add account`}
+                            icon={<ProviderLogo provider={tile.id} size={20} />}
+                            title={tile.displayName}
+                            subtitle={n() > 0 ? `${n()} connected` : (tile.blurb ?? "Connect")}
+                            badge={
+                                n() > 0 ? (
+                                    <span class="account-tile-count" title={`${n()} connected`}>
+                                        {n()}
                                     </span>
-                                </span>
-                            </button>
-                        );
-                    }}
-                </For>
-            </div>
+                                ) : undefined
+                            }
+                            onSelect={() => openTile(tile)}
+                        />
+                    );
+                }}
+            />
 
             {/* Tile-click chooser: OAuth and/or Key, per the brand's authModes. */}
             <Show when={chooser()}>

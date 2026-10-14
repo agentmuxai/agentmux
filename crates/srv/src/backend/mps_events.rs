@@ -48,6 +48,10 @@ macro_rules! per_id_events {
         pub fn per_id_schema() -> Vec<(&'static str, TsType)> {
             vec![$(($prefix, ts_type::<$payload>())),*]
         }
+        /// Whether `name` is a per-id event's name: one of the prefixes above, then an id.
+        pub fn is_per_id_event(name: &str) -> bool {
+            $(name.starts_with(<$marker as PerIdEvent>::PREFIX) ||)* false
+        }
     };
 }
 
@@ -65,6 +69,10 @@ macro_rules! events {
         #[cfg(test)]
         pub fn schema() -> Vec<(&'static str, TsType)> {
             vec![$(($name, ts_type::<$payload>())),*]
+        }
+        /// Whether `name` is one of the events above (not a per-id one: [`is_per_id_event`]).
+        pub fn is_typed_event(name: &str) -> bool {
+            $(name == <$marker as Event>::NAME ||)* false
         }
     };
 }
@@ -278,15 +286,26 @@ macro_rules! client_events {
             )*
             None
         }
+        /// Whether `name` is one of the client events.
+        pub fn is_client_event(name: &str) -> bool {
+            $(name == <$marker as Event>::NAME ||)* false
+        }
     };
 }
 
 // The events, declared in `events!`, that a client publishes: the relay refuses one whose data
-// isn't its payload, and relays any other event as sent.
+// isn't its payload. It refuses every other declared event too, since only srv publishes those
+// (`is_srv_event`), and relays an undeclared one as sent.
 client_events! {
     ToolChunk,
     CompactionStarted,
     SingletonClaim,
+}
+
+/// Whether only srv publishes `name`: a declared event, or a per-id one, that isn't a client event.
+/// Its subscribers read it as its payload type, so the relay doesn't take it from outside.
+pub fn is_srv_event(name: &str) -> bool {
+    (is_typed_event(name) || is_per_id_event(name)) && !is_client_event(name)
 }
 
 /// An event's `data`: its payload as JSON, or none for an event that carries none (`()`, a
@@ -634,6 +653,19 @@ mod tests {
         assert_eq!(broker.read_event_history("tool_chunk", "block:b1", 8).len(), 1, "a refused event isn't stored");
 
         assert_eq!(publish_client_event(&broker, "someones:event", &json!({ "any": 1 }), &scopes, 1), None, "not a client event");
+    }
+
+    #[test]
+    fn srv_events_are_the_declared_ones_clients_dont_publish() {
+        assert!(is_srv_event("controllerstatus"));
+        assert!(is_srv_event("agents:changed"), "a signal with no payload too");
+        assert!(is_srv_event("agent_event:b1"), "a per-id event, by its prefix");
+        assert!(is_srv_event("dronerun:r1"));
+        for client in ["tool_chunk", "compaction_started", "singleton:claim"] {
+            assert!(is_typed_event(client) && !is_srv_event(client), "{client} is a client's");
+        }
+        assert!(!is_srv_event("someones:event"), "an undeclared event is relayed");
+        assert!(!is_srv_event("agent_event"), "a prefix needs its id");
     }
 
     #[test]

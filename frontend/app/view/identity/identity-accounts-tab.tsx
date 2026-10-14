@@ -69,28 +69,7 @@ export function AccountsTab({ model }: { model: IdentityViewModel }): JSX.Elemen
 
     return (
         <>
-            {/* Delete-time notice (layer 4 —
-                SPEC_ACCOUNT_DELETE_DEAUTH_LAYERS_2_4_2026_07_14.md §4, plus the
-                cleanup outcome and delete errors). Transient, dismissable.
-                Honest wording: running processes keep their tokens until
-                restarted — we disclose, not revoke. */}
-            <Show when={model.deleteNoticeAtom()}>
-                {(notice) => (
-                    <div class="identity-delete-notice" role="status" aria-live="polite">
-                        <span class="identity-delete-notice-icon" aria-hidden="true">⚠</span>
-                        <span class="identity-delete-notice-text">{notice()}</span>
-                        <button
-                            type="button"
-                            class="identity-delete-notice-dismiss"
-                            title="Dismiss"
-                            aria-label="Dismiss"
-                            onClick={() => model.dismissDeleteNotice()}
-                        >
-                            ×
-                        </button>
-                    </div>
-                )}
-            </Show>
+            <AccountDeleteNotice model={model} />
             <div class="identity-accounts-layout">
                 <div class="identity-accounts-list">
                     <Show
@@ -141,6 +120,36 @@ export function AccountsTab({ model }: { model: IdentityViewModel }): JSX.Elemen
 
             <Show when={model.pendingDeleteAtom()} keyed>
                 {(account) => <DeleteAccountConfirm model={model} account={account} />}
+            </Show>
+        </>
+    );
+}
+
+/** The transient notice a delete leaves (what was cleaned up, or why it failed). */
+export function AccountDeleteNotice({ model }: { model: IdentityViewModel }): JSX.Element {
+    return (
+        <>
+            {/* Delete-time notice (layer 4 —
+                SPEC_ACCOUNT_DELETE_DEAUTH_LAYERS_2_4_2026_07_14.md §4, plus the
+                cleanup outcome and delete errors). Transient, dismissable.
+                Honest wording: running processes keep their tokens until
+                restarted — we disclose, not revoke. */}
+            <Show when={model.deleteNoticeAtom()}>
+                {(notice) => (
+                    <div class="identity-delete-notice" role="status" aria-live="polite">
+                        <span class="identity-delete-notice-icon" aria-hidden="true">⚠</span>
+                        <span class="identity-delete-notice-text">{notice()}</span>
+                        <button
+                            type="button"
+                            class="identity-delete-notice-dismiss"
+                            title="Dismiss"
+                            aria-label="Dismiss"
+                            onClick={() => model.dismissDeleteNotice()}
+                        >
+                            ×
+                        </button>
+                    </div>
+                )}
             </Show>
         </>
     );
@@ -227,7 +236,7 @@ function useAccountAgentNames(account: Account): Accessor<string[]> {
 
 // ── Account detail panel (opens under its row) ───────────────────────────────
 
-function AccountDetailPanel({ model, account }: { model: IdentityViewModel; account: Account }): JSX.Element {
+export function AccountDetailPanel({ model, account }: { model: IdentityViewModel; account: Account }): JSX.Element {
     const usedBy = useAccountAgentNames(account);
     let panelRef: HTMLDivElement | undefined;
 
@@ -396,7 +405,7 @@ function findScrollParent(el: HTMLElement | undefined): HTMLElement | null {
 
 // ── Delete confirmation (spec §3.3) ──────────────────────────────────────────
 
-function DeleteAccountConfirm({ model, account }: { model: IdentityViewModel; account: Account }): JSX.Element {
+export function DeleteAccountConfirm({ model, account }: { model: IdentityViewModel; account: Account }): JSX.Element {
     const usedBy = useAccountAgentNames(account);
     const backend = account.secret_ref?.backend;
     const keepsHistory = backend === "oauth_config_dir" && PROVIDERS_WITH_KEPT_HISTORY.has(account.provider);

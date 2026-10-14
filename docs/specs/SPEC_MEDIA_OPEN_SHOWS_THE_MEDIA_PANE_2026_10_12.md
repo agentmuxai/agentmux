@@ -3,7 +3,8 @@
 **Date:** 2026-10-12
 **Author:** Maricon@charlie
 **Type:** Spec (one small change, one shared helper that already exists)
-**Status:** proposed — this document changes no code. Flip this line to `implemented` when it lands.
+**Status:** implemented (#4852)
+**Decisions applied:** D1 no focus move, D2 prefer a visible pane, D3 also find a stack's background Media tab; D4 (the agent's `OpenMedia`) stays out of scope.
 **Requested by:** the operator: *"when clicking an image that would normally open an image pane, if an image pane already exists but is minimized, restore the pane so it is viewable and load the image as another document tab. I notice the images are already loaded properly as a document tab but the pane remains minimized, so the user doesn't realize the image was actually loaded into the minimized pane."*
 **Related:** `SPEC_EDITOR_REUSE_RESTORES_MINIMIZED_PANE_2026_09_30.md` (the same fix for the Editor, shipped in #4063; this spec reuses its helper), `SPEC_DOCUMENT_TABS_2026_10_02.md` §5.7 (opening media as a tab of the Media pane on screen), `SPEC_MEDIA_PANE_2026_07_26.md`.
 
