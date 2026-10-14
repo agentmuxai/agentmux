@@ -620,7 +620,7 @@ async fn open_agent_inner(
                          Refusing to launch with an unprotected config dir."
                     )
                 })?;
-                env_vars.insert(provider.auth_config_dir_env_var.to_string(), json!(auth_dir));
+                if !provider.auth_config_dir_env_var.is_empty() { env_vars.insert(provider.auth_config_dir_env_var.to_string(), json!(auth_dir)); }
                 for (k, v) in provider.auth_extra_env {
                     env_vars.insert(k.to_string(), json!(v));
                 }
