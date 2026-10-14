@@ -101,6 +101,8 @@ describe("SingleLinePlot on uPlot", () => {
         // Only the time is shared between the pane's charts, never a y value.
         expect(opts.cursor.sync.scales).toEqual(["x", null]);
         expect([opts.width, opts.height]).toEqual([600, 200]);
+        // Fixed sides, so the charts and the core heatmap in one pane line up.
+        expect(opts.padding).toEqual([null, 36, null, 0]);
         expect(opts.scales.y.range()).toEqual([0, 100]);
         // The x window ends at the newest sample and spans five minutes.
         expect(opts.scales.x.range()).toEqual([(base + 1000) / 1000 - 300, (base + 1000) / 1000]);

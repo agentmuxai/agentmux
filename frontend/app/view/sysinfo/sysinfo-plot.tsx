@@ -22,6 +22,8 @@ import "./sysinfo-plot.scss";
 
 import {
     formatValue,
+    PLOT_LEFT_PX,
+    PLOT_RIGHT_PX,
     resolveCssColor,
     type SeriesSpec,
     timeAxisLabels,
@@ -37,7 +39,7 @@ const CHART_RESIZE_MS = 100;
 /** Least room per x label, so a narrow pane gets fewer of them. */
 const X_LABEL_SPACE_PX = 80;
 
-/** Width of a y axis that fits its widest label (uPlot's own sizing recipe). */
+/** Width of a y axis that fits its widest label (uPlot's own sizing recipe), at least `PLOT_LEFT_PX`. */
 function yAxisSize(self: uPlot, values: string[] | null, axisIdx: number, cycleNum: number): number {
     const axis = self.axes[axisIdx];
     if (cycleNum > 1) return (axis as any)._size;
@@ -47,7 +49,7 @@ function yAxisSize(self: uPlot, values: string[] | null, axisIdx: number, cycleN
         self.ctx.font = (axis as any).font[0];
         size += self.ctx.measureText(longest).width / devicePixelRatio;
     }
-    return Math.ceil(size);
+    return Math.max(PLOT_LEFT_PX, Math.ceil(size));
 }
 
 export type TimeChartProps = {
@@ -116,6 +118,8 @@ export function TimeChart(props: TimeChartProps): JSX.Element {
             width,
             height,
             legend: { show: false },
+            // Fixed sides, so the plot areas of a pane's charts line up (PLOT_LEFT_PX).
+            ...(props.sparkline ? {} : { padding: [null, PLOT_RIGHT_PX, null, 0] as uPlot.Padding }),
             cursor: {
                 // Only the time is shared: each chart has its own y scale, and by
                 // default uPlot would also draw the hovered chart's y value on the others.

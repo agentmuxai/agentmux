@@ -140,6 +140,26 @@ export function volumes(row: DataItem | undefined): Volume[] {
     return out.sort((a, b) => a.mount.localeCompare(b.mount));
 }
 
+/**
+ * Where a sample's column sits across `widthPx`, for a time window `win` (in
+ * seconds, as the charts' x scale): it covers the interval ending at the
+ * sample. `null` when it falls outside the window.
+ */
+export function columnSpan(
+    tsMs: number,
+    win: [number, number],
+    intervalSecs: number,
+    widthPx: number
+): [number, number] | null {
+    const [start, end] = win;
+    const span = end - start;
+    if (!(span > 0) || widthPx <= 0) return null;
+    const t = tsMs / 1000;
+    const x0 = Math.max(0, ((t - intervalSecs - start) / span) * widthPx);
+    const x1 = Math.min(widthPx, ((t - start) / span) * widthPx);
+    return x1 > x0 ? [x0, x1] : null;
+}
+
 /** The window choices, in samples at the default 1 s interval. */
 export const WINDOW_CHOICES = [
     { points: 60, label: "1m" },

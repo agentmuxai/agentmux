@@ -107,7 +107,13 @@ export function FocusView(props: FocusProps): JSX.Element {
                         )}
                         <div class="sysinfo-focus-chart sysinfo-overview-cores">
                             <div class="sysinfo-chart-title">{`Cores (${cores().length})`}</div>
-                            <CoreHeatmap plotData={rows()} cores={cores()} color={CPU} />
+                            <CoreHeatmap
+                                plotData={rows()}
+                                cores={cores()}
+                                color={CPU}
+                                targetLen={props.targetLen}
+                                intervalSecs={props.intervalSecs}
+                            />
                         </div>
                     </Show>
                 </Match>

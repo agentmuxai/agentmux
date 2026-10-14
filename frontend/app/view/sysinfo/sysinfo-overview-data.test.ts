@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import {
     BUSIEST_CORE,
+    columnSpan,
     coreGrid,
     coreKeys,
     formatGB,
@@ -108,5 +109,25 @@ describe("an area alone", () => {
         // A volume without a size is left out.
         expect(volumes(r)).toEqual([{ mount: "C:" + String.fromCharCode(92), freeGB: 100, totalGB: 500 }]);
         expect(volumes(undefined)).toEqual([]);
+    });
+});
+
+describe("columnSpan", () => {
+    const win: [number, number] = [100, 160]; // a 60 s window, as the charts take it
+
+    it("places a sample by its time, covering the interval that ends at it", () => {
+        expect(columnSpan(130_000, win, 1, 600)).toEqual([290, 300]);
+        expect(columnSpan(160_000, win, 1, 600)).toEqual([590, 600]);
+    });
+
+    it("leaves the start of the window empty when there are fewer samples than it holds", () => {
+        // Two samples at the end of a 60 s window sit at its right edge, not across it.
+        expect(columnSpan(159_000, win, 1, 600)?.[0]).toBe(580);
+    });
+
+    it("clips at the window's start, and has nothing outside it", () => {
+        expect(columnSpan(100_500, win, 1, 600)).toEqual([0, 5]);
+        expect(columnSpan(90_000, win, 1, 600)).toBeNull();
+        expect(columnSpan(130_000, [100, 100], 1, 600)).toBeNull();
     });
 });

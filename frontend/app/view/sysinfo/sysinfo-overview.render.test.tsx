@@ -8,6 +8,7 @@
  * docs/reports/REPORT_SYSINFO_REWRITE_AND_MODERN_MONITOR_2026_10_13.md section 5.3.
  */
 import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
+import { createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const made = vi.hoisted(() => ({ charts: [] as any[] }));
@@ -157,6 +158,32 @@ describe("Overview", () => {
     it("names its core heatmap with the number of cores", () => {
         mount();
         expect(screen.getByText("Cores (2)")).toBeTruthy();
+    });
+
+    it("keeps its tiles and their sparklines across new samples, giving them new data", async () => {
+        const [data, setData] = createSignal(DATA.slice(0, 2));
+        render(() => (
+            <Overview
+                plotData={data()}
+                targetLen={121}
+                intervalSecs={1}
+                windowPoints={120}
+                onWindow={vi.fn()}
+                paused={false}
+                onPause={vi.fn()}
+                focus={null}
+                onFocus={vi.fn()}
+                syncKey="sysinfo-b"
+            />
+        ));
+        await vi.advanceTimersByTimeAsync(200);
+        const built = made.charts.length;
+        const spark = made.charts[0];
+        setData(DATA);
+        await vi.advanceTimersByTimeAsync(200);
+        expect(made.charts.length).toBe(built);
+        expect(spark.data[1]).toEqual([20, 60, 40]);
+        expect(tileValue("CPU")).toBe("40%");
     });
 
     it("offers each area alone, and every area again", () => {

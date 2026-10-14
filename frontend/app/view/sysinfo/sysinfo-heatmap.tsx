@@ -5,6 +5,8 @@
  * Every core's load over the window, one row per core and one column per
  * sample, in one hue: the stronger, the busier. A gap is left empty. It fits any
  * number of cores, where one line per core stops being readable past a few.
+ * Columns sit by time on the charts' window, inside the same side gutters
+ * (`PLOT_LEFT_PX`), so they line up under the charts above.
  * docs/reports/REPORT_SYSINFO_REWRITE_AND_MODERN_MONITOR_2026_10_13.md section 5.3.
  */
 
@@ -13,8 +15,8 @@ import { createEffect, createSignal, onCleanup, onMount } from "solid-js";
 
 import { appliedWindowTheme } from "@/app/store/window-appearance";
 
-import { resolveCssColor, withAlpha } from "./sysinfo-chart";
-import { coreGrid } from "./sysinfo-overview-data";
+import { PLOT_LEFT_PX, PLOT_RIGHT_PX, resolveCssColor, withAlpha, xWindowSecs } from "./sysinfo-chart";
+import { columnSpan, coreGrid } from "./sysinfo-overview-data";
 import type { DataItem } from "./sysinfo-types";
 
 /** The faintest a busy-at-all cell is drawn, so 1 % still shows against the background. */
@@ -26,7 +28,16 @@ function cellAlpha(pct: number): number {
     return MIN_ALPHA + (1 - MIN_ALPHA) * v;
 }
 
-export function CoreHeatmap(props: { plotData: DataItem[]; cores: string[]; color: string }): JSX.Element {
+type CoreHeatmapProps = {
+    plotData: DataItem[];
+    cores: string[];
+    color: string;
+    /** The window, as the charts take it (`xWindowSecs`). */
+    targetLen: number;
+    intervalSecs: number;
+};
+
+export function CoreHeatmap(props: CoreHeatmapProps): JSX.Element {
     let host!: HTMLDivElement;
     let canvas!: HTMLCanvasElement;
     let tip!: HTMLDivElement;
@@ -40,6 +51,9 @@ export function CoreHeatmap(props: { plotData: DataItem[]; cores: string[]; colo
         observer.observe(host);
         onCleanup(() => observer.disconnect());
     });
+
+    const plotWidth = (width: number) => width - PLOT_LEFT_PX - PLOT_RIGHT_PX;
+    const win = (rows: DataItem[]) => xWindowSecs(rows, props.targetLen, props.intervalSecs);
 
     createEffect(() => {
         // Drawn again on a theme change too, even while paused: the color is read from it.
@@ -56,17 +70,19 @@ export function CoreHeatmap(props: { plotData: DataItem[]; cores: string[]; colo
         canvas.style.height = `${height}px`;
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         ctx.clearRect(0, 0, width, height);
-        const cols = rows.length;
-        if (cols === 0 || grid.length === 0) return;
+        const w = win(rows);
+        const pw = plotWidth(width);
+        if (!w || pw <= 0 || grid.length === 0) return;
         const color = resolveCssColor(host, props.color);
-        const cw = width / cols;
         const rh = height / grid.length;
+        const spans = rows.map((row) => columnSpan(row.ts, w, props.intervalSecs, pw));
         grid.forEach((cells, r) => {
             cells.forEach((v, c) => {
-                if (v == null) return;
+                const span = spans[c];
+                if (v == null || !span) return;
                 ctx.fillStyle = withAlpha(color, cellAlpha(v));
                 // A hairline between rows keeps cores apart without a grid.
-                ctx.fillRect(c * cw, r * rh, Math.ceil(cw), Math.max(1, rh - 1));
+                ctx.fillRect(PLOT_LEFT_PX + span[0], r * rh, Math.ceil(span[1] - span[0]), Math.max(1, rh - 1));
             });
         });
     });
@@ -74,9 +90,20 @@ export function CoreHeatmap(props: { plotData: DataItem[]; cores: string[]; colo
     const onMove = (e: MouseEvent) => {
         const rows = props.plotData ?? [];
         const { width, height } = size();
-        if (!rows.length || !props.cores.length || width <= 0) return;
+        const w = win(rows);
+        const pw = plotWidth(width);
+        if (!w || !props.cores.length || pw <= 0) return;
         const rect = host.getBoundingClientRect();
-        const c = Math.min(rows.length - 1, Math.max(0, Math.floor(((e.clientX - rect.left) / width) * rows.length)));
+        // The sample whose column is under the pointer.
+        const x = e.clientX - rect.left - PLOT_LEFT_PX;
+        const c = rows.findIndex((row) => {
+            const span = columnSpan(row.ts, w, props.intervalSecs, pw);
+            return span != null && x >= span[0] && x < span[1];
+        });
+        if (c < 0) {
+            tip.style.display = "none";
+            return;
+        }
         const r = Math.min(
             props.cores.length - 1,
             Math.max(0, Math.floor(((e.clientY - rect.top) / height) * props.cores.length))

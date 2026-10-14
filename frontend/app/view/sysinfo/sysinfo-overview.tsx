@@ -60,10 +60,16 @@ type OverviewProps = {
     syncKey: string;
 };
 
+type Stats = Record<"cpu" | "mem" | "total" | "recv" | "sent" | "read" | "write", WindowStats | null>;
+
+/**
+ * One tile. Its figures are read from the window's stats as they change; the
+ * tile itself, and its sparkline, stay built.
+ */
 interface Tile {
     name: string;
-    value: string;
-    range: string;
+    value: (s: Stats) => string;
+    range: (s: Stats) => string;
     sparkKey: string;
     color: string;
     format: (v: number) => string;
@@ -81,7 +87,7 @@ export function Overview(props: OverviewProps): JSX.Element {
     const cores = createMemo(() => coreKeys(latest()));
     const pct = (v: number) => formatValue(v, 0, "%");
 
-    const stats = createMemo(() => ({
+    const stats = createMemo((): Stats => ({
         cpu: windowStats(rows(), "cpu"),
         mem: windowStats(rows(), "mem:used"),
         total: windowStats(rows(), "mem:total"),
@@ -91,47 +97,46 @@ export function Overview(props: OverviewProps): JSX.Element {
         write: windowStats(rows(), "disk:write"),
     }));
 
-    const tiles = createMemo((): Tile[] => {
-        const s = stats();
-        return [
-            {
-                name: "CPU",
-                value: s.cpu ? pct(s.cpu.now) : "–",
-                range: lowHigh(s.cpu, pct),
-                sparkKey: "cpu",
-                color: CPU,
-                format: pct,
-                range0: () => [0, 100],
-            },
-            {
-                name: "Memory",
-                value: s.mem ? `${formatGB(s.mem.now)}${s.total ? ` of ${formatGB(s.total.now)}` : ""}` : "–",
-                range: lowHigh(s.mem, formatGB),
-                sparkKey: "mem:used",
-                color: MEM,
-                format: formatGB,
-                range0: (r) => yRange(r, "mem:used", DefaultPlotMeta["mem:used"]),
-            },
-            {
-                name: "Network",
-                value: s.recv || s.sent ? `↓ ${formatRate(s.recv?.now)}  ↑ ${formatRate(s.sent?.now)}` : "–",
-                range: s.recv ? `↓ peak ${formatRate(s.recv.max)}` : "",
-                sparkKey: "net:bytesrecv",
-                color: IN,
-                format: formatRate,
-                range0: (r) => yRange(r, "net:bytesrecv", DefaultPlotMeta["net:bytesrecv"]),
-            },
-            {
-                name: "Disk",
-                value: s.read || s.write ? `R ${formatRate(s.read?.now)}  W ${formatRate(s.write?.now)}` : "–",
-                range: s.read ? `R peak ${formatRate(s.read.max)}` : "",
-                sparkKey: "disk:read",
-                color: IN,
-                format: formatRate,
-                range0: (r) => yRange(r, "disk:read", DefaultPlotMeta["disk:read"]),
-            },
-        ];
-    });
+    // Built once: a list made again on every sample would make <For> build every
+    // tile and its sparkline again each second.
+    const tiles: Tile[] = [
+        {
+            name: "CPU",
+            value: (s) => (s.cpu ? pct(s.cpu.now) : "–"),
+            range: (s) => lowHigh(s.cpu, pct),
+            sparkKey: "cpu",
+            color: CPU,
+            format: pct,
+            range0: () => [0, 100],
+        },
+        {
+            name: "Memory",
+            value: (s) => (s.mem ? `${formatGB(s.mem.now)}${s.total ? ` of ${formatGB(s.total.now)}` : ""}` : "–"),
+            range: (s) => lowHigh(s.mem, formatGB),
+            sparkKey: "mem:used",
+            color: MEM,
+            format: formatGB,
+            range0: (r) => yRange(r, "mem:used", DefaultPlotMeta["mem:used"]),
+        },
+        {
+            name: "Network",
+            value: (s) => (s.recv || s.sent ? `↓ ${formatRate(s.recv?.now)}  ↑ ${formatRate(s.sent?.now)}` : "–"),
+            range: (s) => (s.recv ? `↓ peak ${formatRate(s.recv.max)}` : ""),
+            sparkKey: "net:bytesrecv",
+            color: IN,
+            format: formatRate,
+            range0: (r) => yRange(r, "net:bytesrecv", DefaultPlotMeta["net:bytesrecv"]),
+        },
+        {
+            name: "Disk",
+            value: (s) => (s.read || s.write ? `R ${formatRate(s.read?.now)}  W ${formatRate(s.write?.now)}` : "–"),
+            range: (s) => (s.read ? `R peak ${formatRate(s.read.max)}` : ""),
+            sparkKey: "disk:read",
+            color: IN,
+            format: formatRate,
+            range0: (r) => yRange(r, "disk:read", DefaultPlotMeta["disk:read"]),
+        },
+    ];
 
     const netSeries: SeriesSpec[] = [
         { key: "net:bytesrecv", label: "In", color: IN },
@@ -214,12 +219,12 @@ export function Overview(props: OverviewProps): JSX.Element {
 
             <Show when={!props.focus}>
                 <div class="sysinfo-overview-tiles">
-                    <For each={tiles()}>
+                    <For each={tiles}>
                         {(t) => (
                             <div class="sysinfo-tile">
                                 <div class="sysinfo-tile-name">{t.name}</div>
-                                <div class="sysinfo-tile-value">{t.value}</div>
-                                <div class="sysinfo-tile-range">{t.range}</div>
+                                <div class="sysinfo-tile-value">{t.value(stats())}</div>
+                                <div class="sysinfo-tile-range">{t.range(stats())}</div>
                                 <TimeChart
                                     plotData={rows()}
                                     series={[{ key: t.sparkKey, label: t.name, color: t.color }]}
@@ -292,7 +297,13 @@ export function Overview(props: OverviewProps): JSX.Element {
                         <Show when={cores().length > 0}>
                             <div class="sysinfo-overview-wide sysinfo-overview-cores">
                                 <div class="sysinfo-chart-title">{`Cores (${cores().length})`}</div>
-                                <CoreHeatmap plotData={rows()} cores={cores()} color={CPU} />
+                                <CoreHeatmap
+                                    plotData={rows()}
+                                    cores={cores()}
+                                    color={CPU}
+                                    targetLen={props.targetLen}
+                                    intervalSecs={props.intervalSecs}
+                                />
                             </div>
                         </Show>
                         <TimeChart
