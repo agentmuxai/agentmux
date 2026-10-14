@@ -543,7 +543,7 @@ async fn open_agent_inner(
                 }
 
                 // 6. Build metadata
-                if agent.agent_type == "container" && provider.controller_type == providers::ControllerType::Terminal { return Err(format!("{} runs in a terminal pane on the host, not in a container", provider.id)); }
+                if agent.agent_type == "container" && matches!(provider.controller_type, providers::ControllerType::Terminal | providers::ControllerType::Msp) { return Err(format!("{} runs on the host, not in a container", provider.id)); }
                 let controller_type = provider.controller_type_str();
                 // Container agents use per-turn docker exec; the subprocess controller
                 // is required regardless of what the provider defaults to (claude returns

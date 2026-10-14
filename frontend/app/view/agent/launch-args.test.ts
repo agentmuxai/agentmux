@@ -201,6 +201,10 @@ describe("launchController", () => {
         expect(launchController(acp, undefined)).toBe("acp");
     });
 
+    it("starts Muse Code on the MSP controller", () => {
+        expect(launchController({ controllerType: "msp", launchArgs: [] } as any, "host")).toBe("msp");
+    });
+
     it("keeps every container agent on the subprocess path", () => {
         for (const p of [acp, persistent, subprocess]) {
             expect(launchController(p, "container")).toBe("subprocess");

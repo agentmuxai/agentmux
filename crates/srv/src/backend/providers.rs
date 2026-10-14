@@ -24,6 +24,9 @@ pub enum ControllerType {
     /// Agent Client Protocol (ACP): JSON-RPC 2.0 over stdio.
     /// Sessions are managed by the protocol — no resume flags needed.
     Acp,
+    /// Muse Session Protocol (MSP, `muse serve`): Muse Code's own JSON-RPC
+    /// 2.0 over stdio, driven by the `msp` controller (blockcontroller/msp.rs).
+    Msp,
     /// Provider-specific App Server protocol over a persistent JSONL stdio
     /// transport. Protocol semantics are selected by [`AppServerKind`].
     #[allow(dead_code)] // Off by default until SPEC_CODEX_APP_SERVER_FIRST_CLASS_PROVIDER_2026_09_12.md §15 Slice 6.
@@ -230,6 +233,7 @@ impl ProviderConfig {
             ControllerType::Persistent => "persistent",
             ControllerType::Subprocess => "subprocess",
             ControllerType::Acp => "acp",
+            ControllerType::Msp => "msp",
             ControllerType::AppServer => "app-server",
             ControllerType::Terminal => "cmd",
         }

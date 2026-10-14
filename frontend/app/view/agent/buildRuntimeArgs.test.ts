@@ -265,10 +265,10 @@ describe("buildRuntimeArgs — antigravity", () => {
     });
 });
 
-describe("buildRuntimeArgs — ACP and terminal-tier agents", () => {
-    // Permission is asked inside ACP (session/request_permission), or in a
-    // terminal-tier CLI's own UI, so the launch args stay exactly the catalog's
-    // in every mode.
+describe("buildRuntimeArgs — ACP, MSP and terminal-tier agents", () => {
+    // Permission is asked inside ACP (session/request_permission) or MSP
+    // (approval/request), or in a terminal-tier CLI's own UI, so the launch
+    // args stay exactly the catalog's in every mode.
     for (const id of ["copilot", "openclaw", "pi", "kilo", "cline", "opencode", "goose", "grok", "dsh", "aider", "crush", "muse"]) {
         it(`${id}: no permission, model or effort flag in any mode`, () => {
             const base = getProvider(id)!.launchArgs;

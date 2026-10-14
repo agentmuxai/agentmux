@@ -98,7 +98,7 @@ fn is_session_replay(loading: bool, is_session_response: bool) -> bool {
 /// `cwd`: the pane's working directory (`~` expanded; a relative one resolved
 /// against the server's, as `Command::current_dir` resolves it), else the
 /// directory the agent process itself starts in.
-fn session_cwd(working_dir: &str) -> String {
+pub(super) fn session_cwd(working_dir: &str) -> String {
     let here = std::env::current_dir().unwrap_or_default();
     let dir = if working_dir.is_empty() {
         here.clone()
@@ -874,7 +874,7 @@ impl AcpController {
 }
 
 /// A meta value that is a string array, or a JSON string encoding one.
-fn meta_string_list(meta: &super::super::obj::MetaMapType, key: &str) -> Vec<String> {
+pub(super) fn meta_string_list(meta: &super::super::obj::MetaMapType, key: &str) -> Vec<String> {
     match meta.get(key) {
         Some(serde_json::Value::Array(values)) => values
             .iter()
@@ -926,29 +926,36 @@ impl AcpController {
     /// M4b-2. agentmux-mcp, which ACP agents get in `session/new`
     /// (`acp_mcp`), runs as the agent's child and so carries it.
     fn spawn_env(&self, block_meta: &super::super::obj::MetaMapType) -> HashMap<String, String> {
-        let mut env_vars = meta_string_map(block_meta, super::META_KEY_CMD_ENV);
-        if let Some(mstore) = &self.mstore {
-            crate::server::agent_handlers::input::carry_block_identity_env(
-                mstore,
-                &self.block_id,
-                &mut env_vars,
-            );
-        }
-        // The workspace the "Your workspace" Operator Config entry points at.
-        crate::server::agent_handlers::input::carry_agent_workdir_env(&mut env_vars, block_meta);
-        // The agent's `agentmux-mcp` reaches srv with these, as on the
-        // persistent path: reserved values, so they replace any in `cmd:env`.
-        if self.auth_key.is_empty() {
-            env_vars.remove("AGENTMUX_AUTH_KEY");
-        } else {
-            env_vars.insert("AGENTMUX_AUTH_KEY".to_string(), self.auth_key.clone());
-        }
-        env_vars.insert("AGENTMUX_BLOCKID".to_string(), self.block_id.clone());
-        crate::server::browser_uploads::record_launch_workspace(&self.block_id, &env_vars);
-        crate::backend::gh_guard::apply_gh_guard(&mut env_vars);
-        crate::backend::account_login_guard::strip_account_login(&mut env_vars);
-        env_vars
+        session_agent_env(block_meta, &self.block_id, &self.mstore, &self.auth_key)
     }
+}
+
+/// The env a session agent's process (ACP or MSP) is spawned with: see
+/// `AcpController::spawn_env`.
+pub(super) fn session_agent_env(
+    block_meta: &super::super::obj::MetaMapType,
+    block_id: &str,
+    mstore: &Option<Arc<Store>>,
+    auth_key: &str,
+) -> HashMap<String, String> {
+    let mut env_vars = meta_string_map(block_meta, super::META_KEY_CMD_ENV);
+    if let Some(mstore) = mstore {
+        crate::server::agent_handlers::input::carry_block_identity_env(mstore, block_id, &mut env_vars);
+    }
+    // The workspace the "Your workspace" Operator Config entry points at.
+    crate::server::agent_handlers::input::carry_agent_workdir_env(&mut env_vars, block_meta);
+    // The agent's `agentmux-mcp` reaches srv with these, as on the
+    // persistent path: reserved values, so they replace any in `cmd:env`.
+    if auth_key.is_empty() {
+        env_vars.remove("AGENTMUX_AUTH_KEY");
+    } else {
+        env_vars.insert("AGENTMUX_AUTH_KEY".to_string(), auth_key.to_string());
+    }
+    env_vars.insert("AGENTMUX_BLOCKID".to_string(), block_id.to_string());
+    crate::server::browser_uploads::record_launch_workspace(block_id, &env_vars);
+    crate::backend::gh_guard::apply_gh_guard(&mut env_vars);
+    crate::backend::account_login_guard::strip_account_login(&mut env_vars);
+    env_vars
 }
 
 impl Controller for AcpController {

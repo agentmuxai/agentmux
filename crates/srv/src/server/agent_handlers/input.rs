@@ -1241,10 +1241,10 @@ pub async fn run_agent_turn_joining(
             hint.keep();
         }
     } else if let Some(acp_ctrl) =
-        ctrl.as_any().downcast_ref::<blockcontroller::acp::AcpController>()
+        blockcontroller::session_agent::session_agent(ctrl.as_ref())
     {
-        // ACP agents (Copilot, OpenClaw, Pi): the message becomes a
-        // `session/prompt` on the agent's running session.
+        // ACP agents (Copilot, OpenClaw, Pi) and Muse Code (MSP): the message
+        // becomes a prompt (a turn) on the agent's running session.
         // If the agent's process exited or crashed, this starts it again from
         // the pane's meta; the message waits for the new session.
         acp_ctrl.ensure_started(block.meta.clone())?;
@@ -1253,7 +1253,7 @@ pub async fn run_agent_turn_joining(
         hint.keep();
     } else {
         return Err(
-            "controller is not a SubprocessController, PersistentSubprocessController or AcpController"
+            "controller is not a SubprocessController, PersistentSubprocessController or session agent"
                 .to_string(),
         );
     }

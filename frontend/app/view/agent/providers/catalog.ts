@@ -860,14 +860,15 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
     muse: {
         id: "muse",
         displayName: "Muse Code",
-        // Terminal tier for now: Muse Code's own UI in a terminal pane (it has no
-        // ACP). Not on npm: the user installs it with Meta's installer; srv runs
-        // its native binary. Mirrors crates/srv/src/backend/providers/muse.rs.
+        // An agent pane over Muse's own protocol, MSP (`muse serve`; it has no
+        // ACP), driven by srv's MspController. Not on npm: the user installs it
+        // with Meta's installer; srv runs its native binary. Mirrors
+        // crates/srv/src/backend/providers/muse.rs.
         cliCommand: "muse",
         defaultArgs: [],
         styledArgs: [],
-        outputFormat: "raw",
-        styledOutputFormat: "raw",
+        outputFormat: "msp",
+        styledOutputFormat: "msp",
         // Sign-in is Muse's own (`muse login`, a Meta account, or META_API_KEY).
         authType: "cli-managed",
         authCheckCommand: [],
@@ -886,10 +887,10 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         authExtraEnv: { MUSE_NO_AUTO_UPDATE: "1", TBH_DISABLE_TELEMETRY: "1" },
         supportedVendors: ["meta"],
         startupInstructionsFilename: "AGENTS.md",
-        launchArgs: ["--trust-workspace"],
+        launchArgs: ["serve","--trust-workspace"],
         resumeFlag: null,
-        sessionIdField: "",
-        controllerType: "terminal",
+        sessionIdField: "sessionId",
+        controllerType: "msp",
     },
 };
 

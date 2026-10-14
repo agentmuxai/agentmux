@@ -639,11 +639,20 @@ mod prepare_provider_auth_dir_tests {
 
 #[test]
 fn terminal_tier_harnesses_run_on_the_cmd_controller() {
-    for id in ["aider", "crush", "muse"] {
+    for id in ["aider", "crush"] {
         let p = get_provider(id).unwrap();
         assert_eq!(p.controller_type, ControllerType::Terminal, "{id}");
         assert_eq!(p.controller_type_str(), "cmd", "{id}");
     }
+}
+
+#[test]
+fn muse_runs_its_msp_host_on_the_msp_controller() {
+    let p = get_provider("muse").unwrap();
+    assert_eq!(p.controller_type, ControllerType::Msp);
+    assert_eq!(p.controller_type_str(), "msp");
+    assert_eq!(p.styled_output_format, "msp");
+    assert_eq!(p.launch_args, &["serve", "--trust-workspace"]);
 }
 
 #[test]

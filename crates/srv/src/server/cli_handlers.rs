@@ -852,11 +852,14 @@ pub(crate) async fn resolve_provider_cli_on_path(provider_id: &str, cli_command:
             .find(|p| p.is_file())
             .map(|p| p.to_string_lossy().into_owned())
     };
-    // A prompt-in-argv CLI, and a terminal-tier one (it runs as the pane's
-    // own process), can't be a `.cmd` wrapper that isn't an npm shim.
+    // A prompt-in-argv CLI, a terminal-tier one (it runs as the pane's own
+    // process) and Muse's MSP host (its launcher updates itself and wraps the
+    // stdio) can't be a `.cmd` wrapper that isn't an npm shim.
     let provider = crate::backend::providers::get_provider(provider_id);
     let prompt_in_argv = provider.and_then(|p| p.prompt_arg_flag()).is_some();
-    let terminal = provider.is_some_and(|p| p.controller_type == crate::backend::providers::ControllerType::Terminal);
+    let terminal = provider.is_some_and(|p| {
+        matches!(p.controller_type, crate::backend::providers::ControllerType::Terminal | crate::backend::providers::ControllerType::Msp)
+    });
     if prompt_in_argv || terminal {
         if let Some(path) = known() {
             return Some(path);
