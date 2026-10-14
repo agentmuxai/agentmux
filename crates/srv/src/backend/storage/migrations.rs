@@ -1191,8 +1191,7 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
             device_name  TEXT NOT NULL,
             device_key   TEXT NOT NULL DEFAULT '',
             created_ms   INTEGER NOT NULL,
-            last_seen_ms INTEGER NOT NULL DEFAULT 0,
-            can_send     INTEGER NOT NULL DEFAULT 0
+            last_seen_ms INTEGER NOT NULL DEFAULT 0
         );
 
         -- The bundles picked for an agent, in order; its own bundle
@@ -1432,13 +1431,8 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
         // v42: the Runtime menu choices the user last made for the agent. See
         // OBJECT_SCHEMA_VERSION's v42 doc comment above.
         "ALTER TABLE db_agents ADD COLUMN last_runtime TEXT NOT NULL DEFAULT ''",
-        // v43: an agent hidden from paired devices. See
-        // OBJECT_SCHEMA_VERSION's v43 doc comment above.
+        // v43 (see its doc comment), then a device's send grant (no bump: older builds ignore it).
         "ALTER TABLE db_agents ADD COLUMN hide_from_devices INTEGER NOT NULL DEFAULT 0",
-        // A paired device's grant to send to agents as the user, off until
-        // the owner turns it on (agentmux-mobile's
-        // SPEC_SEND_FROM_THE_PHONE_2026_10_13 §4). Additive and ignored by
-        // older builds, so no version bump.
         "ALTER TABLE db_viewer_devices ADD COLUMN can_send INTEGER NOT NULL DEFAULT 0",
     ] {
         if let Err(e) = conn.execute_batch(stmt) {
