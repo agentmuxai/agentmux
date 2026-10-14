@@ -1,7 +1,7 @@
 # SPEC: Pane tabs as reducer commands — one writer for "which blocks are in which pane"
 
 **Date:** 2026-09-18
-**Status:** implemented — Phase 0 implemented in #3414; Phase 1 in #3424, #3441 (`LayoutStackMove`) and #4882 (tab switch/close commands with `actionid` dedup, I1); Phase 2 (`layout_revision`) in #4882; Phase 3 (the invariant reaper and loud logging) in this PR. Verified against code 2026-10-14 ([triage](../analysis/REPORT_REDUCER_STACK_TRIAGE_2026_10_13.md)).
+**Status:** implemented — Phase 0 implemented in #3414; Phase 1 in #3424, #3441 (`LayoutStackMove`) and #4882 (tab switch/close commands with `actionid` dedup, I1); Phase 2 (`layout_revision`) in #4882; Phase 3 (the invariant reaper and loud logging) in #4884. Verified against code 2026-10-14 ([triage](../analysis/REPORT_REDUCER_STACK_TRIAGE_2026_10_13.md)).
 **Author:** AgentA@Area54
 **Related:** [`docs/specs/SPEC_AGENT_PANE_CLOSE_GRACEFUL_SHUTDOWN_2026_09_18.md`](SPEC_AGENT_PANE_CLOSE_GRACEFUL_SHUTDOWN_2026_09_18.md)
 (§6 names this as its follow-up; its orphan reaper, §4.9, is the backstop for
@@ -280,7 +280,7 @@ pending-action verbs and handler (§3.3), unified neighbour rule (§3.6), I1/I2 
 `validate_layout_invariants` violations are logged loudly with the tab and
 block ids.
 
-*Phase 3 as implemented (this PR):* the orphan reaper
+*Phase 3 as implemented (#4884):* the orphan reaper
 (`sagas/orphan_reaper.rs`) finds unplaced blocks with `unplaced_blocks`
 (I1). A block of any kind that stays unplaced past `MIN_ORPHAN_AGE` is
 logged once at error level, with its tab and block ids and view. Only agent
