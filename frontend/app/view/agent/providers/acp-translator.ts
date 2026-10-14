@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { StreamEvent } from "../types";
+import type { SessionStats, StreamEvent } from "../types";
 import type { OutputTranslator } from "./translator";
 import { ToolCorrelator, wrapOutput } from "./tool-correlation";
 
@@ -24,7 +24,8 @@ import { ToolCorrelator, wrapOutput } from "./tool-correlation";
  *   plan, usage_update, available_commands_update, current_mode_update,
  *   user_message_chunk   — not rendered
  *
- * The turn ends with the `session/prompt` response's `result.stopReason`.
+ * The turn ends with the `session/prompt` response's `result.stopReason`; its
+ * `result.usage` (ACP, unstable: OpenCode and Kilo send it) is the turn's tokens.
  *
  * The first version read a flat `params.type` (`agent_message_chunk`,
  * `tool_call`, `tool_result` with `content`/`toolName`/`input`), which no ACP
@@ -51,7 +52,7 @@ export class AcpTranslator implements OutputTranslator {
         if (typeof stopReason === "string") {
             this.ended.clear();
             this.calls.clear();
-            return [{ type: "session_end", stats: {} }];
+            return [{ type: "session_end", stats: turnUsage(rawEvent.result.usage) }];
         }
 
         // A JSON-RPC error: a failed prompt, or a session the agent refused to
@@ -175,6 +176,20 @@ export class AcpTranslator implements OutputTranslator {
 }
 
 /** The text of a ContentBlock (`{type: "text", text}`); "" for anything else. */
+/** A prompt response's `usage` as session stats: ACP gives input, output and
+ *  cache counts, not how much of the input was fresh. */
+function turnUsage(usage: any): SessionStats {
+    if (!usage || typeof usage !== "object") return {};
+    const n = (v: unknown) => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : undefined);
+    const stats: SessionStats = {
+        input_tokens: n(usage.inputTokens),
+        output_tokens: n(usage.outputTokens),
+        cache_read_input_tokens: n(usage.cachedReadTokens),
+        cache_creation_input_tokens: n(usage.cachedWriteTokens),
+    };
+    return Object.fromEntries(Object.entries(stats).filter(([, v]) => v !== undefined)) as SessionStats;
+}
+
 function blockText(block: any): string {
     if (typeof block === "string") return block;
     if (block && typeof block === "object" && block.type === "text" && typeof block.text === "string") return block.text;

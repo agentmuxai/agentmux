@@ -99,6 +99,24 @@ describe("AcpTranslator — standard session/update", () => {
         }
     });
 
+    it("takes the turn's tokens from the prompt response's usage", () => {
+        const t = new AcpTranslator();
+        const end = (usage: unknown) => t.translate({ jsonrpc: "2.0", id: 3, result: { stopReason: "end_turn", usage } });
+        expect(end({ inputTokens: 1200, outputTokens: 80, cachedReadTokens: 900, cachedWriteTokens: 100, totalTokens: 1280 })).toEqual([
+            {
+                type: "session_end",
+                stats: { input_tokens: 1200, output_tokens: 80, cache_read_input_tokens: 900, cache_creation_input_tokens: 100 },
+            },
+        ]);
+        // Only what the agent sent; nothing for a missing, null or malformed usage.
+        expect(end({ inputTokens: 5, outputTokens: 2, cachedReadTokens: null })).toEqual([
+            { type: "session_end", stats: { input_tokens: 5, output_tokens: 2 } },
+        ]);
+        for (const usage of [undefined, null, "x", { inputTokens: -1, outputTokens: "2" }]) {
+            expect(end(usage)).toEqual([{ type: "session_end", stats: {} }]);
+        }
+    });
+
     it("an update that fills in the input or a better title re-emits the same call", () => {
         const t = new AcpTranslator();
         t.translate(update({ sessionUpdate: "tool_call", toolCallId: "c6", title: "Read", kind: "read", status: "pending" }));
