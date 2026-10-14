@@ -1,31 +1,33 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-use agentmux_common::ipc::{ErrorCode, Event};
+use agentmux_common::ipc::Event;
 
 use crate::state::State;
 
 
 use crate::state::TabRecord;
 
-/// Phase E.2b — create a tab inside a workspace. Validates the
-/// parent exists; otherwise emits `Event::Error` (non-fatal). On
-/// success: assigns a UUID, appends to the workspace's `tab_ids`,
-/// inserts into `state.tabs`, emits `Event::TabCreated`. If the
-/// workspace had no active tab, the new tab also becomes active
-/// and an `Event::ActiveTabChanged` is emitted alongside.
-///
-/// NOT idempotent on retry (same UUID-assignment caveat as
-/// `handle_create_workspace`).
-pub(super) fn handle_create_tab(state: &mut State, workspace_id: String, name: String) -> Vec<Event> {
+use super::invalid_command;
+
+/// Phase E.2b — create a tab with the caller-minted `tab_id`
+/// (`Ctx::new_id`) inside a workspace. Refuses (non-fatal `Event::Error`)
+/// a missing parent or an id already in use. On success: appends to the
+/// workspace's `tab_ids`, inserts into `state.tabs`, emits
+/// `Event::TabCreated`. If the workspace had no active tab, the new tab
+/// also becomes active and an `Event::ActiveTabChanged` is emitted
+/// alongside.
+pub(super) fn handle_create_tab(
+    state: &mut State,
+    workspace_id: String,
+    tab_id: String,
+    name: String,
+) -> Vec<Event> {
+    if state.tabs.contains_key(&tab_id) {
+        return invalid_command(state, format!("CreateTab: id already in use: {}", tab_id));
+    }
     let Some(workspace_record) = state.workspaces.get(&workspace_id) else {
-        let v = state.bump_version();
-        return vec![Event::Error {
-            code: ErrorCode::InvalidCommand,
-            message: format!("CreateTab: workspace not found: {}", workspace_id),
-            fatal: false,
-            version: v,
-        }];
+        return invalid_command(state, format!("CreateTab: workspace not found: {}", workspace_id));
     };
     // codex P2 #622: auto-generate `Tab N` when name is empty,
     // matching `wcore::create_tab`'s default-naming behaviour. The
@@ -38,7 +40,6 @@ pub(super) fn handle_create_tab(state: &mut State, workspace_id: String, name: S
     } else {
         name
     };
-    let tab_id = uuid::Uuid::new_v4().to_string();
     state.tabs.insert(
         tab_id.clone(),
         TabRecord {
@@ -78,12 +79,22 @@ pub(super) fn handle_create_tab(state: &mut State, workspace_id: String, name: S
     events
 }
 
+/// The tab that takes over as active when the active tab leaves
+/// `tab_ids` from `removed_pos`: the next tab, or the previous one if it
+/// was last, or `None` if none is left. `tab_ids` is the list after the
+/// removal. Deleting and moving a tab out both use it.
+fn neighbour_tab(tab_ids: &[String], removed_pos: usize) -> Option<String> {
+    tab_ids
+        .get(removed_pos)
+        .or_else(|| removed_pos.checked_sub(1).and_then(|i| tab_ids.get(i)))
+        .cloned()
+}
+
 /// Phase E.2b — delete a tab from a workspace. Idempotent: deleting
 /// a missing tab is a silent no-op. If the deleted tab was the
-/// active tab, the workspace's active tab becomes the next tab in
-/// `tab_ids` (or the previous one if the deleted was last; or None
-/// if the workspace is now empty), and an `Event::ActiveTabChanged`
-/// is emitted alongside `Event::TabDeleted`.
+/// active tab, the workspace's active tab becomes its neighbour
+/// (`neighbour_tab`), and an `Event::ActiveTabChanged` is emitted
+/// alongside `Event::TabDeleted`.
 pub(super) fn handle_delete_tab(
     state: &mut State,
     workspace_id: String,
@@ -96,40 +107,22 @@ pub(super) fn handle_delete_tab(
     let Some(pos) = workspace.tab_ids.iter().position(|t| t == &tab_id) else {
         return Vec::new();
     };
-    // Last-tab guard with `force` bypass (round 4 of PR #633).
-    // History:
-    //   * Round 1: saga pre-check → reagent flagged TOCTOU race.
-    //   * Round 2: moved guard to reducer (atomic) → broke CreateTab
-    //     compensation (codex P1 round 2) and Cmd+W keyboard flow
-    //     (codex P1 round 1).
-    //   * Round 3: removed guard entirely; saga keeps soft pre-check
-    //     → codex P2 round 4 re-flagged the TOCTOU race.
-    //   * Round 4 (this): atomic guard with `force: bool` bypass.
-    //     User-facing flows (CloseTab RPC → DeleteTab saga) pass
-    //     `force: false`; compensation paths (`CreateTab` rollback,
-    //     `PromoteBlockToTab.ctx.compensate`) pass `force: true`.
-    //     Frontend keyboard handler `simpleCloseStaticTab` already
-    //     gates pre-RPC, so the reducer rejection is a defense-in-
-    //     depth backstop that catches automation/race paths.
+    // Last-tab guard, here rather than in the caller so two concurrent
+    // closes can't both pass a stale count (#633). User flows (CloseTab →
+    // DeleteTab saga) pass `force: false`; compensation paths (`CreateTab`
+    // rollback, `PromoteBlockToTab` compensate) pass `force: true`.
     if !force && workspace.tab_ids.len() <= 1 {
-        let v = state.bump_version();
-        return vec![Event::Error {
-            code: ErrorCode::InvalidCommand,
-            message: format!(
+        return invalid_command(
+            state,
+            format!(
                 "DeleteTab: refusing to delete the last tab in workspace {} (would leave empty workspace; pass force=true for compensation paths)",
                 workspace_id,
             ),
-            fatal: false,
-            version: v,
-        }];
+        );
     }
     workspace.tab_ids.remove(pos);
     let active_changed = if workspace.active_tab_id.as_deref() == Some(tab_id.as_str()) {
-        let new_active = workspace
-            .tab_ids
-            .get(pos)
-            .or_else(|| pos.checked_sub(1).and_then(|i| workspace.tab_ids.get(i)))
-            .cloned();
+        let new_active = neighbour_tab(&workspace.tab_ids, pos);
         workspace.active_tab_id = new_active.clone();
         Some(new_active)
     } else {
@@ -180,25 +173,10 @@ pub(super) fn handle_set_active_tab(
     tab_id: String,
 ) -> Vec<Event> {
     let Some(workspace) = state.workspaces.get_mut(&workspace_id) else {
-        let v = state.bump_version();
-        return vec![Event::Error {
-            code: ErrorCode::InvalidCommand,
-            message: format!("SetActiveTab: workspace not found: {}", workspace_id),
-            fatal: false,
-            version: v,
-        }];
+        return invalid_command(state, format!("SetActiveTab: workspace not found: {}", workspace_id));
     };
     if !workspace.tab_ids.iter().any(|t| t == &tab_id) {
-        let v = state.bump_version();
-        return vec![Event::Error {
-            code: ErrorCode::InvalidCommand,
-            message: format!(
-                "SetActiveTab: tab {} not in workspace {}",
-                tab_id, workspace_id
-            ),
-            fatal: false,
-            version: v,
-        }];
+        return invalid_command(state, format!("SetActiveTab: tab {} not in workspace {}", tab_id, workspace_id));
     }
     if workspace.active_tab_id.as_deref() == Some(tab_id.as_str()) {
         return Vec::new();
@@ -223,25 +201,10 @@ pub(super) fn handle_reorder_tab(
     new_index: u32,
 ) -> Vec<Event> {
     let Some(workspace) = state.workspaces.get_mut(&workspace_id) else {
-        let v = state.bump_version();
-        return vec![Event::Error {
-            code: ErrorCode::InvalidCommand,
-            message: format!("ReorderTab: workspace not found: {}", workspace_id),
-            fatal: false,
-            version: v,
-        }];
+        return invalid_command(state, format!("ReorderTab: workspace not found: {}", workspace_id));
     };
     let Some(current_pos) = workspace.tab_ids.iter().position(|t| t == &tab_id) else {
-        let v = state.bump_version();
-        return vec![Event::Error {
-            code: ErrorCode::InvalidCommand,
-            message: format!(
-                "ReorderTab: tab {} not in workspace {}",
-                tab_id, workspace_id
-            ),
-            fatal: false,
-            version: v,
-        }];
+        return invalid_command(state, format!("ReorderTab: tab {} not in workspace {}", tab_id, workspace_id));
     };
     let len = workspace.tab_ids.len();
     let target = (new_index as usize).min(len.saturating_sub(1));
@@ -280,45 +243,27 @@ pub(super) fn handle_reorder_tabs_bulk(
     // from SQLite anymore. `tab_ids` must be a permutation of the
     // reducer's own set, not a caller-asserted replacement.
     let Some(current) = state.workspaces.get(&workspace_id).map(|w| w.tab_ids.clone()) else {
-        let v = state.bump_version();
-        return vec![Event::Error {
-            code: ErrorCode::InvalidCommand,
-            message: format!("ReorderTabsBulk: workspace not found: {}", workspace_id),
-            fatal: false,
-            version: v,
-        }];
+        return invalid_command(state, format!("ReorderTabsBulk: workspace not found: {}", workspace_id));
     };
     {
         let mut seen: std::collections::HashSet<&String> =
             std::collections::HashSet::with_capacity(tab_ids.len());
         for id in &tab_ids {
             if !seen.insert(id) {
-                let v = state.bump_version();
-                return vec![Event::Error {
-                    code: ErrorCode::InvalidCommand,
-                    message: format!(
-                        "ReorderTabsBulk: tab_ids contains duplicate entry: {}",
-                        id
-                    ),
-                    fatal: false,
-                    version: v,
-                }];
+                return invalid_command(state, format!("ReorderTabsBulk: tab_ids contains duplicate entry: {}", id));
             }
         }
     }
     if current.len() != tab_ids.len()
         || !current.iter().all(|id| tab_ids.contains(id))
     {
-        let v = state.bump_version();
-        return vec![Event::Error {
-            code: ErrorCode::InvalidCommand,
-            message: format!(
+        return invalid_command(
+            state,
+            format!(
                 "ReorderTabsBulk: tab_ids must be a permutation of the workspace's current tabs (got {:?}, expected a permutation of {:?})",
                 tab_ids, current
             ),
-            fatal: false,
-            version: v,
-        }];
+        );
     }
     if current == tab_ids {
         return Vec::new();
@@ -336,8 +281,8 @@ pub(super) fn handle_reorder_tabs_bulk(
 /// `dst_workspace_id`, inserting at `dst_index` (clamped to dst's
 /// length). Updates the tab's `workspace_id`, removes it from src's
 /// `tab_ids`, inserts into dst's `tab_ids`. If the tab was src's
-/// `active_tab_id`, src's active reverts to its first remaining
-/// tab (or `None` when empty).
+/// `active_tab_id`, src's active becomes its neighbour, as when the
+/// tab is deleted (`neighbour_tab`).
 ///
 /// Errors when:
 /// * source / dest workspace not found,
@@ -358,13 +303,7 @@ pub(super) fn handle_move_tab(
     allow_empty_source: bool,
 ) -> Vec<Event> {
     if src_workspace_id == dst_workspace_id {
-        let v = state.bump_version();
-        return vec![Event::Error {
-            code: ErrorCode::InvalidCommand,
-            message: "MoveTab: src and dst workspaces are identical; use ReorderTab".into(),
-            fatal: false,
-            version: v,
-        }];
+        return invalid_command(state, "MoveTab: src and dst workspaces are identical; use ReorderTab");
     }
     // Strict validation (Phase E.4 strict-mode flip): the
     // migration-tolerant lazy-import fallback (codex P1 round-2
@@ -374,78 +313,54 @@ pub(super) fn handle_move_tab(
     // `state.workspaces[*].tab_ids` consistent with SQLite, so we
     // can reject unknown tabs and workspace_id mismatches outright.
     if !state.workspaces.contains_key(&src_workspace_id) {
-        let v = state.bump_version();
-        return vec![Event::Error {
-            code: ErrorCode::InvalidCommand,
-            message: format!("MoveTab: src workspace not found: {}", src_workspace_id),
-            fatal: false,
-            version: v,
-        }];
+        return invalid_command(state, format!("MoveTab: src workspace not found: {}", src_workspace_id));
     }
     if !state.workspaces.contains_key(&dst_workspace_id) {
-        let v = state.bump_version();
-        return vec![Event::Error {
-            code: ErrorCode::InvalidCommand,
-            message: format!("MoveTab: dst workspace not found: {}", dst_workspace_id),
-            fatal: false,
-            version: v,
-        }];
+        return invalid_command(state, format!("MoveTab: dst workspace not found: {}", dst_workspace_id));
     }
     let tab_workspace_id: Option<String> =
         state.tabs.get(&tab_id).map(|t| t.workspace_id.clone());
     match tab_workspace_id {
         None => {
-            let v = state.bump_version();
-            return vec![Event::Error {
-                code: ErrorCode::InvalidCommand,
-                message: format!("MoveTab: tab not found in state: {}", tab_id),
-                fatal: false,
-                version: v,
-            }];
+            return invalid_command(state, format!("MoveTab: tab not found in state: {}", tab_id));
         }
         Some(actual_ws) if actual_ws != src_workspace_id => {
-            let v = state.bump_version();
-            return vec![Event::Error {
-                code: ErrorCode::InvalidCommand,
-                message: format!(
+            return invalid_command(
+                state,
+                format!(
                     "MoveTab: workspace_id mismatch — tab {} belongs to {}, not {}",
                     tab_id, actual_ws, src_workspace_id
                 ),
-                fatal: false,
-                version: v,
-            }];
+            );
         }
         Some(_) => {}
     }
     if !allow_empty_source && state.workspaces[&src_workspace_id].tab_ids.len() <= 1 {
-        let v = state.bump_version();
-        return vec![Event::Error {
-            code: ErrorCode::InvalidCommand,
-            message: format!(
+        return invalid_command(
+            state,
+            format!(
                 "MoveTab: {} {} (pass allow_empty_source=true for draining flows)",
                 crate::reducer::MOVE_TAB_LAST_TAB_ERROR,
                 src_workspace_id,
             ),
-            fatal: false,
-            version: v,
-        }];
+        );
     }
 
     // Remove from src.
     let new_src_active_tab_id: Option<String> = {
         let src = state.workspaces.get_mut(&src_workspace_id).expect("checked");
-        src.tab_ids.retain(|id| id != &tab_id);
-        if src.active_tab_id.as_deref() == Some(tab_id.as_str()) {
-            src.active_tab_id = src.tab_ids.first().cloned();
+        if let Some(pos) = src.tab_ids.iter().position(|id| id == &tab_id) {
+            src.tab_ids.remove(pos);
+            if src.active_tab_id.as_deref() == Some(tab_id.as_str()) {
+                src.active_tab_id = neighbour_tab(&src.tab_ids, pos);
+            }
         }
         src.active_tab_id.clone()
     };
 
-    // Insert into dst at clamped index. Set the moved tab as dst's
-    // new active tab — mirrors wcore::move_tab_to_workspace
-    // behaviour and addresses codex P2 #621 (dst.active_tab_id was
-    // previously left untouched, so a saga-driven tear-off could
-    // produce a destination workspace with no active tab selected).
+    // Insert into dst at the clamped index and make the moved tab dst's
+    // active tab, so a tear-off never leaves the destination with no
+    // active tab (#621).
     let final_dst_index: u32 = {
         let dst = state.workspaces.get_mut(&dst_workspace_id).expect("checked");
         let clamped = (dst_index as usize).min(dst.tab_ids.len());
@@ -477,13 +392,7 @@ pub(super) fn handle_move_tab(
 /// name is unchanged.
 pub(super) fn handle_rename_tab(state: &mut State, tab_id: String, name: String) -> Vec<Event> {
     let Some(tab) = state.tabs.get_mut(&tab_id) else {
-        let v = state.bump_version();
-        return vec![Event::Error {
-            code: ErrorCode::InvalidCommand,
-            message: format!("RenameTab: tab not found: {}", tab_id),
-            fatal: false,
-            version: v,
-        }];
+        return invalid_command(state, format!("RenameTab: tab not found: {}", tab_id));
     };
     if tab.name == name {
         return Vec::new();
@@ -505,13 +414,7 @@ pub(super) fn handle_update_tab_meta(
     meta_patch: serde_json::Value,
 ) -> Vec<Event> {
     if !state.tabs.contains_key(&tab_id) {
-        let v = state.bump_version();
-        return vec![Event::Error {
-            code: ErrorCode::InvalidCommand,
-            message: format!("UpdateTabMeta: tab not found: {}", tab_id),
-            fatal: false,
-            version: v,
-        }];
+        return invalid_command(state, format!("UpdateTabMeta: tab not found: {}", tab_id));
     }
     let v = state.bump_version();
     vec![Event::TabMetaUpdated {

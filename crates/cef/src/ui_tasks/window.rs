@@ -303,7 +303,7 @@ wrap_task! {
                         )
                     };
                     if let Some(hwnd) = strict {
-                        let main_hwnd = self.state.window_hwnds.lock().get("main").copied();
+                        let main_hwnd = self.state.window_hwnd("main");
                         if main_hwnd == Some(hwnd as isize) {
                             crate::client::dlog(&format!(
                                 "CloseWindowTask({}): strict HWND resolved to MAIN — refusing DestroyWindow, falling back",
@@ -517,7 +517,7 @@ pub(crate) fn unregister_after_parking_close(state: &Arc<AppState>, label: &str)
         // Mirror on_before_close's cache eviction (stale entries break
         // WM_CLOSE routing on label reuse). Main keeps its entry — the
         // process is quitting and WRR still resolves it for logging.
-        state.window_hwnds.lock().remove(label);
+        state.evict_window_hwnd(label);
     }
     crate::wrr::win_event::arm_quit_watchdog(state.count_live_user_windows());
 }
@@ -1908,13 +1908,8 @@ wrap_task! {
                 {
                     use windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
                     let fg = unsafe { GetForegroundWindow() } as isize;
-                    let resolved: Option<String> = if fg != 0 {
-                        let map = self.state.window_hwnds.lock();
-                        map.iter()
-                            .find_map(|(k, &h)| if h == fg { Some(k.clone()) } else { None })
-                    } else {
-                        None
-                    };
+                    let resolved: Option<String> =
+                        if fg != 0 { self.state.label_for_hwnd(fg as _) } else { None };
                     resolved.unwrap_or_else(|| "main".to_string())
                 }
                 #[cfg(not(target_os = "windows"))]

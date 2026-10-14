@@ -24,7 +24,7 @@
  */
 
 import { createMemo, Show, untrack, type Accessor, type JSX } from "solid-js";
-import { getSettingsKeyAtom } from "@/app/store/global";
+import { getSettingsKeyAtom, isDev } from "@/app/store/global";
 import type { SignalPair } from "../state";
 import type { DocumentNode, DocumentState } from "../types";
 import type { ScrollCommand } from "../hooks/useScrollToNode";
@@ -32,6 +32,7 @@ import type { LayoutView } from "@/app/store/agent-pane-layout-store";
 import { AgentDocumentVirtualList } from "../virtualization/AgentDocumentVirtualList";
 import { createAgentViewState } from "../virtualization/state";
 import { resolveTailPolicy } from "../virtualization/streaming-buffer";
+import { resolveFollowController } from "../scroll/follow-controller";
 import { correlateDispatchesForBlock } from "../activity/dispatch-correlation";
 import { allSubagentsAtom } from "../activity/subagent-source";
 import { allDispatchesAtom } from "../activity/dispatch-source";
@@ -206,6 +207,9 @@ export const AgentDocumentView = (props: AgentDocumentViewProps): JSX.Element =>
             // One-way flow while following, on unless explicitly false; read once
             // at mount like the tail policy. SPEC_AGENT_PANE_ONE_WAY_FLOW_2026_10_07.md.
             oneWayFlow={untrack(() => getSettingsKeyAtom("agent:onewayflow")()) !== false}
+            // The follow state machine: unset means on in dev builds only, until
+            // its live soak passes. SPEC_AGENT_PANE_SCROLL_FOLLOW_STATE_MACHINE_2026_09_24.md §8.
+            followController={resolveFollowController(untrack(() => getSettingsKeyAtom("agent:followcontroller")()), isDev)}
             onOpenHistory={props.onOpenHistory}
             dispatchMatches={dispatchMatches}
         />

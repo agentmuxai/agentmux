@@ -557,7 +557,8 @@ working throughout through a legacy adapter.
      `nativeSurface` (browser), `header: "surface"` (agent: an uncolored
      header keeps the theme's block surface instead of the fixed default
      color), `headerMic: { title }` (term: the header mic and its tooltip —
-     agent takes voice beside its composer, so it doesn't declare it),
+     agent takes voice beside its composer, so it doesn't declare it;
+     removed later, no pane has a header mic now),
      `statsBadgeSetting` (term: `term:showstatsbadge`) and `hueBorder` (term:
      `frame:hue` colors the active border). `paneTabCapability(view, key)`
      reads one; an alias carries its view's. `blockframe.tsx`'s and

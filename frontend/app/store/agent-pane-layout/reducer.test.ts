@@ -145,10 +145,10 @@ describe("agent-pane-layout reducer", () => {
                             cmd = { type: "ExpansionResolved", nodeId: id, to: { open: false } };
                             break;
                         case 4:
-                            cmd = { type: "AutoExpandStarted", nodeId: id };
+                            cmd = { type: "ExpansionResolved", nodeId: id, to: { open: true, via: "auto" } };
                             break;
                         case 5:
-                            cmd = { type: "AutoExpandHoldExpired", nodeId: id };
+                            cmd = { type: "ExpansionResolved", nodeId: id, to: { open: true, via: "default" } };
                             break;
                         case 6:
                             cmd = { type: "MeasurementInvalidated", nodeId: id };
@@ -264,44 +264,14 @@ describe("agent-pane-layout reducer", () => {
         });
     });
 
-    describe("expansion semantics — pin outranks auto; hold expiry", () => {
+    describe("expansion semantics", () => {
         // expansion commands are guarded by idSet, so the row must be present.
         const withRow = () => apply(initialState(), { type: "NodesChanged", orderedIds: ["t"] });
 
-        it("AutoExpandStarted then AutoExpandHoldExpired collapses", () => {
-            let s = withRow();
-            s = apply(s, { type: "AutoExpandStarted", nodeId: "t" });
-            expect(s.expansion.get("t")).toEqual({ open: true, via: "auto" });
-            const r = update(s, { type: "AutoExpandHoldExpired", nodeId: "t" });
-            expect(r.state.expansion.has("t")).toBe(false); // collapsed === absent
-            expect(r.events[0]).toMatchObject({ type: "expansion-changed" });
-        });
-
-        it("a user pin survives a hold expiry (no-op, audited)", () => {
-            let s = withRow();
-            s = apply(s, { type: "AutoExpandStarted", nodeId: "t" });
-            s = apply(s, { type: "ExpansionResolved", nodeId: "t", to: { open: true, via: "pin" } }); // pin during hold
-            expect(s.expansion.get("t")).toEqual({ open: true, via: "pin" });
-            const r = update(s, { type: "AutoExpandHoldExpired", nodeId: "t" });
-            expect(r.state).toBe(s); // unchanged
-            expect(r.events[0]).toMatchObject({ type: "command-dropped", reason: "hold-expired-not-auto" });
-        });
-
-        it("AutoExpandStarted does not downgrade an existing pin", () => {
-            let s = withRow();
-            s = apply(s, { type: "ExpansionResolved", nodeId: "t", to: { open: true, via: "pin" } });
-            const r = update(s, { type: "AutoExpandStarted", nodeId: "t" });
-            expect(r.state).toBe(s);
-            expect(s.expansion.get("t")).toEqual({ open: true, via: "pin" });
-        });
-
-        it("ExpansionResolved sets the exact value (incl. via:default, which survives a hold-expiry)", () => {
+        it("ExpansionResolved sets the exact value (incl. via:default)", () => {
             let s = withRow();
             s = apply(s, { type: "ExpansionResolved", nodeId: "t", to: { open: true, via: "default" } });
             expect(s.expansion.get("t")).toEqual({ open: true, via: "default" });
-            // a via:"default" open is NOT auto, so a hold-expiry is a no-op on it
-            const held = update(s, { type: "AutoExpandHoldExpired", nodeId: "t" });
-            expect(held.state.expansion.get("t")).toEqual({ open: true, via: "default" });
             // resolving back to collapsed clears the key
             s = apply(s, { type: "ExpansionResolved", nodeId: "t", to: { open: false } });
             expect(s.expansion.has("t")).toBe(false);

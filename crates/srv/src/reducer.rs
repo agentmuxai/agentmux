@@ -44,10 +44,43 @@ use crate::state::State;
 /// it to return its long-standing error string unchanged.
 pub const MOVE_TAB_LAST_TAB_ERROR: &str = "cannot move last tab out of workspace";
 
-/// Per-dispatch context: the pid the dispatching connection registered.
+/// Per-dispatch context, built by the caller so `update` stays pure.
 #[derive(Debug, Clone)]
 pub struct Ctx {
+    /// The pid the dispatching connection registered.
     pub registered_pid: Option<u32>,
+    /// The id a `CreateWorkspace`, `CreateTab` or `CreateBlock` arm gives the
+    /// new entity. Other arms ignore it.
+    pub new_id: String,
+}
+
+impl Ctx {
+    /// A context for one dispatch, with a freshly minted `new_id`. Build one
+    /// per dispatch: a reused context makes a second create refuse the id.
+    pub fn new(registered_pid: Option<u32>) -> Self {
+        Self {
+            registered_pid,
+            new_id: uuid::Uuid::new_v4().to_string(),
+        }
+    }
+}
+
+/// The non-fatal `Event::Error` reply an arm gives a command it refuses,
+/// leaving state untouched.
+fn error_event(state: &mut State, code: ErrorCode, message: impl Into<String>) -> Vec<Event> {
+    let version = state.bump_version();
+    vec![Event::Error {
+        code,
+        message: message.into(),
+        fatal: false,
+        version,
+    }]
+}
+
+/// `error_event` with `ErrorCode::InvalidCommand`, the code nearly every
+/// refusal uses.
+fn invalid_command(state: &mut State, message: impl Into<String>) -> Vec<Event> {
+    error_event(state, ErrorCode::InvalidCommand, message)
 }
 
 pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
@@ -60,11 +93,15 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
         }
         Command::GetSrvSnapshot => snapshot::handle_get_srv_snapshot(state),
         Command::GetEvents { .. } => Vec::new(), // intercepted by server; unreachable
-        Command::CreateWorkspace { name } => workspace::handle_create_workspace(state, name),
+        Command::CreateWorkspace { name } => {
+            workspace::handle_create_workspace(state, ctx.new_id.clone(), name)
+        }
         Command::DeleteWorkspace { workspace_id, force } => {
             workspace::handle_delete_workspace(state, workspace_id, force)
         }
-        Command::CreateTab { workspace_id, name } => tab::handle_create_tab(state, workspace_id, name),
+        Command::CreateTab { workspace_id, name } => {
+            tab::handle_create_tab(state, workspace_id, ctx.new_id.clone(), name)
+        }
         Command::DeleteTab { workspace_id, tab_id, force } => tab::handle_delete_tab(state, workspace_id, tab_id, force),
         Command::SetActiveTab { workspace_id, tab_id } => {
             tab::handle_set_active_tab(state, workspace_id, tab_id)
@@ -74,7 +111,9 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
             tab_id,
             new_index,
         } => tab::handle_reorder_tab(state, workspace_id, tab_id, new_index),
-        Command::CreateBlock { tab_id, meta } => block::handle_create_block(state, tab_id, meta),
+        Command::CreateBlock { tab_id, meta } => {
+            block::create_block_with_id(state, tab_id, ctx.new_id.clone(), meta)
+        }
         Command::DeleteBlock { tab_id, block_id } => block::handle_delete_block(state, tab_id, block_id),
         Command::SetFocusedNode { tab_id, node_id } => {
             layout::handle_set_focused_node(state, tab_id, node_id)
@@ -198,15 +237,7 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
         } => block::handle_move_block(state, block_id, src_tab_id, dst_tab_id, dst_index),
         // Anything else (launcher-domain commands, unimplemented layout
         // ops) is a non-fatal protocol error that changes no state.
-        other => {
-            let v = state.bump_version();
-            vec![Event::Error {
-                code: ErrorCode::InvalidCommand,
-                message: format!("srv reducer does not accept: {:?}", other),
-                fatal: false,
-                version: v,
-            }]
-        }
+        other => invalid_command(state, format!("srv reducer does not accept: {:?}", other)),
     }
 }
 

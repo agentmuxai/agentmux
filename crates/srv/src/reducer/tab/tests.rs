@@ -4,7 +4,7 @@
 use super::*;
 use crate::reducer::test_support::*;
 use crate::reducer::update;
-use agentmux_common::ipc::Command;
+use agentmux_common::ipc::{Command, ErrorCode};
 
 #[test]
 fn create_tab_validates_workspace_exists() {
@@ -979,4 +979,177 @@ fn move_tab_two_sequential_moves_leave_one_tab() {
     assert_eq!(state.workspaces[&src].tab_ids, vec![t2.clone()]);
     assert_eq!(state.workspaces[&src].active_tab_id, Some(t2));
     assert_eq!(state.workspaces[&dst].tab_ids, vec![t1]);
+}
+
+fn set_active(state: &mut State, ws: &str, tab: &str) {
+    let events = update(
+        state,
+        Command::SetActiveTab { workspace_id: ws.into(), tab_id: tab.into() },
+        &ctx(1),
+    );
+    assert!(!matches!(events.first(), Some(Event::Error { .. })), "got {:?}", events);
+}
+
+/// Moving the active tab out picks its neighbour, as closing it does, not
+/// the workspace's first tab.
+#[test]
+fn move_active_middle_tab_activates_next_neighbour() {
+    let mut state = State::default();
+    let src = create_workspace(&mut state, "src");
+    let dst = create_workspace(&mut state, "dst");
+    let t1 = create_tab(&mut state, &src, "t1");
+    let t2 = create_tab(&mut state, &src, "t2");
+    let t3 = create_tab(&mut state, &src, "t3");
+    set_active(&mut state, &src, &t2);
+    let events = move_tab(&mut state, &t2, &src, &dst, false);
+    match &events[..] {
+        [Event::TabMoved { new_src_active_tab_id, .. }] => {
+            assert_eq!(new_src_active_tab_id, &Some(t3.clone()))
+        }
+        other => panic!("expected TabMoved, got {:?}", other),
+    }
+    assert_eq!(state.workspaces[&src].tab_ids, vec![t1, t3.clone()]);
+    assert_eq!(state.workspaces[&src].active_tab_id, Some(t3));
+}
+
+#[test]
+fn move_active_last_tab_activates_previous_neighbour() {
+    let mut state = State::default();
+    let src = create_workspace(&mut state, "src");
+    let dst = create_workspace(&mut state, "dst");
+    let _t1 = create_tab(&mut state, &src, "t1");
+    let t2 = create_tab(&mut state, &src, "t2");
+    let t3 = create_tab(&mut state, &src, "t3");
+    set_active(&mut state, &src, &t3);
+    move_tab(&mut state, &t3, &src, &dst, false);
+    assert_eq!(state.workspaces[&src].active_tab_id, Some(t2));
+}
+
+/// Moving and closing the same active tab leave the same tab active.
+#[test]
+fn move_and_delete_of_active_tab_pick_the_same_neighbour() {
+    for active_idx in 0..3 {
+        let build = || {
+            let mut state = State::default();
+            let src = create_workspace(&mut state, "src");
+            let dst = create_workspace(&mut state, "dst");
+            let tabs: Vec<String> = (0..3).map(|i| create_tab(&mut state, &src, &format!("t{i}"))).collect();
+            set_active(&mut state, &src, &tabs[active_idx]);
+            (state, src, dst, tabs)
+        };
+        let (mut moved, src, dst, tabs) = build();
+        move_tab(&mut moved, &tabs[active_idx], &src, &dst, false);
+        let (mut deleted, src2, _, tabs2) = build();
+        update(
+            &mut deleted,
+            Command::DeleteTab { workspace_id: src2.clone(), tab_id: tabs2[active_idx].clone(), force: false },
+            &ctx(1),
+        );
+        let pos_of = |state: &State, ws: &str, tabs: &[String]| {
+            let active = state.workspaces[ws].active_tab_id.clone().expect("an active tab");
+            tabs.iter().position(|t| *t == active)
+        };
+        assert_eq!(pos_of(&moved, &src, &tabs), pos_of(&deleted, &src2, &tabs2), "active index {active_idx}");
+    }
+}
+
+#[test]
+fn move_inactive_tab_keeps_source_active_tab() {
+    let mut state = State::default();
+    let src = create_workspace(&mut state, "src");
+    let dst = create_workspace(&mut state, "dst");
+    let t1 = create_tab(&mut state, &src, "t1");
+    let t2 = create_tab(&mut state, &src, "t2");
+    move_tab(&mut state, &t2, &src, &dst, false);
+    assert_eq!(state.workspaces[&src].active_tab_id, Some(t1));
+}
+
+#[test]
+fn create_tab_takes_its_id_from_ctx() {
+    let mut state = State::default();
+    let ws = create_workspace(&mut state, "w");
+    let events = update(
+        &mut state,
+        Command::CreateTab { workspace_id: ws.clone(), name: "t".into() },
+        &ctx_with_id("tab-fixed"),
+    );
+    assert!(matches!(&events[0], Event::TabCreated { tab_id, .. } if tab_id == "tab-fixed"));
+    assert_eq!(state.workspaces[&ws].tab_ids, vec!["tab-fixed".to_string()]);
+    assert_eq!(state.tabs["tab-fixed"].workspace_id, ws);
+}
+
+#[test]
+fn create_tab_refuses_an_id_in_use() {
+    let mut state = State::default();
+    let ws = create_workspace(&mut state, "w");
+    let cmd = || Command::CreateTab { workspace_id: ws.clone(), name: "t".into() };
+    update(&mut state, cmd(), &ctx_with_id("dup"));
+    let events = update(&mut state, cmd(), &ctx_with_id("dup"));
+    assert!(matches!(&events[..], [Event::Error { message, .. }] if message.contains("already in use")));
+    assert_eq!(state.workspaces[&ws].tab_ids, vec!["dup".to_string()]);
+    assert_eq!(state.tabs.len(), 1);
+}
+
+#[test]
+fn rename_tab_renames_and_emits_event() {
+    let mut state = State::default();
+    let ws = create_workspace(&mut state, "w");
+    let tab = create_tab(&mut state, &ws, "old");
+    let events = update(&mut state, Command::RenameTab { tab_id: tab.clone(), name: "new".into() }, &ctx(1));
+    assert!(matches!(
+        &events[..],
+        [Event::TabRenamed { tab_id, name, .. }] if *tab_id == tab && name == "new"
+    ));
+    assert_eq!(state.tabs[&tab].name, "new");
+}
+
+#[test]
+fn rename_tab_to_same_name_is_silent_no_op() {
+    let mut state = State::default();
+    let ws = create_workspace(&mut state, "w");
+    let tab = create_tab(&mut state, &ws, "same");
+    let version = state.event_version;
+    let events = update(&mut state, Command::RenameTab { tab_id: tab, name: "same".into() }, &ctx(1));
+    assert!(events.is_empty());
+    assert_eq!(state.event_version, version);
+}
+
+#[test]
+fn rename_unknown_tab_errors() {
+    let mut state = State::default();
+    let events = update(&mut state, Command::RenameTab { tab_id: "ghost".into(), name: "n".into() }, &ctx(1));
+    assert!(matches!(
+        &events[..],
+        [Event::Error { code: ErrorCode::InvalidCommand, fatal: false, message, .. }] if message.contains("RenameTab")
+    ));
+}
+
+#[test]
+fn update_tab_meta_passes_patch_through_without_touching_state() {
+    let mut state = State::default();
+    let ws = create_workspace(&mut state, "w");
+    let tab = create_tab(&mut state, &ws, "t");
+    let before = state.tabs[&tab].clone();
+    let patch = serde_json::json!({ "tab:color": "red" });
+    let events = update(
+        &mut state,
+        Command::UpdateTabMeta { tab_id: tab.clone(), meta_patch: patch.clone() },
+        &ctx(1),
+    );
+    assert!(matches!(
+        &events[..],
+        [Event::TabMetaUpdated { tab_id, meta_patch, .. }] if *tab_id == tab && *meta_patch == patch
+    ));
+    assert_eq!(state.tabs[&tab], before);
+}
+
+#[test]
+fn update_meta_of_unknown_tab_errors() {
+    let mut state = State::default();
+    let events = update(
+        &mut state,
+        Command::UpdateTabMeta { tab_id: "ghost".into(), meta_patch: serde_json::json!({}) },
+        &ctx(1),
+    );
+    assert!(matches!(&events[..], [Event::Error { message, .. }] if message.contains("UpdateTabMeta")));
 }

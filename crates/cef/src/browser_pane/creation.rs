@@ -131,13 +131,7 @@ wrap_task! {
                 // here is a `floating-*` while `requested_window` is `main`, that's
                 // the bug. DO NOT REMOVE (see browser_pane::trace).
                 {
-                    let actual_parent_label = self
-                        .state
-                        .window_hwnds
-                        .lock()
-                        .iter()
-                        .find(|(_, h)| **h == parent_hwnd_raw as isize)
-                        .map(|(l, _)| l.clone());
+                    let actual_parent_label = self.state.label_for_hwnd(parent_hwnd_raw as _);
                     crate::browser_pane::trace::pane_trace(
                         &self.block_id,
                         "create-parent",

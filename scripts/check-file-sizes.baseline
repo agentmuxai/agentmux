@@ -3,14 +3,14 @@
 # `node scripts/check-file-sizes.mjs --update` after shrinking one. Adding a
 # file or raising a number is a hand edit that the PR has to justify.
 3667 crates/bashwrap/src/bash_wrap.rs
-1973 crates/cef/src/client/lifecycle.rs
+1972 crates/cef/src/client/lifecycle.rs
 1549 crates/cef/src/commands/cli_login.rs
 2225 crates/cef/src/commands/window_pool.rs
 1515 crates/cef/src/lib.rs
-1658 crates/cef/src/state/mod.rs
-2210 crates/cef/src/ui_tasks/window.rs
+1643 crates/cef/src/state/mod.rs
+2205 crates/cef/src/ui_tasks/window.rs
 2606 crates/common/src/data_paths.rs
-2268 crates/common/src/ipc.rs
+2267 crates/common/src/ipc.rs
 1848 crates/common/src/jekt_sign.rs
 1867 crates/launcher/src/saga/mod.rs
 3223 crates/srv/src/backend/agent_config.rs
@@ -32,11 +32,11 @@
 3374 crates/srv/src/identity/resolver/inject.rs
 1539 crates/srv/src/migrations/runner.rs
 2193 crates/srv/src/muxbus/cloud_subscriber.rs
-2251 crates/srv/src/persist_subscriber.rs
+2206 crates/srv/src/persist_subscriber.rs
 2120 crates/srv/src/reducer/layout.rs
 1509 crates/srv/src/registry/migrate.rs
 2253 crates/srv/src/server/agent_handlers/input.rs
-1875 crates/srv/src/server/app_api/agent_open.rs
+1874 crates/srv/src/server/app_api/agent_open.rs
 1572 crates/srv/src/server/editor_handlers.rs
 2112 crates/srv/src/server/muxspect_handlers.rs
 1653 crates/srv/src/server/native_memory_handlers.rs
@@ -46,7 +46,7 @@
 2036 frontend/app/store/agent-pane-state/reducer.ts
 1506 frontend/app/view/agent/agent-view.tsx
 1564 frontend/app/view/agent/components/AgentComposerStrip.tsx
-1860 frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx
+1830 frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx
 1513 frontend/app/view/editor/editor-model.ts
 1561 frontend/app/view/files/files-view.tsx
 2144 frontend/app/view/swarm/swarm-model.ts

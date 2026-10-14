@@ -182,28 +182,6 @@ export function update(
             if (!state.idSet.has(command.nodeId)) return droppedUnknownExpansion(state);
             return setExpansion(state, command.nodeId, command.to);
 
-        case "AutoExpandStarted": {
-            if (!state.idSet.has(command.nodeId)) return droppedUnknownExpansion(state);
-            const cur = state.expansion.get(command.nodeId);
-            // A user pin outranks auto-expand — leave it.
-            if (cur?.open && cur.via === "pin") return { state, events: [] };
-            return setExpansion(state, command.nodeId, { open: true, via: "auto" });
-        }
-
-        case "AutoExpandHoldExpired": {
-            if (!state.idSet.has(command.nodeId)) return droppedUnknownExpansion(state);
-            const cur = state.expansion.get(command.nodeId);
-            if (!cur?.open || cur.via !== "auto") {
-                // Pinned (or already collapsed) during the hold → expiry is a
-                // no-op. Surface it so the audit shows the suppression.
-                return {
-                    state,
-                    events: [{ type: "command-dropped", reason: "hold-expired-not-auto" }],
-                };
-            }
-            return setExpansion(state, command.nodeId, { open: false });
-        }
-
         case "RowMeasured":
             return measureRows(state, [command]);
 

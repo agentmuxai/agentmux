@@ -56,6 +56,10 @@ fn append_tsidx_entry(fs: &Arc<FileStore>, zone: &str, batch_start: u64, now_ms:
 /// `echo: "stdin"`, because the pane already shows the message (its
 /// `agent-message-accepted` node) and must not add a second one. Before 5a-3c
 /// this write published nothing at all.
+///
+/// A message a paired device sent is the exception: no pane typed it, so it
+/// is stored with who sent it (`viewer::origin`) and published as a plain
+/// record, which the open pane shows.
 pub fn persist_user_line(
     broker: Option<&mps::Broker>,
     block_id: &str,
@@ -66,7 +70,12 @@ pub fn persist_user_line(
     let global = global_output_zone.and_then(|zone| {
         crate::backend::agent_session::global_transcript_store().map(|gfs| (gfs, zone))
     });
-    append_transcript(broker, block_id, data, filestore, global, global_output_zone.is_some(), Some("stdin"));
+    let stamped = crate::backend::viewer::origin::stamp(block_id, data);
+    let (data, echo) = match &stamped {
+        Some(line) => (line.as_slice(), None),
+        None => (data, Some("stdin")),
+    };
+    append_transcript(broker, block_id, data, filestore, global, global_output_zone.is_some(), echo);
 }
 
 /// Append data to a block's terminal output file, publish a MPS event,

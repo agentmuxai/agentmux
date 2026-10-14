@@ -66,9 +66,10 @@ pub(super) fn handle_register_browser(
 
 /// Rename a browser entry `old_label` → `new_label`, re-keying the per-label
 /// host state that persists for the window's life: the `browsers` map (and the
-/// duplicated `BrowserHandle.label` field), plus `window_opacities` and
-/// `pane_window_states` when an entry exists. `window_meta` / `window_hwnds`
-/// live on `AppState` and are re-keyed by the caller
+/// duplicated `BrowserHandle.label` field), plus `window_hwnds`,
+/// `window_opacities` and `pane_window_states` when an entry exists, all under
+/// one lock so a promoted window's HWND can't be read under the wrong label.
+/// `window_meta` lives on `AppState` and is re-keyed by the caller
 /// (`promote_pane_pool_window`). Errors if `old_label` is absent or `new_label`
 /// is already registered. Emits no event — the frontend learns the new label
 /// via the `pool:pane-promote` payload, not a host event — and doesn't log:
@@ -107,6 +108,9 @@ pub(super) fn handle_relabel_browser(
         .expect("presence checked above");
     handle.label = new_label.clone();
     state.browsers.insert(new_label.clone(), handle);
+    if let Some(hwnd) = state.window_hwnds.remove(&old_label) {
+        state.window_hwnds.insert(new_label.clone(), hwnd);
+    }
     // Re-key sibling per-label state only when an entry exists (both are
     // created lazily and are usually absent at promote time).
     if let Some(opacity) = state.window_opacities.remove(&old_label) {

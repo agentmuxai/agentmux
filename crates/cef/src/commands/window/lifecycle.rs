@@ -375,14 +375,14 @@ pub(crate) unsafe fn resolve_window_hwnd_strict(
     }
     // Validated cache hit (same semantics as resolve_window_hwnd step 1:
     // no GA_ROOT walk — the cache already stores the outer top-level).
-    let cached = state.window_hwnds.lock().get(label).copied();
+    let cached = state.window_hwnd(label);
     if let Some(raw_isize) = cached {
         let raw = raw_isize as *mut std::ffi::c_void;
         if !raw.is_null() {
             if IsWindow(raw) != 0 {
                 return Some(raw);
             }
-            state.window_hwnds.lock().remove(label);
+            state.evict_window_hwnd(label);
         }
     }
     // Reducer registry + GA_ROOT (same as step 2).
@@ -424,7 +424,7 @@ pub(crate) unsafe fn resolve_window_hwnd(state: &Arc<AppState>, label: &str) -> 
         // button observed v0.39.1 → SPEC_WINDOW_HWND_CACHE_STALE_FIX_2026_05_28.md).
         // Validate via IsWindow before trusting; on stale, evict
         // and fall through to the registry/EnumWindows paths.
-        let cached = state.window_hwnds.lock().get(label).copied();
+        let cached = state.window_hwnd(label);
         if let Some(raw_isize) = cached {
             let raw = raw_isize as *mut std::ffi::c_void;
             if !raw.is_null() {
@@ -443,7 +443,7 @@ pub(crate) unsafe fn resolve_window_hwnd(state: &Arc<AppState>, label: &str) -> 
                     stale_hwnd = ?raw,
                     "[win-resolve] cache hit was stale (IsWindow=false); evicting"
                 );
-                state.window_hwnds.lock().remove(label);
+                state.evict_window_hwnd(label);
             }
         }
 
@@ -574,7 +574,7 @@ pub(crate) unsafe fn find_own_top_level_window() -> *mut std::ffi::c_void {
     result
 }
 
-/// Capture and store the HWND for `label` in `AppState::window_hwnds`.
+/// Capture and bind the HWND for `label` in the reducer's `window_hwnds`.
 ///
 /// Called from `set_window_init_status` once the frontend signals "ready".
 /// Two-pass approach:
@@ -594,7 +594,7 @@ pub(crate) fn capture_hwnd_for_label(state: &Arc<AppState>, label: &str) {
     // child here breaks any IPC that needs to act on the actual
     // top-level (SetWindowPos drags the child within the parent,
     // PostMessage(WM_CLOSE) destroys the child only, etc.).
-    if state.window_hwnds.lock().contains_key(label) {
+    if state.window_hwnd(label).is_some() {
         tracing::debug!(
             "[opacity] capture_hwnd_for_label: label={} already registered, preserving",
             label
@@ -626,7 +626,7 @@ pub(crate) fn capture_hwnd_for_label(state: &Arc<AppState>, label: &str) {
                     let root = GetAncestor(hwnd.0 as *mut std::ffi::c_void, GA_ROOT);
                     if root.is_null() { raw } else { root as isize }
                 };
-                state.window_hwnds.lock().insert(label.to_string(), raw);
+                state.bind_window_hwnd_if_absent(label, raw);
                 tracing::debug!("[opacity] captured hwnd fast-path label={} hwnd={:#x} (outer via GA_ROOT)", label, raw);
                 return;
             }
@@ -643,7 +643,7 @@ pub(crate) fn capture_hwnd_for_label(state: &Arc<AppState>, label: &str) {
     // pool label itself the window legitimately IS off-screen, so the skip
     // is disabled for `window-pool-*` labels.
     let capturing_pool_label = label.starts_with("window-pool-");
-    let known: std::collections::HashSet<isize> = state.window_hwnds.lock().values().cloned().collect();
+    let known = state.bound_window_hwnds();
     for hwnd_raw in find_all_own_windows() {
         let raw = hwnd_raw as isize;
         if known.contains(&raw) {
@@ -656,7 +656,7 @@ pub(crate) fn capture_hwnd_for_label(state: &Arc<AppState>, label: &str) {
             );
             continue;
         }
-        state.window_hwnds.lock().insert(label.to_string(), raw);
+        state.bind_window_hwnd_if_absent(label, raw);
         tracing::debug!("[opacity] captured hwnd fallback label={} hwnd={:#x}", label, raw);
         return;
     }

@@ -207,13 +207,13 @@ tasks:
             - bash -c 'STRIP_MAPS=1 RELEASE_CHANNEL=stable bash scripts/package-linux.sh --format=rpm {{.CLI_ARGS}}'
 
     package:linux:tarball:
-        desc: 'Like `task package:linux` but produces a portable .tar.gz instead of an AppImage — no fpm/appimagetool dependency. Same per-build channel isolation and ephemeral label. See docs/specs/SPEC_LINUX_DISTRO_TARGETS_AND_DOWNLOADS_PAGE_2026_09_15.md.'
+        desc: 'Like `task package:linux` but produces a portable .tar.xz instead of an AppImage — no fpm/appimagetool dependency. Same per-build channel isolation and ephemeral label. See docs/specs/SPEC_LINUX_DISTRO_TARGETS_AND_DOWNLOADS_PAGE_2026_09_15.md.'
         platforms: [linux]
         cmds:
             - bash scripts/package-linux.sh --format=tarball {{.CLI_ARGS}}
 
     package:release:linux:tarball:
-        desc: 'Like `task package:release:linux` but produces a portable .tar.gz. Same stable-build guard.'
+        desc: 'Like `task package:release:linux` but produces a portable .tar.xz. Same stable-build guard.'
         platforms: [linux]
         cmds:
             - bash scripts/guard-stable-build.sh

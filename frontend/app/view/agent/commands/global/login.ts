@@ -20,10 +20,7 @@
 
 import { snapshot as paneSnapshot } from "@/app/store/agent-pane-state-store";
 import { withLoginWindow } from "../../flows/login-window";
-import { RpcApi } from "@/app/store/rpc-api";
-import { sleep } from "@/util/util";
-import { TabRpcClient } from "@/app/store/rpc-util";
-import { persistAndLinkAccount, runProviderLogin } from "../../flows/run-provider-login";
+import { logInAndConfirm } from "../../flows/login-and-confirm";
 import type { SlashCommand, SlashCommandContext, SlashResult } from "../types";
 
 /**
@@ -93,6 +90,30 @@ export const loginCommand: SlashCommand = {
     handler: (ctx) => withLoginWindow(ctx.provider(), () => runLogin(ctx)),
 };
 
+/** Never report success for a login that didn't complete
+ *  (retro-agent-auth-relogin-noop-2026-07-01 §5.1). */
+function notDetectedResult(stage: "link" | "inapp" | "terminal"): SlashResult {
+    switch (stage) {
+        case "link":
+            return {
+                kind: "error",
+                message:
+                    "/login: opened a login page, but no login was detected within 5 minutes. " +
+                    "Complete the login there, then run /login again.",
+            };
+        case "terminal":
+            return {
+                kind: "error",
+                message:
+                    "/login: opened a terminal window, but no login was detected within 5 minutes. " +
+                    "Complete the login there, then run /login again.",
+            };
+        case "inapp":
+            // Another surface's login took the host's single login slot.
+            return { kind: "ok" };
+    }
+}
+
 async function runLogin(ctx: SlashCommandContext): Promise<SlashResult> {
     const prov = ctx.provider();
     const cliPath = ctx.block()?.meta?.["cmd"] ?? "";
@@ -100,7 +121,7 @@ async function runLogin(ctx: SlashCommandContext): Promise<SlashResult> {
         return { kind: "error", message: "/login: provider or CLI path not available" };
     }
     // reagent P1 on PR #2413 (round 3, third pass): mirrors the
-    // `loginCancelled = false` every OTHER login-starting function
+    // cancel-flag reset every OTHER login-starting function
     // (relogin()/loginViaTerminal()) already does at
     // its own start. /login never called any of those three, so a flag
     // left `true` by an EARLIER, unrelated cancelled attempt (e.g. the
@@ -145,154 +166,45 @@ async function runLogin(ctx: SlashCommandContext): Promise<SlashResult> {
                 if (typeof v === "string") authEnv[k] = v;
             }
         }
-        // Shared with the failure-banner / inline-error "Login Again" action
-        // (useAgentControllerStatus.relogin) — opens the OAuth in an in-app
-        // browser pane, or falls through to the global-login copy / real-terminal
-        // tiers when the CLI produces no scrapeable URL. See run-provider-login.ts.
-        // linkTarget lets a tier-3 success register a real account
-        // bound to this agent (PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20.md §7).
+        // The same login-and-confirm core as the pane's own "Login Again"
+        // (flows/login-and-confirm.ts): tier 1 opens the link in the
+        // AuthUrlBox, and a tier-1 "opened" is polled and persisted there.
+        // linkTarget lets a new account bind to this agent
+        // (PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20.md §7).
         const agentDefinitionId = ctx.block()?.meta?.["agentId"] as string | undefined;
-        const linkTarget = agentDefinitionId
-            ? { blockId: ctx.blockId, agentDefinitionId }
-            : undefined;
-        // Tier 1 mints the account dir but does NOT persist/link it (it
-        // returns "opened" before confirming completion) — captured here
-        // so the poll below can call persistAndLinkAccount once IT
-        // confirms the login actually finished. reagent P1: without
-        // this, a tier-1 login that succeeds for any provider whose CLI
-        // actually prints a URL (not requiresLoginTty, e.g. codex) via
-        // /login left the minted account unpersisted/unlinked — the
-        // resolver's spawn gate then blocks the agent on its very next
-        // spawn even though this handler just reported "run /cost to
-        // verify" as if the login were already usable.
-        let openedAccountId: string | undefined;
-        let openedAccountDir: string | undefined;
-        let recheckAuthEnv = authEnv;
-        const outcome = await runProviderLogin({
+        const result = await logInAndConfirm({
             provider: prov,
             cliPath,
             authEnv,
             setAuthUrl: ctx.setAuthUrl,
             log: ctx.log,
-            linkTarget,
-            onAccountRegistered: (accountId, dir) => {
-                openedAccountId = accountId;
-                openedAccountDir = dir;
-                if (prov.authConfigDirEnvVar) {
-                    recheckAuthEnv = { ...authEnv, [prov.authConfigDirEnvVar]: dir };
-                }
-            },
-            // Behavior-gate only: skip tier 1's ~15s URL-capture wait for
-            // providers whose CLI is documented to never print one. Since
-            // SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md §3.2 dropped the
-            // flag for Claude (2.1.198+ prints the authorize URL under our
-            // PTY spawn), no catalog provider sets it — so /login now runs
-            // the in-app tier 1 for Claude too: the AuthUrlBox above the
-            // composer shows the URL + paste box, and the "opened" branch
-            // below polls for completion and persists the account.
+            isCancelled: ctx.isCancelled,
+            linkTarget: agentDefinitionId ? { blockId: ctx.blockId, agentDefinitionId } : undefined,
+            // Behavior-gate only: no catalog provider sets the flag since
+            // SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md §3.2 dropped it for
+            // Claude, so /login runs the in-app tier 1 for Claude too.
             skipTier1: prov.headlessLoginUrlUnsupported === true,
         });
-        switch (outcome) {
-            case "opened": {
-                ctx.log("auth", "waiting for login to complete...");
-                let authenticated = false;
-                const deadline = Date.now() + 5 * 60 * 1000;
-                // reagent P1 on PR #2413 (round 3, second pass): the
-                // AuthUrlBox Cancel / "Use terminal instead" buttons
-                // call useAgentControllerStatus's cancelLogin()/
-                // useTerminalInstead() directly — this poll had no way
-                // to learn that happened and kept running for up to its
-                // own 5-minute deadline regardless, long past
-                // useTerminalInstead()'s 20s backstop (which then
-                // reported a bogus "taking longer than expected"
-                // instead of ever actually opening a terminal). Checked
-                // in the loop condition AND right after the sleep,
-                // mirroring relogin()'s identical "opened" poll.
-                while (!ctx.isCancelled() && Date.now() < deadline && !authenticated) {
-                    await sleep(2000);
-                    if (ctx.isCancelled()) break;
-                    try {
-                        const recheck = await RpcApi.CheckCliAuthCommand(TabRpcClient, {
-                            cli_path: cliPath,
-                            auth_check_args: prov.authCheckCommand,
-                            auth_env: recheckAuthEnv,
-                        }, { timeout: 10000 });
-                        if (recheck.authenticated) authenticated = true;
-                    } catch {
-                        // keep polling on transient RPC errors
-                    }
-                }
-                if (ctx.isCancelled()) {
-                    // The user explicitly switched away (e.g. "Use
-                    // terminal instead", already opening its own
-                    // terminal login) — silent, not an error: never
-                    // fail silently (retro §5.1) still holds, but there
-                    // is nothing wrong to report here, just a flow the
-                    // user chose to leave.
-                    return { kind: "ok" };
-                }
-                if (authenticated && openedAccountId && openedAccountDir) {
-                    // reagent P1 (re-review of PR #2318): must check the
-                    // return value — the exact same persist-failure gap
-                    // found and fixed in useAgentControllerStatus.ts's
-                    // relogin() "opened" branch. Without this, a DB-write
-                    // failure here still reported "login complete" while
-                    // leaving no real account behind for the resolver's
-                    // spawn gate to find on the very next turn.
-                    const persisted = await persistAndLinkAccount(
-                        { provider: prov, cliPath, authEnv, setAuthUrl: ctx.setAuthUrl, log: ctx.log, linkTarget },
-                        openedAccountId,
-                        openedAccountDir,
-                    );
-                    if (!persisted) {
-                        return {
-                            kind: "error",
-                            message:
-                                "/login: the login succeeded, but AgentMux couldn't save the account record. Try again in a moment.",
-                        };
-                    }
-                    ctx.log("auth", "login complete — run /cost to verify");
-                    // See finalizeLoginSuccess's doc comment for the
-                    // active-turn / refresh-failure gating.
-                    return await finalizeLoginSuccess(ctx);
-                }
-                return {
-                    kind: "error",
-                    message:
-                        "/login: opened a login page, but no login was detected within 5 minutes. " +
-                        "Complete the login there, then run /login again.",
-                };
-            }
-            case "terminal-success":
-            case "terminal-cli-signed-in":
-                // openedAccountId/openedAccountDir are only set once
-                // onAccountRegistered fires — run-provider-login.ts only
-                // calls it once the account row is actually persisted, so
-                // this also catches the case where a credential seeded/
-                // typed in successfully but the DB write itself failed.
-                // See REPORT_LOGIN_PERSIST_FAILURE_AND_STUCK_WORKING_2026_07_27.md.
-                // A cli-managed CLI (Pi) keeps its own login: no account.
-                if (outcome === "terminal-cli-signed-in" || (openedAccountId && openedAccountDir)) {
-                    ctx.log("auth", "login complete — run /cost to verify");
-                    // See finalizeLoginSuccess's doc comment for the
-                    // active-turn / refresh-failure gating.
-                    return await finalizeLoginSuccess(ctx);
-                }
+        switch (result.kind) {
+            case "signed-in":
+                ctx.log("auth", "login complete — run /cost to verify");
+                // See finalizeLoginSuccess's doc comment for the
+                // active-turn / refresh-failure gating.
+                return await finalizeLoginSuccess(ctx);
+            case "save-failed":
+                // The credential landed but no account row backs it: the
+                // spawn gate would still block the next turn.
                 return {
                     kind: "error",
                     message:
                         "/login: the login succeeded, but AgentMux couldn't save the account record. Try again in a moment.",
                 };
-            case "terminal-timeout":
-                // Never report success for a login that didn't complete
-                // (retro-agent-auth-relogin-noop-2026-07-01 §5.1).
-                return {
-                    kind: "error",
-                    message:
-                        "/login: opened a terminal window, but no login was detected within 5 minutes. " +
-                        "Complete the login there, then run /login again.",
-                };
-            case "terminal-unavailable":
+            case "not-detected":
+                // The user left the flow (Cancel, "Use terminal instead", or
+                // closing the pane): nothing wrong to report.
+                if (ctx.isCancelled()) return { kind: "ok" };
+                return notDetectedResult(result.stage);
+            case "unavailable":
                 return {
                     kind: "error",
                     message: "/login: the CLI produced no login URL, and a terminal window couldn't be opened on this platform.",

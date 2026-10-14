@@ -36,10 +36,27 @@ pub const MAX_FRAME_BYTES: usize = 64 * 1024;
 pub const TRUNCATED_HEAD_CHARS: usize = 2048;
 
 /// About how many bytes `records` cost on the wire: each line as the device
-/// gets it, so at most [`MAX_FRAME_BYTES`] however large it is written. One
-/// 5 MB tool result is 64 KB behind, not 5 MB.
+/// gets it, so at most [`MAX_FRAME_BYTES`] however large it is written (one
+/// 5 MB tool result is 64 KB behind, not 5 MB), and as a JSON string inside
+/// the event, so with its escapes: a line of quotes is twice its size there.
+/// Counting raw bytes let a 1 MB resume become a 2 MB event, past what the
+/// phone's reader took in one line.
 pub fn wire_size(records: &[u8]) -> usize {
-    records.split(|b| *b == b'\n').map(|line| line.len().min(MAX_FRAME_BYTES) + 1).sum()
+    records
+        .split(|b| *b == b'\n')
+        .map(|line| {
+            let kept = &line[..line.len().min(MAX_FRAME_BYTES)];
+            let escapes: usize = kept
+                .iter()
+                .map(|b| match b {
+                    b'"' | b'\\' | b'\t' | b'\r' | 0x08 | 0x0c => 1,
+                    0..=0x1f => 5,
+                    _ => 0,
+                })
+                .sum();
+            kept.len() + escapes + 1
+        })
+        .sum()
 }
 
 /// What `records` of `filename` cost a subscriber: a transcript's lines as
@@ -412,6 +429,17 @@ mod tests {
         let huge = format!("{}\n", "x".repeat(5 * 1024 * 1024));
         assert!(wire_size(huge.as_bytes()) <= MAX_FRAME_BYTES + 2);
         assert_eq!(wire_size(b"ab\ncd\n"), 3 + 3 + 1);
+    }
+
+    #[test]
+    fn a_line_counts_with_the_escapes_it_gets_as_a_json_string() {
+        // Each record goes out as a JSON string: quotes and backslashes
+        // double, a control character becomes \u00XX.
+        let line = r#"{"a":"b\"c"}"#;
+        let on_wire = serde_json::to_string(line).unwrap();
+        assert_eq!(wire_size(line.as_bytes()), on_wire.len() - 2 + 1, "the escaped string without its quotes, plus the newline");
+        assert_eq!(wire_size(b"\x01"), 6 + 1);
+        assert_eq!(wire_size(b"\t"), 2 + 1);
     }
 
     #[test]

@@ -13,7 +13,7 @@
  * startup / context / memory behaviour from the research doc.
  *
  * Drives:
- * - `AgentCard` display (title = blurb, caption = displayName)
+ * - `AgentCard` display (title = displayName, caption = blurb)
  * - `AgentLaunchModal` description text
  * - `AgentLaunchModal` default container image when "Container" is
  *   picked

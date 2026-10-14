@@ -188,6 +188,12 @@ pub struct HostState {
     /// panes have no entry (their magnify is backend-owned).
     pub pane_window_states: HashMap<String, PaneWindowState>,
 
+    /// Window label → the HWND of its outer top-level window. Mutated only
+    /// by `BindWindowHwnd` / `EvictWindowHwnd` / `RelabelBrowser`; read by the
+    /// HWND resolvers and the drop/redock hit tests (`window_hwnds.rs`).
+    #[cfg(any(target_os = "windows", test))]
+    pub window_hwnds: HashMap<String, isize>,
+
     /// Browser-pane creates deferred because the block_id was still `Closing`
     /// at register time (old CEF Browser mid-teardown — e.g. redock
     /// re-creating the same block_id the floater is still closing). Keyed by
@@ -237,6 +243,8 @@ impl HostState {
             start_hidden_held: false,
             window_opacities: HashMap::new(),
             pane_window_states: HashMap::new(),
+            #[cfg(any(target_os = "windows", test))]
+            window_hwnds: HashMap::new(),
             pending_browser_pane_creates: HashMap::new(),
             next_browser_pane_label_seq: 1,
             event_version: 0,
@@ -381,11 +389,11 @@ pub enum HostCommand {
     /// Rename a browser entry `old_label` → `new_label`, re-keying the
     /// per-label host state that persists for the window's life
     /// (`browsers` + the duplicated `BrowserHandle.label`, and, if present,
-    /// `window_opacities` / `pane_window_states`). Used when a pane-pool
-    /// window (`floating-pool-*`) is promoted into a user floating pane
-    /// (`floating-*`). Errors if `old_label` is absent or `new_label`
-    /// already exists. `window_meta` / `window_hwnds` live on `AppState`
-    /// and are re-keyed by the caller. See
+    /// `window_hwnds` / `window_opacities` / `pane_window_states`). Used when
+    /// a pane-pool window (`floating-pool-*`) is promoted into a user floating
+    /// pane (`floating-*`). Errors if `old_label` is absent or `new_label`
+    /// already exists. `window_meta` lives on `AppState` and is re-keyed by
+    /// the caller. See
     /// `SPEC_FLOATING_PANE_POOL_RELABEL_2026_06_30`.
     #[cfg(target_os = "windows")]
     RelabelBrowser { old_label: String, new_label: String },
@@ -538,6 +546,16 @@ pub enum HostCommand {
     /// z-order afterwards.
     #[cfg(any(target_os = "windows", test))]
     SetFloatingAlwaysOnTop { label: String, on: bool },
+
+    // ── Outer-window HWND registry (window_hwnds.rs) ─────────────────────
+
+    /// Bind `label` to its outer top-level `hwnd`. `replace: false` keeps an
+    /// existing binding.
+    #[cfg(any(target_os = "windows", test))]
+    BindWindowHwnd { label: String, hwnd: isize, replace: bool },
+    /// Forget `label`'s HWND; returns it via `DispatchOutput::evicted_window_hwnd`.
+    #[cfg(any(target_os = "windows", test))]
+    EvictWindowHwnd { label: String },
 }
 
 impl std::fmt::Debug for HostCommand {
@@ -664,6 +682,18 @@ impl std::fmt::Debug for HostCommand {
                 .debug_struct("SetFloatingAlwaysOnTop")
                 .field("label", label)
                 .field("on", on)
+                .finish(),
+            #[cfg(any(target_os = "windows", test))]
+            HostCommand::BindWindowHwnd { label, hwnd, replace } => f
+                .debug_struct("BindWindowHwnd")
+                .field("label", label)
+                .field("hwnd", &format_args!("{:#x}", hwnd))
+                .field("replace", replace)
+                .finish(),
+            #[cfg(any(target_os = "windows", test))]
+            HostCommand::EvictWindowHwnd { label } => f
+                .debug_struct("EvictWindowHwnd")
+                .field("label", label)
                 .finish(),
         }
     }
@@ -958,11 +988,15 @@ pub struct DispatchOutput {
     /// no-op because `old_label == new_label`). Stays `false` on failure
     /// (old label absent, or new label already registered — e.g. a
     /// concurrent close removed the browser between promote and relabel).
-    /// The caller MUST gate the AppState `window_hwnds`/`window_meta` re-key
+    /// The caller MUST gate the AppState `window_meta` re-key
     /// and the `pool:pane-promote` emit on this, else `browsers` and the
     /// AppState maps would disagree and the emit would resolve no browser.
     #[cfg(target_os = "windows")]
     pub relabel_ok: bool,
+
+    /// Set by `EvictWindowHwnd`: the HWND the label was bound to, if any.
+    #[cfg(any(target_os = "windows", test))]
+    pub evicted_window_hwnd: Option<isize>,
 }
 
 // Manual Debug — `cef::Browser` doesn't impl Debug.
@@ -999,6 +1033,10 @@ mod pane_window;
 mod panes;
 mod pool;
 mod quit;
+#[cfg(any(target_os = "windows", test))]
+mod window_hwnds;
+#[cfg(any(target_os = "windows", test))]
+pub(crate) use window_hwnds::{drop_target_at, labels_at_hwnd, DropTarget};
 
 /// The WS4 attended/unattended crossing for this state once `live_after` user
 /// windows remain — every input read from `state`, so a quit in progress
@@ -1064,6 +1102,8 @@ fn is_quit_relevant(cmd: &HostCommand) -> bool {
         | HostCommand::SetStartHiddenHeld { .. } => false,
         #[cfg(any(target_os = "windows", test))]
         HostCommand::SetFloatingAlwaysOnTop { .. } => false,
+        #[cfg(any(target_os = "windows", test))]
+        HostCommand::BindWindowHwnd { .. } | HostCommand::EvictWindowHwnd { .. } => false,
         #[cfg(target_os = "windows")]
         HostCommand::RelabelBrowser { .. } => false,
         _ => true,
@@ -1162,6 +1202,12 @@ pub fn update(state: &mut HostState, cmd: HostCommand) -> DispatchOutput {
         HostCommand::SetFloatingAlwaysOnTop { label, on } => {
             pane_window::handle_set_floating_always_on_top(state, label, on)
         }
+        #[cfg(any(target_os = "windows", test))]
+        HostCommand::BindWindowHwnd { label, hwnd, replace } => {
+            window_hwnds::handle_bind_window_hwnd(state, label, hwnd, replace)
+        }
+        #[cfg(any(target_os = "windows", test))]
+        HostCommand::EvictWindowHwnd { label } => window_hwnds::handle_evict_window_hwnd(state, label),
     };
     // Pillar 2 — level-triggered quit reconciliation. After any transition that
     // can change the decision's inputs, recompute the pure `reconcile_quit` over

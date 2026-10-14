@@ -871,3 +871,115 @@ describe("useAgentControllerStatus — first-flow-wins holds in BOTH orderings (
         });
     });
 });
+
+describe("useAgentControllerStatus — launch-phase reducer wiring", () => {
+    it("a double-clicked Log in starts one login", async () => {
+        let release!: () => void;
+        const gate = new Promise<void>((r) => { release = r; });
+        hub.runProviderLogin.mockImplementation(async () => {
+            await gate;
+            return "terminal-unavailable";
+        });
+        await createRoot(async (dispose) => {
+            const status = useAgentControllerStatus({ blockId: "block-1", provider: () => claude, log: () => {} });
+            const first = status.relogin({ retryAfterLogin: false });
+            const second = status.relogin({ retryAfterLogin: false });
+            const third = status.loginViaTerminal({ retryAfterLogin: false });
+            release();
+            await Promise.all([first, second, third]);
+            expect(hub.runProviderLogin).toHaveBeenCalledTimes(1);
+            dispose();
+        });
+    });
+
+    it("cancel mid-login clears the phase, and a later tier change doesn't bring it back", async () => {
+        let release!: () => void;
+        const gate = new Promise<void>((r) => { release = r; });
+        hub.runProviderLogin.mockImplementation(async (o: any) => {
+            await gate;
+            o.onTierChange?.({ tier: "fallback" });
+            o.onTierChange?.({ tier: "polling", deadlineMs: Date.now() + 1000 });
+            return "terminal-timeout";
+        });
+        await createRoot(async (dispose) => {
+            const status = useAgentControllerStatus({ blockId: "block-1", provider: () => claude, log: () => {} });
+            const live = status.relogin({ retryAfterLogin: false });
+            for (let i = 0; i < 10; i++) await Promise.resolve();
+            expect(status.launchPhase()?.kind).toBe("waiting-for-login-link");
+            expect(status.loginWaiting()).toBe(true);
+
+            status.cancelLogin();
+            expect(status.launchPhase()).toBeNull();
+            expect(status.isCancelled()).toBe(true);
+
+            release();
+            await live;
+            expect(status.launchPhase()).toBeNull();
+            // The user left the flow: no "no login detected" notice.
+            expect(status.authNotice()).toBeNull();
+            expect(status.loginWaiting()).toBe(false);
+            // A pre-launch Log in that didn't sign in puts the Log in state back.
+            expect(status.canRetry()).toBe(true);
+            dispose();
+        });
+    });
+
+    it("startLaunchFlow runs once at a time, calls onReady while the flow still counts as running, then ends it", async () => {
+        const { runLaunchFlow } = await import("../flows/launch-flow");
+        let release!: (v: string) => void;
+        vi.mocked(runLaunchFlow).mockImplementation(
+            (o: any) => {
+                o.setLaunchPhase?.({ kind: "verifying" });
+                o.onAuthCheckResult?.(true);
+                return new Promise((r) => { release = r as any; });
+            },
+        );
+        await createRoot(async (dispose) => {
+            let flowRunningAtReady: boolean | undefined;
+            const status = useAgentControllerStatus({
+                blockId: "block-1",
+                provider: () => claude,
+                log: () => {},
+                onReady: () => { flowRunningAtReady = status.flowRunning(); },
+            });
+            const first = status.startLaunchFlow();
+            const second = status.startLaunchFlow();
+            await second;
+            for (let i = 0; i < 10; i++) await Promise.resolve();
+            expect(status.launchPhase()).toEqual({ kind: "verifying" });
+            expect(status.isLoading()).toBe(true);
+            release("success");
+            await first;
+            expect(runLaunchFlow).toHaveBeenCalledTimes(1);
+            expect(flowRunningAtReady).toBe(true);
+            expect(status.flowRunning()).toBe(false);
+            expect(status.launchPhase()).toBeNull();
+            expect(status.authStatus()).toBe("authenticated");
+            expect(status.isLoading()).toBe(false);
+            dispose();
+        });
+    });
+
+    it("an auth_failed launch leaves the Log in state, and a successful Log in clears it", async () => {
+        const { runLaunchFlow } = await import("../flows/launch-flow");
+        vi.mocked(runLaunchFlow).mockResolvedValue("auth_failed");
+        const onReady = vi.fn();
+        await createRoot(async (dispose) => {
+            const status = useAgentControllerStatus({ blockId: "block-1", provider: () => claude, log: () => {}, onReady });
+            await status.startLaunchFlow();
+            expect(status.canRetry()).toBe(true);
+            expect(status.authStatus()).toBe("unauthenticated");
+            expect(onReady).not.toHaveBeenCalled();
+
+            hub.runProviderLogin.mockImplementation(async (o: any) => {
+                o.onAccountRegistered?.("acct", "/dir");
+                return "inapp-success";
+            });
+            await status.relogin({ retryAfterLogin: false });
+            expect(status.canRetry()).toBe(false);
+            expect(status.authStatus()).toBe("authenticated");
+            expect(onReady).toHaveBeenCalledOnce();
+            dispose();
+        });
+    });
+});

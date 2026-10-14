@@ -36,6 +36,18 @@ export interface OutputTranslator {
 }
 
 /**
+ * The paired device a stored user record says sent it: srv adds
+ * `"amx":{"via":"viewer","device":…,"message_id":…}` beside a message the
+ * user sent from their phone (`crates/srv/src/backend/viewer/origin.rs`).
+ * Undefined for every other record.
+ */
+export function deviceOrigin(rawEvent: unknown): string | undefined {
+    const amx = (rawEvent as { amx?: { via?: unknown; device?: unknown } } | null)?.amx;
+    if (amx?.via !== "viewer" || typeof amx.device !== "string" || !amx.device) return undefined;
+    return amx.device;
+}
+
+/**
  * The user's message as the backend writes it into the transcript for CLIs
  * that don't echo their prompt (Claude's stdin line; for Codex and Kimi, the
  * per-turn subprocess controller's `UserRecordSink`): a
@@ -43,12 +55,14 @@ export interface OutputTranslator {
  * user_message node. Live, the pane already shows the message optimistically
  * and the transcript cursor hands the record to its echo ledger, so a live
  * translator must not render it again — hence replay-only, as Gemini's echo.
- * Returns null when the record isn't one.
+ * A message sent from a paired device is the exception: no pane typed it, so
+ * it renders live too. Returns null when the record isn't one.
  */
 export function replayedUserMessage(rawEvent: unknown, replay: boolean | undefined): StreamEvent[] | null {
     const rec = rawEvent as { type?: unknown; message?: { content?: unknown } } | null;
     if (rec?.type !== "user") return null;
     const content = rec.message?.content;
-    if (!replay || typeof content !== "string" || !content) return [];
-    return [{ type: "user_message", message: content }];
+    const fromDevice = deviceOrigin(rawEvent);
+    if ((!replay && !fromDevice) || typeof content !== "string" || !content) return [];
+    return [{ type: "user_message", message: content, ...(fromDevice ? { fromDevice } : {}) }];
 }

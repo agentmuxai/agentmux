@@ -1,12 +1,14 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-use agentmux_common::ipc::{ErrorCode, Event};
+use agentmux_common::ipc::Event;
 
 use crate::state::State;
 
 
 use crate::state::WindowRecord;
+
+use super::invalid_command;
 
 /// Phase E.5 — record a new window→workspace mapping. Validates
 /// the parent workspace exists; otherwise emits `Event::Error`
@@ -19,13 +21,7 @@ pub(super) fn handle_create_window(
     workspace_id: String,
 ) -> Vec<Event> {
     if !state.workspaces.contains_key(&workspace_id) {
-        let v = state.bump_version();
-        return vec![Event::Error {
-            code: ErrorCode::InvalidCommand,
-            message: format!("CreateWindow: workspace not found: {}", workspace_id),
-            fatal: false,
-            version: v,
-        }];
+        return invalid_command(state, format!("CreateWindow: workspace not found: {}", workspace_id));
     }
     if let Some(existing) = state.windows.get(&window_id) {
         if existing.workspace_id == workspace_id {
@@ -69,25 +65,13 @@ pub(super) fn handle_switch_workspace(
     workspace_id: String,
 ) -> Vec<Event> {
     if !state.workspaces.contains_key(&workspace_id) {
-        let v = state.bump_version();
-        return vec![Event::Error {
-            code: ErrorCode::InvalidCommand,
-            message: format!(
-                "SwitchWorkspace: destination workspace not found: {}",
-                workspace_id
-            ),
-            fatal: false,
-            version: v,
-        }];
+        return invalid_command(
+            state,
+            format!("SwitchWorkspace: destination workspace not found: {}", workspace_id),
+        );
     }
     let Some(window) = state.windows.get_mut(&window_id) else {
-        let v = state.bump_version();
-        return vec![Event::Error {
-            code: ErrorCode::InvalidCommand,
-            message: format!("SwitchWorkspace: window not found: {}", window_id),
-            fatal: false,
-            version: v,
-        }];
+        return invalid_command(state, format!("SwitchWorkspace: window not found: {}", window_id));
     };
     if window.workspace_id == workspace_id {
         return Vec::new();
@@ -129,13 +113,7 @@ pub(super) fn handle_update_window_meta(
     meta_patch: serde_json::Value,
 ) -> Vec<Event> {
     if !state.windows.contains_key(&window_id) {
-        let v = state.bump_version();
-        return vec![Event::Error {
-            code: ErrorCode::InvalidCommand,
-            message: format!("UpdateWindowMeta: window not found: {}", window_id),
-            fatal: false,
-            version: v,
-        }];
+        return invalid_command(state, format!("UpdateWindowMeta: window not found: {}", window_id));
     }
     let v = state.bump_version();
     vec![Event::WindowMetaUpdated {

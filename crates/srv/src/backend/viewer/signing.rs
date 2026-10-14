@@ -21,10 +21,6 @@
 //! Keystore and iOS's Secure Enclave both hold in hardware), sent as the
 //! 65-byte uncompressed point, signing SHA-256 with a DER signature. A
 //! 32-byte key is Ed25519, the shape pairing accepted first; it verifies too.
-//!
-//! Pairing uses `DeviceKey::parse` today; the send route, the next step of
-//! the spec's §8, is what checks signatures.
-#![cfg_attr(not(test), allow(dead_code))]
 
 use base64::Engine as _;
 use sha2::{Digest, Sha256};

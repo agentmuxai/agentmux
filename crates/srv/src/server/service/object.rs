@@ -533,9 +533,7 @@ async fn update_layout_via_reducer(
                 correlation_id: String::new(),
                 slices: Some(slices),
             };
-            let ctx = crate::reducer::Ctx {
-                registered_pid: None,
-            };
+            let ctx = crate::reducer::Ctx::new(None);
             let events = crate::reducer::update(&mut s, cmd, &ctx);
             let has_error = events
                 .iter()

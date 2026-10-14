@@ -479,6 +479,17 @@ pub fn broadcast_turn_message(target_agent: &str, recipients: usize, msg_id: &st
     )
 }
 
+/// The text an agent receives for a message the user sent from a paired
+/// device: what they typed, as a plain user turn with no header (the record
+/// stored beside it says where it came from, `viewer::origin`). Escape
+/// sequences and invisible characters are dropped and marker delimiters
+/// quoted, as in every delivered body, so the text can't pose as a jekt, a
+/// broadcast or a system note. The caller keeps it under
+/// `MAX_MESSAGE_LENGTH`, so nothing is cut.
+pub fn device_turn_message(body: &str) -> String {
+    neutralize_markers(&sanitize_message(body))
+}
+
 /// A value rendered into the marker as one `KEY=value` field. Only
 /// printable ASCII survives (agent ids are ASCII); `=`, `[`, `]`, spaces and
 /// everything else — including invisible and bidi-control characters —

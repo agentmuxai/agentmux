@@ -44,6 +44,16 @@ const startupNode: UserMessageNode = {
 };
 
 describe("UserMessageBlock — regular user input", () => {
+    it("says which device a message was sent from, and nothing for one typed here", () => {
+        render(() => (
+            <UserMessageBlock node={{ ...baseNode, fromDevice: "Pixel 9" }} pinned={false} onTogglePin={() => {}} />
+        ));
+        expect(screen.getByText("From Pixel 9")).toBeInTheDocument();
+        cleanup();
+        render(() => <UserMessageBlock node={baseNode} pinned={false} onTogglePin={() => {}} />);
+        expect(screen.queryByText(/^From /)).toBeNull();
+    });
+
     it("renders expanded with the message body, no summary row", () => {
         render(() => (
             <UserMessageBlock node={baseNode} pinned={false} onTogglePin={() => {}} />
