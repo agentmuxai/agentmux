@@ -50,11 +50,8 @@ pub(crate) async fn handle_move_block_to_tab(state: &AppState, call: &WebCallTyp
     if source_tab_id == dest_tab_id {
         return WebReturnType::success_empty();
     }
-    // Move the block via the reducer. dst_index 0 to mirror
-    // wcore::move_block_to_tab which appended at end... wait,
-    // wcore appends, so end-of-list. The reducer's MoveBlock
-    // clamps dst_index to dst.block_ids.len(); use u32::MAX
-    // to land at the end.
+    // Append to the destination: MoveBlock clamps dst_index to
+    // dst.block_ids.len(), so u32::MAX lands at the end.
     let events = dispatch_to_reducer(
         state,
         agentmux_common::ipc::Command::MoveBlock {
@@ -80,7 +77,7 @@ pub(crate) async fn handle_move_block_to_tab(state: &AppState, call: &WebCallTyp
         }
     }
     publish_events(state, &events);
-    // Auto-close empty source tab (mirrors wcore::move_block_to_tab).
+    // Auto-close the emptied source tab.
     if auto_close {
         let should_close = match store.must_get::<Tab>(&source_tab_id) {
             Ok(t) => t.blockids.is_empty(),

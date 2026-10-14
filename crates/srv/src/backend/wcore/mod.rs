@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 // Copyright 2025, Command Line Inc.
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
@@ -9,7 +8,6 @@
 //! Orchestrates Store mutations with MPS event publishing.
 
 mod block;
-mod dnd;
 mod event;
 mod tab;
 mod window;
@@ -31,11 +29,6 @@ use super::obj::*;
 
 // ---- Layout action types (match Go) ----
 
-pub const LAYOUT_ACTION_INSERT: &str = "insert";
-pub const LAYOUT_ACTION_INSERT_AT_INDEX: &str = "insertatindex";
-pub const LAYOUT_ACTION_REMOVE: &str = "remove";
-pub const LAYOUT_ACTION_CLEAR_TREE: &str = "cleartree";
-pub const LAYOUT_ACTION_REPLACE: &str = "replace";
 pub const LAYOUT_ACTION_SPLIT_HORIZONTAL: &str = "splithorizontal";
 pub const LAYOUT_ACTION_SPLIT_VERTICAL: &str = "splitvertical";
 
@@ -325,7 +318,6 @@ pub fn get_client(store: &Store) -> Result<Client, StoreError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use super::dnd::*;
 
     fn make_store() -> Store {
         Store::open_in_memory().unwrap()
@@ -416,22 +408,6 @@ mod tests {
         let ws = get_workspace(&store, &ws.oid).unwrap();
         assert_eq!(ws.tabids.len(), 1);
         assert_eq!(ws.activetabid, tab2.oid);
-    }
-
-    #[test]
-    fn test_set_active_tab() {
-        let store = make_store();
-        let ws = create_workspace(&store, "WS").unwrap();
-        let _tab1 = create_tab(&store, &ws.oid).unwrap();
-        let tab2 = create_tab(&store, &ws.oid).unwrap();
-
-        set_active_tab(&store, &ws.oid, &tab2.oid).unwrap();
-        let ws = get_workspace(&store, &ws.oid).unwrap();
-        assert_eq!(ws.activetabid, tab2.oid);
-
-        // Setting non-existent tab should fail
-        let result = set_active_tab(&store, &ws.oid, "nonexistent");
-        assert!(result.is_err());
     }
 
     #[test]
@@ -542,28 +518,6 @@ mod tests {
     }
 
     #[test]
-    fn test_create_and_close_window() {
-        let store = make_store();
-        ensure_initial_data(&store).unwrap();
-
-        let client = get_client(&store).unwrap();
-        let initial_count = client.windowids.len();
-
-        let ws = create_workspace(&store, "WS2").unwrap();
-        let window = create_window(&store, &ws.oid).unwrap();
-
-        // Add to client
-        let mut client = get_client(&store).unwrap();
-        client.windowids.push(window.oid.clone());
-        store.update(&mut client).unwrap();
-
-        close_window(&store, &window.oid).unwrap();
-        let client = get_client(&store).unwrap();
-        assert_eq!(client.windowids.len(), initial_count);
-        assert!(store.get::<Window>(&window.oid).unwrap().is_none());
-    }
-
-    #[test]
     fn test_focus_window() {
         let store = make_store();
         ensure_initial_data(&store).unwrap();
@@ -578,24 +532,6 @@ mod tests {
         focus_window(&store, &w2.oid).unwrap();
         let client = get_client(&store).unwrap();
         assert_eq!(client.windowids[0], w2.oid);
-    }
-
-    #[test]
-    fn test_switch_workspace() {
-        let store = make_store();
-        ensure_initial_data(&store).unwrap();
-
-        let client = get_client(&store).unwrap();
-        let window_id = &client.windowids[0];
-        let window = store.must_get::<Window>(window_id).unwrap();
-        let old_ws = window.workspaceid.clone();
-
-        let new_ws = create_workspace(&store, "New WS").unwrap();
-        switch_workspace(&store, window_id, &new_ws.oid).unwrap();
-
-        let window = store.must_get::<Window>(window_id).unwrap();
-        assert_eq!(window.workspaceid, new_ws.oid);
-        assert_ne!(window.workspaceid, old_ws);
     }
 
     #[test]
@@ -651,191 +587,5 @@ mod tests {
         assert_ne!(fixed.workspaceid, "nonexistent");
         let ws = store.must_get::<Workspace>(&fixed.workspaceid).unwrap();
         assert_eq!(ws.tabids.len(), 1); // should have created a tab too
-    }
-
-    #[test]
-    fn test_move_block_to_tab() {
-        let store = make_store();
-        let ws = create_workspace(&store, "WS").unwrap();
-        let tab1 = create_tab(&store, &ws.oid).unwrap();
-        let tab2 = create_tab(&store, &ws.oid).unwrap();
-
-        let meta = MetaMapType::new();
-        let block = create_block(&store, &tab1.oid, meta).unwrap();
-
-        // Verify block is in tab1
-        let t1 = store.must_get::<Tab>(&tab1.oid).unwrap();
-        assert_eq!(t1.blockids.len(), 1);
-        assert_eq!(t1.blockids[0], block.oid);
-
-        // Move block from tab1 to tab2
-        move_block_to_tab(&store, &block.oid, &tab1.oid, &tab2.oid, &ws.oid, false).unwrap();
-
-        // tab1 should be empty, tab2 should have the block
-        let t1 = store.must_get::<Tab>(&tab1.oid).unwrap();
-        let t2 = store.must_get::<Tab>(&tab2.oid).unwrap();
-        assert!(t1.blockids.is_empty());
-        assert_eq!(t2.blockids.len(), 1);
-        assert_eq!(t2.blockids[0], block.oid);
-
-        // Block parentoref should point to tab2
-        let b = store.must_get::<Block>(&block.oid).unwrap();
-        assert_eq!(b.parentoref, format!("tab:{}", tab2.oid));
-    }
-
-    #[test]
-    fn test_move_block_to_tab_auto_close() {
-        let store = make_store();
-        let ws = create_workspace(&store, "WS").unwrap();
-        let tab1 = create_tab(&store, &ws.oid).unwrap();
-        let tab2 = create_tab(&store, &ws.oid).unwrap();
-
-        let block = create_block(&store, &tab1.oid, MetaMapType::new()).unwrap();
-
-        // Move with auto_close=true — tab1 should be deleted since it becomes empty
-        move_block_to_tab(&store, &block.oid, &tab1.oid, &tab2.oid, &ws.oid, true).unwrap();
-
-        // tab1 should be deleted
-        assert!(store.get::<Tab>(&tab1.oid).unwrap().is_none());
-
-        // workspace should only have tab2
-        let ws = store.must_get::<Workspace>(&ws.oid).unwrap();
-        assert_eq!(ws.tabids.len(), 1);
-        assert_eq!(ws.tabids[0], tab2.oid);
-    }
-
-    #[test]
-    fn test_move_block_same_tab_noop() {
-        let store = make_store();
-        let ws = create_workspace(&store, "WS").unwrap();
-        let tab = create_tab(&store, &ws.oid).unwrap();
-        let block = create_block(&store, &tab.oid, MetaMapType::new()).unwrap();
-
-        // Moving to same tab should be a no-op
-        move_block_to_tab(&store, &block.oid, &tab.oid, &tab.oid, &ws.oid, false).unwrap();
-
-        let t = store.must_get::<Tab>(&tab.oid).unwrap();
-        assert_eq!(t.blockids.len(), 1);
-    }
-
-    #[test]
-    fn test_promote_block_to_tab() {
-        let store = make_store();
-        let ws = create_workspace(&store, "WS").unwrap();
-        let tab = create_tab(&store, &ws.oid).unwrap();
-        let block = create_block(&store, &tab.oid, MetaMapType::new()).unwrap();
-
-        // Promote block to new tab
-        let new_tab = promote_block_to_tab(&store, &block.oid, &tab.oid, &ws.oid, false).unwrap();
-
-        // Original tab should be empty
-        let old_tab = store.must_get::<Tab>(&tab.oid).unwrap();
-        assert!(old_tab.blockids.is_empty());
-
-        // New tab should have the block
-        let nt = store.must_get::<Tab>(&new_tab.oid).unwrap();
-        assert_eq!(nt.blockids.len(), 1);
-        assert_eq!(nt.blockids[0], block.oid);
-
-        // Workspace should have both tabs
-        let ws = store.must_get::<Workspace>(&ws.oid).unwrap();
-        assert_eq!(ws.tabids.len(), 2);
-
-        // New tab should be active
-        assert_eq!(ws.activetabid, new_tab.oid);
-    }
-
-    #[test]
-    fn test_reorder_tab() {
-        let store = make_store();
-        let ws = create_workspace(&store, "WS").unwrap();
-        let tab1 = create_tab(&store, &ws.oid).unwrap();
-        let tab2 = create_tab(&store, &ws.oid).unwrap();
-        let tab3 = create_tab(&store, &ws.oid).unwrap();
-
-        // Verify initial order: [tab1, tab2, tab3]
-        let ws_data = store.must_get::<Workspace>(&ws.oid).unwrap();
-        assert_eq!(ws_data.tabids, vec![tab1.oid.clone(), tab2.oid.clone(), tab3.oid.clone()]);
-
-        // Move tab3 to index 0
-        reorder_tab(&store, &ws.oid, &tab3.oid, 0).unwrap();
-
-        let ws_data = store.must_get::<Workspace>(&ws.oid).unwrap();
-        assert_eq!(ws_data.tabids, vec![tab3.oid.clone(), tab1.oid.clone(), tab2.oid.clone()]);
-
-        // Move tab1 to end (index 99 should clamp to len)
-        reorder_tab(&store, &ws.oid, &tab1.oid, 99).unwrap();
-
-        let ws_data = store.must_get::<Workspace>(&ws.oid).unwrap();
-        assert_eq!(ws_data.tabids, vec![tab3.oid.clone(), tab2.oid.clone(), tab1.oid.clone()]);
-    }
-
-    #[test]
-    fn test_move_tab_to_workspace() {
-        let store = make_store();
-        let ws1 = create_workspace(&store, "WS1").unwrap();
-        let ws2 = create_workspace(&store, "WS2").unwrap();
-        let tab1 = create_tab(&store, &ws1.oid).unwrap();
-        let tab2 = create_tab(&store, &ws1.oid).unwrap();
-        let tab3 = create_tab(&store, &ws2.oid).unwrap();
-
-        // Set tab1 as active in ws1
-        set_active_tab(&store, &ws1.oid, &tab1.oid).unwrap();
-
-        // Move tab2 from ws1 to ws2
-        move_tab_to_workspace(&store, &tab2.oid, &ws1.oid, &ws2.oid, None).unwrap();
-
-        let ws1_data = store.must_get::<Workspace>(&ws1.oid).unwrap();
-        let ws2_data = store.must_get::<Workspace>(&ws2.oid).unwrap();
-
-        assert_eq!(ws1_data.tabids, vec![tab1.oid.clone()]);
-        assert!(ws2_data.tabids.contains(&tab2.oid));
-        assert!(ws2_data.tabids.contains(&tab3.oid));
-        // Moved tab becomes active in destination
-        assert_eq!(ws2_data.activetabid, tab2.oid);
-    }
-
-    #[test]
-    fn test_move_tab_to_workspace_last_tab_blocked() {
-        let store = make_store();
-        let ws1 = create_workspace(&store, "WS1").unwrap();
-        let ws2 = create_workspace(&store, "WS2").unwrap();
-        let tab1 = create_tab(&store, &ws1.oid).unwrap();
-        let _tab2 = create_tab(&store, &ws2.oid).unwrap();
-
-        // Should fail — can't move the only tab out
-        let result = move_tab_to_workspace(&store, &tab1.oid, &ws1.oid, &ws2.oid, None);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_tear_off_tab() {
-        let store = make_store();
-        let ws = create_workspace(&store, "WS").unwrap();
-        let tab1 = create_tab(&store, &ws.oid).unwrap();
-        let tab2 = create_tab(&store, &ws.oid).unwrap();
-        set_active_tab(&store, &ws.oid, &tab1.oid).unwrap();
-
-        // Tear off tab2
-        let new_ws = tear_off_tab(&store, &tab2.oid, &ws.oid).unwrap();
-
-        // Source workspace no longer has tab2
-        let ws_data = store.must_get::<Workspace>(&ws.oid).unwrap();
-        assert_eq!(ws_data.tabids, vec![tab1.oid.clone()]);
-
-        // New workspace has tab2
-        assert_eq!(new_ws.tabids, vec![tab2.oid.clone()]);
-        assert_eq!(new_ws.activetabid, tab2.oid);
-    }
-
-    #[test]
-    fn test_tear_off_last_tab_blocked() {
-        let store = make_store();
-        let ws = create_workspace(&store, "WS").unwrap();
-        let tab1 = create_tab(&store, &ws.oid).unwrap();
-
-        // Should fail — can't tear off the only tab
-        let result = tear_off_tab(&store, &tab1.oid, &ws.oid);
-        assert!(result.is_err());
     }
 }

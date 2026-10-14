@@ -1,35 +1,42 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-use agentmux_common::ipc::{ErrorCode, Event};
+use agentmux_common::ipc::Event;
 
 use crate::state::State;
 
 
 use crate::state::BlockRecord;
 
-/// Phase E.3 — create a block inside a tab. Validates parent tab
-/// exists; otherwise emits `Event::Error` (non-fatal). On success:
-/// assigns a UUID, appends to the tab's `block_ids`, inserts into
-/// `state.blocks`, emits `Event::BlockCreated`.
-///
-/// NOT idempotent on retry (UUID assignment per call); saga-side
-/// dedup is responsible for at-most-once delivery in E.5+.
+use super::invalid_command;
+
+/// `create_block_with_id` with an id minted here, for `CreateBlockInStack`
+/// (`layout::handle_create_block_in_stack`), the one create arm that
+/// doesn't take its id from `Ctx::new_id` yet.
 pub(super) fn handle_create_block(
     state: &mut State,
     tab_id: String,
     meta: serde_json::Value,
 ) -> Vec<Event> {
-    if !state.tabs.contains_key(&tab_id) {
-        let v = state.bump_version();
-        return vec![Event::Error {
-            code: ErrorCode::InvalidCommand,
-            message: format!("CreateBlock: tab not found: {}", tab_id),
-            fatal: false,
-            version: v,
-        }];
+    create_block_with_id(state, tab_id, uuid::Uuid::new_v4().to_string(), meta)
+}
+
+/// Phase E.3 — create a block with the caller-minted `block_id`
+/// (`Ctx::new_id`) inside a tab. Refuses (non-fatal `Event::Error`) a
+/// missing tab or an id already in use. On success: appends to the tab's
+/// `block_ids`, inserts into `state.blocks`, emits `Event::BlockCreated`.
+pub(super) fn create_block_with_id(
+    state: &mut State,
+    tab_id: String,
+    block_id: String,
+    meta: serde_json::Value,
+) -> Vec<Event> {
+    if state.blocks.contains_key(&block_id) {
+        return invalid_command(state, format!("CreateBlock: id already in use: {}", block_id));
     }
-    let block_id = uuid::Uuid::new_v4().to_string();
+    if !state.tabs.contains_key(&tab_id) {
+        return invalid_command(state, format!("CreateBlock: tab not found: {}", tab_id));
+    }
     state.blocks.insert(
         block_id.clone(),
         BlockRecord {
@@ -98,13 +105,7 @@ pub(super) fn handle_move_block(
         }
     };
     if let Some(message) = validation_error {
-        let v = state.bump_version();
-        return vec![Event::Error {
-            code: ErrorCode::InvalidCommand,
-            message,
-            fatal: false,
-            version: v,
-        }];
+        return invalid_command(state, message);
     }
 
     // Special-case intra-tab move: remove and re-insert in the same
@@ -151,13 +152,7 @@ pub(super) fn handle_update_block_meta(
     meta_patch: serde_json::Value,
 ) -> Vec<Event> {
     if !state.blocks.contains_key(&block_id) {
-        let v = state.bump_version();
-        return vec![Event::Error {
-            code: ErrorCode::InvalidCommand,
-            message: format!("UpdateBlockMeta: block not found: {}", block_id),
-            fatal: false,
-            version: v,
-        }];
+        return invalid_command(state, format!("UpdateBlockMeta: block not found: {}", block_id));
     }
     let v = state.bump_version();
     vec![Event::BlockMetaUpdated {
@@ -366,5 +361,66 @@ mod tests {
             }
             other => panic!("expected Error, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn create_block_takes_its_id_from_ctx() {
+        let mut state = State::default();
+        let ws = create_workspace(&mut state, "w");
+        let tab = create_tab(&mut state, &ws, "t");
+        let events = update(
+            &mut state,
+            Command::CreateBlock { tab_id: tab.clone(), meta: serde_json::Value::Null },
+            &ctx_with_id("block-fixed"),
+        );
+        assert!(matches!(&events[0], Event::BlockCreated { block_id, .. } if block_id == "block-fixed"));
+        assert_eq!(state.tabs[&tab].block_ids, vec!["block-fixed".to_string()]);
+    }
+
+    #[test]
+    fn create_block_refuses_an_id_in_use() {
+        let mut state = State::default();
+        let ws = create_workspace(&mut state, "w");
+        let tab = create_tab(&mut state, &ws, "t");
+        let cmd = || Command::CreateBlock { tab_id: tab.clone(), meta: serde_json::Value::Null };
+        update(&mut state, cmd(), &ctx_with_id("dup"));
+        let events = update(&mut state, cmd(), &ctx_with_id("dup"));
+        assert!(matches!(&events[..], [Event::Error { message, .. }] if message.contains("already in use")));
+        assert_eq!(state.tabs[&tab].block_ids, vec!["dup".to_string()]);
+    }
+
+    #[test]
+    fn update_block_meta_passes_patch_through_without_touching_state() {
+        let mut state = State::default();
+        let ws = create_workspace(&mut state, "w");
+        let tab = create_tab(&mut state, &ws, "t");
+        let block = create_block(&mut state, &tab);
+        let before = state.blocks[&block].clone();
+        let patch = serde_json::json!({ "view": "term" });
+        let events = update(
+            &mut state,
+            Command::UpdateBlockMeta { block_id: block.clone(), meta_patch: patch.clone() },
+            &ctx(1),
+        );
+        assert!(matches!(
+            &events[..],
+            [Event::BlockMetaUpdated { block_id, meta_patch, .. }] if *block_id == block && *meta_patch == patch
+        ));
+        assert_eq!(state.blocks[&block], before);
+    }
+
+    #[test]
+    fn update_meta_of_unknown_block_errors() {
+        let mut state = State::default();
+        let events = update(
+            &mut state,
+            Command::UpdateBlockMeta { block_id: "ghost".into(), meta_patch: serde_json::json!({}) },
+            &ctx(1),
+        );
+        assert!(matches!(
+            &events[..],
+            [Event::Error { code: agentmux_common::ipc::ErrorCode::InvalidCommand, message, .. }]
+                if message.contains("UpdateBlockMeta")
+        ));
     }
 }

@@ -737,7 +737,7 @@ mod tests {
     ///   3. Edge: missing `children` array for leaves
     #[test]
     fn test_layout_node_serde_compat_with_frontend_shapes() {
-        // Shape 1 — single leaf (matches dnd.rs / service.rs writers).
+        // Shape 1 — single leaf (the shape `wcore::single_leaf_tree` writes).
         let leaf_json = serde_json::json!({
             "id": "node-uuid-1",
             "data": { "blockId": "block-uuid-1" },

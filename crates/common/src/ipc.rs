@@ -290,11 +290,9 @@ pub enum Command {
     /// blocks / layouts. See `Event::SrvSnapshot` for the current
     /// shape.
     GetSrvSnapshot,
-    /// Phase E.2 — create a new workspace. The reducer assigns the
-    /// `oid` (UUID) and emits `Event::WorkspaceCreated`. In E.2 the
-    /// reducer is a session-only projection (no persist subscriber);
-    /// E.2c adds the persist subscriber + migrates HTTP/WS RPC
-    /// to flow through the reducer.
+    /// Phase E.2 — create a new workspace and emit
+    /// `Event::WorkspaceCreated`. Its `oid` is minted by the dispatcher
+    /// (srv's `reducer::Ctx::new_id`), not the reducer.
     CreateWorkspace {
         name: String,
     },
@@ -325,11 +323,11 @@ pub enum Command {
         #[serde(default)]
         force: bool,
     },
-    /// Phase E.2b — create a tab inside an existing workspace. The
-    /// reducer assigns the `tab_id` (UUID), appends to the workspace's
-    /// ordered tab list, and emits `Event::TabCreated`. Validates the
-    /// parent workspace exists; returns `Event::Error` if not.
-    /// Session-only projection (no persist subscriber yet).
+    /// Phase E.2b — create a tab inside an existing workspace, append it
+    /// to the workspace's ordered tab list, and emit `Event::TabCreated`.
+    /// Its `tab_id` is minted by the dispatcher (srv's
+    /// `reducer::Ctx::new_id`). Returns `Event::Error` if the parent
+    /// workspace doesn't exist.
     CreateTab {
         workspace_id: String,
         name: String,
@@ -488,10 +486,11 @@ pub enum Command {
         dst_tab_id: String,
         dst_index: u32,
     },
-    /// Phase E.3 — create a block inside an existing tab. Reducer
-    /// validates parent tab exists, assigns the `block_id` (UUID),
-    /// appends to the tab's `block_ids`, emits `Event::BlockCreated`.
-    /// Session-only projection (no persist subscriber yet).
+    /// Phase E.3 — create a block inside an existing tab, append it to
+    /// the tab's `block_ids`, and emit `Event::BlockCreated`. Its
+    /// `block_id` is minted by the dispatcher (srv's
+    /// `reducer::Ctx::new_id`). Returns `Event::Error` if the parent tab
+    /// doesn't exist.
     CreateBlock {
         tab_id: String,
         /// Phase E.2c.4 — block metadata (`view`, layout hints, etc.)

@@ -11,14 +11,18 @@ use crate::reducer::{update, Ctx};
 use crate::state::State;
 
 pub(crate) fn ctx(_conn_id: u64) -> Ctx {
-    Ctx {
-        registered_pid: None,
-    }
+    Ctx::new(None)
 }
 
 pub(crate) fn ctx_with_pid(_conn_id: u64, pid: u32) -> Ctx {
+    Ctx::new(Some(pid))
+}
+
+/// A context whose create arm assigns `id`.
+pub(crate) fn ctx_with_id(id: &str) -> Ctx {
     Ctx {
-        registered_pid: Some(pid),
+        registered_pid: None,
+        new_id: id.into(),
     }
 }
 

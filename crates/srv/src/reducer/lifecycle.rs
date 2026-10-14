@@ -5,7 +5,7 @@ use agentmux_common::ipc::{ErrorCode, Event};
 
 use crate::state::State;
 
-use super::Ctx;
+use super::{error_event, Ctx};
 
 use agentmux_common::ipc::{ClientKind, LifecyclePhase};
 use crate::state::{ProcessRecord, ProcessState};
@@ -27,13 +27,11 @@ pub(super) fn handle_register(
         _ => false,
     };
     if !allow_register {
-        let v = state.bump_version();
-        return vec![Event::Error {
-            code: ErrorCode::AlreadyRegistered,
-            message: format!("pid {} is already registered with srv", pid),
-            fatal: false,
-            version: v,
-        }];
+        return error_event(
+            state,
+            ErrorCode::AlreadyRegistered,
+            format!("pid {} is already registered with srv", pid),
+        );
     }
 
     let mut out = Vec::with_capacity(3);
