@@ -27,6 +27,7 @@ import { draggable, dropTargetForElements } from "@atlaskit/pragmatic-drag-and-d
 import { preventUnhandled } from "@atlaskit/pragmatic-drag-and-drop/prevent-unhandled";
 import { setCurrentDragPayload } from "@/app/drag/CrossWindowDragMonitor";
 import { markEscaped } from "@/app/drag/drag-session";
+import { hideDragImageOnNativeWayland } from "@/app/drag/wayland-drag-image";
 import {
     isDraggedDocTab,
     isDraggedPaneTab,
@@ -776,6 +777,11 @@ function PaneTabStripItem<T>(props: PaneTabStripItemProps<T>): JSX.Element {
             element: el,
             canDrag: () => drag.canDrag(),
             getInitialData: () => drag.data(),
+            // A release outside every window (a tear-off) would slide the
+            // picture back on native Wayland (wayland-drag-image.ts).
+            onGenerateDragPreview: ({ nativeSetDragImage }) => {
+                hideDragImageOnNativeWayland(nativeSetDragImage);
+            },
             onDragStart: () => drag.start(),
             onDrop: () => drag.release(),
         });

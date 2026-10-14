@@ -30,6 +30,7 @@ import { toPng } from "html-to-image";
 import { createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js";
 import type { JSX } from "solid-js";
 import { onWindowDrag } from "@/app/drag/window-drag-events";
+import { hideDragImageOnNativeWayland } from "@/app/drag/wayland-drag-image";
 import { Key } from "@/util/keyed";
 import { debounce } from "throttle-debounce";
 import { LayoutModel } from "./layoutModel";
@@ -451,6 +452,9 @@ export function createTileLayout(platform: TileLayoutPlatform) {
                     },
                     getInitialData: () => ({ nodeId: props.node.id, type: tileItemType }),
                     onGenerateDragPreview: ({ nativeSetDragImage }) => {
+                        // A tear-off's release outside the window would slide
+                        // the picture back on native Wayland (wayland-drag-image.ts).
+                        if (hideDragImageOnNativeWayland(nativeSetDragImage)) return;
                         const preview = previewImage();
                         if (preview && nativeSetDragImage) {
                             const dpr =

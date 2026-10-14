@@ -5,6 +5,7 @@
 // Global app state — migrated from Jotai atoms to SolidJS signals.
 
 import { hostHas } from "@/app/host/host-caps";
+import { loadWindowSystem } from "@/app/host/window-system";
 import { UserInputModal } from "@/app/modals/userinputmodal";
 import { WpsEvent } from "@/app/store/mps-events";
 import { setPlatform } from "@/util/platformutil";
@@ -197,6 +198,9 @@ type GlobalInitOptions = {
 export function initGlobal(initOpts: GlobalInitOptions) {
     globalPrimaryTabStartup = initOpts.primaryTabStartup ?? false;
     setPlatform(initOpts.platform);
+    // Native Wayland vs X11 decides how floaters move and how drags look
+    // (window-system.ts); only Linux has the choice.
+    if (initOpts.platform === "linux") void loadWindowSystem();
     // Add platform CSS class to body for platform-specific styling
     document.body.classList.add(`platform-${initOpts.platform}`);
     initGlobalSignals(initOpts);
