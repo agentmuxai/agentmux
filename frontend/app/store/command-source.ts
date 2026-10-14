@@ -66,10 +66,6 @@ const [recordsAtom, setRecordsAtom] = createSignal<ReadonlyArray<DispatchRecord>
 
 export const dispatchRecordsAtom: Accessor<ReadonlyArray<DispatchRecord>> = recordsAtom;
 
-/**
- * Append a dispatch to the global log. Called by each slice's dispatch
- * function. Trims to RING_CAPACITY by dropping oldest first.
- */
 /** Strings longer than this are dropped from a recorded command or event. */
 const MAX_RECORDED_STRING = 200;
 
@@ -92,6 +88,10 @@ export function summarizeForLog(value: unknown): unknown {
     return out;
 }
 
+/**
+ * Append a dispatch to the global log. Called by each slice's dispatch
+ * function. Trims to RING_CAPACITY by dropping oldest first.
+ */
 export function recordDispatch(record: DispatchRecord): void {
     // Read inside `untrack` so this call doesn't establish reactive
     // deps when invoked from a SolidJS reactive context (e.g. the
