@@ -407,9 +407,8 @@ pub fn known_install_paths(provider_id: &str) -> Vec<std::path::PathBuf> {
 /// `%LOCALAPPDATA%\agy\bin\agy.exe` on Windows and `~/.local/bin/agy`
 /// elsewhere: the default `TARGET_DIR` of Google's installers,
 /// https://antigravity.google/cli/install.ps1 and the `.sh` one beside it.
-/// Where goose's own installers put it: `download_cli.ps1` in
-/// `~/.local/bin`, `download_cli.sh` under Git Bash in `~/goose`; elsewhere
-/// `~/.local/bin`.
+/// Where goose's own installers put it: the PowerShell one in `~/.local/bin`,
+/// the shell one under Git Bash in `~/goose`; elsewhere `~/.local/bin`.
 fn goose_install_paths(home: Option<std::path::PathBuf>) -> Vec<std::path::PathBuf> {
     let Some(h) = home else { return Vec::new() };
     if cfg!(windows) {
