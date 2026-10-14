@@ -128,6 +128,14 @@ describe("AgentCard other rendering", () => {
         ));
         expect(await screen.findByText("Click to install")).toBeTruthy();
     });
+
+    it("titles the card with the CLI name and captions it with the provider blurb", () => {
+        const { container } = render(() => (
+            <AgentCard agent={makeAgent()} launching={false} disabled={false} onLaunch={() => {}} />
+        ));
+        expect(container.querySelector(".agent-card-title")?.textContent).toBe("Claude Code");
+        expect(container.querySelector(".agent-card-caption")?.textContent).toBe("Anthropic's coding agent");
+    });
 });
 
 describe("AgentCard upgrade badge", () => {
