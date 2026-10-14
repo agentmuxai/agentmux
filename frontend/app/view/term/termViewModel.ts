@@ -21,7 +21,6 @@ import {
     getConnStatusAtom,
     getOverrideConfigAtom,
     getSettingsKeyAtom,
-    setIsTermMultiInput,
     MOS,
 } from "@/store/global";
 import * as services from "@/store/services";
@@ -173,18 +172,6 @@ class TermViewModel {
                         }
                     }
                 }
-            }
-            const isMI = atoms.isTermMultiInput();
-            if (isMI && this.isBasicTerm()) {
-                rtn.push({
-                    elemtype: "textbutton",
-                    text: "Multi Input ON",
-                    className: "yellow",
-                    title: "Input will be sent to all connected terminals (click to disable)",
-                    onClick: () => {
-                        setIsTermMultiInput(false);
-                    },
-                });
             }
             if (!isCmd) {
                 const blockMeta = this.meta();
