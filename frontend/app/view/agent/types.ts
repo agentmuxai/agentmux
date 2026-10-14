@@ -325,6 +325,13 @@ export interface UnloadedResult {
     /** The result's size in bytes, and estimated tokens, for display. */
     bytes: number;
     tokens: number;
+    /**
+     * The file range the header showed (`fileRangeOf`), which reads the
+     * result for Read and Edit; kept so the header doesn't change when the
+     * result leaves. Absent for tools without one.
+     * SPEC_AGENT_PANE_TOOL_OUTPUT_RETENTION_2026_10_13.md §2.
+     */
+    range?: import("./tool-meta/file-range").FileRange;
 }
 
 /**

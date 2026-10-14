@@ -76,15 +76,30 @@ export interface Turn {
 }
 
 /**
- * Turns start at a `user_message` (parser-produced or optimistic); nodes
- * before the first one form a leading turn. Same rule as the turn-scoped
- * tail (`turnScopedFrontier`, Phase 3b).
+ * Whether a node starts a turn: a `user_message` (parser-produced or
+ * optimistic), a jekt, or an incoming agent message — each one is a new input
+ * the agent answers, and srv counts them as turns too. Before, only
+ * `user_message` did, so an agent driven by jekts after one user message was
+ * one turn that never rolled off or unloaded
+ * (SPEC_AGENT_PANE_TOOL_OUTPUT_RETENTION_2026_10_13.md §2.2).
+ */
+export function startsTurn(node: DocumentNode): boolean {
+    return (
+        node.type === "user_message" ||
+        node.type === "jekt_message" ||
+        (node.type === "agent_message" && node.direction === "incoming")
+    );
+}
+
+/**
+ * Turns start at a node `startsTurn` accepts; nodes before the first one
+ * form a leading turn.
  */
 export function splitTurns(nodes: readonly DocumentNode[]): Turn[] {
     const turns: Turn[] = [];
     let start = 0;
     for (let i = 1; i < nodes.length; i++) {
-        if (nodes[i].type === "user_message") {
+        if (startsTurn(nodes[i])) {
             turns.push({ start, end: i });
             start = i;
         }
@@ -132,17 +147,25 @@ export interface FeedSize {
     rows: number;
     turns: number;
     bytes: number;
+    /** Bytes in the turn in flight: from the last turn-starting node to the end. */
+    lastTurnBytes: number;
 }
 
 /** One pass over the feed, shared by `sizeOverLimits` and `sizeAtBudget`. */
 export function feedSize(nodes: readonly DocumentNode[]): FeedSize {
     let turns = 0;
     let bytes = 0;
+    let lastTurnBytes = 0;
     for (const n of nodes) {
-        if (n.type === "user_message") turns++;
-        bytes += nodeBytesFull(n);
+        if (startsTurn(n)) {
+            turns++;
+            lastTurnBytes = 0;
+        }
+        const nb = nodeBytesFull(n);
+        bytes += nb;
+        lastTurnBytes += nb;
     }
-    return { rows: nodes.length, turns, bytes };
+    return { rows: nodes.length, turns, bytes, lastTurnBytes };
 }
 
 /** `feedOverLimits` on a measured size. */

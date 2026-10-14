@@ -19,6 +19,7 @@ import {
     planRollOff,
     resolveLiveFeedTurns,
     splitTurns,
+    startsTurn,
 } from "./live-feed";
 import type { DocumentNode, ShellNode, ToolNode } from "./types";
 
@@ -313,5 +314,42 @@ describe("sizeAtBudget: when scrolling up stops paging older turns in", () => {
         expect(sizeAtBudget(feedSize(many), LIVE_FEED_DEFAULT_TURNS)).toBe(true);
         expect(sizeAtBudget(feedSize(turns(4)), 3)).toBe(true);
         expect(sizeAtBudget(feedSize(turns(3)), 3)).toBe(false);
+    });
+});
+
+// SPEC_AGENT_PANE_TOOL_OUTPUT_RETENTION_2026_10_13.md §2.2.
+describe("startsTurn: jekts and incoming agent messages start turns", () => {
+    const jekt = (id: string) => ({ type: "jekt_message", id, from: "a", to: "b", message: id }) as unknown as DocumentNode;
+    const agentMsg = (id: string, direction: "incoming" | "outgoing") =>
+        ({ type: "agent_message", id, from: "a", to: "b", message: id, method: "mux", direction }) as unknown as DocumentNode;
+    const md = (id: string) => ({ type: "markdown", id, content: id }) as unknown as DocumentNode;
+
+    it("a user message, a jekt and an incoming agent message start a turn; an outgoing one doesn't", () => {
+        expect(startsTurn(user("u"))).toBe(true);
+        expect(startsTurn(jekt("j"))).toBe(true);
+        expect(startsTurn(agentMsg("in", "incoming"))).toBe(true);
+        expect(startsTurn(agentMsg("out", "outgoing"))).toBe(false);
+        expect(startsTurn(md("m"))).toBe(false);
+    });
+
+    it("an agent driven by jekts after one user message gets one turn per jekt", () => {
+        const nodes = [user("u0"), md("a"), jekt("j1"), md("b"), agentMsg("out", "outgoing"), jekt("j2"), md("c")];
+        expect(splitTurns(nodes)).toEqual([
+            { start: 0, end: 2 },
+            { start: 2, end: 5 },
+            { start: 5, end: 7 },
+        ]);
+        expect(feedSize(nodes).turns).toBe(3);
+    });
+
+    it("feedSize reports the bytes of the turn in flight apart from the whole", () => {
+        const big = (id: string, n: number) => ({ type: "markdown", id, content: "x".repeat(n) }) as unknown as DocumentNode;
+        const nodes = [user("u0"), big("a", 5000), user("u1"), big("b", 700), big("c", 300)];
+        const s = feedSize(nodes);
+        expect(s.lastTurnBytes).toBeGreaterThanOrEqual(1000);
+        expect(s.lastTurnBytes).toBeLessThan(s.bytes);
+        // With no turn start at all the whole feed is the turn.
+        const lone = feedSize([big("z", 900)]);
+        expect(lone.lastTurnBytes).toBe(lone.bytes);
     });
 });

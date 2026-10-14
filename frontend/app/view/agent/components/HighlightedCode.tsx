@@ -22,6 +22,7 @@
  */
 
 import { createEffect, createSignal, onCleanup, type JSX } from "solid-js";
+import { ByteLru } from "@/util/byte-lru";
 import { loadShiki, SHIKI_THEME } from "../preview-text/highlight";
 
 // Size caps — skip highlighting for very large content to avoid blocking
@@ -29,10 +30,11 @@ import { loadShiki, SHIKI_THEME } from "../preview-text/highlight";
 const CAP_BYTES = 200 * 1024; // 200 KB
 const CAP_LINES = 2000;
 
-// Module-level cache: ToolNode objects are immutable, so the same
-// (code, lang) pair always produces the same HTML. Key on the full code +
-// lang string — no collision risk, and the code is already in memory.
-const highlightCache = new Map<string, string>();
+// Module-level cache: the same (code, lang) pair always produces the same
+// HTML. Keyed on the full code + lang string, and bounded by bytes: it had no
+// bound at all, and each entry holds the code twice (key and HTML)
+// (SPEC_AGENT_PANE_TOOL_OUTPUT_RETENTION_2026_10_13.md §2.8).
+const highlightCache = new ByteLru<string>(8 * 1024 * 1024, (key, html) => (key.length + html.length) * 2);
 
 function cacheKey(code: string, lang: string): string {
     return `${lang}:${code}`;

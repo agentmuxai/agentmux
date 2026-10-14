@@ -241,8 +241,12 @@ const NO_RANGE_STATUSES = new Set<ToolNode["status"]>(["failed", "denied", "canc
  * or the call failed, was denied or was canceled: its parameters name lines it
  * never touched (ReAgent on #4165).
  */
-export function fileRangeOf(node: Pick<ToolNode, "tool" | "toolName" | "params" | "result" | "status">): FileRange | null {
+export function fileRangeOf(
+    node: Pick<ToolNode, "tool" | "toolName" | "params" | "result" | "status" | "resultUnloaded">
+): FileRange | null {
     if (NO_RANGE_STATUSES.has(node.status)) return null;
+    // An unloaded result keeps the range it produced, so the header holds still.
+    if (node.result == null && node.resultUnloaded) return node.resultUnloaded.range ?? null;
     const name = toolNameOf(node);
     if (READ_NAMES.has(name)) {
         const result = rec(node.result);

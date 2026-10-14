@@ -7,12 +7,27 @@ import { snapshot as layoutSnapshot } from "@/app/store/agent-pane-layout-store"
 import type { AgentPaneModel } from "@/app/store/agent-pane-registration";
 import { getSettingsKeyAtom } from "@/app/store/global";
 import { batch, createEffect, createMemo, createSignal, on, onCleanup, untrack, type Accessor } from "solid-js";
-import { feedSize, liveFeedSupported, resolveLiveFeedTurns, sizeAtBudget, sizeOverLimits, visibleIdsOf } from "../live-feed";
+import {
+    feedSize,
+    LIVE_FEED_MAX_FINISHED_BYTES,
+    liveFeedSupported,
+    resolveLiveFeedTurns,
+    sizeAtBudget,
+    sizeOverLimits,
+    visibleIdsOf,
+} from "../live-feed";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { readToolResult, type ToolResultLoader } from "../tool-result-loader";
 import type { AgentAtoms } from "../state";
 import { userIsInteracting } from "../stream-scheduler";
+
+/** How long a pane stays hidden before its held-open rows are released. */
+export const HIDDEN_HOLD_RELEASE_MS = 30_000;
+/** Loaded text allowed for the turn in flight, on top of the finished turns' budget. */
+export const IN_FLIGHT_TEXT_BUDGET = 512 * 1024;
+/** How often a pass runs while the pane is over its text budget. */
+export const BUDGET_PASS_MS = 10_000;
 
 export function useLiveFeedRollOff(opts: {
     blockId: string;
@@ -139,7 +154,8 @@ export function useLiveFeedRollOff(opts: {
     // transition, not on every flush. A pass made while the reader was up in
     // older rows may keep them all, so it runs again once they're back at the
     // bottom.
-    const size = createMemo(() => (liveFeedOn() ? feedSize(paneModel.document()) : null));
+    const docSize = createMemo(() => feedSize(paneModel.document()));
+    const size = createMemo(() => (liveFeedOn() ? docSize() : null));
     const feedOverBudget = createMemo(() => {
         const s = size();
         return s !== null && sizeOverLimits(s, liveFeedTurns);
@@ -183,10 +199,48 @@ export function useLiveFeedRollOff(opts: {
         on(
             hidden,
             (hidden) => {
-                if (hidden) scheduleRollOff();
+                if (!hidden) return;
+                scheduleRollOff();
+                // A row is held open after finishing on screen so it doesn't
+                // collapse under a reader; a pane nobody can see has no reader,
+                // and its hidden rows never get the scroll-off scan that
+                // releases holds (their rect is 0×0). Release them after a
+                // grace, so their results can unload
+                // (SPEC_AGENT_PANE_TOOL_OUTPUT_RETENTION_2026_10_13.md §2.3).
+                const t = setTimeout(() => {
+                    if (rollOffDisposed || !untrack(opts.hidden)) return;
+                    const [, setDocState] = agentAtoms().documentStateAtom;
+                    setDocState((prev) =>
+                        prev.heldOpenNodes.size === 0 ? prev : { ...prev, heldOpenNodes: new Set<string>() }
+                    );
+                    scheduleRollOff();
+                }, HIDDEN_HOLD_RELEASE_MS);
+                onCleanup(() => clearTimeout(t));
             },
             { defer: true }
         )
+    );
+
+    // While the pane holds more text than its budget (the finished turns'
+    // budget plus room for the turn in flight), a pass runs every
+    // BUDGET_PASS_MS: a long turn has no turn end or send to trigger one, and
+    // `feedOverBudget` fires only on its transition (§2.6).
+    // Independent of the live feed: results unload with it off too (the app-server
+    // controller, `agent:livefeed` disabled), and tool completions schedule no
+    // pass of their own.
+    // The turn in flight has its own bound: a long turn of completed tool results
+    // is trimmed at IN_FLIGHT_TEXT_BUDGET, not only once the whole pane also
+    // holds the finished turns' allowance.
+    const overTextBudget = createMemo(() => {
+        const s = docSize();
+        return s.lastTurnBytes > IN_FLIGHT_TEXT_BUDGET || s.bytes > LIVE_FEED_MAX_FINISHED_BYTES + IN_FLIGHT_TEXT_BUDGET;
+    });
+    createEffect(
+        on(overTextBudget, (over) => {
+            if (!over) return;
+            const t = setInterval(scheduleRollOff, BUDGET_PASS_MS);
+            onCleanup(() => clearInterval(t));
+        })
     );
 
     // Scrolling up pages older lines in while the pane's range is contiguous
