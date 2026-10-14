@@ -60,6 +60,25 @@ pub struct AgentWanKeypair {
 }
 
 impl Store {
+    /// The agent's WAN signing key: the channel-wide `wan.db`'s, the key srv
+    /// publishes and checks a signature against before it carries one over
+    /// the relay (`muxbus::relay::wan_carry_gate`). This version's key above
+    /// is carried over only the first time. Every place that hands an agent
+    /// its WAN key (the `.mcp.json` env in `agent_config` and
+    /// `GET /agentmux/agents/self/keys`) must use this one: from 2026-10-09
+    /// the fetch served this table's key instead, so an agent whose two keys
+    /// differed signed with one and was checked against the other, and its
+    /// WAN jekts all went out unsigned ("signature does not verify locally").
+    pub fn channel_wan_key(
+        &self,
+        wan: &super::wan_identity::WanIdentityStore,
+        agent_id: &str,
+    ) -> Result<super::wan_identity::WanAgentKey, StoreError> {
+        let legacy = self.agent_wan_key_load(agent_id).ok().flatten();
+        let import = legacy.as_ref().map(|k| (k.public_key.as_str(), k.private_key.as_str()));
+        wan.agent_key_ensure(agent_id, import)
+    }
+
     /// Load this agent's WAN keypair if one has already been minted, without
     /// creating one.
     pub fn agent_wan_key_load(&self, agent_id: &str) -> Result<Option<AgentWanKeypair>, StoreError> {

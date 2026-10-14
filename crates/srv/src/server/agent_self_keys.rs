@@ -53,7 +53,20 @@ pub(crate) fn self_keys_for(mstore: &crate::backend::storage::store::Store, uid:
     let jekt_key = named.then(|| mstore.agent_jekt_key_ensure(&slug).ok()).flatten().map(|k| BASE64.encode(k));
     let jekt_key_expires_at = named.then(|| mstore.agent_jekt_key_expires_at(&slug).ok().flatten()).flatten();
     let lan_key = named.then(|| mstore.agent_lan_key_ensure(&slug).ok()).flatten().map(|k| k.private_key);
-    let wan_key = named.then(|| mstore.agent_wan_key_ensure(&slug).ok()).flatten().map(|k| k.private_key);
+    // The key srv checks WAN signatures against, as injection hands it out
+    // (`channel_wan_key`); none without a `wan.db`, never one minted elsewhere.
+    let wan_key = named
+        .then(|| mstore.wan_identity())
+        .flatten()
+        .and_then(|wan| mstore.channel_wan_key(&wan, &slug).ok())
+        .map(|k| {
+            // This may be the first time wan.db holds the key (a long-running
+            // agent fetching after an upgrade): get it published now, as
+            // spawn does, not after the publisher's idle sleep. The carry
+            // gate sends unsigned until it is.
+            crate::muxbus::wan_publish::nudge();
+            k.private_key
+        });
     let uid_keys = mstore.agent_uid_keys_ensure(uid).ok().flatten().map(|(keys, _)| keys);
     Some(SelfKeys {
         slug,
@@ -121,12 +134,31 @@ mod tests {
         assert_eq!(keys.slug, "aria");
         assert_eq!(keys.jekt_key, Some(BASE64.encode(store.agent_jekt_key_ensure("aria").unwrap())));
         assert_eq!(keys.lan_key, Some(store.agent_lan_key_ensure("aria").unwrap().private_key));
-        assert_eq!(keys.wan_key, Some(store.agent_wan_key_ensure("aria").unwrap().private_key));
+        assert_eq!(keys.wan_key, None, "no wan.db, no WAN key: never one minted elsewhere");
         assert!(keys.uid_lan_key.is_some() && keys.uid_wan_key.is_some());
         let expires = keys.jekt_key_expires_at.expect("an expiry with the key");
         let ttl = crate::backend::storage::agent_jekt_keys::JEKT_KEY_TTL_SECS;
         assert!((expires - agentmux_common::time::now_secs() - ttl).abs() <= 5, "a fresh key expires a TTL from now");
         assert_eq!(self_keys_for(&store, "uid-aria").unwrap(), keys, "stable across fetches");
+    }
+
+    #[test]
+    fn the_wan_key_is_the_one_srv_checks_before_carrying_a_signature() {
+        let store = store_with("uid-aria", "aria");
+        let dir = tempfile::tempdir().unwrap();
+        let wan = std::sync::Arc::new(
+            crate::backend::storage::wan_identity::WanIdentityStore::open(&dir.path().join("wan.db")).unwrap(),
+        );
+        store.set_wan_identity(wan.clone());
+        // wan.db minted its own key at the first spawn, before this version
+        // had a db_agent_wan_keys key; then something ensured one there too.
+        let channel_key = wan.agent_key_ensure("aria", None).unwrap();
+        let legacy = store.agent_wan_key_ensure("aria").unwrap();
+        assert_ne!(legacy.private_key, channel_key.private_key, "the two stores hold different keys");
+
+        let served = self_keys_for(&store, "uid-aria").unwrap().wan_key.expect("a WAN key");
+        assert_eq!(served, channel_key.private_key, "the key the relay gate verifies with");
+        assert_eq!(wan.agent_key_load("aria").unwrap().unwrap().private_key, served);
     }
 
     #[test]
