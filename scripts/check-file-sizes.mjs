@@ -48,6 +48,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { isMain } from "./lib/is-main.mjs";
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const BASELINE_FILE = "scripts/check-file-sizes.baseline";
@@ -205,9 +206,7 @@ export function measure() {
 
 // ── Main ────────────────────────────────────────────────────────────────────
 
-const isMain = process.argv[1] && import.meta.url.endsWith(process.argv[1].replace(/\\/g, "/").split("/").pop());
-
-if (isMain) {
+if (isMain(import.meta.url)) {
     const sizes = measure();
     const baselinePath = join(REPO_ROOT, BASELINE_FILE);
     const baseline = parseBaseline(readFileSync(baselinePath, "utf8"));

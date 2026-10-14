@@ -93,6 +93,7 @@ jobs:
           sparse-checkout: |
             scripts/ci-codex-review-gate.mjs
             scripts/lib/github-rest.mjs
+            scripts/lib/is-main.mjs
           sparse-checkout-cone-mode: false
           persist-credentials: false
 
@@ -126,6 +127,7 @@ jobs:
           sparse-checkout: |
             scripts/ci-codex-review-gate.mjs
             scripts/lib/github-rest.mjs
+            scripts/lib/is-main.mjs
           sparse-checkout-cone-mode: false
           persist-credentials: false
 

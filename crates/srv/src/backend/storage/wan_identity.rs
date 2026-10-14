@@ -9,8 +9,8 @@
 //! (`channels/<ch>/versions/<v>/data/`): with the agent keys in `objects.db`,
 //! every upgrade re-minted every agent's WAN key. This file holds:
 //!  - the **instance keypair** — the install's long-lived identity. Its id
-//!    (`jekt_sign::wan_instance_id`) is what agents sign as their
-//!    `AGENTMUX_HOST_LABEL`, and its key certifies each agent key;
+//!    (`jekt_sign::wan_instance_id`) is the `source_host` srv signs WAN jekts
+//!    under, and its key certifies each agent key;
 //!  - the **agent WAN keys**, imported once from the version's
 //!    `db_agent_wan_keys` (or minted fresh) and kept here from then on;
 //!  - (D1b/D2) published fingerprints, the peer cache, replay and
@@ -152,7 +152,7 @@ impl std::fmt::Debug for WanInstance {
 
 /// An agent's WAN keypair, both halves standard base64 — the same encoding
 /// `agent_wan_keys::AgentWanKeypair` uses, so an import is a straight copy
-/// and `AGENTMUX_WAN_KEY` is unchanged for the MCP.
+/// (no agent holds it: srv signs, SPEC_WAN_JEKT_SIGNED_BY_SRV_2026_10_14.md).
 #[derive(Clone, PartialEq, Eq)]
 pub struct WanAgentKey {
     pub public_key: String,
@@ -424,7 +424,7 @@ impl WanIdentityStore {
     }
 
     /// Whether `directory` is confirmed to hold `key`, `agent_id`'s current
-    /// key — the relay carry gate's condition 4 (`relay::wan_carry_gate`).
+    /// key — condition 2 of signing at the origin (`relay::wan_sign_at_origin`).
     pub fn agent_key_is_published_to(&self, agent_id: &str, key: &WanAgentKey, directory: &str) -> Result<bool, StoreError> {
         let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
         let fp: Option<String> = conn

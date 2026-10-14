@@ -12,6 +12,10 @@ window, instance retirement, the agent
 CLAUDE.md jekt section, the C1 deploy, and the §5 end-to-end run. Verified
 2026-09-25. Measured against `agentmux`
 `main` @ `d01833859` and `agentmux-cloud` `main`, both read on 2026-09-24.
+**Superseded in part (2026-10-14):** who makes the signature. srv now signs
+at the origin, for the agent the request's token names, and no agent holds a
+WAN key; the carry gate became `relay::wan_sign_at_origin`. Everything a
+receiver checks is unchanged. See `SPEC_WAN_JEKT_SIGNED_BY_SRV_2026_10_14.md`.
 **Tracking:** `TRACKING_WAN_JEKT_VERIFICATION_2026_09_25.md` — step status,
 what is live, and what still needs the operator.
 **Revision history:** three adversarial reviews on 2026-09-24; every finding
@@ -222,13 +226,13 @@ fields carried **as signed**, the ReAgent way:
 
 | Field | Set by | Notes |
 |---|---|---|
-| `wan_sig` | MCP | base64 Ed25519 |
-| `wan_msg_id` | MCP (`request_id`) | independent of the cloud message `id` |
-| `wan_ts_secs` | MCP (`ts_secs`) | |
-| `wan_source_agent` | MCP (`AGENTMUX_AGENT_ID`) | as signed |
-| `wan_target_agent` | MCP (`to`) | as signed |
-| `wan_source_host` | MCP (`AGENTMUX_HOST_LABEL`) | the **instance id** (§2.2) — signed, so it binds the instance |
-| `wan_source_channel` | MCP (`AGENTMUX_CHANNEL`) | local field `source_channel` |
+| `wan_sig` | srv (MCP until 2026-10-14) | base64 Ed25519; see `SPEC_WAN_JEKT_SIGNED_BY_SRV_2026_10_14.md` |
+| `wan_msg_id` | the request's `request_id` (srv mints one if absent) | independent of the cloud message `id` |
+| `wan_ts_secs` | srv's clock at signing | |
+| `wan_source_agent` | the slug the request's agent token names | as signed |
+| `wan_target_agent` | the request's target | as signed |
+| `wan_source_host` | srv's `wan.db` instance id | the **instance id** (§2.2) — signed, so it binds the instance |
+| `wan_source_channel` | srv's channel | |
 | `wan_key_fp` | srv | fingerprint of the agent public key; an **unsigned lookup hint** — a wrong value finds a key the signature won't verify under |
 | `sender_same_account` | **cloud**, in the `GET /reactive/pending` response | `true` only when the sender and the polling caller are on the same account. Never client-supplied. |
 

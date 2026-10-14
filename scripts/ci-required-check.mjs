@@ -38,6 +38,8 @@
  *   NEEDS_JSON=$(printf '%s' "${{ toJSON(needs) }}") node ci-required-check.mjs
  */
 
+import { isMain } from "./lib/is-main.mjs";
+
 const OK_RESULTS = new Set(["success", "skipped"]);
 
 /**
@@ -74,8 +76,7 @@ async function readStdin() {
 
 // Entry point only when executed directly, so the test can import
 // evaluateRequiredJobs without this running.
-const isMain = process.argv[1] && import.meta.url.endsWith(process.argv[1].replace(/\\/g, "/").split("/").pop());
-if (isMain) {
+if (isMain(import.meta.url)) {
     const raw = process.env.NEEDS_JSON ?? (await readStdin());
     let needs;
     try {

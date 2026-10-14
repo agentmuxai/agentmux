@@ -62,7 +62,12 @@ export class AcpTranslator implements OutputTranslator {
         const error = rawEvent.error;
         if (error && typeof error === "object" && rawEvent.id != null) {
             const message = typeof error.message === "string" && error.message ? error.message : "the agent returned an error";
-            return [{ type: "text", content: `**Error:** ${message}` }];
+            // JSON-RPC's `data` often holds the reason a generic message hides:
+            // goose answers "Internal error" with "Failed to resolve provider:
+            // … GOOSE_PROVIDER" in `data`.
+            const data = typeof error.data === "string" ? error.data.trim() : "";
+            const detail = data && !message.includes(data) ? `: ${data}` : "";
+            return [{ type: "text", content: `**Error:** ${message}${detail}` }];
         }
 
         // The raw event may be the full JSON-RPC envelope or just the params.

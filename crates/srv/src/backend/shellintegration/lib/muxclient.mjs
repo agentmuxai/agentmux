@@ -21,7 +21,9 @@
  * message and exit code (wording has legitimately differed per tool; this
  * doesn't force it to converge). */
 export function readAgentmuxEnv(env = process.env) {
-    return { url: env.AGENTMUX_LOCAL_URL, authKey: env.AGENTMUX_AUTH_KEY };
+    // agentToken: set only in an agent's own shell. It names that agent to
+    // srv (`X-Agent-Token`); absent in a person's terminal.
+    return { url: env.AGENTMUX_LOCAL_URL, authKey: env.AGENTMUX_AUTH_KEY, agentToken: env.AGENTMUX_AGENT_TOKEN || undefined };
 }
 
 /** Perform an authenticated request against agentmux-srv's REST API.
@@ -32,8 +34,11 @@ export function readAgentmuxEnv(env = process.env) {
  * failure (DNS, connection refused, etc.); every existing caller already
  * wraps this in its own try/catch with its own fail() wording.
  */
-export async function agentmuxFetch(url, authKey, path, { method = "GET", body } = {}) {
+export async function agentmuxFetch(url, authKey, path, { method = "GET", body, agentToken } = {}) {
     const headers = { "X-AuthKey": authKey };
+    // Only a call that should be attributed to the agent passes one (see
+    // muxsh's agent send).
+    if (agentToken) headers["X-Agent-Token"] = agentToken;
     const init = { method, headers };
     if (body !== undefined) {
         headers["Content-Type"] = "application/json";

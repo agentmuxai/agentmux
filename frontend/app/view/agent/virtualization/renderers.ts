@@ -23,6 +23,7 @@ import type {
     ToolNode,
     UserMessageNode,
 } from "../types";
+import { isTextCard } from "../context-delivery";
 import { isContentFirstTool } from "../tool-meta/tool-descriptors";
 import { rowDisclosureIn } from "./disclosure";
 
@@ -170,11 +171,11 @@ const CONTEXT_DELIVERY_ITEM_HEAD_PX = 20;
 const CONTEXT_DELIVERY_ADVICE_PX = 40;
 
 /**
- * A compaction summary card: title plus excerpt. A memory card: title plus a
+ * A text card (the compaction summary, a command's output): title plus excerpt. A memory card: title plus a
  * row per item (always shown), plus the size advice when Personal Memory is large.
  */
 function estimateCollapsedContextDelivery(node: ContextDeliveryNode): number {
-    const summaryCard = node.items.length === 1 && node.items[0].kind === "compaction_summary";
+    const summaryCard = isTextCard(node);
     const rows = summaryCard ? CONTEXT_DELIVERY_EXCERPT_PX : node.items.length * CONTEXT_DELIVERY_ITEM_HEAD_PX;
     const advice = node.sizeBand === "high" || node.sizeBand === "critical" ? CONTEXT_DELIVERY_ADVICE_PX : 0;
     return CONTEXT_DELIVERY_TITLE_PX + rows + advice;

@@ -369,6 +369,7 @@ pub(super) fn verify_jekt_signature(state: &AppState, req: &mut InjectionRequest
                 &key, &msgid, &claimed, &req.target_agent, ts, &req.message, sig,
             )
         });
+    if !verified { tracing::warn!(agent_id = %claimed, fresh = within_freshness_window, "host jekt signature missing or did not verify"); }
     req.sig_verified = Some(verified);
 }
 
@@ -492,17 +493,15 @@ pub(super) async fn verify_lan_signature(state: &AppState, req: &mut InjectionRe
         }
     };
 
-    // Trust-on-first-use pin (reagentx P0 — mDNS peer discovery is
-    // unauthenticated, so "whichever peer answers first" is not a safe
-    // trust anchor on its own; see lan_peer_pubkey_pins.rs's module doc and
-    // docs/specs/SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md §2.2). The first
-    // key ever observed for a claimed sender is pinned; a LATER lookup
-    // returning a DIFFERENT key is itself treated as an active red flag —
-    // someone is now claiming a different identity than what was already
-    // established — not silently trusted as an update.
+    // Trust-on-first-use pin (mDNS discovery is unauthenticated; see
+    // lan_peer_pubkey_pins.rs and SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md
+    // §2.2): the first key seen for a sender is pinned, and a LATER,
+    // DIFFERENT key is an active red flag, never a silent update.
     use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
     let observed_key_b64 = BASE64.encode(&observed_key);
     let Ok(pinned_key_b64) = state.mstore.lan_peer_pubkey_pin_get_or_set(&claimed, &observed_key_b64) else {
+        tracing::warn!(agent_id = %claimed, "LAN pubkey pin store unreadable: signature counted as failed");
+        req.lan_verified = Some(false); // fail closed
         return;
     };
     if pinned_key_b64 != observed_key_b64 {
@@ -527,6 +526,7 @@ pub(super) async fn verify_lan_signature(state: &AppState, req: &mut InjectionRe
             &req.message,
             sig,
         );
+    if !verified { tracing::warn!(agent_id = %claimed, fresh = within_freshness_window, "LAN jekt signature did not verify"); }
     req.lan_verified = Some(verified);
     lan_v2::claim_uid(state, req, &claimed);
 }
@@ -814,6 +814,7 @@ pub(crate) async fn deliver(
     // Identity M4c-2d: the sender's UID, for the audit entry only — never
     // forwarded (`#[serde(skip)]`).
     req.audit_source_uid = caller_uid.to_string();
+    super::actor::source_from_token(&state.mstore, caller_uid, &mut req);
     // Identity M4d-6: the signed source_uid is the sender's to set; this srv
     // only counts one that isn't the UID its token named.
     if !caller_uid.is_empty() && req.source_uid.as_deref().is_some_and(|s| s != caller_uid) {
@@ -1112,7 +1113,7 @@ pub(crate) async fn deliver(
                 return held;
             }
         }
-        if let Some(body) = try_cloud_relay(&state, &req).await {
+        if let Some(body) = try_cloud_relay(&state, &req, caller_uid).await {
             return body;
         }
         // 5. No tier knew the target: hold it for the agent's return, when
@@ -1412,7 +1413,7 @@ impl HoldReason {
 /// here therefore means "handed to the relay" — which is the strongest claim
 /// any WAN tier can make, and is what `DELIVERY=wan` on the echoed marker
 /// already tells the sender.
-async fn try_cloud_relay(state: &AppState, req: &InjectionRequest) -> Option<serde_json::Value> {
+async fn try_cloud_relay(state: &AppState, req: &InjectionRequest, caller_uid: &str) -> Option<serde_json::Value> {
     // Never re-relay something that ARRIVED over the cloud. An agent unknown to
     // every instance would otherwise bounce between the relay and each
     // subscriber indefinitely, re-queueing on every hop. `forward_hops` cannot
@@ -1436,23 +1437,22 @@ async fn try_cloud_relay(state: &AppState, req: &InjectionRequest) -> Option<ser
     };
 
     let priority = req.priority.as_deref().unwrap_or("normal");
-    // W3-S (SPEC_WAN_JEKT_VERIFICATION_2026_09_24.md §2.1): carry the
-    // sender's WAN signature as signed, but only through the carry gate —
-    // any unmet condition relays unsigned, exactly as before.
-    // The gate's refusal reason rides on the "queued" line below: a
-    // signature that silently fails to ride is otherwise invisible, and the
-    // receiver can't tell it from a sender that never signed.
-    // The directory this send goes into: this relay plus the account of the
-    // credential it's sent with. The publisher binds each publication to the
-    // same id.
+    // SPEC_WAN_JEKT_SIGNED_BY_SRV_2026_10_14.md: srv signs, here at the
+    // origin, for the agent the request's own token names (`wan_signer`).
+    // Any unmet condition relays unsigned, as before; the reason rides on
+    // the "queued" line below, or the receiver can't tell it from a sender
+    // that never signed. The directory this send goes into: this relay plus
+    // the account of the credential it's sent with.
     let directory = Some(credential.account_sub.as_str())
         .filter(|sub| !sub.is_empty())
         .map(|sub| crate::muxbus::wan_publish::directory_id(&crate::muxbus::relay::rest_base_url(), sub));
-    let (carried, unsigned_reason) = match crate::muxbus::relay::wan_carry_gate(
+    let (carried, unsigned_reason) = match crate::muxbus::relay::wan_sign_at_origin(
         req,
+        super::actor::wan_signer(&state.mstore, caller_uid, req),
         state.mstore.wan_identity().as_deref(),
         directory.as_deref(),
         &crate::backend::reactive::registry::local_channel_id(),
+        agentmux_common::time::now_secs(),
     ) {
         Ok(carried) => (Some(carried), ""),
         Err(reason) => (None, reason),

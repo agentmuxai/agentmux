@@ -90,6 +90,53 @@ describe("useNextPromptSuggestion — hidden-turn suppression (reagentx P0, PR #
         dispose();
     });
 
+    it("leaves the suggestion on screen when a hidden reinjection starts, and clears it for a real turn", async () => {
+        const { setPhase, dispose } = setup();
+
+        setPhase({ kind: "Submitting", submittedAt: 1, pendingContent: "[agentmux: hidden memory reinjection]", hidden: true });
+        await Promise.resolve();
+        // Not the user's turn: whatever the composer shows stays.
+        expect(hub.updateMeta).not.toHaveBeenCalled();
+
+        setPhase({ kind: "Done", outcome: "completed", finishedAt: 2 });
+        setPhase({ kind: "Submitting", submittedAt: 3, pendingContent: "a real message", hidden: false });
+        await Promise.resolve();
+        expect(hub.updateMeta).toHaveBeenCalledWith(
+            "block:b",
+            expect.objectContaining({ "term:next_prompt_suggestion": null }),
+        );
+        dispose();
+    });
+
+    it("keeps a request in flight for the turn before a hidden reinjection that starts as it ends", async () => {
+        let resolve!: (v: { suggestion: string; tokens: null }) => void;
+        hub.nextPromptSuggestion.mockReset().mockReturnValue(new Promise((r) => (resolve = r)));
+        const { setPhase, bumpTurnEnded, dispose } = setup();
+
+        setPhase({ kind: "Submitting", submittedAt: 1, pendingContent: "a real message", hidden: false });
+        await Promise.resolve();
+        setPhase({ kind: "Done", outcome: "completed", finishedAt: 2 });
+        bumpTurnEnded();
+        await Promise.resolve();
+        await Promise.resolve();
+        expect(hub.nextPromptSuggestion).toHaveBeenCalledTimes(1);
+
+        // The automatic compaction's fallback starts while the request is out.
+        setPhase({ kind: "Submitting", submittedAt: 3, pendingContent: "[agentmux: hidden memory reinjection]", hidden: true });
+        await Promise.resolve();
+        setPhase({ kind: "Done", outcome: "completed", finishedAt: 4 });
+        resolve({ suggestion: "next thing", tokens: null });
+        await Promise.resolve();
+        await Promise.resolve();
+        await Promise.resolve();
+
+        expect(hub.updateMeta).toHaveBeenCalledWith(
+            "block:b",
+            expect.objectContaining({ "term:next_prompt_suggestion": "next thing" }),
+        );
+        dispose();
+    });
+
     it("DOES call it after a catch-up turn: its input is hidden but its reply, with suggested next steps, is shown", async () => {
         const { setPhase, bumpTurnEnded, dispose } = setup();
 

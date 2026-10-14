@@ -30,8 +30,9 @@
 // in rpc-api/, an `RpcApi` that is anything but `GeneratedApi`, or a raw
 // `client.rpcCall("<command>", …)` outside generated.ts fails it too (generatedOnlyProblems).
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join, relative, resolve } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
+import { isMain } from "./lib/is-main.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const SCHEMA = join(ROOT, "frontend/types/rpc/rpc-schema.json");
@@ -274,4 +275,4 @@ async function main() {
     }
 }
 
-if (process.argv[1] && resolve(fileURLToPath(import.meta.url)) === resolve(process.argv[1])) main();
+if (isMain(import.meta.url)) main();

@@ -129,8 +129,8 @@ machine, each with its own database and therefore its own keypair.
 
 | Credential | Transport | Purpose |
 |---|---|---|
-| `AGENTMUX_WAN_KEY` | agent's own MCP process env, injected at spawn | The private half of that agent's WAN keypair on this instance. Same never-over-RPC, never-another-agent's-env guarantee as `AGENTMUX_JEKT_KEY` / `AGENTMUX_LAN_KEY`. Gates nothing — it signs. |
-| `AGENTMUX_HOST_LABEL` | same | Not a credential: the host half of this instance's identity, bound into `wan_sig`'s signed material so a signature can't be replayed as the same agent on a different instance. Paired with `AGENTMUX_CHANNEL`. |
+| An agent's WAN private key | **srv only**, in the channel-wide `wan.db` | srv signs a WAN jekt itself, at the origin, for the agent the request's own `X-Agent-Token` names (`SPEC_WAN_JEKT_SIGNED_BY_SRV_2026_10_14.md`). No agent holds it: it was `AGENTMUX_WAN_KEY` in the MCP env until 2026-10-14, and srv removes that from an older `.mcp.json`. Gates nothing — it signs. |
+| The instance id | srv's `wan.db` | Not a credential: the host half of this instance's identity, bound into the signed material so a signature can't be replayed as the same agent on a different instance. Was `AGENTMUX_HOST_LABEL` in the MCP env. |
 
 ## Keeping this current
 

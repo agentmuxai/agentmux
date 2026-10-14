@@ -200,6 +200,7 @@ async fn route_command(
     match cmd {
         // ---- Tier 1: Bootstrap (must work for frontend to load) ----
         "get_platform" => Ok(commands::platform::get_platform()),
+        "get_window_system" => Ok(commands::platform::get_window_system()),
         "get_auth_key" => {
             let key = state.auth_key.lock().clone();
             tracing::debug!("Frontend requested auth key: {}...", &key[..8.min(key.len())]);

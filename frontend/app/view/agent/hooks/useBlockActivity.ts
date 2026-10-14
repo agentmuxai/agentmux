@@ -77,6 +77,28 @@ function clearActivity(blockId: string): void {
     );
 }
 
+/**
+ * The title a session that continues the conversation keeps. The controller
+ * stopping (an account switch restarts it) moves the live title to
+ * `term:restored_summary` (`clearActivity`); a fresh session that carries
+ * AgentMux's record of the same conversation is still about that goal, so the
+ * title comes back rather than the next one starting from nothing. `null` when
+ * there is a title already, or none worth restoring.
+ */
+export function titleToRestoreOnContinue(meta: Record<string, unknown> | undefined): string | null {
+    const current = meta?.[META_TITLE];
+    if (typeof current === "string" && isUsableTitle(current)) return null;
+    const restored = meta?.[META_RESTORED];
+    return typeof restored === "string" && isUsableTitle(restored) ? restored.trim() : null;
+}
+
+/** Put back the title `titleToRestoreOnContinue` names for a pane, if any. */
+export function restoreTitleOnContinue(blockId: string): void {
+    const title = titleToRestoreOnContinue(MOS.getMuxObjectAtom<Block>(`block:${blockId}`)()?.meta);
+    if (!title) return;
+    fireAndForget(() => ObjectService.UpdateObjectMeta(makeORef("block", blockId), { [META_TITLE]: title } as any));
+}
+
 export function useBlockActivity(opts: UseBlockActivityOptions): void {
     onMount(() => {
         let debounceTimer: ReturnType<typeof setTimeout> | undefined;

@@ -134,11 +134,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # Only the classifier is needed. No history: the changed-file list
-          # comes from the API, not from diffing against a base, which
-          # sidesteps the whole `fetch-depth: 1 has no parent to diff` class
-          # of bug that makes this pattern silently wrong elsewhere.
-          sparse-checkout: scripts/ci-classify-changes.mjs
+          # Only the classifier and what it imports are needed (a test checks
+          # the list: scripts/workflow-sparse-checkout.test.mjs). No history:
+          # the changed-file list comes from the API, not from diffing against
+          # a base, which sidesteps the whole `fetch-depth: 1 has no parent to
+          # diff` class of bug that makes this pattern silently wrong elsewhere.
+          sparse-checkout: |
+            scripts/ci-classify-changes.mjs
+            scripts/lib/is-main.mjs
           sparse-checkout-cone-mode: false
 
       - id: classify
@@ -848,7 +851,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          sparse-checkout: scripts/ci-required-check.mjs
+          sparse-checkout: |
+            scripts/ci-required-check.mjs
+            scripts/lib/is-main.mjs
           sparse-checkout-cone-mode: false
       - env:
           NEEDS_JSON: ${{ toJSON(needs) }}

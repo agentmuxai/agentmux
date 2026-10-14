@@ -18,7 +18,7 @@ phases W0–W2: the 2026-09-17 WAN-tier signing spec (no longer in this repo).
 | — | Pure primitives: instance id, key fingerprint, instance-signed certificate, revocation, envelope + freshness checks, cross-language vectors (spec §2.7) | #3727 | merged |
 | C1 | Cloud: carry the eight `wan_*` fields, return `sender_same_account`, key directory + revocation routes | cloud repo | merged; **deployed** 2026-09-25 21:00 UTC (`/api/health` 1.10.0) |
 | D1a | Channel-wide `wan.db`, instance key, agent WAN keys moved into it (survive upgrades), instance id as `AGENTMUX_HOST_LABEL`, agent-delete purge reaches `wan.db` | #3734 | merged |
-| D1b | Certify + publish each agent key (`muxbus/wan_publish.rs`), relay carry gate (`relay::wan_carry_gate`) | #3771 | merged |
+| D1b | Certify + publish each agent key (`muxbus/wan_publish.rs`), relay carry gate (`relay::wan_carry_gate`; since 2026-10-14 srv signs there itself, `relay::wan_sign_at_origin`, `SPEC_WAN_JEKT_SIGNED_BY_SRV_2026_10_14.md`) | #3771 | merged |
 | D2 | Verifier (`muxbus/wan_verify.rs`), peer cache, known instances, replay table, `TRUST=wan-verified` marker, tier rules, audit, `wan` grants off | #3775 | merged |
 | — | Agent jekt policy (`~/.agentmux/agents/CLAUDE.md`) gains `TRUST=wan-verified` | — | **needs the operator** (§3) |
 | — | Trust a verified `new` same-account instance (`ESCALATE=none`), after agents stop holding the account login (#3881) — operator decision 2026-09-26, spec §2.6 amendment | this PR | open |

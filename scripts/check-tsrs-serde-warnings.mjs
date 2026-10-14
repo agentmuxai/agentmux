@@ -19,8 +19,7 @@
 // command exactly: nothing recompiles, and the warnings are the ones that build produced.
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { isMain } from "./lib/is-main.mjs";
 
 /** Items ts-rs warns on that can't change the generated TypeScript, each with why. */
 export const ALLOWED = [
@@ -78,4 +77,4 @@ function main() {
     console.log(`check-tsrs-serde-warnings: ok (${items.length} allowed: ${[...new Set(items)].join(", ") || "none"})`);
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) main();
+if (isMain(import.meta.url)) main();

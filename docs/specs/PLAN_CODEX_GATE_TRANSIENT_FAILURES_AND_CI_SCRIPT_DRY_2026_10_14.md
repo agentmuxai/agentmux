@@ -1,7 +1,7 @@
 # Plan — the Codex review gate survives a transient GitHub error, and the CI script clean-ups around it
 
 **Date:** 2026-10-14
-**Status:** active — step 1 merged (#4897) and step 2 merged (#4900), both verified in production on 2026-10-14; step 3 in review (#4903); step 4 built, opened after step 3 merges. Four steps, one PR each (§4).
+**Status:** active — steps 1–3 merged and verified in production on 2026-10-14 (#4897, #4900, #4903); step 4 in review (#4907).
 **Author:** Clamk@narko
 **Touches:** `scripts/ci-codex-review-gate.mjs`, `scripts/ci-codex-review-gate.test.mjs`, `.github/workflows/codex-review-gate.yml`, a new `scripts/lib/`, and the "is this script being run directly" check in 16 scripts (step 4).
 
@@ -165,6 +165,8 @@ export function isMain(metaUrl, argv1 = process.argv[1]) {
 ```
 
 All 16 call it. Tests: a Windows-style and a POSIX path, a path with a space, a symlinked invocation (skipped where symlinks need privileges), no `argv[1]`, and being imported by another module (false).
+
+**Found while building it:** three of these scripts also run from sparse checkouts, in jobs other than the gate's: `ci-classify-changes.mjs` (`ci-pr.yml` `changes`, `srv-image.yml` `changes`) and `ci-required-check.mjs` (`ci-pr.yml` `ci-required`). Each list gains `scripts/lib/is-main.mjs`. The gate-only sparse test from step 1 becomes `scripts/workflow-sparse-checkout.test.mjs`, which walks every workflow's jobs and fails on any `node scripts/….mjs` whose transitive relative imports its job's sparse list doesn't cover. It names the missing file, and it asserts it found those five jobs, so a parse that silently matches nothing fails too.
 
 ## 4. Steps
 

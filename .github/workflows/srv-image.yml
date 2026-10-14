@@ -48,7 +48,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          sparse-checkout: scripts/ci-classify-changes.mjs
+          sparse-checkout: |
+            scripts/ci-classify-changes.mjs
+            scripts/lib/is-main.mjs
           sparse-checkout-cone-mode: false
       - id: classify
         env:

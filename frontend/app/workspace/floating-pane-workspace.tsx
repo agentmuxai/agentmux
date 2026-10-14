@@ -39,6 +39,7 @@
  */
 
 import { isLinux, isMacOS, isWindows } from "@/util/platformutil";
+import { isNativeWayland } from "@/app/host/window-system";
 import { FLOATER_EDGE_RESIZE_BORDER } from "@/app/workspace/floater-resize";
 import { ErrorBoundary } from "@/app/element/errorboundary";
 import { CenteredDiv } from "@/app/element/quickelems";
@@ -156,10 +157,13 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
         // breaks hover/redock:
         //   - macOS: BeginWindowDrag needs a patched libcef absent in dev builds
         //     (PR #1308).
-        //   - Linux: BeginWindowDrag → _NET_WM_MOVERESIZE hands input to the X11/
-        //     Wayland compositor for the drag, so the renderer receives NO DOM
-        //     mousemove/mouseup — update_floating_redock_hover never fires (no
-        //     landing ghosts) and the hasMoved gate never trips (no redock).
+        //   - Linux on X11/XWayland: BeginWindowDrag → _NET_WM_MOVERESIZE hands
+        //     input to the window manager for the drag, so the renderer receives
+        //     NO DOM mousemove/mouseup — update_floating_redock_hover never fires
+        //     (no landing ghosts) and the hasMoved gate never trips (no redock).
+        //   - Linux on native Wayland is the exception, below (compositorPress):
+        //     no client can place its own window, so set_window_position does
+        //     nothing there and only the compositor's move works.
         // Both use the JS-driven path; it also inherits the dwell + velocity gate
         // (PR #1249). Windows keeps Win32BeginMoveTask (a host-side loop that DOES
         // emit hover while the renderer is dark).
@@ -193,6 +197,15 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
         let jsDragSetPosInFlight = false;
         let jsDragPendingPos: { x: number; y: number } | null = null;
         let jsDragMouseDownId = 0;
+        // Native Wayland (Linux): a header press waiting to become a compositor
+        // move. No client can place its own window there, so the JS-driven
+        // set_window_position does nothing — the floater never moved — and
+        // there are no screen positions to redock by either. Once the press
+        // moves past COMPOSITOR_MOVE_THRESHOLD_PX the compositor takes the
+        // move (start_window_drag → xdg_toplevel.move), as for the main
+        // window (useWindowDrag.linux.ts); a plain click still reaches the grip.
+        let compositorPress: { x: number; y: number } | null = null;
+        const COMPOSITOR_MOVE_THRESHOLD_PX = 4;
         // Per-drag session counter: incremented on every drag start and on cancel.
         // Guards the update_floating_redock_hover IPC .then() against stale responses
         // from a prior drag session arriving during a new drag (or after a cancel).
@@ -411,6 +424,11 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
             // §"Tear-off conflict").
             e.preventDefault();
 
+            if (isLinux() && isNativeWayland()) {
+                compositorPress = { x: e.clientX, y: e.clientY };
+                return;
+            }
+
             if (jsDrivenDrag) {
                 // JS-driven drag (macOS + Linux). macOS: BeginWindowDrag needs a
                 // patched libcef absent in dev builds. Linux: BeginWindowDrag →
@@ -478,6 +496,7 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
         };
 
         const onMouseUp = (e: MouseEvent) => {
+            compositorPress = null;
             // Invalidate any in-flight JS-driven get_window_position IPC so a race
             // where mouseup fires before the promise resolves doesn't arm dragging.
             if (jsDrivenDrag) jsDragMouseDownId += 1;
@@ -932,10 +951,28 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
         document.addEventListener("mousedown", onMouseDown, true);
         document.addEventListener("mouseup", onMouseUp, true);
 
+        // Native Wayland: hand a header press that has moved to the compositor.
+        // One IPC; the page sees no motion until the compositor lets go.
+        const onCompositorPressMove = (e: MouseEvent) => {
+            if (!compositorPress) return;
+            // The button came up somewhere the page didn't see the mouseup.
+            if ((e.buttons & 1) === 0) {
+                compositorPress = null;
+                return;
+            }
+            const dx = Math.abs(e.clientX - compositorPress.x);
+            const dy = Math.abs(e.clientY - compositorPress.y);
+            if (dx < COMPOSITOR_MOVE_THRESHOLD_PX && dy < COMPOSITOR_MOVE_THRESHOLD_PX) return;
+            compositorPress = null;
+            getApi().windows.startDrag(label).catch(() => {});
+        };
+        document.addEventListener("mousemove", onCompositorPressMove, true);
+
         onCleanup(() => {
             cleaned = true;
             document.removeEventListener("mousedown", onMouseDown, true);
             document.removeEventListener("mouseup", onMouseUp, true);
+            document.removeEventListener("mousemove", onCompositorPressMove, true);
             stopCancelListener();
             stopEndedListener();
             stopHoverStateListener();

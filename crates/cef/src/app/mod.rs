@@ -248,6 +248,13 @@ wrap_window_delegate! {
             }
         }
 
+        #[cfg(target_os = "linux")]
+        fn on_window_bounds_changed(&self, window: Option<&mut Window>, _new_bounds: Option<&Rect>) {
+            if let (Some((state, label)), Some(window)) = (&self.window_registration, window) {
+                crate::browser_panes::bounds::window_resized(state, label, window);
+            }
+        }
+
         fn on_window_destroyed(&self, _window: Option<&mut Window>) {
             // Close-cascade diagnostics (window-lifecycle-leak retro round 3,
             // 2026-07-05): trace window destruction so the close-debug file
@@ -269,6 +276,8 @@ wrap_window_delegate! {
             #[cfg(not(target_os = "windows"))]
             if let Some((state, label)) = self.window_registration.as_ref() {
                 state.windows.lock().remove(label);
+                #[cfg(target_os = "linux")]
+                crate::browser_panes::bounds::forget_window(label);
                 tracing::info!(
                     window_label = %label,
                     "[browser-pane] unregistered Window on destroy"

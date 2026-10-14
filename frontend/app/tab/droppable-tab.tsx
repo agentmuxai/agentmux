@@ -11,6 +11,7 @@ import clsx from "clsx";
 import { Tab } from "./tab";
 import { tabItemType, tileItemType } from "@/app/drag/drag-types";
 import { windowTabDragData } from "@/app/drag/foreign-drop";
+import { hideDragImageOnNativeWayland } from "@/app/drag/wayland-drag-image";
 import {
     GAP_PX,
     startWindowTabDrag,
@@ -114,7 +115,7 @@ export function DroppableTab(props: DroppableTabProps): JSX.Element {
                     sourceWindowLabel: windowLabel,
                     isLastTab: isLoneTabDrag(),
                 }),
-            onGenerateDragPreview: ({ location, source }) => {
+            onGenerateDragPreview: ({ location, source, nativeSetDragImage }) => {
                 // Capture grab offset here (rather than onDragStart)
                 // because pragmatic-dnd's DragLocation is on this event;
                 // onDragStart only carries `source`. Used by tear-off to
@@ -131,6 +132,12 @@ export function DroppableTab(props: DroppableTabProps): JSX.Element {
                 // no-drop cursor with zero feedback — that's moot now:
                 // PR #1175 fixed the cursor (→ "move"), and this path
                 // keeps the ghost and only removes the snapback.
+                //
+                // Except on native Wayland: there the compositor slides the
+                // ghost back after any release outside a window, which
+                // preventUnhandled can't stop, so the drag has no picture
+                // (wayland-drag-image.ts).
+                hideDragImageOnNativeWayland(nativeSetDragImage);
                 const tabRect = tabWrapRef.getBoundingClientRect();
                 setTabGrabOffset({
                     x: location.current.input.clientX - tabRect.left,

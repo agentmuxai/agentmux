@@ -17,8 +17,9 @@
 //   node scripts/gen-mux-events.mjs           write mps-events.generated.ts
 //   node scripts/gen-mux-events.mjs --check   fail if it's stale, or a typed event is subscribed untyped (CI)
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join, relative, resolve } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
+import { isMain } from "./lib/is-main.mjs";
 import ts from "typescript";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -308,4 +309,4 @@ async function main() {
     }
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) main();
+if (isMain(import.meta.url)) main();

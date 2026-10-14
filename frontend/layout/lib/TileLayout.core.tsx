@@ -30,6 +30,7 @@ import { toPng } from "html-to-image";
 import { createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js";
 import type { JSX } from "solid-js";
 import { onWindowDrag } from "@/app/drag/window-drag-events";
+import { hideDragImageOnNativeWayland } from "@/app/drag/wayland-drag-image";
 import { Key } from "@/util/keyed";
 import { debounce } from "throttle-debounce";
 import { LayoutModel } from "./layoutModel";
@@ -111,9 +112,9 @@ export interface TileLayoutPlatform {
      */
     boundsCheckRequiresTileDrag: boolean;
     /**
-     * win32: called whenever a leaf's geometry changes outside the first-paint
-     * reveal gate and a resize drag. Native browser panes read the settle
-     * signal to re-sample + SetWindowPos their HWND onto the new rect
+     * win32, linux: called whenever a leaf's geometry changes outside the
+     * first-paint reveal gate and a resize drag. Native browser panes read the
+     * settle signal to re-sample their placeholder and move onto the new rect
      * (SPEC_PANE_REFLOW_ANIMATION_2026_05_29.md).
      */
     onLeafGeometryChange?: () => void;
@@ -293,7 +294,7 @@ export function createTileLayout(platform: TileLayoutPlatform) {
         // Ping the platform's settle signal whenever this node's geometry
         // changes outside the first-paint reveal gate and a resize drag. (The
         // CSS reflow animation this once tracked was removed; DOM panes just
-        // take the new rect directly.) Only win32 supplies the hook — see
+        // take the new rect directly.) Only win32 and linux supply the hook — see
         // `TileLayoutPlatform.onLeafGeometryChange`.
         if (platform.onLeafGeometryChange) {
             const notify = platform.onLeafGeometryChange;
@@ -451,6 +452,9 @@ export function createTileLayout(platform: TileLayoutPlatform) {
                     },
                     getInitialData: () => ({ nodeId: props.node.id, type: tileItemType }),
                     onGenerateDragPreview: ({ nativeSetDragImage }) => {
+                        // A tear-off's release outside the window would slide
+                        // the picture back on native Wayland (wayland-drag-image.ts).
+                        if (hideDragImageOnNativeWayland(nativeSetDragImage)) return;
                         const preview = previewImage();
                         if (preview && nativeSetDragImage) {
                             const dpr =
