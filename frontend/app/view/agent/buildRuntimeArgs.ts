@@ -127,8 +127,9 @@ export function buildRuntimeArgs(
     // An ACP agent takes none either: permission is asked inside the protocol
     // (`session/request_permission`), which srv's ACP controller answers, so a
     // CLI flag would only be one its ACP mode never declared.
-    if (providerId && getProvider(providerId)?.controllerType === "acp") {
-        // No flag for any mode.
+    const controllerType = providerId ? getProvider(providerId)?.controllerType : undefined;
+    if (controllerType === "acp" || controllerType === "terminal") {
+        // No flag for any mode: ACP asks in the protocol, a terminal-tier CLI in its own UI.
     } else if (providerId === "kimi" || providerId === "gemini" || providerId === "qwen") {
         // Kimi, Gemini, and Qwen (a Gemini-CLI fork) only support --yolo
         // (bypass) vs no flag (default) — not --permission-mode / --dangerously-skip-permissions

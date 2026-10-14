@@ -28,6 +28,11 @@ pub enum ControllerType {
     /// transport. Protocol semantics are selected by [`AppServerKind`].
     #[allow(dead_code)] // Off by default until SPEC_CODEX_APP_SERVER_FIRST_CLASS_PROVIDER_2026_09_12.md §15 Slice 6.
     AppServer,
+    /// The CLI's own interactive UI in a terminal pane (view `term`, the
+    /// shell controller's `cmd` mode), for a CLI with no structured
+    /// interface: no transcript, tokens or resume of AgentMux's own.
+    /// SPEC_NINE_NEW_HARNESSES_2026_10_14.md §4.
+    Terminal,
 }
 
 /// Protocol spoken by a provider-neutral App Server controller.
@@ -226,6 +231,7 @@ impl ProviderConfig {
             ControllerType::Subprocess => "subprocess",
             ControllerType::Acp => "acp",
             ControllerType::AppServer => "app-server",
+            ControllerType::Terminal => "cmd",
         }
     }
 
@@ -290,11 +296,14 @@ mod pi;
 mod muxcode;
 mod copilot;
 mod antigravity;
+mod aider;
 mod cline;
+mod crush;
 mod dsh;
 mod goose;
 mod grok;
 mod kilo;
+mod muse;
 mod opencode;
 
 use claude::CLAUDE;
@@ -307,11 +316,14 @@ use pi::PI;
 use muxcode::MUX_CODE;
 use copilot::COPILOT;
 use antigravity::ANTIGRAVITY;
+use aider::AIDER;
 use cline::CLINE;
+use crush::CRUSH;
 use dsh::DSH;
 use goose::GOOSE;
 use grok::GROK;
 use kilo::KILO;
+use muse::MUSE;
 use opencode::OPENCODE;
 
 // ─── Static registry ─────────────────────────────────────────────────────────
@@ -334,6 +346,9 @@ static REGISTRY: LazyLock<HashMap<&'static str, &'static ProviderConfig>> = Lazy
     m.insert(GOOSE.id, &GOOSE);
     m.insert(GROK.id, &GROK);
     m.insert(DSH.id, &DSH);
+    m.insert(AIDER.id, &AIDER);
+    m.insert(CRUSH.id, &CRUSH);
+    m.insert(MUSE.id, &MUSE);
     m
 });
 
@@ -367,6 +382,9 @@ static ALIASES: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(||
     m.insert("grok-build", "grok");
     m.insert("grok-cli", "grok");
     m.insert("deepseek-harness", "dsh");
+    m.insert("aider-chat", "aider");
+    m.insert("crush-cli", "crush");
+    m.insert("muse-code", "muse");
     m
 });
 
@@ -400,6 +418,13 @@ pub fn known_install_paths(provider_id: &str) -> Vec<std::path::PathBuf> {
         ),
         "goose" => goose_install_paths(dirs::home_dir()),
         "grok" => grok_install_paths(dirs::home_dir()),
+        "aider" => aider_install_paths(dirs::home_dir()),
+        "muse" => muse_install_paths(
+            std::env::var_os("MUSE_INSTALL_DIR")
+                .or_else(|| std::env::var_os("LOCALAPPDATA").map(|d| std::path::PathBuf::from(d).join("Programs").join("muse").into()))
+                .map(std::path::PathBuf::from),
+            dirs::home_dir(),
+        ),
         _ => Vec::new(),
     }
 }
@@ -422,6 +447,30 @@ fn goose_install_paths(home: Option<std::path::PathBuf>) -> Vec<std::path::PathB
 fn grok_install_paths(home: Option<std::path::PathBuf>) -> Vec<std::path::PathBuf> {
     let exe = if cfg!(windows) { "grok.exe" } else { "grok" };
     home.map(|h| h.join(".grok").join("bin").join(exe)).into_iter().collect()
+}
+
+/// Where Aider's installer puts it: uv's tool bin dir, `~/.local/bin`.
+fn aider_install_paths(home: Option<std::path::PathBuf>) -> Vec<std::path::PathBuf> {
+    let exe = if cfg!(windows) { "aider.exe" } else { "aider" };
+    home.map(|h| h.join(".local").join("bin").join(exe)).into_iter().collect()
+}
+
+/// Muse Code's native binary, not its launcher: on Windows the launcher is a
+/// `.cmd` a terminal pane can't run, and it would update itself hourly. The
+/// launcher records the version it installed in `.muse-version` beside
+/// `muse-bin-<version>.exe`. Elsewhere the launcher is a script that runs.
+fn muse_install_paths(install_dir: Option<std::path::PathBuf>, home: Option<std::path::PathBuf>) -> Vec<std::path::PathBuf> {
+    if cfg!(windows) {
+        let Some(dir) = install_dir else { return Vec::new() };
+        let Ok(version) = std::fs::read_to_string(dir.join(".muse-version")) else { return Vec::new() };
+        let version = version.trim();
+        if version.is_empty() || version.contains(['/', '\\']) {
+            return Vec::new();
+        }
+        vec![dir.join(format!("muse-bin-{version}.exe"))]
+    } else {
+        home.map(|h| h.join(".local").join("bin").join("muse")).into_iter().collect()
+    }
 }
 
 fn antigravity_install_paths(

@@ -28,7 +28,7 @@ import { resolveForkSessionArgs } from "./fork-session-args";
 import { HISTORY_TAB_FOR_META_KEY, historyTabLabel, openOrFocusHistoryTab } from "./open-history-tab";
 import { quickForkAgent } from "./quick-fork";
 import { cancelComposerFocusRequest, focusComposer, requestComposerFocus } from "./composer-focus";
-import { isPersistentLaunch, launchController, PROVIDER_FLAGS_META_KEY } from "./launch-args";
+import { isPersistentLaunch, launchController, PROVIDER_FLAGS_META_KEY, TERMINAL_PANE_META } from "./launch-args";
 import { recallRuntime } from "./remembered-runtime";
 import { buildPaneArgs } from "./buildRuntimeArgs";
 import type { AgentContent, AgentDefinition, AgentSkill } from "@/app/store/rpc-api";
@@ -355,6 +355,7 @@ export class AgentViewModel {
                 "agent:resume_strategy": provider.resumeStrategy ?? (provider.resumeFlag ? "flag" : "none"),
                 "agent:session_id_field": provider.sessionIdField,
                 "agent:prompt_arg_flag": provider.promptArgFlag ?? "",
+                ...(provider.controllerType === "terminal" ? TERMINAL_PANE_META : {}),
             });
 
             // Create SubprocessController (no-op start — waits for first message)
@@ -854,11 +855,14 @@ export class AgentViewModel {
                 ...zoomMeta,
                 "frame:activebordercolor": agentColor,
                 "frame:bordercolor": dimAgentColor(agentColor),
+                // A terminal-tier harness: this pane becomes a terminal running
+                // the CLI's own UI, in the agent's folder.
+                ...(provider.controllerType === "terminal" ? { ...TERMINAL_PANE_META, "frame:title": instanceName } : {}),
             };
             // The composer mounts as soon as the meta write below lands; ask
             // it to take focus so the user can type right away instead of
             // clicking into it (SPEC_AGENT_PANE_HOVER_CLOSE_FOCUS_REFINEMENTS_2026_09_23.md §3).
-            requestComposerFocus(blockId);
+            if (provider.controllerType !== "terminal") requestComposerFocus(blockId);
             // Identity M4b-3 (spec §6.5.8): record the launch row, THEN one
             // SetMeta carrying the block meta and its stamp, THEN resync —
             // see `commitLaunch`. Resync creates the controller (a no-op

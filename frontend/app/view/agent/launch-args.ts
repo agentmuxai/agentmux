@@ -56,11 +56,16 @@ export function isPersistentLaunch(provider: LaunchArgsProvider, agentMode: stri
 export function launchController(
     provider: LaunchArgsProvider & { controllerType?: string },
     agentMode: string | undefined,
-): "persistent" | "subprocess" | "acp" {
+): "persistent" | "subprocess" | "acp" | "cmd" {
+    if (provider.controllerType === "terminal") return "cmd";
     if (agentMode === "container") return "subprocess";
     if (provider.controllerType === "acp") return "acp";
     return isPersistentLaunch(provider, agentMode) ? "persistent" : "subprocess";
 }
+
+/** The block meta that makes a launch a terminal pane running the CLI's own
+ *  UI: a terminal-tier harness (`controllerType: "terminal"`). */
+export const TERMINAL_PANE_META = { view: "term", "cmd:interactive": true, "cmd:runonstart": true } as const;
 
 /**
  * The args to launch with. Falls back to `launchArgs` whenever the provider

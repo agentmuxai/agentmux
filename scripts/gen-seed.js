@@ -171,6 +171,33 @@ const CLI_DEFS = [
         bus: "dsh",
         containerSupported: false,
     },
+    {
+        id: "aider",
+        name: "Aider",
+        provider: "aider",
+        icon: "A",
+        description: "Git-native pair programmer",
+        bus: "aider",
+        containerSupported: false,
+    },
+    {
+        id: "crush",
+        name: "Crush",
+        provider: "crush",
+        icon: "C",
+        description: "Charm's terminal coding agent",
+        bus: "crush",
+        containerSupported: false,
+    },
+    {
+        id: "muse",
+        name: "Muse Code",
+        provider: "muse",
+        icon: "M",
+        description: "Meta's coding agent",
+        bus: "muse",
+        containerSupported: false,
+    },
 ];
 
 // ── Seeded bundles ─────────────────────────────────────────────────────
@@ -285,7 +312,7 @@ const SEED_MEMORIES = [
 ];
 
 const manifest = {
-    version: 13,
+    version: 14,
     agents: CLI_DEFS.map((d) => ({
         id: d.id,
         name: d.name,

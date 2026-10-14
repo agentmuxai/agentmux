@@ -44,6 +44,9 @@ const PROVIDER_ID_ALIASES: Record<string, string> = {
     "grok-build": "grok",
     "grok-cli": "grok",
     "deepseek-harness": "dsh",
+    "aider-chat": "aider",
+    "crush-cli": "crush",
+    "muse-code": "muse",
 };
 
 /** Resolve a possibly-legacy provider ID to its canonical form. Returns the

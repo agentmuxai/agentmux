@@ -789,6 +789,107 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         controllerType: "acp",
         systemPrereqs: [{ ...NODE_PREREQ, minVersion: "22.19.0" }, NPM_PREREQ],
     },
+    aider: {
+        id: "aider",
+        displayName: "Aider",
+        // Terminal tier: Aider's own UI in a terminal pane. Not on npm: the user
+        // installs it with Aider's installer. Mirrors crates/srv/src/backend/providers/aider.rs.
+        cliCommand: "aider",
+        defaultArgs: [],
+        styledArgs: [],
+        outputFormat: "raw",
+        styledOutputFormat: "raw",
+        // No sign-in of its own: Aider takes the model provider's key from the
+        // environment (OPENAI_API_KEY, ANTHROPIC_API_KEY, …). No check, no login.
+        authType: "cli-managed",
+        authCheckCommand: [],
+        authLoginCommand: [],
+        requiresLoginTty: true,
+        headlessLoginUrlUnsupported: true,
+        npmPackage: "",
+        pinnedVersion: "0.86.2",
+        versionSource: { kind: "pypi", package: "aider-chat" },
+        docsUrl: "https://aider.chat/docs/install.html",
+        windowsInstallCommand: "irm https://aider.chat/install.ps1 | iex",
+        unixInstallCommand: "curl -LsSf https://aider.chat/install.sh | sh",
+        icon: "terminal",
+        authConfigDirEnvVar: "",
+        authDirName: "aider",
+        supportedVendors: ["aider"],
+        startupInstructionsFilename: "AGENTS.md",
+        launchArgs: ["--read","AGENTS.md","--analytics-disable","--no-check-update","--no-show-release-notes","--no-gitignore"],
+        resumeFlag: null,
+        sessionIdField: "",
+        controllerType: "terminal",
+    },
+    crush: {
+        id: "crush",
+        displayName: "Crush",
+        // Terminal tier: Crush's own UI in a terminal pane (no ACP in this version).
+        // Installed from Charm's own npm package, never bundled (its license).
+        // Mirrors crates/srv/src/backend/providers/crush.rs.
+        cliCommand: "crush",
+        defaultArgs: [],
+        styledArgs: [],
+        outputFormat: "raw",
+        styledOutputFormat: "raw",
+        // Crush keeps its own sign-ins and keys (`crush login`, or set in its UI).
+        authType: "cli-managed",
+        authCheckCommand: [],
+        authLoginCommand: ["login"],
+        requiresLoginTty: true,
+        headlessLoginUrlUnsupported: true,
+        npmPackage: "@charmland/crush",
+        pinnedVersion: "0.98.1",
+        docsUrl: "https://github.com/charmbracelet/crush",
+        windowsInstallCommand: "npm install -g @charmland/crush",
+        unixInstallCommand: "npm install -g @charmland/crush",
+        icon: "terminal",
+        authConfigDirEnvVar: "CRUSH_GLOBAL_DATA",
+        authDirName: "crush",
+        authExtraEnv: { CRUSH_DISABLE_METRICS: "1", DO_NOT_TRACK: "1", CRUSH_DISABLE_PROVIDER_AUTO_UPDATE: "1" },
+        supportedVendors: ["crush"],
+        startupInstructionsFilename: "AGENTS.md",
+        launchArgs: [],
+        resumeFlag: null,
+        sessionIdField: "",
+        controllerType: "terminal",
+        systemPrereqs: [NODE_PREREQ, NPM_PREREQ],
+    },
+    muse: {
+        id: "muse",
+        displayName: "Muse Code",
+        // Terminal tier for now: Muse Code's own UI in a terminal pane (it has no
+        // ACP). Not on npm: the user installs it with Meta's installer; srv runs
+        // its native binary. Mirrors crates/srv/src/backend/providers/muse.rs.
+        cliCommand: "muse",
+        defaultArgs: [],
+        styledArgs: [],
+        outputFormat: "raw",
+        styledOutputFormat: "raw",
+        // Sign-in is Muse's own (`muse login`, a Meta account, or META_API_KEY).
+        authType: "cli-managed",
+        authCheckCommand: [],
+        authLoginCommand: ["login"],
+        requiresLoginTty: true,
+        headlessLoginUrlUnsupported: true,
+        npmPackage: "",
+        pinnedVersion: "1.4.7-R6101.1",
+        versionSource: { kind: "vendor", url: "https://api.meta.ai/muse-code/channels/muse-stable" },
+        docsUrl: "https://dev.meta.ai/docs/muse-code",
+        windowsInstallCommand: "irm https://dev.meta.ai/install.ps1 | iex",
+        unixInstallCommand: "curl -fsSL https://dev.meta.ai/install.sh | sh",
+        icon: "terminal",
+        authConfigDirEnvVar: "XDG_CONFIG_HOME",
+        authDirName: "muse",
+        authExtraEnv: { MUSE_NO_AUTO_UPDATE: "1", TBH_DISABLE_TELEMETRY: "1" },
+        supportedVendors: ["meta"],
+        startupInstructionsFilename: "AGENTS.md",
+        launchArgs: ["--trust-workspace"],
+        resumeFlag: null,
+        sessionIdField: "",
+        controllerType: "terminal",
+    },
 };
 
 // Aliases for provider IDs from older databases or alternate naming
@@ -820,6 +921,9 @@ const PROVIDER_ALIASES: Record<string, string> = {
     "grok-build": "grok",
     "grok-cli": "grok",
     "deepseek-harness": "dsh",
+    "aider-chat": "aider",
+    "crush-cli": "crush",
+    "muse-code": "muse",
 };
 
 export function resolveProviderAlias(id: string): string {

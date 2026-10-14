@@ -245,6 +245,45 @@ const CLI_CATALOG: CliCatalogEntry[] = [
         // ACP runs on the host only (no container ACP path yet).
         containerSupported: false,
     },
+    {
+        provider: "aider",
+        displayName: "Aider",
+        icon: "A",
+        blurb: "Git-native pair programmer",
+        primaryContextFile: "AGENTS.md",
+        mcpSupport: "none",
+        popoverMarkdown:
+            "Aider, the git-native pair programmer, in its own terminal UI. It commits its changes as it goes. Install it with Aider's installer and set your model provider's key (for example OPENAI_API_KEY or ANTHROPIC_API_KEY). It opens in a terminal pane; AgentMux shows no transcript of its own.",
+        hostSupported: true,
+        // A terminal pane on the host.
+        containerSupported: false,
+    },
+    {
+        provider: "crush",
+        displayName: "Crush",
+        icon: "C",
+        blurb: "Charm's terminal coding agent",
+        primaryContextFile: "AGENTS.md",
+        mcpSupport: "stdio+http",
+        popoverMarkdown:
+            "Charm's coding agent, in its own terminal UI. Works with many model providers; sign in with `crush login` or set a key in its UI. It opens in a terminal pane; AgentMux shows no transcript of its own. Note: Crush adds an Assisted-by line to commits unless its config turns that off.",
+        hostSupported: true,
+        // A terminal pane on the host.
+        containerSupported: false,
+    },
+    {
+        provider: "muse",
+        displayName: "Muse Code",
+        icon: "M",
+        blurb: "Meta's coding agent",
+        primaryContextFile: "AGENTS.md",
+        mcpSupport: "stdio+http",
+        popoverMarkdown:
+            "Meta's coding agent, running Muse Spark, in its own terminal UI. Install it with Meta's installer and sign in with `muse login` or META_API_KEY. A Muse subscription runs in contributor mode by default, which lets Meta train on your content; change it in Muse's settings. It opens in a terminal pane for now.",
+        hostSupported: true,
+        // A terminal pane on the host.
+        containerSupported: false,
+    },
 ];
 
 /**

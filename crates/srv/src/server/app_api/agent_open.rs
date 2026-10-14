@@ -831,6 +831,13 @@ async fn open_agent_inner(
                     meta.insert("agent:sessionid".to_string(), json!(sid));
                 }
 
+                // A terminal-tier harness runs its own UI in a terminal pane.
+                if provider.controller_type == crate::backend::providers::ControllerType::Terminal {
+                    meta.insert("view".to_string(), json!("term"));
+                    meta.insert("cmd:interactive".to_string(), json!(true));
+                    meta.insert("cmd:runonstart".to_string(), json!(true));
+                }
+
                 // 7. Create block + insert into layout tree.
                 // Through the reducer (#1681), not wcore-direct: a store-only
                 // block is invisible to the reducer-canonical `state.blocks`
