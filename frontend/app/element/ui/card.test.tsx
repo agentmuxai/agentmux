@@ -189,4 +189,23 @@ describe("CardGrid", () => {
         expect(document.activeElement).toBe(screen.getByRole("button", { name: "b" }));
         spy.mockRestore();
     });
+
+    it("finds a card whose key holds characters CSS.escape rewrites", () => {
+        const spy = widthOf(406);
+        const key = "agent\u0000github";
+        const [sel, setSel] = createSignal<string | null>(key);
+        render(() => (
+            <CardGrid
+                items={["x", key]}
+                keyOf={(i) => i}
+                selectedKey={sel()}
+                onClose={() => setSel(null)}
+                renderCard={(i) => <Card title={i} aria-label={i === key ? "observed" : i} />}
+                renderDetail={() => <input aria-label="nickname" />}
+            />
+        ));
+        fireEvent.keyDown(screen.getByLabelText("nickname"), { key: "Escape" });
+        expect(document.activeElement).toBe(screen.getByRole("button", { name: "observed" }));
+        spy.mockRestore();
+    });
 });

@@ -74,6 +74,13 @@ export function CardGrid<T>(props: CardGridProps<T>): JSX.Element {
         return `${(((selectedIndex() % cols) + 0.5) / cols) * 100}%`;
     };
 
+    // Compared, not selected: a key may hold characters (a NUL separator) that
+    // CSS.escape rewrites, so an attribute selector would miss its card.
+    const cellOf = (key: string) =>
+        [...(gridRef?.children ?? [])].find((el) => el.getAttribute("data-card-key") === key) as
+            | HTMLElement
+            | undefined;
+
     let detailRef: HTMLDivElement | undefined;
     // Bring the details into view without moving the card above them out of
     // it. Not scrollIntoView: that also scrolls every scrollable ancestor.
@@ -84,7 +91,7 @@ export function CardGrid<T>(props: CardGridProps<T>): JSX.Element {
                 if (key == null) return;
                 requestAnimationFrame(() => {
                     const scroller = findScrollParent(detailRef);
-                    const card = gridRef?.querySelector<HTMLElement>(`[data-card-key="${cssEscape(key)}"]`);
+                    const card = cellOf(key);
                     if (!detailRef || !scroller || !card) return;
                     const d = detailRef.getBoundingClientRect();
                     const s = scroller.getBoundingClientRect();
@@ -104,7 +111,7 @@ export function CardGrid<T>(props: CardGridProps<T>): JSX.Element {
         const key = props.selectedKey;
         props.onClose();
         if (key != null) {
-            gridRef?.querySelector<HTMLElement>(`[data-card-key="${cssEscape(key)}"] .ui-card`)?.focus();
+            cellOf(key)?.querySelector<HTMLElement>(".ui-card")?.focus();
         }
     };
 
@@ -161,8 +168,4 @@ function findScrollParent(el: HTMLElement | undefined): HTMLElement | null {
         cur = cur.parentElement;
     }
     return null;
-}
-
-function cssEscape(s: string): string {
-    return typeof CSS !== "undefined" && CSS.escape ? CSS.escape(s) : s.replace(/["\\]/g, "\\$&");
 }
