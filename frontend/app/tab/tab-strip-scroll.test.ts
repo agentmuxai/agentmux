@@ -31,7 +31,7 @@ function tab(left: number, right: number): HTMLElement {
 }
 
 describe("revealTabInStrip", () => {
-    it("scrolls to the very end for the last tab, so the drag square shows", () => {
+    it("scrolls to the very end for the last tab, so it shows whole", () => {
         const s = strip(0);
         revealTabInStrip(s, tab(100, 160), true);
         expect(s.scrollLeft).toBe(700);

@@ -47,7 +47,7 @@ import { translateError } from "@/app/errors/translate";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { ensureCapability, getCapability } from "@/app/store/toolchain-capabilities";
-import { muxEventSubscribe } from "@/app/store/mps";
+import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import * as MOS from "@/app/store/mos";
 import { blockEnv } from "@/app/store/block-meta";
@@ -222,14 +222,9 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
 
     // Subscribe to install progress events — backend streams npm/installer output line-by-line
     const installScope = MOS.makeORef("block", blockId);
-    const unsubInstall = muxEventSubscribe({
-        eventType: WpsEvent.InstallProgress,
-        scope: installScope,
-        handler: (event: any) => {
-            const msg: string = event?.data?.message ?? "";
-            if (msg) log("install", msg);
-        },
-    });
+    const unsubInstall = onMuxEvent(WpsEvent.InstallProgress, ({ message }) => {
+        if (message) log("install", message);
+    }, installScope);
 
     let cliResult: ResolveCliResult;
     try {

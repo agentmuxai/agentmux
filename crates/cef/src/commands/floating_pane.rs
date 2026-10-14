@@ -249,6 +249,9 @@ pub fn open_floating_pane_window(
         }
 
         crate::floating_pane::post_create_floating_window(state, &parsed, &window_label, parent_main_hwnd);
+        // The pool was empty: warm one for the next floating pane, once this
+        // one has revealed (no-op if a spawn is in flight or pressure is critical).
+        crate::commands::pane_pool::defer_pane_pool_refill(state, &window_label);
 
         // Mother-window resize: if the pane spanned the full column height,
         // shrink the SOURCE window so remaining panes keep their pixel sizes.

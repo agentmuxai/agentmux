@@ -1181,6 +1181,10 @@
             "method": "BlockStatsDetailCommand"
         },
         {
+            "command": "shell.list",
+            "method": "ShellListCommand"
+        },
+        {
             "command": "tower.forget",
             "method": "TowerForgetCommand"
         },
@@ -1301,6 +1305,10 @@
         {
             "command": "viewer.agent-hidden",
             "method": "ViewerAgentHiddenCommand"
+        },
+        {
+            "command": "viewer.can-send",
+            "method": "ViewerCanSendCommand"
         },
         {
             "command": "viewer.devices",

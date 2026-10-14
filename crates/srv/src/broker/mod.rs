@@ -14,7 +14,7 @@
 //! See `docs/specs/REPORT_AUTH_ARCHITECTURE_STATE_AND_RETHINK_2026_07_21.md`
 //! for the full rationale. AgentMux runs three independent OAuth/credential
 //! systems today (provider-CLI identity, MuxBus cloud login, an unused
-//! Armory service-account scaffold) with no shared refresh or storage model.
+//! service-account OAuth scaffold) with no shared refresh or storage model.
 //! This module is the consolidation point: a single, generic,
 //! single-flight-guarded, proactively-scheduled refresher (`scheduler`),
 //! with each credential system registering its own load/refresh/save
@@ -23,7 +23,7 @@
 //! **Phase A scope:** MuxBus is the only registered source (it's the only
 //! system that already does active token refresh today, so it's the
 //! smallest, lowest-risk slice to prove the broker out on). CLI-provider
-//! credentials and the Armory service-account scaffold are future backends
+//! credentials and the service-account OAuth scaffold are future backends
 //! (Phase C+), not touched here.
 
 pub mod process;

@@ -68,7 +68,8 @@
         },
         "browser:searchsuggestions": {
           "type": "boolean",
-          "description": "A browser pane's address bar also asks the default search engine for suggestions while you type, sending it each edit before you submit. Off: suggestions come only from this computer (history, typed addresses)."
+          "default": true,
+          "description": "A browser pane's address bar also asks the default search engine for suggestions while you type, sending it each edit before you submit, as Chrome does. On by default. Incognito tabs never ask (Chrome refuses suggest requests from off-the-record profiles). Off: suggestions come only from this computer (history, typed addresses)."
         },
         "keybindings": {
           "type": "array",
@@ -148,16 +149,13 @@
         "widget:*": {
           "type": "boolean"
         },
-        "widget:showhelp": {
-          "type": "boolean"
-        },
         "widget:icononly": {
           "type": "boolean"
         },
         "widget:pinned": {
           "type": "array",
           "items": { "type": "string" },
-          "description": "The widget bar's pinned icons, in order, as short names (\"agent\" for defwidget@agent). Absent means the fresh-install default."
+          "description": "The widget bar's pinned icons, in order: a built-in's short name (\"agent\" for defwidget@agent) or an installed package widget's full key (\"ext@acme.board/main\"). Absent means the fresh-install default."
         },
         "widget:hidden": {
           "type": "array",

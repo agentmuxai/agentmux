@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 pub const EVENT_BLOCK_CLOSE: &str = "blockclose";
 #[allow(dead_code)]
 pub const EVENT_CONN_CHANGE: &str = "connchange";
-/// The Remotes pane's list changed in a way `connchange` doesn't cover: a
+/// The Connectors → Remotes list changed in a way `connchange` doesn't cover: a
 /// remote's settings, or a recent one forgotten (SPEC_REMOTES_PANE_2026_10_05.md §4.6).
 pub const EVENT_REMOTES_CHANGE: &str = "remoteschange";
 /// The widget packages changed: installed, approved, edited, removed
@@ -450,6 +450,13 @@ impl Broker {
         }
     }
 
+    /// Whether any route is subscribed to `event_name`, in any scope. For a
+    /// publisher that can skip measuring what nobody reads.
+    pub fn has_subscribers(&self, event_name: &str) -> bool {
+        let inner = self.inner.lock().unwrap();
+        inner.sub_map.get(event_name).is_some_and(|bs| !bs.is_empty())
+    }
+
     /// Unsubscribe a route from a specific event.
     pub fn unsubscribe(&self, route_id: &str, event_name: &str) {
         let mut inner = self.inner.lock().unwrap();
@@ -500,6 +507,7 @@ impl Broker {
     /// Publish a typed event (`mps_events`): `payload` is `E::Payload`, so its
     /// frontend subscribers get it as that type.
     pub fn publish_event<E: super::mps_events::Event>(&self, payload: &E::Payload, scopes: Vec<String>, persist: usize) {
+        // typed-helper: builds the event from a declared event and its payload type.
         self.publish(MuxEvent {
             event: E::NAME.to_string(),
             scopes,
@@ -511,6 +519,7 @@ impl Broker {
 
     /// Publishes a per-id event (`mps_events::PerIdEvent`) under its prefix plus `id`.
     pub fn publish_event_for<E: super::mps_events::PerIdEvent>(&self, id: &str, payload: &E::Payload, scopes: Vec<String>, persist: usize) {
+        // typed-helper: builds the event from a declared per-id event and its payload type.
         self.publish(MuxEvent {
             event: format!("{}{id}", E::PREFIX),
             scopes,
@@ -698,13 +707,8 @@ fn remove_from_all_scopes(map: &mut HashMap<String, Vec<String>>, route_id: &str
 /// and displays each message as a log line in the agent presentation view.
 pub fn publish_install_progress(broker: &Broker, block_id: &str, message: &str) {
     let scope = format!("block:{}", block_id);
-    broker.publish(MuxEvent {
-        event: EVENT_INSTALL_PROGRESS.to_string(),
-        scopes: vec![scope],
-        sender: String::new(),
-        persist: 0,
-        data: Some(serde_json::json!({ "message": message })),
-    });
+    let line = super::mps_events::InstallProgressEvent { message: message.to_string() };
+    broker.publish_event::<super::mps_events::InstallProgress>(&line, vec![scope], 0);
 }
 
 /// Publish a Claude Code OSC window-title activity string to the frontend
@@ -713,13 +717,8 @@ pub fn publish_install_progress(broker: &Broker, block_id: &str, message: &str) 
 /// `term:osc_title` block metadata, which the tab label reads.
 pub fn publish_block_activity(broker: &Broker, block_id: &str, activity: &str) {
     let scope = format!("block:{}", block_id);
-    broker.publish(MuxEvent {
-        event: EVENT_BLOCK_ACTIVITY.to_string(),
-        scopes: vec![scope],
-        sender: String::new(),
-        persist: 0,
-        data: Some(serde_json::json!({ "blockId": block_id, "activity": activity })),
-    });
+    let event = super::mps_events::BlockActivityEvent { block_id: block_id.to_string(), activity: activity.to_string() };
+    broker.publish_event::<super::mps_events::BlockActivity>(&event, vec![scope], 0);
 }
 
 // ====================================================================
@@ -981,6 +980,31 @@ mod tests {
         });
 
         assert!(client.received_events().is_empty());
+    }
+
+    /// A publisher that measures something for a subscriber asks this before
+    /// doing the work: any route, any scope, and gone again once the last
+    /// route unsubscribes.
+    #[test]
+    fn test_has_subscribers_follows_any_subscription_of_the_event() {
+        let broker = Broker::new();
+        assert!(!broker.has_subscribers(EVENT_BLOCK_STATS));
+        let sub = |event: &str, scopes: Vec<&str>, allscopes: bool| SubscriptionRequest {
+            event: event.to_string(),
+            scopes: scopes.into_iter().map(String::from).collect(),
+            allscopes,
+        };
+        broker.subscribe("route-1", sub(EVENT_BLOCK_STATS, vec!["block:abc"], false));
+        assert!(broker.has_subscribers(EVENT_BLOCK_STATS), "an exact scope counts");
+        assert!(!broker.has_subscribers(EVENT_SYS_INFO), "another event doesn't");
+        broker.subscribe("route-2", sub(EVENT_BLOCK_STATS, vec![], true));
+        broker.unsubscribe("route-1", EVENT_BLOCK_STATS);
+        assert!(broker.has_subscribers(EVENT_BLOCK_STATS), "route-2 still watches every scope");
+        broker.subscribe("route-3", sub(EVENT_BLOCK_STATS, vec!["block:*"], false));
+        broker.unsubscribe_all("route-2");
+        assert!(broker.has_subscribers(EVENT_BLOCK_STATS), "a wildcard scope counts");
+        broker.unsubscribe_all("route-3");
+        assert!(!broker.has_subscribers(EVENT_BLOCK_STATS));
     }
 
     /// Regression: replay-on-subscribe delivers persisted events that

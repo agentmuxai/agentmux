@@ -3,7 +3,7 @@
 /**
  * Matches Go's `CommandBlockInputData`
  */
-export type CommandBlockInputData = { blockid: string, inputdata64: string, signame: string, 
+export type CommandBlockInputData = { blockid: string, inputdata64?: string, signame?: string, 
 /**
  * `Option<Value>` in Rust because this handler forwards it to the PTY
  * layer without inspecting it, but the shape IS known and the hand-written

@@ -4,18 +4,17 @@
 /**
  * AgentStashModal — unified tabbed container for per-agent setup surfaces,
  * opened by the single "Stash" (backpack) icon in the agent pane header.
- * This is the per-agent-scoped analogue of the global Armory pane
- * (frontend/app/view/armory/) — "Stash" vs. "Armory" is a deliberate naming
- * split so the two are never confused for the same surface (see
- * docs/reports/REPORT_ARMORY_STASH_NAMING_2026_07_27.md). Consolidates
+ * This is the per-agent-scoped analogue of the app-wide Connectors and Memory
+ * panes ("Stash" was named so the two are never
+ * confused, see docs/reports/REPORT_ARMORY_STASH_NAMING_2026_07_27.md). Consolidates
  * the former two icons (identity + native memory) into one modal with tabs:
  *   - Accounts    — read-only linked-accounts view (AgentIdentityLinksPanel).
  *                   New bindings are created from the agent-launch flow;
  *                   see that component's own doc comment for why this tab
  *                   is not a create/edit surface.
  *   - Personal Memory — the native-memory browser (AgentNativeMemoryModal),
- *                   same feature/RPCs as the Armory rail's "Personal
- *                   Memory" tab (native-memory-manager.tsx) — this is the
+ *                   same feature/RPCs as Memory → Personal
+ *                   (native-memory-manager.tsx) — this is the
  *                   per-agent entry point, that one the cross-agent entry
  *                   point, one source of truth either way. Labels kept in
  *                   sync deliberately — see
@@ -102,7 +101,7 @@ export const AgentStashModal = (props: AgentStashModalProps): JSX.Element => {
     return (
         // agent-stash-modal carries container-type so the tabs below (a
         // descendant) can be targeted by @container agent-stash queries —
-        // same technique as section-pane.tsx's .armory-container wrapper.
+        // same technique as section-pane.tsx's .section-pane-container wrapper.
         <div class={clsx("agent-stash-modal", densityClass(props.density))}>
             {/* element/ui's Tabs — the look the line-style component set was
                 modelled on (SPEC_UI_LINE_STYLE_COMPONENT_SYSTEM_2026_10_05.md §3.2). */}

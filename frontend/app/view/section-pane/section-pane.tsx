@@ -3,8 +3,7 @@
 
 /**
  * A pane with a row of sections, each one manager component: the shape of
- * the Connectors and Memory panes (connectors.tsx, memory.tsx), which
- * replaced the Armory. The selected section lives in block meta under the
+ * the Connectors and Memory panes (connectors.tsx, memory.tsx). The selected section lives in block meta under the
  * pane's own key, so it names the pane, survives a remount, and lets an entry
  * point open the pane on a given section (panes.ts).
  */
@@ -32,9 +31,6 @@ export interface SectionPaneSpec<Id extends string> {
     view: string;
     /** Block meta key holding the selected section id. */
     sectionKey: string;
-    /** Keys that held it before the pane was renamed, read when `sectionKey`
-     *  holds nothing and cleared on the next selection. */
-    legacySectionKeys?: readonly string[];
     /** Section shown when the meta holds none, or an unknown id. */
     defaultSection: Id;
     /** The section tabs' accessible name. */
@@ -66,7 +62,7 @@ export class SectionPaneModel<Id extends string> {
         this.zoomAtom = createMemo<number>(() => readZoom(meta()));
         this.sectionAtom = createMemo<Id>(() => {
             const m = meta() as Record<string, unknown> | undefined;
-            const s = [spec.sectionKey, ...(spec.legacySectionKeys ?? [])].map((k) => m?.[k]).find((v) => v != null);
+            const s = m?.[spec.sectionKey];
             return spec.sections.some((sec) => sec.id === s) ? (s as Id) : spec.defaultSection;
         });
         this.viewName = createMemo<string>(
@@ -75,8 +71,7 @@ export class SectionPaneModel<Id extends string> {
     }
 
     selectSection(id: Id): void {
-        const cleared = Object.fromEntries((this.spec.legacySectionKeys ?? []).map((k) => [k, null]));
-        this.setMeta({ ...cleared, [this.spec.sectionKey]: id });
+        this.setMeta({ [this.spec.sectionKey]: id });
     }
 }
 
@@ -107,9 +102,9 @@ export function SectionPaneView<Id extends string>(props: { model: SectionPaneMo
 
     return (
         // The container carries container-type, so the managers inside can
-        // answer the `armory` container queries; an element can't answer its own.
-        <div class="armory-container">
-            <div class="armory-view" ref={viewRef} style={{ zoom: model.zoomAtom() }}>
+        // answer the `section-pane` container queries; an element can't answer its own.
+        <div class="section-pane-container">
+            <div class="section-pane-view" ref={viewRef} style={{ zoom: model.zoomAtom() }}>
                 {/* One tablist along the top: icons only when narrow, labels when
                     there's room (SPEC_UI_LINE_STYLE_COMPONENT_SYSTEM_2026_10_05.md §5.4). */}
                 <TabbedPane

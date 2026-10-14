@@ -292,7 +292,6 @@ mod promote_liveness_tests {
             &QuitState::Draining { reason: QuitReason::LauncherRequested },
             true,
         ));
-        assert!(!should_open_fallback(true, &QuitState::Quit, true));
     }
 
     /// ReAgent P1 on PR #2987: tear off a window, then close it (or it

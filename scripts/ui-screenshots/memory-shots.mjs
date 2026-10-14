@@ -76,7 +76,7 @@ export const PERSONAL_FILES = {
     "feedback_test_style.md": "---\nname: feedback-test-style\ndescription: how the team wants tests written\n---\n\nOne behaviour per test, named for what it checks (\"says item for one\").\n",
 };
 
-const MEMORY = ".armory-view";
+const MEMORY = ".section-pane-view";
 const tab = (label) => `button.ui-tab[role=tab][aria-label=${JSON.stringify(label)}]`;
 
 async function waitFor(session, expression, what, timeoutMs = 15000) {
@@ -363,7 +363,7 @@ export const shots = [
         title: "Connectors — MCP servers",
         description: "MCP servers: the catalog of tool servers agents can be given.",
         inPane: (s, p) => selectTab(s, p, "MCP servers"),
-        verify: ".agent-primitive-modal-list-item",
+        verify: ".mcp-server-card",
     }),
     connectorsShot({
         id: "connectors-mcp-new",
@@ -371,9 +371,9 @@ export const shots = [
         description: "Adding an MCP server to the catalog.",
         inPane: async (s, p) => {
             await selectTab(s, p, "MCP servers");
-            await clickIn(s, p, ".agent-primitive-modal-new-btn", "New MCP server");
+            await clickIn(s, p, ".mcp-cards-add", "Add server");
         },
-        verify: ".agent-primitive-modal-form",
+        verify: ".mcp-server-form",
     }),
     paneShot({
         id: "settings-widget-approval",

@@ -41,6 +41,8 @@ export interface ToolBlockOverlayProps {
     open?: boolean;
     /** Whether the pane is dormant; see ToolOverlayLog's `dormant`. */
     dormant?: boolean;
+    /** See ToolOverlayLog. */
+    onOverflowChange?: (overflows: boolean) => void;
 }
 
 export const ToolBlockOverlay = (props: ToolBlockOverlayProps): JSX.Element => (
@@ -58,7 +60,7 @@ export const ToolBlockOverlay = (props: ToolBlockOverlayProps): JSX.Element => (
                 {TOOL_STATUS[props.node.status]?.label}
             </span>
         </div>
-        <ToolOverlayLog node={props.node} dispatchMatch={props.dispatchMatch} open={props.open} dormant={props.dormant} />
+        <ToolOverlayLog node={props.node} dispatchMatch={props.dispatchMatch} open={props.open} dormant={props.dormant} onOverflowChange={props.onOverflowChange} />
     </div>
 );
 

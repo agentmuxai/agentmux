@@ -10,4 +10,4 @@
  * `null`), while a client that omits `data` entirely arrives as `null` (a
  * struct deserializes only from an object). `Option<Self>` takes both.
  */
-export type CommandListHiddenTemplatesData = Record<string, never>;
+export type CommandListHiddenTemplatesData = Record<symbol, never>;

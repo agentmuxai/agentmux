@@ -114,37 +114,58 @@ pub(super) fn normalize_bundle_upsert_input(mut data: serde_json::Value) -> serd
 }
 
 // The deprecated `preset.*` aliases (Phase 2's one-release compat window)
-// were retired as part of the Armory Bundle Format (ABF) UI-alignment pass —
+// were retired as part of the ABF UI-alignment pass —
 // `bundle.*` is the only surface now; see the ABF branding sweep this
 // change shipped alongside.
 
+/// One `bundle.list` row: a bundle's summary fields, not the whole bundle.
+#[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub(crate) struct BundleListItem {
+    pub(crate) id: String,
+    pub(crate) name: String,
+    pub(crate) description: String,
+    pub(crate) provider: String,
+    pub(crate) model: String,
+    pub(crate) is_blank: bool,
+    #[ts(type = "number")]
+    pub(crate) updated_at: i64,
+}
+
+/// Response for `bundle.list`: the same rows under both keys (see
+/// `bundle_list_impl`).
+#[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub(crate) struct BundleListResponse {
+    pub(crate) bundles: Vec<BundleListItem>,
+    pub(crate) presets: Vec<BundleListItem>,
+}
+
 fn register_bundle_list(engine: &Arc<WshRpcEngine>, state: &AppState) {
-    let make = |state: AppState| -> crate::backend::rpc::engine::CommandHandler {
-        Box::new(move |_data, _ctx| {
-            let state = state.clone();
-            Box::pin(async move { Ok(Some(bundle_list_impl(&state).await?)) })
-        })
-    };
-    engine.register_handler(COMMAND_BUNDLE_LIST, make(state.clone()));
+    let state = state.clone();
+    engine.register_typed(COMMAND_BUNDLE_LIST, move |_req: Option<NoArgsReq>, _ctx| {
+        let state = state.clone();
+        async move { bundle_list_impl(&state).await }
+    });
+}
+
+#[derive(serde::Deserialize, Default, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub(super) struct BundleGetReq {
+    #[serde(default)]
+    #[ts(as = "Option<String>", optional)]
+    id: String,
+    #[serde(default)]
+    #[ts(as = "Option<String>", optional)]
+    name: String,
 }
 
 fn register_bundle_get(engine: &Arc<WshRpcEngine>, state: &AppState) {
-    let make = |state: AppState| -> crate::backend::rpc::engine::CommandHandler {
-        Box::new(move |data, _ctx| {
-            let state = state.clone();
-            Box::pin(async move {
-                #[derive(serde::Deserialize, Default)]
-                struct Req {
-                    #[serde(default)] id: String,
-                    #[serde(default)] name: String,
-                }
-                let req: Req = serde_json::from_value(data)
-                    .map_err(|e| format!("bundle.get: {e}"))?;
-                Ok(Some(bundle_get_impl(&state, &req.id, &req.name).await?))
-            })
-        })
-    };
-    engine.register_handler(COMMAND_BUNDLE_GET, make(state.clone()));
+    let state = state.clone();
+    engine.register_typed(COMMAND_BUNDLE_GET, move |req: BundleGetReq, _ctx| {
+        let state = state.clone();
+        async move { bundle_get_impl(&state, &req.id, &req.name).await }
+    });
 }
 
 // NOT migrated to `register_typed`, deliberately, unlike the rest of the
@@ -170,13 +191,15 @@ fn register_bundle_validate(engine: &Arc<WshRpcEngine>, _state: &AppState) {
 }
 
 fn register_bundle_upsert(engine: &Arc<WshRpcEngine>, state: &AppState) {
-    let make = |state: &AppState| -> crate::backend::rpc::engine::CommandHandler {
+    let make = |state: &AppState| {
         let id_store = state.id_store.clone();
         let broker = state.broker.clone();
-        Box::new(move |data, _ctx| {
+        // `Value` request, as bundle.validate's: the payload goes through
+        // `normalize_bundle_upsert_input` before it is a `Bundle`.
+        move |data: serde_json::Value, _ctx: RpcContext| {
             let id_store = id_store.clone();
             let broker = broker.clone();
-            Box::pin(async move {
+            async move {
                 let mut memory: Bundle =
                     serde_json::from_value(normalize_bundle_upsert_input(data))
                         .map_err(|e| format!("bundle.upsert: {e}"))?;
@@ -214,28 +237,24 @@ fn register_bundle_upsert(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 id_store.bundle_upsert(&memory)
                     .map_err(|e| format!("bundle.upsert: {e}"))?;
                 broker.publish_event::<crate::backend::mps_events::MemoriesChanged>(&(), vec![], 0);
-                Ok(Some(serde_json::to_value(&memory).map_err(|e| e.to_string())?))
-            })
-        })
+                Ok(memory)
+            }
+        }
     };
-    engine.register_handler(COMMAND_BUNDLE_UPSERT, make(state));
+    engine.register_typed(COMMAND_BUNDLE_UPSERT, make(state));
 }
 
 fn register_bundle_delete(engine: &Arc<WshRpcEngine>, state: &AppState) {
-    let make = |state: &AppState| -> crate::backend::rpc::engine::CommandHandler {
+    let make = |state: &AppState| {
         let id_store = state.id_store.clone();
         let mstore = state.mstore.clone();
         let broker = state.broker.clone();
-        Box::new(move |data, _ctx| {
+        // `{ id }`, the same request `deletememory` takes.
+        move |req: CommandDeleteBundleData, _ctx: RpcContext| {
             let id_store = id_store.clone();
             let mstore = mstore.clone();
             let broker = broker.clone();
-            Box::pin(async move {
-                #[derive(serde::Deserialize)]
-                struct Req { id: String }
-                let req: Req = serde_json::from_value(data)
-                    .map_err(|e| format!("bundle.delete: {e}"))?;
-
+            async move {
                 if req.id == "blank" {
                     return Err("FORBIDDEN: cannot delete a seeded bundle".to_string());
                 }
@@ -246,7 +265,7 @@ fn register_bundle_delete(engine: &Arc<WshRpcEngine>, state: &AppState) {
                             purge_bundle_component_refs(&mstore, &req.id);
                             broker.publish_event::<crate::backend::mps_events::MemoriesChanged>(&(), vec![], 0);
                         }
-                        Ok(Some(json!({ "deleted": deleted })))
+                        Ok(DeleteBundleResult { deleted })
                     }
                     Err(crate::backend::storage::error::StoreError::Other(msg))
                         if msg.contains("seed") || msg.contains("seeded") =>
@@ -255,27 +274,25 @@ fn register_bundle_delete(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     }
                     Err(e) => Err(format!("bundle.delete: {e}")),
                 }
-            })
-        })
+            }
+        }
     };
-    engine.register_handler(COMMAND_BUNDLE_DELETE, make(state));
+    engine.register_typed(COMMAND_BUNDLE_DELETE, make(state));
 }
 
+#[derive(serde::Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub(super) struct BundleSelfGetReq { agent_id: String }
+
 fn register_bundle_self_get(engine: &Arc<WshRpcEngine>, state: &AppState) {
-    let make = |state: AppState| -> crate::backend::rpc::engine::CommandHandler {
-        Box::new(move |data, ctx| {
-            let state = state.clone();
-            Box::pin(async move {
-                #[derive(serde::Deserialize)]
-                struct Req { agent_id: String }
-                let req: Req = serde_json::from_value(data)
-                    .map_err(|e| format!("bundle.self.get: {e}"))?;
-                check_s1(&state.mstore, &ctx, &req.agent_id)?;
-                Ok(Some(bundle_self_get_impl(&state, &req.agent_id).await?))
-            })
-        })
-    };
-    engine.register_handler(COMMAND_BUNDLE_SELF_GET, make(state.clone()));
+    let state = state.clone();
+    engine.register_typed(COMMAND_BUNDLE_SELF_GET, move |req: BundleSelfGetReq, ctx| {
+        let state = state.clone();
+        async move {
+            check_s1(&state.mstore, &ctx, &req.agent_id)?;
+            bundle_self_get_impl(&state, &req.agent_id).await
+        }
+    });
 }
 
 /// Resolve the agent definition behind an S1-authenticated `agent_id`.
@@ -303,6 +320,43 @@ fn resolve_agent_for_s1(
         .ok_or_else(|| format!("no agent with slug or id {agent_id}"))
 }
 
+#[derive(serde::Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub(super) struct AgentProjectInstructionsReq {
+    agent_id: String,
+}
+
+/// One file in `agent.project_instructions`: a resolved
+/// `ProjectInstructionFile`, plus how it compares to the last launch's
+/// observation of it.
+#[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub(super) struct AgentProjectInstructionFile {
+    path: String,
+    exists: bool,
+    #[ts(type = "number")]
+    size_bytes: u64,
+    content_hash: String,
+    /// `"agentmux"` or `"foreign"`.
+    owner: String,
+    content: String,
+    truncated: bool,
+    error: Option<String>,
+    change: crate::backend::storage::project_instructions::InstructionChange,
+    /// Null when the file was never observed.
+    #[ts(type = "number | null")]
+    last_observed_at: Option<i64>,
+}
+
+/// Response for `agent.project_instructions`.
+#[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub(super) struct AgentProjectInstructionsResponse {
+    provider: String,
+    working_directory: String,
+    files: Vec<AgentProjectInstructionFile>,
+}
+
 /// `agent.project_instructions` — what this agent will actually read.
 ///
 /// Phase 3 of `SPEC_INSTRUCTION_AND_MEMORY_PORTABILITY_2026_09_09.md`. Until
@@ -317,16 +371,10 @@ fn resolve_agent_for_s1(
 /// `SPEC_CLAUDE_MD_OWNERSHIP_PROTECTION_2026_08_22.md` exists to keep AgentMux
 /// out of it, and this must not become a way around that.
 fn register_agent_project_instructions(engine: &Arc<WshRpcEngine>, state: &AppState) {
-    let make = |state: AppState| -> crate::backend::rpc::engine::CommandHandler {
-        Box::new(move |data, ctx| {
+    let make = |state: AppState| {
+        move |req: AgentProjectInstructionsReq, ctx: RpcContext| {
             let state = state.clone();
-            Box::pin(async move {
-                #[derive(serde::Deserialize)]
-                struct Req {
-                    agent_id: String,
-                }
-                let req: Req = serde_json::from_value(data)
-                    .map_err(|e| format!("agent.project_instructions: {e}"))?;
+            async move {
                 check_s1(&state.mstore, &ctx, &req.agent_id)?;
 
                 let agent = resolve_agent_for_s1(&state, &req.agent_id)
@@ -356,7 +404,7 @@ fn register_agent_project_instructions(engine: &Arc<WshRpcEngine>, state: &AppSt
                     .mstore
                     .project_instructions_list(&agent.id)
                     .unwrap_or_default();
-                let mut enriched: Vec<serde_json::Value> = files
+                let mut enriched: Vec<AgentProjectInstructionFile> = files
                     .iter()
                     .map(|f| {
                         let prev = previous.iter().find(|p| p.path == f.path);
@@ -365,15 +413,22 @@ fn register_agent_project_instructions(engine: &Arc<WshRpcEngine>, state: &AppSt
                             f.exists,
                             &f.content_hash,
                         );
-                        let mut v = serde_json::to_value(f).unwrap_or_default();
-                        if let Some(obj) = v.as_object_mut() {
-                            obj.insert("change".to_string(), json!(change));
-                            obj.insert(
-                                "last_observed_at".to_string(),
-                                json!(prev.map(|p| p.observed_at)),
-                            );
+                        AgentProjectInstructionFile {
+                            path: f.path.clone(),
+                            exists: f.exists,
+                            size_bytes: f.size_bytes,
+                            content_hash: f.content_hash.clone(),
+                            owner: match f.owner {
+                                crate::backend::project_instructions::InstructionOwner::Agentmux => "agentmux",
+                                crate::backend::project_instructions::InstructionOwner::Foreign => "foreign",
+                            }
+                            .to_string(),
+                            content: f.content.clone(),
+                            truncated: f.truncated,
+                            error: f.error.clone(),
+                            change,
+                            last_observed_at: prev.map(|p| p.observed_at),
                         }
-                        v
                     })
                     .collect();
 
@@ -390,29 +445,29 @@ fn register_agent_project_instructions(engine: &Arc<WshRpcEngine>, state: &AppSt
                         false,
                         "",
                     );
-                    enriched.push(json!({
-                        "path": prev.path,
-                        "exists": false,
-                        "size_bytes": 0,
-                        "content_hash": "",
-                        "owner": prev.owner,
-                        "content": "",
-                        "truncated": false,
-                        "error": serde_json::Value::Null,
-                        "change": change,
-                        "last_observed_at": prev.observed_at,
-                    }));
+                    enriched.push(AgentProjectInstructionFile {
+                        path: prev.path.clone(),
+                        exists: false,
+                        size_bytes: 0,
+                        content_hash: String::new(),
+                        owner: prev.owner.clone(),
+                        content: String::new(),
+                        truncated: false,
+                        error: None,
+                        change,
+                        last_observed_at: Some(prev.observed_at),
+                    });
                 }
 
-                Ok(Some(json!({
-                    "provider": agent.provider,
-                    "working_directory": work_dir,
-                    "files": enriched,
-                })))
-            })
-        })
+                Ok(AgentProjectInstructionsResponse {
+                    provider: agent.provider,
+                    working_directory: work_dir,
+                    files: enriched,
+                })
+            }
+        }
     };
-    engine.register_handler(COMMAND_AGENT_PROJECT_INSTRUCTIONS, make(state.clone()));
+    engine.register_typed(COMMAND_AGENT_PROJECT_INSTRUCTIONS, make(state.clone()));
 }
 
 /// Read-only account-requirement resolution (spec §4.5) — one identity
@@ -483,25 +538,25 @@ fn bounded_display(s: &str) -> String {
     crate::backend::bundle_import::truncate_display(s, crate::backend::bundle_import::MAX_DISPLAY_FIELD_CHARS)
 }
 
-pub(crate) async fn bundle_list_impl(state: &AppState) -> Result<serde_json::Value, String> {
+pub(crate) async fn bundle_list_impl(state: &AppState) -> Result<BundleListResponse, String> {
     let memories = state.id_store.bundle_list().map_err(|e| format!("bundle.list: {e}"))?;
-    let bundles: Vec<_> = memories.iter().map(|m| json!({
-        "id": m.id, "name": m.name, "description": m.description,
-        "provider": m.provider, "model": m.model, "is_blank": m.is_blank, "updated_at": m.updated_at,
-    })).collect();
+    let bundles: Vec<BundleListItem> = memories.into_iter().map(|m| BundleListItem {
+        id: m.id, name: m.name, description: m.description,
+        provider: m.provider, model: m.model, is_blank: m.is_blank, updated_at: m.updated_at,
+    }).collect();
     // Emit both keys: `bundle.list` callers read `bundles`; the separate
     // REST route `/api/v1/agent/preset/list` (`PresetList` MCP tool,
     // server/mod.rs) still reads `presets` and is unrelated to the internal
     // WS `preset.*` aliases retired in this pass — do not drop `presets`
     // here without first retiring that REST route too.
-    Ok(json!({ "bundles": bundles, "presets": bundles }))
+    Ok(BundleListResponse { presets: bundles.clone(), bundles })
 }
 
 pub(crate) async fn bundle_get_impl(
     state: &AppState,
     id: &str,
     name: &str,
-) -> Result<serde_json::Value, String> {
+) -> Result<Bundle, String> {
     let memory = if !id.is_empty() {
         state.id_store.bundle_get(id).map_err(|e| format!("bundle.get: {e}"))?
             .ok_or_else(|| format!("bundle.get: not found id={id}"))?
@@ -512,13 +567,13 @@ pub(crate) async fn bundle_get_impl(
     } else {
         return Err("bundle.get: provide id or name".to_string());
     };
-    serde_json::to_value(&memory).map_err(|e| e.to_string())
+    Ok(memory)
 }
 
-/// Structurally validate a bundle draft — Armory Bundle Format (ABF)
+/// Structurally validate a bundle draft — ABF
 /// UI-alignment pass. Takes the SAME payload shape `bundle.upsert` accepts
 /// (reuses its `normalize_bundle_upsert_input`), not just an id, so the
-/// Armory editor's "Validate" button can check an unsaved draft (including a
+/// Memory → Bundles editor's "Validate" button can check an unsaved draft (including a
 /// brand-new bundle with no id yet) rather than only whatever was last
 /// persisted.
 ///
@@ -536,7 +591,7 @@ pub(crate) fn bundle_validate_impl(
 pub(crate) async fn bundle_self_get_impl<'o>(
     state: &AppState,
     owner: impl Into<SelfOwner<'o>>,
-) -> Result<serde_json::Value, String> {
+) -> Result<Bundle, String> {
     let agent_id = match owner.into() {
         SelfOwner::Slug(slug) => slug,
         // Identity M4c-2c: an attributed caller's own row, and its registry
@@ -586,7 +641,7 @@ pub(crate) async fn bundle_self_get_impl<'o>(
 fn bundle_self_get_by_memory_id(
     state: &AppState,
     memory_id: Option<String>,
-) -> Result<serde_json::Value, String> {
+) -> Result<Bundle, String> {
     let memory = if let Some(mid) = memory_id {
         state.id_store.bundle_get(&mid).map_err(|e| format!("bundle.self.get: {e}"))?
             .ok_or_else(|| format!("bundle.self.get: memory_id {mid} not found"))?
@@ -599,7 +654,7 @@ fn bundle_self_get_by_memory_id(
         state.id_store.bundle_get(&blank_id).map_err(|e| format!("bundle.self.get: {e}"))?
             .ok_or_else(|| "bundle.self.get: blank singleton row missing".to_string())?
     };
-    serde_json::to_value(&memory).map_err(|e| e.to_string())
+    Ok(memory)
 }
 
 /// The agent a self-scoped MuxAPI call is about — whose personal memory

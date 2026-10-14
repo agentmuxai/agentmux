@@ -30,7 +30,7 @@ function formatTimestamp(ms: number): string {
 }
 
 /** "by <writer>" for Global Memory versions — the trusted writer, which an
- *  agent can't fake the way it can `source`. The Armory itself is implied by
+ *  agent can't fake the way it can `source`. The Memory pane itself is implied by
  *  a "Human" source, so it isn't repeated. */
 function writerLabel(v: MemoryVersionMeta): string | null {
     if (!v.written_by || v.written_by === "armory-ui") return null;

@@ -7,7 +7,7 @@
  * the is_global / bound_to_agent / no-check_s1 details, which apply
  * identically here. A reactive, read-only view of the standalone Skill
  * primitive (`skill.*` MuxAPI, crates/srv/src/server/app_api/skill.rs)
- * plus a Bind/Unbind toggle — global skills are authored in the Armory,
+ * plus a Bind/Unbind toggle — global skills are authored in Memory → Skills,
  * not here.
  */
 

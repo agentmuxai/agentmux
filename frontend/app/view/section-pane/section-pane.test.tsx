@@ -2,8 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The Connectors and Memory panes (section-pane.tsx and the two manifests),
- * and the Armory and Remotes manifests that move saved blocks onto them.
+ * The Connectors and Memory panes (section-pane.tsx and the two manifests).
  * docs/specs/SPEC_RETIRE_ARMORY_CONNECTORS_AND_KNOWLEDGE_PANES_2026_10_05.md,
  * docs/specs/SPEC_REMOTES_INTO_CONNECTORS_2026_10_08.md.
  */
@@ -58,10 +57,8 @@ vi.mock("@/app/store/block-component-registry", () => ({
 }));
 
 import type { PaneTabHostContext, PaneTabManifest } from "@/app/block/pane-tab-registry";
-import { armoryPaneTab } from "@/app/view/armory/armory";
 import { connectorsPaneTab } from "@/app/view/connectors/connectors";
 import { memoryPaneTab } from "@/app/view/memory/memory";
-import { remotesPaneTab } from "@/app/view/remotes/remotes";
 
 // A real signal behind the host context, so a setMeta write flows back into
 // the pane the way the backend's meta push does.
@@ -166,29 +163,6 @@ describe("Connectors → Remotes", () => {
     });
 });
 
-describe("a saved Remotes block", () => {
-    it("rewrites its meta to Connectors → Remotes after it's created, keeping the rest", async () => {
-        setBlockMeta({ view: "remotes", "remotes:expand": "db1", "term:zoom": 1.3 });
-        createRoot(() => remotesPaneTab.create(makeCtx()));
-        expect(setMetaMock).not.toHaveBeenCalled();
-        await Promise.resolve();
-        expect(setMetaMock).toHaveBeenCalledWith({ view: "connectors", "connectors:section": "remotes" });
-    });
-
-    it("shows Connectors on Remotes before the write lands, and lets the user pick another section", () => {
-        const { container, title } = mount(remotesPaneTab, { view: "remotes", "remotes:expand": "db1" });
-        expect(visiblePane(container)).toBe("remotes-view");
-        expect(title()).toBe("Connectors · Remotes");
-        expect(container.querySelector('[data-testid="remotes-view"]')!.getAttribute("data-expand")).toBe("db1");
-        fireEvent.click(screen.getByRole("tab", { name: "Accounts" }));
-        expect(visiblePane(container)).toBe("accounts-manager");
-    });
-
-    it("stands in for Connectors", () => {
-        expect(remotesPaneTab.legacyOf).toBe("connectors");
-    });
-});
-
 describe("Memory pane", () => {
     it("has the sections Global, Personal, Skills and Bundles, on Global by default", () => {
         const { container, title } = mount(memoryPaneTab);
@@ -215,18 +189,7 @@ describe("Memory pane", () => {
     it("clicking a tab writes memory:section", () => {
         const { container } = mount(memoryPaneTab);
         fireEvent.click(screen.getByRole("tab", { name: "Skills" }));
-        // The section key from when the pane was named Knowledge is cleared too.
-        expect(setMetaMock).toHaveBeenCalledWith({ "knowledge:section": null, "memory:section": "skills" });
-        expect(visiblePane(container)).toBe("skill-manager");
-    });
-
-    it("opens on the section a block saved when the pane was named Knowledge", () => {
-        const { container } = mount(memoryPaneTab, { "knowledge:section": "bundles" });
-        expect(visiblePane(container)).toBe("bundle-manager");
-    });
-
-    it("prefers memory:section over the old key when a block has both", () => {
-        const { container } = mount(memoryPaneTab, { "memory:section": "skills", "knowledge:section": "bundles" });
+        expect(setMetaMock).toHaveBeenCalledWith({ "memory:section": "skills" });
         expect(visiblePane(container)).toBe("skill-manager");
     });
 
@@ -256,13 +219,13 @@ describe("section pane zoom", () => {
 
     it("applies term:zoom as CSS zoom", () => {
         const { container } = mount(connectorsPaneTab, { "term:zoom": 1.2 });
-        expect((container.querySelector(".armory-view") as HTMLElement).style.zoom).toBe("1.2");
+        expect((container.querySelector(".section-pane-view") as HTMLElement).style.zoom).toBe("1.2");
     });
 
     it("Ctrl+Wheel steps term:zoom; back at 1.0 it clears the key", () => {
         setPlatform("win32"); // mod+wheel: Ctrl here, ⌘ on macOS
         const { container } = mount(memoryPaneTab);
-        const view = container.querySelector(".armory-view")!;
+        const view = container.querySelector(".section-pane-view")!;
         wheel(view, { ctrlKey: true, deltaY: 100 });
         expect(setMetaMock).toHaveBeenLastCalledWith({ "term:zoom": 0.9 });
         wheel(view, { ctrlKey: true, deltaY: -100 });
@@ -271,38 +234,9 @@ describe("section pane zoom", () => {
 
     it("leaves a plain wheel and Ctrl+Shift+Wheel (all panes) alone", () => {
         const { container } = mount(memoryPaneTab);
-        const view = container.querySelector(".armory-view")!;
+        const view = container.querySelector(".section-pane-view")!;
         wheel(view, { deltaY: 100 });
         wheel(view, { ctrlKey: true, shiftKey: true, deltaY: 100 });
         expect(setMetaMock).not.toHaveBeenCalled();
-    });
-});
-
-describe("a saved Armory block", () => {
-    it("rewrites its meta to the new pane after it's created", async () => {
-        setBlockMeta({ view: "armory", "armory:section": "skills", "term:zoom": 1.3 });
-        createRoot(() => armoryPaneTab.create(makeCtx()));
-        expect(setMetaMock).not.toHaveBeenCalled();
-        await Promise.resolve();
-        expect(setMetaMock).toHaveBeenCalledWith({
-            view: "memory",
-            "memory:section": "skills",
-            "armory:section": null,
-            "armory:memory:subsection": null,
-        });
-    });
-
-    it("shows its new pane until the block remounts as it", () => {
-        const { container, title } = mount(armoryPaneTab, { view: "trust", "armory:section": "mcp" });
-        expect(tabLabels(container)).toEqual(["Accounts", "MCP servers", "Remotes"]);
-        expect(title()).toBe("Connectors · Accounts");
-        // The meta write lands: now the section follows.
-        setBlockMeta((m) => ({ ...m, view: "connectors", "connectors:section": "mcp" }));
-        expect(visiblePane(container)).toBe("mcp-manager");
-        expect(title()).toBe("Connectors · MCP servers");
-    });
-
-    it("keeps the old Trust Center view id as an alias", () => {
-        expect(armoryPaneTab.aliases).toEqual(["trust"]);
     });
 });

@@ -35,9 +35,17 @@ export function update(
 
     switch (command.type) {
         case "Opened": {
+            const bundleIdsEdited = command.initial?.bundleIds !== undefined;
             const next: LaunchFlowState = {
                 ...state,
-                form: { ...initialForm(), ...command.initial },
+                form: {
+                    ...initialForm(),
+                    ...command.initial,
+                    bundleIds: command.initial?.bundleIds ?? [],
+                    bundleIdsEdited,
+                },
+                // A list handed back by the round-trip needs no load.
+                agentBundles: { ready: bundleIdsEdited, ownBundleId: command.ownBundleId ?? "" },
                 closed: false,
             };
             return { state: next, events: [] };
@@ -81,6 +89,16 @@ export function update(
             if (state.form.bundleId === command.bundleId) return { state, events: [] };
             return {
                 state: { ...state, form: { ...state.form, bundleId: command.bundleId } },
+                events: [],
+            };
+        }
+
+        case "BundleIdsChanged": {
+            return {
+                state: {
+                    ...state,
+                    form: { ...state.form, bundleIds: command.bundleIds, bundleIdsEdited: true },
+                },
                 events: [],
             };
         }
@@ -161,6 +179,27 @@ export function update(
         case "BundlesFailed": {
             return {
                 state: { ...state, bundles: { ...state.bundles, loading: false, error: command.error } },
+                events: [],
+            };
+        }
+
+        case "AgentBundlesLoaded": {
+            return {
+                state: {
+                    ...state,
+                    form: state.form.bundleIdsEdited
+                        ? state.form
+                        : { ...state.form, bundleIds: command.bundleIds },
+                    agentBundles: { ready: true, ownBundleId: command.ownBundleId },
+                },
+                events: [],
+            };
+        }
+
+        case "AgentBundlesFailed": {
+            if (state.agentBundles.ready) return { state, events: [] };
+            return {
+                state: { ...state, agentBundles: { ...state.agentBundles, ready: true } },
                 events: [],
             };
         }

@@ -10,7 +10,7 @@ import { MOS } from "@/app/store/global";
 import { setBlockMeta } from "@/app/store/block-meta";
 import { getLayoutModelForStaticTab } from "@/layout/lib/layoutModelHooks";
 import { addWidgetAsPaneTab, effectiveStack, setActiveBlockInStack } from "@/layout/lib/layoutStack";
-import { CONNECTORS_SECTION_KEY, CONNECTORS_VIEW, LEGACY_REMOTES_VIEW } from "@/app/view/section-pane/panes";
+import { CONNECTORS_SECTION_KEY, CONNECTORS_VIEW } from "@/app/view/section-pane/panes";
 import { fireAndForget } from "@/util/util";
 import { META_REMOTES_EXPAND } from "./remotes-sections";
 
@@ -24,12 +24,9 @@ export async function openRemotesInPane(fromBlockId: string, connection?: string
         [CONNECTORS_SECTION_KEY]: "remotes" as const,
         ...(connection ? { [META_REMOTES_EXPAND]: connection } : {}),
     };
-    // A saved Remotes tab not shown since it was a pane of its own still says
-    // "remotes"; it becomes Connectors when it loads.
-    const existing = effectiveStack(node.data).find((id) => {
-        const view = MOS.getObjectValue<Block>(MOS.makeORef("block", id))?.meta?.view;
-        return view === CONNECTORS_VIEW || view === LEGACY_REMOTES_VIEW;
-    });
+    const existing = effectiveStack(node.data).find(
+        (id) => MOS.getObjectValue<Block>(MOS.makeORef("block", id))?.meta?.view === CONNECTORS_VIEW
+    );
     if (existing) {
         await setBlockMeta(existing, meta as MetaType);
         setActiveBlockInStack(model, node.id, existing);

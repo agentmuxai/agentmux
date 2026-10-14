@@ -255,7 +255,7 @@ export interface UseAgentControllerStatus {
     /**
      * Re-run the CLI auth check against this pane's CURRENT `cmd`/`cmd:env`
      * block meta, without opening any login flow. Used after an external
-     * bind event (a different pane, the Armory's Bind-to-Agent menu, or
+     * bind event (a different pane, Connectors' Bind-to-Agent menu, or
      * this pane's own `bindExistingAccount` below) to verify the newly
      * bound credential actually works before declaring the pane unblocked.
      * On success, clears `canRetry`/`authNotice` via `notifyControllerHealthy()`
@@ -269,7 +269,7 @@ export interface UseAgentControllerStatus {
     recheckAuthAfterBind: () => Promise<boolean>;
     /**
      * Bind `account` to this pane's agent (link upsert + best-effort live
-     * `cmd:env`/forced-resync apply) — identical sequence to the Armory's
+     * `cmd:env`/forced-resync apply) — identical sequence to Connectors'
      * Bind-to-Agent context menu (`bindAccountToAgent`, reused directly, not
      * reimplemented). Deliberately does NOT retry the failed turn or call
      * `recheckAuthAfterBind` itself: binding fires the same
@@ -710,7 +710,7 @@ export function useAgentControllerStatus(
             // browser-open-2026-07-20) — "Login Again" used to dead-end the
             // instant the CLI produced no URL, which is every time for Claude
             // Code v2.1.x. linkTarget lets a tier-3 success register a real
-            // Armory account and bind it to THIS agent (single-point
+            // account and bind it to THIS agent (single-point
             // enforcement, PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20.md
             // §7) instead of just seeding a file nothing tracks.
             const agentDefinitionId = getBlockMetaKeyAtom(opts.blockId, "agentId")() as string | undefined;
@@ -1397,9 +1397,9 @@ export function useAgentControllerStatus(
             // console-only log or an unhandled rejection at the caller
             // (agent-view.tsx's `void status.bindExistingAccount(...)` call
             // sites don't — and shouldn't have to — attach their own
-            // `.catch()`). reagentx P2 on PR #2971: the Armory's own
-            // Bind-to-Agent menu surfaces this via `onBindError`; this entry
-            // point had no equivalent until now.
+            // `.catch()`). Connectors → Accounts' own Bind-to-Agent menu
+            // surfaces this via `onBindError` (#2971); this entry point had
+            // no equivalent until now.
             const msg = `Couldn't bind "${account.name}": ${e?.message ?? String(e)}`;
             opts.log("auth", msg, "error");
             setAuthNotice(msg);

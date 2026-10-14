@@ -1,5 +1,123 @@
 use super::*;
 
+/// `identity.self.accounts` and `identity.self.unlink`: the agent asking.
+#[derive(Debug, serde::Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct IdentitySelfAccountsReq {
+    pub agent_id: String,
+}
+
+/// `identity.self.accounts`: the provider accounts linked to the agent, with no secrets.
+#[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct IdentitySelfAccountsResult {
+    pub accounts: Vec<IdentitySelfAccount>,
+}
+
+/// One linked account in `IdentitySelfAccountsResult`.
+#[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct IdentitySelfAccount {
+    pub account_id: String,
+    pub provider: String,
+    pub name: String,
+    pub kind: String,
+    pub status: String,
+    pub masked_tail: String,
+    #[ts(type = "number")]
+    pub updated_at: i64,
+}
+
+/// `identity.account.upsert`: an account for the agent's own use, created or updated, and linked.
+#[derive(Debug, serde::Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+#[serde(rename_all = "snake_case")]
+pub struct IdentityAccountUpsertReq {
+    pub agent_id: String,
+    pub provider: String,
+    pub name: String,
+    #[serde(default)]
+    #[ts(as = "Option<String>", optional)]
+    pub kind: String,
+    pub secret: String,
+    #[serde(default)]
+    #[ts(as = "Option<bool>", optional)]
+    pub validate: bool,
+    #[serde(default)]
+    #[ts(as = "Option<String>", optional)]
+    pub account_id: String,
+}
+
+/// `identity.account.upsert`: the account as stored, and the validation result when one was asked for.
+#[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct IdentityAccountUpsertResult {
+    pub account_id: String,
+    pub provider: String,
+    pub name: String,
+    #[ts(type = r#""valid" | "invalid" | "unknown""#)]
+    pub status: String,
+    pub masked_tail: String,
+    pub valid: bool,
+    pub error: Option<String>,
+}
+
+/// `identity.account.validate`: a stored account to probe, or a provider and secret to probe ad hoc.
+#[derive(Debug, Default, serde::Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+#[serde(rename_all = "snake_case")]
+pub struct IdentityAccountValidateReq {
+    #[serde(default)]
+    #[ts(as = "Option<String>", optional)]
+    pub agent_id: String,
+    #[serde(default)]
+    #[ts(as = "Option<String>", optional)]
+    pub account_id: String,
+    #[serde(default)]
+    #[ts(as = "Option<String>", optional)]
+    pub provider: String,
+    #[serde(default)]
+    #[ts(as = "Option<String>", optional)]
+    pub secret: String,
+}
+
+/// `identity.account.validate`: whether the provider accepted the key.
+#[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct IdentityAccountValidateResult {
+    pub valid: bool,
+    #[ts(type = r#""valid" | "invalid""#)]
+    pub status: String,
+    pub masked_tail: String,
+    pub error: Option<String>,
+}
+
+impl IdentityAccountValidateResult {
+    fn of(outcome: crate::identity::key_validator::ValidationOutcome, masked_tail: String) -> Self {
+        IdentityAccountValidateResult {
+            valid: outcome.valid,
+            status: if outcome.valid { "valid" } else { "invalid" }.to_string(),
+            masked_tail,
+            error: outcome.error,
+        }
+    }
+}
+
+/// `identity.self.unlink`: the provider whose account to unlink from the agent.
+#[derive(Debug, serde::Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct IdentitySelfUnlinkReq {
+    pub agent_id: String,
+    pub provider: String,
+}
+
+/// `identity.self.unlink`: whether a link was removed.
+#[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct IdentitySelfUnlinkResult {
+    pub unlinked: bool,
+}
+
 pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     register_identity_self_accounts(engine, state);
     register_identity_account_upsert(engine, state);
@@ -9,48 +127,23 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
 fn register_identity_self_accounts(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let state = state.clone();
-    engine.register_handler(
-        COMMAND_IDENTITY_SELF_ACCOUNTS,
-        Box::new(move |data, ctx| {
-            let state = state.clone();
-            Box::pin(async move {
-                #[derive(serde::Deserialize)]
-                struct Req { agent_id: String }
-                let req: Req = serde_json::from_value(data)
-                    .map_err(|e| format!("identity.self.accounts: {e}"))?;
-                check_s1(&state.mstore, &ctx, &req.agent_id)?;
-                Ok(Some(identity_self_accounts_impl(&state, &req.agent_id).await?))
-            })
-        }),
-    );
+    engine.register_typed(COMMAND_IDENTITY_SELF_ACCOUNTS, move |req: IdentitySelfAccountsReq, ctx| {
+        let state = state.clone();
+        async move {
+            check_s1(&state.mstore, &ctx, &req.agent_id)?;
+            identity_self_accounts_impl(&state, &req.agent_id).await
+        }
+    });
 }
 
 fn register_identity_account_upsert(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let state = state.clone();
-    engine.register_handler(
-        COMMAND_IDENTITY_ACCOUNT_UPSERT,
-        Box::new(move |data, ctx| {
+    engine.register_typed(COMMAND_IDENTITY_ACCOUNT_UPSERT, move |req: IdentityAccountUpsertReq, ctx| {
             let state = state.clone();
-            Box::pin(async move {
+            async move {
                 let id_store = &state.id_store;
                 let identity_store = &state.identity_store;
                 let broker = &state.broker;
-                #[derive(serde::Deserialize)]
-                #[serde(rename_all = "snake_case")]
-                struct Req {
-                    agent_id: String,
-                    provider: String,
-                    name: String,
-                    #[serde(default)]
-                    kind: String,
-                    secret: String,
-                    #[serde(default)]
-                    validate: bool,
-                    #[serde(default)]
-                    account_id: String,
-                }
-                let req: Req = serde_json::from_value(data)
-                    .map_err(|e| format!("identity.account.upsert: {e}"))?;
                 check_s1(&state.mstore, &ctx, &req.agent_id)?;
                 if req.secret.is_empty() {
                     return Err("identity.account.upsert: secret must not be empty".to_string());
@@ -197,77 +290,50 @@ fn register_identity_account_upsert(engine: &Arc<WshRpcEngine>, state: &AppState
                     watcher.recheck_all_watched_agents();
                 }
 
-                Ok(Some(json!({
-                    "account_id":  account_id,
-                    "provider":    req.provider,
-                    "name":        req.name,
-                    "status":      status,
-                    "masked_tail": masked_tail,
-                    "valid":       valid,
-                    "error":       error_msg,
-                })))
-            })
-        }),
-    );
+                Ok(IdentityAccountUpsertResult {
+                    account_id,
+                    provider: req.provider,
+                    name: req.name,
+                    status,
+                    masked_tail,
+                    valid,
+                    error: error_msg,
+                })
+            }
+        });
 }
 
 fn register_identity_account_validate(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let state = state.clone();
-    engine.register_handler(
-        COMMAND_IDENTITY_ACCOUNT_VALIDATE,
-        Box::new(move |data, ctx| {
+    engine.register_typed(COMMAND_IDENTITY_ACCOUNT_VALIDATE, move |req: IdentityAccountValidateReq, ctx| {
             let state = state.clone();
-            Box::pin(async move {
-                #[derive(serde::Deserialize, Default)]
-                #[serde(rename_all = "snake_case")]
-                struct Req {
-                    #[serde(default)] agent_id: String,
-                    #[serde(default)] account_id: String,
-                    #[serde(default)] provider: String,
-                    #[serde(default)] secret: String,
-                }
-                let req: Req = serde_json::from_value(data)
-                    .map_err(|e| format!("identity.account.validate: {e}"))?;
+            async move {
 
                 if !req.account_id.is_empty() {
                     // Stored-account path: S1 + ownership verification, then probe
                     // using the stored keychain secret (shared with the REST path).
                     check_s1(&state.mstore, &ctx, &req.agent_id)?;
-                    return Ok(Some(
-                        identity_account_validate_stored_impl(&state, &req.agent_id, &req.account_id).await?,
-                    ));
+                    return identity_account_validate_stored_impl(&state, &req.agent_id, &req.account_id).await;
                 }
                 if !req.provider.is_empty() && !req.secret.is_empty() {
                     // Ad-hoc probe — caller supplies their own secret, nothing
                     // stored. WS-only; not exposed over REST/MCP (no inline secret).
                     let masked_tail = crate::identity::key_validator::masked_tail(&req.secret);
                     let outcome = crate::identity::key_validator::validate(&req.provider, &req.secret).await;
-                    return Ok(Some(json!({
-                        "valid": outcome.valid,
-                        "status": if outcome.valid { "valid" } else { "invalid" },
-                        "masked_tail": masked_tail,
-                        "error": outcome.error,
-                    })));
+                    return Ok(IdentityAccountValidateResult::of(outcome, masked_tail));
                 }
                 Err("identity.account.validate: provide account_id or (provider + secret)".to_string())
-            })
-        }),
-    );
+            }
+        });
 }
 
 fn register_identity_self_unlink(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let state = state.clone();
-    engine.register_handler(
-        COMMAND_IDENTITY_SELF_UNLINK,
-        Box::new(move |data, ctx| {
+    engine.register_typed(COMMAND_IDENTITY_SELF_UNLINK, move |req: IdentitySelfUnlinkReq, ctx| {
             let state = state.clone();
-            Box::pin(async move {
+            async move {
                 let identity_store = &state.identity_store;
                 let broker = &state.broker;
-                #[derive(serde::Deserialize)]
-                struct Req { agent_id: String, provider: String }
-                let req: Req = serde_json::from_value(data)
-                    .map_err(|e| format!("identity.self.unlink: {e}"))?;
                 check_s1(&state.mstore, &ctx, &req.agent_id)?;
 
                 // Link rows are keyed by definition id, not the S1 slug —
@@ -297,16 +363,15 @@ fn register_identity_self_unlink(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 if unlinked {
                     broker.publish_event_for::<crate::backend::mps_events::AgentIdentitiesChanged>(&req.agent_id, &(), vec![], 0);
                 }
-                Ok(Some(json!({ "unlinked": unlinked })))
-            })
-        }),
-    );
+                Ok(IdentitySelfUnlinkResult { unlinked })
+            }
+        });
 }
 
 pub(crate) async fn identity_self_accounts_impl<'o>(
     state: &AppState,
     owner: impl Into<SelfOwner<'o>>,
-) -> Result<serde_json::Value, String> {
+) -> Result<IdentitySelfAccountsResult, String> {
     // Link rows are keyed by definition id, not the S1 slug callers
     // authenticate with — see resolve_agent_definition_id. Identity M4c-2c:
     // an attributed caller's is its own row's (`SelfOwner`).
@@ -336,7 +401,7 @@ pub(crate) async fn identity_self_accounts_impl<'o>(
         // fixed — but it is a real UX gap: nothing in this payload tells the
         // caller the account can't satisfy a spawn in THIS channel. Logged
         // below so it is at least observable; surfacing it in the payload (and
-        // in Armory) is tracked as follow-up, not silently assumed fine. See
+        // in Connectors) is tracked as follow-up, not silently assumed fine. See
         // docs/analysis/ANALYSIS_PER_CHANNEL_AUTH_BYPASSES_2026_08_31.md §6.
         match crate::identity::resolver::resolve_account(&state.id_store, &state.identity_store, &link.account_id) {
             Ok(Some((acct, account_store))) => {
@@ -354,11 +419,11 @@ pub(crate) async fn identity_self_accounts_impl<'o>(
                 }
                 let masked_tail = acct.context.get("masked_tail")
                     .and_then(|v| v.as_str()).unwrap_or("").to_string();
-                accounts.push(json!({
-                    "account_id": acct.id, "provider": acct.provider, "name": acct.name,
-                    "kind": acct.kind, "status": acct.status, "masked_tail": masked_tail,
-                    "updated_at": acct.updated_at,
-                }));
+                accounts.push(IdentitySelfAccount {
+                    account_id: acct.id, provider: acct.provider, name: acct.name,
+                    kind: acct.kind, status: acct.status, masked_tail,
+                    updated_at: acct.updated_at,
+                });
             }
             Ok(None) => {
                 // Link points at a since-deleted account — skip silently.
@@ -374,7 +439,7 @@ pub(crate) async fn identity_self_accounts_impl<'o>(
             }
         }
     }
-    Ok(json!({ "accounts": accounts }))
+    Ok(IdentitySelfAccountsResult { accounts })
 }
 
 /// Validate one of the agent's own linked accounts by probing the provider with
@@ -384,7 +449,7 @@ pub(crate) async fn identity_account_validate_stored_impl<'o>(
     state: &AppState,
     owner: impl Into<SelfOwner<'o>>,
     account_id: &str,
-) -> Result<serde_json::Value, String> {
+) -> Result<IdentityAccountValidateResult, String> {
     // Link rows are keyed by definition id, not the S1 slug — without the
     // resolution this ownership check always saw zero links and rejected.
     // Identity M4c-2c: an attributed caller's is its own row's, so it can
@@ -417,10 +482,52 @@ pub(crate) async fn identity_account_validate_stored_impl<'o>(
         .map_err(|e| format!("identity.account.validate: keychain: {e}"))?;
     let tail = crate::identity::key_validator::masked_tail(&plaintext);
     let outcome = crate::identity::key_validator::validate(&acct.provider, &plaintext).await;
-    Ok(json!({
-        "valid": outcome.valid,
-        "status": if outcome.valid { "valid" } else { "invalid" },
-        "masked_tail": tail,
-        "error": outcome.error,
-    }))
+    Ok(IdentityAccountValidateResult::of(outcome, tail))
+}
+
+#[cfg(test)]
+mod wire_tests {
+    use super::*;
+
+    /// Each response serializes as the `json!` it replaced did: same keys, `error` null when there is none.
+    #[test]
+    fn identity_responses_serialize_as_before() {
+        let account = IdentitySelfAccount {
+            account_id: "a1".into(),
+            provider: "claude".into(),
+            name: "Work".into(),
+            kind: "api_key".into(),
+            status: "ok".into(),
+            masked_tail: "…wxyz".into(),
+            updated_at: 7,
+        };
+        assert_eq!(
+            serde_json::to_value(IdentitySelfAccountsResult { accounts: vec![account] }).unwrap(),
+            json!({ "accounts": [{ "account_id": "a1", "provider": "claude", "name": "Work", "kind": "api_key", "status": "ok", "masked_tail": "…wxyz", "updated_at": 7 }] })
+        );
+        let upsert = IdentityAccountUpsertResult {
+            account_id: "a1".into(),
+            provider: "claude".into(),
+            name: "Work".into(),
+            status: "unknown".into(),
+            masked_tail: "…wxyz".into(),
+            valid: false,
+            error: None,
+        };
+        assert_eq!(
+            serde_json::to_value(upsert).unwrap(),
+            json!({ "account_id": "a1", "provider": "claude", "name": "Work", "status": "unknown", "masked_tail": "…wxyz", "valid": false, "error": null })
+        );
+        let outcome = crate::identity::key_validator::ValidationOutcome {
+            valid: false,
+            metadata: json!({}),
+            masked_tail: String::new(),
+            error: Some("401".into()),
+        };
+        assert_eq!(
+            serde_json::to_value(IdentityAccountValidateResult::of(outcome, "…wxyz".into())).unwrap(),
+            json!({ "valid": false, "status": "invalid", "masked_tail": "…wxyz", "error": "401" })
+        );
+        assert_eq!(serde_json::to_value(IdentitySelfUnlinkResult { unlinked: true }).unwrap(), json!({ "unlinked": true }));
+    }
 }

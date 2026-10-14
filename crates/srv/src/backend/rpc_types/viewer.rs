@@ -27,6 +27,11 @@ pub struct ViewerDeviceInfo {
     /// 0 until the device's first request after pairing.
     #[ts(type = "number")]
     pub last_seen_ms: i64,
+    /// The owner let it send to agents as the user.
+    pub can_send: bool,
+    /// It paired with a key, so it can sign what it sends. A device without
+    /// one must pair again before it can be allowed to send.
+    pub has_key: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
@@ -49,6 +54,21 @@ pub struct ViewerRevokeResult {
     /// How many of its open feeds were closed.
     #[ts(type = "number")]
     pub feeds_closed: usize,
+}
+
+/// `viewer.can-send`: let a paired device send to agents as the user, or
+/// stop it (agentmux-mobile's SPEC_SEND_FROM_THE_PHONE_2026_10_13 §4).
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct CommandViewerCanSendData {
+    pub device_id: String,
+    pub can_send: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct ViewerCanSendResult {
+    pub can_send: bool,
 }
 
 /// `viewer.agent-hidden`: read an agent's "hide from paired devices" flag, or

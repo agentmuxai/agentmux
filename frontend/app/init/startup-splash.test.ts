@@ -50,6 +50,21 @@ describe("startup splash fade", () => {
         expect(onReveal).toHaveBeenCalledOnce();
     });
 
+    // SPEC_WINDOW_OPEN_LATENCY_AND_WARM_POOLS_2026_10_13.md §2.3: a cold
+    // floating pane reports its reveal so the host refills the pane pool.
+    it("a cold window's reveal callback runs once, with the cold start's fade kept", async () => {
+        const { fadeOutStartupSplash, onStartupReveal } = await import("./startup-splash");
+        const onReveal = vi.fn();
+        onStartupReveal(onReveal);
+        const el = mountSplash();
+        expect(onReveal).not.toHaveBeenCalled();
+        fadeOutStartupSplash();
+        expect(onReveal).toHaveBeenCalledOnce();
+        expect(el.style.transitionDuration).toBe("");
+        fadeOutStartupSplash();
+        expect(onReveal).toHaveBeenCalledOnce();
+    });
+
     it("with the splash already gone nothing happens", async () => {
         const { fadeOutStartupSplash, markPoolPromoted } = await import("./startup-splash");
         const onReveal = vi.fn();

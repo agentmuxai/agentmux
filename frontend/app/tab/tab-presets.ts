@@ -43,8 +43,8 @@ export type PresetNode = LeafNode | SplitNode;
 // Matches the window-bootstrap default in
 // crates/srv/src/backend/wcore/mod.rs's `default_three_pane_tree` — a
 // SEPARATE mechanism kept in sync by convention, not shared code, so a
-// change to either one has to be mirrored here by hand. Armory was dropped
-// from the starter set (still one click away in the widget bar),
+// change to either one has to be mirrored here by hand. Connectors and
+// Memory aren't in the starter set (each one click away in the widget bar),
 // superseding SPEC_DEFAULT_WIDGETS_REORDER_2026_08_25.md's arrangement.
 //
 // Note this preset can't express the backend's 20/80 size split — the

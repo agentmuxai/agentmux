@@ -288,13 +288,13 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     // `.agentmux-cred-seeded` sentinel).
                     //
                     // It ran during a routine AUTH CHECK — no login, no user
-                    // action, no Armory account — so an agent in a fresh
+                    // action, no bound account — so an agent in a fresh
                     // channel silently acquired the operator's personal
                     // credential. That is the most direct of the four
                     // per-channel-isolation bypasses catalogued in
                     // `docs/analysis/ANALYSIS_PER_CHANNEL_AUTH_BYPASSES_2026_08_31.md`
                     // (#4), and the most likely answer to the reported "agents
-                    // operate with an empty Armory" (it also explains why the
+                    // operate with no account" (it also explains why the
                     // symptom varied by machine — it depended on whether
                     // `~/.claude` happened to hold a valid credential).
                     //
@@ -1271,7 +1271,7 @@ mod tests {
         // field names `path_source` on purpose (explaining why the rename
         // exists), and a bare substring check matched that instead of the
         // field and failed on a correct binding.
-        let ts = <ToolchainEnvResult as ts_rs::TS>::inline();
+        let ts = <ToolchainEnvResult as ts_rs::TS>::inline(&ts_rs::Config::from_env());
         assert!(ts.contains("pathSource: string"), "generated TS lost the rename: {ts}");
         assert!(
             !ts.contains("path_source: string"),

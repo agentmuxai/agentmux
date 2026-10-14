@@ -147,7 +147,12 @@ export function getNodeModel(model: LayoutModel, node: LayoutNode): NodeModel {
                     // Restoring is always allowed; minimizing requires at
                     // least one OTHER expanded pane to remain (the window
                     // must never become all-headers).
-                    if (minimizedIds.has(nodeid)) return true;
+                    if (minimizedIds.has(nodeid)) {
+                        // A minimized pane that is also maximized offers "Minimize" (back to its
+                        // chip), which needs one other expanded pane; otherwise it is "Restore".
+                        const maximized = model.localTreeStateAtom().magnifiedNodeId === nodeid;
+                        return !maximized || model.numLeafs() - minimizedIds.size >= 1;
+                    }
                     return model.numLeafs() - minimizedIds.size > 1;
                 }),
                 isEphemeral: createMemo(() => {
@@ -162,7 +167,12 @@ export function getNodeModel(model: LayoutModel, node: LayoutNode): NodeModel {
                     fireAndForget(() => model.closeNode(nodeid));
                 },
                 toggleMagnify: () => model.magnifyNodeToggle(nodeid),
-                toggleMinimize: () => model.minimizeNodeToggle(nodeid),
+                // While maximized the header's button reads "Minimize" even for a chip that was
+                // maximized, so it must not restore it; every other caller toggles.
+                toggleMinimize: () =>
+                    model.localTreeStateAtom().magnifiedNodeId === nodeid
+                        ? model.collapseMaximizedNode(nodeid)
+                        : model.minimizeNodeToggle(nodeid),
                 focusNode: () => model.focusNode(nodeid),
                 dragHandleRef: { current: null as HTMLDivElement | null },
                 displayContainerRef: model.displayContainerRef,

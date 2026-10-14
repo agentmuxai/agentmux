@@ -505,7 +505,6 @@ declare global {
     type FullConfigType = {
         settings: SettingsType;
         mimetypes: {[key: string]: MimeTypeConfigType};
-        defaultwidgets: {[key: string]: WidgetConfigType};
         widgets: {[key: string]: WidgetConfigType};
         presets: {[key: string]: MetaType};
         termthemes: {[key: string]: TermThemeType};
@@ -714,7 +713,6 @@ declare global {
         "onboarding:githubstar"?: boolean;
         "onboarding:lastversion"?: string;
         count?: number;
-        "widget:order"?: string[];
         "agent:*"?: boolean;
         agentId?: string;
         /** v6 — DB row id of the AgentInstance currently bound to this pane. */
@@ -770,13 +768,6 @@ declare global {
         // block remount and names the pane (section-pane.tsx, warden-model.ts).
         "connectors:section"?: "accounts" | "mcp" | "remotes";
         "memory:section"?: "global" | "personal" | "skills" | "bundles";
-        // Memory's section key from when it was named Knowledge: read as a
-        // fallback (section-pane.tsx `legacySectionKeys`), cleared on the next pick.
-        "knowledge:section"?: "global" | "personal" | "skills" | "bundles";
-        // The retired Armory's section keys: read once, to move a saved Armory
-        // block to Connectors or Memory (section-pane/panes.ts), then cleared.
-        "armory:section"?: "accounts" | "memory" | "skills" | "mcp" | "bundles" | "native_memory";
-        "armory:memory:subsection"?: "global" | "personal";
         "warden:section"?: "host" | "lan" | "internet" | "audit" | "supervisor";
         // Set once by quick-fork.ts right after a fork lands on a provider
         // with no --fork-session equivalent and a parent session existed to
@@ -914,9 +905,8 @@ declare global {
         "app:showtray"?: boolean;
         "app:startatlogin"?: boolean;
         "widget:*"?: boolean;
-        "widget:showhelp"?: boolean;
         "widget:icononly"?: boolean;
-        /** Pinned widget-bar icons, in order, as short names (`agent` for `defwidget@agent`). */
+        /** Pinned widget-bar icons, in order: a built-in's short name (`agent` for `defwidget@agent`), or an installed package widget's full key (`ext@<id>/<pane>`). */
         "widget:pinned"?: string[];
         /** Widget-bar entries the user hid, as full keys (`defwidget@drone`). */
         "widget:hidden"?: string[];
@@ -1362,7 +1352,8 @@ declare global {
     // wconfig.WidgetConfigType
     type WidgetConfigType = {
         "display:order"?: number;
-        "display:hidden"?: boolean;
+        /** Shown only inside its parent group's flyout, not on the bar, in More or in the pane pickers. Not the user's Hidden (`widget:hidden`). Older files call this `display:hidden`. */
+        "display:grouponly"?: boolean;
         "display:pinned"?: boolean;
         icon?: string;
         color?: string;

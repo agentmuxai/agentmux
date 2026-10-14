@@ -2,11 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * SkillCatalogModel — view model for the Armory's Skills tab. Drives list +
+ * SkillCatalogModel — view model for Memory → Skills. Drives list +
  * create/edit/delete, plus binding a global skill to an agent, over the
  * window-scoped `skill.catalog.*` MuxAPI
  * (crates/srv/src/server/app_api/skill.rs) — no `agent_id`/`check_s1`
- * context, since the Armory's connection is never agent-authenticated.
+ * context, since Memory's connection is never agent-authenticated.
  * Every row here is global by construction — the catalog only ever
  * lists/creates/edits is_global rows. Per-agent private skills, and
  * unbinding, live in the Agent-setup modal (AgentSkillModel), not here.

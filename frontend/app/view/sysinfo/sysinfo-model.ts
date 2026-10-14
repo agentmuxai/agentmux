@@ -10,17 +10,28 @@ import type { SignalAtom } from "@/util/util";
 import { createSignalAtom } from "@/util/util";
 
 import { getConnStatusAtom } from "@/store/global";
-import { RpcApi } from "@/app/store/rpc-api";
 import { WpsEvent } from "@/app/store/mps-events";
-import { TabRpcClient } from "@/app/store/rpc-util";
 
 import { DataItem, DefaultNumPoints, DefaultPlotMeta, PlotTypes } from "./sysinfo-types";
-import { convertMuxEventToDataItem, getGapThresholdMs } from "./sysinfo-util";
+import { GapBackfiller } from "./sysinfo-backfill";
+import { convertTimeSeriesToDataItem, getGapThresholdMs } from "./sysinfo-util";
 import type { ConnStatus } from "@/types/rpc/ConnStatus";
+import { readMuxEventHistory } from "@/app/store/mps-history";
 
 // ---------------------------------------------------------------------------
 // Sample ring-buffer reducer
 // ---------------------------------------------------------------------------
+
+/** Least time between two gap backfills, so a machine that stalls often isn't asked for history in a loop. */
+const BACKFILL_MIN_INTERVAL_MS = 5000;
+
+/** The newest sample that is a reading, not a gap marker. */
+function lastRealSample(state: DataItem[]): DataItem | null {
+    for (let i = state.length - 1; i >= 0; i--) {
+        if (state[i].blank !== 1) return state[i];
+    }
+    return null;
+}
 
 function makeBlankItem(template: DataItem, ts: number): DataItem {
     const blank: DataItem = { ts };
@@ -33,6 +44,7 @@ function makeBlankItem(template: DataItem, ts: number): DataItem {
 
 type SampleAction =
     | { type: "RESET"; items: DataItem[]; intervalSecs: number; numPoints: number }
+    | { type: "MERGE"; items: DataItem[]; intervalSecs: number; numPoints: number }
     | { type: "APPEND"; item: DataItem; intervalSecs: number; numPoints: number };
 
 /**
@@ -123,6 +135,34 @@ export function sampleReducer(state: DataItem[], action: SampleAction): DataItem
         return result;
     }
 
+    if (action.type === "MERGE") {
+        // Samples fetched from history for a gap, added to what the series already
+        // has: the union by timestamp (a sample already here wins), in time order,
+        // then laid out as RESET lays out history, so each gap still left gets its
+        // break markers and a filled one loses them. Nothing is cleared, so the
+        // chart never goes blank for it.
+        //
+        // Only history older than the newest sample held is taken. History only
+        // ever fills a gap behind the live samples; one stamped later than them is
+        // from before a backwards clock step (the ring still holds those), and as
+        // the newest it would make RESET's window drop the live samples.
+        const byTs = new Map<number, DataItem>();
+        let known = 0;
+        let newest = -Infinity;
+        for (const d of state) {
+            if (d.blank === 1) continue;
+            byTs.set(d.ts, d);
+            known++;
+            newest = Math.max(newest, d.ts);
+        }
+        for (const d of action.items) {
+            if (d.ts < newest && !byTs.has(d.ts)) byTs.set(d.ts, d);
+        }
+        if (byTs.size === known) return state;
+        const merged = [...byTs.values()].sort((a, b) => a.ts - b.ts);
+        return sampleReducer([], { ...action, type: "RESET", items: merged });
+    }
+
     if (action.type === "APPEND") {
         const { item, intervalSecs, numPoints } = action;
         const intervalMs = intervalSecs * 1000;
@@ -169,20 +209,14 @@ export function sampleReducer(state: DataItem[], action: SampleAction): DataItem
             return [...trimmed, item];
         }
 
-        if (last) {
-            const gap = item.ts - last.ts;
-            if (gap > intervalMs * 1.5 && gap <= intervalMs * 3.5) {
-                // 1–3 missed ticks: zero-order hold — extend the last value
-                const steps = Math.round(gap / intervalMs) - 1;
-                const held: DataItem[] = [];
-                for (let i = 1; i <= steps; i++) {
-                    held.push({ ...last, ts: last.ts + i * intervalMs });
-                }
-                return [...trimmed, ...held, item];
-            } else if (gap > intervalMs * 3.5) {
-                // True break (connection hiccup / long pause): NaN sentinel
-                return [...trimmed, makeBlankItem(last, last.ts + 1), item];
-            }
+        if (last && item.ts - last.ts > getGapThresholdMs(intervalSecs)) {
+            // No samples for longer than a few ticks: end the line at the last real
+            // sample and start it again at this one, as RESET does for history. Both
+            // edges get a marker, so the line and the area break at both ends (a
+            // marker on the left alone left the area to ramp up from 0 to this
+            // sample). A shorter gap is joined by the line between two real
+            // readings; no value is repeated to fill it in.
+            return [...trimmed, makeBlankItem(last, last.ts + 1), makeBlankItem(item, item.ts - 1), item];
         }
 
         return [...trimmed, item];
@@ -233,15 +267,45 @@ class SysinfoViewModel {
 
     appendData(item: DataItem) {
         try {
+            const previous = lastRealSample(this.dataAtom());
             this.dispatch({
                 type: "APPEND",
                 item,
                 intervalSecs: this.getConfiguredInterval(),
                 numPoints: this.numPoints(),
             });
+            // The live lane delivers only the newest sample after a stall; the rest
+            // are in srv's history. A forward gap past the threshold is fetched.
+            if (previous != null && item.ts - previous.ts > getGapThresholdMs(this.getConfiguredInterval())) {
+                this.backfiller.noteGap(previous.ts);
+            }
         } catch (e) {
             console.error("sysinfo: appendData error", e);
         }
+    }
+
+    /** Merge the history newer than `fromTs` into the series, without clearing it. */
+    private async backfillFrom(fromTs: number): Promise<void> {
+        const scope = this.connection();
+        const history = await readMuxEventHistory(WpsEvent.SysInfo, scope, this.numPoints());
+        // The pane switched machines while this was fetching: its series was
+        // reloaded for the new one, and these samples belong to the old.
+        if (this.connection() !== scope) return;
+        const items = history.map(convertTimeSeriesToDataItem).filter((d): d is DataItem => d != null && d.ts > fromTs);
+        if (items.length === 0) return;
+        this.dispatch({
+            type: "MERGE",
+            items,
+            intervalSecs: this.getConfiguredInterval(),
+            numPoints: this.numPoints(),
+        });
+    }
+
+    private backfiller = new GapBackfiller((fromTs) => this.backfillFrom(fromTs), BACKFILL_MIN_INTERVAL_MS);
+
+    /** Drop any gap still waiting to be fetched; the pane is gone. A pane mounted again with this model backfills as before. */
+    dispose() {
+        this.backfiller.reset();
     }
 
     // A native pane tab (Pane Tab contract Phase 2c): built by `create(ctx)`
@@ -325,17 +389,14 @@ class SysinfoViewModel {
     }
 
     async loadInitialData() {
+        // A gap noted for the previous connection means nothing for this one.
+        this.backfiller.reset();
         this.loadingAtom._set(true);
         try {
             const numPoints = this.numPoints();
             const connName = this.connection();
-            const initialData = await RpcApi.EventReadHistoryCommand(TabRpcClient, {
-                event: WpsEvent.SysInfo,
-                scope: connName,
-                maxitems: numPoints,
-            });
-            if (initialData == null) return;
-            const initialDataItems: DataItem[] = initialData.map(convertMuxEventToDataItem);
+            const initialData = await readMuxEventHistory(WpsEvent.SysInfo, connName, numPoints);
+            const initialDataItems: DataItem[] = initialData.map(convertTimeSeriesToDataItem);
             this.resetData(initialDataItems);
         } catch (e) {
             console.log("Error loading initial data for sysinfo", e);

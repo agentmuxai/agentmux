@@ -12,7 +12,7 @@
 //! straight after. That half went with the store code it called.
 //!
 //! Phase 0b of `SPEC_INSTRUCTION_AND_MEMORY_PORTABILITY_2026_09_09.md`. The
-//! two stores were never synced: binding a skill in the Armory wrote only a
+//! two stores were never synced: binding a skill in Memory → Skills wrote only a
 //! ref row, while ABF export read only the inline column, so a bundle could
 //! run with components it did not export and export components it did not run
 //! with (§3.4). The ref tables become authoritative; this carries the inline

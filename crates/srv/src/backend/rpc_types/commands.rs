@@ -219,13 +219,13 @@ pub const COMMAND_LIST_IDENTITY_ACCOUNTS: &str = "listidentityaccounts";
 pub const COMMAND_GET_IDENTITY_ACCOUNT: &str = "getidentityaccount";
 pub const COMMAND_UPSERT_IDENTITY_ACCOUNT: &str = "upsertidentityaccount";
 pub const COMMAND_DELETE_IDENTITY_ACCOUNT: &str = "deleteidentityaccount";
-/// Armory: validate (optional, user-initiated) + securely store an API
+/// Connectors → Accounts: validate (optional, user-initiated) + securely store an API
 /// key. The plaintext goes to the OS keychain; the DB keeps only a
 /// `SecretRef::Keychain` pointer + masked tail + metadata. Used for both new
 /// accounts and replacing a key on an existing one (via `accountId`).
 /// See docs/specs/archive/SPEC_TRUST_CENTER_2026_06_15.md §5/§6.
 pub const COMMAND_ACCOUNT_KEY_VERIFY: &str = "account.key.verify";
-/// Armory service OAuth (scaffold — activates once client ids are
+/// Service OAuth (scaffold — activates once client ids are
 /// provisioned or supplied as BYO). See docs/specs/archive/SPEC_TRUST_CENTER_2026_06_15.md §4.2.
 pub const COMMAND_ACCOUNT_OAUTH_START: &str = "account.oauth.start";
 pub const COMMAND_ACCOUNT_OAUTH_POLL: &str = "account.oauth.poll";
@@ -236,7 +236,7 @@ pub const COMMAND_LINK_AGENT_IDENTITY: &str = "linkagentidentity";
 pub const COMMAND_UNLINK_AGENT_IDENTITY: &str = "unlinkagentidentity";
 pub const COMMAND_LIST_AGENT_IDENTITIES: &str = "listagentidentities";
 /// Every (agent_id, account_id, provider) row across every agent — powers
-/// the Armory "Identities" read-only rail (issue #1624 PR-C), which needs
+/// the since-removed "Identities" read-only rail (issue #1624 PR-C), which needs
 /// all agents' bindings up front rather than one `listagentidentities` call
 /// per row. Wraps `Store::agent_identity_list_all`, previously only used by
 /// the m0013/m0014 backfill migrations.
@@ -279,10 +279,10 @@ pub const COMMAND_DELETE_SYSTEM_MEMORY: &str = "deletesystemmemory";
 /// path-traversal surface) and no write counterpart. See
 /// docs/specs/SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md §5, §7.
 pub const COMMAND_GET_CLAUDE_GLOBAL_CONFIG: &str = "getclaudeglobalconfig";
-/// Global Memory version history for the Armory UI — list / diff / revert
+/// Global Memory version history for Memory → Global — list / diff / revert
 /// over `db_bundle_versions`, the WebSocket counterparts of the
 /// GlobalMemoryHistory/Diff/Revert MCP tools (#3448). Unlike those, they
-/// also cover system-tier entries, which the Armory can already edit.
+/// also cover system-tier entries, which Memory → Global can already edit.
 /// SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.3.
 pub const COMMAND_GLOBAL_MEMORY_HISTORY: &str = "globalmemory:history";
 pub const COMMAND_GLOBAL_MEMORY_DIFF: &str = "globalmemory:diff";
@@ -433,7 +433,7 @@ pub const COMMAND_CONN_DISCONNECT: &str = "conndisconnect";
 pub const COMMAND_CONN_SESSIONS: &str = "connsessions";
 /// `{ connname, sessionid, blockid? }`: end one; `true` if the host had it.
 pub const COMMAND_CONN_SESSION_END: &str = "connsessionend";
-/// The Remotes pane (docs/specs/SPEC_REMOTES_PANE_2026_10_05.md §4.6).
+/// Connectors → Remotes (docs/specs/SPEC_REMOTES_PANE_2026_10_05.md §4.6).
 pub const COMMAND_REMOTES_LIST: &str = "remoteslist";
 pub const COMMAND_REMOTE_SET_CONFIG: &str = "remotesetconfig";
 pub const COMMAND_REMOTE_FORGET: &str = "remoteforget";
@@ -480,6 +480,7 @@ pub const COMMAND_VIEWER_PAIR_START: &str = "viewer.pair-start";
 pub const COMMAND_VIEWER_DEVICES: &str = "viewer.devices";
 pub const COMMAND_VIEWER_REVOKE: &str = "viewer.revoke";
 pub const COMMAND_VIEWER_AGENT_HIDDEN: &str = "viewer.agent-hidden";
+pub const COMMAND_VIEWER_CAN_SEND: &str = "viewer.can-send";
 
 // The cloud presence publisher (muxbus::wan_presence): its state, and a try now.
 pub const COMMAND_PRESENCE_STATUS: &str = "presence.status";
@@ -495,6 +496,8 @@ pub const COMMAND_TOWER_FORGET: &str = "tower.forget";
 // A terminal's stats badge tooltip (backend::blockstats_detail). The window's,
 // not an agent API.
 pub const COMMAND_BLOCKSTATS_DETAIL: &str = "blockstats.detail";
+/// The shells installed here, and which one a new local terminal starts with (`backend::shells`).
+pub const COMMAND_SHELL_LIST: &str = "shell.list";
 
 // MuxAPI Tier 2 — pane lifecycle commands
 pub const COMMAND_PANE_OPEN: &str = "pane.open";
@@ -559,7 +562,7 @@ pub const COMMAND_BUNDLE_IMPORT_FOR_AGENT: &str = "bundle.import_for_agent";
 // one agent's full record to another machine — never bundled into the
 // default export by default.
 pub const COMMAND_BUNDLE_EXPORT_FOR_AGENT_WITH_HISTORY: &str = "bundle.export_for_agent_with_history";
-// Structural ABF validator — Armory Bundle Format (ABF) UI-alignment pass.
+// Structural ABF validator — ABF UI-alignment pass.
 // Read-only: fetches the bundle and runs the pure bundle_validate module
 // against it, no Store writes.
 pub const COMMAND_BUNDLE_VALIDATE: &str = "bundle.validate";
@@ -606,20 +609,20 @@ pub const COMMAND_SKILL_DELETE: &str = "skill.delete";
 pub const COMMAND_SKILL_BIND: &str = "skill.bind";
 pub const COMMAND_SKILL_UNBIND: &str = "skill.unbind";
 
-// MuxAPI — Armory-level Skill catalog (global skills only, window-scoped —
+// MuxAPI — Memory → Skills catalog (global skills only, window-scoped —
 // no agent_id, no check_s1 — mirrors bundle.* auth shape).
 pub const COMMAND_SKILL_CATALOG_LIST: &str = "skill.catalog.list";
 pub const COMMAND_SKILL_CATALOG_UPSERT: &str = "skill.catalog.upsert";
 pub const COMMAND_SKILL_CATALOG_DELETE: &str = "skill.catalog.delete";
 // skill.bind is check_s1-gated (agent binds a skill to itself over its own
-// authenticated connection) — the Armory dashboard's WebSocket never
+// authenticated connection) — the Memory pane's WebSocket never
 // authenticates as an agent, so it can never satisfy that gate. This is the
-// catalog-tier sibling the Armory's "Bind to agent" action actually calls.
+// catalog-tier sibling Memory → Skills' "Bind to agent" action calls.
 // See docs/reports/REPORT_ARMORY_SKILLS_MARKDOWN_AND_BIND_BUG_2026_07_27.md.
 pub const COMMAND_SKILL_CATALOG_BIND: &str = "skill.catalog.bind";
 // Catalog-tier siblings of skill.list / skill.unbind — same no-check_s1
 // rationale as skill.catalog.bind above. AgentStashModal's Skills tab (the
-// per-agent Stash view, not the Armory catalog itself) runs over the
+// per-agent Stash view, not Memory → Skills itself) runs over the
 // dashboard's connection, so it needs a window-scoped way to list what's
 // bound to one specific agent and to unbind, not just bind.
 // See docs/reports/REPORT_ARMORY_ARCHITECTURE_AND_NAMING_REVIEW_2026_07_23.md §2.2.
@@ -657,7 +660,7 @@ pub const COMMAND_MCP_UNBIND: &str = "mcp.unbind";
 // actually speaks the protocol, distinct from "does the JSON parse."
 pub const COMMAND_MCP_PROBE: &str = "mcp.probe";
 
-// MuxAPI — Armory-level MCP Server catalog (global servers only,
+// MuxAPI — Connectors → MCP servers catalog (global servers only,
 // window-scoped — no agent_id, no check_s1 — mirrors bundle.* auth shape).
 pub const COMMAND_MCP_CATALOG_LIST: &str = "mcp.catalog.list";
 pub const COMMAND_MCP_CATALOG_UPSERT: &str = "mcp.catalog.upsert";
@@ -670,9 +673,9 @@ pub const COMMAND_MCP_CATALOG_SET_REACH: &str = "mcp.catalog.set_reach";
 // (SPEC_CONNECTORS_MCP_WHAT_AGENTS_RUN_2026_10_10.md §3).
 pub const COMMAND_MCP_OBSERVED_LIST: &str = "mcp.observed.list";
 // mcp.bind is check_s1-gated (agent binds a server to itself over its own
-// authenticated connection) — the Armory dashboard's WebSocket never
+// authenticated connection) — the Connectors pane's WebSocket never
 // authenticates as an agent, so it can never satisfy that gate. This is the
-// catalog-tier sibling the Armory's "Bind to agent" action actually calls.
+// catalog-tier sibling the MCP servers "Bind to agent" action calls.
 // Same fix as skill.catalog.bind — see
 // docs/reports/REPORT_ARMORY_SKILLS_MARKDOWN_AND_BIND_BUG_2026_07_27.md.
 pub const COMMAND_MCP_CATALOG_BIND: &str = "mcp.catalog.bind";

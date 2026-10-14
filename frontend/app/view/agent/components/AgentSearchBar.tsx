@@ -85,7 +85,7 @@ export const AgentSearchBar = (props: AgentSearchBarProps): JSX.Element => {
                     onClick={props.onClose}
                     title="Close search (Esc)"
                 >
-                    &times;
+                    <i class="fa-solid fa-xmark" aria-hidden="true" />
                 </button>
             </div>
         </Show>

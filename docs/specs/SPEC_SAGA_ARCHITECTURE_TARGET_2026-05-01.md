@@ -1,7 +1,7 @@
 # Saga + Reducer + IPC Architecture — Target End State
 
 **Date:** 2026-05-01
-**Status:** Draft 1 — for review
+**Status:** historical — implemented by the 9 PRs #641–#649 ([retro](../retro/saga-architecture-migration-complete-2026-05-02.md)); the launcher's durable layer was later collapsed by #2191. Verified against code 2026-10-14 ([triage](../analysis/REPORT_REDUCER_STACK_TRIAGE_2026_10_13.md)).
 **Audience:** AgentA, future contributors, reagent/codex reviewing PRs that touch these surfaces.
 
 This spec is the **unified target picture** for AgentMux's saga + reducer + IPC system. It does not specify implementation steps — that's the job of the companion specs:

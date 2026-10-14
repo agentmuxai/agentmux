@@ -95,6 +95,10 @@ export function minimizeNodeToggle(model: LayoutModel, nodeId: string) {
     }
 
     // ── Restore ───────────────────────────────────────────────────────────────
+    // Always a restore for a minimized pane, even one that is also maximized:
+    // programmatic callers (showBlockInPane, for an editor reuse or a
+    // notification) rely on this to make the pane visible. The header's own
+    // Minimize on a maximized chip is `collapseMaximizedNode` below.
     if (node.minimized) {
         node.minimized = undefined;
         _finishToggle(model, nodeId, false);
@@ -108,6 +112,39 @@ export function minimizeNodeToggle(model: LayoutModel, nodeId: string) {
     // guard for programmatic callers.
     if (countExpandedLeaves(model.treeState.rootNode) <= 1) return;
 
+    // A maximized pane can be minimized directly (SPEC_PANE_CONTROLS_TILED_
+    // RESTORE_ICON_AND_MINIMIZE_FROM_MAXIMIZED_2026_10_12 §5). Maximize is a
+    // layer over the tree (`magnifiedNodeId`), so the pane still holds its
+    // slot and the chip is derived from it: ending the maximize and setting
+    // the flag in one commit IS "remember the minimize position". Un-magnify
+    // through its own reducer (as removeLeafEmptiedByMove does) so the overlay
+    // state stays consistent; setState=false defers the commit to
+    // _finishToggle below (one updateTree, one persist), and focused=false
+    // leaves focus where minimizing a tiled pane leaves it.
+    if (model.treeState.magnifiedNodeId === nodeId) {
+        model.magnifyNodeToggle(nodeId, false, false);
+    }
+
+    node.minimized = true;
+    _finishToggle(model, nodeId, true);
+}
+
+/**
+ * The header's Minimize while the pane is maximized: end the maximize and leave
+ * the pane as a chip, whether or not it already was one (a minimized chip that
+ * was maximized is both). Unlike `minimizeNodeToggle` this never restores: that
+ * toggle is what programmatic callers use to make a pane visible, so a
+ * minimized-and-maximized pane must keep restoring there. Like any minimize it
+ * needs one other expanded pane. One commit: one updateTree, one persist.
+ */
+export function collapseMaximizedNode(model: LayoutModel, nodeId: string) {
+    const node = findNode(model.treeState.rootNode, nodeId);
+    if (!node || node.children?.length) return;
+    if (model.treeState.magnifiedNodeId !== nodeId) return;
+    // A pane that is already minimized is not counted as expanded, so it needs one other.
+    const otherExpanded = countExpandedLeaves(model.treeState.rootNode) - (isNodeLocked(node) ? 0 : 1);
+    if (otherExpanded < 1) return;
+    model.magnifyNodeToggle(nodeId, false, false);
     node.minimized = true;
     _finishToggle(model, nodeId, true);
 }

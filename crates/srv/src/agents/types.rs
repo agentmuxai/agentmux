@@ -128,16 +128,9 @@ pub enum AgentEvent {
     },
 }
 
-/// How compaction was triggered. `Auto` = context filled up and
-/// Claude Code compacted automatically; `Manual` = the user (or the
-/// agent itself) ran `/compact`.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ts_rs::TS)]
-#[ts(export, export_to = "../../../frontend/types/rpc/")]
-#[serde(rename_all = "snake_case")]
-pub enum CompactionTrigger {
-    Auto,
-    Manual,
-}
+/// How compaction was triggered: the same type as `compaction_started`'s trigger, which
+/// `agentmux-bashwrap` publishes, so it is declared once, in `agentmux-common`.
+pub use agentmux_common::client_events::CompactionTrigger;
 
 // Generated for the session domain (ActivitySummaryResult.tokens). The
 // hand-written global `TokenCounts` in srv-types.d.ts stays for now: four other

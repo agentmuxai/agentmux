@@ -40,8 +40,8 @@
     &.block-frame-default-header--has-tabstrip {
         padding-left: 0;
 
-        // …but a view-icon control ahead of them (the editor's file-tree
-        // toggle, blockframe.tsx's `viewIconControlElem`) keeps the inset an
+        // …but a view-icon control ahead of them (a clickable `headerIcon`,
+        // blockframe.tsx's `viewIconControlElem`) keeps the inset an
         // ordinary header gives its icon, instead of touching the pane edge.
         .block-frame-view-icon-control {
             margin-left: 10px;
@@ -268,6 +268,36 @@
             justify-content: center;
             align-items: center;
             padding: 0;
+        }
+
+        // Close: a bigger X that turns the standard Windows close red on hover.
+        // Free has no `xmark-large`, so 25px of font gives the ~15.6px X the Pro glyph had.
+        // The colour goes on the <i>: IconButton writes `color: inherit` inline on the
+        // button, which beats any hover rule on the button itself.
+        .block-frame-default-close {
+            padding: 0;
+            border-radius: 3px;
+
+            i {
+                width: 1em;
+                font-size: 25px;
+            }
+
+            &:hover {
+                background: var(--window-close-hover-bg);
+
+                i {
+                    color: var(--window-close-fg);
+                }
+            }
+
+            &:active {
+                background: var(--window-close-press-bg);
+
+                i {
+                    color: var(--window-close-fg);
+                }
+            }
         }
 
         // Floating pane "Always on top" tack. When on, the icon takes the theme
@@ -515,4 +545,21 @@
     // got laid out.
     margin-left:  calc((#{$line} - #{$slot-snapped}) / 2);
     margin-right: calc((#{$slot-snapped} - #{$line}) / 2);
+}
+
+// Edge fade for a horizontally scrolling strip with a hidden scrollbar: the
+// side with more content past it fades out over $width, the usual "more this
+// way" cue. A mask, not an overlay, so it works on any background. The
+// `has-more-left` / `has-more-right` classes come from createScrollEdges
+// (frontend/app/element/scroll-edges.ts); with neither, nothing fades.
+@mixin scroll-edge-fade($width: 28px) {
+    &.has-more-right {
+        mask-image: linear-gradient(to right, #000 calc(100% - #{$width}), transparent);
+    }
+    &.has-more-left {
+        mask-image: linear-gradient(to right, transparent, #000 #{$width});
+    }
+    &.has-more-left.has-more-right {
+        mask-image: linear-gradient(to right, transparent, #000 #{$width}, #000 calc(100% - #{$width}), transparent);
+    }
 }

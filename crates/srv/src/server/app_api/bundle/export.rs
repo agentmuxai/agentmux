@@ -15,33 +15,51 @@ use super::*;
 /// to the pure `bundle_export::export_bundle`. `format: "zip"` returns a
 /// base64-encoded archive; anything else (including omitted) returns the
 /// raw file list for the caller to write out itself.
-#[derive(serde::Deserialize, Default)]
+#[derive(serde::Deserialize, Default, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/", rename = "BundleExportReq")]
 pub(super) struct ExportReq {
     pub(crate) id: String,
     #[serde(default)]
+    #[ts(as = "Option<String>", optional)]
     pub(crate) format: String,
     /// Installed sandboxed widgets to carry, by id (zip only;
     /// SPEC_WIDGET_SHARING_2026_10_10.md §3.4).
     #[serde(default)]
+    #[ts(as = "Option<Vec<String>>", optional)]
     pub(crate) widgets: Vec<String>,
+}
+
+/// Response for `bundle.export` and `bundle.export_for_agent`: the file list,
+/// or with `format: "zip"` the archive instead of it.
+#[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub(crate) struct BundleExportResponse {
+    pub(crate) root_slug: String,
+    /// Absent with `format: "zip"`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub(crate) files: Option<Vec<crate::backend::bundle_export::BundleExportFile>>,
+    pub(crate) skipped_skills: Vec<String>,
+    pub(crate) warnings: Vec<String>,
+    pub(crate) missing_skill_ids: Vec<String>,
+    /// Present only with `format: "zip"`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub(crate) zip_base64: Option<String>,
 }
 
 pub(super) fn register_bundle_export(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let id_store = state.id_store.clone();
     let mstore = state.mstore.clone();
     let identity_store = state.identity_store.clone();
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_BUNDLE_EXPORT,
-        Box::new(move |data, _ctx| {
+        move |req: ExportReq, _ctx| {
             let id_store = id_store.clone();
             let mstore = mstore.clone();
             let identity_store = identity_store.clone();
-            Box::pin(async move {
-                let req: ExportReq = serde_json::from_value(data)
-                    .map_err(|e| format!("bundle.export: {e}"))?;
-                bundle_export_impl(&id_store, &mstore, &identity_store, req).map(Some)
-            })
-        }),
+            async move { bundle_export_impl(&id_store, &mstore, &identity_store, req) }
+        },
     );
 }
 
@@ -55,7 +73,7 @@ pub(super) fn bundle_export_impl(
     mstore: &crate::backend::storage::store::Store,
     identity_store: &crate::backend::storage::store::Store,
     req: ExportReq,
-) -> Result<serde_json::Value, String> {
+) -> Result<BundleExportResponse, String> {
     let bundle = id_store
         .bundle_get(&req.id)
         .map_err(|e| format!("bundle.export: {e}"))?
@@ -101,19 +119,22 @@ pub(super) fn bundle_export_impl(
         .map_err(|e| format!("bundle.export: {e}"))?;
         use base64::Engine as _;
         let encoded = base64::engine::general_purpose::STANDARD.encode(&zip_bytes);
-        return Ok(json!({
-            "root_slug": export.root_slug,
-            "skipped_skills": export.skipped_skills,
-            "warnings": all_warnings,
-            "missing_skill_ids": missing_skill_ids,
-            "zip_base64": encoded,
-        }));
+        return Ok(BundleExportResponse {
+            root_slug: export.root_slug,
+            files: None,
+            skipped_skills: export.skipped_skills,
+            warnings: all_warnings,
+            missing_skill_ids,
+            zip_base64: Some(encoded),
+        });
     }
 
-    let mut result = serde_json::to_value(&export).map_err(|e| e.to_string())?;
-    if let Some(obj) = result.as_object_mut() {
-        obj.insert("missing_skill_ids".to_string(), json!(missing_skill_ids));
-        obj.insert("warnings".to_string(), json!(all_warnings));
-    }
-    Ok(result)
+    Ok(BundleExportResponse {
+        root_slug: export.root_slug,
+        files: Some(export.files),
+        skipped_skills: export.skipped_skills,
+        warnings: all_warnings,
+        missing_skill_ids,
+        zip_base64: None,
+    })
 }

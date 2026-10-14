@@ -68,7 +68,7 @@ export const MemoryAdoptionApprovalWindow = (): JSX.Element => {
     const decide = (approve: boolean) => {
         if (!meta || busy()) return;
         setBusy(true);
-        // The host adopts (on approve), reports to the Armory, and closes
+        // The host adopts (on approve), reports to Memory → Personal, and closes
         // this window itself.
         void getApi().approvals.decideMemoryAdoption(meta.approvalId, approve).catch(() => {
             setBusy(false);

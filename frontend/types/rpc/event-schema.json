@@ -261,6 +261,15 @@
     }
   },
   {
+    "event": "block:activity",
+    "payloadTs": {
+      "imports": [
+        "BlockActivityEvent"
+      ],
+      "name": "BlockActivityEvent"
+    }
+  },
+  {
     "event": "block:reveal",
     "payloadTs": {
       "imports": [
@@ -294,6 +303,15 @@
         "BtwAnswerChunkEvent"
       ],
       "name": "BtwAnswerChunkEvent"
+    }
+  },
+  {
+    "event": "compaction_started",
+    "payloadTs": {
+      "imports": [
+        "CompactionStarted"
+      ],
+      "name": "CompactionStarted"
     }
   },
   {
@@ -427,6 +445,60 @@
     }
   },
   {
+    "event": "install_progress",
+    "payloadTs": {
+      "imports": [
+        "InstallProgressEvent"
+      ],
+      "name": "InstallProgressEvent"
+    }
+  },
+  {
+    "event": "laninstances",
+    "payloadTs": {
+      "imports": [
+        "LanInstanceList"
+      ],
+      "name": "LanInstanceList"
+    }
+  },
+  {
+    "event": "laninstances:error",
+    "payloadTs": {
+      "imports": [
+        "LanDiscoveryError"
+      ],
+      "name": "LanDiscoveryError"
+    }
+  },
+  {
+    "event": "laninstances:firewall",
+    "payloadTs": {
+      "imports": [
+        "LanFirewall"
+      ],
+      "name": "LanFirewall"
+    }
+  },
+  {
+    "event": "laninstances:health",
+    "payloadTs": {
+      "imports": [
+        "LanDiscoverability"
+      ],
+      "name": "LanDiscoverability"
+    }
+  },
+  {
+    "event": "lsp:message",
+    "payloadTs": {
+      "imports": [
+        "LspMessageEvent"
+      ],
+      "name": "LspMessageEvent"
+    }
+  },
+  {
     "event": "mcp:changed",
     "payloadTs": {
       "imports": [],
@@ -456,6 +528,15 @@
     "payloadTs": {
       "imports": [],
       "name": "null"
+    }
+  },
+  {
+    "event": "muxbus:status",
+    "payloadTs": {
+      "imports": [
+        "MuxBusDeliveryStatus"
+      ],
+      "name": "MuxBusDeliveryStatus"
     }
   },
   {
@@ -561,6 +642,15 @@
     }
   },
   {
+    "event": "singleton:claim",
+    "payloadTs": {
+      "imports": [
+        "SingletonClaimEvent"
+      ],
+      "name": "SingletonClaimEvent"
+    }
+  },
+  {
     "event": "skills:changed",
     "payloadTs": {
       "imports": [],
@@ -658,12 +748,39 @@
     }
   },
   {
+    "event": "tool_chunk",
+    "payloadTs": {
+      "imports": [
+        "ToolChunk"
+      ],
+      "name": "ToolChunk"
+    }
+  },
+  {
     "event": "userattention",
     "payloadTs": {
       "imports": [
         "UserAttentionEvent"
       ],
       "name": "UserAttentionEvent"
+    }
+  },
+  {
+    "event": "viewer:paired",
+    "payloadTs": {
+      "imports": [
+        "ViewerPairedEvent"
+      ],
+      "name": "ViewerPairedEvent"
+    }
+  },
+  {
+    "event": "waveobj:batchedupdates",
+    "payloadTs": {
+      "imports": [
+        "MuxObjBatch"
+      ],
+      "name": "MuxObjBatch"
     }
   },
   {

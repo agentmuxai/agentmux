@@ -583,7 +583,7 @@ where
                 )),
             }
         }
-        let events = {
+        let reducer::Reduced { events, diagnostics } = {
             let mut state = ctx.state.lock().await;
             let rctx = reducer::Ctx {
                 now_rfc3339,
@@ -593,6 +593,11 @@ where
             };
             reducer::update(&mut state, cmd.clone(), &rctx)
         };
+        // The reducer does no I/O; write its log lines now that the state
+        // lock is released.
+        for line in &diagnostics {
+            crate::log(line);
+        }
 
         // SPEC_LAUNCHER_TEARDOWN_BACKSTOP Phase 2 — arm/disarm the J0
         // teardown state machine from the VALIDATED reducer output (same
@@ -780,7 +785,7 @@ async fn dispatch_synthetic_goodbye(
     };
     let now_rfc3339 = chrono::Utc::now().to_rfc3339();
     let now_ms = launcher_start_ms();
-    let events = {
+    let reducer::Reduced { events, diagnostics } = {
         let mut state = ctx.state.lock().await;
         let rctx = reducer::Ctx {
             now_rfc3339,
@@ -790,6 +795,9 @@ async fn dispatch_synthetic_goodbye(
         };
         reducer::update(&mut state, Command::Goodbye, &rctx)
     };
+    for line in &diagnostics {
+        crate::log(line);
+    }
     for event in events {
         let event = patch_launcher_identity(event, ctx);
         if !matches!(

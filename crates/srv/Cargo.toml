@@ -10,7 +10,7 @@ name = "agentmux-srv"
 path = "src/main.rs"
 
 [dependencies]
-agentmux-common = { path = "../common" }
+agentmux-common = { path = "../common", features = ["ts"] }
 tokio = { version = "1", features = ["full"] }
 axum = { version = "0.7", features = ["ws"] }
 tower-http = { version = "0.6", features = ["cors", "fs"] }
@@ -47,7 +47,7 @@ rusqlite = { version = "0.31", features = ["bundled"] }
 # attributes these structs already carry, so the emitted type matches the
 # wire shape serde actually produces rather than the Rust field names.
 # See docs/specs/SPEC_RPC_BINDINGS_CODEGEN_2026_09_07.md.
-ts-rs = { version = "10", features = ["serde-compat", "serde-json-impl"] }
+ts-rs = { version = "12", features = ["serde-compat", "serde-json-impl"] }
 base64 = "0.22"
 thiserror = "1"
 dirs = "5"
@@ -64,7 +64,7 @@ notify = "7"
 # in memory. See docs/specs/SPEC_NATIVE_CONTAINER_DEV_PROXY_2026_09_19.md.
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "multipart", "stream"] }
 # OS-native secret storage (macOS Keychain / Windows Credential Manager /
-# Linux Secret Service) for Armory API keys. See
+# Linux Secret Service) for account API keys. See
 # docs/specs/archive/SPEC_TRUST_CENTER_2026_06_15.md §7/§12.2.
 keyring = "2"
 # Zero plaintext secret buffers on drop.
@@ -122,6 +122,9 @@ trash = "5.2"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12", "logging"] }
 rcgen = { version = "0.13", default-features = false, features = ["crypto", "ring", "pem"] }
+# ECDSA P-256 checks of a paired device's send signature (backend/viewer/signing),
+# from the ring already under rustls: no new crate.
+ring = { version = "0.17", default-features = false, features = ["alloc"] }
 hyper = { version = "1", features = ["http1", "server"] }
 hyper-util = { version = "0.1", features = ["tokio", "service"] }
 

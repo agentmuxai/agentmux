@@ -3,7 +3,7 @@
 /**
  * Data for SubprocessSpawnCommand — spawn agent CLI for a single turn.
  */
-export type CommandSubprocessSpawnData = { blockid: string, tabid: string, cli_command: string, cli_args: Array<string>, working_dir: string, env_vars: { [key in string]?: string }, 
+export type CommandSubprocessSpawnData = { blockid: string, tabid: string, cli_command: string, cli_args: Array<string>, working_dir: string, env_vars: { [key in string]: string }, 
 /**
  * The user's JSON message to write to subprocess stdin.
  */

@@ -6,4 +6,4 @@
  * A struct registered as `Option<Self>`, like `EditorRootsReq`: the stub
  * sends `{}` and a client that omits `data` sends `null`.
  */
-export type FsPlacesReq = Record<string, never>;
+export type FsPlacesReq = Record<symbol, never>;

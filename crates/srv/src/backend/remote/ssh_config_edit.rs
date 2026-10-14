@@ -149,7 +149,7 @@ pub fn add_host_in(config: &Path, ssh_dir: &Path, host: &NewHost) -> Result<Stri
         }
         add.push('\n');
     }
-    add.push_str("# Added by AgentMux (Remotes)\n");
+    add.push_str("# Added by AgentMux (Connectors > Remotes)\n");
     add.push_str(&block);
     use std::io::Write;
     std::fs::OpenOptions::new()
@@ -262,7 +262,7 @@ mod tests {
         add_host_in(&config, dir.path(), &host("db1")).unwrap();
         let text = std::fs::read_to_string(&config).unwrap();
         assert!(text.starts_with("Host *\n"), "the old content is untouched: {text}");
-        assert!(text.ends_with("# Added by AgentMux (Remotes)\nHost db1\n    HostName 10.0.0.5\n    User asaf\n"), "{text}");
+        assert!(text.ends_with("# Added by AgentMux (Connectors > Remotes)\nHost db1\n    HostName 10.0.0.5\n    User asaf\n"), "{text}");
         let backup = std::fs::read_to_string(dir.path().join(BACKUP_NAME)).unwrap();
         assert_eq!(backup, "Host *\n    ServerAliveInterval 30\nInclude extra\n");
         // Again: refused, whether the name is in the file or an Include.
@@ -312,7 +312,7 @@ mod tests {
         add_host_in(&config, &ssh_dir, &host("box")).unwrap();
         assert_eq!(
             std::fs::read_to_string(&config).unwrap(),
-            "# Added by AgentMux (Remotes)\nHost box\n    HostName 10.0.0.5\n    User asaf\n"
+            "# Added by AgentMux (Connectors > Remotes)\nHost box\n    HostName 10.0.0.5\n    User asaf\n"
         );
         assert!(!ssh_dir.join(BACKUP_NAME).exists(), "nothing to keep a copy of");
         #[cfg(unix)]

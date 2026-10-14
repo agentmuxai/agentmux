@@ -385,7 +385,7 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: bash scripts/check-rpc-bindings.sh --check-only
 
-      # Four checks the gate above CANNOT make: it verifies a generated file
+      # Three checks the gate above CANNOT make: it verifies a generated file
       # exists per type and is current with the Rust, which a file can be while
       # still describing a wire format nobody speaks. Each of these was written
       # after the same defect got past review more than once. Pure node, no
@@ -396,6 +396,16 @@ jobs:
       - name: RPC codegen hygiene
         if: matrix.os == 'ubuntu-latest'
         run: node scripts/check-rpc-codegen-hygiene.mjs
+
+      # ts-rs ignores a serde attribute item it can't parse, so the generated
+      # TypeScript can silently disagree with the wire (a lost rename caused the
+      # "My Agents empty" incident). This fails on any such warning outside the
+      # script's allow-list. It repeats the `cargo check --tests` above exactly,
+      # so cargo only replays that build's warnings; nothing recompiles.
+      # See scripts/check-tsrs-serde-warnings.mjs and #4802.
+      - name: ts-rs parses every serde attribute
+        if: matrix.os == 'ubuntu-latest'
+        run: node scripts/check-tsrs-serde-warnings.mjs -- check --tests -p agentmux-common -p agentmux-srv -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp -p agentmux-remote -p agentmux-procstats
 
   # macOS compile check, non-blocking for now (PLAN_MACOS_COMPILE_GATE_2026_10_09.md
   # phase 1): `cargo check --tests` on the same CEF-free crates as the `rust`
@@ -606,6 +616,13 @@ jobs:
       # docs/specs/SPEC_DEV_VITE_UNSAFE_PORT_GUARD_2026_10_02.md
       - name: vite-port self-test
         run: bash scripts/vite-port.test.sh
+
+      # `task dev` on Windows deletes its old dist/cef-dev-<epoch> builds, but
+      # only ones no process runs from (rm -rf on a live one deletes the helper
+      # tools the running app still needs).
+      # docs/specs/SPEC_TASK_DEV_PRUNE_OLD_BUILDS_2026_10_14.md
+      - name: prune-dev-builds self-test
+        run: bash scripts/prune-dev-builds.test.sh
 
       # bundle:windows refuses a CEF runtime that isn't the pinned tracer-off
       # build (a tracer-on libcef.dll deadlocks the app at a random later

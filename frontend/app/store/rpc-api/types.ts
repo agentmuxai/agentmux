@@ -5,7 +5,7 @@
 // existing `import { ..., type OAuthFlowStatus } from ".../rpc-api"` keeps working.
 
 /**
- * Wire shape of an Armory service-OAuth flow status (account.oauth.*).
+ * Wire shape of a service-OAuth flow status (account.oauth.*).
  * Mirrors `oauth_status_wire()` in
  * crates/srv/src/server/agent_handlers/identity.rs.
  *   pending       — flow starting up

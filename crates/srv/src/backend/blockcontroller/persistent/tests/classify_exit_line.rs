@@ -47,7 +47,7 @@ fn unrecognized_raw_text_is_suppressed() {
 #[test]
 fn auth_error_is_surfaced_even_though_not_retryable() {
     // Non-retryable classes still have recovery-banner value (Login
-    // Again / Armory actions) — only UnknownNonZero is suppressed.
+    // Again / Connectors actions) — only UnknownNonZero is suppressed.
     let line = r#"{"type":"result","is_error":true,"result":"invalid api key (401)"}"#;
     let failure = classify_exit_line(Some(1), line).expect("auth errors should still surface");
     assert_eq!(failure.code, FailureClass::Auth);

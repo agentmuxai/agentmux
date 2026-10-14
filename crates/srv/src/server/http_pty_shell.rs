@@ -126,8 +126,17 @@ pub(super) async fn handle_pty_shell_create(
         blockcontroller::META_KEY_CONTROLLER.to_string(),
         json!(blockcontroller::BLOCK_CONTROLLER_SHELL),
     );
+    // An agent's shell doesn't follow the user's default-shell setting
+    // (term:localshellpath and term:localshellopts are for their terminals):
+    // pin it to the automatic shell with no extra arguments. Only macOS and
+    // Linux reach that branch; Windows runs cmd.exe below.
+    meta.insert(
+        blockcontroller::META_KEY_TERM_LOCAL_SHELL_PATH.to_string(),
+        json!(crate::backend::shells::automatic().display().to_string()),
+    );
+    meta.insert(blockcontroller::META_KEY_TERM_LOCAL_SHELL_OPTS.to_string(), json!([]));
     // Force cmd.exe directly on Windows rather than the "shell" controller's
-    // default pwsh/powershell auto-detection (`detect_local_shell_path_windows`,
+    // default pwsh/powershell auto-detection (`backend::shells::automatic`,
     // which tries pwsh first). Discovered live, not assumed: PowerShell's
     // PSReadLine issues a cursor-position query (`ESC[6n`, Device Status
     // Report) on interactive startup and blocks forever waiting for a
@@ -333,16 +342,13 @@ pub(super) async fn handle_pty_shell_create(
                 .mstore
                 .get::<crate::backend::obj::Block>(&req.agent_block_id)
             {
-                state.event_bus.broadcast_event(&crate::backend::eventbus::WSEventType {
-                    eventtype: "waveobj:update".to_string(),
-                    oref: format!("block:{}", req.agent_block_id),
-                    data: Some(serde_json::to_value(&crate::backend::obj::MuxObjUpdate {
-                        updatetype: "update".into(),
-                        otype: "block".into(),
-                        oid: req.agent_block_id.clone(),
-                        obj: Some(crate::backend::obj::mux_obj_to_value(&parent)),
-                    }).unwrap_or_default()),
-                });
+                let update = crate::backend::obj::MuxObjUpdate {
+                    updatetype: "update".into(),
+                    otype: "block".into(),
+                    oid: req.agent_block_id.clone(),
+                    obj: Some(crate::backend::obj::mux_obj_to_value(&parent)),
+                };
+                state.event_bus.broadcast_event(&crate::backend::eventbus::EventBus::typed_ws_event::<crate::backend::mps_events::MuxObjUpdated>(&update, format!("block:{}", req.agent_block_id)));
             }
             (child_id.clone(), block)
         }
@@ -354,16 +360,13 @@ pub(super) async fn handle_pty_shell_create(
             // (or opened moments later) actually sees the pointer reactively
             // instead of only on its next unrelated refetch.
             if let Ok(Some(parent)) = state.mstore.get::<crate::backend::obj::Block>(&req.agent_block_id) {
-                state.event_bus.broadcast_event(&crate::backend::eventbus::WSEventType {
-                    eventtype: "waveobj:update".to_string(),
-                    oref: format!("block:{}", req.agent_block_id),
-                    data: Some(serde_json::to_value(&crate::backend::obj::MuxObjUpdate {
-                        updatetype: "update".into(),
-                        otype: "block".into(),
-                        oid: req.agent_block_id.clone(),
-                        obj: Some(crate::backend::obj::mux_obj_to_value(&parent)),
-                    }).unwrap_or_default()),
-                });
+                let update = crate::backend::obj::MuxObjUpdate {
+                    updatetype: "update".into(),
+                    otype: "block".into(),
+                    oid: req.agent_block_id.clone(),
+                    obj: Some(crate::backend::obj::mux_obj_to_value(&parent)),
+                };
+                state.event_bus.broadcast_event(&crate::backend::eventbus::EventBus::typed_ws_event::<crate::backend::mps_events::MuxObjUpdated>(&update, format!("block:{}", req.agent_block_id)));
             }
             (child_id.clone(), block)
         }
@@ -429,16 +432,13 @@ pub(super) async fn handle_pty_shell_create(
             }
             if changed {
                 let _ = state.mstore.update(&mut parent);
-                state.event_bus.broadcast_event(&crate::backend::eventbus::WSEventType {
-                    eventtype: "waveobj:update".to_string(),
-                    oref: format!("block:{}", req.agent_block_id),
-                    data: Some(serde_json::to_value(&crate::backend::obj::MuxObjUpdate {
-                        updatetype: "update".into(),
-                        otype: "block".into(),
-                        oid: req.agent_block_id.clone(),
-                        obj: Some(crate::backend::obj::mux_obj_to_value(&parent)),
-                    }).unwrap_or_default()),
-                });
+                let update = crate::backend::obj::MuxObjUpdate {
+                    updatetype: "update".into(),
+                    otype: "block".into(),
+                    oid: req.agent_block_id.clone(),
+                    obj: Some(crate::backend::obj::mux_obj_to_value(&parent)),
+                };
+                state.event_bus.broadcast_event(&crate::backend::eventbus::EventBus::typed_ws_event::<crate::backend::mps_events::MuxObjUpdated>(&update, format!("block:{}", req.agent_block_id)));
             }
         }
         return (

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Armory → Memory → Personal: the agent card grid and its drill-in.
+ * Memory → Personal: the agent card grid and its drill-in.
  * docs/specs/SPEC_ARMORY_PERSONAL_MEMORY_AGENT_BLOCKS_2026_09_01.md.
  *
  * The load-bearing case here is the four-state count: an agent whose

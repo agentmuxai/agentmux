@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * SkillManager — the Armory's "Skills" tab body. Context-free
+ * SkillManager — the Memory → Skills section body. Context-free
  * list/create/edit/delete over the global Skill catalog (skill.catalog.*
  * MuxAPI via SkillCatalogModel). Every row here is global — per-agent
  * private skills live in the Agent-setup modal (AgentSkillsModal), not

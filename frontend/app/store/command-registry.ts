@@ -419,7 +419,7 @@ export function registerDefaultCommands(): void {
         label: "Connectors",
         category: "App",
         icon: "plug",
-        keywords: "accounts sign in login mcp servers armory",
+        keywords: "accounts sign in login mcp servers remotes ssh",
         execute: () => openConnectors(),
     });
     commandRegistry.register({
@@ -427,28 +427,8 @@ export function registerDefaultCommands(): void {
         label: "Memory",
         category: "App",
         icon: "brain",
-        keywords: "global personal memory skills bundles abf armory knowledge",
+        keywords: "global personal memory skills bundles abf",
         execute: () => openMemory(),
-    });
-    // Memory's former command, for a keybinding or the macOS menu of an older
-    // build that still names it.
-    commandRegistry.register({
-        id: "app:knowledge",
-        label: "Memory",
-        category: "App",
-        icon: "brain",
-        hidden: true,
-        execute: () => openMemory(),
-    });
-    // The Armory's old command, for a keybinding that still names it. Remove
-    // with the Armory (SPEC_RETIRE_ARMORY_CONNECTORS_AND_KNOWLEDGE_PANES_2026_10_05.md).
-    commandRegistry.register({
-        id: "app:identity",
-        label: "Connectors",
-        category: "App",
-        icon: "plug",
-        hidden: true,
-        execute: () => openConnectors(),
     });
     commandRegistry.register({
         id: "help:docs",

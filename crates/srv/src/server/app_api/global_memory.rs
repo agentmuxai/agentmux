@@ -124,7 +124,7 @@ pub(crate) fn global_memory_write_impl(
         .bundle_upsert_with_version(&bundle, agent_id, written_by_uid, source, source_detail)
         .map_err(|e| format!("globalmemory.write: {e}"))?;
 
-    // New entries sort LAST, matching the Armory UI's own "+ New section"
+    // New entries sort LAST, matching Memory → Global's own "+ New section"
     // behavior (global-bundle-model.ts's saveEdit) — without this, a fresh
     // bundle_id defaults to sort_order=0 and could land ambiguously
     // interleaved with any other 0-sort_order row instead of visibly
@@ -147,7 +147,7 @@ pub(crate) fn global_memory_write_impl(
     Ok(json!({ "id": bundle.id, "name": bundle.name }))
 }
 
-/// Every Global Memory entry the Armory pane shows — id/name/updated_at/system,
+/// Every Global Memory entry Memory → Global shows — id/name/updated_at/system,
 /// no content (mirrors `memory_list_impl`'s summary shape), system rows first
 /// as `bundle_list_global` orders them. System-tier rows are listed so an empty
 /// result means "nothing" and not "nothing you may touch" (the pane lists them
@@ -180,9 +180,9 @@ pub(crate) fn global_memory_read_impl(state: &AppState, id: &str) -> Result<serd
     Ok(json!({ "id": bundle.id, "name": bundle.name, "content": bundle.instructions }))
 }
 
-/// Demotes a Global Memory entry (clears `is_global`) — matches the Armory
-/// UI's own "Remove" semantics: the bundle row itself survives (still
-/// available in the Bundles tab), only its Global Memory membership is
+/// Demotes a Global Memory entry (clears `is_global`) — matches Memory →
+/// Global's own "Remove" semantics: the bundle row itself survives (still
+/// available in Memory → Bundles), only its Global Memory membership is
 /// cleared. Refuses a system-tier id, the blank singleton, or any id that
 /// wasn't ALREADY a Global Memory entry before this call — same ownership
 /// guards as `global_memory_write_impl`, for the identical reason: bundle
@@ -329,7 +329,7 @@ pub(crate) fn global_memory_diff_impl(
 
 /// The diff text `global_memory_diff_impl` returns — a `- name:`/`+ name:`
 /// pair when the name changed (see that function's doc comment for why),
-/// then `line_diff` over the instructions. Shared with the Armory UI's
+/// then `line_diff` over the instructions. Shared with Memory → Global's
 /// `globalmemory:diff` WebSocket command (`agent_handlers/bundle.rs`) so the
 /// MCP tool and the UI can never render the same pair of versions two ways.
 pub(crate) fn bundle_version_diff(

@@ -4,4 +4,4 @@ export type RemoteStatus = {
 /**
  * `connecting`, `connected`, `disconnected` or `error`.
  */
-state: string, error: string, };
+state: string, error?: string, };

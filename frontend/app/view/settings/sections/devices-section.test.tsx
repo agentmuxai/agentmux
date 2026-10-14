@@ -1,17 +1,19 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-/** Settings › Paired devices: the list from `viewer.devices`, and Revoke. */
+/** Settings › Paired devices: the list from `viewer.devices`, Can send, and Revoke. */
 
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const listDevices = vi.fn();
 const revoke = vi.fn();
+const canSend = vi.fn();
 vi.mock("@/app/store/rpc-api", () => ({
     RpcApi: {
         ViewerDevicesCommand: (...args: unknown[]) => listDevices(...args),
         ViewerRevokeCommand: (...args: unknown[]) => revoke(...args),
+        ViewerCanSendCommand: (...args: unknown[]) => canSend(...args),
         SetConfigCommand: (...args: unknown[]) => setConfig(...args),
         PresenceStatusCommand: () => Promise.resolve({ state: "signed_out", since_ms: 0, record_version: 2 }),
         MuxBusStatusCommand: () => Promise.reject(new Error("no srv")),
@@ -41,6 +43,7 @@ describe("DevicesSection", () => {
     beforeEach(() => {
         listDevices.mockReset();
         revoke.mockReset();
+        canSend.mockReset();
         setConfig.mockReset();
         settings = {};
     });
@@ -85,6 +88,49 @@ describe("DevicesSection", () => {
         fireEvent.click(within(row).getByRole("button", { name: "Revoke" }));
         expect(await screen.findByRole("alert")).toHaveTextContent("Couldn't revoke Pixel 9: database is locked");
         expect(screen.getByText("Pixel 9")).toBeInTheDocument();
+    });
+
+    it("Can send is off until turned on, and turns on through viewer.can-send", async () => {
+        listDevices.mockResolvedValue({
+            devices: [
+                { device_id: "d1", device_name: "Pixel 9", created_ms: Date.now(), last_seen_ms: 0, can_send: false, has_key: true },
+            ],
+        });
+        canSend.mockResolvedValue({ can_send: true });
+        render(() => <DevicesSection />);
+        const toggle = await screen.findByRole("switch", { name: "Pixel 9 can send messages" });
+        expect(toggle).toHaveAttribute("aria-checked", "false");
+        fireEvent.click(toggle);
+        await waitFor(() =>
+            expect(screen.getByRole("switch", { name: "Pixel 9 can send messages" })).toHaveAttribute("aria-checked", "true")
+        );
+        expect(canSend).toHaveBeenCalledWith({}, { device_id: "d1", can_send: true });
+    });
+
+    it("a device without a key says Pair again instead of a switch", async () => {
+        listDevices.mockResolvedValue({
+            devices: [
+                { device_id: "d1", device_name: "Old phone", created_ms: Date.now(), last_seen_ms: 0, can_send: false, has_key: false },
+            ],
+        });
+        render(() => <DevicesSection />);
+        const row = (await screen.findByText("Old phone")).closest("tr")!;
+        expect(within(row).getByText("Pair again")).toBeInTheDocument();
+        expect(within(row).queryByRole("switch")).not.toBeInTheDocument();
+    });
+
+    it("keeps the switch where it was and says why when the change fails", async () => {
+        listDevices.mockResolvedValue({
+            devices: [
+                { device_id: "d1", device_name: "Pixel 9", created_ms: Date.now(), last_seen_ms: 0, can_send: false, has_key: true },
+            ],
+        });
+        canSend.mockRejectedValue(new Error("Pixel 9 paired before devices had keys. Pair it again to let it send."));
+        render(() => <DevicesSection />);
+        const toggle = await screen.findByRole("switch", { name: "Pixel 9 can send messages" });
+        fireEvent.click(toggle);
+        expect(await screen.findByRole("alert")).toHaveTextContent("Couldn't change Pixel 9: Pixel 9 paired before");
+        expect(toggle).toHaveAttribute("aria-checked", "false");
     });
 
     it("says how to pair when nothing is paired", async () => {

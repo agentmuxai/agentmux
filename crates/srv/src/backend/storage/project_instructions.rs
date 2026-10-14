@@ -34,8 +34,9 @@ pub struct ProjectInstructionObservation {
 }
 
 /// How a file compares to the last time it was observed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
+#[ts(export, export_to = "../../../frontend/types/rpc/", rename = "ProjectInstructionChange")]
 pub enum InstructionChange {
     /// No prior observation — the first time this agent was looked at.
     FirstSeen,

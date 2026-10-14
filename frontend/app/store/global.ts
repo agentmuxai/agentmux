@@ -38,6 +38,9 @@ import {
 } from "./window-identity";
 import { reconnectWS } from "./ws";
 import type { MuxObjUpdate } from "@/types/rpc/MuxObjUpdate";
+import type { LanInstance } from "@/types/rpc/LanInstance";
+import type { LanDiscoverability } from "@/types/rpc/LanDiscoverability";
+import type { LanFirewall } from "@/types/rpc/LanFirewall";
 
 // ---------------------------------------------------------------------------
 // Global signals (replace Jotai atoms)
@@ -100,25 +103,13 @@ export const [lanDiscoveryErrorAtom, setLanDiscoveryErrorAtom] = createSignal<st
 // interface: Area54, 2026-10-01), so this is separate from the peer list and
 // from the start-up error above. `null` means "no news / fine". Set by the
 // `laninstances:health` event; see docs/specs/SPEC_LAN_FIREWALL_SETUP_2026_10_01.md 4.7.
-export interface LanDiscoverability {
-    state: "healthy" | "degraded" | "undiscoverable" | "off";
-    /** IPv4 addresses the service was expected on but never announced on. */
-    missing: string[];
-    /** Daemon rebuilds the watchdog has already tried. */
-    rebuilds: number;
-}
+export type { LanDiscoverability };
 export const [lanDiscoverabilityAtom, setLanDiscoverabilityAtom] = createSignal<LanDiscoverability | null>(null);
 // What the OS firewall would do to LAN peers trying to reach this machine
 // (Windows only for now; elsewhere srv sends nothing and this stays `null`).
 // Set by `laninstances:firewall`. See SPEC_LAN_FIREWALL_SETUP_2026_10_01.md 4.3.
-export type LanFirewallStatus = "ok" | "needs-setup" | "blocked" | "public-network" | "managed" | "unknown" | "off";
-export interface LanFirewall {
-    status: LanFirewallStatus;
-    /** Per adapter: its network category and whether a rule covers it. */
-    adapters: { name: string; category: string; state: string }[];
-    /** Group policy makes locally created rules ineffective. */
-    localRulesIgnored: boolean;
-}
+export type { LanFirewall };
+export type LanFirewallStatus = LanFirewall["status"];
 export const [lanFirewallAtom, setLanFirewallAtom] = createSignal<LanFirewall | null>(null);
 // The device that paired most recently while this window was open, from srv's
 // `viewer:paired` (crates/srv/src/server/http_viewer.rs). The host popover's
@@ -288,104 +279,44 @@ export function initGlobalEventSubs(initOpts: AgentMuxInitOpts) {
         },
         initOpts.windowId
     );
-    muxEventSubscribe(
-        {
-            eventType: WpsEvent.MuxObjBatchedUpdates,
-            handler: (event) => {
-                // All updates from one atomic backend transition, applied in
-                // one batch() flush (updateMuxObjects) so the UI can't paint
-                // a half-applied state — e.g. CloseTab's tab delete blanking
-                // the still-mounted tab before the workspace update unmounts
-                // it. See SPEC_TAB_CLOSE_BUTTON_SELECT_FLASH_2026_08_25.md §7.
-                const updates: MuxObjUpdate[] = event.data ?? [];
-                MOS.updateMuxObjects(updates);
-            },
+    onMuxEvent(WpsEvent.MuxObjBatchedUpdates, (updates) => {
+        // All updates from one atomic backend transition, applied in
+        // one batch() flush (updateMuxObjects) so the UI can't paint
+        // a half-applied state — e.g. CloseTab's tab delete blanking
+        // the still-mounted tab before the workspace update unmounts
+        // it. See SPEC_TAB_CLOSE_BUTTON_SELECT_FLASH_2026_08_25.md §7.
+        MOS.updateMuxObjects(updates);
+    });
+    // Cloud delivery's state changed (srv `muxbus::delivery_status`).
+    onMuxEvent(MUXBUS_STATUS_EVENT, (status) => acceptMuxbusDelivery(status));
+    onMuxEvent(WpsEvent.ViewerPaired, (d) => {
+        const deviceName = String(d.device_name || "A device");
+        setViewerPairedAtom({ deviceId: d.device_id, deviceName });
+        pushNotification({
+            icon: "fa-mobile-screen",
+            title: "Device paired",
+            message: `${deviceName} can now watch this computer's agents. Settings > Paired devices can revoke it.`,
+            timestamp: new Date().toISOString(),
+            type: "info",
+            expiration: Date.now() + 8000,
+        });
+    });
+    onMuxEvent(WpsEvent.LanInstances, (instances) => {
+        setLanInstancesAtom(instances);
+        // A successful broadcast clears any prior error state.
+        setLanDiscoveryErrorAtom(null);
+    });
+    onMuxEvent(WpsEvent.LanInstancesError, ({ error }) => setLanDiscoveryErrorAtom(error));
+    onMuxEvent(WpsEvent.LanInstancesFirewall, (firewall) => setLanFirewallAtom(firewall));
+    onMuxEvent(WpsEvent.LanInstancesHealth, (health) => setLanDiscoverabilityAtom(health));
+    muxEventSubscribe({
+        eventType: WpsEvent.UserInput,
+        handler: (event) => {
+            const data: UserInputRequest = event.data;
+            openModal(UserInputModal, { ...data });
         },
-        {
-            eventType: WpsEvent.UserInput,
-            handler: (event) => {
-                const data: UserInputRequest = event.data;
-                openModal(UserInputModal, { ...data });
-            },
-            scope: initOpts.windowId,
-        },
-        {
-            eventType: WpsEvent.LanInstances,
-            handler: (event) => {
-                const instances: LanInstance[] = event.data ?? [];
-                setLanInstancesAtom(instances);
-                // A successful broadcast clears any prior error state.
-                setLanDiscoveryErrorAtom(null);
-            },
-        },
-        {
-            // Cloud delivery's state changed (srv `muxbus::delivery_status`).
-            eventType: MUXBUS_STATUS_EVENT,
-            handler: (event) => acceptMuxbusDelivery(event.data),
-        },
-        {
-            eventType: WpsEvent.LanInstancesError,
-            handler: (event) => {
-                const errMsg = event.data?.error ?? "unknown error";
-                setLanDiscoveryErrorAtom(String(errMsg));
-            },
-        },
-        {
-            eventType: WpsEvent.LanInstancesFirewall,
-            handler: (event) => {
-                const d = event.data as Partial<LanFirewall> | null | undefined;
-                const status = d?.status;
-                if (
-                    status !== "ok" &&
-                    status !== "needs-setup" &&
-                    status !== "blocked" &&
-                    status !== "public-network" &&
-                    status !== "managed" &&
-                    status !== "unknown" &&
-                    status !== "off"
-                ) {
-                    return;
-                }
-                setLanFirewallAtom({
-                    status,
-                    adapters: Array.isArray(d?.adapters) ? d.adapters : [],
-                    localRulesIgnored: d?.localRulesIgnored === true,
-                });
-            },
-        },
-        {
-            eventType: WpsEvent.ViewerPaired,
-            handler: (event) => {
-                const d = event.data as { device_id?: string; device_name?: string } | null | undefined;
-                if (!d?.device_id) return;
-                const deviceName = String(d.device_name || "A device");
-                setViewerPairedAtom({ deviceId: d.device_id, deviceName });
-                pushNotification({
-                    icon: "fa-mobile-screen",
-                    title: "Device paired",
-                    message: `${deviceName} can now watch this computer's agents. Settings > Paired devices can revoke it.`,
-                    timestamp: new Date().toISOString(),
-                    type: "info",
-                    expiration: Date.now() + 8000,
-                });
-            },
-        },
-        {
-            eventType: WpsEvent.LanInstancesHealth,
-            handler: (event) => {
-                const d = event.data as Partial<LanDiscoverability> | null | undefined;
-                const state = d?.state;
-                if (state !== "healthy" && state !== "degraded" && state !== "undiscoverable" && state !== "off") {
-                    return;
-                }
-                setLanDiscoverabilityAtom({
-                    state,
-                    missing: Array.isArray(d?.missing) ? d.missing.map(String) : [],
-                    rebuilds: typeof d?.rebuilds === "number" ? d.rebuilds : 0,
-                });
-            },
-        },
-    );
+        scope: initOpts.windowId,
+    });
 }
 
 // Block / tab atom caches — moved to block-atom-cache.ts; re-exported below for

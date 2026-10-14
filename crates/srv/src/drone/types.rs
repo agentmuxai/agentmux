@@ -241,7 +241,7 @@ mod tests {
         );
 
         // And the generated TS says the same thing.
-        let ts = <FlowNode as ts_rs::TS>::inline();
+        let ts = <FlowNode as ts_rs::TS>::inline(&ts_rs::Config::from_env());
         assert!(ts.contains("type?: string"), "generated TS lost the rename: {ts}");
         assert!(!ts.contains("node_type"), "generated TS kept the Rust name: {ts}");
     }
@@ -271,7 +271,7 @@ mod tests {
     /// This is the thing that notices.
     #[test]
     fn block_status_union_covers_every_value_the_executor_writes() {
-        let ts = <BlockState as ts_rs::TS>::inline();
+        let ts = <BlockState as ts_rs::TS>::inline(&ts_rs::Config::from_env());
         // Keep in sync with the status literals in
         // drone/executor/engine.rs. "pending" is in the union but never
         // written by the server; the frontend uses it for blocks it has not
@@ -292,7 +292,7 @@ mod tests {
     /// only ever agreeing with the first.
     #[test]
     fn enum_variants_are_snake_case_in_both_serde_and_the_generated_union() {
-        let kind_ts = <BlockKind as ts_rs::TS>::inline();
+        let kind_ts = <BlockKind as ts_rs::TS>::inline(&ts_rs::Config::from_env());
         for k in [
             BlockKind::Agent,
             BlockKind::Condition,
@@ -309,7 +309,7 @@ mod tests {
             );
         }
 
-        let run_ts = <RunStatus as ts_rs::TS>::inline();
+        let run_ts = <RunStatus as ts_rs::TS>::inline(&ts_rs::Config::from_env());
         for r in [RunStatus::Running, RunStatus::Done, RunStatus::Failed] {
             let wire = serde_json::to_value(r).unwrap();
             let wire = wire.as_str().unwrap();
@@ -326,9 +326,9 @@ mod tests {
     #[test]
     fn timestamps_generate_as_number() {
         for ts in [
-            <DroneDefinition as ts_rs::TS>::inline(),
-            <DroneRun as ts_rs::TS>::inline(),
-            <BlockState as ts_rs::TS>::inline(),
+            <DroneDefinition as ts_rs::TS>::inline(&ts_rs::Config::from_env()),
+            <DroneRun as ts_rs::TS>::inline(&ts_rs::Config::from_env()),
+            <BlockState as ts_rs::TS>::inline(&ts_rs::Config::from_env()),
         ] {
             assert!(!ts.contains("bigint"), "a 64-bit field leaked as bigint: {ts}");
         }

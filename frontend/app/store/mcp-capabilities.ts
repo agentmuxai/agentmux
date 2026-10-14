@@ -6,12 +6,12 @@
  * the MCP-server analogue of toolchain-capabilities.ts's CLI/daemon probes.
  * Same shape deliberately: module-level `createStore`, `ensureCapability`/
  * `watchCapability`, in-flight de-dup so two mounted consumers (e.g. an
- * Armory catalog row and a future per-agent status pill) never fire
+ * MCP servers catalog row and a future per-agent status pill) never fire
  * duplicate probes or disagree with each other.
  *
  * Backed by `mcp.catalog.probe` (crates/srv/src/server/app_api/mcp.rs) —
  * the window-scoped, agent-independent probe, since the primary consumer is
- * the Armory's MCP Servers catalog, which has no agent context. Keyed by
+ * Connectors → MCP servers, which has no agent context. Keyed by
  * MCP server id, not a fixed catalog of known tool ids (toolchain-catalog.ts
  * enumerates a small fixed set of CLIs; MCP servers are user-defined rows).
  *
@@ -20,9 +20,9 @@
  * every prerequisite the server itself depends on is satisfied (e.g.
  * ableton-mcp's process starts and answers `initialize` whether or not
  * Ableton Live is actually running; that gap is why each preload catalog
- * entry's static `prereqNote` (mcp-preload-catalog.ts, shown by
- * McpCatalogPicker and mcp-manager) matters alongside this dynamic check,
- * not instead of it. Only the spec's `db_mcp_servers` column for it
+ * entry's static `prereqNote` (mcp-preload-catalog.ts, shown in a
+ * server's details by mcp-server-detail.tsx) matters alongside this
+ * dynamic check, not instead of it. Only the spec's `db_mcp_servers` column for it
  * (§4.4/§6) is not built).
  */
 
@@ -109,8 +109,8 @@ export function refreshMcpCapability(id: string): Promise<McpCapabilityState> {
 
 /**
  * Polls a capability every `intervalMs` while the caller holds the
- * returned stop function (call it from `onCleanup`) — lets an open Armory
- * MCP Servers tab notice "the user just started Ableton Live" within a
+ * returned stop function (call it from `onCleanup`) — lets an open Connectors
+ * → MCP servers notice "the user just started Ableton Live" within a
  * few seconds, same pattern as toolchain-capabilities.ts's Docker liveness
  * polling.
  */

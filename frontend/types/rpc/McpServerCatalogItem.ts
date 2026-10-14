@@ -2,7 +2,7 @@
 
 /**
  * `mcp_server_list_global`'s response shape: the server plus how many
- * agents currently hold a `db_agent_mcp_ref` to it — the Armory catalog's
+ * agents currently hold a `db_agent_mcp_ref` to it — Connectors → MCP servers'
  * "used by N agents" count (gap #2 of #1960).
  */
 export type McpServerCatalogItem = { bound_count: number, 

@@ -246,7 +246,7 @@ describe("runProviderLogin", () => {
         });
     });
 
-    it("links the account but skips the block-meta update when linkTarget has no blockId (SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md §3.3 surface 3: Armory/Stash callers with no live pane)", async () => {
+    it("links the account but skips the block-meta update when linkTarget has no blockId (SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md §3.3 surface 3: Connectors/Stash callers with no live pane)", async () => {
         hub.runCliLogin.mockResolvedValue(null);
 
         const outcome = await runProviderLogin({

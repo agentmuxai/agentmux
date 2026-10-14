@@ -2,10 +2,12 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+import { PaneGrip } from "@/app/element/PaneGrip";
 import { blockViewToIcon, blockViewToName, ConnectionButton, getBlockHeaderIcon, Input } from "@/app/block/blockutil";
 import { paneTabCapability, paneTabLabelFor } from "@/app/block/pane-tab-registry";
 import { Button } from "@/app/element/button";
 import { MicButton } from "@/app/element/MicButton";
+import { PaneRestoreGlyph } from "@/app/element/pane-control-glyphs";
 import { redactSecrets } from "@/app/errors/redact";
 import { ChangeConnectionBlockModal } from "@/app/modals/conntypeahead";
 import { getApi } from "@/app/store/app-api";
@@ -317,7 +319,7 @@ function OptMinimizeButton(props: { minimized: boolean; toggleMinimize: () => vo
     // rather than a minimize control.
     const decl = createMemo<IconButtonDecl>(() => ({
         elemtype: "iconbutton",
-        icon: props.minimized ? "window-restore" : "window-minimize",
+        icon: props.minimized ? <PaneRestoreGlyph /> : "regular@window-minimize",
         title: props.minimized ? "Restore" : "Minimize",
         click: props.toggleMinimize,
     }));
@@ -327,7 +329,7 @@ function OptMinimizeButton(props: { minimized: boolean; toggleMinimize: () => vo
 function OptMagnifyButton(props: { magnified: boolean; toggleMagnify: () => void; disabled: boolean }): JSX.Element {
     const magnifyDecl = createMemo<IconButtonDecl>(() => ({
         elemtype: "iconbutton",
-        icon: props.magnified ? "window-restore" : "window-maximize",
+        icon: props.magnified ? <PaneRestoreGlyph /> : "regular@window-maximize",
         title: props.magnified ? "Restore" : "Maximize",
         click: props.toggleMagnify,
         disabled: props.disabled,
@@ -350,7 +352,7 @@ function OptMagnifyButton(props: { magnified: boolean; toggleMagnify: () => void
 function FloatingMaximizeButton(props: { label: string; blockId: string }): JSX.Element {
     const decl: IconButtonDecl = {
         elemtype: "iconbutton",
-        icon: "window-maximize",
+        icon: "regular@window-maximize",
         title: "Maximize",
         click: () => {
             getApi().windows.toggleFloatingMaximize(props.label, props.blockId).catch(console.error);
@@ -445,8 +447,8 @@ function EndIcons(props: {
                 hot-reload can pair this (new) header with a pre-canMinimize
                 cached model — degrade to showing the button (the toggle's own
                 countExpandedLeaves guard still enforces the policy). */}
-            <Show when={!ephemeral() && !magnified() && numLeafs() > 1 && (props.nodeModel.canMinimize?.() ?? true)}>
-                <OptMinimizeButton minimized={minimized()} toggleMinimize={props.nodeModel.toggleMinimize} />
+            <Show when={!ephemeral() && numLeafs() > 1 && (props.nodeModel.canMinimize?.() ?? true)}>
+                <OptMinimizeButton minimized={minimized() && !magnified()} toggleMinimize={props.nodeModel.toggleMinimize} />
             </Show>
 
             <Show
@@ -690,8 +692,11 @@ function BlockFrame_Header(
     });
 
     // With the tab strip in place of the iconview, the view icon itself is
-    // gone — keep it only when it's a real control (the editor's file-tree
-    // toggle), not when it's just the pane's identity (the pill shows that).
+    // gone. Keep it only when it's a real control, not when it's just the
+    // pane's identity (the pill shows that). No built-in view uses this now,
+    // but the v1 pane-tab contract lets a tab's `headerIcon` be clickable,
+    // and trusted widgets register through that contract
+    // (SPEC_PANE_TAB_CONTRACT_V1_2026_09_24.md).
     const viewIconControlElem = createMemo<JSX.Element>(() => {
         const vi = viewIconUnion();
         if (!props.leadingTabStrip || vi == null || typeof vi === "string") return null;
@@ -812,7 +817,11 @@ function BlockFrame_Header(
                 </div>
             </Show>
             <UnseenTurnsDot blockId={props.blockId()} />
-            <Show when={manageConnection()}>
+            {/* With a tab strip, a remote terminal's pill names its remote
+                (term-pane-tab.ts) instead: a chip here showed only while that
+                tab was active. The picker still opens with Change connection
+                (⌘⇧G), placed by the pane. */}
+            <Show when={manageConnection() && !props.leadingTabStrip}>
                 <ConnectionButton
                     ref={props.connBtnRef}
                     connection={blockData()?.meta?.connection}
@@ -838,6 +847,13 @@ function BlockFrame_Header(
                 visible={headerHovering() && tooltipHeaderElems().length > 0}
                 content={<>{tooltipHeaderElems()}</>}
             />
+            {/* The pane's grip, outside the scrolling tab strip, just left of
+                the pane controls. The header's whole-pane drag is vetoed for a
+                magnified or ephemeral pane (TileLayout.core.tsx canDrag); the
+                grip says so. */}
+            <Show when={!props.preview}>
+                <PaneGrip dragDisabled={props.nodeModel.isMagnified() || props.nodeModel.isEphemeral()} />
+            </Show>
             <div class="block-frame-end-icons" onDblClick={(e) => e.stopPropagation()}>
                 <EndIcons
                     viewModel={props.viewModel}

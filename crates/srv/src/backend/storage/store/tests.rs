@@ -537,7 +537,7 @@
 
     // Exercises agent_identity_list_all() across multiple agents and
     // providers, not just the empty/single-agent cases the migration tests
-    // (m0013's `is_empty()` assertion) happen to cover. Backs the Armory
+    // (m0013's `is_empty()` assertion) happen to cover. Backed the since-removed
     // "Identities" read-only rail (issue #1624 PR-C), the first live RPC
     // consumer of this method beyond the startup-backfill migrations.
     #[test]
@@ -1090,7 +1090,7 @@
     }
 
     // ── bundle_upsert_system_if_changed — PR #3244 ────────────────────────
-    // Codex P2 / ReAgent P2: a no-op save from the Armory UI (operator opens
+    // A no-op save from Memory (operator opens
     // a seeded entry and hits Save without changing anything) must not
     // record a version, or it would falsely transfer ownership away from
     // operator_config_seed's reseed logic.
@@ -1112,7 +1112,7 @@
         let seeded = mk_system("sys-1", "Policy");
         store.bundle_upsert_system_if_changed(&seeded, "agentmux-operator-config-seed", "agentmux_operator_config_seed", "{}").unwrap();
 
-        // Operator opens the entry in the Armory UI and hits Save without
+        // Operator opens the entry in Memory and hits Save without
         // editing anything — same name/instructions, different (human) caller.
         let noop_save = mk_system("sys-1", "Policy");
         let version = store.bundle_upsert_system_if_changed(&noop_save, "armory-ui", "human", "{}").unwrap();

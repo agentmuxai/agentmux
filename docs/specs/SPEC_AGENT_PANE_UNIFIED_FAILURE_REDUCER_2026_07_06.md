@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-06
 **Author:** Agent2
-**Status:** Draft
+**Status:** implemented — #1987 moved failure state into the pane reducer. Deliberate change: the auto-retry countdown and budget stay in `hooks/useAgentFailure.ts`; `AutoRetryElapsed` was not built. Verified against code 2026-10-14 ([triage](../analysis/REPORT_REDUCER_STACK_TRIAGE_2026_10_13.md)).
 **Scope:** [`frontend/app/store/agent-pane-state/`](../../frontend/app/store/agent-pane-state) (the turn-phase reducer), [`frontend/app/view/agent/hooks/useAgentFailure.ts`](../../frontend/app/view/agent/hooks/useAgentFailure.ts), [`frontend/app/view/agent/useAgentStream.ts`](../../frontend/app/view/agent/useAgentStream.ts), [`frontend/app/view/agent/hooks/useControllerStatusEvents.ts`](../../frontend/app/view/agent/hooks/useControllerStatusEvents.ts). This spec **builds on** existing work — it is not a green-field design.
 **Related (must-read first):**
 [`docs/specs/SPEC_AGENT_PANE_STATE_MACHINE_2026_05_23.md`](SPEC_AGENT_PANE_STATE_MACHINE_2026_05_23.md) (the `TurnPhase` discriminated union this spec extends),

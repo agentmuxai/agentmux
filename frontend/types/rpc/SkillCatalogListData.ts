@@ -6,4 +6,4 @@
  * only from JSON `null`, so a unit Req would reject every real call while
  * compiling and passing every CI gate (the `bookmarks.list` bug).
  */
-export type SkillCatalogListData = Record<string, never>;
+export type SkillCatalogListData = Record<symbol, never>;

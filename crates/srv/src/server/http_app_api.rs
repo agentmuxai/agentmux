@@ -39,7 +39,7 @@ pub(super) fn app_api_error_status(e: &str) -> StatusCode {
     }
 }
 
-pub(super) fn app_api_response(result: Result<serde_json::Value, String>) -> axum::response::Response {
+pub(super) fn app_api_response<T: serde::Serialize>(result: Result<T, String>) -> axum::response::Response {
     match result {
         Ok(v) => (StatusCode::OK, Json(v)).into_response(),
         Err(e) => (app_api_error_status(&e), Json(json!({ "error": e }))).into_response(),
@@ -426,8 +426,8 @@ pub(super) struct AgentGlobalMemoryRemoveRequest {
 }
 
 /// `POST /api/v1/agent/globalmemory/remove` — demote a Global Memory entry
-/// (clears `is_global`; the bundle row itself survives, same as the Armory
-/// UI's own "Remove" button). Backs the `GlobalMemoryRemove` MCP tool.
+/// (clears `is_global`; the bundle row itself survives, same as Memory →
+/// Global's own "Remove" button). Backs the `GlobalMemoryRemove` MCP tool.
 pub(super) async fn handle_agent_globalmemory_remove(
     State(state): State<AppState>,
     Json(req): Json<AgentGlobalMemoryRemoveRequest>,

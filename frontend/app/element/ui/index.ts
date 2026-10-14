@@ -7,6 +7,8 @@
 // scripts/check-ui-primitives.mjs counts what still doesn't.
 
 export { Button, IconButton, type ButtonProps, type IconButtonProps } from "./Button";
+export { Card, type CardProps } from "./Card";
+export { CardGrid, columnsFor, rowEnd, type CardGridProps } from "./CardGrid";
 export { Field, useField, type FieldProps } from "./Field";
 export { FilterInput, type FilterInputProps } from "./FilterInput";
 export {
@@ -22,6 +24,7 @@ export {
 } from "./inputs";
 export { SegmentedControl, type SegmentedControlProps, type SegmentedOption } from "./SegmentedControl";
 export { densityClass, type UiDensity, type UiTone } from "./shared";
+export { StatusDot, type StatusDotProps, type StatusTone } from "./StatusDot";
 export {
     TabbedPane,
     tabId,

@@ -47,7 +47,7 @@
 //!
 //! Deliberately UNCONDITIONAL on `isolated_auth_enabled()` (unlike
 //! `0011_shared_store_backfill`'s sibling-scan, which skips other channels
-//! when isolated so a disposable Armory test store starts empty): this
+//! when isolated so a disposable test account store starts empty): this
 //! migration's destination has no isolation concept at all — see the design
 //! doc §2.3 — so there is no "keep this run's view empty" case to preserve.
 

@@ -25,6 +25,7 @@ import { useTabTearOffEvents } from "./tab-tearoff-events";
 import { createTearOffTabAtRelease } from "./tab-tearoff-rpc";
 import { tabWrapperRefs } from "./tabbar-dnd";
 import { GripDots } from "@/app/element/GripDots";
+import { createScrollEdges } from "@/app/element/scroll-edges";
 import "./tabbar.scss";
 
 interface TabBarProps {
@@ -296,6 +297,11 @@ function TabBar(props: TabBarProps): JSX.Element {
     // only.
     useTabDragAndDrop({ tabBarScrollRef: () => tabBarScrollRef }, () => props.workspace, allTabIds, tearOffTabAtRelease);
 
+    // Edge fades while the tabs overflow the strip (scroll-edge-fade,
+    // tabbar.scss): the strip hides its scrollbar, so this is the cue that
+    // more tabs are a wheel-scroll away.
+    const edges = createScrollEdges(() => tabBarScrollRef);
+
     // Phase 4/5 — cross-window tear-off event listeners (hover/merge/
     // standalone/cancel-back). Raw list for the same reason as above.
     useTabTearOffEvents(
@@ -308,9 +314,9 @@ function TabBar(props: TabBarProps): JSX.Element {
 
     const activeIndex = () => tabIds().indexOf(displayActiveTabId());
 
-    // Keep the active tab visible when the strip scrolls; the last tab also
-    // brings the drag square after it into view (SPEC_TAB_BAR_DRAG_GUTTER_2026_10_04
-    // §3). After a frame, so a just-created tab has mounted and been laid out.
+    // Keep the active tab visible when the strip scrolls; the last tab scrolls
+    // the strip to its end (SPEC_TAB_BAR_DRAG_GUTTER_2026_10_04 §3). After a
+    // frame, so a just-created tab has mounted and been laid out.
     createEffect(
         on(displayActiveTabId, (tabId) => {
             if (!tabId) return;
@@ -333,7 +339,12 @@ function TabBar(props: TabBarProps): JSX.Element {
             <Show when={!isMacOS()}>
                 <HamburgerMenu />
             </Show>
-            <div ref={tabBarScrollRef!} class="tab-bar-scroll" data-drag-region="false">
+            <div
+                ref={tabBarScrollRef!}
+                class="tab-bar-scroll"
+                classList={{ "has-more-left": edges.moreLeft(), "has-more-right": edges.moreRight() }}
+                data-drag-region="false"
+            >
                 {/* When the hamburger sits to the left of the tabs (Windows/
                     Linux), give the hamburger→first-tab boundary the SAME 1px
                     separator every tab-to-tab boundary has — otherwise the
@@ -400,11 +411,14 @@ function TabBar(props: TabBarProps): JSX.Element {
                     "false", so a click here starts a window drag. Moving it outside
                     the scroll (as a sibling) left a dead zone — the empty interior
                     of the scroll container looked draggable but wasn't. */}
-                <div ref={tabBarFillRef!} class="tab-bar-fill" data-drag-region="true">
-                    {/* A dim grip marks the drag square; it takes no events, so a
-                        press on it is a press on the fill. */}
-                    <GripDots class="tab-bar-fill-grip" />
-                </div>
+                <div ref={tabBarFillRef!} class="tab-bar-fill" data-drag-region="true" />
+            </div>
+            {/* The window's grip: a fixed drag square outside the scrolling
+                tabs, just left of the widgets, so it never scrolls or fades with
+                them (SPEC_DRAG_SPACE_AFFORDANCE_2026_10_13 §5.8). A press on it
+                drags the window like the fill; the dots take no events. */}
+            <div class="tab-bar-grip" data-drag-region="true" aria-hidden="true">
+                <GripDots />
             </div>
             <Show when={pendingCloseTabId() !== null}>
                 <TabCloseConfirmModal

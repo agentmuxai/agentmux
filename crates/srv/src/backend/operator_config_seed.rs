@@ -12,7 +12,7 @@
 //!
 //! The reseed decision (§3.3 of the spec above) is ownership-based, not a
 //! field diff like `agent_seed.rs`'s own `reseed_if_needed`: a human can
-//! edit an Operator Config entry today via the Armory's Global Memory
+//! edit an Operator Config entry today via Memory → Global's
 //! editor (`GlobalMemoryFullView`), and the *entire* value of an entry is
 //! its content, so
 //! there is no separate "identity field" to diff against safely. Instead
@@ -44,7 +44,7 @@ use super::storage::{BundleReseedOutcome, StoreError};
 
 /// The reserved `written_by` identity this seeder stamps on every version it
 /// writes. Never used by any other caller — an agent's own write stamps its
-/// real `AGENTMUX_AGENT_ID`, a human edit via the Armory UI stamps
+/// real `AGENTMUX_AGENT_ID`, a human edit in Memory stamps
 /// `"armory-ui"` (`bundle.rs`'s `upsertsystemmemory` handler, via `bundle_
 /// upsert_system_with_version`) — so seeing this exact value on the latest
 /// version is what tells `bundle_reseed_system_if_owned` that nothing but
@@ -576,7 +576,7 @@ mod tests {
     }
 
     /// The load-bearing guarantee (spec §3.3, §5 test plan): a human edit
-    /// through the Armory UI must survive the next startup's reseed even
+    /// through Memory must survive the next startup's reseed even
     /// though the manifest content differs from what's stored. Simulated via
     /// `bundle_upsert_system_with_version(..., "armory-ui", ...)` — the exact
     /// call `upsertsystemmemory` (`bundle.rs`) now makes for a real UI save —
@@ -591,7 +591,7 @@ mod tests {
         let e1 = entry("op-1", "Operator One", "body one");
         seed_one(&store, &e1, 1).unwrap();
 
-        // Simulate a human editing this system entry via the real Armory UI
+        // Simulate a human editing this system entry via the real Memory pane
         // save path (`upsertsystemmemory` -> `bundle_upsert_system_with_version`).
         let edited = Bundle {
             id: "op-1".to_string(),
@@ -729,7 +729,7 @@ mod tests {
         assert_eq!(store.bundle_get("op-old").unwrap().unwrap().instructions, "new content");
     }
 
-    /// An ORDINARY human delete via the Armory UI (`bundle_delete_system`,
+    /// An ORDINARY human delete in Memory (`bundle_delete_system`,
     /// via `deletesystemmemory` — records no version at all) must not leave
     /// a tombstone behind; a manually deleted entry still comes back
     /// exactly as before this fix (`deleted_entry_is_recreated_...` below).

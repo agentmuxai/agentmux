@@ -50,7 +50,7 @@
 //! `objects.db`. P1 fix (2026-08-15, Codex review on PR #2587): this used
 //! to write bundles straight into `mstore` (the channel store this
 //! migration already has open for the agent-definition side) — every real
-//! bundle-read path (`listmemories`/`getmemory`/the Armory editor/the
+//! bundle-read path (`listmemories`/`getmemory`/the Memory editor/the
 //! bundle-summary panel) reads through `id_store` instead, so a
 //! channel-local bundle would be silently invisible everywhere else, the
 //! exact same bug the runtime provisioning-path fix
@@ -491,7 +491,7 @@ mod tests {
     // must land in the EFFECTIVE identity/memory store (shared store,
     // mirroring AppState.id_store), never the channel-local store the
     // agent definition itself lives in — a channel-local bundle is
-    // invisible to bundle.list/bundle.get/the Armory editor.
+    // invisible to bundle.list/bundle.get/the Memory editor.
     #[test]
     fn backfilled_bundle_lands_in_the_shared_store_not_the_channel_store() {
         with_isolated_home(|_home| {

@@ -119,19 +119,20 @@ pub enum ORefParseError {
 // ORef is never declared as its own TypeScript type, and cannot be flattened.
 impl ts_rs::TS for ORef {
     type WithoutGenerics = Self;
-    fn name() -> String {
+    type OptionInnerType = Self;
+    fn name(_: &ts_rs::Config) -> String {
         "string".to_owned()
     }
-    fn inline() -> String {
-        <Self as ts_rs::TS>::name()
+    fn inline(cfg: &ts_rs::Config) -> String {
+        <Self as ts_rs::TS>::name(cfg)
     }
-    fn inline_flattened() -> String {
+    fn inline_flattened(_: &ts_rs::Config) -> String {
         panic!("ORef cannot be flattened")
     }
-    fn decl() -> String {
+    fn decl(_: &ts_rs::Config) -> String {
         panic!("ORef cannot be declared")
     }
-    fn decl_concrete() -> String {
+    fn decl_concrete(_: &ts_rs::Config) -> String {
         panic!("ORef cannot be declared")
     }
 }
@@ -178,7 +179,7 @@ mod tests {
         struct Consumer {
             oref: ORef,
         }
-        let decl = <Consumer as ts_rs::TS>::decl();
+        let decl = <Consumer as ts_rs::TS>::decl(&ts_rs::Config::from_env());
         assert!(
             decl.contains("oref: string"),
             "a field holding an ORef must generate `string`; got: {decl}"

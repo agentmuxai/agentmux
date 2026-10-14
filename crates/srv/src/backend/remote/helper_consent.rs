@@ -20,6 +20,8 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Mutex, OnceLock};
 
+use tokio::sync::watch;
+
 /// What the settings say for a host.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Policy {
@@ -139,13 +141,38 @@ fn lock() -> std::sync::MutexGuard<'static, AgentPanes> {
     agent_panes().lock().unwrap_or_else(|e| e.into_inner())
 }
 
+/// Hosts (by [`host_key`]) remembered until srv restarts.
+type Hosts = OnceLock<Mutex<HashSet<String>>>;
+
+fn hosts(set: &'static Hosts) -> std::sync::MutexGuard<'static, HashSet<String>> {
+    set.get_or_init(Default::default).lock().unwrap_or_else(|e| e.into_inner())
+}
+
 /// Hosts the user answered "Not now" for since srv started.
 fn declined() -> std::sync::MutexGuard<'static, HashSet<String>> {
-    static DECLINED: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
-    DECLINED
-        .get_or_init(|| Mutex::new(HashSet::new()))
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
+    static DECLINED: Hosts = OnceLock::new();
+    hosts(&DECLINED)
+}
+
+/// Hosts whose terminals were durable by default ([`Mode::Default`]) and whose helper
+/// didn't get installed since srv started: the question went unanswered, or
+/// the install failed. Their panes are plain until then, unless durable is
+/// asked for.
+///
+/// [`Mode::Default`]: crate::backend::blockcontroller::durable_mode::Mode::Default
+fn not_installed_hosts() -> std::sync::MutexGuard<'static, HashSet<String>> {
+    static NOT_INSTALLED: Hosts = OnceLock::new();
+    hosts(&NOT_INSTALLED)
+}
+
+/// Whether `connection`'s helper didn't get installed for a terminal durable by default, since srv started.
+pub fn not_installed(connection: &str) -> bool {
+    not_installed_hosts().contains(&host_key(connection))
+}
+
+/// `connection`'s helper didn't get installed for a terminal durable by default.
+pub fn note_not_installed(connection: &str) {
+    not_installed_hosts().insert(host_key(connection));
 }
 
 /// Whether a durable pane on `connection` runs as a plain SSH terminal
@@ -169,11 +196,8 @@ pub fn plain_instead(connection: &str) -> bool {
 
 /// Hosts found since srv started to be ones the helper can't run on.
 fn unsupported() -> std::sync::MutexGuard<'static, HashSet<String>> {
-    static UNSUPPORTED: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
-    UNSUPPORTED
-        .get_or_init(|| Mutex::new(HashSet::new()))
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
+    static UNSUPPORTED: Hosts = OnceLock::new();
+    hosts(&UNSUPPORTED)
 }
 
 /// Whether `connection`'s host was found to be one the helper can't run on.
@@ -197,17 +221,37 @@ fn plain_for(policy: Policy, declined: bool) -> bool {
     }
 }
 
-/// Remember an answer for [`plain_instead`]: "Not now" until srv restarts,
-/// undone by a later Install. A closed window is no answer.
+/// Hosts the user answered Install for since srv started: the host's other
+/// terminals install without asking again, the first maybe still uploading.
+fn approved() -> std::sync::MutexGuard<'static, HashSet<String>> {
+    static APPROVED: Hosts = OnceLock::new();
+    hosts(&APPROVED)
+}
+
+/// The helper was removed from `connection`'s host: what was answered for it
+/// since srv started (Install, Not now, a failed try) no longer holds, and
+/// its next need asks again. A stored Always or Never is a setting, and stays.
+pub fn forget_answers(connection: &str) {
+    let key = host_key(connection);
+    approved().remove(&key);
+    declined().remove(&key);
+    not_installed_hosts().remove(&key);
+}
+
+/// Remember an answer until srv restarts: "Not now" for [`plain_instead`],
+/// Install so the host isn't asked again; each undoes the other. A closed
+/// window is no answer.
 pub(crate) fn note_answer(connection: &str, answer: Answer) {
     if !answer.answered {
         return;
     }
-    let mut declined = declined();
+    let key = host_key(connection);
     if answer.approve {
-        declined.remove(&host_key(connection));
+        declined().remove(&key);
+        approved().insert(key);
     } else {
-        declined.insert(host_key(connection));
+        approved().remove(&key);
+        declined().insert(key);
     }
 }
 
@@ -284,7 +328,7 @@ pub fn question(connection: &str, agent: Option<&str>) -> serde_json::Value {
         "message": format!(
             "{who}The helper enables file browsing and terminals that survive disconnects. \
              It is about 500 KB, in ~/.agentmux-remote on that machine; it needs no root, \
-             and you can remove it any time from Remotes."
+             and you can remove it any time from Connectors > Remotes."
         ),
         "checkbox": format!("Don't ask again for {connection}"),
         "ok_label": "Install",
@@ -292,39 +336,107 @@ pub fn question(connection: &str, agent: Option<&str>) -> serde_json::Value {
     })
 }
 
+/// What needs the helper on a host: it decides what an answer given earlier
+/// for the host (since srv started) means now.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Need {
+    /// The host's files: after a Not now, Reconnect asks again.
+    Files,
+    /// A terminal: a Not now holds until srv restarts, and so does an earlier
+    /// failed try when it is durable only `by_default`.
+    Terminal { by_default: bool },
+}
+
 /// Whether the helper may be installed on `connection` now, for the pane
 /// `block_id` (`None`: no pane, which counts as an agent's doing). `Err`
 /// says why not, for the pane to show.
-pub async fn allow_install(connection: &str, block_id: Option<&str>) -> Result<(), String> {
+pub async fn allow_install(connection: &str, block_id: Option<&str>, need: Need) -> Result<(), String> {
     let deps = DEPS
         .get()
         .ok_or_else(|| "AgentMux could not ask whether to install its helper".to_string())?;
-    let agent = agent_of(block_id);
-    let by_agent = agent.is_some() || block_id.is_none_or(str::is_empty) || agent_opening(connection);
-    let (host, global) = (deps.settings)(connection);
-    match step(Policy::resolve(&host, &global), by_agent) {
-        Step::Install => return Ok(()),
-        Step::Refuse => {
-            return Err(format!(
-                "installing AgentMux's helper on {connection} is set to Never (change it in Remotes)"
-            ))
-        }
-        Step::Ask => {}
+    allow_install_with(deps, connection, block_id, need).await
+}
+
+/// The user's question per host while it is open: their other panes on that
+/// host wait for its answer instead of asking again.
+fn open_questions() -> std::sync::MutexGuard<'static, HashMap<String, watch::Receiver<Option<Answer>>>> {
+    static OPEN: OnceLock<Mutex<HashMap<String, watch::Receiver<Option<Answer>>>>> = OnceLock::new();
+    OPEN.get_or_init(Default::default).lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// What was answered for the host since srv started, as it holds for
+/// `need`: `None` to ask. Read with the open questions locked, so a question
+/// closing meanwhile can't be missed (its answer is noted before it closes).
+fn held(connection: &str, key: &str, need: Need) -> Option<Result<(), String>> {
+    // A failed try first: an Install answered before it doesn't make the
+    // upload work this time.
+    if need == (Need::Terminal { by_default: true }) && not_installed_hosts().contains(key) {
+        return Some(Err("it didn't install on this host earlier".to_string()));
     }
-    let answer = (deps.ask)(
-        block_id.unwrap_or_default().to_string(),
-        question(connection, agent.as_deref()),
-    )
-    .await?;
-    let (install, remember) = outcome(answer);
-    if let Some(value) = remember {
-        if let Err(e) = (deps.remember)(connection, value) {
-            tracing::warn!(connection = %connection, error = %e, "helper install: could not store the answer");
-        }
+    if approved().contains(key) {
+        return Some(Ok(()));
     }
-    tracing::info!(connection = %connection, agent = ?agent, install, remember = ?remember, "helper install: asked");
-    note_answer(connection, answer);
-    if install {
+    match need {
+        Need::Terminal { .. } if declined().contains(key) => {
+            Some(Err(format!("you chose not to install AgentMux's helper on {connection}")))
+        }
+        _ => None,
+    }
+}
+
+/// Ask the user about `connection` once: a question already open for the
+/// host answers this pane too, and so does an answer given earlier
+/// ([`held`]). A failed question counts as no answer.
+async fn ask_once(deps: &Deps, connection: &str, block_id: &str, need: Need) -> Result<(), String> {
+    let key = host_key(connection);
+    let tx = loop {
+        let open = {
+            let mut open = open_questions();
+            match open.get(&key) {
+                Some(rx) => Err(rx.clone()),
+                None => {
+                    if let Some(earlier) = held(connection, &key, need) {
+                        return earlier;
+                    }
+                    let (tx, rx) = watch::channel(None);
+                    open.insert(key.clone(), rx);
+                    Ok(tx)
+                }
+            }
+        };
+        match open {
+            Ok(tx) => break tx,
+            Err(mut rx) => match rx.wait_for(Option::is_some).await {
+                Ok(answer) => return verdict(connection, answer.unwrap_or_default()),
+                // The asking pane went away without an answer (closed, or
+                // stopped): this pane asks instead. The user said nothing
+                // about it.
+                Err(_) => continue,
+            },
+        }
+    };
+    // However this ends, even dropped with its pane, the question closes.
+    let _open = OpenQuestion(key);
+    let answer = match (deps.ask)(block_id.to_string(), question(connection, None)).await {
+        Ok(answer) => answer,
+        Err(e) => {
+            tracing::warn!(connection = %connection, error = %e, "helper install: could not ask");
+            Answer::default()
+        }
+    };
+    record(deps, connection, None, answer);
+    // Unanswered, for a terminal durable only by default: a failed try,
+    // noted before the question closes so a terminal arriving now sees it.
+    if !answer.answered && need == (Need::Terminal { by_default: true }) {
+        note_not_installed(connection);
+    }
+    let _ = tx.send(Some(answer));
+    verdict(connection, answer)
+}
+
+/// What an answer means for the pane: install, or why not.
+fn verdict(connection: &str, answer: Answer) -> Result<(), String> {
+    if outcome(answer).0 {
         Ok(())
     } else if answer.answered {
         Err(format!("you chose not to install AgentMux's helper on {connection}"))
@@ -333,9 +445,208 @@ pub async fn allow_install(connection: &str, block_id: Option<&str>) -> Result<(
     }
 }
 
+/// A host's open question, closed on drop.
+struct OpenQuestion(String);
+
+impl Drop for OpenQuestion {
+    fn drop(&mut self) {
+        open_questions().remove(&self.0);
+    }
+}
+
+/// Store and log an answer once, where it was asked.
+fn record(deps: &Deps, connection: &str, agent: Option<&str>, answer: Answer) {
+    let (install, remember) = outcome(answer);
+    if let Some(value) = remember {
+        if let Err(e) = (deps.remember)(connection, value) {
+            tracing::warn!(connection = %connection, error = %e, "helper install: could not store the answer");
+        }
+    }
+    tracing::info!(connection = %connection, agent = ?agent, install, remember = ?remember, "helper install: asked");
+    note_answer(connection, answer);
+}
+
+/// [`allow_install`] with its dependencies given.
+async fn allow_install_with(deps: &Deps, connection: &str, block_id: Option<&str>, need: Need) -> Result<(), String> {
+    let agent = agent_of(block_id);
+    let by_agent = agent.is_some() || block_id.is_none_or(str::is_empty) || agent_opening(connection);
+    let (host, global) = (deps.settings)(connection);
+    match step(Policy::resolve(&host, &global), by_agent) {
+        Step::Install => return Ok(()),
+        Step::Refuse => {
+            return Err(format!(
+                "installing AgentMux's helper on {connection} is set to Never (change it in Connectors > Remotes)"
+            ))
+        }
+        Step::Ask => {}
+    }
+    if !by_agent {
+        return ask_once(deps, connection, block_id.unwrap_or_default(), need).await;
+    }
+    // An agent's question names the agent, and is its own.
+    let answer = (deps.ask)(
+        block_id.unwrap_or_default().to_string(),
+        question(connection, agent.as_deref()),
+    )
+    .await?;
+    record(deps, connection, agent.as_deref(), answer);
+    verdict(connection, answer)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A restart brings back all of a host's terminals at once: they share
+    /// one question rather than each opening its own window.
+    #[tokio::test]
+    async fn a_hosts_panes_share_one_question() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let asked = std::sync::Arc::new(AtomicUsize::new(0));
+        let deps = {
+            let asked = asked.clone();
+            Deps {
+                ask: Box::new(move |_, _| {
+                    asked.fetch_add(1, Ordering::SeqCst);
+                    Box::pin(async {
+                        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+                        Ok(Answer { answered: true, approve: true, remember: false })
+                    })
+                }),
+                settings: Box::new(|_| (String::new(), String::new())),
+                remember: Box::new(|_, _| Ok(())),
+            }
+        };
+        let (a, b, c) = tokio::join!(
+            allow_install_with(&deps, "me@shared-question-host", Some("blk-shared-1"), Need::Files),
+            allow_install_with(&deps, " me@shared-question-host ", Some("blk-shared-2"), Need::Files),
+            allow_install_with(&deps, "me@other-question-host", Some("blk-shared-3"), Need::Files),
+        );
+        assert_eq!((a, b, c), (Ok(()), Ok(()), Ok(())));
+        assert_eq!(asked.load(Ordering::SeqCst), 2, "one question per host");
+
+        // A terminal that gets to the host after the question closed (the
+        // first is still uploading the helper) doesn't ask again.
+        let later = allow_install_with(&deps, "me@shared-question-host", Some("blk-shared-4"), Need::Files).await;
+        assert_eq!(later, Ok(()));
+        assert_eq!(asked.load(Ordering::SeqCst), 2, "Install holds until srv restarts");
+
+        // Removing the helper (Remotes) undoes it: the next need asks again.
+        forget_answers(" me@shared-question-host ");
+        let after_removal = allow_install_with(&deps, "me@shared-question-host", Some("blk-shared-5"), Need::Files).await;
+        assert_eq!(after_removal, Ok(()));
+        assert_eq!(asked.load(Ordering::SeqCst), 3, "asked again after the helper was removed");
+
+    }
+
+    /// A terminal holds a Not now (and, durable only by default, an earlier
+    /// failed try) until srv restarts, read in the same step that would open a
+    /// question; Files asks again (its Reconnect).
+    #[tokio::test]
+    async fn what_an_earlier_answer_means_depends_on_the_need() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static ASKED: AtomicUsize = AtomicUsize::new(0);
+        static DEPS_COUNTS: OnceLock<Deps> = OnceLock::new();
+        let deps = DEPS_COUNTS.get_or_init(|| Deps {
+            ask: Box::new(|_, _| {
+                ASKED.fetch_add(1, Ordering::SeqCst);
+                Box::pin(async { Ok(Answer { answered: true, approve: false, remember: false }) })
+            }),
+            settings: Box::new(|_| (String::new(), String::new())),
+            remember: Box::new(|_, _| Ok(())),
+        });
+        let terminal = Need::Terminal { by_default: true };
+        note_answer("me@need-declined-host", Answer { answered: true, approve: false, remember: false });
+        assert!(allow_install_with(deps, "me@need-declined-host", Some("blk-need-1"), terminal).await.is_err());
+        assert_eq!(ASKED.load(Ordering::SeqCst), 0, "a terminal isn't asked again after Not now");
+        let _ = allow_install_with(deps, "me@need-declined-host", Some("blk-need-2"), Need::Files).await;
+        assert_eq!(ASKED.load(Ordering::SeqCst), 1, "Files' Reconnect asks again");
+
+        note_not_installed("me@need-failed-host");
+        let failed = allow_install_with(deps, "me@need-failed-host", Some("blk-need-3"), terminal).await;
+        assert_eq!(failed, Err("it didn't install on this host earlier".to_string()));
+        assert_eq!(ASKED.load(Ordering::SeqCst), 1);
+        let chosen = Need::Terminal { by_default: false };
+        let _ = allow_install_with(deps, "me@need-failed-host", Some("blk-need-4"), chosen).await;
+        assert_eq!(ASKED.load(Ordering::SeqCst), 2, "a terminal set to durable asks");
+    }
+
+    /// Install was answered but the upload failed: a terminal durable only by
+    /// default doesn't try again (Files may). And a question closed
+    /// unanswered is noted as a failed try before it closes, so no terminal
+    /// slips in between and asks again.
+    #[tokio::test]
+    async fn a_failed_or_unanswered_try_holds_for_default_terminals() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static ASKED: AtomicUsize = AtomicUsize::new(0);
+        static DEPS_NO_ANSWER: OnceLock<Deps> = OnceLock::new();
+        let deps = DEPS_NO_ANSWER.get_or_init(|| Deps {
+            ask: Box::new(|_, _| {
+                ASKED.fetch_add(1, Ordering::SeqCst);
+                Box::pin(async { Ok(Answer::default()) })
+            }),
+            settings: Box::new(|_| (String::new(), String::new())),
+            remember: Box::new(|_, _| Ok(())),
+        });
+        let terminal = Need::Terminal { by_default: true };
+        note_answer("me@approved-failed-host", Answer { answered: true, approve: true, remember: false });
+        note_not_installed("me@approved-failed-host");
+        let retry = allow_install_with(deps, "me@approved-failed-host", Some("blk-af-1"), terminal).await;
+        assert!(retry.is_err(), "a failed install outweighs the Install answer");
+        let files = allow_install_with(deps, "me@approved-failed-host", Some("blk-af-2"), Need::Files).await;
+        assert_eq!(files, Ok(()), "Files tries again on the Install answer");
+        assert_eq!(ASKED.load(Ordering::SeqCst), 0);
+
+        let unanswered = allow_install_with(deps, "me@unanswered-host", Some("blk-af-3"), terminal).await;
+        assert!(unanswered.is_err());
+        assert!(not_installed("me@unanswered-host"), "noted before the question closed");
+    }
+
+    /// The pane asking is closed mid-question: a pane waiting on its answer
+    /// asks instead, rather than taking the closed pane's "no answer".
+    #[tokio::test]
+    async fn a_waiting_pane_asks_when_the_asking_pane_closes() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static ASKED: AtomicUsize = AtomicUsize::new(0);
+        static DEPS_SECOND_ANSWERS: OnceLock<Deps> = OnceLock::new();
+        let deps = DEPS_SECOND_ANSWERS.get_or_init(|| Deps {
+            ask: Box::new(|_, _| {
+                if ASKED.fetch_add(1, Ordering::SeqCst) == 0 {
+                    Box::pin(std::future::pending())
+                } else {
+                    Box::pin(async { Ok(Answer { answered: true, approve: true, remember: false }) })
+                }
+            }),
+            settings: Box::new(|_| (String::new(), String::new())),
+            remember: Box::new(|_, _| Ok(())),
+        });
+        let asking = tokio::spawn(allow_install_with(deps, "me@handover-host", Some("blk-handover-1"), Need::Files));
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        let waiting = tokio::spawn(allow_install_with(deps, "me@handover-host", Some("blk-handover-2"), Need::Files));
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        asking.abort();
+        let waited = tokio::time::timeout(std::time::Duration::from_secs(5), waiting).await;
+        assert_eq!(waited.expect("the waiting pane gets an answer").unwrap(), Ok(()));
+        assert_eq!(ASKED.load(Ordering::SeqCst), 2, "asked again, by the pane still open");
+    }
+
+    /// The pane asking is closed mid-question: the question doesn't stay
+    /// open for the host, answering every later pane "no answer".
+    #[tokio::test]
+    async fn a_question_whose_pane_closed_is_not_left_open() {
+        static DEPS_NEVER_ANSWERS: OnceLock<Deps> = OnceLock::new();
+        let deps = DEPS_NEVER_ANSWERS.get_or_init(|| Deps {
+            ask: Box::new(|_, _| Box::pin(std::future::pending())),
+            settings: Box::new(|_| (String::new(), String::new())),
+            remember: Box::new(|_, _| Ok(())),
+        });
+        let asking = tokio::spawn(allow_install_with(deps, "me@closed-question-host", Some("blk-closed"), Need::Files));
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        assert!(open_questions().contains_key("me@closed-question-host"));
+        asking.abort();
+        let _ = asking.await;
+        assert!(!open_questions().contains_key("me@closed-question-host"));
+    }
 
     #[test]
     fn the_hosts_setting_wins_over_the_global_one() {

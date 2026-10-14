@@ -156,7 +156,18 @@ Owner, 2026-10-13: "there is a missing seperator at the end of the last window t
 
 ### 5.6 The glyph: 4×3 dots (owner, 2026-10-13)
 
-After trying the 2×3 `grip-vertical` in `task dev`, the owner asked for "3x3", then "a 4x3 but joining 2": two 2×3 grips side by side. Font Awesome Free has neither (`grip` is 3×2, `grip-vertical` 2×3), so `frontend/app/element/GripDots.tsx` draws it: an inline SVG of twelve dots, four columns by three rows on a 4-unit pitch, `currentColor`, 1em tall. Both grips use it. A wide block of dots reads as "grab here" without a single column's row-reorder connotation, and stays clear of the kebab and hamburger shapes (§4.5).
+After trying the 2×3 `grip-vertical` in `task dev`, the owner asked for "3x3", then "a 4x3 but joining 2": two 2×3 grips side by side. Font Awesome Free has neither (`grip` is 3×2, `grip-vertical` 2×3), so [`frontend/app/element/GripDots.tsx`](../../frontend/app/element/GripDots.tsx) draws it: an inline SVG of twelve dots, four columns by three rows on a 4-unit pitch, `currentColor`, 1em tall. Both grips use it. A wide block of dots reads as "grab here" without a single column's row-reorder connotation, and stays clear of the kebab and hamburger shapes (§4.5).
+
+### 5.7 Edge fades on overflowing tab strips (owner, 2026-10-13)
+
+"when the pane tabs overflow, make the right edge of the overflow a gradient fade out to indicate to the user there is more to the right", then the same for the window tab bar. Both strips hide their scrollbar, so the standard cue is a scroll shadow: the side with more tabs past it fades out (28 px), and nothing fades while every tab fits or once scrolled to that end. It is a `mask-image` gradient, not an overlay, so it works on any header colour. One helper, [`frontend/app/element/scroll-edges.ts`](../../frontend/app/element/scroll-edges.ts) (`createScrollEdges`: scroll, resize and child changes, measured at most once per frame), sets `has-more-left` / `has-more-right`; one mixin, `scroll-edge-fade` in [`frontend/app/mixins.scss`](../../frontend/app/mixins.scss), draws the fade. The pane strip and the window strip both use them.
+
+### 5.8 The grips sit outside the scrolling strips (owner, 2026-10-13)
+
+"in the window tabs, it gets mounted to the left of the left most widget. on pane tabs it is mounted to the left of the pane controls … so that the scroll and fade only apply to the tabs, not the grips". So:
+
+- **Window:** `.tab-bar-grip` is a fixed 32 px drag square after `.tab-bar-scroll`, just left of the widgets (`data-drag-region="true"`; the dots take no events). The empty `.tab-bar-fill` inside the strip stays draggable, without a glyph and without its old 32 px minimum: the grip outside is the guaranteed drag square, and the minimum would make the strip overflow by its own width and fade with no tab hidden (Codex on #4808).
+- **Pane:** the grip is its own component, [`frontend/app/element/PaneGrip.tsx`](../../frontend/app/element/PaneGrip.tsx), rendered by `BlockFrame_Header` just before the pane controls. The tab strip's reserved slot after the "+" (`reserveDragHandle`) is gone: the grip outside the strip now keeps a place to grab the pane however far the tabs scroll.
 
 ## 6. Decisions
 

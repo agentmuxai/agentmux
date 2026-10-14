@@ -40,21 +40,31 @@ describe("sampleReducer — APPEND, ordinary forward time", () => {
         expect(out.map((d) => d.ts)).toEqual([recent.ts, next.ts]);
     });
 
-    it("zero-order holds across 1-3 missed ticks", () => {
+    it("joins a short gap with the line between two real samples, inventing none", () => {
         const state = [sample(1000, 42)];
         const out = append(state, sample(4000, 7));
-        expect(out.map((d) => d.ts)).toEqual([1000, 2000, 3000, 4000]);
-        expect(out[1].cpu).toBe(42);
-        expect(out[2].cpu).toBe(42);
+        expect(out.map((d) => d.ts)).toEqual([1000, 4000]);
+        expect(out.map((d) => d.cpu)).toEqual([42, 7]);
+    });
+
+    it("breaks the series on both sides of a long forward gap", () => {
+        const state = [sample(1000, 42)];
+        const out = append(state, sample(20000, 7));
+        // Real sample, a marker just after it, a marker just before the next, the next.
+        expect(out.map((d) => d.ts)).toEqual([1000, 1001, 19999, 20000]);
+        expect(out.map((d) => d.blank === 1)).toEqual([false, true, true, false]);
+        expect(Number.isNaN(out[1].cpu as number)).toBe(true);
+        expect(Number.isNaN(out[2].cpu as number)).toBe(true);
         expect(out[3].cpu).toBe(7);
     });
 
-    it("inserts a NaN sentinel across a long forward break", () => {
-        const state = [sample(1000)];
-        const out = append(state, sample(20000));
-        expect(out).toHaveLength(3);
-        expect(out[1].blank).toBe(1);
-        expect(Number.isNaN(out[1].cpu as number)).toBe(true);
+    it("breaks a series again at each later gap, leaving the earlier ones in place", () => {
+        let state: DataItem[] = [sample(1000)];
+        state = append(state, sample(20000));
+        state = append(state, sample(21000));
+        state = append(state, sample(60000));
+        expect(state.filter((d) => d.blank === 1)).toHaveLength(4);
+        for (let i = 1; i < state.length; i++) expect(state[i].ts).toBeGreaterThan(state[i - 1].ts);
     });
 });
 
@@ -94,7 +104,7 @@ describe("sampleReducer — APPEND across a backwards clock step", () => {
         const state = [sample(base), sample(base + 8000)];
         const out = append(state, sample(base + 1000));
         const blanks = out.filter((d) => d.blank === 1);
-        expect(blanks).toHaveLength(1);
+        expect(blanks.length).toBeGreaterThan(0);
         expect(out[out.length - 1].ts).toBe(base + 1000);
         // The far-ahead point is gone; the retained one is genuinely older.
         expect(out.some((d) => d.ts === base + 8000)).toBe(false);
@@ -222,5 +232,72 @@ describe("sampleReducer — no duplicate x", () => {
         const out = append([sample(1000), sample(2000, 11)], sample(2000, 99));
         expect(out.map((d) => d.ts)).toEqual([1000, 2000]);
         expect(out[out.length - 1].cpu).toBe(99);
+    });
+});
+
+describe("sampleReducer — MERGE of history fetched for a gap", () => {
+    const merge = (state: DataItem[], items: DataItem[]) =>
+        sampleReducer(state, { type: "MERGE", items, intervalSecs: INTERVAL, numPoints: NUM_POINTS });
+
+    it("fills a gap with the samples taken in it and drops the break markers", () => {
+        let state = [sample(1000, 40)];
+        state = append(state, sample(20000, 80));
+        expect(state.filter((d) => d.blank === 1)).toHaveLength(2);
+        const history = Array.from({ length: 18 }, (_, i) => sample(2000 + i * 1000, 50 + i));
+        const out = merge(state, history);
+        // Every second from 1000 to 20000 is there, in order, each once.
+        const real = out.filter((d) => d.blank !== 1).map((d) => d.ts);
+        expect(real).toEqual(Array.from({ length: 20 }, (_, i) => 1000 + i * 1000));
+        // No marker inside the filled stretch.
+        expect(out.some((d) => d.blank === 1 && d.ts > 1000 && d.ts < 20000)).toBe(false);
+    });
+
+    it("leaves a break where the history has a hole too", () => {
+        let state = [sample(1000, 40)];
+        state = append(state, sample(60000, 80));
+        // History covers only 2 s to 10 s: the rest of the gap stays a gap.
+        const out = merge(state, Array.from({ length: 9 }, (_, i) => sample(2000 + i * 1000, 50)));
+        const markers = out.filter((d) => d.blank === 1).map((d) => d.ts);
+        expect(markers.some((t) => t > 10000 && t < 60000)).toBe(true);
+        expect(out.filter((d) => d.blank !== 1).map((d) => d.ts)).toEqual([
+            1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000, 9000, 10000, 60000,
+        ]);
+    });
+
+    it("keeps the sample already held when history has the same timestamp", () => {
+        const state = [sample(1000, 40), sample(2000, 41)];
+        const out = merge(state, [sample(1000, 99), sample(1500, 55)]);
+        expect(out.find((d) => d.ts === 1000)?.cpu).toBe(40);
+        expect(out.some((d) => d.ts === 1500)).toBe(true);
+    });
+
+    it("returns the same state when history has nothing new", () => {
+        const state = [sample(1000, 40), sample(2000, 41)];
+        expect(merge(state, [sample(1000, 40), sample(2000, 41)])).toBe(state);
+        expect(merge(state, [])).toBe(state);
+    });
+
+    it("ignores history stamped later than the newest sample held, as after a backwards clock step", () => {
+        // Live samples run 1000..3000 after the clock stepped back; the ring still
+        // holds the pre-step ones, stamped far later. They must not become "newest".
+        const state = [sample(1000, 40), sample(2000, 41), sample(3000, 42)];
+        const preStep = [sample(900_000, 1), sample(901_000, 2), sample(2500, 7)];
+        const out = merge(state, preStep);
+        expect(out.some((d) => d.ts >= 900_000)).toBe(false);
+        expect(out.filter((d) => d.blank !== 1).map((d) => d.ts)).toEqual([1000, 2000, 2500, 3000]);
+    });
+
+    it("does nothing when the series holds no real sample to bound the history by", () => {
+        const state: DataItem[] = [];
+        expect(merge(state, [sample(1000, 40)])).toBe(state);
+    });
+
+    it("trims to the visible window like any other update", () => {
+        const newest = 1_000_000;
+        const state = [sample(newest, 40)];
+        const tooOld = sample(newest - INTERVAL_MS * (NUM_POINTS + 50), 10);
+        const out = merge(state, [tooOld, sample(newest - 1000, 39)]);
+        expect(out.some((d) => d.ts === tooOld.ts)).toBe(false);
+        expect(out.some((d) => d.ts === newest - 1000)).toBe(true);
     });
 });

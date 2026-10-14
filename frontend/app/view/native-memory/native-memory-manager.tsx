@@ -7,7 +7,7 @@
  * from the same MemoryHistory/MemoryContent pieces a Stash pane's own Memory
  * tab uses. Both read the identical agent:memory:{list,history,diff,
  * revert} RPCs — one source of truth, two entry points (per-agent Stash,
- * cross-agent Armory) — no copy or migration step between them. See
+ * cross-agent Memory pane) — no copy or migration step between them. See
  * docs/specs/SPEC_MEMORY_VERSION_CONTROL_AND_ARMORY_AUDIT_2026_08_19.md §4.3.
  *
  * The agent picker was a `<select>` until 2026-09-01; it's now a card grid
@@ -32,8 +32,8 @@
  * an already-fully-loaded list, not RPC-paginated). See
  * docs/specs/SPEC_ARMORY_PERSONAL_MEMORY_FILTER_AND_SORT_2026_09_02.md.
  *
- * Deliberately named/placed away from `frontend/app/view/memory/` (Armory's
- * *Bundles* tab — `MemoryManager`, a legacy name predating the
+ * Deliberately named/placed away from `frontend/app/view/memory/` (then
+ * the *Bundles* manager — `MemoryManager`, a legacy name predating the
  * Preset→Bundle rename — see that spec's §4.3 "naming collision to avoid").
  * This directory and component are about native memory only.
  */
@@ -76,7 +76,7 @@ function storeMemorySort(sort: MemoryAgentSortOption): void {
         localStorage.setItem(MEMORY_SORT_STORAGE_KEY, sort);
     } catch {
         // best-effort only — a failed write just means the preference
-        // doesn't survive to the next Armory open, not a functional break
+        // doesn't survive to the next Memory open, not a functional break
     }
 }
 

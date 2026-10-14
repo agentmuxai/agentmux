@@ -333,8 +333,9 @@ async fn forward_event(socket: &mut WebSocket, event: serde_json::Value) -> bool
         serde_json::to_string(&event).unwrap_or_default()
     } else {
         // Raw event bus event — wrap as RPC eventrecv
-        // Re-wraps a background-lane event srv already built (typed where it was
-        // published) into the frame the renderer reads.
+        // Re-wraps a raw event-bus event into the frame the renderer reads. It is typed where it
+        // was built (`EventBus::typed_ws_event`); check-untyped-rpc-handlers counts any raw event
+        // built by hand.
         let mux_event = json!({
             "event": event["eventtype"],
             "scopes": [event["oref"]],
@@ -908,21 +909,19 @@ pub(super) fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, con
                 // so all WS clients refresh their atoms with the new data.
                 let oref = crate::backend::ORef::parse(&oref_str)
                     .map_err(|e| e.to_string())?;
-                let update_data = if oref.otype == "block" {
+                // Only a block's update carries its object; any other went out with no data,
+                // which the frontend ignores, so it isn't sent.
+                if oref.otype == "block" {
                     if let Ok(block) = mstore.must_get::<Block>(&oref.oid) {
-                        Some(serde_json::to_value(&MuxObjUpdate {
+                        let update = MuxObjUpdate {
                             updatetype: "update".into(),
                             otype: oref.otype.clone(),
                             oid: oref.oid.clone(),
                             obj: Some(mux_obj_to_value(&block)),
-                        }).unwrap_or_default())
-                    } else { None }
-                } else { None };
-                event_bus.broadcast_event(&crate::backend::eventbus::WSEventType {
-                    eventtype: "waveobj:update".to_string(),
-                    oref: oref_str,
-                    data: update_data,
-                });
+                        };
+                        event_bus.broadcast_event(&crate::backend::eventbus::EventBus::typed_ws_event::<crate::backend::mps_events::MuxObjUpdated>(&update, oref_str));
+                    }
+                }
                 Ok(())
         }
     });

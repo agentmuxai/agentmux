@@ -211,7 +211,11 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
     const flow = createLaunchFlowStore({
         eventSink: () => {},
     });
-    flow.dispatch({ type: "Opened", initial: props.initialFormState });
+    flow.dispatch({
+        type: "Opened",
+        initial: props.initialFormState,
+        ownBundleId: props.agent.memory_id ?? "",
+    });
     const name = () => flow.state.form.name;
     const setName = (v: string) => flow.dispatch({ type: "NameChanged", name: v });
     const runtime = () => flow.state.form.runtime;
@@ -285,27 +289,22 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
     );
     const hasUserBundles = createMemo(() => realBundles(flow.state).length > 0);
 
-    // The agent's Bundles list: what it was handed back from the `+ New
-    // bundle` round-trip, else the saved one. Launch saves it only when it
-    // was edited, so a list that hasn't loaded (or failed to) never
-    // overwrites the saved one; the editor waits for the load.
-    const [picks, setPicks] = createSignal<string[]>(props.initialFormState?.bundleIds ?? []);
-    const [picksEdited, setPicksEdited] = createSignal(props.initialFormState?.bundleIds !== undefined);
-    const [picksReady, setPicksReady] = createSignal(picksEdited());
-    const [ownBundleId, setOwnBundleId] = createSignal(props.agent.memory_id ?? "");
+    // The agent's Bundles list lives in the slice (`form.bundleIds`); the
+    // editor waits for the saved list to load.
+    const picks = () => flow.state.form.bundleIds;
+    const picksEdited = () => flow.state.form.bundleIdsEdited;
+    const picksReady = () => flow.state.agentBundles.ready;
+    const ownBundleId = () => flow.state.agentBundles.ownBundleId;
     void RpcApi.GetAgentBundlesCommand(TabRpcClient, { agent_id: props.agent.id })
-        .then((r) => {
-            if (!picksEdited()) setPicks(r.bundle_ids);
-            setOwnBundleId(r.own_bundle_id);
-        })
-        .catch(() => {
-            /* left as it is: Launch saves only what the user then picks */
-        })
-        .finally(() => setPicksReady(true));
-    const editPicks = (ids: string[]) => {
-        setPicks(ids);
-        setPicksEdited(true);
-    };
+        .then((r) =>
+            flow.dispatch(
+                { type: "AgentBundlesLoaded", bundleIds: r.bundle_ids, ownBundleId: r.own_bundle_id },
+                "system",
+            ),
+        )
+        // Left as it is: Launch saves only what the user then picks.
+        .catch(() => flow.dispatch({ type: "AgentBundlesFailed" }, "system"));
+    const editPicks = (ids: string[]) => flow.dispatch({ type: "BundleIdsChanged", bundleIds: ids });
     const pickableBundles = createMemo(() => realBundles(flow.state).filter((b) => b.id !== ownBundleId()));
     const ownBundleName = () => bundles().find((b) => b.id === ownBundleId())?.name;
 
@@ -333,7 +332,7 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
         image: image(),
         accountId: accountId(),
         bundleId: bundleId(),
-        bundleIds: picks(),
+        bundleIds: [...picks()],
         // Capture continuation context so the `+ New bundle` round-trip
         // restores Continue mode on return; without this the launch
         // modal flips to New and an ambient-creds continuation's auth
@@ -457,7 +456,7 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
         try {
             const row = continuedRow();
             const bundleIds = picksEdited()
-                ? (await RpcApi.SetAgentBundlesCommand(TabRpcClient, { agent_id: props.agent.id, bundle_ids: picks() }))
+                ? (await RpcApi.SetAgentBundlesCommand(TabRpcClient, { agent_id: props.agent.id, bundle_ids: [...picks()] }))
                       .bundle_ids
                 : picks();
             await props.onSubmit({

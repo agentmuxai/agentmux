@@ -66,8 +66,6 @@ const inPane = (node: ToolNode, wrap?: (block: () => JSX.Element) => JSX.Element
 
 const button = (container: HTMLElement) =>
     container.querySelector(".agent-tool-panel-actions [aria-label='Open in editor']") as HTMLElement | null;
-const heightToggle = (container: HTMLElement) =>
-    container.querySelector(".agent-tool-panel-actions .agent-tool-panel-height") as HTMLElement | null;
 
 describe("Open in editor on a Markdown file preview", () => {
     it("a Read of a .md file opens it in the tab's editor, or a new one to the right", () => {
@@ -139,42 +137,6 @@ describe("Open in editor on a Markdown file preview", () => {
         const { container } = inPane(read("C:/repo/docs/notes.md"));
         fireEvent.click(button(container)!);
         await waitFor(() => expect(h.show).toHaveBeenCalledWith("editor-9"));
-    });
-});
-
-describe("Taller / shorter preview", () => {
-    const bash: ToolNode = {
-        type: "tool",
-        id: "b1",
-        tool: "Bash",
-        toolName: "Bash",
-        params: { command: "ls" },
-        result: { stdout: "a\nb\nc", stderr: "", exitCode: 0 },
-        status: "success",
-        collapsed: false,
-        summary: "",
-    };
-
-    it("every tool's preview has it; a Markdown preview has Open in editor beside it", () => {
-        const plain = inPane(bash);
-        expect(heightToggle(plain.container)).not.toBeNull();
-        expect(button(plain.container)).toBeNull();
-        cleanup();
-        const md = inPane(read("C:/repo/docs/notes.md"));
-        expect(heightToggle(md.container)).not.toBeNull();
-        expect(button(md.container)).not.toBeNull();
-    });
-
-    it("makes the preview three times as tall, and back", () => {
-        const { container } = inPane(bash);
-        const panel = container.querySelector(".agent-tool-panel")!;
-        const toggle = heightToggle(container)!;
-        expect(toggle.getAttribute("aria-label")).toBe("Taller preview");
-        fireEvent.click(toggle);
-        expect(panel.classList.contains("agent-tool-panel--tall")).toBe(true);
-        expect(heightToggle(container)!.getAttribute("aria-label")).toBe("Shorter preview");
-        fireEvent.click(heightToggle(container)!);
-        expect(panel.classList.contains("agent-tool-panel--tall")).toBe(false);
     });
 });
 

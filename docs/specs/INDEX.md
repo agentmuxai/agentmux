@@ -199,6 +199,7 @@ partial list.
 | [`PLAN_EDITOR_ON_SHARED_DOC_TABS_2026_10_10`](PLAN_EDITOR_ON_SHARED_DOC_TABS_2026_10_10.md) | Plan — the Editor's document tabs on the shared surfaces |
 | [`PLAN_LOGIN_CTA_SURFACE_CONSOLIDATION_2026_09_02`](PLAN_LOGIN_CTA_SURFACE_CONSOLIDATION_2026_09_02.md) | Plan — consolidate the agent pane's two (really three) separate login CTAs |
 | [`PLAN_MUXBUS_KEYCHAIN_WINDOWS_BLOB_LIMIT_2026_08_03`](PLAN_MUXBUS_KEYCHAIN_WINDOWS_BLOB_LIMIT_2026_08_03.md) | Plan — fix MuxBus token persistence on Windows (Credential Manager 2560-byte cap) |
+| [`PLAN_SRV_REDUCER_MODULARIZATION_2026-05-07`](PLAN_SRV_REDUCER_MODULARIZATION_2026-05-07.md) | Plan: srv reducer modularization |
 | [`REPORT_LONGRUNNING_TOOLCALL_AUTODETECT_STATUS_2026_07_26`](REPORT_LONGRUNNING_TOOLCALL_AUTODETECT_STATUS_2026_07_26.md) | Report: auto-detecting long-running tool calls (sleep and beyond) and docking them — status refresh, 2026-07-26 |
 | [`SPEC_A6_AGENT_PANE_MIRROR_REMOVAL_2026_09_06`](SPEC_A6_AGENT_PANE_MIRROR_REMOVAL_2026_09_06.md) | SPEC: A6 — remove the agent-pane `AgentAtoms` mirror; render from the reducer stores |
 | [`SPEC_ABF_IMPORT_UI_PHASE3_2026_08_02`](SPEC_ABF_IMPORT_UI_PHASE3_2026_08_02.md) | Spec: ABF Import UI (Phase 3) — Selective Import + Collision Handling |
@@ -231,11 +232,13 @@ partial list.
 | [`SPEC_AGENT_PANE_SCROLL_FOLLOW_AND_STATUS_OVERLAY_2026_07_24`](SPEC_AGENT_PANE_SCROLL_FOLLOW_AND_STATUS_OVERLAY_2026_07_24.md) | SPEC: Agent pane — fix silent auto-scroll-follow drops, extend the message-list scrollbar past the Working/Host status rows |
 | [`SPEC_AGENT_PANE_SHELL_EXIT_COLLAPSES_DRAWER_2026_09_15`](SPEC_AGENT_PANE_SHELL_EXIT_COLLAPSES_DRAWER_2026_09_15.md) | SPEC: Typing `exit` in the agent pane's shell drawer should close the shell and collapse the drawer |
 | [`SPEC_AGENT_PANE_SPLIT_OPENS_PICKER_2026_09_30`](SPEC_AGENT_PANE_SPLIT_OPENS_PICKER_2026_09_30.md) | Spec: Splitting an agent pane opens a fresh agent picker |
+| [`SPEC_AGENT_PANE_STATE_MACHINE_2026_05_07`](SPEC_AGENT_PANE_STATE_MACHINE_2026_05_07.md) | Spec: Agent Pane State Machine Refinement |
 | [`SPEC_AGENT_PANE_STATE_MACHINE_2026_05_23`](SPEC_AGENT_PANE_STATE_MACHINE_2026_05_23.md) | SPEC — agent-pane turn-phase: discriminated union evolution |
 | [`SPEC_AGENT_PANE_STATE_PERSISTENCE_2026_05_15`](SPEC_AGENT_PANE_STATE_PERSISTENCE_2026_05_15.md) | SPEC: Agent-Pane Reducer State Persistence |
 | [`SPEC_AGENT_PANE_TAB_KEEPALIVE_2026_09_18`](SPEC_AGENT_PANE_TAB_KEEPALIVE_2026_09_18.md) | SPEC: Keep-alive for agent tabs in the pane tab strip |
 | [`SPEC_AGENT_PANE_TAB_STRIP_OVERLAY_2026_08_10`](SPEC_AGENT_PANE_TAB_STRIP_OVERLAY_2026_08_10.md) | SPEC: Agent pane tab strip floats over the conversation, doesn't reserve a row |
 | [`SPEC_AGENT_PANE_TOOL_PEEK_ON_LINE_AND_MD_OPEN_IN_EDITOR_2026_10_11`](SPEC_AGENT_PANE_TOOL_PEEK_ON_LINE_AND_MD_OPEN_IN_EDITOR_2026_10_11.md) | Agent pane: a tool call's hover peek only on its line, and "Open in editor" on Markdown file previews |
+| [`SPEC_AGENT_PANE_UNIFIED_FAILURE_REDUCER_2026_07_06`](SPEC_AGENT_PANE_UNIFIED_FAILURE_REDUCER_2026_07_06.md) | SPEC — agent-pane failure state: fold `useAgentFailure` into the turn-phase reducer |
 | [`SPEC_AGENT_PANE_ZONE_ORDER_WORKED_FOOTER_2026_04_24`](SPEC_AGENT_PANE_ZONE_ORDER_WORKED_FOOTER_2026_04_24.md) | Spec: Agent Pane Zone Reorder + Enriched "Worked" Footer |
 | [`SPEC_AGENT_PICKER_FILTER_SEARCH_2026_08_17`](SPEC_AGENT_PICKER_FILTER_SEARCH_2026_08_17.md) | SPEC: Filter/search box atop the AgentPicker |
 | [`SPEC_AGENT_PICKER_TWO_TIER_2026_05_24`](SPEC_AGENT_PICKER_TWO_TIER_2026_05_24.md) | SPEC: Two-tier agent picker — "My Agents" + "Templates" |
@@ -301,6 +304,7 @@ partial list.
 | [`SPEC_CI_COMPLETION_NOTIFICATIONS_2026_08_16`](SPEC_CI_COMPLETION_NOTIFICATIONS_2026_08_16.md) | SPEC: jekt notification when a PR's CI run completes (pass or fail) |
 | [`SPEC_CI_PATH_CONDITIONAL_CHECKS_2026_09_21`](SPEC_CI_PATH_CONDITIONAL_CHECKS_2026_09_21.md) | SPEC: skip the build on documentation-only PRs, safely |
 | [`SPEC_CLAUDE_MD_OWNERSHIP_PROTECTION_2026_08_22`](SPEC_CLAUDE_MD_OWNERSHIP_PROTECTION_2026_08_22.md) | Spec: protect a pre-existing project `CLAUDE.md` from AgentMux's overwrite |
+| [`SPEC_CODEGEN_REMAINING_GAPS_2026_10_13`](SPEC_CODEGEN_REMAINING_GAPS_2026_10_13.md) | What codegen still doesn't cover |
 | [`SPEC_CODEX_JSONL_CONTRACT_2026_08_08`](SPEC_CODEX_JSONL_CONTRACT_2026_08_08.md) | Codex CLI JSONL Adapter Contract |
 | [`SPEC_COLOR_THEME_TOKEN_HARDENING_2026_09_21`](SPEC_COLOR_THEME_TOKEN_HARDENING_2026_09_21.md) | SPEC: harden the Tailwind color system against silent per-theme breakage |
 | [`SPEC_COMPACTION_STARTED_RECONCILIATION_RACE_2026_09_02`](SPEC_COMPACTION_STARTED_RECONCILIATION_RACE_2026_09_02.md) | Spec: `compaction_started` Arriving Before Turn-Phase Reconciliation Drops the Ping Permanently |
@@ -312,12 +316,14 @@ partial list.
 | [`SPEC_COMPOSER_STRIP_LEFT_JUSTIFIED_TIERED_WRAP_2026_08_03`](SPEC_COMPOSER_STRIP_LEFT_JUSTIFIED_TIERED_WRAP_2026_08_03.md) | SPEC — Composer strip: left-justified, tiered wrap (up to 3 levels) |
 | [`SPEC_COMPOSER_STRIP_MODE_TOPLEVEL_2026_07_02`](SPEC_COMPOSER_STRIP_MODE_TOPLEVEL_2026_07_02.md) | SPEC — Promote Mode to the composer strip; retire the nested "Controls" panel under Log |
 | [`SPEC_COMPOSER_STRIP_TWO_LINE_RESPONSIVE_2026_07_30`](SPEC_COMPOSER_STRIP_TWO_LINE_RESPONSIVE_2026_07_30.md) | SPEC — Composer strip: two-line wrap when the pane narrows |
+| [`SPEC_CONNECTORS_CARDS_2026_10_13`](SPEC_CONNECTORS_CARDS_2026_10_13.md) | Spec: Connectors shows everything connected as cards |
 | [`SPEC_CONTAINER_AGENTS_WORK_FOR_EVERYONE_2026_10_07`](SPEC_CONTAINER_AGENTS_WORK_FOR_EVERYONE_2026_10_07.md) | SPEC: container agents that work for everyone, not only for people who can already pull our image |
 | [`SPEC_CONTEXT_MENU_PASTE_KEEPS_TERMINAL_FOCUS_2026_10_07`](SPEC_CONTEXT_MENU_PASTE_KEEPS_TERMINAL_FOCUS_2026_10_07.md) | Pasting into a terminal from the right-click menu should leave the terminal ready for Enter |
 | [`SPEC_COPY_BUTTON_FALSE_POSITIVE_FIX_2026_08_10`](SPEC_COPY_BUTTON_FALSE_POSITIVE_FIX_2026_08_10.md) | SPEC: Copy Button Silently Failing (Three Stacked Bugs) |
 | [`SPEC_CRATES_DIRECTORY_REORGANIZATION_2026_09_30`](SPEC_CRATES_DIRECTORY_REORGANIZATION_2026_09_30.md) | Move the Rust crates under `crates/`, with a merge freeze and a rebase plan |
 | [`SPEC_CREATE_AGENT_NAME_NO_PREFILL_2026_10_06`](SPEC_CREATE_AGENT_NAME_NO_PREFILL_2026_10_06.md) | Spec: The new-agent Name field starts empty, with ghost text |
 | [`SPEC_CTRL_SHIFT_SCROLL_ZOOM_ALL_PANES_2026_09_07`](SPEC_CTRL_SHIFT_SCROLL_ZOOM_ALL_PANES_2026_09_07.md) | Spec: Ctrl+Shift+Scroll zooms every pane in the window at once |
+| [`SPEC_DEFAULT_SHELL_SETTING_2026_10_13`](SPEC_DEFAULT_SHELL_SETTING_2026_10_13.md) | Default shell: a Settings picker that lists the shells installed, and shows the one in use |
 | [`SPEC_DEV_ENV_ISOLATION`](SPEC_DEV_ENV_ISOLATION.md) | Dev-Build Environment Isolation |
 | [`SPEC_DEV_INSTANCE_ISOLATION_DIAGNOSTICS_2026_09_19`](SPEC_DEV_INSTANCE_ISOLATION_DIAGNOSTICS_2026_09_19.md) | SPEC: Fix misleading guidance when a second `task dev` instance collides |
 | [`SPEC_DEV_MODE_LAUNCHER_IPC_2026_05_16`](SPEC_DEV_MODE_LAUNCHER_IPC_2026_05_16.md) | SPEC: Restore Launcher IPC in `task dev` Mode |
@@ -330,6 +336,7 @@ partial list.
 | [`SPEC_EDITOR_FIRST_KEYSTROKE_NOT_RENDERED_2026_09_15`](SPEC_EDITOR_FIRST_KEYSTROKE_NOT_RENDERED_2026_09_15.md) | Editor: the first keystroke after focusing is accepted but not rendered |
 | [`SPEC_EDITOR_MEDIA_SPLIT_OPENS_EMPTY_2026_10_10`](SPEC_EDITOR_MEDIA_SPLIT_OPENS_EMPTY_2026_10_10.md) | Spec: Splitting an editor or media pane opens an empty one |
 | [`SPEC_EDITOR_REUSE_RESTORES_MINIMIZED_PANE_2026_09_30`](SPEC_EDITOR_REUSE_RESTORES_MINIMIZED_PANE_2026_09_30.md) | Spec: An agent opening a file shows the Editor pane it lands in |
+| [`SPEC_EDITOR_TREE_TOGGLE_IN_DOC_TAB_BAR_2026_10_04`](SPEC_EDITOR_TREE_TOGGLE_IN_DOC_TAB_BAR_2026_10_04.md) | SPEC: The Editor's file-tree toggle moves into its document tab bar |
 | [`SPEC_ESBUILD_OVERRIDE_VITE_INCOMPAT_2026_09_17`](SPEC_ESBUILD_OVERRIDE_VITE_INCOMPAT_2026_09_17.md) | SPEC: Remove the `esbuild >=0.28.2` override — it broke `task dev` and never protected the bundle |
 | [`SPEC_EXTERNAL_HOST_BUILD_2026_10_09`](SPEC_EXTERNAL_HOST_BUILD_2026_10_09.md) | SPEC: Build the frontend for a host other than the desktop app |
 | [`SPEC_FLEET_BROADCAST_CROSS_TIER_TARGETING_2026_08_22`](SPEC_FLEET_BROADCAST_CROSS_TIER_TARGETING_2026_08_22.md) | SPEC: `FleetBroadcast` reaches cross-channel/LAN/WAN targets |
@@ -366,6 +373,7 @@ partial list.
 | [`SPEC_MACOS_MUXBUS_KEYCHAIN_NOTICE_2026_09_16`](SPEC_MACOS_MUXBUS_KEYCHAIN_NOTICE_2026_09_16.md) | SPEC: Warn macOS/Linux users up front that MuxBus sign-in will prompt for a password |
 | [`SPEC_MACOS_TAB_REDOCK_PARITY_2026_07_24`](SPEC_MACOS_TAB_REDOCK_PARITY_2026_07_24.md) | macOS Tab Redock Parity — Implementation Scoping |
 | [`SPEC_MCP_LOOP_TOOL_2026_06_16`](SPEC_MCP_LOOP_TOOL_2026_06_16.md) | SPEC: MCP `Loop` / `LoopStop` tools — recurring prompt injection |
+| [`SPEC_MEDIA_OPEN_SHOWS_THE_MEDIA_PANE_2026_10_12`](SPEC_MEDIA_OPEN_SHOWS_THE_MEDIA_PANE_2026_10_12.md) | Spec: Clicking an image shows the Media pane it lands in |
 | [`SPEC_MEDIA_PANE_2026_07_26`](SPEC_MEDIA_PANE_2026_07_26.md) | Spec: Media pane — live-updating image/video viewer for agent-generated files |
 | [`SPEC_MEDIA_PANE_V4_MCP_OPEN_TOOL_2026_08_03`](SPEC_MEDIA_PANE_V4_MCP_OPEN_TOOL_2026_08_03.md) | Spec: Media pane v4 — agent-facing `OpenMedia` MCP tool |
 | [`SPEC_MEMORY_VERSION_CONTROL_AND_ARMORY_AUDIT_2026_08_19`](SPEC_MEMORY_VERSION_CONTROL_AND_ARMORY_AUDIT_2026_08_19.md) | Spec: Native Memory Version Control — Single Source of Truth, Two Views (Stash + Armory) |
@@ -393,6 +401,7 @@ partial list.
 | [`SPEC_PANE_CLICK_THROUGH_INPUT_FOCUS_2026_09_23`](SPEC_PANE_CLICK_THROUGH_INPUT_FOCUS_2026_09_23.md) | Clicking an input in an unselected pane should focus that input — in one click |
 | [`SPEC_PANE_CLOSE_REOPEN_CONTINUITY_GUARANTEE_2026_07_27`](SPEC_PANE_CLOSE_REOPEN_CONTINUITY_GUARANTEE_2026_07_27.md) | Spec: pane close/reopen must guarantee conversation continuity, or say so |
 | [`SPEC_PANE_COLOR_SYSTEM_CONSOLIDATION_2026_09_20`](SPEC_PANE_COLOR_SYSTEM_CONSOLIDATION_2026_09_20.md) | SPEC: consolidate pane/tab color systems — persist explicit agent-pane picks, unify the tab-select indicator |
+| [`SPEC_PANE_CONTROLS_TILED_RESTORE_ICON_AND_MINIMIZE_FROM_MAXIMIZED_2026_10_12`](SPEC_PANE_CONTROLS_TILED_RESTORE_ICON_AND_MINIMIZE_FROM_MAXIMIZED_2026_10_12.md) | Spec — Pane controls: the outline maximize icon, a restore icon for a tiled layout, and minimizing a maximized pane directly |
 | [`SPEC_PANE_DRAG_TO_TAB_2026_07_10`](SPEC_PANE_DRAG_TO_TAB_2026_07_10.md) | Spec: Pane Drag-to-Tab (Cross-Tab Pane Relocation via Drag & Drop) |
 | [`SPEC_PANE_ENV_ISOLATION_2026_09_17`](SPEC_PANE_ENV_ISOLATION_2026_09_17.md) | SPEC: an instance's identity must not be inheritable by its panes |
 | [`SPEC_PANE_FILE_DROP_2026_05_30`](SPEC_PANE_FILE_DROP_2026_05_30.md) | SPEC: Drag-and-drop files into Terminal and Agent panes |
@@ -413,6 +422,9 @@ partial list.
 | [`SPEC_PERSISTENT_CONTROLLER_FAILURE_CLASSIFICATION_2026_08_04`](SPEC_PERSISTENT_CONTROLLER_FAILURE_CLASSIFICATION_2026_08_04.md) | SPEC — Wire failure classification + auto-retry into the persistent controller (Claude 429/overloaded) |
 | [`SPEC_PERSISTENT_SPAWN_GENERATION_AND_MESSAGE_IDENTITY_2026_08_09`](SPEC_PERSISTENT_SPAWN_GENERATION_AND_MESSAGE_IDENTITY_2026_08_09.md) | SPEC — Persistent controller race cluster: gap audit + remaining fixes |
 | [`SPEC_PERSISTENT_TURN_END_TEXT_GATE_2026_07_30`](SPEC_PERSISTENT_TURN_END_TEXT_GATE_2026_07_30.md) | SPEC — Require real explanation text before declaring a persistent-mode turn done |
+| [`SPEC_PHASE_E4_LAYOUT_REDUCER_2026-05-01`](SPEC_PHASE_E4_LAYOUT_REDUCER_2026-05-01.md) | SPEC: Phase E.4 — Layout reducer migration |
+| [`SPEC_PHASE_E_SAGAS_2026-04-30`](SPEC_PHASE_E_SAGAS_2026-04-30.md) | Phase E Sagas — Full Specification |
+| [`SPEC_PHASE_E_SRV_REDUCER_2026_04_29`](SPEC_PHASE_E_SRV_REDUCER_2026_04_29.md) | SPEC: Phase E — srv reducer + saga coordinator (first multi-reducer validation) |
 | [`SPEC_PILLAR1_STEP6_SAGA_COLLAPSE_2026_07_16`](SPEC_PILLAR1_STEP6_SAGA_COLLAPSE_2026_07_16.md) | SPEC: Pillar 1 Step 6 — collapse launcher saga durability to an in-memory registry |
 | [`SPEC_PILLAR2_SANITIZE_THEN_DECIDE_2026_07_11`](SPEC_PILLAR2_SANITIZE_THEN_DECIDE_2026_07_11.md) | Pillar 2 — Sanitize-Then-Decide: Retiring the Last Two Independent Quit Authorities |
 | [`SPEC_PI_HARNESS_VIA_PI_ACP_2026_10_06`](SPEC_PI_HARNESS_VIA_PI_ACP_2026_10_06.md) | Spec: Make the Pi harness launch, through the `pi-acp` adapter |
@@ -431,6 +443,8 @@ partial list.
 | [`SPEC_RESIZE_DEFAULT_FLIP_AND_WINDOW_EDGE_SHIFT_2026_08_26`](SPEC_RESIZE_DEFAULT_FLIP_AND_WINDOW_EDGE_SHIFT_2026_08_26.md) | SPEC: Resize refinements — flip group/direct defaults, and Shift+window-resize feeding only the edge panes |
 | [`SPEC_RESIZE_THROUGH_COLLAPSED_PANES_2026_10_03`](SPEC_RESIZE_THROUGH_COLLAPSED_PANES_2026_10_03.md) | SPEC: resize through collapsed panes — every edge of a collapsed run resizes the expanded panes either side |
 | [`SPEC_RESPONSIVE_TAB_BAR_TOP_POSITION_2026_08_24`](SPEC_RESPONSIVE_TAB_BAR_TOP_POSITION_2026_08_24.md) | SPEC: Move the narrow-width responsive tab bar to the top (from the bottom) |
+| [`SPEC_RETIRE_ARMORY_CONNECTORS_AND_KNOWLEDGE_PANES_2026_10_05`](SPEC_RETIRE_ARMORY_CONNECTORS_AND_KNOWLEDGE_PANES_2026_10_05.md) | SPEC: Retire the Armory — two panes, Connectors and Knowledge |
+| [`SPEC_SAGA_DURABILITY_2026-05-01`](SPEC_SAGA_DURABILITY_2026-05-01.md) | SPEC: Saga durability — durable saga log |
 | [`SPEC_SETTINGS_ISOLATED_BY_CHANNEL_2026_08_19`](SPEC_SETTINGS_ISOLATED_BY_CHANNEL_2026_08_19.md) | Spec: Make `settings.json` isolated-by-default for every non-`stable` channel |
 | [`SPEC_SETTINGS_LIVE_COMMIT_AND_TERMINAL_APPLY_GAPS_2026_09_22`](SPEC_SETTINGS_LIVE_COMMIT_AND_TERMINAL_APPLY_GAPS_2026_09_22.md) | SPEC — Settings commit on blur, not on change; plus the remaining terminal live-apply gaps |
 | [`SPEC_SETTINGS_PANE_COMPLETION_2026_07_14`](SPEC_SETTINGS_PANE_COMPLETION_2026_07_14.md) | SPEC — Settings pane: fill out the remaining sections (completes SPEC_SETTINGS_PANE_2026_06_25) |
@@ -452,6 +466,7 @@ partial list.
 | [`SPEC_STATUSBAR_TOKEN_PANEL_BY_AGENT_2026_08_30`](SPEC_STATUSBAR_TOKEN_PANEL_BY_AGENT_2026_08_30.md) | Spec: Token stats panel — break out by agent + value-add details |
 | [`SPEC_STATUSBAR_TOKEN_USAGE_2026_04_24`](SPEC_STATUSBAR_TOKEN_USAGE_2026_04_24.md) | Spec: Status-Bar Token Usage Indicator + Per-Service Breakdown |
 | [`SPEC_STORE_MODULARIZATION_2026_05_27`](SPEC_STORE_MODULARIZATION_2026_05_27.md) | SPEC: `wstore` → `store` rename + modularization |
+| [`SPEC_SUBAGENT_LIFECYCLE_RECONCILIATION_2026_07_12`](SPEC_SUBAGENT_LIFECYCLE_RECONCILIATION_2026_07_12.md) | SPEC — subagent lifecycle: no reducer, no liveness, "working" forever |
 | [`SPEC_SUBAGENT_WATCHER_IDENTITY_BOUND_CONFIG_DIR_2026_08_22`](SPEC_SUBAGENT_WATCHER_IDENTITY_BOUND_CONFIG_DIR_2026_08_22.md) | SPEC: subagent_watcher watches the identity-bound Claude config dir, not a stale spawn-time snapshot |
 | [`SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24`](SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md) | SPEC: Surface `~/.claude/CLAUDE.md` (read-only) in Global Memory |
 | [`SPEC_SWARM_BROADCAST_AS_USER_MESSAGE_2026_10_01`](SPEC_SWARM_BROADCAST_AS_USER_MESSAGE_2026_10_01.md) | Spec: a Swarm broadcast reaches agents as the user's own message, marked as a broadcast |
@@ -469,6 +484,7 @@ partial list.
 | [`SPEC_TAB_CONTENT_REVEAL_GATE`](SPEC_TAB_CONTENT_REVEAL_GATE.md) | Tab content reveal gate |
 | [`SPEC_TAB_CREATION_REVEAL_ARCHITECTURE_2026_09_16`](SPEC_TAB_CREATION_REVEAL_ARCHITECTURE_2026_09_16.md) | SPEC: Window-Tab Creation Flashing — Root Cause and an Architecture Cleanup |
 | [`SPEC_TAB_SWITCH_DECOUPLE_SELECT_FROM_PAINT_2026_09_04`](SPEC_TAB_SWITCH_DECOUPLE_SELECT_FROM_PAINT_2026_09_04.md) | Instant tab-bar selection, decoupled from destination-pane reveal cost (window-level tabs) |
+| [`SPEC_TASK_DEV_PRUNE_OLD_BUILDS_2026_10_14`](SPEC_TASK_DEV_PRUNE_OLD_BUILDS_2026_10_14.md) | SPEC: `task dev` removes its old builds once nothing runs from them |
 | [`SPEC_TERMINAL_LATENCY_BENCHMARK_2026_05_19`](SPEC_TERMINAL_LATENCY_BENCHMARK_2026_05_19.md) | SPEC: Terminal Input Echo-Latency Benchmark |
 | [`SPEC_TERMINAL_SCROLLBACK_PERSISTENCE_2026_07_23`](SPEC_TERMINAL_SCROLLBACK_PERSISTENCE_2026_07_23.md) | SPEC: Terminal scrollback doesn't survive reconnect (all `view:"term"` panes) |
 | [`SPEC_TERMINAL_STATS_BADGE_REMOTE_PANES_2026_10_12`](SPEC_TERMINAL_STATS_BADGE_REMOTE_PANES_2026_10_12.md) | The terminal stats badge on SSH and WSL panes: the remote shell's figures, not the local client's |
@@ -490,6 +506,8 @@ partial list.
 | [`SPEC_TOWER_AGENT_CENTRIC_VIEWS_2026_10_08`](SPEC_TOWER_AGENT_CENTRIC_VIEWS_2026_10_08.md) | SPEC: Tower, agent first: an Agents rail and a Processes list grouped by agent |
 | [`SPEC_TRANSCRIPT_NODE_HOVER_PEEK_2026_08_03`](SPEC_TRANSCRIPT_NODE_HOVER_PEEK_2026_08_03.md) | Spec: hover-to-peek on tool calls and thinking clumps |
 | [`SPEC_TRANSCRIPT_NODE_HOVER_PEEK_ALL_KINDS_2026_08_25`](SPEC_TRANSCRIPT_NODE_HOVER_PEEK_ALL_KINDS_2026_08_25.md) | Spec: hover-to-peek on EVERY transcript node kind, 50ms delay |
+| [`SPEC_TSRS_SERDE_ATTRIBUTE_WARNINGS_2026_10_13`](SPEC_TSRS_SERDE_ATTRIBUTE_WARNINGS_2026_10_13.md) | ts-rs drops serde attributes it can't parse |
+| [`SPEC_TYPED_EVENTS_EVERY_PATH_2026_10_13`](SPEC_TYPED_EVENTS_EVERY_PATH_2026_10_13.md) | Typed events on every path |
 | [`SPEC_TYPED_EVENT_PAYLOADS_2026_10_13`](SPEC_TYPED_EVENT_PAYLOADS_2026_10_13.md) | Typed event payloads |
 | [`SPEC_UI_MANUAL_SCREENSHOT_TOOLING_2026_09_19`](SPEC_UI_MANUAL_SCREENSHOT_TOOLING_2026_09_19.md) | SPEC: Reusable, cropped screenshot tooling for the user manual |
 | [`SPEC_USER_INPUT_VISIBILITY_AND_STARTUP_COLLAPSE_2026_05_24`](SPEC_USER_INPUT_VISIBILITY_AND_STARTUP_COLLAPSE_2026_05_24.md) | SPEC: User input visibility + startup-injection collapse |
@@ -499,12 +517,15 @@ partial list.
 | [`SPEC_WINDOWS_CEF_RUNTIME_VERIFY_BACKSLASH_PATH_HASH_2026_09_24`](SPEC_WINDOWS_CEF_RUNTIME_VERIFY_BACKSLASH_PATH_HASH_2026_09_24.md) | SPEC — The Windows CEF runtime guard rejects the correct runtime whenever its path contains a backslash |
 | [`SPEC_WINDOWS_CEF_RUNTIME_VERIFY_OR_FAIL_2026_09_23`](SPEC_WINDOWS_CEF_RUNTIME_VERIFY_OR_FAIL_2026_09_23.md) | SPEC — Windows builds refuse a CEF runtime that isn't the pinned tracer-off build |
 | [`SPEC_WINDOW_LIFECYCLE_CLOSE_RELIABILITY_2026_07_04`](SPEC_WINDOW_LIFECYCLE_CLOSE_RELIABILITY_2026_07_04.md) | SPEC: Window-close reliability — fix the `backend_window_id` race |
+| [`SPEC_WINDOW_PROCESS_STATE_MACHINE_2026_04_27`](SPEC_WINDOW_PROCESS_STATE_MACHINE_2026_04_27.md) | SPEC: AgentMux Window & Process State Machine |
 | [`SPEC_WINDOW_SNAP_MAXIMIZE_2026_09_04`](SPEC_WINDOW_SNAP_MAXIMIZE_2026_09_04.md) | SPEC — Chrome-style window snap: drag-to-top maximize, border-drag vertical snap |
 | [`SPEC_WORKDIR_SAFE_WRITES_2026_10_01`](SPEC_WORKDIR_SAFE_WRITES_2026_10_01.md) | SPEC: One safe way to write into an agent's workspace |
 | [`SPEC_WORKING_STATE_AND_SCROLL_FOLLOW_HARDENING_2026_07_27`](SPEC_WORKING_STATE_AND_SCROLL_FOLLOW_HARDENING_2026_07_27.md) | SPEC: Harden the "Working…" indicator and message-list auto-follow against four related recurring bugs |
 | [`SPEC_WRITE_TOOL_CONTENT_VIEW_2026_06_19`](SPEC_WRITE_TOOL_CONTENT_VIEW_2026_06_19.md) | SPEC: Write tool expanded content view |
 | [`SPEC_WRITE_TOOL_MD_RENDER_2026_06_23`](SPEC_WRITE_TOOL_MD_RENDER_2026_06_23.md) | SPEC: Render `.md` content as markdown in the Write tool overlay |
+| [`agent-pane-document-reducer-2026-05-03`](agent-pane-document-reducer-2026-05-03.md) | Agent Pane Document Reducer — root-cause + architecture spec |
 | [`app-api-extension`](app-api-extension.md) | MuxAPI Extension Spec |
+| [`browser-pane-reducer-roadmap`](browser-pane-reducer-roadmap.md) | Browser-pane reducer migration — diagnostic-first roadmap |
 | [`cef-portable-build`](cef-portable-build.md) | Spec: CEF Portable Build Pipeline |
 | [`command-palette`](command-palette.md) | Command Palette — Spec |
 | [`dev-build-env-isolation`](dev-build-env-isolation.md) | Dev-Build Env Isolation |
@@ -638,7 +659,6 @@ partial list.
 | [`SPEC_REMOTE_TERMINALS_AND_DURABLE_SESSIONS_2026_10_02`](SPEC_REMOTE_TERMINALS_AND_DURABLE_SESSIONS_2026_10_02.md) | SPEC: Remote terminals (SSH, WSL) and durable remote sessions — implementation plan |
 | [`SPEC_RENAME_KNOWLEDGE_TO_MEMORY_2026_10_06`](SPEC_RENAME_KNOWLEDGE_TO_MEMORY_2026_10_06.md) | SPEC: Rename the Knowledge pane to Memory, and give "memory" one set of meanings |
 | [`SPEC_RESUME_GATE_AND_SAME_IDENTITY_CONTINUATION_2026_09_25`](SPEC_RESUME_GATE_AND_SAME_IDENTITY_CONTINUATION_2026_09_25.md) | SPEC: one resume gate, and native continuation across logins of the same identity |
-| [`SPEC_RETIRE_ARMORY_CONNECTORS_AND_KNOWLEDGE_PANES_2026_10_05`](SPEC_RETIRE_ARMORY_CONNECTORS_AND_KNOWLEDGE_PANES_2026_10_05.md) | SPEC: Retire the Armory — two panes, Connectors and Knowledge |
 | [`SPEC_REVEAL_BLOCK_ONE_PATH_2026_09_27`](SPEC_REVEAL_BLOCK_ONE_PATH_2026_09_27.md) | SPEC: one way to reveal a block — including a background tab in a multi-tab pane |
 | [`SPEC_RPC_BINDINGS_CODEGEN_2026_09_07`](SPEC_RPC_BINDINGS_CODEGEN_2026_09_07.md) | SPEC: Generate the Rust ↔ TypeScript RPC bindings from srv |
 | [`SPEC_SESSION_RESTORE_AND_SAVED_LAYOUTS_2026_08_13`](SPEC_SESSION_RESTORE_AND_SAVED_LAYOUTS_2026_08_13.md) | Spec: Restore-on-relaunch + named, reloadable "Layouts" |
@@ -646,6 +666,7 @@ partial list.
 | [`SPEC_SRV_INFO_ON_CONNECT_2026_10_09`](SPEC_SRV_INFO_ON_CONNECT_2026_10_09.md) | SPEC: srv describes itself on every connect (`srvinfo`) |
 | [`SPEC_START_WITH_OS_2026_09_25`](SPEC_START_WITH_OS_2026_09_25.md) | SPEC: Start with OS — AgentMux starts quietly at login, on every platform, and keeps working after updates |
 | [`SPEC_STREAMING_BASH_RUNNER_2026_05_11`](SPEC_STREAMING_BASH_RUNNER_2026_05_11.md) | Streaming bash runner — PreToolUse command rewrite |
+| [`SPEC_STRONG_REDUCER_AUTHORITY_LAYOUT_2026_06_30`](SPEC_STRONG_REDUCER_AUTHORITY_LAYOUT_2026_06_30.md) | SPEC — Strong Reducer-Authority for Layout (Intent-Driven srv Reducer) |
 | [`SPEC_SUBAGENT_LIVE_RECONCILIATION_AND_RETIRE_2026_07_20`](SPEC_SUBAGENT_LIVE_RECONCILIATION_AND_RETIRE_2026_07_20.md) | SPEC — live subagent reconciliation + Retire action (best-practices plan) |
 | [`SPEC_SWARM_OTHER_HOSTS_AND_CHANNELS_2026_10_02`](SPEC_SWARM_OTHER_HOSTS_AND_CHANNELS_2026_10_02.md) | SPEC: The Swarm shows the agents of every other instance this one knows about |
 | [`SPEC_TEAROFF_PAINT_LATENCY_2026_09_30`](SPEC_TEAROFF_PAINT_LATENCY_2026_09_30.md) | SPEC: Tear-off paint latency: show the torn-off content as fast as the window |
@@ -666,6 +687,7 @@ partial list.
 | [`SPEC_WINDOWS_LIFECYCLE_ROBUSTNESS_2026_06_26`](SPEC_WINDOWS_LIFECYCLE_ROBUSTNESS_2026_06_26.md) | Windows Lifecycle Robustness — Surviving External Termination |
 | [`SPEC_WINDOWS_PORTABLE_7Z_2026_10_11`](SPEC_WINDOWS_PORTABLE_7Z_2026_10_11.md) | Spec: ship the Windows portable as `.7z` instead of `.zip` |
 | [`SPEC_WINDOW_NAME_API_HARDENING_2026_08_08`](SPEC_WINDOW_NAME_API_HARDENING_2026_08_08.md) | SPEC: Window-name MuxAPI hardening (phantom-id success + status codes) |
+| [`SPEC_WINDOW_OPEN_LATENCY_AND_WARM_POOLS_2026_10_13`](SPEC_WINDOW_OPEN_LATENCY_AND_WARM_POOLS_2026_10_13.md) | Spec: opening a widget in a new window or a floating pane is fast every time |
 | [`SPEC_WINDOW_RESIZE_NO_PAINT_DELAY_2026_09_24`](SPEC_WINDOW_RESIZE_NO_PAINT_DELAY_2026_09_24.md) | SPEC — Window resize repaints pane content every frame, with no settle delay |
 | [`SPEC_WINGET_PACKAGE_BOOTSTRAP_2026_09_10`](SPEC_WINGET_PACKAGE_BOOTSTRAP_2026_09_10.md) | WinGet package bootstrap: `AgentMux.AI` |
 | [`linux-pool-startup-fill-2026-05-08`](linux-pool-startup-fill-2026-05-08.md) | Linux/macOS: wire startup-time window-pool fill |
@@ -747,7 +769,6 @@ partial list.
 | [`SPEC_LAUNCHER_LINUX_PACKAGED_AND_SPLASH_2026_06_05`](SPEC_LAUNCHER_LINUX_PACKAGED_AND_SPLASH_2026_06_05.md) | SPEC: Launcher + reducer/saga parity on Linux + Linux splash |
 | [`SPEC_LAUNCHER_MACOS_DEV_INTEGRATION_2026_05_30`](SPEC_LAUNCHER_MACOS_DEV_INTEGRATION_2026_05_30.md) | SPEC: Integrating `agentmux-launcher` into macOS / Linux `task dev` |
 | [`SPEC_LAUNCHER_MACOS_PACKAGED_AND_SPLASH_2026_05_31`](SPEC_LAUNCHER_MACOS_PACKAGED_AND_SPLASH_2026_05_31.md) | SPEC: Launcher in packaged macOS builds + restore the splash + tear-off crash |
-| [`SPEC_LAUNCH_AUTH_STATE_MACHINE_2026_05_14`](SPEC_LAUNCH_AUTH_STATE_MACHINE_2026_05_14.md) | Pre-launch auth — complete user stories + state machine |
 | [`SPEC_LIGHT_THEME_RULES_AND_CONTRAST_ENFORCEMENT_2026_10_01`](SPEC_LIGHT_THEME_RULES_AND_CONTRAST_ENFORCEMENT_2026_10_01.md) | Spec: rules for light themes, enforced across every light theme |
 | [`SPEC_LINUX_APPIMAGE_PER_BUILD_CHANNEL_2026_06_25`](SPEC_LINUX_APPIMAGE_PER_BUILD_CHANNEL_2026_06_25.md) | SPEC: Linux AppImage Per-Build Channel Isolation |
 | [`SPEC_LINUX_DOCS_UPDATE_2026_06_06`](SPEC_LINUX_DOCS_UPDATE_2026_06_06.md) | SPEC — Linux documentation catch-up |
@@ -788,7 +809,6 @@ partial list.
 | [`SPEC_PEEK_OVERLAY_MOUSE_Y_TRACKING_2026_09_03`](SPEC_PEEK_OVERLAY_MOUSE_Y_TRACKING_2026_09_03.md) | SPEC — Peek overlay: track mouse Y while pinned to the right |
 | [`SPEC_PERFORMANCE_INSTRUMENTATION_AND_OPTIMIZATION`](SPEC_PERFORMANCE_INSTRUMENTATION_AND_OPTIMIZATION.md) | Performance instrumentation + optimization strategy |
 | [`SPEC_PER_NODE_TOKEN_ACCOUNTING_2026_08_03`](SPEC_PER_NODE_TOKEN_ACCOUNTING_2026_08_03.md) | Spec: true per-node token accounting |
-| [`SPEC_PHASE_E_SAGAS_2026-04-30`](SPEC_PHASE_E_SAGAS_2026-04-30.md) | Phase E Sagas — Full Specification |
 | [`SPEC_PILLAR1_STEP2_WINDOW_TOPOLOGY_PERSISTENCE_2026_07_06`](SPEC_PILLAR1_STEP2_WINDOW_TOPOLOGY_PERSISTENCE_2026_07_06.md) | Pillar 1 Step 2 — Persist the Two Host-Only Topology Facts to srv |
 | [`SPEC_PILLAR1_STEP3_WINDOW_TOPOLOGY_2026_07_07`](SPEC_PILLAR1_STEP3_WINDOW_TOPOLOGY_2026_07_07.md) | Pillar 1 Step 3 — Persist Window Kind + Parent Linkage to srv |
 | [`SPEC_PILLAR1_STEP4_CRASH_REPROJECT_2026_07_07`](SPEC_PILLAR1_STEP4_CRASH_REPROJECT_2026_07_07.md) | Pillar 1 Step 4 — Crash Reproject: Automatic Multi-Window Reconstruction |
@@ -802,7 +822,6 @@ partial list.
 | [`SPEC_SHUTDOWN_COUNTDOWN_MODAL_2026_09_04`](SPEC_SHUTDOWN_COUNTDOWN_MODAL_2026_09_04.md) | A formal shutdown sequence: countdown-confirm modal + splash-style progress |
 | [`SPEC_SPLASH_TELEMETRY_LINUX_2026_06_27`](SPEC_SPLASH_TELEMETRY_LINUX_2026_06_27.md) | SPEC: Splash Startup Telemetry — Linux |
 | [`SPEC_SRV_SUPERVISION_RECYCLE_2026_07_11`](SPEC_SRV_SUPERVISION_RECYCLE_2026_07_11.md) | SPEC: srv supervision via host recycle (#942 Phase 2) |
-| [`SPEC_STRONG_REDUCER_AUTHORITY_LAYOUT_2026_06_30`](SPEC_STRONG_REDUCER_AUTHORITY_LAYOUT_2026_06_30.md) | SPEC — Strong Reducer-Authority for Layout (Intent-Driven srv Reducer) |
 | [`SPEC_SUPPRESS_OS_CREDENTIAL_PROMPTS_2026_05_30`](SPEC_SUPPRESS_OS_CREDENTIAL_PROMPTS_2026_05_30.md) | Spec: Never request OS credential / keychain access (all runtime modes) |
 | [`SPEC_SWARM_REMOTE_AGENTS_PLATFORM_TAG_AND_SELECTION_2026_10_03`](SPEC_SWARM_REMOTE_AGENTS_PLATFORM_TAG_AND_SELECTION_2026_10_03.md) | SPEC: Swarm remote agents: a platform tag, and selecting them like local agents |
 | [`SPEC_SWARM_ROW_AGENT_COLOR_AND_SELECT_TO_FOCUS_2026_09_25`](SPEC_SWARM_ROW_AGENT_COLOR_AND_SELECT_TO_FOCUS_2026_09_25.md) | SPEC: Swarm rows use the agent's own pane-tab color, and selecting a row focuses its pane instead of the Swarm pane |
@@ -836,7 +855,6 @@ partial list.
 | [`agent-pane-slash-commands`](agent-pane-slash-commands.md) | Agent Pane Slash Commands |
 | [`agent-pane-title-buttons`](agent-pane-title-buttons.md) | Agent Pane Title Buttons + Git Identity |
 | [`agentmux-local-url-injection`](agentmux-local-url-injection.md) | AGENTMUX_LOCAL_URL Pane Injection |
-| [`browser-pane-reducer-roadmap`](browser-pane-reducer-roadmap.md) | Browser-pane reducer migration — diagnostic-first roadmap |
 | [`cef-portable-layout`](cef-portable-layout.md) | CEF Portable Layout — Clean Directory Spec |
 | [`cef-size-reduction`](cef-size-reduction.md) | CEF Portable Size Reduction Spec |
 | [`cef-ui-thread-dispatch`](cef-ui-thread-dispatch.md) | Spec: CEF UI Thread Dispatch for IPC Handlers |
@@ -885,7 +903,6 @@ partial list.
 | [`KIMI_PROVIDER_INTEGRATION_SPEC`](KIMI_PROVIDER_INTEGRATION_SPEC.md) | Kimi Code CLI Provider Integration Spec |
 | [`PLAN_AGENT_PANE_RESIZE_SCROLL_PIN_2026_08_05`](PLAN_AGENT_PANE_RESIZE_SCROLL_PIN_2026_08_05.md) | Fix Plan: Agent Pane Loses Bottom-Pin on Pane Resize |
 | [`PLAN_INPUT_RESPONSIVENESS_EXECUTION_2026_05_29`](PLAN_INPUT_RESPONSIVENESS_EXECUTION_2026_05_29.md) | PLAN: Execute SPEC_INPUT_RESPONSIVENESS — terminal + agent pane |
-| [`PLAN_SRV_REDUCER_MODULARIZATION_2026-05-07`](PLAN_SRV_REDUCER_MODULARIZATION_2026-05-07.md) | Plan: srv reducer modularization |
 | [`PLAN_TOOL_BLOCK_SCROLL_DRIVEN_COLLAPSE_2026_06_16`](PLAN_TOOL_BLOCK_SCROLL_DRIVEN_COLLAPSE_2026_06_16.md) | Implementation Plan: Scroll-Driven Tool-Block Collapse |
 | [`REPORT_AGENT_PANE_SYNTHESIZED_TEXT_AUDIT_2026_08_06`](REPORT_AGENT_PANE_SYNTHESIZED_TEXT_AUDIT_2026_08_06.md) | Report: Audit of AgentMux-Synthesized Text in the Agent Pane |
 | [`REPORT_ARMORY_BUNDLE_STANDARD_RESEARCH_2026_07_16`](REPORT_ARMORY_BUNDLE_STANDARD_RESEARCH_2026_07_16.md) | Report: Is there a standard for Armory-style agent capability bundles? Research + proposal (2026-07-16) |
@@ -915,9 +932,7 @@ partial list.
 | [`SPEC_AGENT_PANE_HYPERLINKS_2026_06_20`](SPEC_AGENT_PANE_HYPERLINKS_2026_06_20.md) | SPEC: Aggressive Hyperlink Detection in Agent Pane |
 | [`SPEC_AGENT_PANE_MEMORY_IDENTITY_MODALS_2026_06_19`](SPEC_AGENT_PANE_MEMORY_IDENTITY_MODALS_2026_06_19.md) | Agent Pane Memory & Identity Modals |
 | [`SPEC_AGENT_PANE_PROGRESS_BAR_OVERLAY_NO_GAP_2026_08_25`](SPEC_AGENT_PANE_PROGRESS_BAR_OVERLAY_NO_GAP_2026_08_25.md) | SPEC — Agent pane: remove the reserved-space gap above the tab strip; progress bar overlays instead |
-| [`SPEC_AGENT_PANE_STATE_MACHINE_2026_05_07`](SPEC_AGENT_PANE_STATE_MACHINE_2026_05_07.md) | Spec: Agent Pane State Machine Refinement |
 | [`SPEC_AGENT_PANE_STATUS_GRADIENT_2026_06_14`](SPEC_AGENT_PANE_STATUS_GRADIENT_2026_06_14.md) | SPEC: Agent Pane — Status Zones Reorganization + Gradient Progress Bar |
-| [`SPEC_AGENT_PANE_UNIFIED_FAILURE_REDUCER_2026_07_06`](SPEC_AGENT_PANE_UNIFIED_FAILURE_REDUCER_2026_07_06.md) | SPEC — agent-pane failure state: fold `useAgentFailure` into the turn-phase reducer |
 | [`SPEC_AGENT_PICKER_TEMPLATE_SECTION_CLEANUP_2026_08_22`](SPEC_AGENT_PICKER_TEMPLATE_SECTION_CLEANUP_2026_08_22.md) | Spec: "New Agent" heading + harness-only icons in the template section |
 | [`SPEC_AGENT_PICKER_TILE_GRID_2026_06_17`](SPEC_AGENT_PICKER_TILE_GRID_2026_06_17.md) | Agent picker: tile-grid layout |
 | [`SPEC_AGENT_STATUS_LABELS_2026_06_27`](SPEC_AGENT_STATUS_LABELS_2026_06_27.md) | Agent Status Labels — Richer Working State UX |
@@ -981,7 +996,6 @@ partial list.
 | [`SPEC_INSTANCE_PANEL_FLOATING_PANES_SECTION_2026_06_24`](SPEC_INSTANCE_PANEL_FLOATING_PANES_SECTION_2026_06_24.md) | Spec: Floating Panes Section in Instance Panel |
 | [`SPEC_JEKT_SECURITY_AND_VISIBILITY_2026_07_01`](SPEC_JEKT_SECURITY_AND_VISIBILITY_2026_07_01.md) | Spec: Jekt Security & Visibility |
 | [`SPEC_LAUNCHER_DEV_INTEGRATION_2026-05-13`](SPEC_LAUNCHER_DEV_INTEGRATION_2026-05-13.md) | SPEC: Integrating `agentmux-launcher` into `task dev` |
-| [`SPEC_LAUNCHER_SAGA_DURABILITY_2026-05-01`](SPEC_LAUNCHER_SAGA_DURABILITY_2026-05-01.md) | Launcher Saga Durability + Recovery |
 | [`SPEC_LAUNCH_MODAL_INTEGRATION_TESTS_2026_05_19`](SPEC_LAUNCH_MODAL_INTEGRATION_TESTS_2026_05_19.md) | SPEC: Launch Modal — Integration Tests (jsdom-based) |
 | [`SPEC_LAUNCH_MODAL_PLAIN_LANGUAGE_2026_04_24`](SPEC_LAUNCH_MODAL_PLAIN_LANGUAGE_2026_04_24.md) | Spec: Launch Modal Plain-Language Rewrite |
 | [`SPEC_LAUNCH_MODAL_PROFILE_SECTION_2026_05_18`](SPEC_LAUNCH_MODAL_PROFILE_SECTION_2026_05_18.md) | SPEC: Launch Modal — Profile Section + New Identity/Memory Modals |
@@ -1025,8 +1039,6 @@ partial list.
 | [`SPEC_PANE_RESIZE_AND_FLOATER_DRAG_NATIVE_LOOP_2026_06_05`](SPEC_PANE_RESIZE_AND_FLOATER_DRAG_NATIVE_LOOP_2026_06_05.md) | Spec (v2) — Floating-pane drag — host-side manual loop |
 | [`SPEC_PERSISTENT_SHELL_NODE_2026_06_11`](SPEC_PERSISTENT_SHELL_NODE_2026_06_11.md) | SPEC: Persistent Shell Node in the Agent Pane |
 | [`SPEC_PERSISTENT_SHELL_PHASE3_STOP_2026_06_14`](SPEC_PERSISTENT_SHELL_PHASE3_STOP_2026_06_14.md) | SPEC: Persistent Shell Node — Phase 3 (Stop / Lifecycle) |
-| [`SPEC_PHASE_E4_LAYOUT_REDUCER_2026-05-01`](SPEC_PHASE_E4_LAYOUT_REDUCER_2026-05-01.md) | SPEC: Phase E.4 — Layout reducer migration |
-| [`SPEC_PHASE_E_SRV_REDUCER_2026_04_29`](SPEC_PHASE_E_SRV_REDUCER_2026_04_29.md) | SPEC: Phase E — srv reducer + saga coordinator (first multi-reducer validation) |
 | [`SPEC_PHASE_F_HOST_REDUCER_2026-05-01`](SPEC_PHASE_F_HOST_REDUCER_2026-05-01.md) | SPEC: Phase F — host reducer (third reducer in the multi-reducer architecture) |
 | [`SPEC_REACTIVE_WORKSPACE_SYNC_2026-05-14`](SPEC_REACTIVE_WORKSPACE_SYNC_2026-05-14.md) | SPEC: Reactive Workspace + Object Sync (frontend reactivity gap) |
 | [`SPEC_REMOVE_NODE_HOVER_STRIP_2026_06_15`](SPEC_REMOVE_NODE_HOVER_STRIP_2026_06_15.md) | SPEC: Remove the per-row hover strip (`NodeHoverStrip`) |
@@ -1035,8 +1047,6 @@ partial list.
 | [`SPEC_RETRO_FOLLOWUPS_2026_04_12`](SPEC_RETRO_FOLLOWUPS_2026_04_12.md) | Spec: Retro Follow-ups — 2026-04-12 |
 | [`SPEC_ROBUST_MODAL_SYSTEM_2026_04_23`](SPEC_ROBUST_MODAL_SYSTEM_2026_04_23.md) | Spec: Robust Modal System |
 | [`SPEC_RUNTIME_IDENTITY_AUTOBIND_2026_05_15`](SPEC_RUNTIME_IDENTITY_AUTOBIND_2026_05_15.md) | SPEC: Runtime Identity Auto-Bind & Named-Agent Display Fix |
-| [`SPEC_SAGA_ARCHITECTURE_TARGET_2026-05-01`](SPEC_SAGA_ARCHITECTURE_TARGET_2026-05-01.md) | Saga + Reducer + IPC Architecture — Target End State |
-| [`SPEC_SAGA_DURABILITY_2026-05-01`](SPEC_SAGA_DURABILITY_2026-05-01.md) | SPEC: Saga durability — durable saga log |
 | [`SPEC_SCHEMA_FLATTENING_2026_05_19`](SPEC_SCHEMA_FLATTENING_2026_05_19.md) | SPEC: objects.db Schema Flattening + De-Forge Rename |
 | [`SPEC_SECTIONED_PANE_DYNAMIC_TITLE_2026_08_12`](SPEC_SECTIONED_PANE_DYNAMIC_TITLE_2026_08_12.md) | SPEC: Dynamic pane titles for rail/section panes (Armory, Warden, Settings) |
 | [`SPEC_SERVICE_SUPERVISION_AND_RECOVERY_2026_05_20`](SPEC_SERVICE_SUPERVISION_AND_RECOVERY_2026_05_20.md) | SPEC — Service Supervision & Recovery |
@@ -1053,7 +1063,6 @@ partial list.
 | [`SPEC_STATUSBAR_CPU_CORES_PANEL_2026_06_15`](SPEC_STATUSBAR_CPU_CORES_PANEL_2026_06_15.md) | SPEC: Status-bar CPU → per-core panel |
 | [`SPEC_STATUS_BAR_POPOVER_AIRSPACE_CLIP_2026_08_17`](SPEC_STATUS_BAR_POPOVER_AIRSPACE_CLIP_2026_08_17.md) | SPEC — Status bar popovers: fix native browser-pane airspace occlusion |
 | [`SPEC_STATUS_BAR_WINDOW_COUNT_2026_05_16`](SPEC_STATUS_BAR_WINDOW_COUNT_2026_05_16.md) | SPEC: Status-Bar Window-Count Display |
-| [`SPEC_SUBAGENT_LIFECYCLE_RECONCILIATION_2026_07_12`](SPEC_SUBAGENT_LIFECYCLE_RECONCILIATION_2026_07_12.md) | SPEC — subagent lifecycle: no reducer, no liveness, "working" forever |
 | [`SPEC_SUBMENU_POSITIONING_AND_HOVER_TIMING_2026_08_10`](SPEC_SUBMENU_POSITIONING_AND_HOVER_TIMING_2026_08_10.md) | SPEC: Submenu positioning flash + hover-intent (safe-triangle) timing |
 | [`SPEC_SUBPROCESS_INTEGRATION_TESTS_2026_04_16`](SPEC_SUBPROCESS_INTEGRATION_TESTS_2026_04_16.md) | SPEC: Subprocess Integration Tests |
 | [`SPEC_SWARM_LIVE_FEED_BINDINGS_2026_07_05`](SPEC_SWARM_LIVE_FEED_BINDINGS_2026_07_05.md) | SPEC: Swarm Live Feed — backend code bindings |
@@ -1090,7 +1099,6 @@ partial list.
 | [`SPEC_WINDOWS_CEF_BUNDLE_VERSION_INTEGRITY_2026_06_03`](SPEC_WINDOWS_CEF_BUNDLE_VERSION_INTEGRITY_2026_06_03.md) | SPEC: Windows CEF Bundle Version Integrity & Loud Startup Failure |
 | [`SPEC_WINDOW_DRAG_DPI_FIX_2026-05-13`](SPEC_WINDOW_DRAG_DPI_FIX_2026-05-13.md) | SPEC: Robust DPI Handling for Window-Header Drag |
 | [`SPEC_WINDOW_INSTANCE_NAMING_CLEANUP_2026-05-14`](SPEC_WINDOW_INSTANCE_NAMING_CLEANUP_2026-05-14.md) | SPEC: Window/Instance Naming Cleanup |
-| [`SPEC_WINDOW_PROCESS_STATE_MACHINE_2026_04_27`](SPEC_WINDOW_PROCESS_STATE_MACHINE_2026_04_27.md) | SPEC: AgentMux Window & Process State Machine |
 | [`SPEC_WINDOW_REACTIVATE_FOCUS_RESTORE_2026_05_23`](SPEC_WINDOW_REACTIVATE_FOCUS_RESTORE_2026_05_23.md) | SPEC: Restore keyboard focus to the active pane on window re-activation (Windows) |
 | [`SPEC_WINDOW_RENAME_2026_04_27`](SPEC_WINDOW_RENAME_2026_04_27.md) | Window Rename + Click Behaviors in InstancePanel |
 | [`SPEC_WINDOW_TITLE_FORMAT_2026-05-13`](SPEC_WINDOW_TITLE_FORMAT_2026-05-13.md) | SPEC: Window Title Format — `Window - Tab - AgentMux` |
@@ -1098,11 +1106,9 @@ partial list.
 | [`SPEC_WORKING_STATE_LIVENESS_MODEL_2026_06_29`](SPEC_WORKING_STATE_LIVENESS_MODEL_2026_06_29.md) | SPEC: "Working…" State — Liveness Model (rethink, not rewrite) |
 | [`SPEC_WORKSPACE_TAB_SIZING_2026-05-27`](SPEC_WORKSPACE_TAB_SIZING_2026-05-27.md) | Spec: Workspace Tab Sizing — Editor-Tab Parity |
 | [`SPEC_WRITE_STATE_NDJSON_RESTORE_2026_06_12`](SPEC_WRITE_STATE_NDJSON_RESTORE_2026_06_12.md) | SPEC: write_state Option 4 — NDJSON-Reconstructed Snapshot (Schema v2) |
-| [`agent-pane-document-reducer-2026-05-03`](agent-pane-document-reducer-2026-05-03.md) | Agent Pane Document Reducer — root-cause + architecture spec |
 | [`agent-pane-icon-debug`](agent-pane-icon-debug.md) | Agent Pane Icon Buttons — Debug Log |
 | [`agentmux-isolated-auth`](agentmux-isolated-auth.md) | Spec: AgentMux Isolated Claude/Anthropic Authentication |
 | [`codex-gemini-cli-integration`](codex-gemini-cli-integration.md) | Spec: Codex CLI & Gemini CLI — Install, Auth, and Launch Integration |
-| [`frontend-reducer-implementation-plan-2026-05-03`](frontend-reducer-implementation-plan-2026-05-03.md) | Frontend Reducer Implementation Plan |
 | [`instance-indicator`](instance-indicator.md) | Spec: Window Instance Indicator |
 | [`jekt-auto-registration`](jekt-auto-registration.md) | Jekt Auto-Registration via AGENTMUX_AGENT_ID |
 | [`lan-awareness-and-embedded-jekt-api`](lan-awareness-and-embedded-jekt-api.md) | Analysis: LAN Instance Awareness & Embedded Jekt API |
@@ -1147,6 +1153,7 @@ partial list.
 | [`ANALYSIS_MULTI_PROCESS_BEST_PRACTICES_2026_04_27`](ANALYSIS_MULTI_PROCESS_BEST_PRACTICES_2026_04_27.md) | ANALYSIS: Multi-Process Desktop App State Management — Best Practices |
 | [`ANALYSIS_WINDOW_PROCESS_STATE_INVENTORY_2026_04_27`](ANALYSIS_WINDOW_PROCESS_STATE_INVENTORY_2026_04_27.md) | ANALYSIS: AgentMux Window/Process State Inventory |
 | [`MASTER_REDUCER_STACK_STATUS_2026-05-05`](MASTER_REDUCER_STACK_STATUS_2026-05-05.md) | Master Reducer-Stack Status — 2026-05-05 |
+| [`PHASE_E_SAGAS_EXECUTION_PLAN_2026-04-30`](PHASE_E_SAGAS_EXECUTION_PLAN_2026-04-30.md) | Phase E.5 Sagas — Execution Plan |
 | [`REPORT_AGENT_IDENTITY_HISTORY_FRAGMENTATION_2026_08_16`](REPORT_AGENT_IDENTITY_HISTORY_FRAGMENTATION_2026_08_16.md) | Agent Identity/History Fragmentation Across Builds — Root Cause and a Fast-Lookup Design |
 | [`REPORT_AGENT_PANE_ARCHITECTURE_MODULARIZATION_ANALYSIS_2026_07_31`](REPORT_AGENT_PANE_ARCHITECTURE_MODULARIZATION_ANALYSIS_2026_07_31.md) | REPORT — Agent Pane Architecture: Full Inventory & Modularization Analysis |
 | [`REPORT_AGENT_PANE_SCROLL_PIN_FLICKER_AUDIT_2026_07_30`](REPORT_AGENT_PANE_SCROLL_PIN_FLICKER_AUDIT_2026_07_30.md) | Report: why the message-list scrollbar still visibly drifts up before snapping to bottom, and how to make it pin unconditionally |
@@ -1161,8 +1168,11 @@ partial list.
 | [`REPORT_PROCESS_ARCHITECTURE_STATE_AND_RETHINK_2026_07_22`](REPORT_PROCESS_ARCHITECTURE_STATE_AND_RETHINK_2026_07_22.md) | AgentMux Process Architecture — Current State & Rethink |
 | [`REPORT_REDUCER_STACK_AUDIT_2026_07_26`](REPORT_REDUCER_STACK_AUDIT_2026_07_26.md) | Reducer Stack Audit — Post-Mortem on Duplication, Coupling, and Modularization |
 | [`REPORT_SWARM_SUBAGENT_INTERRUPTED_STATUS_2026_07_20`](REPORT_SWARM_SUBAGENT_INTERRUPTED_STATUS_2026_07_20.md) | REPORT — why every subagent under a long-running pane shows "Interrupted" |
+| [`SAGA_ARCHITECTURE_EXECUTION_PLAN_2026-05-01`](SAGA_ARCHITECTURE_EXECUTION_PLAN_2026-05-01.md) | Saga Architecture — Execution Plan |
 | [`SPEC_ACTIVE_TAB_COLOR_LINE_STOP_AT_TAB_STRIP_2026_07_13`](SPEC_ACTIVE_TAB_COLOR_LINE_STOP_AT_TAB_STRIP_2026_07_13.md) | SPEC — active-tab color line: stop at the tab strip's right edge, not the viewport edge |
+| [`SPEC_LAUNCH_AUTH_STATE_MACHINE_2026_05_14`](SPEC_LAUNCH_AUTH_STATE_MACHINE_2026_05_14.md) | Pre-launch auth — complete user stories + state machine |
 | [`SPEC_PERSISTENCE_LAYER_ANALYSIS_2026-05-14`](SPEC_PERSISTENCE_LAYER_ANALYSIS_2026-05-14.md) | SPEC: Persistence layer analysis — keep SQLite, or move? |
+| [`SPEC_SAGA_ARCHITECTURE_TARGET_2026-05-01`](SPEC_SAGA_ARCHITECTURE_TARGET_2026-05-01.md) | Saga + Reducer + IPC Architecture — Target End State |
 | [`browser-pane-state-catalog`](browser-pane-state-catalog.md) | Browser pane state catalog |
 | [`container-agent-runtime`](container-agent-runtime.md) | Spec: Container Agent Runtime |
 | [`modal-cleanup-migration-2026-05-01`](modal-cleanup-migration-2026-05-01.md) | Modal Cleanup — Migration Audit & Plan |
@@ -1181,11 +1191,14 @@ partial list.
 | [`SPEC_COMPOSER_STRIP_LEFT_RIGHT_BALANCE_2026_08_24`](SPEC_COMPOSER_STRIP_LEFT_RIGHT_BALANCE_2026_08_24.md) | SPEC: Composer strip — balance misc elements across left/right zones |
 | [`SPEC_HIDDEN_MEMORY_REINJECTION_AFTER_COMPACTION_2026_09_22`](SPEC_HIDDEN_MEMORY_REINJECTION_AFTER_COMPACTION_2026_09_22.md) | Spec: Hidden memory reinjection after compaction |
 | [`SPEC_JEKT_DEFERRED_DELIVERY_NO_MIDTURN_INTERRUPT_2026_09_10`](SPEC_JEKT_DEFERRED_DELIVERY_NO_MIDTURN_INTERRUPT_2026_09_10.md) | SPEC: Defer jekt / inter-agent message delivery until a safe turn boundary — never truncate an in-progress explanation |
+| [`SPEC_LAUNCHER_SAGA_DURABILITY_2026-05-01`](SPEC_LAUNCHER_SAGA_DURABILITY_2026-05-01.md) | Launcher Saga Durability + Recovery |
 | [`SPEC_MEMORY_CARRYOVER_LOAD_AND_MANAGE_2026_09_05`](SPEC_MEMORY_CARRYOVER_LOAD_AND_MANAGE_2026_09_05.md) | Memory carry-over: loading and management across the three agent-awareness cases |
 | [`SPEC_NO_MIDTURN_DELIVERY_2026_09_23`](SPEC_NO_MIDTURN_DELIVERY_2026_09_23.md) | SPEC: No mid-turn delivery — automated messages never cut an agent's train of thought |
 | [`SPEC_PANE_CLOSE_FOCUS_HANDOFF_2026_10_03`](SPEC_PANE_CLOSE_FOCUS_HANDOFF_2026_10_03.md) | When a pane closes, the pane that takes over gets the caret |
 | [`SPEC_PANE_FILE_DROP_TARGET_HIGHLIGHT_2026_09_27`](SPEC_PANE_FILE_DROP_TARGET_HIGHLIGHT_2026_09_27.md) | SPEC: Highlight the pane a dragged file will land in |
 | [`SPEC_WINDOW_DRAG_HANDLE_2026_06_06`](SPEC_WINDOW_DRAG_HANDLE_2026_06_06.md) | SPEC: Always-visible window drag handle (grip) in the tab bar |
+| [`frontend-reducer-architecture-2026-05-03`](frontend-reducer-architecture-2026-05-03.md) | Frontend Reducer Architecture — spec roadmap |
+| [`frontend-reducer-implementation-plan-2026-05-03`](frontend-reducer-implementation-plan-2026-05-03.md) | Frontend Reducer Implementation Plan |
 
 ### no status line
 
@@ -1199,11 +1212,9 @@ Fix one when you touch it and know its real state.
 | [`CLEANUP_LEGACY_REMNANTS`](CLEANUP_LEGACY_REMNANTS.md) | Cleanup Spec: Remove Legacy Remnants |
 | [`OAUTH_FLOW_SMOKE_DIAGNOSTIC_2026_05_14`](OAUTH_FLOW_SMOKE_DIAGNOSTIC_2026_05_14.md) | OAuth Pre-Launch Smoke-Test Diagnostic — 2026-05-14 |
 | [`OAUTH_RESUME_AFTER_REBOOT_2026_05_14`](OAUTH_RESUME_AFTER_REBOOT_2026_05_14.md) | OAuth pre-launch — resume notes after PC reboot (2026-05-14) |
-| [`PHASE_E_SAGAS_EXECUTION_PLAN_2026-04-30`](PHASE_E_SAGAS_EXECUTION_PLAN_2026-04-30.md) | Phase E.5 Sagas — Execution Plan |
 | [`PLAN_BROWSER_DOM_API`](PLAN_BROWSER_DOM_API.md) | PLAN: Browser-pane DOM API implementation |
 | [`PLAN_SPLASH_TELEMETRY_OPEN_ITEMS_2026_07_22`](PLAN_SPLASH_TELEMETRY_OPEN_ITEMS_2026_07_22.md) | PLAN: Splash telemetry — consolidated open-items tracker |
 | [`RESEARCH_TAB_TEAROFF_CROSS_PLATFORM_2026-05-07`](RESEARCH_TAB_TEAROFF_CROSS_PLATFORM_2026-05-07.md) | Tab tear-off — research report on cross-platform best practices |
-| [`SAGA_ARCHITECTURE_EXECUTION_PLAN_2026-05-01`](SAGA_ARCHITECTURE_EXECUTION_PLAN_2026-05-01.md) | Saga Architecture — Execution Plan |
 | [`SPEC_AGENT_BUSY_ANIMATION_2026_06_21`](SPEC_AGENT_BUSY_ANIMATION_2026_06_21.md) | Agent Busy Animation — Aurora Bar |
 | [`SPEC_AGENT_ERROR_FRAMEWORK_2026_06_20`](SPEC_AGENT_ERROR_FRAMEWORK_2026_06_20.md) | SPEC: Agent Error Framework — Durable Error State + Global Error Surface |
 | [`SPEC_AGENT_FAILURE_DIAGNOSTICS_2026_06_11`](SPEC_AGENT_FAILURE_DIAGNOSTICS_2026_06_11.md) | SPEC: Agent Failure Diagnostics — Surfacing the "Why" Behind a Non-Zero Exit |
@@ -1344,12 +1355,6 @@ section above, do not bulk-restamp them.
 | [`SPEC_BROWSER_PANE_LIFECYCLE`](SPEC_BROWSER_PANE_LIFECYCLE.md) | SPEC: Browser Pane Lifecycle & State Machine |
 | [`cef-drag-window-management`](cef-drag-window-management.md) | Spec: CEF Drag, Drop, and Window Management |
 | [`cef-transparency-architecture`](cef-transparency-architecture.md) | Spec: CEF Transparency Architecture |
-
-**`architecture`**
-
-| Spec | Title |
-|---|---|
-| [`frontend-reducer-architecture-2026-05-03`](frontend-reducer-architecture-2026-05-03.md) | Frontend Reducer Architecture — spec roadmap |
 
 **`assessment`**
 

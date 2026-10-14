@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! srv's secret storage: Armory API keys, OAuth accounts, MuxBus
+//! srv's secret storage: account API keys, OAuth accounts, MuxBus
 //! credentials, browser-pane logins.
 //!
 //! Backs `SecretRef::Keychain { service, account }`, which names an entry in

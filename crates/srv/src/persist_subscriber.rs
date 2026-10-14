@@ -1,40 +1,23 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Phase E.2c.1+E.2c.2 — persist subscriber. A tokio task that
-// consumes the srv reducer's broadcast bus and mirrors
-// workspace/tab/block lifecycle events back to SQLite via wcore.
+// Persist subscriber: a tokio task that consumes the srv reducer's event
+// bus and writes each domain event (workspaces, tabs, blocks, windows,
+// meta, the layout tree and its focus/magnify, the backend-action queue)
+// to SQLite through `apply_event_to_mstore`. The reducer owns that state;
+// SQLite is its projection, loaded back at startup by
+// `persist::bootstrap_state_from_mstore`.
 //
-// Status:
-//   * E.2c.1 (#614) shipped the per-event apply path. Subscriber was
-//     dead-code in production because no producer existed.
-//   * E.2c.2 (this) wires the workspace HTTP/WS RPC handlers through
-//     the reducer, making the subscriber LIVE for workspace events.
-//     Adds full-resync-on-`Lagged` for workspaces (RPC-migrated
-//     entities only — tab/block resync lands in E.2c.3 / E.2c.4).
+// RPC handlers and saga steps also call `apply_event_to_mstore` right after
+// dispatching, so a follow-up read sees the write; every arm is idempotent,
+// so this task's second apply of the same event is a no-op. Events from the
+// srv IPC pipe (`srv_ipc/server.rs`) get no such synchronous apply and reach
+// SQLite only through this task.
 //
-// Bus-lag handling:
-//   On RecvError::Lagged(n) the subscriber drops `n` events.
-//   Naive HWM advancement past dropped events would permanently
-//   diverge SQLite from reducer state. Instead we do a workspace-
-//   scoped resync: snapshot `state.workspaces` under the reducer
-//   mutex, write each workspace into SQLite (idempotent insert /
-//   no-op / update). The resync is INSERT/UPDATE only — no deletes —
-//   because workspaces can also be created OUTSIDE the reducer
-//   during the migration window (e.g., the still-wcore-direct
-//   `CreateWindow` flow calls `wcore::create_window_full` which
-//   creates a workspace under the hood). Deleting workspaces
-//   missing from the reducer snapshot would lose those legitimate
-//   rows. Stale workspaces deleted-via-reducer that the subscriber
-//   missed on Lagged linger on disk until the next user-driven
-//   DeleteWorkspace cleans them up via the wcore fallback in
-//   service.rs. (codex P1 #615.)
-//
-//   IMPORTANT: tab/block resync is NOT done here yet. Tabs and
-//   blocks remain RPC-direct via wcore; the reducer's view of them
-//   is FROZEN at bootstrap. Doing tab/block resync before E.2c.3
-//   and E.2c.4 land would clobber RPC-driven writes the reducer
-//   doesn't see. Resync expands as each entity migrates.
+// Bus lag: on `RecvError::Lagged` the dropped events are lost, so
+// `resync_workspaces` rewrites workspaces from the reducer's snapshot.
+// Tabs, blocks and layout are not resynced; a lag leaves them stale on
+// disk until their next event.
 
 use std::sync::Arc;
 
@@ -80,13 +63,9 @@ async fn run_persist_subscriber(
                 }
             }
             Err(broadcast::error::RecvError::Lagged(n)) => {
-                // Workspace-scoped full resync. Subscriber dropped
-                // `n` events; rather than guess which entities were
-                // affected, snapshot the reducer's workspace map and
-                // reconcile SQLite against it. RPC-migrated entities
-                // (workspaces in E.2c.2) are correctly recovered;
-                // not-yet-migrated entities (tab/block) are left
-                // alone — see module-level docs.
+                // Dropped `n` events; rather than guess which were
+                // lost, reconcile SQLite's workspaces against the
+                // reducer's (see the module header for what isn't).
                 tracing::warn!(
                     target: "srv-persist-subscriber",
                     "[srv-persist-subscriber] dropped {} event(s) — running workspace resync",
@@ -109,26 +88,9 @@ async fn run_persist_subscriber(
 }
 
 /// Snapshot `state.workspaces` and reconcile against SQLite —
-/// INSERT/UPDATE only, no deletes. Workspace-scoped (tab/block
-/// resync expands here as each entity's RPC layer migrates).
-///
-/// Why no delete-phase: during the migration window, workspaces
-/// can be created OUTSIDE the reducer (e.g., the still-wcore-direct
-/// `CreateWindow` flow calls `wcore::create_window_full` which
-/// creates a workspace under the hood). Those workspaces aren't in
-/// `state.workspaces`. If the subscriber lagged and we did a
-/// delete-not-in-snapshot pass, we'd cascade-delete legitimate
-/// workspaces — data loss triggered by bus pressure rather than a
-/// user action. Far better for a stale workspace deleted-via-reducer
-/// to linger on disk after a Lagged event than to lose a real one.
-/// (codex P1 #615.)
-///
-/// Stale-after-Lagged scenario: reducer fires WorkspaceDeleted, the
-/// subscriber drops it on Lagged, resync runs but only insert/updates.
-/// SQLite still has the deleted workspace's row. The next user-driven
-/// DeleteWorkspace (which falls through to `wcore::delete_workspace`
-/// for unknown-to-reducer rows) cleans it up. Acceptable behaviour
-/// during the migration; tightens once all RPC is reducer-driven.
+/// INSERT/UPDATE only, no deletes: a delete pass triggered by bus pressure
+/// rather than a user action risks losing rows (#615). The cost is that a
+/// workspace whose `WorkspaceDeleted` was dropped lingers on disk.
 ///
 /// Strategy:
 ///   1. Lock state, snapshot the workspace map (ids + names),
@@ -295,71 +257,38 @@ pub(crate) fn apply_event_to_mstore(
         Event::MagnifiedNodeChanged { tab_id, node_id, .. } => {
             apply_magnified_node_changed(mstore, tab_id, node_id)
         }
-        // Phase E.4.B — layout-tree persistence. These two are the
-        // first tree-mutating layout events to persist through the
-        // subscriber (rather than wcore-direct). They are behaviour-
-        // neutral until a production caller dispatches LayoutClear /
-        // LayoutSetTree (the Layout* arms are still dormant per
-        // reducer.rs §"4 of 11"); they land the persistence path that
-        // the UpdateObject→LayoutSetTree reroute (next phase) needs.
-        // Insert is deliberately NOT here yet — its event carries op
-        // params, not the resulting tree, so persisting it would require
-        // re-running the algebra in the subscriber (a new divergence
-        // surface). Delete WAS in the same boat until SPEC_864 site #6
-        // gave `LayoutNodeDeleted` a `new_tree` (+ `tree_cleared`) and its
-        // own arm below; Insert follows when a production caller needs it.
-        Event::LayoutCleared { tab_id, .. } => apply_layout_cleared(mstore, tab_id),
+        // Layout-tree persistence. Every tree-changing event the reducer emits
+        // carries its resulting tree, so the subscriber writes it rather
+        // than re-running the tree algebra (a second divergence surface).
         Event::LayoutTreeReplaced {
             tab_id,
             new_tree,
             slices,
             ..
-        } => apply_layout_tree_replaced(mstore, tab_id, new_tree, slices.as_ref()),
-        // SPEC_864 site #6 — LayoutNodeDeleted gets its own arm (not the
-        // group below) because a delete is the one structural op that can
-        // legitimately EMPTY the tree (root-orphan case). `tree_cleared`
-        // disambiguates a real root-delete clear from a version-skewed
-        // sender's absent `new_tree`, which must be ignored rather than
-        // applied as an erase (same skew concern as the group below).
-        // Leaforder handling follows the granular-arm convention: untouched
-        // for a non-empty tree (frontend-recomputed geometry cache, not
-        // read on reproject), cleared with everything else on a real
-        // empty-tree clear (apply_layout_tree_replaced's clears path).
+        } => apply_layout_tree_replaced(mstore, tab_id, new_tree, slices.as_ref(), NO_FOCUS_CLEAR),
+        // A delete is the one structural op that can legitimately EMPTY the
+        // tree (root-orphan case), so `tree_cleared` tells a real clear from
+        // a version-skewed sender's absent `new_tree`, which is ignored
+        // rather than applied as an erase. `was_focused`/`was_magnified`
+        // mean the reducer cleared that id; the row must match.
         Event::LayoutNodeDeleted {
             tab_id,
             new_tree,
             tree_cleared,
+            was_focused,
+            was_magnified,
             ..
         } => match (new_tree.is_some(), tree_cleared) {
-            (true, _) => apply_layout_tree_replaced(mstore, tab_id, new_tree, None),
-            (false, true) => apply_layout_tree_replaced(mstore, tab_id, &None, None),
+            (true, _) => apply_layout_tree_replaced(
+                mstore,
+                tab_id,
+                new_tree,
+                None,
+                FocusClear { focused: *was_focused, magnified: *was_magnified },
+            ),
+            (false, true) => apply_layout_tree_replaced(mstore, tab_id, &None, None, NO_FOCUS_CLEAR),
             (false, false) => Ok(()),
         },
-        // The 7 granular structural arms each carry the reducer's resulting
-        // tree in `new_tree` (post-op, post-balance), so persistence is the
-        // same rootnode write as LayoutTreeReplaced — no algebra re-run in the
-        // subscriber (the divergence surface we're avoiding). Focus/magnify
-        // changes from these ops are not persisted here yet (the frontend
-        // reconciles focus on load); that's a tracked follow-up.
-        Event::LayoutNodeMoved { tab_id, new_tree, .. }
-        | Event::LayoutNodesSwapped { tab_id, new_tree, .. }
-        | Event::LayoutNodesResized { tab_id, new_tree, .. }
-        | Event::LayoutNodeReplaced { tab_id, new_tree, .. }
-        | Event::LayoutSplitHorizontalApplied { tab_id, new_tree, .. }
-        | Event::LayoutSplitVerticalApplied { tab_id, new_tree, .. }
-        | Event::LayoutNodeInsertedAtIndex { tab_id, new_tree, .. } => {
-            // These structural ops NEVER legitimately produce an empty tree,
-            // so a `None` here is only a version-skewed / pre-change sender
-            // (`new_tree` is `#[serde(default)]`). Ignore it rather than
-            // passing it to `apply_layout_tree_replaced`, which would treat
-            // `None` as an intentional empty-tree clear and ERASE the
-            // persisted layout (codex P2 on #1883). Persist only a real tree.
-            match new_tree {
-                // Granular events carry no client slices — tree-only write.
-                Some(_) => apply_layout_tree_replaced(mstore, tab_id, new_tree, None),
-                None => Ok(()),
-            }
-        }
         // SPEC_864 Phase 4 — APPEND to the pending queue (unlike the
         // slices path above, which REPLACEs it: pushing a slice without
         // processed actions is how the frontend ACKS the queue; the
@@ -798,40 +727,14 @@ fn apply_magnified_node_changed(
     Ok(())
 }
 
-/// Phase E.4.B — apply a `LayoutCleared` event: wipe the tab's persisted
-/// layout tree and the focus/magnify ids (and the leaforder cache — an
-/// empty tree has no leaves). Mirrors
-/// `reducer::layout::handle_layout_clear`. Idempotent: silent no-op when
-/// the tab is unknown, the layout row is missing, or it is already clear
-/// (so a double-apply — once synchronously from the RPC handler, once
-/// from the broadcast — does not churn the version).
-fn apply_layout_cleared(
-    mstore: &Store,
-    tab_id: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let Some(tab) = mstore.get::<Tab>(tab_id)? else {
-        return Ok(());
-    };
-    if tab.layoutstate.is_empty() {
-        return Ok(());
-    }
-    let Some(mut layout) = mstore.get::<PersistedLayoutState>(&tab.layoutstate)? else {
-        return Ok(());
-    };
-    if layout.rootnode.is_none()
-        && layout.focusednodeid.is_empty()
-        && layout.magnifiednodeid.is_empty()
-        && layout.leaforder.is_none()
-    {
-        return Ok(());
-    }
-    layout.rootnode = None;
-    layout.focusednodeid = String::new();
-    layout.magnifiednodeid = String::new();
-    layout.leaforder = None;
-    mstore.update(&mut layout)?;
-    Ok(())
+/// Focus/magnify ids a tree-only layout event says the reducer cleared.
+#[derive(Clone, Copy)]
+struct FocusClear {
+    focused: bool,
+    magnified: bool,
 }
+
+const NO_FOCUS_CLEAR: FocusClear = FocusClear { focused: false, magnified: false };
 
 /// Phase E.4.B — apply a `LayoutTreeReplaced` event: write the reducer-
 /// supplied tree onto `LayoutState.rootnode`. Mirrors
@@ -845,8 +748,9 @@ fn apply_layout_cleared(
 /// this route retires: leaforder / pendingbackendactions are written
 /// verbatim (absent = clear — pushing without processed actions is how
 /// the frontend acks its queue); focus/magnify strings overwrite (empty =
-/// clear). `slices: None` (granular events, tree-only callers) leaves
-/// those columns untouched — leaforder is a frontend-recomputed geometry
+/// clear). `slices: None` (tree-only events) leaves those columns
+/// untouched, except that `clear` empties a focus/magnify id the reducer
+/// dropped with the edit — leaforder is a frontend-recomputed geometry
 /// cache (`getLeafOrder` in `layoutGeometry.ts`) and is NOT read on
 /// reproject (`persist::bootstrap_state_from_mstore` reads
 /// rootnode/focus/magnify only). Idempotent: no-op (no version bump)
@@ -856,6 +760,7 @@ fn apply_layout_tree_replaced(
     tab_id: &str,
     new_tree: &Option<agentmux_common::LayoutNode>,
     slices: Option<&agentmux_common::LayoutClientSlices>,
+    clear: FocusClear,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let Some(tab) = mstore.get::<Tab>(tab_id)? else {
         return Ok(());
@@ -875,11 +780,13 @@ fn apply_layout_tree_replaced(
     let new_focused = match (slices, clears) {
         (_, true) => String::new(),
         (Some(s), false) => s.focused_node_id.clone(),
+        (None, false) if clear.focused => String::new(),
         (None, false) => layout.focusednodeid.clone(),
     };
     let new_magnified = match (slices, clears) {
         (_, true) => String::new(),
         (Some(s), false) => s.magnified_node_id.clone(),
+        (None, false) if clear.magnified => String::new(),
         (None, false) => layout.magnifiednodeid.clone(),
     };
     let new_leaforder: Option<Vec<LeafOrderEntry>> = match (slices, clears) {
@@ -1534,69 +1441,7 @@ mod tests {
         assert_eq!(root.data.unwrap().block_id, "b1");
     }
 
-    #[test]
-    fn layout_granular_event_persists_new_tree() {
-        // The 7 granular structural events each carry the reducer's resulting
-        // tree in `new_tree`; the unified subscriber arm writes it to
-        // db_layout (same path as LayoutTreeReplaced). Representative check
-        // via LayoutNodeMoved — the |-pattern routes all 7 identically.
-        let s = store();
-        let tab = ws_tab(&s);
-        apply_event_to_mstore(
-            &Event::LayoutNodeMoved {
-                tab_id: tab.clone(),
-                new_tree: Some(leaf("moved-root", "bm")),
-                node_id: "x".into(),
-                new_parent_id: "y".into(),
-                index: 0,
-                correlation_id: "c".into(),
-                version: 3,
-            },
-            &s,
-        )
-        .unwrap();
-        let root = layout_of(&s, &tab)
-            .rootnode
-            .expect("granular event persisted rootnode");
-        assert_eq!(root.id, "moved-root");
-    }
 
-    #[test]
-    fn layout_granular_event_with_none_tree_does_not_clear() {
-        // A version-skewed granular event (new_tree defaulted to None) must NOT
-        // erase the persisted layout — these ops never produce an empty tree.
-        // (codex P2 #1883.)
-        let s = store();
-        let tab = ws_tab(&s);
-        apply_event_to_mstore(
-            &Event::LayoutTreeReplaced {
-                tab_id: tab.clone(),
-                new_tree: Some(leaf("keep", "bk")),
-                correlation_id: "seed".into(),
-                slices: None,
-                version: 2,
-            },
-            &s,
-        )
-        .unwrap();
-        apply_event_to_mstore(
-            &Event::LayoutNodeMoved {
-                tab_id: tab.clone(),
-                new_tree: None, // version skew — must be a no-op, not a clear
-                node_id: "x".into(),
-                new_parent_id: "y".into(),
-                index: 0,
-                correlation_id: "c".into(),
-                version: 3,
-            },
-            &s,
-        )
-        .unwrap();
-        let root = layout_of(&s, &tab)
-            .rootnode
-            .expect("tree preserved, not cleared by a None granular event");
-        assert_eq!(root.id, "keep");
-    }
 
     // ── SPEC_864 site #6 — LayoutNodeDeleted persistence ────────────────────
 
@@ -1628,7 +1473,7 @@ mod tests {
     fn layout_node_deleted_none_without_cleared_is_ignored() {
         // A version-skewed LayoutNodeDeleted (pre-site-#6 JSON: no
         // new_tree, tree_cleared defaults false) must NOT erase the
-        // persisted layout — same skew rule as the granular group.
+        // persisted layout.
         let s = store();
         let tab = ws_tab(&s);
         apply_event_to_mstore(
@@ -1700,53 +1545,42 @@ mod tests {
     }
 
     #[test]
-    fn layout_cleared_wipes_tree_and_ids() {
+    fn layout_node_deleted_persists_focus_and_magnify_clears() {
         let s = store();
         let tab = ws_tab(&s);
-        apply_event_to_mstore(
-            &Event::LayoutTreeReplaced {
-                tab_id: tab.clone(),
-                new_tree: Some(leaf("n1", "b1")),
-                correlation_id: "c".into(),
-                slices: None,
-                version: 3,
-            },
-            &s,
-        )
-        .unwrap();
-        apply_event_to_mstore(
-            &Event::FocusedNodeChanged {
-                tab_id: tab.clone(),
-                node_id: "n1".into(),
-                version: 4,
-            },
-            &s,
-        )
-        .unwrap();
-        apply_event_to_mstore(
-            &Event::MagnifiedNodeChanged {
-                tab_id: tab.clone(),
-                node_id: "n1".into(),
-                version: 5,
-            },
-            &s,
-        )
-        .unwrap();
-        apply_event_to_mstore(
-            &Event::LayoutCleared {
-                tab_id: tab.clone(),
-                correlation_id: "c".into(),
-                version: 6,
-            },
-            &s,
-        )
-        .unwrap();
+        let seed = |focused: &str, magnified: &str| Event::LayoutTreeReplaced {
+            tab_id: tab.clone(),
+            new_tree: Some(leaf("gone", "bg")),
+            correlation_id: "seed".into(),
+            slices: Some(slices(None, focused, magnified, None)),
+            version: 2,
+        };
+        let delete = |was_focused: bool, was_magnified: bool| Event::LayoutNodeDeleted {
+            tab_id: tab.clone(),
+            node_id: "gone".into(),
+            new_tree: Some(leaf("survivor", "bs")),
+            tree_cleared: false,
+            was_focused,
+            was_magnified,
+            correlation_id: "c".into(),
+            version: 3,
+        };
+
+        apply_event_to_mstore(&seed("gone", "gone"), &s).unwrap();
+        apply_event_to_mstore(&delete(true, true), &s).unwrap();
         let layout = layout_of(&s, &tab);
-        assert!(layout.rootnode.is_none());
-        assert!(layout.focusednodeid.is_empty());
-        assert!(layout.magnifiednodeid.is_empty());
-        assert!(layout.leaforder.is_none());
+        assert_eq!(layout.rootnode.unwrap().id, "survivor");
+        assert_eq!(layout.focusednodeid, "", "reducer cleared focus; the row must too");
+        assert_eq!(layout.magnifiednodeid, "", "reducer cleared magnify; the row must too");
+
+        // Ids the delete didn't touch stay as they were.
+        apply_event_to_mstore(&seed("survivor", "survivor"), &s).unwrap();
+        apply_event_to_mstore(&delete(false, false), &s).unwrap();
+        let layout = layout_of(&s, &tab);
+        assert_eq!(layout.focusednodeid, "survivor");
+        assert_eq!(layout.magnifiednodeid, "survivor");
     }
+
 
     #[test]
     fn layout_tree_replaced_empty_clears_focus_magnify() {
@@ -1902,7 +1736,7 @@ mod tests {
 
     #[test]
     fn layout_tree_replaced_without_slices_leaves_client_columns_untouched() {
-        // Tree-only events (granular arms, dormant callers) must not clobber
+        // Tree-only events (pane-tab edits, saga callers) must not clobber
         // focus/magnify/leaforder/pending — only a slice-carrying full-row
         // push owns those columns.
         let s = store();
@@ -1955,15 +1789,6 @@ mod tests {
     #[test]
     fn layout_events_silent_when_tab_missing() {
         let s = store();
-        apply_event_to_mstore(
-            &Event::LayoutCleared {
-                tab_id: "ghost".into(),
-                correlation_id: "c".into(),
-                version: 1,
-            },
-            &s,
-        )
-        .unwrap();
         apply_event_to_mstore(
             &Event::LayoutTreeReplaced {
                 tab_id: "ghost".into(),

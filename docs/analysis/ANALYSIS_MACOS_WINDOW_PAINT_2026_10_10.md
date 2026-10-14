@@ -1,12 +1,29 @@
 # macOS window paint: what the Windows work already gives us, and what macOS still needs
 
 **Date:** 2026-10-10
-**Status:** analysis. §2 is the status of the Windows paint work, §3 what carries over, §5 the macOS measurements, §6 the causes, §7 the recommendations. Nothing in this PR changes product code; the only code is the measurement scripts in [`scripts/perf/macos-paint/`](../../scripts/perf/macos-paint).
+**Status:** analysis; M1 and M2 shipped (§0, updated 2026-10-13). §2 is the status of the Windows paint work, §3 what carries over, §5 the macOS measurements, §6 the causes, §7 the recommendations. Nothing in this PR changes product code; the only code is the measurement scripts in [`scripts/perf/macos-paint/`](../../scripts/perf/macos-paint).
 **Author:** AgentO
 **Trigger:** Repo owner, 2026-10-10: *"we did extensive work on windows optimizing the agentmux windows paint, find that work, whats the status, and I want you to investigate how we can improve macos. research, write report to file."*
 **Related:** `ANALYSIS_WINDOW_RESIZE_REPAINT_LAG_2026_10_06.md` (the Windows resize work), `ANALYSIS_BROWSER_PANE_RESIZE_ARCHITECTURE_2026_10_06.md`, `ANALYSIS_WINDOW_TAB_SWITCH_SMOOTHNESS_2026_09_24.md`, `ANALYSIS_WINDOW_TAB_SWITCH_PAINT_2026_09_30.md`, `SPEC_WINDOW_RESIZE_NO_PAINT_DELAY_2026_09_24.md`.
 
 Code citations are against `main` @ `fd6eae06f`. "Measured" means measured on the machine and build in §5, on a shared machine whose load varied (§5.1): treat frame counts as ±10 and trust ratios and traces more than single runs.
+
+---
+
+## 0. What shipped (added 2026-10-13)
+
+The report below is as written on 2026-10-10, before the fixes. Since then:
+
+| Item | Shipped as | Result (scripted drag, `drag.mjs --mode scripted`, on the machine of §5.1) |
+|---|---|---|
+| M1, cost-aware terminal refits | #4658 | Fast drag over 4 terminals: 16–19 of ~24 frames before, 19 in every run after. With each refit made 6 ms costlier: 63–70 of ~81 before, 67–70 after. |
+| M2, pane geometry task | #4657 | Fast drag, pane on the dragged edge: p90 distance from the window edge 300–330 pt → 95–150 pt; settled 200–255 ms → 27–67 ms after the last resize. |
+| Not in §7: panes move with the window as it is resized | #4690 | Same case: p90 distance from the window edge 90–120 pt → 5 pt. |
+| Not in §7: window edges with a browser pane open | #4688 | With a browser pane open, no window edge or corner could start a resize (a mouse hook skipped AppKit's resize tracking). Fixed. |
+
+**M3** (a real mouse drag) was not recorded with the recorder of §11, but the owner tested the build with all of the above by hand and found resizing "very smooth". **M4–M7** are still open.
+
+Side findings from testing these builds (a tab tear-off crash, since traced to a stale local CEF framework, and dev-window gotchas) are in [`NOTES_MACOS_TESTING_FINDINGS_2026_10_11.md`](NOTES_MACOS_TESTING_FINDINGS_2026_10_11.md).
 
 ---
 
@@ -238,6 +255,8 @@ My driver sets bounds directly. A mouse drag goes through AppKit's live-resize l
 
 **Order:** M3 first if a person can spare a minute (it decides how much M1 and M2 matter), otherwise M2 then M1. M2 is the one with a clear structural cause and a precedent on Windows.
 
+**Update 2026-10-13:** M2 shipped as #4657 and M1 as #4658; see §0 for the results.
+
 ---
 
 ## 8. DRY and modularization opportunities
@@ -299,7 +318,7 @@ The scripts are in [`scripts/perf/macos-paint/`](../../scripts/perf/macos-paint)
 
 Keep the total at 16 terminals or fewer (M4).
 
-**Recording a real drag (M3).** Select the tab to test (`node gototab.mjs <index>`), run `node drag.mjs <cef pid> --mode armed`, and drag the window's right edge out and back for a few seconds. Do it on the terminals tab and on the browser-pane tab, then compare with the `--mode scripted` numbers in §5.6. On 2026-10-10 it was armed twice for 15 minutes each and caught no drag, so this is still open.
+**Recording a real drag (M3).** Select the tab to test (`node gototab.mjs <index>`), run `node drag.mjs <cef pid> --mode armed`, and drag the window's right edge out and back for a few seconds. Do it on the terminals tab and on the browser-pane tab, then compare with the `--mode scripted` numbers in §5.6. On 2026-10-10 it was armed twice for 15 minutes each and caught no drag, so this is still open. (After M1 and M2 shipped, the owner judged a real drag by hand instead, §0.)
 
 ---
 

@@ -7,4 +7,13 @@ export type ViewerDeviceInfo = { device_id: string, device_name: string, created
 /**
  * 0 until the device's first request after pairing.
  */
-last_seen_ms: number, };
+last_seen_ms: number, 
+/**
+ * The owner let it send to agents as the user.
+ */
+can_send: boolean, 
+/**
+ * It paired with a key, so it can sign what it sends. A device without
+ * one must pair again before it can be allowed to send.
+ */
+has_key: boolean, };

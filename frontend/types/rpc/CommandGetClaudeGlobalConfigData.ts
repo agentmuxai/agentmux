@@ -4,4 +4,4 @@
  * Input for `getclaudeglobalconfig`. Same reasoning as
  * `CommandListBundlesData` — read-only, no parameters, but still not `()`.
  */
-export type CommandGetClaudeGlobalConfigData = Record<string, never>;
+export type CommandGetClaudeGlobalConfigData = Record<symbol, never>;

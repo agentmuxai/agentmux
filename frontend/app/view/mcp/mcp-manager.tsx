@@ -2,294 +2,409 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * McpManager — the Armory's "MCP Servers" tab body. Context-free
- * list/create/edit/delete over the global MCP Server catalog
- * (mcp.catalog.* MuxAPI via McpCatalogModel). Every row here is global —
- * per-agent private servers live in the Agent-setup modal (AgentMcpModal),
- * not here.
+ * McpManager — Connectors → MCP servers. The global MCP server catalog
+ * (mcp.catalog.* MuxAPI via McpCatalogModel) and the servers running agents
+ * report (McpObservedModel), as cards: an Add gallery of presets, "Your
+ * servers" (the catalog) and "Also in use" (what agents run that isn't in
+ * it), with a card's details and forms opening below its row
+ * (docs/specs/SPEC_CONNECTORS_CARDS_2026_10_13.md §3.5). Per-agent private
+ * servers live in the Agent-setup modal (AgentMcpModal), not here.
  */
 
-import { onCleanup, For, Show, type JSX } from "solid-js";
-import { PrimitiveListDetail } from "@/app/element/primitive-list-detail";
-import { showTextInputContextMenu } from "@/app/store/contextmenu";
-import { McpCatalogModel, reachLabel } from "./mcp-model";
-import { McpCatalogPicker } from "./McpCatalogPicker";
-import { McpInUse } from "./mcp-in-use";
-import { McpObservedModel, notLoadedBy, notLoadedText } from "./mcp-observed";
-import { findPreloadEntryByName } from "./mcp-preload-catalog";
-import { getMcpCapability, watchMcpCapability, type McpCapabilityStatus } from "@/app/store/mcp-capabilities";
-import "../agent/components/AgentPrimitiveModal.scss";
-import "./mcp-status-pill.scss";
-import { Button, Field, Switch } from "@/app/element/ui";
-import { focusOnOpen } from "@/util/focusutil";
+import { createMemo, createSignal, onCleanup, Show, type JSX } from "solid-js";
 
-const STATUS_LABEL: Record<McpCapabilityStatus, string> = {
-    unknown: "Not checked",
-    checking: "Checking…",
-    connected: "Connected",
-    unreachable: "Unreachable",
-    handshake_failed: "Not responding",
-    invalid_config: "Invalid config",
-};
+import { ConfirmModal } from "@/app/element/confirm-modal";
+import { Button, Card, CardGrid, FilterInput } from "@/app/element/ui";
+import { ContextMenuModel } from "@/app/store/contextmenu";
+import { matchesEveryWord } from "@/app/util/fuzzysearch";
+import type { McpServerCatalogItem } from "@/types/rpc/McpServerCatalogItem";
+import { McpObservedDetail, observedStatus } from "./mcp-in-use";
+import { connectionSummary, McpCatalogModel, reachLabel } from "./mcp-model";
+import { McpObservedModel, notLoadedBy, notLoadedText, rowSummary, sourceLabel, type ObservedServerRow } from "./mcp-observed";
+import { findPreloadEntryByName, MCP_PRELOAD_CATALOG, type McpPreloadEntry } from "./mcp-preload-catalog";
+import { McpServerDetail, McpServerForm } from "./mcp-server-detail";
+import "./mcp-cards.scss";
 
-function McpStatusPill(props: { serverId: string; serverName: string }): JSX.Element {
-    onCleanup(watchMcpCapability(props.serverId));
-    const cap = () => getMcpCapability(props.serverId);
-    // §6 acceptance bar: a non-"connected" status pairs with the catalog's
-    // static remediation text (when this server was created from a known
-    // catalog entry) instead of a bare status word.
-    const remediation = () => {
-        const s = cap().status;
-        if (s === "unknown" || s === "checking" || s === "connected") return null;
-        return findPreloadEntryByName(props.serverName)?.prereqNote ?? null;
-    };
-    // Unlike remediation() above, this is NOT gated on status — a risk that's
-    // real once the server is connected and usable must stay visible exactly
-    // then, not disappear the moment the server starts working (spec §4
-    // policy #2; this is what Codex flagged on #2298).
-    const riskNote = () => findPreloadEntryByName(props.serverName)?.riskNote ?? null;
+/** The card of a server being added, first in "Your servers" while its form is open. */
+const NEW_KEY = "\u0000new";
+const CUSTOM_KEY = "\u0000custom";
 
-    return (
-        <div class="mcp-status-block">
-            <span class="mcp-status-pill" classList={{ "is-connected": cap().status === "connected" }}>
-                {STATUS_LABEL[cap().status]}
-                <Show when={cap().status === "connected" && cap().toolCount !== undefined}>
-                    {" "}· {cap().toolCount} tools
-                </Show>
-            </span>
-            <Show when={remediation()}>
-                <p class="mcp-status-remediation">{remediation()}</p>
-            </Show>
-            <Show when={riskNote()}>
-                <p class="mcp-status-risk">⚠ {riskNote()}</p>
-            </Show>
-        </div>
-    );
-}
+const observedKey = (row: ObservedServerRow) => `${row.source}\u0000${row.name}`;
+
+const Icon = (props: { name: string }) => <i class={`fa-solid fa-${props.name}`} />;
 
 export const McpManager = (): JSX.Element => {
     const model = new McpCatalogModel();
     onCleanup(() => model.dispose());
     const observed = new McpObservedModel();
     onCleanup(() => observed.dispose());
-    /** Why a catalog server isn't on every agent it should be: they started first. */
-    const notLoaded = (serverName: string) => notLoadedText(notLoadedBy(observed.agentsAtom(), serverName));
 
-    // Single-pane — see docs/specs/SPEC_ARMORY_RESPONSIVE_SINGLE_PANE_LAYOUT_2026_07_15.md.
-    const inDetail = () => model.selectedIdAtom() !== null || model.draftAtom() !== null;
-    const handleBack = () => {
+    const [filter, setFilter] = createSignal("");
+    // One card is open in the section: a catalog server's (in the model) or
+    // an observed server's (here).
+    const [observedOpen, setObservedOpen] = createSignal<string | null>(null);
+    const [deleting, setDeleting] = createSignal<McpServerCatalogItem | null>(null);
+    const [deletingBound, setDeletingBound] = createSignal<string[] | null>(null);
+
+    // Cards are keyed by id, so a refreshed list keeps them (and an open form).
+    const serverById = createMemo(() => new Map(model.serversAtom().map((s) => [s.id, s])));
+    const catalogNames = createMemo(() => new Set(model.serversAtom().map((s) => s.name)));
+    const usesFor = (name: string) =>
+        observed
+            .rowsAtom()
+            .filter((r) => r.name === name)
+            .flatMap((r) => r.uses);
+    /** Why a catalog server isn't on every agent it should be: they started first. */
+    const notLoaded = (name: string) => notLoadedText(notLoadedBy(observed.agentsAtom(), name));
+    const otherRows = createMemo(() => observed.rowsAtom().filter((r) => !catalogNames().has(r.name)));
+    const rowByKey = createMemo(() => new Map(otherRows().map((r) => [observedKey(r), r])));
+
+    const newDraft = () => {
+        const d = model.draftAtom();
+        return d && !d.id ? d : null;
+    };
+    const serverKeys = createMemo(() => {
+        const keys = model
+            .serversAtom()
+            .filter((s) => matchesEveryWord(filter(), s.name, connectionSummary(s.transport, s.config)))
+            .map((s) => s.id);
+        return newDraft() ? [NEW_KEY, ...keys] : keys;
+    });
+    const otherKeys = createMemo(() =>
+        otherRows()
+            .filter((r) => matchesEveryWord(filter(), r.name, sourceLabel(r.source)))
+            .map(observedKey),
+    );
+    const catalogOpen = () => (newDraft() ? NEW_KEY : model.selectedIdAtom());
+    const count = () => model.serversAtom().length + otherRows().length;
+    const hasAny = () => count() > 0 || newDraft() !== null;
+
+    const closeCatalog = () => {
         model.setError(null);
-        model.setSelectedId(null);
         model.setDraft(null);
+        model.setSelectedId(null);
+    };
+    const toggleServer = (server: McpServerCatalogItem) => {
+        setObservedOpen(null);
+        if (catalogOpen() === server.id) closeCatalog();
+        else model.handleSelect(server);
+    };
+    const toggleObserved = (key: string) => {
+        if (observedOpen() === key) {
+            setObservedOpen(null);
+            return;
+        }
+        closeCatalog();
+        setObservedOpen(key);
+    };
+    const startNew = () => {
+        setObservedOpen(null);
+        model.startNew();
+    };
+    // A preset already in the catalog opens its card instead of a second copy.
+    const pickPreset = (entry: McpPreloadEntry) => {
+        setObservedOpen(null);
+        const existing = model.serversAtom().find((s) => s.name === entry.name);
+        if (existing) {
+            setFilter("");
+            model.handleSelect(existing);
+        } else {
+            model.startFromCatalog(entry);
+        }
+    };
+    const requestDelete = (server: McpServerCatalogItem) => {
+        setDeleting(server);
+        setDeletingBound(null);
+        void model.boundAgentNames(server).then((names) => {
+            if (deleting()?.id === server.id) setDeletingBound(names);
+        });
     };
 
-    const listView = (
-        <div class="agent-primitive-modal-list">
-            <Show when={model.errorAtom()}>
-                <div class="agent-primitive-modal-error">{model.errorAtom()}</div>
-            </Show>
-            <McpInUse model={observed} />
-            <Show
-                when={model.serversAtom().length > 0}
-                fallback={<div class="agent-primitive-modal-list-empty">No MCP servers yet</div>}
-            >
-                <For each={model.serversAtom()}>
-                    {(server) => (
-                        <>
-                            <button
-                                class="agent-primitive-modal-list-item"
-                                classList={{ "is-selected": model.selectedIdAtom() === server.id }}
-                                onClick={() => model.handleSelect(server)}
-                            >
-                                <span class="agent-primitive-modal-list-item-name">{server.name}</span>
-                                <span class="agent-primitive-modal-list-item-badge">{reachLabel(server)}</span>
-                            </button>
-                            <Show when={notLoaded(server.name)}>{(text) => <p class="mcp-not-loaded">{text()}</p>}</Show>
-                        </>
-                    )}
-                </For>
-            </Show>
+    const serverMenu = (server: McpServerCatalogItem): ContextMenuItem[] => {
+        const agents = model.agentsAtom();
+        return [
+            {
+                label: "Edit",
+                click: () => {
+                    setObservedOpen(null);
+                    model.startEdit(server);
+                },
+            },
+            agents.length === 0
+                ? { label: "Bind to agent", sublabel: "no agents", enabled: false }
+                : {
+                      label: "Bind to agent",
+                      type: "submenu",
+                      submenu: agents.map((a) => ({
+                          label: a.name,
+                          click: () => void model.bindToAgent(server.id, a.id),
+                      })),
+                  },
+            // Last, after a separator, so it is never under the pointer.
+            { type: "separator" },
+            { label: "Delete…", click: () => requestDelete(server) },
+        ];
+    };
 
-            <button class="agent-primitive-modal-new-btn" onClick={() => model.openCatalogPicker()}>
-                + Browse catalog
-            </button>
-            <button class="agent-primitive-modal-new-btn" onClick={() => model.startNew()}>
-                + New MCP server
-            </button>
-        </div>
+    const presetChip = (entry: McpPreloadEntry) => {
+        const added = () => catalogNames().has(entry.name);
+        return (
+            <Card
+                size="chip"
+                class="mcp-preset-chip"
+                data-preset={entry.id}
+                icon={<Icon name={entry.icon} />}
+                title={entry.name}
+                subtitle={added() ? "Added" : "Add"}
+                aria-label={added() ? `${entry.name}, added: open it` : `Add ${entry.name}`}
+                onSelect={() => pickPreset(entry)}
+            />
+        );
+    };
+
+    const serverCard = (key: string) => (
+        <Show
+            when={key !== NEW_KEY}
+            fallback={
+                <Card
+                    class="mcp-server-card"
+                    aria-label="New MCP server"
+                    icon={<Icon name="plus" />}
+                    title={newDraft()?.name.trim() || "New server"}
+                    subtitle="Not saved yet"
+                    selected
+                    onSelect={() => model.cancelDraft()}
+                />
+            }
+        >
+            <Show when={serverById().get(key)}>
+                {(server) => {
+                    const status = () => observedStatus(usesFor(server().name), notLoaded(server().name));
+                    return (
+                        <Card
+                            class="mcp-server-card"
+                            data-mcp-server={server().name}
+                            aria-label={server().name}
+                            icon={<Icon name={findPreloadEntryByName(server().name)?.icon ?? "plug"} />}
+                            title={server().name}
+                            subtitle={connectionSummary(server().transport, server().config)}
+                            meta={[
+                                <span>{reachLabel(server())}</span>,
+                                ...(server().in_containers ? [<span>Containers too</span>] : []),
+                            ]}
+                            status={status()}
+                            attention={status().tone === "error"}
+                            selected={catalogOpen() === key}
+                            onSelect={() => toggleServer(server())}
+                            onContextMenu={(e: MouseEvent) => {
+                                e.preventDefault();
+                                ContextMenuModel.showContextMenu(serverMenu(server()), e);
+                            }}
+                        />
+                    );
+                }}
+            </Show>
+        </Show>
     );
 
-    const detailView = (
-        <div class="agent-primitive-modal-detail">
-            <Show when={model.errorAtom()}>
-                <div class="agent-primitive-modal-error">{model.errorAtom()}</div>
-            </Show>
-            <Show
-                when={model.draftAtom()}
-                fallback={
-                    <Show when={model.selectedAtom()}>
-                        {(server) => (
-                                    <div class="agent-primitive-modal-readonly">
-                                        <h3 class="agent-primitive-modal-name">{server().name}</h3>
-                                        <p class="agent-primitive-modal-global-note">
-                                            {server().all_agents
-                                                ? "Every agent gets it"
-                                                : `Bound to ${reachLabel(server())}`}
-                                        </p>
-                                        <Show when={notLoaded(server().name)}>
-                                            {(text) => <p class="mcp-not-loaded">{text()}</p>}
-                                        </Show>
-                                        <Field
-                                            label="All agents"
-                                            description="Every agent gets it at launch, not only the ones it is bound to."
-                                        >
-                                            <Switch
-                                                checked={server().all_agents}
-                                                onChange={(on) =>
-                                                    void model.setReach(server().id, {
-                                                        all_agents: on,
-                                                        in_containers: server().in_containers,
-                                                    })
-                                                }
-                                            />
-                                        </Field>
-                                        <Field
-                                            label="Containers too"
-                                            description="Container agents get it as well. Leave off for a server that runs a program on this computer."
-                                        >
-                                            <Switch
-                                                checked={server().in_containers}
-                                                onChange={(on) =>
-                                                    void model.setReach(server().id, {
-                                                        all_agents: server().all_agents,
-                                                        in_containers: on,
-                                                    })
-                                                }
-                                            />
-                                        </Field>
-                                        {/* Keyed specifically on id (a stable primitive, unlike the
-                                            outer non-keyed Show's `server` object, which is a fresh
-                                            reference on every refresh()) — remounts McpStatusPill, and
-                                            so restarts its watchMcpCapability poll, exactly when the
-                                            selected server actually changes, not on every list refresh. */}
-                                        <Show when={server().id} keyed>
-                                            {(id) => <McpStatusPill serverId={id} serverName={server().name} />}
-                                        </Show>
-                                        <span class="agent-primitive-modal-field-label">Transport</span>
-                                        <pre class="agent-primitive-modal-field-value">{server().transport}</pre>
-                                        <span class="agent-primitive-modal-field-label">Config</span>
-                                        <pre class="agent-primitive-modal-field-value">{server().config}</pre>
-                                        <span class="agent-primitive-modal-field-label">Bind to agent</span>
-                                        <div class="agent-primitive-modal-bind-row">
-                                            <select
-                                                class="agent-primitive-modal-input"
-                                                value={model.bindAgentIdAtom()}
-                                                onChange={(e) => model.setBindAgentId(e.currentTarget.value)}
-                                            >
-                                                <option value="">Select an agent…</option>
-                                                <For each={model.agentsAtom()}>
-                                                    {(agent) => <option value={agent.id}>{agent.name}</option>}
-                                                </For>
-                                            </select>
-                                            <Button
-                                                class="agent-primitive-modal-btn"
-                                                disabled={!model.bindAgentIdAtom()}
-                                                onClick={() => void model.bindToAgent(server().id, model.bindAgentIdAtom())}
-                                            >
-                                                Bind
-                                            </Button>
-                                        </div>
-                                        <div class="agent-primitive-modal-actions">
-                                            <Button
-                                                tone="danger"
-                                                class="agent-primitive-modal-btn agent-primitive-modal-btn-danger"
-                                                onClick={() => void model.deleteServer(server().id)}
-                                            >
-                                                Delete
-                                            </Button>
-                                            <Button
-                                                class="agent-primitive-modal-btn"
-                                                onClick={() => model.startEdit(server())}
-                                            >
-                                                Edit
-                                            </Button>
-                                        </div>
-                                    </div>
-                                )}
-                            </Show>
+    const serverDetail = (key: string) => (
+        <Show
+            when={key !== NEW_KEY}
+            fallback={<Show when={newDraft()}>{(draft) => <McpServerForm model={model} draft={draft()} />}</Show>}
+        >
+            <Show when={serverById().get(key)}>
+                {(server) => (
+                    <Show
+                        when={model.draftAtom()?.id === key ? model.draftAtom() : null}
+                        fallback={
+                            <McpServerDetail
+                                model={model}
+                                server={server()}
+                                notLoaded={notLoaded(server().name)}
+                                uses={usesFor(server().name)}
+                                onDelete={() => requestDelete(server())}
+                            />
                         }
                     >
-                        {(draft) => (
-                            <form
-                                class="agent-primitive-modal-form"
-                                onSubmit={(e) => { e.preventDefault(); void model.saveDraft(); }}
-                            >
-                                <span class="agent-primitive-modal-field-label">Name *</span>
-                                <input
-                                    class="agent-primitive-modal-input"
-                                    type="text"
-                                    value={draft().name}
-                                    onInput={(e) => model.setDraft({ ...draft(), name: e.currentTarget.value })}
-                                    onContextMenu={showTextInputContextMenu}
-                                    placeholder="e.g. filesystem"
-                                    required
-                                    ref={(el) => focusOnOpen(el, { select: true })}
-                                />
-                                <span class="agent-primitive-modal-field-label">Transport</span>
-                                <input
-                                    class="agent-primitive-modal-input"
-                                    type="text"
-                                    value={draft().transport}
-                                    onInput={(e) => model.setDraft({ ...draft(), transport: e.currentTarget.value })}
-                                    onContextMenu={showTextInputContextMenu}
-                                    placeholder="stdio"
-                                />
-                                <span class="agent-primitive-modal-field-label">Config (JSON)</span>
-                                <textarea
-                                    class="agent-primitive-modal-textarea"
-                                    rows={6}
-                                    value={draft().config}
-                                    onInput={(e) => model.setDraft({ ...draft(), config: e.currentTarget.value })}
-                                    onContextMenu={showTextInputContextMenu}
-                                    spellcheck={false}
-                                />
-                                <div class="agent-primitive-modal-actions">
-                                    <Button
-                                        class="agent-primitive-modal-btn"
-                                        onClick={() => model.cancelDraft()}
-                                        disabled={model.savingAtom()}
-                                    >
-                                        Cancel
-                                    </Button>
-                                    <Button
-                                        type="submit"
-                                        tone="accent"
-                                        class="agent-primitive-modal-btn agent-primitive-modal-btn-primary"
-                                        disabled={model.savingAtom() || !draft().name.trim()}
-                                    >
-                                        {model.savingAtom() ? "Saving…" : "Save"}
-                                    </Button>
-                                </div>
-                            </form>
-                        )}
+                        {(draft) => <McpServerForm model={model} draft={draft()} />}
+                    </Show>
+                )}
             </Show>
-        </div>
+        </Show>
+    );
+
+    const observedCard = (key: string) => (
+        <Show when={rowByKey().get(key)}>
+            {(row) => {
+                const status = () => observedStatus(row().uses);
+                return (
+                    <Card
+                        class="mcp-observed-card"
+                        data-mcp-observed={row().name}
+                        aria-label={row().name}
+                        icon={<Icon name="plug" />}
+                        title={row().name}
+                        subtitle={sourceLabel(row().source)}
+                        meta={[<span>{rowSummary(row())}</span>]}
+                        status={status()}
+                        attention={status().tone === "error"}
+                        selected={observedOpen() === key}
+                        onSelect={() => toggleObserved(key)}
+                    />
+                );
+            }}
+        </Show>
+    );
+
+    const addButton = (
+        <Button tone="accent" icon="plus" class="mcp-cards-add" onClick={startNew}>
+            Add server
+        </Button>
     );
 
     return (
-        <>
-            <PrimitiveListDetail
-                showDetail={inDetail()}
-                backLabel="MCP Servers"
-                onBack={handleBack}
-                list={listView}
-                detail={detailView}
-            />
-            <Show when={model.catalogPickerOpenAtom()}>
-                <McpCatalogPicker model={model} />
+        <div class="ui-card-section ui-density-compact mcp-cards">
+            <div class="ui-card-section-header">
+                <span class="ui-card-section-title">MCP servers</span>
+                <span class="ui-card-section-count">{count()}</span>
+                <FilterInput
+                    class="ui-card-section-filter"
+                    value={filter()}
+                    onInput={setFilter}
+                    placeholder="Filter servers"
+                />
+                {addButton}
+            </div>
+
+            <Show when={model.errorAtom()}>
+                <div class="mcp-cards-error" role="alert">
+                    {model.errorAtom()}
+                </div>
             </Show>
-        </>
+
+            <CardGrid
+                size="chip"
+                class="mcp-add-gallery"
+                ariaLabel="Add an MCP server"
+                items={[...MCP_PRELOAD_CATALOG.map((e) => e.id), CUSTOM_KEY]}
+                keyOf={(k) => k}
+                renderCard={(k) => (
+                    <Show
+                        when={MCP_PRELOAD_CATALOG.find((e) => e.id === k)}
+                        fallback={
+                            <Card
+                                size="chip"
+                                class="mcp-preset-chip"
+                                data-preset="custom"
+                                icon={<Icon name="plus" />}
+                                title="Custom server"
+                                subtitle="Any command or URL"
+                                aria-label="Add a custom server"
+                                onSelect={startNew}
+                            />
+                        }
+                    >
+                        {(entry) => presetChip(entry())}
+                    </Show>
+                )}
+            />
+
+            <Show
+                when={hasAny()}
+                fallback={
+                    <div class="ui-card-empty mcp-cards-empty">
+                        <span>No MCP servers yet. Add one to give your agents its tools.</span>
+                        <Button tone="accent" icon="plus" onClick={startNew}>
+                            Add server
+                        </Button>
+                    </div>
+                }
+            >
+                <Show when={serverKeys().length > 0}>
+                    <h4 class="ui-card-group-heading">Your servers</h4>
+                    <CardGrid
+                        class="mcp-servers-grid"
+                        ariaLabel="Your servers"
+                        items={serverKeys()}
+                        keyOf={(k) => k}
+                        renderCard={serverCard}
+                        selectedKey={catalogOpen()}
+                        renderDetail={serverDetail}
+                        onClose={closeCatalog}
+                    />
+                </Show>
+                <Show when={otherKeys().length > 0}>
+                    <h4 class="ui-card-group-heading">Also in use</h4>
+                    <CardGrid
+                        class="mcp-observed-grid"
+                        ariaLabel="Also in use"
+                        items={otherKeys()}
+                        keyOf={(k) => k}
+                        renderCard={observedCard}
+                        selectedKey={observedOpen()}
+                        renderDetail={(k) => (
+                            <Show when={rowByKey().get(k)}>{(row) => <McpObservedDetail row={row()} />}</Show>
+                        )}
+                        onClose={() => setObservedOpen(null)}
+                    />
+                </Show>
+                <Show when={filter() && serverKeys().length === 0 && otherKeys().length === 0}>
+                    <div class="ui-card-empty">No servers match “{filter()}”.</div>
+                </Show>
+            </Show>
+
+            <Show when={deleting()}>
+                {(server) => (
+                    <ConfirmModal
+                        open={true}
+                        scope="tab"
+                        title={`Delete ${server().name}?`}
+                        confirmLabel="Delete server"
+                        destructive
+                        onConfirm={async () => {
+                            await model.deleteServer(server().id);
+                            setDeleting(null);
+                        }}
+                        onCancel={() => setDeleting(null)}
+                    >
+                        <DeleteDetails
+                            server={server()}
+                            boundNames={deletingBound()}
+                            runningIn={usesFor(server().name).map((u) => u.agent)}
+                        />
+                    </ConfirmModal>
+                )}
+            </Show>
+        </div>
     );
 };
 
 McpManager.displayName = "McpManager";
+
+/** What deleting a catalog server takes away, and from whom. */
+function DeleteDetails(props: {
+    server: McpServerCatalogItem;
+    /** Null while they're being looked up. */
+    boundNames: string[] | null;
+    runningIn: string[];
+}): JSX.Element {
+    const bound = () => {
+        const names = props.boundNames;
+        if (names && names.length > 0) return `Bound to ${names.join(", ")}.`;
+        if (props.server.bound_count > 0) return `Bound to ${reachLabel({ ...props.server, all_agents: false })}.`;
+        return null;
+    };
+    const running = () => [...new Set(props.runningIn)];
+    return (
+        <div class="mcp-delete-confirm">
+            <p>AgentMux removes it from the catalog. Agents stop getting it the next time they start.</p>
+            <Show when={props.server.all_agents}>
+                <p>Every agent gets it now.</p>
+            </Show>
+            <Show when={bound()}>{(text) => <p>{text()}</p>}</Show>
+            <Show when={running().length > 0}>
+                <p>Running now in {running().join(", ")}, which keep it until they restart.</p>
+            </Show>
+        </div>
+    );
+}

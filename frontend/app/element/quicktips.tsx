@@ -59,7 +59,7 @@ const CardTitle = (props: { children: JSX.Element }): JSX.Element => (
 
 /** The pane-header icons, each with the command its shortcut comes from. */
 const HEADER_ICONS: { icon: string; label: string; command?: string }[] = [
-    { icon: "fa-window-maximize", label: "Maximize a pane", command: "pane:magnify" },
+    { icon: "fa-regular fa-window-maximize", label: "Maximize a pane", command: "pane:magnify" },
     { icon: "fa-laptop", label: "Change connection", command: "pane:changeConnection" },
     { icon: "fa-cog", label: "Pane Settings" },
     { icon: "fa-xmark", label: "Close pane", command: "pane:close" },
@@ -136,7 +136,7 @@ const QuickTips = (props: { filter?: string }): JSX.Element => {
                             {(it) => (
                                 <div class="flex items-center gap-3 p-2 rounded-md hover:bg-hover transition-colors">
                                     <IconBox variant="secondary">
-                                        <i class={`fa-solid ${it.icon} fa-fw`} />
+                                        <i class={`${/\bfa-(regular|brands)\b/.test(it.icon) ? "" : "fa-solid "}${it.icon} fa-fw`} />
                                     </IconBox>
                                     <Show when={it.command} fallback={<span class="text-[15px]">{it.label}</span>}>
                                         <div class="flex flex-col gap-0.5 flex-1">

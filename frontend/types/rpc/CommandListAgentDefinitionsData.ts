@@ -15,4 +15,4 @@
  * default. `include_hidden` only affects templates — user-owned rows
  * never set `user_hidden`, so the flag is a no-op for them.
  */
-export type CommandListAgentDefinitionsData = { is_seeded: number | null, include_hidden: boolean, };
+export type CommandListAgentDefinitionsData = { is_seeded?: number | null, include_hidden?: boolean, };

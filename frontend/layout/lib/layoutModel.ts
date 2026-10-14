@@ -92,6 +92,7 @@ import {
 } from "./layoutMagnify";
 import {
     minimizeNodeToggle as minimizeNodeToggleImpl,
+    collapseMaximizedNode as collapseMaximizedNodeImpl,
     rebuildMinimizedSet as rebuildMinimizedSetImpl,
 } from "./layoutMinimize";
 import {
@@ -901,6 +902,10 @@ export class LayoutModel {
 
     magnifyNodeToggle(nodeId: string, setState = true, focused = true) {
         magnifyNodeToggleImpl(this, nodeId, setState, focused);
+    }
+
+    collapseMaximizedNode(nodeId: string) {
+        collapseMaximizedNodeImpl(this, nodeId);
     }
 
     minimizeNodeToggle(nodeId: string) {

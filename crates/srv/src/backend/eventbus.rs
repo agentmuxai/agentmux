@@ -181,11 +181,24 @@ impl EventBus {
         self.broadcast_event_lane(event, Lane::Priority);
     }
 
+    /// A typed event as a raw event-bus frame: `eventtype` is its name and `oref` its scope, for
+    /// a caller that sends through `broadcast_event` or a lane rather than the broker.
+    /// `websocket.rs::forward_event` wraps it as the `eventrecv` frame the renderer reads.
+    pub fn typed_ws_event<E: super::mps_events::Event>(payload: &E::Payload, oref: impl Into<String>) -> WSEventType {
+        // typed-helper: builds the frame from a declared event and its payload type.
+        WSEventType {
+            eventtype: E::NAME.to_string(),
+            oref: oref.into(),
+            data: super::mps_events::payload_data(payload),
+        }
+    }
+
     /// A typed event as the frame srv writes to one WebSocket itself (`srvinfo` and `config` on
     /// connect): the same `rpc`/`eventrecv` frame a broadcast sends.
     pub fn typed_frame<E: super::mps_events::Event>(payload: &E::Payload) -> serde_json::Value {
         serde_json::json!({
             "eventtype": WS_EVENT_RPC,
+            // typed-helper: builds the frame from a declared event and its payload type.
             "data": { "command": "eventrecv", "data": { "event": E::NAME, "data": super::mps_events::payload_data(payload) } },
         })
     }
@@ -194,6 +207,7 @@ impl EventBus {
     /// broker: no scopes, nothing persisted. The same `rpc`/`eventrecv` frame a broker event
     /// gets (a serialized `MuxEvent` omits its empty scopes, sender and persist).
     pub fn broadcast_typed<E: super::mps_events::Event>(&self, payload: &E::Payload) {
+        // typed-helper: builds the event from a declared event and its payload type.
         let event = MuxEvent {
             event: E::NAME.to_string(),
             scopes: vec![],
@@ -204,6 +218,7 @@ impl EventBus {
         self.broadcast_event(&WSEventType {
             eventtype: WS_EVENT_RPC.to_string(),
             oref: String::new(),
+            // typed-helper: the frame around the typed `event` above.
             data: Some(serde_json::json!({ "command": "eventrecv", "data": event })),
         });
     }
@@ -227,18 +242,8 @@ impl EventBus {
         if updates.is_empty() {
             return;
         }
-        let data = match serde_json::to_value(updates) {
-            Ok(v) => v,
-            Err(e) => {
-                tracing::error!("cannot marshal waveobj batched updates: {}", e);
-                return;
-            }
-        };
-        self.broadcast_event(&WSEventType {
-            eventtype: WS_EVENT_MUX_OBJ_BATCHED_UPDATES.to_string(),
-            oref: String::new(),
-            data: Some(data),
-        });
+        let batch = super::obj::MuxObjBatch(updates.to_vec());
+        self.broadcast_event(&Self::typed_ws_event::<super::mps_events::MuxObjBatchedUpdates>(&batch, String::new()));
     }
 
     /// Broadcast an event to all connected WebSocket clients on a specific lane.

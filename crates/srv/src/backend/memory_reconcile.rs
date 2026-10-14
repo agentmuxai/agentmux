@@ -866,7 +866,7 @@ pub(crate) fn capture_while_running(fs: &FileStore, uid: &str, dir: &Path, settl
     result
 }
 
-/// An AgentMux write to an agent's memory — MemoryWrite, the Armory editor,
+/// An AgentMux write to an agent's memory — MemoryWrite, the Memory editor,
 /// a revert, a bundle import — recorded before the file is written
 /// (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.1.1), so the next spawn
 /// doesn't take it for the provider's, and it follows the agent at once.

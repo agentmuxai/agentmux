@@ -161,7 +161,7 @@ function getDisconnectItem(
     return disconnectSuggestionItem;
 }
 
-/** "Manage remotes…": the Remotes pane, in this pane (SPEC_REMOTES_PANE_2026_10_05.md §4.7). */
+/** "Manage remotes…": Connectors → Remotes, in this pane (SPEC_REMOTES_PANE_2026_10_05.md §4.7). */
 function getManageRemotesItem(
     blockId: string,
     connection: string | undefined,
@@ -299,7 +299,7 @@ const ChangeConnectionBlockModal = ({
         const localSuggestions: SuggestionConnectionScope | null = localItems.length
             ? { headerText: "Local", items: localItems }
             : null;
-        // Pinned, SSH hosts, Recent and WSL, as in the Remotes pane (§4.7).
+        // Pinned, SSH hosts, Recent and WSL, as in Connectors > Remotes (§4.7).
         const remoteScopes = remoteSuggestionScopes(remotes(), connSelected(), conn, (name) =>
             computeConnColorNum(connStatusMap.get(name))
         );

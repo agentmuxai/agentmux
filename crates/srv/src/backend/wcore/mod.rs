@@ -132,8 +132,8 @@ pub fn ensure_initial_data(store: &Store) -> Result<bool, StoreError> {
 ///        50% width         50% width
 /// ```
 ///
-/// Armory was dropped from the starter set (it's still one click away in the
-/// widget bar) and sysinfo moved above swarm, keeping its previous 20% share
+/// Connectors and Memory aren't in the starter set (each is one click away in
+/// the widget bar) and sysinfo moved above swarm, keeping its previous 20% share
 /// of the right column. Supersedes the 4-pane arrangement from
 /// SPEC_DEFAULT_WIDGETS_REORDER_2026_08_25.md. Only affects tabs seeded from
 /// here — first launch and newly-created windows; an existing persisted
@@ -473,8 +473,8 @@ mod tests {
 
         seed_default_layout(&store, &tab.oid).unwrap();
 
-        // 3 blocks: agent + swarm + sysinfo. Armory is deliberately NOT
-        // seeded any more — it stays reachable from the widget bar.
+        // 3 blocks: agent + swarm + sysinfo. Connectors and Memory are deliberately
+        // NOT seeded — both stay reachable from the widget bar.
         let tab = store.must_get::<Tab>(&tab.oid).unwrap();
         assert_eq!(tab.blockids.len(), 3, "agent + swarm + sysinfo");
         let views: Vec<String> = tab
@@ -494,7 +494,9 @@ mod tests {
         assert!(views.contains(&"agent".to_string()));
         assert!(views.contains(&"swarm".to_string()));
         assert!(views.contains(&"sysinfo".to_string()));
-        assert!(!views.contains(&"armory".to_string()), "armory must not be seeded");
+        for view in ["connectors", "memory"] {
+            assert!(!views.contains(&view.to_string()), "{view} must not be seeded");
+        }
 
         // Layout populated (the regression was new windows getting rootnode=None).
         let layout = store.must_get::<LayoutState>(&tab.layoutstate).unwrap();
@@ -517,7 +519,7 @@ mod tests {
 
         let right = &root.children[1];
         assert_eq!(right.flex_direction, FlexDirection::Column);
-        assert_eq!(right.children.len(), 2, "sysinfo + swarm only — no armory");
+        assert_eq!(right.children.len(), 2, "sysinfo + swarm only");
         assert_eq!(right.children[0].data.as_ref().unwrap().block_id, "b-sysinfo", "sysinfo on top");
         assert_eq!(right.children[1].data.as_ref().unwrap().block_id, "b-swarm", "swarm below");
         assert_eq!(right.children[0].size, 2.0);

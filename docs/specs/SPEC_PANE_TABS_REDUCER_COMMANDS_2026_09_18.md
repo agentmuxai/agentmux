@@ -1,7 +1,7 @@
 # SPEC: Pane tabs as reducer commands — one writer for "which blocks are in which pane"
 
 **Date:** 2026-09-18
-**Status:** active — Phase 0 implemented in #3414; Phase 1 partly implemented in #3424 (§4); Phases 2–3 not started.
+**Status:** active — Phase 0 implemented in #3414; Phase 1 partly implemented in #3424 and #3441 (`LayoutStackMove`); Phase 1's tab switch/close commands with `actionid` dedup and invariant I1, and Phases 2–3 (`layout_revision`, the invariant reaper), not started. Verified against code 2026-10-14 ([triage](../analysis/REPORT_REDUCER_STACK_TRIAGE_2026_10_13.md)).
 **Author:** AgentA@Area54
 **Related:** [`docs/specs/SPEC_AGENT_PANE_CLOSE_GRACEFUL_SHUTDOWN_2026_09_18.md`](SPEC_AGENT_PANE_CLOSE_GRACEFUL_SHUTDOWN_2026_09_18.md)
 (§6 names this as its follow-up; its orphan reaper, §4.9, is the backstop for

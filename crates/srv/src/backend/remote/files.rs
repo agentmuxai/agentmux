@@ -522,7 +522,7 @@ pub async fn connect(conn: &str, ask: Option<AskIn<'_>>) -> Result<Arc<RemoteFil
         // with ssh's prompts going to the user as for the connection itself
         // (the grant lives until the install is done).
         Err((e, true)) => {
-            super::helper_consent::allow_install(&name, ask.map(|a| a.block_id))
+            super::helper_consent::allow_install(&name, ask.map(|a| a.block_id), super::helper_consent::Need::Files)
                 .await
                 .map_err(|why| {
                     RemoteError::link(format!(

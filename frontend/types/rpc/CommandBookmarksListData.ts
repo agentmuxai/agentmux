@@ -9,4 +9,4 @@
  * empty struct accepts `{}` and ignores unknown keys, matching the previous
  * untyped handler's behaviour of ignoring `data` entirely.
  */
-export type CommandBookmarksListData = Record<string, never>;
+export type CommandBookmarksListData = Record<symbol, never>;

@@ -1,7 +1,8 @@
 # Frontend Reducer Architecture — spec roadmap
 
 **Date:** 2026-05-03
-**Status:** Architecture overview + spec family inventory. Each named follow-up spec needs to be written before its implementation.
+**Status:** superseded — slices #1, #3, #4, #6, #9 and #10 shipped; #7 was judged not applicable; #5 and #8 were absorbed by the agent-pane layout and pane-tabs specs. The conventions doc is the living reference. Verified against code 2026-10-14 ([triage](../analysis/REPORT_REDUCER_STACK_TRIAGE_2026_10_13.md)).
+**Superseded-by:** [`frontend-reducer-conventions-2026-05-03.md`](./frontend-reducer-conventions-2026-05-03.md)
 **Reads-this-first:**
 - `docs/specs/agent-pane-document-reducer-2026-05-03.md` — first slice to land (the live agent-doc bug fix)
 - `agentmux-srv/src/reducer.rs` + `SPEC_PHASE_E_SRV_REDUCER_2026_04_29.md` — the canonical reducer pattern, server-side

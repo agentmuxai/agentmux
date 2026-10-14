@@ -1,7 +1,8 @@
 # Frontend Reducer Implementation Plan
 
 **Date:** 2026-05-03
-**Status:** Draft. Each PR section needs a quick "go" before its code lands.
+**Status:** superseded — the plan's slices shipped or were absorbed elsewhere (see the architecture doc's status). Verified against code 2026-10-14 ([triage](../analysis/REPORT_REDUCER_STACK_TRIAGE_2026_10_13.md)).
+**Superseded-by:** [`frontend-reducer-conventions-2026-05-03.md`](./frontend-reducer-conventions-2026-05-03.md)
 **Reads-this-first:**
 - `frontend-reducer-architecture-2026-05-03.md` — the spec roadmap (slices #1–#8)
 - `frontend-reducer-conventions-2026-05-03.md` — shape every slice follows

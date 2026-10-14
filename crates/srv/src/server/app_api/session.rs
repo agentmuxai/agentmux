@@ -142,7 +142,7 @@ fn register_session_resume_preflight_handler(engine: &Arc<WshRpcEngine>, state: 
 /// answer for this block, and **takes precedence over `cmd:env`** whenever
 /// it's `Some` (reagent P1, second pass on PR #2833).
 ///
-/// For an agent bound to an Armory OAuth identity, the `cmd:env` snapshot is
+/// For an agent bound to an OAuth account, the `cmd:env` snapshot is
 /// simply not where the CLI will look: the real spawn resolves the isolated
 /// dir dynamically through `inject_identity_env_async` (via
 /// `agent_handlers/input.rs`'s `build_persistent_spawn_env`, which

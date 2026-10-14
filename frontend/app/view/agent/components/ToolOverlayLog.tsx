@@ -23,6 +23,7 @@ import { beginHeightContinuity, cancelHeightContinuity } from "../resize-contrac
 import { ChunkPreview } from "./ChunkPreview";
 import { dropBashwrapStartingChunk } from "./output-cap";
 import { startsAtTop } from "../tool-meta/tool-descriptors";
+import { createOverflowReporter } from "./overflow-report";
 import { previewBox } from "./scroll-handoff";
 import { renderCompactDefault } from "./tool-renderers/builtins";
 import { registerToolRenderers } from "./tool-renderers";
@@ -44,6 +45,8 @@ interface ToolOverlayLogProps {
     /** Whether the pane is dormant (hidden). A dormant log whose tool finishes
      *  lets go of the chunk view it was holding: see `branch`. */
     dormant?: boolean;
+    /** Told whether the preview scrolls vertically, once its size has settled (overflow-report.ts). */
+    onOverflowChange?: (overflows: boolean) => void;
 }
 
 /** Same window as the pane's own (`AgentDocumentVirtualList.tsx`'s
@@ -329,6 +332,14 @@ export const ToolOverlayLog = (props: ToolOverlayLogProps): JSX.Element => {
         });
     });
 
+    // Tell the tool block whether this box scrolls (it shows its taller toggle
+    // only then), on the same resizes the pin below follows.
+    const overflow = createOverflowReporter({
+        el: () => scrollRef,
+        hidden: panelHidden,
+        onChange: () => props.onOverflowChange,
+    });
+
     // Pin on every resize of the box (FLIP, max-height transition, pane or
     // window resize, un-hiding) and of the content (new chunks, the result
     // swap, late renders such as syntax highlighting).
@@ -337,7 +348,10 @@ export const ToolOverlayLog = (props: ToolOverlayLogProps): JSX.Element => {
     onMount(() => {
         const el = scrollRef;
         if (!el || !hasResizeObserver) return;
-        const ro = new ResizeObserver(() => pinToBottom());
+        const ro = new ResizeObserver(() => {
+            pinToBottom();
+            overflow.check();
+        });
         ro.observe(el);
         if (contentRef) ro.observe(contentRef);
         onCleanup(() => ro.disconnect());
@@ -352,7 +366,10 @@ export const ToolOverlayLog = (props: ToolOverlayLogProps): JSX.Element => {
         // A document preview that starts streaming follows like any other.
         if (b === "chunks" && isStreaming() && detachedByDefault) setFollowing(true, "streaming-started");
         // Without ResizeObserver (jsdom), pin one frame after the DOM flush.
-        if (!hasResizeObserver && following) requestAnimationFrame(pinToBottom);
+        if (!hasResizeObserver) {
+            if (following) requestAnimationFrame(pinToBottom);
+            requestAnimationFrame(overflow.check);
+        }
     });
 
     // A different tool node reusing this slot (streaming-buffer cap advance,

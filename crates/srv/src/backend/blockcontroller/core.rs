@@ -289,18 +289,13 @@ pub(crate) fn broadcast_block_update(store: &Store, event_bus: &EventBus, block_
     let Ok(block) = store.must_get::<crate::backend::obj::Block>(block_id) else {
         return;
     };
-    let data = serde_json::to_value(&crate::backend::obj::MuxObjUpdate {
+    let update = crate::backend::obj::MuxObjUpdate {
         updatetype: "update".into(),
         otype: "block".into(),
         oid: block_id.to_string(),
         obj: Some(crate::backend::obj::mux_obj_to_value(&block)),
-    })
-    .ok();
-    event_bus.broadcast_event(&crate::backend::eventbus::WSEventType {
-        eventtype: "waveobj:update".to_string(),
-        oref: format!("block:{block_id}"),
-        data,
-    });
+    };
+    event_bus.broadcast_event(&crate::backend::eventbus::EventBus::typed_ws_event::<crate::backend::mps_events::MuxObjUpdated>(&update, format!("block:{block_id}")));
 }
 
 #[cfg(test)]

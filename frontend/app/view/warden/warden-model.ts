@@ -10,8 +10,8 @@ export type WardenSection = "host" | "lan" | "internet" | "audit" | "supervisor"
 // Label text only (not icon), hoisted here so viewName can read it without
 // importing from warden-view.tsx, which would reintroduce the circular
 // import warden.tsx exists to avoid. warden-view.tsx's RAIL references this
-// too, so the two can never drift out of sync. Mirrors section-pane.tsx's
-// ARMORY_SECTION_LABELS exactly.
+// too, so the two can never drift out of sync, like the section labels in
+// connectors.tsx and memory.tsx.
 export const WARDEN_SECTION_LABELS: Record<WardenSection, string> = {
     host: "Host",
     lan: "LAN",
@@ -30,7 +30,7 @@ export class WardenViewModel {
     blockId: string;
     /** Writes the block's meta — the host context's. */
     setMeta: (patch: Record<string, unknown>) => void;
-    // Per-pane zoom, same term:zoom metadata + clamp range as Armory/editor/
+    // Per-pane zoom, same term:zoom metadata + clamp range as Connectors/Memory/editor/
     // term/agent/swarm — see section-pane.tsx's zoomAtom for the precedent
     // this mirrors exactly.
     zoomAtom: Accessor<number>;

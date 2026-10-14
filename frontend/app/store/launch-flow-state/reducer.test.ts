@@ -110,6 +110,51 @@ describe("launch-flow-state reducer", () => {
         });
     });
 
+    describe("the agent's Bundles list", () => {
+        it("waits for the saved list, which fills an unedited form", () => {
+            let s = dispatch(initialState(), { type: "Opened", ownBundleId: "own" }).state;
+            expect(s.agentBundles).toEqual({ ready: false, ownBundleId: "own" });
+            expect(s.form.bundleIdsEdited).toBe(false);
+            s = dispatch(s, { type: "AgentBundlesLoaded", bundleIds: ["b1", "b2"], ownBundleId: "own-2" }).state;
+            expect(s.form.bundleIds).toEqual(["b1", "b2"]);
+            expect(s.form.bundleIdsEdited).toBe(false);
+            expect(s.agentBundles).toEqual({ ready: true, ownBundleId: "own-2" });
+        });
+
+        it("keeps the user's edit when the saved list loads later", () => {
+            let s = dispatch(initialState(), { type: "Opened" }).state;
+            s = dispatch(s, { type: "BundleIdsChanged", bundleIds: ["mine"] }).state;
+            expect(s.form.bundleIdsEdited).toBe(true);
+            s = dispatch(s, { type: "AgentBundlesLoaded", bundleIds: ["saved"], ownBundleId: "" }).state;
+            expect(s.form.bundleIds).toEqual(["mine"]);
+            expect(s.agentBundles.ready).toBe(true);
+        });
+
+        it("a list handed back by the round-trip counts as edited and needs no load", () => {
+            const s = dispatch(initialState(), {
+                type: "Opened",
+                initial: { bundleIds: ["carried"] },
+            }).state;
+            expect(s.form.bundleIds).toEqual(["carried"]);
+            expect(s.form.bundleIdsEdited).toBe(true);
+            expect(s.agentBundles.ready).toBe(true);
+        });
+
+        it("a failed load opens the editor on what it has", () => {
+            let s = dispatch(initialState(), { type: "Opened", ownBundleId: "own" }).state;
+            s = dispatch(s, { type: "AgentBundlesFailed" }).state;
+            expect(s.agentBundles).toEqual({ ready: true, ownBundleId: "own" });
+            expect(s.form.bundleIds).toEqual([]);
+            expect(dispatch(s, { type: "AgentBundlesFailed" }).state).toBe(s);
+        });
+
+        it("a load landing after Closed is dropped", () => {
+            let s = dispatch(initialState(), { type: "Opened" }).state;
+            s = dispatch(s, { type: "Closed" }).state;
+            expect(dispatch(s, { type: "AgentBundlesLoaded", bundleIds: ["x"], ownBundleId: "" }).state).toBe(s);
+        });
+    });
+
     describe("form fields", () => {
         it("NameChanged updates name", () => {
             const s = dispatch(initialState(), { type: "NameChanged", name: "n" }).state;

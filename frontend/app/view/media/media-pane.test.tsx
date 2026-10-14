@@ -15,7 +15,10 @@ const hub = vi.hoisted(() => ({
     hooks: new Map<string, { drop: (d: { paths: string[]; files: File[] }) => void }>(),
     urls: 0,
     blocks: new Map<string, { meta: Record<string, unknown> }>(),
-    leafs: [] as string[],
+    // A leaf is a block id, or a node (minimized, a stack...) when the test needs one.
+    leafs: [] as (string | Record<string, unknown>)[],
+    revealed: [] as string[],
+    revealFails: false,
     focused: "" as string,
     metaWrites: [] as [string, Record<string, unknown>][],
 }));
@@ -55,8 +58,16 @@ vi.mock("@/app/store/block-meta", () => ({
 vi.mock("@/layout/lib/layoutModelHooks", () => ({
     getLayoutModelForStaticTab: () => ({
         focusedNode: () => ({ data: { blockId: hub.focused } }),
-        leafs: () => hub.leafs.map((blockId) => ({ data: { blockId } })),
+        leafs: () => hub.leafs.map((l) => (typeof l === "string" ? { id: l, data: { blockId: l } } : l)),
     }),
+}));
+// Showing the pane is reveal-block's job (tested there); here, that it is asked for the right block.
+vi.mock("@/app/util/reveal-block", () => ({
+    showBlockWithoutFocus: async (blockId: string) => {
+        hub.revealed.push(blockId);
+        if (hub.revealFails) throw new Error("no layout");
+        return true;
+    },
 }));
 
 import { mediaPaneTab } from "./media";
@@ -75,6 +86,8 @@ beforeEach(() => {
     hub.leafs = [];
     hub.focused = "";
     hub.metaWrites = [];
+    hub.revealed = [];
+    hub.revealFails = false;
     URL.createObjectURL = () => `blob:test/${++hub.urls}`;
     URL.revokeObjectURL = () => {};
 });
@@ -258,6 +271,84 @@ describe("opening media into the Media pane on screen", () => {
         hub.focused = "m2";
         await openInMediaPaneOnScreen("C:/y.png");
         expect(hub.metaWrites[1]).toEqual(["m2", { "media:open": [{ id: expect.any(String), path: "C:/y.png" }] }]);
+    });
+});
+
+describe("opening media shows the Media pane it lands in", () => {
+    const media = (id: string) => hub.blocks.set(id, { meta: { view: "media" } });
+    const node = (id: string, data: Record<string, unknown>, minimized = false) => ({ id, minimized, data });
+    const queuedOn = () => hub.metaWrites.map(([id]) => id);
+
+    it("asks for the pane to be shown, once the file is queued", async () => {
+        media("m1");
+        hub.leafs = [node("n1", { blockId: "m1" })];
+        expect(await openInMediaPaneOnScreen("C:/x.png")).toBe(true);
+        expect(queuedOn()).toEqual(["m1"]);
+        expect(hub.revealed).toEqual(["m1"]);
+    });
+
+    it("a minimized Media pane is chosen and shown (it was the only one)", async () => {
+        media("m1");
+        hub.leafs = [node("n1", { blockId: "m1" }, true)];
+        expect(await openInMediaPaneOnScreen("C:/x.png")).toBe(true);
+        expect(queuedOn()).toEqual(["m1"]);
+        expect(hub.revealed).toEqual(["m1"]);
+    });
+
+    it("prefers a Media pane that is already visible over a minimized one", async () => {
+        media("min");
+        media("vis");
+        hub.leafs = [node("n1", { blockId: "min" }, true), node("n2", { blockId: "vis" })];
+        await openInMediaPaneOnScreen("C:/x.png");
+        expect(queuedOn()).toEqual(["vis"]);
+        expect(hub.revealed).toEqual(["vis"]);
+    });
+
+    it("the focused Media pane still wins, minimized or not", async () => {
+        media("min");
+        media("vis");
+        hub.leafs = [node("n1", { blockId: "min" }, true), node("n2", { blockId: "vis" })];
+        hub.focused = "min";
+        await openInMediaPaneOnScreen("C:/x.png");
+        expect(queuedOn()).toEqual(["min"]);
+        expect(hub.revealed).toEqual(["min"]);
+    });
+
+    it("finds a Media pane that is a background tab of a stack, instead of saying there is none", async () => {
+        hub.blocks.set("t1", { meta: { view: "term" } });
+        media("m1");
+        hub.leafs = [node("n1", { blockId: "t1", blockStack: ["t1", "m1"], activeBlockId: "t1" })];
+        expect(await openInMediaPaneOnScreen("C:/x.png")).toBe(true);
+        expect(queuedOn()).toEqual(["m1"]);
+        expect(hub.revealed).toEqual(["m1"]); // the show switches the stack to it
+    });
+
+    it("a visible Media tab of a stack is chosen over a hidden one elsewhere", async () => {
+        media("bg");
+        media("front");
+        hub.leafs = [
+            node("n1", { blockId: "bg" }, true),
+            node("n2", { blockId: "term", blockStack: ["term", "front"], activeBlockId: "front" }),
+        ];
+        hub.blocks.set("term", { meta: { view: "term" } });
+        await openInMediaPaneOnScreen("C:/x.png");
+        expect(queuedOn()).toEqual(["front"]);
+    });
+
+    it("with no Media pane, says so and shows nothing", async () => {
+        hub.blocks.set("t1", { meta: { view: "term" } });
+        hub.leafs = [node("n1", { blockId: "t1" })];
+        expect(await openInMediaPaneOnScreen("C:/x.png")).toBe(false);
+        expect(hub.metaWrites).toEqual([]);
+        expect(hub.revealed).toEqual([]);
+    });
+
+    it("a failure to show the pane does not fail the open: the file is queued and the click handled", async () => {
+        media("m1");
+        hub.leafs = [node("n1", { blockId: "m1" }, true)];
+        hub.revealFails = true;
+        expect(await openInMediaPaneOnScreen("C:/x.png")).toBe(true);
+        expect(queuedOn()).toEqual(["m1"]);
     });
 });
 

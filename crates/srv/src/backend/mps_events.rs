@@ -48,6 +48,10 @@ macro_rules! per_id_events {
         pub fn per_id_schema() -> Vec<(&'static str, TsType)> {
             vec![$(($prefix, ts_type::<$payload>())),*]
         }
+        /// Whether `name` is a per-id event's name: one of the prefixes above, then an id.
+        pub fn is_per_id_event(name: &str) -> bool {
+            $(name.starts_with(<$marker as PerIdEvent>::PREFIX) ||)* false
+        }
     };
 }
 
@@ -65,6 +69,10 @@ macro_rules! events {
         #[cfg(test)]
         pub fn schema() -> Vec<(&'static str, TsType)> {
             vec![$(($name, ts_type::<$payload>())),*]
+        }
+        /// Whether `name` is one of the events above (not a per-id one: [`is_per_id_event`]).
+        pub fn is_typed_event(name: &str) -> bool {
+            $(name == <$marker as Event>::NAME ||)* false
         }
     };
 }
@@ -177,8 +185,36 @@ events! {
     NotificationActivate: crate::backend::notify::router::EVENT_NOTIFICATION_ACTIVATE => crate::backend::notify::router::NotificationActivateEvent,
     /// Ask one window to open a pane as its own floating OS window (`app_api::pane`).
     OpenFloatingPane: "openfloatingpane" => OpenFloatingPaneEvent,
+    /// The LAN peers this instance sees (`lan_discovery`).
+    LanInstances: "laninstances" => crate::backend::lan_discovery::LanInstanceList,
+    /// LAN discovery couldn't start, or a daemon rebuild failed.
+    LanInstancesError: "laninstances:error" => crate::backend::lan_discovery::LanDiscoveryError,
+    /// Whether this instance is discoverable on every LAN interface (the mDNS watchdog).
+    LanInstancesHealth: "laninstances:health" => crate::backend::lan_discovery::LanDiscoverability,
+    /// The OS firewall's verdict on LAN peers reaching this machine (`lan_firewall`).
+    LanInstancesFirewall: "laninstances:firewall" => crate::backend::lan_firewall::LanFirewall,
+    /// Several object updates from one atomic transition, applied in one flush (`EventBus::broadcast_mux_obj_updates`).
+    MuxObjBatchedUpdates: super::eventbus::WS_EVENT_MUX_OBJ_BATCHED_UPDATES => crate::backend::obj::MuxObjBatch,
+    /// A line of an agent CLI's install progress, for its pane (`mps::publish_install_progress`).
+    InstallProgress: super::mps::EVENT_INSTALL_PROGRESS => InstallProgressEvent,
+    /// An agent pane's activity, from its terminal title (`mps::publish_block_activity`).
+    BlockActivity: super::mps::EVENT_BLOCK_ACTIVITY => BlockActivityEvent,
+    /// One message from a language server (`lsp::supervisor`).
+    LspMessage: "lsp:message" => LspMessageEvent,
+    /// Cloud delivery's state changed (`muxbus::delivery_status`).
+    MuxbusStatus: crate::muxbus::delivery_status::EVENT_MUXBUS_STATUS => crate::backend::rpc_types::MuxBusDeliveryStatus,
+    /// A mobile viewer paired with this machine (`http_viewer`).
+    ViewerPaired: "viewer:paired" => ViewerPairedEvent,
     /// Tell a window's renderer to reveal a block (`notify::router`).
     BlockReveal: crate::backend::notify::router::EVENT_BLOCK_REVEAL => crate::backend::notify::router::BlockRevealEvent,
+
+    // Published by a client through the HTTP relay, which checks the payload (`client_events!`).
+    /// A line of a Bash call's output, its exit, its pid or which call it is (`agentmux-bashwrap`).
+    ToolChunk: "tool_chunk" => agentmux_common::client_events::ToolChunk,
+    /// Claude Code began compacting (`agentmux-bashwrap precompact`).
+    CompactionStarted: "compaction_started" => agentmux_common::client_events::CompactionStarted,
+    /// A window claimed or released a singleton modal (`frontend/app/store/singleton-modal.ts`).
+    SingletonClaim: "singleton:claim" => SingletonClaimEvent,
 
     // Signals with no payload: something changed, and a subscriber refetches what it shows.
     /// The agents list changed.
@@ -226,10 +262,69 @@ per_id_events! {
     AgentEventStream: "agent_event:" => crate::agents::types::AgentEvent,
 }
 
+macro_rules! client_events {
+    ($($marker:ident,)*) => {
+        /// Publishes an event a process outside srv sent (`POST /agentmux/wps/publish`) if it is a
+        /// client event: `None` if `name` isn't one, an error if `data` isn't its payload type.
+        pub fn publish_client_event(
+            broker: &super::mps::Broker,
+            name: &str,
+            data: &serde_json::Value,
+            scopes: &[String],
+            persist: usize,
+        ) -> Option<Result<(), String>> {
+            $(
+                if name == <$marker as Event>::NAME {
+                    return Some(match <<$marker as Event>::Payload as serde::Deserialize>::deserialize(data) {
+                        Ok(payload) => {
+                            broker.publish_event::<$marker>(&payload, scopes.to_vec(), persist);
+                            Ok(())
+                        }
+                        Err(e) => Err(format!("{name}: {e}")),
+                    });
+                }
+            )*
+            None
+        }
+        /// Whether `name` is one of the client events.
+        pub fn is_client_event(name: &str) -> bool {
+            $(name == <$marker as Event>::NAME ||)* false
+        }
+    };
+}
+
+// The events, declared in `events!`, that a client publishes: the relay refuses one whose data
+// isn't its payload. It refuses every other declared event too, since only srv publishes those
+// (`is_srv_event`), and relays an undeclared one as sent.
+client_events! {
+    ToolChunk,
+    CompactionStarted,
+    SingletonClaim,
+}
+
+/// Whether only srv publishes `name`: a declared event, or a per-id one, that isn't a client event.
+/// Its subscribers read it as its payload type, so the relay doesn't take it from outside.
+pub fn is_srv_event(name: &str) -> bool {
+    (is_typed_event(name) || is_per_id_event(name)) && !is_client_event(name)
+}
+
 /// An event's `data`: its payload as JSON, or none for an event that carries none (`()`, a
 /// pure "something changed" signal), so such an event goes out with no `data` field at all.
 pub fn payload_data<P: Serialize>(payload: &P) -> Option<serde_json::Value> {
     serde_json::to_value(payload).ok().filter(|v| !v.is_null())
+}
+
+/// `singleton:claim`, to `singleton:<kind>` with `persist: 1`: the latest one names the window
+/// holding that kind of singleton modal.
+#[derive(Debug, Clone, PartialEq, Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct SingletonClaimEvent {
+    pub kind: String,
+    /// The holding window's label, or `null` once released.
+    pub holder: Option<String>,
+    /// The publishing window's claim counter.
+    #[ts(type = "number")]
+    pub epoch: u64,
 }
 
 /// `editor:file_changed` / `media:file_changed`: the file that changed.
@@ -328,6 +423,39 @@ pub struct ConfigEvent {
     pub fullconfig: serde_json::Value,
 }
 
+/// `install_progress`: one line of install progress.
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct InstallProgressEvent {
+    pub message: String,
+}
+
+/// `block:activity`: what an agent pane is doing, from its terminal title.
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+#[serde(rename_all = "camelCase")]
+pub struct BlockActivityEvent {
+    pub block_id: String,
+    pub activity: String,
+}
+
+/// `lsp:message`: one JSON-RPC message from a language server, as it sent it.
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct LspMessageEvent {
+    pub server_id: String,
+    #[ts(type = "unknown")]
+    pub message: serde_json::Value,
+}
+
+/// `viewer:paired`: the device that just paired.
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct ViewerPairedEvent {
+    pub device_id: String,
+    pub device_name: String,
+}
+
 /// `openfloatingpane`: the pane to float, now alone in its own workspace.
 #[derive(Debug, Clone, Serialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
@@ -355,7 +483,6 @@ pub struct ProcessExitedEvent {
 /// `output`: one app-server protocol frame, as the agent sent it.
 #[derive(Debug, Clone, Serialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
-#[serde(transparent)]
 pub struct ProtocolFrame(#[ts(type = "unknown")] pub serde_json::Value);
 
 /// `agentcredentials:revoked:<agent id>`: the agent still holds the provider's tokens until it restarts.
@@ -455,6 +582,37 @@ mod tests {
     }
 
     #[test]
+    fn lan_payloads_serialize_as_the_json_they_replace() {
+        use crate::backend::eventbus::EventBus;
+        use crate::backend::lan_discovery::{LanDiscoverability, LanDiscoveryError, LanInstanceList};
+        let empty = EventBus::typed_ws_event::<LanInstances>(&LanInstanceList(Vec::new()), String::new());
+        assert_eq!((empty.eventtype.as_str(), empty.data), ("laninstances", Some(serde_json::json!([]))));
+        let error = LanDiscoveryError { error: "bind failed".into() };
+        assert_eq!(serde_json::to_value(&error).unwrap(), serde_json::json!({ "error": "bind failed" }));
+        let health = LanDiscoverability { state: "degraded".into(), missing: vec!["192.0.2.7".into()], rebuilds: 1 };
+        assert_eq!(serde_json::to_value(&health).unwrap(), serde_json::json!({ "state": "degraded", "missing": ["192.0.2.7"], "rebuilds": 1 }));
+    }
+
+    #[test]
+    fn raw_event_payloads_serialize_as_the_json_they_replace() {
+        use crate::backend::eventbus::EventBus;
+        let progress = EventBus::typed_ws_event::<InstallProgress>(&InstallProgressEvent { message: "npm i".into() }, "block:b1");
+        assert_eq!((progress.eventtype.as_str(), progress.oref.as_str()), ("install_progress", "block:b1"));
+        assert_eq!(progress.data, Some(serde_json::json!({ "message": "npm i" })));
+        let activity = BlockActivityEvent { block_id: "b1".into(), activity: "auth refactor".into() };
+        assert_eq!(serde_json::to_value(&activity).unwrap(), serde_json::json!({ "blockId": "b1", "activity": "auth refactor" }));
+        let lsp = LspMessageEvent { server_id: "rust".into(), message: serde_json::json!({ "id": 1 }) };
+        assert_eq!(serde_json::to_value(&lsp).unwrap(), serde_json::json!({ "server_id": "rust", "message": { "id": 1 } }));
+        let paired = ViewerPairedEvent { device_id: "d1".into(), device_name: "Phone".into() };
+        assert_eq!(serde_json::to_value(&paired).unwrap(), serde_json::json!({ "device_id": "d1", "device_name": "Phone" }));
+        // The batch goes out as the bare array, as it did before.
+        let update = crate::backend::obj::MuxObjUpdate { updatetype: "delete".into(), otype: "tab".into(), oid: "t1".into(), obj: None };
+        let batch = EventBus::typed_ws_event::<MuxObjBatchedUpdates>(&crate::backend::obj::MuxObjBatch(vec![update]), String::new());
+        assert_eq!(batch.eventtype, "waveobj:batchedupdates");
+        assert_eq!(batch.data, Some(serde_json::json!([{ "updatetype": "delete", "otype": "tab", "oid": "t1" }])));
+    }
+
+    #[test]
     fn a_typed_frame_is_the_eventrecv_frame_srv_wrote_by_hand() {
         let frame = crate::backend::eventbus::EventBus::typed_frame::<Config>(&ConfigEvent { fullconfig: serde_json::json!({ "settings": {} }) });
         assert_eq!(
@@ -473,6 +631,47 @@ mod tests {
             serde_json::to_value(&activate).unwrap(),
             serde_json::json!({ "id": "n1", "block_id": "b1", "tab_id": "t1", "window_id": "w1", "workspace_id": null, "at_ms": 7 })
         );
+    }
+
+    #[test]
+    fn a_client_event_is_published_only_with_its_payload() {
+        use super::super::mps::Broker;
+        use serde_json::json;
+        let broker = Broker::new();
+        let scopes = vec!["block:b1".to_string()];
+        let chunk = json!({ "op": "chunk", "tool_id": "toolu_1", "kind": "stdout", "content": "hi\n", "timestamp": 5 });
+        assert_eq!(publish_client_event(&broker, "tool_chunk", &chunk, &scopes, 8), Some(Ok(())));
+        let stored = broker.read_event_history("tool_chunk", "block:b1", 8);
+        assert_eq!(stored.len(), 1);
+        assert_eq!(stored[0].data, Some(chunk), "goes out as it came in");
+
+        let wrong = json!({ "op": "chunk", "tool_id": "toolu_1", "kind": "tty", "content": "", "timestamp": 0 });
+        let refused = publish_client_event(&broker, "tool_chunk", &wrong, &scopes, 8).expect("a client event");
+        assert!(refused.unwrap_err().starts_with("tool_chunk: unknown variant `tty`"));
+        let claim = json!({ "kind": "bundles", "holder": "main", "epoch": "1" });
+        assert!(publish_client_event(&broker, "singleton:claim", &claim, &["singleton:bundles".to_string()], 1).unwrap().is_err());
+        assert_eq!(broker.read_event_history("tool_chunk", "block:b1", 8).len(), 1, "a refused event isn't stored");
+
+        assert_eq!(publish_client_event(&broker, "someones:event", &json!({ "any": 1 }), &scopes, 1), None, "not a client event");
+    }
+
+    #[test]
+    fn srv_events_are_the_declared_ones_clients_dont_publish() {
+        assert!(is_srv_event("controllerstatus"));
+        assert!(is_srv_event("agents:changed"), "a signal with no payload too");
+        assert!(is_srv_event("agent_event:b1"), "a per-id event, by its prefix");
+        assert!(is_srv_event("dronerun:r1"));
+        for client in ["tool_chunk", "compaction_started", "singleton:claim"] {
+            assert!(is_typed_event(client) && !is_srv_event(client), "{client} is a client's");
+        }
+        assert!(!is_srv_event("someones:event"), "an undeclared event is relayed");
+        assert!(!is_srv_event("agent_event"), "a prefix needs its id");
+    }
+
+    #[test]
+    fn a_released_singleton_claim_names_no_holder() {
+        let release = SingletonClaimEvent { kind: "bundles".into(), holder: None, epoch: 3 };
+        assert_eq!(serde_json::to_value(&release).unwrap(), serde_json::json!({ "kind": "bundles", "holder": null, "epoch": 3 }));
     }
 
     #[test]

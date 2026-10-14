@@ -34,3 +34,15 @@ fn export_bindings_event_schema() {
     json.push('\n');
     std::fs::write(&out, json).unwrap_or_else(|e| panic!("writing {}: {e}", out.display()));
 }
+
+/// The payloads of the events `agentmux-bashwrap` publishes, declared in `agentmux-common`. ts-rs
+/// writes a type's file from its own crate's tests, which `check-rpc-bindings.sh` doesn't run, so
+/// srv writes these.
+#[test]
+fn export_bindings_client_event_payloads() {
+    use agentmux_common::client_events::{CompactionStarted, ToolChunk};
+    use ts_rs::TS;
+    let cfg = ts_rs::Config::from_env();
+    ToolChunk::export_all(&cfg).expect("exporting ToolChunk");
+    CompactionStarted::export_all(&cfg).expect("exporting CompactionStarted");
+}

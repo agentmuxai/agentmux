@@ -246,25 +246,25 @@ In this change (small and needed for the above):
 
 Separate follow-ups:
 
-5. **Package widgets can't be pinned.** Pin logic always looks up `defwidget@${short}`
+5. ~~**Package widgets can't be pinned.**~~ Resolved 2026-10-13: `widget:pinned` holds a built-in's short name (so old files read as before) and a package widget's full key (`ext@<id>/<pane>`); `pinIdOf` / `keyOfPinId` in `action-widgets-config.ts` convert, and every pin path (bar, drag, right-click, title-bar menu, Settings) uses them. The original finding: Pin logic always looks up `defwidget@${short}`
    (`action-widgets-config.ts:152,168`, `action-widgets-menu.ts:37`, `action-widgets.tsx:336`), and the title-bar
    menu lists only `defwidget@` keys (`:85`). So `ext@…` entries only ever appear in More. Fix by moving
    `widget:pinned` to full keys, reading short names as `defwidget@<short>` for old files.
-6. **Two rename maps** that must agree: `RENAMED_PINS` in TS (includes `armory` → `connectors` + `memory`) and
-   `RENAMED_WIDGETS` in Rust (no `armory`, `user_widgets.rs:54-58`). Keep one in Rust and send the canonical names,
-   or at least add `armory` to Rust and a test that the two agree.
-7. **Dead or leftover keys and fields:** `widget:showhelp` and `widget:*` (schema and types, no reader),
+6. ~~**Two rename maps**~~ Resolved 2026-10-13: both are gone. `m0037_retire_old_pane_names` rewrites the old names
+   (`armory`, `knowledge`, `remotes`) in stored pins, hidden entries and widgets.json once, so neither the frontend's
+   `RENAMED_PINS` nor srv's `RENAMED_WIDGETS` is needed.
+7. ~~**Dead or leftover keys and fields:**~~ Resolved 2026-10-13: `widget:showhelp`, `widget:order` (type), `defaultwidgets`, `ConfigState::set_config` and the `let _ = view;` are removed. (`widget:*` stays: it is the clear-group key every settings group has; the `widget:hidden@defwidget@` comment was already gone.) The original list: `widget:showhelp` and `widget:*` (schema and types, no reader),
    `widget:order` (`MetaType`, template tests), the `widget:hidden@defwidget@…` example in a comment
    (`types.rs:518`, it would be confused with the new key), `FullConfigType.defaultwidgets` (never filled,
    `types.rs:846`), `ConfigState::set_config` (`#[allow(dead_code)]`, `state.rs:55`), `let _ = view;`
    (`widget_packages.rs:594`).
-8. **Out-of-date schemas:** `schema/widgets.json` lacks `display:pinned` and `module` and sets
+8. ~~**Out-of-date schemas:**~~ Resolved 2026-10-13: `schema/widgets.json` has `display:pinned` and `module`; `schema/settings.json` already had `widget:pinned`. The original finding: `schema/widgets.json` lacks `display:pinned` and `module` and sets
    `additionalProperties: false`, so it rejects valid files. `schema/settings.json` lacks `widget:pinned`.
-9. **`display:hidden` naming:** it means "only inside its group", and the Launcher also uses it. Rename to
+9. ~~**`display:hidden` naming:**~~ Resolved 2026-10-13: widgets now use `display:grouponly`; `display:hidden` is still read (a serde alias) and is written back under the new name. Connections keep their own `display:hidden`, which is a different thing. The original finding: it means "only inside its group", and the Launcher also uses it. Rename to
    `display:grouponly` (reading the old name), so it can't be confused with the user's Hidden.
-10. **Comment drift:** `user_widgets.rs:116` says the user file can "hide" a package entry, but it can only replace
+10. ~~**Comment drift:**~~ Resolved 2026-10-13 (the `user_widgets.rs` comment is corrected; the settings-key block was already a pointer). The original finding: `user_widgets.rs:116` says the user file can "hide" a package entry, but it can only replace
     it. The settings-key doc block is duplicated in `action-widgets.tsx:11-13` and `action-widgets-config.ts:8-10`.
-11. **Palette labels** "Open Remotes" and "Open Hangar (Files)" (`command-registry.ts:175,182`) may predate the
+11. ~~**Palette labels**~~ Checked 2026-10-13, no change: "Open Remotes" opens Connectors on its Remotes section and Hangar is the Files pane's name. The original note: "Open Remotes" and "Open Hangar (Files)" (`command-registry.ts:175,182`) may predate the
     Connectors rename. Check them.
 
 ## 8. Tests

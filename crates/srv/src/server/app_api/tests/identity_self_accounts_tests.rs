@@ -85,9 +85,9 @@ async fn skips_a_malformed_linked_account_instead_of_failing_the_whole_call() {
     let result = identity_self_accounts_impl(&state, &def.id)
         .await
         .expect("must not fail even with a malformed linked account present");
-    let accounts = result["accounts"].as_array().unwrap();
+    let accounts = &result.accounts;
     assert_eq!(accounts.len(), 1, "the malformed account must be skipped, not error the whole call");
-    assert_eq!(accounts[0]["account_id"], json!("acct-good"));
+    assert_eq!(accounts[0].account_id, "acct-good");
 }
 
 // reagentx P1 on PR #2428 (round 4): `resolve_agent_definition_id`
@@ -179,7 +179,7 @@ async fn resolve_agent_definition_id_falls_back_to_the_registry_for_a_slug_only_
     }
 
     let result = result.expect("must resolve via the registry fallback, not error 'unknown agent'");
-    let accounts = result["accounts"].as_array().unwrap();
+    let accounts = &result.accounts;
     assert_eq!(accounts.len(), 1);
-    assert_eq!(accounts[0]["account_id"], json!("acct-good"));
+    assert_eq!(accounts[0].account_id, "acct-good");
 }

@@ -10,4 +10,4 @@
  * deserialize — the stub sends `{}`, a client that omits `data` sends `null`,
  * and serde accepts each from only one of `()` and a struct.
  */
-export type NoArgsReq = Record<string, never>;
+export type NoArgsReq = Record<symbol, never>;

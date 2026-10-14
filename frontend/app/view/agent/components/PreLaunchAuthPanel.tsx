@@ -298,25 +298,6 @@ export const PreLaunchAuthPanel = (props: PreLaunchAuthPanelProps): JSX.Element 
                         onSubmitCallback={(url) => void controller.submitCallback(url)}
                     />
                 </Match>
-                <Match
-                    when={
-                        controller.state().kind === "authenticated" ||
-                        controller.state().kind === "saving"
-                    }
-                >
-                    {/* Minimal stub (#853) so the panel doesn't go
-                        blank if the reducer enters the `authenticated`/
-                        `saving` kinds. No backend `auth.savebundle` RPC
-                        was ever built, and the backend's
-                        `AuthSessionStatus` (identity/auth_session.rs)
-                        has no `authenticated` status, so nothing
-                        reaches these kinds today. Surfaces Cancel so
-                        users aren't forced to close the modal. */}
-                    <AuthenticatedStub
-                        state={controller.state()}
-                        onCancel={() => void controller.cancel()}
-                    />
-                </Match>
                 <Match when={controller.state().kind === "failed"}>
                     <FailedBanner
                         state={controller.state()}
@@ -574,7 +555,7 @@ async function startConnect(
                     if (registeredAccountId) {
                         controller.markSeeded(registeredAccountId);
                     } else {
-                        // The credential landed but the Armory account row
+                        // The credential landed but the account row
                         // couldn't be persisted — don't show fake-ready state
                         // (the resolver's spawn gate requires a real bound
                         // account, so a fake-ready panel would let Launch
@@ -800,21 +781,6 @@ const WaitingPanel = (p: {
 const ReadyBanner = (): JSX.Element => (
     <div class="pre-launch-auth-panel-ready">
         ✓ Connected. Ready to launch.
-    </div>
-);
-
-const AuthenticatedStub = (p: {
-    state: AuthState;
-    onCancel: () => void;
-}): JSX.Element => (
-    <div class="pre-launch-auth-panel-ready">
-        <div>
-            ✓ Authenticated{p.state.email ? ` as ${p.state.email}` : ""}.
-            {" "}Awaiting bundle save…
-        </div>
-        <Button onClick={() => p.onCancel()} className="pre-launch-auth-panel-cancel">
-            Cancel
-        </Button>
     </div>
 );
 

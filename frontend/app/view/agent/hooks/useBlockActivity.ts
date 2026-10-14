@@ -32,7 +32,7 @@
  */
 
 import { onCleanup, onMount } from "solid-js";
-import { muxEventSubscribe, onMuxEvent } from "@/app/store/mps";
+import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import { makeORef } from "@/app/store/mos";
 import { ObjectService } from "@/app/store/services";
@@ -81,22 +81,17 @@ export function useBlockActivity(opts: UseBlockActivityOptions): void {
     onMount(() => {
         let debounceTimer: ReturnType<typeof setTimeout> | undefined;
 
-        const unsub = muxEventSubscribe({
-            eventType: WpsEvent.BlockActivity,
-            scope: makeORef("block", opts.blockId),
-            handler: (event) => {
-                const activity = (event as any)?.data?.activity as string | undefined;
-                if (!activity) return;
-                clearTimeout(debounceTimer);
-                debounceTimer = setTimeout(() => {
-                    fireAndForget(() =>
-                        ObjectService.UpdateObjectMeta(makeORef("block", opts.blockId), {
-                            [META_OSC_TITLE]: activity,
-                        } as any)
-                    );
-                }, 300);
-            },
-        });
+        const unsub = onMuxEvent(WpsEvent.BlockActivity, ({ activity }) => {
+            if (!activity) return;
+            clearTimeout(debounceTimer);
+            debounceTimer = setTimeout(() => {
+                fireAndForget(() =>
+                    ObjectService.UpdateObjectMeta(makeORef("block", opts.blockId), {
+                        [META_OSC_TITLE]: activity,
+                    } as any)
+                );
+            }, 300);
+        }, makeORef("block", opts.blockId));
 
         // Clear term:osc_title, term:ambient_summary, and
         // term:next_prompt_suggestion on session end (process exit) so a

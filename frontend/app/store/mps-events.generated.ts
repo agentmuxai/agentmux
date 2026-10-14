@@ -17,10 +17,12 @@ import type { AttachmentBatchDoneEvent } from "@/types/rpc/AttachmentBatchDoneEv
 import type { AttachmentFailedEvent } from "@/types/rpc/AttachmentFailedEvent";
 import type { AttachmentProgressEvent } from "@/types/rpc/AttachmentProgressEvent";
 import type { AttachmentReadyEvent } from "@/types/rpc/AttachmentReadyEvent";
+import type { BlockActivityEvent } from "@/types/rpc/BlockActivityEvent";
 import type { BlockControllerRuntimeStatus } from "@/types/rpc/BlockControllerRuntimeStatus";
 import type { BlockRefEvent } from "@/types/rpc/BlockRefEvent";
 import type { BlockRevealEvent } from "@/types/rpc/BlockRevealEvent";
 import type { BtwAnswerChunkEvent } from "@/types/rpc/BtwAnswerChunkEvent";
+import type { CompactionStarted } from "@/types/rpc/CompactionStarted";
 import type { ConfigEvent } from "@/types/rpc/ConfigEvent";
 import type { ConnStatus } from "@/types/rpc/ConnStatus";
 import type { CredentialsRevokedEvent } from "@/types/rpc/CredentialsRevokedEvent";
@@ -30,7 +32,15 @@ import type { DockClearEvent } from "@/types/rpc/DockClearEvent";
 import type { FilesChangedEvent } from "@/types/rpc/FilesChangedEvent";
 import type { FsOpEvent } from "@/types/rpc/FsOpEvent";
 import type { InstallChunkEvent } from "@/types/rpc/InstallChunkEvent";
+import type { InstallProgressEvent } from "@/types/rpc/InstallProgressEvent";
+import type { LanDiscoverability } from "@/types/rpc/LanDiscoverability";
+import type { LanDiscoveryError } from "@/types/rpc/LanDiscoveryError";
+import type { LanFirewall } from "@/types/rpc/LanFirewall";
+import type { LanInstanceList } from "@/types/rpc/LanInstanceList";
+import type { LspMessageEvent } from "@/types/rpc/LspMessageEvent";
 import type { MessageAcceptedEvent } from "@/types/rpc/MessageAcceptedEvent";
+import type { MuxBusDeliveryStatus } from "@/types/rpc/MuxBusDeliveryStatus";
+import type { MuxObjBatch } from "@/types/rpc/MuxObjBatch";
 import type { MuxObjUpdate } from "@/types/rpc/MuxObjUpdate";
 import type { NoDirectLinksEvent } from "@/types/rpc/NoDirectLinksEvent";
 import type { NotificationActivateEvent } from "@/types/rpc/NotificationActivateEvent";
@@ -50,6 +60,7 @@ import type { RunEvent } from "@/types/rpc/RunEvent";
 import type { ShellChunkEvent } from "@/types/rpc/ShellChunkEvent";
 import type { ShellNodeCreateEvent } from "@/types/rpc/ShellNodeCreateEvent";
 import type { ShutdownLineEvent } from "@/types/rpc/ShutdownLineEvent";
+import type { SingletonClaimEvent } from "@/types/rpc/SingletonClaimEvent";
 import type { SrvInfo } from "@/types/rpc/SrvInfo";
 import type { SubagentAbandonedEvent } from "@/types/rpc/SubagentAbandonedEvent";
 import type { SubagentActivityEvent } from "@/types/rpc/SubagentActivityEvent";
@@ -60,7 +71,9 @@ import type { SubagentNamedEvent } from "@/types/rpc/SubagentNamedEvent";
 import type { SubagentSpawnedEvent } from "@/types/rpc/SubagentSpawnedEvent";
 import type { SubagentUpdatedEvent } from "@/types/rpc/SubagentUpdatedEvent";
 import type { TimeSeriesData } from "@/types/rpc/TimeSeriesData";
+import type { ToolChunk } from "@/types/rpc/ToolChunk";
 import type { UserAttentionEvent } from "@/types/rpc/UserAttentionEvent";
+import type { ViewerPairedEvent } from "@/types/rpc/ViewerPairedEvent";
 import type { WSFileEventData } from "@/types/rpc/WSFileEventData";
 import type { WidgetPackagesEvent } from "@/types/rpc/WidgetPackagesEvent";
 import type { WidgetRequestsEvent } from "@/types/rpc/WidgetRequestsEvent";
@@ -94,10 +107,12 @@ export type MuxEventPayloads = {
   "attachment:progress": AttachmentProgressEvent;
   "attachment:ready": AttachmentReadyEvent;
   "background-task-updated": BlockRefEvent;
+  "block:activity": BlockActivityEvent;
   "block:reveal": BlockRevealEvent;
   blockfile: WSFileEventData;
   blockstats: TimeSeriesData;
   btw_answer_chunk: BtwAnswerChunkEvent;
+  compaction_started: CompactionStarted;
   config: ConfigEvent;
   connchange: ConnStatus;
   controllerstatus: BlockControllerRuntimeStatus;
@@ -112,10 +127,17 @@ export type MuxEventPayloads = {
   "identity:no-direct-links": NoDirectLinksEvent;
   "identityaccounts:changed": null;
   install_chunk: InstallChunkEvent;
+  install_progress: InstallProgressEvent;
+  laninstances: LanInstanceList;
+  "laninstances:error": LanDiscoveryError;
+  "laninstances:firewall": LanFirewall;
+  "laninstances:health": LanDiscoverability;
+  "lsp:message": LspMessageEvent;
   "mcp:changed": null;
   "mcp:observed": BlockRefEvent;
   "media:file_changed": PathChangedEvent;
   "memories:changed": null;
+  "muxbus:status": MuxBusDeliveryStatus;
   "namedagents:changed": null;
   notification: OsNotification;
   "notification:activate": NotificationActivateEvent;
@@ -128,6 +150,7 @@ export type MuxEventPayloads = {
   remoteschange: null;
   shell_chunk: ShellChunkEvent;
   shell_node_create: ShellNodeCreateEvent;
+  "singleton:claim": SingletonClaimEvent;
   "skills:changed": null;
   srvinfo: SrvInfo;
   "subagent:abandoned": SubagentAbandonedEvent;
@@ -139,7 +162,10 @@ export type MuxEventPayloads = {
   "subagent:spawned": SubagentSpawnedEvent;
   "subagent:updated": SubagentUpdatedEvent;
   sysinfo: TimeSeriesData;
+  tool_chunk: ToolChunk;
   userattention: UserAttentionEvent;
+  "viewer:paired": ViewerPairedEvent;
+  "waveobj:batchedupdates": MuxObjBatch;
   "waveobj:update": MuxObjUpdate;
   widgetpackages: WidgetPackagesEvent;
   widgetrequests: WidgetRequestsEvent;
@@ -180,10 +206,12 @@ export const TYPED_MUX_EVENTS = [
   "attachment:progress",
   "attachment:ready",
   "background-task-updated",
+  "block:activity",
   "block:reveal",
   "blockfile",
   "blockstats",
   "btw_answer_chunk",
+  "compaction_started",
   "config",
   "connchange",
   "controllerstatus",
@@ -198,10 +226,17 @@ export const TYPED_MUX_EVENTS = [
   "identity:no-direct-links",
   "identityaccounts:changed",
   "install_chunk",
+  "install_progress",
+  "laninstances",
+  "laninstances:error",
+  "laninstances:firewall",
+  "laninstances:health",
+  "lsp:message",
   "mcp:changed",
   "mcp:observed",
   "media:file_changed",
   "memories:changed",
+  "muxbus:status",
   "namedagents:changed",
   "notification",
   "notification:activate",
@@ -214,6 +249,7 @@ export const TYPED_MUX_EVENTS = [
   "remoteschange",
   "shell_chunk",
   "shell_node_create",
+  "singleton:claim",
   "skills:changed",
   "srvinfo",
   "subagent:abandoned",
@@ -225,7 +261,10 @@ export const TYPED_MUX_EVENTS = [
   "subagent:spawned",
   "subagent:updated",
   "sysinfo",
+  "tool_chunk",
   "userattention",
+  "viewer:paired",
+  "waveobj:batchedupdates",
   "waveobj:update",
   "widgetpackages",
   "widgetrequests",

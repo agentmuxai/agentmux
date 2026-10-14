@@ -110,6 +110,7 @@ mod routes;
 mod http_health;
 mod http_fleet;
 mod http_viewer;
+mod http_viewer_sysinfo;
 mod http_viewer_terminal;
 mod http_shell;
 mod http_pty_shell;

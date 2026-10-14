@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Structural Armory Bundle Format (ABF) validator — Armory UI-alignment
+//! Structural Armory Bundle Format (ABF) validator — ABF UI-alignment
 //! pass (docs/specs/SPEC_ABF_V0_2_PROVIDER_AWARE_COMPONENTS_AND_NATIVE_MEMORY_2026_08_10.md).
 //!
 //! Pure functions only — no I/O, no Store access, same convention as
@@ -13,7 +13,7 @@
 //!
 //! This is advisory only: a bundle can be saved with validation errors
 //! present. The `bundle.validate` RPC is a read-only, on-demand check the
-//! Armory bundle editor's "Validate" button calls.
+//! Memory → Bundles editor's "Validate" button calls.
 
 use std::collections::{HashMap, HashSet};
 

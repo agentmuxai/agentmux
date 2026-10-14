@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// Styles for NativeMemoryManager — Armory's "Native Memory" tab. Three
+// Styles for NativeMemoryManager — Memory → Personal. Three
 // screens in one drill-down, each its own grid/list: agent cards →
 // file cards → NativeMemoryHistoryPanel.
 
@@ -254,7 +254,7 @@
 // its own container. Both grids collapse to a single column rather than
 // scrolling sideways — same narrow-pane budget the filter bar below already
 // works to.
-@container armory (max-width: 359px) {
+@container section-pane (max-width: 359px) {
     .native-memory-manager-grid,
     .native-memory-manager-file-grid {
         grid-template-columns: 1fr;
@@ -478,7 +478,7 @@
 // ── Filter bar — narrow panes (Codex/muxreview, PR #2929 — three rounds) ──────
 // Panes go down to 128px in either dimension (MinNodeSizePx,
 // frontend/layout/lib/layoutResize.ts) — well below the app's existing
-// `armory` container breakpoints (767px/479px, section-pane.scss). At a 128px
+// `section-pane` container breakpoints (767px/479px, section-pane.scss). At a 128px
 // pane the grid-view's own padding + this bar's padding leaves roughly 86px
 // of content width — verified with a live Chromium harness at every round
 // below, not just arithmetic (see the PR discussion for each measurement).
@@ -494,7 +494,7 @@
 // narrow-width `flex-basis: 100%` below applies to that trio atomically, and
 // swaps the toggle's hidden text for the compact "Mem" label above instead
 // of leaving the checkbox with no visible indicator at all.
-@container armory (max-width: 359px) {
+@container section-pane (max-width: 359px) {
     .memory-agent-filter-bar {
         flex-wrap: wrap;
     }

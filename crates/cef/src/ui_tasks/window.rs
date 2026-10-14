@@ -1721,9 +1721,8 @@ wrap_task! {
                 }
             };
 
-            let mut request_context = crate::commands::create_isolated_request_context(
-                &self.state, &self.label,
-            );
+            // The shared default context (SPEC_WINDOW_OPEN_LATENCY_AND_WARM_POOLS_2026_10_13.md §2.4).
+            let mut request_context = crate::commands::secondary_window_request_context();
             tracing::info!(
                 label = %self.label,
                 elapsed_us = t0.elapsed().as_micros() as u64,

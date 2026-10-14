@@ -528,7 +528,8 @@ async fn route_command(
             // without the API: the address bar keeps its plain behavior.
             let block_id = args.get("block_id").and_then(|v| v.as_str()).unwrap_or("");
             let text = args.get("text").and_then(|v| v.as_str()).unwrap_or("");
-            // The `browser:searchsuggestions` setting; off unless said.
+            // The `browser:searchsuggestions` setting, which the frontend
+            // always sends; a caller that doesn't gets local matches only.
             let search_suggestions = args.get("search_suggestions").and_then(|v| v.as_bool()).unwrap_or(false);
             Ok(state.browser_panes.autocomplete(state, block_id, text, search_suggestions).await)
         }
@@ -799,7 +800,7 @@ async fn route_command(
             }
         }
         "memory_adoption_request" => {
-            // The Armory asks to adopt earlier accounts' memory for an agent
+            // Memory → Personal asks to adopt earlier accounts' memory for an agent
             // (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.1.4). This only
             // opens the approval subwindow; see `memory_adoption`.
             let window_label = args.get("window_label").and_then(|v| v.as_str()).unwrap_or("");

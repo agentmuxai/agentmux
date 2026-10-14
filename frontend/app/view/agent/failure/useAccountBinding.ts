@@ -105,7 +105,7 @@ export function useAccountBinding(opts: {
     });
 
     // A flat picker of accounts to bind, anchored at the click — same
-    // ContextMenuModel primitive the Armory's Bind-to-Agent menu uses
+    // ContextMenuModel primitive Connectors → Accounts' Bind-to-Agent menu uses
     // (SPEC_ARMORY_BIND_TO_AGENT_CONTEXT_MENU_2026_08_09.md), just a flat
     // list here (the trigger IS the button — no outer submenu to nest under).
     // What to do for a given candidate list is `planBind` (account-picker.ts,

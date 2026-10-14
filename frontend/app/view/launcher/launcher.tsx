@@ -72,7 +72,7 @@ export class LauncherViewModel {
             // here; it now shows at the top level instead, not doubled up.
             source = getChildWidgets(parent, wmap, settings).map((c) => c.widget);
         } else {
-            // display:hidden normally keeps a grouped child out of this
+            // display:grouponly normally keeps a grouped child out of this
             // top-level grid — but an individually pinned child (promoted
             // out of its group) overrides that, same as it overrides the
             // group-hiding default everywhere else (see
@@ -80,7 +80,7 @@ export class LauncherViewModel {
             const pinnedSet = new Set(getPinnedKeys(settings, wmap));
             const hidden = getHiddenKeys(settings);
             source = sortByDisplayOrder(wmap).filter(
-                ([key, widget]) => !widget["display:hidden"] || pinnedSet.has(key.replace("defwidget@", ""))
+                ([key, widget]) => !widget["display:grouponly"] || pinnedSet.has(key.replace("defwidget@", ""))
             )
                 // Hidden by the user in Settings → Widgets, like the bar and the "+" picker.
                 .filter(([key]) => !isWidgetHidden(key, wmap, settings, hidden))

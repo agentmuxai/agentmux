@@ -48,6 +48,8 @@ use crate::backend::remote::host::HostSsh;
 use crate::backend::storage::filestore::FileStore;
 use crate::backend::storage::store::Store;
 
+use super::durable_mode::{mode, wants, Mode};
+
 /// Block meta: turns a pane on an SSH connection into a durable one.
 pub const META_KEY_DURABLE: &str = "term:durable";
 /// Block meta: the helper session this pane attaches to.
@@ -62,71 +64,6 @@ static APP_EXITING: AtomicBool = AtomicBool::new(false);
 /// AgentMux is quitting (`sagas::agent_teardown::app_exit`).
 pub fn note_app_exiting() {
     APP_EXITING.store(true, Ordering::SeqCst);
-}
-
-/// Whether a shell pane runs durable (spec §7.1). Only on an SSH connection:
-/// the pane's own `term:durable` first, then its connection's settings, then
-/// the global setting; with none of them set, yes on a host the helper has
-/// answered on (`remote::helper_hosts`).
-pub fn wants(meta: &MetaMapType, config: Option<&crate::backend::wconfig::FullConfigType>) -> bool {
-    let conn = obj::meta_get_string(meta, super::META_KEY_CONNECTION, "");
-    if !matches!(
-        crate::backend::remote::ConnTarget::parse(&conn),
-        Ok(crate::backend::remote::ConnTarget::Ssh(_))
-    ) {
-        return false;
-    }
-    // An agent's SSH shell (`PtyShell`, marked by http_pty_shell.rs) is never
-    // durable, whatever the defaults: its ssh's prompts must reach the user as
-    // the agent's (its own askpass grant), and the agent tools do not reattach
-    // a session yet (the `Shell` tool's `durable`, spec §8.1, still to come).
-    if !obj::meta_get_string(
-        meta,
-        crate::backend::remote::askpass::META_KEY_AGENT_BLOCK,
-        "",
-    )
-    .is_empty()
-    {
-        return false;
-    }
-    // The user doesn't want the helper on this host (Never, or "Not now"
-    // since srv started) and it isn't there: a plain SSH terminal
-    // (SPEC_REMOTES_PANE_2026_10_05.md §4.9).
-    if crate::backend::remote::helper_consent::plain_instead(&conn)
-        && !crate::backend::remote::helper_hosts::known(&conn)
-    {
-        return false;
-    }
-    // A host found to be one the helper can't run on (Windows) is plain even
-    // when a stale record says it has the helper and couldn't be forgotten.
-    if crate::backend::remote::helper_consent::unsupported_host(&conn) {
-        return false;
-    }
-    let conn_setting = config.and_then(|c| {
-        c.connections
-            .iter()
-            .find(|(name, _)| crate::backend::remote::conn::same_connection(name, &conn))
-            .and_then(|(_, k)| k.term_durable)
-    });
-    resolve_durable(
-        meta.get(META_KEY_DURABLE).and_then(|v| v.as_bool()),
-        conn_setting,
-        config.and_then(|c| c.settings.term_durable),
-        || crate::backend::remote::helper_hosts::known(&conn),
-    )
-}
-
-/// §7.1's order: pane, connection, global, then whether the host has the
-/// helper (asked only when nothing is set).
-pub fn resolve_durable(
-    pane: Option<bool>,
-    connection: Option<bool>,
-    global: Option<bool>,
-    host_has_helper: impl FnOnce() -> bool,
-) -> bool {
-    pane.or(connection)
-        .or(global)
-        .unwrap_or_else(host_has_helper)
 }
 
 /// The pane's size from its runtime options, as `(cols, rows)`; 80 x 24 when
@@ -220,6 +157,11 @@ pub fn attach_command(session: &str, offset: u64, cols: u16, rows: u16) -> Strin
 const EXIT_COMMAND_NOT_FOUND: i32 = 127;
 /// `ssh`'s own failures (it could not connect or log in) exit 255.
 const EXIT_SSH_FAILED: i32 = 255;
+/// How long an `ssh` whose output ended has to exit before it is killed.
+const EXIT_GRACE: Duration = Duration::from_secs(5);
+/// Tries a pane durable only by default makes at a host it has never reached,
+/// and the helper never ran on, before it becomes a plain SSH terminal.
+const FIRST_REACH_TRIES: u32 = 3;
 
 /// ssh could not log in, and trying again would only fail (or ask) again:
 /// refused credentials, or a host key it will not accept.
@@ -395,17 +337,13 @@ impl DurableSshController {
             &self.event_bus,
             store.must_get::<obj::Block>(&self.block_id),
         ) {
-            bus.broadcast_event(&crate::backend::eventbus::WSEventType {
-                eventtype: "waveobj:update".to_string(),
-                oref: oref.clone(),
-                data: serde_json::to_value(&obj::MuxObjUpdate {
-                    updatetype: "update".into(),
-                    otype: "block".into(),
-                    oid: self.block_id.clone(),
-                    obj: Some(obj::mux_obj_to_value(&block)),
-                })
-                .ok(),
-            });
+            let update = obj::MuxObjUpdate {
+                updatetype: "update".into(),
+                otype: "block".into(),
+                oid: self.block_id.clone(),
+                obj: Some(obj::mux_obj_to_value(&block)),
+            };
+            bus.broadcast_event(&crate::backend::eventbus::EventBus::typed_ws_event::<crate::backend::mps_events::MuxObjUpdated>(&update, oref.clone()));
         }
     }
 
@@ -481,6 +419,7 @@ impl Controller for DurableSshController {
             filestore: self.filestore.clone(),
             _askpass_grant: askpass_grant,
             plain: Arc::new(AtomicBool::new(false)),
+            by_default: mode(&block_meta, self.config.as_ref().map(|c| c.get_full_config()).as_deref()) == Mode::Default,
         };
         let plain = run.plain.clone();
         let fallback = self.fallback.clone();
@@ -688,9 +627,13 @@ struct Run {
     filestore: Option<Arc<FileStore>>,
     /// The askpass grant behind `host`'s prompts (revoked on drop).
     _askpass_grant: Option<crate::backend::remote::askpass::Revoke>,
-    /// Set when the run ends because the user declined the helper: the pane
-    /// becomes a plain SSH terminal.
+    /// Set when the run ends because the helper isn't to be had (the user
+    /// declined it, or durable was only the default and it didn't install):
+    /// the pane becomes a plain SSH terminal.
     plain: Arc<AtomicBool>,
+    /// Durable only by default ([`Mode::Default`]): without the helper the
+    /// pane becomes a plain terminal rather than stopping.
+    by_default: bool,
 }
 
 /// How one `ssh` ended.
@@ -725,6 +668,7 @@ impl Run {
         let mut attempt = 0u32;
         let mut noted_drop = false;
         let mut installed_once = false;
+        let mut ever_attached = false;
         // Whether the host has answered if it is Windows (asked until it has).
         let mut platform_known = false;
         loop {
@@ -802,42 +746,51 @@ impl Run {
                     }
                     if !attached && code == Some(EXIT_COMMAND_NOT_FOUND) {
                         // No helper on the host (yet): install it once, then
-                        // attach again; a failed install stops the pane.
-                        if installed_once {
+                        // attach again. One that still isn't there after
+                        // installing it failed the same way.
+                        let why = if installed_once {
+                            format!("it still isn't runnable after installing it ({})", helper_path())
+                        } else {
+                            installed_once = true;
+                            match self.install_helper().await {
+                                Ok(()) => continue,
+                                Err(why) => why,
+                            }
+                        };
+                        let declined = crate::backend::remote::helper_consent::plain_instead(&self.conn);
+                        // Durable was asked for and the user didn't decline
+                        // the helper, but it isn't there: the pane stops, and
+                        // says how to get a plain terminal.
+                        if !declined && !self.by_default {
                             self.note(&format!(
-                                "AgentMux's helper still is not runnable on {} ({}).",
-                                self.conn,
-                                helper_path()
+                                "This pane can't stay alive without AgentMux's helper on {}: {why}. For a plain SSH terminal, set \"Keep sessions alive\" to Off for this host in Connectors > Remotes.",
+                                self.conn
                             ))
                             .await;
                             return over(EXIT_COMMAND_NOT_FOUND);
                         }
-                        installed_once = true;
-                        match self.install_helper().await {
-                            Ok(()) => continue,
-                            // The user doesn't want the helper here: the
-                            // pane falls back to a plain SSH terminal.
-                            Err(_) if crate::backend::remote::helper_consent::plain_instead(&self.conn) => {
-                                self.note(&format!(
-                                    "AgentMux's helper isn't on {}, so this is a plain SSH terminal: it ends if the connection drops.",
-                                    self.conn
-                                ))
-                                .await;
-                                // The helper was just found missing here: a
-                                // record saying it's installed is stale, and
-                                // would keep the pane durable (wants), so the
-                                // restart would come straight back.
-                                if let Err(e) = crate::backend::remote::helper_hosts::forget_helper(&self.conn) {
-                                    tracing::warn!(connection = %self.conn, error = %e, "could not forget the missing helper");
-                                }
-                                self.plain.store(true, Ordering::SeqCst);
-                                return None;
-                            }
-                            Err(line) => {
-                                self.note(&line).await;
-                                return over(EXIT_COMMAND_NOT_FOUND);
-                            }
+                        // The user doesn't want the helper here, or durable was only the
+                        // default and it didn't install: the pane falls back to a plain SSH
+                        // terminal.
+                        let mut line = format!(
+                            "AgentMux's helper isn't on {}, so this is a plain SSH terminal: it ends if the connection drops.",
+                            self.conn
+                        );
+                        if !declined {
+                            // Not durable by default on this host again until srv restarts.
+                            crate::backend::remote::helper_consent::note_not_installed(&self.conn);
+                            line.push_str(&format!(" Why: {why}."));
                         }
+                        self.note(&line).await;
+                        // The helper was just found missing here: a record
+                        // saying it's installed is stale, and would keep the
+                        // pane durable (wants), so the restart would come
+                        // straight back.
+                        if let Err(e) = crate::backend::remote::helper_hosts::forget_helper(&self.conn) {
+                            tracing::warn!(connection = %self.conn, error = %e, "could not forget the missing helper");
+                        }
+                        self.plain.store(true, Ordering::SeqCst);
+                        return None;
                     }
                     // A refused login (the user cancelled a password, a key
                     // was not accepted, a host key changed) stops the pane:
@@ -862,9 +815,40 @@ impl Run {
                         let line = crate::backend::remote::link::disconnected_note(&self.conn);
                         return self.wait_for_user(&line, &mut leave_rx, stopped).await;
                     }
+                    // A first terminal, durable only by default, on a host
+                    // it never reached and the helper never ran on (a
+                    // mistyped name, a host that's down): no session can be
+                    // waiting there, so after a few tries it becomes a plain
+                    // SSH terminal, which shows ssh's error, as before
+                    // durable was the default. A host the helper ran on
+                    // keeps trying: its session may be there.
+                    ever_attached |= attached;
+                    if self.by_default
+                        && !ever_attached
+                        && code == Some(EXIT_SSH_FAILED)
+                        && attempt + 1 >= FIRST_REACH_TRIES
+                        && !crate::backend::remote::helper_hosts::known(&self.conn)
+                    {
+                        let why = stderr.lines().last().unwrap_or("").trim();
+                        self.note(&format!(
+                            "Could not reach {} ({why}), so this is a plain SSH terminal.",
+                            self.conn
+                        ))
+                        .await;
+                        // The helper couldn't get there either: the host's
+                        // terminals are plain until srv restarts, and the
+                        // restart (which asks `wants` again) is one of them.
+                        crate::backend::remote::helper_consent::note_not_installed(&self.conn);
+                        self.plain.store(true, Ordering::SeqCst);
+                        return None;
+                    }
                     if attached {
                         attempt = 0;
                         noted_drop = false;
+                        // Any install so far took: a helper missing from now
+                        // on was removed (Remotes' Remove helper), and is
+                        // installed again rather than stopping the pane.
+                        installed_once = false;
                     }
                     if !noted_drop {
                         let why = stderr.lines().last().unwrap_or("").trim().to_string();
@@ -976,13 +960,20 @@ impl Run {
         let mut buf = vec![0u8; 64 * 1024];
         let mut attached = false;
         let mut ended_here = false;
+        let mut output_ended = false;
         let mut last_heard = tokio::time::Instant::now();
         let mut ping = tokio::time::interval(PING_EVERY);
         ping.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         let ended = loop {
             tokio::select! {
                 read = stdout.read(&mut buf) => {
-                    let n = match read { Ok(0) | Err(_) => break None, Ok(n) => n };
+                    let n = match read {
+                        Ok(0) | Err(_) => {
+                            output_ended = true;
+                            break None;
+                        }
+                        Ok(n) => n,
+                    };
                     last_heard = tokio::time::Instant::now();
                     let Ok(frames) = decoder.push(&buf[..n]) else { break None };
                     let mut exited: Option<i32> = None;
@@ -1114,8 +1105,23 @@ impl Run {
                 Ended::Left
             };
         }
-        let _ = child.kill().await;
-        let code = child.wait().await.ok().and_then(|s| s.code());
+        // ssh closes its output a moment before it exits: wait for its exit
+        // code (127: no helper, 255: its own failure) before killing it,
+        // which lost the code, so a host without the helper reconnected for
+        // ever instead of installing it. A stalled ssh is killed at once.
+        let exited = if output_ended {
+            tokio::time::timeout(EXIT_GRACE, child.wait()).await.ok().and_then(Result::ok)
+        } else {
+            None
+        };
+        let status = match exited {
+            Some(status) => Some(status),
+            None => {
+                let _ = child.kill().await;
+                child.wait().await.ok()
+            }
+        };
+        let code = status.and_then(|s| s.code());
         let stderr = stderr_task.await.unwrap_or_default();
         Ended::Dropped {
             code,
@@ -1157,17 +1163,12 @@ impl Run {
 
     /// Put this version's helper on the host (`helper_install::ensure`),
     /// saying so in the pane, once the user has said yes
-    /// (`helper_consent`). `Err` is the line for the pane.
+    /// (`helper_consent`). `Err` says why not.
     async fn install_helper(&self) -> Result<(), String> {
-        let plain = "For a plain SSH terminal, set \"Keep sessions alive\" to Off for this host in the Remotes pane.";
-        if let Err(why) =
-            crate::backend::remote::helper_consent::allow_install(&self.conn, Some(&self.block_id)).await
-        {
-            return Err(format!(
-                "This pane can't stay alive without AgentMux's helper on {}: {why}. {plain}",
-                self.conn
-            ));
-        }
+        // After another pane's Not now, or (durable only by default) its
+        // failed try, this asks nothing and installs nothing (`Need`).
+        let need = crate::backend::remote::helper_consent::Need::Terminal { by_default: self.by_default };
+        crate::backend::remote::helper_consent::allow_install(&self.conn, Some(&self.block_id), need).await?;
         crate::backend::remote::helper_install::ensure(&self.host, &self.conn, &self.session, |size| {
             self.note_owned(format!(
                 "Installing AgentMux's helper on {} ({} KB, in ~/.agentmux-remote) so this pane can stay alive…",
@@ -1176,7 +1177,7 @@ impl Run {
             ))
         })
         .await
-        .map_err(|e| format!("Could not install AgentMux's helper on {}: {e}. {plain}", self.conn))
+        .map_err(|e| format!("installing it failed: {e}"))
     }
 
     fn read_offset(&self) -> u64 {
@@ -1220,655 +1221,5 @@ impl Run {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::backend::remote::conn::SshDest;
-
-    #[test]
-    fn only_a_helper_session_id_reaches_a_command_line() {
-        assert!(valid_session_id("amx-0123abcd") && valid_session_id("a_b-C"));
-        for bad in [
-            "",
-            "bad/id; touch /tmp/pwn",
-            "a b",
-            "$(id)",
-            &"x".repeat(65),
-        ] {
-            assert!(!valid_session_id(bad), "{bad:?}");
-        }
-    }
-
-    #[test]
-    fn reconnecting_backs_off_and_never_stops() {
-        let waits: Vec<u64> = (0..8).map(|a| backoff(a).as_secs()).collect();
-        assert_eq!(waits, [1, 2, 5, 10, 30, 30, 30, 30]);
-        assert_eq!(backoff(u32::MAX).as_secs(), 30);
-    }
-
-    #[test]
-    fn output_is_appended_once_and_gaps_are_named() {
-        assert_eq!(accept(10, 0, 5), Accept::Seen, "all before what was seen");
-        assert_eq!(accept(10, 5, 5), Accept::Seen);
-        assert_eq!(
-            accept(10, 5, 8),
-            Accept::Append { skip: 5, next: 13 },
-            "overlap: only the new part"
-        );
-        assert_eq!(accept(10, 10, 4), Accept::Append { skip: 0, next: 14 });
-        assert_eq!(
-            accept(10, 12, 3),
-            Accept::Gap {
-                from: 10,
-                to: 12,
-                next: 15
-            }
-        );
-    }
-
-    #[test]
-    fn the_attach_command_names_the_versioned_helper() {
-        let c = attach_command("amx-1", 42, 120, 40);
-        assert!(c.starts_with("~/.agentmux-remote/bin/"), "{c}");
-        assert!(
-            c.ends_with("/agentmux-remote attach --session amx-1 --offset 42 --cols 120 --rows 40"),
-            "{c}"
-        );
-    }
-
-    /// A stand-in for `ssh` + the helper, speaking the helper's real frames:
-    /// the first connection attaches, sends "hello" and drops (exit 255, a
-    /// network drop); the reconnect must ask for exactly offset 7, gets
-    /// "world" and the session's end.
-    const FAKE_SSH: &str = r#"
-import os, struct, sys, time
-remote = sys.argv[-1].split()
-offset = int(remote[remote.index('--offset') + 1])
-state = os.environ['FAKE_SSH_STATE']
-n = int(open(state).read()) if os.path.exists(state) else 0
-open(state, 'w').write(str(n + 1))
-with open(os.environ['FAKE_SSH_LOG'], 'ab') as log:
-    log.write(b'run %d offset %d\n' % (n, offset))
-out = sys.stdout.buffer
-def frame(kind, payload):
-    out.write(struct.pack('>BI', kind, len(payload)) + payload)
-    out.flush()
-stream = b'hello\r\n' + b'world\r\n'
-if n == 0:
-    frame(14, struct.pack('>Q', 0) + bytes([1]) + b'amx-test')
-    frame(10, struct.pack('>Q', 0) + stream[:7])
-    sys.exit(255)
-frame(14, struct.pack('>Q', 7) + bytes([0]) + b'amx-test')
-frame(10, struct.pack('>Q', offset) + stream[offset:])
-frame(12, struct.pack('>i', 0))
-time.sleep(5)
-"#;
-
-    fn python() -> Option<std::path::PathBuf> {
-        let names: &[&str] = if cfg!(windows) {
-            &["python", "py"]
-        } else {
-            &["python3", "python"]
-        };
-        names.iter().find_map(|n| which::which(n).ok())
-    }
-
-    /// `ssh` for a test: Python running `script` (a fake host), as `name` in
-    /// `dir`. `None`, to skip the test, where there is no Python.
-    fn fake_ssh(dir: &std::path::Path, name: &str, script: &str) -> Option<std::path::PathBuf> {
-        let python = python()?;
-        let script_path = dir.join(format!("{name}.py"));
-        std::fs::write(&script_path, script).unwrap();
-        if cfg!(windows) {
-            let cmd = dir.join(format!("{name}.cmd"));
-            let line = format!("@\"{}\" \"{}\" %*\r\n", python.display(), script_path.display());
-            std::fs::write(&cmd, line).unwrap();
-            return Some(cmd);
-        }
-        let sh = dir.join(name);
-        let line = format!("#!/bin/sh\nexec \"{}\" \"{}\" \"$@\"\n", python.display(), script_path.display());
-        std::fs::write(&sh, line).unwrap();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&sh, std::fs::Permissions::from_mode(0o755)).unwrap();
-        }
-        Some(sh)
-    }
-
-    /// A durable pane's run for a test: pane `block` on host `conn`, reached
-    /// by `ssh_path`, its session `session`.
-    fn test_run(state: &crate::server::AppState, block: &str, conn: &str, session: &str, ssh_path: std::path::PathBuf) -> Run {
-        Run {
-            block_id: block.to_string(),
-            conn: conn.to_string(),
-            host: HostSsh {
-                dest: SshDest {
-                    destination: conn.to_string(),
-                    port: None,
-                },
-                ssh_path,
-                control_dir: None,
-                env: Vec::new(),
-            },
-            session: session.to_string(),
-            size: (80, 24),
-            broker: Some(state.broker.clone()),
-            filestore: Some(state.filestore.clone()),
-            _askpass_grant: None,
-            plain: Arc::new(AtomicBool::new(false)),
-        }
-    }
-
-    /// The reconnect loop for real: a dropped link reattaches at exactly the
-    /// offset it had reached, nothing is appended twice, and the session's
-    /// own end ends the pane's run.
-    #[tokio::test]
-    async fn a_dropped_link_reattaches_at_its_offset_and_appends_nothing_twice() {
-        let dir = tempfile::tempdir().unwrap();
-        let Some(ssh_path) = fake_ssh(dir.path(), "fake_ssh", FAKE_SSH) else {
-            eprintln!("skipped: no python to stand in for ssh");
-            return;
-        };
-        std::env::set_var("FAKE_SSH_STATE", dir.path().join("state"));
-        std::env::set_var("FAKE_SSH_LOG", dir.path().join("log"));
-
-        let state = crate::server::tests::test_state();
-        let block = "durable-test-block";
-        let run = test_run(&state, block, "fakehost", "amx-test", ssh_path);
-        let (_input_tx, input_rx) = mpsc::unbounded_channel();
-        let (_leave_tx, leave_rx) = watch::channel(Leave::Stay);
-        let ended = tokio::time::timeout(
-            Duration::from_secs(30),
-            run.run(input_rx, leave_rx, Box::new(|_| {})),
-        )
-        .await
-        .expect("the run ends");
-        assert_eq!(
-            ended,
-            Some(Done {
-                code: 0,
-                session_over: true
-            }),
-            "the session's own end ends the run"
-        );
-
-        let log = std::fs::read_to_string(dir.path().join("log")).unwrap();
-        assert_eq!(
-            log, "run 0 offset 0\nrun 1 offset 7\n",
-            "the reconnect asks for exactly what it missed"
-        );
-        let term = state.filestore.read_file(block, "term").unwrap().unwrap();
-        let text = String::from_utf8_lossy(&term).into_owned();
-        assert_eq!(text.matches("hello").count(), 1, "{text:?}");
-        assert_eq!(text.matches("world").count(), 1, "{text:?}");
-        assert!(
-            text.find("hello") < text.find("reconnecting")
-                && text.find("reconnecting") < text.find("world"),
-            "{text:?}"
-        );
-        let offset = state
-            .filestore
-            .stat(block, "term")
-            .unwrap()
-            .unwrap()
-            .meta
-            .get(FILE_META_REMOTE_OFFSET)
-            .cloned();
-        // Over, so the next session starts from 0 (no "the previous session
-        // is gone" for a plain `exit`).
-        assert_eq!(offset, Some(serde_json::json!(0)));
-    }
-
-    /// Every attach fails (the host is unreachable); `end` is logged.
-    const FAKE_SSH_DOWN: &str = r#"
-import os, sys
-remote = sys.argv[-1].split()
-with open(os.environ['FAKE_SSH_LOG2'], 'ab') as log:
-    log.write((' '.join(remote[1:3]) + '\n').encode())
-sys.exit(0 if remote[1] == 'end' else 255)
-"#;
-
-    /// A pane closed while its host is unreachable still ends its session
-    /// there (one `agentmux-remote end`), rather than leaving the shell
-    /// running with nothing able to reach it.
-    #[tokio::test]
-    async fn closing_while_disconnected_still_ends_the_session() {
-        let dir = tempfile::tempdir().unwrap();
-        let Some(ssh_path) = fake_ssh(dir.path(), "fake_ssh_down", FAKE_SSH_DOWN) else {
-            eprintln!("skipped: no python to stand in for ssh");
-            return;
-        };
-        let log = dir.path().join("log2");
-        std::env::set_var("FAKE_SSH_LOG2", &log);
-
-        let state = crate::server::tests::test_state();
-        let run = test_run(&state, "durable-down-block", "downhost", "amx-down", ssh_path);
-        let (_input_tx, input_rx) = mpsc::unbounded_channel();
-        let (leave_tx, leave_rx) = watch::channel(Leave::Stay);
-        let task = tokio::spawn(run.run(input_rx, leave_rx, Box::new(|_| {})));
-        // Let it fail an attach and start backing off, then close the pane.
-        tokio::time::sleep(Duration::from_millis(1500)).await;
-        leave_tx.send(Leave::End).unwrap();
-        let ended = tokio::time::timeout(Duration::from_secs(20), task)
-            .await
-            .expect("the run ends")
-            .unwrap();
-        assert_eq!(ended, None, "closed, not the session's own end");
-        let calls = std::fs::read_to_string(&log).unwrap();
-        assert!(calls.lines().any(|l| l.starts_with("attach")), "{calls:?}");
-        assert_eq!(
-            calls.lines().last(),
-            Some("end --session"),
-            "the last ssh ends the session: {calls:?}"
-        );
-    }
-
-    /// A host slow to answer: attach hangs, as ssh does while its connection
-    /// is being made; `end` answers at once.
-    const FAKE_SSH_SLOW: &str = r#"
-import os, sys, time
-remote = sys.argv[-1].split()
-with open(os.environ['FAKE_SSH_LOG_SLOW'], 'ab') as log:
-    log.write((' '.join(remote[1:3]) + '\n').encode())
-if remote[1] == 'end':
-    sys.exit(0)
-time.sleep(30)
-sys.exit(255)
-"#;
-
-    /// Closed while its ssh is still trying to reach the session (the host
-    /// slow or down, a reconnect under way): the End went down an ssh that
-    /// never reached the session, which ran on. The test above caught this
-    /// only when the close happened to land mid-attach, under load.
-    #[tokio::test]
-    async fn closing_while_still_connecting_ends_the_session() {
-        let dir = tempfile::tempdir().unwrap();
-        let Some(ssh_path) = fake_ssh(dir.path(), "fake_ssh_slow", FAKE_SSH_SLOW) else {
-            eprintln!("skipped: no python to stand in for ssh");
-            return;
-        };
-        let log = dir.path().join("log_slow");
-        std::env::set_var("FAKE_SSH_LOG_SLOW", &log);
-
-        let state = crate::server::tests::test_state();
-        let run = test_run(&state, "durable-slow-block", "slowhost", "amx-slow", ssh_path);
-        let (_input_tx, input_rx) = mpsc::unbounded_channel();
-        let (leave_tx, leave_rx) = watch::channel(Leave::Stay);
-        let task = tokio::spawn(run.run(input_rx, leave_rx, Box::new(|_| {})));
-        // Close the pane while its first attach is still connecting.
-        let attaching = tokio::time::timeout(Duration::from_secs(10), async {
-            while !std::fs::read_to_string(&log).is_ok_and(|c| c.starts_with("attach")) {
-                tokio::time::sleep(Duration::from_millis(50)).await;
-            }
-        });
-        attaching.await.expect("an attach starts");
-        leave_tx.send(Leave::End).unwrap();
-        let ended = tokio::time::timeout(Duration::from_secs(20), task)
-            .await
-            .expect("the run ends")
-            .unwrap();
-        assert_eq!(ended, None, "closed, not the session's own end");
-        let calls = std::fs::read_to_string(&log).unwrap();
-        assert_eq!(calls.lines().collect::<Vec<_>>(), ["attach --session", "end --session"], "{calls:?}");
-    }
-
-    /// A host without the helper: attach fails with 127 until the helper is
-    /// installed; the probe, upload and install steps behave as on a real
-    /// host, the install step checking the uploaded file's hash itself.
-    const FAKE_SSH_FRESH_HOST: &str = r#"
-import hashlib, os, struct, sys
-remote = sys.argv[-1]
-d = os.environ['FAKE_HOST_DIR']
-log = open(os.path.join(d, 'log'), 'ab', buffering=0)
-helper = os.path.join(d, 'helper')
-if remote.startswith('sh -c') and 'uname -sm' in remote:
-    log.write(b'probe\n')
-    sys.stdout.write('Linux x86_64\n')
-elif remote.startswith('sh -c') and 'cat >' in remote:
-    log.write(b'upload\n')
-    open(helper + '.tmp', 'wb').write(sys.stdin.buffer.read())
-elif remote.startswith('sh -c') and 'mv -f' in remote:
-    log.write(b'install\n')
-    got = hashlib.sha256(open(helper + '.tmp', 'rb').read()).hexdigest()
-    if got in remote:
-        os.replace(helper + '.tmp', helper)
-        sys.stdout.write('ok\n')
-    else:
-        sys.stdout.write('mismatch ' + got + '\n')
-elif ' attach ' in remote:
-    if not os.path.exists(helper):
-        log.write(b'attach-missing\n')
-        sys.exit(127)
-    log.write(b'attach\n')
-    out = sys.stdout.buffer
-    def frame(kind, payload):
-        out.write(struct.pack('>BI', kind, len(payload)) + payload)
-        out.flush()
-    frame(14, struct.pack('>Q', 0) + bytes([1]) + b'amx-fresh')
-    frame(10, struct.pack('>Q', 0) + b'ready\r\n')
-    frame(12, struct.pack('>i', 0))
-    import time; time.sleep(5)
-"#;
-
-    /// A first durable pane on a host without the helper installs it (probe,
-    /// upload, hash-checked install) and then attaches.
-    #[tokio::test]
-    async fn a_host_without_the_helper_gets_it_installed_then_attaches() {
-        let dir = tempfile::tempdir().unwrap();
-        let Some(ssh_path) = fake_ssh(dir.path(), "fake_ssh_fresh", FAKE_SSH_FRESH_HOST) else {
-            eprintln!("skipped: no python to stand in for ssh");
-            return;
-        };
-        std::env::set_var("FAKE_HOST_DIR", dir.path());
-        // The user says Install when asked.
-        crate::backend::remote::helper_consent::install_answering_yes();
-        // The "release" build, from a local folder.
-        let builds = dir.path().join("builds");
-        std::fs::create_dir_all(&builds).unwrap();
-        let name = crate::backend::remote::helper_install::asset_name(
-            env!("CARGO_PKG_VERSION"),
-            "x86_64-unknown-linux-musl",
-        );
-        std::fs::write(builds.join(name), b"the helper").unwrap();
-        std::env::set_var("AGENTMUX_REMOTE_HELPER_DIR", &builds);
-
-        let state = crate::server::tests::test_state();
-        let run = test_run(&state, "durable-fresh-block", "freshhost", "amx-fresh", ssh_path);
-        let (_input_tx, input_rx) = mpsc::unbounded_channel();
-        let (_leave_tx, leave_rx) = watch::channel(Leave::Stay);
-        let ended = tokio::time::timeout(
-            Duration::from_secs(30),
-            run.run(input_rx, leave_rx, Box::new(|_| {})),
-        )
-        .await
-        .expect("the run ends");
-        std::env::remove_var("AGENTMUX_REMOTE_HELPER_DIR");
-        assert_eq!(
-            ended,
-            Some(Done {
-                code: 0,
-                session_over: true
-            })
-        );
-        let log = std::fs::read_to_string(dir.path().join("log")).unwrap();
-        assert_eq!(log, "attach-missing\nprobe\nupload\ninstall\nattach\n");
-        let term = state
-            .filestore
-            .read_file("durable-fresh-block", "term")
-            .unwrap()
-            .unwrap();
-        let text = String::from_utf8_lossy(&term).into_owned();
-        assert!(
-            text.contains("Installing AgentMux's helper on freshhost") && text.contains("ready"),
-            "{text:?}"
-        );
-    }
-
-    /// "Not now" to the helper makes the host's durable panes plain SSH
-    /// terminals until srv restarts; an Install puts them back
-    /// (SPEC_REMOTES_PANE_2026_10_05.md §4.9).
-    #[test]
-    fn a_host_the_user_declined_the_helper_on_is_not_durable() {
-        use crate::backend::remote::helper_consent::{install_answering_yes, note_answer, Answer};
-        install_answering_yes();
-        let mut meta = MetaMapType::new();
-        meta.insert(super::super::META_KEY_CONNECTION.into(), serde_json::json!("declined-durable-host"));
-        meta.insert(META_KEY_DURABLE.into(), serde_json::json!(true));
-        assert!(wants(&meta, None));
-
-        let answer = |approve| Answer { answered: true, approve, remember: false };
-        note_answer("declined-durable-host", answer(false));
-        assert!(!wants(&meta, None), "Not now: a plain SSH terminal");
-        note_answer("declined-durable-host", answer(true));
-        assert!(wants(&meta, None), "Install: durable again");
-    }
-
-    #[test]
-    fn only_an_ssh_pane_with_durable_on_is_durable() {
-        let meta = |conn: &str, durable: Option<bool>| {
-            let mut m = MetaMapType::new();
-            m.insert(
-                super::super::META_KEY_CONNECTION.into(),
-                serde_json::json!(conn),
-            );
-            if let Some(d) = durable {
-                m.insert(META_KEY_DURABLE.into(), serde_json::json!(d));
-            }
-            m
-        };
-        assert!(wants(&meta("area54", Some(true)), None));
-        assert!(!wants(&meta("area54", Some(false)), None));
-        assert!(!wants(&meta("local", Some(true)), None));
-        assert!(!wants(&meta("wsl://Ubuntu", Some(true)), None));
-
-        // The connection's setting, then the global one, under the pane's.
-        let mut config = crate::backend::wconfig::FullConfigType::default();
-        config.settings.term_durable = Some(false);
-        config.connections.insert(
-            "durable-test-host".into(),
-            crate::backend::wconfig::ConnKeywords {
-                term_durable: Some(true),
-                ..Default::default()
-            },
-        );
-        assert!(wants(&meta("durable-test-host", None), Some(&config)));
-        assert!(!wants(
-            &meta("durable-test-host", Some(false)),
-            Some(&config)
-        ));
-        assert!(!wants(&meta("durable-test-other", None), Some(&config)));
-
-        // An agent's SSH shell: never, not even when asked or by default.
-        let mut agent = meta("durable-test-host", Some(true));
-        agent.insert(
-            crate::backend::remote::askpass::META_KEY_AGENT_BLOCK.into(),
-            serde_json::json!("agent-block"),
-        );
-        assert!(!wants(&agent, Some(&config)));
-    }
-
-    #[test]
-    fn durable_is_the_pane_then_the_connection_then_global_then_the_helper() {
-        let never = || panic!("asked the host only when nothing is set");
-        assert!(resolve_durable(Some(true), Some(false), Some(false), never));
-        assert!(!resolve_durable(None, Some(false), Some(true), never));
-        assert!(resolve_durable(None, None, Some(true), never));
-        assert!(resolve_durable(None, None, None, || true));
-        assert!(!resolve_durable(None, None, None, || false));
-    }
-
-    #[test]
-    fn a_refused_login_is_told_from_a_dropped_link() {
-        assert!(login_refused(
-            "user@box: Permission denied (publickey,password)."
-        ));
-        assert!(login_refused("Host key verification failed."));
-        assert!(login_refused(
-            "@    WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!     @"
-        ));
-        assert!(!login_refused(
-            "ssh: connect to host box port 22: Connection timed out"
-        ));
-        assert!(!login_refused("Connection reset by peer"));
-        assert!(!login_refused(""));
-    }
-
-    /// A Windows host: its `cmd` doesn't know the helper's command.
-    const FAKE_SSH_WINDOWS: &str = r#"
-import os, sys
-with open(os.environ['FAKE_SSH_LOG4'], 'ab') as log:
-    log.write((sys.argv[-1].split()[1] + '\n').encode())
-sys.stderr.write("'~' is not recognized as an internal or external command,\noperable program or batch file.\n")
-sys.exit(1)
-"#;
-
-    /// A Windows host makes the pane a plain SSH terminal at once, instead
-    /// of reconnecting for ever: the run says so and ends without a `done`,
-    /// for the controller to restart the pane (its `plain` flag).
-    #[tokio::test]
-    async fn a_windows_host_turns_the_pane_into_a_plain_ssh_terminal() {
-        let dir = tempfile::tempdir().unwrap();
-        let Some(ssh_path) = fake_ssh(dir.path(), "fake_ssh_windows", FAKE_SSH_WINDOWS) else {
-            eprintln!("skipped: no python to stand in for ssh");
-            return;
-        };
-        std::env::set_var("FAKE_SSH_LOG4", dir.path().join("log"));
-
-        let state = crate::server::tests::test_state();
-        let block = "durable-windows-block";
-        let plain = Arc::new(AtomicBool::new(false));
-        let mut run = test_run(&state, block, "windowshost", "amx-windows", ssh_path);
-        run.plain = plain.clone();
-        let (_input_tx, input_rx) = mpsc::unbounded_channel();
-        let (_leave_tx, leave_rx) = watch::channel(Leave::Stay);
-        let ended = tokio::time::timeout(
-            Duration::from_secs(15),
-            run.run(input_rx, leave_rx, Box::new(|_| panic!("no done: the pane is restarted"))),
-        )
-        .await
-        .expect("the run ends at once, without reconnecting");
-        assert_eq!(ended, None);
-        assert!(plain.load(Ordering::SeqCst), "the pane is to become a plain terminal");
-        assert!(crate::backend::remote::helper_consent::plain_instead("windowshost"));
-        let mut meta = MetaMapType::new();
-        meta.insert(super::super::META_KEY_CONNECTION.into(), serde_json::json!("windowshost"));
-        meta.insert(META_KEY_DURABLE.into(), serde_json::json!(true));
-        assert!(!wants(&meta, None), "durable no more, whatever a helper record says");
-        let log = std::fs::read_to_string(dir.path().join("log")).unwrap();
-        assert_eq!(log, "attach\n", "tried once, no install");
-        let term = state.filestore.read_file(block, "term").unwrap().unwrap();
-        assert!(String::from_utf8_lossy(&term).contains("plain SSH terminal"));
-    }
-
-    /// A Windows host in another language: its `cmd` answers in German, and
-    /// only `cmd /c echo %OS%` tells it apart.
-    const FAKE_SSH_WINDOWS_DE: &str = r#"
-import os, sys
-cmd = sys.argv[-1]
-with open(os.environ['FAKE_SSH_LOG5'], 'ab') as log:
-    log.write((cmd.split()[0] if cmd.startswith('cmd') else cmd.split()[1]).encode() + b'\n')
-if cmd.startswith('cmd /c echo'):
-    sys.stdout.write('Windows_NT"\n')
-    sys.exit(0)
-sys.stderr.write("Der Befehl \"~\" ist entweder falsch geschrieben oder\nkonnte nicht gefunden werden.\n")
-sys.exit(1)
-"#;
-
-    #[tokio::test]
-    async fn a_windows_host_in_another_language_is_found_by_asking_it() {
-        let dir = tempfile::tempdir().unwrap();
-        let Some(ssh_path) = fake_ssh(dir.path(), "fake_ssh_windows_de", FAKE_SSH_WINDOWS_DE) else {
-            eprintln!("skipped: no python to stand in for ssh");
-            return;
-        };
-        std::env::set_var("FAKE_SSH_LOG5", dir.path().join("log"));
-
-        let state = crate::server::tests::test_state();
-        let plain = Arc::new(AtomicBool::new(false));
-        let mut run = test_run(&state, "durable-windows-de-block", "windowshost-de", "amx-windows-de", ssh_path);
-        run.plain = plain.clone();
-        let (_input_tx, input_rx) = mpsc::unbounded_channel();
-        let (_leave_tx, leave_rx) = watch::channel(Leave::Stay);
-        let ended = tokio::time::timeout(
-            Duration::from_secs(20),
-            run.run(input_rx, leave_rx, Box::new(|_| panic!("no done: the pane is restarted"))),
-        )
-        .await
-        .expect("the run ends at once, without reconnecting");
-        assert_eq!(ended, None);
-        assert!(plain.load(Ordering::SeqCst));
-        assert!(crate::backend::remote::helper_consent::plain_instead("windowshost-de"));
-        let log = std::fs::read_to_string(dir.path().join("log")).unwrap();
-        assert_eq!(log, "attach\ncmd\n", "one attach, then the host asked once");
-    }
-
-    #[test]
-    fn only_a_reply_from_the_host_settles_whether_it_is_windows() {
-        use crate::backend::remote::host::HostOutput;
-        let out = |code: Option<i32>, stdout: &str| HostOutput {
-            code,
-            stdout: stdout.to_string(),
-            stderr: String::new(),
-        };
-        assert_eq!(windows_answer(&out(Some(0), "Windows_NT\"\n")), Some(true));
-        assert_eq!(windows_answer(&out(Some(127), "")), Some(false), "a POSIX shell without cmd");
-        assert_eq!(windows_answer(&out(Some(255), "")), None, "ssh failed: ask again");
-        assert_eq!(windows_answer(&out(None, "")), None, "killed: ask again");
-    }
-
-    #[test]
-    fn windows_shells_are_told_by_their_answer() {
-        assert!(windows_shell_refused("'~' is not recognized as an internal or external command,"));
-        assert!(windows_shell_refused("The term '~/x' is not recognized as a name of a cmdlet, function"));
-        assert!(!windows_shell_refused("bash: ~/.agentmux-remote/bin/x: No such file or directory"));
-    }
-
-    /// The host refuses the login (stderr is the point); each run logs its
-    /// helper command (`attach` or `end`).
-    const FAKE_SSH_REFUSED: &str = r#"
-import os, sys
-with open(os.environ['FAKE_SSH_LOG3'], 'ab') as log:
-    log.write((sys.argv[-1].split()[1] + '\n').encode())
-sys.stderr.write('user@fakehost: Permission denied (publickey).\n')
-sys.exit(255)
-"#;
-
-    /// A refused login stops the pane at once with the reason, rather than
-    /// asking again every 30 s, and keeps the session id: the session may
-    /// still be on the host for the pane's restart to reattach to. Closing
-    /// the pane then still ends the session there.
-    #[tokio::test]
-    async fn a_refused_login_stops_the_pane_and_keeps_its_session() {
-        let dir = tempfile::tempdir().unwrap();
-        let Some(ssh_path) = fake_ssh(dir.path(), "fake_ssh_refused", FAKE_SSH_REFUSED) else {
-            eprintln!("skipped: no python to stand in for ssh");
-            return;
-        };
-        std::env::set_var("FAKE_SSH_LOG3", dir.path().join("log"));
-
-        let state = crate::server::tests::test_state();
-        let block = "durable-refused-block";
-        let run = test_run(&state, block, "fakehost", "amx-refused", ssh_path);
-        let (_input_tx, input_rx) = mpsc::unbounded_channel();
-        let (leave_tx, leave_rx) = watch::channel(Leave::Stay);
-        let (stopped_tx, stopped_rx) = tokio::sync::oneshot::channel();
-        let task = tokio::spawn(run.run(
-            input_rx,
-            leave_rx,
-            Box::new(move |done| {
-                let _ = stopped_tx.send(done);
-            }),
-        ));
-        // Well inside the first backoff: no retry was waited for.
-        let stopped = tokio::time::timeout(Duration::from_secs(15), stopped_rx)
-            .await
-            .expect("the pane is shown done")
-            .unwrap();
-        assert_eq!(
-            stopped,
-            Done {
-                code: EXIT_SSH_FAILED,
-                session_over: false
-            }
-        );
-        let log = std::fs::read_to_string(dir.path().join("log")).unwrap();
-        assert_eq!(log, "attach\n", "asked once, not again");
-
-        // Closing the pane: one `end` for the session it kept.
-        leave_tx.send(Leave::End).unwrap();
-        let ended = tokio::time::timeout(Duration::from_secs(15), task)
-            .await
-            .expect("the run ends")
-            .unwrap();
-        assert_eq!(ended, None);
-        let log = std::fs::read_to_string(dir.path().join("log")).unwrap();
-        assert_eq!(log, "attach\nend\n");
-        let term = state.filestore.read_file(block, "term").unwrap().unwrap();
-        let text = String::from_utf8_lossy(&term).into_owned();
-        assert!(
-            text.contains("Could not log in to fakehost")
-                && text.contains("Permission denied (publickey)"),
-            "{text:?}"
-        );
-    }
-}
+#[path = "durable_ssh_tests.rs"]
+mod tests;

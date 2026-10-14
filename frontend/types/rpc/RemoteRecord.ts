@@ -4,7 +4,7 @@ import type { RemotePlatform } from "./RemotePlatform";
 import type { RemoteStatus } from "./RemoteStatus";
 
 /**
- * One remote machine, as the Remotes pane shows it.
+ * One remote machine, as Connectors → Remotes shows it.
  */
 export type RemoteRecord = { 
 /**

@@ -6,7 +6,8 @@
  * pin/unpin RPC persistence. Extracted from action-widgets.tsx.
  *
  * Settings keys:
- *   widget:pinned   — ordered short-name array (e.g. ["agent","terminal","sysinfo"])
+ *   widget:pinned   — ordered pin ids (e.g. ["agent","terminal","ext@acme.board/main"]): a built-in's
+ *                     short name, or a package widget's full key (pinIdOf / keyOfPinId)
  *   widget:hidden   — full keys hidden from the bar, More and the pane pickers
  *                     (SPEC_WIDGET_BAR_VISIBILITY_SETTINGS_2026_10_12.md)
  *   widget:icononly — icons only, no labels
@@ -17,7 +18,6 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { createBlock, openOrFocusPaneByView } from "@/store/global";
 import { fireAndForget } from "@/util/util";
 import { isLightThemeActive, widgetRoleColor } from "@/app/block/pane-identity";
-import { resolvePaneTabView } from "@/app/block/pane-tab-registry";
 import { paneRoleColor, type PaneColorRole } from "@/app/block/pane-color-scheme";
 import type { JSX } from "solid-js";
 
@@ -59,20 +59,6 @@ export function widgetIconStyle(widget: WidgetConfigType): JSX.CSSProperties {
     return tint ? { "--widget-tint": tint } : {};
 }
 
-/** Pinned short-names saved under an older name, read as the widget that
- *  replaced them: the Armory became Connectors and Memory, Knowledge became
- *  Memory, Remotes became a section of Connectors. A user widget override under an old key is moved to its new key by
- *  srv (`RENAMED_WIDGETS`, crates/srv/src/backend/user_widgets.rs). */
-const RENAMED_PINS: Record<string, string[]> = {
-    armory: ["connectors", "memory"],
-    knowledge: ["memory"],
-    remotes: ["connectors"],
-};
-
-function currentPinNames(pinned: readonly string[]): string[] {
-    return pinned.flatMap((shortName) => RENAMED_PINS[shortName] ?? [shortName]);
-}
-
 // ── Hidden entries (widget:hidden) ─────────────────────────────────────────────
 
 /** Entries that can't be hidden: Settings is the way back to everything else that was. */
@@ -80,20 +66,26 @@ export const UNHIDEABLE_WIDGET_KEYS: ReadonlySet<string> = new Set(["defwidget@s
 
 const DEFWIDGET = "defwidget@";
 
-/** The full keys hidden from the widget bar, More and the pane "+" pickers, read from
- *  `widget:hidden` with old names mapped the same way as pins (`remotes` → `connectors`).
+/** What `widget:pinned` stores for an entry: the short name for a built-in (`agent` for
+ *  `defwidget@agent`, so older files read as they always did), the full key for anything else
+ *  (a package widget, `ext@<id>/<pane>`). */
+export function pinIdOf(key: string): string {
+    return key.startsWith(DEFWIDGET) ? key.slice(DEFWIDGET.length) : key;
+}
+
+/** The widget key a pin id names; the inverse of pinIdOf. Built-in short names never contain "@". */
+export function keyOfPinId(id: string): string {
+    return id.includes("@") ? id : DEFWIDGET + id;
+}
+
+/** The full keys hidden from the widget bar, More and the pane "+" pickers (`widget:hidden`).
  *  An entry that can't be hidden is never in the set. */
 export function getHiddenKeys(settings: Record<string, any>): Set<string> {
     const raw = settings?.["widget:hidden"];
     const hidden = new Set<string>();
     if (!Array.isArray(raw)) return hidden;
     for (const key of raw) {
-        if (typeof key !== "string") continue;
-        if (key.startsWith(DEFWIDGET)) {
-            for (const name of currentPinNames([key.slice(DEFWIDGET.length)])) hidden.add(DEFWIDGET + name);
-        } else {
-            hidden.add(key);
-        }
+        if (typeof key === "string") hidden.add(key);
     }
     for (const key of UNHIDEABLE_WIDGET_KEYS) hidden.delete(key);
     return hidden;
@@ -117,7 +109,7 @@ export function isWidgetHidden(
 /** True if `shortName` is individually pinned via widget:pinned — i.e. promoted out of its parent group. */
 function isIndividuallyPinned(shortName: string, settings: Record<string, any>): boolean {
     const pinned: string[] | undefined = settings?.["widget:pinned"];
-    return pinned !== undefined && currentPinNames(pinned).includes(shortName);
+    return pinned !== undefined && pinned.includes(shortName);
 }
 
 /**
@@ -173,11 +165,10 @@ export function getChildWidgets(
 }
 
 /**
- * Return the effective pinned short-names (no "defwidget@" prefix), in order.
+ * Return the effective pinned ids (pinIdOf: short names for built-ins, full keys for package widgets), in order.
  *
  * Priority:
- *  1. widget:pinned is set → authoritative, except that a renamed widget
- *     reads as the one that replaced it (`RENAMED_PINS`). A grouped child listed here IS
+ *  1. widget:pinned is set → authoritative. A grouped child listed here IS
  *     honored (not stripped) — that's exactly how an individual child gets
  *     promoted out of its parent group onto the bar (see
  *     getEffectiveGroupedChildKeys).
@@ -192,11 +183,11 @@ export function getPinnedKeys(
     wmap: Record<string, WidgetConfigType>
 ): string[] {
     const hidden = getHiddenKeys(settings);
-    return getSavedPinNames(settings, wmap).filter((shortName) => !isWidgetHidden(`defwidget@${shortName}`, wmap, settings, hidden));
+    return getSavedPinNames(settings, wmap).filter((id) => !isWidgetHidden(keyOfPinId(id), wmap, settings, hidden));
 }
 
 /**
- * The pins as saved, hidden or not: `widget:pinned` with old names mapped (or the fresh-install
+ * The pins as saved, hidden or not: `widget:pinned` (or the fresh-install
  * default). Every write of `widget:pinned` starts from this, not from getPinnedKeys, so a pinned
  * group hidden only because its children are (isWidgetHidden) keeps its pin through other edits
  * and is back on the bar once a child is shown again.
@@ -204,13 +195,13 @@ export function getPinnedKeys(
 export function getSavedPinNames(settings: Record<string, any>, wmap: Record<string, WidgetConfigType>): string[] {
     const pinned: string[] | undefined = settings["widget:pinned"];
     if (pinned !== undefined) {
-        return [...new Set(currentPinNames(pinned))].filter((shortName) => wmap[`defwidget@${shortName}`] != null);
+        return [...new Set(pinned)].filter((id) => wmap[keyOfPinId(id)] != null);
     }
     const grouped = getGroupedChildKeys(wmap);
     return Object.entries(wmap)
-        .filter(([key, w]) => w["display:pinned"] && !grouped.has(key.replace("defwidget@", "")))
+        .filter(([key, w]) => w["display:pinned"] && !grouped.has(pinIdOf(key)))
         .sort(([, a], [, b]) => (a["display:order"] ?? 0) - (b["display:order"] ?? 0))
-        .map(([key]) => key.replace("defwidget@", ""));
+        .map(([key]) => pinIdOf(key));
 }
 
 /** Put the visible pins in `visibleOrder` into the slots they hold in `saved`, leaving any pin
@@ -231,8 +222,8 @@ export function getPinnedWidgets(
 ): { key: string; widget: WidgetConfigType }[] {
     if (!wmap) return [];
     return getPinnedKeys(settings, wmap)
-        .map((shortName) => {
-            const key = `defwidget@${shortName}`;
+        .map((id) => {
+            const key = keyOfPinId(id);
             return { key, widget: wmap[key] };
         })
         .filter((e) => e.widget != null);
@@ -248,8 +239,8 @@ export function getMoreWidgets(
     const hidden = getHiddenKeys(settings);
     return Object.entries(wmap)
         .filter(([key]) => {
-            const shortName = key.replace("defwidget@", "");
-            return !pinnedSet.has(shortName) && !grouped.has(shortName) && !isWidgetHidden(key, wmap, settings, hidden);
+            const id = pinIdOf(key);
+            return !pinnedSet.has(id) && !grouped.has(id) && !isWidgetHidden(key, wmap, settings, hidden);
         })
         .sort(([, a], [, b]) => (a["display:order"] ?? 0) - (b["display:order"] ?? 0))
         .map(([key, widget]) => ({ key, widget }));
@@ -332,13 +323,9 @@ export function buildPaneWidgetMenuItems(
 const FOCUS_EXISTING_VIEWS = new Set(["connectors", "memory"]);
 
 export async function handleWidgetSelect(widget: WidgetConfigType) {
-    // A user's widget override written before a pane was renamed can still
-    // name the old view; resolve it, or the open pane wouldn't be found.
-    const raw = widget.blockdef?.meta?.["view"] as string | undefined;
-    const view = raw ? resolvePaneTabView(raw) : undefined;
+    const view = widget.blockdef?.meta?.["view"] as string | undefined;
     if (view && FOCUS_EXISTING_VIEWS.has(view) && !widget.magnified) {
-        const blockdef = view === raw ? widget.blockdef : { ...widget.blockdef, meta: { ...widget.blockdef?.meta, view } };
-        await openOrFocusPaneByView(view, blockdef);
+        await openOrFocusPaneByView(view, widget.blockdef);
         return;
     }
     createBlock(widget.blockdef, widget.magnified);
@@ -369,14 +356,12 @@ export type WidgetBarState = "pinned" | "more" | "hidden" | "group";
 
 export interface WidgetBarEntry {
     key: string;
-    /** `agent` for `defwidget@agent`; the full key for anything else. */
+    /** The pin id (pinIdOf): `agent` for `defwidget@agent`; the full key for anything else. */
     shortName: string;
     widget: WidgetConfigType;
     state: WidgetBarState;
     /** False for Settings, the way back to everything hidden. */
     canHide: boolean;
-    /** Only built-in (`defwidget@`) entries can be pinned today. */
-    canPin: boolean;
     /** A group's children, each with its own state ("group", "pinned" or "hidden"). */
     children: WidgetBarEntry[];
     /** For a pinned entry (a promoted child too): its place on the bar, and how many are pinned.
@@ -406,14 +391,13 @@ export function getWidgetBarModel(
     const pinnedSet = new Set(pinned);
     const structuralChildren = getGroupedChildKeys(wmap);
     const entry = (key: string, widget: WidgetConfigType, state: WidgetBarState, children: WidgetBarEntry[] = []): WidgetBarEntry => {
-        const shortName = key.startsWith(DEFWIDGET) ? key.slice(DEFWIDGET.length) : key;
+        const shortName = pinIdOf(key);
         return {
             key,
             shortName,
             widget,
             state,
             canHide: !UNHIDEABLE_WIDGET_KEYS.has(key),
-            canPin: key.startsWith(DEFWIDGET),
             children,
             ...(state === "pinned" ? { pinIndex: pinned.indexOf(shortName), pinCount: pinned.length } : {}),
         };
@@ -428,11 +412,11 @@ export function getWidgetBarModel(
 
     const topLevel = Object.entries(wmap).filter(([key]) => !structuralChildren.has(key.replace(DEFWIDGET, "")));
     const pinnedRows = pinned
-        .map((name) => DEFWIDGET + name)
-        .filter((key) => !structuralChildren.has(key.slice(DEFWIDGET.length)) && wmap[key] != null)
+        .map(keyOfPinId)
+        .filter((key) => !structuralChildren.has(pinIdOf(key)) && wmap[key] != null)
         .map((key) => entry(key, wmap[key], "pinned", childrenOf(wmap[key])));
     const rest = topLevel
-        .filter(([key]) => !pinnedSet.has(key.replace(DEFWIDGET, "")))
+        .filter(([key]) => !pinnedSet.has(pinIdOf(key)))
         .sort(([, a], [, b]) => byOrder(a, b));
     const moreRows = rest
         .filter(([key]) => !isWidgetHidden(key, wmap, settings, hidden))
@@ -450,18 +434,17 @@ export function nextWidgetBarConfig(
     settings: Record<string, any>,
     wmap: Record<string, WidgetConfigType>
 ): { "widget:pinned"?: string[]; "widget:hidden"?: string[] | null } {
-    const shortName = key.startsWith(DEFWIDGET) ? key.slice(DEFWIDGET.length) : null;
+    const shortName = pinIdOf(key);
     const pinned = getSavedPinNames(settings, wmap);
     const rawHidden: string[] = Array.isArray(settings?.["widget:hidden"])
         ? settings["widget:hidden"].filter((k: unknown): k is string => typeof k === "string")
         : [];
-    // Drop the key, and any old name that reads as it (a stored `defwidget@remotes` hides Connectors).
-    const withoutKey = rawHidden.filter((k) => !getHiddenKeys({ "widget:hidden": [k] }).has(key));
+    const withoutKey = rawHidden.filter((k) => k !== key);
     const out: { "widget:pinned"?: string[]; "widget:hidden"?: string[] | null } = {};
     if (state === "hidden") {
         if (UNHIDEABLE_WIDGET_KEYS.has(key)) return out;
         out["widget:hidden"] = [...withoutKey, key];
-        if (shortName && pinned.includes(shortName)) out["widget:pinned"] = pinned.filter((n) => n !== shortName);
+        if (pinned.includes(shortName)) out["widget:pinned"] = pinned.filter((n) => n !== shortName);
         return out;
     }
     // A group hidden only because every child is hidden (isWidgetHidden): showing or pinning the
@@ -474,8 +457,8 @@ export function nextWidgetBarConfig(
     }
     if (nextHidden.length !== rawHidden.length) out["widget:hidden"] = nextHidden.length > 0 ? nextHidden : null;
     if (state === "pinned") {
-        if (shortName && !pinned.includes(shortName)) out["widget:pinned"] = [...pinned, shortName];
-    } else if (shortName && pinned.includes(shortName)) {
+        if (!pinned.includes(shortName)) out["widget:pinned"] = [...pinned, shortName];
+    } else if (pinned.includes(shortName)) {
         out["widget:pinned"] = pinned.filter((n) => n !== shortName);
     }
     return out;

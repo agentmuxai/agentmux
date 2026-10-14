@@ -3,7 +3,7 @@
 #
 # docs/cef-build/CEF_FORK_MAINTENANCE.md (§3 the inventory, §5 this gate)
 #
-# THE RULE: AgentMux carries four changes on top of CEF, spanning 18 CEF source
+# THE RULE: AgentMux carries six changes on top of CEF, spanning 23 CEF source
 # files and 3 Chromium-side patches. Every one must survive every milestone
 # upgrade. Layer A (patches under cef/patch/) fails loudly when it goes missing;
 # Layer B (edits to libcef/** and include/**) fails SILENTLY — the tree still
@@ -29,7 +29,7 @@
 #   scripts/cef-verify.sh --repo ~/src/cef     # explicit clone (validated, never guessed past)
 #   scripts/cef-verify.sh --remote fork        # whatever you named agentmuxai/cef
 #
-# Exit 0 = all 23 present. Exit 1 = something is missing, or the clone/ref could
+# Exit 0 = all 26 present. Exit 1 = something is missing, or the clone/ref could
 # not be resolved. It never modifies the repository it inspects.
 
 set -euo pipefail
@@ -86,7 +86,7 @@ if printf '%s' "$REF" | grep -qE '^[0-9]+$'; then
   # mid-port, so a stale remote-tracking ref answers confidently about state
   # that has since moved -- which is precisely how a wrong claim about the 152
   # port got into CEF_FORK_MAINTENANCE.md §1.2. If the network or auth is down,
-  # the correct outcome is "I cannot tell you", not "23 OK" against yesterday.
+  # the correct outcome is "I cannot tell you", not "26 OK" against yesterday.
   git -C "$REPO" fetch "$REMOTE" --prune >/dev/null 2>&1 \
     || { echo "cef-verify: fetch from '$REMOTE' failed; refusing to verify against a possibly stale ref" >&2; exit 1; }
   BR="$REMOTE/$REF"
@@ -120,6 +120,9 @@ libcef/browser/views/window_view.cc|CalculateRenderPasses
 include/internal/cef_types.h|or a frameless window
 libcef/browser/views/widget_impl.h|observed_theme_services_
 libcef/browser/views/widget_impl.cc|observed_theme_services_
+include/cef_request_context.h|GetAutocompleteSuggestions
+libcef/browser/request_context_impl.h|GetAutocompleteSuggestions
+libcef/browser/request_context_impl.cc|GetAutocompleteSuggestions
 '
 PATCHES='rwhv_background_opaque_check views_caption_rightclick_passthrough agentmux_process_requirement'
 

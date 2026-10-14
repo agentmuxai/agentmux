@@ -190,6 +190,7 @@ import type { CommandUpdateAgentInstanceData } from "@/types/rpc/CommandUpdateAg
 import type { CommandUpdateAgentSkillData } from "@/types/rpc/CommandUpdateAgentSkillData";
 import type { CommandUpsertBundleData } from "@/types/rpc/CommandUpsertBundleData";
 import type { CommandViewerAgentHiddenData } from "@/types/rpc/CommandViewerAgentHiddenData";
+import type { CommandViewerCanSendData } from "@/types/rpc/CommandViewerCanSendData";
 import type { CommandViewerRevokeData } from "@/types/rpc/CommandViewerRevokeData";
 import type { CommandVoiceCheckPathData } from "@/types/rpc/CommandVoiceCheckPathData";
 import type { CommandWriteAgentConfigData } from "@/types/rpc/CommandWriteAgentConfigData";
@@ -350,6 +351,7 @@ import type { SessionExportResult } from "@/types/rpc/SessionExportResult";
 import type { SessionRestoreResult } from "@/types/rpc/SessionRestoreResult";
 import type { SessionResumePreflightResult } from "@/types/rpc/SessionResumePreflightResult";
 import type { ShellExecResult } from "@/types/rpc/ShellExecResult";
+import type { ShellList } from "@/types/rpc/ShellList";
 import type { ShellStatusResult } from "@/types/rpc/ShellStatusResult";
 import type { ShellStopResult } from "@/types/rpc/ShellStopResult";
 import type { Skill } from "@/types/rpc/Skill";
@@ -387,6 +389,7 @@ import type { UnlinkAgentIdentityResult } from "@/types/rpc/UnlinkAgentIdentityR
 import type { UnwatchMediaDirReq } from "@/types/rpc/UnwatchMediaDirReq";
 import type { ValidationReport } from "@/types/rpc/ValidationReport";
 import type { ViewerAgentHiddenResult } from "@/types/rpc/ViewerAgentHiddenResult";
+import type { ViewerCanSendResult } from "@/types/rpc/ViewerCanSendResult";
 import type { ViewerDevicesResult } from "@/types/rpc/ViewerDevicesResult";
 import type { ViewerPairStartResult } from "@/types/rpc/ViewerPairStartResult";
 import type { ViewerRevokeResult } from "@/types/rpc/ViewerRevokeResult";
@@ -1998,7 +2001,7 @@ export const GeneratedApi = {
     client: RpcClient,
     data: ToolchainVersionsReq,
     opts?: RpcOpts
-  ): Promise<{ [key in string]?: string | null }> {
+  ): Promise<{ [key in string]: string | null }> {
     return client.rpcCall("toolchain.versions", data, opts);
   },
   // command "tooldecision"
@@ -2008,6 +2011,10 @@ export const GeneratedApi = {
   // command "blockstats.detail"
   BlockStatsDetailCommand(client: RpcClient, data: BlockStatsDetailReq, opts?: RpcOpts): Promise<BlockStatsDetail> {
     return client.rpcCall("blockstats.detail", data, opts);
+  },
+  // command "shell.list"
+  ShellListCommand(client: RpcClient, opts?: RpcOpts): Promise<ShellList> {
+    return client.rpcCall("shell.list", {}, opts);
   },
   // command "tower.forget"
   TowerForgetCommand(client: RpcClient, data: TowerForgetReq, opts?: RpcOpts): Promise<TowerPeersResult> {
@@ -2219,6 +2226,14 @@ export const GeneratedApi = {
     opts?: RpcOpts
   ): Promise<ViewerAgentHiddenResult> {
     return client.rpcCall("viewer.agent-hidden", data, opts);
+  },
+  // command "viewer.can-send"
+  ViewerCanSendCommand(
+    client: RpcClient,
+    data: CommandViewerCanSendData,
+    opts?: RpcOpts
+  ): Promise<ViewerCanSendResult> {
+    return client.rpcCall("viewer.can-send", data, opts);
   },
   // command "viewer.devices"
   ViewerDevicesCommand(client: RpcClient, opts?: RpcOpts): Promise<ViewerDevicesResult> {

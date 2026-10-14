@@ -54,7 +54,7 @@ pub struct AppState {
     /// creds, native memory, or cron jobs should use `identity_store`
     /// instead, which (unlike this field) is never redirected by
     /// `isolated_auth_enabled()`. `id_store` itself stays because
-    /// `db_accounts` still legitimately needs an isolatable path (Armory
+    /// `db_accounts` still legitimately needs an isolatable path (account
     /// testing) — see the spec's §3.2 for the account-specific split, not
     /// yet implemented.
     pub id_store: Arc<Store>,

@@ -10,13 +10,13 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use sysinfo::{DiskRefreshKind, Disks, Networks, Pid, ProcessRefreshKind, ProcessesToUpdate};
-use tokio::time::MissedTickBehavior;
 
 use crate::backend::blockcontroller::pidregistry;
 use crate::backend::blockcontroller::process_tree;
 use crate::backend::rpc_types::TimeSeriesData;
 use crate::backend::wconfig::ConfigState;
 use crate::backend::mps::Broker;
+use crate::backend::sampler::{Scheduler, SourceId, SourceSpec};
 
 const BYTES_PER_GB: f64 = 1_073_741_824.0;
 const BYTES_PER_MB: f64 = 1_048_576.0;
@@ -31,6 +31,17 @@ const MAX_INTERVAL_SECS: f64 = 2.0;
 /// goes through CacheDelete: with a few DMGs mounted that was thousands of
 /// system calls and log lines a minute, for numbers that move slowly.
 const DISK_FULL_REFRESH: Duration = Duration::from_secs(30);
+
+/// Sources due within this much of each other run in one pass.
+const SCHEDULER_COALESCE_MS: u64 = 50;
+/// How often the panes' processes are scanned with no badge watching: enough to
+/// evict a pane whose shell exited without normal cleanup.
+const PANE_JANITOR_MS: u64 = 30_000;
+/// A budget no run exceeds: the source keeps its interval whatever a run costs.
+const NEVER_STRETCHED: u64 = u64::MAX / 4;
+const HOLDER_TELEMETRY: &str = "telemetry";
+const HOLDER_JANITOR: &str = "pane-janitor";
+const HOLDER_BADGES: &str = "pane-badges";
 
 // ── Commit (pagefile) attribution ────────────────────────────────────────
 // docs/retro/retro-subagent-backfill-storm-oom-2026-07-17.md: a live OOM
@@ -1072,7 +1083,12 @@ fn get_interval_secs(config_watcher: &ConfigState) -> f64 {
 /// Run the sysinfo collection loop. Uses `tokio::time::interval` for steady
 /// tick rate regardless of refresh duration. Interval is re-read from config
 /// each tick and the timer is reset if it changes.
-pub async fn run_sysinfo_loop(broker: Arc<Broker>, config_watcher: Arc<ConfigState>, conn_name: String) {
+pub async fn run_sysinfo_loop(
+    broker: Arc<Broker>,
+    config_watcher: Arc<ConfigState>,
+    conn_name: String,
+    panes: crate::backend::sampler::panes::PaneSampler,
+) {
     let mut sys = sysinfo::System::new_all();
     let mut networks = Networks::new_with_refreshed_list();
     let mut net_state = NetState::new();
@@ -1093,208 +1109,196 @@ pub async fn run_sysinfo_loop(broker: Arc<Broker>, config_watcher: Arc<ConfigSta
     // Each pane badge's highest memory, for its tooltip.
     let mut peaks = crate::backend::blockstats_detail::Peaks::default();
 
+    // What to measure and how often: a source runs only while something holds a
+    // lease on it (backend/sampler). The machine's counters are the baseline. The
+    // panes' processes run at the telemetry rate only while a pane badge is
+    // subscribed, and otherwise just often enough to evict a pane whose shell has
+    // died. docs/reports/REPORT_SYSINFO_REWRITE_AND_MODERN_MONITOR_2026_10_13.md
+    // section 5.5.
+    let epoch = Instant::now();
+    let since_epoch = |t: Instant| t.duration_since(epoch).as_millis() as u64;
+    let min_interval_ms = (MIN_INTERVAL_SECS * 1000.0) as u64;
+    let mut sched = Scheduler::new(
+        vec![
+            // Never stretched: the machine's counters are what the CPU chart shows,
+            // and a busy machine is exactly when they must keep coming. Only the
+            // costly pane scan slows down under load.
+            SourceSpec { id: SourceId::Machine, min_interval_ms, budget_ms: NEVER_STRETCHED, needs: &[] },
+            SourceSpec { id: SourceId::Panes, min_interval_ms, budget_ms: 400, needs: &[] },
+        ],
+        SCHEDULER_COALESCE_MS,
+    );
+    let mut watched = false;
     let mut current_interval = get_interval_secs(&config_watcher);
-    let mut ticker = tokio::time::interval(Duration::from_secs_f64(current_interval));
-    ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
-    // Skip the first immediate tick
-    ticker.tick().await;
+    sched.lease(HOLDER_TELEMETRY, SourceId::Machine, (current_interval * 1000.0) as u64, None, 0);
+    sched.lease(HOLDER_JANITOR, SourceId::Panes, PANE_JANITOR_MS, None, 0);
+    // Both start one interval in: the CPU counters need two reads to mean anything.
+    sched.finished(SourceId::Machine, 0, 0);
+    sched.finished(SourceId::Panes, 0, 0);
 
     tracing::info!("sysinfo loop started for conn:{}", conn_name);
 
     loop {
-        ticker.tick().await;
-
-        // Check if interval changed and reset ticker if so
+        let now_ms = since_epoch(Instant::now());
         let new_interval = get_interval_secs(&config_watcher);
         if (new_interval - current_interval).abs() > 0.001 {
             current_interval = new_interval;
-            ticker = tokio::time::interval(Duration::from_secs_f64(current_interval));
-            ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
-            ticker.tick().await; // consume immediate first tick
             tracing::info!("sysinfo interval changed to {}s", current_interval);
         }
-
-        // Refresh all metrics. All sysinfo refresh calls are synchronous
-        // /proc reads; block_in_place signals the Tokio runtime to keep
-        // other tasks (including terminal echo) running on other threads
-        // while this thread is occupied — preventing 1Hz echo starvation.
-        //
-        // `get_pagefile_volume_data`'s `GetDiskFreeSpaceExW` call (reagent
-        // P1, PR #2109) is a synchronous Win32 disk I/O syscall — the exact
-        // hazard this block exists to isolate, unlike `get_commit_data`'s
-        // `GlobalMemoryStatusEx` (pure in-memory, no filesystem driver
-        // involved) — so its result is computed here too, alongside the
-        // other blocking OS reads, not in the async section below.
-        let mut pagefile_values = HashMap::new();
-        tokio::task::block_in_place(|| {
-            sys.refresh_cpu_usage();
-            sys.refresh_memory();
-            networks.refresh(true);
-            if last_disk_full_refresh.elapsed() >= DISK_FULL_REFRESH {
-                disks.refresh(true);
-                last_disk_full_refresh = Instant::now();
-            } else {
-                for disk in disks.list_mut() {
-                    disk.refresh_specifics(DiskRefreshKind::nothing().with_io_usage());
-                }
-            }
-            get_pagefile_volume_data(&mut pagefile_values);
-        });
-
-        let now_instant = Instant::now();
-        let elapsed_secs = now_instant.duration_since(last_tick).as_secs_f64();
-        last_tick = now_instant;
-
-        let mut values = pagefile_values;
-        get_cpu_data(&sys, &mut values);
-        get_mem_data(&sys, &mut values);
-        get_commit_data(&mut values);
-        net_state.get_net_data(&networks, &mut values);
-        get_disk_data(&disks, elapsed_secs, &mut values);
-        // Must follow get_disk_data: it summarises the per-volume figures that
-        // call just wrote. The Windows equivalent already ran inside
-        // block_in_place above (it makes a real syscall); this one does not.
-        #[cfg(not(target_os = "windows"))]
-        get_watch_volume_data(&disks, &mut values);
-
-        // Commit attribution: periodic in the steady state, or immediately
-        // (debounced) when commit heads toward exhaustion — see
-        // docs/retro/retro-subagent-backfill-storm-oom-2026-07-17.md. Reuses
-        // the commit numbers just computed above rather than re-querying.
-        // Windows-only like every other commit/pagefile helper in this file
-        // (get_commit_data, available_commit_gb, get_pagefile_volume_data) —
-        // its rationale (pagefile/commit exhaustion) doesn't apply elsewhere,
-        // and off-Windows `mem:commit:*` are never populated, so this would
-        // otherwise pay a full process-table refresh every tick just to log
-        // a permanently-zero commit_used_gb/commit_total_gb.
-        #[cfg(target_os = "windows")]
-        {
-            let commit_avail_gb = match (values.get("mem:commit:total"), values.get("mem:commit:used")) {
-                (Some(total), Some(used)) => Some(total - used),
-                _ => None,
-            };
-            let due_periodic = now_instant.duration_since(last_attribution) >= ATTRIBUTION_INTERVAL;
-            let due_urgent = commit_avail_gb.is_some_and(|gb| gb < ATTRIBUTION_URGENT_THRESHOLD_GB)
-                && last_urgent_attribution
-                    .is_none_or(|t| now_instant.duration_since(t) >= ATTRIBUTION_URGENT_COOLDOWN);
-            if due_periodic || due_urgent {
-                let commit_used_gb = *values.get("mem:commit:used").unwrap_or(&0.0);
-                let commit_total_gb = *values.get("mem:commit:total").unwrap_or(&0.0);
-                tokio::task::block_in_place(|| {
-                    log_memory_attribution(&mut sys, commit_used_gb, commit_total_gb)
-                });
-                last_attribution = now_instant;
-                if due_urgent {
-                    last_urgent_attribution = Some(now_instant);
-                }
-            }
+        let interval_ms = (current_interval * 1000.0) as u64;
+        sched.lease(HOLDER_TELEMETRY, SourceId::Machine, interval_ms, None, now_ms);
+        let has_viewers = broker.has_subscribers(crate::backend::mps::EVENT_BLOCK_STATS);
+        if has_viewers {
+            sched.lease(HOLDER_BADGES, SourceId::Panes, interval_ms, None, now_ms);
+        } else {
+            sched.release_source(HOLDER_BADGES, SourceId::Panes, now_ms);
         }
+        if has_viewers != watched {
+            watched = has_viewers;
+            tracing::debug!(watched, "sysinfo: pane stats {}", if watched { "have a viewer" } else { "have no viewer" });
+        }
+        let wake = sched.next_wakeup(now_ms).unwrap_or(now_ms + interval_ms);
+        if wake > now_ms {
+            tokio::time::sleep_until(tokio::time::Instant::from_std(epoch + Duration::from_millis(wake))).await;
+        }
+        let due = sched.due(since_epoch(Instant::now()));
 
-        let now = agentmux_common::time::now_ms();
-
-        let ts_data = TimeSeriesData { ts: now, values, uptime_secs: Some(uptime_secs()) };
-
-        broker.publish_event::<crate::backend::mps_events::SysInfo>(&ts_data, vec![conn_name.clone()], PERSIST_COUNT);
-
-        // Per-pane process tree metrics: aggregate CPU/mem across each block's
-        // shell process and all its descendants.
-        let block_pids = pidregistry::get_all();
-        peaks.retain(|id| block_pids.iter().any(|(b, _)| b == id));
-        if !block_pids.is_empty() {
-            // Pass 1: cheap minimal refresh of all processes to populate parent()
-            // links. ProcessRefreshKind::nothing() skips CPU/mem — just PID/PPID.
-            // On a VM with many Chromium/CEF helper processes this can take 5–20ms;
-            // block_in_place keeps the Tokio runtime unblocked during the scan.
+        if due.contains(&SourceId::Machine) {
+            let run_started = Instant::now();
+            // Refresh all metrics. All sysinfo refresh calls are synchronous
+            // /proc reads; block_in_place signals the Tokio runtime to keep
+            // other tasks (including terminal echo) running on other threads
+            // while this thread is occupied — preventing 1Hz echo starvation.
+            //
+            // `get_pagefile_volume_data`'s `GetDiskFreeSpaceExW` call (reagent
+            // P1, PR #2109) is a synchronous Win32 disk I/O syscall — the exact
+            // hazard this block exists to isolate, unlike `get_commit_data`'s
+            // `GlobalMemoryStatusEx` (pure in-memory, no filesystem driver
+            // involved) — so its result is computed here too, alongside the
+            // other blocking OS reads, not in the async section below.
+            let mut pagefile_values = HashMap::new();
             tokio::task::block_in_place(|| {
-                sys.refresh_processes_specifics(
-                    ProcessesToUpdate::All,
-                    false, // keep stale entries — pass 2 removes dead ones
-                    ProcessRefreshKind::nothing(),
-                );
-            });
-
-            // For each block, BFS the process tree from the shell PID.
-            let mut block_trees: Vec<(String, Vec<Pid>)> = block_pids
-                .iter()
-                .map(|(block_id, pid)| {
-                    let root = Pid::from(*pid as usize);
-                    let tree = process_tree::collect_descendants(
-                        &sys,
-                        root,
-                        process_tree::MAX_PIDS_PER_BLOCK,
-                    );
-                    (block_id.clone(), tree)
-                })
-                .collect();
-
-            // Pass 2: targeted deep refresh (CPU + mem) for only the PIDs we care about.
-            // Deduplicate across blocks so each PID is refreshed at most once.
-            let mut all_pids: Vec<Pid> = block_trees
-                .iter()
-                .flat_map(|(_, pids)| pids.iter().copied())
-                .collect();
-            all_pids.sort_unstable();
-            all_pids.dedup();
-            tokio::task::block_in_place(|| {
-                sys.refresh_processes_specifics(
-                    ProcessesToUpdate::Some(&all_pids),
-                    true, // remove dead processes on this authoritative pass
-                    ProcessRefreshKind::everything(),
-                );
-            });
-
-            // Aggregate per block and publish.
-            // After Pass 2 (remove_dead=true), sys.process() returns None for any
-            // PID that no longer exists — use this to detect orphaned registry entries.
-            let mut dead_block_ids: Vec<String> = Vec::new();
-
-            for (block_id, pids) in &mut block_trees {
-                // collect_descendants() always puts the root PID first.
-                let root_pid = pids.first().copied().unwrap_or(Pid::from(0usize));
-                let mut total_cpu: f64 = 0.0;
-                let mut total_mem: u64 = 0;
-                let mut live_count: u32 = 0;
-
-                for pid in pids.iter() {
-                    if let Some(proc) = sys.process(*pid) {
-                        total_cpu += proc.cpu_usage() as f64;
-                        total_mem += proc.memory();
-                        live_count += 1;
+                sys.refresh_cpu_usage();
+                sys.refresh_memory();
+                networks.refresh(true);
+                if last_disk_full_refresh.elapsed() >= DISK_FULL_REFRESH {
+                    disks.refresh(true);
+                    last_disk_full_refresh = Instant::now();
+                } else {
+                    for disk in disks.list_mut() {
+                        disk.refresh_specifics(DiskRefreshKind::nothing().with_io_usage());
                     }
                 }
+                get_pagefile_volume_data(&mut pagefile_values);
+            });
 
-                // Root process is gone — evict from registry.  This is the last-resort
-                // cleanup for processes that exit without normal wait-task teardown
-                // (SIGKILL by the OS, unexpected crash, or stop() race).
-                if sys.process(root_pid).is_none() {
-                    dead_block_ids.push(block_id.clone());
-                    continue; // skip publishing stale stats for a dead block
-                }
+            let now_instant = Instant::now();
+            let elapsed_secs = now_instant.duration_since(last_tick).as_secs_f64();
+            last_tick = now_instant;
 
-                let mut block_values = HashMap::new();
-                block_values.insert("cpu".to_string(), total_cpu);
-                block_values.insert("mem".to_string(), total_mem as f64);
-                block_values.insert("pids".to_string(), live_count as f64);
-                let started = sys.process(root_pid).map_or(0, |p| p.start_time());
-                let peak = peaks.observe(block_id, (root_pid.as_u32(), started), total_mem);
-                block_values.insert("mem:peak".to_string(), peak as f64);
+            let mut values = pagefile_values;
+            get_cpu_data(&sys, &mut values);
+            get_mem_data(&sys, &mut values);
+            get_commit_data(&mut values);
+            net_state.get_net_data(&networks, &mut values);
+            get_disk_data(&disks, elapsed_secs, &mut values);
+            // Must follow get_disk_data: it summarises the per-volume figures that
+            // call just wrote. The Windows equivalent already ran inside
+            // block_in_place above (it makes a real syscall); this one does not.
+            #[cfg(not(target_os = "windows"))]
+            get_watch_volume_data(&disks, &mut values);
 
-                let block_ts = TimeSeriesData {
-                    ts: now,
-                    values: block_values,
-                    // Per-block process stats, not the backend's own uptime.
-                    uptime_secs: None,
+            // Commit attribution: periodic in the steady state, or immediately
+            // (debounced) when commit heads toward exhaustion — see
+            // docs/retro/retro-subagent-backfill-storm-oom-2026-07-17.md. Reuses
+            // the commit numbers just computed above rather than re-querying.
+            // Windows-only like every other commit/pagefile helper in this file
+            // (get_commit_data, available_commit_gb, get_pagefile_volume_data) —
+            // its rationale (pagefile/commit exhaustion) doesn't apply elsewhere,
+            // and off-Windows `mem:commit:*` are never populated, so this would
+            // otherwise pay a full process-table refresh every tick just to log
+            // a permanently-zero commit_used_gb/commit_total_gb.
+            #[cfg(target_os = "windows")]
+            {
+                let commit_avail_gb = match (values.get("mem:commit:total"), values.get("mem:commit:used")) {
+                    (Some(total), Some(used)) => Some(total - used),
+                    _ => None,
                 };
-                broker.publish_event::<crate::backend::mps_events::BlockStats>(&block_ts, vec![format!("block:{block_id}")], 0);
+                let due_periodic = now_instant.duration_since(last_attribution) >= ATTRIBUTION_INTERVAL;
+                let due_urgent = commit_avail_gb.is_some_and(|gb| gb < ATTRIBUTION_URGENT_THRESHOLD_GB)
+                    && last_urgent_attribution
+                        .is_none_or(|t| now_instant.duration_since(t) >= ATTRIBUTION_URGENT_COOLDOWN);
+                if due_periodic || due_urgent {
+                    let commit_used_gb = *values.get("mem:commit:used").unwrap_or(&0.0);
+                    let commit_total_gb = *values.get("mem:commit:total").unwrap_or(&0.0);
+                    tokio::task::block_in_place(|| {
+                        log_memory_attribution(&mut sys, commit_used_gb, commit_total_gb)
+                    });
+                    last_attribution = now_instant;
+                    if due_urgent {
+                        last_urgent_attribution = Some(now_instant);
+                    }
+                }
             }
 
-            for block_id in &dead_block_ids {
-                pidregistry::unregister(block_id);
-                tracing::warn!(
-                    block_id = %block_id,
-                    "sysinfo: evicted dead root PID — process exited without normal cleanup"
-                );
+            let now = agentmux_common::time::now_ms();
+
+            let ts_data = TimeSeriesData { ts: now, values, uptime_secs: Some(uptime_secs()) };
+
+            broker.publish_event::<crate::backend::mps_events::SysInfo>(&ts_data, vec![conn_name.clone()], PERSIST_COUNT);
+            sched.finished(SourceId::Machine, since_epoch(run_started), run_started.elapsed().as_millis() as u64);
+        }
+
+        if due.contains(&SourceId::Panes) {
+            let run_started = Instant::now();
+            let now = agentmux_common::time::now_ms();
+            // Each pane's processes as Tower groups them (its Job Object or cgroup,
+            // else its shell's tree), from Tower's own sample, so the badge, its
+            // detail and Tower count the same processes (`sampler::panes`).
+            // Read before the sample: a shell registered after it was read can't be
+            // judged by it.
+            let registered = pidregistry::get_all();
+            let asked = Instant::now();
+            match tokio::task::block_in_place(|| panes()) {
+                Ok(stats) => {
+                    peaks.retain(|id| stats.iter().any(|s| s.block_id == id));
+                    for s in &stats {
+                        let mut values = HashMap::new();
+                        if let Some(cpu) = s.cpu_pct {
+                            values.insert("cpu".to_string(), cpu);
+                        }
+                        values.insert("mem".to_string(), s.mem as f64);
+                        values.insert("pids".to_string(), f64::from(s.pids));
+                        let peak = peaks.observe(&s.block_id, s.shell, s.mem);
+                        values.insert("mem:peak".to_string(), peak as f64);
+                        // Per-block process stats, not the backend's own uptime.
+                        let block_ts = TimeSeriesData { ts: now, values, uptime_secs: None };
+                        broker.publish_event::<crate::backend::mps_events::BlockStats>(
+                            &block_ts,
+                            vec![format!("block:{}", s.block_id)],
+                            0,
+                        );
+                    }
+                }
+                Err(e) => tracing::debug!(error = %e, "sysinfo: pane stats sample failed"),
             }
+            // Last-resort cleanup for a shell that exited without the normal
+            // teardown (killed by the OS, a crash, a stop() race): its PID is
+            // missing from a process table read after it was registered. Only a
+            // sample taken in this pass counts; a reused or failed one is skipped,
+            // and the next pass decides.
+            if let Some(live) = crate::backend::tower_sampler::Tower::global().live_pids_since(asked) {
+                for (block_id, pid) in registered {
+                    if !live.contains(&pid) {
+                        pidregistry::unregister(&block_id);
+                        tracing::warn!(
+                            block_id = %block_id,
+                            "sysinfo: evicted dead root PID — process exited without normal cleanup"
+                        );
+                    }
+                }
+            }
+            sched.finished(SourceId::Panes, since_epoch(run_started), run_started.elapsed().as_millis() as u64);
         }
     }
 }

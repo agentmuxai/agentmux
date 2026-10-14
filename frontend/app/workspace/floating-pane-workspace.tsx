@@ -401,10 +401,10 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
             const target = e.target as HTMLElement | null;
             if (!target) return;
             if (!target.closest(HEADER_SELECTOR)) return;
-            // The pane grip (role="button", PaneTabStrip.tsx) is a drag handle
+            // The pane grip (role="button", PaneGrip.tsx) is a drag handle
             // first: a press on it moves the floater like the rest of the
             // header; its click still opens the pane menu.
-            if (target.closest(INTERACTIVE_SELECTOR) && !target.closest(".pane-tab-strip-grip")) return;
+            if (target.closest(INTERACTIVE_SELECTOR) && !target.closest(".pane-grip")) return;
 
             // Load-bearing: blocks pragmatic-dnd's HTML5 dragstart, preventing
             // the double-tear-off regression (ANALYSIS_FLOATING_PANE_HEADER_DRAG

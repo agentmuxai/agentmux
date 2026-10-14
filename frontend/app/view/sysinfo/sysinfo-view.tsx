@@ -12,7 +12,7 @@ import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Sh
 
 import type { SysinfoViewModel } from "./sysinfo-model";
 import { SingleLinePlot } from "./sysinfo-plot";
-import { convertMuxEventToDataItem } from "./sysinfo-util";
+import { convertTimeSeriesToDataItem } from "./sysinfo-util";
 
 type SysinfoViewProps = {
     blockId: string;
@@ -24,6 +24,7 @@ function SysinfoView(props: SysinfoViewProps): JSX.Element {
     // The chart is empty until its history arrives: hold the pane until then
     // (pane-content-holds.ts).
     onCleanup(trackPaneContent(blockId));
+    onCleanup(() => model.dispose());
     const releaseContent = holdPaneContent(blockId);
     onCleanup(releaseContent);
     createEffect(() => {
@@ -46,14 +47,14 @@ function SysinfoView(props: SysinfoViewProps): JSX.Element {
     });
 
     // Subscribe to sysinfo events — hand every sample to the reducer.
-    // The reducer handles missing ticks via zero-order hold (≤3 missed) or
-    // a NaN sentinel (true break). No gap-triggered reload here: that caused
+    // The reducer joins a short gap between two real samples and breaks the
+    // series at a long one. No gap-triggered reload here: that caused
     // the chart to blank under load and created a drop/reload feedback loop.
     createEffect(() => {
         const cn = connName();
-        const unsubFn = onMuxEvent(WpsEvent.SysInfo, (_data, event) => {
+        const unsubFn = onMuxEvent(WpsEvent.SysInfo, (data) => {
                 if (model.loadingAtom()) return;
-                const dataItem = convertMuxEventToDataItem(event);
+                const dataItem = convertTimeSeriesToDataItem(data);
                 if (dataItem == null) return;
                 model.appendData(dataItem);
             }, cn);

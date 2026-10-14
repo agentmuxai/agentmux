@@ -442,9 +442,8 @@ export function createTileLayout(platform: TileLayoutPlatform) {
                         // diverged from browser-drag assumptions in practice
                         // (see docs/retro/retro-native-pointer-drag-tearoff-shelved-2026-07-29.md)
                         // — checked explicitly here rather than trusted
-                        // implicitly. `.pane-tab-strip-drag-handle` (the
-                        // pane's grip slot after the "+", PaneTabStrip.tsx)
-                        // is deliberately NOT
+                        // implicitly. `.pane-grip` (the pane's grip, left of
+                        // the pane controls, PaneGrip.tsx) is deliberately NOT
                         // in this selector — it stays part of this region.
                         const atPoint = document.elementFromPoint(input.clientX, input.clientY);
                         if (atPoint?.closest(PANE_DRAG_EXCLUDED)) return false;

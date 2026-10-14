@@ -5,4 +5,4 @@
  * typed it `Record<string, never>`, which is exactly what an empty struct
  * generates.
  */
-export type MuxBusDisconnectResp = Record<string, never>;
+export type MuxBusDisconnectResp = Record<symbol, never>;

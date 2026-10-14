@@ -220,7 +220,7 @@ pub fn default_conversation_visibility() -> String {
 /// it) and native-memory resolution (which must find the memories written
 /// inside it) share one definition and cannot drift — they previously
 /// disagreed, and the resolver simply gave up on a blank field, breaking
-/// Armory → Bundle → Personal for the common case. See
+/// Memory → Personal for the common case. See
 /// `docs/specs/SPEC_FIX_PERSONAL_MEMORY_EMPTY_WORKDIR_2026_09_01.md`.
 ///
 /// NOTE: deliberately NOT `derive_slug` above. `agent.open`'s own inline

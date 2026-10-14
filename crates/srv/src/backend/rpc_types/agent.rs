@@ -8,18 +8,24 @@
 use serde::{Deserialize, Serialize};
 
 /// Request for agent.open — find or create an agent pane for the given agent_id.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "snake_case")]
 pub struct CommandAgentOpenData {
     pub agent_id: String,
+    #[ts(optional)]
     pub tab_id: Option<String>,
+    #[ts(optional)]
     pub split_direction: Option<String>,
+    #[ts(optional)]
     pub split_reference_block_id: Option<String>,
+    #[ts(optional)]
     pub focus: Option<bool>,
 }
 
 /// Request for agent.send — send a message to an agent pane.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "snake_case")]
 pub struct CommandAgentSendData {
     pub block_id: String,
@@ -27,30 +33,37 @@ pub struct CommandAgentSendData {
 }
 
 /// Request for agent.stop — stop a running agent subprocess.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "snake_case")]
 pub struct CommandAgentStopApiData {
     pub block_id: String,
+    #[ts(optional)]
     pub signal: Option<String>,
     /// Also stop the agent's `run_in_background` tasks? Absent: the user's
     /// `agent:stopkeepsbackground` setting (default keep).
     #[serde(default)]
+    #[ts(optional)]
     pub stop_background: Option<bool>,
 }
 
 /// Request for agent.status — query status of an agent pane.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "snake_case")]
 pub struct CommandAgentStatusData {
     pub block_id: String,
 }
 
 /// Request for agent.output — read buffered output lines from an agent pane.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "snake_case")]
 pub struct CommandAgentOutputData {
     pub block_id: String,
+    #[ts(optional, type = "number")]
     pub after_line: Option<usize>,
+    #[ts(optional, type = "number")]
     pub max_lines: Option<usize>,
 }
 
@@ -62,7 +75,8 @@ pub struct CommandAgentStreamData {
 }
 
 /// Response from agent.open.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "snake_case")]
 pub struct AgentOpenResult {
     pub block_id: String,
@@ -79,42 +93,57 @@ pub struct AgentOpenResult {
 ///   `"skip"` (default) — return existing id unchanged
 ///   `"update"` — overwrite all provided non-empty fields
 ///   `"error"` — fail with an error message
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "snake_case")]
 pub struct CommandAgentDefineData {
     pub name: String,
     #[serde(default)]
+    #[ts(as = "Option<String>", optional)]
     pub provider: String,
     /// Alternative to `provider` — inferred from model prefix.
     /// If both are set, `provider` wins.
     #[serde(default)]
+    #[ts(as = "Option<String>", optional)]
     pub model: String,
     #[serde(default)]
+    #[ts(as = "Option<String>", optional)]
     pub icon: String,
     #[serde(default)]
+    #[ts(as = "Option<String>", optional)]
     pub description: String,
     #[serde(default)]
+    #[ts(as = "Option<String>", optional)]
     pub working_directory: String,
     #[serde(default)]
+    #[ts(as = "Option<String>", optional)]
     pub shell: String,
     #[serde(default)]
+    #[ts(as = "Option<String>", optional)]
     pub environment: String,
     /// System/instruction text written to the agent's CLAUDE.md on spawn.
+    #[ts(optional)]
     pub system_prompt: Option<String>,
     /// Extra env vars injected at agent spawn, stored as KEY=VALUE lines.
+    #[ts(optional)]
     pub env: Option<std::collections::HashMap<String, String>>,
+    #[ts(optional)]
     pub if_exists: Option<String>,
+    #[ts(optional)]
     pub create_instance_stub: Option<bool>,
     /// "host" or "container". Defaults to "host" when absent — the safe
     /// default that works without Docker. Callers must explicitly pass
     /// "container" so a missing field never silently starts the wrong runtime.
     #[serde(default = "default_host_agent_type")]
+    #[ts(as = "Option<String>", optional)]
     pub agent_type: String,
     /// Docker image for container-type agents. Empty string for host agents.
     #[serde(default)]
+    #[ts(as = "Option<String>", optional)]
     pub container_image: String,
     /// JSON array of volume mount specs. Empty array (`"[]"`) for host agents.
     #[serde(default = "default_container_volumes")]
+    #[ts(as = "Option<String>", optional)]
     pub container_volumes: String,
     /// Redirects this agent's harness at a non-default model vendor backend
     /// (e.g. a custom `ANTHROPIC_BASE_URL` for a `claude`-provider agent).
@@ -128,6 +157,7 @@ pub struct CommandAgentDefineData {
     /// Mirrors the existing `Option<T>` = "don't touch" idiom already used
     /// by `CommandUpdateAgentDefinitionData::auto_continue_enabled`.
     #[serde(default)]
+    #[ts(optional)]
     pub model_vendor_base_url: Option<String>,
 }
 
@@ -136,18 +166,21 @@ fn default_host_agent_type() -> String {
 }
 
 /// Response from agent.define.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "snake_case")]
 pub struct AgentDefineResult {
     pub definition_id: String,
     pub slug: String,
     pub action: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub instance_stub_id: Option<String>,
 }
 
 /// Response from agent.send.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "snake_case")]
 pub struct AgentSendResult {
     pub block_id: String,
@@ -156,7 +189,8 @@ pub struct AgentSendResult {
 }
 
 /// Response from agent.stop.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "snake_case")]
 pub struct AgentStopResult {
     pub block_id: String,
@@ -165,7 +199,8 @@ pub struct AgentStopResult {
 }
 
 /// Response from agent.status.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "snake_case")]
 pub struct AgentStatusResult {
     pub block_id: String,
@@ -179,7 +214,8 @@ pub struct AgentStatusResult {
 }
 
 /// A single entry in the agent.list response.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "snake_case")]
 pub struct AgentListEntry {
     pub block_id: String,
@@ -191,18 +227,21 @@ pub struct AgentListEntry {
 }
 
 /// Response from agent.list.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "snake_case")]
 pub struct AgentListResult {
     pub agents: Vec<AgentListEntry>,
 }
 
 /// Response from agent.output.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "snake_case")]
 pub struct AgentOutputResult {
     pub block_id: String,
     pub lines: Vec<String>,
+    #[ts(type = "number")]
     pub total_lines: usize,
     pub has_more: bool,
 }
