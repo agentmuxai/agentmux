@@ -40,13 +40,26 @@ const REASON_LABEL: Record<ContextDeliveryNode["reason"], string> = {
     clear: "after /clear",
     compaction: "after compaction",
     resume_fresh: "session continued",
+    command: "Claude Code command",
 };
 
 const MEMORY_KINDS = new Set(["global_memory", "personal_memory", "running_summary"]);
 
+/** Items whose whole text is in the transcript: their card shows an excerpt and opens to it. */
+const TEXT_KINDS = new Set(["compaction_summary", "command_output"]);
+
 /** True for the single-item compaction summary card, which shows an excerpt, not rows. */
 export function isCompactionSummaryCard(node: ContextDeliveryNode): boolean {
     return node.items.length === 1 && node.items[0].kind === "compaction_summary";
+}
+
+/**
+ * True for a card of one text item (the compaction summary, a command's
+ * output): an excerpt instead of item rows. Not a memory delivery, so a later
+ * new-session card never takes its place (`supersededCard`).
+ */
+export function isTextCard(node: ContextDeliveryNode): boolean {
+    return node.items.length === 1 && TEXT_KINDS.has(node.items[0].kind);
 }
 
 /** The card's one-line title (spec §3.2). */
@@ -55,6 +68,7 @@ export function contextDeliveryTitle(node: ContextDeliveryNode): string {
         const how = node.trigger === "auto" ? "auto-compact" : node.trigger === "manual" ? "manual compact" : null;
         return how ? `Agent given a summary of the conversation (${how})` : "Agent given a summary of the conversation";
     }
+    if (isTextCard(node)) return node.items[0].name;
     const n = node.items.length;
     const count = `${n} ${n === 1 ? "item" : "items"}`;
     const cut = node.items.filter((i) => i.delivered === "partial" || i.delivered === "omitted").length;
@@ -105,6 +119,53 @@ function stringContent(frame: RawFrame): string | null {
     if (frame.type !== "user") return null;
     const content = asFrame(frame.message)?.content;
     return typeof content === "string" ? content : null;
+}
+
+/** The whole frame is one local command's output: `<local-command-stdout>…</local-command-stdout>`. */
+const COMMAND_OUTPUT_RE = /^\s*<local-command-(stdout|stderr)>([\s\S]*)<\/local-command-\1>\s*$/;
+
+/** What `commandOutputNode` returns for an output with no text: nothing to show. */
+export const EMPTY_COMMAND_OUTPUT = "empty";
+
+/**
+ * A local slash command's output (`/compact` reports "Compacted …" and its
+ * hooks) that Claude Code puts in the conversation as a plain-string user
+ * frame wrapped in `<local-command-stdout>`. The model has it, so it's a
+ * context delivery: a card with an excerpt that opens to the text, not a
+ * message from the user (spec §9 C1). `EMPTY_COMMAND_OUTPUT` for an empty
+ * one, null when `rawEvent` isn't one. Id: the frame's `uuid`, else its
+ * timestamp and size, so live and replay agree.
+ */
+export function commandOutputNode(rawEvent: unknown, now: number): ContextDeliveryNode | typeof EMPTY_COMMAND_OUTPUT | null {
+    const frame = asFrame(rawEvent);
+    const text = frame ? stringContent(frame) : null;
+    const m = text != null ? COMMAND_OUTPUT_RE.exec(text) : null;
+    if (!frame || !m) return null;
+    const body = m[2].trim();
+    if (!body) return EMPTY_COMMAND_OUTPUT;
+    const firstLine = body.split(/\r?\n/).find((l) => l.trim().length > 0)?.trim() ?? "";
+    const excerpt = firstLine.length <= EXCERPT_MAX ? firstLine : `${firstLine.slice(0, EXCERPT_MAX - 1).trimEnd()}…`;
+    const ts = parseTime(frame.timestamp);
+    const id =
+        typeof frame.uuid === "string" && frame.uuid
+            ? `context-delivery-command-${frame.uuid}`
+            : `context-delivery-command-${typeof frame.timestamp === "string" ? frame.timestamp : "notime"}-${body.length}`;
+    return {
+        type: "context_delivery",
+        id,
+        reason: "command",
+        timestamp: Number.isNaN(ts) ? now : ts,
+        items: [
+            {
+                kind: "command_output",
+                name: m[1] === "stderr" ? "Claude Code command error output" : "Claude Code command output",
+                sizeBytes: new TextEncoder().encode(body).length,
+                tokens: estimateTokenCount(body),
+                excerpt,
+                body,
+            },
+        ],
+    };
 }
 
 /**

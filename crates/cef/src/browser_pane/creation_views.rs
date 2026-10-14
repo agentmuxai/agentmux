@@ -483,13 +483,28 @@ pub fn create_browser_pane_view(
 /// Must run on the CEF UI thread. Caller is responsible for the
 /// `post_task(ThreadId::UI, ...)` marshalling.
 pub fn resize_browser_pane_view(state: &Arc<AppState>, label: &str, rect: Rect) {
+    resize_browser_pane_view_inner(state, label, rect, true);
+}
+
+/// `resize_browser_pane_view`, without the Linux window layout when `layout`
+/// is false: the caller moves several panes and lays their window out once
+/// (`browser_panes::bounds::apply`). Returns the pane's window label if it
+/// was moved on Linux, so the caller knows which window to lay out.
+pub(crate) fn resize_browser_pane_view_inner(
+    state: &Arc<AppState>,
+    label: &str,
+    rect: Rect,
+    layout: bool,
+) -> Option<String> {
+    #[cfg(target_os = "macos")]
+    let _ = layout;
     let entry = state.browser_pane_overlays.lock().get(label).cloned();
     let Some((window_label, controller)) = entry else {
         tracing::debug!(
             label = %label,
             "[browser-pane] views: resize requested but no OverlayController found (already closed?)"
         );
-        return;
+        return None;
     };
     let pane_rect = (rect.x, rect.y, rect.width, rect.height);
     // Keep the airspace path's rect source (see `AppState::browser_pane_physical_rects`)
@@ -527,7 +542,7 @@ pub fn resize_browser_pane_view(state: &Arc<AppState>, label: &str, rect: Rect) 
         // (ANALYSIS_MACOS_WINDOW_PAINT_2026_10_10.md §6.2).
         let base = crate::browser_panes::bounds::layout_base(label);
         if crate::ui_tasks::move_shown_pane_overlay(&controller, overlay_wnum, &rect, base.as_ref()) {
-            return;
+            return None;
         }
         tracing::debug!(
             label = %label, window_label = %window_label,
@@ -544,7 +559,7 @@ pub fn resize_browser_pane_view(state: &Arc<AppState>, label: &str, rect: Rect) 
             0,
             overlay_wnum,
         );
-        return;
+        return None;
     }
 
     // On macOS, if NOT visible — just hide the overlay without a layout pass.
@@ -555,7 +570,7 @@ pub fn resize_browser_pane_view(state: &Arc<AppState>, label: &str, rect: Rect) 
             label = %label, window_label = %window_label,
             "[browser-pane] resize_browser_pane_view: set_visible(0) (not visible)"
         );
-        return;
+        None
     }
 
     // Linux: CEF Views SetSize/SetPosition work correctly.
@@ -566,6 +581,17 @@ pub fn resize_browser_pane_view(state: &Arc<AppState>, label: &str, rect: Rect) 
     // a window.layout() on the OWNING window to force the layout pass.
     #[cfg(not(target_os = "macos"))]
     {
+        let window = state.windows.lock().get(&window_label).cloned();
+        // A rect the page laid out for an older window size moves with the
+        // window (`LayoutBase`): after the host has already followed a resize,
+        // a late batch for the old size must not pull the pane back.
+        let rect = match (crate::browser_panes::bounds::layout_base(label), window.as_ref()) {
+            (Some(base), Some(w)) => {
+                let (width, height) = crate::browser_panes::bounds::window_client_px(w);
+                base.predict(&rect, width, height)
+            }
+            _ => rect,
+        };
         controller.set_size(Some(&Size { width: rect.width, height: rect.height }));
         controller.set_position(Some(&Point { x: rect.x, y: rect.y }));
         // Visibility = AND of the two independent hide reasons:
@@ -578,16 +604,23 @@ pub fn resize_browser_pane_view(state: &Arc<AppState>, label: &str, rect: Rect) 
         // Without consulting overlay-clip state here, a positive-rect resize
         // (e.g. user drags a splitter while a modal is open) would clobber
         // the airspace's set_visible(0) — Codex review on PR #881.
-        controller.set_visible(if visible { 1 } else { 0 });
-        if let Some(window) = state.windows.lock().get(&window_label).cloned() {
-            window.layout();
+        // Only on a change: re-showing a shown pane is not free.
+        let shown = if visible { 1 } else { 0 };
+        if controller.is_visible() != shown {
+            controller.set_visible(shown);
+        }
+        if layout {
+            if let Some(window) = &window {
+                window.layout();
+            }
         }
         tracing::debug!(
             label = %label, window_label = %window_label,
             x = rect.x, y = rect.y, w = rect.width, h = rect.height,
-            visible,
-            "[browser-pane] views: resize applied (set_size + set_position + visibility + layout)"
+            visible, layout,
+            "[browser-pane] views: resize applied (set_size + set_position + visibility)"
         );
+        Some(window_label)
     }
 }
 

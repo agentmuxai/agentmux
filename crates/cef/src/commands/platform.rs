@@ -16,6 +16,30 @@ pub fn get_platform() -> serde_json::Value {
     serde_json::json!(agentmux_common::platform_name::platform_name())
 }
 
+/// The window system this host's windows live in: "wayland" (native
+/// Wayland), "x11" (X11 or XWayland), "windows" or "macos".
+///
+/// The page can't tell native Wayland from X11 itself, and they differ in
+/// what a client may do: on native Wayland no client can place its own
+/// window (only the compositor moves it), and a drag dropped outside every
+/// window is animated back to where it started by the compositor.
+pub fn get_window_system() -> serde_json::Value {
+    #[cfg(target_os = "linux")]
+    {
+        // Unset when nothing was appended: an X11 session, Chromium's default.
+        let wayland = crate::app::SELECTED_OZONE_PLATFORM.get().map(String::as_str) == Some("wayland");
+        serde_json::json!(if wayland { "wayland" } else { "x11" })
+    }
+    #[cfg(target_os = "windows")]
+    {
+        serde_json::json!("windows")
+    }
+    #[cfg(target_os = "macos")]
+    {
+        serde_json::json!("macos")
+    }
+}
+
 /// Check if THIS build is a `task dev` build — resolved from the host exe
 /// PATH (`is_dev_self`), NOT `AGENTMUX_RUNTIME_MODE`. A running dev AgentMux
 /// leaks that env into descendant processes, which would otherwise flip a

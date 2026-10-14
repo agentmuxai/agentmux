@@ -69,7 +69,7 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { pathToFileURL } from "node:url";
+import { isMain } from "./lib/is-main.mjs";
 
 // The repo root, found from the working directory so the pure functions below
 // import cleanly under vitest (where import.meta.url is not a file: URL).
@@ -1003,6 +1003,6 @@ function main(argv) {
     return runGate();
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMain(import.meta.url)) {
     process.exit(main(process.argv.slice(2)));
 }

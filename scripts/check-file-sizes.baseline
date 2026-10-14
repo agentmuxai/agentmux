@@ -5,7 +5,7 @@
 3667 crates/bashwrap/src/bash_wrap.rs
 1972 crates/cef/src/client/lifecycle.rs
 1549 crates/cef/src/commands/cli_login.rs
-2225 crates/cef/src/commands/window_pool.rs
+2220 crates/cef/src/commands/window_pool.rs
 1515 crates/cef/src/lib.rs
 1643 crates/cef/src/state/mod.rs
 2205 crates/cef/src/ui_tasks/window.rs
@@ -13,8 +13,7 @@
 2267 crates/common/src/ipc.rs
 1848 crates/common/src/jekt_sign.rs
 1867 crates/launcher/src/saga/mod.rs
-3221 crates/srv/src/backend/agent_config.rs
-1677 crates/srv/src/backend/blockcontroller/acp.rs
+3197 crates/srv/src/backend/agent_config.rs
 1531 crates/srv/src/backend/blockcontroller/app_server.rs
 2647 crates/srv/src/backend/blockcontroller/app_server_protocol.rs
 1734 crates/srv/src/backend/blockcontroller/persistent/mod.rs
@@ -33,9 +32,9 @@
 2193 crates/srv/src/muxbus/cloud_subscriber.rs
 2206 crates/srv/src/persist_subscriber.rs
 1509 crates/srv/src/registry/migrate.rs
-2253 crates/srv/src/server/agent_handlers/input.rs
+2241 crates/srv/src/server/agent_handlers/input.rs
 1805 crates/srv/src/server/app_api/agent_open.rs
-1572 crates/srv/src/server/editor_handlers.rs
+1562 crates/srv/src/server/editor_handlers.rs
 2112 crates/srv/src/server/muxspect_handlers.rs
 1653 crates/srv/src/server/native_memory_handlers.rs
 2804 crates/srv/src/server/reactive.rs

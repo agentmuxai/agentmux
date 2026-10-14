@@ -1308,12 +1308,9 @@ impl Handler {
         // construction, never simultaneously "verified" on that same tier.
         //
         // `channel_verified` (SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md
-        // §D3, Phase B) joins the list on the same terms: a cross-channel
-        // signature that verified against the sender's published public
-        // key is proof of exactly who sent it. Its `Some(false)` is NOT yet
-        // among the forcing rules above — Phase C, deliberately held back
-        // until published keys have propagated (spec §6/§10) — so today
-        // this field can only ever relax, never escalate.
+        // §D3) joins on the same terms. Its `Some(false)` is not among the
+        // forcing rules above (Phase C, held until keys propagate, §6/§10),
+        // but like every failed verdict it blocks the relaxation.
         //
         // `wan_verified` (W3-S §2.6, amended 2026-09-26) joins for any
         // verified same-account install that isn't revoked — `approved` or
@@ -1325,7 +1322,10 @@ impl Handler {
         // from disk is the accepted residual, spec open question 5).
         // `revoked` is forcing, above; a verdict with no instance proves no
         // install and relaxes nothing.
-        let is_cryptographically_verified = req.sig_verified == Some(true)
+        // A FAILED check rules the relaxation out: another tier's success can't cancel it.
+        let any_failed = [req.sig_verified, req.reagent_verified, req.lan_verified, req.channel_verified, req.wan_verified].contains(&Some(false));
+        let is_cryptographically_verified = !any_failed
+            && (req.sig_verified == Some(true)
             || req.reagent_verified == Some(true)
             || req.lan_verified == Some(true)
             || req.channel_verified == Some(true)
@@ -1334,7 +1334,7 @@ impl Handler {
                 && matches!(
                     wan_instance_status,
                     Some(super::types::WanInstanceStatus::Approved | super::types::WanInstanceStatus::New)
-                ));
+                )));
         // SPEC_JEKT_TRANSCRIPT_REQUEST_TIER_RULES_2026_08_22.md rule 2: the
         // ONE named exception to the verified-sender relaxation above. A
         // transcript_request's ESCALATE=required is not relaxed by a

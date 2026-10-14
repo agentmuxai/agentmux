@@ -33,6 +33,7 @@ import { recallRuntime } from "./remembered-runtime";
 import { buildPaneArgs } from "./buildRuntimeArgs";
 import type { AgentContent, AgentDefinition, AgentSkill } from "@/app/store/rpc-api";
 import { markAgentOpen } from "./open-trace";
+import { launchResumesConversation, requestCatchUp } from "./catch-up-request";
 
 /** The agent's state behind its native pane tab (`agentPaneTabManifest`,
  *  agent-manifest.tsx). */
@@ -948,6 +949,12 @@ export class AgentViewModel {
                     "agent",
                     `direct identity link write-through failed: ${e?.message ?? String(e)}`,
                 );
+            }
+            // Picking a conversation back up (My agents, the launch modal's
+            // Continue): once the pane runs, the agent says where it is. A fork
+            // is a new branch, not a resume.
+            if (launchResumesConversation(forkSessionArgs.continueSessionId, overrides?.forkSession)) {
+                await requestCatchUp(blockId, "resumed").catch(() => {});
             }
             return true;
         } catch (e: any) {

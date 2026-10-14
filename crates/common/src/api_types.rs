@@ -366,32 +366,8 @@ pub struct InjectRequest {
     /// that LAN path, never as verified attribution.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lan_sig_v2: Option<String>,
-    /// Base64 Ed25519 signature for the general agent-to-agent WAN tier,
-    /// produced with the sender's own `AGENTMUX_WAN_KEY` — a *different* key
-    /// from `AGENTMUX_LAN_KEY` — over a domain-separated payload
-    /// (`agentmux_common::jekt_sign::sign_wan_jekt`). Sent
-    /// unconditionally for the same reason `lan_sig` and `channel_sig` are:
-    /// the sending process cannot know which tier srv will route the message
-    /// over.
-    ///
-    /// **Nothing verifies this yet.** Verification requires resolving
-    /// `(sender_account, source_agent)` to exactly one published key, which
-    /// waits on relay-side work tracked in the private cloud repo. The field
-    /// is carried now so that keys are
-    /// minted and propagating by the time a verifier exists — an agent only
-    /// gets a key when it is spawned.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub wan_sig: Option<String>,
-    /// The sending machine's host label (`AGENTMUX_HOST_LABEL`, injected at
-    /// spawn). With `source_channel` this identifies which AgentMux *instance*
-    /// under the sending account owns the keypair `wan_sig` was made with —
-    /// one account can run the same agent name on several machines, and on
-    /// several build channels of one machine, each with its own database and
-    /// therefore its own key. Bound into the signed material, so a wrong value selects a key
-    /// the signature cannot verify under rather than granting anything.
-    /// Absent whenever `wan_sig` is.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub wan_source_host: Option<String>,
+    // No WAN signature: srv signs a WAN jekt itself, at the origin, for the
+    // agent its token names (docs/specs/SPEC_WAN_JEKT_SIGNED_BY_SRV_2026_10_14.md).
 }
 
 // ── Pane ──────────────────────────────────────────────────────────────────────

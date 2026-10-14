@@ -72,6 +72,7 @@
 //   node scripts/check-new-spec-status.mjs          # added-vs-origin/main
 //   node scripts/check-new-spec-status.mjs --list   # report, never fails
 import { execFileSync } from "node:child_process";
+import { isMain } from "./lib/is-main.mjs";
 
 const args = process.argv.slice(2);
 const LIST_ONLY = args.includes("--list");
@@ -216,6 +217,6 @@ function main() {
     return violations.length ? 1 : 0;
 }
 
-if (import.meta.url === `file://${process.argv[1].replace(/\\/g, "/")}`) {
+if (isMain(import.meta.url)) {
     process.exit(main());
 }

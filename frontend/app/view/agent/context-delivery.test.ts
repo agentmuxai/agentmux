@@ -3,11 +3,17 @@
 
 import { describe, expect, it } from "vitest";
 import {
+    commandOutputNode,
     CompactionSummaryTracker,
     compactionSummaryExcerpt,
     compactionSummaryNodeId,
     contextDeliveryTitle,
+    EMPTY_COMMAND_OUTPUT,
+    isTextCard,
 } from "./context-delivery";
+import { supersededCard } from "./memory-injected";
+import { parseHistoryLines } from "./parseHistoryLines";
+import type { ContextDeliveryNode } from "./types";
 import { contextCompactedNodeId, parseCompactBoundaryFrame, type CompactBoundaryData } from "./compact-boundary";
 
 const SUMMARY = [
@@ -204,5 +210,69 @@ describe("compactionSummaryExcerpt", () => {
 
     it("returns an empty string when there's nothing but the preamble", () => {
         expect(compactionSummaryExcerpt("This session is being continued from a previous conversation.")).toBe("");
+    });
+});
+
+// The frame Claude Code wrote after a manual /compact in a live run (spec §5.2, §9 C1).
+const COMMAND_OUTPUT =
+    "<local-command-stdout>Compacted PreCompact [agentmux-bashwrap precompact --trigger=manual] completed successfully</local-command-stdout>";
+
+describe("commandOutputNode", () => {
+    const frame = (content: unknown, extra: Record<string, unknown> = {}) => ({ type: "user", message: { role: "user", content }, ...extra });
+
+    it("turns a local command's output into a card, not a user message", () => {
+        const node = commandOutputNode(frame(COMMAND_OUTPUT, { uuid: "c-1", timestamp: "2026-10-14T17:00:00.000Z" }), 0);
+        expect(node).not.toBe(EMPTY_COMMAND_OUTPUT);
+        if (!node || node === EMPTY_COMMAND_OUTPUT) throw new Error("no card");
+        expect(node).toMatchObject({ type: "context_delivery", id: "context-delivery-command-c-1", reason: "command", timestamp: Date.parse("2026-10-14T17:00:00.000Z") });
+        expect(node.items).toHaveLength(1);
+        expect(node.items[0]).toMatchObject({
+            kind: "command_output",
+            name: "Claude Code command output",
+            body: "Compacted PreCompact [agentmux-bashwrap precompact --trigger=manual] completed successfully",
+        });
+        expect(isTextCard(node)).toBe(true);
+        expect(contextDeliveryTitle(node)).toBe("Claude Code command output");
+    });
+
+    it("names error output, and drops an empty one", () => {
+        const err = commandOutputNode(frame("<local-command-stderr>Unknown command</local-command-stderr>"), 5);
+        expect(err !== EMPTY_COMMAND_OUTPUT && err?.items[0].name).toBe("Claude Code command error output");
+        expect(commandOutputNode(frame("<local-command-stdout></local-command-stdout>"), 0)).toBe(EMPTY_COMMAND_OUTPUT);
+    });
+
+    it("keeps an id without a uuid stable from the frame itself", () => {
+        const f = frame(COMMAND_OUTPUT, { timestamp: "2026-10-14T17:00:00.000Z" });
+        const a = commandOutputNode(f, 1);
+        const b = commandOutputNode(f, 2);
+        expect(a !== EMPTY_COMMAND_OUTPUT && a?.id).toBe(b !== EMPTY_COMMAND_OUTPUT && b?.id);
+    });
+
+    it("leaves anything that isn't wholly one command's output alone", () => {
+        expect(commandOutputNode(frame(`Look at this: ${COMMAND_OUTPUT}`), 0)).toBeNull();
+        expect(commandOutputNode(frame("<local-command-stdout>a</local-command-stderr>"), 0)).toBeNull();
+        expect(commandOutputNode(frame([{ type: "text", text: COMMAND_OUTPUT }]), 0)).toBeNull();
+        expect(commandOutputNode({ type: "assistant", message: { content: COMMAND_OUTPUT } }, 0)).toBeNull();
+    });
+
+    it("on replay, a compaction's command output is a card, and no user message is left", () => {
+        const lines = [
+            { type: "system", subtype: "compact_boundary", uuid: "b-9", compact_metadata: { trigger: "manual", pre_tokens: 40_000, post_tokens: 10_000 } },
+            summaryFrame(),
+            frame(COMMAND_OUTPUT, { uuid: "c-9" }),
+        ].map((l) => JSON.stringify(l));
+        const { nodes } = parseHistoryLines(lines, "claude-stream-json");
+        expect(nodes.filter((n) => n.type === "user_message")).toHaveLength(0);
+        expect(nodes.filter((n) => n.type === "context_delivery").map((n) => n.id)).toEqual([
+            expect.stringContaining("context-delivery-compaction"),
+            "context-delivery-command-c-9",
+        ]);
+    });
+
+    it("isn't replaced by a later new-session card: that session ran a command", () => {
+        const startup = (id: string): ContextDeliveryNode => ({ type: "context_delivery", id, reason: "startup", timestamp: 0, items: [] });
+        const output = commandOutputNode(frame(COMMAND_OUTPUT, { uuid: "c-2" }), 0) as ContextDeliveryNode;
+        expect(supersededCard([startup("a"), output], startup("b"))).toBeUndefined();
+        expect(supersededCard([startup("a")], startup("b"))?.id).toBe("a");
     });
 });

@@ -95,3 +95,19 @@ describe("useBlockActivity at session end", () => {
         }
     });
 });
+
+describe("the title a continued session keeps", () => {
+    it("is the restored one when the live title was cleared at the session end", async () => {
+        const { titleToRestoreOnContinue } = await import("./useBlockActivity");
+        expect(titleToRestoreOnContinue({ [META_RESTORED]: "Set up CI for the docs site" })).toBe("Set up CI for the docs site");
+        expect(titleToRestoreOnContinue({ "term:ambient_summary": null, [META_RESTORED]: "  Set up CI  " })).toBe("Set up CI");
+    });
+
+    it("is nothing when a live title exists, or none is worth restoring", async () => {
+        const { titleToRestoreOnContinue } = await import("./useBlockActivity");
+        expect(titleToRestoreOnContinue({ "term:ambient_summary": "A newer title", [META_RESTORED]: "Older" })).toBeNull();
+        expect(titleToRestoreOnContinue({ [META_RESTORED]: "(none yet)" })).toBeNull();
+        expect(titleToRestoreOnContinue({})).toBeNull();
+        expect(titleToRestoreOnContinue(undefined)).toBeNull();
+    });
+});

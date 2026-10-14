@@ -354,6 +354,30 @@ async fn a_forged_v2_settles_nothing_and_the_name_s_checks_decide() {
 }
 
 #[tokio::test]
+async fn a_uid_s_key_proves_only_the_name_and_channel_it_was_published_under() {
+    // An agent signs with its own UID key while claiming another agent's
+    // name: the key is real, the claim isn't.
+    let state = test_state();
+    let dir = tempfile::tempdir().unwrap();
+    let (private, public) = keypair(4);
+    publish_uid(dir.path(), "lark", "chan-a", "uid-lark", &public);
+    let mut req = channel_req("github-consumer", "chan-a", NOW);
+    sign_v2(&mut req, "uid-lark", &private);
+    verify_cross_channel_signature_in(&state, &mut req, dir.path(), NOW);
+    assert_ne!(req.channel_verified, Some(true), "lark's key proves lark, not github-consumer");
+    // Its own name, but another channel than the one it published in.
+    let mut other_channel = channel_req("lark", "chan-b", NOW);
+    sign_v2(&mut other_channel, "uid-lark", &private);
+    verify_cross_channel_signature_in(&state, &mut other_channel, dir.path(), NOW);
+    assert_ne!(other_channel.channel_verified, Some(true));
+    // The name it published under, in its channel, any case.
+    let mut own = channel_req("Lark", "chan-a", NOW);
+    sign_v2(&mut own, "uid-lark", &private);
+    verify_cross_channel_signature_in(&state, &mut own, dir.path(), NOW);
+    assert_eq!(own.channel_verified, Some(true));
+}
+
+#[tokio::test]
 async fn an_agent_this_instance_has_no_row_for_is_verified_by_its_uid() {
     let state = test_state();
     let dir = tempfile::tempdir().unwrap();

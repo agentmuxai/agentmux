@@ -14,6 +14,7 @@ pub mod providers;
 pub mod drag;
 pub mod tear_off_hook;
 pub mod window_pool;
+pub mod replace_page;
 pub mod pane_pool;
 pub mod startup_pools;
 pub mod clipboard;
