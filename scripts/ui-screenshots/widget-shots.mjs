@@ -58,7 +58,7 @@ const OVERRIDES = {
     },
     swarm: { marker: ".swarm-view" },
     help: { settleMs: 2500 },
-    sysinfo: { marker: ".sysinfo-plot", settleMs: 2000, description: "Live CPU and memory graphs for this computer." },
+    sysinfo: { marker: ".sysinfo-chart", settleMs: 2000, description: "Live CPU and memory graphs for this computer." },
     editor: {
         settleMs: 1500,
         afterOpen: async (session, pane) => {

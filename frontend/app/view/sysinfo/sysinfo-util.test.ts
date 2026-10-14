@@ -3,106 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import {
-    buildPlotAxisLabelOptions,
-    buildTimeTicks,
-    chooseTimeTickStepMs,
-    formatTimeTick,
-    computeAutoMaxY,
-    computeLeftMarginForTicks,
-    computePlotMargins,
-    xTickFitsBeforeRightEdge,
-    PLOT_EDGE_PAD_PX,
-    PLOT_TICK_GUTTER_PX,
-    getGapThresholdMs,
-    resolveDomainBound,
-} from "./sysinfo-util";
-
-describe("computePlotMargins", () => {
-    it("gives a sparkline the same small margin on every side", () => {
-        const m = computePlotMargins(true, false);
-        expect(m).toEqual({ marginTop: 4, marginRight: 4, marginBottom: 4, marginLeft: 4 });
-        // A sparkline hides its axis (SingleLinePlot's `axis: !sparkline`), so `title`
-        // never applies to one in practice — but the margin must not depend on it.
-        expect(computePlotMargins(true, true)).toEqual(m);
-    });
-
-    it("gives a titled panel more headroom than an untitled one, everything else equal", () => {
-        const titled = computePlotMargins(false, true);
-        const untitled = computePlotMargins(false, false);
-        expect(titled.marginTop).toBeGreaterThan(untitled.marginTop);
-        expect(titled).toMatchObject({ marginRight: untitled.marginRight, marginBottom: untitled.marginBottom, marginLeft: untitled.marginLeft });
-    });
-
-    it("runs the chart flush against the pane's right edge", () => {
-        for (const title of [true, false]) expect(computePlotMargins(false, title).marginRight).toBe(0);
-    });
-
-    it("never returns a non-positive top/bottom/left margin for a non-sparkline panel (tick text still needs room)", () => {
-        for (const title of [true, false]) {
-            const { marginTop, marginBottom, marginLeft } = computePlotMargins(false, title);
-            for (const v of [marginTop, marginBottom, marginLeft]) expect(v).toBeGreaterThan(0);
-        }
-    });
-});
-
-describe("xTickFitsBeforeRightEdge", () => {
-    // 100 s window across a 500 px wide plot with a 20 px left margin and no right margin.
-    const fits = (secsFromRight: number) =>
-        xTickFitsBeforeRightEdge(100_000 - secsFromRight * 1000, 0, 100_000, 500, 20, 0);
-
-    it("keeps a tick label with room for half its width before the right edge", () => {
-        expect(fits(50)).toBe(true);
-        expect(fits(10)).toBe(true); // 10 s = 48 px from the edge
-    });
-
-    it("hides the label of a tick so close to the flush right edge that it would be clipped", () => {
-        expect(fits(0)).toBe(false);
-        expect(fits(2)).toBe(false); // ~10 px from the edge
-    });
-
-    it("a right margin makes room: the same tick fits once the plot stops short of the edge", () => {
-        const d = 100_000 - 2000;
-        expect(xTickFitsBeforeRightEdge(d, 0, 100_000, 500, 20, 40)).toBe(true);
-    });
-
-    it("leaves a degenerate domain alone", () => {
-        expect(xTickFitsBeforeRightEdge(5, 5, 5, 500, 20, 0)).toBe(true);
-    });
-});
-
-describe("computeLeftMarginForTicks", () => {
-    it("leaves 1px between the plot's left edge and the widest y tick label (the pane adds its 1px border)", () => {
-        expect(PLOT_EDGE_PAD_PX).toBe(1);
-        // margin = edge pad + label width + the gutter Plot puts between a label and the axis
-        expect(computeLeftMarginForTicks(18)).toBe(PLOT_EDGE_PAD_PX + 18 + PLOT_TICK_GUTTER_PX);
-    });
-
-    it("rounds a fractional width up, so the label never crosses the edge", () => {
-        expect(computeLeftMarginForTicks(17.2)).toBe(PLOT_EDGE_PAD_PX + 18 + PLOT_TICK_GUTTER_PX);
-    });
-
-    it("grows with a wider label (e.g. a rate with units) and shrinks with a narrower one", () => {
-        expect(computeLeftMarginForTicks(40)).toBeGreaterThan(computeLeftMarginForTicks(18));
-        expect(computeLeftMarginForTicks(6)).toBeLessThan(computeLeftMarginForTicks(18));
-    });
-
-    it("falls back to the default left margin when nothing could be measured", () => {
-        const fallback = computePlotMargins(false, false).marginLeft;
-        for (const w of [0, NaN, -1]) expect(computeLeftMarginForTicks(w)).toBe(fallback);
-    });
-});
-
-describe("buildPlotAxisLabelOptions", () => {
-    it("turns both axis labels off: time and the unit are inferred from the ticks and title", () => {
-        // `label: null` is how Plot suppresses an axis label; `undefined`
-        // would let it fall back to the channel name ("time", "%", …).
-        expect(buildPlotAxisLabelOptions()).toEqual({ x: { label: null }, y: { label: null } });
-    });
-});
-
-// The remaining sysinfo-util exports had no test coverage anywhere in the repo
-// before this file. Added here since it's the first test file for this module.
+import { computeAutoMaxY, formatTimeTick, getGapThresholdMs, resolveDomainBound } from "./sysinfo-util";
 
 describe("resolveDomainBound", () => {
     it("passes a numeric bound straight through", () => {
@@ -158,36 +59,7 @@ describe("computeAutoMaxY", () => {
     });
 });
 
-describe("x axis time ticks", () => {
-    it("chooseTimeTickStepMs picks the smallest step that fits the tick budget", () => {
-        expect(chooseTimeTickStepMs(2 * 60_000, 6)).toBe(30_000);
-        expect(chooseTimeTickStepMs(60_000, 6)).toBe(10_000);
-        expect(chooseTimeTickStepMs(15 * 60_000, 6)).toBe(300_000);
-        expect(chooseTimeTickStepMs(60 * 60_000, 5)).toBe(900_000);
-        // Fewer than two ticks never asked for; a huge span tops out at a day.
-        expect(chooseTimeTickStepMs(10_000, 0)).toBe(5_000);
-        expect(chooseTimeTickStepMs(365 * 86_400_000, 4)).toBe(86_400_000);
-    });
-
-    it("buildTimeTicks lands on round local boundaries inside the window", () => {
-        const minX = Date.UTC(2026, 9, 13, 8, 52, 7);
-        const maxX = Date.UTC(2026, 9, 13, 8, 54, 7);
-        const ticks = buildTimeTicks(minX, maxX, 30_000, 0);
-        expect(ticks.map((t) => new Date(t).getUTCSeconds())).toEqual([30, 0, 30, 0]);
-        expect(ticks[0]).toBeGreaterThanOrEqual(minX);
-        expect(ticks[ticks.length - 1]).toBeLessThanOrEqual(maxX);
-        // A zone half an hour east puts hour ticks on its own hours.
-        const east = 30 * 60_000;
-        const hourly = buildTimeTicks(Date.UTC(2026, 0, 1, 0, 10), Date.UTC(2026, 0, 1, 4, 0), 3_600_000, east);
-        expect(hourly.map((t) => new Date(t + east).getUTCMinutes())).toEqual([0, 0, 0, 0]);
-    });
-
-    it("buildTimeTicks is empty for an empty or backwards window", () => {
-        expect(buildTimeTicks(5, 5, 1000)).toEqual([]);
-        expect(buildTimeTicks(9, 5, 1000)).toEqual([]);
-        expect(buildTimeTicks(0, 5000, 0)).toEqual([]);
-    });
-
+describe("formatTimeTick", () => {
     it("formatTimeTick shows seconds under a minute's spacing, so neighbours differ", () => {
         const t = new Date(2026, 9, 13, 8, 52, 30).getTime();
         expect(formatTimeTick(t, 30_000)).toBe("8:52:30");

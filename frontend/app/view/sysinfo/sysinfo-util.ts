@@ -36,77 +36,6 @@ export function getGapThresholdMs(configIntervalSecs: number): number {
     return Math.max(3000, intervalMs * 2.5);
 }
 
-/** Layout margins for one panel's `Plot.plot()` call, in pixels. */
-export type PlotMargins = {
-    marginTop: number;
-    marginRight: number;
-    marginBottom: number;
-    marginLeft: number;
-};
-
-/**
- * Margins tight enough for this panel's actual content, instead of trusting
- * Observable Plot's auto-computed margins — those are sized for a full-page
- * chart with room to spare, which is disproportionately wasteful on these
- * small (as little as ~100px tall) grid panels.
- *
- * A sparkline hides its axis entirely (`axis: !sparkline` in SingleLinePlot),
- * so it needs only a sliver of room to keep the hover dot/tip from clipping
- * at the edge — no tick text, no axis label.
- *
- * A titled panel (`title` — the metric name, top-left) needs enough top
- * margin to clear that text; an untitled one needs only the same sliver as a
- * sparkline's top edge.
- *
- * With no axis labels (see buildPlotAxisLabelOptions below), neither axis
- * claims a reserved band past the last tick, so marginRight/marginBottom only
- * need to fit the tick text itself. The right margin is 0: the chart ends flush
- * against the pane's edge.
- */
-export function computePlotMargins(sparkline: boolean, title: boolean): PlotMargins {
-    if (sparkline) {
-        return { marginTop: 4, marginRight: 4, marginBottom: 4, marginLeft: 4 };
-    }
-    return {
-        marginTop: title ? 16 : 6,
-        // Flush: the data runs to the pane's right edge.
-        marginRight: 0,
-        // Tick text row + axis line.
-        marginBottom: 20,
-        // Up to 3-digit tick values + a leading "-".
-        marginLeft: 30,
-    };
-}
-
-/** Gap between the plot's left edge and the widest y tick label (the pane's own 1px border adds to it). */
-export const PLOT_EDGE_PAD_PX = 1;
-/** What Plot leaves between a y tick label and the axis: tick length (6) + padding (3). */
-export const PLOT_TICK_GUTTER_PX = 9;
-
-/**
- * The left margin that puts the widest y tick label `PLOT_EDGE_PAD_PX` from the
- * pane's left edge: that padding, the label, and the tick gutter. Fed with the
- * measured width of the rendered labels, so it fits "100" (CPU) and wider ones
- * (rates with units) alike. Falls back to `computePlotMargins`' default when
- * nothing could be measured (no layout, e.g. jsdom, or a hidden pane).
- */
-export function computeLeftMarginForTicks(maxLabelWidthPx: number): number {
-    if (!Number.isFinite(maxLabelWidthPx) || maxLabelWidthPx <= 0) return computePlotMargins(false, false).marginLeft;
-    return PLOT_EDGE_PAD_PX + Math.ceil(maxLabelWidthPx) + PLOT_TICK_GUTTER_PX;
-}
-
-/**
- * x/y scale options for the axis labels: none. The ticks already say it's
- * time (clock times along x) and the panel title names the metric, so a
- * "time" / "%" label is redundant chrome in a panel this small. (#3937 had
- * moved them to the origin; the repo owner then asked for them gone.)
- * `label: null` is how Plot suppresses a label — `undefined` would fall back
- * to the channel name.
- */
-export function buildPlotAxisLabelOptions(): { x: { label: null }; y: { label: null } } {
-    return { x: { label: null }, y: { label: null } };
-}
-
 /**
  * Compute a dynamic (auto-scaled) y-max for a metric with no natural
  * ceiling (network/disk throughput) or one where the fixed ceiling wastes
@@ -149,59 +78,6 @@ export function computeAutoMaxY(
         padded = Math.min(padded, hardCap);
     }
     return padded;
-}
-
-/** Half the width of the widest x tick label ("12:59 AM"), plus a px of clearance. */
-const X_TICK_HALF_LABEL_PX = 26;
-
-/**
- * Whether the tick at time `d` has room for its (centred) label before the
- * plot's right edge. With the chart flush against the pane (marginRight 0), the
- * last tick can sit closer to the edge than half its label is wide, which cuts
- * the label off ("9:41 A"); such a tick's label is left blank instead.
- */
-export function xTickFitsBeforeRightEdge(
-    d: number,
-    minX: number,
-    maxX: number,
-    width: number,
-    marginLeft: number,
-    marginRight: number
-): boolean {
-    if (!(maxX > minX)) return true;
-    const x = marginLeft + ((d - minX) / (maxX - minX)) * (width - marginLeft - marginRight);
-    return width - x >= X_TICK_HALF_LABEL_PX;
-}
-
-/** Candidate spacings for x ticks, in seconds: whole seconds, minutes and hours. */
-const TIME_TICK_STEPS_S = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600, 7200, 14400, 21600, 43200, 86400];
-
-/**
- * The tick spacing (ms) for a window `spanMs` wide: the smallest candidate that
- * leaves at most `maxTicks` ticks, so a 2-minute window gets 15 s or 30 s ticks
- * and a 15-minute one gets minute ticks.
- */
-export function chooseTimeTickStepMs(spanMs: number, maxTicks: number): number {
-    const max = Math.max(2, Math.floor(maxTicks));
-    for (const s of TIME_TICK_STEPS_S) {
-        if (spanMs / (s * 1000) <= max) return s * 1000;
-    }
-    return TIME_TICK_STEPS_S[TIME_TICK_STEPS_S.length - 1] * 1000;
-}
-
-/**
- * Tick times (ms) inside [minX, maxX] on round local-clock boundaries of
- * `stepMs` (:00, :15, :30, ...), so labels read "8:52:30" rather than whatever
- * millisecond the window happens to start on. `tzOffsetMs` is the local zone's
- * offset from UTC (east positive), so hour-sized steps land on local hours.
- */
-export function buildTimeTicks(minX: number, maxX: number, stepMs: number, tzOffsetMs = 0): number[] {
-    if (!(maxX > minX) || !(stepMs > 0)) return [];
-    const ticks: number[] = [];
-    for (let t = Math.ceil((minX + tzOffsetMs) / stepMs) * stepMs - tzOffsetMs; t <= maxX; t += stepMs) {
-        ticks.push(t);
-    }
-    return ticks;
 }
 
 /** A tick's label: seconds when ticks are closer than a minute apart, else hours and minutes. */

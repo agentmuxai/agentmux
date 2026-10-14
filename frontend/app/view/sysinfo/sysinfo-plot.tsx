@@ -2,27 +2,34 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import * as Plot from "@observablehq/plot";
-import dayjs from "dayjs";
-import * as htl from "htl";
-import type { JSX } from "solid-js";
-import { batch, createEffect, createSignal, onCleanup, onMount } from "solid-js";
-import { throttle } from "throttle-debounce";
+/**
+ * One Sysinfo chart, drawn by uPlot on a canvas. It is built once and given new
+ * data with `setData` on each update, instead of a new SVG every time, so a
+ * busy pane costs a redraw, not a rebuild. What it draws (the series, window,
+ * range and labels) comes from sysinfo-chart.ts.
+ * docs/reports/REPORT_SYSINFO_REWRITE_AND_MODERN_MONITOR_2026_10_13.md section 5.2.
+ */
 
+import type { JSX } from "solid-js";
+import { createEffect, createSignal, on, onCleanup, onMount, Show } from "solid-js";
+import { throttle } from "throttle-debounce";
+import uPlot from "uplot";
+
+import { appliedWindowTheme } from "@/app/store/window-appearance";
+
+import "uplot/dist/uPlot.min.css";
 import "./sysinfo-plot.scss";
 
-import type { DataItem } from "./sysinfo-types";
 import {
-    buildPlotAxisLabelOptions,
-    buildTimeTicks,
-    chooseTimeTickStepMs,
-    computeAutoMaxY,
-    computeLeftMarginForTicks,
-    computePlotMargins,
-    formatTimeTick,
-    resolveDomainBound,
-    xTickFitsBeforeRightEdge,
-} from "./sysinfo-util";
+    formatValue,
+    resolveCssColor,
+    timeAxisLabels,
+    toAlignedData,
+    withAlpha,
+    xWindowSecs,
+    yRange,
+} from "./sysinfo-chart";
+import type { DataItem } from "./sysinfo-types";
 
 type SingleLinePlotProps = {
     plotData: Array<DataItem>;
@@ -34,276 +41,181 @@ type SingleLinePlotProps = {
     sparkline?: boolean;
     targetLen: number;
     intervalSecs: number;
+    /** Charts with the same key move one crosshair together. */
+    syncKey?: string;
 };
 
-// Module-level counter so each SingleLinePlot instance gets a unique gradient
-// id even if two instances with the same blockId+yval briefly coexist in the
-// DOM during dock/float transitions. Document-scoped SVG ids conflict across
-// SVGs; a per-instance suffix prevents the wrong gradient being resolved.
-let _gradientSeq = 0;
+/** At most one resize per this many ms while the pane is being dragged. */
+const CHART_RESIZE_MS = 100;
+/** Least room per x label, so a narrow pane gets fewer of them. */
+const X_LABEL_SPACE_PX = 80;
 
-/** At most one chart rebuild per this many ms while its pane is resizing. */
-const CHART_RESIZE_REDRAW_MS = 100;
-
-/** Width in px of the widest y-axis tick label in a rendered plot; 0 if it can't be measured. */
-function widestYTickLabel(plot: Element): number {
-    let widest = 0;
-    for (const t of Array.from(plot.querySelectorAll('[aria-label="y-axis tick label"] text'))) {
-        const w = (t as SVGGraphicsElement).getBBox?.().width ?? 0;
-        if (w > widest) widest = w;
+/** Width of a y axis that fits its widest label (uPlot's own sizing recipe). */
+function yAxisSize(self: uPlot, values: string[] | null, axisIdx: number, cycleNum: number): number {
+    const axis = self.axes[axisIdx];
+    if (cycleNum > 1) return (axis as any)._size;
+    let size = (axis.ticks?.size ?? 0) + (axis.gap ?? 0);
+    const longest = (values ?? []).reduce((a, v) => (v.length > a.length ? v : a), "");
+    if (longest !== "") {
+        self.ctx.font = (axis as any).font[0];
+        size += self.ctx.measureText(longest).width / devicePixelRatio;
     }
-    return widest;
-}
-
-/** Least width per x tick label, so a narrow pane gets fewer, wider-spaced ticks. */
-const TIME_TICK_MIN_SPACING_PX = 80;
-
-/** Class on every chart's SVG; sysinfo-plot.scss carries Plot's rules for it. */
-const PLOT_CLASS = "sysinfo-plot";
-
-/**
- * Ready a freshly drawn plot before it enters the document.
- *
- * Plot puts a `<style>` in every SVG it draws. A chart redrawn as its pane
- * resizes then changed the document's stylesheets each time, and now and then
- * that invalidated every font on the page and relaid out the whole tab in the
- * middle of a window drag. Those rules are in sysinfo-plot.scss instead.
- * The drawing stretches with its SVG between throttled redraws.
- */
-export function preparePlotSvg(plot: Element): void {
-    plot.querySelector(":scope > style")?.remove();
-    plot.setAttribute("preserveAspectRatio", "none");
+    return Math.ceil(size);
 }
 
 function SingleLinePlot(props: SingleLinePlotProps): JSX.Element {
-    let containerRef!: HTMLDivElement;
-    const [plotWidth, setPlotWidth] = createSignal(0);
-    const [plotHeight, setPlotHeight] = createSignal(0);
-    // Stable unique id for this component instance — set once, never changes.
-    const gradientId = `gradient-${props.blockId}-${props.yval}-${++_gradientSeq}`;
+    let container!: HTMLDivElement;
+    let tip!: HTMLDivElement;
+    let chart: uPlot | null = null;
+    const [size, setSize] = createSignal({ width: 0, height: 0 });
+    // What the scales read; updated before each setData.
+    let xWindow: [number, number] = [0, 1];
+    let yWindow: [number, number] = [0, 100];
+
+    const unit = () => props.yvalMeta?.label ?? "";
+    const decimals = () => props.yvalMeta?.decimalPlaces ?? 0;
+
+    const showTip = (u: uPlot) => {
+        const idx = u.cursor.idx;
+        const y = idx == null ? null : (u.data[1][idx] as number | null);
+        if (idx == null || y == null || props.sparkline) {
+            tip.style.display = "none";
+            return;
+        }
+        const ts = (u.data[0][idx] as number) * 1000;
+        tip.textContent = `${new Date(ts).toLocaleTimeString()}  ${formatValue(y, decimals(), unit())}`;
+        tip.style.display = "block";
+        tip.style.left = `${u.over.offsetLeft + (u.cursor.left ?? 0)}px`;
+        tip.style.top = `${Math.max(0, u.over.offsetTop + u.valToPos(y, "y") - 30)}px`;
+    };
+
+    const options = (width: number, height: number): uPlot.Options => {
+        const color = resolveCssColor(container, props.yvalMeta?.color || props.defaultColor);
+        const muted = resolveCssColor(container, "var(--grey-text-color)");
+        const grid = { stroke: withAlpha(muted, 0.25), width: 1 };
+        const ticks = { stroke: withAlpha(muted, 0.4), width: 1, size: 4 };
+        return {
+            width,
+            height,
+            legend: { show: false },
+            cursor: {
+                // Only the time is shared: each chart has its own y scale, and by
+                // default uPlot would also draw the hovered chart's y value on the others.
+                sync: props.syncKey ? { key: props.syncKey, scales: ["x", null] } : undefined,
+                drag: { x: false, y: false },
+                points: { size: 6, fill: color },
+            },
+            scales: {
+                x: { time: true, range: () => xWindow },
+                y: { range: () => yWindow },
+            },
+            axes: props.sparkline
+                ? [{ show: false }, { show: false }]
+                : [
+                      {
+                          stroke: muted,
+                          grid,
+                          ticks,
+                          space: X_LABEL_SPACE_PX,
+                          values: (_u, splits, _axisIdx, _space, incr) => timeAxisLabels(splits, incr),
+                      },
+                      {
+                          stroke: muted,
+                          grid,
+                          ticks,
+                          size: yAxisSize,
+                          values: (_u, splits) => splits.map((v) => formatValue(v, decimals(), "")),
+                      },
+                  ],
+            series: [
+                {},
+                {
+                    label: props.yvalMeta?.name ?? props.yval,
+                    stroke: color,
+                    width: 2,
+                    // A missing sample is a break in the line and the area.
+                    spanGaps: false,
+                    points: { show: false },
+                    fill: (u: uPlot) => {
+                        const g = u.ctx.createLinearGradient(0, u.bbox.top, 0, u.bbox.top + u.bbox.height);
+                        g.addColorStop(0, withAlpha(color, 0.7));
+                        g.addColorStop(1, withAlpha(color, 0));
+                        return g;
+                    },
+                },
+            ],
+            hooks: { setCursor: [(u) => showTip(u)] },
+        };
+    };
+
+    const windows = () => {
+        const rows = props.plotData ?? [];
+        const win = xWindowSecs(rows, props.targetLen, props.intervalSecs);
+        if (win) xWindow = win;
+        yWindow = yRange(rows, props.yval, props.yvalMeta);
+        return toAlignedData(rows, [props.yval]);
+    };
+
+    const build = () => {
+        chart?.destroy();
+        chart = null;
+        const { width, height } = size();
+        if (width <= 0 || height <= 0) return;
+        chart = new uPlot(options(width, height), windows(), container);
+    };
 
     onMount(() => {
-        if (!containerRef) return;
-        // A trailing timer here held the chart at its old size for a whole
-        // window drag (SPEC_WINDOW_RESIZE_NO_PAINT_DELAY_2026_09_24.md §4.2).
-        // Redrawing on every tick instead cost ~8 ms a frame, since Plot builds
-        // a new SVG each time. So a drag redraws at most every
-        // CHART_RESIZE_REDRAW_MS, first and last size included, and the drawn
-        // SVG stretches to the pane in between (see the effect below).
-        // One batch, so the chart effect runs once for both dimensions.
-        const resize = throttle(CHART_RESIZE_REDRAW_MS, (width: number, height: number) => {
-            batch(() => {
-                setPlotWidth(width);
-                setPlotHeight(height);
-            });
-        });
-        const rszObs = new ResizeObserver((entries) => {
+        const resize = throttle(CHART_RESIZE_MS, (width: number, height: number) => setSize({ width, height }));
+        const observer = new ResizeObserver((entries) => {
             const rect = entries[entries.length - 1].contentRect;
-            resize(rect.width, rect.height);
+            resize(Math.floor(rect.width), Math.floor(rect.height));
         });
-        rszObs.observe(containerRef);
+        observer.observe(container);
         onCleanup(() => {
-            rszObs.disconnect();
+            observer.disconnect();
             resize.cancel();
+            chart?.destroy();
+            chart = null;
         });
     });
 
-    createEffect(() => {
-        const {
-            plotData,
-            yval,
-            yvalMeta,
-            blockId,
-            defaultColor,
-            title = false,
-            sparkline = false,
-            targetLen,
-            intervalSecs,
-        } = props;
-        const pw = plotWidth();
-        const ph = plotHeight();
+    // A new chart when what it draws changes (metric, color, axes, or the
+    // theme, whose colors the canvas resolved when it was built), or when it
+    // has none yet; otherwise only a new size, or new data.
+    createEffect(
+        on(
+            [
+                () => props.yval,
+                () => props.yvalMeta,
+                () => props.defaultColor,
+                () => props.sparkline,
+                appliedWindowTheme,
+            ],
+            () => build(),
+            { defer: true }
+        )
+    );
+    createEffect(
+        on(size, (s) => {
+            if (!chart) build();
+            else chart.setSize(s);
+        })
+    );
+    createEffect(
+        on([() => props.plotData, () => props.targetLen, () => props.intervalSecs], () => chart?.setData(windows()), {
+            defer: true,
+        })
+    );
 
-        if (!containerRef) return;
-        // Remove previously appended plots
-        while (containerRef.firstChild) {
-            containerRef.removeChild(containerRef.firstChild);
-        }
-
-        if (plotData == null || plotData.length === 0) return;
-
-        const marks: Plot.Markish[] = [];
-        const decimalPlaces = yvalMeta?.decimalPlaces ?? 0;
-        let color = yvalMeta?.color;
-        if (!color) color = defaultColor;
-
-        marks.push(
-            () => htl.svg`<defs>
-      <linearGradient id="${gradientId}" gradientTransform="rotate(90)">
-        <stop offset="0%" stop-color="${color}" stop-opacity="0.7" />
-        <stop offset="100%" stop-color="${color}" stop-opacity="0" />
-      </linearGradient>
-        </defs>`
-        );
-
-        marks.push(
-            Plot.lineY(plotData, {
-                stroke: color,
-                strokeWidth: 2,
-                x: "ts",
-                y: yval,
-            })
-        );
-
-        // y1/y2, not y: with `y` alone Plot stacks the area, and its stack turns a
-        // missing value (NaN) into the baseline, so every gap was drawn as a drop to
-        // 0 and a diagonal climb back. An explicit baseline leaves NaN undefined, so
-        // the area breaks where the line does.
-        marks.push(
-            Plot.areaY(plotData, {
-                fill: `url(#${gradientId})`,
-                x: "ts",
-                y1: 0,
-                y2: yval,
-            })
-        );
-
-        if (title) {
-            marks.push(
-                Plot.text([yvalMeta?.name], {
-                    frameAnchor: "top-left",
-                    dx: 4,
-                    fill: "var(--grey-text-color)",
-                })
-            );
-        }
-
-        const labelY = yvalMeta?.label ?? "?";
-        // Gap markers carry NaN, which the hover marks would show as "NaN%".
-        const hoverData = plotData.filter((d) => !d.blank);
-        marks.push(
-            Plot.ruleX(
-                hoverData,
-                Plot.pointerX({
-                    x: "ts",
-                    py: yval,
-                    stroke: "var(--grey-text-color)",
-                    strokeWidth: 1,
-                    strokeDasharray: 2,
-                })
-            )
-        );
-        marks.push(
-            Plot.ruleY(
-                hoverData,
-                Plot.pointerX({
-                    px: "ts",
-                    y: yval,
-                    stroke: "var(--grey-text-color)",
-                    strokeWidth: 1,
-                    strokeDasharray: 2,
-                })
-            )
-        );
-        marks.push(
-            Plot.tip(
-                hoverData,
-                Plot.pointerX({
-                    x: "ts",
-                    y: yval,
-                    fill: "var(--main-bg-color)",
-                    anchor: "middle",
-                    dy: -30,
-                    title: (d: any) =>
-                        `${dayjs.unix(d.ts / 1000).format("h:mm:ss A")} ${Number(d[yval]).toFixed(decimalPlaces)}${labelY}`,
-                    textPadding: 3,
-                })
-            )
-        );
-        marks.push(
-            Plot.dot(
-                hoverData,
-                Plot.pointerX({ x: "ts", y: yval, fill: color, r: 3, stroke: "var(--main-text-color)", strokeWidth: 1 })
-            )
-        );
-
-        // Dynamic (auto-scaled) max for metrics with no natural ceiling
-        // (network/disk) or a fixed ceiling that wastes most of the chart
-        // when actual usage sits well below it (memory) — see
-        // computeAutoMaxY's own doc comment and
-        // docs/reports/REPORT_SYSINFO_COMBINED_CHART_RESEARCH_2026_08_17.md.
-        // CPU keeps its fixed 0-100 (autoMaxY unset): auto-scaling an
-        // already-bounded percentage would make ordinary noise read as
-        // dramatic spikes.
-        const hardCapY = resolveDomainBound(yvalMeta?.maxy, plotData[plotData.length - 1]);
-        const maxY = yvalMeta?.autoMaxY
-            ? computeAutoMaxY(plotData, yval, yvalMeta?.autoMaxYFloor ?? 1, hardCapY)
-            : (hardCapY ?? 100);
-        const minY = resolveDomainBound(yvalMeta?.miny, plotData[plotData.length - 1]) ?? 0;
-        const maxX = plotData[plotData.length - 1].ts;
-        const minX = maxX - targetLen * intervalSecs * 1000;
-
-        // `nice: true` rounds the computed domain OUTWARD to human-friendly
-        // tick values (e.g. 0-87 -> 0-100) — good for an uncapped autoMaxY
-        // metric (network/disk), where there's no physical ceiling to
-        // violate. Disabled specifically when a hard cap is in effect
-        // (memory's mem:total): nicing can push the rendered axis max past
-        // the cap, visually showing headroom that doesn't exist and
-        // defeating computeAutoMaxY's hard-cap guarantee (reagentx P1 on PR
-        // #2638). CPU's fixed [0, 100] doesn't need nicing either way — a
-        // round domain already.
-        const niceY = yvalMeta?.autoMaxY && hardCapY == null;
-
-        // Tight, panel-appropriate margins and no axis labels — see
-        // computePlotMargins/buildPlotAxisLabelOptions for the rationale.
-        const margins = computePlotMargins(sparkline, title);
-        const axisLabels = buildPlotAxisLabelOptions();
-
-        const tickStepMs = chooseTimeTickStepMs(maxX - minX, (pw - margins.marginLeft) / TIME_TICK_MIN_SPACING_PX);
-        const tzOffsetMs = -new Date(maxX).getTimezoneOffset() * 60000;
-        const xTicks = buildTimeTicks(minX, maxX, tickStepMs, tzOffsetMs);
-
-        const buildPlot = (marginLeft: number) => {
-            const plot = Plot.plot({
-                className: PLOT_CLASS,
-                axis: !sparkline,
-                ...margins,
-                marginLeft,
-                x: {
-                    grid: true,
-                    ...axisLabels.x,
-                    ticks: xTicks,
-                    tickFormat: (d: number) =>
-                        xTickFitsBeforeRightEdge(d, minX, maxX, pw, marginLeft, margins.marginRight)
-                            ? formatTimeTick(d, tickStepMs)
-                            : "",
-                    domain: [minX, maxX],
-                },
-                y: { ...axisLabels.y, domain: [minY, maxY], nice: niceY },
-                width: pw,
-                height: ph,
-                marks: marks,
-            });
-            preparePlotSvg(plot);
-            return plot;
-        };
-        let plot = buildPlot(margins.marginLeft);
-        containerRef.append(plot);
-        if (!sparkline) {
-            // Fit the left margin to the labels as actually rendered, so the
-            // widest sits PLOT_EDGE_PAD_PX from the pane's edge. One refit only.
-            const fitted = computeLeftMarginForTicks(widestYTickLabel(plot));
-            if (Math.abs(fitted - margins.marginLeft) >= 1) {
-                const refit = buildPlot(fitted);
-                containerRef.replaceChild(refit, plot);
-                plot = refit;
-            }
-        }
-        onCleanup(() => {
-            plot.remove();
-        });
-    });
-
-    return <div ref={containerRef!} class="min-h-[100px]" />;
+    return (
+        <div class="sysinfo-chart min-h-[100px]">
+            <Show when={props.title && props.yvalMeta?.name}>
+                <div class="sysinfo-chart-title">{props.yvalMeta?.name}</div>
+            </Show>
+            <div ref={container} class="sysinfo-chart-canvas" />
+            <div ref={tip} class="sysinfo-chart-tip" style={{ display: "none" }} />
+        </div>
+    );
 }
 
 export { SingleLinePlot };
