@@ -117,7 +117,7 @@ Still to measure on CEF 154 (they decide §5 change 1): whether `close_browser` 
 - If §4 shows that `close_browser` on a blanked Views window does fire `OnBeforeClose` on CEF 154, use that instead, and destroy parked windows beyond the cap.
 
 **2. Don't let a recycle keep the old page (done).**
-- Demote and park-and-blank navigate with `location.replace` (`replace_page` in `commands/window_pool.rs`), not `load_url`. Verified in §4.2; the host's `--disable-features` list is unchanged, so browser panes keep the cache.
+- Demote and park-and-blank navigate with `location.replace` (`replace_page` in `crates/cef/src/commands/replace_page.rs`), not `load_url`. Verified in §4.2; the host's `--disable-features` list is unchanged, so browser panes keep the cache. `replace_page` falls back to `load_url` when the page can't navigate itself: a target that isn't http(s) or `about:blank` (Chromium blocks a page-initiated top-frame navigation to the install-broken `data:` page), or a frame with no live renderer, which runs no script.
 
 **3. Recycle within a bound.**
 - A recycled renderer above a size threshold (2× a fresh pool window's private working set, measured at demote from the renderer map) isn't demoted. It's parked and blanked, freeing most of its high-water mark.
