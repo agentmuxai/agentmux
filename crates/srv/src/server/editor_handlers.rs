@@ -1552,21 +1552,11 @@ mod tests {
         assert_eq!(env["AGENTMUX_AGENT_ID"], "aria");
         assert!(env["AGENTMUX_JEKT_KEY"].is_string() && !env["AGENTMUX_JEKT_KEY"].as_str().unwrap().is_empty());
         assert!(env["AGENTMUX_LAN_KEY"].is_string() && !env["AGENTMUX_LAN_KEY"].as_str().unwrap().is_empty());
-        // The WAN key must be
-        // injected on this path too. This assertion is the whole point of the
-        // report cited above: the Launch-button path silently skipped key
-        // injection for months while `agent.open` did it correctly.
-        assert!(env["AGENTMUX_WAN_KEY"].is_string() && !env["AGENTMUX_WAN_KEY"].as_str().unwrap().is_empty());
-        assert_ne!(env["AGENTMUX_WAN_KEY"], env["AGENTMUX_LAN_KEY"], "WAN and LAN keys must be independent");
-        // §2.1.2: the WAN signature binds the sending instance, so the host
-        // label must travel with the key. A missing one would make the sender
-        // sign under a different instance identity than srv publishes.
-        // W3-S §2.2: the id of the instance that certifies the key.
-        assert_eq!(
-            env["AGENTMUX_HOST_LABEL"],
-            serde_json::json!(wan.instance_ensure("unused").unwrap().instance_id),
-            "the MCP env must carry the instance id that certifies this agent's WAN key"
-        );
+        // No WAN key on this path either (SPEC_WAN_JEKT_SIGNED_BY_SRV_2026_10_14.md):
+        // srv signs WAN jekts, and the key it uses is minted in wan.db here.
+        assert!(env.get("AGENTMUX_WAN_KEY").is_none());
+        assert!(env.get("AGENTMUX_HOST_LABEL").is_none());
+        assert!(wan.agent_key_load("aria").unwrap().is_some());
 
     }
 }

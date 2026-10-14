@@ -106,92 +106,93 @@ pub(crate) struct WanCarried {
 const MAX_CARRIED_SIG_CHARS: usize = 128;
 const MAX_CARRIED_ID_CHARS: usize = 256;
 
-/// The relay carry gate (§2.1): the tuple rides the relay only if **every**
-/// condition holds; otherwise the message is relayed exactly as before, with
-/// nothing carried, so every gap degrades to "unsigned", never to a false
-/// forgery alarm at the receiver. `Err` names the first condition that
-/// failed, for debug logging only.
+/// Sign a WAN jekt at the instance that relays it, for the agent its token
+/// names (`docs/specs/SPEC_WAN_JEKT_SIGNED_BY_SRV_2026_10_14.md` §3). The
+/// tuple rides the relay only if **every** condition holds; otherwise the
+/// message is relayed exactly as before, with nothing carried, so every gap
+/// degrades to "unsigned", never to a false forgery alarm at the receiver.
+/// `Err` names the first condition that failed, for the "queued" log line.
 ///
-/// 1. The sender proved itself on this host (`sig_verified == Some(true)`):
-///    a local process holding the auth key can't launder a captured
-///    `wan_sig` through the relay. Do not drop this gate.
-/// 2. The signed instance and channel are this install's own.
-/// 3. The signature verifies locally under the agent's key in `wan.db`
-///    (a key purged by an agent delete fails here).
-/// 4. The directory this relay sends into — this relay plus the signed-in
-///    account (`wan_publish::directory_id`) — is confirmed to hold that key,
-///    so a receiver can find it. A key published under another account or
-///    relay doesn't count: after a sign-in there, the signature would name a
-///    key the receiver can't fetch.
-/// 5. Both ids are well-formed and every field is within the cloud's caps.
-pub(crate) fn wan_carry_gate(
+/// 1. `signer` is the jekt's `source_agent`, established by the caller from
+///    the request's own agent token (`actor::uid_has_slug`), and only at the
+///    origin: a forwarded hop has no token, so `None`. Do not drop this gate:
+///    without it, any local process holding the instance key could have srv
+///    sign as any agent.
+/// 2. `wan.db` holds the agent's key, and the directory this relay sends
+///    into (this relay plus the signed-in account,
+///    `wan_publish::directory_id`) is confirmed to hold it, so a receiver can
+///    find it. A key published under another account or relay doesn't count.
+/// 3. Both ids are well-formed and every field is within the cloud's caps.
+///
+/// Every signed field but the message and target is srv's own: its instance,
+/// its channel, its clock. A `wan_sig`, host or timestamp in the request body
+/// is not read (agents signed these themselves before; see the spec §2).
+pub(crate) fn wan_sign_at_origin(
     req: &crate::backend::reactive::types::InjectionRequest,
+    signer: Option<&str>,
     wan: Option<&crate::backend::storage::wan_identity::WanIdentityStore>,
     directory: Option<&str>,
     local_channel: &str,
+    now_secs: i64,
 ) -> Result<WanCarried, &'static str> {
     use crate::backend::reactive::sanitize::validate_agent_id;
 
     let wan = wan.ok_or("no wan.db")?;
-    let sig = req.wan_sig.as_deref().ok_or("unsigned")?;
-    if req.sig_verified != Some(true) {
-        return Err("sender not host-verified");
+    // 1
+    let source = req.source_agent.as_deref().filter(|s| !s.is_empty()).ok_or("no source agent")?;
+    if signer != Some(source) {
+        return Err(if signer.is_none() { "no agent token" } else { "token names another agent" });
     }
-    let source = req.source_agent.as_deref().ok_or("no source agent")?;
-    let msg_id = req.request_id.as_deref().ok_or("no msgid")?;
-    let ts_secs = req.ts_secs.ok_or("no signed timestamp")?;
-    let host = req.wan_source_host.as_deref().ok_or("no instance")?;
-    let channel = req.source_channel.as_deref().ok_or("no channel")?;
-
+    // The caller's id when it sent one (the MCP does), else a fresh one: the
+    // receiver's replay check only needs it unique per sender.
+    let minted;
+    let msg_id = match req.request_id.as_deref().filter(|s| !s.is_empty()) {
+        Some(id) => id,
+        None => {
+            minted = uuid::Uuid::new_v4().to_string();
+            &minted
+        }
+    };
     // 2
-    let instance = wan
-        .instance_ensure(&crate::backend::reactive::registry::local_host_label())
-        .map_err(|_| "no instance")?;
-    if host != instance.instance_id {
-        return Err("signed for another instance");
-    }
-    if channel != local_channel {
-        return Err("signed for another channel");
-    }
-    // 3
     let key = wan.agent_key_load(source).ok().flatten().ok_or("no key in wan.db")?;
-    let public = key.public_key_bytes().ok_or("malformed key")?;
-    if !agentmux_common::jekt_sign::verify_wan_jekt(
-        &public,
-        msg_id,
-        source,
-        host,
-        channel,
-        &req.target_agent,
-        ts_secs,
-        &req.message,
-        sig,
-    ) {
-        return Err("signature does not verify locally");
-    }
-    // 4
     let directory = directory.ok_or("no account to publish under")?;
     if !wan.agent_key_is_published_to(source, &key, directory).unwrap_or(false) {
         return Err("key not published to this directory");
     }
-    // 5
+    // 3
     if !validate_agent_id(source) || !validate_agent_id(&req.target_agent) {
         return Err("malformed agent id");
     }
-    if sig.len() > MAX_CARRIED_SIG_CHARS
-        || [msg_id, host, channel].iter().any(|s| s.len() > MAX_CARRIED_ID_CHARS)
-        || ts_secs <= 0
-    {
+    let instance = wan
+        .instance_ensure(&crate::backend::reactive::registry::local_host_label())
+        .map_err(|_| "no instance")?;
+    if [msg_id, &instance.instance_id, local_channel].iter().any(|s| s.len() > MAX_CARRIED_ID_CHARS) || now_secs <= 0 {
+        return Err("over the cloud's caps");
+    }
+    let public = key.public_key_bytes().ok_or("malformed key")?;
+    let private = agentmux_common::jekt_sign::decode_key(&key.private_key).ok_or("malformed key")?;
+    let sig = agentmux_common::jekt_sign::sign_wan_jekt(
+        &private,
+        msg_id,
+        source,
+        &instance.instance_id,
+        local_channel,
+        &req.target_agent,
+        now_secs,
+        &req.message,
+    )
+    .ok_or("malformed key")?;
+    if sig.len() > MAX_CARRIED_SIG_CHARS {
         return Err("over the cloud's caps");
     }
     Ok(WanCarried {
-        wan_sig: sig.to_string(),
+        wan_sig: sig,
         wan_msg_id: msg_id.to_string(),
-        wan_ts_secs: ts_secs,
+        wan_ts_secs: now_secs,
         wan_source_agent: source.to_string(),
         wan_target_agent: req.target_agent.clone(),
-        wan_source_host: host.to_string(),
-        wan_source_channel: channel.to_string(),
+        wan_source_host: instance.instance_id,
+        wan_source_channel: local_channel.to_string(),
         wan_key_fp: agentmux_common::jekt_sign::wan_key_fingerprint(&public),
     })
 }
@@ -632,50 +633,43 @@ mod tests {
         assert_eq!(settled_account("acct-a".into(), None), "", "logged out mid-way");
     }
 
-    fn signed_request() -> (tempfile::TempDir, WanIdentityStore, InjectionRequest) {
-        use base64::Engine as _;
+    const NOW: i64 = 1_790_000_000;
+
+    /// A jekt from "camper" to "agent2", as srv holds it at the origin, with
+    /// camper's key in wan.db and published.
+    fn origin_request() -> (tempfile::TempDir, WanIdentityStore, InjectionRequest) {
         let dir = tempfile::tempdir().unwrap();
         let wan = WanIdentityStore::open(&dir.path().join("wan.db")).unwrap();
-        let instance = wan.instance_ensure("narko").unwrap();
         let key = wan.agent_key_ensure("camper", None).unwrap();
         wan.agent_key_mark_published("camper", &key.public_key, TEST_DIR).unwrap();
-        let private = base64::engine::general_purpose::STANDARD.decode(&key.private_key).unwrap();
-        let sig = agentmux_common::jekt_sign::sign_wan_jekt(
-            &private, "msg-1", "camper", &instance.instance_id, "stable", "agent2", 1_790_000_000, "hello",
-        )
-        .unwrap();
         let req = InjectionRequest {
             target_agent: "agent2".into(),
             message: "hello".into(),
             source_agent: Some("camper".into()),
             request_id: Some("msg-1".into()),
-            ts_secs: Some(1_790_000_000),
-            sig_verified: Some(true),
-            wan_sig: Some(sig),
-            wan_source_host: Some(instance.instance_id.clone()),
-            source_channel: Some("stable".into()),
             ..Default::default()
         };
         (dir, wan, req)
     }
 
     #[test]
-    fn a_signed_host_verified_published_message_is_carried_as_signed() {
-        let (_dir, wan, req) = signed_request();
-        let carried = wan_carry_gate(&req, Some(&wan), Some(TEST_DIR), "stable").expect("every condition holds");
+    fn srv_signs_for_the_agent_its_token_names_and_a_receiver_can_check_it() {
+        let (_dir, wan, req) = origin_request();
+        let carried = wan_sign_at_origin(&req, Some("camper"), Some(&wan), Some(TEST_DIR), "stable", NOW)
+            .expect("every condition holds");
+        let instance = wan.instance_ensure(&crate::backend::reactive::registry::local_host_label()).unwrap();
         let key = wan.agent_key_load("camper").unwrap().unwrap();
-        assert_eq!(carried.wan_sig, req.wan_sig.clone().unwrap());
         assert_eq!(carried.wan_msg_id, "msg-1");
-        assert_eq!(carried.wan_ts_secs, 1_790_000_000);
+        assert_eq!(carried.wan_ts_secs, NOW, "srv's clock");
         assert_eq!(carried.wan_source_agent, "camper");
         assert_eq!(carried.wan_target_agent, "agent2");
-        assert_eq!(carried.wan_source_channel, "stable");
+        assert_eq!(carried.wan_source_host, instance.instance_id, "srv's own instance");
+        assert_eq!(carried.wan_source_channel, "stable", "srv's own channel");
         assert_eq!(
             carried.wan_key_fp,
             agentmux_common::jekt_sign::wan_key_fingerprint(&key.public_key_bytes().unwrap())
         );
         // What a receiver will reconstruct verifies against the published record.
-        let instance = wan.instance_ensure("narko").unwrap();
         let record = crate::muxbus::wan_publish::certify(&instance, "camper", "stable", &key).unwrap();
         let view = agentmux_common::jekt_sign::WanCarried {
             sig: &carried.wan_sig,
@@ -688,62 +682,77 @@ mod tests {
             key_fp: &carried.wan_key_fp,
         };
         assert_eq!(agentmux_common::jekt_sign::verify_wan_against_record(&view, &record, "hello"), Ok(()));
+        assert!(
+            agentmux_common::jekt_sign::verify_wan_against_record(&view, &record, "hello!").is_err(),
+            "the signature covers the message"
+        );
     }
 
     #[test]
-    fn each_carry_condition_failing_in_turn_sends_the_message_unsigned() {
-        type Mutation = Box<dyn Fn(&mut InjectionRequest, &WanIdentityStore)>;
-        let cases: Vec<(&str, Mutation)> = vec![
-            ("unsigned", Box::new(|r, _| r.wan_sig = None)),
-            // 1: a local process with the auth key but not the agent's host key.
-            ("not host-verified", Box::new(|r, _| r.sig_verified = None)),
-            ("host verification failed", Box::new(|r, _| r.sig_verified = Some(false))),
-            // 2: an agent spawned before D1 signs its hostname, not the instance id.
-            ("hostname instead of instance id", Box::new(|r, _| r.wan_source_host = Some("narko".into()))),
-            ("another channel", Box::new(|r, _| r.source_channel = Some("beta".into()))),
-            // 3
-            ("tampered message", Box::new(|r, _| r.message = "hello!".into())),
-            ("retargeted", Box::new(|r, _| r.target_agent = "lark".into())),
-            ("key purged by an agent delete", Box::new(|_, w| {
-                w.agent_keys_delete(&["camper".to_string()]).unwrap();
-            })),
-            // 4: re-minted key, not yet published.
-            ("key not published", Box::new(|r, w| {
-                use base64::Engine as _;
-                w.agent_keys_delete(&["camper".to_string()]).unwrap();
-                let key = w.agent_key_ensure("camper", None).unwrap();
-                let private = base64::engine::general_purpose::STANDARD.decode(&key.private_key).unwrap();
-                r.wan_sig = agentmux_common::jekt_sign::sign_wan_jekt(
-                    &private, "msg-1", "camper", r.wan_source_host.as_deref().unwrap(), "stable", "agent2",
-                    1_790_000_000, "hello",
-                );
-            })),
-            ("no signed timestamp", Box::new(|r, _| r.ts_secs = None)),
-            ("no msgid", Box::new(|r, _| r.request_id = None)),
-        ];
-        for (name, mutate) in cases {
-            let (_dir, wan, mut req) = signed_request();
-            mutate(&mut req, &wan);
-            assert!(wan_carry_gate(&req, Some(&wan), Some(TEST_DIR), "stable").is_err(), "{name} was carried");
-        }
-        // And with no wan.db at all.
-        let (_dir, _wan, req) = signed_request();
-        assert_eq!(wan_carry_gate(&req, None, Some(TEST_DIR), "stable"), Err("no wan.db"));
-        // 4, after a sign-in to another account or relay: published there
-        // under the old one only, or no account at all.
-        let (_dir, wan, req) = signed_request();
+    fn a_request_with_no_id_is_signed_under_a_fresh_one() {
+        // `muxsh agent send` sends none.
+        let (_dir, wan, mut req) = origin_request();
+        req.request_id = None;
+        let a = wan_sign_at_origin(&req, Some("camper"), Some(&wan), Some(TEST_DIR), "stable", NOW).unwrap();
+        let b = wan_sign_at_origin(&req, Some("camper"), Some(&wan), Some(TEST_DIR), "stable", NOW).unwrap();
+        assert!(!a.wan_msg_id.is_empty());
+        assert_ne!(a.wan_msg_id, b.wan_msg_id, "unique per send, so the receiver's replay check passes");
+    }
+
+    #[test]
+    fn what_a_caller_puts_in_the_body_is_not_what_srv_signs() {
+        let (_dir, wan, mut req) = origin_request();
+        // An agent (or an older MCP) supplying its own signature, instance,
+        // channel and time: none of it is read.
+        req.wan_sig = Some("forged".into());
+        req.wan_source_host = Some("another-instance".into());
+        req.source_channel = Some("beta".into());
+        req.ts_secs = Some(1);
+        let carried = wan_sign_at_origin(&req, Some("camper"), Some(&wan), Some(TEST_DIR), "stable", NOW).unwrap();
+        assert_ne!(carried.wan_sig, "forged");
+        assert_ne!(carried.wan_source_host, "another-instance");
+        assert_eq!((carried.wan_source_channel.as_str(), carried.wan_ts_secs), ("stable", NOW));
+    }
+
+    #[test]
+    fn each_condition_failing_in_turn_sends_the_message_unsigned() {
+        let sign = |req: &InjectionRequest, signer: Option<&str>, wan: Option<&WanIdentityStore>, dir: Option<&str>| {
+            wan_sign_at_origin(req, signer, wan, dir, "stable", NOW).err()
+        };
+        let (_dir, wan, req) = origin_request();
+        // 1: no token (a terminal's muxsh, a script, a forwarded hop) ...
+        assert_eq!(sign(&req, None, Some(&wan), Some(TEST_DIR)), Some("no agent token"));
+        // ... or a token naming another agent than the jekt's source.
+        assert_eq!(sign(&req, Some("agent5"), Some(&wan), Some(TEST_DIR)), Some("token names another agent"));
+        let mut sourceless = req.clone();
+        sourceless.source_agent = None;
+        assert_eq!(sign(&sourceless, Some("camper"), Some(&wan), Some(TEST_DIR)), Some("no source agent"));
+        // 2
+        assert_eq!(sign(&req, Some("camper"), None, Some(TEST_DIR)), Some("no wan.db"));
+        assert_eq!(sign(&req, Some("camper"), Some(&wan), None), Some("no account to publish under"));
         assert_eq!(
-            wan_carry_gate(&req, Some(&wan), Some("https://relay.test#another-account"), "stable"),
-            Err("key not published to this directory")
+            sign(&req, Some("camper"), Some(&wan), Some("https://relay.test#another-account")),
+            Some("key not published to this directory")
         );
-        assert_eq!(wan_carry_gate(&req, Some(&wan), None, "stable"), Err("no account to publish under"));
+        wan.agent_keys_delete(&["camper".to_string()]).unwrap();
+        assert_eq!(sign(&req, Some("camper"), Some(&wan), Some(TEST_DIR)), Some("no key in wan.db"));
+        // A re-minted key isn't published yet.
+        wan.agent_key_ensure("camper", None).unwrap();
+        assert_eq!(
+            sign(&req, Some("camper"), Some(&wan), Some(TEST_DIR)),
+            Some("key not published to this directory")
+        );
+        // 3
+        let (_dir, wan, mut bad) = origin_request();
+        bad.target_agent = "not a name!".into();
+        assert_eq!(sign(&bad, Some("camper"), Some(&wan), Some(TEST_DIR)), Some("malformed agent id"));
     }
 
     #[tokio::test]
     async fn the_carried_tuple_rides_the_body_and_its_absence_keeps_the_old_shape() {
         let (url, seen, _g) = stub_relay(axum::http::StatusCode::OK, r#"{"success":true}"#).await;
-        let (_dir, wan, req) = signed_request();
-        let carried = wan_carry_gate(&req, Some(&wan), Some(TEST_DIR), "stable").unwrap();
+        let (_dir, wan, req) = origin_request();
+        let carried = wan_sign_at_origin(&req, Some("camper"), Some(&wan), Some(TEST_DIR), "stable", NOW).unwrap();
         let _ = relay_inject(&url, &reqwest::Client::new(), "tok", "camper", "agent2", "hello", "normal", Some(&carried))
             .await;
         {
@@ -755,7 +764,7 @@ mod tests {
             ] {
                 assert!(body.get(field).is_some(), "{field} missing from the relay body");
             }
-            assert_eq!(body["wan_ts_secs"], serde_json::json!(1_790_000_000));
+            assert_eq!(body["wan_ts_secs"], serde_json::json!(NOW));
         }
 
         let _ = relay_inject(&url, &reqwest::Client::new(), "tok", "camper", "agent2", "hello", "normal", None).await;

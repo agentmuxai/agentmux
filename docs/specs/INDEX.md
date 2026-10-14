@@ -513,6 +513,7 @@ partial list.
 | [`SPEC_TYPED_EVENT_PAYLOADS_2026_10_13`](SPEC_TYPED_EVENT_PAYLOADS_2026_10_13.md) | Typed event payloads |
 | [`SPEC_UI_MANUAL_SCREENSHOT_TOOLING_2026_09_19`](SPEC_UI_MANUAL_SCREENSHOT_TOOLING_2026_09_19.md) | SPEC: Reusable, cropped screenshot tooling for the user manual |
 | [`SPEC_USER_INPUT_VISIBILITY_AND_STARTUP_COLLAPSE_2026_05_24`](SPEC_USER_INPUT_VISIBILITY_AND_STARTUP_COLLAPSE_2026_05_24.md) | SPEC: User input visibility + startup-injection collapse |
+| [`SPEC_WAN_JEKT_SIGNED_BY_SRV_2026_10_14`](SPEC_WAN_JEKT_SIGNED_BY_SRV_2026_10_14.md) | SPEC: srv signs WAN jekts for the agent its token names |
 | [`SPEC_WEBFETCH_CONTENT_VIEW_2026_06_22`](SPEC_WEBFETCH_CONTENT_VIEW_2026_06_22.md) | SPEC: WebFetch content view |
 | [`SPEC_WIDGET_BAR_PARENT_SUBMENUS_2026_08_12`](SPEC_WIDGET_BAR_PARENT_SUBMENUS_2026_08_12.md) | SPEC: Widget bar parent widgets (grouped submenus) |
 | [`SPEC_WIDGET_DEFAULT_PANE_COLORS_2026_10_05`](SPEC_WIDGET_DEFAULT_PANE_COLORS_2026_10_05.md) | SPEC: a default color for every widget type, set per widget in Settings |

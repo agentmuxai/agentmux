@@ -814,6 +814,7 @@ pub(crate) async fn deliver(
     // Identity M4c-2d: the sender's UID, for the audit entry only — never
     // forwarded (`#[serde(skip)]`).
     req.audit_source_uid = caller_uid.to_string();
+    super::actor::source_from_token(&state.mstore, caller_uid, &mut req);
     // Identity M4d-6: the signed source_uid is the sender's to set; this srv
     // only counts one that isn't the UID its token named.
     if !caller_uid.is_empty() && req.source_uid.as_deref().is_some_and(|s| s != caller_uid) {
@@ -1436,23 +1437,22 @@ async fn try_cloud_relay(state: &AppState, req: &InjectionRequest) -> Option<ser
     };
 
     let priority = req.priority.as_deref().unwrap_or("normal");
-    // W3-S (SPEC_WAN_JEKT_VERIFICATION_2026_09_24.md §2.1): carry the
-    // sender's WAN signature as signed, but only through the carry gate —
-    // any unmet condition relays unsigned, exactly as before.
-    // The gate's refusal reason rides on the "queued" line below: a
-    // signature that silently fails to ride is otherwise invisible, and the
-    // receiver can't tell it from a sender that never signed.
-    // The directory this send goes into: this relay plus the account of the
-    // credential it's sent with. The publisher binds each publication to the
-    // same id.
+    // SPEC_WAN_JEKT_SIGNED_BY_SRV_2026_10_14.md: srv signs, here at the
+    // origin, for the agent the request's own token names (`wan_signer`).
+    // Any unmet condition relays unsigned, as before; the reason rides on
+    // the "queued" line below, or the receiver can't tell it from a sender
+    // that never signed. The directory this send goes into: this relay plus
+    // the account of the credential it's sent with.
     let directory = Some(credential.account_sub.as_str())
         .filter(|sub| !sub.is_empty())
         .map(|sub| crate::muxbus::wan_publish::directory_id(&crate::muxbus::relay::rest_base_url(), sub));
-    let (carried, unsigned_reason) = match crate::muxbus::relay::wan_carry_gate(
+    let (carried, unsigned_reason) = match crate::muxbus::relay::wan_sign_at_origin(
         req,
+        super::actor::wan_signer(&state.mstore, req),
         state.mstore.wan_identity().as_deref(),
         directory.as_deref(),
         &crate::backend::reactive::registry::local_channel_id(),
+        agentmux_common::time::now_secs(),
     ) {
         Ok(carried) => (Some(carried), ""),
         Err(reason) => (None, reason),
