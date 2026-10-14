@@ -81,7 +81,7 @@ describe("agent-pane-layout store", () => {
         dispatch(BID, { type: "RowMeasured", nodeId: "a", state: "expanded", cssPx: 200 });
         expect(layout.mock.calls.length).toBe(before);
         // …and when the row is later expanded, the cached expanded height applies.
-        dispatch(BID, { type: "UserExpanded", nodeId: "a" });
+        dispatch(BID, { type: "ExpansionResolved", nodeId: "a", to: { open: true, via: "pin" } });
         expect(layout.mock.calls.at(-1)![0].rows[0].height).toBe(200);
     });
 
