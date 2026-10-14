@@ -245,9 +245,7 @@ async fn handle_connection(stream: NamedPipeServer, ctx: Arc<ServerCtx>) {
 
         let events = {
             let mut state = ctx.state.lock().await;
-            let rctx = reducer::Ctx {
-                registered_pid,
-            };
+            let rctx = reducer::Ctx::new(registered_pid);
             reducer::update(&mut state, cmd.clone(), &rctx)
         };
 
@@ -311,9 +309,7 @@ async fn dispatch_synthetic_goodbye(
     };
     let events = {
         let mut state = ctx.state.lock().await;
-        let rctx = reducer::Ctx {
-            registered_pid: Some(pid),
-        };
+        let rctx = reducer::Ctx::new(Some(pid));
         reducer::update(&mut state, Command::Goodbye, &rctx)
     };
     for event in events {

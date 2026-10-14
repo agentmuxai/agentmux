@@ -70,7 +70,7 @@ Phase 1) — the generated profile includes a stanza for their fixed
 `/opt/agentmux/bin/agentmux-cef` install path, and the helper script ships
 alongside the binary there.
 
-**The portable `.tar.gz` is NOT covered.** It has no fixed install path by
+**The portable `.tar.xz` is NOT covered.** It has no fixed install path by
 design (extract anywhere) — a static AppArmor profile fundamentally can't
 name a location that doesn't exist yet. "Fix it now" fails gracefully with
 an error (re-shows the dialog rather than crashing or claiming false
@@ -143,7 +143,7 @@ Opening a second instance sends an `open_new_window` command to the running laun
 "Produced by CI builder (`agentmuxai/agentmux-builder`) only" —
 `agentmuxai/agentmux-builder` does not exist in the org and never did as far
 as this repo's history shows; that line was stale since at least
-2026-06-06. `.deb` (and a portable `.tar.gz`) are now built by this repo's
+2026-06-06. `.deb` (and a portable `.tar.xz`, a `.tar.gz` through v0.59.24) are now built by this repo's
 own `build-linux.yml` / `task package:linux:deb` / `task package:linux:tarball`
 — see the Package formats section below.
 
@@ -154,7 +154,7 @@ own `build-linux.yml` / `task package:linux:deb` / `task package:linux:tarball`
 | AppImage | `task package:linux` | Extract-and-run, no install step | Primary format; self-registers a desktop entry on first launch via `install-linux-desktop.sh` |
 | `.deb` | `task package:linux:deb` | `sudo apt install ./AgentMux_<version>_amd64.deb` (or `sudo dpkg -i`) | Installs to `/opt/agentmux`, wrapper at `/usr/bin/agentmux`. Built via [`fpm`](https://github.com/jordansissel/fpm); requires `gem install fpm` for local builds |
 | `.rpm` | `task package:linux:rpm` | `sudo rpm -i AgentMux-<version>-1.x86_64.rpm` (or `sudo dnf install ./AgentMux-<version>-1.x86_64.rpm`) | Same `/opt/agentmux` install layout as the `.deb`. Built via `fpm`; also requires `rpmbuild` (`apt-get install rpm` on Debian/Ubuntu, or `dnf install rpm-build` on Fedora) |
-| `.tar.gz` | `task package:linux:tarball` | Extract, run `./AgentMux/agentmux.sh` | No install step, no packaging tool dependency — closest Linux equivalent to the Windows portable .7z |
+| `.tar.xz` | `task package:linux:tarball` | Extract, run `./AgentMux/agentmux.sh` | No install step, no packaging tool dependency — closest Linux equivalent to the Windows portable .7z |
 
 All four formats are built from the identical staged runtime
 ([`scripts/stage-linux-runtime.sh`](../scripts/stage-linux-runtime.sh)) — same binaries, same CEF runtime, same

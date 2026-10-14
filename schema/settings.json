@@ -558,6 +558,10 @@
           "default": true,
           "description": "While an agent pane follows the conversation, text only moves up: nothing overshoots and scrolls back, and a tool preview that gets shorter leaves room at the bottom for the next content instead of pulling the conversation down. Set false to restore the previous behaviour (the glide and the shrink hold). Takes effect when a pane is next opened. See docs/specs/SPEC_AGENT_PANE_ONE_WAY_FLOW_2026_10_07.md."
         },
+        "agent:followcontroller": {
+          "type": "boolean",
+          "description": "Agent panes decide whether to follow the conversation with one state machine: only your own scroll up (wheel, keys, scrollbar, a text selection) stops following, and scrolling back to the bottom or sending a message starts it again. Unset: on in development builds, off in releases until it has been soak-tested. Set false to restore the previous follow logic. Takes effect when a pane is next opened. See docs/specs/SPEC_AGENT_PANE_SCROLL_FOLLOW_STATE_MACHINE_2026_09_24.md."
+        },
         "agent:livefeed": {
           "type": "boolean",
           "default": true,

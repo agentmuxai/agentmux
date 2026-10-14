@@ -1,7 +1,7 @@
 # SPEC: Pane tabs as reducer commands — one writer for "which blocks are in which pane"
 
 **Date:** 2026-09-18
-**Status:** active — Phase 0 implemented in #3414; Phase 1 partly implemented in #3424 (§4); Phases 2–3 not started.
+**Status:** active — Phase 0 implemented in #3414; Phase 1 in #3424, #3441 (`LayoutStackMove`) and this PR (tab switch/close commands with `actionid` dedup, I1); Phase 2 (`layout_revision`) in this PR; Phase 3 (the invariant reaper and loud logging) not started. Verified against code 2026-10-14 ([triage](../analysis/REPORT_REDUCER_STACK_TRIAGE_2026_10_13.md)).
 **Author:** AgentA@Area54
 **Related:** [`docs/specs/SPEC_AGENT_PANE_CLOSE_GRACEFUL_SHUTDOWN_2026_09_18.md`](SPEC_AGENT_PANE_CLOSE_GRACEFUL_SHUTDOWN_2026_09_18.md)
 (§6 names this as its follow-up; its orphan reaper, §4.9, is the backstop for
@@ -158,6 +158,9 @@ New `Command`s, each applied to the reducer's tree for the tab, each emitting a
 Addressing by block id, not node id, on purpose: node ids are frontend-minted
 and change across a reload's rebuild; block ids don't.
 
+*As built:* `LayoutStackRemove` is `LayoutDeleteNodeByBlock`, which already had
+these semantics since Phase 0 (§3.4); no second command was added.
+
 ### 3.3 Frontend: intents, applied optimistically
 
 `layoutStack.ts` keeps its local edit (so the tab strip reacts instantly) and
@@ -202,6 +205,27 @@ from undoing a stack change it never saw:
 This is narrower than a general conflict resolver. Only stack membership is
 merged; everything else keeps last-writer-wins, as today.
 
+*As built (refuse and resync, not merge on srv):*
+- **The revision.** `TabRecord::layout_revision` is bumped once per batch
+  of queued pending actions (every queued action, not only stack ones: a stale
+  push erases any action it never saw from the queue it replaces). Each action
+  carries it as `rev`, and the layout row stores it as `layoutrevision`, so it
+  survives a restart.
+- **The push.** The frontend echoes `layoutrevision` with each push: the
+  stored row's, advanced through the revisions its own commands were queued
+  at (`pushBaseRevision`, `layoutPersistence.ts`).
+- **The refusal.** A push built on an older revision is refused before it is
+  dispatched (`reducer::layout::stale_push_revision`, checked in
+  `update_layout_via_reducer` under the reducer lock). Nothing is applied.
+  The answer is `{stale, layoutrevision}` plus the row as stored.
+- **The resync.** The frontend applies the actions it missed from that row,
+  then pushes again on the newer revision: its own edits are still in its
+  tree.
+- **Why not merge on srv.** Re-applying actions on srv would need a srv copy
+  of every frontend action handler (insert and split included), and the
+  reducer would hold a tree without the member until then.
+- **Older clients.** A push with no `layoutrevision` skips the check.
+
 ### 3.6 One rule for "which tab becomes visible"
 
 `LayoutStackRemove`'s neighbour choice is the single implementation. The
@@ -233,12 +257,24 @@ pending-action verbs and handler (§3.3), unified neighbour rule (§3.6), I1/I2 
   used to pick the first live member.
 - **I2:** checked as `STACK_*` in `validate_layout_invariants`.
 
-*Not yet:*
-- tab switches and closes sent as commands with `actionid` de-duplication
-  (§3.3);
-- I1, which needs the tab's `block_ids` as well as the tree.
+*Phase 1, the rest (this PR):*
+- **Commands.** `pane.activateTab` (`LayoutStackActivate`) and
+  `pane.removeTab` (`LayoutDeleteNodeByBlock`); `pane.moveTab` now takes an
+  `action_id` too.
+- **Queued actions.** Each command queues its pending action (`stackactivate`,
+  `delete`, `stackmove`) under the action id the frontend minted, and answers
+  with the revision it was queued at.
+- **De-duplication.** `setActiveBlockInStack`, `closeBlockInStack` and
+  `moveBlockInStack` send them beside their local edit (`sendStackCommand`)
+  and record the id as processed, so the frontend that sent one skips its
+  copy. A tab close is out of srv's pane before `ClosePane` deletes the block.
+- **I1.** The tree half, "a block is in at most one pane", is
+  `BLOCK_IN_TWO_PANES` in `validate_layout_invariants`. The other half,
+  "in at least one", is `backend::layout::unplaced_blocks`. It is not checked
+  at every write: a block on its way into a pane is briefly unplaced.
 
-**Phase 2 — stale-push protection (§3.5).**
+**Phase 2 — stale-push protection (§3.5).** Implemented in this PR; see §3.5,
+"As built".
 
 **Phase 3 — enforce.** The pane-close spec's reaper uses I1 to find orphans;
 `validate_layout_invariants` violations are logged loudly with the tab and
@@ -277,4 +313,7 @@ Each must fail on today's code:
 2. Floating (torn-off) windows have their own tab context. Does I1 hold for
    them unchanged, or do they need their own rule?
 3. Should `layout_revision` (§3.5) reuse the layout object's existing `version`
-   field? It is currently ignored on this path.
+   field? It is currently ignored on this path. *Answered: no.* `version` is
+   bumped by every row write, including the frontend's own pushes, so a second
+   push sent before the first one's answer would be refused as stale. The
+   revision counts only queued backend actions.

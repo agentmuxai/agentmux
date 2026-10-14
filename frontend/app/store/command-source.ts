@@ -66,6 +66,28 @@ const [recordsAtom, setRecordsAtom] = createSignal<ReadonlyArray<DispatchRecord>
 
 export const dispatchRecordsAtom: Accessor<ReadonlyArray<DispatchRecord>> = recordsAtom;
 
+/** Strings longer than this are dropped from a recorded command or event. */
+const MAX_RECORDED_STRING = 200;
+
+/**
+ * A command or event as the log keeps it: its scalar fields only (type,
+ * ids, counts, flags, short strings). The log is for diagnostics — the panel
+ * shows a command's type and its event count — and keeping whole commands
+ * kept every node array, history restore and tool result that passed
+ * through for 500 dispatches after the pane had let it go
+ * (SPEC_AGENT_PANE_TOOL_OUTPUT_RETENTION_2026_10_13.md §2.7).
+ */
+export function summarizeForLog(value: unknown): unknown {
+    if (value == null || typeof value !== "object") return value;
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+        if (typeof v === "number" || typeof v === "boolean") out[k] = v;
+        else if (typeof v === "string" && v.length <= MAX_RECORDED_STRING) out[k] = v;
+        else if (Array.isArray(v)) out[k + "Count"] = v.length;
+    }
+    return out;
+}
+
 /**
  * Append a dispatch to the global log. Called by each slice's dispatch
  * function. Trims to RING_CAPACITY by dropping oldest first.
@@ -77,11 +99,16 @@ export function recordDispatch(record: DispatchRecord): void {
     // Without this, the read+write pair on `recordsAtom` causes the
     // outer effect to re-run on every dispatch — observed as a
     // ~3000× runaway and renderer V8-stack crash on the storm path.
+    const kept: DispatchRecord = {
+        ...record,
+        command: summarizeForLog(record.command),
+        events: record.events.map(summarizeForLog),
+    };
     untrack(() => {
         const prev = recordsAtom();
         const next = prev.length >= RING_CAPACITY
-            ? [...prev.slice(prev.length - RING_CAPACITY + 1), record]
-            : [...prev, record];
+            ? [...prev.slice(prev.length - RING_CAPACITY + 1), kept]
+            : [...prev, kept];
         setRecordsAtom(next);
     });
 }

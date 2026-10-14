@@ -47,7 +47,9 @@ pub fn create_window(
 /// If workspace_id is empty, creates workspace + tab + window + updates client
 /// all in one BEGIN/COMMIT — reducing 8+ lock acquisitions and fsyncs to 1.
 ///
-/// Returns the created Window.
+/// Returns the created Window. Production creates windows through the
+/// reducer (`server/service/window_create.rs`); tests use this to seed rows.
+#[cfg(test)]
 pub fn create_window_full(
     store: &Store,
     workspace_id: &str,
@@ -135,32 +137,6 @@ pub fn create_window_full(
     })
 }
 
-/// Close a window and remove from client's window list.
-/// Cascades cleanup through workspace → tabs → blocks, killing all shell processes.
-pub fn close_window(store: &Store, window_id: &str) -> Result<(), StoreError> {
-    // Cascade: kill all shell processes in this window's workspace
-    if let Ok(window) = store.must_get::<Window>(window_id) {
-        if let Ok(workspace) = store.must_get::<Workspace>(&window.workspaceid) {
-            let all_tab_ids: Vec<String> = workspace
-                .tabids
-                .iter()
-                .chain(workspace.pinnedtabids.iter())
-                .cloned()
-                .collect();
-            for tab_id in &all_tab_ids {
-                let _ = super::tab::delete_tab_inner(store, tab_id);
-            }
-            let _ = store.delete::<Workspace>(&window.workspaceid);
-        }
-    }
-
-    let mut client = get_client(store)?;
-    client.windowids.retain(|id| id != window_id);
-    store.update(&mut client)?;
-    store.delete::<Window>(window_id)?;
-    Ok(())
-}
-
 /// Focus a window (move to front of client's window list).
 pub fn focus_window(store: &Store, window_id: &str) -> Result<(), StoreError> {
     let mut client = get_client(store)?;
@@ -169,21 +145,6 @@ pub fn focus_window(store: &Store, window_id: &str) -> Result<(), StoreError> {
         client.windowids.insert(0, id);
         store.update(&mut client)?;
     }
-    Ok(())
-}
-
-/// Switch a window to a different workspace.
-pub fn switch_workspace(
-    store: &Store,
-    window_id: &str,
-    ws_id: &str,
-) -> Result<(), StoreError> {
-    // Verify workspace exists
-    let _ = store.must_get::<Workspace>(ws_id)?;
-
-    let mut window = store.must_get::<Window>(window_id)?;
-    window.workspaceid = ws_id.to_string();
-    store.update(&mut window)?;
     Ok(())
 }
 

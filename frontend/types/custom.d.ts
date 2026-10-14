@@ -381,9 +381,7 @@ declare global {
         maximizeWindow: () => void;
         toggleDevtools: () => void;
         inspectElementAt: (x: number, y: number) => void;
-        setWindowTransparency: (transparent: boolean, blur: boolean, opacity: number) => void;
         setWindowOpacity: (label: string, opacity: number) => Promise<void>;
-        getWindowOpacity: (label: string) => Promise<number>;
         getWindowLabel: () => Promise<string>;
         isMainWindow: () => Promise<boolean>;
         registerBackendWindow: (label: string, windowId: string) => void;

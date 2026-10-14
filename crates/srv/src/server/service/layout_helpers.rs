@@ -143,6 +143,7 @@ pub(crate) async fn queue_target_stack_push(
 /// since `CreateBlockInStack` always activates; this one carries the
 /// caller's actual `activate` value since a reorder may or may not).
 /// SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §4.1, Phase 3.
+/// Returns the `layout_revision` it was queued at.
 pub(crate) async fn queue_target_stack_move(
     state: &super::super::AppState,
     tab_id: &str,
@@ -150,10 +151,11 @@ pub(crate) async fn queue_target_stack_move(
     target_block_id: &str,
     position: &str,
     activate: bool,
-) -> Result<(), String> {
+    action_id: &str,
+) -> Result<u64, String> {
     let action = LayoutActionData {
         actiontype: "stackmove".to_string(),
-        actionid: uuid::Uuid::new_v4().to_string(),
+        actionid: action_id_or_new(action_id),
         blockid: block_id.to_string(),
         nodesize: None,
         nodesizefraction: None,
@@ -164,7 +166,49 @@ pub(crate) async fn queue_target_stack_move(
         targetblockid: target_block_id.to_string(),
         position: position.to_string(),
     };
-    super::reducer_helpers::queue_layout_actions_via_reducer(state, tab_id, vec![action]).await
+    super::reducer_helpers::queue_layout_actions_at_revision(state, tab_id, vec![action]).await
+}
+
+/// Tell the frontend that `block_id` became the visible tab of its pane
+/// (`Command::LayoutStackActivate`). Matches
+/// `LayoutTreeActionType.StackActivate = "stackactivate"`. Returns the
+/// `layout_revision` it was queued at.
+pub(crate) async fn queue_stack_activate(
+    state: &super::super::AppState,
+    tab_id: &str,
+    block_id: &str,
+    action_id: &str,
+) -> Result<u64, String> {
+    let action = LayoutActionData {
+        actiontype: "stackactivate".to_string(),
+        actionid: action_id_or_new(action_id),
+        ..source_delete_action(block_id)
+    };
+    super::reducer_helpers::queue_layout_actions_at_revision(state, tab_id, vec![action]).await
+}
+
+/// Tell the frontend that `block_id` left its pane (one tab of a stack, or the
+/// pane with its last tab): the `delete` action, under the caller's id.
+/// Returns the `layout_revision` it was queued at.
+pub(crate) async fn queue_stack_remove(
+    state: &super::super::AppState,
+    tab_id: &str,
+    block_id: &str,
+    action_id: &str,
+) -> Result<u64, String> {
+    let action = LayoutActionData { actionid: action_id_or_new(action_id), ..source_delete_action(block_id) };
+    super::reducer_helpers::queue_layout_actions_at_revision(state, tab_id, vec![action]).await
+}
+
+/// The id a frontend minted for its own command, so that frontend skips the
+/// queued copy (`processedActionIds`, layoutPersistence.ts); a fresh one when
+/// it sent none or an unusable one.
+fn action_id_or_new(action_id: &str) -> String {
+    if action_id.is_empty() || action_id.len() > 64 {
+        uuid::Uuid::new_v4().to_string()
+    } else {
+        action_id.to_string()
+    }
 }
 
 /// Phase 4b/4c — enqueue a directional split action on the TARGET tab's

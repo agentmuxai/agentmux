@@ -156,6 +156,7 @@ import type { CommandNativeMemoryWriteFileData } from "@/types/rpc/CommandNative
 import type { CommandNextPromptSuggestionData } from "@/types/rpc/CommandNextPromptSuggestionData";
 import type { CommandPaneMoveTabData } from "@/types/rpc/CommandPaneMoveTabData";
 import type { CommandPaneOpenData } from "@/types/rpc/CommandPaneOpenData";
+import type { CommandPaneTabData } from "@/types/rpc/CommandPaneTabData";
 import type { CommandReadEditorFileData } from "@/types/rpc/CommandReadEditorFileData";
 import type { CommandReadEditorFileResult } from "@/types/rpc/CommandReadEditorFileResult";
 import type { CommandRemoteAddData } from "@/types/rpc/CommandRemoteAddData";
@@ -190,6 +191,7 @@ import type { CommandUpdateAgentInstanceData } from "@/types/rpc/CommandUpdateAg
 import type { CommandUpdateAgentSkillData } from "@/types/rpc/CommandUpdateAgentSkillData";
 import type { CommandUpsertBundleData } from "@/types/rpc/CommandUpsertBundleData";
 import type { CommandViewerAgentHiddenData } from "@/types/rpc/CommandViewerAgentHiddenData";
+import type { CommandViewerCanSendData } from "@/types/rpc/CommandViewerCanSendData";
 import type { CommandViewerRevokeData } from "@/types/rpc/CommandViewerRevokeData";
 import type { CommandVoiceCheckPathData } from "@/types/rpc/CommandVoiceCheckPathData";
 import type { CommandWriteAgentConfigData } from "@/types/rpc/CommandWriteAgentConfigData";
@@ -322,6 +324,7 @@ import type { NotifyTakeActivationResult } from "@/types/rpc/NotifyTakeActivatio
 import type { OAuthSessionReq } from "@/types/rpc/OAuthSessionReq";
 import type { OpenInShellReq } from "@/types/rpc/OpenInShellReq";
 import type { PaneOpenResult } from "@/types/rpc/PaneOpenResult";
+import type { PaneTabEditResult } from "@/types/rpc/PaneTabEditResult";
 import type { PollProviderAuthReq } from "@/types/rpc/PollProviderAuthReq";
 import type { PollSessionResult } from "@/types/rpc/PollSessionResult";
 import type { PresencePublishNowResult } from "@/types/rpc/PresencePublishNowResult";
@@ -388,6 +391,7 @@ import type { UnlinkAgentIdentityResult } from "@/types/rpc/UnlinkAgentIdentityR
 import type { UnwatchMediaDirReq } from "@/types/rpc/UnwatchMediaDirReq";
 import type { ValidationReport } from "@/types/rpc/ValidationReport";
 import type { ViewerAgentHiddenResult } from "@/types/rpc/ViewerAgentHiddenResult";
+import type { ViewerCanSendResult } from "@/types/rpc/ViewerCanSendResult";
 import type { ViewerDevicesResult } from "@/types/rpc/ViewerDevicesResult";
 import type { ViewerPairStartResult } from "@/types/rpc/ViewerPairStartResult";
 import type { ViewerRevokeResult } from "@/types/rpc/ViewerRevokeResult";
@@ -1634,8 +1638,16 @@ export const GeneratedApi = {
     return client.rpcCall("pane.open", data, opts);
   },
   // command "pane.moveTab"
-  PaneMoveTabCommand(client: RpcClient, data: CommandPaneMoveTabData, opts?: RpcOpts): Promise<void> {
+  PaneMoveTabCommand(client: RpcClient, data: CommandPaneMoveTabData, opts?: RpcOpts): Promise<PaneTabEditResult> {
     return client.rpcCall("pane.moveTab", data, opts);
+  },
+  // command "pane.activateTab"
+  PaneActivateTabCommand(client: RpcClient, data: CommandPaneTabData, opts?: RpcOpts): Promise<PaneTabEditResult> {
+    return client.rpcCall("pane.activateTab", data, opts);
+  },
+  // command "pane.removeTab"
+  PaneRemoveTabCommand(client: RpcClient, data: CommandPaneTabData, opts?: RpcOpts): Promise<PaneTabEditResult> {
+    return client.rpcCall("pane.removeTab", data, opts);
   },
   // command "layout.open"
   OpenLayoutCommand(client: RpcClient, data: CommandLayoutOpenData, opts?: RpcOpts): Promise<LayoutOpenResult> {
@@ -2224,6 +2236,14 @@ export const GeneratedApi = {
     opts?: RpcOpts
   ): Promise<ViewerAgentHiddenResult> {
     return client.rpcCall("viewer.agent-hidden", data, opts);
+  },
+  // command "viewer.can-send"
+  ViewerCanSendCommand(
+    client: RpcClient,
+    data: CommandViewerCanSendData,
+    opts?: RpcOpts
+  ): Promise<ViewerCanSendResult> {
+    return client.rpcCall("viewer.can-send", data, opts);
   },
   // command "viewer.devices"
   ViewerDevicesCommand(client: RpcClient, opts?: RpcOpts): Promise<ViewerDevicesResult> {

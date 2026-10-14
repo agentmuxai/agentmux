@@ -15,7 +15,7 @@
  * ANSI parsing lands in Phase γ (perf + worker offload) per the spec.
  */
 
-import { Match, Show, Switch, createComputed, createEffect, createSignal, onCleanup, onMount, type JSX } from "solid-js";
+import { Match, Show, Switch, createComputed, createEffect, createMemo, createSignal, onCleanup, onMount, type JSX } from "solid-js";
 // `Show` retained for fallback ToolOverlayResult sub-tree.
 import type { ToolNode } from "../types";
 import type { AgentDispatch } from "../../swarm/swarm-model";
@@ -23,6 +23,7 @@ import { beginHeightContinuity, cancelHeightContinuity } from "../resize-contrac
 import { ChunkPreview } from "./ChunkPreview";
 import { dropBashwrapStartingChunk } from "./output-cap";
 import { startsAtTop } from "../tool-meta/tool-descriptors";
+import { createOverflowReporter } from "./overflow-report";
 import { previewBox } from "./scroll-handoff";
 import { renderCompactDefault } from "./tool-renderers/builtins";
 import { registerToolRenderers } from "./tool-renderers";
@@ -37,6 +38,15 @@ interface ToolOverlayLogProps {
      *  see `activity/dispatch-correlation.ts`. Undefined when no confident
      *  match was found, or for any other tool kind. */
     dispatchMatch?: AgentDispatch;
+    /** Whether this log can be seen now: its panel is open and its pane isn't
+     *  dormant (ToolBlock's `bodyShowing`). While it can't, the log keeps
+     *  showing what it showed: see `branch`. Undefined counts as open. */
+    open?: boolean;
+    /** Whether the pane is dormant (hidden). A dormant log whose tool finishes
+     *  lets go of the chunk view it was holding: see `branch`. */
+    dormant?: boolean;
+    /** Told whether the preview scrolls vertically, once its size has settled (overflow-report.ts). */
+    onOverflowChange?: (overflows: boolean) => void;
 }
 
 /** Same window as the pane's own (`AgentDocumentVirtualList.tsx`'s
@@ -113,19 +123,67 @@ export const ToolOverlayLog = (props: ToolOverlayLogProps): JSX.Element => {
     const hasResult = () => props.node.result != null;
     const chunks = () => props.node.log?.chunks ?? [];
 
-    // Mirrors the `<Switch>` branches below exactly — used only to detect
-    // when the RENDERED branch changes (for the height-FLIP effect further
-    // down), so it must stay a plain function, not a `createMemo`: see the
-    // "INLINE prop access pattern" note above `isStreaming` — memoizing
-    // anything derived from `props.node.log?.chunks` has previously broken
-    // reactivity for in-place chunk-array mutations (PR #884/#885/#886).
-    type LogBranch = "streaming" | "result" | "chunks-final" | "empty";
-    const branch = (): LogBranch => {
-        if (isStreaming() && hasChunks()) return "streaming";
+    // What the log shows, and so which `<Switch>` branch below renders (also
+    // what the height FLIP further down watches for a change):
+    // - "chunks": the streamed output, while the tool runs and after it when
+    //   no structured result came. One branch whether or not the stream is
+    //   still open: both render the same ChunkList, and as two branches the
+    //   stream closing rebuilt the whole list (and measured a FLIP between
+    //   two equal heights);
+    // - "result": the structured result; "empty": nothing yet (the
+    //   placeholder), both drawn by ToolOverlayResult;
+    // - "none": the stream is open but shows nothing yet while a result
+    //   already exists, which renders nothing.
+    //
+    // While it can't be seen (`props.open === false`: the panel is closed, or
+    // the pane is dormant) it keeps showing what it showed. A finished tool's
+    // panel closes as its result arrives, and its body is dropped a second
+    // later (body-mount.ts): building the result view then, every line of its
+    // output, was work for a panel nobody saw, and so was everything a hidden
+    // pane built. With a dozen agents streaming, each line of output was
+    // built three times (SPEC_AGENT_PANE_STREAM_FRAME_BUDGET_2026_10_13.md
+    // §2.2, §2.3). Shown again, it shows the current output.
+    //
+    // A memo is safe here: the reducer replaces a node's `log` and chunk array
+    // on every change (the in-place mutation that once made memos miss
+    // updates, PR #884/#885/#886, is gone).
+    type LogBranch = "chunks" | "result" | "empty" | "none";
+    const currentBranch = (): LogBranch => {
+        if (hasChunks() && (isStreaming() || !hasResult())) return "chunks";
         if (!isStreaming() && hasResult()) return "result";
-        if (!isStreaming() && !hasResult() && hasChunks()) return "chunks-final";
-        return "empty";
+        if (!hasChunks() && !hasResult()) return "empty";
+        return "none";
     };
+    // - A log that mounts while it can't be seen shows nothing until it can
+    //   (a restored tool in an already-hidden tab, a row mounted hidden).
+    // - A dormant log whose tool finished lets go of the chunk view it held:
+    //   the reducer freed the node's chunks, and holding the stale array (and
+    //   its lines) until the tab is shown would defeat that. It builds the
+    //   result when shown. A closing panel (not dormant) keeps the view for
+    //   its collapse animation.
+    const branch = createMemo<LogBranch | undefined>((prev) => {
+        if (props.open === false) {
+            if (prev === undefined) return "none";
+            if (prev === "chunks" && props.dormant && !isStreaming() && hasResult()) return "none";
+            return prev;
+        }
+        return currentBranch();
+    }) as () => LogBranch;
+    // The node the branches draw from, held with the branch while the panel is
+    // closed: the reducer frees a tool's chunks once its result arrives (a
+    // closing panel still showing the chunk view must not empty out
+    // mid-collapse), and a tool with no chunks would otherwise build its
+    // result inside ToolOverlayResult as its status changes. Held for at most
+    // the body's linger (body-mount.ts), then unmounted.
+    const shownNode = createMemo<ToolNode | undefined>((prev) =>
+        props.open === false && prev !== undefined && branch() !== "none" ? prev : props.node
+    ) as () => ToolNode;
+    const shownChunks = (): ReadonlyArray<LogChunk> => shownNode().log?.chunks ?? [];
+    // The dispatch card's live data is held with the node: a correlated
+    // dispatch update must not rebuild a result while its pane is dormant.
+    const shownDispatch = createMemo<AgentDispatch | undefined>((prev) =>
+        props.open === false && branch() !== "none" ? prev : props.dispatchMatch
+    );
 
     // Scroll hand-off to the outer pane at this box's edges, with the skid, as
     // every preview box has (scroll-handoff.ts `previewBox`; this box carries
@@ -274,6 +332,14 @@ export const ToolOverlayLog = (props: ToolOverlayLogProps): JSX.Element => {
         });
     });
 
+    // Tell the tool block whether this box scrolls (it shows its taller toggle
+    // only then), on the same resizes the pin below follows.
+    const overflow = createOverflowReporter({
+        el: () => scrollRef,
+        hidden: panelHidden,
+        onChange: () => props.onOverflowChange,
+    });
+
     // Pin on every resize of the box (FLIP, max-height transition, pane or
     // window resize, un-hiding) and of the content (new chunks, the result
     // swap, late renders such as syntax highlighting).
@@ -282,7 +348,10 @@ export const ToolOverlayLog = (props: ToolOverlayLogProps): JSX.Element => {
     onMount(() => {
         const el = scrollRef;
         if (!el || !hasResizeObserver) return;
-        const ro = new ResizeObserver(() => pinToBottom());
+        const ro = new ResizeObserver(() => {
+            pinToBottom();
+            overflow.check();
+        });
         ro.observe(el);
         if (contentRef) ro.observe(contentRef);
         onCleanup(() => ro.disconnect());
@@ -295,9 +364,12 @@ export const ToolOverlayLog = (props: ToolOverlayLogProps): JSX.Element => {
         const b = branch();
         panelHidden();
         // A document preview that starts streaming follows like any other.
-        if (b === "streaming" && detachedByDefault) setFollowing(true, "streaming-started");
+        if (b === "chunks" && isStreaming() && detachedByDefault) setFollowing(true, "streaming-started");
         // Without ResizeObserver (jsdom), pin one frame after the DOM flush.
-        if (!hasResizeObserver && following) requestAnimationFrame(pinToBottom);
+        if (!hasResizeObserver) {
+            if (following) requestAnimationFrame(pinToBottom);
+            requestAnimationFrame(overflow.check);
+        }
     });
 
     // A different tool node reusing this slot (streaming-buffer cap advance,
@@ -401,7 +473,11 @@ export const ToolOverlayLog = (props: ToolOverlayLogProps): JSX.Element => {
         }
         const el = scrollRef;
         // `el` is unset only on the very first run, during setup.
-        if (el && lastBranch !== undefined && b !== lastBranch) {
+        // Not while the log can't be seen: its branch changes when a dormant
+        // tool finishes, and measuring (computed style up the ancestors,
+        // scrollHeight, offsetHeight) and easing a height nobody sees would
+        // force the layout the dormancy gate exists to avoid.
+        if (el && lastBranch !== undefined && b !== lastBranch && props.open !== false) {
             pendingCommit = beginHeightContinuity(el, measureHeight, measureRenderedHeight);
         }
         lastBranch = b;
@@ -443,17 +519,13 @@ export const ToolOverlayLog = (props: ToolOverlayLogProps): JSX.Element => {
         >
             <div class="agent-tool-overlay-log-content" ref={contentRef}>
             <Switch>
-                <Match when={isStreaming() && hasChunks()}>
-                    <ChunkList chunks={chunks()} />
+                <Match when={branch() === "chunks"}>
+                    <ChunkList chunks={shownChunks()} />
                 </Match>
-                <Match when={!isStreaming() && hasResult()}>
-                    <ToolOverlayResult node={props.node} dispatchMatch={props.dispatchMatch} />
-                </Match>
-                <Match when={!isStreaming() && !hasResult() && hasChunks()}>
-                    <ChunkList chunks={chunks()} />
-                </Match>
-                <Match when={!hasChunks() && !hasResult()}>
-                    <ToolOverlayResult node={props.node} dispatchMatch={props.dispatchMatch} />
+                {/* One branch for the placeholder and the result: ToolOverlayResult
+                    swaps them itself, without remounting. */}
+                <Match when={branch() === "result" || branch() === "empty"}>
+                    <ToolOverlayResult node={shownNode()} dispatchMatch={shownDispatch()} />
                 </Match>
             </Switch>
             </div>
@@ -489,18 +561,39 @@ function ToolOverlayResult(props: {
     // keep rendering "⏳ Running..." even after chunks landed and
     // status flipped. (Same pattern MarkdownBlock at lines 18-23
     // warns against; bit us on PR #887.)
+    //
+    // But not every new reference is a change: a stream flush hands each
+    // mounted tool a new node object whether or not anything about it changed,
+    // and the body below is built from the node as a whole, so reading
+    // props.node directly rebuilt a finished tool's entire result (every line
+    // of its output) on every flush: 2 to 6 times per tool in the lab, most of
+    // the pane's DOM churn with several agents streaming
+    // (SPEC_AGENT_PANE_STREAM_FRAME_BUDGET_2026_10_13.md §3 R3). This memo
+    // passes a new node on only when one of its own fields changed.
+    const node = createMemo(() => props.node, undefined, { equals: sameToolNode });
     return (
         <Show
-            when={props.node.status !== "running"}
+            when={node().status !== "running"}
             fallback={
                 <div class="agent-tool-loading">
                     <span class="agent-tool-spinner">⏳</span> Thinking...
                 </div>
             }
         >
-            {renderToolResultBody(props.node, { dispatchMatch: props.dispatchMatch })}
+            {renderToolResultBody(node(), { dispatchMatch: props.dispatchMatch })}
         </Show>
     );
+}
+
+/** Same node for rendering: the same object, or one whose own fields are all
+ *  the same values (nested objects compared by reference, as the reducer
+ *  keeps the ones it didn't change). */
+export function sameToolNode(a: ToolNode, b: ToolNode): boolean {
+    if (a === b) return true;
+    const ka = Object.keys(a) as (keyof ToolNode)[];
+    if (ka.length !== Object.keys(b).length) return false;
+    for (const k of ka) if (a[k] !== b[k]) return false;
+    return true;
 }
 
 function renderToolResultBody(node: ToolNode, ctx?: ToolRenderContext): JSX.Element {

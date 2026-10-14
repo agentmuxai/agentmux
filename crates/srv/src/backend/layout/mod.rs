@@ -7,11 +7,18 @@
 //! Ports the 11 pure-ish action handlers from
 //! `frontend/layout/lib/layoutTree.ts` to Rust. These functions take
 //! `&mut LayoutNode` (the tree root) and operation params; they have no
-//! I/O and no side effects. The reducer arms (Phase 5) will call these.
+//! I/O and no side effects.
 //!
 //! Test oracle: the 30 tests in `frontend/layout/tests/layoutTree.test.ts`
 //! (shipped in PR #686) — the Rust implementations must produce identical
 //! state transitions for identical inputs.
+//!
+//! The structural ops (insert, move, swap, resize, replace, split, balance)
+//! have no reducer arm: nothing produced those commands. They stay, with
+//! their oracle tests, for the layout-intents work in
+//! `docs/specs/SPEC_STRONG_REDUCER_AUTHORITY_LAYOUT_2026_06_30.md`; outside
+//! tests they are unused, hence the `dead_code` allowance.
+#![cfg_attr(not(test), allow(dead_code))]
 
 use agentmux_common::{FlexDirection, LayoutNode, ResizeOp, SplitPosition, StackMovePosition};
 use uuid::Uuid;
@@ -807,8 +814,41 @@ pub fn validate_layout_invariants(root: &Option<LayoutNode>) -> Vec<String> {
                 leaves
             ));
         }
+        // I11 — a block is in at most one pane (the tree half of
+        // SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md §3.1 I1; the other
+        // half, "in at least one", needs the tab's blocks: `unplaced_blocks`).
+        let mut pane_of: std::collections::HashMap<String, &str> = std::collections::HashMap::new();
+        for_each_leaf(tree, &mut |leaf, data| {
+            for member in leaf_members(data) {
+                if let Some(first) = pane_of.insert(member.clone(), &leaf.id).filter(|first| *first != leaf.id) {
+                    violations.push(format!("BLOCK_IN_TWO_PANES @ {}: also in {}", short(&member), short(first)));
+                }
+            }
+        });
     }
     violations
+}
+
+/// The tab's blocks that are in no pane of its tree: the other half of I1
+/// (SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md §3.1). Briefly true of a
+/// block on its way into a pane (a queued placement the frontend hasn't
+/// applied yet); a block that stays unplaced is an orphan.
+pub fn unplaced_blocks(root: &Option<LayoutNode>, block_ids: &[String]) -> Vec<String> {
+    let mut placed = std::collections::HashSet::new();
+    if let Some(tree) = root {
+        for_each_leaf(tree, &mut |_, data| placed.extend(leaf_members(data)));
+    }
+    block_ids.iter().filter(|b| !placed.contains(*b)).cloned().collect()
+}
+
+/// Visit every leaf (a node with `data`), depth first.
+fn for_each_leaf<'a>(node: &'a LayoutNode, f: &mut impl FnMut(&'a LayoutNode, &'a agentmux_common::LayoutNodeData)) {
+    if let Some(data) = node.data.as_ref() {
+        f(node, data);
+    }
+    for child in &node.children {
+        for_each_leaf(child, f);
+    }
 }
 
 /// First leaf (depth-first) whose `data.block_id` is set but not present in

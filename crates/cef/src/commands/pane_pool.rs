@@ -608,13 +608,17 @@ pub fn promote_pane_pool_window(
             cleanup_failed_pane_promote_orphan(state, &label);
             return None;
         }
-        // AppState label maps (not reducer state).
-        {
-            let mut hwnds = state.window_hwnds.lock();
-            if let Some(h) = hwnds.remove(&label) {
-                hwnds.insert(new_label.clone(), h);
-            }
+        // Logged here rather than in the reducer arm, which doesn't log.
+        if label != new_label {
+            tracing::info!(
+                target: "pool:pane",
+                old_label = %label,
+                new_label = %new_label,
+                "[relabel] browser re-keyed on pane-pool promotion"
+            );
         }
+        // `window_meta` is AppState, not reducer state (`RelabelBrowser`
+        // re-keyed `window_hwnds` with the browser).
         {
             let mut meta = state.window_meta.lock();
             if let Some(mut m) = meta.remove(&label) {

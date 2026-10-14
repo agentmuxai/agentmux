@@ -4,6 +4,14 @@
 use super::*;
 use crate::state::{BrowserPaneLifecycle, WindowKind};
 
+/// A fixed instant for commands that carry the caller's clock reading.
+/// Arms only store it, so any value works; one value keeps tests deterministic.
+fn t0() -> std::time::Instant {
+    use std::sync::OnceLock;
+    static T0: OnceLock<std::time::Instant> = OnceLock::new();
+    *T0.get_or_init(std::time::Instant::now)
+}
+
 fn entry(label: &str) -> PendingWindowCreation {
     PendingWindowCreation {
         label: label.to_string(),
@@ -107,21 +115,6 @@ fn take_by_label_misses_without_touching_the_queue() {
 }
 
 #[test]
-fn enqueue_during_shutdown_is_rejected() {
-    let mut state = HostState::default();
-    state.lifecycle = HostLifecyclePhase::ShuttingDown;
-    let out = update(
-        &mut state,
-        HostCommand::EnqueuePendingWindowCreation { entry: entry("w1") },
-    );
-    assert!(matches!(
-        out.events.as_slice(),
-        [HostEvent::Error { .. }]
-    ));
-    assert_eq!(state.pending_window_creations.len(), 0);
-}
-
-#[test]
 fn version_increments_monotonically() {
     let mut state = HostState::default();
     let out1 = update(
@@ -149,7 +142,6 @@ fn version_increments_monotonically() {
         HostEvent::PoolWindowEntered { version, .. } => *version,
         HostEvent::PoolWindowLeft { version, .. } => *version,
         HostEvent::QuitDraining { version, .. } => *version,
-        HostEvent::QuitReady { version } => *version,
         HostEvent::WindowOpacityApplied { version, .. } => *version,
         HostEvent::WindowOpacityCleared { version, .. } => *version,
         HostEvent::PaneWindowStateChanged { version, .. } => *version,
@@ -171,7 +163,7 @@ fn version_increments_monotonically() {
 fn pane_close_lifecycle() {
     let mut state = HostState::default();
     update(&mut state, HostCommand::TryRegisterBrowserPaneLive { block_id: "b1".into(), pending: None });
-    update(&mut state, HostCommand::EnqueueBrowserPaneClose { block_id: "b1".into() });
+    update(&mut state, HostCommand::EnqueueBrowserPaneClose { block_id: "b1".into(), now: t0() });
     assert!(matches!(
         state.browser_panes["b1"].lifecycle,
         BrowserPaneLifecycle::Closing { .. }
@@ -183,7 +175,7 @@ fn pane_close_lifecycle() {
 #[test]
 fn pane_close_idempotent_for_missing() {
     let mut state = HostState::default();
-    let out = update(&mut state, HostCommand::EnqueueBrowserPaneClose { block_id: "missing".into() });
+    let out = update(&mut state, HostCommand::EnqueueBrowserPaneClose { block_id: "missing".into(), now: t0() });
     assert!(out.events.is_empty()); // idempotent no-op
     // The load-bearing property for issue #2218 B.4:
     // BrowserPaneManager::close() (browser_panes/close.rs) checks exactly this
@@ -210,7 +202,10 @@ fn try_register_browser_pane_live_fresh_returns_label_and_inserts_live() {
         Some(RegisterResult::Fresh(l)) => l,
         other => panic!("expected Fresh(_), got {:?}", other),
     };
-    assert!(label.starts_with("browser-pane-b1-"));
+    // The sequence lives in HostState and starts at 1, so a fresh state's
+    // first label is fixed.
+    assert_eq!(label, "browser-pane-b1-1");
+    assert_eq!(state.next_browser_pane_label_seq, 2);
     assert_eq!(state.browser_panes["b1"].label, label);
     assert!(matches!(state.browser_panes["b1"].lifecycle, BrowserPaneLifecycle::Live));
     assert!(matches!(out.events[0], HostEvent::BrowserPaneCreateRequested { .. }));
@@ -311,25 +306,12 @@ fn try_register_cross_window_returns_already_live_elsewhere_and_stashes() {
 fn try_register_browser_pane_live_closing_returns_closing() {
     let mut state = HostState::default();
     update(&mut state, HostCommand::TryRegisterBrowserPaneLive { block_id: "b1".into(), pending: None });
-    update(&mut state, HostCommand::EnqueueBrowserPaneClose { block_id: "b1".into() });
+    update(&mut state, HostCommand::EnqueueBrowserPaneClose { block_id: "b1".into(), now: t0() });
     let out = update(
         &mut state,
         HostCommand::TryRegisterBrowserPaneLive { block_id: "b1".into(), pending: None },
     );
     assert!(matches!(out.browser_pane_register_result, Some(RegisterResult::Closing)));
-}
-
-#[test]
-fn try_register_browser_pane_live_during_shutdown_errors() {
-    let mut state = HostState::default();
-    state.lifecycle = HostLifecyclePhase::ShuttingDown;
-    let out = update(
-        &mut state,
-        HostCommand::TryRegisterBrowserPaneLive { block_id: "b1".into(), pending: None },
-    );
-    assert!(out.browser_pane_register_result.is_none());
-    assert!(matches!(out.events[0], HostEvent::Error { .. }));
-    assert!(!state.browser_panes.contains_key("b1"));
 }
 
 #[test]
@@ -345,7 +327,7 @@ fn enqueue_browser_pane_close_returns_label_for_live_entry() {
     };
     let out = update(
         &mut state,
-        HostCommand::EnqueueBrowserPaneClose { block_id: "b1".into() },
+        HostCommand::EnqueueBrowserPaneClose { block_id: "b1".into(), now: t0() },
     );
     assert_eq!(out.closed_browser_pane_label, Some(label));
 }
@@ -354,10 +336,10 @@ fn enqueue_browser_pane_close_returns_label_for_live_entry() {
 fn enqueue_browser_pane_close_returns_none_for_already_closing() {
     let mut state = HostState::default();
     update(&mut state, HostCommand::TryRegisterBrowserPaneLive { block_id: "b1".into(), pending: None });
-    update(&mut state, HostCommand::EnqueueBrowserPaneClose { block_id: "b1".into() });
+    update(&mut state, HostCommand::EnqueueBrowserPaneClose { block_id: "b1".into(), now: t0() });
     let out = update(
         &mut state,
-        HostCommand::EnqueueBrowserPaneClose { block_id: "b1".into() },
+        HostCommand::EnqueueBrowserPaneClose { block_id: "b1".into(), now: t0() },
     );
     assert!(out.closed_browser_pane_label.is_none());
 }
@@ -406,7 +388,7 @@ fn pane_lifecycle_supports_h7_invariant_check() {
     // Live pane present → gate is OPEN (not closing)
     assert!(!state.browser_panes.values().any(|e| matches!(e.lifecycle, BrowserPaneLifecycle::Closing { .. })));
 
-    update(&mut state, HostCommand::EnqueueBrowserPaneClose { block_id: "b1".into() });
+    update(&mut state, HostCommand::EnqueueBrowserPaneClose { block_id: "b1".into(), now: t0() });
     // Closing pane present → gate is CLOSED
     assert!(state.browser_panes.values().any(|e| matches!(e.lifecycle, BrowserPaneLifecycle::Closing { .. })));
 
@@ -417,7 +399,7 @@ fn pane_lifecycle_supports_h7_invariant_check() {
 
 #[test]
 fn drain_after_close_recreate_does_not_evict_new_entry() {
-    // The exact bug BROWSER_PANE_LABEL_SEQ defends against: register → close →
+    // The exact bug the pane-label sequence defends against: register → close →
     // drain by OLD label → register again → drain by OLD label must
     // NOT evict the new entry.
     let mut state = HostState::default();
@@ -429,7 +411,7 @@ fn drain_after_close_recreate_does_not_evict_new_entry() {
         Some(RegisterResult::Fresh(l)) => l,
         _ => unreachable!(),
     };
-    update(&mut state, HostCommand::EnqueueBrowserPaneClose { block_id: "b1".into() });
+    update(&mut state, HostCommand::EnqueueBrowserPaneClose { block_id: "b1".into(), now: t0() });
     update(&mut state, HostCommand::DrainBrowserPaneByLabel { label: first.clone() });
 
     // re-register — gets a different label
@@ -460,7 +442,7 @@ fn closing_register_stashes_pending_and_complete_close_returns_it() {
 
     // b1 is Live, then close-requested → Closing.
     update(&mut state, HostCommand::TryRegisterBrowserPaneLive { block_id: "b1".into(), pending: None });
-    update(&mut state, HostCommand::EnqueueBrowserPaneClose { block_id: "b1".into() });
+    update(&mut state, HostCommand::EnqueueBrowserPaneClose { block_id: "b1".into(), now: t0() });
 
     // Re-register while Closing, WITH pending params (the redock re-create).
     let pend = PendingBrowserPaneCreate {
@@ -547,12 +529,13 @@ fn quit_state_monotonic() {
     assert_eq!(state.quit_state, QuitState::Running);
     update(&mut state, HostCommand::BeginDrain { reason: QuitReason::LastWindowClosed });
     assert!(matches!(state.quit_state, QuitState::Draining { .. }));
-    update(&mut state, HostCommand::ConfirmDrained);
-    assert_eq!(state.quit_state, QuitState::Quit);
-    // Subsequent BeginDrain is a no-op (monotonic).
+    // Subsequent BeginDrain is a no-op (monotonic): the first reason sticks.
     let out = update(&mut state, HostCommand::BeginDrain { reason: QuitReason::External });
     assert!(out.events.is_empty());
-    assert_eq!(state.quit_state, QuitState::Quit);
+    assert_eq!(
+        state.quit_state,
+        QuitState::Draining { reason: QuitReason::LastWindowClosed }
+    );
 }
 
 // ── H.4 pool ─────────────────────────────────────────────────────────
@@ -965,7 +948,6 @@ fn should_begin_drain_truth_table() {
         ),
         None
     );
-    assert_eq!(should_begin_drain(true, 0, false, &QuitState::Quit, false), None);
     // UNARMED (sanitize-then-decide §1.E): the startup gap — no live user
     // window has ever registered — must never drain, even though every other
     // input reads "drainable" (main's creation path enqueues no pending entry,
@@ -987,7 +969,16 @@ fn should_begin_drain_background_service_suppresses_last_window_closed_only() {
     assert_eq!(should_begin_drain(true, 1, false, &QuitState::Running, true), None);
     assert_eq!(should_begin_drain(true, 0, true, &QuitState::Running, true), None);
     assert_eq!(should_begin_drain(false, 0, false, &QuitState::Running, true), None);
-    assert_eq!(should_begin_drain(true, 0, false, &QuitState::Quit, true), None);
+    assert_eq!(
+        should_begin_drain(
+            true,
+            0,
+            false,
+            &QuitState::Draining { reason: QuitReason::External },
+            true,
+        ),
+        None
+    );
 }
 
 /// Only USER-initiated creations block drain; pool/pane background creations don't.
@@ -1092,7 +1083,6 @@ fn a_user_window_arriving_mid_drain_is_closed_on_arrival() {
             "a user window registering mid-drain must be closed on arrival"
         );
     }
-    assert!(should_close_on_arrival(&user, &QuitState::Quit));
 }
 
 /// The normal case must stay untouched: registering while Running never
@@ -1255,7 +1245,7 @@ fn is_quit_relevant_guard_membership() {
     }));
     // Irrelevant — hot path + pane lifecycle (panes never affect the window count).
     assert!(!is_quit_relevant(&HostCommand::EvictFloatingPaneWindowState { label: "f".into() }));
-    assert!(!is_quit_relevant(&HostCommand::EnqueueBrowserPaneClose { block_id: "b".into() }));
+    assert!(!is_quit_relevant(&HostCommand::EnqueueBrowserPaneClose { block_id: "b".into(), now: t0() }));
 }
 
 /// `update` surfaces the level-triggered drain decision on a quit-relevant
@@ -1374,4 +1364,382 @@ fn browser_pane_event_target_is_none_for_unknown_or_windowless_pane() {
         crate::events::browser_pane_event_target(&state, "legacy"),
         None
     );
+}
+
+// ── SetWindowOpacity ─────────────────────────────────────────────────
+
+#[test]
+fn set_window_opacity_stores_the_value_and_emits_applied() {
+    let mut state = HostState::default();
+    let out = update(&mut state, HostCommand::SetWindowOpacity { label: "w1".into(), opacity: 0.5 });
+    assert!(matches!(
+        out.events.as_slice(),
+        [HostEvent::WindowOpacityApplied { label, opacity, version: 1 }] if label == "w1" && *opacity == 0.5
+    ));
+    assert_eq!(state.window_opacities.get("w1"), Some(&0.5));
+    assert!(out.request_drain.is_none(), "opacity is not quit-relevant");
+}
+
+#[test]
+fn set_window_opacity_clamps_below_zero() {
+    let mut state = HostState::default();
+    let out = update(&mut state, HostCommand::SetWindowOpacity { label: "w1".into(), opacity: -3.0 });
+    assert!(matches!(
+        out.events.as_slice(),
+        [HostEvent::WindowOpacityApplied { opacity, .. }] if *opacity == 0.0
+    ));
+    assert_eq!(state.window_opacities.get("w1"), Some(&0.0));
+}
+
+#[test]
+fn set_window_opacity_at_or_above_one_clears_the_entry() {
+    let mut state = HostState::default();
+    update(&mut state, HostCommand::SetWindowOpacity { label: "w1".into(), opacity: 0.4 });
+    for opacity in [1.0, 7.5] {
+        let out = update(&mut state, HostCommand::SetWindowOpacity { label: "w1".into(), opacity });
+        assert!(matches!(
+            out.events.as_slice(),
+            [HostEvent::WindowOpacityCleared { label, .. }] if label == "w1"
+        ));
+        assert!(!state.window_opacities.contains_key("w1"), "fully opaque = no entry");
+    }
+}
+
+#[test]
+fn set_window_opacity_is_per_label() {
+    let mut state = HostState::default();
+    update(&mut state, HostCommand::SetWindowOpacity { label: "a".into(), opacity: 0.3 });
+    update(&mut state, HostCommand::SetWindowOpacity { label: "b".into(), opacity: 0.7 });
+    update(&mut state, HostCommand::SetWindowOpacity { label: "a".into(), opacity: 1.0 });
+    assert!(!state.window_opacities.contains_key("a"));
+    assert_eq!(state.window_opacities.get("b"), Some(&0.7));
+}
+
+// ── PopAndPromoteFrontPanePoolWindow ─────────────────────────────────
+
+#[test]
+fn pop_and_promote_front_pane_pool_window_pops_in_fifo_order() {
+    let mut state = HostState::default();
+    for label in ["pp1", "pp2"] {
+        update(&mut state, HostCommand::PanePoolWindowSpawnStart { label: label.into() });
+        update(&mut state, HostCommand::PanePoolWindowReady { label: label.into() });
+    }
+    assert_eq!(state.pane_pool.queue, ["pp1", "pp2"]);
+
+    let out = update(&mut state, HostCommand::PopAndPromoteFrontPanePoolWindow);
+    assert_eq!(out.promoted_pane_pool_label.as_deref(), Some("pp1"));
+    assert_eq!(out.pane_pool_size_after, Some(1));
+    assert!(out.events.is_empty());
+    assert_eq!(state.pane_pool.queue, ["pp2"]);
+    assert!(!state.pane_pool.unpromoted.contains("pp1"));
+
+    let out = update(&mut state, HostCommand::PopAndPromoteFrontPanePoolWindow);
+    assert_eq!(out.promoted_pane_pool_label.as_deref(), Some("pp2"));
+    assert_eq!(out.pane_pool_size_after, Some(0));
+}
+
+#[test]
+fn pop_and_promote_front_pane_pool_window_on_empty_queue_is_a_no_op() {
+    let mut state = HostState::default();
+    // A spawn still in flight (unpromoted, not yet ready) must not be promoted.
+    update(&mut state, HostCommand::PanePoolWindowSpawnStart { label: "pp1".into() });
+    let out = update(&mut state, HostCommand::PopAndPromoteFrontPanePoolWindow);
+    assert_eq!(out.promoted_pane_pool_label, None);
+    assert_eq!(out.pane_pool_size_after, None);
+    assert!(state.pane_pool.unpromoted.contains("pp1"));
+    assert!(state.pane_pool.respawn_in_flight);
+}
+
+#[test]
+fn pop_and_promote_and_eviction_never_claim_the_same_label() {
+    let mut state = HostState::default();
+    update(&mut state, HostCommand::PanePoolWindowSpawnStart { label: "pp1".into() });
+    update(&mut state, HostCommand::PanePoolWindowReady { label: "pp1".into() });
+    let promoted = update(&mut state, HostCommand::PopAndPromoteFrontPanePoolWindow);
+    let evicted = update(&mut state, HostCommand::PopFrontPanePoolWindowForEviction);
+    assert_eq!(promoted.promoted_pane_pool_label.as_deref(), Some("pp1"));
+    assert_eq!(evicted.evicted_pane_pool_label, None, "already claimed by the promote");
+}
+
+// ── Purity: nothing in the reducer reads the clock, a global or the env ──
+
+#[test]
+fn pane_labels_come_from_state_so_two_fresh_states_agree() {
+    let register = |state: &mut HostState, block_id: &str| match update(
+        state,
+        HostCommand::TryRegisterBrowserPaneLive { block_id: block_id.into(), pending: None },
+    )
+    .browser_pane_register_result
+    {
+        Some(RegisterResult::Fresh(l)) => l,
+        other => panic!("expected Fresh, got {:?}", other),
+    };
+    let mut a = HostState::default();
+    let mut b = HostState::default();
+    assert_eq!(register(&mut a, "x"), "browser-pane-x-1");
+    assert_eq!(register(&mut a, "y"), "browser-pane-y-2");
+    // A second state is not affected by the first, as it was with the old
+    // process-global counter.
+    assert_eq!(register(&mut b, "x"), "browser-pane-x-1");
+}
+
+#[test]
+fn enqueue_browser_pane_close_stamps_the_callers_instant() {
+    let mut state = HostState::default();
+    update(
+        &mut state,
+        HostCommand::TryRegisterBrowserPaneLive { block_id: "b1".into(), pending: None },
+    );
+    let when = t0() + std::time::Duration::from_secs(5);
+    update(&mut state, HostCommand::EnqueueBrowserPaneClose { block_id: "b1".into(), now: when });
+    assert!(matches!(
+        state.browser_panes["b1"].lifecycle,
+        BrowserPaneLifecycle::Closing { since } if since == when
+    ));
+}
+
+#[test]
+fn background_service_mode_comes_from_the_constructor() {
+    assert!(!HostState::default().background_service_enabled);
+    assert!(!HostState::new(false).background_service_enabled);
+    assert!(HostState::new(true).background_service_enabled);
+}
+
+#[test]
+fn host_bump_version_saturates_instead_of_wrapping() {
+    let mut state = HostState { event_version: u64::MAX - 1, ..HostState::default() };
+    assert_eq!(state.bump_version(), u64::MAX);
+    assert_eq!(state.bump_version(), u64::MAX, "must not wrap to 0");
+}
+
+// ── Attended/unattended flag: every write goes through the reducer ──
+
+#[test]
+fn seed_background_unattended_sets_the_flag_without_reporting_a_crossing() {
+    let mut state = HostState::new(true);
+    let out = update(&mut state, HostCommand::SeedBackgroundUnattended { unattended: true });
+    assert!(state.background_unattended);
+    assert_eq!(out.background_attention, None, "the log already holds this period");
+    assert!(out.events.is_empty());
+    assert!(out.request_drain.is_none());
+}
+
+#[test]
+fn start_hidden_hold_and_release_report_one_crossing_each() {
+    // Background-service mode off: a held login start is still an unattended
+    // period (that is how start_hidden always recorded it).
+    let mut state = HostState::default();
+    let out = update(&mut state, HostCommand::SetStartHiddenHeld { held: true });
+    assert_eq!(out.background_attention, Some(true));
+    assert!(state.background_unattended);
+    assert!(state.start_hidden_held);
+
+    // Repeating it is not a new period.
+    let out = update(&mut state, HostCommand::SetStartHiddenHeld { held: true });
+    assert_eq!(out.background_attention, None);
+
+    let out = update(&mut state, HostCommand::SetStartHiddenHeld { held: false });
+    assert_eq!(out.background_attention, Some(false));
+    assert!(!state.background_unattended);
+    assert!(!state.start_hidden_held);
+}
+
+#[test]
+fn start_hidden_hold_over_a_seeded_period_is_not_a_new_crossing() {
+    let mut state = HostState::new(true);
+    update(&mut state, HostCommand::SeedBackgroundUnattended { unattended: true });
+    let out = update(&mut state, HostCommand::SetStartHiddenHeld { held: true });
+    assert_eq!(out.background_attention, None);
+    assert!(state.background_unattended);
+}
+
+#[test]
+fn window_count_rule_stands_down_while_main_is_held() {
+    // "main" is registered (live count 1) but hidden; without the hold gate the
+    // next quit-relevant dispatch would flip the flag back to attended.
+    let mut state = HostState::new(true);
+    update(&mut state, HostCommand::SetStartHiddenHeld { held: true });
+    assert_eq!(attention_after(&state, 1), None);
+    assert_eq!(attention_after(&state, 0), None);
+    update(&mut state, HostCommand::SetStartHiddenHeld { held: false });
+    // Released with no live window (unit tests can't register one) in
+    // background-service mode: still unattended, until a window counts.
+    assert!(state.background_unattended);
+    assert_eq!(attention_after(&state, 1), Some(false));
+}
+
+#[test]
+fn start_hidden_attention_transition_truth_table() {
+    use super::quit::start_hidden_attention_transition as t;
+    // (held, bg_enabled, quitting, currently_unattended, live) -> crossing
+    assert_eq!(t(true, false, false, false, 1), Some(true));
+    assert_eq!(t(true, true, true, false, 1), Some(true), "a hold is unattended even mid-quit");
+    assert_eq!(t(true, false, false, true, 1), None);
+    assert_eq!(t(false, false, false, true, 1), Some(false));
+    assert_eq!(t(false, false, false, true, 0), Some(false), "no window rule without background mode");
+    assert_eq!(t(false, true, false, true, 1), Some(false));
+    assert_eq!(t(false, true, false, true, 0), None, "background mode, no window: still unattended");
+    assert_eq!(t(false, true, true, true, 0), Some(false), "quitting is never unattended");
+    assert_eq!(t(false, false, false, false, 1), None);
+}
+
+#[test]
+fn attention_commands_are_not_quit_relevant() {
+    use super::is_quit_relevant;
+    assert!(!is_quit_relevant(&HostCommand::SeedBackgroundUnattended { unattended: true }));
+    assert!(!is_quit_relevant(&HostCommand::SetStartHiddenHeld { held: true }));
+}
+
+// ── Outer-window HWND registry and drop-target classification (R5/R6) ────
+
+#[test]
+fn bind_window_hwnd_replaces_unless_asked_to_keep() {
+    let mut state = HostState::default();
+    let bind = |label: &str, hwnd: isize, replace: bool| HostCommand::BindWindowHwnd {
+        label: label.to_string(),
+        hwnd,
+        replace,
+    };
+    update(&mut state, bind("floating-a", 0x10, true));
+    assert_eq!(state.window_hwnds.get("floating-a"), Some(&0x10));
+    // A guess (capture_hwnd_for_label) never overwrites the creator's bind.
+    update(&mut state, bind("floating-a", 0x20, false));
+    assert_eq!(state.window_hwnds.get("floating-a"), Some(&0x10));
+    update(&mut state, bind("main", 0x30, false));
+    assert_eq!(state.window_hwnds.get("main"), Some(&0x30));
+    update(&mut state, bind("floating-a", 0x20, true));
+    assert_eq!(state.window_hwnds.get("floating-a"), Some(&0x20));
+}
+
+#[test]
+fn evict_window_hwnd_returns_the_binding_once() {
+    let mut state = HostState::default();
+    update(&mut state, HostCommand::BindWindowHwnd { label: "main".into(), hwnd: 0x30, replace: true });
+    let out = update(&mut state, HostCommand::EvictWindowHwnd { label: "main".into() });
+    assert_eq!(out.evicted_window_hwnd, Some(0x30));
+    assert!(out.events.is_empty());
+    let again = update(&mut state, HostCommand::EvictWindowHwnd { label: "main".into() });
+    assert_eq!(again.evicted_window_hwnd, None, "idempotent");
+}
+
+/// `state::window_hwnds`'s shim calls `update` directly; that is only the same
+/// as `host_dispatch` while these arms stay out of the quit reconcile.
+#[test]
+fn window_hwnd_commands_are_not_quit_relevant() {
+    use super::is_quit_relevant;
+    assert!(!is_quit_relevant(&HostCommand::BindWindowHwnd { label: "main".into(), hwnd: 1, replace: true }));
+    assert!(!is_quit_relevant(&HostCommand::EvictWindowHwnd { label: "main".into() }));
+}
+
+#[cfg(target_os = "windows")]
+#[test]
+fn failed_relabel_leaves_the_hwnd_binding_alone() {
+    let mut state = HostState::default();
+    update(&mut state, HostCommand::BindWindowHwnd { label: "floating-pool-a".into(), hwnd: 0x10, replace: true });
+    // No browser under the old label, so the relabel fails and moves nothing.
+    let out = update(
+        &mut state,
+        HostCommand::RelabelBrowser { old_label: "floating-pool-a".into(), new_label: "floating-a".into() },
+    );
+    assert!(!out.relabel_ok);
+    assert_eq!(state.window_hwnds.get("floating-pool-a"), Some(&0x10));
+    assert!(!state.window_hwnds.contains_key("floating-a"));
+}
+
+#[test]
+fn labels_at_hwnd_is_sorted_and_exact() {
+    let hwnds: HashMap<String, isize> =
+        [("window-b", 7), ("main", 7), ("floating-c", 8)].into_iter().map(|(l, h)| (l.to_string(), h)).collect();
+    assert_eq!(super::labels_at_hwnd(&hwnds, 7), vec!["main", "window-b"]);
+    assert_eq!(super::labels_at_hwnd(&hwnds, 8), vec!["floating-c"]);
+    assert!(super::labels_at_hwnd(&hwnds, 9).is_empty());
+}
+
+mod drop_target {
+    use super::super::window_hwnds::classify_drop_target;
+    use super::super::DropTarget;
+    use crate::state::BrowserKind;
+
+    const USER: BrowserKind = BrowserKind::TopLevel { is_pool: false };
+
+    /// Classify `labels` where every label has `kind`, "main" has a frame of
+    /// its own, and `with_backend` lists the labels whose renderer registered
+    /// a backend window.
+    fn classify(labels: &[&str], kind: Option<BrowserKind>, main_has_frame: bool, with_backend: &[&str]) -> DropTarget {
+        classify_drop_target(labels, &|_| kind.clone(), main_has_frame, &|l| with_backend.contains(&l))
+    }
+
+    #[test]
+    fn floaters_are_never_a_target_whatever_their_label() {
+        for label in ["floating-a", "floating-pool-a", "window-a"] {
+            for is_pool in [false, true] {
+                assert_eq!(
+                    classify(&[label], Some(BrowserKind::Floater { is_pool }), true, &[label]),
+                    DropTarget::Floater(label.to_string()),
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_user_window_is_a_target_by_type_not_label() {
+        assert_eq!(classify(&["main"], Some(USER), true, &["main"]), DropTarget::Window("main".into()));
+        assert_eq!(classify(&["window-a"], Some(USER), true, &["main", "window-a"]), DropTarget::Window("window-a".into()));
+        // Promoted from the pool: keeps its `window-pool-*` label, is a user window.
+        assert_eq!(
+            classify(&["window-pool-a"], Some(USER), true, &["main", "window-pool-a"]),
+            DropTarget::Window("window-pool-a".into()),
+        );
+        // A tear-off whose renderer hasn't registered yet, while main has its frame.
+        assert_eq!(classify(&["window-a"], Some(USER), true, &["main"]), DropTarget::Window("window-a".into()));
+    }
+
+    #[test]
+    fn nothing_else_takes_a_drop() {
+        let not_targets = [
+            Some(BrowserKind::TopLevel { is_pool: true }),
+            Some(BrowserKind::Pane { block_id: "b".into() }),
+            Some(BrowserKind::Popup),
+            None, // bound at window creation, browser not registered yet
+        ];
+        for kind in not_targets {
+            assert_eq!(classify(&["window-pool-a"], kind.clone(), true, &["main"]), DropTarget::Nothing, "{kind:?}");
+        }
+    }
+
+    #[test]
+    fn untracked_and_ambiguous_hwnds() {
+        assert_eq!(classify(&[], Some(USER), true, &["main"]), DropTarget::Untracked);
+        // Two labels on one HWND: one is stale, and nothing says which.
+        assert_eq!(classify(&["main", "window-a"], Some(USER), true, &["main", "window-a"]), DropTarget::Nothing);
+    }
+
+    #[test]
+    fn a_window_serving_the_primary_is_main() {
+        // Its renderer registered as "main", it has no backend window of its
+        // own, and "main" has no frame of its own.
+        assert_eq!(classify(&["window-pool-a"], Some(USER), false, &["main"]), DropTarget::Window("main".into()));
+        assert_eq!(classify(&["window-a"], Some(USER), false, &["main"]), DropTarget::Window("main".into()));
+        // Any one of those facts missing: its own label.
+        assert_eq!(classify(&["window-pool-a"], Some(USER), true, &["main"]), DropTarget::Window("window-pool-a".into()));
+        assert_eq!(
+            classify(&["window-pool-a"], Some(USER), false, &["main", "window-pool-a"]),
+            DropTarget::Window("window-pool-a".into()),
+        );
+        assert_eq!(classify(&["window-pool-a"], Some(USER), false, &[]), DropTarget::Window("window-pool-a".into()));
+    }
+
+    #[test]
+    fn drop_target_at_reads_the_registry() {
+        let mut state = super::HostState::default();
+        super::update(
+            &mut state,
+            super::HostCommand::BindWindowHwnd { label: "main".into(), hwnd: 0x30, replace: true },
+        );
+        let none: &dyn Fn(&str) -> bool = &|_| false;
+        assert_eq!(super::super::drop_target_at(&state, 0x99, none), DropTarget::Untracked);
+        // Bound, but no browser registered under the label (unit tests can't
+        // register one: a `BrowserHandle` needs a real `cef::Browser`).
+        assert_eq!(super::super::drop_target_at(&state, 0x30, none), DropTarget::Nothing);
+    }
 }

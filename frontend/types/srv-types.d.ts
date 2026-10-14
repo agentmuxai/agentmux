@@ -536,6 +536,9 @@ declare global {
         focusednodeid?: string;
         leaforder?: LeafOrderEntry[];
         pendingbackendactions?: LayoutActionData[];
+        /** srv's layout revision for this tab (`TabRecord::layout_revision`); a
+         *  push echoes the one it was built on. */
+        layoutrevision?: number;
     };
 
     // waveobj.LeafOrderEntry
@@ -1000,6 +1003,7 @@ declare global {
         "agent:mcpselfheal"?: boolean;
         "agent:turnscopedtail"?: boolean;
         "agent:onewayflow"?: boolean;
+        "agent:followcontroller"?: boolean;
         "agent:livefeed"?: boolean;
         "agent:livefeedturns"?: number;
         "markdown:streamtailinplace"?: boolean;

@@ -138,16 +138,17 @@ pub async fn bootstrap_state_from_mstore(state: &Arc<Mutex<State>>, mstore: &Sto
         // rootnode is a passive shadow — refreshed on startup, never
         // diverging from disk because no reducer-arm writers exist
         // yet at runtime.
-        let (focused_node_id, magnified_node_id, rootnode) = if tab.layoutstate.is_empty() {
-            (String::new(), String::new(), None)
+        let (focused_node_id, magnified_node_id, rootnode, layout_revision) = if tab.layoutstate.is_empty() {
+            (String::new(), String::new(), None, 0)
         } else {
             match mstore.get::<crate::backend::obj::LayoutState>(&tab.layoutstate) {
                 Ok(Some(layout)) => (
                     layout.focusednodeid,
                     layout.magnifiednodeid,
                     layout.rootnode,
+                    layout.layoutrevision,
                 ),
-                _ => (String::new(), String::new(), None),
+                _ => (String::new(), String::new(), None, 0),
             }
         };
         state.tabs.insert(
@@ -160,6 +161,7 @@ pub async fn bootstrap_state_from_mstore(state: &Arc<Mutex<State>>, mstore: &Sto
                 focused_node_id,
                 magnified_node_id,
                 rootnode,
+                layout_revision,
             },
         );
     }

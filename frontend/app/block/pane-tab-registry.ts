@@ -37,10 +37,6 @@ export interface PaneTabCapabilities {
      *  pane gets. `"none"`: the view draws no header of its own (the
      *  launcher's search box is its top edge). */
     header?: "default" | "surface" | "none";
-    /** The header shows a mic button (the view model's `voiceHandle`), with
-     *  this tooltip. A view that takes voice elsewhere (agent: beside its
-     *  composer) leaves this out. */
-    headerMic?: { title: string };
     /** A boolean setting that hides this view's CPU/memory stats badge when
      *  set to `false` (terminal: `term:showstatsbadge`). Without it the badge
      *  always shows. */
@@ -116,8 +112,8 @@ export interface PaneTabInstance {
      *  whose `connection` capability depends on state (a terminal running a
      *  command has none). Omitted: the capability alone decides. */
     manageConnection?: Accessor<boolean>;
-    /** Voice input: the handle the header mic and Ctrl+Shift+V deliver
-     *  transcripts to. */
+    /** Voice input: the handle Ctrl+Shift+V (and the agent composer's mic)
+     *  delivers transcripts to. */
     voice?(): PaneVoiceHandle;
     /** The tab's find bar (`useSearch`), for Ctrl+F / Escape. */
     search?(): SearchAtoms | undefined;

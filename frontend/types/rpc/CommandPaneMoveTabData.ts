@@ -7,4 +7,9 @@
  * `agentmux_common::StackMovePosition`'s serde encoding).
  * SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §4.1, Phase 3.
  */
-export type CommandPaneMoveTabData = { block_id: string, target_block_id: string, position: "before" | "after" | "end", activate: boolean, };
+export type CommandPaneMoveTabData = { block_id: string, target_block_id: string, position: "before" | "after" | "end", activate: boolean, 
+/**
+ * The caller's id for the queued `stackmove`, which it then skips (it
+ * already made the move). SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md §3.3.
+ */
+action_id?: string, };

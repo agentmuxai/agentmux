@@ -2,12 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Paired devices: every device paired with this computer's viewer (the host
-// popover's "Pair a device"), when it paired and was last seen, and Revoke,
-// which stops its token working and closes what it is watching. Below it,
+// popover's "Pair a device"), when it paired and was last seen, whether it may
+// send messages to agents as you (off until turned on here; agentmux-mobile's
+// SPEC_SEND_FROM_THE_PHONE_2026_10_13 §4), and Revoke, which stops its token
+// working and closes what it is watching. Below it,
 // MuxBus sign-in (muxbus-sign-in.tsx) and Cloud presence (cloud-presence.tsx).
 // agentmux-mobile's SPEC_AGENT_STATUS_AND_LIVE_PANE_FEED_2026_10_07 §4.1.
 
-import { Button } from "@/app/element/ui";
+import { Button, Switch } from "@/app/element/ui";
 import { createEffect, createSignal, For, on, onMount, Show, type JSX } from "solid-js";
 
 import { settingsAtom, viewerPairedAtom } from "@/app/store/global";
@@ -25,9 +27,9 @@ export const DEVICES_SETTINGS = {
         id: "devices.paired",
         label: "Paired devices",
         description:
-            "Devices paired with this computer can watch its agents, read-only, over your local network. Revoke one to stop it.",
+            "Devices paired with this computer can watch its agents over your local network. Turn on Can send to let one send messages to your agents as you. Revoke one to stop it.",
         section: "devices",
-        keywords: ["mobile", "device", "tablet", "pair", "revoke", "viewer", "live feed", "qr code"],
+        keywords: ["mobile", "device", "tablet", "pair", "revoke", "viewer", "live feed", "qr code", "send", "message"],
     },
     shareTerminals: {
         id: "devices.share_terminals",
@@ -80,6 +82,7 @@ export function DevicesSection(): JSX.Element {
     const [devices, setDevices] = createSignal<ViewerDeviceInfo[] | null>(null);
     const [error, setError] = createSignal<string | null>(null);
     const [revoking, setRevoking] = createSignal<string | null>(null);
+    const [granting, setGranting] = createSignal<string | null>(null);
 
     const load = async () => {
         try {
@@ -104,6 +107,21 @@ export function DevicesSection(): JSX.Element {
             setError(`Couldn't revoke ${device.device_name}: ${e instanceof Error ? e.message : e}`);
         } finally {
             setRevoking(null);
+        }
+    };
+
+    const setCanSend = async (device: ViewerDeviceInfo, canSend: boolean) => {
+        setGranting(device.device_id);
+        try {
+            const r = await RpcApi.ViewerCanSendCommand(TabRpcClient, { device_id: device.device_id, can_send: canSend });
+            setDevices((list) =>
+                (list ?? []).map((d) => (d.device_id === device.device_id ? { ...d, can_send: r.can_send } : d))
+            );
+            setError(null);
+        } catch (e) {
+            setError(`Couldn't change ${device.device_name}: ${e instanceof Error ? e.message : e}`);
+        } finally {
+            setGranting(null);
         }
     };
 
@@ -135,6 +153,7 @@ export function DevicesSection(): JSX.Element {
                                         <th>Name</th>
                                         <th>Paired</th>
                                         <th>Last seen</th>
+                                        <th>Can send</th>
                                         <th />
                                     </tr>
                                 </thead>
@@ -145,6 +164,26 @@ export function DevicesSection(): JSX.Element {
                                                 <td class="setting-devices-name">{device.device_name}</td>
                                                 <td>{ago(device.created_ms, now())}</td>
                                                 <td>{device.last_seen_ms > 0 ? ago(device.last_seen_ms, now()) : "never"}</td>
+                                                <td>
+                                                    <Show
+                                                        when={device.has_key}
+                                                        fallback={
+                                                            <span
+                                                                class="setting-devices-muted"
+                                                                title="This device paired before devices had keys. Pair it again to let it send."
+                                                            >
+                                                                Pair again
+                                                            </span>
+                                                        }
+                                                    >
+                                                        <Switch
+                                                            checked={device.can_send}
+                                                            disabled={granting() === device.device_id}
+                                                            ariaLabel={`${device.device_name} can send messages`}
+                                                            onChange={(v) => void setCanSend(device, v)}
+                                                        />
+                                                    </Show>
+                                                </td>
                                                 <td>
                                                     <Button
                                                         tone="danger"

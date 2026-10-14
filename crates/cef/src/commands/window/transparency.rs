@@ -62,7 +62,7 @@ pub fn set_window_transparency(state: &Arc<AppState>, args: &serde_json::Value) 
 
     #[cfg(target_os = "windows")]
     {
-        let hwnd_raw = state.window_hwnds.lock().get(label.as_str()).copied();
+        let hwnd_raw = state.window_hwnd(&label);
         let hwnds: Vec<*mut std::ffi::c_void> = if let Some(raw) = hwnd_raw {
             vec![raw as *mut std::ffi::c_void]
         } else {
@@ -195,7 +195,7 @@ pub fn set_window_opacity(
     let changes = opacity_changes(&out.events);
     #[cfg(target_os = "windows")]
     for (ev_label, ev_opacity) in &changes {
-        let hwnd_raw = state.window_hwnds.lock().get(ev_label.as_str()).copied();
+        let hwnd_raw = state.window_hwnd(ev_label);
         match (hwnd_raw, ev_opacity) {
             (Some(raw), Some(opacity)) => {
                 let hwnd = raw as *mut std::ffi::c_void;

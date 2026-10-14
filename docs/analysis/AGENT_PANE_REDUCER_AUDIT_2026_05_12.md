@@ -1,6 +1,6 @@
 # Agent pane reducer-coverage audit
 
-**Status:** analysis
+**Status:** historical — the mirror this audit wanted a lint for was removed by A6. Verified against code 2026-10-14 ([triage](REPORT_REDUCER_STACK_TRIAGE_2026_10_13.md)).
 
 **Date:** 2026-05-12
 **Owner:** AgentA

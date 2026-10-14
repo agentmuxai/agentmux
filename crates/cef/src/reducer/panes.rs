@@ -8,11 +8,15 @@ use std::time::Instant;
 
 use crate::state::*;
 
-use super::{DispatchOutput, HostEvent, HostLifecyclePhase, HostState, RegisterResult, emit_error};
+use super::{DispatchOutput, HostEvent, HostState, RegisterResult};
 
 // ── H.1 — pane lifecycle ─────────────────────────────────────────────────
 
-pub(super) fn handle_enqueue_browser_pane_close(state: &mut HostState, block_id: String) -> DispatchOutput {
+pub(super) fn handle_enqueue_browser_pane_close(
+    state: &mut HostState,
+    block_id: String,
+    now: Instant,
+) -> DispatchOutput {
     let entry = match state.browser_panes.get_mut(&block_id) {
         Some(e) => e,
         None => return DispatchOutput::default(), // close request for already-gone pane; idempotent
@@ -20,7 +24,7 @@ pub(super) fn handle_enqueue_browser_pane_close(state: &mut HostState, block_id:
     if matches!(entry.lifecycle, BrowserPaneLifecycle::Closing { .. }) {
         return DispatchOutput::default(); // already Closing; idempotent
     }
-    entry.lifecycle = BrowserPaneLifecycle::Closing { since: Instant::now() };
+    entry.lifecycle = BrowserPaneLifecycle::Closing { since: now };
     let label = entry.label.clone();
     let v = state.bump_version();
     DispatchOutput {
@@ -44,12 +48,6 @@ pub(super) fn handle_try_register_browser_pane_live(
     block_id: String,
     pending: Option<crate::state::PendingBrowserPaneCreate>,
 ) -> DispatchOutput {
-    if state.lifecycle == HostLifecyclePhase::ShuttingDown {
-        return emit_error(
-            state,
-            format!("try_register_browser_pane_live: shutting down (block_id={})", block_id),
-        );
-    }
     if let Some(entry) = state.browser_panes.get(&block_id) {
         // Snapshot what we need, then drop the `entry` borrow so the
         // `pending_browser_pane_creates` mutation below is sound (NLL).
@@ -96,7 +94,7 @@ pub(super) fn handle_try_register_browser_pane_live(
             ..Default::default()
         };
     }
-    let label = super::next_browser_pane_label(&block_id);
+    let label = super::next_browser_pane_label(state, &block_id);
     // Record the window this pane is created in, so a later cross-window create
     // (tear-off / redock) can be detected in the match above.
     let window_label = pending

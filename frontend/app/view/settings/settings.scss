@@ -384,6 +384,11 @@
     overflow-wrap: anywhere;
 }
 
+// "Pair again" where a device without a key would have its Can send switch.
+.setting-devices-muted {
+    color: var(--secondary-text-color);
+}
+
 // Cloud presence (sections/cloud-presence.tsx): the status line, "Publish
 // now" at the end, and a note under them.
 .setting-presence {

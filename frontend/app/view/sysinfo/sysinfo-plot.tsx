@@ -15,6 +15,8 @@ import { createEffect, createSignal, on, onCleanup, onMount, Show } from "solid-
 import { throttle } from "throttle-debounce";
 import uPlot from "uplot";
 
+import { appliedWindowTheme } from "@/app/store/window-appearance";
+
 import "uplot/dist/uPlot.min.css";
 import "./sysinfo-plot.scss";
 
@@ -204,9 +206,14 @@ export function TimeChart(props: TimeChartProps): JSX.Element {
         });
     });
 
-    // A new chart when what it draws changes (series, colors, axes), or when it
+    // A new chart when what it draws changes (series, colors, axes, or the
+    // theme, whose colors the canvas resolved when it was built), or when it
     // has none yet; otherwise only a new size, or new data.
-    createEffect(on([() => props.series, () => props.sparkline, () => props.timeAxis], () => build(), { defer: true }));
+    createEffect(
+        on([() => props.series, () => props.sparkline, () => props.timeAxis, appliedWindowTheme], () => build(), {
+            defer: true,
+        })
+    );
     createEffect(
         on(size, (s) => {
             if (!chart) build();

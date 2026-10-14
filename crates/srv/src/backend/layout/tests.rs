@@ -1784,3 +1784,33 @@ fn invariants_flag_an_inconsistent_stack() {
     assert!(violations.iter().any(|v| v.starts_with("STACK_DUPLICATE_MEMBER")), "{violations:?}");
     assert!(validate_layout_invariants(&Some(leaf_with_stack("ok", "a", &["a", "b"], 1.0))).is_empty());
 }
+
+// ── I1: each of a tab's blocks is in exactly one pane ───────────────────────
+
+#[test]
+fn invariants_flag_a_block_in_two_panes() {
+    let tree = group(
+        "root",
+        FlexDirection::Row,
+        1.0,
+        vec![leaf_with_stack("p1", "a", &["a", "b"], 1.0), leaf("p2", "b", 1.0)],
+    );
+    let violations = validate_layout_invariants(&Some(tree));
+    assert!(violations.iter().any(|v| v.starts_with("BLOCK_IN_TWO_PANES @ b")), "{violations:?}");
+    let healthy = group("root", FlexDirection::Row, 1.0, vec![leaf_with_stack("p1", "a", &["a", "b"], 1.0), leaf("p2", "c", 1.0)]);
+    assert!(validate_layout_invariants(&Some(healthy)).is_empty());
+}
+
+#[test]
+fn unplaced_blocks_counts_background_tabs_as_placed() {
+    let tree = Some(group(
+        "root",
+        FlexDirection::Row,
+        1.0,
+        vec![leaf_with_stack("p1", "a", &["a", "b"], 1.0), leaf("p2", "c", 1.0)],
+    ));
+    let ids = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+    assert!(unplaced_blocks(&tree, &ids(&["a", "b", "c"])).is_empty());
+    assert_eq!(unplaced_blocks(&tree, &ids(&["a", "d", "c", "e"])), ids(&["d", "e"]));
+    assert_eq!(unplaced_blocks(&None, &ids(&["a"])), ids(&["a"]));
+}

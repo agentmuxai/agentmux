@@ -454,8 +454,16 @@ pub struct LayoutState {
     pub leaforder: Option<Vec<LeafOrderEntry>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pendingbackendactions: Option<Vec<LayoutActionData>>,
+    /// The reducer's `TabRecord::layout_revision` as of the last queued
+    /// action. A frontend push echoes the revision it built on.
+    #[serde(default, skip_serializing_if = "is_zero_u64")]
+    pub layoutrevision: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub meta: Option<MetaMapType>,
+}
+
+fn is_zero_u64(v: &u64) -> bool {
+    *v == 0
 }
 
 // LayoutState has meta as Option<MetaMapType> (Go uses omitempty), so manual impl:
@@ -737,7 +745,7 @@ mod tests {
     ///   3. Edge: missing `children` array for leaves
     #[test]
     fn test_layout_node_serde_compat_with_frontend_shapes() {
-        // Shape 1 — single leaf (matches dnd.rs / service.rs writers).
+        // Shape 1 — single leaf (the shape `wcore::single_leaf_tree` writes).
         let leaf_json = serde_json::json!({
             "id": "node-uuid-1",
             "data": { "blockId": "block-uuid-1" },

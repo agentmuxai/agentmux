@@ -14,6 +14,16 @@ export function effectiveStack(data: TabLayoutData): string[] {
     return data.blockStack?.length ? data.blockStack : [data.blockId];
 }
 
+/** Make `blockId` its leaf's visible tab, in place. Mirrors the backend's
+ *  `activate_stack_member` (`crates/srv/src/backend/layout/mod.rs`): a leaf
+ *  with no stack stays without one. Returns false when it isn't a member. */
+export function activateMemberInStack(data: TabLayoutData, blockId: string): boolean {
+    if (!effectiveStack(data).includes(blockId)) return false;
+    data.blockId = blockId;
+    if (data.blockStack?.length) data.activeBlockId = blockId;
+    return true;
+}
+
 /**
  * Remove `blockId` from its leaf's stack in place, WITHOUT deleting its
  * block. If it was the visible tab, the right-hand neighbour becomes visible

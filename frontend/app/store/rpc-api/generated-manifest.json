@@ -891,6 +891,14 @@
             "method": "PaneMoveTabCommand"
         },
         {
+            "command": "pane.activateTab",
+            "method": "PaneActivateTabCommand"
+        },
+        {
+            "command": "pane.removeTab",
+            "method": "PaneRemoveTabCommand"
+        },
+        {
             "command": "layout.open",
             "method": "OpenLayoutCommand"
         },
@@ -1305,6 +1313,10 @@
         {
             "command": "viewer.agent-hidden",
             "method": "ViewerAgentHiddenCommand"
+        },
+        {
+            "command": "viewer.can-send",
+            "method": "ViewerCanSendCommand"
         },
         {
             "command": "viewer.devices",

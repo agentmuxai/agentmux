@@ -261,6 +261,32 @@ describe("layoutStack", () => {
     });
 
     describe("setActiveBlockInStack", () => {
+        it("sends pane.activateTab under an action id this model then skips", () => {
+            const model = createLayoutModel();
+            const nodeId = insertRootBlock(model, "b1");
+            pushBlockOntoStack(model, nodeId, "b2");
+
+            setActiveBlockInStack(model, nodeId, "b1");
+
+            expect(rpcCall).toHaveBeenCalledTimes(1);
+            const [command, data] = rpcCall.mock.calls[0];
+            expect(command).toBe("pane.activateTab");
+            expect(data.block_id).toBe("b1");
+            expect(model.processedActionIds.has(data.action_id)).toBe(true);
+        });
+
+        it("counts the revision its command was queued at as seen", async () => {
+            const model = createLayoutModel();
+            const nodeId = insertRootBlock(model, "b1");
+            pushBlockOntoStack(model, nodeId, "b2");
+            rpcCall.mockResolvedValue({ layout_revision: 4 });
+
+            setActiveBlockInStack(model, nodeId, "b1");
+            await vi.advanceTimersByTimeAsync(0);
+
+            expect([...model.ownLayoutRevisions]).toEqual([4]);
+        });
+
         it("switches the active member among existing stack members", () => {
             const model = createLayoutModel();
             const nodeId = insertRootBlock(model, "b1");
@@ -337,7 +363,7 @@ describe("layoutStack", () => {
             expect(data.blockStack).toEqual(["b3", "b1", "b2"]);
             expect(rpcCall).toHaveBeenCalledWith(
                 "pane.moveTab",
-                { block_id: "b3", target_block_id: "b1", position: "before", activate: false },
+                { block_id: "b3", target_block_id: "b1", position: "before", activate: false, action_id: expect.any(String) },
                 {}
             );
         });
@@ -370,7 +396,7 @@ describe("layoutStack", () => {
             expect(data.activeBlockId).toBe("b1");
             expect(rpcCall).toHaveBeenCalledWith(
                 "pane.moveTab",
-                { block_id: "b1", target_block_id: "b2", position: "after", activate: true },
+                { block_id: "b1", target_block_id: "b2", position: "after", activate: true, action_id: expect.any(String) },
                 {}
             );
         });
@@ -423,7 +449,7 @@ describe("layoutStack", () => {
             expect(b.data!.blockId).toBe("a2");
             expect(rpcCall).toHaveBeenCalledWith(
                 "pane.moveTab",
-                { block_id: "a2", target_block_id: "b1", position: "end", activate: true },
+                { block_id: "a2", target_block_id: "b1", position: "end", activate: true, action_id: expect.any(String) },
                 {}
             );
         });
@@ -480,7 +506,7 @@ describe("layoutStack", () => {
                 expect(rpcCall).toHaveBeenCalledTimes(1);
                 expect(rpcCall).toHaveBeenCalledWith(
                     "pane.moveTab",
-                    { block_id: "a1", target_block_id: "b1", position: "end", activate: true },
+                    { block_id: "a1", target_block_id: "b1", position: "end", activate: true, action_id: expect.any(String) },
                     {}
                 );
             });
@@ -800,6 +826,22 @@ describe("layoutStack", () => {
             expect(beforeNodeDelete).not.toHaveBeenCalled();
             expect(model.treeState.rootNode).toBeUndefined();
             expect(onNodeDelete).toHaveBeenCalledTimes(1);
+        });
+
+        it("closing one tab of a stack takes it out of srv's pane before ClosePane runs", async () => {
+            const model = createLayoutModel();
+            const nodeId = insertRootBlock(model, "b1");
+            pushBlockOntoStack(model, nodeId, "b2");
+            const order: string[] = [];
+            rpcCall.mockImplementation(async (command: string) => void order.push(command));
+            model.onNodeDelete = vi.fn(async () => void order.push("ClosePane"));
+
+            await closeBlockInStack(model, nodeId, "b2");
+
+            expect(order).toEqual(["pane.removeTab", "ClosePane"]);
+            const data = rpcCall.mock.calls[0][1];
+            expect(data.block_id).toBe("b2");
+            expect(model.processedActionIds.has(data.action_id)).toBe(true);
         });
 
         it("closing one tab of a stack hands onNodeDelete only that tab", async () => {

@@ -10,7 +10,9 @@ import { isUnderway } from "@/app/drag/drag-session";
 import { findNodeByBlockId, newLayoutNode, walkNodes } from "./layoutNode";
 import { rebuildMinimizedSet } from "./layoutMinimize";
 import { removeBlockFromLeaf, removeLeafEmptiedByMove } from "./layoutMagnify";
-import { addMemberToStack, moveMemberAcrossStacks, moveMemberInStack } from "./stackMembers";
+import { activateMemberInStack, addMemberToStack, moveMemberAcrossStacks, moveMemberInStack } from "./stackMembers";
+import type { LayoutPushResult } from "./layoutAtom";
+import type { PaneTabEditResult } from "@/types/rpc/PaneTabEditResult";
 import {
     LayoutTreeActionType,
     LayoutTreeClearTreeAction,
@@ -344,6 +346,13 @@ async function handleBackendAction(model: LayoutModel, action: LayoutActionData)
             }
             break;
         }
+        case LayoutTreeActionType.StackActivate: {
+            const leaf = model?.getNodeByBlockId(action.blockid) ?? findNodeByBlockId(model.treeState.rootNode, action.blockid);
+            if (!leaf?.data || !activateMemberInStack(leaf.data, action.blockid)) {
+                console.error("Cannot apply layout action StackActivate, no pane holds blockId", action.blockid);
+            }
+            break;
+        }
         case LayoutTreeActionType.ClearTree: {
             model.treeReducer(
                 {
@@ -471,8 +480,86 @@ export function persistToBackend(model: LayoutModel) {
             (a) => a.actionid && !model.processedActionIds.has(a.actionid)
         );
         muxObj.pendingbackendactions = unprocessed?.length ? unprocessed : undefined;
+        muxObj.layoutrevision = pushBaseRevision(model, muxObj.layoutrevision ?? 0);
 
-        model.setter(model.muxObjectAtom, muxObj);
         model.persistDebounceTimer = null;
+        const push = (model.muxObjectAtom as { _push?: (v: LayoutState) => Promise<LayoutPushResult | null> })._push;
+        if (!push) {
+            model.setter(model.muxObjectAtom, muxObj);
+            return;
+        }
+        push(muxObj)
+            .then((result) => {
+                if (result?.stale) return resyncAfterStalePush(model, result);
+                model.stalePushStreak = 0;
+            })
+            .catch((e) => console.warn("[layout] layout push failed", e));
     }, 100);
+}
+
+/**
+ * The layout revision a push is built on: the stored row's, then on through
+ * every following revision this model's own pane-tab commands were queued
+ * at (their local edits are already in its tree). srv refuses a push built
+ * on an older revision than its own (`stale_push_revision`).
+ * SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md §3.5.
+ */
+export function pushBaseRevision(model: LayoutModel, rowRevision: number): number {
+    let base = rowRevision;
+    while (model.ownLayoutRevisions.has(base + 1)) base++;
+    for (const rev of model.ownLayoutRevisions) {
+        if (rev <= base) model.ownLayoutRevisions.delete(rev);
+    }
+    return base;
+}
+
+/** A stale push in a row this many times gives up until the next edit pushes:
+ *  srv queueing faster than a round trip means something is wrong. */
+const MAX_STALE_PUSH_STREAK = 5;
+
+/**
+ * srv refused a push built before an action it queued: nothing was applied,
+ * and the row as stored (with the action) is already in this model's cache.
+ * Apply the actions it missed onto the local tree, then push again on the
+ * newer revision — the push's own edits are still in the tree.
+ */
+async function resyncAfterStalePush(model: LayoutModel, result: LayoutPushResult): Promise<void> {
+    if (model.disposed) return;
+    model.stalePushStreak++;
+    if (model.stalePushStreak > MAX_STALE_PUSH_STREAK) {
+        console.error("[layout] layout push refused as stale too many times in a row; waiting for the next edit", result);
+        return;
+    }
+    console.info("[layout] layout push refused as stale; applying the missed actions and pushing again", result);
+    await processPendingBackendActions(model);
+    model.persistToBackend();
+}
+
+/**
+ * Send the pane-tab command that mirrors a local edit this model already made
+ * (`pane.activateTab`, `pane.removeTab`, `pane.moveTab`). srv applies it and
+ * queues it for other views under the id minted here, which this model skips;
+ * the revision it was queued at counts as seen for this model's next push.
+ * A failure is only logged (the returned promise never rejects): the next
+ * tree push carries the same change.
+ * SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md §3.3.
+ */
+export function sendStackCommand(
+    model: LayoutModel,
+    op: string,
+    send: (actionId: string) => Promise<PaneTabEditResult>
+): Promise<void> {
+    const actionId = crypto.randomUUID();
+    model.processedActionIds.add(actionId);
+    let sent: Promise<PaneTabEditResult>;
+    try {
+        sent = Promise.resolve(send(actionId));
+    } catch (e) {
+        sent = Promise.reject(e);
+    }
+    return sent
+        .then((res) => {
+            if (res?.layout_revision) model.ownLayoutRevisions.add(res.layout_revision);
+        })
+        .catch((e) => console.warn(`[layout] ${op} failed; the next layout push carries the change`, e));
 }

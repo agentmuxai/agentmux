@@ -426,7 +426,7 @@ fn takes_pane_path(kind: Option<&crate::state::BrowserKind>, client_is_browser_p
 #[cfg(target_os = "windows")]
 fn native_window_visible(state: &std::sync::Arc<crate::state::AppState>, label: Option<&str>) -> Option<bool> {
     let label = label?;
-    let hwnd = *state.window_hwnds.lock().get(label)?;
+    let hwnd = state.window_hwnd(label)?;
     // SAFETY: IsWindowVisible tolerates stale/invalid handles (returns FALSE).
     let vis = unsafe {
         windows_sys::Win32::UI::WindowsAndMessaging::IsWindowVisible(

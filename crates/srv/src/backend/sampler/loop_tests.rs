@@ -72,11 +72,16 @@ async fn pane_stats_are_measured_only_while_something_subscribes() {
     // A pane whose shell is this test process, so the scan finds it alive.
     let block = "sampler-loop-smoke-block";
     pidregistry::register(block, std::process::id());
-    let task = tokio::spawn(crate::backend::sysinfo::run_sysinfo_loop(Arc::clone(&broker), config, "local".into()));
+    // Every pane is named, as the store would name a real one.
+    let panes = crate::backend::sampler::panes::tower_sampler(|_| {
+        Some(crate::backend::tower_sampler::BlockLabel { label: "Terminal".into(), agent: false })
+    });
+    let task = tokio::spawn(crate::backend::sysinfo::run_sysinfo_loop(Arc::clone(&broker), config, "local".into(), panes));
 
     // The machine's counters flow at the telemetry rate; nobody watches the pane,
     // so it isn't scanned (the janitor's first scan is 30 s away).
-    pause(1500).await;
+    // At 250 ms about eight would come in 2 s; a loaded test machine still gives a few.
+    pause(2000).await;
     assert!(seen.sysinfo() >= 3, "sysinfo samples: {}", seen.sysinfo());
     assert_eq!(seen.blockstats(), 0, "no viewer, so no pane scan");
 

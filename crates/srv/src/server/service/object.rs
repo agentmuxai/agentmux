@@ -217,97 +217,47 @@ pub(super) async fn handle_object_service(state: &AppState, call: &WebCallType) 
                 Ok(v) => v,
                 Err(e) => return WebReturnType::error(e),
             };
-            // SPEC_864 Phase 2 — an OTYPE_LAYOUT push routes through the
-            // reducer as a single `LayoutSetTree` (tree + client slices),
-            // replacing the legacy `update_raw` whole-row write PLUS the
-            // separate SetFocusedNode/SetMagnifiedNode dispatches (the
-            // "double-write": two SQLite writes, two version bumps, per
-            // push, with `TabRecord.rootnode` left a stale shadow). One
-            // dispatch → one persist-subscriber write → one version bump,
-            // and the reducer's in-memory tree stays authoritative.
-            //
-            // Fallback: an unowned layout row (no tab references it) or a
-            // rootnode that fails typed deserialization takes the legacy
-            // wcore-direct path below, loudly — never silently drop a push.
-            // For an OWNED row whose rootnode failed the typed parse, the
-            // legacy path must still dispatch the focus/magnify slice to
-            // the reducer (the pre-Phase-2 Option-A behavior) so
-            // `TabRecord` focus state can't silently diverge on that
-            // branch (reagent P1 #1970, review 3).
-            let mut fallback_slice: Option<(String, String, String)> = None;
+            // SPEC_864 Phase 2 — an OTYPE_LAYOUT push for a tab's layout row
+            // routes through the reducer as a single `LayoutSetTree` (tree +
+            // client slices); the reducer's tree stays authoritative.
             if mux_obj_value.get("otype").and_then(|v| v.as_str()) == Some(OTYPE_LAYOUT) {
-                let layout_route: Option<(String, Option<agentmux_common::LayoutNode>)> =
-                    match mux_obj_value
-                        .get("oid")
-                        .and_then(|v| v.as_str())
-                        .and_then(|layout_oid| find_tab_for_layout(store, layout_oid))
-                    {
-                        Some(tab_id) => match mux_obj_value.get("rootnode") {
-                            None | Some(serde_json::Value::Null) => Some((tab_id, None)),
-                            Some(v) => match serde_json::from_value(v.clone()) {
-                                Ok(tree) => Some((tab_id, Some(tree))),
-                                Err(e) => {
-                                    tracing::warn!(
-                                        error = %e,
-                                        "UpdateObject: layout rootnode failed typed parse; \
-                                         falling back to legacy wcore-direct write"
-                                    );
-                                    let get_str = |key: &str| -> String {
-                                        mux_obj_value
-                                            .get(key)
-                                            .and_then(|v| v.as_str())
-                                            .unwrap_or("")
-                                            .to_string()
-                                    };
-                                    fallback_slice = Some((
-                                        tab_id,
-                                        get_str("focusednodeid"),
-                                        get_str("magnifiednodeid"),
-                                    ));
-                                    None
-                                }
-                            },
+                if let Some(tab_id) = mux_obj_value
+                    .get("oid")
+                    .and_then(|v| v.as_str())
+                    .and_then(|layout_oid| find_tab_for_layout(store, layout_oid))
+                {
+                    let tree = match mux_obj_value.get("rootnode") {
+                        None | Some(serde_json::Value::Null) => PushedTree::Replace(None),
+                        Some(v) => match serde_json::from_value(v.clone()) {
+                            Ok(tree) => PushedTree::Replace(Some(tree)),
+                            // Writing the raw tree would leave the reducer's
+                            // copy stale for the next structural edit to
+                            // clobber. Keep the reducer's tree, apply the
+                            // client slices, and answer with the row as
+                            // stored so the pusher resyncs to it.
+                            Err(e) => {
+                                tracing::warn!(
+                                    error = %e,
+                                    tab_id = %tab_id,
+                                    "UpdateObject: layout rootnode failed typed parse; keeping the reducer's tree"
+                                );
+                                PushedTree::KeepCurrent
+                            }
                         },
-                        None => {
-                            tracing::warn!(
-                                "UpdateObject: layout row not owned by any tab; \
-                                 falling back to legacy wcore-direct write"
-                            );
-                            None
-                        }
                     };
-                if let Some((tab_id, new_tree)) = layout_route {
-                    return update_layout_via_reducer(state, mux_obj_value, tab_id, new_tree)
-                        .await;
+                    return update_layout_via_reducer(state, mux_obj_value, tab_id, tree).await;
                 }
+                tracing::warn!(
+                    "UpdateObject: layout row not owned by any tab; writing it directly"
+                );
             }
-            // Non-layout otypes and the layout fallbacks: legacy wholesale
-            // row replace. The unowned-row fallback has no reducer-known
-            // tab, so there is nothing to dispatch; the owned-but-unparsable
-            // fallback dispatches the focus/magnify slice AFTER the write
-            // succeeds (failure-atomicity ordering per codex P2 PR #632).
+            // Whole-row replace, only for rows the reducer doesn't own (the
+            // client row, an unowned layout row). Workspace/tab/block/window
+            // rows carry reducer-owned fields (`tabids`, `activetabid`,
+            // `blockids`, `workspaceid`); their changes go through the typed
+            // RPCs (`UpdateObjectMeta`, `UpdateTabName`, ...).
             match update_object(store, mux_obj_value) {
                 Ok((otype, oid, obj_val)) => {
-                    if let Some((tab_id, new_focused, new_magnified)) = fallback_slice {
-                        let focus_events = dispatch_to_reducer(
-                            state,
-                            agentmux_common::ipc::Command::SetFocusedNode {
-                                tab_id: tab_id.clone(),
-                                node_id: new_focused,
-                            },
-                        )
-                        .await;
-                        publish_events(state, &focus_events);
-                        let mag_events = dispatch_to_reducer(
-                            state,
-                            agentmux_common::ipc::Command::SetMagnifiedNode {
-                                tab_id,
-                                node_id: new_magnified,
-                            },
-                        )
-                        .await;
-                        publish_events(state, &mag_events);
-                    }
                     let update = MuxObjUpdate {
                         updatetype: "update".into(),
                         otype,
@@ -485,6 +435,13 @@ pub(super) async fn handle_object_service(state: &AppState, call: &WebCallType) 
     }
 }
 
+/// The tree a layout push asks for: the pushed one, or (when it didn't
+/// parse) whatever the reducer holds when the push is applied.
+enum PushedTree {
+    Replace(Option<agentmux_common::LayoutNode>),
+    KeepCurrent,
+}
+
 /// SPEC_864 Phase 2 — route a frontend `UpdateObject` layout push through
 /// the reducer as a single `LayoutSetTree` dispatch.
 ///
@@ -512,7 +469,7 @@ async fn update_layout_via_reducer(
     state: &AppState,
     mux_obj_value: serde_json::Value,
     tab_id: String,
-    new_tree: Option<agentmux_common::LayoutNode>,
+    pushed_tree: PushedTree,
 ) -> WebReturnType {
     let store = &state.mstore;
     let oid = mux_obj_value
@@ -531,22 +488,18 @@ async fn update_layout_via_reducer(
     let get_json = |key: &str| -> Option<serde_json::Value> {
         mux_obj_value.get(key).filter(|v| !v.is_null()).cloned()
     };
+    // Absent from older clients, which skip the stale check.
+    let base_revision = mux_obj_value.get("layoutrevision").and_then(|v| v.as_u64());
     let slices = agentmux_common::LayoutClientSlices {
         leaforder: get_json("leaforder"),
         focused_node_id: get_str("focusednodeid"),
         magnified_node_id: get_str("magnifiednodeid"),
         pending_backend_actions: get_json("pendingbackendactions"),
     };
-    let cmd = agentmux_common::ipc::Command::LayoutSetTree {
-        tab_id: tab_id.clone(),
-        new_tree,
-        correlation_id: String::new(),
-        slices: Some(slices),
-    };
-
     // ── single critical section: snapshot + dispatch + persist (+ rollback) ──
     let mut apply_err: Option<String> = None;
     let mut early_err: Option<String> = None;
+    let stale_at: Option<u64>;
     let events = {
         let mut s = state.srv_state.lock().await;
         // Snapshot the current row for the rollback path INSIDE the
@@ -568,12 +521,26 @@ async fn update_layout_via_reducer(
                 LayoutState::default()
             }
         };
-        if early_err.is_some() {
+        stale_at = base_revision.and_then(|b| crate::reducer::stale_push_revision(&s, &tab_id, b));
+        if let Some(current) = stale_at {
+            tracing::info!(tab_id = %tab_id, base_revision = ?base_revision, current, "UpdateObject: layout push refused, built on a stale layout revision");
+        }
+        if early_err.is_some() || stale_at.is_some() {
             Vec::new()
         } else {
-            let ctx = crate::reducer::Ctx {
-                registered_pid: None,
+            // Resolved under the lock so a concurrent push can't change the
+            // tree between the read and the dispatch.
+            let new_tree = match pushed_tree {
+                PushedTree::Replace(tree) => tree,
+                PushedTree::KeepCurrent => s.tabs.get(&tab_id).and_then(|t| t.rootnode.clone()),
             };
+            let cmd = agentmux_common::ipc::Command::LayoutSetTree {
+                tab_id: tab_id.clone(),
+                new_tree,
+                correlation_id: String::new(),
+                slices: Some(slices),
+            };
+            let ctx = crate::reducer::Ctx::new(None);
             let events = crate::reducer::update(&mut s, cmd, &ctx);
             let has_error = events
                 .iter()
@@ -626,6 +593,9 @@ async fn update_layout_via_reducer(
     if let Some(err) = early_err {
         return WebReturnType::error(err);
     }
+    if let Some(current) = stale_at {
+        return refuse_stale_layout_push(store, &oid, current);
+    }
     if let Some(err_msg) = events.iter().find_map(|e| match e {
         agentmux_common::ipc::Event::Error { message, .. } => Some(message.clone()),
         _ => None,
@@ -647,5 +617,24 @@ async fn update_layout_via_reducer(
             obj: Some(obj_val),
         }]),
         Err(e) => WebReturnType::error(format!("UpdateObject: re-read failed: {}", e)),
+    }
+}
+
+/// The answer to a stale layout push: nothing applied, `{stale, layoutrevision}`
+/// as data, and the row as stored, whose queue holds the actions the pusher
+/// missed. SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md §3.5.
+fn refuse_stale_layout_push(store: &crate::backend::storage::store::Store, oid: &str, current: u64) -> WebReturnType {
+    let updates = match get_object_by_oref(store, &format!("{}:{}", OTYPE_LAYOUT, oid)) {
+        Ok(obj_val) => vec![MuxObjUpdate {
+            updatetype: "update".into(),
+            otype: OTYPE_LAYOUT.to_string(),
+            oid: oid.to_string(),
+            obj: Some(obj_val),
+        }],
+        Err(e) => return WebReturnType::error(format!("UpdateObject: re-read failed: {}", e)),
+    };
+    WebReturnType {
+        data: Some(serde_json::json!({ "stale": true, "layoutrevision": current })),
+        ..WebReturnType::success_with_updates(updates)
     }
 }

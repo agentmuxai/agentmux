@@ -21,8 +21,11 @@
 pub mod cert;
 pub mod client;
 pub mod feed;
+pub mod origin;
 pub mod pairing;
 pub mod panes;
+pub mod sends;
+pub mod signing;
 pub mod terminal;
 
 use std::collections::HashMap;
@@ -110,6 +113,8 @@ pub struct ViewerService {
     reservation: parking_lot::Mutex<Option<(u16, socket2::Socket)>>,
     /// When each device's `last_seen_ms` was last written.
     last_seen_written: parking_lot::Mutex<HashMap<String, i64>>,
+    /// What each device sent lately: its rate limit and `message_id`s.
+    pub sends: parking_lot::Mutex<sends::SendLedger>,
 }
 
 impl ViewerService {
@@ -138,6 +143,7 @@ impl ViewerService {
             bound: parking_lot::Mutex::new(Vec::new()),
             reservation: parking_lot::Mutex::new(None),
             last_seen_written: parking_lot::Mutex::new(HashMap::new()),
+            sends: parking_lot::Mutex::new(sends::SendLedger::default()),
         })
     }
 
@@ -251,9 +257,10 @@ impl ViewerService {
         }
     }
 
-    /// Forget a revoked device's throttle entry.
+    /// Forget a revoked device's throttle entry and what it sent.
     pub fn forget_device(&self, device_id: &str) {
         self.last_seen_written.lock().remove(device_id);
+        self.sends.lock().forget_device(device_id);
     }
 }
 

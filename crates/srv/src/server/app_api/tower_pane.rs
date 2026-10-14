@@ -14,7 +14,7 @@ use super::*;
 use crate::backend::process_tracker::registry::AgentProcessRegistry;
 use crate::backend::{tower_peers, tower_remote};
 use crate::backend::tower_agentmux::{own_view_pid, parse_renderer_map, renderer_serves, RendererEntry};
-use crate::backend::tower_sampler::{BlockLabel, Inputs, Tower};
+use crate::backend::tower_sampler::{block_label, Inputs, Tower};
 
 pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     register_peers(engine, state);
@@ -154,30 +154,6 @@ fn window_workspace(mstore: &Store, window_id: &str) -> Option<String> {
     let window = mstore.get::<obj::Window>(window_id).ok().flatten()?;
     let workspace = mstore.get::<obj::Workspace>(&window.workspaceid).ok().flatten()?;
     Some(workspace.name).filter(|n| !n.is_empty())
-}
-
-/// A pane's name in Tower: the agent's name, else what the terminal runs.
-/// `None` for a block that no longer exists.
-pub(crate) fn block_label(mstore: &Store, block_id: &str) -> Option<BlockLabel> {
-    let block = mstore.get::<Block>(block_id).ok().flatten()?;
-    let meta = |key: &str| obj::meta_get_string(&block.meta, key, "");
-    let agent_name = [meta("agentName"), meta("agentId")].into_iter().find(|s| !s.is_empty());
-    let agent = agent_name.is_some()
-        || blockcontroller::get_controller(block_id).is_some_and(|c| c.get_runtime_status().is_agent_pane);
-    let label = agent_name.unwrap_or_else(|| {
-        let title = meta("frame:title");
-        let connection = meta("connection");
-        if !title.is_empty() {
-            title
-        } else if !connection.is_empty() && connection != "local" {
-            format!("Terminal ({connection})")
-        } else if agent {
-            "Agent".to_string()
-        } else {
-            "Terminal".to_string()
-        }
-    });
-    Some(BlockLabel { label, agent })
 }
 
 #[cfg(test)]

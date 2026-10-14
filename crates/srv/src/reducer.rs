@@ -15,15 +15,11 @@
 // `agentmux-launcher::reducer`. Mutex held only during dispatch
 // (sub-millisecond).
 //
-// Arms by phase:
-//   * E.1b — Register / Goodbye / Ping / GetSrvSnapshot / GetEvents
-//   * E.2  — CreateWorkspace / DeleteWorkspace
-//   * E.2b — CreateTab / DeleteTab / SetActiveTab / ReorderTab
-//   * E.3  — CreateBlock / DeleteBlock
-//   * E.5  — CreateWindow / CloseWindowInternal / SwitchWorkspace
-//             (window↔workspace mapping for sagas)
-//   * E.5+ — saga-driven multi-step commands (TearOff/Restore/Move)
-//             land via the saga coordinator dispatching atomic arms
+// Arms, by domain module: lifecycle (Register / Goodbye / Ping /
+// GetSrvSnapshot), workspace, tab, block, window (window↔workspace
+// mapping), and layout (tree, focus/magnify, pane-tab stacks, backend
+// action queue). Multi-step flows (tear-off, restore, move) are sagas
+// that dispatch these atomic arms.
 //
 // `Command::GetEvents` is intercepted by the IPC server before
 // reaching the reducer (server queries the event log; reducer
@@ -44,10 +40,49 @@ mod workspace;
 use agentmux_common::ipc::{Command, ErrorCode, Event};
 use crate::state::State;
 
-/// Per-dispatch context: the pid the dispatching connection registered.
+pub(crate) use layout::stale_push_revision;
+
+/// Text in the `MoveTab` last-tab refusal; `MoveTabToWorkspace` matches on
+/// it to return its long-standing error string unchanged.
+pub const MOVE_TAB_LAST_TAB_ERROR: &str = "cannot move last tab out of workspace";
+
+/// Per-dispatch context, built by the caller so `update` stays pure.
 #[derive(Debug, Clone)]
 pub struct Ctx {
+    /// The pid the dispatching connection registered.
     pub registered_pid: Option<u32>,
+    /// The id a `CreateWorkspace`, `CreateTab` or `CreateBlock` arm gives the
+    /// new entity. Other arms ignore it.
+    pub new_id: String,
+}
+
+impl Ctx {
+    /// A context for one dispatch, with a freshly minted `new_id`. Build one
+    /// per dispatch: a reused context makes a second create refuse the id.
+    pub fn new(registered_pid: Option<u32>) -> Self {
+        Self {
+            registered_pid,
+            new_id: uuid::Uuid::new_v4().to_string(),
+        }
+    }
+}
+
+/// The non-fatal `Event::Error` reply an arm gives a command it refuses,
+/// leaving state untouched.
+fn error_event(state: &mut State, code: ErrorCode, message: impl Into<String>) -> Vec<Event> {
+    let version = state.bump_version();
+    vec![Event::Error {
+        code,
+        message: message.into(),
+        fatal: false,
+        version,
+    }]
+}
+
+/// `error_event` with `ErrorCode::InvalidCommand`, the code nearly every
+/// refusal uses.
+fn invalid_command(state: &mut State, message: impl Into<String>) -> Vec<Event> {
+    error_event(state, ErrorCode::InvalidCommand, message)
 }
 
 pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
@@ -60,11 +95,15 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
         }
         Command::GetSrvSnapshot => snapshot::handle_get_srv_snapshot(state),
         Command::GetEvents { .. } => Vec::new(), // intercepted by server; unreachable
-        Command::CreateWorkspace { name } => workspace::handle_create_workspace(state, name),
+        Command::CreateWorkspace { name } => {
+            workspace::handle_create_workspace(state, ctx.new_id.clone(), name)
+        }
         Command::DeleteWorkspace { workspace_id, force } => {
             workspace::handle_delete_workspace(state, workspace_id, force)
         }
-        Command::CreateTab { workspace_id, name } => tab::handle_create_tab(state, workspace_id, name),
+        Command::CreateTab { workspace_id, name } => {
+            tab::handle_create_tab(state, workspace_id, ctx.new_id.clone(), name)
+        }
         Command::DeleteTab { workspace_id, tab_id, force } => tab::handle_delete_tab(state, workspace_id, tab_id, force),
         Command::SetActiveTab { workspace_id, tab_id } => {
             tab::handle_set_active_tab(state, workspace_id, tab_id)
@@ -74,7 +113,9 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
             tab_id,
             new_index,
         } => tab::handle_reorder_tab(state, workspace_id, tab_id, new_index),
-        Command::CreateBlock { tab_id, meta } => block::handle_create_block(state, tab_id, meta),
+        Command::CreateBlock { tab_id, meta } => {
+            block::create_block_with_id(state, tab_id, ctx.new_id.clone(), meta)
+        }
         Command::DeleteBlock { tab_id, block_id } => block::handle_delete_block(state, tab_id, block_id),
         Command::SetFocusedNode { tab_id, node_id } => {
             layout::handle_set_focused_node(state, tab_id, node_id)
@@ -82,38 +123,16 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
         Command::SetMagnifiedNode { tab_id, node_id } => {
             layout::handle_set_magnified_node(state, tab_id, node_id)
         }
-        // Phase E.4.B Phase 5 — layout tree mutation arms. All 11 arms are
-        // wired. First production dispatcher: the `UpdateObject`→
-        // `LayoutSetTree` reroute (SPEC_864 Phase 2, `object.rs`); the
-        // remaining wcore-direct writers migrate in SPEC_864 Phases 3–5.
-        Command::LayoutClear {
-            tab_id,
-            correlation_id,
-        } => layout::handle_layout_clear(state, tab_id, correlation_id),
+        // Layout tree arms. Every one has a producer and is persisted from
+        // its event; layout commands without an arm (LayoutClear,
+        // LayoutInsertNode, the granular move/swap/resize/replace/split
+        // ops) fall to the `InvalidCommand` catch-all below.
         Command::LayoutSetTree {
             tab_id,
             new_tree,
             correlation_id,
             slices,
         } => layout::handle_layout_set_tree(state, tab_id, new_tree, correlation_id, slices),
-        Command::LayoutInsertNode {
-            tab_id,
-            node,
-            parent_id,
-            index,
-            focus_after,
-            magnify_after,
-            correlation_id,
-        } => layout::handle_layout_insert_node(
-            state,
-            tab_id,
-            node,
-            parent_id,
-            index,
-            focus_after,
-            magnify_after,
-            correlation_id,
-        ),
         Command::LayoutDeleteNode {
             tab_id,
             node_id,
@@ -144,7 +163,7 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
             target_block_id,
             meta,
             activate,
-        } => layout::handle_create_block_in_stack(state, tab_id, target_block_id, meta, activate),
+        } => layout::handle_create_block_in_stack(state, tab_id, target_block_id, ctx.new_id.clone(), meta, activate),
         // SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §4.1 — reorder within a
         // pane or move a tab into a different pane.
         Command::LayoutStackMove {
@@ -163,97 +182,6 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
             actions,
             correlation_id,
         } => layout::handle_layout_queue_backend_actions(state, tab_id, actions, correlation_id),
-        // Phase 3 — the remaining 7 layout-tree arms. Each resolves the
-        // tab, calls the existing pure fn in `backend::layout`, runs
-        // `balance_node` (matching the frontend's post-action normalize),
-        // reconciles dangling focus/magnify, and emits the granular event.
-        Command::LayoutMoveNode {
-            tab_id,
-            node_id,
-            new_parent_id,
-            index,
-            correlation_id,
-        } => layout::handle_layout_move_node(
-            state,
-            tab_id,
-            node_id,
-            new_parent_id,
-            index,
-            correlation_id,
-        ),
-        Command::LayoutSwapNodes {
-            tab_id,
-            node1_id,
-            node2_id,
-            correlation_id,
-        } => layout::handle_layout_swap_nodes(state, tab_id, node1_id, node2_id, correlation_id),
-        Command::LayoutResizeNodes {
-            tab_id,
-            ops,
-            correlation_id,
-        } => layout::handle_layout_resize_nodes(state, tab_id, ops, correlation_id),
-        Command::LayoutReplaceNode {
-            tab_id,
-            target_id,
-            new_node,
-            focus_after,
-            correlation_id,
-        } => layout::handle_layout_replace_node(
-            state,
-            tab_id,
-            target_id,
-            new_node,
-            focus_after,
-            correlation_id,
-        ),
-        Command::LayoutSplitHorizontal {
-            tab_id,
-            target_id,
-            new_node,
-            position,
-            focus_after,
-            correlation_id,
-        } => layout::handle_layout_split_horizontal(
-            state,
-            tab_id,
-            target_id,
-            new_node,
-            position,
-            focus_after,
-            correlation_id,
-        ),
-        Command::LayoutSplitVertical {
-            tab_id,
-            target_id,
-            new_node,
-            position,
-            focus_after,
-            correlation_id,
-        } => layout::handle_layout_split_vertical(
-            state,
-            tab_id,
-            target_id,
-            new_node,
-            position,
-            focus_after,
-            correlation_id,
-        ),
-        Command::LayoutInsertNodeAtIndex {
-            tab_id,
-            node,
-            index_arr,
-            focus_after,
-            magnify_after,
-            correlation_id,
-        } => layout::handle_layout_insert_node_at_index(
-            state,
-            tab_id,
-            node,
-            index_arr,
-            focus_after,
-            magnify_after,
-            correlation_id,
-        ),
         Command::CreateWindow {
             window_id,
             workspace_id,
@@ -294,25 +222,24 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
             src_workspace_id,
             dst_workspace_id,
             dst_index,
-        } => tab::handle_move_tab(state, tab_id, src_workspace_id, dst_workspace_id, dst_index),
+            allow_empty_source,
+        } => tab::handle_move_tab(
+            state,
+            tab_id,
+            src_workspace_id,
+            dst_workspace_id,
+            dst_index,
+            allow_empty_source,
+        ),
         Command::MoveBlock {
             block_id,
             src_tab_id,
             dst_tab_id,
             dst_index,
         } => block::handle_move_block(state, block_id, src_tab_id, dst_tab_id, dst_index),
-        // Anything else is a non-fatal protocol error. Future
-        // phases (E.2b tabs, E.3 blocks, E.4 layouts) extend this
-        // match by adding new arms above.
-        other => {
-            let v = state.bump_version();
-            vec![Event::Error {
-                code: ErrorCode::InvalidCommand,
-                message: format!("srv reducer does not accept: {:?}", other),
-                fatal: false,
-                version: v,
-            }]
-        }
+        // Anything else (launcher-domain commands, unimplemented layout
+        // ops) is a non-fatal protocol error that changes no state.
+        other => invalid_command(state, format!("srv reducer does not accept: {:?}", other)),
     }
 }
 

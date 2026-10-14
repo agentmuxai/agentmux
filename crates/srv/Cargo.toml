@@ -122,6 +122,9 @@ trash = "5.2"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12", "logging"] }
 rcgen = { version = "0.13", default-features = false, features = ["crypto", "ring", "pem"] }
+# ECDSA P-256 checks of a paired device's send signature (backend/viewer/signing),
+# from the ring already under rustls: no new crate.
+ring = { version = "0.17", default-features = false, features = ["alloc"] }
 hyper = { version = "1", features = ["http1", "server"] }
 hyper-util = { version = "0.1", features = ["tokio", "service"] }
 

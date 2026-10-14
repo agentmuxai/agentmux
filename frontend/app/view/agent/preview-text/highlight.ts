@@ -12,6 +12,7 @@
  * from a deleted line into an added one.
  */
 
+import { ByteLru } from "@/util/byte-lru";
 import type { PreviewDoc } from "./types";
 
 export const SHIKI_THEME = "github-dark-high-contrast";
@@ -25,13 +26,21 @@ export interface CodeToken {
 
 /** Don't highlight more than this much text at once: it blocks the main thread. */
 const MAX_HIGHLIGHT_CHARS = 200 * 1024;
-const CACHE_ENTRIES = 200;
+/** The token cache's budget: it was 200 entries of up to 200 KB of code each. */
+const CACHE_BYTES = 8 * 1024 * 1024;
 
 let shiki: Promise<typeof import("../components/shiki-highlighter")> | null = null;
 /** The Shiki module, loaded once on first use. */
 export const loadShiki = () => (shiki ??= import("../components/shiki-highlighter"));
 
-const cache = new Map<string, CodeToken[][]>();
+/** Estimated bytes of a cached entry: the key (two bytes a character) plus
+ *  each token's text and a fixed per-token overhead. */
+function entryBytes(key: string, lines: CodeToken[][]): number {
+    let n = key.length * 2;
+    for (const line of lines) for (const t of line) n += t.content.length * 2 + 48;
+    return n;
+}
+const cache = new ByteLru<CodeToken[][]>(CACHE_BYTES, entryBytes);
 
 /** Tokens for each line of `code`, or null for plain text, too much text, or a
  *  grammar Shiki can't load. */
@@ -46,7 +55,6 @@ async function tokenize(code: string, lang: string | undefined): Promise<CodeTok
         const lines = tokens.map((line) =>
             line.map((t) => ({ content: t.content, color: t.color, fontStyle: t.fontStyle }))
         );
-        if (cache.size >= CACHE_ENTRIES) cache.delete(cache.keys().next().value!);
         cache.set(key, lines);
         return lines;
     } catch (e) {

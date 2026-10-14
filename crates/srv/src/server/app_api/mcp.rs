@@ -577,7 +577,7 @@ fn observed_agents(
     });
     let mut agents = Vec::new();
     for (block_id, observation) in crate::backend::mcp_observed::all() {
-        let Some(label) = crate::server::app_api::tower_pane::block_label(mstore, &block_id) else {
+        let Some(label) = crate::backend::tower_sampler::block_label(mstore, &block_id) else {
             continue;
         };
         let agent_id = crate::identity::resolver::block_agent_id(mstore, &block_id);

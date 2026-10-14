@@ -325,6 +325,13 @@ export interface UnloadedResult {
     /** The result's size in bytes, and estimated tokens, for display. */
     bytes: number;
     tokens: number;
+    /**
+     * The file range the header showed (`fileRangeOf`), which reads the
+     * result for Read and Edit; kept so the header doesn't change when the
+     * result leaves. Absent for tools without one.
+     * SPEC_AGENT_PANE_TOOL_OUTPUT_RETENTION_2026_10_13.md §2.
+     */
+    range?: import("./tool-meta/file-range").FileRange;
 }
 
 /**
@@ -432,6 +439,11 @@ export interface UserMessageNode {
      *  `[BROADCAST:...]` header srv prepended already removed.
      *  SPEC_SWARM_BROADCAST_AS_USER_MESSAGE_2026_10_01.md §4.5. */
     broadcast?: { recipients?: number; msgId?: string };
+    /** The paired device the user sent this from (their phone), when they did:
+     *  shown as "From <device>". From the stored record's `amx`, which only srv
+     *  writes, never from the text. agentmux-mobile's
+     *  SPEC_SEND_FROM_THE_PHONE_2026_10_13 §5.3. */
+    fromDevice?: string;
 }
 
 /**
@@ -977,6 +989,8 @@ export interface UserMessageEvent {
     type: "user_message";
     message: string;
     timestamp?: number;
+    /** The paired device that sent it, from the record's `amx` (see `deviceOrigin`). */
+    fromDevice?: string;
 }
 
 interface SessionEndEvent {

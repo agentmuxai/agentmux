@@ -17,6 +17,8 @@ mod quit;
 mod pending_reproject;
 mod promote_liveness;
 mod ui_thread_gate;
+#[cfg(target_os = "windows")]
+mod window_hwnds;
 
 pub use drag::{DragType, DragPayload, DragSession, FloatingRedockGhostState};
 pub use window_meta::{WindowKind, WindowMeta, PendingWindowCreation};
@@ -372,7 +374,7 @@ pub struct AppState {
     /// readers lock this briefly and copy out what they need. Tear-off-hook
     /// state has not moved here yet. See `crates/cef/src/reducer/mod.rs` and
     /// `docs/specs/SPEC_PHASE_F_HOST_REDUCER_2026-05-01.md`.
-    pub host_state: Mutex<crate::reducer::HostState>,
+    pub host_state: std::sync::Arc<Mutex<crate::reducer::HostState>>,
 
     /// Per-pane, per-origin media capture grants (camera/mic in browser panes).
     ///
@@ -483,8 +485,8 @@ pub struct AppState {
     /// so an HWND key risks a stale entry colliding with a recreated pane.
     ///
     /// Why a wrong-skip can't happen:
-    /// - **Labels are globally unique and never reused** (monotonic
-    ///   `BROWSER_PANE_LABEL_SEQ`; see `next_browser_pane_label`). A
+    /// - **Labels are unique and never reused within the process** (monotonic
+    ///   `HostState::next_browser_pane_label_seq`; see `next_browser_pane_label`). A
     ///   close→recreate registers the new pane under a brand-new label, so the
     ///   label-keyed cache always *misses* and re-applies. This is the primary
     ///   guarantee.
@@ -548,7 +550,7 @@ pub struct AppState {
     // PR #5 H.5 — `is_quitting` AtomicBool deleted; the host reducer's
     // `HostState.quit_state: QuitState` is the sole source of truth.
     // Reads go through `AppState::is_quitting()`; transitions through
-    // `HostCommand::BeginDrain` and `ConfirmDrained`.
+    // `HostCommand::BeginDrain`.
 
     /// Version-specific data directory (e.g. ai.agentmux.cef.v0-32-111/)
     pub version_data_dir: Mutex<Option<String>>,
@@ -625,15 +627,14 @@ pub struct AppState {
     // Phase B.1 removed `job_handle` (was Windows-only). Launcher
     // owns J0 wrapping srv now; host no longer needs its own job.
 
-    /// Per-window HWND registry (label → HWND). Bound at Views window
-    /// creation (`app/mod.rs` `on_window_created`) and by the floating-pane
-    /// creator right after `CreateWindowExW`; `set_window_init_status` →
-    /// `capture_hwnd_for_label` fills in any label still missing once the
-    /// window is shown. Stored as `isize` (the raw HWND value) so the map is
-    /// `Send`. Read wherever the host must target exactly one window's HWND
-    /// (opacity, close, drag, …) instead of enumerating all process windows.
+    /// Per-window HWND registry (label → outer top-level HWND), owned by the
+    /// host reducer (`HostState.window_hwnds`). Bound at Views window creation
+    /// (`app/mod.rs` `on_window_created`) and by the floating-pane creator
+    /// right after `CreateWindowExW`; `capture_hwnd_for_label` fills in any
+    /// label still missing once the window is shown. Use `window_hwnd` /
+    /// `bind_window_hwnd` / `evict_window_hwnd` (`state/window_hwnds.rs`).
     #[cfg(target_os = "windows")]
-    pub window_hwnds: Mutex<HashMap<String, isize>>,
+    pub window_hwnds: window_hwnds::WindowHwndsShim,
 
     /// Phase 4b — per-window ghost state for floating-pane redock.
     /// Keyed by window label. The target renderer pushes its last-computed
@@ -719,6 +720,11 @@ pub struct AppState {
 
 impl Default for AppState {
     fn default() -> Self {
+        // The reducer reads no environment; background-service mode is read
+        // here, once, and handed to it (see `HostState::background_service_enabled`).
+        let host_state = std::sync::Arc::new(Mutex::new(crate::reducer::HostState::new(
+            std::env::var("AGENTMUX_BACKGROUND_SERVICE").is_ok(),
+        )));
         Self {
             auth_key: Mutex::new(uuid::Uuid::new_v4().to_string()),
             host_reg_secret: Mutex::new(uuid::Uuid::new_v4().to_string()),
@@ -770,7 +776,9 @@ impl Default for AppState {
             owned_panes: Mutex::new(std::collections::HashSet::new()),
             site_limits: Default::default(),
             popup_openers: Mutex::new(std::collections::HashMap::new()),
-            host_state: Mutex::new(crate::reducer::HostState::default()),
+            #[cfg(target_os = "windows")]
+            window_hwnds: window_hwnds::WindowHwndsShim::new(host_state.clone()),
+            host_state,
             media_grants: Mutex::new(
                 crate::browser_panes::media_grants::MediaGrantStore::new(),
             ),
@@ -802,8 +810,6 @@ impl Default for AppState {
             browser_api: crate::browser_api::BrowserApiState::new(),
             debug_port: Mutex::new(0),
             cef_cache_dir: Mutex::new(None),
-            #[cfg(target_os = "windows")]
-            window_hwnds: Mutex::new(HashMap::new()),
             floating_redock_ghost: Mutex::new(HashMap::new()),
             window_transparent: std::sync::atomic::AtomicBool::new(false),
             ui_thread_gate: Mutex::new(UiThreadGate::default()),
@@ -1082,22 +1088,6 @@ impl AppState {
             .filter(|(_, h)| matches!(h.kind, BrowserKind::TopLevel { is_pool: true }))
             .map(|(l, _)| l.clone())
             .collect()
-    }
-
-    /// Reverse lookup: find the label whose cached HWND matches `hwnd`.
-    /// Used by the win-event HIDE handler to map an OS-level window hide to a
-    /// logical `report_window_closed` call, covering close paths (Alt+F4,
-    /// taskbar) that bypass the `close_window()` RPC.
-    /// O(n) over `window_hwnds` — n is bounded by the number of open windows
-    /// (typically 1–5). Returns `None` if `hwnd` is not in the cache.
-    #[cfg(target_os = "windows")]
-    pub fn label_for_hwnd(&self, hwnd: windows_sys::Win32::Foundation::HWND) -> Option<String> {
-        let raw = hwnd as isize;
-        let guard = self.window_hwnds.lock();
-        guard
-            .iter()
-            .find(|(_k, v): &(&String, &isize)| **v == raw)
-            .map(|(k, _)| k.clone())
     }
 
     /// Returns `true` iff the browser registered under `label` is a
@@ -1614,12 +1604,6 @@ fn log_host_event(ev: &crate::reducer::HostEvent) {
             event = "QuitDraining",
             reason = ?reason, version,
             "[host-reducer] entering drain mode",
-        ),
-        HostEvent::QuitReady { version } => tracing::warn!(
-            target: "host-reducer",
-            event = "QuitReady",
-            version,
-            "[host-reducer] drain complete; host quitting",
         ),
         // ── Opacity ──────────────────────────────────────────────────────
         HostEvent::WindowOpacityApplied { label, opacity, version } => tracing::debug!(

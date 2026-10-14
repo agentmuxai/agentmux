@@ -135,6 +135,11 @@ export class OneWayFlow {
         for (const c of containers) if (c) this.ro?.observe(c, { box: "border-box" });
     }
 
+    /** The bottom spacer's current height (px). */
+    get spacerHeight(): number {
+        return this.spacerPx;
+    }
+
     observeRow(el: Element): void {
         this.rows.add(el);
         // Border box, not the default content box: a row whose padding or

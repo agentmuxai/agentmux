@@ -1,22 +1,24 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-use agentmux_common::ipc::{ErrorCode, Event};
+use agentmux_common::ipc::Event;
 
 use crate::state::State;
 
 
 use crate::state::WorkspaceRecord;
 
-/// Phase E.2 — create a new workspace. Reducer assigns the OID
-/// (UUID), inserts into canonical state, emits WorkspaceCreated.
-/// NOT idempotent on retry: each invocation generates a fresh UUID
-/// and inserts a new row, so a saga that double-fires CreateWorkspace
-/// would create two distinct workspaces. Saga-side dedup (correlation
-/// IDs / saga state machine) is responsible for at-most-once delivery
-/// when sagas land in E.5+.
-pub(super) fn handle_create_workspace(state: &mut State, name: String) -> Vec<Event> {
-    let workspace_id = uuid::Uuid::new_v4().to_string();
+use super::invalid_command;
+
+/// Create a workspace with the caller-minted `workspace_id` (`Ctx::new_id`),
+/// insert it into canonical state and emit `WorkspaceCreated`. Refuses an id
+/// already in use. Each dispatch mints a fresh id, so a saga that
+/// double-fires CreateWorkspace creates two workspaces; at-most-once
+/// delivery is the saga's job.
+pub(super) fn handle_create_workspace(state: &mut State, workspace_id: String, name: String) -> Vec<Event> {
+    if state.workspaces.contains_key(&workspace_id) {
+        return invalid_command(state, format!("CreateWorkspace: id already in use: {}", workspace_id));
+    }
     state.workspaces.insert(
         workspace_id.clone(),
         WorkspaceRecord {
@@ -103,13 +105,7 @@ pub(super) fn handle_delete_workspace(
 /// the name is unchanged.
 pub(super) fn handle_rename_workspace(state: &mut State, workspace_id: String, name: String) -> Vec<Event> {
     let Some(workspace) = state.workspaces.get_mut(&workspace_id) else {
-        let v = state.bump_version();
-        return vec![Event::Error {
-            code: ErrorCode::InvalidCommand,
-            message: format!("RenameWorkspace: workspace not found: {}", workspace_id),
-            fatal: false,
-            version: v,
-        }];
+        return invalid_command(state, format!("RenameWorkspace: workspace not found: {}", workspace_id));
     };
     if workspace.name == name {
         return Vec::new();
@@ -135,16 +131,7 @@ pub(super) fn handle_update_workspace_meta(
     meta_patch: serde_json::Value,
 ) -> Vec<Event> {
     if !state.workspaces.contains_key(&workspace_id) {
-        let v = state.bump_version();
-        return vec![Event::Error {
-            code: ErrorCode::InvalidCommand,
-            message: format!(
-                "UpdateWorkspaceMeta: workspace not found: {}",
-                workspace_id
-            ),
-            fatal: false,
-            version: v,
-        }];
+        return invalid_command(state, format!("UpdateWorkspaceMeta: workspace not found: {}", workspace_id));
     }
     let v = state.bump_version();
     vec![Event::WorkspaceMetaUpdated {
@@ -363,5 +350,93 @@ mod tests {
         )));
         assert!(!state.windows.contains_key("win-a"));
         assert_eq!(state.windows["win-b"].workspace_id, ws_b);
+    }
+
+    #[test]
+    fn create_workspace_takes_its_id_from_ctx() {
+        let mut state = State::default();
+        let events = update(&mut state, Command::CreateWorkspace { name: "w".into() }, &ctx_with_id("ws-fixed"));
+        assert!(matches!(&events[0], Event::WorkspaceCreated { workspace_id, .. } if workspace_id == "ws-fixed"));
+        assert_eq!(state.workspaces["ws-fixed"].workspace_id, "ws-fixed");
+    }
+
+    #[test]
+    fn create_workspace_refuses_an_id_in_use() {
+        let mut state = State::default();
+        update(&mut state, Command::CreateWorkspace { name: "first".into() }, &ctx_with_id("dup"));
+        let events = update(&mut state, Command::CreateWorkspace { name: "second".into() }, &ctx_with_id("dup"));
+        assert!(matches!(&events[..], [Event::Error { message, .. }] if message.contains("already in use")));
+        assert_eq!(state.workspaces.len(), 1);
+        assert_eq!(state.workspaces["dup"].name, "first");
+    }
+
+    #[test]
+    fn rename_workspace_renames_and_emits_event() {
+        let mut state = State::default();
+        let ws = create_workspace(&mut state, "old");
+        let events = update(
+            &mut state,
+            Command::RenameWorkspace { workspace_id: ws.clone(), name: "new".into() },
+            &ctx(1),
+        );
+        assert!(matches!(
+            &events[..],
+            [Event::WorkspaceRenamed { workspace_id, name, .. }] if *workspace_id == ws && name == "new"
+        ));
+        assert_eq!(state.workspaces[&ws].name, "new");
+    }
+
+    #[test]
+    fn rename_workspace_to_same_name_is_silent_no_op() {
+        let mut state = State::default();
+        let ws = create_workspace(&mut state, "same");
+        let version = state.event_version;
+        let events = update(&mut state, Command::RenameWorkspace { workspace_id: ws, name: "same".into() }, &ctx(1));
+        assert!(events.is_empty());
+        assert_eq!(state.event_version, version);
+    }
+
+    #[test]
+    fn rename_unknown_workspace_errors() {
+        let mut state = State::default();
+        let events = update(
+            &mut state,
+            Command::RenameWorkspace { workspace_id: "ghost".into(), name: "n".into() },
+            &ctx(1),
+        );
+        assert!(matches!(
+            &events[..],
+            [Event::Error { code: agentmux_common::ipc::ErrorCode::InvalidCommand, fatal: false, message, .. }]
+                if message.contains("RenameWorkspace")
+        ));
+    }
+
+    #[test]
+    fn update_workspace_meta_passes_patch_through_without_touching_state() {
+        let mut state = State::default();
+        let ws = create_workspace(&mut state, "w");
+        let before = state.workspaces[&ws].clone();
+        let patch = serde_json::json!({ "bg": "#000" });
+        let events = update(
+            &mut state,
+            Command::UpdateWorkspaceMeta { workspace_id: ws.clone(), meta_patch: patch.clone() },
+            &ctx(1),
+        );
+        assert!(matches!(
+            &events[..],
+            [Event::WorkspaceMetaUpdated { workspace_id, meta_patch, .. }] if *workspace_id == ws && *meta_patch == patch
+        ));
+        assert_eq!(state.workspaces[&ws], before);
+    }
+
+    #[test]
+    fn update_meta_of_unknown_workspace_errors() {
+        let mut state = State::default();
+        let events = update(
+            &mut state,
+            Command::UpdateWorkspaceMeta { workspace_id: "ghost".into(), meta_patch: serde_json::json!({}) },
+            &ctx(1),
+        );
+        assert!(matches!(&events[..], [Event::Error { message, .. }] if message.contains("UpdateWorkspaceMeta")));
     }
 }

@@ -207,13 +207,13 @@ tasks:
             - bash -c 'STRIP_MAPS=1 RELEASE_CHANNEL=stable bash scripts/package-linux.sh --format=rpm {{.CLI_ARGS}}'
 
     package:linux:tarball:
-        desc: 'Like `task package:linux` but produces a portable .tar.gz instead of an AppImage — no fpm/appimagetool dependency. Same per-build channel isolation and ephemeral label. See docs/specs/SPEC_LINUX_DISTRO_TARGETS_AND_DOWNLOADS_PAGE_2026_09_15.md.'
+        desc: 'Like `task package:linux` but produces a portable .tar.xz instead of an AppImage — no fpm/appimagetool dependency. Same per-build channel isolation and ephemeral label. See docs/specs/SPEC_LINUX_DISTRO_TARGETS_AND_DOWNLOADS_PAGE_2026_09_15.md.'
         platforms: [linux]
         cmds:
             - bash scripts/package-linux.sh --format=tarball {{.CLI_ARGS}}
 
     package:release:linux:tarball:
-        desc: 'Like `task package:release:linux` but produces a portable .tar.gz. Same stable-build guard.'
+        desc: 'Like `task package:release:linux` but produces a portable .tar.xz. Same stable-build guard.'
         platforms: [linux]
         cmds:
             - bash scripts/guard-stable-build.sh
@@ -925,15 +925,22 @@ tasks:
                 # wipe agentmux-launcher.exe while it is still running. Windows
                 # locks the EXE image for the process lifetime, so rm -rf on a
                 # running dir exits non-zero and the subsequent cp fails (exit 201).
-                # Old cef-dev-* dirs accumulate but are small; run `task clean:host`
-                # after stopping a dev session to wipe them all. No prune loop here:
-                # rm -rf on a live dir partially succeeds (unlocked files like
-                # agentmux-mcp are deleted while locked DLLs/EXE survive), leaving
-                # the running session with broken tool paths on the next shell call.
+                # Each run leaves a ~1 GB cef-dev-<epoch> behind, so two prunes
+                # run via scripts/prune-dev-builds.sh: here, which clears older
+                # builds of a session that was killed before it could clean up
+                # (skipping any made in the last 10 minutes, which another run in
+                # this clone may be about to start), and after the launcher exits
+                # (end of this block), for this run's own build only. It deletes a build
+                # only when no process runs from it, because rm -rf on a live dir
+                # partially succeeds (unlocked files like agentmux-mcp are deleted
+                # while locked DLLs/EXE survive), leaving the running session with
+                # broken tool paths on the next shell call. A build it can't prove
+                # idle is left for the next run.
                 # Unix keeps a fixed "dist/cef-dev" name so install-linux-desktop.sh
                 # writes a stable Exec= path that survives across dev sessions.
                 if [ "{{OS}}" = "windows" ]; then
                   DEV_DIR="dist/cef-dev-$(date +%s 2>/dev/null || echo dev)"
+                  bash scripts/prune-dev-builds.sh --keep "$(basename "$DEV_DIR")" --grace 10 || true
                 else
                   DEV_DIR="dist/cef-dev"
                   rm -rf "$DEV_DIR" 2>/dev/null || true
@@ -1215,8 +1222,8 @@ tasks:
                 # dock-clicks to work. Unix: each `dev:serve` start wipes + recreates the
                 # fixed $DEV_DIR, so leaving it around is safe (no stale
                 # binaries leak across versions). Windows: each run creates a
-                # fresh dist/cef-dev-<epoch> dir and never wipes it; old dirs
-                # accumulate until `task clean:host` removes them.
+                # fresh dist/cef-dev-<epoch> dir; scripts/prune-dev-builds.sh
+                # removes it (and any older idle ones) once nothing runs from it.
                 #
                 # --strictPort closes the TOCTOU window: if something binds
                 # our port between the pre-check and Vite startup, Vite
@@ -1270,7 +1277,16 @@ tasks:
                 # The launcher inherits AGENTMUX_DEV and the host inherits
                 # it transitively through tokio::process::Command::spawn.
                 if [ "{{OS}}" = "windows" ]; then
-                  cd "$DEV_DIR" && AGENTMUX_DEV=1 ./agentmux-launcher.exe --url="$VITE_URL"
+                  launcher_rc=0
+                  (cd "$DEV_DIR" && AGENTMUX_DEV=1 ./agentmux-launcher.exe --url="$VITE_URL") || launcher_rc=$?
+                  # The app has exited: delete this run's build (and any older idle
+                  # one). Its helper processes follow the launcher out within a few
+                  # seconds, so wait for them; a build still in use stays for the
+                  # next run's prune. The launcher's exit code is the task's. The
+                  # `||` matters: a task block exits on the first failing command,
+                  # which would skip the prune after a crash.
+                  bash scripts/prune-dev-builds.sh --only "$(basename "$DEV_DIR")" --wait 20 || true
+                  exit $launcher_rc
                 else
                   # Phase 1: launch via the launcher (it spawns srv, hands the
                   # host its endpoints, and supervises both). LD_LIBRARY_PATH=.

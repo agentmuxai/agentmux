@@ -10,7 +10,7 @@ use cef::Browser;
 
 use crate::state::*;
 
-use super::{DispatchOutput, HostEvent, HostLifecyclePhase, HostState, emit_error};
+use super::{DispatchOutput, HostEvent, HostState, emit_error};
 
 // ── H.2 — browser handle registry ────────────────────────────────────────
 
@@ -19,10 +19,8 @@ pub(super) fn handle_register_browser(
     label: String,
     browser: Browser,
     kind: BrowserKind,
+    registered_at: Instant,
 ) -> DispatchOutput {
-    if state.lifecycle == HostLifecyclePhase::ShuttingDown {
-        return emit_error(state, format!("register_browser: shutting down (label={})", label));
-    }
     if state.browsers.contains_key(&label) {
         return emit_error(state, format!("register_browser: label {} already registered", label));
     }
@@ -32,7 +30,7 @@ pub(super) fn handle_register_browser(
             label: label.clone(),
             browser,
             kind: kind.clone(),
-            registered_at: Instant::now(),
+            registered_at,
         },
     );
     // Quit arming (SPEC_PILLAR2_SANITIZE_THEN_DECIDE §1.E): the first live
@@ -68,12 +66,14 @@ pub(super) fn handle_register_browser(
 
 /// Rename a browser entry `old_label` → `new_label`, re-keying the per-label
 /// host state that persists for the window's life: the `browsers` map (and the
-/// duplicated `BrowserHandle.label` field), plus `window_opacities` and
-/// `pane_window_states` when an entry exists. `window_meta` / `window_hwnds`
-/// live on `AppState` and are re-keyed by the caller
+/// duplicated `BrowserHandle.label` field), plus `window_hwnds`,
+/// `window_opacities` and `pane_window_states` when an entry exists, all under
+/// one lock so a promoted window's HWND can't be read under the wrong label.
+/// `window_meta` lives on `AppState` and is re-keyed by the caller
 /// (`promote_pane_pool_window`). Errors if `old_label` is absent or `new_label`
 /// is already registered. Emits no event — the frontend learns the new label
-/// via the `pool:pane-promote` payload, not a host event.
+/// via the `pool:pane-promote` payload, not a host event — and doesn't log:
+/// the caller logs the re-key when `relabel_ok` comes back true.
 /// See `SPEC_FLOATING_PANE_POOL_RELABEL_2026_06_30`.
 #[cfg(target_os = "windows")]
 pub(super) fn handle_relabel_browser(
@@ -108,20 +108,17 @@ pub(super) fn handle_relabel_browser(
         .expect("presence checked above");
     handle.label = new_label.clone();
     state.browsers.insert(new_label.clone(), handle);
+    if let Some(hwnd) = state.window_hwnds.remove(&old_label) {
+        state.window_hwnds.insert(new_label.clone(), hwnd);
+    }
     // Re-key sibling per-label state only when an entry exists (both are
     // created lazily and are usually absent at promote time).
     if let Some(opacity) = state.window_opacities.remove(&old_label) {
         state.window_opacities.insert(new_label.clone(), opacity);
     }
     if let Some(win_state) = state.pane_window_states.remove(&old_label) {
-        state.pane_window_states.insert(new_label.clone(), win_state);
+        state.pane_window_states.insert(new_label, win_state);
     }
-    tracing::info!(
-        target: "pool:pane",
-        old_label = %old_label,
-        new_label = %new_label,
-        "[relabel] browser re-keyed on pane-pool promotion"
-    );
     DispatchOutput {
         relabel_ok: true,
         ..Default::default()
