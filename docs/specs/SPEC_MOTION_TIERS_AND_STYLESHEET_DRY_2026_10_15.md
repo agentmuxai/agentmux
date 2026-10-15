@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-15
 **Author:** AgentY@narko
-**Status:** approved 2026-10-15; the operator took every recommendation in §8 ("go with recommendations, get it all built"). Phases in §7; each PR updates this line. Phase A (one motion gate; everything animates in both tiers) is in the PR that adds this spec.
+**Status:** active. Approved 2026-10-15: the operator took every recommendation in §8 ("go with recommendations, get it all built"). Phases in §7; each PR updates this line. Phase A (one motion gate; everything animates in both tiers) is in the PR that adds this spec.
 **Verified against:** `agentmux` `main` @ `fb6b20ba8`, by reading code (three read-only inventories, spot-checked by hand) and this machine's Windows setting.
 **Scope:** every animation, transition and motion gate in `frontend/` (CSS, SCSS, TS, the vendored Font Awesome CSS, SVG assets, `index.html`), the `window:reducedmotion` setting end to end, and the shared stylesheet layer (`theme.scss`, `mixins.scss`, `element/ui/`).
 **Related:**
