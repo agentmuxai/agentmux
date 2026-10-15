@@ -145,18 +145,22 @@ static TRANSFERS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(4);
 const SEEN_FOR: std::time::Duration = std::time::Duration::from_secs(15 * 60);
 static SEEN_LAN: std::sync::Mutex<Vec<(String, std::time::Instant)>> = std::sync::Mutex::new(Vec::new());
 
-/// Whether this LAN files jekt's msgid was delivered here before.
-fn seen_before(msgid: &str) -> bool {
+/// Claim this LAN files jekt's msgid for one delivery, under one lock so two
+/// copies arriving at once can't both pass: `false` when it was delivered
+/// here before or is being delivered now.
+fn reserve(msgid: &str) -> bool {
     let mut seen = SEEN_LAN.lock().unwrap_or_else(|e| e.into_inner());
     seen.retain(|(_, at)| at.elapsed() < SEEN_FOR);
-    seen.iter().any(|(id, _)| id == msgid)
+    if seen.iter().any(|(id, _)| id == msgid) {
+        return false;
+    }
+    seen.push((msgid.to_string(), std::time::Instant::now()));
+    true
 }
 
-/// Remember a LAN files jekt's msgid once it is delivered, and only then:
-/// a delivery that failed may be retried.
-fn remember_delivered(msgid: &str) {
-    let mut seen = SEEN_LAN.lock().unwrap_or_else(|e| e.into_inner());
-    seen.push((msgid.to_string(), std::time::Instant::now()));
+/// Give a claim back after a delivery that failed, so the sender may retry.
+fn release(msgid: &str) {
+    SEEN_LAN.lock().unwrap_or_else(|e| e.into_inner()).retain(|(id, _)| id != msgid);
 }
 
 /// The body of a forward with files: the request's JSON length (u32,
@@ -309,7 +313,9 @@ async fn receive<R: tokio::io::AsyncRead + Unpin>(
         return serde_json::json!({ "success": false, "error": format!("agent not found: {target}") });
     }
     let withheld = withheld_reason(&req).is_some();
-    if tier == "lan" && !withheld && seen_before(req.request_id.as_deref().unwrap_or("")) {
+    let msgid = req.request_id.clone().unwrap_or_default();
+    let claimed = tier == "lan" && !withheld;
+    if claimed && !reserve(&msgid) {
         return refused(&req, "files refused: this message was already delivered");
     }
 
@@ -324,10 +330,9 @@ async fn receive<R: tokio::io::AsyncRead + Unpin>(
     }
     prepare(&mut req).await;
     let delivered = req.files_delivery.as_ref().map_or(0, |d| d.delivered);
-    let msgid = req.request_id.clone().unwrap_or_default();
     let resp = state.reactive_handler.inject_message(req);
-    if tier == "lan" && resp.success {
-        remember_delivered(&msgid);
+    if claimed && !resp.success {
+        release(&msgid);
     }
     let mut value = serde_json::to_value(&resp).unwrap_or_default();
     if let Some(obj) = value.as_object_mut() {
@@ -676,10 +681,10 @@ mod tests {
     #[test]
     fn a_lan_files_jekt_is_delivered_once() {
         let id = format!("m-{}", std::process::id());
-        assert!(!seen_before(&id));
-        assert!(!seen_before(&id), "not delivered yet: a retry is fine");
-        remember_delivered(&id);
-        assert!(seen_before(&id), "a replay within the window");
-        assert!(!seen_before(&format!("{id}-other")));
+        assert!(reserve(&id));
+        assert!(!reserve(&id), "a copy arriving while the first is delivered, or after");
+        release(&id);
+        assert!(reserve(&id), "a delivery that failed may be retried");
+        assert!(reserve(&format!("{id}-other")));
     }
 }
