@@ -1,7 +1,7 @@
 # Spec: an agent pane shows its latest content still, on a tab switch and on a send
 
 **Date:** 2026-10-15
-**Status:** active. Shipped: §4.1, rows on screen stay put when rows above are removed or inserted (#4962); §3.1 and §3.2, a pane shown again lands at its latest content (PR_PENDING). Left: §3.3-§3.5, §4.2, §4.3.
+**Status:** active. Shipped: §4.1, rows on screen stay put when rows above are removed or inserted (#4962); §3.1 and §3.2, a pane shown again lands at its latest content (#4963). Left: §3.3-§3.5, §4.2, §4.3.
 **Scope:** the agent pane's transcript (`frontend/app/view/agent/`): the one-way scroll flow, the virtual list, the live-feed roll-off.
 **Related:** `SPEC_AGENT_PANE_ONE_WAY_FLOW_2026_10_07.md` (the follower, spacer room, commit points), `SPEC_RENDERER_RECYCLE_WHEN_IDLE_2026_10_13.md` (stable row ids, #4952).
 
