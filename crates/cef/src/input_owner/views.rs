@@ -70,6 +70,7 @@ pub fn pane_pointer_down(state: &Arc<AppState>, block: &str) {
 /// Not while this adapter is focusing the pane itself, nor before the pane is
 /// live: Views focuses a new pane's browser as it is added, and CEF may report
 /// a focus set from code with the same source.
+#[cfg_attr(target_os = "macos", allow(dead_code))]
 pub fn pane_chosen(state: &Arc<AppState>, block: &str) {
     if ADAPTER_FOCUSING.with(|f| f.get()) {
         return;
