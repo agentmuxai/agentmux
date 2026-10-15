@@ -186,6 +186,7 @@ async fn activate_tab_switches_the_stored_pane_and_queues_under_the_callers_id()
     .unwrap();
     assert_eq!(res.layout_revision, before + 1);
     let stored = row(&state, &layout_oid);
+    assert_eq!(res.version, stored.version as u64, "the answer names the stored row's version");
     assert_eq!(stored.rootnode.as_ref().unwrap().data.as_ref().unwrap().block_id, a);
     let last = stored.pendingbackendactions.unwrap().pop().unwrap();
     assert_eq!((last.actiontype.as_str(), last.actionid.as_str(), last.blockid.as_str()), ("stackactivate", "fe-1", a.as_str()));
@@ -213,5 +214,6 @@ async fn remove_tab_takes_one_tab_out_and_queues_a_delete_under_the_callers_id()
         .await
         .unwrap();
     assert_eq!(again.layout_revision, 0);
+    assert_eq!(again.version, row(&state, &layout_oid).version as u64);
     assert_eq!(state.srv_state.lock().await.tabs[&tab_id].layout_revision, before + 1);
 }

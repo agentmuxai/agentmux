@@ -527,6 +527,9 @@ declare global {
         ephemeral: boolean;
         targetblockid?: string;
         position?: string;
+        /** The node id srv gave the leaf it placed (insert, split): the
+         *  frontend's mirror uses it, so both trees name it alike. */
+        nodeid?: string;
     };
 
     // waveobj.LayoutState

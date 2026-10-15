@@ -10,6 +10,8 @@ import { createSignal } from "solid-js";
 import { LayoutModel } from "@/layout/lib/layoutModel";
 import { deriveNodeId, newLayoutNode } from "@/layout/lib/layoutNode";
 import { isLayoutQuiet, reconcileWithStoredLayout } from "@/layout/lib/layoutIntents";
+import { sendStackCommand } from "@/layout/lib/layoutPersistence";
+import { closeBlockInStack, pushBlockOntoStack } from "@/layout/lib/layoutStack";
 import {
     LayoutNode,
     LayoutTreeActionType,
@@ -225,5 +227,148 @@ describe("layout intents", () => {
             expect(model.treeState.rootNode!.size).toBe(7);
             expect(model.treeState.focusedNodeId).toBe(a.id);
         });
+    });
+});
+
+describe("backend edits srv already applied", () => {
+    beforeEach(() => {
+        rows.clear();
+        calls.length = 0;
+    });
+
+    /** srv placed `blockId` (as `place_block` does) and queued the matching action. */
+    function queueInsert(model: LayoutModel, version: number, stored: LayoutNode | undefined, action: Partial<LayoutActionData>) {
+        const row = rows.get("layout-1") as any;
+        row._set({
+            otype: "layout",
+            oid: "layout-1",
+            version,
+            meta: {},
+            rootnode: stored,
+            pendingbackendactions: [{ actiontype: "insert", focused: true, magnified: false, ephemeral: false, ...action }],
+        });
+        model.onBackendUpdate();
+    }
+
+    it("a queued insert is mirrored with srv's node id, and nothing is sent back", async () => {
+        const model = createModel();
+        const a = insert(model, "a");
+        intentsSent()[0].resolve({ applied: true, version: 2 });
+        await settle();
+        const push = vi.fn(async () => null);
+        (model.muxObjectAtom as any)._push = push;
+        // srv's tree after its own insert: a and the new leaf in a row.
+        const actionId = "a0000009-0000-4000-8000-000000000009";
+        const stored = {
+            id: deriveNodeId(actionId, 1),
+            flexDirection: "row",
+            size: 10,
+            children: [
+                { ...JSON.parse(JSON.stringify(a)), flexDirection: "column" },
+                { id: "srv-leaf", flexDirection: "column", size: 10, data: { blockId: "b" } },
+            ],
+        } as LayoutNode;
+        queueInsert(model, 3, stored, { actionid: actionId, blockid: "b", nodeid: "srv-leaf" });
+        await settle();
+        expect(JSON.stringify(model.treeState.rootNode)).toContain("srv-leaf");
+        expect(model.treeState.rootNode!.id).toBe(deriveNodeId(actionId, 1));
+        expect(intentsSent()).toHaveLength(1); // only the first insert
+        await new Promise((r) => setTimeout(r, 150));
+        expect(push).not.toHaveBeenCalled();
+    });
+
+    it("a queued placement already in the tree is skipped", async () => {
+        const model = createModel();
+        insert(model, "a");
+        intentsSent()[0].resolve({ applied: true, version: 2 });
+        await settle();
+        const before = JSON.stringify(model.treeState.rootNode);
+        queueInsert(model, 2, model.treeState.rootNode, { actionid: "x1", blockid: "a", nodeid: "other" });
+        await settle();
+        expect(JSON.stringify(model.treeState.rootNode)).toBe(before);
+    });
+
+    it("a model loading a row takes its queued actions as seen, not to replay", () => {
+        const [get, set] = createSignal<LayoutState>({
+            otype: "layout",
+            oid: "layout-1",
+            version: 4,
+            meta: {},
+            rootnode: { id: "r", flexDirection: "row", size: 10, data: { blockId: "b" } },
+            pendingbackendactions: [
+                { actiontype: "insert", actionid: "q1", blockid: "b", focused: true, magnified: false, ephemeral: false },
+            ],
+        } as LayoutState);
+        const atom = () => get();
+        (atom as any)._set = set;
+        rows.set("layout-1", atom as unknown as SignalAtom<LayoutState>);
+        const model = createModel();
+        expect(model.processedActionIds.has("q1")).toBe(true);
+        expect(model.treeState.rootNode!.id).toBe("r");
+        expect(calls).toHaveLength(0);
+    });
+
+    it("a pane-tab command waits for the intents queued before it", async () => {
+        const model = createModel();
+        insert(model, "a");
+        await settle();
+        let sentCommand = false;
+        const done = sendStackCommand(model, "pane.activateTab", async () => {
+            sentCommand = true;
+            return { layout_revision: 0, version: 0 };
+        });
+        await settle();
+        expect(sentCommand).toBe(false);
+        intentsSent()[0].resolve({ applied: true, version: 2 });
+        await done;
+        expect(sentCommand).toBe(true);
+    });
+
+    it("a pane-tab command's answer holds off the comparison until the row shows it", async () => {
+        const model = createModel();
+        await sendStackCommand(model, "pane.activateTab", async () => ({ layout_revision: 1, version: 9 }));
+        expect(model.layoutVersionFloor).toBe(9);
+    });
+
+    it("a tab close queued on a model that is then disposed still sends its command and deletes the block", async () => {
+        const model = createModel();
+        const a = insert(model, "a"); // its intent stays in flight
+        pushBlockOntoStack(model, a.id, "b");
+        const onNodeDelete = vi.fn(async () => {});
+        model.onNodeDelete = onNodeDelete;
+        const closing = closeBlockInStack(model, a.id, "b", { confirmed: true });
+        await settle();
+        expect(calls.some((c) => c.command === "pane.removeTab")).toBe(false); // queued behind the intent
+        model.dispose();
+        intentsSent()[0].resolve({ applied: true, version: 2 });
+        await settle();
+        const removeTab = calls.find((c) => c.command === "pane.removeTab");
+        expect(removeTab?.data.block_id).toBe("b");
+        removeTab!.resolve({ layout_revision: 3, version: 3 });
+        await closing;
+        expect(onNodeDelete).toHaveBeenCalledWith({ blockId: "b" });
+    });
+
+    it("a pane-tab command queued after the model is disposed still goes", async () => {
+        const model = createModel();
+        model.dispose();
+        let sent = false;
+        await sendStackCommand(model, "pane.activateTab", async () => {
+            sent = true;
+            return { layout_revision: 0, version: 0 };
+        });
+        expect(sent).toBe(true);
+    });
+
+    it("closing the ephemeral pane sends only the view", async () => {
+        const model = createModel();
+        insert(model, "a");
+        intentsSent()[0].resolve({ applied: true, version: 2 });
+        await settle();
+        model.newEphemeralNode("eph");
+        const eph = model.ephemeralNode();
+        await model.closeNode(eph.id);
+        await settle();
+        expect(intentsSent().map((c) => c.data.intent.type)).toEqual(["insert", "view"]);
     });
 });

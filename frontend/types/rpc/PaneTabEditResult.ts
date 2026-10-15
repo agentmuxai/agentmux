@@ -4,4 +4,9 @@
  * Response from pane.moveTab, pane.activateTab and pane.removeTab: the tab's
  * `layout_revision` the change was queued at, which the caller counts as seen.
  */
-export type PaneTabEditResult = { layout_revision: number, };
+export type PaneTabEditResult = { layout_revision: number, 
+/**
+ * The layout row's version once the change is stored: a row update with
+ * this version or later includes it.
+ */
+version: number, };

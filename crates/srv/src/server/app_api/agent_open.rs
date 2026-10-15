@@ -911,41 +911,13 @@ async fn open_agent_inner(
                 }
                 crate::server::service::publish_events(&app_state, &create_events);
 
-                // Enqueue a layout insert action for the frontend to process.
-                // The frontend's LayoutModel watches pendingbackendactions on the
-                // LayoutState and applies them via treeReducer.
-                // SPEC_864 Phase 4 — append through the reducer (single
-                // writer of db_layout). Best-effort like the store-direct
-                // write it replaces.
-                {
-                    let action = obj::LayoutActionData {
-                        actiontype: "insert".to_string(),
-                        actionid: uuid::Uuid::new_v4().to_string(),
-                        blockid: block_id.clone(),
-                        nodesize: None,
-                        nodesizefraction: None,
-                        indexarr: None,
-                        // Honors the request's `focus` (default true — the UI
-                        // flow's behavior). Was hardcoded `true` while the RPC
-                        // surface was the only caller and nothing set the
-                        // field; this PR documents `focus`/`--no-focus` on
-                        // OpenAgent/muxopen, so ignoring it would silently
-                        // contradict their own help text. reagent P1, PR #3032.
-                        focused: cmd.focus.unwrap_or(true),
-                        magnified: false,
-                        ephemeral: false,
-                        targetblockid: String::new(),
-                        position: String::new(),
-                    };
-                    if let Err(e) = crate::server::service::queue_layout_actions_via_reducer(
-                        &app_state,
-                        &tab_id,
-                        vec![action],
-                    )
-                    .await
-                    {
-                        tracing::warn!("agent.open: layout action enqueue failed: {e}");
-                    }
+                // Place it: srv's tree, then the queued `insert` for the
+                // window. Best-effort: a failure leaves the block unplaced,
+                // for the orphan reaper. `focus` defaults to true, as the UI
+                // flow does (#3032).
+                let placement = crate::server::service::layout_intents::Placement::Append { focused: cmd.focus.unwrap_or(true) };
+                if let Err(e) = crate::server::service::layout_intents::place_block(&app_state, &tab_id, &block_id, placement).await {
+                    tracing::warn!("agent.open: placing the pane failed: {e}");
                 }
                 block_id
                 };

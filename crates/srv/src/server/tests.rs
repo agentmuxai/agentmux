@@ -2205,6 +2205,7 @@ async fn update_object_layout_push_single_write_and_coherent_reducer() {
             ephemeral: false,
             targetblockid: String::new(),
             position: String::new(),
+            nodeid: None,
         }]);
         mstore.update(&mut layout).unwrap();
     }
@@ -2707,7 +2708,7 @@ async fn layout_stays_coherent_across_full_mutation_lifecycle() {
         "targetblockid": "",
         "position": "",
     }]);
-    crate::server::service::queue_layout_actions_via_reducer(
+    crate::server::service::reducer_helpers::queue_layout_actions_via_reducer(
         &state,
         &tab_id,
         serde_json::from_value(action).unwrap(),

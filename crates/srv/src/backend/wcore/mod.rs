@@ -27,11 +27,6 @@ use super::storage::store::Store;
 use super::storage::StoreError;
 use super::obj::*;
 
-// ---- Layout action types (match Go) ----
-
-pub const LAYOUT_ACTION_SPLIT_HORIZONTAL: &str = "splithorizontal";
-pub const LAYOUT_ACTION_SPLIT_VERTICAL: &str = "splitvertical";
-
 // ---- Core operations ----
 
 /// Ensure initial data is present in the store.
