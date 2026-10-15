@@ -3,7 +3,8 @@
 **Date:** 2026-10-15
 **Author:** Maricon@charlie
 **Type:** Spec (one small button on top of the existing redock saga)
-**Status:** proposed — this document changes no code. Flip this line to `implemented (#NNNN)` when it lands.
+**Status:** implemented (#4956)
+**Decisions applied:** D1 the main window's active tab, D3 bring it forward, D4 the `pane:redock` command, D6 every platform; D2 (a picker) and D5 (the tab it was torn from) are follow-ups.
 **Requested by:** the operator: *"we should add a redock button in the floating pane control bar"*, reusing the new restore glyph from #4838.
 **Related:** `SPEC_FLOATING_PANE_REDOCK_2026-05-27.md` (redock by dragging a floater onto a tile), `SPEC_FLOATING_PANE_REDOCK_DWELL_2026_09_09.md` (the dwell gate for accidental docks), `SPEC_PANE_CONTROLS_TILED_RESTORE_ICON_AND_MINIMIZE_FROM_MAXIMIZED_2026_10_12.md` (the glyph).
 
