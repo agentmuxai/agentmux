@@ -31,8 +31,10 @@ use crate::backend::update_install::InstallKind;
 /// Release files come only from here (`browser_download_url`).
 pub(crate) const RELEASE_DOWNLOAD_PREFIX: &str = "https://github.com/agentmuxai/agentmux/releases/download/";
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
-/// No bytes for this long ends the download.
+/// No answer, or no bytes, for this long ends the download.
 const STALL_TIMEOUT: Duration = Duration::from_secs(60);
+/// Unpacking takes seconds; this only stops a hung `tar`.
+const UNPACK_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 
 static RUNNING: AtomicBool = AtomicBool::new(false);
 
@@ -156,10 +158,9 @@ async fn download(asset: &ReleaseAsset, dest: &Path, version: &str) -> Result<()
         .connect_timeout(CONNECT_TIMEOUT)
         .build()
         .map_err(|e| e.to_string())?;
-    let mut resp = client
-        .get(&asset.url)
-        .send()
+    let mut resp = tokio::time::timeout(STALL_TIMEOUT, client.get(&asset.url).send())
         .await
+        .map_err(|_| "GitHub didn't answer".to_string())?
         .and_then(|r| r.error_for_status())
         .map_err(|e| format!("download failed: {e}"))?;
     let part = dest.with_file_name(format!("{}.part", asset.name));
@@ -232,7 +233,7 @@ async fn unpack_portable(file: &Path, version: &str, parent: &Path) -> Result<Pa
     let _ = tokio::fs::remove_dir_all(&partial).await;
     tokio::fs::create_dir_all(&partial).await.map_err(|e| format!("can't write to {}: {e}", parent.display()))?;
     use agentmux_common::win32::NoWindow;
-    let output = tokio::process::Command::new(tar_exe())
+    let run = tokio::process::Command::new(tar_exe())
         .arg("-xf")
         .arg(file)
         .arg("-C")
@@ -240,18 +241,18 @@ async fn unpack_portable(file: &Path, version: &str, parent: &Path) -> Result<Pa
         .stdin(std::process::Stdio::null())
         .kill_on_drop(true)
         .no_window()
-        .output()
-        .await;
-    let checked = match output {
-        Err(e) => Err(format!("couldn't run tar to unpack it: {e}")),
-        Ok(o) if !o.status.success() => {
+        .output();
+    let checked = match tokio::time::timeout(UNPACK_TIMEOUT, run).await {
+        Err(_) => Err("unpacking took more than 10 minutes and was stopped".to_string()),
+        Ok(Err(e)) => Err(format!("couldn't run tar to unpack it: {e}")),
+        Ok(Ok(o)) if !o.status.success() => {
             let why = String::from_utf8_lossy(&o.stderr).lines().next().unwrap_or("").to_string();
             Err(format!("tar couldn't unpack it ({why}); this Windows may be too old to read .7z files"))
         }
-        Ok(_) if !is_staged_portable(&partial, version) => {
+        Ok(Ok(_)) if !is_staged_portable(&partial, version) => {
             Err(format!("what was unpacked isn't an AgentMux {version} portable"))
         }
-        Ok(_) => Ok(()),
+        Ok(Ok(_)) => Ok(()),
     };
     let target = free_folder(parent, &name);
     let result = match checked {
