@@ -1,6 +1,6 @@
 # Pane tab and document tab strips: the selected pane tab and the selected document tab are always fully shown
 
-**Status:** draft — nothing implemented. Written 2026-10-15; the code reading below is checked against `main` at 3e104fa8b. Every design question is settled with the operator (§7); nothing is open (§8).
+**Status:** implemented — #4986: the pane tab strip and the document tab strip reveal their selected tab on selection, pane focus, any click or input in the pane, mount or becoming visible, and a layout change, smoothly and clear of the edge fade; the window tab bar shares the moved helper unchanged. Checked live in a dev build on 2026-10-15 (22 pane tabs, 20 document tabs). The strips register by DOM rather than a Solid context (§4). Written 2026-10-15; the code reading below is checked against `main` at 3e104fa8b. Every design question was settled with the operator (§7); nothing is open (§8).
 **Author:** Camper@narko, at the operator's request
 **Scope:** [`frontend/app/element/PaneTabStrip.tsx`](../../frontend/app/element/PaneTabStrip.tsx) / `.scss` (the strip component, shared by pane tabs and document tabs), [`PaneHeaderTabStrip.tsx`](../../frontend/app/element/PaneHeaderTabStrip.tsx) (the pane header's strip), [`DocTabStrip.tsx`](../../frontend/app/doc-tabs/DocTabStrip.tsx) (the document tab strip), [`PaneChrome.tsx`](../../frontend/app/element/PaneChrome.tsx); the reveal helper [`frontend/app/tab/tab-strip-scroll.ts`](../../frontend/app/tab/tab-strip-scroll.ts), which today only the window tab bar uses, moves to be shared.
 **Related:**
