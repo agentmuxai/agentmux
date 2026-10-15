@@ -66,9 +66,8 @@
  */
 
 import { shouldReduceMotion } from "@/app/motion/motion";
+import { DURATION_BASE_MS, EASE_MATERIAL } from "@/app/motion/tokens";
 
-const HEIGHT_FLIP_MS = 150;
-const EASE = "cubic-bezier(0.4, 0, 0.2, 1)";
 
 /**
  * Above this magnitude, skip the ease and let the mutation land instantly.
@@ -161,7 +160,7 @@ function flip(el: HTMLElement, fromPx: number, toPx: number): void {
     el.style.height = `${fromPx}px`;
     el.style.overflowY = "hidden";
     void el.offsetHeight; // force reflow so the "from" height commits before animating
-    el.style.transition = `height ${HEIGHT_FLIP_MS}ms ${EASE}`;
+    el.style.transition = `height ${DURATION_BASE_MS}ms ${EASE_MATERIAL}`;
     const raf = requestAnimationFrame(() => {
         el.style.height = `${toPx}px`;
     });

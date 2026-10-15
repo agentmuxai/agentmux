@@ -49,13 +49,9 @@
     &--neutral { color: var(--secondary-text-color); opacity: 0.5; }
 }
 
-@keyframes maintenance-pulse {
-    0%, 100% { opacity: 1; }
-    50%       { opacity: 0.25; }
-}
-
 .maintenance-pulse {
-    animation: maintenance-pulse 1.4s ease-in-out infinite;
+    --pulse-min: 0.25;
+    animation: am-pulse 1.4s var(--ease-in-out) infinite;
 }
 
 // ── Row text ─────────────────────────────────────────────────────────────────

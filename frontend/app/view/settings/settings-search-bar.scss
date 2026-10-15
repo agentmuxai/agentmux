@@ -112,7 +112,7 @@
 // Brief highlight after a search result scrolls a row into view — see
 // SettingsView's handleSelectResult.
 .setting-row--search-highlight {
-    animation: settings-search-highlight-fade 1.5s ease-out;
+    animation: settings-search-highlight-fade 1.5s var(--ease-out);
 }
 
 @keyframes settings-search-highlight-fade {

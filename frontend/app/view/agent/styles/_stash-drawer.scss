@@ -60,7 +60,7 @@
     cursor: ns-resize;
     background: transparent;
     border-bottom: 1px solid transparent;
-    transition: background 0.1s, border-color 0.1s;
+    transition: background var(--duration-fast), border-color var(--duration-fast);
 
     &:hover,
     &--active {

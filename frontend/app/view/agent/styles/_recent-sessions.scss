@@ -140,10 +140,12 @@
         background: color-mix(in srgb, var(--main-text-color) 2%, transparent);
         border-radius: 0;
         color: var(--main-text-color);
-        // Not `all`: that also animates the inherited `visibility` that hides
-        // window and pane tabs, so this would pop in a frame late when shown
-        // (docs/analysis/ANALYSIS_WINDOW_TAB_SWITCH_PAINT_2026_09_30.md §3).
-        transition: filter 0.15s ease, opacity 0.15s ease, border-color 0.15s ease, background-color 0.15s ease;
+        // Listed, not `all`: see mixins.control-transition for why.
+        transition:
+            filter var(--duration-base) var(--ease-standard),
+            opacity var(--duration-base) var(--ease-standard),
+            border-color var(--duration-base) var(--ease-standard),
+            background-color var(--duration-base) var(--ease-standard);
 
         &:hover {
             border-color: var(--accent-color);
@@ -219,8 +221,12 @@
     // `transition: filter …, opacity …`, and that blur/dim would snap
     // instead of animate for as long as the move is in flight.
     .agent-recent-sessions-row.agent-row-move {
-        transition: transform var(--motion-spring), filter 0.15s ease, opacity 0.15s ease, border-color 0.15s ease,
-            background-color 0.15s ease;
+        transition:
+            transform var(--motion-spring),
+            filter var(--duration-base) var(--ease-standard),
+            opacity var(--duration-base) var(--ease-standard),
+            border-color var(--duration-base) var(--ease-standard),
+            background-color var(--duration-base) var(--ease-standard);
     }
 
     // Reduced treatment (transition), dormant under the motion policy. A
@@ -443,10 +449,10 @@
         background: transparent;
         color: var(--secondary-text-color);
         cursor: default;
-        transition: background 0.12s, color 0.12s, transform 0.12s;
+        transition: background var(--duration-quick), color var(--duration-quick), transform var(--duration-quick);
 
         i {
-            transition: transform 0.15s;
+            transition: transform var(--duration-base);
         }
 
         // "when hover it highlights"

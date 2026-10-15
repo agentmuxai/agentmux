@@ -224,7 +224,7 @@
         // motion (a cue, not decoration), so it must beat the global
         // reduced-motion reset in app.scss.
         .placeholder-sizer {
-            transition: transform 120ms ease-out !important;
+            transition: transform var(--duration-quick) var(--ease-out) !important;
         }
     }
 
@@ -257,7 +257,7 @@
         box-sizing: border-box;
         opacity: 1;
         transform: scale(1);
-        transition: opacity 120ms ease-out, transform 120ms ease-out;
+        transition: opacity var(--duration-quick) var(--ease-out), transform var(--duration-quick) var(--ease-out);
 
         @starting-style {
             opacity: 0;
@@ -268,7 +268,7 @@
             opacity: 0;
             transform: scale(0.92);
             transition-timing-function: ease-in;
-            transition-duration: 150ms;
+            transition-duration: var(--duration-base);
         }
     }
 

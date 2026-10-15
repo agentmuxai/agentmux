@@ -15,7 +15,7 @@
 .widget-icon {
     // --widget-tint: the widget type's color, faintly (widgetIconStyle).
     color: var(--widget-tint, var(--widget-icon-color));
-    transition: color 120ms ease;
+    transition: color var(--duration-quick) var(--ease-standard);
 }
 
 .action-widget-slot:hover .widget-icon {
@@ -65,7 +65,7 @@
     // applied during the actual drag (`:active`) so the user gets a
     // real signal while a drag is in progress.
     border-radius: 0;
-    transition: opacity 120ms ease;
+    transition: opacity var(--duration-quick) var(--ease-standard);
     touch-action: none;
 
     &:active {

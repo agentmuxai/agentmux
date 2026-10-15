@@ -38,6 +38,7 @@ import {
 } from "@/app/drag/pane-tab-drag";
 import { flashElement, onActivityFlash } from "@/app/notification/activity-flash";
 import { shouldReduceMotion } from "@/app/motion/motion";
+import { DURATION_BASE_MS, EASE_OUT } from "@/app/motion/tokens";
 import { isWindows } from "@/util/platformutil";
 import { Tooltip } from "./tooltip";
 import "./PaneTabStrip.scss";
@@ -49,7 +50,7 @@ import { createScrollEdges } from "./scroll-edges";
 
 // Matches the other reveal-gate/cross-fade durations added alongside this
 // one in SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md §2.4.
-const WIDTH_TRANSITION_MS = 160;
+const WIDTH_TRANSITION_MS = DURATION_BASE_MS;
 
 
 /** How long a just-landed pill keeps `.pane-tab--landing` — the Window Tab
@@ -464,7 +465,7 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
                 if (holdWidth !== undefined && holdWidth !== newWidth && !shouldReduceMotion("transition")) {
                     el.style.width = `${holdWidth}px`;
                     el.getBoundingClientRect(); // force reflow before the transition kicks in
-                    el.style.transition = `width ${WIDTH_TRANSITION_MS}ms ease-out`;
+                    el.style.transition = `width ${WIDTH_TRANSITION_MS}ms ${EASE_OUT}`;
                     el.style.width = `${newWidth}px`;
                     widthResetTimeout = setTimeout(() => {
                         el.style.width = "";

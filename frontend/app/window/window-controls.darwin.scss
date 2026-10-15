@@ -47,12 +47,12 @@
         flex-shrink: 0;
         -webkit-app-region: no-drag;
         user-select: none;
-        transition: filter 80ms linear;
+        transition: filter var(--duration-instant) linear;
 
         .traffic-glyph {
             // Glyphs are hidden at rest; they fade in when the group is hovered.
             opacity: 0;
-            transition: opacity 80ms linear;
+            transition: opacity var(--duration-instant) linear;
             // Semi-transparent dark overlay — readable on any circle colour.
             color: rgba(0, 0, 0, 0.55);
         }

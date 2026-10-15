@@ -18,7 +18,7 @@
     margin: 0;
     cursor: default;
     border-radius: 0;
-    transition: background 80ms ease;
+    transition: background var(--duration-instant) var(--ease-standard);
 
     &:hover {
         background: var(--hover-bg-color);
@@ -141,7 +141,9 @@
             display: block;
             height: 100%;
             border-radius: 2px;
-            transition: width 240ms ease, background-color 240ms ease;
+            transition:
+                width var(--duration-moderate) var(--ease-standard),
+                background-color var(--duration-moderate) var(--ease-standard);
         }
 
         .cpu-core-pct {
@@ -191,7 +193,9 @@
         height: var(--sq);
         border-radius: 2px;
         cursor: default;
-        transition: background-color 240ms ease, outline-color 80ms ease;
+        transition:
+            background-color var(--duration-moderate) var(--ease-standard),
+            outline-color var(--duration-instant) var(--ease-standard);
         outline: 1px solid transparent;
 
         &:hover,

@@ -261,7 +261,7 @@
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
     cursor: grab;
     user-select: none;
-    transition: border-color 80ms ease;
+    transition: border-color var(--duration-instant) var(--ease-standard);
     &:active {
         cursor: grabbing;
     }

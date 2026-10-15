@@ -57,7 +57,7 @@
         font-size: var(--text-xs);
         line-height: 1.4;
         border-radius: 0;
-        transition: background 0.1s, color 0.1s;
+        transition: background var(--duration-fast), color var(--duration-fast);
         flex-shrink: 0;
 
         &:hover:not(:disabled) {

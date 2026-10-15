@@ -21,11 +21,9 @@
 // specificity) — this mixin exists so agent-view.scss can apply the SAME
 // ruleset under a DIFFERENT ancestor without copy-pasting 250 lines and
 // risking drift between the two.
-// NOTE: `term-activity-flash`'s @keyframes lives in app.scss, not here and
-// not in the mixin below — see that definition's own comment. The mixin
-// only REFERENCES the animation by name (`animation: term-activity-flash`),
-// which works regardless of which stylesheet defines it, since @keyframes
-// names are global in CSS.
+// NOTE: the term-activity flash below only REFERENCES `am-accent-flash` by
+// name. Its @keyframes lives in _keyframes.scss, loaded once from app.scss:
+// a @keyframes inside a mixin is emitted once per @include.
 @mixin block-frame-default-header-layout() {
     max-height: var(--header-height);
     min-height: var(--header-height);
@@ -143,7 +141,8 @@
             text-overflow: ellipsis;
             white-space: nowrap;
             &.term-activity--flash {
-                animation: term-activity-flash 0.5s ease-out;
+                --flash-end-opacity: 0.6;
+                animation: am-accent-flash 0.5s var(--ease-out);
             }
         }
 
@@ -482,6 +481,34 @@
     :root[data-motion-reduce~="#{$category}"] & {
         @content;
     }
+}
+
+/// A control's colour fades (hover, focus, pressed). It lists the six
+/// properties those states change rather than `all`: `all` also animates the
+/// inherited `visibility` that hides window and pane tabs, so the control
+/// would pop in a frame late when shown
+/// (docs/analysis/ANALYSIS_WINDOW_TAB_SWITCH_PAINT_2026_09_30.md §3;
+/// scripts/check-no-transition-all.sh rejects `all`).
+@mixin control-transition($duration: var(--duration-instant), $ease: var(--ease-standard)) {
+    transition-property: color, background-color, border-color, outline-color, box-shadow, opacity;
+    transition-duration: $duration;
+    transition-timing-function: $ease;
+}
+
+/// The collapse and expand of a tool panel's body: height, padding and margin
+/// shrink together while the body fades a little ahead of them.
+/// `content-visibility` is discrete; `allow-discrete` lets it animate with
+/// the collapse, so it flips to `hidden` at the END of the close (the body
+/// stays rendered through the shrink) and to visible at the START of the open.
+/// Without it the body pops out the instant the panel is hidden
+/// (Chromium 117+).
+@mixin collapse-transition {
+    transition:
+        max-height var(--duration-quick) var(--ease-material),
+        padding var(--duration-quick) var(--ease-material),
+        margin var(--duration-quick) var(--ease-material),
+        opacity var(--duration-fast) var(--ease-out),
+        content-visibility var(--duration-quick) allow-discrete;
 }
 
 /// Visually hidden but still read by assistive tech. Standard pattern.

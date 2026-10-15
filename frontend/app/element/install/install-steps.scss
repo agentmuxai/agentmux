@@ -33,7 +33,8 @@
 
     [data-status="active"] > & {
         color: var(--accent-color);
-        animation: install-step-pulse 1.4s ease-in-out infinite;
+        --pulse-min: 0.35;
+        animation: am-pulse 1.4s var(--ease-in-out) infinite;
 
         // Reduced treatment (status), dormant under the motion policy.
         @include mixins.when-motion-reduced(status) {
@@ -85,9 +86,4 @@
     .install-step-hint {
         grid-column: 2 / -1;
     }
-}
-
-@keyframes install-step-pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.35; }
 }

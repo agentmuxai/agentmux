@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-15
 **Author:** AgentY@narko
-**Status:** active. Approved 2026-10-15: the operator took every recommendation in §8 ("go with recommendations, get it all built"). Phases in §7; each PR updates this line. Phase A (one motion gate; everything animates in both tiers) is in #4968, the PR that adds this spec.
+**Status:** active. Approved 2026-10-15: the operator took every recommendation in §8 ("go with recommendations, get it all built"). Phases in §7; each PR updates this line. Phase A (one motion gate; everything animates in both tiers) is in #4968; phase B (motion tokens and keyframes) is built.
 **Verified against:** `agentmux` `main` @ `fb6b20ba8`, by reading code (three read-only inventories, spot-checked by hand) and this machine's Windows setting.
 **Scope:** every animation, transition and motion gate in `frontend/` (CSS, SCSS, TS, the vendored Font Awesome CSS, SVG assets, `index.html`), the `window:reducedmotion` setting end to end, and the shared stylesheet layer (`theme.scss`, `mixins.scss`, `element/ui/`).
 **Related:**
@@ -256,9 +256,11 @@ Split `theme.scss`'s motion tokens into durations and easings, and keep the pair
 | `--duration-fast` | 100 ms | 100 ms / 0.1 s ×33, `--motion-fast` |
 | `--duration-quick` | 120 ms | 120 ms / 0.12 s ×17, the view transition, the placeholder glide |
 | `--duration-base` | 160 ms | 150 ms / 0.15 s ×38 and 160 ms (merge: 150 becomes 160, §5.3) |
-| `--duration-slow` | 280 ms | `--motion-slow`; 240 ms ×3 (merge: 240 becomes 280, or a token of its own, §8 Q5) |
+| `--duration-moderate` | 240 ms | 240 ms ×3 (its own token, §8 Q5) |
+| `--duration-slow` | 280 ms | `--motion-slow` |
 | `--ease-standard` | `ease` | `ease` ×87 |
 | `--ease-out` | `ease-out` | ×29 |
+| `--ease-in-out` | `ease-in-out` | the status pulses (×12) |
 | `--ease-emphasized` | `cubic-bezier(0.2, 1, 0.3, 1)` | the current `--motion-*` curve, the modal entrance |
 | `--ease-material` | `cubic-bezier(0.4, 0, 0.2, 1)` | the collapse transition and the FLIP |
 | `--ease-decelerate` | `cubic-bezier(0.2, 0, 0, 1)` | row enter |
@@ -270,6 +272,21 @@ Split `theme.scss`'s motion tokens into durations and easings, and keep the pair
 **JS constants** move to `frontend/app/motion/tokens.ts`, with the same names and values, and a unit test that compares them with `theme.scss`. JS animations also respect `--motion-scale` by reading it once per tier change.
 
 **Bugs fixed here:** `transition-duration: var(--motion-fast)` at `element/modal.scss:187` and `view/agent/styles/_composer-strip.scss:314`. The pair token is invalid as a duration, so the declaration computes to 0 s and the dismiss button's and the composer strip's colour fades never animate. Both become `--duration-fast`.
+
+**As built (phase B).**
+- Durations and easings in `transition` and `animation` declarations use the tokens. Three kinds of value stay literal:
+  - values with no token (90, 140, 180, 200, 250, 300 and 400 ms; 0.5, 0.9, 1 and 1.5 s);
+  - the loop period of an infinite animation, which is rhythm, not a transition;
+  - the reduced treatments inside `when-motion-reduced` (and the raw view-transition one in `app.scss`), which stay as written.
+- `--motion-spring` keeps 400 ms and its own curve, also scaled: `calc(400ms * var(--motion-scale))`.
+- `control-transition` also takes `$ease` (default `--ease-standard`). The two bug-fix sites pass `--ease-emphasized`, the curve of the `--motion-fast` pair they named.
+- `collapse-transition` covers the tool panel collapse in `_document-nodes.scss` and `_shell-node.scss`.
+- JS reads the same values from `motion/tokens.ts`; its test compares them with `theme.scss`.
+  - `HOLD_RELEASE_MS`, `WIDTH_TRANSITION_MS` and `HEIGHT_FLIP_MS` (150 becomes 160) are `DURATION_BASE_MS`.
+  - The tile layout's overlay hold (150 ms) is too, because it must match the placeholder's exit fade, which became 160 ms.
+  - The reveal gate and the media-ready fade use `DURATION_QUICK_MS`.
+  - `GLIDE_MS` (180), `FADE_MS` (200) and `SPINNER_FRAME_MS` (a frame rate) stay literal.
+- `tokens.ts` holds unscaled values. Reading `--motion-scale` in JS waits until the scale is anything but 1.
 
 ### 4.8 One keyframes file
 
@@ -290,6 +307,15 @@ Kept as they are, because they are one of a kind:
 - `brain-spinner-pulse`, plus its copy `startup-pulse` in `index.html:57`, which has to stay inline because it paints before any stylesheet loads. Its sync comment stays.
 
 `tab-bounce`'s second use, on `.agent-activity-row.activity-flash-out` (`_shell-node.scss:243`), gets its own name, because it carries a different meaning.
+
+**As built (phase B).**
+- `am-pulse` also takes `--pulse-max` (default 1), for `ctx-text-pulse`'s 0.8. The sites set `--pulse-min` 0.35 (install step, busy dot), 0.25 (maintenance) and 0.6 (question countdown). The identity dot uses the 0.4 default.
+- `am-accent-flash` has no end colour: it settles to the element's own colour. That is what both originals ended on (`inherit` on an element that sets no colour; the swarm summary's own `--secondary-text-color`). The pane header sets `--flash-end-opacity: 0.6`.
+- The attachment ring sets `--spin-from: -90deg`.
+- `am-blink` uses the shell cursor's body. The btw cursor's 50.01 % stop becomes 50 %, a 0.1 ms difference at 1 s.
+- `am-highlight-fade` was not made. The two highlights differ in both their start and end colours, so a shared body would be only variables. `search-match-flash` and `settings-search-highlight-fade` stay where they are.
+- Only the departure (`.activity-flash-out`) gets its own name, `activity-row-depart`. The dock row's arrival (`.activity-flash-in`) is a landing, the same meaning as a tab's, and keeps `tab-bounce`.
+- `error-display.ts`'s reconnect spinner uses `am-spin`. `bootstrap.ts` imports `app.scss` before anything that can show the error page, so the inline `amux-spin` is gone.
 
 Dead keyframes and CSS found by the inventory are deleted after a final check for class names built at run time:
 - `float-up` (`tailwindsetup.css:115`);

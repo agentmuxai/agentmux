@@ -217,7 +217,7 @@
             .agent-working-row-progress.is-over .agent-working-row-progress-fill {
                 width: 33% !important; // beats the inline estimate width
                 transition: none;
-                animation: agent-compaction-indeterminate 1.6s ease-in-out infinite;
+                animation: agent-compaction-indeterminate 1.6s var(--ease-in-out) infinite;
             }
 
             // The ASCII spinner (AsciiSpinner.tsx) is the status text's color:
@@ -343,7 +343,7 @@
         border-radius: 50%;
         background: var(--accent-color);
         flex-shrink: 0;
-        animation: agent-pulse 1.2s ease-in-out infinite;
+        animation: agent-pulse 1.2s var(--ease-in-out) infinite;
         // Subtle halo that breathes with the pulse — gives the dot
         // a little more life without interfering with the spotlight.
         box-shadow: 0 0 6px color-mix(in srgb, var(--accent-color) 60%, transparent);
@@ -440,7 +440,4 @@
         }
     }
 
-    @keyframes agent-spin {
-        to { transform: rotate(360deg); }
-    }
 }

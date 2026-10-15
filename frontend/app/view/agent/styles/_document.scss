@@ -289,8 +289,8 @@
     .agent-document-streaming-buffer[data-animate] .agent-document-row:not([data-node-type="user_message"]) {
         opacity: 1;
         transform: translateY(0);
-        transition: opacity 180ms cubic-bezier(0.2, 0, 0, 1),
-                    transform 180ms cubic-bezier(0.2, 0, 0, 1);
+        transition: opacity 180ms var(--ease-decelerate),
+                    transform 180ms var(--ease-decelerate);
     }
 
     @starting-style {
@@ -316,7 +316,7 @@
     // SPEC_AGENT_PANE_ONE_WAY_FLOW_2026_10_07.md R1, R2.
     .agent-document[data-one-way] .agent-document-streaming-buffer[data-animate] .agent-document-row:not([data-node-type="user_message"]) {
         transform: none;
-        transition: opacity 180ms cubic-bezier(0.2, 0, 0, 1);
+        transition: opacity 180ms var(--ease-decelerate);
     }
 
     @starting-style {

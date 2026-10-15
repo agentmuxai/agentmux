@@ -31,7 +31,7 @@
         font-size: var(--text-sm);
         font-family: inherit;
         outline: none;
-        transition: border-color 0.15s;
+        transition: border-color var(--duration-base);
 
         &:focus {
             border-color: var(--accent-color);
@@ -68,7 +68,7 @@
         color: var(--secondary-text-color);
         font-size: var(--text-xs);
         line-height: 1;
-        transition: background 0.1s, color 0.1s, border-color 0.1s;
+        transition: background var(--duration-fast), color var(--duration-fast), border-color var(--duration-fast);
 
         &:hover {
             background: color-mix(in srgb, var(--accent-color) 15%, transparent);
@@ -100,7 +100,7 @@
         padding-left: var(--space-1);
         // Brief animation so the highlight is immediately noticeable when
         // navigating between matches
-        animation: search-match-flash 0.25s ease-out;
+        animation: search-match-flash 0.25s var(--ease-out);
     }
 
     @keyframes search-match-flash {

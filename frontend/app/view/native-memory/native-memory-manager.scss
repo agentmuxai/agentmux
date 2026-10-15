@@ -5,6 +5,8 @@
 // screens in one drill-down, each its own grid/list: agent cards →
 // file cards → NativeMemoryHistoryPanel.
 
+@use "../../mixins.scss";
+
 .native-memory-manager {
     display: flex;
     flex-direction: column;
@@ -87,11 +89,7 @@
     color: var(--main-text-color);
     text-align: left;
     cursor: default;
-    // Not `all`: that also animates the inherited `visibility` that hides
-    // window and pane tabs, so this would pop in a frame late when shown
-    // (docs/analysis/ANALYSIS_WINDOW_TAB_SWITCH_PAINT_2026_09_30.md §3).
-    transition-property: color, background-color, border-color, outline-color, box-shadow, opacity;
-    transition-duration: 0.15s;
+    @include mixins.control-transition(var(--duration-base));
     min-width: 0;
 
     &:hover,
@@ -168,11 +166,7 @@
     color: var(--main-text-color);
     text-align: left;
     cursor: default;
-    // Not `all`: that also animates the inherited `visibility` that hides
-    // window and pane tabs, so this would pop in a frame late when shown
-    // (docs/analysis/ANALYSIS_WINDOW_TAB_SWITCH_PAINT_2026_09_30.md §3).
-    transition-property: color, background-color, border-color, outline-color, box-shadow, opacity;
-    transition-duration: 0.15s;
+    @include mixins.control-transition(var(--duration-base));
     min-width: 0;
 
     &:hover,
@@ -371,7 +365,7 @@
     font-size: 12px;
     font-family: inherit;
     outline: none;
-    transition: border-color 0.15s;
+    transition: border-color var(--duration-base);
 
     &:focus {
         border-color: var(--accent-color);
@@ -394,9 +388,9 @@
     font-size: 14px;
     line-height: 1;
     transition:
-        background 0.1s,
-        color 0.1s,
-        border-color 0.1s;
+        background var(--duration-fast),
+        color var(--duration-fast),
+        border-color var(--duration-fast);
 
     &:hover {
         background: color-mix(in srgb, var(--error-color) 15%, transparent);
@@ -468,7 +462,7 @@
     font-family: inherit;
     outline: none;
     cursor: default;
-    transition: border-color 0.15s;
+    transition: border-color var(--duration-base);
 
     &:focus {
         border-color: var(--accent-color);

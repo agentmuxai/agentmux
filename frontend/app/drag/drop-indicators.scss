@@ -26,7 +26,7 @@
     justify-content: center;
     pointer-events: none;
     border-radius: var(--block-border-radius);
-    animation: drop-indicator-in 100ms ease-out;
+    animation: am-fade-in var(--duration-fast) var(--ease-out);
 
     // Reduced treatment (feedback), dormant under the motion policy.
     @include mixins.when-motion-reduced(feedback) {
@@ -65,15 +65,6 @@
         &--blocked {
             color: var(--drop-blocked-fg);
         }
-    }
-}
-
-@keyframes drop-indicator-in {
-    from {
-        opacity: 0;
-    }
-    to {
-        opacity: 1;
     }
 }
 

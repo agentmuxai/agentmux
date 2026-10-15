@@ -176,11 +176,6 @@ $transcript-preview-max-height: calc(50vh / 3);
     // gated by `resultPill() != null` / `log.open`, which flip together).
     // A brief fade-in on the incoming element softens the pop; skipped
     // entirely for reduced-motion users below.
-    @keyframes agent-tool-summary-fade-in {
-        from { opacity: 0; }
-        to { opacity: 1; }
-    }
-
     // Reusable class (as opposed to the animation applied inline on
     // `.agent-tool-live-tail` below) for elements whose *visibility*
     // toggle is coupled 1:1 to a genuine tool-status change — e.g.
@@ -189,7 +184,7 @@ $transcript-preview-max-height: calc(50vh / 3);
     // (`ToolBlockOverlay.tsx`), so CSS's "display:none -> visible
     // restarts animations" behavior only ever fires on that real event.
     .agent-tool-summary-fade-in {
-        animation: agent-tool-summary-fade-in 160ms ease-out;
+        animation: am-fade-in var(--duration-base) var(--ease-out);
 
         // Reduced treatment (transition), dormant under the motion policy.
         @include mixins.when-motion-reduced(transition) {
@@ -216,7 +211,7 @@ $transcript-preview-max-height: calc(50vh / 3);
     }
 
     .agent-tool-fade-in-once {
-        animation: agent-tool-summary-fade-in 160ms ease-out;
+        animation: am-fade-in var(--duration-base) var(--ease-out);
 
         // Reduced treatment (transition), dormant under the motion policy.
         @include mixins.when-motion-reduced(transition) {
@@ -345,7 +340,7 @@ $transcript-preview-max-height: calc(50vh / 3);
         border-radius: 0;
         background: transparent;
         cursor: default;
-        transition: background 0.1s;
+        transition: background var(--duration-fast);
 
         &:hover {
             background: color-mix(in srgb, var(--main-text-color) 3%, transparent);
@@ -402,7 +397,7 @@ $transcript-preview-max-height: calc(50vh / 3);
                 // success/error/etc, see the `&.success .agent-tool-status-icon`
                 // rules below) instead of an instant snap. The glyph itself
                 // still changes instantly — only its color eases.
-                transition: color 150ms ease;
+                transition: color var(--duration-base) var(--ease-standard);
             }
 
             // Peek-anchor wrapper span sits between the flex row and the
@@ -519,7 +514,7 @@ $transcript-preview-max-height: calc(50vh / 3);
                 white-space: nowrap;
                 overflow: hidden;
                 text-overflow: ellipsis;
-                animation: agent-tool-summary-fade-in 160ms ease-out;
+                animation: am-fade-in var(--duration-base) var(--ease-out);
 
                 // Reduced treatment (transition), dormant under the motion policy.
                 @include mixins.when-motion-reduced(transition) {
@@ -618,17 +613,7 @@ $transcript-preview-max-height: calc(50vh / 3);
             // the time of that spec), while flow → hidden (the
             // 5s-post-completion-hold auto-collapse path) and the row's
             // entry get a clean ease-out shrink.
-            transition:
-                max-height 120ms cubic-bezier(0.4, 0, 0.2, 1),
-                padding 120ms cubic-bezier(0.4, 0, 0.2, 1),
-                margin 120ms cubic-bezier(0.4, 0, 0.2, 1),
-                opacity 100ms ease-out,
-                // `content-visibility` is discrete; `allow-discrete` lets it
-                // animate with the collapse — it flips to `hidden` at the END of
-                // the close (body stays rendered through the 120ms shrink) and to
-                // visible at the START of the open. Without it the body pops out
-                // the instant `--hidden` is added. (Chromium 117+.)
-                content-visibility 120ms allow-discrete;
+            @include mixins.collapse-transition;
 
             &--hidden {
                 max-height: 0;
@@ -684,7 +669,7 @@ $transcript-preview-max-height: calc(50vh / 3);
             gap: var(--space-0-5);
             background: color-mix(in srgb, var(--main-text-color) 4%, var(--main-bg-color));
             opacity: 0.55;
-            transition: opacity 100ms ease-out;
+            transition: opacity var(--duration-fast) var(--ease-out);
         }
 
         .agent-tool-panel:hover > .agent-tool-panel-actions,
@@ -755,7 +740,7 @@ $transcript-preview-max-height: calc(50vh / 3);
                 color: var(--accent-color);
                 flex-shrink: 0;
                 opacity: 0.7;
-                transition: opacity 0.15s ease;
+                transition: opacity var(--duration-base) var(--ease-standard);
             }
 
             &.agent-dispatch-card-running .agent-dispatch-card-status-icon {
@@ -2301,7 +2286,7 @@ $transcript-preview-max-height: calc(50vh / 3);
         flex-shrink: 0;
         margin-left: auto;
         opacity: 0;
-        transition: opacity 0.15s ease;
+        transition: opacity var(--duration-base) var(--ease-standard);
     }
 
     &:hover .agent-error-copy,
@@ -2904,7 +2889,7 @@ $transcript-preview-max-height: calc(50vh / 3);
 // the notches that arrive at its edge, that edge shows a 2 px accent line, inset
 // so nothing moves, then fades. SPEC_TOOL_PREVIEW_WHEEL_EDGE_SKID_2026_09_27.md §4.4.
 .scroll-handoff-box {
-    transition: box-shadow 150ms ease-out;
+    transition: box-shadow var(--duration-base) var(--ease-out);
 
     // Reduced treatment (feedback), dormant under the motion policy.
     @include mixins.when-motion-reduced(feedback) {

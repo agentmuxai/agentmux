@@ -574,7 +574,10 @@
     border-radius: 4px;
     cursor: default;
     opacity: 0;
-    transition: opacity 0.15s ease, color 0.15s ease, background 0.15s ease;
+    transition:
+        opacity var(--duration-base) var(--ease-standard),
+        color var(--duration-base) var(--ease-standard),
+        background var(--duration-base) var(--ease-standard);
 }
 
 .swarm-subagent-row:hover .swarm-subagent-retire,
@@ -638,7 +641,10 @@
     border-radius: 4px;
     cursor: pointer;
     opacity: 0;
-    transition: opacity 0.15s ease, color 0.15s ease, background 0.15s ease;
+    transition:
+        opacity var(--duration-base) var(--ease-standard),
+        color var(--duration-base) var(--ease-standard),
+        background var(--duration-base) var(--ease-standard);
 }
 
 .swarm-shell-row:hover .swarm-shell-stop {
@@ -788,7 +794,7 @@
     word-break: break-word;
     overflow-wrap: break-word;
     &.swarm-activity-summary--flash {
-        animation: swarm-activity-flash 0.5s ease-out;
+        animation: am-accent-flash 0.5s var(--ease-out);
     }
     // A fallback line (restored, heuristic or a status phrase), not the agent's
     // own title: dimmer and upright, so it is never read as the agent's account
@@ -797,11 +803,6 @@
         opacity: 0.6;
         font-style: normal;
     }
-}
-
-@keyframes swarm-activity-flash {
-    0%   { opacity: 1; color: var(--accent-color, #6c9ef8); }
-    100% { opacity: 1; color: var(--secondary-text-color); }
 }
 
 // ── Status chip ──────────────────────────────────────────────────────────

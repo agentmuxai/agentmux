@@ -307,11 +307,7 @@
     font-size: 9px;
     line-height: 1;
     cursor: default;
-    // Not `all`: that also animates the inherited `visibility` that hides
-    // window and pane tabs, so this would pop in a frame late when shown
-    // (docs/analysis/ANALYSIS_WINDOW_TAB_SWITCH_PAINT_2026_09_30.md §3).
-    transition-property: color, background-color, border-color, outline-color, box-shadow, opacity;
-    transition-duration: var(--motion-fast);
+    @include mixins.control-transition(var(--duration-fast), var(--ease-emphasized));
 
     &:hover {
         color: var(--main-text-color);
@@ -380,7 +376,7 @@
     padding: 1px var(--space-1-5);
     cursor: default;
     outline: none;
-    transition: color 0.08s, border-color 0.08s, background 0.08s;
+    transition: color var(--duration-instant), border-color var(--duration-instant), background var(--duration-instant);
 
     &:hover {
         border-color: var(--accent-color);
@@ -464,7 +460,9 @@
     border: 1px solid var(--border-color);
     border-radius: 0;
     cursor: default;
-    transition: background 80ms ease, color 80ms ease;
+    transition:
+        background var(--duration-instant) var(--ease-standard),
+        color var(--duration-instant) var(--ease-standard);
 
     &:hover:not(:disabled) {
         background: color-mix(in srgb, var(--accent-color) 12%, transparent);
@@ -496,13 +494,9 @@
     &--high    { color: var(--warning-color); }
     &--critical {
         color: var(--error-color);
-        animation: ctx-text-pulse 1.2s ease-in-out infinite;
+        --pulse-max: 0.8;
+        animation: am-pulse 1.2s var(--ease-in-out) infinite;
     }
-}
-
-@keyframes ctx-text-pulse {
-    0%, 100% { opacity: 0.8; }
-    50%       { opacity: 0.4; }
 }
 
 // Tier 3 countdown text ("~4.2k to auto-compact") — reuses
@@ -675,7 +669,7 @@
     cursor: ns-resize;
     background: transparent;
     border-top: 1px solid transparent;
-    transition: background 0.1s, border-color 0.1s;
+    transition: background var(--duration-fast), border-color var(--duration-fast);
 
     &:hover,
     &--active {
@@ -725,7 +719,7 @@
 
     &.is-fading {
         opacity: 0;
-        transition: opacity 200ms ease-out;
+        transition: opacity 200ms var(--ease-out);
         pointer-events: none;
     }
 }

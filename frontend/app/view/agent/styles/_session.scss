@@ -29,7 +29,10 @@
     cursor: default;
     outline: none;
     white-space: nowrap;
-    transition: background 80ms ease, border-color 80ms ease, color 80ms ease;
+    transition:
+        background var(--duration-instant) var(--ease-standard),
+        border-color var(--duration-instant) var(--ease-standard),
+        color var(--duration-instant) var(--ease-standard);
 
     &:hover:not(:disabled) {
         background: color-mix(in srgb, var(--accent-color) 14%, transparent);
