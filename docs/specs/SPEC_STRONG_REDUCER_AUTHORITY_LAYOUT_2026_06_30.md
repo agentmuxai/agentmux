@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-30
 **Type:** Implementation spec (full analysis)
-**Status:** active — Phase 2 (`balance_node`, #1866) and Phase 3 (srv reducer arms, #1868) implemented; Phase 4 implemented in #4946 (the frontend's own tree edits are layout intents) and #4947 (srv applies its own placements; the window pushes no tree for them); minimize (Phase 5) and Phase 6 not started. Verified against code 2026-10-14 ([triage](../analysis/REPORT_REDUCER_STACK_TRIAGE_2026_10_13.md)).
+**Status:** active — Phase 2 (`balance_node`, #1866) and Phase 3 (srv reducer arms, #1868) implemented; Phase 4 implemented in #4946 (the frontend's own tree edits are layout intents) and #4947 (srv applies its own placements; the window pushes no tree for them); Phase 5 implemented in #4948 (minimize and restore are intents; minimize has been a display mode since #2197, so the dissolve intents were dropped); Phase 6 not started. Verified against code 2026-10-14 ([triage](../analysis/REPORT_REDUCER_STACK_TRIAGE_2026_10_13.md)).
 **Owner:** asaf
 **Supersedes scope of:** `SPEC_864_LAYOUT_SINGLE_WRITER_2026_06_30.md` (that spec's "weak" single-writer
 becomes Phase 1 here; this spec is the committed end-goal)
@@ -345,7 +345,7 @@ replace all round-trip through srv). Do NOT auto-merge on bot approval.**
 `Undissolve` intents with the logical/geometric split. *Own sub-spec + visual verification.* Until
 done, minimize routes its result via `LayoutSetTree` (tracked debt).
 
-*Phase 5 as built (PR_PHASE5):* the design above no longer fits the code. Since #2197 minimize is
+*Phase 5 as built (#4948):* the design above no longer fits the code. Since #2197 minimize is
 a display mode: a leaf's `minimized` flag, its stored size untouched, and the slip and the column
 dissolve are derived at render (`layoutMinimize.ts`, `resolveRowSlipTargets`); nothing restructures
 the tree, and `minimizedSize`/`slipMinimize`/`columnDissolve`/`_slipAnchor` are legacy fields
