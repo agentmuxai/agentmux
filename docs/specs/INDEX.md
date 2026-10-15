@@ -573,6 +573,7 @@ partial list.
 | [`SPEC_AGENT_PANE_FILE_ATTACHMENTS_2026_09_26`](SPEC_AGENT_PANE_FILE_ATTACHMENTS_2026_09_26.md) | SPEC: Attach any file in the agent composer (PDF, Office, text, code, …) |
 | [`SPEC_AGENT_PANE_HISTORY_ALIGNMENT_2026_08_05`](SPEC_AGENT_PANE_HISTORY_ALIGNMENT_2026_08_05.md) | SPEC: Align pane scrollback with actual model context, and make cross-instance opens honest |
 | [`SPEC_AGENT_PANE_IMAGE_ATTACHMENTS_2026_09_26`](SPEC_AGENT_PANE_IMAGE_ATTACHMENTS_2026_09_26.md) | SPEC: Paste and drop images into the agent pane input |
+| [`SPEC_AGENT_PANE_NO_CATCH_UP_MOTION_2026_10_15`](SPEC_AGENT_PANE_NO_CATCH_UP_MOTION_2026_10_15.md) | Spec: an agent pane shows its latest content still, on a tab switch and on a send |
 | [`SPEC_AGENT_PANE_ONE_WAY_FLOW_2026_10_07`](SPEC_AGENT_PANE_ONE_WAY_FLOW_2026_10_07.md) | Agent pane: one-way flow while following |
 | [`SPEC_AGENT_PANE_PREVIEW_CLEANUPS_2026_09_26`](SPEC_AGENT_PANE_PREVIEW_CLEANUPS_2026_09_26.md) | Spec: Agent-pane preview cleanups (message shell, scroll hand-off, cap estimates, file preview) |
 | [`SPEC_AGENT_PANE_ROW_DISCLOSURE_2026_09_26`](SPEC_AGENT_PANE_ROW_DISCLOSURE_2026_09_26.md) | Spec: One open/closed model for agent-pane rows |
