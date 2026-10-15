@@ -803,6 +803,12 @@
         color: var(--main-text-color);
     }
 
+    // Only the part's name wraps.
+    td:nth-child(n + 2),
+    th:nth-child(n + 2) {
+        white-space: nowrap;
+    }
+
     td:nth-child(n + 3),
     th:nth-child(n + 3) {
         text-align: right;
