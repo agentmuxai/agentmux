@@ -8,7 +8,7 @@
 
 import { hostModule } from "@host-module";
 import { initApp } from "./app-init";
-import { tryAutoRecover, clearStartupReloadCount, StartupFailureHandled } from "./app/init/error-display";
+import { tryAutoRecover, clearStartupReloadCount, StartupFailureHandled, reloadKeepingHostCredentials } from "./app/init/error-display";
 import { benchMark } from "@/util/startup-bench";
 import { initPerf } from "@/perf";
 import { isTerminalContext } from "@/app/platform/webgl-context-loss";
@@ -77,7 +77,7 @@ document.addEventListener("webglcontextlost", (event) => {
     contextLostReloading = true;
     setContextLossReloadCount(reloadCount + 1);
     console.error(`[recovery] WebGL context lost — reloading page in 1s (attempt ${reloadCount + 1}/${CONTEXT_LOSS_MAX_RELOADS})`);
-    setTimeout(() => window.location.reload(), 1000);
+    setTimeout(reloadKeepingHostCredentials, 1000);
 }, true);
 
 // ── Keyboard reload (host-window recovery) ───────────────────────────────────
@@ -96,7 +96,7 @@ const startupReloadKeyHandler = (e: KeyboardEvent) => {
         e.key === "F5" || ((e.ctrlKey || e.metaKey) && (e.key === "r" || e.key === "R"));
     if (isReload) {
         e.preventDefault();
-        window.location.reload();
+        reloadKeepingHostCredentials();
     }
 };
 window.addEventListener("keydown", startupReloadKeyHandler, true);

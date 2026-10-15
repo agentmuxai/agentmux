@@ -826,6 +826,7 @@ partial list.
 | [`SPEC_PROVIDER_ISOLATION_2026_06_20`](SPEC_PROVIDER_ISOLATION_2026_06_20.md) | SPEC: Provider environment isolation — never touch the user's `~/.claude` or global CLI |
 | [`SPEC_RELEASE_CICD_CORRECTION_2026_06_30`](SPEC_RELEASE_CICD_CORRECTION_2026_06_30.md) | Release CI/CD Correction — remove the `dl.agentmux.ai` fabrication |
 | [`SPEC_REMOVE_PIN_FEATURE`](SPEC_REMOVE_PIN_FEATURE.md) | SPEC: Remove Tab Pinning, Uniform Inter-Tab Separator |
+| [`SPEC_RENDERER_RECYCLE_WHEN_IDLE_2026_10_13`](SPEC_RENDERER_RECYCLE_WHEN_IDLE_2026_10_13.md) | Spec: recycle a window's renderer when it's idle and over budget |
 | [`SPEC_RUNTIME_MENU_REMAINING_GAPS_2026_10_01`](SPEC_RUNTIME_MENU_REMAINING_GAPS_2026_10_01.md) | SPEC: Finishing the runtime menu — approval prompts, a remembered runtime, the resolved model, and install cleanup |
 | [`SPEC_SHARED_AGENT_REGISTRY_2026_05_12`](SPEC_SHARED_AGENT_REGISTRY_2026_05_12.md) | Spec: Shared agent registry — cross-version "Continue agent" dropdown |
 | [`SPEC_SHUTDOWN_COUNTDOWN_MODAL_2026_09_04`](SPEC_SHUTDOWN_COUNTDOWN_MODAL_2026_09_04.md) | A formal shutdown sequence: countdown-confirm modal + splash-style progress |
