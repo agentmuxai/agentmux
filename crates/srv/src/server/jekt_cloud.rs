@@ -148,8 +148,9 @@ pub(crate) async fn fetch(
     let note = |req: &mut InjectionRequest, text: &str| {
         req.files_delivery = Some(FilesDelivery { delivered: 0, text: text.to_string(), inline: Vec::new(), inline_charge: None });
     };
-    if jekt_files::validate_cloud(&files).is_err() {
-        note(req, "The files sent with this message were malformed, so none were delivered.");
+    let plain: Vec<JektFile> = files.iter().map(|f| f.file.clone()).collect();
+    if jekt_files::validate_cloud(&files).is_err() || jekt_files::check_tier_limits(&plain, "wan").is_err() {
+        note(req, "The files sent with this message were malformed or over the cloud's limits, so none were delivered.");
         return Ok(());
     }
     // A verified sender's signature covers the manifest through its msgid.
@@ -157,7 +158,7 @@ pub(crate) async fn fetch(
         note(req, "The files sent with this message don't match its signature, so none were delivered.");
         return Ok(());
     }
-    req.files = Some(files.iter().map(|f| f.file.clone()).collect::<Vec<JektFile>>());
+    req.files = Some(plain);
     if super::jekt_files::withheld_reason(req).is_some() {
         return Ok(()); // `prepare` says they were withheld
     }
@@ -187,16 +188,28 @@ pub(crate) async fn fetch(
         }
         let url = issued.json::<serde_json::Value>().await.ok().and_then(|v| v["url"].as_str().map(str::to_string));
         let Some(url) = url else { return Err("blob URL answer unreadable".to_string()) };
-        let blob = http
+        let mut resp = http
             .get(&url)
             .timeout(TRANSFER_TIMEOUT)
             .send()
             .await
             .and_then(|r| r.error_for_status())
-            .map_err(|e| format!("blob download failed: {e}"))?
-            .bytes()
-            .await
-            .map_err(|e| format!("blob download cut short: {e}"))?;
+            .map_err(|e| format!("blob download failed: {e}"))?;
+        // Read no more than the file and its encryption can be.
+        let max = f.file.size as usize + OVERHEAD;
+        let mut blob = Vec::with_capacity(max.min(1 << 20));
+        let mut oversized = false;
+        while let Some(chunk) = resp.chunk().await.map_err(|e| format!("blob download cut short: {e}"))? {
+            if blob.len() + chunk.len() > max {
+                oversized = true;
+                break;
+            }
+            blob.extend_from_slice(&chunk);
+        }
+        if oversized {
+            tracing::warn!(file = %f.file.name, "jekt cloud files: blob larger than its file");
+            continue;
+        }
         let key = f.key.clone();
         let plain = tokio::task::spawn_blocking(move || open(&blob, &key)).await.ok().flatten();
         let intact = plain.filter(|p| p.len() as u64 == f.file.size && {
@@ -258,6 +271,18 @@ mod tests {
         fetch("http://127.0.0.1:1", &client, "t", "agenty", &mut req, manifest(), Some("m-1")).await.unwrap();
         assert!(req.files.is_none());
         assert!(req.files_delivery.unwrap().text.contains("don't match its signature"));
+    }
+
+    #[tokio::test]
+    async fn a_manifest_over_the_cloud_limits_is_refused_before_fetching() {
+        let client = reqwest::Client::new();
+        let mut files = manifest();
+        files[0].file.size = 30 * 1024 * 1024;
+        let mut req = InjectionRequest { delivery_tier: Some("wan".into()), ..Default::default() };
+        // Nothing listens at the base: a fetch would fail with Err.
+        fetch("http://127.0.0.1:1", &client, "t", "agenty", &mut req, files, None).await.unwrap();
+        assert!(req.files.is_none());
+        assert!(req.files_delivery.unwrap().text.contains("over the cloud's limits"));
     }
 
     #[tokio::test]
