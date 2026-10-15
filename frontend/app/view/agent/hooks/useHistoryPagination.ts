@@ -212,6 +212,7 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
     const parseOptsAt = (resp: { stream?: string; gen?: string }, firstLine: number) => ({
         ...parseOpts,
         idFirstLine: firstLine,
+        idGen: resp.gen,
         ...(resp.stream && resp.gen ? { source: { stream: resp.stream, gen: resp.gen, firstLine } } : {}),
     });
     const [historyOffset, setHistoryOffset] = createSignal(0);

@@ -1047,9 +1047,21 @@ describe("line-based history ids (idFirstLine)", () => {
         expect([...liveIds].sort()).toEqual([...historyIds].sort());
     });
 
+    it("the transcript generation is part of the id, so a new transcript's line 0 isn't the old one's", () => {
+        const lines = [text("A")];
+        const genA = parseHistoryLines(lines, "claude", undefined, undefined, { idFirstLine: 0, idGen: "0123456789abcdef" }).nodes[0].id;
+        const genB = parseHistoryLines(lines, "claude", undefined, undefined, { idFirstLine: 0, idGen: "fedcba9876543210" }).nodes[0].id;
+        expect(genA).toBe("node_01234567_L0_0");
+        expect(genB).toBe("node_fedcba98_L0_0");
+        // Live, in the same generation, the line gets the same id as history.
+        const live = new ClaudeCodeStreamParser();
+        live.setIdLine(0, "0123456789abcdef");
+        expect(live.parseLine(lines[0])?.id).toBe(genA);
+    });
+
     it("the live loop sets the line for ids where it sets it for tool results", () => {
         const src = readFileSync(join(process.cwd(), "frontend/app/view/agent/useAgentStream.ts"), "utf8");
-        expect(src).toMatch(/parser\.setIdLine\(sourceLine != null && from \? sourceLine : null\)/);
+        expect(src).toMatch(/parser\.setIdLine\(sourceLine != null && from \? sourceLine : null, from\?\.gen\)/);
         expect(src).toMatch(/parser\.setSourceLine\(null\);\s*parser\.setIdLine\(null\);/);
     });
 });

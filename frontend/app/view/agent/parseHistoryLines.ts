@@ -112,6 +112,8 @@ export interface HistoryParserOptions {
      * SPEC_RENDERER_RECYCLE_WHEN_IDLE_2026_10_13.md §2.
      */
     idFirstLine?: number;
+    /** The transcript generation the lines belong to, when known: part of those ids. */
+    idGen?: string;
 }
 
 /**
@@ -326,7 +328,7 @@ export class HistoryParser {
             const trimmed = line.trim();
             if (!trimmed || !trimmed.startsWith("{")) continue;
             parser.setSourceLine(source ? { stream: source.stream, gen: source.gen, line: source.firstLine + lineIdx } : null);
-            parser.setIdLine(idFirstLine != null ? idFirstLine + linesBefore + lineIdx : null);
+            parser.setIdLine(idFirstLine != null ? idFirstLine + linesBefore + lineIdx : null, opts?.idGen);
 
             let rawEvent: any;
             try {

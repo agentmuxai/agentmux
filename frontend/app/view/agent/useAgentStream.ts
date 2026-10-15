@@ -797,7 +797,7 @@ export function useAgentStream({
                 parser.setSourceLine(sourceLine != null && from ? { stream: from.stream, gen: from.gen, line: sourceLine } : null);
                 // The id history gives this line on a reload (node_L<line>_<k>),
                 // so a collapsed row or a scroll anchor finds it again.
-                parser.setIdLine(sourceLine != null && from ? sourceLine : null);
+                parser.setIdLine(sourceLine != null && from ? sourceLine : null, from?.gen);
                 if (sourceLine != null) sourceLine++;
                 const trimmed = line.trim();
                 if (!trimmed) continue;

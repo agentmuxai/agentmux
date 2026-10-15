@@ -305,11 +305,14 @@ export class ClaudeCodeStreamParser {
     private nextIdOf(prefix: string): string {
         const skip = this.skipIdsFn();
         if (this.idLine != null) {
-            // History replay that knows its transcript line (`setIdLine`): an
-            // id of the node's own line, the same on every load of that line,
-            // so it is unique across history pages and stable across reloads.
-            let id = `${prefix}_L${this.idLine}_${this.idLineSeq++}`;
-            while (skip.has(id)) id = `${prefix}_L${this.idLine}_${this.idLineSeq++}`;
+            // Parsing that knows its transcript line (`setIdLine`): an id of the
+            // node's own line in its transcript generation, the same on every
+            // load of that line, so it is unique across history pages and
+            // stable across reloads. The generation keeps a new transcript's
+            // line 0 (after an archive) apart from the old one's.
+            const scope = this.idGen ? `${this.idGen.slice(0, 8)}_` : "";
+            let id = `${prefix}_${scope}L${this.idLine}_${this.idLineSeq++}`;
+            while (skip.has(id)) id = `${prefix}_${scope}L${this.idLine}_${this.idLineSeq++}`;
             return id;
         }
         let id = `${prefix}_${this.nodeIdCounter++}`;
@@ -769,15 +772,23 @@ export class ClaudeCodeStreamParser {
     }
 
     private idLine: number | null = null;
+    private idGen: string | undefined;
     private idLineSeq = 0;
     /**
-     * The transcript line the next events come from, for ids (`nextIdOf`):
-     * a history replay sets it per line; null (live parsing) keeps the
-     * counter ids. SPEC_RENDERER_RECYCLE_WHEN_IDLE_2026_10_13.md §2.
+     * The transcript line (and generation, when known) the next events come
+     * from, for ids (`nextIdOf`): history reads and the live loop set it per
+     * line; null keeps the counter ids.
+     * SPEC_RENDERER_RECYCLE_WHEN_IDLE_2026_10_13.md §2.
+     *
+     * Known limit: a text or thinking run gets its id from the line it starts
+     * on as far as this parse can see. A read that begins partway through a
+     * run (a window not cut at a turn boundary) anchors that one row on its
+     * first line read, so its id can differ from another read's.
      */
-    setIdLine(line: number | null): void {
-        if (line !== this.idLine) this.idLineSeq = 0;
+    setIdLine(line: number | null, gen?: string): void {
+        if (line !== this.idLine || gen !== this.idGen) this.idLineSeq = 0;
         this.idLine = line;
+        this.idGen = gen;
     }
 
     /**
