@@ -151,6 +151,13 @@ pub(crate) async fn prepare(req: &mut InjectionRequest) {
     req.files_delivery = Some(delivery);
 }
 
+/// Deliver on this instance, settling the inline budget for the attempt.
+pub(crate) fn inject_here(state: &super::AppState, req: &InjectionRequest) -> crate::backend::reactive::types::InjectionResponse {
+    let resp = state.reactive_handler.inject_message(req.clone());
+    settle(req, resp.success);
+    resp
+}
+
 /// After a delivery attempt: give back the inline budget it was charged when
 /// it wasn't delivered (refused, rate-limited, retried later), so only a
 /// delivered jekt counts against the session the user's own attachments use.
@@ -439,9 +446,7 @@ async fn receive<R: tokio::io::AsyncRead + Unpin>(
     }
     prepare(&mut req).await;
     let delivered = req.files_delivery.as_ref().map_or(0, |d| d.delivered);
-    let charged = req.clone();
-    let resp = state.reactive_handler.inject_message(req);
-    settle(&charged, resp.success);
+    let resp = inject_here(state, &req);
     if claimed && !resp.success {
         release(&msgid);
     }
