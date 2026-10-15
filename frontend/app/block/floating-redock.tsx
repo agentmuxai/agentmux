@@ -10,6 +10,7 @@
 import { PaneRestoreGlyph } from "@/app/element/pane-control-glyphs";
 import * as MOS from "@/app/store/mos";
 import { WorkspaceService } from "@/app/store/services";
+import { holdRedock } from "@/app/workspace/floating-redock-guard";
 import { atoms, getApi } from "@/store/global";
 import { IconButton } from "@/element/iconbutton";
 import type { JSX } from "solid-js";
@@ -102,9 +103,15 @@ export async function redockThisFloater(): Promise<boolean> {
     if (!floatingWindowLabel()) return false;
     const target = await findRedockTarget();
     if (!target) return false;
-    if (!(await redockFloaterInto(target))) return false;
-    await getApi().focusWindow(target.label).catch(console.error);
-    return true;
+    // Hold the guard across the saga AND the focus call: the floater's empty-tab watcher
+    // closes the window as soon as the tab empties, which is before the saga call returns
+    // (the backend broadcasts the tab update first), and a closed window runs no more code.
+    // The guard releases at the end and the floater then closes.
+    return holdRedock(async () => {
+        if (!(await redockFloaterInto(target))) return false;
+        await getApi().focusWindow(target.label).catch(console.error);
+        return true;
+    });
 }
 
 /** Header Redock button for a floating pane. Hidden when no window can take the pane; the check

@@ -48,7 +48,8 @@ import { TabContent } from "@/app/tab/tabcontent";
 import { WorkspaceService } from "@/store/services";
 import { atoms, getApi } from "@/store/global";
 import * as MOS from "@/store/mos";
-import { Show, createEffect, createMemo, createSignal, onCleanup, onMount, type JSX } from "solid-js";
+import { holdRedock, redockInProgress } from "./floating-redock-guard";
+import { Show, createEffect, createMemo, onCleanup, onMount, type JSX } from "solid-js";
 
 import { createRedockArming } from "./redock-arming";
 import { useReapplyFloatingOnTop } from "@/app/block/floating-ontop";
@@ -101,10 +102,9 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
     // subscription whenever tabId changes (the prior effect run's
     // cleanup decrements the previous refcount).
     let hadBlocks = false;
-    // Signal so createEffect re-runs when redockInProgress changes — a plain
-    // JS boolean is non-reactive, so the effect would never see the flag go
-    // false again after the RPC completes, leaving the floater open after dock.
-    const [redockInProgress, setRedockInProgress] = createSignal(false);
+    // `redockInProgress` is a reactive module-level guard (floating-redock-guard.ts)
+    // shared with the Redock button, so the effect re-runs when it goes false again
+    // after the RPC completes, and the floater closes after a dock.
     createEffect(() => {
         const tid = tabId();
         if (!tid) return;
@@ -236,8 +236,8 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
         // from the host's drag tick instead, so these stay no-ops there).
         let startHoverHeartbeat: () => void = () => {};
         let stopHoverHeartbeat: () => void = () => {};
-        // redockInProgress is a signal at component scope (above this onMount)
-        // so createEffect re-runs when it changes.
+        // redockInProgress is a reactive module-level guard (floating-redock-guard.ts)
+        // so the empty-tab effect re-runs when it changes.
         // Sentinel for the listenEvent .then() race: if the component unmounts
         // before the Promise resolves, the .then() immediately calls unlisten.
         let cleaned = false;
@@ -805,12 +805,7 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
         }
 
         const tryRedockAtCursor = async (screenX: number, screenY: number, expectedTarget: string | null) => {
-            setRedockInProgress(true);
-            try {
-                await tryRedockAtCursorInner(screenX, screenY, expectedTarget);
-            } finally {
-                setRedockInProgress(false);
-            }
+            await holdRedock(() => tryRedockAtCursorInner(screenX, screenY, expectedTarget));
         };
 
         const tryRedockAtCursorInner = async (screenX: number, screenY: number, expectedTarget: string | null) => {

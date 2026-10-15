@@ -13,7 +13,10 @@ const hub = vi.hoisted(() => ({
     reloads: [] as string[],
     redocks: [] as unknown[][],
     redockFails: false,
+    guard: (() => false) as () => boolean,
     focused: [] as string[],
+    // What the guard read at each step (the saga calls and the focus call).
+    guardAt: [] as string[],
 }));
 
 vi.mock("@/store/global", () => ({
@@ -23,7 +26,10 @@ vi.mock("@/store/global", () => ({
             if (hub.listFails) throw new Error("no host");
             return hub.instances;
         },
-        focusWindow: async (label: string) => void hub.focused.push(label),
+        focusWindow: async (label: string) => {
+            hub.focused.push(label);
+            hub.guardAt.push("focus:" + hub.guard());
+        },
     }),
 }));
 vi.mock("@/app/store/mos", () => ({
@@ -40,12 +46,14 @@ vi.mock("@/app/store/services", () => ({
     WorkspaceService: {
         RedockFloatingPane: async (...args: unknown[]) => {
             hub.redocks.push(args);
+            hub.guardAt.push("saga:" + hub.guard());
             if (hub.redockFails) throw new Error("saga");
             return { redocked: true };
         },
     },
 }));
 
+import { redockInProgress } from "@/app/workspace/floating-redock-guard";
 import { FloatingRedockButton, findRedockTarget, pickRedockTarget, redockFloaterInto, redockThisFloater } from "./floating-redock";
 
 const setLabel = (label: string) => window.history.replaceState({}, "", `/?windowLabel=${label}`);
@@ -64,6 +72,8 @@ beforeEach(() => {
     hub.redocks = [];
     hub.redockFails = false;
     hub.focused = [];
+    hub.guardAt = [];
+    hub.guard = redockInProgress;
     setLabel("floating-1");
 });
 afterEach(() => {
@@ -136,6 +146,22 @@ describe("redockThisFloater", () => {
         expect(await redockThisFloater()).toBe(true);
         expect(hub.redocks).toHaveLength(1);
         expect(hub.focused).toEqual(["main"]);
+    });
+    it("holds the redock guard across the saga AND the focus call, and releases it after", async () => {
+        // The floater closes itself when its tab empties, which the backend broadcasts before the
+        // saga call returns; the guard defers that close, or the focus call would never run.
+        hub.objects.set("tab:ftab", { blockids: ["b1", "b2"] });
+        expect(redockInProgress()).toBe(false);
+        expect(await redockThisFloater()).toBe(true);
+        expect(hub.guardAt).toEqual(["saga:true", "saga:true", "focus:true"]);
+        expect(redockInProgress()).toBe(false);
+    });
+    it("releases the guard when the redock fails", async () => {
+        hub.redockFails = true;
+        const err = vi.spyOn(console, "error").mockImplementation(() => {});
+        await redockThisFloater();
+        err.mockRestore();
+        expect(redockInProgress()).toBe(false);
     });
     it("does nothing in a window that is not a floater", async () => {
         setLabel("main");
