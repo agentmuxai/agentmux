@@ -43,9 +43,11 @@ export function takeScrollMemo(blockId: string): ScrollMemo | undefined {
 
 /**
  * The pane's position, read from the DOM (a one-time read, when the page goes
- * away): the first row whose bottom is below the scroller's top.
+ * away): the first row whose bottom is below the scroller's top. The offset is
+ * stored unzoomed, like `scrollTop`: `getBoundingClientRect` is in zoomed px
+ * under the pane's CSS zoom, so it is divided by `zoom`.
  */
-export function captureScrollMemo(scroller: HTMLElement | undefined, following: boolean): ScrollMemo | null {
+export function captureScrollMemo(scroller: HTMLElement | undefined, following: boolean, zoom = 1): ScrollMemo | null {
     if (following) return { bottom: true };
     if (!scroller) return null;
     const top = scroller.getBoundingClientRect().top;
@@ -53,7 +55,7 @@ export function captureScrollMemo(scroller: HTMLElement | undefined, following: 
         const box = row.getBoundingClientRect();
         if (box.bottom > top + 1) {
             const nodeId = row.dataset.nodeId;
-            return nodeId ? { nodeId, offsetPx: top - box.top } : null;
+            return nodeId ? { nodeId, offsetPx: (top - box.top) / (zoom > 0 ? zoom : 1) } : null;
         }
     }
     return null;
@@ -68,12 +70,15 @@ export function useScrollMemo(opts: {
     blockId: string | undefined;
     scroller: () => HTMLElement | undefined;
     following: Accessor<boolean>;
+    /** The pane's CSS zoom (1 without one). */
+    zoom?: Accessor<number>;
     historyReady: Accessor<boolean>;
     scrollToRow: (nodeId: string, offsetPx: number) => void;
 }): void {
     const { blockId } = opts;
     if (!blockId) return;
-    const capture = (): ScrollMemo | null => captureScrollMemo(opts.scroller(), untrack(opts.following));
+    const capture = (): ScrollMemo | null =>
+        captureScrollMemo(opts.scroller(), untrack(opts.following), opts.zoom ? untrack(opts.zoom) : 1);
     capturers.set(blockId, capture);
     onCleanup(() => {
         if (capturers.get(blockId) === capture) capturers.delete(blockId);

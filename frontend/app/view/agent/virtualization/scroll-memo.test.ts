@@ -37,6 +37,12 @@ describe("scroll memo (SPEC_RENDERER_RECYCLE_WHEN_IDLE_2026_10_13.md §2)", () =
         expect(captureScrollMemo(undefined, false)).toBeNull();
     });
 
+    it("stores the offset unzoomed: getBoundingClientRect is zoomed under the pane's CSS zoom", () => {
+        // At 2x, b is 20 zoomed px in: 10 px of scrollTop.
+        expect(captureScrollMemo(scroller(["a", "b", "c"], 30), false, 2)).toEqual({ nodeId: "b", offsetPx: 10 });
+        expect(captureScrollMemo(scroller(["a", "b", "c"], 30), false, 0.5)).toEqual({ nodeId: "b", offsetPx: 40 });
+    });
+
     it("is read once, and ignores what it can't use", () => {
         sessionStorage.setItem("agentmux:scroll:b1", JSON.stringify({ nodeId: "n1", offsetPx: 12 }));
         expect(takeScrollMemo("b1")).toEqual({ nodeId: "n1", offsetPx: 12 });

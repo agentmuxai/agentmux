@@ -1186,7 +1186,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         const cmd = props.scrollCommand?.();
         if (cmd) untrack(() => scrollToNode(cmd.nodeId));
     });
-    useScrollMemo({ blockId: props.blockId, scroller: () => scrollRef, following: props.viewState.stickToBottom, historyReady: props.viewState.historyReady, scrollToRow: scrollToNode });
+    useScrollMemo({ blockId: props.blockId, scroller: () => scrollRef, following: props.viewState.stickToBottom, zoom: props.zoomFactor, historyReady: props.viewState.historyReady, scrollToRow: scrollToNode });
 
     // Release (latched-collapse) any held-open tool whose row has scrolled fully
     // above the viewport top. DOM-based so it works uniformly for virtualized
