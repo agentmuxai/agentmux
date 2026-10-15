@@ -139,10 +139,10 @@ export function cefInputOwnerState(windowLabel: string): Promise<InputOwnerRepor
 // Every request for the keyboard, for the page's own content or one of its
 // browser panes, goes out as one numbered `input_select`. The requests are
 // separate IPCs and can reach the host out of order; the host drops one that
-// arrives after a newer one. `inputEpoch` tells this page load from the one
-// before a reload, whose numbers it would otherwise repeat.
-// SPEC_BROWSER_PANE_INPUT_OWNER_2026_10_15.md §3.6.
-const inputEpoch = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+// arrives after a newer one. `inputEpoch`, when this page loaded (in
+// microseconds), orders this page load after the one before a reload, whose
+// numbers it would otherwise repeat. SPEC_BROWSER_PANE_INPUT_OWNER_2026_10_15.md §3.6.
+const inputEpoch = Math.round(performance.timeOrigin * 1000);
 let inputSeq = 0;
 
 function selectInput(windowLabel: string, blockId?: string): Promise<boolean> {

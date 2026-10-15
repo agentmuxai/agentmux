@@ -148,8 +148,9 @@ No key codes are read. The per-message wheel and key lines in the pane subclass 
   seq }`: the app's own content without `block_id`, a browser pane with it. The existing `reclaimWindowFocus` and
   `browserPanes.focus` send it (`cef-host-commands.ts`), so every caller is numbered without changing. The requests are
   separate IPCs and can reach the host out of order; the host drops one whose `seq` isn't above the last one it applied
-  for that window (`registry::apply_selection`, which applies it under the same lock). `epoch` is per page load, so a reloaded page starts its own numbering;
-  the page load it replaces is retired, so a request still in flight from before the reload is dropped too.
+  for that window (`registry::apply_selection`, which applies it under the same lock). `epoch` is when the page loaded (microseconds), so a reloaded page starts its own
+  numbering and a request still in flight from an earlier page, even its first, is dropped. A page load more than a
+  minute older than the current one is a new page after the clock was set back, not a late request.
   On every platform; `main_window_focus` and `browser_pane_focus` stay for other callers.
 - **The host says what happened.** When whether the window is active, or where its machine last saw the keyboard,
   changes, the window's page gets `input-owner-changed { active, keys: "app" | "pane" | "elsewhere" | null, block_id }`
