@@ -69,6 +69,8 @@ pub(crate) async fn prepare(req: &mut InjectionRequest) {
             req.files_delivery = Some(FilesDelivery {
                 delivered: 0,
                 text: "This message was sent with files that didn't arrive.".to_string(),
+                inline: Vec::new(),
+                inline_charge: None,
             });
         }
         return;
@@ -79,6 +81,8 @@ pub(crate) async fn prepare(req: &mut InjectionRequest) {
         req.files_delivery = Some(FilesDelivery {
             delivered: 0,
             text: format!("{count} {noun} sent with this message {verb} withheld: {reason}."),
+            inline: Vec::new(),
+            inline_charge: None,
         });
         return;
     }
@@ -86,6 +90,8 @@ pub(crate) async fn prepare(req: &mut InjectionRequest) {
         req.files_delivery = Some(FilesDelivery {
             delivered: 0,
             text: format!("{count} {noun} sent with this message couldn't be delivered: the attachment store isn't available."),
+            inline: Vec::new(),
+            inline_charge: None,
         });
         return;
     };
@@ -101,6 +107,9 @@ pub(crate) async fn prepare(req: &mut InjectionRequest) {
     // copy's name included, so neither a name nor the path it gives the copy
     // can close the jekt block or open a list.
     let sender = quote_in_jekt(req.source_agent.as_deref().unwrap_or("Another agent"));
+    // Claude sees them inline only from a sender whose signature verified
+    // (spec §6.4), and only when it is running to take them.
+    let inline_to = sender_verified(req).then(|| inline_target(&req.target_agent)).flatten();
     let delivery = tokio::task::spawn_blocking(move || {
         let mut found = Vec::new();
         let mut missing = Vec::new();
@@ -118,17 +127,104 @@ pub(crate) async fn prepare(req: &mut InjectionRequest) {
                 None => missing.push(name),
             }
         }
-        FilesDelivery {
-            delivered: found.len(),
-            text: prompt::jekt_list_block(&sender, &found, &missing, &[]),
-        }
+        let (prepared, inline_charge) = match inline_to {
+            Some(t) => {
+                let prepared = svc.with_session_inline_budget(&t.session_key, Some(&t.new_session_key), t.session_bytes, |budget| {
+                    let prepared = prompt::prepare_from(Some(&sender), &found, &missing, t.max_count, budget);
+                    let spent = prompt::inline_bytes(&prepared.inline);
+                    (prepared, spent)
+                });
+                let spent = prompt::inline_bytes(&prepared.inline);
+                (prepared, (spent > 0).then_some((t.session_key, spent)))
+            }
+            None => (prompt::prepare_from(Some(&sender), &found, &missing, 0, 0), None),
+        };
+        FilesDelivery { delivered: found.len(), text: prepared.list, inline: prepared.inline, inline_charge }
     })
     .await
     .unwrap_or_else(|_| FilesDelivery {
         delivered: 0,
         text: format!("{count} {noun} sent with this message couldn't be delivered."),
+        inline: Vec::new(),
+        inline_charge: None,
     });
     req.files_delivery = Some(delivery);
+}
+
+/// Deliver on this instance, settling the inline budget for the attempt.
+pub(crate) fn inject_here(state: &super::AppState, req: &InjectionRequest) -> crate::backend::reactive::types::InjectionResponse {
+    let resp = state.reactive_handler.inject_message(req.clone());
+    settle(req, resp.success);
+    resp
+}
+
+/// After a delivery attempt: give back the inline budget it was charged when
+/// it wasn't delivered (refused, rate-limited, retried later), so only a
+/// delivered jekt counts against the session the user's own attachments use.
+pub(crate) fn settle(req: &InjectionRequest, delivered: bool) {
+    let Some((key, bytes)) = req.files_delivery.as_ref().and_then(|d| d.inline_charge.clone()) else {
+        return;
+    };
+    if delivered {
+        return;
+    }
+    if let Some(svc) = attachments::get() {
+        svc.refund_session_inline(&key, bytes);
+    }
+}
+
+/// Whether this jekt's sender is proven for this message, by the same rule
+/// that relaxes `ESCALATE` (`Handler::deliver_audited`): one check verified
+/// and none failed.
+fn sender_verified(req: &InjectionRequest) -> bool {
+    let verdicts = [req.sig_verified, req.reagent_verified, req.lan_verified, req.channel_verified, req.wan_verified];
+    let wan_ok = req.wan_verified == Some(true)
+        && req.wan_instance.as_ref().is_some_and(|i| matches!(i.status, WanInstanceStatus::Approved | WanInstanceStatus::New));
+    !verdicts.contains(&Some(false))
+        && (req.sig_verified == Some(true)
+            || req.reagent_verified == Some(true)
+            || req.lan_verified == Some(true)
+            || req.channel_verified == Some(true)
+            || wan_ok)
+}
+
+/// Where inline files may go: a persistent Claude agent that is running or
+/// starting, so its stdin takes the image blocks. A target that would have
+/// to be started gets a turn with the text alone, so it gets the list alone.
+struct InlineTarget {
+    max_count: usize,
+    session_bytes: u64,
+    /// The Claude session's inline budget, as the composer keys it
+    /// (`agent_handlers/input.rs`): by session id, or by block until known.
+    session_key: String,
+    new_session_key: String,
+}
+
+fn inline_target(target: &str) -> Option<InlineTarget> {
+    use crate::backend::blockcontroller::persistent::PersistentSubprocessController;
+    use crate::backend::reactive::handler::LookupOutcome;
+    let handler = crate::backend::reactive::get_global_handler();
+    let block = handler.block_for_uid(target).or_else(|| match handler.lookup_by_name(target) {
+        LookupOutcome::One(reg) => Some(reg.block_id),
+        _ => None,
+    })?;
+    let ctrl = crate::backend::blockcontroller::get_controller(&block)?;
+    let persistent = ctrl.as_any().downcast_ref::<PersistentSubprocessController>()?;
+    let limits = attachments::get()?.limits();
+    if persistent.needs_spawn() || limits.claude_inline_max == 0 {
+        return None;
+    }
+    let new_session_key = format!("block:{block}:new");
+    let session_key = persistent
+        .session_id()
+        .filter(|s| !s.is_empty())
+        .map_or_else(|| new_session_key.clone(), |s| format!("session:{s}"));
+    Some(InlineTarget {
+        max_count: limits.claude_inline_max,
+        session_bytes: limits.claude_session_inline_bytes,
+        session_key,
+        new_session_key,
+    })
 }
 
 // ---- Moving the files to another instance (spec §4) ----
@@ -350,7 +446,7 @@ async fn receive<R: tokio::io::AsyncRead + Unpin>(
     }
     prepare(&mut req).await;
     let delivered = req.files_delivery.as_ref().map_or(0, |d| d.delivered);
-    let resp = state.reactive_handler.inject_message(req);
+    let resp = inject_here(state, &req);
     if claimed && !resp.success {
         release(&msgid);
     }
@@ -570,6 +666,21 @@ mod tests {
         req.sig_verified = Some(true);
         req.channel_verified = Some(false);
         assert!(withheld_reason(&req).is_some(), "any failed check withholds");
+    }
+
+    /// Inline needs proof for this message: a verified check and no failed one.
+    #[test]
+    fn only_a_verified_sender_gets_files_inline() {
+        let f = files();
+        let mut req = req_with(f.clone(), &jekt_files::bind_msgid("m", &f), "channel");
+        assert!(!sender_verified(&req), "self-declared");
+        req.channel_verified = Some(true);
+        assert!(sender_verified(&req));
+        req.lan_verified = Some(false);
+        assert!(!sender_verified(&req), "a failed check rules it out");
+        let mut wan = req_with(f.clone(), &jekt_files::bind_msgid("m", &f), "wan");
+        wan.wan_verified = Some(true);
+        assert!(!sender_verified(&wan), "a verdict with no instance proves no install");
     }
 
     #[test]

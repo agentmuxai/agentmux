@@ -237,7 +237,9 @@ async fn replay_one(state: &AppState, row: HeldJekt) -> ReplayOutcome {
     // recompute would lose a forced escalation.
     let mut req = request_from_held(&row);
     super::jekt_files::prepare(&mut req).await;
+    let charged = req.clone();
     let resp = state.reactive_handler.inject_held(req);
+    super::jekt_files::settle(&charged, resp.success);
     let mstore = state.mstore.clone();
     let id = row.request_id.clone();
     if resp.success {

@@ -757,7 +757,7 @@ pub enum AgentDelivery {
 /// keystrokes silently fail to reach a persistent stream-json agent (it rejects raw
 /// input). Spec: docs/specs/SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md §6 (Phase 3).
 pub fn deliver_agent_message(block_id: &str, message: &str) -> Result<AgentDelivery, String> {
-    deliver_agent_message_from(block_id, message, None)
+    deliver_agent_message_from(block_id, message, None, &[])
 }
 
 /// [`deliver_agent_message`], saying who the input is from (turn provenance,
@@ -768,6 +768,7 @@ pub fn deliver_agent_message_from(
     block_id: &str,
     message: &str,
     origin: Option<health::TurnInput>,
+    inline: &[serde_json::Value],
 ) -> Result<AgentDelivery, String> {
     let ctrl =
         get_controller(block_id).ok_or_else(|| format!("no controller for block {block_id}"))?;
@@ -776,7 +777,7 @@ pub fn deliver_agent_message_from(
         .as_any()
         .downcast_ref::<persistent::PersistentSubprocessController>()
     {
-        return Ok(match persistent_ctrl.send_user_message_outcome_from(message.to_string(), origin)? {
+        return Ok(match persistent_ctrl.send_user_message_with_images_from(message.to_string(), origin, inline.to_vec())? {
             SendOutcome::Sent => AgentDelivery::Structured,
             SendOutcome::Deferred => AgentDelivery::StructuredDeferred,
         });

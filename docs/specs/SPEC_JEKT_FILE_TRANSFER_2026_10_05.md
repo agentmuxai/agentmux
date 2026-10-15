@@ -1,7 +1,7 @@
 # SPEC: Send files with a jekt, on every delivery tier
 
 **Date:** 2026-10-05, revised 2026-10-15 against `main` 53682b5bc
-**Status:** active — Phase 1 shipped (#4965); Phase 2 in review; Phases 3–5 proposed
+**Status:** active — Phases 1 and 2 shipped (#4965, #4972); Phase 3 in review; Phases 4–5 proposed
 **Author:** AgentX@narko; revision by Loap@narko
 **Builds on:** `SPEC_AGENT_PANE_IMAGE_ATTACHMENTS_2026_09_26.md` and `SPEC_AGENT_PANE_FILE_ATTACHMENTS_2026_09_26.md` (the attachment store and how providers receive attachments), `SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md`, `SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md`, `SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md`, `SPEC_WAN_JEKT_VERIFICATION_2026_09_24.md`, `SPEC_WAN_JEKT_SIGNED_BY_SRV_2026_10_14.md` (signing per tier), `SPEC_DURABLE_JEKT_DELIVERY_2026_09_24.md` (held messages), `SPEC_JEKT_DELIVERY_STATES_AND_MAILBOX_2026_10_01.md`.
 
@@ -208,7 +208,7 @@ A later version can seal each file key to the receiver's public key (an X25519 k
 |---|---|
 | 1 | Same instance. `SendMessage.files` (MCP uploads to its srv); manifest, msgid binding and the receive-side check; same-instance delivery; held jekts keep their manifest; `FILES=`, the sender-named `<attached_files>` list, neutralising fake lists and quoting sender-controlled names; keyword scan over names; chips on the jekt bubble |
 | 2 | Another instance on this machine, and LAN: `POST /agentmux/reactive/inject-files` (in `lan_forward_routes`), `files-v1` in registry entries and the LAN agent answer, files only from `lan-verified` senders on LAN, a LAN files jekt delivered once, four transfers at once per receiver |
-| 3 | Inline images and PDFs for persistent Claude from verified senders (`MessageSender` carries attachments) |
+| 3 | Inline images and PDFs for a running persistent Claude from verified senders: `MessageSender` carries Claude content blocks; the files step inlines only for a verified sender and a target that is running or starting, within the session's inline budget, so the list's "shown above" is always true; a target that has to be started gets the list alone |
 | 4 | Cloud: relay blob interface (cloud repository), encrypted upload and download, release on a failed download |
 | 5 | Sealed file keys (§7) |
 
