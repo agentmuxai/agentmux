@@ -9,7 +9,7 @@
 //! bodies so pane-specific logic lives in one place instead of threaded
 //! through `if self.is_browser_pane` branches in `client.rs`.
 //!
-//! Notable: this is where `install_browser_pane_focus_redirect` actually gets wired
+//! Notable: this is where `install_browser_pane_subclass` actually gets wired
 //! in. Before this phase the function existed in `browser_pane::hwnd` but had zero
 //! callers (see `SPEC_BROWSER_PANE_LIFECYCLE.md` §5 race #5). Now
 //! `on_after_created_browser_pane` and `on_load_end_browser_pane` both reinstall the focus
@@ -282,15 +282,15 @@ pub fn on_after_created_browser_pane(state: &Arc<AppState>, browser: &Browser) {
                 }
                 tracing::info!("[pane-zorder] raised pane to top of Z-order");
 
-                // Subclass the pane HWND + its descendants so WM_SETFOCUS
-                // from Chromium gets redirected to the parent. The state
+                // Subclass the pane HWND + its descendants so clicks and
+                // focus reach the input owner. The state
                 // and block_id let the subclass emit `browser-pane-clicked`
                 // directly on WM_LBUTTONDOWN without relying on CEF focus
                 // callbacks (which don't fire for clicks inside an already-
                 // focused pane).
                 let block_id = resolve_pane_block_id(state, browser).unwrap_or_default();
                 unsafe {
-                    crate::browser_pane::hwnd::install_browser_pane_focus_redirect(
+                    crate::browser_pane::hwnd::install_browser_pane_subclass(
                         hwnd,
                         state.clone(),
                         block_id.clone(),
@@ -421,7 +421,7 @@ pub fn on_before_close_browser_pane(state: &Arc<AppState>, label: &str) {
     #[cfg(target_os = "windows")]
     {
         if let Some(block_id) = block_id {
-            crate::browser_pane::hwnd::uninstall_focus_redirect_for_block(block_id);
+            crate::browser_pane::hwnd::uninstall_pane_subclass_for_block(block_id);
             crate::browser_pane::hwnd::remove_contexts_for_block(block_id);
         }
     }
@@ -498,7 +498,7 @@ pub fn on_load_end_browser_pane(state: &Arc<AppState>, browser: &Browser) {
             if !wh.0.is_null() {
                 let block_id = pane_block_id.clone().unwrap_or_default();
                 unsafe {
-                    crate::browser_pane::hwnd::install_browser_pane_focus_redirect(
+                    crate::browser_pane::hwnd::install_browser_pane_subclass(
                         wh.0 as *mut std::ffi::c_void,
                         state.clone(),
                         block_id,

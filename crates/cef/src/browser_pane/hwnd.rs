@@ -20,7 +20,7 @@ static BROWSER_PANE_WNDPROCS: std::sync::LazyLock<
 > = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
 
 /// Per-pane context, keyed by the pane's outer HWND. Populated by
-/// `install_browser_pane_focus_redirect`. The WndProc hook uses it to emit the
+/// `install_browser_pane_subclass`. The WndProc hook uses it to emit the
 /// `browser-pane-clicked` event on `WM_LBUTTONDOWN` without needing to
 /// round-trip through CEF callbacks — only the outer HWND is keyed here;
 /// descendants walk up via `GetParent` to find their context.
@@ -35,7 +35,7 @@ static BROWSER_PANE_HWND_CONTEXT: std::sync::LazyLock<
 > = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
 
 /// Restore the original WndProc for every HWND (outer + children) that was
-/// subclassed by `install_browser_pane_focus_redirect` for the given `block_id`.
+/// subclassed by `install_browser_pane_subclass` for the given `block_id`.
 ///
 /// Call this from `on_before_close_browser_pane` **before**
 /// `remove_contexts_for_block` — we still need `BROWSER_PANE_HWND_CONTEXT` to
@@ -47,7 +47,7 @@ static BROWSER_PANE_HWND_CONTEXT: std::sync::LazyLock<
 /// pane's HWND value from being picked
 /// as the "main render widget" by `find_main_render_widget` if the value is
 /// later recycled by a new `Chrome_RenderWidgetHostHWND`.
-pub fn uninstall_focus_redirect_for_block(block_id: &str) {
+pub fn uninstall_pane_subclass_for_block(block_id: &str) {
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         EnumChildWindows, IsWindow, SetWindowLongPtrW, GWLP_WNDPROC,
     };
@@ -207,7 +207,7 @@ pub fn pane_block_for_hwnd(hwnd: *mut std::ffi::c_void) -> Option<String> {
 /// by `browser_pane::callbacks::on_load_end_browser_pane` after every navigation — Chromium
 /// recreates the `Chrome_RenderWidgetHostHWND` on every page load, so the
 /// subclass has to follow along or it ends up stranded on a destroyed HWND.
-pub unsafe fn install_browser_pane_focus_redirect(
+pub unsafe fn install_browser_pane_subclass(
     hwnd: *mut std::ffi::c_void,
     state: Arc<crate::state::AppState>,
     block_id: String,
@@ -308,7 +308,7 @@ pub unsafe fn install_browser_pane_focus_redirect(
             // *changes* — clicks inside a pane that already has keyboard
             // focus (the user clicked another DOM pane, then clicked
             // back into this pane content) produce WM_LBUTTONDOWN but
-            // no CEF focus callback, leaving a flag armed forever.
+            // no CEF focus callback.
             if let Some(ctx) = find_context(hwnd) {
                 if let Some(state) = ctx.state.upgrade() {
                     let block_id_short: String = ctx.block_id.chars().take(7).collect();
