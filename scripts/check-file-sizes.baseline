@@ -7,7 +7,7 @@
 1549 crates/cef/src/commands/cli_login.rs
 2217 crates/cef/src/commands/window_pool.rs
 1515 crates/cef/src/lib.rs
-1633 crates/cef/src/state/mod.rs
+1632 crates/cef/src/state/mod.rs
 2205 crates/cef/src/ui_tasks/window.rs
 2606 crates/common/src/data_paths.rs
 2267 crates/common/src/ipc.rs
