@@ -140,16 +140,39 @@ pub fn known(connection: &str) -> bool {
 }
 
 /// [`remember_in`] under this instance's config dir, for this AgentMux's
-/// version. Best effort: a host not remembered only means its next pane is
-/// not durable by default.
+/// version, then (in the background, when that changed anything) for the
+/// other names of its machine ([`remember_on_machine`]). Best effort: a host
+/// not remembered only means its next pane is not durable by default.
 pub fn remember(connection: &str) {
-    if let Err(e) = remember_in(
-        &crate::backend::base::get_mux_config_dir(),
-        connection,
-        env!("CARGO_PKG_VERSION"),
-    ) {
+    let config_home = crate::backend::base::get_mux_config_dir();
+    let version = env!("CARGO_PKG_VERSION");
+    let had = |c: &str| {
+        let (hosts, info) = all_in(&config_home);
+        canonical(c).is_some_and(|n| hosts.contains(&n) && info.get(&n).is_some_and(|i| i.helper_version == version))
+    };
+    let already = had(connection);
+    if let Err(e) = remember_in(&config_home, connection, version) {
         tracing::warn!(connection = %connection, error = %e, "could not remember a helper host");
     }
+    if !already {
+        on_machine_later(connection, true);
+    }
+}
+
+/// Record `connection`'s helper for the other names of its machine, in the
+/// background: `ssh -G` may take a moment, and the callers can't wait.
+fn on_machine_later(connection: &str, installed: bool) {
+    let Ok(rt) = tokio::runtime::Handle::try_current() else {
+        return;
+    };
+    let connection = connection.to_string();
+    rt.spawn(async move {
+        if installed {
+            remember_on_machine(&connection).await;
+        } else if let Err(e) = forget_helper_on_machine(&connection).await {
+            tracing::warn!(connection = %connection, error = %e, "could not forget the helper record");
+        }
+    });
 }
 
 /// [`record_uname_in`] under this instance's config dir. Best effort.
@@ -181,9 +204,110 @@ pub fn forget_helper_in(config_home: &Path, connection: &str) -> std::io::Result
     write(config_home, &hosts)
 }
 
-/// [`forget_helper_in`] under this instance's config dir.
+/// [`forget_helper_in`] under this instance's config dir, then (in the
+/// background) for the other names of its machine.
 pub fn forget_helper(connection: &str) -> std::io::Result<()> {
-    forget_helper_in(&crate::backend::base::get_mux_config_dir(), connection)
+    forget_helper_in(&crate::backend::base::get_mux_config_dir(), connection)?;
+    on_machine_later(connection, false);
+    Ok(())
+}
+
+// ── One machine, many names ────────────────────────────────────────────────
+//
+// The helper lives in the remote account's home, so every name for the same
+// account on the same machine (two ssh config aliases for one
+// `user@host:port`, say) shares one helper. What one name learns about it is
+// recorded for all of them, or each name would show its own guess (#4513).
+
+/// `user@hostname:port` from `ssh -G`'s output, the host name in lower case;
+/// `None` unless all three are there.
+fn machine_from_ssh_g(out: &str) -> Option<String> {
+    let (mut user, mut host, mut port) = (None, None, None);
+    for line in out.lines() {
+        match line.trim_end().split_once(' ') {
+            Some(("user", v)) if !v.trim().is_empty() => user = Some(v.trim().to_string()),
+            Some(("hostname", v)) if !v.trim().is_empty() => host = Some(v.trim().to_ascii_lowercase()),
+            Some(("port", v)) => port = v.trim().parse::<u16>().ok(),
+            _ => {}
+        }
+    }
+    Some(format!("{}@{}:{}", user?, host?, port?))
+}
+
+/// How long a name's machine is kept: `ssh -G` runs at most once in that
+/// time for each name.
+const MACHINE_TTL: std::time::Duration = std::time::Duration::from_secs(300);
+
+/// The account and machine `connection` logs in to, as `ssh -G` says (the
+/// user's ssh config applied); `None` if it can't say.
+async fn machine(connection: &str) -> Option<String> {
+    use std::collections::HashMap;
+    use std::sync::LazyLock;
+    use std::time::Instant;
+    static CACHE: LazyLock<Mutex<HashMap<String, (Instant, Option<String>)>>> = LazyLock::new(Default::default);
+    let name = canonical(connection)?;
+    if let Some((at, found)) = CACHE.lock().unwrap_or_else(|e| e.into_inner()).get(&name) {
+        if at.elapsed() < MACHINE_TTL {
+            return found.clone();
+        }
+    }
+    let found = match super::ConnTarget::parse(&name) {
+        Ok(super::ConnTarget::Ssh(dest)) => super::address::ssh_g(&dest).await.and_then(|out| machine_from_ssh_g(&out)),
+        _ => None,
+    };
+    CACHE.lock().unwrap_or_else(|e| e.into_inner()).insert(name, (Instant::now(), found.clone()));
+    found
+}
+
+/// The other names AgentMux knows (the user's ssh config hosts, and the
+/// hosts recorded here) for the account and machine `connection` logs in to.
+async fn same_machine(connection: &str) -> Vec<String> {
+    let Some(name) = canonical(connection) else {
+        return Vec::new();
+    };
+    let Some(target) = machine(&name).await else {
+        return Vec::new();
+    };
+    let mut names = tokio::task::spawn_blocking(super::ssh_config::hosts).await.unwrap_or_default();
+    let (recorded, info) = all_in(&crate::backend::base::get_mux_config_dir());
+    names.extend(recorded);
+    names.extend(info.into_keys());
+    let mut names: Vec<String> = names.iter().filter_map(|n| canonical(n)).filter(|n| *n != name).collect();
+    names.sort();
+    names.dedup();
+    let machines = futures_util::future::join_all(names.iter().map(|n| machine(n))).await;
+    names.into_iter().zip(machines).filter(|(_, m)| m.as_deref() == Some(target.as_str())).map(|(n, _)| n).collect()
+}
+
+/// [`remember_in`] for `connection` and each of `same`, its machine's other names.
+fn remember_on_machine_in(config_home: &Path, connection: &str, same: &[String], version: &str) -> std::io::Result<()> {
+    remember_in(config_home, connection, version)?;
+    same.iter().try_for_each(|n| remember_in(config_home, n, version))
+}
+
+/// [`forget_helper_in`] for `connection` and each of `same`, its machine's other names.
+fn forget_on_machine_in(config_home: &Path, connection: &str, same: &[String]) -> std::io::Result<()> {
+    forget_helper_in(config_home, connection)?;
+    same.iter().try_for_each(|n| forget_helper_in(config_home, n))
+}
+
+/// [`remember`], for every name of `connection`'s machine. Best effort.
+pub async fn remember_on_machine(connection: &str) {
+    let same = same_machine(connection).await;
+    if let Err(e) = remember_on_machine_in(
+        &crate::backend::base::get_mux_config_dir(),
+        connection,
+        &same,
+        env!("CARGO_PKG_VERSION"),
+    ) {
+        tracing::warn!(connection = %connection, error = %e, "could not remember a helper host");
+    }
+}
+
+/// [`forget_helper`], for every name of `connection`'s machine.
+pub async fn forget_helper_on_machine(connection: &str) -> std::io::Result<()> {
+    let same = same_machine(connection).await;
+    forget_on_machine_in(&crate::backend::base::get_mux_config_dir(), connection, &same)
 }
 
 #[cfg(test)]
@@ -247,5 +371,35 @@ mod tests {
         assert!(known_in(dir.path(), "user@box"));
         let (_, info) = all_in(dir.path());
         assert!(info.is_empty());
+    }
+
+    /// One helper serves every name for the same account on the same machine:
+    /// installing through one name, or removing through another, says so for
+    /// all of them (#4513).
+    #[test]
+    fn a_helper_is_recorded_for_every_name_of_its_machine() {
+        let dir = tempfile::tempdir().unwrap();
+        let same = |n: &str| vec![if n == "box-key" { "box-pw" } else { "box-key" }.to_string()];
+        remember_on_machine_in(dir.path(), "box-key", &same("box-key"), "0.59.24").unwrap();
+        assert!(known_in(dir.path(), "box-key") && known_in(dir.path(), "box-pw"));
+        let (_, info) = all_in(dir.path());
+        assert_eq!(info["box-pw"].helper_version, "0.59.24");
+
+        forget_on_machine_in(dir.path(), "box-pw", &same("box-pw")).unwrap();
+        assert!(!known_in(dir.path(), "box-key") && !known_in(dir.path(), "box-pw"));
+
+        // Another machine's name is left alone.
+        remember_on_machine_in(dir.path(), "other", &[], "0.59.24").unwrap();
+        forget_on_machine_in(dir.path(), "box-key", &same("box-key")).unwrap();
+        assert!(known_in(dir.path(), "other"));
+    }
+
+    #[test]
+    fn a_machine_is_the_account_host_and_port_ssh_connects_to() {
+        let g = "user tester\nhostname 127.0.0.1\nport 2222\npubkeyauthentication no\n";
+        assert_eq!(machine_from_ssh_g(g).as_deref(), Some("tester@127.0.0.1:2222"));
+        // Host names compare without case; a missing part is no machine.
+        assert_eq!(machine_from_ssh_g("user me\nhostname Box.LAN\nport 22\n").as_deref(), Some("me@box.lan:22"));
+        assert_eq!(machine_from_ssh_g("hostname box\nport 22\n"), None);
     }
 }

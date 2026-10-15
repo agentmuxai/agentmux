@@ -349,7 +349,8 @@ async fn remove_helper(state: &AppState, connection: &str, block: &str) -> Resul
         return Err(format!("removing the helper from {name} did not finish ({})", one_line(&out, 200)));
     }
     files::close(&name).await;
-    if let Err(e) = helper_hosts::forget_helper(&name) {
+    // For every name of the machine: they all had this one helper.
+    if let Err(e) = helper_hosts::forget_helper_on_machine(&name).await {
         tracing::warn!(connection = %name, error = %e, "could not forget the removed helper");
     }
     // Its next need asks again (spec §4.9), whatever was answered before.
