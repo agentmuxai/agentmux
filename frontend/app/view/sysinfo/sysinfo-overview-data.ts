@@ -114,8 +114,9 @@ export const FOCUS_CHOICES = [
     { value: "everything", label: "Everything" },
 ] as const;
 
-/** A saved area, or the default for anything else. */
+/** A saved area, or the default for anything else. `advanced` is what Everything was saved as before it was renamed. */
 export function toAreaChoice(v: unknown): AreaChoice {
+    if (v === "advanced") return "everything";
     return FOCUS_CHOICES.some((c) => c.value === v) ? (v as AreaChoice) : DEFAULT_AREA;
 }
 
