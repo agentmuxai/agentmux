@@ -215,7 +215,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
         "ConnList" => {
             crate::srv_http::require_agent_env(local_url, auth_key, block_id)?;
             let url = format!("{}/api/v1/conn/list", local_url.trim_end_matches('/'));
-            let result = crate::srv_http::srv_get_json(client, &url, auth_key, &[], "ConnList").await?;
+            let result = crate::srv_http::srv_get_json(client, &url, auth_key, &[], "Terminal connections").await?;
             Ok(serde_json::to_string_pretty(&result)?)
         }
         _ => Err(not_in_family()),
