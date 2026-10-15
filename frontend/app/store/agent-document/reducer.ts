@@ -836,6 +836,23 @@ export function update(
             return { state: { ...state, nodes }, events: [{ type: "tool-result-loaded", nodeId: command.nodeId }] };
         }
 
+        case "RekeyNode": {
+            const idx = state.nodeIndexById.get(command.from);
+            if (idx == null || command.from === command.to || state.nodeIdSet.has(command.to)) return { state, events: [] };
+            const nodes = state.nodes.slice();
+            nodes[idx] = { ...nodes[idx], id: command.to } as DocumentNode;
+            const nodeIdSet = new Set(state.nodeIdSet);
+            nodeIdSet.delete(command.from);
+            nodeIdSet.add(command.to);
+            const nodeIndexById = new Map(state.nodeIndexById);
+            nodeIndexById.delete(command.from);
+            nodeIndexById.set(command.to, idx);
+            return {
+                state: { ...state, nodes, nodeIdSet, nodeIndexById },
+                events: [{ type: "node-rekeyed", from: command.from, to: command.to }],
+            };
+        }
+
         case "RollOff": {
             const plan = planRollOff(state.nodes, command);
             if (!plan) return { state, events: [] };

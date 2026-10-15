@@ -39,7 +39,7 @@ import { getFileSubject } from "@/app/store/mps";
 import { getObjectValue, makeORef } from "@/app/store/mos";
 import { blockRoleColor, isLightThemeActive } from "@/app/block/pane-identity";
 import { noteToolCall, noteToolResult } from "@/app/store/touched-files";
-import { createEffect, onCleanup, onMount, type Accessor } from "solid-js";
+import { batch, createEffect, onCleanup, onMount, type Accessor } from "solid-js";
 import { createTranslator } from "./providers/translator-factory";
 import { modelTurnCommand } from "./model-turn-signal";
 import {
@@ -91,6 +91,7 @@ import { usePendingMessageAcceptance } from "./hooks/usePendingMessageAcceptance
 import type { BackgroundTaskView } from "@/app/store/rpc-api";
 import { agentPerfStore } from "./virtualization/perf-probe";
 import { toolActivityArg } from "./tool-meta/tool-descriptors";
+import { parseHistoryLines } from "./parseHistoryLines";
 import { EchoLedger, TranscriptCursor, type TranscriptFileEvent, type TranscriptSettleLatch } from "./transcript-cursor";
 
 const OutputFileName = "output";
@@ -549,7 +550,21 @@ export function useAgentStream({
 
         // Promotes accepted pending messages into user_message document
         // nodes. No-ops internally if pendingMessages was not provided.
-        const echoLedger = new EchoLedger();
+        // A sent message's row shows at once under a client id; when its
+        // record is placed, the row takes the id history gives that record,
+        // so a reload finds the same row (collapsed state, a scroll anchor).
+        // Retried a few frames while the row still waits in the flush queue.
+        const rekeyAccepted = (id: string, record: string, at: { gen: string; line: number }, tries = 0): void => {
+            const replayed = parseHistoryLines([record], outputFormat, agentName, undefined, { idFirstLine: at.line, idGen: at.gen })
+                .nodes.find((n) => n.type === "user_message");
+            if (!replayed || replayed.id === id) return;
+            const events = batch(() => model.dispatchDoc({ type: "RekeyNode", from: id, to: replayed.id }));
+            if (events.length > 0) addNodeId(replayed.id);
+            else if (tries < 5 && queue.pendingNewNodes().some((n) => n.id === id)) {
+                requestAnimationFrame(() => rekeyAccepted(id, record, at, tries + 1));
+            }
+        };
+        const echoLedger = new EchoLedger(rekeyAccepted);
         usePendingMessageAcceptance({
             blockId,
             model,
@@ -559,7 +574,7 @@ export function useAgentStream({
             addNodeId,
             onTurnStartFromQueue,
             onPendingLeft,
-            onAccepted: (text) => echoLedger.accepted(text),
+            onAccepted: (text, nodeId) => echoLedger.accepted(text, nodeId),
         });
 
         // Seed the in-batch dedup cache from the reducer-maintained
@@ -800,6 +815,9 @@ export function useAgentStream({
             for (const line of lines) {
                 // Every element is one transcript line, blank or not.
                 parser.setSourceLine(sourceLine != null && from ? { stream: from.stream, gen: from.gen, line: sourceLine } : null);
+                // The id history gives this line on a reload (node_L<line>_<k>),
+                // so a collapsed row or a scroll anchor finds it again.
+                parser.setIdLine(sourceLine != null && from ? sourceLine : null, from?.gen);
                 if (sourceLine != null) sourceLine++;
                 const trimmed = line.trim();
                 if (!trimmed) continue;
@@ -1081,6 +1099,7 @@ export function useAgentStream({
                 }
             }
             parser.setSourceLine(null);
+            parser.setIdLine(null);
             flushStreamedChars();
 
             // Schedule a single flush per animation frame
@@ -1096,8 +1115,8 @@ export function useAgentStream({
         // already shows — is not parsed; the ledger pairs it with that node.
         const cursor = new TranscriptCursor({
             deliver: parseRecords,
-            echo: (text) => echoLedger.echoed(text),
-            isOwnEcho: (line) => echoLedger.isOwnEcho(line),
+            echo: (text, from) => echoLedger.echoed(text, from),
+            isOwnEcho: (line, at) => echoLedger.isOwnEcho(line, at),
             reset: resetStream,
             readRange: async (offset, limit, expectGen) => {
                 const resp = await RpcApi.BlockfileReadRangeCommand(

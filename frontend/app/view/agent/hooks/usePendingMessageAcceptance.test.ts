@@ -78,6 +78,29 @@ afterEach(() => {
     vi.clearAllMocks();
 });
 
+describe("usePendingMessageAcceptance — onAccepted", () => {
+    // The echo ledger may re-key the row from inside onAccepted (its record
+    // came first), so the row must already be queued.
+    it("reports the accepted row after it is queued", () => {
+        const pushedNodes: unknown[] = [];
+        const seenQueued: boolean[] = [];
+        createRoot((dispose) => {
+            usePendingMessageAcceptance({
+                blockId: BLOCK_ID,
+                model: { dispatchPane: () => {} } as any,
+                pendingMessages: () => [{ id: "m1", text: "hello" } as PendingMessage],
+                queue: { pushNewNode: (n: unknown) => pushedNodes.push(n), scheduleFlush: vi.fn() } as any,
+                hasNodeId: () => false,
+                addNodeId: () => {},
+                onAccepted: (text, id) => seenQueued.push(text === "hello" && pushedNodes.some((n: any) => n.id === id)),
+            });
+            fire({ message_id: "m1" });
+            dispose();
+        });
+        expect(seenQueued).toEqual([true]);
+    });
+});
+
 describe("usePendingMessageAcceptance — onTurnStartFromQueue", () => {
     it("dispatches TurnStart and re-engages scroll-follow when accepted while idle (Done)", () => {
         hub.turnPhase = { kind: "Done", outcome: "completed", finishedAt: 0 };

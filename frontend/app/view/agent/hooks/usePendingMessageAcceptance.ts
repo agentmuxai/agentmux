@@ -62,7 +62,7 @@ export interface UsePendingMessageAcceptanceOptions {
      * `useAgentStream`'s echo ledger, which pairs it with the message's
      * transcript record (Phase 5a-4, `transcript-cursor.ts`).
      */
-    onAccepted?: (text: string) => void;
+    onAccepted?: (text: string, nodeId: string) => void;
 }
 
 export function usePendingMessageAcceptance(opts: UsePendingMessageAcceptanceOptions): void {
@@ -134,9 +134,12 @@ export function usePendingMessageAcceptance(opts: UsePendingMessageAcceptanceOpt
             };
             if (!opts.hasNodeId(node.id)) {
                 opts.addNodeId(node.id);
-                opts.onAccepted?.(pending.text);
                 opts.queue.pushNewNode(node);
                 opts.queue.scheduleFlush();
+                // After the push: when the record's echo came first, the
+                // ledger re-keys the row at once, and the row must already be
+                // where the re-key looks for it (the flush queue).
+                opts.onAccepted?.(pending.text, node.id);
             }
         }, MOS.makeORef("block", opts.blockId));
     onCleanup(() => acceptedUnsub());

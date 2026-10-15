@@ -187,7 +187,15 @@ export type AgentDocumentCommand =
      */
     | { type: "UnloadToolResults"; keepIds: ReadonlySet<string> }
     /** A tool's unloaded result, read back from the transcript (§3.4). */
-    | { type: "ResultLoaded"; nodeId: string; result: ToolResult };
+    | { type: "ResultLoaded"; nodeId: string; result: ToolResult }
+    /**
+     * Give a row the id a reload will give it: a message the user sent shows
+     * at once under a client id, and its transcript record, once placed,
+     * names the line-based id history builds for it. No-op when `from` is
+     * gone or `to` is already taken.
+     * SPEC_RENDERER_RECYCLE_WHEN_IDLE_2026_10_13.md §2.
+     */
+    | { type: "RekeyNode"; from: string; to: string };
 
 /**
  * Audit events emitted by the reducer. v1 logs them via the dispatcher's
@@ -198,6 +206,7 @@ export type AgentDocumentEvent =
     | { type: "session-ended"; at: number }
     | { type: "history-loaded"; addedCount: number; duplicatesDropped: number }
     | { type: "history-restored"; restoredCount: number; fromSnapshot: true }
+    | { type: "node-rekeyed"; from: string; to: string }
     | {
           type: "stream-flushed";
           appendedNew: number;

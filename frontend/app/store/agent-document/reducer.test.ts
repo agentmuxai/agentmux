@@ -85,6 +85,23 @@ describe("agent document reducer", () => {
         });
     });
 
+    describe("RekeyNode", () => {
+        const start = () => update(initialState(), { type: "HistoryLoaded", nodes: [md("a"), md("b")] }).state;
+        it("renames a row in place, with the id indexes", () => {
+            const r = update(start(), { type: "RekeyNode", from: "b", to: "user_g_L9_0" });
+            expect(r.state.nodes.map((n) => n.id)).toEqual(["a", "user_g_L9_0"]);
+            expect(r.state.nodeIdSet).toEqual(new Set(["a", "user_g_L9_0"]));
+            expect(r.state.nodeIndexById.get("user_g_L9_0")).toBe(1);
+            expect(r.state.nodeIndexById.has("b")).toBe(false);
+            expect(r.events).toEqual([{ type: "node-rekeyed", from: "b", to: "user_g_L9_0" }]);
+        });
+        it("does nothing when the row is gone or the new id is taken", () => {
+            const s = start();
+            expect(update(s, { type: "RekeyNode", from: "zz", to: "y" }).state).toBe(s);
+            expect(update(s, { type: "RekeyNode", from: "b", to: "a" }).state).toBe(s);
+        });
+    });
+
     describe("HistoryRestored (snapshot)", () => {
         it("prepends nodes onto an empty document and jumps to active", () => {
             const r = update(initialState(), {
