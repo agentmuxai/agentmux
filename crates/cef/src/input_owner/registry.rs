@@ -19,14 +19,14 @@ static OWNERS: LazyLock<Mutex<HashMap<String, WindowInput>>> = LazyLock::new(Def
 static EPOCH: LazyLock<Instant> = LazyLock::new(Instant::now);
 
 /// Milliseconds on a monotonic clock, for the machine's timing.
-pub fn now_ms() -> u64 {
+fn monotonic_ms() -> u64 {
     EPOCH.elapsed().as_millis() as u64
 }
 
 /// Step `window`'s machine with `event` and return the effects to run. Logs a
 /// line when the state changes or there is something to do.
 pub fn step(window: &str, event: Event) -> Vec<Effect> {
-    let now = now_ms();
+    let now = monotonic_ms();
     let (before, after, effects) = {
         let mut owners = OWNERS.lock();
         let input = owners.entry(window.to_string()).or_default();
