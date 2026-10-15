@@ -129,6 +129,7 @@ export async function openBlockInStack(
     const anchor = "nodeId" in target ? findPane()?.data?.blockId : target.blockId;
     if (!anchor) return null;
     const paneOpenResult = await RpcApi.PaneOpenCommand(TabRpcClient, { view, stack_onto_block_id: anchor, meta }, {});
+    await raiseVersionFloor(model);
     const node = findPane();
     if (!node) {
         await ObjectService.DeleteBlock(paneOpenResult.block_id).catch(() => {});
@@ -136,6 +137,15 @@ export async function openBlockInStack(
     }
     pushBlockOntoStack(model, node.id, paneOpenResult.block_id);
     return paneOpenResult.block_id;
+}
+
+/** srv already placed the block: the window compares its tree with srv's only
+ *  once its row shows that. */
+async function raiseVersionFloor(model: LayoutModel): Promise<void> {
+    const oid = model.tabAtom?.()?.layoutstate;
+    if (!oid) return;
+    const row = (await ObjectService.GetObject(`layout:${oid}`).catch(() => null)) as LayoutState | null;
+    if (row?.version) model.layoutVersionFloor = Math.max(model.layoutVersionFloor, row.version);
 }
 
 export function pushBlockOntoStack(model: LayoutModel, nodeId: string, blockId: string): void {

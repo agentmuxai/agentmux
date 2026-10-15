@@ -314,13 +314,19 @@ describe("backend edits srv already applied", () => {
         let sentCommand = false;
         const done = sendStackCommand(model, "pane.activateTab", async () => {
             sentCommand = true;
-            return { layout_revision: 0 };
+            return { layout_revision: 0, version: 0 };
         });
         await settle();
         expect(sentCommand).toBe(false);
         intentsSent()[0].resolve({ applied: true, version: 2 });
         await done;
         expect(sentCommand).toBe(true);
+    });
+
+    it("a pane-tab command's answer holds off the comparison until the row shows it", async () => {
+        const model = createModel();
+        await sendStackCommand(model, "pane.activateTab", async () => ({ layout_revision: 1, version: 9 }));
+        expect(model.layoutVersionFloor).toBe(9);
     });
 
     it("closing the ephemeral pane sends only the view", async () => {

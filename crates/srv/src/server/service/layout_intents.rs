@@ -38,7 +38,7 @@ pub(crate) async fn apply_layout_intent(
         .must_get::<Tab>(tab_id)
         .map_err(|e| format!("layout intent: tab {tab_id}: {e}"))?
         .layoutstate;
-    let row_version = || store.get::<LayoutState>(&layout_oid).ok().flatten().map_or(0, |r| r.version as u64);
+    let row_version = || layout_row_version(store, tab_id);
     let cmd = Command::LayoutApplyIntent {
         tab_id: tab_id.to_string(),
         intent,
@@ -69,6 +69,16 @@ pub(crate) async fn apply_layout_intent(
     };
     super::publish_events(state, &events);
     Ok(outcome)
+}
+
+/// The version of `tab_id`'s layout row (0 when it has none).
+pub(crate) fn layout_row_version(store: &crate::backend::storage::store::Store, tab_id: &str) -> u64 {
+    store
+        .get::<Tab>(tab_id)
+        .ok()
+        .flatten()
+        .and_then(|tab| store.get::<LayoutState>(&tab.layoutstate).ok().flatten())
+        .map_or(0, |row| row.version as u64)
 }
 
 /// Put the tab back as `old_row` stores it, and forget the action id so a

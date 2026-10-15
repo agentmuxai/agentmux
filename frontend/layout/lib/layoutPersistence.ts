@@ -284,15 +284,9 @@ async function handleBackendAction(model: LayoutModel, action: LayoutActionData)
             //   not this action.
             // Both rules live in one shared helper, also used by the tear-off
             // paths (SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §3.5). Committed
-            // by processPendingBackendActions' updateTree + persist.
-            if (leaf) {
-                removeBlockFromLeaf(model, leaf, action.blockid);
-            } else {
-                console.error(
-                    "Cannot apply eventbus layout action DeleteNode, could not find leaf node with blockId",
-                    action.blockid
-                );
-            }
+            // by processPendingBackendActions' updateTree; srv applied it already.
+            // No leaf: this window removed it already (a close it made).
+            if (leaf) removeBlockFromLeaf(model, leaf, action.blockid);
             break;
         }
         case LayoutTreeActionType.InsertNodeAtIndex: {
@@ -585,6 +579,8 @@ export function sendStackCommand(
             try {
                 const res = await send(actionId);
                 if (res?.layout_revision) model.ownLayoutRevisions.add(res.layout_revision);
+                // Compare with srv only once the row shows this change.
+                if (res?.version) model.layoutVersionFloor = Math.max(model.layoutVersionFloor, res.version);
             } catch (e) {
                 console.warn(`[layout] ${op} failed; showing srv's layout`, e);
             } finally {

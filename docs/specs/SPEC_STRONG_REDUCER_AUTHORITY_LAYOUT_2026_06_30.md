@@ -331,6 +331,9 @@ replace all round-trip through srv). Do NOT auto-merge on bot approval.**
   model that loads a row takes its queued actions as seen. Pane-tab edits send only their
   command, through the same outbox as the intents. A block that moved elsewhere leaves the local
   tree only. The dangling-leaf prune sends `delete` intents.
+- **A window compares only with a row that has its changes.** The pane-tab commands answer with
+  the row's version, as intents do, and adding a pane tab reads it after `pane.open`; until the
+  cached row reaches it, a stale cached row can't undo the window's own edit.
 - **The queue keeps its latest 32 actions** (`persist_subscriber/layout_queue.rs`): nothing pushes
   a drained queue back any more, and srv applied every action in it.
 - **Still whole-tree pushes:** minimize and restore (Phase 5), and the push that follows a stale

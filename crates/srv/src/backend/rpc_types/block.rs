@@ -860,6 +860,11 @@ pub struct CommandPaneTabData {
 pub struct PaneTabEditResult {
     #[ts(type = "number")]
     pub layout_revision: u64,
+    /// The layout row's version once the change is stored: a row update with
+    /// this version or later includes it.
+    #[serde(default)]
+    #[ts(type = "number")]
+    pub version: u64,
 }
 
 /// Request for blockfile:line_count — count total lines in a blockfile.

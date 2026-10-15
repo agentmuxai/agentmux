@@ -37,7 +37,12 @@ vi.mock("@/app/store/rpc-util", () => ({
         rpcCall: (...args: unknown[]) => (args[0] === "layout.applyIntent" ? intentCall(...args) : rpcCall(...args)),
     },
 }));
-vi.mock("@/app/store/services", () => ({ ObjectService: { DeleteBlock: (...args: unknown[]) => deleteBlock(...args) } }));
+vi.mock("@/app/store/services", () => ({
+    ObjectService: {
+        DeleteBlock: (...args: unknown[]) => deleteBlock(...args),
+        GetObject: async () => ({ version: 1 }),
+    },
+}));
 
 // Same mock harness as layoutModel.test.ts.
 const layoutStateSignals = new Map<string, SignalAtom<LayoutState>>();
