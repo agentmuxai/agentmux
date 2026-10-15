@@ -523,6 +523,28 @@ describe.each<Kind>(["pane", "doc"])("the %s tab strip reveals its selected tab"
         expect(s.isRevealed("t12")).toBe(true);
     });
 
+    it("a tab before the selected one closing moves it out of view: revealed again", () => {
+        const m = mountPane();
+        const s = m.strips[kind];
+        // Scrolled (not by the user's wheel) so the selected tab sits just clear of the left fade.
+        s.set(890);
+        expect(s.isRevealed("t10")).toBe(true);
+        m.close("t3", "t10");
+        flush();
+        expect(s.isRevealed("t10")).toBe(true);
+    });
+
+    it("watches every tab's width, so renaming an earlier one is a layout change too", () => {
+        const m = mountPane();
+        const s = m.strips[kind];
+        expect(observers.some((o) => o.targets.has(s.tab("t3")))).toBe(true);
+        // A wider earlier tab pushes the selected one out of view.
+        m.geo[kind].tabW = 150;
+        resizeAll();
+        flush();
+        expect(s.isRevealed("t10")).toBe(true);
+    });
+
     it("a wheel or a touch over a strip that cannot scroll is not the user scrolling it", () => {
         const m = mountPane({ n: 3, active: "t2" });
         const s = m.strips[kind];

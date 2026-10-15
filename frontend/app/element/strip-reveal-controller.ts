@@ -62,7 +62,8 @@ export function createStripReveal(input: StripRevealInput): StripReveal {
     // A resize or rename arrived while a smooth reveal travelled: look again when it ends.
     let layoutDeferred = false;
     let waited = false;
-    let observed: HTMLElement | null = null;
+    let observedTabs = new Set<Element>();
+    let tabListKey: string | undefined;
 
     const stopSmooth = () => {
         smoothing = false;
@@ -166,11 +167,16 @@ export function createStripReveal(input: StripRevealInput): StripReveal {
         });
         const ro = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(() => request("layout"));
         ro?.observe(strip);
+        // Every tab, not only the selected one: a tab before it that closes, is
+        // reordered, or is renamed to another width moves the selected tab without
+        // resizing it or the strip. A tab list that changed is a layout change too.
         createEffect(() => {
-            const id = input.activeId();
-            if (observed) ro?.unobserve(observed);
-            observed = id == null ? null : findTab(strip, id);
-            if (observed) ro?.observe(observed);
+            const key = input.tabIds().join("\u0000");
+            for (const el of observedTabs) ro?.unobserve(el);
+            observedTabs = new Set(strip.querySelectorAll("[data-tab-id]"));
+            for (const el of observedTabs) ro?.observe(el);
+            if (tabListKey !== undefined && tabListKey !== key) request("layout");
+            tabListKey = key;
         });
         onCleanup(() => ro?.disconnect());
     });
