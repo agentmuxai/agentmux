@@ -20,6 +20,12 @@ import { getLayoutModelForStaticTab } from "@/layout/index";
 export const FOCUS_RETRY_FRAMES = 60;
 /** A pointer press this recently means the user moved focus on purpose. */
 const DELIBERATE_PRESS_MS = 300;
+/**
+ * How long the window-focus net waits before returning the caret: a click
+ * that brings the window back fires `focus` before its own pointerdown
+ * reaches the page.
+ */
+export const WINDOW_FOCUS_SETTLE_MS = 100;
 
 class FocusManager {
     /** Reactive accessor — returns the currently focused blockId (or null). */
@@ -294,16 +300,29 @@ export function installFocusFollowsSelection(): void {
     if (followInstalled || typeof document === "undefined") return;
     followInstalled = true;
     let lastPressAt = Number.NEGATIVE_INFINITY;
+    let presses = 0;
     document.addEventListener(
         "pointerdown",
         () => {
             lastPressAt = performance.now();
+            presses++;
         },
         true
     );
     window.addEventListener("focus", () => {
-        const active = document.activeElement;
-        if (active == null || active === document.body) focusManager.ensureSelectionFocused("window-focus");
+        // The click that brought the window back decides where the caret
+        // goes. On macOS a browser pane holds the keyboard in a window of its
+        // own: a click in the app hands it back, and this event lands before
+        // that click does. Returning the caret to the selection right away
+        // gave the browser pane (still selected at that instant) the keyboard
+        // again, and typing into the pane just clicked went nowhere.
+        const pressesAtFocus = presses;
+        setTimeout(() => {
+            const active = document.activeElement;
+            if (active != null && active !== document.body) return;
+            if (presses !== pressesAtFocus) return;
+            focusManager.ensureSelectionFocused("window-focus");
+        }, WINDOW_FOCUS_SETTLE_MS);
     });
     document.addEventListener(
         "focusout",
