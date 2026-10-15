@@ -228,6 +228,21 @@ export function sampleReducer(state: DataItem[], action: SampleAction): DataItem
 
 // ---------------------------------------------------------------------------
 
+/** The plot type a pane's meta selects. */
+export function plotTypeOf(meta: MetaType | undefined): string {
+    const plotType = meta?.["sysinfo:type"];
+    if (typeof plotType === "string" && plotType) return plotType;
+    // A pane that saved an area but no plot type did so when the area view was
+    // the default: it stays on it.
+    return meta?.["sysinfo:focus"] != null ? AreaPlotType : DefaultPlotType;
+}
+
+/** What a pane is called: its simple view's label ("All cores"), or the area it shows ("Memory", "Everything"). */
+export function viewNameOf(plotType: string, area: AreaChoice): string {
+    if (plotType !== AreaPlotType) return SIMPLE_VIEWS.find((v) => v.type === plotType)?.label ?? plotType;
+    return FOCUS_CHOICES.find((c) => c.value === area)?.label ?? plotType;
+}
+
 /** Sysinfo's state behind its native pane tab (`sysinfoPaneTab`, sysinfo.tsx). */
 class SysinfoViewModel {
     viewType: string;
@@ -362,14 +377,7 @@ class SysinfoViewModel {
             return DefaultNumPoints;
         });
 
-        this.plotTypeSelectedAtom = createMemo(() => {
-            const blockData = { meta: this.meta() };
-            const plotType = blockData?.meta?.["sysinfo:type"];
-            if (typeof plotType === "string" && plotType) return plotType;
-            // A pane that saved an area but no plot type did so when the area
-            // view was the default: it stays on it.
-            return blockData?.meta?.["sysinfo:focus"] != null ? AreaPlotType : DefaultPlotType;
-        });
+        this.plotTypeSelectedAtom = createMemo(() => plotTypeOf(this.meta()));
 
         this.metrics = createMemo(() => {
             const plotType = this.plotTypeSelectedAtom();
@@ -392,13 +400,7 @@ class SysinfoViewModel {
 
         this.visible = createMemo(() => ctx.visibility() === "active");
 
-        // The pane is named for the area it shows ("CPU", "Everything"), or
-        // the simple view's label ("Memory", "All cores").
-        this.viewName = createMemo(() => {
-            const plotType = this.plotTypeSelectedAtom();
-            if (plotType !== AreaPlotType) return SIMPLE_VIEWS.find((v) => v.type === plotType)?.label ?? plotType;
-            return FOCUS_CHOICES.find((c) => c.value === this.focus())?.label ?? plotType;
-        });
+        this.viewName = createMemo(() => viewNameOf(this.plotTypeSelectedAtom(), this.focus()));
 
         this.viewText = createMemo(() => "");
 

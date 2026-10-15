@@ -56,6 +56,16 @@ describe("sysinfoPaneTab", () => {
         }
     });
 
+    it("names a remote pane's tab as its own title, an old area pane included", () => {
+        const label = (meta: Record<string, unknown>) =>
+            sysinfoPaneTab("sysinfo").tab!.label!({ meta } as any) as string | undefined;
+        expect(label({ connection: "me@devbox" })).toBe("CPU · me@devbox");
+        expect(label({ connection: "me@devbox", "sysinfo:type": "All CPU" })).toBe("All cores · me@devbox");
+        // Saved with an area and no plot type: the area view, as the pane itself opens.
+        expect(label({ connection: "me@devbox", "sysinfo:focus": "mem" })).toBe("Memory · me@devbox");
+        expect(label({ "sysinfo:focus": "mem" })).toBeUndefined();
+    });
+
     it("titles the pane with its plot type, read from the block's meta, and follows it", () => {
         createRoot((dispose) => {
             const { ctx, setMeta } = fakeCtx({ "sysinfo:type": "Mem" });
