@@ -30,6 +30,7 @@ pub mod shell_quote;
 pub mod slug;
 pub mod srv_stderr;
 pub mod time;
+pub mod tokens;
 pub mod toolchain_path;
 pub mod transcript_request;
 pub mod win32;

@@ -58,7 +58,15 @@ export function formatExactNumber(n: number): string {
  * "~340 tok (est.)") — never present it as real API-reported usage.
  *
  * See docs/specs/SPEC_TRANSCRIPT_NODE_HOVER_PEEK_2026_08_03.md §2.2/§1.4.
+ *
+ * It counts Unicode code points, as srv's `agentmux_common::tokens` does, so
+ * both give the same figure (SPEC_MEMORY_PANE_TOKENS_2026_10_15.md §4.1).
  */
 export function estimateTokenCount(text: string): number {
-    return Math.ceil(text.length / 4);
+    let codePoints = 0;
+    for (let i = 0; i < text.length; i++) {
+        // A surrogate pair is one code point: its low half isn't counted.
+        if ((text.charCodeAt(i) & 0xfc00) !== 0xdc00) codePoints++;
+    }
+    return Math.ceil(codePoints / 4);
 }

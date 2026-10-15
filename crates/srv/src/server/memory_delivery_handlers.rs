@@ -21,6 +21,7 @@
 //! [`Caller::Agent`](super::caller::Caller)): its Personal Memory is that
 //! agent's. Without a token only Global Memory is delivered.
 
+use agentmux_common::tokens::{estimate_tokens, tokens_for_chars};
 use std::collections::{HashMap, VecDeque};
 use std::sync::{LazyLock, Mutex};
 
@@ -748,7 +749,7 @@ fn compose_fallback_delivery(
         .then(|| crate::backend::continuity_state::running_summary_section(&state.mstore, block_id))
         .flatten();
     if let Some(summary) = &summary {
-        let (size, tokens) = (summary.len(), summary.chars().count().div_ceil(4));
+        let (size, tokens) = (summary.len(), estimate_tokens(summary) as usize);
         items.push(EntrySize::running_summary(size, tokens, "full", size, tokens));
     }
     let delivery_id = format!("fb-{}", uuid::Uuid::new_v4());
@@ -842,7 +843,7 @@ fn in_startup_file_item(e: &Entry) -> EntrySize {
         path: None,
         delivered: "full",
         source_size_bytes: e.text.len(),
-        source_tokens: e.text.chars().count().div_ceil(4),
+        source_tokens: estimate_tokens(&e.text) as usize,
         startup: None,
         via: Some("startup_file"),
     }
@@ -893,7 +894,7 @@ fn startup_items_of(files: Vec<crate::backend::startup_files::StartupFile>) -> V
     files
         .into_iter()
         .map(|f| {
-            let (size_bytes, tokens) = (f.text.len(), f.text.chars().count().div_ceil(4));
+            let (size_bytes, tokens) = (f.text.len(), estimate_tokens(&f.text) as usize);
             EntrySize {
                 label: f.name.clone(),
                 source: "startup",
@@ -1038,9 +1039,9 @@ fn delivery_items(entries: &[Entry], composed: &memory_delivery::Composed, deliv
         .map(|span| {
             let delivered = memory_delivery::Delivered::of(span, delivered_chars);
             let slice: String = chars[span.start..span.end.min(delivered_chars).max(span.start)].iter().collect();
-            let (size_bytes, tokens) = (slice.len(), slice.chars().count().div_ceil(4));
+            let (size_bytes, tokens) = (slice.len(), estimate_tokens(&slice) as usize);
             let whole: String = chars[span.start..span.end].iter().collect();
-            let (source_size_bytes, source_tokens) = (whole.len(), (span.end - span.start).div_ceil(4));
+            let (source_size_bytes, source_tokens) = (whole.len(), tokens_for_chars((span.end - span.start) as u64) as usize);
             match span.entry.map(|i| &entries[i]) {
                 Some(e) => EntrySize {
                     label: e.label.clone(),

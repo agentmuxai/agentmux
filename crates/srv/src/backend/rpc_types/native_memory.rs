@@ -25,6 +25,13 @@ pub struct NativeMemoryFileMeta {
     // plain JS number. See BrowserBookmark::created_at (PR #3293).
     #[ts(type = "number")]
     pub size_bytes: u64,
+    /// Estimated tokens (`agentmux_common::tokens::estimate_tokens`): what the
+    /// file costs a context it is delivered into
+    /// (SPEC_MEMORY_PANE_TOKENS_2026_10_15.md §4.2).
+    #[ts(type = "number")]
+    pub tokens_est: u64,
+    #[ts(type = "number")]
+    pub lines: u64,
     // ts-rs maps 64-bit integers to `bigint`; every consumer treats this as a
     // plain JS number. See BrowserBookmark::created_at (PR #3293).
     #[ts(type = "number")]

@@ -1293,8 +1293,38 @@
         assert_eq!(joined, block);
         for s in &sections {
             assert_eq!(s.size_bytes, s.text.len() as u64);
+            assert_eq!(s.tokens_est, agentmux_common::tokens::estimate_tokens(&s.text), "tokens of the injected text");
         }
         assert!(super::super::global_bundle_sections(&[]).is_empty());
+    }
+
+    #[test]
+    fn native_memory_counts_match_the_estimator() {
+        use agentmux_common::tokens::{count_lines, estimate_tokens};
+        let store = crate::backend::storage::store::Store::open_in_memory().unwrap();
+        // f.md: past an embedded NUL, where SQLite's length() would stop.
+        let files = [
+            ("a.md", ""),
+            ("b.md", "one"),
+            ("c.md", "one\ntwo\n"),
+            ("d.md", "日本語テキスト\r\nx"),
+            ("e.md", "\n"),
+            ("f.md", "a\0bcde\nx"),
+        ];
+        for (name, content) in files {
+            store
+                .agent_native_memory_upsert("agent-counts", name, content, None, "/p", content.len() as i64, 0)
+                .unwrap();
+        }
+        for (name, content) in files {
+            assert_eq!(
+                store.agent_native_memory_counts("agent-counts", name).unwrap(),
+                Some((estimate_tokens(content), count_lines(content))),
+                "{name}"
+            );
+        }
+        assert_eq!(store.agent_native_memory_counts("agent-counts", "missing.md").unwrap(), None);
+        assert_eq!(store.agent_native_memory_counts("nobody", "a.md").unwrap(), None);
     }
 
     // ---- Registry parallel-write mirror (PR A) ----

@@ -247,6 +247,12 @@ pub struct CommandGlobalMemorySectionsData {
     #[serde(default)]
     #[ts(optional)]
     pub block_id: Option<String>,
+    /// With no `block_id`: the kind of agent to compose for, `host` or
+    /// `container`, as the Memory pane's Host / Container toggle asks
+    /// (SPEC_MEMORY_PANE_TOKENS_2026_10_15.md §5.2). Absent: `host`.
+    #[serde(default)]
+    #[ts(optional)]
+    pub agent_kind: Option<String>,
 }
 
 /// `globalmemory:import_sources` — no arguments.

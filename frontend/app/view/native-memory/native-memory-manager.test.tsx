@@ -768,6 +768,8 @@ describe("NativeMemoryManager — file grid", () => {
             is_index: false,
             metadata_type: null,
             size_bytes: 512,
+            tokens_est: 128,
+            lines: 10,
             modified_at: Date.now() - 2 * 86_400_000,
             ...over,
         };
@@ -886,7 +888,7 @@ describe("MemoryFileCard — label helpers", () => {
     });
 
     test("fileMetaLabel omits segments it has no value for, rather than leaving a dangling separator", () => {
-        const base = { filename: "x.md", is_index: false, metadata_type: null };
+        const base = { filename: "x.md", is_index: false, metadata_type: null, tokens_est: 0, lines: 0 };
         expect(fileMetaLabel({ ...base, size_bytes: 100, modified_at: 0 })).toBe("100 B");
         expect(fileMetaLabel({ ...base, size_bytes: 0, modified_at: 0 })).toBe("0 B");
     });

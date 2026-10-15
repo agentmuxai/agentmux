@@ -100,10 +100,27 @@ pub(crate) fn memory_list_impl<'o>(
                 })
                 .unwrap_or_default()
         };
+        // The whole file, for its tokens and lines (memory files are notes,
+        // capped like every other memory read).
+        let (tokens_est, lines) = {
+            use std::io::Read;
+            let mut buf = Vec::new();
+            match std::fs::File::open(entry.path())
+                .and_then(|f| f.take(crate::server::native_memory_handlers::MAX_MEMORY_FILE_BYTES).read_to_end(&mut buf))
+            {
+                Ok(_) => {
+                    let text = String::from_utf8_lossy(&buf);
+                    (agentmux_common::tokens::estimate_tokens(&text), agentmux_common::tokens::count_lines(&text))
+                }
+                Err(_) => (agentmux_common::tokens::tokens_for_chars(meta.len()), 0),
+            }
+        };
         files.push(NativeMemoryFileMeta {
             is_index: name == "MEMORY.md",
             metadata_type: crate::server::native_memory_handlers::parse_memory_frontmatter_type(&preview_content),
             size_bytes: meta.len(),
+            tokens_est,
+            lines,
             modified_at: meta.modified().ok()
                 .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
                 .map(|d| d.as_millis() as i64)

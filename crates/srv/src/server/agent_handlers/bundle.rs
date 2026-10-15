@@ -336,6 +336,16 @@ fn own_bundle_id(mstore: &Store, agent_id: &str) -> String {
     mstore.agent_def_get(agent_id).ok().flatten().map(|def| def.memory_id).unwrap_or_default()
 }
 
+/// `globalmemory:sections`' `agent_kind`, for a caller with no pane: `host`
+/// when absent.
+fn requested_agent_kind(agent_kind: Option<&str>) -> Result<&'static str, String> {
+    match agent_kind {
+        None | Some("host") => Ok("host"),
+        Some("container") => Ok("container"),
+        Some(other) => Err(format!("globalmemory:sections: agent_kind must be host or container, not {other:?}")),
+    }
+}
+
 /// Memory → Global's "Bring Global Memory from…" step for an isolated channel
 /// (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.1.6). Registered with the
 /// others below.
@@ -355,10 +365,10 @@ pub(crate) fn register_global_memory_sections(engine: &WshRpcEngine, state: &App
                 let bundles = store.bundle_list_global().map_err(|e| format!("globalmemory:sections: {e}"))?;
                 // The same entries the pane's startup file got: Operator
                 // Config targeted at another agent kind is left out.
-                let agent_mode = cmd
-                    .block_id
-                    .as_deref()
-                    .map_or_else(|| "host".to_string(), |b| crate::backend::operator_config_seed::agent_mode_of_block(&mstore, b));
+                let agent_mode = match cmd.block_id.as_deref() {
+                    Some(b) => crate::backend::operator_config_seed::agent_mode_of_block(&mstore, b),
+                    None => requested_agent_kind(cmd.agent_kind.as_deref())?.to_string(),
+                };
                 let bundles = crate::backend::operator_config_seed::global_bundles_for_agent(bundles, &agent_mode);
                 Ok::<Vec<crate::backend::storage::GlobalMemorySection>, String>(
                     crate::backend::storage::global_bundle_sections(&bundles),
@@ -573,6 +583,19 @@ fn read_claude_global_config(claude_dir: &std::path::Path) -> std::io::Result<Cl
 // The sibling getclaudehostconfig (~/.claude) handler was removed
 // 2026-09-01 — SPEC_ARMORY_DROP_HOST_CLI_CONFIG_BLOCK_2026_09_01.md.
 // See docs/specs/SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md §5.
+#[cfg(test)]
+mod global_memory_sections_tests {
+    use super::requested_agent_kind;
+
+    #[test]
+    fn the_agent_kind_is_host_or_container_and_host_by_default() {
+        assert_eq!(requested_agent_kind(None), Ok("host"));
+        assert_eq!(requested_agent_kind(Some("host")), Ok("host"));
+        assert_eq!(requested_agent_kind(Some("container")), Ok("container"));
+        assert!(requested_agent_kind(Some("vm")).is_err());
+    }
+}
+
 #[cfg(test)]
 mod claude_global_config_tests {
     use super::*;

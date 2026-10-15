@@ -18,4 +18,8 @@ text: string,
 /**
  * `text`'s length in bytes: what this section adds to an injection.
  */
-size_bytes: number, };
+size_bytes: number, 
+/**
+ * `text`'s estimated tokens (`agentmux_common::tokens`).
+ */
+tokens_est: number, };

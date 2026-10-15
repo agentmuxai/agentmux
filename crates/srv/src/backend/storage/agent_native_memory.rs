@@ -102,6 +102,17 @@ impl Store {
         Ok(rows)
     }
 
+    /// One mirrored file's estimated tokens and lines, counted by
+    /// `agentmux_common::tokens` like a live file; `None` when it isn't
+    /// mirrored. Counted here, not in SQL: SQLite's `length()` of TEXT stops at
+    /// an embedded NUL.
+    pub fn agent_native_memory_counts(&self, agent_id: &str, filename: &str) -> Result<Option<(u64, u64)>, StoreError> {
+        use agentmux_common::tokens::{count_lines, estimate_tokens};
+        Ok(self
+            .agent_native_memory_read(agent_id, filename)?
+            .map(|content| (estimate_tokens(&content), count_lines(&content))))
+    }
+
     /// Read one mirrored file's content by `(agent_id, filename)`. Used as
     /// the read-path fallback when the file is missing from the live FS
     /// (e.g. a different channel wrote it, or the live folder was wiped).
