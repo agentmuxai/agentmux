@@ -119,21 +119,56 @@ impl Drop for Ending {
     }
 }
 
-/// End a session's whole process group: hang up, then kill what is left
-/// [`HANGUP_GRACE`] later. `ending` closes once the kill is sent.
+/// End a session: hang up its shell's process group and every other process
+/// in the shell's session (a background job has a group of its own), then
+/// kill what is left [`HANGUP_GRACE`] later. `ending` closes once the kill is
+/// sent.
 pub fn end_group(pid: u32, ending: Ending) {
     let pgid = -(pid as libc::pid_t);
+    let leader = agentmux_procstats::snapshot()
+        .ok()
+        .and_then(|procs| procs.into_iter().find(|p| p.pid == pid))
+        .map(|p| p.start_key);
     // SAFETY: plain signals to a process group this daemon created.
     unsafe {
         libc::kill(pgid, libc::SIGHUP);
     }
+    signal_session(pid, leader, libc::SIGHUP);
     std::thread::spawn(move || {
         std::thread::sleep(HANGUP_GRACE);
         unsafe {
             libc::kill(pgid, libc::SIGKILL);
         }
+        signal_session(pid, leader, libc::SIGKILL);
         drop(ending);
     });
+}
+
+/// Send `signal` to every process in the session led by `sid` (the shell
+/// `spawn_login_shell` made with `setsid`) outside the shell's own group,
+/// which [`end_group`] signals itself.
+fn signal_session(sid: u32, leader: Option<u64>, signal: libc::c_int) {
+    let Ok(procs) = agentmux_procstats::snapshot() else {
+        return;
+    };
+    // A session's id is its leader's pid, which isn't given to a new process
+    // while any process of the session is left. A live process with that pid
+    // other than the leader seen when the session was ended means the id was
+    // reused since: none of its processes are this session's.
+    if procs.iter().any(|p| p.pid == sid && Some(p.start_key) != leader) {
+        return;
+    }
+    let sid = sid as libc::pid_t;
+    for p in &procs {
+        let pid = p.pid as libc::pid_t;
+        // SAFETY: getsid, getpgid and kill on a pid; a process gone since the
+        // snapshot fails them harmlessly.
+        unsafe {
+            if pid != sid && libc::getsid(pid) == sid && libc::getpgid(pid) != sid {
+                libc::kill(pid, signal);
+            }
+        }
+    }
 }
 
 /// Wait until every [`Ending`] is closed: before the daemon exits, which would
