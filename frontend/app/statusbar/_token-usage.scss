@@ -50,7 +50,7 @@
     // in StatusBar.scss), so the counts read as one more stat.
     .token-usage-indicator-counts {
         font-family: var(--font-sans);
-        font-size: 11px;
+        font-size: var(--text-xs);
         letter-spacing: -0.02em;
     }
 
@@ -64,7 +64,7 @@
 // z-index; the body's chrome zoom comes from anchored-popover.scss.
 .token-usage-breakdown {
     @include popoverFrame.popover-frame;
-    font-size: 12px;
+    font-size: var(--text-sm);
     display: flex;
     flex-direction: column;
     padding: var(--space-2) 0;
@@ -81,12 +81,12 @@
 
     .token-usage-breakdown-title {
         font-weight: 600;
-        font-size: 13px;
+        font-size: var(--text-base);
     }
 
     .token-usage-breakdown-subtitle {
         color: var(--secondary-text-color);
-        font-size: 11px;
+        font-size: var(--text-xs);
     }
 
     .token-usage-breakdown-rows {
@@ -101,7 +101,7 @@
         align-items: center;
         justify-content: space-between;
         padding: var(--space-0-5) var(--space-3);
-        font-size: 12px;
+        font-size: var(--text-sm);
         width: 100%;
         // Rows that are <button>s (agent rows, the ambient toggle) need
         // to shed native button chrome to read identically to the
@@ -131,7 +131,7 @@
         cursor: pointer;
 
         &:hover {
-            background: var(--hover-bg-color, rgba(255, 255, 255, 0.06));
+            background: var(--hover-bg-color);
         }
     }
 
@@ -148,7 +148,7 @@
     }
 
     .token-usage-breakdown-row-cache {
-        font-size: 9px;
+        font-size: var(--text-3xs);
         font-weight: 400;
         color: var(--secondary-text-color);
         opacity: 0.8;
@@ -160,7 +160,7 @@
     .token-usage-breakdown-row-meta {
         flex: 1 1 100%;
         order: 3;
-        font-size: 10px;
+        font-size: var(--text-2xs);
         color: var(--secondary-text-color);
         opacity: 0.85;
     }
@@ -188,7 +188,7 @@
     .token-usage-breakdown-ambient-row {
         padding-left: calc(var(--space-3) + var(--space-2));
         opacity: 0.8;
-        font-size: 11px;
+        font-size: var(--text-xs);
     }
 
     .token-usage-breakdown-total .token-usage-breakdown-row-counts {
@@ -198,14 +198,14 @@
     .token-usage-breakdown-cache-rate {
         padding: 2px var(--space-3) 0;
         color: var(--secondary-text-color);
-        font-size: 10px;
+        font-size: var(--text-2xs);
         text-align: right;
     }
 
     .token-usage-breakdown-empty {
         padding: var(--space-3) var(--space-3);
         color: var(--secondary-text-color);
-        font-size: 11px;
+        font-size: var(--text-xs);
         text-align: center;
     }
 
@@ -221,7 +221,7 @@
         border: 1px solid transparent;
         color: var(--error-color);
         font-family: inherit;
-        font-size: 11px;
+        font-size: var(--text-xs);
         padding: var(--space-0-5) var(--space-2);
         border-radius: 0;
         cursor: default;

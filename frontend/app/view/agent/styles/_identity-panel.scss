@@ -78,7 +78,7 @@
 
 .agent-identity-provider-icon {
     grid-area: icon;
-    font-size: 13px;
+    font-size: var(--text-base);
     text-align: center;
     opacity: 0.6;
 }

@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-15
 **Author:** AgentY@narko
-**Status:** active. Approved 2026-10-15: the operator took every recommendation in §8 ("go with recommendations, get it all built"). Phases in §7; each PR updates this line. Phase A (one motion gate; everything animates in both tiers) is in #4968; phase B (motion tokens and keyframes) is built.
+**Status:** active. Approved 2026-10-15: the operator took every recommendation in §8 ("go with recommendations, get it all built"). Phases in §7; each PR updates this line. Phases A (#4968), B (#4971) and C (token bugs and mechanical swaps) are built.
 **Verified against:** `agentmux` `main` @ `fb6b20ba8`, by reading code (three read-only inventories, spot-checked by hand) and this machine's Windows setting.
 **Scope:** every animation, transition and motion gate in `frontend/` (CSS, SCSS, TS, the vendored Font Awesome CSS, SVG assets, `index.html`), the `window:reducedmotion` setting end to end, and the shared stylesheet layer (`theme.scss`, `mixins.scss`, `element/ui/`).
 **Related:**
@@ -424,6 +424,23 @@ The order is by payoff against risk. The DRY items go in phases C and D (§7); p
    - 143 raw durations become tokens.
    - The `transition-property: color, background-color, border-color, outline-color, box-shadow, opacity;` line appears six times, with its "Not `all`" comment copied seven times. It becomes `@mixin control-transition($duration: var(--duration-instant))`.
    - The identical collapse transition (`_document-nodes.scss:619`, `_shell-node.scss:46`) becomes `@mixin collapse-transition`.
+
+**As built (phase C).**
+- Item 2: `--modal-box-shadow` is a valid shadow, so the search box shows it.
+- Item 3: undefined variables went from 27 to 0.
+  - Corrected at their use: `--highlight-bg` → `--highlight-bg-color`, `--text-color` → `--main-text-color`, `--border-radius-sm` → `--radius-sm`, `--secondary-bg-color` → `--block-bg-color` (the editor, which already fell back to it) or `--panel-bg-color` (the WebFetch result, like the file's other cards), `--space-2-5` → `--space-2` or `--space-3`.
+  - Defined in `theme.scss`, at the fallback most call sites showed: `--tertiary-text-color` (white at 0.5; 0.3 had as many uses, all in one file), with a light-polarity override at half the text colour; `--error-bg-color`; `--button-secondary-bg-color`. `--am-window-fade`, which the Linux host sets inline, gets its default of 1 in `:root.am-uniform-fade`.
+  - Where the fallback differed from the real token, or the call sites differed from each other, the call site keeps the value it rendered, as a literal: `--panel-bg`, `--panel-bg-alt`, `--input-bg`, `--color-input-bg`, `--code-bg-color`, `--color-code-bg`, `--color-warning-bg`, `--border-color-faint`, `--selected-bg-color`, `--radius-2` (4 px), `--font-family` (`sans-serif`), Tailwind's `--default-font-*-settings` (`normal`), and the other alphas of `--tertiary-text-color` and `--button-secondary-bg-color`. The tints are candidates for item 16.
+  - Not ours to define: Shiki sets `--shiki-*` on each highlighted run, and `var(--conn-icon-color-${n})` is built in a template literal. The check now leaves both out.
+- Visible changes. Each was a variable with no fallback, so the style rendered nothing:
+  - `--highlight-bg`: eight backgrounds in the Swarm pane and on the copy-error button (hovers, the active agent, a count pill, the retired badge, the error text box) now show.
+  - `--space-2-5`: the error banner and the prerequisite modal row get their padding (it was 0), 8 × 12 px.
+  - `--secondary-bg-color`: the WebFetch result's header and body sit on `--panel-bg-color`.
+  - In the light themes, the five `--tertiary-text-color` sites read at half the text colour instead of half white.
+- Item 5: 467 raw px font sizes became tokens, outside `themes/`: 9 px ×20 (the new `--text-3xs`), 10 ×121, 11 ×133, 12 ×98, 13 ×64, 14 ×31. The 26 sizes equal to `--text-lg` to `--text-3xl` (16, 18, 22, 28 px) and the sizes with no token stay. Tailwind's unused `--text-xxs` and `--text-title` are gone; `theme.scss`'s `--text-title` composite, which wins over Tailwind's layered one, stays.
+- Item 6: 274 fallbacks on tokens that `:root` always sets were dropped (108 hex, 62 `rgb()`/`rgba()`, 60 px, 30 numbers, 14 others such as shadows). The 26 whose fallback is another `var()` stay.
+- Item 7: `:root` and `.ui-density-comfortable` share one rule; the three list/detail blocks are one rule with a selector list.
+- Item 20 (§6.6): `check-ui-primitives.mjs` also ratchets, per file, raw durations in transitions and animations, raw px font sizes, fallbacks on always-defined tokens and raw z-indexes.
 
 ### 6.3 Shared mixins that exist and nobody uses
 

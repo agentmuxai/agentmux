@@ -60,7 +60,7 @@
     flex-shrink: 0;
     text-transform: uppercase;
     letter-spacing: 0.04em;
-    font-size: 10px;
+    font-size: var(--text-2xs);
     font-weight: var(--font-weight-medium);
     color: var(--secondary-text-color);
 }

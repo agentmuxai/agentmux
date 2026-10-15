@@ -29,7 +29,7 @@
     padding: var(--space-1) var(--space-1-5);
     cursor: default;
     color: var(--main-text-color);
-    font-size: 12px;
+    font-size: var(--text-sm);
     font-style: normal;
     font-weight: 400;
     line-height: normal;
@@ -110,7 +110,7 @@
 
 .menu-item-icon {
     width: 14px;
-    font-size: 11px;
+    font-size: var(--text-xs);
     margin-right: var(--space-1);
     opacity: 0.7;
     flex-shrink: 0;
@@ -133,7 +133,7 @@
 // regular icon slot so the active selection actually pops at a glance.
 .menu-item-check {
     opacity: 1;
-    font-size: 12px;
+    font-size: var(--text-sm);
     color: var(--accent-color);
 }
 
@@ -146,7 +146,7 @@
     min-width: 0;
     max-width: 220px;
     margin-left: var(--space-2);
-    font-size: 11px;
+    font-size: var(--text-xs);
     color: var(--secondary-text-color, rgb(from var(--main-text-color) r g b / 0.45));
     pointer-events: none;
 }
@@ -155,7 +155,7 @@
 .menu-item-shortcut {
     flex-shrink: 0;
     margin-left: var(--space-2);
-    font-size: 11px;
+    font-size: var(--text-xs);
     color: var(--secondary-text-color, rgb(from var(--main-text-color) r g b / 0.45));
     font-family: var(--font-mono, "Hack", monospace);
     letter-spacing: 0.02em;

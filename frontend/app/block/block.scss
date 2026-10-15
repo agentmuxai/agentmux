@@ -160,7 +160,7 @@
 
                         .connstatus-status-text {
                             max-width: 100%;
-                            font-size: 11px;
+                            font-size: var(--text-xs);
                             font-style: normal;
                             font-weight: 600;
                             line-height: 16px;
@@ -169,7 +169,7 @@
                         }
 
                         .connstatus-error {
-                            font-size: 11px;
+                            font-size: var(--text-xs);
                             font-style: normal;
                             font-weight: 400;
                             line-height: 15px;
@@ -211,7 +211,7 @@
 
                     button {
                         i {
-                            font-size: 11px;
+                            font-size: var(--text-xs);
                             opacity: 0.7;
                         }
                     }

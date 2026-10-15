@@ -6,22 +6,22 @@
 // starting, <InstallProgress> after.
 
 .system-tool-install-inline {
-    margin-top: var(--space-1, 6px);
-    padding: var(--space-2, 8px);
+    margin-top: var(--space-1);
+    padding: var(--space-2);
     border: 1px solid var(--border-color);
     background: color-mix(in srgb, var(--main-text-color) 3%, transparent);
     display: flex;
     flex-direction: column;
-    gap: var(--space-1-5, 10px);
+    gap: var(--space-1-5);
     min-width: 0;
 }
 
 .system-tool-install-status {
-    font-size: var(--text-xs, 11px);
+    font-size: var(--text-xs);
     color: var(--secondary-text-color);
 }
 
 .system-tool-install-brand-icon {
-    margin-right: var(--space-1, 6px);
+    margin-right: var(--space-1);
     color: var(--secondary-text-color);
 }

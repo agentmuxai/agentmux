@@ -49,7 +49,7 @@
 // on restart" banner block (SPEC_ARMORY_GLOBAL_MEMORY_DECLUTTER_2026_09_15.md §3).
 .global-bundle-intro {
     margin: 0;
-    font-size: 10px;
+    font-size: var(--text-2xs);
     color: var(--secondary-text-color);
     line-height: 1.5;
 }
@@ -72,20 +72,20 @@
 // the <code> element in the markup.
 code.global-bundle-file-label {
     font-family: var(--font-mono);
-    font-size: 9px;
+    font-size: var(--text-3xs);
     color: var(--secondary-text-color);
     white-space: normal;
     word-break: break-all;
 }
 
 .global-bundle-file-empty {
-    font-size: 10px;
+    font-size: var(--text-2xs);
 }
 
 .global-bundle-empty {
     padding: var(--space-3);
     text-align: center;
-    font-size: 10px;
+    font-size: var(--text-2xs);
     color: var(--secondary-text-color);
     font-style: italic;
     border: 1px dashed var(--border-color);

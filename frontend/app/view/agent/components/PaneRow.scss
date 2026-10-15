@@ -73,7 +73,7 @@
     padding: 0 var(--space-1);
     background: transparent;
     border: none;
-    border-radius: var(--radius-sm, 0);
+    border-radius: var(--radius-sm);
     color: var(--secondary-text-color);
     cursor: var(--cursor-default);
     font-size: var(--text-sm);
@@ -84,7 +84,7 @@
 
     &:hover {
         color: var(--main-text-color);
-        background: var(--hover-bg-color, rgba(255, 255, 255, 0.06));
+        background: var(--hover-bg-color);
     }
 
     &--danger:hover {
@@ -102,15 +102,15 @@
     gap: var(--space-0-5);
 
     &-text {
-        font-size: var(--text-xs, 11px);
+        font-size: var(--text-xs);
         white-space: nowrap;
     }
 
     &--labeled {
         height: auto;
         padding: 2px var(--space-1-5);
-        border: 1px solid var(--border-color, rgba(255, 255, 255, 0.12));
-        border-radius: var(--radius-sm, 3px);
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-sm);
     }
 
     &--primary {
@@ -168,7 +168,7 @@
     display: flex;
     flex-direction: column;
     gap: var(--space-0-5);
-    font-size: var(--text-xs, 11px);
+    font-size: var(--text-xs);
     color: var(--secondary-text-color);
 
     .agent-failure-stderr {
@@ -176,10 +176,10 @@
         max-height: 160px;
         overflow: auto;
         padding: var(--space-1);
-        background: var(--code-bg-color, rgba(0, 0, 0, 0.25));
-        border-radius: var(--radius-sm, 3px);
+        background: rgba(0, 0, 0, 0.25);
+        border-radius: var(--radius-sm);
         font-family: var(--font-mono, monospace);
-        font-size: 11px;
+        font-size: var(--text-xs);
         white-space: pre-wrap;
         word-break: break-word;
     }

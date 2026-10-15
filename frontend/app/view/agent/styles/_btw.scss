@@ -123,7 +123,7 @@
         gap: var(--space-3);
         padding: 3px 10px;
         border-top: 1px solid var(--border-color);
-        font-size: 10px;
+        font-size: var(--text-2xs);
         color: var(--secondary-text-color);
         background: color-mix(in srgb, var(--main-bg-color) 80%, transparent);
     }

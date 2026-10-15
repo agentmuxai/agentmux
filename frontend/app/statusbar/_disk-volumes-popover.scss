@@ -33,7 +33,7 @@
 .disk-volumes-popover {
     // The body of an AnchoredPopover (shell: position, z-index; body: zoom).
     @include popoverFrame.popover-frame;
-    font-size: 12px;
+    font-size: var(--text-sm);
     display: flex;
     flex-direction: column;
     padding: var(--space-2) 0;
@@ -50,12 +50,12 @@
 
     .disk-volumes-title {
         font-weight: 600;
-        font-size: 13px;
+        font-size: var(--text-base);
     }
 
     .disk-volumes-count {
         color: var(--secondary-text-color);
-        font-size: 11px;
+        font-size: var(--text-xs);
     }
 
     .disk-volumes-empty {
@@ -106,7 +106,7 @@
     .disk-volume-free {
         flex: 0 0 auto;
         font-family: var(--font-mono);
-        font-size: 11px;
+        font-size: var(--text-xs);
         white-space: nowrap;
     }
 }

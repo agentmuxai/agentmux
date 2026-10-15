@@ -38,7 +38,7 @@
 }
 
 .sysinfo-tile-name {
-    font-size: 11px;
+    font-size: var(--text-xs);
     color: var(--grey-text-color);
 }
 
@@ -53,7 +53,7 @@
 
 .sysinfo-tile-range {
     min-height: 14px;
-    font-size: 11px;
+    font-size: var(--text-xs);
     color: var(--grey-text-color);
 }
 
@@ -99,7 +99,7 @@
 .sysinfo-overview-table {
     width: 100%;
     border-collapse: collapse;
-    font-size: 12px;
+    font-size: var(--text-sm);
 
     th,
     td {
@@ -139,7 +139,7 @@
     margin: 0;
     padding: 0;
     list-style: none;
-    font-size: 11px;
+    font-size: var(--text-xs);
     color: var(--grey-text-color);
 }
 

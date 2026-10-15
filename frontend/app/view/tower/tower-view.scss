@@ -11,7 +11,7 @@
     height: 100%;
     overflow: hidden;
     color: var(--main-text-color);
-    font-size: 13px;
+    font-size: var(--text-base);
 }
 
 .tower-toolbar {
@@ -388,7 +388,7 @@ tr:hover .tower-reveal,
 
 .tower-swatch--fixed {
     color: var(--secondary-text-color);
-    font-size: 10px;
+    font-size: var(--text-2xs);
 }
 
 .tower-spark {

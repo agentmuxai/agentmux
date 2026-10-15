@@ -26,7 +26,7 @@
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    background: var(--secondary-bg-color, var(--block-bg-color));
+    background: var(--block-bg-color);
 }
 
 // Vertical resize strip between the tree column and the main editor column.
@@ -55,7 +55,7 @@
     flex-direction: column;
     flex: 1;
     min-height: 0;
-    font-size: 12px;
+    font-size: var(--text-sm);
     color: var(--main-text-color);
 }
 
@@ -64,7 +64,7 @@
     gap: 2px;
     padding: var(--space-1);
     border-bottom: 1px solid var(--border-color);
-    background: var(--secondary-bg-color, var(--block-bg-color));
+    background: var(--block-bg-color);
 }
 
 // Pure-CSS instant tooltip — same pattern as the status bar's `data-tip`,
@@ -81,11 +81,11 @@
         left: 50%;
         transform: translateX(-50%);
         padding: var(--space-1) var(--space-1-5);
-        background: var(--modal-bg-color, #2a2a2a);
+        background: var(--modal-bg-color);
         color: var(--main-text-color);
         border: 1px solid var(--border-color);
         border-radius: 3px;
-        font-size: 11px;
+        font-size: var(--text-xs);
         white-space: nowrap;
         pointer-events: none;
         z-index: 1000;
@@ -104,7 +104,7 @@
     background: transparent;
     color: var(--secondary-text-color);
     cursor: default;
-    font-size: 11px;
+    font-size: var(--text-xs);
     transition:
         background var(--duration-instant) var(--ease-standard),
         color var(--duration-instant) var(--ease-standard),
@@ -149,7 +149,7 @@
     }
 
     &--active {
-        background: rgba(var(--accent-color-rgb, 100, 150, 255), 0.15);
+        background: rgba(var(--accent-color-rgb), 0.15);
         color: var(--accent-color, var(--main-text-color));
     }
 
@@ -161,7 +161,7 @@
 
 .file-tree-chevron {
     width: 10px;
-    font-size: 9px;
+    font-size: var(--text-3xs);
     color: var(--secondary-text-color);
     opacity: 0.7;
     flex: 0 0 auto;
@@ -174,7 +174,7 @@
 
 .file-tree-icon {
     width: 14px;
-    font-size: 11px;
+    font-size: var(--text-xs);
     opacity: 0.8;
     flex: 0 0 auto;
     text-align: center;
@@ -188,22 +188,22 @@
 
 .file-tree-symlink {
     opacity: 0.5;
-    font-size: 10px;
+    font-size: var(--text-2xs);
     margin-left: 2px;
 }
 
 .file-tree-loading {
     padding: 2px var(--space-1);
     color: var(--secondary-text-color);
-    font-size: 11px;
+    font-size: var(--text-xs);
     opacity: 0.6;
     font-style: italic;
 }
 
 .file-tree-error {
     padding: 2px var(--space-1);
-    color: var(--error-color, #d97706);
-    font-size: 11px;
+    color: var(--error-color);
+    font-size: var(--text-xs);
 }
 
 .file-tree-row--renaming {
@@ -219,10 +219,10 @@
 .file-tree-inline-input {
     flex: 1;
     min-width: 0;
-    background: var(--input-bg-color, #1e1e2e);
-    border: 1px solid var(--accent-color, #89b4fa);
+    background: var(--input-bg-color);
+    border: 1px solid var(--accent-color);
     border-radius: 2px;
-    color: var(--text-color);
+    color: var(--main-text-color);
     font-size: inherit;
     font-family: inherit;
     padding: 0 4px;
@@ -264,12 +264,12 @@
     min-width: 120px;
     height: 18px;
     padding: 0 4px;
-    background: var(--input-bg-color, #1e1e2e);
-    border: 1px solid var(--accent-color, #89b4fa);
+    background: var(--input-bg-color);
+    border: 1px solid var(--accent-color);
     border-radius: 2px;
     color: var(--main-text-color);
     font-family: var(--font-mono);
-    font-size: 11px;
+    font-size: var(--text-xs);
     outline: none;
 
     &:focus {
@@ -312,7 +312,7 @@
     display: flex;
     align-items: center;
     gap: var(--space-2);
-    font-size: 12px;
+    font-size: var(--text-sm);
 }
 
 .editor-empty-keys {
@@ -325,11 +325,11 @@
         min-width: 16px;
         padding: 1px 6px;
         font-family: var(--font-mono);
-        font-size: 11px;
+        font-size: var(--text-xs);
         line-height: 16px;
         text-align: center;
         color: var(--main-text-color);
-        background: var(--secondary-bg-color, var(--block-bg-color));
+        background: var(--block-bg-color);
         border: 1px solid var(--border-color);
         border-radius: 4px;
     }
@@ -348,7 +348,7 @@
 .editor-empty-hint {
     position: relative;
     z-index: 1;
-    font-size: 11px;
+    font-size: var(--text-xs);
     opacity: 0.55;
     text-align: center;
     max-width: 320px;
@@ -360,14 +360,14 @@
     justify-content: center;
     height: 100%;
     color: var(--secondary-text-color);
-    font-size: 13px;
+    font-size: var(--text-base);
 }
 
 .editor-error {
     padding: var(--space-2) var(--space-3);
     background: rgba(255, 80, 80, 0.15);
     color: var(--error-color);
-    font-size: 12px;
+    font-size: var(--text-sm);
     border-bottom: 1px solid rgba(255, 80, 80, 0.3);
 }
 
@@ -388,25 +388,25 @@
 
 .editor-error-panel-icon {
     font-size: 32px;
-    color: var(--error-color, #d97706);
+    color: var(--error-color);
     line-height: 1;
 }
 
 .editor-error-panel-title {
-    font-size: 14px;
+    font-size: var(--text-md);
     font-weight: 500;
 }
 
 .editor-error-panel-path {
     font-family: var(--font-mono);
-    font-size: 11px;
+    font-size: var(--text-xs);
     color: var(--secondary-text-color);
     word-break: break-all;
     max-width: 500px;
 }
 
 .editor-error-panel-message {
-    font-size: 12px;
+    font-size: var(--text-sm);
     color: var(--secondary-text-color);
     max-width: 500px;
     background: rgba(255, 80, 80, 0.08);
@@ -423,10 +423,10 @@
     border-radius: 3px;
     color: var(--main-text-color);
     cursor: default;
-    font-size: 12px;
+    font-size: var(--text-sm);
 
     &:hover {
-        background: var(--hover-bg-color, rgba(255, 255, 255, 0.05));
+        background: var(--hover-bg-color);
     }
 }
 
@@ -440,7 +440,7 @@
 
     .cm-scroller {
         font-family: var(--font-mono);
-        font-size: 13px;
+        font-size: var(--text-base);
     }
 
     // Tight gutter — no debugger/breakpoint margin to reserve, so the line
@@ -484,7 +484,7 @@
     gap: 1px;
     padding: 3px 8px;
     border-bottom: 1px solid var(--border-color);
-    background: var(--secondary-bg-color, var(--block-bg-color));
+    background: var(--block-bg-color);
 }
 
 // The modes are an element/ui SegmentedControl (compact); the toolbar row
@@ -540,7 +540,7 @@
     min-height: 0;
 
     .markdown {
-        font-size: var(--markdown-font-size, 14px);
+        font-size: var(--markdown-font-size);
     }
 }
 
@@ -573,7 +573,7 @@
     background: rgba(245, 158, 11, 0.08);
     border-bottom: 1px solid rgba(245, 158, 11, 0.25);
     color: var(--main-text-color);
-    font-size: 12px;
+    font-size: var(--text-sm);
     display: flex;
     flex-direction: column;
     gap: var(--space-1);
@@ -587,7 +587,7 @@
 
 .editor-lsp-banner-icon {
     color: rgba(245, 158, 11, 0.9);
-    font-size: 14px;
+    font-size: var(--text-md);
 }
 
 .editor-lsp-banner-text {
@@ -613,7 +613,7 @@
 
 .editor-lsp-banner-install {
     font-family: var(--font-mono);
-    font-size: 11px;
+    font-size: var(--text-xs);
     flex-wrap: wrap;
 }
 
@@ -634,12 +634,12 @@
     border: 1px solid var(--border-color);
     border-radius: 3px;
     color: var(--main-text-color);
-    font-size: 11px;
+    font-size: var(--text-xs);
     text-decoration: none;
     font-family: var(--font-sans);
 
     &:hover {
-        background: var(--hover-bg-color, rgba(255, 255, 255, 0.05));
+        background: var(--hover-bg-color);
     }
 }
 
@@ -652,8 +652,8 @@
     gap: var(--space-1);
     padding: 2px var(--space-2);
     border-top: 1px solid var(--border-color);
-    background: var(--secondary-bg-color, var(--block-bg-color));
-    font-size: 11px;
+    background: var(--block-bg-color);
+    font-size: var(--text-xs);
     color: var(--secondary-text-color);
     user-select: none;
 }
@@ -686,7 +686,7 @@
 }
 .editor-lsp-status[data-kind="crashed"] {
     .editor-lsp-status-dot {
-        background: var(--error-color, #ef4444); // red
+        background: var(--error-color); // red
     }
 }
 
@@ -699,7 +699,7 @@
     width: 30px;
     padding: 0;
     // The same icon size as the tree toolbar's buttons (.file-tree-toolbar-btn).
-    font-size: 11px;
+    font-size: var(--text-xs);
     border: none;
     border-right: 1px solid var(--border-color);
     background: transparent;

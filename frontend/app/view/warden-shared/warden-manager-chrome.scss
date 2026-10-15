@@ -38,12 +38,12 @@
     overflow-y: auto;
     color: var(--main-text-color);
     background: var(--main-bg-color);
-    font-size: 13px;
+    font-size: var(--text-base);
 }
 
 .warden-manager-error {
     font-size: 0.85em;
-    color: var(--warning-color, #d97706);
+    color: var(--warning-color);
 }
 
 .warden-manager-table {

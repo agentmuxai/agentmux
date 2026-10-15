@@ -40,19 +40,19 @@
 .bundle-view-list-item {
     padding: 10px 12px;
     cursor: default;
-    border-bottom: 1px solid var(--border-color-faint, rgba(255, 255, 255, 0.06));
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 
     &:hover {
-        background: var(--hover-bg-color, rgba(255, 255, 255, 0.04));
+        background: var(--hover-bg-color);
     }
 
     &.is-selected {
-        background: var(--selected-bg-color, rgba(255, 255, 255, 0.08));
+        background: rgba(255, 255, 255, 0.08);
     }
 
     &.is-blank {
         font-style: italic;
-        color: var(--secondary-text-color, rgba(255, 255, 255, 0.6));
+        color: var(--secondary-text-color);
     }
 }
 
@@ -60,7 +60,7 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    font-size: 13px;
+    font-size: var(--text-base);
     font-weight: 500;
     min-width: 0;
 }
@@ -75,20 +75,20 @@
 
 .bundle-view-global-badge {
     flex: 0 0 auto;
-    font-size: 10px;
+    font-size: var(--text-2xs);
     font-weight: 600;
     letter-spacing: 0.04em;
     padding: 1px 5px;
     border-radius: 3px;
     background: var(--accent-color);
-    color: var(--accent-text-color, #fff);
+    color: var(--accent-text-color);
     text-transform: uppercase;
     opacity: 0.85;
 }
 
 .bundle-view-list-item-provider {
-    font-size: 11px;
-    color: var(--secondary-text-color, rgba(255, 255, 255, 0.6));
+    font-size: var(--text-xs);
+    color: var(--secondary-text-color);
     margin-top: 2px;
 }
 
@@ -101,10 +101,10 @@
 .bundle-view-error {
     padding: 8px 12px;
     margin-bottom: 12px;
-    background: var(--error-bg-color, rgba(255, 80, 80, 0.15));
-    color: var(--error-text-color, #ff8080);
+    background: var(--error-bg-color);
+    color: var(--error-text-color);
     border-radius: 0;
-    font-size: 13px;
+    font-size: var(--text-base);
 }
 
 // ── Read-only detail ────────────────────────────────────────────
@@ -131,23 +131,23 @@
 
     dt {
         color: var(--secondary-text-color);
-        font-size: 13px;
+        font-size: var(--text-base);
     }
 
     dd {
         margin: 0;
-        font-size: 13px;
+        font-size: var(--text-base);
     }
 }
 
 .bundle-view-instructions-readonly pre {
     margin: 0;
     padding: 8px;
-    background: var(--code-bg-color, rgba(0, 0, 0, 0.2));
+    background: rgba(0, 0, 0, 0.2);
     border-radius: 0;
     white-space: pre-wrap;
     font-family: var(--font-mono);
-    font-size: 12px;
+    font-size: var(--text-sm);
     max-height: 240px;
     overflow-y: auto;
 }
@@ -178,7 +178,7 @@
 }
 
 .bundle-view-field-label {
-    font-size: 12px;
+    font-size: var(--text-sm);
     color: var(--secondary-text-color);
     display: inline-flex;
     align-items: center;
@@ -186,8 +186,8 @@
 }
 
 .bundle-view-field-help {
-    font-size: 11px;
-    color: var(--tertiary-text-color, rgba(255, 255, 255, 0.5));
+    font-size: var(--text-xs);
+    color: var(--tertiary-text-color);
     cursor: default;
 
     &:hover {
@@ -198,11 +198,11 @@
 .bundle-view-input,
 .bundle-view-textarea {
     padding: 6px 10px;
-    background: var(--input-bg-color, rgba(0, 0, 0, 0.2));
+    background: var(--input-bg-color);
     color: var(--main-text-color);
     border: 1px solid var(--border-color);
     border-radius: 0;
-    font-size: 13px;
+    font-size: var(--text-base);
     font-family: inherit;
 
     &:focus {
@@ -213,7 +213,7 @@
 
 .bundle-view-textarea {
     font-family: var(--font-mono);
-    font-size: 12px;
+    font-size: var(--text-sm);
     resize: vertical;
     min-height: 120px;
 }
@@ -236,16 +236,16 @@
     border: 1px solid var(--border-color);
     border-radius: 0;
     padding: 8px 12px;
-    font-size: 12px;
+    font-size: var(--text-sm);
 
     &.is-valid {
-        border-color: var(--success-text-color, #7ec97e);
+        border-color: var(--success-text-color);
     }
 }
 
 .bundle-view-validation-ok {
     margin: 0;
-    color: var(--success-text-color, #7ec97e);
+    color: var(--success-text-color);
 }
 
 .bundle-view-validation-list {
@@ -258,23 +258,23 @@
 
 .bundle-view-validation-item {
     &.is-error {
-        color: var(--error-text-color, #ff8080);
+        color: var(--error-text-color);
     }
 
     &.is-warning {
-        color: var(--warning-text-color, #e8b93f);
+        color: var(--warning-text-color);
     }
 }
 
 .bundle-view-validation-field {
     font-family: var(--font-mono);
-    font-size: 11px;
+    font-size: var(--text-xs);
     opacity: 0.8;
 }
 
 .bundle-view-form-hint {
-    font-size: 11px;
-    color: var(--tertiary-text-color, rgba(255, 255, 255, 0.5));
+    font-size: var(--text-xs);
+    color: var(--tertiary-text-color);
     margin: 4px 0 0;
     font-style: italic;
 }
@@ -316,12 +316,12 @@
    can still save; the key simply will not be exported. */
 .bundle-view-provider-instruction-warn,
 .bundle-view-provider-instructions-malformed {
-    font-size: 12px;
-    color: var(--warning-color, #d08770);
+    font-size: var(--text-sm);
+    color: var(--warning-color);
     line-height: 1.4;
 }
 
 .bundle-view-provider-instructions-malformed {
     padding: 8px;
-    border: 1px solid var(--warning-color, #d08770);
+    border: 1px solid var(--warning-color);
 }

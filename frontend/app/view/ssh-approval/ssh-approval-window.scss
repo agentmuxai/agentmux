@@ -62,7 +62,7 @@
     background: var(--form-element-bg-color, var(--main-bg-color));
     color: var(--main-text-color);
     border: 1px solid var(--border-color);
-    border-radius: var(--radius-sm, 4px);
+    border-radius: var(--radius-sm);
 }
 
 .ssh-approval-checkbox {

@@ -67,7 +67,7 @@
 
 .agent-primitive-modal-list-item-badge {
     flex-shrink: 0;
-    font-size: 10px;
+    font-size: var(--text-2xs);
     text-transform: uppercase;
     letter-spacing: 0.04em;
     padding: 1px 5px;
@@ -110,7 +110,7 @@
 
 .agent-primitive-modal-name {
     margin: 0 0 var(--space-1) 0;
-    font-size: var(--text-md, 14px);
+    font-size: var(--text-md);
     font-weight: 600;
     color: var(--main-text-color);
 }
@@ -127,7 +127,7 @@
 .agent-primitive-modal-caveat {
     margin: 0 0 var(--space-2) 0;
     padding: var(--space-1) var(--space-2);
-    border-radius: var(--radius-sm, 0);
+    border-radius: var(--radius-sm);
     background: color-mix(in srgb, var(--warning-color) 15%, transparent);
     font-size: var(--text-xs);
     color: var(--secondary-text-color);

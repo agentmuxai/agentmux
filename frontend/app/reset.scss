@@ -25,8 +25,8 @@
     :host {
         -webkit-text-size-adjust: 100%;
         tab-size: 4;
-        font-feature-settings: var(--default-font-feature-settings, normal);
-        font-variation-settings: var(--default-font-variation-settings, normal);
+        font-feature-settings: normal;
+        font-variation-settings: normal;
         -webkit-tap-highlight-color: transparent;
     }
 

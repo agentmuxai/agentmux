@@ -39,7 +39,7 @@ if (!BROWSER) console.info(NO_BROWSER_HINT);
 /** The app's design tokens that the tile CSS reads, with their real values. */
 const TOKENS = `:root{
   --space-1:4px;--space-1-5:6px;--space-2:8px;--space-3:12px;--space-4:16px;
-  --text-xs:11px;--text-sm:12px;
+  --text-2xs:10px;--text-xs:11px;--text-sm:12px;--text-base:13px;
   --main-text-color:#e0e0e0;--secondary-text-color:#9a9a9a;--border-color:#444;
   --accent-color:#58c142;--error-color:#f87171;--modal-bg-color:#222;
 }

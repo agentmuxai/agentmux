@@ -16,7 +16,7 @@
     max-width: 260px;
     padding: 4px 0;
     user-select: none;
-    font-size: 13px;
+    font-size: var(--text-base);
     color: var(--main-text-color);
 }
 
@@ -62,7 +62,7 @@
 }
 
 .ctx-menu-shortcut {
-    font-size: 11px;
+    font-size: var(--text-xs);
     color: var(--grey-text-color);
     flex-shrink: 0;
 }
