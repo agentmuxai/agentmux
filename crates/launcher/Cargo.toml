@@ -154,16 +154,17 @@ smithay-client-toolkit = "0.19"
 
 [target.'cfg(target_os = "windows")'.build-dependencies]
 winres = "0.1"
-# Decode the splash brain logo at compile time. The PNG (RGBA, transparent
-# background) lives at `resources/brain.png`; build.rs decodes it to raw
-# BGRA bytes that splash.rs `include_bytes!`-s — no runtime PNG decoder
-# in the launcher binary.
+# Read the splash brain logo's header at compile time. The PNG (RGBA,
+# transparent background) lives at `resources/brain.png`; build.rs only reads
+# its dimensions to emit BRAIN_W/BRAIN_H. splash.rs embeds the PNG and decodes
+# the pixels at runtime with the `png` 0.18 runtime dependency above.
 png = "0.17"
 
 [target.'cfg(target_os = "linux")'.build-dependencies]
-# Same compile-time brain.png decode as Windows, but emitting straight RGBA8
-# (brain_rgba.bin) for the Linux X11/Wayland splash backends. Keeps a PNG
-# decoder out of the launcher runtime binary.
+# Compile-time brain.png decode (the Windows build now decodes at runtime
+# instead), emitting straight RGBA8 (brain_rgba.bin) for the Linux
+# X11/Wayland splash backends. Keeps a PNG decoder out of the launcher
+# runtime binary.
 png = "0.17"
 
 [dev-dependencies]
