@@ -2,7 +2,8 @@
 
 **Date:** 2026-10-15
 **Status:** active — phase 1 (detection, the chip, Maintenance's "What's
-new" and Download) in #4983; phases 2–5 are not started. The operator took the §8 recommendations on 2026-10-15.
+new" and Download) in #4983; phase 2 (data carries forward) in #4996;
+phases 3–5 are not started. The operator took the §8 recommendations on 2026-10-15.
 **Asked for:** "agents need a way to upgrade their running instances and
 continue on. Users also need a button to let them know. We did work on this
 in the past, find the history, let's consolidate; we have partial work in the
@@ -212,8 +213,8 @@ Each phase is small and useful on its own.
 1. **Detection and the chip.** The srv check, the `app:updatestatus` event
    and `app.update-status` command, the chip, and the panel's "What's new"
    with **Download** (opens the release page). This is enough for users to know.
-2. **Data carries forward** (§6). Verify, then fix. Needed before any
-   in-app upgrade.
+2. **Data carries forward** (§6). Verified and fixed in #4996. Needed
+   before any in-app upgrade.
 3. **In-app upgrade for the Windows portable and macOS.** Download, verify,
    stage, then the launcher flow: wire `run_migration_upgrade` (fast-startup
    phase 1b) and the relaunch.
