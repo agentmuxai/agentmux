@@ -87,6 +87,9 @@ fn the_exit_marker_is_in_the_shells_own_syntax() {
         with_exit_marker("npm test", ShellFamily::Fish, "ab12cd34"),
         "npm test; echo \"__AMX_RC_ab12cd34_{$status}__\""
     );
+    // run's cwd is a cd in front of the command, in the shell's syntax.
+    assert_eq!(in_dir("npm test", "D:\\w", ShellFamily::Cmd), "cd /d \"D:\\w\" && npm test");
+    assert_eq!(in_dir("npm test", "/w", ShellFamily::Posix), "cd \"/w\" && npm test");
     // run clears a half-typed line first: Esc in cmd, Ctrl+U in a Unix shell.
     assert_eq!(clear_line(ShellFamily::Cmd), "\x1b");
     assert_eq!(clear_line(ShellFamily::Posix), "\u{15}");

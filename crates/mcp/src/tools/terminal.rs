@@ -609,6 +609,15 @@ pub(super) fn with_exit_marker(command: &str, family: ShellFamily, nonce: &str) 
     }
 }
 
+/// `command` run in `cwd`: the drawer is a long-lived shell, so `run`'s cwd
+/// is a `cd` in front of the command (cmd's `/d` changes the drive too).
+pub(super) fn in_dir(command: &str, cwd: &str, family: ShellFamily) -> String {
+    match family {
+        ShellFamily::Cmd => format!("cd /d \"{cwd}\" && {command}"),
+        ShellFamily::Posix | ShellFamily::Fish => format!("cd \"{cwd}\" && {command}"),
+    }
+}
+
 /// The key that clears a half-typed input line before `run` types: Esc in
 /// cmd, Ctrl+U in a Unix shell (readline, zsh's line editor, fish).
 pub(super) fn clear_line(family: ShellFamily) -> &'static str {
@@ -646,16 +655,29 @@ async fn run_action(arguments: &Value, cx: &ToolCtx<'_>) -> Result<Value> {
                      wait with until \"exit\" waits for it; close stops it.",
         }));
     }
-    let id = resolve(arguments, cx).await?;
     if command.contains('\n') {
         anyhow::bail!("run takes one command line; join steps with && (or use type for a script)");
     }
+    let mut id = resolve(arguments, cx).await?;
+    // A connection other than the drawer's goes through open, so srv answers
+    // as it does for open: the drawer switches, or a conflict says why not.
+    // Without this the command would run on whatever the drawer is on.
+    if let Some(wanted) = str_arg(arguments, "connection") {
+        let current = known(&id).connection.unwrap_or_else(|| "local".to_string());
+        if wanted != current && str_arg(arguments, "terminal").is_none() {
+            id = open(arguments, cx).await?["terminal"].as_str().unwrap_or_default().to_string();
+        }
+    }
     let family = shell_family(known(&id).connection.as_deref());
+    let line = match str_arg(arguments, "cwd") {
+        Some(cwd) => in_dir(command, cwd, family),
+        None => command.to_string(),
+    };
     let nonce = uuid::Uuid::new_v4().simple().to_string()[..8].to_string();
     write(cx, &id, clear_line(family)).await?;
     tokio::time::sleep(Duration::from_millis(50)).await;
     let start = read_log(cx, &id, None, 1).await?.end;
-    write(cx, &id, &format!("{}\r", with_exit_marker(command, family, &nonce))).await?;
+    write(cx, &id, &format!("{}\r", with_exit_marker(&line, family, &nonce))).await?;
     let timeout_ms = arguments
         .get("timeout_ms")
         .and_then(|v| v.as_u64())
