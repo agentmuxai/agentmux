@@ -17,6 +17,9 @@ pub const MAX_FILES: usize = 10;
 /// What an instance that can receive files advertises, in its registry
 /// entries and its `GET /agentmux/reactive/agent` answer (spec §3.4).
 pub const FEATURE: &str = "files-v1";
+/// What an install that can fetch files sent through the cloud relay says in
+/// its agents' leases, which a sender asks about before sending (§4.4).
+pub const CLOUD_FEATURE: &str = "files-cloud-v1";
 const MIB: u64 = 1024 * 1024;
 
 /// The most one file, and all of a jekt's files together, may weigh when
