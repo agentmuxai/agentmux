@@ -59,12 +59,19 @@ export function createStripReveal(input: StripRevealInput): StripReveal {
     let smoothing = false;
     let widthAnimating = false;
     let recheckAfterWidth = false;
+    // A resize or rename arrived while a smooth reveal travelled: look again when it ends.
+    let layoutDeferred = false;
     let waited = false;
     let observed: HTMLElement | null = null;
 
     const stopSmooth = () => {
         smoothing = false;
         clearTimeout(smoothTimer);
+        if (layoutDeferred) {
+            layoutDeferred = false;
+            // Not under a held pointer (a scrollbar drag) or after the user's own scroll.
+            if (!userScrolled && !pointerDown && input.shown()) request("layout");
+        }
     };
     // Any scroll write cancels a smooth scroll in flight; this one stays where it is.
     const cancelInFlight = () => {
@@ -95,16 +102,17 @@ export function createStripReveal(input: StripRevealInput): StripReveal {
         const item = findTab(strip, id);
         if (!item) return;
         const ids = input.tabIds();
-        if (smooth) {
-            smoothing = true;
-            clearTimeout(smoothTimer);
-            smoothTimer = setTimeout(stopSmooth, SMOOTH_FALLBACK_MS);
-        }
-        revealInStrip(strip, item, ids[ids.length - 1] === id, {
+        const scrolled = revealInStrip(strip, item, ids[ids.length - 1] === id, {
             isFirst: ids[0] === id,
             edgeClearance: STRIP_EDGE_FADE_PX,
             behavior: smooth ? "smooth" : "instant",
         });
+        // Only a scroll that started is in flight: a tab already in view holds nothing off.
+        if (smooth && scrolled) {
+            smoothing = true;
+            clearTimeout(smoothTimer);
+            smoothTimer = setTimeout(stopSmooth, SMOOTH_FALLBACK_MS);
+        }
         if (widthAnimating) recheckAfterWidth = true;
     };
     const schedule = () => {
@@ -117,6 +125,7 @@ export function createStripReveal(input: StripRevealInput): StripReveal {
             // Never over the user's scroll or a smooth reveal; during a width
             // transition tab widths still change, so measure once when it ends.
             if (widthAnimating) recheckAfterWidth = true;
+            if (smoothing && !userScrolled) layoutDeferred = true;
             if (userScrolled || widthAnimating || smoothing) return;
         } else {
             userScrolled = false;

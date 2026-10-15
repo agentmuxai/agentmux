@@ -537,14 +537,16 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
         const el = stripRef;
         if (!el) return;
         const handleWheel = (e: WheelEvent) => {
+            if (el.scrollWidth <= el.clientWidth) return; // nothing to scroll: not the user scrolling it
             // The user's scroll: it stands until the next reveal, and stops one in flight.
             reveal.noteUserScroll();
-            if (el.scrollWidth <= el.clientWidth) return;
             if (Math.abs(e.deltaX) >= Math.abs(e.deltaY)) return;
             e.preventDefault();
             el.scrollLeft += e.deltaY;
         };
-        const handleTouch = () => reveal.noteUserScroll();
+        const handleTouch = () => {
+            if (el.scrollWidth > el.clientWidth) reveal.noteUserScroll();
+        };
         const handlePointerDown = () => reveal.notePointerDown();
         el.addEventListener("wheel", handleWheel, { passive: false });
         el.addEventListener("touchmove", handleTouch, { passive: true });

@@ -495,6 +495,47 @@ describe.each<Kind>(["pane", "doc"])("the %s tab strip reveals its selected tab"
         expect(s.scrollTos).toEqual([{ left: 2 * TAB_W - FADE, behavior: "smooth" }]);
     });
 
+    it("a smooth reveal that finds the selected tab already in view holds off nothing", () => {
+        const m = mountPane({ active: "t2" });
+        const s = m.strips[kind];
+        fireEvent.keyDown(m.content, { key: "a" });
+        flush();
+        expect(s.calls).toBe(0);
+        // Narrower now: the selected tab is out of view, and nothing the user did.
+        m.geo[kind].client = 250;
+        resizeAll();
+        flush();
+        expect(s.isRevealed("t2")).toBe(true);
+    });
+
+    it("a resize while a smooth reveal travels is looked at again when it ends", () => {
+        const m = mountPane({ active: "t0" });
+        const s = m.strips[kind];
+        m.setActive[kind]("t12");
+        flush();
+        expect(s.inFlight).not.toBeNull();
+        m.geo[kind].client = 300;
+        resizeAll();
+        flush();
+        s.finish();
+        s.el.dispatchEvent(new Event("scrollend"));
+        flush();
+        expect(s.isRevealed("t12")).toBe(true);
+    });
+
+    it("a wheel or a touch over a strip that cannot scroll is not the user scrolling it", () => {
+        const m = mountPane({ n: 3, active: "t2" });
+        const s = m.strips[kind];
+        fireEvent.wheel(s.el, { deltaY: 50 });
+        fireEvent.touchMove(s.el);
+        // Tabs arrive and the strip narrows until it overflows and hides the selected one.
+        m.setCount(20);
+        m.geo[kind].client = 250;
+        resizeAll();
+        flush();
+        expect(s.isRevealed("t2")).toBe(true);
+    });
+
     it("checks once for a burst of events in one frame", () => {
         const m = mountPane();
         const s = m.strips[kind];

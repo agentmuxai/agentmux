@@ -70,8 +70,9 @@ export function revealTargetScrollLeft(
     return null;
 }
 
-export function revealInStrip(strip: HTMLElement, item: HTMLElement, isLast: boolean, options: StripRevealOptions = {}): void {
-    if (strip.scrollWidth <= strip.clientWidth) return; // nothing scrolls
+/** Returns whether it wrote a scroll: false when the item is already in view, or the strip does not scroll. */
+export function revealInStrip(strip: HTMLElement, item: HTMLElement, isLast: boolean, options: StripRevealOptions = {}): boolean {
+    if (strip.scrollWidth <= strip.clientWidth) return false; // nothing scrolls
     let g: StripRevealGeometry;
     if (isLast || options.isFirst) {
         g = { scrollLeft: strip.scrollLeft, scrollWidth: strip.scrollWidth, clientWidth: strip.clientWidth, itemLeft: 0, itemRight: 0, zoom: 1 };
@@ -90,7 +91,8 @@ export function revealInStrip(strip: HTMLElement, item: HTMLElement, isLast: boo
         };
     }
     const target = revealTargetScrollLeft(g, isLast, options);
-    if (target === null) return;
+    if (target === null) return false;
     if (options.behavior === "smooth") strip.scrollTo({ left: target, behavior: "smooth" });
     else strip.scrollLeft = target;
+    return true;
 }
