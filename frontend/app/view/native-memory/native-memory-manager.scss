@@ -229,6 +229,14 @@
     @include mixins.truncate;
 }
 
+// The token count leads the meta line: it is what a size costs a context
+// (SPEC_MEMORY_PANE_TOKENS_2026_10_15.md §5.1).
+.memory-file-card-tokens {
+    color: var(--main-text-color);
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+
 // ── Grids — narrow panes ─────────────────────────────────────────────────
 // Panes go down to 128px in either dimension (MinNodeSizePx,
 // frontend/layout/lib/layoutResize.ts), where a 200px minimum track overflows

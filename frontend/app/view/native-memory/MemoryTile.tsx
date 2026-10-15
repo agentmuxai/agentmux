@@ -14,6 +14,7 @@
  */
 
 import { For, Show, type JSX } from "solid-js";
+import { tokensLabel } from "./memory-tokens";
 
 export interface MemoryTileBadge {
     label: string;
@@ -31,6 +32,10 @@ export interface MemoryTileProps {
     /** File names read best in the mono face; entry names don't. */
     monoTitle?: boolean;
     badges?: MemoryTileBadge[];
+    /** Estimated tokens, shown first as "~1.2k tok" (memory-tokens.ts). */
+    tokens?: number;
+    /** The chip's tooltip: the exact estimate, bytes and lines. */
+    tokensTitle?: string;
     meta?: string;
     onSelect: () => void;
     ariaLabel?: string;
@@ -68,7 +73,10 @@ export function MemoryTile(props: MemoryTileProps): JSX.Element {
             onClick={() => props.onSelect()}
             onKeyDown={handleKeyDown}
             data-testid={props.testId ?? "memory-tile"}
-            aria-label={props.ariaLabel ?? [props.title, props.meta].filter(Boolean).join(" — ")}
+            aria-label={
+                props.ariaLabel ??
+                [props.title, props.tokens != null ? tokensLabel(props.tokens) : "", props.meta].filter(Boolean).join(" — ")
+            }
             draggable={props.draggable ? true : undefined}
             onDragStart={(e) => props.onDragStart?.(e)}
             onDragOver={(e) => props.onDragOver?.(e)}
@@ -105,8 +113,16 @@ export function MemoryTile(props: MemoryTileProps): JSX.Element {
                         )}
                     </For>
                 </span>
-                <Show when={props.meta}>
-                    <span class="memory-file-card-meta">{props.meta}</span>
+                <Show when={props.tokens != null || props.meta}>
+                    <span class="memory-file-card-meta">
+                        <Show when={props.tokens != null}>
+                            <span class="memory-file-card-tokens" title={props.tokensTitle}>
+                                {tokensLabel(props.tokens ?? 0)}
+                            </span>
+                        </Show>
+                        <Show when={props.tokens != null && props.meta}>{" · "}</Show>
+                        {props.meta}
+                    </span>
                 </Show>
             </span>
         </div>

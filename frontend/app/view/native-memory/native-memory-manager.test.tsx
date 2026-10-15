@@ -145,9 +145,9 @@ describe("NativeMemoryManager — agent grid", () => {
                 : Promise.resolve({ files: [{ filename: "only.md" }] })
         );
         render(() => <NativeMemoryManager />);
-        expect(await screen.findByText("2 files")).toBeInTheDocument();
+        expect(await screen.findByText(/· 2 files$/)).toBeInTheDocument();
         // Singular, not "1 files".
-        expect(await screen.findByText("1 file")).toBeInTheDocument();
+        expect(await screen.findByText(/· 1 file$/)).toBeInTheDocument();
     });
 
     test("an agent with no memories reads as empty, not as an error", async () => {
@@ -207,7 +207,7 @@ describe("NativeMemoryManager — agent grid", () => {
         );
         render(() => <NativeMemoryManager />);
         expect(await screen.findByText("Couldn't read memories")).toBeInTheDocument();
-        expect(await screen.findByText("1 file")).toBeInTheDocument();
+        expect(await screen.findByText(/· 1 file$/)).toBeInTheDocument();
     });
 });
 
@@ -301,12 +301,30 @@ describe("NativeMemoryManager — filter and sort", () => {
             agent("a4", "Stuck"),
         ]);
         const { container } = render(() => <NativeMemoryManager />);
-        await screen.findByText("2 files");
+        await screen.findByText(/· 2 files$/);
         await screen.findByText("Couldn't read memories");
 
         fireEvent.change(screen.getByTestId("memory-agent-sort-select"), { target: { value: "count" } });
 
         expect(cardTitlesInOrder(container)).toEqual(["TwoFiles", "OneFile", "Stuck", "Errored"]);
+    });
+
+    test("cards sum their files' tokens and, by default, sort by them, largest first", async () => {
+        nativeMemoryListMock.mockImplementation((_c: unknown, req: { agent_id: string }) => {
+            // Many small files against one large one: tokens, not files, decide.
+            if (req.agent_id === "a1") {
+                return Promise.resolve({ files: ["a", "b", "c"].map((f) => ({ filename: f, tokens_est: 100 })) });
+            }
+            return Promise.resolve({ files: [{ filename: "big", tokens_est: 12_400 }] });
+        });
+        listAgentDefinitionsMock.mockResolvedValue([agent("a1", "ManySmall"), agent("a2", "OneLarge")]);
+        const { container } = render(() => <NativeMemoryManager />);
+
+        expect(await screen.findByText("~12k tok · 1 file")).toBeInTheDocument();
+        expect(await screen.findByText("~300 tok · 3 files")).toBeInTheDocument();
+        expect((screen.getByTestId("memory-agent-sort-select") as HTMLSelectElement).value).toBe("tokens");
+        expect(cardTitlesInOrder(container)).toEqual(["OneLarge", "ManySmall"]);
+        expect(screen.getByText("~12k tok · 1 file").getAttribute("title")).toMatch(/^~12,400 tokens \(est\.\)/);
     });
 
     test("'Has memories' hides zero-count cards but never loading or error ones", async () => {
@@ -376,7 +394,7 @@ describe("NativeMemoryManager — reactive updates", () => {
         );
         mpsHub.handlers.get("agent:memory:changed:a1")?.({});
 
-        expect(await screen.findByText("1 file")).toBeInTheDocument();
+        expect(await screen.findByText(/· 1 file$/)).toBeInTheDocument();
         // a2's card never re-fetched (still shows the original empty state).
         expect(screen.getByText("AgentY").closest(".memory-agent-card")).toHaveTextContent("No memories yet");
     });
@@ -393,7 +411,7 @@ describe("NativeMemoryManager — reactive updates", () => {
         try {
             nativeMemoryListMock.mockResolvedValue({ files: [{ filename: "MEMORY.md" }] });
             render(() => <NativeMemoryManager />);
-            await vi.waitFor(() => expect(screen.getAllByText("1 file")).toHaveLength(2));
+            await vi.waitFor(() => expect(screen.getAllByText(/· 1 file$/)).toHaveLength(2));
 
             // Only `files.length` is ever read by the code under test here
             // (fetchCountFor), so a minimal shape is honest about what this
@@ -440,7 +458,7 @@ describe("NativeMemoryManager — reactive updates", () => {
         );
         mpsHub.handlers.get("agent:memory:changed:a1")?.({});
 
-        expect(await screen.findByText("1 file")).toBeInTheDocument();
+        expect(await screen.findByText(/· 1 file$/)).toBeInTheDocument();
         expect(screen.queryByText("Couldn't read memories")).toBeNull();
     });
 
@@ -667,7 +685,7 @@ describe("NativeMemoryManager — reactive updates", () => {
                 : Promise.resolve({ files: [] })
         );
         mpsHub.handlers.get("agent:memory:changed:a1")?.({});
-        await screen.findByText("2 files");
+        await screen.findByText(/· 2 files$/);
 
         // The original slow request finally resolves with stale data.
         resolveSlow?.({ files: [] });
@@ -676,7 +694,7 @@ describe("NativeMemoryManager — reactive updates", () => {
         // Must still show the newer, correct count on a1's own card
         // specifically — a2's own (genuinely empty) card still legitimately
         // reads "No memories yet" and is not what this assertion is about.
-        expect(screen.getByText("2 files")).toBeInTheDocument();
+        expect(screen.getByText(/· 2 files$/)).toBeInTheDocument();
         expect(screen.getByText("Manoz").closest(".memory-agent-card")).toHaveTextContent("2 files");
     });
 
@@ -807,7 +825,9 @@ describe("NativeMemoryManager — file grid", () => {
 
         const tile = document.querySelector<HTMLElement>(".memory-file-card")!;
         expect(tile.querySelector(".memory-file-card-badge")).toHaveTextContent("feedback");
-        expect(tile.querySelector(".memory-file-card-meta")).toHaveTextContent("2.0 KB · 2d ago");
+        expect(tile.querySelector(".memory-file-card-meta")).toHaveTextContent("~128 tok · 2d ago");
+        // Bytes and lines are in the token chip's tooltip, after the exact estimate.
+        expect(tile.querySelector(".memory-file-card-tokens")?.getAttribute("title")).toMatch(/^~128 tokens \(est\.\) · 2\.0 KB · 10 lines\n/);
     });
 
     test("the index file is marked and sorts first, whatever its name", async () => {
@@ -889,7 +909,7 @@ describe("MemoryFileCard — label helpers", () => {
 
     test("fileMetaLabel omits segments it has no value for, rather than leaving a dangling separator", () => {
         const base = { filename: "x.md", is_index: false, metadata_type: null, tokens_est: 0, lines: 0 };
-        expect(fileMetaLabel({ ...base, size_bytes: 100, modified_at: 0 })).toBe("100 B");
-        expect(fileMetaLabel({ ...base, size_bytes: 0, modified_at: 0 })).toBe("0 B");
+        expect(fileMetaLabel({ ...base, size_bytes: 440, tokens_est: 110, modified_at: 0 })).toBe("~110 tok");
+        expect(fileMetaLabel({ ...base, size_bytes: 0, tokens_est: 0, modified_at: 0 })).toBe("~0 tok");
     });
 });

@@ -19,9 +19,11 @@
 import { type Accessor, type JSX } from "solid-js";
 import { FilterInput } from "@/app/element/ui";
 
-export type MemoryAgentSortOption = "name" | "count" | "provider";
+export type MemoryAgentSortOption = "tokens" | "name" | "count" | "provider";
 
-export const DEFAULT_MEMORY_SORT: MemoryAgentSortOption = "name";
+// Largest first: what memory costs is what the pane is for
+// (SPEC_MEMORY_PANE_TOKENS_2026_10_15.md §9).
+export const DEFAULT_MEMORY_SORT: MemoryAgentSortOption = "tokens";
 
 export interface MemoryAgentFilterBarProps {
     value: Accessor<string>;
@@ -85,6 +87,7 @@ export const MemoryAgentFilterBar = (props: MemoryAgentFilterBarProps): JSX.Elem
                     value={props.sortBy()}
                     onChange={(e) => props.onSortChange(e.currentTarget.value as MemoryAgentSortOption)}
                 >
+                    <option value="tokens">Most tokens</option>
                     <option value="name">Name (A–Z)</option>
                     <option value="count">Most files</option>
                     <option value="provider">Provider</option>

@@ -31,22 +31,14 @@
 import type { JSX } from "solid-js";
 import type { NativeMemoryFileMeta } from "@/app/store/rpc-api";
 import { MemoryTile, type MemoryTileBadge } from "./MemoryTile";
+import { tokensLabel, tokensTitle } from "./memory-tokens";
+
+export { formatFileSize } from "./memory-tokens";
 
 interface MemoryFileCardProps {
     file: NativeMemoryFileMeta;
     /** Opens this file's version history. */
     onSelect: (filename: string) => void;
-}
-
-/** Byte-count label. Mirrors BundleImportPreviewModal's own formatBytes —
- *  duplicated rather than shared because that one is a private helper of an
- *  unrelated modal; a shared util is worth extracting only once a third
- *  caller appears. */
-export function formatFileSize(bytes: number): string {
-    if (!Number.isFinite(bytes) || bytes < 0) return "";
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 /** Relative modified-time label, same buckets as AgentLaunchModal's
@@ -63,11 +55,12 @@ export function formatFileAge(ms: number): string {
     return `${Math.floor(delta / 86_400_000)}d ago`;
 }
 
-/** The tile's meta line ("439 B · 2d ago"). Pulled out so the render and the
- *  aria-label can't drift, and so the empty-segment cases are unit-testable
- *  on their own. */
+/** The tile's label ("~110 tok · 2d ago"): tokens, not bytes
+ *  (SPEC_MEMORY_PANE_TOKENS_2026_10_15.md §5.1). Pulled out so the render and
+ *  the aria-label can't drift, and so the empty-segment cases are
+ *  unit-testable on their own. */
 export function fileMetaLabel(file: NativeMemoryFileMeta): string {
-    return [formatFileSize(file.size_bytes), formatFileAge(file.modified_at)].filter(Boolean).join(" · ");
+    return [tokensLabel(file.tokens_est), formatFileAge(file.modified_at)].filter(Boolean).join(" · ");
 }
 
 export const MemoryFileCard = (props: MemoryFileCardProps): JSX.Element => {
@@ -82,7 +75,9 @@ export const MemoryFileCard = (props: MemoryFileCardProps): JSX.Element => {
             icon={props.file.is_index ? "fa-list" : "fa-file-lines"}
             title={props.file.filename}
             badges={badges()}
-            meta={fileMetaLabel(props.file)}
+            tokens={props.file.tokens_est}
+            tokensTitle={tokensTitle(props.file.tokens_est, props.file.size_bytes, props.file.lines)}
+            meta={formatFileAge(props.file.modified_at)}
             onSelect={() => props.onSelect(props.file.filename)}
             classList={{ "memory-file-card--index": props.file.is_index }}
             testId="memory-file-card"

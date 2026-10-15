@@ -29,19 +29,16 @@ import { createSignal, For, onCleanup, Show, type JSX } from "solid-js";
 import { beginDrag, endDrag, session, type DragEndReason } from "@/app/drag/drag-session";
 import type { Bundle } from "@/app/store/rpc-api";
 import { GlobalMemoryImportBanner } from "./GlobalMemoryImportBanner";
-import { formatFileAge, formatFileSize } from "@/app/view/native-memory/MemoryFileCard";
+import { formatFileAge } from "@/app/view/native-memory/MemoryFileCard";
 import { MemoryTile } from "@/app/view/native-memory/MemoryTile";
+import { shareLabel, tokensTitle } from "@/app/view/native-memory/memory-tokens";
+import { estimateTokenCount } from "@/util/format-count";
 import "@/app/view/native-memory/native-memory-manager.scss";
 import { GlobalMemoryFullView } from "./GlobalMemoryFullView";
 import { GlobalBundleViewModel, utf8Bytes, type GlobalMemoryView } from "./global-bundle-model";
+import { GlobalMemoryTokenStrip } from "./GlobalMemoryTokenStrip";
 import "./global-bundle.scss";
 
-/** "size · updated" for an entry tile. */
-function entryMetaLabel(entry: Pick<Bundle, "instructions" | "updated_at">): string {
-    return [formatFileSize(utf8Bytes(entry.instructions ?? "")), formatFileAge(entry.updated_at)]
-        .filter(Boolean)
-        .join(" · ");
-}
 
 function viewTitle(model: GlobalBundleViewModel, view: GlobalMemoryView): string {
     switch (view.kind) {
@@ -50,7 +47,7 @@ function viewTitle(model: GlobalBundleViewModel, view: GlobalMemoryView): string
         case "claude-config":
             return "CLAUDE.md";
         case "preview":
-            return "Combined preview";
+            return `Delivered to a ${model.agentKindAtom()} agent`;
         case "entry":
             return model.openEntryAtom()?.name ?? "";
     }
@@ -67,7 +64,25 @@ export const GlobalBundleManager = (): JSX.Element => {
     // SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md §3.2/§3.4). Building it
     // explicitly from the two split atoms keeps on-screen order visibly
     // matching actual injection order.
-    const memoryEntries = () => [...model.systemSectionsAtom(), ...model.ordinarySectionsAtom()];
+    const injectionOrder = () => [...model.systemSectionsAtom(), ...model.ordinarySectionsAtom()];
+    // Largest first, when asked: by what the chosen kind of agent is
+    // delivered (SPEC_MEMORY_PANE_TOKENS_2026_10_15.md §5.2).
+    const deliveredTokens = (entry: Bundle) => model.tokensByIdAtom().get(entry.id)?.tokens_est;
+    const memoryEntries = () =>
+        model.largestFirstAtom()
+            ? [...injectionOrder()].sort((a, b) => (deliveredTokens(b) ?? -1) - (deliveredTokens(a) ?? -1))
+            : injectionOrder();
+    /** "17% · 2d ago", or why the entry costs this kind of agent nothing. */
+    const entryMeta = (entry: Bundle) => {
+        const delivered = model.tokensByIdAtom().get(entry.id);
+        const age = formatFileAge(entry.updated_at);
+        if (!delivered && model.deliveredAtom()) {
+            const why = (entry.instructions ?? "").trim() ? `Not sent to ${model.agentKindAtom()} agents` : "Empty";
+            return [why, age].filter(Boolean).join(" · ");
+        }
+        const share = delivered ? shareLabel(delivered.tokens_est, model.deliveredTotalsAtom()?.total ?? 0) : "";
+        return [share, age].filter(Boolean).join(" · ");
+    };
 
     // Leaving a full view with unsaved edits asks first — the same
     // protection Esc has (editor-keys.ts).
@@ -89,8 +104,9 @@ export const GlobalBundleManager = (): JSX.Element => {
         if (session()?.kind === "list-item") endDrag(reason);
     };
     const [dropTargetId, setDropTargetId] = createSignal<string | null>(null);
+    // No dragging while the tiles aren't in injection order.
     const dragHandlers = (entry: Bundle) =>
-        entry.is_system
+        entry.is_system || model.largestFirstAtom()
             ? {}
             : {
                   draggable: true,
@@ -129,6 +145,8 @@ export const GlobalBundleManager = (): JSX.Element => {
                 order.
             </p>
 
+            <GlobalMemoryTokenStrip model={model} />
+
             <GlobalMemoryImportBanner onImported={() => void model.refresh()} />
 
             <Show when={model.errorAtom()}>
@@ -146,7 +164,16 @@ export const GlobalBundleManager = (): JSX.Element => {
                             title={entry.name}
                             monoTitle={false}
                             badges={entry.is_system ? [{ label: "system", variant: "accent" }] : []}
-                            meta={entryMetaLabel(entry)}
+                            tokens={deliveredTokens(entry)}
+                            tokensTitle={
+                                deliveredTokens(entry) != null
+                                    ? tokensTitle(
+                                          deliveredTokens(entry) ?? 0,
+                                          model.tokensByIdAtom().get(entry.id)?.size_bytes,
+                                      )
+                                    : undefined
+                            }
+                            meta={entryMeta(entry)}
                             onSelect={() => openView({ kind: "entry", id: entry.id })}
                             testId="global-memory-tile"
                             data={{ id: entry.id, kind: entry.is_system ? "system" : "entry" }}
@@ -170,11 +197,13 @@ export const GlobalBundleManager = (): JSX.Element => {
                             icon="fa-file-code"
                             title="CLAUDE.md"
                             badges={[{ label: "read-only", icon: "fa-lock", variant: "accent" }]}
-                            meta={
+                            tokens={cfg().exists ? estimateTokenCount(cfg().content ?? "") : undefined}
+                            tokensTitle={
                                 cfg().exists
-                                    ? `${formatFileSize(utf8Bytes(cfg().content ?? ""))} · provider config`
-                                    : "No file yet · provider config"
+                                    ? tokensTitle(estimateTokenCount(cfg().content ?? ""), utf8Bytes(cfg().content ?? ""))
+                                    : undefined
                             }
+                            meta={cfg().exists ? "provider config" : "No file yet · provider config"}
                             onSelect={() => openView({ kind: "claude-config" })}
                             testId="global-memory-tile"
                             data={{ kind: "claude-config" }}
@@ -185,9 +214,18 @@ export const GlobalBundleManager = (): JSX.Element => {
 
                 <MemoryTile
                     icon="fa-layer-group"
-                    title="Combined preview"
+                    title={`Delivered to a ${model.agentKindAtom()} agent`}
                     monoTitle={false}
-                    meta={`${memoryEntries().length} ${memoryEntries().length === 1 ? "entry" : "entries"} · ${formatFileSize(utf8Bytes(model.previewAtom()))}`}
+                    tokens={model.deliveredTotalsAtom()?.total}
+                    tokensTitle={
+                        model.deliveredTotalsAtom()
+                            ? tokensTitle(model.deliveredTotalsAtom()?.total ?? 0, utf8Bytes(model.previewAtom()))
+                            : undefined
+                    }
+                    meta={(() => {
+                        const n = model.deliveredTotalsAtom()?.count ?? memoryEntries().length;
+                        return `${n} ${n === 1 ? "entry" : "entries"}`;
+                    })()}
                     onSelect={() => openView({ kind: "preview" })}
                     classList={{ "memory-file-card--action": true }}
                     testId="global-memory-tile"

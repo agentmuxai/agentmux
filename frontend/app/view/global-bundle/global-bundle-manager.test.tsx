@@ -22,6 +22,8 @@ import type { Bundle } from "@/app/store/rpc-api";
 const CLAUDE_CONFIG_PATH = "/home/user/.agentmux/shared/providers/claude/CLAUDE.md";
 
 const listMemoriesMock = vi.fn();
+/** `globalmemory:sections`; rejects unless a test says what's delivered. */
+const sectionsMock = vi.fn();
 const getClaudeGlobalConfigMock = vi.fn();
 const upsertMock = vi.fn();
 const upsertSystemMock = vi.fn();
@@ -44,6 +46,7 @@ vi.mock("@/app/store/rpc-api", () => ({
         GlobalMemoryRevertCommand: (...args: unknown[]) => revertMock(...args),
         GlobalMemoryImportSourcesCommand: (...args: unknown[]) => importSourcesMock(...args),
         GlobalMemoryImportCommand: (...args: unknown[]) => importMock(...args),
+        GlobalMemorySectionsCommand: (...args: unknown[]) => sectionsMock(...args),
     },
 }));
 
@@ -63,6 +66,11 @@ vi.mock("@/app/store/mps", async () => {
 });
 
 import { GlobalBundleManager } from "./global-bundle-manager";
+
+/** A delivered Global Memory section with `tokens` estimated tokens. */
+function section(id: string, tokens: number, isSystem = false) {
+    return { id, name: id, is_system: isSystem, text: "x".repeat(tokens * 4), size_bytes: tokens * 4, tokens_est: tokens };
+}
 
 function bundle(id: string, name: string, instructions: string, over: Partial<Bundle> = {}): Bundle {
     return {
@@ -114,12 +122,13 @@ afterEach(() => {
 });
 
 beforeEach(() => {
-    for (const m of [listMemoriesMock, getClaudeGlobalConfigMock, upsertMock, upsertSystemMock, reorderMock, historyMock, diffMock, revertMock]) {
+    for (const m of [listMemoriesMock, sectionsMock, getClaudeGlobalConfigMock, upsertMock, upsertSystemMock, reorderMock, historyMock, diffMock, revertMock]) {
         m.mockReset();
     }
     mpsHub.handlers.clear();
     localStorage.clear();
     listMemoriesMock.mockResolvedValue([]);
+    sectionsMock.mockRejectedValue(new Error("no srv"));
     getClaudeGlobalConfigMock.mockResolvedValue({ path: CLAUDE_CONFIG_PATH, content: null, exists: false });
     historyMock.mockResolvedValue({ versions: [] });
     upsertMock.mockImplementation((_c: unknown, b: Bundle) => Promise.resolve({ ...b, id: b.id || "new-id" }));
@@ -127,7 +136,7 @@ beforeEach(() => {
 });
 
 describe("GlobalBundleManager — tiles first", () => {
-    test("one tile per entry (system first, badged), then CLAUDE.md, Combined preview, and + Add memory last", async () => {
+    test("one tile per entry (system first, badged), then CLAUDE.md, what a host agent is delivered, and + Add memory last", async () => {
         listMemoriesMock.mockResolvedValue([
             bundle("g-b", "Beta", "b", { sort_order: 1 }),
             bundle("g-a", "Alpha", "hello", { sort_order: 0 }),
@@ -135,18 +144,76 @@ describe("GlobalBundleManager — tiles first", () => {
             bundle("private", "Not global", "x", { is_global: false }),
         ]);
         getClaudeGlobalConfigMock.mockResolvedValue({ path: CLAUDE_CONFIG_PATH, content: "# rules\n", exists: true });
+        sectionsMock.mockResolvedValue([section("sys-1", 30, true), section("g-a", 7), section("g-b", 3)]);
         render(() => <GlobalBundleManager />);
 
         await waitFor(() =>
-            expect(tileTitles()).toEqual(["Policy", "Alpha", "Beta", "CLAUDE.md", "Combined preview", "+ Add memory"])
+            expect(tileTitles()).toEqual(["Policy", "Alpha", "Beta", "CLAUDE.md", "Delivered to a host agent", "+ Add memory"])
         );
         const system = document.querySelector('[data-kind="system"]');
         expect(system?.querySelector(".memory-file-card-badge")?.textContent).toBe("system");
         const claude = document.querySelector('[data-kind="claude-config"]');
         expect(claude?.querySelector(".memory-file-card-badge")?.textContent).toContain("read-only");
         expect(claude?.querySelector(".fa-lock")).not.toBeNull();
-        // "size · updated", from the entry itself.
-        expect(document.querySelector('[data-id="g-a"] .memory-file-card-meta')?.textContent).toBe("5 B · 2h ago");
+        // "tokens · share · updated": what a host agent is delivered.
+        await waitFor(() =>
+            expect(document.querySelector('[data-id="g-a"] .memory-file-card-meta')?.textContent).toBe("~7 tok · 18% · 2h ago")
+        );
+        expect(sectionsMock.mock.calls.at(-1)?.[1]).toEqual({ agent_kind: "host" });
+        expect(screen.getByTestId("global-memory-token-strip")).toHaveTextContent(
+            "Every host agent starts with ~40 tok of Global Memory"
+        );
+        expect(document.querySelector('[data-kind="preview"] .memory-file-card-tokens')?.textContent).toBe("~40 tok");
+        expect(document.querySelector('[data-kind="claude-config"] .memory-file-card-tokens')?.textContent).toBe("~2 tok");
+    });
+
+    test("the Container toggle shows what a container agent is delivered, and names an entry it isn't sent", async () => {
+        listMemoriesMock.mockResolvedValue([
+            bundle("sys-host", "Widgets", "host only", { is_system: true }),
+            bundle("g-a", "Alpha", "hello"),
+        ]);
+        sectionsMock.mockImplementation((_c: unknown, req: { agent_kind: string }) =>
+            Promise.resolve(
+                req.agent_kind === "container" ? [section("g-a", 7)] : [section("sys-host", 20, true), section("g-a", 7)]
+            )
+        );
+        render(() => <GlobalBundleManager />);
+        await waitFor(() => expect(screen.getByTestId("global-memory-token-strip")).toHaveTextContent("~27 tok"));
+
+        fireEvent.click(screen.getByRole("button", { name: "Container" }));
+        await waitFor(() =>
+            expect(screen.getByTestId("global-memory-token-strip")).toHaveTextContent(
+                "Every container agent starts with ~7 tok of Global Memory"
+            )
+        );
+        expect(sectionsMock.mock.calls.at(-1)?.[1]).toEqual({ agent_kind: "container" });
+        expect(document.querySelector('[data-id="sys-host"] .memory-file-card-meta')?.textContent).toContain(
+            "Not sent to container agents"
+        );
+        expect(tileTitles()).toContain("Delivered to a container agent");
+    });
+
+    test("Largest first orders the tiles by delivered tokens, and stops dragging", async () => {
+        listMemoriesMock.mockResolvedValue([
+            bundle("g-a", "Alpha", "a", { sort_order: 0 }),
+            bundle("g-b", "Beta", "b", { sort_order: 1 }),
+        ]);
+        sectionsMock.mockResolvedValue([section("g-a", 5), section("g-b", 50)]);
+        render(() => <GlobalBundleManager />);
+        await waitFor(() => expect(tileTitles().slice(0, 2)).toEqual(["Alpha", "Beta"]));
+        await waitFor(() => expect(document.querySelector('[data-id="g-b"] .memory-file-card-tokens')).not.toBeNull());
+
+        fireEvent.click(screen.getByRole("button", { name: "Largest first" }));
+        await waitFor(() => expect(tileTitles().slice(0, 2)).toEqual(["Beta", "Alpha"]));
+        expect(document.querySelector('[data-id="g-a"]')?.getAttribute("draggable")).toBeNull();
+    });
+
+    test("without srv's figures the tiles still load, with no token chips", async () => {
+        listMemoriesMock.mockResolvedValue([bundle("g-a", "Alpha", "hello")]);
+        render(() => <GlobalBundleManager />);
+        await waitFor(() => expect(tileTitles()).toContain("Alpha"));
+        expect(document.querySelector('[data-id="g-a"] .memory-file-card-tokens')).toBeNull();
+        expect(screen.getByTestId("global-memory-token-strip")).toHaveTextContent("Counting tokens…");
     });
 
     test("uses the Personal Memory tile grid and tile CSS, with no always-visible preview per entry", async () => {
@@ -473,7 +540,7 @@ describe("GlobalBundleManager — combined preview tile", () => {
     test("opens the exact composed block", async () => {
         listMemoriesMock.mockResolvedValue([bundle("g-a", "Alpha", "alpha body")]);
         render(() => <GlobalBundleManager />);
-        await openTile("Combined preview");
+        await openTile("Delivered to a host agent");
         expect(await screen.findByText("[Workspace] Alpha", { selector: ".heading" })).toBeInTheDocument();
     });
 });
