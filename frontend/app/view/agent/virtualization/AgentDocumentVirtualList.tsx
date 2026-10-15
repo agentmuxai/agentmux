@@ -60,6 +60,7 @@ import {
 import { computeLayoutView } from "@/app/store/agent-pane-layout/reducer";
 import { captureOnScreen, restoreOnScreen } from "./keep-on-screen";
 import { useSettleOnShow } from "../scroll/settle-on-show";
+import { useScrollMemo } from "./scroll-memo";
 import { inFlowState, ROW_GAP_PX, type ExpansionState } from "@/app/store/agent-pane-layout/types";
 import {
     initialStickyFrontierId,
@@ -1147,7 +1148,8 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
     // (user wants to stay where they jumped). Uses the slice's row
     // position if the target is in the virtualized head, else the
     // streaming buffer's natural DOM offset.
-    const scrollToNode = (nodeId: string): void => {
+    // With `offsetPx` (scroll-memo.ts, after a reload): the row at that offset, at once; else centered, smoothly.
+    const scrollToNode = (nodeId: string, offsetPx?: number): void => {
         if (!scrollRef) return;
         const idx = props.viewState.indexOf(nodeId);
         if (idx < 0) return;
@@ -1164,7 +1166,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
             if (row) {
                 const viewportPx = scrollRef.clientHeight; // perf:allow-layout-read — user-initiated scrollToNode
                 const center = row.start - viewportPx / 2 + row.height / 2;
-                scrollRef.scrollTo({ top: Math.max(0, center), behavior: "smooth" });
+                scrollRef.scrollTo(offsetPx == null ? { top: Math.max(0, center), behavior: "smooth" } : { top: Math.max(0, row.start + offsetPx) });
             }
         } else {
             // Streaming buffer — node is mounted; query DOM and scroll directly.
@@ -1172,21 +1174,19 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
             if (!el) return;
             const elTop = el.offsetTop; // perf:allow-layout-read — user-initiated scrollToNode
             const center = elTop - scrollRef.clientHeight / 2 + el.clientHeight / 2; // perf:allow-layout-read — user-initiated scrollToNode
-            scrollRef.scrollTo({ top: Math.max(0, center), behavior: "smooth" });
+            scrollRef.scrollTo(offsetPx == null ? { top: Math.max(0, center), behavior: "smooth" } : { top: Math.max(0, elTop + offsetPx) });
         }
         if (!follow) transitionFollow("jump-to-node", `node=${nodeId.slice(0, 8)}`, () => props.viewState.disengageStickToBottom());
     };
 
-    // React to jump commands from the parent's useScrollToNode hook.
-    // untrack the scroll so this effect depends ONLY on the command signal:
-    // scrollToNode reads layoutView / partition, both of which change on
-    // every scroll, and useScrollToNode holds the last command rather than
-    // clearing it — tracking them would re-fire the jump on each scroll and pin
-    // the user on the old target.
+    // Jump commands from the parent's useScrollToNode, untracked: scrollToNode reads layoutView /
+    // partition, which change on every scroll, and the last command is held, so tracking them
+    // would re-fire the jump on each scroll and pin the user on the old target.
     createEffect(() => {
         const cmd = props.scrollCommand?.();
         if (cmd) untrack(() => scrollToNode(cmd.nodeId));
     });
+    useScrollMemo({ blockId: props.blockId, scroller: () => scrollRef, following: props.viewState.stickToBottom, historyReady: props.viewState.historyReady, scrollToRow: scrollToNode });
 
     // Release (latched-collapse) any held-open tool whose row has scrolled fully
     // above the viewport top. DOM-based so it works uniformly for virtualized
