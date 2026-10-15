@@ -114,6 +114,7 @@ fn suppress_os_crash_dialogs() {}
 /// docs/specs/SPEC_SERVICE_SUPERVISION_AND_RECOVERY_2026_05_20.md.
 fn main() {
     suppress_os_crash_dialogs();
+    logging::install_panic_hook();
 
     // Dev/demo affordance: `--splash-selftest` shows the splash in isolation
     // (no srv/host), holds it briefly, then exits — for eyeballing the footer +
