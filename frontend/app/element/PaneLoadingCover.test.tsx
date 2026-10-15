@@ -17,11 +17,15 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { PaneLoadingCover } from "./PaneLoadingCover";
 import type { PaneReadinessPhase } from "@/app/store/pane-readiness";
 
-vi.mock("@/app/store/global", () => ({
-    atoms: { prefersReducedMotionAtom: () => false },
+let reduceTransition = false;
+vi.mock("@/app/motion/motion", () => ({
+    shouldReduceMotion: (category: string) => category === "transition" && reduceTransition,
 }));
 
-afterEach(cleanup);
+afterEach(() => {
+    cleanup();
+    reduceTransition = false;
+});
 
 const overlays = () => document.querySelectorAll(".agent-pane-loading-overlay");
 
@@ -41,6 +45,15 @@ describe("PaneLoadingCover", () => {
     it("unmounts once live", () => {
         render(() => <PaneLoadingCover phase={() => "live" as PaneReadinessPhase} />);
         expect(overlays().length).toBe(0);
+    });
+
+    it("fades instantly only when the motion policy reduces transition", () => {
+        render(() => <PaneLoadingCover phase={() => "revealing" as PaneReadinessPhase} />);
+        expect(overlays()[0].classList.contains("is-reduced-motion")).toBe(false);
+        cleanup();
+        reduceTransition = true;
+        render(() => <PaneLoadingCover phase={() => "revealing" as PaneReadinessPhase} />);
+        expect(overlays()[0].classList.contains("is-reduced-motion")).toBe(true);
     });
 
     it("transitions through the phases without ever showing two covers", () => {

@@ -921,6 +921,7 @@ declare global {
         "window:blur"?: boolean;
         "window:opacity"?: number;
         "window:bgcolor"?: string;
+        /** @deprecated Ignored: motion follows the system (SPEC_MOTION_TIERS_AND_STYLESHEET_DRY_2026_10_15). */
         "window:reducedmotion"?: boolean;
         "window:tilegapsize"?: number;
         "window:showmenubar"?: boolean;

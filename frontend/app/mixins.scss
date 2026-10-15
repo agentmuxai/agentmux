@@ -2,6 +2,8 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+@use "sass:list";
+
 // Extracted from block.scss's `.block-frame-default-header` ruleset —
 // originally only ever written nested inside `.block.block-frame-default
 // .block-frame-default-inner`, so its layout (display:flex, padding,
@@ -464,13 +466,20 @@
     @media (max-width: calc(#{$w} - 1px)) { @content; }
 }
 
-/// Reduced-motion respect removed app-wide (2026-07-11 product
-/// decision — OS "reduce motion" was killing functional motion cues
-/// like drag strobes and drop indicators). The mixin is kept as a
-/// no-op so call sites compile and the decision is easy to revisit;
-/// the wrapped @content is intentionally never emitted.
-@mixin respect-reduced-motion {
-    @if false {
+/// The reduced treatment for one animation, applied only when the motion
+/// policy reduces `$category` (status, feedback, transition or decorative) in
+/// this window's tier (SPEC_MOTION_TIERS_AND_STYLESHEET_DRY_2026_10_15.md §4.3;
+/// the policy lives in motion/motion.ts). Never write a raw
+/// prefers-reduced-motion media query: CI rejects it
+/// (scripts/check-motion-gates.mjs).
+///
+/// Flashes follow a separate rule in both tiers: no more than three flashes
+/// in any one second (WCAG 2.3.1). Note it at each flash's definition.
+@mixin when-motion-reduced($category) {
+    @if not list.index((status, feedback, transition, decorative), $category) {
+        @error "when-motion-reduced: unknown category #{$category}";
+    }
+    :root[data-motion-reduce~="#{$category}"] & {
         @content;
     }
 }

@@ -285,22 +285,26 @@
     to   { opacity: 1; transform: scale(1) translateY(0); }
 }
 
-// Reduced-motion variant of the nudge. It must still be a *brief*
-// animation — not `none` — so the JS `animationend` listener fires and
-// the `modal-dismiss--nudge` class is cleared. A non-moving outline
-// flash highlights the dismiss control without any scale/translate.
+// The nudge's reduced treatment. It must still be a *brief* animation —
+// not `none` — so the JS `animationend` listener fires and the
+// `modal-dismiss--nudge` class is cleared. A non-moving outline flash
+// highlights the dismiss control without any scale/translate.
 @keyframes modal-dismiss-nudge-static {
     0%, 100% { box-shadow: none; }
     50%      { box-shadow: var(--shadow-focus-ring); }
 }
 
-@include mixins.respect-reduced-motion {
-    .modal-backdrop,
-    .modal-panel {
+// Reduced treatments (transition; feedback for the nudge), dormant under the
+// motion policy.
+.modal-backdrop,
+.modal-panel {
+    @include mixins.when-motion-reduced(transition) {
         animation: none;
     }
+}
 
-    .modal-dismiss--nudge {
+.modal-dismiss--nudge {
+    @include mixins.when-motion-reduced(feedback) {
         // Still animated (so `animationend` fires) but motion-free.
         animation: modal-dismiss-nudge-static 240ms ease-in-out;
     }

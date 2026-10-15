@@ -1,6 +1,8 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+@use "../mixins.scss";
+
 // Same pulse timing/easing as index.html's #startup-loading — keep them in
 // sync if either changes, they're meant to read as the same brand moment.
 
@@ -20,26 +22,21 @@
         // GPU layer, Chromium re-rasterizes this large multi-gradient vector
         // every animation frame, which reads as a flicker instead of a pulse.
         will-change: transform, opacity;
+
+        // Reduced treatment (status), dormant under the motion policy.
+        @include mixins.when-motion-reduced(status) {
+            animation: none;
+        }
     }
 
     &.is-fading {
         opacity: 0;
         transition: opacity 200ms ease-out;
         pointer-events: none;
-    }
 
-    // Instant show/hide, no animation — matches this codebase's established
-    // reduced-motion pattern for the analogous tab-reveal fade
-    // (workspace.tsx sets transition:"none" when prefersReducedMotion() is
-    // true). Must override BOTH the pulse keyframe and the fade transition;
-    // an earlier version of this rule only disabled the pulse, leaving the
-    // opacity fade still animated under prefers-reduced-motion.
-    &.is-reduced-motion {
-        svg {
-            animation: none;
-        }
-
-        &.is-fading {
+        // Reduced treatment (transition), dormant under the motion policy:
+        // instant show/hide, no animated fade.
+        @include mixins.when-motion-reduced(transition) {
             transition: none;
         }
     }

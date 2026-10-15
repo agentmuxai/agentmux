@@ -56,7 +56,8 @@ import { TransitionGroup } from "solid-transition-group";
 import { AnchoredPopover } from "@/app/element/anchored-popover";
 import { Button } from "@/app/element/ui";
 import { getOpenBlockIdsForDefinition } from "@/app/store/agent-pane-state-store";
-import { prefersReducedMotionAtom, pushNotification } from "@/app/store/global";
+import { shouldReduceMotion } from "@/app/motion/motion";
+import { pushNotification } from "@/app/store/global";
 import { onMuxEvent } from "@/app/store/mps";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
@@ -972,20 +973,19 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                         immediately reflow) applies — without this the row
                         would collapse to its content's intrinsic width
                         instead of holding its original grid-cell size
-                        while it animates. Reduced motion: both handlers
-                        bail to the instant-removal path — the stylesheet's
-                        own `@media (prefers-reduced-motion: reduce)` block
-                        is a backstop, not the primary gate, per that
-                        spec's §4.4. */}
+                        while it animates. When the motion policy reduces
+                        `transition` (dormant today), both handlers bail to
+                        the instant-removal path; the stylesheet's reduced
+                        treatment is a backstop. */}
                     <TransitionGroup
                         enterClass=""
                         enterActiveClass=""
                         enterToClass=""
-                        moveClass={prefersReducedMotionAtom() ? "" : "agent-row-move"}
+                        moveClass={shouldReduceMotion("transition") ? "" : "agent-row-move"}
                         onBeforeExit={(el) => {
                             const id = (el as HTMLElement).dataset.definitionId;
                             const isGenuineDelete = id !== undefined && deletingIds().has(id);
-                            if (prefersReducedMotionAtom() || !isGenuineDelete) return;
+                            if (shouldReduceMotion("transition") || !isGenuineDelete) return;
                             const r = (el as HTMLElement).getBoundingClientRect();
                             (el as HTMLElement).style.width = `${r.width}px`;
                             (el as HTMLElement).style.height = `${r.height}px`;
@@ -1002,7 +1002,7 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                                     return next;
                                 });
                             };
-                            if (!isGenuineDelete || prefersReducedMotionAtom()) {
+                            if (!isGenuineDelete || shouldReduceMotion("transition")) {
                                 clearDeleting();
                                 done();
                                 return;

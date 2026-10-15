@@ -1,6 +1,8 @@
 // Copyright 2024-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+@use "../../../mixins.scss";
+
 // AgentPicker "Recent sessions" surface (cascade follow-up 2026-05-23).
 // Sits ABOVE the agent-card list inside `.agent-picker`. Visually
 // secondary to the "+New" tiles (the cards) — same width cap, lighter
@@ -221,14 +223,10 @@
             background-color 0.15s ease;
     }
 
-    @media (prefers-reduced-motion: reduce) {
-        // Backstop for the JS-side gate in MyAgentsList.tsx (which swaps
-        // these classes to "" entirely) — mirrors the existing two-layer
-        // pattern app.scss documents for its reduced-motion view-transition
-        // backstop (`::view-transition-old/new(workspace-tab-content)`): the
-        // app-wide `.prefers-reduced-motion` class only zeroes
-        // `transition-*`, never `animation-*`, so a `@keyframes`-driven
-        // poof needs its own explicit reduced-motion handling here.
+    // Reduced treatment (transition), dormant under the motion policy. A
+    // backstop for the JS-side gate in MyAgentsList.tsx, which swaps these
+    // classes to "" entirely.
+    @include mixins.when-motion-reduced(transition) {
         .agent-recent-sessions-row.agent-row-exit-active {
             animation-duration: 1ms;
         }

@@ -31,10 +31,9 @@
     @include line.tone(quiet);
 }
 
-// Filled, and glowing gently while it waits for the user; still under
-// reduced motion. The glow animates box-shadow, which would override the
-// focus ring, so it stops while the button has keyboard focus, and focus
-// gets a solid outline of its own.
+// Filled, and glowing gently while it waits for the user. The glow animates
+// box-shadow, which would override the focus ring, so it stops while the
+// button has keyboard focus, and focus gets a solid outline of its own.
 .ui-tone-attention {
     @include line.tone(attention);
     box-shadow: 0 0 10px color-mix(in srgb, var(--attention-color) 45%, transparent);
@@ -55,7 +54,8 @@
         box-shadow: none;
     }
 
-    @media (prefers-reduced-motion: reduce) {
+    // Reduced treatment (status), dormant under the motion policy.
+    @include mixins.when-motion-reduced(status) {
         animation: none;
 
         &:not(:focus-visible) {

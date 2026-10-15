@@ -107,6 +107,11 @@ describe("collect", () => {
         expect(collect(commented).undefinedVars).toEqual(["--missing", "--real"]);
     });
 
+    it("leaves Tailwind's and Font Awesome's own variables out", () => {
+        const vendor = [...files, { path: "frontend/app/v.scss", source: ".v { a: var(--tw-x); b: var(--fa-animation-duration, 1s); }" }];
+        expect(collect(vendor).undefinedVars).toEqual(["--missing"]);
+    });
+
     it("doesn't count a variable set only by a test as defined", () => {
         const withUse = [...files, { path: "frontend/app/view/x/z.scss", source: ".z { color: var(--set-in-test); }" }];
         expect(collect(withUse).undefinedVars).toEqual(["--missing", "--set-in-test"]);

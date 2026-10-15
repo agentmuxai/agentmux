@@ -237,7 +237,8 @@
         background: var(--warning-color);
         animation: ui-status-dot-pulse 1.2s ease-in-out infinite;
 
-        @media (prefers-reduced-motion: reduce) {
+        // Reduced treatment (status), dormant under the motion policy.
+        @include mixins.when-motion-reduced(status) {
             animation: none;
         }
     }

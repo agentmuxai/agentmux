@@ -173,6 +173,7 @@ See also:
 | Spec | Summary |
 |---|---|
 | [SPEC_DESIGN_SYSTEM_2026_04_23](SPEC_DESIGN_SYSTEM_2026_04_23.md) | Design-system tokens + components |
+| [SPEC_MOTION_TIERS_AND_STYLESHEET_DRY_2026_10_15](SPEC_MOTION_TIERS_AND_STYLESHEET_DRY_2026_10_15.md) | Two motion tiers (OS animations on / off), one category policy (everything runs in both today), one gate in CSS and JS with a CI check; motion tokens and keyframes; a ranked DRY plan for the stylesheets (approved; built in phases) |
 | [SPEC_PERFORMANCE_INSTRUMENTATION_AND_OPTIMIZATION](SPEC_PERFORMANCE_INSTRUMENTATION_AND_OPTIMIZATION.md) | Perf instrumentation spec |
 | [SPEC_MAGNIFY_ZOOM_IMPLEMENTATION_2026-05-21](SPEC_MAGNIFY_ZOOM_IMPLEMENTATION_2026-05-21.md) | Zoom / DPI implementation |
 

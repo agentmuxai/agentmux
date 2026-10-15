@@ -255,7 +255,9 @@ export function collect(files) {
         }
     }
 
-    const undefinedVars = [...used].filter((name) => !defined.has(name) && !name.startsWith("--tw-"));
+    // `--tw-*` are Tailwind's; `--fa-*` are Font Awesome's optional hooks
+    // (public/fontawesome/), always read with FA's own fallback.
+    const undefinedVars = [...used].filter((name) => !defined.has(name) && !/^--(tw|fa)-/.test(name));
     return {
         buttons: sortObject(buttons),
         solidFills: [...fills].sort(),

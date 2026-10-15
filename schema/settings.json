@@ -197,7 +197,8 @@
           "type": "string"
         },
         "window:reducedmotion": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Deprecated, ignored: motion follows the system (SPEC_MOTION_TIERS_AND_STYLESHEET_DRY_2026_10_15)."
         },
         "window:tilegapsize": {
           "type": "integer"

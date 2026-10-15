@@ -22,7 +22,7 @@
 // Vite's platformResolve plugin maps `TileLayout.platform` to one of the
 // three platform files; this file is never platform-resolved.
 
-import { atoms } from "@/app/store/global";
+import { shouldReduceMotion } from "@/app/motion/motion";
 import { gatingNodeIds } from "@/app/store/tab-reveal";
 import { draggable } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
 import clsx from "clsx";
@@ -553,8 +553,8 @@ export function createTileLayout(platform: TileLayoutPlatform) {
         const tileStyle = createMemo<JSX.CSSProperties>(() => ({
             ...(tileTransform() as JSX.CSSProperties),
             visibility: isRevealGated() ? "hidden" : undefined,
-            opacity: atoms.prefersReducedMotionAtom() ? undefined : isRevealGated() ? 0 : 1,
-            transition: atoms.prefersReducedMotionAtom() ? undefined : "opacity 120ms ease-out",
+            opacity: shouldReduceMotion("transition") ? undefined : isRevealGated() ? 0 : 1,
+            transition: shouldReduceMotion("transition") ? undefined : "opacity 120ms ease-out",
         }));
 
         return (

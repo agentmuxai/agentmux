@@ -235,6 +235,8 @@ pub struct SettingsType {
     #[serde(rename = "window:bgcolor", default, skip_serializing_if = "String::is_empty")]
     pub window_bg_color: String,
 
+    /// Deprecated, ignored: motion follows the system (SPEC_MOTION_TIERS_AND_STYLESHEET_DRY_2026_10_15).
+    /// Kept so settings files that still set it load.
     #[serde(rename = "window:reducedmotion", default, skip_serializing_if = "is_false")]
     pub window_reduced_motion: bool,
 

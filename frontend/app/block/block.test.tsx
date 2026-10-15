@@ -53,7 +53,7 @@ vi.mock("@/store/mos", () => ({
 
 const registry = new Map<string, unknown>();
 vi.mock("@/store/global", () => ({
-    atoms: { prefersReducedMotionAtom: () => false },
+    atoms: {},
     counterInc: () => {},
     getBlockComponentModel: (blockId: string) => registry.get(blockId),
     registerBlockComponentModel: (blockId: string, bcm: unknown) => {

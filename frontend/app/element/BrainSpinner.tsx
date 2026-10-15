@@ -12,7 +12,6 @@
  * See docs/specs/REPORT_AGENT_PANE_BLANK_LOAD_BRAIN_INDICATOR_2026_07_04.md.
  */
 
-import { atoms } from "@/store/global";
 import type { JSX } from "solid-js";
 import brainSvg from "@/app/asset/logo-brain.svg?raw";
 import "./BrainSpinner.scss";
@@ -26,11 +25,9 @@ interface BrainSpinnerProps {
 }
 
 export const BrainSpinner = (props: BrainSpinnerProps): JSX.Element => {
-    const reducedMotion = atoms.prefersReducedMotionAtom;
-
     return (
         <div
-            class={`brain-spinner${props.fading ? " is-fading" : ""}${reducedMotion() ? " is-reduced-motion" : ""}${props.class ? ` ${props.class}` : ""}`}
+            class={`brain-spinner${props.fading ? " is-fading" : ""}${props.class ? ` ${props.class}` : ""}`}
             aria-hidden="true"
             innerHTML={brainSvg}
         />

@@ -1,6 +1,8 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+@use "mixins.scss";
+
 // Shared drag-and-drop feedback: the "valid drop target" strobe + pulse and
 // the landing bounce. Moved verbatim out of tabbar.scss, where the Window Tab
 // bar introduced them (SPEC_PANE_DRAG_TO_TAB v3 addendum §A1/A4), so the Pane
@@ -19,15 +21,11 @@
 // accent-outline pulse carries the "valid drop target" signal for the rest of
 // the hover.
 //
-// Flash rate (review finding on PR #2105, P1): the original design (10 flashes
-// / 500ms = 20 Hz) exceeded the WCAG 2.3.1 general flash threshold (max 3
-// flashes per any 1-second window) — a real photosensitive-seizure risk,
-// independent of any animation preference. Reduced to 2 flashes over 800ms
-// (2.5 Hz, safely under the threshold). Also keeps a targeted
-// `prefers-reduced-motion` opt-out for THIS flash specifically (dropping
-// straight to the steady pulse): seizure-trigger content warrants its own
-// escape hatch, a distinct and more serious category than the general "skip
-// cosmetic transitions" policy this app otherwise doesn't honor.
+// Flash rule (WCAG 2.3.1, both motion tiers): no more than three flashes in
+// any one second. The original design (10 flashes / 500ms = 20 Hz) broke it;
+// this is 2 flashes over 800ms (2.5 Hz), under the limit, so the strobe runs
+// in both tiers. Its pulse-only treatment, which drops straight to the steady
+// pulse, is declared below and dormant under `feedback`.
 @mixin drop-target-hover {
     outline: 2px solid var(--drop-target-border);
     outline-offset: -2px;
@@ -35,7 +33,8 @@
         tab-drop-invert-strobe 400ms steps(1, end) 2,
         tab-drop-pulse 0.8s ease-in-out infinite alternate;
 
-    @media (prefers-reduced-motion: reduce) {
+    // Reduced treatment (feedback), dormant under the motion policy.
+    @include mixins.when-motion-reduced(feedback) {
         animation: tab-drop-pulse 0.8s ease-in-out infinite alternate;
     }
 }
@@ -45,12 +44,12 @@
 // c → 1-c → c), so the parent's invert on top of this one gives back the
 // descendant's exact original pixels. Both start in the same style recalc
 // (one class toggle on the parent) and use steps(1, end), so they flip on the
-// same frame. Mirrors `drop-target-hover`'s reduced-motion opt-out: no parent
-// strobe there, so nothing to cancel.
+// same frame. Mirrors `drop-target-hover`'s pulse-only treatment (dormant
+// under `feedback`): no parent strobe there, so nothing to cancel.
 @mixin drop-target-strobe-exempt {
     animation: tab-drop-invert-strobe 400ms steps(1, end) 2;
 
-    @media (prefers-reduced-motion: reduce) {
+    @include mixins.when-motion-reduced(feedback) {
         animation: none;
     }
 }

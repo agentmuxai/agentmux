@@ -331,7 +331,10 @@ the OS "reduce motion" setting was silently disabling functional motion cues —
 this strobe, the drop pulse, insertion indicators — which carry meaning, not
 decoration. `prefersReducedMotionAtom` is hard `false` (plumbing kept for easy
 revisit), the `respect-reduced-motion` SCSS mixin is a no-op, and all raw
-`@media (prefers-reduced-motion: reduce)` blocks are removed.
+`@media (prefers-reduced-motion: reduce)` blocks are removed. The atom and the
+no-op mixin were later replaced by the motion tiers and policy of
+[`SPEC_MOTION_TIERS_AND_STYLESHEET_DRY_2026_10_15.md`](SPEC_MOTION_TIERS_AND_STYLESHEET_DRY_2026_10_15.md),
+which keeps every animation running in both tiers.
 
 ### A2. Stability fixes
 

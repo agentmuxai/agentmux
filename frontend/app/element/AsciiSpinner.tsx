@@ -4,7 +4,8 @@
 // A one-character ASCII spinner, the app's "still working" mark: the agent
 // pane's Working row (beside the composer) and the Swarm's status chip.
 // It replaced a pulsing dot and animates on its own signal, so a frame never
-// re-renders the text beside it. Reduced motion shows a static mark.
+// re-renders the text beside it. When the motion policy reduces `status`, it
+// shows a static mark.
 //
 // Every spinner on screen shares one timer and one frame: the Swarm can show
 // dozens at once, and independent timers would give each its own phase, which
@@ -14,7 +15,7 @@
 
 import { createEffect, createSignal, onCleanup, type JSX } from "solid-js";
 
-import { atoms } from "@/app/store/global";
+import { shouldReduceMotion } from "@/app/motion/motion";
 
 export const SPINNER_FRAMES = ["|", "/", "-", "\\"] as const;
 export const SPINNER_FRAME_MS = 120;
@@ -39,7 +40,7 @@ function acquireTicker(): () => void {
 
 /** `class` styles the mark where it sits; the default is the Working row's. */
 export function AsciiSpinner(props: { class?: string }): JSX.Element {
-    const reducedMotion = atoms.prefersReducedMotionAtom;
+    const reducedMotion = () => shouldReduceMotion("status");
     createEffect(() => {
         if (reducedMotion()) return;
         onCleanup(acquireTicker());

@@ -30,6 +30,7 @@
 
 import { batch, createEffect, createMemo, createSignal, onCleanup, onMount, Show, untrack, type Accessor, type JSX } from "solid-js";
 import { trail } from "@/log/render-trail";
+import { shouldReduceMotion } from "@/app/motion/motion";
 import { Key } from "@/util/keyed";
 import type { ScrollCommand } from "../hooks/useScrollToNode";
 import type { AgentDispatch } from "../../swarm/swarm-model";
@@ -404,10 +405,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         for (const a of glides) a.cancel();
         glides.clear();
     }
-    function reducedMotion(): boolean {
-        if (scrollRef?.closest(".prefers-reduced-motion")) return true;
-        return typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
-    }
+    const reducedMotion = () => shouldReduceMotion("transition");
     /** The running glides' current offset (px, signed), then stops them. */
     function takeGlideOffset(): number {
         if (glides.size === 0 || !streamingBufferRef) return 0;
