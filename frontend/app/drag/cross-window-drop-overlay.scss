@@ -23,7 +23,7 @@
         align-items: center;
         gap: var(--space-2);
         color: var(--drop-target-border);
-        font-size: 14px;
+        font-size: var(--text-md);
         opacity: 0.8;
 
         i {

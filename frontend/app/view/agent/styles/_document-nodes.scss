@@ -58,7 +58,7 @@ $transcript-preview-max-height: calc(50vh / 3);
 // shared by agent messages and jekts.
 @mixin message-chevron {
     color: var(--secondary-text-color);
-    font-size: 10px;
+    font-size: var(--text-2xs);
 }
 
 // Markdown rendered inside a tool preview (a WebSearch answer, an Agent
@@ -140,7 +140,7 @@ $transcript-preview-max-height: calc(50vh / 3);
     }
 
     .markdown > .content {
-        font-size: 13px;
+        font-size: var(--text-base);
 
         .heading {
             margin: 0.6em 0 0.2em;
@@ -222,7 +222,7 @@ $transcript-preview-max-height: calc(50vh / 3);
     // (SPEC_TOOL_OUTPUT_CAP_2026_05_30.md). One muted line, never silent.
     .agent-output-hidden-marker {
         padding: 1px 0;
-        color: var(--secondary-text-color, #888);
+        color: var(--secondary-text-color);
         font-size: 0.85em;
         font-style: italic;
         opacity: 0.75;
@@ -302,7 +302,7 @@ $transcript-preview-max-height: calc(50vh / 3);
                 flex-shrink: 0;
                 width: 12px;
                 text-align: center;
-                font-size: 10px;
+                font-size: var(--text-2xs);
             }
 
             .markdown-canceled-body {
@@ -506,7 +506,7 @@ $transcript-preview-max-height: calc(50vh / 3);
                 min-width: 0;
                 margin-left: 8px;
                 padding: 0 6px;
-                color: var(--accent-color, #2bd4a8);
+                color: var(--accent-color);
                 background: rgba(43, 212, 168, 0.08);
                 border-radius: 0;
                 font-family: var(--font-mono);
@@ -704,7 +704,7 @@ $transcript-preview-max-height: calc(50vh / 3);
             align-items: center;
             gap: var(--space-1);
             padding: var(--space-1) var(--space-2);
-            border-radius: var(--radius-2, 4px);
+            border-radius: 4px;
             background: color-mix(in srgb, var(--term-bright-magenta) 8%, transparent);
             cursor: default;
             font-size: var(--text-sm);
@@ -804,7 +804,7 @@ $transcript-preview-max-height: calc(50vh / 3);
     // Hidden by default; shown by the 600px container query in _responsive.scss.
     .agent-tool-result-pill {
         display: none; // shown via container query at ≥600px
-        font-size: 10px;
+        font-size: var(--text-2xs);
         font-family: var(--font-mono);
         padding: 1px 5px;
         border-radius: var(--radius-full);
@@ -1302,13 +1302,13 @@ $transcript-preview-max-height: calc(50vh / 3);
     .agent-tool-log-line,
     .agent-preview {
         a.linkified-url {
-            color: var(--link-color, #60a5fa);
+            color: var(--link-color);
             text-decoration: underline;
-            text-decoration-color: color-mix(in srgb, var(--link-color, #60a5fa) 40%, transparent);
+            text-decoration-color: color-mix(in srgb, var(--link-color) 40%, transparent);
             cursor: pointer;
 
             &:hover {
-                text-decoration-color: var(--link-color, #60a5fa);
+                text-decoration-color: var(--link-color);
             }
         }
     }
@@ -1574,7 +1574,7 @@ $transcript-preview-max-height: calc(50vh / 3);
     .agent-question-panel-cancelled-note {
         padding: 3px var(--space-1);
         color: var(--secondary-text-color);
-        font-size: var(--text-sm, 12px);
+        font-size: var(--text-sm);
         font-style: italic;
     }
 
@@ -1726,7 +1726,7 @@ $transcript-preview-max-height: calc(50vh / 3);
         }
 
         .agent-tool-compact-chevron {
-            font-size: 9px;
+            font-size: var(--text-3xs);
             flex-shrink: 0;
             width: 10px;
         }
@@ -1824,7 +1824,7 @@ $transcript-preview-max-height: calc(50vh / 3);
     }
 
     .agent-search-sources-label {
-        font-size: 10px;
+        font-size: var(--text-2xs);
         letter-spacing: 0.08em;
         text-transform: uppercase;
         color: var(--secondary-text-color);
@@ -1868,7 +1868,7 @@ $transcript-preview-max-height: calc(50vh / 3);
         flex-shrink: 0;
         opacity: 0.7;
         font-family: var(--font-mono);
-        font-size: 10px;
+        font-size: var(--text-2xs);
     }
 
     .agent-search-links {
@@ -1905,7 +1905,7 @@ $transcript-preview-max-height: calc(50vh / 3);
         flex: 1 1 0;
         min-width: 0;
         color: var(--secondary-text-color);
-        font-size: 10px;
+        font-size: var(--text-2xs);
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
@@ -2013,7 +2013,7 @@ $transcript-preview-max-height: calc(50vh / 3);
 
     .agent-search-card-domain {
         color: var(--success-color);
-        font-size: 10px;
+        font-size: var(--text-2xs);
         opacity: 0.85;
         overflow: hidden;
         text-overflow: ellipsis;
@@ -2021,7 +2021,7 @@ $transcript-preview-max-height: calc(50vh / 3);
     }
 
     .agent-search-card-index {
-        font-size: 10px;
+        font-size: var(--text-2xs);
         opacity: 0.4;
         flex-shrink: 0;
         font-family: var(--font-mono);
@@ -2048,7 +2048,7 @@ $transcript-preview-max-height: calc(50vh / 3);
     }
 
     .agent-search-card-date {
-        font-size: 10px;
+        font-size: var(--text-2xs);
         opacity: 0.45;
         margin-top: 1px;
     }
@@ -2067,8 +2067,8 @@ $transcript-preview-max-height: calc(50vh / 3);
         justify-content: space-between;
         gap: var(--space-1);
         padding: var(--space-0-5) var(--space-1);
-        border-radius: var(--border-radius-sm);
-        background: var(--secondary-bg-color);
+        border-radius: var(--radius-sm);
+        background: var(--panel-bg-color);
         cursor: pointer;
 
         &:hover {
@@ -2099,7 +2099,7 @@ $transcript-preview-max-height: calc(50vh / 3);
     }
 
     .agent-fetch-status {
-        font-size: 10px;
+        font-size: var(--text-2xs);
         padding: 1px 6px;
         border-radius: 10px;
         flex-shrink: 0;
@@ -2111,8 +2111,8 @@ $transcript-preview-max-height: calc(50vh / 3);
         }
 
         &.agent-fetch-status-redirect {
-            color: var(--warning-color, #d4a017);
-            background: color-mix(in srgb, var(--warning-color, #d4a017) 15%, transparent);
+            color: var(--warning-color);
+            background: color-mix(in srgb, var(--warning-color) 15%, transparent);
         }
 
         &.agent-fetch-status-error {
@@ -2138,8 +2138,8 @@ $transcript-preview-max-height: calc(50vh / 3);
         font-size: var(--text-xs);
         line-height: 1.5;
         padding: var(--space-0-5);
-        border-radius: var(--border-radius-sm);
-        background: var(--secondary-bg-color);
+        border-radius: var(--radius-sm);
+        background: var(--panel-bg-color);
 
         &.agent-fetch-content-json {
             font-family: var(--font-mono);
@@ -2147,7 +2147,7 @@ $transcript-preview-max-height: calc(50vh / 3);
     }
 
     .agent-fetch-truncated {
-        font-size: 10px;
+        font-size: var(--text-2xs);
         opacity: 0.5;
         padding: var(--space-0-5);
         text-align: center;
@@ -2185,7 +2185,7 @@ $transcript-preview-max-height: calc(50vh / 3);
     }
 
     .agent-tool-write-bytes {
-        font-size: 10px;
+        font-size: var(--text-2xs);
         opacity: 0.5;
         flex-shrink: 0;
         margin-left: auto;
@@ -2332,7 +2332,7 @@ $transcript-preview-max-height: calc(50vh / 3);
             content: "";
             flex: 1 1 auto;
             height: 1px;
-            background: var(--border-color, rgba(255, 255, 255, 0.12));
+            background: var(--border-color);
         }
     }
 
@@ -2342,16 +2342,16 @@ $transcript-preview-max-height: calc(50vh / 3);
         font-weight: 600;
         letter-spacing: 0.06em;
         text-transform: uppercase;
-        color: var(--secondary-text-color, rgba(255, 255, 255, 0.45));
+        color: var(--secondary-text-color);
         padding: 2px 10px;
-        border: 1px solid var(--border-color, rgba(255, 255, 255, 0.12));
+        border: 1px solid var(--border-color);
         border-radius: 10px;
-        background: var(--panel-bg-color, rgba(255, 255, 255, 0.04));
+        background: var(--panel-bg-color);
     }
 
     .agent-context-compacted-detail {
         font-size: var(--text-xs);
-        color: var(--tertiary-text-color, rgba(255, 255, 255, 0.3));
+        color: rgba(255, 255, 255, 0.3);
     }
 }
 
@@ -2373,15 +2373,15 @@ $transcript-preview-max-height: calc(50vh / 3);
         font-weight: 600;
         letter-spacing: 0.06em;
         text-transform: uppercase;
-        color: var(--warning-color, #d9a441);
+        color: var(--warning-color);
         padding: 2px 10px;
-        border: 1px solid color-mix(in srgb, var(--warning-color, #d9a441) 40%, transparent);
+        border: 1px solid color-mix(in srgb, var(--warning-color) 40%, transparent);
         border-radius: 10px;
     }
 
     .agent-compaction-started-detail {
         font-size: var(--text-xs);
-        color: var(--tertiary-text-color, rgba(255, 255, 255, 0.3));
+        color: rgba(255, 255, 255, 0.3);
     }
 }
 
@@ -2407,9 +2407,9 @@ $transcript-preview-max-height: calc(50vh / 3);
         @include meta-row-text;
         letter-spacing: 0.02em;
         padding: 2px 10px;
-        border: 1px solid var(--border-color, rgba(255, 255, 255, 0.12));
+        border: 1px solid var(--border-color);
         border-radius: 10px;
-        background: var(--panel-bg-color, rgba(255, 255, 255, 0.04));
+        background: var(--panel-bg-color);
     }
 
     &--low  .agent-memory-reinjection-label { color: var(--secondary-text-color); }
@@ -2462,7 +2462,7 @@ $transcript-preview-max-height: calc(50vh / 3);
         top: 50%;
         width: 32%;
         height: 1px;
-        background: var(--border-color, rgba(255, 255, 255, 0.08));
+        background: var(--border-color);
     }
 
     &::before { left: 0; }
@@ -2472,10 +2472,10 @@ $transcript-preview-max-height: calc(50vh / 3);
         font-size: 10.5px;
         font-weight: 600;
         letter-spacing: 0.05em;
-        color: var(--tertiary-text-color, rgba(255, 255, 255, 0.35));
+        color: rgba(255, 255, 255, 0.35);
         padding: 1px 9px;
         border-radius: 9px;
-        background: var(--panel-bg-color, rgba(255, 255, 255, 0.04));
+        background: var(--panel-bg-color);
     }
 }
 
@@ -2499,7 +2499,7 @@ $transcript-preview-max-height: calc(50vh / 3);
             content: "";
             flex: 1 1 auto;
             height: 1px;
-            background: var(--border-color, rgba(255, 255, 255, 0.12));
+            background: var(--border-color);
         }
     }
 
@@ -2509,29 +2509,29 @@ $transcript-preview-max-height: calc(50vh / 3);
         font-weight: 600;
         letter-spacing: 0.06em;
         text-transform: uppercase;
-        color: var(--secondary-text-color, rgba(255, 255, 255, 0.45));
+        color: var(--secondary-text-color);
         padding: 2px 10px;
-        border: 1px solid var(--border-color, rgba(255, 255, 255, 0.12));
+        border: 1px solid var(--border-color);
         border-radius: 10px;
-        background: var(--panel-bg-color, rgba(255, 255, 255, 0.04));
+        background: var(--panel-bg-color);
     }
 
     .agent-session-outcome-detail {
         font-size: var(--text-xs);
-        color: var(--tertiary-text-color, rgba(255, 255, 255, 0.3));
+        color: rgba(255, 255, 255, 0.3);
     }
 
     &.agent-session-outcome-fresh {
         .agent-session-outcome-rule {
             &::before,
             &::after {
-                background: color-mix(in srgb, var(--warning-color, #d9a441) 40%, transparent);
+                background: color-mix(in srgb, var(--warning-color) 40%, transparent);
             }
         }
 
         .agent-session-outcome-label {
-            color: var(--warning-color, #d9a441);
-            border-color: color-mix(in srgb, var(--warning-color, #d9a441) 40%, transparent);
+            color: var(--warning-color);
+            border-color: color-mix(in srgb, var(--warning-color) 40%, transparent);
         }
     }
 }
@@ -2545,7 +2545,7 @@ $transcript-preview-max-height: calc(50vh / 3);
     gap: 3px;
     padding: 10px var(--space-2);
     user-select: none;
-    --cli-notice-tone: var(--secondary-text-color, rgba(255, 255, 255, 0.45));
+    --cli-notice-tone: var(--secondary-text-color);
 
     .agent-cli-notice-rule {
         display: flex;
@@ -2558,7 +2558,7 @@ $transcript-preview-max-height: calc(50vh / 3);
             content: "";
             flex: 1 1 auto;
             height: 1px;
-            background: var(--border-color, rgba(255, 255, 255, 0.12));
+            background: var(--border-color);
         }
     }
 
@@ -2568,23 +2568,23 @@ $transcript-preview-max-height: calc(50vh / 3);
         font-weight: 600;
         color: var(--cli-notice-tone);
         padding: 2px 10px;
-        border: 1px solid var(--border-color, rgba(255, 255, 255, 0.12));
+        border: 1px solid var(--border-color);
         border-radius: 10px;
-        background: var(--panel-bg-color, rgba(255, 255, 255, 0.04));
+        background: var(--panel-bg-color);
     }
 
     .agent-cli-notice-detail {
         font-size: var(--text-xs);
-        color: var(--tertiary-text-color, rgba(255, 255, 255, 0.3));
+        color: rgba(255, 255, 255, 0.3);
         text-align: center;
     }
 
     &.agent-cli-notice-warn {
-        --cli-notice-tone: var(--warning-color, #d9a441);
+        --cli-notice-tone: var(--warning-color);
     }
 
     &.agent-cli-notice-error {
-        --cli-notice-tone: var(--error-color, #e06c75);
+        --cli-notice-tone: var(--error-color);
     }
 
     &.agent-cli-notice-warn,
@@ -2611,14 +2611,14 @@ $transcript-preview-max-height: calc(50vh / 3);
     gap: var(--space-1-5);
     padding: 8px var(--space-2);
     margin: 0 var(--space-1-5);
-    border: 1px dashed var(--border-color, rgba(255, 255, 255, 0.12));
+    border: 1px dashed var(--border-color);
     border-radius: 4px;
-    cursor: var(--cursor-interactive, pointer);
+    cursor: var(--cursor-interactive);
     user-select: none;
 
     &:hover,
     &:focus-visible {
-        background: var(--panel-bg-color, rgba(255, 255, 255, 0.04));
+        background: var(--panel-bg-color);
         border-color: color-mix(in srgb, var(--accent-color) 40%, transparent);
     }
 
@@ -2638,7 +2638,7 @@ $transcript-preview-max-height: calc(50vh / 3);
         text-overflow: ellipsis;
         white-space: nowrap;
         font-size: var(--text-xs);
-        color: var(--tertiary-text-color, rgba(255, 255, 255, 0.3));
+        color: rgba(255, 255, 255, 0.3);
     }
 
     .agent-history-link-cta {
@@ -2671,7 +2671,7 @@ $transcript-preview-max-height: calc(50vh / 3);
     display: flex;
     justify-content: flex-end;
     gap: var(--space-2);
-    font-size: 13px;
+    font-size: var(--text-base);
     line-height: 1.4;
     color: var(--secondary-text-color);
     white-space: nowrap;
@@ -2680,7 +2680,7 @@ $transcript-preview-max-height: calc(50vh / 3);
 // A secondary line that isn't time/tokens (ambient narration's provenance
 // note): the old meta styling, left-aligned, on its own line.
 .agent-node-peek-tooltip-note {
-    font-size: 13px;
+    font-size: var(--text-base);
     line-height: 1.4;
     color: var(--secondary-text-color);
     white-space: nowrap;
@@ -2698,7 +2698,7 @@ $transcript-preview-max-height: calc(50vh / 3);
     white-space: pre-wrap;
     word-break: break-all;
     font-family: var(--font-mono);
-    font-size: 13px;
+    font-size: var(--text-base);
     // Was 1.6, the loosest text in the tool UI; the in-flow preview it is a peek
     // of reads at 1.4. More command fits before the panel has to scroll.
     line-height: var(--leading-normal);
@@ -2833,7 +2833,7 @@ $transcript-preview-max-height: calc(50vh / 3);
     gap: var(--space-1-5);
     padding: 8px var(--space-2);
     margin: 0 var(--space-1-5);
-    border: 1px dashed var(--border-color, rgba(255, 255, 255, 0.12));
+    border: 1px dashed var(--border-color);
     border-radius: 4px;
     user-select: none;
 
@@ -2849,7 +2849,7 @@ $transcript-preview-max-height: calc(50vh / 3);
         text-overflow: ellipsis;
         white-space: nowrap;
         font-size: var(--text-xs);
-        color: var(--secondary-text-color, rgba(255, 255, 255, 0.55));
+        color: var(--secondary-text-color);
     }
 
     .agent-resume-preflight-cta {
@@ -2857,7 +2857,7 @@ $transcript-preview-max-height: calc(50vh / 3);
         font-size: var(--text-xs);
         font-weight: 600;
         color: var(--accent-color);
-        cursor: var(--cursor-interactive, pointer);
+        cursor: var(--cursor-interactive);
 
         &:hover,
         &:focus-visible {
@@ -2871,10 +2871,10 @@ $transcript-preview-max-height: calc(50vh / 3);
 }
 
 .agent-resume-preflight-fresh {
-    border-color: color-mix(in srgb, var(--warning-color, #d89a3a) 45%, transparent);
+    border-color: color-mix(in srgb, var(--warning-color) 45%, transparent);
 
     .agent-resume-preflight-sigil {
-        color: var(--warning-color, #d89a3a);
+        color: var(--warning-color);
     }
 }
 
@@ -2882,7 +2882,7 @@ $transcript-preview-max-height: calc(50vh / 3);
 // it stays in the neutral vocabulary rather than borrowing the warning tint.
 .agent-resume-preflight-recover .agent-resume-preflight-sigil,
 .agent-resume-preflight-pending .agent-resume-preflight-sigil {
-    color: var(--tertiary-text-color, rgba(255, 255, 255, 0.35));
+    color: rgba(255, 255, 255, 0.35);
 }
 
 // The wheel-edge skid (components/scroll-handoff.ts): while a capped box absorbs

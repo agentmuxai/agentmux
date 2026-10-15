@@ -23,7 +23,7 @@
 
     .agent-disconnected-banner-icon {
         color: var(--error-color);
-        font-size: 14px;
+        font-size: var(--text-md);
         line-height: 1;
         flex-shrink: 0;
     }

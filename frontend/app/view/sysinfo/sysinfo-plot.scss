@@ -28,7 +28,7 @@
     top: 2px;
     left: 6px;
     z-index: 1;
-    font-size: 11px;
+    font-size: var(--text-xs);
     color: var(--grey-text-color);
     pointer-events: none;
 }
@@ -42,7 +42,7 @@
     background: var(--main-bg-color);
     border: 1px solid var(--border-color);
     color: var(--main-text-color);
-    font-size: 11px;
+    font-size: var(--text-xs);
     white-space: nowrap;
     pointer-events: none;
 }
@@ -95,7 +95,7 @@
 }
 
 .sysinfo-bar-paused {
-    font-size: 11px;
+    font-size: var(--text-xs);
     color: var(--grey-text-color);
 }
 

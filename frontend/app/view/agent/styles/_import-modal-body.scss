@@ -64,7 +64,7 @@
 }
 
 .agent-import-result {
-    font-size: 13px;
+    font-size: var(--text-base);
     color: var(--main-text-color);
     text-align: center;
     padding: var(--space-5) 0;

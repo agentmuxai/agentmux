@@ -9,7 +9,7 @@
     z-index: var(--z-xterm-overlay);
     display: flex;
     gap: var(--space-1-5);
-    font-size: 11px;
+    font-size: var(--text-xs);
     font-variant-numeric: tabular-nums;
     opacity: 0.5;
     white-space: nowrap;

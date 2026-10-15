@@ -10,10 +10,15 @@ import {
     collect,
     compare,
     countButtons,
+    deadFallbacks,
     declarations,
     parseCatFileBatch,
     pickBase,
+    rawDurations,
+    rawFontSizes,
+    rawZIndexes,
     resolveSelector,
+    rootTokens,
     solidFills,
     stripComments,
 } from "./check-ui-primitives.mjs";
@@ -81,6 +86,61 @@ describe("rule 3: corner radii", () => {
     });
 });
 
+describe("rules 5-8: the shared scales", () => {
+    it("counts raw times in transition and animation declarations, not tokens or other properties", () => {
+        const scss = `
+            .a { transition: opacity 120ms ease, color var(--duration-fast) var(--ease-out); }
+            .b { animation: spin 0.5s linear infinite; animation-delay: 1s; }
+            .c { transition-duration: var(--duration-base); --x: 80ms; }
+        `;
+        expect(rawDurations(scss)).toBe(3);
+    });
+
+    it("counts raw durations, font sizes and z-indexes inside a mixin too", () => {
+        const scss = `@mixin x { .item { transition: opacity 123ms; font-size: 11px; z-index: 3; } }`;
+        expect(rawDurations(scss)).toBe(1);
+        expect(rawFontSizes(scss)).toHaveLength(1);
+        expect(rawZIndexes(scss)).toHaveLength(1);
+    });
+
+    it("counts a negative delay, but not a time inside a name", () => {
+        const scss = `.a { animation-delay: -1s; transition-delay: -120ms; animation: tab-1s 2s; }`;
+        expect(rawDurations(scss)).toBe(3);
+    });
+
+    it("counts font sizes given as raw px only", () => {
+        const scss = `.a { font-size: 12px; } .b { font-size: var(--text-sm); } .c { font-size: 0.9em; } .d { font-size: 9px !important; }`;
+        expect(rawFontSizes(scss).map((d) => d.selector)).toEqual([".a", ".d"]);
+    });
+
+    it("counts z-indexes given as raw numbers only", () => {
+        const scss = `.a { z-index: 10; } .b { z-index: var(--z-modal); } .c { z-index: -1; } .d { z-index: auto; }`;
+        expect(rawZIndexes(scss).map((d) => d.selector)).toEqual([".a", ".c"]);
+    });
+
+    it("takes tokens set on :root, alone or in a list, and not inside an at-rule", () => {
+        const scss = `
+            :root { --text-2xs: 10px; --a: 1; }
+            :root, .ui-density-comfortable { --b: 1; }
+            @layer base { :root { --c: 1; } }
+            @media (min-width: 1px) { :root { --in-media: 1; } }
+            :root.am-uniform-fade { --scoped: 1; }
+            [data-theme="x"] { --theme-only: 1; }
+        `;
+        expect(rootTokens(scss)).toEqual(["--text-2xs", "--a", "--b", "--c"]);
+    });
+
+    it("counts fallbacks on those tokens only, not in comments", () => {
+        const tokens = new Set(["--radius-sm", "--error-color"]);
+        const scss = `
+            // var(--radius-sm, 4px) in a comment
+            .a { border-radius: var(--radius-sm, 4px); color: var(--error-color, var(--x)); }
+            .b { color: var(--pane-ring-color, #fff); background: var(--error-color); }
+        `;
+        expect(deadFallbacks(scss, tokens)).toBe(2);
+    });
+});
+
 describe("collect", () => {
     const files = [
         { path: "frontend/app/view/x/x.tsx", source: '<button class="a" /><button class="b" />' },
@@ -107,9 +167,29 @@ describe("collect", () => {
         expect(collect(commented).undefinedVars).toEqual(["--missing", "--real"]);
     });
 
-    it("leaves Tailwind's and Font Awesome's own variables out", () => {
-        const vendor = [...files, { path: "frontend/app/v.scss", source: ".v { a: var(--tw-x); b: var(--fa-animation-duration, 1s); }" }];
+    it("leaves Tailwind's, Font Awesome's and Shiki's own variables out", () => {
+        const vendor = [
+            ...files,
+            { path: "frontend/app/v.scss", source: ".v { a: var(--tw-x); b: var(--fa-animation-duration, 1s); c: var(--shiki-dark-font-style); }" },
+        ];
         expect(collect(vendor).undefinedVars).toEqual(["--missing"]);
+    });
+
+    it("doesn't take a name built in a template literal for a variable", () => {
+        const built = [...files, { path: "frontend/app/view/x/t.ts", source: "const c = `var(--conn-icon-color-${n})`;" }];
+        expect(collect(built).undefinedVars).toEqual(["--missing"]);
+    });
+
+    it("counts the scale rules per file, and fallbacks against every file's :root tokens", () => {
+        const scaled = [
+            ...files,
+            { path: "frontend/app/view/x/s.scss", source: ".s { font-size: 11px; z-index: 3; transition: opacity 90ms; color: var(--defined, red); }" },
+        ];
+        const out = collect(scaled);
+        expect(out.fontSizes).toEqual({ "frontend/app/view/x/s.scss": 1 });
+        expect(out.zIndex).toEqual({ "frontend/app/view/x/s.scss": 1 });
+        expect(out.durations).toEqual({ "frontend/app/view/x/s.scss": 1 });
+        expect(out.fallbacks).toEqual({ "frontend/app/view/x/s.scss": 1 });
     });
 
     it("doesn't count a variable set only by a test as defined", () => {
@@ -137,6 +217,15 @@ describe("compare", () => {
     it("reports growth, including in a file that was clean", () => {
         const current = { ...structuredClone(baseline), buttons: { "a.tsx": 3, "b.tsx": 1 } };
         expect(compare(current, baseline).grew).toEqual(["buttons: a.tsx has 3, base 2", "buttons: b.tsx has 1, base 0"]);
+    });
+
+    it("ratchets the scale counts per file too", () => {
+        const current = { ...structuredClone(baseline), fontSizes: { "s.scss": 2 }, fallbacks: {} };
+        const base = { ...baseline, fontSizes: { "s.scss": 1 }, fallbacks: { "s.scss": 3 } };
+        expect(compare(current, base)).toEqual({
+            grew: ["fontSizes: s.scss has 2, base 1"],
+            shrank: ["fallbacks: s.scss has 0, base 3"],
+        });
     });
 
     it("reports shrinkage separately from growth", () => {

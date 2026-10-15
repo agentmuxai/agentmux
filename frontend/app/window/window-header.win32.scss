@@ -4,7 +4,7 @@
 //
 // Windows-specific window header styles.
 // CSS zoom divides flex space by zoom factor on Chromium/WebView2.
-// calc(100vw / var(--zoomfactor, 1)) compensates so the header fills the viewport.
+// calc(100vw / var(--zoomfactor)) compensates so the header fills the viewport.
 // This MUST remain pure CSS — setting the width from JS breaks Windows.
 
 .window-header {
@@ -32,7 +32,7 @@
     display: flex;
     flex-direction: row;
     align-items: end;
-    width: calc(100vw / var(--zoomfactor, 1));
+    width: calc(100vw / var(--zoomfactor));
     height: 33px;
     zoom: var(--zoomfactor);
     cursor: default;

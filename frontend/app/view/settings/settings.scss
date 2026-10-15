@@ -118,7 +118,7 @@
 }
 
 .default-shell-status {
-    font-size: 12px;
+    font-size: var(--text-sm);
     color: var(--secondary-text-color);
 
     &--warn {

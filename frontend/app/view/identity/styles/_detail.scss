@@ -22,7 +22,7 @@
 }
 
 .identity-detail-subname {
-    font-size: 11px;
+    font-size: var(--text-xs);
     color: var(--secondary-text-color);
     white-space: nowrap;
     overflow: hidden;
@@ -30,13 +30,13 @@
 }
 
 .identity-detail-status-text {
-    font-size: 11px;
+    font-size: var(--text-xs);
     color: var(--secondary-text-color);
     text-transform: capitalize;
 }
 
 .identity-detail-section {
-    font-size: 10px;
+    font-size: var(--text-2xs);
     font-weight: 600;
     letter-spacing: 0.08em;
     text-transform: uppercase;
@@ -56,19 +56,19 @@
 }
 
 .identity-detail-label {
-    font-size: 11px;
+    font-size: var(--text-xs);
     color: var(--secondary-text-color);
     min-width: 80px;
     flex-shrink: 0;
 }
 
 .identity-detail-value {
-    font-size: 12px;
+    font-size: var(--text-sm);
     word-break: break-all;
 }
 
 .identity-detail-empty {
-    font-size: 11px;
+    font-size: var(--text-xs);
     color: var(--secondary-text-color);
     font-style: italic;
 }
@@ -81,7 +81,7 @@
 }
 
 .identity-agent-chip {
-    font-size: 11px;
+    font-size: var(--text-xs);
     padding: 1px var(--space-1-5);
     border-radius: 0;
     background: var(--panel-bg-color);
@@ -101,7 +101,7 @@
 .identity-row-chevron {
     flex-shrink: 0;
     width: 10px;
-    font-size: 9px;
+    font-size: var(--text-3xs);
     color: var(--secondary-text-color);
 }
 
@@ -142,7 +142,7 @@
 
 .identity-delete-confirm p {
     margin: 0 0 var(--space-1-5);
-    font-size: 12px;
+    font-size: var(--text-sm);
 
     &:last-child {
         margin-bottom: 0;

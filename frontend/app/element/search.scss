@@ -19,14 +19,14 @@
     input {
         flex: 1 1 auto;
         border: none;
-        font-size: 14px;
+        font-size: var(--text-md);
         height: 100%;
         padding: 0;
         border-radius: 0;
     }
 
     .search-results {
-        font-size: 12px;
+        font-size: var(--text-sm);
         margin: auto 0;
         color: var(--secondary-text-color);
 
@@ -45,7 +45,7 @@
         gap: 5px;
         padding-left: var(--space-1);
         button {
-            font-size: 12px;
+            font-size: var(--text-sm);
         }
     }
 
@@ -53,7 +53,7 @@
         gap: 1px;
         padding-left: 5px;
         button {
-            font-size: 14px;
+            font-size: var(--text-md);
         }
     }
 }

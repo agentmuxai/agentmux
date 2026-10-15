@@ -73,7 +73,7 @@
     }
 
     &.context-active {
-        background: var(--hover-bg-color, rgba(255, 255, 255, 0.08));
+        background: var(--hover-bg-color);
     }
 
     &.dragging {
@@ -108,12 +108,12 @@
     // a menu list, the link cursor is conventional there.
     border-radius: 0;
     color: var(--secondary-text-color);
-    font-size: 12px;
+    font-size: var(--text-sm);
     white-space: nowrap;
 
     &:hover,
     &.open {
-        background: var(--hover-bg-color, rgba(255, 255, 255, 0.08));
+        background: var(--hover-bg-color);
         // Was a hardcoded `white` — invisible against a light theme's
         // hover background. Matches the icon-hover treatment above
         // (line 20) for the same "this control is active" state.
@@ -121,15 +121,15 @@
     }
 
     i {
-        font-size: 12px;
+        font-size: var(--text-sm);
     }
 
     .action-widget-more-label {
-        font-size: 12px;
+        font-size: var(--text-sm);
     }
 
     .action-widget-more-chevron {
-        font-size: 9px;
+        font-size: var(--text-3xs);
         opacity: 0.7;
     }
 }
@@ -155,7 +155,7 @@
         padding: var(--space-1) var(--space-1-5);
         cursor: default;
         color: var(--main-text-color);
-        font-size: 12px;
+        font-size: var(--text-sm);
         line-height: normal;
         letter-spacing: -0.12px;
         border-radius: 0;
@@ -169,7 +169,7 @@
             width: 14px;
             text-align: center;
             flex-shrink: 0;
-            font-size: 11px;
+            font-size: var(--text-xs);
         }
 
         .action-widget-more-item-label {
@@ -182,7 +182,7 @@
         // SPEC_WIDGET_BAR_PARENT_SUBMENUS_2026_08_12.md §3.4) — same
         // treatment FlyoutMenu already gives any item.subItems row.
         .action-widget-more-item-chevron {
-            font-size: 10px;
+            font-size: var(--text-2xs);
             opacity: 0.6;
             flex-shrink: 0;
         }

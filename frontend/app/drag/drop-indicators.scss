@@ -50,7 +50,7 @@
         max-width: calc(100% - 32px);
         padding: 8px 14px;
         border-radius: 6px;
-        font-size: 13px;
+        font-size: var(--text-base);
         font-weight: 500;
         color: var(--drop-prompt-fg);
         background: var(--drop-prompt-bg);

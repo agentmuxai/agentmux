@@ -22,7 +22,7 @@
 
     .fork-provider-fallback-banner-icon {
         color: var(--warning-color);
-        font-size: 14px;
+        font-size: var(--text-md);
         line-height: 1;
         flex-shrink: 0;
     }

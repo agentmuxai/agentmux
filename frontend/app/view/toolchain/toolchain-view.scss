@@ -15,8 +15,8 @@
     display: flex;
     align-items: center;
     justify-content: flex-end;
-    gap: var(--space-1, 6px);
-    padding: var(--space-2, 8px) var(--space-3, 12px);
+    gap: var(--space-1);
+    padding: var(--space-2) var(--space-3);
     border-bottom: 1px solid var(--border-color);
     flex-shrink: 0;
 }
@@ -24,20 +24,20 @@
 .toolchain-body {
     display: flex;
     flex-direction: column;
-    gap: var(--space-4, 16px);
+    gap: var(--space-4);
     flex: 1 1 auto;
     overflow-y: auto;
-    padding: var(--space-3, 12px);
+    padding: var(--space-3);
 }
 
 .toolchain-section {
     display: flex;
     flex-direction: column;
-    gap: var(--space-1, 6px);
+    gap: var(--space-1);
 }
 
 .toolchain-section-title {
-    margin: 0 0 var(--space-1, 6px);
+    margin: 0 0 var(--space-1);
     font-size: 0.78rem;
     font-weight: 600;
     text-transform: uppercase;
@@ -50,7 +50,7 @@
 .toolchain-env-line {
     display: flex;
     align-items: center;
-    gap: var(--space-2, 8px);
+    gap: var(--space-2);
     font-size: 0.85rem;
     padding: 2px 0;
 }
@@ -65,7 +65,7 @@
 }
 
 .toolchain-error {
-    color: var(--error-color, #f85149);
+    color: var(--error-color);
 }
 
 .toolchain-env-key {
@@ -79,10 +79,10 @@
 }
 
 .toolchain-path-dump {
-    margin: var(--space-1, 6px) 0 0;
-    padding: var(--space-2, 8px);
-    border-radius: var(--radius-md, 6px);
-    background: var(--panel-bg-alt, rgba(127, 127, 127, 0.1));
+    margin: var(--space-1) 0 0;
+    padding: var(--space-2);
+    border-radius: var(--radius-md);
+    background: rgba(127, 127, 127, 0.1);
     font-size: 0.75rem;
     line-height: 1.45;
     max-height: 180px;
@@ -95,12 +95,12 @@
 .toolchain-row {
     display: flex;
     align-items: flex-start;
-    gap: var(--space-3, 12px);
-    padding: var(--space-2, 8px);
-    border-radius: var(--radius-md, 6px);
+    gap: var(--space-3);
+    padding: var(--space-2);
+    border-radius: var(--radius-md);
 
     &:hover {
-        background: var(--panel-bg-alt, rgba(127, 127, 127, 0.07));
+        background: rgba(127, 127, 127, 0.07);
     }
 }
 
@@ -127,7 +127,7 @@
     display: flex;
     align-items: center;
     flex-wrap: wrap;
-    gap: var(--space-2, 8px);
+    gap: var(--space-2);
 }
 
 .toolchain-row-name {
@@ -167,14 +167,14 @@
     font-size: 0.78rem;
     padding: 1px 5px;
     border-radius: 4px;
-    border: 1px solid var(--border-color, rgba(127, 127, 127, 0.3));
-    background: var(--panel-bg-alt, rgba(127, 127, 127, 0.08));
+    border: 1px solid var(--border-color);
+    background: rgba(127, 127, 127, 0.08);
     color: inherit;
     text-align: right;
 
     &:focus {
         outline: none;
-        border-color: var(--accent-color, rgba(88, 166, 255, 0.6));
+        border-color: var(--accent-color);
     }
 
     &::-webkit-inner-spin-button,
@@ -187,20 +187,20 @@
 .toolchain-row-cmd {
     display: flex;
     align-items: center;
-    gap: var(--space-2, 8px);
+    gap: var(--space-2);
 
     code {
         font-size: 0.74rem;
         padding: 1px 6px;
         border-radius: 4px;
-        background: var(--panel-bg-alt, rgba(127, 127, 127, 0.12));
+        background: rgba(127, 127, 127, 0.12);
     }
 }
 
 .toolchain-row-actions {
     display: flex;
     align-items: center;
-    gap: var(--space-1, 6px);
+    gap: var(--space-1);
     margin-top: 2px;
 }
 
@@ -214,22 +214,22 @@
     font-weight: 500;
     padding: 1px 8px;
     border-radius: 999px;
-    background: var(--panel-bg-alt, rgba(127, 127, 127, 0.15));
+    background: rgba(127, 127, 127, 0.15);
 
     &--ok {
         background: rgba(46, 160, 67, 0.18);
-        color: var(--success-color, #2ea043);
+        color: var(--success-color);
     }
     &--warn {
         background: rgba(219, 154, 4, 0.18);
-        color: var(--warning-color, #d29922);
+        color: var(--warning-color);
     }
     &--muted {
         opacity: 0.7;
     }
     &--update {
         background: rgba(219, 154, 4, 0.18);
-        color: var(--warning-color, #d29922);
+        color: var(--warning-color);
     }
 }
 

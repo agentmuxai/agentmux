@@ -69,7 +69,7 @@
     // SPEC_AGENT_PANE_PROGRESS_BAR_OVERLAY_NO_GAP_2026_08_25.md's bigger 3px
     // row-gap (a separate, now-fixed issue) stopped drawing attention away
     // from this smaller, always-present 1px mismatch.
-    height: calc(var(--pane-tab-strip-height, 28px) * var(--pane-tab-strip-zoom, 1) + 1px);
+    height: calc(var(--pane-tab-strip-height) * var(--pane-tab-strip-zoom, 1) + 1px);
     border-bottom: 1px solid var(--border-color);
 
     // …but NOT when this strip is the pane header itself (PaneHeaderTabStrip
@@ -92,7 +92,7 @@
     // above it). With no border there is nothing to carve, and keeping it
     // would leave a 1px gap under `.pane-tab-strip-inner` instead.
     .block-frame-default-header & {
-        height: calc(var(--pane-tab-strip-height, 28px) * var(--pane-tab-strip-zoom, 1));
+        height: calc(var(--pane-tab-strip-height) * var(--pane-tab-strip-zoom, 1));
         border-bottom: none;
     }
     // No fill on the container itself — only .pane-tab (active/hover) and
@@ -191,7 +191,7 @@
     display: flex;
     flex-direction: row;
     align-items: stretch;
-    height: var(--pane-tab-strip-height, 28px);
+    height: var(--pane-tab-strip-height);
     zoom: var(--pane-tab-strip-zoom, 1);
 }
 
@@ -238,7 +238,7 @@
     color: var(--secondary-text-color);
     cursor: default;
     user-select: none;
-    font-size: 11px;
+    font-size: var(--text-xs);
     overflow: hidden;
     transition:
         background var(--duration-instant) var(--ease-standard),
@@ -394,7 +394,7 @@
     flex: 0 0 var(--pane-tab-icon-size);
     width: var(--pane-tab-icon-size);
     height: var(--pane-tab-icon-size);
-    font-size: 12px;
+    font-size: var(--text-sm);
     line-height: 1;
 
     i {
@@ -483,7 +483,7 @@
     background: transparent;
     color: inherit;
     cursor: default;
-    font-size: 14px;
+    font-size: var(--text-md);
     line-height: 1;
     opacity: 0;
     transition:
@@ -579,7 +579,7 @@
 // Smaller than the 15px glyph it sits beside: this is a text affordance, and at
 // the glyph's own size it would out-weigh the actual tab labels next to it.
 .pane-tab-strip-add-label {
-    font-size: 11px;
+    font-size: var(--text-xs);
     white-space: nowrap;
 }
 

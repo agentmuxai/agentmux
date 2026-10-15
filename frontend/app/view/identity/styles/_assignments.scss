@@ -14,7 +14,7 @@
 .identity-matrix {
     width: 100%;
     border-collapse: collapse;
-    font-size: 12px;
+    font-size: var(--text-sm);
 
     th, td {
         padding: var(--space-1-5) 10px;
@@ -23,7 +23,7 @@
     }
 
     th {
-        font-size: 10px;
+        font-size: var(--text-2xs);
         font-weight: 600;
         letter-spacing: 0.06em;
         text-transform: uppercase;
@@ -31,7 +31,7 @@
     }
 
     .identity-matrix-agent {
-        font-size: 12px;
+        font-size: var(--text-sm);
         color: var(--main-text-color);
     }
 

@@ -360,12 +360,12 @@
     }
 
     .modal-panel-title {
-        font-size: 14px;
+        font-size: var(--text-md);
         line-height: 1.3;
     }
 
     .modal-panel-description {
-        font-size: 12px;
+        font-size: var(--text-sm);
         margin-top: 2px;
     }
 

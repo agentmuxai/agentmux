@@ -51,7 +51,7 @@
         flex-shrink: 0;
         width: 10px;
         text-align: center;
-        font-size: 9px;
+        font-size: var(--text-3xs);
         color: var(--accent-color);
     }
 
@@ -76,7 +76,7 @@
         gap: var(--space-3);
         padding: 3px 10px;
         border-top: 1px solid var(--border-color);
-        font-size: 10px;
+        font-size: var(--text-2xs);
         color: var(--secondary-text-color);
         background: color-mix(in srgb, var(--main-bg-color) 80%, transparent);
     }
@@ -135,7 +135,7 @@
         gap: var(--space-3);
         padding: 3px 10px;
         border-top: 1px solid var(--border-color);
-        font-size: 10px;
+        font-size: var(--text-2xs);
         color: var(--secondary-text-color);
         background: color-mix(in srgb, var(--main-bg-color) 90%, transparent);
     }
@@ -202,7 +202,7 @@
 
     .slash-help__group-label {
         padding: var(--space-1) 10px var(--space-0-5);
-        font-size: 10px;
+        font-size: var(--text-2xs);
         font-weight: 600;
         text-transform: uppercase;
         letter-spacing: 0.04em;
@@ -234,14 +234,14 @@
     }
 
     .slash-help__aliases {
-        font-size: 10px;
+        font-size: var(--text-2xs);
         color: var(--secondary-text-color);
         font-family: var(--font-mono);
         opacity: 0.75;
     }
 
     .slash-help__arg {
-        font-size: 10px;
+        font-size: var(--text-2xs);
         color: var(--secondary-text-color);
         font-family: var(--font-mono);
         opacity: 0.6;
@@ -260,7 +260,7 @@
         gap: var(--space-3);
         padding: 3px 10px;
         border-top: 1px solid var(--border-color);
-        font-size: 10px;
+        font-size: var(--text-2xs);
         color: var(--secondary-text-color);
         background: color-mix(in srgb, var(--main-bg-color) 80%, transparent);
     }

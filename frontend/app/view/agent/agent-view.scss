@@ -158,7 +158,7 @@
         // whole trailing area past "+", not just [tabs][+]
         // itself. See
         // docs/specs/SPEC_PANE_TAB_STRIP_TRAILING_BLUR_2026_08_12.md.
-        z-index: var(--z-pane-overlay, 4);
+        z-index: var(--z-pane-overlay);
 
         // Glass panel over the trailing space right of "+" —
         // SPEC_PANE_TAB_STRIP_TRAILING_BLUR_2026_08_12.md. `backdrop-filter`
@@ -253,15 +253,15 @@
         // so no `!important` is needed for either to win.
         .pane-tab-strip-add,
         .pane-tab {
-            background: var(--modal-bg-color, #232323);
+            background: var(--modal-bg-color);
         }
 
         .pane-tab-strip-add:hover {
-            background: color-mix(in srgb, var(--modal-bg-color, #232323) 92%, white 8%);
+            background: color-mix(in srgb, var(--modal-bg-color) 92%, white 8%);
         }
 
         .pane-tab:hover {
-            background: color-mix(in srgb, var(--modal-bg-color, #232323) 94%, white 6%);
+            background: color-mix(in srgb, var(--modal-bg-color) 94%, white 6%);
         }
     }
 }
@@ -511,19 +511,19 @@
     gap: 10px;
     padding: 6px 10px;
     flex: 0 0 auto;
-    border-bottom: 1px solid var(--border-color, rgba(255, 255, 255, 0.08));
+    border-bottom: 1px solid var(--border-color);
 
     .agent-history-title {
-        font-size: 12px;
+        font-size: var(--text-sm);
         font-weight: 600;
         letter-spacing: 0.04em;
         text-transform: uppercase;
-        color: var(--secondary-text-color, rgba(255, 255, 255, 0.55));
+        color: var(--secondary-text-color);
     }
 
     .agent-history-meta {
-        font-size: 11px;
-        color: var(--tertiary-text-color, rgba(255, 255, 255, 0.32));
+        font-size: var(--text-xs);
+        color: rgba(255, 255, 255, 0.32);
         margin-left: auto;
     }
 }

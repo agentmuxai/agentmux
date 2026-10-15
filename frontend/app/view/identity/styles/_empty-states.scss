@@ -13,14 +13,14 @@
     height: 200px;
     gap: 10px;
     color: var(--secondary-text-color);
-    font-size: 13px;
+    font-size: var(--text-base);
 
     p { margin: 0; }
 }
 
 .identity-empty-add {
     padding: 5px 14px;
-    font-size: 12px;
+    font-size: var(--text-sm);
     border-radius: 0;
     border: 1px solid var(--accent-color);
     background: transparent;

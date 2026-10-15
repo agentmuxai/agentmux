@@ -59,7 +59,7 @@
 
     &--warn {
         display: block;
-        color: var(--warning-color, #f59e0b);
+        color: var(--warning-color);
     }
 }
 
@@ -191,15 +191,15 @@
     align-items: flex-start;
     gap: 8px;
     padding: 8px 10px;
-    border-left: 3px solid var(--warning-color, #f59e0b);
-    background: color-mix(in srgb, var(--warning-color, #f59e0b) 8%, transparent);
+    border-left: 3px solid var(--warning-color);
+    background: color-mix(in srgb, var(--warning-color) 8%, transparent);
     border-radius: 0 4px 4px 0;
     font-size: var(--text-sm);
     line-height: 1.5;
     color: var(--main-text-color);
 
     i {
-        color: var(--warning-color, #f59e0b);
+        color: var(--warning-color);
         margin-top: 2px;
         flex-shrink: 0;
     }

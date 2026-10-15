@@ -16,7 +16,7 @@
 
 .identity-header-title {
     font-weight: 600;
-    font-size: 13px;
+    font-size: var(--text-base);
     color: var(--main-text-color);
     margin-right: var(--space-1);
 }
@@ -24,7 +24,7 @@
 .identity-add-btn {
     margin-left: auto;
     padding: 3px 10px;
-    font-size: 12px;
+    font-size: var(--text-sm);
     border-radius: 0;
     border: 1px solid var(--border-color);
     background: transparent;

@@ -181,7 +181,7 @@
     border-radius: 0;
     color: var(--secondary-text-color);
     font: inherit;
-    font-size: 10px;
+    font-size: var(--text-2xs);
     padding: 1px var(--space-1-5);
     cursor: default;
     outline: none;
@@ -248,7 +248,7 @@
     // One width, not a range: a note that changes with a pick wraps inside the
     // panel instead of resizing it. Capped by the window on a narrow one.
     width: min(300px, calc(100vw - 16px));
-    font-size: 10px;
+    font-size: var(--text-2xs);
 
     // `.menu` is a column that sizes its children to their content; these fill
     // the fixed width, so the rows and dividers run edge to edge.
@@ -304,7 +304,7 @@
     border: 1px solid transparent;
     border-radius: var(--radius-sm);
     color: var(--secondary-text-color);
-    font-size: 9px;
+    font-size: var(--text-3xs);
     line-height: 1;
     cursor: default;
     @include mixins.control-transition(var(--duration-fast), var(--ease-emphasized));
@@ -323,7 +323,7 @@
 
 .agent-runtime-dropup-section {
     padding: var(--space-1) var(--space-1-5) 2px;
-    font-size: 9px;
+    font-size: var(--text-3xs);
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.05em;
@@ -358,7 +358,7 @@
 
 .agent-runtime-dropup-description {
     color: var(--secondary-text-color);
-    font-size: 9px;
+    font-size: var(--text-3xs);
     opacity: 0.8;
 }
 
@@ -371,7 +371,7 @@
     border-radius: 0;
     color: var(--accent-color);
     font: inherit;
-    font-size: 10px;
+    font-size: var(--text-2xs);
     font-weight: 600;
     padding: 1px var(--space-1-5);
     cursor: default;
@@ -453,7 +453,7 @@
     display: inline-flex;
     align-items: center;
     padding: 1px var(--space-1);
-    font-size: 10px;
+    font-size: var(--text-2xs);
     font-family: var(--font-mono);
     color: var(--secondary-text-color);
     background: transparent;
@@ -479,7 +479,7 @@
 // Context text (replaces ContextWindowBar graphic).
 .agent-composer-strip-ctx {
     font-family: var(--font-mono);
-    font-size: 10px;
+    font-size: var(--text-2xs);
     white-space: nowrap;
     opacity: 0.8;
     // Base color, stated explicitly because this element is a <button> now
@@ -506,7 +506,7 @@
 // this block adds only what's specific to the countdown span itself.
 .agent-composer-strip-ctx-countdown {
     font-family: var(--font-mono);
-    font-size: 10px;
+    font-size: var(--text-2xs);
     white-space: nowrap;
     opacity: 0.8;
 
@@ -533,7 +533,7 @@
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    font-size: 10px;
+    font-size: var(--text-2xs);
     white-space: nowrap;
 
     &--ok { color: var(--success-color); }
@@ -634,7 +634,7 @@
     }
 
     .agent-composer-strip-log-btn {
-        font-size: 9px;
+        font-size: var(--text-3xs);
         padding: 1px 3px;
     }
 }
@@ -740,8 +740,8 @@
     border-radius: 4px;
     background-color: rgb(from var(--warning-color) r g b / 0.85);
     color: var(--block-bg-color);
-    font-size: 10px;
-    font-family: var(--font-family, sans-serif);
+    font-size: var(--text-2xs);
+    font-family: sans-serif;
     pointer-events: none;
 }
 
@@ -756,7 +756,7 @@
     padding-right: calc(var(--space-2) + 18px);
     margin-bottom: var(--space-1);
     border-bottom: 1px solid var(--border-color);
-    font-size: 10px;
+    font-size: var(--text-2xs);
     color: var(--warning-color);
 
     &[data-kind="pending"],
@@ -796,7 +796,7 @@
 .agent-runtime-dropup-note {
     overflow-wrap: anywhere;
     padding: 2px var(--space-2);
-    font-size: 10px;
+    font-size: var(--text-2xs);
     line-height: 13px;
     height: calc(2 * 13px);
     box-sizing: content-box;
