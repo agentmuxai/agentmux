@@ -85,7 +85,7 @@ fn the_exit_marker_is_in_the_shells_own_syntax() {
     // fish has no $?: its status, braced so the name ends before the underscores.
     assert_eq!(
         with_exit_marker("npm test", ShellFamily::Fish, "ab12cd34"),
-        "npm test; echo \"__AMX_RC_ab12cd34_{$status}__\""
+        "npm test; echo \"__AMX_RC_ab12cd34_\"$status\"__\""
     );
     // PowerShell: a native command's exit code, else the cmdlet's success.
     assert_eq!(
@@ -120,6 +120,28 @@ fn the_exit_marker_gives_the_commands_own_output_and_code() {
     assert_eq!(exit_marker(printf, "n5"), Some(("x".to_string(), 0)));
     // An earlier run's marker is not this run's result.
     assert_eq!(exit_marker("$ y; echo \"__AMX_RC_new_$?__\"\n__AMX_RC_old_0__\n", "new"), None);
+}
+
+#[test]
+fn a_trailing_comment_is_dropped_so_it_cant_swallow_the_marker() {
+    assert_eq!(without_trailing_comment("echo ok # explanation", ShellFamily::Posix), "echo ok");
+    assert_eq!(without_trailing_comment("echo ok #", ShellFamily::Fish), "echo ok");
+    // A # inside quotes, after an escape, or inside a word isn't a comment.
+    assert_eq!(without_trailing_comment("echo '# not' \"# not\"", ShellFamily::Posix), "echo '# not' \"# not\"");
+    assert_eq!(without_trailing_comment("echo \\# a#b", ShellFamily::Posix), "echo \\# a#b");
+    assert_eq!(without_trailing_comment("git log --format=%H#x", ShellFamily::Posix), "git log --format=%H#x");
+    // PowerShell escapes with a backtick; cmd has no # comments.
+    assert_eq!(without_trailing_comment("echo `# x # y", ShellFamily::Pwsh), "echo `# x");
+    assert_eq!(without_trailing_comment("echo a # b", ShellFamily::Cmd), "echo a # b");
+}
+
+#[test]
+fn a_prompt_counts_for_any_shell_when_the_family_isnt_known() {
+    assert!(at_any_prompt("C:\\w>", None));
+    assert!(at_any_prompt("user@h:~$ ", None));
+    assert!(!at_any_prompt("Building...", None));
+    // A known family narrows it to that shell's prompt.
+    assert!(!at_any_prompt("user@h:~$ ", Some(ShellFamily::Cmd)));
 }
 
 #[test]

@@ -676,9 +676,9 @@ pub(super) async fn handle_pty_shell_read(
     };
     let content = match state.filestore.read_file(&req.shell_id, "term") {
         Ok(Some(bytes)) => {
-            let (from, abs_end) = since_slice(bytes.len(), start_idx, req.since);
+            let (range, abs_end) = since_slice(&bytes, start_idx, req.since);
             end = abs_end;
-            String::from_utf8_lossy(&bytes[from..]).to_string()
+            String::from_utf8_lossy(&bytes[range]).to_string()
         }
         Ok(None) => String::new(),
         Err(e) => {
@@ -702,14 +702,41 @@ pub(super) async fn handle_pty_shell_read(
 /// absolute end, the next `since`. Offsets are absolute, so they keep growing
 /// even when a circular file drops its oldest bytes. A `since` before what is
 /// still held reads all of it; one past the end (a cleared log) reads it all
-/// again.
-fn since_slice(len: usize, start_idx: u64, since: Option<u64>) -> (usize, u64) {
-    let end = start_idx + len as u64;
-    let from = match since {
+/// again. The range holds whole characters only: it starts past any
+/// continuation bytes (a wrapped log can begin mid-character) and stops
+/// before a character still being written, which the next read returns.
+fn since_slice(bytes: &[u8], start_idx: u64, since: Option<u64>) -> (std::ops::Range<usize>, u64) {
+    let len = bytes.len();
+    let to = len - incomplete_tail(bytes);
+    let end = start_idx + to as u64;
+    let mut from = match since {
         Some(s) if s >= start_idx && s <= end => (s - start_idx) as usize,
         _ => 0,
     };
-    (from, end)
+    while from < to && bytes[from] & 0xC0 == 0x80 {
+        from += 1;
+    }
+    (from..to, end)
+}
+
+/// How many bytes at the end of `bytes` begin a UTF-8 character that isn't
+/// complete yet.
+fn incomplete_tail(bytes: &[u8]) -> usize {
+    let len = bytes.len();
+    for back in 1..=len.min(4) {
+        let b = bytes[len - back];
+        if b & 0xC0 == 0x80 {
+            continue;
+        }
+        let need = match b {
+            0xC0..=0xDF => 2,
+            0xE0..=0xEF => 3,
+            0xF0..=0xF7 => 4,
+            _ => 1,
+        };
+        return if need > back { back } else { 0 };
+    }
+    0
 }
 
 /// `POST /api/v1/ptyshell/status` — query whether the shell is still running.
@@ -794,22 +821,39 @@ fn running_shell_conflict(state: &AppState, agent_block_id: &str, connection: &s
 mod since_tests {
     use super::since_slice;
 
+    fn ascii(n: usize) -> Vec<u8> {
+        vec![b'a'; n]
+    }
+
     #[test]
     fn a_cursor_reads_only_what_came_after_it() {
         // A plain log: offsets are byte positions.
-        assert_eq!(since_slice(100, 0, None), (0, 100));
-        assert_eq!(since_slice(100, 0, Some(40)), (40, 100));
-        assert_eq!(since_slice(100, 0, Some(100)), (100, 100));
+        assert_eq!(since_slice(&ascii(100), 0, None), (0..100, 100));
+        assert_eq!(since_slice(&ascii(100), 0, Some(40)), (40..100, 100));
+        assert_eq!(since_slice(&ascii(100), 0, Some(100)), (100..100, 100));
         // A cleared log (the cursor is past the end) is read again from its start.
-        assert_eq!(since_slice(10, 0, Some(100)), (0, 10));
+        assert_eq!(since_slice(&ascii(10), 0, Some(100)), (0..10, 10));
     }
 
     #[test]
     fn offsets_stay_absolute_when_a_circular_log_wraps() {
         // 300 bytes written, the newest 256 held: they start at 44.
-        assert_eq!(since_slice(256, 44, Some(250)), (206, 300));
-        assert_eq!(since_slice(256, 44, Some(300)), (256, 300));
+        assert_eq!(since_slice(&ascii(256), 44, Some(250)), (206..256, 300));
+        assert_eq!(since_slice(&ascii(256), 44, Some(300)), (256..256, 300));
         // A cursor older than what is still held reads all of it.
-        assert_eq!(since_slice(256, 44, Some(10)), (0, 300));
+        assert_eq!(since_slice(&ascii(256), 44, Some(10)), (0..256, 300));
+    }
+
+    #[test]
+    fn a_read_never_splits_a_character() {
+        let done = "ok é ✓".as_bytes().to_vec();
+        assert_eq!(since_slice(&done, 0, None), (0..done.len(), done.len() as u64));
+        // The last character is half written: it waits for the next read.
+        let mut half = "ok ".as_bytes().to_vec();
+        half.extend_from_slice(&"✓".as_bytes()[..2]);
+        assert_eq!(since_slice(&half, 0, None), (0..3, 3));
+        // A wrapped log that starts mid-character skips the leftover bytes.
+        let wrapped = &"✓ok".as_bytes()[1..];
+        assert_eq!(since_slice(wrapped, 1, None), (2..4, 5));
     }
 }

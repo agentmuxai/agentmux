@@ -210,6 +210,16 @@ async fn open(arguments: &Value, cx: &ToolCtx<'_>) -> Result<Value> {
     let id = pty_shell::call("PtyShell", arguments, cx).await?;
     let connection = str_arg(arguments, "connection").map(str::to_string);
     remember(&id, Kind::Pty, connection.clone());
+    // A remote shell's family is probed now, and only while it sits at a
+    // prompt: the probe is typed, and a busy terminal would hand it to
+    // whatever is running instead.
+    if known(&id).family.is_none() {
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        let tail = strip_ansi(&read_log(cx, &id, None, 5).await?.content);
+        if at_any_prompt(&tail, None) {
+            family_of(cx, &id).await?;
+        }
+    }
     let mut out = target(connection.as_deref());
     out["terminal"] = json!(id);
     out["kind"] = json!("drawer");
@@ -583,7 +593,9 @@ async fn wait_on(arguments: &Value, cx: &ToolCtx<'_>, id: &str, since: u64, skip
     if background && !exit {
         anyhow::bail!("a background job can only be waited on with until \"exit\"");
     }
-    let family = if matches!(until, Until::Prompt) { family_of(cx, id).await? } else { ShellFamily::Posix };
+    // A wait only reads: it never probes (that would type into whatever is
+    // running). Without a known family, any shell's prompt counts.
+    let family = known(id).family;
     let started = Instant::now();
     let deadline = started + Duration::from_millis(timeout_ms);
     // Quiet means no new bytes, not text of the same length: a spinner that
@@ -616,7 +628,7 @@ async fn wait_on(arguments: &Value, cx: &ToolCtx<'_>, id: &str, since: u64, skip
                 // that came after the call.
                 Until::Prompt if quiet_for >= 300 => {
                     let now = strip_ansi(&read_log(cx, id, None, 5).await?.content);
-                    at_prompt(&now, family).then(Vec::new)
+                    at_any_prompt(&now, family).then(Vec::new)
                 }
                 Until::Prompt => None,
                 Until::Exit => None,
@@ -668,21 +680,60 @@ pub(super) fn at_prompt(text: &str, family: ShellFamily) -> bool {
     }
 }
 
+/// [`at_prompt`] for a known family, or any shell's prompt when it isn't known.
+pub(super) fn at_any_prompt(text: &str, family: Option<ShellFamily>) -> bool {
+    match family {
+        Some(f) => at_prompt(text, f),
+        None => at_prompt(text, ShellFamily::Cmd) || at_prompt(text, ShellFamily::Posix),
+    }
+}
+
 // ── run ──────────────────────────────────────────────────────────────────
+
+/// `command` without a trailing comment, for the shells whose comments run
+/// from an unquoted `#` to the end of the line (a POSIX shell, fish,
+/// PowerShell): the exit marker goes after the command on the same line, and
+/// a comment would swallow it. Quotes and backslash escapes are respected.
+pub(super) fn without_trailing_comment(command: &str, family: ShellFamily) -> &str {
+    if family == ShellFamily::Cmd {
+        return command;
+    }
+    let (mut single, mut double, mut escaped) = (false, false, false);
+    let mut prev_space = true;
+    for (i, c) in command.char_indices() {
+        if escaped {
+            escaped = false;
+        } else if c == '\\' && !single && family != ShellFamily::Pwsh {
+            escaped = true;
+        } else if c == '`' && family == ShellFamily::Pwsh && !single {
+            escaped = true;
+        } else if c == '\'' && !double {
+            single = !single;
+        } else if c == '"' && !single {
+            double = !double;
+        } else if c == '#' && !single && !double && prev_space {
+            return command[..i].trim_end();
+        }
+        prev_space = c.is_whitespace();
+    }
+    command
+}
 
 /// The command with an exit-code marker after it, in the shell's own syntax,
 /// tagged with this run's `nonce` so no earlier run's marker is taken for it.
 /// cmd expands `%ERRORLEVEL%` when it reads the line, before the command runs,
-/// so `call` with `%^ERRORLEVEL%` defers it; fish has `$status` for `$?`,
-/// braced so the variable name ends there; PowerShell reports a native
-/// command's code in `$LASTEXITCODE` and a cmdlet's success in `$?`. The typed
-/// line itself never matches [`exit_marker`]: it has `%^ERRORLEVEL%`, `$?`,
-/// `{$status}` or a `$(...)` expression, not digits.
+/// so `call` with `%^ERRORLEVEL%` defers it; fish has `$status` for `$?`;
+/// PowerShell reports a native command's code in `$LASTEXITCODE` and a
+/// cmdlet's success in `$?`. The typed line itself never matches
+/// [`exit_marker`]: it has `%^ERRORLEVEL%`, `$?`, `$status` or a `$(...)`
+/// expression, not digits.
 pub(super) fn with_exit_marker(command: &str, family: ShellFamily, nonce: &str) -> String {
     match family {
         ShellFamily::Cmd => format!("{command} & call echo __AMX_RC_{nonce}_%^ERRORLEVEL%__"),
         ShellFamily::Posix => format!("{command}; echo \"__AMX_RC_{nonce}_$?__\""),
-        ShellFamily::Fish => format!("{command}; echo \"__AMX_RC_{nonce}_{{$status}}__\""),
+        // fish does no brace expansion inside double quotes: $status goes
+        // between two quoted parts, which fish joins into one word.
+        ShellFamily::Fish => format!("{command}; echo \"__AMX_RC_{nonce}_\"$status\"__\""),
         ShellFamily::Pwsh => format!(
             "{command}; echo \"__AMX_RC_{nonce}_$(if ($?) {{ 0 }} elseif ($LASTEXITCODE) {{ $LASTEXITCODE }} else {{ 1 }})__\""
         ),
@@ -750,6 +801,7 @@ async fn run_action(arguments: &Value, cx: &ToolCtx<'_>) -> Result<Value> {
         }
     }
     let family = family_of(cx, &id).await?;
+    let command = without_trailing_comment(command, family);
     let line = match str_arg(arguments, "cwd") {
         Some(cwd) => in_dir(command, cwd, family),
         None => command.to_string(),
