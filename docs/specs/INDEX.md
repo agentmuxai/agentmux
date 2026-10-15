@@ -173,6 +173,7 @@ See also:
 | Spec | Summary |
 |---|---|
 | [SPEC_DESIGN_SYSTEM_2026_04_23](SPEC_DESIGN_SYSTEM_2026_04_23.md) | Design-system tokens + components |
+| [SPEC_MOTION_TIERS_AND_STYLESHEET_DRY_2026_10_15](SPEC_MOTION_TIERS_AND_STYLESHEET_DRY_2026_10_15.md) | Two motion tiers (OS animations on / off), one category policy (everything runs in both today), one gate in CSS and JS with a CI check; motion tokens and keyframes; a ranked DRY plan for the stylesheets (approved; built in phases) |
 | [SPEC_PERFORMANCE_INSTRUMENTATION_AND_OPTIMIZATION](SPEC_PERFORMANCE_INSTRUMENTATION_AND_OPTIMIZATION.md) | Perf instrumentation spec |
 | [SPEC_MAGNIFY_ZOOM_IMPLEMENTATION_2026-05-21](SPEC_MAGNIFY_ZOOM_IMPLEMENTATION_2026-05-21.md) | Zoom / DPI implementation |
 
@@ -650,6 +651,7 @@ partial list.
 | [`SPEC_MCP_INTEGRATION_PARITY_ABLETON_PILOT_2026_07_08`](SPEC_MCP_INTEGRATION_PARITY_ABLETON_PILOT_2026_07_08.md) | Spec: MCP integration parity with Claude Desktop / Cursor, piloted on Ableton MCP |
 | [`SPEC_MEMORY_PRESSURE_SUPERVISION_2026_06_16`](SPEC_MEMORY_PRESSURE_SUPERVISION_2026_06_16.md) | Memory-Pressure Supervision & Graceful Degradation (host / instance level) |
 | [`SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03`](SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03.md) | Migration System Audit & Hardening Plan |
+| [`SPEC_MOTION_TIERS_AND_STYLESHEET_DRY_2026_10_15`](SPEC_MOTION_TIERS_AND_STYLESHEET_DRY_2026_10_15.md) | SPEC: two motion tiers, one motion policy, and a DRY pass over the stylesheets |
 | [`SPEC_MUXBUS_MULTI_TIER_DISCOVERY_AND_REMOTE_INVOCATION_2026_07_29`](SPEC_MUXBUS_MULTI_TIER_DISCOVERY_AND_REMOTE_INVOCATION_2026_07_29.md) | Spec: multi-tier discovery + remote API invocation over muxbus |
 | [`SPEC_MUXSH_CLI_2026_09_16`](SPEC_MUXSH_CLI_2026_09_16.md) | SPEC: `muxsh` — a terminal-side pane-opener for MuxAPI |
 | [`SPEC_MUXSH_FULL_COLLECTION_2026_09_16`](SPEC_MUXSH_FULL_COLLECTION_2026_09_16.md) | SPEC: The full `muxsh` collection — a consistent, wsh-familiar CLI over MuxAPI |

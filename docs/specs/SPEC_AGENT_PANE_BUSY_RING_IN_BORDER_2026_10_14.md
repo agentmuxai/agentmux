@@ -116,7 +116,7 @@ same colour as the band's "on" sections, not a dark gap.
 | Idle | hidden (`opacity: 0`, 200 ms fade) | The static ring shows as now. |
 | Working | full on/off pattern, marching | |
 | Stopping | the off colour moves toward the on colour (**ring 70%**), still marching | Lower contrast instead of today's whole-band `opacity: 0.55`. A translucent band over the ring would blend into a muddy third colour. |
-| Reduced motion (`prefers-reduced-motion: reduce`) | the same broken pattern, **static** | Today it always animates. The colours still say "working". |
+| Reduced motion (the OS asks for less) | full on/off pattern, marching, as in Working | Superseded by [`SPEC_MOTION_TIERS_AND_STYLESHEET_DRY_2026_10_15.md`](SPEC_MOTION_TIERS_AND_STYLESHEET_DRY_2026_10_15.md): motion runs in both tiers. The static pattern stays declared, dormant under the `status` category. |
 
 ### 2.4 What stays the same
 
@@ -166,7 +166,9 @@ pane "+" fix (#4933). A dev build is driven over CDP with a forced
    outside the band's on sections. Check all four edges, including the left
    edge next to a split neighbour (the 2026-09-25 retro).
 5. **States:** stopping lowers contrast but keeps marching. Idle shows the
-   plain ring. Focused-alone shows the band. Reduced motion is static.
+   plain ring. Focused-alone shows the band. Reduced motion marches like
+   full motion (the static pattern is dormant under `status`, per the
+   motion-tiers spec).
 6. **Themes:** the off colour is distinguishable from both the ring and the
    background in the default dark theme and one light theme.
 

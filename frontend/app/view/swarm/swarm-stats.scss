@@ -1,6 +1,8 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+@use "../../mixins.scss";
+
 // Slides down from under the toolbar and pushes the list down: the grid row
 // animates from 0fr to 1fr, so the panel's real height opens with no fixed max.
 .swarm-stats {
@@ -13,7 +15,8 @@
         border-bottom: 1px solid var(--border-color);
     }
 
-    @media (prefers-reduced-motion: reduce) {
+    // Reduced treatment (transition), dormant under the motion policy.
+    @include mixins.when-motion-reduced(transition) {
         transition: none;
     }
 }

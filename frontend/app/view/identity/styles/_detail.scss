@@ -1,6 +1,8 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+@use "../../../mixins.scss";
+
 // Account detail content, in the panel that opens under its row
 // (SPEC_ARMORY_ACCOUNTS_DELETE_AND_INLINE_DETAIL_2026_10_04.md §3.2).
 
@@ -125,7 +127,8 @@
         opacity: 0;
     }
 
-    @media (prefers-reduced-motion: reduce) {
+    // Reduced treatment (transition), dormant under the motion policy.
+    @include mixins.when-motion-reduced(transition) {
         transition: none;
     }
 }

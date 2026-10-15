@@ -130,6 +130,10 @@ Files: `frontend/layout/lib/{layoutModel,layoutTree,layoutGeometry,layoutNodeMod
 `useDebouncedNodeInnerRect` (`layoutModelHooks.ts`) historically delayed applying the content's `innerRect` by `animationTimeS` on open/close (instant only during resize/magnify/reduced-motion). With the wrapper transition dormant (`0s`), this meant content snapped to its new size with no animation. Even with the wrapper transition on, the debounce holds the **body** at its old size for the whole animation and then snaps it — so only the empty wrapper would ease. The fix removes the open/close debounce (apply immediately) and lets the `.block-content` CSS transition animate the body in lockstep.
 
 ### 3.5 Status — ✅ root cause found: suppressed by `prefers-reduced-motion`
+
+> [!NOTE]
+> No longer current. The `.prefers-reduced-motion` reset quoted below is gone, and nothing in the app turns pane motion off for the OS setting any more. Motion follows the tiers and policy in [`SPEC_MOTION_TIERS_AND_STYLESHEET_DRY_2026_10_15.md`](../specs/SPEC_MOTION_TIERS_AND_STYLESHEET_DRY_2026_10_15.md), which today reduces nothing in either tier. The diagnosis below is kept as the record of that time.
+
 The implementation (§3.2) is **correct**. It appeared to "still snap" because the **OS had *reduce motion* enabled** (`prefers-reduced-motion: reduce`), which AgentMux honors via a **global accessibility reset** in [`frontend/app/app.scss`](../../frontend/app/app.scss):
 
 ```scss

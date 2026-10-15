@@ -17,10 +17,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 let reducedMotion = false;
-vi.mock("@/app/store/global", () => ({
-    atoms: {
-        prefersReducedMotionAtom: () => reducedMotion,
-    },
+vi.mock("@/app/motion/motion", () => ({
+    shouldReduceMotion: (category: string) => category === "transition" && reducedMotion,
 }));
 
 import { beginHeightContinuity, cancelHeightContinuity, withHeightContinuity } from "./resize-contract";
@@ -145,7 +143,7 @@ describe("withHeightContinuity", () => {
         expect(el.style.height).toBe("");
     });
 
-    it("does not animate under reduced motion, but the mutation still runs", () => {
+    it("does not animate when the motion policy reduces transition, but the mutation still runs", () => {
         reducedMotion = true;
         const el = document.createElement("div");
         setOffset(el, 40);

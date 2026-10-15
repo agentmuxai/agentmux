@@ -72,8 +72,8 @@
         pointer-events: none;
     }
 
-    // Same reduced-motion override as .brain-spinner.is-reduced-motion
-    // (BrainSpinner.scss) — instant show/hide, no animated fade.
+    // Reduced treatment (transition), set from shouldReduceMotion: instant
+    // show/hide, no animated fade, like .brain-spinner's (BrainSpinner.scss).
     &.is-reduced-motion.is-fading {
         transition: none;
     }

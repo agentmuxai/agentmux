@@ -1,6 +1,8 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+@use "../../mixins.scss";
+
 // Layer 1 step list — SPEC_UNIVERSAL_INSTALL_DIALOG_2026_09_23.md §4.1.
 
 .install-steps {
@@ -32,6 +34,11 @@
     [data-status="active"] > & {
         color: var(--accent-color);
         animation: install-step-pulse 1.4s ease-in-out infinite;
+
+        // Reduced treatment (status), dormant under the motion policy.
+        @include mixins.when-motion-reduced(status) {
+            animation: none;
+        }
     }
 
     [data-status="done"] > & {
@@ -83,10 +90,4 @@
 @keyframes install-step-pulse {
     0%, 100% { opacity: 1; }
     50% { opacity: 0.35; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-    [data-status="active"] > .install-step-icon {
-        animation: none;
-    }
 }

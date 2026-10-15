@@ -75,9 +75,8 @@
         &:hover .line {
             visibility: visible;
 
-            // Ignore the prefers-reduced-motion override, since we're
-            // not applying a true animation here, just a delay before
-            // showing the resize line.
+            // Not a true animation, just a delay before showing the
+            // resize line, so it has no reduced treatment.
             /* stylelint-disable declaration-no-important */
             transition-property: visibility !important;
             transition-delay: var(--animation-time-s) !important;
@@ -273,11 +272,8 @@
         }
     }
 
-    // NOTE — no `prefers-reduced-motion` suppression here by design.
-    // The drag-rearrange glide (`.placeholder-sizer`) is treated as ESSENTIAL
-    // spatial motion and animates regardless of the reduced-motion preference —
-    // see the `!important` exemption above. The inner `.placeholder`
-    // opacity/scale fade is decorative and intentionally left subject to the
-    // global accessibility reset in app.scss (no `!important`), so it still
-    // snaps for reduced-motion users while the position glide survives.
+    // NOTE — no reduced treatment here by design. The drag-rearrange glide
+    // (`.placeholder-sizer`) is ESSENTIAL spatial motion: it shows where a
+    // drop lands, so it stays outside the motion policy and is never reduced
+    // (SPEC_MOTION_TIERS_AND_STYLESHEET_DRY_2026_10_15.md §8 Q4).
 }

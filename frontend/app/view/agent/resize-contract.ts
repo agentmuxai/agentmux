@@ -65,7 +65,7 @@
  * `fromPx` is captured fresh in each `beginHeightContinuity` call.
  */
 
-import { atoms } from "@/app/store/global";
+import { shouldReduceMotion } from "@/app/motion/motion";
 
 const HEIGHT_FLIP_MS = 150;
 const EASE = "cubic-bezier(0.4, 0, 0.2, 1)";
@@ -136,7 +136,7 @@ function isMeasurable(el: HTMLElement): boolean {
 }
 
 function shouldAnimate(fromPx: number, toPx: number): boolean {
-    if (atoms.prefersReducedMotionAtom()) return false;
+    if (shouldReduceMotion("transition")) return false;
     if (fromPx <= 0) return false; // nothing to freeze FROM — first paint, not a resize
     const delta = Math.abs(toPx - fromPx);
     return delta > 1 && delta <= MAX_ANIMATED_DELTA_PX;

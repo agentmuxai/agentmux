@@ -10,7 +10,8 @@ import { Show, createEffect, createMemo, createSignal, on, onCleanup, onMount, u
 import { useTick } from "@/app/hook/useTick";
 import { getVoiceSession, type PaneVoiceHandle } from "@/app/hook/useVoiceInput";
 import { markEnd, markStart } from "@/perf";
-import { atoms, getSettingsKeyAtom, pushNotification } from "@/app/store/global";
+import { shouldReduceMotion } from "@/app/motion/motion";
+import { getSettingsKeyAtom, pushNotification } from "@/app/store/global";
 import { focusManager } from "@/app/store/focusManager";
 import { showTextInputContextMenu } from "@/app/store/contextmenu";
 import { formatCompactNumber } from "@/util/format-count";
@@ -197,14 +198,9 @@ export const AgentWorkingRow = (props: AgentWorkingRowProps): JSX.Element => {
     // spinner beside it carries the "still working" signal. Originally
     // SPEC_AGENT_WORKING_INDICATOR_SHIMMER_AND_MIC_RELOCATION_2026_07_08.md §2.
     //
-    // Reduced motion: read the app's centralized atom (settings override OR
-    // OS preference — see atoms.prefersReducedMotionAtom / BrainSpinner.tsx),
-    // not a one-off matchMedia() call, so it stays in sync with the same
-    // signal every other animated element in the app honors. Skips the
-    // one-shot type-out (jumps straight to full text, matching modal.tsx's
-    // "brief, non-moving" convention for one-shot reveals under reduced
-    // motion).
-    const reducedMotion = atoms.prefersReducedMotionAtom;
+    // When the motion policy reduces `transition` (motion/motion.ts; dormant
+    // today), skips the one-shot type-out and jumps straight to the full text.
+    const reducedMotion = () => shouldReduceMotion("transition");
     // Between two passes of one turn: no pass runs, the next is expected. The
     // row keeps its live form (dimmed) rather than flash "Worked" and take it
     // back a moment later. Display only: the composer's busy gate is not this.

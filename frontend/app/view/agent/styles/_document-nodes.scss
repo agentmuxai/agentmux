@@ -191,7 +191,8 @@ $transcript-preview-max-height: calc(50vh / 3);
     .agent-tool-summary-fade-in {
         animation: agent-tool-summary-fade-in 160ms ease-out;
 
-        @include mixins.respect-reduced-motion {
+        // Reduced treatment (transition), dormant under the motion policy.
+        @include mixins.when-motion-reduced(transition) {
             animation: none;
         }
     }
@@ -217,7 +218,8 @@ $transcript-preview-max-height: calc(50vh / 3);
     .agent-tool-fade-in-once {
         animation: agent-tool-summary-fade-in 160ms ease-out;
 
-        @include mixins.respect-reduced-motion {
+        // Reduced treatment (transition), dormant under the motion policy.
+        @include mixins.when-motion-reduced(transition) {
             animation: none;
         }
     }
@@ -519,7 +521,8 @@ $transcript-preview-max-height: calc(50vh / 3);
                 text-overflow: ellipsis;
                 animation: agent-tool-summary-fade-in 160ms ease-out;
 
-                @include mixins.respect-reduced-motion {
+                // Reduced treatment (transition), dormant under the motion policy.
+                @include mixins.when-motion-reduced(transition) {
                     animation: none;
                 }
 
@@ -2903,7 +2906,8 @@ $transcript-preview-max-height: calc(50vh / 3);
 .scroll-handoff-box {
     transition: box-shadow 150ms ease-out;
 
-    @media (prefers-reduced-motion: reduce) {
+    // Reduced treatment (feedback), dormant under the motion policy.
+    @include mixins.when-motion-reduced(feedback) {
         transition: none;
     }
 }

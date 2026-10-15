@@ -6,10 +6,11 @@
 
 import { hostHas } from "@/app/host/host-caps";
 import { loadWindowSystem } from "@/app/host/window-system";
+import { initMotion } from "@/app/motion/motion";
 import { UserInputModal } from "@/app/modals/userinputmodal";
 import { WpsEvent } from "@/app/store/mps-events";
 import { setPlatform } from "@/util/platformutil";
-import { createMemo, createSignal } from "solid-js";
+import { createSignal } from "solid-js";
 import { getApi } from "./app-api";
 import {
     backendDeathInfoAtom,
@@ -71,17 +72,6 @@ export function syncUpdaterStatus(): void {
 // unavailable). Set by TermWrap.loadRendererAddon; read by the status-bar GPU
 // indicator. null until the first terminal mounts.
 export const [termRendererAtom, setTermRendererAtom] = createSignal<"webgl" | "dom" | null>(null);
-
-export const reducedMotionSetting = createMemo(() => settingsAtom()?.["window:reducedmotion"]);
-export const [reducedMotionSystemPreference, setReducedMotionSystemPreference] = createSignal(false);
-
-// Reduced-motion respect is removed app-wide (product decision,
-// 2026-07-11): OS-level "reduce motion"/disabled-animations settings were
-// silently killing functional motion cues (drag strobes, drop pulses,
-// insertion indicators) that carry meaning rather than decoration. The
-// setting plumbing above is kept so the decision is easy to revisit, but
-// the atom every consumer reads is hard false.
-export const prefersReducedMotionAtom = createMemo(() => false);
 
 export { backendDeathInfoAtom, backendStatusAtom, setBackendStatusAtom };
 
@@ -164,7 +154,6 @@ export const atoms = {
     controlShiftDelayAtom: controlShiftDelayAtom,
     updaterStatusAtom: updaterStatusAtom,
     updaterVersionAtom: updaterVersionAtom,
-    prefersReducedMotionAtom: prefersReducedMotionAtom,
     typeAheadModalAtom: typeAheadModalAtom,
     modalOpen: modalOpen,
     allConnStatus: allConnStatus,
@@ -225,13 +214,8 @@ function initGlobalSignals(initOpts: GlobalInitOptions) {
         }
     } catch (_) {}
 
-    if (globalThis.window != null) {
-        const reducedMotionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
-        setReducedMotionSystemPreference(!reducedMotionQuery || reducedMotionQuery.matches);
-        reducedMotionQuery?.addEventListener("change", () => {
-            setReducedMotionSystemPreference(reducedMotionQuery.matches);
-        });
-    }
+    // This window's motion tier, on <html> and for shouldReduceMotion (motion/motion.ts).
+    if (globalThis.window != null) initMotion();
 
     try {
         initBackendStatusListeners(getApi(), reconnectWS);

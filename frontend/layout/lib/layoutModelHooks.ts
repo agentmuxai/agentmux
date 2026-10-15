@@ -144,7 +144,6 @@ export function useDebouncedNodeInnerRect(nodeModel: NodeModel): () => CSSProper
         // Read remaining deps so the effect re-runs when they change.
         void nodeModel.isMagnified();
         void nodeModel.isResizing();
-        void atoms.prefersReducedMotionAtom();
 
         // Apply the inner rect IMMEDIATELY in every case.
         //

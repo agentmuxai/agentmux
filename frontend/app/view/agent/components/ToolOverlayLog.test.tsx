@@ -22,10 +22,10 @@ import type { ToolLogChunk, ToolNode } from "../types";
 let reducedMotion = false;
 /** `agent:followcontroller` as the preview reads it at mount. */
 let followFlag: boolean | undefined;
+vi.mock("@/app/motion/motion", () => ({
+    shouldReduceMotion: (category: string) => category === "transition" && reducedMotion,
+}));
 vi.mock("@/app/store/global", () => ({
-    atoms: {
-        prefersReducedMotionAtom: () => reducedMotion,
-    },
     // Previews render through Markdown, which reads its
     // `markdown:streamtailinplace` kill switch on mount.
     getSettingsKeyAtom: (key: string) => () => (key === "agent:followcontroller" ? followFlag : undefined),
@@ -323,7 +323,7 @@ describe("ToolOverlayLog — height-FLIP transition", () => {
         vi.useRealTimers();
     });
 
-    it("does not animate when the user prefers reduced motion", async () => {
+    it("does not animate when the motion policy reduces transition", async () => {
         reducedMotion = true;
         vi.useFakeTimers();
         stubHeightsByBranch({ scroll: 40, offset: 50 }, { scroll: 120, offset: 80 });

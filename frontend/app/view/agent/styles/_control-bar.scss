@@ -1,6 +1,8 @@
 // Copyright 2024-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+@use "../../../mixins.scss";
+
 // Picker empty state + presentation view modifier + control bar. Wrapped in .agent-view so the cascade chain matches
 // the pre-split file (SPEC_AGENT_VIEW_SCSS_SPLIT_2026_04_24).
 .agent-view {
@@ -230,7 +232,8 @@
                 color: var(--block-identity-color, var(--accent-color));
             }
 
-            @media (prefers-reduced-motion: reduce) {
+            // Reduced treatment (status), dormant under the motion policy.
+            @include mixins.when-motion-reduced(status) {
                 .agent-working-row-progress-fill {
                     transition: none;
                 }

@@ -37,9 +37,8 @@
 //     per-node bookkeeping Maps below grow unboundedly over a long-running
 //     session (reagent's review of PR #2761).
 //
-// Reduced-motion behaviour: the reveal is unanimated regardless, so
-// `prefers-reduced-motion` users get the same behaviour. No special
-// handling needed.
+// Motion: the reveal is unanimated, so both motion tiers behave the same.
+// No special handling needed.
 
 import { createSignal } from "solid-js";
 import { fadeOutStartupSplash } from "@/app/init/startup-splash";

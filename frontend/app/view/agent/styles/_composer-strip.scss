@@ -582,8 +582,9 @@
     flex-shrink: 0;
 }
 
-@include mixins.respect-reduced-motion {
-    .agent-composer-strip-ctx--critical {
+// Reduced treatment (status), dormant under the motion policy.
+.agent-composer-strip-ctx--critical {
+    @include mixins.when-motion-reduced(status) {
         animation-duration: 2.4s;
     }
 }

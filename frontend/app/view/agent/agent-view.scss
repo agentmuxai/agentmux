@@ -387,9 +387,10 @@
         --busy-ring-off: var(--busy-ring-off-stopping);
     }
 
-    // The same broken pattern, still: the colours alone say "working".
-    @media (prefers-reduced-motion: reduce) {
-        &--active::before {
+    // Reduced treatment (status), dormant under the motion policy: the same
+    // broken pattern, still; the colours alone say "working".
+    &--active::before {
+        @include mixins.when-motion-reduced(status) {
             animation: none;
         }
     }
