@@ -5,9 +5,10 @@
 
 // ── Add/Edit form overlay ─────────────────────────────────────────────────────
 
+@use "../../../mixins.scss";
+
 .identity-form-overlay {
-    position: absolute;
-    inset: 0;
+    @include mixins.abs-fill;
     background: rgba(0, 0, 0, 0.6);
     display: flex;
     align-items: flex-start;

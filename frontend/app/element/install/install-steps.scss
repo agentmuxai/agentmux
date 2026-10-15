@@ -54,9 +54,7 @@
 }
 
 .install-step-label {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    @include mixins.truncate;
 }
 
 .install-step-hint {
@@ -69,9 +67,7 @@
 // Single line, never grows (§4.1 "Active step subline").
 .install-step-subline {
     grid-column: 2 / -1;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    @include mixins.truncate;
     font-size: var(--text-sm);
     color: var(--secondary-text-color);
 

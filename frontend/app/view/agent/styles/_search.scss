@@ -3,6 +3,8 @@
 
 // In-session search bar + search-match highlight. Wrapped in .agent-view so the cascade chain matches
 // the pre-split file (SPEC_AGENT_VIEW_SCSS_SPLIT_2026_04_24).
+
+@use "../../../mixins.scss";
 .agent-view {
     // === In-session Search Bar ===
 
@@ -31,7 +33,7 @@
         font-size: var(--text-sm);
         font-family: inherit;
         outline: none;
-        transition: border-color var(--duration-base);
+        transition: border-color var(--duration-decorative-base);
 
         &:focus {
             border-color: var(--accent-color);
@@ -58,9 +60,7 @@
         width: 22px;
         height: 22px;
         padding: 0;
-        display: flex;
-        align-items: center;
-        justify-content: center;
+        @include mixins.flex-center;
         background: none;
         border: 1px solid transparent;
         border-radius: 0;
@@ -68,7 +68,7 @@
         color: var(--secondary-text-color);
         font-size: var(--text-xs);
         line-height: 1;
-        transition: background var(--duration-fast), color var(--duration-fast), border-color var(--duration-fast);
+        transition: background var(--duration-decorative-fast), color var(--duration-decorative-fast), border-color var(--duration-decorative-fast);
 
         &:hover {
             background: color-mix(in srgb, var(--accent-color) 15%, transparent);

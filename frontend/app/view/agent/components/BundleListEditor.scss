@@ -4,6 +4,8 @@
 // The ordered bundle picker (BundleListEditor.tsx): one row per bundle, then
 // the "Add a bundle…" select.
 
+@use "../../../mixins.scss";
+
 .bundle-list-editor {
     display: flex;
     flex-direction: column;
@@ -27,9 +29,7 @@
 .bundle-list-editor-name {
     flex: 1;
     min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    @include mixins.truncate;
 
     &.is-missing {
         color: var(--secondary-text-color);

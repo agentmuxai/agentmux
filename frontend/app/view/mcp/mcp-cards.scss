@@ -8,6 +8,8 @@
 
 // The section's scroll container: its pane is absolutely positioned with
 // overflow hidden, so without this a long list or an open form is cut off.
+
+@use "../../mixins.scss";
 .mcp-cards {
     box-sizing: border-box;
     height: 100%;
@@ -48,8 +50,7 @@
     margin-top: var(--space-1);
     font-size: var(--text-2xs);
     font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
+    @include mixins.label-caps;
     color: var(--secondary-text-color);
 }
 
@@ -145,9 +146,7 @@
 }
 
 .mcp-use-agent {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    @include mixins.truncate;
     color: var(--main-text-color);
 }
 

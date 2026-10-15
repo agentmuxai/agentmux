@@ -82,7 +82,7 @@
             color: var(--main-text-color);
             font-size: var(--text-xs);
             cursor: default;
-            @include mixins.control-transition(var(--duration-base));
+            @include mixins.control-transition(var(--duration-decorative-base));
 
             &:hover:not(:disabled) {
                 background: color-mix(in srgb, var(--main-text-color) 10%, transparent);

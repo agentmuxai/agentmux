@@ -224,15 +224,12 @@
     }
 
     &:focus-visible {
-        outline: 2px solid var(--accent-color);
-        outline-offset: 1px;
+        @include mixins.focus-ring;
     }
 }
 
 .agent-runtime-dropup-trigger-label {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    @include mixins.truncate;
     // Explicit, not relying on the flexbox spec's "auto minimum resolves to
     // 0 under non-visible overflow" rule alone — same defensive-explicit
     // style as `.agent-composer-strip-row-left`/`-row-right`'s own
@@ -296,9 +293,7 @@
     right: 2px;
     width: 16px;
     height: 16px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    @include mixins.flex-center;
     padding: 0;
     background: transparent;
     border: 1px solid transparent;
@@ -307,7 +302,7 @@
     font-size: var(--text-3xs);
     line-height: 1;
     cursor: default;
-    @include mixins.control-transition(var(--duration-fast), var(--ease-emphasized));
+    @include mixins.control-transition(var(--duration-decorative-fast), var(--ease-emphasized));
 
     &:hover {
         color: var(--main-text-color);
@@ -316,8 +311,7 @@
     }
 
     &:focus-visible {
-        outline: none;
-        box-shadow: var(--shadow-focus-ring);
+        @include mixins.focus-ring;
     }
 }
 
@@ -325,8 +319,7 @@
     padding: var(--space-1) var(--space-1-5) 2px;
     font-size: var(--text-3xs);
     font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
+    @include mixins.label-caps;
     color: var(--secondary-text-color);
     opacity: 0.75;
 
@@ -376,7 +369,7 @@
     padding: 1px var(--space-1-5);
     cursor: default;
     outline: none;
-    transition: color var(--duration-instant), border-color var(--duration-instant), background var(--duration-instant);
+    transition: color var(--duration-decorative-instant), border-color var(--duration-decorative-instant), background var(--duration-decorative-instant);
 
     &:hover {
         border-color: var(--accent-color);
@@ -384,8 +377,7 @@
     }
 
     &:focus-visible {
-        outline: 2px solid var(--accent-color);
-        outline-offset: 1px;
+        @include mixins.focus-ring;
     }
 
     // Open: the pressed line look, not a solid fill
@@ -461,8 +453,8 @@
     border-radius: 0;
     cursor: default;
     transition:
-        background var(--duration-instant) var(--ease-standard),
-        color var(--duration-instant) var(--ease-standard);
+        background var(--duration-decorative-instant) var(--ease-standard),
+        color var(--duration-decorative-instant) var(--ease-standard);
 
     &:hover:not(:disabled) {
         background: color-mix(in srgb, var(--accent-color) 12%, transparent);
@@ -547,9 +539,7 @@
 // SPEC_COMPOSER_ACCOUNT_SWITCH_AND_JEKT_HEIGHT_CAP_2026_09_26.md Part A.
 .agent-composer-strip-auth-link {
     appearance: none;
-    background: none;
-    border: 0;
-    padding: 0;
+    @include mixins.button-reset;
     margin: 0;
     font: inherit;
     color: inherit;
@@ -563,8 +553,7 @@
     }
 
     &:focus-visible {
-        outline: 1px solid currentColor;
-        outline-offset: 2px;
+        @include mixins.focus-ring;
     }
 }
 
@@ -669,7 +658,7 @@
     cursor: ns-resize;
     background: transparent;
     border-top: 1px solid transparent;
-    transition: background var(--duration-fast), border-color var(--duration-fast);
+    transition: background var(--duration-decorative-fast), border-color var(--duration-decorative-fast);
 
     &:hover,
     &--active {
@@ -712,8 +701,7 @@
 // data-pane-overlay tag here: unlike the browser pane, this drawer's content
 // is a plain xterm.js canvas, not a native HWND layer needing a clip hole).
 .agent-shell-loading-overlay {
-    position: absolute;
-    inset: 0;
+    @include mixins.abs-fill;
     background-color: rgb(from var(--block-bg-color) r g b);
     opacity: 1;
 
@@ -771,9 +759,7 @@
 .agent-runtime-dropup-drift-line {
     height: 14px;
     line-height: 14px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    @include mixins.truncate;
 }
 .agent-runtime-dropup-drift-btn {
     flex: 0 0 auto;
@@ -800,10 +786,7 @@
     line-height: 13px;
     height: calc(2 * 13px);
     box-sizing: content-box;
-    overflow: hidden;
-    display: -webkit-box;
-    -webkit-box-orient: vertical;
-    -webkit-line-clamp: 2;
+    @include mixins.truncate-lines(2);
     color: var(--secondary-text-color);
     font-style: italic;
 

@@ -5,6 +5,8 @@
 // BundleImportPreviewModal, BundleImportConfirmModal). Reuses the app's shared .modal-panel-* shell
 // classes; everything here is scoped under .bundle-import-*.
 
+@use "../../../mixins.scss";
+
 .bundle-import-select-body,
 .bundle-import-preview-body,
 .bundle-import-confirm-body {
@@ -54,9 +56,7 @@
 }
 
 .bundle-import-link-btn {
-    background: none;
-    border: none;
-    padding: 0;
+    @include mixins.button-reset;
     color: var(--color-accent, #4d9de5);
     text-decoration: underline;
     cursor: pointer;

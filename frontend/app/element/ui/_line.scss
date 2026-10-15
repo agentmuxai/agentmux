@@ -81,9 +81,7 @@
 }
 
 @mixin line-control {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
+    @include mixins.flex-center(inline-flex);
     gap: var(--ui-gap);
     box-sizing: border-box;
     min-height: var(--ui-height);
@@ -100,7 +98,7 @@
     border-radius: var(--radius-sm);
     cursor: var(--cursor-interactive);
     transition-property: color, background-color, border-color, box-shadow, opacity;
-    transition-duration: var(--duration-instant);
+    transition-duration: var(--duration-decorative-instant);
     transition-timing-function: var(--ease-standard);
 
     i {
@@ -121,11 +119,6 @@
 
     &:focus-visible {
         @include mixins.focus-ring;
-    }
-
-    // Both are box-shadows, so a focused pressed control needs them combined.
-    &:focus-visible:is([aria-pressed="true"], [aria-checked="true"], [aria-selected="true"]) {
-        box-shadow: inset 0 0 0 1px var(--accent-color), var(--shadow-focus-ring);
     }
 
     &:disabled,

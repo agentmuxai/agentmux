@@ -8,6 +8,7 @@
 @use "./disk-volumes-popover";
 @use "./maintenance-section";
 @use "./health-notices";
+@use "../mixins.scss";
 
 .status-bar {
     // Responsive 2-row wrap (§4.4 of SPEC_STATUSBAR_TOKEN_USAGE).
@@ -207,9 +208,7 @@
         opacity: 0.4;
         font-size: var(--text-2xs);
         padding: 0 5px;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
+        @include mixins.truncate;
         max-width: 200px;
         user-select: text;
     }
@@ -300,9 +299,7 @@
     .status-bar-popover-link {
         display: block;
         min-width: 0;
-        padding: 0;
-        border: 0;
-        background: none;
+        @include mixins.button-reset;
         color: inherit;
         text-align: right;
         white-space: normal;
@@ -325,9 +322,8 @@
     }
 
     .status-bar-popover-section-title {
-        text-transform: uppercase;
+        @include mixins.label-caps;
         font-size: 0.85em;
-        letter-spacing: 0.05em;
         opacity: 0.5;
         padding: var(--space-0-5) 0;
     }
@@ -465,9 +461,7 @@
     // Truncate long emails gracefully.
     .muxbus-login-chip-email {
         max-width: 140px;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
+        @include mixins.truncate;
     }
 }
 
@@ -486,9 +480,7 @@
     .muxbus-popover-email {
         font-size: 0.95em;
         max-width: 160px;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
+        @include mixins.truncate;
     }
 }
 

@@ -1,5 +1,7 @@
 // Identity pane — same shape as bundle-view.scss (left rail + detail).
 
+@use "../../mixins.scss";
+
 .identity-pane {
     display: flex;
     flex-direction: row;
@@ -48,8 +50,7 @@
     .identity-pane-section-title {
         font-size: var(--text-md);
         margin: 16px 0 8px;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
+        @include mixins.label-caps;
         color: var(--secondary-text-color);
     }
 

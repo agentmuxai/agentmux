@@ -1,6 +1,8 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+@use "../../mixins.scss";
+
 .swarm-view {
     display: flex;
     flex-direction: column;
@@ -16,19 +18,15 @@
 // ── Loading / empty root ─────────────────────────────────────────────────
 
 .swarm-loading {
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    @include mixins.flex-center;
     height: 100%;
     color: var(--secondary-text-color);
     font-size: var(--text-sm);
 }
 
 .swarm-empty-root {
-    display: flex;
+    @include mixins.flex-center;
     flex-direction: column;
-    align-items: center;
-    justify-content: center;
     height: 100%;
     gap: 6px;
     padding: 24px;
@@ -180,9 +178,7 @@
         flex: 1;
         font-size: var(--text-base);
         font-weight: 500;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
+        @include mixins.truncate;
         color: var(--main-text-color);
     }
 
@@ -272,8 +268,7 @@
 .swarm-bucket-label {
     font-size: var(--text-2xs);
     font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
+    @include mixins.label-caps;
 }
 
 .swarm-bucket-count {
@@ -329,9 +324,7 @@
     // One line per todo — a checklist is scanned, not read, and wrapping a
     // long item would push every other row out of view. Full text is on the
     // element's own title attribute.
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    @include mixins.truncate;
     min-width: 0;
 }
 
@@ -375,9 +368,7 @@
 
 .swarm-current-tool-name {
     font-family: var(--font-mono);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    @include mixins.truncate;
 }
 
 // ── Workflow group (subagents spawned together by one Task/Workflow-tool
@@ -418,9 +409,7 @@
     flex: 1;
     font-size: var(--text-sm);
     font-family: var(--font-mono);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    @include mixins.truncate;
     color: var(--main-text-color);
 }
 
@@ -445,7 +434,7 @@
 .swarm-workflow-status-badge {
     font-size: var(--text-2xs);
     font-weight: 600;
-    text-transform: uppercase;
+    @include mixins.label-caps;
     letter-spacing: 0.02em;
     padding: 1px 6px;
     border-radius: 3px;
@@ -539,9 +528,7 @@
         flex: 1;
         font-size: var(--text-sm);
         font-family: var(--font-mono);
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
+        @include mixins.truncate;
         color: var(--main-text-color);
     }
 }
@@ -561,9 +548,7 @@
 // (`_shell-node.scss`), scaled down for this row's compact 30px height.
 .swarm-subagent-retire {
     flex-shrink: 0;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
+    @include mixins.flex-center(inline-flex);
     width: 20px;
     height: 20px;
     appearance: none;
@@ -575,9 +560,9 @@
     cursor: default;
     opacity: 0;
     transition:
-        opacity var(--duration-base) var(--ease-standard),
-        color var(--duration-base) var(--ease-standard),
-        background var(--duration-base) var(--ease-standard);
+        opacity var(--duration-decorative-base) var(--ease-standard),
+        color var(--duration-decorative-base) var(--ease-standard),
+        background var(--duration-decorative-base) var(--ease-standard);
 }
 
 .swarm-subagent-row:hover .swarm-subagent-retire,
@@ -611,9 +596,7 @@
     flex: 1;
     font-size: var(--text-sm);
     font-family: var(--font-mono);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    @include mixins.truncate;
     color: var(--main-text-color);
 }
 
@@ -628,9 +611,7 @@
 
 .swarm-shell-stop {
     flex-shrink: 0;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
+    @include mixins.flex-center(inline-flex);
     width: 20px;
     height: 20px;
     appearance: none;
@@ -642,9 +623,9 @@
     cursor: pointer;
     opacity: 0;
     transition:
-        opacity var(--duration-base) var(--ease-standard),
-        color var(--duration-base) var(--ease-standard),
-        background var(--duration-base) var(--ease-standard);
+        opacity var(--duration-decorative-base) var(--ease-standard),
+        color var(--duration-decorative-base) var(--ease-standard),
+        background var(--duration-decorative-base) var(--ease-standard);
 }
 
 .swarm-shell-row:hover .swarm-shell-stop {
@@ -678,9 +659,7 @@
 .swarm-cron-name {
     flex: 1;
     font-size: var(--text-sm);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    @include mixins.truncate;
     color: var(--main-text-color);
 }
 
@@ -707,7 +686,7 @@
     flex-shrink: 0;
     font-size: var(--text-2xs);
     font-weight: 600;
-    text-transform: uppercase;
+    @include mixins.label-caps;
     letter-spacing: 0.02em;
     padding: 1px 6px;
     border-radius: 3px;
@@ -1058,9 +1037,7 @@
     flex: 1;
     font-size: var(--text-sm);
     font-family: var(--font-mono);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    @include mixins.truncate;
     color: var(--main-text-color);
 }
 
@@ -1126,9 +1103,7 @@
 
 .swarm-remote-title {
     font-weight: 600;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    @include mixins.truncate;
 }
 
 .swarm-remote-badge,
@@ -1156,9 +1131,7 @@
 }
 
 .swarm-remote-agent-name {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    @include mixins.truncate;
 }
 
 // The status chip sits at the row's right edge, as on a local row.

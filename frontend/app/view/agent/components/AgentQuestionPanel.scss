@@ -164,8 +164,8 @@
     border-radius: var(--radius-sm);
     cursor: default;
     transition:
-        background var(--duration-instant) var(--ease-standard),
-        border-color var(--duration-instant) var(--ease-standard);
+        background var(--duration-decorative-instant) var(--ease-standard),
+        border-color var(--duration-decorative-instant) var(--ease-standard);
 
     &:hover {
         background: var(--hover-bg-color);

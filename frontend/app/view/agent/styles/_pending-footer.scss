@@ -3,6 +3,8 @@
 
 // Pending queue zone + agent footer. Wrapped in .agent-view so the cascade chain matches
 // the pre-split file (SPEC_AGENT_VIEW_SCSS_SPLIT_2026_04_24).
+
+@use "../../../mixins.scss";
 .agent-view {
     // === Pending queue zone ===
     // Rendered between the conversation document and the composer.
@@ -35,16 +37,13 @@
             gap: var(--space-1-5);
             color: var(--warning-color);
             font-size: var(--text-2xs);
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
+            @include mixins.label-caps;
             opacity: 0.9;
 
             .agent-pending-header-text {
                 flex: 1;
                 min-width: 0;
-                overflow: hidden;
-                text-overflow: ellipsis;
-                white-space: nowrap;
+                @include mixins.truncate;
             }
         }
 

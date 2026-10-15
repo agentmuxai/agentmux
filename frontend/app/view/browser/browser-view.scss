@@ -1,6 +1,8 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+@use "../../mixins.scss";
+
 .browser-pane-favicon {
     width: 14px;
     height: 14px;
@@ -48,9 +50,7 @@
     color: var(--main-text-color);
     font-size: var(--text-md);
     cursor: default;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    @include mixins.flex-center;
 
     &:hover:not(:disabled) {
         background: var(--highlight-bg-color);
@@ -284,9 +284,7 @@
     .browser-popup-window-url {
         flex: 1;
         min-width: 0;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
+        @include mixins.truncate;
     }
 }
 
@@ -336,15 +334,12 @@
    the native page. */
 .browser-drag-catcher,
 .browser-drag-hole {
-    position: absolute;
-    inset: 0;
+    @include mixins.abs-fill;
 }
 
 .browser-empty {
-    display: flex;
+    @include mixins.flex-center;
     flex-direction: column;
-    align-items: center;
-    justify-content: center;
     height: 100%;
     gap: var(--space-3);
     color: var(--secondary-text-color);
@@ -368,8 +363,7 @@
 // pane-overlay-auto.ts's visibility check reads computed opacity on this
 // tagged data-pane-overlay element itself.
 .browser-loading-overlay {
-    position: absolute;
-    inset: 0;
+    @include mixins.abs-fill;
     // --block-bg-color is translucent in every theme (rgba with alpha < 1) —
     // needs the opaque `r g b` form (no alpha channel) or the native
     // browser-pane HWND's own blank page bleeds through underneath, same

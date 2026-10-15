@@ -5,6 +5,8 @@
 // AgentMuxError needs to surface to the user. See
 // docs/specs/SPEC_ERROR_CATALOG_2026_05_17.md.
 
+@use "../mixins.scss";
+
 .amx-error-banner {
     display: grid;
     grid-template-columns: auto 1fr auto auto;
@@ -53,9 +55,7 @@
 
 .amx-error-banner-details-toggle {
     align-self: flex-start;
-    background: none;
-    border: none;
-    padding: 0;
+    @include mixins.button-reset;
     margin-top: var(--space-1);
     color: var(--secondary-text-color);
     font-size: var(--text-xs);

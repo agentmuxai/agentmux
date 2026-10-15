@@ -24,9 +24,7 @@
 .identity-detail-subname {
     font-size: var(--text-xs);
     color: var(--secondary-text-color);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    @include mixins.truncate;
 }
 
 .identity-detail-status-text {
@@ -38,8 +36,8 @@
 .identity-detail-section {
     font-size: var(--text-2xs);
     font-weight: 600;
+    @include mixins.label-caps;
     letter-spacing: 0.08em;
-    text-transform: uppercase;
     color: var(--secondary-text-color);
     margin: 10px 0 var(--space-1);
 

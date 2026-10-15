@@ -58,9 +58,7 @@
 
     .input-right-element {
         padding: 0 5px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
+        @include mixins.flex-center;
     }
 
     .input {

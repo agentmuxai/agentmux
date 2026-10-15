@@ -6,6 +6,8 @@
 // by the button leading the document bar.
 // Spec: docs/specs/SPEC_EDITOR_FILE_TREE_2026-05-26.md
 
+@use "../../mixins.scss";
+
 .editor-view {
     display: flex;
     flex-direction: row;
@@ -39,7 +41,7 @@
     width: 4px;
     cursor: col-resize;
     background: var(--border-color);
-    transition: background var(--duration-instant) var(--ease-standard);
+    transition: background var(--duration-decorative-instant) var(--ease-standard);
     position: relative;
 
     &:hover,
@@ -95,9 +97,7 @@
 .file-tree-toolbar-btn {
     width: 24px;
     height: 24px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
+    @include mixins.flex-center(inline-flex);
     padding: 0;
     border: 1px solid transparent;
     border-radius: 3px;
@@ -106,9 +106,9 @@
     cursor: default;
     font-size: var(--text-xs);
     transition:
-        background var(--duration-instant) var(--ease-standard),
-        color var(--duration-instant) var(--ease-standard),
-        border-color var(--duration-instant) var(--ease-standard);
+        background var(--duration-decorative-instant) var(--ease-standard),
+        color var(--duration-decorative-instant) var(--ease-standard),
+        border-color var(--duration-decorative-instant) var(--ease-standard);
 
     &:hover {
         background: rgba(255, 255, 255, 0.05);
@@ -140,9 +140,7 @@
     padding: 2px var(--space-1);
     cursor: default;
     user-select: none;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    @include mixins.truncate;
 
     &:hover {
         background: rgba(255, 255, 255, 0.04);
@@ -288,10 +286,8 @@
 
 .editor-empty {
     position: relative;
-    display: flex;
+    @include mixins.flex-center;
     flex-direction: column;
-    align-items: center;
-    justify-content: center;
     height: 100%;
     gap: var(--space-5);
     padding: var(--space-4);
@@ -355,9 +351,7 @@
 }
 
 .editor-loading {
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    @include mixins.flex-center;
     height: 100%;
     color: var(--secondary-text-color);
     font-size: var(--text-base);
@@ -376,10 +370,8 @@
 // error text, and a Close-tab button.
 .editor-error-panel {
     flex: 1;
-    display: flex;
+    @include mixins.flex-center;
     flex-direction: column;
-    align-items: center;
-    justify-content: center;
     gap: var(--space-2);
     padding: var(--space-4);
     color: var(--main-text-color);
@@ -597,13 +589,11 @@
 .editor-lsp-banner-dismiss {
     width: 20px;
     height: 20px;
-    background: transparent;
-    border: none;
+    @include mixins.button-reset;
     color: var(--secondary-text-color);
     cursor: default;
     font-size: 16px;
     line-height: 1;
-    padding: 0;
     opacity: 0.6;
 
     &:hover {
@@ -622,9 +612,7 @@
     padding: 2px var(--space-1);
     background: rgba(0, 0, 0, 0.2);
     border-radius: 3px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    @include mixins.truncate;
 }
 
 .editor-lsp-banner-copy,
@@ -693,16 +681,12 @@
 // Shows the file tree again, leading the document bar while it is hidden.
 .editor-tree-toggle {
     flex: 0 0 auto;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
+    @include mixins.flex-center(inline-flex);
     width: 30px;
-    padding: 0;
+    @include mixins.button-reset;
     // The same icon size as the tree toolbar's buttons (.file-tree-toolbar-btn).
     font-size: var(--text-xs);
-    border: none;
     border-right: 1px solid var(--border-color);
-    background: transparent;
     color: var(--secondary-text-color);
     cursor: pointer;
 

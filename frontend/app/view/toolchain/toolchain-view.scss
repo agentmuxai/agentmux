@@ -3,6 +3,8 @@
 //
 // Ported from the toolchain modal's stylesheet — adapted for a full-height pane layout.
 
+@use "../../mixins.scss";
+
 .toolchain-view {
     display: flex;
     flex-direction: column;
@@ -40,8 +42,7 @@
     margin: 0 0 var(--space-1);
     font-size: 0.78rem;
     font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
+    @include mixins.label-caps;
     opacity: 0.6;
 }
 
@@ -138,9 +139,7 @@
 .toolchain-row-path {
     font-size: 0.74rem;
     opacity: 0.55;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    @include mixins.truncate;
 }
 
 .toolchain-widget-desc {

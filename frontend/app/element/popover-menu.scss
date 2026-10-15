@@ -5,6 +5,8 @@
 // Item chrome (`.menu`, `.menu-item`, `.menu-divider`, `.menu-item-check`) is
 // inherited from flyoutmenu.scss. Only section-specific styles live here.
 
+@use "../mixins.scss";
+
 .popover-menu {
     // z-index matches other flyout surfaces
     z-index: var(--z-flyout-menu);
@@ -22,8 +24,7 @@
     cursor: default;
     color: var(--secondary-text-color, rgb(from var(--main-text-color) r g b / 0.65));
     font-size: var(--text-xs);
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
+    @include mixins.label-caps;
 
     .menu-item-icon {
         opacity: 0.6;

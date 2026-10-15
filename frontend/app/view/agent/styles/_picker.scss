@@ -64,7 +64,7 @@
         font-size: var(--text-sm);
         font-family: inherit;
         outline: none;
-        transition: border-color var(--duration-base);
+        transition: border-color var(--duration-decorative-base);
 
         &:focus {
             border-color: var(--accent-color);
@@ -81,9 +81,7 @@
         width: 22px;
         height: 22px;
         padding: 0;
-        display: flex;
-        align-items: center;
-        justify-content: center;
+        @include mixins.flex-center;
         background: none;
         border: 1px solid transparent;
         border-radius: 0;
@@ -91,7 +89,7 @@
         color: var(--secondary-text-color);
         font-size: var(--text-md);
         line-height: 1;
-        transition: background var(--duration-fast), color var(--duration-fast), border-color var(--duration-fast);
+        transition: background var(--duration-decorative-fast), color var(--duration-decorative-fast), border-color var(--duration-decorative-fast);
 
         &:hover {
             background: color-mix(in srgb, var(--error-color) 15%, transparent);
@@ -118,8 +116,7 @@
         flex-shrink: 0;
         font-size: var(--text-2xs);
         font-weight: 600;
-        letter-spacing: 0.03em;
-        text-transform: uppercase;
+        @include mixins.label-caps;
         color: var(--secondary-text-color);
         opacity: 0.75;
     }
@@ -134,7 +131,7 @@
         font-family: inherit;
         outline: none;
         cursor: default;
-        transition: border-color var(--duration-base);
+        transition: border-color var(--duration-decorative-base);
 
         &:focus {
             border-color: var(--accent-color);
@@ -151,8 +148,7 @@
         font-size: var(--text-sm);
         font-weight: 600;
         color: color-mix(in srgb, var(--main-text-color) 70%, transparent);
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
+        @include mixins.label-caps;
         margin-top: var(--space-3);
     }
 
@@ -202,8 +198,7 @@
         font-size: var(--text-sm);
         font-weight: 600;
         color: color-mix(in srgb, var(--main-text-color) 60%, transparent);
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
+        @include mixins.label-caps;
         display: flex;
         align-items: center;
         gap: var(--space-2);
@@ -264,7 +259,7 @@
         color: var(--accent-color);
         border: 1px solid var(--accent-color);
         background: transparent;
-        transition: background var(--duration-base);
+        transition: background var(--duration-decorative-base);
 
         &:hover,
         &:focus-visible {
@@ -287,7 +282,7 @@
         background: color-mix(in srgb, var(--main-text-color) 3%, transparent);
         border-radius: 0;
         cursor: default;
-        @include mixins.control-transition(var(--duration-base));
+        @include mixins.control-transition(var(--duration-decorative-base));
         color: var(--main-text-color);
         text-align: left;
         width: 100%;
@@ -344,8 +339,7 @@
             padding: 3px 10px;   // a touch more horizontal breathing room
             font-size: var(--text-2xs);
             font-weight: 600;
-            letter-spacing: 0.04em;
-            text-transform: uppercase;
+            @include mixins.label-caps;
             color: #fff; /* stylelint-disable-line color-no-hex */
             background: var(--success-color);
             border-radius: 0;
@@ -354,7 +348,7 @@
             z-index: 1;
             user-select: none;
             transform-origin: bottom right;
-            transition: transform var(--duration-base) var(--ease-out), background var(--duration-base);
+            transition: transform var(--duration-decorative-base) var(--ease-out), background var(--duration-decorative-base);
         }
 
         &:hover .agent-card-install-ribbon {
@@ -409,10 +403,10 @@
             cursor: default;
             opacity: 0;
             transition:
-                opacity var(--duration-quick) var(--ease-out),
-                background var(--duration-quick),
-                color var(--duration-quick),
-                border-color var(--duration-quick);
+                opacity var(--duration-decorative-quick) var(--ease-out),
+                background var(--duration-decorative-quick),
+                color var(--duration-decorative-quick),
+                border-color var(--duration-decorative-quick);
             pointer-events: none;
             z-index: 1;
             user-select: none;
@@ -437,9 +431,7 @@
         }
 
         .agent-card-icon {
-            display: flex;
-            align-items: center;
-            justify-content: center;
+            @include mixins.flex-center;
             flex-shrink: 0;
             width: 32px;
             height: 32px;
@@ -463,18 +455,14 @@
         .agent-card-desc {
             font-size: var(--text-xs);
             color: var(--secondary-text-color);
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
+            @include mixins.truncate;
         }
 
         .agent-card-slug {
             font-size: var(--text-2xs);
             color: color-mix(in srgb, var(--secondary-text-color) 65%, transparent);
             font-family: var(--font-mono);
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
+            @include mixins.truncate;
         }
 
         // Definition card (post-SPEC_AGENT_DEFINITIONS_MODAL) — title
@@ -484,18 +472,14 @@
             font-size: var(--text-base);
             font-weight: 500;
             color: var(--main-text-color);
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
+            @include mixins.truncate;
         }
 
         .agent-card-caption {
             font-size: var(--text-xs);
             font-weight: 500;
             color: var(--secondary-text-color);
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
+            @include mixins.truncate;
         }
 
         // Inline rename row — replaces the name span while editing
@@ -526,9 +510,7 @@
         .agent-card-rename-btn {
             width: 22px;
             height: 22px;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
+            @include mixins.flex-center(inline-flex);
             padding: 0;
             border: 1px solid var(--border-color);
             background: color-mix(in srgb, var(--main-text-color) 5%, transparent);

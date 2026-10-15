@@ -4,6 +4,8 @@
 // Image zoom in the Media view (media-zoom.ts): the cursor says what a click
 // or drag will do, and a zoomed image shows its zoom with a way back to fit.
 
+@use "../../mixins.scss";
+
 .media-view-content:focus {
     outline: none;
 }
@@ -45,12 +47,9 @@
 
 // A pane with no tab at all: the same centred, click-to-pick box as an empty tab.
 .media-pane-empty {
-    position: absolute;
-    inset: 0;
-    display: flex;
+    @include mixins.abs-fill;
+    @include mixins.flex-center;
     flex-direction: column;
-    align-items: center;
-    justify-content: center;
     gap: 6px;
     padding: 24px;
     overflow: hidden;

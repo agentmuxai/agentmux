@@ -5,11 +5,7 @@
 @use "../mixins.scss";
 
 .type-ahead-modal-backdrop {
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
+    @include mixins.abs-fill;
     background-color: transparent;
     z-index: var(--zindex-typeahead-modal-backdrop);
 }

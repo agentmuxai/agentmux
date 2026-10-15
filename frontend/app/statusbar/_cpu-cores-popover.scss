@@ -5,29 +5,11 @@
 // Spec: SPEC_STATUSBAR_CPU_CORES_PANEL_2026_06_15.md.
 
 @use "../element/popover-frame" as popoverFrame;
+@use "./stat-button" as statButton;
 
 // Clickable CPU readout in the status bar (the <button> wrapping "CPU n%").
 .stat-cpu-button {
-    background: transparent;
-    border: none;
-    color: inherit;
-    font-family: inherit;
-    font-size: inherit;
-    line-height: inherit;
-    padding: 0 2px;
-    margin: 0;
-    cursor: default;
-    border-radius: 0;
-    transition: background var(--duration-instant) var(--ease-standard);
-
-    &:hover {
-        background: var(--hover-bg-color);
-    }
-
-    &:focus-visible {
-        outline: 1px solid var(--accent-color);
-        outline-offset: -1px;
-    }
+    @include statButton.stat-button;
 }
 
 .cpu-cores-popover {

@@ -8,6 +8,8 @@
 // cards, both styled by element/ui/card.scss
 // (SPEC_CONNECTORS_CARDS_2026_10_13.md §3.2); this file keeps the chooser.
 
+@use "../../mixins.scss";
+
 .accounts-gallery {
     display: flex;
     flex-direction: column;
@@ -15,9 +17,7 @@
 
 // The brand logo in the chooser's header.
 .account-tile-logo {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
+    @include mixins.flex-center(inline-flex);
     flex: none;
     width: 20px;
     height: 20px;
@@ -45,12 +45,9 @@
 // — it rendered unstyled (position: static, transparent backdrop) since it's
 // a plain div, never wrapped by Modal.
 .accounts-chooser-overlay {
-    position: fixed;
-    inset: 0;
+    @include mixins.fixed-fill;
     z-index: var(--zindex-modal-wrapper);
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    @include mixins.flex-center;
     background: rgba(0, 0, 0, 0.45);
 }
 

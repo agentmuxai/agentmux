@@ -2,6 +2,8 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+@use "../mixins.scss";
+
 .pane-title-bar {
     display: flex;
     flex-direction: row;
@@ -23,7 +25,7 @@
     font-weight: 500;
     color: var(--secondary-text-color);
     user-select: none;
-    transition: background-color var(--duration-base) var(--ease-standard);
+    transition: background-color var(--duration-decorative-base) var(--ease-standard);
 
     &.is-hovered {
         background-color: color-mix(in srgb, var(--block-bg-solid-color) 70%, transparent);
@@ -34,9 +36,7 @@
     }
 
     .pane-title-icon {
-        display: flex;
-        align-items: center;
-        justify-content: center;
+        @include mixins.flex-center;
         font-size: var(--text-md);
         flex-shrink: 0;
 
@@ -48,9 +48,7 @@
 
     .pane-title-text {
         flex: 1;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
+        @include mixins.truncate;
         cursor: default;
         color: var(--main-text-color);
 

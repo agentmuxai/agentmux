@@ -7,6 +7,8 @@
 // Glyphs are hidden at rest and fade in when the mouse enters the group,
 // matching the standard macOS Sequoia / Sonoma behaviour.
 
+@use "../mixins.scss";
+
 /* stylelint-disable color-no-hex --
    The macOS traffic-light colours (#FF5F57 / #FFBD2E / #28CA41) are OS
    brand values that must match Apple's HIG exactly. They are not
@@ -41,9 +43,7 @@
         border: none;
         padding: 0;
         cursor: default;
-        display: flex;
-        align-items: center;
-        justify-content: center;
+        @include mixins.flex-center;
         flex-shrink: 0;
         -webkit-app-region: no-drag;
         user-select: none;
@@ -52,7 +52,7 @@
         .traffic-glyph {
             // Glyphs are hidden at rest; they fade in when the group is hovered.
             opacity: 0;
-            transition: opacity var(--duration-instant) linear;
+            transition: opacity var(--duration-decorative-instant) linear;
             // Semi-transparent dark overlay — readable on any circle colour.
             color: rgba(0, 0, 0, 0.55);
         }

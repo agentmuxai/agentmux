@@ -21,8 +21,8 @@
 //                   takes its fallback: settings.scss's `--panel-bg-alt` was
 //                   a fixed grey in every theme.
 //
-// Four more hold the shared scales (SPEC_MOTION_TIERS_AND_STYLESHEET_DRY_
-// 2026_10_15.md §6.6, item 20), all per file, in SCSS/CSS:
+// Five more hold the shared scales (SPEC_MOTION_TIERS_AND_STYLESHEET_DRY_
+// 2026_10_15.md §6.6, item 20, and §6.3, item 10), all per file, in SCSS/CSS:
 //
 //   5. durations    raw times (`120ms`, `0.5s`) in transition and animation
 //                   declarations, where a `--duration-*` token belongs
@@ -31,6 +31,10 @@
 //                   any at-rule: the fallback can never apply, and a wrong one
 //                   misleads (`var(--radius-sm, 4px)` renders 0)
 //   8. zIndex       `z-index` given as a raw number, not a `--z-*` token
+//   9. focusRings   `:focus-visible` rules that draw their own ring (an
+//                   outline or box-shadow) instead of `@include
+//                   mixins.focus-ring`. `outline: none` alone doesn't count,
+//                   nor does the shared ring: mixin bodies are skipped.
 //
 // A count above the base's fails: use the element/ui/ components instead. A
 // count below it is reported and passes. There is no checked-in baseline:
@@ -269,6 +273,14 @@ export function rawZIndexes(scss) {
     return declarations(scss, { includeMixins: true }).filter((d) => d.property === "z-index" && /^-?\d+$/.test(unimportant(d.value)));
 }
 
+/** `:focus-visible` rules (by resolved selector) that set an outline or box-shadow of their own. */
+export function handFocusRings(scss) {
+    const ring = (d) =>
+        (d.property.startsWith("outline") || d.property === "box-shadow") && !/^(none|0)$/.test(unimportant(d.value));
+    const rules = declarations(scss).filter((d) => d.selector.includes(":focus-visible") && ring(d));
+    return [...new Set(rules.map((d) => d.selector))];
+}
+
 /** Custom properties set on `:root` itself (alone or in a list), outside any at-rule: defined in every element. */
 export function rootTokens(scss) {
     const onRoot = (selector) => selector.split(",").some((s) => s.trim() === ":root");
@@ -295,6 +307,7 @@ export function collect(files) {
     const durations = {};
     const fontSizes = {};
     const zIndex = {};
+    const focusRings = {};
     const styles = [];
 
     for (const { path, source } of files) {
@@ -318,6 +331,7 @@ export function collect(files) {
             countInto(durations, path, rawDurations(source));
             countInto(fontSizes, path, rawFontSizes(source).length);
             countInto(zIndex, path, rawZIndexes(source).length);
+            countInto(focusRings, path, handFocusRings(source).length);
         }
     }
 
@@ -339,6 +353,7 @@ export function collect(files) {
         fontSizes: sortObject(fontSizes),
         fallbacks: sortObject(fallbacks),
         zIndex: sortObject(zIndex),
+        focusRings: sortObject(focusRings),
     };
 }
 
@@ -352,7 +367,7 @@ function sortObject(obj) {
 
 // ── Compare ─────────────────────────────────────────────────────────────────
 
-const PER_FILE = ["buttons", "radius", "durations", "fontSizes", "fallbacks", "zIndex"];
+const PER_FILE = ["buttons", "radius", "durations", "fontSizes", "fallbacks", "zIndex", "focusRings"];
 
 /** How `current` differs from `baseline` (the base branch), as human-readable lines. */
 export function compare(current, baseline) {
@@ -465,7 +480,8 @@ if (isMain(import.meta.url)) {
         console.log("Use Button / IconButton / Tabs / SegmentedControl / Field / inputs from");
         console.log("frontend/app/element/ui/, a line instead of a solid fill, a --radius-* token,");
         console.log("only custom properties that are defined, --duration-*, --text-* and --z-* tokens");
-        console.log("instead of raw values, and no fallback on a token :root always sets.");
+        console.log("instead of raw values, no fallback on a token :root always sets, and");
+        console.log("`@include mixins.focus-ring` for a focus ring.");
         process.exit(1);
     }
     const total = (o) => Object.values(o).reduce((a, b) => a + b, 0);
@@ -474,7 +490,7 @@ if (isMain(import.meta.url)) {
             `${current.solidFills.length} solid fills, ${total(current.radius)} off-token radii, ` +
             `${current.undefinedVars.length} undefined variables, ${total(current.durations)} raw durations, ` +
             `${total(current.fontSizes)} raw px font sizes, ${total(current.fallbacks)} fallbacks on always-defined ` +
-            `tokens, ${total(current.zIndex)} raw z-indexes.`
+            `tokens, ${total(current.zIndex)} raw z-indexes, ${total(current.focusRings)} hand-written focus rings.`
     );
     if (shrank.length > 0) {
         console.log(`Down from the base branch (${shrank.length}):`);

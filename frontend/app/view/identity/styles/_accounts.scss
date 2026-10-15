@@ -8,6 +8,8 @@
 // transient, dismissable row shown after deleting an account that had
 // linked agents. Sits above the accounts list.
 
+@use "../../../mixins.scss";
+
 .identity-delete-notice {
     display: flex;
     align-items: center;
@@ -70,8 +72,8 @@
     padding: var(--space-1) 0;
     font-size: var(--text-2xs);
     font-weight: 600;
+    @include mixins.label-caps;
     letter-spacing: 0.08em;
-    text-transform: uppercase;
     color: var(--secondary-text-color);
 }
 
@@ -87,7 +89,7 @@
     border-radius: 0;
     background: color-mix(in srgb, var(--main-text-color) 3%, transparent);
     margin-bottom: var(--space-1);
-    transition: background var(--duration-fast), border-color var(--duration-fast);
+    transition: background var(--duration-decorative-fast), border-color var(--duration-decorative-fast);
 
     &:last-child {
         margin-bottom: 0;
@@ -107,9 +109,7 @@
 .identity-account-name {
     flex: 1;
     font-size: var(--text-base);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    @include mixins.truncate;
 }
 
 .identity-row-meta {

@@ -100,8 +100,7 @@
 
     // === Document Container ===
     .agent-document {
-        position: absolute;
-        inset: 0;
+        @include mixins.abs-fill;
         overflow-y: auto;
         // Stop scroll chaining from leaving the pane once it hits its own
         // top/bottom (e.g. OS-level swipe-navigation gestures). Nested tool

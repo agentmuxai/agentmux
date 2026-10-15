@@ -6,6 +6,8 @@
 // fallback that stacked them instead of removing the split; both are
 // gone now that only one of the two ever renders at a time.
 
+@use "../../mixins.scss";
+
 .bundle-view-rail {
     display: flex;
     flex-direction: column;
@@ -68,21 +70,18 @@
 .bundle-view-list-item-name-text {
     flex: 1 1 0;
     min-width: 0;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    @include mixins.truncate;
 }
 
 .bundle-view-global-badge {
     flex: 0 0 auto;
     font-size: var(--text-2xs);
     font-weight: 600;
-    letter-spacing: 0.04em;
+    @include mixins.label-caps;
     padding: 1px 5px;
     border-radius: 3px;
     background: var(--accent-color);
     color: var(--accent-text-color);
-    text-transform: uppercase;
     opacity: 0.85;
 }
 

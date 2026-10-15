@@ -6,6 +6,8 @@
 
 // ── Badge on section title ───────────────────────────────────────────────────
 
+@use "../mixins.scss";
+
 .maintenance-badge {
     display: inline-block;
     margin-left: var(--space-1-5);
@@ -64,9 +66,7 @@
 
 .maintenance-row-text {
     flex: 1 1 auto;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    @include mixins.truncate;
 
     &--dim   { color: var(--secondary-text-color); }
     &--warn  { color: var(--warning-color); }
@@ -127,16 +127,12 @@
     flex: 0 0 36px;
     font-family: var(--font-mono, monospace);
     color: var(--secondary-text-color);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    @include mixins.truncate;
 }
 
 .maintenance-sub-label {
     flex: 1 1 auto;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    @include mixins.truncate;
     color: var(--secondary-text-color);
 }
 

@@ -5,11 +5,12 @@
 // warden-shared/warden-manager-chrome.scss (imported by this component's
 // .tsx alongside this file).
 
+@use "../../mixins.scss";
+
 .warden-host-state {
     display: inline-block;
-    text-transform: uppercase;
+    @include mixins.label-caps;
     font-size: 0.7em;
-    letter-spacing: 0.05em;
     padding: 2px 6px;
     border-radius: 0;
 
@@ -42,9 +43,9 @@
     line-height: 1;
     padding: 0;
     transition:
-        opacity var(--duration-fast) var(--ease-standard),
-        background var(--duration-fast) var(--ease-standard),
-        border-color var(--duration-fast) var(--ease-standard);
+        opacity var(--duration-decorative-fast) var(--ease-standard),
+        background var(--duration-decorative-fast) var(--ease-standard),
+        border-color var(--duration-decorative-fast) var(--ease-standard);
 
     &:hover {
         opacity: 1;

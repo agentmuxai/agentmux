@@ -6,6 +6,8 @@
 
 // Quiet label, like the long-running bucket: the rows themselves carry a
 // status word in its own color, so the bucket needs no hue of its own.
+
+@use "../../mixins.scss";
 .swarm-bucket--background .swarm-bucket-label {
     color: var(--secondary-text-color);
 }
@@ -42,9 +44,7 @@
     flex: 1;
     min-width: 0;
     font-size: var(--text-sm);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    @include mixins.truncate;
     color: var(--main-text-color);
 }
 

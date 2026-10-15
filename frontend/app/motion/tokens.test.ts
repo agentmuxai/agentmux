@@ -44,8 +44,24 @@ describe("motion tokens match theme.scss", () => {
         expect(declared("motion-scale")).toBe("1");
     });
 
+    // CSS only: hover and focus fades, which no JS animation is (spec §5.4).
+    it.each(["instant", "fast", "quick", "base"])(
+        "--duration-decorative-%s is --duration-%s's value, also scaled by --motion-scale-decorative",
+        (name) => {
+            expect(declared(`duration-decorative-${name}`)).toBe(
+                `calc(${DURATIONS[name]}ms * var(--motion-scale) * var(--motion-scale-decorative))`
+            );
+        }
+    );
+
+    it("--motion-scale-decorative is 1", () => {
+        expect(declared("motion-scale-decorative")).toBe("1");
+    });
+
     it("theme.scss declares no duration or easing token that tokens.ts lacks", () => {
-        const names = [...theme.matchAll(/^\s*--(duration|ease)-([\w-]+):/gm)].map((m) => `${m[1]}-${m[2]}`);
+        const names = [...theme.matchAll(/^\s*--(duration|ease)-([\w-]+):/gm)]
+            .map((m) => `${m[1]}-${m[2]}`)
+            .filter((name) => !name.startsWith("duration-decorative-"));
         const known = [...Object.keys(DURATIONS).map((n) => `duration-${n}`), ...Object.keys(EASINGS).map((n) => `ease-${n}`)];
         expect(names.sort()).toEqual(known.sort());
     });

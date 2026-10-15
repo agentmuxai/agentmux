@@ -15,8 +15,8 @@
     cursor: default;
     border: 1.5px solid transparent;
     transition:
-        transform var(--duration-fast) var(--ease-standard),
-        border-color var(--duration-fast) var(--ease-standard);
+        transform var(--duration-decorative-fast) var(--ease-standard),
+        border-color var(--duration-decorative-fast) var(--ease-standard);
 
     &:hover {
         transform: scale(1.25);

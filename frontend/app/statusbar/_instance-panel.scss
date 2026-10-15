@@ -4,6 +4,8 @@
 // InstancePanel — popover anchored to the version chip.
 // Spec: SPEC_VERSION_INSTANCE_PANEL_2026_04_25.md.
 
+@use "../mixins.scss";
+
 .instance-panel {
     background: var(--main-bg-color);
     border: 1px solid var(--border-color);
@@ -38,9 +40,7 @@
     }
     .instance-panel-value {
         flex: 1 1 auto;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
+        @include mixins.truncate;
     }
 }
 
@@ -75,8 +75,7 @@
 .instance-panel-section-title {
     font-size: var(--text-xs);
     color: var(--secondary-text-color);
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
+    @include mixins.label-caps;
     margin-bottom: var(--space-1);
 }
 
@@ -112,9 +111,7 @@
     }
     .instance-panel-window-name {
         flex: 1 1 auto;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
+        @include mixins.truncate;
     }
     .instance-panel-window-badge {
         flex: 0 0 auto;
@@ -123,8 +120,7 @@
         border-radius: 999px;
         background: var(--accent-color);
         color: var(--button-text-color);
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
+        @include mixins.label-caps;
     }
 }
 
@@ -177,9 +173,7 @@
 
     .instance-panel-pane-name {
         flex: 1 1 auto;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
+        @include mixins.truncate;
     }
 }
 
