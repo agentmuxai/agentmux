@@ -32,6 +32,7 @@ import {
     xWindowSecs,
     yRange,
 } from "./sysinfo-chart";
+import { figures, titled, unitFormat } from "./sysinfo-overview-data";
 import type { DataItem } from "./sysinfo-types";
 
 /** At most one resize per this many ms while the pane is being dragged. */
@@ -39,8 +40,11 @@ const CHART_RESIZE_MS = 100;
 /** Least room per x label, so a narrow pane gets fewer of them. */
 const X_LABEL_SPACE_PX = 80;
 
-/** Width of a y axis that fits its widest label (uPlot's own sizing recipe), at least `PLOT_LEFT_PX`. */
-function yAxisSize(self: uPlot, values: string[] | null, axisIdx: number, cycleNum: number): number {
+/** A tight chart's time axis: its labels and ticks, nothing more. */
+const TIGHT_X_AXIS_PX = 22;
+
+/** Width of a y axis that fits its widest label (uPlot's own sizing recipe), at least `min`. */
+const yAxisSize = (min: number) => (self: uPlot, values: string[] | null, axisIdx: number, cycleNum: number) => {
     const axis = self.axes[axisIdx];
     if (cycleNum > 1) return (axis as any)._size;
     let size = (axis.ticks?.size ?? 0) + (axis.gap ?? 0);
@@ -49,8 +53,8 @@ function yAxisSize(self: uPlot, values: string[] | null, axisIdx: number, cycleN
         self.ctx.font = (axis as any).font[0];
         size += self.ctx.measureText(longest).width / devicePixelRatio;
     }
-    return Math.max(PLOT_LEFT_PX, Math.ceil(size));
-}
+    return Math.max(min, Math.ceil(size));
+};
 
 export type TimeChartProps = {
     plotData: Array<DataItem>;
@@ -69,6 +73,8 @@ export type TimeChartProps = {
     sparkline?: boolean;
     /** `false`: no time labels, for a chart stacked above another that has them. */
     timeAxis?: boolean;
+    /** Against the pane's edges: axes only as wide as their labels, no side gutters. */
+    tight?: boolean;
     /** The chart's name, over its top-left corner. */
     title?: string;
     class?: string;
@@ -112,14 +118,18 @@ export function TimeChart(props: TimeChartProps): JSX.Element {
     const options = (width: number, height: number): uPlot.Options => {
         const muted = resolveCssColor(container, "var(--grey-text-color)");
         const grid = { stroke: withAlpha(muted, 0.25), width: 1 };
-        const ticks = { stroke: withAlpha(muted, 0.4), width: 1, size: 4 };
+        const ticks = { stroke: withAlpha(muted, 0.4), width: 1, size: props.tight ? 3 : 4 };
+        const gap = props.tight ? 3 : 5;
         const single = props.series.length === 1;
         return {
             width,
             height,
             legend: { show: false },
-            // Fixed sides, so the plot areas of a pane's charts line up (PLOT_LEFT_PX).
-            ...(props.sparkline ? {} : { padding: [null, PLOT_RIGHT_PX, null, 0] as uPlot.Padding }),
+            // Fixed sides, so the plot areas of a pane's charts line up (PLOT_LEFT_PX);
+            // a tight chart keeps only the room its last time label needs.
+            ...(props.sparkline
+                ? {}
+                : { padding: [props.tight ? 7 : null, props.tight ? null : PLOT_RIGHT_PX, null, 0] as uPlot.Padding }),
             cursor: {
                 // Only the time is shared: each chart has its own y scale, and by
                 // default uPlot would also draw the hovered chart's y value on the others.
@@ -138,16 +148,18 @@ export function TimeChart(props: TimeChartProps): JSX.Element {
                           stroke: muted,
                           grid,
                           ticks,
+                          gap,
                           space: X_LABEL_SPACE_PX,
                           values: (_u, splits, _axisIdx, _space, incr) =>
                               props.timeAxis === false ? splits.map(() => "") : timeAxisLabels(splits, incr),
-                          ...(props.timeAxis === false ? { size: 4 } : {}),
+                          ...(props.timeAxis === false ? { size: 4 } : props.tight ? { size: TIGHT_X_AXIS_PX } : {}),
                       },
                       {
                           stroke: muted,
                           grid,
                           ticks,
-                          size: yAxisSize,
+                          gap,
+                          size: yAxisSize(props.tight ? 0 : PLOT_LEFT_PX),
                           // Below the axis is still an amount: no minus signs.
                           values: (_u, splits) => splits.map((v) => (props.axisFormat ?? props.format)(Math.abs(v))),
                       },
@@ -214,9 +226,11 @@ export function TimeChart(props: TimeChartProps): JSX.Element {
     // theme, whose colors the canvas resolved when it was built), or when it
     // has none yet; otherwise only a new size, or new data.
     createEffect(
-        on([() => props.series, () => props.sparkline, () => props.timeAxis, appliedWindowTheme], () => build(), {
-            defer: true,
-        })
+        on(
+            [() => props.series, () => props.sparkline, () => props.timeAxis, () => props.tight, appliedWindowTheme],
+            () => build(),
+            { defer: true }
+        )
     );
     createEffect(
         on(size, (s) => {
@@ -231,7 +245,7 @@ export function TimeChart(props: TimeChartProps): JSX.Element {
     );
 
     return (
-        <div class={`sysinfo-chart ${props.class ?? ""}`}>
+        <div class={`sysinfo-chart ${props.tight ? "sysinfo-chart--tight" : ""} ${props.class ?? ""}`}>
             <Show when={props.title}>
                 <div class="sysinfo-chart-title">{props.title}</div>
             </Show>
@@ -250,19 +264,23 @@ type SingleLinePlotProps = {
     yvalMeta: TimeSeriesMeta;
     blockId: string;
     defaultColor: string;
-    title?: boolean;
     sparkline?: boolean;
     targetLen: number;
     intervalSecs: number;
     syncKey?: string;
 };
 
-/** One metric, as the plot types show it: its color, unit and range from its metadata. */
+/**
+ * One metric, as a simple view shows it: titled with its figures now and over
+ * the window, its unit on the axis, its color and range from its metadata.
+ */
 export function SingleLinePlot(props: SingleLinePlotProps): JSX.Element {
+    const format = (v: number) => unitFormat(props.yvalMeta)(v);
+    const name = () => props.yvalMeta?.name ?? props.yval;
     const series = (): SeriesSpec[] => [
         {
             key: props.yval,
-            label: props.yvalMeta?.name ?? props.yval,
+            label: name(),
             color: props.yvalMeta?.color || props.defaultColor,
         },
     ];
@@ -271,13 +289,13 @@ export function SingleLinePlot(props: SingleLinePlotProps): JSX.Element {
             plotData={props.plotData}
             series={series()}
             yRange={(rows) => yRange(rows, props.yval, props.yvalMeta)}
-            format={(v) => formatValue(v, props.yvalMeta?.decimalPlaces ?? 0, props.yvalMeta?.label ?? "")}
-            axisFormat={(v) => formatValue(v, props.yvalMeta?.decimalPlaces ?? 0, "")}
+            format={format}
             targetLen={props.targetLen}
             intervalSecs={props.intervalSecs}
             syncKey={props.syncKey}
             sparkline={props.sparkline}
-            title={props.title ? props.yvalMeta?.name : undefined}
+            title={props.sparkline ? undefined : titled(name(), figures(props.plotData, props.yval, format))}
+            tight
             class="min-h-[100px]"
         />
     );

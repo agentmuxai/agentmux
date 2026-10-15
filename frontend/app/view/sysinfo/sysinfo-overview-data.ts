@@ -9,7 +9,7 @@
  * docs/reports/REPORT_SYSINFO_REWRITE_AND_MODERN_MONITOR_2026_10_13.md section 5.3.
  */
 
-import { niceCeil } from "./sysinfo-chart";
+import { formatValue, niceCeil } from "./sysinfo-chart";
 import type { DataItem } from "./sysinfo-types";
 
 /** The visible window's view of one metric. */
@@ -81,17 +81,40 @@ export function formatRate(mbps: number | null | undefined): string {
     return `${(v * 1000).toFixed(0)} KB/s`;
 }
 
+/** How a metric's values read, by its unit: "50%", "12.0 GB", "400 KB/s". */
+export function unitFormat(meta: TimeSeriesMeta | undefined): (v: number) => string {
+    switch (meta?.label) {
+        case "%":
+            return (v) => formatValue(v, 0, "%");
+        case "GB":
+            return formatGB;
+        case "MB/s":
+            return formatRate;
+        default:
+            return (v) => formatValue(v, meta?.decimalPlaces ?? 0, meta?.label ?? "");
+    }
+}
+
 /** A size given in GB, to one decimal. */
 export function formatGB(gb: number | null | undefined): string {
     if (gb == null || !Number.isFinite(gb)) return "–";
     return `${gb.toFixed(1)} GB`;
 }
 
+/** "29% now, 16% – 62%": a chart's title figures over the window. */
+export function figures(rows: DataItem[], key: string, f: (v: number) => string): string {
+    const s = windowStats(rows, key);
+    return s ? `${f(s.now)} now, ${f(s.min)} – ${f(s.max)}` : "";
+}
+
+/** A chart's title: its name, then its figures when it has any. */
+export const titled = (name: string, fig: string): string => (fig ? `${name}: ${fig}` : name);
+
 /** One area shown alone, in up to three charts. */
 export type FocusArea = "cpu" | "mem" | "disk" | "net";
 
-/** What the pane shows: one area, or `advanced`, every area at once. */
-export type AreaChoice = FocusArea | "advanced";
+/** What the pane shows: one area, or `everything`, every area at once. */
+export type AreaChoice = FocusArea | "everything";
 
 /** The area a pane shows until one is chosen. */
 const DEFAULT_AREA: AreaChoice = "cpu";
@@ -102,11 +125,12 @@ export const FOCUS_CHOICES = [
     { value: "mem", label: "Memory" },
     { value: "disk", label: "Disk" },
     { value: "net", label: "Network" },
-    { value: "advanced", label: "Advanced" },
+    { value: "everything", label: "Everything" },
 ] as const;
 
-/** A saved area, or the default for anything else. */
+/** A saved area, or the default for anything else. `advanced` is what Everything was saved as before it was renamed. */
 export function toAreaChoice(v: unknown): AreaChoice {
+    if (v === "advanced") return "everything";
     return FOCUS_CHOICES.some((c) => c.value === v) ? (v as AreaChoice) : DEFAULT_AREA;
 }
 

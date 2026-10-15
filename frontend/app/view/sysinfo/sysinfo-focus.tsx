@@ -18,10 +18,12 @@ import { CoreHeatmap } from "./sysinfo-heatmap";
 import {
     BUSIEST_CORE,
     coreKeys,
+    figures,
     type FocusArea,
     formatGB,
     formatRate,
     mirroredRange,
+    titled,
     volumes,
     windowStats,
     withBusiestCore,
@@ -44,13 +46,6 @@ type FocusProps = {
     syncKey: string;
 };
 
-/** "29% now, 16% – 62%": a chart's title figures over the window. */
-function figures(rows: DataItem[], key: string, f: (v: number) => string): string {
-    const s = windowStats(rows, key);
-    return s ? `${f(s.now)} now, ${f(s.min)} – ${f(s.max)}` : "";
-}
-
-const titled = (name: string, fig: string) => (fig ? `${name}: ${fig}` : name);
 
 export function FocusView(props: FocusProps): JSX.Element {
     const rows = () => props.plotData;

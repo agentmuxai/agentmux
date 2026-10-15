@@ -101,8 +101,8 @@ describe("SingleLinePlot on uPlot", () => {
         // Only the time is shared between the pane's charts, never a y value.
         expect(opts.cursor.sync.scales).toEqual(["x", null]);
         expect([opts.width, opts.height]).toEqual([600, 200]);
-        // Fixed sides, so the charts and the core heatmap in one pane line up.
-        expect(opts.padding).toEqual([null, 36, null, 0]);
+        // Against the pane's edges: no gutter on the left, only the room its last time label needs on the right.
+        expect(opts.padding).toEqual([7, null, null, 0]);
         expect(opts.scales.y.range()).toEqual([0, 100]);
         // The x window ends at the newest sample and spans five minutes.
         expect(opts.scales.x.range()).toEqual([(base + 1000) / 1000 - 300, (base + 1000) / 1000]);
@@ -128,13 +128,13 @@ describe("SingleLinePlot on uPlot", () => {
         expect(calls[1][1]).toEqual([40, 55, 60]);
     });
 
-    it("labels the time axis to the second on a short window, and the y axis without a unit", async () => {
+    it("labels the time axis to the second on a short window, and the y axis with its unit", async () => {
         mount(() => series(sample(base, 40)));
         await vi.advanceTimersByTimeAsync(200);
         const [x, y] = made.charts[0].opts.axes;
         const t = new Date(2026, 9, 13, 8, 52, 30).getTime() / 1000;
         expect(x.values(null, [t, t + 30], 0, 80, 30)).toEqual(["8:52:30", "8:53:00"]);
-        expect(y.values(null, [0, 50, 100])).toEqual(["0", "50", "100"]);
+        expect(y.values(null, [0, 50, 100])).toEqual(["0%", "50%", "100%"]);
     });
 
     it("is built again when the theme changes, so its canvas takes the new colors", async () => {
