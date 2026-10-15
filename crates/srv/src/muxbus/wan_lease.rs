@@ -472,6 +472,14 @@ pub(crate) enum Holder {
 const HOLDER_FRESH: Duration = Duration::from_secs(20);
 
 static HOLDER_CACHE: LazyLock<Mutex<HashMap<String, (Holder, Instant)>>> = LazyLock::new(Default::default);
+
+/// A cached answer's key: the agent and the credential it was asked with,
+/// since the answer is the credential's account's. A switched account never
+/// reuses another account's answer.
+fn holder_key(agent: &str, token: &str) -> String {
+    use sha2::Digest;
+    format!("{}#{}", &hex::encode(sha2::Sha256::digest(token.as_bytes()))[..16], key(agent))
+}
 static HOLDER_UNSUPPORTED_UNTIL: LazyLock<Mutex<Option<Instant>>> = LazyLock::new(Default::default);
 
 /// Ask the relay who holds `agent`'s lease, as `caller` (the message's
@@ -481,7 +489,7 @@ pub(crate) async fn holder(base: &str, agent: &str, caller: &str, token: &str, h
     if HOLDER_UNSUPPORTED_UNTIL.lock().unwrap_or_else(|e| e.into_inner()).is_some_and(|t| t > Instant::now()) {
         return Holder::Unsupported;
     }
-    if let Some((answer, at)) = HOLDER_CACHE.lock().unwrap_or_else(|e| e.into_inner()).get(&key(agent)) {
+    if let Some((answer, at)) = HOLDER_CACHE.lock().unwrap_or_else(|e| e.into_inner()).get(&holder_key(agent, token)) {
         if at.elapsed() < HOLDER_FRESH {
             return answer.clone();
         }
@@ -518,7 +526,7 @@ pub(crate) async fn holder(base: &str, agent: &str, caller: &str, token: &str, h
     HOLDER_CACHE
         .lock()
         .unwrap_or_else(|e| e.into_inner())
-        .insert(key(agent), (answer.clone(), Instant::now()));
+        .insert(holder_key(agent, token), (answer.clone(), Instant::now()));
     answer
 }
 
@@ -594,7 +602,15 @@ mod tests {
         drop(closed);
         let lost = format!("HolderLost-{}", &uuid::Uuid::new_v4().to_string()[..8]);
         assert_eq!(holder(&dead, &lost, "lark", "tok", &http).await, Holder::Unreachable);
-        assert!(HOLDER_CACHE.lock().unwrap().get(&key(&lost)).is_none());
+        assert!(HOLDER_CACHE.lock().unwrap().get(&holder_key(&lost, "tok")).is_none());
+    }
+
+    /// An answer is the asking credential's account's: another credential
+    /// (a switched account) never reuses it.
+    #[test]
+    fn a_cached_holder_answer_belongs_to_its_credential() {
+        assert_eq!(holder_key("AgentY", "tok-a"), holder_key("agenty", "tok-a"));
+        assert_ne!(holder_key("agenty", "tok-a"), holder_key("agenty", "tok-b"));
     }
 
     /// The holder query's answers. Anything the relay
