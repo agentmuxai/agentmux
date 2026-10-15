@@ -285,9 +285,11 @@ export function NativeMemoryManager(): JSX.Element {
             })
             .catch(() => {});
     };
-    for (const event of [WpsEvent.MemoriesChanged, WpsEvent.AgentContentChanged, WpsEvent.SkillsChanged, WpsEvent.AgentSkillsChanged]) {
-        onCleanup(onMuxEvent(event, () => untrack(agents).forEach(fetchLaunchCostFor)));
-    }
+    const refetchLaunchCosts = () => untrack(agents).forEach(fetchLaunchCostFor);
+    onCleanup(onMuxEvent(WpsEvent.MemoriesChanged, refetchLaunchCosts));
+    onCleanup(onMuxEvent(WpsEvent.AgentContentChanged, refetchLaunchCosts));
+    onCleanup(onMuxEvent(WpsEvent.SkillsChanged, refetchLaunchCosts));
+    onCleanup(onMuxEvent(WpsEvent.AgentSkillsChanged, refetchLaunchCosts));
 
     // The open panes, for their windows: refetched when a pane opens or
     // closes anywhere (tracked blocks), and when the user comes back to this
