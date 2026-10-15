@@ -156,6 +156,17 @@ pub fn inline_bytes(blocks: &[serde_json::Value]) -> u64 {
 /// The `<attached_files>` block. `inlined` holds the numbers of the items
 /// Claude was also given inline.
 pub fn list_block(items: &[Resolved], missing: &[String], inlined: &[usize]) -> String {
+    list_block_from(None, items, missing, inlined)
+}
+
+/// The `<attached_files>` block for files another agent sent with a jekt
+/// (SPEC_JEKT_FILE_TRANSFER_2026_10_05.md §6.2): the same list, with a lead
+/// naming the sender instead of the user.
+pub fn jekt_list_block(sender: &str, items: &[Resolved], missing: &[String], inlined: &[usize]) -> String {
+    list_block_from(Some(sender), items, missing, inlined)
+}
+
+fn list_block_from(sender: Option<&str>, items: &[Resolved], missing: &[String], inlined: &[usize]) -> String {
     let total = items.len() + missing.len();
     let all_images = missing.is_empty() && items.iter().all(|i| i.is_image());
     let (one, many) = if all_images {
@@ -167,9 +178,10 @@ pub fn list_block(items: &[Resolved], missing: &[String], inlined: &[usize]) -> 
     out.push_str(BLOCK_OPEN);
     out.push('\n');
     let noun = if total == 1 { one } else { many };
-    out.push_str(&format!(
-        "The user attached {total} {noun}. The numbers match how the user refers to them."
-    ));
+    out.push_str(&match sender {
+        None => format!("The user attached {total} {noun}. The numbers match how the user refers to them."),
+        Some(sender) => format!("{sender} sent {total} {noun} with this message."),
+    });
     if !inlined.is_empty() && inlined.len() == items.len() {
         out.push_str(" They are shown above; the files are listed here too.");
     } else if !inlined.is_empty() {
@@ -364,6 +376,15 @@ mod tests {
         assert!(list_block(&items, &[], &[1]).contains("Image 1 is shown above"));
         assert!(list_block(&items, &[], &[]).contains("Open them from these paths"));
         assert!(list_block(&items, &[], &[]).contains("The user attached 2 images."));
+    }
+
+    #[test]
+    fn a_jekt_list_names_its_sender_and_keeps_the_item_lines() {
+        let items = vec![item(1, "a.png", "/s/aa.v1-e2000.send.png")];
+        let list = jekt_list_block("agentx", &items, &[], &[]);
+        assert!(list.contains("agentx sent 1 image with this message. Open them"), "{list}");
+        assert!(!list.contains("The user"));
+        assert!(list.contains("\n1. a.png — /s/aa.v1-e2000.send.png\n"));
     }
 
     #[test]

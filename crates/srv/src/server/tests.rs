@@ -6060,6 +6060,10 @@ async fn m4a2_every_actor_site_counts_a_name_that_is_not_plainly_the_callers() {
 /// through the real handler, so dropping the call fails this test.
 #[tokio::test]
 async fn m4a2_a_claims_carried_uid_that_is_not_the_tokens_is_counted() {
+    // Its attributed claims move the `work_claim` site's counters too, which
+    // `m4a2_every_actor_site_counts_a_name_that_is_not_plainly_the_callers`
+    // asserts exactly.
+    let _counters = M4_ACTOR_COUNTERS.lock().await;
     use crate::backend::storage::agents::test_agent_def;
     let state = test_state();
     let mut def = test_agent_def("uid-m4a2-claim", "Claimer", "claude", "agent", 1, "");

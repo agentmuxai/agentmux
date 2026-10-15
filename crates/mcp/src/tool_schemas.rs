@@ -153,7 +153,8 @@ pub(crate) const SEND_MESSAGE_TOOL: &str = r#"{
     "type": "object",
     "properties": {
       "to":      { "type": "string", "description": "Name of the target agent (its AGENTMUX_AGENT_ID value)" },
-      "message": { "type": "string", "description": "Message text to inject into the target agent's conversation" }
+      "message": { "type": "string", "description": "Message text to inject into the target agent's conversation" },
+      "files":   { "type": "array", "items": { "type": "string" }, "maxItems": 10, "description": "Optional: up to 10 files to send with the message, as absolute paths (a relative path is taken from your workspace folder, not your shell's current directory). The receiver gets each one as a local file listed in the message, as if its user had attached it. At most 100 MB per file and 200 MB in total. For now only to an agent on this same AgentMux; to any other agent the send fails and nothing is sent. To pass on a file you received, give its path from the list you got." }
     },
     "required": ["to", "message"]
   }

@@ -39,6 +39,11 @@ pub struct HeldJekt {
     /// would lose a forced escalation (review of #3632).
     pub is_transcript_request: bool,
     pub transcript_request_escalate_forced: bool,
+    /// The files sent with it, as the request's manifest JSON; '' for a
+    /// text-only jekt (SPEC_JEKT_FILE_TRANSFER_2026_10_05.md §4.5). The
+    /// files stay in this instance's attachment store meanwhile: a held
+    /// jekt always started here.
+    pub files_json: String,
     pub sent_at_ms: i64,
     pub expires_at_ms: i64,
     pub attempts: i64,
@@ -81,6 +86,7 @@ fn row_to_held(row: &Row) -> rusqlite::Result<HeldJekt> {
         channel_verified: verdict_from_sql(row.get("channel_verified")?),
         is_transcript_request: row.get::<_, i64>("is_transcript_request")? != 0,
         transcript_request_escalate_forced: row.get::<_, i64>("transcript_request_escalate_forced")? != 0,
+        files_json: row.get("files_json")?,
         sent_at_ms: row.get("sent_at_ms")?,
         expires_at_ms: row.get("expires_at_ms")?,
         attempts: row.get("attempts")?,
@@ -109,9 +115,9 @@ impl Store {
                 (request_id, target_uid, target_agent, source_agent, audit_source_uid,
                  message, priority, jekt_tier, delivery_tier,
                  sig_verified, reagent_verified, lan_verified, channel_verified,
-                 is_transcript_request, transcript_request_escalate_forced,
+                 is_transcript_request, transcript_request_escalate_forced, files_json,
                  sent_at_ms, expires_at_ms, attempts, last_error)
-             SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?18, ?19, ?14, ?15, 0, ''
+             SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?18, ?19, ?20, ?14, ?15, 0, ''
               WHERE (SELECT COUNT(*) FROM db_jekt_held WHERE target_uid = ?2) < ?16
                 AND (SELECT COUNT(*) FROM db_jekt_held) < ?17",
             params![
@@ -134,6 +140,7 @@ impl Store {
                 HELD_PER_CHANNEL,
                 i64::from(held.is_transcript_request),
                 i64::from(held.transcript_request_escalate_forced),
+                held.files_json,
             ],
         )?;
         Ok(if n > 0 { HoldOutcome::Held } else { HoldOutcome::Full })
@@ -215,6 +222,7 @@ mod tests {
             channel_verified: Some(true),
             is_transcript_request: true,
             transcript_request_escalate_forced: true,
+            files_json: String::new(),
             sent_at_ms,
             expires_at_ms: sent_at_ms + HELD_TTL_MS,
             attempts: 0,

@@ -35,7 +35,17 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 "{}/agentmux/reactive/inject",
                 local_url.trim_end_matches('/')
             );
-            let req = signed_jekt(source_agent, to, message);
+            // Files go into this agent's attachment store first; the jekt
+            // names them (SPEC_JEKT_FILE_TRANSFER_2026_10_05.md §3.1).
+            let files = match super::send_files::files_arg(arguments)? {
+                Some(paths) => {
+                    let local = super::send_files::check(&paths)?;
+                    Some(super::send_files::upload(local, cx).await?)
+                }
+                None => None,
+            };
+            let sent_names: Vec<String> = files.iter().flatten().map(|f| f.name.clone()).collect();
+            let req = signed_jekt_with_files(source_agent, to, message, files);
 
             let resp = client
                 .post(&url)
@@ -56,7 +66,12 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 .await
                 .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
 
-            send_message_outcome(to, &result)
+            let outcome = send_message_outcome(to, &result)?;
+            Ok(if sent_names.is_empty() {
+                outcome
+            } else {
+                format!("{outcome}\nFiles: {}", sent_names.join(", "))
+            })
         }
         "DiscoverAgents" => {
             if local_url.is_empty() || auth_key.is_empty() {

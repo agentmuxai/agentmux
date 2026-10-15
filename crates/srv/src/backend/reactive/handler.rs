@@ -4,44 +4,12 @@
 
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
-use std::time::{Duration, Instant};
 
-use super::sanitize::{format_injected_message, is_sensitive_message, sanitize_message, validate_agent_id, wrap_jekt_message};
+use super::sanitize::{format_injected_message, is_sensitive_message, sanitize_message, validate_agent_id, wrap_jekt_message_with_files};
 use super::types::*;
 use super::{audit_hash, now_unix_millis, AUDIT_LOG_MAX, RATE_LIMIT_MAX};
 
-// ---- Rate Limiter ----
-
-pub(super) struct RateLimiter {
-    tokens: u32,
-    max_tokens: u32,
-    last_refill: Instant,
-}
-
-impl RateLimiter {
-    pub(super) fn new(max_tokens: u32) -> Self {
-        Self {
-            tokens: max_tokens,
-            max_tokens,
-            last_refill: Instant::now(),
-        }
-    }
-
-    pub(super) fn check(&mut self) -> bool {
-        let now = Instant::now();
-        let elapsed = now.duration_since(self.last_refill);
-        if elapsed >= Duration::from_secs(1) {
-            self.tokens = self.max_tokens;
-            self.last_refill = now;
-        }
-        if self.tokens > 0 {
-            self.tokens -= 1;
-            true
-        } else {
-            false
-        }
-    }
-}
+pub(super) use super::rate_limiter::RateLimiter;
 
 // ---- Supervisor nudge-ceiling tracking ----
 
@@ -1274,6 +1242,8 @@ impl Handler {
             || is_unverified_sender
             || matches!(declared_tier, Some(super::types::JektTier::Sensitive))
             || is_sensitive_message(&sanitized)
+            // A file's name is scanned like its message (file transfer spec §6.4).
+            || req.files.iter().flatten().any(|f| is_sensitive_message(&f.name))
             || req.is_transcript_request;
         let effective_tier = if is_sensitive { "sensitive" } else {
             declared_tier.map_or("coord", |t| match t {
@@ -1362,7 +1332,7 @@ impl Handler {
         // checked," e.g. a Slack-bridge message) from `Some(true)`
         // ("actually verified") rather than collapsing both to the same
         // label — see `wrap_jekt_message`'s doc comment.
-        let wrapped = wrap_jekt_message(
+        let wrapped = wrap_jekt_message_with_files(
             &sanitized,
             req.source_agent.as_deref(),
             &req.target_agent,
@@ -1377,6 +1347,7 @@ impl Handler {
             &request_id,
             priority,
             req.held_sent_at_ms,
+            req.files_delivery.as_ref(),
         );
 
         // Legacy source-prefix format preserved for PTY controllers that don't

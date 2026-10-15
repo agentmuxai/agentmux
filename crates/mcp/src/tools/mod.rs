@@ -21,6 +21,7 @@ mod overlap;
 mod panes;
 mod presets;
 mod pty_shell;
+mod send_files;
 mod shell;
 mod ui;
 mod widgets;
@@ -46,6 +47,23 @@ fn pane_arg(arguments: &Value) -> Option<String> {
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .map(str::to_string)
+}
+
+/// A path the agent gave, made absolute against its own workspace
+/// (`AGENTMUX_AGENT_WORKDIR`, else this process's directory). It doesn't
+/// follow a `cd` in the agent's shell, so tools ask for absolute paths.
+fn resolve_workdir_path(path: &str) -> String {
+    let p = std::path::Path::new(path);
+    if p.is_absolute() {
+        return path.to_string();
+    }
+    let base = std::env::var("AGENTMUX_AGENT_WORKDIR")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::current_dir().ok())
+        .unwrap_or_default();
+    base.join(p).to_string_lossy().into_owned()
 }
 
 /// A family's answer for a tool it doesn't own.

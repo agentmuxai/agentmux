@@ -25,146 +25,8 @@ use super::AppState;
 /// indefinitely, hanging the original request (reagent P1 on PR #2350).
 const MAX_FORWARD_HOPS: u8 = 3;
 
-/// Echo a successfully-sent jekt into the SENDER's own pane
-/// (SPEC_JEKT_SECURITY_AND_VISIBILITY §3.2).
-///
-/// Appends a `{"type":"user",...}` NDJSON line carrying the same
-/// `[JEKT:...]` marker block the receiver got (re-wrapped with identical
-/// fields) to the sender's `output` blockfile — live MPS append (renders
-/// immediately in an open agent view), persisted history
-/// (`parseHistoryLines` rebuilds on reopen), and global transcript mirror.
-/// The frontend's `tryParseJekt` sees FROM == this pane's agent and renders
-/// it as an *outgoing* JektBubble (stream-parser.ts direction detection —
-/// this is the producer that comment says doesn't exist yet).
-///
-/// No-op when the sender isn't a registered agent on this instance (cron,
-/// external callers) or is messaging itself (the incoming marker already
-/// lands in the same pane).
-///
-/// `reagent_verified`/`lan_verified` should be the SAME values the original
-/// delivery's `Handler::inject_message_inner` computed `effective_tier`/
-/// `requires_stop` from (not re-derived) — see the call site's own doc
-/// comment inline below for why passing anything else produces a
-/// self-contradictory echoed marker (reagentx P1 on PR #2623).
-/// The delivery-tier + verification signals an echoed marker must carry.
-///
-/// Grouped into a named struct rather than left as positionals because
-/// `sig_verified`, `reagent_verified` and `lan_verified` are three consecutive
-/// `Option<bool>`s: any two of them can be transposed at a call site and the
-/// compiler cannot say a word. The failure mode is a silently mislabelled TRUST
-/// field on a security marker, which is not the kind of bug to leave to
-/// argument order.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) struct EchoTrust<'a> {
-    pub delivery_tier: &'a str,
-    pub sig_verified: Option<bool>,
-    pub reagent_verified: Option<bool>,
-    pub lan_verified: Option<bool>,
-    pub channel_verified: Option<bool>,
-}
-
-/// The trust an echoed marker should carry after a forward, given the
-/// peer's response body. The RECEIVING instance is the one that computes
-/// `channel_verified` (the forwarder holds the sender's HMAC key, so §D2
-/// step 2 of SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md makes it skip
-/// cross-channel verification) and threads it back via
-/// `InjectionResponse::channel_verified`, exactly as it already does for
-/// `effective_tier`/`requires_stop`. Taking it from the body keeps the
-/// sender's echoed `TRUST=` consistent with the `ESCALATE=` the same body
-/// supplies — otherwise a sensitive cross-channel message could echo as
-/// `TRUST=self-declared … ESCALATE=none`, which contradicts itself (codex
-/// P2 on #3064). A body without the field (an older peer) leaves the
-/// caller's value alone.
-fn echo_trust_from_peer_body<'a>(body: &serde_json::Value, base: EchoTrust<'a>) -> EchoTrust<'a> {
-    EchoTrust {
-        channel_verified: body
-            .get("channel_verified")
-            .and_then(|v| v.as_bool())
-            .or(base.channel_verified),
-        ..base
-    }
-}
-
-pub(super) fn echo_jekt_to_sender(
-    state: &AppState,
-    source_agent: Option<&str>,
-    target_agent: &str,
-    message: &str,
-    msgid: &str,
-    effective_tier: Option<&str>,
-    requires_stop: Option<bool>,
-    trust: EchoTrust<'_>,
-    priority: &str,
-) {
-    let EchoTrust {
-        delivery_tier,
-        sig_verified,
-        reagent_verified,
-        lan_verified,
-        channel_verified,
-    } = trust;
-    let Some(src) = source_agent.filter(|s| !s.is_empty()) else {
-        return;
-    };
-    if src.eq_ignore_ascii_case(target_agent) {
-        return;
-    }
-    let Some(sender_reg) = state.reactive_handler.get_agent(src) else {
-        return;
-    };
-
-    let sanitized = crate::backend::reactive::sanitize::sanitize_message(message);
-    let wrapped = crate::backend::reactive::sanitize::wrap_jekt_message(
-        &sanitized,
-        Some(&sender_reg.agent_id),
-        target_agent,
-        effective_tier.unwrap_or("coord"),
-        delivery_tier,
-        sig_verified,
-        // reagentx P1 on PR #2623: these used to be hardcoded `None, None`
-        // ("sender-echo is inherently host-tier, so WAN/LAN verification is
-        // meaningless here") — true for TRUST/SIG rendering alone, but as of
-        // SPEC_JEKT_SENSITIVE_TIER_VERIFIED_SENDER_NO_STOP_2026_08_17.md
-        // that assumption broke: `requires_stop` (just above) already
-        // reflects the REAL delivery's verification, so hardcoding these to
-        // `None` produced a self-contradictory echoed marker — `ESCALATE=none`
-        // (implying a verified sender) next to `TRUST=network-claimed` with
-        // no `SIG=` field (implying an unverified one). Passing the same
-        // verification signals the original decision was made from keeps
-        // the echoed marker internally consistent with its own `ESCALATE=`.
-        reagent_verified,
-        lan_verified,
-        channel_verified,
-        // The sender-side echo never has a WAN verdict: WAN verification
-        // happens only at the receiving install (W3-S §2.3), after the echo.
-        None,
-        // Defaults to `true` (STOP) when the caller couldn't tell us —
-        // matches `effective_tier` defaulting to the more-cautious "coord"
-        // rather than assuming "info" above; never silently downgrades a
-        // sensitive echo to tag-only just because this hop lost the signal.
-        requires_stop.unwrap_or(true),
-        msgid,
-        priority,
-        None,
-    );
-    let line = serde_json::json!({
-        "type": "user",
-        "message": { "role": "user", "content": wrapped }
-    });
-    let data = format!("{line}\n");
-    let global_zone = crate::backend::blockcontroller::shell::resolve_global_output_zone(
-        &Some(state.mstore.clone()),
-        &sender_reg.block_id,
-    );
-    crate::backend::blockcontroller::shell::handle_append_block_file(
-        &state.broker,
-        &sender_reg.block_id,
-        crate::backend::agent_session::OUTPUT_FILE,
-        data.as_bytes(),
-        Some(&state.filestore),
-        global_zone.as_deref(),
-    );
-}
+pub(super) use super::jekt_echo::{echo_jekt_to_sender, EchoTrust};
+use super::jekt_echo::{echo_jekt_to_sender_with_files, echo_trust_from_peer_body};
 
 /// One forward candidate: where to POST, how to authenticate, and what the
 /// echoed marker should claim about the hop if it lands.
@@ -828,6 +690,14 @@ pub(crate) async fn deliver(
     req.route_unsigned_target();
     resolve_transcript_request_tier_fields(&state.mstore, &mut req);
 
+    // Files sent with it (SPEC_JEKT_FILE_TRANSFER_2026_10_05.md §3.3, §6):
+    // refused outright unless the msgid binds them, then prepared for the
+    // agent here, since the handler does no I/O.
+    if let Err(error) = super::jekt_files::check(&req) {
+        return files_refused(&req, error);
+    }
+    super::jekt_files::prepare(&mut req).await;
+
     // 1. Try local ReactiveHandler first (fast path — same instance).
     let resp = state.reactive_handler.inject_message(req.clone());
     if resp.success {
@@ -852,6 +722,21 @@ pub(crate) async fn deliver(
         .as_deref()
         .map(|e| e.starts_with("agent not found"))
         .unwrap_or(false);
+
+    // Files don't leave this instance yet (spec §8, Phase 1): hold them for
+    // an agent defined here that isn't running, or say why they can't go.
+    if is_not_found && req.files.is_some() {
+        if let Some(held) = hold_for_absent_target(state, auth_via, &req, &resp, HoldReason::NotRunning).await {
+            return held;
+        }
+        return files_refused(
+            &req,
+            format!(
+                "{} isn't on this AgentMux; files can only be sent to an agent on the same AgentMux for now",
+                req.target_agent
+            ),
+        );
+    }
 
     if is_not_found && req.forward_hops >= MAX_FORWARD_HOPS {
         tracing::warn!(
@@ -1129,6 +1014,22 @@ pub(crate) async fn deliver(
     serde_json::to_value(&resp).unwrap_or_default()
 }
 
+/// The answer for a jekt whose files can't be accepted: nothing delivered.
+fn files_refused(req: &InjectionRequest, error: String) -> serde_json::Value {
+    serde_json::to_value(crate::backend::reactive::types::InjectionResponse {
+        success: false,
+        request_id: req.request_id.clone().unwrap_or_default(),
+        block_id: None,
+        error: Some(error),
+        timestamp: agentmux_common::time::now_ms_u64(),
+        effective_tier: None,
+        requires_stop: None,
+        channel_verified: None,
+        deferred: None,
+    })
+    .unwrap_or_default()
+}
+
 /// Echo a locally delivered jekt into the sender's own pane, as every
 /// successful delivery path does.
 fn echo_local_delivery(
@@ -1136,7 +1037,7 @@ fn echo_local_delivery(
     req: &InjectionRequest,
     resp: &crate::backend::reactive::types::InjectionResponse,
 ) {
-    echo_jekt_to_sender(
+    echo_jekt_to_sender_with_files(
         state,
         req.source_agent.as_deref(),
         &req.target_agent,
@@ -1156,6 +1057,7 @@ fn echo_local_delivery(
             channel_verified: req.channel_verified,
         },
         req.priority.as_deref().unwrap_or("normal"),
+        req.files_delivery.as_ref(),
     );
 }
 
@@ -1204,6 +1106,11 @@ pub(crate) async fn hold_for_absent_target(
         channel_verified: req.channel_verified,
         is_transcript_request: req.is_transcript_request,
         transcript_request_escalate_forced: req.transcript_request_escalate_forced,
+        files_json: req
+            .files
+            .as_ref()
+            .and_then(|f| serde_json::to_string(f).ok())
+            .unwrap_or_default(),
         sent_at_ms: now,
         expires_at_ms: now + HELD_TTL_MS,
         attempts: 0,

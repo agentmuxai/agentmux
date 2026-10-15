@@ -929,12 +929,18 @@ export class ClaudeCodeStreamParser {
                 ? "outgoing"
                 : "incoming";
 
+        // Files sent with it: srv puts its `<attached_files>` list last in the
+        // body and says so with FILES= (a sender's own text can't write one).
+        const body = stripJektEnvelope(match[2], tier);
+        const files = fields.FILES !== undefined ? splitAttachedImages(body) : { text: body, attachments: [] };
+
         return {
             type: "jekt_message",
             id: this.nextIdOf("jekt"),
             from: fields.FROM,
             to: fields.TO,
-            message: stripJektEnvelope(match[2], tier),
+            message: files.text,
+            ...(files.attachments.length ? { attachments: files.attachments } : {}),
             raw: event.message,
             tier,
             deliveryTier,

@@ -368,6 +368,11 @@ pub struct InjectRequest {
     pub lan_sig_v2: Option<String>,
     // No WAN signature: srv signs a WAN jekt itself, at the origin, for the
     // agent its token names (docs/specs/SPEC_WAN_JEKT_SIGNED_BY_SRV_2026_10_14.md).
+    /// Files sent with this jekt, already in the sender's attachment store.
+    /// `request_id` ends in their manifest digest, which binds them to every
+    /// signature (`agentmux_common::jekt_files`). Absent on a text-only jekt.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub files: Option<Vec<crate::jekt_files::JektFile>>,
 }
 
 // ── Pane ──────────────────────────────────────────────────────────────────────
