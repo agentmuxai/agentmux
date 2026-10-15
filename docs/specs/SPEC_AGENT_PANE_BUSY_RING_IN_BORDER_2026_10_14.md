@@ -92,10 +92,15 @@ same colour as the band's "on" sections, not a dark gap.
 | Direction | clockwise | unchanged |
 | Duty | 10° on / 10° off | **10° on / 10° off by default** (§5 Q1 offers shorter breaks) |
 | On colour | `--progress-bar-color` | unchanged: the ring's own colour |
-| Off colour | ring 25% + background 75% | **ring 40% + background 60%** (`--busy-ring-off`, §2.5) |
+| Off colour | ring 25% + background 75% | **ring 40% + opaque background 60%** (`--busy-ring-off`, §2.5) |
 | Thickness | 1px, *inside* the 2px ring | **the 2px ring itself**; never changes |
 
-- **The off colour** is mixed toward `--main-bg-color`, so in every theme,
+- **The off colour** is mixed toward the pane background *without the
+  window's transparency* (`--pane-bg-opaque`). `--main-bg-color` carries
+  `--window-opacity` when the window is transparent or blurred, and mixed
+  toward that, the off sections would composite back toward the ring below
+  and lose most of their contrast (muxreview on #4934). Mixed toward the
+  pane background, in every theme,
   light or dark, it reads as a *break* in the line (the "broken ants") rather
   than a second, competing colour. At 40% it differs clearly from the ring.
   Unlike today's 25% it stays visible against the background, so the pane's
@@ -130,12 +135,15 @@ In [`PaneChrome.scss`](../../frontend/app/element/PaneChrome.scss) on `.pane-sta
 
 ```scss
 --pane-ring-width: 2px;   // the ring's border AND the busy band's padding: one value, so they can't drift
---busy-ring-off: color-mix(in srgb, var(--progress-bar-color) 40%, var(--main-bg-color));
---busy-ring-off-stopping: color-mix(in srgb, var(--progress-bar-color) 70%, var(--main-bg-color));
+--pane-bg-opaque: rgb(from var(--main-bg-color) r g b / 1);   // the pane background, window transparency removed
+--busy-ring-off: color-mix(in srgb, var(--progress-bar-color) 40%, var(--pane-bg-opaque));
+--busy-ring-off-stopping: color-mix(in srgb, var(--progress-bar-color) 70%, var(--pane-bg-opaque));
 ```
 
 `.pane-stack::after` uses `border: var(--pane-ring-width) solid …`, and the
-bar uses `padding: var(--pane-ring-width)`.
+bar uses `padding: var(--pane-ring-width)` over an opaque base of
+`--pane-bg-opaque`, so a translucent ring colour composites the same way on
+every pane.
 
 ## 3. Verification
 

@@ -80,8 +80,13 @@
     // they read as breaks in the line; while stopping they move closer to the
     // ring. SPEC_AGENT_PANE_BUSY_RING_IN_BORDER_2026_10_14.md §2.5.
     --pane-ring-width: 2px;
-    --busy-ring-off: color-mix(in srgb, var(--progress-bar-color) 40%, var(--main-bg-color));
-    --busy-ring-off-stopping: color-mix(in srgb, var(--progress-bar-color) 70%, var(--main-bg-color));
+    // The pane background without the window's transparency (`--main-bg-color`
+    // carries `--window-opacity` when the window is transparent or blurred):
+    // mixed toward a translucent background, the off colour would composite
+    // back toward the ring and lose its contrast (muxreview on #4934).
+    --pane-bg-opaque: rgb(from var(--main-bg-color) r g b / 1);
+    --busy-ring-off: color-mix(in srgb, var(--progress-bar-color) 40%, var(--pane-bg-opaque));
+    --busy-ring-off-stopping: color-mix(in srgb, var(--progress-bar-color) 70%, var(--pane-bg-opaque));
 
     &.pane-stack-focused {
         --progress-bar-color: var(--pane-ring-color, var(--accent-color));

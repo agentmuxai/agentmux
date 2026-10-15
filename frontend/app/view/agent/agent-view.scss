@@ -342,9 +342,10 @@
     -webkit-mask-composite: xor;
     mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
     mask-composite: exclude;
-    // The ring's own colour under the pattern, so anything the rotating
-    // layer leaves uncovered reads as ring, not as a gap.
-    background: var(--progress-bar-color, var(--accent-color));
+    // An opaque base under the pattern: the pane background without the
+    // window's transparency, so a translucent ring colour composites the
+    // same way on every pane and the off sections keep their contrast.
+    background: var(--pane-bg-opaque, var(--main-bg-color));
 
     &::before {
         content: "";
@@ -353,9 +354,9 @@
         // Solid fallback for browsers without conic-gradient() support —
         // ignored (declaration below wins) wherever it's understood.
         background: var(--progress-bar-color, var(--accent-color));
-        // Every stop is fully opaque (the off wedge mixes against the pane
-        // background, NOT transparent) so the pattern stays crisp over any
-        // theme. The off colour is `--busy-ring-off` (PaneChrome.scss),
+        // The off wedge mixes against the opaque pane background
+        // (`--pane-bg-opaque`), NOT a transparent or translucent one, so the
+        // pattern stays crisp over any theme and window opacity. The off colour is `--busy-ring-off` (PaneChrome.scss),
         // swapped for a closer one while stopping. 10deg wedges (18 pairs around the circle) —
         // roughly matches the original linear version's stripe density
         // at typical pane sizes; exact apparent width naturally varies
