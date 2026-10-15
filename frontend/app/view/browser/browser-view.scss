@@ -45,6 +45,12 @@ $browser-nav-stack-below: 388px;
 .browser-nav-bar {
     zoom: var(--zoomfactor);
     container: browser-nav / inline-size;
+    // Over the page placeholder after it, so the suggestion list, which drops
+    // below the bar, stays on top even if the bar becomes a stacking context
+    // (contain, opacity, transform...). `container-type` alone doesn't make
+    // one in Chrome 154: it implies no layout containment.
+    position: relative;
+    z-index: var(--z-pane-overlay);
     background: var(--main-bg-color);
     border-bottom: 1px solid var(--border-color);
     flex-shrink: 0;
