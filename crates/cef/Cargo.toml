@@ -82,7 +82,8 @@ whoami = "1"
 # run_cli_login. See SPEC_OPENCLAW_AGENT_2026_05_17.md §6.
 portable-pty = "0.9"
 json_comments = "0.2"
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+# Talks only to srv at AGENTMUX_LOCAL_URL (http://127.0.0.1:<port>): no TLS feature on purpose (#4207).
+reqwest = { version = "0.12", default-features = false, features = ["json"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-sys = { version = "0.59", features = [
