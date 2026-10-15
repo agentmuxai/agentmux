@@ -963,6 +963,7 @@ partial list.
 | [`SPEC_BROWSER_PANE_CLICK_DISMISSES_MENUS_2026_08_15`](SPEC_BROWSER_PANE_CLICK_DISMISSES_MENUS_2026_08_15.md) | SPEC — Browser pane: clicking inside it should dismiss open menus/popovers |
 | [`SPEC_BROWSER_PANE_DEFAULT_URL_AND_POPUP_2026_04_21`](SPEC_BROWSER_PANE_DEFAULT_URL_AND_POPUP_2026_04_21.md) | Spec: Browser pane default URL + in-pane popup redirect |
 | [`SPEC_BROWSER_PANE_FOCUS_LOCK`](SPEC_BROWSER_PANE_FOCUS_LOCK.md) | SPEC: Browser Pane Focus Lock |
+| [`SPEC_BROWSER_PANE_INPUT_OWNER_2026_10_15`](SPEC_BROWSER_PANE_INPUT_OWNER_2026_10_15.md) | Browser pane input owner: one state machine per window |
 | [`SPEC_BROWSER_PANE_LIFECYCLE_TESTS`](SPEC_BROWSER_PANE_LIFECYCLE_TESTS.md) | SPEC: Browser Pane Lifecycle — Automated Test Coverage |
 | [`SPEC_BROWSER_PANE_MODULARIZATION`](SPEC_BROWSER_PANE_MODULARIZATION.md) | SPEC: Browser Pane Code Modularization |
 | [`SPEC_BROWSER_PANE_OPTIMISTIC_HEADER_2026_05_18`](SPEC_BROWSER_PANE_OPTIMISTIC_HEADER_2026_05_18.md) | SPEC: Optimistic Browser-Pane Header on Navigation |
