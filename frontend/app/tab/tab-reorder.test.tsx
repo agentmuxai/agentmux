@@ -29,6 +29,7 @@ vi.mock("@/layout/index", () => ({
     getLayoutModelForTabById: (id: string) => hub.models.get(id),
 }));
 vi.mock("@/layout/lib/crossTabDrag", () => ({ clearCrossTabDrop: () => {} }));
+vi.mock("@/layout/lib/layoutIntents", () => ({ layoutDragEnded: () => {} }));
 vi.mock("@/app/drag/CrossWindowDragMonitor", () => ({ setCurrentDragPayload: () => {} }));
 vi.mock("../store/services", () => ({ WorkspaceService: { ReorderTab: () => Promise.resolve() } }));
 vi.mock("@/util/platformutil", async (importOriginal) => ({
