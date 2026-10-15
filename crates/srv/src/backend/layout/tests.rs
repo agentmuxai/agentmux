@@ -835,6 +835,25 @@ fn delete_node_collapses_single_child_parent() {
 }
 
 #[test]
+fn delete_node_keeps_the_promoted_leafs_minimized_flag() {
+    let mut kept = leaf("n1", "keep", 5.0);
+    kept.minimized = true;
+    let mut root = group("root", FlexDirection::Row, 10.0, vec![kept, leaf("n2", "drop", 5.0)]);
+    delete_node(&mut root, "n2").unwrap();
+    assert_eq!(root.id, "n1");
+    assert!(root.minimized, "the promoted leaf stays minimized");
+}
+
+#[test]
+fn a_promoted_leaf_hands_its_minimized_flag_to_the_new_intermediate() {
+    let mut node = leaf("n1", "b1", 5.0);
+    node.minimized = true;
+    ensure_group_node(&mut node);
+    assert!(!node.minimized, "the new group carries no flag");
+    assert!(node.children[0].minimized && node.children[0].id == "n1");
+}
+
+#[test]
 fn delete_node_unknown_id_returns_error() {
     let child = leaf("child", "b1", 5.0);
     let mut root = group("root", FlexDirection::Row, 10.0, vec![child]);

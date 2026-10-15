@@ -109,10 +109,11 @@ fn ensure_group_node(node: &mut LayoutNode) {
             flex_direction: reverse_flex_direction(old_flex),
             size: DEFAULT_NODE_SIZE,
             data: node.data.take(),
-            // Move `extra` (forward-compat catch-all from #688/#689) to the
-            // intermediate so unknown fields the frontend wrote to the leaf
-            // travel with the data, not stay on the new group wrapper.
-            // Mirrors the same transfer in `delete_recursive` line below.
+            // Move `minimized` and `extra` (forward-compat catch-all from
+            // #688/#689) to the intermediate so what the frontend wrote on the
+            // leaf travels with the data, not stays on the new group wrapper.
+            // Mirrors the same transfer in `delete_recursive` below.
+            minimized: std::mem::take(&mut node.minimized),
             extra: std::mem::take(&mut node.extra),
             ..Default::default()
         };
@@ -1043,8 +1044,8 @@ fn delete_recursive(node: &mut LayoutNode, target_id: &str) -> bool {
     if let Some(i) = idx {
         // Found target as a direct child — remove it.
         node.children.remove(i);
-        // Collapse: if only one child remains, promote it.
-        // Preserve `extra` (unknown-field catch-all from #688/#689).
+        // Collapse: if only one child remains, promote it, with its
+        // `minimized` flag and `extra` (unknown-field catch-all from #688/#689).
         if node.children.len() == 1 {
             let sole = node.children.remove(0);
             node.id = sole.id;
@@ -1052,6 +1053,7 @@ fn delete_recursive(node: &mut LayoutNode, target_id: &str) -> bool {
             node.data = sole.data;
             node.flex_direction = sole.flex_direction;
             node.children = sole.children;
+            node.minimized = sole.minimized;
             node.extra = sole.extra;
         }
         return true;
