@@ -168,19 +168,11 @@ wrap_focus_handler! {
             _browser: Option<&mut Browser>,
             source: FocusSource,
         ) -> ::std::os::raw::c_int {
-            // Previously we cancelled FocusSource::NAVIGATION here to
-            // stop page-load from stealing focus away from the main
-            // window. But cancelling on_set_focus during the very
-            // first navigation of a newly-created pane triggered CEF
-            // to fire `on_before_close` on that pane ~10ms later —
-            // reliably reproducible when creating a 2nd browser pane.
-            // The Win32 WndProc subclass below already redirects
-            // page-load SetFocus to the top-level window (see
-            // `browser_pane::hwnd::install_browser_pane_focus_redirect`), which
-            // handles the original focus-steal concern. Returning 0
-            // here so CEF proceeds with normal focus handling at the
-            // Chromium level; Win32 subclass continues to redirect
-            // any resulting Win32 focus change away from the pane.
+            // Never cancelled: cancelling FocusSource::NAVIGATION during
+            // the very first navigation of a newly-created pane made CEF
+            // fire `on_before_close` on that pane ~10ms later (reliably,
+            // when creating a 2nd browser pane). On Windows the input
+            // owner puts back focus a page takes that wasn't asked for.
             tracing::info!("[pane-focus] on_set_focus source={:?} cancel=false", source);
             0
         }

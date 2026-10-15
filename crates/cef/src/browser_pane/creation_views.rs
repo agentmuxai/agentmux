@@ -377,9 +377,9 @@ pub fn create_browser_pane_view(
     // 7b. Return focus to the main window's BrowserView. CEF's default
     //     on_after_created behaviour (fired from add_overlay_view above when
     //     the BrowserView is added to the widget hierarchy) gives focus to the
-    //     new pane browser. On Windows, AgentMuxHandler::on_after_created_browser_pane
-    //     installs a WM_SETFOCUS redirect subclass that catches this steal.
-    //     On macOS/Linux there is no equivalent subclass, so the OverlayController
+    //     new pane browser. (Windows doesn't use this file: there the window's
+    //     input owner, `crate::input_owner`, puts back focus a new page takes.)
+    //     On macOS/Linux there is no input owner yet, so the OverlayController
     //     holds focus after creation and its BrowserView intercepts all keyboard
     //     (and, depending on CEF hit-test state, mouse) events for the parent window —
     //     causing the "black pane + frozen UI" bug. Explicitly refocus the main

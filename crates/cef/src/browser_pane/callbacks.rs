@@ -302,8 +302,8 @@ pub fn on_after_created_browser_pane(state: &Arc<AppState>, browser: &Browser) {
     }
     #[cfg(not(target_os = "windows"))]
     {
-        // On macOS/Linux, the focus redirect subclass used on Windows doesn't
-        // exist. CEF's on_after_created fires from inside add_overlay_view
+        // On macOS/Linux there is no input owner yet (Windows has one,
+        // `crate::input_owner`; spec Phase 4). CEF's on_after_created fires from inside add_overlay_view
         // (when the BrowserView is added to the widget hierarchy) and gives
         // focus to the new pane browser. creation_views::create_browser_pane_view
         // immediately returns focus to the main window after add_overlay_view
@@ -463,13 +463,11 @@ pub fn on_load_start_browser_pane(state: &Arc<AppState>, browser: &Browser) {
 /// Chromium creates a fresh `Chrome_RenderWidgetHostHWND` on every
 /// navigation. The subclass installed at `on_after_created` is on the
 /// OLD widget HWND, which was destroyed during navigation — so without
-/// reinstalling here, keyboard focus steals by the new page bypass our
-/// redirect and end up stuck on the pane.
+/// reinstalling here, clicks and focus in the new page don't reach the
+/// window's input owner (`crate::input_owner`).
 ///
-/// Does NOT force focus back to main. `WM_MOUSEWHEEL` is routed to the
-/// focused HWND; stealing focus away from the pane breaks scrolling.
-/// The FocusHandler cancel + WndProc redirect already keep focus off
-/// the pane during the *initial* navigation focus steal.
+/// Does NOT force focus anywhere: the input owner decides whether focus the
+/// page took stays (CEF's `on_got_focus` reports it too).
 pub fn on_load_end_browser_pane(state: &Arc<AppState>, browser: &Browser) {
     tracing::info!("[pane-load-end] pane page loaded; reinstalling focus subclass");
     let pane_block_id = resolve_pane_block_id(state, browser);
