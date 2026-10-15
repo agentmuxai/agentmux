@@ -444,11 +444,15 @@ fn version_summary_meta(v: BundleVersionSummary) -> GlobalMemoryVersionMeta {
         written_by: v.written_by,
         written_by_uid: v.written_by_uid,
         created_at: v.created_at,
+        size_bytes: v.size_bytes,
+        tokens_est: v.tokens_est,
     }
 }
 
 fn version_meta(v: BundleVersion) -> GlobalMemoryVersionMeta {
     GlobalMemoryVersionMeta {
+        size_bytes: v.instructions.len() as u64,
+        tokens_est: agentmux_common::tokens::estimate_tokens(&v.instructions),
         id: v.id,
         content_hash: v.content_hash,
         parent_version_id: v.parent_version_id,

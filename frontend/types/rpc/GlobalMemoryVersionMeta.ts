@@ -8,4 +8,9 @@ export type GlobalMemoryVersionMeta = { id: string, content_hash: string, parent
 /**
  * The trusted writer: an agent's own id, or `"armory-ui"`.
  */
-written_by: string, written_by_uid: string, created_at: number, };
+written_by: string, written_by_uid: string, created_at: number, 
+/**
+ * The version's size and estimated tokens (`agentmux_common::tokens`),
+ * for the history's size over time (SPEC_MEMORY_PANE_TOKENS_2026_10_15.md §5.5).
+ */
+size_bytes: number, tokens_est: number, };

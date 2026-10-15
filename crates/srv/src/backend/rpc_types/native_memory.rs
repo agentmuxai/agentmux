@@ -165,6 +165,12 @@ pub struct NativeMemoryVersionMeta {
     // plain JS number. See BrowserBookmark::created_at (PR #3293).
     #[ts(type = "number")]
     pub created_at: i64,
+    /// The version's size and estimated tokens (`agentmux_common::tokens`),
+    /// for the history's size over time (SPEC_MEMORY_PANE_TOKENS_2026_10_15.md §5.5).
+    #[ts(type = "number")]
+    pub size_bytes: u64,
+    #[ts(type = "number")]
+    pub tokens_est: u64,
 }
 
 /// `agent:memory:claims` — the memory folders an agent has claimed, for

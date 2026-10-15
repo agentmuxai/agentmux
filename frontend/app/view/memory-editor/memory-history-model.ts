@@ -24,6 +24,9 @@ export interface MemoryVersionMeta {
     created_at: number;
     /** Global Memory only: the trusted writer (an agent id, "armory-ui"). */
     written_by?: string;
+    /** The version's estimated tokens and size (SPEC_MEMORY_PANE_TOKENS_2026_10_15.md §5.5). */
+    tokens_est?: number;
+    size_bytes?: number;
 }
 
 export interface MemoryHistorySource<V extends MemoryVersionMeta = MemoryVersionMeta> {
