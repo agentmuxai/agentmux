@@ -8,10 +8,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const updateStatus = vi.fn();
 const updateDownload = vi.fn();
+const upgradeRestart = vi.fn();
+const upgradeCancel = vi.fn();
 vi.mock("@/app/store/rpc-api", () => ({
     RpcApi: {
         AppUpdateStatusCommand: (...a: unknown[]) => updateStatus(...a),
         AppUpdateDownloadCommand: (...a: unknown[]) => updateDownload(...a),
+        AppUpgradeRestartCommand: (...a: unknown[]) => upgradeRestart(...a),
+        AppUpgradeCancelCommand: (...a: unknown[]) => upgradeCancel(...a),
     },
 }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
@@ -53,6 +57,8 @@ const download = (state: string, extra: Record<string, unknown> = {}) => ({
 beforeEach(() => {
     updateStatus.mockReset();
     updateDownload.mockReset();
+    upgradeRestart.mockReset();
+    upgradeCancel.mockReset();
     openLink.mockReset();
     installAppUpdate.mockReset();
     openNativePath.mockReset();
@@ -148,5 +154,37 @@ describe("Maintenance download, for an install AgentMux can upgrade itself", () 
     it("a download of an older release is not shown against a newer one", () => {
         acceptAppUpdate({ ...download("ready"), latest: "0.59.28" });
         expect(releaseDownload()).toBeNull();
+    });
+});
+
+describe("Maintenance: Upgrade & restart", () => {
+    const FOLDER = { folder: "C:/apps/agentmux-0.59.27-x64-portable" };
+
+    it("restarts once agents finish, and says how many it waits for", async () => {
+        updateStatus.mockResolvedValue(download("ready", FOLDER));
+        upgradeRestart.mockResolvedValue(download("waiting", { ...FOLDER, waiting_for: 2 }));
+        render(() => <MaintenanceSection />);
+        fireEvent.click(await screen.findByRole("button", { name: "Upgrade & restart" }));
+        expect(upgradeRestart).toHaveBeenCalledWith(expect.anything(), { now: false });
+        expect(await screen.findByText("Waiting for 2 agents to finish…")).toBeTruthy();
+
+        upgradeRestart.mockResolvedValue(download("restarting", FOLDER));
+        fireEvent.click(screen.getByRole("button", { name: "Restart now" }));
+        expect(upgradeRestart).toHaveBeenLastCalledWith(expect.anything(), { now: true });
+        expect(await screen.findByText("Restarting: confirm in the AgentMux dialog")).toBeTruthy();
+        expect(installAppUpdate).not.toHaveBeenCalled();
+    });
+
+    it("Cancel stops waiting, and a restart that didn't happen says why", async () => {
+        updateStatus.mockResolvedValue(download("waiting", { ...FOLDER, waiting_for: 1 }));
+        upgradeCancel.mockResolvedValue(download("ready", FOLDER));
+        render(() => <MaintenanceSection />);
+        expect(await screen.findByText("Waiting for 1 agent to finish…")).toBeTruthy();
+        fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+        expect(upgradeCancel).toHaveBeenCalledTimes(1);
+        expect(await screen.findByRole("button", { name: "Upgrade & restart" })).toBeTruthy();
+
+        acceptAppUpdate(download("ready", { ...FOLDER, error: "AgentMux didn't restart: the upgrade was declined" }));
+        expect(await screen.findByText(/the upgrade was declined/)).toBeTruthy();
     });
 });

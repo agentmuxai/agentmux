@@ -84,6 +84,7 @@ fn set(version: &str, state: &str, received: u64, total: u64, error: Option<Stri
         total,
         error,
         folder: folder.map(|f| f.display().to_string()),
+        waiting_for: 0,
     }));
 }
 
@@ -102,7 +103,7 @@ pub fn start() -> Result<AppUpdateStatus, String> {
     };
     if let Some(d) = &status.download {
         let staged = d.folder.as_deref().is_some_and(|f| is_staged_portable(Path::new(f), &version));
-        if d.version == version && d.state == "ready" && staged {
+        if d.version == version && matches!(d.state.as_str(), "ready" | "waiting" | "restarting") && staged {
             return Ok(status);
         }
     }
@@ -206,7 +207,7 @@ async fn download(asset: &ReleaseAsset, dest: &Path, version: &str) -> Result<()
 }
 
 /// Whether `dir` is an unpacked AgentMux `version` portable.
-fn is_staged_portable(dir: &Path, version: &str) -> bool {
+pub(crate) fn is_staged_portable(dir: &Path, version: &str) -> bool {
     dir.join("agentmux.exe").is_file()
         && dir.join("runtime").join("agentmux-portable.marker").is_file()
         && dir.join("runtime").join(format!("agentmux-{version}.exe")).is_file()

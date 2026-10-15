@@ -62,6 +62,19 @@ export async function startAppUpdateDownload(): Promise<void> {
     acceptAppUpdate(await RpcApi.AppUpdateDownloadCommand(TabRpcClient));
 }
 
+/**
+ * Restart into the staged release: once agents finish their turn, or `now`.
+ * The launcher then asks the user in a dialog of its own.
+ */
+export async function upgradeAndRestart(now: boolean): Promise<void> {
+    acceptAppUpdate(await RpcApi.AppUpgradeRestartCommand(TabRpcClient, { now }));
+}
+
+/** Stop waiting to restart. */
+export async function cancelUpgrade(): Promise<void> {
+    acceptAppUpdate(await RpcApi.AppUpgradeCancelCommand(TabRpcClient));
+}
+
 /** Open the version panel, where the Maintenance section shows the release. */
 export function openVersionPanel(): void {
     window.dispatchEvent(new CustomEvent("agentmux:open-version-panel"));

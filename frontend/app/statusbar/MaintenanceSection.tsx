@@ -1,7 +1,15 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { appUpdate, availableRelease, loadAppUpdate, releaseDownload, startAppUpdateDownload } from "@/store/app-update";
+import {
+    appUpdate,
+    availableRelease,
+    cancelUpgrade,
+    loadAppUpdate,
+    releaseDownload,
+    startAppUpdateDownload,
+    upgradeAndRestart,
+} from "@/store/app-update";
 import { atoms, getApi, openLink } from "@/store/global";
 import { WpsEvent } from "@/store/mps-events";
 import { createEffect, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
@@ -55,7 +63,7 @@ export const MaintenanceSection = (): JSX.Element => {
         if (!release()) return atoms.updaterStatusAtom();
         const d = download()?.state;
         if (d === "downloading" || d === "unpacking") return "downloading";
-        if (d === "ready") return "ready";
+        if (d === "ready" || d === "waiting" || d === "restarting") return "ready";
         if (d === "failed") return "error";
         return "available";
     };
@@ -189,6 +197,11 @@ export const MaintenanceSection = (): JSX.Element => {
         }
     };
 
+    const runUpgrade = (now: boolean) => {
+        setStartError(null);
+        upgradeAndRestart(now).catch((e) => setStartError(String(e?.message ?? e)));
+    };
+
     const handleInstallUpdate = () => {
         const r = release();
         if (r) {
@@ -270,8 +283,8 @@ export const MaintenanceSection = (): JSX.Element => {
                                   : "Downloading…"}
                         </span>
                     </Show>
-                    {/* Staged by srv: the new version's folder (restart comes with phase 3b). */}
-                    <Show when={updaterStatus() === "ready" && download()?.folder}>
+                    {/* Staged by srv: restart into it, once agents finish their turn. */}
+                    <Show when={download()?.state === "ready" && download()?.folder}>
                         <span class="maintenance-icon maintenance-icon--update">↑</span>
                         <span class="maintenance-row-text" title={download()?.folder}>
                             v{updaterVersion()} is ready
@@ -282,6 +295,37 @@ export const MaintenanceSection = (): JSX.Element => {
                             onClick={() => getApi().openNativePath(download()!.folder!)}
                         >
                             Show folder
+                        </Button>
+                        <Button
+                            density="compact"
+                            tone="accent"
+                            class="maintenance-btn maintenance-btn--primary"
+                            onClick={() => runUpgrade(false)}
+                        >
+                            Upgrade &amp; restart
+                        </Button>
+                    </Show>
+                    <Show when={download()?.state === "waiting"}>
+                        <span class="maintenance-icon maintenance-icon--working">↑</span>
+                        <span class="maintenance-row-text maintenance-row-text--dim">
+                            {download()!.waiting_for > 0
+                                ? `Waiting for ${download()!.waiting_for} agent${download()!.waiting_for === 1 ? "" : "s"} to finish…`
+                                : "Restarting soon…"}
+                        </span>
+                        <Button density="compact" class="maintenance-btn" onClick={() => runUpgrade(true)}>
+                            Restart now
+                        </Button>
+                        <Button density="compact" class="maintenance-btn" onClick={() => void cancelUpgrade()}>
+                            Cancel
+                        </Button>
+                    </Show>
+                    <Show when={download()?.state === "restarting"}>
+                        <span class="maintenance-icon maintenance-icon--working">↑</span>
+                        <span class="maintenance-row-text maintenance-row-text--dim">
+                            Restarting: confirm in the AgentMux dialog
+                        </span>
+                        <Button density="compact" class="maintenance-btn" onClick={() => void cancelUpgrade()}>
+                            Cancel
                         </Button>
                     </Show>
                     <Show when={updaterStatus() === "ready" && !download()}>
@@ -315,6 +359,9 @@ export const MaintenanceSection = (): JSX.Element => {
                 </div>
             </Show>
 
+            <Show when={download()?.state === "ready" && download()?.error}>
+                <div class="maintenance-row-text maintenance-row-text--error">{download()!.error}</div>
+            </Show>
             <Show when={startError()}>
                 <div class="maintenance-row-text maintenance-row-text--error">{startError()}</div>
             </Show>

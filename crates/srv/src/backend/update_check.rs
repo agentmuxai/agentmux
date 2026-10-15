@@ -105,7 +105,9 @@ pub struct ReleaseAsset {
 pub struct DownloadStatus {
     /// The release being downloaded.
     pub version: String,
-    /// `downloading`, `unpacking`, `ready` or `failed`.
+    /// `downloading`, `unpacking`, `ready` or `failed`; then, after "Upgrade
+    /// & restart", `waiting` (for agents to finish their turn) and
+    /// `restarting` (the launcher was asked).
     pub state: String,
     #[ts(type = "number")]
     pub received: u64,
@@ -118,6 +120,9 @@ pub struct DownloadStatus {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub folder: Option<String>,
+    /// While `waiting`: how many agents are still in a turn.
+    #[serde(default)]
+    pub waiting_for: u32,
 }
 
 impl AppUpdateStatus {
