@@ -4,7 +4,7 @@
 import { findNode, walkNodes } from "./layoutNode";
 import { isNodeLocked, isEffectivelyMinimized, reportLayoutViolations } from "./layoutInvariants";
 import type { LayoutModel } from "./layoutModel";
-import { DefaultNodeSize, type LayoutNode } from "./types";
+import { DefaultNodeSize, LayoutTreeActionType, type LayoutNode, type LayoutTreeMinimizeNodeAction } from "./types";
 
 /** Height of the block header in CSS pixels (matches --header-height in theme.scss). */
 export const HeaderHeightPx = 33;
@@ -80,8 +80,9 @@ export function countExpandedLeaves(root: LayoutNode | undefined): number {
 }
 
 /**
- * Toggle minimize for a leaf node. Minimize sets the display-mode flag;
- * restore clears it. No sizes are read or written.
+ * Toggle minimize for a leaf node: the `minimize` / `restore` layout intent
+ * (layoutTree.ts `minimizeNode`, computed again by srv). No sizes are read or
+ * written.
  */
 export function minimizeNodeToggle(model: LayoutModel, nodeId: string) {
     const node = findNode(model.treeState.rootNode, nodeId);
@@ -94,39 +95,27 @@ export function minimizeNodeToggle(model: LayoutModel, nodeId: string) {
         return;
     }
 
-    // ── Restore ───────────────────────────────────────────────────────────────
     // Always a restore for a minimized pane, even one that is also maximized:
     // programmatic callers (showBlockInPane, for an editor reuse or a
     // notification) rely on this to make the pane visible. The header's own
     // Minimize on a maximized chip is `collapseMaximizedNode` below.
     if (node.minimized) {
-        node.minimized = undefined;
-        _finishToggle(model, nodeId, false);
+        commitToggle(model, LayoutTreeActionType.Restore, nodeId);
         return;
     }
 
-    // ── Minimize ──────────────────────────────────────────────────────────────
     // The last expanded pane cannot be collapsed — the window must always keep
     // at least one pane showing content. The header already hides the minimize
-    // button in this state (NodeModel.canMinimize); this is the authoritative
-    // guard for programmatic callers.
+    // button in this state (NodeModel.canMinimize); `minimizeNode` is the
+    // authoritative guard for programmatic callers.
     if (countExpandedLeaves(model.treeState.rootNode) <= 1) return;
 
     // A maximized pane can be minimized directly (SPEC_PANE_CONTROLS_TILED_
-    // RESTORE_ICON_AND_MINIMIZE_FROM_MAXIMIZED_2026_10_12 §5). Maximize is a
-    // layer over the tree (`magnifiedNodeId`), so the pane still holds its
-    // slot and the chip is derived from it: ending the maximize and setting
-    // the flag in one commit IS "remember the minimize position". Un-magnify
-    // through its own reducer (as removeLeafEmptiedByMove does) so the overlay
-    // state stays consistent; setState=false defers the commit to
-    // _finishToggle below (one updateTree, one persist), and focused=false
-    // leaves focus where minimizing a tiled pane leaves it.
-    if (model.treeState.magnifiedNodeId === nodeId) {
-        model.magnifyNodeToggle(nodeId, false, false);
-    }
-
-    node.minimized = true;
-    _finishToggle(model, nodeId, true);
+    // RESTORE_ICON_AND_MINIMIZE_FROM_MAXIMIZED_2026_10_12 §5): the minimize
+    // ends the maximize in the same commit, which IS "remember the minimize
+    // position" (maximize is a layer over the tree), with focus left where
+    // minimizing a tiled pane leaves it.
+    commitToggle(model, LayoutTreeActionType.Minimize, nodeId);
 }
 
 /**
@@ -135,7 +124,7 @@ export function minimizeNodeToggle(model: LayoutModel, nodeId: string) {
  * was maximized is both). Unlike `minimizeNodeToggle` this never restores: that
  * toggle is what programmatic callers use to make a pane visible, so a
  * minimized-and-maximized pane must keep restoring there. Like any minimize it
- * needs one other expanded pane. One commit: one updateTree, one persist.
+ * needs one other expanded pane.
  */
 export function collapseMaximizedNode(model: LayoutModel, nodeId: string) {
     const node = findNode(model.treeState.rootNode, nodeId);
@@ -144,27 +133,17 @@ export function collapseMaximizedNode(model: LayoutModel, nodeId: string) {
     // A pane that is already minimized is not counted as expanded, so it needs one other.
     const otherExpanded = countExpandedLeaves(model.treeState.rootNode) - (isNodeLocked(node) ? 0 : 1);
     if (otherExpanded < 1) return;
-    model.magnifyNodeToggle(nodeId, false, false);
-    node.minimized = true;
-    _finishToggle(model, nodeId, true);
+    commitToggle(model, LayoutTreeActionType.Minimize, nodeId);
 }
 
-/**
- * Commit tree changes. `model.updateTree()` rebuilds `minimizedNodeIds`
- * fresh from the (already-toggled) `node.minimized` flags as part of its own
- * pass — see `layoutGeometry.ts::updateTree` — so there is nothing to set
- * here directly; this function only exists for the doctor-report /
- * persistence side effects around that call.
- */
-function _finishToggle(model: LayoutModel, nodeId: string, minimized: boolean) {
-    model.updateTree();
-    // Layout doctor (issue #2179): validate immediately with toggle attribution.
+/** One commit: the intent (local prediction, sent to srv), then the layout
+ *  doctor's check with the toggle's attribution (issue #2179). */
+function commitToggle(model: LayoutModel, type: LayoutTreeActionType.Minimize | LayoutTreeActionType.Restore, nodeId: string) {
+    model.treeReducer({ type, nodeId } as LayoutTreeMinimizeNodeAction);
     reportLayoutViolations(
         model.treeState.rootNode,
-        `minimizeToggle:${minimized ? "minimize" : "restore"}:${nodeId.slice(0, 8)}`
+        `minimizeToggle:${type === LayoutTreeActionType.Minimize ? "minimize" : "restore"}:${nodeId.slice(0, 8)}`
     );
-    model.localTreeStateAtom._set({ ...model.treeState });
-    model.persistToBackend();
 }
 
 /**

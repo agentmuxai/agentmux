@@ -84,6 +84,10 @@ pub struct LayoutNode {
     pub children: Vec<LayoutNode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub data: Option<LayoutNodeData>,
+    /// A leaf shown as a header chip (minimize is a display mode: its stored
+    /// `size` is kept, so restore only clears this). Leaf-only.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub minimized: bool,
     /// Catch-all for unknown top-level fields. Uses `serde_json::Map`
     /// (insertion-ordered) for deterministic round-trips.
     #[serde(flatten, default, skip_serializing_if = "serde_json::Map::is_empty")]

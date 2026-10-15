@@ -79,6 +79,9 @@ pub(crate) fn handle_layout_apply_intent(
             if effect.unfocus.as_deref() == Some(tab.focused_node_id.as_str()) {
                 tab.focused_node_id.clear();
             }
+            if effect.unmagnify.as_deref() == Some(tab.magnified_node_id.as_str()) {
+                tab.magnified_node_id.clear();
+            }
             if let Some(id) = effect.magnify {
                 tab.magnified_node_id = id;
             }

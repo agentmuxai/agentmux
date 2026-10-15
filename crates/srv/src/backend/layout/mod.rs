@@ -609,10 +609,7 @@ pub fn is_node_locked(node: &LayoutNode) -> bool {
     // render on the frontend; stored sizes never touched). The remaining keys
     // are legacy markers from the pre-display-mode model, recognized until
     // persisted trees are migrated by the frontend's `rebuildMinimizedSet`.
-    node.extra
-        .get("minimized")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false)
+    node.minimized
         || node.extra.contains_key("minimizedSize")
         || node.extra.contains_key("slipMinimize")
         || node.extra.contains_key("columnDissolve")
@@ -713,11 +710,11 @@ pub fn validate_layout_invariants(root: &Option<LayoutNode>) -> Vec<String> {
         }
         // I2 — the `minimized` flag and the legacy minimizedSize/slipMinimize
         // markers are leaf-only.
-        if is_branch && (has("minimized") || has("minimizedSize") || has("slipMinimize")) {
+        if is_branch && (node.minimized || has("minimizedSize") || has("slipMinimize")) {
             violations.push(format!(
                 "MIN_MARKER_ON_BRANCH @ {}: branch has {}",
                 short(&node.id),
-                if has("minimized") {
+                if node.minimized {
                     "minimized"
                 } else if has("minimizedSize") {
                     "minimizedSize"
@@ -1381,6 +1378,7 @@ fn split_impl(
         size: root.size,
         children: std::mem::take(&mut root.children),
         data: root.data.take(),
+        minimized: std::mem::take(&mut root.minimized),
         extra: std::mem::take(&mut root.extra),
     };
     let root_size = root_clone.size;

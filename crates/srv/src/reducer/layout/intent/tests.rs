@@ -155,8 +155,20 @@ fn legacy_minimize_fields_are_migrated_before_the_intent() {
     let root = state.tabs[&tab].rootnode.clone().unwrap();
     let nb = &root.children[1];
     assert_eq!(nb.size, 30.0);
-    assert_eq!(nb.extra.get("minimized"), Some(&serde_json::Value::Bool(true)));
-    assert_eq!(nb.extra.len(), 1);
+    assert!(nb.minimized);
+    assert!(nb.extra.is_empty());
+}
+
+#[test]
+fn minimizing_the_magnified_pane_ends_the_magnify_without_a_sender_view() {
+    let (mut state, tab, _a, b) = one_pane();
+    intent(&mut state, &tab, split_b(&b), ACTION, None);
+    state.tabs.get_mut(&tab).unwrap().magnified_node_id = "nb".into();
+    let events = intent(&mut state, &tab, LayoutIntent::Minimize { node_id: "nb".into() }, "a2", None);
+    assert_eq!(state.tabs[&tab].magnified_node_id, "");
+    assert!(events.iter().any(|e| matches!(e, Event::MagnifiedNodeChanged { node_id, .. } if node_id.is_empty())));
+    let refused = intent(&mut state, &tab, LayoutIntent::Minimize { node_id: "na".into() }, "a3", None);
+    assert!(matches!(&refused[0], Event::Error { message, .. } if message.contains("last pane")));
 }
 
 #[test]

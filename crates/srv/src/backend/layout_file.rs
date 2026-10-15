@@ -339,7 +339,7 @@ impl TabBuilder<'_> {
             LayoutPane {
                 views,
                 active,
-                minimized: node.extra.get("minimized").and_then(Value::as_bool).filter(|m| *m),
+                minimized: node.minimized.then_some(true),
                 extra: Map::new(),
             },
         );
@@ -822,10 +822,6 @@ impl PlanBuilder<'_> {
                 let active = placeholders[doc_pane.active.min(placeholders.len() - 1)].clone();
                 let id = uuid::Uuid::new_v4().to_string();
                 self.node_by_pane.insert(pane.clone(), id.clone());
-                let mut extra = Map::new();
-                if doc_pane.minimized == Some(true) {
-                    extra.insert("minimized".into(), Value::Bool(true));
-                }
                 let multi = placeholders.len() > 1;
                 Some(LayoutNode {
                     id,
@@ -836,7 +832,7 @@ impl PlanBuilder<'_> {
                         active_block_id: if multi { active } else { String::new() },
                         ..Default::default()
                     }),
-                    extra,
+                    minimized: doc_pane.minimized == Some(true),
                     ..Default::default()
                 })
             }

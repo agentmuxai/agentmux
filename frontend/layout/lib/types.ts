@@ -63,6 +63,10 @@ export enum LayoutTreeActionType {
     ReplaceNode = "replace",
     SplitHorizontal = "splithorizontal",
     SplitVertical = "splitvertical",
+    // Show a leaf as a header chip, or show it again (display mode; its size
+    // is kept). layoutMinimize.ts.
+    Minimize = "minimize",
+    Restore = "restore",
     // Backend-originated: `blockid` was added (in the reducer) as the visible
     // tab of the pane holding `targetblockid` (`CreateBlockInStack`).
     StackPush = "stackpush",
@@ -178,6 +182,11 @@ export interface ResizeNodeOperation {
 export interface LayoutTreeResizeNodeAction extends LayoutTreeAction {
     type: LayoutTreeActionType.ResizeNode;
     resizeOperations: ResizeNodeOperation[];
+}
+
+export interface LayoutTreeMinimizeNodeAction extends LayoutTreeAction {
+    type: LayoutTreeActionType.Minimize | LayoutTreeActionType.Restore;
+    nodeId: string;
 }
 
 export interface LayoutTreeFocusNodeAction extends LayoutTreeAction {

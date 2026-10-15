@@ -23,7 +23,7 @@ fn branch(id: &str, dir: FlexDirection, children: Vec<LayoutNode>) -> LayoutNode
 }
 
 fn minimized(mut node: LayoutNode) -> LayoutNode {
-    node.extra.insert("minimized".into(), true.into());
+    node.minimized = true;
     node
 }
 
@@ -331,6 +331,28 @@ fn insert_at_index_follows_the_path_and_inserts_after_it() {
 }
 
 #[test]
+fn minimize_sets_the_flag_keeps_the_size_and_unmagnifies() {
+    let mut tree = three_in_a_row();
+    let effect = apply(&mut tree, LayoutIntent::Minimize { node_id: "b".into() }).unwrap();
+    let b = find_node_by_id(tree.as_ref().unwrap(), "b").unwrap();
+    assert!(b.minimized);
+    assert_eq!(b.size, 10.0, "minimize is a display mode: the size stays");
+    assert_eq!(effect.unmagnify.as_deref(), Some("b"));
+    apply(&mut tree, LayoutIntent::Restore { node_id: "b".into() }).unwrap();
+    assert!(!find_node_by_id(tree.as_ref().unwrap(), "b").unwrap().minimized);
+}
+
+#[test]
+fn minimize_refuses_the_last_expanded_pane_and_branches() {
+    let mut tree = Some(branch("r", FlexDirection::Row, vec![leaf("a", "ba"), minimized(leaf("m", "bm"))]));
+    assert!(matches!(apply(&mut tree, LayoutIntent::Minimize { node_id: "a".into() }), Err(LayoutError::Refused(_))));
+    assert!(matches!(apply(&mut tree, LayoutIntent::Minimize { node_id: "r".into() }), Err(LayoutError::Refused(_))));
+    // Already minimized: nothing to do, not a refusal.
+    assert!(apply(&mut tree, LayoutIntent::Minimize { node_id: "m".into() }).is_ok());
+    assert!(apply(&mut tree, LayoutIntent::Restore { node_id: "a".into() }).is_ok());
+}
+
+#[test]
 fn clear_and_view() {
     let mut tree = three_in_a_row();
     apply(&mut tree, LayoutIntent::View).unwrap();
@@ -353,10 +375,10 @@ fn legacy_minimize_fields_migrate_to_the_flag() {
     let mut root = branch("r", FlexDirection::Row, vec![leaf("a", "ba"), slipped, squeezed]);
     root.extra.insert("_slipAnchor".into(), true.into());
     assert_eq!(migrate_legacy_minimize(&mut root), 4);
-    let flag = |n: &LayoutNode| n.extra.get("minimized").and_then(|v| v.as_bool());
+    let flag = |n: &LayoutNode| n.minimized.then_some(true);
     assert_eq!((root.children[1].size, flag(&root.children[1])), (6.0, Some(true)), "slip: mean of a (10) and q (2)");
     assert_eq!((root.children[2].size, flag(&root.children[2])), (25.0, Some(true)));
-    assert!(root.extra.is_empty() && root.children[2].extra.len() == 1);
+    assert!(root.extra.is_empty() && root.children[2].extra.is_empty());
     assert_eq!(migrate_legacy_minimize(&mut root), 0, "a current tree is untouched");
 }
 
@@ -475,7 +497,7 @@ impl Generator {
         let leaves: Vec<String> = nodes.iter().filter(|n| n.children.is_empty()).map(|n| n.id.clone()).collect();
         let non_root_leaves: Vec<String> = leaves.iter().filter(|id| **id != root.id).cloned().collect();
         let branches: Vec<&LayoutNode> = nodes.iter().copied().filter(|n| !n.children.is_empty()).collect();
-        match self.rng.below(40) {
+        match self.rng.below(44) {
             0..=5 => self.insert(),
             6..=15 => self.split(tree),
             16..=19 => LayoutIntent::Delete { node_id: self.rng.pick(&leaves).clone() },
@@ -513,6 +535,14 @@ impl Generator {
                 LayoutIntent::InsertAtIndex { node: self.new_leaf(), index_arr, magnified: false, focused: self.rng.one_in(2) }
             }
             37 if self.rng.one_in(6) => LayoutIntent::Clear,
+            40..=41 => LayoutIntent::Minimize { node_id: self.rng.pick(&leaves).clone() },
+            42..=43 => {
+                let minimized: Vec<String> = nodes.iter().filter(|n| n.minimized).map(|n| n.id.clone()).collect();
+                match minimized.is_empty() {
+                    true => LayoutIntent::View,
+                    false => LayoutIntent::Restore { node_id: self.rng.pick(&minimized).clone() },
+                }
+            }
             _ => LayoutIntent::View,
         }
     }
@@ -550,7 +580,7 @@ fn count_leaves(node: &LayoutNode) -> usize {
 fn mark_minimized(node: &mut LayoutNode, rng: &mut Rng, expanded: &mut usize) {
     if node.children.is_empty() {
         if *expanded > 1 && rng.one_in(5) {
-            node.extra.insert("minimized".into(), true.into());
+            node.minimized = true;
             *expanded -= 1;
         }
         return;
@@ -712,7 +742,7 @@ fn vectors_exercise_every_intent_and_some_refusals() {
             }
         }
     }
-    for kind in ["insert", "insertatindex", "delete", "move", "swap", "resize", "replace", "splithorizontal", "splitvertical", "view"] {
+    for kind in ["insert", "insertatindex", "delete", "move", "swap", "resize", "replace", "splithorizontal", "splitvertical", "minimize", "restore", "view"] {
         assert!(seen.contains(kind), "no {kind} in the vectors");
     }
     assert!(refused > 0, "the vectors should include refused intents");

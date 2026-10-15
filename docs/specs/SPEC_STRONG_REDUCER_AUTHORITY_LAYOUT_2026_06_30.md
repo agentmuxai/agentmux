@@ -345,6 +345,19 @@ replace all round-trip through srv). Do NOT auto-merge on bot approval.**
 `Undissolve` intents with the logical/geometric split. *Own sub-spec + visual verification.* Until
 done, minimize routes its result via `LayoutSetTree` (tracked debt).
 
+*Phase 5 as built (PR_PHASE5):* the design above no longer fits the code. Since #2197 minimize is
+a display mode: a leaf's `minimized` flag, its stored size untouched, and the slip and the column
+dissolve are derived at render (`layoutMinimize.ts`, `resolveRowSlipTargets`); nothing restructures
+the tree, and `minimizedSize`/`slipMinimize`/`columnDissolve`/`_slipAnchor` are legacy fields
+migrated away on load. So there is no geometry to split off and no dissolve intent to add.
+- **`minimize` and `restore` intents.** Minimize sets the flag and ends that pane's magnify;
+  minimizing the last pane still showing content is refused (`countExpandedLeaves`); restore
+  clears it. The frontend's toggle, and the header's Minimize on a maximized pane, send one intent
+  each.
+- **The flag is typed:** `LayoutNode.minimized` (`agentmux-common`), not an `extra` key. The legacy
+  fields stay in `extra`, migrated on every intent (Phase 4).
+- With this, no frontend edit pushes a whole tree.
+
 **Phase 6 — delete the backstops.** Remove `heal_layout` + callers, the relaxed `reorder_tabs_bulk`
 validation + its migration test, the resync layout carve-out. The payoff deletion.
 

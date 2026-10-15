@@ -266,7 +266,7 @@ fn balance_column_dissolve_suppresses_direction_flip() {
 /// derived at render, stored size untouched).
 fn minimized_leaf(id: &str, block_id: &str, size: f32) -> LayoutNode {
     let mut node = leaf(id, block_id, size);
-    node.extra.insert("minimized".into(), serde_json::Value::Bool(true));
+    node.minimized = true;
     node
 }
 
@@ -354,7 +354,7 @@ fn validate_invariants_flags_display_mode_flag_on_branch() {
         DEFAULT_NODE_SIZE,
         vec![leaf("l1", "b1", 100.0), leaf("l2", "b2", 100.0)],
     );
-    branch.extra.insert("minimized".into(), serde_json::Value::Bool(true));
+    branch.minimized = true;
     let root = Some(group(
         "root",
         FlexDirection::Row,
@@ -746,7 +746,7 @@ fn insert_node_never_promotes_a_minimized_leaf() {
     // corruption this guards against.
     fn assert_not_corrupted(node: &LayoutNode) {
         if !node.children.is_empty() {
-            assert!(!node.extra.contains_key("minimized"), "branch {} carries minimized", node.id);
+            assert!(!node.minimized, "branch {} carries minimized", node.id);
         }
         for c in &node.children {
             assert_not_corrupted(c);
