@@ -367,12 +367,23 @@ fn an_attach_connected_before_stop_gets_no_session() {
     assert!(matches!(frames.first(), Some(Frame::Error(_))), "{frames:?}");
 }
 
-/// A session's process that ignores the hang-up (and, unlike a shell, never
-/// notices its terminal close) is still killed by `stop`, before the daemon
-/// exits.
-#[test]
-fn stop_kills_a_process_that_ignores_the_hangup() {
-    let home = std::env::temp_dir().join(format!("amr-stop-hup-{}", std::process::id()));
+/// Kills the process it holds however the test ends.
+struct KillOnDrop(libc::pid_t);
+
+impl Drop for KillOnDrop {
+    fn drop(&mut self) {
+        // SAFETY: a plain signal to a process this test started.
+        unsafe {
+            libc::kill(self.0, libc::SIGKILL);
+        }
+    }
+}
+
+/// Run `stops` stops at once on a daemon whose session runs a process that
+/// ignores the hang-up (and, unlike a shell, never notices its terminal
+/// close): each succeeds, and the process is killed before the daemon exits.
+fn stops_kill_a_process_that_ignores_the_hangup(tag: &str, stops: usize) {
+    let home = std::env::temp_dir().join(format!("amr-{tag}-{}", std::process::id()));
     std::fs::create_dir_all(&home).unwrap();
     let _cleanup = Cleanup(home.clone());
     let mut a = attach(&home, "t1", 0);
@@ -391,16 +402,27 @@ fn stop_kills_a_process_that_ignores_the_hangup() {
         .and_then(|rest| rest.split('=').next())
         .and_then(|p| p.trim().parse().ok())
         .unwrap_or_else(|| panic!("no pid in {text:?}"));
+    let _kill = KillOnDrop(pid);
     // SAFETY: signal 0 only checks that the process exists.
     let alive = || unsafe { libc::kill(pid, 0) == 0 };
     assert!(alive());
 
-    let out = Command::new(BIN)
-        .arg("stop")
-        .env("AGENTMUX_REMOTE_HOME", &home)
-        .output()
-        .unwrap();
-    assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "ok");
+    let running: Vec<Child> = (0..stops)
+        .map(|_| {
+            Command::new(BIN)
+                .arg("stop")
+                .env("AGENTMUX_REMOTE_HOME", &home)
+                .stdout(Stdio::piped())
+                .spawn()
+                .unwrap()
+        })
+        .collect();
+    // One that comes once the socket is gone finds no daemon: nothing to stop.
+    for stop in running {
+        let out = stop.wait_with_output().unwrap();
+        assert!(out.status.success(), "{out:?}");
+        assert!(matches!(String::from_utf8_lossy(&out.stdout).trim(), "ok" | ""), "{out:?}");
+    }
     let deadline = Instant::now() + Duration::from_secs(10);
     while daemon_running(&home) {
         assert!(Instant::now() < deadline, "the daemon outlived stop");
@@ -411,6 +433,18 @@ fn stop_kills_a_process_that_ignores_the_hangup() {
         assert!(Instant::now() < deadline, "a process that ignored SIGHUP outlived stop");
         std::thread::sleep(Duration::from_millis(50));
     }
+}
+
+#[test]
+fn stop_kills_a_process_that_ignores_the_hangup() {
+    stops_kill_a_process_that_ignores_the_hangup("stop-hup", 1);
+}
+
+/// A second stop at the same time never exits the daemon before the first
+/// one's kills are sent.
+#[test]
+fn concurrent_stops_still_kill_a_process_that_ignores_the_hangup() {
+    stops_kill_a_process_that_ignores_the_hangup("stop-hup-2", 4);
 }
 
 #[test]

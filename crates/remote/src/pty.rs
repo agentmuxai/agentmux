@@ -97,34 +97,51 @@ pub fn resize(master: &File, cols: u16, rows: u16) {
 /// How long [`end_group`] gives a hung-up group before killing what is left.
 pub const HANGUP_GRACE: std::time::Duration = std::time::Duration::from_secs(2);
 
-/// The kills [`end_group`] has scheduled, for [`wait_for_kills`].
-static KILLS: std::sync::Mutex<Vec<std::thread::JoinHandle<()>>> = std::sync::Mutex::new(Vec::new());
+/// How many [`Ending`]s are still open, for [`wait_for_endings`].
+static ENDINGS: std::sync::Mutex<usize> = std::sync::Mutex::new(0);
+static ENDINGS_DONE: std::sync::Condvar = std::sync::Condvar::new();
+
+/// A session being ended, from the moment it is decided until its group's
+/// kill is sent (or none is needed): the daemon must not exit in between.
+pub struct Ending(());
+
+impl Ending {
+    pub fn start() -> Self {
+        *ENDINGS.lock().unwrap_or_else(|e| e.into_inner()) += 1;
+        Ending(())
+    }
+}
+
+impl Drop for Ending {
+    fn drop(&mut self) {
+        *ENDINGS.lock().unwrap_or_else(|e| e.into_inner()) -= 1;
+        ENDINGS_DONE.notify_all();
+    }
+}
 
 /// End a session's whole process group: hang up, then kill what is left
-/// [`HANGUP_GRACE`] later.
-pub fn end_group(pid: u32) {
+/// [`HANGUP_GRACE`] later. `ending` closes once the kill is sent.
+pub fn end_group(pid: u32, ending: Ending) {
     let pgid = -(pid as libc::pid_t);
     // SAFETY: plain signals to a process group this daemon created.
     unsafe {
         libc::kill(pgid, libc::SIGHUP);
     }
-    let kill = std::thread::spawn(move || {
+    std::thread::spawn(move || {
         std::thread::sleep(HANGUP_GRACE);
         unsafe {
             libc::kill(pgid, libc::SIGKILL);
         }
+        drop(ending);
     });
-    let mut kills = KILLS.lock().unwrap_or_else(|e| e.into_inner());
-    kills.retain(|k| !k.is_finished());
-    kills.push(kill);
 }
 
-/// Wait until every kill [`end_group`] scheduled has been sent: before the
-/// daemon exits, which would otherwise drop the ones still waiting.
-pub fn wait_for_kills() {
-    let kills = std::mem::take(&mut *KILLS.lock().unwrap_or_else(|e| e.into_inner()));
-    for kill in kills {
-        let _ = kill.join();
+/// Wait until every [`Ending`] is closed: before the daemon exits, which would
+/// otherwise drop the kills still waiting.
+pub fn wait_for_endings() {
+    let mut open = ENDINGS.lock().unwrap_or_else(|e| e.into_inner());
+    while *open > 0 {
+        open = ENDINGS_DONE.wait(open).unwrap_or_else(|e| e.into_inner());
     }
 }
 

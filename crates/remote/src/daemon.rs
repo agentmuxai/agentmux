@@ -95,7 +95,9 @@ type Sessions = Arc<Mutex<HashMap<String, Arc<Session>>>>;
 static GENERATION: AtomicU64 = AtomicU64::new(1);
 
 /// Set by `STOP`, under the sessions' lock, which every new session is made
-/// under: no session is made after `STOP` has taken the list it ends.
+/// under: no session is made after `STOP` has taken the list it ends. Every
+/// session ended is taken out under that lock too, with its `pty::Ending`, so
+/// `STOP` then waits for all of them, whoever ended them.
 static STOPPING: AtomicBool = AtomicBool::new(false);
 
 /// Run the daemon in the foreground until it has been idle for a minute.
@@ -224,10 +226,9 @@ fn handle(stream: UnixStream, sessions: &Sessions, sock: &Path) -> io::Result<()
             ["STOP"] => {
                 // No new connection reaches this daemon from here on.
                 let _ = std::fs::remove_file(sock);
-                let ids: Vec<String> = {
+                let (first, ids): (bool, Vec<String>) = {
                     let map = sessions.lock().unwrap();
-                    STOPPING.store(true, Ordering::SeqCst);
-                    map.keys().cloned().collect()
+                    (!STOPPING.swap(true, Ordering::SeqCst), map.keys().cloned().collect())
                 };
                 for id in ids {
                     end_session(sessions, &id, None);
@@ -236,8 +237,13 @@ fn handle(stream: UnixStream, sessions: &Sessions, sock: &Path) -> io::Result<()
                 // The answer is complete once every handle on the connection
                 // is closed.
                 drop((out, reader, stream));
-                // Exit once the ended sessions' leftovers are killed.
-                pty::wait_for_kills();
+                if !first {
+                    // The first STOP exits the daemon once all is ended.
+                    loop {
+                        std::thread::park();
+                    }
+                }
+                pty::wait_for_endings();
                 std::process::exit(0);
             }
             _ => out.write_all(&Frame::Error("bad request".into()).encode()),
@@ -271,18 +277,18 @@ fn end_session(sessions: &Sessions, id: &str, only: Option<&Arc<Session>>) -> bo
         let mut map = sessions.lock().unwrap();
         match (map.get(id), only) {
             (Some(s), Some(o)) if !Arc::ptr_eq(s, o) => None,
-            (Some(_), _) => map.remove(id),
+            (Some(_), _) => map.remove(id).map(|s| (s, pty::Ending::start())),
             (None, _) => None,
         }
     };
-    let Some(s) = removed else {
+    let Some((s, ending)) = removed else {
         return false;
     };
     let mut inner = s.inner.lock().unwrap();
     // A shell already reaped has no process group left to end, and its pid
     // may by now be another process's.
     if inner.exited.is_none() {
-        pty::end_group(s.pid);
+        pty::end_group(s.pid, ending);
     }
     if let Some((_, c)) = inner.client.take() {
         let _ = c.shutdown(std::net::Shutdown::Both);
