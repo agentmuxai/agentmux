@@ -3,11 +3,13 @@
 
 // GlobalMemoryTokenStrip — above Memory → Global's tiles: what every agent of
 // one kind starts with, in tokens, split into Operator Config and Workspace,
-// with the Host / Container toggle and the tile order
-// (SPEC_MEMORY_PANE_TOKENS_2026_10_15.md §5.2).
+// with the Host / Container toggle and the tile order, the largest entries'
+// share, and which startup files carry it (SPEC_MEMORY_PANE_TOKENS_2026_10_15.md
+// §5.2, §5.5).
 
 import { For, Show, type JSX } from "solid-js";
 import { SegmentedControl } from "@/app/element/ui";
+import { topContributors, topContributorsLabel } from "@/app/view/native-memory/memory-aggregates";
 import { shareLabel, tokensLabel, tokensTitle, TOKEN_ESTIMATE_NOTE } from "@/app/view/native-memory/memory-tokens";
 import type { AgentKind, GlobalBundleViewModel } from "./global-bundle-model";
 
@@ -32,6 +34,13 @@ export function GlobalMemoryTokenStrip(props: { model: GlobalBundleViewModel }):
             { key: "workspace", label: "Workspace", tokens: t.workspace },
         ].filter((p) => p.tokens > 0);
     };
+    const top = () => topContributors((m.deliveredAtom() ?? []).map((s) => s.tokens_est));
+    const files = () => m.filenameGroupsAtom();
+    const filesTitle = () =>
+        [
+            ...files().map((g) => `${g.filename}: ${g.providerNames.join(", ")}`),
+            ...(m.noFileProvidersAtom().length ? [`No startup file: ${m.noFileProvidersAtom().join(", ")}`] : []),
+        ].join("\n");
 
     return (
         <div class="global-memory-token-strip" data-testid="global-memory-token-strip">
@@ -83,6 +92,21 @@ export function GlobalMemoryTokenStrip(props: { model: GlobalBundleViewModel }):
                             </span>
                         )}
                     </For>
+                    <Show when={top()}>
+                        {(t) => (
+                            <span class="global-memory-token-strip-top" data-testid="global-memory-token-strip-top">
+                                {topContributorsLabel(t(), "entries", "Global Memory")}
+                            </span>
+                        )}
+                    </Show>
+                </div>
+            </Show>
+            <Show when={files().length > 0}>
+                <div class="global-memory-token-strip-files" title={filesTitle()} data-testid="global-memory-token-strip-files">
+                    Sent in {files().map((g) => g.filename).join(", ")}
+                    <Show when={m.noFileProvidersAtom().length > 0}>
+                        {" "}· not sent to {m.noFileProvidersAtom().join(", ")} (no startup file)
+                    </Show>
                 </div>
             </Show>
         </div>

@@ -214,3 +214,12 @@ code.global-bundle-file-label {
 .global-memory-token-strip-key--workspace::before {
     background: var(--secondary-text-color);
 }
+
+// The largest entries' share, and the startup files (SPEC_MEMORY_PANE_TOKENS_2026_10_15.md §5.5).
+.global-memory-token-strip-top {
+    color: var(--main-text-color);
+}
+
+.global-memory-token-strip-files {
+    color: var(--secondary-text-color);
+}
