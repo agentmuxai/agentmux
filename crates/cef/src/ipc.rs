@@ -1069,16 +1069,17 @@ async fn route_command(
             let epoch = args.get("epoch").and_then(|v| v.as_str()).unwrap_or("");
             let seq = args.get("seq").and_then(|v| v.as_u64()).unwrap_or(0);
             let block_id = args.get("block_id").and_then(|v| v.as_str());
-            if !crate::input_owner::registry::accept_selection(window_label, epoch, seq) {
+            let applied = crate::input_owner::registry::apply_selection(window_label, epoch, seq, || {
+                tracing::info!("[ipc] input_select win={window_label} #{seq} {}", block_id.unwrap_or("app"));
+                match block_id {
+                    Some(block_id) => state.browser_panes.focus(block_id, state),
+                    None => focus_app(state, window_label),
+                }
+            });
+            if !applied {
                 tracing::info!("[ipc] input_select win={window_label} #{seq}: older than one already applied, dropped");
-                return Ok(serde_json::json!(false));
             }
-            tracing::info!("[ipc] input_select win={window_label} #{seq} {}", block_id.unwrap_or("app"));
-            match block_id {
-                Some(block_id) => state.browser_panes.focus(block_id, state),
-                None => focus_app(state, window_label),
-            }
-            Ok(serde_json::json!(true))
+            Ok(serde_json::json!(applied))
         }
         // Whether `window_label` is active and where its keyboard is, as the
         // last `input-owner-changed` said; null where nothing tracks it yet.
