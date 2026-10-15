@@ -2010,12 +2010,9 @@ wrap_task! {
 
             // macOS: a pane overlay may hold key status (the user clicked into
             // a page). Hand it back to the app window so keystrokes follow the
-            // frontend's focus again, and drop any parked pane key request.
+            // frontend's focus again.
             #[cfg(target_os = "macos")]
-            {
-                crate::ui_tasks::clear_pending_pane_key();
-                crate::ui_tasks::reclaim_key_for_window(std::ptr::null_mut());
-            }
+            crate::ui_tasks::reclaim_key_for_window(std::ptr::null_mut());
 
             // Defocus all live panes at the Chromium level too.
             self.state.browser_panes.defocus_all(&self.state);

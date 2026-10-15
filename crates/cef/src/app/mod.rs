@@ -255,6 +255,19 @@ wrap_window_delegate! {
             }
         }
 
+        // macOS/Linux: the window's input owner learns that the window became
+        // the active one or stopped being it; its effects are posted, so they
+        // run after CEF's own activation handling. Windows observes
+        // WM_ACTIVATE itself (`input_owner::windows`).
+        fn on_window_activation_changed(&self, _window: Option<&mut Window>, active: ::std::os::raw::c_int) {
+            #[cfg(not(target_os = "windows"))]
+            if let Some((state, label)) = self.window_registration.as_ref() {
+                crate::input_owner::views::window_activation(state, label, active != 0);
+            }
+            #[cfg(target_os = "windows")]
+            let _ = active;
+        }
+
         fn on_window_destroyed(&self, _window: Option<&mut Window>) {
             // Close-cascade diagnostics (window-lifecycle-leak retro round 3,
             // 2026-07-05): trace window destruction so the close-debug file

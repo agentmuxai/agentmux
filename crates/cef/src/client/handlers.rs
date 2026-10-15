@@ -160,7 +160,11 @@ wrap_focus_handler! {
                 }
             }
             #[cfg(not(target_os = "windows"))]
-            let _ = (browser, &self.state);
+            if let Some(browser) = browser {
+                if let Some(block) = crate::browser_pane::callbacks::resolve_pane_block_id(&self.state, browser) {
+                    crate::input_owner::views::pane_focus_gained(&self.state, &block);
+                }
+            }
         }
 
         fn on_set_focus(

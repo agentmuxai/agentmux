@@ -416,18 +416,11 @@ impl BrowserPaneManager {
         // keyboard (`give_keyboard`) on the UI thread if and when it should.
         #[cfg(target_os = "windows")]
         crate::input_owner::windows::select_pane(state, block_id);
-        // macOS: the page only receives keystrokes while its overlay NSWindow
-        // is the key window — set_focus alone leaves AppKit delivering keys to
-        // the main window. Posted even when the browser isn't live yet: the UI
-        // task parks the request until the overlay is registered.
-        #[cfg(target_os = "macos")]
-        crate::ui_tasks::post_make_pane_overlay_key(block_id);
+        // macOS and Linux: the same, through the Views adapter (macOS: the page
+        // only gets keystrokes while its overlay NSWindow is the key window).
+        // A pane that can't take focus yet keeps the selection until it can.
         #[cfg(not(target_os = "windows"))]
-        if let Some(browser) = self.live_browser(state, block_id) {
-            if let Some(host) = browser.host() {
-                host.set_focus(1);
-            }
-        }
+        crate::input_owner::views::select_pane(state, block_id);
     }
 
     /// Give pane `block_id`'s page the keyboard, in Chromium and in Win32. The

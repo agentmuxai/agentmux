@@ -302,8 +302,7 @@ pub fn on_after_created_browser_pane(state: &Arc<AppState>, browser: &Browser) {
     }
     #[cfg(not(target_os = "windows"))]
     {
-        // On macOS/Linux there is no input owner yet (Windows has one,
-        // `crate::input_owner`; spec Phase 4). CEF's on_after_created fires from inside add_overlay_view
+        // CEF's on_after_created fires from inside add_overlay_view
         // (when the BrowserView is added to the widget hierarchy) and gives
         // focus to the new pane browser. creation_views::create_browser_pane_view
         // immediately returns focus to the main window after add_overlay_view
@@ -335,6 +334,10 @@ pub fn on_after_created_browser_pane(state: &Arc<AppState>, browser: &Browser) {
                     }
                 }
             }
+            // Linux: the pane can take focus now; a selection waiting for it is
+            // applied. macOS waits for its overlay window (SetPaneBoundsViewsTask).
+            #[cfg(not(target_os = "macos"))]
+            crate::input_owner::views::pane_live(state, &block_id);
         }
     }
 }

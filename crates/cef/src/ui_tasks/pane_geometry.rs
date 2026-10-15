@@ -420,7 +420,7 @@ wrap_task! {
 
                     // Restore main window as key so sidebar clicks work — unless
                     // a pane overlay holds key because the user clicked into /
-                    // focused a page (make_pane_overlay_key). This task runs on
+                    // focused a page (give_pane_overlay_key). This task runs on
                     // every bounds change (resize, split animation, tab switch),
                     // so re-keying main here took the keyboard away from the
                     // page mid-typing.
@@ -724,15 +724,16 @@ wrap_task! {
             // Main browser host is now stored into PANE_WIN_TO_HOST inside the
             // rwhvc_cls block above, keyed by the NSWindow pointer for this pane.
 
-            // The overlay is now tagged and registered: apply a keyboard-focus
-            // request that arrived before it was (open-with-focus claims focus
-            // as soon as browser_pane_create returns, which beats this task).
+            // The overlay is now tagged and registered: the pane can take the
+            // keyboard, and the input owner applies a recent selection of it
+            // that arrived before it could (open-with-focus claims focus as
+            // soon as browser_pane_create returns, which beats this task).
             #[cfg(target_os = "macos")]
             if let Some(block_id) = self.label
                 .strip_prefix("browser-pane-")
                 .and_then(|rest| rest.rfind('-').map(|dash| &rest[..dash]))
             {
-                crate::ui_tasks::apply_pending_pane_key(block_id);
+                crate::input_owner::views::pane_live(&self.state, block_id);
             }
 
             // Diagnostic: swizzle NSApp::sendEvent: once to log all leftMouseDown

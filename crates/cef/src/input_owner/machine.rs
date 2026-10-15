@@ -97,8 +97,8 @@ pub const VERIFY_AFTER_MS: u64 = 50;
 pub const RESTORE_MIN_INTERVAL_MS: u64 = 100;
 /// Asks for one owner before the machine accepts where focus is and warns.
 pub const MAX_ATTEMPTS: u8 = 3;
-/// How long a selection that can't be applied yet stays applicable. The same as
-/// macOS's parked pane-key request (`PENDING_PANE_KEY_TTL`, #4958): a request
+/// How long a selection that can't be applied yet stays applicable. The same as the
+/// parked pane-key request macOS had before this machine (#4958): a request
 /// applied later than this took the keyboard from whatever the user moved on to.
 pub const PARKED_WANT_TTL_MS: u64 = 1500;
 

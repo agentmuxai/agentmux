@@ -160,6 +160,33 @@ No key codes are read. The per-message wheel and key lines in the pane subclass 
   caret-follows-selection net (`focusManager.ts`), the native menu's command (`command-registry.ts`) and the window
   focus signal (`window-focus.ts`). Where nothing reports, it is `document.hasFocus()`, as before.
 
+### 3.7 The macOS and Linux adapter (Phase 4)
+
+Neither platform has an input owner today. On macOS the pieces are hooks in `ui_tasks/platform_macos.rs` and one
+parked request for the whole app (`PENDING_PANE_KEY`, #4958); on Linux the host has almost no focus logic. The same
+bug classes the Windows adapter removed are there: one global slot shared by every window, a reclaim and a key change
+made in a window the user isn't in (`MainFocusReclaimTask` has no foreground check off Windows; `defocus_all` blurs the
+panes of every window), a hidden or closed pane keeping or regaining the keyboard, and requests applied late.
+
+One adapter serves both, `input_owner/views.rs`, feeding the same machine. Its events:
+
+| Event | macOS | Linux |
+|---|---|---|
+| `Select` | `input_select` (§3.6) | same |
+| `PanePointerDown` | left mouse-down on a pane overlay (`swizzled_nsapp_send_event`) | none observed: the frontend's `Select` stands in |
+| `AppPointerDown` | left or right mouse-down in an app window (same hook) | none observed |
+| `FocusGained` | CEF `on_got_focus` for a pane browser | same |
+| `Activated` / `Deactivated` | CEF Views `on_window_activation_changed`, effects posted to run after CEF's own handling | same |
+| `PaneLive` / `PaneShown` / `PaneCollapsed` / `PaneClosing` / `PaneGone` | pane created, rect applied (0×0 is collapsed), close | same |
+| `Verify` | the key window: a tagged pane overlay is that pane, the window's own NSWindow the app | the last surface CEF reported focus to in that window |
+
+Its effects go through three per-platform functions (`views::platform`): `focus_app(window)` (macOS: key status back
+to that window's own NSWindow, its main browser focused, only *its* panes blurred; Linux: its main browser focused,
+its panes blurred), `focus_pane(block)` (macOS: the overlay made key and the page first responder, without parking:
+the machine parks; Linux: the pane browser focused) and `focused(window)` for `Verify`. Effects for a pointer event
+run at once, on the UI thread inside the event, as the hook did before (the click that selects a pane is the one the
+page gets); the others are posted. `PENDING_PANE_KEY` and its TTL are replaced by the machine's parked selection.
+
 ## 4. Phases
 
 | Phase | Content |
@@ -167,7 +194,7 @@ No key codes are read. The per-message wheel and key lines in the pane subclass 
 | 1 | This spec; `crates/cef/src/input_owner/` pure machine with transition and property tests. No behaviour change. |
 | 2 | Windows adapter: per-window registry, the events above wired in, effects run on the UI thread, `[input]` logging, `GetFocus` verify. Removes `ALLOW_BROWSER_PANE_FOCUS_ONCE`, the swallowed `WM_SETFOCUS`, the pre-CEF `WM_ACTIVATE` restore and the off-thread `SetFocus`. Adds `RaisePanes` and the collapse hand-off. Live-tested in an isolated dev build. |
 | 3 | Frontend (§3.6): one `input_select` with a sequence number for every selection change; an `input-owner-changed` event back; `document.hasFocus()` no longer stands in for "a pane has the keys". |
-| 4 | macOS (key window) and Linux (Views focus) adapters onto the same core. |
+| 4 | macOS (key window) and Linux (Views focus) adapters onto the same core (§3.7). |
 
 ## 5. Not in scope
 
