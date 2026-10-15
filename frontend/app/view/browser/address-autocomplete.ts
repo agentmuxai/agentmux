@@ -25,6 +25,12 @@ export interface AddressAutocomplete {
     matches: Accessor<BrowserAutocompleteMatch[]>;
     /** The text `matches` answer, so a stale list is never acted on. */
     matchesFor: Accessor<string>;
+    /** The list is shown: it has suggestions, even while the answer for
+     *  newer text is on its way. Closing it between keystrokes would close
+     *  and re-cut its hole through the page under it, and the page flashes
+     *  through on every key (pane-overlay.ts). Acting on the list still
+     *  needs `matchesFor` to match what was typed. */
+    open: Accessor<boolean>;
     /** Highlighted row, or -1. */
     selected: Accessor<number>;
     /** False once the host has said it has no autocomplete. */
@@ -88,6 +94,7 @@ export function createAddressAutocomplete(query: AutocompleteQuery): AddressAuto
     return {
         matches,
         matchesFor,
+        open: () => matches().length > 0,
         selected,
         supported,
         update(text) {
