@@ -1071,22 +1071,14 @@ async fn enforce_register_first(
             false,
         ),
         // Phase E.4.B — all layout-tree commands are srv-pipe only.
-        Command::LayoutInsertNode { .. }
-        | Command::LayoutInsertNodeAtIndex { .. }
-        | Command::LayoutDeleteNode { .. }
+        Command::LayoutDeleteNode { .. }
         | Command::LayoutDeleteNodeByBlock { .. }
         | Command::LayoutStackPush { .. }
         | Command::LayoutStackActivate { .. }
         | Command::CreateBlockInStack { .. }
         | Command::LayoutStackMove { .. }
+        | Command::LayoutApplyIntent { .. }
         | Command::LayoutQueueBackendActions { .. }
-        | Command::LayoutMoveNode { .. }
-        | Command::LayoutSwapNodes { .. }
-        | Command::LayoutResizeNodes { .. }
-        | Command::LayoutReplaceNode { .. }
-        | Command::LayoutSplitHorizontal { .. }
-        | Command::LayoutSplitVertical { .. }
-        | Command::LayoutClear { .. }
         | Command::LayoutSetTree { .. } => (
             "Layout command is a srv-pipe command; sent to launcher pipe by mistake".to_string(),
             false,

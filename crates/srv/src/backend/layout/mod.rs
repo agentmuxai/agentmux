@@ -13,12 +13,14 @@
 //! (shipped in PR #686) — the Rust implementations must produce identical
 //! state transitions for identical inputs.
 //!
-//! The structural ops (insert, move, swap, resize, replace, split, balance)
-//! have no reducer arm: nothing produced those commands. They stay, with
-//! their oracle tests, for the layout-intents work in
-//! `docs/specs/SPEC_STRONG_REDUCER_AUTHORITY_LAYOUT_2026_06_30.md`; outside
-//! tests they are unused, hence the `dead_code` allowance.
+//! The structural ops here (insert, move, swap, resize, replace, split) are
+//! unused outside their tests, hence the `dead_code` allowance: layout
+//! intents apply the frontend-faithful port in [`intent`] instead, which
+//! differs from them where the frontend does (delete leaves the collapse to
+//! `balance_node`; a same-direction child is flattened on insert).
 #![cfg_attr(not(test), allow(dead_code))]
+
+pub mod intent;
 
 use agentmux_common::{FlexDirection, LayoutNode, ResizeOp, SplitPosition, StackMovePosition};
 use uuid::Uuid;
@@ -44,6 +46,8 @@ pub enum LayoutError {
     /// or dissolved column). Minimized is a locked state — see
     /// `docs/specs/SPEC_LAYOUT_MINIMIZE_LOCKED_STATE_REDESIGN_2026_07_16.md`.
     NodeLocked { id: String },
+    /// An intent the reducer won't apply, with the reason.
+    Refused(String),
 }
 
 impl std::fmt::Display for LayoutError {
@@ -56,6 +60,7 @@ impl std::fmt::Display for LayoutError {
             Self::InvalidIndexPath => write!(f, "index_arr is empty or points to a non-existent location"),
             Self::InvalidNode { id } => write!(f, "invalid node (leaf-XOR-branch violated): {}", id),
             Self::NodeLocked { id } => write!(f, "node is minimize-locked: {}", id),
+            Self::Refused(reason) => f.write_str(reason),
         }
     }
 }

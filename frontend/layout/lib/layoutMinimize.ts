@@ -1,7 +1,7 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { findNode } from "./layoutNode";
+import { findNode, walkNodes } from "./layoutNode";
 import { isNodeLocked, isEffectivelyMinimized, reportLayoutViolations } from "./layoutInvariants";
 import type { LayoutModel } from "./layoutModel";
 import { DefaultNodeSize, type LayoutNode } from "./types";
@@ -188,9 +188,23 @@ function _finishToggle(model: LayoutModel, nodeId: string, minimized: boolean) {
  *   carve-out bookkeeping of the legacy model).
  */
 export function rebuildMinimizedSet(model: LayoutModel) {
-    const ids = new Set<string>();
-    let migrated = 0;
     const root = model.treeState.rootNode;
+    const migrated = migrateLegacyMinimize(root);
+    if (migrated > 0) {
+        console.warn(`[layoutMinimize] migrated ${migrated} legacy minimize field(s) to the display-mode flag`);
+    }
+    const ids = new Set<string>();
+    walkNodes(root, (node) => {
+        if (node.minimized && !node.children?.length) ids.add(node.id);
+    });
+    model.minimizedNodeIds._set(ids);
+}
+
+/** The migration half of `rebuildMinimizedSet`, on a bare tree. Returns how
+ *  many legacy fields it migrated. srv runs the same migration
+ *  (`migrate_legacy_minimize`, crates/srv/src/backend/layout/intent.rs). */
+export function migrateLegacyMinimize(root: LayoutNode | undefined): number {
+    let migrated = 0;
     // Flex sizes are relative WITHIN a parent. A slipped/dissolved node lives
     // nested in its slip/dissolve TARGET — a different unit space from where
     // its `originalRowSize` was recorded — so restoring that raw number would
@@ -240,12 +254,8 @@ export function rebuildMinimizedSet(model: LayoutModel) {
             node._slipAnchor = undefined;
             migrated++;
         }
-        if (node.minimized && isLeaf) ids.add(node.id);
         node.children?.forEach((c) => walk(c, node));
     }
     if (root) walk(root, undefined);
-    if (migrated > 0) {
-        console.warn(`[layoutMinimize] migrated ${migrated} legacy minimize field(s) to the display-mode flag`);
-    }
-    model.minimizedNodeIds._set(ids);
+    return migrated;
 }

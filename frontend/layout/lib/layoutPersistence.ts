@@ -10,6 +10,7 @@ import { isUnderway } from "@/app/drag/drag-session";
 import { findNodeByBlockId, newLayoutNode, walkNodes } from "./layoutNode";
 import { rebuildMinimizedSet } from "./layoutMinimize";
 import { removeBlockFromLeaf, removeLeafEmptiedByMove } from "./layoutMagnify";
+import { queueLayoutPush, reconcileWithStoredLayout } from "./layoutIntents";
 import { activateMemberInStack, addMemberToStack, moveMemberAcrossStacks, moveMemberInStack } from "./stackMembers";
 import type { LayoutPushResult } from "./layoutAtom";
 import type { PaneTabEditResult } from "@/types/rpc/PaneTabEditResult";
@@ -80,6 +81,7 @@ export function onBackendUpdate(model: LayoutModel) {
     if (pendingActions?.length) {
         fireAndForget(() => processPendingBackendActions(model));
     }
+    reconcileWithStoredLayout(model);
     // NOTE deliberately NO prune here (SPEC_DRAG_SESSION_ARCHITECTURE_REFACTOR
     // §3.5): running it reactively on every Tab/LayoutState change made the
     // Tab object a tracked dependency and could delete a LEGITIMATE
@@ -195,16 +197,21 @@ export async function processPendingBackendActions(model: LayoutModel) {
 
     model.treeState.pendingBackendActions = undefined;
 
-    for (const action of actions) {
-        if (!action.actionid) {
-            console.warn("Dropping layout action without actionid:", action);
-            continue;
+    model.processingBackendActions = true;
+    try {
+        for (const action of actions) {
+            if (!action.actionid) {
+                console.warn("Dropping layout action without actionid:", action);
+                continue;
+            }
+            if (model.processedActionIds.has(action.actionid)) {
+                continue;
+            }
+            model.processedActionIds.add(action.actionid);
+            await handleBackendAction(model, action);
         }
-        if (model.processedActionIds.has(action.actionid)) {
-            continue;
-        }
-        model.processedActionIds.add(action.actionid);
-        await handleBackendAction(model, action);
+    } finally {
+        model.processingBackendActions = false;
     }
 
     batch(() => {
@@ -450,7 +457,9 @@ async function handleBackendAction(model: LayoutModel, action: LayoutActionData)
 }
 
 /**
- * Persist current tree state to the backend MuxObject (debounced).
+ * Push the whole local tree to the backend MuxObject (debounced), for the
+ * edits that don't reach srv as layout intents yet. It leaves through the
+ * same queue as the intents (`queueLayoutPush`, layoutIntents.ts).
  * @param model The LayoutModel instance.
  */
 export function persistToBackend(model: LayoutModel) {
@@ -459,42 +468,52 @@ export function persistToBackend(model: LayoutModel) {
     }
 
     model.persistDebounceTimer = setTimeout(() => {
-        if (model.disposed) return;
-        const muxObj = model.getter(model.muxObjectAtom);
-        if (!muxObj) return;
-
-        muxObj.rootnode = model.treeState.rootNode;
-        muxObj.focusednodeid = model.treeState.focusedNodeId;
-        muxObj.magnifiednodeid = model.treeState.magnifiedNodeId;
-        muxObj.leaforder = model.treeState.leafOrder;
-        // Persistence Phase A (SPEC_DRAG_SESSION_ARCHITECTURE_REFACTOR §3.6):
-        // the pendingbackendactions queue is BACKEND-owned. Never write our
-        // (often stale) local copy — a debounced persist racing a freshly
-        // queued action used to erase it (the stale-tree resurrection
-        // engine). Instead, carry forward the LIVE queue minus the actions
-        // this model has already processed: ordinary persists preserve
-        // unseen actions verbatim, and post-processing persists still clear
-        // consumed ones.
-        const liveQueue = model.getter(model.muxObjectAtom)?.pendingbackendactions;
-        const unprocessed = liveQueue?.filter(
-            (a) => a.actionid && !model.processedActionIds.has(a.actionid)
-        );
-        muxObj.pendingbackendactions = unprocessed?.length ? unprocessed : undefined;
-        muxObj.layoutrevision = pushBaseRevision(model, muxObj.layoutrevision ?? 0);
-
         model.persistDebounceTimer = null;
-        const push = (model.muxObjectAtom as { _push?: (v: LayoutState) => Promise<LayoutPushResult | null> })._push;
-        if (!push) {
-            model.setter(model.muxObjectAtom, muxObj);
+        if (model.disposed) return;
+        queueLayoutPush(model);
+    }, 100);
+}
+
+/** Send the whole local tree now; resolves once srv has answered. */
+export async function pushLayout(model: LayoutModel): Promise<void> {
+    if (model.disposed) return;
+    const muxObj = model.getter(model.muxObjectAtom);
+    if (!muxObj) return;
+
+    muxObj.rootnode = model.treeState.rootNode;
+    muxObj.focusednodeid = model.treeState.focusedNodeId;
+    muxObj.magnifiednodeid = model.treeState.magnifiedNodeId;
+    muxObj.leaforder = model.treeState.leafOrder;
+    // Persistence Phase A (SPEC_DRAG_SESSION_ARCHITECTURE_REFACTOR §3.6):
+    // the pendingbackendactions queue is BACKEND-owned. Never write our
+    // (often stale) local copy — a debounced persist racing a freshly
+    // queued action used to erase it (the stale-tree resurrection
+    // engine). Instead, carry forward the LIVE queue minus the actions
+    // this model has already processed: ordinary persists preserve
+    // unseen actions verbatim, and post-processing persists still clear
+    // consumed ones.
+    const liveQueue = model.getter(model.muxObjectAtom)?.pendingbackendactions;
+    const unprocessed = liveQueue?.filter(
+        (a) => a.actionid && !model.processedActionIds.has(a.actionid)
+    );
+    muxObj.pendingbackendactions = unprocessed?.length ? unprocessed : undefined;
+    muxObj.layoutrevision = pushBaseRevision(model, muxObj.layoutrevision ?? 0);
+
+    const push = (model.muxObjectAtom as { _push?: (v: LayoutState) => Promise<LayoutPushResult | null> })._push;
+    if (!push) {
+        model.setter(model.muxObjectAtom, muxObj);
+        return;
+    }
+    try {
+        const result = await push(muxObj);
+        if (result?.stale) {
+            await resyncAfterStalePush(model, result);
             return;
         }
-        push(muxObj)
-            .then((result) => {
-                if (result?.stale) return resyncAfterStalePush(model, result);
-                model.stalePushStreak = 0;
-            })
-            .catch((e) => console.warn("[layout] layout push failed", e));
-    }, 100);
+        model.stalePushStreak = 0;
+    } catch (e) {
+        console.warn("[layout] layout push failed", e);
+    }
 }
 
 /**

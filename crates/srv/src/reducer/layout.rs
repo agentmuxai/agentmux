@@ -5,6 +5,10 @@ use agentmux_common::ipc::{ErrorCode, Event};
 
 use crate::state::State;
 
+mod intent;
+pub(super) use intent::handle_layout_apply_intent;
+#[allow(unused_imports)]
+pub(crate) use intent::RECENT_INTENTS;
 
 /// Phase E.4 (Option A) — set the focused layout-node id on a tab.
 /// Errors (non-fatal) if the tab is unknown to the reducer; no-op

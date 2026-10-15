@@ -13,6 +13,7 @@ pub mod event_log;
 pub mod install_presence;
 pub mod ipc;
 pub mod jekt_sign;
+pub mod layout_intent;
 pub mod layout_types;
 pub mod log_retention;
 pub mod login_pty;
@@ -42,6 +43,7 @@ pub use data_paths::{
     IsolatedSettingsReason,
 };
 pub use errors::{AgentMuxError, AmxCode};
+pub use layout_intent::{LayoutIntent, LayoutResizeOp, LayoutViewState};
 pub use layout_types::{
     FlexDirection, LayoutClientSlices, LayoutNode, LayoutNodeData, ResizeOp, SplitPosition,
     StackMovePosition,

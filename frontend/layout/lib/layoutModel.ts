@@ -10,22 +10,10 @@ import { atomWithThrottle, boundNumber, createSignalAtom, SignalAtom } from "@/u
 import type { Properties as CSSProperties } from "csstype";
 import { createEffect, createMemo, createRoot, getOwner, on, runWithOwner, Owner } from "solid-js";
 import { getLayoutStateAtomFromTab } from "./layoutAtom";
-import { findNode } from "./layoutNode";
-import {
-    clearTree,
-    computeMoveNode,
-    deleteNode,
-    focusNode,
-    insertNode,
-    insertNodeAtIndex,
-    magnifyNodeToggle,
-    moveNode,
-    replaceNode,
-    resizeNode,
-    splitHorizontal,
-    splitVertical,
-    swapNode,
-} from "./layoutTree";
+import { findNode, withDerivedNodeIds } from "./layoutNode";
+import { computeMoveNode } from "./layoutTree";
+import { applyLayoutAction, intentForAction, isIntentAction } from "./layoutIntentActions";
+import { flushLayoutOutbox, type LayoutOutboxItem } from "./layoutIntents";
 import {
     ContentRenderer,
     FlexDirection,
@@ -33,19 +21,11 @@ import {
     LayoutNodeAdditionalProps,
     LayoutTreeAction,
     LayoutTreeActionType,
-    LayoutTreeClearTreeAction,
     LayoutTreeComputeMoveNodeAction,
-    LayoutTreeDeleteNodeAction,
-    LayoutTreeFocusNodeAction,
     LayoutTreeInsertNodeAction,
-    LayoutTreeInsertNodeAtIndexAction,
     LayoutTreeMagnifyNodeToggleAction,
     LayoutTreeMoveNodeAction,
-    LayoutTreeReplaceNodeAction,
-    LayoutTreeResizeNodeAction,
     LayoutTreeSetPendingAction,
-    LayoutTreeSplitHorizontalAction,
-    LayoutTreeSplitVerticalAction,
     LayoutTreeState,
     LayoutTreeSwapNodeAction,
     NavigateDirection,
@@ -99,6 +79,7 @@ import {
     initializeFromMuxObject as initializeFromMuxObjectImpl,
     onBackendUpdate as onBackendUpdateImpl,
     persistToBackend as persistToBackendImpl,
+    pushLayout,
 } from "./layoutPersistence";
 import {
     updateTree as updateTreeImpl,
@@ -166,6 +147,22 @@ export class LayoutModel {
      * @internal
      */
     stalePushStreak = 0;
+    /**
+     * Layout intents and whole-tree pushes waiting to be sent, in order
+     * (layoutIntents.ts).
+     * @internal
+     */
+    layoutOutbox: LayoutOutboxItem[] = [];
+    /** True while the outbox is being sent. @internal */
+    layoutSending = false;
+    /**
+     * The layout row version that includes every intent this model has sent:
+     * an older row is not compared with the local tree.
+     * @internal
+     */
+    layoutVersionFloor = 0;
+    /** True while queued backend actions are being applied. @internal */
+    processingBackendActions = false;
     /**
      * Read a signal value (signal accessor — call to read, returns current value).
      * Kept for compatibility with modules that call model.getter(signal).
@@ -394,6 +391,7 @@ export class LayoutModel {
         // Stop every pending write first: a delayed persist or prune from a
         // model whose tab has left could overwrite the tab's new owner.
         this.disposed = true;
+        this.layoutOutbox = [];
         if (this.persistDebounceTimer) clearTimeout(this.persistDebounceTimer);
         this.persistDebounceTimer = null;
         if (this.startupPruneTimer) clearTimeout(this.startupPruneTimer);
@@ -616,6 +614,11 @@ export class LayoutModel {
         persistToBackendImpl(this);
     }
 
+    /** Send the whole local tree now (the outbox calls it in its turn). @internal */
+    pushLayoutNow(): Promise<void> {
+        return pushLayout(this);
+    }
+
     /**
      * Register TileLayout callbacks that should be called on various state changes.
      * @param contents Contains callbacks provided by the TileLayout component.
@@ -647,37 +650,33 @@ export class LayoutModel {
         // OLD pane instead of the newly selected one. Deferred to after
         // state actually commits (below) instead of firing per-case.
         let shouldRequestFocus = false;
-        switch (action.type) {
+        // A tree edit is applied here as the prediction of srv's result and
+        // sent as an intent; srv's stored tree has the last word
+        // (layoutIntents.ts). Branches the edit creates are named from its
+        // action id, as srv names them.
+        if (isIntentAction(action.type)) {
+            const actionId = crypto.randomUUID();
+            const intent = intentForAction(action);
+            withDerivedNodeIds(actionId, () => applyLayoutAction(this.treeState, action));
+            // A queued backend action being mirrored is not this window's
+            // edit; the push that follows the batch carries it.
+            if (intent && !this.processingBackendActions) this.layoutOutbox.push({ kind: "intent", actionId, intent });
+            if (action.type === LayoutTreeActionType.FocusNode) shouldRequestFocus = true;
+            if (action.type === LayoutTreeActionType.MagnifyNodeToggle) {
+                shouldRequestFocus = (action as LayoutTreeMagnifyNodeToggleAction).focused !== false;
+            }
+            if (
+                (action.type === LayoutTreeActionType.InsertNode ||
+                    action.type === LayoutTreeActionType.InsertNodeAtIndex) &&
+                (action as LayoutTreeInsertNodeAction).focused
+            ) {
+                shouldRequestFocus = true;
+            }
+        } else switch (action.type) {
             case LayoutTreeActionType.ComputeMove:
                 this.pendingTreeAction.throttledValueAtom._set(
                     computeMoveNode(this.treeState, action as LayoutTreeComputeMoveNodeAction)
                 );
-                break;
-            case LayoutTreeActionType.Move:
-                moveNode(this.treeState, action as LayoutTreeMoveNodeAction);
-                break;
-            case LayoutTreeActionType.InsertNode:
-                insertNode(this.treeState, action as LayoutTreeInsertNodeAction);
-                if ((action as LayoutTreeInsertNodeAction).focused) {
-                    shouldRequestFocus = true;
-                }
-                break;
-            case LayoutTreeActionType.InsertNodeAtIndex:
-                insertNodeAtIndex(this.treeState, action as LayoutTreeInsertNodeAtIndexAction);
-                if ((action as LayoutTreeInsertNodeAtIndexAction).focused) {
-                    shouldRequestFocus = true;
-                }
-                break;
-            case LayoutTreeActionType.DeleteNode: {
-                const delAction = action as LayoutTreeDeleteNodeAction;
-                deleteNode(this.treeState, delAction);
-                break;
-            }
-            case LayoutTreeActionType.Swap:
-                swapNode(this.treeState, action as LayoutTreeSwapNodeAction);
-                break;
-            case LayoutTreeActionType.ResizeNode:
-                resizeNode(this.treeState, action as LayoutTreeResizeNodeAction);
                 break;
             case LayoutTreeActionType.SetPendingAction: {
                 const pendingAction = (action as LayoutTreeSetPendingAction).action;
@@ -701,26 +700,6 @@ export class LayoutModel {
                 this.pendingTreeAction.throttledValueAtom._set(undefined);
                 break;
             }
-            case LayoutTreeActionType.FocusNode:
-                focusNode(this.treeState, action as LayoutTreeFocusNodeAction);
-                shouldRequestFocus = true;
-                break;
-            case LayoutTreeActionType.MagnifyNodeToggle:
-                magnifyNodeToggle(this.treeState, action as LayoutTreeMagnifyNodeToggleAction);
-                shouldRequestFocus = (action as LayoutTreeMagnifyNodeToggleAction).focused !== false;
-                break;
-            case LayoutTreeActionType.ClearTree:
-                clearTree(this.treeState);
-                break;
-            case LayoutTreeActionType.ReplaceNode:
-                replaceNode(this.treeState, action as LayoutTreeReplaceNodeAction);
-                break;
-            case LayoutTreeActionType.SplitHorizontal:
-                splitHorizontal(this.treeState, action as LayoutTreeSplitHorizontalAction);
-                break;
-            case LayoutTreeActionType.SplitVertical:
-                splitVertical(this.treeState, action as LayoutTreeSplitVerticalAction);
-                break;
             default:
                 console.error("Invalid reducer action", this.treeState, action);
         }
@@ -742,7 +721,7 @@ export class LayoutModel {
                 this.focusedNodeIdStack = [newId, ...this.focusedNodeIdStack.filter((id) => id !== newId)];
             }
             this.localTreeStateAtom._set({ ...this.treeState });
-            this.persistToBackend();
+            void flushLayoutOutbox(this);
         }
         // Fires only once state has actually committed above — see this
         // function's leading comment. Gated on setState too: with

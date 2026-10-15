@@ -8,6 +8,31 @@ import { DefaultNodeSize, FlexDirection, LayoutNode } from "./types";
 import { reverseFlexDirection } from "./utils";
 
 /**
+ * The id of the `n`th node (from 1) a layout action creates: the action id
+ * with its first eight hex digits replaced by `n`. srv derives the same ids
+ * for the same intent (`derive_node_id`, crates/srv/src/backend/layout/intent.rs),
+ * so the branches the frontend predicts are the ones srv stores.
+ */
+export function deriveNodeId(actionId: string, n: number): string {
+    if (actionId.length >= 9 && actionId[8] === "-") return n.toString(16).padStart(8, "0") + actionId.slice(8);
+    return `${actionId}-${n}`;
+}
+
+let nextNodeId: (() => string) | null = null;
+
+/** Run `fn` with every node it creates named by `deriveNodeId(actionId, …)`. */
+export function withDerivedNodeIds<T>(actionId: string, fn: () => T): T {
+    const outer = nextNodeId;
+    let used = 0;
+    nextNodeId = () => deriveNodeId(actionId, ++used);
+    try {
+        return fn();
+    } finally {
+        nextNodeId = outer;
+    }
+}
+
+/**
  * Creates a new node.
  * @param flexDirection The flex direction for the new node.
  * @param size The size for the new node.
@@ -22,7 +47,7 @@ export function newLayoutNode(
     data?: TabLayoutData
 ): LayoutNode {
     const newNode: LayoutNode = {
-        id: crypto.randomUUID(),
+        id: nextNodeId ? nextNodeId() : crypto.randomUUID(),
         flexDirection: flexDirection ?? FlexDirection.Row,
         size: size ?? DefaultNodeSize,
         children,

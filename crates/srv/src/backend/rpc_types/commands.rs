@@ -593,6 +593,10 @@ pub const COMMAND_BROWSER_PROFILES_DELETE: &str = "browser_profiles.delete";
 pub const COMMAND_LAYOUT_SAVE: &str = "layout.save";
 pub const COMMAND_LAYOUT_PREVIEW: &str = "layout.preview";
 pub const COMMAND_LAYOUT_OPEN: &str = "layout.open";
+/// Apply one layout edit (split, move, resize, close, ...) to a tab's tree in
+/// the reducer — `Command::LayoutApplyIntent`.
+/// SPEC_STRONG_REDUCER_AUTHORITY_LAYOUT_2026_06_30.md §4.
+pub const COMMAND_LAYOUT_APPLY_INTENT: &str = "layout.applyIntent";
 
 // Browser-pane start page — a single URL, also global (shared_dir-backed).
 // Write-only RPC: the value is read via GetFullConfig's `browserstartpage`

@@ -1,0 +1,103 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+//! Apply a layout intent and store its result: the write path of every layout
+//! edit a window makes (`layout.applyIntent`).
+//! SPEC_STRONG_REDUCER_AUTHORITY_LAYOUT_2026_06_30.md §4.
+
+use agentmux_common::ipc::{Command, Event};
+use agentmux_common::{LayoutClientSlices, LayoutIntent, LayoutViewState};
+
+use crate::backend::obj::{LayoutState, Tab};
+
+use super::super::AppState;
+
+/// What became of an intent.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct IntentOutcome {
+    /// False when the reducer refused it; `error` says why.
+    pub applied: bool,
+    pub error: Option<String>,
+    /// The layout row's version afterwards.
+    pub version: u64,
+}
+
+/// Dispatch `LayoutApplyIntent` and write its events to the layout row in one
+/// hold of the reducer lock, so rows are written in the order intents are
+/// applied (the contract `update_layout_via_reducer` set for tree pushes). A
+/// failed write puts the tab back as the row has it. Publishes on success.
+pub(crate) async fn apply_layout_intent(
+    state: &AppState,
+    tab_id: &str,
+    intent: LayoutIntent,
+    action_id: &str,
+    view: Option<LayoutViewState>,
+) -> Result<IntentOutcome, String> {
+    let store = &state.mstore;
+    let layout_oid = store
+        .must_get::<Tab>(tab_id)
+        .map_err(|e| format!("layout intent: tab {tab_id}: {e}"))?
+        .layoutstate;
+    let row_version = || store.get::<LayoutState>(&layout_oid).ok().flatten().map_or(0, |r| r.version as u64);
+    let cmd = Command::LayoutApplyIntent {
+        tab_id: tab_id.to_string(),
+        intent,
+        action_id: action_id.to_string(),
+        view,
+    };
+    let (events, outcome) = {
+        let mut s = state.srv_state.lock().await;
+        let old_row = store.get::<LayoutState>(&layout_oid).map_err(|e| format!("layout intent: {e}"))?;
+        let ctx = crate::reducer::Ctx::new(None);
+        let events = crate::reducer::update(&mut s, cmd, &ctx);
+        if let Some(message) = events.iter().find_map(|e| match e {
+            Event::Error { message, .. } => Some(message.clone()),
+            _ => None,
+        }) {
+            tracing::info!(tab_id, action_id, "layout intent refused: {message}");
+            let outcome = IntentOutcome { applied: false, error: Some(message), version: row_version() };
+            (Vec::new(), outcome)
+        } else if let Some(err) = events
+            .iter()
+            .find_map(|ev| crate::persist_subscriber::apply_event_to_mstore(ev, store).err())
+        {
+            roll_back(&mut s, store, tab_id, action_id, old_row);
+            return Err(format!("layout intent: SQLite write failed: {err}"));
+        } else {
+            (events, IntentOutcome { applied: true, error: None, version: row_version() })
+        }
+    };
+    super::publish_events(state, &events);
+    Ok(outcome)
+}
+
+/// Put the tab back as `old_row` stores it, and forget the action id so a
+/// resend applies.
+fn roll_back(
+    s: &mut crate::state::State,
+    store: &crate::backend::storage::store::Store,
+    tab_id: &str,
+    action_id: &str,
+    old_row: Option<LayoutState>,
+) {
+    let Some(old) = old_row else { return };
+    let rollback = Command::LayoutSetTree {
+        tab_id: tab_id.to_string(),
+        new_tree: old.rootnode.clone(),
+        correlation_id: String::new(),
+        slices: Some(LayoutClientSlices {
+            leaforder: old.leaforder.as_ref().and_then(|v| serde_json::to_value(v).ok()),
+            focused_node_id: old.focusednodeid.clone(),
+            magnified_node_id: old.magnifiednodeid.clone(),
+            pending_backend_actions: old.pendingbackendactions.as_ref().and_then(|v| serde_json::to_value(v).ok()),
+        }),
+    };
+    for ev in crate::reducer::update(s, rollback, &crate::reducer::Ctx::new(None)) {
+        if let Err(e) = crate::persist_subscriber::apply_event_to_mstore(&ev, store) {
+            tracing::warn!(error = %e, "layout intent: rollback SQLite mirror failed");
+        }
+    }
+    if let Some(tab) = s.tabs.get_mut(tab_id) {
+        tab.recent_intent_ids.retain(|id| id != action_id);
+    }
+}

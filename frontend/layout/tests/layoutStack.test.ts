@@ -27,8 +27,16 @@ import { LayoutNodeAdditionalProps, LayoutTreeActionType, LayoutTreeInsertNodeAc
 import type { SignalAtom } from "@/util/util";
 
 const rpcCall = vi.fn();
+// Layout intents (every tree edit) go to their own mock, so `rpcCall` counts
+// the pane-tab commands these tests are about. Its version is one no mocked
+// row reaches, so the model never swaps its tree for the (static) stored one.
+const intentCall = vi.fn(async (..._args: unknown[]) => ({ applied: true, version: Number.MAX_SAFE_INTEGER }));
 const deleteBlock = vi.fn();
-vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: { rpcCall: (...args: unknown[]) => rpcCall(...args) } }));
+vi.mock("@/app/store/rpc-util", () => ({
+    TabRpcClient: {
+        rpcCall: (...args: unknown[]) => (args[0] === "layout.applyIntent" ? intentCall(...args) : rpcCall(...args)),
+    },
+}));
 vi.mock("@/app/store/services", () => ({ ObjectService: { DeleteBlock: (...args: unknown[]) => deleteBlock(...args) } }));
 
 // Same mock harness as layoutModel.test.ts.
