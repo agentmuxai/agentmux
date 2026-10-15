@@ -64,6 +64,9 @@ pub struct WhoParams {
     pub repo: Option<String>,
     pub branch: Option<String>,
     pub query: Option<String>,
+    /// A PR: `recent_posts` then holds only posts about it (the MCP side asks
+    /// about each of its files too, and merges those posts in).
+    pub pr: Option<i64>,
     pub agent: Option<String>,
     pub block: Option<String>,
 }
@@ -146,7 +149,8 @@ pub(crate) async fn handle_who_is_working_on(
     // What agents posted about it (SPEC_AGENT_COORDINATION_CHANNEL_2026_10_15 §3.4).
     let store = state.identity_store.clone();
     let asked = target.clone();
-    let recent_posts = tokio::task::spawn_blocking(move || super::coord_channel_handlers::recent_posts(&store, &asked, now))
+    let pr = p.pr.filter(|n| *n > 0);
+    let recent_posts = tokio::task::spawn_blocking(move || super::coord_channel_handlers::recent_posts(&store, &asked, pr, now))
         .await
         .unwrap_or_default();
     Json(json!({

@@ -225,11 +225,12 @@ pub(crate) async fn handle_read_channel(
     .into_response()
 }
 
-/// `WhoIsWorkingOn`'s `recent_posts`: the last day's posts about the question.
-pub(crate) fn recent_posts(store: &Store, target: &matching::Target, now_ms: i64) -> Vec<Value> {
+/// `WhoIsWorkingOn`'s `recent_posts`: the last day's posts about the question
+/// (and about `pr`, when it asks about a PR).
+pub(crate) fn recent_posts(store: &Store, target: &matching::Target, pr: Option<i64>, now_ms: i64) -> Vec<Value> {
     let Some(repo) = target.repo.as_deref() else { return Vec::new() };
     let posts = store.coord_posts_in(repo, now_ms - WHO_SINCE_MS, now_ms).unwrap_or_default();
-    coord::select(posts, target, None, WHO_POSTS)
+    coord::select(posts, target, pr, WHO_POSTS)
 }
 
 #[cfg(test)]
@@ -358,6 +359,22 @@ mod tests {
         let kinds: Vec<&str> = b["posts"].as_array().unwrap().iter().map(|p| p["kind"].as_str().unwrap()).collect();
         assert_eq!(kinds, vec!["release", "claim"], "newest first: {b}");
         assert!(b["posts"][1]["text"].as_str().unwrap().ends_with(": shim removal"));
+    }
+
+    #[tokio::test]
+    async fn who_is_working_on_a_pr_shows_only_that_prs_posts() {
+        let state = crate::server::tests::test_state();
+        let repo = format!("o/r{}", unique());
+        for (pr, msg) in [(Some(12), "merge #12 after #11"), (None, "unrelated repo-wide hold")] {
+            let p = PostParams { message: Some(msg.into()), repo: Some(repo.clone()), pr, agent: Some("C".into()), ..Default::default() };
+            assert_eq!(handle_post_to_channel(State(state.clone()), None, Json(p)).await.status(), StatusCode::OK);
+        }
+        let who = WhoParams { repo: Some(repo), pr: Some(12), agent: Some("Asker".into()), ..Default::default() };
+        let (status, b) = body(handle_who_is_working_on(State(state), None, Query(who)).await).await;
+        assert_eq!(status, StatusCode::OK, "{b}");
+        let posts = b["recent_posts"].as_array().unwrap();
+        assert_eq!(posts.len(), 1, "{b}");
+        assert_eq!(posts[0]["text"], "merge #12 after #11");
     }
 
     #[tokio::test]

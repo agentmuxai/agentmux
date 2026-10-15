@@ -45,6 +45,10 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 None => (None, None),
             };
             let mut query = who_query(arguments, &agent, block_id);
+            // srv's recent_posts then holds the PR's own posts.
+            if let Some(n) = pr {
+                query.push(("pr", n.to_string()));
+            }
             // A PR's URL names its repository: ask about that one.
             if let Some(url_repo) = pr_repo {
                 match arg(arguments, "repo") {
@@ -63,6 +67,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 // here would list agents that touch none of the PR's files.
                 let mut q = query.clone();
                 q.retain(|(k, _)| matches!(*k, "repo" | "agent" | "block"));
+                // Not `pr`: these ask about one of its files, whose posts are merged in.
                 q.push(("path", path));
                 let url = url.clone();
                 async move { srv_get_json(client, &url, auth_key, &q, "WhoIsWorkingOn").await.ok() }
@@ -255,12 +260,18 @@ where
     };
     if let Some(files) = pr.and_then(|n| prs.iter().find(|p| p.number == n)).map(|p| p.files.clone()) {
         let mut agents: Vec<Value> = Vec::new();
+        let mut posts: Vec<Value> = body.get("recent_posts").and_then(Value::as_array).cloned().unwrap_or_default();
         for file in files.iter().take(PR_FILES_CHECKED) {
             if let Some(answer) = ask_path(file.clone()).await {
                 merge_agents(&mut agents, answer.get("agents").and_then(Value::as_array).cloned().unwrap_or_default());
+                merge_posts(&mut posts, answer.get("recent_posts").and_then(Value::as_array).cloned().unwrap_or_default());
             }
         }
         body["agents"] = Value::Array(agents);
+        // The PR's own posts and its files' posts, newest first, as srv caps them.
+        posts.sort_by_key(|p| std::cmp::Reverse(p.get("at").and_then(Value::as_i64).unwrap_or(0)));
+        posts.truncate(RECENT_POSTS_MAX);
+        body["recent_posts"] = Value::Array(posts);
         if files.len() > PR_FILES_CHECKED {
             body["pr_note"] = json!(format!(
                 "the PR changes {} files; agents on this computer were checked against the first {PR_FILES_CHECKED}",
@@ -269,6 +280,18 @@ where
         }
     }
     open_prs::merge_into(body, matches, &host, &repo);
+}
+
+/// `WhoIsWorkingOn`'s `recent_posts` holds at most this many (srv's cap).
+const RECENT_POSTS_MAX: usize = 5;
+
+/// Add posts not already in `into` (by id).
+fn merge_posts(into: &mut Vec<Value>, from: Vec<Value>) {
+    for post in from {
+        if !into.iter().any(|p| p.get("id") == post.get("id")) {
+            into.push(post);
+        }
+    }
 }
 
 /// Merge srv answers for several files: one entry per agent and channel,
@@ -338,6 +361,13 @@ mod tests {
         assert_eq!((body["agent"].as_str(), body["block"].as_str()), (Some("Loap-3"), Some("blk")));
         assert!(channel_post_body(&json!({ "message": "x", "repo": "o/other", "pr": "https://github.com/o/r/pull/12" }), "a", "b").is_err());
         assert!(channel_post_body(&json!({ "message": "x", "pr": "nope" }), "a", "b").is_err());
+    }
+
+    #[test]
+    fn posts_from_several_files_merge_once_each() {
+        let mut into = vec![json!({ "id": "a", "at": 3 })];
+        merge_posts(&mut into, vec![json!({ "id": "a", "at": 3 }), json!({ "id": "b", "at": 5 })]);
+        assert_eq!(into.iter().map(|p| p["id"].as_str().unwrap()).collect::<Vec<_>>(), vec!["a", "b"]);
     }
 
     #[test]
