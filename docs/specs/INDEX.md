@@ -765,6 +765,7 @@ partial list.
 | [`SPEC_FLEETWIDE_CRASH_HANG_FORENSICS_2026_08_14`](SPEC_FLEETWIDE_CRASH_HANG_FORENSICS_2026_08_14.md) | SPEC: Fleet-wide crash & hang forensic logging — implementation plan |
 | [`SPEC_FLOATING_PANE_DND_RETHINK_2026_06_22`](SPEC_FLOATING_PANE_DND_RETHINK_2026_06_22.md) | Floating-pane DnD lifecycle — architecture rethink |
 | [`SPEC_FLOATING_PANE_POOL_RELABEL_2026_06_30`](SPEC_FLOATING_PANE_POOL_RELABEL_2026_06_30.md) | SPEC — Rename Pool-Promoted Floating Panes to `floating-<uuid>` (Option A) |
+| [`SPEC_FLOATING_PANE_REDOCK_BUTTON_2026_10_15`](SPEC_FLOATING_PANE_REDOCK_BUTTON_2026_10_15.md) | Spec: A Redock button in the floating pane's header |
 | [`SPEC_FLOATING_PANE_REDOCK_PHASE_4A_SCOPING_2026-05-27`](SPEC_FLOATING_PANE_REDOCK_PHASE_4A_SCOPING_2026-05-27.md) | Phase 4a Re-dock — MVP scope decision |
 | [`SPEC_FLOATING_PANE_TEAROFF_2026_05_11`](SPEC_FLOATING_PANE_TEAROFF_2026_05_11.md) | Floating pane tear-off (subordinate window, owned by mother instance) |
 | [`SPEC_FLOATING_PANE_TEAROFF_CROSS_PLATFORM_2026-05-26`](SPEC_FLOATING_PANE_TEAROFF_CROSS_PLATFORM_2026-05-26.md) | Floating pane tear-off — cross-platform recipes |
