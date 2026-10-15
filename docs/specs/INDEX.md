@@ -803,6 +803,7 @@ partial list.
 | [`SPEC_MEDIA_PANE_V3_BROWSER_AND_CUSTOM_TRANSPORT_2026_07_29`](SPEC_MEDIA_PANE_V3_BROWSER_AND_CUSTOM_TRANSPORT_2026_07_29.md) | Spec: Media pane v3 — persistent browser + custom playback/scrub UI |
 | [`SPEC_MEMORY_COMMIT_ATTRIBUTION_CORRECTION_2026_07_02`](SPEC_MEMORY_COMMIT_ATTRIBUTION_CORRECTION_2026_07_02.md) | SPEC — Commit-attribution correction + genuine AgentMux memory-hygiene fixes |
 | [`SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24`](SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md) | SPEC: Memory follows the agent — across upgrades, channels, accounts, and machines; plus the Armory memory refresh |
+| [`SPEC_MEMORY_PANE_TOKENS_2026_10_15`](SPEC_MEMORY_PANE_TOKENS_2026_10_15.md) | Spec: The Memory pane in tokens — what memory costs each agent's context |
 | [`SPEC_MEMORY_RPC_HANDLERS_BLANK_WORKDIR_2026_09_02`](SPEC_MEMORY_RPC_HANDLERS_BLANK_WORKDIR_2026_09_02.md) | Spec: fix agent:memory:{list,read_file,write_file,revert} for a blank working_directory |
 | [`SPEC_MODAL_PANE_CLIP_2026_04_24`](SPEC_MODAL_PANE_CLIP_2026_04_24.md) | Spec: Modal-v2 ↔ Native Pane Airspace Clipping |
 | [`SPEC_MODEL_CATALOG_REFRESH_2026_07_02`](SPEC_MODEL_CATALOG_REFRESH_2026_07_02.md) | SPEC — API-sourced model catalog: keep the agent-pane model dropdown current |
