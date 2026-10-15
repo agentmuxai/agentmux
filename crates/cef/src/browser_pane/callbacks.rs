@@ -619,7 +619,6 @@ pub fn on_loading_state_change_browser_pane(
     }
 }
 
-/// The main frame's current URL, or empty when the browser has no main frame.
 /// Tell a newly loaded frontend where an already-live pane is: its URL, loading
 /// state and back/forward. A pane re-attached without navigating (a reload of
 /// its window, `BrowserPaneManager::create`'s `AlreadyLive` arm) gets none of
@@ -639,6 +638,7 @@ pub(crate) fn emit_current_nav_state(state: &Arc<AppState>, block_id: &str, brow
     );
 }
 
+/// The main frame's current URL, or empty when the browser has no main frame.
 pub(crate) fn main_frame_url(browser: &Browser) -> String {
     let url = browser
         .main_frame()
