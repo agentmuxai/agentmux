@@ -15,7 +15,7 @@ vi.mock("@/app/platform/ipc", () => ({
 import { invokeCommand } from "@/app/platform/ipc";
 import { cefBrowserPanes, cefInputOwnerState, cefReclaimWindowFocus } from "./cef-host-commands";
 
-type Selection = { window_label: string; block_id?: string; epoch: string; seq: number };
+type Selection = { window_label: string; block_id?: string; epoch: number; seq: number };
 
 function selections(): Selection[] {
     return vi
@@ -36,7 +36,8 @@ describe("keyboard requests", () => {
         expect(b.block_id).toBe("block-1");
         expect(c.block_id).toBeUndefined();
         expect(new Set([a.epoch, b.epoch, c.epoch]).size).toBe(1);
-        expect(a.epoch).not.toBe("");
+        // When this page loaded, in microseconds: a later page load numbers higher.
+        expect(a.epoch).toBe(Math.round(performance.timeOrigin * 1000));
         expect(b.seq).toBe(a.seq + 1);
         expect(c.seq).toBe(b.seq + 1);
     });

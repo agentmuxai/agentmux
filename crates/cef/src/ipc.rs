@@ -1066,7 +1066,7 @@ async fn route_command(
         // SPEC_BROWSER_PANE_INPUT_OWNER_2026_10_15.md §3.6.
         "input_select" => {
             let window_label = args.get("window_label").and_then(|v| v.as_str()).unwrap_or("main");
-            let epoch = args.get("epoch").and_then(|v| v.as_str()).unwrap_or("");
+            let epoch = args.get("epoch").and_then(|v| v.as_u64()).unwrap_or(0);
             let seq = args.get("seq").and_then(|v| v.as_u64()).unwrap_or(0);
             let block_id = args.get("block_id").and_then(|v| v.as_str());
             let applied = crate::input_owner::registry::apply_selection(window_label, epoch, seq, || {

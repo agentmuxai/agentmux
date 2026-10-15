@@ -53,17 +53,19 @@ pub fn snapshot(window: &str) -> Option<(bool, Have, String)> {
     OWNERS.lock().get(window).map(|w| (w.active, w.have.clone(), w.describe()))
 }
 
-/// A window's selections: the page load whose selections count (`epoch`), the
-/// number of the last one applied, and the page loads it replaced.
+/// A window's selections: the page load whose selections count (`epoch`, when
+/// it loaded, in microseconds since the Unix epoch) and the number of the last
+/// one applied.
 #[derive(Default)]
 struct Selections {
-    epoch: String,
+    epoch: u64,
     seq: u64,
-    retired: std::collections::VecDeque<String>,
 }
 
-/// How many replaced page loads a window remembers.
-const RETIRED_EPOCHS: usize = 32;
+/// A page load this much older than the current one is a new page after the
+/// clock was set back, not a request still in flight from an earlier load
+/// (those are milliseconds old).
+const CLOCK_SET_BACK_US: u64 = 60_000_000;
 
 static SELECTIONS: LazyLock<Mutex<HashMap<String, Selections>>> = LazyLock::new(Default::default);
 
@@ -73,9 +75,9 @@ static SELECTIONS: LazyLock<Mutex<HashMap<String, Selections>>> = LazyLock::new(
 /// older one must not undo a newer one. The check and `apply` run under one
 /// lock, so two requests are applied in the order they were accepted. `apply`
 /// must not make a selection itself. A new page load (a reload) starts its own
-/// numbering and retires the one before it, so a request still in flight from
-/// the old page can't take the window back.
-pub fn apply_selection(window: &str, epoch: &str, seq: u64, apply: impl FnOnce()) -> bool {
+/// numbering; page loads are ordered by when they loaded, so a request still in
+/// flight from an earlier page, even its first, can't take the window back.
+pub fn apply_selection(window: &str, epoch: u64, seq: u64, apply: impl FnOnce()) -> bool {
     let mut selections = SELECTIONS.lock();
     if !accept(&mut selections, window, epoch, seq) {
         return false;
@@ -84,27 +86,18 @@ pub fn apply_selection(window: &str, epoch: &str, seq: u64, apply: impl FnOnce()
     true
 }
 
-fn accept(selections: &mut HashMap<String, Selections>, window: &str, epoch: &str, seq: u64) -> bool {
+fn accept(selections: &mut HashMap<String, Selections>, window: &str, epoch: u64, seq: u64) -> bool {
     let s = selections.entry(window.to_string()).or_default();
-    if s.epoch == epoch {
-        if seq <= s.seq {
-            return false;
-        }
+    let newer = if epoch == s.epoch {
+        seq > s.seq
+    } else {
+        epoch > s.epoch || s.epoch - epoch > CLOCK_SET_BACK_US
+    };
+    if newer {
+        s.epoch = epoch;
         s.seq = seq;
-        return true;
     }
-    if s.retired.iter().any(|e| e == epoch) {
-        return false;
-    }
-    if !s.epoch.is_empty() {
-        s.retired.push_back(std::mem::take(&mut s.epoch));
-        if s.retired.len() > RETIRED_EPOCHS {
-            s.retired.pop_front();
-        }
-    }
-    s.epoch = epoch.to_string();
-    s.seq = seq;
-    true
+    newer
 }
 
 /// What a window's frontend is told about its input: whether the window is
@@ -187,47 +180,62 @@ mod tests {
 
     // Each test uses its own window label: the registry is process-wide.
 
-    fn accepts(window: &str, epoch: &str, seq: u64) -> bool {
+    fn accepts(window: &str, epoch: u64, seq: u64) -> bool {
         apply_selection(window, epoch, seq, || {})
     }
 
     #[test]
     fn only_an_accepted_selection_is_applied() {
         let mut applied = vec![];
-        apply_selection("t-apply", "e", 2, || applied.push(2));
-        apply_selection("t-apply", "e", 1, || applied.push(1));
-        apply_selection("t-apply", "e", 3, || applied.push(3));
+        apply_selection("t-apply", 1, 2, || applied.push(2));
+        apply_selection("t-apply", 1, 1, || applied.push(1));
+        apply_selection("t-apply", 1, 3, || applied.push(3));
         assert_eq!(applied, vec![2, 3]);
     }
 
     #[test]
     fn a_selection_older_than_one_applied_is_dropped() {
-        assert!(accepts("t-order", "load-1", 1));
-        assert!(accepts("t-order", "load-1", 3));
-        assert!(!accepts("t-order", "load-1", 2), "arrived after #3");
-        assert!(!accepts("t-order", "load-1", 3), "the same one twice");
-        assert!(accepts("t-order", "load-1", 4));
+        assert!(accepts("t-order", 1_000, 1));
+        assert!(accepts("t-order", 1_000, 3));
+        assert!(!accepts("t-order", 1_000, 2), "arrived after #3");
+        assert!(!accepts("t-order", 1_000, 3), "the same one twice");
+        assert!(accepts("t-order", 1_000, 4));
     }
 
     #[test]
     fn a_reloaded_page_starts_its_own_numbering() {
-        assert!(accepts("t-reload", "load-1", 40));
-        assert!(accepts("t-reload", "load-2", 1));
-        assert!(!accepts("t-reload", "load-2", 1));
+        assert!(accepts("t-reload", 1_000, 40));
+        assert!(accepts("t-reload", 2_000, 1));
+        assert!(!accepts("t-reload", 2_000, 1));
+    }
+
+    #[test]
+    fn the_first_request_of_an_earlier_page_arriving_after_a_reload_is_dropped() {
+        // Its page load was never seen: it is older all the same (#4985).
+        assert!(accepts("t-unseen", 2_000, 1));
+        assert!(!accepts("t-unseen", 1_000, 1));
+        assert!(accepts("t-unseen", 2_000, 2));
+    }
+
+    #[test]
+    fn a_page_loaded_after_the_clock_was_set_back_is_still_accepted() {
+        assert!(accepts("t-clock", 500_000_000, 3));
+        assert!(accepts("t-clock", 100_000_000, 1), "minutes older: a new page, not a late request");
+        assert!(!accepts("t-clock", 100_000_000, 1), "the same request twice");
     }
 
     #[test]
     fn a_request_from_before_a_reload_arriving_after_it_is_dropped() {
-        assert!(accepts("t-retired", "load-1", 5));
-        assert!(accepts("t-retired", "load-2", 1));
-        assert!(!accepts("t-retired", "load-1", 6), "the old page's late request");
-        assert!(accepts("t-retired", "load-2", 2), "the new page carries on");
+        assert!(accepts("t-retired", 1_000, 5));
+        assert!(accepts("t-retired", 2_000, 1));
+        assert!(!accepts("t-retired", 1_000, 6), "the old page's late request");
+        assert!(accepts("t-retired", 2_000, 2), "the new page carries on");
     }
 
     #[test]
     fn windows_are_numbered_apart() {
-        assert!(accepts("t-win-a", "e", 5));
-        assert!(accepts("t-win-b", "e", 1));
+        assert!(accepts("t-win-a", 1, 5));
+        assert!(accepts("t-win-b", 1, 1));
     }
 
     #[test]
