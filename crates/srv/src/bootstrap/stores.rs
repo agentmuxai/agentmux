@@ -149,6 +149,9 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
         .map(std::path::PathBuf::from)
         .unwrap_or_else(base::get_mux_data_dir)
         .join("snapshots");
+    // A new version's first start begins from the previous version's data,
+    // then snapshots and migrates it like any upgrade (carry_forward.rs).
+    super::carry_forward::from_previous_version(&db_dir, &code_version);
     match maybe_snapshot_pre_migration(
         &db_dir,
         &snapshots_dir,
