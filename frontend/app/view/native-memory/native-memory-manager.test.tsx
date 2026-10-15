@@ -367,6 +367,25 @@ describe("NativeMemoryManager — filter and sort", () => {
         expect(cost.querySelector(".agent-launch-cost-band")).toBeNull();
     });
 
+    test("a user-owned startup file isn't counted, and a Global Memory edit refreshes the launch line", async () => {
+        nativeMemoryListMock.mockResolvedValue({ files: [] });
+        const part = (kind: string, tokens: number, via = "startup_file") => ({
+            kind, name: kind, tokens_est: tokens, size_bytes: tokens * 4, lines: 1, via,
+        });
+        const owned = (operator: number) => ({
+            agent_id: "a1", provider: "codex", startup_file: "AGENTS.md", delivered_by_file: true,
+            parts: [part("operator_config", operator)], total_tokens_est: operator,
+        });
+        launchCostMock.mockResolvedValue({ ...owned(4500), delivered_by_file: false });
+        listAgentDefinitionsMock.mockResolvedValue([agent("a1", "Manoz")]);
+        render(() => <NativeMemoryManager />);
+        expect(await screen.findByText("Starts with ~0 tok")).toBeInTheDocument();
+
+        launchCostMock.mockResolvedValue(owned(5200));
+        mpsHub.handlers.get("memories:changed")?.({ event: "memories:changed" });
+        expect(await screen.findByText("Starts with ~5.2k tok")).toBeInTheDocument();
+    });
+
     test("'Has memories' hides zero-count cards but never loading or error ones", async () => {
         nativeMemoryListMock.mockImplementation((_c: unknown, req: { agent_id: string }) => {
             if (req.agent_id === "a1") return Promise.resolve({ files: [{ filename: "x" }] }); // has memories

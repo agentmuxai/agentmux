@@ -8,16 +8,25 @@
 
 import { For, Show, type JSX } from "solid-js";
 import type { LaunchCost } from "@/types/rpc/LaunchCost";
-import { bandWords, launchBudget, launchGroups, viaLabel, type AgentWindow } from "./agent-launch-cost";
+import {
+    bandWords,
+    deliveredParts,
+    deliveredTotal,
+    launchBudget,
+    launchGroups,
+    viaLabel,
+    type AgentWindow,
+} from "./agent-launch-cost";
 import { shareLabel, tokensLabel, tokensTitle, TOKEN_ESTIMATE_NOTE } from "./memory-tokens";
 
 export function AgentLaunchCost(props: { cost: LaunchCost; window: AgentWindow | null }): JSX.Element {
-    const budget = () => (props.window ? launchBudget(props.cost.total_tokens_est, props.window.window) : null);
+    const total = () => deliveredTotal(props.cost);
+    const budget = () => (props.window ? launchBudget(total(), props.window.window) : null);
     return (
         <section class="agent-launch-cost" aria-label="What this agent starts with" data-testid="agent-launch-cost">
             <div class="agent-launch-cost-head">
-                <span title={tokensTitle(props.cost.total_tokens_est)}>
-                    Starts with <strong>{tokensLabel(props.cost.total_tokens_est)}</strong>
+                <span title={tokensTitle(total())}>
+                    Starts with <strong>{tokensLabel(total())}</strong>
                 </span>
                 <Show when={budget()}>
                     {(b) => (
@@ -31,7 +40,7 @@ export function AgentLaunchCost(props: { cost: LaunchCost; window: AgentWindow |
             <Show when={props.cost.startup_file && !props.cost.delivered_by_file}>
                 <p class="agent-launch-cost-note">
                     {props.cost.startup_file} in this agent's folder is your own file, so its launch doesn't add
-                    AgentMux's startup text to it.
+                    AgentMux's startup text to it, and that text isn't counted here.
                 </p>
             </Show>
             <div class="agent-launch-cost-bar" aria-hidden="true">
@@ -57,7 +66,7 @@ export function AgentLaunchCost(props: { cost: LaunchCost; window: AgentWindow |
                     </tr>
                 </thead>
                 <tbody>
-                    <For each={props.cost.parts}>
+                    <For each={deliveredParts(props.cost)}>
                         {(p) => (
                             <tr>
                                 <td>{p.name}</td>
@@ -65,7 +74,7 @@ export function AgentLaunchCost(props: { cost: LaunchCost; window: AgentWindow |
                                 <td title={tokensTitle(p.tokens_est, p.size_bytes || undefined, p.lines)}>
                                     {tokensLabel(p.tokens_est)}
                                 </td>
-                                <td>{shareLabel(p.tokens_est, props.cost.total_tokens_est)}</td>
+                                <td>{shareLabel(p.tokens_est, total())}</td>
                             </tr>
                         )}
                     </For>

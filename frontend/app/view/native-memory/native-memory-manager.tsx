@@ -46,7 +46,8 @@ import type { AgentDefinition, NativeMemoryFileMeta } from "@/app/store/rpc-api"
 import { createEffect, createMemo, createSignal, For, onCleanup, Show, untrack, type JSX } from "solid-js";
 import { MemoryAgentCard, type MemoryCountState } from "./MemoryAgentCard";
 import { AgentLaunchCost } from "./AgentLaunchCost";
-import { windowFromMetas } from "./agent-launch-cost";
+import { deliveredTotal, windowFromMetas } from "./agent-launch-cost";
+import { WpsEvent } from "@/app/store/mps-events";
 import type { LaunchCost } from "@/types/rpc/LaunchCost";
 import type { AgentOpenPane } from "@/types/rpc/AgentOpenPane";
 import { MOS } from "@/app/store/global";
@@ -265,15 +266,48 @@ export function NativeMemoryManager(): JSX.Element {
                         : { ...prev, [agent.id]: { kind: "error", message: e.message ?? String(e) } }
                 );
             });
+        fetchLaunchCostFor(agent);
+    };
+
+    // An agent's launch cost also depends on Global Memory, bundles, its own
+    // content and skills, so it has its own request generation and is
+    // refetched for every agent when any of those change.
+    const launchRequestGeneration = new Map<string, number>();
+    const fetchLaunchCostFor = (agent: AgentDefinition) => {
+        const generation = (launchRequestGeneration.get(agent.id) ?? 0) + 1;
+        launchRequestGeneration.set(agent.id, generation);
         // No launch line rather than a second error: the count line already
         // says when an agent can't be read.
         RpcApi.MemoryLaunchCostCommand(TabRpcClient, { agent_id: agent.id })
             .then((cost) => {
-                if (countRequestGeneration.get(agent.id) !== generation) return;
+                if (launchRequestGeneration.get(agent.id) !== generation) return;
                 setLaunchCosts((prev) => ({ ...prev, [agent.id]: cost }));
             })
             .catch(() => {});
     };
+    for (const event of [WpsEvent.MemoriesChanged, WpsEvent.AgentContentChanged, WpsEvent.SkillsChanged, WpsEvent.AgentSkillsChanged]) {
+        onCleanup(onMuxEvent(event, () => untrack(agents).forEach(fetchLaunchCostFor)));
+    }
+
+    // The open panes, for their windows: refetched when a pane opens or
+    // closes anywhere (tracked blocks), and when the user comes back to this
+    // window, as AgentPicker does. A reply older than one already applied is
+    // dropped.
+    let panesSeq = 0;
+    let panesApplied = 0;
+    const fetchOpenPanes = () => {
+        const seq = ++panesSeq;
+        RpcApi.AgentOpenPanesCommand(TabRpcClient, {})
+            .then((res) => {
+                if (seq <= panesApplied) return;
+                panesApplied = seq;
+                setOpenPanes(res.panes);
+            })
+            .catch(() => {});
+    };
+    onCleanup(onMuxEvent(WpsEvent.ProcessBrokerTrackedBlocksChanged, fetchOpenPanes));
+    window.addEventListener("focus", fetchOpenPanes);
+    onCleanup(() => window.removeEventListener("focus", fetchOpenPanes));
 
     createEffect(() => {
         agentIdsKey();
@@ -286,11 +320,12 @@ export function NativeMemoryManager(): JSX.Element {
         // already resolved — only genuinely new agents are fetched below.
         setCounts((prev) => Object.fromEntries(Object.entries(prev).filter(([id]) => present.has(id))));
         setLaunchCosts((prev) => Object.fromEntries(Object.entries(prev).filter(([id]) => present.has(id))));
-        RpcApi.AgentOpenPanesCommand(TabRpcClient, {})
-            .then((res) => setOpenPanes(res.panes))
-            .catch(() => setOpenPanes([]));
+        fetchOpenPanes();
         for (const id of countRequestGeneration.keys()) {
             if (!present.has(id)) countRequestGeneration.delete(id);
+        }
+        for (const id of launchRequestGeneration.keys()) {
+            if (!present.has(id)) launchRequestGeneration.delete(id);
         }
 
         const missing = list.filter((a) => untrack(() => counts())[a.id] === undefined);
@@ -559,7 +594,7 @@ export function NativeMemoryManager(): JSX.Element {
                                                 onSelect={setSelectedAgent}
                                                 launch={
                                                     launchCosts()[agent.id]
-                                                        ? { total: launchCosts()[agent.id].total_tokens_est, window: windowFor(agent.id) }
+                                                        ? { total: deliveredTotal(launchCosts()[agent.id]), window: windowFor(agent.id) }
                                                         : null
                                                 }
                                             />

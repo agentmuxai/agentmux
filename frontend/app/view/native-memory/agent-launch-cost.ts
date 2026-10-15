@@ -25,12 +25,24 @@ export const LAUNCH_GROUPS: { key: string; label: string; kinds: string[] }[] = 
     { key: "personal", label: "Personal Memory", kinds: ["personal"] },
 ];
 
-/** `cost`'s tokens by group, leaving out the empty ones. */
+/** The parts a launch actually delivers: none of the startup file's when the
+ *  file is the user's own, since the launch doesn't write it. */
+export function deliveredParts(cost: LaunchCost): LaunchCostPart[] {
+    return cost.delivered_by_file ? cost.parts : cost.parts.filter((p) => p.via !== "startup_file");
+}
+
+/** What a launch actually delivers, in tokens. */
+export function deliveredTotal(cost: LaunchCost): number {
+    return deliveredParts(cost).reduce((n, p) => n + p.tokens_est, 0);
+}
+
+/** The delivered tokens by group, leaving out the empty ones. */
 export function launchGroups(cost: LaunchCost): { key: string; label: string; tokens: number }[] {
+    const parts = deliveredParts(cost);
     return LAUNCH_GROUPS.map((g) => ({
         key: g.key,
         label: g.label,
-        tokens: cost.parts.filter((p) => g.kinds.includes(p.kind)).reduce((n, p) => n + p.tokens_est, 0),
+        tokens: parts.filter((p) => g.kinds.includes(p.kind)).reduce((n, p) => n + p.tokens_est, 0),
     })).filter((g) => g.tokens > 0);
 }
 

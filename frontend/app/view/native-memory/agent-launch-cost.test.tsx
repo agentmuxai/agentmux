@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import type { LaunchCost } from "@/types/rpc/LaunchCost";
-import { bandWords, launchBudget, launchGroups, viaLabel, windowFromMetas } from "./agent-launch-cost";
+import { bandWords, deliveredParts, deliveredTotal, launchBudget, launchGroups, viaLabel, windowFromMetas } from "./agent-launch-cost";
 import { launchLine } from "./MemoryAgentCard";
 
 const part = (kind: string, tokens: number, via = "startup_file") => ({
@@ -18,6 +18,7 @@ const part = (kind: string, tokens: number, via = "startup_file") => ({
 describe("agent-launch-cost", () => {
     it("groups the parts in launch order and leaves out the empty groups", () => {
         const cost = {
+            delivered_by_file: true,
             parts: [part("operator_config", 4500), part("soul", 300), part("skills_index", 100), part("personal", 900, "session_hook")],
         } as LaunchCost;
         expect(launchGroups(cost)).toEqual([
@@ -25,6 +26,15 @@ describe("agent-launch-cost", () => {
             { key: "agent", label: "Agent", tokens: 400 },
             { key: "personal", label: "Personal Memory", tokens: 900 },
         ]);
+    });
+
+    it("counts none of a user-owned startup file: the launch doesn't write it", () => {
+        const parts = [part("operator_config", 4500), part("soul", 300), part("personal", 900, "session_hook")];
+        const owned = { delivered_by_file: false, parts, total_tokens_est: 5700 } as LaunchCost;
+        expect(deliveredParts(owned).map((p) => p.kind)).toEqual(["personal"]);
+        expect(deliveredTotal(owned)).toBe(900);
+        expect(launchGroups(owned)).toEqual([{ key: "personal", label: "Personal Memory", tokens: 900 }]);
+        expect(deliveredTotal({ ...owned, delivered_by_file: true })).toBe(5700);
     });
 
     it("names how each part arrives", () => {
