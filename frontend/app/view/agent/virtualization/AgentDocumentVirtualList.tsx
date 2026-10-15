@@ -58,6 +58,7 @@ import {
     type RowPosition,
 } from "@/app/store/agent-pane-layout-store";
 import { computeLayoutView } from "@/app/store/agent-pane-layout/reducer";
+import { captureOnScreen, restoreOnScreen } from "./keep-on-screen";
 import { inFlowState, ROW_GAP_PX, type ExpansionState } from "@/app/store/agent-pane-layout/types";
 import {
     initialStickyFrontierId,
@@ -763,19 +764,17 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
             // several times per logical document update, each against a
             // PARTIALLY-updated slice (e.g. `NodesChanged` landing with a
             // node's estimate/expansion not yet pushed). On a small
-            // incremental change (the common live-streaming case) the
-            // intermediate views are usually equivalent enough that nothing
-            // visibly breaks — but a LARGE simultaneous batch (every node
-            // changing identity at once, e.g. AgentHistoryView's wholesale
-            // reparse-on-loadOlder, SPEC_AGENT_HISTORY_AS_TAB_AND_DRAFT_PRESERVATION_2026_08_11.md)
-            // hits this glitch window hard enough to crash `reconcileArrays`
-            // ("replaceChild: node not a child" — a stale intermediate
-            // `windowedRows()` row still referencing a DOM node an even-more-
-            // intermediate pass had already removed). `batch()` defers every
-            // signal write started inside it until the callback returns, so
-            // `windowedRows()` observes exactly ONE consistent LayoutView per
-            // logical update instead of N glitching ones — the standard Solid
-            // fix for exactly this class of mid-transaction inconsistency.
+            // incremental change (live streaming) nothing visibly breaks, but a
+            // LARGE batch (every node changing identity at once, e.g.
+            // AgentHistoryView's reparse-on-loadOlder,
+            // SPEC_AGENT_HISTORY_AS_TAB_AND_DRAFT_PRESERVATION_2026_08_11.md)
+            // crashed `reconcileArrays` ("replaceChild: node not a child": a
+            // stale intermediate row referencing a DOM node a later pass had
+            // removed). `batch()` defers every signal write inside it, so
+            // `windowedRows()` sees ONE consistent LayoutView per update.
+            // Rows removed or inserted above the screen (a roll-off, the
+            // history link) don't move the rows on screen (keep-on-screen.ts).
+            const onScreen = captureOnScreen(blockId, untrack(() => props.layoutView?.()));
             batch(() => {
                 dispatchLayoutIfRegistered(blockId, { type: "NodesChanged", orderedIds: ids });
                 const idSet = new Set(ids);
@@ -838,6 +837,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                     });
                 }
             });
+            restoreOnScreen(blockId, onScreen, untrack(() => props.layoutView?.()), scrollRef);
             // Heights of nodes that left the buffer any other way (removed,
             // cleared) are dropped; the buffer holds a few dozen at most.
             const inBuffer = new Set(partition().streamingNodes.map((n) => n.id));
