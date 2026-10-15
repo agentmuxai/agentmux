@@ -14,6 +14,35 @@ use sha2::{Digest, Sha256};
 
 /// At most this many files on one jekt.
 pub const MAX_FILES: usize = 10;
+/// What an instance that can receive files advertises, in its registry
+/// entries and its `GET /agentmux/reactive/agent` answer (spec §3.4).
+pub const FEATURE: &str = "files-v1";
+const MIB: u64 = 1024 * 1024;
+
+/// The most one file, and all of a jekt's files together, may weigh when
+/// they travel on `tier` (spec §5): `(per file, per jekt)`. The same machine
+/// (`host`, `channel`) allows the most; LAN less; anything else nothing yet.
+pub fn tier_limits(tier: &str) -> Option<(u64, u64)> {
+    match tier {
+        "host" | "channel" => Some((100 * MIB, 200 * MIB)),
+        "lan" => Some((50 * MIB, 100 * MIB)),
+        _ => None,
+    }
+}
+
+/// Why `files` can't travel on `tier`, if they can't.
+pub fn check_tier_limits(files: &[JektFile], tier: &str) -> Result<(), String> {
+    let Some((per_file, per_jekt)) = tier_limits(tier) else {
+        return Err(format!("files can't be sent over the {tier} tier yet"));
+    };
+    if let Some(f) = files.iter().find(|f| f.size > per_file) {
+        return Err(format!("{} is over the {} MB limit per file on this tier", f.name, per_file / MIB));
+    }
+    if files.iter().map(|f| f.size).sum::<u64>() > per_jekt {
+        return Err(format!("the files come to more than the {} MB limit per message on this tier", per_jekt / MIB));
+    }
+    Ok(())
+}
 /// A file name's length limit, in characters (the attachment store's).
 pub const MAX_NAME_CHARS: usize = 120;
 /// Separates the msgid a sender would otherwise use from the digest.
@@ -158,6 +187,15 @@ mod tests {
         assert_eq!(clean_name("dir/"), "file");
         assert_eq!(clean_name(".."), "file");
         assert_eq!(clean_name(&"n".repeat(300)).chars().count(), MAX_NAME_CHARS);
+    }
+
+    #[test]
+    fn tier_limits_are_tighter_further_away() {
+        let f = |size| JektFile { sha256: "a".repeat(64), name: "a".into(), size };
+        assert!(check_tier_limits(&[f(100 * MIB)], "channel").is_ok());
+        assert!(check_tier_limits(&[f(100 * MIB)], "lan").is_err());
+        assert!(check_tier_limits(&[f(40 * MIB), f(40 * MIB), f(40 * MIB)], "lan").is_err(), "per jekt");
+        assert!(check_tier_limits(&[f(1)], "wan").is_err(), "not yet");
     }
 
     #[test]

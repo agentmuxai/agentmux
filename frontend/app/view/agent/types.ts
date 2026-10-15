@@ -355,12 +355,20 @@ export interface AgentMessageNode {
 export type JektTier = "info" | "coord" | "sensitive";
 
 /** Network path the jekt crossed to reach this agent. */
-export type JektDeliveryTier = "host" | "lan" | "wan";
+/** `channel`: another AgentMux instance on the same machine. */
+export type JektDeliveryTier = "host" | "channel" | "lan" | "wan";
 
 /** Sender trust classification. Host-tier deliveries are agent-originated on
  *  this machine; lan/wan cross a network boundary and are only as
  *  trustworthy as the sender's token. Spec §5. */
-export type JektTrust = "host-verified" | "network-claimed";
+export type JektTrust =
+    | "host-verified"
+    | "channel-verified"
+    | "lan-verified"
+    | "wan-verified"
+    | "self-declared"
+    | "unverified"
+    | "network-claimed";
 
 /**
  * A muxbus jekt message, parsed out of the `[JEKT:FROM=... TIER=... ...]` /
@@ -1117,6 +1125,7 @@ export const JEKT_TIER_ICONS: Record<JektTier, string> = {
  */
 export const JEKT_DELIVERY_ICONS: Record<JektDeliveryTier, string> = {
     host: "🏠",
+    channel: "🖥️",
     lan: "🛰️",
     wan: "☁️",
 };
