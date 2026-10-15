@@ -752,7 +752,8 @@ fn for_each_leaf<'a>(node: &'a LayoutNode, f: &mut impl FnMut(&'a LayoutNode, &'
 
 /// First leaf (depth-first) whose `data.block_id` is set but not present in
 /// `live_block_ids`. `data.block_id` is only ever non-empty on leaves —
-/// container/group nodes have `data: None` (see `ensure_group_node`).
+/// container/group nodes have `data: None` (see `add_intermediate_node` in
+/// `intent.rs`).
 fn first_dangling_leaf_id(
     node: &LayoutNode,
     live_block_ids: &std::collections::HashSet<String>,
@@ -786,7 +787,7 @@ fn collect_insert_candidates<'a>(
     out: &mut Vec<InsertCandidate<'a>>,
 ) {
     // Minimized is a locked state: never a blind-insert target. Without
-    // this, `ensure_group_node` promoting a minimized leaf into a branch
+    // this, `add_intermediate_node` (`intent.rs`) promoting a minimized leaf into a branch
     // could leave the tree in a state where an agent/API-driven insert
     // silently un-collapses a fully-minimized subtree (every child
     // minimized → one child isn't anymore, with no user action on that
