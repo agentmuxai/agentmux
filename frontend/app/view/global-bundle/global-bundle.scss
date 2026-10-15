@@ -173,30 +173,6 @@ code.global-bundle-file-label {
     gap: 8px;
 }
 
-.global-memory-token-strip-toggle {
-    display: inline-flex;
-
-    button {
-        padding: 2px 8px;
-        border: 1px solid var(--border-color);
-        border-radius: 0;
-        background: transparent;
-        color: var(--secondary-text-color);
-        font-size: var(--text-xs);
-        cursor: pointer;
-
-        & + button {
-            border-left: none;
-        }
-
-        &[aria-pressed="true"] {
-            background: var(--accent-bg-subtle);
-            color: var(--main-text-color);
-            font-weight: 600;
-        }
-    }
-}
-
 .global-memory-token-strip-bar {
     display: flex;
     height: 6px;

@@ -7,12 +7,19 @@
 // (SPEC_MEMORY_PANE_TOKENS_2026_10_15.md §5.2).
 
 import { For, Show, type JSX } from "solid-js";
+import { SegmentedControl } from "@/app/element/ui";
 import { shareLabel, tokensLabel, tokensTitle, TOKEN_ESTIMATE_NOTE } from "@/app/view/native-memory/memory-tokens";
 import type { AgentKind, GlobalBundleViewModel } from "./global-bundle-model";
 
-const KINDS: { kind: AgentKind; label: string }[] = [
-    { kind: "host", label: "Host" },
-    { kind: "container", label: "Container" },
+const KINDS: { value: AgentKind; label: string }[] = [
+    { value: "host", label: "Host" },
+    { value: "container", label: "Container" },
+];
+
+type Order = "injection" | "largest";
+const ORDERS: { value: Order; label: string }[] = [
+    { value: "injection", label: "Injection order" },
+    { value: "largest", label: "Largest first" },
 ];
 
 export function GlobalMemoryTokenStrip(props: { model: GlobalBundleViewModel }): JSX.Element {
@@ -41,35 +48,20 @@ export function GlobalMemoryTokenStrip(props: { model: GlobalBundleViewModel }):
                     )}
                 </Show>
                 <span class="global-memory-token-strip-toggles">
-                    <span class="global-memory-token-strip-toggle" role="group" aria-label="Agent kind">
-                        <For each={KINDS}>
-                            {(k) => (
-                                <button
-                                    type="button"
-                                    aria-pressed={m.agentKindAtom() === k.kind}
-                                    onClick={() => m.setAgentKind(k.kind)}
-                                >
-                                    {k.label}
-                                </button>
-                            )}
-                        </For>
-                    </span>
-                    <span class="global-memory-token-strip-toggle" role="group" aria-label="Order">
-                        <button
-                            type="button"
-                            aria-pressed={!m.largestFirstAtom()}
-                            onClick={() => m.setLargestFirst(false)}
-                        >
-                            Injection order
-                        </button>
-                        <button
-                            type="button"
-                            aria-pressed={m.largestFirstAtom()}
-                            onClick={() => m.setLargestFirst(true)}
-                        >
-                            Largest first
-                        </button>
-                    </span>
+                    <SegmentedControl
+                        density="compact"
+                        ariaLabel="Agent kind"
+                        options={KINDS}
+                        value={m.agentKindAtom()}
+                        onChange={(kind) => m.setAgentKind(kind)}
+                    />
+                    <SegmentedControl
+                        density="compact"
+                        ariaLabel="Order"
+                        options={ORDERS}
+                        value={m.largestFirstAtom() ? "largest" : "injection"}
+                        onChange={(order) => m.setLargestFirst(order === "largest")}
+                    />
                 </span>
             </div>
             <Show when={parts().length > 0}>

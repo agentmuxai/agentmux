@@ -180,7 +180,7 @@ describe("GlobalBundleManager — tiles first", () => {
         render(() => <GlobalBundleManager />);
         await waitFor(() => expect(screen.getByTestId("global-memory-token-strip")).toHaveTextContent("~27 tok"));
 
-        fireEvent.click(screen.getByRole("button", { name: "Container" }));
+        fireEvent.click(screen.getByRole("radio", { name: "Container" }));
         await waitFor(() =>
             expect(screen.getByTestId("global-memory-token-strip")).toHaveTextContent(
                 "Every container agent starts with ~7 tok of Global Memory"
@@ -203,7 +203,7 @@ describe("GlobalBundleManager — tiles first", () => {
         await waitFor(() => expect(tileTitles().slice(0, 2)).toEqual(["Alpha", "Beta"]));
         await waitFor(() => expect(document.querySelector('[data-id="g-b"] .memory-file-card-tokens')).not.toBeNull());
 
-        fireEvent.click(screen.getByRole("button", { name: "Largest first" }));
+        fireEvent.click(screen.getByRole("radio", { name: "Largest first" }));
         await waitFor(() => expect(tileTitles().slice(0, 2)).toEqual(["Beta", "Alpha"]));
         expect(document.querySelector('[data-id="g-a"]')?.getAttribute("draggable")).toBeNull();
     });
