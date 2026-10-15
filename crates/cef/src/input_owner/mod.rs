@@ -13,4 +13,6 @@ pub mod machine;
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 pub mod registry;
 #[cfg(target_os = "windows")]
+pub mod watch;
+#[cfg(target_os = "windows")]
 pub mod windows;
