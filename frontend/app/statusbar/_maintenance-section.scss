@@ -144,3 +144,13 @@
     opacity: 0.6;
     white-space: nowrap;
 }
+
+// A newer release's notes, under its row (What's new).
+.maintenance-release-notes {
+    margin: 0 var(--space-1-5) var(--space-1);
+    max-height: 200px;
+    overflow: auto;
+    white-space: pre-wrap;
+    font-size: var(--text-xs);
+    color: var(--secondary-text-color);
+}

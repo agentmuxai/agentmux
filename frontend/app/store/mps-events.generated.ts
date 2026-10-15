@@ -13,6 +13,7 @@ import type { AgentRuntimeEvent } from "@/types/rpc/AgentRuntimeEvent";
 import type { AgentTurnEvent } from "@/types/rpc/AgentTurnEvent";
 import type { AmbientNarrationEvent } from "@/types/rpc/AmbientNarrationEvent";
 import type { AmbientSpentEvent } from "@/types/rpc/AmbientSpentEvent";
+import type { AppUpdateStatus } from "@/types/rpc/AppUpdateStatus";
 import type { AttachmentBatchDoneEvent } from "@/types/rpc/AttachmentBatchDoneEvent";
 import type { AttachmentFailedEvent } from "@/types/rpc/AttachmentFailedEvent";
 import type { AttachmentProgressEvent } from "@/types/rpc/AttachmentProgressEvent";
@@ -102,6 +103,7 @@ export type MuxEventPayloads = {
   agentturn: AgentTurnEvent;
   "ambient-narration": AmbientNarrationEvent;
   "ambient:spent": AmbientSpentEvent;
+  "app:updatestatus": AppUpdateStatus;
   "attachment:batch-done": AttachmentBatchDoneEvent;
   "attachment:failed": AttachmentFailedEvent;
   "attachment:progress": AttachmentProgressEvent;
@@ -201,6 +203,7 @@ export const TYPED_MUX_EVENTS = [
   "agentturn",
   "ambient-narration",
   "ambient:spent",
+  "app:updatestatus",
   "attachment:batch-done",
   "attachment:failed",
   "attachment:progress",

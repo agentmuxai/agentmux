@@ -205,6 +205,8 @@ events! {
     MuxbusStatus: crate::muxbus::delivery_status::EVENT_MUXBUS_STATUS => crate::backend::rpc_types::MuxBusDeliveryStatus,
     /// A mobile viewer paired with this machine (`http_viewer`).
     ViewerPaired: "viewer:paired" => ViewerPairedEvent,
+    /// What srv knows about newer releases changed (`update_check`).
+    AppUpdateStatusChanged: crate::backend::update_check::EVENT_APP_UPDATE_STATUS => crate::backend::update_check::AppUpdateStatus,
     /// Tell a window's renderer to reveal a block (`notify::router`).
     BlockReveal: crate::backend::notify::router::EVENT_BLOCK_REVEAL => crate::backend::notify::router::BlockRevealEvent,
 

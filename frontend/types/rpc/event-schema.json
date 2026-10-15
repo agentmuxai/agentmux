@@ -216,6 +216,15 @@
     }
   },
   {
+    "event": "app:updatestatus",
+    "payloadTs": {
+      "imports": [
+        "AppUpdateStatus"
+      ],
+      "name": "AppUpdateStatus"
+    }
+  },
+  {
     "event": "attachment:batch-done",
     "payloadTs": {
       "imports": [

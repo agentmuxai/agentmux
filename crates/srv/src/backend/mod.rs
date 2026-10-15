@@ -125,6 +125,7 @@ pub mod tower_peers;
 pub mod tower_remote;
 pub mod tool_calls;
 pub mod tower_sampler;
+pub mod update_check;
 pub mod storage;
 pub mod subagent_watcher;
 pub mod userinput;

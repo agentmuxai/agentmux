@@ -34,6 +34,7 @@ import type { AgentShutdownKeepResult } from "@/types/rpc/AgentShutdownKeepResul
 import type { AgentSkill } from "@/types/rpc/AgentSkill";
 import type { AgentTrackedBlocksResult } from "@/types/rpc/AgentTrackedBlocksResult";
 import type { AppInfoResult } from "@/types/rpc/AppInfoResult";
+import type { AppUpdateStatus } from "@/types/rpc/AppUpdateStatus";
 import type { AskSideQuestionResult } from "@/types/rpc/AskSideQuestionResult";
 import type { AttachmentsCopyToWorkdirResult } from "@/types/rpc/AttachmentsCopyToWorkdirResult";
 import type { AttachmentsInfoResult } from "@/types/rpc/AttachmentsInfoResult";
@@ -2238,6 +2239,10 @@ export const GeneratedApi = {
     opts?: RpcOpts
   ): Promise<ValidationReport> {
     return client.rpcCall("bundle.validate", data, opts);
+  },
+  // command "app.update-status"
+  AppUpdateStatusCommand(client: RpcClient, opts?: RpcOpts): Promise<AppUpdateStatus> {
+    return client.rpcCall("app.update-status", {}, opts);
   },
   // command "viewer.agent-hidden"
   ViewerAgentHiddenCommand(

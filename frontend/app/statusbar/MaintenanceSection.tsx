@@ -1,7 +1,8 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { atoms, getApi } from "@/store/global";
+import { appUpdate, availableRelease, loadAppUpdate } from "@/store/app-update";
+import { atoms, getApi, openLink } from "@/store/global";
 import { WpsEvent } from "@/store/mps-events";
 import { createEffect, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
 import "./_maintenance-section.scss";
@@ -45,8 +46,13 @@ function fmtDuration(ms: number): string {
 // ── Component ────────────────────────────────────────────────────────────────
 
 export const MaintenanceSection = (): JSX.Element => {
-    const updaterStatus = atoms.updaterStatusAtom;
-    const updaterVersion = atoms.updaterVersionAtom;
+    // A newer release srv found (store/app-update.ts) leads; the host
+    // updater's own states are kept for a host that has one.
+    onMount(() => void loadAppUpdate());
+    const release = () => availableRelease();
+    const updaterStatus = () => (release() ? "available" : atoms.updaterStatusAtom());
+    const updaterVersion = () => release()?.version ?? atoms.updaterVersionAtom();
+    const [showNotes, setShowNotes] = createSignal(false);
 
     const [migState, setMigState] = createSignal<MigState>({ kind: "idle", pendingCount: 0 });
     const [vacState, setVacState] = createSignal<VacState>({ kind: "idle", lastRunMs: null });
@@ -171,6 +177,13 @@ export const MaintenanceSection = (): JSX.Element => {
     };
 
     const handleInstallUpdate = () => {
+        // Until AgentMux installs a release itself (the spec's phase 3), the
+        // release page is where it is downloaded.
+        const r = release();
+        if (r) {
+            void openLink(r.url);
+            return;
+        }
         getApi().installAppUpdate();
     };
 
@@ -208,8 +221,18 @@ export const MaintenanceSection = (): JSX.Element => {
                     <Show when={updaterStatus() === "available"}>
                         <span class="maintenance-icon maintenance-icon--update">↓</span>
                         <span class="maintenance-row-text">
-                            {updaterVersion() ? `v${updaterVersion()} available` : "Update available"}
+                            {updaterVersion() ? `v${updaterVersion()} is out` : "Update available"}
                         </span>
+                        <Show when={release() && appUpdate()?.notes}>
+                            <Button
+                                density="compact"
+                                class="maintenance-btn"
+                                aria-expanded={showNotes()}
+                                onClick={() => setShowNotes(!showNotes())}
+                            >
+                                What's new
+                            </Button>
+                        </Show>
                         <Button
                             density="compact"
                             tone="accent"
@@ -240,6 +263,23 @@ export const MaintenanceSection = (): JSX.Element => {
                     <Show when={updaterStatus() === "error"}>
                         <span class="maintenance-icon maintenance-icon--error">✗</span>
                         <span class="maintenance-row-text maintenance-row-text--error">Update failed</span>
+                    </Show>
+                </div>
+            </Show>
+
+            <Show when={showNotes() && release() && appUpdate()?.notes}>
+                <pre class="maintenance-release-notes">{appUpdate()?.notes}</pre>
+            </Show>
+            {/* A local or dev build isn't a release: say which one is. */}
+            <Show when={appUpdate()?.state === "local-build" && appUpdate()?.latest}>
+                <div class="maintenance-update-row">
+                    <span class="maintenance-row-text maintenance-row-text--dim">
+                        Local build. The latest release is v{appUpdate()?.latest}.
+                    </span>
+                    <Show when={appUpdate()?.url}>
+                        <Button density="compact" class="maintenance-btn" onClick={() => void openLink(appUpdate()!.url!)}>
+                            View
+                        </Button>
                     </Show>
                 </div>
             </Show>

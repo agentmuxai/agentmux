@@ -1,12 +1,18 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+import { availableRelease, loadAppUpdate, openVersionPanel } from "@/store/app-update";
 import { atoms, getApi } from "@/store/global";
-import { Show, type JSX } from "solid-js";
+import { onMount, Show, type JSX } from "solid-js";
 
+// The status-bar chip for a newer AgentMux. srv's release check
+// (store/app-update.ts) says when one exists; the host updater's states
+// (downloading, ready, …) are kept for a host that has one.
 const UpdateStatus = (): JSX.Element => {
-    const updaterStatus = atoms.updaterStatusAtom;
-    const updaterVersion = atoms.updaterVersionAtom;
+    onMount(() => void loadAppUpdate());
+    const fromSrv = () => availableRelease();
+    const updaterStatus = () => (fromSrv() ? "available" : atoms.updaterStatusAtom());
+    const updaterVersion = () => fromSrv()?.version ?? atoms.updaterVersionAtom();
 
     const icon = () => {
         switch (updaterStatus()) {
@@ -34,7 +40,7 @@ const UpdateStatus = (): JSX.Element => {
         switch (updaterStatus()) {
             case "available": {
                 const ver = updaterVersion();
-                return ver ? `Update ${ver} available` : "Update available";
+                return ver ? `Update to ${ver}` : "Update available";
             }
             case "downloading": return "Downloading update…";
             case "ready": return "Restart to update";
@@ -47,6 +53,12 @@ const UpdateStatus = (): JSX.Element => {
     const clickable = () => updaterStatus() === "ready" || updaterStatus() === "available";
 
     const handleClick = () => {
+        // A release srv found: the version panel shows what's new and where
+        // to get it. Nothing installs from a click on the chip.
+        if (fromSrv()) {
+            openVersionPanel();
+            return;
+        }
         if (updaterStatus() === "ready" || updaterStatus() === "available") {
             getApi().installAppUpdate();
         }
@@ -57,7 +69,7 @@ const UpdateStatus = (): JSX.Element => {
             <div
                 class={`status-bar-item${clickable() ? " clickable" : ""}`}
                 onClick={clickable() ? handleClick : undefined}
-                data-tip={clickable() ? "Update available, click to install" : "Update status"}
+                data-tip={fromSrv() ? "A newer AgentMux is out: see what's new" : clickable() ? "Update available, click to install" : "Update status"}
                 aria-label={`Update: ${label()}`}
             >
                 <span class="status-icon" style={{ color: color() }}>
