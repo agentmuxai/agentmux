@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-15
 **Author:** AgentY@narko
-**Status:** active. Approved 2026-10-15: the operator took every recommendation in §8 ("go with recommendations, get it all built"). Phases in §7; each PR updates this line. Phases A (#4968), B (#4971) and C (#4973) are merged or in review; phase D1 (shared mixins) is built.
+**Status:** active. Approved 2026-10-15: the operator took every recommendation in §8 ("go with recommendations, get it all built"). Phases in §7; each PR updates this line. Phases A (#4968), B (#4971), C (#4973) and D1 (#4975) are merged or in review; phase D2 (near-duplicate sheets) is built.
 **Verified against:** `agentmux` `main` @ `fb6b20ba8`, by reading code (three read-only inventories, spot-checked by hand) and this machine's Windows setting.
 **Scope:** every animation, transition and motion gate in `frontend/` (CSS, SCSS, TS, the vendored Font Awesome CSS, SVG assets, `index.html`), the `window:reducedmotion` setting end to end, and the shared stylesheet layer (`theme.scss`, `mixins.scss`, `element/ui/`).
 **Related:**
@@ -482,6 +482,21 @@ The order is by payoff against risk. The DRY items go in phases C and D (§7); p
 13. The status-bar popovers (`_cpu-cores-popover`, `_disk-volumes-popover`, `_token-usage`) move their stat button and rows into the existing `popover-frame`.
 14. The agent modals (`AgentNativeMemoryModal.scss`, `AgentPrimitiveModal.scss`, `BundlePrimitiveSection.scss`) share one list/detail structure and move onto `primitive-list-detail`.
 15. The cards in `_picker.scss` and `native-memory-manager.scss` hand-roll name, description and slug styles while `element/ui/card.scss` exists. Move them onto it.
+
+**As built (phase D2).** In the built stylesheet every selector has the same declarations as before, apart from the two noted under item 13, and the rules that can apply to one element keep their order.
+- Item 12: `element/_approval-window.scss` has an `approval-window($prefix)` mixin: the window, its error state, the header's title, the body's text and the footer, under each window's own class names. The ssh window passes `$selectable: true`, since its text was always selectable. Each window keeps what is its own: the credential header's column and its origin and realm lines; memory adoption's scrolling body and folder list; ssh's scrolling body, message, note, input and checkbox.
+- Item 13:
+  - `popover-frame.scss` gains `readout-popover` (the frame as a column) and mixins for its header, title, quiet note and empty line, and for the CPU and Disk rows: the row, the bar, its fill and the value.
+  - The token-usage button is the stat button, with its own padding and an opacity fade added to the transition. It gains `line-height: inherit` and `margin: 0`, which the base button reset already gives every button. Its empty line writes `padding: var(--space-3)` once instead of twice.
+  - The stat button stays in `statusbar/_stat-button.scss`: it is the bar's button, not part of a popover.
+  - Left: the lists (the CPU list's three tiers and the Disk list differ in gap, padding and height), the bars' colours, and the token-usage rows, which have no counterpart.
+- Item 14: `element/_primitive-list-detail-content.scss` holds what goes inside a list and detail: the empty line, the row and its name, the badge and its tone, the "+ New" button, the error and caveat colours, and the text field and textarea.
+  - It is a partial of its own because `primitive-list-detail.scss` emits rules, which a `@use` would copy into every stylesheet that uses it.
+  - The memory dialog and the primitive dialog share the list's empty line, row, name, badge and "+ New" button; the bundle section uses the name, badge, error, caveat and fields. The primitive dialog's list and detail, the same block twice, are one rule.
+  - Left: the memory dialog's list and detail frame (a bordered box with a margin, and a definite height for the detail), and the error and caveat boxes' spacing and size, which differ between the three.
+- Item 15: `element/ui/_card-text.scss` has `card-title` (one line with an ellipsis, `--text-sm`, weight 600). `.ui-card-title` and the memory agent and file cards' titles use it; they were the same three declarations.
+  - Left, because moving them would change pixels: the picker's card name and title (`--text-base`, weight 500), its description and caption (`--text-xs`, where the card's subtitle is `--text-2xs`) and its slug (secondary text at 65%, mono); the memory cards' count and meta line (`--text-xs`).
+  - The colour stays out of the mixin: the memory "action" tiles colour their title through the card.
 
 ### 6.5 Needs a design decision (later)
 

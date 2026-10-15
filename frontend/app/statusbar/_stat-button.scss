@@ -1,23 +1,27 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-/// A clickable readout in the status bar (CPU, Disk): a <button> that reads as
-/// the plain stat text until hovered. The focus ring is inset, not the shared
-/// focus-ring: the button is the bar's full height, and the bar clips at its
-/// own edge (`overflow: clip`, StatusBar.scss), so an outline outside it
-/// would be cut off.
-@mixin stat-button {
+/// A clickable readout in the status bar (CPU, Disk, token usage): a <button>
+/// that reads as the plain stat text until hovered. The focus ring is inset,
+/// not the shared focus-ring: the button is the bar's full height, and the bar
+/// clips at its own edge (`overflow: clip`, StatusBar.scss), so an outline
+/// outside it would be cut off. `$transition` is for a button that also fades
+/// something else on hover.
+@mixin stat-button(
+    $padding: 0 2px,
+    $transition: background var(--duration-decorative-instant) var(--ease-standard)
+) {
     background: transparent;
     border: none;
     color: inherit;
     font-family: inherit;
     font-size: inherit;
     line-height: inherit;
-    padding: 0 2px;
+    padding: $padding;
     margin: 0;
     cursor: default;
     border-radius: 0;
-    transition: background var(--duration-decorative-instant) var(--ease-standard);
+    transition: $transition;
 
     &:hover {
         background: var(--hover-bg-color);

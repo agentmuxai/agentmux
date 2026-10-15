@@ -17,25 +17,14 @@
     --cpu-idle-color: color-mix(in srgb, var(--accent-color) 22%, var(--secondary-text-color));
 
     // The body of an AnchoredPopover (shell: position, z-index; body: zoom).
-    @include popoverFrame.popover-frame;
-    font-size: var(--text-sm);
-    display: flex;
-    flex-direction: column;
-    padding: var(--space-2) 0;
-    user-select: none;
+    @include popoverFrame.readout-popover;
 
     .cpu-cores-header {
-        padding: 0 var(--space-3) var(--space-1-5);
-        display: flex;
-        align-items: baseline;
-        justify-content: space-between;
-        gap: var(--space-2);
-        border-bottom: 1px solid var(--border-color);
+        @include popoverFrame.readout-popover-header;
     }
 
     .cpu-cores-title {
-        font-weight: 600;
-        font-size: var(--text-base);
+        @include popoverFrame.readout-popover-title;
     }
 
     .cpu-cores-aggregate {
@@ -49,8 +38,7 @@
         align-items: center;
         justify-content: space-between;
         gap: var(--space-2);
-        color: var(--secondary-text-color);
-        font-size: var(--text-xs);
+        @include popoverFrame.readout-popover-note;
         min-height: 14px; // stable height as the readout text changes
     }
 
@@ -77,10 +65,7 @@
     }
 
     .cpu-cores-empty {
-        padding: var(--space-3);
-        text-align: center;
-        color: var(--secondary-text-color);
-        font-size: var(--text-xs);
+        @include popoverFrame.readout-popover-empty;
     }
 
     // Scroll backstop shared by every tier's content area.
@@ -100,9 +85,7 @@
     }
 
     .cpu-core {
-        display: flex;
-        align-items: center;
-        gap: var(--space-2);
+        @include popoverFrame.readout-row;
 
         .cpu-core-label {
             flex: 0 0 auto;
@@ -112,16 +95,13 @@
         }
 
         .cpu-core-bar {
-            flex: 1 1 auto;
-            height: 6px;
+            @include popoverFrame.readout-bar;
             background: rgba(127, 127, 127, 0.18);
             border-radius: 2px;
-            overflow: hidden;
         }
 
         .cpu-core-bar-fill {
-            display: block;
-            height: 100%;
+            @include popoverFrame.readout-bar-fill;
             border-radius: 2px;
             transition:
                 width var(--duration-moderate) var(--ease-standard),
@@ -129,11 +109,9 @@
         }
 
         .cpu-core-pct {
-            flex: 0 0 auto;
+            @include popoverFrame.readout-value;
             min-width: 34px;
             text-align: right;
-            font-family: var(--font-mono);
-            font-size: var(--text-xs);
         }
     }
 

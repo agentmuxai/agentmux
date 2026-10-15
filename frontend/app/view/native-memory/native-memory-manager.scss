@@ -6,6 +6,7 @@
 // file cards → NativeMemoryHistoryPanel.
 
 @use "../../mixins.scss";
+@use "../../element/ui/card-text" as cardText;
 
 .native-memory-manager {
     display: flex;
@@ -115,9 +116,7 @@
 }
 
 .memory-agent-card-title {
-    font-size: var(--text-sm);
-    font-weight: 600;
-    @include mixins.truncate;
+    @include cardText.card-title;
 }
 
 .memory-agent-card-count {
@@ -194,10 +193,8 @@
 }
 
 .memory-file-card-title {
-    font-size: var(--text-sm);
-    font-weight: 600;
+    @include cardText.card-title;
     font-family: var(--font-mono);
-    @include mixins.truncate;
 }
 
 .memory-file-card-badges {

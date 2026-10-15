@@ -8,6 +8,7 @@
 // `ui-density-compact`.
 
 @use "../../mixins.scss";
+@use "./card-text" as cardText;
 
 // ── Grid ──────────────────────────────────────────────────────────────────────
 
@@ -136,12 +137,15 @@
 .ui-card-subtitle,
 .ui-card-meta {
     min-width: 0;
+}
+
+.ui-card-subtitle,
+.ui-card-meta {
     @include mixins.truncate;
 }
 
 .ui-card-title {
-    font-size: var(--text-sm);
-    font-weight: 600;
+    @include cardText.card-title;
     color: var(--main-text-color);
 }
 

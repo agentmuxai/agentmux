@@ -5,35 +5,27 @@
 // Spec: docs/specs/SPEC_STATUSBAR_TOKEN_USAGE_2026_04_24.md.
 
 @use "../element/popover-frame" as popoverFrame;
+@use "./stat-button" as statButton;
 
+// A stat button that also fades in on hover.
 .token-usage-indicator {
+    @include statButton.stat-button(
+        $padding: 0 5px,
+        $transition: (
+            background var(--duration-decorative-instant) var(--ease-standard),
+            opacity var(--duration-decorative-instant) var(--ease-standard)
+        )
+    );
     display: inline-flex;
     align-items: center;
     gap: 3px;
     height: 100%;
-    padding: 0 5px;
-    background: transparent;
-    border: none;
-    color: inherit;
-    font-family: inherit;
-    font-size: inherit;
-    cursor: default;
     white-space: nowrap;
-    border-radius: 0;
     // The same resting opacity as the left section's stats (.system-stats).
     opacity: 0.6;
-    transition:
-        background var(--duration-decorative-instant) var(--ease-standard),
-        opacity var(--duration-decorative-instant) var(--ease-standard);
 
     &:hover {
-        background: var(--hover-bg-color);
         opacity: 1;
-    }
-
-    &:focus-visible {
-        outline: 1px solid var(--accent-color);
-        outline-offset: -1px;
     }
 
     // Zero-state: kept visible as an affordance but visually quiet
@@ -63,30 +55,18 @@
 // The body of an AnchoredPopover: the shell positions it and sets its
 // z-index; the body's chrome zoom comes from anchored-popover.scss.
 .token-usage-breakdown {
-    @include popoverFrame.popover-frame;
-    font-size: var(--text-sm);
-    display: flex;
-    flex-direction: column;
-    padding: var(--space-2) 0;
-    user-select: none;
+    @include popoverFrame.readout-popover;
 
     .token-usage-breakdown-header {
-        padding: 0 var(--space-3) var(--space-1-5);
-        display: flex;
-        align-items: baseline;
-        justify-content: space-between;
-        gap: var(--space-2);
-        border-bottom: 1px solid var(--border-color);
+        @include popoverFrame.readout-popover-header;
     }
 
     .token-usage-breakdown-title {
-        font-weight: 600;
-        font-size: var(--text-base);
+        @include popoverFrame.readout-popover-title;
     }
 
     .token-usage-breakdown-subtitle {
-        color: var(--secondary-text-color);
-        font-size: var(--text-xs);
+        @include popoverFrame.readout-popover-note;
     }
 
     .token-usage-breakdown-rows {
@@ -203,10 +183,7 @@
     }
 
     .token-usage-breakdown-empty {
-        padding: var(--space-3) var(--space-3);
-        color: var(--secondary-text-color);
-        font-size: var(--text-xs);
-        text-align: center;
+        @include popoverFrame.readout-popover-empty;
     }
 
     .token-usage-breakdown-footer {
