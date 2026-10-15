@@ -87,6 +87,13 @@ fn the_exit_marker_is_in_the_shells_own_syntax() {
         with_exit_marker("npm test", ShellFamily::Fish, "ab12cd34"),
         "npm test; echo \"__AMX_RC_ab12cd34_{$status}__\""
     );
+    // PowerShell: a native command's exit code, else the cmdlet's success.
+    assert_eq!(
+        with_exit_marker("npm test", ShellFamily::Pwsh, "n"),
+        "npm test; echo \"__AMX_RC_n_$(if ($?) { 0 } elseif ($LASTEXITCODE) { $LASTEXITCODE } else { 1 })__\""
+    );
+    assert_eq!(clear_line(ShellFamily::Pwsh), "\x1b");
+    assert_eq!(in_dir("x", "C:\\w", ShellFamily::Pwsh), "Set-Location -LiteralPath \"C:\\w\"; x");
     // run's cwd is a cd in front of the command, in the shell's syntax.
     assert_eq!(in_dir("npm test", "D:\\w", ShellFamily::Cmd), "cd /d \"D:\\w\" && npm test");
     assert_eq!(in_dir("npm test", "/w", ShellFamily::Posix), "cd \"/w\" && npm test");
@@ -113,6 +120,20 @@ fn the_exit_marker_gives_the_commands_own_output_and_code() {
     assert_eq!(exit_marker(printf, "n5"), Some(("x".to_string(), 0)));
     // An earlier run's marker is not this run's result.
     assert_eq!(exit_marker("$ y; echo \"__AMX_RC_new_$?__\"\n__AMX_RC_old_0__\n", "new"), None);
+}
+
+#[test]
+fn a_remote_shell_is_told_apart_by_what_it_expands() {
+    let line = probe_line("p1");
+    assert_eq!(line, "echo __AMX_FAM_p1_%COMSPEC%_$FISH_VERSION.$PSVersionTable.end");
+    // The echo of the probe line comes first and is skipped.
+    let echo = format!("C:\\>{line}\n");
+    assert_eq!(classify_probe(&format!("{echo}__AMX_FAM_p1_C:\\Windows\\system32\\cmd.exe_$FISH_VERSION.$PSVersionTable.end\n"), "p1"), Some(ShellFamily::Cmd));
+    assert_eq!(classify_probe(&format!("{echo}__AMX_FAM_p1_%COMSPEC%_.System.Management.Automation.PSVersionHashTable.end\n"), "p1"), Some(ShellFamily::Pwsh));
+    assert_eq!(classify_probe(&format!("{echo}__AMX_FAM_p1_%COMSPEC%_3.7.1..end\n"), "p1"), Some(ShellFamily::Fish));
+    assert_eq!(classify_probe(&format!("{echo}__AMX_FAM_p1_%COMSPEC%_..end\n"), "p1"), Some(ShellFamily::Posix));
+    // Only the echo so far: no answer yet.
+    assert_eq!(classify_probe(&echo, "p1"), None);
 }
 
 #[test]

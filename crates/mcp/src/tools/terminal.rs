@@ -27,6 +27,9 @@ enum Kind {
 struct Known {
     kind: Kind,
     connection: Option<String>,
+    /// The shell's family once known: local terminals at once, remote ones
+    /// after [`probe_family`].
+    family: Option<ShellFamily>,
 }
 
 #[derive(Default)]
@@ -102,19 +105,25 @@ pub(super) enum ShellFamily {
     Posix,
     /// fish has no `$?`: its last status is `$status`.
     Fish,
+    /// PowerShell (an SSH login to Windows can land in it).
+    Pwsh,
 }
 
-fn shell_family(connection: Option<&str>) -> ShellFamily {
+/// The family of a local terminal, which srv starts itself (cmd.exe on
+/// Windows, `$SHELL` elsewhere); `None` for a remote one, which is probed.
+fn local_family(connection: Option<&str>) -> Option<ShellFamily> {
     match connection.filter(|c| *c != "local") {
-        None if cfg!(windows) => ShellFamily::Cmd,
-        None if target(None)["shell"] == "fish" => ShellFamily::Fish,
-        _ => ShellFamily::Posix,
+        None if cfg!(windows) => Some(ShellFamily::Cmd),
+        None if target(None)["shell"] == "fish" => Some(ShellFamily::Fish),
+        None => Some(ShellFamily::Posix),
+        Some(_) => None,
     }
 }
 
 fn remember(id: &str, kind: Kind, connection: Option<String>) {
     let mut st = STATE.lock().unwrap();
-    st.known.insert(id.to_string(), Known { kind: kind.clone(), connection });
+    let family = local_family(connection.as_deref());
+    st.known.insert(id.to_string(), Known { kind: kind.clone(), connection, family });
     if kind == Kind::Pty {
         st.drawer = Some(id.to_string());
     }
@@ -127,7 +136,59 @@ fn known(id: &str) -> Known {
         .known
         .get(id)
         .cloned()
-        .unwrap_or(Known { kind: Kind::Pty, connection: None })
+        .unwrap_or(Known { kind: Kind::Pty, connection: None, family: local_family(None) })
+}
+
+/// The terminal's shell family: known for a local terminal, probed once for a
+/// remote one (WSL and SSH run the login shell there, which can be fish, cmd
+/// or PowerShell as well as a POSIX shell).
+async fn family_of(cx: &ToolCtx<'_>, id: &str) -> Result<ShellFamily> {
+    if let Some(f) = known(id).family {
+        return Ok(f);
+    }
+    let family = probe_family(cx, id).await.unwrap_or(ShellFamily::Posix);
+    if let Some(k) = STATE.lock().unwrap().known.get_mut(id) {
+        k.family = Some(family);
+    }
+    Ok(family)
+}
+
+/// One line every shell expands differently: cmd fills in `%COMSPEC%`, fish
+/// `$FISH_VERSION`, PowerShell `$PSVersionTable`; a POSIX shell none of them.
+pub(super) fn probe_line(nonce: &str) -> String {
+    format!("echo __AMX_FAM_{nonce}_%COMSPEC%_$FISH_VERSION.$PSVersionTable.end")
+}
+
+/// The family the probe's output (after the echo of the probe line) shows,
+/// or `None` while it hasn't arrived.
+pub(super) fn classify_probe(text: &str, nonce: &str) -> Option<ShellFamily> {
+    let re = regex::Regex::new(&format!(r"__AMX_FAM_{}_(.*?)\.end", regex::escape(nonce))).ok()?;
+    let got = re.captures(after_first_line(text))?.get(1)?.as_str().to_string();
+    let lower = got.to_ascii_lowercase();
+    Some(if lower.contains("cmd.exe") {
+        ShellFamily::Cmd
+    } else if got.contains("PSVersionHashTable") {
+        ShellFamily::Pwsh
+    } else if got.starts_with("%COMSPEC%_") && got[10..].starts_with(|c: char| c.is_ascii_digit()) {
+        ShellFamily::Fish
+    } else {
+        ShellFamily::Posix
+    })
+}
+
+async fn probe_family(cx: &ToolCtx<'_>, id: &str) -> Result<ShellFamily> {
+    let nonce = uuid::Uuid::new_v4().simple().to_string()[..8].to_string();
+    let start = read_log(cx, id, None, 1).await?.end;
+    write(cx, id, &format!("{}\r", probe_line(&nonce))).await?;
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < deadline {
+        tokio::time::sleep(POLL).await;
+        let text = strip_ansi(&read_log(cx, id, Some(start), READ_ALL_LINES).await?.content);
+        if let Some(f) = classify_probe(&text, &nonce) {
+            return Ok(f);
+        }
+    }
+    anyhow::bail!("the shell didn't answer the probe")
 }
 
 /// The `terminal` an action names (`shell_id` is accepted too), else the
@@ -180,6 +241,11 @@ async fn type_action(arguments: &Value, cx: &ToolCtx<'_>) -> Result<Value> {
     if known(&id).kind == Kind::Background {
         if !keys.is_empty() {
             anyhow::bail!("keys go to a terminal; a background job takes text on stdin only");
+        }
+        // A job's stdin takes whole lines (srv ends each write with a newline),
+        // so text can't be typed without Enter: say so rather than submit it.
+        if !submit {
+            anyhow::bail!("a background job's stdin takes whole lines: pass submit: true to send text as a line");
         }
         let result = shell::call("ShellInput", &json!({ "shell_id": id, "text": text }), cx).await?;
         return Ok(json!({ "terminal": id, "result": result }));
@@ -517,10 +583,12 @@ async fn wait_on(arguments: &Value, cx: &ToolCtx<'_>, id: &str, since: u64, skip
     if background && !exit {
         anyhow::bail!("a background job can only be waited on with until \"exit\"");
     }
-    let family = shell_family(known(id).connection.as_deref());
+    let family = if matches!(until, Until::Prompt) { family_of(cx, id).await? } else { ShellFamily::Posix };
     let started = Instant::now();
     let deadline = started + Duration::from_millis(timeout_ms);
-    let mut last_len = usize::MAX;
+    // Quiet means no new bytes, not text of the same length: a spinner that
+    // keeps overwriting one line is still printing.
+    let mut last_end = u64::MAX;
     let mut last_change = Instant::now();
     loop {
         let elapsed = started.elapsed().as_millis() as u64;
@@ -532,8 +600,8 @@ async fn wait_on(arguments: &Value, cx: &ToolCtx<'_>, id: &str, since: u64, skip
         } else {
             let log = read_log(cx, id, Some(since), READ_ALL_LINES).await?;
             let text = strip_ansi(&log.content);
-            if text.len() != last_len {
-                last_len = text.len();
+            if log.end != last_end {
+                last_end = log.end;
                 last_change = Instant::now();
             }
             let quiet_for = last_change.elapsed().as_millis() as u64;
@@ -591,7 +659,7 @@ pub(super) fn at_prompt(text: &str, family: ShellFamily) -> bool {
     let Some(last) = text.lines().rev().find(|l| !l.trim().is_empty()) else { return false };
     let last = last.trim_end();
     match family {
-        ShellFamily::Cmd => {
+        ShellFamily::Cmd | ShellFamily::Pwsh => {
             let b = last.as_bytes();
             (b.len() >= 3 && b[0].is_ascii_alphabetic() && b[1] == b':' && b[2] == b'\\' && last.ends_with('>'))
                 || (last.starts_with("PS ") && last.ends_with('>'))
@@ -606,13 +674,18 @@ pub(super) fn at_prompt(text: &str, family: ShellFamily) -> bool {
 /// tagged with this run's `nonce` so no earlier run's marker is taken for it.
 /// cmd expands `%ERRORLEVEL%` when it reads the line, before the command runs,
 /// so `call` with `%^ERRORLEVEL%` defers it; fish has `$status` for `$?`,
-/// braced so the variable name ends there. The typed line itself never
-/// matches [`exit_marker`]: it has `%^ERRORLEVEL%`, `$?` or `{$status}`, not digits.
+/// braced so the variable name ends there; PowerShell reports a native
+/// command's code in `$LASTEXITCODE` and a cmdlet's success in `$?`. The typed
+/// line itself never matches [`exit_marker`]: it has `%^ERRORLEVEL%`, `$?`,
+/// `{$status}` or a `$(...)` expression, not digits.
 pub(super) fn with_exit_marker(command: &str, family: ShellFamily, nonce: &str) -> String {
     match family {
         ShellFamily::Cmd => format!("{command} & call echo __AMX_RC_{nonce}_%^ERRORLEVEL%__"),
         ShellFamily::Posix => format!("{command}; echo \"__AMX_RC_{nonce}_$?__\""),
         ShellFamily::Fish => format!("{command}; echo \"__AMX_RC_{nonce}_{{$status}}__\""),
+        ShellFamily::Pwsh => format!(
+            "{command}; echo \"__AMX_RC_{nonce}_$(if ($?) {{ 0 }} elseif ($LASTEXITCODE) {{ $LASTEXITCODE }} else {{ 1 }})__\""
+        ),
     }
 }
 
@@ -622,14 +695,15 @@ pub(super) fn in_dir(command: &str, cwd: &str, family: ShellFamily) -> String {
     match family {
         ShellFamily::Cmd => format!("cd /d \"{cwd}\" && {command}"),
         ShellFamily::Posix | ShellFamily::Fish => format!("cd \"{cwd}\" && {command}"),
+        ShellFamily::Pwsh => format!("Set-Location -LiteralPath \"{cwd}\"; {command}"),
     }
 }
 
 /// The key that clears a half-typed input line before `run` types: Esc in
-/// cmd, Ctrl+U in a Unix shell (readline, zsh's line editor, fish).
+/// cmd and PowerShell, Ctrl+U in a Unix shell (readline, zsh's line editor, fish).
 pub(super) fn clear_line(family: ShellFamily) -> &'static str {
     match family {
-        ShellFamily::Cmd => "\x1b",
+        ShellFamily::Cmd | ShellFamily::Pwsh => "\x1b",
         ShellFamily::Posix | ShellFamily::Fish => "\x15",
     }
 }
@@ -675,7 +749,7 @@ async fn run_action(arguments: &Value, cx: &ToolCtx<'_>) -> Result<Value> {
             id = open(arguments, cx).await?["terminal"].as_str().unwrap_or_default().to_string();
         }
     }
-    let family = shell_family(known(&id).connection.as_deref());
+    let family = family_of(cx, &id).await?;
     let line = match str_arg(arguments, "cwd") {
         Some(cwd) => in_dir(command, cwd, family),
         None => command.to_string(),
