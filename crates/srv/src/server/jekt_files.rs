@@ -138,6 +138,8 @@ pub(crate) const TRANSFER_TIMEOUT: std::time::Duration = std::time::Duration::fr
 /// The inject request in front of the files is small (a 10 KB message and
 /// its signatures); anything longer is refused before it is read.
 const MAX_REQUEST_JSON: u32 = 64 * 1024;
+/// How long the request in front of the files may take to arrive.
+const HEADER_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 /// Transfers a receiver takes at once; another waits for the sender's retry.
 static TRANSFERS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(4);
 /// How long a LAN files jekt's msgid is remembered, so a captured request
@@ -248,9 +250,16 @@ pub(super) async fn handle_reactive_inject_files(
 ) -> axum::response::Response {
     use axum::response::IntoResponse;
     use futures_util::StreamExt;
+    // A slot before any byte is read, so no connection waits outside the cap.
+    let Ok(_slot) = TRANSFERS.try_acquire() else {
+        // Not a verdict on this candidate: the sender moves on.
+        let body = serde_json::json!({ "success": false, "error": "busy receiving other files" });
+        return (axum::http::StatusCode::SERVICE_UNAVAILABLE, axum::Json(body)).into_response();
+    };
     let stream = body.into_data_stream().map(|r| r.map_err(std::io::Error::other));
     let mut reader = tokio_util::io::StreamReader::new(stream);
-    let req = match read_request(&mut reader).await {
+    let header = tokio::time::timeout(HEADER_TIMEOUT, read_request(&mut reader)).await;
+    let req = match header.unwrap_or_else(|_| Err("request timed out".to_string())) {
         Ok(req) => req,
         Err(e) => {
             let body = serde_json::json!({ "success": false, "error": e });
@@ -259,11 +268,6 @@ pub(super) async fn handle_reactive_inject_files(
     };
     super::actor::check_actor(&state, caller.as_deref(), super::actor::ActorSite::Inject, req.source_agent.as_deref());
     let caller_uid = super::caller::attributed_uid(caller.as_deref());
-    let Ok(_slot) = TRANSFERS.try_acquire() else {
-        // Not a verdict on this candidate: the sender moves on.
-        let body = serde_json::json!({ "success": false, "error": "busy receiving other files" });
-        return (axum::http::StatusCode::SERVICE_UNAVAILABLE, axum::Json(body)).into_response();
-    };
     axum::Json(receive(&state, auth_via, &caller_uid, req, &mut reader).await).into_response()
 }
 
@@ -357,6 +361,17 @@ async fn receive<R: tokio::io::AsyncRead + Unpin>(
     value
 }
 
+/// A file in `incoming/` that is removed when dropped, unless taken.
+struct PartFile(Option<std::path::PathBuf>);
+
+impl Drop for PartFile {
+    fn drop(&mut self) {
+        if let Some(path) = self.0.take() {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+}
+
 /// Stream each file into the store, keeping the ones whose bytes match
 /// their hash and size. A file that doesn't is dropped, and the list says it
 /// didn't arrive; a stream that ends early leaves the rest missing.
@@ -369,6 +384,9 @@ async fn store_files<R: tokio::io::AsyncRead + Unpin>(
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     for f in files {
         let tmp = svc.store().new_incoming_path();
+        // Removes the partial file even when the copy is dropped mid-read
+        // (the transfer's deadline); kept only once the store has it.
+        let mut guard = PartFile(Some(tmp.clone()));
         let copied = async {
             let mut out = tokio::fs::File::create(&tmp).await?;
             let mut hasher = sha2::Sha256::new();
@@ -392,16 +410,13 @@ async fn store_files<R: tokio::io::AsyncRead + Unpin>(
             Ok(sha) if sha == f.sha256 => {
                 if let Err(e) = svc.commit_upload(tmp.clone(), sha, f.name.clone()).await {
                     tracing::warn!(file = %f.name, error = %e.message, "jekt files: received file not stored");
-                    let _ = tokio::fs::remove_file(&tmp).await;
+                } else {
+                    guard.0 = None;
                 }
             }
-            Ok(_) => {
-                tracing::warn!(file = %f.name, "jekt files: received bytes don't match their hash");
-                let _ = tokio::fs::remove_file(&tmp).await;
-            }
+            Ok(_) => tracing::warn!(file = %f.name, "jekt files: received bytes don't match their hash"),
             Err(e) => {
                 tracing::warn!(file = %f.name, error = %e, "jekt files: transfer cut short");
-                let _ = tokio::fs::remove_file(&tmp).await;
                 return;
             }
         }
@@ -415,7 +430,11 @@ pub(crate) fn entry_takes(req: &InjectionRequest, entry: &crate::backend::reacti
     if req.files.is_none() || entry.jekt_features.iter().any(|f| f == jekt_files::FEATURE) {
         return true;
     }
-    *too_old = true;
+    // An entry whose process is gone is stale, not a running older build:
+    // pass over it without calling the target too old.
+    if crate::backend::reactive::registry::pid_alive(entry.pid) {
+        *too_old = true;
+    }
     false
 }
 
@@ -693,7 +712,7 @@ mod tests {
         let with_files = req_with(f.clone(), &jekt_files::bind_msgid("m", &f), "host");
         let text = InjectionRequest { request_id: Some("m".into()), ..Default::default() };
         let mut entry: crate::backend::reactive::registry::AgentEntry = serde_json::from_value(serde_json::json!({
-            "agent_id": "agenta", "local_url": "http://127.0.0.1:1", "block_id": "b", "pid": 1, "updated_at": 0
+            "agent_id": "agenta", "local_url": "http://127.0.0.1:1", "block_id": "b", "pid": std::process::id(), "updated_at": 0
         }))
         .unwrap();
         let mut too_old = false;
@@ -702,6 +721,9 @@ mod tests {
         entry.jekt_features = vec![jekt_files::FEATURE.into()];
         let mut too_old = false;
         assert!(entry_takes(&with_files, &entry, &mut too_old) && !too_old);
+        entry.jekt_features.clear();
+        entry.pid = u32::MAX - 7;
+        assert!(!entry_takes(&with_files, &entry, &mut too_old) && !too_old, "a stale entry is no evidence of an older build");
     }
 
     #[tokio::test]
