@@ -234,6 +234,9 @@ fn machine_from_ssh_g(out: &str) -> Option<String> {
     Some(format!("{}@{}:{}", user?, host?, port?))
 }
 
+/// How many `ssh -G` [`same_machine`] runs at once.
+const SSH_G_AT_ONCE: usize = 4;
+
 /// How long a name's machine is kept: `ssh -G` runs at most once in that
 /// time for each name.
 const MACHINE_TTL: std::time::Duration = std::time::Duration::from_secs(300);
@@ -275,7 +278,14 @@ async fn same_machine(connection: &str) -> Vec<String> {
     let mut names: Vec<String> = names.iter().filter_map(|n| canonical(n)).filter(|n| *n != name).collect();
     names.sort();
     names.dedup();
-    let machines = futures_util::future::join_all(names.iter().map(|n| machine(n))).await;
+    // A few at a time: a large ssh config would otherwise start dozens of ssh
+    // processes at once.
+    use futures_util::StreamExt;
+    let machines: Vec<Option<String>> = futures_util::stream::iter(names.clone())
+        .map(|n| async move { machine(&n).await })
+        .buffered(SSH_G_AT_ONCE)
+        .collect()
+        .await;
     names.into_iter().zip(machines).filter(|(_, m)| m.as_deref() == Some(target.as_str())).map(|(n, _)| n).collect()
 }
 
