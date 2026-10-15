@@ -290,7 +290,9 @@ function showReconnecting(attempt: number, max: number): void {
 
     const spinner = document.createElement("div");
     spinner.textContent = "⟳";
-    spinner.style.cssText = "font-size:34px;animation:amux-spin 1s linear infinite;";
+    // am-spin is app.scss's (_keyframes.scss): bootstrap.ts imports app.scss
+    // before anything that can show this, and the build links it in index.html.
+    spinner.style.cssText = "font-size:34px;animation:am-spin 1s linear infinite;";
 
     const label = document.createElement("div");
     label.textContent = "Reconnecting to AgentMux…";
@@ -300,10 +302,7 @@ function showReconnecting(attempt: number, max: number): void {
     sub.textContent = `attempt ${attempt} of ${max}`;
     sub.style.cssText = "font-size:12px;color:rgba(255,255,255,0.5);";
 
-    const style = document.createElement("style");
-    style.textContent = "@keyframes amux-spin{to{transform:rotate(360deg)}}";
-
-    wrap.append(spinner, label, sub, style);
+    wrap.append(spinner, label, sub);
     main.appendChild(wrap);
 }
 

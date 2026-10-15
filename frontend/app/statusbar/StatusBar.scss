@@ -103,7 +103,7 @@
 
         .status-icon-spin {
             display: inline-block;
-            animation: status-icon-spin 1.2s linear infinite;
+            animation: am-spin 1.2s linear infinite;
         }
     }
 
@@ -513,15 +513,6 @@
     &:disabled {
         opacity: 0.4;
         cursor: default;
-    }
-}
-
-@keyframes status-icon-spin {
-    from {
-        transform: rotate(0deg);
-    }
-    to {
-        transform: rotate(360deg);
     }
 }
 

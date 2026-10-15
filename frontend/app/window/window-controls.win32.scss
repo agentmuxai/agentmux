@@ -81,7 +81,7 @@
         justify-content: center;
         user-select: none;
         -webkit-app-region: no-drag;
-        transition: background-color 80ms linear, color 80ms linear;
+        transition: background-color var(--duration-instant) linear, color var(--duration-instant) linear;
 
         // Glyph colour follows button color; the SVGs use currentColor.
         svg {

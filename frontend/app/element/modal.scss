@@ -83,7 +83,7 @@
     background: rgba(0, 0, 0, 0.55);
     backdrop-filter: blur(8px);
     -webkit-backdrop-filter: blur(8px);
-    animation: modal-fade-in 120ms ease-out;
+    animation: am-fade-in var(--duration-quick) var(--ease-out);
 }
 
 .modal-panel {
@@ -96,7 +96,7 @@
     border: 1px solid var(--border-color);
     border-radius: var(--radius-lg);
     box-shadow: var(--shadow-modal);
-    animation: modal-pop-in 140ms cubic-bezier(0.2, 1, 0.3, 1);
+    animation: modal-pop-in 140ms var(--ease-emphasized);
 
     // Focus ring when the panel itself is the focus target (only
     // happens when there are no focusable descendants).
@@ -180,11 +180,7 @@
     font-size: var(--text-md);
     line-height: 1;
     cursor: default;
-    // Not `all`: that also animates the inherited `visibility` that hides
-    // window and pane tabs, so this would pop in a frame late when shown
-    // (docs/analysis/ANALYSIS_WINDOW_TAB_SWITCH_PAINT_2026_09_30.md §3).
-    transition-property: color, background-color, border-color, outline-color, box-shadow, opacity;
-    transition-duration: var(--motion-fast);
+    @include mixins.control-transition(var(--duration-fast), var(--ease-emphasized));
 
     &:hover {
         color: var(--main-text-color);
@@ -264,7 +260,7 @@
 // it. A subtle scale-up pulse draws the eye to "this is how you close".
 
 .modal-dismiss--nudge {
-    animation: modal-dismiss-nudge 240ms cubic-bezier(0.34, 1.56, 0.64, 1);
+    animation: modal-dismiss-nudge var(--duration-moderate) var(--ease-bounce);
 }
 
 @keyframes modal-dismiss-nudge {
@@ -274,11 +270,6 @@
 }
 
 // ── Animations ───────────────────────────────────────────────────────────────
-
-@keyframes modal-fade-in {
-    from { opacity: 0; }
-    to   { opacity: 1; }
-}
 
 @keyframes modal-pop-in {
     from { opacity: 0; transform: scale(0.96) translateY(4px); }

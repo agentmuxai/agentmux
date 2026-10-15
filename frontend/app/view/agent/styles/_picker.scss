@@ -3,6 +3,8 @@
 
 // Agent picker list + card + card-settings panel. Wrapped in .agent-view so the cascade chain matches
 // the pre-split file (SPEC_AGENT_VIEW_SCSS_SPLIT_2026_04_24).
+@use "../../../mixins.scss";
+
 .agent-view {
     // === Agent Picker ===
     // The single scroll boundary for the whole picker — My Agents and
@@ -62,7 +64,7 @@
         font-size: var(--text-sm);
         font-family: inherit;
         outline: none;
-        transition: border-color 0.15s;
+        transition: border-color var(--duration-base);
 
         &:focus {
             border-color: var(--accent-color);
@@ -89,7 +91,7 @@
         color: var(--secondary-text-color);
         font-size: 14px;
         line-height: 1;
-        transition: background 0.1s, color 0.1s, border-color 0.1s;
+        transition: background var(--duration-fast), color var(--duration-fast), border-color var(--duration-fast);
 
         &:hover {
             background: color-mix(in srgb, var(--error-color) 15%, transparent);
@@ -132,7 +134,7 @@
         font-family: inherit;
         outline: none;
         cursor: default;
-        transition: border-color 0.15s;
+        transition: border-color var(--duration-base);
 
         &:focus {
             border-color: var(--accent-color);
@@ -262,7 +264,7 @@
         color: var(--accent-color);
         border: 1px solid var(--accent-color);
         background: transparent;
-        transition: background 0.15s;
+        transition: background var(--duration-base);
 
         &:hover,
         &:focus-visible {
@@ -285,11 +287,7 @@
         background: color-mix(in srgb, var(--main-text-color) 3%, transparent);
         border-radius: 0;
         cursor: default;
-        // Not `all`: that also animates the inherited `visibility` that hides
-        // window and pane tabs, so this would pop in a frame late when shown
-        // (docs/analysis/ANALYSIS_WINDOW_TAB_SWITCH_PAINT_2026_09_30.md §3).
-        transition-property: color, background-color, border-color, outline-color, box-shadow, opacity;
-        transition-duration: 0.15s;
+        @include mixins.control-transition(var(--duration-base));
         color: var(--main-text-color);
         text-align: left;
         width: 100%;
@@ -356,7 +354,7 @@
             z-index: 1;
             user-select: none;
             transform-origin: bottom right;
-            transition: transform 0.15s ease-out, background 0.15s;
+            transition: transform var(--duration-base) var(--ease-out), background var(--duration-base);
         }
 
         &:hover .agent-card-install-ribbon {
@@ -410,7 +408,11 @@
             border-radius: 0;
             cursor: default;
             opacity: 0;
-            transition: opacity 0.12s ease-out, background 0.12s, color 0.12s, border-color 0.12s;
+            transition:
+                opacity var(--duration-quick) var(--ease-out),
+                background var(--duration-quick),
+                color var(--duration-quick),
+                border-color var(--duration-quick);
             pointer-events: none;
             z-index: 1;
             user-select: none;
@@ -560,7 +562,7 @@
             border: 2px solid color-mix(in srgb, var(--accent-color) 25%, transparent);
             border-top-color: var(--accent-color);
             border-radius: 50%;
-            animation: agent-spin 0.8s linear infinite;
+            animation: am-spin 0.8s linear infinite;
             flex-shrink: 0;
         }
     }

@@ -335,7 +335,7 @@
     inset: 0;
     pointer-events: none;
     opacity: 0;
-    transition: opacity 200ms ease;
+    transition: opacity 200ms var(--ease-standard);
     border-radius: var(--block-border-radius);
     padding: var(--pane-ring-width, 2px);
     -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);

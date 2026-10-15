@@ -41,7 +41,10 @@
     font-size: 1em;
     line-height: 1;
     padding: 0;
-    transition: opacity 100ms ease, background 100ms ease, border-color 100ms ease;
+    transition:
+        opacity var(--duration-fast) var(--ease-standard),
+        background var(--duration-fast) var(--ease-standard),
+        border-color var(--duration-fast) var(--ease-standard);
 
     &:hover {
         opacity: 1;

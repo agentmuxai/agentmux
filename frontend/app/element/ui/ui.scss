@@ -39,7 +39,7 @@
     box-shadow: 0 0 10px color-mix(in srgb, var(--attention-color) 45%, transparent);
 
     &:not(:focus-visible, :disabled, [aria-disabled="true"]) {
-        animation: ui-attention-glow 1.8s ease-in-out infinite;
+        animation: ui-attention-glow 1.8s var(--ease-in-out) infinite;
     }
 
     &:focus-visible {
@@ -154,8 +154,8 @@
     cursor: var(--cursor-interactive);
     user-select: none;
     transition-property: color, background-color, box-shadow;
-    transition-duration: 80ms;
-    transition-timing-function: ease;
+    transition-duration: var(--duration-instant);
+    transition-timing-function: var(--ease-standard);
 
     i {
         width: calc(var(--ui-icon-size) + 4px);
@@ -328,8 +328,8 @@
     border-radius: var(--radius-sm);
     outline: none;
     transition-property: border-color, box-shadow;
-    transition-duration: 80ms;
-    transition-timing-function: ease;
+    transition-duration: var(--duration-instant);
+    transition-timing-function: var(--ease-standard);
 
     &::placeholder {
         color: var(--secondary-text-color);
@@ -369,7 +369,9 @@
     color: var(--main-text-color);
     border: 1px solid var(--border-color);
     border-radius: var(--radius-sm);
-    transition: border-color 80ms ease, box-shadow 80ms ease;
+    transition:
+        border-color var(--duration-instant) var(--ease-standard),
+        box-shadow var(--duration-instant) var(--ease-standard);
 
     &:focus-within {
         border-color: var(--accent-color);
@@ -446,8 +448,8 @@ select.ui-input {
     border-radius: var(--radius-full);
     cursor: var(--cursor-interactive);
     transition-property: background-color, border-color, box-shadow;
-    transition-duration: 80ms;
-    transition-timing-function: ease;
+    transition-duration: var(--duration-instant);
+    transition-timing-function: var(--ease-standard);
 
     &:hover:not(:disabled) {
         border-color: color-mix(in srgb, var(--accent-color) 30%, transparent);
@@ -477,8 +479,8 @@ select.ui-input {
     background: var(--secondary-text-color);
     border-radius: var(--radius-full);
     transition-property: transform, background-color;
-    transition-duration: 80ms;
-    transition-timing-function: ease;
+    transition-duration: var(--duration-instant);
+    transition-timing-function: var(--ease-standard);
 
     .ui-switch[aria-checked="true"] & {
         background: var(--accent-color);

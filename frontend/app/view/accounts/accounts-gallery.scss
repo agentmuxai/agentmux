@@ -110,7 +110,7 @@
         font-family: inherit;
         text-align: left;
         cursor: default;
-        transition: background 90ms ease, border-color 90ms ease;
+        transition: background 90ms var(--ease-standard), border-color 90ms var(--ease-standard);
 
         &:hover {
             background: var(--hover-bg-color);

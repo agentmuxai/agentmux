@@ -240,7 +240,9 @@
     user-select: none;
     font-size: 11px;
     overflow: hidden;
-    transition: background 80ms ease, color 80ms ease;
+    transition:
+        background var(--duration-instant) var(--ease-standard),
+        color var(--duration-instant) var(--ease-standard);
     // Positioning + own stacking context for the activity-flash overlay
     // below, which sits at z-index -1: over the pill's (pane-colored)
     // background, under its icon/label/×.
@@ -484,7 +486,9 @@
     font-size: 14px;
     line-height: 1;
     opacity: 0;
-    transition: opacity 80ms ease, background 80ms ease;
+    transition:
+        opacity var(--duration-instant) var(--ease-standard),
+        background var(--duration-instant) var(--ease-standard);
 
     &:hover {
         background: rgba(255, 255, 255, 0.1);
@@ -547,7 +551,9 @@
     cursor: default;
     font-size: 15px;
     line-height: 1;
-    transition: background 80ms ease, color 80ms ease;
+    transition:
+        background var(--duration-instant) var(--ease-standard),
+        color var(--duration-instant) var(--ease-standard);
 
     &:hover {
         background: rgba(255, 255, 255, 0.06);

@@ -75,8 +75,8 @@
     text-align: left;
     cursor: default;
     transition:
-        background 90ms ease,
-        border-color 90ms ease;
+        background 90ms var(--ease-standard),
+        border-color 90ms var(--ease-standard);
 
     &:hover {
         border-color: var(--accent-color);
@@ -235,7 +235,8 @@
 
     &--busy {
         background: var(--warning-color);
-        animation: ui-status-dot-pulse 1.2s ease-in-out infinite;
+        --pulse-min: 0.35;
+        animation: am-pulse 1.2s var(--ease-in-out) infinite;
 
         // Reduced treatment (status), dormant under the motion policy.
         @include mixins.when-motion-reduced(status) {
@@ -246,12 +247,6 @@
     &--idle {
         background: transparent;
         border-color: var(--secondary-text-color);
-    }
-}
-
-@keyframes ui-status-dot-pulse {
-    50% {
-        opacity: 0.35;
     }
 }
 

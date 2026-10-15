@@ -31,7 +31,7 @@
     outline-offset: -2px;
     animation:
         tab-drop-invert-strobe 400ms steps(1, end) 2,
-        tab-drop-pulse 0.8s ease-in-out infinite alternate;
+        tab-drop-pulse 0.8s var(--ease-in-out) infinite alternate;
 
     // Reduced treatment (feedback), dormant under the motion policy.
     @include mixins.when-motion-reduced(feedback) {
@@ -56,6 +56,6 @@
 
 // Landing bounce on a tab that was just dropped into place.
 @mixin landing-bounce {
-    animation: tab-bounce 300ms cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+    animation: tab-bounce 300ms var(--ease-bounce) forwards;
     transform-origin: center bottom;
 }

@@ -6,16 +6,6 @@
 // Spec: docs/specs/SPEC_ASK_USER_QUESTION_2026_06_15.md,
 // docs/specs/SPEC_ASK_USER_QUESTION_AUTO_TIMEOUT_2026_08_06.md.
 
-// Subtle urgency pulse for the countdown chip's final 5 seconds — opacity
-// only (no color/size change here; color escalation is handled by the
-// --warning/--critical modifier classes below) so it reads as "urgent"
-// without being distracting.
-@keyframes amux-question-countdown-pulse {
-    50% {
-        opacity: 0.6;
-    }
-}
-
 .agent-question-panel {
     display: flex;
     flex-direction: column;
@@ -111,7 +101,7 @@
 .agent-question-panel-countdown {
     font-size: var(--text-xs, 11px);
     color: var(--secondary-text-color);
-    transition: color 120ms ease;
+    transition: color var(--duration-quick) var(--ease-standard);
     white-space: nowrap;
 
     &--warning {
@@ -122,7 +112,11 @@
     &--critical {
         color: var(--error-color);
         font-weight: var(--font-weight-medium, 500);
-        animation: amux-question-countdown-pulse 1s ease-in-out infinite;
+        // Subtle urgency pulse for the final 5 seconds: opacity only (the colour
+        // comes from the modifier classes), so it reads as urgent without being
+        // distracting.
+        --pulse-min: 0.6;
+        animation: am-pulse 1s var(--ease-in-out) infinite;
     }
 }
 
@@ -169,7 +163,9 @@
     border: 1px solid var(--border-color);
     border-radius: var(--radius-sm, 0);
     cursor: default;
-    transition: background 80ms ease, border-color 80ms ease;
+    transition:
+        background var(--duration-instant) var(--ease-standard),
+        border-color var(--duration-instant) var(--ease-standard);
 
     &:hover {
         background: var(--hover-bg-color, rgba(255, 255, 255, 0.06));

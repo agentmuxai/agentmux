@@ -15,7 +15,7 @@
     &.status-valid     { background: var(--success-color); }
     &.status-expired   { background: var(--error-color); }
     &.status-invalid   { background: var(--error-color); }
-    &.status-checking  { background: var(--warning-color); animation: pulse 1s infinite; }
+    &.status-checking  { background: var(--warning-color); animation: am-pulse 1s infinite; }
     &.status-unknown   { background: var(--secondary-text-color); }
 
     &.detail-status {
@@ -23,10 +23,5 @@
         height: 8px;
         margin-left: var(--space-1);
     }
-}
-
-@keyframes pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.4; }
 }
 

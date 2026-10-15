@@ -117,7 +117,7 @@ $gap: 6px;
                 display: block;
                 height: 100%;
                 background: var(--accent-color);
-                transition: width 120ms linear;
+                transition: width var(--duration-quick) linear;
             }
         }
 
@@ -324,7 +324,7 @@ $gap: 6px;
             font-size: 10px;
             cursor: pointer;
             opacity: 0;
-            transition: opacity 80ms linear;
+            transition: opacity var(--duration-instant) linear;
 
             &:hover {
                 color: var(--main-text-color);
@@ -359,10 +359,12 @@ $gap: 6px;
                 .bar {
                     stroke: var(--accent-color);
                     stroke-linecap: round;
-                    transition: stroke-dashoffset 120ms linear;
+                    transition: stroke-dashoffset var(--duration-quick) linear;
                 }
                 &.is-indeterminate {
-                    animation: agent-attachment-spin 900ms linear infinite;
+                    // The ring starts at the top: the svg is turned -90deg.
+                    --spin-from: -90deg;
+                    animation: am-spin 900ms linear infinite;
                 }
             }
         }
@@ -393,7 +395,7 @@ $gap: 6px;
         }
 
         &.is-flash &__main {
-            animation: agent-attachment-flash 900ms ease-out;
+            animation: agent-attachment-flash 900ms var(--ease-out);
         }
 
         // "+N": the next few thumbnails, dimmed, under the count.
@@ -599,15 +601,6 @@ $gap: 6px;
         .pos {
             color: var(--secondary-text-color);
         }
-    }
-}
-
-@keyframes agent-attachment-spin {
-    from {
-        transform: rotate(-90deg);
-    }
-    to {
-        transform: rotate(270deg);
     }
 }
 

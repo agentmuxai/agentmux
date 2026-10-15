@@ -13,7 +13,7 @@
     color: var(--secondary-text-color);
     opacity: 0.35;
     cursor: grab;
-    transition: opacity 120ms ease;
+    transition: opacity var(--duration-quick) var(--ease-standard);
 
     &:focus-visible {
         opacity: 1;

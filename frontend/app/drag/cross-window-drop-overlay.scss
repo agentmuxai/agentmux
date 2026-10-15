@@ -15,7 +15,7 @@
     border: 2px dashed var(--drop-target-border);
     border-radius: 0;
     pointer-events: none;
-    animation: cross-drag-fade-in 0.15s ease-out;
+    animation: am-fade-in var(--duration-base) var(--ease-out);
 
     .cross-drag-overlay-content {
         display: flex;
@@ -29,14 +29,5 @@
         i {
             font-size: 28px;
         }
-    }
-}
-
-@keyframes cross-drag-fade-in {
-    from {
-        opacity: 0;
-    }
-    to {
-        opacity: 1;
     }
 }

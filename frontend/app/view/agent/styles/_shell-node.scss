@@ -4,10 +4,12 @@
 // Persistent shell node — compact colored row + inline log panel.
 // Spec: docs/specs/SPEC_PERSISTENT_SHELL_NODE_2026_06_11.md
 
+@use "../../../mixins.scss";
+
 .agent-shell-block {
     position: relative;
     border-left: 4px solid var(--border-color);
-    transition: border-left-color 0.2s ease;
+    transition: border-left-color 0.2s var(--ease-standard);
 
     // Status colors
     &.running    { border-left-color: var(--term-bright-green); }
@@ -17,7 +19,7 @@
 
     // Running pulse — draws attention to an active long-running process
     &.running {
-        animation: shell-running-pulse 2s ease-in-out infinite;
+        animation: shell-running-pulse 2s var(--ease-in-out) infinite;
     }
 }
 
@@ -42,12 +44,7 @@
     min-height: 0;
     max-height: 50vh;
     overflow: hidden;
-    transition:
-        max-height 120ms cubic-bezier(0.4, 0, 0.2, 1),
-        padding 120ms cubic-bezier(0.4, 0, 0.2, 1),
-        margin 120ms cubic-bezier(0.4, 0, 0.2, 1),
-        opacity 100ms ease-out,
-        content-visibility 120ms allow-discrete;
+    @include mixins.collapse-transition;
 
     // Collapsed: clip to zero so the row matches its 32px estimate. Body
     // stays in the DOM (content-visibility, not display:none) so the
@@ -160,7 +157,10 @@
     border-radius: 3px;
     cursor: default;
     opacity: 0.55;
-    transition: opacity 0.15s ease, color 0.15s ease, background 0.15s ease;
+    transition:
+        opacity var(--duration-base) var(--ease-standard),
+        color var(--duration-base) var(--ease-standard),
+        background var(--duration-base) var(--ease-standard);
 
     &:hover {
         opacity: 1;
@@ -186,12 +186,7 @@
     background: var(--term-bright-green);
     margin-left: 2px;
     vertical-align: text-bottom;
-    animation: shell-cursor-blink 1s step-end infinite;
-}
-
-@keyframes shell-cursor-blink {
-    0%, 100% { opacity: 1; }
-    50%       { opacity: 0; }
+    animation: am-blink 1s step-end infinite;
 }
 
 // Responsive: hide live-tail on narrow panes
@@ -223,7 +218,7 @@
 
 .agent-activity-row {
     border-left: 3px solid var(--border-color);
-    transition: border-left-color 0.2s ease;
+    transition: border-left-color 0.2s var(--ease-standard);
 
     &.running  { border-left-color: var(--term-bright-green); }
     &.done     { border-left-color: var(--accent-color); opacity: 0.75; }
@@ -232,16 +227,28 @@
 
     & + & { border-top: 1px solid var(--border-color); }
 
-    // Landing/departure flash — reuses `tab-bounce` (drag/drop-indicators.scss), the same
-    // spring-bounce played when a dragged tab lands, so a dock row appearing
-    // or about to disappear reads the same way a tab drop does elsewhere in
-    // the app. Both are transform-only (no layout shift) so they're safe to
-    // fire on a row that's about to be removed from the list.
+    // Landing flash: `tab-bounce` (drag/drop-indicators.scss), the same
+    // spring-bounce a dragged tab plays when it lands, so a dock row appearing
+    // reads the way a tab drop does elsewhere in the app. The departure plays
+    // the same shape under its own name, `activity-row-depart`: it means the
+    // row is leaving, not landing. Both are transform-only (no layout shift),
+    // so they're safe on a row that's about to be removed from the list.
     &.activity-flash-in,
     &.activity-flash-out {
         transform-origin: center bottom;
-        animation: tab-bounce 300ms cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+        animation: tab-bounce 300ms var(--ease-bounce) forwards;
     }
+
+    &.activity-flash-out {
+        animation-name: activity-row-depart;
+    }
+}
+
+@keyframes activity-row-depart {
+    0%   { transform: scaleX(0.88); }
+    55%  { transform: scaleX(1.04); }
+    80%  { transform: scaleX(0.98); }
+    100% { transform: scaleX(1.0);  }
 }
 
 .agent-activity-summary {
@@ -334,7 +341,11 @@
     border-radius: 6px;
     cursor: default;
     opacity: 0.75;
-    transition: opacity 0.15s ease, color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+    transition:
+        opacity var(--duration-base) var(--ease-standard),
+        color var(--duration-base) var(--ease-standard),
+        background var(--duration-base) var(--ease-standard),
+        border-color var(--duration-base) var(--ease-standard);
 
     &:hover {
         opacity: 1;

@@ -100,8 +100,8 @@
     border-radius: var(--radius-sm);
     cursor: var(--cursor-interactive);
     transition-property: color, background-color, border-color, box-shadow, opacity;
-    transition-duration: 80ms;
-    transition-timing-function: ease;
+    transition-duration: var(--duration-instant);
+    transition-timing-function: var(--ease-standard);
 
     i {
         font-size: var(--ui-icon-size);

@@ -23,7 +23,7 @@
     font-weight: 500;
     color: var(--secondary-text-color);
     user-select: none;
-    transition: background-color 0.15s ease;
+    transition: background-color var(--duration-base) var(--ease-standard);
 
     &.is-hovered {
         background-color: color-mix(in srgb, var(--block-bg-solid-color) 70%, transparent);

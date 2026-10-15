@@ -18,7 +18,7 @@
     margin: 0;
     cursor: default;
     border-radius: 0;
-    transition: background 80ms ease;
+    transition: background var(--duration-instant) var(--ease-standard);
 
     &:hover {
         background: var(--hover-bg-color);

@@ -168,19 +168,6 @@
     }
 }
 
-.browser-loading-bar {
-    height: 2px;
-    background: var(--accent-color);
-    animation: browser-loading 1.5s ease-in-out infinite;
-    flex-shrink: 0;
-}
-
-@keyframes browser-loading {
-    0% { width: 0; margin-left: 0; }
-    50% { width: 60%; margin-left: 20%; }
-    100% { width: 0; margin-left: 100%; }
-}
-
 .browser-error {
     padding: var(--space-3) var(--space-4);
     background: rgba(255, 80, 80, 0.1);
@@ -394,7 +381,7 @@
 
     &.is-fading {
         opacity: 0;
-        transition: opacity 200ms ease-out;
+        transition: opacity 200ms var(--ease-out);
         pointer-events: none;
     }
 }
@@ -419,7 +406,7 @@
 
     &.is-fading {
         opacity: 0;
-        transition: opacity 200ms ease-out;
+        transition: opacity 200ms var(--ease-out);
         pointer-events: none;
     }
 }

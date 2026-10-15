@@ -39,7 +39,7 @@
     width: 4px;
     cursor: col-resize;
     background: var(--border-color);
-    transition: background 80ms ease;
+    transition: background var(--duration-instant) var(--ease-standard);
     position: relative;
 
     &:hover,
@@ -105,7 +105,10 @@
     color: var(--secondary-text-color);
     cursor: default;
     font-size: 11px;
-    transition: background 80ms ease, color 80ms ease, border-color 80ms ease;
+    transition:
+        background var(--duration-instant) var(--ease-standard),
+        color var(--duration-instant) var(--ease-standard),
+        border-color var(--duration-instant) var(--ease-standard);
 
     &:hover {
         background: rgba(255, 255, 255, 0.05);

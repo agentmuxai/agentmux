@@ -31,7 +31,7 @@
     // Brief flash after the first Enter on a high-risk Allow — tells
     // the user "we received the keystroke, hit it again to commit".
     &--armed {
-        animation: agent-decision-panel-armed 0.5s ease-out;
+        animation: agent-decision-panel-armed 0.5s var(--ease-out);
     }
 }
 
@@ -52,7 +52,9 @@
     font-size: var(--text-xs);
     cursor: default;
     text-align: left;
-    transition: background 80ms ease, border-color 80ms ease;
+    transition:
+        background var(--duration-instant) var(--ease-standard),
+        border-color var(--duration-instant) var(--ease-standard);
     flex-shrink: 0;
 
     &:hover {
@@ -196,7 +198,7 @@
     padding: var(--space-0-5) var(--space-1);
     border-radius: 0;
     cursor: default;
-    transition: background 80ms ease;
+    transition: background var(--duration-instant) var(--ease-standard);
 
     &:hover {
         background: color-mix(in srgb, var(--main-text-color) 4%, transparent);
@@ -272,7 +274,9 @@
     border-radius: 0;
     cursor: default;
     border: 1px solid transparent;
-    transition: background 80ms ease, border-color 80ms ease;
+    transition:
+        background var(--duration-instant) var(--ease-standard),
+        border-color var(--duration-instant) var(--ease-standard);
 
     // Allow is the loud, filled call to action, except on a high-risk gate,
     // which keeps the quieter success tint and its second confirm so the

@@ -5,6 +5,7 @@
 @use "reset.scss";
 @use "theme.scss";
 @use "themes/index";
+@use "keyframes";
 
 // `clip`, not `hidden`: clipped the same, but not a scroll container. With
 // `hidden`, anything wider than the window (the status bar's left group in a
@@ -67,12 +68,12 @@ body {
     border: 2px solid var(--drop-target-border);
     border-radius: var(--block-border-radius);
     transition:
-        top 120ms ease-out,
-        left 120ms ease-out,
-        width 120ms ease-out,
-        height 120ms ease-out,
-        background-color 100ms ease-out,
-        border-color 100ms ease-out;
+        top var(--duration-quick) var(--ease-out),
+        left var(--duration-quick) var(--ease-out),
+        width var(--duration-quick) var(--ease-out),
+        height var(--duration-quick) var(--ease-out),
+        background-color var(--duration-fast) var(--ease-out),
+        border-color var(--duration-fast) var(--ease-out);
 
     // Stage one, before the dwell arms the drop: where the pane would land,
     // without committing to it (redock-ghost.ts). Releasing here leaves the
@@ -251,36 +252,6 @@ a {
     }
 }
 
-// Pane-header activity flash, referenced by
-// `mixins.block-frame-default-header-layout()`'s `.block-frame-text.term-activity--flash`.
-// Lives HERE, in the one globally-imported stylesheet, rather than in that
-// mixin's body (muxreview P2 on PR #3151): a @keyframes inside a mixin is
-// emitted once per @include, so it appeared twice once both block.scss and
-// agent-view.scss included the mixin. Moving it to mixins.scss's top level
-// was worse still — every one of that module's 10 consumers then emitted a
-// copy, including unrelated ones like modal.scss. app.scss is imported
-// exactly once (bootstrap.ts / app.tsx), so this compiles to a single
-// definition; @keyframes names are global in CSS, so the mixin's
-// `animation:` reference resolves regardless of where it's declared.
-//
-// One deliberate deviation from the block.scss original this was extracted
-// from: it read `var(--accent-color, #6c9ef8)`. block.scss is grandfathered
-// in .stylelintignore for its pre-existing raw hex; this file is not, so
-// carrying the literal would newly fail `color-no-hex`. Dropping it is safe
-// rather than a silent behavior change — `--accent-color` is defined
-// unconditionally in theme.scss and only ever overridden, never unset, by
-// the files in themes/, so the fallback arm was unreachable.
-@keyframes term-activity-flash {
-    0% {
-        opacity: 1;
-        color: var(--accent-color);
-    }
-    100% {
-        opacity: 0.6;
-        color: inherit;
-    }
-}
-
 // ── Tab-switch view transition ──────────────────────────────────────────────
 // workspace.tsx wraps the active-tab swap in document.startViewTransition(),
 // scoped to this one named group via `view-transition-name` on the tab-
@@ -298,7 +269,7 @@ a {
 // zero-cost cached-texture swap isn't available here.
 ::view-transition-old(workspace-tab-content),
 ::view-transition-new(workspace-tab-content) {
-    animation-duration: 120ms;
+    animation-duration: var(--duration-quick);
 }
 
 // Reduced treatment (transition), dormant under the motion policy. workspace.tsx

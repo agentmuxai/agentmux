@@ -64,9 +64,9 @@
         align-items: center;
         justify-content: center;
         transition:
-            background 0.1s,
-            color 0.1s,
-            border-color 0.1s;
+            background var(--duration-fast),
+            color var(--duration-fast),
+            border-color var(--duration-fast);
 
         &:hover {
             background: color-mix(in srgb, var(--error-color) 15%, transparent);
@@ -115,7 +115,7 @@
         margin-left: 2px;
         vertical-align: text-bottom;
         background: var(--accent-color);
-        animation: btw-overlay-cursor-blink 1s step-end infinite;
+        animation: am-blink 1s step-end infinite;
     }
 
     .btw-overlay__hint {
@@ -126,16 +126,5 @@
         font-size: 10px;
         color: var(--secondary-text-color);
         background: color-mix(in srgb, var(--main-bg-color) 80%, transparent);
-    }
-}
-
-@keyframes btw-overlay-cursor-blink {
-    0%,
-    50% {
-        opacity: 1;
-    }
-    50.01%,
-    100% {
-        opacity: 0;
     }
 }

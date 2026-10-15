@@ -87,7 +87,7 @@
     border-radius: 0;
     background: color-mix(in srgb, var(--main-text-color) 3%, transparent);
     margin-bottom: var(--space-1);
-    transition: background 0.1s, border-color 0.1s;
+    transition: background var(--duration-fast), border-color var(--duration-fast);
 
     &:last-child {
         margin-bottom: 0;
