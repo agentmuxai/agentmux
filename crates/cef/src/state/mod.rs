@@ -627,14 +627,6 @@ pub struct AppState {
     // Phase B.1 removed `job_handle` (was Windows-only). Launcher
     // owns J0 wrapping srv now; host no longer needs its own job.
 
-    /// Per-window HWND registry (label → outer top-level HWND), owned by the
-    /// host reducer (`HostState.window_hwnds`). Bound at Views window creation
-    /// (`app/mod.rs` `on_window_created`) and by the floating-pane creator
-    /// right after `CreateWindowExW`; `capture_hwnd_for_label` fills in any
-    /// label still missing once the window is shown. Use `window_hwnd` /
-    /// `bind_window_hwnd` / `evict_window_hwnd` (`state/window_hwnds.rs`).
-    #[cfg(target_os = "windows")]
-    pub window_hwnds: window_hwnds::WindowHwndsShim,
 
     /// Phase 4b — per-window ghost state for floating-pane redock.
     /// Keyed by window label. The target renderer pushes its last-computed
@@ -776,8 +768,6 @@ impl Default for AppState {
             owned_panes: Mutex::new(std::collections::HashSet::new()),
             site_limits: Default::default(),
             popup_openers: Mutex::new(std::collections::HashMap::new()),
-            #[cfg(target_os = "windows")]
-            window_hwnds: window_hwnds::WindowHwndsShim::new(host_state.clone()),
             host_state,
             media_grants: Mutex::new(
                 crate::browser_panes::media_grants::MediaGrantStore::new(),

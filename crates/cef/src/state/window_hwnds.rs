@@ -1,54 +1,18 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! `AppState` access to the outer-window HWND registry, which the host
-//! reducer owns (`HostState.window_hwnds`, `reducer/window_hwnds.rs`).
+//! `AppState` access to the outer-window HWND registry (label → outer
+//! top-level HWND), which the host reducer owns (`HostState.window_hwnds`,
+//! `reducer/window_hwnds.rs`). Bound at Views window creation (`app/mod.rs`
+//! `on_window_created`) and by the floating-pane creator right after
+//! `CreateWindowExW`; `capture_hwnd_for_label` fills in any label still
+//! missing once the window is shown. Every write goes through the reducer.
 
 use std::collections::HashSet;
-use std::sync::Arc;
 
-use parking_lot::{Mutex, MutexGuard};
-
-use crate::reducer::{DropTarget, HostCommand, HostState};
+use crate::reducer::{DropTarget, HostCommand};
 
 use super::AppState;
-
-/// `AppState::window_hwnds`: a handle onto `HostState.window_hwnds`.
-pub struct WindowHwndsShim(Arc<Mutex<HostState>>);
-
-impl WindowHwndsShim {
-    pub(super) fn new(host_state: Arc<Mutex<HostState>>) -> Self {
-        Self(host_state)
-    }
-
-    /// Only for the `state.window_hwnds.lock()` call sites left in
-    /// `commands/window_pool.rs`; everything else uses the `AppState` methods
-    /// below. Holds the `host_state` lock for as long as the guard lives, so
-    /// keep it to one statement.
-    pub fn lock(&self) -> WindowHwndsGuard<'_> {
-        WindowHwndsGuard(self.0.lock())
-    }
-}
-
-/// The map's old `get` / `insert` / `remove`, with writes going through the
-/// reducer's arms. Calling `update` directly matches `host_dispatch` here:
-/// those arms emit no events and aren't quit-relevant.
-pub struct WindowHwndsGuard<'a>(MutexGuard<'a, HostState>);
-
-impl WindowHwndsGuard<'_> {
-    pub fn get(&self, label: &str) -> Option<&isize> {
-        self.0.window_hwnds.get(label)
-    }
-
-    pub fn insert(&mut self, label: String, hwnd: isize) {
-        crate::reducer::update(&mut self.0, HostCommand::BindWindowHwnd { label, hwnd, replace: true });
-    }
-
-    pub fn remove(&mut self, label: &str) -> Option<isize> {
-        crate::reducer::update(&mut self.0, HostCommand::EvictWindowHwnd { label: label.to_string() })
-            .evicted_window_hwnd
-    }
-}
 
 impl AppState {
     /// The outer top-level HWND bound to `label`, as its raw value.

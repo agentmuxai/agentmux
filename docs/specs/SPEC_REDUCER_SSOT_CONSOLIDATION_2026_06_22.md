@@ -189,12 +189,12 @@ separate locks → a promoted window's HWND can cache under the wrong label.
 is defensible (CEF Views hides the main HWND; `host.window_handle()` returns an inner WS_CHILD,
 lifecycle.rs:442-454). The violation is that it is authoritative AND uncoupled, not that it exists.*
 
-*Done 2026-10-14 (this PR):* the map is `HostState.window_hwnds`, written only by `BindWindowHwnd`
+*Done 2026-10-14 (#4877):* the map is `HostState.window_hwnds`, written only by `BindWindowHwnd`
 (`replace: false` makes `capture_hwnd_for_label`'s check-then-insert one step), `EvictWindowHwnd`, and
 `RelabelBrowser`, which now moves the HWND with the browser under one lock. `AppState` reads it through
-`window_hwnd` / `label_for_hwnd` / `drop_target_at`. One leftover: `commands/window_pool.rs` still calls
-`state.window_hwnds.lock()` (it was being changed by another open PR), served by a shim whose writes go
-through the same reducer arms; convert those calls and delete the shim once that PR lands.
+`window_hwnd` / `label_for_hwnd` / `drop_target_at`. `commands/window_pool.rs` kept a shim over
+`state.window_hwnds.lock()` while another open PR changed it; its calls now use `evict_window_hwnd` /
+`window_hwnd` / `bind_window_hwnd` and the shim is gone (2026-10-15).
 
 ### Track 3 — Reliable launcher→renderer delivery
 
