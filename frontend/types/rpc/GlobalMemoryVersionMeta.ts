@@ -2,7 +2,7 @@
 
 /**
  * One `db_bundle_versions` row's metadata, no `name`/`instructions` —
- * the same fields `bundle_version_meta_json` (app_api) puts on the MCP wire.
+ * also what the `GlobalMemoryHistory` / `GlobalMemoryRevert` MCP tools return.
  */
 export type GlobalMemoryVersionMeta = { id: string, content_hash: string, parent_version_id: string | null, source: string, source_detail: string, 
 /**

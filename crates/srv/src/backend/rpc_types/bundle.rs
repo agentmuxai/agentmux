@@ -107,7 +107,7 @@ pub struct CommandUpsertBundleData {
 // db_bundle_versions rows. SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.3.
 
 /// One `db_bundle_versions` row's metadata, no `name`/`instructions` —
-/// the same fields `bundle_version_meta_json` (app_api) puts on the MCP wire.
+/// also what the `GlobalMemoryHistory` / `GlobalMemoryRevert` MCP tools return.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct GlobalMemoryVersionMeta {

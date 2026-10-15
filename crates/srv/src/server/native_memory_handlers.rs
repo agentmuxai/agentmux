@@ -48,9 +48,7 @@ use crate::backend::rpc_types::{
     NativeMemoryListResult,
     NativeMemoryReadFileResult,
     NativeMemoryRevertResult,
-    NativeMemoryVersionMeta,
 };
-use crate::backend::storage::NativeMemoryVersion;
 
 use super::AppState;
 pub(crate) use super::native_memory_diff::line_diff;
