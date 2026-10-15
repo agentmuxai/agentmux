@@ -247,6 +247,29 @@ async fn bootstrap_heals_leaves_for_blocks_the_tab_does_not_own() {
     assert!(crate::backend::layout::validate_layout_invariants(&healed.rootnode).is_empty());
 }
 
+/// When the blocks can't be read (one row that doesn't decode fails the whole
+/// load), every tab looks like it owns nothing. The heal must not run then, or
+/// it would prune every stored layout to empty.
+#[tokio::test]
+async fn bootstrap_does_not_heal_when_the_blocks_cannot_be_read() {
+    let state = test_state();
+    let (tab_id, oid, ..) = seed(&state).await;
+    let before = serde_json::to_string(&row(&state, &oid)).unwrap();
+    assert!(row(&state, &oid).rootnode.is_some());
+    state
+        .mstore
+        .conn()
+        .lock()
+        .unwrap()
+        .execute("INSERT INTO db_block (oid, version, data) VALUES ('undecodable', 1, ?1)", [b"not json".to_vec()])
+        .unwrap();
+    assert!(state.mstore.get_all::<crate::backend::obj::Block>().is_err(), "the block load fails as a whole");
+
+    let fresh = bootstrap_fresh(&state).await;
+    assert_eq!(serde_json::to_string(&row(&state, &oid)).unwrap(), before, "the stored layout is untouched");
+    assert_eq!(fresh.lock().await.tabs[&tab_id].rootnode, row(&state, &oid).rootnode);
+}
+
 /// A row with nothing to heal is left exactly as stored: no write.
 #[tokio::test]
 async fn bootstrap_leaves_a_clean_layout_row_untouched() {

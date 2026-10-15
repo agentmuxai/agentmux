@@ -55,14 +55,21 @@ pub async fn bootstrap_state_from_mstore(state: &Arc<Mutex<State>>, mstore: &Sto
         );
         Vec::new()
     });
-    let blocks = mstore.get_all::<Block>().unwrap_or_else(|e| {
-        tracing::warn!(
-            target: "srv-persist",
-            "[srv-persist] bootstrap: failed to load blocks from mstore: {} — blocks start empty",
-            e
-        );
-        Vec::new()
-    });
+    // `get_all` fails as a whole when one row doesn't decode. Then every tab's
+    // block list below is empty, which is not the truth on disk: the layout
+    // heal must not run against it, or it would prune and store every tree
+    // empty.
+    let (blocks, blocks_loaded) = match mstore.get_all::<Block>() {
+        Ok(blocks) => (blocks, true),
+        Err(e) => {
+            tracing::warn!(
+                target: "srv-persist",
+                "[srv-persist] bootstrap: failed to load blocks from mstore: {} — blocks start empty",
+                e
+            );
+            (Vec::new(), false)
+        }
+    };
     let mut state = state.lock().await;
     for ws in &workspaces {
         // The persistent `Workspace` carries two ordered lists:
@@ -167,7 +174,12 @@ pub async fn bootstrap_state_from_mstore(state: &Arc<Mutex<State>>, mstore: &Sto
     // A row written by an earlier build can hold a leaf for a block the tab
     // no longer owns; heal it now, before any window loads it, and store the
     // healed row through the same write an intent's events take.
-    let tab_ids: Vec<String> = state.tabs.keys().cloned().collect();
+    let tab_ids: Vec<String> = if blocks_loaded {
+        state.tabs.keys().cloned().collect()
+    } else {
+        tracing::warn!(target: "srv-persist", "[srv-persist] bootstrap: blocks could not be read; skipping the layout heal");
+        Vec::new()
+    };
     for tab_id in tab_ids {
         for ev in crate::reducer::heal_loaded_layout(&mut state, &tab_id) {
             if let Err(e) = crate::persist_subscriber::apply_event_to_mstore(&ev, mstore) {
