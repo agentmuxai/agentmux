@@ -244,6 +244,7 @@ pub(crate) async fn relay_inject(
     message: &str,
     priority: &str,
     wan: Option<&WanCarried>,
+    files: Option<&[agentmux_common::jekt_files::CloudFile]>,
 ) -> RelayOutcome {
     if message.len() > MAX_RELAY_MESSAGE_BYTES {
         return RelayOutcome::Failed(format!(
@@ -265,6 +266,10 @@ pub(crate) async fn relay_inject(
         if let Ok(serde_json::Value::Object(fields)) = serde_json::to_value(wan) {
             obj.extend(fields);
         }
+    }
+    // Files sent with it, uploaded already (server::jekt_cloud).
+    if let (Some(files), Some(obj)) = (files, body.as_object_mut()) {
+        obj.insert("files".to_string(), serde_json::to_value(files).unwrap_or_default());
     }
     let resp = http
         .post(&url)
@@ -458,7 +463,7 @@ mod tests {
             "clare",
             "hello",
             "normal",
-            None,
+            None, None,
         )
         .await;
         match out {
@@ -486,7 +491,7 @@ mod tests {
             "clare",
             "hello",
             "urgent",
-            None,
+            None, None,
         )
         .await;
 
@@ -521,7 +526,7 @@ mod tests {
             "clare",
             "hello",
             "normal",
-            None,
+            None, None,
         )
         .await;
         match out {
@@ -543,7 +548,7 @@ mod tests {
             (r#"{"success":true,"injection_id":"inj-8","target_in_account":true}"#, Some(true)),
         ] {
             let (url, _seen, _g) = stub_relay(axum::http::StatusCode::OK, body).await;
-            let out = relay_inject(&url, &reqwest::Client::new(), "tok", "agent2", "agnetx", "hello", "normal", None).await;
+            let out = relay_inject(&url, &reqwest::Client::new(), "tok", "agent2", "agnetx", "hello", "normal", None, None).await;
             match out {
                 RelayOutcome::Queued { target_in_account, .. } => assert_eq!(target_in_account, want, "{body}"),
                 other => panic!("expected Queued, got {other:?}"),
@@ -566,7 +571,7 @@ mod tests {
             "clare",
             "hello",
             "normal",
-            None,
+            None, None,
         )
         .await;
         assert!(matches!(out, RelayOutcome::Failed(_)), "got {out:?}");
@@ -585,7 +590,7 @@ mod tests {
             "clare",
             &big,
             "normal",
-            None,
+            None, None,
         )
         .await;
         match out {
@@ -608,7 +613,7 @@ mod tests {
             "clare",
             "hello",
             "normal",
-            None,
+            None, None,
         )
         .await;
         assert!(matches!(out, RelayOutcome::Failed(_)), "got {out:?}");
@@ -753,7 +758,7 @@ mod tests {
         let (url, seen, _g) = stub_relay(axum::http::StatusCode::OK, r#"{"success":true}"#).await;
         let (_dir, wan, req) = origin_request();
         let carried = wan_sign_at_origin(&req, Some("camper"), Some(&wan), Some(TEST_DIR), "stable", NOW).unwrap();
-        let _ = relay_inject(&url, &reqwest::Client::new(), "tok", "camper", "agent2", "hello", "normal", Some(&carried))
+        let _ = relay_inject(&url, &reqwest::Client::new(), "tok", "camper", "agent2", "hello", "normal", Some(&carried), None)
             .await;
         {
             let c = seen.lock().unwrap();
@@ -767,7 +772,7 @@ mod tests {
             assert_eq!(body["wan_ts_secs"], serde_json::json!(NOW));
         }
 
-        let _ = relay_inject(&url, &reqwest::Client::new(), "tok", "camper", "agent2", "hello", "normal", None).await;
+        let _ = relay_inject(&url, &reqwest::Client::new(), "tok", "camper", "agent2", "hello", "normal", None, None).await;
         let c = seen.lock().unwrap();
         let keys: std::collections::BTreeSet<_> =
             c.as_ref().unwrap().body.as_object().unwrap().keys().cloned().collect();
@@ -776,5 +781,23 @@ mod tests {
             ["message", "priority", "target_agent"].into_iter().map(String::from).collect(),
             "unsigned relays keep exactly the old body"
         );
+    }
+
+    /// Files uploaded for a jekt ride its body as the manifest, keys and blob
+    /// ids included (SPEC_JEKT_FILE_TRANSFER_2026_10_05.md §4.4).
+    #[tokio::test]
+    async fn a_cloud_manifest_rides_the_body() {
+        let (url, seen, _g) = stub_relay(axum::http::StatusCode::OK, r#"{"success":true}"#).await;
+        let files = vec![agentmux_common::jekt_files::CloudFile {
+            file: agentmux_common::jekt_files::JektFile { sha256: "ab".repeat(32), name: "shot.png".into(), size: 3 },
+            key: "A".repeat(43) + "=",
+            blob_id: "blob-0123abcd-0000-4000-8000-0123456789ab".into(),
+        }];
+        let _ = relay_inject(&url, &reqwest::Client::new(), "tok", "camper", "agent2", "hello", "normal", None, Some(&files)).await;
+        let c = seen.lock().unwrap();
+        let body = &c.as_ref().unwrap().body;
+        assert_eq!(body["files"][0]["blob_id"], "blob-0123abcd-0000-4000-8000-0123456789ab");
+        assert_eq!(body["files"][0]["sha256"], "ab".repeat(32), "the file's fields sit beside key and blob_id");
+        assert_eq!(body["files"][0]["key"], "A".repeat(43) + "=");
     }
 }
