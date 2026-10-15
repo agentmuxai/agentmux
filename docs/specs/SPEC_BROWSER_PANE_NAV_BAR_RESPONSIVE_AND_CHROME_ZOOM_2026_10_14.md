@@ -1,6 +1,6 @@
 # SPEC: The browser pane's nav bar stacks in thin panes and follows chrome zoom
 
-**Status:** built (B1), PR open. The live checks (B2, §6.2) are partly done: the operator tried the layouts and chrome zoom in a dev build on Windows on 2026-10-15; the measured checks in §4.2 are not yet recorded.
+**Status:** active — built (B1), PR #4981. The live checks (B2, §6.2) are partly done: the operator tried the layouts and chrome zoom in a dev build on Windows on 2026-10-15; the measured checks in §4.2 are not yet recorded.
 **Author:** Agent5@narko, 2026-10-14, at the operator's request
 **Trigger (operator, 2026-10-14):** "lets now refine the browser chrome. It needs to be responsive (two line, address bar atop) for thinner panes. We also want its zoom bound to the overall agentmux chrome zoom. take a look, write spec to file"
 **Changed after trying the build (operator, 2026-10-15):** "in the thin view, put the address bar below", then "we dont need the arrow .. <enter> will be the only option. Also, keep the profile on the right on both wide and thin". This spec describes the result; §10 lists what changed from the first draft.

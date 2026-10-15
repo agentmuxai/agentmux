@@ -5,7 +5,7 @@
  * Whether a Ctrl+wheel over `target` zooms chrome rather than its pane. Shared
  * by AppZoomHandler and AppAllPanesZoomHandler (app.tsx), which route a wheel
  * by this one hit-test, so which elements count as chrome has one place to
- * change (ReAgent P2, PR #3090). A leaf module so it can be tested without
+ * change (#3090). A leaf module so it can be tested without
  * app.tsx's imports.
  */
 export function isOverChrome(target: HTMLElement): boolean {
