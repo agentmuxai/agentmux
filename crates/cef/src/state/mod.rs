@@ -627,7 +627,6 @@ pub struct AppState {
     // Phase B.1 removed `job_handle` (was Windows-only). Launcher
     // owns J0 wrapping srv now; host no longer needs its own job.
 
-
     /// Phase 4b — per-window ghost state for floating-pane redock.
     /// Keyed by window label. The target renderer pushes its last-computed
     /// `{ block_id, dir }` here on each hover update; the floater queries
