@@ -1,7 +1,7 @@
 # Spec: recycle a window's renderer when it's idle and over budget
 
 **Date:** 2026-10-13, revised 2026-10-14 against `main` @ `ab6a9c400`
-**Status:** active. Shipped: §2's reload without a history entry (#4940). Left: the rest of Phase A (§2), Phase B (§3), Phase C (§4).
+**Status:** active. Shipped: §2's reload without a history entry (#4940); composer drafts, sent-message history and attachment drafts across a reload (#4942). Left: the rest of Phase A (§2: pane state, scroll position, browser panes, secondary windows), Phase B (§3), Phase C (§4).
 **Plan item:** #5 of `PLAN_RENDERER_MEMORY_FIXES_2026_10_12.md`.
 **Evidence:** `docs/reports/REPORT_RENDERER_MEMORY_ROOT_CAUSES_2026_10_12.md` §4.3.
 **Related:** `SPEC_WINDOW_CHURN_RENDERER_LEAK_2026_10_13.md` (#4858: a navigation that adds a history entry keeps the old page in the back/forward cache).
@@ -32,7 +32,7 @@ Today a reload of the main window restores the workspace, layout, agent transcri
 |---|---|---|
 | Composer drafts | in-memory `Map` (`AgentFooter.tsx:87`) | Persist per block in `sessionStorage` on change (debounced 300 ms), restore on mount. Survives a reload, not an app restart, as today. |
 | Up-arrow history | a `let` in the component body (`AgentFooter.tsx:740-743`), lost on every unmount, including a pane-tab switch (`:75-83`) | Move it to a module-level `Map` per block (fixes the tab switch), persisted like drafts. |
-| Attachment drafts | in-memory `Map` (`attachments/attachment-draft.ts:495`) | Persist each draft's srv attachment ids and metadata (the files are in srv's attachment store, `:86-95`; the retention sweep, `:12-13`, must not take a draft's file while it is referenced). An upload in progress (an XHR, `:129`) can't survive: it blocks a recycle (§4.3). |
+| Attachment drafts | in-memory `Map` (`attachments/attachment-draft.ts:495`) | Persist the ready attachments' ids and names, and bring them back with the existing `restoreRefs`, which shows a file that's gone as an error tile. The files are in srv's attachment store (`:86-95`), kept 30 days after their last use (`crates/srv/src/backend/attachments/mod.rs:36`), so a reload is no risk to them. An upload in progress (an XHR, `:129`) can't survive: it blocks a recycle (§4.3). |
 | Messages queued while the agent is busy | `heldQueue` (`useAgentCommands.ts:301-321`, pushed at `:735-741` and `:779`) | Never recycle while one is non-empty; the predicate exists (`hasHeldMessages`, `:1103`, exposed at `agent-view.tsx:1105`). |
 | Pane state (collapsed, pinned, filter, details) | the 30 s snapshot (`useSnapshotPersistence.ts:43`) is marked dirty only when the document's nodes change (`:128-134`), so a change to this state alone may never be written; Solid's cleanup doesn't run on unload | Mark the snapshot dirty on these changes too, and add `flushBeforeRecycle()`, which writes every pane's snapshot now (§3). |
 | Scroll position | `scrollPosition` is only ever 0 (`state.ts:110`); it is copied into the snapshot (`useSnapshotPersistence.ts:101`) and read on restore (`useHistoryPagination.ts:438`), but never written | Write it from the virtual list's scroll anchor (first visible row id + offset), restore it after history loads. |

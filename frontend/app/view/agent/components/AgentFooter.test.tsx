@@ -25,6 +25,7 @@ import { ObjectService } from "@/app/store/services";
 import type { AgentViewModel } from "../agent-model";
 import { requestComposerFocus } from "../composer-focus";
 import { focusManager } from "@/app/store/focusManager";
+import { resetReloadPersistenceForTests } from "../reload-persistence";
 
 /** Run the clock just until the Working row's line has finished typing out
  *  (it stops changing), so a test reads the whole line without letting the
@@ -562,7 +563,7 @@ describe("AgentFooter ghost-text next-prompt suggestion (SPEC_NEXT_PROMPT_SUGGES
 });
 
 // SPEC_AGENT_HISTORY_AS_TAB_AND_DRAFT_PRESERVATION_2026_08_11.md §3.4:
-// composerDrafts is module-level, keyed by blockId — every case below uses
+// the composer draft (reload-persistence.ts) is module-level, keyed by blockId — every case below uses
 // a blockId dedicated to that case (never "test-block", which every other
 // describe block in this file shares) so these tests can't leak draft
 // state into, or read stale state left by, unrelated tests sharing this
@@ -1322,5 +1323,35 @@ describe("AgentFooter keyboard focus", () => {
         expect(vm.focusTargetRef.current).toBe(getComposer());
         unmount();
         expect(vm.focusTargetRef.current).toBeNull();
+    });
+});
+
+describe("AgentFooter sent-message history across a remount and a reload (SPEC_RENDERER_RECYCLE_WHEN_IDLE_2026_10_13.md §2)", () => {
+    beforeEach(() => {
+        sessionStorage.clear();
+        resetReloadPersistenceForTests();
+    });
+
+    it("ArrowUp recalls what was sent before a pane-tab switch and a reload", async () => {
+        const vm = { ...makeViewModel(undefined), blockId: "history-block" } as unknown as AgentViewModel;
+        render(() => <AgentFooter agentName="Test" viewModel={vm} onSendMessage={vi.fn()} />);
+        const user = userEvent.setup();
+        let ta = getComposer();
+        await user.click(ta);
+        for (const msg of ["first message", "second message"]) {
+            await user.type(ta, msg);
+            keyOn(ta, "Enter");
+        }
+
+        cleanup(); // the footer unmounts on a pane-tab switch
+        resetReloadPersistenceForTests(); // and a reload forgets everything in memory
+
+        render(() => <AgentFooter agentName="Test" viewModel={vm} onSendMessage={vi.fn()} />);
+        ta = getComposer();
+        ta.setSelectionRange(0, 0);
+        keyOn(ta, "ArrowUp");
+        expect(ta.value).toBe("second message");
+        keyOn(ta, "ArrowUp");
+        expect(ta.value).toBe("first message");
     });
 });
