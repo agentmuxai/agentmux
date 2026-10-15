@@ -67,10 +67,25 @@ pub fn pane_pointer_down(state: &Arc<AppState>, block: &str) {
 
 /// The user gave pane `block`'s page focus where no click hook sees it (Linux:
 /// CEF's `on_set_focus` with a user source): the same as a click in it, posted.
+/// Not while this adapter is focusing the pane itself, nor before the pane is
+/// live: Views focuses a new pane's browser as it is added, and CEF may report
+/// a focus set from code with the same source.
 pub fn pane_chosen(state: &Arc<AppState>, block: &str) {
-    if let Some(window) = state.browser_pane_window_label(block) {
-        dispatch(state, &window, Event::PanePointerDown(block.to_string()), Run::Posted);
+    if ADAPTER_FOCUSING.with(|f| f.get()) {
+        return;
     }
+    let Some(window) = state.browser_pane_window_label(block) else { return };
+    if !registry::pane_is_live(&window, block) {
+        tracing::debug!("[input] win={window} focus on pane:{block} before it is live: not a choice");
+        return;
+    }
+    dispatch(state, &window, Event::PanePointerDown(block.to_string()), Run::Posted);
+}
+
+thread_local! {
+    /// Set while this adapter itself gives a pane browser focus, so CEF's
+    /// report of that focus isn't taken for the user choosing the pane.
+    static ADAPTER_FOCUSING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 /// CEF reported that pane `block`'s browser got focus.
@@ -223,7 +238,9 @@ fn focus_pane_browser(state: &Arc<AppState>, block: &str) {
         .and_then(|l| state.get_browser(&l))
         .and_then(|b| b.host());
     if let Some(host) = host {
+        ADAPTER_FOCUSING.with(|f| f.set(true));
         host.set_focus(1);
+        ADAPTER_FOCUSING.with(|f| f.set(false));
     }
 }
 

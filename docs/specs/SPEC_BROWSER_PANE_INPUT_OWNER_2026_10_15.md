@@ -174,7 +174,7 @@ One adapter serves both, `input_owner/views.rs`, feeding the same machine. Its e
 | Event | macOS | Linux |
 |---|---|---|
 | `Select` | `input_select` (§3.6) | same |
-| `PanePointerDown` | left mouse-down on a pane overlay (`swizzled_nsapp_send_event`) | CEF `on_set_focus` with `FocusSource::SYSTEM` for a pane browser: focus the user gave the page (a click, Tab), told apart from a page load's `NAVIGATION` focus |
+| `PanePointerDown` | left mouse-down on a pane overlay (`swizzled_nsapp_send_event`) | CEF `on_set_focus` with `FocusSource::SYSTEM` for a pane browser: focus the user gave the page (a click, Tab), told apart from a page load's `NAVIGATION` focus. Not for a pane that isn't live yet (Views focuses a new pane as it is added) or focus the adapter gave itself |
 | `AppPointerDown` | not yet: the same hook still hands key status back to the app window itself; the frontend's `Select` follows | none observed |
 | `FocusGained` | CEF `on_got_focus` for a pane browser | same |
 | `Activated` / `Deactivated` | CEF Views `on_window_activation_changed`, effects posted to run after CEF's own handling. A pane overlay is a key window of its own, so the window is reported inactive whenever one of its pages takes the keyboard: a deactivation counts only once the key change has settled and neither the window nor one of its own overlays is key | same; panes are views inside the window, so a deactivation is the window's |

@@ -11,7 +11,7 @@ use std::time::Instant;
 
 use parking_lot::Mutex;
 
-use super::machine::{Effect, Event, Have, Owner, Surface, WindowInput};
+use super::machine::{Effect, Event, Have, Owner, PaneLife, Surface, WindowInput};
 
 /// Each window's machine, by window label (`main`, `floating-<uuid>`, …).
 static OWNERS: LazyLock<Mutex<HashMap<String, WindowInput>>> = LazyLock::new(Default::default);
@@ -51,6 +51,12 @@ pub fn still_requested(window: &str, owner: &Owner) -> bool {
         .lock()
         .get(window)
         .is_some_and(|w| w.active && matches!(&w.have, Have::Pending { target, .. } if target == owner))
+}
+
+/// Whether `window`'s machine knows pane `block` as live (created, shown and
+/// able to take focus).
+pub fn pane_is_live(window: &str, block: &str) -> bool {
+    OWNERS.lock().get(window).is_some_and(|w| w.panes.get(block) == Some(&PaneLife::Live))
 }
 
 /// Whether `window`'s machine counts the window as active.

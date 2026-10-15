@@ -180,7 +180,9 @@ wrap_focus_handler! {
             tracing::info!("[pane-focus] on_set_focus source={:?} cancel=false", source);
             // Linux has no click hook into a pane's page (Windows and macOS
             // do): focus the user gave the page (a click, Tab) is the user
-            // choosing that pane, not the page taking focus by itself.
+            // choosing that pane, not the page taking focus by itself
+            // (`pane_chosen` leaves out a pane being created and focus the
+            // input owner gave itself).
             #[cfg(not(any(target_os = "windows", target_os = "macos")))]
             if source == FocusSource::SYSTEM {
                 if let Some(block) = browser.and_then(|b| crate::browser_pane::callbacks::resolve_pane_block_id(&self.state, b)) {
