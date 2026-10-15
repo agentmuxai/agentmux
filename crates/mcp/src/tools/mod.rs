@@ -18,13 +18,17 @@ mod global_memory;
 mod history;
 mod loops;
 mod memory;
+mod memory_tool;
 mod open_prs;
 mod overlap;
 mod panes;
+mod presence_tool;
 mod presets;
 mod pty_shell;
+mod schedule_tool;
 mod send_files;
 mod shell;
+mod tasks_tool;
 mod terminal;
 mod ui;
 mod ui_tool;
@@ -126,6 +130,36 @@ const REPLACED: &[(&str, &str)] = &[
     ("PressKeys", "UI with action \"keys\""),
     ("DiscoverWindows", "UI with action \"windows\""),
     ("CaptureWindow", "UI with action \"window\""),
+    ("MemoryList", "Memory with action \"list\""),
+    ("MemoryRead", "Memory with action \"read\""),
+    ("MemoryWrite", "Memory with action \"write\""),
+    ("MemoryHistory", "Memory with action \"history\""),
+    ("MemoryDiff", "Memory with action \"diff\""),
+    ("MemoryRevert", "Memory with action \"revert\" (version_id)"),
+    ("GlobalMemoryList", "Memory with action \"list\" and scope \"global\""),
+    ("GlobalMemoryRead", "Memory with action \"read\" and scope \"global\""),
+    ("GlobalMemoryWrite", "Memory with action \"write\" and scope \"global\""),
+    ("GlobalMemoryRemove", "Memory with action \"remove\" and scope \"global\""),
+    ("GlobalMemoryHistory", "Memory with action \"history\" and scope \"global\""),
+    ("GlobalMemoryDiff", "Memory with action \"diff\" and scope \"global\""),
+    ("GlobalMemoryRevert", "Memory with action \"revert\" and scope \"global\""),
+    ("WorkEnqueue", "Tasks with action \"enqueue\""),
+    ("WorkClaim", "Tasks with action \"claim\""),
+    ("WorkHeartbeat", "Tasks with action \"heartbeat\""),
+    ("WorkComplete", "Tasks with action \"complete\""),
+    ("WorkRelease", "Tasks with action \"release\""),
+    ("WorkList", "Tasks with action \"list\""),
+    ("WhoIsWorkingOn", "Presence with action \"who\""),
+    ("ClaimWork", "Presence with action \"claim\""),
+    ("ReleaseWork", "Presence with action \"release\""),
+    ("CronCreate", "Schedule with action \"create\" and cron"),
+    ("CronList", "Schedule with action \"list\""),
+    ("CronPause", "Schedule with action \"pause\""),
+    ("CronResume", "Schedule with action \"resume\""),
+    ("CronDelete", "Schedule with action \"delete\""),
+    ("Loop", "Schedule with action \"create\" and every"),
+    ("LoopList", "Schedule with action \"list\""),
+    ("LoopStop", "Schedule with action \"delete\""),
 ];
 
 /// Try each family in turn; the first that owns `name` answers.
@@ -143,14 +177,12 @@ pub(crate) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
         panes,
         fleet,
         history,
-        overlap,
+        presence_tool,
         ui_tool,
         browser_tool,
-        loops,
-        work,
-        cron,
-        memory,
-        global_memory,
+        schedule_tool,
+        tasks_tool,
+        memory_tool,
         presets,
         accounts,
         widgets
@@ -169,28 +201,32 @@ mod tests {
     const FAMILIES: &[(&str, &str)] = &[
         ("accounts", include_str!("accounts.rs")),
         ("browser_tool", include_str!("browser_tool.rs")),
-        ("cron", include_str!("cron.rs")),
         ("fleet", include_str!("fleet.rs")),
-        ("global_memory", include_str!("global_memory.rs")),
         ("history", include_str!("history.rs")),
-        ("loops", include_str!("loops.rs")),
-        ("memory", include_str!("memory.rs")),
-        ("overlap", include_str!("overlap.rs")),
+        ("memory_tool", include_str!("memory_tool.rs")),
+        ("presence_tool", include_str!("presence_tool.rs")),
         ("panes", include_str!("panes.rs")),
         ("presets", include_str!("presets.rs")),
+        ("schedule_tool", include_str!("schedule_tool.rs")),
+        ("tasks_tool", include_str!("tasks_tool.rs")),
         ("terminal", include_str!("terminal.rs")),
         ("ui_tool", include_str!("ui_tool.rs")),
         ("widgets", include_str!("widgets.rs")),
-        ("work", include_str!("work.rs")),
     ];
 
     /// Families a family tool calls into, never routed to: their names are
     /// not advertised, and each is in `REPLACED`.
     const INTERNAL: &[(&str, &str)] = &[
         ("browser", include_str!("browser.rs")),
+        ("cron", include_str!("cron.rs")),
+        ("global_memory", include_str!("global_memory.rs")),
+        ("loops", include_str!("loops.rs")),
+        ("memory", include_str!("memory.rs")),
+        ("overlap", include_str!("overlap.rs")),
         ("pty_shell", include_str!("pty_shell.rs")),
         ("shell", include_str!("shell.rs")),
         ("ui", include_str!("ui.rs")),
+        ("work", include_str!("work.rs")),
     ];
 
     /// The tool names in a family's `match name` arms (`"A" | "B" => {`),
@@ -238,8 +274,13 @@ mod tests {
         }
         for (family, src) in INTERNAL {
             for n in arm_names(src) {
-                assert!(!advertised.contains(&n), "{n} ({family}) is internal but advertised");
-                assert!(super::REPLACED.iter().any(|(old, _)| *old == n), "{n} ({family}) has no REPLACED entry");
+                // Either replaced (not advertised, named in REPLACED) or still
+                // advertised and passed through by a routed family.
+                if advertised.contains(&n) {
+                    assert!(owner.contains_key(&n), "{n} ({family}) is advertised but no routed family passes it through");
+                } else {
+                    assert!(super::REPLACED.iter().any(|(old, _)| *old == n), "{n} ({family}) has no REPLACED entry");
+                }
             }
         }
     }
