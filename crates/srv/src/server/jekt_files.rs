@@ -145,16 +145,18 @@ static TRANSFERS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(4);
 const SEEN_FOR: std::time::Duration = std::time::Duration::from_secs(15 * 60);
 static SEEN_LAN: std::sync::Mutex<Vec<(String, std::time::Instant)>> = std::sync::Mutex::new(Vec::new());
 
-/// Whether this LAN files jekt's msgid was accepted before; if not, it is
-/// remembered now.
+/// Whether this LAN files jekt's msgid was delivered here before.
 fn seen_before(msgid: &str) -> bool {
     let mut seen = SEEN_LAN.lock().unwrap_or_else(|e| e.into_inner());
     seen.retain(|(_, at)| at.elapsed() < SEEN_FOR);
-    if seen.iter().any(|(id, _)| id == msgid) {
-        return true;
-    }
+    seen.iter().any(|(id, _)| id == msgid)
+}
+
+/// Remember a LAN files jekt's msgid once it is delivered, and only then:
+/// a delivery that failed may be retried.
+fn remember_delivered(msgid: &str) {
+    let mut seen = SEEN_LAN.lock().unwrap_or_else(|e| e.into_inner());
     seen.push((msgid.to_string(), std::time::Instant::now()));
-    false
 }
 
 /// The body of a forward with files: the request's JSON length (u32,
@@ -170,6 +172,15 @@ type ByteStream = futures_util::stream::BoxStream<'static, std::io::Result<axum:
 async fn transfer_stream(svc: &attachments::Service, req: &InjectionRequest) -> Result<ByteStream, String> {
     use futures_util::StreamExt;
     let json = serde_json::to_vec(req).map_err(|e| e.to_string())?;
+    // The receiver reads at most this much before the files; a message too
+    // long for it would be refused there on every retry.
+    if json.len() > MAX_REQUEST_JSON as usize {
+        return Err(format!(
+            "files refused: the message is too long to send with files ({} KB with its signatures; at most {} KB)",
+            json.len() / 1024,
+            MAX_REQUEST_JSON / 1024
+        ));
+    }
     let mut head = (json.len() as u32).to_be_bytes().to_vec();
     head.extend_from_slice(&json);
     let mut parts = vec![futures_util::stream::once(async move { Ok::<_, std::io::Error>(axum::body::Bytes::from(head)) }).boxed()];
@@ -313,7 +324,11 @@ async fn receive<R: tokio::io::AsyncRead + Unpin>(
     }
     prepare(&mut req).await;
     let delivered = req.files_delivery.as_ref().map_or(0, |d| d.delivered);
+    let msgid = req.request_id.clone().unwrap_or_default();
     let resp = state.reactive_handler.inject_message(req);
+    if tier == "lan" && resp.success {
+        remember_delivered(&msgid);
+    }
     let mut value = serde_json::to_value(&resp).unwrap_or_default();
     if let Some(obj) = value.as_object_mut() {
         obj.insert("files_delivered".into(), delivered.into());
@@ -624,6 +639,16 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_message_too_long_to_carry_files_is_refused_by_the_sender() {
+        let d = tempfile::tempdir().unwrap();
+        let f = files();
+        let mut req = req_with(f.clone(), &jekt_files::bind_msgid("m", &f), "channel");
+        req.message = "x".repeat(MAX_REQUEST_JSON as usize);
+        let err = transfer_stream(&service(d.path()), &req).await.err().unwrap();
+        assert!(err.contains("too long to send with files"), "{err}");
+    }
+
+    #[tokio::test]
     async fn an_oversized_or_missing_request_header_is_refused_before_reading_on() {
         let big = (MAX_REQUEST_JSON + 1).to_be_bytes();
         assert!(read_request(&mut &big[..]).await.unwrap_err().contains("refused"));
@@ -652,6 +677,8 @@ mod tests {
     fn a_lan_files_jekt_is_delivered_once() {
         let id = format!("m-{}", std::process::id());
         assert!(!seen_before(&id));
+        assert!(!seen_before(&id), "not delivered yet: a retry is fine");
+        remember_delivered(&id);
         assert!(seen_before(&id), "a replay within the window");
         assert!(!seen_before(&format!("{id}-other")));
     }
