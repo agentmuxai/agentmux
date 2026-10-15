@@ -87,8 +87,80 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             let answer = srv_post_json(client, &url, auth_key, &body, name).await?;
             Ok(serde_json::to_string_pretty(&answer).unwrap_or_else(|_| answer.to_string()))
         }
+        "PostToChannel" | "ReadChannel" => {
+            if local_url.is_empty() || auth_key.is_empty() {
+                anyhow::bail!(
+                    "AGENTMUX_LOCAL_URL and AGENTMUX_AUTH_KEY must be set. \
+                     Is this agent pane opened via AgentMux?"
+                );
+            }
+            let agent = std::env::var("AGENTMUX_AGENT_ID").unwrap_or_default();
+            let url = format!("{}/api/v1/coord/posts", local_url.trim_end_matches('/'));
+            let answer = if name == "PostToChannel" {
+                let body = channel_post_body(arguments, &agent, block_id)?;
+                srv_post_json(client, &url, auth_key, &body, name).await?
+            } else {
+                let query = channel_read_query(arguments, &agent, block_id)?;
+                srv_get_json(client, &url, auth_key, &query, name).await?
+            };
+            Ok(serde_json::to_string_pretty(&answer).unwrap_or_else(|_| answer.to_string()))
+        }
         _ => Err(not_in_family()),
     }
+}
+
+/// A coordination post's PR argument: its number, and the repository its URL
+/// names (which must agree with `repo` when both are given).
+fn channel_pr(arguments: &Value) -> Result<(Option<String>, Option<u64>)> {
+    let Some(v) = arguments.get("pr").filter(|v| !v.is_null()) else { return Ok((None, None)) };
+    let (url_repo, n) =
+        pr_ref(v).ok_or_else(|| anyhow::anyhow!("pr must be a PR number (12, \"#12\") or its GitHub URL"))?;
+    let repo = match (url_repo, arg(arguments, "repo")) {
+        (Some(u), Some(r)) if normalize_repo(r) != normalize_repo(&u) => {
+            anyhow::bail!("pr is a PR of {u}, but repo is {r}: pass one or the other")
+        }
+        (Some(u), None) => Some(u),
+        _ => None,
+    };
+    Ok((repo, Some(n)))
+}
+
+/// `PostToChannel`'s request body.
+fn channel_post_body(arguments: &Value, agent: &str, block_id: &str) -> Result<Value> {
+    let mut body = serde_json::Map::new();
+    for key in ["message", "path", "repo", "branch", "topic"] {
+        if let Some(v) = arg(arguments, key) {
+            body.insert(key.into(), json!(v));
+        }
+    }
+    let (pr_repo, pr) = channel_pr(arguments)?;
+    if let Some(r) = pr_repo {
+        body.insert("repo".into(), json!(r));
+    }
+    if let Some(n) = pr {
+        body.insert("pr".into(), json!(n));
+    }
+    body.insert("agent".into(), json!(agent.trim()));
+    body.insert("block".into(), json!(block_id.trim()));
+    Ok(Value::Object(body))
+}
+
+/// `ReadChannel`'s query string.
+fn channel_read_query(arguments: &Value, agent: &str, block_id: &str) -> Result<Vec<(&'static str, String)>> {
+    let mut q = who_query(arguments, agent, block_id);
+    let (pr_repo, pr) = channel_pr(arguments)?;
+    if let Some(r) = pr_repo {
+        q.push(("repo", r));
+    }
+    if let Some(n) = pr {
+        q.push(("pr", n.to_string()));
+    }
+    for key in ["since_minutes", "limit"] {
+        if let Some(n) = arguments.get(key).and_then(|v| v.as_u64()) {
+            q.push((key, n.to_string()));
+        }
+    }
+    Ok(q)
 }
 
 /// A PR: `12`, `"12"`, `"#12"`, or its URL
@@ -250,6 +322,34 @@ fn release_body(arguments: &Value, agent: &str, block_id: &str) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_channel_post_carries_its_pr_and_the_repository_a_pr_url_names() {
+        let body = channel_post_body(
+            &json!({ "message": "regenerate INDEX.md", "path": "docs/specs", "pr": "https://github.com/o/r/pull/12" }),
+            "Loap-3",
+            "blk",
+        )
+        .unwrap();
+        assert_eq!(body["message"], "regenerate INDEX.md");
+        assert_eq!(body["path"], "docs/specs");
+        assert_eq!(body["repo"], "o/r");
+        assert_eq!(body["pr"], 12);
+        assert_eq!((body["agent"].as_str(), body["block"].as_str()), (Some("Loap-3"), Some("blk")));
+        assert!(channel_post_body(&json!({ "message": "x", "repo": "o/other", "pr": "https://github.com/o/r/pull/12" }), "a", "b").is_err());
+        assert!(channel_post_body(&json!({ "message": "x", "pr": "nope" }), "a", "b").is_err());
+    }
+
+    #[test]
+    fn a_channel_read_passes_its_filters_window_and_limit() {
+        let q = channel_read_query(&json!({ "path": "a.rs", "pr": 7, "since_minutes": 60, "limit": 5, "query": "index" }), "a", "b").unwrap();
+        let get = |k: &str| q.iter().find(|(key, _)| *key == k).map(|(_, v)| v.as_str());
+        assert_eq!(get("path"), Some("a.rs"));
+        assert_eq!(get("query"), Some("index"));
+        assert_eq!(get("pr"), Some("7"));
+        assert_eq!(get("since_minutes"), Some("60"));
+        assert_eq!(get("limit"), Some("5"));
+    }
 
     #[test]
     fn a_pr_is_a_number_a_hash_number_or_a_url_naming_its_repository() {

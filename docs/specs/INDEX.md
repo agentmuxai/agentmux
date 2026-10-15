@@ -211,6 +211,7 @@ partial list.
 | [`SPEC_AGENT_BROWSER_PANE_DEEP_CONTROL_2026_09_20`](SPEC_AGENT_BROWSER_PANE_DEEP_CONTROL_2026_09_20.md) | SPEC: Deep, no-mouse control of a browser pane via MuxAPI |
 | [`SPEC_AGENT_BUNDLE_FORMAT_V0_3_2026_10_05`](SPEC_AGENT_BUNDLE_FORMAT_V0_3_2026_10_05.md) | SPEC: Agent Bundle Format v0.3, and bundles that bind to any agent |
 | [`SPEC_AGENT_COLOR_2026_08_08`](SPEC_AGENT_COLOR_2026_08_08.md) | SPEC: Per-agent color — assign at creation, backfill existing, show on the pane frame |
+| [`SPEC_AGENT_COORDINATION_CHANNEL_2026_10_15`](SPEC_AGENT_COORDINATION_CHANNEL_2026_10_15.md) | Spec: a coordination channel per repository, for agents on this computer |
 | [`SPEC_AGENT_DISPATCH_SUBAGENT_HIERARCHY_2026_07_17`](SPEC_AGENT_DISPATCH_SUBAGENT_HIERARCHY_2026_07_17.md) | SPEC: two-level dispatch/member schema for subagents and workflows |
 | [`SPEC_AGENT_FACING_GLOBAL_MEMORY_API_2026_09_15`](SPEC_AGENT_FACING_GLOBAL_MEMORY_API_2026_09_15.md) | Spec: Agent-facing Global Memory API (MCP tools to add/list/read a Global Memory entry) |
 | [`SPEC_AGENT_HEADER_COLOR_UNIFICATION_2026_09_20`](SPEC_AGENT_HEADER_COLOR_UNIFICATION_2026_09_20.md) | SPEC: decommission the env-var pane color system; header inherits the agent's identity color |
