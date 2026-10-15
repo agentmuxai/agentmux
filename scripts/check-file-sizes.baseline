@@ -40,7 +40,7 @@
 2804 crates/srv/src/server/reactive.rs
 1598 crates/srv/src/server/ui_handlers.rs
 2270 crates/srv/src/server/websocket.rs
-2036 frontend/app/store/agent-pane-state/reducer.ts
+2000 frontend/app/store/agent-pane-state/reducer.ts
 1506 frontend/app/view/agent/agent-view.tsx
 1564 frontend/app/view/agent/components/AgentComposerStrip.tsx
 1830 frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx
