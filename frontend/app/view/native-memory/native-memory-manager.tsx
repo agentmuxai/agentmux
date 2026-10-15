@@ -45,6 +45,11 @@ import { useAgentDefinitions } from "@/app/view/agent/components/AgentPicker";
 import type { AgentDefinition, NativeMemoryFileMeta } from "@/app/store/rpc-api";
 import { createEffect, createMemo, createSignal, For, onCleanup, Show, untrack, type JSX } from "solid-js";
 import { MemoryAgentCard, type MemoryCountState } from "./MemoryAgentCard";
+import { AgentLaunchCost } from "./AgentLaunchCost";
+import { windowFromMetas } from "./agent-launch-cost";
+import type { LaunchCost } from "@/types/rpc/LaunchCost";
+import type { AgentOpenPane } from "@/types/rpc/AgentOpenPane";
+import { MOS } from "@/app/store/global";
 import { DEFAULT_MEMORY_SORT, MemoryAgentFilterBar, type MemoryAgentSortOption } from "./MemoryAgentFilterBar";
 import { MemoryFileCard } from "./MemoryFileCard";
 import { resolveProviderAlias } from "@/app/view/agent/providers/catalog";
@@ -169,6 +174,18 @@ export function NativeMemoryManager(): JSX.Element {
     // per agent, each settling independently so a single slow or failing
     // agent never blocks the grid's first paint or blanks its siblings.
     const [counts, setCounts] = createSignal<Record<string, MemoryCountState>>({});
+    // What each agent's next launch delivers (`memory:launchcost`), fetched
+    // with its count; and the agent panes open now, whose block meta carries
+    // the context window a budget is measured against
+    // (SPEC_MEMORY_PANE_TOKENS_2026_10_15.md §5.3).
+    const [launchCosts, setLaunchCosts] = createSignal<Record<string, LaunchCost>>({});
+    const [openPanes, setOpenPanes] = createSignal<AgentOpenPane[]>([]);
+    const windowFor = (agentId: string) =>
+        windowFromMetas(
+            openPanes()
+                .filter((p) => p.agent_id === agentId)
+                .map((p) => MOS.getMuxObjectAtom<Block>(MOS.makeORef("block", p.block_id))()?.meta as Record<string, unknown>)
+        );
 
     // Keyed on the SET of agent ids, not on `agents()` itself. `agents()` is a
     // brand-new array on every `agents:changed` event — which fires for any
@@ -248,6 +265,14 @@ export function NativeMemoryManager(): JSX.Element {
                         : { ...prev, [agent.id]: { kind: "error", message: e.message ?? String(e) } }
                 );
             });
+        // No launch line rather than a second error: the count line already
+        // says when an agent can't be read.
+        RpcApi.MemoryLaunchCostCommand(TabRpcClient, { agent_id: agent.id })
+            .then((cost) => {
+                if (countRequestGeneration.get(agent.id) !== generation) return;
+                setLaunchCosts((prev) => ({ ...prev, [agent.id]: cost }));
+            })
+            .catch(() => {});
     };
 
     createEffect(() => {
@@ -260,6 +285,10 @@ export function NativeMemoryManager(): JSX.Element {
         // Drop entries for agents that no longer exist, and keep every count
         // already resolved — only genuinely new agents are fetched below.
         setCounts((prev) => Object.fromEntries(Object.entries(prev).filter(([id]) => present.has(id))));
+        setLaunchCosts((prev) => Object.fromEntries(Object.entries(prev).filter(([id]) => present.has(id))));
+        RpcApi.AgentOpenPanesCommand(TabRpcClient, {})
+            .then((res) => setOpenPanes(res.panes))
+            .catch(() => setOpenPanes([]));
         for (const id of countRequestGeneration.keys()) {
             if (!present.has(id)) countRequestGeneration.delete(id);
         }
@@ -528,6 +557,11 @@ export function NativeMemoryManager(): JSX.Element {
                                                 agent={agent}
                                                 count={counts()[agent.id] ?? { kind: "loading" }}
                                                 onSelect={setSelectedAgent}
+                                                launch={
+                                                    launchCosts()[agent.id]
+                                                        ? { total: launchCosts()[agent.id].total_tokens_est, window: windowFor(agent.id) }
+                                                        : null
+                                                }
                                             />
                                         )}
                                     </For>
@@ -591,6 +625,9 @@ export function NativeMemoryManager(): JSX.Element {
                             fallback={
                                 <div class="native-memory-manager-file-grid-view">
                                     <MemoryAdoptionPanel agentId={agent().id} agentName={agentLabel(agent())} />
+                                    <Show when={launchCosts()[agent().id]}>
+                                        {(cost) => <AgentLaunchCost cost={cost()} window={windowFor(agent().id)} />}
+                                    </Show>
                                     <MemoryClaimsPanel agentId={agent().id} agentName={agentLabel(agent())} />
                                     {/* Distinct from the "no files" empty state below:
                                         an unresolved list must not read as an agent that
