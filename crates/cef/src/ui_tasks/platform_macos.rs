@@ -318,9 +318,24 @@ pub(crate) fn reclaim_key_from_pane(pane_label: &str) {
 
 // A focus request for a pane whose overlay window isn't registered yet (the
 // frontend's claim-on-create can beat SetPaneBoundsViewsTask). Applied by
-// `apply_pending_pane_key` once that task has tagged + registered the overlay.
+// `apply_pending_pane_key` once that task has tagged + registered the overlay,
+// if it is still recent (PENDING_PANE_KEY_TTL).
 #[cfg(target_os = "macos")]
-static PENDING_PANE_KEY: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+static PENDING_PANE_KEY: std::sync::Mutex<Option<(String, std::time::Instant)>> = std::sync::Mutex::new(None);
+
+/// How long a parked key request may wait for its overlay. The bounds pass
+/// that applies it also runs on every later layout change (an agent composer
+/// growing as the user types into it): an old request applied then took the
+/// keyboard from the pane the user had clicked into since (seen live).
+#[cfg(target_os = "macos")]
+const PENDING_PANE_KEY_TTL: std::time::Duration = std::time::Duration::from_millis(1500);
+
+#[cfg(target_os = "macos")]
+fn park_pane_key(block_id: &str) {
+    if let Ok(mut p) = PENDING_PANE_KEY.lock() {
+        *p = Some((block_id.to_string(), std::time::Instant::now()));
+    }
+}
 
 /// Give the pane's overlay window key status so keystrokes reach the page.
 /// Called on the UI thread for `browser_pane_focus` (pane click, keyboard pane
@@ -364,7 +379,7 @@ pub(crate) fn make_pane_overlay_key(block_id: &str) {
                     // creation, seen live): makeKeyWindow is a silent no-op on a
                     // window that isn't on screen. Park it; the next
                     // SetPaneBoundsViewsTask pass applies it once shown.
-                    if let Ok(mut p) = PENDING_PANE_KEY.lock() { *p = Some(block_id.to_string()); }
+                    park_pane_key(block_id);
                 }
                 tracing::info!(
                     block_id, overlay = w as usize, is_key, responder_ok,
@@ -373,7 +388,7 @@ pub(crate) fn make_pane_overlay_key(block_id: &str) {
             }
         }
         None => {
-            if let Ok(mut p) = PENDING_PANE_KEY.lock() { *p = Some(block_id.to_string()); }
+            park_pane_key(block_id);
             tracing::info!(block_id, "[pane-key] overlay not registered yet — key request parked");
         }
     }
@@ -383,9 +398,20 @@ pub(crate) fn make_pane_overlay_key(block_id: &str) {
 /// Called by SetPaneBoundsViewsTask right after it registers the overlay.
 #[cfg(target_os = "macos")]
 pub(crate) fn apply_pending_pane_key(block_id: &str) {
-    let pending = PENDING_PANE_KEY.lock().ok().map_or(false, |p| p.as_deref() == Some(block_id));
-    if pending {
-        make_pane_overlay_key(block_id);
+    let pending = PENDING_PANE_KEY.lock().ok().and_then(|mut p| match p.as_ref() {
+        Some((id, at)) if id == block_id => {
+            let fresh = at.elapsed() <= PENDING_PANE_KEY_TTL;
+            if !fresh {
+                *p = None;
+            }
+            Some(fresh)
+        }
+        _ => None,
+    });
+    match pending {
+        Some(true) => make_pane_overlay_key(block_id),
+        Some(false) => tracing::info!(block_id, "[pane-key] parked key request expired — not applied"),
+        None => {}
     }
 }
 
