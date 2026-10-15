@@ -100,10 +100,10 @@ fn is_todo_tool(name: &str) -> bool {
 const FILE_EDIT_TOOL_NAMES: &[&str] = &["Edit", "Write", "MultiEdit", "NotebookEdit"];
 
 /// A tool that runs a shell command (Claude's `Bash`, a provider's `shell`,
-/// AgentMux's own `Shell`), by name.
+/// AgentMux's own `Terminal`), by name.
 fn is_shell_tool(name: &str) -> bool {
     let lower = name.to_ascii_lowercase();
-    lower.contains("bash") || lower.ends_with("shell")
+    lower.contains("bash") || lower.ends_with("shell") || lower.ends_with("terminal")
 }
 
 /// Whether a shell command opens a PR: `gh-agent pr create` or `gh pr create`,
@@ -1334,7 +1334,7 @@ mod tests {
         assert!(!is_pr_create("gh-agent pr view 12"));
         assert!(!is_pr_create("echo gh pr list; grep create"));
         assert!(!is_pr_create("git commit -m 'gh-agent pr: create'"));
-        assert!(is_shell_tool("Bash") && is_shell_tool("mcp__agentmux__Shell") && !is_shell_tool("Edit"));
+        assert!(is_shell_tool("Bash") && is_shell_tool("mcp__agentmux__Terminal") && !is_shell_tool("Edit"));
         assert!(is_pr_create("pwsh.exe -NoProfile -Command 'gh-agent pr create -t x'"));
     }
 

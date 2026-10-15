@@ -99,7 +99,7 @@ muxsh run --stop <shell_id>      # stop it
 ```
 
 Thin wrapper over `POST /api/v1/shell/{create,status,stop}` — the same
-routes the `Shell`/`ShellStatus`/`ShellStop` MCP tools use. All remaining
+routes the `Terminal` MCP tool uses for `run` with `background: true`, `wait` and `close`. All remaining
 arguments after `run` are joined with spaces to form the command line (quote
 it yourself if it needs shell-special characters preserved a particular way).
 

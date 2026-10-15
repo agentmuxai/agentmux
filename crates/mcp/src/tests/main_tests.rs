@@ -717,121 +717,21 @@ fn audit_log_discover_windows_appends_ndjson_with_window_list() {
     );
 }
 
-/// Every tool advertised by `tools/list` must be valid JSON with a `name`
-/// and `inputSchema` — the server `expect("static json")`s these at runtime,
-/// so a malformed const would panic on the first `tools/list`. Also pins the
-/// tool count (11 original + 2 loop tools = 13). See
-/// SPEC_AGENT_API_FIRST_CLASS_SURFACE_2026_06_17.md §10.
+/// Every tool `tools/list` advertises is valid JSON with a name, a
+/// description and an input schema, and no name is listed twice. The server
+/// `expect("static json")`s these, so a malformed one would panic on the
+/// first `tools/list`. Checks `ADVERTISED` itself, the list the server sends.
 #[test]
 fn all_tool_defs_are_valid_json_with_names() {
-    let defs = [
-        SHELL_TOOL,
-        SHELL_STOP_TOOL,
-        OPEN_EDITOR_TOOL,
-        OPEN_MEDIA_TOOL,
-        OPEN_FILES_TOOL,
-        SEND_MESSAGE_TOOL,
-        DISCOVER_AGENTS_TOOL,
-        WHOAMI_TOOL,
-        CONN_LIST_TOOL,
-        LAYOUT_TOOL,
-        SET_NAME_TOOL,
-        SET_ACTIVE_TAB_TOOL,
-        NEW_TAB_TOOL,
-        FOCUS_WINDOW_TOOL,
-        LOOP_TOOL,
-        LOOP_STOP_TOOL,
-        LOOP_LIST_TOOL,
-        WORK_ENQUEUE_TOOL,
-        WORK_CLAIM_TOOL,
-        WORK_HEARTBEAT_TOOL,
-        WORK_COMPLETE_TOOL,
-        WORK_RELEASE_TOOL,
-        WORK_LIST_TOOL,
-        CRON_CREATE_TOOL,
-        CRON_DELETE_TOOL,
-        CRON_LIST_TOOL,
-        CRON_PAUSE_TOOL,
-        CRON_RESUME_TOOL,
-        MEMORY_LIST_TOOL,
-        MEMORY_READ_TOOL,
-        MEMORY_WRITE_TOOL,
-        MEMORY_HISTORY_TOOL,
-        MEMORY_DIFF_TOOL,
-        MEMORY_REVERT_TOOL,
-        GLOBAL_MEMORY_LIST_TOOL,
-        GLOBAL_MEMORY_READ_TOOL,
-        GLOBAL_MEMORY_WRITE_TOOL,
-        GLOBAL_MEMORY_REMOVE_TOOL,
-        GLOBAL_MEMORY_HISTORY_TOOL,
-        GLOBAL_MEMORY_DIFF_TOOL,
-        GLOBAL_MEMORY_REVERT_TOOL,
-        PRESET_LIST_TOOL,
-        PRESET_GET_TOOL,
-        IDENTITY_ACCOUNTS_TOOL,
-        IDENTITY_VALIDATE_TOOL,
-        FLEET_LIST_TOOL,
-        FLEET_BROADCAST_TOOL,
-        FLEET_BULK_STOP_TOOL,
-        OPEN_AGENT_TOOL,
-        CAPTURE_WINDOW_TOOL,
-        DISCOVER_WINDOWS_TOOL,
-        LIST_CONVERSATIONS_TOOL,
-        CLOSE_PANE_TOOL,
-        QUIT_SELF_TOOL,
-        REGISTER_DEV_SERVER_TOOL,
-    ];
-    // This array (and its count) has drifted from the real `tools/list`
-    // response before this change too — SHELL_INPUT/STATUS, the three
-    // UI_* tools, GET_AGENT_TRANSCRIPT, and SUPERVISOR_NUDGE are all
-    // live tools missing from it. Not fixed here (out of scope for
-    // this feature) — just adding the 3 new fleet-control tools
-    // (SPEC_MULTI_AGENT_FLEET_CONTROL_2026_08_20.md) alongside the 3
-    // memory-version-history tools merged in from a concurrent PR, on
-    // top of whatever this test already covered, so at least those
-    // don't silently join the drift. CAPTURE_WINDOW_TOOL added here too
-    // (PR #2709) — same reasoning, not fixing the pre-existing drift.
-    // LIST_CONVERSATIONS_TOOL added here too
-    // (SPEC_MUXSPECT_CROSS_TIER_CONVERSATION_VISIBILITY_2026_08_21.md
-    // Phase A) — same reasoning, not fixing the pre-existing drift.
-    // DISCOVER_WINDOWS_TOOL added here too
-    // (SPEC_AGENT_APP_API_WINDOW_CONTROL_ROBUSTNESS_2026_08_24.md) — same
-    // reasoning, not fixing the pre-existing drift.
-    // MUXQUEUE_TOOLS (6: WorkEnqueue/Claim/Heartbeat/Complete/Release/List)
-    // added here too (REPORT_UNIVERSAL_AGENT_WORK_QUEUE_2026_09_01.md
-    // slice 2) — same reasoning, not fixing the pre-existing drift between
-    // this running total and the prose breakdown below it.
-    // OPEN_AGENT_TOOL added (REPORT_AGENT_OPEN_API_GAP_2026_09_06.md) —
-    // same reasoning as the entries above, not fixing the pre-existing
-    // drift between this running total and the prose breakdown.
-    // CLOSE_PANE_TOOL added (SPEC_AGENT_PANE_LIFECYCLE_CONTROL_2026_09_10.md
-    // Phase 1) — same reasoning, not fixing the pre-existing drift.
-    // GLOBAL_MEMORY_{LIST,READ,WRITE,REMOVE}_TOOL added (4:
-    // SPEC_AGENT_FACING_GLOBAL_MEMORY_API_2026_09_15.md Phase 2) — same
-    // reasoning, not fixing the pre-existing drift between this running
-    // total and the prose breakdown.
-    // REGISTER_DEV_SERVER_TOOL added (1:
-    // SPEC_NATIVE_CONTAINER_DEV_PROXY_2026_09_19.md) — same reasoning,
-    // not fixing the pre-existing drift between this running total and
-    // the prose breakdown.
-    // GLOBAL_MEMORY_{HISTORY,DIFF,REVERT}_TOOL added (3:
-    // SPEC_AGENT_FACING_GLOBAL_MEMORY_API_2026_09_15.md's own Phase-3
-    // follow-up — the read side of the Global Memory audit trail,
-    // `bundle_version_list`/`bundle_version_get`, existed and was tested
-    // but had no MCP tool wrapper until now) — same reasoning, not fixing
-    // the pre-existing drift between this running total and the prose
-    // breakdown.
-    // OPEN_FILES_TOOL added (1: SPEC_FILE_BROWSER_PANE_2026_10_01.md §8.1)
-    // — same reasoning, not fixing the pre-existing drift.
-    assert_eq!(defs.len(), 55, "+ 1 ConnList + 1 OpenFiles + 1 QuitSelf; tools/list advertises 27 tools (11 original + 1 OpenMedia + 3 Loop + 5 Cron + 7 agent-API) + 3 memory-version-history + 3 fleet-control tools + 1 OpenAgent + 1 CaptureWindow + 1 ListConversations + 1 DiscoverWindows + 6 Muxqueue + 1 ClosePane + 4 GlobalMemory + 1 RegisterDevServer + 3 GlobalMemory-version-history");
-    for d in defs {
+    let mut names = std::collections::BTreeSet::new();
+    for d in ADVERTISED {
         let v: Value = serde_json::from_str(d).expect("tool def must be valid JSON");
-        assert!(
-            v.get("name").and_then(|n| n.as_str()).is_some(),
-            "tool def missing name: {d}"
-        );
-        assert!(v.get("inputSchema").is_some(), "tool def missing inputSchema");
+        let name = v.get("name").and_then(|n| n.as_str()).unwrap_or_else(|| panic!("tool def missing name: {d}"));
+        assert!(v.get("description").and_then(|n| n.as_str()).is_some(), "{name}: no description");
+        assert!(v.get("inputSchema").is_some(), "{name}: no inputSchema");
+        assert!(names.insert(name.to_string()), "{name} is advertised twice");
     }
+    assert_eq!(advertised_tools().len(), ADVERTISED.len());
 }
 
 /// The two consolidated verbs must expose their discriminator enums so the

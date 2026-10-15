@@ -58,7 +58,7 @@ pub(super) async fn handle_pty_shell_create(
         if let Some(conflict) = running_shell_conflict(&state, &req.agent_block_id, &connection) {
             return conflict;
         }
-        if let Err(e) = connections::consent_for_ssh(&state, &req.agent_block_id, &ssh_agent, &connection, "an interactive shell (PtyShell)").await {
+        if let Err(e) = connections::consent_for_ssh(&state, &req.agent_block_id, &ssh_agent, &connection, "an interactive terminal").await {
             return (StatusCode::FORBIDDEN, Json(json!({ "error": e }))).into_response();
         }
     }
@@ -663,12 +663,18 @@ pub(super) async fn handle_pty_shell_read(
     if !is_owned_by_agent(&state.mstore, &req.shell_id, &req.agent_block_id) {
         return (
             StatusCode::OK,
-            Json(PtyShellReadResponse { content: String::new(), truncated: false }),
+            Json(PtyShellReadResponse { content: String::new(), truncated: false, end: 0 }),
         )
             .into_response();
     }
+    let mut end = 0u64;
     let content = match state.filestore.read_file(&req.shell_id, "term") {
-        Ok(Some(bytes)) => String::from_utf8_lossy(&bytes).to_string(),
+        Ok(Some(bytes)) => {
+            end = bytes.len() as u64;
+            // `since` past the end (a log that was cleared) reads it all again.
+            let from = req.since.filter(|&s| s <= end).unwrap_or(0) as usize;
+            String::from_utf8_lossy(&bytes[from..]).to_string()
+        }
         Ok(None) => String::new(),
         Err(e) => {
             return (
@@ -683,7 +689,7 @@ pub(super) async fn handle_pty_shell_read(
     let start = lines.len().saturating_sub(tail_lines);
     let truncated = start > 0;
     let tail = lines[start..].join("\n");
-    (StatusCode::OK, Json(PtyShellReadResponse { content: tail, truncated })).into_response()
+    (StatusCode::OK, Json(PtyShellReadResponse { content: tail, truncated, end })).into_response()
 }
 
 /// `POST /api/v1/ptyshell/status` — query whether the shell is still running.

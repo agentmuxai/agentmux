@@ -236,6 +236,10 @@ pub struct PtyShellReadRequest {
     /// Number of trailing lines to return. Defaults to 200.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tail_lines: Option<u32>,
+    /// Only output from this byte offset on (a previous response's `end`), so
+    /// a caller reads just what is new. Absent: from the start of the log.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub since: Option<u64>,
 }
 
 /// Response from `POST /api/v1/ptyshell/read`
@@ -244,6 +248,9 @@ pub struct PtyShellReadResponse {
     pub content: String,
     /// True if the shell's output has more lines than `tail_lines` returned.
     pub truncated: bool,
+    /// The log's length in bytes when read: pass it back as `since`.
+    #[serde(default)]
+    pub end: u64,
 }
 
 /// `POST /api/v1/ptyshell/status` — query whether the shell is still running.

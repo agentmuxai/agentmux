@@ -145,6 +145,7 @@ dependencies = [
  "agentmux-common",
  "anyhow",
  "image 0.25.10",
+ "regex",
  "reqwest",
  "serde",
  "serde_json",

@@ -592,6 +592,7 @@ partial list.
 | [`SPEC_AGENT_SELF_QUIT_2026_09_24`](SPEC_AGENT_SELF_QUIT_2026_09_24.md) | SPEC: Agent self-quit — `/quit` for the user, `QuitSelf` for the agent (on direct user instruction only) |
 | [`SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24`](SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24.md) | SPEC: one live instance per agent — an agent identity is driven by at most one process, across host, LAN and WAN |
 | [`SPEC_AGENT_TEARDOWN_SINGLE_PATH_2026_10_01`](SPEC_AGENT_TEARDOWN_SINGLE_PATH_2026_10_01.md) | SPEC: One teardown path for everything an agent owns |
+| [`SPEC_AGENT_TERMINAL_DRIVING_2026_10_15`](SPEC_AGENT_TERMINAL_DRIVING_2026_10_15.md) | SPEC: Agents drive terminals through MuxAPI: keys, screen, wait, commands, terminal panes |
 | [`SPEC_AGENT_TURN_MODEL_AND_LIVE_STATUS_2026_10_08`](SPEC_AGENT_TURN_MODEL_AND_LIVE_STATUS_2026_10_08.md) | SPEC: Agent turns that return to the user, what started them, and a live status that says what is happening |
 | [`SPEC_AGENT_UNRESTRICTED_CAPTURE_WITH_ACCOUNTABILITY_2026_08_30`](SPEC_AGENT_UNRESTRICTED_CAPTURE_WITH_ACCOUNTABILITY_2026_08_30.md) | SPEC: Safe unrestricted screen capture for agents |
 | [`SPEC_AGENT_VIEW_MODULARIZATION_2026_04_13`](SPEC_AGENT_VIEW_MODULARIZATION_2026_04_13.md) | Spec: Modularize `frontend/app/view/agent/agent-view.tsx` |
@@ -657,6 +658,7 @@ partial list.
 | [`SPEC_MEMORY_PRESSURE_SUPERVISION_2026_06_16`](SPEC_MEMORY_PRESSURE_SUPERVISION_2026_06_16.md) | Memory-Pressure Supervision & Graceful Degradation (host / instance level) |
 | [`SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03`](SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03.md) | Migration System Audit & Hardening Plan |
 | [`SPEC_MOTION_TIERS_AND_STYLESHEET_DRY_2026_10_15`](SPEC_MOTION_TIERS_AND_STYLESHEET_DRY_2026_10_15.md) | SPEC: two motion tiers, one motion policy, and a DRY pass over the stylesheets |
+| [`SPEC_MUXAPI_TOOL_CONSOLIDATION_2026_10_15`](SPEC_MUXAPI_TOOL_CONSOLIDATION_2026_10_15.md) | SPEC: MuxAPI in fourteen tools: one per family, with actions |
 | [`SPEC_MUXBUS_MULTI_TIER_DISCOVERY_AND_REMOTE_INVOCATION_2026_07_29`](SPEC_MUXBUS_MULTI_TIER_DISCOVERY_AND_REMOTE_INVOCATION_2026_07_29.md) | Spec: multi-tier discovery + remote API invocation over muxbus |
 | [`SPEC_MUXSH_CLI_2026_09_16`](SPEC_MUXSH_CLI_2026_09_16.md) | SPEC: `muxsh` — a terminal-side pane-opener for MuxAPI |
 | [`SPEC_MUXSH_FULL_COLLECTION_2026_09_16`](SPEC_MUXSH_FULL_COLLECTION_2026_09_16.md) | SPEC: The full `muxsh` collection — a consistent, wsh-familiar CLI over MuxAPI |

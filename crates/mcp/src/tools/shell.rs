@@ -1,8 +1,10 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Shell, ShellStop, ShellInput, ShellStatus: pipe shells in the agent pane.
-//! ConnList: the connections those and PtyShell can run on.
+//! Pipe shells (background jobs) in the agent pane, and the connections a
+//! terminal can run on. Not advertised: `Terminal` (terminal.rs) calls these
+//! by their old names for its `run` with `background`, `close`, `type` to a
+//! job, and `connections`.
 
 use super::*;
 
