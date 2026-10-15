@@ -123,6 +123,16 @@ const grepDetail = (p: Record<string, any>): string => {
         .join(" · ");
 };
 
+/** An MCP tool with an `action` (one tool per family, like agentmux's
+ *  Terminal, Browser and UI) does a different thing per action: the row says
+ *  which, with what it acts on, so a click reads apart from a snapshot. Typed
+ *  text is left out: it may be a password being filled in. */
+const mcpActionDetail = (p: Record<string, any>): string => {
+    if (typeof p.action !== "string" || !p.action) return "";
+    const target = [p.command, p.url, p.ref, p.selector, p.id].find((v) => typeof v === "string" && v);
+    return target ? `${p.action} · ${target}` : p.action;
+};
+
 /** A globe followed by a query or a host/path can only be a web tool, so the
  *  name is dropped — unless there's no detail, or the row is a bare globe. */
 const webLabel = (name: string, detail: string): string | null => (detail ? null : name);
@@ -212,7 +222,7 @@ export const TOOL_DESCRIPTORS: readonly ToolDescriptor[] = [
         },
     },
     { names: ["WebFetch", "web_fetch"], icon: "🌐", label: webLabel, detail: hostPathOf },
-    { prefix: MCP_PREFIX, label: (name) => mcpDisplayName(name) ?? name },
+    { prefix: MCP_PREFIX, label: (name) => mcpDisplayName(name) ?? name, detail: mcpActionDetail },
     // Catch-all: every fact's default. No header detail — see toolActivityArg.
     {
         icon: "🛠️",

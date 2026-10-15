@@ -123,6 +123,32 @@ fn the_exit_marker_gives_the_commands_own_output_and_code() {
 }
 
 #[test]
+fn a_command_left_open_is_refused_not_run_into_the_marker() {
+    use ShellFamily::*;
+    assert_eq!(open_ending("npm start &", Posix), Some("&"));
+    assert_eq!(open_ending("make && ", Fish), Some("&&"));
+    assert_eq!(open_ending("cat x |", Pwsh), Some("|"));
+    assert_eq!(open_ending("a ||", Cmd), Some("||"));
+    assert_eq!(open_ending("echo one \\", Posix), Some("\\"));
+    assert_eq!(open_ending("dir ^", Cmd), Some("^"));
+    assert_eq!(open_ending("Get-Item `", Pwsh), Some("`"));
+    // Escaped, the character is an argument; doubled, the escape is.
+    assert_eq!(open_ending("echo \\&", Posix), None);
+    assert_eq!(open_ending("echo ^|", Cmd), None);
+    assert_eq!(open_ending("echo a\\\\", Posix), None);
+    assert_eq!(open_ending("npm test", Posix), None);
+}
+
+#[test]
+fn the_echo_of_every_typed_line_is_skipped() {
+    let text = "first\nsecond READY\nREADY\n";
+    assert_eq!(after_lines(text, 0), text);
+    assert_eq!(after_lines(text, 2), "READY\n");
+    assert_eq!(after_lines(text, 5), "");
+    assert_eq!(after_first_line(text), "second READY\nREADY\n");
+}
+
+#[test]
 fn a_trailing_comment_is_dropped_so_it_cant_swallow_the_marker() {
     assert_eq!(without_trailing_comment("echo ok # explanation", ShellFamily::Posix), "echo ok");
     assert_eq!(without_trailing_comment("echo ok #", ShellFamily::Fish), "echo ok");
