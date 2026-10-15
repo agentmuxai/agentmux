@@ -8,7 +8,7 @@
  * SPEC_AGENT_PANE_FILE_ATTACHMENTS_2026_09_26.md (any file, not only images).
  *
  * Module-level and keyed by blockId, like the composer's text draft
- * (AgentFooter's composerDrafts): the footer unmounts on every pane-tab
+ * (reload-persistence.ts): the footer unmounts on every pane-tab
  * switch, and the attachments must survive that. The ready ones also survive a
  * reload of the window (stored like the text draft, reload-persistence.ts); none
  * survive an app restart. The store keeps a file 30 days after its last use.

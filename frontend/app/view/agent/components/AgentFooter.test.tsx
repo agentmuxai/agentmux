@@ -563,7 +563,7 @@ describe("AgentFooter ghost-text next-prompt suggestion (SPEC_NEXT_PROMPT_SUGGES
 });
 
 // SPEC_AGENT_HISTORY_AS_TAB_AND_DRAFT_PRESERVATION_2026_08_11.md §3.4:
-// composerDrafts is module-level, keyed by blockId — every case below uses
+// the composer draft (reload-persistence.ts) is module-level, keyed by blockId — every case below uses
 // a blockId dedicated to that case (never "test-block", which every other
 // describe block in this file shares) so these tests can't leak draft
 // state into, or read stale state left by, unrelated tests sharing this
