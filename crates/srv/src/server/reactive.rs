@@ -1281,7 +1281,7 @@ fn absent_route_for(answer: &crate::muxbus::wan_lease::Holder) -> AbsentRoute {
     use crate::muxbus::wan_lease::Holder;
     match answer {
         Holder::Free | Holder::Yours | Holder::Unreachable => AbsentRoute::HoldHere,
-        Holder::Other(_) | Holder::Unknown | Holder::Unsupported => AbsentRoute::Relay,
+        Holder::Other(..) | Holder::Unknown | Holder::Unsupported => AbsentRoute::Relay,
     }
 }
 
@@ -2671,7 +2671,7 @@ mod absent_route_tests {
         assert_eq!(absent_route_for(&Holder::Yours), AbsentRoute::HoldHere);
         // No relay to send through: keep it here.
         assert_eq!(absent_route_for(&Holder::Unreachable), AbsentRoute::HoldHere);
-        assert_eq!(absent_route_for(&Holder::Other("computer area54".into())), AbsentRoute::Relay);
+        assert_eq!(absent_route_for(&Holder::Other("computer area54".into(), Vec::new())), AbsentRoute::Relay);
         // An older relay, or one that won't say: the order before this plan.
         assert_eq!(absent_route_for(&Holder::Unsupported), AbsentRoute::Relay);
         assert_eq!(absent_route_for(&Holder::Unknown), AbsentRoute::Relay);

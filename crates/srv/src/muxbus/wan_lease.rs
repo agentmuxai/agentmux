@@ -270,6 +270,8 @@ async fn call(base: &str, agent_id: &str, token: &str, http: &reqwest::Client, p
         "host": crate::backend::reactive::registry::local_host_label(),
         "channel": crate::backend::reactive::registry::local_channel_id(),
         "version": env!("CARGO_PKG_VERSION"),
+        // A sender asks before sending files through the relay.
+        "features": [agentmux_common::jekt_files::CLOUD_FEATURE],
     });
     post(base, path, token, http, Some(agent_id), &body).await
 }
@@ -454,7 +456,8 @@ pub(crate) enum Holder {
     /// This instance holds it.
     Yours,
     /// Another install of the same account holds it: the agent is live there.
-    Other(String),
+    /// The description, and what that install said it can receive.
+    Other(String, Vec<String>),
     /// A lease the relay won't describe (another account, or none), or a
     /// relay-side error.
     Unknown,
@@ -469,6 +472,14 @@ pub(crate) enum Holder {
 const HOLDER_FRESH: Duration = Duration::from_secs(20);
 
 static HOLDER_CACHE: LazyLock<Mutex<HashMap<String, (Holder, Instant)>>> = LazyLock::new(Default::default);
+
+/// A cached answer's key: the agent and the credential it was asked with,
+/// since the answer is the credential's account's. A switched account never
+/// reuses another account's answer.
+fn holder_key(agent: &str, token: &str) -> String {
+    use sha2::Digest;
+    format!("{}#{}", &hex::encode(sha2::Sha256::digest(token.as_bytes()))[..16], key(agent))
+}
 static HOLDER_UNSUPPORTED_UNTIL: LazyLock<Mutex<Option<Instant>>> = LazyLock::new(Default::default);
 
 /// Ask the relay who holds `agent`'s lease, as `caller` (the message's
@@ -478,7 +489,7 @@ pub(crate) async fn holder(base: &str, agent: &str, caller: &str, token: &str, h
     if HOLDER_UNSUPPORTED_UNTIL.lock().unwrap_or_else(|e| e.into_inner()).is_some_and(|t| t > Instant::now()) {
         return Holder::Unsupported;
     }
-    if let Some((answer, at)) = HOLDER_CACHE.lock().unwrap_or_else(|e| e.into_inner()).get(&key(agent)) {
+    if let Some((answer, at)) = HOLDER_CACHE.lock().unwrap_or_else(|e| e.into_inner()).get(&holder_key(agent, token)) {
         if at.elapsed() < HOLDER_FRESH {
             return answer.clone();
         }
@@ -515,7 +526,7 @@ pub(crate) async fn holder(base: &str, agent: &str, caller: &str, token: &str, h
     HOLDER_CACHE
         .lock()
         .unwrap_or_else(|e| e.into_inner())
-        .insert(key(agent), (answer.clone(), Instant::now()));
+        .insert(holder_key(agent, token), (answer.clone(), Instant::now()));
     answer
 }
 
@@ -524,7 +535,15 @@ fn holder_from(status: u16, body: &serde_json::Value) -> Holder {
         200..=299 => match body.get("state").and_then(|s| s.as_str()) {
             Some("free") => Holder::Free,
             Some("yours") => Holder::Yours,
-            Some("other") => Holder::Other(body.get("held_by").map(describe_holder).unwrap_or_default()),
+            Some("other") => {
+                let held_by = body.get("held_by");
+                let features = held_by
+                    .and_then(|h| h.get("features"))
+                    .and_then(|f| f.as_array())
+                    .map(|f| f.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+                    .unwrap_or_default();
+                Holder::Other(held_by.map(describe_holder).unwrap_or_default(), features)
+            }
             _ => Holder::Unknown,
         },
         404 | 405 => Holder::Unsupported,
@@ -566,7 +585,7 @@ mod tests {
         let agent = format!("HolderTest-{}", &uuid::Uuid::new_v4().to_string()[..8]);
 
         let first = holder(&base, &agent, "lark", "tok", &http).await;
-        assert!(matches!(&first, Holder::Other(d) if d.contains("area54-holder-test")), "{first:?}");
+        assert!(matches!(&first, Holder::Other(d, _) if d.contains("area54-holder-test")), "{first:?}");
         let again = holder(&base, &agent, "lark", "tok", &http).await;
         assert_eq!(again, first);
         let seen = hits.lock().unwrap().clone();
@@ -583,7 +602,15 @@ mod tests {
         drop(closed);
         let lost = format!("HolderLost-{}", &uuid::Uuid::new_v4().to_string()[..8]);
         assert_eq!(holder(&dead, &lost, "lark", "tok", &http).await, Holder::Unreachable);
-        assert!(HOLDER_CACHE.lock().unwrap().get(&key(&lost)).is_none());
+        assert!(HOLDER_CACHE.lock().unwrap().get(&holder_key(&lost, "tok")).is_none());
+    }
+
+    /// An answer is the asking credential's account's: another credential
+    /// (a switched account) never reuses it.
+    #[test]
+    fn a_cached_holder_answer_belongs_to_its_credential() {
+        assert_eq!(holder_key("AgentY", "tok-a"), holder_key("agenty", "tok-a"));
+        assert_ne!(holder_key("agenty", "tok-a"), holder_key("agenty", "tok-b"));
     }
 
     /// The holder query's answers. Anything the relay
@@ -594,7 +621,7 @@ mod tests {
         assert_eq!(holder_from(200, &json!({ "state": "free" })), Holder::Free);
         assert_eq!(holder_from(200, &json!({ "state": "yours" })), Holder::Yours);
         let other = holder_from(200, &json!({ "state": "other", "held_by": { "host": "area54", "channel": "stable", "version": "0.59.5" } }));
-        assert!(matches!(&other, Holder::Other(d) if d.contains("area54")), "{other:?}");
+        assert!(matches!(&other, Holder::Other(d, _) if d.contains("area54")), "{other:?}");
         assert_eq!(holder_from(200, &json!({ "state": "unknown" })), Holder::Unknown);
         assert_eq!(holder_from(200, &json!({ "state": "weird" })), Holder::Unknown);
         assert_eq!(holder_from(200, &serde_json::Value::Null), Holder::Unknown);
