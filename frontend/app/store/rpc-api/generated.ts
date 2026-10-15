@@ -147,6 +147,7 @@ import type { CommandMcpCatalogUpsertData } from "@/types/rpc/CommandMcpCatalogU
 import type { CommandMcpUpsertData } from "@/types/rpc/CommandMcpUpsertData";
 import type { CommandMemoryDeliveryClaimFallbackData } from "@/types/rpc/CommandMemoryDeliveryClaimFallbackData";
 import type { CommandMemoryDeliveryComposeData } from "@/types/rpc/CommandMemoryDeliveryComposeData";
+import type { CommandMemoryLaunchCostData } from "@/types/rpc/CommandMemoryLaunchCostData";
 import type { CommandNativeMemoryAdoptionListData } from "@/types/rpc/CommandNativeMemoryAdoptionListData";
 import type { CommandNativeMemoryClaimsData } from "@/types/rpc/CommandNativeMemoryClaimsData";
 import type { CommandNativeMemoryDiffData } from "@/types/rpc/CommandNativeMemoryDiffData";
@@ -270,6 +271,7 @@ import type { InstallStartReq } from "@/types/rpc/InstallStartReq";
 import type { InstallStartResult } from "@/types/rpc/InstallStartResult";
 import type { InstallSystemToolResult } from "@/types/rpc/InstallSystemToolResult";
 import type { InstallToolResult } from "@/types/rpc/InstallToolResult";
+import type { LaunchCost } from "@/types/rpc/LaunchCost";
 import type { LayoutIntentResult } from "@/types/rpc/LayoutIntentResult";
 import type { LayoutOpenResult } from "@/types/rpc/LayoutOpenResult";
 import type { LayoutPreviewResult } from "@/types/rpc/LayoutPreviewResult";
@@ -1503,6 +1505,10 @@ export const GeneratedApi = {
     opts?: RpcOpts
   ): Promise<McpServer> {
     return client.rpcCall("mcp.upsert", data, opts);
+  },
+  // command "memory:launchcost"
+  MemoryLaunchCostCommand(client: RpcClient, data: CommandMemoryLaunchCostData, opts?: RpcOpts): Promise<LaunchCost> {
+    return client.rpcCall("memory:launchcost", data, opts);
   },
   // command "movescratchfile"
   MoveScratchFileCommand(client: RpcClient, data: MoveScratchFileReq, opts?: RpcOpts): Promise<MoveScratchFileResult> {

@@ -1030,14 +1030,9 @@ pub(super) fn write_agent_config_files(
     agent_slug: &str,
     work_dir: &str,
 ) -> Result<(), String> {
-    // Load agent content
-    let contents = mstore.agent_content_get_all(&agent.id)
-        .unwrap_or_default();
-
-    let mut content_map = std::collections::HashMap::new();
-    for fc in &contents {
-        content_map.insert(fc.content_type.clone(), fc.content.clone());
-    }
+    // The agent's content, with Global Memory and its picked bundles put
+    // before its own memory (shared with `memory:launchcost`).
+    let mut content_map = crate::server::memory_launch_cost::startup_content_map(mstore, id_store, agent);
 
     // Disable autonomous memory writes only when using the bare slug-fallback workdir
     // (~/.agentmux/agents/<slug>) — that path is shared across same-name multi-tab
@@ -1065,28 +1060,6 @@ pub(super) fn write_agent_config_files(
                 );
             }
         }
-    }
-
-    // Global Memory (minus Operator Config for another agent kind), then the
-    // agent's picked bundles in list order, go into CLAUDE.md; WriteAgentConfig
-    // composes the same text (SPEC_RENAME_KNOWLEDGE_TO_MEMORY_2026_10_06.md §3.6).
-    let global_bundles = crate::backend::operator_config_seed::global_bundles_for_agent(
-        id_store.bundle_list_global().unwrap_or_default(),
-        &agent.agent_type,
-    );
-    let startup_block = crate::backend::storage::join_startup_blocks(
-        &crate::backend::storage::format_global_bundle_block(&global_bundles),
-        &crate::backend::storage::format_agent_bundle_block(&crate::backend::storage::agent_picked_bundles(
-            mstore, id_store, &agent.id,
-        )),
-    );
-    if !startup_block.is_empty() {
-        content_map
-            .entry("memory".to_string())
-            .and_modify(|existing| {
-                *existing = format!("{startup_block}\n\n---\n\n{existing}");
-            })
-            .or_insert(startup_block);
     }
 
     // v1 skills: globals are always injected; the agent's OWN ref-bound skills
@@ -1661,6 +1634,33 @@ mod write_agent_config_files_tests {
 
         let mcp_json = std::fs::read_to_string(work_dir.path().join(".mcp.json")).unwrap_or_default();
         assert!(!mcp_json.contains("writer-tools"), "a picked bundle's server must not launch: {mcp_json}");
+    }
+
+    /// `memory:launchcost` counts what a launch writes: its parts sum to the
+    /// estimate of the written startup file (SPEC_MEMORY_PANE_TOKENS_2026_10_15.md §8).
+    #[test]
+    fn launch_cost_is_the_estimate_of_the_startup_file_a_launch_writes() {
+        let (mstore, id_store) = (make_store(), make_store());
+        let work_dir = tempfile::tempdir().unwrap();
+        let mut agent = make_agent("agent-1", work_dir.path().to_str().unwrap());
+        agent.provider = "codex".to_string();
+        mstore.agent_def_insert(&mut agent).unwrap();
+        id_store.bundle_upsert(&make_bundle("global-1", "Rules", "global rule", true)).unwrap();
+        id_store.bundle_upsert(&make_bundle("b1", "Reviewer", "review carefully", false)).unwrap();
+        mstore.agent_bundles_set("agent-1", &["b1".to_string()]).unwrap();
+        let (agent_id, content_type) = ("agent-1".to_string(), "soul".to_string());
+        let content = "You are {{AGENT}}, a careful reviewer.".to_string();
+        let soul = crate::backend::storage::content::AgentContent { agent_id, content_type, content, updated_at: 1 };
+        mstore.agent_content_set(&soul).unwrap();
+
+        write_agent_config_files(&mstore, &id_store, &mstore, &agent, "test-agent", work_dir.path().to_str().unwrap()).unwrap();
+        let written = std::fs::read_to_string(work_dir.path().join("AGENTS.md")).unwrap();
+        let cost = crate::server::memory_launch_cost::launch_cost(&mstore, &id_store, &mstore, &agent, Some(&written), &[]);
+        let (_marker, body) = written.split_once("\n\n").unwrap();
+        assert_eq!(cost.total_tokens_est, agentmux_common::tokens::estimate_tokens(body));
+        let kinds: Vec<&str> = cost.parts.iter().map(|p| p.kind.as_str()).collect();
+        assert_eq!(kinds, ["workspace_global", "bundle", "soul", "formatting"]);
+        assert!(cost.delivered_by_file && cost.startup_file.as_deref() == Some("AGENTS.md"));
     }
 }
 

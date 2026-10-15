@@ -3951,6 +3951,25 @@
     }
   },
   {
+    "command": "memory:launchcost",
+    "request": "agentmux_srv::backend::rpc_types::native_memory::CommandMemoryLaunchCostData",
+    "requestName": "CommandMemoryLaunchCostData",
+    "requestTs": {
+      "imports": [
+        "CommandMemoryLaunchCostData"
+      ],
+      "name": "CommandMemoryLaunchCostData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::native_memory::LaunchCost",
+    "responseName": "LaunchCost",
+    "responseTs": {
+      "imports": [
+        "LaunchCost"
+      ],
+      "name": "LaunchCost"
+    }
+  },
+  {
     "command": "memorydelivery:claim_fallback",
     "request": "agentmux_srv::backend::rpc_types::bundle::CommandMemoryDeliveryClaimFallbackData",
     "requestName": "CommandMemoryDeliveryClaimFallbackData",

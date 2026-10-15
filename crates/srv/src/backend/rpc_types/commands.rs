@@ -295,6 +295,7 @@ pub const COMMAND_GLOBAL_MEMORY_IMPORT: &str = "globalmemory:import";
 /// what memory reinjection re-delivers, Operator Config included
 /// (SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27.md §7 P1).
 pub const COMMAND_GLOBAL_MEMORY_SECTIONS: &str = "globalmemory:sections";
+pub const COMMAND_MEMORY_LAUNCH_COST: &str = "memory:launchcost";
 /// The frontend's hidden memory reinjection asks whether to deliver, or stand
 /// down because the `SessionStart` hook delivered the same event
 /// (SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27.md §7 P2).
