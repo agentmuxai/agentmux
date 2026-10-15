@@ -243,6 +243,16 @@ fn showing_a_pane_again_does_not_take_the_keys_by_itself() {
 }
 
 #[test]
+fn a_pane_hidden_and_shown_quickly_after_its_selection_does_not_take_the_keys() {
+    // A quick tab switch away and back, within the 1.5 s a selection may wait (#4970).
+    let mut w = window();
+    w.step(Event::Select(pane("a")), 1000);
+    w.step(Event::PaneCollapsed("a".into()), 1200);
+    check(&mut w, Surface::App, 1250);
+    assert!(focus_effects(&w.step(Event::PaneShown("a".into()), 1400)).is_empty());
+}
+
+#[test]
 fn hiding_a_pane_in_an_inactive_window_forgets_the_request() {
     let mut w = window();
     w.step(Event::Select(pane("a")), 100);
@@ -314,8 +324,8 @@ fn a_pending_pane_that_is_hidden_before_the_check_falls_back_to_the_app() {
 fn describe_and_the_log_names_read_well() {
     let mut w = window();
     w.step(Event::Select(pane("0123456789abcdef")), 100);
-    // The pane isn't live: the app is asked for, the selection is kept.
-    assert_eq!(w.describe(), "active want=pane:01234567 have=app");
+    // The pane isn't live: the app keeps the keyboard, the selection waits.
+    assert_eq!(w.describe(), "active want=pane:01234567(parked) have=app");
     let fx = w.step(Event::PaneLive("0123456789abcdef".into()), 200);
     assert_eq!(w.describe(), "active want=pane:01234567 have=pending(pane:01234567#0)");
     assert_eq!(Event::PaneLive("0123456789abcdef".into()).to_string(), "pane-live(pane:01234567)");
