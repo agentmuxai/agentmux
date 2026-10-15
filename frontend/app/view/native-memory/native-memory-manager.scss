@@ -93,7 +93,7 @@
     &:hover,
     &:focus-visible {
         border-color: var(--accent-color);
-        background: color-mix(in srgb, var(--accent-color) 8%, transparent);
+        background: var(--accent-bg-subtle);
     }
 
     // An errored card stays clickable (the detail view shows the real error),
@@ -166,7 +166,7 @@
     &:hover,
     &:focus-visible {
         border-color: var(--accent-color);
-        background: color-mix(in srgb, var(--accent-color) 8%, transparent);
+        background: var(--accent-bg-subtle);
     }
 
     // The index file is the entry point the agent loads every session — a
@@ -376,8 +376,8 @@
         border-color var(--duration-decorative-fast);
 
     &:hover {
-        background: color-mix(in srgb, var(--error-color) 15%, transparent);
-        border-color: color-mix(in srgb, var(--error-color) 40%, transparent);
+        background: var(--error-bg-strong);
+        border-color: var(--error-line-strong);
         color: var(--error-color);
     }
 }
@@ -563,7 +563,7 @@
     padding: var(--space-1-5) var(--space-2);
     border: 1px solid var(--border-color);
     border-radius: 6px;
-    background: color-mix(in srgb, var(--accent-color) 6%, transparent);
+    background: var(--accent-bg-subtle);
     font-size: var(--text-sm);
 }
 
@@ -645,7 +645,7 @@
 .native-memory-manager-unverified {
     margin-left: var(--space-1-5);
     padding: 1px var(--space-1-5);
-    border: 1px solid color-mix(in srgb, var(--warning-color) 60%, transparent);
+    border: 1px solid var(--warning-line-vivid);
     border-radius: 999px;
     color: var(--warning-color);
     font-size: var(--text-xs);

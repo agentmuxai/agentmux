@@ -30,7 +30,7 @@
            Without this the spinner disappears for ~200ms during the FOUC guard. */
         visibility: visible !important;
         opacity: 1 !important;
-        z-index: 99999;
+        z-index: 99999; /* --z-splash, Z_SPLASH: no stylesheet has loaded yet */
       }
       /* Cross-fade the splash out once the content-reveal gate decides the
          window has settled (frontend/app/init/startup-splash.ts adds .fading).

@@ -54,7 +54,7 @@
 
 // Archive is mildly destructive (compresses history) — warm accent border.
 .agent-session-btn-archive:hover:not(:disabled) {
-    background: color-mix(in srgb, var(--warning-color) 16%, transparent);
+    background: var(--warning-bg-strong);
     border-color: var(--warning-color);
 }
 

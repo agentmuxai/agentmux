@@ -15,7 +15,7 @@
         gap: var(--space-1-5);
         margin: var(--space-1) 0 var(--space-0-5);
         padding: var(--space-1) var(--space-2);
-        @include line.notice(danger, $text: var(--main-text-color), $line: color-mix(in srgb, var(--error-color) 50%, transparent));
+        @include line.notice(danger, $text: var(--main-text-color), $line: var(--error-line-heavy));
         border-radius: 0;
         font-size: var(--text-sm);
         flex-shrink: 0;
@@ -50,7 +50,7 @@
 
     .agent-disconnected-banner-action {
         background: none;
-        border: 1px solid color-mix(in srgb, var(--error-color) 50%, transparent);
+        border: 1px solid var(--error-line-heavy);
         cursor: default;
         padding: var(--space-0-5) var(--space-1-5);
         color: var(--error-color);

@@ -434,7 +434,7 @@
         cursor: pointer;
 
         &:hover:not(:disabled) {
-            background: color-mix(in srgb, var(--error-color) 22%, transparent);
+            background: var(--error-bg-heavy);
         }
     }
 }

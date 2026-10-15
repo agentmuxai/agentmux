@@ -83,7 +83,7 @@
         cursor: pointer;
 
         &:hover {
-            background: color-mix(in srgb, var(--error-color) 15%, transparent);
+            background: var(--error-bg-strong);
         }
     }
 
@@ -148,7 +148,7 @@
 
         &:hover {
             border-color: var(--accent-color);
-            background: color-mix(in srgb, var(--accent-color) 6%, transparent);
+            background: var(--accent-bg-subtle);
         }
 
         // The open button is the tile's keyboard target; the ring goes on the
@@ -606,7 +606,7 @@
 
     &:focus {
         border-color: color-mix(in srgb, var(--accent-color) 70%, transparent);
-        background: color-mix(in srgb, var(--accent-color) 4%, transparent);
+        background: var(--accent-bg-subtle);
     }
 
     &:disabled {

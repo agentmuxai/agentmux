@@ -26,7 +26,7 @@
     // "stop and look" rather than "answer this when convenient".
     &--high-risk {
         background: color-mix(in srgb, var(--error-color) 10%, var(--main-bg-color));
-        border-color: color-mix(in srgb, var(--error-color) 60%, transparent);
+        border-color: var(--error-line-vivid);
         border-left-color: var(--error-color);
     }
 
@@ -47,7 +47,7 @@
     margin: 0 var(--space-1-5);
     padding: var(--space-1) var(--space-3);
     background: color-mix(in srgb, var(--warning-color) 6%, var(--main-bg-color));
-    border: 1px solid color-mix(in srgb, var(--warning-color) 40%, transparent);
+    border: 1px solid var(--warning-line-strong);
     border-radius: 0;
     color: var(--warning-color);
     font-family: inherit;
@@ -66,7 +66,7 @@
 
     &--high-risk {
         background: color-mix(in srgb, var(--error-color) 8%, var(--main-bg-color));
-        border-color: color-mix(in srgb, var(--error-color) 50%, transparent);
+        border-color: var(--error-line-heavy);
         color: var(--error-color);
 
         &:hover {
@@ -121,7 +121,7 @@
 }
 
 .agent-decision-panel-risk {
-    background: color-mix(in srgb, var(--error-color) 25%, transparent);
+    background: var(--error-bg-heavy);
     color: var(--error-color);
 }
 
@@ -147,7 +147,7 @@
             font-family: var(--font-mono);
             font-size: var(--text-xs);
             color: var(--accent-color);
-            background: color-mix(in srgb, var(--accent-color) 8%, transparent);
+            background: var(--accent-bg-subtle);
             padding: 1px 4px;
             border-radius: 0;
         }
@@ -292,8 +292,8 @@
     }
 
     .agent-decision-panel--high-risk &--allow {
-        background: color-mix(in srgb, var(--success-color) 22%, transparent);
-        border-color: color-mix(in srgb, var(--success-color) 50%, transparent);
+        background: var(--success-bg-heavy);
+        border-color: var(--success-line-heavy);
         color: var(--success-color);
         font-weight: 500;
         box-shadow: none;
@@ -321,8 +321,8 @@
     }
 
     &--deny {
-        background: color-mix(in srgb, var(--error-color) 18%, transparent);
-        border-color: color-mix(in srgb, var(--error-color) 50%, transparent);
+        background: var(--error-bg-strong);
+        border-color: var(--error-line-heavy);
         color: var(--error-color);
 
         &:hover {

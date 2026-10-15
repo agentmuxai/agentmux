@@ -45,6 +45,7 @@ import {
 import { AgentPanePerfSection } from "./agent-pane-perf-section";
 import { shortcutFor } from "@/app/keybindings";
 import { keyCommands } from "@/app/store/keymodel-dispatch";
+import { Z_DEV_DIAGNOSTICS } from "@/app/zindex";
 
 const DEFAULT_DISPLAY_LIMIT = 80;
 
@@ -159,7 +160,7 @@ export function DiagPanel(): JSX.Element {
                     position: "fixed",
                     bottom: "8px",
                     left: "8px",
-                    "z-index": "999998", // one less than perf HUD so they don't fight
+                    "z-index": Z_DEV_DIAGNOSTICS, // under the perf HUD, so they don't fight
                     "background-color": "rgba(20, 20, 20, 0.94)",
                     color: "#d0d0d0",
                     "font-family": "Menlo, Consolas, monospace",

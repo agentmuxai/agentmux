@@ -151,7 +151,7 @@
     font-size: var(--text-xs);
     line-height: 1.45;
     color: var(--secondary-text-color);
-    background: color-mix(in srgb, var(--accent-color) 8%, transparent);
+    background: var(--accent-bg-subtle);
     border: 1px solid color-mix(in srgb, var(--accent-color) 25%, transparent);
     border-radius: var(--radius-sm);
     padding: var(--space-2);

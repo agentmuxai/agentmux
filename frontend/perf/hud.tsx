@@ -18,6 +18,7 @@ import { createEffect, createSignal, onCleanup, onMount, Show, type JSX, For } f
 import { perfStore } from "./store";
 import { shortcutFor } from "@/app/keybindings";
 import { keyCommands } from "@/app/store/keymodel-dispatch";
+import { Z_DEV_HUD } from "@/app/zindex";
 
 interface HudSnapshot {
     longTasks: { count: number; p50: number; p75: number; p95: number; max: number };
@@ -96,7 +97,7 @@ export function PerfHud(): JSX.Element {
                     position: "fixed",
                     bottom: "8px",
                     right: "8px",
-                    "z-index": "999999",
+                    "z-index": Z_DEV_HUD,
                     "background-color": "rgba(20, 20, 20, 0.92)",
                     color: "#d0d0d0",
                     "font-family": "Menlo, Consolas, monospace",

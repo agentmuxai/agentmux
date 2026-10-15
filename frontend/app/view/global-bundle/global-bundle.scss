@@ -98,7 +98,7 @@ code.global-bundle-file-label {
     padding: var(--space-1-5) var(--space-2);
     border: 1px solid var(--border-color);
     border-radius: 6px;
-    background: color-mix(in srgb, var(--accent-color) 6%, transparent);
+    background: var(--accent-bg-subtle);
     font-size: var(--text-sm);
 }
 

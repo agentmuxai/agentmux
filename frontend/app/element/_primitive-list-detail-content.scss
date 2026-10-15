@@ -84,7 +84,7 @@
 
 /// A caveat note's colours (a known limitation). The site sets its spacing.
 @mixin caveat-box {
-    background: color-mix(in srgb, var(--warning-color) 15%, transparent);
+    background: var(--warning-bg-strong);
     font-size: var(--text-xs);
     color: var(--secondary-text-color);
 }

@@ -228,7 +228,7 @@
 }
 
 .tower-badge--agent {
-    border-color: color-mix(in srgb, var(--accent-color) 60%, transparent);
+    border-color: var(--accent-line-vivid);
     color: var(--accent-color);
 }
 

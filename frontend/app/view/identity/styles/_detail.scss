@@ -108,7 +108,7 @@
 .identity-account-panel {
     border: 1px solid var(--accent-color);
     border-top: none;
-    background: color-mix(in srgb, var(--accent-color) 4%, transparent);
+    background: var(--accent-bg-subtle);
     padding: var(--space-2) var(--space-3);
     margin-bottom: var(--space-1);
     overflow: hidden;

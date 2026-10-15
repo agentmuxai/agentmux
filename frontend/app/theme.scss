@@ -201,7 +201,6 @@
     // Same treatment, phase C of SPEC_MOTION_TIERS_AND_STYLESHEET_DRY_2026_10_15.md
     // §6.1: each takes the fallback most of its call sites already showed.
     --tertiary-text-color: rgba(255, 255, 255, 0.5); // dimmer than --secondary-text-color; light override below
-    --error-bg-color: rgba(255, 80, 80, 0.15);
     --button-secondary-bg-color: rgba(127, 127, 127, 0.1); // a neutral grey tint, so no per-theme override
     --elevated-bg-color: var(--modal-bg-color);  // alias — same concept as the pre-existing modal token, itself a plain per-theme literal (no window-opacity coupling)
 
@@ -477,6 +476,35 @@
     --accent-line:  color-mix(in srgb, var(--accent-color) 30%, transparent);
     --success-bg:   color-mix(in srgb, var(--success-color) 12%, transparent);
     --success-line: color-mix(in srgb, var(--success-color) 30%, transparent);
+    // Each tone's other steps, around `-bg` and `-line`: a `-bg-subtle`
+    // wash (6 %), `-bg-strong` (16 %) for hovers and status pills,
+    // `-bg-heavy` (23 %) for a selected or high-risk item, and
+    // `-line-strong`, `-heavy` and `-vivid` (40, 50, 60 %) for borders that
+    // must stand out. Each sits within 2 points of the tints it replaced.
+    --error-bg-subtle:     color-mix(in srgb, var(--error-color) 6%, transparent);
+    --error-bg-strong:     color-mix(in srgb, var(--error-color) 16%, transparent);
+    --error-bg-heavy:      color-mix(in srgb, var(--error-color) 23%, transparent);
+    --error-line-strong:   color-mix(in srgb, var(--error-color) 40%, transparent);
+    --error-line-heavy:    color-mix(in srgb, var(--error-color) 50%, transparent);
+    --error-line-vivid:    color-mix(in srgb, var(--error-color) 60%, transparent);
+    --warning-bg-subtle:   color-mix(in srgb, var(--warning-color) 6%, transparent);
+    --warning-bg-strong:   color-mix(in srgb, var(--warning-color) 16%, transparent);
+    --warning-bg-heavy:    color-mix(in srgb, var(--warning-color) 23%, transparent);
+    --warning-line-strong: color-mix(in srgb, var(--warning-color) 40%, transparent);
+    --warning-line-heavy:  color-mix(in srgb, var(--warning-color) 50%, transparent);
+    --warning-line-vivid:  color-mix(in srgb, var(--warning-color) 60%, transparent);
+    --accent-bg-subtle:    color-mix(in srgb, var(--accent-color) 6%, transparent);
+    --accent-bg-strong:    color-mix(in srgb, var(--accent-color) 16%, transparent);
+    --accent-bg-heavy:     color-mix(in srgb, var(--accent-color) 23%, transparent);
+    --accent-line-strong:  color-mix(in srgb, var(--accent-color) 40%, transparent);
+    --accent-line-heavy:   color-mix(in srgb, var(--accent-color) 50%, transparent);
+    --accent-line-vivid:   color-mix(in srgb, var(--accent-color) 60%, transparent);
+    --success-bg-subtle:   color-mix(in srgb, var(--success-color) 6%, transparent);
+    --success-bg-strong:   color-mix(in srgb, var(--success-color) 16%, transparent);
+    --success-bg-heavy:    color-mix(in srgb, var(--success-color) 23%, transparent);
+    --success-line-strong: color-mix(in srgb, var(--success-color) 40%, transparent);
+    --success-line-heavy:  color-mix(in srgb, var(--success-color) 50%, transparent);
+    --success-line-vivid:  color-mix(in srgb, var(--success-color) 60%, transparent);
 
     // Stacking layers: the one z-index scale (SPEC_DESIGN_SYSTEM §5.3,
     // SPEC_MOTION_TIERS_AND_STYLESHEET_DRY_2026_10_15.md §6.5 item 17).
@@ -523,8 +551,17 @@
     --z-drag-overlay:       1000;
     --z-modal:              9000;
     --z-flyout-menu:        9500;
-    --z-transient:          9999;  // the floating pane's drop preview, the "copied" note (context menus set 9999 inline)
+    --z-capture-indicator:  9998;  // the media-capture indicator
+    --z-transient:          9999;  // the floating pane's drop preview, the "copied" note, the context menus and the tab colour panel
     --z-top:                10000; // the delete confirmation and the zoom level
+
+    // Over everything the app draws, its dialogs included. TypeScript sets
+    // these inline (zindex.ts); index.html repeats the splash's number,
+    // because it paints before any stylesheet has loaded.
+    --z-js-menu:            99999;  // the JS context menu's full-window overlay
+    --z-splash:             99999;  // the startup splash, until the window has settled
+    --z-dev-diagnostics:    999998; // the dev diagnostics panel, under the HUD
+    --z-dev-hud:            999999; // the performance HUD
 }
 
 // Control density. `comfortable` is the default, set on :root; a density

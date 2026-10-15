@@ -44,7 +44,7 @@
         color: var(--main-text-color);
 
         &--selected {
-            background: color-mix(in srgb, var(--accent-color) 22%, transparent);
+            background: var(--accent-bg-heavy);
         }
     }
 
@@ -107,7 +107,7 @@
         color: var(--main-text-color);
 
         &--selected {
-            background: color-mix(in srgb, var(--accent-color) 22%, transparent);
+            background: var(--accent-bg-heavy);
         }
     }
 
@@ -178,8 +178,8 @@
         transition: background var(--duration-decorative-fast), color var(--duration-decorative-fast), border-color var(--duration-decorative-fast);
 
         &:hover {
-            background: color-mix(in srgb, var(--error-color) 15%, transparent);
-            border-color: color-mix(in srgb, var(--error-color) 40%, transparent);
+            background: var(--error-bg-strong);
+            border-color: var(--error-line-strong);
             color: var(--error-color);
         }
     }
@@ -215,7 +215,7 @@
 
         &:hover,
         &:focus {
-            background: color-mix(in srgb, var(--accent-color) 18%, transparent);
+            background: var(--accent-bg-strong);
             outline: none;
         }
     }

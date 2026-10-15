@@ -7,6 +7,7 @@
 
 import { createEffect, createSignal, onCleanup, type JSX } from "solid-js";
 import { Portal } from "solid-js/web";
+import { Z_TRANSIENT } from "@/app/zindex";
 import "./context-menu.scss";
 
 export interface ContextMenuItem {
@@ -85,7 +86,7 @@ export function ContextMenu(props: Props): JSX.Element {
     const style = (): JSX.CSSProperties => {
         const x = Math.min(props.x, window.innerWidth - 260);
         const y = Math.min(props.y, window.innerHeight - 400);
-        return { position: "fixed", left: `${x}px`, top: `${y}px`, "z-index": "9999" };
+        return { position: "fixed", left: `${x}px`, top: `${y}px`, "z-index": Z_TRANSIENT };
     };
 
     return (

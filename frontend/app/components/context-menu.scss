@@ -51,7 +51,7 @@
 
         &:hover:not(.ctx-menu-item--disabled),
         &.ctx-menu-item--focused:not(.ctx-menu-item--disabled) {
-            background: color-mix(in srgb, var(--error-color) 15%, transparent);
+            background: var(--error-bg-strong);
         }
     }
 }

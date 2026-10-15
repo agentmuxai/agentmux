@@ -115,10 +115,10 @@
 
     &--primary {
         color: var(--main-text-color);
-        border-color: color-mix(in srgb, var(--error-color) 60%, transparent);
+        border-color: var(--error-line-vivid);
         background: var(--error-bg);
 
-        &:hover { background: color-mix(in srgb, var(--error-color) 24%, transparent); }
+        &:hover { background: var(--error-bg-heavy); }
     }
 
     &:disabled {

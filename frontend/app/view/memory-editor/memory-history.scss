@@ -175,11 +175,11 @@
 
     &.is-added {
         color: var(--success-color);
-        background: color-mix(in srgb, var(--success-color) 8%, transparent);
+        background: var(--success-bg-subtle);
     }
 
     &.is-removed {
         color: var(--error-color);
-        background: color-mix(in srgb, var(--error-color) 8%, transparent);
+        background: var(--error-bg-subtle);
     }
 }

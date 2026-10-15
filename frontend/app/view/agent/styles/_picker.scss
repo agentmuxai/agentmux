@@ -92,8 +92,8 @@
         transition: background var(--duration-decorative-fast), color var(--duration-decorative-fast), border-color var(--duration-decorative-fast);
 
         &:hover {
-            background: color-mix(in srgb, var(--error-color) 15%, transparent);
-            border-color: color-mix(in srgb, var(--error-color) 40%, transparent);
+            background: var(--error-bg-strong);
+            border-color: var(--error-line-strong);
             color: var(--error-color);
         }
     }
@@ -289,7 +289,7 @@
 
         &:hover:not(:disabled) {
             border-color: var(--accent-color);
-            background: color-mix(in srgb, var(--accent-color) 8%, transparent);
+            background: var(--accent-bg-subtle);
         }
 
         &:disabled {
@@ -299,7 +299,7 @@
 
         &--launching {
             border-color: var(--accent-color);
-            background: color-mix(in srgb, var(--accent-color) 6%, transparent);
+            background: var(--accent-bg-subtle);
         }
 
         &--new {
@@ -522,19 +522,19 @@
 
             &:hover {
                 border-color: var(--accent-color);
-                background: color-mix(in srgb, var(--accent-color) 15%, transparent);
+                background: var(--accent-bg-strong);
             }
 
             &--confirm:hover {
                 color: var(--success-color);
                 border-color: var(--success-color);
-                background: color-mix(in srgb, var(--success-color) 15%, transparent);
+                background: var(--success-bg-strong);
             }
 
             &--cancel:hover {
                 color: var(--error-color);
                 border-color: var(--error-color);
-                background: color-mix(in srgb, var(--error-color) 15%, transparent);
+                background: var(--error-bg-strong);
             }
         }
 

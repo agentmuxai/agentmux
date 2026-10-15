@@ -442,7 +442,7 @@
 
     &--active {
         color: var(--warning-color);
-        background: color-mix(in srgb, var(--warning-color) 15%, transparent);
+        background: var(--warning-bg-strong);
     }
     &--retired {
         color: var(--secondary-text-color);

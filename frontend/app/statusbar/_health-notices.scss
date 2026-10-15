@@ -23,7 +23,7 @@
 
     &--critical {
         border-color: var(--error-color);
-        background: color-mix(in srgb, var(--error-color) 16%, transparent);
+        background: var(--error-bg-strong);
     }
 
     &-head {
