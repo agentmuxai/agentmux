@@ -26,6 +26,8 @@ import { Show, createMemo, type JSX } from "solid-js";
 import { ProviderLogo } from "@/element/ProviderLogo";
 import type { AgentDefinition } from "@/app/store/rpc-api";
 import { tokensLabel, tokensTitle } from "./memory-tokens";
+import { bandWords, launchBudget, type AgentWindow } from "./agent-launch-cost";
+import { PROVIDERS, resolveProviderAlias } from "@/app/view/agent/providers/catalog";
 
 /** Per-agent memory-count fetch state. `error` is distinct from `count: 0`. */
 export type MemoryCountState =
@@ -39,6 +41,30 @@ interface MemoryAgentCardProps {
     count: MemoryCountState;
     /** Opens this agent's memory detail view. */
     onSelect: (agent: AgentDefinition) => void;
+    /** What its next launch delivers (`memory:launchcost`), and its context
+     *  window when an open pane has reported one. `personalDelivered`: whether
+     *  that launch delivers any of its Personal Memory (only Claude's does today). */
+    launch?: { total: number; window: AgentWindow | null; personalDelivered?: boolean } | null;
+}
+
+/** "Not delivered to Codex agents" when the agent has Personal Memory its
+ *  launch doesn't deliver, else "" (SPEC_MEMORY_PANE_TOKENS_2026_10_15.md §5.3). */
+export function undeliveredLabel(
+    agent: AgentDefinition,
+    count: MemoryCountState,
+    launch: MemoryAgentCardProps["launch"]
+): string {
+    if (count.kind !== "count" || count.files === 0 || !launch || launch.personalDelivered !== false) return "";
+    const provider = PROVIDERS[resolveProviderAlias(agent.provider ?? "")]?.displayName ?? agent.provider;
+    return provider ? `Not delivered to ${provider} agents` : "Not delivered at launch";
+}
+
+/** The launch line: "Starts with ~12k tok · 6% of 200k · large". */
+export function launchLine(launch: { total: number; window: AgentWindow | null }): string {
+    const budget = launch.window ? launchBudget(launch.total, launch.window.window) : null;
+    return [`Starts with ${tokensLabel(launch.total)}`, budget?.share, budget ? bandWords(budget.band) : ""]
+        .filter(Boolean)
+        .join(" · ");
 }
 
 /** The count line's text — pulled out so the render and its aria-label can't
@@ -78,7 +104,14 @@ export const MemoryAgentCard = (props: MemoryAgentCardProps): JSX.Element => {
             // An errored card stays clickable on purpose: the detail view
             // surfaces the real error text, which is more useful than a dead
             // card that only says something went wrong.
-            aria-label={`${name()} — ${memoryCountLabel(props.count)}`}
+            aria-label={[
+                name(),
+                memoryCountLabel(props.count),
+                undeliveredLabel(props.agent, props.count, props.launch),
+                props.launch ? launchLine(props.launch) : "",
+            ]
+                .filter(Boolean)
+                .join(" — ")}
             title={props.count.kind === "error" ? props.count.message : undefined}
         >
             <ProviderLogo provider={props.agent.provider} size={28} class="memory-agent-card-icon" />
@@ -98,6 +131,30 @@ export const MemoryAgentCard = (props: MemoryAgentCardProps): JSX.Element => {
                     </Show>
                     {memoryCountLabel(props.count)}
                 </span>
+                <Show when={undeliveredLabel(props.agent, props.count, props.launch)}>
+                    {(words) => <span class="memory-agent-card-undelivered">{words()}</span>}
+                </Show>
+                <Show when={props.launch}>
+                    {(launch) => {
+                        const budget = () =>
+                            launch().window ? launchBudget(launch().total, launch().window?.window ?? 0) : null;
+                        return (
+                            <span class="memory-agent-card-launch" title={tokensTitle(launch().total)}>
+                                {launchLine(launch())}
+                                <Show when={budget()}>
+                                    {(b) => (
+                                        <span class="memory-agent-card-launch-bar" aria-hidden="true">
+                                            <span
+                                                class={`memory-agent-card-launch-fill memory-agent-card-launch-fill--${b().band}`}
+                                                style={{ width: `${b().fill * 100}%` }}
+                                            />
+                                        </span>
+                                    )}
+                                </Show>
+                            </span>
+                        );
+                    }}
+                </Show>
             </span>
         </div>
     );
