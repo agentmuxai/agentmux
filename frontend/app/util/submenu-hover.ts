@@ -21,6 +21,15 @@ export interface SubmenuHoverOptions {
      * submenu closes. Default 300.
      */
     closeSafetyTimeoutMs?: number;
+    /**
+     * Whether leaving the trigger or the submenu closes it (after the
+     * safe-triangle grace above). Default true, for a dropdown opened by
+     * hovering a toolbar button. A submenu inside a menu passes false, as in
+     * a native menu: it stays open when the pointer leaves the menu, and
+     * closes only when another row at its level is hovered (the caller's
+     * peer close), on an outside click, or when its menu closes.
+     */
+    closeOnLeave?: boolean;
     /** Caller shows the submenu (still visibility-hidden until positioned). */
     onOpen: () => void;
     /** Caller hides/unmounts the submenu. */
@@ -119,6 +128,7 @@ function isInsideSafeTriangle(apex: Point, cursor: Point, submenuRect: DOMRect):
 export function createSubmenuHover(opts: SubmenuHoverOptions): SubmenuHoverController {
     const openDelayMs = opts.openDelayMs ?? DEFAULT_OPEN_DELAY_MS;
     const closeSafetyTimeoutMs = opts.closeSafetyTimeoutMs ?? DEFAULT_CLOSE_SAFETY_TIMEOUT_MS;
+    const closeOnLeave = opts.closeOnLeave ?? true;
 
     let isOpen = false;
     let openTimer: ReturnType<typeof setTimeout> | null = null;
@@ -191,7 +201,7 @@ export function createSubmenuHover(opts: SubmenuHoverOptions): SubmenuHoverContr
 
         onTriggerLeave(e) {
             clearOpenTimer();
-            if (!isOpen) return;
+            if (!isOpen || !closeOnLeave) return;
             beginCloseIntent(e);
         },
 
@@ -201,7 +211,7 @@ export function createSubmenuHover(opts: SubmenuHoverOptions): SubmenuHoverContr
         },
 
         onSubmenuLeave(e) {
-            if (!isOpen) return;
+            if (!isOpen || !closeOnLeave) return;
             beginCloseIntent(e);
         },
 

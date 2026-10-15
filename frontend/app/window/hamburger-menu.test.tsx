@@ -54,7 +54,7 @@ const h = vi.hoisted(() => {
         setTheme: vi.fn((_: string) => Promise.resolve()),
         setOpacity: vi.fn(),
     };
-    return { createTab, openNewWindow, openModal, CommandPaletteModal, store, settings, caps, win, menu: { items: [] as MenuItem[] } };
+    return { createTab, openNewWindow, openModal, CommandPaletteModal, store, settings, caps, win, menu: { items: [] as MenuItem[], close: vi.fn() } };
 });
 
 // keymodel.ts imports the store as "@/app/store/global", the menu as "@/store/global".
@@ -110,8 +110,9 @@ vi.mock("@/app/store/keymodel-nav", () => ({
 // The real FlyoutMenu positions a floating panel, which jsdom can't lay out.
 // Capture the items it is given; it renders item.shortcut verbatim.
 vi.mock("@/app/element/flyoutmenu", () => ({
-    FlyoutMenu: (props: { items: MenuItem[]; children?: unknown }) => {
+    FlyoutMenu: (props: { items: MenuItem[]; closeRef?: (close: () => void) => void; children?: unknown }) => {
         h.menu.items = props.items;
+        props.closeRef?.(h.menu.close);
         return props.children;
     },
 }));
@@ -121,7 +122,7 @@ import { registerGlobalKeys } from "@/app/store/keymodel";
 import { appHandleKeyDown, keyCommands } from "@/app/store/keymodel-dispatch";
 import { adaptFromReactOrNativeKeyEvent, setKeyUtilPlatform } from "@/util/keyutil";
 import { setPlatform } from "@/util/platformutil";
-import { HamburgerMenu } from "./hamburger-menu";
+import { closeHamburgerMenu, HamburgerMenu } from "./hamburger-menu";
 
 type Platform = "darwin" | "win32" | "linux";
 type Keys = { key: string; code: string; ctrlKey?: boolean; altKey?: boolean; shiftKey?: boolean; metaKey?: boolean };
@@ -378,5 +379,21 @@ describe("Theme and Opacity are this window's", () => {
             dispose();
         });
         cleanup();
+    });
+});
+
+describe("closeHamburgerMenu", () => {
+    afterEach(() => cleanup());
+
+    it("closes a mounted hamburger, and nothing once it is unmounted", () => {
+        const { unmount } = render(() => <HamburgerMenu position="right" />);
+        h.menu.close.mockClear();
+        closeHamburgerMenu();
+        expect(h.menu.close).toHaveBeenCalledTimes(1);
+
+        unmount();
+        h.menu.close.mockClear();
+        closeHamburgerMenu();
+        expect(h.menu.close).not.toHaveBeenCalled();
     });
 });

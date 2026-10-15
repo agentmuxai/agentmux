@@ -32,7 +32,7 @@ import { THEME_OPTIONS } from "@/app/menu/base-menus";
 import { shortcutFor } from "@/app/keybindings";
 import { saveCurrentLayout } from "./save-layout";
 import { openLayoutFromFile } from "./open-layout";
-import { createMemo, type JSX } from "solid-js";
+import { createMemo, onCleanup, type JSX } from "solid-js";
 import "./hamburger-menu.scss";
 
 interface HamburgerMenuProps {
@@ -44,7 +44,21 @@ interface HamburgerMenuProps {
     position?: "left" | "right";
 }
 
+// Every mounted hamburger's close, so the "…" More dropdown can close it when
+// it opens beside it (action-widgets.tsx): on macOS both sit at the right of
+// the header, and a More opened by hover drew over an open hamburger.
+const hamburgerClosers = new Set<() => void>();
+
+/** Closes the hamburger menu if it is open. */
+export function closeHamburgerMenu(): void {
+    for (const close of hamburgerClosers) close();
+}
+
 export function HamburgerMenu(props: HamburgerMenuProps): JSX.Element {
+    let close: (() => void) | undefined;
+    onCleanup(() => {
+        if (close) hamburgerClosers.delete(close);
+    });
     const menuItems = createMemo((): MenuItem[] => {
         // Theme and Opacity stay open while the user tries values (keepOpen),
         // so a choice must not rebuild the items: that would remount the open
@@ -195,6 +209,10 @@ export function HamburgerMenu(props: HamburgerMenuProps): JSX.Element {
             items={menuItems()}
             placement={atRight() ? "bottom-end" : "bottom-start"}
             mirrored={atRight()}
+            closeRef={(fn) => {
+                close = fn;
+                hamburgerClosers.add(fn);
+            }}
         >
             <button
                 class="hamburger-btn"
