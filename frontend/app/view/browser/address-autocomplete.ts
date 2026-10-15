@@ -57,22 +57,37 @@ export function createAddressAutocomplete(query: AutocompleteQuery): AddressAuto
     let inFlight = false;
     let waiting: string | null = null;
 
+    const clear = () => {
+        setMatches([]);
+        setMatchesFor("");
+        setSelected(-1);
+    };
+
     const run = (text: string) => {
         inFlight = true;
+        // The list stays open while this runs (`open`), so an answer for the
+        // newest text that brings no list must close it, not leave the old one.
+        const newest = () => text === current && waiting === null;
         query(text)
             .then((result) => {
-                if (!result) return;
+                if (!result) {
+                    if (newest()) clear();
+                    return;
+                }
                 if (!result.supported) {
                     setSupported(false);
+                    clear();
                     return;
                 }
                 // Only the answer for the newest text is shown.
-                if (text !== current || waiting !== null) return;
+                if (!newest()) return;
                 setMatches(result.matches);
                 setMatchesFor(text);
                 setSelected(-1);
             })
-            .catch(() => {})
+            .catch(() => {
+                if (newest()) clear();
+            })
             .finally(() => {
                 inFlight = false;
                 if (waiting !== null) {
@@ -86,9 +101,7 @@ export function createAddressAutocomplete(query: AutocompleteQuery): AddressAuto
     const close = () => {
         current = "";
         waiting = null;
-        setMatches([]);
-        setMatchesFor("");
-        setSelected(-1);
+        clear();
     };
 
     return {
