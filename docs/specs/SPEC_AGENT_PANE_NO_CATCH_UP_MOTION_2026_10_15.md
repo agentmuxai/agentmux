@@ -1,7 +1,7 @@
 # Spec: an agent pane shows its latest content still, on a tab switch and on a send
 
 **Date:** 2026-10-15
-**Status:** active. Shipped: §4.1, rows on screen stay put when rows above are removed or inserted (#4962); §3.1 and §3.2, a pane shown again lands at its latest content (#4963). Left: §3.3-§3.5, §4.2, §4.3.
+**Status:** active. Shipped: §4.1, rows on screen stay put when rows above are removed or inserted (#4962); §3.1 and §3.2, a pane shown again lands at its latest content (#4963).; §3.2's window counted from the first painted frame (PR_PENDING), after the lab (§3.6). Left: §3.3-§3.5, §4.2, §4.3.
 **Scope:** the agent pane's transcript (`frontend/app/view/agent/`): the one-way scroll flow, the virtual list, the live-feed roll-off.
 **Related:** `SPEC_AGENT_PANE_ONE_WAY_FLOW_2026_10_07.md` (the follower, spacer room, commit points), `SPEC_RENDERER_RECYCLE_WHEN_IDLE_2026_10_13.md` (stable row ids, #4952).
 
@@ -50,7 +50,7 @@ The send itself changes no transcript rows: `TurnStart` and `PendingMessageQueue
 
 **3.1 Know when the pane is shown.** The virtual list reads dormancy (`useAgentDormant()`; the provider already wraps it, `agent-view.tsx:1219`) and reacts to dormant → active. The reaction only applies while the pane follows (`viewState.stickToBottom()`): a pane the user scrolled up keeps its place, which on-screen compensation already does.
 
-**3.2 Land, don't ease, while the frozen content commits.** On show, `OneWayFlow` lands at the bottom and opens a settle window (`settleOnShow()`, the commit window's mechanism, `one-way-flow.ts:256-270`; spacer room is given up too, since nothing was painted while the pane was hidden): until it closes, every resize writes the true bottom before paint. Long enough to cover the staged commits (the 90 ms settled render, the 150 ms tool-log transition): 400 ms. The first frame after the switch is then already at the bottom, and so is every frame while the content settles.
+**3.2 Land, don't ease, while the frozen content commits.** On show, `OneWayFlow` lands at the bottom and opens a settle window (`settleOnShow()`, the commit window's mechanism, `one-way-flow.ts:256-270`; spacer room is given up too, since nothing was painted while the pane was hidden): until it closes, every resize writes the true bottom before paint. Long enough to cover the staged commits (the 90 ms settled render, the 150 ms tool-log transition): 400 ms. The first frame after the switch is then already at the bottom, and so is every frame while the content settles. The window also counts from the first painted frame after the show: in a packaged build the lab measured about 330 ms of drawing before that frame, which used up a window started at the show.
 
 After the window, output that arrives is new: the follower eases it in as today. That is "if the agent is busy, it scrolls normally as it processes", with no special case for busy.
 
@@ -61,6 +61,8 @@ After the window, output that arrives is new: the follower eases it in as today.
 **3.4 No fades for rows mounted while hidden.** Rows mounted while the tab was under `content-visibility: hidden` (the legacy setting, or during a window resize) would fade in together on show (`styles/_document.scss:287-325`). Clear `data-animate` while dormant and set it again a frame after show.
 
 **3.5 Legacy path.** Skip `glideContent` and `holdBufferHeight` during the same window (`AgentDocumentVirtualList.tsx:1106-1108`).
+
+**3.6 What the lab showed (2026-10-15).** Sampled after paint in packaged builds, with the app's one-way recorder on: with §3.2, every painted frame after a show is at the bottom (0 frames short of it; 3 frames, up to 584 px, without). But the content the pane got while hidden still arrives in stages after the show (about 4,700, then 2,200, then 1,000 px over three frames), and a pane pinned to the bottom shows each stage as the text jumping up: about 5,400 px of motion in both builds. That is the reported "fast scroll", and no scroll rule removes it. Proposed next: keep the pane covered (its document hidden, the background showing) from the show until its layout has settled (two frames with no resize, at most 400 ms), then reveal it at the bottom. Then the pane appears once, with its latest content; output after that scrolls in as usual.
 
 ## 4. Design: sending after idle
 
