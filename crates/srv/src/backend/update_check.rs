@@ -22,8 +22,6 @@ use std::time::Duration;
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 
-/// Settings key: check for new releases. On unless set to `false`.
-pub const SETTING_UPDATE_CHECK: &str = "app:updatecheck";
 /// The event every window gets when the status changes.
 pub const EVENT_APP_UPDATE_STATUS: &str = "app:updatestatus";
 
@@ -32,6 +30,8 @@ pub const EVENT_APP_UPDATE_STATUS: &str = "app:updatestatus";
 const LATEST_RELEASE_URL: &str = "https://api.github.com/repos/agentmuxai/agentmux/releases/latest";
 const FIRST_CHECK_AFTER: Duration = Duration::from_secs(60);
 const CHECK_EVERY: Duration = Duration::from_secs(6 * 60 * 60);
+/// How often `app:updatecheck` is re-read.
+const SETTING_POLL: Duration = Duration::from_secs(60);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 /// Release notes kept for the panel, in bytes.
 const MAX_NOTES_BYTES: usize = 16 * 1024;
@@ -159,9 +159,10 @@ pub fn current_status() -> AppUpdateStatus {
         .unwrap_or_else(|| AppUpdateStatus::initial(env!("CARGO_PKG_VERSION"), true))
 }
 
-/// Whether the user lets AgentMux check: on unless set to `false`.
+/// Whether the user lets AgentMux check (`app:updatecheck`): on unless set
+/// to `false`. The key is written out so settings-defaults.test.ts sees the default.
 fn check_enabled(config: &crate::backend::wconfig::ConfigState) -> bool {
-    config.get_settings().extra.get(SETTING_UPDATE_CHECK).and_then(|v| v.as_bool()).unwrap_or(true)
+    config.get_settings().extra.get("app:updatecheck").and_then(|v| v.as_bool()).unwrap_or(true)
 }
 
 async fn fetch_latest(client: &reqwest::Client) -> Result<Release, String> {
@@ -194,23 +195,29 @@ pub fn spawn(config: Arc<crate::backend::wconfig::ConfigState>, event_bus: Arc<c
     };
     tokio::spawn(async move {
         tokio::time::sleep(FIRST_CHECK_AFTER).await;
+        // The setting is re-read every minute, so turning it off clears the
+        // chip at once and turning it on checks at once; GitHub is asked at
+        // most every 6 hours while it stays on.
+        let mut last_asked: Option<std::time::Instant> = None;
         loop {
-            let next = if check_enabled(&config) {
+            if !check_enabled(&config) {
+                last_asked = None;
+                publish(&event_bus, AppUpdateStatus::initial(current, false));
+            } else if last_asked.is_none_or(|t| t.elapsed() >= CHECK_EVERY) {
+                last_asked = Some(std::time::Instant::now());
                 let channel = crate::backend::reactive::registry::local_channel_id();
-                match fetch_latest(&client).await {
-                    Ok(release) => Some(status_for(current, &channel, &release, agentmux_common::time::now_ms())),
+                let next = match fetch_latest(&client).await {
+                    Ok(release) => status_for(current, &channel, &release, agentmux_common::time::now_ms()),
                     Err(e) => {
                         tracing::info!(error = %e, "update check: no answer, trying again later");
-                        None
+                        // Keep what an earlier check found; after "off", say "not checked yet".
+                        let cur = current_status();
+                        if cur.state == "off" { AppUpdateStatus::initial(current, true) } else { cur }
                     }
-                }
-            } else {
-                Some(AppUpdateStatus::initial(current, false))
-            };
-            if let Some(next) = next {
+                };
                 publish(&event_bus, next);
             }
-            tokio::time::sleep(CHECK_EVERY).await;
+            tokio::time::sleep(SETTING_POLL).await;
         }
     });
 }

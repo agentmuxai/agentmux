@@ -1,9 +1,8 @@
 # SPEC: upgrading AgentMux, for users and for agents
 
 **Date:** 2026-10-15
-**Status:** active. Phase 1 (detection, the chip, Maintenance's "What's
-new" and Download) is built in the PR that adds this file; phases 2–5 are
-not started. The operator took the §8 recommendations on 2026-10-15.
+**Status:** active — phase 1 (detection, the chip, Maintenance's "What's
+new" and Download) in #4983; phases 2–5 are not started. The operator took the §8 recommendations on 2026-10-15.
 **Asked for:** "agents need a way to upgrade their running instances and
 continue on. Users also need a button to let them know. We did work on this
 in the past, find the history, let's consolidate; we have partial work in the
@@ -64,20 +63,24 @@ an agent asking for something that affects the user),
   unauthenticated, from srv (it already has an HTTP client and the network
   settings). Compare the tag's semver with this build's. Pre-releases are
   ignored.
-- **When:** 60 s after the first window is interactive, then every 6 h while
-  running. Never during startup, never blocking anything (fast-startup §5).
-  Offline, rate-limited or any error means "no news", not a retry loop.
-- **What's kept:** the latest tag, its notes (the release body, which is the
-  `VERSION_HISTORY.md` section), its assets and their sizes, and when it was
-  checked.
-- **Published as:** the `app-update-status` event the frontend already
-  listens for: `up-to-date`, `available {version, notes}`,
-  `downloading {percent}`, `ready {version}`, `error {message}`.
+- **When:** 60 s after srv starts, then every 6 h while running. Never
+  during startup, never blocking anything (fast-startup §5). Offline,
+  rate-limited or any error means "no news", not a retry loop.
+- **What's kept** (`backend::update_check::AppUpdateStatus`): this build's
+  version, the latest release's version, page and notes (the release body,
+  which is the `VERSION_HISTORY.md` section, up to 16 KB), when it was
+  published, and when it was checked. Phase 3 adds its assets and their sizes.
+- **Published as:** the typed `app:updatestatus` event when the status
+  changes, and the `app.update-status` command for a window that opens
+  later. States: `up-to-date`, `available`, `local-build`, `off` (the check
+  is turned off) and `unknown` (not checked yet). Phase 3 adds the download
+  states.
 - **Setting:** `app:updatecheck` (on by default; off means no request is
-  ever made).
+  ever made). It is re-read every minute: turning it off clears the chip at
+  once, turning it on checks at once.
 - **Local and dev builds** (`task package`, `task dev`; channel `local-…` or
   `dev-…`) don't offer an update: they aren't released versions. The panel
-  says "Built from <sha>. The latest release is 0.59.27." and links the release.
+  says "Local build. The latest release is v0.59.27." and links the release.
 
 ## 4. Applying it
 
