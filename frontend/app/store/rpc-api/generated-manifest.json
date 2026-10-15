@@ -1319,6 +1319,10 @@
             "dataType": "import(\"@/app/store/rpc-api/bundle\").BundleValidateInput"
         },
         {
+            "command": "app.update-download",
+            "method": "AppUpdateDownloadCommand"
+        },
+        {
             "command": "app.update-status",
             "method": "AppUpdateStatusCommand"
         },

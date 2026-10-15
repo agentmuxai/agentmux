@@ -484,6 +484,8 @@ pub const COMMAND_VIEWER_AGENT_HIDDEN: &str = "viewer.agent-hidden";
 pub const COMMAND_VIEWER_CAN_SEND: &str = "viewer.can-send";
 // What srv knows about newer AgentMux releases (backend::update_check).
 pub const COMMAND_APP_UPDATE_STATUS: &str = "app.update-status";
+// Download and stage the newer release (backend::update_download).
+pub const COMMAND_APP_UPDATE_DOWNLOAD: &str = "app.update-download";
 
 // The cloud presence publisher (muxbus::wan_presence): its state, and a try now.
 pub const COMMAND_PRESENCE_STATUS: &str = "presence.status";

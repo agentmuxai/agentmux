@@ -2246,6 +2246,10 @@ export const GeneratedApi = {
   ): Promise<ValidationReport> {
     return client.rpcCall("bundle.validate", data, opts);
   },
+  // command "app.update-download"
+  AppUpdateDownloadCommand(client: RpcClient, opts?: RpcOpts): Promise<AppUpdateStatus> {
+    return client.rpcCall("app.update-download", {}, opts);
+  },
   // command "app.update-status"
   AppUpdateStatusCommand(client: RpcClient, opts?: RpcOpts): Promise<AppUpdateStatus> {
     return client.rpcCall("app.update-status", {}, opts);

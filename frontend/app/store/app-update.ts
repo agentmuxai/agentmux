@@ -15,6 +15,7 @@ import { WpsEvent } from "@/app/store/mps-events";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import type { AppUpdateStatus } from "@/types/rpc/AppUpdateStatus";
+import type { DownloadStatus } from "@/types/rpc/DownloadStatus";
 
 export type { AppUpdateStatus } from "@/types/rpc/AppUpdateStatus";
 
@@ -48,6 +49,17 @@ export async function loadAppUpdate(): Promise<void> {
 export function availableRelease(s: AppUpdateStatus | null = appUpdate()): { version: string; url: string } | null {
     if (s?.state !== "available" || !s.latest || !s.url) return null;
     return { version: s.latest, url: s.url };
+}
+
+/** srv's download of the newer release, or null before one was asked for. */
+export function releaseDownload(s: AppUpdateStatus | null = appUpdate()): DownloadStatus | null {
+    const d = s?.download;
+    return d && s?.latest && d.version === s.latest ? d : null;
+}
+
+/** Ask srv to download and stage the newer release; progress arrives as events. */
+export async function startAppUpdateDownload(): Promise<void> {
+    acceptAppUpdate(await RpcApi.AppUpdateDownloadCommand(TabRpcClient));
 }
 
 /** Open the version panel, where the Maintenance section shows the release. */

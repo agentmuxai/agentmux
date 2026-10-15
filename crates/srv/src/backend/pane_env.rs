@@ -359,6 +359,8 @@ mod spawn_site_coverage {
          "sanitized: Unix branch of the same node, one sanitize_process_command covers both"),
         ("src/backend/shell_node.rs", "program", 1,
          "sanitized: an agent Shell run elsewhere (wsl.exe for WSL, ssh for SSH), the same sanitize_process_command"),
+        ("src/backend/update_download.rs", "tar_exe(", 2,
+         "sanitized: Windows' tar.exe unpacks a downloaded release, sanitize_external_command; the second is the test that builds its archive"),
         ("src/backend/tool_store.rs", "\"where\"", 2,
          "probe: Windows PATH lookup for a tool; output parsed for a path, never executed"),
         ("src/backend/tool_store.rs", "\"which\"", 2,
