@@ -214,6 +214,14 @@ describe("An area alone", () => {
         expect(screen.getByRole("list", { name: "Volumes" }).textContent).toBe("/data100.0 GB free of 500.0 GB");
     });
 
+    it("lists a simple view's own measures, and no others, as a table", () => {
+        render(() => <MeasureTable plotData={DATA} keys={["cpu", "mem:used", "cpu:1"]} />);
+        const names = [...document.querySelectorAll(".sysinfo-overview-table tbody th")].map((c) => c.textContent);
+        expect(names).toEqual(["CPU", "Memory used", "Core 1"]);
+        const memRow = [...document.querySelectorAll(".sysinfo-overview-table tbody tr")][1];
+        expect(memRow.children[1].textContent).toBe("12.0 GB");
+    });
+
     it("lists only its own measures as a table", () => {
         render(() => <MeasureTable plotData={DATA} focus="net" />);
         const names = [...document.querySelectorAll(".sysinfo-overview-table tbody th")].map((c) => c.textContent);

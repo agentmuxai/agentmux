@@ -119,6 +119,18 @@ describe("SysinfoViewModel focus", () => {
         });
     });
 
+    it("keeps a pane that saved an area but no plot type on the area view", () => {
+        createRoot((dispose) => {
+            const { model: m } = model({ "sysinfo:focus": "mem" });
+            expect(m.plotTypeSelectedAtom()).toBe("Overview");
+            expect(m.viewName()).toBe("Memory");
+            expect(model({ "sysinfo:focus": "advanced" }).model.viewName()).toBe("Everything");
+            // Nothing saved: simple CPU.
+            expect(model().model.plotTypeSelectedAtom()).toBe("CPU");
+            dispose();
+        });
+    });
+
     it("is visible only while its pane is active", () => {
         createRoot((dispose) => {
             const [vis, setVis] = createSignal("active");

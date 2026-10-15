@@ -33,6 +33,7 @@ import {
     formatGB,
     formatRate,
     mirroredRange,
+    unitFormat,
     windowStats,
     type WindowStats,
 } from "./sysinfo-overview-data";
@@ -174,8 +175,12 @@ function Tiles(props: { plotData: DataItem[]; targetLen: number; intervalSecs: n
     );
 }
 
-/** The figures as a table: now, low, high and average for the area's measures (every area's in Everything). */
-export function MeasureTable(props: { plotData: DataItem[]; focus: AreaChoice }): JSX.Element {
+/**
+ * The figures as a table: now, low, high and average. An Advanced view lists
+ * its area's measures (every area's in Everything); a simple view lists `keys`,
+ * exactly the measures it charts.
+ */
+export function MeasureTable(props: { plotData: DataItem[]; focus?: AreaChoice; keys?: string[] }): JSX.Element {
     const rows = createMemo(() => {
         const data = props.plotData;
         const line = (name: string, key: string, f: (v: number) => string) => {
@@ -196,6 +201,14 @@ export function MeasureTable(props: { plotData: DataItem[]; focus: AreaChoice })
         ];
         const net = [line("Network in", "net:bytesrecv", formatRate), line("Network out", "net:bytessent", formatRate)];
         const disk = [line("Disk read", "disk:read", formatRate), line("Disk write", "disk:write", formatRate)];
+        if (props.keys) {
+            return props.keys.map((k) => {
+                const meta = DefaultPlotMeta[k];
+                const core = /^cpu:(\d+)$/.exec(k);
+                const name = meta?.name ?? (core ? `Core ${core[1]}` : k);
+                return line(name, k, core ? pct : unitFormat(meta));
+            });
+        }
         switch (props.focus) {
             case "cpu":
                 return [line("CPU", "cpu", pct), ...cores];

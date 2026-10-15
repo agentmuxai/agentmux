@@ -155,11 +155,15 @@ function SysinfoViewInner(props: SysinfoViewProps): JSX.Element {
     );
     const view = () => (overview() ? model.focus() : model.plotTypeSelectedAtom());
     const onView = (v: string) => (overview() ? model.setFocus(v as AreaChoice) : void model.setSimpleView(v));
-    // The table lists the area shown: a simple view's own (`SIMPLE_VIEWS`).
-    const tableArea = (): AreaChoice =>
-        overview()
-            ? model.focus()
-            : (SIMPLE_VIEWS.find((v) => v.type === model.plotTypeSelectedAtom())?.area ?? "everything");
+    // The table lists what the view shows: an Advanced view's area, or exactly
+    // the measures a simple view charts. It scrolls when it is taller than the pane.
+    const measureTable = () => (
+        <div class="sysinfo-table-scroll">
+            <Show when={overview()} fallback={<MeasureTable plotData={plotData()} keys={yvals()} />}>
+                <MeasureTable plotData={plotData()} focus={model.focus()} />
+            </Show>
+        </div>
+    );
 
     return (
         <div class="sysinfo-pane">
@@ -178,7 +182,7 @@ function SysinfoViewInner(props: SysinfoViewProps): JSX.Element {
                 table={table()}
                 onTable={setTable}
             />
-            <Show when={!table()} fallback={<MeasureTable plotData={plotData()} focus={tableArea()} />}>
+            <Show when={!table()} fallback={measureTable()}>
                 <Show
                     when={!overview()}
                     fallback={

@@ -9,7 +9,7 @@
  * docs/reports/REPORT_SYSINFO_REWRITE_AND_MODERN_MONITOR_2026_10_13.md section 5.3.
  */
 
-import { niceCeil } from "./sysinfo-chart";
+import { formatValue, niceCeil } from "./sysinfo-chart";
 import type { DataItem } from "./sysinfo-types";
 
 /** The visible window's view of one metric. */
@@ -79,6 +79,20 @@ export function formatRate(mbps: number | null | undefined): string {
     if (v >= 1000) return `${(v / 1000).toFixed(1)} GB/s`;
     if (v >= 1) return `${v.toFixed(1)} MB/s`;
     return `${(v * 1000).toFixed(0)} KB/s`;
+}
+
+/** How a metric's values read, by its unit: "50%", "12.0 GB", "400 KB/s". */
+export function unitFormat(meta: TimeSeriesMeta | undefined): (v: number) => string {
+    switch (meta?.label) {
+        case "%":
+            return (v) => formatValue(v, 0, "%");
+        case "GB":
+            return formatGB;
+        case "MB/s":
+            return formatRate;
+        default:
+            return (v) => formatValue(v, meta?.decimalPlaces ?? 0, meta?.label ?? "");
+    }
 }
 
 /** A size given in GB, to one decimal. */

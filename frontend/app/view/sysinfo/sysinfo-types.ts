@@ -2,8 +2,6 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { AreaChoice } from "./sysinfo-overview-data";
-
 export const DefaultNumPoints = 120;
 
 export type DataItem = {
@@ -123,18 +121,18 @@ export const PlotTypes: Record<string, (dataItem: DataItem) => string[]> = {
  * "Simple" in the pane's menus. `type` is the plot type saved in the pane's
  * meta (`sysinfo:type`), kept as it was so saved panes still open on it;
  * `label` is how the menus and the pane's title name it, `short` how the
- * control row does, and `area` whose figures its table lists.
+ * control row does.
  */
-export const SIMPLE_VIEWS: { type: string; label: string; short: string; area: AreaChoice }[] = [
-    { type: "CPU", label: "CPU", short: "CPU", area: "cpu" },
-    { type: "All CPU", label: "All cores", short: "Cores", area: "cpu" },
-    { type: "Mem", label: "Memory", short: "Memory", area: "mem" },
-    { type: "Net", label: "Network", short: "Network", area: "net" },
-    { type: "Net (Sent/Recv)", label: "Network sent and received", short: "Net in/out", area: "net" },
-    { type: "Disk I/O", label: "Disk", short: "Disk", area: "disk" },
-    { type: "Disk I/O (R/W)", label: "Disk read and write", short: "Disk r/w", area: "disk" },
-    { type: "CPU + Mem", label: "CPU and memory", short: "CPU+Mem", area: "everything" },
-    { type: "CPU + Mem + Net", label: "CPU, memory and network", short: "CPU+Mem+Net", area: "everything" },
+export const SIMPLE_VIEWS: { type: string; label: string; short: string }[] = [
+    { type: "CPU", label: "CPU", short: "CPU" },
+    { type: "All CPU", label: "All cores", short: "Cores" },
+    { type: "Mem", label: "Memory", short: "Memory" },
+    { type: "Net", label: "Network", short: "Network" },
+    { type: "Net (Sent/Recv)", label: "Network sent and received", short: "Net in/out" },
+    { type: "Disk I/O", label: "Disk", short: "Disk" },
+    { type: "Disk I/O (R/W)", label: "Disk read and write", short: "Disk r/w" },
+    { type: "CPU + Mem", label: "CPU and memory", short: "CPU+Mem" },
+    { type: "CPU + Mem + Net", label: "CPU, memory and network", short: "CPU+Mem+Net" },
 ];
 
 export const DefaultPlotMeta: Record<string, TimeSeriesMeta> = {

@@ -365,8 +365,10 @@ class SysinfoViewModel {
         this.plotTypeSelectedAtom = createMemo(() => {
             const blockData = { meta: this.meta() };
             const plotType = blockData?.meta?.["sysinfo:type"];
-            if (plotType == null || typeof plotType != "string") return DefaultPlotType;
-            return plotType;
+            if (typeof plotType === "string" && plotType) return plotType;
+            // A pane that saved an area but no plot type did so when the area
+            // view was the default: it stays on it.
+            return blockData?.meta?.["sysinfo:focus"] != null ? AreaPlotType : DefaultPlotType;
         });
 
         this.metrics = createMemo(() => {

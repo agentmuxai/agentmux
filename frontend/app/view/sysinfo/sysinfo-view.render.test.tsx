@@ -99,12 +99,15 @@ describe("SysinfoView controls", () => {
         expect(bar().paused).toBe(true);
     });
 
-    it("shows a simple view's figures as a table of its area", () => {
+    it("lists exactly a simple view's measures as its table, and an Advanced view's area", () => {
         const { model, setPlotType } = fakeModel();
-        setPlotType("Net (Sent/Recv)");
+        setPlotType("CPU + Mem");
         render(() => <SysinfoView blockId="b" model={model} />);
         bar().onTable(true);
-        expect(seen.table[seen.table.length - 1].focus).toBe("net");
+        // The fake model charts ["cpu"] whatever its plot type.
+        expect(seen.table[seen.table.length - 1].keys).toEqual(["cpu"]);
+        setPlotType("Overview");
+        expect(seen.table[seen.table.length - 1].focus).toBe("cpu");
     });
 });
 

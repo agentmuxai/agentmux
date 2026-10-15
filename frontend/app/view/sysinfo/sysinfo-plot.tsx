@@ -32,7 +32,7 @@ import {
     xWindowSecs,
     yRange,
 } from "./sysinfo-chart";
-import { figures, formatGB, formatRate, titled } from "./sysinfo-overview-data";
+import { figures, titled, unitFormat } from "./sysinfo-overview-data";
 import type { DataItem } from "./sysinfo-types";
 
 /** At most one resize per this many ms while the pane is being dragged. */
@@ -269,20 +269,6 @@ type SingleLinePlotProps = {
     intervalSecs: number;
     syncKey?: string;
 };
-
-/** How a metric's values read, by its unit: "50%", "12.0 GB", "400 KB/s". */
-function unitFormat(meta: TimeSeriesMeta | undefined): (v: number) => string {
-    switch (meta?.label) {
-        case "%":
-            return (v) => formatValue(v, 0, "%");
-        case "GB":
-            return formatGB;
-        case "MB/s":
-            return formatRate;
-        default:
-            return (v) => formatValue(v, meta?.decimalPlaces ?? 0, meta?.label ?? "");
-    }
-}
 
 /**
  * One metric, as a simple view shows it: titled with its figures now and over

@@ -98,3 +98,10 @@
     font-size: 11px;
     color: var(--grey-text-color);
 }
+
+// The figures as a table (sysinfo-view.tsx): it scrolls when taller than the pane.
+.sysinfo-table-scroll {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+}
