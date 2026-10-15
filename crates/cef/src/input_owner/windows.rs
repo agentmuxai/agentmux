@@ -19,9 +19,11 @@ use super::registry;
 /// The app state, for the top-level window hook, which Windows calls without one.
 static STATE: OnceLock<Arc<AppState>> = OnceLock::new();
 
-/// Give the top-level window hook the app state. Idempotent.
+/// Give the top-level window hook the app state, and install the input
+/// diagnostics (`watch`). Idempotent; called on the UI thread.
 pub fn set_state(state: &Arc<AppState>) {
     let _ = STATE.set(state.clone());
+    super::watch::install(state);
 }
 
 /// Step `window`'s machine and run what it returns.
