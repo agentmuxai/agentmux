@@ -3,7 +3,8 @@
 **Date:** 2026-10-15
 **Status:** active — phase 1 (detection, the chip, Maintenance's "What's
 new" and Download) in #4983; phase 2 (data carries forward) in #4996;
-phases 3–5 are not started. The operator took the §8 recommendations on 2026-10-15.
+phase 3a (download and stage, Windows portable) in #NNNN; the rest of
+phase 3 and phases 4–5 are not started. The operator took the §8 recommendations on 2026-10-15.
 **Asked for:** "agents need a way to upgrade their running instances and
 continue on. Users also need a button to let them know. We did work on this
 in the past, find the history, let's consolidate; we have partial work in the
@@ -105,24 +106,36 @@ an agent asking for something that affects the user),
 
 ### 4.2 By kind of install
 
-Detected lazily, when the user clicks (fast-startup §5.3).
+srv reads how it was installed from where its own binary is
+(`backend/update_install.rs`), and names the release file for that kind as
+CI publishes it (`.github/workflows/build-*.yml`).
 
-| Install | Download | Apply |
-|---|---|---|
-| Windows portable `.7z` | The release's `.7z` | Extract next to the running folder, then the launcher starts the new folder's launcher and exits. The old folder is left in place; Maintenance offers to delete old versions |
-| Windows installer (`setup.exe`) | The `setup.exe` | Run it silently after srv stops; it relaunches |
-| Windows MSIX | — | Open the `.msix` (App Installer handles the swap) |
-| macOS `.dmg` | The `.dmg` | Mount, verify, replace `AgentMux.app` after quit, relaunch |
-| Linux AppImage / portable `.tar.xz` | The file | Replace and relaunch, like the Windows portable |
-| Linux `.deb` / `.rpm` | — | Show the command or download link: the package manager owns the files |
+| Install | How it's recognised | Release file | Apply | Phase |
+|---|---|---|---|---|
+| Windows portable | `runtime/agentmux-portable.marker` beside srv, `agentmux.exe` above it | `agentmux-<v>-x64-portable.7z` | Unpack with Windows' `tar.exe` into `agentmux-<v>-x64-portable` next to the running folder (or under `~/.agentmux/updates/<v>/` when that can't be written); the launcher starts the new folder's launcher and exits. The old folder stays; Maintenance offers to delete old versions | 3a, 3b |
+| Windows `setup.exe` (Inno Setup, per-user by default, fixed AppId) | any other Windows install | `AgentMux-<v>-x64-setup.exe` | The launcher exits, the installer runs silently (`/VERYSILENT /SUPPRESSMSGBOXES`) and replaces the install in place; a `[Run]` entry for silent runs relaunches it. An all-users install asks Windows for permission | 3d |
+| Microsoft Store (`.msix`, Store ID 9P9QCXNNCRK3) | under `WindowsApps` | — | The Store updates it; AgentMux can't replace its own files. "Update in the Store" opens the Store page, or asks the Store API to install it. The Store certifies a release after GitHub publishes it, so the chip defers to the Store | 3f |
+| macOS `.dmg` | inside an `.app` | `AgentMux_<v>_arm64.dmg` | Mount, check `codesign --verify` and the Gatekeeper assessment, replace `AgentMux.app` after quit, relaunch. The bundle id carries the version (`ai.agentmux.<channel>.<version>`), so check first whether macOS asks for permissions again after each upgrade | 3c |
+| Linux AppImage | `$APPIMAGE` | `AgentMux_<v>_amd64.AppImage` | Replace that file, relaunch | 3e |
+| Linux portable | the portable marker | `AgentMux_<v>_amd64-portable.tar.xz` | Like the Windows portable, with the system `tar` | 3e |
+| Linux `.deb` / `.rpm` | under `/usr` or `/opt` | `AgentMux_<v>_amd64.deb` / `AgentMux-<v>-1.x86_64.rpm` | Install with the desktop's password prompt (`pkexec`); later an apt/dnf repository so system updates do it | 3g |
 
 ### 4.3 Verifying a download
 
-- Assets come only from `github.com/agentmuxai/agentmux` releases, over TLS,
-  by the asset ids the release lists.
-- Each release publishes SHA-256 sums (a new release step: `SHA256SUMS`, and
-  later a signature over it). A download whose hash doesn't match is deleted
-  and reported.
+- Release files come only from
+  `https://github.com/agentmuxai/agentmux/releases/download/`, as the
+  release lists them; a file the release lists without a SHA-256 isn't
+  offered.
+- GitHub lists a SHA-256 for every release file (`digest` in the releases
+  API). The download is hashed as it arrives and must be exactly that size
+  and hash, or it is deleted and the reason shown.
+- That digest comes from the same place as the file, so it proves the file
+  arrived whole, not who built it. A `SHA256SUMS` signed with a key the app
+  pins is phase 5.
+- What is unpacked must be a portable of exactly that version (the
+  launcher, the marker, `runtime/agentmux-<v>.exe`) before it is moved into
+  place. `tar.exe` refuses `..` and absolute paths, and is run by its full
+  path (`%SystemRoot%\System32\tar.exe`), never whatever `tar` is on `PATH`.
 - On Windows and macOS the installed binaries' code signatures are checked
   before swapping (Authenticode, `codesign --verify` / notarization) where
   the release is signed.
@@ -219,13 +232,21 @@ Each phase is small and useful on its own.
    with **Download** (opens the release page). This is enough for users to know.
 2. **Data carries forward** (§6). Verified and fixed in #4996. Needed
    before any in-app upgrade.
-3. **In-app upgrade for the Windows portable and macOS.** Download, verify,
-   stage, then the launcher flow: wire `run_migration_upgrade` (fast-startup
-   phase 1b) and the relaunch.
+3. **In-app upgrade**, one install kind at a time (§4.2):
+   - **3a**: the Windows portable is downloaded, verified and unpacked next
+     to the running folder (`backend/update_download.rs`,
+     `app.update-download`); Maintenance shows the progress, then "Show
+     folder". Every other kind still opens the release page.
+   - **3b**: **Upgrade & restart**: srv tells the launcher the staged folder
+     (a line on its stderr, which the launcher already reads); the launcher
+     closes the windows (saving the session), stops srv, starts the new
+     launcher and exits. Waits for working agents first (§8).
+   - **3c** macOS, **3d** `setup.exe`, **3e** AppImage and Linux portable,
+     **3f** the Store, **3g** `.deb`/`.rpm`.
 4. **Agents.** `VersionStatus`, `RequestUpgrade` with the gate and the
    banner, the post-restart note, and the result to the asker.
-5. **The other installers** (`setup.exe`, `.msix`, AppImage, `.deb`/`.rpm`
-   guidance), the `SHA256SUMS` release step, and cleanup of old versions.
+5. **Hardening and cleanup:** a signed `SHA256SUMS` release step, code
+   signature checks before a swap, and deleting old versions.
 
 ## 8. Decisions (the operator took these recommendations, 2026-10-15)
 
