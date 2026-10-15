@@ -11,7 +11,7 @@ use std::time::Instant;
 
 use parking_lot::Mutex;
 
-use super::machine::{Effect, Event, WindowInput};
+use super::machine::{Effect, Event, Have, WindowInput};
 
 /// Each window's machine, by window label (`main`, `floating-<uuid>`, …).
 static OWNERS: LazyLock<Mutex<HashMap<String, WindowInput>>> = LazyLock::new(Default::default);
@@ -19,7 +19,7 @@ static OWNERS: LazyLock<Mutex<HashMap<String, WindowInput>>> = LazyLock::new(Def
 static EPOCH: LazyLock<Instant> = LazyLock::new(Instant::now);
 
 /// Milliseconds on a monotonic clock, for the machine's timing.
-fn monotonic_ms() -> u64 {
+pub(super) fn monotonic_ms() -> u64 {
     EPOCH.elapsed().as_millis() as u64
 }
 
@@ -44,6 +44,13 @@ pub fn step(window: &str, event: Event) -> Vec<Effect> {
 /// Whether `window`'s machine counts the window as active.
 pub fn is_active(window: &str) -> bool {
     OWNERS.lock().get(window).is_some_and(|w| w.active)
+}
+
+/// `window`'s machine as the diagnostics need it: whether it is active, where
+/// it last saw the keyboard, and its one-line description.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+pub fn snapshot(window: &str) -> Option<(bool, Have, String)> {
+    OWNERS.lock().get(window).map(|w| (w.active, w.have.clone(), w.describe()))
 }
 
 /// The window whose machine knows pane `block`.

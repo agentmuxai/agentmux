@@ -125,6 +125,21 @@ closing). A selection that isn't usable falls back to `App` when it is applied.
 - **I8:** a selected pane can take focus now, or is waiting for it (parked) within 1.5 s of being selected; otherwise
   the app is the selection.
 
+### 3.5 Diagnostics (Windows)
+
+The wheel and typing failures take long use to reproduce, so each one has to be readable from the log alone. Besides
+the `[input]` line for every change of state, `input_owner/watch.rs` installs thread-local mouse and keyboard hooks on
+the UI thread. They sample the wheel, left clicks and key presses, at most one of each kind per 250 ms, take no lock,
+and post the check to a UI task. A `[input-watch]` warning is logged, at most one per kind per 5 s with a count of the
+rest, when:
+
+- a wheel or click over a visible pane went to another window, or to a pane it wasn't over. The line names the window
+  that got it, the window at that point, and the input owner's state;
+- keys pressed in a window in front went to no window of it, or to a surface other than the one the input owner
+  believes has the keyboard, or the input owner counts that window inactive.
+
+No key codes are read. The per-message wheel and key lines in the pane subclass are debug-level.
+
 ## 4. Phases
 
 | Phase | Content |

@@ -281,10 +281,10 @@ pub unsafe fn install_browser_pane_subclass(
 
         match msg {
             WM_MOUSEWHEEL | WM_MOUSEHWHEEL => {
-                tracing::info!("[pane-wndproc] mouse-wheel hwnd={:p} msg=0x{:x}", hwnd, msg);
+                tracing::debug!("[pane-wndproc] mouse-wheel hwnd={:p} msg=0x{:x}", hwnd, msg);
             }
             WM_KEYDOWN | WM_CHAR => {
-                tracing::info!("[pane-wndproc] key msg=0x{:x} wparam={}", msg, wparam);
+                tracing::debug!("[pane-wndproc] key msg=0x{:x}", msg);
             }
             WM_KILLFOCUS => {
                 tracing::info!("[pane-wndproc] WM_KILLFOCUS hwnd={:p}", hwnd);
