@@ -9,7 +9,7 @@ import { usePaneOverlay } from "@/app/platform/pane-overlay";
 import { ModalLayer } from "@/element/ModalLayer";
 import { useModalLayer } from "@/element/modal-layer";
 import { BrainSpinner } from "@/app/element/BrainSpinner";
-import { atoms } from "@/store/global";
+import { shouldReduceMotion } from "@/app/motion/motion";
 import type { BrowserViewModel } from "./browser-model";
 import { usePaneRectSync } from "./use-pane-rect-sync";
 import { useDragSnapshot, type DragSnapshot } from "./use-drag-snapshot";
@@ -191,10 +191,11 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
             return;
         }
         if (!spinnerMounted()) return;
-        // prefersReducedMotion: BrainSpinner shows/hides instantly (no CSS
-        // transition) in that mode, so holding the node mounted for the
-        // normal fade duration would just be a pointless delay — unmount now.
-        if (atoms.prefersReducedMotionAtom()) {
+        // When the motion policy reduces `transition`, BrainSpinner
+        // shows/hides instantly (no CSS transition), so holding the node
+        // mounted for the normal fade duration would just be a pointless
+        // delay — unmount now.
+        if (shouldReduceMotion("transition")) {
             setSpinnerMounted(false);
             return;
         }

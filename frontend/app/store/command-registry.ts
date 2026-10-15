@@ -23,6 +23,7 @@ import { openModal } from "@/app/store/modalmodel";
 import { CommandPaletteModal } from "@/app/modals/command-palette";
 import { zoomIn, zoomOut, zoomReset } from "@/app/store/zoom";
 import { openNewWindowFromHere } from "@/app/store/window-appearance";
+import { redockThisFloater } from "@/app/block/floating-redock";
 import { openConnectors, openMemory } from "@/app/view/section-pane/panes";
 
 // ---------------------------------------------------------------------------
@@ -237,6 +238,14 @@ export function registerDefaultCommands(): void {
         icon: "clone",
         requires: "multiWindow",
         execute: () => openNewWindowFromHere().catch(console.error),
+    });
+    commandRegistry.register({
+        id: "pane:redock",
+        label: "Redock floating pane",
+        category: "Pane",
+        icon: "table-columns",
+        // Only a floating pane's window acts on it; anywhere else it does nothing.
+        execute: () => void redockThisFloater(),
     });
     commandRegistry.register({
         id: "window:close",

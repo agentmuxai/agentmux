@@ -1,6 +1,8 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+@use "../../../mixins.scss";
+
 .agent-registration-panel {
     display: flex;
     flex-direction: column;
@@ -10,7 +12,7 @@
 
     &-error {
         color: var(--error-text-color);
-        font-size: 12px;
+        font-size: var(--text-sm);
     }
 
     &-header {
@@ -23,7 +25,7 @@
         display: inline-flex;
         align-items: center;
         gap: 6px;
-        font-size: 13px;
+        font-size: var(--text-base);
         color: var(--main-text-color);
     }
 
@@ -32,7 +34,7 @@
         width: 8px;
         height: 8px;
         border-radius: 50%;
-        background: var(--tertiary-text-color, rgba(255, 255, 255, 0.4));
+        background: rgba(255, 255, 255, 0.4);
         flex: 0 0 auto;
 
         &.is-valid {
@@ -45,13 +47,13 @@
             background: var(--warning-text-color);
         }
         &.is-unknown {
-            background: var(--tertiary-text-color, rgba(255, 255, 255, 0.4));
+            background: rgba(255, 255, 255, 0.4);
         }
     }
 
     &-refresh {
         padding: 4px 10px;
-        font-size: 12px;
+        font-size: var(--text-sm);
         background: transparent;
         color: var(--accent-color);
         border: 1px solid var(--accent-color);
@@ -78,9 +80,9 @@
 
         h3 {
             margin: 0;
-            font-size: 12px;
+            font-size: var(--text-sm);
             font-weight: 600;
-            text-transform: uppercase;
+            @include mixins.label-caps;
             letter-spacing: 0.02em;
             color: var(--secondary-text-color);
         }
@@ -90,7 +92,7 @@
             grid-template-columns: auto 1fr;
             gap: 2px 10px;
             margin: 0;
-            font-size: 12px;
+            font-size: var(--text-sm);
         }
 
         dt {
@@ -105,7 +107,7 @@
         ul {
             margin: 0;
             padding-left: 18px;
-            font-size: 12px;
+            font-size: var(--text-sm);
         }
 
         &.is-warning {
@@ -118,7 +120,7 @@
     }
 
     &-hint {
-        font-size: 12px;
+        font-size: var(--text-sm);
         color: var(--secondary-text-color);
         margin: 0;
     }

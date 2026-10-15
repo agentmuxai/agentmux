@@ -4,6 +4,8 @@
 // Tower pane: a toolbar (view tabs, CPU convention), a summary line, and one
 // table. Controls are element/ui's; this file only lays them out.
 
+@use "../../mixins.scss";
+
 .tower-view {
     display: flex;
     flex-direction: column;
@@ -11,7 +13,7 @@
     height: 100%;
     overflow: hidden;
     color: var(--main-text-color);
-    font-size: 13px;
+    font-size: var(--text-base);
 }
 
 .tower-toolbar {
@@ -185,9 +187,7 @@
 }
 
 .tower-label {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    @include mixins.truncate;
     min-width: 0;
 }
 
@@ -202,9 +202,7 @@
 }
 
 .tower-exe {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    @include mixins.truncate;
     min-width: 0;
 }
 
@@ -236,9 +234,7 @@
 
 .tower-badge--task {
     max-width: 14em;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    @include mixins.truncate;
 }
 
 // The reveal action appears on hover or focus, so the table reads as numbers.
@@ -308,7 +304,7 @@ tr:hover .tower-reveal,
     outline: none;
 
     &:focus-visible {
-        box-shadow: 0 0 0 1px var(--accent-color);
+        @include mixins.focus-ring;
     }
 }
 
@@ -360,9 +356,7 @@ tr:hover .tower-reveal,
 
 .tower-rail-name {
     grid-area: name;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    @include mixins.truncate;
 }
 
 .tower-rail-cpu {
@@ -380,15 +374,13 @@ tr:hover .tower-reveal,
     width: 10px;
     height: 10px;
     border-radius: var(--radius-sm);
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
+    @include mixins.flex-center(inline-flex);
     flex-shrink: 0;
 }
 
 .tower-swatch--fixed {
     color: var(--secondary-text-color);
-    font-size: 10px;
+    font-size: var(--text-2xs);
 }
 
 .tower-spark {
@@ -498,9 +490,7 @@ tr:hover .tower-reveal,
 // The tool call a process runs, after its name: muted, cut off if long.
 .tower-started-by {
     min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    @include mixins.truncate;
     color: var(--secondary-text-color);
     font-style: italic;
 }

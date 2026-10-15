@@ -95,7 +95,9 @@ export function BrowserNavBar(props: {
     // committed yet, so nothing is asked and nothing is written into the input
     // until it ends (writing a completion mid-composition would break it).
     let composing = false;
-    const suggestionsOpen = () => autocomplete.matches().length > 0 && autocomplete.matchesFor() === typed();
+    // The keys act on the list only when it answers what was typed. It stays
+    // on screen (`autocomplete.open`) while the next answer is on its way.
+    const suggestionsOpen = () => autocomplete.open() && autocomplete.matchesFor() === typed();
     const showInInput = (value: string) => {
         setAddressBar(value);
         if (addressInputRef) addressInputRef.value = value;
@@ -582,7 +584,7 @@ export function BrowserNavBar(props: {
                             value={addressBar()}
                             role="combobox"
                             aria-autocomplete="both"
-                            aria-expanded={suggestionsOpen()}
+                            aria-expanded={autocomplete.open()}
                             onInput={(e) => {
                                 const value = e.currentTarget.value;
                                 setAddressBar(value);
@@ -660,7 +662,7 @@ export function BrowserNavBar(props: {
                             }}
                             placeholder="Enter URL or search..."
                         />
-                        <Show when={suggestionsOpen()}>
+                        <Show when={autocomplete.open()}>
                             <AddressSuggestions
                                 matches={autocomplete.matches()}
                                 selected={autocomplete.selected()}

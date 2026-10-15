@@ -97,6 +97,11 @@ pub struct AgentEntry {
     pub uid: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub uid_public_key: String,
+    /// What the writing instance can receive beyond plain jekts, e.g.
+    /// `files-v1` (`SPEC_JEKT_FILE_TRANSFER_2026_10_05.md` §3.4). Empty for
+    /// an entry an older build wrote: a sender attaches nothing for it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub jekt_features: Vec<String>,
 }
 
 /// Serializes this process's own read-compare-remove sequences
@@ -251,6 +256,7 @@ pub fn write_with_nonce(
         jekt_public_key: String::new(),
         uid: String::new(),
         uid_public_key: String::new(),
+        jekt_features: vec![agentmux_common::jekt_files::FEATURE.to_string()],
     };
     let path = agent_path(data_dir, agent_id);
     let Ok(json) = serde_json::to_string(&entry) else { return };
@@ -499,6 +505,7 @@ pub fn write_shared_with_nonce(
         jekt_public_key,
         uid,
         uid_public_key,
+        jekt_features: vec![agentmux_common::jekt_files::FEATURE.to_string()],
     };
     write_entry_file(&path, &entry);
 }
@@ -1140,6 +1147,7 @@ mod shared_tests {
             jekt_public_key: String::new(),
             uid: String::new(),
             uid_public_key: String::new(),
+            jekt_features: Vec::new(),
         }
     }
 

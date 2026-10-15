@@ -1,6 +1,8 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+@use "../../../element/ui/line";
+
 // Non-Claude fork fallback note (SPEC_AGENT_QUICK_FORK_NEW_TAB_2026_08_21.md
 // §4.4). Deliberately styled as a lower-key "info" notice, not the
 // error-red of the disconnected banner — this isn't a failure, just an
@@ -12,17 +14,15 @@
         gap: var(--space-1-5);
         margin: var(--space-1) 0 var(--space-0-5);
         padding: var(--space-1) var(--space-2);
-        background: color-mix(in srgb, var(--warning-color) 10%, transparent);
-        border: 1px solid color-mix(in srgb, var(--warning-color) 40%, transparent);
+        @include line.notice(warning, $text: var(--main-text-color), $line: color-mix(in srgb, var(--warning-color) 40%, transparent));
         border-radius: 0;
         font-size: var(--text-sm);
         flex-shrink: 0;
-        color: var(--main-text-color);
     }
 
     .fork-provider-fallback-banner-icon {
         color: var(--warning-color);
-        font-size: 14px;
+        font-size: var(--text-md);
         line-height: 1;
         flex-shrink: 0;
     }

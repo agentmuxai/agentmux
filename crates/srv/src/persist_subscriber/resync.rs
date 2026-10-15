@@ -109,7 +109,7 @@ fn resync_workspace(mstore: &Store, rec: &WorkspaceRecord) -> ResyncResult {
 }
 
 /// The tab row (inserted with its layout row if missing), its name and
-/// `blockids`, and its layout row's tree, focus, magnify and layout revision.
+/// `blockids`, and its layout row's tree, focus and magnify.
 fn resync_tab(mstore: &Store, rec: &TabRecord) -> ResyncResult {
     super::apply_tab_created(mstore, &rec.workspace_id, &rec.tab_id, &rec.name)?;
     let Some(mut tab) = mstore.get::<Tab>(&rec.tab_id)? else {
@@ -135,14 +135,10 @@ fn resync_tab(mstore: &Store, rec: &TabRecord) -> ResyncResult {
     };
     // An empty tree clears leaforder too, as `LayoutTreeReplaced` does.
     let leaforder = if rec.rootnode.is_none() { None } else { layout.leaforder.clone() };
-    // Never lowered: a stale push built before a dropped queue append must
-    // still be refused (`reducer::layout::stale_push_revision`).
-    let revision = layout.layoutrevision.max(rec.layout_revision);
     if layout.rootnode == rec.rootnode
         && layout.focusednodeid == rec.focused_node_id
         && layout.magnifiednodeid == rec.magnified_node_id
         && layout.leaforder == leaforder
-        && layout.layoutrevision == revision
     {
         return Ok(());
     }
@@ -150,7 +146,6 @@ fn resync_tab(mstore: &Store, rec: &TabRecord) -> ResyncResult {
     layout.focusednodeid = rec.focused_node_id.clone();
     layout.magnifiednodeid = rec.magnified_node_id.clone();
     layout.leaforder = leaforder;
-    layout.layoutrevision = revision;
     mstore.update(&mut layout)?;
     Ok(())
 }

@@ -12,8 +12,10 @@ path = "src/main.rs"
 
 [dependencies]
 agentmux-common = { path = "../common" }
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-util", "io-std", "time"] }
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-util", "io-std", "time", "fs"] }
+# Talks only to srv at AGENTMUX_LOCAL_URL (http://127.0.0.1:<port>): no TLS feature on purpose (#4207).
+# `stream`: SendMessage streams files to srv's attachment upload route.
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 anyhow = "1"

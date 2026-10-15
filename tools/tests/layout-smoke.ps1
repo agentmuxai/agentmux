@@ -49,29 +49,26 @@ try {
     }
     foreach ($id in $expected) {
         if ($tab.blockids -notcontains $id) {
-            Write-Error "Tab blockids missing $id — layout action may not have been processed by frontend"
+            Write-Error "Tab blockids missing $id"
         }
     }
     Write-Host "[layout-smoke] Tab blockids match ($($tab.blockids.Count) blocks)"
 
-    # Verify the LayoutState has a rootnode (frontend drained the
-    # pending actions). If pendingbackendactions is still non-empty
-    # the frontend hasn't processed yet — either SettleMs is too
-    # short for this machine, or the frontend isn't running.
+    # Verify the LayoutState holds the three panes srv laid out.
     # Property access is PSObject.Properties-based because strict
     # mode throws on missing properties and the serialized LayoutState
-    # omits rootnode/pending when unset.
+    # omits rootnode when unset.
     $ls = Invoke-AgentMuxService -Auth $auth -Service object -Method GetObject `
         -Args @("layout:$($tab.layoutstate)")
     $rootnode = $ls.PSObject.Properties['rootnode']
-    $pending  = $ls.PSObject.Properties['pendingbackendactions']
     if (-not $rootnode -or -not $rootnode.Value) {
-        $pendingCount = 0
-        if ($pending -and $pending.Value) { $pendingCount = @($pending.Value).Count }
-        Write-Warning "LayoutState has no rootnode yet - frontend may not have drained pendingbackendactions. Pending count: $pendingCount"
-    } else {
-        Write-Host "[layout-smoke] LayoutState rootnode present"
+        Write-Error "LayoutState has no rootnode"
     }
+    $leafCount = @($rootnode.Value.children).Count
+    if ($leafCount -ne 3) {
+        Write-Error "LayoutState rootnode has $leafCount children, expected 3"
+    }
+    Write-Host "[layout-smoke] LayoutState holds the 3 panes"
 
     Write-Host "[layout-smoke] PASS" -ForegroundColor Green
     if ($KeepTab) {

@@ -8,6 +8,8 @@
 // transient, dismissable row shown after deleting an account that had
 // linked agents. Sits above the accounts list.
 
+@use "../../../mixins.scss";
+
 .identity-delete-notice {
     display: flex;
     align-items: center;
@@ -17,7 +19,7 @@
     border: 1px solid var(--warning-color);
     border-left-width: 3px;
     border-radius: 4px;
-    background: color-mix(in srgb, var(--warning-color) 10%, transparent);
+    background: var(--warning-bg);
 
     .identity-delete-notice-icon {
         color: var(--warning-color);
@@ -34,7 +36,7 @@
         border: none;
         background: transparent;
         color: var(--secondary-text-color);
-        font-size: 14px;
+        font-size: var(--text-md);
         line-height: 1;
         cursor: pointer;
         padding: 2px 4px;
@@ -68,10 +70,10 @@
 
 .identity-group-header {
     padding: var(--space-1) 0;
-    font-size: 10px;
+    font-size: var(--text-2xs);
     font-weight: 600;
+    @include mixins.label-caps;
     letter-spacing: 0.08em;
-    text-transform: uppercase;
     color: var(--secondary-text-color);
 }
 
@@ -85,9 +87,9 @@
     cursor: default;
     border: 1px solid var(--border-color);
     border-radius: 0;
-    background: color-mix(in srgb, var(--main-text-color) 3%, transparent);
+    background: var(--tint-1);
     margin-bottom: var(--space-1);
-    transition: background 0.1s, border-color 0.1s;
+    transition: background var(--duration-decorative-fast), border-color var(--duration-decorative-fast);
 
     &:last-child {
         margin-bottom: 0;
@@ -106,10 +108,8 @@
 
 .identity-account-name {
     flex: 1;
-    font-size: 13px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    font-size: var(--text-base);
+    @include mixins.truncate;
 }
 
 .identity-row-meta {
@@ -119,15 +119,7 @@
 }
 
 .identity-display-name {
-    font-size: 11px;
+    font-size: var(--text-xs);
     color: var(--secondary-text-color);
-}
-
-.identity-agent-count {
-    font-size: 11px;
-    color: var(--secondary-text-color);
-    background: var(--panel-bg-color);
-    padding: 1px 5px;
-    border-radius: 0;
 }
 

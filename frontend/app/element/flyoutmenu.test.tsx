@@ -43,6 +43,26 @@ describe("FlyoutMenu", () => {
         expect(menuOpen()).toBe(false);
     });
 
+    it("hands its owner a close function that closes it from outside", () => {
+        let close: (() => void) | undefined;
+        const onOpenChange = vi.fn();
+        render(() => (
+            <FlyoutMenu items={[{ label: "Plain" }]} onOpenChange={onOpenChange} closeRef={(fn) => (close = fn)}>
+                <button type="button">Open menu</button>
+            </FlyoutMenu>
+        ));
+        open();
+        expect(menuOpen()).toBe(true);
+        close!();
+        expect(menuOpen()).toBe(false);
+        expect(onOpenChange).toHaveBeenLastCalledWith(false);
+
+        // Closing a closed menu does nothing.
+        onOpenChange.mockClear();
+        close!();
+        expect(onOpenChange).not.toHaveBeenCalled();
+    });
+
     it("stays open after a keepOpen item is clicked, and closes on an outside click", () => {
         const onClick = vi.fn();
         render(() => (

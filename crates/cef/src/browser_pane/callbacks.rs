@@ -9,7 +9,7 @@
 //! bodies so pane-specific logic lives in one place instead of threaded
 //! through `if self.is_browser_pane` branches in `client.rs`.
 //!
-//! Notable: this is where `install_browser_pane_focus_redirect` actually gets wired
+//! Notable: this is where `install_browser_pane_subclass` actually gets wired
 //! in. Before this phase the function existed in `browser_pane::hwnd` but had zero
 //! callers (see `SPEC_BROWSER_PANE_LIFECYCLE.md` §5 race #5). Now
 //! `on_after_created_browser_pane` and `on_load_end_browser_pane` both reinstall the focus
@@ -261,9 +261,8 @@ pub(crate) fn resolve_pane_label(state: &Arc<AppState>, browser: &Browser) -> Op
 /// Responsibilities:
 /// 1. Raise the pane's outer HWND to the top of its parent's Z-order so
 ///    mouse-wheel events reach the pane renderer rather than main's.
-/// 2. Install the WM_SETFOCUS redirect subclass on the pane's HWND tree so
-///    Chromium's internal focus-steals on page load don't yank keyboard
-///    focus away from the main window.
+/// 2. Subclass the pane's HWND tree so clicks and focus reach the input owner
+///    (`crate::input_owner`), and tell it the pane is live.
 pub fn on_after_created_browser_pane(state: &Arc<AppState>, browser: &Browser) {
     #[cfg(target_os = "windows")]
     {
@@ -283,27 +282,28 @@ pub fn on_after_created_browser_pane(state: &Arc<AppState>, browser: &Browser) {
                 }
                 tracing::info!("[pane-zorder] raised pane to top of Z-order");
 
-                // Subclass the pane HWND + its descendants so WM_SETFOCUS
-                // from Chromium gets redirected to the parent. The state
+                // Subclass the pane HWND + its descendants so clicks and
+                // focus reach the input owner. The state
                 // and block_id let the subclass emit `browser-pane-clicked`
                 // directly on WM_LBUTTONDOWN without relying on CEF focus
                 // callbacks (which don't fire for clicks inside an already-
                 // focused pane).
                 let block_id = resolve_pane_block_id(state, browser).unwrap_or_default();
                 unsafe {
-                    crate::browser_pane::hwnd::install_browser_pane_focus_redirect(
+                    crate::browser_pane::hwnd::install_browser_pane_subclass(
                         hwnd,
                         state.clone(),
-                        block_id,
+                        block_id.clone(),
                     );
                 }
+                crate::input_owner::windows::pane_live(state, &block_id);
             }
         }
     }
     #[cfg(not(target_os = "windows"))]
     {
-        // On macOS/Linux, the focus redirect subclass used on Windows doesn't
-        // exist. CEF's on_after_created fires from inside add_overlay_view
+        // On macOS/Linux there is no input owner yet (Windows has one,
+        // `crate::input_owner`; spec Phase 4). CEF's on_after_created fires from inside add_overlay_view
         // (when the BrowserView is added to the widget hierarchy) and gives
         // focus to the new pane browser. creation_views::create_browser_pane_view
         // immediately returns focus to the main window after add_overlay_view
@@ -421,7 +421,7 @@ pub fn on_before_close_browser_pane(state: &Arc<AppState>, label: &str) {
     #[cfg(target_os = "windows")]
     {
         if let Some(block_id) = block_id {
-            crate::browser_pane::hwnd::uninstall_focus_redirect_for_block(block_id);
+            crate::browser_pane::hwnd::uninstall_pane_subclass_for_block(block_id);
             crate::browser_pane::hwnd::remove_contexts_for_block(block_id);
         }
     }
@@ -463,13 +463,11 @@ pub fn on_load_start_browser_pane(state: &Arc<AppState>, browser: &Browser) {
 /// Chromium creates a fresh `Chrome_RenderWidgetHostHWND` on every
 /// navigation. The subclass installed at `on_after_created` is on the
 /// OLD widget HWND, which was destroyed during navigation — so without
-/// reinstalling here, keyboard focus steals by the new page bypass our
-/// redirect and end up stuck on the pane.
+/// reinstalling here, clicks and focus in the new page don't reach the
+/// window's input owner (`crate::input_owner`).
 ///
-/// Does NOT force focus back to main. `WM_MOUSEWHEEL` is routed to the
-/// focused HWND; stealing focus away from the pane breaks scrolling.
-/// The FocusHandler cancel + WndProc redirect already keep focus off
-/// the pane during the *initial* navigation focus steal.
+/// Does NOT force focus anywhere: the input owner decides whether focus the
+/// page took stays (CEF's `on_got_focus` reports it too).
 pub fn on_load_end_browser_pane(state: &Arc<AppState>, browser: &Browser) {
     tracing::info!("[pane-load-end] pane page loaded; reinstalling focus subclass");
     let pane_block_id = resolve_pane_block_id(state, browser);
@@ -500,7 +498,7 @@ pub fn on_load_end_browser_pane(state: &Arc<AppState>, browser: &Browser) {
             if !wh.0.is_null() {
                 let block_id = pane_block_id.clone().unwrap_or_default();
                 unsafe {
-                    crate::browser_pane::hwnd::install_browser_pane_focus_redirect(
+                    crate::browser_pane::hwnd::install_browser_pane_subclass(
                         wh.0 as *mut std::ffi::c_void,
                         state.clone(),
                         block_id,
@@ -617,6 +615,25 @@ pub fn on_loading_state_change_browser_pane(
     } else {
         tracing::warn!("[pane-loading-state] couldn't resolve block_id for nav-state emit");
     }
+}
+
+/// Tell a newly loaded frontend where an already-live pane is: its URL, loading
+/// state and back/forward. A pane re-attached without navigating (a reload of
+/// its window, `BrowserPaneManager::create`'s `AlreadyLive` arm) gets none of
+/// the load callbacks that normally carry these.
+pub(crate) fn emit_current_nav_state(state: &Arc<AppState>, block_id: &str, browser: &Browser) {
+    crate::events::emit_browser_pane_event(
+        state,
+        block_id,
+        "browser-pane-nav-state",
+        &serde_json::json!({
+            "block_id": block_id,
+            "url": main_frame_url(browser),
+            "can_go_back": browser.can_go_back() != 0,
+            "can_go_forward": browser.can_go_forward() != 0,
+            "is_loading": is_pane_main_frame_loading(state, block_id),
+        }),
+    );
 }
 
 /// The main frame's current URL, or empty when the browser has no main frame.

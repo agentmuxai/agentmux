@@ -32,7 +32,6 @@ declare global {
         activeTabId: Accessor<string>;
         isFullScreen: Accessor<boolean>;
         controlShiftDelayAtom: Accessor<boolean>;
-        prefersReducedMotionAtom: Accessor<boolean>;
         updaterStatusAtom: Accessor<UpdaterStatus>;
         typeAheadModalAtom: Accessor<TypeAheadModalType>;
         modalOpen: Accessor<boolean>;

@@ -200,29 +200,34 @@ async fn resync_moves_a_block_row_to_its_reducer_parent() {
     assert!(tab(&mstore, "t2").blockids.is_empty());
 }
 
-/// A dropped queue append leaves the row's layout revision behind the
-/// reducer's; the resync raises it, and never lowers one that is ahead.
+/// Layout intents whose events are lost: the resync writes the tree, focus
+/// and magnify the reducer computed for them.
 #[tokio::test]
-async fn resync_writes_the_layout_revision_and_never_lowers_it() {
+async fn resync_writes_the_tree_layout_intents_computed() {
     let mstore = store();
     let mut s = State::default();
     for e in build(&mut s) {
         apply_event_to_mstore(&e, &mstore).unwrap();
     }
-    let queue = Command::LayoutQueueBackendActions {
-        tab_id: "t2".into(),
-        actions: serde_json::json!([{ "actiontype": "delete", "actionid": "a1", "blockid": "blk-1" }]),
-        correlation_id: String::new(),
+    dispatch(&mut s, Command::CreateBlock { tab_id: "t2".into(), meta: serde_json::Value::Null }, "blk-2");
+    let split = agentmux_common::LayoutIntent::SplitVertical {
+        target_node_id: "n1".into(),
+        new_node: leaf("n2", "blk-2"),
+        position: agentmux_common::SplitPosition::After,
+        size_fraction: Some(0.5),
+        focused: true,
     };
-    dispatch(&mut s, queue, "-"); // its event is lost
-    assert_eq!(layout(&mstore, "t2").layoutrevision, 0);
-    let state = Arc::new(Mutex::new(s));
-    resync_from_reducer(&state, &mstore).await.unwrap();
-    assert_eq!(layout(&mstore, "t2").layoutrevision, 1);
-
-    let mut row = layout(&mstore, "t2");
-    row.layoutrevision = 5;
-    mstore.update(&mut row).unwrap();
-    resync_from_reducer(&state, &mstore).await.unwrap();
-    assert_eq!(layout(&mstore, "t2").layoutrevision, 5);
+    let view = agentmux_common::LayoutViewState { focused_node_id: "n2".into(), magnified_node_id: "n2".into() };
+    // Its events are lost.
+    dispatch(
+        &mut s,
+        Command::LayoutApplyIntent { tab_id: "t2".into(), intent: split, action_id: "act-1".into(), view: Some(view) },
+        "-",
+    );
+    let computed = s.tabs["t2"].rootnode.clone();
+    assert_ne!(layout(&mstore, "t2").rootnode, computed);
+    resync_from_reducer(&Arc::new(Mutex::new(s)), &mstore).await.unwrap();
+    let row = layout(&mstore, "t2");
+    assert_eq!(row.rootnode, computed);
+    assert_eq!((row.focusednodeid.as_str(), row.magnifiednodeid.as_str()), ("n2", "n2"));
 }

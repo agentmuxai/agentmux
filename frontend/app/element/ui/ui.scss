@@ -31,21 +31,18 @@
     @include line.tone(quiet);
 }
 
-// Filled, and glowing gently while it waits for the user; still under
-// reduced motion. The glow animates box-shadow, which would override the
-// focus ring, so it stops while the button has keyboard focus, and focus
-// gets a solid outline of its own.
+// Filled, and glowing gently while it waits for the user. The glow stops
+// while the button has keyboard focus, so the focus ring reads on its own.
 .ui-tone-attention {
     @include line.tone(attention);
     box-shadow: 0 0 10px color-mix(in srgb, var(--attention-color) 45%, transparent);
 
     &:not(:focus-visible, :disabled, [aria-disabled="true"]) {
-        animation: ui-attention-glow 1.8s ease-in-out infinite;
+        animation: ui-attention-glow 1.8s var(--ease-in-out) infinite;
     }
 
     &:focus-visible {
-        outline: 2px solid var(--main-text-color);
-        outline-offset: 2px;
+        @include mixins.focus-ring;
     }
 
     // Not ready yet (Submit before every question is answered): no glow, so
@@ -55,7 +52,8 @@
         box-shadow: none;
     }
 
-    @media (prefers-reduced-motion: reduce) {
+    // Reduced treatment (status), dormant under the motion policy.
+    @include mixins.when-motion-reduced(status) {
         animation: none;
 
         &:not(:focus-visible) {
@@ -154,8 +152,8 @@
     cursor: var(--cursor-interactive);
     user-select: none;
     transition-property: color, background-color, box-shadow;
-    transition-duration: 80ms;
-    transition-timing-function: ease;
+    transition-duration: var(--duration-decorative-instant);
+    transition-timing-function: var(--ease-standard);
 
     i {
         width: calc(var(--ui-icon-size) + 4px);
@@ -199,12 +197,6 @@
 
     &[aria-selected="true"] {
         box-shadow: inset 2px 0 0 var(--accent-color);
-    }
-
-    // Roving focus means the focused tab is always the selected one, so the
-    // focus ring has to sit alongside the leading-edge line, not replace it.
-    &[aria-selected="true"]:focus-visible {
-        box-shadow: inset 2px 0 0 var(--accent-color), var(--shadow-focus-ring);
     }
 }
 
@@ -328,8 +320,8 @@
     border-radius: var(--radius-sm);
     outline: none;
     transition-property: border-color, box-shadow;
-    transition-duration: 80ms;
-    transition-timing-function: ease;
+    transition-duration: var(--duration-decorative-instant);
+    transition-timing-function: var(--ease-standard);
 
     &::placeholder {
         color: var(--secondary-text-color);
@@ -337,7 +329,7 @@
     }
 
     &:hover:not(:disabled, :focus) {
-        border-color: color-mix(in srgb, var(--accent-color) 30%, transparent);
+        border-color: var(--accent-line);
     }
 
     &:focus {
@@ -369,7 +361,9 @@
     color: var(--main-text-color);
     border: 1px solid var(--border-color);
     border-radius: var(--radius-sm);
-    transition: border-color 80ms ease, box-shadow 80ms ease;
+    transition:
+        border-color var(--duration-decorative-instant) var(--ease-standard),
+        box-shadow var(--duration-decorative-instant) var(--ease-standard);
 
     &:focus-within {
         border-color: var(--accent-color);
@@ -384,11 +378,9 @@
     .ui-filter-input {
         flex: 1 1 auto;
         min-width: 0;
-        padding: 0;
+        @include mixins.button-reset;
         font: inherit;
         color: inherit;
-        background: transparent;
-        border: 0;
         outline: none;
 
         &::placeholder {
@@ -446,11 +438,11 @@ select.ui-input {
     border-radius: var(--radius-full);
     cursor: var(--cursor-interactive);
     transition-property: background-color, border-color, box-shadow;
-    transition-duration: 80ms;
-    transition-timing-function: ease;
+    transition-duration: var(--duration-decorative-instant);
+    transition-timing-function: var(--ease-standard);
 
     &:hover:not(:disabled) {
-        border-color: color-mix(in srgb, var(--accent-color) 30%, transparent);
+        border-color: var(--accent-line);
     }
 
     &[aria-checked="true"] {
@@ -477,8 +469,8 @@ select.ui-input {
     background: var(--secondary-text-color);
     border-radius: var(--radius-full);
     transition-property: transform, background-color;
-    transition-duration: 80ms;
-    transition-timing-function: ease;
+    transition-duration: var(--duration-decorative-instant);
+    transition-timing-function: var(--ease-standard);
 
     .ui-switch[aria-checked="true"] & {
         background: var(--accent-color);

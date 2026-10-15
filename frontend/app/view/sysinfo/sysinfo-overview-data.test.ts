@@ -86,9 +86,11 @@ describe("formatting", () => {
 describe("an area alone", () => {
     it("reads a saved area, and anything else as CPU", () => {
         expect(toAreaChoice("net")).toBe("net");
-        expect(toAreaChoice("advanced")).toBe("advanced");
+        expect(toAreaChoice("everything")).toBe("everything");
         // Nothing saved, or a value from an older build, shows CPU.
         expect(toAreaChoice(undefined)).toBe("cpu");
+        // Everything, as it was saved before it was renamed.
+        expect(toAreaChoice("advanced")).toBe("everything");
         expect(toAreaChoice("overview")).toBe("cpu");
         expect(toAreaChoice(3)).toBe("cpu");
     });

@@ -13,7 +13,6 @@
 @use "styles/tool-overlay-portal";
 @use "styles/identity-panel";
 @use "styles/launch-modal-body";
-@use "styles/import-modal-body";
 @use "styles/picker-delete-error";
 @use "styles/card-info-popover";
 @use "styles/search";
@@ -25,7 +24,6 @@
 @use "styles/control-bar";
 @use "styles/session";
 @use "styles/document";
-@use "styles/header-controls";
 @use "styles/pending-footer";
 @use "styles/attachments";
 @use "styles/responsive";
@@ -132,7 +130,7 @@
     //
     // z-index: `var(--z-pane-overlay, 4)` sits safely below every real
     // ceiling in this chain — `.connstatus-overlay` and `.block-mask`
-    // unfocused (both `--zindex-block-mask-inner` = 10) and `.block-mask`
+    // unfocused (both `--z-pane-mask` = 10) and `.block-mask`
     // focused (50) — the semantically right token for "pane chrome floating
     // over this pane's own content."
     //
@@ -158,7 +156,7 @@
         // whole trailing area past "+", not just [tabs][+]
         // itself. See
         // docs/specs/SPEC_PANE_TAB_STRIP_TRAILING_BLUR_2026_08_12.md.
-        z-index: var(--z-pane-overlay, 4);
+        z-index: var(--z-pane-overlay);
 
         // Glass panel over the trailing space right of "+" —
         // SPEC_PANE_TAB_STRIP_TRAILING_BLUR_2026_08_12.md. `backdrop-filter`
@@ -253,20 +251,28 @@
         // so no `!important` is needed for either to win.
         .pane-tab-strip-add,
         .pane-tab {
-            background: var(--modal-bg-color, #232323);
+            background: var(--modal-bg-color);
         }
 
         .pane-tab-strip-add:hover {
-            background: color-mix(in srgb, var(--modal-bg-color, #232323) 92%, white 8%);
+            background: color-mix(in srgb, var(--modal-bg-color) 92%, white 8%);
         }
 
         .pane-tab:hover {
-            background: color-mix(in srgb, var(--modal-bg-color, #232323) 94%, white 6%);
+            background: color-mix(in srgb, var(--modal-bg-color) 94%, white 6%);
         }
     }
 }
 
 // === Marching-ants Progress Bar ===
+// Runs INSIDE the pane border: the band is the selection ring's own band
+// (`padding: var(--pane-ring-width)` over `.pane-stack::after`'s border of
+// the same width), painted in two colours, the ring's and an "off" colour
+// mixed toward the background, so the border reads as a marching dashed line
+// and never changes thickness. It used to be a separate 1px band inside the
+// ring, whose bright and dim segments read as teeth growing off the border
+// (SPEC_AGENT_PANE_BUSY_RING_IN_BORDER_2026_10_14.md).
+//
 // Fills the chrome's .pane-progress-bar-slot (PaneChrome.scss) — no
 // zoom-compensation math needed here (unlike its previous home nested
 // inside .agent-view), since that slot lives in the chrome's tree,
@@ -323,23 +329,20 @@
 // aspect ratio — a rotating background needs to cover the ring's
 // bounding *circle* (its diagonal), not just its bounding box.
 .agent-pane-progress-bar {
-    position: absolute;
-    inset: 0;
+    @include mixins.abs-fill;
     pointer-events: none;
     opacity: 0;
-    transition: opacity 200ms ease;
+    transition: opacity 200ms var(--ease-standard);
     border-radius: var(--block-border-radius);
-    padding: 1px;
+    padding: var(--pane-ring-width, 2px);
     -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
     -webkit-mask-composite: xor;
     mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
     mask-composite: exclude;
-    // Opaque base so the ring fully covers whatever's behind it in its
-    // own slot. Without this the translucent stripe gaps would reveal
-    // the slot's background and the marching pattern would be lost.
-    // Matches .agent-view's surface (--main-bg-color) so the bar reads as
-    // chrome, consistent with the rest of the pane.
-    background: var(--main-bg-color);
+    // An opaque base under the pattern: the pane background without the
+    // window's transparency, so a translucent ring colour composites the
+    // same way on every pane and the off sections keep their contrast.
+    background: var(--pane-bg-opaque, var(--main-bg-color));
 
     &::before {
         content: "";
@@ -348,9 +351,10 @@
         // Solid fallback for browsers without conic-gradient() support —
         // ignored (declaration below wins) wherever it's understood.
         background: var(--progress-bar-color, var(--accent-color));
-        // Every stop is fully opaque (the faded wedge mixes against the
-        // pane background, NOT transparent) so the pattern stays crisp
-        // over any theme. 10deg wedges (18 pairs around the circle) —
+        // The off wedge mixes against the opaque pane background
+        // (`--pane-bg-opaque`), NOT a transparent or translucent one, so the
+        // pattern stays crisp over any theme and window opacity. The off colour is `--busy-ring-off` (PaneChrome.scss),
+        // swapped for a closer one while stopping. 10deg wedges (18 pairs around the circle) —
         // roughly matches the original linear version's stripe density
         // at typical pane sizes; exact apparent width naturally varies
         // with distance from center, an inherent (and accepted)
@@ -359,8 +363,8 @@
             from 0deg,
             var(--progress-bar-color, var(--accent-color)) 0deg,
             var(--progress-bar-color, var(--accent-color)) 10deg,
-            color-mix(in srgb, var(--progress-bar-color, var(--accent-color)) 25%, var(--main-bg-color)) 10deg,
-            color-mix(in srgb, var(--progress-bar-color, var(--accent-color)) 25%, var(--main-bg-color)) 20deg
+            var(--busy-ring-off) 10deg,
+            var(--busy-ring-off) 20deg
         );
     }
 
@@ -374,8 +378,18 @@
         }
     }
 
+    // Stopping: lower contrast, still marching. Not a whole-band opacity,
+    // which over the ring would blend into a muddy third colour.
     &--active#{&}--stopping {
-        opacity: 0.55;
+        --busy-ring-off: var(--busy-ring-off-stopping);
+    }
+
+    // Reduced treatment (status), dormant under the motion policy: the same
+    // broken pattern, still; the colours alone say "working".
+    &--active::before {
+        @include mixins.when-motion-reduced(status) {
+            animation: none;
+        }
     }
 }
 
@@ -429,7 +443,7 @@
     // Contains EVERY absolutely/sticky-positioned descendant's z-index —
     // .agent-pane-loading-overlay (PaneLoadingCover.scss), .agent-search-
     // bar (_search.scss, z:10), .slash-autocomplete (_slash.scss, z:50),
-    // .agent-filter-toggle (_header-controls.scss, z:10), and anything
+    // and anything
     // else added inside .agent-view later — so none of them can ever
     // escape and compete with .pane-tab-strip (a true sibling of
     // .agent-view inside .agent-pane-stack-content, z-index
@@ -494,19 +508,18 @@
     gap: 10px;
     padding: 6px 10px;
     flex: 0 0 auto;
-    border-bottom: 1px solid var(--border-color, rgba(255, 255, 255, 0.08));
+    border-bottom: 1px solid var(--border-color);
 
     .agent-history-title {
-        font-size: 12px;
+        font-size: var(--text-sm);
         font-weight: 600;
-        letter-spacing: 0.04em;
-        text-transform: uppercase;
-        color: var(--secondary-text-color, rgba(255, 255, 255, 0.55));
+        @include mixins.label-caps;
+        color: var(--secondary-text-color);
     }
 
     .agent-history-meta {
-        font-size: 11px;
-        color: var(--tertiary-text-color, rgba(255, 255, 255, 0.32));
+        font-size: var(--text-xs);
+        color: rgba(255, 255, 255, 0.32);
         margin-left: auto;
     }
 }

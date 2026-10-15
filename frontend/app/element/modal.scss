@@ -42,8 +42,7 @@
 
 .modal-root {
     // Window scope: a fixed full-window overlay.
-    position: fixed;
-    inset: 0;
+    @include mixins.fixed-fill;
     z-index: var(--z-modal);
     display: grid;
     place-items: center;
@@ -78,12 +77,11 @@
     // Sized to the lock region: `inset:0` covers the full `.modal-root`,
     // which is the window for `data-scope="window"` and the tab/pane
     // mount node for `data-scope="tab" | "pane"`.
-    position: absolute;
-    inset: 0;
+    @include mixins.abs-fill;
     background: rgba(0, 0, 0, 0.55);
     backdrop-filter: blur(8px);
     -webkit-backdrop-filter: blur(8px);
-    animation: modal-fade-in 120ms ease-out;
+    animation: am-fade-in var(--duration-quick) var(--ease-out);
 }
 
 .modal-panel {
@@ -96,13 +94,12 @@
     border: 1px solid var(--border-color);
     border-radius: var(--radius-lg);
     box-shadow: var(--shadow-modal);
-    animation: modal-pop-in 140ms cubic-bezier(0.2, 1, 0.3, 1);
+    animation: modal-pop-in 140ms var(--ease-emphasized);
 
     // Focus ring when the panel itself is the focus target (only
     // happens when there are no focusable descendants).
     &:focus-visible {
-        box-shadow: var(--shadow-modal), var(--shadow-focus-ring);
-        outline: none;
+        @include mixins.focus-ring;
     }
 
     // Layer B (MODAL_COMPACT_VARIANT_ARCHITECTURE_2026_05_26 §7): fluid
@@ -169,9 +166,7 @@
     right: var(--space-2);
     width: 28px;
     height: 28px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    @include mixins.flex-center;
     padding: 0;
     background: transparent;
     border: 1px solid transparent;
@@ -180,21 +175,16 @@
     font-size: var(--text-md);
     line-height: 1;
     cursor: default;
-    // Not `all`: that also animates the inherited `visibility` that hides
-    // window and pane tabs, so this would pop in a frame late when shown
-    // (docs/analysis/ANALYSIS_WINDOW_TAB_SWITCH_PAINT_2026_09_30.md §3).
-    transition-property: color, background-color, border-color, outline-color, box-shadow, opacity;
-    transition-duration: var(--motion-fast);
+    @include mixins.control-transition(var(--duration-decorative-fast), var(--ease-emphasized));
 
     &:hover {
         color: var(--main-text-color);
-        background: color-mix(in srgb, var(--main-text-color) 8%, transparent);
+        background: var(--tint-3);
         border-color: var(--border-color);
     }
 
     &:focus-visible {
-        outline: none;
-        box-shadow: var(--shadow-focus-ring);
+        @include mixins.focus-ring;
     }
 }
 
@@ -232,7 +222,7 @@
     gap: var(--space-2);
     padding: var(--space-3) var(--space-5);
     border-top: 1px solid var(--border-color);
-    background: color-mix(in srgb, var(--main-text-color) 2%, transparent);
+    background: var(--tint-1);
 }
 
 // ── ConfirmModal button styling ──────────────────────────────────────────────
@@ -264,7 +254,7 @@
 // it. A subtle scale-up pulse draws the eye to "this is how you close".
 
 .modal-dismiss--nudge {
-    animation: modal-dismiss-nudge 240ms cubic-bezier(0.34, 1.56, 0.64, 1);
+    animation: modal-dismiss-nudge var(--duration-moderate) var(--ease-bounce);
 }
 
 @keyframes modal-dismiss-nudge {
@@ -275,32 +265,31 @@
 
 // ── Animations ───────────────────────────────────────────────────────────────
 
-@keyframes modal-fade-in {
-    from { opacity: 0; }
-    to   { opacity: 1; }
-}
-
 @keyframes modal-pop-in {
     from { opacity: 0; transform: scale(0.96) translateY(4px); }
     to   { opacity: 1; transform: scale(1) translateY(0); }
 }
 
-// Reduced-motion variant of the nudge. It must still be a *brief*
-// animation — not `none` — so the JS `animationend` listener fires and
-// the `modal-dismiss--nudge` class is cleared. A non-moving outline
-// flash highlights the dismiss control without any scale/translate.
+// The nudge's reduced treatment. It must still be a *brief* animation —
+// not `none` — so the JS `animationend` listener fires and the
+// `modal-dismiss--nudge` class is cleared. A non-moving outline flash
+// highlights the dismiss control without any scale/translate.
 @keyframes modal-dismiss-nudge-static {
     0%, 100% { box-shadow: none; }
     50%      { box-shadow: var(--shadow-focus-ring); }
 }
 
-@include mixins.respect-reduced-motion {
-    .modal-backdrop,
-    .modal-panel {
+// Reduced treatments (transition; feedback for the nudge), dormant under the
+// motion policy.
+.modal-backdrop,
+.modal-panel {
+    @include mixins.when-motion-reduced(transition) {
         animation: none;
     }
+}
 
-    .modal-dismiss--nudge {
+.modal-dismiss--nudge {
+    @include mixins.when-motion-reduced(feedback) {
         // Still animated (so `animationend` fires) but motion-free.
         animation: modal-dismiss-nudge-static 240ms ease-in-out;
     }
@@ -365,12 +354,12 @@
     }
 
     .modal-panel-title {
-        font-size: 14px;
+        font-size: var(--text-md);
         line-height: 1.3;
     }
 
     .modal-panel-description {
-        font-size: 12px;
+        font-size: var(--text-sm);
         margin-top: 2px;
     }
 

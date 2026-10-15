@@ -8,12 +8,12 @@
     position: absolute;
     left: var(--space-2);
     bottom: var(--space-2);
-    // Above pane content (BlockMask uses var(--zindex-block-mask),
-    // overlays sit at 20) but below modals (50+).
-    z-index: 30;
+    // Above pane content (the block mask, the terminal's stickers) but
+    // below the focused ring.
+    z-index: var(--z-pane-badge);
     padding: 2px var(--space-1-5);
     font-family: var(--font-mono);
-    font-size: 11px;
+    font-size: var(--text-xs);
     font-weight: 500;
     line-height: 1.4;
     letter-spacing: 0.02em;

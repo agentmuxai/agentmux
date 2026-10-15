@@ -1,43 +1,17 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// The sole content of its own top-level window, like
-// credential-approval-window.scss.
+// The window's chrome is the approval windows' shared one
+// (element/_approval-window.scss).
 
-.memory-adoption-approval-window {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-4);
-    width: 100%;
-    height: 100%;
-    padding: var(--space-5);
-    background: var(--main-bg-color);
-    color: var(--main-text-color);
-    box-sizing: border-box;
-    user-select: none;
-    -webkit-app-region: no-drag;
-}
+@use "../../element/approval-window" as approvalWindow;
 
-.memory-adoption-approval-window-error {
-    justify-content: center;
-    align-items: center;
-    text-align: center;
-    color: var(--secondary-text-color);
-}
-
-.memory-adoption-approval-header h2 {
-    margin: 0;
-    font-size: var(--text-lg);
-    font-weight: 600;
-}
+@include approvalWindow.approval-window(memory-adoption-approval);
 
 .memory-adoption-approval-body {
-    flex: 1;
     min-height: 0;
     overflow: auto;
-    font-size: var(--text-sm);
     color: var(--secondary-text-color);
-    line-height: 1.5;
 
     p {
         margin: 0 0 var(--space-3);
@@ -59,12 +33,6 @@
         padding-left: var(--space-4);
         font-family: var(--font-mono);
     }
-}
-
-.memory-adoption-approval-footer {
-    display: flex;
-    justify-content: flex-end;
-    gap: var(--space-2);
 }
 
 .memory-adoption-approval-dir {

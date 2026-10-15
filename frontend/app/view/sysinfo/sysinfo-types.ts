@@ -39,7 +39,7 @@ function defaultMemMeta(name: string, maxY: string): TimeSeriesMeta {
     };
 }
 
-function defaultNetMeta(name: string): TimeSeriesMeta {
+function defaultNetMeta(name: string, color = "var(--sysinfo-in-color)"): TimeSeriesMeta {
     return {
         name: name,
         label: "MB/s",
@@ -50,12 +50,12 @@ function defaultNetMeta(name: string): TimeSeriesMeta {
         // See docs/reports/REPORT_SYSINFO_COMBINED_CHART_RESEARCH_2026_08_17.md.
         autoMaxY: true,
         autoMaxYFloor: 1,
-        color: "var(--sysinfo-net-color)",
+        color,
         decimalPlaces: 2,
     };
 }
 
-function defaultDiskMeta(name: string): TimeSeriesMeta {
+function defaultDiskMeta(name: string, color = "var(--sysinfo-in-color)"): TimeSeriesMeta {
     return {
         name: name,
         label: "MB/s",
@@ -64,13 +64,16 @@ function defaultDiskMeta(name: string): TimeSeriesMeta {
         // real ceiling either.
         autoMaxY: true,
         autoMaxYFloor: 1,
-        color: "var(--sysinfo-net-color)",
+        color,
         decimalPlaces: 2,
     };
 }
 
-/** The plot type a pane shows until one is chosen. */
-export const DefaultPlotType = "Overview";
+/** The plot type of the Advanced views (CPU, Memory, Disk, Network, Everything with their controls), as saved. */
+export const AreaPlotType = "Overview";
+
+/** The plot type a pane shows until one is chosen: simple CPU, one chart, cheap to open. */
+export const DefaultPlotType = "CPU";
 
 export const PlotTypes: Record<string, (dataItem: DataItem) => string[]> = {
     // CPU, memory, network, disk and every core at once (sysinfo-overview.tsx);
@@ -113,18 +116,37 @@ export const PlotTypes: Record<string, (dataItem: DataItem) => string[]> = {
     },
 };
 
+/**
+ * The simple views: one plain chart per measure, no controls, offered under
+ * "Simple" in the pane's menus. `type` is the plot type saved in the pane's
+ * meta (`sysinfo:type`), kept as it was so saved panes still open on it;
+ * `label` is how the menus and the pane's title name it, `short` how the
+ * control row does.
+ */
+export const SIMPLE_VIEWS: { type: string; label: string; short: string }[] = [
+    { type: "CPU", label: "CPU", short: "CPU" },
+    { type: "All CPU", label: "All cores", short: "Cores" },
+    { type: "Mem", label: "Memory", short: "Memory" },
+    { type: "Net", label: "Network", short: "Network" },
+    { type: "Net (Sent/Recv)", label: "Network sent and received", short: "Net in/out" },
+    { type: "Disk I/O", label: "Disk", short: "Disk" },
+    { type: "Disk I/O (R/W)", label: "Disk read and write", short: "Disk r/w" },
+    { type: "CPU + Mem", label: "CPU and memory", short: "CPU+Mem" },
+    { type: "CPU + Mem + Net", label: "CPU, memory and network", short: "CPU+Mem+Net" },
+];
+
 export const DefaultPlotMeta: Record<string, TimeSeriesMeta> = {
-    cpu: defaultCpuMeta("CPU %"),
-    "mem:total": defaultMemMeta("Memory Total", "mem:total"),
-    "mem:used": defaultMemMeta("Memory Used", "mem:total"),
-    "mem:free": defaultMemMeta("Memory Free", "mem:total"),
-    "mem:available": defaultMemMeta("Memory Available", "mem:total"),
-    "net:bytessent": defaultNetMeta("Network Sent"),
-    "net:bytesrecv": defaultNetMeta("Network Recv"),
-    "net:bytestotal": defaultNetMeta("Network Total"),
-    "disk:read": defaultDiskMeta("Disk Read"),
-    "disk:write": defaultDiskMeta("Disk Write"),
-    "disk:total": defaultDiskMeta("Disk Total"),
+    cpu: defaultCpuMeta("CPU"),
+    "mem:total": defaultMemMeta("Memory total", "mem:total"),
+    "mem:used": defaultMemMeta("Memory used", "mem:total"),
+    "mem:free": defaultMemMeta("Memory free", "mem:total"),
+    "mem:available": defaultMemMeta("Memory available", "mem:total"),
+    "net:bytessent": defaultNetMeta("Network out", "var(--sysinfo-out-color)"),
+    "net:bytesrecv": defaultNetMeta("Network in"),
+    "net:bytestotal": defaultNetMeta("Network"),
+    "disk:read": defaultDiskMeta("Disk read"),
+    "disk:write": defaultDiskMeta("Disk write", "var(--sysinfo-out-color)"),
+    "disk:total": defaultDiskMeta("Disk"),
 };
 for (let i = 0; i < 32; i++) {
     DefaultPlotMeta[`cpu:${i}`] = defaultCpuMeta(`Core ${i}`);

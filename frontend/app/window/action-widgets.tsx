@@ -41,6 +41,7 @@ import {
 import { hideFromWidgetBar } from "./widget-bar-hide";
 import { buildWidgetOpenActions } from "./action-widgets-menu";
 import { MoreDropdown } from "./more-dropdown";
+import { closeHamburgerMenu } from "./hamburger-menu";
 import { PinnedWidgetFlyout } from "./pinned-widget-flyout";
 import { useWidgetBarResponsive } from "./use-widget-bar-responsive";
 import { useWidgetDragReorder } from "./use-widget-drag-reorder";
@@ -281,7 +282,12 @@ const ActionWidgets = (): JSX.Element => {
     // onClose so every close path clears it for free.
     const [moreConfirmedByClick, setMoreConfirmedByClick] = createSignal(false);
     const moreHover = createSubmenuHover({
-        onOpen: () => setMoreOpen(true),
+        onOpen: () => {
+            // More opens on hover beside the hamburger (macOS): close the
+            // hamburger so the two menus never overlap.
+            closeHamburgerMenu();
+            setMoreOpen(true);
+        },
         onClose: () => {
             setMoreOpen(false);
             setMoreConfirmedByClick(false);

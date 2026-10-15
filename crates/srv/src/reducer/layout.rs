@@ -5,6 +5,12 @@ use agentmux_common::ipc::{ErrorCode, Event};
 
 use crate::state::State;
 
+mod heal;
+mod intent;
+pub(crate) use heal::heal_loaded_layout;
+pub(super) use intent::handle_layout_apply_intent;
+#[allow(unused_imports)]
+pub(crate) use intent::RECENT_INTENTS;
 
 /// Phase E.4 (Option A) — set the focused layout-node id on a tab.
 /// Errors (non-fatal) if the tab is unknown to the reducer; no-op
@@ -78,7 +84,8 @@ pub(super) fn handle_layout_set_tree(
         }];
     };
     tab.rootnode = new_tree.clone();
-    // SPEC_864 Phase 2 — a full-row push carries focus/magnify in `slices`
+    // SPEC_864 Phase 2 — a seeding `LayoutSetTree` (srv's own; windows send
+    // intents) carries focus/magnify in `slices`
     // (REPLACE semantics; empty string = clear). leaforder /
     // pending_backend_actions are not modeled in TabRecord — they ride the
     // event through to the persist subscriber untouched.
@@ -95,8 +102,9 @@ pub(super) fn handle_layout_set_tree(
     let (pushed_focused, pushed_magnified) = (tab.focused_node_id.clone(), tab.magnified_node_id.clone());
     // Referential-integrity enforcement (see
     // `backend::layout::prune_dangling_block_refs`'s doc comment): this is
-    // the exact vector — a wholesale tree push — that let a stale frontend
-    // copy resurrect a deleted block's leaf
+    // the exact vector — a wholesale tree replace — that once let a stale
+    // frontend copy resurrect a deleted block's leaf. Windows no longer push
+    // trees, but srv's seeders still replace whole trees here
     // (INVESTIGATION_LAYOUT_DEAD_SPACE_STALE_TREE_RESURRECTION_2026_07_08.md).
     // Re-derive `new_tree`/the event from the now-authoritative (possibly
     // pruned) `tab.rootnode` rather than the caller's original value, so
@@ -110,17 +118,6 @@ pub(super) fn handle_layout_set_tree(
             tab_id = %tab_id,
             pruned,
             "reducer: LayoutSetTree pruned dangling layout leaf/leaves referencing since-deleted blocks"
-        );
-    }
-    // Minimize-lock enforcement (same write-point-invariant shape as the
-    // prune above; SPEC_LAYOUT_MINIMIZE_LOCKED_STATE_REDESIGN_2026_07_16.md):
-    // a pushed tree that resized a minimized node gets snapped back here.
-    let snapped = crate::backend::layout::enforce_minimized_locks(&mut tab.rootnode);
-    if snapped > 0 {
-        tracing::warn!(
-            tab_id = %tab_id,
-            snapped,
-            "reducer: LayoutSetTree snapped minimize-locked node size(s) back to their locked values"
         );
     }
     report_layout_violations(&tab_id, "LayoutSetTree", &tab.rootnode);
@@ -168,18 +165,16 @@ pub(super) fn handle_layout_delete_node(
             version: v,
         }];
     };
-    let Some(root) = tab.rootnode.as_mut() else {
+    if tab.rootnode.is_none() {
         // Empty tree — nothing to delete; idempotent no-op (no event).
         return Vec::new();
-    };
-    // `backend::layout::delete_node` leaves
-    // root deletion to the caller (returns Ok(()) with the root
-    // unmodified). Detect the root case here and clear the tree
-    // wholesale so the reducer state matches the
-    // `LayoutNodeDeleted` event we emit.
-    if root.id == node_id {
-        tab.rootnode = None;
-    } else if let Err(e) = crate::backend::layout::delete_node(root, &node_id) {
+    }
+    // The frontend's delete, then its balance pass (the `delete` intent), so
+    // the window that mirrors this removal ends with the same tree.
+    let mut tree = tab.rootnode.clone();
+    let delete = agentmux_common::LayoutIntent::Delete { node_id: node_id.clone() };
+    let mut ids = crate::backend::layout::intent::NodeIds::new(&correlation_id);
+    if let Err(e) = crate::backend::layout::intent::apply_intent(&mut tree, delete, &mut ids) {
         let v = state.bump_version();
         return vec![Event::Error {
             code: ErrorCode::InvalidCommand,
@@ -188,24 +183,16 @@ pub(super) fn handle_layout_delete_node(
             version: v,
         }];
     }
+    tab.rootnode = tree;
 
-    // Two ways focus/magnify ids can reference nodes that no longer
-    // exist in the tree post-delete; both must be cleared:
-    //   - `delete_recursive` collapse-sole-child rewrites a
-    //        parent's id to the promoted child's id. If
-    //        focused/magnified was the parent's original id, that
-    //        id is gone from the tree even though the same physical
-    //        node remains.
-    //   - Deleting a container removes all descendants. If
-    //        focused/magnified was a descendant, it's gone too.
-    // A direct-target match (`focused == node_id`) doesn't catch
-    // either case. Reconcile by walking the post-delete tree and
-    // clearing any focus/magnify id that no longer resolves.
+    // Focus or magnify can name a node the delete took: a descendant of a
+    // removed container, or a branch the balance pass collapsed into its one
+    // remaining leaf. Clear whichever no longer resolves.
     let (was_focused, was_magnified) = clear_dangling_focus_magnify(tab);
 
     // SPEC_864 site #6 — carry the resulting tree so the persist
     // subscriber can write db_layout without re-running the algebra
-    // (same single-writer shape as the 7 structural arms). A delete is
+    // (the single-writer shape of every layout arm). A delete is
     // the one structural op that can legitimately EMPTY the tree
     // (root-orphan case), so `tree_cleared` disambiguates a real clear
     // from a version-skewed sender's absent field.
@@ -264,9 +251,9 @@ fn report_layout_violations(tab_id: &str, op: &str, tree: &Option<agentmux_commo
 ///
 /// Unresolved block → silent idempotent no-op (empty event vec), NOT an
 /// error: every `delete_block` saga run dispatches this, and a block
-/// may legitimately have no layout node (the frontend's own delete
-/// flow already pushed a pruned tree via `LayoutSetTree`, the block
-/// was floating/never laid out, or the tab tree is empty).
+/// may legitimately have no layout node (a layout intent already
+/// removed it, the block was floating/never laid out, or the tab tree
+/// is empty).
 pub(super) fn handle_layout_delete_node_by_block(
     state: &mut State,
     tab_id: String,
@@ -308,34 +295,25 @@ pub(super) fn handle_layout_delete_node_by_block(
 
 /// SPEC_864 Phase 4 — append backend actions to a tab's
 /// `pendingbackendactions` queue. The reducer does NOT model the queue
-/// in `TabRecord` (it is a transient backend→frontend mailbox the
-/// frontend drains via REPLACE-clear slices, not layout-tree state), so
-/// this arm only validates and passes the payload through; the persist
-/// subscriber APPENDs it to `LayoutState.pendingbackendactions`.
+/// in `TabRecord` (it tells a window what srv already did to the tree; it
+/// is not layout-tree state), so this arm only validates and passes the
+/// payload through; the persist subscriber APPENDs it to
+/// `LayoutState.pendingbackendactions`.
 ///
 /// `actions` must be a non-empty JSON array of `LayoutActionData`
 /// objects (the type lives in `agentmux-srv::backend::obj`, not the
 /// common crate — hence the raw-value carriage).
-///
-/// Each batch bumps the tab's `layout_revision` and stamps it on every action
-/// as `rev`, so a frontend push that never saw this batch is refused instead
-/// of erasing it (`stale_push_revision`).
 pub(super) fn handle_layout_queue_backend_actions(
     state: &mut State,
     tab_id: String,
-    mut actions: serde_json::Value,
+    actions: serde_json::Value,
     correlation_id: String,
 ) -> Vec<Event> {
-    let Some(tab) = state.tabs.get_mut(&tab_id) else {
+    if !state.tabs.contains_key(&tab_id) {
         return unknown_tab(state, "LayoutQueueBackendActions", &tab_id);
-    };
-    match actions.as_array_mut() {
-        Some(arr) if !arr.is_empty() => {
-            tab.layout_revision += 1;
-            for action in arr.iter_mut().filter_map(|a| a.as_object_mut()) {
-                action.insert("rev".into(), tab.layout_revision.into());
-            }
-        }
+    }
+    match actions.as_array() {
+        Some(arr) if !arr.is_empty() => {}
         _ => {
             return op_error(
                 state,
@@ -353,17 +331,6 @@ pub(super) fn handle_layout_queue_backend_actions(
         correlation_id,
         version: v,
     }]
-}
-
-/// The tab's current `layout_revision` when a frontend tree push built on
-/// `base_revision` is stale, else `None`. A stale push never saw some queued
-/// backend action (a tab pushed into a pane, a pane removed), and applying it
-/// would drop that change from the tree and erase it from the queue the push
-/// replaces. The pusher resyncs: it applies the actions it missed, then pushes
-/// again. SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md §3.5.
-pub(crate) fn stale_push_revision(state: &State, tab_id: &str, base_revision: u64) -> Option<u64> {
-    let current = state.tabs.get(tab_id)?.layout_revision;
-    (base_revision < current).then_some(current)
 }
 
 // ── Pane tabs (SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md §3.2) ─────────

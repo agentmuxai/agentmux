@@ -8,6 +8,7 @@
 @use "./disk-volumes-popover";
 @use "./maintenance-section";
 @use "./health-notices";
+@use "../mixins.scss";
 
 .status-bar {
     // Responsive 2-row wrap (§4.4 of SPEC_STATUSBAR_TOKEN_USAGE).
@@ -23,14 +24,14 @@
     justify-content: space-between;
     min-height: 22px;
     flex-shrink: 0;
-    font-size: 11px;
+    font-size: var(--text-xs);
     zoom: var(--zoomfactor);
     background: var(--status-bar-bg);
     border-top: 1px solid var(--border-color);
     color: var(--secondary-text-color);
     user-select: none;
     -webkit-app-region: no-drag;
-    z-index: calc(var(--zindex-modal-wrapper) - 1);
+    z-index: var(--z-status-bar);
     padding: 0 var(--space-1-5);
     gap: 0;
     // Never wider than the window: a single item still too wide is cut at the
@@ -97,13 +98,13 @@
         }
 
         .status-icon {
-            font-size: 9px;
+            font-size: var(--text-3xs);
             line-height: 1;
         }
 
         .status-icon-spin {
             display: inline-block;
-            animation: status-icon-spin 1.2s linear infinite;
+            animation: am-spin 1.2s linear infinite;
         }
     }
 
@@ -134,7 +135,7 @@
     // fixed to apply for real — pick a value here deliberately if changing.
     .stat-mono {
         font-family: var(--font-sans);
-        font-size: 11px;
+        font-size: var(--text-xs);
         letter-spacing: -0.02em;
         display: inline-block;
     }
@@ -205,18 +206,16 @@
 
     .status-hostname {
         opacity: 0.4;
-        font-size: 10px;
+        font-size: var(--text-2xs);
         padding: 0 5px;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
+        @include mixins.truncate;
         max-width: 200px;
         user-select: text;
     }
 
     .status-version {
         opacity: 0.4;
-        font-size: 10px;
+        font-size: var(--text-2xs);
         padding: 0 5px;
         border-radius: 0;
         // Button reset so the chip looks identical whether it's a
@@ -271,7 +270,7 @@
     @include popoverFrame.popover-frame;
     padding: var(--space-2) 10px;
     min-width: 200px;
-    font-size: 11px;
+    font-size: var(--text-xs);
 
     .status-bar-popover-row {
         display: flex;
@@ -300,9 +299,7 @@
     .status-bar-popover-link {
         display: block;
         min-width: 0;
-        padding: 0;
-        border: 0;
-        background: none;
+        @include mixins.button-reset;
         color: inherit;
         text-align: right;
         white-space: normal;
@@ -325,9 +322,8 @@
     }
 
     .status-bar-popover-section-title {
-        text-transform: uppercase;
+        @include mixins.label-caps;
         font-size: 0.85em;
-        letter-spacing: 0.05em;
         opacity: 0.5;
         padding: var(--space-0-5) 0;
     }
@@ -414,7 +410,7 @@
     gap: 4px;
     padding: 0 6px;
     height: 100%;
-    font-size: 11px;
+    font-size: var(--text-xs);
     font-family: inherit;
     color: inherit;
     background: transparent;
@@ -433,62 +429,13 @@
     // so the cause of that dot is unmistakable once the panel is open.
     &.muxbus-login-chip-signin {
         color: var(--error-color);
-        background: color-mix(in srgb, var(--error-color) 12%, transparent);
+        background: var(--error-bg);
         border-radius: 4px;
         cursor: pointer;
 
         &:hover:not(:disabled) {
             background: color-mix(in srgb, var(--error-color) 22%, transparent);
         }
-    }
-
-    // Signed-in state — slightly more prominent than version chip.
-    &.muxbus-login-chip-connected {
-        opacity: 0.55;
-
-        &:hover {
-            opacity: 1;
-            background: var(--hover-bg-color);
-        }
-    }
-
-    // Green dot indicating live cloud connection.
-    .muxbus-login-chip-dot {
-        display: inline-block;
-        width: 5px;
-        height: 5px;
-        border-radius: 50%;
-        background: var(--success-color, #4caf50);
-        flex-shrink: 0;
-    }
-
-    // Truncate long emails gracefully.
-    .muxbus-login-chip-email {
-        max-width: 140px;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-    }
-}
-
-// Inline error indicator (! badge) shown beside the chip when connect/disconnect fails.
-.muxbus-login-chip-error {
-    color: var(--error-color);
-    font-size: 11px;
-    cursor: default;
-    padding: 0 2px;
-}
-
-// Disconnect popover — inherits .status-bar-popover layout.
-.muxbus-login-popover {
-    min-width: 220px;
-
-    .muxbus-popover-email {
-        font-size: 0.95em;
-        max-width: 160px;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
     }
 }
 
@@ -499,7 +446,7 @@
     border: 1px solid var(--border-color);
     border-radius: 0;
     color: inherit;
-    font-size: 11px;
+    font-size: var(--text-xs);
     font-family: inherit;
     cursor: default;
     text-align: left;
@@ -513,15 +460,6 @@
     &:disabled {
         opacity: 0.4;
         cursor: default;
-    }
-}
-
-@keyframes status-icon-spin {
-    from {
-        transform: rotate(0deg);
-    }
-    to {
-        transform: rotate(360deg);
     }
 }
 
@@ -602,7 +540,7 @@
     flex-shrink: 0;
 
     &--ok {
-        background: var(--success-color, #4caf50);
+        background: var(--success-color);
     }
 }
 

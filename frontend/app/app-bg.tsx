@@ -45,5 +45,5 @@ export function AppBackground(): JSX.Element {
         onCleanup(() => rszObs.disconnect());
     });
 
-    return <div ref={bgRef!} class="pointer-events-none absolute top-0 left-0 w-full h-full z-[var(--zindex-app-background)]" style={style() as any} />;
+    return <div ref={bgRef!} class="pointer-events-none absolute top-0 left-0 w-full h-full z-[var(--z-behind)]" style={style() as any} />;
 }

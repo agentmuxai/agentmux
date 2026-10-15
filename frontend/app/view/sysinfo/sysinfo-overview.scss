@@ -3,6 +3,8 @@
 
 // Sysinfo's Overview (sysinfo-overview.tsx): controls, then tiles, then the
 // charts as small multiples, two to a row where the pane is wide enough.
+
+@use "../../mixins.scss";
 .sysinfo-overview {
     display: flex;
     flex-direction: column;
@@ -12,22 +14,6 @@
     min-height: 0;
     padding: 6px;
     overflow-y: auto;
-}
-
-.sysinfo-overview-controls {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 6px;
-}
-
-.sysinfo-overview-spacer {
-    flex: 1 1 auto;
-}
-
-.sysinfo-overview-paused {
-    font-size: 11px;
-    color: var(--grey-text-color);
 }
 
 .sysinfo-overview-tiles {
@@ -54,7 +40,7 @@
 }
 
 .sysinfo-tile-name {
-    font-size: 11px;
+    font-size: var(--text-xs);
     color: var(--grey-text-color);
 }
 
@@ -62,14 +48,12 @@
     font-size: 15px;
     line-height: 1.3;
     color: var(--main-text-color);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    @include mixins.truncate;
 }
 
 .sysinfo-tile-range {
     min-height: 14px;
-    font-size: 11px;
+    font-size: var(--text-xs);
     color: var(--grey-text-color);
 }
 
@@ -115,7 +99,7 @@
 .sysinfo-overview-table {
     width: 100%;
     border-collapse: collapse;
-    font-size: 12px;
+    font-size: var(--text-sm);
 
     th,
     td {
@@ -155,7 +139,7 @@
     margin: 0;
     padding: 0;
     list-style: none;
-    font-size: 11px;
+    font-size: var(--text-xs);
     color: var(--grey-text-color);
 }
 

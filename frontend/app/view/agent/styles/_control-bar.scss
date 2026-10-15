@@ -1,15 +1,15 @@
 // Copyright 2024-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+@use "../../../mixins.scss";
+
 // Picker empty state + presentation view modifier + control bar. Wrapped in .agent-view so the cascade chain matches
 // the pre-split file (SPEC_AGENT_VIEW_SCSS_SPLIT_2026_04_24).
 .agent-view {
     // === Picker Empty State ===
     .agent-picker-empty {
-        display: flex;
+        @include mixins.flex-center;
         flex-direction: column;
-        align-items: center;
-        justify-content: center;
         height: 100%;
         gap: 10px;
         padding: var(--space-6);
@@ -21,7 +21,7 @@
         }
 
         .agent-picker-empty-title {
-            font-size: 14px;
+            font-size: var(--text-md);
             font-weight: 500;
             color: var(--main-text-color);
         }
@@ -85,16 +85,14 @@
         align-items: center;
         gap: var(--space-2);
         padding: var(--space-1) var(--space-3);
-        font-size: 11px;
+        font-size: var(--text-xs);
         color: var(--secondary-text-color);
         background: color-mix(in srgb, var(--accent-color) 6%, var(--elevated-bg-color));
 
         .agent-away-digest-text {
             flex: 1;
             min-width: 0;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
+            @include mixins.truncate;
         }
     }
 
@@ -103,7 +101,7 @@
     }
 
     .agent-working-row-anchor .agent-working-row {
-        font-size: 10px;
+        font-size: var(--text-2xs);
         display: flex;
         align-items: center;
         gap: 5px;
@@ -164,9 +162,7 @@
             .agent-working-row-left {
                 flex: 1;
                 min-width: 0;
-                overflow: hidden;
-                text-overflow: ellipsis;
-                white-space: nowrap;
+                @include mixins.truncate;
                 // The live status, one line, truncated at the end.
                 // SPEC_AGENT_TURN_MODEL_AND_LIVE_STATUS_2026_10_08.md §6.10.
                 display: flex;
@@ -215,7 +211,7 @@
             .agent-working-row-progress.is-over .agent-working-row-progress-fill {
                 width: 33% !important; // beats the inline estimate width
                 transition: none;
-                animation: agent-compaction-indeterminate 1.6s ease-in-out infinite;
+                animation: agent-compaction-indeterminate 1.6s var(--ease-in-out) infinite;
             }
 
             // The ASCII spinner (AsciiSpinner.tsx) is the status text's color:
@@ -230,7 +226,8 @@
                 color: var(--block-identity-color, var(--accent-color));
             }
 
-            @media (prefers-reduced-motion: reduce) {
+            // Reduced treatment (status), dormant under the motion policy.
+            @include mixins.when-motion-reduced(status) {
                 .agent-working-row-progress-fill {
                     transition: none;
                 }
@@ -244,9 +241,7 @@
 
             .agent-working-row-cancel-login {
                 margin-left: var(--space-2);
-                padding: 0;
-                background: none;
-                border: none;
+                @include mixins.button-reset;
                 color: inherit;
                 font: inherit;
                 text-decoration: underline;
@@ -295,9 +290,7 @@
             .agent-working-row-left {
                 flex: 1;
                 min-width: 0;
-                overflow: hidden;
-                text-overflow: ellipsis;
-                white-space: nowrap;
+                @include mixins.truncate;
                 opacity: 0.55;
             }
 
@@ -340,7 +333,7 @@
         border-radius: 50%;
         background: var(--accent-color);
         flex-shrink: 0;
-        animation: agent-pulse 1.2s ease-in-out infinite;
+        animation: agent-pulse 1.2s var(--ease-in-out) infinite;
         // Subtle halo that breathes with the pulse — gives the dot
         // a little more life without interfering with the spotlight.
         box-shadow: 0 0 6px color-mix(in srgb, var(--accent-color) 60%, transparent);
@@ -362,8 +355,8 @@
         justify-content: space-between;
         gap: var(--space-2);
         padding: var(--space-1) var(--space-2);
-        background: color-mix(in srgb, var(--accent-color) 14%, transparent);
-        border-bottom: 1px solid color-mix(in srgb, var(--accent-color) 30%, transparent);
+        background: var(--accent-bg);
+        border-bottom: 1px solid var(--accent-line);
         font-size: var(--text-xs);
         color: var(--main-text-color);
 
@@ -383,8 +376,8 @@
         justify-content: space-between;
         gap: var(--space-2);
         padding: var(--space-1) var(--space-2);
-        background: color-mix(in srgb, var(--warning-color, #d97706) 14%, transparent);
-        border-bottom: 1px solid color-mix(in srgb, var(--warning-color, #d97706) 30%, transparent);
+        background: var(--warning-bg);
+        border-bottom: 1px solid var(--warning-line);
         font-size: var(--text-xs);
         color: var(--main-text-color);
 
@@ -406,8 +399,8 @@
         justify-content: space-between;
         gap: var(--space-2);
         padding: var(--space-1) var(--space-2);
-        background: color-mix(in srgb, var(--warning-color) 14%, transparent);
-        border-bottom: 1px solid color-mix(in srgb, var(--warning-color) 30%, transparent);
+        background: var(--warning-bg);
+        border-bottom: 1px solid var(--warning-line);
         font-size: var(--text-xs);
         color: var(--main-text-color);
 
@@ -423,7 +416,7 @@
         align-items: center;
         gap: var(--space-2);
         padding: var(--space-1) var(--space-2);
-        background: color-mix(in srgb, var(--main-text-color) 4%, transparent);
+        background: var(--tint-2);
         border-bottom: 1px solid var(--border-color);
         font-size: var(--text-xs);
         color: var(--secondary-text-color);
@@ -431,13 +424,9 @@
         .agent-archived-label {
             flex: 1 1 auto;
             min-width: 0;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            font-size: 10px;
+            @include mixins.label-caps;
+            font-size: var(--text-2xs);
         }
     }
 
-    @keyframes agent-spin {
-        to { transform: rotate(360deg); }
-    }
 }

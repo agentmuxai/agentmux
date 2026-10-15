@@ -333,6 +333,13 @@ impl Service {
         blocking(move || svc.store.derive_and_save(&id, &blob, kind, &name, edge)).await
     }
 
+    /// Give back what [`Self::with_session_inline_budget`] recorded for a
+    /// message that then wasn't delivered. Blocking.
+    pub fn refund_session_inline(&self, key: &str, bytes: u64) {
+        let _guard = self.session_budget.lock().unwrap();
+        self.store.refund_session_inline_bytes(key, bytes);
+    }
+
     /// Run `f` with the inline budget left in Claude session `key` (out of
     /// `max`), and record what it reports spending, as one step under a
     /// lock. `carry_from` is a per-block key counted before the session had

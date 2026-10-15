@@ -10,7 +10,6 @@
 @use "styles/provider-badge";
 @use "styles/status-dot";
 @use "styles/detail";
-@use "styles/assignments";
 @use "styles/empty-states";
 @use "styles/form-overlay";
 
@@ -19,7 +18,7 @@
     flex-direction: column;
     height: 100%;
     overflow: hidden;
-    font-size: 13px;
+    font-size: var(--text-base);
     color: var(--main-text-color);
     background: var(--main-bg-color);
 }

@@ -3,6 +3,8 @@
 
 // Agent picker list + card + card-settings panel. Wrapped in .agent-view so the cascade chain matches
 // the pre-split file (SPEC_AGENT_VIEW_SCSS_SPLIT_2026_04_24).
+@use "../../../mixins.scss";
+
 .agent-view {
     // === Agent Picker ===
     // The single scroll boundary for the whole picker — My Agents and
@@ -62,7 +64,7 @@
         font-size: var(--text-sm);
         font-family: inherit;
         outline: none;
-        transition: border-color 0.15s;
+        transition: border-color var(--duration-decorative-base);
 
         &:focus {
             border-color: var(--accent-color);
@@ -79,17 +81,15 @@
         width: 22px;
         height: 22px;
         padding: 0;
-        display: flex;
-        align-items: center;
-        justify-content: center;
+        @include mixins.flex-center;
         background: none;
         border: 1px solid transparent;
         border-radius: 0;
         cursor: default;
         color: var(--secondary-text-color);
-        font-size: 14px;
+        font-size: var(--text-md);
         line-height: 1;
-        transition: background 0.1s, color 0.1s, border-color 0.1s;
+        transition: background var(--duration-decorative-fast), color var(--duration-decorative-fast), border-color var(--duration-decorative-fast);
 
         &:hover {
             background: color-mix(in srgb, var(--error-color) 15%, transparent);
@@ -114,10 +114,9 @@
 
     .agent-picker-sort-label {
         flex-shrink: 0;
-        font-size: 10px;
+        font-size: var(--text-2xs);
         font-weight: 600;
-        letter-spacing: 0.03em;
-        text-transform: uppercase;
+        @include mixins.label-caps;
         color: var(--secondary-text-color);
         opacity: 0.75;
     }
@@ -132,7 +131,7 @@
         font-family: inherit;
         outline: none;
         cursor: default;
-        transition: border-color 0.15s;
+        transition: border-color var(--duration-decorative-base);
 
         &:focus {
             border-color: var(--accent-color);
@@ -146,11 +145,10 @@
     // like peers, not a heading + a free-floating grid.
     .agent-picker-templates-header {
         width: 100%;
-        font-size: var(--text-sm, 0.875rem);
+        font-size: var(--text-sm);
         font-weight: 600;
         color: color-mix(in srgb, var(--main-text-color) 70%, transparent);
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
+        @include mixins.label-caps;
         margin-top: var(--space-3);
     }
 
@@ -160,7 +158,7 @@
     // second label competing with the header above it.
     .agent-picker-templates-hint {
         width: 100%;
-        font-size: var(--text-xs, 0.75rem);
+        font-size: var(--text-xs);
         color: color-mix(in srgb, var(--main-text-color) 55%, transparent);
         margin: 0;
     }
@@ -197,11 +195,10 @@
     .agent-picker-hidden-templates-header {
         all: unset;
         cursor: default;
-        font-size: var(--text-sm, 0.875rem);
+        font-size: var(--text-sm);
         font-weight: 600;
         color: color-mix(in srgb, var(--main-text-color) 60%, transparent);
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
+        @include mixins.label-caps;
         display: flex;
         align-items: center;
         gap: var(--space-2);
@@ -228,7 +225,7 @@
 
     .agent-picker-hidden-templates-empty,
     .agent-picker-hidden-templates-loading {
-        font-size: var(--text-sm, 0.875rem);
+        font-size: var(--text-sm);
         color: var(--secondary-text-color);
         padding: var(--space-2) 0;
     }
@@ -239,16 +236,16 @@
         gap: var(--space-3);
         padding: var(--space-2) var(--space-3);
         border-radius: 0;
-        background: color-mix(in srgb, var(--main-text-color) 2%, transparent);
+        background: var(--tint-1);
 
         &:hover {
-            background: color-mix(in srgb, var(--main-text-color) 5%, transparent);
+            background: var(--tint-2);
         }
     }
 
     .agent-picker-hidden-template-name {
         flex: 1;
-        font-size: var(--text-sm, 0.875rem);
+        font-size: var(--text-sm);
         color: var(--main-text-color);
     }
 
@@ -257,16 +254,16 @@
         cursor: default;
         padding: 4px 10px;
         border-radius: 0;
-        font-size: var(--text-xs, 0.75rem);
+        font-size: var(--text-xs);
         font-weight: 500;
         color: var(--accent-color);
         border: 1px solid var(--accent-color);
         background: transparent;
-        transition: background 0.15s;
+        transition: background var(--duration-decorative-base);
 
         &:hover,
         &:focus-visible {
-            background: color-mix(in srgb, var(--accent-color) 12%, transparent);
+            background: var(--accent-bg);
         }
     }
 
@@ -282,14 +279,10 @@
         min-height: 92px;
         padding: var(--space-3) var(--space-3) var(--space-4);
         border: 1px solid var(--border-color);
-        background: color-mix(in srgb, var(--main-text-color) 3%, transparent);
+        background: var(--tint-1);
         border-radius: 0;
         cursor: default;
-        // Not `all`: that also animates the inherited `visibility` that hides
-        // window and pane tabs, so this would pop in a frame late when shown
-        // (docs/analysis/ANALYSIS_WINDOW_TAB_SWITCH_PAINT_2026_09_30.md §3).
-        transition-property: color, background-color, border-color, outline-color, box-shadow, opacity;
-        transition-duration: 0.15s;
+        @include mixins.control-transition(var(--duration-decorative-base));
         color: var(--main-text-color);
         text-align: left;
         width: 100%;
@@ -344,23 +337,22 @@
             right: 0;            // anchored fully inside the card so
             bottom: 0;           // the label can't clip on the right
             padding: 3px 10px;   // a touch more horizontal breathing room
-            font-size: 10px;
+            font-size: var(--text-2xs);
             font-weight: 600;
-            letter-spacing: 0.04em;
-            text-transform: uppercase;
+            @include mixins.label-caps;
             color: #fff; /* stylelint-disable-line color-no-hex */
-            background: var(--success-color, #4e9a06);
+            background: var(--success-color);
             border-radius: 0;
             box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
             pointer-events: none;
             z-index: 1;
             user-select: none;
             transform-origin: bottom right;
-            transition: transform 0.15s ease-out, background 0.15s;
+            transition: transform var(--duration-decorative-base) var(--ease-out), background var(--duration-decorative-base);
         }
 
         &:hover .agent-card-install-ribbon {
-            background: color-mix(in srgb, var(--success-color, #4e9a06) 80%, white);
+            background: color-mix(in srgb, var(--success-color) 80%, white);
             transform: scale(1.06);
         }
 
@@ -374,12 +366,12 @@
             top: 6px;
             right: 6px;
             padding: 1px 6px;
-            font-size: 9px;
+            font-size: var(--text-3xs);
             font-weight: 600;
             letter-spacing: 0.03em;
-            color: var(--warning-color, #c4a000);
-            background: color-mix(in srgb, var(--warning-color, #c4a000) 14%, transparent);
-            border: 1px solid color-mix(in srgb, var(--warning-color, #c4a000) 35%, transparent);
+            color: var(--warning-color);
+            background: var(--warning-bg);
+            border: 1px solid color-mix(in srgb, var(--warning-color) 35%, transparent);
             border-radius: 3px;
             pointer-events: none;
             z-index: 1;
@@ -401,16 +393,20 @@
             right: var(--space-1);
             bottom: var(--space-1);
             padding: 2px 8px;
-            font-size: 10px;
+            font-size: var(--text-2xs);
             font-weight: 600;
             letter-spacing: 0.02em;
             color: var(--secondary-text-color);
-            background: color-mix(in srgb, var(--main-text-color) 6%, transparent);
+            background: var(--tint-2);
             border: 1px solid color-mix(in srgb, var(--border-color) 70%, transparent);
             border-radius: 0;
             cursor: default;
             opacity: 0;
-            transition: opacity 0.12s ease-out, background 0.12s, color 0.12s, border-color 0.12s;
+            transition:
+                opacity var(--duration-decorative-quick) var(--ease-out),
+                background var(--duration-decorative-quick),
+                color var(--duration-decorative-quick),
+                border-color var(--duration-decorative-quick);
             pointer-events: none;
             z-index: 1;
             user-select: none;
@@ -424,20 +420,18 @@
 
         .agent-card-new-session-btn:hover {
             color: var(--main-text-color);
-            background: color-mix(in srgb, var(--main-text-color) 12%, transparent);
+            background: var(--tint-4);
             border-color: var(--accent-color);
         }
 
         &.agent-card--needs-install {
             // Subtle accent on the card border to reinforce the
             // ribbon's "needs action" signal.
-            border-color: color-mix(in srgb, var(--warning-color, #e9b800) 40%, var(--border-color));
+            border-color: color-mix(in srgb, var(--warning-color) 40%, var(--border-color));
         }
 
         .agent-card-icon {
-            display: flex;
-            align-items: center;
-            justify-content: center;
+            @include mixins.flex-center;
             flex-shrink: 0;
             width: 32px;
             height: 32px;
@@ -454,46 +448,38 @@
         }
 
         .agent-card-name {
-            font-size: 13px;
+            font-size: var(--text-base);
             font-weight: 500;
         }
 
         .agent-card-desc {
             font-size: var(--text-xs);
             color: var(--secondary-text-color);
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
+            @include mixins.truncate;
         }
 
         .agent-card-slug {
-            font-size: 10px;
+            font-size: var(--text-2xs);
             color: color-mix(in srgb, var(--secondary-text-color) 65%, transparent);
             font-family: var(--font-mono);
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
+            @include mixins.truncate;
         }
 
         // Definition card (post-SPEC_AGENT_DEFINITIONS_MODAL) — title
         // is the CLI brand name; the capability blurb and context-file
         // badge live in the caption row below.
         .agent-card-title {
-            font-size: 13px;
+            font-size: var(--text-base);
             font-weight: 500;
             color: var(--main-text-color);
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
+            @include mixins.truncate;
         }
 
         .agent-card-caption {
             font-size: var(--text-xs);
             font-weight: 500;
             color: var(--secondary-text-color);
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
+            @include mixins.truncate;
         }
 
         // Inline rename row — replaces the name span while editing
@@ -506,11 +492,11 @@
         .agent-card-rename-input {
             flex: 1;
             min-width: 0;
-            font-size: 13px;
+            font-size: var(--text-base);
             font-weight: 500;
             font-family: inherit;
             color: var(--main-text-color);
-            background: color-mix(in srgb, var(--main-text-color) 6%, transparent);
+            background: var(--tint-2);
             border: 1px solid var(--accent-color);
             border-radius: 0;
             padding: 1px 5px;
@@ -524,12 +510,10 @@
         .agent-card-rename-btn {
             width: 22px;
             height: 22px;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
+            @include mixins.flex-center(inline-flex);
             padding: 0;
             border: 1px solid var(--border-color);
-            background: color-mix(in srgb, var(--main-text-color) 5%, transparent);
+            background: var(--tint-2);
             border-radius: 0;
             color: var(--main-text-color);
             font-size: var(--text-xs);
@@ -560,7 +544,7 @@
             border: 2px solid color-mix(in srgb, var(--accent-color) 25%, transparent);
             border-top-color: var(--accent-color);
             border-radius: 50%;
-            animation: agent-spin 0.8s linear infinite;
+            animation: am-spin 0.8s linear infinite;
             flex-shrink: 0;
         }
     }
@@ -583,7 +567,7 @@
 
         .nodejs-notice-title {
             font-weight: 600;
-            font-size: 13px;
+            font-size: var(--text-base);
             margin-bottom: var(--space-1);
         }
 

@@ -3,6 +3,8 @@
 
 // widget-bar-settings.tsx: Settings → Widgets → Widget bar.
 
+@use "../../../mixins.scss";
+
 .widget-bar-list {
     display: flex;
     flex-direction: column;
@@ -34,9 +36,7 @@
 }
 
 .widget-bar-row-label {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    @include mixins.truncate;
 }
 
 .widget-bar-row-note {

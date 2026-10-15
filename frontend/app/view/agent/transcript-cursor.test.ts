@@ -389,6 +389,33 @@ describe("EchoLedger", () => {
         expect(l.isOwnEcho('{"type":"user", broken')).toBe(false);
         expect(l.isOwnEcho(rec("x"))).toBe(true);
     });
+
+    // SPEC_RENDERER_RECYCLE_WHEN_IDLE_2026_10_13.md §2: a shown row learns where its record sits.
+    it("reports where a shown message's record was placed, in every order and path", () => {
+        const placed: unknown[] = [];
+        const l = new EchoLedger((id, record, at) => placed.push([id, record, at]));
+        l.accepted("a", "user_1");
+        l.echoed(rec("z") + "\n" + rec("a") + "\n", { gen: "g1", line: 40 });
+        l.echoed(rec("b") + "\n", { gen: "g1", line: 42 });
+        l.accepted("b", "user_2"); // its echo came first
+        l.accepted("c", "user_3");
+        expect(l.isOwnEcho(rec("c"), { gen: "g1", line: 50 })).toBe(true);
+        expect(placed).toEqual([
+            ["user_1", rec("a"), { gen: "g1", line: 41 }],
+            ["user_2", rec("b"), { gen: "g1", line: 42 }],
+            ["user_3", rec("c"), { gen: "g1", line: 50 }],
+        ]);
+    });
+
+    it("reports nothing without a position or a row id", () => {
+        const placed: unknown[] = [];
+        const l = new EchoLedger((...a) => placed.push(a));
+        l.accepted("a", "user_1");
+        l.echoed(rec("a") + "\n"); // unpositioned
+        l.accepted("b");
+        l.echoed(rec("b") + "\n", { gen: "g1", line: 3 }); // no id
+        expect(placed).toEqual([]);
+    });
 });
 
 describe("historyPin", () => {

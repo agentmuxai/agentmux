@@ -527,6 +527,9 @@ declare global {
         ephemeral: boolean;
         targetblockid?: string;
         position?: string;
+        /** The node id srv gave the leaf it placed (insert, split): the
+         *  frontend's mirror uses it, so both trees name it alike. */
+        nodeid?: string;
     };
 
     // waveobj.LayoutState
@@ -536,9 +539,6 @@ declare global {
         focusednodeid?: string;
         leaforder?: LeafOrderEntry[];
         pendingbackendactions?: LayoutActionData[];
-        /** srv's layout revision for this tab (`TabRecord::layout_revision`); a
-         *  push echoes the one it was built on. */
-        layoutrevision?: number;
     };
 
     // waveobj.LeafOrderEntry
@@ -921,6 +921,7 @@ declare global {
         "window:blur"?: boolean;
         "window:opacity"?: number;
         "window:bgcolor"?: string;
+        /** @deprecated Ignored: motion follows the system (SPEC_MOTION_TIERS_AND_STYLESHEET_DRY_2026_10_15). */
         "window:reducedmotion"?: boolean;
         "window:tilegapsize"?: number;
         "window:showmenubar"?: boolean;

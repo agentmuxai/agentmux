@@ -1898,25 +1898,7 @@ wrap_task! {
 
     impl Task {
         fn execute(&self) {
-            // An empty label means "reclaim the foreground agentmux window" —
-            // used by the pane-destroy focus handoff, which can't know the
-            // surviving window's label up front (redock vs. in-window close).
-            let label: String = if !self.label.is_empty() {
-                self.label.clone()
-            } else {
-                #[cfg(target_os = "windows")]
-                {
-                    use windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
-                    let fg = unsafe { GetForegroundWindow() } as isize;
-                    let resolved: Option<String> =
-                        if fg != 0 { self.state.label_for_hwnd(fg as _) } else { None };
-                    resolved.unwrap_or_else(|| "main".to_string())
-                }
-                #[cfg(not(target_os = "windows"))]
-                {
-                    "main".to_string()
-                }
-            };
+            let label = self.label.clone();
 
             // Phase H.2.b — reducer-aware lookup with fallback.
             let browser = match self.state.get_browser(&label) {
@@ -2010,7 +1992,6 @@ wrap_task! {
                         let render = find_main_render_widget(top_hwnd, &pane_outer_hwnds);
                         let target = render.unwrap_or(top_hwnd);
                         windows_sys::Win32::UI::Input::KeyboardAndMouse::SetFocus(target as _);
-                        crate::browser_pane::hwnd::record_intentional_focus(target);
                         tracing::info!(
                             "[main-focus-reclaim] Win32 SetFocus target={:p} render_found={} panes_excluded={}",
                             target,

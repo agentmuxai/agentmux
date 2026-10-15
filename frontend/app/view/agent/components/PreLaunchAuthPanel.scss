@@ -6,6 +6,8 @@
 // (element/ui) — this file only handles panel layout, the
 // inline-icon row inside the button, and the surrounding banner / hint copy.
 
+@use "../../../mixins.scss";
+
 .pre-launch-auth-panel {
     display: flex;
     flex-direction: column;
@@ -14,7 +16,7 @@
     margin: var(--space-3) 0;
     border: 1px solid var(--border-color);
     border-radius: 0;
-    background-color: var(--panel-bg, rgba(255, 255, 255, 0.02));
+    background-color: var(--tint-1);
 }
 
 .pre-launch-auth-panel-cta,
@@ -25,8 +27,8 @@
 }
 
 .pre-launch-auth-panel-warning {
-    color: var(--warning-text-color, #d97706);
-    font-size: 13px;
+    color: var(--warning-text-color);
+    font-size: var(--text-base);
     line-height: 1.4;
 }
 
@@ -44,9 +46,7 @@
 .pre-launch-auth-panel-connect-icon {
     font-size: 18px;
     line-height: 1;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
+    @include mixins.flex-center(inline-flex);
     min-width: 20px;
 }
 
@@ -56,7 +56,7 @@
 
 .pre-launch-auth-panel-hint {
     color: var(--secondary-text-color);
-    font-size: 12px;
+    font-size: var(--text-sm);
     line-height: 1.5;
 }
 
@@ -70,13 +70,13 @@
 
 .pre-launch-auth-panel-waiting-title {
     font-weight: 500;
-    font-size: 14px;
+    font-size: var(--text-md);
 }
 
 .pre-launch-auth-panel-waiting-steps {
     margin: 0;
     padding-left: var(--space-5);
-    font-size: 13px;
+    font-size: var(--text-base);
     color: var(--secondary-text-color);
 
     li {
@@ -91,9 +91,9 @@
     display: flex;
     flex-direction: column;
     gap: var(--space-1-5);
-    padding: var(--space-2) var(--space-2-5, var(--space-2));
+    padding: var(--space-2);
     border: 1px solid var(--border-color);
-    border-radius: var(--radius-sm, 0);
+    border-radius: var(--radius-sm);
 
     & + & {
         margin-top: var(--space-1);
@@ -131,7 +131,7 @@
 }
 
 .pre-launch-auth-panel-url-label {
-    font-size: 12px;
+    font-size: var(--text-sm);
     color: var(--secondary-text-color);
 }
 
@@ -143,12 +143,12 @@
     display: block;
     width: 100%;
     padding: var(--space-2) var(--space-3);
-    background-color: var(--input-bg, rgba(255, 255, 255, 0.04));
+    background-color: var(--tint-2);
     border: 1px solid var(--border-color);
     border-radius: 0;
     color: var(--main-text-color);
     font-family: var(--font-mono);
-    font-size: 12px;
+    font-size: var(--text-sm);
     line-height: 1.4;
     white-space: normal;
     word-break: break-all;
@@ -159,12 +159,12 @@
     flex: 1 1 auto;
     min-width: 0;
     padding: var(--space-2) var(--space-3);
-    background-color: var(--input-bg, rgba(255, 255, 255, 0.04));
+    background-color: var(--tint-2);
     border: 1px solid var(--border-color);
     border-radius: 0;
     color: var(--main-text-color);
     font-family: var(--font-mono);
-    font-size: 12px;
+    font-size: var(--text-sm);
 
     &:focus {
         outline: 1px solid var(--accent-color);
@@ -176,7 +176,7 @@
 
 .pre-launch-auth-panel-device-code {
     padding: var(--space-3);
-    background-color: var(--input-bg, rgba(255, 255, 255, 0.04));
+    background-color: var(--tint-2);
     border: 1px solid var(--border-color);
     border-radius: 0;
     display: flex;
@@ -185,7 +185,7 @@
 }
 
 .pre-launch-auth-panel-device-code-label {
-    font-size: 12px;
+    font-size: var(--text-sm);
     color: var(--secondary-text-color);
 
     a {
@@ -209,8 +209,8 @@
 // ── Terminal banners ──────────────────────────────────────────
 
 .pre-launch-auth-panel-ready {
-    color: var(--success-text-color, #10b981);
-    font-size: 13px;
+    color: var(--success-text-color);
+    font-size: var(--text-base);
     font-weight: 500;
     padding: var(--space-2) var(--space-3);
     background-color: rgba(16, 185, 129, 0.08);
@@ -228,7 +228,7 @@
 }
 
 .pre-launch-auth-panel-failed-message {
-    color: var(--error-text-color, #ef4444);
-    font-size: 13px;
+    color: var(--error-text-color);
+    font-size: var(--text-base);
     line-height: 1.4;
 }

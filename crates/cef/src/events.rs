@@ -126,9 +126,11 @@ pub fn emit_event_to_window(
 /// same class of bug for `browser-pane-clicked` / shortcut / context-menu;
 /// this covers the remaining push sites (nav-state x3, title, favicon).
 ///
-/// Falls back to the legacy `main` routing (with a warning) only when the
-/// pane has no reducer entry or its `window_label` is empty (the legacy
-/// `EnqueueBrowserPaneCreate` path), so nothing that worked before regresses.
+/// Falls back to the old `main` routing (with a warning) only when the pane
+/// has no reducer entry or its `window_label` is empty. The one production
+/// registration (`BrowserPaneManager::create`) always records the creating window,
+/// so this is a safety net that keeps the event flowing rather than dropping
+/// it, not a path normal use takes.
 /// Returns whether a browser was found to deliver to.
 pub fn emit_browser_pane_event(
     state: &crate::state::AppState,

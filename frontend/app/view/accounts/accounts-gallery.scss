@@ -8,6 +8,8 @@
 // cards, both styled by element/ui/card.scss
 // (SPEC_CONNECTORS_CARDS_2026_10_13.md §3.2); this file keeps the chooser.
 
+@use "../../mixins.scss";
+
 .accounts-gallery {
     display: flex;
     flex-direction: column;
@@ -15,9 +17,7 @@
 
 // The brand logo in the chooser's header.
 .account-tile-logo {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
+    @include mixins.flex-center(inline-flex);
     flex: none;
     width: 20px;
     height: 20px;
@@ -45,12 +45,9 @@
 // — it rendered unstyled (position: static, transparent backdrop) since it's
 // a plain div, never wrapped by Modal.
 .accounts-chooser-overlay {
-    position: fixed;
-    inset: 0;
-    z-index: var(--zindex-modal-wrapper);
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    @include mixins.fixed-fill;
+    z-index: var(--z-popover);
+    @include mixins.flex-center;
     background: rgba(0, 0, 0, 0.45);
 }
 
@@ -66,15 +63,15 @@
     .accounts-chooser-header {
         display: flex;
         align-items: center;
-        gap: var(--space-2, 8px);
-        padding: var(--space-3, 12px);
+        gap: var(--space-2);
+        padding: var(--space-3);
         border-bottom: 1px solid var(--border-color);
     }
 
     .accounts-chooser-title {
         flex: 1;
         font-weight: 600;
-        font-size: 13px;
+        font-size: var(--text-base);
     }
 
     .accounts-chooser-close {
@@ -82,7 +79,7 @@
         border: none;
         color: var(--secondary-text-color);
         cursor: default;
-        font-size: 13px;
+        font-size: var(--text-base);
         padding: 2px 4px;
 
         &:hover {
@@ -93,8 +90,8 @@
     .accounts-chooser-modes {
         display: flex;
         flex-direction: column;
-        padding: var(--space-2, 8px);
-        gap: var(--space-2, 8px);
+        padding: var(--space-2);
+        gap: var(--space-2);
     }
 
     .accounts-chooser-mode {
@@ -102,15 +99,15 @@
         flex-direction: column;
         align-items: flex-start;
         gap: 2px;
-        padding: var(--space-2, 8px) var(--space-3, 12px);
-        background: var(--button-secondary-bg-color, rgba(127, 127, 127, 0.08));
+        padding: var(--space-2) var(--space-3);
+        background: rgba(127, 127, 127, 0.08);
         border: 1px solid var(--border-color);
         border-radius: 6px;
         color: inherit;
         font-family: inherit;
         text-align: left;
         cursor: default;
-        transition: background 90ms ease, border-color 90ms ease;
+        transition: background 90ms var(--ease-standard), border-color 90ms var(--ease-standard);
 
         &:hover {
             background: var(--hover-bg-color);
@@ -119,13 +116,13 @@
     }
 
     .accounts-chooser-mode-title {
-        font-size: 13px;
+        font-size: var(--text-base);
         font-weight: 600;
         color: var(--main-text-color);
     }
 
     .accounts-chooser-mode-sub {
-        font-size: 11px;
+        font-size: var(--text-xs);
         color: var(--secondary-text-color);
     }
 }

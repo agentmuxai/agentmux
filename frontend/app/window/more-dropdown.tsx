@@ -176,6 +176,7 @@ const MoreDropdown = ({
                         return (
                             <div
                                 class="action-widget-more-item"
+                                onMouseEnter={() => parentPeers.closeOthers(key)}
                                 onClick={() => handleItemClick(widget)}
                                 onContextMenu={(e) => handleItemContextMenu(e, key)}
                             >
@@ -191,6 +192,9 @@ const MoreDropdown = ({
                     let hover = parentRowHoverControllers.get(key);
                     if (!hover) {
                         hover = createSubmenuHover({
+                            // Stays open when the pointer leaves; another row
+                            // of this dropdown closes it (closeOthers).
+                            closeOnLeave: false,
                             onOpen: () => openParentSub(key),
                             onClose: () => closeParentSub(key),
                         });

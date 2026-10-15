@@ -366,9 +366,9 @@ function updateTreeHelper(
             // so we no longer override its transform/z-index here. The tile-node slot stays at its
             // original position but is hidden via CSS (tile-hidden class).
             if (model.lastMagnifiedNodeId === node.id) {
-                addlProps.transform.zIndex = "var(--zindex-layout-last-magnified-node)";
+                addlProps.transform.zIndex = "var(--z-layout-last-magnified)";
             } else if (model.lastEphemeralNodeId === node.id) {
-                addlProps.transform.zIndex = "var(--zindex-layout-last-ephemeral-node)";
+                addlProps.transform.zIndex = "var(--z-layout-last-ephemeral)";
             }
         }
         return;

@@ -403,7 +403,6 @@ const AppInner = () => {
     // And for an agent's SSH access and its ssh's prompts (agentmux-cef
     // `ssh_approval`).
     const IS_SSH_APPROVAL = new URLSearchParams(window.location.search).get("initialView") === "ssh-approval";
-    const prefersReducedMotion = atoms.prefersReducedMotionAtom;
     const client = atoms.client;
     const windowData = atoms.muxWindow;
     const isFullScreen = atoms.isFullScreen;
@@ -444,7 +443,6 @@ const AppInner = () => {
             <div
                 class={clsx("flex flex-col w-full h-full", PLATFORM, {
                     fullscreen: isFullScreen(),
-                    "prefers-reduced-motion": prefersReducedMotion(),
                     "floating-pane-mode": IS_FLOATING_PANE,
                 })}
                 onContextMenu={showTextInputContextMenu}

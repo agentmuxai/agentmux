@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 62f856a3ae2d7687fa2880123816ed4cf614a1c6c11fd7b049465d49a9a86e78 # shrinks to steps = [(Select(Pane("b")), 0, App), (FocusGained(App), 92, App), (Deactivated, 49, App), (Deactivated, 104, App), (Deactivated, 178, App), (Deactivated, 60, App), (PaneClosing("a"), 263, App), (FocusGained(App), 279, App), (PaneShown("b"), 52, App), (Activated, 274, App), (FocusGained(Pane("a")), 50, App), (Select(App), 100, App)]

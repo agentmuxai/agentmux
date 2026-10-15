@@ -903,6 +903,10 @@
             "method": "OpenLayoutCommand"
         },
         {
+            "command": "layout.applyIntent",
+            "method": "LayoutApplyIntentCommand"
+        },
+        {
             "command": "presence.publish-now",
             "method": "PresencePublishNowCommand"
         },

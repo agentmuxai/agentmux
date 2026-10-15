@@ -30,6 +30,8 @@
 
 import { batch, createEffect, createMemo, createSignal, onCleanup, onMount, Show, untrack, type Accessor, type JSX } from "solid-js";
 import { trail } from "@/log/render-trail";
+import { shouldReduceMotion } from "@/app/motion/motion";
+import { DURATION_BASE_MS, EASE_DECELERATE } from "@/app/motion/tokens";
 import { Key } from "@/util/keyed";
 import type { ScrollCommand } from "../hooks/useScrollToNode";
 import type { AgentDispatch } from "../../swarm/swarm-model";
@@ -58,9 +60,13 @@ import {
     type RowPosition,
 } from "@/app/store/agent-pane-layout-store";
 import { computeLayoutView } from "@/app/store/agent-pane-layout/reducer";
+import { captureOnScreen, restoreOnScreen } from "./keep-on-screen";
+import { useSettleOnShow } from "../scroll/settle-on-show";
+import { useScrollMemo } from "./scroll-memo";
 import { inFlowState, ROW_GAP_PX, type ExpansionState } from "@/app/store/agent-pane-layout/types";
 import {
     initialStickyFrontierId,
+    locateFrontierRow,
     nodeBytes,
     partitionAt,
     partitionForVirtualization,
@@ -400,10 +406,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         for (const a of glides) a.cancel();
         glides.clear();
     }
-    function reducedMotion(): boolean {
-        if (scrollRef?.closest(".prefers-reduced-motion")) return true;
-        return typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
-    }
+    const reducedMotion = () => shouldReduceMotion("transition");
     /** The running glides' current offset (px, signed), then stops them. */
     function takeGlideOffset(): number {
         if (glides.size === 0 || !streamingBufferRef) return 0;
@@ -426,17 +429,16 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
     // fills it with nothing moving. Released when the turn's rows move into
     // the head (the frontier moves) and when the reader leaves the bottom.
     // SPEC_CONTENT_RESIZE_CONTRACT_2026_08_31.md §2.
-    // The hold is brief: if nothing fills the room within HOLD_MS (the agent
-    // paused), it closes by itself, the content easing down over
-    // HOLD_RELEASE_MS instead of snapping. Every pin pass restarts the wait,
-    // so while the agent streams the room is filled, not closed.
+    // The hold is brief: if nothing fills the room within HOLD_MS (the agent paused), it closes
+    // by itself, the content easing down over HOLD_RELEASE_MS instead of snapping. Every pin
+    // pass restarts the wait, so while the agent streams the room is filled, not closed.
     // 350 ms / 160 ms (was 700 / 220): an agent's next row usually takes longer
     // than 700 ms, so most holds ended in a visible empty gap and then an
     // ease-down; a shorter hold closes the gap sooner. Too short and a row
     // that was about to arrive finds the room already closed, so tune this
     // against a live run before shortening further.
     const HOLD_MS = 350;
-    const HOLD_RELEASE_MS = 160;
+    const HOLD_RELEASE_MS = DURATION_BASE_MS;
     let holdTimer: ReturnType<typeof setTimeout> | undefined;
     // The hold must never be taller than the content. This runs inside the
     // ResizeObserver that watches this element, so a min-height above the real
@@ -478,7 +480,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
             // Upward offset: it doesn't add scrollable room, so no pin fights it.
             const a = target.animate([{ transform: `translateY(${-moved}px)` }, { transform: "translateY(0)" }], {
                 duration: HOLD_RELEASE_MS,
-                easing: "cubic-bezier(0.2, 0, 0, 1)",
+                easing: EASE_DECELERATE,
             });
             glides.add(a);
             a.onfinish = () => glides.delete(a);
@@ -495,7 +497,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
             if (!el || typeof el.animate !== "function") continue;
             const a = el.animate([{ transform: `translateY(${delta}px)` }, { transform: "translateY(0)" }], {
                 duration: GLIDE_MS,
-                easing: "cubic-bezier(0.2, 0, 0, 1)",
+                easing: EASE_DECELERATE,
                 composite: "add",
             });
             glides.add(a);
@@ -623,11 +625,9 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
     // Where the frontier was last time: streaming only appends, so this is
     // almost always still right and saves a full findIndex per flush.
     let frontierIndexHint = -1;
-    const locateFrontier = (nodes: readonly DocumentNode[]): number => {
-        if (stickyFrontierId == null) return -1;
-        if (nodes[frontierIndexHint]?.id === stickyFrontierId) return frontierIndexHint;
-        return nodes.findIndex((n) => n.id === stickyFrontierId); // prepend (older history), truncation
-    };
+    let frontierRow: DocumentNode | undefined; // the row itself, so a re-key keeps it (locateFrontierRow)
+    const locateFrontier = (nodes: readonly DocumentNode[]): number =>
+        stickyFrontierId == null ? -1 : locateFrontierRow(nodes, stickyFrontierId, frontierIndexHint, frontierRow);
     const turnPartition = (nodes: readonly DocumentNode[]) => {
         let at = locateFrontier(nodes);
         // `from: at` — the frontier never moves back, so the target search
@@ -637,6 +637,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         if (at < 0) at = target;
         else if (target > at) at = advanceFrontier(nodes, at, target);
         stickyFrontierId = nodes[at]?.id ?? null;
+        frontierRow = nodes[at];
         frontierIndexHint = at;
         const result = partitionAt(nodes, at);
         trail("agent:virt:partition", {
@@ -763,19 +764,17 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
             // several times per logical document update, each against a
             // PARTIALLY-updated slice (e.g. `NodesChanged` landing with a
             // node's estimate/expansion not yet pushed). On a small
-            // incremental change (the common live-streaming case) the
-            // intermediate views are usually equivalent enough that nothing
-            // visibly breaks — but a LARGE simultaneous batch (every node
-            // changing identity at once, e.g. AgentHistoryView's wholesale
-            // reparse-on-loadOlder, SPEC_AGENT_HISTORY_AS_TAB_AND_DRAFT_PRESERVATION_2026_08_11.md)
-            // hits this glitch window hard enough to crash `reconcileArrays`
-            // ("replaceChild: node not a child" — a stale intermediate
-            // `windowedRows()` row still referencing a DOM node an even-more-
-            // intermediate pass had already removed). `batch()` defers every
-            // signal write started inside it until the callback returns, so
-            // `windowedRows()` observes exactly ONE consistent LayoutView per
-            // logical update instead of N glitching ones — the standard Solid
-            // fix for exactly this class of mid-transaction inconsistency.
+            // incremental change (live streaming) nothing visibly breaks, but a
+            // LARGE batch (every node changing identity at once, e.g.
+            // AgentHistoryView's reparse-on-loadOlder,
+            // SPEC_AGENT_HISTORY_AS_TAB_AND_DRAFT_PRESERVATION_2026_08_11.md)
+            // crashed `reconcileArrays` ("replaceChild: node not a child": a
+            // stale intermediate row referencing a DOM node a later pass had
+            // removed). `batch()` defers every signal write inside it, so
+            // `windowedRows()` sees ONE consistent LayoutView per update.
+            // Rows removed or inserted above the screen (a roll-off, the
+            // history link) don't move the rows on screen (keep-on-screen.ts).
+            const onScreen = captureOnScreen(blockId, untrack(() => props.layoutView?.()));
             batch(() => {
                 dispatchLayoutIfRegistered(blockId, { type: "NodesChanged", orderedIds: ids });
                 const idSet = new Set(ids);
@@ -838,6 +837,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                     });
                 }
             });
+            restoreOnScreen(blockId, onScreen, untrack(() => props.layoutView?.()), scrollRef);
             // Heights of nodes that left the buffer any other way (removed,
             // cleared) are dropped; the buffer holds a few dozen at most.
             const inBuffer = new Set(partition().streamingNodes.map((n) => n.id));
@@ -1146,7 +1146,8 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
     // (user wants to stay where they jumped). Uses the slice's row
     // position if the target is in the virtualized head, else the
     // streaming buffer's natural DOM offset.
-    const scrollToNode = (nodeId: string): void => {
+    // With `offsetPx` (scroll-memo.ts, after a reload): the row at that offset, at once; else centered, smoothly.
+    const scrollToNode = (nodeId: string, offsetPx?: number): void => {
         if (!scrollRef) return;
         const idx = props.viewState.indexOf(nodeId);
         if (idx < 0) return;
@@ -1163,7 +1164,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
             if (row) {
                 const viewportPx = scrollRef.clientHeight; // perf:allow-layout-read — user-initiated scrollToNode
                 const center = row.start - viewportPx / 2 + row.height / 2;
-                scrollRef.scrollTo({ top: Math.max(0, center), behavior: "smooth" });
+                scrollRef.scrollTo(offsetPx == null ? { top: Math.max(0, center), behavior: "smooth" } : { top: Math.max(0, row.start + offsetPx) });
             }
         } else {
             // Streaming buffer — node is mounted; query DOM and scroll directly.
@@ -1171,21 +1172,19 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
             if (!el) return;
             const elTop = el.offsetTop; // perf:allow-layout-read — user-initiated scrollToNode
             const center = elTop - scrollRef.clientHeight / 2 + el.clientHeight / 2; // perf:allow-layout-read — user-initiated scrollToNode
-            scrollRef.scrollTo({ top: Math.max(0, center), behavior: "smooth" });
+            scrollRef.scrollTo(offsetPx == null ? { top: Math.max(0, center), behavior: "smooth" } : { top: Math.max(0, elTop + offsetPx) });
         }
         if (!follow) transitionFollow("jump-to-node", `node=${nodeId.slice(0, 8)}`, () => props.viewState.disengageStickToBottom());
     };
 
-    // React to jump commands from the parent's useScrollToNode hook.
-    // untrack the scroll so this effect depends ONLY on the command signal:
-    // scrollToNode reads layoutView / partition, both of which change on
-    // every scroll, and useScrollToNode holds the last command rather than
-    // clearing it — tracking them would re-fire the jump on each scroll and pin
-    // the user on the old target.
+    // Jump commands from the parent's useScrollToNode, untracked: scrollToNode reads layoutView /
+    // partition, which change on every scroll, and the last command is held, so tracking them
+    // would re-fire the jump on each scroll and pin the user on the old target.
     createEffect(() => {
         const cmd = props.scrollCommand?.();
         if (cmd) untrack(() => scrollToNode(cmd.nodeId));
     });
+    useScrollMemo({ blockId: props.blockId, scroller: () => scrollRef, following: props.viewState.stickToBottom, zoom: props.zoomFactor, historyReady: props.viewState.historyReady, scrollToRow: scrollToNode });
 
     // Release (latched-collapse) any held-open tool whose row has scrolled fully
     // above the viewport top. DOM-based so it works uniformly for virtualized
@@ -1611,10 +1610,9 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         })
         : undefined;
     onCleanup(() => measureRO?.disconnect());
-    // The one-way path's single observer (SPEC_AGENT_PANE_ONE_WAY_FLOW R4).
-    // Created after measureRO and tailRO on purpose: in a round where rows
-    // resized, its callback runs after theirs have updated the slice, so the
-    // geometry it reads already includes them.
+    // The one-way path's single observer (SPEC_AGENT_PANE_ONE_WAY_FLOW R4). Created after measureRO
+    // and tailRO on purpose: in a round where rows resized, its callback runs after theirs have
+    // updated the slice, so the geometry it reads already includes them.
     const oneWayFlow = oneWay
         ? new OneWayFlow({
             following: () => untrack(props.viewState.stickToBottom),
@@ -1625,9 +1623,8 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                 pinnedGeometry = geo;
                 follow?.noteGeometry(geo);
             },
-            // Collapsing held-open tools that scrolled off the top changes
-            // layout, so it runs before the observation is measured and its
-            // effect is compensated in the same frame.
+            // Collapsing held-open tools that scrolled off the top changes layout, so it
+            // runs before the observation is measured and is compensated in the same frame.
             prepare: () => releaseScrolledOffHolds(),
             observed: (geo) => {
                 syncOverflowState(geo);
@@ -1637,6 +1634,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         })
         : null;
     onCleanup(() => oneWayFlow?.dispose());
+    useSettleOnShow(oneWayFlow, props.viewState.stickToBottom);
     onMount(() => {
         if (oneWayFlow && scrollRef && bottomSpacerRef) {
             oneWayFlow.attach(scrollRef, bottomSpacerRef, [virtualContainerRef, streamingBufferRef]);

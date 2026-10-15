@@ -218,16 +218,7 @@ fn extract_version(e: &Event) -> u64 {
         | Event::FocusedNodeChanged { version, .. }
         | Event::MagnifiedNodeChanged { version, .. }
         | Event::SagaActionFailed { version, .. }
-        | Event::LayoutNodeInserted { version, .. }
-        | Event::LayoutNodeInsertedAtIndex { version, .. }
         | Event::LayoutNodeDeleted { version, .. }
-        | Event::LayoutNodeMoved { version, .. }
-        | Event::LayoutNodesSwapped { version, .. }
-        | Event::LayoutNodesResized { version, .. }
-        | Event::LayoutNodeReplaced { version, .. }
-        | Event::LayoutSplitHorizontalApplied { version, .. }
-        | Event::LayoutSplitVerticalApplied { version, .. }
-        | Event::LayoutCleared { version, .. }
         | Event::LayoutBackendActionsQueued { version, .. }
         | Event::LayoutTreeReplaced { version, .. }
         | Event::WindowMetaUpdated { version, .. }

@@ -45,8 +45,8 @@ CSS can animate layer 1. It **cannot** touch layer 2 — the host moves the HWND
 **Key invariant:** the backend stores **relative flex sizes**, never pixel coordinates. Each window computes its own pixels from its own container size — which is how the same tab can render at different sizes in different windows.
 
 ### Backend types & ops
-- [`crates/common/src/layout_types.rs`](../../crates/common/src/layout_types.rs) — `LayoutNode { id, flex_direction, size, children, data: Option<{block_id}> }`, `FlexDirection {Row,Column}`, `ResizeOp`, `SplitPosition`. Leaf = `data: Some`, no children; group = `data: None`, has children.
-- [`crates/srv/src/backend/layout/mod.rs`](../../crates/srv/src/backend/layout/mod.rs) — pure tree mutators: `insert_node`, `insert_node_at_index`, `delete_node` (collapses sole-child parents), `move_node`, `swap_nodes`, `resize_nodes` (atomic, validates all sizes ∈ [0,100] before mutating), `replace_node`, `split_horizontal/vertical`, `ensure_group_node`. **No geometry here.**
+- [`crates/common/src/layout_types.rs`](../../crates/common/src/layout_types.rs) — `LayoutNode { id, flex_direction, size, children, data: Option<{block_id}> }`, `FlexDirection {Row,Column}`, `SplitPosition`; [`layout_intent.rs`](../../crates/common/src/layout_intent.rs) — `LayoutIntent`, the edits a window sends. Leaf = `data: Some`, no children; group = `data: None`, has children.
+- [`crates/srv/src/backend/layout/intent.rs`](../../crates/srv/src/backend/layout/intent.rs) — `apply_intent`: the frontend's tree algebra (`layoutTree.ts`) ported to Rust, followed by `balance_node` (`backend/layout/mod.rs`). Branch node ids derive from the intent's action id, as the frontend's do. **No geometry here.**
 - [`crates/srv/src/reducer/layout.rs`](../../crates/srv/src/reducer/layout.rs) + `reducer.rs` — command arms (`LayoutInsertNode`, `LayoutDeleteNode`, `LayoutMoveNode`, `LayoutResizeNodes`, `SetFocusedNode`, `SetMagnifiedNode`, …) → mutate `TabRecord` → emit versioned `Event::Layout*` (every event carries a monotonic `version`).
 - Persistence: [`crates/srv/src/backend/obj.rs`](../../crates/srv/src/backend/obj.rs) `LayoutState { rootnode, focusednodeid, magnifiednodeid, … }`, one row per `tab_id` in the wstore.
 
@@ -54,12 +54,16 @@ CSS can animate layer 1. It **cannot** touch layer 2 — the host moves the HWND
 ```
 user action (drag/close/split) in window A
   └─ frontend layoutTree reducer applies LOCALLY (sub-ms) → UI updates optimistically
-  └─ persistence layer (debounced ~100ms) dispatches Command::Layout* (with correlation_id) → srv
-        srv reducer validates + applies to TabRecord.rootnode → bump_version → Event::Layout*
-        wstore row mutates → WaveObjUpdate broadcast to ALL windows
-          window A (originator): correlation_id matches a pending local action → no-op
-          window B (other window, same tab): applies the granular mutation to its treeState
+  └─ layout outbox (layoutIntents.ts) sends the edit as an intent: layout.applyIntent {intent, action_id}
+        srv applies it to TabRecord.rootnode (the same algebra + balance) → stores the row
+        → answers {applied, version}; the row update reaches every window
+          window A: once quiet and the row includes its intents, adopts srv's tree if it differs
+          window B (other window, same tab): adopts srv's tree
+srv's own edits (pane.open, agent.open, redock, the delete sagas) apply to srv's tree, then
+queue the matching action on the row's pendingbackendactions for the window to mirror.
 ```
+No window writes a whole layout row: `object.UpdateObject` refuses a layout row
+(SPEC_STRONG_REDUCER_AUTHORITY_LAYOUT_2026_06_30.md §7, Phase 6).
 **Authoritative truth = srv reducer.** Frontends are optimistic projections that reconcile via versioned events.
 
 ---
@@ -69,7 +73,7 @@ user action (drag/close/split) in window A
 Files: `frontend/layout/lib/{layoutModel,layoutTree,layoutGeometry,layoutNodeModels,layoutModelHooks,layoutResize,layoutPersistence,utils}.ts`, `TileLayout.win32.tsx`, `tilelayout.scss`.
 
 ### 2.1 Tree → geometry
-- `LayoutModel.treeReducer(action)` (`layoutModel.ts`) applies the action to `treeState`, then (if `setState`): `updateTree()` → `localTreeStateAtom._set({...})` → `persistToBackend()` (debounced 100ms).
+- `LayoutModel.treeReducer(action)` (`layoutModel.ts`) applies the action to `treeState`, then (if `setState`): `updateTree()` → `localTreeStateAtom._set({...})`, and queues the matching intent for srv (`layoutIntents.ts`).
 - `updateTree()` (`layoutGeometry.ts`) walks the (optionally balanced) tree via `updateTreeHelper`, producing per-node **`additionalProps`**: `{ rect, transform, resizeHandles, pixelToSizeRatio, treeKey }`. Container nodes lay children out left-to-right (Row) or top-to-bottom (Column) using `childSize / pixelToSizeRatio`. Results are committed in a `batch()` to three signals: `leafs`, `leafOrder`, `additionalProps`.
 - `setTransform(rect)` (`utils.ts`) is the geometry → CSS bridge. It emits an **animatable** style object:
   ```ts
@@ -93,7 +97,7 @@ Files: `frontend/layout/lib/{layoutModel,layoutTree,layoutGeometry,layoutNodeMod
 - The pane **body size** comes from `block.tsx` → `useDebouncedNodeInnerRect(nodeModel)` → `.block-content { width/height }`.
 
 ### 2.3 Resize (splitter) drag — distinct path
-`layoutResize.ts`: pointer-move (throttled 10ms) → `SetPendingAction(ResizeNode)` + `updateTree(false)` (no balance) → rects update **instantly**. `isResizing()` = `isContainerResizing() || isSplitterDragging()` is **true** during a drag, which **removes the `.animate` class** so the drag tracks the cursor with no transition. On release: `CommitPendingAction` → balance + persist.
+`layoutResize.ts`: pointer-move (throttled 10ms) → `SetPendingAction(ResizeNode)` + `updateTree(false)` (no balance) → rects update **instantly**. `isResizing()` = `isContainerResizing() || isSplitterDragging()` is **true** during a drag, which **removes the `.animate` class** so the drag tracks the cursor with no transition. On release: `CommitPendingAction` → balance + a `resize` intent.
 
 ### 2.4 Reveal / first-paint gate
 - [`frontend/app/store/tab-reveal.ts`](../../frontend/app/store/tab-reveal.ts): on tab switch/open, sets a `tab-content-hidden` (`visibility:hidden`) gate, then lifts it after a settle window (≈80ms clean of >50ms long-tasks, hard cap 800ms) so users never see a piecemeal first paint.
@@ -126,6 +130,10 @@ Files: `frontend/layout/lib/{layoutModel,layoutTree,layoutGeometry,layoutNodeMod
 `useDebouncedNodeInnerRect` (`layoutModelHooks.ts`) historically delayed applying the content's `innerRect` by `animationTimeS` on open/close (instant only during resize/magnify/reduced-motion). With the wrapper transition dormant (`0s`), this meant content snapped to its new size with no animation. Even with the wrapper transition on, the debounce holds the **body** at its old size for the whole animation and then snaps it — so only the empty wrapper would ease. The fix removes the open/close debounce (apply immediately) and lets the `.block-content` CSS transition animate the body in lockstep.
 
 ### 3.5 Status — ✅ root cause found: suppressed by `prefers-reduced-motion`
+
+> [!NOTE]
+> No longer current. The `.prefers-reduced-motion` reset quoted below is gone, and nothing in the app turns pane motion off for the OS setting any more. Motion follows the tiers and policy in [`SPEC_MOTION_TIERS_AND_STYLESHEET_DRY_2026_10_15.md`](../specs/SPEC_MOTION_TIERS_AND_STYLESHEET_DRY_2026_10_15.md), which today reduces nothing in either tier. The diagnosis below is kept as the record of that time.
+
 The implementation (§3.2) is **correct**. It appeared to "still snap" because the **OS had *reduce motion* enabled** (`prefers-reduced-motion: reduce`), which AgentMux honors via a **global accessibility reset** in [`frontend/app/app.scss`](../../frontend/app/app.scss):
 
 ```scss

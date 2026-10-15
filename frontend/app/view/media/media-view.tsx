@@ -35,6 +35,7 @@ import { ALL_MEDIA_EXTENSIONS, createMediaDropHook } from "./media-drop";
 import { EmptyPaneLogo } from "@/app/element/EmptyPaneLogo";
 import { Button } from "@/app/element/ui";
 import "./media-view.scss";
+import { DURATION_QUICK_MS, EASE_STANDARD } from "@/app/motion/tokens";
 import {
     actualSizeScale,
     FIT,
@@ -437,7 +438,7 @@ export function MediaView(props: {
                         style={{
                             "object-fit": "contain",
                             opacity: mediaReady() ? 1 : 0,
-                            transition: "opacity 120ms ease",
+                            transition: `opacity ${DURATION_QUICK_MS}ms ${EASE_STANDARD}`,
                             position: "absolute",
                             inset: "0",
                             margin: "auto",
@@ -468,7 +469,7 @@ export function MediaView(props: {
                 <Show when={!errorMsg() && kind() === "video" && objectUrl()}>
                     <video
                         class="media-view-media max-w-full max-h-full"
-                        style={{ "object-fit": "contain", opacity: mediaReady() ? 1 : 0, transition: "opacity 120ms ease", position: "absolute", inset: "0", margin: "auto" }}
+                        style={{ "object-fit": "contain", opacity: mediaReady() ? 1 : 0, transition: `opacity ${DURATION_QUICK_MS}ms ${EASE_STANDARD}`, position: "absolute", inset: "0", margin: "auto" }}
                         src={objectUrl()}
                         controls
                         onLoadedData={() => setMediaReady(true)}
@@ -477,7 +478,7 @@ export function MediaView(props: {
                 </Show>
                 <Show when={!errorMsg() && kind() === "audio" && objectUrl()}>
                     <audio
-                        style={{ opacity: mediaReady() ? 1 : 0, transition: "opacity 120ms ease", width: "80%" }}
+                        style={{ opacity: mediaReady() ? 1 : 0, transition: `opacity ${DURATION_QUICK_MS}ms ${EASE_STANDARD}`, width: "80%" }}
                         src={objectUrl()}
                         controls
                         onLoadedData={() => setMediaReady(true)}

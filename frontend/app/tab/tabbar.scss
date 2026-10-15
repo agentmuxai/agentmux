@@ -140,7 +140,10 @@
         // during a reorder drag. Without these transitions the gap snaps
         // discontinuously. Will go away once §3.6 (TabDropIndicator)
         // replaces this with a dedicated indicator element.
-        transition: padding-left 100ms ease-out, padding-right 100ms ease-out, opacity 0.15s ease;
+        transition:
+            padding-left var(--duration-fast) var(--ease-out),
+            padding-right var(--duration-fast) var(--ease-out),
+            opacity var(--duration-base) var(--ease-standard);
 
         // Pane dragged over a tab — attention strobe then steady pulse
         // (SPEC_PANE_DRAG_TO_TAB v3 addendum §A1/A4). The treatment itself,
@@ -158,7 +161,10 @@
         // Tab being dragged — reduce opacity
         &.tab-dragging {
             opacity: 0.35;
-            transition: padding-left 100ms ease-out, padding-right 100ms ease-out, opacity 0.1s ease;
+            transition:
+                padding-left var(--duration-fast) var(--ease-out),
+                padding-right var(--duration-fast) var(--ease-out),
+                opacity var(--duration-fast) var(--ease-standard);
         }
 
         // Landing bounce on the dropped tab
@@ -200,17 +206,15 @@
         flex: 0 0 var(--tab-bar-drag-gutter);
         height: 100%;
         align-self: stretch;
-        display: flex;
-        align-items: center;
-        justify-content: center;
+        @include mixins.flex-center;
         border-bottom: var(--snap-chrome) solid var(--border-color);
-        font-size: 12px;
+        font-size: var(--text-sm);
         color: var(--secondary-text-color);
 
         svg {
             opacity: 0.35;
             pointer-events: none;
-            transition: opacity 120ms ease;
+            transition: opacity var(--duration-decorative-quick) var(--ease-standard);
             // The bar's box sits 1.5px lower than the widget bar's (its bottom
             // hairline); lift the dots onto the widget icons' centre line.
             transform: translateY(-1.5px);

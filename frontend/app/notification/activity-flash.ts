@@ -91,10 +91,10 @@ export function onActivityFlash(listener: FlashListener): () => void {
 // that counts as a flash at all. The red-flash rule (saturated red pane
 // colors) has the same area exemption.
 //
-// Not gated on prefers-reduced-motion: this only animates opacity in
-// place — nothing moves, scales or slides, which is what that preference
-// guards against — and a fade is the substitution reduced-motion guidance
-// itself recommends.
+// No reduced treatment of its own (feedback, motion/motion.ts): this only
+// animates opacity in place — nothing moves, scales or slides, which is what
+// reduced motion guards against — and a fade is the substitution
+// reduced-motion guidance itself recommends.
 
 /** Each strike stays at its intensity this long: one 60 Hz frame, whatever the vsync phase. */
 export const FLASH_STRIKE_HOLD_MS = 20;

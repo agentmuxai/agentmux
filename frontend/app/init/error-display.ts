@@ -110,10 +110,15 @@ function buildCredentialedUrl(): string | null {
  * Reload this window so it reconnects: through the credentialed URL when the
  * host has injected the IPC creds, a plain reload when it hasn't (genuinely
  * down). The desktop host's `AppApi.reloadWindow`, and the auto-reconnect below.
+ *
+ * `replace`, not `assign`: a navigation that adds a history entry leaves the old
+ * page, the whole app with its heap, in Chromium's back/forward cache, so the
+ * reload would free nothing (crates/cef/src/commands/replace_page.rs;
+ * docs/specs/SPEC_RENDERER_RECYCLE_WHEN_IDLE_2026_10_13.md §2).
  */
 export function reloadKeepingHostCredentials(): void {
     const credUrl = buildCredentialedUrl();
-    if (credUrl) location.assign(credUrl);
+    if (credUrl) location.replace(credUrl);
     else location.reload();
 }
 
@@ -160,7 +165,7 @@ async function doRestore(): Promise<void> {
     const credUrl = buildCredentialedUrl();
     if (credUrl && !readRestoreTried()) {
         writeRestoreTried(true);
-        location.assign(credUrl);
+        location.replace(credUrl); // no history entry: see reloadKeepingHostCredentials
         return;
     }
     if (await spawnFreshWindowViaHost()) {
@@ -266,6 +271,9 @@ function mountRoot(): HTMLElement {
     const loader = document.getElementById("startup-loading");
     if (loader) loader.remove();
     const main = document.getElementById("main") ?? document.body;
+    // The startup guard hides the app root (app-init.ts), not <body>.
+    main.style.visibility = "visible";
+    main.style.opacity = "1";
     main.innerHTML = "";
     return main;
 }
@@ -282,7 +290,9 @@ function showReconnecting(attempt: number, max: number): void {
 
     const spinner = document.createElement("div");
     spinner.textContent = "⟳";
-    spinner.style.cssText = "font-size:34px;animation:amux-spin 1s linear infinite;";
+    // am-spin is app.scss's (_keyframes.scss): bootstrap.ts imports app.scss
+    // before anything that can show this, and the build links it in index.html.
+    spinner.style.cssText = "font-size:34px;animation:am-spin 1s linear infinite;";
 
     const label = document.createElement("div");
     label.textContent = "Reconnecting to AgentMux…";
@@ -292,10 +302,7 @@ function showReconnecting(attempt: number, max: number): void {
     sub.textContent = `attempt ${attempt} of ${max}`;
     sub.style.cssText = "font-size:12px;color:rgba(255,255,255,0.5);";
 
-    const style = document.createElement("style");
-    style.textContent = "@keyframes amux-spin{to{transform:rotate(360deg)}}";
-
-    wrap.append(spinner, label, sub, style);
+    wrap.append(spinner, label, sub);
     main.appendChild(wrap);
 }
 

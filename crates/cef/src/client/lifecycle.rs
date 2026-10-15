@@ -433,7 +433,7 @@ impl AgentMuxHandler {
                 // WM_ACTIVATE only; all messages pass through to CEF.
                 // Install on every top-level — both `main` and Subwindow.
                 if is_top_level_window && !is_popup {
-                    unsafe { install_top_level_focus_restore_hook(hwnd); }
+                    unsafe { install_top_level_focus_restore_hook(hwnd, &self.state); }
 
                     // Shift+window-edge resize (spec SPEC_RESIZE_DEFAULT_FLIP_
                     // AND_WINDOW_EDGE_SHIFT_2026_08_26.md §3.4): observe the

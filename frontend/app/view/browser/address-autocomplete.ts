@@ -25,6 +25,12 @@ export interface AddressAutocomplete {
     matches: Accessor<BrowserAutocompleteMatch[]>;
     /** The text `matches` answer, so a stale list is never acted on. */
     matchesFor: Accessor<string>;
+    /** The list is shown: it has suggestions, even while the answer for
+     *  newer text is on its way. Closing it between keystrokes would close
+     *  and re-cut its hole through the page under it, and the page flashes
+     *  through on every key (pane-overlay.ts). Acting on the list still
+     *  needs `matchesFor` to match what was typed. */
+    open: Accessor<boolean>;
     /** Highlighted row, or -1. */
     selected: Accessor<number>;
     /** False once the host has said it has no autocomplete. */
@@ -51,22 +57,37 @@ export function createAddressAutocomplete(query: AutocompleteQuery): AddressAuto
     let inFlight = false;
     let waiting: string | null = null;
 
+    const clear = () => {
+        setMatches([]);
+        setMatchesFor("");
+        setSelected(-1);
+    };
+
     const run = (text: string) => {
         inFlight = true;
+        // The list stays open while this runs (`open`), so an answer for the
+        // newest text that brings no list must close it, not leave the old one.
+        const newest = () => text === current && waiting === null;
         query(text)
             .then((result) => {
-                if (!result) return;
+                if (!result) {
+                    if (newest()) clear();
+                    return;
+                }
                 if (!result.supported) {
                     setSupported(false);
+                    clear();
                     return;
                 }
                 // Only the answer for the newest text is shown.
-                if (text !== current || waiting !== null) return;
+                if (!newest()) return;
                 setMatches(result.matches);
                 setMatchesFor(text);
                 setSelected(-1);
             })
-            .catch(() => {})
+            .catch(() => {
+                if (newest()) clear();
+            })
             .finally(() => {
                 inFlight = false;
                 if (waiting !== null) {
@@ -80,14 +101,13 @@ export function createAddressAutocomplete(query: AutocompleteQuery): AddressAuto
     const close = () => {
         current = "";
         waiting = null;
-        setMatches([]);
-        setMatchesFor("");
-        setSelected(-1);
+        clear();
     };
 
     return {
         matches,
         matchesFor,
+        open: () => matches().length > 0,
         selected,
         supported,
         update(text) {

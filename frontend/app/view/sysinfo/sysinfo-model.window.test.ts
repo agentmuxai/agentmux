@@ -119,6 +119,18 @@ describe("SysinfoViewModel focus", () => {
         });
     });
 
+    it("keeps a pane that saved an area but no plot type on the area view", () => {
+        createRoot((dispose) => {
+            const { model: m } = model({ "sysinfo:focus": "mem" });
+            expect(m.plotTypeSelectedAtom()).toBe("Overview");
+            expect(m.viewName()).toBe("Memory");
+            expect(model({ "sysinfo:focus": "advanced" }).model.viewName()).toBe("Everything");
+            // Nothing saved: simple CPU.
+            expect(model().model.plotTypeSelectedAtom()).toBe("CPU");
+            dispose();
+        });
+    });
+
     it("is visible only while its pane is active", () => {
         createRoot((dispose) => {
             const [vis, setVis] = createSignal("active");
@@ -134,21 +146,74 @@ describe("SysinfoViewModel focus", () => {
 
     it("takes an area at once, saves it, and is named for it", () => {
         createRoot((dispose) => {
-            const { model: m, setMeta } = model();
+            const { model: m, setMeta } = model({ "sysinfo:type": "Overview" });
             m.setFocus("net");
             expect(m.focus()).toBe("net");
             expect(m.viewName()).toBe("Network");
             expect(setMeta).toHaveBeenCalledWith({ "sysinfo:focus": "net" });
-            m.setFocus("advanced");
-            expect(m.viewName()).toBe("Advanced");
-            expect(setMeta).toHaveBeenLastCalledWith({ "sysinfo:focus": "advanced" });
+            m.setFocus("everything");
+            expect(m.viewName()).toBe("Everything");
+            expect(setMeta).toHaveBeenLastCalledWith({ "sysinfo:focus": "everything" });
             dispose();
         });
     });
 
-    it("leaves a classic plot type's name alone", () => {
+    it("names a simple view by its label, whatever area is saved", () => {
         createRoot((dispose) => {
-            expect(model({ "sysinfo:type": "Mem", "sysinfo:focus": "cpu" }).model.viewName()).toBe("Mem");
+            expect(model({ "sysinfo:type": "Mem", "sysinfo:focus": "cpu" }).model.viewName()).toBe("Memory");
+            dispose();
+        });
+    });
+});
+
+describe("SysinfoViewModel menus", () => {
+    const sub = (items: ContextMenuItem[], label: string) => items.find((i) => i.label === label)?.submenu ?? [];
+
+    it("offer a Simple submenu, then an Advanced one with the area buttons' choices", () => {
+        createRoot((dispose) => {
+            const { model: m } = model({ "sysinfo:type": "Overview", "sysinfo:focus": "mem" });
+            const items = m.getBodyContextMenuItems();
+            expect(items.map((i) => i.label)).toEqual(["Simple", "Advanced"]);
+            const advanced = sub(items, "Advanced");
+            expect(advanced.map((i) => i.label)).toEqual(["CPU", "Memory", "Disk", "Network", "Everything"]);
+            expect(advanced.filter((i) => i.checked).map((i) => i.label)).toEqual(["Memory"]);
+            expect(sub(items, "Simple").map((i) => i.label)).toEqual([
+                "CPU",
+                "All cores",
+                "Memory",
+                "Network",
+                "Network sent and received",
+                "Disk",
+                "Disk read and write",
+                "CPU and memory",
+                "CPU, memory and network",
+            ]);
+            // The settings menu's Plot Type holds the same two.
+            const plotType = sub(m.getSettingsMenuItems(), "Plot Type");
+            expect(plotType.map((i) => i.label)).toEqual(["Simple", "Advanced"]);
+            dispose();
+        });
+    });
+
+    it("check the pane's simple view, and show a picked one", async () => {
+        await createRoot(async (dispose) => {
+            const { model: m, setMeta } = model({ "sysinfo:type": "All CPU" });
+            const items = m.getBodyContextMenuItems();
+            expect(sub(items, "Simple").filter((i) => i.checked).map((i) => i.label)).toEqual(["All cores"]);
+            expect(sub(items, "Advanced").some((i) => i.checked)).toBe(false);
+            await sub(items, "Simple").find((i) => i.label === "Memory")!.click!();
+            expect(setMeta).toHaveBeenLastCalledWith(expect.objectContaining({ "sysinfo:type": "Mem" }));
+            expect(m.viewName()).toBe("Memory");
+            dispose();
+        });
+    });
+
+    it("show the picked area, leaving a simple view", async () => {
+        await createRoot(async (dispose) => {
+            const { model: m, setMeta } = model({ "sysinfo:type": "Mem" });
+            await sub(m.getBodyContextMenuItems(), "Advanced").find((i) => i.label === "Everything")!.click!();
+            expect(setMeta).toHaveBeenLastCalledWith({ "sysinfo:type": "Overview", "sysinfo:focus": "everything" });
+            expect(m.viewName()).toBe("Everything");
             dispose();
         });
     });

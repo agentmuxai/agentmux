@@ -3,14 +3,17 @@
 
 import { describe, expect, it } from "vitest";
 import { newLayoutNode } from "../lib/layoutNode";
+import { applyLayoutAction } from "../lib/layoutIntentActions";
 import { validateLayoutInvariants, describeLayoutTree } from "../lib/layoutInvariants";
 import { minimizeNodeToggle } from "../lib/layoutMinimize";
-import { FlexDirection, type LayoutNode, type LayoutNodeAdditionalProps } from "../lib/types";
+import { FlexDirection, type LayoutNode, type LayoutNodeAdditionalProps, type LayoutTreeAction, type LayoutTreeState } from "../lib/types";
 
 function makeMockModel(rootNode: LayoutNode, addlProps: Record<string, Partial<LayoutNodeAdditionalProps>> = {}) {
     let minimizedSet = new Set<string>();
+    const treeState = { rootNode, pendingBackendActions: [] };
     return {
-        treeState: { rootNode, pendingBackendActions: [] },
+        treeState,
+        treeReducer: (action: LayoutTreeAction) => applyLayoutAction(treeState as LayoutTreeState, action),
         getter: (_sig: unknown) => addlProps as Record<string, LayoutNodeAdditionalProps>,
         additionalProps: {} as any,
         gapSizePx: () => 0,
@@ -21,7 +24,6 @@ function makeMockModel(rootNode: LayoutNode, addlProps: Record<string, Partial<L
         },
         updateTree: () => {},
         localTreeStateAtom: { _set: () => {} },
-        persistToBackend: () => {},
     };
 }
 

@@ -7,12 +7,12 @@
     top: 50%;
     left: 50%;
     transform: translate(-50%, -50%);
-    // Sits in the context-menu slot so the zoom-level toast always
-    // paints above every other overlay (modals, popovers, flyouts).
-    z-index: var(--z-context-menu);
+    // The top layer, so the zoom-level toast always paints above every
+    // other overlay (modals, popovers, flyouts, context menus).
+    z-index: var(--z-top);
     pointer-events: none;
 
-    animation: zoom-fade-in-out 1.5s ease-out;
+    animation: zoom-fade-in-out 1.5s var(--ease-out);
 }
 
 .zoom-indicator-content {

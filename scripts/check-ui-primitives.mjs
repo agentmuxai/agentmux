@@ -6,7 +6,7 @@
 // docs/specs/SPEC_UI_LINE_STYLE_COMPONENT_SYSTEM_2026_10_05.md §7
 //
 // THE RULES. Controls come from frontend/app/element/ui/ and follow its line
-// style. Four counts may not go up compared with the base branch (the
+// style. Eight counts may not go up compared with the base branch (the
 // merge-base with origin/main, or $GITHUB_BASE_REF):
 //
 //   1. buttons      hand-rolled `<button` elements in .tsx outside element/ui/,
@@ -20,6 +20,21 @@
 //                   (not in SCSS/CSS, not set from TS). Every use silently
 //                   takes its fallback: settings.scss's `--panel-bg-alt` was
 //                   a fixed grey in every theme.
+//
+// Five more hold the shared scales (SPEC_MOTION_TIERS_AND_STYLESHEET_DRY_
+// 2026_10_15.md §6.6, item 20, and §6.3, item 10), all per file, in SCSS/CSS:
+//
+//   5. durations    raw times (`120ms`, `0.5s`) in transition and animation
+//                   declarations, where a `--duration-*` token belongs
+//   6. fontSizes    `font-size` given as a raw px value, not a `--text-*` token
+//   7. fallbacks    `var(--x, …)` where `--x` is set on `:root` itself, outside
+//                   any at-rule: the fallback can never apply, and a wrong one
+//                   misleads (`var(--radius-sm, 4px)` renders 0)
+//   8. zIndex       `z-index` given as a raw number, not a `--z-*` token
+//   9. focusRings   `:focus-visible` rules that draw their own ring (an
+//                   outline or box-shadow) instead of `@include
+//                   mixins.focus-ring`. `outline: none` alone doesn't count,
+//                   nor does the shared ring: mixin bodies are skipped.
 //
 // A count above the base's fails: use the element/ui/ components instead. A
 // count below it is reported and passes. There is no checked-in baseline:
@@ -118,12 +133,14 @@ export function resolveSelector(parent, child) {
 /**
  * Every declaration in a stylesheet, with the resolved selector it sits
  * under. At-rules (@media, @container, @include with a block) don't add to
- * the selector; @mixin and @function bodies are skipped entirely, since
- * their selectors only mean something where they are included.
+ * the selector; @mixin and @function bodies are skipped, since their
+ * selectors only mean something where they are included. Checks that don't
+ * look at the selector (the scale ratchets) pass `{ includeMixins: true }`,
+ * so a raw value written inside a mixin counts too.
  */
-export function declarations(scss) {
+export function declarations(scss, { includeMixins = false } = {}) {
     const text = stripComments(scss);
-    const stack = []; // { selector, skip }
+    const stack = []; // { selector, skip, conditional }
     const out = [];
     let buf = "";
     let line = 1;
@@ -139,10 +156,12 @@ export function declarations(scss) {
             buf += c;
         } else if (c === "{") {
             const head = buf.trim();
-            const parent = stack.length ? stack[stack.length - 1] : { selector: "", skip: false };
-            const skip = parent.skip || /^@(mixin|function)\b/.test(head);
+            const parent = stack.length ? stack[stack.length - 1] : { selector: "", skip: false, conditional: false };
+            const skip = parent.skip || (!includeMixins && /^@(mixin|function)\b/.test(head));
             const selector = head.startsWith("@") ? parent.selector : resolveSelector(parent.selector, head);
-            stack.push({ selector, skip });
+            // Inside @media, @include, @if and the like; @layer always applies.
+            const conditional = parent.conditional || (head.startsWith("@") && !/^@layer\b/.test(head));
+            stack.push({ selector, skip, conditional });
             buf = "";
             bufLine = line;
         } else if (c === "}") {
@@ -165,9 +184,15 @@ export function declarations(scss) {
         const decl = buf.trim();
         const top = stack[stack.length - 1];
         if (!top || top.skip) return;
-        const m = /^([a-z-]+)\s*:\s*([\s\S]+)$/i.exec(decl);
+        const m = /^([a-z0-9-]+)\s*:\s*([\s\S]+)$/i.exec(decl);
         if (!m) return;
-        out.push({ selector: top.selector, property: m[1].toLowerCase(), value: m[2].trim(), line: bufLine });
+        out.push({
+            selector: top.selector,
+            property: m[1].toLowerCase(),
+            value: m[2].trim(),
+            line: bufLine,
+            conditional: top.conditional,
+        });
     }
 }
 
@@ -222,8 +247,53 @@ export function stripScriptComments(source) {
 
 export function usedVars(source) {
     const names = new Set();
-    for (const m of source.matchAll(/var\(\s*(--[\w-]+)/g)) names.add(m[1]);
+    // Not a name built in a template literal, `var(--conn-icon-color-${n})`.
+    for (const m of source.matchAll(/var\(\s*(--[\w-]+)(?![\w-]|\$\{)/g)) names.add(m[1]);
     return names;
+}
+
+// ── Rules 5-8: the shared scales ────────────────────────────────────────────
+
+// An optional sign, for a negative delay (`-120ms`); the look-behind still
+// rejects a time inside a name such as `tab-1s`.
+const RAW_TIME = /(?<![\w.-])-?\d*\.?\d+m?s\b/g;
+const unimportant = (value) => value.replace(/\s*!important$/, "");
+
+export function rawDurations(scss) {
+    return declarations(scss, { includeMixins: true })
+        .filter((d) => /^(transition|animation)(-duration|-delay)?$/.test(d.property))
+        .reduce((n, d) => n + (d.value.match(RAW_TIME) ?? []).length, 0);
+}
+
+export function rawFontSizes(scss) {
+    return declarations(scss, { includeMixins: true }).filter((d) => d.property === "font-size" && /^\d*\.?\d+px$/.test(unimportant(d.value)));
+}
+
+export function rawZIndexes(scss) {
+    return declarations(scss, { includeMixins: true }).filter((d) => d.property === "z-index" && /^-?\d+$/.test(unimportant(d.value)));
+}
+
+/** `:focus-visible` rules (by resolved selector) that set an outline or box-shadow of their own. */
+export function handFocusRings(scss) {
+    const ring = (d) =>
+        (d.property.startsWith("outline") || d.property === "box-shadow") && !/^(none|0)$/.test(unimportant(d.value));
+    const rules = declarations(scss).filter((d) => d.selector.includes(":focus-visible") && ring(d));
+    return [...new Set(rules.map((d) => d.selector))];
+}
+
+/** Custom properties set on `:root` itself (alone or in a list), outside any at-rule: defined in every element. */
+export function rootTokens(scss) {
+    const onRoot = (selector) => selector.split(",").some((s) => s.trim() === ":root");
+    return declarations(scss)
+        .filter((d) => onRoot(d.selector) && !d.conditional && d.property.startsWith("--"))
+        .map((d) => d.property);
+}
+
+/** `var(--x, …)` uses whose `--x` is one of `tokens`, so the fallback never applies. */
+export function deadFallbacks(scss, tokens) {
+    let n = 0;
+    for (const m of stripComments(scss).matchAll(/var\(\s*(--[\w-]+)\s*,/g)) if (tokens.has(m[1])) n++;
+    return n;
 }
 
 // ── Collect ─────────────────────────────────────────────────────────────────
@@ -234,6 +304,11 @@ export function collect(files) {
     const radius = {};
     const defined = new Set();
     const used = new Set();
+    const durations = {};
+    const fontSizes = {};
+    const zIndex = {};
+    const focusRings = {};
+    const styles = [];
 
     for (const { path, source } of files) {
         const isStyle = /\.(s?css)$/.test(path);
@@ -252,16 +327,38 @@ export function collect(files) {
             for (const selector of solidFills(source)) fills.add(`${path} :: ${selector}`);
             const n = badRadii(source).length;
             if (n > 0) radius[path] = n;
+            styles.push({ path, source });
+            countInto(durations, path, rawDurations(source));
+            countInto(fontSizes, path, rawFontSizes(source).length);
+            countInto(zIndex, path, rawZIndexes(source).length);
+            countInto(focusRings, path, handFocusRings(source).length);
         }
     }
 
-    const undefinedVars = [...used].filter((name) => !defined.has(name) && !name.startsWith("--tw-"));
+    const tokens = new Set(styles.flatMap(({ source }) => rootTokens(source)));
+    const fallbacks = {};
+    for (const { path, source } of styles) countInto(fallbacks, path, deadFallbacks(source, tokens));
+
+    // `--tw-*` are Tailwind's; `--fa-*` are Font Awesome's optional hooks
+    // (public/fontawesome/), always read with FA's own fallback; `--shiki-*`
+    // are set inline on each highlighted run by Shiki, the `-font-style` and
+    // `-font-weight` ones only when the theme styles that token.
+    const undefinedVars = [...used].filter((name) => !defined.has(name) && !/^--(tw|fa|shiki)-/.test(name));
     return {
         buttons: sortObject(buttons),
         solidFills: [...fills].sort(),
         radius: sortObject(radius),
         undefinedVars: undefinedVars.sort(),
+        durations: sortObject(durations),
+        fontSizes: sortObject(fontSizes),
+        fallbacks: sortObject(fallbacks),
+        zIndex: sortObject(zIndex),
+        focusRings: sortObject(focusRings),
     };
+}
+
+function countInto(counts, path, n) {
+    if (n > 0) counts[path] = n;
 }
 
 function sortObject(obj) {
@@ -270,15 +367,17 @@ function sortObject(obj) {
 
 // ── Compare ─────────────────────────────────────────────────────────────────
 
+const PER_FILE = ["buttons", "radius", "durations", "fontSizes", "fallbacks", "zIndex", "focusRings"];
+
 /** How `current` differs from `baseline` (the base branch), as human-readable lines. */
 export function compare(current, baseline) {
     const grew = [];
     const shrank = [];
 
-    for (const key of ["buttons", "radius"]) {
-        const files = new Set([...Object.keys(current[key]), ...Object.keys(baseline[key] ?? {})]);
+    for (const key of PER_FILE) {
+        const files = new Set([...Object.keys(current[key] ?? {}), ...Object.keys(baseline[key] ?? {})]);
         for (const file of [...files].sort()) {
-            const now = current[key][file] ?? 0;
+            const now = current[key]?.[file] ?? 0;
             const was = baseline[key]?.[file] ?? 0;
             if (now > was) grew.push(`${key}: ${file} has ${now}, base ${was}`);
             else if (now < was) shrank.push(`${key}: ${file} has ${now}, base ${was}`);
@@ -380,14 +479,18 @@ if (isMain(import.meta.url)) {
         console.log();
         console.log("Use Button / IconButton / Tabs / SegmentedControl / Field / inputs from");
         console.log("frontend/app/element/ui/, a line instead of a solid fill, a --radius-* token,");
-        console.log("and only custom properties that are defined.");
+        console.log("only custom properties that are defined, --duration-*, --text-* and --z-* tokens");
+        console.log("instead of raw values, no fallback on a token :root always sets, and");
+        console.log("`@include mixins.focus-ring` for a focus ring.");
         process.exit(1);
     }
     const total = (o) => Object.values(o).reduce((a, b) => a + b, 0);
     console.log(
         `OK: no new hand-rolled controls vs ${base.slice(0, 9)}. Now ${total(current.buttons)} hand-rolled buttons, ` +
             `${current.solidFills.length} solid fills, ${total(current.radius)} off-token radii, ` +
-            `${current.undefinedVars.length} undefined variables.`
+            `${current.undefinedVars.length} undefined variables, ${total(current.durations)} raw durations, ` +
+            `${total(current.fontSizes)} raw px font sizes, ${total(current.fallbacks)} fallbacks on always-defined ` +
+            `tokens, ${total(current.zIndex)} raw z-indexes, ${total(current.focusRings)} hand-written focus rings.`
     );
     if (shrank.length > 0) {
         console.log(`Down from the base branch (${shrank.length}):`);

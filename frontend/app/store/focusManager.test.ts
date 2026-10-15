@@ -67,7 +67,7 @@ function runFrames(n = 1): void {
 }
 
 import { push as pushModal, remove as removeModal } from "@/app/element/modal-stack";
-import { FOCUS_RETRY_FRAMES, focusManager, installFocusFollowsSelection } from "./focusManager";
+import { FOCUS_RETRY_FRAMES, focusManager, installFocusFollowsSelection, WINDOW_FOCUS_SETTLE_MS } from "./focusManager";
 
 describe("focusManager", () => {
     beforeEach(() => {
@@ -391,16 +391,47 @@ describe("focusManager", () => {
         });
 
         it("gives the selection the caret when the window comes back with it on <body>", () => {
-            (document.activeElement as HTMLElement | null)?.blur();
-            window.dispatchEvent(new Event("focus"));
-            expect(giveFocus).toHaveBeenCalledTimes(1);
+            vi.useFakeTimers({ toFake: ["setTimeout"] });
+            try {
+                (document.activeElement as HTMLElement | null)?.blur();
+                window.dispatchEvent(new Event("focus"));
+                expect(giveFocus).not.toHaveBeenCalled();
+                vi.advanceTimersByTime(WINDOW_FOCUS_SETTLE_MS);
+                expect(giveFocus).toHaveBeenCalledTimes(1);
+            } finally {
+                vi.useRealTimers();
+            }
         });
 
         it("leaves a caret the user placed alone when the window comes back", () => {
-            document.body.innerHTML = `<input id="x" />`;
-            document.body.querySelector<HTMLInputElement>("#x")!.focus();
-            window.dispatchEvent(new Event("focus"));
-            expect(giveFocus).not.toHaveBeenCalled();
+            vi.useFakeTimers({ toFake: ["setTimeout"] });
+            try {
+                document.body.innerHTML = `<input id="x" />`;
+                document.body.querySelector<HTMLInputElement>("#x")!.focus();
+                window.dispatchEvent(new Event("focus"));
+                vi.advanceTimersByTime(WINDOW_FOCUS_SETTLE_MS);
+                expect(giveFocus).not.toHaveBeenCalled();
+            } finally {
+                vi.useRealTimers();
+            }
+        });
+
+        // macOS: a click in the app while a browser pane holds the keyboard
+        // hands it back to the window, whose focus event lands before the
+        // click. The selection (still the browser pane) must not take it.
+        it("leaves it to the click that brought the window back", () => {
+            vi.useFakeTimers({ toFake: ["setTimeout"] });
+            try {
+                document.body.innerHTML = `<div data-blockid="block-2"><p id="row">x</p></div>`;
+                (document.activeElement as HTMLElement | null)?.blur();
+                window.dispatchEvent(new Event("focus"));
+                vi.advanceTimersByTime(5);
+                document.getElementById("row")?.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+                vi.advanceTimersByTime(WINDOW_FOCUS_SETTLE_MS);
+                expect(giveFocus).not.toHaveBeenCalled();
+            } finally {
+                vi.useRealTimers();
+            }
         });
 
         it("leaves it alone when the press that moved it was outside the panes", () => {

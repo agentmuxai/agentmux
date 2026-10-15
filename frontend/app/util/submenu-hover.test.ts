@@ -273,3 +273,55 @@ describe("createSubmenuHover", () => {
         });
     });
 });
+
+describe("createSubmenuHover with closeOnLeave: false (a submenu inside a menu)", () => {
+    let onOpen: Mock<() => void>;
+    let onClose: Mock<() => void>;
+    let controller: SubmenuHoverController;
+
+    beforeEach(() => {
+        vi.useFakeTimers();
+        onOpen = vi.fn<() => void>();
+        onClose = vi.fn<() => void>();
+        controller = createSubmenuHover({ closeOnLeave: false, onOpen, onClose });
+        controller.setSubmenuEl({ getBoundingClientRect: () => SUBMENU_RECT });
+        controller.onTriggerEnter();
+        vi.advanceTimersByTime(90);
+        expect(onOpen).toHaveBeenCalledOnce();
+    });
+
+    afterEach(() => {
+        controller.dispose();
+        vi.useRealTimers();
+    });
+
+    it("stays open when the pointer leaves the trigger away from the submenu", () => {
+        controller.onTriggerLeave({ clientX: 150, clientY: 400 });
+        moveTo(50, 600);
+        vi.advanceTimersByTime(5000);
+        expect(onClose).not.toHaveBeenCalled();
+    });
+
+    it("stays open when the pointer leaves the submenu itself", () => {
+        controller.onSubmenuEnter();
+        controller.onSubmenuLeave({ clientX: 470, clientY: 150 });
+        moveTo(900, 150);
+        vi.advanceTimersByTime(5000);
+        expect(onClose).not.toHaveBeenCalled();
+    });
+
+    it("still closes on an explicit close (a sibling row hovered, the menu closed)", () => {
+        controller.onTriggerLeave({ clientX: 150, clientY: 400 });
+        controller.close();
+        expect(onClose).toHaveBeenCalledOnce();
+    });
+
+    it("does not open when the pointer leaves before the open delay", () => {
+        controller.close();
+        onOpen.mockClear();
+        controller.onTriggerEnter();
+        controller.onTriggerLeave({ clientX: 150, clientY: 400 });
+        vi.advanceTimersByTime(500);
+        expect(onOpen).not.toHaveBeenCalled();
+    });
+});

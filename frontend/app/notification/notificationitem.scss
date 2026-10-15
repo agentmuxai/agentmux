@@ -22,7 +22,7 @@
     }
 
     .notification-title {
-        font-size: 13px;
+        font-size: var(--text-base);
         font-style: normal;
         font-weight: 500;
         line-height: 18px;
@@ -42,7 +42,7 @@
     }
 
     .notification-message {
-        font-size: 13px;
+        font-size: var(--text-base);
         font-style: normal;
         font-weight: 400;
         line-height: 18px;
@@ -57,7 +57,7 @@
 
         i {
             margin-left: 3px;
-            font-size: 11px;
+            font-size: var(--text-xs);
         }
     }
 
@@ -72,7 +72,7 @@
         top: 5px;
         right: 5px;
         padding: 10px var(--space-2);
-        font-size: 11px;
+        font-size: var(--text-xs);
         color: rgb(from var(--main-text-color) r g b / 0.5);
     }
 
@@ -103,7 +103,7 @@
         }
 
         .notification-timestamp {
-            font-size: 12px;
+            font-size: var(--text-sm);
             font-weight: 400;
             line-height: 18px;
             opacity: 0.5;
@@ -131,7 +131,7 @@
     align-items: flex-start;
     gap: var(--space-3);
     border-radius: 0;
-    border: 0.5px solid rgba(255, 255, 255, 0.12);
+    border: 0.5px solid var(--tint-4);
     background: var(--modal-bg-color);
     color: var(--main-text-color);
     box-shadow: 0px 8px 32px 0px rgba(0, 0, 0, 0.25);

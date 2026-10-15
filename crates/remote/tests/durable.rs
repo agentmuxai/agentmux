@@ -281,6 +281,172 @@ fn concurrent_attaches_share_one_daemon_and_one_session() {
     }
 }
 
+/// Whether a daemon holds `home`'s daemon lock, which it keeps for its life.
+fn daemon_running(home: &std::path::Path) -> bool {
+    use std::os::fd::AsRawFd;
+    let Ok(lock) = std::fs::OpenOptions::new()
+        .write(true)
+        .open(home.join("run").join("daemon.lock"))
+    else {
+        return false;
+    };
+    // SAFETY: flock on a descriptor this test owns; closing it releases it.
+    unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) != 0 }
+}
+
+/// `stop` (Remotes' Remove helper) ends every session and the daemon at once,
+/// instead of the daemon exiting only after a minute idle (#4513, finding 6).
+#[test]
+fn stop_ends_every_session_and_the_daemon_at_once() {
+    let home = std::env::temp_dir().join(format!("amr-stop-{}", std::process::id()));
+    std::fs::create_dir_all(&home).unwrap();
+    let _cleanup = Cleanup(home.clone());
+    let mut a = attach(&home, "t1", 0);
+    a.until(|f, _| matches!(f, Frame::Hello { .. }));
+    let mut b = attach(&home, "t2", 0);
+    b.until(|f, _| matches!(f, Frame::Hello { .. }));
+    assert!(daemon_running(&home));
+
+    let out = Command::new(BIN)
+        .arg("stop")
+        .env("AGENTMUX_REMOTE_HOME", &home)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+    assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "ok");
+
+    // Both attaches end with their sessions, and the daemon goes within
+    // seconds, not a minute.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    for att in [&mut a, &mut b] {
+        while att.child.try_wait().unwrap().is_none() {
+            assert!(Instant::now() < deadline, "an attach outlived stop");
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+    while daemon_running(&home) {
+        assert!(Instant::now() < deadline, "the daemon outlived stop");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert!(!home.join("run").join("daemon.sock").exists());
+
+    // With no daemon, stop has nothing to do.
+    let out = Command::new(BIN)
+        .arg("stop")
+        .env("AGENTMUX_REMOTE_HOME", &home)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+}
+
+/// An attach already connected when `stop` comes gets no session: one made
+/// after `stop` would never be ended, and outlive the daemon.
+#[test]
+fn an_attach_connected_before_stop_gets_no_session() {
+    use std::os::unix::net::UnixStream;
+    let home = std::env::temp_dir().join(format!("amr-stop-race-{}", std::process::id()));
+    std::fs::create_dir_all(&home).unwrap();
+    let _cleanup = Cleanup(home.clone());
+    let a = attach(&home, "t1", 0);
+    a.until(|f, _| matches!(f, Frame::Hello { .. }));
+    let mut early = UnixStream::connect(home.join("run").join("daemon.sock")).unwrap();
+
+    let out = Command::new(BIN)
+        .arg("stop")
+        .env("AGENTMUX_REMOTE_HOME", &home)
+        .output()
+        .unwrap();
+    assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "ok");
+
+    let line = format!("AMR {} ATTACH t2 0 80 24\n", agentmux_remote::frame::PROTOCOL);
+    early.write_all(line.as_bytes()).unwrap();
+    early.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+    let (mut d, mut buf) = (Decoder::new(), [0u8; 4096]);
+    let n = early.read(&mut buf).unwrap();
+    let frames = d.push(&buf[..n]).unwrap();
+    assert!(matches!(frames.first(), Some(Frame::Error(_))), "{frames:?}");
+}
+
+/// Kills the process it holds however the test ends.
+struct KillOnDrop(libc::pid_t);
+
+impl Drop for KillOnDrop {
+    fn drop(&mut self) {
+        // SAFETY: a plain signal to a process this test started.
+        unsafe {
+            libc::kill(self.0, libc::SIGKILL);
+        }
+    }
+}
+
+/// Run `stops` stops at once on a daemon whose session runs a process that
+/// ignores the hang-up (and, unlike a shell, never notices its terminal
+/// close): each succeeds, and the process is killed before the daemon exits.
+fn stops_kill_a_process_that_ignores_the_hangup(tag: &str, stops: usize) {
+    let home = std::env::temp_dir().join(format!("amr-{tag}-{}", std::process::id()));
+    std::fs::create_dir_all(&home).unwrap();
+    let _cleanup = Cleanup(home.clone());
+    let mut a = attach(&home, "t1", 0);
+    a.until(|f, _| matches!(f, Frame::Hello { .. }));
+    a.send(Frame::Input(b"trap '' HUP; echo \"P\"\"ID=$$=\"; exec sleep 300\n".to_vec()));
+    let (_, text) = a.until(|_, t| {
+        String::from_utf8_lossy(t)
+            .split("PID=")
+            .nth(1)
+            .is_some_and(|rest| rest.contains('='))
+    });
+    let text = String::from_utf8_lossy(&text).into_owned();
+    let pid: libc::pid_t = text
+        .split("PID=")
+        .nth(1)
+        .and_then(|rest| rest.split('=').next())
+        .and_then(|p| p.trim().parse().ok())
+        .unwrap_or_else(|| panic!("no pid in {text:?}"));
+    let _kill = KillOnDrop(pid);
+    // SAFETY: signal 0 only checks that the process exists.
+    let alive = || unsafe { libc::kill(pid, 0) == 0 };
+    assert!(alive());
+
+    let running: Vec<Child> = (0..stops)
+        .map(|_| {
+            Command::new(BIN)
+                .arg("stop")
+                .env("AGENTMUX_REMOTE_HOME", &home)
+                .stdout(Stdio::piped())
+                .spawn()
+                .unwrap()
+        })
+        .collect();
+    // One that comes once the socket is gone finds no daemon: nothing to stop.
+    for stop in running {
+        let out = stop.wait_with_output().unwrap();
+        assert!(out.status.success(), "{out:?}");
+        assert!(matches!(String::from_utf8_lossy(&out.stdout).trim(), "ok" | ""), "{out:?}");
+    }
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while daemon_running(&home) {
+        assert!(Instant::now() < deadline, "the daemon outlived stop");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    // Killed by the time the daemon is gone; reaping by init may lag a little.
+    while alive() {
+        assert!(Instant::now() < deadline, "a process that ignored SIGHUP outlived stop");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+#[test]
+fn stop_kills_a_process_that_ignores_the_hangup() {
+    stops_kill_a_process_that_ignores_the_hangup("stop-hup", 1);
+}
+
+/// A second stop at the same time never exits the daemon before the first
+/// one's kills are sent.
+#[test]
+fn concurrent_stops_still_kill_a_process_that_ignores_the_hangup() {
+    stops_kill_a_process_that_ignores_the_hangup("stop-hup-2", 4);
+}
+
 #[test]
 fn version_names_the_protocol() {
     let out = Command::new(BIN).arg("version").output().unwrap();

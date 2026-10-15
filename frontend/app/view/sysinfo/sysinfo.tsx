@@ -6,8 +6,8 @@
 
 import type { PaneTabManifest } from "@/app/block/pane-tab-registry";
 import { remoteOf, remoteTabIcon, remoteTabName } from "@/app/block/pane-tab-remote";
-import { SysinfoViewModel } from "./sysinfo-model";
-import { DefaultPlotType } from "./sysinfo-types";
+import { plotTypeOf, SysinfoViewModel, viewNameOf } from "./sysinfo-model";
+import { toAreaChoice } from "./sysinfo-overview-data";
 import { SysinfoView } from "./sysinfo-view";
 
 /**
@@ -28,8 +28,9 @@ export function sysinfoPaneTab(view: "sysinfo" | "cpuplot"): PaneTabManifest {
             label: ({ meta }) => {
                 const remote = remoteOf(meta);
                 if (!remote) return undefined;
-                const plot = (meta?.["sysinfo:type"] as string | undefined) || DefaultPlotType;
-                return `${plot} · ${remoteTabName(remote)}`;
+                // Named as the pane's own title is (viewNameOf), from its meta.
+                const name = viewNameOf(plotTypeOf(meta), toAreaChoice(meta?.["sysinfo:focus"]));
+                return `${name} · ${remoteTabName(remote)}`;
             },
             icon: ({ meta }) => {
                 const remote = remoteOf(meta);

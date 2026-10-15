@@ -10,7 +10,8 @@ import { Show, createEffect, createMemo, createSignal, on, onCleanup, onMount, u
 import { useTick } from "@/app/hook/useTick";
 import { getVoiceSession, type PaneVoiceHandle } from "@/app/hook/useVoiceInput";
 import { markEnd, markStart } from "@/perf";
-import { atoms, getSettingsKeyAtom, pushNotification } from "@/app/store/global";
+import { shouldReduceMotion } from "@/app/motion/motion";
+import { getSettingsKeyAtom, pushNotification } from "@/app/store/global";
 import { focusManager } from "@/app/store/focusManager";
 import { showTextInputContextMenu } from "@/app/store/contextmenu";
 import { formatCompactNumber } from "@/util/format-count";
@@ -39,6 +40,7 @@ import { SlashAutocomplete } from "./SlashAutocomplete";
 import { isBangCommand } from "../bang-command";
 import { AttachmentTray } from "../attachments/AttachmentTray";
 import { getAttachmentDraft } from "../attachments/attachment-draft";
+import { getComposerDraft, getSentHistory, saveSentHistory, SENT_HISTORY_MAX, setComposerDraft } from "../reload-persistence";
 import { attachmentNoun, fileKind } from "../attachments/file-kind";
 import { isContainerPane, spliceComposerTokens } from "../hooks/useAgentDropAttach";
 import { copyIntoWorkdir, type CopySource } from "@/app/drag/file-drop-actions";
@@ -82,9 +84,9 @@ function fmtTurnTokens(output: number, t: TurnTokens | null | undefined): string
 // from this component's own vantage point and clearing there would erase
 // the very draft this exists to preserve. A stale entry for a since-closed
 // block is a bounded, harmless leak (one short string per block ever
-// opened this session).
+// opened this session). It lives in reload-persistence.ts
+// (getComposerDraft/setComposerDraft), which also keeps it across a reload.
 // Spec: SPEC_AGENT_HISTORY_AS_TAB_AND_DRAFT_PRESERVATION_2026_08_11.md \u00a73.4.
-const composerDrafts = new Map<string, string>();
 
 // ── AgentWorkingRow ───────────────────────────────────────────────────────────
 // Rendered immediately below AgentDocumentView in the conversation area.
@@ -196,14 +198,9 @@ export const AgentWorkingRow = (props: AgentWorkingRowProps): JSX.Element => {
     // spinner beside it carries the "still working" signal. Originally
     // SPEC_AGENT_WORKING_INDICATOR_SHIMMER_AND_MIC_RELOCATION_2026_07_08.md §2.
     //
-    // Reduced motion: read the app's centralized atom (settings override OR
-    // OS preference — see atoms.prefersReducedMotionAtom / BrainSpinner.tsx),
-    // not a one-off matchMedia() call, so it stays in sync with the same
-    // signal every other animated element in the app honors. Skips the
-    // one-shot type-out (jumps straight to full text, matching modal.tsx's
-    // "brief, non-moving" convention for one-shot reveals under reduced
-    // motion).
-    const reducedMotion = atoms.prefersReducedMotionAtom;
+    // When the motion policy reduces `transition` (motion/motion.ts; dormant
+    // today), skips the one-shot type-out and jumps straight to the full text.
+    const reducedMotion = () => shouldReduceMotion("transition");
     // Between two passes of one turn: no pass runs, the next is expected. The
     // row keeps its live form (dimmed) rather than flash "Worked" and take it
     // back a moment later. Display only: the composer's busy gate is not this.
@@ -662,7 +659,7 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
     const draftBlockId = props.viewModel?.blockId;
     // Files attached to the unsent message (SPEC_AGENT_PANE_IMAGE_ATTACHMENTS
     // _2026_09_26.md §5, SPEC_AGENT_PANE_FILE_ATTACHMENTS_2026_09_26.md).
-    // Module-level per block, like composerDrafts.
+    // Module-level per block, like the composer draft.
     const attachmentDraft = draftBlockId ? getAttachmentDraft(draftBlockId) : undefined;
     let focusLastTile: (() => void) | undefined;
     const [sendHint, setSendHint] = createSignal<string | null>(null);
@@ -731,15 +728,14 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
     };
 
     // ── Sent-message history (shell-style ArrowUp / ArrowDown recall) ──
-    // Per-pane, in-memory, capped. The component body runs once (SolidJS), so
-    // these closure `let`s persist for the footer's lifetime — same pattern as
-    // the voice/typing flags below. `histPos === sentHistory.length` means
+    // Per block, capped, kept like the draft (reload-persistence.ts): it
+    // survives a pane-tab switch and a reload. The cursor and stash are
+    // closure `let`s for the footer's lifetime. `histPos === sentHistory.length` means
     // "not navigating — showing the live draft"; lower values point at a prior
     // sent message. `histDraft` stashes the in-progress text while navigating
     // so ArrowDown past the newest entry restores it.
-    const HISTORY_MAX = 200;
-    let sentHistory: string[] = [];
-    let histPos = 0;
+    const sentHistory: string[] = draftBlockId ? getSentHistory(draftBlockId) : [];
+    let histPos = sentHistory.length;
     let histDraft = "";
 
     // ── Slash autocomplete state ──────────────────────────────────────
@@ -854,8 +850,8 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
         // accept, voice) — persisting here, not just in handleInput below,
         // means e.g. an Esc-clear-to-empty also clears the persisted draft
         // instead of resurrecting the pre-clear text on the next tab
-        // switch back. See composerDrafts above.
-        if (draftBlockId) composerDrafts.set(draftBlockId, text);
+        // switch back. See the composer draft note above.
+        if (draftBlockId) setComposerDraft(draftBlockId, text);
     };
 
     const acceptCompletion = (cmd: SlashCommand): void => {
@@ -903,13 +899,13 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
         // through to native undo instead of resurrecting stale text. (reagent
         // P1 / codex P2 on PR #2497.)
         escClearedDraft = null;
-        // Persist the draft (composerDrafts above) so it survives a
+        // Persist the draft (see the composer draft note above) so it survives a
         // tab-switch-away/back. Synchronous, not RAF-batched like the
         // typing-scroll below — a Map.set() is O(1) with no layout/DOM
         // cost, so it needs no debouncing, and must not depend on
         // `props.onTyping` being provided (that callback is optional; the
         // draft guarantee isn't).
-        if (draftBlockId && textareaRef) composerDrafts.set(draftBlockId, textareaRef.value);
+        if (draftBlockId && textareaRef) setComposerDraft(draftBlockId, textareaRef.value);
         // Perf marks per SPEC_INPUT_RESPONSIVENESS §7.1. Target: handler
         // body P95 < 5 ms. The mark span ends BEFORE the RAF enqueue so
         // we measure only the synchronous handler cost.
@@ -961,14 +957,14 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
     });
 
     // Restore a draft left behind by a prior mount of this same block (a
-    // tab switch away and back — see composerDrafts above). Direct .value
+    // tab switch away and back — see the composer draft note above). Direct .value
     // write, matching every other programmatic composer write in this file
     // (writeComposerValue) — deliberately does NOT dispatch `input`, so it
     // doesn't trip handleInput's history-cursor reset before the user has
     // touched anything.
     onMount(() => {
         if (!draftBlockId || !textareaRef) return;
-        const draft = composerDrafts.get(draftBlockId);
+        const draft = getComposerDraft(draftBlockId);
         if (draft) {
             textareaRef.value = draft;
             setIsBangCmd(isBangCommand(draft));
@@ -1139,7 +1135,8 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
             // reset the navigation cursor back to the live (now empty) draft.
             if (message.trim() && message !== sentHistory[sentHistory.length - 1]) {
                 sentHistory.push(message);
-                if (sentHistory.length > HISTORY_MAX) sentHistory.shift();
+                if (sentHistory.length > SENT_HISTORY_MAX) sentHistory.shift();
+                if (draftBlockId) saveSentHistory(draftBlockId);
             }
             histPos = sentHistory.length;
             histDraft = "";

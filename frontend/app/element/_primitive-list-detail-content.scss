@@ -1,0 +1,113 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// What goes inside a primitive list/detail: the list's rows, their badges,
+// the "+ New" button, the caveat box and the form fields (the error box is
+// element/ui/_line.scss's `notice`). The
+// layout around them (list or detail, the back button) is
+// primitive-list-detail.scss. Used by the agent memory dialog
+// (AgentNativeMemoryModal.scss), the agent's MCP servers and Skills
+// (AgentPrimitiveModal.scss) and the bundle's primitive section
+// (BundlePrimitiveSection.scss), each under its own class names.
+
+@use "../mixins.scss";
+
+/// The list's "nothing here" line.
+@mixin list-empty {
+    padding: var(--space-2);
+    font-size: var(--text-sm);
+    color: var(--secondary-text-color);
+    font-style: italic;
+}
+
+/// A row: a full-width button with a rule under it.
+@mixin list-item {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+    width: 100%;
+    padding: var(--space-1-5) var(--space-2);
+    border: none;
+    border-bottom: 1px solid var(--border-color);
+    background: transparent;
+    color: var(--main-text-color);
+    font-size: var(--text-sm);
+    text-align: left;
+    cursor: default;
+
+    &:hover {
+        background: var(--hover-bg-color);
+    }
+
+    &.is-selected {
+        background: var(--accent-bg);
+    }
+}
+
+/// The row's name: takes the room, cut with an ellipsis.
+@mixin list-item-name {
+    flex: 1;
+    min-width: 0;
+    @include mixins.truncate;
+}
+
+/// A small caps label at the end of a row.
+@mixin badge {
+    flex-shrink: 0;
+    font-size: var(--text-2xs);
+    @include mixins.label-caps;
+    padding: 1px 5px;
+}
+
+/// A badge in a colour: the text, on a faint tint of it.
+@mixin badge-tone($color) {
+    color: $color;
+    background: color-mix(in srgb, #{$color} 12%, transparent);
+}
+
+/// The "+ New" button at the foot of the list.
+@mixin new-btn {
+    margin-top: auto;
+    padding: var(--space-1-5) var(--space-2);
+    border: none;
+    border-top: 1px solid var(--border-color);
+    background: transparent;
+    color: var(--accent-color);
+    font-size: var(--text-sm);
+    text-align: left;
+    cursor: default;
+
+    &:hover {
+        background: var(--hover-bg-color);
+    }
+}
+
+/// A caveat note's colours (a known limitation). The site sets its spacing.
+@mixin caveat-box {
+    background: color-mix(in srgb, var(--warning-color) 15%, transparent);
+    font-size: var(--text-xs);
+    color: var(--secondary-text-color);
+}
+
+/// A text field: a 1px line that turns accent, doubled, while focused.
+@mixin field-input {
+    width: 100%;
+    box-sizing: border-box;
+    padding: var(--space-1) var(--space-1-5);
+    border: 1px solid var(--border-color);
+    background: var(--main-bg-color);
+    color: var(--main-text-color);
+    font-size: var(--text-sm);
+    outline: none;
+
+    &:focus {
+        border-color: var(--accent-color);
+        box-shadow: 0 0 0 1px var(--accent-color);
+    }
+}
+
+/// What a multi-line field adds to `field-input`.
+@mixin field-textarea {
+    font-family: var(--font-mono);
+    resize: vertical;
+}

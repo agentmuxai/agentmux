@@ -1,6 +1,8 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+@use "../../mixins.scss";
+
 .settings-search-bar {
     position: relative;
     flex-shrink: 0;
@@ -19,7 +21,7 @@
 
 .settings-search-icon {
     color: var(--secondary-text-color);
-    font-size: 12px;
+    font-size: var(--text-sm);
     flex-shrink: 0;
 }
 
@@ -29,7 +31,7 @@
     border: none;
     outline: none;
     color: var(--main-text-color);
-    font-size: 13px;
+    font-size: var(--text-base);
     font-family: var(--font-sans);
 
     &::placeholder {
@@ -89,30 +91,28 @@
 }
 
 .settings-search-result-label {
-    font-size: 13px;
+    font-size: var(--text-base);
     color: var(--main-text-color);
 }
 
 .settings-search-result-desc {
-    font-size: 11px;
+    font-size: var(--text-xs);
     color: var(--secondary-text-color);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    @include mixins.truncate;
 }
 
 .settings-search-empty {
     padding: var(--space-4) 10px;
     text-align: center;
     color: var(--secondary-text-color);
-    font-size: 12px;
+    font-size: var(--text-sm);
     font-style: italic;
 }
 
 // Brief highlight after a search result scrolls a row into view — see
 // SettingsView's handleSelectResult.
 .setting-row--search-highlight {
-    animation: settings-search-highlight-fade 1.5s ease-out;
+    animation: settings-search-highlight-fade 1.5s var(--ease-out);
 }
 
 @keyframes settings-search-highlight-fade {

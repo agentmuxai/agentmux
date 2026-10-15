@@ -6,7 +6,7 @@
 
 .input {
     width: 100%;
-    font-size: 12px;
+    font-size: var(--text-sm);
     outline: none;
     color: var(--form-element-text-color);
     background: var(--form-element-bg-color);
@@ -58,9 +58,7 @@
 
     .input-right-element {
         padding: 0 5px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
+        @include mixins.flex-center;
     }
 
     .input {

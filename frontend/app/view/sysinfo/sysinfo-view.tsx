@@ -10,9 +10,12 @@ import clsx from "clsx";
 import type { JSX } from "solid-js";
 import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show } from "solid-js";
 
+import { SysinfoBar } from "./sysinfo-bar";
 import type { SysinfoViewModel } from "./sysinfo-model";
-import { Overview } from "./sysinfo-overview";
+import { MeasureTable, Overview } from "./sysinfo-overview";
+import { type AreaChoice, FOCUS_CHOICES } from "./sysinfo-overview-data";
 import { SingleLinePlot } from "./sysinfo-plot";
+import { AreaPlotType, SIMPLE_VIEWS } from "./sysinfo-types";
 import { convertTimeSeriesToDataItem } from "./sysinfo-util";
 
 type SysinfoViewProps = {
@@ -132,7 +135,6 @@ function SysinfoViewInner(props: SysinfoViewProps): JSX.Element {
     const targetLen = createMemo(() => model.numPoints() + 1);
     const intervalSecs = createMemo(() => model.intervalSecsAtom());
 
-    const title = createMemo(() => yvals().length > 1);
     // The "CPU + Mem + Net" plot type stacks as a single column of 3
     // full-width rows instead of falling into the 2-column grid below: at 2
     // columns, 3 panels wrap to a 2+1 layout that leaves the second row
@@ -144,64 +146,81 @@ function SysinfoViewInner(props: SysinfoViewProps): JSX.Element {
     const cols1 = createMemo(() => model.plotTypeSelectedAtom() === "CPU + Mem + Net");
     const cols2 = createMemo(() => yvals().length > 2 && !cols1());
 
-    const overview = createMemo(() => model.plotTypeSelectedAtom() === "Overview");
-    // A pause belongs to the Overview, which has the control to resume it: the
-    // classic plot types have none, so leaving it resumes.
-    createEffect(
-        on(overview, (shown) => {
-            if (!shown && paused()) {
-                setPaused(false);
-                setPlotData(model.dataAtom());
-            }
-        })
+    const overview = createMemo(() => model.plotTypeSelectedAtom() === AreaPlotType);
+    // The figures as a table instead of the charts, in either mode.
+    const [table, setTable] = createSignal(false);
+    // One control row for both modes: the simple views or the Advanced ones.
+    const views = createMemo(() =>
+        overview() ? FOCUS_CHOICES : SIMPLE_VIEWS.map((v) => ({ value: v.type, label: v.short }))
+    );
+    const view = () => (overview() ? model.focus() : model.plotTypeSelectedAtom());
+    const onView = (v: string) => (overview() ? model.setFocus(v as AreaChoice) : void model.setSimpleView(v));
+    // The table lists what the view shows: an Advanced view's area, or exactly
+    // the measures a simple view charts. It scrolls when it is taller than the pane.
+    const measureTable = () => (
+        <div class="sysinfo-table-scroll">
+            <Show when={overview()} fallback={<MeasureTable plotData={plotData()} keys={yvals()} />}>
+                <MeasureTable plotData={plotData()} focus={model.focus()} />
+            </Show>
+        </div>
     );
 
     return (
-        <Show
-            when={!overview()}
-            fallback={
-                <Overview
-                    plotData={plotData()}
-                    targetLen={targetLen()}
-                    intervalSecs={intervalSecs()}
-                    windowSecs={model.windowSecs()}
-                    onWindow={(secs) => model.setWindow(secs)}
-                    paused={paused()}
-                    onPause={(p) => {
-                        setPaused(p);
-                        if (!p) setPlotData(model.dataAtom());
-                    }}
-                    focus={model.focus()}
-                    onFocus={(area) => model.setFocus(area)}
-                    syncKey={`sysinfo-${model.blockId}`}
-                />
-            }
-        >
-            <div class="flex flex-col flex-grow mb-0 overflow-y-auto">
-                <div
-                    class={clsx("w-full h-full grid grid-rows-[repeat(auto-fit,minmax(100px,1fr))] gap-[10px]", {
-                        "grid-cols-1": cols1(),
-                        "grid-cols-2": cols2(),
-                    })}
+        <div class="sysinfo-pane">
+            <SysinfoBar
+                views={views()}
+                view={view()}
+                onView={onView}
+                windowSecs={model.windowSecs()}
+                intervalSecs={intervalSecs()}
+                onWindow={(secs) => model.setWindow(secs)}
+                paused={paused()}
+                onPause={(p) => {
+                    setPaused(p);
+                    if (!p) setPlotData(model.dataAtom());
+                }}
+                table={table()}
+                onTable={setTable}
+            />
+            <Show when={!table()} fallback={measureTable()}>
+                <Show
+                    when={!overview()}
+                    fallback={
+                        <Overview
+                            plotData={plotData()}
+                            targetLen={targetLen()}
+                            intervalSecs={intervalSecs()}
+                            focus={model.focus()}
+                            syncKey={`sysinfo-${model.blockId}`}
+                        />
+                    }
                 >
-                    <For each={yvals()}>
-                        {(yval) => (
-                            <SingleLinePlot
-                                plotData={plotData()}
-                                yval={yval}
-                                yvalMeta={plotMeta().get(yval)}
-                                blockId={model.blockId}
-                                defaultColor={"var(--accent-color)"}
-                                title={title()}
-                                targetLen={targetLen()}
-                                intervalSecs={intervalSecs()}
-                                syncKey={`sysinfo-${model.blockId}`}
-                            />
-                        )}
-                    </For>
-                </div>
-            </div>
-        </Show>
+                    <div class="flex flex-col flex-grow mb-0 overflow-y-auto">
+                        <div
+                            class={clsx("w-full h-full grid grid-rows-[repeat(auto-fit,minmax(100px,1fr))] gap-[2px]", {
+                                "grid-cols-1": cols1(),
+                                "grid-cols-2": cols2(),
+                            })}
+                        >
+                            <For each={yvals()}>
+                                {(yval) => (
+                                    <SingleLinePlot
+                                        plotData={plotData()}
+                                        yval={yval}
+                                        yvalMeta={plotMeta().get(yval)}
+                                        blockId={model.blockId}
+                                        defaultColor={"var(--accent-color)"}
+                                        targetLen={targetLen()}
+                                        intervalSecs={intervalSecs()}
+                                        syncKey={`sysinfo-${model.blockId}`}
+                                    />
+                                )}
+                            </For>
+                        </div>
+                    </div>
+                </Show>
+            </Show>
+        </div>
     );
 }
 

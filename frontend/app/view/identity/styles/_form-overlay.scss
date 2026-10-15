@@ -5,15 +5,16 @@
 
 // ── Add/Edit form overlay ─────────────────────────────────────────────────────
 
+@use "../../../mixins.scss";
+
 .identity-form-overlay {
-    position: absolute;
-    inset: 0;
+    @include mixins.abs-fill;
     background: rgba(0, 0, 0, 0.6);
     display: flex;
     align-items: flex-start;
     justify-content: flex-end;
-    // Pane-level modal — sits in the existing element-modal slot.
-    z-index: var(--zindex-elem-modal);
+    // A dialog inside the pane.
+    z-index: var(--z-pane-modal);
 }
 
 .identity-form {
@@ -33,7 +34,7 @@
     padding: 10px 14px;
     border-bottom: 1px solid var(--border-color);
     font-weight: 600;
-    font-size: 13px;
+    font-size: var(--text-base);
     flex-shrink: 0;
 }
 
@@ -42,7 +43,7 @@
     border: none;
     color: var(--secondary-text-color);
     cursor: default;
-    font-size: 14px;
+    font-size: var(--text-md);
     padding: var(--space-0-5) var(--space-1-5);
     border-radius: 0;
 
@@ -70,14 +71,14 @@
 }
 
 .identity-form-label {
-    font-size: 11px;
+    font-size: var(--text-xs);
     color: var(--secondary-text-color);
 }
 
 .identity-input,
 .identity-select {
     padding: 5px var(--space-2);
-    font-size: 12px;
+    font-size: var(--text-sm);
     background: var(--form-element-bg-color);
     border: 1px solid var(--border-color);
     border-radius: 0;
@@ -95,7 +96,7 @@
     align-items: flex-start;
     gap: 6px;
     padding: var(--space-1-5) 10px;
-    font-size: 12px;
+    font-size: var(--text-sm);
     background: rgba(239, 68, 68, 0.1);
     border: 1px solid rgba(239, 68, 68, 0.3);
     border-radius: 0;
@@ -128,7 +129,7 @@
 
 .identity-form-warning {
     padding: var(--space-1-5) 10px;
-    font-size: 11px;
+    font-size: var(--text-xs);
     background: rgba(245, 158, 11, 0.1);
     border: 1px solid rgba(245, 158, 11, 0.3);
     border-radius: 0;
@@ -147,12 +148,12 @@
 // ── Account secure-key lifecycle (SPEC_TRUST_CENTER §5) ──
 
 .identity-key-egress-note {
-    font-size: 11px;
+    font-size: var(--text-xs);
     line-height: 1.45;
     color: var(--secondary-text-color);
     background: color-mix(in srgb, var(--accent-color) 8%, transparent);
     border: 1px solid color-mix(in srgb, var(--accent-color) 25%, transparent);
-    border-radius: var(--radius-sm, 4px);
+    border-radius: var(--radius-sm);
     padding: var(--space-2);
     margin: var(--space-1) 0 var(--space-2);
 
@@ -175,17 +176,17 @@
     flex-wrap: wrap;
     padding: var(--space-2);
     border: 1px solid var(--border-color);
-    border-radius: var(--radius-sm, 4px);
+    border-radius: var(--radius-sm);
 
     .identity-key-masked {
         font-family: var(--font-mono);
-        font-size: 13px;
+        font-size: var(--text-base);
         letter-spacing: 1px;
         color: var(--main-text-color);
     }
 
     .identity-key-locked-note {
-        font-size: 11px;
+        font-size: var(--text-xs);
         color: var(--secondary-text-color);
         flex: 1 1 auto;
     }

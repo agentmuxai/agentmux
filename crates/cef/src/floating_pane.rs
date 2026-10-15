@@ -64,6 +64,8 @@ use cef::*;
 
 use crate::state::AppState;
 
+pub(crate) mod reveal;
+
 // ---------------------------------------------------------------------------
 // Global floater HWND registry — used by the main-window cascade hook to
 // minimize/restore/destroy/z-order floaters without the owned-window
@@ -620,6 +622,7 @@ wrap_task! {
                 self.y,
                 self.width,
                 self.height,
+                true,
             ) {
                 Ok(h) => h,
                 Err(e) => {
@@ -853,6 +856,7 @@ wrap_task! {
                 crate::commands::window_pool::POOL_OFFSCREEN_Y,
                 crate::commands::window_pool::PANE_POOL_WIDTH,
                 crate::commands::window_pool::PANE_POOL_HEIGHT,
+                false,
             ) {
                 Ok(h) => h,
                 Err(e) => {
@@ -894,6 +898,7 @@ wrap_task! {
             unsafe {
                 crate::client::wndproc::install_top_level_focus_restore_hook(
                     outer_hwnd as *mut std::ffi::c_void,
+                    &self.state,
                 );
             }
 
@@ -1176,6 +1181,7 @@ fn create_popup(
     y: i32,
     width: i32,
     height: i32,
+    cloak_until_painted: bool,
 ) -> Result<*mut std::ffi::c_void, String> {
     use std::ffi::OsStr;
     use std::os::windows::ffi::OsStrExt;
@@ -1310,6 +1316,11 @@ fn create_popup(
         }
     }
 
+    // A cold floater is shown cloaked until its page paints (no white frame
+    // before the browser's first one); see `reveal`.
+    if cloak_until_painted {
+        reveal::cloak_until_painted(window_label, hwnd as isize);
+    }
     unsafe {
         ShowWindow(hwnd, SW_SHOWNOACTIVATE);
     }

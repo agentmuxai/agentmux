@@ -60,7 +60,7 @@ skip_placement?: boolean,
  * Create the block directly as a new tab of the pane that holds this
  * block (visible or background), in ONE reducer step
  * (`Command::CreateBlockInStack`) — the block never exists without a
- * pane, unlike `skip_placement` + a frontend push, which could be
+ * pane, unlike `skip_placement` + a separate placement step, which could be
  * interrupted in between. The frontend is told via a queued `stackpush`
  * layout action. Takes precedence over `skip_placement` and split
  * placement; `floating` still wins (checked first).

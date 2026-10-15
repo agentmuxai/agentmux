@@ -21,7 +21,7 @@
             border-radius: 50%;
             border: 1.5px solid var(--error-color, var(--color-error, #e5484d));
             opacity: 0.6;
-            animation: mic-pulse 1.4s ease-in-out infinite;
+            animation: mic-pulse 1.4s var(--ease-in-out) infinite;
         }
     }
 

@@ -69,7 +69,7 @@
     // SPEC_AGENT_PANE_PROGRESS_BAR_OVERLAY_NO_GAP_2026_08_25.md's bigger 3px
     // row-gap (a separate, now-fixed issue) stopped drawing attention away
     // from this smaller, always-present 1px mismatch.
-    height: calc(var(--pane-tab-strip-height, 28px) * var(--pane-tab-strip-zoom, 1) + 1px);
+    height: calc(var(--pane-tab-strip-height) * var(--pane-tab-strip-zoom, 1) + 1px);
     border-bottom: 1px solid var(--border-color);
 
     // …but NOT when this strip is the pane header itself (PaneHeaderTabStrip
@@ -92,7 +92,7 @@
     // above it). With no border there is nothing to carve, and keeping it
     // would leave a 1px gap under `.pane-tab-strip-inner` instead.
     .block-frame-default-header & {
-        height: calc(var(--pane-tab-strip-height, 28px) * var(--pane-tab-strip-zoom, 1));
+        height: calc(var(--pane-tab-strip-height) * var(--pane-tab-strip-zoom, 1));
         border-bottom: none;
     }
     // No fill on the container itself — only .pane-tab (active/hover) and
@@ -191,7 +191,7 @@
     display: flex;
     flex-direction: row;
     align-items: stretch;
-    height: var(--pane-tab-strip-height, 28px);
+    height: var(--pane-tab-strip-height);
     zoom: var(--pane-tab-strip-zoom, 1);
 }
 
@@ -238,9 +238,11 @@
     color: var(--secondary-text-color);
     cursor: default;
     user-select: none;
-    font-size: 11px;
+    font-size: var(--text-xs);
     overflow: hidden;
-    transition: background 80ms ease, color 80ms ease;
+    transition:
+        background var(--duration-decorative-instant) var(--ease-standard),
+        color var(--duration-decorative-instant) var(--ease-standard);
     // Positioning + own stacking context for the activity-flash overlay
     // below, which sits at z-index -1: over the pill's (pane-colored)
     // background, under its icon/label/×.
@@ -255,9 +257,8 @@
     // getColor), else accent, at 0.9 alpha — the click's full strength.
     &::before {
         content: "";
-        position: absolute;
-        inset: 0;
-        z-index: var(--zindex-activity-flash);
+        @include mixins.abs-fill;
+        z-index: var(--z-behind);
         background: oklch(
             from var(--activity-flash-base, var(--pane-tab-underline, var(--accent-color)))
                 min(0.85, calc(l + 0.06)) calc(c * 1.4) h / 0.9
@@ -270,7 +271,7 @@
         // The white tint is layered ON TOP of the resting neutral
         // background rather than replacing it, so hovering an uncolored
         // tab never exposes the header's active-tab tint underneath.
-        background: linear-gradient(rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.03)),
+        background: linear-gradient(var(--tint-1), var(--tint-1)),
             var(--pane-tab-neutral-bg, transparent);
         color: var(--main-text-color);
 
@@ -386,13 +387,11 @@
 // exist. Scales only with the zoom of whatever contains the strip.
 .pane-tab-icon {
     --pane-tab-icon-size: 14px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    @include mixins.flex-center;
     flex: 0 0 var(--pane-tab-icon-size);
     width: var(--pane-tab-icon-size);
     height: var(--pane-tab-icon-size);
-    font-size: 12px;
+    font-size: var(--text-sm);
     line-height: 1;
 
     i {
@@ -432,9 +431,7 @@
 .pane-tab-label {
     flex: 1;
     min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    @include mixins.truncate;
 }
 
 // The inline rename input swapped in via renderLabel (PaneTabRenameInput) —
@@ -443,11 +440,9 @@
 .pane-tab-rename-input {
     flex: 1;
     min-width: 0;
-    border: none;
+    @include mixins.button-reset;
     outline: none;
-    padding: 0;
     margin: 0;
-    background: transparent;
     color: inherit;
     font: inherit;
     cursor: text;
@@ -472,22 +467,20 @@
     flex: 0 0 16px;
     width: 16px;
     height: 16px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    padding: 0;
-    border: none;
+    @include mixins.flex-center(inline-flex);
+    @include mixins.button-reset;
     border-radius: 3px;
-    background: transparent;
     color: inherit;
     cursor: default;
-    font-size: 14px;
+    font-size: var(--text-md);
     line-height: 1;
     opacity: 0;
-    transition: opacity 80ms ease, background 80ms ease;
+    transition:
+        opacity var(--duration-decorative-instant) var(--ease-standard),
+        background var(--duration-decorative-instant) var(--ease-standard);
 
     &:hover {
-        background: rgba(255, 255, 255, 0.1);
+        background: var(--tint-4);
     }
 }
 
@@ -536,21 +529,19 @@
     flex: 0 0 auto;
     width: 28px;
     height: 28px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    padding: 0;
-    border: none;
+    @include mixins.flex-center(inline-flex);
+    @include mixins.button-reset;
     border-left: 1px solid var(--border-color);
-    background: transparent;
     color: var(--secondary-text-color);
     cursor: default;
     font-size: 15px;
     line-height: 1;
-    transition: background 80ms ease, color 80ms ease;
+    transition:
+        background var(--duration-decorative-instant) var(--ease-standard),
+        color var(--duration-decorative-instant) var(--ease-standard);
 
     &:hover {
-        background: rgba(255, 255, 255, 0.06);
+        background: var(--tint-2);
         color: var(--main-text-color);
     }
 }
@@ -573,7 +564,7 @@
 // Smaller than the 15px glyph it sits beside: this is a text affordance, and at
 // the glyph's own size it would out-weigh the actual tab labels next to it.
 .pane-tab-strip-add-label {
-    font-size: 11px;
+    font-size: var(--text-xs);
     white-space: nowrap;
 }
 

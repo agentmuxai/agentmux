@@ -6,9 +6,11 @@
 // promoted here as the reusable base). Token-driven; no raw hex.
 // Spec: docs/specs/SPEC_AGENT_PANE_FORKS_AND_AUX_PINS_2026_06_15.md §5.2.
 
+@use "../../../mixins.scss";
+
 .pane-row {
     border-left: 3px solid var(--border-color);
-    transition: border-left-color 0.2s ease;
+    transition: border-left-color 0.2s var(--ease-standard);
 
     &--running { border-left-color: var(--term-bright-green); }
     &--active  { border-left-color: var(--accent-color); }
@@ -65,24 +67,24 @@
     &:first-of-type { margin-left: auto; }
 
     flex: 0 0 auto;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
+    @include mixins.flex-center(inline-flex);
     min-width: 18px;
     height: 18px;
     padding: 0 var(--space-1);
     background: transparent;
     border: none;
-    border-radius: var(--radius-sm, 0);
+    border-radius: var(--radius-sm);
     color: var(--secondary-text-color);
     cursor: var(--cursor-default);
     font-size: var(--text-sm);
     line-height: 1;
-    transition: color 80ms ease, background 80ms ease;
+    transition:
+        color var(--duration-decorative-instant) var(--ease-standard),
+        background var(--duration-decorative-instant) var(--ease-standard);
 
     &:hover {
         color: var(--main-text-color);
-        background: var(--hover-bg-color, rgba(255, 255, 255, 0.06));
+        background: var(--hover-bg-color);
     }
 
     &--danger:hover {
@@ -100,21 +102,21 @@
     gap: var(--space-0-5);
 
     &-text {
-        font-size: var(--text-xs, 11px);
+        font-size: var(--text-xs);
         white-space: nowrap;
     }
 
     &--labeled {
         height: auto;
         padding: 2px var(--space-1-5);
-        border: 1px solid var(--border-color, rgba(255, 255, 255, 0.12));
-        border-radius: var(--radius-sm, 3px);
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-sm);
     }
 
     &--primary {
         color: var(--main-text-color);
         border-color: color-mix(in srgb, var(--error-color) 60%, transparent);
-        background: color-mix(in srgb, var(--error-color) 14%, transparent);
+        background: var(--error-bg);
 
         &:hover { background: color-mix(in srgb, var(--error-color) 24%, transparent); }
     }
@@ -166,7 +168,7 @@
     display: flex;
     flex-direction: column;
     gap: var(--space-0-5);
-    font-size: var(--text-xs, 11px);
+    font-size: var(--text-xs);
     color: var(--secondary-text-color);
 
     .agent-failure-stderr {
@@ -174,10 +176,10 @@
         max-height: 160px;
         overflow: auto;
         padding: var(--space-1);
-        background: var(--code-bg-color, rgba(0, 0, 0, 0.25));
-        border-radius: var(--radius-sm, 3px);
+        background: rgba(0, 0, 0, 0.25);
+        border-radius: var(--radius-sm);
         font-family: var(--font-mono, monospace);
-        font-size: 11px;
+        font-size: var(--text-xs);
         white-space: pre-wrap;
         word-break: break-word;
     }

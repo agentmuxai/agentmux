@@ -1,21 +1,20 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+@use "../mixins.scss";
+
 .cross-drag-overlay {
-    position: fixed;
-    inset: 0;
+    @include mixins.fixed-fill;
     // Intentionally below modals/popovers — if a drag lands while a
     // modal is open, the modal keeps focus. Matches the z-index
     // hierarchy in SPEC_DESIGN_SYSTEM §5.3.
     z-index: var(--z-drag-overlay);
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    @include mixins.flex-center;
     background: var(--drop-target-bg);
     border: 2px dashed var(--drop-target-border);
     border-radius: 0;
     pointer-events: none;
-    animation: cross-drag-fade-in 0.15s ease-out;
+    animation: am-fade-in var(--duration-base) var(--ease-out);
 
     .cross-drag-overlay-content {
         display: flex;
@@ -23,20 +22,11 @@
         align-items: center;
         gap: var(--space-2);
         color: var(--drop-target-border);
-        font-size: 14px;
+        font-size: var(--text-md);
         opacity: 0.8;
 
         i {
             font-size: 28px;
         }
-    }
-}
-
-@keyframes cross-drag-fade-in {
-    from {
-        opacity: 0;
-    }
-    to {
-        opacity: 1;
     }
 }

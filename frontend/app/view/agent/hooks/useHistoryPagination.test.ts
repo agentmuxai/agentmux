@@ -399,6 +399,25 @@ describe("useHistoryPagination — restore only the live feed's turns (SPEC_AGEN
         expect(hook().historyOffset()).toBe(HWM - 1);
     });
 
+    // SPEC_RENDERER_RECYCLE_WHEN_IDLE_2026_10_13.md §2: each page used to be
+    // parsed with ids counted from 0, so an older page's messages collided
+    // with the restored window's and HistoryLoaded dropped them.
+    it("an older page's messages get their own line-based ids, so none collide with the restored window", async () => {
+        sameBlockV2();
+        const text = (content: string) => JSON.stringify({ type: "text", content });
+        vi.mocked(RpcApi.BlockfileReadRangeCommand)
+            .mockResolvedValueOnce({ lines: [text("NEW-1"), text("NEW-2")], total: HWM, offset: HWM - 2 })
+            .mockResolvedValueOnce({ lines: [text("OLD-1"), text("OLD-2")], total: HWM, offset: HWM - 2 - OLDER_PAGE_LINES });
+        const { model, hook } = mount(() => 7);
+        await flush();
+        await hook().loadOlder();
+        const restored = model.docEvents.find((e) => e.type === "HistoryRestored").nodes.map((n: any) => n.id);
+        const older = model.docEvents.find((e) => e.type === "HistoryLoaded").nodes.map((n: any) => n.id);
+        expect(restored).toEqual([`node_L${HWM - 2}_0`]);
+        expect(older[0]).toBe(`node_L${HWM - 2 - OLDER_PAGE_LINES}_0`);
+        expect(older.filter((id: string) => restored.includes(id))).toEqual([]);
+    });
+
     it("an older srv that ignores tail_turns returns the window, and that's where it starts", async () => {
         sameBlockV2();
         vi.mocked(RpcApi.BlockfileReadRangeCommand).mockResolvedValue({

@@ -225,6 +225,9 @@ pub(crate) fn request_from_held(row: &HeldJekt) -> InjectionRequest {
     req.transcript_request_escalate_forced = row.transcript_request_escalate_forced;
     req.audit_source_uid = row.audit_source_uid.clone();
     req.held_sent_at_ms = Some(row.sent_at_ms);
+    req.files = (!row.files_json.is_empty())
+        .then(|| serde_json::from_str(&row.files_json).ok())
+        .flatten();
     req
 }
 
@@ -232,8 +235,11 @@ async fn replay_one(state: &AppState, row: HeldJekt) -> ReplayOutcome {
     // The transcript-request fields are restored as accepted, never
     // recomputed: the replay addresses the target by UID, and the slug-keyed
     // recompute would lose a forced escalation.
-    let req = request_from_held(&row);
+    let mut req = request_from_held(&row);
+    super::jekt_files::prepare(&mut req).await;
+    let charged = req.clone();
     let resp = state.reactive_handler.inject_held(req);
+    super::jekt_files::settle(&charged, resp.success);
     let mstore = state.mstore.clone();
     let id = row.request_id.clone();
     if resp.success {

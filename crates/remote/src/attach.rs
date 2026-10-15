@@ -122,7 +122,7 @@ pub fn session_pid(base: &Path, session: &str) -> Option<u32> {
     answer.trim().parse().ok()
 }
 
-/// Send one control line (`END`, `LIST`) and print the answer.
+/// Send one control line (`END`, `LIST`, `STOP`) and print the answer.
 pub fn control(base: &Path, line: &str) -> i32 {
     let mut stream = match UnixStream::connect(socket_path(base)) {
         Ok(s) => s,

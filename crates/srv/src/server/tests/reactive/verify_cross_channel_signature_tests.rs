@@ -34,6 +34,7 @@ fn publish(shared_dir: &std::path::Path, agent: &str, channel: &str, pubkey: Opt
             jekt_public_key: pubkey.map(|k| BASE64.encode(k)).unwrap_or_default(),
             uid: String::new(),
             uid_public_key: String::new(),
+            jekt_features: Vec::new(),
         },
     );
 }
@@ -269,6 +270,7 @@ fn publish_uid(
             jekt_public_key: String::new(),
             uid: uid.to_string(),
             uid_public_key: BASE64.encode(uid_public),
+            jekt_features: Vec::new(),
         },
     );
 }

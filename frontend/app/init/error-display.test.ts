@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, beforeEach, vi } from "vitest";
 const mocks = vi.hoisted(() => ({ writeText: vi.fn(() => Promise.resolve()) }));
 vi.mock("@/util/clipboard", () => ({ writeText: mocks.writeText }));
 
-import { failStartup, showStartupError, StartupFailureHandled } from "./error-display";
+import { failStartup, reloadKeepingHostCredentials, showStartupError, StartupFailureHandled } from "./error-display";
 
 describe("showStartupError", () => {
     beforeEach(() => {
@@ -21,6 +21,15 @@ describe("showStartupError", () => {
         expect(document.body.style.visibility).toBe("visible");
         expect(document.body.style.opacity).toBe("1");
         expect(document.body.classList.contains("is-transparent")).toBe(false);
+    });
+
+    it("shows the app root too: the startup guard hides #main, not the body", () => {
+        const main = document.getElementById("main")!;
+        main.style.visibility = "hidden";
+        main.style.opacity = "0";
+        showStartupError("test error");
+        expect(main.style.visibility).toBe("visible");
+        expect(main.style.opacity).toBe("1");
     });
 
     it("removes the startup loader", () => {
@@ -137,5 +146,41 @@ describe("showStartupError copy", () => {
         const text = document.getElementById("main")?.textContent ?? "";
         expect(text).toContain("This window didn't finish starting");
         expect(text).not.toContain("lost its connection");
+    });
+});
+
+describe("reloadKeepingHostCredentials", () => {
+    const nav = { href: "http://127.0.0.1:1234/?windowLabel=main", assign: vi.fn(), replace: vi.fn(), reload: vi.fn() };
+    beforeEach(() => {
+        vi.stubGlobal("location", nav);
+        nav.assign.mockClear();
+        nav.replace.mockClear();
+        nav.reload.mockClear();
+    });
+    afterEach(() => {
+        vi.unstubAllGlobals();
+        delete window.__AGENTMUX_IPC_PORT__;
+        delete window.__AGENTMUX_IPC_TOKEN__;
+    });
+
+    // A navigation that adds a history entry leaves the old page in the
+    // back/forward cache, so the reload would free nothing.
+    it("replaces the history entry with the credentialed URL", () => {
+        window.__AGENTMUX_IPC_PORT__ = 1234;
+        window.__AGENTMUX_IPC_TOKEN__ = "t";
+        reloadKeepingHostCredentials();
+        expect(nav.assign).not.toHaveBeenCalled();
+        expect(nav.replace).toHaveBeenCalledTimes(1);
+        const url = new URL(nav.replace.mock.calls[0][0]);
+        expect(url.searchParams.get("ipc_port")).toBe("1234");
+        expect(url.searchParams.get("ipc_token")).toBe("t");
+        expect(url.searchParams.get("windowLabel")).toBe("main");
+    });
+
+    it("falls back to a plain reload without creds", () => {
+        reloadKeepingHostCredentials();
+        expect(nav.reload).toHaveBeenCalledTimes(1);
+        expect(nav.assign).not.toHaveBeenCalled();
+        expect(nav.replace).not.toHaveBeenCalled();
     });
 });

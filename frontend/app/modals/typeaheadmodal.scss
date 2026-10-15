@@ -5,18 +5,14 @@
 @use "../mixins.scss";
 
 .type-ahead-modal-backdrop {
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
+    @include mixins.abs-fill;
     background-color: transparent;
-    z-index: var(--zindex-typeahead-modal-backdrop);
+    z-index: var(--z-typeahead-backdrop);
 }
 
 .type-ahead-modal {
     position: absolute;
-    z-index: var(--zindex-typeahead-modal);
+    z-index: var(--z-typeahead);
     display: flex;
     flex-direction: column;
     align-items: flex-start;
@@ -28,7 +24,7 @@
 
     .label {
         opacity: 0.5;
-        font-size: 13px;
+        font-size: var(--text-base);
         white-space: nowrap;
     }
 
@@ -44,19 +40,11 @@
             padding: var(--space-1) var(--space-1-5);
             height: 24px;
         }
-
-        .input-decoration.end-position {
-            margin: var(--space-1-5);
-
-            i {
-                opacity: 0.3;
-            }
-        }
     }
 
     &.has-suggestions {
         .input {
-            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+            border-bottom: 1px solid var(--tint-3);
         }
     }
 
@@ -68,7 +56,7 @@
         gap: 10px;
 
         .suggestion-header {
-            font-size: 11px;
+            font-size: var(--text-xs);
             font-style: normal;
             font-weight: 500;
             line-height: 12px;
@@ -99,7 +87,7 @@
             .typeahead-item-name {
                 display: flex;
                 gap: var(--space-2);
-                font-size: 11px;
+                font-size: var(--text-xs);
                 font-weight: 400;
                 line-height: 14px;
 

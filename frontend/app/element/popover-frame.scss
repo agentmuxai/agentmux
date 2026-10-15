@@ -11,3 +11,73 @@
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
     color: var(--main-text-color);
 }
+
+// ── Readout popovers (CPU cores, disk volumes, token usage) ─────────────────
+
+/// The body of a readout popover: the frame, as a column.
+@mixin readout-popover {
+    @include popover-frame;
+    font-size: var(--text-sm);
+    display: flex;
+    flex-direction: column;
+    padding: var(--space-2) 0;
+    user-select: none;
+}
+
+/// The header row: the title on the left, a readout on the right, a rule under.
+@mixin readout-popover-header {
+    padding: 0 var(--space-3) var(--space-1-5);
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--space-2);
+    border-bottom: 1px solid var(--border-color);
+}
+
+@mixin readout-popover-title {
+    font-weight: 600;
+    font-size: var(--text-base);
+}
+
+/// A quiet line of secondary text (a count, a subtitle).
+@mixin readout-popover-note {
+    color: var(--secondary-text-color);
+    font-size: var(--text-xs);
+}
+
+/// The "nothing to show" line. `$centered: false` keeps it at the popover's
+/// own size, left-aligned.
+@mixin readout-popover-empty($centered: true) {
+    padding: var(--space-3);
+    color: var(--secondary-text-color);
+    @if $centered {
+        font-size: var(--text-xs);
+        text-align: center;
+    }
+}
+
+/// A row of label, bar and value (one CPU core, one drive).
+@mixin readout-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+}
+
+/// The row's bar: its track, and the fill inside it.
+@mixin readout-bar {
+    flex: 1 1 auto;
+    height: 6px;
+    overflow: hidden;
+}
+
+@mixin readout-bar-fill {
+    display: block;
+    height: 100%;
+}
+
+/// The row's figure at the end (a percentage, the free space).
+@mixin readout-value {
+    flex: 0 0 auto;
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+}

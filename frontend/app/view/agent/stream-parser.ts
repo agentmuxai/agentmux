@@ -92,7 +92,16 @@ function parseBroadcastHeader(
 }
 
 const VALID_JEKT_TIERS: ReadonlySet<string> = new Set(["info", "coord", "sensitive"]);
-const VALID_JEKT_DELIVERY_TIERS: ReadonlySet<string> = new Set(["host", "lan", "wan"]);
+const VALID_JEKT_DELIVERY_TIERS: ReadonlySet<string> = new Set(["host", "channel", "lan", "wan"]);
+const VALID_JEKT_TRUST: ReadonlySet<string> = new Set([
+    "host-verified",
+    "channel-verified",
+    "lan-verified",
+    "wan-verified",
+    "self-declared",
+    "unverified",
+    "network-claimed",
+]);
 
 /**
  * A held jekt (SPEC_DURABLE_JEKT_DELIVERY_2026_09_24.md §2.4) carries
@@ -304,6 +313,17 @@ export class ClaudeCodeStreamParser {
      */
     private nextIdOf(prefix: string): string {
         const skip = this.skipIdsFn();
+        if (this.idLine != null) {
+            // Parsing that knows its transcript line (`setIdLine`): an id of the
+            // node's own line in its transcript generation, the same on every
+            // load of that line, so it is unique across history pages and
+            // stable across reloads. The generation keeps a new transcript's
+            // line 0 (after an archive) apart from the old one's.
+            const scope = this.idGen ? `${this.idGen.slice(0, 8)}_` : "";
+            let id = `${prefix}_${scope}L${this.idLine}_${this.idLineSeq++}`;
+            while (skip.has(id)) id = `${prefix}_${scope}L${this.idLine}_${this.idLineSeq++}`;
+            return id;
+        }
         let id = `${prefix}_${this.nodeIdCounter++}`;
         while (skip.has(id)) {
             id = `${prefix}_${this.nodeIdCounter++}`;
@@ -760,6 +780,26 @@ export class ClaudeCodeStreamParser {
         this.sourceLine = source;
     }
 
+    private idLine: number | null = null;
+    private idGen: string | undefined;
+    private idLineSeq = 0;
+    /**
+     * The transcript line (and generation, when known) the next events come
+     * from, for ids (`nextIdOf`): history reads and the live loop set it per
+     * line; null keeps the counter ids.
+     * SPEC_RENDERER_RECYCLE_WHEN_IDLE_2026_10_13.md §2.
+     *
+     * Known limit: a text or thinking run gets its id from the line it starts
+     * on as far as this parse can see. A read that begins partway through a
+     * run (a window not cut at a turn boundary) anchors that one row on its
+     * first line read, so its id can differ from another read's.
+     */
+    setIdLine(line: number | null, gen?: string): void {
+        if (line !== this.idLine || gen !== this.idGen) this.idLineSeq = 0;
+        this.idLine = line;
+        this.idGen = gen;
+    }
+
     /**
      * Set the current agent ID for proper direction detection
      */
@@ -885,7 +925,9 @@ export class ClaudeCodeStreamParser {
         const deliveryTier: JektDeliveryTier = VALID_JEKT_DELIVERY_TIERS.has(fields.DELIVERY)
             ? (fields.DELIVERY as JektDeliveryTier)
             : "wan";
-        const trust: JektTrust = fields.TRUST === "host-verified" ? "host-verified" : "network-claimed";
+        // Shown as the marker says; anything unrecognised reads as the least
+        // proven label, like TIER/DELIVERY above.
+        const trust: JektTrust = VALID_JEKT_TRUST.has(fields.TRUST) ? (fields.TRUST as JektTrust) : "network-claimed";
 
         // Direction mirrors agentMessageToNode: incoming when this agent is
         // the declared recipient, outgoing when it's the declared sender
@@ -898,12 +940,18 @@ export class ClaudeCodeStreamParser {
                 ? "outgoing"
                 : "incoming";
 
+        // Files sent with it: srv puts its `<attached_files>` list last in the
+        // body and says so with FILES= (a sender's own text can't write one).
+        const body = stripJektEnvelope(match[2], tier);
+        const files = fields.FILES !== undefined ? splitAttachedImages(body) : { text: body, attachments: [] };
+
         return {
             type: "jekt_message",
             id: this.nextIdOf("jekt"),
             from: fields.FROM,
             to: fields.TO,
-            message: stripJektEnvelope(match[2], tier),
+            message: files.text,
+            ...(files.attachments.length ? { attachments: files.attachments } : {}),
             raw: event.message,
             tier,
             deliveryTier,

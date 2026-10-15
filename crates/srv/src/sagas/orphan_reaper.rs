@@ -7,7 +7,8 @@
 // is a bug, not a state: its process keeps running and nothing on screen
 // can reach it (the Manoz incident, spec §2). The close paths no longer
 // produce one (#3402, #3414), but other ways remain — a create-then-place
-// interrupted between its two steps, a stale whole-tree push
+// interrupted between its two steps, and (until windows stopped pushing
+// trees) a stale whole-tree push
 // (SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md §2) — and orphans from
 // before those fixes are still on disk. This is the backstop, not the fix.
 //

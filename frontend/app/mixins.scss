@@ -2,6 +2,8 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+@use "sass:list";
+
 // Extracted from block.scss's `.block-frame-default-header` ruleset —
 // originally only ever written nested inside `.block.block-frame-default
 // .block-frame-default-inner`, so its layout (display:flex, padding,
@@ -19,11 +21,6 @@
 // specificity) — this mixin exists so agent-view.scss can apply the SAME
 // ruleset under a DIFFERENT ancestor without copy-pasting 250 lines and
 // risking drift between the two.
-// NOTE: `term-activity-flash`'s @keyframes lives in app.scss, not here and
-// not in the mixin below — see that definition's own comment. The mixin
-// only REFERENCES the animation by name (`animation: term-activity-flash`),
-// which works regardless of which stylesheet defines it, since @keyframes
-// names are global in CSS.
 @mixin block-frame-default-header-layout() {
     max-height: var(--header-height);
     min-height: var(--header-height);
@@ -32,7 +29,7 @@
     align-items: center;
     gap: var(--space-2);
     font: var(--header-font);
-    zoom: var(--zoomfactor, 1);
+    zoom: var(--zoomfactor);
     border-bottom: 1px solid var(--border-color);
     border-radius: var(--block-border-radius) var(--block-border-radius) 0 0;
 
@@ -94,13 +91,11 @@
             }
 
             &--input {
-                background: transparent;
-                border: none;
+                @include button-reset;
                 border-bottom: 1px solid var(--accent-color);
                 outline: none;
                 color: inherit;
                 font: inherit;
-                padding: 0;
                 width: 100%;
                 min-width: 40px;
                 text-wrap: nowrap;
@@ -114,7 +109,7 @@
 
     .block-frame-text {
         font: var(--fixed-font);
-        font-size: 11px;
+        font-size: var(--text-xs);
         opacity: 0.7;
         flex-grow: 1;
 
@@ -122,27 +117,10 @@
             flex-grow: 0;
         }
 
-        &.preview-filename {
-            direction: rtl;
-            text-align: left;
-            span {
-                cursor: default;
-
-                &:hover {
-                    background: var(--highlight-bg-color);
-                }
-            }
-        }
-
         &.term-activity {
             opacity: 0.6;
             max-width: 500px;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-            &.term-activity--flash {
-                animation: term-activity-flash 0.5s ease-out;
-            }
+            @include truncate;
         }
 
     }
@@ -216,9 +194,7 @@
                     border: none;
                     color: var(--main-text-color);
                     width: 100%;
-                    white-space: nowrap;
-                    overflow: hidden;
-                    text-overflow: ellipsis;
+                    @include truncate;
                     box-sizing: border-box;
                     opacity: 0.7;
                     font-weight: 500;
@@ -232,15 +208,13 @@
             .wave-iconbutton {
                 height: 100%;
                 width: 27px;
-                display: flex;
-                align-items: center;
-                justify-content: center;
+                @include flex-center;
             }
         }
 
         .menubutton {
             .wave-button {
-                font-size: 11px;
+                font-size: var(--text-xs);
             }
         }
     }
@@ -250,11 +224,9 @@
         flex-shrink: 0;
 
         .wave-iconbutton {
-            display: flex;
+            @include flex-center;
             width: 26px;
             padding: var(--space-1) var(--space-1-5);
-            align-items: center;
-            justify-content: center;
             font-size: 18px;
         }
 
@@ -345,11 +317,18 @@
     }
 }
 
-@mixin ellipsis() {
-    display: block;
-    white-space: nowrap;
+/// One line, cut with an ellipsis. Leaves `display` alone: the element must
+/// already be a block or a flex/grid item for the ellipsis to show.
+@mixin truncate {
     overflow: hidden;
     text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/// `truncate` on an element made a block.
+@mixin ellipsis() {
+    display: block;
+    @include truncate;
 }
 
 @mixin avatar-dims-mixin() {
@@ -367,7 +346,7 @@
     &.size-sm {
         width: 30px;
         height: 30px;
-        font-size: 11px; // 18px * (30 / 50)
+        font-size: var(--text-xs); // 18px * (30 / 50)
 
         .status-indicator {
             width: 7px;
@@ -378,7 +357,7 @@
     &.size-md {
         width: 40px;
         height: 40px;
-        font-size: 14px; // 18px * (40 / 50)
+        font-size: var(--text-md); // 18px * (40 / 50)
 
         .status-indicator {
             width: 9px;
@@ -416,9 +395,9 @@
 
 /// Center children both axes. Shortcut for the `display: flex;
 /// align-items: center; justify-content: center;` triple that recurs
-/// hundreds of times across the frontend.
-@mixin flex-center {
-    display: flex;
+/// hundreds of times across the frontend. Pass `inline-flex` for an inline box.
+@mixin flex-center($display: flex) {
+    display: $display;
     align-items: center;
     justify-content: center;
 }
@@ -437,6 +416,12 @@
     inset: 0;
 }
 
+/// Fill the viewport: a full-window overlay or backdrop.
+@mixin fixed-fill {
+    position: fixed;
+    inset: 0;
+}
+
 /// Multi-line clamp with ellipsis. `$n` is the number of lines.
 @mixin truncate-lines($n) {
     display: -webkit-box;
@@ -446,11 +431,30 @@
     overflow: hidden;
 }
 
-/// Accessible focus ring. Use on `&:focus-visible` for interactive
-/// elements; theme-aware via `--shadow-focus-ring`.
+/// The keyboard focus ring: a 2px accent outline, 1px off the element. Use it
+/// on `&:focus-visible`. An outline, not a box-shadow, so it doesn't clip
+/// inside `overflow: hidden` the way a shadow does, and it leaves the
+/// element's own box-shadow (a pressed or selected line) in place
+/// (SPEC_MOTION_TIERS_AND_STYLESHEET_DRY_2026_10_15.md §8 Q6).
+/// scripts/check-ui-primitives.mjs counts focus rings written by hand.
 @mixin focus-ring {
-    outline: none;
-    box-shadow: var(--shadow-focus-ring);
+    outline: 2px solid var(--accent-color);
+    outline-offset: 1px;
+}
+
+/// An uppercase label (a section heading, a badge), at the one shared
+/// letter-spacing.
+@mixin label-caps {
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+/// Strip a `<button>` (or an input) of the browser's own box: no fill, no
+/// border, no padding. The call site sets the rest.
+@mixin button-reset {
+    background: transparent;
+    border: none;
+    padding: 0;
 }
 
 /// Media queries keyed off a minimum / maximum width. Pass a token
@@ -464,15 +468,53 @@
     @media (max-width: calc(#{$w} - 1px)) { @content; }
 }
 
-/// Reduced-motion respect removed app-wide (2026-07-11 product
-/// decision — OS "reduce motion" was killing functional motion cues
-/// like drag strobes and drop indicators). The mixin is kept as a
-/// no-op so call sites compile and the decision is easy to revisit;
-/// the wrapped @content is intentionally never emitted.
-@mixin respect-reduced-motion {
-    @if false {
+/// The reduced treatment for one animation, applied only when the motion
+/// policy reduces `$category` (status, feedback, transition or decorative) in
+/// this window's tier (SPEC_MOTION_TIERS_AND_STYLESHEET_DRY_2026_10_15.md §4.3;
+/// the policy lives in motion/motion.ts). Never write a raw
+/// prefers-reduced-motion media query: CI rejects it
+/// (scripts/check-motion-gates.mjs).
+///
+/// Flashes follow a separate rule in both tiers: no more than three flashes
+/// in any one second (WCAG 2.3.1). Note it at each flash's definition.
+@mixin when-motion-reduced($category) {
+    @if not list.index((status, feedback, transition, decorative), $category) {
+        @error "when-motion-reduced: unknown category #{$category}";
+    }
+    :root[data-motion-reduce~="#{$category}"] & {
         @content;
     }
+}
+
+/// A control's colour fades (hover, focus, pressed). It lists the six
+/// properties those states change rather than `all`: `all` also animates the
+/// inherited `visibility` that hides window and pane tabs, so the control
+/// would pop in a frame late when shown
+/// (docs/analysis/ANALYSIS_WINDOW_TAB_SWITCH_PAINT_2026_09_30.md §3;
+/// scripts/check-no-transition-all.sh rejects `all`).
+///
+/// Hover and focus colour fades are decorative motion (§5.4 of the motion
+/// spec), so `$duration` takes a `--duration-decorative-*` token.
+@mixin control-transition($duration: var(--duration-decorative-instant), $ease: var(--ease-standard)) {
+    transition-property: color, background-color, border-color, outline-color, box-shadow, opacity;
+    transition-duration: $duration;
+    transition-timing-function: $ease;
+}
+
+/// The collapse and expand of a tool panel's body: height, padding and margin
+/// shrink together while the body fades a little ahead of them.
+/// `content-visibility` is discrete; `allow-discrete` lets it animate with
+/// the collapse, so it flips to `hidden` at the END of the close (the body
+/// stays rendered through the shrink) and to visible at the START of the open.
+/// Without it the body pops out the instant the panel is hidden
+/// (Chromium 117+).
+@mixin collapse-transition {
+    transition:
+        max-height var(--duration-quick) var(--ease-material),
+        padding var(--duration-quick) var(--ease-material),
+        margin var(--duration-quick) var(--ease-material),
+        opacity var(--duration-fast) var(--ease-out),
+        content-visibility var(--duration-quick) allow-discrete;
 }
 
 /// Visually hidden but still read by assistive tech. Standard pattern.

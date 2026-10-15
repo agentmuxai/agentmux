@@ -128,6 +128,7 @@ import type { CommandHideNamedAgentData } from "@/types/rpc/CommandHideNamedAgen
 import type { CommandImportAgentDefinitionsData } from "@/types/rpc/CommandImportAgentDefinitionsData";
 import type { CommandImportAgentFromClawData } from "@/types/rpc/CommandImportAgentFromClawData";
 import type { CommandInstallToolData } from "@/types/rpc/CommandInstallToolData";
+import type { CommandLayoutIntentData } from "@/types/rpc/CommandLayoutIntentData";
 import type { CommandLayoutOpenData } from "@/types/rpc/CommandLayoutOpenData";
 import type { CommandLayoutPreviewData } from "@/types/rpc/CommandLayoutPreviewData";
 import type { CommandLayoutSaveData } from "@/types/rpc/CommandLayoutSaveData";
@@ -268,6 +269,7 @@ import type { InstallStartReq } from "@/types/rpc/InstallStartReq";
 import type { InstallStartResult } from "@/types/rpc/InstallStartResult";
 import type { InstallSystemToolResult } from "@/types/rpc/InstallSystemToolResult";
 import type { InstallToolResult } from "@/types/rpc/InstallToolResult";
+import type { LayoutIntentResult } from "@/types/rpc/LayoutIntentResult";
 import type { LayoutOpenResult } from "@/types/rpc/LayoutOpenResult";
 import type { LayoutPreviewResult } from "@/types/rpc/LayoutPreviewResult";
 import type { LayoutSaveResult } from "@/types/rpc/LayoutSaveResult";
@@ -1652,6 +1654,14 @@ export const GeneratedApi = {
   // command "layout.open"
   OpenLayoutCommand(client: RpcClient, data: CommandLayoutOpenData, opts?: RpcOpts): Promise<LayoutOpenResult> {
     return client.rpcCall("layout.open", data, opts);
+  },
+  // command "layout.applyIntent"
+  LayoutApplyIntentCommand(
+    client: RpcClient,
+    data: CommandLayoutIntentData,
+    opts?: RpcOpts
+  ): Promise<LayoutIntentResult> {
+    return client.rpcCall("layout.applyIntent", data, opts);
   },
   // command "presence.publish-now"
   PresencePublishNowCommand(client: RpcClient, opts?: RpcOpts): Promise<PresencePublishNowResult> {

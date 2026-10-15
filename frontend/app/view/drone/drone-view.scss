@@ -1,6 +1,8 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+@use "../../mixins.scss";
+
 .drone-pane {
     display: flex;
     flex-direction: column;
@@ -8,7 +10,7 @@
     width: 100%;
     background: var(--main-bg-color);
     color: var(--main-text-color);
-    font-size: 13px;
+    font-size: var(--text-base);
     overflow: hidden;
 }
 
@@ -31,7 +33,7 @@
     background: transparent;
     border: 1px solid transparent;
     color: inherit;
-    font-size: 14px;
+    font-size: var(--text-md);
     font-weight: 500;
     padding: 4px 8px;
     border-radius: 0;
@@ -61,7 +63,7 @@
     border-radius: 0;
     color: inherit;
     cursor: grab;
-    font-size: 12px;
+    font-size: var(--text-sm);
     white-space: nowrap;
     user-select: none;
     &:hover {
@@ -74,7 +76,7 @@
 }
 
 .drone-chip-emoji {
-    font-size: 14px;
+    font-size: var(--text-md);
     line-height: 1;
 }
 
@@ -100,7 +102,7 @@
     background: color-mix(in srgb, #ef4444 12%, transparent);
     color: #ef4444;
     padding: 4px 8px;
-    font-size: 11px;
+    font-size: var(--text-xs);
     border-radius: 0;
     z-index: 5;
 }
@@ -115,15 +117,14 @@
     background: color-mix(in srgb, var(--main-text-color) 2%, var(--main-bg-color));
     background-image: radial-gradient(
         circle,
-        color-mix(in srgb, var(--main-text-color) 8%, transparent) 1px,
+        var(--tint-3) 1px,
         transparent 1px
     );
     background-size: 16px 16px;
 }
 
 .drone-canvas {
-    position: absolute;
-    inset: 0;
+    @include mixins.abs-fill;
     overflow: hidden;
     touch-action: none; // we own pan/zoom via pointer + wheel
     cursor: grab;
@@ -220,7 +221,7 @@
     text-align: center;
     line-height: 1.6;
     color: var(--secondary-text-color);
-    font-size: 12px;
+    font-size: var(--text-sm);
     opacity: 0.8;
     pointer-events: none;
 }
@@ -238,9 +239,7 @@
 .drone-ctrl {
     width: 26px;
     height: 26px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    @include mixins.flex-center;
     background: var(--main-bg-color);
     border: 1px solid var(--border-color);
     color: inherit;
@@ -248,7 +247,7 @@
     font-size: 15px;
     line-height: 1;
     &:hover {
-        background: color-mix(in srgb, var(--main-text-color) 8%, transparent);
+        background: var(--tint-3);
     }
 }
 
@@ -261,7 +260,7 @@
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
     cursor: grab;
     user-select: none;
-    transition: border-color 80ms ease;
+    transition: border-color var(--duration-decorative-instant) var(--ease-standard);
     &:active {
         cursor: grabbing;
     }
@@ -279,12 +278,12 @@
     background: var(--block-color, var(--accent-color));
     color: white;
     border-radius: 0;
-    font-size: 11px;
+    font-size: var(--text-xs);
     font-weight: 500;
 }
 
 .drone-node-emoji {
-    font-size: 13px;
+    font-size: var(--text-base);
     line-height: 1;
 }
 
@@ -297,7 +296,7 @@
     border: none;
     color: white;
     cursor: default;
-    font-size: 14px;
+    font-size: var(--text-md);
     line-height: 1;
     padding: 0 4px;
     opacity: 0.7;
@@ -307,11 +306,9 @@
 // Summary line shown when the node is unselected.
 .drone-node-summary {
     padding: 5px 8px;
-    font-size: 11px;
+    font-size: var(--text-xs);
     color: var(--secondary-text-color);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    @include mixins.truncate;
 }
 
 // Inline field stack shown when the node is selected.
@@ -335,13 +332,10 @@
 }
 
 .drone-node-field-label {
-    font-size: 10px;
+    font-size: var(--text-2xs);
     color: var(--secondary-text-color);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    text-transform: uppercase;
-    letter-spacing: 0.3px;
+    @include mixins.truncate;
+    @include mixins.label-caps;
 }
 
 .drone-input {
@@ -351,7 +345,7 @@
     padding: 3px 6px;
     color: inherit;
     font-family: inherit;
-    font-size: 11px;
+    font-size: var(--text-xs);
     width: 100%;
     box-sizing: border-box;
     min-width: 0;
@@ -399,9 +393,8 @@
     align-items: center;
     gap: 12px;
     padding: 6px 12px;
-    font-size: 10px;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
+    font-size: var(--text-2xs);
+    @include mixins.label-caps;
     color: var(--secondary-text-color);
     border-bottom: 1px solid var(--border-color);
 }
@@ -419,7 +412,7 @@
 .drone-runpanel-empty {
     padding: 16px;
     color: var(--secondary-text-color);
-    font-size: 11px;
+    font-size: var(--text-xs);
     font-style: italic;
     text-align: center;
 }
@@ -429,7 +422,7 @@
     grid-template-columns: 80px 80px 1fr;
     gap: 8px;
     padding: 4px 12px;
-    font-size: 11px;
+    font-size: var(--text-xs);
     align-items: center;
     border-bottom: 1px solid color-mix(in srgb, var(--border-color) 50%, transparent);
     &--ok .drone-runpanel-status { color: #10b981; }
@@ -437,20 +430,17 @@
 }
 
 .drone-runpanel-status {
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    font-size: 10px;
+    @include mixins.label-caps;
+    font-size: var(--text-2xs);
 }
 
 .drone-runpanel-id {
     font-family: var(--font-mono);
-    font-size: 10px;
+    font-size: var(--text-2xs);
     color: var(--secondary-text-color);
 }
 
 .drone-runpanel-output {
     font-family: var(--font-mono);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    @include mixins.truncate;
 }

@@ -74,12 +74,12 @@ export interface TranscriptCursorDeps {
      * An echo's records (the user's own message, already on screen). Not
      * parsed; handed over so the pane can pair it with the node it echoes.
      */
-    echo(text: string): void;
+    echo(text: string, from?: { gen: string; line: number }): void;
     /**
      * Whether a line read to fill a gap is the echo of a message this pane
      * already shows (its echo event was lost). Such a line is dropped.
      */
-    isOwnEcho(line: string): boolean;
+    isOwnEcho(line: string, at?: { gen: string; line: number }): boolean;
     /** A `truncate`, `replace` or `delete` of the stream: today's reset. */
     reset(fileop: "truncate" | "replace" | "delete"): void;
     /** Read lines `[offset, offset + limit)` of generation `expectGen`. */
@@ -316,7 +316,7 @@ export class TranscriptCursor {
         if (!text) return;
         if (ev.echo) {
             this.stats.echoes++;
-            this.deps.echo(text);
+            this.deps.echo(text, { gen: p.gen, line: firstLine });
             return;
         }
         this.deliver(text, { stream: p.stream, gen: p.gen, line: firstLine });
@@ -362,7 +362,7 @@ export class TranscriptCursor {
             const keep: Array<{ line: string; at: number }> = [];
             for (let i = 0; i < res.lines.length; i++) {
                 const line = res.lines[i];
-                if (this.deps.isOwnEcho(line)) {
+                if (this.deps.isOwnEcho(line, { gen, line: at + i })) {
                     this.stats.ownEchoesDropped++;
                 } else {
                     keep.push({ line, at: at + i });
@@ -424,30 +424,50 @@ const ECHO_LEDGER_MAX = 64;
  * then equal text is the match, which errs toward dropping a record that
  * already has a node with the same text on screen.
  */
-export class EchoLedger {
-    /** Accepted messages whose record hasn't been seen yet. */
-    private shown: string[] = [];
-    /** Echoes seen before their message was accepted. */
-    private early: string[] = [];
+/** Where a record sits: its transcript generation and line. */
+type RecordPos = { gen: string; line: number };
 
-    accepted(text: string): void {
-        if (takeFirst(this.early, text)) return;
-        pushBounded(this.shown, text);
+export class EchoLedger {
+    /** Accepted messages whose record hasn't been seen yet, with their row id. */
+    private shown: Array<{ text: string; id?: string }> = [];
+    /** Echoes seen before their message was accepted, and where they were. */
+    private early: Array<{ text: string; record: string; at?: RecordPos }> = [];
+
+    /**
+     * `onPlaced`: a message's row (`id`) met its record at a known position,
+     * so the row can take the id a reload will give that record
+     * (SPEC_RENDERER_RECYCLE_WHEN_IDLE_2026_10_13.md §2).
+     */
+    constructor(private readonly onPlaced?: (id: string, record: string, at: RecordPos) => void) {}
+
+    accepted(text: string, id?: string): void {
+        const early = takeFirst(this.early, text);
+        if (early) {
+            if (id && early.at) this.onPlaced?.(id, early.record, early.at);
+            return;
+        }
+        pushBounded(this.shown, { text, id });
     }
 
-    /** An echo event's records. */
-    echoed(records: string): void {
-        for (const line of splitRecords(records)) {
-            const text = userText(line);
-            if (text === null) continue;
-            if (!takeFirst(this.shown, text)) pushBounded(this.early, text);
-        }
+    /** An echo event's records, from line `from.line` when positioned. */
+    echoed(records: string, from?: RecordPos): void {
+        splitRecords(records).forEach((record, i) => {
+            const text = userText(record);
+            if (text === null) return;
+            const at = from ? { gen: from.gen, line: from.line + i } : undefined;
+            const shown = takeFirst(this.shown, text);
+            if (!shown) pushBounded(this.early, { text, record, at });
+            else if (shown.id && at) this.onPlaced?.(shown.id, record, at);
+        });
     }
 
     /** A gap line: the record of a message already shown? Consumes the match. */
-    isOwnEcho(line: string): boolean {
+    isOwnEcho(line: string, at?: RecordPos): boolean {
         const text = userText(line);
-        return text !== null && takeFirst(this.shown, text);
+        const shown = text === null ? undefined : takeFirst(this.shown, text);
+        if (!shown) return false;
+        if (shown.id && at) this.onPlaced?.(shown.id, line, at);
+        return true;
     }
 }
 
@@ -463,15 +483,13 @@ function userText(line: string): string | null {
     }
 }
 
-function takeFirst(list: string[], text: string): boolean {
-    const i = list.indexOf(text);
-    if (i < 0) return false;
-    list.splice(i, 1);
-    return true;
+function takeFirst<T extends { text: string }>(list: T[], text: string): T | undefined {
+    const i = list.findIndex((e) => e.text === text);
+    return i < 0 ? undefined : list.splice(i, 1)[0];
 }
 
-function pushBounded(list: string[], text: string): void {
-    list.push(text);
+function pushBounded<T>(list: T[], entry: T): void {
+    list.push(entry);
     if (list.length > ECHO_LEDGER_MAX) list.shift();
 }
 

@@ -9,7 +9,12 @@
  *     the next reopen restores the full conversation via HistoryRestored
  *     rather than the lossy 200-line NDJSON replay;
  * (b) during the pane lifetime, write a snapshot every 30s if the document
- *     changed since the last save. Bounds crash-loss to ~30s.
+ *     or the overlay (collapsed, pinned, filter, details) changed since the
+ *     last save. Bounds crash-loss to ~30s;
+ * (c) on demand, `flushPaneSnapshots()` writes every pane's pending snapshot
+ *     now and resolves when the writes are done: what a window does before
+ *     its renderer is recycled (SPEC_RENDERER_RECYCLE_WHEN_IDLE_2026_10_13.md
+ *     §2, §3.1), since Solid's cleanup (a) doesn't run on unload.
  *
  * Extracted verbatim from agent-view.tsx — same effect ordering, same
  * onCleanup registration order. The interval + createEffect are created
@@ -41,6 +46,14 @@ export interface UseSnapshotPersistenceOptions {
 }
 
 const SNAPSHOT_INTERVAL_MS = 30_000;
+
+/** Every mounted pane's "write now if dirty" (c). */
+const flushers = new Set<() => Promise<void>>();
+
+/** Write every pane's pending snapshot now; resolves when the writes are done (failures are logged, not thrown). */
+export function flushPaneSnapshots(): Promise<void> {
+    return Promise.all([...flushers].map((flush) => flush())).then(() => {});
+}
 
 export function useSnapshotPersistence(opts: UseSnapshotPersistenceOptions): void {
     // Serialize concurrent writes through a single promise chain: the 30s
@@ -132,12 +145,32 @@ export function useSnapshotPersistence(opts: UseSnapshotPersistenceOptions): voi
             lastNodes = next;
         }
     });
+    // The overlay changes without the nodes changing (collapsing or pinning a
+    // row, the filter, details), and was otherwise never saved by the interval.
+    // Only the saved fields count: `heldOpenNodes` isn't saved, and changes as
+    // tools finish. Each update replaces the changed field, so identity is enough.
+    let lastOverlay: unknown[] | undefined;
+    createEffect(() => {
+        const ds = opts.getAtoms().documentStateAtom[0]();
+        const overlay = [ds?.collapsedNodes, ds?.pinnedNodes, ds?.filter, ds?.scrollPosition, opts.getDetailsOpen()];
+        if (lastOverlay && overlay.some((v, i) => v !== lastOverlay![i])) dirty = true;
+        lastOverlay = overlay;
+    });
     const snapshotInterval = setInterval(() => {
         if (!dirty) return;
         dirty = false;
         writeSnapshotNow();
     }, SNAPSHOT_INTERVAL_MS);
     onCleanup(() => clearInterval(snapshotInterval));
+    const flush = (): Promise<void> => {
+        if (dirty) {
+            dirty = false;
+            writeSnapshotNow();
+        }
+        return inFlightSnapshot;
+    };
+    flushers.add(flush);
+    onCleanup(() => flushers.delete(flush));
     onCleanup(() => {
         if (!dirty) return;
         writeSnapshotNow();

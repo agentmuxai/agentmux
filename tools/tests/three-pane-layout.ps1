@@ -5,13 +5,11 @@
 # Replaces the "manually right-click + split + replace-with" flow from
 # the original pane-focus-stress.ps1 docs.
 #
-# Architecture note: block layout inside a tab is reduced client-side
-# by LayoutModel.treeReducer (see frontend/layout/lib/layoutModel.ts).
-# There's no backend `layout.split` RPC — the frontend just watches
-# the LayoutState.pendingbackendactions field, drains it, and applies
-# each action locally. This helper pushes 3 actions (one insert + two
-# splithorizontal) into a freshly-created tab's LayoutState, which the
-# running frontend then picks up and reduces.
+# Architecture note: srv owns each tab's layout tree and changes it only
+# through layout intents (SPEC_STRONG_REDUCER_AUTHORITY_LAYOUT_2026_06_30.md).
+# This helper sends 3 intents (one insert + two splithorizontal) through
+# `object.ApplyLayoutIntent`, the same edit a window sends as
+# `layout.applyIntent`; the running window shows the stored tree.
 #
 # Depends on `authfile.ps1` being dot-sourced first. All API calls go
 # through Invoke-AgentMuxService to /agentmux/service.
@@ -99,6 +97,33 @@ function Remove-AgentMuxTestTab {
     }
 }
 
+function New-AgentMuxLayoutLeaf {
+    <#
+    .SYNOPSIS
+    A layout leaf (pane) for one block, with a fresh node id.
+    #>
+    param([Parameter(Mandatory)] [string]$BlockId)
+    return @{ id = [guid]::NewGuid().ToString(); flexDirection = "row"; size = 10; data = @{ blockId = $BlockId } }
+}
+
+function Invoke-AgentMuxLayoutIntent {
+    <#
+    .SYNOPSIS
+    Applies one layout intent to a tab's layout (object.ApplyLayoutIntent)
+    and throws if srv refuses it.
+    #>
+    param(
+        [Parameter(Mandatory)] $Auth,
+        [Parameter(Mandatory)] [string]$TabId,
+        [Parameter(Mandatory)] $Intent
+    )
+    $res = Invoke-AgentMuxService -Auth $Auth -Service object -Method ApplyLayoutIntent `
+        -Args @($TabId, $Intent, [guid]::NewGuid().ToString())
+    if (-not $res.applied) {
+        throw "layout intent $($Intent.type) refused: $($res.error)"
+    }
+}
+
 function New-AgentMuxThreePaneLayout {
     <#
     .SYNOPSIS
@@ -106,15 +131,12 @@ function New-AgentMuxThreePaneLayout {
     inside a tab, with both browsers pointed at google.com.
 
     .DESCRIPTION
-    Creates three blocks via object.CreateBlock, then pushes three
-    pendingbackendactions into the tab's LayoutState:
+    Creates three blocks via object.CreateBlock, then sends three layout
+    intents for the tab (object.ApplyLayoutIntent):
 
-      1. insert           blockid=p1            (creates the root node)
-      2. splithorizontal  blockid=t  target=p1  (splits, T on the right)
-      3. splithorizontal  blockid=p2 target=t   (splits again, P2 rightmost)
-
-    The frontend's LayoutModel drains pendingbackendactions and calls
-    treeReducer for each — see frontend/layout/lib/layoutPersistence.ts.
+      1. insert           p1            (creates the root node)
+      2. splithorizontal  t  target=p1  (splits, T on the right)
+      3. splithorizontal  p2 target=t   (splits again, P2 rightmost)
 
     Returns a PSCustomObject with p1, t, p2 block IDs for later
     interaction (e.g. coordinate-based clicks in the stress test).
@@ -145,8 +167,8 @@ function New-AgentMuxThreePaneLayout {
     the pane-close risk.
 
     .PARAMETER SettleMs
-    Milliseconds to wait after pushing the layout actions so the
-    frontend can drain them and render. Default 1500.
+    Milliseconds to wait after the layout intents so the window can
+    render the new tree. Default 1500.
     #>
     [CmdletBinding()]
     param(
@@ -189,93 +211,21 @@ function New-AgentMuxThreePaneLayout {
     $p2 = Invoke-AgentMuxService -Auth $Auth -Service object -Method CreateBlock `
         -Args @($p2Def, $rtOpts) -Uicontext $uicontext
 
-    # Fetch the Tab to get its layoutstate oid. The LayoutState oid
-    # differs from the tab oid — the tab stores a reference.
-    $tab = Invoke-AgentMuxService -Auth $Auth -Service object -Method GetObject `
-        -Args @("tab:$($TabInfo.tabid)")
-    $layoutStateOid = $tab.layoutstate
-    if (-not $layoutStateOid) {
-        throw "Tab $($TabInfo.tabid) has no layoutstate ref"
-    }
-
-    # Load the current LayoutState. It'll be freshly created, empty
-    # (no rootnode, no pendingactions).
-    $layoutState = Invoke-AgentMuxService -Auth $Auth -Service object -Method GetObject `
-        -Args @("layout:$layoutStateOid")
-
-    # Push layout actions ONE AT A TIME, letting the frontend drain
-    # between each. Pushing all three in one batch doesn't work: the
-    # frontend's processPendingBackendActions loops the actions but
-    # calls getNodeByBlockId against `model.leafs` (a memoized signal)
-    # — that signal is only refreshed by updateTree() at the END of
-    # the loop, so action 2's splithorizontal can't find the target
-    # block that action 1 just inserted. The loop silently no-ops on
-    # the misses. Per-action push forces updateTree + persistToBackend
-    # to run between each, so the next push sees the freshly-materialized
-    # target. See frontend/layout/lib/layoutPersistence.ts and
-    # layoutNodeModels.ts `getNodeByBlockId`.
+    # srv computes and stores each edit; the window shows the stored
+    # tree. Each intent names its panes by node id.
+    $p1Node = New-AgentMuxLayoutLeaf -BlockId $p1
+    $tNode  = New-AgentMuxLayoutLeaf -BlockId $t
+    $p2Node = New-AgentMuxLayoutLeaf -BlockId $p2
     $plan = @(
-        @{
-            actiontype = "insert"
-            actionid   = [guid]::NewGuid().ToString()
-            blockid    = $p1
-            focused    = $true
-            magnified  = $false
-            ephemeral  = $false
-        },
-        @{
-            actiontype    = "splithorizontal"
-            actionid      = [guid]::NewGuid().ToString()
-            blockid       = $t
-            targetblockid = $p1
-            position      = "after"
-            focused       = $false
-            magnified     = $false
-            ephemeral     = $false
-        },
-        @{
-            actiontype    = "splithorizontal"
-            actionid      = [guid]::NewGuid().ToString()
-            blockid       = $p2
-            targetblockid = $t
-            position      = "after"
-            focused       = $false
-            magnified     = $false
-            ephemeral     = $false
-        }
+        @{ type = "insert"; node = $p1Node; magnified = $false; focused = $true },
+        @{ type = "splithorizontal"; targetNodeId = $p1Node.id; newNode = $tNode; position = "after"; focused = $false },
+        @{ type = "splithorizontal"; targetNodeId = $tNode.id; newNode = $p2Node; position = "after"; focused = $false }
     )
-
-    # Budget the settle time across 3 pushes. Default 3500ms → ~1200ms
-    # per push, which is generous for a locally-running dev instance.
-    $perStepSettle = [int]($SettleMs / $plan.Count)
-
-    for ($i = 0; $i -lt $plan.Count; $i++) {
-        Write-Verbose "Layout action $($i + 1)/$($plan.Count): $($plan[$i].actiontype) $($plan[$i].blockid)"
-
-        # Re-fetch the LayoutState each iteration — the frontend wrote
-        # back rootnode/version from the previous action via
-        # persistToBackend, and UpdateObject takes the whole object.
-        $currentLs = Invoke-AgentMuxService -Auth $Auth -Service object -Method GetObject `
-            -Args @("layout:$layoutStateOid")
-
-        # Rebuild as a hashtable: under Set-StrictMode assigning to a
-        # property the PSCustomObject doesn't have throws.
-        $payload = @{
-            otype                 = "layout"
-            oid                   = $layoutStateOid
-            version               = $currentLs.version
-            pendingbackendactions = @($plan[$i])
-        }
-        foreach ($propName in @("rootnode", "magnifiednodeid", "focusednodeid", "leaforder", "meta")) {
-            $prop = $currentLs.PSObject.Properties[$propName]
-            if ($prop) { $payload[$propName] = $prop.Value }
-        }
-
-        Invoke-AgentMuxService -Auth $Auth -Service object -Method UpdateObject `
-            -Args @($payload, $false) | Out-Null
-
-        Start-Sleep -Milliseconds $perStepSettle
+    foreach ($intent in $plan) {
+        Write-Verbose "Layout intent: $($intent.type)"
+        Invoke-AgentMuxLayoutIntent -Auth $Auth -TabId $TabInfo.tabid -Intent $intent
     }
+    Start-Sleep -Milliseconds $SettleMs
 
     return [pscustomobject]@{
         tabid = $TabInfo.tabid

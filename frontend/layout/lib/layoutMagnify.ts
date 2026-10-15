@@ -16,6 +16,7 @@ import { effectiveStack, removeMemberFromStack } from "./stackMembers";
 import { setTransform } from "./utils";
 import type { LayoutModel } from "./layoutModel";
 import { clearLeafRevealGate } from "@/app/store/tab-reveal";
+import { sendViewIntent } from "./layoutIntents";
 
 /**
  * Toggle magnification of a given node.
@@ -48,7 +49,8 @@ export function magnifyNodeToggle(model: LayoutModel, nodeId: string, setState =
  * live agent session. That exact bug happened once for a different move
  * (incident R1 / #1681 — see layoutPersistence.ts's DeleteNode case).
  *
- * Only edits `model.treeState` (setState=false); the caller commits.
+ * Only edits `model.treeState` (setState=false); the caller commits. Local
+ * only: srv removes the pane with the move.
  * SPEC_PANE_TAB_DRAG_LANDING_FLASH_AND_LAST_TAB_CLOSE_2026_09_24.md §4.2.
  */
 export function removeLeafEmptiedByMove(model: LayoutModel, nodeId: string): void {
@@ -59,7 +61,8 @@ export function removeLeafEmptiedByMove(model: LayoutModel, nodeId: string): voi
         type: LayoutTreeActionType.DeleteNode,
         nodeId,
     };
-    model.treeReducer(deleteAction, false);
+    // srv removes the pane itself, with the move that emptied it.
+    model.treeReducer(deleteAction, false, { local: true });
     clearLeafRevealGate(nodeId);
 }
 
@@ -96,7 +99,8 @@ export function removeMovedBlock(model: LayoutModel, blockId: string): boolean {
     removeBlockFromLeaf(model, leaf, blockId);
     model.updateTree(false);
     model.setter(model.localTreeStateAtom, { ...model.treeState });
-    model.persistToBackend();
+    // Nothing to send: srv takes the block out of this tab's layout as part
+    // of the move (`queue_source_layout_delete`).
     return true;
 }
 
@@ -119,7 +123,7 @@ export async function closeNode(model: LayoutModel, nodeId: string, opts?: { con
             model.treeState.focusedNodeId = undefined;
             model.updateTree(false);
             model.setter(model.localTreeStateAtom, { ...model.treeState });
-            model.persistToBackend();
+            sendViewIntent(model);
             clearLeafRevealGate(nodeId);
             await model.onNodeDelete?.(ephemeralNode.data);
             return;
@@ -248,7 +252,7 @@ export function updateEphemeralNodeProps(
         },
         true,
         true,
-        "var(--zindex-layout-ephemeral-node)"
+        "var(--z-layout-ephemeral)"
     );
     addlPropsMap[node.id] = { treeKey: "-1", transform };
     leafs.push(node);

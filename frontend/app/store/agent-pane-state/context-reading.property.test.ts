@@ -70,7 +70,7 @@ function windowsFor(r: () => number): Record<string, number> {
 }
 
 function nextCommand(r: () => number, t: number): AgentPaneCommand {
-    switch (Math.floor(r() * 12)) {
+    switch (Math.floor(r() * 13)) {
         case 0:
         case 1:
         case 2: {
@@ -109,6 +109,10 @@ function nextCommand(r: () => number, t: number): AgentPaneCommand {
             return { type: "TurnEnd", stats: null };
         case 10:
             return { type: "ContextModelSwitched", model: pick(r, SETTINGS) };
+        case 11: {
+            const model = pick(r, MODELS);
+            return { type: "ContextReported", tokens: tokens(r), ...(model ? { model } : {}) };
+        }
         default:
             return r() < 0.5 ? { type: "TurnReset" } : { type: "TurnStartFailed" };
     }

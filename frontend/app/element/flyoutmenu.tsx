@@ -67,6 +67,12 @@ type MenuProps = {
      */
     mirrored?: boolean;
     onOpenChange?: (isOpen: boolean) => void;
+    /**
+     * Receives a function that closes the menu, for an owner that must close
+     * it from outside (the hamburger closes when the "…" More dropdown
+     * opens beside it, hamburger-menu.tsx).
+     */
+    closeRef?: (close: () => void) => void;
     children?: JSX.Element;
     renderMenu?: (subMenu: JSX.Element, props: any) => JSX.Element;
     renderMenuItem?: (item: MenuItem, props: any) => JSX.Element;
@@ -95,6 +101,9 @@ const FlyoutMenu = (props: MenuProps): JSX.Element => {
         setIsOpen(open);
         props.onOpenChange?.(open);
     };
+    props.closeRef?.(() => {
+        if (isOpen()) onOpenChangeMenu(false);
+    });
 
     const updatePosition = async () => {
         if (!referenceEl || !floatingEl) return;
@@ -339,6 +348,9 @@ const MenuRows = (props: MenuRowsProps): JSX.Element => {
                 // the only caller of for this key.
                 const hover: SubmenuHoverController | null = item.subItems
                     ? createSubmenuHover({
+                          // Stays open when the pointer leaves; a sibling
+                          // row's peers.closeOthers below closes it.
+                          closeOnLeave: false,
                           onOpen: () => props.openSubMenu(key, item.label),
                           onClose: () => props.closeSubMenu(key),
                       })

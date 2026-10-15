@@ -49,34 +49,13 @@ try {
     $p2 = Invoke-AgentMuxService -Auth $auth -Service object -Method CreateBlock `
         -Args @($p2Def, $rtOpts) -Uicontext $uicontext
 
-    # Push layout actions one-at-a-time (see three-pane-layout.ps1 for why).
-    $tab = Invoke-AgentMuxService -Auth $auth -Service object -Method GetObject `
-        -Args @("tab:$($tabInfo.tabid)")
-    $lsOid = $tab.layoutstate
-
-    $actions = @(
-        @{ actiontype = "insert"; actionid = (New-Guid).ToString();
-           blockid = $p1; focused = $true; magnified = $false; ephemeral = $false },
-        @{ actiontype = "splithorizontal"; actionid = (New-Guid).ToString();
-           blockid = $p2; targetblockid = $p1; position = "after";
-           focused = $false; magnified = $false; ephemeral = $false }
-    )
-    foreach ($act in $actions) {
-        $ls = Invoke-AgentMuxService -Auth $auth -Service object -Method GetObject `
-            -Args @("layout:$lsOid")
-        $payload = @{
-            otype = "layout"; oid = $lsOid
-            version = $ls.version
-            pendingbackendactions = @($act)
-        }
-        foreach ($p in @("rootnode","magnifiednodeid","focusednodeid","leaforder","meta")) {
-            $prop = $ls.PSObject.Properties[$p]
-            if ($prop) { $payload[$p] = $prop.Value }
-        }
-        Invoke-AgentMuxService -Auth $auth -Service object -Method UpdateObject `
-            -Args @($payload, $false) | Out-Null
-        Start-Sleep -Milliseconds 1000
-    }
+    # Lay the two panes out side by side (see three-pane-layout.ps1).
+    $p1Node = New-AgentMuxLayoutLeaf -BlockId $p1
+    $p2Node = New-AgentMuxLayoutLeaf -BlockId $p2
+    Invoke-AgentMuxLayoutIntent -Auth $auth -TabId $tabInfo.tabid `
+        -Intent @{ type = "insert"; node = $p1Node; magnified = $false; focused = $true }
+    Invoke-AgentMuxLayoutIntent -Auth $auth -TabId $tabInfo.tabid `
+        -Intent @{ type = "splithorizontal"; targetNodeId = $p1Node.id; newNode = $p2Node; position = "after"; focused = $false }
 
     # Let the browsers load the pages. example.com is tiny (<100ms);
     # google.com has more assets. 3s is a comfortable ceiling.

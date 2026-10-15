@@ -1,5 +1,7 @@
 // Identity pane — same shape as bundle-view.scss (left rail + detail).
 
+@use "../../mixins.scss";
+
 .identity-pane {
     display: flex;
     flex-direction: row;
@@ -17,21 +19,21 @@
     .identity-pane-error {
         padding: 8px 12px;
         margin-bottom: 12px;
-        background: var(--error-bg-color, rgba(255, 80, 80, 0.15));
-        color: var(--error-text-color, #ff8080);
+        background: var(--error-bg-color);
+        color: var(--error-text-color);
         border-radius: 0;
-        font-size: 13px;
+        font-size: var(--text-base);
     }
 
     .identity-pane-empty {
         max-width: 460px;
-        color: var(--secondary-text-color, rgba(255, 255, 255, 0.7));
+        color: var(--secondary-text-color);
         line-height: 1.5;
     }
 
     .identity-pane-empty-hint {
-        font-size: 13px;
-        color: var(--tertiary-text-color, rgba(255, 255, 255, 0.5));
+        font-size: var(--text-base);
+        color: var(--tertiary-text-color);
         margin-top: 8px;
     }
 
@@ -46,17 +48,16 @@
     }
 
     .identity-pane-section-title {
-        font-size: 14px;
+        font-size: var(--text-md);
         margin: 16px 0 8px;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
+        @include mixins.label-caps;
         color: var(--secondary-text-color);
     }
 
     .identity-pane-bindings {
         width: 100%;
         border-collapse: collapse;
-        font-size: 13px;
+        font-size: var(--text-base);
 
         thead th {
             text-align: left;
@@ -68,7 +69,7 @@
 
         tbody td {
             padding: 6px 8px;
-            border-bottom: 1px solid var(--border-color-faint, rgba(255, 255, 255, 0.04));
+            border-bottom: 1px solid var(--tint-2);
             vertical-align: middle;
         }
 
@@ -83,7 +84,7 @@
         display: inline-flex;
         align-items: center;
         gap: 6px;
-        font-size: 12px;
+        font-size: var(--text-sm);
         color: var(--main-text-color);
     }
 
@@ -92,7 +93,7 @@
         width: 8px;
         height: 8px;
         border-radius: 50%;
-        background: var(--tertiary-text-color, rgba(255, 255, 255, 0.4));
+        background: rgba(255, 255, 255, 0.4);
         flex: 0 0 auto;
 
         &.is-valid {
@@ -105,7 +106,7 @@
             background: #f87171; // red-400
         }
         &.is-unknown {
-            background: var(--tertiary-text-color, rgba(255, 255, 255, 0.4));
+            background: rgba(255, 255, 255, 0.4);
         }
     }
 

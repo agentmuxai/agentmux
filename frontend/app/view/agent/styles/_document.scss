@@ -1,6 +1,8 @@
 // Copyright 2024-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+@use "../../../mixins.scss";
+
 // Document container + status log (terminal-style). Wrapped in .agent-view so the cascade chain matches
 // the pre-split file (SPEC_AGENT_VIEW_SCSS_SPLIT_2026_04_24).
 .agent-view {
@@ -58,7 +60,7 @@
         border: 1px solid var(--border-color);
         background: var(--main-bg-color);
         color: var(--secondary-text-color);
-        font-size: 12px;
+        font-size: var(--text-sm);
         pointer-events: none;
     }
 
@@ -98,8 +100,7 @@
 
     // === Document Container ===
     .agent-document {
-        position: absolute;
-        inset: 0;
+        @include mixins.abs-fill;
         overflow-y: auto;
         // Stop scroll chaining from leaving the pane once it hits its own
         // top/bottom (e.g. OS-level swipe-navigation gestures). Nested tool
@@ -282,13 +283,13 @@
     // REPORT_LIVE_FEED_ROLL_OFF_TOO_AGGRESSIVE_2026_09_30 (docs/reports) §7.
     // 180 ms and an 8px rise: 120 ms / 4px read as an instant pop. The
     // content above glides up by the same arrival (AgentDocumentVirtualList's
-    // glideContent). Off under reduced motion, as the spec (§6) says.
+    // glideContent). Its reduced treatment (none) is below, dormant.
     // REPORT_AGENT_PANE_ROW_ENTER_MOTION_2026_10_01 (docs/reports) §5.
     .agent-document-streaming-buffer[data-animate] .agent-document-row:not([data-node-type="user_message"]) {
         opacity: 1;
         transform: translateY(0);
-        transition: opacity 180ms cubic-bezier(0.2, 0, 0, 1),
-                    transform 180ms cubic-bezier(0.2, 0, 0, 1);
+        transition: opacity 180ms var(--ease-decelerate),
+                    transform 180ms var(--ease-decelerate);
     }
 
     @starting-style {
@@ -298,9 +299,8 @@
         }
     }
 
-    // Same selector as the enter rule, so it wins on order, not lost on
-    // specificity (muxreview P1 on #4178).
-    @media (prefers-reduced-motion: reduce) {
+    // Reduced treatment (transition), dormant under the motion policy.
+    @include mixins.when-motion-reduced(transition) {
         .agent-document-streaming-buffer[data-animate] .agent-document-row:not([data-node-type="user_message"]) {
             transition: none;
         }
@@ -315,7 +315,7 @@
     // SPEC_AGENT_PANE_ONE_WAY_FLOW_2026_10_07.md R1, R2.
     .agent-document[data-one-way] .agent-document-streaming-buffer[data-animate] .agent-document-row:not([data-node-type="user_message"]) {
         transform: none;
-        transition: opacity 180ms cubic-bezier(0.2, 0, 0, 1);
+        transition: opacity 180ms var(--ease-decelerate);
     }
 
     @starting-style {
@@ -324,9 +324,10 @@
         }
     }
 
-    // Reduced motion: quicker, not gone (owner, 2026-10-07): a shorter fade,
-    // and the follower's approach is quicker too (scroll/follower.ts).
-    @media (prefers-reduced-motion: reduce) {
+    // Reduced treatment (transition), dormant under the motion policy: quicker,
+    // not gone, a shorter fade (the follower's quicker approach is in
+    // scroll/follower.ts).
+    @include mixins.when-motion-reduced(transition) {
         .agent-document[data-one-way] .agent-document-streaming-buffer[data-animate] .agent-document-row:not([data-node-type="user_message"]) {
             transition: opacity 90ms cubic-bezier(0.2, 0, 0, 1);
         }

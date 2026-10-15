@@ -7,13 +7,21 @@ members = ["crates/srv", "crates/cef", "crates/launcher", "crates/common", "crat
 # RFC #857 Phase 1.
 [workspace.package]
 
-version = "0.59.26"
+version = "0.59.27"
 
 [profile.release]
 strip = true
 lto = true
 codegen-units = 1
 opt-level = "s"
+
+# The launcher is a supervisor that spends its life waiting on pipes and
+# process handles, so size beats speed there. Scoped to this one package:
+# nothing depends on it, so srv, the host and every shared dependency keep
+# the profile above. `agentmux-common` is deliberately NOT included; it is
+# shared with srv/host and the extra saving was ~30 KB.
+[profile.release.package.agentmux-launcher]
+opt-level = "z"
 
 # Fast release profile for testing (much faster compile, slightly larger binary)
 [profile.fast-release]

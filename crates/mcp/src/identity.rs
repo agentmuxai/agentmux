@@ -240,6 +240,7 @@ impl OutgoingJektSignatures {
             source_uid: self.source_uid,
             channel_sig_v2: self.channel_sig_v2,
             lan_sig_v2: self.lan_sig_v2,
+            files: None,
         }
     }
 }
@@ -250,20 +251,39 @@ impl OutgoingJektSignatures {
 /// routes by the route name, and normalizing a signed request at a hop would
 /// break its signature. A blank target is left blank.
 pub(crate) fn signed_jekt(source_agent: Option<String>, target_agent: &str, message: &str) -> InjectRequest {
+    signed_jekt_with_files(source_agent, target_agent, message, None)
+}
+
+/// [`signed_jekt`] for a jekt that carries files: its msgid ends in their
+/// manifest digest, so every signature below covers them too
+/// (`agentmux_common::jekt_files`).
+pub(crate) fn signed_jekt_with_files(
+    source_agent: Option<String>,
+    target_agent: &str,
+    message: &str,
+    files: Option<Vec<agentmux_common::jekt_files::JektFile>>,
+) -> InjectRequest {
     let target = if target_agent.trim().is_empty() {
         target_agent.to_string()
     } else {
         agentmux_common::slug::agent_route_name(target_agent)
     };
-    sign_outgoing_jekt(source_agent.as_deref(), &target, message).into_request(target, message.to_string(), source_agent)
+    let mut req = sign_outgoing_jekt(source_agent.as_deref(), &target, message, files.as_deref())
+        .into_request(target, message.to_string(), source_agent);
+    req.files = files;
+    req
 }
 
 pub(crate) fn sign_outgoing_jekt(
     source_agent: Option<&str>,
     target_agent: &str,
     message: &str,
+    files: Option<&[agentmux_common::jekt_files::JektFile]>,
 ) -> OutgoingJektSignatures {
-    let msgid = generate_jekt_msgid();
+    let msgid = match files {
+        Some(files) => agentmux_common::jekt_files::bind_msgid(&generate_jekt_msgid(), files),
+        None => generate_jekt_msgid(),
+    };
     let ts_secs = agentmux_common::time::now_secs();
     // The keys: fetched from srv when they're this agent's, else the env's
     // (identity M4d-3, self_keys.rs).
@@ -348,7 +368,21 @@ pub(crate) fn sign_ui_automation_auth() -> Result<agentmux_common::api_types::Ui
 
 #[cfg(test)]
 mod signed_jekt_tests {
-    use super::signed_jekt;
+    use super::{signed_jekt, signed_jekt_with_files};
+
+    /// A jekt with files is signed under a msgid that binds them, so every
+    /// signature covers them; a text-only jekt is exactly as before.
+    #[test]
+    fn files_are_bound_into_the_signed_msgid() {
+        use agentmux_common::jekt_files::{msgid_binds, JektFile};
+        let files = vec![JektFile { sha256: "ab".repeat(32), name: "shot.png".into(), size: 3 }];
+        let req = signed_jekt_with_files(None, "agent2", "look", Some(files.clone()));
+        assert!(msgid_binds(req.request_id.as_deref().unwrap(), &files));
+        assert_eq!(req.files, Some(files));
+        let text = signed_jekt(None, "agent2", "look");
+        assert_eq!(agentmux_common::jekt_files::bound_digest(text.request_id.as_deref().unwrap()), None);
+        assert_eq!(text.files, None);
+    }
 
     /// The target is signed and sent as its route name, so every hop routes
     /// by the name the fork registered under; an `@` address is left alone.

@@ -6,16 +6,14 @@
 // direct child of `.window-header` (macOS far-right). Moved here from
 // tabbar.scss when the menu was extracted into <HamburgerMenu>.
 
+@use "../mixins.scss";
+
 .hamburger-btn {
     flex-shrink: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    @include mixins.flex-center;
     width: 28px;
     height: 27px;
-    padding: 0;
-    background: transparent;
-    border: none;
+    @include mixins.button-reset;
     color: var(--accent-color);
     -webkit-app-region: no-drag;
     cursor: default;

@@ -29,6 +29,7 @@
 
 mod block;
 mod layout;
+pub(crate) use layout::heal_loaded_layout;
 mod lifecycle;
 mod snapshot;
 mod tab;
@@ -40,7 +41,6 @@ mod workspace;
 use agentmux_common::ipc::{Command, ErrorCode, Event};
 use crate::state::State;
 
-pub(crate) use layout::stale_push_revision;
 
 /// Text in the `MoveTab` last-tab refusal; `MoveTabToWorkspace` matches on
 /// it to return its long-standing error string unchanged.
@@ -124,9 +124,7 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
             layout::handle_set_magnified_node(state, tab_id, node_id)
         }
         // Layout tree arms. Every one has a producer and is persisted from
-        // its event; layout commands without an arm (LayoutClear,
-        // LayoutInsertNode, the granular move/swap/resize/replace/split
-        // ops) fall to the `InvalidCommand` catch-all below.
+        // its event.
         Command::LayoutSetTree {
             tab_id,
             new_tree,
@@ -174,6 +172,14 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
             activate,
             correlation_id,
         } => layout::handle_layout_stack_move(state, tab_id, block_id, target_block_id, position, activate, correlation_id),
+        // SPEC_STRONG_REDUCER_AUTHORITY_LAYOUT_2026_06_30.md §4 — every
+        // layout edit the frontend makes, computed here.
+        Command::LayoutApplyIntent {
+            tab_id,
+            intent,
+            action_id,
+            view,
+        } => layout::handle_layout_apply_intent(state, tab_id, intent, action_id, view),
         // SPEC_864 Phase 4 — queue-append pass-through (the reducer does
         // not model pendingbackendactions in TabRecord; the persist
         // subscriber appends to db_layout from the event).

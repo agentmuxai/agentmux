@@ -50,11 +50,9 @@ vi.mock("@/app/store/global", () => ({
 }));
 
 const dispatched: Array<{ type: string; targetNodeId?: string; position?: string }> = [];
-const markBlockRecentlyCreated = vi.fn();
 
 vi.mock("@/layout/index", () => ({
     LayoutTreeActionType: { InsertNode: "insert", SplitHorizontal: "splithorizontal", SplitVertical: "splitvertical" },
-    markBlockRecentlyCreated: (...args: unknown[]) => markBlockRecentlyCreated(...args),
     getLayoutModelForTabById: () => ({
         treeReducer: (action: any) => dispatched.push(action),
         // Every block id resolves to a node id of the same shape — good
@@ -145,7 +143,6 @@ describe("applyTabPreset concurrent creation", () => {
         expect(dispatched[1]).toMatchObject({ type: "splithorizontal", targetNodeId: "node-block-agent" });
         expect(dispatched[2]).toMatchObject({ type: "splitvertical", targetNodeId: "node-block-swarm" });
         expect(dispatched[3]).toMatchObject({ type: "splitvertical", targetNodeId: "node-block-memory" });
-        expect(markBlockRecentlyCreated).toHaveBeenCalledTimes(4);
     });
 
     it("skips a block that failed and lets the next sibling take its place", async () => {

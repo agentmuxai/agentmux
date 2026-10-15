@@ -9,11 +9,12 @@
 import { createSignal } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const hub = vi.hoisted(() => ({ payloads: [] as unknown[], crossTabCleared: 0 }));
+const hub = vi.hoisted(() => ({ payloads: [] as unknown[], crossTabCleared: 0, dragsEnded: [] as unknown[] }));
 vi.mock("@/app/drag/CrossWindowDragMonitor", () => ({
     setCurrentDragPayload: (p: unknown) => hub.payloads.push(p),
 }));
 vi.mock("./crossTabDrag", () => ({ clearCrossTabDrop: () => hub.crossTabCleared++ }));
+vi.mock("./layoutIntents", () => ({ layoutDragEnded: (m: unknown) => hub.dragsEnded.push(m) }));
 
 import { beginDrag, endDrag, isUnderway, session } from "@/app/drag/drag-session";
 import { endTileDrag, releaseTileDrag, startTileDrag } from "./tile-drag";
@@ -49,6 +50,7 @@ describe("tile drag", () => {
         releaseTileDrag(model);
         expect(dragState).toMatchObject({ nodeId: null, layoutModel: null, node: null });
         expect(model.activeDrag()).toBe(false);
+        expect(hub.dragsEnded).toContain(model); // the comparison skipped mid-drag runs now
         expect(hub.payloads).not.toContain(null);
         expect(session()?.released).toBe(true);
         expect(isUnderway("tile")).toBe(false);

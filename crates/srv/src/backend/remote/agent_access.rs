@@ -81,15 +81,6 @@ pub fn always_allowed(agent: &str, connection: &str) -> bool {
     )
 }
 
-/// [`remember_in`] under this instance's config dir.
-pub fn remember(agent: &str, connection: &str) -> std::io::Result<()> {
-    remember_in(
-        &crate::backend::base::get_mux_config_dir(),
-        agent,
-        connection,
-    )
-}
-
 /// Forget "always" for `agent` on `connection` (Remotes' Revoke,
 /// SPEC_REMOTES_PANE_2026_10_05.md §4.10): the agent is asked again on its
 /// next use of the host. `false` if there was no such grant.

@@ -3,22 +3,21 @@
 
 // The pane's grip (PaneGrip.tsx): a 24px target (WCAG 2.5.8) left of the pane
 // controls; dim at rest, full on header hover or focus, grab cursor.
+
+@use "../mixins.scss";
 .pane-grip {
     flex: 0 0 24px;
     height: 24px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 12px;
+    @include mixins.flex-center;
+    font-size: var(--text-sm);
     color: var(--secondary-text-color);
     opacity: 0.35;
     cursor: grab;
-    transition: opacity 120ms ease;
+    transition: opacity var(--duration-decorative-quick) var(--ease-standard);
 
     &:focus-visible {
         opacity: 1;
-        outline: 1px solid var(--accent-color);
-        outline-offset: -1px;
+        @include mixins.focus-ring;
     }
 
     [data-role="block-header"]:hover &,

@@ -44,7 +44,7 @@
         height: 3px;
         background: var(--pane-remote-color);
         pointer-events: none;
-        z-index: var(--zindex-block-mask-inner);
+        z-index: var(--z-pane-mask);
     }
 
     // Selection ring for the whole pane (header + content) — mirrors
@@ -55,18 +55,17 @@
     // `z-index`/`will-change` matter once focused).
     &::after {
         content: "";
-        position: absolute;
-        inset: 0;
+        @include mixins.abs-fill;
         pointer-events: none;
-        border: 2px solid var(--pane-ring-color, var(--border-color));
+        border: var(--pane-ring-width) solid var(--pane-ring-color, var(--border-color));
         border-radius: var(--block-border-radius);
-        z-index: var(--zindex-block-mask-inner);
+        z-index: var(--z-pane-mask);
         will-change: transform;
     }
 
     &.pane-stack-focused::after {
         border-color: var(--pane-ring-color, var(--accent-color));
-        z-index: 50;
+        z-index: var(--z-pane-ring);
     }
 
     // The busy indicator's stripe color mirrors the selection ring above
@@ -74,6 +73,19 @@
     // portaled into `.pane-progress-bar-slot` (agent-view.scss's
     // `.agent-pane-progress-bar`) reads the identical value.
     --progress-bar-color: var(--pane-ring-color, var(--border-color));
+    // The ring's width, shared with the busy band that paints over it
+    // (agent-view.scss `.agent-pane-progress-bar`), so the two can't drift.
+    // The busy band's "off" sections mix the ring toward the background, so
+    // they read as breaks in the line; while stopping they move closer to the
+    // ring. SPEC_AGENT_PANE_BUSY_RING_IN_BORDER_2026_10_14.md §2.5.
+    --pane-ring-width: 2px;
+    // The pane background without the window's transparency (`--main-bg-color`
+    // carries `--window-opacity` when the window is transparent or blurred):
+    // mixed toward a translucent background, the off colour would composite
+    // back toward the ring and lose its contrast (muxreview on #4934).
+    --pane-bg-opaque: rgb(from var(--main-bg-color) r g b / 1);
+    --busy-ring-off: color-mix(in srgb, var(--progress-bar-color) 40%, var(--pane-bg-opaque));
+    --busy-ring-off-stopping: color-mix(in srgb, var(--progress-bar-color) 70%, var(--pane-bg-opaque));
 
     &.pane-stack-focused {
         --progress-bar-color: var(--pane-ring-color, var(--accent-color));
@@ -125,22 +137,28 @@
 // (SPEC_AGENT_PANE_PROGRESS_BAR_OVERLAY_NO_GAP_2026_08_25.md), positioned
 // against `.pane-stack` above.
 //
-// A transparent 2px BORDER, not `inset: 2px` — deliberate: the same
-// box-model mechanism as `.pane-stack::after`'s own 2px border, so both
-// round to the same device pixels on fractional pane sizes and the bar
-// nests exactly inside the selection ring. `inset: 2px` rounded
-// differently and left a one-edge gap —
-// docs/retro/RETRO_AGENT_PANE_PROGRESS_RING_TOP_EDGE_GAP_2026_09_19.md.
+// Covers the whole pane, the same box as `.pane-stack::after`'s ring: the
+// busy band paints over the ring's own band (its padding is the ring's
+// width), so the pattern runs inside the border instead of beside it
+// (SPEC_AGENT_PANE_BUSY_RING_IN_BORDER_2026_10_14.md §2.1). Border and
+// padding at the same offsets from the same box round to the same device
+// pixels, the property
+// docs/retro/RETRO_AGENT_PANE_PROGRESS_RING_TOP_EDGE_GAP_2026_09_19.md
+// relied on.
 .pane-progress-bar-slot {
-    position: absolute;
-    inset: 0;
-    border: 2px solid transparent;
+    @include mixins.abs-fill;
     // Matches the ring's own radius so the masked frame inside doesn't poke
     // square corners past the pane's rounded ones.
     border-radius: var(--block-border-radius);
-    overflow: hidden;
+    // `clip`, not `hidden`: not a scroll container, so the rotating pattern's
+    // overflow can never scroll the band off its edges
+    // (RETRO_AGENT_PANE_BUSY_RING_LEFT_EDGE_FAINT_2026_09_25.md, candidate 3).
+    overflow: clip;
     pointer-events: none;
-    // Above a floating pane tab strip (z: var(--z-pane-overlay, 4)) so the
-    // bar draws over the strip's top edge — both sit at top: 0.
-    z-index: calc(var(--z-pane-overlay, 4) + 1);
+    // Above the selection ring (`::after`, 50 when focused) and the block
+    // mask, in the same `.pane-stack` stacking context, so nothing covers the
+    // band (that retro's candidate 1). Under the band the ring is the same
+    // colour as the band's "on" sections, so a pixel of rounding never shows
+    // as a gap.
+    z-index: var(--z-pane-progress);
 }

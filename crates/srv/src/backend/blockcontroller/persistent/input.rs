@@ -144,9 +144,26 @@ impl PersistentSubprocessController {
         message: String,
         origin: Option<crate::backend::blockcontroller::health::TurnInput>,
     ) -> Result<SendOutcome, String> {
+        self.send_user_message_with_images_from(message, origin, Vec::new())
+    }
+
+    /// [`Self::send_user_message_outcome_from`] with Claude content blocks
+    /// (images, PDFs) ahead of the text, as the composer sends attachments
+    /// (`prompt::claude_user_line`). The stored copy drops their base64
+    /// (`append_delivered_message`).
+    pub fn send_user_message_with_images_from(
+        &self,
+        message: String,
+        origin: Option<crate::backend::blockcontroller::health::TurnInput>,
+        images: Vec<serde_json::Value>,
+    ) -> Result<SendOutcome, String> {
         // Pre-turn fence — see `send_message`.
         self.fence_check()?;
-        let json_str = Self::encode_user_message(&message);
+        let json_str = if images.is_empty() {
+            Self::encode_user_message(&message)
+        } else {
+            crate::backend::attachments::prompt::claude_user_line(message, images)
+        };
 
         // ONE lock acquisition covers the must-wait check, the enqueue and the
         // write. Because the watchdog takes this same lock, there is no window
@@ -552,6 +569,9 @@ impl PersistentSubprocessController {
     /// tracked as spec §8 Q3.
     pub(super) fn append_delivered_message(&self, json_str: &str) {
         let Some(ref broker) = self.broker else { return };
+        // A line with inline images is stored without their base64, as
+        // `persist_message_to_blockfile` stores one.
+        let json_str = &*crate::backend::attachments::prompt::persisted_line(json_str);
         let global_zone =
             super::super::shell::resolve_global_output_zone(&self.mstore, &self.block_id);
         // A paired device's message is stored with who sent it
