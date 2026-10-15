@@ -915,9 +915,6 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
                     Err(e) => return Err(format!("agent:memory:list: read_dir: {e}")),
                 };
 
-                // Tokens and lines of each mirrored file, for the files this list
-                // doesn't re-read (unchanged since their last mirror).
-                let mirror_counts = id_store.agent_native_memory_counts(&agent.id).unwrap_or_default();
                 if let Some(entries) = entries {
                     for entry in entries {
                         let entry = entry.map_err(|e| format!("agent:memory:list: read_dir entry: {e}"))?;
@@ -965,7 +962,7 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
 
                         let unchanged_since_last_mirror =
                             mirrored_meta.get(&name) == Some(&(size_bytes as i64, modified_at));
-                        let mut counts = mirror_counts.get(&name).copied();
+                        let mut counts = None;
                         if !unchanged_since_last_mirror {
                             // A read failure here (permission change, TOCTOU
                             // delete, AV/NFS lock, concurrent editor) must NOT
@@ -1006,7 +1003,9 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
                             }
                         }
                         live_filenames.insert(name.clone());
-                        // Unread and never mirrored: estimated from its bytes.
+                        // Not read above (unchanged, or the read failed): from the
+                        // mirror; never mirrored: estimated from its bytes.
+                        let counts = counts.or_else(|| id_store.agent_native_memory_counts(&agent.id, &name).ok().flatten());
                         let (tokens_est, lines) = counts.unwrap_or((tokens_for_chars(size_bytes), 0));
 
                         files.push(NativeMemoryFileMeta {
@@ -1030,9 +1029,10 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
                             if live_filenames.contains(&row.filename) {
                                 continue;
                             }
-                            let (tokens_est, lines) = mirror_counts
-                                .get(&row.filename)
-                                .copied()
+                            let (tokens_est, lines) = id_store
+                                .agent_native_memory_counts(&agent.id, &row.filename)
+                                .ok()
+                                .flatten()
                                 .unwrap_or((tokens_for_chars(row.size_bytes as u64), 0));
                             files.push(NativeMemoryFileMeta {
                                 is_index: row.filename == "MEMORY.md",

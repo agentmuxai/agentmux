@@ -102,23 +102,15 @@ impl Store {
         Ok(rows)
     }
 
-    /// Each mirrored file's estimated tokens and lines, by filename, counted by
-    /// `agentmux_common::tokens` like a live file. Counted here, not in SQL:
-    /// SQLite's `length()` of TEXT stops at an embedded NUL.
-    pub fn agent_native_memory_counts(
-        &self,
-        agent_id: &str,
-    ) -> Result<std::collections::HashMap<String, (u64, u64)>, StoreError> {
+    /// One mirrored file's estimated tokens and lines, counted by
+    /// `agentmux_common::tokens` like a live file; `None` when it isn't
+    /// mirrored. Counted here, not in SQL: SQLite's `length()` of TEXT stops at
+    /// an embedded NUL.
+    pub fn agent_native_memory_counts(&self, agent_id: &str, filename: &str) -> Result<Option<(u64, u64)>, StoreError> {
         use agentmux_common::tokens::{count_lines, estimate_tokens};
-        let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare("SELECT filename, content FROM db_agent_native_memory WHERE agent_id = ?1")?;
-        let rows = stmt
-            .query_map(params![agent_id], |row| {
-                let content: String = row.get(1)?;
-                Ok((row.get::<_, String>(0)?, (estimate_tokens(&content), count_lines(&content))))
-            })?
-            .collect::<Result<std::collections::HashMap<_, _>, _>>()?;
-        Ok(rows)
+        Ok(self
+            .agent_native_memory_read(agent_id, filename)?
+            .map(|content| (estimate_tokens(&content), count_lines(&content))))
     }
 
     /// Read one mirrored file's content by `(agent_id, filename)`. Used as

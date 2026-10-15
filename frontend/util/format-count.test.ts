@@ -83,7 +83,7 @@ describe("estimateTokenCount", () => {
             ["héllo", 2],
             ["日本語テキスト", 2],
             ["🙂🙂🙂🙂", 1],
-            ["éé", 1],
+            ["e\u0301e\u0301", 1], // combining marks
             ["# Memory\n\nOne line.\n", 5],
         ];
         for (const [text, tokens] of vector) expect(estimateTokenCount(text), JSON.stringify(text)).toBe(tokens);

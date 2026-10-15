@@ -1316,11 +1316,15 @@
                 .agent_native_memory_upsert("agent-counts", name, content, None, "/p", content.len() as i64, 0)
                 .unwrap();
         }
-        let counts = store.agent_native_memory_counts("agent-counts").unwrap();
         for (name, content) in files {
-            assert_eq!(counts[name], (estimate_tokens(content), count_lines(content)), "{name}");
+            assert_eq!(
+                store.agent_native_memory_counts("agent-counts", name).unwrap(),
+                Some((estimate_tokens(content), count_lines(content))),
+                "{name}"
+            );
         }
-        assert!(store.agent_native_memory_counts("nobody").unwrap().is_empty());
+        assert_eq!(store.agent_native_memory_counts("agent-counts", "missing.md").unwrap(), None);
+        assert_eq!(store.agent_native_memory_counts("nobody", "a.md").unwrap(), None);
     }
 
     // ---- Registry parallel-write mirror (PR A) ----
