@@ -95,9 +95,16 @@ impl BrowserPaneManager {
             // window). ANALYSIS_BROWSER_PANE_REDOCK_BLACK_TYPING_LOCK_2026_06_15.md §1.
             crate::input_owner::windows::pane_gone(state, block_id);
         }
-        // macOS/Linux: the input owner hands the keyboard on if the pane had it.
+        // macOS/Linux: the input owner hands the keyboard on if the pane had it,
+        // and forgets the pane. The async drain below finds no entry once
+        // CompleteBrowserPaneClose has removed it, so it can't report the pane
+        // gone; a stale entry would leave the old window owning a pane that a
+        // redock recreates elsewhere.
         #[cfg(not(target_os = "windows"))]
-        crate::input_owner::views::pane_closing(state, block_id);
+        {
+            crate::input_owner::views::pane_closing(state, block_id);
+            crate::input_owner::views::pane_gone(state, block_id);
+        }
         // Linux/macOS — Views path. Marshal the BrowserView detach onto the
         // CEF UI thread (remove_child_view is UI-thread-only); the underlying
         // Browser's on_before_close fires asynchronously and clears
