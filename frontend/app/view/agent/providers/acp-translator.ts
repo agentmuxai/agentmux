@@ -73,7 +73,11 @@ export class AcpTranslator implements OutputTranslator {
             // … GOOSE_PROVIDER" in `data`.
             const data = typeof error.data === "string" ? error.data.trim() : "";
             const detail = data && !message.includes(data) ? `: ${data}` : "";
-            return [{ type: "text", content: `**Error:** ${message}${detail}` }];
+            // ACP's auth_required (-32000), as Grok Build and Cline send it
+            // signed out: the agent's own sign-in, which `/login` runs.
+            const said = `${message}${detail}`;
+            const hint = error.code === -32000 ? `${/[.!?]$/.test(said) ? "" : "."} Type \`/login\` to sign in.` : "";
+            return [{ type: "text", content: `**Error:** ${said}${hint}` }];
         }
 
         // The raw event may be the full JSON-RPC envelope or just the params.

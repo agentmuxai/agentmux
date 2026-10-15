@@ -179,7 +179,7 @@ describe("AcpTranslator — JSON-RPC errors", () => {
                 error: { code: -32000, message: "Authentication required: Configure an API key or log in with an OAuth provider." },
             }),
         ).toEqual([
-            { type: "text", content: "**Error:** Authentication required: Configure an API key or log in with an OAuth provider." },
+            { type: "text", content: "**Error:** Authentication required: Configure an API key or log in with an OAuth provider. Type `/login` to sign in." },
         ]);
     });
 
@@ -201,6 +201,17 @@ describe("AcpTranslator — JSON-RPC errors", () => {
         );
         expect(err("Internal error")).toEqual(text("**Error:** Internal error"));
         expect(err({ details: 1 })).toEqual(text("**Error:** Internal error"));
+    });
+
+    it("says how to sign in when the agent needs it (ACP's auth_required)", () => {
+        const t = new AcpTranslator();
+        // As Grok Build 1.0.52 and Cline 3.0.71 answered session/new signed out.
+        expect(t.translate({ jsonrpc: "2.0", id: 2, error: { code: -32000, message: "Authentication required", data: "no auth method id provided" } })).toEqual([
+            { type: "text", content: "**Error:** Authentication required: no auth method id provided. Type `/login` to sign in." },
+        ]);
+        expect(t.translate({ jsonrpc: "2.0", id: 2, error: { code: -32000, message: "Authentication required: Call authenticate before starting a session" } })).toEqual([
+            { type: "text", content: "**Error:** Authentication required: Call authenticate before starting a session. Type `/login` to sign in." },
+        ]);
     });
 
     it("still says something for an error with no message", () => {
