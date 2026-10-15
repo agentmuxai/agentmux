@@ -17,11 +17,13 @@ import {
     viaLabel,
     type AgentWindow,
 } from "./agent-launch-cost";
+import { topContributors, topContributorsLabel } from "./memory-aggregates";
 import { shareLabel, tokensLabel, tokensTitle, TOKEN_ESTIMATE_NOTE } from "./memory-tokens";
 
 export function AgentLaunchCost(props: { cost: LaunchCost; window: AgentWindow | null }): JSX.Element {
     const total = () => deliveredTotal(props.cost);
     const budget = () => (props.window ? launchBudget(total(), props.window.window) : null);
+    const top = () => topContributors(deliveredParts(props.cost).map((p) => p.tokens_est));
     return (
         <section class="agent-launch-cost" aria-label="What this agent starts with" data-testid="agent-launch-cost">
             <div class="agent-launch-cost-head">
@@ -80,6 +82,9 @@ export function AgentLaunchCost(props: { cost: LaunchCost; window: AgentWindow |
                     </For>
                 </tbody>
             </table>
+            <Show when={top()}>
+                {(t) => <p class="agent-launch-cost-note">{topContributorsLabel(t(), "parts", "the launch")}.</p>}
+            </Show>
             <Show when={budget()}>
                 {(b) => (
                     <p class="agent-launch-cost-note">

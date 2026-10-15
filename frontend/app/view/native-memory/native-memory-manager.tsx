@@ -52,6 +52,8 @@ import type { LaunchCost } from "@/types/rpc/LaunchCost";
 import type { AgentOpenPane } from "@/types/rpc/AgentOpenPane";
 import { MOS } from "@/app/store/global";
 import { DEFAULT_MEMORY_SORT, MemoryAgentFilterBar, type MemoryAgentSortOption } from "./MemoryAgentFilterBar";
+import { fileDistribution, fileDistributionLabel } from "./memory-aggregates";
+import { MemoryFleetSummary } from "./MemoryFleetSummary";
 import { MemoryFileCard } from "./MemoryFileCard";
 import { resolveProviderAlias } from "@/app/view/agent/providers/catalog";
 import { NativeMemoryFileView } from "./NativeMemoryFileView";
@@ -86,6 +88,10 @@ function storeMemorySort(sort: MemoryAgentSortOption): void {
         // doesn't survive to the next Memory open, not a functional break
     }
 }
+
+/** Fewer files than this, and a median and p90 say nothing a glance at the
+ *  tiles doesn't (SPEC_MEMORY_PANE_TOKENS_2026_10_15.md §5.5). */
+const MIN_FILES_FOR_DISTRIBUTION = 5;
 
 /**
  * Comparator for the grid's `count` and `tokens` sorts (largest first, by
@@ -379,6 +385,15 @@ export function NativeMemoryManager(): JSX.Element {
         return filtered.slice().sort((a, b) => compareAgents(sortBy(), a, b, currentCounts));
     });
 
+    // Every agent whose count has arrived, for the fleet line (spec §5.5).
+    const fleetAgents = createMemo(() => {
+        const c = counts();
+        return agents().flatMap((a) => {
+            const n = c[a.id];
+            return n?.kind === "count" ? [{ id: a.id, name: agentLabel(a), tokens: n.tokens }] : [];
+        });
+    });
+
     // Re-fetch the file list whenever the selected agent changes; clear the
     // file selection so a stale filename from a different agent can't leak
     // into NativeMemoryFileView's props.
@@ -586,6 +601,7 @@ export function NativeMemoryManager(): JSX.Element {
                                 sortBy={sortBy}
                                 onSortChange={setSortBy}
                             />
+                            <MemoryFleetSummary agents={fleetAgents()} />
                             <Show
                                 when={visibleAgents().length > 0}
                                 fallback={
@@ -702,6 +718,11 @@ export function NativeMemoryManager(): JSX.Element {
                                                 </div>
                                             }
                                         >
+                                            <Show when={sortedFiles().length >= MIN_FILES_FOR_DISTRIBUTION}>
+                                                <div class="memory-file-distribution" data-testid="memory-file-distribution">
+                                                    {fileDistributionLabel(fileDistribution(sortedFiles().map((f) => f.tokens_est ?? 0))!)}
+                                                </div>
+                                            </Show>
                                             <div class="native-memory-manager-file-grid">
                                                 <For each={sortedFiles()}>
                                                     {(file) => (
