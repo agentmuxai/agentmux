@@ -160,21 +160,21 @@ unsafe fn hand_back_activation() {
     );
 }
 
-/// Subclass a top-level window's WndProc to report activation (`WM_ACTIVATE`)
-/// and the window being shown or restored to the window's input owner
-/// (`crate::input_owner::windows`), which gives the keyboard back to the user's
-/// selection after CEF's own activation handling. Also hands activation back
-/// from an invisible pool window (`invisible_activation`).
-///
-/// SAFE on the main CEF Views window: this hook only observes, and ALWAYS
-/// passes the message through to the original WndProc.
-///
-/// Idempotent: re-calling on an already-hooked HWND is a no-op.
 /// Top-level windows minimized now, so a later restore can be told from a resize.
 #[cfg(target_os = "windows")]
 static MINIMIZED: std::sync::LazyLock<std::sync::Mutex<std::collections::HashSet<usize>>> =
     std::sync::LazyLock::new(Default::default);
 
+/// Subclass a top-level window's WndProc to report activation (`WM_ACTIVATE`,
+/// `WM_ACTIVATEAPP`) and the window being shown or restored to the window's
+/// input owner (`crate::input_owner::windows`), which gives the keyboard back to
+/// the user's selection after CEF's own activation handling. Also hands
+/// activation back from an invisible pool window (`invisible_activation`).
+///
+/// SAFE on the main CEF Views window: this hook only observes, and ALWAYS
+/// passes the message through to the original WndProc.
+///
+/// Idempotent: re-calling on an already-hooked HWND is a no-op.
 #[cfg(target_os = "windows")]
 pub(crate) unsafe fn install_top_level_focus_restore_hook(
     hwnd: *mut std::ffi::c_void,
@@ -182,7 +182,7 @@ pub(crate) unsafe fn install_top_level_focus_restore_hook(
 ) {
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         CallWindowProcW, DefWindowProcW, PostMessageW, SetWindowLongPtrW, GWLP_WNDPROC, WM_ACTIVATE,
-        WM_SHOWWINDOW, WM_SIZE,
+        WM_ACTIVATEAPP, WM_SHOWWINDOW, WM_SIZE,
     };
 
     crate::input_owner::windows::set_state(state);
@@ -246,6 +246,13 @@ pub(crate) unsafe fn install_top_level_focus_restore_hook(
             } else {
                 crate::input_owner::windows::window_activation(hwnd, false, true);
             }
+        }
+        // The app came to the foreground or left it (sent to each of its
+        // top-level windows). A window activated in the background earlier may
+        // get no second WM_ACTIVATE when it comes forward; this tells the input
+        // owner then.
+        if msg == WM_ACTIVATEAPP {
+            crate::input_owner::windows::app_activation(hwnd, wparam != 0, user_can_see(hwnd));
         }
 
         // Shown, or restored from minimized: the window's panes are raised again

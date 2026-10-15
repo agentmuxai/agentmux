@@ -97,16 +97,83 @@ pub fn pane_gone(state: &Arc<AppState>, block: &str) {
 /// How long after a pane is destroyed to check that some window still has the keyboard.
 const ORPHAN_CHECK_AFTER_MS: i64 = 50;
 
-/// The top-level window `hwnd` was activated or deactivated (`WM_ACTIVATE`).
-/// Called before CEF's own handling; the effects are posted, so they run after it.
-/// `visible`: an invisible pool window's activation is handed back elsewhere.
+/// The top-level window `hwnd` was activated or deactivated (`WM_ACTIVATE`), or
+/// its app was (`WM_ACTIVATEAPP`). Called before CEF's own handling; the effects
+/// are posted, so they run after it. `visible`: an invisible pool window's
+/// activation is handed back elsewhere.
+///
+/// Only the foreground window counts as active. Windows also activates a window
+/// in the background, without the keyboard, when something in it takes focus
+/// while another app is in front (a new pane's page does); the user then isn't
+/// in it, and the app's focus reclaim refuses to run there. Such a window
+/// becomes active when it comes to the foreground.
 pub fn window_activation(hwnd: *mut std::ffi::c_void, active: bool, visible: bool) {
+    activation(hwnd, active, visible, true);
+}
+
+/// The app came to the foreground or left it (`WM_ACTIVATEAPP`, sent to each of
+/// its top-level windows): as `window_activation`, for whichever of them is the
+/// foreground window, without logging the others.
+pub fn app_activation(hwnd: *mut std::ffi::c_void, active: bool, visible: bool) {
+    activation(hwnd, active, visible, false);
+}
+
+fn activation(hwnd: *mut std::ffi::c_void, active: bool, visible: bool, report_background: bool) {
     let Some(state) = STATE.get() else { return };
     let Some(window) = state.label_for_hwnd(hwnd as _) else { return };
-    if active && !visible {
+    if !active {
+        dispatch(state, &window, Event::Deactivated);
         return;
     }
-    dispatch(state, &window, if active { Event::Activated } else { Event::Deactivated });
+    if !visible {
+        return;
+    }
+    if !activate_if_foreground(state, &window, hwnd as isize) {
+        // The foreground may still be on its way; look once more.
+        let mut task = ForegroundCheckTask::new(state.clone(), window, hwnd as isize, report_background);
+        post_delayed_task(ThreadId::UI, Some(&mut task), FOREGROUND_CHECK_AFTER_MS);
+    }
+}
+
+/// How long after an activation that wasn't (yet) the foreground to look again.
+const FOREGROUND_CHECK_AFTER_MS: i64 = 50;
+
+/// Whether `hwnd` is the root of the foreground window.
+fn is_foreground(hwnd: isize) -> bool {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{GetAncestor, GetForegroundWindow, GA_ROOT};
+    let fg = unsafe { GetForegroundWindow() };
+    !fg.is_null() && unsafe { GetAncestor(fg, GA_ROOT) } as isize == hwnd
+}
+
+/// Tell `window`'s machine it is active if `hwnd` is the foreground window and
+/// the machine doesn't know yet. Returns whether `hwnd` is the foreground window.
+fn activate_if_foreground(state: &Arc<AppState>, window: &str, hwnd: isize) -> bool {
+    if !is_foreground(hwnd) {
+        return false;
+    }
+    if !registry::is_active(window) {
+        dispatch(state, window, Event::Activated);
+    }
+    true
+}
+
+wrap_task! {
+    struct ForegroundCheckTask {
+        state: Arc<AppState>,
+        window: String,
+        hwnd: isize,
+        report_background: bool,
+    }
+    impl Task {
+        fn execute(&self) {
+            if !activate_if_foreground(&self.state, &self.window, self.hwnd) && self.report_background {
+                tracing::info!(
+                    "[input] win={} activated in the background; waiting for it to come to the foreground",
+                    self.window,
+                );
+            }
+        }
+    }
 }
 
 /// The top-level window `hwnd` was shown, or restored from minimized.
@@ -248,19 +315,26 @@ fn raise_panes(state: &Arc<AppState>, window: &str) {
             continue;
         }
         let centre = POINT { x: (rect.left + rect.right) / 2, y: (rect.top + rect.bottom) / 2 };
-        let hit = unsafe { WindowFromPoint(centre) };
-        if !hit.is_null() && hit != wrapper && unsafe { IsChild(wrapper, hit) } == 0 {
+        // The window the pointer reaches at the pane's centre, if not the pane's own.
+        let cover = || {
+            let hit = unsafe { WindowFromPoint(centre) };
+            if hit.is_null() || hit == wrapper || unsafe { IsChild(wrapper, hit) } != 0 {
+                return None;
+            }
             let mut class = [0u16; 64];
             let n = unsafe { GetClassNameW(hit, class.as_mut_ptr(), class.len() as i32) };
-            tracing::info!(
-                "[input] win={window} pane:{} was covered at its centre by {:p} class={}",
-                block.get(..8).unwrap_or(&block),
-                hit,
-                String::from_utf16_lossy(&class[..n.max(0) as usize]),
-            );
-        }
+            Some(format!("{:p} class={}", hit, String::from_utf16_lossy(&class[..n.max(0) as usize])))
+        };
+        let before = cover();
         unsafe {
             SetWindowPos(wrapper, std::ptr::null_mut(), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+        }
+        if let Some(by) = before {
+            let after = cover().map_or("uncovered now".to_string(), |by| format!("still covered by {by}"));
+            tracing::info!(
+                "[input] win={window} pane:{} was covered at its centre by {by}; raised, {after}",
+                block.get(..8).unwrap_or(&block),
+            );
         }
     }
 }

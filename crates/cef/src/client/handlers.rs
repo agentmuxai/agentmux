@@ -79,11 +79,11 @@ wrap_client! {
         }
 
         fn focus_handler(&self) -> Option<FocusHandler> {
-            // For browser panes only: cancel CEF's auto-focus on navigation so the
-            // child HWND doesn't steal keyboard focus from the main window when the
-            // page finishes loading. The user can still click into the pane to focus it.
+            // For browser panes only: reports a page taking focus to the input
+            // owner (see the handler below).
             if self.is_browser_pane {
-                Some(AgentMuxPaneFocusHandler::new())
+                let state = self.inner.lock().state.clone();
+                Some(AgentMuxPaneFocusHandler::new(state))
             } else {
                 None
             }
@@ -143,11 +143,26 @@ wrap_client! {
 // CEF's `on_before_close` on that pane ~10ms later. On Windows, a page taking
 // the keyboard on its own is put back by the window's input owner
 // (`crate::input_owner`), which the pane's Win32 subclass reports clicks and
-// `WM_SETFOCUS` to (`browser_pane::hwnd`).
+// `WM_SETFOCUS` to (`browser_pane::hwnd`). `on_got_focus` reports it too: the
+// page's render widget window is created after the subclass is installed and
+// only subclassed at load end, so focus a new page takes isn't seen there.
 wrap_focus_handler! {
-    struct AgentMuxPaneFocusHandler;
+    struct AgentMuxPaneFocusHandler {
+        state: Arc<crate::state::AppState>,
+    }
 
     impl FocusHandler {
+        fn on_got_focus(&self, browser: Option<&mut Browser>) {
+            #[cfg(target_os = "windows")]
+            if let Some(browser) = browser {
+                if let Some(block) = crate::browser_pane::callbacks::resolve_pane_block_id(&self.state, browser) {
+                    crate::input_owner::windows::pane_focus_gained(&self.state, &block);
+                }
+            }
+            #[cfg(not(target_os = "windows"))]
+            let _ = (browser, &self.state);
+        }
+
         fn on_set_focus(
             &self,
             _browser: Option<&mut Browser>,

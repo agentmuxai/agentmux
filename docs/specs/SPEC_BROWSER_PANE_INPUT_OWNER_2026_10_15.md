@@ -66,8 +66,8 @@ Surface = App | Pane(block) | Elsewhere      // where Win32 focus was seen
 | `Select(owner)` | `browser_pane_focus` → `Pane`, `main_window_focus` → `App` (Phase 3: one `input_select` IPC) |
 | `PanePointerDown(b)` | `WM_LBUTTONDOWN` in b's windows |
 | `AppPointerDown` | macOS: a click in the app window (`swizzled_nsapp_send_event`); Windows: not observed, the frontend's `Select(App)` stands in |
-| `FocusGained(surface)` | `WM_SETFOCUS` in a pane's windows (after Chromium has handled it) |
-| `Activated` / `Deactivated` | top-level `WM_ACTIVATE`, posted to run after CEF's own handling |
+| `FocusGained(surface)` | `WM_SETFOCUS` in a pane's windows (after Chromium has handled it), and CEF's `on_got_focus` for a pane's browser: a new page's render widget window is created after the pane's windows are subclassed, so focus it takes on load never reaches a subclass |
+| `Activated` / `Deactivated` | top-level `WM_ACTIVATE` and `WM_ACTIVATEAPP`, effects posted to run after CEF's own handling. Only the foreground window is `Activated`: Windows also activates a window in the background when something in it takes focus while another app is in front (a new pane's page does), and the app's focus reclaim rightly refuses to run in a window the user isn't in. If the window isn't the foreground yet, the adapter looks once more 50 ms later; otherwise `WM_ACTIVATEAPP` reports it when it comes forward |
 | `WindowShown` | top-level `WM_SHOWWINDOW` / restore |
 | `PaneLive` / `PaneShown` / `PaneCollapsed` / `PaneClosing` / `PaneGone` | pane create, rect apply (0×0 is collapsed), close |
 | `Verify { seq, surface }` | the posted check: `GetFocus()` mapped to a surface. Only the latest check asked for counts; an older `seq` belongs to an earlier request and is ignored |

@@ -41,6 +41,11 @@ pub fn step(window: &str, event: Event) -> Vec<Effect> {
     effects
 }
 
+/// Whether `window`'s machine counts the window as active.
+pub fn is_active(window: &str) -> bool {
+    OWNERS.lock().get(window).is_some_and(|w| w.active)
+}
+
 /// The window whose machine knows pane `block`.
 pub fn window_of_pane(block: &str) -> Option<String> {
     OWNERS.lock().iter().find(|(_, w)| w.panes.contains_key(block)).map(|(k, _)| k.clone())
