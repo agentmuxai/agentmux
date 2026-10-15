@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createSignal } from "solid-js";
 import { LayoutModel } from "@/layout/lib/layoutModel";
 import { deriveNodeId, newLayoutNode } from "@/layout/lib/layoutNode";
-import { isLayoutQuiet, reconcileWithStoredLayout } from "@/layout/lib/layoutIntents";
+import { reconcileWithStoredLayout } from "@/layout/lib/layoutIntents";
 import { sendStackCommand } from "@/layout/lib/layoutPersistence";
 import { closeBlockInStack, pushBlockOntoStack } from "@/layout/lib/layoutStack";
 import {

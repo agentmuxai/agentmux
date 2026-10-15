@@ -4,10 +4,7 @@
 
 import { batch } from "solid-js";
 import { fireAndForget } from "@/util/util";
-// drag-session, not tile-drag: tile-drag imports crossTabDrag, which imports
-// this module.
-import { isUnderway } from "@/app/drag/drag-session";
-import { findNodeByBlockId, newLayoutNode, walkNodes } from "./layoutNode";
+import { findNodeByBlockId, newLayoutNode } from "./layoutNode";
 import { rebuildMinimizedSet } from "./layoutMinimize";
 import { removeBlockFromLeaf, removeLeafEmptiedByMove } from "./layoutMagnify";
 import { queueLayoutCommand, reconcileWithStoredLayout } from "./layoutIntents";
@@ -16,7 +13,6 @@ import type { PaneTabEditResult } from "@/types/rpc/PaneTabEditResult";
 import {
     LayoutTreeActionType,
     LayoutTreeClearTreeAction,
-    LayoutTreeDeleteNodeAction,
     LayoutTreeInsertNodeAction,
     LayoutTreeInsertNodeAtIndexAction,
     LayoutTreeReplaceNodeAction,
