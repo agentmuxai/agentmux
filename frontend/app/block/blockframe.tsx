@@ -42,6 +42,7 @@ import { getEffectiveTitle, isUsableFocusRingColor, pickReadableTextColor } from
 import { BlockFrameProps } from "./blocktypes";
 import { resolveContextMenuRegion } from "./context-menu-region";
 import { canTackFloatingPane, FloatingAlwaysOnTopButton } from "./floating-ontop";
+import { FloatingRedockButton } from "./floating-redock";
 import { partitionHeaderElems } from "./header-elems";
 import { buildPaneContextMenu, joinMenuGroups, type PaneMenuSection } from "./pane-actions";
 import { applyHueToAllPanes, hueToActiveBorder, PANE_HUE_OPTIONS, setHue } from "./pane-color-menu";
@@ -439,6 +440,9 @@ function EndIcons(props: {
                             />
                         }
                     >
+                        {/* Redock first: back into a window's tile layout, with no drag
+                        (SPEC_FLOATING_PANE_REDOCK_BUTTON_2026_10_15). */}
+                        <FloatingRedockButton />
                         {/* "Always on top" tack, with the window controls
                         (SPEC_FLOATING_PANE_ALWAYS_ON_TOP_2026_09_27 §4). */}
                         <Show when={canTackFloatingPane(floatingLabel())}>
