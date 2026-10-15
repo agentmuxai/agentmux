@@ -539,6 +539,43 @@ describe("jekt marker detection", () => {
         expect(jekt.message).toBe("Hey, can you review PR #25?");
     });
 
+    // SPEC_JEKT_FILE_TRANSFER_2026_10_05.md §6.2: srv lists the files last in
+    // the body and counts them in FILES=.
+    const sha = "ab".repeat(32);
+    const withFiles = (files: string | null, body: string) =>
+        `[JEKT:FROM=agentx TO=agent3 TIER=coord DELIVERY=host TRUST=host-verified${files === null ? "" : ` FILES=${files}`} MSGID=m PRIORITY=normal TS=1783386012]\n` +
+        `────────────────────────────────────────────────────────────\n` +
+        `From: agentx | To: agent3 | ts=1783386012\n` +
+        `${body}\n` +
+        `────────────────────────────────────────────────────────────\n` +
+        `Reply: bus:inject to agentx\n` +
+        `[/JEKT]`;
+    const list =
+        `<attached_files>\nagentx sent 1 image with this message. Open them from these paths with your file or image viewing tool when you need them.\n` +
+        `1. shot.png — C:\\data\\attachments\\derived\\ab\\${sha}.v1-e2000.send.png\n</attached_files>`;
+
+    test("files sent with a jekt become chips and leave the text clean", () => {
+        const node = parser.parseStreamEvent({ type: "user_message", message: withFiles("1", `look at this\n${list}`) });
+        const jekt = node as import("./types").JektMessageNode;
+        expect(jekt.message).toBe("look at this");
+        expect(jekt.attachments).toEqual([{ id: sha, name: "shot.png" }]);
+    });
+
+    test("a list without FILES= in the marker is just text", () => {
+        const node = parser.parseStreamEvent({ type: "user_message", message: withFiles(null, `look at this\n${list}`) });
+        const jekt = node as import("./types").JektMessageNode;
+        expect(jekt.attachments).toBeUndefined();
+        expect(jekt.message).toContain("<attached_files>");
+    });
+
+    test("withheld files leave their note in the text and add no chips", () => {
+        const note = "1 file sent with this message was withheld: the sender's signature failed verification.";
+        const node = parser.parseStreamEvent({ type: "user_message", message: withFiles("0", `look\n${note}`) });
+        const jekt = node as import("./types").JektMessageNode;
+        expect(jekt.attachments).toBeUndefined();
+        expect(jekt.message).toBe(`look\n${note}`);
+    });
+
     test("direction is incoming when TO matches the current agent", () => {
         parser.setAgentId("agent3");
         const node = parser.parseStreamEvent({ type: "user_message", message: jektBlock({ to: "agent3" }) });

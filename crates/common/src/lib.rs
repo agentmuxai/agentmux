@@ -12,6 +12,7 @@ pub mod errors;
 pub mod event_log;
 pub mod install_presence;
 pub mod ipc;
+pub mod jekt_files;
 pub mod jekt_sign;
 pub mod layout_intent;
 pub mod layout_types;

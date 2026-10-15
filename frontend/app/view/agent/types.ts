@@ -396,6 +396,10 @@ export interface JektMessageNode {
      *  SPEC_DURABLE_JEKT_DELIVERY_2026_09_24.md §2.4); absent when it was
      *  delivered live. */
     heldForSecs?: number;
+    /** Files the sender sent with it, read back from srv's `<attached_files>`
+     *  list (marker `FILES=`; SPEC_JEKT_FILE_TRANSFER_2026_10_05.md §6.2).
+     *  Absent when none came. */
+    attachments?: { id?: string; name: string }[];
 }
 
 /**

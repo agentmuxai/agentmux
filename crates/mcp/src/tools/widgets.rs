@@ -28,21 +28,6 @@ async fn list(cx: &ToolCtx<'_>) -> Result<Vec<Value>> {
     Ok(body.get("packages").and_then(Value::as_array).cloned().unwrap_or_default())
 }
 
-/// A path the agent gave, made absolute against its own workspace.
-fn resolve_path(path: &str) -> String {
-    let p = std::path::Path::new(path);
-    if p.is_absolute() {
-        return path.to_string();
-    }
-    let base = std::env::var("AGENTMUX_AGENT_WORKDIR")
-        .ok()
-        .filter(|s| !s.is_empty())
-        .map(std::path::PathBuf::from)
-        .or_else(|| std::env::current_dir().ok())
-        .unwrap_or_default();
-    base.join(p).to_string_lossy().into_owned()
-}
-
 pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
     match name {
         "WidgetList" => {
@@ -71,7 +56,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             // The prompt names this agent only from its signed identity; an
             // agent with no signing key yet is shown as unverified.
             let body = json!({
-                "path": resolve_path(path),
+                "path": resolve_workdir_path(path),
                 "replace": arguments.get("replace").and_then(Value::as_bool).unwrap_or(true),
                 "auth": crate::identity::sign_ui_automation_auth().ok(),
                 "wait_secs": wait,

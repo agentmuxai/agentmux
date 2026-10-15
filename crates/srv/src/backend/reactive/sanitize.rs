@@ -377,6 +377,49 @@ pub fn wrap_jekt_message(
     priority: &str,
     held_sent_at_ms: Option<i64>,
 ) -> String {
+    wrap_jekt_message_with_files(
+        msg,
+        source_agent,
+        target_agent,
+        effective_tier,
+        delivery_tier,
+        sig_verified,
+        reagent_verified,
+        lan_verified,
+        channel_verified,
+        wan_instance,
+        requires_stop,
+        msg_id,
+        priority,
+        held_sent_at_ms,
+        None,
+    )
+}
+
+/// [`wrap_jekt_message`] for a jekt that was sent with files
+/// (SPEC_JEKT_FILE_TRANSFER_2026_10_05.md §6.2): the marker gains
+/// `FILES=<n delivered>`, and srv's own text for them (the
+/// `<attached_files>` list, or why there is none) follows the message
+/// inside the block. Only srv writes that list: the sender's text has its
+/// list tags quoted ([`neutralize_file_lists`]), on every jekt.
+#[allow(clippy::too_many_arguments)]
+pub fn wrap_jekt_message_with_files(
+    msg: &str,
+    source_agent: Option<&str>,
+    target_agent: &str,
+    effective_tier: &str,
+    delivery_tier: &str,
+    sig_verified: Option<bool>,
+    reagent_verified: Option<bool>,
+    lan_verified: Option<bool>,
+    channel_verified: Option<bool>,
+    wan_instance: Option<&super::types::WanInstanceInfo>,
+    requires_stop: bool,
+    msg_id: &str,
+    priority: &str,
+    held_sent_at_ms: Option<i64>,
+    files: Option<&super::types::FilesDelivery>,
+) -> String {
     let now_secs = agentmux_common::time::now_secs_u64();
     // A held message shows when it was sent, and how long it waited — never
     // the replay time as if it were current (durable jekt spec §2.4).
@@ -399,7 +442,7 @@ pub fn wrap_jekt_message(
     let priority = marker_field(priority);
     let delivery_tier = marker_field(delivery_tier);
     let delivery_tier = delivery_tier.as_str();
-    let msg = neutralize_markers(msg);
+    let msg = neutralize_file_lists(&neutralize_markers(msg));
     let wan_instance = wan_instance.filter(|_| delivery_tier == "wan");
     let trust = if delivery_tier == "lan" && lan_verified == Some(true) {
         "lan-verified"
@@ -438,8 +481,11 @@ pub fn wrap_jekt_message(
         ""
     };
 
+    let files_field = files.map(|f| format!(" FILES={}", f.delivered)).unwrap_or_default();
+    let files_text = files.map(|f| format!("\n{}", f.text)).unwrap_or_default();
+
     let structured_tag = format!(
-        "[JEKT:FROM={from} TO={target_agent} TIER={effective_tier} DELIVERY={delivery_tier}{held_field} TRUST={trust}{instance_field}{sig_field}{escalate_field} MSGID={msg_id} PRIORITY={priority} TS={ts_secs}]"
+        "[JEKT:FROM={from} TO={target_agent} TIER={effective_tier} DELIVERY={delivery_tier}{held_field} TRUST={trust}{instance_field}{sig_field}{escalate_field}{files_field} MSGID={msg_id} PRIORITY={priority} TS={ts_secs}]"
     );
 
     let sensitive_warning = if effective_tier == "sensitive" {
@@ -459,7 +505,7 @@ pub fn wrap_jekt_message(
     };
 
     format!(
-        "{structured_tag}\n────────────────────────────────────────────────────────────\nFrom: {from} | To: {target_agent} | ts={ts_secs}{sensitive_warning}\n{msg}\n────────────────────────────────────────────────────────────\n{reply_hint}\n[/JEKT]"
+        "{structured_tag}\n────────────────────────────────────────────────────────────\nFrom: {from} | To: {target_agent} | ts={ts_secs}{sensitive_warning}\n{msg}{files_text}\n────────────────────────────────────────────────────────────\n{reply_hint}\n[/JEKT]"
     )
 }
 
@@ -584,6 +630,55 @@ fn neutralize_markers(msg: &str) -> String {
                     (false, ':') => out.push_str(&format!("[{label}-QUOTED:")),
                     _ => out.push_str(&format!("[{label}-QUOTED]")),
                 }
+                i += len;
+                continue 'scan;
+            }
+        }
+        out.push(chars[i]);
+        i += 1;
+    }
+    out
+}
+
+/// The attachment list tags a delivered body must not be able to write:
+/// srv's `<attached_files>` list (and the older `<attached_images>`) is how
+/// an agent and its pane learn which files came with a message
+/// (`backend/attachments/prompt.rs`), so a sender's own text gets them
+/// quoted as `<attached_files-quoted>`. Matched like marker delimiters:
+/// any case, fullwidth forms, whitespace and ZWJ/ZWNJ between the parts.
+const FILE_LIST_TAGS: &[&str] = &["attached_files", "attached_images"];
+
+fn match_list_tag(chars: &[char], i: usize, word: &str) -> Option<(usize, bool)> {
+    let skippable = |c: char| c.is_whitespace() || c == '\u{200C}' || c == '\u{200D}';
+    if fold(*chars.get(i)?) != '<' {
+        return None;
+    }
+    let mut j = i + 1;
+    while chars.get(j).is_some_and(|&c| skippable(c)) { j += 1; }
+    let closing = chars.get(j).is_some_and(|&c| fold(c) == '/');
+    if closing {
+        j += 1;
+    }
+    for want in word.chars() {
+        while chars.get(j).is_some_and(|&c| skippable(c)) { j += 1; }
+        if fold(*chars.get(j)?) != want {
+            return None;
+        }
+        j += 1;
+    }
+    while chars.get(j).is_some_and(|&c| skippable(c)) { j += 1; }
+    (fold(*chars.get(j)?) == '>').then_some((j + 1 - i, closing))
+}
+
+/// The body with every attachment list tag quoted (see [`FILE_LIST_TAGS`]).
+fn neutralize_file_lists(msg: &str) -> String {
+    let chars: Vec<char> = msg.chars().collect();
+    let mut out = String::with_capacity(msg.len());
+    let mut i = 0;
+    'scan: while i < chars.len() {
+        for word in FILE_LIST_TAGS {
+            if let Some((len, closing)) = match_list_tag(&chars, i, word) {
+                out.push_str(&format!("<{}{word}-quoted>", if closing { "/" } else { "" }));
                 i += len;
                 continue 'scan;
             }

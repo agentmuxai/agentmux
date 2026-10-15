@@ -96,6 +96,25 @@ pub(super) fn echo_jekt_to_sender(
     trust: EchoTrust<'_>,
     priority: &str,
 ) {
+    echo_jekt_to_sender_with_files(state, source_agent, target_agent, message, msgid, effective_tier, requires_stop, trust, priority, None);
+}
+
+/// [`echo_jekt_to_sender`] for a jekt delivered with files: the sender's
+/// echo lists them as the receiver's message did, so its pane shows the
+/// same chips (SPEC_JEKT_FILE_TRANSFER_2026_10_05.md §6.2).
+#[allow(clippy::too_many_arguments)]
+fn echo_jekt_to_sender_with_files(
+    state: &AppState,
+    source_agent: Option<&str>,
+    target_agent: &str,
+    message: &str,
+    msgid: &str,
+    effective_tier: Option<&str>,
+    requires_stop: Option<bool>,
+    trust: EchoTrust<'_>,
+    priority: &str,
+    files: Option<&crate::backend::reactive::types::FilesDelivery>,
+) {
     let EchoTrust {
         delivery_tier,
         sig_verified,
@@ -114,7 +133,7 @@ pub(super) fn echo_jekt_to_sender(
     };
 
     let sanitized = crate::backend::reactive::sanitize::sanitize_message(message);
-    let wrapped = crate::backend::reactive::sanitize::wrap_jekt_message(
+    let wrapped = crate::backend::reactive::sanitize::wrap_jekt_message_with_files(
         &sanitized,
         Some(&sender_reg.agent_id),
         target_agent,
@@ -146,6 +165,7 @@ pub(super) fn echo_jekt_to_sender(
         msgid,
         priority,
         None,
+        files,
     );
     let line = serde_json::json!({
         "type": "user",
@@ -828,6 +848,14 @@ pub(crate) async fn deliver(
     req.route_unsigned_target();
     resolve_transcript_request_tier_fields(&state.mstore, &mut req);
 
+    // Files sent with it (SPEC_JEKT_FILE_TRANSFER_2026_10_05.md §3.3, §6):
+    // refused outright unless the msgid binds them, then prepared for the
+    // agent here, since the handler does no I/O.
+    if let Err(error) = super::jekt_files::check(&req) {
+        return files_refused(&req, error);
+    }
+    super::jekt_files::prepare(&mut req).await;
+
     // 1. Try local ReactiveHandler first (fast path — same instance).
     let resp = state.reactive_handler.inject_message(req.clone());
     if resp.success {
@@ -852,6 +880,21 @@ pub(crate) async fn deliver(
         .as_deref()
         .map(|e| e.starts_with("agent not found"))
         .unwrap_or(false);
+
+    // Files don't leave this instance yet (spec §8, Phase 1): hold them for
+    // an agent defined here that isn't running, or say why they can't go.
+    if is_not_found && req.files.is_some() {
+        if let Some(held) = hold_for_absent_target(state, auth_via, &req, &resp, HoldReason::NotRunning).await {
+            return held;
+        }
+        return files_refused(
+            &req,
+            format!(
+                "{} isn't on this AgentMux; files can only be sent to an agent on the same AgentMux for now",
+                req.target_agent
+            ),
+        );
+    }
 
     if is_not_found && req.forward_hops >= MAX_FORWARD_HOPS {
         tracing::warn!(
@@ -1129,6 +1172,22 @@ pub(crate) async fn deliver(
     serde_json::to_value(&resp).unwrap_or_default()
 }
 
+/// The answer for a jekt whose files can't be accepted: nothing delivered.
+fn files_refused(req: &InjectionRequest, error: String) -> serde_json::Value {
+    serde_json::to_value(crate::backend::reactive::types::InjectionResponse {
+        success: false,
+        request_id: req.request_id.clone().unwrap_or_default(),
+        block_id: None,
+        error: Some(error),
+        timestamp: agentmux_common::time::now_ms_u64(),
+        effective_tier: None,
+        requires_stop: None,
+        channel_verified: None,
+        deferred: None,
+    })
+    .unwrap_or_default()
+}
+
 /// Echo a locally delivered jekt into the sender's own pane, as every
 /// successful delivery path does.
 fn echo_local_delivery(
@@ -1136,7 +1195,7 @@ fn echo_local_delivery(
     req: &InjectionRequest,
     resp: &crate::backend::reactive::types::InjectionResponse,
 ) {
-    echo_jekt_to_sender(
+    echo_jekt_to_sender_with_files(
         state,
         req.source_agent.as_deref(),
         &req.target_agent,
@@ -1156,6 +1215,7 @@ fn echo_local_delivery(
             channel_verified: req.channel_verified,
         },
         req.priority.as_deref().unwrap_or("normal"),
+        req.files_delivery.as_ref(),
     );
 }
 
@@ -1204,6 +1264,11 @@ pub(crate) async fn hold_for_absent_target(
         channel_verified: req.channel_verified,
         is_transcript_request: req.is_transcript_request,
         transcript_request_escalate_forced: req.transcript_request_escalate_forced,
+        files_json: req
+            .files
+            .as_ref()
+            .and_then(|f| serde_json::to_string(f).ok())
+            .unwrap_or_default(),
         sent_at_ms: now,
         expires_at_ms: now + HELD_TTL_MS,
         attempts: 0,

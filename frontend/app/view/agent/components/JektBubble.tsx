@@ -23,6 +23,7 @@ import { Show, createEffect, createMemo, untrack, type JSX } from "solid-js";
 import { proseDoc, rawDoc } from "../preview-text/docs";
 import type { JektMessageNode } from "../types";
 import { JEKT_DELIVERY_ICONS, JEKT_TIER_ICONS } from "../types";
+import { AttachmentStrip } from "../attachments/AttachmentStrip";
 import { arrivedLive } from "../virtualization/live-arrival";
 import { CollapsibleMessage } from "./CollapsibleMessage";
 import { PreviewLines } from "./PreviewLines";
@@ -112,6 +113,10 @@ export const JektBubble = (props: JektBubbleProps): JSX.Element => {
             }
             body={
                 <>
+                    {/* Files sent with it, above the text as on a user message. */}
+                    <Show when={props.node.attachments?.length}>
+                        <AttachmentStrip attachments={props.node.attachments!} />
+                    </Show>
                     {/* Prose: wraps at words (PreviewLines, the preview text stage). */}
                     <div class="agent-jekt-body" ref={handoff}>
                         <PreviewLines doc={bodyDoc()} linkify />

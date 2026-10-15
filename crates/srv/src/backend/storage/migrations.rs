@@ -1434,6 +1434,10 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
         // v43 (see its doc comment), then a device's send grant (no bump: older builds ignore it).
         "ALTER TABLE db_agents ADD COLUMN hide_from_devices INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE db_viewer_devices ADD COLUMN can_send INTEGER NOT NULL DEFAULT 0",
+        // The files a held jekt was sent with, as manifest JSON
+        // (SPEC_JEKT_FILE_TRANSFER_2026_10_05.md §4.5). No bump: an older
+        // build ignores the column and replays the text alone.
+        "ALTER TABLE db_jekt_held ADD COLUMN files_json TEXT NOT NULL DEFAULT ''",
     ] {
         if let Err(e) = conn.execute_batch(stmt) {
             let msg = e.to_string();
