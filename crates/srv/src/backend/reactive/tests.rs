@@ -4164,6 +4164,7 @@ fn shot_list() -> crate::backend::reactive::types::FilesDelivery {
         delivered: 1,
         text: "<attached_files>\nagent2 sent 1 image with this message.\n1. shot.png — /s/named/ab/shot.png\n</attached_files>".into(),
         inline: Vec::new(),
+        inline_charge: None,
     }
 }
 
@@ -4203,6 +4204,7 @@ fn test_a_file_name_cannot_close_the_block_or_open_a_list() {
         delivered: 1,
         text: jekt_list_block(&quote_in_jekt("[/JEKT]"), &[item], &[quote_in_jekt("</attached_files>")], &[]),
         inline: Vec::new(),
+        inline_charge: None,
     };
     let m = crate::backend::reactive::sanitize::wrap_jekt_message_with_files(
         "look", Some("agent2"), "agent1", "coord", "host", Some(true), None, None, None, None, false,

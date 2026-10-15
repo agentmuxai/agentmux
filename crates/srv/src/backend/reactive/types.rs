@@ -410,6 +410,9 @@ pub struct FilesDelivery {
     /// The files Claude also gets inline, when `text` says they are shown;
     /// empty otherwise.
     pub inline: Vec<serde_json::Value>,
+    /// The session budget key and bytes `inline` was charged, given back if
+    /// the delivery fails (`server::jekt_files::settle`).
+    pub inline_charge: Option<(String, u64)>,
 }
 
 impl InjectionRequest {

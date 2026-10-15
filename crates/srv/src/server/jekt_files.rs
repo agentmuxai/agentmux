@@ -70,6 +70,7 @@ pub(crate) async fn prepare(req: &mut InjectionRequest) {
                 delivered: 0,
                 text: "This message was sent with files that didn't arrive.".to_string(),
                 inline: Vec::new(),
+        inline_charge: None,
             });
         }
         return;
@@ -81,6 +82,7 @@ pub(crate) async fn prepare(req: &mut InjectionRequest) {
             delivered: 0,
             text: format!("{count} {noun} sent with this message {verb} withheld: {reason}."),
             inline: Vec::new(),
+        inline_charge: None,
         });
         return;
     }
@@ -89,6 +91,7 @@ pub(crate) async fn prepare(req: &mut InjectionRequest) {
             delivered: 0,
             text: format!("{count} {noun} sent with this message couldn't be delivered: the attachment store isn't available."),
             inline: Vec::new(),
+        inline_charge: None,
         });
         return;
     };
@@ -124,23 +127,43 @@ pub(crate) async fn prepare(req: &mut InjectionRequest) {
                 None => missing.push(name),
             }
         }
-        let prepared = match inline_to {
-            Some(t) => svc.with_session_inline_budget(&t.session_key, Some(&t.new_session_key), t.session_bytes, |budget| {
-                let prepared = prompt::prepare_from(Some(&sender), &found, &missing, t.max_count, budget);
+        let (prepared, inline_charge) = match inline_to {
+            Some(t) => {
+                let prepared = svc.with_session_inline_budget(&t.session_key, Some(&t.new_session_key), t.session_bytes, |budget| {
+                    let prepared = prompt::prepare_from(Some(&sender), &found, &missing, t.max_count, budget);
+                    let spent = prompt::inline_bytes(&prepared.inline);
+                    (prepared, spent)
+                });
                 let spent = prompt::inline_bytes(&prepared.inline);
-                (prepared, spent)
-            }),
-            None => prompt::prepare_from(Some(&sender), &found, &missing, 0, 0),
+                (prepared, (spent > 0).then_some((t.session_key, spent)))
+            }
+            None => (prompt::prepare_from(Some(&sender), &found, &missing, 0, 0), None),
         };
-        FilesDelivery { delivered: found.len(), text: prepared.list, inline: prepared.inline }
+        FilesDelivery { delivered: found.len(), text: prepared.list, inline: prepared.inline, inline_charge }
     })
     .await
     .unwrap_or_else(|_| FilesDelivery {
         delivered: 0,
         text: format!("{count} {noun} sent with this message couldn't be delivered."),
         inline: Vec::new(),
+        inline_charge: None,
     });
     req.files_delivery = Some(delivery);
+}
+
+/// After a delivery attempt: give back the inline budget it was charged when
+/// it wasn't delivered (refused, rate-limited, retried later), so only a
+/// delivered jekt counts against the session the user's own attachments use.
+pub(crate) fn settle(req: &InjectionRequest, delivered: bool) {
+    let Some((key, bytes)) = req.files_delivery.as_ref().and_then(|d| d.inline_charge.clone()) else {
+        return;
+    };
+    if delivered {
+        return;
+    }
+    if let Some(svc) = attachments::get() {
+        svc.refund_session_inline(&key, bytes);
+    }
 }
 
 /// Whether this jekt's sender is proven for this message, by the same rule
@@ -416,7 +439,9 @@ async fn receive<R: tokio::io::AsyncRead + Unpin>(
     }
     prepare(&mut req).await;
     let delivered = req.files_delivery.as_ref().map_or(0, |d| d.delivered);
+    let charged = req.clone();
     let resp = state.reactive_handler.inject_message(req);
+    settle(&charged, resp.success);
     if claimed && !resp.success {
         release(&msgid);
     }

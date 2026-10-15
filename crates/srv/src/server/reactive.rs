@@ -717,6 +717,7 @@ pub(crate) async fn deliver(
 
     // 1. Try local ReactiveHandler first (fast path — same instance).
     let resp = state.reactive_handler.inject_message(req.clone());
+    super::jekt_files::settle(&req, resp.success);
     if resp.success {
         echo_local_delivery(state, &req, &resp);
         return super::jekt_files::with_count(serde_json::to_value(&resp).unwrap_or_default(), &req);

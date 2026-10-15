@@ -337,6 +337,13 @@ impl Service {
     /// `max`), and record what it reports spending, as one step under a
     /// lock. `carry_from` is a per-block key counted before the session had
     /// an id; its count moves into `key` first. Blocking.
+    /// Give back what [`Self::with_session_inline_budget`] recorded for a
+    /// message that then wasn't delivered. Blocking.
+    pub fn refund_session_inline(&self, key: &str, bytes: u64) {
+        let _guard = self.session_budget.lock().unwrap();
+        self.store.refund_session_inline_bytes(key, bytes);
+    }
+
     pub fn with_session_inline_budget<T>(
         &self,
         key: &str,

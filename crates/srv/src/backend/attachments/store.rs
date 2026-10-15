@@ -202,6 +202,18 @@ impl Store {
         let _ = std::fs::remove_file(self.session_path(from));
     }
 
+    /// Take back bytes counted for a message that wasn't delivered.
+    pub fn refund_session_inline_bytes(&self, key: &str, bytes: u64) {
+        let now = self.session_inline_bytes(key);
+        if bytes == 0 || now == 0 {
+            return;
+        }
+        let _ = write_atomic(
+            &self.session_path(key),
+            serde_json::json!({ "bytes": now.saturating_sub(bytes) }).to_string().as_bytes(),
+        );
+    }
+
     pub fn add_session_inline_bytes(&self, key: &str, bytes: u64) {
         if bytes == 0 {
             return;
@@ -1075,6 +1087,20 @@ mod tests {
         let (good, _) = ingest(&s, &png(dir.path(), "good.png", 2)).unwrap();
         s.discard_if_unprocessed(&good);
         assert!(s.meta(&good, &fingerprint(2000)).is_some());
+    }
+
+    /// A jekt that wasn't delivered gives back what it was charged, never
+    /// below zero (SPEC_JEKT_FILE_TRANSFER_2026_10_05.md §6.4).
+    #[test]
+    fn session_inline_bytes_can_be_refunded() {
+        let (_dir, s) = store();
+        s.add_session_inline_bytes("sess-r", 1500);
+        s.refund_session_inline_bytes("sess-r", 1000);
+        assert_eq!(s.session_inline_bytes("sess-r"), 500);
+        s.refund_session_inline_bytes("sess-r", 9999);
+        assert_eq!(s.session_inline_bytes("sess-r"), 0);
+        s.refund_session_inline_bytes("sess-none", 10);
+        assert_eq!(s.session_inline_bytes("sess-none"), 0);
     }
 
     #[test]
