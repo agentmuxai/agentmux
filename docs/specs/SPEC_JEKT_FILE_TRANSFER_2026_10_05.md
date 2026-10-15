@@ -1,7 +1,7 @@
 # SPEC: Send files with a jekt, on every delivery tier
 
 **Date:** 2026-10-05, revised 2026-10-15 against `main` 53682b5bc
-**Status:** Phase 1 shipped (#4965); Phase 2 in review; Phases 3–5 proposed
+**Status:** active — Phase 1 shipped (#4965); Phase 2 in review; Phases 3–5 proposed
 **Author:** AgentX@narko; revision by Loap@narko
 **Builds on:** `SPEC_AGENT_PANE_IMAGE_ATTACHMENTS_2026_09_26.md` and `SPEC_AGENT_PANE_FILE_ATTACHMENTS_2026_09_26.md` (the attachment store and how providers receive attachments), `SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md`, `SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md`, `SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md`, `SPEC_WAN_JEKT_VERIFICATION_2026_09_24.md`, `SPEC_WAN_JEKT_SIGNED_BY_SRV_2026_10_14.md` (signing per tier), `SPEC_DURABLE_JEKT_DELIVERY_2026_09_24.md` (held messages), `SPEC_JEKT_DELIVERY_STATES_AND_MAILBOX_2026_10_01.md`.
 
