@@ -161,9 +161,13 @@ pub(crate) async fn handle_claim_work(
     let identified = caller.as_ref().is_some_and(|c| c.0.uid().is_some());
     let stored = tokio::task::spawn_blocking(move || {
         let stored = store.work_claim_put(&claim, now)?;
-        // The claim in its repository's channel (SPEC_AGENT_COORDINATION_CHANNEL_2026_10_15 §3.5).
-        if let Some(post) = coord::claim_post(&stored, false, identified, now) {
-            let _ = store.coord_post_put(&post, now);
+        // A new claim in its repository's channel (SPEC_AGENT_COORDINATION_CHANNEL_2026_10_15
+        // §3.5); a renewal (it keeps the existing claim's id) posts nothing, or re-claiming to
+        // extend it would fill the channel.
+        if stored.id == claim.id {
+            if let Some(post) = coord::claim_post(&stored, false, identified, now) {
+                let _ = store.coord_post_put(&post, now);
+            }
         }
         let live = store.work_claims_live(now)?;
         Ok::<_, crate::backend::storage::StoreError>((stored, live))

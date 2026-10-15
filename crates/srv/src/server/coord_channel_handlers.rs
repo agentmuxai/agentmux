@@ -206,7 +206,7 @@ pub(crate) async fn handle_read_channel(
         return bad_request("no repository to read: pass `repo`, a path in a repository, or call this from inside one");
     };
     let now = agentmux_common::time::now_ms();
-    let since_ms = p.since_minutes.map(|m| m.max(0) * 60_000).unwrap_or(DEFAULT_SINCE_MS).min(RETENTION_MS);
+    let since_ms = p.since_minutes.map(|m| m.max(0).saturating_mul(60_000)).unwrap_or(DEFAULT_SINCE_MS).min(RETENTION_MS);
     let limit = p.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT);
     let store = state.identity_store.clone();
     let repo = channel.clone();
@@ -358,6 +358,34 @@ mod tests {
         let kinds: Vec<&str> = b["posts"].as_array().unwrap().iter().map(|p| p["kind"].as_str().unwrap()).collect();
         assert_eq!(kinds, vec!["release", "claim"], "newest first: {b}");
         assert!(b["posts"][1]["text"].as_str().unwrap().ends_with(": shim removal"));
+    }
+
+    #[tokio::test]
+    async fn renewing_a_claim_posts_nothing_more() {
+        let state = crate::server::tests::test_state();
+        let repo = format!("o/r{}", unique());
+        let me = format!("claimer-{}", unique());
+        for _ in 0..3 {
+            let claim = ClaimParams {
+                repo: Some(repo.clone()),
+                path: Some("crates/x".into()),
+                agent: Some(me.clone()),
+                ..Default::default()
+            };
+            assert_eq!(handle_claim_work(State(state.clone()), None, Json(claim)).await.status(), StatusCode::OK);
+        }
+        let b = read(&state, ReadParams { repo: Some(repo), ..Default::default() }).await;
+        assert_eq!(b["posts"].as_array().unwrap().len(), 1, "{b}");
+    }
+
+    #[tokio::test]
+    async fn a_huge_window_reads_the_whole_retention() {
+        let state = crate::server::tests::test_state();
+        let repo = format!("o/r{}", unique());
+        let p = PostParams { message: Some("hello".into()), repo: Some(repo.clone()), agent: Some("C".into()), ..Default::default() };
+        assert_eq!(handle_post_to_channel(State(state.clone()), None, Json(p)).await.status(), StatusCode::OK);
+        let b = read(&state, ReadParams { repo: Some(repo), since_minutes: Some(i64::MAX), ..Default::default() }).await;
+        assert_eq!(b["posts"].as_array().unwrap().len(), 1);
     }
 
     #[test]

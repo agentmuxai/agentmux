@@ -7,7 +7,7 @@
 
 use serde_json::{json, Value};
 
-use crate::backend::reactive::sanitize::quote_in_system_note;
+use crate::backend::reactive::sanitize::{is_sensitive_message, quote_in_system_note};
 use crate::backend::storage::coord_posts::CoordPost;
 use crate::backend::storage::work_claims::WorkClaim;
 
@@ -82,14 +82,21 @@ pub fn select(posts: Vec<CoordPost>, t: &Target, pr: Option<i64>, limit: usize) 
 
 /// What a claim or a release leaves in its repository's channel: `None` for
 /// a claim with no repository (an absolute path in no known clone, or a bare
-/// topic), which has no channel.
+/// topic), which has no channel, and for one whose target looks like
+/// credentials or a destructive command. A note that does is left out: the
+/// channel refuses such text (`PostToChannel`), and keeps posts longer than
+/// a claim lives.
 pub fn claim_post(c: &WorkClaim, released: bool, identified: bool, now_ms: i64) -> Option<CoordPost> {
     let repo = c.repo.clone()?;
     let what = claims::describe(c);
-    let body = match (released, c.note.is_empty()) {
+    if is_sensitive_message(&what) {
+        return None;
+    }
+    let note = Some(c.note.as_str()).filter(|n| !n.is_empty() && !is_sensitive_message(n));
+    let body = match (released, note) {
         (true, _) => format!("released {what}"),
-        (false, true) => format!("claimed {what}"),
-        (false, false) => format!("claimed {what}: {}", c.note),
+        (false, None) => format!("claimed {what}"),
+        (false, Some(n)) => format!("claimed {what}: {n}"),
     };
     Some(CoordPost {
         id: uuid::Uuid::new_v4().to_string(),
@@ -200,6 +207,11 @@ mod tests {
         assert_eq!((p.kind.as_str(), p.repo.as_str()), ("claim", "o/r"));
         assert!(p.body.starts_with("claimed ") && p.body.ends_with(": shim removal"), "{}", p.body);
         assert!(claim_post(&c, true, true, 10).unwrap().body.starts_with("released "));
-        assert!(claim_post(&WorkClaim { repo: None, ..c }, false, true, 10).is_none());
+        assert!(claim_post(&WorkClaim { repo: None, ..c.clone() }, false, true, 10).is_none());
+        // Sensitive text never reaches the channel: the note is left out, a target skips the post.
+        let secret_note = WorkClaim { note: "rotating the deploy token".into(), ..c.clone() };
+        assert!(!claim_post(&secret_note, false, true, 10).unwrap().body.contains("token"));
+        let secret_topic = WorkClaim { path: None, topic: Some("api_key rotation".into()), ..c };
+        assert!(claim_post(&secret_topic, false, true, 10).is_none());
     }
 }
