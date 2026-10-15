@@ -239,6 +239,20 @@ pub(crate) fn key_window_is_pane_overlay() -> bool {
     is_tagged_pane_overlay(unsafe { keywin_objc::key_window() })
 }
 
+/// Show the app's own cursor while a pane overlay is the key window. The app
+/// page still gets the pointer moves and asks for its cursor (the I-beam over
+/// a text box, the hand over a link), but AppKit only applies the cursor of
+/// the key window, so after a click into a browser pane's page the pointer
+/// stayed an arrow over the rest of the app until it was clicked. `cursor` is
+/// the NSCursor CEF passes to `on_cursor_change`. UI thread only.
+#[cfg(target_os = "macos")]
+pub(crate) fn set_app_cursor_while_pane_key(cursor: *mut std::ffi::c_void) {
+    if cursor.is_null() || !key_window_is_pane_overlay() {
+        return;
+    }
+    unsafe { keywin_objc::send0(cursor, b"set\0") };
+}
+
 /// Only the pane overlay that is currently key may keep its page's
 /// RenderWidgetHostViewCocoa as first responder. Any other overlay is reset
 /// to its own window. Otherwise Chromium's CommandDispatcher, which offers an

@@ -663,6 +663,29 @@ wrap_display_handler! {
             inner.on_title_change(browser, title);
         }
 
+        /// macOS: while a browser pane's window holds the keyboard, AppKit
+        /// doesn't apply the app page's cursor, so it is set here. CEF still
+        /// handles every change as before (returns 0).
+        fn on_cursor_change(
+            &self,
+            browser: Option<&mut Browser>,
+            cursor: *mut u8,
+            _type_: CursorType,
+            _custom_cursor_info: Option<&CursorInfo>,
+        ) -> ::std::os::raw::c_int {
+            #[cfg(target_os = "macos")]
+            {
+                let state = self.inner.lock().state.clone();
+                let is_pane = browser.map_or(true, |b| state.block_id_for_browser(b).is_some());
+                if !is_pane {
+                    crate::ui_tasks::set_app_cursor_while_pane_key(cursor.cast());
+                }
+            }
+            #[cfg(not(target_os = "macos"))]
+            let _ = (browser, cursor);
+            0
+        }
+
         fn on_address_change(&self, browser: Option<&mut Browser>, frame: Option<&mut Frame>, url: Option<&CefString>) {
             let mut inner = self.inner.lock();
             inner.on_address_change(browser, frame, url);
