@@ -130,6 +130,7 @@ Agents' own memories and skills that name old tools are outside the repo; the re
 | Slice | PR | Before → after (`tools/list` characters) |
 |---|---|---|
 | S1 `Terminal` | #5001 | 11 tools, 8,714 → 1 tool, 4,525 (−48%); 97 tools → 87 |
+| S2 `Browser`, `UI` | this PR | Browser 17 tools, 15,082 → 1, 5,935 (−61%); UI 8 tools, 10,296 → 1, 3,185 (−69%); 87 tools → 64. The Browser actions that change a page take `until_text`/`until_url`/`until_gone` and `snapshot: true`, so act, wait and read is one call. Operator Config gains a Browser line (it had none) |
 
 S1 also moved the advertised list into one `ADVERTISED` constant (`crates/mcp/src/tool_schemas.rs`), which the server sends and a test checks, so each later slice changes the list in one place.
 

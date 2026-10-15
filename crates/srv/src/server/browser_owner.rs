@@ -127,7 +127,7 @@ pub(crate) fn check(
         .unwrap_or("");
     if !mirrored.eq_ignore_ascii_case(agent_id) {
         return Err(Denied::Forbidden(format!(
-            "the user took over pane {pane:?}; open a new one with OpenBrowser if you still need a browser"
+            "the user took over pane {pane:?}; open a new one with Browser's open action if you still need a browser"
         )));
     }
     Ok(())

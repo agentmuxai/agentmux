@@ -50,7 +50,7 @@ export interface ResolvedNote {
  */
 const API_REFUSED: ReadonlyMap<string, string> = new Map([
     ["files:deletePermanently", "it can't be undone"],
-    ["pane:close", "a key press closes the focused pane at once: RunCommand pane:close with a target closes it with the user's 15-second undo"],
+    ["pane:close", "a key press closes the focused pane at once: UI's command action with pane:close and a target closes it with the user's 15-second undo"],
 ]);
 
 /** Commands refused on macOS only, for something macOS can't undo yet. None
@@ -150,7 +150,7 @@ export function runCommand(command: string, target: string | undefined, deps: Ru
     if (refused) return { ran: false, reason: `${command} is not available to agents: ${refused}` };
     const info = listShortcuts(deps.platform).find((s) => s.command === command);
     if (!info) {
-        return { ran: false, reason: `unknown command ${command}: ListShortcuts lists the commands` };
+        return { ran: false, reason: `unknown command ${command}: UI's shortcuts action lists the commands` };
     }
     if (target) {
         const notHere: RunResult = { ran: false, reason: `pane ${target} is not in this window` };
@@ -281,7 +281,7 @@ export function planKeyPress(keys: string, platform: KeyPlatform): KeyPressPlan 
         const bound = source.split(" ").map((p) => parseKey(p, platform));
         if (bound.length === specs.length && bound.every((b, i) => sameKey(b, specs[i]))) commands.add(row.command);
     }
-    if (commands.size === 0) return { reason: `"${keys}" isn't a key in the shortcut table: ListShortcuts lists them` };
+    if (commands.size === 0) return { reason: `"${keys}" isn't a key in the shortcut table: UI's shortcuts action lists them` };
     for (const c of commands) {
         const refused = refusalFor(c, platform);
         if (refused) return { reason: `"${keys}" runs ${c}, which is not available to agents: ${refused}` };
@@ -289,7 +289,7 @@ export function planKeyPress(keys: string, platform: KeyPlatform): KeyPressPlan 
     const events: KeyEventPlan[] = [];
     for (const [i, spec] of specs.entries()) {
         const ev = eventFor(spec);
-        if (!ev) return { reason: `"${parts[i]}": PressKeys can't send that key yet` };
+        if (!ev) return { reason: `"${parts[i]}": UI's keys action can't send that key yet` };
         events.push(ev);
     }
     return { events, modifiers: specs.map(modifierNames), commands: [...commands] };

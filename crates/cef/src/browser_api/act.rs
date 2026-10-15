@@ -543,7 +543,7 @@ pub async fn act_route(
         return unauthorized();
     }
     let Some(table) = state.browser_api.ref_tables.get(&req.block_id) else {
-        return fail("no snapshot of this pane yet: take one with BrowserSnapshot first");
+        return fail("no snapshot of this pane yet: take one with Browser's snapshot action first");
     };
     let Some(&backend) = table.refs.get(&req.ref_) else {
         return fail(format!("unknown reference {:?}; take a new snapshot", req.ref_));
@@ -573,7 +573,7 @@ async fn act(cdp: &mut CdpSession, table: &RefTable, backend: i64, req: &ActReq)
     let after = match req.action.as_str() {
         "click" => {
             if facts.is_file_input() {
-                return Err("this is a file input: clicking it opens a file dialog only the user can use; upload with BrowserSetFiles".to_string());
+                return Err("this is a file input: clicking it opens a file dialog only the user can use; upload with Browser's set_files action".to_string());
             }
             // Fail closed: a click we can't classify (the page broke the
             // check, say by shadowing form.elements) isn't made.
@@ -887,7 +887,7 @@ pub async fn set_files_route(
         return fail("no files given");
     }
     let Some(table) = state.browser_api.ref_tables.get(&req.block_id) else {
-        return fail("no snapshot of this pane yet: take one with BrowserSnapshot first");
+        return fail("no snapshot of this pane yet: take one with Browser's snapshot action first");
     };
     let Some(&backend) = table.refs.get(&req.ref_) else {
         return fail(format!("unknown reference {:?}; take a new snapshot", req.ref_));
