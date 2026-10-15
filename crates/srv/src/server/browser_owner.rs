@@ -117,7 +117,7 @@ pub(crate) fn check(
     if !recorded.is_some_and(|r| r.eq_ignore_ascii_case(agent_id)) {
         return Err(Denied::Forbidden(format!(
             "pane {pane:?} is not a browser pane you own: an agent can drive only browser \
-             panes it opened itself with OpenBrowser, and loses one the user takes over"
+             panes it opened itself with Browser's open action, and loses one the user takes over"
         )));
     }
     let mirrored = block

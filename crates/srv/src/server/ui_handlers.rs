@@ -1030,7 +1030,7 @@ fn opener_allows(
                 StatusCode::FORBIDDEN,
                 format!(
                     "the user took over pane {opener:?}, which opened popup {pane:?} (directly or \
-                     through other popups); open a new pane with OpenBrowser if you still need a browser"
+                     through other popups); open a new pane with Browser's open action if you still need a browser"
                 ),
             ));
         }
@@ -1100,7 +1100,7 @@ fn popup_window_target(state: &AppState, id: &str, agent_id: &str) -> Result<Str
             StatusCode::FORBIDDEN,
             format!(
                 "the user took over pane {:?}, which opened popup window {id:?}; open a new pane \
-                 with OpenBrowser if you still need a browser",
+                 with Browser's open action if you still need a browser",
                 w.opener
             ),
         ));
@@ -1133,7 +1133,7 @@ fn not_waiting_on_user(pane: &str) -> Result<(), (StatusCode, String)> {
         Some(Kind::Handoff) => Err((
             StatusCode::CONFLICT,
             format!(
-                "the user is working in pane {pane:?} (your BrowserHandoff); your tools on it are \
+                "the user is working in pane {pane:?} (your Browser handoff); your tools on it are \
                  paused until they click Done or Cancel"
             ),
         )),

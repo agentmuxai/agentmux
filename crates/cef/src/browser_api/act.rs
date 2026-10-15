@@ -602,7 +602,7 @@ async fn act(cdp: &mut CdpSession, table: &RefTable, backend: i64, req: &ActReq)
                 // still shows what the user approved.
                 if !committing || req.approved_as.as_ref() != Some(&ask) {
                     return Err("the form changed while the user was reading the approval, so nothing was clicked; \
-                                call BrowserClick again to show them what it sends now"
+                                click it again to show them what it sends now"
                         .to_string());
                 }
             } else if committing {

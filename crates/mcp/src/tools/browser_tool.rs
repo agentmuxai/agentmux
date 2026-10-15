@@ -41,7 +41,11 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
     match name {
         "Browser" => {
             let (act, args) = pick("Browser", ACTS, arguments)?;
-            let follow_wait = ["until_text", "until_url", "until_gone"].iter().any(|k| arguments.get(*k).is_some());
+            // `wait`'s own conditions are the until_* parameters (pick renamed
+            // them for its handler): for wait they are not a follow-up.
+            let is_wait = act.action == "wait";
+            let follow_wait =
+                !is_wait && ["until_text", "until_url", "until_gone"].iter().any(|k| arguments.get(*k).is_some());
             let follow_snapshot = arguments.get("snapshot").and_then(|v| v.as_bool()).unwrap_or(false);
             if (follow_wait || follow_snapshot) && !CHANGES_THE_PAGE.contains(&act.action) {
                 anyhow::bail!(
@@ -130,6 +134,22 @@ mod tests {
     fn a_follow_up_wait_uses_the_until_parameters_not_the_actions_text() {
         let args = json!({ "action": "fill", "pane": "p", "ref": "e2", "text": "hello", "until_url": "/next", "timeout_seconds": 5 });
         assert_eq!(follow_wait_args(&args), json!({ "pane": "p", "url_contains": "/next", "timeout_seconds": 5 }));
+    }
+
+    /// wait with its conditions reaches its handler (which, with no srv here,
+    /// fails on the missing environment) instead of the follow-up guard.
+    #[tokio::test]
+    async fn wait_with_its_conditions_is_not_taken_for_a_follow_up() {
+        let (client, loops, counter) = cx_parts();
+        let cx = ToolCtx { local_url: "", auth_key: "", block_id: "", client: &client, loops: &loops, loop_counter: &counter };
+        for args in [
+            json!({ "action": "wait", "until_text": "Done" }),
+            json!({ "action": "wait", "until_url": "/next", "pane": "p" }),
+            json!({ "action": "wait", "until_gone": "e4" }),
+        ] {
+            let e = call("Browser", &args, &cx).await.unwrap_err().to_string();
+            assert!(!e.contains("follow an action that changes the page"), "{args}: {e}");
+        }
     }
 
     #[tokio::test]

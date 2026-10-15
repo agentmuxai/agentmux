@@ -382,7 +382,7 @@ pub(crate) fn candidate_label(w: &AgentMuxWindowInfo) -> String {
     if w.is_agentmux {
         format!("pid={} title={:?}", w.pid, w.title)
     } else {
-        format!("pid={} <non-AgentMux window; pass include_foreign to DiscoverWindows to identify it>", w.pid)
+        format!("pid={} <non-AgentMux window; pass include_foreign to UI's windows action to identify it>", w.pid)
     }
 }
 
@@ -445,7 +445,7 @@ pub(crate) fn capture_window_impl(
                 );
             }
             anyhow::bail!(
-                "no window found for pid {target_pid} — call DiscoverWindows to see \
+                "no window found for pid {target_pid} — use UI's windows action to see \
                  current candidates"
             );
         }
@@ -626,7 +626,7 @@ pub(crate) fn capture_window_impl(
         " (likely_unrendered: true — the captured frame looks solid or \
            near-solid-color even after retrying, which can mean the window \
            hasn't painted its first real frame yet, or that it genuinely \
-           looks like this; consider calling CaptureWindow again shortly if \
+           looks like this; consider capturing it again shortly if \
            that's unexpected)"
     } else {
         ""
