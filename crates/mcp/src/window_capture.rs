@@ -419,8 +419,7 @@ pub(crate) fn capture_window_impl(
 
     let target: &AgentMuxWindowInfo = if let Some(target_pid) = pid {
         // A single host process can own multiple top-level windows sharing
-        // the same pid (`LAST_FOCUSED_BY_ROOT` in
-        // crates/cef/src/browser_pane/hwnd.rs, `find_all_own_windows` in
+        // the same pid (`find_all_own_windows` in
         // crates/cef/src/commands/window/lifecycle.rs), so a plain `.find()`
         // would capture whichever matching window enumerated first — possibly
         // a pool/sub-window, not the one the caller meant. Same
