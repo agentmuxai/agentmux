@@ -108,12 +108,6 @@ export function isLayoutQuiet(model: LayoutModel): boolean {
 }
 
 /**
- * Show what srv stores. When the model is quiet and its row includes every
- * intent it sent (`layoutVersionFloor`), a stored tree that differs from the
- * local one replaces it: srv refused an edit, or computed it differently.
- * Focus stays the frontend's while its pane exists.
- */
-/**
  * A drag on `model` ended. The comparison with srv's stored tree is skipped
  * while a drag is active, and some repairs ask for it mid-drag (a cross-tab
  * redock that srv refused before `dragend`), so run it now. One task later:
@@ -123,6 +117,12 @@ export function layoutDragEnded(model: LayoutModel): void {
     setTimeout(() => reconcileWithStoredLayout(model), 0);
 }
 
+/**
+ * Show what srv stores. When the model is quiet and its row includes every
+ * intent it sent (`layoutVersionFloor`), a stored tree that differs from the
+ * local one replaces it: srv refused an edit, or computed it differently.
+ * Focus stays the frontend's while its pane exists.
+ */
 export function reconcileWithStoredLayout(model: LayoutModel): void {
     if (model.disposed || !isLayoutQuiet(model)) return;
     const row = model.getter(model.muxObjectAtom);

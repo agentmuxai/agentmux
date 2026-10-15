@@ -436,12 +436,6 @@ fn balance_drops_empty_branch_child() {
     assert!(node.children.iter().all(|c| c.data.is_some()));
 }
 
-// ── isInstanceLabel filter (JS analogue: insert location) ──────────────────
-
-// ── insertNodeAtIndex ────────────────────────────────────────────────────────
-
-// ── swapNode ──────────────────────────────────────────────────────────────────
-
 // ── deleteNode ────────────────────────────────────────────────────────────────
 
 #[test]
@@ -492,8 +486,6 @@ fn delete_node_root_returns_ok_without_deleting() {
     assert!(result.is_ok());
 }
 
-// ── resizeNode ────────────────────────────────────────────────────────────────
-
 // ── focusNode (find_node_by_id, id lookup) ────────────────────────────────────
 
 #[test]
@@ -505,22 +497,6 @@ fn find_node_by_id_finds_nested_node() {
     assert!(find_node_by_id(&root, "middle").is_some());
     assert!(find_node_by_id(&root, "ghost").is_none());
 }
-
-// ── magnifyNodeToggle (via split to verify two-level structure) ─────────────
-
-// ── replaceNode ──────────────────────────────────────────────────────────────
-
-// ── Purity ───────────────────────────────────────────────────────────────────
-
-// ── insertNode ID stability ───────────────────────────────────────────────────
-
-// ── insertNodeAtIndex leaf promotion ─────────────────────────────────────────
-
-// ── swapNode ancestor rejection ──────────────────────────────────────────────
-
-// ── moveNode ─────────────────────────────────────────────────────────────────
-
-// ── resizeNode missing target ────────────────────────────────────────────────
 
 // ── Purity ───────────────────────────────────────────────────────────────────
 
