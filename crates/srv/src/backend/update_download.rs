@@ -310,6 +310,31 @@ mod tests {
         assert_eq!(free_folder(dir.path(), "other"), dir.path().join("other"));
     }
 
+    /// The real thing, against a published release (125 MB; run by hand):
+    /// `cargo test -p agentmux-srv --bin agentmux-srv -- --ignored real_portable_release`.
+    #[cfg(windows)]
+    #[tokio::test]
+    #[ignore]
+    async fn real_portable_release_downloads_verifies_and_unpacks() {
+        let name = "agentmux-0.59.27-x64-portable.7z";
+        let asset = ReleaseAsset {
+            name: name.into(),
+            size: 124_705_866,
+            url: format!("{RELEASE_DOWNLOAD_PREFIX}v0.59.27/{name}"),
+            sha256: "db750e1689752519ad21b730436f783493c63b59ad734677a433e413c9b47f2a".into(),
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join(name);
+        download(&asset, &file, "0.59.27").await.unwrap();
+        let folder = unpack_portable(&file, "0.59.27", dir.path()).await.unwrap();
+        assert!(is_staged_portable(&folder, "0.59.27"));
+        // One wrong byte of checksum and the download is refused and removed.
+        let wrong = ReleaseAsset { sha256: "0".repeat(64), ..asset };
+        let err = download(&wrong, &dir.path().join("again.7z"), "0.59.27").await.unwrap_err();
+        assert!(err.contains("checksum"), "{err}");
+        assert!(!dir.path().join(format!("{name}.part")).exists());
+    }
+
     /// Windows' tar.exe reads the archive and the folder lands in place;
     /// a zip stands in for the release `.7z` (both go through libarchive).
     #[cfg(windows)]
