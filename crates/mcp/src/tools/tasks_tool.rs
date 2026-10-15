@@ -6,7 +6,7 @@
 //! replaces the six Work* tools, renamed so the queue can't be confused with
 //! Presence's claims; their handlers (work.rs) run each action unchanged.
 
-use super::family::{pick, Act};
+use super::family::{pick, relabeled, Act};
 use super::*;
 
 pub(super) const ACTS: &[Act] = &[
@@ -22,7 +22,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
     match name {
         "Tasks" => {
             let (act, args) = pick("Tasks", ACTS, arguments)?;
-            work::call(act.tool, &args, cx).await
+            relabeled("Tasks", ACTS, work::call(act.tool, &args, cx).await)
         }
         _ => Err(not_in_family()),
     }

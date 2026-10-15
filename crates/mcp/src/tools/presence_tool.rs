@@ -6,7 +6,7 @@
 //! replaces WhoIsWorkingOn, ClaimWork and ReleaseWork; their handlers
 //! (overlap.rs) run each action unchanged.
 
-use super::family::{pick, Act};
+use super::family::{pick, relabeled, Act};
 use super::*;
 
 pub(super) const ACTS: &[Act] = &[
@@ -19,7 +19,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
     match name {
         "Presence" => {
             let (act, args) = pick("Presence", ACTS, arguments)?;
-            overlap::call(act.tool, &args, cx).await
+            relabeled("Presence", ACTS, overlap::call(act.tool, &args, cx).await)
         }
         // The channel tools live in overlap.rs too; they pass through here
         // until the Message family takes them (slice S4).
