@@ -7,12 +7,12 @@
 .type-ahead-modal-backdrop {
     @include mixins.abs-fill;
     background-color: transparent;
-    z-index: var(--zindex-typeahead-modal-backdrop);
+    z-index: var(--z-typeahead-backdrop);
 }
 
 .type-ahead-modal {
     position: absolute;
-    z-index: var(--zindex-typeahead-modal);
+    z-index: var(--z-typeahead);
     display: flex;
     flex-direction: column;
     align-items: flex-start;
@@ -40,19 +40,11 @@
             padding: var(--space-1) var(--space-1-5);
             height: 24px;
         }
-
-        .input-decoration.end-position {
-            margin: var(--space-1-5);
-
-            i {
-                opacity: 0.3;
-            }
-        }
     }
 
     &.has-suggestions {
         .input {
-            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+            border-bottom: 1px solid var(--tint-3);
         }
     }
 

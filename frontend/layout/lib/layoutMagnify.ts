@@ -252,7 +252,7 @@ export function updateEphemeralNodeProps(
         },
         true,
         true,
-        "var(--zindex-layout-ephemeral-node)"
+        "var(--z-layout-ephemeral)"
     );
     addlPropsMap[node.id] = { treeKey: "-1", transform };
     leafs.push(node);

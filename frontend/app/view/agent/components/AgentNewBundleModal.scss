@@ -1,6 +1,8 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+@use "../../../element/ui/line";
+
 // Shared styles for AgentNewIdentityModalPanel and
 // AgentNewMemoryModalPanel. Canonical modal chrome lives in
 // `frontend/app/element/modal.scss`; this file styles the form
@@ -70,10 +72,8 @@
 
 .agent-new-bundle-modal-error {
     padding: var(--space-1-5) var(--space-2);
-    background: color-mix(in srgb, var(--error-color) 10%, transparent);
-    border: 1px solid color-mix(in srgb, var(--error-color) 30%, transparent);
+    @include line.notice(danger);
     border-radius: 0;
-    color: var(--error-color);
     font-size: var(--text-sm);
 }
 

@@ -57,7 +57,7 @@
     &::after {
         content: "";
         position: absolute;
-        z-index: var(--zindex-layout-placeholder-container);
+        z-index: var(--z-layout-placeholder);
         background-color: var(--drop-target-bg);
         border: 1px solid var(--drop-zone-armed-border);
         box-sizing: border-box;

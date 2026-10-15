@@ -329,7 +329,7 @@
     }
 
     &:hover:not(:disabled, :focus) {
-        border-color: color-mix(in srgb, var(--accent-color) 30%, transparent);
+        border-color: var(--accent-line);
     }
 
     &:focus {
@@ -442,7 +442,7 @@ select.ui-input {
     transition-timing-function: var(--ease-standard);
 
     &:hover:not(:disabled) {
-        border-color: color-mix(in srgb, var(--accent-color) 30%, transparent);
+        border-color: var(--accent-line);
     }
 
     &[aria-checked="true"] {

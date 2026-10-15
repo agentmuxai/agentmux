@@ -21,7 +21,7 @@
 @use "../../../mixins.scss";
 .agent-session-btn {
     appearance: none;
-    background: color-mix(in srgb, var(--main-text-color) 6%, transparent);
+    background: var(--tint-2);
     border: 1px solid var(--border-color);
     border-radius: 0;
     color: var(--main-text-color);
@@ -37,7 +37,7 @@
         color var(--duration-decorative-instant) var(--ease-standard);
 
     &:hover:not(:disabled) {
-        background: color-mix(in srgb, var(--accent-color) 14%, transparent);
+        background: var(--accent-bg);
         border-color: var(--accent-color);
         color: var(--main-text-color);
     }
@@ -160,7 +160,7 @@
     gap: var(--space-2);
     padding: 2px var(--space-2);
     border-top: 1px solid var(--border-color);
-    background: color-mix(in srgb, var(--main-text-color) 2%, transparent);
+    background: var(--tint-1);
     font-size: var(--text-2xs);
     font-family: var(--font-mono);
     color: var(--secondary-text-color);

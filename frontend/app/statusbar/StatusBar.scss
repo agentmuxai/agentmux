@@ -31,7 +31,7 @@
     color: var(--secondary-text-color);
     user-select: none;
     -webkit-app-region: no-drag;
-    z-index: calc(var(--zindex-modal-wrapper) - 1);
+    z-index: var(--z-status-bar);
     padding: 0 var(--space-1-5);
     gap: 0;
     // Never wider than the window: a single item still too wide is cut at the
@@ -429,58 +429,13 @@
     // so the cause of that dot is unmistakable once the panel is open.
     &.muxbus-login-chip-signin {
         color: var(--error-color);
-        background: color-mix(in srgb, var(--error-color) 12%, transparent);
+        background: var(--error-bg);
         border-radius: 4px;
         cursor: pointer;
 
         &:hover:not(:disabled) {
             background: color-mix(in srgb, var(--error-color) 22%, transparent);
         }
-    }
-
-    // Signed-in state — slightly more prominent than version chip.
-    &.muxbus-login-chip-connected {
-        opacity: 0.55;
-
-        &:hover {
-            opacity: 1;
-            background: var(--hover-bg-color);
-        }
-    }
-
-    // Green dot indicating live cloud connection.
-    .muxbus-login-chip-dot {
-        display: inline-block;
-        width: 5px;
-        height: 5px;
-        border-radius: 50%;
-        background: var(--success-color);
-        flex-shrink: 0;
-    }
-
-    // Truncate long emails gracefully.
-    .muxbus-login-chip-email {
-        max-width: 140px;
-        @include mixins.truncate;
-    }
-}
-
-// Inline error indicator (! badge) shown beside the chip when connect/disconnect fails.
-.muxbus-login-chip-error {
-    color: var(--error-color);
-    font-size: var(--text-xs);
-    cursor: default;
-    padding: 0 2px;
-}
-
-// Disconnect popover — inherits .status-bar-popover layout.
-.muxbus-login-popover {
-    min-width: 220px;
-
-    .muxbus-popover-email {
-        font-size: 0.95em;
-        max-width: 160px;
-        @include mixins.truncate;
     }
 }
 

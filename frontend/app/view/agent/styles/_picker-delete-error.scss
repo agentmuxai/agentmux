@@ -11,7 +11,7 @@
     padding: var(--space-2) var(--space-3);
     font-size: var(--text-sm);
     color: var(--error-color);
-    background: color-mix(in srgb, var(--error-color) 10%, transparent);
+    background: var(--error-bg);
     border-radius: var(--radius-sm);
 }
 

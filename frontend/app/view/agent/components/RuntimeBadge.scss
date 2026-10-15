@@ -40,13 +40,13 @@
     &--container {
         background: color-mix(in srgb, var(--success-color) 15%, transparent);
         color: var(--success-color);
-        border: 1px solid color-mix(in srgb, var(--success-color) 30%, transparent);
+        border: 1px solid var(--success-line);
     }
 
     &--host {
         background: color-mix(in srgb, var(--warning-color) 15%, transparent);
         color: var(--warning-color);
-        border: 1px solid color-mix(in srgb, var(--warning-color) 30%, transparent);
+        border: 1px solid var(--warning-line);
     }
 
     // `&` can only appear once, at the start of a compound selector — `&--tag&--host`
@@ -54,18 +54,18 @@
     // compiling to the exact same compound selector: `.runtime-badge--tag.runtime-badge--host`.
     &--tag#{&}--host {
         color: var(--warning-color);
-        background: color-mix(in srgb, var(--warning-color) 10%, transparent);
+        background: var(--warning-bg);
         border: none;
     }
 
     &--tag#{&}--container {
         color: var(--main-text-color);
-        background: color-mix(in srgb, var(--main-text-color) 8%, transparent);
+        background: var(--tint-3);
         border: none;
     }
 
     &--unknown {
-        background: color-mix(in srgb, var(--main-text-color) 10%, transparent);
+        background: var(--tint-4);
         color: var(--secondary-text-color);
         border: 1px solid color-mix(in srgb, var(--main-text-color) 20%, transparent);
     }

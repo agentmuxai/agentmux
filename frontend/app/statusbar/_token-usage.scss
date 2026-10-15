@@ -207,7 +207,7 @@
             border-color var(--duration-decorative-instant) var(--ease-standard);
 
         &:hover:not(:disabled) {
-            background: color-mix(in srgb, var(--error-color) 12%, transparent);
+            background: var(--error-bg);
             border-color: color-mix(in srgb, var(--error-color) 40%, transparent);
         }
 

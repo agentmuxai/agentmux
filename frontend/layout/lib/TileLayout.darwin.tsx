@@ -63,7 +63,7 @@ const ResizeHandle = (props: ResizeHandleComponentProps) => {
                 ...props.resizeHandleProps.transform as JSX.CSSProperties,
                 cursor: cursorStyle(),
                 "pointer-events": "auto",
-                "z-index": "var(--zindex-layout-resize-handle)",
+                "z-index": "var(--z-layout-resize-handle)",
             }}
             onPointerMove={handlePointerMove}
         >

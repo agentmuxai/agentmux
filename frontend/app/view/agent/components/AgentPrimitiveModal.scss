@@ -10,13 +10,14 @@
 // fallback; see docs/specs/SPEC_ARMORY_RESPONSIVE_SINGLE_PANE_LAYOUT_2026_07_15.md.
 
 @use "../../../element/primitive-list-detail-content" as listDetail;
+@use "../../../element/ui/line";
 @use "../../../mixins.scss";
 
 .agent-primitive-modal-error {
     flex-shrink: 0;
     margin-bottom: var(--space-2);
     padding: var(--space-1-5) var(--space-2);
-    @include listDetail.error-box;
+    @include line.notice(danger);
     font-size: var(--text-sm);
 }
 

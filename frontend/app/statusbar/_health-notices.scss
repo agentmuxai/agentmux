@@ -19,7 +19,7 @@
     padding: var(--space-1) var(--space-2);
     border: 1px solid var(--warning-color);
     border-radius: var(--radius-md);
-    background: color-mix(in srgb, var(--warning-color) 14%, transparent);
+    background: var(--warning-bg);
 
     &--critical {
         border-color: var(--error-color);

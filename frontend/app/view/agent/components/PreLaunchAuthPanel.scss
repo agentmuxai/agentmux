@@ -16,7 +16,7 @@
     margin: var(--space-3) 0;
     border: 1px solid var(--border-color);
     border-radius: 0;
-    background-color: rgba(255, 255, 255, 0.02);
+    background-color: var(--tint-1);
 }
 
 .pre-launch-auth-panel-cta,
@@ -143,7 +143,7 @@
     display: block;
     width: 100%;
     padding: var(--space-2) var(--space-3);
-    background-color: rgba(255, 255, 255, 0.04);
+    background-color: var(--tint-2);
     border: 1px solid var(--border-color);
     border-radius: 0;
     color: var(--main-text-color);
@@ -159,7 +159,7 @@
     flex: 1 1 auto;
     min-width: 0;
     padding: var(--space-2) var(--space-3);
-    background-color: rgba(255, 255, 255, 0.04);
+    background-color: var(--tint-2);
     border: 1px solid var(--border-color);
     border-radius: 0;
     color: var(--main-text-color);
@@ -176,7 +176,7 @@
 
 .pre-launch-auth-panel-device-code {
     padding: var(--space-3);
-    background-color: rgba(255, 255, 255, 0.04);
+    background-color: var(--tint-2);
     border: 1px solid var(--border-color);
     border-radius: 0;
     display: flex;

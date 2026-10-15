@@ -18,6 +18,7 @@
 // .primitive-list-detail-detail-body wrappers, not a fixed sidebar.
 
 @use "../../../element/primitive-list-detail-content" as listDetail;
+@use "../../../element/ui/line";
 @use "../../../mixins.scss";
 
 .agent-memory-modal {
@@ -72,7 +73,7 @@
     flex-shrink: 0;
     margin-top: var(--space-2);
     padding: var(--space-1-5) var(--space-2);
-    @include listDetail.error-box;
+    @include line.notice(danger);
     border-radius: 0;
     font-size: var(--text-sm);
 }

@@ -65,7 +65,7 @@
         font-size: var(--text-sm);
         padding: var(--space-2) var(--space-3);
         border: 1px solid var(--error-color);
-        background: color-mix(in srgb, var(--error-color) 10%, transparent);
+        background: var(--error-bg);
         text-align: center;
     }
 
@@ -136,7 +136,7 @@
         row-gap: var(--space-1);
         padding: 14px var(--space-2) 8px 16px;
         border: 1px solid color-mix(in srgb, var(--border-color) 80%, transparent);
-        background: color-mix(in srgb, var(--main-text-color) 2%, transparent);
+        background: var(--tint-1);
         border-radius: 0;
         color: var(--main-text-color);
         // Listed, not `all`: see mixins.control-transition for why.
@@ -442,12 +442,12 @@
 
         // "when hover it highlights"
         &:hover {
-            background: color-mix(in srgb, var(--main-text-color) 10%, transparent);
+            background: var(--tint-4);
             color: var(--main-text-color);
         }
 
         &.is-open {
-            background: color-mix(in srgb, var(--accent-color) 12%, transparent);
+            background: var(--accent-bg);
             color: var(--main-text-color);
 
             i {
@@ -516,7 +516,7 @@
     }
 
     &:hover {
-        background: color-mix(in srgb, var(--main-text-color) 6%, transparent);
+        background: var(--tint-2);
     }
 
     &:focus-visible {
@@ -531,7 +531,7 @@
     border-top: 1px solid color-mix(in srgb, var(--border-color) 60%, transparent);
 
     &:hover {
-        background: color-mix(in srgb, var(--error-color) 10%, transparent);
+        background: var(--error-bg);
     }
 }
 
@@ -595,7 +595,7 @@
     font-size: var(--text-base);
     font-family: inherit;
     color: var(--main-text-color);
-    background: color-mix(in srgb, var(--main-text-color) 4%, transparent);
+    background: var(--tint-2);
     border: 1px solid var(--border-color);
     border-radius: 0;
     outline: none;

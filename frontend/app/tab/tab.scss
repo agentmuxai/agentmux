@@ -74,7 +74,7 @@
         &::before {
             content: "";
             @include mixins.abs-fill;
-            z-index: var(--zindex-activity-flash);
+            z-index: var(--z-behind);
             background: rgb(from var(--main-text-color) r g b / 0.12);
             opacity: 0;
             pointer-events: none;
@@ -117,7 +117,7 @@
 
     .name {
         user-select: none;
-        z-index: var(--zindex-tab-name);
+        z-index: var(--z-tab-name);
         font-size: var(--text-xs);
         font-weight: 400;
         overflow: hidden;
@@ -141,7 +141,7 @@
         min-height: 0; // the line Button's 26px minimum would outgrow the tab
         @include mixins.flex-center;
         cursor: default;
-        z-index: var(--zindex-tab-name);
+        z-index: var(--z-tab-name);
         padding: 0;
         /* Tab close button must NOT pick up the general `.tab *`
            transition rule — a transition on the close button causes

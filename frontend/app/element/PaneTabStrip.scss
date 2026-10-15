@@ -258,7 +258,7 @@
     &::before {
         content: "";
         @include mixins.abs-fill;
-        z-index: var(--zindex-activity-flash);
+        z-index: var(--z-behind);
         background: oklch(
             from var(--activity-flash-base, var(--pane-tab-underline, var(--accent-color)))
                 min(0.85, calc(l + 0.06)) calc(c * 1.4) h / 0.9
@@ -271,7 +271,7 @@
         // The white tint is layered ON TOP of the resting neutral
         // background rather than replacing it, so hovering an uncolored
         // tab never exposes the header's active-tab tint underneath.
-        background: linear-gradient(rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.03)),
+        background: linear-gradient(var(--tint-1), var(--tint-1)),
             var(--pane-tab-neutral-bg, transparent);
         color: var(--main-text-color);
 
@@ -480,7 +480,7 @@
         background var(--duration-decorative-instant) var(--ease-standard);
 
     &:hover {
-        background: rgba(255, 255, 255, 0.1);
+        background: var(--tint-4);
     }
 }
 
@@ -541,7 +541,7 @@
         color var(--duration-decorative-instant) var(--ease-standard);
 
     &:hover {
-        background: rgba(255, 255, 255, 0.06);
+        background: var(--tint-2);
         color: var(--main-text-color);
     }
 }

@@ -299,12 +299,6 @@
     flex-shrink: 0;
 }
 
-.browser-error-hint {
-    font-size: var(--text-xs);
-    color: var(--secondary-text-color);
-    margin-top: var(--space-1);
-}
-
 .browser-placeholder {
     flex: 1;
     width: auto; /* was 100% — auto lets flex stretch respect margin */

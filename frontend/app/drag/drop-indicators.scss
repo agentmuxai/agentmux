@@ -14,12 +14,11 @@
     --drop-prompt-bg: rgb(0 0 0 / 72%);
     --drop-prompt-fg: #fff;
     --drop-blocked-fg: var(--warning-color);
-    --zindex-file-drop: 60; // above the focused pane ring (50)
 }
 
 .drop-indicator {
     @include mixins.abs-fill;
-    z-index: var(--zindex-file-drop);
+    z-index: var(--z-file-drop);
     @include mixins.flex-center;
     pointer-events: none;
     border-radius: var(--block-border-radius);

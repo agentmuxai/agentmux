@@ -109,7 +109,7 @@
             top: calc(var(--header-height) + 6px);
             left: 6px;
             right: 6px;
-            z-index: var(--zindex-block-mask-inner);
+            z-index: var(--z-pane-mask);
             display: flex;
             align-items: center;
             justify-content: flex-start;
@@ -225,7 +225,7 @@
             border: 2px solid var(--border-color);
             pointer-events: none;
             border-radius: var(--block-border-radius);
-            z-index: var(--zindex-block-mask-inner);
+            z-index: var(--z-pane-mask);
             // Promote to a compositor layer so the focus border composites
             // above xterm's `.xterm-viewport` GPU-scroll layer
             // (`overflow-y:scroll` triggers Blink's scroll-layer promotion).
@@ -242,7 +242,7 @@
             // still guarantees a composite layer (no backdrop sample, no
             // filter, no blend). The squash/reorder concern cited in the
             // original comment is a non-issue here: the explicit
-            // `z-index: var(--zindex-block-mask-inner)` above sets paint
+            // `z-index: var(--z-pane-mask)` above sets paint
             // order within the parent stacking context, and squashing
             // groups preserve relative z-order across squashed siblings.
             will-change: transform;
@@ -283,7 +283,7 @@
                 // stacking context places it above xterm's scroll layer.
                 border-color: var(--accent-color);
                 // z-index must exceed any in-block overlay (termstickers = 20)
-                z-index: 50;
+                z-index: var(--z-pane-ring);
             }
 
             // Agent-loaded terminals show the agent color instead of accent.
@@ -367,7 +367,7 @@
         code {
             font-family: var(--font-mono);
             font-size: inherit;
-            background: color-mix(in srgb, var(--main-text-color) 6%, transparent);
+            background: var(--tint-2);
             padding: 1px 4px;
             border-radius: var(--radius-sm);
         }
@@ -385,7 +385,7 @@
 
         &:hover {
             color: var(--main-text-color);
-            background: color-mix(in srgb, var(--main-text-color) 6%, transparent);
+            background: var(--tint-2);
         }
     }
 
@@ -396,7 +396,7 @@
         overflow: auto;
         font-family: var(--font-mono);
         font-size: var(--text-xs);
-        background: color-mix(in srgb, var(--main-text-color) 4%, transparent);
+        background: var(--tint-2);
         padding: var(--space-2);
         border-radius: var(--radius-sm);
         white-space: pre-wrap;
@@ -416,7 +416,7 @@
         border-radius: var(--radius-sm);
         box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
         white-space: nowrap;
-        z-index: 9999;
+        z-index: var(--z-transient);
         animation: block-error-copied-fade 1.5s var(--ease-standard) forwards;
     }
 

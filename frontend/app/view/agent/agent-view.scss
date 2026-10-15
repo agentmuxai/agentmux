@@ -13,7 +13,6 @@
 @use "styles/tool-overlay-portal";
 @use "styles/identity-panel";
 @use "styles/launch-modal-body";
-@use "styles/import-modal-body";
 @use "styles/picker-delete-error";
 @use "styles/card-info-popover";
 @use "styles/search";
@@ -25,7 +24,6 @@
 @use "styles/control-bar";
 @use "styles/session";
 @use "styles/document";
-@use "styles/header-controls";
 @use "styles/pending-footer";
 @use "styles/attachments";
 @use "styles/responsive";
@@ -132,7 +130,7 @@
     //
     // z-index: `var(--z-pane-overlay, 4)` sits safely below every real
     // ceiling in this chain — `.connstatus-overlay` and `.block-mask`
-    // unfocused (both `--zindex-block-mask-inner` = 10) and `.block-mask`
+    // unfocused (both `--z-pane-mask` = 10) and `.block-mask`
     // focused (50) — the semantically right token for "pane chrome floating
     // over this pane's own content."
     //
@@ -445,7 +443,7 @@
     // Contains EVERY absolutely/sticky-positioned descendant's z-index —
     // .agent-pane-loading-overlay (PaneLoadingCover.scss), .agent-search-
     // bar (_search.scss, z:10), .slash-autocomplete (_slash.scss, z:50),
-    // .agent-filter-toggle (_header-controls.scss, z:10), and anything
+    // and anything
     // else added inside .agent-view later — so none of them can ever
     // escape and compete with .pane-tab-strip (a true sibling of
     // .agent-view inside .agent-pane-stack-content, z-index

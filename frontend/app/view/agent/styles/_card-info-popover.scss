@@ -52,7 +52,7 @@
         font-family: var(--font-mono);
         font-size: var(--text-xs);
         padding: 1px var(--space-1);
-        background: color-mix(in srgb, var(--main-text-color) 6%, transparent);
+        background: var(--tint-2);
         border-radius: var(--radius-sm);
         color: var(--main-text-color);
     }

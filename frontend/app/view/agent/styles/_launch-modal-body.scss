@@ -86,7 +86,7 @@
     }
 
     &:hover:not(.agent-launch-modal-radio--disabled) {
-        background: color-mix(in srgb, var(--main-text-color) 4%, transparent);
+        background: var(--tint-2);
     }
 
     &.agent-launch-modal-radio--disabled {
@@ -108,7 +108,7 @@
     font-size: var(--text-xs);
     color: var(--secondary-text-color);
     padding: var(--space-1-5) var(--space-2);
-    background: color-mix(in srgb, var(--main-text-color) 3%, transparent);
+    background: var(--tint-1);
     border: 1px dashed var(--border-color);
     border-radius: 0;
 
@@ -129,7 +129,7 @@
     font-size: var(--text-sm);
     color: var(--error-color);
     padding: var(--space-1-5) var(--space-2);
-    background: color-mix(in srgb, var(--error-color) 10%, transparent);
+    background: var(--error-bg);
     border-radius: 0;
 }
 

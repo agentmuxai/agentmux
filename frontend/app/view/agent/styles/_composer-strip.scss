@@ -306,7 +306,7 @@
 
     &:hover {
         color: var(--main-text-color);
-        background: color-mix(in srgb, var(--main-text-color) 8%, transparent);
+        background: var(--tint-3);
         border-color: var(--border-color);
     }
 
@@ -373,7 +373,7 @@
 
     &:hover {
         border-color: var(--accent-color);
-        background: color-mix(in srgb, var(--accent-color) 12%, transparent);
+        background: var(--accent-bg);
     }
 
     &:focus-visible {
@@ -457,9 +457,9 @@
         color var(--duration-decorative-instant) var(--ease-standard);
 
     &:hover:not(:disabled) {
-        background: color-mix(in srgb, var(--accent-color) 12%, transparent);
+        background: var(--accent-bg);
         color: var(--main-text-color);
-        border-color: color-mix(in srgb, var(--accent-color) 30%, transparent);
+        border-color: var(--accent-line);
     }
 
     &:disabled {
