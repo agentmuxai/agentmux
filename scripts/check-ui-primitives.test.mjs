@@ -96,6 +96,13 @@ describe("rules 5-8: the shared scales", () => {
         expect(rawDurations(scss)).toBe(3);
     });
 
+    it("counts raw durations, font sizes and z-indexes inside a mixin too", () => {
+        const scss = `@mixin x { .item { transition: opacity 123ms; font-size: 11px; z-index: 3; } }`;
+        expect(rawDurations(scss)).toBe(1);
+        expect(rawFontSizes(scss)).toHaveLength(1);
+        expect(rawZIndexes(scss)).toHaveLength(1);
+    });
+
     it("counts a negative delay, but not a time inside a name", () => {
         const scss = `.a { animation-delay: -1s; transition-delay: -120ms; animation: tab-1s 2s; }`;
         expect(rawDurations(scss)).toBe(3);

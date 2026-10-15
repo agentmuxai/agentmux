@@ -129,10 +129,12 @@ export function resolveSelector(parent, child) {
 /**
  * Every declaration in a stylesheet, with the resolved selector it sits
  * under. At-rules (@media, @container, @include with a block) don't add to
- * the selector; @mixin and @function bodies are skipped entirely, since
- * their selectors only mean something where they are included.
+ * the selector; @mixin and @function bodies are skipped, since their
+ * selectors only mean something where they are included. Checks that don't
+ * look at the selector (the scale ratchets) pass `{ includeMixins: true }`,
+ * so a raw value written inside a mixin counts too.
  */
-export function declarations(scss) {
+export function declarations(scss, { includeMixins = false } = {}) {
     const text = stripComments(scss);
     const stack = []; // { selector, skip, conditional }
     const out = [];
@@ -151,7 +153,7 @@ export function declarations(scss) {
         } else if (c === "{") {
             const head = buf.trim();
             const parent = stack.length ? stack[stack.length - 1] : { selector: "", skip: false, conditional: false };
-            const skip = parent.skip || /^@(mixin|function)\b/.test(head);
+            const skip = parent.skip || (!includeMixins && /^@(mixin|function)\b/.test(head));
             const selector = head.startsWith("@") ? parent.selector : resolveSelector(parent.selector, head);
             // Inside @media, @include, @if and the like; @layer always applies.
             const conditional = parent.conditional || (head.startsWith("@") && !/^@layer\b/.test(head));
@@ -254,17 +256,17 @@ const RAW_TIME = /(?<![\w.-])-?\d*\.?\d+m?s\b/g;
 const unimportant = (value) => value.replace(/\s*!important$/, "");
 
 export function rawDurations(scss) {
-    return declarations(scss)
+    return declarations(scss, { includeMixins: true })
         .filter((d) => /^(transition|animation)(-duration|-delay)?$/.test(d.property))
         .reduce((n, d) => n + (d.value.match(RAW_TIME) ?? []).length, 0);
 }
 
 export function rawFontSizes(scss) {
-    return declarations(scss).filter((d) => d.property === "font-size" && /^\d*\.?\d+px$/.test(unimportant(d.value)));
+    return declarations(scss, { includeMixins: true }).filter((d) => d.property === "font-size" && /^\d*\.?\d+px$/.test(unimportant(d.value)));
 }
 
 export function rawZIndexes(scss) {
-    return declarations(scss).filter((d) => d.property === "z-index" && /^-?\d+$/.test(unimportant(d.value)));
+    return declarations(scss, { includeMixins: true }).filter((d) => d.property === "z-index" && /^-?\d+$/.test(unimportant(d.value)));
 }
 
 /** Custom properties set on `:root` itself (alone or in a list), outside any at-rule: defined in every element. */
