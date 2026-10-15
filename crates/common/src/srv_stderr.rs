@@ -42,7 +42,7 @@
 //! - `AGENTMUXSRV-UPGRADE version:<v> launcher:<path>` — any time after
 //!   ESTART: the user chose "Upgrade & restart" and `<path>` is the launcher of
 //!   a release srv downloaded and verified. The launcher checks it again, asks
-//!   the user itself, and restarts into it (`crates/launcher/src/upgrade.rs`).
+//!   the user itself, and restarts into it (`crates/launcher/src/upgrade_restart.rs`).
 
 /// Prefix of the line srv writes to stderr immediately before exiting 1
 /// because `run_pending_migrations` failed. Supervisors match on this to fail

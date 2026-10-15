@@ -141,7 +141,7 @@ async fn run(asset: &ReleaseAsset, version: &str, root: &Path) -> Result<PathBuf
     }
     set(version, "unpacking", asset.size, asset.size, None, None);
     // Next to the running folder, so it's where the user expects; under
-    // under this version's `updates/` when that folder's parent can't be written.
+    // this version's `updates/` when that folder's parent can't be written.
     let mut last = String::new();
     for parent in [root.parent().map(Path::to_path_buf), Some(dir.clone())].into_iter().flatten() {
         match unpack_portable(&file, version, &parent).await {
