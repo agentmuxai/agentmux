@@ -200,7 +200,9 @@ async fn type_action(arguments: &Value, cx: &ToolCtx<'_>) -> Result<Value> {
 
     let mut out = json!({ "terminal": id, "since": start });
     if arguments.get("until").is_some() {
-        let waited = wait_on(arguments, cx, &id, start, submit).await?;
+        // Skip the echo of typed text (whether or not it was submitted), and
+        // only then: keys or a bare Enter echo no line of their own.
+        let waited = wait_on(arguments, cx, &id, start, !text.is_empty()).await?;
         out["wait"] = waited;
     } else {
         tokio::time::sleep(Duration::from_millis(300)).await;
@@ -500,8 +502,8 @@ fn parse_until(arguments: &Value) -> Result<Until> {
 }
 
 /// Blocks (polling srv) until the condition holds or the timeout passes.
-/// `skip_echo`: the output starts with the echo of a line just typed, which a
-/// pattern must not match (`type` with `submit`).
+/// `skip_echo`: the output starts with the echo of text just typed, which a
+/// pattern must not match (`type` with `text`).
 async fn wait_on(arguments: &Value, cx: &ToolCtx<'_>, id: &str, since: u64, skip_echo: bool) -> Result<Value> {
     let until = parse_until(arguments)?;
     let timeout_ms = arguments

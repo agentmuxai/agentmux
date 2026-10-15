@@ -668,11 +668,16 @@ pub(super) async fn handle_pty_shell_read(
             .into_response();
     }
     let mut end = 0u64;
+    // Where the bytes `read_file` returns start in the whole log: 0, unless the
+    // file is a circular one that has wrapped.
+    let start_idx = match state.filestore.stat(&req.shell_id, "term") {
+        Ok(Some(f)) => f.data_start_idx().max(0) as u64,
+        _ => 0,
+    };
     let content = match state.filestore.read_file(&req.shell_id, "term") {
         Ok(Some(bytes)) => {
-            end = bytes.len() as u64;
-            // `since` past the end (a log that was cleared) reads it all again.
-            let from = req.since.filter(|&s| s <= end).unwrap_or(0) as usize;
+            let (from, abs_end) = since_slice(bytes.len(), start_idx, req.since);
+            end = abs_end;
             String::from_utf8_lossy(&bytes[from..]).to_string()
         }
         Ok(None) => String::new(),
@@ -690,6 +695,21 @@ pub(super) async fn handle_pty_shell_read(
     let truncated = start > 0;
     let tail = lines[start..].join("\n");
     (StatusCode::OK, Json(PtyShellReadResponse { content: tail, truncated, end })).into_response()
+}
+
+/// Where to start reading `len` bytes that begin at `start_idx` in the whole
+/// log, for a reader that has seen everything before `since`; and the log's
+/// absolute end, the next `since`. Offsets are absolute, so they keep growing
+/// even when a circular file drops its oldest bytes. A `since` before what is
+/// still held reads all of it; one past the end (a cleared log) reads it all
+/// again.
+fn since_slice(len: usize, start_idx: u64, since: Option<u64>) -> (usize, u64) {
+    let end = start_idx + len as u64;
+    let from = match since {
+        Some(s) if s >= start_idx && s <= end => (s - start_idx) as usize,
+        _ => 0,
+    };
+    (from, end)
 }
 
 /// `POST /api/v1/ptyshell/status` — query whether the shell is still running.
@@ -768,4 +788,28 @@ fn running_shell_conflict(state: &AppState, agent_block_id: &str, connection: &s
         return None;
     }
     super::http_shell::connection_conflict(&shell, connection)
+}
+
+#[cfg(test)]
+mod since_tests {
+    use super::since_slice;
+
+    #[test]
+    fn a_cursor_reads_only_what_came_after_it() {
+        // A plain log: offsets are byte positions.
+        assert_eq!(since_slice(100, 0, None), (0, 100));
+        assert_eq!(since_slice(100, 0, Some(40)), (40, 100));
+        assert_eq!(since_slice(100, 0, Some(100)), (100, 100));
+        // A cleared log (the cursor is past the end) is read again from its start.
+        assert_eq!(since_slice(10, 0, Some(100)), (0, 10));
+    }
+
+    #[test]
+    fn offsets_stay_absolute_when_a_circular_log_wraps() {
+        // 300 bytes written, the newest 256 held: they start at 44.
+        assert_eq!(since_slice(256, 44, Some(250)), (206, 300));
+        assert_eq!(since_slice(256, 44, Some(300)), (256, 300));
+        // A cursor older than what is still held reads all of it.
+        assert_eq!(since_slice(256, 44, Some(10)), (0, 300));
+    }
 }
