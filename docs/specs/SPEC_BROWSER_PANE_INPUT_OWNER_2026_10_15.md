@@ -128,9 +128,11 @@ closing). A selection that isn't usable falls back to `App` when it is applied.
 ### 3.5 Diagnostics (Windows)
 
 The wheel and typing failures take long use to reproduce, so each one has to be readable from the log alone. Besides
-the `[input]` line for every change of state, `input_owner/watch.rs` installs thread-local mouse and keyboard hooks on
-the UI thread. They sample the wheel, left clicks and key presses, at most one of each kind per 250 ms, take no lock,
-and post the check to a UI task. A `[input-watch]` warning is logged, at most one per kind per 5 s with a count of the
+the `[input]` line for every change of state, `input_owner/watch.rs` installs a thread-local `WH_GETMESSAGE` hook on
+the UI thread, which sees every message the thread takes off its queue. It samples the wheel, left clicks and key
+presses, at most one of each kind per 250 ms, takes no lock, and posts the check to a UI task. A pane counts as under
+the pointer only if its top-level window is the one on top there, so a floating window or another app in front hides
+it, while a window inside the same top-level covering it is reported. A `[input-watch]` warning is logged, at most one per kind per 5 s with a count of the
 rest, when:
 
 - a wheel or click over a visible pane went to another window, or to a pane it wasn't over. The line names the window

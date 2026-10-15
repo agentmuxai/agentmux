@@ -3,9 +3,10 @@
 
 //! Diagnostics for input that goes somewhere other than where it should, so a
 //! "the wheel / typing stopped working" report can be read from the log alone.
-//! Thread-local mouse and keyboard hooks on the UI thread sample the wheel,
-//! clicks and key presses (at most one of each kind per `SAMPLE_EVERY_MS`) and
-//! post the check to a UI task; the hooks themselves take no lock. A line is
+//! A thread-local `WH_GETMESSAGE` hook on the UI thread sees every message the
+//! thread takes off its queue; it samples the wheel, clicks and key presses (at
+//! most one of each kind per `SAMPLE_EVERY_MS`) and posts the check to a UI
+//! task, taking no lock itself. A line is
 //! logged only when something disagrees, at most once per `LOG_EVERY_MS` per
 //! kind. No key codes are read. docs/specs/SPEC_BROWSER_PANE_INPUT_OWNER_2026_10_15.md §3.5.
 
@@ -14,11 +15,10 @@ use std::sync::{Arc, OnceLock};
 
 use cef::*;
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
-use windows_sys::Win32::UI::Input::KeyboardAndMouse::GetFocus;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, GetAncestor, GetClassNameW, GetForegroundWindow, GetWindowRect, IsWindowVisible,
-    SetWindowsHookExW, WindowFromPoint, GA_ROOT, HC_ACTION, MOUSEHOOKSTRUCT, WH_KEYBOARD, WH_MOUSE, WM_LBUTTONDOWN,
-    WM_MOUSEHWHEEL, WM_MOUSEWHEEL,
+    SetWindowsHookExW, WindowFromPoint, GA_ROOT, HC_ACTION, MSG, PM_REMOVE, WH_GETMESSAGE, WM_KEYDOWN,
+    WM_LBUTTONDOWN, WM_MOUSEHWHEEL, WM_MOUSEWHEEL, WM_SYSKEYDOWN,
 };
 
 use crate::state::{AppState, BrowserPaneLifecycle};
@@ -59,20 +59,15 @@ static LAST_SAMPLE: [AtomicU64; 3] = [AtomicU64::new(0), AtomicU64::new(0), Atom
 static LAST_LOG: [AtomicU64; 3] = [AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0)];
 static SUPPRESSED: [AtomicU64; 3] = [AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0)];
 
-/// Install the hooks on the calling thread, which must be the UI thread. Once.
+/// Install the hook on the calling thread, which must be the UI thread. Once.
 pub fn install(state: &Arc<AppState>) {
     if INSTALLED.swap(true, Ordering::SeqCst) {
         return;
     }
     let _ = STATE.set(state.clone());
     let thread = unsafe { windows_sys::Win32::System::Threading::GetCurrentThreadId() };
-    let mouse = unsafe { SetWindowsHookExW(WH_MOUSE, Some(mouse_hook), std::ptr::null_mut(), thread) };
-    let keys = unsafe { SetWindowsHookExW(WH_KEYBOARD, Some(key_hook), std::ptr::null_mut(), thread) };
-    tracing::info!(
-        "[input-watch] hooks installed: mouse={} keyboard={}",
-        !mouse.is_null(),
-        !keys.is_null()
-    );
+    let hook = unsafe { SetWindowsHookExW(WH_GETMESSAGE, Some(message_hook), std::ptr::null_mut(), thread) };
+    tracing::info!("[input-watch] hook installed: {}", !hook.is_null());
 }
 
 /// Whether a sample of `kind` is due now; takes the slot if so.
@@ -83,29 +78,24 @@ fn take_sample(kind: Kind) -> bool {
     now.saturating_sub(prev) >= SAMPLE_EVERY_MS && last.compare_exchange(prev, now, Ordering::Relaxed, Ordering::Relaxed).is_ok()
 }
 
-unsafe extern "system" fn mouse_hook(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
-    if code == HC_ACTION as i32 && lparam != 0 {
-        let msg = wparam as u32;
-        let kind = match msg {
-            WM_MOUSEWHEEL | WM_MOUSEHWHEEL => Some(Kind::Wheel),
-            WM_LBUTTONDOWN => Some(Kind::Click),
-            _ => None,
-        };
-        if let Some(kind) = kind {
-            if take_sample(kind) {
-                let info = &*(lparam as *const MOUSEHOOKSTRUCT);
-                post(Sample::Pointer { kind, pt: info.pt, target: info.hwnd as isize });
+unsafe extern "system" fn message_hook(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    // Only a message being taken off the queue, not one peeked at and left there.
+    if code == HC_ACTION as i32 && wparam == PM_REMOVE as usize && lparam != 0 {
+        let msg = &*(lparam as *const MSG);
+        match msg.message {
+            WM_MOUSEWHEEL | WM_MOUSEHWHEEL if take_sample(Kind::Wheel) => {
+                // The wheel's lParam is the pointer in screen coordinates.
+                let pt = POINT { x: (msg.lParam & 0xFFFF) as u16 as i16 as i32, y: ((msg.lParam >> 16) & 0xFFFF) as u16 as i16 as i32 };
+                post(Sample::Pointer { kind: Kind::Wheel, pt, target: msg.hwnd as isize });
             }
+            WM_LBUTTONDOWN if take_sample(Kind::Click) => {
+                post(Sample::Pointer { kind: Kind::Click, pt: msg.pt, target: msg.hwnd as isize });
+            }
+            WM_KEYDOWN | WM_SYSKEYDOWN if take_sample(Kind::Key) => {
+                post(Sample::Key { focus: msg.hwnd as isize, foreground: GetForegroundWindow() as isize });
+            }
+            _ => {}
         }
-    }
-    CallNextHookEx(std::ptr::null_mut(), code, wparam, lparam)
-}
-
-unsafe extern "system" fn key_hook(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
-    // Bit 31 of lParam is the transition state: 0 for a key going down.
-    let key_down = (lparam as u32) & 0x8000_0000 == 0;
-    if code == HC_ACTION as i32 && key_down && take_sample(Kind::Key) {
-        post(Sample::Key { focus: GetFocus() as isize, foreground: GetForegroundWindow() as isize });
     }
     CallNextHookEx(std::ptr::null_mut(), code, wparam, lparam)
 }
@@ -163,7 +153,7 @@ fn check_pointer(state: &Arc<AppState>, kind: Kind, pt: POINT, target: HWND) {
     );
 }
 
-/// Keys pressed while `focus` had the keyboard: wrong if the input owner of the
+/// Keys sent to `focus` (the window with the keyboard): wrong if the input owner of the
 /// window in front believes someone else has it, isn't active though the window
 /// is in front, or nothing of that window has the keyboard.
 fn check_keys(state: &Arc<AppState>, focus: HWND, foreground: HWND) {
@@ -203,7 +193,15 @@ fn report(kind: Kind, line: String) {
 }
 
 /// The visible, live pane whose window contains `pt`, and its window label.
+/// Only panes of the top-level window that is on top at `pt` count: a floating
+/// window over the main one, or another app, hides the panes beneath. A window
+/// inside the same top-level covering a pane doesn't, so that is still reported.
 fn pane_at(state: &Arc<AppState>, pt: POINT) -> Option<(String, String)> {
+    let at = unsafe { WindowFromPoint(pt) };
+    if at.is_null() {
+        return None;
+    }
+    let top = unsafe { GetAncestor(at, GA_ROOT) };
     let panes: Vec<(String, String, String)> = state
         .host_state
         .lock()
@@ -215,7 +213,9 @@ fn pane_at(state: &Arc<AppState>, pt: POINT) -> Option<(String, String)> {
     panes.into_iter().find_map(|(block, label, window)| {
         let wrapper = crate::browser_pane::wrapper::peek_wrapper_hwnd(&label)? as HWND;
         let mut r = RECT { left: 0, top: 0, right: 0, bottom: 0 };
-        let inside = unsafe { IsWindowVisible(wrapper) != 0 && GetWindowRect(wrapper, &mut r) != 0 }
+        let inside = unsafe {
+            GetAncestor(wrapper, GA_ROOT) == top && IsWindowVisible(wrapper) != 0 && GetWindowRect(wrapper, &mut r) != 0
+        }
             && pt.x >= r.left
             && pt.x < r.right
             && pt.y >= r.top
