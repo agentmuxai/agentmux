@@ -329,8 +329,8 @@ fn focus_surface(state: &Arc<AppState>, window: &str) -> Surface {
 fn raise_panes(state: &Arc<AppState>, window: &str) {
     use windows_sys::Win32::Foundation::{POINT, RECT};
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        GetClassNameW, GetWindowRect, IsChild, SetWindowPos, WindowFromPoint, SWP_NOACTIVATE, SWP_NOMOVE,
-        SWP_NOSIZE,
+        GetAncestor, GetClassNameW, GetWindowRect, IsChild, SetWindowPos, WindowFromPoint, GA_ROOT,
+        SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
     };
     let panes: Vec<(String, String)> = state
         .host_state
@@ -348,10 +348,16 @@ fn raise_panes(state: &Arc<AppState>, window: &str) {
             continue;
         }
         let centre = POINT { x: (rect.left + rect.right) / 2, y: (rect.top + rect.bottom) / 2 };
-        // The window the pointer reaches at the pane's centre, if not the pane's own.
+        // The window of this pane's own top-level window that the pointer
+        // reaches at the pane's centre, if not the pane's own. Another app's
+        // window in front of the whole window isn't something covering the pane.
+        let root = unsafe { GetAncestor(wrapper, GA_ROOT) };
         let cover = || {
             let hit = unsafe { WindowFromPoint(centre) };
             if hit.is_null() || hit == wrapper || unsafe { IsChild(wrapper, hit) } != 0 {
+                return None;
+            }
+            if unsafe { GetAncestor(hit, GA_ROOT) } != root {
                 return None;
             }
             let mut class = [0u16; 64];
