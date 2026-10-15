@@ -1,5 +1,30 @@
 # AgentMux Version History
 
+## 0.59.27 — 2026-10-15
+
+- A floating pane or window opened without a warm pool window no longer loses its logo for a moment during startup
+- agentmux-bashwrap and agentmux-mcp are 1.2 MiB smaller each (about 30%): they only talk to the local AgentMux server over plain HTTP, so they no longer carry a TLS library
+- OpenCode agents show each turn's token counts, with the cache split
+- A floating pane opened without a warm pool window no longer shows a white frame before its content appears
+- fix(panes): the + after a pane's tabs is centred at every zoom and display scaling
+- Muse Code runs in an agent pane over its own protocol (MSP, muse serve): streamed replies, tool calls, approvals, token usage, and a clear sign-in message when signed out
+- feat(panes): the busy ring marches inside the pane border in two colours, instead of teeth growing off it
+- Sysinfo opens on CPU, and its every-area view is now called Advanced, the last button. A Sysinfo pane in a background tab or hidden window no longer samples or draws, so many open tabs no longer slow the app; shown again, it fills in what it missed
+- Menus: a submenu stays open when the pointer leaves the menu, and closes when another row is hovered, as in a native menu. On macOS, hovering the … More button closes an open ☰ menu, so the two no longer overlap.
+- Browser pane address bar: the suggestion list no longer flashes the page through it on every key; it keeps the previous suggestions on screen until the next ones arrive.
+- Browser pane: PDFs open in Chromium's PDF viewer again instead of staying a blank pane.
+- Reloading a window (the Reload button after an update, or automatic recovery) now frees the memory its old page held
+- The launcher (agentmux.exe) is about 13% smaller, 3.99 MB down to 3.46 MB: it is built for size and no longer carries a raw copy of the splash logo.
+- Message drafts, sent-message history (Up arrow) and attached files in an agent pane now survive a reload of the window; the history also survives switching pane tabs
+- Collapsing, pinning or filtering rows in an agent pane, or opening its details, is now saved and restored like the rest of the pane
+- Reloading a window no longer reloads the web pages in its browser panes; they keep their scroll position, form input and playing media
+- Reloading a secondary window brings back the same window and workspace instead of an empty one
+- Layout edits (split, move, resize, close, focus) reach the backend as single edits that the backend computes and stores, instead of the whole pane tree; if the window's layout ever differs from the stored one, the window shows the stored one.
+- Panes the backend opens or moves (open pane, open agent, redock, tear-off) are placed by the backend itself, and the window no longer sends its whole pane tree after them or after a pane-tab change.
+- Minimizing and restoring a pane is computed and stored by the backend as one edit, like every other layout change.
+- Layout: windows no longer write a tab's whole layout; every change is an edit srv applies, so a stale window can't overwrite another's panes
+- The launcher now writes any internal error (panic) it hits to its log with the thread and source line, so crashes that used to leave no trace can be diagnosed.
+
 ## 0.59.26 — 2026-10-14
 
 - Opening and closing windows no longer leaves memory behind: a recycled window now replaces its page instead of keeping every previous one in the browser's back/forward cache
