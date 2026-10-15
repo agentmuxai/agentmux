@@ -1299,10 +1299,18 @@
     }
 
     #[test]
-    fn native_memory_counts_match_the_estimator_without_loading_content() {
+    fn native_memory_counts_match_the_estimator() {
         use agentmux_common::tokens::{count_lines, estimate_tokens};
         let store = crate::backend::storage::store::Store::open_in_memory().unwrap();
-        let files = [("a.md", ""), ("b.md", "one"), ("c.md", "one\ntwo\n"), ("d.md", "日本語テキスト\r\nx"), ("e.md", "\n")];
+        // f.md: past an embedded NUL, where SQLite's length() would stop.
+        let files = [
+            ("a.md", ""),
+            ("b.md", "one"),
+            ("c.md", "one\ntwo\n"),
+            ("d.md", "日本語テキスト\r\nx"),
+            ("e.md", "\n"),
+            ("f.md", "a\0bcde\nx"),
+        ];
         for (name, content) in files {
             store
                 .agent_native_memory_upsert("agent-counts", name, content, None, "/p", content.len() as i64, 0)
