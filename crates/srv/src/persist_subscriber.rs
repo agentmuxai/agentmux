@@ -249,9 +249,7 @@ pub(crate) fn apply_event_to_mstore(
             (false, false) => Ok(()),
         },
         // SPEC_864 Phase 4 — APPEND to the pending queue (unlike the
-        // slices path above, which REPLACEs it: pushing a slice without
-        // processed actions is how the frontend ACKS the queue; the
-        // backend enqueues by appending). Idempotent under the
+        // slices path above, which REPLACEs it). Idempotent under the
         // double-apply contract (sync from the dispatch helper, again
         // from broadcast) by deduping on `actionid` — every writer
         // stamps a fresh UUID per action.

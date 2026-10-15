@@ -30,7 +30,7 @@
 3374 crates/srv/src/identity/resolver/inject.rs
 1539 crates/srv/src/migrations/runner.rs
 2193 crates/srv/src/muxbus/cloud_subscriber.rs
-2163 crates/srv/src/persist_subscriber.rs
+2161 crates/srv/src/persist_subscriber.rs
 1509 crates/srv/src/registry/migrate.rs
 2241 crates/srv/src/server/agent_handlers/input.rs
 1777 crates/srv/src/server/app_api/agent_open.rs

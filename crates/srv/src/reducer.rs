@@ -29,6 +29,7 @@
 
 mod block;
 mod layout;
+pub(crate) use layout::heal_loaded_layout;
 mod lifecycle;
 mod snapshot;
 mod tab;

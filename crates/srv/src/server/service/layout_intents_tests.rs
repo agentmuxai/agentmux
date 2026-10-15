@@ -189,3 +189,71 @@ async fn the_service_method_applies_an_intent() {
     let ret = super::run_service_call(&state, &call(vec![tab_id.into(), bad, "act-2".into()])).await;
     assert_eq!(ret.data.unwrap()["applied"], false);
 }
+
+/// Bootstrap the reducer from the store into a fresh state, as srv startup does.
+async fn bootstrap_fresh(state: &AppState) -> std::sync::Arc<tokio::sync::Mutex<crate::state::State>> {
+    let fresh = std::sync::Arc::new(tokio::sync::Mutex::new(crate::state::State::default()));
+    crate::persist::bootstrap_state_from_mstore(&fresh, &state.mstore).await;
+    fresh
+}
+
+/// A row stored by an earlier build with a leaf for a block another tab owns
+/// and one for a deleted block: bootstrap removes both from the reducer's tree
+/// and the stored row, and clears the focus that pointed at one of them.
+#[tokio::test]
+async fn bootstrap_heals_leaves_for_blocks_the_tab_does_not_own() {
+    let state = test_state();
+    let (tab_id, oid, a, b) = seed(&state).await;
+    let ws_id = state.mstore.must_get::<Tab>(&tab_id).unwrap();
+    let ws_id = state.srv_state.lock().await.tabs[&ws_id.oid].workspace_id.clone();
+    let other = dispatch_apply(&state, Command::CreateTab { workspace_id: ws_id, name: "o".into() }).await;
+    let other_tab = other
+        .iter()
+        .find_map(|e| match e {
+            Event::TabCreated { tab_id, .. } => Some(tab_id.clone()),
+            _ => None,
+        })
+        .unwrap();
+    let ev = dispatch_apply(&state, Command::CreateBlock { tab_id: other_tab, meta: serde_json::json!({ "view": "term" }) }).await;
+    let elsewhere = ev
+        .iter()
+        .find_map(|e| match e {
+            Event::BlockCreated { block_id, .. } => Some(block_id.clone()),
+            _ => None,
+        })
+        .unwrap();
+
+    let mut stored = row(&state, &oid);
+    stored.rootnode = Some(LayoutNode {
+        id: "root".into(),
+        flex_direction: FlexDirection::Row,
+        size: 10.0,
+        children: vec![leaf("na", &a), leaf("nb", &b), leaf("nx", &elsewhere), leaf("ng", "deleted-block")],
+        ..Default::default()
+    });
+    stored.focusednodeid = "ng".into();
+    state.mstore.update(&mut stored).unwrap();
+    let version_before = row(&state, &oid).version;
+
+    let fresh = bootstrap_fresh(&state).await;
+    let healed = row(&state, &oid);
+    let kids: Vec<_> = healed.rootnode.as_ref().unwrap().children.iter().map(|c| c.id.clone()).collect();
+    assert_eq!(kids, ["na", "nb"]);
+    assert!(healed.version > version_before, "the healed row is stored with a new version");
+    assert_eq!(healed.focusednodeid, "", "the focus on a removed leaf is cleared");
+    let tab = fresh.lock().await.tabs[&tab_id].clone();
+    assert_eq!(tab.rootnode, healed.rootnode, "the reducer holds the stored tree");
+    assert_eq!(tab.focused_node_id, "");
+    assert!(crate::backend::layout::validate_layout_invariants(&healed.rootnode).is_empty());
+}
+
+/// A row with nothing to heal is left exactly as stored: no write.
+#[tokio::test]
+async fn bootstrap_leaves_a_clean_layout_row_untouched() {
+    let state = test_state();
+    let (tab_id, oid, ..) = seed(&state).await;
+    let before = serde_json::to_string(&row(&state, &oid)).unwrap();
+    let fresh = bootstrap_fresh(&state).await;
+    assert_eq!(serde_json::to_string(&row(&state, &oid)).unwrap(), before);
+    assert_eq!(fresh.lock().await.tabs[&tab_id].rootnode, row(&state, &oid).rootnode);
+}

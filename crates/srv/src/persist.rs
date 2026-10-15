@@ -164,6 +164,17 @@ pub async fn bootstrap_state_from_mstore(state: &Arc<Mutex<State>>, mstore: &Sto
             },
         );
     }
+    // A row written by an earlier build can hold a leaf for a block the tab
+    // no longer owns; heal it now, before any window loads it, and store the
+    // healed row through the same write an intent's events take.
+    let tab_ids: Vec<String> = state.tabs.keys().cloned().collect();
+    for tab_id in tab_ids {
+        for ev in crate::reducer::heal_loaded_layout(&mut state, &tab_id) {
+            if let Err(e) = crate::persist_subscriber::apply_event_to_mstore(&ev, mstore) {
+                tracing::warn!(target: "srv-persist", tab_id = %tab_id, "[srv-persist] bootstrap: storing the healed layout failed: {}", e);
+            }
+        }
+    }
     for block in &blocks {
         // Phase E.3 — recover each block's parent tab via reverse
         // lookup against `state.tabs` (NOT raw `tabs` from SQLite):

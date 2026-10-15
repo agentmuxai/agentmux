@@ -375,6 +375,10 @@ nothing pushed a tree any more, so this phase deletes the whole-tree path and wh
 - **No frontend prune.** `pruneDanglingLeaves`, its startup pass, the end-of-drag pass and the
   recently-created age gate are deleted: srv takes a moved or deleted block out of the tree itself
   (Phase 4) and the window shows srv's tree. A failed redock shows the source tab as srv stores it.
+  A row stored by an earlier build can still hold a leaf for a block its tab no longer owns, so srv
+  heals each tab's tree once at bootstrap (`heal_loaded_layout`): it removes those leaves, balances,
+  clears a focus/magnify left on nothing, and stores the row with a new version. A clean row is
+  not rewritten.
 - **Dead srv algebra deleted.** The old structural mutators in `backend/layout/mod.rs`,
   `enforce_minimized_locks` and `ResizeOp` had no caller once every edit was an intent; their
   tests that still described live behaviour moved to the intent tests.
