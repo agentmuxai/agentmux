@@ -225,6 +225,12 @@ mod keywin_objc {
         }
         std::ptr::null_mut()
     }
+    pub(super) unsafe fn get_bool(obj: *mut c_void, sel: &[u8]) -> bool {
+        if obj.is_null() { return false; }
+        let f: extern "C" fn(*mut c_void, *const c_void) -> i8 =
+            std::mem::transmute(objc_msgSend as *const c_void);
+        f(obj, sel_registerName(sel.as_ptr() as _)) != 0
+    }
     pub(super) unsafe fn make_first_responder(win: *mut c_void, view: *mut c_void) -> bool {
         let f: extern "C" fn(*mut c_void, *const c_void, *mut c_void) -> i8 =
             std::mem::transmute(objc_msgSend as *const c_void);
@@ -344,6 +350,13 @@ fn pane_overlay_window(block_id: &str) -> Option<*mut std::ffi::c_void> {
         .lock()
         .ok()
         .and_then(|m| m.iter().find(|(_, (_, b, _))| b == block_id).map(|(w, _)| *w as *mut std::ffi::c_void))
+}
+
+/// Whether pane `block_id`'s overlay window is registered and on screen, so it
+/// can take key status. UI thread only.
+#[cfg(target_os = "macos")]
+pub(crate) fn pane_overlay_on_screen(block_id: &str) -> bool {
+    pane_overlay_window(block_id).is_some_and(|w| unsafe { keywin_objc::get_bool(w, b"isVisible\0") })
 }
 
 /// Give pane `block_id`'s overlay window key status, and its page the first

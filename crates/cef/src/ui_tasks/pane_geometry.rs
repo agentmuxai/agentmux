@@ -724,16 +724,21 @@ wrap_task! {
             // Main browser host is now stored into PANE_WIN_TO_HOST inside the
             // rwhvc_cls block above, keyed by the NSWindow pointer for this pane.
 
-            // The overlay is now tagged and registered: the pane can take the
-            // keyboard, and the input owner applies a recent selection of it
-            // that arrived before it could (open-with-focus claims focus as
-            // soon as browser_pane_create returns, which beats this task).
+            // The overlay is tagged and registered. Once it is also on screen
+            // (makeKeyWindow does nothing to a window that isn't), the pane can
+            // take the keyboard, and the input owner applies a recent selection
+            // of it that arrived before it could (open-with-focus claims focus
+            // as soon as browser_pane_create returns, which beats this task).
+            // Not yet on screen: a later run of this task (the reaffirm pass, a
+            // re-show) reports it.
             #[cfg(target_os = "macos")]
             if let Some(block_id) = self.label
                 .strip_prefix("browser-pane-")
                 .and_then(|rest| rest.rfind('-').map(|dash| &rest[..dash]))
             {
-                crate::input_owner::views::pane_live(&self.state, block_id);
+                if crate::ui_tasks::pane_overlay_on_screen(block_id) {
+                    crate::input_owner::views::pane_live(&self.state, block_id);
+                }
             }
 
             // Diagnostic: swizzle NSApp::sendEvent: once to log all leftMouseDown

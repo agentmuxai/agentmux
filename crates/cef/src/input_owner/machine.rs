@@ -55,8 +55,9 @@ pub enum Event {
     Select(Owner),
     /// A click in the pane's page.
     PanePointerDown(PaneId),
-    /// A click in the app's own content (where the platform reports it: macOS,
-    /// Phase 4; Windows doesn't see it, the frontend's selection stands in).
+    /// A click in the app's own content, where a platform reports it. None does
+    /// yet: Windows doesn't see it, and macOS's `sendEvent:` hook still hands
+    /// key status back itself; the frontend's selection stands in.
     #[cfg_attr(target_os = "windows", allow(dead_code))]
     AppPointerDown,
     /// The platform reported focus arriving at a surface of this window.

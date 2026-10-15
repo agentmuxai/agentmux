@@ -175,10 +175,10 @@ One adapter serves both, `input_owner/views.rs`, feeding the same machine. Its e
 |---|---|---|
 | `Select` | `input_select` (§3.6) | same |
 | `PanePointerDown` | left mouse-down on a pane overlay (`swizzled_nsapp_send_event`) | none observed: the frontend's `Select` stands in |
-| `AppPointerDown` | left or right mouse-down in an app window (same hook) | none observed |
+| `AppPointerDown` | not yet: the same hook still hands key status back to the app window itself; the frontend's `Select` follows | none observed |
 | `FocusGained` | CEF `on_got_focus` for a pane browser | same |
 | `Activated` / `Deactivated` | CEF Views `on_window_activation_changed`, effects posted to run after CEF's own handling | same |
-| `PaneLive` / `PaneShown` / `PaneCollapsed` / `PaneClosing` / `PaneGone` | pane created, rect applied (0×0 is collapsed), close | same |
+| `PaneLive` / `PaneShown` / `PaneCollapsed` / `PaneClosing` / `PaneGone` | live: the overlay window registered and on screen (`SetPaneBoundsViewsTask`, also on every re-show); a 0×0 rect is collapsed; close | live: the browser created; shown/collapsed: the rect applied; close |
 | `Verify` | the key window: a tagged pane overlay is that pane, the window's own NSWindow the app | the last surface CEF reported focus to in that window |
 
 Its effects go through three per-platform functions (`views::platform`): `focus_app(window)` (macOS: key status back
