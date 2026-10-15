@@ -132,8 +132,49 @@ const BORDER_G: u8 = 0x0D;
 const BORDER_R: u8 = 0x0D;
 const BORDER_WIDTH: i32 = 2;
 
-static BRAIN_BGRA: &[u8] =
-    include_bytes!(concat!(env!("OUT_DIR"), "/brain_bgra.bin"));
+static BRAIN_PNG: &[u8] = include_bytes!("../resources/brain.png");
+
+/// The brain logo as BGRA with pre-multiplied alpha, decoded from
+/// `BRAIN_PNG` on first use (the first splash frame).
+///
+/// Pre-multiplied alpha is what `UpdateLayeredWindow`'s BLENDFUNCTION
+/// (AC_SRC_ALPHA) wants: each channel is already `channel * alpha / 255`,
+/// so `composite` avoids that multiply for every pixel on every frame.
+/// If the PNG somehow fails to decode the logo is left fully transparent
+/// and the rest of the splash still draws; `brain_png_decodes` fails the
+/// build's tests in that case.
+fn brain_bgra() -> &'static [u8] {
+    static BRAIN: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
+    BRAIN.get_or_init(|| {
+        decode_brain_bgra(BRAIN_PNG)
+            .unwrap_or_else(|| vec![0; (BRAIN_W * BRAIN_H * 4) as usize])
+    })
+}
+
+fn decode_brain_bgra(png_bytes: &[u8]) -> Option<Vec<u8>> {
+    let mut reader = png::Decoder::new(std::io::Cursor::new(png_bytes))
+        .read_info()
+        .ok()?;
+    let mut buf = vec![0u8; reader.output_buffer_size()?];
+    let info = reader.next_frame(&mut buf).ok()?;
+    if info.color_type != png::ColorType::Rgba
+        || info.bit_depth != png::BitDepth::Eight
+        || (info.width, info.height) != (BRAIN_W as u32, BRAIN_H as u32)
+    {
+        return None;
+    }
+    buf.truncate(info.buffer_size());
+    // RGBA straight → BGRA pre-multiplied, in place.
+    for px in buf.chunks_exact_mut(4) {
+        let (r, g, b, a) = (px[0], px[1], px[2], px[3]);
+        let pre = |c: u8| ((c as u16 * a as u16 + 127) / 255) as u8;
+        px[0] = pre(b);
+        px[1] = pre(g);
+        px[2] = pre(r);
+        px[3] = a;
+    }
+    Some(buf)
+}
 
 struct SendHandle(HANDLE);
 unsafe impl Send for SendHandle {}
@@ -406,17 +447,18 @@ fn composite(
 
     // Brain glyph (pre-multiplied OVER onto BG).
     let ba = brain_alpha as u16;
+    let brain = brain_bgra();
     for y in 0..BRAIN_H {
         let dib_row = ((BRAIN_Y + y) * SPLASH_W * 4) as usize;
         let src_row = (y * BRAIN_W * 4) as usize;
         for x in 0..BRAIN_W {
             let di = dib_row + ((BRAIN_X + x) * 4) as usize;
             let si = src_row + (x * 4) as usize;
-            let sa = BRAIN_BGRA[si + 3] as u16;
+            let sa = brain[si + 3] as u16;
             if sa == 0 { continue; }
-            let mb = (BRAIN_BGRA[si] as u16 * ba + 127) / 255;
-            let mg = (BRAIN_BGRA[si + 1] as u16 * ba + 127) / 255;
-            let mr = (BRAIN_BGRA[si + 2] as u16 * ba + 127) / 255;
+            let mb = (brain[si] as u16 * ba + 127) / 255;
+            let mg = (brain[si + 1] as u16 * ba + 127) / 255;
+            let mr = (brain[si + 2] as u16 * ba + 127) / 255;
             let ma = (sa * ba + 127) / 255;
             let inv = 255u16 - ma;
             dib[di]     = ((dib[di] as u16 * inv / 255) + mb).min(255) as u8;
@@ -646,5 +688,22 @@ unsafe fn fade_out(hwnd: HWND, mem_dc: HDC, _dib: &mut [u8]) {
         if alpha < 0 { alpha = 0; }
         push_layered(hwnd, mem_dc, alpha as u8);
         std::thread::sleep(std::time::Duration::from_millis(16));
+    }
+}
+
+
+#[cfg(test)]
+mod brain_tests {
+    use super::*;
+
+    #[test]
+    fn brain_png_decodes() {
+        let px = decode_brain_bgra(BRAIN_PNG).expect("brain.png decodes as 8-bit RGBA at BRAIN_W x BRAIN_H");
+        assert_eq!(px.len(), (BRAIN_W * BRAIN_H * 4) as usize);
+        // Pre-multiplied: no colour channel may exceed its alpha.
+        assert!(px.chunks_exact(4).all(|p| p[0] <= p[3] && p[1] <= p[3] && p[2] <= p[3]));
+        // Not blank, and the transparent background survived.
+        assert!(px.chunks_exact(4).any(|p| p[3] == 255));
+        assert!(px.chunks_exact(4).any(|p| p[3] == 0));
     }
 }
