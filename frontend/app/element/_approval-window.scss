@@ -1,0 +1,55 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// The chrome the approval windows share: credential, memory adoption and ssh.
+// Each one is the sole content of its own top-level window, not a
+// `<ModalLayer>` panel, so it owns its full chrome rather than layering onto
+// modal.scss. Each window's stylesheet includes this with its own class
+// prefix, then styles what is in its body.
+
+/// The window, its error state, the header's title, the body's text and the
+/// footer's button row, as `.<prefix>-window`, `.<prefix>-window-error`,
+/// `.<prefix>-header h2`, `.<prefix>-body` and `.<prefix>-footer`.
+/// `$selectable: false` keeps the window's text from being selected.
+@mixin approval-window($prefix, $selectable: false) {
+    .#{$prefix}-window {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-4);
+        width: 100%;
+        height: 100%;
+        padding: var(--space-5);
+        background: var(--main-bg-color);
+        color: var(--main-text-color);
+        box-sizing: border-box;
+        @if not $selectable {
+            user-select: none;
+        }
+        -webkit-app-region: no-drag;
+    }
+
+    .#{$prefix}-window-error {
+        justify-content: center;
+        align-items: center;
+        text-align: center;
+        color: var(--secondary-text-color);
+    }
+
+    .#{$prefix}-header h2 {
+        margin: 0;
+        font-size: var(--text-lg);
+        font-weight: 600;
+    }
+
+    .#{$prefix}-body {
+        flex: 1;
+        font-size: var(--text-sm);
+        line-height: 1.5;
+    }
+
+    .#{$prefix}-footer {
+        display: flex;
+        justify-content: flex-end;
+        gap: var(--space-2);
+    }
+}

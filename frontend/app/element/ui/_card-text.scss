@@ -1,0 +1,14 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// The type of a card's text (card.scss), for a card drawn by hand that sets
+// its title the same way.
+
+@use "../../mixins.scss";
+
+/// A card's title: one line, cut with an ellipsis, small and semibold.
+@mixin card-title {
+    font-size: var(--text-sm);
+    font-weight: 600;
+    @include mixins.truncate;
+}
