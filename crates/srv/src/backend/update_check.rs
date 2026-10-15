@@ -344,11 +344,20 @@ fn publish(event_bus: &crate::backend::eventbus::EventBus, mut next: AppUpdateSt
         }
         // The check time alone changing is not news to a window.
         let same = AppUpdateStatus { checked_ms: cur.checked_ms, ..next.clone() } == *cur;
+        // Download progress is news to a window, not to the log.
+        let step = |s: &AppUpdateStatus| (s.state.clone(), s.latest.clone(), s.download.as_ref().map(|d| d.state.clone()));
+        if step(&cur) != step(&next) {
+            tracing::info!(
+                state = %next.state,
+                latest = ?next.latest,
+                download = ?next.download.as_ref().map(|d| d.state.as_str()),
+                "update check: status changed"
+            );
+        }
         *cur = next.clone();
         !same
     };
     if changed {
-        tracing::info!(state = %next.state, latest = ?next.latest, "update check: status changed");
         event_bus.broadcast_event(&crate::backend::eventbus::EventBus::typed_ws_event::<
             crate::backend::mps_events::AppUpdateStatusChanged,
         >(&next, String::new()));
