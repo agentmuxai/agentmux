@@ -70,9 +70,21 @@ pub async fn of(name: &str) -> Option<RemoteAddress> {
 type Slot = Arc<tokio::sync::Mutex<Option<(Instant, RemoteAddress)>>>;
 
 async fn ssh(dest: &super::conn::SshDest) -> RemoteAddress {
-    let Some(binary) = super::ssh::binary_for_user() else {
+    let (host, port) = match ssh_g(dest).await {
+        Some(out) => parse_ssh_g(&out),
+        None => (None, None),
+    };
+    let Some(host) = host else {
         return RemoteAddress::default();
     };
+    let address = resolve(&host, port.or(dest.port).unwrap_or(22)).await;
+    RemoteAddress { host: Some(host), address }
+}
+
+/// What `ssh -G` prints for `dest`: the options ssh would connect with, the
+/// user's ssh config applied. `None` if it fails or takes too long.
+pub(super) async fn ssh_g(dest: &super::conn::SshDest) -> Option<String> {
+    let binary = super::ssh::binary_for_user()?;
     let mut cmd = tokio::process::Command::new(binary);
     // Not ours to configure, and it needs nothing of AgentMux's environment.
     crate::backend::pane_env::sanitize_external_command(&mut cmd);
@@ -88,15 +100,10 @@ async fn ssh(dest: &super::conn::SshDest) -> RemoteAddress {
         use agentmux_common::win32::NoWindow;
         cmd.no_window();
     }
-    let (host, port) = match tokio::time::timeout(STEP_TIMEOUT, cmd.output()).await {
-        Ok(Ok(out)) if out.status.success() => parse_ssh_g(&String::from_utf8_lossy(&out.stdout)),
-        _ => (None, None),
-    };
-    let Some(host) = host else {
-        return RemoteAddress::default();
-    };
-    let address = resolve(&host, port.or(dest.port).unwrap_or(22)).await;
-    RemoteAddress { host: Some(host), address }
+    match tokio::time::timeout(STEP_TIMEOUT, cmd.output()).await {
+        Ok(Ok(out)) if out.status.success() => Some(String::from_utf8_lossy(&out.stdout).into_owned()),
+        _ => None,
+    }
 }
 
 /// `hostname` and `port` from `ssh -G`'s output.
