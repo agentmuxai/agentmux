@@ -264,7 +264,9 @@ where
         for file in files.iter().take(PR_FILES_CHECKED) {
             if let Some(answer) = ask_path(file.clone()).await {
                 merge_agents(&mut agents, answer.get("agents").and_then(Value::as_array).cloned().unwrap_or_default());
-                merge_posts(&mut posts, answer.get("recent_posts").and_then(Value::as_array).cloned().unwrap_or_default());
+                // Asked without branch and query (for a broad agent lookup): apply them to its posts here.
+                let file_posts = answer.get("recent_posts").and_then(Value::as_array).cloned().unwrap_or_default();
+                merge_posts(&mut posts, file_posts.into_iter().filter(|p| post_matches(p, arguments)).collect());
             }
         }
         body["agents"] = Value::Array(agents);
@@ -284,6 +286,25 @@ where
 
 /// `WhoIsWorkingOn`'s `recent_posts` holds at most this many (srv's cap).
 const RECENT_POSTS_MAX: usize = 5;
+
+/// Whether a post fits the question's `branch` and `query`, as srv selects
+/// them (`work_facts::coord::matches`): the branch it is about, or none; every
+/// word of `query` in its topic, path or text, case-insensitively.
+fn post_matches(post: &Value, arguments: &Value) -> bool {
+    let field = |k: &str| post.get(k).and_then(Value::as_str).unwrap_or("");
+    if let (Some(asked), Some(on)) = (arg(arguments, "branch"), post.get("branch").and_then(Value::as_str)) {
+        if !asked.eq_ignore_ascii_case(on) {
+            return false;
+        }
+    }
+    match arg(arguments, "query") {
+        Some(q) => {
+            let hay = format!("{} {} {}", field("topic"), field("path"), field("text")).to_lowercase();
+            q.to_lowercase().split_whitespace().all(|w| hay.contains(w))
+        }
+        None => true,
+    }
+}
 
 /// Add posts not already in `into` (by id).
 fn merge_posts(into: &mut Vec<Value>, from: Vec<Value>) {
@@ -361,6 +382,16 @@ mod tests {
         assert_eq!((body["agent"].as_str(), body["block"].as_str()), (Some("Loap-3"), Some("blk")));
         assert!(channel_post_body(&json!({ "message": "x", "repo": "o/other", "pr": "https://github.com/o/r/pull/12" }), "a", "b").is_err());
         assert!(channel_post_body(&json!({ "message": "x", "pr": "nope" }), "a", "b").is_err());
+    }
+
+    #[test]
+    fn a_files_posts_keep_the_questions_branch_and_query() {
+        let post = json!({ "branch": "main", "topic": "docs index", "path": "docs/specs/INDEX.md", "text": "regenerate it" });
+        assert!(post_matches(&post, &json!({})));
+        assert!(post_matches(&post, &json!({ "branch": "MAIN", "query": "Index regenerate" })));
+        assert!(!post_matches(&post, &json!({ "branch": "dev" })));
+        assert!(!post_matches(&post, &json!({ "query": "shim" })));
+        assert!(post_matches(&json!({ "text": "x" }), &json!({ "branch": "dev" })), "a post on no branch fits any");
     }
 
     #[test]
