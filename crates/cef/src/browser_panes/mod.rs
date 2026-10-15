@@ -30,7 +30,7 @@
 //! - `mod.rs` (this file): struct definition, `BrowserPaneCloseOps` trait,
 //!   `AppStateCloseOps` impl, and pane creation.
 //! - `close`: close/lifecycle (`close`, `close_with`, `drain_closed_label`,
-//!   `replay_pending_create`, `reclaim_focus_after_pane_destroy`).
+//!   `replay_pending_create`).
 //! - `navigation`: `navigate`, `go_back`, `go_forward`, `reload`, `resize`.
 //! - `bounds`: `set_rects`, a window's panes moved in one UI-thread step
 //!   (`browser_panes_set_rects`).
@@ -120,22 +120,6 @@ impl<'a> BrowserPaneCloseOps for AppStateCloseOps<'a> {
             },
         );
         let browser = out.removed_browser?;
-
-        // Forget any stale focus-tracking entry for CEF's OWN hwnd
-        // (LAST_FOCUSED_BY_ROOT is keyed by whatever HWND actually
-        // received SetFocus — always CEF's own hwnd/descendants, never
-        // our wrapper, which never itself receives focus). Belt-and-
-        // suspenders: `on_before_close_browser_pane` also runs a more
-        // thorough sweep via `uninstall_focus_redirect_for_block` once
-        // CEF's OnBeforeClose fires (which the wrapper's reparent-then-
-        // destroy teardown is what makes reliable — see
-        // destroy_wrapper_hwnd) — this covers the gap before that.
-        if let Some(host) = browser.host() {
-            let wh = host.window_handle();
-            if !wh.0.is_null() {
-                crate::browser_pane::hwnd::forget_focus_for_child(wh.0 as *mut _);
-            }
-        }
 
         // Drop our Arc before returning so Chromium's refcount doesn't wait
         // for the caller's scope to unwind.

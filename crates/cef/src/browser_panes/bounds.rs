@@ -362,7 +362,15 @@ fn apply(state: &Arc<AppState>, window_label: &str, rects: &[(PaneBounds, Option
         return;
     }
     #[cfg(target_os = "windows")]
-    apply_windows(state, &live);
+    {
+        apply_windows(state, &live);
+        // A pane laid out at 0×0 is on a tab that isn't the visible one; the
+        // input owner gives the app the keyboard if that pane had it.
+        for (r, _) in &live {
+            let collapsed = r.width <= 0 || r.height <= 0;
+            crate::input_owner::windows::pane_laid_out(state, window_label, &r.block_id, collapsed);
+        }
+    }
     #[cfg(target_os = "macos")]
     for (r, label) in &live {
         crate::browser_pane::creation_views::resize_browser_pane_view(state, label, r.rect());

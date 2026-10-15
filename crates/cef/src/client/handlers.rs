@@ -79,11 +79,11 @@ wrap_client! {
         }
 
         fn focus_handler(&self) -> Option<FocusHandler> {
-            // For browser panes only: cancel CEF's auto-focus on navigation so the
-            // child HWND doesn't steal keyboard focus from the main window when the
-            // page finishes loading. The user can still click into the pane to focus it.
+            // For browser panes only: reports a page taking focus to the input
+            // owner (see the handler below).
             if self.is_browser_pane {
-                Some(AgentMuxPaneFocusHandler::new())
+                let state = self.inner.lock().state.clone();
+                Some(AgentMuxPaneFocusHandler::new(state))
             } else {
                 None
             }
@@ -140,33 +140,39 @@ wrap_client! {
 // FocusHandler used only by browser-pane clients. Returns 0 for every
 // focus source (never cancels at the CEF level) — cancelling NAVIGATION
 // focus during the very first navigation of a newly-created pane fires
-// CEF's `on_before_close` on that pane ~10ms later. Focus-steal
-// protection lives entirely in the Win32 `WndProc` subclass below
-// (`browser_pane::hwnd::install_browser_pane_focus_redirect`), which redirects programmatic
-// `WM_SETFOCUS` back to the top-level window. User clicks are let through
-// because `WM_LBUTTONDOWN` in the subclass arms `ALLOW_BROWSER_PANE_FOCUS_ONCE`.
+// CEF's `on_before_close` on that pane ~10ms later. On Windows, a page taking
+// the keyboard on its own is put back by the window's input owner
+// (`crate::input_owner`), which the pane's Win32 subclass reports clicks and
+// `WM_SETFOCUS` to (`browser_pane::hwnd`). `on_got_focus` reports it too: the
+// page's render widget window is created after the subclass is installed and
+// only subclassed at load end, so focus a new page takes isn't seen there.
 wrap_focus_handler! {
-    struct AgentMuxPaneFocusHandler;
+    struct AgentMuxPaneFocusHandler {
+        state: Arc<crate::state::AppState>,
+    }
 
     impl FocusHandler {
+        fn on_got_focus(&self, browser: Option<&mut Browser>) {
+            #[cfg(target_os = "windows")]
+            if let Some(browser) = browser {
+                if let Some(block) = crate::browser_pane::callbacks::resolve_pane_block_id(&self.state, browser) {
+                    crate::input_owner::windows::pane_focus_gained(&self.state, &block);
+                }
+            }
+            #[cfg(not(target_os = "windows"))]
+            let _ = (browser, &self.state);
+        }
+
         fn on_set_focus(
             &self,
             _browser: Option<&mut Browser>,
             source: FocusSource,
         ) -> ::std::os::raw::c_int {
-            // Previously we cancelled FocusSource::NAVIGATION here to
-            // stop page-load from stealing focus away from the main
-            // window. But cancelling on_set_focus during the very
-            // first navigation of a newly-created pane triggered CEF
-            // to fire `on_before_close` on that pane ~10ms later —
-            // reliably reproducible when creating a 2nd browser pane.
-            // The Win32 WndProc subclass below already redirects
-            // page-load SetFocus to the top-level window (see
-            // `browser_pane::hwnd::install_browser_pane_focus_redirect`), which
-            // handles the original focus-steal concern. Returning 0
-            // here so CEF proceeds with normal focus handling at the
-            // Chromium level; Win32 subclass continues to redirect
-            // any resulting Win32 focus change away from the pane.
+            // Never cancelled: cancelling FocusSource::NAVIGATION during
+            // the very first navigation of a newly-created pane made CEF
+            // fire `on_before_close` on that pane ~10ms later (reliably,
+            // when creating a 2nd browser pane). On Windows the input
+            // owner puts back focus a page takes that wasn't asked for.
             tracing::info!("[pane-focus] on_set_focus source={:?} cancel=false", source);
             0
         }

@@ -160,32 +160,32 @@ unsafe fn hand_back_activation() {
     );
 }
 
-// Pane Win32 focus-redirect subclass + ALLOW_BROWSER_PANE_FOCUS_ONCE flag moved to
-// `crate::browser_pane::hwnd` in Phase 2 of the modularization split. See
-// `docs/specs/SPEC_BROWSER_PANE_MODULARIZATION.md`.
+/// Top-level windows minimized now, so a later restore can be told from a resize.
+#[cfg(target_os = "windows")]
+static MINIMIZED: std::sync::LazyLock<std::sync::Mutex<std::collections::HashSet<usize>>> =
+    std::sync::LazyLock::new(Default::default);
 
-/// Subclass a top-level window's WndProc to handle `WM_ACTIVATE`: when the
-/// window is being activated (`wparam != WA_INACTIVE`), look up the last
-/// intentionally-focused child for *this* root in
-/// `LAST_FOCUSED_BY_ROOT` and `SetFocus` it. Closes the
-/// alt-tab-back-and-input-drops bug.
+/// Subclass a top-level window's WndProc to report activation (`WM_ACTIVATE`,
+/// `WM_ACTIVATEAPP`) and the window being shown or restored to the window's
+/// input owner (`crate::input_owner::windows`), which gives the keyboard back to
+/// the user's selection after CEF's own activation handling. Also hands
+/// activation back from an invisible pool window (`invisible_activation`).
 ///
-/// Spec: `docs/specs/SPEC_WINDOW_REACTIVATE_FOCUS_RESTORE_2026_05_23.md`
-/// §5.1.3.
-///
-/// SAFE on the main CEF Views window: this hook ONLY observes `WM_ACTIVATE`
-/// and ALWAYS passes the message through to the original WndProc. No
-/// message is short-circuited.
+/// SAFE on the main CEF Views window: this hook only observes, and ALWAYS
+/// passes the message through to the original WndProc.
 ///
 /// Idempotent: re-calling on an already-hooked HWND is a no-op.
 #[cfg(target_os = "windows")]
-pub(crate) unsafe fn install_top_level_focus_restore_hook(hwnd: *mut std::ffi::c_void) {
-    use std::sync::atomic::Ordering;
-    use windows_sys::Win32::UI::Input::KeyboardAndMouse::SetFocus;
+pub(crate) unsafe fn install_top_level_focus_restore_hook(
+    hwnd: *mut std::ffi::c_void,
+    state: &std::sync::Arc<crate::state::AppState>,
+) {
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        CallWindowProcW, DefWindowProcW, IsWindow, PostMessageW, SetWindowLongPtrW, GWLP_WNDPROC,
-        WM_ACTIVATE,
+        CallWindowProcW, DefWindowProcW, PostMessageW, SetWindowLongPtrW, GWLP_WNDPROC, WM_ACTIVATE,
+        WM_ACTIVATEAPP, WM_SHOWWINDOW, WM_SIZE,
     };
+
+    crate::input_owner::windows::set_state(state);
 
     const WA_INACTIVE: u32 = 0;
 
@@ -239,35 +239,40 @@ pub(crate) unsafe fn install_top_level_focus_restore_hook(hwnd: *mut std::ffi::c
                     }
                     InvisibleActivation::Nothing => {}
                 }
-                // The activating window is `hwnd`, which IS its own
-                // top-level root — the map is keyed by root HWND.
-                let child = crate::browser_pane::hwnd::LAST_FOCUSED_BY_ROOT
-                    .lock()
-                    .ok()
-                    .and_then(|m| m.get(&(hwnd as usize)).copied())
-                    .unwrap_or(0);
-                if child != 0 {
-                    let child_hwnd = child as *mut std::ffi::c_void;
-                    if IsWindow(child_hwnd) != 0 {
-                        // Honor the next pane-WM_SETFOCUS instead of redirecting.
-                        crate::browser_pane::hwnd::ALLOW_BROWSER_PANE_FOCUS_ONCE
-                            .store(true, Ordering::Relaxed);
-                        SetFocus(child_hwnd);
-                        tracing::info!(
-                            "[focus-restore] WM_ACTIVATE root={:p} state={} -> SetFocus child={:p}",
-                            hwnd, activation_state, child_hwnd,
-                        );
-                    } else {
-                        tracing::info!(
-                            "[focus-restore] WM_ACTIVATE root={:p} stale child={:p} (IsWindow=0) — no-op",
-                            hwnd, child_hwnd,
-                        );
-                    }
-                } else {
-                    tracing::info!(
-                        "[focus-restore] WM_ACTIVATE root={:p} no recorded child — no-op",
-                        hwnd,
-                    );
+                // The input owner re-applies the selection. Its effects are
+                // posted, so they run after CEF's own activation handling below,
+                // which would otherwise take focus straight back.
+                crate::input_owner::windows::window_activation(hwnd, true, user_can_see(hwnd));
+            } else {
+                crate::input_owner::windows::window_activation(hwnd, false, true);
+            }
+        }
+        // The app came to the foreground or left it (sent to each of its
+        // top-level windows). A window activated in the background earlier may
+        // get no second WM_ACTIVATE when it comes forward; this tells the input
+        // owner then.
+        if msg == WM_ACTIVATEAPP {
+            crate::input_owner::windows::app_activation(hwnd, wparam != 0, user_can_see(hwnd));
+        }
+
+        // Shown, or restored from minimized: the window's panes are raised again
+        // above its own child windows, so a visible pane takes its wheel.
+        if msg == WM_SHOWWINDOW && wparam != 0 {
+            crate::input_owner::windows::window_shown(hwnd);
+        }
+        if msg == WM_SIZE {
+            const SIZE_RESTORED: usize = 0;
+            const SIZE_MINIMIZED: usize = 1;
+            const SIZE_MAXIMIZED: usize = 2;
+            let key = hwnd as usize;
+            if wparam == SIZE_MINIMIZED {
+                if let Ok(mut set) = MINIMIZED.lock() {
+                    set.insert(key);
+                }
+            } else if wparam == SIZE_RESTORED || wparam == SIZE_MAXIMIZED {
+                let was_minimized = MINIMIZED.lock().map(|mut set| set.remove(&key)).unwrap_or(false);
+                if was_minimized {
+                    crate::input_owner::windows::window_shown(hwnd);
                 }
             }
         }
@@ -336,6 +341,8 @@ pub(crate) unsafe fn install_top_level_focus_restore_hook(hwnd: *mut std::ffi::c
             "[focus-restore] installed WM_ACTIVATE observer on top-level HWND {:p}",
             hwnd,
         );
+        // An activation before this hook was never seen.
+        crate::input_owner::windows::window_hooked(hwnd);
     } else {
         tracing::warn!(
             "[focus-restore] SetWindowLongPtrW returned 0 for HWND {:p} — hook not installed",
