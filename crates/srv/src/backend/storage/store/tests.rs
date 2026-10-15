@@ -1293,8 +1293,26 @@
         assert_eq!(joined, block);
         for s in &sections {
             assert_eq!(s.size_bytes, s.text.len() as u64);
+            assert_eq!(s.tokens_est, agentmux_common::tokens::estimate_tokens(&s.text), "tokens of the injected text");
         }
         assert!(super::super::global_bundle_sections(&[]).is_empty());
+    }
+
+    #[test]
+    fn native_memory_counts_match_the_estimator_without_loading_content() {
+        use agentmux_common::tokens::{count_lines, estimate_tokens};
+        let store = crate::backend::storage::store::Store::open_in_memory().unwrap();
+        let files = [("a.md", ""), ("b.md", "one"), ("c.md", "one\ntwo\n"), ("d.md", "日本語テキスト\r\nx"), ("e.md", "\n")];
+        for (name, content) in files {
+            store
+                .agent_native_memory_upsert("agent-counts", name, content, None, "/p", content.len() as i64, 0)
+                .unwrap();
+        }
+        let counts = store.agent_native_memory_counts("agent-counts").unwrap();
+        for (name, content) in files {
+            assert_eq!(counts[name], (estimate_tokens(content), count_lines(content)), "{name}");
+        }
+        assert!(store.agent_native_memory_counts("nobody").unwrap().is_empty());
     }
 
     // ---- Registry parallel-write mirror (PR A) ----

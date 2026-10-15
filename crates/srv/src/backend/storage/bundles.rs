@@ -217,6 +217,9 @@ pub struct GlobalMemorySection {
     /// `text`'s length in bytes: what this section adds to an injection.
     #[ts(type = "number")]
     pub size_bytes: u64,
+    /// `text`'s estimated tokens (`agentmux_common::tokens`).
+    #[ts(type = "number")]
+    pub tokens_est: u64,
 }
 
 /// The sections of the Global Memory block, system (`is_system`) first, each
@@ -230,6 +233,7 @@ pub fn global_bundle_sections(bundles: &[Bundle]) -> Vec<GlobalMemorySection> {
         name: b.name.clone(),
         is_system: b.is_system,
         size_bytes: text.len() as u64,
+        tokens_est: agentmux_common::tokens::estimate_tokens(&text),
         text,
     };
     let system = system.into_iter().enumerate().map(|(i, b)| {

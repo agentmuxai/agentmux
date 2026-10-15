@@ -10,4 +10,10 @@ export type CommandGlobalMemorySectionsData = {
  * (`operator_config_seed::global_bundles_for_agent`). Absent: every
  * entry, as a host agent gets them.
  */
-block_id?: string, };
+block_id?: string, 
+/**
+ * With no `block_id`: the kind of agent to compose for, `host` or
+ * `container`, as the Memory pane's Host / Container toggle asks
+ * (SPEC_MEMORY_PANE_TOKENS_2026_10_15.md §5.2). Absent: `host`.
+ */
+agent_kind?: string, };

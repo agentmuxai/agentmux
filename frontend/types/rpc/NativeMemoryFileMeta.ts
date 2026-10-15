@@ -13,6 +13,12 @@ is_index: boolean,
  */
 metadata_type: string | null, size_bytes: number, 
 /**
+ * Estimated tokens (`agentmux_common::tokens::estimate_tokens`): what the
+ * file costs a context it is delivered into
+ * (SPEC_MEMORY_PANE_TOKENS_2026_10_15.md §4.2).
+ */
+tokens_est: number, lines: number, 
+/**
  * Unix timestamp in milliseconds.
  */
 modified_at: number, };
