@@ -7,7 +7,9 @@
 //! Read from where the running srv binary is, so nothing has to be passed
 //! down from the launcher:
 //! - Windows portable: srv is in `<folder>/runtime/`, beside
-//!   `agentmux-portable.marker`, and `<folder>/agentmux.exe` is the launcher;
+//!   `agentmux-portable.marker`, and `<folder>/agentmux.exe` is the launcher.
+//!   `setup.exe` installs the same `runtime/` (marker included), so a folder
+//!   with Inno Setup's uninstaller (`unins000.exe`) is a `setup.exe` install;
 //! - Microsoft Store: under `WindowsApps`; the Store updates it;
 //! - Windows `setup.exe`: any other Windows install;
 //! - macOS: inside an `.app`;
@@ -71,6 +73,17 @@ impl InstallKind {
     }
 }
 
+/// Whether `dir` holds Inno Setup's uninstaller (`unins000.exe`, or
+/// `unins001.exe`… when one was already there): a `setup.exe` install.
+pub fn has_uninstaller(dir: &Path) -> bool {
+    std::fs::read_dir(dir).is_ok_and(|entries| {
+        entries.filter_map(|e| e.ok()).any(|e| {
+            let name = e.file_name().to_string_lossy().to_ascii_lowercase();
+            name.starts_with("unins") && name.ends_with(".exe")
+        })
+    })
+}
+
 /// The kind for an srv binary at `exe` on `os` (`std::env::consts::OS`).
 fn detect_at(exe: &Path, os: &str, appimage: bool, debian: bool) -> InstallKind {
     let dir = exe.parent();
@@ -83,7 +96,9 @@ fn detect_at(exe: &Path, os: &str, appimage: bool, debian: bool) -> InstallKind 
         "windows" => {
             if text.to_ascii_lowercase().contains("/windowsapps/") {
                 InstallKind::WindowsStore
-            } else if let Some(root) = portable_root.filter(|r| r.join("agentmux.exe").is_file()) {
+            } else if let Some(root) =
+                portable_root.filter(|r| r.join("agentmux.exe").is_file() && !has_uninstaller(r))
+            {
                 InstallKind::WindowsPortable { root }
             } else {
                 InstallKind::WindowsSetup
@@ -133,6 +148,12 @@ mod tests {
         assert_eq!(detect_at(store, "windows", false, false), InstallKind::WindowsStore);
         let setup = Path::new(r"C:\Users\u\AppData\Local\Programs\AgentMux\runtime\srv.exe");
         assert_eq!(detect_at(setup, "windows", false, false), InstallKind::WindowsSetup);
+        // setup.exe ships the portable's runtime/, marker and all: its
+        // uninstaller is what tells the two apart.
+        let installed = dir.path().join("Programs/AgentMux");
+        let exe = portable(&installed);
+        std::fs::write(installed.join("unins000.exe"), b"").unwrap();
+        assert_eq!(detect_at(&exe, "windows", false, false), InstallKind::WindowsSetup);
     }
 
     #[test]

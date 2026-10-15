@@ -153,6 +153,8 @@ async fn run(asset: &ReleaseAsset, version: &str, root: &Path) -> Result<PathBuf
             }
         }
     }
+    // Nothing more can be done with it; a later download fetches it again.
+    let _ = tokio::fs::remove_file(&file).await;
     Err(last)
 }
 
@@ -305,22 +307,24 @@ async fn unpack_portable(file: &Path, version: &str, parent: &Path) -> Result<Pa
         }
         Ok(Ok(_)) => Ok(()),
     };
-    // Another AgentMux staged the same release while this one unpacked.
-    if checked.is_ok() && is_staged_portable(&parent.join(&name), version) {
-        let _ = tokio::fs::remove_dir_all(&partial).await;
-        return Ok(parent.join(&name));
-    }
-    let target = free_folder(parent, &name);
+    let canonical = parent.join(&name);
     let result = match checked {
-        Ok(()) => tokio::fs::rename(&partial, &target)
-            .await
-            .map(|_| target)
-            .map_err(|e| format!("can't move the unpacked folder into place: {e}")),
         Err(e) => Err(e),
+        // Another AgentMux staged the same release while this one unpacked:
+        // use it rather than make a copy beside it.
+        Ok(()) if is_staged_portable(&canonical, version) => Ok(canonical),
+        Ok(()) => {
+            let target = free_folder(parent, &name);
+            match tokio::fs::rename(&partial, &target).await {
+                Ok(()) => Ok(target),
+                // The other one's move won the race.
+                Err(_) if is_staged_portable(&canonical, version) => Ok(canonical),
+                Err(e) => Err(format!("can't move the unpacked folder into place: {e}")),
+            }
+        }
     };
-    if result.is_err() {
-        let _ = tokio::fs::remove_dir_all(&partial).await;
-    }
+    // Whatever wasn't moved into place.
+    let _ = tokio::fs::remove_dir_all(&partial).await;
     result
 }
 
