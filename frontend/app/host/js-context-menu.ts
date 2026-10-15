@@ -273,6 +273,9 @@ export function showJsContextMenu(
                 // the user travel diagonally into the submenu without it
                 // vanishing out from under the cursor.
                 const hover = createSubmenuHover({
+                    // Stays open when the pointer leaves the menu; a sibling
+                    // row's mouseenter (peer close below) closes it.
+                    closeOnLeave: false,
                     onOpen: () => {
                         sub.style.visibility = "hidden";
                         sub.style.display = "";
