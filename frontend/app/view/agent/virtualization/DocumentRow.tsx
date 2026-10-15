@@ -486,8 +486,8 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
                                 ? [
                                       "",
                                       "Personal memory has grown large. Consider:",
-                                      "• Compress: MemoryList → consolidate with MemoryWrite (check MemoryHistory/MemoryDiff first)",
-                                      "• Delegate: hand the next segment of work to another agent via WorkEnqueue",
+                                      "• Compress: Memory list → consolidate with Memory write (check its history and diff first)",
+                                      "• Delegate: hand the next segment of work to another agent via Tasks enqueue",
                                   ]
                                 : [];
                         return [...lines, totalsLine, ...suggestionLines].join("\n");

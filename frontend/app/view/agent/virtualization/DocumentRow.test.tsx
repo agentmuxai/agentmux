@@ -383,8 +383,8 @@ describe("DocumentRow — memory_reinjection node", () => {
 
             const tooltip = document.body.querySelector(".agent-memory-reinjection-tooltip");
             expect(tooltip?.textContent).toMatch(/consider/i);
-            expect(tooltip?.textContent).toMatch(/MemoryWrite/);
-            expect(tooltip?.textContent).toMatch(/WorkEnqueue/);
+            expect(tooltip?.textContent).toMatch(/Memory write/);
+            expect(tooltip?.textContent).toMatch(/Tasks enqueue/);
             // Informational text only — no button/link for this suggestion.
             // Confirmed by absence, not just by not asserting for one: this
             // node type renders no interactive elements at all today.

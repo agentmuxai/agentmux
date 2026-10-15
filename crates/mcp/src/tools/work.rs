@@ -45,7 +45,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             let status = resp.status();
             let text = resp.text().await.unwrap_or_default();
             if !status.is_success() {
-                anyhow::bail!("WorkEnqueue failed: HTTP {status} — {text}");
+                anyhow::bail!("Tasks enqueue failed: HTTP {status} — {text}");
             }
             let id = serde_json::from_str::<Value>(&text).ok()
                 .and_then(|v| v.get("id").and_then(|x| x.as_str()).map(|s| s.to_string()))
@@ -86,7 +86,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             let status = resp.status();
             let text = resp.text().await.unwrap_or_default();
             if !status.is_success() {
-                anyhow::bail!("WorkClaim failed: HTTP {status} — {text}");
+                anyhow::bail!("Tasks claim failed: HTTP {status} — {text}");
             }
             let v: Value = serde_json::from_str(&text).unwrap_or(serde_json::json!({}));
             if !v.get("claimed").and_then(|x| x.as_bool()).unwrap_or(false) {
@@ -115,7 +115,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             };
             Ok(format!(
                 "Claimed work item {id} (attempt {attempt}) — pass attempt={attempt} to \
-                 WorkHeartbeat/WorkComplete/WorkRelease for this item.\n\n\
+                 Tasks heartbeat, complete and release for this item.\n\n\
                  Title: {title}\n\n{payload}{handback}"
             ))
         }
@@ -126,7 +126,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             let id = arguments.get("id").and_then(|v| v.as_str()).filter(|s| !s.is_empty())
                 .ok_or_else(|| anyhow::anyhow!("missing required parameter: id"))?;
             let attempt = arguments.get("attempt").and_then(|v| v.as_i64())
-                .ok_or_else(|| anyhow::anyhow!("missing required parameter: attempt (from the WorkClaim response)"))?;
+                .ok_or_else(|| anyhow::anyhow!("missing required parameter: attempt (from the Tasks claim answer)"))?;
 
             let (segment, result_text) = match name {
                 "WorkHeartbeat" => ("heartbeat", String::new()),
@@ -144,7 +144,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                         .filter(|s| !s.is_empty())
                         .ok_or_else(|| {
                             anyhow::anyhow!(
-                                "WorkComplete requires a non-empty 'result' — it is the only \
+                                "Tasks complete requires a non-empty 'result' — it is the only \
                                  record of what this item accomplished once it is marked done"
                             )
                         })?
@@ -173,7 +173,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 // always the same: claim again.
                 anyhow::bail!(
                     "This claim is no longer yours — the lease expired and the item was \
-                     reclaimed, or another agent holds it now. Call WorkClaim again if you \
+                     reclaimed, or another agent holds it now. Claim again with Tasks if you \
                      still want work; do NOT retry with the old attempt number."
                 );
             }
@@ -227,7 +227,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             let status = resp.status();
             let text = resp.text().await.unwrap_or_default();
             if !status.is_success() {
-                anyhow::bail!("WorkList failed: HTTP {status} — {text}");
+                anyhow::bail!("Tasks list failed: HTTP {status} — {text}");
             }
             let v: Value = serde_json::from_str(&text).unwrap_or(serde_json::json!({}));
             let items = v.get("items").and_then(|x| x.as_array()).cloned().unwrap_or_default();

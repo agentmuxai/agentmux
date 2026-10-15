@@ -37,7 +37,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             let status = resp.status();
             let text = resp.text().await.unwrap_or_default();
             if !status.is_success() {
-                anyhow::bail!("CronCreate failed: HTTP {status} — {text}");
+                anyhow::bail!("Schedule create failed: HTTP {status} — {text}");
             }
             let v: serde_json::Value = serde_json::from_str(&text).unwrap_or_default();
             let job = &v["job"];
@@ -63,7 +63,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             }
             if !status.is_success() {
                 let text = resp.text().await.unwrap_or_default();
-                anyhow::bail!("CronDelete failed: HTTP {status} — {text}");
+                anyhow::bail!("Schedule delete failed: HTTP {status} — {text}");
             }
             Ok(format!("Deleted cron job {id}"))
         }
@@ -75,7 +75,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             let status = resp.status();
             let text = resp.text().await.unwrap_or_default();
             if !status.is_success() {
-                anyhow::bail!("CronList failed: HTTP {status} — {text}");
+                anyhow::bail!("Schedule list failed: HTTP {status} — {text}");
             }
             let v: serde_json::Value = serde_json::from_str(&text).unwrap_or_default();
             let jobs = v["jobs"].as_array().cloned().unwrap_or_default();
