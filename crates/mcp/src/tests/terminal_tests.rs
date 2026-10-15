@@ -105,6 +105,9 @@ fn the_exit_marker_gives_the_commands_own_output_and_code() {
     // The echo alone (no digits) is not a result.
     assert_eq!(exit_marker("C:\\w>x & call echo __AMX_RC_n3_%^ERRORLEVEL%__\n", "n3"), None);
     assert_eq!(exit_marker("$ x; echo \"__AMX_RC_n4_$?__\"\nstill running", "n4"), None);
+    // Output that doesn't end in a newline is kept: the marker follows it on its line.
+    let printf = "$ printf x; echo \"__AMX_RC_n5_$?__\"\nx__AMX_RC_n5_0__\n$ ";
+    assert_eq!(exit_marker(printf, "n5"), Some(("x".to_string(), 0)));
     // An earlier run's marker is not this run's result.
     assert_eq!(exit_marker("$ y; echo \"__AMX_RC_new_$?__\"\n__AMX_RC_old_0__\n", "new"), None);
 }

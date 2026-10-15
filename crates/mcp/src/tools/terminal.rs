@@ -624,10 +624,9 @@ pub(super) fn exit_marker(text: &str, nonce: &str) -> Option<(String, i64)> {
     let caps = re.captures(body)?;
     let m = caps.get(0)?;
     let code = caps[1].parse().ok()?;
-    let before = &body[..m.start()];
-    // The marker's own line (cmd echoes nothing else on it; a Unix shell may
-    // print it after a prompt fragment) isn't output.
-    let output = before.rsplit_once('\n').map(|(o, _)| o).unwrap_or("");
+    // Everything before the marker is output, including a last line that
+    // didn't end in a newline (`printf x` puts the marker right after the x).
+    let output = &body[..m.start()];
     Some((output.trim_end().to_string(), code))
 }
 
