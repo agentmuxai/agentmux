@@ -186,6 +186,8 @@ export const WpsEvent = {
     NotificationRetract: "notification:retract",
     ToolChunk: "tool_chunk",
     ViewerPaired: "viewer:paired",
+    /** What srv knows about newer AgentMux releases (crates/srv/src/backend/update_check.rs). */
+    AppUpdateStatus: "app:updatestatus",
     AgentShutdown: "agent:shutdown",
     AgentShutdownPending: "agent:shutdown-pending",
     AgentShutdownPendingCleared: "agent:shutdown-pending-cleared",

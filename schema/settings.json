@@ -166,6 +166,11 @@
           "type": "boolean",
           "description": "Show MuxBus Cloud in the status bar: the dot after the host name and the sign-in block in the host menu. Default true (absent means shown); set false to hide both. LAN discovery is unaffected. See docs/specs/SPEC_STATUSBAR_HIDE_MUXBUS_SETTING_2026_10_08.md."
         },
+        "app:updatecheck": {
+          "type": "boolean",
+          "default": true,
+          "description": "Check GitHub Releases for a newer AgentMux, a minute after start and then every 6 hours, and show it in the status bar. Default true (absent means on); set false to make no request at all. Nothing is downloaded or installed. See docs/specs/SPEC_UPGRADE_FOR_USERS_AND_AGENTS_2026_10_15.md."
+        },
         "viewer:shareterminals": {
           "type": "boolean",
           "default": false,

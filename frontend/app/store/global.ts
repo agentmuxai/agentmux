@@ -24,6 +24,7 @@ import { flashErrors, notificationPopoverMode, notifications, pushNotification }
 import { openModal } from "./modalmodel";
 import * as MOS from "./mos";
 import { getFileSubject, muxEventSubscribe, onMuxEvent } from "./mps";
+import { acceptAppUpdate, APP_UPDATE_EVENT } from "./app-update";
 import { acceptMuxbusDelivery, MUXBUS_STATUS_EVENT } from "./muxbus-delivery";
 import {
     activeTabId,
@@ -277,6 +278,8 @@ export function initGlobalEventSubs(initOpts: AgentMuxInitOpts) {
     });
     // Cloud delivery's state changed (srv `muxbus::delivery_status`).
     onMuxEvent(MUXBUS_STATUS_EVENT, (status) => acceptMuxbusDelivery(status));
+    // A newer release, or none (srv `update_check`).
+    onMuxEvent(APP_UPDATE_EVENT, (status) => acceptAppUpdate(status));
     onMuxEvent(WpsEvent.ViewerPaired, (d) => {
         const deviceName = String(d.device_name || "A device");
         setViewerPairedAtom({ deviceId: d.device_id, deviceName });

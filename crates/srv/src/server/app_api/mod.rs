@@ -86,6 +86,7 @@ mod voice;
 pub(crate) mod fleet;
 mod attachments;
 pub(crate) mod connections;
+pub(crate) mod app_update;
 pub(crate) mod viewer;
 mod presence;
 pub(crate) mod tower_pane;
@@ -116,6 +117,7 @@ pub fn register_app_api_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     attachments::register(engine, state);
     connections::register(engine, state);
     viewer::register(engine, state);
+    app_update::register(engine, state);
     presence::register(engine, state);
     tower_pane::register(engine, state);
     blockstats::register(engine, state);

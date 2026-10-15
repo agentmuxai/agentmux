@@ -293,6 +293,9 @@ pub fn spawn_background_subsystems(
     // account's cloud directory. Not gated on the subscriber: a logged-out
     // or isolated channel simply finds no token and publishes nothing.
     crate::muxbus::wan_publish::spawn(mstore.clone(), id_store.clone());
+    // Whether a newer release exists: a minute after start, then every 6 h,
+    // never on the startup path (SPEC_UPGRADE_FOR_USERS_AND_AGENTS §3).
+    crate::backend::update_check::spawn(config_watcher.clone(), event_bus.clone());
 
     // Discord messaging bridge — connects to Discord Gateway if configured.
     // Set messaging:discord:enabled + messaging:discord:token in settings.json to activate.
