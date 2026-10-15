@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-30
 **Type:** Implementation spec (full analysis)
-**Status:** active — Phase 2 (`balance_node`, #1866) and Phase 3 (srv reducer arms, #1868) implemented; Phase 4 implemented in #4946 (the frontend's own tree edits are layout intents); the backend-originated edits, minimize (Phase 5) and Phase 6 not started. Verified against code 2026-10-14 ([triage](../analysis/REPORT_REDUCER_STACK_TRIAGE_2026_10_13.md)).
+**Status:** active — Phase 2 (`balance_node`, #1866) and Phase 3 (srv reducer arms, #1868) implemented; Phase 4 implemented in #4946 (the frontend's own tree edits are layout intents) and #4947 (srv applies its own placements; the window pushes no tree for them); minimize (Phase 5) and Phase 6 not started. Verified against code 2026-10-14 ([triage](../analysis/REPORT_REDUCER_STACK_TRIAGE_2026_10_13.md)).
 **Owner:** asaf
 **Supersedes scope of:** `SPEC_864_LAYOUT_SINGLE_WRITER_2026_06_30.md` (that spec's "weak" single-writer
 becomes Phase 1 here; this spec is the committed end-goal)
@@ -316,7 +316,7 @@ replace all round-trip through srv). Do NOT auto-merge on bot approval.**
   commands), minimize and restore, the dangling-leaf prune, and removing a block that moved
   elsewhere.
 
-*Phase 4, srv's own edits, as built (PR_PHASE4B):*
+*Phase 4, srv's own edits, as built (#4947):*
 - **srv places blocks itself.** `place_block` (`server/service/layout_intents.rs`) applies an
   insert or a split as a layout intent to srv's tree, then queues the matching action under the
   same action id, with the leaf's node id (`LayoutActionData.nodeid`). Every placement goes
