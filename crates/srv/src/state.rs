@@ -80,6 +80,10 @@ pub struct TabRecord {
     /// as `rev`; mirrors `LayoutState.layoutrevision`. A frontend tree push
     /// built on an older revision is refused (`reducer::layout::stale_push_revision`).
     pub layout_revision: u64,
+    /// Action ids of the latest layout intents applied, oldest first and at
+    /// most `reducer::layout::RECENT_INTENTS` of them: a repeat is a no-op, so a
+    /// resent intent can't apply twice. Not persisted.
+    pub recent_intent_ids: Vec<String>,
 }
 
 /// Phase E.3 — block as held by the srv reducer's canonical state.

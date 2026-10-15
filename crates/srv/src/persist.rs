@@ -162,6 +162,7 @@ pub async fn bootstrap_state_from_mstore(state: &Arc<Mutex<State>>, mstore: &Sto
                 magnified_node_id,
                 rootnode,
                 layout_revision,
+                recent_intent_ids: Vec::new(),
             },
         );
     }

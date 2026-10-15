@@ -40,6 +40,19 @@ function makeLayoutStateSignal(oid: string): SignalAtom<LayoutState> {
     return atom as unknown as SignalAtom<LayoutState>;
 }
 
+// Layout intents: recorded, answered with a version no mocked row reaches so
+// the model keeps its own tree (layoutIntents.ts compares only with a row that
+// includes its intents).
+const intentCalls = vi.hoisted(() => [] as { command: string; data: any }[]);
+vi.mock("@/app/store/rpc-util", () => ({
+    TabRpcClient: {
+        rpcCall: async (command: string, data: any) => {
+            intentCalls.push({ command, data });
+            return { applied: true, version: Number.MAX_SAFE_INTEGER };
+        },
+    },
+}));
+
 vi.mock("@/app/store/global", () => {
     return {
         MOS: {

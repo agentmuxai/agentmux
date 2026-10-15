@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-30
 **Type:** Implementation spec (full analysis)
-**Status:** active — Phase 2 (`balance_node`, #1866) and Phase 3 (srv reducer arms, #1868) implemented; Phases 4–6 not started (the frontend still pushes the whole tree, `frontend/layout/lib/layoutPersistence.ts`). Verified against code 2026-10-14 ([triage](../analysis/REPORT_REDUCER_STACK_TRIAGE_2026_10_13.md)).
+**Status:** active — Phase 2 (`balance_node`, #1866) and Phase 3 (srv reducer arms, #1868) implemented; Phase 4 implemented in #4946 (the frontend's own tree edits are layout intents); the backend-originated edits, minimize (Phase 5) and Phase 6 not started. Verified against code 2026-10-14 ([triage](../analysis/REPORT_REDUCER_STACK_TRIAGE_2026_10_13.md)).
 **Owner:** asaf
 **Supersedes scope of:** `SPEC_864_LAYOUT_SINGLE_WRITER_2026_06_30.md` (that spec's "weak" single-writer
 becomes Phase 1 here; this spec is the committed end-goal)
@@ -278,6 +278,43 @@ missing `*Applied` events. *Unit-tested per arm against the oracle.*
 `handleBackendAction`/`pendingbackendactions` path; keep drag-preview local. **This is the
 behavior-changing core — needs app-running E2E verification (split/move/resize/swap/insert/delete/
 replace all round-trip through srv). Do NOT auto-merge on bot approval.**
+
+*Phase 4 as built (#4946):*
+- **One command.** `LayoutApplyIntent { tab_id, intent, action_id, view }`, over the RPC
+  `layout.applyIntent`. `LayoutIntent` (`agentmux-common/src/layout_intent.rs`) is the frontend's
+  tree action with the same `type` tag and field names: insert, insertatindex, delete, move, swap,
+  resize, replace, splithorizontal, splitvertical, clear, and `view` (focus and magnify only).
+  The nine granular commands of §1.2 were deleted in #4869 and not revived.
+- **The algebra.** `backend/layout/intent.rs` ports `layoutTree.ts` step for step (with
+  `addChildAt` and `addIntermediateNode`), then runs `balance_node`. The older Rust ops in
+  `backend/layout/mod.rs` were not used: they differ from the frontend (delete collapses the parent
+  itself, insert never flattens a same-direction child), and every difference would show as the
+  stored tree replacing the one on screen.
+- **Normalization on every intent:** legacy minimize fields migrated (as `rebuildMinimizedSet`
+  does at load), balance, leaves of deleted blocks pruned, legacy minimize locks, the invariant
+  report.
+- **Ids.** A node the intent adds carries the id the frontend gave it. A branch srv creates gets
+  `derive_node_id(action_id, n)`; the frontend names its own the same way (`withDerivedNodeIds`),
+  so its prediction and srv's result are the same tree.
+- **Refused, where the frontend would corrupt the tree:** a move into the moved node's own
+  subtree, `insertAtRoot`, a negative index, a swap with an ancestor, a resize with any bad op
+  (the frontend applies the ops before it).
+- **Focus and magnify** stay the frontend's to choose (it holds the focus history and the geometry
+  that pick a successor). Each intent carries them; srv stores them, cleared if they name no node.
+- **De-duplication.** A tab remembers its last 64 action ids; a repeat is a no-op, so a resend
+  after a transport failure applies once.
+- **Frontend.** `treeReducer` applies the action (the prediction) and queues the intent instead of
+  calling `persistToBackend`. One outbox (`layoutIntents.ts`) sends intents and the remaining
+  whole-tree pushes in order, one at a time; a push drops the intents queued behind it, which it
+  carries. Once nothing is in flight and the row includes its intents (the answer's `version`), a
+  stored tree that differs replaces the local one.
+- **Parity.** 80 random intent sequences with srv's results
+  (`frontend/layout/tests/fixtures/layout-intent-vectors.json`) are replayed through the frontend's
+  reducer by `layoutIntentVectors.test.ts`; a proptest checks the invariants on 256 more.
+- **Still whole-tree pushes, behind `layout_revision`:** mirroring queued backend actions (srv
+  queues inserts, splits and source deletes without applying them), pane-tab edits (also sent as
+  commands), minimize and restore, the dangling-leaf prune, and removing a block that moved
+  elsewhere.
 
 **Phase 5 — model the minimize fields + dissolve intents** (§6). Promote `minimizedSize`/
 `slipMinimize`/`columnDissolve`/`_slipAnchor` to typed fields; add `LayoutDissolveColumn`/

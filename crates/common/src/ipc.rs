@@ -529,38 +529,10 @@ pub enum Command {
 
     // ── Phase E.4.B — Layout tree commands ──────────────────────────────
     //
-    // Each command carries a `correlation_id` (UUID string) for the
-    // frontend optimistic-confirm pattern: the slice-#8 subscriber uses
-    // it to distinguish "my own command echoing back" from "a remote
-    // command I must apply locally".
-    //
-    // `focus_after` / `magnify_after` flags mirror the semantics of the
-    // frontend's `LayoutTreeActionType` (focused / magnified side effects
-    // on InsertNode, SplitH, SplitV, ReplaceNode).
-    //
+    // The frontend's own tree edits arrive as `LayoutApplyIntent`; the
+    // rest are srv's (deletes by block, pane tabs, seeding, the queue).
     // See docs/specs/srv-phase-e4b-formal-spec-2026-05-03.md §5.
 
-    /// Insert a new node into the tree. If `parent_id` is `None`, the
-    /// heuristic `findNextInsertLocation` is used (first available slot);
-    /// `index` positions within the parent's children (None = append).
-    LayoutInsertNode {
-        tab_id: String,
-        node: crate::LayoutNode,
-        parent_id: Option<String>,
-        index: Option<usize>,
-        focus_after: bool,
-        magnify_after: bool,
-        correlation_id: String,
-    },
-    /// Insert at an exact index path through the tree (e.g. `[0, 2]`).
-    LayoutInsertNodeAtIndex {
-        tab_id: String,
-        node: crate::LayoutNode,
-        index_arr: Vec<usize>,
-        focus_after: bool,
-        magnify_after: bool,
-        correlation_id: String,
-    },
     /// Remove a node by id; collapse empty parents.
     LayoutDeleteNode {
         tab_id: String,
@@ -625,61 +597,20 @@ pub enum Command {
         activate: bool,
         correlation_id: String,
     },
-    /// Reparent a node to a new parent at the given child index.
-    LayoutMoveNode {
+    /// Apply a layout intent to the tab's tree: the frontend's own tree
+    /// action, computed and normalized by the reducer.
+    /// SPEC_STRONG_REDUCER_AUTHORITY_LAYOUT_2026_06_30.md §4.
+    ///
+    /// `action_id` names it: branches it creates get ids derived from it,
+    /// and a repeat of a recent id is a no-op. `view` is the sender's
+    /// focused and magnified pane after the intent (`None`: the intent's own
+    /// `focused`/`magnified` flags decide, as for srv's own placements).
+    LayoutApplyIntent {
         tab_id: String,
-        node_id: String,
-        new_parent_id: String,
-        index: usize,
-        correlation_id: String,
-    },
-    /// Swap two sibling (or cross-parent) nodes. Sizes travel with nodes.
-    LayoutSwapNodes {
-        tab_id: String,
-        node1_id: String,
-        node2_id: String,
-        correlation_id: String,
-    },
-    /// Apply N resize operations atomically. Rejected entirely if any
-    /// `size` is out of range (reducer validates; early-return on first
-    /// invalid op, matching the frontend's existing semantic).
-    LayoutResizeNodes {
-        tab_id: String,
-        ops: Vec<crate::ResizeOp>,
-        correlation_id: String,
-    },
-    /// Replace a node with a new one, preserving the target's flex size.
-    LayoutReplaceNode {
-        tab_id: String,
-        target_id: String,
-        new_node: crate::LayoutNode,
-        focus_after: bool,
-        correlation_id: String,
-    },
-    /// Horizontal split: inserts `new_node` before/after `target_id`
-    /// in a Row parent (or wraps them in a new Row group if parent is not Row).
-    LayoutSplitHorizontal {
-        tab_id: String,
-        target_id: String,
-        new_node: crate::LayoutNode,
-        position: crate::SplitPosition,
-        focus_after: bool,
-        correlation_id: String,
-    },
-    /// Vertical split: inserts `new_node` before/after `target_id`
-    /// in a Column parent (or wraps them in a new Column group).
-    LayoutSplitVertical {
-        tab_id: String,
-        target_id: String,
-        new_node: crate::LayoutNode,
-        position: crate::SplitPosition,
-        focus_after: bool,
-        correlation_id: String,
-    },
-    /// Wipe the entire tree (sets rootnode = None, clears focus/magnify).
-    LayoutClear {
-        tab_id: String,
-        correlation_id: String,
+        intent: crate::LayoutIntent,
+        action_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        view: Option<crate::LayoutViewState>,
     },
     /// Bulk-replace the tree. Used during Phase 7a writer migration and
     /// for tear-off where the whole subtree changes atomically.

@@ -95,3 +95,35 @@ pub struct LayoutOpenResult {
     /// What couldn't be reproduced, including agents that didn't start.
     pub notes: Vec<String>,
 }
+
+/// Request for `layout.applyIntent`: one layout edit a window made to a tab,
+/// for srv to compute on its own tree.
+/// SPEC_STRONG_REDUCER_AUTHORITY_LAYOUT_2026_06_30.md §4.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct CommandLayoutIntentData {
+    pub tab_id: String,
+    /// The sender's id for this edit. Nodes srv creates for it get ids
+    /// derived from it, and resending it is a no-op.
+    pub action_id: String,
+    pub intent: agentmux_common::LayoutIntent,
+    /// The sender's focused and magnified pane after the edit; empty for none.
+    pub focused_node_id: String,
+    pub magnified_node_id: String,
+}
+
+/// Response from `layout.applyIntent`.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct LayoutIntentResult {
+    /// False when srv refused the edit; `error` says why. The stored layout
+    /// is then unchanged, and the sender shows that instead of its own.
+    pub applied: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub error: Option<String>,
+    /// The layout row's version once the edit is stored. A row update with
+    /// this version or later includes it.
+    #[ts(type = "number")]
+    pub version: u64,
+}
