@@ -70,7 +70,7 @@ pub(crate) async fn prepare(req: &mut InjectionRequest) {
                 delivered: 0,
                 text: "This message was sent with files that didn't arrive.".to_string(),
                 inline: Vec::new(),
-        inline_charge: None,
+                inline_charge: None,
             });
         }
         return;
@@ -82,7 +82,7 @@ pub(crate) async fn prepare(req: &mut InjectionRequest) {
             delivered: 0,
             text: format!("{count} {noun} sent with this message {verb} withheld: {reason}."),
             inline: Vec::new(),
-        inline_charge: None,
+            inline_charge: None,
         });
         return;
     }
@@ -91,7 +91,7 @@ pub(crate) async fn prepare(req: &mut InjectionRequest) {
             delivered: 0,
             text: format!("{count} {noun} sent with this message couldn't be delivered: the attachment store isn't available."),
             inline: Vec::new(),
-        inline_charge: None,
+            inline_charge: None,
         });
         return;
     };
