@@ -447,6 +447,48 @@ fn concurrent_stops_still_kill_a_process_that_ignores_the_hangup() {
     stops_kill_a_process_that_ignores_the_hangup("stop-hup-2", 4);
 }
 
+/// A background job that ignores the hang-up has a process group of its own
+/// (job control), but is in the session: ending the session kills it too.
+#[test]
+fn ending_a_session_kills_a_background_job_that_ignores_the_hangup() {
+    let home = std::env::temp_dir().join(format!("amr-end-job-{}", std::process::id()));
+    std::fs::create_dir_all(&home).unwrap();
+    let _cleanup = Cleanup(home.clone());
+    let mut a = attach(&home, "t1", 0);
+    a.until(|f, _| matches!(f, Frame::Hello { .. }));
+    a.send(Frame::Input(b"(trap '' HUP; exec sleep 300) & echo \"P\"\"ID=$!=\"\n".to_vec()));
+    let (_, text) = a.until(|_, t| {
+        String::from_utf8_lossy(t)
+            .split("PID=")
+            .nth(1)
+            .is_some_and(|rest| rest.contains('='))
+    });
+    let text = String::from_utf8_lossy(&text).into_owned();
+    let pid: libc::pid_t = text
+        .split("PID=")
+        .nth(1)
+        .and_then(|rest| rest.split('=').next())
+        .and_then(|p| p.trim().parse().ok())
+        .unwrap_or_else(|| panic!("no pid in {text:?}"));
+    let _kill = KillOnDrop(pid);
+    // SAFETY: signal 0 only checks that the process exists.
+    let alive = || unsafe { libc::kill(pid, 0) == 0 };
+    assert!(alive());
+
+    let out = Command::new(BIN)
+        .args(["end", "--session", "t1"])
+        .env("AGENTMUX_REMOTE_HOME", &home)
+        .output()
+        .unwrap();
+    assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "ok");
+    // Hung up at once, killed after the grace; reaping by init may lag a little.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while alive() {
+        assert!(Instant::now() < deadline, "a background job that ignored SIGHUP outlived its session");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
 #[test]
 fn version_names_the_protocol() {
     let out = Command::new(BIN).arg("version").output().unwrap();
