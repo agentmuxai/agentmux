@@ -588,6 +588,15 @@ describe("jekt marker detection", () => {
         expect((node as import("./types").JektMessageNode).direction).toBe("outgoing");
     });
 
+    test("shows the marker's own TRUST label, and an unknown one as network-claimed", () => {
+        const trustOf = (trust: string) =>
+            (parser.parseStreamEvent({ type: "user_message", message: jektBlock({ trust }) }) as import("./types").JektMessageNode).trust;
+        for (const t of ["channel-verified", "lan-verified", "wan-verified", "self-declared", "unverified"]) {
+            expect(trustOf(t)).toBe(t);
+        }
+        expect(trustOf("totally-verified")).toBe("network-claimed");
+    });
+
     test("keeps DELIVERY=channel (another instance on this machine) rather than reading it as wan", () => {
         const node = parser.parseStreamEvent({ type: "user_message", message: jektBlock({ delivery: "channel" }) });
         expect((node as import("./types").JektMessageNode).deliveryTier).toBe("channel");

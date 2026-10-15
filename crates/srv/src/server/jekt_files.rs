@@ -416,7 +416,9 @@ pub(crate) async fn no_route(
     too_old: bool,
 ) -> serde_json::Value {
     use super::reactive::{hold_for_absent_target, HoldReason};
-    if !candidate_seen {
+    // A target running in an older build is alive, not absent: holding its
+    // files here would only wait out the 24 hours.
+    if !candidate_seen && !too_old {
         if let Some(held) = hold_for_absent_target(state, auth_via, req, resp, HoldReason::NotRunning).await {
             return held;
         }

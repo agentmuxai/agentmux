@@ -361,7 +361,14 @@ export type JektDeliveryTier = "host" | "channel" | "lan" | "wan";
 /** Sender trust classification. Host-tier deliveries are agent-originated on
  *  this machine; lan/wan cross a network boundary and are only as
  *  trustworthy as the sender's token. Spec §5. */
-export type JektTrust = "host-verified" | "network-claimed";
+export type JektTrust =
+    | "host-verified"
+    | "channel-verified"
+    | "lan-verified"
+    | "wan-verified"
+    | "self-declared"
+    | "unverified"
+    | "network-claimed";
 
 /**
  * A muxbus jekt message, parsed out of the `[JEKT:FROM=... TIER=... ...]` /
