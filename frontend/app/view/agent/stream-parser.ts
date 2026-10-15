@@ -92,7 +92,7 @@ function parseBroadcastHeader(
 }
 
 const VALID_JEKT_TIERS: ReadonlySet<string> = new Set(["info", "coord", "sensitive"]);
-const VALID_JEKT_DELIVERY_TIERS: ReadonlySet<string> = new Set(["host", "lan", "wan"]);
+const VALID_JEKT_DELIVERY_TIERS: ReadonlySet<string> = new Set(["host", "channel", "lan", "wan"]);
 
 /**
  * A held jekt (SPEC_DURABLE_JEKT_DELIVERY_2026_09_24.md §2.4) carries

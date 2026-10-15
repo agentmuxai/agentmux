@@ -99,6 +99,9 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
     // comment for why this can't just be nested inside `authed_routes`.
     let lan_forward_routes = Router::new()
         .route("/agentmux/reactive/inject", post(reactive::handle_reactive_inject))
+        // A jekt with its files after it, from another instance or a LAN peer
+        // (SPEC_JEKT_FILE_TRANSFER_2026_10_05.md §4). Streamed, never buffered.
+        .route("/agentmux/reactive/inject-files", post(super::jekt_files::handle_reactive_inject_files))
         .route("/agentmux/reactive/agent", get(reactive::handle_reactive_agent))
         // Names, kinds and status only — see `handle_reactive_agent_names`' doc comment for why
         // this is deliberately not `/agentmux/reactive/agents` (which stays

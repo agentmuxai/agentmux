@@ -588,6 +588,11 @@ describe("jekt marker detection", () => {
         expect((node as import("./types").JektMessageNode).direction).toBe("outgoing");
     });
 
+    test("keeps DELIVERY=channel (another instance on this machine) rather than reading it as wan", () => {
+        const node = parser.parseStreamEvent({ type: "user_message", message: jektBlock({ delivery: "channel" }) });
+        expect((node as import("./types").JektMessageNode).deliveryTier).toBe("channel");
+    });
+
     test("defaults unrecognized TIER/DELIVERY values to sensitive/wan (least-trusted) rather than dropping the node", () => {
         const node = parser.parseStreamEvent({ type: "user_message", message: jektBlock({ tier: "bogus", delivery: "bogus" }) });
         const jekt = node as import("./types").JektMessageNode;

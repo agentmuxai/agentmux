@@ -61,6 +61,9 @@ pub(super) enum ForwardOutcome {
     /// alive — a non-2xx status, or a body that wasn't JSON. **Never evict on
     /// this**; fall through to the next candidate/tier and leave the entry be.
     Inconclusive,
+    /// The peer refused the jekt's files for a reason no other candidate
+    /// would change (`jekt_files::refused`): end the search with its answer.
+    Refused(serde_json::Value),
 }
 
 /// The single implementation of "POST this injection to a peer srv and echo it
@@ -88,7 +91,9 @@ async fn forward_inject_to_peer(
     forwarded_req: &InjectionRequest,
     peer: ForwardPeer<'_>,
 ) -> ForwardOutcome {
-    let forward_url = format!("{}/agentmux/reactive/inject", peer.url);
+    // A jekt with files carries them, after it (file transfer spec §4).
+    let route = if forwarded_req.files.is_some() { "inject-files" } else { "inject" };
+    let forward_url = format!("{}/agentmux/reactive/{route}", peer.url);
     let channel = peer.channel.unwrap_or("-");
     tracing::debug!(
         target = %req.target_agent,
@@ -98,7 +103,15 @@ async fn forward_inject_to_peer(
         "inject forward"
     );
 
-    let mut fwd = state.http_client.post(&forward_url).json(forwarded_req);
+    let mut fwd = state.http_client.post(&forward_url);
+    fwd = if forwarded_req.files.is_some() {
+        match super::jekt_files::transfer_body(forwarded_req).await {
+            Ok(body) => fwd.body(body).timeout(super::jekt_files::TRANSFER_TIMEOUT),
+            Err(e) => return ForwardOutcome::Refused(super::jekt_files::refused(req, e)),
+        }
+    } else {
+        fwd.json(forwarded_req)
+    };
     if !peer.auth_key.is_empty() {
         fwd = fwd.header(AUTH_KEY_HEADER, peer.auth_key);
     }
@@ -115,6 +128,9 @@ async fn forward_inject_to_peer(
                 );
                 return ForwardOutcome::Inconclusive;
             };
+            if body.get("files_refused").and_then(|v| v.as_bool()) == Some(true) {
+                return ForwardOutcome::Refused(body);
+            }
             if body.get("success").and_then(|v| v.as_bool()) != Some(true) {
                 tracing::warn!(
                     target = %req.target_agent,
@@ -125,7 +141,7 @@ async fn forward_inject_to_peer(
                 );
                 return ForwardOutcome::Stale;
             }
-            echo_jekt_to_sender(
+            echo_jekt_to_sender_with_files(
                 state,
                 req.source_agent.as_deref(),
                 &req.target_agent,
@@ -135,6 +151,7 @@ async fn forward_inject_to_peer(
                 body.get("requires_stop").and_then(|v| v.as_bool()),
                 echo_trust_from_peer_body(&body, peer.trust),
                 req.priority.as_deref().unwrap_or("normal"),
+                req.files_delivery.as_ref(),
             );
             ForwardOutcome::Delivered(body)
         }
@@ -547,7 +564,7 @@ pub(super) fn verify_cross_channel_signature_in(
 /// full-key caller's own `"channel"` claim is honoured as-is. Claiming it
 /// gains nothing — it only adds `verify_cross_channel_signature` on top of
 /// the unconditional `verify_jekt_signature`, never removes a check.
-fn resolve_delivery_tier(auth_via: super::ReactiveAuthVia, claimed: Option<&str>) -> String {
+pub(super) fn resolve_delivery_tier(auth_via: super::ReactiveAuthVia, claimed: Option<&str>) -> String {
     if auth_via == super::ReactiveAuthVia::LanKey {
         "lan".to_string()
     } else {
@@ -694,7 +711,7 @@ pub(crate) async fn deliver(
     // refused outright unless the msgid binds them, then prepared for the
     // agent here, since the handler does no I/O.
     if let Err(error) = super::jekt_files::check(&req) {
-        return files_refused(&req, error);
+        return super::jekt_files::refused(&req, error);
     }
     super::jekt_files::prepare(&mut req).await;
 
@@ -702,7 +719,7 @@ pub(crate) async fn deliver(
     let resp = state.reactive_handler.inject_message(req.clone());
     if resp.success {
         echo_local_delivery(state, &req, &resp);
-        return serde_json::to_value(&resp).unwrap_or_default();
+        return super::jekt_files::with_count(serde_json::to_value(&resp).unwrap_or_default(), &req);
     }
 
     // The target is here but its spawn gate refused (not signed in). That is
@@ -722,21 +739,6 @@ pub(crate) async fn deliver(
         .as_deref()
         .map(|e| e.starts_with("agent not found"))
         .unwrap_or(false);
-
-    // Files don't leave this instance yet (spec §8, Phase 1): hold them for
-    // an agent defined here that isn't running, or say why they can't go.
-    if is_not_found && req.files.is_some() {
-        if let Some(held) = hold_for_absent_target(state, auth_via, &req, &resp, HoldReason::NotRunning).await {
-            return held;
-        }
-        return files_refused(
-            &req,
-            format!(
-                "{} isn't on this AgentMux; files can only be sent to an agent on the same AgentMux for now",
-                req.target_agent
-            ),
-        );
-    }
 
     if is_not_found && req.forward_hops >= MAX_FORWARD_HOPS {
         tracing::warn!(
@@ -780,11 +782,13 @@ pub(crate) async fn deliver(
     // is not a candidate, so the first message after a restart is held.
     let mut candidate_seen = false;
     if is_not_found {
+        // A candidate an older build registered can't take files (spec §3.4).
+        let mut files_too_old = false;
         // Tier 2: same-host, different sidecar (file registry → HTTP loopback)
         let data_dir = base::get_mux_data_dir();
         if let Some(entry) = agent_registry::lookup(&data_dir, &req.target_agent) {
             // Guard against self-forwarding loops.
-            if entry.local_url != state.local_web_url {
+            if entry.local_url != state.local_web_url && super::jekt_files::entry_takes(&req, &entry, &mut files_too_old) {
                 match forward_inject_to_peer(
                     &state,
                     &req,
@@ -805,7 +809,7 @@ pub(crate) async fn deliver(
                 )
                 .await
                 {
-                    ForwardOutcome::Delivered(body) => return body,
+                    ForwardOutcome::Delivered(body) | ForwardOutcome::Refused(body) => return body,
                     // A non-delivery here is ambiguous: this entry may be
                     // stale (agent unregistered without a clean shutdown), OR
                     // the owning process may be alive and simply not have
@@ -870,7 +874,7 @@ pub(crate) async fn deliver(
                 let is_loopback = entry.local_url.starts_with("http://127.0.0.1")
                     || entry.local_url.starts_with("http://localhost")
                     || entry.local_url.starts_with("http://[::1]");
-                if !is_loopback || entry.local_url == state.local_web_url {
+                if !is_loopback || entry.local_url == state.local_web_url || !super::jekt_files::entry_takes(&req, &entry, &mut files_too_old) {
                     continue;
                 }
 
@@ -894,7 +898,7 @@ pub(crate) async fn deliver(
                 )
                 .await
                 {
-                    ForwardOutcome::Delivered(body) => return body,
+                    ForwardOutcome::Delivered(body) | ForwardOutcome::Refused(body) => return body,
                     // Same ambiguity and same should_evict_on_forward_failure
                     // policy as Tier 2a — PID-liveness alone over-protects an
                     // old, genuinely-dead individual agent whose srv process
@@ -931,11 +935,14 @@ pub(crate) async fn deliver(
         // Tier 3: LAN peer (mDNS lookup → HTTP). Runs when tier 2 had no registry
         // entry or its forward failed. Queries each discovered LAN peer for the
         // agent; result is cached for 60s to avoid per-inject mDNS fan-out.
-        if let Some((peer_url, peer_auth_key)) = state
-            .lan_discovery
-            .find_agent(&req.target_agent, &state.http_client)
-            .await
-        {
+        let lan_peer = match state.lan_discovery.find_agent(&req.target_agent, &state.http_client).await {
+            Some((url, key)) => match super::jekt_files::lan_peer_takes(&state.http_client, &req, &url, &key, &mut files_too_old).await {
+                Ok(takes) => takes.then_some((url, key)),
+                Err(refusal) => return refusal,
+            },
+            None => None,
+        };
+        if let Some((peer_url, peer_auth_key)) = lan_peer {
             match forward_inject_to_peer(
                 &state,
                 &req,
@@ -958,7 +965,7 @@ pub(crate) async fn deliver(
             )
             .await
             {
-                ForwardOutcome::Delivered(body) => return body,
+                ForwardOutcome::Delivered(body) | ForwardOutcome::Refused(body) => return body,
                 // The peer answered "not mine" (agent migrated away since we
                 // cached it) or was unreachable — either way the discovery
                 // cache entry is wrong. Unlike the registry tiers there is no
@@ -993,6 +1000,9 @@ pub(crate) async fn deliver(
         // this, the relay came first for it too, so a same-computer agent got
         // the relay's 30 min expiry instead of the 24 h hold, and only a
         // sender NOT signed in to the cloud ever reached the hold.
+        if req.files.is_some() {
+            return super::jekt_files::no_route(state, auth_via, &req, &resp, candidate_seen, files_too_old).await;
+        }
         if !candidate_seen && route_for_absent(state, auth_via, &req, &resp).await == AbsentRoute::HoldHere {
             if let Some(held) = hold_for_absent_target(state, auth_via, &req, &resp, HoldReason::NotRunning).await {
                 return held;
@@ -1012,22 +1022,6 @@ pub(crate) async fn deliver(
 
     // 6. Every tier declined — return the original local error.
     serde_json::to_value(&resp).unwrap_or_default()
-}
-
-/// The answer for a jekt whose files can't be accepted: nothing delivered.
-fn files_refused(req: &InjectionRequest, error: String) -> serde_json::Value {
-    serde_json::to_value(crate::backend::reactive::types::InjectionResponse {
-        success: false,
-        request_id: req.request_id.clone().unwrap_or_default(),
-        block_id: None,
-        error: Some(error),
-        timestamp: agentmux_common::time::now_ms_u64(),
-        effective_tier: None,
-        requires_stop: None,
-        channel_verified: None,
-        deferred: None,
-    })
-    .unwrap_or_default()
 }
 
 /// Echo a locally delivered jekt into the sender's own pane, as every
@@ -1536,6 +1530,9 @@ pub(super) async fn handle_reactive_agent(
             // of this endpoint that don't know about this field see no
             // change in shape.
             let mut value = serde_json::to_value(&agent).unwrap_or_default();
+            if let Some(obj) = value.as_object_mut() {
+                obj.insert("jekt_features".into(), json!([agentmux_common::jekt_files::FEATURE]));
+            }
             if let Ok(Some(pubkey)) = state.mstore.agent_lan_public_key_load(id) {
                 if let Some(obj) = value.as_object_mut() {
                     obj.insert("lan_public_key".to_string(), json!(pubkey));
