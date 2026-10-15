@@ -17,8 +17,8 @@
  * reports `visibilityState === "hidden"`.
  */
 
-import { createSignal, type Accessor } from "solid-js";
 import { onInputOwnerChange, userInThisWindow } from "@/app/store/input-owner";
+import { createSignal, type Accessor } from "solid-js";
 
 let cached: Accessor<boolean> | null = null;
 

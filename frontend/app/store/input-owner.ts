@@ -13,8 +13,8 @@
  * doesn't track it (macOS and Linux until Phase 4) it is `document.hasFocus()`.
  */
 
-import { createSignal } from "solid-js";
 import { getApi } from "@/app/store/global";
+import { createSignal } from "solid-js";
 
 const [report, setReport] = createSignal<InputOwnerReport | null>(null);
 const listeners = new Set<() => void>();
