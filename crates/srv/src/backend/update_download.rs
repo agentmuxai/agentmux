@@ -37,6 +37,9 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 const STALL_TIMEOUT: Duration = Duration::from_secs(60);
 /// Unpacking takes seconds; this only stops a hung `tar`.
 const UNPACK_TIMEOUT: Duration = Duration::from_secs(10 * 60);
+/// A download file or unpacking folder untouched this long was left by a
+/// run that was cut short (a crash, a quit): a live run writes continuously.
+const ABANDONED_AFTER: Duration = Duration::from_secs(60 * 60);
 
 static RUNNING: AtomicBool = AtomicBool::new(false);
 
@@ -125,7 +128,9 @@ pub fn start() -> Result<AppUpdateStatus, String> {
 }
 
 async fn run(asset: &ReleaseAsset, version: &str, root: &Path) -> Result<PathBuf, String> {
-    let dir = crate::backend::base::get_mux_data_dir().join("updates").join(version);
+    let updates = crate::backend::base::get_mux_data_dir().join("updates");
+    remove_abandoned_downloads(&updates).await;
+    let dir = updates.join(version);
     tokio::fs::create_dir_all(&dir).await.map_err(|e| format!("can't create {}: {e}", dir.display()))?;
     let file = dir.join(format!("{}-{}", std::process::id(), asset.name));
     if let Err(e) = download(asset, &file, version).await {
@@ -224,18 +229,33 @@ async fn remove_stale_partials(parent: &Path, name: &str) {
     let Ok(mut entries) = tokio::fs::read_dir(parent).await else { return };
     while let Ok(Some(e)) = entries.next_entry().await {
         let file_name = e.file_name().to_string_lossy().into_owned();
-        if !file_name.starts_with(&prefix) || !file_name.ends_with(".partial") {
-            continue;
-        }
-        let old = e
-            .metadata()
-            .await
-            .ok()
-            .and_then(|m| m.modified().ok())
-            .and_then(|t| t.elapsed().ok())
-            .is_some_and(|age| age > Duration::from_secs(60 * 60));
-        if old {
+        if file_name.starts_with(&prefix) && file_name.ends_with(".partial") && abandoned(&e).await {
             let _ = tokio::fs::remove_dir_all(e.path()).await;
+        }
+    }
+}
+
+async fn abandoned(e: &tokio::fs::DirEntry) -> bool {
+    e.metadata()
+        .await
+        .ok()
+        .and_then(|m| m.modified().ok())
+        .and_then(|t| t.elapsed().ok())
+        .is_some_and(|age| age > ABANDONED_AFTER)
+}
+
+/// Download files (each run's `<pid>-<file>` and its `.part`) left in
+/// `updates/<version>/` by runs that were cut short. Folders are kept: one
+/// may be a release staged there when its portable's folder couldn't be
+/// written, and unpacking folders are `remove_stale_partials`' job.
+async fn remove_abandoned_downloads(updates: &Path) {
+    let Ok(mut versions) = tokio::fs::read_dir(updates).await else { return };
+    while let Ok(Some(v)) = versions.next_entry().await {
+        let Ok(mut files) = tokio::fs::read_dir(v.path()).await else { continue };
+        while let Ok(Some(f)) = files.next_entry().await {
+            if f.file_type().await.is_ok_and(|t| t.is_file()) && abandoned(&f).await {
+                let _ = tokio::fs::remove_file(f.path()).await;
+            }
         }
     }
 }
@@ -261,7 +281,10 @@ async fn unpack_portable(file: &Path, version: &str, parent: &Path) -> Result<Pa
     let _ = tokio::fs::remove_dir_all(&partial).await;
     tokio::fs::create_dir_all(&partial).await.map_err(|e| format!("can't write to {}: {e}", parent.display()))?;
     use agentmux_common::win32::NoWindow;
-    let run = tokio::process::Command::new(tar_exe())
+    let mut tar = tokio::process::Command::new(tar_exe());
+    // tar needs nothing of this instance: none of its AGENTMUX_* variables.
+    crate::backend::pane_env::sanitize_external_command(&mut tar);
+    let run = tar
         .arg("-xf")
         .arg(file)
         .arg("-C")
@@ -331,6 +354,27 @@ mod tests {
         std::fs::write(dir.join("agentmux.exe"), b"").unwrap();
         std::fs::write(dir.join("runtime/agentmux-portable.marker"), b"").unwrap();
         std::fs::write(dir.join(format!("runtime/agentmux-{version}.exe")), b"").unwrap();
+    }
+
+    #[tokio::test]
+    async fn downloads_left_by_an_interrupted_run_are_removed_and_folders_kept() {
+        let updates = tempfile::tempdir().unwrap();
+        let dir = updates.path().join("0.59.27");
+        std::fs::create_dir_all(dir.join("agentmux-0.59.27-x64-portable")).unwrap();
+        let age = |p: &Path, secs: u64| {
+            let t = std::time::SystemTime::now() - Duration::from_secs(secs);
+            std::fs::File::options().write(true).open(p).unwrap().set_modified(t).unwrap();
+        };
+        let old = dir.join("4242-agentmux-0.59.27-x64-portable.7z.part");
+        let live = dir.join("777-agentmux-0.59.27-x64-portable.7z.part");
+        std::fs::write(&old, b"x").unwrap();
+        std::fs::write(&live, b"x").unwrap();
+        age(&old, 2 * 60 * 60);
+        age(&live, 5);
+        remove_abandoned_downloads(updates.path()).await;
+        assert!(!old.exists());
+        assert!(live.exists());
+        assert!(dir.join("agentmux-0.59.27-x64-portable").is_dir());
     }
 
     #[test]
