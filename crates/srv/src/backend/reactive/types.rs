@@ -398,6 +398,11 @@ pub struct InjectionRequest {
     /// body: a sender can't supply its own file list.
     #[serde(skip)]
     pub files_delivery: Option<FilesDelivery>,
+    /// The cloud relay's manifest for `files` (keys and blob ids), set once
+    /// they are uploaded (`server::jekt_cloud::upload`); what the relay is
+    /// sent. Never read from or written to a body.
+    #[serde(skip)]
+    pub cloud_files: Option<Vec<agentmux_common::jekt_files::CloudFile>>,
 }
 
 /// The files part of a delivered jekt: how many the agent gets (the

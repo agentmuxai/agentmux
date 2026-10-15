@@ -1001,7 +1001,7 @@ pub(crate) async fn deliver(
         // the relay's 30 min expiry instead of the 24 h hold, and only a
         // sender NOT signed in to the cloud ever reached the hold.
         if req.files.is_some() {
-            return super::jekt_files::no_route(state, auth_via, &req, &resp, candidate_seen, files_too_old).await;
+            return super::jekt_files::no_route(state, auth_via, caller_uid, &req, &resp, candidate_seen, files_too_old).await;
         }
         if !candidate_seen && route_for_absent(state, auth_via, &req, &resp).await == AbsentRoute::HoldHere {
             if let Some(held) = hold_for_absent_target(state, auth_via, &req, &resp, HoldReason::NotRunning).await {
@@ -1314,7 +1314,7 @@ impl HoldReason {
 /// here therefore means "handed to the relay" — which is the strongest claim
 /// any WAN tier can make, and is what `DELIVERY=wan` on the echoed marker
 /// already tells the sender.
-async fn try_cloud_relay(state: &AppState, req: &InjectionRequest, caller_uid: &str) -> Option<serde_json::Value> {
+pub(super) async fn try_cloud_relay(state: &AppState, req: &InjectionRequest, caller_uid: &str) -> Option<serde_json::Value> {
     // Never re-relay something that ARRIVED over the cloud. An agent unknown to
     // every instance would otherwise bounce between the relay and each
     // subscriber indefinitely, re-queueing on every hop. `forward_hops` cannot
@@ -1366,7 +1366,7 @@ async fn try_cloud_relay(state: &AppState, req: &InjectionRequest, caller_uid: &
         &req.target_agent,
         &req.message,
         priority,
-        carried.as_ref(),
+        carried.as_ref(), req.cloud_files.as_deref(),
     )
     .await;
 
@@ -1384,7 +1384,7 @@ async fn try_cloud_relay(state: &AppState, req: &InjectionRequest, caller_uid: &
                 cloud_kept_signature = request_id.starts_with("inj-w-"),
                 "cloud relay: queued for WAN delivery"
             );
-            echo_jekt_to_sender(
+            echo_jekt_to_sender_with_files(
                 state,
                 Some(source),
                 &req.target_agent,
@@ -1403,7 +1403,7 @@ async fn try_cloud_relay(state: &AppState, req: &InjectionRequest, caller_uid: &
                     lan_verified: None,
                     channel_verified: None,
                 },
-                priority,
+                priority, req.files_delivery.as_ref(),
             );
             let body = crate::backend::reactive::types::InjectionResponse {
                 deferred: None,
