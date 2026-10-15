@@ -176,7 +176,6 @@ vi.mock("@/app/store/global", async () => {
 
     return {
         MOS,
-        atoms: { prefersReducedMotionAtom: () => false },
         staticTabId: () => "tab-1",
         // The drawer resolves `term:scrollback` through this (see
         // termscrollback.ts). Backed by a mutable bag so a test can set the

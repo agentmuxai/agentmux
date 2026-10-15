@@ -9,6 +9,7 @@ import { PaneMediaCaptureIndicator } from "@/app/window/pane-media-capture-indic
 import { StatusBar } from "@/app/statusbar/StatusBar";
 import { WindowHeader } from "@/app/window/window-header";
 import { TabContent } from "@/app/tab/tabcontent";
+import { shouldReduceMotion } from "@/app/motion/motion";
 import { atoms } from "@/store/global";
 import {
     WindowTabDisplayedProvider,
@@ -34,7 +35,6 @@ import type { JSX } from "solid-js";
 function WorkspaceElem(): JSX.Element {
     const tabId = atoms.activeTabId;
     const ws = atoms.workspace;
-    const prefersReducedMotion = atoms.prefersReducedMotionAtom;
     // Keep inactive tabs laid out, the way pane tabs keep hidden members
     // (docs/analysis/ANALYSIS_WINDOW_TAB_SWITCH_SMOOTHNESS_2026_09_24.md §6.1):
     // `visibility: hidden` instead of `content-visibility: hidden`, so a
@@ -57,15 +57,8 @@ function WorkspaceElem(): JSX.Element {
     // (browserslist "Chrome >= 128"), but detected rather than assumed — a
     // missing API degrades to the plain instant swap, not a throw.
     //
-    // Reduced-motion (reagent P1 on PR #3239): the removed opacity fade was
-    // explicitly gated on this same atom (Codex P2 on PR #1108), and that
-    // gating was accidentally dropped along with the fade itself. The
-    // app-wide `.prefers-reduced-motion` CSS override (app.scss) only zeroes
-    // `transition-*` properties, not the `animation-*` ones a view
-    // transition's `::view-transition-old/new` pseudo-elements actually
-    // animate with — so skip calling startViewTransition at all when the
-    // user prefers reduced motion, same as the code this replaced did for
-    // its own animation.
+    // Skipped when the motion policy reduces `transition` (motion/motion.ts;
+    // dormant today, everything runs in both tiers).
     //
     // Reveal-gate resync (reagent P1 on PR #3239): `document.
     // startViewTransition()`'s update callback is NOT guaranteed to run
@@ -127,7 +120,7 @@ function WorkspaceElem(): JSX.Element {
             setDisplayTabId(next);
             if (tabSwitching()) scheduleRevealLift();
         };
-        if (!instant && !prefersReducedMotion() && typeof document.startViewTransition === "function") {
+        if (!instant && !shouldReduceMotion("transition") && typeof document.startViewTransition === "function") {
             document.startViewTransition(apply);
         } else {
             apply();

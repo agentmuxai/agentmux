@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 @use "../element/menu-frame" as menuFrame;
+@use "../mixins.scss";
 
 .tab {
     position: absolute;
@@ -24,9 +25,7 @@
     font-weight: 400;
     color: var(--secondary-text-color);
     opacity: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    @include mixins.flex-center;
 
     // Inter-tab separator moved out of the tab as a real DOM
     // sibling element (.tab-separator in tabbar.scss). The previous
@@ -74,19 +73,12 @@
         // (PaneTabStrip.scss), not this one.
         &::before {
             content: "";
-            position: absolute;
-            inset: 0;
+            @include mixins.abs-fill;
             z-index: var(--zindex-activity-flash);
             background: rgb(from var(--main-text-color) r g b / 0.12);
             opacity: 0;
             pointer-events: none;
         }
-    }
-
-    &.animate {
-        transition:
-            transform 0.3s ease,
-            background-color 0.3s ease-in-out;
     }
 
     &.active {
@@ -126,7 +118,7 @@
     .name {
         user-select: none;
         z-index: var(--zindex-tab-name);
-        font-size: 11px;
+        font-size: var(--text-xs);
         font-weight: 400;
         overflow: hidden;
         text-overflow: ellipsis;
@@ -147,9 +139,7 @@
         width: 20px;
         height: 20px;
         min-height: 0; // the line Button's 26px minimum would outgrow the tab
-        display: flex;
-        align-items: center;
-        justify-content: center;
+        @include mixins.flex-center;
         cursor: default;
         z-index: var(--zindex-tab-name);
         padding: 0;
@@ -164,7 +154,7 @@
 
         // The close X is Font Awesome's `xmark`, the same shape as every other close.
         i {
-            font-size: 13px;
+            font-size: var(--text-base);
             line-height: 1;
         }
     }
@@ -246,13 +236,8 @@ body:not(.nohover) .tab.active:hover {
 // docs/retro/RETRO_TAB_GAPS_ARCHITECTURE_ANALYSIS_2026_04_25.md.
 // Now: simple opacity fade-in only; width follows content via the
 // flex layout's `width: auto` + min/max-width constraints.
-@keyframes new-tab-fade-in {
-    from { opacity: 0; }
-    to   { opacity: 1; }
-}
-
 .tab.new-tab {
-    animation: new-tab-fade-in 0.1s forwards;
+    animation: am-fade-in var(--duration-fast) forwards;
 }
 
 // Colored tab — the underline is the hue at full strength; hover lifts the
@@ -306,7 +291,7 @@ body:not(.nohover) .tab.tab-colored.active.dragging {
     border: 1px solid var(--border-color);
     border-radius: 0;
     color: var(--secondary-text-color);
-    font-size: 11px;
+    font-size: var(--text-xs);
     cursor: default;
     white-space: nowrap;
 

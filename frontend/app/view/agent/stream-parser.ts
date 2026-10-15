@@ -92,7 +92,16 @@ function parseBroadcastHeader(
 }
 
 const VALID_JEKT_TIERS: ReadonlySet<string> = new Set(["info", "coord", "sensitive"]);
-const VALID_JEKT_DELIVERY_TIERS: ReadonlySet<string> = new Set(["host", "lan", "wan"]);
+const VALID_JEKT_DELIVERY_TIERS: ReadonlySet<string> = new Set(["host", "channel", "lan", "wan"]);
+const VALID_JEKT_TRUST: ReadonlySet<string> = new Set([
+    "host-verified",
+    "channel-verified",
+    "lan-verified",
+    "wan-verified",
+    "self-declared",
+    "unverified",
+    "network-claimed",
+]);
 
 /**
  * A held jekt (SPEC_DURABLE_JEKT_DELIVERY_2026_09_24.md §2.4) carries
@@ -916,7 +925,9 @@ export class ClaudeCodeStreamParser {
         const deliveryTier: JektDeliveryTier = VALID_JEKT_DELIVERY_TIERS.has(fields.DELIVERY)
             ? (fields.DELIVERY as JektDeliveryTier)
             : "wan";
-        const trust: JektTrust = fields.TRUST === "host-verified" ? "host-verified" : "network-claimed";
+        // Shown as the marker says; anything unrecognised reads as the least
+        // proven label, like TIER/DELIVERY above.
+        const trust: JektTrust = VALID_JEKT_TRUST.has(fields.TRUST) ? (fields.TRUST as JektTrust) : "network-claimed";
 
         // Direction mirrors agentMessageToNode: incoming when this agent is
         // the declared recipient, outgoing when it's the declared sender

@@ -94,19 +94,55 @@ pub fn resize(master: &File, cols: u16, rows: u16) {
     }
 }
 
-/// End a session's whole process group: hang up, then kill what is left.
-pub fn end_group(pid: u32) {
+/// How long [`end_group`] gives a hung-up group before killing what is left.
+pub const HANGUP_GRACE: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// How many [`Ending`]s are still open, for [`wait_for_endings`].
+static ENDINGS: std::sync::Mutex<usize> = std::sync::Mutex::new(0);
+static ENDINGS_DONE: std::sync::Condvar = std::sync::Condvar::new();
+
+/// A session being ended, from the moment it is decided until its group's
+/// kill is sent (or none is needed): the daemon must not exit in between.
+pub struct Ending(());
+
+impl Ending {
+    pub fn start() -> Self {
+        *ENDINGS.lock().unwrap_or_else(|e| e.into_inner()) += 1;
+        Ending(())
+    }
+}
+
+impl Drop for Ending {
+    fn drop(&mut self) {
+        *ENDINGS.lock().unwrap_or_else(|e| e.into_inner()) -= 1;
+        ENDINGS_DONE.notify_all();
+    }
+}
+
+/// End a session's whole process group: hang up, then kill what is left
+/// [`HANGUP_GRACE`] later. `ending` closes once the kill is sent.
+pub fn end_group(pid: u32, ending: Ending) {
     let pgid = -(pid as libc::pid_t);
     // SAFETY: plain signals to a process group this daemon created.
     unsafe {
         libc::kill(pgid, libc::SIGHUP);
     }
     std::thread::spawn(move || {
-        std::thread::sleep(std::time::Duration::from_secs(2));
+        std::thread::sleep(HANGUP_GRACE);
         unsafe {
             libc::kill(pgid, libc::SIGKILL);
         }
+        drop(ending);
     });
+}
+
+/// Wait until every [`Ending`] is closed: before the daemon exits, which would
+/// otherwise drop the kills still waiting.
+pub fn wait_for_endings() {
+    let mut open = ENDINGS.lock().unwrap_or_else(|e| e.into_inner());
+    while *open > 0 {
+        open = ENDINGS_DONE.wait(open).unwrap_or_else(|e| e.into_inner());
+    }
 }
 
 fn set_cloexec(fd: libc::c_int) {

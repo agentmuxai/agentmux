@@ -14,6 +14,9 @@
 //!   the session over and the old connection is closed.
 //! - `AMR <protocol> END <session>`: end it. Answered `ok` or `none`.
 //! - `AMR <protocol> LIST`: one line per session, `id end exited`.
+//! - `AMR <protocol> STOP`: end every session, then the daemon itself
+//!   (Remotes' Remove helper). Answered `ok`. A daemon older than this
+//!   answers it as a bad request, and exits once idle as before.
 //! - `AMR <protocol> PID <session>`: its shell's process id, for its pane's
 //!   stats badge (`serve`'s `PaneProcs`). Answered `<pid>` or `none`. A
 //!   daemon older than this answers it as a bad request: the pane then reads
@@ -25,7 +28,7 @@ use std::io::{self, BufRead, BufReader, Read, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -90,6 +93,12 @@ struct Session {
 type Sessions = Arc<Mutex<HashMap<String, Arc<Session>>>>;
 
 static GENERATION: AtomicU64 = AtomicU64::new(1);
+
+/// Set by `STOP`, under the sessions' lock, which every new session is made
+/// under: no session is made after `STOP` has taken the list it ends. Every
+/// session ended is taken out under that lock too, with its `pty::Ending`, so
+/// `STOP` then waits for all of them, whoever ended them.
+static STOPPING: AtomicBool = AtomicBool::new(false);
 
 /// Run the daemon in the foreground until it has been idle for a minute.
 pub fn run(base: &Path) -> io::Result<()> {
@@ -158,17 +167,17 @@ pub fn run(base: &Path) -> io::Result<()> {
     }
     for stream in listener.incoming() {
         let Ok(stream) = stream else { continue };
-        let (sessions, connections) = (sessions.clone(), connections.clone());
+        let (sessions, connections, sock) = (sessions.clone(), connections.clone(), sock.clone());
         connections.fetch_add(1, Ordering::SeqCst);
         std::thread::spawn(move || {
-            let _ = handle(stream, &sessions);
+            let _ = handle(stream, &sessions, &sock);
             connections.fetch_sub(1, Ordering::SeqCst);
         });
     }
     Ok(())
 }
 
-fn handle(stream: UnixStream, sessions: &Sessions) -> io::Result<()> {
+fn handle(stream: UnixStream, sessions: &Sessions, sock: &Path) -> io::Result<()> {
     let mut reader = BufReader::new(stream.try_clone()?);
     let mut line = String::new();
     reader.read_line(&mut line)?;
@@ -214,6 +223,29 @@ fn handle(stream: UnixStream, sessions: &Sessions) -> io::Result<()> {
                     .collect();
                 out.write_all(list.concat().as_bytes())
             }
+            ["STOP"] => {
+                // No new connection reaches this daemon from here on.
+                let _ = std::fs::remove_file(sock);
+                let (first, ids): (bool, Vec<String>) = {
+                    let map = sessions.lock().unwrap();
+                    (!STOPPING.swap(true, Ordering::SeqCst), map.keys().cloned().collect())
+                };
+                for id in ids {
+                    end_session(sessions, &id, None);
+                }
+                let _ = out.write_all(b"ok\n");
+                // The answer is complete once every handle on the connection
+                // is closed.
+                drop((out, reader, stream));
+                if !first {
+                    // The first STOP exits the daemon once all is ended.
+                    loop {
+                        std::thread::park();
+                    }
+                }
+                pty::wait_for_endings();
+                std::process::exit(0);
+            }
             _ => out.write_all(&Frame::Error("bad request".into()).encode()),
         },
         _ => {
@@ -245,18 +277,18 @@ fn end_session(sessions: &Sessions, id: &str, only: Option<&Arc<Session>>) -> bo
         let mut map = sessions.lock().unwrap();
         match (map.get(id), only) {
             (Some(s), Some(o)) if !Arc::ptr_eq(s, o) => None,
-            (Some(_), _) => map.remove(id),
+            (Some(_), _) => map.remove(id).map(|s| (s, pty::Ending::start())),
             (None, _) => None,
         }
     };
-    let Some(s) = removed else {
+    let Some((s, ending)) = removed else {
         return false;
     };
     let mut inner = s.inner.lock().unwrap();
     // A shell already reaped has no process group left to end, and its pid
     // may by now be another process's.
     if inner.exited.is_none() {
-        pty::end_group(s.pid);
+        pty::end_group(s.pid, ending);
     }
     if let Some((_, c)) = inner.client.take() {
         let _ = c.shutdown(std::net::Shutdown::Both);
@@ -275,6 +307,10 @@ fn attach(
 ) -> io::Result<()> {
     let (session, created) = {
         let mut map = sessions.lock().unwrap();
+        if STOPPING.load(Ordering::SeqCst) {
+            let mut out = stream;
+            return out.write_all(&Frame::Error("the helper is stopping".into()).encode());
+        }
         match map.get(id) {
             Some(s) => (s.clone(), false),
             None => {

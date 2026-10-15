@@ -1,19 +1,22 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+@use "../../mixins.scss";
+
 // Slides down from under the toolbar and pushes the list down: the grid row
 // animates from 0fr to 1fr, so the panel's real height opens with no fixed max.
 .swarm-stats {
     display: grid;
     grid-template-rows: 0fr;
-    transition: grid-template-rows 200ms cubic-bezier(0.2, 0, 0, 1);
+    transition: grid-template-rows 200ms var(--ease-decelerate);
 
     &[data-open] {
         grid-template-rows: 1fr;
         border-bottom: 1px solid var(--border-color);
     }
 
-    @media (prefers-reduced-motion: reduce) {
+    // Reduced treatment (transition), dormant under the motion policy.
+    @include mixins.when-motion-reduced(transition) {
         transition: none;
     }
 }
@@ -25,7 +28,7 @@
 
 .swarm-stats-title {
     padding: 6px 12px 2px;
-    font-size: 10px;
+    font-size: var(--text-2xs);
     color: var(--secondary-text-color);
 }
 
@@ -36,7 +39,7 @@
     row-gap: 2px;
     align-items: baseline;
     padding: 2px 12px 8px;
-    font-size: 12px;
+    font-size: var(--text-sm);
 }
 
 .swarm-stats-row {
@@ -50,11 +53,9 @@
 
 .swarm-stats-counts {
     min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    @include mixins.truncate;
     font-family: var(--font-mono, "Hack", monospace);
-    font-size: 11px;
+    font-size: var(--text-xs);
     color: var(--secondary-text-color);
 
     &.swarm-stats-counts--warn {
@@ -65,6 +66,6 @@
 // The "N failing" note inside the toolbar's Stats button.
 .swarm-stats-failing {
     margin-left: 6px;
-    font-size: 10px;
+    font-size: var(--text-2xs);
     color: var(--warning-text-color, var(--warning-color));
 }

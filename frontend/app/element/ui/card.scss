@@ -75,8 +75,8 @@
     text-align: left;
     cursor: default;
     transition:
-        background 90ms ease,
-        border-color 90ms ease;
+        background 90ms var(--ease-standard),
+        border-color 90ms var(--ease-standard);
 
     &:hover {
         border-color: var(--accent-color);
@@ -116,9 +116,7 @@
 
 .ui-card-icon {
     grid-area: icon;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
+    @include mixins.flex-center(inline-flex);
     width: 20px;
     height: 20px;
     color: var(--secondary-text-color);
@@ -138,9 +136,7 @@
 .ui-card-subtitle,
 .ui-card-meta {
     min-width: 0;
-    overflow: hidden;
-    white-space: nowrap;
-    text-overflow: ellipsis;
+    @include mixins.truncate;
 }
 
 .ui-card-title {
@@ -235,9 +231,11 @@
 
     &--busy {
         background: var(--warning-color);
-        animation: ui-status-dot-pulse 1.2s ease-in-out infinite;
+        --pulse-min: 0.35;
+        animation: am-pulse 1.2s var(--ease-in-out) infinite;
 
-        @media (prefers-reduced-motion: reduce) {
+        // Reduced treatment (status), dormant under the motion policy.
+        @include mixins.when-motion-reduced(status) {
             animation: none;
         }
     }
@@ -245,12 +243,6 @@
     &--idle {
         background: transparent;
         border-color: var(--secondary-text-color);
-    }
-}
-
-@keyframes ui-status-dot-pulse {
-    50% {
-        opacity: 0.35;
     }
 }
 
@@ -294,8 +286,7 @@
     margin: var(--space-1) 0 0;
     font-size: var(--text-2xs);
     font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
+    @include mixins.label-caps;
     color: var(--secondary-text-color);
 }
 

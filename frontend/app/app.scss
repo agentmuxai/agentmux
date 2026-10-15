@@ -5,6 +5,7 @@
 @use "reset.scss";
 @use "theme.scss";
 @use "themes/index";
+@use "keyframes";
 
 // `clip`, not `hidden`: clipped the same, but not a scroll container. With
 // `hidden`, anything wider than the window (the status bar's left group in a
@@ -67,12 +68,12 @@ body {
     border: 2px solid var(--drop-target-border);
     border-radius: var(--block-border-radius);
     transition:
-        top 120ms ease-out,
-        left 120ms ease-out,
-        width 120ms ease-out,
-        height 120ms ease-out,
-        background-color 100ms ease-out,
-        border-color 100ms ease-out;
+        top var(--duration-quick) var(--ease-out),
+        left var(--duration-quick) var(--ease-out),
+        width var(--duration-quick) var(--ease-out),
+        height var(--duration-quick) var(--ease-out),
+        background-color var(--duration-fast) var(--ease-out),
+        border-color var(--duration-fast) var(--ease-out);
 
     // Stage one, before the dwell arms the drop: where the pane would land,
     // without committing to it (redock-ghost.ts). Releasing here leaves the
@@ -213,20 +214,6 @@ a {
     color: var(--accent-color);
 }
 
-.prefers-reduced-motion {
-    /* stylelint-disable declaration-no-important --
-       Accessibility override: must beat every component's own
-       transition rules; `!important` is the standard pattern for
-       this `prefers-reduced-motion` workaround. */
-    * {
-        transition-duration: none !important;
-        transition-timing-function: none !important;
-        transition-property: none !important;
-        transition-delay: none !important;
-    }
-    /* stylelint-enable declaration-no-important */
-}
-
 .flash-error-container {
     position: absolute;
     right: 10px;
@@ -265,36 +252,6 @@ a {
     }
 }
 
-// Pane-header activity flash, referenced by
-// `mixins.block-frame-default-header-layout()`'s `.block-frame-text.term-activity--flash`.
-// Lives HERE, in the one globally-imported stylesheet, rather than in that
-// mixin's body (muxreview P2 on PR #3151): a @keyframes inside a mixin is
-// emitted once per @include, so it appeared twice once both block.scss and
-// agent-view.scss included the mixin. Moving it to mixins.scss's top level
-// was worse still — every one of that module's 10 consumers then emitted a
-// copy, including unrelated ones like modal.scss. app.scss is imported
-// exactly once (bootstrap.ts / app.tsx), so this compiles to a single
-// definition; @keyframes names are global in CSS, so the mixin's
-// `animation:` reference resolves regardless of where it's declared.
-//
-// One deliberate deviation from the block.scss original this was extracted
-// from: it read `var(--accent-color, #6c9ef8)`. block.scss is grandfathered
-// in .stylelintignore for its pre-existing raw hex; this file is not, so
-// carrying the literal would newly fail `color-no-hex`. Dropping it is safe
-// rather than a silent behavior change — `--accent-color` is defined
-// unconditionally in theme.scss and only ever overridden, never unset, by
-// the files in themes/, so the fallback arm was unreachable.
-@keyframes term-activity-flash {
-    0% {
-        opacity: 1;
-        color: var(--accent-color);
-    }
-    100% {
-        opacity: 0.6;
-        color: inherit;
-    }
-}
-
 // ── Tab-switch view transition ──────────────────────────────────────────────
 // workspace.tsx wraps the active-tab swap in document.startViewTransition(),
 // scoped to this one named group via `view-transition-name` on the tab-
@@ -312,23 +269,48 @@ a {
 // zero-cost cached-texture swap isn't available here.
 ::view-transition-old(workspace-tab-content),
 ::view-transition-new(workspace-tab-content) {
-    animation-duration: 120ms;
+    animation-duration: var(--duration-quick);
 }
 
-// Defense in depth (reagent P1 on PR #3239): workspace.tsx already skips
-// calling startViewTransition() at all when prefersReducedMotionAtom is
-// true, which is the real gate — no transition means no
-// ::view-transition-old/new pseudo-elements ever exist to animate. This is
-// a second, CSS-only backstop for the same intent: the app-wide
-// `.prefers-reduced-motion` class above only zeroes `transition-*`
-// properties, not `animation-*`, which is what a view transition's
-// pseudo-elements actually use — so it alone would NOT have suppressed
-// this. A real `prefers-reduced-motion: reduce` media query (OS-level,
-// independent of whatever drives the app's own atom/class) catches any
-// path that isn't gated in JS.
-@media (prefers-reduced-motion: reduce) {
-    ::view-transition-old(workspace-tab-content),
-    ::view-transition-new(workspace-tab-content) {
-        animation-duration: 1ms;
+// Reduced treatment (transition), dormant under the motion policy. workspace.tsx
+// also skips startViewTransition() when shouldReduceMotion("transition"); this
+// covers a path that isn't gated in JS. Written out rather than through
+// mixins.when-motion-reduced: these pseudo-elements hang off :root itself, so
+// the attribute has to be on the same compound, not an ancestor.
+:root[data-motion-reduce~="transition"]::view-transition-old(workspace-tab-content),
+:root[data-motion-reduce~="transition"]::view-transition-new(workspace-tab-content) {
+    animation-duration: 1ms;
+}
+
+// Font Awesome's vendored CSS (public/fontawesome/css/fontawesome.min.css) has
+// its own reduced-motion media rule, which runs fa-spin, fa-pulse and the other
+// fa-* animations once, in 1 ms. This puts FA's own values back in the reduced
+// tier unless the motion policy reduces `status`
+// (SPEC_MOTION_TIERS_AND_STYLESHEET_DRY_2026_10_15.md §4.4). The 0s that rule
+// writes to transition-delay and transition-duration is left alone: FA
+// declares no transition, so 0s is already its own value.
+:root[data-motion-tier="reduced"]:not([data-motion-reduce~="status"]) {
+    .fa-beat,
+    .fa-beat-fade,
+    .fa-bounce,
+    .fa-fade,
+    .fa-flip,
+    .fa-shake,
+    .fa-spin {
+        animation-delay: var(--fa-animation-delay, 0s);
+        animation-duration: var(--fa-animation-duration, 1s);
+        animation-iteration-count: var(--fa-animation-iteration-count, infinite);
+    }
+
+    .fa-spin {
+        animation-duration: var(--fa-animation-duration, 2s);
+    }
+
+    // FA gives these no delay of its own, so the initial 0s.
+    .fa-pulse,
+    .fa-spin-pulse {
+        animation-delay: 0s;
+        animation-duration: var(--fa-animation-duration, 1s);
+        animation-iteration-count: var(--fa-animation-iteration-count, infinite);
     }
 }

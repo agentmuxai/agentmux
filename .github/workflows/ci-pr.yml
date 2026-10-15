@@ -569,6 +569,13 @@ jobs:
       - name: No transition-all gate
         run: bash scripts/check-no-transition-all.sh
 
+      # Only frontend/app/motion/motion.ts reads the OS motion preference; every
+      # reduced treatment goes through the motion policy. Thirteen raw media
+      # queries came back after the 2026-07-11 decision with nothing to stop
+      # them (SPEC_MOTION_TIERS_AND_STYLESHEET_DRY_2026_10_15.md §4.6).
+      - name: Motion gates
+        run: node scripts/check-motion-gates.mjs
+
       # Ratchet for the line-style component set: hand-rolled buttons, solid
       # fills on controls, off-token corner radii and undefined CSS variables
       # may not go up compared with the base branch, which this job's

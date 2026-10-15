@@ -100,9 +100,7 @@ $gap: 6px;
             min-width: 0;
 
             .text {
-                white-space: nowrap;
-                overflow: hidden;
-                text-overflow: ellipsis;
+                @include mixins.truncate;
             }
         }
 
@@ -117,7 +115,7 @@ $gap: 6px;
                 display: block;
                 height: 100%;
                 background: var(--accent-color);
-                transition: width 120ms linear;
+                transition: width var(--duration-quick) linear;
             }
         }
 
@@ -135,9 +133,7 @@ $gap: 6px;
         }
 
         button.link {
-            padding: 0;
-            border: none;
-            background: none;
+            @include mixins.button-reset;
             color: var(--accent-color);
             font-size: var(--text-xs);
             cursor: pointer;
@@ -201,9 +197,7 @@ $gap: 6px;
 
         &__main {
             position: relative;
-            display: flex;
-            align-items: center;
-            justify-content: center;
+            @include mixins.flex-center;
             width: $tile;
             height: $tile;
             padding: 0;
@@ -214,8 +208,7 @@ $gap: 6px;
             cursor: zoom-in;
 
             &:focus-visible {
-                outline: 2px solid var(--accent-color);
-                outline-offset: 1px;
+                @include mixins.focus-ring;
             }
 
             img {
@@ -226,7 +219,7 @@ $gap: 6px;
         }
 
         &__placeholder {
-            font-size: 13px;
+            font-size: var(--text-base);
             font-weight: 600;
             color: var(--secondary-text-color);
         }
@@ -250,7 +243,7 @@ $gap: 6px;
             .ext {
                 max-width: $tile - 8px;
                 overflow: hidden;
-                font-size: 9px;
+                font-size: var(--text-3xs);
                 font-weight: 600;
                 line-height: 10px;
                 letter-spacing: 0.02em;
@@ -261,8 +254,7 @@ $gap: 6px;
         // Text tiles: a mini page with the file's first lines, starting
         // below the number badge.
         &__text {
-            position: absolute;
-            inset: 0;
+            @include mixins.abs-fill;
             padding: 19px 4px 4px 6px;
             overflow: hidden;
             font-family: var(--font-mono, monospace);
@@ -280,7 +272,7 @@ $gap: 6px;
             bottom: 3px;
             padding: 0 3px;
             border-radius: 3px;
-            font-size: 9px;
+            font-size: var(--text-3xs);
             line-height: 13px;
             background: color-mix(in srgb, var(--main-bg-color) 80%, transparent);
         }
@@ -300,7 +292,7 @@ $gap: 6px;
             min-width: 14px;
             padding: 0 3px;
             border-radius: 3px;
-            font-size: 10px;
+            font-size: var(--text-2xs);
             line-height: 14px;
             text-align: center;
             color: var(--main-text-color);
@@ -313,18 +305,16 @@ $gap: 6px;
             right: -6px;
             width: 18px;
             height: 18px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
+            @include mixins.flex-center;
             padding: 0;
             border: 1px solid var(--border-color);
             border-radius: 50%;
             background: var(--main-bg-color);
             color: var(--secondary-text-color);
-            font-size: 10px;
+            font-size: var(--text-2xs);
             cursor: pointer;
             opacity: 0;
-            transition: opacity 80ms linear;
+            transition: opacity var(--duration-decorative-instant) linear;
 
             &:hover {
                 color: var(--main-text-color);
@@ -337,11 +327,8 @@ $gap: 6px;
         }
 
         &__progress {
-            position: absolute;
-            inset: 0;
-            display: flex;
-            align-items: center;
-            justify-content: center;
+            @include mixins.abs-fill;
+            @include mixins.flex-center;
             background: color-mix(in srgb, var(--main-bg-color) 45%, transparent);
 
             svg {
@@ -359,10 +346,12 @@ $gap: 6px;
                 .bar {
                     stroke: var(--accent-color);
                     stroke-linecap: round;
-                    transition: stroke-dashoffset 120ms linear;
+                    transition: stroke-dashoffset var(--duration-quick) linear;
                 }
                 &.is-indeterminate {
-                    animation: agent-attachment-spin 900ms linear infinite;
+                    // The ring starts at the top: the svg is turned -90deg.
+                    --spin-from: -90deg;
+                    animation: am-spin 900ms linear infinite;
                 }
             }
         }
@@ -371,13 +360,11 @@ $gap: 6px;
             display: flex;
             flex-direction: column;
             margin-top: 3px;
-            font-size: 10px;
+            font-size: var(--text-2xs);
             line-height: 12px;
 
             .name {
-                overflow: hidden;
-                white-space: nowrap;
-                text-overflow: ellipsis;
+                @include mixins.truncate;
                 color: var(--main-text-color);
             }
             .size {
@@ -393,7 +380,7 @@ $gap: 6px;
         }
 
         &.is-flash &__main {
-            animation: agent-attachment-flash 900ms ease-out;
+            animation: agent-attachment-flash 900ms var(--ease-out);
         }
 
         // "+N": the next few thumbnails, dimmed, under the count.
@@ -401,17 +388,14 @@ $gap: 6px;
             cursor: pointer;
 
             .mosaic {
-                position: absolute;
-                inset: 0;
+                @include mixins.abs-fill;
                 display: grid;
                 grid-template-columns: 1fr 1fr;
                 grid-template-rows: 1fr 1fr;
                 opacity: 0.35;
 
                 .cell {
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
+                    @include mixins.flex-center;
                     font-size: var(--text-sm);
                     background-size: cover;
                     background-position: center;
@@ -440,12 +424,9 @@ $gap: 6px;
 
 // ── Preview (portalled to <body>, so not under .agent-view) ────────────
 .agent-attachment-lightbox {
-    position: fixed;
-    inset: 0;
+    @include mixins.fixed-fill;
     z-index: var(--z-modal);
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    @include mixins.flex-center;
     // A dimming scrim reads the same in every theme.
     background: rgb(0 0 0 / 72%);
 
@@ -462,9 +443,7 @@ $gap: 6px;
     }
 
     &__image {
-        display: flex;
-        align-items: center;
-        justify-content: center;
+        @include mixins.flex-center;
         min-width: 320px;
         min-height: 200px;
 
@@ -538,7 +517,7 @@ $gap: 6px;
         .name {
             max-width: 100%;
             overflow-wrap: anywhere;
-            font-size: 14px;
+            font-size: var(--text-md);
             color: var(--main-text-color);
         }
         .warn {
@@ -559,9 +538,7 @@ $gap: 6px;
         display: flex;
         gap: 6px;
         min-width: 0;
-        overflow: hidden;
-        white-space: nowrap;
-        text-overflow: ellipsis;
+        @include mixins.truncate;
         color: var(--main-text-color);
 
         .num {
@@ -599,15 +576,6 @@ $gap: 6px;
         .pos {
             color: var(--secondary-text-color);
         }
-    }
-}
-
-@keyframes agent-attachment-spin {
-    from {
-        transform: rotate(-90deg);
-    }
-    to {
-        transform: rotate(270deg);
     }
 }
 

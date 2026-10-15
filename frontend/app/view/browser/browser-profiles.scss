@@ -5,16 +5,16 @@
 // rows (docs/specs/SPEC_BROWSER_PANE_PROFILES_MENU_2026_10_09.md §3–§4).
 
 // A profile's initial on its colour.
+
+@use "../../mixins.scss";
 .browser-profile-badge {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
+    @include mixins.flex-center(inline-flex);
     flex-shrink: 0;
     width: 18px;
     height: 18px;
     border-radius: 50%;
     color: #fff;
-    font-size: 10px;
+    font-size: var(--text-2xs);
     font-weight: 700;
     line-height: 1;
 }
@@ -22,7 +22,7 @@
 .browser-profile-badge-personal {
     color: var(--main-text-color);
     border: 1px solid var(--border-color);
-    font-size: 9px;
+    font-size: var(--text-3xs);
 }
 
 // The ✓ on the menu row of the tab's own identity.
@@ -64,7 +64,7 @@
 
 .browser-new-profile-error {
     color: var(--error-color);
-    font-size: 12px;
+    font-size: var(--text-sm);
 }
 
 // Settings → Browser.
@@ -91,7 +91,7 @@
     align-items: center;
     gap: var(--space-1);
     color: var(--secondary-text-color);
-    font-size: 12px;
+    font-size: var(--text-sm);
 }
 
 .browser-profile-fixed {

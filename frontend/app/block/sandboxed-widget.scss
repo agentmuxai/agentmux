@@ -3,6 +3,8 @@
 
 // The pane host for a sandboxed widget (sandboxed-widget-host.tsx).
 
+@use "../mixins.scss";
+
 .sandboxed-widget {
     position: relative;
     width: 100%;
@@ -20,12 +22,9 @@
 
 // Shown in place of the frame once the widget has been stopped.
 .sandboxed-widget-failure {
-    position: absolute;
-    inset: 0;
-    display: flex;
+    @include mixins.abs-fill;
+    @include mixins.flex-center;
     flex-direction: column;
-    align-items: center;
-    justify-content: center;
     gap: 12px;
     padding: 24px;
     text-align: center;

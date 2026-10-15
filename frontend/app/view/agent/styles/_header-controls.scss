@@ -3,6 +3,8 @@
 
 // Agent header + process controls + main container + filter controls. Wrapped in .agent-view so the cascade chain matches
 // the pre-split file (SPEC_AGENT_VIEW_SCSS_SPLIT_2026_04_24).
+@use "../../../mixins.scss";
+
 .agent-view {
     // === Agent Header ===
     .agent-header {
@@ -23,7 +25,7 @@
             display: flex;
             align-items: center;
             gap: var(--space-2);
-            font-size: 14px;
+            font-size: var(--text-md);
             font-weight: 500;
 
             .agent-status-icon {
@@ -80,11 +82,7 @@
             color: var(--main-text-color);
             font-size: var(--text-xs);
             cursor: default;
-            // Not `all`: that also animates the inherited `visibility` that hides
-            // window and pane tabs, so this would pop in a frame late when shown
-            // (docs/analysis/ANALYSIS_WINDOW_TAB_SWITCH_PAINT_2026_09_30.md §3).
-            transition-property: color, background-color, border-color, outline-color, box-shadow, opacity;
-            transition-duration: 0.15s;
+            @include mixins.control-transition(var(--duration-decorative-base));
 
             &:hover:not(:disabled) {
                 background: color-mix(in srgb, var(--main-text-color) 10%, transparent);

@@ -44,6 +44,7 @@ pub(crate) mod work_queue;
 mod messaging_handlers;
 mod muxbus_handlers;
 mod muxspect_handlers;
+mod coord_channel_handlers;
 mod work_claims_handlers;
 mod work_facts_handlers;
 pub(crate) mod native_memory_handlers;

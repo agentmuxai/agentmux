@@ -30,6 +30,8 @@
 
 import { batch, createEffect, createMemo, createSignal, onCleanup, onMount, Show, untrack, type Accessor, type JSX } from "solid-js";
 import { trail } from "@/log/render-trail";
+import { shouldReduceMotion } from "@/app/motion/motion";
+import { DURATION_BASE_MS, EASE_DECELERATE } from "@/app/motion/tokens";
 import { Key } from "@/util/keyed";
 import type { ScrollCommand } from "../hooks/useScrollToNode";
 import type { AgentDispatch } from "../../swarm/swarm-model";
@@ -404,10 +406,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         for (const a of glides) a.cancel();
         glides.clear();
     }
-    function reducedMotion(): boolean {
-        if (scrollRef?.closest(".prefers-reduced-motion")) return true;
-        return typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
-    }
+    const reducedMotion = () => shouldReduceMotion("transition");
     /** The running glides' current offset (px, signed), then stops them. */
     function takeGlideOffset(): number {
         if (glides.size === 0 || !streamingBufferRef) return 0;
@@ -430,17 +429,16 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
     // fills it with nothing moving. Released when the turn's rows move into
     // the head (the frontier moves) and when the reader leaves the bottom.
     // SPEC_CONTENT_RESIZE_CONTRACT_2026_08_31.md §2.
-    // The hold is brief: if nothing fills the room within HOLD_MS (the agent
-    // paused), it closes by itself, the content easing down over
-    // HOLD_RELEASE_MS instead of snapping. Every pin pass restarts the wait,
-    // so while the agent streams the room is filled, not closed.
+    // The hold is brief: if nothing fills the room within HOLD_MS (the agent paused), it closes
+    // by itself, the content easing down over HOLD_RELEASE_MS instead of snapping. Every pin
+    // pass restarts the wait, so while the agent streams the room is filled, not closed.
     // 350 ms / 160 ms (was 700 / 220): an agent's next row usually takes longer
     // than 700 ms, so most holds ended in a visible empty gap and then an
     // ease-down; a shorter hold closes the gap sooner. Too short and a row
     // that was about to arrive finds the room already closed, so tune this
     // against a live run before shortening further.
     const HOLD_MS = 350;
-    const HOLD_RELEASE_MS = 160;
+    const HOLD_RELEASE_MS = DURATION_BASE_MS;
     let holdTimer: ReturnType<typeof setTimeout> | undefined;
     // The hold must never be taller than the content. This runs inside the
     // ResizeObserver that watches this element, so a min-height above the real
@@ -482,7 +480,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
             // Upward offset: it doesn't add scrollable room, so no pin fights it.
             const a = target.animate([{ transform: `translateY(${-moved}px)` }, { transform: "translateY(0)" }], {
                 duration: HOLD_RELEASE_MS,
-                easing: "cubic-bezier(0.2, 0, 0, 1)",
+                easing: EASE_DECELERATE,
             });
             glides.add(a);
             a.onfinish = () => glides.delete(a);
@@ -499,7 +497,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
             if (!el || typeof el.animate !== "function") continue;
             const a = el.animate([{ transform: `translateY(${delta}px)` }, { transform: "translateY(0)" }], {
                 duration: GLIDE_MS,
-                easing: "cubic-bezier(0.2, 0, 0, 1)",
+                easing: EASE_DECELERATE,
                 composite: "add",
             });
             glides.add(a);

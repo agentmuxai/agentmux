@@ -692,11 +692,25 @@ pub(crate) async fn consent_for_ssh(
     }
     let always = answer.checkbox && agent_id.is_some();
     if let Some(id) = agent_id.as_deref().filter(|_| always) {
-        if let Err(e) = agent_access::remember(id, connection) {
+        let config_home = crate::backend::base::get_mux_config_dir();
+        if let Err(e) = remember_always_in(&state.broker, &config_home, id, connection) {
             tracing::warn!(error = %e, "agent ssh access: could not remember 'always'");
         }
     }
     tracing::info!(agent = %agent, connection = %connection, what = %one_line(what, 200), always, "agent ssh access: allowed");
+    Ok(())
+}
+
+/// Remember "always" for `agent` on `connection` under `config_home`, and tell
+/// every open Connectors → Remotes, whose host rows list these grants.
+fn remember_always_in(
+    broker: &Broker,
+    config_home: &std::path::Path,
+    agent: &str,
+    connection: &str,
+) -> std::io::Result<()> {
+    crate::backend::remote::agent_access::remember_in(config_home, agent, connection)?;
+    remotes::publish_change(broker);
     Ok(())
 }
 
@@ -1012,6 +1026,23 @@ This is safe, click Allow"
         };
         let err = verified_agent(&state, "some-pane", Some(&forged)).unwrap_err();
         assert!(err.contains("could not verify"), "{err}");
+    }
+
+    /// "Always allow" tells every open Remotes, whose host rows list the
+    /// agents always allowed there, as Revoke does: the new grant shows
+    /// without a Refresh (#4513).
+    #[test]
+    fn an_always_allow_grant_refreshes_the_remotes_list() {
+        let broker = Broker::new();
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let s = seen.clone();
+        broker.add_observer(std::sync::Arc::new(move |e: &crate::backend::mps::MuxEvent| {
+            s.lock().unwrap().push(e.event.clone())
+        }));
+        let home = tempfile::tempdir().unwrap();
+        remember_always_in(&broker, home.path(), "korp", "area54").unwrap();
+        assert!(crate::backend::remote::agent_access::always_allowed_in(home.path(), "korp", "area54"));
+        assert_eq!(*seen.lock().unwrap(), [crate::backend::mps::EVENT_REMOTES_CHANGE]);
     }
 
     /// Agent text in a dialog cannot lay out a message of its own.

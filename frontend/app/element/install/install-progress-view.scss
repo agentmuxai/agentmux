@@ -4,6 +4,8 @@
 // <InstallProgress> — Layer 1 plus the collapsed Layer 2 disclosure
 // (SPEC_UNIVERSAL_INSTALL_DIALOG_2026_09_23.md §4).
 
+@use "../../mixins.scss";
+
 .install-view {
     display: flex;
     flex-direction: column;
@@ -54,7 +56,6 @@
     }
 
     &:focus-visible {
-        outline: none;
-        box-shadow: var(--shadow-focus-ring);
+        @include mixins.focus-ring;
     }
 }

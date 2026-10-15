@@ -59,13 +59,6 @@ export const APPEARANCE_SETTINGS = {
         section: "appearance",
         keywords: ["pane spacing", "tile gap", "split gap", "pane margin", "window:tilegapsize"],
     },
-    reduceMotion: {
-        id: "appearance.reduce_motion",
-        label: "Reduce motion",
-        description: "Disable CSS animations and transitions",
-        section: "appearance",
-        keywords: ["disable animations", "accessibility", "motion sickness", "animation speed", "window:reducedmotion"],
-    },
     bgColor: {
         id: "appearance.bg_color",
         label: "Background color",
@@ -199,17 +192,6 @@ export function AppearanceSection(): JSX.Element {
                         min={0} max={20} step={1} parse="int"
                         value={(s()["window:tilegapsize"] as number) ?? 3}
                         onChange={(v) => set("window:tilegapsize", v)}
-                    />
-                }
-            />
-            <SettingRow
-                id={APPEARANCE_SETTINGS.reduceMotion.id}
-                label={APPEARANCE_SETTINGS.reduceMotion.label}
-                description={APPEARANCE_SETTINGS.reduceMotion.description}
-                control={
-                    <ToggleControl
-                        checked={!!(s()["window:reducedmotion"] as boolean)}
-                        onChange={(v) => set("window:reducedmotion", v)}
                     />
                 }
             />

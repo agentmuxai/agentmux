@@ -5,29 +5,11 @@
 // Spec: SPEC_STATUSBAR_CPU_CORES_PANEL_2026_06_15.md.
 
 @use "../element/popover-frame" as popoverFrame;
+@use "./stat-button" as statButton;
 
 // Clickable CPU readout in the status bar (the <button> wrapping "CPU n%").
 .stat-cpu-button {
-    background: transparent;
-    border: none;
-    color: inherit;
-    font-family: inherit;
-    font-size: inherit;
-    line-height: inherit;
-    padding: 0 2px;
-    margin: 0;
-    cursor: default;
-    border-radius: 0;
-    transition: background 80ms ease;
-
-    &:hover {
-        background: var(--hover-bg-color);
-    }
-
-    &:focus-visible {
-        outline: 1px solid var(--accent-color);
-        outline-offset: -1px;
-    }
+    @include statButton.stat-button;
 }
 
 .cpu-cores-popover {
@@ -36,7 +18,7 @@
 
     // The body of an AnchoredPopover (shell: position, z-index; body: zoom).
     @include popoverFrame.popover-frame;
-    font-size: 12px;
+    font-size: var(--text-sm);
     display: flex;
     flex-direction: column;
     padding: var(--space-2) 0;
@@ -53,12 +35,12 @@
 
     .cpu-cores-title {
         font-weight: 600;
-        font-size: 13px;
+        font-size: var(--text-base);
     }
 
     .cpu-cores-aggregate {
         font-family: var(--font-mono);
-        font-size: 12px;
+        font-size: var(--text-sm);
     }
 
     .cpu-cores-subtitle {
@@ -68,7 +50,7 @@
         justify-content: space-between;
         gap: var(--space-2);
         color: var(--secondary-text-color);
-        font-size: 11px;
+        font-size: var(--text-xs);
         min-height: 14px; // stable height as the readout text changes
     }
 
@@ -76,7 +58,7 @@
         display: inline-flex;
         align-items: center;
         gap: 4px;
-        font-size: 10px;
+        font-size: var(--text-2xs);
         opacity: 0.8;
     }
 
@@ -98,7 +80,7 @@
         padding: var(--space-3);
         text-align: center;
         color: var(--secondary-text-color);
-        font-size: 11px;
+        font-size: var(--text-xs);
     }
 
     // Scroll backstop shared by every tier's content area.
@@ -126,13 +108,13 @@
             flex: 0 0 auto;
             color: var(--secondary-text-color);
             font-family: var(--font-mono);
-            font-size: 11px;
+            font-size: var(--text-xs);
         }
 
         .cpu-core-bar {
             flex: 1 1 auto;
             height: 6px;
-            background: var(--button-secondary-bg-color, rgba(127, 127, 127, 0.18));
+            background: rgba(127, 127, 127, 0.18);
             border-radius: 2px;
             overflow: hidden;
         }
@@ -141,7 +123,9 @@
             display: block;
             height: 100%;
             border-radius: 2px;
-            transition: width 240ms ease, background-color 240ms ease;
+            transition:
+                width var(--duration-moderate) var(--ease-standard),
+                background-color var(--duration-moderate) var(--ease-standard);
         }
 
         .cpu-core-pct {
@@ -149,7 +133,7 @@
             min-width: 34px;
             text-align: right;
             font-family: var(--font-mono);
-            font-size: 11px;
+            font-size: var(--text-xs);
         }
     }
 
@@ -169,7 +153,7 @@
             align-items: center;
             gap: 2px 4px;
             padding: 3px 5px;
-            background: var(--button-secondary-bg-color, rgba(127, 127, 127, 0.1));
+            background: var(--button-secondary-bg-color);
             border-radius: 3px;
 
             .cpu-core-label { grid-area: label; }
@@ -191,7 +175,9 @@
         height: var(--sq);
         border-radius: 2px;
         cursor: default;
-        transition: background-color 240ms ease, outline-color 80ms ease;
+        transition:
+            background-color var(--duration-moderate) var(--ease-standard),
+            outline-color var(--duration-instant) var(--ease-standard);
         outline: 1px solid transparent;
 
         &:hover,

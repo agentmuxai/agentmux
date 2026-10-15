@@ -75,9 +75,8 @@
         &:hover .line {
             visibility: visible;
 
-            // Ignore the prefers-reduced-motion override, since we're
-            // not applying a true animation here, just a delay before
-            // showing the resize line.
+            // Not a true animation, just a delay before showing the
+            // resize line, so it has no reduced treatment.
             /* stylelint-disable declaration-no-important */
             transition-property: visibility !important;
             transition-delay: var(--animation-time-s) !important;
@@ -225,7 +224,7 @@
         // motion (a cue, not decoration), so it must beat the global
         // reduced-motion reset in app.scss.
         .placeholder-sizer {
-            transition: transform 120ms ease-out !important;
+            transition: transform var(--duration-quick) var(--ease-out) !important;
         }
     }
 
@@ -258,7 +257,7 @@
         box-sizing: border-box;
         opacity: 1;
         transform: scale(1);
-        transition: opacity 120ms ease-out, transform 120ms ease-out;
+        transition: opacity var(--duration-quick) var(--ease-out), transform var(--duration-quick) var(--ease-out);
 
         @starting-style {
             opacity: 0;
@@ -269,15 +268,12 @@
             opacity: 0;
             transform: scale(0.92);
             transition-timing-function: ease-in;
-            transition-duration: 150ms;
+            transition-duration: var(--duration-base);
         }
     }
 
-    // NOTE — no `prefers-reduced-motion` suppression here by design.
-    // The drag-rearrange glide (`.placeholder-sizer`) is treated as ESSENTIAL
-    // spatial motion and animates regardless of the reduced-motion preference —
-    // see the `!important` exemption above. The inner `.placeholder`
-    // opacity/scale fade is decorative and intentionally left subject to the
-    // global accessibility reset in app.scss (no `!important`), so it still
-    // snaps for reduced-motion users while the position glide survives.
+    // NOTE — no reduced treatment here by design. The drag-rearrange glide
+    // (`.placeholder-sizer`) is ESSENTIAL spatial motion: it shows where a
+    // drop lands, so it stays outside the motion policy and is never reduced
+    // (SPEC_MOTION_TIERS_AND_STYLESHEET_DRY_2026_10_15.md §8 Q4).
 }

@@ -64,6 +64,9 @@ pub struct WhoParams {
     pub repo: Option<String>,
     pub branch: Option<String>,
     pub query: Option<String>,
+    /// A PR: `recent_posts` then holds only posts about it (the MCP side asks
+    /// about each of its files too, and merges those posts in).
+    pub pr: Option<i64>,
     pub agent: Option<String>,
     pub block: Option<String>,
 }
@@ -143,10 +146,18 @@ pub(crate) async fn handle_who_is_working_on(
         .filter(|c| !claims::is_own(c, &me_name, uid.as_deref().unwrap_or("")))
         .collect();
     claims::add_claim_matches(&mut agents, &target, &theirs, &others, now);
+    // What agents posted about it (SPEC_AGENT_COORDINATION_CHANNEL_2026_10_15 §3.4).
+    let store = state.identity_store.clone();
+    let asked = target.clone();
+    let pr = p.pr.filter(|n| *n > 0);
+    let recent_posts = tokio::task::spawn_blocking(move || super::coord_channel_handlers::recent_posts(&store, &asked, pr, now))
+        .await
+        .unwrap_or_default();
     Json(json!({
         "asked": target,
         "caller": me.as_ref().map(|m| json!({ "agent": m.agent, "repo": m.repo, "branch": m.branch })),
         "agents": agents,
+        "recent_posts": recent_posts,
         "remote_agents": remote_agents(&state),
         "unreachable_channels": unreachable,
         "note": NOTE,

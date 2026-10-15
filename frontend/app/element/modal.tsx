@@ -32,8 +32,8 @@
  * - Pane-overlay clip — registers the modal's rect with the backend
  *   so native browser-pane HWNDs paint transparent under the modal
  *   (`SPEC_MODAL_PANE_CLIP_2026_04_24.md`).
- * - `prefers-reduced-motion` honored — entrance/exit animations
- *   suppressed when set.
+ * - Motion: the entrance/exit animations declare a reduced treatment
+ *   (modal.scss), dormant under the motion policy (motion/motion.ts).
  * - `closeOnBackdropClick={false}` nudges the panel's
  *   `[data-modal-dismiss]` control instead of silently swallowing
  *   the click.

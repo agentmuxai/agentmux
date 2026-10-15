@@ -13,7 +13,7 @@
 
 [data-theme="solarized-light"] {
     // Alpha-aware — see dracula.scss's comment (PR #2138 reagent P1).
-    --main-bg-color: rgba(253, 246, 227, var(--window-opacity, 0.45));
+    --main-bg-color: rgba(253, 246, 227, var(--window-opacity));
     --panel-bg-color: rgba(88, 110, 117, 0.05);
     --block-bg-color: rgba(255, 255, 255, 0.5);
     --block-bg-solid-color: #fdf6e3;

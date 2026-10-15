@@ -5,18 +5,20 @@
 // AgentMuxError needs to surface to the user. See
 // docs/specs/SPEC_ERROR_CATALOG_2026_05_17.md.
 
+@use "../mixins.scss";
+
 .amx-error-banner {
     display: grid;
     grid-template-columns: auto 1fr auto auto;
     grid-template-areas: "icon body code dismiss";
     align-items: start;
     gap: var(--space-2);
-    padding: var(--space-2) var(--space-2-5);
-    background: color-mix(in srgb, var(--error-color, #ff6b6b) 12%, transparent);
-    border: 1px solid color-mix(in srgb, var(--error-color, #ff6b6b) 40%, transparent);
+    padding: var(--space-2) var(--space-3);
+    background: color-mix(in srgb, var(--error-color) 12%, transparent);
+    border: 1px solid color-mix(in srgb, var(--error-color) 40%, transparent);
     border-radius: 0;
     color: var(--main-text-color);
-    font-size: var(--text-sm, 13px);
+    font-size: var(--text-sm);
     line-height: 1.4;
 }
 
@@ -24,7 +26,7 @@
     grid-area: icon;
     font-size: 16px;
     line-height: 1;
-    color: var(--error-color, #ff6b6b);
+    color: var(--error-color);
     margin-top: 1px;
 }
 
@@ -38,7 +40,7 @@
 
 .amx-error-banner-title {
     font-weight: 600;
-    color: var(--error-color, #ff6b6b);
+    color: var(--error-color);
 }
 
 .amx-error-banner-message {
@@ -53,12 +55,10 @@
 
 .amx-error-banner-details-toggle {
     align-self: flex-start;
-    background: none;
-    border: none;
-    padding: 0;
+    @include mixins.button-reset;
     margin-top: var(--space-1);
     color: var(--secondary-text-color);
-    font-size: 11px;
+    font-size: var(--text-xs);
     text-decoration: underline dotted;
     cursor: default;
 
@@ -74,7 +74,7 @@
     border: 1px solid var(--border-color);
     border-radius: 0;
     font-family: var(--font-mono);
-    font-size: 11px;
+    font-size: var(--text-xs);
     white-space: pre-wrap;
     word-break: break-word;
     color: var(--secondary-text-color);
@@ -87,7 +87,7 @@
     align-self: flex-start;
     padding: 1px 6px;
     font-family: var(--font-mono);
-    font-size: 10px;
+    font-size: var(--text-2xs);
     letter-spacing: 0.04em;
     background: color-mix(in srgb, var(--main-text-color) 6%, transparent);
     color: var(--secondary-text-color);

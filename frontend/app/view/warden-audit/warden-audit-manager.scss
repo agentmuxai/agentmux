@@ -8,6 +8,8 @@
 // failure and a nudge is not a success/error in the same sense an ordinary
 // jekt delivery is.
 
+@use "../../mixins.scss";
+
 .warden-audit-feed {
     list-style: none;
     margin: 0;
@@ -41,9 +43,7 @@
 }
 
 .warden-audit-flow {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    @include mixins.truncate;
 }
 
 .warden-audit-status {
@@ -75,18 +75,14 @@
     opacity: 0.8;
     color: #ef4444;
     font-size: 0.95em;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    @include mixins.truncate;
 }
 
 .warden-audit-reason {
     opacity: 0.8;
     color: #60a5fa;
     font-size: 0.95em;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    @include mixins.truncate;
 }
 
 // ── Responsive container queries ─────────────────────────────────────────────

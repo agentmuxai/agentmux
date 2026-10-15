@@ -23,7 +23,7 @@
 
     .agent-disconnected-banner-icon {
         color: var(--error-color);
-        font-size: 14px;
+        font-size: var(--text-md);
         line-height: 1;
         flex-shrink: 0;
     }
@@ -57,7 +57,7 @@
         font-size: var(--text-xs);
         line-height: 1.4;
         border-radius: 0;
-        transition: background 0.1s, color 0.1s;
+        transition: background var(--duration-decorative-fast), color var(--duration-decorative-fast);
         flex-shrink: 0;
 
         &:hover:not(:disabled) {

@@ -58,7 +58,7 @@ $transcript-preview-max-height: calc(50vh / 3);
 // shared by agent messages and jekts.
 @mixin message-chevron {
     color: var(--secondary-text-color);
-    font-size: 10px;
+    font-size: var(--text-2xs);
 }
 
 // Markdown rendered inside a tool preview (a WebSearch answer, an Agent
@@ -140,7 +140,7 @@ $transcript-preview-max-height: calc(50vh / 3);
     }
 
     .markdown > .content {
-        font-size: 13px;
+        font-size: var(--text-base);
 
         .heading {
             margin: 0.6em 0 0.2em;
@@ -176,11 +176,6 @@ $transcript-preview-max-height: calc(50vh / 3);
     // gated by `resultPill() != null` / `log.open`, which flip together).
     // A brief fade-in on the incoming element softens the pop; skipped
     // entirely for reduced-motion users below.
-    @keyframes agent-tool-summary-fade-in {
-        from { opacity: 0; }
-        to { opacity: 1; }
-    }
-
     // Reusable class (as opposed to the animation applied inline on
     // `.agent-tool-live-tail` below) for elements whose *visibility*
     // toggle is coupled 1:1 to a genuine tool-status change — e.g.
@@ -189,9 +184,10 @@ $transcript-preview-max-height: calc(50vh / 3);
     // (`ToolBlockOverlay.tsx`), so CSS's "display:none -> visible
     // restarts animations" behavior only ever fires on that real event.
     .agent-tool-summary-fade-in {
-        animation: agent-tool-summary-fade-in 160ms ease-out;
+        animation: am-fade-in var(--duration-base) var(--ease-out);
 
-        @include mixins.respect-reduced-motion {
+        // Reduced treatment (transition), dormant under the motion policy.
+        @include mixins.when-motion-reduced(transition) {
             animation: none;
         }
     }
@@ -215,9 +211,10 @@ $transcript-preview-max-height: calc(50vh / 3);
     }
 
     .agent-tool-fade-in-once {
-        animation: agent-tool-summary-fade-in 160ms ease-out;
+        animation: am-fade-in var(--duration-base) var(--ease-out);
 
-        @include mixins.respect-reduced-motion {
+        // Reduced treatment (transition), dormant under the motion policy.
+        @include mixins.when-motion-reduced(transition) {
             animation: none;
         }
     }
@@ -225,7 +222,7 @@ $transcript-preview-max-height: calc(50vh / 3);
     // (SPEC_TOOL_OUTPUT_CAP_2026_05_30.md). One muted line, never silent.
     .agent-output-hidden-marker {
         padding: 1px 0;
-        color: var(--secondary-text-color, #888);
+        color: var(--secondary-text-color);
         font-size: 0.85em;
         font-style: italic;
         opacity: 0.75;
@@ -305,7 +302,7 @@ $transcript-preview-max-height: calc(50vh / 3);
                 flex-shrink: 0;
                 width: 12px;
                 text-align: center;
-                font-size: 10px;
+                font-size: var(--text-2xs);
             }
 
             .markdown-canceled-body {
@@ -343,7 +340,7 @@ $transcript-preview-max-height: calc(50vh / 3);
         border-radius: 0;
         background: transparent;
         cursor: default;
-        transition: background 0.1s;
+        transition: background var(--duration-decorative-fast);
 
         &:hover {
             background: color-mix(in srgb, var(--main-text-color) 3%, transparent);
@@ -400,7 +397,7 @@ $transcript-preview-max-height: calc(50vh / 3);
                 // success/error/etc, see the `&.success .agent-tool-status-icon`
                 // rules below) instead of an instant snap. The glyph itself
                 // still changes instantly — only its color eases.
-                transition: color 150ms ease;
+                transition: color var(--duration-base) var(--ease-standard);
             }
 
             // Peek-anchor wrapper span sits between the flex row and the
@@ -424,9 +421,7 @@ $transcript-preview-max-height: calc(50vh / 3);
                 display: block;
                 width: 100%;
                 font-weight: 500;
-                overflow: hidden;
-                text-overflow: ellipsis;
-                white-space: nowrap;
+                @include mixins.truncate;
             }
 
             // Composed header (tool-header.ts): the tool name reads as the
@@ -454,9 +449,7 @@ $transcript-preview-max-height: calc(50vh / 3);
                 > .agent-tool-detail--cut-start {
                     flex: 0 1 auto;
                     min-width: 0;
-                    overflow: hidden;
-                    text-overflow: ellipsis;
-                    white-space: nowrap;
+                    @include mixins.truncate;
                     direction: rtl;
                     text-align: left;
                 }
@@ -509,17 +502,16 @@ $transcript-preview-max-height: calc(50vh / 3);
                 min-width: 0;
                 margin-left: 8px;
                 padding: 0 6px;
-                color: var(--accent-color, #2bd4a8);
+                color: var(--accent-color);
                 background: rgba(43, 212, 168, 0.08);
                 border-radius: 0;
                 font-family: var(--font-mono);
                 font-size: var(--text-xs);
-                white-space: nowrap;
-                overflow: hidden;
-                text-overflow: ellipsis;
-                animation: agent-tool-summary-fade-in 160ms ease-out;
+                @include mixins.truncate;
+                animation: am-fade-in var(--duration-base) var(--ease-out);
 
-                @include mixins.respect-reduced-motion {
+                // Reduced treatment (transition), dormant under the motion policy.
+                @include mixins.when-motion-reduced(transition) {
                     animation: none;
                 }
 
@@ -615,17 +607,7 @@ $transcript-preview-max-height: calc(50vh / 3);
             // the time of that spec), while flow → hidden (the
             // 5s-post-completion-hold auto-collapse path) and the row's
             // entry get a clean ease-out shrink.
-            transition:
-                max-height 120ms cubic-bezier(0.4, 0, 0.2, 1),
-                padding 120ms cubic-bezier(0.4, 0, 0.2, 1),
-                margin 120ms cubic-bezier(0.4, 0, 0.2, 1),
-                opacity 100ms ease-out,
-                // `content-visibility` is discrete; `allow-discrete` lets it
-                // animate with the collapse — it flips to `hidden` at the END of
-                // the close (body stays rendered through the 120ms shrink) and to
-                // visible at the START of the open. Without it the body pops out
-                // the instant `--hidden` is added. (Chromium 117+.)
-                content-visibility 120ms allow-discrete;
+            @include mixins.collapse-transition;
 
             &--hidden {
                 max-height: 0;
@@ -681,7 +663,7 @@ $transcript-preview-max-height: calc(50vh / 3);
             gap: var(--space-0-5);
             background: color-mix(in srgb, var(--main-text-color) 4%, var(--main-bg-color));
             opacity: 0.55;
-            transition: opacity 100ms ease-out;
+            transition: opacity var(--duration-decorative-fast) var(--ease-out);
         }
 
         .agent-tool-panel:hover > .agent-tool-panel-actions,
@@ -716,7 +698,7 @@ $transcript-preview-max-height: calc(50vh / 3);
             align-items: center;
             gap: var(--space-1);
             padding: var(--space-1) var(--space-2);
-            border-radius: var(--radius-2, 4px);
+            border-radius: 4px;
             background: color-mix(in srgb, var(--term-bright-magenta) 8%, transparent);
             cursor: default;
             font-size: var(--text-sm);
@@ -735,9 +717,7 @@ $transcript-preview-max-height: calc(50vh / 3);
 
             .agent-dispatch-card-name {
                 font-weight: 500;
-                overflow: hidden;
-                text-overflow: ellipsis;
-                white-space: nowrap;
+                @include mixins.truncate;
             }
 
             .agent-dispatch-card-members {
@@ -752,7 +732,7 @@ $transcript-preview-max-height: calc(50vh / 3);
                 color: var(--accent-color);
                 flex-shrink: 0;
                 opacity: 0.7;
-                transition: opacity 0.15s ease;
+                transition: opacity var(--duration-decorative-base) var(--ease-standard);
             }
 
             &.agent-dispatch-card-running .agent-dispatch-card-status-icon {
@@ -816,7 +796,7 @@ $transcript-preview-max-height: calc(50vh / 3);
     // Hidden by default; shown by the 600px container query in _responsive.scss.
     .agent-tool-result-pill {
         display: none; // shown via container query at ≥600px
-        font-size: 10px;
+        font-size: var(--text-2xs);
         font-family: var(--font-mono);
         padding: 1px 5px;
         border-radius: var(--radius-full);
@@ -855,9 +835,7 @@ $transcript-preview-max-height: calc(50vh / 3);
         .agent-tool-glob-file {
             color: var(--term-bright-cyan);
             padding: 1px var(--space-1);
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
+            @include mixins.truncate;
 
             &:hover {
                 background: color-mix(in srgb, var(--term-bright-cyan) 8%, transparent);
@@ -1216,9 +1194,7 @@ $transcript-preview-max-height: calc(50vh / 3);
                 flex-basis: 100%;
                 padding-left: var(--space-4);
                 font-size: var(--text-sm);
-                overflow: hidden;
-                text-overflow: ellipsis;
-                white-space: nowrap;
+                @include mixins.truncate;
             }
         }
 
@@ -1314,13 +1290,13 @@ $transcript-preview-max-height: calc(50vh / 3);
     .agent-tool-log-line,
     .agent-preview {
         a.linkified-url {
-            color: var(--link-color, #60a5fa);
+            color: var(--link-color);
             text-decoration: underline;
-            text-decoration-color: color-mix(in srgb, var(--link-color, #60a5fa) 40%, transparent);
+            text-decoration-color: color-mix(in srgb, var(--link-color) 40%, transparent);
             cursor: pointer;
 
             &:hover {
-                text-decoration-color: var(--link-color, #60a5fa);
+                text-decoration-color: var(--link-color);
             }
         }
     }
@@ -1487,10 +1463,7 @@ $transcript-preview-max-height: calc(50vh / 3);
                 cursor: default;
 
                 &:focus-visible {
-                    // Visible focus ring for keyboard users — matches
-                    // the accent treatment used elsewhere for focus.
-                    outline: 2px solid var(--user-input-color);
-                    outline-offset: 1px;
+                    @include mixins.focus-ring;
                 }
 
                 .agent-user-message-icon {
@@ -1555,8 +1528,7 @@ $transcript-preview-max-height: calc(50vh / 3);
                         background: color-mix(in oklab, var(--user-input-color) 35%, var(--main-text-color));
                     }
                     &:focus-visible {
-                        outline: 2px solid var(--user-input-color);
-                        outline-offset: 1px;
+                        @include mixins.focus-ring;
                         opacity: 1;
                     }
                 }
@@ -1586,7 +1558,7 @@ $transcript-preview-max-height: calc(50vh / 3);
     .agent-question-panel-cancelled-note {
         padding: 3px var(--space-1);
         color: var(--secondary-text-color);
-        font-size: var(--text-sm, 12px);
+        font-size: var(--text-sm);
         font-style: italic;
     }
 
@@ -1738,15 +1710,13 @@ $transcript-preview-max-height: calc(50vh / 3);
         }
 
         .agent-tool-compact-chevron {
-            font-size: 9px;
+            font-size: var(--text-3xs);
             flex-shrink: 0;
             width: 10px;
         }
 
         .agent-tool-compact-text {
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
+            @include mixins.truncate;
         }
 
         // A one-line text result, shown whole (CompactResult); a long one
@@ -1836,9 +1806,9 @@ $transcript-preview-max-height: calc(50vh / 3);
     }
 
     .agent-search-sources-label {
-        font-size: 10px;
+        font-size: var(--text-2xs);
+        @include mixins.label-caps;
         letter-spacing: 0.08em;
-        text-transform: uppercase;
         color: var(--secondary-text-color);
     }
 
@@ -1871,16 +1841,14 @@ $transcript-preview-max-height: calc(50vh / 3);
     }
 
     .agent-search-source-domain {
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
+        @include mixins.truncate;
     }
 
     .agent-search-source-count {
         flex-shrink: 0;
         opacity: 0.7;
         font-family: var(--font-mono);
-        font-size: 10px;
+        font-size: var(--text-2xs);
     }
 
     .agent-search-links {
@@ -1908,19 +1876,15 @@ $transcript-preview-max-height: calc(50vh / 3);
         flex: 0 1 auto;
         min-width: 0;
         color: var(--accent-color);
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
+        @include mixins.truncate;
     }
 
     .agent-search-link-domain {
         flex: 1 1 0;
         min-width: 0;
         color: var(--secondary-text-color);
-        font-size: 10px;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
+        font-size: var(--text-2xs);
+        @include mixins.truncate;
     }
 
     .agent-search-card-favicon {
@@ -1978,9 +1942,7 @@ $transcript-preview-max-height: calc(50vh / 3);
 
     .agent-search-query {
         font-style: italic;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
+        @include mixins.truncate;
     }
 
     .agent-search-card {
@@ -2025,15 +1987,13 @@ $transcript-preview-max-height: calc(50vh / 3);
 
     .agent-search-card-domain {
         color: var(--success-color);
-        font-size: 10px;
+        font-size: var(--text-2xs);
         opacity: 0.85;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
+        @include mixins.truncate;
     }
 
     .agent-search-card-index {
-        font-size: 10px;
+        font-size: var(--text-2xs);
         opacity: 0.4;
         flex-shrink: 0;
         font-family: var(--font-mono);
@@ -2042,9 +2002,7 @@ $transcript-preview-max-height: calc(50vh / 3);
     .agent-search-card-title {
         color: var(--accent-color);
         font-size: var(--text-sm);
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
+        @include mixins.truncate;
         line-height: 1.3;
     }
 
@@ -2053,14 +2011,11 @@ $transcript-preview-max-height: calc(50vh / 3);
         opacity: 0.8;
         font-size: var(--text-xs);
         line-height: 1.4;
-        display: -webkit-box;
-        -webkit-line-clamp: 3;
-        -webkit-box-orient: vertical;
-        overflow: hidden;
+        @include mixins.truncate-lines(3);
     }
 
     .agent-search-card-date {
-        font-size: 10px;
+        font-size: var(--text-2xs);
         opacity: 0.45;
         margin-top: 1px;
     }
@@ -2079,8 +2034,8 @@ $transcript-preview-max-height: calc(50vh / 3);
         justify-content: space-between;
         gap: var(--space-1);
         padding: var(--space-0-5) var(--space-1);
-        border-radius: var(--border-radius-sm);
-        background: var(--secondary-bg-color);
+        border-radius: var(--radius-sm);
+        background: var(--panel-bg-color);
         cursor: pointer;
 
         &:hover {
@@ -2105,13 +2060,11 @@ $transcript-preview-max-height: calc(50vh / 3);
     .agent-fetch-domain {
         color: var(--success-color);
         font-size: var(--text-xs);
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
+        @include mixins.truncate;
     }
 
     .agent-fetch-status {
-        font-size: 10px;
+        font-size: var(--text-2xs);
         padding: 1px 6px;
         border-radius: 10px;
         flex-shrink: 0;
@@ -2123,8 +2076,8 @@ $transcript-preview-max-height: calc(50vh / 3);
         }
 
         &.agent-fetch-status-redirect {
-            color: var(--warning-color, #d4a017);
-            background: color-mix(in srgb, var(--warning-color, #d4a017) 15%, transparent);
+            color: var(--warning-color);
+            background: color-mix(in srgb, var(--warning-color) 15%, transparent);
         }
 
         &.agent-fetch-status-error {
@@ -2138,9 +2091,7 @@ $transcript-preview-max-height: calc(50vh / 3);
         opacity: 0.7;
         font-style: italic;
         padding: 0 var(--space-0-5);
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
+        @include mixins.truncate;
     }
 
     .agent-fetch-content {
@@ -2150,8 +2101,8 @@ $transcript-preview-max-height: calc(50vh / 3);
         font-size: var(--text-xs);
         line-height: 1.5;
         padding: var(--space-0-5);
-        border-radius: var(--border-radius-sm);
-        background: var(--secondary-bg-color);
+        border-radius: var(--radius-sm);
+        background: var(--panel-bg-color);
 
         &.agent-fetch-content-json {
             font-family: var(--font-mono);
@@ -2159,7 +2110,7 @@ $transcript-preview-max-height: calc(50vh / 3);
     }
 
     .agent-fetch-truncated {
-        font-size: 10px;
+        font-size: var(--text-2xs);
         opacity: 0.5;
         padding: var(--space-0-5);
         text-align: center;
@@ -2197,7 +2148,7 @@ $transcript-preview-max-height: calc(50vh / 3);
     }
 
     .agent-tool-write-bytes {
-        font-size: 10px;
+        font-size: var(--text-2xs);
         opacity: 0.5;
         flex-shrink: 0;
         margin-left: auto;
@@ -2298,7 +2249,7 @@ $transcript-preview-max-height: calc(50vh / 3);
         flex-shrink: 0;
         margin-left: auto;
         opacity: 0;
-        transition: opacity 0.15s ease;
+        transition: opacity var(--duration-decorative-base) var(--ease-standard);
     }
 
     &:hover .agent-error-copy,
@@ -2344,7 +2295,7 @@ $transcript-preview-max-height: calc(50vh / 3);
             content: "";
             flex: 1 1 auto;
             height: 1px;
-            background: var(--border-color, rgba(255, 255, 255, 0.12));
+            background: var(--border-color);
         }
     }
 
@@ -2352,18 +2303,18 @@ $transcript-preview-max-height: calc(50vh / 3);
         flex-shrink: 0;
         font-size: var(--text-xs);
         font-weight: 600;
+        @include mixins.label-caps;
         letter-spacing: 0.06em;
-        text-transform: uppercase;
-        color: var(--secondary-text-color, rgba(255, 255, 255, 0.45));
+        color: var(--secondary-text-color);
         padding: 2px 10px;
-        border: 1px solid var(--border-color, rgba(255, 255, 255, 0.12));
+        border: 1px solid var(--border-color);
         border-radius: 10px;
-        background: var(--panel-bg-color, rgba(255, 255, 255, 0.04));
+        background: var(--panel-bg-color);
     }
 
     .agent-context-compacted-detail {
         font-size: var(--text-xs);
-        color: var(--tertiary-text-color, rgba(255, 255, 255, 0.3));
+        color: rgba(255, 255, 255, 0.3);
     }
 }
 
@@ -2383,17 +2334,17 @@ $transcript-preview-max-height: calc(50vh / 3);
     .agent-compaction-started-label {
         font-size: var(--text-xs);
         font-weight: 600;
+        @include mixins.label-caps;
         letter-spacing: 0.06em;
-        text-transform: uppercase;
-        color: var(--warning-color, #d9a441);
+        color: var(--warning-color);
         padding: 2px 10px;
-        border: 1px solid color-mix(in srgb, var(--warning-color, #d9a441) 40%, transparent);
+        border: 1px solid color-mix(in srgb, var(--warning-color) 40%, transparent);
         border-radius: 10px;
     }
 
     .agent-compaction-started-detail {
         font-size: var(--text-xs);
-        color: var(--tertiary-text-color, rgba(255, 255, 255, 0.3));
+        color: rgba(255, 255, 255, 0.3);
     }
 }
 
@@ -2409,9 +2360,7 @@ $transcript-preview-max-height: calc(50vh / 3);
 // escalate exactly the way the context-fill meter already trains users to
 // recognize.
 .agent-memory-reinjection {
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    @include mixins.flex-center;
     padding: 6px var(--space-2);
     user-select: none;
 
@@ -2419,9 +2368,9 @@ $transcript-preview-max-height: calc(50vh / 3);
         @include meta-row-text;
         letter-spacing: 0.02em;
         padding: 2px 10px;
-        border: 1px solid var(--border-color, rgba(255, 255, 255, 0.12));
+        border: 1px solid var(--border-color);
         border-radius: 10px;
-        background: var(--panel-bg-color, rgba(255, 255, 255, 0.04));
+        background: var(--panel-bg-color);
     }
 
     &--low  .agent-memory-reinjection-label { color: var(--secondary-text-color); }
@@ -2460,9 +2409,7 @@ $transcript-preview-max-height: calc(50vh / 3);
 // Calendar-day separator (Agent History view). Same centered-rule shape as
 // .agent-session-outcome but visually lighter — a date chip, no detail line.
 .agent-day-divider {
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    @include mixins.flex-center;
     padding: 8px var(--space-2);
     user-select: none;
     position: relative;
@@ -2474,7 +2421,7 @@ $transcript-preview-max-height: calc(50vh / 3);
         top: 50%;
         width: 32%;
         height: 1px;
-        background: var(--border-color, rgba(255, 255, 255, 0.08));
+        background: var(--border-color);
     }
 
     &::before { left: 0; }
@@ -2484,10 +2431,10 @@ $transcript-preview-max-height: calc(50vh / 3);
         font-size: 10.5px;
         font-weight: 600;
         letter-spacing: 0.05em;
-        color: var(--tertiary-text-color, rgba(255, 255, 255, 0.35));
+        color: rgba(255, 255, 255, 0.35);
         padding: 1px 9px;
         border-radius: 9px;
-        background: var(--panel-bg-color, rgba(255, 255, 255, 0.04));
+        background: var(--panel-bg-color);
     }
 }
 
@@ -2511,7 +2458,7 @@ $transcript-preview-max-height: calc(50vh / 3);
             content: "";
             flex: 1 1 auto;
             height: 1px;
-            background: var(--border-color, rgba(255, 255, 255, 0.12));
+            background: var(--border-color);
         }
     }
 
@@ -2519,31 +2466,31 @@ $transcript-preview-max-height: calc(50vh / 3);
         flex-shrink: 0;
         font-size: var(--text-xs);
         font-weight: 600;
+        @include mixins.label-caps;
         letter-spacing: 0.06em;
-        text-transform: uppercase;
-        color: var(--secondary-text-color, rgba(255, 255, 255, 0.45));
+        color: var(--secondary-text-color);
         padding: 2px 10px;
-        border: 1px solid var(--border-color, rgba(255, 255, 255, 0.12));
+        border: 1px solid var(--border-color);
         border-radius: 10px;
-        background: var(--panel-bg-color, rgba(255, 255, 255, 0.04));
+        background: var(--panel-bg-color);
     }
 
     .agent-session-outcome-detail {
         font-size: var(--text-xs);
-        color: var(--tertiary-text-color, rgba(255, 255, 255, 0.3));
+        color: rgba(255, 255, 255, 0.3);
     }
 
     &.agent-session-outcome-fresh {
         .agent-session-outcome-rule {
             &::before,
             &::after {
-                background: color-mix(in srgb, var(--warning-color, #d9a441) 40%, transparent);
+                background: color-mix(in srgb, var(--warning-color) 40%, transparent);
             }
         }
 
         .agent-session-outcome-label {
-            color: var(--warning-color, #d9a441);
-            border-color: color-mix(in srgb, var(--warning-color, #d9a441) 40%, transparent);
+            color: var(--warning-color);
+            border-color: color-mix(in srgb, var(--warning-color) 40%, transparent);
         }
     }
 }
@@ -2557,7 +2504,7 @@ $transcript-preview-max-height: calc(50vh / 3);
     gap: 3px;
     padding: 10px var(--space-2);
     user-select: none;
-    --cli-notice-tone: var(--secondary-text-color, rgba(255, 255, 255, 0.45));
+    --cli-notice-tone: var(--secondary-text-color);
 
     .agent-cli-notice-rule {
         display: flex;
@@ -2570,7 +2517,7 @@ $transcript-preview-max-height: calc(50vh / 3);
             content: "";
             flex: 1 1 auto;
             height: 1px;
-            background: var(--border-color, rgba(255, 255, 255, 0.12));
+            background: var(--border-color);
         }
     }
 
@@ -2580,23 +2527,23 @@ $transcript-preview-max-height: calc(50vh / 3);
         font-weight: 600;
         color: var(--cli-notice-tone);
         padding: 2px 10px;
-        border: 1px solid var(--border-color, rgba(255, 255, 255, 0.12));
+        border: 1px solid var(--border-color);
         border-radius: 10px;
-        background: var(--panel-bg-color, rgba(255, 255, 255, 0.04));
+        background: var(--panel-bg-color);
     }
 
     .agent-cli-notice-detail {
         font-size: var(--text-xs);
-        color: var(--tertiary-text-color, rgba(255, 255, 255, 0.3));
+        color: rgba(255, 255, 255, 0.3);
         text-align: center;
     }
 
     &.agent-cli-notice-warn {
-        --cli-notice-tone: var(--warning-color, #d9a441);
+        --cli-notice-tone: var(--warning-color);
     }
 
     &.agent-cli-notice-error {
-        --cli-notice-tone: var(--error-color, #e06c75);
+        --cli-notice-tone: var(--error-color);
     }
 
     &.agent-cli-notice-warn,
@@ -2623,14 +2570,14 @@ $transcript-preview-max-height: calc(50vh / 3);
     gap: var(--space-1-5);
     padding: 8px var(--space-2);
     margin: 0 var(--space-1-5);
-    border: 1px dashed var(--border-color, rgba(255, 255, 255, 0.12));
+    border: 1px dashed var(--border-color);
     border-radius: 4px;
-    cursor: var(--cursor-interactive, pointer);
+    cursor: var(--cursor-interactive);
     user-select: none;
 
     &:hover,
     &:focus-visible {
-        background: var(--panel-bg-color, rgba(255, 255, 255, 0.04));
+        background: var(--panel-bg-color);
         border-color: color-mix(in srgb, var(--accent-color) 40%, transparent);
     }
 
@@ -2646,11 +2593,9 @@ $transcript-preview-max-height: calc(50vh / 3);
     .agent-history-link-label {
         flex: 1;
         min-width: 0;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
+        @include mixins.truncate;
         font-size: var(--text-xs);
-        color: var(--tertiary-text-color, rgba(255, 255, 255, 0.3));
+        color: rgba(255, 255, 255, 0.3);
     }
 
     .agent-history-link-cta {
@@ -2683,7 +2628,7 @@ $transcript-preview-max-height: calc(50vh / 3);
     display: flex;
     justify-content: flex-end;
     gap: var(--space-2);
-    font-size: 13px;
+    font-size: var(--text-base);
     line-height: 1.4;
     color: var(--secondary-text-color);
     white-space: nowrap;
@@ -2692,7 +2637,7 @@ $transcript-preview-max-height: calc(50vh / 3);
 // A secondary line that isn't time/tokens (ambient narration's provenance
 // note): the old meta styling, left-aligned, on its own line.
 .agent-node-peek-tooltip-note {
-    font-size: 13px;
+    font-size: var(--text-base);
     line-height: 1.4;
     color: var(--secondary-text-color);
     white-space: nowrap;
@@ -2710,7 +2655,7 @@ $transcript-preview-max-height: calc(50vh / 3);
     white-space: pre-wrap;
     word-break: break-all;
     font-family: var(--font-mono);
-    font-size: 13px;
+    font-size: var(--text-base);
     // Was 1.6, the loosest text in the tool UI; the in-flow preview it is a peek
     // of reads at 1.4. More command fits before the panel has to scroll.
     line-height: var(--leading-normal);
@@ -2826,8 +2771,7 @@ $transcript-preview-max-height: calc(50vh / 3);
             background: color-mix(in oklab, var(--user-input-color) 35%, var(--main-text-color));
         }
         &:focus-visible {
-            outline: 2px solid var(--user-input-color);
-            outline-offset: 1px;
+            @include mixins.focus-ring;
             opacity: 1;
         }
     }
@@ -2845,7 +2789,7 @@ $transcript-preview-max-height: calc(50vh / 3);
     gap: var(--space-1-5);
     padding: 8px var(--space-2);
     margin: 0 var(--space-1-5);
-    border: 1px dashed var(--border-color, rgba(255, 255, 255, 0.12));
+    border: 1px dashed var(--border-color);
     border-radius: 4px;
     user-select: none;
 
@@ -2857,11 +2801,9 @@ $transcript-preview-max-height: calc(50vh / 3);
     .agent-resume-preflight-label {
         flex: 1;
         min-width: 0;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
+        @include mixins.truncate;
         font-size: var(--text-xs);
-        color: var(--secondary-text-color, rgba(255, 255, 255, 0.55));
+        color: var(--secondary-text-color);
     }
 
     .agent-resume-preflight-cta {
@@ -2869,7 +2811,7 @@ $transcript-preview-max-height: calc(50vh / 3);
         font-size: var(--text-xs);
         font-weight: 600;
         color: var(--accent-color);
-        cursor: var(--cursor-interactive, pointer);
+        cursor: var(--cursor-interactive);
 
         &:hover,
         &:focus-visible {
@@ -2883,10 +2825,10 @@ $transcript-preview-max-height: calc(50vh / 3);
 }
 
 .agent-resume-preflight-fresh {
-    border-color: color-mix(in srgb, var(--warning-color, #d89a3a) 45%, transparent);
+    border-color: color-mix(in srgb, var(--warning-color) 45%, transparent);
 
     .agent-resume-preflight-sigil {
-        color: var(--warning-color, #d89a3a);
+        color: var(--warning-color);
     }
 }
 
@@ -2894,16 +2836,17 @@ $transcript-preview-max-height: calc(50vh / 3);
 // it stays in the neutral vocabulary rather than borrowing the warning tint.
 .agent-resume-preflight-recover .agent-resume-preflight-sigil,
 .agent-resume-preflight-pending .agent-resume-preflight-sigil {
-    color: var(--tertiary-text-color, rgba(255, 255, 255, 0.35));
+    color: rgba(255, 255, 255, 0.35);
 }
 
 // The wheel-edge skid (components/scroll-handoff.ts): while a capped box absorbs
 // the notches that arrive at its edge, that edge shows a 2 px accent line, inset
 // so nothing moves, then fades. SPEC_TOOL_PREVIEW_WHEEL_EDGE_SKID_2026_09_27.md §4.4.
 .scroll-handoff-box {
-    transition: box-shadow 150ms ease-out;
+    transition: box-shadow var(--duration-base) var(--ease-out);
 
-    @media (prefers-reduced-motion: reduce) {
+    // Reduced treatment (feedback), dormant under the motion policy.
+    @include mixins.when-motion-reduced(feedback) {
         transition: none;
     }
 }

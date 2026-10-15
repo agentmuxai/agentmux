@@ -1,6 +1,8 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+@use "../mixins.scss";
+
 // File-drop indicator tokens and states.
 // docs/specs/SPEC_DRAG_AND_DROP_CONSOLIDATION_2026_09_27.md §4. Everything
 // derives from the theme's accent and warning colours so themes restyle it.
@@ -16,15 +18,17 @@
 }
 
 .drop-indicator {
-    position: absolute;
-    inset: 0;
+    @include mixins.abs-fill;
     z-index: var(--zindex-file-drop);
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    @include mixins.flex-center;
     pointer-events: none;
     border-radius: var(--block-border-radius);
-    animation: drop-indicator-in 100ms ease-out;
+    animation: am-fade-in var(--duration-fast) var(--ease-out);
+
+    // Reduced treatment (feedback), dormant under the motion policy.
+    @include mixins.when-motion-reduced(feedback) {
+        animation: none;
+    }
 
     &--armed {
         outline: 1px dashed var(--drop-zone-armed-border);
@@ -43,13 +47,11 @@
         max-width: calc(100% - 32px);
         padding: 8px 14px;
         border-radius: 6px;
-        font-size: 13px;
+        font-size: var(--text-base);
         font-weight: 500;
         color: var(--drop-prompt-fg);
         background: var(--drop-prompt-bg);
-        overflow: hidden;
-        white-space: nowrap;
-        text-overflow: ellipsis;
+        @include mixins.truncate;
 
         i {
             flex-shrink: 0;
@@ -58,21 +60,6 @@
         &--blocked {
             color: var(--drop-blocked-fg);
         }
-    }
-}
-
-@keyframes drop-indicator-in {
-    from {
-        opacity: 0;
-    }
-    to {
-        opacity: 1;
-    }
-}
-
-@media (prefers-reduced-motion: reduce) {
-    .drop-indicator {
-        animation: none;
     }
 }
 

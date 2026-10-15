@@ -3,11 +3,11 @@
 
 // missing-widget.tsx: a widget's pane whose widget isn't running.
 
+@use "../mixins.scss";
+
 .missing-widget {
-    display: flex;
+    @include mixins.flex-center;
     flex-direction: column;
-    align-items: center;
-    justify-content: center;
     gap: 12px;
     width: 100%;
     height: 100%;

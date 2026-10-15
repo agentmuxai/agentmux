@@ -22,7 +22,7 @@
  */
 
 import { BrainSpinner } from "@/app/element/BrainSpinner";
-import { atoms } from "@/app/store/global";
+import { shouldReduceMotion } from "@/app/motion/motion";
 import type { PaneReadinessPhase } from "@/app/store/pane-readiness";
 import { Show, type JSX } from "solid-js";
 import "./PaneLoadingCover.scss";
@@ -54,7 +54,7 @@ export function PaneLoadingCover(props: PaneLoadingCoverProps): JSX.Element {
                 classList={{
                     "is-in-flow": !overlay(),
                     "is-fading": fading(),
-                    "is-reduced-motion": atoms.prefersReducedMotionAtom(),
+                    "is-reduced-motion": shouldReduceMotion("transition"),
                 }}
             >
                 <BrainSpinner fading={fading()} />

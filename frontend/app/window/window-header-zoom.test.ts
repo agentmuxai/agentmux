@@ -6,7 +6,7 @@
 // (docs/retro/retro-chrome-zoom-*.md). Pin them:
 //
 //   - Windows and Linux run Chromium (WebView2/CEF), where `zoom` scales the
-//     header's own width: it must be `calc(100vw / var(--zoomfactor, 1))`, or
+//     header's own width: it must be `calc(100vw / var(--zoomfactor))`, or
 //     the right-side widgets drift left when zoomed out (and off-screen when
 //     zoomed in). A plain `100vw` was right only on Linux's old WebKitGTK.
 //   - macOS (WebKit) must use `width: 100%`: the calc form double-divides.
@@ -27,7 +27,7 @@ const headerWidths = (src: string) =>
 
 describe("window header width under chrome zoom", () => {
     it.each(["win32", "linux"])("%s (Chromium) divides 100vw by the zoom", (platform) => {
-        expect(headerWidths(scss(platform))).toEqual(["calc(100vw / var(--zoomfactor, 1))"]);
+        expect(headerWidths(scss(platform))).toEqual(["calc(100vw / var(--zoomfactor))"]);
     });
 
     it("darwin (WebKit) fills its parent instead", () => {

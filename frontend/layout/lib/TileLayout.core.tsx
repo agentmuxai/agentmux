@@ -22,7 +22,8 @@
 // Vite's platformResolve plugin maps `TileLayout.platform` to one of the
 // three platform files; this file is never platform-resolved.
 
-import { atoms } from "@/app/store/global";
+import { shouldReduceMotion } from "@/app/motion/motion";
+import { DURATION_BASE_MS, DURATION_QUICK_MS, EASE_OUT } from "@/app/motion/tokens";
 import { gatingNodeIds } from "@/app/store/tab-reveal";
 import { draggable } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
 import clsx from "clsx";
@@ -166,9 +167,9 @@ export function createTileLayout(platform: TileLayoutPlatform) {
         const layoutModel = useTileLayout(props.tabAtom, props.contents);
         const overlayTransform = () => layoutModel.overlayTransform();
 
-        // Issue #836: hold the on-screen overlayTransform for 150ms after
+        // Issue #836: hold the on-screen overlayTransform for DURATION_BASE_MS after
         // activeDrag flips false, so the Placeholder's inner-div exit fade
-        // (also 150ms) stays visible. Without this, overlayTransform()
+        // (--duration-base, tilelayout.scss) stays visible. Without this, overlayTransform()
         // recomputes the moment onDrop fires and moves the entire
         // .placeholder-container off-screen (top = 2*height) before the
         // .exiting CSS transition can play. We cache the last in-drag
@@ -186,7 +187,7 @@ export function createTileLayout(platform: TileLayoutPlatform) {
                 setOverlayHold(false);
             } else if (heldOverlayTransform()) {
                 // Drag just ended (or page initial state with no cached value, skip).
-                // Hold the last in-drag transform for 150ms to match the Placeholder
+                // Hold the last in-drag transform for DURATION_BASE_MS to match the Placeholder
                 // exit-fade duration, then release. A new drag during the hold window
                 // resets cleanly via the active branch above.
                 if (overlayHoldTimer) clearTimeout(overlayHoldTimer);
@@ -195,7 +196,7 @@ export function createTileLayout(platform: TileLayoutPlatform) {
                     setOverlayHold(false);
                     setHeldOverlayTransform(undefined);
                     overlayHoldTimer = null;
-                }, 150);
+                }, DURATION_BASE_MS);
             }
         });
         onCleanup(() => { if (overlayHoldTimer) clearTimeout(overlayHoldTimer); });
@@ -553,8 +554,8 @@ export function createTileLayout(platform: TileLayoutPlatform) {
         const tileStyle = createMemo<JSX.CSSProperties>(() => ({
             ...(tileTransform() as JSX.CSSProperties),
             visibility: isRevealGated() ? "hidden" : undefined,
-            opacity: atoms.prefersReducedMotionAtom() ? undefined : isRevealGated() ? 0 : 1,
-            transition: atoms.prefersReducedMotionAtom() ? undefined : "opacity 120ms ease-out",
+            opacity: shouldReduceMotion("transition") ? undefined : isRevealGated() ? 0 : 1,
+            transition: shouldReduceMotion("transition") ? undefined : `opacity ${DURATION_QUICK_MS}ms ${EASE_OUT}`,
         }));
 
         return (

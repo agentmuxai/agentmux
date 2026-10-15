@@ -17,6 +17,8 @@
 // content for PrimitiveListDetail's own .primitive-list-detail-list /
 // .primitive-list-detail-detail-body wrappers, not a fixed sidebar.
 
+@use "../../../mixins.scss";
+
 .agent-memory-modal {
     display: flex;
     flex-direction: column;
@@ -44,7 +46,7 @@
 
 .agent-memory-modal-title {
     min-width: 0;
-    font-size: var(--text-md, 14px);
+    font-size: var(--text-md);
     font-weight: 600;
     color: var(--main-text-color);
 }
@@ -54,9 +56,7 @@
     margin-top: var(--space-1);
     font-size: var(--text-xs);
     color: var(--secondary-text-color);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    @include mixins.truncate;
 }
 
 .agent-memory-modal-path-note {
@@ -127,17 +127,14 @@
 .agent-memory-modal-list-item-name {
     flex: 1;
     min-width: 0;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    @include mixins.truncate;
 }
 
 .agent-memory-modal-list-item-badge,
 .agent-memory-modal-list-item-type {
     flex-shrink: 0;
-    font-size: 10px;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
+    font-size: var(--text-2xs);
+    @include mixins.label-caps;
     padding: 1px 5px;
     border-radius: 0;
     color: var(--secondary-text-color);
@@ -244,10 +241,8 @@
 
 .agent-memory-modal-empty {
     flex: 1;
-    display: flex;
+    @include mixins.flex-center;
     flex-direction: column;
-    justify-content: center;
-    align-items: center;
     gap: var(--space-2);
     padding: var(--space-4);
     text-align: center;

@@ -18,7 +18,7 @@
     color: var(--main-text-color);
     border: 1px solid var(--border-color);
     border-radius: 0;
-    font-size: 11px;
+    font-size: var(--text-xs);
     // Size to content, but wrap (don't single-line overflow) once the tip
     // exceeds max-width. `nowrap` + `max-width` contradicted: long tips
     // (e.g. GFX's full GPU renderer string) spilled out of the balloon.

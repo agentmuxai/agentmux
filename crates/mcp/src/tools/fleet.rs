@@ -70,7 +70,13 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             Ok(if sent_names.is_empty() {
                 outcome
             } else {
-                format!("{outcome}\nFiles: {}", sent_names.join(", "))
+                // Fewer arrive when a file fails its hash on the way or the
+                // receiver withholds them; its message says which.
+                let arrived = result.get("files_delivered").and_then(Value::as_u64);
+                match arrived.filter(|n| (*n as usize) < sent_names.len()) {
+                    Some(n) => format!("{outcome}\nFiles: {} ({n} of {} arrived)", sent_names.join(", "), sent_names.len()),
+                    None => format!("{outcome}\nFiles: {}", sent_names.join(", ")),
+                }
             })
         }
         "DiscoverAgents" => {

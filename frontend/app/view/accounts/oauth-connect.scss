@@ -9,15 +9,15 @@
 .oauth-connect {
     display: flex;
     flex-direction: column;
-    gap: var(--space-2, 8px);
-    margin-top: var(--space-1, 4px);
+    gap: var(--space-2);
+    margin-top: var(--space-1);
 
     .oauth-byo-note {
-        font-size: 11px;
+        font-size: var(--text-xs);
         color: var(--secondary-text-color);
         line-height: 1.5;
-        padding: var(--space-2, 8px);
-        background: var(--button-secondary-bg-color, rgba(127, 127, 127, 0.1));
+        padding: var(--space-2);
+        background: var(--button-secondary-bg-color);
         border-radius: 4px;
     }
 
@@ -33,8 +33,8 @@
     .oauth-flow-status {
         display: flex;
         flex-direction: column;
-        gap: var(--space-2, 8px);
-        padding: var(--space-2, 8px);
+        gap: var(--space-2);
+        padding: var(--space-2);
         border: 1px solid var(--border-color);
         border-radius: 4px;
     }
@@ -42,18 +42,18 @@
     .oauth-device {
         display: flex;
         flex-direction: column;
-        gap: var(--space-2, 8px);
+        gap: var(--space-2);
     }
 
     .oauth-device-label {
-        font-size: 12px;
+        font-size: var(--text-sm);
         color: var(--main-text-color);
     }
 
     .oauth-device-code-row {
         display: flex;
         align-items: center;
-        gap: var(--space-2, 8px);
+        gap: var(--space-2);
     }
 
     .oauth-device-code {
@@ -62,13 +62,13 @@
         letter-spacing: 2px;
         font-weight: 600;
         padding: 4px 10px;
-        background: var(--button-secondary-bg-color, rgba(127, 127, 127, 0.15));
+        background: rgba(127, 127, 127, 0.15);
         border-radius: 4px;
         user-select: all;
     }
 
     .oauth-waiting {
-        font-size: 11px;
+        font-size: var(--text-xs);
         color: var(--secondary-text-color);
         font-style: italic;
     }

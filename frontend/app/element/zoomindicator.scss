@@ -12,7 +12,7 @@
     z-index: var(--z-context-menu);
     pointer-events: none;
 
-    animation: zoom-fade-in-out 1.5s ease-out;
+    animation: zoom-fade-in-out 1.5s var(--ease-out);
 }
 
 .zoom-indicator-content {

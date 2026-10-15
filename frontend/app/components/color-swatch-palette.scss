@@ -14,7 +14,9 @@
     border-radius: 0;
     cursor: default;
     border: 1.5px solid transparent;
-    transition: transform 0.1s ease, border-color 0.1s ease;
+    transition:
+        transform var(--duration-decorative-fast) var(--ease-standard),
+        border-color var(--duration-decorative-fast) var(--ease-standard);
 
     &:hover {
         transform: scale(1.25);
@@ -38,7 +40,7 @@
         border: 1px solid var(--border-color);
         border-radius: 0;
         color: var(--secondary-text-color);
-        font-size: 10px;
+        font-size: var(--text-2xs);
         cursor: default;
         white-space: nowrap;
 

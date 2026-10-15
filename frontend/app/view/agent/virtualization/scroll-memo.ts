@@ -25,6 +25,10 @@ export type ScrollMemo = { bottom: true } | { nodeId: string; offsetPx: number }
 
 const capturers = new Map<string, () => ScrollMemo | null>();
 
+/** How long, and for how many frames at most, a restored position is held while the rows settle. */
+const RESTORE_HOLD_MS = 1000;
+const RESTORE_HOLD_FRAMES = 60;
+
 /** Record every mounted pane's position now. */
 export function saveScrollMemos(): void {
     for (const [blockId, capture] of capturers) writeSession(KEY + blockId, capture() ?? undefined);
@@ -43,22 +47,33 @@ export function takeScrollMemo(blockId: string): ScrollMemo | undefined {
 
 /**
  * The pane's position, read from the DOM (a one-time read, when the page goes
- * away): the first row whose bottom is below the scroller's top. The offset is
- * stored unzoomed, like `scrollTop`: `getBoundingClientRect` is in zoomed px
- * under the pane's CSS zoom, so it is divided by `zoom`.
+ * away): the first row that starts on screen, and how far below the top it
+ * starts (a negative offset). Anchoring on the row cut by the top edge instead
+ * broke when that row came back a different height (a tall tool output, in the
+ * lab: 1411 px into it landed in a later row); a row that starts on screen is
+ * placed by its start, whatever its height. Only when one row covers the whole
+ * screen is that row used, with the offset into it. Stored unzoomed, like
+ * `scrollTop`: `getBoundingClientRect` is in zoomed px under the pane's CSS
+ * zoom, so it is divided by `zoom`.
  */
 export function captureScrollMemo(scroller: HTMLElement | undefined, following: boolean, zoom = 1): ScrollMemo | null {
     if (following) return { bottom: true };
     if (!scroller) return null;
-    const top = scroller.getBoundingClientRect().top;
+    const view = scroller.getBoundingClientRect();
+    const scale = zoom > 0 ? zoom : 1;
+    let cut: { nodeId: string; offsetPx: number } | null = null;
     for (const row of scroller.querySelectorAll<HTMLElement>("[data-node-id]")) {
         const box = row.getBoundingClientRect();
-        if (box.bottom > top + 1) {
-            const nodeId = row.dataset.nodeId;
-            return nodeId ? { nodeId, offsetPx: (top - box.top) / (zoom > 0 ? zoom : 1) } : null;
+        const nodeId = row.dataset.nodeId;
+        if (!nodeId || box.bottom <= view.top + 1) continue;
+        if (box.top >= view.top - 1) {
+            // Starts on screen (below the top edge, above the bottom one).
+            if (box.top < view.bottom) return { nodeId, offsetPx: (view.top - box.top) / scale };
+            break;
         }
+        cut ??= { nodeId, offsetPx: (view.top - box.top) / scale };
     }
-    return null;
+    return cut;
 }
 
 /**
@@ -89,7 +104,25 @@ export function useScrollMemo(opts: {
         restored = true;
         const memo = takeScrollMemo(blockId);
         if (!memo || "bottom" in memo) return; // the default: following, at the bottom
-        // After the restored rows' first layout, so the row has a position.
-        requestAnimationFrame(() => opts.scrollToRow(memo.nodeId, memo.offsetPx));
+        // After the restored rows' first layout, so the row has a position; then
+        // on each frame for a while: the rows above it are measured over the next
+        // frames, and a pane that no longer follows keeps nothing in place, so the
+        // row drifted (458 px in the lab). Input in the pane ends it at once.
+        const scroller = opts.scroller();
+        let userMoved = false;
+        const stop = (): void => {
+            userMoved = true;
+        };
+        const types = ["wheel", "pointerdown", "keydown", "touchstart"] as const;
+        for (const t of types) scroller?.addEventListener(t, stop, { passive: true, once: true });
+        const until = performance.now() + RESTORE_HOLD_MS;
+        let frames = 0;
+        const hold = (): void => {
+            if (userMoved) return;
+            opts.scrollToRow(memo.nodeId, memo.offsetPx);
+            if (++frames < RESTORE_HOLD_FRAMES && performance.now() < until) requestAnimationFrame(hold);
+            else for (const t of types) scroller?.removeEventListener(t, stop);
+        };
+        requestAnimationFrame(hold);
     });
 }

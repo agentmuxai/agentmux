@@ -8,6 +8,8 @@
 // catalog's `popoverMarkdown` plus small metadata chips (primary
 // context file, MCP support).
 
+@use "../../../mixins.scss";
+
 .agent-card-action-btn--info {
     &.agent-card-action-btn--open {
         // Flipped look while the popover is open — mirror hover state
@@ -58,9 +60,8 @@
 
 .agent-card-info-popover-label {
     flex-shrink: 0;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    font-size: 10px;
+    @include mixins.label-caps;
+    font-size: var(--text-2xs);
     font-weight: var(--font-weight-medium);
     color: var(--secondary-text-color);
 }

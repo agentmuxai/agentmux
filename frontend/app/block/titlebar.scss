@@ -2,6 +2,8 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+@use "../mixins.scss";
+
 .pane-title-bar {
     display: flex;
     flex-direction: row;
@@ -19,11 +21,11 @@
     // (ANALYSIS_THEME_SYSTEM_LIGHT_THEME_AND_DEPTH_GAPS_2026_07_07.md §2c)
     background-color: color-mix(in srgb, var(--block-bg-solid-color) 60%, transparent);
     border-bottom: 1px solid var(--border-color);
-    font-size: 12px;
+    font-size: var(--text-sm);
     font-weight: 500;
     color: var(--secondary-text-color);
     user-select: none;
-    transition: background-color 0.15s ease;
+    transition: background-color var(--duration-decorative-base) var(--ease-standard);
 
     &.is-hovered {
         background-color: color-mix(in srgb, var(--block-bg-solid-color) 70%, transparent);
@@ -34,10 +36,8 @@
     }
 
     .pane-title-icon {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 14px;
+        @include mixins.flex-center;
+        font-size: var(--text-md);
         flex-shrink: 0;
 
         i {
@@ -48,9 +48,7 @@
 
     .pane-title-text {
         flex: 1;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
+        @include mixins.truncate;
         cursor: default;
         color: var(--main-text-color);
 
@@ -68,7 +66,7 @@
         border: 1px solid var(--accent-color);
         border-radius: 0;
         padding: var(--space-0-5) var(--space-1-5);
-        font-size: 12px;
+        font-size: var(--text-sm);
         font-weight: 500;
         color: var(--main-text-color);
         outline: none;

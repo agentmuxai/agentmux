@@ -4,6 +4,8 @@
 // AgentDecisionPanel — surfaced for per-tool-call permission gates.
 // Spec: docs/specs/SPEC_DECISION_PROMPT_2026_04_24.md §5.
 
+@use "../../../mixins.scss";
+
 .agent-decision-panel {
     display: flex;
     flex-direction: column;
@@ -31,7 +33,7 @@
     // Brief flash after the first Enter on a high-risk Allow — tells
     // the user "we received the keystroke, hit it again to commit".
     &--armed {
-        animation: agent-decision-panel-armed 0.5s ease-out;
+        animation: agent-decision-panel-armed 0.5s var(--ease-out);
     }
 }
 
@@ -52,7 +54,9 @@
     font-size: var(--text-xs);
     cursor: default;
     text-align: left;
-    transition: background 80ms ease, border-color 80ms ease;
+    transition:
+        background var(--duration-decorative-instant) var(--ease-standard),
+        border-color var(--duration-decorative-instant) var(--ease-standard);
     flex-shrink: 0;
 
     &:hover {
@@ -75,7 +79,7 @@
 .agent-decision-panel-minimized-cta {
     margin-left: auto;
     color: var(--secondary-text-color);
-    font-size: 10px;
+    font-size: var(--text-2xs);
 }
 
 @keyframes agent-decision-panel-armed {
@@ -96,7 +100,7 @@
 }
 
 .agent-decision-panel-icon {
-    font-size: 14px;
+    font-size: var(--text-md);
     line-height: 1;
 }
 
@@ -107,9 +111,8 @@
 
 .agent-decision-panel-queue,
 .agent-decision-panel-risk {
-    font-size: 10px;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
+    font-size: var(--text-2xs);
+    @include mixins.label-caps;
     padding: 2px 5px;
     border-radius: 0;
     background: color-mix(in srgb, var(--main-text-color) 10%, transparent);
@@ -129,9 +132,8 @@
     margin: 0;
 
     dt {
-        font-size: 10px;
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
+        font-size: var(--text-2xs);
+        @include mixins.label-caps;
         color: var(--secondary-text-color);
         align-self: baseline;
     }
@@ -180,9 +182,8 @@
     margin: 0;
 
     legend {
-        font-size: 10px;
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
+        font-size: var(--text-2xs);
+        @include mixins.label-caps;
         color: var(--secondary-text-color);
         padding: 0;
         margin-bottom: var(--space-0-5);
@@ -196,7 +197,7 @@
     padding: var(--space-0-5) var(--space-1);
     border-radius: 0;
     cursor: default;
-    transition: background 80ms ease;
+    transition: background var(--duration-decorative-instant) var(--ease-standard);
 
     &:hover {
         background: color-mix(in srgb, var(--main-text-color) 4%, transparent);
@@ -224,9 +225,8 @@
     gap: var(--space-0-5);
 
     span {
-        font-size: 10px;
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
+        font-size: var(--text-2xs);
+        @include mixins.label-caps;
         color: var(--secondary-text-color);
     }
 }
@@ -272,7 +272,9 @@
     border-radius: 0;
     cursor: default;
     border: 1px solid transparent;
-    transition: background 80ms ease, border-color 80ms ease;
+    transition:
+        background var(--duration-decorative-instant) var(--ease-standard),
+        border-color var(--duration-decorative-instant) var(--ease-standard);
 
     // Allow is the loud, filled call to action, except on a high-risk gate,
     // which keeps the quieter success tint and its second confirm so the

@@ -1,14 +1,14 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-/** The Working row's ASCII spinner: frames on its own clock, still under reduced motion. */
+/** The Working row's ASCII spinner: frames on its own clock, still when the motion policy reduces `status`. */
 
 import { cleanup, render } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const [reduced, setReduced] = createSignal(false);
-vi.mock("@/app/store/global", () => ({ atoms: { prefersReducedMotionAtom: () => reduced() } }));
+vi.mock("@/app/motion/motion", () => ({ shouldReduceMotion: (category: string) => category === "status" && reduced() }));
 
 import { AsciiSpinner, SPINNER_FRAME_MS, SPINNER_FRAMES, SPINNER_STILL } from "./AsciiSpinner";
 
@@ -73,7 +73,7 @@ describe("AsciiSpinner", () => {
         expect(again.container.textContent).toBe(SPINNER_FRAMES[0]);
     });
 
-    it("holds still under reduced motion", () => {
+    it("holds still when the motion policy reduces status", () => {
         vi.useFakeTimers();
         setReduced(true);
         const { container } = render(() => <AsciiSpinner />);

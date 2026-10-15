@@ -22,7 +22,7 @@ use serde_json::json;
 
 use crate::backend::storage::work_claims::WorkClaim;
 use crate::backend::work_facts::cross_channel::own_channel;
-use crate::backend::work_facts::{claims, matching};
+use crate::backend::work_facts::{claims, coord, matching};
 
 use super::caller::Caller;
 use super::work_facts_handlers::{caller_block, cross_channel_facts, local_facts, split_caller};
@@ -65,7 +65,7 @@ const MAX_NAME: usize = 200;
 /// breaks become spaces, whitespace runs collapse) of at most `max`
 /// characters. Marker quoting happens where the text is shown inside a
 /// system note (`work_facts::overlap`).
-fn one_line(s: &Option<String>, max: usize) -> Option<String> {
+pub(super) fn one_line(s: &Option<String>, max: usize) -> Option<String> {
     let flat: String = s.as_deref()?.chars().map(|c| if c.is_control() { ' ' } else { c }).collect();
     let flat = flat.split_whitespace().collect::<Vec<_>>().join(" ");
     if flat.is_empty() {
@@ -84,7 +84,7 @@ fn nonempty(s: &Option<String>) -> Option<&str> {
 /// Who is asking: the name and UID of the caller's registration (found by
 /// token, block, then unique name, as `WhoIsWorkingOn` does), else the name
 /// it sent. `None` when there is no name at all.
-fn claimer(
+pub(super) fn claimer(
     state: &AppState,
     caller: Option<&Caller>,
     agent: Option<&str>,
@@ -158,8 +158,17 @@ pub(crate) async fn handle_claim_work(
         expires_at: now + claims::ttl_ms(p.ttl_minutes),
     };
     let store = state.identity_store.clone();
+    let identified = caller.as_ref().is_some_and(|c| c.0.uid().is_some());
     let stored = tokio::task::spawn_blocking(move || {
         let stored = store.work_claim_put(&claim, now)?;
+        // A new claim in its repository's channel (SPEC_AGENT_COORDINATION_CHANNEL_2026_10_15
+        // §3.5); a renewal (it keeps the existing claim's id) posts nothing, or re-claiming to
+        // extend it would fill the channel.
+        if stored.id == claim.id {
+            if let Some(post) = coord::claim_post(&stored, false, identified, now) {
+                let _ = store.coord_post_put(&post, now);
+            }
+        }
         let live = store.work_claims_live(now)?;
         Ok::<_, crate::backend::storage::StoreError>((stored, live))
     })
@@ -205,7 +214,17 @@ pub(crate) async fn handle_release_work(
     let id = nonempty(&p.id).map(str::to_string);
     let store = state.identity_store.clone();
     let now = agentmux_common::time::now_ms();
-    let released = tokio::task::spawn_blocking(move || store.work_claim_release(&agent, &uid, id.as_deref(), now)).await;
+    let identified = caller.as_ref().is_some_and(|c| c.0.uid().is_some());
+    let released = tokio::task::spawn_blocking(move || {
+        let released = store.work_claim_release(&agent, &uid, id.as_deref(), now)?;
+        for c in &released {
+            if let Some(post) = coord::claim_post(c, true, identified, now) {
+                let _ = store.coord_post_put(&post, now);
+            }
+        }
+        Ok::<_, crate::backend::storage::StoreError>(released)
+    })
+    .await;
     match released {
         Ok(Ok(released)) => {
             let note = if released.is_empty() {

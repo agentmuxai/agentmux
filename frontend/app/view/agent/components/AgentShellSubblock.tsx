@@ -16,7 +16,8 @@
 
 import { registerContextMenuRegion } from "@/app/block/context-menu-region";
 import { BrainSpinner } from "@/app/element/BrainSpinner";
-import { atoms, getSettingsPrefixAtom, staticTabId, MOS } from "@/app/store/global";
+import { shouldReduceMotion } from "@/app/motion/motion";
+import { getSettingsPrefixAtom, staticTabId, MOS } from "@/app/store/global";
 import { resolveTermScrollback } from "@/app/view/term/termscrollback";
 import { resolveTermScrollSensitivity } from "@/app/view/term/termscrollsensitivity";
 import { RpcApi } from "@/app/store/rpc-api";
@@ -395,10 +396,11 @@ export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element 
             return;
         }
         if (!spinnerMounted()) return;
-        // prefersReducedMotion: BrainSpinner shows/hides instantly (no CSS
-        // transition) in that mode, so holding the node mounted for the
-        // normal fade duration would just be a pointless delay — unmount now.
-        if (atoms.prefersReducedMotionAtom()) {
+        // When the motion policy reduces `transition`, BrainSpinner
+        // shows/hides instantly (no CSS transition), so holding the node
+        // mounted for the normal fade duration would just be a pointless
+        // delay — unmount now.
+        if (shouldReduceMotion("transition")) {
             setSpinnerMounted(false);
             return;
         }

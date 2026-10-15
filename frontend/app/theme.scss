@@ -2,6 +2,8 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+@use "mixins.scss";
+
 /* stylelint-disable color-no-hex --
    theme.scss is the canonical source of colour primitives — hex
    literals live here by design. Other component SCSS files must
@@ -38,7 +40,7 @@
     // Alpha-aware so panes that use `background: var(--main-bg-color)`
     // (and there are 30+ of them across agent / swarm / browser / identity /
     // memory / etc.) automatically inherit window transparency.
-    --main-bg-color: rgba(34, 34, 34, var(--window-opacity, 0.45));
+    --main-bg-color: rgba(34, 34, 34, var(--window-opacity));
     --border-color: rgba(255, 255, 255, 0.16);
     // Tab separator — a flush 1px hairline divider between adjacent
     // tabs (VSCode-style; slot equals line, so no whitespace gap).
@@ -58,7 +60,7 @@
     // --snap-chrome is the same but inside the zoomed --window-header.
     --dpr: 1;
     --snap: calc(1px / var(--dpr));
-    --snap-chrome: calc(1px / (var(--dpr) * var(--zoomfactor, 1)));
+    --snap-chrome: calc(1px / (var(--dpr) * var(--zoomfactor)));
     // `font` SHORTHAND composites — valid only with `font:`, never with
     // `font-family:`. Built from the canonical tokens below so the family and
     // size are defined exactly once.
@@ -225,6 +227,11 @@
     // this dark-family default), so it reads as a distinct box on every
     // dark theme's own palette without needing a per-theme override.
     --input-bg-color: rgba(255, 255, 255, 0.08);
+    // Same treatment, phase C of SPEC_MOTION_TIERS_AND_STYLESHEET_DRY_2026_10_15.md
+    // §6.1: each takes the fallback most of its call sites already showed.
+    --tertiary-text-color: rgba(255, 255, 255, 0.5); // dimmer than --secondary-text-color; light override below
+    --error-bg-color: rgba(255, 80, 80, 0.15);
+    --button-secondary-bg-color: rgba(127, 127, 127, 0.1); // a neutral grey tint, so no per-theme override
     --elevated-bg-color: var(--modal-bg-color);  // alias — same concept as the pre-existing modal token, itself a plain per-theme literal (no window-opacity coupling)
 
     // z-indexes in xterm.css
@@ -245,7 +252,7 @@
     --modal-border-radius: 0; /* SPEC_HARD_CORNERS_2026_05_26 */
     --toggle-bg-color: var(--border-color);
     --modal-shadow-color: rgba(0, 0, 0, 0.8);
-    --modal-box-shadow: box-shadow: 0px 8px 24px 0px var(--modal-shadow-color);
+    --modal-box-shadow: 0px 8px 24px 0px var(--modal-shadow-color);
 
     --toggle-thumb-color: var(--main-text-color);
     --toggle-checked-bg-color: var(--accent-color);
@@ -338,6 +345,7 @@
 
     // Typography scale — size + weight + leading as independent tokens
     // plus composite role tokens for common text patterns.
+    --text-3xs:  9px;
     --text-2xs:  10px; // dense chrome: composer strip, Stash drawer, compact controls
     --text-xs:   11px;
     --text-sm:   12px;
@@ -422,12 +430,47 @@
     --shadow-modal: 0 24px 48px rgba(0, 0, 0, 0.45);
     --shadow-focus-ring: 0 0 0 2px var(--accent-color);
 
-    // Motion — easing + duration pre-composed so components just
-    // write `transition: transform var(--motion-base);`.
-    --motion-fast:   100ms cubic-bezier(0.2, 1, 0.3, 1);
-    --motion-base:   160ms cubic-bezier(0.2, 1, 0.3, 1);
-    --motion-slow:   280ms cubic-bezier(0.2, 1, 0.3, 1);
-    --motion-spring: 400ms cubic-bezier(0.2, 0.9, 0.2, 1.2);
+    // Motion durations. Every one is multiplied by `--motion-scale`, which is
+    // 1 in both motion tiers today. One declaration on
+    // `:root[data-motion-tier="reduced"]` could later slow or quicken the
+    // reduced tier as a whole. motion/tokens.ts mirrors these values for JS
+    // (and its test keeps the two in step).
+    // SPEC_MOTION_TIERS_AND_STYLESHEET_DRY_2026_10_15.md §4.7.
+    --motion-scale: 1;
+    --duration-instant:  calc(80ms * var(--motion-scale));
+    --duration-fast:     calc(100ms * var(--motion-scale));
+    --duration-quick:    calc(120ms * var(--motion-scale));
+    --duration-base:     calc(160ms * var(--motion-scale));
+    --duration-moderate: calc(240ms * var(--motion-scale));
+    --duration-slow:     calc(280ms * var(--motion-scale));
+
+    // Decorative motion (hover and focus colour fades, hover lifts) also
+    // scales by `--motion-scale-decorative`, 1 today. A policy that reduces
+    // `decorative` sets it to 0 in one rule,
+    // `:root[data-motion-reduce~="decorative"]`, instead of a reduced
+    // treatment at every site (§5.4). CSS only: no JS animation is decorative.
+    --motion-scale-decorative: 1;
+    --duration-decorative-instant: calc(80ms * var(--motion-scale) * var(--motion-scale-decorative));
+    --duration-decorative-fast:    calc(100ms * var(--motion-scale) * var(--motion-scale-decorative));
+    --duration-decorative-quick:   calc(120ms * var(--motion-scale) * var(--motion-scale-decorative));
+    --duration-decorative-base:    calc(160ms * var(--motion-scale) * var(--motion-scale-decorative));
+
+    // Motion easings.
+    --ease-standard:   ease;
+    --ease-out:        ease-out;
+    --ease-in-out:     ease-in-out;
+    --ease-emphasized: cubic-bezier(0.2, 1, 0.3, 1);
+    --ease-material:   cubic-bezier(0.4, 0, 0.2, 1);
+    --ease-decelerate: cubic-bezier(0.2, 0, 0, 1);
+    --ease-bounce:     cubic-bezier(0.34, 1.56, 0.64, 1);
+
+    // Duration + easing pairs, so components can just write
+    // `transition: transform var(--motion-base);`. A pair is not a duration:
+    // `transition-duration` takes a `--duration-*` token.
+    --motion-fast:   var(--duration-fast) var(--ease-emphasized);
+    --motion-base:   var(--duration-base) var(--ease-emphasized);
+    --motion-slow:   var(--duration-slow) var(--ease-emphasized);
+    --motion-spring: calc(400ms * var(--motion-scale)) cubic-bezier(0.2, 0.9, 0.2, 1.2);
 
     // Cursor — interaction affordances. Name the INTENT, not the raw keyword,
     // so components read semantically and the mapping can move in one place.
@@ -458,17 +501,6 @@
     --ui-tint-rest:   6%;
     --ui-tint-hover:  12%;
 
-    // Control density. `comfortable` is the default; `.ui-density-compact`
-    // below swaps in the composer strip's sizes. Components in
-    // frontend/app/element/ui/ read only these, never a size of their own.
-    --ui-font-size:   var(--text-sm);
-    --ui-font-weight: var(--font-weight-medium);
-    --ui-pad-y:       var(--space-1);
-    --ui-pad-x:       var(--space-3);
-    --ui-gap:         var(--space-1-5);
-    --ui-height:      26px;
-    --ui-icon-size:   12px;
-
     // Z-index hierarchy (canonical source — SPEC_DESIGN_SYSTEM §5.3).
     // Naming is aspirational; existing `--zindex-*` tokens higher in
     // this file stay valid and will be re-pointed or retired in a
@@ -489,8 +521,13 @@
     --z-context-menu:  10000;
 }
 
-// The two control densities. A class on any container (or on a control
-// itself) resets the `--ui-*` sizes for everything inside it.
+// Control density. `comfortable` is the default, set on :root; a density
+// class on any container (or on a control itself) resets the `--ui-*` sizes
+// for everything inside it, so a comfortable control inside a compact
+// section gets its own sizes back. `.ui-density-compact` swaps in the
+// composer strip's sizes. Components in frontend/app/element/ui/ read only
+// these, never a size of their own.
+:root,
 .ui-density-comfortable {
     --ui-font-size:   var(--text-sm);
     --ui-font-weight: var(--font-weight-medium);
@@ -523,17 +560,17 @@
 //   body::before, inside the faded group.
 :root.am-uniform-fade {
     --window-opacity: 1 !important;
+    --am-window-fade: 1; // the host's inline value wins
     background: transparent !important;
 
     body {
         background: transparent !important;
-        opacity: var(--am-window-fade, 1);
+        opacity: var(--am-window-fade);
     }
 
     body::before {
         content: "";
-        position: fixed;
-        inset: 0;
+        @include mixins.fixed-fill;
         z-index: -1;
         pointer-events: none;
         background: var(--main-bg-color);
@@ -548,4 +585,6 @@
     // against white), with white text on it.
     --attention-color: rgb(196, 0, 155);
     --attention-text-color: rgb(255, 255, 255);
+    // The dark default, white at half opacity, is lost on a light page.
+    --tertiary-text-color: color-mix(in srgb, var(--main-text-color) 50%, transparent);
 }

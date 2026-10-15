@@ -20,7 +20,7 @@
 // JS on any platform:
 //
 //   - Windows and Linux (both Chromium: CEF/WebView2): `calc(100vw /
-//     var(--zoomfactor, 1))` in window-header.{win32,linux}.scss. Setting the
+//     var(--zoomfactor))` in window-header.{win32,linux}.scss. Setting the
 //     width from JS breaks Windows.
 //   - macOS:   `width: 100%` in window-header.darwin.scss. Do NOT switch
 //     it to the `calc(100vw / …)` form — that double-divides on WebKit and

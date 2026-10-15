@@ -3261,6 +3261,7 @@ mod fleet_tests {
             jekt_public_key: String::new(),
             uid: String::new(),
             uid_public_key: String::new(),
+            jekt_features: Vec::new(),
         };
         std::fs::write(dir.join("test-channel.json"), serde_json::to_string(&entry).unwrap()).unwrap();
     }

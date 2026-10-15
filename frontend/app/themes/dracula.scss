@@ -10,7 +10,7 @@
     // on PR #2138: a plain opaque hex here broke transparency for every
     // named theme once body switched from a hardcoded translucent
     // literal to reading this token directly.
-    --main-bg-color: rgba(40, 42, 54, var(--window-opacity, 0.45));
+    --main-bg-color: rgba(40, 42, 54, var(--window-opacity));
     --panel-bg-color: rgba(33, 34, 44, 0.6);
     --block-bg-color: rgba(24, 25, 32, 0.7);
     --block-bg-solid-color: #1e1f29;

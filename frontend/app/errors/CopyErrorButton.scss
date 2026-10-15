@@ -1,6 +1,8 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+@use "../mixins.scss";
+
 .copy-error-button {
     display: inline-flex;
     align-items: center;
@@ -9,17 +11,17 @@
 
 .copy-error-button-action {
     appearance: none;
-    border: 1px solid var(--border-color, rgba(255, 255, 255, 0.15));
+    border: 1px solid var(--border-color);
     background: transparent;
     color: var(--secondary-text-color);
     border-radius: 4px;
-    font-size: 12px;
+    font-size: var(--text-sm);
     padding: 3px 8px;
     cursor: pointer;
 
     &:hover {
         color: var(--main-text-color);
-        background: var(--highlight-bg);
+        background: var(--highlight-bg-color);
     }
 
     &.is-copied {
@@ -38,18 +40,16 @@
     border: none;
     background: transparent;
     color: var(--secondary-text-color);
-    font-size: 11px;
+    font-size: var(--text-xs);
     width: 20px;
     height: 20px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
+    @include mixins.flex-center(inline-flex);
     border-radius: 4px;
     cursor: pointer;
 
     &:hover {
         color: var(--main-text-color);
-        background: var(--hover-bg-color, rgba(255, 255, 255, 0.08));
+        background: var(--hover-bg-color);
     }
 
     &.is-copied i {
@@ -74,16 +74,16 @@
     height: 1.4em;
     min-width: 120px;
     resize: none;
-    font-size: 11px;
+    font-size: var(--text-xs);
     padding: 2px 4px;
     color: var(--main-text-color);
-    background: var(--highlight-bg);
+    background: var(--highlight-bg-color);
     border: 1px solid var(--error-color);
     border-radius: 3px;
 }
 
 .copy-error-button-fallback-hint {
-    font-size: 11px;
+    font-size: var(--text-xs);
     color: var(--error-color);
     white-space: nowrap;
 }

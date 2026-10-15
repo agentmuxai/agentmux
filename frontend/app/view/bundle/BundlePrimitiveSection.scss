@@ -8,6 +8,8 @@
 // wholesale — this content sits inside bundle-view-detail, not a
 // full-height PrimitiveListDetail pane.
 
+@use "../../mixins.scss";
+
 .bundle-primitive-section {
     margin-top: var(--space-3);
     padding-top: var(--space-2);
@@ -59,17 +61,14 @@
 .bundle-primitive-section-item-name {
     flex: 1;
     min-width: 0;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    @include mixins.truncate;
     color: var(--main-text-color);
 }
 
 .bundle-primitive-section-item-badge {
     flex-shrink: 0;
-    font-size: 10px;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
+    font-size: var(--text-2xs);
+    @include mixins.label-caps;
     padding: 1px 5px;
 
     &.is-private {

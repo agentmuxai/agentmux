@@ -5,10 +5,10 @@
 
 // ── Provider badge ────────────────────────────────────────────────────────────
 
+@use "../../../mixins.scss";
+
 .identity-provider-badge {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
+    @include mixins.flex-center(inline-flex);
     width: 26px;
     height: 22px;
     border-radius: 0;
@@ -37,7 +37,7 @@
     /* stylelint-enable color-no-hex */
 
     &.matrix-badge {
-        font-size: 10px;
+        font-size: var(--text-2xs);
         width: auto;
         padding: 1px 5px;
     }

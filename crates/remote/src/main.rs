@@ -9,6 +9,7 @@
 //! - `attach --session ID [--offset N] [--cols C] [--rows R]`: attach to a
 //!   durable session, starting the daemon and the session as needed.
 //! - `end --session ID`, `list`: end a session; list them.
+//! - `stop`: end every session and stop the daemon (Remotes' Remove helper).
 //! - `serve --stdio`: file operations for srv over stdio (`serve.rs`), on
 //!   any platform.
 //!
@@ -117,13 +118,15 @@ fn run(args: &[String]) -> i32 {
         },
         #[cfg(unix)]
         Some("list") => attach::control(&base_dir(), "LIST"),
+        #[cfg(unix)]
+        Some("stop") => attach::control(&base_dir(), "STOP"),
         #[cfg(not(unix))]
-        Some("daemon" | "attach" | "end" | "list") => {
+        Some("daemon" | "attach" | "end" | "list" | "stop") => {
             eprintln!("agentmux-remote: durable sessions need a Linux or macOS host");
             1
         }
         _ => {
-            eprintln!("usage: agentmux-remote version | serve --stdio | daemon | attach --session ID [--offset N] [--cols C] [--rows R] | end --session ID | list");
+            eprintln!("usage: agentmux-remote version | serve --stdio | daemon | attach --session ID [--offset N] [--cols C] [--rows R] | end --session ID | list | stop");
             2
         }
     }

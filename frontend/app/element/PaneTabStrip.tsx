@@ -37,7 +37,8 @@ import {
     startPaneTabDrag,
 } from "@/app/drag/pane-tab-drag";
 import { flashElement, onActivityFlash } from "@/app/notification/activity-flash";
-import { atoms } from "@/store/global";
+import { shouldReduceMotion } from "@/app/motion/motion";
+import { DURATION_BASE_MS, EASE_OUT } from "@/app/motion/tokens";
 import { isWindows } from "@/util/platformutil";
 import { Tooltip } from "./tooltip";
 import "./PaneTabStrip.scss";
@@ -49,7 +50,7 @@ import { createScrollEdges } from "./scroll-edges";
 
 // Matches the other reveal-gate/cross-fade durations added alongside this
 // one in SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md §2.4.
-const WIDTH_TRANSITION_MS = 160;
+const WIDTH_TRANSITION_MS = DURATION_BASE_MS;
 
 
 /** How long a just-landed pill keeps `.pane-tab--landing` — the Window Tab
@@ -461,10 +462,10 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
                 // the current tab count — only trustworthy once the line
                 // above has cleared any lingering override.
                 const newWidth = el.getBoundingClientRect().width;
-                if (holdWidth !== undefined && holdWidth !== newWidth && !atoms.prefersReducedMotionAtom()) {
+                if (holdWidth !== undefined && holdWidth !== newWidth && !shouldReduceMotion("transition")) {
                     el.style.width = `${holdWidth}px`;
                     el.getBoundingClientRect(); // force reflow before the transition kicks in
-                    el.style.transition = `width ${WIDTH_TRANSITION_MS}ms ease-out`;
+                    el.style.transition = `width ${WIDTH_TRANSITION_MS}ms ${EASE_OUT}`;
                     el.style.width = `${newWidth}px`;
                     widthResetTimeout = setTimeout(() => {
                         el.style.width = "";
@@ -484,7 +485,7 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
             () => [props.activeId, props.tabs.map(props.getId)] as const,
             ([active, ids], prev) => {
                 const doc = props.docDrag;
-                if (!doc || !prev || !active || atoms.prefersReducedMotionAtom()) return;
+                if (!doc || !prev || !active || shouldReduceMotion("feedback")) return;
                 const [wasActive] = prev;
                 if (wasActive && wasActive !== active && !ids.includes(wasActive)) markLanded(active, doc.blockId);
             }
