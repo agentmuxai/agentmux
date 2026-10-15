@@ -84,6 +84,13 @@ describe("helpers", () => {
         expect(toolDetail("Grep", { pattern: "x" })).toBe("x");
     });
 
+    it("an MCP tool with an action names the action and its target, never typed text", () => {
+        expect(toolDetail("mcp__agentmux__Terminal", { action: "run", command: "npm test" })).toBe("run · npm test");
+        expect(toolDetail("mcp__agentmux__Browser", { action: "click", ref: "e12" })).toBe("click · e12");
+        expect(toolDetail("mcp__agentmux__Browser", { action: "fill", ref: "e3", text: "hunter2" })).toBe("fill · e3");
+        expect(toolDetail("mcp__agentmux__UI", { action: "screenshot" })).toBe("screenshot");
+    });
+
     it("a Grep row shows where and how it searched, not just the pattern", () => {
         const call = {
             pattern: "fn deliver\\(",

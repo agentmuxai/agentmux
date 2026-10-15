@@ -276,9 +276,10 @@ async fn type_action(arguments: &Value, cx: &ToolCtx<'_>) -> Result<Value> {
 
     let mut out = json!({ "terminal": id, "since": start });
     if arguments.get("until").is_some() {
-        // Skip the echo of typed text (whether or not it was submitted), and
-        // only then: keys or a bare Enter echo no line of their own.
-        let waited = wait_on(arguments, cx, &id, start, !text.is_empty()).await?;
+        // Skip the echo of typed text, one line per line typed (whether or
+        // not the last was submitted): keys or a bare Enter echo no line of
+        // their own.
+        let waited = wait_on(arguments, cx, &id, start, text.lines().count()).await?;
         out["wait"] = waited;
     } else {
         tokio::time::sleep(Duration::from_millis(300)).await;
@@ -546,7 +547,7 @@ async fn wait_action(arguments: &Value, cx: &ToolCtx<'_>) -> Result<Value> {
         None if known(&id).kind == Kind::Pty => read_log(cx, &id, None, 1).await?.end,
         None => 0,
     };
-    let mut out = wait_on(arguments, cx, &id, since, false).await?;
+    let mut out = wait_on(arguments, cx, &id, since, 0).await?;
     out["terminal"] = json!(id);
     Ok(out)
 }
@@ -578,9 +579,9 @@ fn parse_until(arguments: &Value) -> Result<Until> {
 }
 
 /// Blocks (polling srv) until the condition holds or the timeout passes.
-/// `skip_echo`: the output starts with the echo of text just typed, which a
-/// pattern must not match (`type` with `text`).
-async fn wait_on(arguments: &Value, cx: &ToolCtx<'_>, id: &str, since: u64, skip_echo: bool) -> Result<Value> {
+/// `echo_lines`: the output starts with the echo of that many lines just
+/// typed, which a pattern must not match (`type` with `text`).
+async fn wait_on(arguments: &Value, cx: &ToolCtx<'_>, id: &str, since: u64, echo_lines: usize) -> Result<Value> {
     let until = parse_until(arguments)?;
     let timeout_ms = arguments
         .get("timeout_ms")
@@ -617,7 +618,7 @@ async fn wait_on(arguments: &Value, cx: &ToolCtx<'_>, id: &str, since: u64, skip
                 last_change = Instant::now();
             }
             let quiet_for = last_change.elapsed().as_millis() as u64;
-            let searched = if skip_echo { after_first_line(&text) } else { text.as_str() };
+            let searched = after_lines(&text, echo_lines);
             let found = match &until {
                 Until::Pattern(re) => re.captures(searched).map(|c| {
                     c.iter().map(|m| m.map(|m| m.as_str().to_string())).collect::<Vec<_>>()
@@ -657,7 +658,16 @@ async fn wait_on(arguments: &Value, cx: &ToolCtx<'_>, id: &str, since: u64, skip
 }
 
 pub(super) fn after_first_line(text: &str) -> &str {
-    text.split_once('\n').map(|(_, rest)| rest).unwrap_or("")
+    after_lines(text, 1)
+}
+
+/// `text` after its first `n` lines (all of it for 0, none if it has fewer).
+pub(super) fn after_lines(text: &str, n: usize) -> &str {
+    let mut rest = text;
+    for _ in 0..n {
+        rest = rest.split_once('\n').map(|(_, r)| r).unwrap_or("");
+    }
+    rest
 }
 
 pub(super) fn tail(text: &str, lines: usize) -> String {
@@ -717,6 +727,29 @@ pub(super) fn without_trailing_comment(command: &str, family: ShellFamily) -> &s
         prev_space = c.is_whitespace();
     }
     command
+}
+
+/// How `command` ends if it doesn't end a command: in the background (`&`),
+/// or waiting for more (a pipe, `&&`, `||`, a line continuation). The exit
+/// marker can't follow such a line, so `run` refuses it instead of waiting
+/// out its timeout.
+pub(super) fn open_ending(command: &str, family: ShellFamily) -> Option<&'static str> {
+    let (esc, name) = match family {
+        ShellFamily::Cmd => ('^', "^"),
+        ShellFamily::Pwsh => ('`', "`"),
+        ShellFamily::Posix | ShellFamily::Fish => ('\\', "\\"),
+    };
+    // An odd run of escape characters escapes what follows; an even run is
+    // escaped escape characters.
+    let escapes = |s: &str| s.chars().rev().take_while(|&ch| ch == esc).count() % 2 == 1;
+    let c = command.trim_end();
+    for end in ["&&", "||", "|", "&"] {
+        if let Some(before) = c.strip_suffix(end) {
+            // `\&` or `^|` is the character itself, typed as an argument.
+            return (!escapes(before)).then_some(end);
+        }
+    }
+    escapes(c).then_some(name)
 }
 
 /// The command with an exit-code marker after it, in the shell's own syntax,
@@ -802,6 +835,12 @@ async fn run_action(arguments: &Value, cx: &ToolCtx<'_>) -> Result<Value> {
     }
     let family = family_of(cx, &id).await?;
     let command = without_trailing_comment(command, family);
+    if let Some(end) = open_ending(command, family) {
+        anyhow::bail!(
+            "run waits for a command to finish, and this one ends with {end:?}: \
+             complete it, or for one that keeps running pass background: true"
+        );
+    }
     let line = match str_arg(arguments, "cwd") {
         Some(cwd) => in_dir(command, cwd, family),
         None => command.to_string(),
