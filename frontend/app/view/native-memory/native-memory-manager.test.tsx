@@ -386,6 +386,37 @@ describe("NativeMemoryManager — filter and sort", () => {
         expect(await screen.findByText("Starts with ~5.2k tok")).toBeInTheDocument();
     });
 
+    test("an agent whose launch doesn't deliver its Personal Memory says so on its card", async () => {
+        nativeMemoryListMock.mockResolvedValue({ files: [{ filename: "notes.md", tokens_est: 900 }] });
+        launchCostMock.mockResolvedValue({
+            agent_id: "a1", provider: "codex", startup_file: "AGENTS.md", delivered_by_file: true,
+            parts: [{ kind: "operator_config", name: "Operator Config", tokens_est: 4500, size_bytes: 18000, lines: 1, via: "startup_file" }],
+            total_tokens_est: 4500,
+        });
+        listAgentDefinitionsMock.mockResolvedValue([{ ...agent("a1", "Cody"), provider: "codex" } as AgentDefinition]);
+        render(() => <NativeMemoryManager />);
+        expect(await screen.findByText("Not delivered to Codex CLI agents")).toBeInTheDocument();
+        expect(screen.getByText("Cody").closest(".memory-agent-card")?.getAttribute("aria-label")).toBe(
+            "Cody — ~900 tok · 1 file — Not delivered to Codex CLI agents — Starts with ~4.5k tok"
+        );
+    });
+
+    test("coming back to the window refetches the launch costs (a startup file can change on disk)", async () => {
+        const cost = (tokens: number) => ({
+            agent_id: "a1", provider: "claude", startup_file: "CLAUDE.md", delivered_by_file: true,
+            parts: [{ kind: "operator_config", name: "Operator Config", tokens_est: tokens, size_bytes: tokens * 4, lines: 1, via: "startup_file" }],
+            total_tokens_est: tokens,
+        });
+        launchCostMock.mockResolvedValue(cost(4500));
+        listAgentDefinitionsMock.mockResolvedValue([agent("a1", "Manoz")]);
+        render(() => <NativeMemoryManager />);
+        expect(await screen.findByText("Starts with ~4.5k tok")).toBeInTheDocument();
+
+        launchCostMock.mockResolvedValue({ ...cost(4500), delivered_by_file: false });
+        window.dispatchEvent(new Event("focus"));
+        expect(await screen.findByText("Starts with ~0 tok")).toBeInTheDocument();
+    });
+
     test("'Has memories' hides zero-count cards but never loading or error ones", async () => {
         nativeMemoryListMock.mockImplementation((_c: unknown, req: { agent_id: string }) => {
             if (req.agent_id === "a1") return Promise.resolve({ files: [{ filename: "x" }] }); // has memories

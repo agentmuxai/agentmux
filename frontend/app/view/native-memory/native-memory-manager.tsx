@@ -311,8 +311,15 @@ export function NativeMemoryManager(): JSX.Element {
             .catch(() => {});
     };
     onCleanup(onMuxEvent(WpsEvent.ProcessBrokerTrackedBlocksChanged, fetchOpenPanes));
-    window.addEventListener("focus", fetchOpenPanes);
-    onCleanup(() => window.removeEventListener("focus", fetchOpenPanes));
+    // Coming back to this window also refetches the launch costs: an agent's
+    // startup file can be created or edited on disk, and no event says so
+    // (it decides `delivered_by_file`).
+    const onFocus = () => {
+        fetchOpenPanes();
+        refetchLaunchCosts();
+    };
+    window.addEventListener("focus", onFocus);
+    onCleanup(() => window.removeEventListener("focus", onFocus));
 
     createEffect(() => {
         agentIdsKey();
@@ -392,6 +399,8 @@ export function NativeMemoryManager(): JSX.Element {
         setFilesError(null);
         if (!agent) return;
         setFilesLoading(true);
+        // Its launch cost too, so the breakdown it opens on is current.
+        untrack(() => fetchLaunchCostFor(agent));
         RpcApi.NativeMemoryListCommand(TabRpcClient, { agent_id: agent.id })
             .then((res) => {
                 if (requestId !== latestRequestId) return;
@@ -599,7 +608,13 @@ export function NativeMemoryManager(): JSX.Element {
                                                 onSelect={setSelectedAgent}
                                                 launch={
                                                     launchCosts()[agent.id]
-                                                        ? { total: deliveredTotal(launchCosts()[agent.id]), window: windowFor(agent.id) }
+                                                        ? {
+                                                              total: deliveredTotal(launchCosts()[agent.id]),
+                                                              window: windowFor(agent.id),
+                                                              personalDelivered: launchCosts()[agent.id].parts.some(
+                                                                  (p) => p.kind === "personal"
+                                                              ),
+                                                          }
                                                         : null
                                                 }
                                             />
