@@ -699,6 +699,14 @@ const PANE_ALLOWED_NAV_SCHEMES: &[&str] = &[
     "view-source",
 ];
 
+/// Chromium's built-in PDF viewer. A PDF opens as a page that embeds this
+/// extension in a child frame, and `on_before_browse` sees that frame's
+/// navigation too: without this entry every PDF stayed a blank pane. Only
+/// this one origin, not the whole `chrome-extension` scheme: Chromium serves
+/// it itself and never hands it to the OS shell, so it carries none of the
+/// risk the allowlist exists to block.
+const PDF_VIEWER_ORIGIN: &str = "chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/";
+
 /// The scheme of `url` (lowercased) if it has one — the run of
 /// `[a-z0-9+.-]` before the first `:`, per RFC 3986. Returns `None` for a
 /// scheme-relative or relative URL (no valid scheme → resolves against the
@@ -729,6 +737,9 @@ fn url_scheme(url: &str) -> Option<String> {
 /// shell. A relative/scheme-less URL, or one of `PANE_ALLOWED_NAV_SCHEMES`, is
 /// allowed (returns false).
 pub fn is_disallowed_pane_nav_scheme(url: &str) -> bool {
+    if url.trim().starts_with(PDF_VIEWER_ORIGIN) {
+        return false;
+    }
     match url_scheme(url) {
         None => false, // relative / scheme-less — resolves against current origin
         Some(scheme) => {
@@ -882,6 +893,24 @@ mod external_url_tests {
             "steam://run/1",
             "callto:foo",
             "custom-installer://elevate",
+        ] {
+            assert!(is_disallowed_pane_nav_scheme(u), "should block: {u}");
+        }
+    }
+
+    #[test]
+    fn only_the_pdf_viewer_extension_is_allowed() {
+        // The frame Chromium's PDF viewer loads in; blocking it left every
+        // PDF a blank pane.
+        assert!(!is_disallowed_pane_nav_scheme(
+            "chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/index.html"
+        ));
+        // Any other extension, or a lookalike id, is still blocked.
+        for u in [
+            "chrome-extension://aaaabbbbccccddddeeeeffffgggghhhh/index.html",
+            "chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjaix/index.html",
+            "chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehja/index.html",
+            "chrome-extension:mhjfbmdgcfjbbpaeojofohoefgiehjai/index.html",
         ] {
             assert!(is_disallowed_pane_nav_scheme(u), "should block: {u}");
         }
