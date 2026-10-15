@@ -70,17 +70,28 @@
     min-height: 0;
 }
 
+// Each control is one flex item, so a narrowing pane moves them to the next
+// line one at a time from the right; pause and table stay right-aligned.
 .sysinfo-bar {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 4px;
+    gap: 2px 4px;
     padding: 2px 3px;
     flex-shrink: 0;
+
+    // A set of buttons wider than the pane wraps within itself.
+    .ui-segmented {
+        flex-wrap: wrap;
+        max-width: 100%;
+    }
 }
 
-.sysinfo-bar-spacer {
-    flex: 1 1 auto;
+.sysinfo-bar-actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-left: auto;
 }
 
 .sysinfo-bar-paused {

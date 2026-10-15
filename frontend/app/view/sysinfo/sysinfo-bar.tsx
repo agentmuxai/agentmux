@@ -4,8 +4,10 @@
 /**
  * Sysinfo's one control row, the same in the simple and the Advanced views: a
  * button per view to switch in one click, the window (1 to 15 minutes), and on
- * the right pause and a table of the figures instead of the charts. In a
- * narrow pane the view buttons take a row of their own.
+ * the right pause and a table of the figures instead of the charts. As the pane
+ * narrows, the controls break onto the next line one at a time from the right
+ * (pause and table, then the window), and a set of buttons wider than the pane
+ * wraps within itself.
  */
 
 import type { JSX } from "solid-js";
@@ -51,22 +53,23 @@ export function SysinfoBar(props: SysinfoBarProps): JSX.Element {
                 value={String(props.windowSecs)}
                 onChange={(v) => props.onWindow(Number(v))}
             />
-            <Show when={props.paused}>
-                <span class="sysinfo-bar-paused">Paused</span>
-            </Show>
-            <div class="sysinfo-bar-spacer" />
-            <IconButton
-                icon={props.paused ? "play" : "pause"}
-                label={props.paused ? "Resume" : "Pause"}
-                pressed={props.paused}
-                onClick={() => props.onPause(!props.paused)}
-            />
-            <IconButton
-                icon="table"
-                label={props.table ? "Show charts" : "Show as a table"}
-                pressed={props.table}
-                onClick={() => props.onTable(!props.table)}
-            />
+            <div class="sysinfo-bar-actions">
+                <Show when={props.paused}>
+                    <span class="sysinfo-bar-paused">Paused</span>
+                </Show>
+                <IconButton
+                    icon={props.paused ? "play" : "pause"}
+                    label={props.paused ? "Resume" : "Pause"}
+                    pressed={props.paused}
+                    onClick={() => props.onPause(!props.paused)}
+                />
+                <IconButton
+                    icon="table"
+                    label={props.table ? "Show charts" : "Show as a table"}
+                    pressed={props.table}
+                    onClick={() => props.onTable(!props.table)}
+                />
+            </div>
         </div>
     );
 }
