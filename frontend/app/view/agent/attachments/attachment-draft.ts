@@ -9,8 +9,9 @@
  *
  * Module-level and keyed by blockId, like the composer's text draft
  * (AgentFooter's composerDrafts): the footer unmounts on every pane-tab
- * switch, and the attachments must survive that. They don't survive an app
- * restart; the backend's retention sweep removes their files later.
+ * switch, and the attachments must survive that. The ready ones also survive a
+ * reload of the window (stored like the text draft, reload-persistence.ts); none
+ * survive an app restart. The store keeps a file 30 days after its last use.
  *
  * Two ways in:
  *  - paths (drop): `attachments.ingest` copies and processes them in the
@@ -37,6 +38,9 @@ import type { AttachmentReadyEvent } from "@/types/rpc/AttachmentReadyEvent";
 import type { AttachmentRef } from "@/types/rpc/AttachmentRef";
 import type { AttachmentRejected } from "@/types/rpc/AttachmentRejected";
 import { attachmentNoun, fileKind } from "./file-kind";
+import { readSession, writeSession } from "../reload-persistence";
+
+const STORED_KEY = "agentmux:attachment-draft:";
 
 /** Fallback limits until the backend reports its own (settings-driven) ones. */
 const DEFAULT_MAX_FILES = 128;
@@ -134,7 +138,10 @@ export class AttachmentDraft {
         this.blockId = blockId;
         const [items, setItems] = createSignal<DraftAttachment[]>([]);
         this.items = items;
-        this.setItems = (fn) => setItems((prev) => fn(prev));
+        this.setItems = (fn) => {
+            setItems((prev) => fn(prev));
+            this.store();
+        };
         const [flashKey, setFlashKey] = createSignal<string | null>(null);
         this.flashKey = flashKey;
         this.setFlashKey = setFlashKey;
@@ -387,6 +394,15 @@ export class AttachmentDraft {
         ]);
     }
 
+    /**
+     * Keep the ready attachments (id and name) for a reload of this window. An
+     * upload or ingest still in progress can't continue after one.
+     */
+    private store(): void {
+        const refs: AttachmentRef[] = this.readyItems().map((i) => ({ id: i.info!.id, name: i.name }));
+        writeSession(STORED_KEY + this.blockId, refs.length > 0 ? refs : undefined);
+    }
+
     /** After a send: the tray empties; the files stay in the store for the transcript. */
     clearAfterSend(): void {
         this.setItems(() => []);
@@ -500,6 +516,9 @@ export function getAttachmentDraft(blockId: string): AttachmentDraft {
     if (!d) {
         d = new AttachmentDraft(blockId);
         drafts.set(blockId, d);
+        // First use since this page loaded: bring back what a reload left.
+        const stored = readSession<AttachmentRef[]>(STORED_KEY + blockId);
+        if (Array.isArray(stored) && stored.length > 0) void d.restoreRefs(stored);
     }
     return d;
 }
