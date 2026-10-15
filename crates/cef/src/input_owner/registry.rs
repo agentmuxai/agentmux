@@ -53,23 +53,47 @@ pub fn snapshot(window: &str) -> Option<(bool, Have, String)> {
     OWNERS.lock().get(window).map(|w| (w.active, w.have.clone(), w.describe()))
 }
 
-/// The last selection each window's frontend made that was applied: the page
-/// load it came from (`epoch`) and its number in that load.
-static SELECTIONS: LazyLock<Mutex<HashMap<String, (String, u64)>>> = LazyLock::new(Default::default);
+/// A window's selections: the page load whose selections count (`epoch`), the
+/// number of the last one applied, and the page loads it replaced.
+#[derive(Default)]
+struct Selections {
+    epoch: String,
+    seq: u64,
+    retired: std::collections::VecDeque<String>,
+}
+
+/// How many replaced page loads a window remembers.
+const RETIRED_EPOCHS: usize = 32;
+
+static SELECTIONS: LazyLock<Mutex<HashMap<String, Selections>>> = LazyLock::new(Default::default);
 
 /// Whether selection `seq` from page load `epoch` of `window` comes after the
 /// last one applied; records it if so. Requests travel as separate IPCs and can
 /// arrive out of order; an older one must not undo a newer one. A new page load
-/// (a reload) starts its own numbering.
+/// (a reload) starts its own numbering and retires the one before it, so a
+/// request still in flight from the old page can't take the window back.
 pub fn accept_selection(window: &str, epoch: &str, seq: u64) -> bool {
     let mut selections = SELECTIONS.lock();
-    match selections.get(window) {
-        Some((e, last)) if e == epoch && seq <= *last => false,
-        _ => {
-            selections.insert(window.to_string(), (epoch.to_string(), seq));
-            true
+    let s = selections.entry(window.to_string()).or_default();
+    if s.epoch == epoch {
+        if seq <= s.seq {
+            return false;
+        }
+        s.seq = seq;
+        return true;
+    }
+    if s.retired.iter().any(|e| e == epoch) {
+        return false;
+    }
+    if !s.epoch.is_empty() {
+        s.retired.push_back(std::mem::take(&mut s.epoch));
+        if s.retired.len() > RETIRED_EPOCHS {
+            s.retired.pop_front();
         }
     }
+    s.epoch = epoch.to_string();
+    s.seq = seq;
+    true
 }
 
 /// What a window's frontend is told about its input: whether the window is
@@ -166,6 +190,14 @@ mod tests {
         assert!(accept_selection("t-reload", "load-1", 40));
         assert!(accept_selection("t-reload", "load-2", 1));
         assert!(!accept_selection("t-reload", "load-2", 1));
+    }
+
+    #[test]
+    fn a_request_from_before_a_reload_arriving_after_it_is_dropped() {
+        assert!(accept_selection("t-retired", "load-1", 5));
+        assert!(accept_selection("t-retired", "load-2", 1));
+        assert!(!accept_selection("t-retired", "load-1", 6), "the old page's late request");
+        assert!(accept_selection("t-retired", "load-2", 2), "the new page carries on");
     }
 
     #[test]
