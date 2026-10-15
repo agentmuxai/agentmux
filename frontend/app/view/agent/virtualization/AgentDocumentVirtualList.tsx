@@ -59,6 +59,7 @@ import {
 } from "@/app/store/agent-pane-layout-store";
 import { computeLayoutView } from "@/app/store/agent-pane-layout/reducer";
 import { captureOnScreen, restoreOnScreen } from "./keep-on-screen";
+import { useSettleOnShow } from "../scroll/settle-on-show";
 import { inFlowState, ROW_GAP_PX, type ExpansionState } from "@/app/store/agent-pane-layout/types";
 import {
     initialStickyFrontierId,
@@ -1611,10 +1612,9 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         })
         : undefined;
     onCleanup(() => measureRO?.disconnect());
-    // The one-way path's single observer (SPEC_AGENT_PANE_ONE_WAY_FLOW R4).
-    // Created after measureRO and tailRO on purpose: in a round where rows
-    // resized, its callback runs after theirs have updated the slice, so the
-    // geometry it reads already includes them.
+    // The one-way path's single observer (SPEC_AGENT_PANE_ONE_WAY_FLOW R4). Created after measureRO
+    // and tailRO on purpose: in a round where rows resized, its callback runs after theirs have
+    // updated the slice, so the geometry it reads already includes them.
     const oneWayFlow = oneWay
         ? new OneWayFlow({
             following: () => untrack(props.viewState.stickToBottom),
@@ -1625,9 +1625,8 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                 pinnedGeometry = geo;
                 follow?.noteGeometry(geo);
             },
-            // Collapsing held-open tools that scrolled off the top changes
-            // layout, so it runs before the observation is measured and its
-            // effect is compensated in the same frame.
+            // Collapsing held-open tools that scrolled off the top changes layout, so it
+            // runs before the observation is measured and is compensated in the same frame.
             prepare: () => releaseScrolledOffHolds(),
             observed: (geo) => {
                 syncOverflowState(geo);
@@ -1637,6 +1636,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         })
         : null;
     onCleanup(() => oneWayFlow?.dispose());
+    useSettleOnShow(oneWayFlow, props.viewState.stickToBottom);
     onMount(() => {
         if (oneWayFlow && scrollRef && bottomSpacerRef) {
             oneWayFlow.attach(scrollRef, bottomSpacerRef, [virtualContainerRef, streamingBufferRef]);
