@@ -8,6 +8,7 @@ pub mod platform;
 pub mod autostart;
 pub mod taskbar_attention;
 pub mod cli_login;
+mod login_console;
 pub mod window;
 pub mod backend;
 pub mod providers;
