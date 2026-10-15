@@ -9,17 +9,6 @@
     font: inherit;
     outline: inherit;
 
-    &.bulb {
-        color: var(--bulb-color);
-        opacity: 1;
-
-        &:hover i::before {
-            content: "\f672";
-            position: relative;
-            left: -1px;
-        }
-    }
-
     &:hover {
         opacity: 1;
     }

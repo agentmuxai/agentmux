@@ -4,16 +4,6 @@
 
 @use "../../mixins.scss" as mixins;
 
-.connection-btn {
-    min-height: 0;
-    overflow: hidden;
-    line-height: 1;
-    display: flex;
-    background-color: orangered;
-    justify-content: flex-start;
-    width: 200px;
-}
-
 .view-term {
     // .view-term itself never painted a background — xterm's own canvas
     // (starting only where .term-connectelem sits, below the tab strip)
@@ -29,39 +19,6 @@
     height: 100%;
     overflow: hidden;
     position: relative;
-
-    .term-header {
-        display: flex;
-        flex-direction: row;
-        padding: var(--space-1) 10px;
-        height: 35px;
-        gap: 10px;
-        align-items: center;
-        flex-shrink: 0;
-        border-bottom: 1px solid var(--border-color);
-    }
-
-    .term-toolbar {
-        height: 20px;
-        border-bottom: 1px solid var(--border-color);
-        overflow: hidden;
-    }
-
-    .term-cmd-toolbar {
-        display: flex;
-        flex-direction: row;
-        height: 24px;
-        border-bottom: 1px solid var(--border-color);
-        overflow: hidden;
-        align-items: center;
-
-        .term-cmd-toolbar-text {
-            font: var(--fixed-font);
-            flex-grow: 1;
-            @include mixins.truncate;
-            padding: 0 5px;
-        }
-    }
 
     // Frosted-glass band across the top of the pane, matching the agent
     // pane's tab strip. See
@@ -99,34 +56,15 @@
         margin: 0;
     }
 
-    .term-htmlelem {
-        display: flex;
-        flex-direction: column;
-        width: 100%;
-        flex-grow: 1;
-        min-height: 0;
-        overflow: hidden;
-
-        .block-content {
-            padding: 0;
-        }
-    }
-
     &.term-mode-term {
         .term-connectelem {
             display: flex;
-        }
-        .term-htmlelem {
-            display: none;
         }
     }
 
     &.term-mode-vdom {
         .term-connectelem {
             display: none;
-        }
-        .term-htmlelem {
-            display: flex;
         }
 
         .ijson iframe {
@@ -142,19 +80,11 @@
         left: 0;
         width: 100%;
         height: 100%;
-        z-index: var(--zindex-termstickers);
+        z-index: var(--z-term-stickers);
         pointer-events: none;
 
         .term-sticker-image {
             img {
-                object-fit: contain;
-                width: 100%;
-                height: 100%;
-            }
-        }
-
-        .term-sticker-svg {
-            svg {
                 object-fit: contain;
                 width: 100%;
                 height: 100%;

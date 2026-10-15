@@ -21,9 +21,6 @@
 // specificity) — this mixin exists so agent-view.scss can apply the SAME
 // ruleset under a DIFFERENT ancestor without copy-pasting 250 lines and
 // risking drift between the two.
-// NOTE: the term-activity flash below only REFERENCES `am-accent-flash` by
-// name. Its @keyframes lives in _keyframes.scss, loaded once from app.scss:
-// a @keyframes inside a mixin is emitted once per @include.
 @mixin block-frame-default-header-layout() {
     max-height: var(--header-height);
     min-height: var(--header-height);
@@ -120,26 +117,10 @@
             flex-grow: 0;
         }
 
-        &.preview-filename {
-            direction: rtl;
-            text-align: left;
-            span {
-                cursor: default;
-
-                &:hover {
-                    background: var(--highlight-bg-color);
-                }
-            }
-        }
-
         &.term-activity {
             opacity: 0.6;
             max-width: 500px;
             @include truncate;
-            &.term-activity--flash {
-                --flash-end-opacity: 0.6;
-                animation: am-accent-flash 0.5s var(--ease-out);
-            }
         }
 
     }

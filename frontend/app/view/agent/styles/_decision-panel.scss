@@ -115,7 +115,7 @@
     @include mixins.label-caps;
     padding: 2px 5px;
     border-radius: 0;
-    background: color-mix(in srgb, var(--main-text-color) 10%, transparent);
+    background: var(--tint-4);
     color: var(--secondary-text-color);
     font-weight: 500;
 }
@@ -200,11 +200,11 @@
     transition: background var(--duration-decorative-instant) var(--ease-standard);
 
     &:hover {
-        background: color-mix(in srgb, var(--main-text-color) 4%, transparent);
+        background: var(--tint-2);
     }
 
     &--active {
-        background: color-mix(in srgb, var(--accent-color) 12%, transparent);
+        background: var(--accent-bg);
     }
 }
 
@@ -304,7 +304,7 @@
 
         // The armed look (first press of the two-step confirm) still shows.
         &.agent-decision-panel-btn--armed {
-            background: color-mix(in srgb, var(--accent-color) 30%, transparent);
+            background: var(--accent-line);
             border-color: var(--accent-color);
             color: var(--accent-color);
         }
@@ -315,7 +315,7 @@
     // `--allow`, which compiled to `--allow--armed` and never matched.
     // Codex/reagent P1 on PR #556.
     &--armed {
-        background: color-mix(in srgb, var(--accent-color) 30%, transparent);
+        background: var(--accent-line);
         border-color: var(--accent-color);
         color: var(--accent-color);
     }
@@ -326,7 +326,7 @@
         color: var(--error-color);
 
         &:hover {
-            background: color-mix(in srgb, var(--error-color) 30%, transparent);
+            background: var(--error-line);
         }
     }
 
@@ -336,7 +336,7 @@
         color: var(--secondary-text-color);
 
         &:hover {
-            background: color-mix(in srgb, var(--main-text-color) 6%, transparent);
+            background: var(--tint-2);
             color: var(--main-text-color);
         }
     }

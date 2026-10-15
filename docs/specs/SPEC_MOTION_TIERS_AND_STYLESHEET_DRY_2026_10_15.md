@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-15
 **Author:** AgentY@narko
-**Status:** active. Approved 2026-10-15: the operator took every recommendation in §8 ("go with recommendations, get it all built"). Phases in §7; each PR updates this line. Phases A (#4968), B (#4971), C (#4973) and D1 (#4975) are merged or in review; phase D2 (near-duplicate sheets) is built.
+**Status:** active. Approved 2026-10-15: the operator took every recommendation in §8 ("go with recommendations, get it all built"). Phases in §7; each PR updates this line. Phases A (#4968), B (#4971), C (#4973), D1 (#4975) and D2 (#4977) are merged or in review; phase E (tints, z-index, dead CSS) is built.
 **Verified against:** `agentmux` `main` @ `fb6b20ba8`, by reading code (three read-only inventories, spot-checked by hand) and this machine's Windows setting.
 **Scope:** every animation, transition and motion gate in `frontend/` (CSS, SCSS, TS, the vendored Font Awesome CSS, SVG assets, `index.html`), the `window:reducedmotion` setting end to end, and the shared stylesheet layer (`theme.scss`, `mixins.scss`, `element/ui/`).
 **Related:**
@@ -514,6 +514,36 @@ The order is by payoff against risk. The DRY items go in phases C and D (§7); p
     - A rough scan found 111 of 2,510 class names with no reference in TS or TSX.
     - Hand-checked examples: all of `_import-modal-body.scss`, `identity/styles/_assignments.scss`, `term.scss:33-58`, `.flex-spacer`, `.os-scrollbar*` and `.u-cursor-*` in `app.scss`, and about 17 `agent-header*` classes.
     - Each removal is checked against class names built at run time (`sh-*` is one such family, and is not dead).
+
+**As built (phase E).**
+- Item 16, tints. `theme.scss` defines `--tint-1` to `--tint-4`, the text colour at 3, 5, 8 and 10 % over transparent, and a `-bg` (12 %) and a `-line` (30 %) for each of error, warning, accent and success. They are made of the theme's own colours, so the light themes need no override.
+  - The steps come from the 59 neutral tints at 2 to 12 % (2 % ×8, 3 ×12, 4 ×6, 5 ×10, 6 ×11, 8 ×6, 10 ×5, 12 ×1) and the 18 white overlays. 3/5/8/10 moves each by at most 2 points, and fewer than 3/5/8/12 would, which spends a step on two uses.
+  - 128 `color-mix()` calls within 2 points of a step use the token: 59 neutral tints, 45 tone backgrounds at 10 to 14 % and 24 tone lines at 28 to 30 %. What shifts: neutral 2 → 3 %, 4 → 5 %, 6 → 5 % and 12 → 10 %; tone backgrounds 10 → 12 % and 14 → 12 %; the search-match flash's accent 28 → 30 %.
+  - 18 white overlays (`rgba(255, 255, 255, a)` as a background or a border) use the nearest step: 0.02 and 0.03 → `--tint-1`, 0.04 to 0.06 → `--tint-2`, 0.08 → `--tint-3`, 0.1 and 0.12 → `--tint-4`. They follow the theme's text colour now, so in the light themes they are a dark wash where the white one did not show. White as a text colour, on the colour swatches and handles, in the window controls' caption colours and in Tailwind's `@theme` colours stays.
+  - Left as they are, outside every step's 2 points (99 calls): the 15 % tone tints (23, mostly hovers), the 4 to 8 % accent and warning tints, the lines and text tints from 35 % up, and `--error-bg-color` (a fixed red at 15 %, two uses).
+- Item 16, notices. `element/ui/_line.scss` has `notice($tone, $text, $bg, $line)`: the tone's `-bg` behind, a 1 px `-line` around and the text in the tone, for `danger`, `warning`, `accent` and `success`. 14 boxes use it and keep their own padding, margins and radius: the nine error boxes in the memory, primitive, bundle and new-memory dialogs and the memory panes (D2's `error-box` mixin is gone), the error banner, the disconnected and fork-fallback banners, the memory conflict banner and the prerequisite row. The four banners keep their heavier line (40 or 50 %) and their main text colour; the prerequisite row keeps its 6 % tint.
+- Item 17, z-index. `theme.scss` has one `--z-*` scale, in groups by stacking context, each in paint order. Every layer keeps the number it rendered with, so nothing moves above or below anything else. The `--zindex-*` names are gone, including the four the tile layout sets from TypeScript. The 10 unused tokens are removed; `--z-flash-error`, `--z-typeahead` and `--z-popover`, also unused, had values no element rendered at (7000, 8000, 8500) and now carry their layer's.
+
+  | Context | Layer, in paint order | Token | Value (before and after) |
+  |---|---|---|---|
+  | any | under the content: app background, activity flashes | `--z-behind` | −1 |
+  | tile layout | display, last magnified, last ephemeral, resize handle, placeholder, overlay, magnified backdrop, ephemeral backdrop, ephemeral, magnify | `--z-layout-*` | 0, 1, 2, 3, 4, 5, 6, 8, 9, 20 |
+  | pane or tab | tab name, agent tab strip, block stats, block mask and ring at rest, terminal stickers, size badge, focused ring, busy band, file drop, pane dialog | `--z-tab-name` … `--z-pane-modal` | 3, 4, 5, 10, 20, 30, 50, 51, 60, 100 |
+  | window | typeahead backdrop, typeahead, window drag | `--z-typeahead-backdrop`, `--z-typeahead`, `--z-window-drag` | 90, 100, 100 |
+  | window | status bar, popovers and the accounts chooser, status-bar tip | `--z-status-bar`, `--z-popover`, `--z-status-tip` | 499 (`calc(500 - 1)`), 500, 510 (`calc(500 + 10)`) |
+  | window | flash errors, cross-window drop | `--z-flash-error`, `--z-drag-overlay` | 550, 1000 |
+  | window | modals, flyout menus | `--z-modal`, `--z-flyout-menu` | 9000, 9500 |
+  | window | drop preview, "copied" note | `--z-transient` (was a raw 9999) | 9999 |
+  | window | delete confirmation, zoom level | `--z-top` (was a raw 10000 and `--z-context-menu`) | 10000 |
+
+  - Raw z-indexes in the stylesheets went from 60 to 51: eight became tokens and one left with `_header-controls.scss`. The 51 left order a component's own children inside its own stacking context.
+  - TypeScript sets these inline, outside the scale, at the same numbers as before: the context menus and the tab colour panel (9999), the media-capture indicator (9998), the JS context menu and the startup splash in `index.html` (99999), and the dev diagnostics and performance HUD (999998, 999999).
+- Item 18, dead CSS. Each class was checked for a reference anywhere outside the stylesheets and docs, then for names built at run time: a template literal or concatenation ending in one of its prefixes, or starting with one of its suffixes. 106 built selectors went.
+  - Whole files: `_import-modal-body.scss`, `_header-controls.scss` (the `agent-header*`, process-control, sidebar and filter classes) and `identity/styles/_assignments.scss`.
+  - In `term.scss`: `.term-header`, `.term-toolbar`, `.term-cmd-toolbar*`, `.connection-btn`, `.term-htmlelem` and `.term-sticker-svg`. In `app.scss`: `.flex-spacer`, `.error-color`, `.u-cursor-*` and `.scrollbar-hide-until-hover`.
+  - Single rules: `.bst-connection*`, `.browser-error-hint`, the icon button's `.bulb` (and its `--bulb-color`), `.config-error-button`, the typeahead's `.input-decoration.end-position`, `.identity-header*`, `.identity-agent-count`, `.matrix-badge`, `.muxbus-login-chip-connected`, `-dot`, `-email` and `-error`, `.muxbus-login-popover`, `.overlay-leaf`, and the pane header's `.preview-filename` and `.term-activity--flash`. That flash was the only rule that set `am-accent-flash`'s `--flash-end-opacity`, so the keyframes end at opacity 1, as they did everywhere else.
+  - Kept: `.os-scrollbar*`, which OverlayScrollbars (`markdown.tsx`) creates; `.identity-form-error-text` and `-copy-btn`, which `CopyableErrorMessage` builds from its `class`; `.markdown-table` and the terminal's `.ijson`; the classes of xterm.css, highlight.js and Tailwind's utilities.
+  - Candidates, not proven: 218 classes with no literal reference whose prefix is built at run time somewhere, for example the `CollapsibleMessage` parts (`agent-jekt-*`, `agent-message-*`), `status-lan-diamond--*`, `files-git-*`, `log-fg-*` and the `is-*` states.
 
 ### 6.6 Small and safe
 

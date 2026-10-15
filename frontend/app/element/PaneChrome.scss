@@ -44,7 +44,7 @@
         height: 3px;
         background: var(--pane-remote-color);
         pointer-events: none;
-        z-index: var(--zindex-block-mask-inner);
+        z-index: var(--z-pane-mask);
     }
 
     // Selection ring for the whole pane (header + content) — mirrors
@@ -59,13 +59,13 @@
         pointer-events: none;
         border: var(--pane-ring-width) solid var(--pane-ring-color, var(--border-color));
         border-radius: var(--block-border-radius);
-        z-index: var(--zindex-block-mask-inner);
+        z-index: var(--z-pane-mask);
         will-change: transform;
     }
 
     &.pane-stack-focused::after {
         border-color: var(--pane-ring-color, var(--accent-color));
-        z-index: 50;
+        z-index: var(--z-pane-ring);
     }
 
     // The busy indicator's stripe color mirrors the selection ring above
@@ -160,5 +160,5 @@
     // band (that retro's candidate 1). Under the band the ring is the same
     // colour as the band's "on" sections, so a pixel of rounding never shows
     // as a gap.
-    z-index: 51;
+    z-index: var(--z-pane-progress);
 }

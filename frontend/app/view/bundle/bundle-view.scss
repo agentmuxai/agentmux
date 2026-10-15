@@ -42,14 +42,14 @@
 .bundle-view-list-item {
     padding: 10px 12px;
     cursor: default;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    border-bottom: 1px solid var(--tint-2);
 
     &:hover {
         background: var(--hover-bg-color);
     }
 
     &.is-selected {
-        background: rgba(255, 255, 255, 0.08);
+        background: var(--tint-3);
     }
 
     &.is-blank {

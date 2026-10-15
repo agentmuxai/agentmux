@@ -8,7 +8,7 @@
 .anchored-popover {
     // left/top come inline from computeMenuPosition.
     position: fixed;
-    z-index: var(--zindex-modal-wrapper);
+    z-index: var(--z-popover);
 }
 
 // A menu-styled panel (`.menu` body) keeps the flyout-menu tier it had.

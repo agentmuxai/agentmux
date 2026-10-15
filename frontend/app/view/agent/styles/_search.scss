@@ -92,7 +92,7 @@
 
     .agent-node-search-match {
         // Subtle accent-tinted background to flag the matched node
-        background: color-mix(in srgb, var(--accent-color) 10%, transparent) !important; /* stylelint-disable-line declaration-no-important */
+        background: var(--accent-bg) !important; /* stylelint-disable-line declaration-no-important */
         // Left border acts as a gutter indicator
         border-left: 3px solid var(--accent-color) !important; /* stylelint-disable-line declaration-no-important */
         border-radius: 0;
@@ -105,10 +105,10 @@
 
     @keyframes search-match-flash {
         from {
-            background: color-mix(in srgb, var(--accent-color) 28%, transparent);
+            background: var(--accent-line);
         }
         to {
-            background: color-mix(in srgb, var(--accent-color) 10%, transparent);
+            background: var(--accent-bg);
         }
     }
 }

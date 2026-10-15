@@ -250,7 +250,7 @@ $transcript-preview-max-height: calc(50vh / 3);
             color: var(--secondary-text-color);
             border-left: 2px solid var(--secondary-text-color);
             padding-left: var(--space-2);
-            background: color-mix(in srgb, var(--main-text-color) 2%, transparent);
+            background: var(--tint-1);
             margin-block: 4px;
         }
 
@@ -265,7 +265,7 @@ $transcript-preview-max-height: calc(50vh / 3);
             opacity: 0.7;
             border-left: 2px solid var(--secondary-text-color);
             padding-left: var(--space-2);
-            background: color-mix(in srgb, var(--main-text-color) 2%, transparent);
+            background: var(--tint-1);
             margin-block: 4px;
 
             .markdown-canceled-header {
@@ -316,13 +316,13 @@ $transcript-preview-max-height: calc(50vh / 3);
         }
 
         code {
-            background: color-mix(in srgb, var(--main-text-color) 8%, transparent);
+            background: var(--tint-3);
             padding: 1px var(--space-1);
             border-radius: 0;
         }
 
         pre {
-            background: color-mix(in srgb, var(--main-text-color) 5%, transparent);
+            background: var(--tint-2);
             padding: var(--space-1) var(--space-1-5);
             border-radius: 0;
             overflow-x: auto;
@@ -343,7 +343,7 @@ $transcript-preview-max-height: calc(50vh / 3);
         transition: background var(--duration-decorative-fast);
 
         &:hover {
-            background: color-mix(in srgb, var(--main-text-color) 3%, transparent);
+            background: var(--tint-1);
         }
 
         &.running {
@@ -812,15 +812,15 @@ $transcript-preview-max-height: calc(50vh / 3);
         // see `fadeInOnMount` in `ToolBlock.tsx`), so resizing never
         // replays it (reagent P2 on PR #1975).
 
-        &.pill-exit-ok  { color: var(--success-color); background: color-mix(in srgb, var(--success-color) 14%, transparent); }
-        &.pill-exit-err { color: var(--error-color);   background: color-mix(in srgb, var(--error-color)   14%, transparent); }
+        &.pill-exit-ok  { color: var(--success-color); background: var(--success-bg); }
+        &.pill-exit-err { color: var(--error-color);   background: var(--error-bg); }
         &.pill-files    { color: var(--term-bright-cyan);    background: color-mix(in srgb, var(--term-bright-cyan)    12%, transparent); }
         &.pill-matches  { color: var(--term-bright-cyan);    background: color-mix(in srgb, var(--term-bright-cyan)    12%, transparent); }
         &.pill-sources  { color: var(--term-bright-cyan);    background: color-mix(in srgb, var(--term-bright-cyan)    12%, transparent); }
-        &.pill-written  { color: var(--success-color);       background: color-mix(in srgb, var(--success-color)       14%, transparent); }
-        &.pill-edited   { color: var(--warning-color);       background: color-mix(in srgb, var(--warning-color)       14%, transparent); }
+        &.pill-written  { color: var(--success-color);       background: var(--success-bg); }
+        &.pill-edited   { color: var(--warning-color);       background: var(--warning-bg); }
         &.pill-agent    { color: var(--term-bright-magenta); background: color-mix(in srgb, var(--term-bright-magenta) 12%, transparent); }
-        &.pill-agent-running { color: var(--warning-color); background: color-mix(in srgb, var(--warning-color) 14%, transparent); }
+        &.pill-agent-running { color: var(--warning-color); background: var(--warning-bg); }
     }
 
     // Glob file list — shown when CompactResult is expanded for a Glob result.
@@ -879,7 +879,7 @@ $transcript-preview-max-height: calc(50vh / 3);
         font-size: var(--text-sm);
 
         .agent-diff-header {
-            background: color-mix(in srgb, var(--main-text-color) 10%, transparent);
+            background: var(--tint-4);
             padding: 3px var(--space-1-5);
             font-weight: bold;
             border-bottom: 1px solid var(--border-color);
@@ -890,7 +890,7 @@ $transcript-preview-max-height: calc(50vh / 3);
     .agent-diff-empty {
         color: var(--secondary-text-color);
         padding: var(--space-1) var(--space-1-5);
-        background: color-mix(in srgb, var(--main-text-color) 3%, transparent);
+        background: var(--tint-1);
         border-radius: 0;
     }
 
@@ -904,7 +904,7 @@ $transcript-preview-max-height: calc(50vh / 3);
         border-radius: 0;
 
         .agent-bash-cmd {
-            background: color-mix(in srgb, var(--main-text-color) 5%, transparent);
+            background: var(--tint-2);
             padding: 3px var(--space-1-5);
             border-bottom: 1px solid var(--border-color);
             display: flex;
@@ -973,7 +973,7 @@ $transcript-preview-max-height: calc(50vh / 3);
             padding: var(--space-0-5) var(--space-1-5);
             font-size: var(--text-xs);
             border-top: 1px solid var(--border-color);
-            background: color-mix(in srgb, var(--main-text-color) 3%, transparent);
+            background: var(--tint-1);
 
             &.exit-success {
                 color: var(--success-color);
@@ -1044,7 +1044,7 @@ $transcript-preview-max-height: calc(50vh / 3);
             }
 
             .agent-message-body {
-                background: color-mix(in srgb, var(--main-text-color) 5%, transparent);
+                background: var(--tint-2);
                 padding: var(--space-1) var(--space-1-5);
                 border-radius: 0;
                 margin: 0;
@@ -1115,7 +1115,7 @@ $transcript-preview-max-height: calc(50vh / 3);
             cursor: default;
 
             .agent-jekt-body {
-                background: color-mix(in srgb, var(--main-text-color) 5%, transparent);
+                background: var(--tint-2);
                 padding: var(--space-1) var(--space-1-5);
                 border-radius: 0;
                 margin: 0 0 var(--space-1) 0;
@@ -1143,7 +1143,7 @@ $transcript-preview-max-height: calc(50vh / 3);
                 }
 
                 .agent-jekt-raw-body {
-                    background: color-mix(in srgb, var(--main-text-color) 5%, transparent);
+                    background: var(--tint-2);
                     padding: var(--space-1) var(--space-1-5);
                     margin: var(--space-1) 0 0 0;
                     // The raw payload repeats the whole message plus the
@@ -1159,7 +1159,7 @@ $transcript-preview-max-height: calc(50vh / 3);
     // than a jekt: it's context, not a message.
     .agent-context-delivery {
         border-left: 2px solid var(--secondary-text-color);
-        background: color-mix(in srgb, var(--main-text-color) 3%, transparent);
+        background: var(--tint-1);
         cursor: default;
 
         .agent-context-delivery-summary {
@@ -1274,7 +1274,7 @@ $transcript-preview-max-height: calc(50vh / 3);
         }
 
         .agent-context-delivery-body {
-            background: color-mix(in srgb, var(--main-text-color) 5%, transparent);
+            background: var(--tint-2);
             padding: var(--space-1) var(--space-1-5);
             margin: 0 0 var(--space-1) 0;
             font-size: var(--text-xs);
@@ -1868,7 +1868,7 @@ $transcript-preview-max-height: calc(50vh / 3);
 
         &:hover,
         &:focus-visible {
-            background: color-mix(in srgb, var(--main-text-color) 6%, transparent);
+            background: var(--tint-2);
         }
     }
 

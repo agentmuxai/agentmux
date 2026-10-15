@@ -63,7 +63,7 @@ body {
 .floating-redock-drop-placeholder {
     position: fixed;
     pointer-events: none;
-    z-index: 9999;
+    z-index: var(--z-transient);
     background-color: var(--drop-target-bg);
     border: 2px solid var(--drop-target-border);
     border-radius: var(--block-border-radius);
@@ -139,20 +139,12 @@ a.plain-link {
     background-color: var(--scrollbar-thumb-hover-color);
 }
 
-.flex-spacer {
-    flex-grow: 1;
-}
-
 .text-fixed {
     font: var(--fixed-font);
 }
 
 .error-boundary {
     white-space: pre-wrap;
-    color: var(--error-color);
-}
-
-.error-color {
     color: var(--error-color);
 }
 
@@ -185,30 +177,6 @@ a.plain-link {
 a[href] {
     cursor: var(--cursor-link);
 }
-//
-// Utility classes (resolve to `--cursor-*` design tokens):
-.u-cursor-interactive { cursor: var(--cursor-interactive); }
-.u-cursor-link        { cursor: var(--cursor-link); }
-.u-cursor-default     { cursor: var(--cursor-default); }
-.u-cursor-text        { cursor: var(--cursor-text); }
-.u-cursor-disabled    { cursor: var(--cursor-disabled); }
-.u-cursor-grab        { cursor: var(--cursor-grab); }
-.u-cursor-grabbing    { cursor: var(--cursor-grabbing); }
-
-.scrollbar-hide-until-hover {
-    *::-webkit-scrollbar-thumb,
-    *::-webkit-scrollbar-track {
-        display: none;
-    }
-
-    *::-webkit-scrollbar-corner {
-        display: none;
-    }
-
-    *:hover::-webkit-scrollbar-thumb {
-        display: block;
-    }
-}
 
 a {
     color: var(--accent-color);
@@ -218,7 +186,7 @@ a {
     position: absolute;
     right: 10px;
     bottom: 10px;
-    z-index: var(--zindex-flash-error-container);
+    z-index: var(--z-flash-error);
     display: flex;
     flex-direction: column;
     gap: 10px;

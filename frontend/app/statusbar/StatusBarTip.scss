@@ -7,7 +7,7 @@
 // The shell of the tip's AnchoredPopover: above the status bar popovers, and
 // never in the way of the pointer.
 .status-bar-tip-shell {
-    z-index: calc(var(--zindex-modal-wrapper) + 10);
+    z-index: var(--z-status-tip);
     pointer-events: none;
 }
 

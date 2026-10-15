@@ -30,11 +30,11 @@
     }
 
     .display-container {
-        z-index: var(--zindex-layout-display-container);
+        z-index: var(--z-layout-display);
     }
 
     .placeholder-container {
-        z-index: var(--zindex-layout-placeholder-container);
+        z-index: var(--z-layout-placeholder);
         // The placeholder is purely visual (its children already carry
         // pointer-events: none) — the CONTAINER must be too. Without this,
         // any transform bug that leaves it on-screen turns it into a
@@ -43,7 +43,7 @@
     }
 
     .overlay-container {
-        z-index: var(--zindex-layout-overlay-container);
+        z-index: var(--z-layout-overlay);
     }
 
     .overlay-node {
@@ -52,7 +52,7 @@
     }
 
     .resize-handle {
-        z-index: var(--zindex-layout-resize-handle);
+        z-index: var(--z-layout-resize-handle);
 
         .line {
             visibility: hidden;
@@ -175,16 +175,16 @@
     }
 
     .magnified-node-backdrop {
-        z-index: var(--zindex-layout-magnified-node-backdrop);
+        z-index: var(--z-layout-magnified-backdrop);
     }
 
     .ephemeral-node-backdrop {
-        z-index: var(--zindex-layout-ephemeral-node-backdrop);
+        z-index: var(--z-layout-ephemeral-backdrop);
     }
 
     .magnify-container {
         position: absolute;
-        z-index: var(--zindex-layout-magnify-container);
+        z-index: var(--z-layout-magnify);
         border-radius: var(--block-border-radius);
         overflow: clip; // see .tile-node
     }
@@ -228,8 +228,7 @@
         }
     }
 
-    .tile-leaf,
-    .overlay-leaf {
+    .tile-leaf {
         height: 100%;
         width: 100%;
     }

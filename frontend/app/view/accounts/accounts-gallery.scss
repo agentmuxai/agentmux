@@ -46,7 +46,7 @@
 // a plain div, never wrapped by Modal.
 .accounts-chooser-overlay {
     @include mixins.fixed-fill;
-    z-index: var(--zindex-modal-wrapper);
+    z-index: var(--z-popover);
     @include mixins.flex-center;
     background: rgba(0, 0, 0, 0.45);
 }

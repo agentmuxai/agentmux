@@ -13,8 +13,8 @@
     display: flex;
     align-items: flex-start;
     justify-content: flex-end;
-    // Pane-level modal — sits in the existing element-modal slot.
-    z-index: var(--zindex-elem-modal);
+    // A dialog inside the pane.
+    z-index: var(--z-pane-modal);
 }
 
 .identity-form {

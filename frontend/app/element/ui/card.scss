@@ -71,7 +71,7 @@
     padding: var(--space-1-5) var(--space-2);
     border: 1px solid var(--border-color);
     border-radius: var(--radius-sm);
-    background: color-mix(in srgb, var(--main-text-color) 3%, transparent);
+    background: var(--tint-1);
     color: var(--main-text-color);
     text-align: left;
     cursor: default;

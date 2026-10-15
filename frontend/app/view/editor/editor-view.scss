@@ -111,16 +111,16 @@
         border-color var(--duration-decorative-instant) var(--ease-standard);
 
     &:hover {
-        background: rgba(255, 255, 255, 0.05);
+        background: var(--tint-2);
         color: var(--main-text-color);
     }
 
     &:active {
-        background: rgba(255, 255, 255, 0.1);
+        background: var(--tint-4);
     }
 
     &--active {
-        background: rgba(255, 255, 255, 0.08);
+        background: var(--tint-3);
         color: var(--accent-color);
         border-color: var(--border-color);
     }
@@ -143,7 +143,7 @@
     @include mixins.truncate;
 
     &:hover {
-        background: rgba(255, 255, 255, 0.04);
+        background: var(--tint-2);
     }
 
     &--active {
@@ -210,7 +210,7 @@
 }
 
 .file-tree-row--new-entry {
-    background: rgba(255, 255, 255, 0.04);
+    background: var(--tint-2);
 }
 
 // Inline rename / new-entry input — matches the row height, no border-radius.

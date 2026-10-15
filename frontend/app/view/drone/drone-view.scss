@@ -117,7 +117,7 @@
     background: color-mix(in srgb, var(--main-text-color) 2%, var(--main-bg-color));
     background-image: radial-gradient(
         circle,
-        color-mix(in srgb, var(--main-text-color) 8%, transparent) 1px,
+        var(--tint-3) 1px,
         transparent 1px
     );
     background-size: 16px 16px;
@@ -247,7 +247,7 @@
     font-size: 15px;
     line-height: 1;
     &:hover {
-        background: color-mix(in srgb, var(--main-text-color) 8%, transparent);
+        background: var(--tint-3);
     }
 }
 

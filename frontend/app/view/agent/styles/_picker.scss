@@ -236,10 +236,10 @@
         gap: var(--space-3);
         padding: var(--space-2) var(--space-3);
         border-radius: 0;
-        background: color-mix(in srgb, var(--main-text-color) 2%, transparent);
+        background: var(--tint-1);
 
         &:hover {
-            background: color-mix(in srgb, var(--main-text-color) 5%, transparent);
+            background: var(--tint-2);
         }
     }
 
@@ -263,7 +263,7 @@
 
         &:hover,
         &:focus-visible {
-            background: color-mix(in srgb, var(--accent-color) 12%, transparent);
+            background: var(--accent-bg);
         }
     }
 
@@ -279,7 +279,7 @@
         min-height: 92px;
         padding: var(--space-3) var(--space-3) var(--space-4);
         border: 1px solid var(--border-color);
-        background: color-mix(in srgb, var(--main-text-color) 3%, transparent);
+        background: var(--tint-1);
         border-radius: 0;
         cursor: default;
         @include mixins.control-transition(var(--duration-decorative-base));
@@ -370,7 +370,7 @@
             font-weight: 600;
             letter-spacing: 0.03em;
             color: var(--warning-color);
-            background: color-mix(in srgb, var(--warning-color) 14%, transparent);
+            background: var(--warning-bg);
             border: 1px solid color-mix(in srgb, var(--warning-color) 35%, transparent);
             border-radius: 3px;
             pointer-events: none;
@@ -397,7 +397,7 @@
             font-weight: 600;
             letter-spacing: 0.02em;
             color: var(--secondary-text-color);
-            background: color-mix(in srgb, var(--main-text-color) 6%, transparent);
+            background: var(--tint-2);
             border: 1px solid color-mix(in srgb, var(--border-color) 70%, transparent);
             border-radius: 0;
             cursor: default;
@@ -420,7 +420,7 @@
 
         .agent-card-new-session-btn:hover {
             color: var(--main-text-color);
-            background: color-mix(in srgb, var(--main-text-color) 12%, transparent);
+            background: var(--tint-4);
             border-color: var(--accent-color);
         }
 
@@ -496,7 +496,7 @@
             font-weight: 500;
             font-family: inherit;
             color: var(--main-text-color);
-            background: color-mix(in srgb, var(--main-text-color) 6%, transparent);
+            background: var(--tint-2);
             border: 1px solid var(--accent-color);
             border-radius: 0;
             padding: 1px 5px;
@@ -513,7 +513,7 @@
             @include mixins.flex-center(inline-flex);
             padding: 0;
             border: 1px solid var(--border-color);
-            background: color-mix(in srgb, var(--main-text-color) 5%, transparent);
+            background: var(--tint-2);
             border-radius: 0;
             color: var(--main-text-color);
             font-size: var(--text-xs);

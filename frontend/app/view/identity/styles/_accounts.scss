@@ -19,7 +19,7 @@
     border: 1px solid var(--warning-color);
     border-left-width: 3px;
     border-radius: 4px;
-    background: color-mix(in srgb, var(--warning-color) 10%, transparent);
+    background: var(--warning-bg);
 
     .identity-delete-notice-icon {
         color: var(--warning-color);
@@ -87,7 +87,7 @@
     cursor: default;
     border: 1px solid var(--border-color);
     border-radius: 0;
-    background: color-mix(in srgb, var(--main-text-color) 3%, transparent);
+    background: var(--tint-1);
     margin-bottom: var(--space-1);
     transition: background var(--duration-decorative-fast), border-color var(--duration-decorative-fast);
 
@@ -121,13 +121,5 @@
 .identity-display-name {
     font-size: var(--text-xs);
     color: var(--secondary-text-color);
-}
-
-.identity-agent-count {
-    font-size: var(--text-xs);
-    color: var(--secondary-text-color);
-    background: var(--panel-bg-color);
-    padding: 1px 5px;
-    border-radius: 0;
 }
 

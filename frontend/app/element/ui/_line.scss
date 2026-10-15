@@ -13,6 +13,7 @@
 //   --ui-bg            background at rest
 //   --ui-tone          colour of the hover/pressed line and tint
 
+@use "sass:map";
 @use "../../mixins.scss";
 
 @mixin tone($tone) {
@@ -29,7 +30,7 @@
         --ui-fg: var(--secondary-text-color);
         --ui-fg-hover: var(--main-text-color);
         --ui-line: var(--border-color);
-        --ui-line-hover: color-mix(in srgb, var(--accent-color) 30%, transparent);
+        --ui-line-hover: var(--accent-line);
         --ui-bg: transparent;
     } @else if $tone == danger {
         --ui-tone: var(--error-color);
@@ -58,6 +59,36 @@
         --ui-bg: transparent;
     } @else {
         @error "unknown line-control tone: #{$tone}";
+    }
+}
+
+// A notice box: a faint tint of its tone behind it, a 1px line in the tone
+// around it, and its text in the tone. The tones are `tone`'s accent and
+// danger, plus warning and success; each reads the theme's `--<colour>-bg`
+// and `--<colour>-line` tints. `$text` gives the text another colour, or
+// null to keep the inherited one. `$bg` and `$line` are for a box that keeps
+// a tint of its own. The site sets its size, spacing and radius.
+$notice-colors: (accent: accent, danger: error, warning: warning, success: success);
+
+@mixin notice($tone, $text: tone, $bg: null, $line: null) {
+    @if not map.has-key($notice-colors, $tone) {
+        @error "unknown notice tone: #{$tone}";
+    }
+    $color: map.get($notice-colors, $tone);
+    @if $bg {
+        background: $bg;
+    } @else {
+        background: var(--#{$color}-bg);
+    }
+    @if $line {
+        border: 1px solid $line;
+    } @else {
+        border: 1px solid var(--#{$color}-line);
+    }
+    @if $text == tone {
+        color: var(--#{$color}-color);
+    } @else if $text {
+        color: $text;
     }
 }
 

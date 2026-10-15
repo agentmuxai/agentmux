@@ -158,35 +158,6 @@
 
     --tab-green: rgb(88, 193, 66);
 
-    /* z-index values */
-    --zindex-header-hover: 100;
-    --zindex-termstickers: 20;
-    --zindex-modal: 2;
-    --zindex-modal-wrapper: 500;
-    --zindex-modal-backdrop: 1;
-    --zindex-typeahead-modal: 100;
-    --zindex-typeahead-modal-backdrop: 90;
-    --zindex-elem-modal: 100;
-    --zindex-window-drag: 100;
-    --zindex-tab-name: 3;
-    --zindex-layout-display-container: 0;
-    --zindex-layout-last-magnified-node: 1;
-    --zindex-layout-last-ephemeral-node: 2;
-    --zindex-layout-resize-handle: 3;
-    --zindex-layout-placeholder-container: 4;
-    --zindex-layout-overlay-container: 5;
-    --zindex-layout-magnified-node-backdrop: 6;
-    --zindex-layout-magnified-node: 7;
-    --zindex-layout-ephemeral-node-backdrop: 8;
-    --zindex-layout-ephemeral-node: 9;
-    --zindex-block-mask-inner: 10;
-    --zindex-layout-magnify-container: 20;
-    --zindex-flash-error-container: 550;
-    --zindex-app-background: -1;
-    // Activity-flash overlay: below its host's content, above its host's
-    // background — only inside a host with `isolation: isolate`.
-    --zindex-activity-flash: -1;
-
     // ─── Phantom-token fixes (ANALYSIS_THEME_SYSTEM_LIGHT_THEME_AND_DEPTH_GAPS_2026_07_07.md §2b) ───
     // Each of these was referenced at its call site as `var(--token,
     // #fallback)` but never actually DEFINED anywhere — every consumer was
@@ -234,17 +205,6 @@
     --button-secondary-bg-color: rgba(127, 127, 127, 0.1); // a neutral grey tint, so no per-theme override
     --elevated-bg-color: var(--modal-bg-color);  // alias — same concept as the pre-existing modal token, itself a plain per-theme literal (no window-opacity coupling)
 
-    // z-indexes in xterm.css
-    // xterm-helpers: 5
-    // xterm-helper-textarea: -5
-    // composition-view: 1
-    // xterm-message: 10
-    // xterm-decoration: 6
-    // xterm-decoration-top-layer: 7
-    // xterm-decoration-overview-ruler: 8
-    // xterm-decoration-top: 2
-    --zindex-xterm-viewport-overlay: 5; // Viewport contains the scrollbar
-
     // modal colors
     --modal-bg-color: #232323;
     --modal-header-bottom-border-color: rgba(241, 246, 243, 0.15);
@@ -291,7 +251,6 @@
     --sysinfo-in-color: #d55181;
     --sysinfo-out-color: #c98500;
 
-    --bulb-color: rgb(255, 221, 51);
 
     // term colors (16 + 6) form the base terminal theme
     // for consistency these colors should be used by plugins/applications
@@ -501,24 +460,71 @@
     --ui-tint-rest:   6%;
     --ui-tint-hover:  12%;
 
-    // Z-index hierarchy (canonical source — SPEC_DESIGN_SYSTEM §5.3).
-    // Naming is aspirational; existing `--zindex-*` tokens higher in
-    // this file stay valid and will be re-pointed or retired in a
-    // follow-up migration PR. New components must consume these.
-    --z-base:          0;
-    --z-layout-behind: 1;
-    --z-layout-above:  2;
-    --z-node-strip:    3;
-    --z-pane-overlay:  4;
-    --z-xterm-overlay: 5;
-    --z-drag-overlay:  1000;
-    --z-flash-error:   7000;
-    --z-typeahead:     8000;
-    --z-popover:       8500;
-    --z-tab-modal:     8800;
-    --z-modal:         9000;
-    --z-flyout-menu:   9500;
-    --z-context-menu:  10000;
+    // Tints (SPEC_MOTION_TIERS_AND_STYLESHEET_DRY_2026_10_15.md §6.5 item 16).
+    // `--tint-1` to `-4` are washes of the text colour, for faint
+    // backgrounds and lines over any surface; being made of the text colour,
+    // they follow every theme, light ones included. A tone's `-bg` sits
+    // behind a notice, a selected row or a pill, and its `-line` borders it.
+    --tint-1: color-mix(in srgb, var(--main-text-color) 3%, transparent);
+    --tint-2: color-mix(in srgb, var(--main-text-color) 5%, transparent);
+    --tint-3: color-mix(in srgb, var(--main-text-color) 8%, transparent);
+    --tint-4: color-mix(in srgb, var(--main-text-color) 10%, transparent);
+    --error-bg:     color-mix(in srgb, var(--error-color) 12%, transparent);
+    --error-line:   color-mix(in srgb, var(--error-color) 30%, transparent);
+    --warning-bg:   color-mix(in srgb, var(--warning-color) 12%, transparent);
+    --warning-line: color-mix(in srgb, var(--warning-color) 30%, transparent);
+    --accent-bg:    color-mix(in srgb, var(--accent-color) 12%, transparent);
+    --accent-line:  color-mix(in srgb, var(--accent-color) 30%, transparent);
+    --success-bg:   color-mix(in srgb, var(--success-color) 12%, transparent);
+    --success-line: color-mix(in srgb, var(--success-color) 30%, transparent);
+
+    // Stacking layers: the one z-index scale (SPEC_DESIGN_SYSTEM §5.3,
+    // SPEC_MOTION_TIERS_AND_STYLESHEET_DRY_2026_10_15.md §6.5 item 17).
+    // A z-index only competes inside its own stacking context, so the
+    // layers come in groups, one per kind of context, each in paint order.
+    // Every value is the one that layer had before the two old scales were
+    // merged, so nothing moved above or below anything else. A small number
+    // that only orders a component's own children stays a number there.
+    --z-behind: -1; // under its context's content, over its background: the app background, activity flashes
+
+    // Inside the tile layout.
+    --z-layout-display:            0;
+    --z-layout-last-magnified:     1;
+    --z-layout-last-ephemeral:     2;
+    --z-layout-resize-handle:      3;
+    --z-layout-placeholder:        4;
+    --z-layout-overlay:            5;
+    --z-layout-magnified-backdrop: 6;
+    --z-layout-ephemeral-backdrop: 8;
+    --z-layout-ephemeral:          9;
+    --z-layout-magnify:            20;
+
+    // Inside a pane or a tab. xterm.css's own layers, inside the terminal,
+    // run from -5 to 10.
+    --z-tab-name:      3;   // a tab's name and controls, over its activity flash
+    --z-pane-overlay:  4;   // pane chrome over the pane's content: the agent pane's tab strip
+    --z-xterm-overlay: 5;   // the block stats badge
+    --z-pane-mask:     10;  // the block mask and the pane ring at rest, the connection status
+    --z-term-stickers: 20;
+    --z-pane-badge:    30;  // the size badge while resizing
+    --z-pane-ring:     50;  // the focused pane's ring and block mask
+    --z-pane-progress: 51;  // the busy band, over the ring
+    --z-file-drop:     60;  // the file drop target, over the ring
+    --z-pane-modal:    100; // a dialog inside a pane (the identity form)
+
+    // Over the whole window.
+    --z-typeahead-backdrop: 90;
+    --z-typeahead:          100;
+    --z-window-drag:        100;
+    --z-status-bar:         499;
+    --z-popover:            500;   // anchored popovers, the accounts chooser
+    --z-status-tip:         510;
+    --z-flash-error:        550;
+    --z-drag-overlay:       1000;
+    --z-modal:              9000;
+    --z-flyout-menu:        9500;
+    --z-transient:          9999;  // the floating pane's drop preview, the "copied" note (context menus set 9999 inline)
+    --z-top:                10000; // the delete confirmation and the zoom level
 }
 
 // Control density. `comfortable` is the default, set on :root; a density
@@ -571,7 +577,7 @@
     body::before {
         content: "";
         @include mixins.fixed-fill;
-        z-index: -1;
+        z-index: var(--z-behind);
         pointer-events: none;
         background: var(--main-bg-color);
     }

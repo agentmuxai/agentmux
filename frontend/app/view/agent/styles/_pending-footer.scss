@@ -64,7 +64,7 @@
     // === Agent Footer ===
     .agent-footer {
         border-top: 1px solid var(--border-color);
-        background: color-mix(in srgb, var(--main-text-color) 3%, transparent);
+        background: var(--tint-1);
         padding: var(--space-0-5) var(--space-0-5);
 
         .agent-input-container {

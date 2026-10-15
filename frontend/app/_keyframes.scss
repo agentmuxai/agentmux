@@ -40,11 +40,10 @@
     50%      { opacity: 0; }
 }
 
-// A line of text that just changed: it starts in the accent colour, fully
-// opaque, and settles to its own colour at `--flash-end-opacity` (default 1).
-// The colour has no end keyframe on purpose, so it ends at the element's own
-// colour, whatever that is.
+// A line of text that just changed: it starts in the accent colour and
+// settles to its own colour. The colour has no end keyframe on purpose, so it
+// ends at the element's own colour, whatever that is.
 @keyframes am-accent-flash {
     0%   { opacity: 1; color: var(--accent-color); }
-    100% { opacity: var(--flash-end-opacity, 1); }
+    100% { opacity: 1; }
 }

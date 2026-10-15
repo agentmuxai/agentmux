@@ -27,5 +27,5 @@
     justify-content: flex-end;
     padding: var(--space-3) var(--space-5);
     border-top: 1px solid var(--border-color);
-    background: color-mix(in srgb, var(--main-text-color) 2%, transparent);
+    background: var(--tint-1);
 }

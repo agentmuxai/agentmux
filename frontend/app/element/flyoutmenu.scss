@@ -103,7 +103,7 @@
 
 .menu-divider {
     height: 1px;
-    background-color: rgba(255, 255, 255, 0.1);
+    background-color: var(--tint-4);
     margin: var(--space-0-5) var(--space-1);
     pointer-events: none;
 }
