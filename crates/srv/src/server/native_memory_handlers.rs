@@ -48,12 +48,11 @@ use crate::backend::rpc_types::{
     NativeMemoryListResult,
     NativeMemoryReadFileResult,
     NativeMemoryRevertResult,
-    NativeMemoryVersionMeta,
 };
-use crate::backend::storage::NativeMemoryVersion;
 
 use super::AppState;
 pub(crate) use super::native_memory_diff::line_diff;
+use super::native_memory_versions::{version_summary_to_meta, version_to_meta};
 use agentmux_common::tokens::{count_lines, estimate_tokens, tokens_for_chars};
 
 /// Compute `$CLAUDE_CONFIG_DIR/projects/<sanitized>/memory/` for the given
@@ -757,30 +756,6 @@ fn legacy_memory_dir_by_id(
     }
     memory_dir_for_blank_working_dir(mstore, &agent.id, &agent.name, &agent.slug)
         .map(|dir| (dir, MemoryDirProvenance::Unverified))
-}
-
-fn version_summary_to_meta(v: crate::backend::storage::NativeMemoryVersionSummary) -> NativeMemoryVersionMeta {
-    NativeMemoryVersionMeta {
-        id: v.id,
-        content_hash: v.content_hash,
-        parent_version_id: v.parent_version_id,
-        source: v.source,
-        source_detail: v.source_detail,
-        session_id: v.session_id,
-        created_at: v.created_at,
-    }
-}
-
-fn version_to_meta(v: &NativeMemoryVersion) -> NativeMemoryVersionMeta {
-    NativeMemoryVersionMeta {
-        id: v.id.clone(),
-        content_hash: v.content_hash.clone(),
-        parent_version_id: v.parent_version_id.clone(),
-        source: v.source.clone(),
-        source_detail: v.source_detail.clone(),
-        session_id: v.session_id.clone(),
-        created_at: v.created_at,
-    }
 }
 
 /// The content `agent:memory:read_file` would return for `path` right now —

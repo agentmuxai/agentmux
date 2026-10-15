@@ -316,15 +316,7 @@ pub(crate) fn memory_history_impl<'o>(
         .agent_native_memory_version_list(&version_agent_id, filename)
         .map_err(|e| format!("memory.history: store: {e}"))?
         .into_iter()
-        .map(|v| crate::backend::rpc_types::NativeMemoryVersionMeta {
-            id: v.id,
-            content_hash: v.content_hash,
-            parent_version_id: v.parent_version_id,
-            source: v.source,
-            source_detail: v.source_detail,
-            session_id: v.session_id,
-            created_at: v.created_at,
-        })
+        .map(crate::server::native_memory_versions::version_summary_to_meta)
         .collect();
     serde_json::to_value(crate::backend::rpc_types::NativeMemoryHistoryResult { versions })
         .map_err(|e| e.to_string())
@@ -456,15 +448,7 @@ pub(crate) fn memory_revert_impl<'o>(
     state.broker.publish_event_for::<crate::backend::mps_events::AgentMemoryChanged>(&version_agent_id, &(), vec![], 0);
 
     serde_json::to_value(crate::backend::rpc_types::NativeMemoryRevertResult {
-        version: crate::backend::rpc_types::NativeMemoryVersionMeta {
-            id: new_version.id,
-            content_hash: new_version.content_hash,
-            parent_version_id: new_version.parent_version_id,
-            source: new_version.source,
-            source_detail: new_version.source_detail,
-            session_id: new_version.session_id,
-            created_at: new_version.created_at,
-        },
+        version: crate::server::native_memory_versions::version_to_meta(&new_version),
     })
     .map_err(|e| e.to_string())
 }

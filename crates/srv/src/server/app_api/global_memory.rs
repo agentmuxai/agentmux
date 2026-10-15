@@ -217,35 +217,10 @@ pub(crate) fn global_memory_remove_impl(state: &AppState, id: &str) -> Result<se
     Ok(json!({ "ok": true }))
 }
 
-/// A version's metadata as JSON — `id`/`content_hash`/`parent_version_id`/
-/// `source`/`source_detail`/`written_by`/`created_at`, no `name`/
-/// `instructions`. Takes the five common-field accessors as plain values
-/// rather than borrowing a concrete struct so both `BundleVersionSummary`
-/// (the `history` list shape) and `BundleVersion` (the full-content shape
-/// `revert`'s freshly-inserted row comes back as) can share this one
-/// formatter without either type needing to convert into the other.
-fn bundle_version_meta_json(
-    id: &str,
-    content_hash: &str,
-    parent_version_id: &Option<String>,
-    source: &str,
-    source_detail: &str,
-    written_by: &str,
-    written_by_uid: &str,
-    created_at: i64,
-) -> serde_json::Value {
-    json!({
-        "id": id,
-        "content_hash": content_hash,
-        "parent_version_id": parent_version_id,
-        "source": source,
-        "source_detail": source_detail,
-        "written_by": written_by,
-        // Identity M4c-2d (spec §6.5.9): the writer's UID beside its name;
-        // empty when the write was Unattributed.
-        "written_by_uid": written_by_uid,
-        "created_at": created_at,
-    })
+/// A version's metadata as JSON: `GlobalMemoryVersionMeta`, the same shape
+/// `globalmemory:history` sends the pane, with no `name`/`instructions`.
+fn version_meta_json(meta: crate::backend::rpc_types::GlobalMemoryVersionMeta) -> serde_json::Value {
+    serde_json::to_value(meta).unwrap_or_default()
 }
 
 /// Loads `id`'s bundle and refuses it unless it is (a) not the blank
@@ -287,11 +262,8 @@ pub(crate) fn global_memory_history_impl(state: &AppState, id: &str) -> Result<s
     load_ordinary_global_bundle(state, id, "history")?;
     let versions: Vec<_> = state.id_store.bundle_version_list(id)
         .map_err(|e| format!("globalmemory.history: store: {e}"))?
-        .iter()
-        .map(|v| bundle_version_meta_json(
-            &v.id, &v.content_hash, &v.parent_version_id, &v.source, &v.source_detail, &v.written_by,
-            &v.written_by_uid, v.created_at,
-        ))
+        .into_iter()
+        .map(|v| version_meta_json(crate::server::agent_handlers::bundle::version_summary_meta(v)))
         .collect();
     Ok(json!({ "versions": versions }))
 }
@@ -389,14 +361,5 @@ pub(crate) fn global_memory_revert_impl(
 
     state.broker.publish_event::<crate::backend::mps_events::MemoriesChanged>(&(), vec![], 0);
     tracing::info!(agent_id, bundle_id = %id, version_id, "globalmemory.revert");
-    Ok(json!({ "version": bundle_version_meta_json(
-        &new_version.id,
-        &new_version.content_hash,
-        &new_version.parent_version_id,
-        &new_version.source,
-        &new_version.source_detail,
-        &new_version.written_by,
-        &new_version.written_by_uid,
-        new_version.created_at,
-    ) }))
+    Ok(json!({ "version": version_meta_json(crate::server::agent_handlers::bundle::version_meta(new_version)) }))
 }

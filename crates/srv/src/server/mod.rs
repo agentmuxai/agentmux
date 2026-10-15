@@ -51,6 +51,7 @@ mod work_facts_handlers;
 pub(crate) mod memory_launch_cost;
 pub(crate) mod native_memory_diff;
 pub(crate) mod native_memory_handlers;
+pub(crate) mod native_memory_versions;
 pub(crate) mod memory_delivery_handlers;
 mod notify_handlers;
 pub(crate) mod browser_allowlist;

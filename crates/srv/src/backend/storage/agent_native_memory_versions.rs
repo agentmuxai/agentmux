@@ -58,6 +58,10 @@ pub struct NativeMemoryVersionSummary {
     pub source_detail: String,
     pub session_id: String,
     pub created_at: i64,
+    /// The version's size and estimated tokens (`agentmux_common::tokens`),
+    /// counted from its content, which the summary doesn't carry.
+    pub size_bytes: u64,
+    pub tokens_est: u64,
 }
 
 use agentmux_common::time::now_ms;
@@ -269,7 +273,7 @@ impl Store {
     ) -> Result<Vec<NativeMemoryVersionSummary>, StoreError> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, content_hash, parent_version_id, source, source_detail, session_id, created_at
+            "SELECT id, content_hash, parent_version_id, source, source_detail, session_id, created_at, content
              FROM db_agent_native_memory_versions
              WHERE agent_id = ?1 AND filename = ?2
              ORDER BY created_at DESC, rowid DESC",
@@ -284,6 +288,8 @@ impl Store {
                     source_detail: row.get(4)?,
                     session_id: row.get(5)?,
                     created_at: row.get(6)?,
+                    size_bytes: row.get_ref(7)?.as_str().map_or(0, |c| c.len() as u64),
+                    tokens_est: row.get_ref(7)?.as_str().map_or(0, agentmux_common::tokens::estimate_tokens),
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -570,6 +576,16 @@ mod tests {
                 r#"{"detected_via":"reconciliation_sweep"}"#, "",
             )
             .unwrap();
+    }
+
+    #[test]
+    fn the_version_list_counts_each_version_s_content() {
+        let store = shared_store();
+        sweep_first_sight(&store, "agent-1", "MEMORY.md");
+        let listed = &store.agent_native_memory_version_list("agent-1", "MEMORY.md").unwrap()[0];
+        let full = store.agent_native_memory_version_get(&listed.id).unwrap().unwrap();
+        assert_eq!(listed.size_bytes, full.content.len() as u64);
+        assert_eq!(listed.tokens_est, agentmux_common::tokens::estimate_tokens(&full.content));
     }
 
     #[test]
