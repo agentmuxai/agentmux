@@ -249,9 +249,9 @@ fn report_layout_violations(tab_id: &str, op: &str, tree: &Option<agentmux_commo
 ///
 /// Unresolved block → silent idempotent no-op (empty event vec), NOT an
 /// error: every `delete_block` saga run dispatches this, and a block
-/// may legitimately have no layout node (the frontend's own delete
-/// flow already pushed a pruned tree via `LayoutSetTree`, the block
-/// was floating/never laid out, or the tab tree is empty).
+/// may legitimately have no layout node (a layout intent already
+/// removed it, the block was floating/never laid out, or the tab tree
+/// is empty).
 pub(super) fn handle_layout_delete_node_by_block(
     state: &mut State,
     tab_id: String,
