@@ -59,6 +59,10 @@ pub(super) struct PendingInj {
     wan_key_fp: Option<String>,
     #[serde(default)]
     sender_same_account: Option<bool>,
+    // Files sent with it, on the relay (server::jekt_cloud): the manifest as
+    // the sender signed it. Absent on a text jekt and from an older relay.
+    #[serde(default)]
+    files: Option<Vec<agentmux_common::jekt_files::CloudFile>>,
 }
 #[derive(Deserialize)]
 pub(super) struct AckResp {
@@ -366,7 +370,23 @@ pub(super) async fn claim_and_deliver(
         if !late.is_empty() {
             req.message = format!("{late}{}", req.message);
         }
+        // Files sent with it: fetched now that the claim is ours. A relay that
+        // can't be reached gives the claim back, for a retry with its files.
+        if let Some(files) = inj.files.clone() {
+            if let Err(e) =
+                crate::server::jekt_cloud::fetch(base, http, &agent_token, agent_id, &mut req, files, inj.wan_msg_id.as_deref()).await
+            {
+                tracing::warn!(injection_id = %inj.id, error = %e, "cloud_subscriber: files not fetched; releasing for a retry");
+                release(base, http, &agent_token, agent_id, &inj.id, &delivered_at).await;
+                continue;
+            }
+            crate::server::jekt_files::prepare(&mut req).await;
+        }
+        let charged = req.files_delivery.is_some().then(|| req.clone());
         let delivery = handler.inject_message(req);
+        if let Some(charged) = &charged {
+            crate::server::jekt_files::settle(charged, delivery.success);
+        }
         tracing::debug!(
             injection_id = %inj.id,
             agent_id = %agent_id,
@@ -389,42 +409,48 @@ pub(super) async fn claim_and_deliver(
             // ready) — release it back to pending so it's retried, instead
             // of silently dropping it now that claiming already marked it
             // "delivered".
-            let release_url = format!("{}/reactive/release", base);
-            match http
-                .post(&release_url)
-                .header("Authorization", format!("Bearer {}", agent_token))
-                .header("X-Agent-ID", agent_id)
-                .json(&serde_json::json!({
-                    "injection_id": inj.id,
-                    "delivered_at": delivered_at,
-                }))
-                .send()
-                .await
-            {
-                Ok(r) if r.status().is_success() => {}
-                Ok(r) => {
-                    // Claim is stranded as "delivered" with no local
-                    // delivery and no retry until this is visible — log
-                    // loudly rather than discarding silently.
-                    tracing::warn!(
-                        injection_id = %inj.id,
-                        agent_id = %agent_id,
-                        status = %r.status(),
-                        "cloud_subscriber: release request non-2xx — injection stranded as delivered, message lost"
-                    );
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        injection_id = %inj.id,
-                        agent_id = %agent_id,
-                        error = %e,
-                        "cloud_subscriber: release request failed — injection stranded as delivered, message lost"
-                    );
-                }
-            }
+            release(base, http, &agent_token, agent_id, &inj.id, &delivered_at).await;
         }
     }
 
     delivery_status::fetched(agent_id, delivered_count, &body.expired);
     AgentSyncOutcome::Ok
+}
+
+/// Give a claimed injection back to pending, so it's delivered on a later
+/// pull. A release that fails strands it as delivered: logged loudly.
+async fn release(base: &str, http: &reqwest::Client, agent_token: &str, agent_id: &str, injection_id: &str, delivered_at: &str) {
+    let release_url = format!("{}/reactive/release", base);
+    match http
+        .post(&release_url)
+        .header("Authorization", format!("Bearer {}", agent_token))
+        .header("X-Agent-ID", agent_id)
+        .json(&serde_json::json!({
+            "injection_id": injection_id,
+            "delivered_at": delivered_at,
+        }))
+        .send()
+        .await
+    {
+        Ok(r) if r.status().is_success() => {}
+        Ok(r) => {
+            // Claim is stranded as "delivered" with no local delivery and no
+            // retry until this is visible — log loudly rather than discarding
+            // silently.
+            tracing::warn!(
+                injection_id = %injection_id,
+                agent_id = %agent_id,
+                status = %r.status(),
+                "cloud_subscriber: release request non-2xx — injection stranded as delivered, message lost"
+            );
+        }
+        Err(e) => {
+            tracing::warn!(
+                injection_id = %injection_id,
+                agent_id = %agent_id,
+                error = %e,
+                "cloud_subscriber: release request failed — injection stranded as delivered, message lost"
+            );
+        }
+    }
 }

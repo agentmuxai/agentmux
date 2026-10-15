@@ -26,8 +26,65 @@ pub fn tier_limits(tier: &str) -> Option<(u64, u64)> {
     match tier {
         "host" | "channel" => Some((100 * MIB, 200 * MIB)),
         "lan" => Some((50 * MIB, 100 * MIB)),
+        "wan" => Some((25 * MIB, 50 * MIB)),
         _ => None,
     }
+}
+
+/// A file as a cloud jekt's manifest carries it (spec §4.4): the file, the
+/// key its blob is encrypted under, and the relay's name for the blob.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CloudFile {
+    #[serde(flatten)]
+    pub file: JektFile,
+    /// Standard base64 of a 32-byte AES-256-GCM key.
+    pub key: String,
+    pub blob_id: String,
+}
+
+/// Leads a cloud manifest's digest: never the same input as a plain one.
+const CLOUD_DIGEST_LABEL: &str = "amx-jekt-files-cloud-v1";
+
+/// SHA-256 over a cloud manifest, keys and blob ids included, so the WAN
+/// signature that binds it covers them too.
+pub fn cloud_manifest_digest(files: &[CloudFile]) -> String {
+    let mut input = String::from(CLOUD_DIGEST_LABEL);
+    for f in files {
+        input.push(ENTRY_SEP);
+        input.push_str(&f.file.sha256);
+        for part in [f.file.name.as_str(), &f.file.size.to_string(), &f.key, &f.blob_id] {
+            input.push(FIELD_SEP);
+            input.push_str(part);
+        }
+    }
+    format!("{:x}", Sha256::digest(input.as_bytes()))
+}
+
+/// The msgid a WAN jekt carrying `files` is signed under: `msgid` without
+/// any digest it already ended in, then the cloud manifest's digest.
+pub fn bind_cloud_msgid(msgid: &str, files: &[CloudFile]) -> String {
+    let base = match bound_digest(msgid) {
+        Some(_) => &msgid[..msgid.rfind(MSGID_TAG).unwrap_or(msgid.len())],
+        None => msgid,
+    };
+    format!("{base}{MSGID_TAG}{}", cloud_manifest_digest(files))
+}
+
+/// Whether `msgid` binds exactly this cloud manifest.
+pub fn cloud_msgid_binds(msgid: &str, files: &[CloudFile]) -> bool {
+    bound_digest(msgid).is_some_and(|d| d == cloud_manifest_digest(files))
+}
+
+/// Why a cloud manifest is refused: the plain checks, plus a 44-character
+/// base64 key and a relay blob id on every entry.
+pub fn validate_cloud(files: &[CloudFile]) -> Result<(), String> {
+    let plain: Vec<JektFile> = files.iter().map(|f| f.file.clone()).collect();
+    validate(&plain)?;
+    let blob_id = |s: &str| s.len() == 41 && s.starts_with("blob-") && s[5..].bytes().all(|b| b.is_ascii_hexdigit() || b == b'-');
+    if files.iter().any(|f| f.key.len() != 44 || !f.key.ends_with('=') || !blob_id(&f.blob_id)) {
+        return Err("a cloud file entry is malformed".to_string());
+    }
+    Ok(())
 }
 
 /// Why `files` can't travel on `tier`, if they can't.
@@ -189,13 +246,41 @@ mod tests {
         assert_eq!(clean_name(&"n".repeat(300)).chars().count(), MAX_NAME_CHARS);
     }
 
+    fn cloud(n: u8) -> CloudFile {
+        CloudFile {
+            file: file(n, "a.png", 10),
+            key: "A".repeat(43) + "=",
+            blob_id: "blob-0123abcd-0000-4000-8000-0123456789ab".into(),
+        }
+    }
+
+    #[test]
+    fn a_cloud_manifest_binds_its_keys_and_blob_ids() {
+        let files = vec![cloud(1)];
+        let msgid = bind_cloud_msgid(&bind_msgid("m-1", &[cloud(1).file]), &files);
+        assert!(msgid.starts_with("m-1.files-v1."), "the plain digest is replaced, not stacked: {msgid}");
+        assert!(cloud_msgid_binds(&msgid, &files));
+        let mut other_key = files.clone();
+        other_key[0].key = "B".repeat(43) + "=";
+        let mut other_blob = files.clone();
+        other_blob[0].blob_id = "blob-ffffffff-0000-4000-8000-0123456789ab".into();
+        assert!(!cloud_msgid_binds(&msgid, &other_key));
+        assert!(!cloud_msgid_binds(&msgid, &other_blob));
+        assert!(!msgid_binds(&msgid, &[cloud(1).file]), "a plain manifest never matches a cloud digest");
+        assert!(validate_cloud(&files).is_ok());
+        let mut bad = files.clone();
+        bad[0].key = "short".into();
+        assert!(validate_cloud(&bad).is_err());
+    }
+
     #[test]
     fn tier_limits_are_tighter_further_away() {
         let f = |size| JektFile { sha256: "a".repeat(64), name: "a".into(), size };
         assert!(check_tier_limits(&[f(100 * MIB)], "channel").is_ok());
         assert!(check_tier_limits(&[f(100 * MIB)], "lan").is_err());
         assert!(check_tier_limits(&[f(40 * MIB), f(40 * MIB), f(40 * MIB)], "lan").is_err(), "per jekt");
-        assert!(check_tier_limits(&[f(1)], "wan").is_err(), "not yet");
+        assert!(check_tier_limits(&[f(30 * MIB)], "wan").is_err(), "cloud is tightest");
+        assert!(check_tier_limits(&[f(1)], "elsewhere").is_err());
     }
 
     #[test]

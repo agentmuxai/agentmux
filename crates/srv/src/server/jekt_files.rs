@@ -45,7 +45,7 @@ fn check_manifest(req: &InjectionRequest) -> Result<(), String> {
 }
 
 /// Why trust rules out delivering a jekt's files (§6.4), or `None`.
-fn withheld_reason(req: &InjectionRequest) -> Option<&'static str> {
+pub(crate) fn withheld_reason(req: &InjectionRequest) -> Option<&'static str> {
     let failed = [req.sig_verified, req.reagent_verified, req.lan_verified, req.channel_verified, req.wan_verified]
         .contains(&Some(false))
         || req.wan_instance.as_ref().is_some_and(|i| i.status == WanInstanceStatus::Revoked);
@@ -571,15 +571,30 @@ pub(crate) async fn lan_peer_takes(
 pub(crate) async fn no_route(
     state: &super::AppState,
     auth_via: super::ReactiveAuthVia,
+    caller_uid: &str,
     req: &InjectionRequest,
     resp: &crate::backend::reactive::types::InjectionResponse,
     candidate_seen: bool,
     too_old: bool,
 ) -> serde_json::Value {
-    use super::reactive::{hold_for_absent_target, HoldReason};
-    // A target running in an older build is alive, not absent: holding its
-    // files here would only wait out the 24 hours.
-    if !candidate_seen && !too_old {
+    use super::reactive::{hold_for_absent_target, route_for_absent, AbsentRoute, HoldReason};
+    if too_old {
+        // Alive in an older build, not absent: neither held nor relayed.
+        return refused(req, format!("files refused: {}'s AgentMux is too old to receive files; nothing was sent", req.target_agent));
+    }
+    // As a text jekt: held here for an agent defined here that no install
+    // runs, else through the relay (spec §4.4).
+    if !candidate_seen && route_for_absent(state, auth_via, req, resp).await == AbsentRoute::HoldHere {
+        if let Some(held) = hold_for_absent_target(state, auth_via, req, resp, HoldReason::NotRunning).await {
+            return held;
+        }
+    }
+    match super::jekt_cloud::relay(state, req, caller_uid).await {
+        Ok(Some(queued)) => return queued,
+        Ok(None) => {}
+        Err(why) => return refused(req, why),
+    }
+    if !candidate_seen {
         if let Some(held) = hold_for_absent_target(state, auth_via, req, resp, HoldReason::NotRunning).await {
             return held;
         }
@@ -587,12 +602,10 @@ pub(crate) async fn no_route(
     let target = &req.target_agent;
     refused(
         req,
-        if too_old {
-            format!("files refused: {target}'s AgentMux is too old to receive files; nothing was sent")
-        } else if candidate_seen {
+        if candidate_seen {
             format!("files refused: {target} couldn't take them just now; nothing was sent, try again shortly")
         } else {
-            format!("files refused: {target} isn't on this machine or the LAN, and files can't go through the cloud relay yet; nothing was sent")
+            format!("files refused: {target} isn't on this machine or the LAN, and the cloud relay didn't take them; nothing was sent")
         },
     )
 }
