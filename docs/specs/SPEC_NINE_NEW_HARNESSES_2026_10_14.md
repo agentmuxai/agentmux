@@ -1,6 +1,6 @@
 # Spec: Nine new harnesses — OpenCode, Kilo Code, Cline, goose, Grok Build, DeepSeek Harness, Muse Code, Crush, Aider
 
-**Status:** active. Shipped: Phase 0 (#4889, #4890, #4893, #4895), the six ACP harnesses (#4899, #4908), the terminal tier with Aider, Crush and Muse Code (#4926), and OpenCode's token usage (§5 item 4). Remaining: Muse Code's structured tier (§7.7), token usage for the other ACP agents, and the context meter from `usage_update`.
+**Status:** active. Shipped: Phase 0 (#4889, #4890, #4893, #4895), the six ACP harnesses (#4899, #4908), the terminal tier with Aider and Crush (#4926), Muse Code over MSP (#4932, §7.7), and OpenCode's token usage (#4930) and context meter (§5 item 4). Remaining: token usage and the context meter for the other ACP agents, once each is measured, and a check of Muse Code's tool calls and approvals signed in.
 **Date:** 2026-10-14
 **Author:** Lazo
 
@@ -142,7 +142,7 @@ One PR each.
 4. **Token usage over ACP.** Read the `session/prompt` response's `usage` into the turn's stats.
    - ACP leaves open whether it is per-turn or cumulative, and whether `inputTokens` includes the cache (agent-client-protocol#1860). So it is read only for an agent whose semantics were measured, through its own output format (`opencode-acp`, the way `qwen-stream-json` reuses the Claude translator).
    - OpenCode 1.19.0, measured: the turn's last model call; `inputTokens` is the uncached share, beside `cachedReadTokens`. Kilo Code, a fork, couldn't be measured signed out.
-   - `usage_update` (`used` of `size`, and cost) is the context window's fill. Feeding the context meter from it is a follow-up.
+   - `usage_update` (`used` of `size`, and cost) is the context window's fill. OpenCode's feeds the context meter, on the model its `configOptions` name, with `size` as that model's reported window (`acp-context.ts`).
 5. **A version source for non-npm harnesses.**
    - Add `versionSource?: { kind: "npm" | "pypi" | "github-release" | "vendor"; package?: string; repo?: string }` to `ProviderDefinition`. Its pin goes in `pinnedVersion` as for npm.
    - The version drift report reads `catalog.ts` and today monitors only `npmPackage`. A provider without one is reported as "unmonitored" and never flagged.

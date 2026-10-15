@@ -51,6 +51,7 @@ import {
     type StreamedKind,
 } from "./main-agent-usage";
 import { createSessionStartDetector } from "./session-start";
+import { createAcpContextTracker, readsAcpContext, type AcpContextTracker } from "./acp-context";
 import type { PendingMessage } from "./state";
 import { ClaudeCodeStreamParser } from "./stream-parser";
 import type { ContextCompactedNode, DocumentNode, SessionOutcomeNode } from "./types";
@@ -327,6 +328,9 @@ export function useAgentStream({
     // Only Claude Code's stream carries per-call usage in the shape the meter
     // reads (main-agent-usage.ts); other providers' panes show no reading.
     const readsUsage = readsMainAgentUsage(outputFormat);
+    // An ACP agent's own context reports, for a format measured to send
+    // them (acp-context.ts); reset with the translator.
+    let acpContext: AcpContextTracker | null = null;
     // Output characters the main agent streamed since the last dispatch, for
     // the working row's counter: one OutputStreamed per batch of lines, not
     // per delta. Flushed before any call boundary so a call's characters are
@@ -505,6 +509,7 @@ export function useAgentStream({
         // Reset state on new subscription
         lineBuffer = "";
         translator = createTranslator(outputFormat);
+        acpContext = readsAcpContext(outputFormat) ? createAcpContextTracker() : null;
         compactionSummaries = new CompactionSummaryTracker();
         parser = new ClaudeCodeStreamParser();
         if (agentName) parser.setAgentId(agentName);
@@ -935,6 +940,13 @@ export function useAgentStream({
                     // the raw frame: the translator keeps only the usage.
                     const windows = readsUsage ? reportedContextWindowsFromResult(rawEvent) : null;
                     if (windows) model.dispatchPane({ type: "ContextWindowsReported", windows });
+                    const reported = acpContext?.observe(rawEvent);
+                    if (reported) {
+                        if (reported.model && reported.window != null) {
+                            model.dispatchPane({ type: "ContextWindowsReported", windows: { [reported.model]: reported.window } });
+                        }
+                        model.dispatchPane({ type: "ContextReported", tokens: reported.tokens, model: reported.model });
+                    }
                 }
 
                 // Translate provider-specific format → StreamEvent[]

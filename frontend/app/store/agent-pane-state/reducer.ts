@@ -52,64 +52,18 @@ import type { SessionStats, TurnTokens } from "@/app/view/agent/types";
 import type { TurnCarry } from "./types";
 import {
     implausibleReason,
-    learnedWindowsAfter,
     makeContextReading,
     mergeContextWindows,
     plausibleReading,
-    refutedReportedWindow,
     rewindowContextReading,
-    windowFor,
     type ContextReading,
 } from "./context-reading";
+import { rejectedEvent, withReading } from "./context-reading-state";
 import { outputSoFar, turnOutputTokens, withShownOutput } from "./turn-contribution";
 import { isNewerLedger } from "./turn-ledger";
 import { IDLE_ACTIVITY, type ActivityState, type ModelActivityPhase } from "./types";
 import { toolActivity } from "@/app/store/agent-pane-state/tool-labels";
 import { planFromTodoWrite } from "@/app/store/agent-pane-state/plan";
-
-/** The `context-reading-rejected` event for a reading `implausibleReason` refused. */
-function rejectedEvent(reading: ContextReading, reason: string): AgentPaneEvent {
-    return {
-        type: "context-reading-rejected",
-        tokens: reading.tokens,
-        window: reading.window,
-        model: reading.model,
-        source: reading.source,
-        reason,
-    };
-}
-
-/**
- * `state` with `reading` as the pane's reading — any window it proved recorded
- * per model — plus the events it warrants: `context-reading-rejected` when it
- * can't be shown and `wasShown` says it is news (a reading that just turned
- * implausible, not one refused again), and `context-window-refuted` when it
- * newly contradicts a reported window.
- */
-function withReading(
-    state: AgentPaneState,
-    reading: ContextReading | null,
-    wasShown: boolean,
-): { state: AgentPaneState; events: AgentPaneEvent[] } {
-    const events: AgentPaneEvent[] = [];
-    if (reading) {
-        const reason = implausibleReason(reading);
-        if (reason != null && wasShown) events.push(rejectedEvent(reading, reason));
-        const refuted = refutedReportedWindow(reading, state.reportedContextWindows);
-        const knownBefore = windowFor(state.learnedContextWindows, reading.model);
-        if (refuted != null && reading.model && reading.window != null && (knownBefore == null || knownBefore < reading.window)) {
-            events.push({
-                type: "context-window-refuted",
-                model: reading.model,
-                reported: refuted,
-                tokens: reading.tokens,
-                window: reading.window,
-            });
-        }
-    }
-    const learnedContextWindows = learnedWindowsAfter(state.learnedContextWindows, reading);
-    return { state: { ...state, context: reading, learnedContextWindows }, events };
-}
 
 /** A live reading taken after `t` (unix ms): it already measures what an event
  *  at `t` left behind. */
@@ -671,6 +625,16 @@ export function update(
                 learned: state.learnedContextWindows,
             });
             return withReading({ ...state, reportedContextWindows }, reading, plausibleReading(state.context) != null);
+        }
+
+        case "ContextReported": {
+            const model = command.model ?? state.lastContextModel;
+            const reading = makeContextReading(
+                { tokens: command.tokens, model, source: "live", at: nowMs },
+                { reported: state.reportedContextWindows, learned: state.learnedContextWindows },
+            );
+            const next = { ...state, lastContextModel: model, contextSeedable: false };
+            return withReading(next, reading, plausibleReading(state.context) != null);
         }
 
         case "ContextInvalidated": {
