@@ -78,8 +78,28 @@ pub(crate) async fn relay(state: &super::AppState, req: &InjectionRequest, calle
         return Ok(None);
     };
     let base = crate::muxbus::relay::rest_base_url();
+    // Only to a target running now on an install that says it can fetch
+    // them: the relay doesn't bind a jekt to the install that will claim it,
+    // so a target with no live holder could be claimed later by an older
+    // install, which would deliver the text without its files (spec §3.4).
+    let holder = crate::muxbus::wan_lease::holder(&base, &req.target_agent, source, &credential.token, &state.http_client).await;
+    if let Err(why) = takes_cloud_files(&holder) {
+        return Err(format!("files refused: {} {why}; nothing was sent", req.target_agent));
+    }
     let cloud_req = upload(&base, &state.http_client, &credential.token, source, req).await?;
     Ok(super::reactive::try_cloud_relay(state, &cloud_req, caller_uid).await)
+}
+
+/// Whether the target's lease holder can fetch files from the relay: only a
+/// live holder that says so. `Err` says why not, after the target's name.
+fn takes_cloud_files(holder: &crate::muxbus::wan_lease::Holder) -> Result<(), &'static str> {
+    use crate::muxbus::wan_lease::Holder;
+    match holder {
+        Holder::Other(_, features) if features.iter().any(|f| f == jekt_files::CLOUD_FEATURE) => Ok(()),
+        Holder::Other(..) => Err("runs on an AgentMux too old to receive files through the cloud relay"),
+        Holder::Free | Holder::Yours => Err("isn't running on another computer right now, and files through the cloud relay go only to a running agent"),
+        Holder::Unknown | Holder::Unsupported | Holder::Unreachable => Err("can't be confirmed to receive files: the cloud relay didn't say who runs it"),
+    }
 }
 
 /// Encrypt and upload each file; the request to relay, its files named by
@@ -262,6 +282,17 @@ mod tests {
             key: "A".repeat(43) + "=",
             blob_id: "blob-0123abcd-0000-4000-8000-0123456789ab".into(),
         }]
+    }
+
+    #[test]
+    fn only_a_live_holder_that_says_so_takes_cloud_files() {
+        use crate::muxbus::wan_lease::Holder;
+        assert!(takes_cloud_files(&Holder::Other("computer x".into(), vec![jekt_files::CLOUD_FEATURE.into()])).is_ok());
+        assert!(takes_cloud_files(&Holder::Other("computer x".into(), Vec::new())).unwrap_err().contains("too old"));
+        // No live capable holder: an older install could claim it later.
+        for unknown in [Holder::Free, Holder::Yours, Holder::Unknown, Holder::Unsupported, Holder::Unreachable] {
+            assert!(takes_cloud_files(&unknown).is_err(), "{unknown:?}");
+        }
     }
 
     #[tokio::test]

@@ -11,7 +11,14 @@ import { invokeCommand, listenEvent } from "@/app/platform/ipc";
 import type { HealthPayload } from "@/app/store/health-signals";
 import { jsContextMenuApi } from "@/app/host/js-context-menu";
 import { benchMark } from "@/util/startup-bench";
-import { cefApprovals, cefBrowserPanes, cefHostMisc, cefReclaimWindowFocus, cefWindows } from "@/app/host/cef-host-commands";
+import {
+    cefApprovals,
+    cefBrowserPanes,
+    cefHostMisc,
+    cefInputOwnerState,
+    cefReclaimWindowFocus,
+    cefWindows,
+} from "@/app/host/cef-host-commands";
 import { CEF_HOST_CAPS } from "@/app/host/host-caps";
 import { reloadKeepingHostCredentials } from "@/app/init/error-display";
 import { isTransientNetworkError, retryTransient } from "@/util/transient-network";
@@ -128,6 +135,7 @@ export function buildCefApi(): AppApi {
         approvals: cefApprovals,
         ...cefHostMisc,
         reclaimWindowFocus: cefReclaimWindowFocus,
+        inputOwnerState: cefInputOwnerState,
 
         // --- Synchronous getters (return cached values) ---
         getAuthKey: () => cachedValues!.authKey,

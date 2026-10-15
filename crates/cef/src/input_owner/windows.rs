@@ -19,15 +19,22 @@ use super::registry;
 /// The app state, for the top-level window hook, which Windows calls without one.
 static STATE: OnceLock<Arc<AppState>> = OnceLock::new();
 
-/// Give the top-level window hook the app state. Idempotent.
+/// Give the top-level window hook the app state, and install the input
+/// diagnostics (`watch`). Idempotent; called on the UI thread.
 pub fn set_state(state: &Arc<AppState>) {
     let _ = STATE.set(state.clone());
+    super::watch::install(state);
 }
 
-/// Step `window`'s machine and run what it returns.
+/// Step `window`'s machine and run what it returns. Tells the window's frontend
+/// when whether it is active, or where the keyboard is, changed
+/// (`input-owner-changed`).
 pub fn dispatch(state: &Arc<AppState>, window: &str, event: Event) {
     for effect in registry::step(window, event) {
         run(state, window, effect);
+    }
+    if let Some(report) = registry::report_if_changed(window) {
+        crate::events::emit_event_to_window(state, window, "input-owner-changed", &report.to_json());
     }
 }
 

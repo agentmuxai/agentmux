@@ -125,13 +125,49 @@ closing). A selection that isn't usable falls back to `App` when it is applied.
 - **I8:** a selected pane can take focus now, or is waiting for it (parked) within 1.5 s of being selected; otherwise
   the app is the selection.
 
+### 3.5 Diagnostics (Windows)
+
+The wheel and typing failures take long use to reproduce, so each one has to be readable from the log alone. Besides
+the `[input]` line for every change of state, `input_owner/watch.rs` installs a thread-local `WH_GETMESSAGE` hook on
+the UI thread, which sees every message the thread takes off its queue. It samples the wheel, left clicks and key
+presses, at most one of each kind per 250 ms, takes no lock, and posts the check to a UI task. A pane counts as under
+the pointer only if its top-level window is the one on top there, so a floating window or another app in front hides
+it, while a window inside the same top-level covering it is reported. A `[input-watch]` warning is logged, at most one per kind per 5 s with a count of the
+rest, when:
+
+- a wheel or click over a visible pane went to another window, or to a pane it wasn't over. The line names the window
+  that got it, the window at that point, and the input owner's state;
+- keys pressed in a window in front went to no window of it, or to a surface other than the one the input owner
+  believes has the keyboard, or the input owner counts that window inactive.
+
+No key codes are read. The per-message wheel and key lines in the pane subclass are debug-level.
+
+### 3.6 The frontend's half
+
+- **One request, numbered.** Every request for the keyboard goes out as `input_select { window_label, block_id?, epoch,
+  seq }`: the app's own content without `block_id`, a browser pane with it. The existing `reclaimWindowFocus` and
+  `browserPanes.focus` send it (`cef-host-commands.ts`), so every caller is numbered without changing. The requests are
+  separate IPCs and can reach the host out of order; the host drops one whose `seq` isn't above the last one it applied
+  for that window (`registry::apply_selection`, which applies it under the same lock). `epoch` is when the page loaded (microseconds), so a reloaded page starts its own
+  numbering and a request still in flight from an earlier page, even its first, is dropped. A page load more than a
+  minute older than the current one is a new page after the clock was set back, not a late request.
+  On every platform; `main_window_focus` and `browser_pane_focus` stay for other callers.
+- **The host says what happened.** When whether the window is active, or where its machine last saw the keyboard,
+  changes, the window's page gets `input-owner-changed { active, keys: "app" | "pane" | "elsewhere" | null, block_id }`
+  (`registry::report_if_changed`). While a request is pending the keyboard is reported where it was last seen.
+  `input_owner_state` returns the same for a page that has just loaded. Windows only until Phase 4; elsewhere it is null.
+- **`userInThisWindow()`** (`input-owner.ts`): the page has focus, or the window is active and one of its panes has the
+  keyboard. It replaces `document.hasFocus()` where that read "a pane has the keys" as "the user is elsewhere": the
+  caret-follows-selection net (`focusManager.ts`), the native menu's command (`command-registry.ts`) and the window
+  focus signal (`window-focus.ts`). Where nothing reports, it is `document.hasFocus()`, as before.
+
 ## 4. Phases
 
 | Phase | Content |
 |---|---|
 | 1 | This spec; `crates/cef/src/input_owner/` pure machine with transition and property tests. No behaviour change. |
 | 2 | Windows adapter: per-window registry, the events above wired in, effects run on the UI thread, `[input]` logging, `GetFocus` verify. Removes `ALLOW_BROWSER_PANE_FOCUS_ONCE`, the swallowed `WM_SETFOCUS`, the pre-CEF `WM_ACTIVATE` restore and the off-thread `SetFocus`. Adds `RaisePanes` and the collapse hand-off. Live-tested in an isolated dev build. |
-| 3 | Frontend: one `input_select` with a sequence number for every selection change; an `input-owner-changed` event back; `document.hasFocus()` no longer stands in for "a pane has the keys". |
+| 3 | Frontend (§3.6): one `input_select` with a sequence number for every selection change; an `input-owner-changed` event back; `document.hasFocus()` no longer stands in for "a pane has the keys". |
 | 4 | macOS (key window) and Linux (Views focus) adapters onto the same core. |
 
 ## 5. Not in scope

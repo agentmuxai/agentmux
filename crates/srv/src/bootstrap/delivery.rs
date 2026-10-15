@@ -52,6 +52,9 @@ pub(crate) enum AgentRoute {
 /// REPORT_JEKT_DELIVERY_DROPS_SUBPROCESS_AGENTS_2026_09_02.md). An `Err` is a
 /// structured controller that failed to take the message; it must not be retried
 /// as keystrokes.
+// Live delivery passes inline blocks (`route_agent_message_from`); the tests
+// route text alone.
+#[cfg(test)]
 pub(crate) fn route_agent_message(block_id: &str, message: &str) -> Result<AgentRoute, String> {
     route_agent_message_from(block_id, message, None, &[])
 }

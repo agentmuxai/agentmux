@@ -18,7 +18,7 @@
  * §4.1/§4.5.
  */
 
-import { Show, createEffect, createMemo, createSignal, getOwner, onCleanup, runWithOwner, untrack, type JSX } from "solid-js";
+import { Show, createEffect, createMemo, createSignal, getOwner, on, onCleanup, onMount, runWithOwner, untrack, type JSX } from "solid-js";
 import { UnseenTurnsDot } from "@/app/block/UnseenTurnsDot";
 import {
     computeBlockColorBg,
@@ -40,6 +40,7 @@ import { paneStackIds } from "@/layout/lib/layoutNodeModels";
 import "./PaneChrome.scss";
 import { openPaneTabWidgetPicker } from "./pane-tab-picker";
 import { PaneHeaderTabStrip } from "./PaneHeaderTabStrip";
+import { installPaneInteractionReveal, revealPaneStrips } from "./pane-strip-registry";
 import { createPaneTabMemory, describePaneTab, PaneTabIconView, prunePaneTabMemory, type PaneTabInfo } from "./pane-tab-model";
 import { PaneTabRenameInput } from "./PaneTabRenameInput";
 import type { PaneTabColors } from "./PaneTabStrip";
@@ -68,6 +69,24 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
     const activeBlockData = createMemo(() => MOS.getMuxObjectAtom<Block>(MOS.makeORef("block", activeBlockId()))());
 
     const isFocused = () => nodeModel.isFocused();
+
+    // The pane's strips (pane tabs, and document tabs in an Editor or Media view)
+    // scroll their selected tab into view when the pane takes focus and on any
+    // click or input in it (SPEC_PANE_TAB_STRIP_REVEAL_SELECTED_2026_10_15.md §3-§4).
+    let paneRoot: HTMLDivElement | undefined;
+    onMount(() => {
+        if (paneRoot) onCleanup(installPaneInteractionReveal(paneRoot));
+    });
+    createEffect(
+        on(
+            isFocused,
+            (focused, wasFocused) => {
+                if (focused && !wasFocused && paneRoot) revealPaneStrips(paneRoot, "focus");
+            },
+            { defer: true }
+        )
+    );
+
     const isAlone = () => nodeModel.numLeafs() <= 1;
     // A stripe in the remote's colour when the active tab is on one
     // (SPEC_REMOTES_PANE_2026_10_05.md §4.8).
@@ -440,6 +459,9 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
     return (
         <div
             class="pane-stack"
+            ref={(el) => {
+                paneRoot = el;
+            }}
             // The whole-pane drop zone for a Pane Tab dragged from another
             // pane (PaneTabStrip's `foreignDropRootFor`).
             data-role="pane"

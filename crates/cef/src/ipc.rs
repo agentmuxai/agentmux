@@ -1052,64 +1052,40 @@ async fn route_command(
             Ok(serde_json::json!(true))
         }
         "main_window_focus" => {
-            // Move keyboard focus back to the main browser when the user
-            // clicks a main-DOM input (address bar, etc). Previously this
-            // called SetFocus(top_level) where top_level was the outer CEF
-            // Views window — which does NOT route keyboard to the embedded
-            // render widget. Keys kept arriving at the pane's HWND.
-            //
-            // Correct path: tell Chromium that main's Browser has focus.
-            // CEF internally calls SetFocus on the right Chrome_RenderWidgetHostHWND.
-            // Also defocus every pane browser so Chromium stops routing input
-            // to them.
-            //
-            // `window_label` arg: routes focus to THE window that sent the
-            // IPC. Without it, we'd iterate state.browsers and take the
-            // first non-pane entry (always `label=main`), so clicking an
-            // input in window 2 would reclaim focus to window 1. Default
-            // "main" for back-compat if an older frontend omits the arg.
-            let window_label = args
-                .get("window_label")
-                .and_then(|v| v.as_str())
-                .unwrap_or("main")
-                .to_string();
+            // The app's own content in the window that sent it takes the keyboard.
+            // Older frontends and other callers; the frontend sends `input_select`.
+            // Default "main" for back-compat if an older frontend omits the label.
+            let window_label = args.get("window_label").and_then(|v| v.as_str()).unwrap_or("main");
             tracing::info!("[ipc] main_window_focus window_label={}", window_label);
-
-            // Phase H.2.b — reducer-aware lookup with fallback. Try the
-            // requested label first; on miss, pick any non-pane browser
-            // (covers the corner case where the requested window label
-            // isn't registered yet — race on first DOM focus before
-            // registerBackendWindow lands).
-            let target_browser = state
-                .get_browser(&window_label)
-                .map(|b| (window_label.clone(), b))
-                .or_else(|| {
-                    state
-                        .list_browsers()
-                        .into_iter()
-                        .find(|(k, _)| !k.starts_with("browser-pane-"))
-                });
-
-            if let Some((label, _browser)) = target_browser {
-                // Windows: a selection for the window's input owner, which runs
-                // the reclaim below as its `FocusApp` effect when it should.
-                #[cfg(target_os = "windows")]
-                crate::input_owner::windows::select_app(state, &label);
-                // Full focus reclaim has to run on the CEF UI thread:
-                // `browser_view_get_for_browser`, `host.set_focus`, and
-                // walking the HWND tree all require it. The task also
-                // handles `defocus_all` on panes.
-                #[cfg(not(target_os = "windows"))]
-                {
-                    let mut task = crate::ui_tasks::MainFocusReclaimTask::new(state.clone(), label.clone());
-                    cef::post_task(cef::ThreadId::UI, Some(&mut task));
-                    tracing::info!("[ipc] main_window_focus: posted MainFocusReclaimTask for label={}", label);
-                }
-            } else {
-                tracing::warn!("[ipc] main_window_focus: no browser found for label={}", window_label);
-            }
-
+            focus_app(state, window_label);
             Ok(serde_json::json!(true))
+        }
+        // The frontend's one selection request: the app (no `block_id`) or a
+        // pane of `window_label` takes the keyboard. `epoch` (one per page load)
+        // and `seq` order them, so one that arrives after a newer one is dropped.
+        // SPEC_BROWSER_PANE_INPUT_OWNER_2026_10_15.md §3.6.
+        "input_select" => {
+            let window_label = args.get("window_label").and_then(|v| v.as_str()).unwrap_or("main");
+            let epoch = args.get("epoch").and_then(|v| v.as_u64()).unwrap_or(0);
+            let seq = args.get("seq").and_then(|v| v.as_u64()).unwrap_or(0);
+            let block_id = args.get("block_id").and_then(|v| v.as_str());
+            let applied = crate::input_owner::registry::apply_selection(window_label, epoch, seq, || {
+                tracing::info!("[ipc] input_select win={window_label} #{seq} {}", block_id.unwrap_or("app"));
+                match block_id {
+                    Some(block_id) => state.browser_panes.focus(block_id, state),
+                    None => focus_app(state, window_label),
+                }
+            });
+            if !applied {
+                tracing::info!("[ipc] input_select win={window_label} #{seq}: older than one already applied, dropped");
+            }
+            Ok(serde_json::json!(applied))
+        }
+        // Whether `window_label` is active and where its keyboard is, as the
+        // last `input-owner-changed` said; null where nothing tracks it yet.
+        "input_owner_state" => {
+            let window_label = args.get("window_label").and_then(|v| v.as_str()).unwrap_or("main");
+            Ok(crate::input_owner::registry::report(window_label).map_or(serde_json::Value::Null, |r| r.to_json()))
         }
 
         // ---- Unknown command ----
@@ -1117,3 +1093,28 @@ async fn route_command(
     }
 }
 
+/// The app's own content in `window_label` takes the keyboard from its panes.
+/// Windows: a selection for the window's input owner, which reclaims focus as
+/// its `FocusApp` effect when it should. Elsewhere the reclaim runs directly, on
+/// the CEF UI thread: `browser_view_get_for_browser`, `host.set_focus` and
+/// walking the window tree require it; it also defocuses the panes. If the
+/// label isn't registered yet (first DOM focus racing window registration),
+/// any non-pane window is used.
+fn focus_app(state: &Arc<AppState>, window_label: &str) {
+    let target = state
+        .get_browser(window_label)
+        .map(|_| window_label.to_string())
+        .or_else(|| state.list_browsers().into_iter().map(|(k, _)| k).find(|k| !k.starts_with("browser-pane-")));
+    let Some(label) = target else {
+        tracing::warn!("[ipc] focus_app: no browser found for label={}", window_label);
+        return;
+    };
+    #[cfg(target_os = "windows")]
+    crate::input_owner::windows::select_app(state, &label);
+    #[cfg(not(target_os = "windows"))]
+    {
+        let mut task = crate::ui_tasks::MainFocusReclaimTask::new(state.clone(), label.clone());
+        cef::post_task(cef::ThreadId::UI, Some(&mut task));
+        tracing::info!("[ipc] focus_app: posted MainFocusReclaimTask for label={}", label);
+    }
+}

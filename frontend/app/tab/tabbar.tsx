@@ -20,7 +20,7 @@ import { TabCloseConfirmModal } from "./tab-close-confirm-modal";
 import { asksBeforeClosingTab, DONT_ASK_AGAIN } from "./tab-close-confirm";
 import { registerTabCloseRequestHandler } from "./tab-close-request";
 import { useTabDragAndDrop } from "./tab-reorder";
-import { revealTabInStrip } from "./tab-strip-scroll";
+import { revealInStrip } from "@/app/element/strip-reveal";
 import { useTabTearOffEvents } from "./tab-tearoff-events";
 import { createTearOffTabAtRelease } from "./tab-tearoff-rpc";
 import { tabWrapperRefs } from "./tabbar-dnd";
@@ -324,7 +324,7 @@ function TabBar(props: TabBarProps): JSX.Element {
                 const el = tabWrapperRefs.get(tabId);
                 if (!el || !tabBarScrollRef) return;
                 const ids = tabIds();
-                revealTabInStrip(tabBarScrollRef, el, ids[ids.length - 1] === tabId);
+                revealInStrip(tabBarScrollRef, el, ids[ids.length - 1] === tabId);
             });
             onCleanup(() => cancelAnimationFrame(frame));
         })

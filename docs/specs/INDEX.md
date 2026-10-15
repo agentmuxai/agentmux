@@ -421,6 +421,7 @@ partial list.
 | [`SPEC_PANE_TAB_STRIP_AGENT_TERMINAL_2026_07_20`](SPEC_PANE_TAB_STRIP_AGENT_TERMINAL_2026_07_20.md) | SPEC: Pane tab strip — editor-style in-pane tabs for agent and terminal panes |
 | [`SPEC_PANE_TAB_STRIP_CHROME_ZOOM_AND_SCROLL_CLEARANCE_2026_08_12`](SPEC_PANE_TAB_STRIP_CHROME_ZOOM_AND_SCROLL_CLEARANCE_2026_08_12.md) | SPEC: Bind the pane tab strip to its own pane's zoom, and fix top scroll-clearance for short agent conversations |
 | [`SPEC_PANE_TAB_STRIP_COMPACT_SIZING_AND_RENAME_2026_07_22`](SPEC_PANE_TAB_STRIP_COMPACT_SIZING_AND_RENAME_2026_07_22.md) | SPEC: Pane tab strip — compact (shrink-to-fit) sizing + double-click rename |
+| [`SPEC_PANE_TAB_STRIP_REVEAL_SELECTED_2026_10_15`](SPEC_PANE_TAB_STRIP_REVEAL_SELECTED_2026_10_15.md) | Pane tab and document tab strips: the selected pane tab and the selected document tab are always fully shown |
 | [`SPEC_PANE_TAB_STRIP_TRAILING_BLUR_2026_08_12`](SPEC_PANE_TAB_STRIP_TRAILING_BLUR_2026_08_12.md) | SPEC: Frosted-glass backdrop for the agent pane tab strip's trailing space |
 | [`SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07`](SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07.md) | SPEC: Switching in-pane tabs must not repaint the pane header or tab bar |
 | [`SPEC_PEEK_PANEL_META_ROW_AND_MONO_COMMAND_2026_09_27`](SPEC_PEEK_PANEL_META_ROW_AND_MONO_COMMAND_2026_09_27.md) | SPEC: hover peek panel — time and tokens on one right-aligned line, command in the tool call's colour and monospace font |
