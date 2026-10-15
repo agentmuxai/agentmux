@@ -84,7 +84,8 @@ pub(super) fn handle_layout_set_tree(
         }];
     };
     tab.rootnode = new_tree.clone();
-    // SPEC_864 Phase 2 — a full-row push carries focus/magnify in `slices`
+    // SPEC_864 Phase 2 — a seeding `LayoutSetTree` (srv's own; windows send
+    // intents) carries focus/magnify in `slices`
     // (REPLACE semantics; empty string = clear). leaforder /
     // pending_backend_actions are not modeled in TabRecord — they ride the
     // event through to the persist subscriber untouched.
@@ -101,8 +102,9 @@ pub(super) fn handle_layout_set_tree(
     let (pushed_focused, pushed_magnified) = (tab.focused_node_id.clone(), tab.magnified_node_id.clone());
     // Referential-integrity enforcement (see
     // `backend::layout::prune_dangling_block_refs`'s doc comment): this is
-    // the exact vector — a wholesale tree push — that let a stale frontend
-    // copy resurrect a deleted block's leaf
+    // the exact vector — a wholesale tree replace — that once let a stale
+    // frontend copy resurrect a deleted block's leaf. Windows no longer push
+    // trees, but srv's seeders still replace whole trees here
     // (INVESTIGATION_LAYOUT_DEAD_SPACE_STALE_TREE_RESURRECTION_2026_07_08.md).
     // Re-derive `new_tree`/the event from the now-authoritative (possibly
     // pruned) `tab.rootnode` rather than the caller's original value, so

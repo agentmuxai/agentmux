@@ -646,7 +646,7 @@ fn layout_set_tree_to_none_clears_rootnode() {
 
 /// End-to-end regression for
 /// docs/investigations/INVESTIGATION_LAYOUT_DEAD_SPACE_STALE_TREE_RESURRECTION_2026_07_08.md:
-/// a wholesale tree push — the exact vector a stale frontend copy used
+/// a wholesale tree replace — the exact vector a stale frontend copy once used
 /// to resurrect a deleted block's leaf through — must self-heal
 /// instead of persisting the dangling reference. Only "ba" is
 /// registered as live; "gone" is not (simulating a block deleted
@@ -765,7 +765,7 @@ fn layout_set_tree_prune_without_slices_emits_focus_and_magnify_changes() {
     assert!(matches!(&events[..], [Event::LayoutTreeReplaced { .. }]), "got {:?}", events);
 }
 
-/// SPEC_864 Phase 2 — a slice-carrying full-row push applies focus/
+/// SPEC_864 Phase 2 — a slice-carrying `LayoutSetTree` applies focus/
 /// magnify to the TabRecord (empty = clear) and echoes the slices on
 /// the emitted event for the persist subscriber.
 #[test]

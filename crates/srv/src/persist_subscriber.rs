@@ -752,7 +752,7 @@ fn apply_layout_tree_replaced(
     };
     let new_pending: Option<Vec<LayoutActionData>> = match slices {
         // The pending queue is frontend-acked state, not tree geometry —
-        // an empty-tree push still replaces it (unlike focus/leaforder,
+        // an empty-tree `LayoutSetTree` still replaces it (unlike focus/leaforder,
         // which dangle without a tree).
         Some(s) => match &s.pending_backend_actions {
             Some(v) if !v.is_null() => Some(serde_json::from_value(v.clone())?),
