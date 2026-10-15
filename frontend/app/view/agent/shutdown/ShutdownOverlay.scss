@@ -3,13 +3,12 @@
 
 // The closing pane's shutdown log (SPEC_AGENT_SELF_QUIT_2026_09_24.md §5.5).
 // Sits inside .agent-view's own stacking context, above its content.
+
+@use "../../../mixins.scss";
 .agent-shutdown-overlay {
-    position: absolute;
-    inset: 0;
+    @include mixins.abs-fill;
     z-index: 30;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    @include mixins.flex-center;
     background: color-mix(in srgb, var(--main-bg-color) 82%, transparent);
     backdrop-filter: blur(1px);
 }
@@ -34,9 +33,7 @@
 .agent-shutdown-overlay__line {
     padding-left: 12px;
     color: var(--secondary-text-color);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    @include mixins.truncate;
 }
 
 .agent-shutdown-overlay__more {

@@ -7,6 +7,8 @@
 
 // Override the default panel width for the palette. Applied via the
 // `panelClass="command-palette-panel"` prop passed to Modal.
+
+@use "../mixins.scss";
 .modal-panel.command-palette-panel {
     width: 560px;
     max-width: 92vw;
@@ -108,9 +110,7 @@
     flex: 1;
     font-size: var(--text-base);
     color: var(--main-text-color);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    @include mixins.truncate;
 }
 
 // The command's shortcut, from the shortcut table (keybindings/defaults.ts).
@@ -126,8 +126,7 @@
     font-size: var(--text-xs);
     color: var(--secondary-text-color);
     flex-shrink: 0;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
+    @include mixins.label-caps;
 }
 
 .command-palette-empty {

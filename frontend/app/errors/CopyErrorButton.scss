@@ -1,6 +1,8 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+@use "../mixins.scss";
+
 .copy-error-button {
     display: inline-flex;
     align-items: center;
@@ -41,9 +43,7 @@
     font-size: var(--text-xs);
     width: 20px;
     height: 20px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
+    @include mixins.flex-center(inline-flex);
     border-radius: 4px;
     cursor: pointer;
 

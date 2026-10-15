@@ -5,10 +5,10 @@
 // rows (docs/specs/SPEC_BROWSER_PANE_PROFILES_MENU_2026_10_09.md §3–§4).
 
 // A profile's initial on its colour.
+
+@use "../../mixins.scss";
 .browser-profile-badge {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
+    @include mixins.flex-center(inline-flex);
     flex-shrink: 0;
     width: 18px;
     height: 18px;

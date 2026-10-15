@@ -42,8 +42,7 @@
 
 .modal-root {
     // Window scope: a fixed full-window overlay.
-    position: fixed;
-    inset: 0;
+    @include mixins.fixed-fill;
     z-index: var(--z-modal);
     display: grid;
     place-items: center;
@@ -78,8 +77,7 @@
     // Sized to the lock region: `inset:0` covers the full `.modal-root`,
     // which is the window for `data-scope="window"` and the tab/pane
     // mount node for `data-scope="tab" | "pane"`.
-    position: absolute;
-    inset: 0;
+    @include mixins.abs-fill;
     background: rgba(0, 0, 0, 0.55);
     backdrop-filter: blur(8px);
     -webkit-backdrop-filter: blur(8px);
@@ -101,8 +99,7 @@
     // Focus ring when the panel itself is the focus target (only
     // happens when there are no focusable descendants).
     &:focus-visible {
-        box-shadow: var(--shadow-modal), var(--shadow-focus-ring);
-        outline: none;
+        @include mixins.focus-ring;
     }
 
     // Layer B (MODAL_COMPACT_VARIANT_ARCHITECTURE_2026_05_26 §7): fluid
@@ -169,9 +166,7 @@
     right: var(--space-2);
     width: 28px;
     height: 28px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    @include mixins.flex-center;
     padding: 0;
     background: transparent;
     border: 1px solid transparent;
@@ -180,7 +175,7 @@
     font-size: var(--text-md);
     line-height: 1;
     cursor: default;
-    @include mixins.control-transition(var(--duration-fast), var(--ease-emphasized));
+    @include mixins.control-transition(var(--duration-decorative-fast), var(--ease-emphasized));
 
     &:hover {
         color: var(--main-text-color);
@@ -189,8 +184,7 @@
     }
 
     &:focus-visible {
-        outline: none;
-        box-shadow: var(--shadow-focus-ring);
+        @include mixins.focus-ring;
     }
 }
 

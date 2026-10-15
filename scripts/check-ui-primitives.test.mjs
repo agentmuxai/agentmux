@@ -12,6 +12,7 @@ import {
     countButtons,
     deadFallbacks,
     declarations,
+    handFocusRings,
     parseCatFileBatch,
     pickBase,
     rawDurations,
@@ -86,7 +87,7 @@ describe("rule 3: corner radii", () => {
     });
 });
 
-describe("rules 5-8: the shared scales", () => {
+describe("rules 5-9: the shared scales", () => {
     it("counts raw times in transition and animation declarations, not tokens or other properties", () => {
         const scss = `
             .a { transition: opacity 120ms ease, color var(--duration-fast) var(--ease-out); }
@@ -116,6 +117,18 @@ describe("rules 5-8: the shared scales", () => {
     it("counts z-indexes given as raw numbers only", () => {
         const scss = `.a { z-index: 10; } .b { z-index: var(--z-modal); } .c { z-index: -1; } .d { z-index: auto; }`;
         expect(rawZIndexes(scss).map((d) => d.selector)).toEqual([".a", ".c"]);
+    });
+
+    it("counts :focus-visible rules that draw their own ring, not the mixin or a bare outline: none", () => {
+        const scss = `
+            .a:focus-visible { outline: 1px solid var(--accent-color); outline-offset: -1px; }
+            .b { &:focus-visible { @include mixins.focus-ring; } }
+            .c { &:hover, &:focus-visible { box-shadow: 0 0 0 1px red; } }
+            .d:focus-visible { outline: none; }
+            .e:focus { outline: 2px solid red; }
+            .f:has(.g:focus-visible) { outline-color: red; }
+        `;
+        expect(handFocusRings(scss)).toEqual([".a:focus-visible", ".c:hover, .c:focus-visible", ".f:has(.g:focus-visible)"]);
     });
 
     it("takes tokens set on :root, alone or in a list, and not inside an at-rule", () => {
@@ -183,13 +196,17 @@ describe("collect", () => {
     it("counts the scale rules per file, and fallbacks against every file's :root tokens", () => {
         const scaled = [
             ...files,
-            { path: "frontend/app/view/x/s.scss", source: ".s { font-size: 11px; z-index: 3; transition: opacity 90ms; color: var(--defined, red); }" },
+            {
+                path: "frontend/app/view/x/s.scss",
+                source: ".s { font-size: 11px; z-index: 3; transition: opacity 90ms; color: var(--defined, red); &:focus-visible { outline: 1px solid; } }",
+            },
         ];
         const out = collect(scaled);
         expect(out.fontSizes).toEqual({ "frontend/app/view/x/s.scss": 1 });
         expect(out.zIndex).toEqual({ "frontend/app/view/x/s.scss": 1 });
         expect(out.durations).toEqual({ "frontend/app/view/x/s.scss": 1 });
         expect(out.fallbacks).toEqual({ "frontend/app/view/x/s.scss": 1 });
+        expect(out.focusRings).toEqual({ "frontend/app/view/x/s.scss": 1 });
     });
 
     it("doesn't count a variable set only by a test as defined", () => {

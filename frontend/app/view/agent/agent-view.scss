@@ -331,8 +331,7 @@
 // aspect ratio — a rotating background needs to cover the ring's
 // bounding *circle* (its diagonal), not just its bounding box.
 .agent-pane-progress-bar {
-    position: absolute;
-    inset: 0;
+    @include mixins.abs-fill;
     pointer-events: none;
     opacity: 0;
     transition: opacity 200ms var(--ease-standard);
@@ -516,8 +515,7 @@
     .agent-history-title {
         font-size: var(--text-sm);
         font-weight: 600;
-        letter-spacing: 0.04em;
-        text-transform: uppercase;
+        @include mixins.label-caps;
         color: var(--secondary-text-color);
     }
 

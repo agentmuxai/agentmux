@@ -5,6 +5,8 @@
 // warden-audit-manager.scss's `.warden-audit-row`) so this decision feed's
 // column layout can't silently drift out of sync with the Audit tab's.
 
+@use "../../mixins.scss";
+
 .warden-supervisor-toggle-row {
     display: flex;
     align-items: center;
@@ -54,9 +56,7 @@
     opacity: 0.8;
     color: #60a5fa;
     font-size: 0.95em;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    @include mixins.truncate;
 }
 
 @container warden (max-width: 479px) {

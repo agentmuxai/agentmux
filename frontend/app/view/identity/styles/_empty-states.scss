@@ -5,11 +5,11 @@
 
 // ── Empty states ──────────────────────────────────────────────────────────────
 
+@use "../../../mixins.scss";
+
 .identity-empty {
-    display: flex;
+    @include mixins.flex-center;
     flex-direction: column;
-    align-items: center;
-    justify-content: center;
     height: 200px;
     gap: 10px;
     color: var(--secondary-text-color);

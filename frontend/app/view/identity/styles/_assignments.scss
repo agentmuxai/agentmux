@@ -7,6 +7,8 @@
 
 // Natural height — `.identity-body` (styles/_header.scss) is the single
 // scroll boundary, not this section on its own.
+
+@use "../../../mixins.scss";
 .identity-assignments {
     padding: var(--space-3);
 }
@@ -25,8 +27,8 @@
     th {
         font-size: var(--text-2xs);
         font-weight: 600;
+        @include mixins.label-caps;
         letter-spacing: 0.06em;
-        text-transform: uppercase;
         color: var(--secondary-text-color);
     }
 

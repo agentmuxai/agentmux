@@ -25,7 +25,7 @@ describe("My Agents tile sizing", () => {
 
     it("the summary may use three lines, and the empty-state note stays one", () => {
         const preview = tiles.slice(tiles.indexOf(".agent-recent-sessions-preview {"), tiles.indexOf(".agent-recent-sessions-preview--empty"));
-        expect(preview).toMatch(/-webkit-line-clamp:\s*3/);
+        expect(preview).toMatch(/@include mixins\.truncate-lines\(3\)/);
         expect(preview).not.toMatch(/white-space:\s*nowrap/);
         const empty = tiles.slice(tiles.indexOf(".agent-recent-sessions-preview--empty"), tiles.indexOf(".agent-recent-sessions-line3"));
         expect(empty).toMatch(/-webkit-line-clamp:\s*1/);

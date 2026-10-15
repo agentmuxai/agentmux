@@ -2,6 +2,8 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+@use "mixins.scss";
+
 /* stylelint-disable color-no-hex --
    theme.scss is the canonical source of colour primitives — hex
    literals live here by design. Other component SCSS files must
@@ -442,6 +444,17 @@
     --duration-moderate: calc(240ms * var(--motion-scale));
     --duration-slow:     calc(280ms * var(--motion-scale));
 
+    // Decorative motion (hover and focus colour fades, hover lifts) also
+    // scales by `--motion-scale-decorative`, 1 today. A policy that reduces
+    // `decorative` sets it to 0 in one rule,
+    // `:root[data-motion-reduce~="decorative"]`, instead of a reduced
+    // treatment at every site (§5.4). CSS only: no JS animation is decorative.
+    --motion-scale-decorative: 1;
+    --duration-decorative-instant: calc(80ms * var(--motion-scale) * var(--motion-scale-decorative));
+    --duration-decorative-fast:    calc(100ms * var(--motion-scale) * var(--motion-scale-decorative));
+    --duration-decorative-quick:   calc(120ms * var(--motion-scale) * var(--motion-scale-decorative));
+    --duration-decorative-base:    calc(160ms * var(--motion-scale) * var(--motion-scale-decorative));
+
     // Motion easings.
     --ease-standard:   ease;
     --ease-out:        ease-out;
@@ -557,8 +570,7 @@
 
     body::before {
         content: "";
-        position: fixed;
-        inset: 0;
+        @include mixins.fixed-fill;
         z-index: -1;
         pointer-events: none;
         background: var(--main-bg-color);

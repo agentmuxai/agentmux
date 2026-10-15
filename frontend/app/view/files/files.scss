@@ -5,6 +5,8 @@
 // No `transition: all` (CI gate): the pane lives inside window tabs hidden
 // with inherited `visibility`, and an `all` transition would animate that.
 
+@use "../../mixins.scss";
+
 .files-view {
     display: flex;
     flex-direction: column;
@@ -123,8 +125,7 @@
     padding: 8px 10px 2px;
     font-size: var(--text-2xs);
     font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
+    @include mixins.label-caps;
     color: var(--secondary-text-color);
 }
 
@@ -160,9 +161,7 @@
     cursor: pointer;
 
     span {
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
+        @include mixins.truncate;
     }
 
     i {
@@ -391,9 +390,7 @@
     padding: 3px 10px;
     border-top: 1px solid var(--border-color);
     color: var(--secondary-text-color);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    @include mixins.truncate;
 
     .files-status-error {
         color: var(--error-color);
@@ -506,9 +503,7 @@
 }
 
 .files-link {
-    padding: 0;
-    border: none;
-    background: transparent;
+    @include mixins.button-reset;
     color: var(--accent-color);
     font: inherit;
     cursor: pointer;
@@ -548,12 +543,9 @@
 }
 
 .files-conflict-overlay {
-    position: fixed;
-    inset: 0;
+    @include mixins.fixed-fill;
     z-index: var(--z-modal);
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    @include mixins.flex-center;
     background: var(--modal-shadow-color);
 }
 
@@ -699,9 +691,7 @@
 
 .files-tile-art {
     position: relative;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    @include mixins.flex-center;
     width: 96px;
     height: 80px;
     flex-shrink: 0;
@@ -741,15 +731,12 @@
 }
 
 .files-tile-name {
-    display: -webkit-box;
+    @include mixins.truncate-lines(2);
     width: 100%;
-    overflow: hidden;
     font-size: var(--text-xs);
     line-height: 1.3;
     text-align: center;
     overflow-wrap: anywhere;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
 }
 
 .files-tile .files-rename {

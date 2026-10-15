@@ -107,9 +107,7 @@
     min-width: 0;
     font-size: var(--text-sm);
     font-weight: 500;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    @include mixins.truncate;
 }
 
 .agent-shell-elapsed {
@@ -125,9 +123,7 @@
     flex: 1 1 60%;
     font-size: var(--text-xs);
     color: var(--secondary-text-color);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    @include mixins.truncate;
     opacity: 0.75;
     min-width: 0;
 }
@@ -136,9 +132,7 @@
     font-family: var(--font-mono);
     font-size: var(--text-xs);
     color: var(--secondary-text-color);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    @include mixins.truncate;
 }
 
 // Stop button (Phase 3) — tree-kills the running process. Pinned to the
@@ -158,9 +152,9 @@
     cursor: default;
     opacity: 0.55;
     transition:
-        opacity var(--duration-base) var(--ease-standard),
-        color var(--duration-base) var(--ease-standard),
-        background var(--duration-base) var(--ease-standard);
+        opacity var(--duration-decorative-base) var(--ease-standard),
+        color var(--duration-decorative-base) var(--ease-standard),
+        background var(--duration-decorative-base) var(--ease-standard);
 
     &:hover {
         opacity: 1;
@@ -285,9 +279,7 @@
     font-size: var(--text-sm);
     font-weight: 600;
     color: var(--main-text-color);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    @include mixins.truncate;
 }
 
 .agent-activity-elapsed {
@@ -316,9 +308,7 @@
     font-size: var(--text-xs);
     color: var(--main-text-color);
     font-family: var(--font-mono);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    @include mixins.truncate;
     opacity: 0.9;
 }
 
@@ -326,9 +316,7 @@
 .agent-activity-dismiss {
     flex: 0 0 auto;
     margin-left: auto;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
+    @include mixins.flex-center(inline-flex);
     align-self: stretch;
     min-width: 28px;
     appearance: none;
@@ -342,10 +330,10 @@
     cursor: default;
     opacity: 0.75;
     transition:
-        opacity var(--duration-base) var(--ease-standard),
-        color var(--duration-base) var(--ease-standard),
-        background var(--duration-base) var(--ease-standard),
-        border-color var(--duration-base) var(--ease-standard);
+        opacity var(--duration-decorative-base) var(--ease-standard),
+        color var(--duration-decorative-base) var(--ease-standard),
+        background var(--duration-decorative-base) var(--ease-standard),
+        border-color var(--duration-decorative-base) var(--ease-standard);
 
     &:hover {
         opacity: 1;

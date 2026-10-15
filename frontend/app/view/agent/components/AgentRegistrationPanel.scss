@@ -1,6 +1,8 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+@use "../../../mixins.scss";
+
 .agent-registration-panel {
     display: flex;
     flex-direction: column;
@@ -80,7 +82,7 @@
             margin: 0;
             font-size: var(--text-sm);
             font-weight: 600;
-            text-transform: uppercase;
+            @include mixins.label-caps;
             letter-spacing: 0.02em;
             color: var(--secondary-text-color);
         }

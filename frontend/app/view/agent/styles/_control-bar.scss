@@ -8,10 +8,8 @@
 .agent-view {
     // === Picker Empty State ===
     .agent-picker-empty {
-        display: flex;
+        @include mixins.flex-center;
         flex-direction: column;
-        align-items: center;
-        justify-content: center;
         height: 100%;
         gap: 10px;
         padding: var(--space-6);
@@ -94,9 +92,7 @@
         .agent-away-digest-text {
             flex: 1;
             min-width: 0;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
+            @include mixins.truncate;
         }
     }
 
@@ -166,9 +162,7 @@
             .agent-working-row-left {
                 flex: 1;
                 min-width: 0;
-                overflow: hidden;
-                text-overflow: ellipsis;
-                white-space: nowrap;
+                @include mixins.truncate;
                 // The live status, one line, truncated at the end.
                 // SPEC_AGENT_TURN_MODEL_AND_LIVE_STATUS_2026_10_08.md §6.10.
                 display: flex;
@@ -247,9 +241,7 @@
 
             .agent-working-row-cancel-login {
                 margin-left: var(--space-2);
-                padding: 0;
-                background: none;
-                border: none;
+                @include mixins.button-reset;
                 color: inherit;
                 font: inherit;
                 text-decoration: underline;
@@ -298,9 +290,7 @@
             .agent-working-row-left {
                 flex: 1;
                 min-width: 0;
-                overflow: hidden;
-                text-overflow: ellipsis;
-                white-space: nowrap;
+                @include mixins.truncate;
                 opacity: 0.55;
             }
 
@@ -434,8 +424,7 @@
         .agent-archived-label {
             flex: 1 1 auto;
             min-width: 0;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
+            @include mixins.label-caps;
             font-size: var(--text-2xs);
         }
     }

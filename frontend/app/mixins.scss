@@ -94,13 +94,11 @@
             }
 
             &--input {
-                background: transparent;
-                border: none;
+                @include button-reset;
                 border-bottom: 1px solid var(--accent-color);
                 outline: none;
                 color: inherit;
                 font: inherit;
-                padding: 0;
                 width: 100%;
                 min-width: 40px;
                 text-wrap: nowrap;
@@ -137,9 +135,7 @@
         &.term-activity {
             opacity: 0.6;
             max-width: 500px;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
+            @include truncate;
             &.term-activity--flash {
                 --flash-end-opacity: 0.6;
                 animation: am-accent-flash 0.5s var(--ease-out);
@@ -217,9 +213,7 @@
                     border: none;
                     color: var(--main-text-color);
                     width: 100%;
-                    white-space: nowrap;
-                    overflow: hidden;
-                    text-overflow: ellipsis;
+                    @include truncate;
                     box-sizing: border-box;
                     opacity: 0.7;
                     font-weight: 500;
@@ -233,9 +227,7 @@
             .wave-iconbutton {
                 height: 100%;
                 width: 27px;
-                display: flex;
-                align-items: center;
-                justify-content: center;
+                @include flex-center;
             }
         }
 
@@ -251,11 +243,9 @@
         flex-shrink: 0;
 
         .wave-iconbutton {
-            display: flex;
+            @include flex-center;
             width: 26px;
             padding: var(--space-1) var(--space-1-5);
-            align-items: center;
-            justify-content: center;
             font-size: 18px;
         }
 
@@ -346,11 +336,18 @@
     }
 }
 
-@mixin ellipsis() {
-    display: block;
-    white-space: nowrap;
+/// One line, cut with an ellipsis. Leaves `display` alone: the element must
+/// already be a block or a flex/grid item for the ellipsis to show.
+@mixin truncate {
     overflow: hidden;
     text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/// `truncate` on an element made a block.
+@mixin ellipsis() {
+    display: block;
+    @include truncate;
 }
 
 @mixin avatar-dims-mixin() {
@@ -417,9 +414,9 @@
 
 /// Center children both axes. Shortcut for the `display: flex;
 /// align-items: center; justify-content: center;` triple that recurs
-/// hundreds of times across the frontend.
-@mixin flex-center {
-    display: flex;
+/// hundreds of times across the frontend. Pass `inline-flex` for an inline box.
+@mixin flex-center($display: flex) {
+    display: $display;
     align-items: center;
     justify-content: center;
 }
@@ -438,6 +435,12 @@
     inset: 0;
 }
 
+/// Fill the viewport: a full-window overlay or backdrop.
+@mixin fixed-fill {
+    position: fixed;
+    inset: 0;
+}
+
 /// Multi-line clamp with ellipsis. `$n` is the number of lines.
 @mixin truncate-lines($n) {
     display: -webkit-box;
@@ -447,11 +450,30 @@
     overflow: hidden;
 }
 
-/// Accessible focus ring. Use on `&:focus-visible` for interactive
-/// elements; theme-aware via `--shadow-focus-ring`.
+/// The keyboard focus ring: a 2px accent outline, 1px off the element. Use it
+/// on `&:focus-visible`. An outline, not a box-shadow, so it doesn't clip
+/// inside `overflow: hidden` the way a shadow does, and it leaves the
+/// element's own box-shadow (a pressed or selected line) in place
+/// (SPEC_MOTION_TIERS_AND_STYLESHEET_DRY_2026_10_15.md §8 Q6).
+/// scripts/check-ui-primitives.mjs counts focus rings written by hand.
 @mixin focus-ring {
-    outline: none;
-    box-shadow: var(--shadow-focus-ring);
+    outline: 2px solid var(--accent-color);
+    outline-offset: 1px;
+}
+
+/// An uppercase label (a section heading, a badge), at the one shared
+/// letter-spacing.
+@mixin label-caps {
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+/// Strip a `<button>` (or an input) of the browser's own box: no fill, no
+/// border, no padding. The call site sets the rest.
+@mixin button-reset {
+    background: transparent;
+    border: none;
+    padding: 0;
 }
 
 /// Media queries keyed off a minimum / maximum width. Pass a token
@@ -489,7 +511,10 @@
 /// would pop in a frame late when shown
 /// (docs/analysis/ANALYSIS_WINDOW_TAB_SWITCH_PAINT_2026_09_30.md §3;
 /// scripts/check-no-transition-all.sh rejects `all`).
-@mixin control-transition($duration: var(--duration-instant), $ease: var(--ease-standard)) {
+///
+/// Hover and focus colour fades are decorative motion (§5.4 of the motion
+/// spec), so `$duration` takes a `--duration-decorative-*` token.
+@mixin control-transition($duration: var(--duration-decorative-instant), $ease: var(--ease-standard)) {
     transition-property: color, background-color, border-color, outline-color, box-shadow, opacity;
     transition-duration: $duration;
     transition-timing-function: $ease;

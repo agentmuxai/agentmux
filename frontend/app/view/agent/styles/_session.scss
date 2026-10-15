@@ -17,6 +17,8 @@
 // `.agent-view` nesting when the Shell drawer's Session row was replaced by
 // the stats popover — see
 // docs/specs/SPEC_AGENT_SHELL_DRAWER_INFO_PANEL_2026_09_19.md §3.
+
+@use "../../../mixins.scss";
 .agent-session-btn {
     appearance: none;
     background: color-mix(in srgb, var(--main-text-color) 6%, transparent);
@@ -30,9 +32,9 @@
     outline: none;
     white-space: nowrap;
     transition:
-        background var(--duration-instant) var(--ease-standard),
-        border-color var(--duration-instant) var(--ease-standard),
-        color var(--duration-instant) var(--ease-standard);
+        background var(--duration-decorative-instant) var(--ease-standard),
+        border-color var(--duration-decorative-instant) var(--ease-standard),
+        color var(--duration-decorative-instant) var(--ease-standard);
 
     &:hover:not(:disabled) {
         background: color-mix(in srgb, var(--accent-color) 14%, transparent);
@@ -41,8 +43,7 @@
     }
 
     &:focus-visible {
-        outline: 2px solid var(--accent-color);
-        outline-offset: 1px;
+        @include mixins.focus-ring;
     }
 
     &:disabled {
@@ -73,10 +74,8 @@
 // would compete with it.
 .agent-session-stats-trigger {
     appearance: none;
-    background: none;
-    border: none;
+    @include mixins.button-reset;
     border-radius: 0;
-    padding: 0;
     margin: 0;
     // Deliberately NOT `font: inherit` / `color: inherit` (Codex P2 on
     // #3435): this file loads after _composer-strip.scss, so at equal
@@ -96,8 +95,7 @@
     }
 
     &:focus-visible {
-        outline: 2px solid var(--accent-color);
-        outline-offset: 1px;
+        @include mixins.focus-ring;
     }
 }
 
@@ -112,8 +110,7 @@
     padding: 2px var(--space-2);
     color: var(--secondary-text-color);
     font-size: var(--text-3xs);
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
+    @include mixins.label-caps;
 }
 
 .agent-session-stats-row {

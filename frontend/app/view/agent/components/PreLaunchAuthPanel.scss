@@ -6,6 +6,8 @@
 // (element/ui) — this file only handles panel layout, the
 // inline-icon row inside the button, and the surrounding banner / hint copy.
 
+@use "../../../mixins.scss";
+
 .pre-launch-auth-panel {
     display: flex;
     flex-direction: column;
@@ -44,9 +46,7 @@
 .pre-launch-auth-panel-connect-icon {
     font-size: 18px;
     line-height: 1;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
+    @include mixins.flex-center(inline-flex);
     min-width: 20px;
 }
 

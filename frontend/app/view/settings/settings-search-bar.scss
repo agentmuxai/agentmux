@@ -1,6 +1,8 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+@use "../../mixins.scss";
+
 .settings-search-bar {
     position: relative;
     flex-shrink: 0;
@@ -96,9 +98,7 @@
 .settings-search-result-desc {
     font-size: var(--text-xs);
     color: var(--secondary-text-color);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    @include mixins.truncate;
 }
 
 .settings-search-empty {

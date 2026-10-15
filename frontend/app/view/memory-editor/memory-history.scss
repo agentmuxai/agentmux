@@ -8,6 +8,8 @@
 // The panel's "current content" rules went with it — content now renders in
 // MemoryContent (memory-editor.scss). SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.3.
 
+@use "../../mixins.scss";
+
 .native-memory-history {
     display: flex;
     flex-direction: column;
@@ -100,8 +102,7 @@
 .native-memory-history-item-badge {
     flex-shrink: 0;
     font-size: var(--text-2xs);
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
+    @include mixins.label-caps;
     padding: 1px 5px;
     color: var(--accent-color);
     background: color-mix(in srgb, var(--accent-color) 12%, transparent);

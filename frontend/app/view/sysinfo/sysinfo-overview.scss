@@ -3,6 +3,8 @@
 
 // Sysinfo's Overview (sysinfo-overview.tsx): controls, then tiles, then the
 // charts as small multiples, two to a row where the pane is wide enough.
+
+@use "../../mixins.scss";
 .sysinfo-overview {
     display: flex;
     flex-direction: column;
@@ -46,9 +48,7 @@
     font-size: 15px;
     line-height: 1.3;
     color: var(--main-text-color);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    @include mixins.truncate;
 }
 
 .sysinfo-tile-range {

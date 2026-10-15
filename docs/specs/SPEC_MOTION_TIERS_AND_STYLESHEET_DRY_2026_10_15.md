@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-15
 **Author:** AgentY@narko
-**Status:** active. Approved 2026-10-15: the operator took every recommendation in §8 ("go with recommendations, get it all built"). Phases in §7; each PR updates this line. Phases A (#4968), B (#4971) and C (token bugs and mechanical swaps) are built.
+**Status:** active. Approved 2026-10-15: the operator took every recommendation in §8 ("go with recommendations, get it all built"). Phases in §7; each PR updates this line. Phases A (#4968), B (#4971) and C (#4973) are merged or in review; phase D1 (shared mixins) is built.
 **Verified against:** `agentmux` `main` @ `fb6b20ba8`, by reading code (three read-only inventories, spot-checked by hand) and this machine's Windows setting.
 **Scope:** every animation, transition and motion gate in `frontend/` (CSS, SCSS, TS, the vendored Font Awesome CSS, SVG assets, `index.html`), the `window:reducedmotion` setting end to end, and the shared stylesheet layer (`theme.scss`, `mixins.scss`, `element/ui/`).
 **Related:**
@@ -457,6 +457,24 @@ The order is by payoff against risk. The DRY items go in phases C and D (§7); p
     - There are 22 hand-written resets (transparent background, no border, no padding), including identical stat buttons in `statusbar/_cpu-cores-popover.scss:7-26` and `_disk-volumes-popover.scss:7-26`.
     - There are 21 hand-rolled close and dismiss buttons, which move to the `element/ui` IconButton.
     - `check-ui-primitives.mjs` already counts 184 hand-rolled buttons, so this is that ratchet's backlog.
+
+**As built (phase D1).**
+- Item 9, blocks replaced by a mixin, where the block's own declarations matched exactly:
+  - `flex-center` ×78: 59 `display: flex` and 19 `display: inline-flex`, which the mixin now takes as `flex-center(inline-flex)`;
+  - `abs-fill` ×25 and the new `fixed-fill` ×7 (two of the 25 wrote out `top`/`right`/`bottom`/`left`, now `inset`);
+  - the new `truncate` ×112. `ellipsis` (with `display: block`) is `truncate` plus the display, and still has no users;
+  - `truncate-lines` ×4. Three of them gain the standard `line-clamp` next to their `-webkit-line-clamp`, same count;
+  - the new `label-caps` ×58, at 0.04 em, the most common value. 16 labels moved to it: 0.03 em ×5, 0.05 em ×4, 0.5 px ×6 and 0.3 px ×1, each within 0.016 em of it. 10 keep their own, written after the include: 0.02 em ×3, 0.06 em ×4 and 0.08 em ×3. The two warden status labels have no letter-spacing and stay as they are.
+- Item 10: `focus-ring` is the 2 px accent outline, 1 px off the element (Q6).
+  - 19 `:focus-visible` rules use it instead of their own ring: the four box-shadow rings and the modal panel's (drawn with its own shadow), the ten 2 px outlines 1 px off (three of them in the user message's colour rather than the accent), the pane grip's inset outline, the tower rail's 1 px shadow, the auth link's 1 px `currentColor` outline and the attention button's 2 px text-colour outline. The four existing users (line controls, cards, tabs, the switch) change with the mixin.
+  - Because the ring is now an outline, the pressed line control's and the selected tab's inset line stay under it, so their two combined box-shadow rules are gone.
+  - Left alone, each with an inset ring because an outline outside would be clipped: the CPU and Disk readouts and the token-usage button in the status bar (full height in a bar that clips), the focused row and tile in Files (inside the scrolling list), and the My Agents row menu item (full width in the menu). The CPU core squares keep their shared hover and focus outline. Four `outline: none` rules that show focus another way are not rings.
+  - `check-ui-primitives.mjs` counts the hand-written ones per file (5 today); the count may only go down.
+- Item 11:
+  - `button-reset` (`background: transparent; border: none; padding: 0`) replaces 21 resets, written as `none` or `0` at some sites; both compute the same.
+  - The CPU and Disk readout buttons share `statusbar/_stat-button.scss`.
+  - The 21 hand-rolled close and dismiss buttons are not on `IconButton` yet: that changes their markup, so it is a separate change.
+- §5.4: `--motion-scale-decorative: 1` and `--duration-decorative-instant`, `-fast`, `-quick` and `-base`, at the same values. 68 hover and focus fades and hover lifts use them (119 durations), including `control-transition`'s default and every call that passes a duration. The `:root[data-motion-reduce~="decorative"]` rule is not added.
 
 ### 6.4 Near-duplicate stylesheets
 

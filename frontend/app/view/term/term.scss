@@ -58,9 +58,7 @@
         .term-cmd-toolbar-text {
             font: var(--fixed-font);
             flex-grow: 1;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
+            @include mixins.truncate;
             padding: 0 5px;
         }
     }

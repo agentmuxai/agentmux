@@ -18,12 +18,9 @@
 }
 
 .drop-indicator {
-    position: absolute;
-    inset: 0;
+    @include mixins.abs-fill;
     z-index: var(--zindex-file-drop);
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    @include mixins.flex-center;
     pointer-events: none;
     border-radius: var(--block-border-radius);
     animation: am-fade-in var(--duration-fast) var(--ease-out);
@@ -54,9 +51,7 @@
         font-weight: 500;
         color: var(--drop-prompt-fg);
         background: var(--drop-prompt-bg);
-        overflow: hidden;
-        white-space: nowrap;
-        text-overflow: ellipsis;
+        @include mixins.truncate;
 
         i {
             flex-shrink: 0;

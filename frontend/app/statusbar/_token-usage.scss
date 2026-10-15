@@ -23,8 +23,8 @@
     // The same resting opacity as the left section's stats (.system-stats).
     opacity: 0.6;
     transition:
-        background var(--duration-instant) var(--ease-standard),
-        opacity var(--duration-instant) var(--ease-standard);
+        background var(--duration-decorative-instant) var(--ease-standard),
+        opacity var(--duration-decorative-instant) var(--ease-standard);
 
     &:hover {
         background: var(--hover-bg-color);
@@ -226,8 +226,8 @@
         border-radius: 0;
         cursor: default;
         transition:
-            background var(--duration-instant) var(--ease-standard),
-            border-color var(--duration-instant) var(--ease-standard);
+            background var(--duration-decorative-instant) var(--ease-standard),
+            border-color var(--duration-decorative-instant) var(--ease-standard);
 
         &:hover:not(:disabled) {
             background: color-mix(in srgb, var(--error-color) 12%, transparent);

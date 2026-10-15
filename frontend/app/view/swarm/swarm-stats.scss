@@ -53,9 +53,7 @@
 
 .swarm-stats-counts {
     min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    @include mixins.truncate;
     font-family: var(--font-mono, "Hack", monospace);
     font-size: var(--text-xs);
     color: var(--secondary-text-color);

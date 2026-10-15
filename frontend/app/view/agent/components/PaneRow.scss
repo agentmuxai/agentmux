@@ -6,6 +6,8 @@
 // promoted here as the reusable base). Token-driven; no raw hex.
 // Spec: docs/specs/SPEC_AGENT_PANE_FORKS_AND_AUX_PINS_2026_06_15.md §5.2.
 
+@use "../../../mixins.scss";
+
 .pane-row {
     border-left: 3px solid var(--border-color);
     transition: border-left-color 0.2s var(--ease-standard);
@@ -65,9 +67,7 @@
     &:first-of-type { margin-left: auto; }
 
     flex: 0 0 auto;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
+    @include mixins.flex-center(inline-flex);
     min-width: 18px;
     height: 18px;
     padding: 0 var(--space-1);
@@ -79,8 +79,8 @@
     font-size: var(--text-sm);
     line-height: 1;
     transition:
-        color var(--duration-instant) var(--ease-standard),
-        background var(--duration-instant) var(--ease-standard);
+        color var(--duration-decorative-instant) var(--ease-standard),
+        background var(--duration-decorative-instant) var(--ease-standard);
 
     &:hover {
         color: var(--main-text-color);

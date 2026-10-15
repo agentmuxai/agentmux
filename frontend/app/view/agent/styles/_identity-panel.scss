@@ -5,6 +5,8 @@
 // Top-level because rendered through a portal (identity modal).
 // ── AgentIdentityPanel (Step 4 of SPEC_AGENT_IDENTITY_RESTRUCTURE) ────────────
 
+@use "../../../mixins.scss";
+
 .agent-identity-panel {
     padding: 10px var(--space-3);
     display: flex;
@@ -90,9 +92,7 @@
     // nowrap is safe today (short labels, fixed 72px column at the wide
     // breakpoint) but doesn't truncate — pair with ellipsis so a future
     // longer label degrades instead of forcing the row wider.
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    @include mixins.truncate;
 }
 
 .agent-identity-provider-assignment {
@@ -107,9 +107,7 @@
 .agent-identity-account-name {
     font-size: var(--text-sm);
     font-weight: 500;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    @include mixins.truncate;
 }
 
 .agent-identity-username {

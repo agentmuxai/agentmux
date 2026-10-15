@@ -206,9 +206,7 @@
         flex: 0 0 var(--tab-bar-drag-gutter);
         height: 100%;
         align-self: stretch;
-        display: flex;
-        align-items: center;
-        justify-content: center;
+        @include mixins.flex-center;
         border-bottom: var(--snap-chrome) solid var(--border-color);
         font-size: var(--text-sm);
         color: var(--secondary-text-color);
@@ -216,7 +214,7 @@
         svg {
             opacity: 0.35;
             pointer-events: none;
-            transition: opacity var(--duration-quick) var(--ease-standard);
+            transition: opacity var(--duration-decorative-quick) var(--ease-standard);
             // The bar's box sits 1.5px lower than the widget bar's (its bottom
             // hairline); lift the dots onto the widget icons' centre line.
             transform: translateY(-1.5px);

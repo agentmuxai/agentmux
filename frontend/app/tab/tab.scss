@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 @use "../element/menu-frame" as menuFrame;
+@use "../mixins.scss";
 
 .tab {
     position: absolute;
@@ -24,9 +25,7 @@
     font-weight: 400;
     color: var(--secondary-text-color);
     opacity: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    @include mixins.flex-center;
 
     // Inter-tab separator moved out of the tab as a real DOM
     // sibling element (.tab-separator in tabbar.scss). The previous
@@ -74,8 +73,7 @@
         // (PaneTabStrip.scss), not this one.
         &::before {
             content: "";
-            position: absolute;
-            inset: 0;
+            @include mixins.abs-fill;
             z-index: var(--zindex-activity-flash);
             background: rgb(from var(--main-text-color) r g b / 0.12);
             opacity: 0;
@@ -141,9 +139,7 @@
         width: 20px;
         height: 20px;
         min-height: 0; // the line Button's 26px minimum would outgrow the tab
-        display: flex;
-        align-items: center;
-        justify-content: center;
+        @include mixins.flex-center;
         cursor: default;
         z-index: var(--zindex-tab-name);
         padding: 0;

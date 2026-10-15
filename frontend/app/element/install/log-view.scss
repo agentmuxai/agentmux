@@ -3,6 +3,8 @@
 
 // Layer 2 install console — SPEC_UNIVERSAL_INSTALL_DIALOG_2026_09_23.md §4.2.
 
+@use "../../mixins.scss";
+
 .install-log {
     // Bounded: scrolls inside itself and never pushes the dialog's footer
     // out of view. About twelve rows; eight in a narrow pane.
@@ -17,8 +19,7 @@
     user-select: text;
 
     &:focus-visible {
-        outline: none;
-        box-shadow: var(--shadow-focus-ring);
+        @include mixins.focus-ring;
     }
 
     @container modal-mount (max-width: 400px) {

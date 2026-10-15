@@ -116,9 +116,7 @@
 
 .ui-card-icon {
     grid-area: icon;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
+    @include mixins.flex-center(inline-flex);
     width: 20px;
     height: 20px;
     color: var(--secondary-text-color);
@@ -138,9 +136,7 @@
 .ui-card-subtitle,
 .ui-card-meta {
     min-width: 0;
-    overflow: hidden;
-    white-space: nowrap;
-    text-overflow: ellipsis;
+    @include mixins.truncate;
 }
 
 .ui-card-title {
@@ -290,8 +286,7 @@
     margin: var(--space-1) 0 0;
     font-size: var(--text-2xs);
     font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
+    @include mixins.label-caps;
     color: var(--secondary-text-color);
 }
 

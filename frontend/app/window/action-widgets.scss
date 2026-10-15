@@ -15,7 +15,7 @@
 .widget-icon {
     // --widget-tint: the widget type's color, faintly (widgetIconStyle).
     color: var(--widget-tint, var(--widget-icon-color));
-    transition: color var(--duration-quick) var(--ease-standard);
+    transition: color var(--duration-decorative-quick) var(--ease-standard);
 }
 
 .action-widget-slot:hover .widget-icon {

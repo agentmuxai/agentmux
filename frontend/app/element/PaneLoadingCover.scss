@@ -15,13 +15,12 @@
 // Unscoped and owned by the component, it works wherever the component does.
 //
 // Original history preserved below, because the reasoning is still load-bearing.
+
+@use "../mixins.scss";
 .agent-pane-loading-overlay {
-    position: absolute;
-    inset: 0;
+    @include mixins.abs-fill;
     background: var(--main-bg-color);
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    @include mixins.flex-center;
 
     // Low, explicit value — not load-bearing on its own. Every host that
     // renders this cover establishes its own stacking context (`.agent-view`
