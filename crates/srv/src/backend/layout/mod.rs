@@ -109,10 +109,11 @@ fn ensure_group_node(node: &mut LayoutNode) {
             flex_direction: reverse_flex_direction(old_flex),
             size: DEFAULT_NODE_SIZE,
             data: node.data.take(),
-            // Move `extra` (forward-compat catch-all from #688/#689) to the
-            // intermediate so unknown fields the frontend wrote to the leaf
-            // travel with the data, not stay on the new group wrapper.
-            // Mirrors the same transfer in `delete_recursive` line below.
+            // Move `minimized` and `extra` (forward-compat catch-all from
+            // #688/#689) to the intermediate so what the frontend wrote on the
+            // leaf travels with the data, not stays on the new group wrapper.
+            // Mirrors the same transfer in `delete_recursive` below.
+            minimized: std::mem::take(&mut node.minimized),
             extra: std::mem::take(&mut node.extra),
             ..Default::default()
         };
@@ -609,10 +610,7 @@ pub fn is_node_locked(node: &LayoutNode) -> bool {
     // render on the frontend; stored sizes never touched). The remaining keys
     // are legacy markers from the pre-display-mode model, recognized until
     // persisted trees are migrated by the frontend's `rebuildMinimizedSet`.
-    node.extra
-        .get("minimized")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false)
+    node.minimized
         || node.extra.contains_key("minimizedSize")
         || node.extra.contains_key("slipMinimize")
         || node.extra.contains_key("columnDissolve")
@@ -713,11 +711,11 @@ pub fn validate_layout_invariants(root: &Option<LayoutNode>) -> Vec<String> {
         }
         // I2 — the `minimized` flag and the legacy minimizedSize/slipMinimize
         // markers are leaf-only.
-        if is_branch && (has("minimized") || has("minimizedSize") || has("slipMinimize")) {
+        if is_branch && (node.minimized || has("minimizedSize") || has("slipMinimize")) {
             violations.push(format!(
                 "MIN_MARKER_ON_BRANCH @ {}: branch has {}",
                 short(&node.id),
-                if has("minimized") {
+                if node.minimized {
                     "minimized"
                 } else if has("minimizedSize") {
                     "minimizedSize"
@@ -1046,8 +1044,8 @@ fn delete_recursive(node: &mut LayoutNode, target_id: &str) -> bool {
     if let Some(i) = idx {
         // Found target as a direct child — remove it.
         node.children.remove(i);
-        // Collapse: if only one child remains, promote it.
-        // Preserve `extra` (unknown-field catch-all from #688/#689).
+        // Collapse: if only one child remains, promote it, with its
+        // `minimized` flag and `extra` (unknown-field catch-all from #688/#689).
         if node.children.len() == 1 {
             let sole = node.children.remove(0);
             node.id = sole.id;
@@ -1055,6 +1053,7 @@ fn delete_recursive(node: &mut LayoutNode, target_id: &str) -> bool {
             node.data = sole.data;
             node.flex_direction = sole.flex_direction;
             node.children = sole.children;
+            node.minimized = sole.minimized;
             node.extra = sole.extra;
         }
         return true;
@@ -1381,6 +1380,7 @@ fn split_impl(
         size: root.size,
         children: std::mem::take(&mut root.children),
         data: root.data.take(),
+        minimized: std::mem::take(&mut root.minimized),
         extra: std::mem::take(&mut root.extra),
     };
     let root_size = root_clone.size;

@@ -16,9 +16,11 @@ import {
     insertNode,
     insertNodeAtIndex,
     magnifyNodeToggle,
+    minimizeNode,
     moveNode,
     replaceNode,
     resizeNode,
+    restoreNode,
     splitHorizontal,
     splitVertical,
     swapNode,
@@ -32,6 +34,7 @@ import {
     LayoutTreeInsertNodeAction,
     LayoutTreeInsertNodeAtIndexAction,
     LayoutTreeMagnifyNodeToggleAction,
+    LayoutTreeMinimizeNodeAction,
     LayoutTreeMoveNodeAction,
     LayoutTreeReplaceNodeAction,
     LayoutTreeResizeNodeAction,
@@ -55,6 +58,8 @@ const INTENT_ACTIONS = new Set<LayoutTreeActionType>([
     LayoutTreeActionType.ReplaceNode,
     LayoutTreeActionType.SplitHorizontal,
     LayoutTreeActionType.SplitVertical,
+    LayoutTreeActionType.Minimize,
+    LayoutTreeActionType.Restore,
 ]);
 
 export function isIntentAction(type: LayoutTreeActionType): boolean {
@@ -114,6 +119,10 @@ export function intentForAction(action: LayoutTreeAction): LayoutIntent | null {
                 focused: !!a.focused,
             };
         }
+        case LayoutTreeActionType.Minimize:
+            return { type: "minimize", nodeId: (action as LayoutTreeMinimizeNodeAction).nodeId };
+        case LayoutTreeActionType.Restore:
+            return { type: "restore", nodeId: (action as LayoutTreeMinimizeNodeAction).nodeId };
         case LayoutTreeActionType.ClearTree:
             return { type: "clear" };
         case LayoutTreeActionType.FocusNode:
@@ -151,6 +160,12 @@ export function applyLayoutAction(state: LayoutTreeState, action: LayoutTreeActi
             break;
         case LayoutTreeActionType.MagnifyNodeToggle:
             magnifyNodeToggle(state, action as LayoutTreeMagnifyNodeToggleAction);
+            break;
+        case LayoutTreeActionType.Minimize:
+            minimizeNode(state, action as LayoutTreeMinimizeNodeAction);
+            break;
+        case LayoutTreeActionType.Restore:
+            restoreNode(state, action as LayoutTreeMinimizeNodeAction);
             break;
         case LayoutTreeActionType.ClearTree:
             clearTree(state);

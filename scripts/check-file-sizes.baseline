@@ -35,7 +35,7 @@
 2241 crates/srv/src/server/agent_handlers/input.rs
 1777 crates/srv/src/server/app_api/agent_open.rs
 1562 crates/srv/src/server/editor_handlers.rs
-2112 crates/srv/src/server/muxspect_handlers.rs
+2108 crates/srv/src/server/muxspect_handlers.rs
 1653 crates/srv/src/server/native_memory_handlers.rs
 2804 crates/srv/src/server/reactive.rs
 1598 crates/srv/src/server/ui_handlers.rs

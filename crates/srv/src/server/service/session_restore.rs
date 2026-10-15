@@ -805,6 +805,7 @@ mod tests {
                 },
             ],
             data: None,
+            minimized: false,
             extra: Default::default(),
         };
         seed_layout_via_reducer(&state, &tab_id, tree, "left".into(), Vec::new(), String::new())
@@ -917,6 +918,7 @@ mod tests {
                 },
             ],
             data: None,
+            minimized: false,
             extra: Default::default(),
         };
         // "left" pane is magnified.

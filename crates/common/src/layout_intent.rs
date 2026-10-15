@@ -124,6 +124,17 @@ pub enum LayoutIntent {
         #[serde(default)]
         focused: bool,
     },
+    /// Show a leaf as a header chip; its size is kept. Refused for the last
+    /// pane still showing content.
+    Minimize {
+        #[serde(rename = "nodeId")]
+        node_id: String,
+    },
+    /// Show a minimized leaf again.
+    Restore {
+        #[serde(rename = "nodeId")]
+        node_id: String,
+    },
     /// Empty the tree.
     Clear,
     /// No tree change: only the focused and magnified pane, which travel
@@ -144,6 +155,8 @@ impl LayoutIntent {
             Self::Replace { .. } => "replace",
             Self::SplitHorizontal { .. } => "splithorizontal",
             Self::SplitVertical { .. } => "splitvertical",
+            Self::Minimize { .. } => "minimize",
+            Self::Restore { .. } => "restore",
             Self::Clear => "clear",
             Self::View => "view",
         }

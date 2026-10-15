@@ -266,7 +266,7 @@ fn balance_column_dissolve_suppresses_direction_flip() {
 /// derived at render, stored size untouched).
 fn minimized_leaf(id: &str, block_id: &str, size: f32) -> LayoutNode {
     let mut node = leaf(id, block_id, size);
-    node.extra.insert("minimized".into(), serde_json::Value::Bool(true));
+    node.minimized = true;
     node
 }
 
@@ -354,7 +354,7 @@ fn validate_invariants_flags_display_mode_flag_on_branch() {
         DEFAULT_NODE_SIZE,
         vec![leaf("l1", "b1", 100.0), leaf("l2", "b2", 100.0)],
     );
-    branch.extra.insert("minimized".into(), serde_json::Value::Bool(true));
+    branch.minimized = true;
     let root = Some(group(
         "root",
         FlexDirection::Row,
@@ -746,7 +746,7 @@ fn insert_node_never_promotes_a_minimized_leaf() {
     // corruption this guards against.
     fn assert_not_corrupted(node: &LayoutNode) {
         if !node.children.is_empty() {
-            assert!(!node.extra.contains_key("minimized"), "branch {} carries minimized", node.id);
+            assert!(!node.minimized, "branch {} carries minimized", node.id);
         }
         for c in &node.children {
             assert_not_corrupted(c);
@@ -832,6 +832,25 @@ fn delete_node_collapses_single_child_parent() {
     // root is now the "keep" leaf.
     assert_eq!(root.children.len(), 0);
     assert_eq!(root.data.as_ref().map(|d| d.block_id.as_str()), Some("keep"));
+}
+
+#[test]
+fn delete_node_keeps_the_promoted_leafs_minimized_flag() {
+    let mut kept = leaf("n1", "keep", 5.0);
+    kept.minimized = true;
+    let mut root = group("root", FlexDirection::Row, 10.0, vec![kept, leaf("n2", "drop", 5.0)]);
+    delete_node(&mut root, "n2").unwrap();
+    assert_eq!(root.id, "n1");
+    assert!(root.minimized, "the promoted leaf stays minimized");
+}
+
+#[test]
+fn a_promoted_leaf_hands_its_minimized_flag_to_the_new_intermediate() {
+    let mut node = leaf("n1", "b1", 5.0);
+    node.minimized = true;
+    ensure_group_node(&mut node);
+    assert!(!node.minimized, "the new group carries no flag");
+    assert!(node.children[0].minimized && node.children[0].id == "n1");
 }
 
 #[test]

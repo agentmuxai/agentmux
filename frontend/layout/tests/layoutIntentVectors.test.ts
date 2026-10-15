@@ -70,6 +70,10 @@ function actionFor(intent: LayoutIntent, root: LayoutNode | undefined): LayoutTr
                 sizeFraction: intent.sizeFraction,
                 focused: intent.focused,
             } as LayoutTreeAction;
+        case "minimize":
+            return { type: LayoutTreeActionType.Minimize, nodeId: intent.nodeId } as LayoutTreeAction;
+        case "restore":
+            return { type: LayoutTreeActionType.Restore, nodeId: intent.nodeId } as LayoutTreeAction;
         case "clear":
             return { type: LayoutTreeActionType.ClearTree } as LayoutTreeAction;
         case "view":
@@ -94,7 +98,7 @@ function step(state: LayoutTreeState, actionId: string, intent: LayoutIntent): v
 describe("layout intent vectors (srv's results, replayed by the frontend's reducer)", () => {
     it("the vectors cover every intent", () => {
         const kinds = new Set(vectors.flatMap((v) => v.steps.map((s) => s.intent.type)));
-        for (const k of ["insert", "insertatindex", "delete", "move", "swap", "resize", "replace", "splithorizontal", "splitvertical"]) {
+        for (const k of ["insert", "insertatindex", "delete", "move", "swap", "resize", "replace", "splithorizontal", "splitvertical", "minimize", "restore"]) {
             expect(kinds).toContain(k);
         }
     });

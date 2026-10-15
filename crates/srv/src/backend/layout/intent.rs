@@ -57,6 +57,8 @@ pub struct ViewEffect {
     pub magnify: Option<String>,
     /// Clear focus if it is this node (a delete).
     pub unfocus: Option<String>,
+    /// Clear magnify if it is this node (a minimize).
+    pub unmagnify: Option<String>,
     /// Clear focus and magnify (a clear).
     pub clear: bool,
 }
@@ -130,6 +132,11 @@ fn apply_unbalanced(
                 effect.focus = Some(new_id);
             }
         }
+        LayoutIntent::Minimize { node_id } => {
+            set_minimized(tree_mut(root)?, &node_id, true)?;
+            effect.unmagnify = Some(node_id);
+        }
+        LayoutIntent::Restore { node_id } => set_minimized(tree_mut(root)?, &node_id, false)?,
         LayoutIntent::Clear => {
             *root = None;
             effect.clear = true;
@@ -172,7 +179,7 @@ fn new_node(
     data: Option<LayoutNodeData>,
     ids: &mut NodeIds,
 ) -> LayoutNode {
-    LayoutNode { id: ids.next(), flex_direction, size, children, data, extra: Default::default() }
+    LayoutNode { id: ids.next(), flex_direction, size, children, data, ..Default::default() }
 }
 
 // ── layoutNode.ts primitives ────────────────────────────────────────────────
@@ -206,9 +213,7 @@ fn add_intermediate_node(node: &mut LayoutNode, ids: &mut NodeIds) {
     let mut intermediate = if node.data.is_some() {
         let mut leaf = new_node(reverse(node.flex_direction), DEFAULT_NODE_SIZE, Vec::new(), node.data.take(), ids);
         // `minimized` belongs to the content, not the branch it becomes.
-        if let Some(flag) = node.extra.remove("minimized") {
-            leaf.extra.insert("minimized".into(), flag);
-        }
+        leaf.minimized = std::mem::take(&mut node.minimized);
         leaf
     } else {
         let inner = new_node(node.flex_direction, DEFAULT_NODE_SIZE, std::mem::take(&mut node.children), None, ids);
@@ -483,6 +488,30 @@ fn new_node_group(direction: FlexDirection, size: f32, children: Vec<LayoutNode>
     new_node(direction, size, children, None, ids)
 }
 
+/// `minimizeNode` / `restoreNode`: set a leaf's display-mode flag. Minimizing
+/// the last pane still showing content is refused: the window always keeps
+/// one (`countExpandedLeaves`, layoutMinimize.ts).
+fn set_minimized(tree: &mut LayoutNode, node_id: &str, minimized: bool) -> Result<(), LayoutError> {
+    let expanded = expanded_leaves(tree);
+    let node = find_node_by_id_mut(tree, node_id).ok_or_else(|| not_found(node_id))?;
+    if !node.children.is_empty() {
+        return Err(LayoutError::Refused(format!("{node_id} is not a pane (minimize is leaf-only)")));
+    }
+    if minimized && !node.minimized && expanded <= 1 {
+        return Err(LayoutError::Refused(format!("{node_id} is the last pane showing content")));
+    }
+    node.minimized = minimized;
+    Ok(())
+}
+
+/// Leaves still showing content.
+fn expanded_leaves(node: &LayoutNode) -> usize {
+    if node.children.is_empty() {
+        return usize::from(node.data.is_some() && !super::is_node_locked(node));
+    }
+    node.children.iter().map(expanded_leaves).sum()
+}
+
 // ── Legacy minimize fields (`rebuildMinimizedSet`, layoutMinimize.ts) ───────
 
 /// Migrate the pre-display-mode minimize fields to the `minimized` flag, as the
@@ -500,14 +529,14 @@ fn migrate_node(node: &mut LayoutNode, sane_share: f32) -> usize {
             if let Some(size) = original.as_f64() {
                 node.size = size as f32;
             }
-            node.extra.insert("minimized".into(), true.into());
+            node.minimized = true;
         }
         migrated += 1;
     }
     if node.extra.remove("slipMinimize").is_some() {
         node.size = sane_share;
         if is_leaf {
-            node.extra.insert("minimized".into(), true.into());
+            node.minimized = true;
         }
         migrated += 1;
     }

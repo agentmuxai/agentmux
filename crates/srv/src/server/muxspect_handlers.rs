@@ -2036,11 +2036,7 @@ mod tests {
                 }),
                 ..Default::default()
             };
-            if minimized {
-                // Round-trips through `extra`, not a typed field — same as
-                // the frontend writes it.
-                n.extra.insert("minimized".to_string(), json!(true));
-            }
+            n.minimized = minimized;
             n
         }
 
