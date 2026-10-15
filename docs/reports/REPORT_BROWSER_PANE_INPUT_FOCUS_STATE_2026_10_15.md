@@ -10,11 +10,11 @@
 ## Summary
 
 - **No one owns input for a browser pane.** On Windows, about a dozen places in host Rust, frontend TypeScript and Chromium decide where keys go. Nothing records which surface should have the keyboard, and nothing checks that Win32 agrees. Wheel and click routing is a separate mechanism (window z-order, rect and clip region) with no owner at all.
-- **In this incident the wheel failure was a hit-testing problem, not a keyboard-focus problem.** From 12:50 to 13:04:30 UTC no wheel message and no click reached any window of the stuck pane (`a2958da2`). Two clicks on it reached the app UI's placeholder under the page instead. Keyboard focus moved to and from the pane normally the whole time. The pane took the wheel again 0.5 s after the tab switch re-sent its rect, which also raises its window to the top.
-- **Likely mechanism, medium-low confidence:** something in the main window's own HWND tree sat above the pane's window. The page stayed visible but no longer received pointer input. The pane's z-order is set only as a side effect of creating or moving it. The frontend never re-sends an unchanged rect, so nothing re-raised it until the tab switch. The window was hidden and shown at 13:02:12, which may be the trigger. This is unverified: the log has no z-order data. §9 lists the one diagnostic that would settle it.
+- **In this incident the wheel failure was a hit-testing problem, not a keyboard-focus problem.** For about 15 minutes no wheel message and no click reached any window of the stuck pane. Two clicks on it reached the app UI's placeholder under the page instead. Keyboard focus moved to and from the pane normally the whole time. The pane took the wheel again half a second after a tab switch re-sent its rect, which also raises its window to the top.
+- **Likely mechanism, medium-low confidence:** something in the main window's own HWND tree sat above the pane's window. The page stayed visible but no longer received pointer input. The pane's z-order is set only as a side effect of creating or moving it. The frontend never re-sends an unchanged rect, so nothing re-raised it until the tab switch. The window was hidden and shown about two minutes before the operator noticed, which may be the trigger. This is unverified: the log has no z-order data. §9 lists the one diagnostic that would settle it.
 - **For keyboard routing, the code has at least five ways to leave keys in a pane the user can't see, or nowhere** (§3.2). The two most direct:
   - Switching window tabs collapses a focused pane to 0×0 without moving focus.
-  - The `WM_ACTIVATE` restore picks a child window without checking the frontend's selection, and Chromium undoes it within 0.2 ms; the log shows this at 13:02:11.
+  - The `WM_ACTIVATE` restore picks a child window without checking the frontend's selection, and Chromium undoes it within a millisecond; the incident log shows this.
   - The rest come from the single global one-shot "allow focus" flag and an off-thread `SetFocus`.
 - **Nothing merged after 0.59.26 changes Windows input routing** (§4).
 - **Recommendation:** one host-side input-owner state machine per window, owning both the keyboard owner and the pointer-surface invariants:
@@ -26,45 +26,44 @@
 
 ## 1. What the operator saw, and what the log shows
 
-Source: the operator's host log for 0.59.26 (2026-10-15, timestamps UTC). The `[pane-wndproc]` lines are logged for every wheel and key message that reaches a subclassed pane window (`hwnd.rs:422-433`), so their absence is meaningful.
+Source: the operator's host log for this build. This section describes it rather than quoting it: panes are "A", "B" and
+"C", and times are relative to T0, when the operator came back to the window after about 11 minutes away. The
+`[pane-wndproc]` lines are logged for every wheel and key message that reaches a subclassed pane window
+(`hwnd.rs:422-433`), so their absence is meaningful.
 
-Pane windows, matched from creation and load lines:
+Three browser panes were open: A (the one that got stuck) and B in one window tab, C in another.
 
-| block | window tab | Chrome widget HWND | page HWND (wheel target) |
-|---|---|---|---|
-| `a2958da2` (the stuck pane) | `e46ccbd0` | `0x5e1e3e` | `0xa31e4e` |
-| `c6888002` | `e46ccbd0` | `0x14310e8` | `0x7af0dca` |
-| `7b792679` (scrolled during recovery) | `99324eb0` | `0x621444` | `0x471d88` |
-
-Main window: top-level `0x54a0582`, main render widget `0x9a20a32`.
-
-Timeline:
-
-| time (UTC) | line (trimmed) | meaning |
+| time | what the log shows | meaning |
 |---|---|---|
-| 12:49:42 | `tab-reveal whole-tab target=e46ccbd0` | the pane's tab becomes active |
-| 12:50:10–12:50:12 | `DragStarted` / `DragEnded outcome=Cancelled`, then `moveNode` | a pane drag, then a layout move in that tab |
-| 12:50:23 | `[drag-snapshot] size 717x1755 != pane 0x0; dropped` | the page's real size matched the new layout; the placeholder was 0×0 for a moment |
-| 12:51:02 | `WM_KILLFOCUS hwnd=0x14310e8` | the window loses activation (operator away for 11 min) |
-| 13:02:11.3758 | `WM_SETFOCUS allowed (intentional)` on `0x14310e8` | the activation restore gives `c6888002` the keys... |
-| 13:02:11.3766 | `WM_KILLFOCUS hwnd=0x14310e8` | ...and Chromium's own activation handling takes them back 0.8 ms later |
-| 13:02:11.3798 | `[ipc] browser_pane_focus block_id=c6888002` | the frontend's window-focus net puts them back |
-| 13:02:12.36 → .73 | `[wave-turn] ... visibility: visible→hidden`, then back | the main window was hidden and shown |
-| 13:03:23.109–.224 | 4× `browser_pane_focus block_id=a2958da2`, 3× `giveFocus` | the operator selects the stuck pane; only one `WM_SETFOCUS` follows |
-| 13:03:27 | `main-focus-reclaim ... target=0x9a20a32` | a click elsewhere takes the keys back |
-| 13:03:31 | the same pattern again (4 IPCs, 3 `giveFocus`) | second attempt on the stuck pane |
-| 13:04:27.39 | `browser_pane_focus block_id=d1f989aa`, `tab-reveal ... 99324eb0` | switch to the other tab |
-| 13:04:28.62 | `mouse-wheel hwnd=0x471d88` (22 messages) | wheel works in the other tab's pane |
-| 13:04:30.93 | `tab-reveal whole-tab target=e46ccbd0` | back to the first tab |
-| 13:04:31.37 | `mouse-wheel hwnd=0xa31e4e` (10, then 78 at 13:07) | the stuck pane takes the wheel again |
+| T0 − 12 min | a pane drag, cancelled, then a layout move in A's tab | the layout changed; A's placeholder was briefly 0×0 |
+| T0 − 11 min | `WM_KILLFOCUS` on B | the window lost activation |
+| T0 | `WM_SETFOCUS allowed (intentional)` on B, then `WM_KILLFOCUS` on B 0.8 ms later, then `browser_pane_focus` for B | the activation restore gave B the keys, Chromium's own activation handling took them back, and the frontend's window-focus net put them back |
+| T0 + 1 s | the main window's visibility went hidden, then visible, within 0.4 s | the window was hidden and shown |
+| T0 + 72 s | 4× `browser_pane_focus` for A, 3× `giveFocus`, one `WM_SETFOCUS` | the operator selects A |
+| T0 + 76 s | `main-focus-reclaim` | a click elsewhere takes the keys back |
+| T0 + 80 s | the same pattern for A again | a second attempt on A |
+| T0 + 136 s | `browser_pane_focus` for another pane, then a tab reveal of C's tab | switch to the other tab |
+| T0 + 137 s | 22 `mouse-wheel` messages at C's page window | the wheel works in C |
+| T0 + 140 s | a tab reveal of A's tab | back to the first tab |
+| T0 + 140.4 s | `mouse-wheel` at A's page window, the same window as before | A takes the wheel again |
 
 What this establishes:
 
-- **The wheel never reached the stuck pane.** Its page window got no `WM_MOUSEWHEEL` between 10:43 and 13:04:31, and the post-recovery wheel went to the same HWND (`0xa31e4e`), so the window wasn't replaced in between.
-- **Clicks didn't reach it either.** There is no `emit-clicked` for any pane after 12:38. A native click on a pane always logs one (`hwnd.rs:444-459`). Each selection at 13:03:23 and 13:03:31 produced four `browser_pane_focus` calls but only three `giveFocus` lines. The fourth fits the placeholder's DOM `onMouseDown` (`browser-view.tsx:392-408`), which fires only when the click lands on the app UI under the page, not on the page's window. (Inference: the log doesn't say which call came from where.)
-- **Keyboard focus did move as asked.** Each request produced `WM_SETFOCUS allowed` on the pane, and each click elsewhere produced `WM_KILLFOCUS` plus a main reclaim. No key messages were logged after 12:47, so this incident says nothing about typing.
-- **No overlay-clip call happened between 13:03:38 and the recovery.** A stale `SetWindowRgn` hole is not the cause: the tab switch doesn't touch the clip region, yet it fixed the pane.
-- **The recovery coincides with the tab switch re-sending the pane's rect.** The rect goes to 0×0 on the hidden tab (`use-pane-rect-sync.ts:157`) and back on the visible one. `apply_windows` moves the wrapper with `DeferWindowPos` and a null insert-after, which raises it to the top of its siblings (`bounds.rs:426-437`).
+- **The wheel never reached A.** Its page window got no `WM_MOUSEWHEEL` for over two hours before the recovery, and
+  the post-recovery wheel went to the same window, so the window wasn't replaced in between.
+- **Clicks didn't reach it either.** There is no `emit-clicked` for any pane in the 25 minutes before the recovery. A
+  native click on a pane always logs one (`hwnd.rs:444-459`). Each selection of A produced four `browser_pane_focus`
+  calls but only three `giveFocus` lines. The fourth fits the placeholder's DOM `onMouseDown`
+  (`browser-view.tsx:392-408`), which fires only when the click lands on the app UI under the page, not on the page's
+  window. (Inference: the log doesn't say which call came from where.)
+- **Keyboard focus did move as asked.** Each request produced `WM_SETFOCUS allowed` on the pane, and each click
+  elsewhere produced `WM_KILLFOCUS` plus a main reclaim. No key messages were logged near the incident, so this
+  incident says nothing about typing.
+- **No overlay-clip call happened between the second selection and the recovery.** A stale `SetWindowRgn` hole is not
+  the cause: the tab switch doesn't touch the clip region, yet it fixed the pane.
+- **The recovery coincides with the tab switch re-sending the pane's rect.** The rect goes to 0×0 on the hidden tab
+  (`use-pane-rect-sync.ts:157`) and back on the visible one. `apply_windows` moves the wrapper with `DeferWindowPos` and
+  a null insert-after, which raises it to the top of its siblings (`bounds.rs:426-437`).
 
 ## 2. How input reaches a browser pane today
 
@@ -163,19 +162,19 @@ Ownership is split three ways, and two owners often act on the same event:
 |---|---|---|
 | G1 | **Two models of focus, no feedback.** The frontend's model is layout selection plus `document.activeElement`. Win32's is the focused HWND. The host never tells the frontend which surface actually has the keys. The frontend uses `document.hasFocus()` as a proxy, and that is false whenever a pane holds the keys | `focusManager.ts:89,183-185` |
 | G2 | **Collapsing a focused pane never moves focus (S3).** A window-tab switch or pane-tab switch sends 0×0. F4's "tab-activated" bails because the main document isn't focused, so the hidden pane keeps the keyboard. Browser panes have no `onDeactivate` | `use-pane-rect-sync.ts:157`, `focusManager.ts:89,353`, `browser.tsx:34-44` |
-| G3 | **The `WM_ACTIVATE` restore is undone by Chromium and can target the wrong pane.** It calls `SetFocus` before CEF's own `WM_ACTIVATE` handling, which then takes focus back (log 13:02:11 and 13:02:12, under 1 ms). It doesn't check that the child is a visible, selected pane. It arms the global flag even when the child is the main render widget, which has no subclass to consume it | `wndproc.rs:244-271`, `:315-319` |
-| G4 | **One global one-shot flag stands in for "intent".** Every `browser_pane_focus`, every pane click and every activation restore arms it, for any pane. Whichever pane's `WM_SETFOCUS` comes next consumes it. Repeated requests leave it armed: four requests at 13:03:23 produced one `WM_SETFOCUS`, so the flag stayed armed for about 8 s, and any page's `focus()` in that window would have been let through and recorded as intentional | `hwnd.rs:190,445,497`, `clip.rs:431`, log 13:03:23 |
+| G3 | **The `WM_ACTIVATE` restore is undone by Chromium and can target the wrong pane.** It calls `SetFocus` before CEF's own `WM_ACTIVATE` handling, which then takes focus back (the incident log, under 1 ms). It doesn't check that the child is a visible, selected pane. It arms the global flag even when the child is the main render widget, which has no subclass to consume it | `wndproc.rs:244-271`, `:315-319` |
+| G4 | **One global one-shot flag stands in for "intent".** Every `browser_pane_focus`, every pane click and every activation restore arms it, for any pane. Whichever pane's `WM_SETFOCUS` comes next consumes it. Repeated requests leave it armed: four requests in the incident produced one `WM_SETFOCUS`, so the flag stayed armed for seconds, and any page's `focus()` in that window would have been let through and recorded as intentional | `hwnd.rs:190,445,497`, `clip.rs:431`, §1 |
 | G5 | **`browser_pane_focus` calls Win32 `SetFocus` from a tokio worker.** Win32 `SetFocus` fails for a window owned by another thread's queue, so focus depends on CEF's own posted `SetFocus`. `main_window_focus` is correctly marshalled. This is inferred from the Win32 contract; the log can't tell the two `SetFocus` calls apart | `ipc.rs:713-717`, `clip.rs:435-437`, vs `ipc.rs:1094-1102` |
 | G6 | **A refused redirect swallows `WM_SETFOCUS` (S4).** `WM_SETFOCUS` reports a change that has already happened. Returning 0 without calling Chromium leaves the pane holding Win32 focus while Chromium thinks it is blurred, so keys go nowhere. Redirects and refusals are not logged | `hwnd.rs:515-522` |
 | G7 | **Nothing verifies the outcome.** `WM_KILLFOCUS` is only logged. No `GetFocus()` check after a transition, no `on_got_focus`, no `on_take_focus` | `hwnd.rs:429-431`, `handlers.rs:148-174` |
-| G8 | **Many uncoordinated requesters; last writer wins.** Logged: 3 `giveFocus` per selection, 2 `main_window_focus` per click. F6 reclaims on every `focusin`, as INCIDENT_2026_10_07 already noted | log 12:50:05, 13:03:23, 13:03:27; `block.tsx:266-289` |
+| G8 | **Many uncoordinated requesters; last writer wins.** Logged: 3 `giveFocus` per selection, 2 `main_window_focus` per click. F6 reclaims on every `focusin`, as INCIDENT_2026_10_07 already noted | §1; `block.tsx:266-289` |
 | G9 | **Pointer routing has no owner (S8).** Z-order is set only at create and on rect changes. The frontend never re-sends an unchanged rect, and nothing re-raises after a window hide, show or activation. Nothing checks `WindowFromPoint` over a pane | `callbacks.rs:275-284`, `bounds.rs:426-437`, `use-pane-rect-sync.ts:158-166` |
-| G10 | **Overlay clips can apply out of order.** Requests are fire-and-forget and run on any tokio worker. The log shows overlapping applies on threads 3, 17, 32 and 34 at 12:50:09–12:50:11. The per-pane cache lock makes each apply atomic, not ordered. A late stale clip leaves a hole that eats pointer input over part of a pane, and the frontend's dedupe never re-sends the clear. Not the cause here (§1) | `pane-overlay.ts:204`, `clip.rs:58-350`, log 12:50:11.29–.30 |
+| G10 | **Overlay clips can apply out of order.** Requests are fire-and-forget and run on any tokio worker. The incident log shows overlapping applies on four different worker threads within two seconds. The per-pane cache lock makes each apply atomic, not ordered. A late stale clip leaves a hole that eats pointer input over part of a pane, and the frontend's dedupe never re-sends the clear. Not the cause here (§1) | `pane-overlay.ts:204`, `clip.rs:58-350` |
 | G11 | **Logs can't map HWND to pane.** `[pane-subclass]` logs the HWND without the block id. A child HWND that Chromium recreates without a navigation is never subclassed, so its input is neither redirected nor logged | `hwnd.rs:554,583`, `callbacks.rs:496-511` |
 
 ### 3.3 The most likely mechanism for each symptom
 
-- **Wheel stuck until a tab switch (this incident).** High confidence it is pointer hit-testing (S8), not keyboard focus: see §1. Medium-low confidence on the trigger. The leading candidate is a child of the main window ending up above the pane's wrapper during the 13:02:12 hide and show. Chromium manages its own child windows and may reposition them on show or resize. The pane stays visible because that window doesn't paint over it. The pane is re-raised only when its rect changes (G9), which is exactly what the tab switch did. The other candidate is a stale wrapper position after the 12:50:12 layout move: the frontend thinks the rect was sent, the host dropped or misapplied it, and dedupe never re-sends it. The size seen at 12:50:23 makes that less likely. Either way, the code has no check that would catch it.
+- **Wheel stuck until a tab switch (this incident).** High confidence it is pointer hit-testing (S8), not keyboard focus: see §1. Medium-low confidence on the trigger. The leading candidate is a child of the main window ending up above the pane's wrapper during the hide and show at T0 + 1 s. Chromium manages its own child windows and may reposition them on show or resize. The pane stays visible because that window doesn't paint over it. The pane is re-raised only when its rect changes (G9), which is exactly what the tab switch did. The other candidate is a stale wrapper position after the layout move at T0 − 12 min: the frontend thinks the rect was sent, the host dropped or misapplied it, and dedupe never re-sends it. The page size logged just after the move makes that less likely. Either way, the code has no check that would catch it.
 - **Keystrokes don't reach the pane, or go elsewhere.** Nothing in this incident's log, so this is from code reading. The most direct paths, in rough order of likelihood:
   - G2: switch window tabs while a browser pane has the keys, and they stay with the hidden pane.
   - G3: activation hands the keys to whichever pane was last recorded; Chromium then takes them back and the frontend's 100 ms net puts them somewhere else.
@@ -344,9 +343,9 @@ Decide on #4430 (Views overlays on Windows) before P2: it would replace the HWND
 
 ## 9. Open questions
 
-1. **What blocked the pointer at 13:02–13:04?** A z-order dump of the main window's children, with P0's `input_focus_dump` during the next occurrence, would show whether a main child sat above the wrapper. A live test in a dev build would also answer it: minimize and restore, then check that the wheel reaches the pane. Until then §3.3 is a hypothesis.
+1. **What blocked the pointer between T0 and the recovery?** A z-order dump of the main window's children, with P0's `input_focus_dump` during the next occurrence, would show whether a main child sat above the wrapper. A live test in a dev build would also answer it: minimize and restore, then check that the wheel reaches the pane. Until then §3.3 is a hypothesis.
 2. Is "scroll inactive windows" on (the Windows default) on the operator's machine? It doesn't change the conclusion, since no wheel reached the pane either way, but it matters for the design's wheel assumptions.
-3. Were the 13:03:23 and 13:03:31 clicks on the page body (as the extra IPC suggests) or on the pane header? The frontend could log the placeholder `onMouseDown` to settle this next time.
+3. Were the two clicks on A (as the extra IPC suggests) or on the pane header? The frontend could log the placeholder `onMouseDown` to settle this next time.
 4. Does CEF's `host.set_focus(1)` already call Win32 `SetFocus` on the pane's widget? If so, G5's off-thread call is only redundant, not harmful. Check in a dev build with the P0 logging.
 5. When the window is activated, should the keyboard go to the frontend's selection or to the last Win32 owner? The design says the selection; today K9 uses the last owner.
 6. Should a page's own `focus()` ever take the keyboard from the app, for example an OAuth page focusing its password field when the user just clicked it? The table allows it only under a pending user intent for that pane.

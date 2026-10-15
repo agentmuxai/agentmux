@@ -1,6 +1,7 @@
 # Browser pane input owner: one state machine per window
 
-**Status:** draft. Phase 1 (the pure machine) built with this spec; Phases 2 to 4 not yet built.
+**Status:** active. Phase 1, the pure machine (`crates/cef/src/input_owner/`), built in #4970. Phases 2 to 4 (the
+Windows adapter, the frontend contract, the macOS and Linux adapters) not yet built.
 **Date:** 2026-10-15.
 **Requested by:** repo owner (asafebgi), after a browser pane stopped taking the wheel and typing until a tab switch:
 "we need really rigorous state machine for the browser's input focus … take the lead, design the machine and implement".
@@ -69,14 +70,14 @@ Surface = App | Pane(block) | Elsewhere      // where Win32 focus was seen
 | `Activated` / `Deactivated` | top-level `WM_ACTIVATE`, posted to run after CEF's own handling |
 | `WindowShown` | top-level `WM_SHOWWINDOW` / restore |
 | `PaneLive` / `PaneShown` / `PaneCollapsed` / `PaneClosing` / `PaneGone` | pane create, rect apply (0×0 is collapsed), close |
-| `Verify(surface)` | the posted check: `GetFocus()` mapped to a surface |
+| `Verify { seq, surface }` | the posted check: `GetFocus()` mapped to a surface. Only the latest check asked for counts; an older `seq` belongs to an earlier request and is ignored |
 
 | Effect | What the adapter does, on the UI thread |
 |---|---|
 | `FocusApp` | `set_focus(1)` on the window's browser, Win32 `SetFocus` on its render widget, `set_focus(0)` on its panes |
 | `FocusPane(b)` | `set_focus(1)` on b, Win32 `SetFocus` on b's window |
 | `RaisePanes` | `SetWindowPos(HWND_TOP, no move/size/activate)` on every live, shown pane of the window |
-| `Verify { after_ms }` | post a delayed check that sends `Verify(surface)` |
+| `Verify { seq, after_ms }` | post a delayed check that sends `Verify { seq, surface }` |
 | `Warn(reason)` | log a warning with the window's state |
 
 ### 3.3 Transitions
@@ -103,10 +104,12 @@ closing). A selection that isn't usable falls back to `App` when it is applied.
 | `PaneLive(b)` / `PaneShown(b)` | b is `want`, chosen within 1.5 s, window active, not owned | `Pending(b)` | `FocusPane(b)`, `Verify(50)` |
 | `PaneCollapsed(b)` | b owns or is pending | `Pending(App)` | `FocusApp`, `Verify(50)`. Showing b again doesn't take the keys back by itself: the frontend's selection, now that the app has them, decides (`focusManager.ts`) |
 | `PaneClosing(b)` / `PaneGone(b)` | b owns or is pending | `Pending(App)`, `want = App` if it was b | `FocusApp`, `Verify(50)` |
-| `Verify(s)` | `Pending(t)` and `s == t` | `Owned(t)` | none |
+| `Verify(s)` | `seq` isn't the latest asked for | unchanged | none |
+| | `Pending(t)` and `s == t` | `Owned(t)` | none |
 | | `Pending(t)`, mismatch, attempt < 2 | `Pending(t, attempt + 1)` | `focus(t)`, `Verify(50)` |
 | | `Pending(t)`, mismatch, attempt = 2 | `Owned(s)` | `Warn` |
-| | `restore_due` | `Pending(usable(want))` | `focus`, `Verify(50)` |
+| | `restore_due`, 100 ms since the last correction | `Pending(usable(want))` | `focus`, `Verify(50)` |
+| | `restore_due`, sooner | unchanged | `Verify(remaining)` |
 | | `Owned(o)`, `s != o` | `Owned(s)`; `want = App` if `s` is the app | none (drift recorded, not reversed) |
 
 ### 3.4 Invariants (checked by the tests after every step)

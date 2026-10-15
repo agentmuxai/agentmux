@@ -67,8 +67,9 @@ pub enum Event {
     PaneCollapsed(PaneId),
     PaneClosing(PaneId),
     PaneGone(PaneId),
-    /// The posted check: where the platform reports focus now.
-    Verify(Surface),
+    /// The posted check (`Effect::Verify`): where the platform reports focus now.
+    /// `seq` is the check's own; only the latest one asked for counts.
+    Verify { seq: u64, surface: Surface },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -80,8 +81,9 @@ pub enum Effect {
     /// Put every live, shown pane above the app's own child windows, so a visible
     /// pane takes its wheel and clicks.
     RaisePanes,
-    /// Check where focus is after this long, and send `Event::Verify`.
-    Verify { after_ms: u64 },
+    /// Check where focus is after this long, and send `Event::Verify` with this
+    /// `seq`. A later check makes this one stale.
+    Verify { seq: u64, after_ms: u64 },
     /// Something the machine couldn't make true, for the log.
     Warn(&'static str),
 }
@@ -113,6 +115,9 @@ pub struct WindowInput {
     /// put off by the rate limit and is still owed.
     pub last_restore_ms: Option<u64>,
     pub restore_due: bool,
+    /// The latest check asked for. A check that comes back with an older `seq`
+    /// belongs to an earlier request and is ignored.
+    pub verify_seq: u64,
 }
 
 impl Default for WindowInput {
@@ -125,6 +130,7 @@ impl Default for WindowInput {
             panes: BTreeMap::new(),
             last_restore_ms: None,
             restore_due: false,
+            verify_seq: 0,
         }
     }
 }
@@ -163,10 +169,24 @@ impl WindowInput {
         }
     }
 
+    /// Ask for a check after `after_ms`; any earlier check still out becomes stale.
+    fn schedule_verify(&mut self, after_ms: u64) -> Effect {
+        self.verify_seq += 1;
+        Effect::Verify { seq: self.verify_seq, after_ms }
+    }
+
     fn request(&mut self, target: Owner, attempt: u8) -> Vec<Effect> {
         let effect = focus_effect(&target);
         self.have = Have::Pending { target, attempt };
-        vec![effect, Effect::Verify { after_ms: VERIFY_AFTER_MS }]
+        vec![effect, self.schedule_verify(VERIFY_AFTER_MS)]
+    }
+
+    /// How long until a page's own focus may be corrected again; 0 if now.
+    fn restore_wait(&self, now_ms: u64) -> u64 {
+        match self.last_restore_ms {
+            Some(last) => RESTORE_MIN_INTERVAL_MS.saturating_sub(now_ms.saturating_sub(last)),
+            None => 0,
+        }
     }
 
     fn choose(&mut self, owner: Owner, now_ms: u64) {
@@ -181,7 +201,10 @@ impl WindowInput {
         }
         let target = self.usable(&self.want.clone());
         match &self.have {
-            Have::Owned(s) if *s == target.surface() => vec![Effect::Verify { after_ms: 0 }],
+            Have::Owned(s) if *s == target.surface() => {
+                let check = self.schedule_verify(0);
+                vec![check]
+            }
             Have::Pending { target: t, .. } if *t == target => vec![],
             _ => self.request(target, 0),
         }
@@ -190,13 +213,11 @@ impl WindowInput {
     /// Correct a page that took the keyboard on its own, at most once per
     /// `RESTORE_MIN_INTERVAL_MS`; a correction inside that time is put off, not dropped.
     fn restore(&mut self, observed: Surface, now_ms: u64) -> Vec<Effect> {
-        if let Some(last) = self.last_restore_ms {
-            let since = now_ms.saturating_sub(last);
-            if since < RESTORE_MIN_INTERVAL_MS {
-                self.have = Have::Owned(observed);
-                self.restore_due = true;
-                return vec![Effect::Verify { after_ms: RESTORE_MIN_INTERVAL_MS - since }];
-            }
+        let wait = self.restore_wait(now_ms);
+        if wait > 0 {
+            self.have = Have::Owned(observed);
+            self.restore_due = true;
+            return vec![self.schedule_verify(wait)];
         }
         self.last_restore_ms = Some(now_ms);
         self.restore_due = false;
@@ -273,7 +294,13 @@ impl WindowInput {
                 self.panes.remove(&b);
                 effects
             }
-            Event::Verify(s) => self.verify(s, now_ms),
+            Event::Verify { seq, surface } => {
+                if seq != self.verify_seq {
+                    // A check for an earlier request: a later one is on its way.
+                    return vec![];
+                }
+                self.verify(surface, now_ms)
+            }
         }
     }
 
@@ -322,12 +349,18 @@ impl WindowInput {
             return vec![];
         }
         if self.restore_due {
-            self.restore_due = false;
             let target = self.usable(&self.want.clone());
             if s == target.surface() {
+                self.restore_due = false;
                 self.have = Have::Owned(s);
                 return vec![];
             }
+            // The owed correction keeps to the same rate as any other.
+            let wait = self.restore_wait(now_ms);
+            if wait > 0 {
+                return vec![self.schedule_verify(wait)];
+            }
+            self.restore_due = false;
             self.last_restore_ms = Some(now_ms);
             return self.request(target, 0);
         }
@@ -393,6 +426,38 @@ impl fmt::Display for Have {
             Have::Unknown => write!(f, "unknown"),
             Have::Owned(s) => write!(f, "{s}"),
             Have::Pending { target, attempt } => write!(f, "pending({target}#{attempt})"),
+        }
+    }
+}
+
+impl fmt::Display for Event {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Event::Select(o) => write!(f, "select({o})"),
+            Event::PanePointerDown(b) => write!(f, "pane-pointer-down(pane:{})", short(b)),
+            Event::AppPointerDown => write!(f, "app-pointer-down"),
+            Event::FocusGained(s) => write!(f, "focus-gained({s})"),
+            Event::Activated => write!(f, "activated"),
+            Event::Deactivated => write!(f, "deactivated"),
+            Event::WindowShown => write!(f, "window-shown"),
+            Event::PaneLive(b) => write!(f, "pane-live(pane:{})", short(b)),
+            Event::PaneShown(b) => write!(f, "pane-shown(pane:{})", short(b)),
+            Event::PaneCollapsed(b) => write!(f, "pane-collapsed(pane:{})", short(b)),
+            Event::PaneClosing(b) => write!(f, "pane-closing(pane:{})", short(b)),
+            Event::PaneGone(b) => write!(f, "pane-gone(pane:{})", short(b)),
+            Event::Verify { seq, surface } => write!(f, "verify#{seq}({surface})"),
+        }
+    }
+}
+
+impl fmt::Display for Effect {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Effect::FocusApp => write!(f, "focus-app"),
+            Effect::FocusPane(b) => write!(f, "focus-pane:{}", short(b)),
+            Effect::RaisePanes => write!(f, "raise-panes"),
+            Effect::Verify { seq, after_ms } => write!(f, "verify#{seq}+{after_ms}ms"),
+            Effect::Warn(reason) => write!(f, "warn({reason})"),
         }
     }
 }
