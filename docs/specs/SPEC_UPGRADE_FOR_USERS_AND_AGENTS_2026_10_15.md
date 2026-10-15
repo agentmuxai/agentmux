@@ -45,7 +45,7 @@ an agent asking for something that affects the user),
 | Piece | State |
 |---|---|
 | Version panel (click the version chip) with a Maintenance section | Built (#1813). Shows the version, channel, commit and build; Maintenance shows migrations and vacuum |
-| "Update available" chip and the panel's update row | UI built (`UpdateStatus.tsx`, `MaintenanceSection.tsx`), never shown: nothing emits `app-update-status`, so `updaterStatusAtom` stays `up-to-date` |
+| "Update available" chip and the panel's update row | UI built (`UpdateStatus.tsx`, `MaintenanceSection.tsx`), never shown: the host never sends its updater status, so `updaterStatusAtom` stays `up-to-date`. Phase 1 feeds both from srv's `app:updatestatus` |
 | `install_update` | A host stub that logs and returns (`crates/cef/src/commands/stubs.rs`) |
 | Update check | None. GitHub Releases does publish every version with every installer kind (portable `.7z`, `setup.exe`, `.msix`, `.dmg`, `.deb`, `.rpm`, `.AppImage`, Linux portable `.tar.xz`) |
 | Launcher: stop srv cleanly, run migrations from a binary | `quiesce_srv` is live (every quit); `run_migration_upgrade` is written and has no caller (`crates/launcher/src/upgrade.rs`) |
@@ -194,9 +194,9 @@ purpose and are out of scope (`REPORT_AGENT_HISTORY_LOST_ON_NEW_BUILD_2026_09_25
 
 Each phase is small and useful on its own.
 
-1. **Detection and the chip.** The srv check, the `app-update-status` event,
-   the chip, and the panel's "What's new" with **Download from GitHub**
-   (opens the release page). This is enough for users to know.
+1. **Detection and the chip.** The srv check, the `app:updatestatus` event
+   and `app.update-status` command, the chip, and the panel's "What's new"
+   with **Download** (opens the release page). This is enough for users to know.
 2. **Data carries forward** (§6). Verify, then fix. Needed before any
    in-app upgrade.
 3. **In-app upgrade for the Windows portable and macOS.** Download, verify,
