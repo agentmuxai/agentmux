@@ -15,7 +15,7 @@ use cef::*;
 
 use crate::state::{AppState, BrowserPaneLifecycle};
 
-use super::machine::{Effect, Event, Owner, Surface};
+use super::machine::{Effect, Event, Have, Owner, Surface};
 use super::registry;
 
 /// When a step's effects run. `Now` only on the UI thread, at a point where
@@ -99,30 +99,54 @@ pub fn pane_focus_gained(state: &Arc<AppState>, block: &str) {
 /// `window` became the active window, or stopped being it (CEF Views
 /// `on_window_activation_changed`). On macOS a pane overlay is a key window of
 /// its own, so the window is reported inactive whenever one of its own pages
-/// takes the keyboard; that isn't the user leaving it. A deactivation counts
-/// once the key change has settled (posted) and neither the window nor one of
-/// its own pane overlays is key.
+/// takes the keyboard, and active again when the page gives it back; neither
+/// is the user leaving or returning. Decided once the key change has settled
+/// (posted):
+/// - a deactivation counts only if neither the window nor one of its own pane
+///   overlays is key;
+/// - an activation of a window still counted active is the keyboard coming
+///   back from its own page: focus arriving at the app, which doesn't ask for
+///   the selection again (nor overrides a pane asked for since);
+/// - a window whose page holds key hears nothing when another window takes
+///   it, so an activation deactivates every other window still counted active
+///   (`platform::others_active`): one window is key at a time.
 pub fn window_activation(state: &Arc<AppState>, window: &str, active: bool) {
-    if active {
-        dispatch(state, window, Event::Activated, Run::Posted);
-        return;
-    }
-    let mut task = DeactivationTask::new(state.clone(), window.to_string());
+    let mut task = ActivationTask::new(state.clone(), window.to_string(), active);
     post_task(ThreadId::UI, Some(&mut task));
 }
 
 wrap_task! {
-    struct DeactivationTask {
+    struct ActivationTask {
         state: Arc<AppState>,
         window: String,
+        active: bool,
     }
     impl Task {
         fn execute(&self) {
-            if platform::holds_key(&self.state, &self.window) {
-                tracing::debug!("[input] win={} deactivation ignored: it or one of its panes is key", self.window);
+            let (state, window) = (&self.state, self.window.as_str());
+            if !self.active {
+                if platform::holds_key(state, window) {
+                    tracing::debug!("[input] win={window} deactivation ignored: it or one of its panes is key");
+                    return;
+                }
+                dispatch(state, window, Event::Deactivated, Run::Posted);
                 return;
             }
-            dispatch(&self.state, &self.window, Event::Deactivated, Run::Posted);
+            if platform::key_came_back(window) {
+                // A hand-back the machine asked for may land after it has asked
+                // for a pane since: then it is no news, and the pane's request
+                // stands.
+                if matches!(registry::snapshot(window), Some((_, Have::Pending { target: Owner::Pane(_), .. }, _))) {
+                    tracing::debug!("[input] win={window} key came back while a pane is asked for; ignored");
+                } else {
+                    dispatch(state, window, Event::FocusGained(Surface::App), Run::Posted);
+                }
+                return;
+            }
+            for other in platform::others_active(window) {
+                dispatch(state, &other, Event::Deactivated, Run::Posted);
+            }
+            dispatch(state, window, Event::Activated, Run::Posted);
         }
     }
 }
@@ -290,6 +314,18 @@ mod platform {
         crate::ui_tasks::key_surface_of(ns_window(state, window)).is_some()
     }
 
+    /// `window` became key while its machine still counts it active: its own
+    /// page held the keyboard and gave it back (deactivations from that are
+    /// ignored, `holds_key`).
+    pub fn key_came_back(window: &str) -> bool {
+        registry::is_active(window)
+    }
+
+    /// The other windows still counted active: on macOS only one is key.
+    pub fn others_active(window: &str) -> Vec<String> {
+        registry::active_windows().into_iter().filter(|w| w != window).collect()
+    }
+
     pub fn note_focus(_window: &str, _surface: Surface) {}
 }
 
@@ -324,6 +360,14 @@ mod platform {
         false
     }
 
+    pub fn key_came_back(_window: &str) -> bool {
+        false
+    }
+
+    pub fn others_active(_window: &str) -> Vec<String> {
+        Vec::new()
+    }
+
     pub fn note_focus(window: &str, surface: Surface) {
         LAST.lock().insert(window.to_string(), surface);
     }
@@ -349,6 +393,14 @@ mod platform {
 
     pub fn holds_key(_state: &Arc<AppState>, _window: &str) -> bool {
         false
+    }
+
+    pub fn key_came_back(_window: &str) -> bool {
+        false
+    }
+
+    pub fn others_active(_window: &str) -> Vec<String> {
+        Vec::new()
     }
 
     pub fn note_focus(_window: &str, _surface: Surface) {}

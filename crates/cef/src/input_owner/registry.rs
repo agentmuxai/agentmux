@@ -64,6 +64,12 @@ pub fn is_active(window: &str) -> bool {
     OWNERS.lock().get(window).is_some_and(|w| w.active)
 }
 
+/// The windows whose machines count them as active.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn active_windows() -> Vec<String> {
+    OWNERS.lock().iter().filter(|(_, w)| w.active).map(|(k, _)| k.clone()).collect()
+}
+
 /// `window`'s machine as the diagnostics need it: whether it is active, where
 /// it last saw the keyboard, and its one-line description.
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
