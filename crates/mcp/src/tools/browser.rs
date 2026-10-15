@@ -204,7 +204,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 .and_then(|v| v.as_f64())
                 .map(|s| (s * 1000.0).round() as u64);
             if [text.is_some(), url_contains.is_some(), gone.is_some()].iter().filter(|b| **b).count() != 1 {
-                anyhow::bail!("give exactly one of text, url_contains or gone");
+                anyhow::bail!("give exactly one of until_text, until_url or until_gone");
             }
             let req_url = format!("{}/api/v1/ui/browser/wait_for", local_url.trim_end_matches('/'));
             let resp = client

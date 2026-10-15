@@ -56,13 +56,20 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 );
             }
             let mut out = browser::call(act.tool, &args, cx).await?;
+            // The action has run: a follow-up that fails is reported after its
+            // result, never instead of it, so the agent doesn't repeat a click
+            // that already submitted something.
             if follow_wait {
-                let waited = browser::call("BrowserWaitFor", &follow_wait_args(arguments), cx).await?;
-                out = format!("{out}\n\nwait: {waited}");
+                out = match browser::call("BrowserWaitFor", &follow_wait_args(arguments), cx).await {
+                    Ok(waited) => format!("{out}\n\nwait: {waited}"),
+                    Err(e) => format!("{out}\n\nwait failed (the {} itself was done): {e}", act.action),
+                };
             }
             if follow_snapshot {
-                let snap = browser::call("BrowserSnapshot", &only(arguments, &["pane", "scope"]), cx).await?;
-                out = format!("{out}\n\nsnapshot:\n{snap}");
+                out = match browser::call("BrowserSnapshot", &only(arguments, &["pane", "scope"]), cx).await {
+                    Ok(snap) => format!("{out}\n\nsnapshot:\n{snap}"),
+                    Err(e) => format!("{out}\n\nsnapshot failed (the {} itself was done): {e}", act.action),
+                };
             }
             Ok(out)
         }
