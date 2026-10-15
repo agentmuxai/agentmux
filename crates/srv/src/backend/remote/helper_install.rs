@@ -127,8 +127,9 @@ pub fn install_command(version: &str, tag: &str, sha256: &str) -> String {
 }
 
 /// Removes the helper from the host (SPEC_REMOTES_PANE_2026_10_05.md §4.9):
-/// ends every session each installed version's daemon holds, then deletes
-/// `~/.agentmux-remote`. The daemon, with no sessions left, exits on its own.
+/// ends every session each installed version's daemon holds and stops the
+/// daemon, then deletes `~/.agentmux-remote`. A helper older than `stop`
+/// ignores it, and its daemon, with no sessions left, exits within a minute.
 /// Prints `ok`.
 pub fn remove_command() -> String {
     sh("for p in \"$HOME\"/.agentmux-remote/bin/*/agentmux-remote; do \
@@ -136,6 +137,7 @@ pub fn remove_command() -> String {
           \"$p\" list 2>/dev/null | while read -r id rest; do \
             \"$p\" end --session \"$id\" >/dev/null 2>&1; \
           done; \
+          \"$p\" stop >/dev/null 2>&1; \
         done; \
         rm -rf \"$HOME/.agentmux-remote\" && echo ok")
 }
@@ -402,16 +404,18 @@ mod tests {
         assert!(probe.installed, "{probe:?}");
     }
 
-    /// Removing ends each session through the helper, then deletes its folder.
+    /// Removing ends each session through the helper, stops its daemon at
+    /// once rather than leaving it to exit idle a minute later (#4513), then
+    /// deletes its folder.
     #[cfg(unix)]
     #[test]
-    fn remove_ends_the_sessions_and_deletes_the_folder() {
+    fn remove_ends_the_sessions_stops_the_daemon_and_deletes_the_folder() {
         let home = tempfile::tempdir().unwrap();
         let dir = home.path().join(".agentmux-remote/bin/0.59.8");
         std::fs::create_dir_all(&dir).unwrap();
         let ended = home.path().join("ended");
         let fake = format!(
-            "#!/bin/sh\ncase \"$1\" in list) echo 'amx-1 10 -'; echo 'amx-2 5 0';; end) echo \"$3\" >> '{}';; esac\n",
+            "#!/bin/sh\ncase \"$1\" in list) echo 'amx-1 10 -'; echo 'amx-2 5 0';; end) echo \"$3\" >> '{0}';; stop) echo stop >> '{0}';; esac\n",
             ended.display()
         );
         let bin = dir.join("agentmux-remote");
@@ -425,7 +429,7 @@ mod tests {
             .output()
             .unwrap();
         assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "ok");
-        assert_eq!(std::fs::read_to_string(&ended).unwrap(), "amx-1\namx-2\n");
+        assert_eq!(std::fs::read_to_string(&ended).unwrap(), "amx-1\namx-2\nstop\n");
         assert!(!home.path().join(".agentmux-remote").exists());
     }
 }
