@@ -137,3 +137,80 @@ code.global-bundle-file-label {
     font-size: var(--text-xs);
     color: var(--secondary-text-color);
 }
+
+// What every agent of one kind starts with, in tokens
+// (SPEC_MEMORY_PANE_TOKENS_2026_10_15.md §5.2).
+.global-memory-token-strip {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    flex-shrink: 0;
+    padding: 8px 10px;
+    border: 1px solid var(--border-color);
+    font-size: var(--text-xs);
+    color: var(--secondary-text-color);
+}
+
+.global-memory-token-strip-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px 12px;
+}
+
+.global-memory-token-strip-total {
+    color: var(--main-text-color);
+
+    strong {
+        font-variant-numeric: tabular-nums;
+    }
+}
+
+.global-memory-token-strip-toggles {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.global-memory-token-strip-bar {
+    display: flex;
+    height: 6px;
+    gap: 2px;
+}
+
+.global-memory-token-strip-segment {
+    min-width: 2px;
+
+    &--system {
+        background: var(--accent-color);
+    }
+
+    &--workspace {
+        background: var(--secondary-text-color);
+    }
+}
+
+.global-memory-token-strip-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 12px;
+    font-variant-numeric: tabular-nums;
+}
+
+.global-memory-token-strip-key::before {
+    content: "";
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    margin-right: 5px;
+    vertical-align: baseline;
+}
+
+.global-memory-token-strip-key--system::before {
+    background: var(--accent-color);
+}
+
+.global-memory-token-strip-key--workspace::before {
+    background: var(--secondary-text-color);
+}

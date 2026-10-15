@@ -25,11 +25,13 @@
 import { Show, createMemo, type JSX } from "solid-js";
 import { ProviderLogo } from "@/element/ProviderLogo";
 import type { AgentDefinition } from "@/app/store/rpc-api";
+import { tokensLabel, tokensTitle } from "./memory-tokens";
 
 /** Per-agent memory-count fetch state. `error` is distinct from `count: 0`. */
 export type MemoryCountState =
     | { kind: "loading" }
-    | { kind: "count"; files: number }
+    /** `tokens`: the files' estimated tokens, summed (`tokens_est`). */
+    | { kind: "count"; files: number; tokens: number }
     | { kind: "error"; message: string };
 
 interface MemoryAgentCardProps {
@@ -49,7 +51,7 @@ function memoryCountLabel(count: MemoryCountState): string {
             return "Couldn't read memories";
         case "count":
             if (count.files === 0) return "No memories yet";
-            return count.files === 1 ? "1 file" : `${count.files} files`;
+            return `${tokensLabel(count.tokens)} · ${count.files === 1 ? "1 file" : `${count.files} files`}`;
     }
 }
 
@@ -85,6 +87,11 @@ export const MemoryAgentCard = (props: MemoryAgentCardProps): JSX.Element => {
                 <span
                     class="memory-agent-card-count"
                     classList={{ "memory-agent-card-count--error": props.count.kind === "error" }}
+                    title={
+                        props.count.kind === "count" && props.count.files > 0
+                            ? tokensTitle(props.count.tokens)
+                            : undefined
+                    }
                 >
                     <Show when={props.count.kind === "error"}>
                         <i class="fa-solid fa-triangle-exclamation" aria-hidden="true" />{" "}

@@ -40,6 +40,7 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { onMuxEvent } from "@/app/store/mps";
 import { PROVIDERS } from "@/app/view/agent/providers";
 import type { Bundle, GlobalMemoryVersionMeta } from "@/app/store/rpc-api";
+import type { GlobalMemorySection } from "@/types/rpc/GlobalMemorySection";
 import { MemoryDraftModel } from "@/app/view/memory-editor/memory-draft-model";
 import type { MemoryHistorySource } from "@/app/view/memory-editor/memory-history-model";
 import { sha256Hex } from "@/util/sha256";
@@ -136,6 +137,36 @@ export function groupProvidersByStartupFilename(): { filename: string; providerN
     return Array.from(groups.entries()).map(([filename, providerNames]) => ({ filename, providerNames }));
 }
 
+/** The agent kinds Operator Config entries can target. */
+export type AgentKind = "host" | "container";
+
+/** The separator between Global Memory sections, as srv's
+ *  `GLOBAL_SECTION_SEPARATOR` (storage/bundles.rs). */
+export const GLOBAL_SECTION_SEPARATOR = "\n\n---\n\n";
+
+export interface DeliveredTotals {
+    /** Every delivered section's tokens. */
+    total: number;
+    /** Operator Config (system) sections' tokens. */
+    system: number;
+    /** Workspace sections' tokens. */
+    workspace: number;
+    /** How many sections are delivered. */
+    count: number;
+}
+
+/** `sections`' tokens, summed and split; `null` when there are none to sum. */
+export function deliveredTotals(sections: GlobalMemorySection[] | null): DeliveredTotals | null {
+    if (!sections) return null;
+    const t: DeliveredTotals = { total: 0, system: 0, workspace: 0, count: sections.length };
+    for (const s of sections) {
+        t.total += s.tokens_est;
+        if (s.is_system) t.system += s.tokens_est;
+        else t.workspace += s.tokens_est;
+    }
+    return t;
+}
+
 export class GlobalBundleViewModel {
     // Cross-window reactivity (SPEC_ARMORY_REACTIVE_UPDATES_2026_09_02.md) —
     // a bundle create/edit/delete/reorder made elsewhere refreshes this view
@@ -176,8 +207,31 @@ export class GlobalBundleViewModel {
     systemSectionsAtom: Accessor<Bundle[]>;
     /** sectionsAtom minus systemSectionsAtom — what the ordinary editor list renders. */
     ordinarySectionsAtom: Accessor<Bundle[]>;
-    /** Combined startup-instructions-file preview block. */
+    /** Combined startup-instructions-file preview block: what an agent of
+     *  `agentKindAtom`'s kind is delivered, once `globalmemory:sections`
+     *  has answered. */
     previewAtom: Accessor<string>;
+
+    /** The kind of agent the token figures are for: Operator Config entries
+     *  can target only host or only container agents
+     *  (SPEC_MEMORY_PANE_TOKENS_2026_10_15.md §5.2). */
+    private _agentKind = createSignal<AgentKind>("host");
+    agentKindAtom: Accessor<AgentKind> = this._agentKind[0];
+    /** Tiles in injection order, or largest first. */
+    private _largestFirst = createSignal(false);
+    largestFirstAtom: Accessor<boolean> = this._largestFirst[0];
+    setLargestFirst = this._largestFirst[1];
+    /** What `globalmemory:sections` says that kind of agent is delivered:
+     *  each section's injected text and estimated tokens. `null` until it
+     *  answers, or when it fails. */
+    private _delivered = createSignal<GlobalMemorySection[] | null>(null);
+    deliveredAtom: Accessor<GlobalMemorySection[] | null> = this._delivered[0];
+    private setDelivered = this._delivered[1];
+    /** Delivered tokens by entry id; an entry that isn't delivered to this
+     *  kind (or is empty) has none. */
+    tokensByIdAtom: Accessor<Map<string, GlobalMemorySection>>;
+    /** The delivered total, split into Operator Config and Workspace. */
+    deliveredTotalsAtom: Accessor<DeliveredTotals | null>;
     /** Providers grouped by resolved startup-instructions filename, e.g.
      *  [{filename: "CLAUDE.md", providerNames: ["Claude Code", "Mux Code"]}, ...].
      *  Static — derived from the PROVIDERS catalog, not per-workspace agent
@@ -233,7 +287,14 @@ export class GlobalBundleViewModel {
         this.ordinarySectionsAtom = createMemo(() =>
             this.sectionsAtom().filter((m) => !m.is_system),
         );
-        this.previewAtom = createMemo(() => formatGlobalBundleBlock(this.sectionsAtom()));
+        this.previewAtom = createMemo(() => {
+            const delivered = this.deliveredAtom();
+            return delivered
+                ? delivered.map((d) => d.text).join(GLOBAL_SECTION_SEPARATOR)
+                : formatGlobalBundleBlock(this.sectionsAtom());
+        });
+        this.tokensByIdAtom = createMemo(() => new Map((this.deliveredAtom() ?? []).map((d) => [d.id, d])));
+        this.deliveredTotalsAtom = createMemo(() => deliveredTotals(this.deliveredAtom()));
         this.openEntryAtom = createMemo(() => {
             const v = this.viewAtom();
             if (v?.kind !== "entry") return null;
@@ -276,6 +337,31 @@ export class GlobalBundleViewModel {
     }
 
 
+    /** Shows what an agent of `kind` is delivered. */
+    setAgentKind(kind: AgentKind): void {
+        if (kind === this.agentKindAtom()) return;
+        this._agentKind[1](kind);
+        this.setDelivered(null);
+        void this.fetchDelivered();
+    }
+
+    /** Id of the newest `fetchDelivered()`, so a reply for an older kind or
+     *  an older list can't replace a newer one. */
+    private latestDeliveredId = 0;
+
+    /** Fetches what `agentKindAtom`'s kind of agent is delivered. Failure
+     *  leaves the figures out rather than raising `errorAtom`: the entries
+     *  themselves still load and edit. */
+    private async fetchDelivered(): Promise<void> {
+        const requestId = ++this.latestDeliveredId;
+        try {
+            const sections = await RpcApi.GlobalMemorySectionsCommand(TabRpcClient, { agent_kind: this.agentKindAtom() });
+            if (requestId === this.latestDeliveredId) this.setDelivered(sections);
+        } catch {
+            if (requestId === this.latestDeliveredId) this.setDelivered(null);
+        }
+    }
+
     /** Id of the newest `refresh()`; an older one that resolves later is
      *  dropped, so overlapping `memories:changed` refreshes can't put stale
      *  data (or stale content for the draft's conflict check) over fresh. */
@@ -289,6 +375,7 @@ export class GlobalBundleViewModel {
             this.setAll(list);
             this.setError(null);
             this.setRefreshNonce((n) => n + 1);
+            void this.fetchDelivered();
             // The open entry may have changed underneath its view: hand the
             // new content to the draft model, which updates silently when
             // there's no unsaved draft and raises the banner (only on a real

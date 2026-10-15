@@ -64,7 +64,7 @@ const MEMORY_SORT_STORAGE_KEY = "nativeMemory:sortBy";
 function loadStoredMemorySort(): MemoryAgentSortOption {
     try {
         const raw = localStorage.getItem(MEMORY_SORT_STORAGE_KEY);
-        if (raw === "name" || raw === "count" || raw === "provider") return raw;
+        if (raw === "tokens" || raw === "name" || raw === "count" || raw === "provider") return raw;
     } catch {
         // ignore — fall through to the default
     }
@@ -81,8 +81,8 @@ function storeMemorySort(sort: MemoryAgentSortOption): void {
 }
 
 /**
- * Comparator for the grid's `count` sort. `loading`/`error` cards sort
- * AFTER every resolved count (in that order — loading before error), each
+ * Comparator for the grid's `count` and `tokens` sorts (largest first, by
+ * `key`). `loading`/`error` cards sort AFTER every resolved count (in that order — loading before error), each
  * group alphabetical by name internally: a numeric "most files" sort has no
  * correct answer for a count that isn't known yet or failed to resolve, so
  * burying those at the bottom is the intentional behavior, not a fallback
@@ -90,7 +90,12 @@ function storeMemorySort(sort: MemoryAgentSortOption): void {
  * this ordering never collapses that distinction, it just decides where an
  * unresolved card sits in the list.
  */
-function compareByCount(a: AgentDefinition, b: AgentDefinition, counts: Record<string, MemoryCountState>): number {
+function compareByCount(
+    a: AgentDefinition,
+    b: AgentDefinition,
+    counts: Record<string, MemoryCountState>,
+    key: "files" | "tokens"
+): number {
     const rank = (id: string): number => {
         const c = counts[id];
         if (c?.kind === "count") return 0;
@@ -101,8 +106,8 @@ function compareByCount(a: AgentDefinition, b: AgentDefinition, counts: Record<s
     const rb = rank(b.id);
     if (ra !== rb) return ra - rb;
     if (ra === 0) {
-        const fa = (counts[a.id] as { kind: "count"; files: number }).files;
-        const fb = (counts[b.id] as { kind: "count"; files: number }).files;
+        const fa = (counts[a.id] as Extract<MemoryCountState, { kind: "count" }>)[key];
+        const fb = (counts[b.id] as Extract<MemoryCountState, { kind: "count" }>)[key];
         if (fa !== fb) return fb - fa;
     }
     return agentLabel(a).localeCompare(agentLabel(b), undefined, { sensitivity: "base" });
@@ -115,8 +120,10 @@ function compareAgents(
     counts: Record<string, MemoryCountState>
 ): number {
     switch (sort) {
+        case "tokens":
+            return compareByCount(a, b, counts, "tokens");
         case "count":
-            return compareByCount(a, b, counts);
+            return compareByCount(a, b, counts, "files");
         case "provider": {
             const providerDiff = a.provider.localeCompare(b.provider, undefined, { sensitivity: "base" });
             if (providerDiff !== 0) return providerDiff;
@@ -218,7 +225,14 @@ export function NativeMemoryManager(): JSX.Element {
                 setCounts((prev) =>
                     prev[agent.id] === undefined
                         ? prev
-                        : { ...prev, [agent.id]: { kind: "count", files: res.files.length } }
+                        : {
+                              ...prev,
+                              [agent.id]: {
+                                  kind: "count",
+                                  files: res.files.length,
+                                  tokens: res.files.reduce((n, f) => n + (f.tokens_est ?? 0), 0),
+                              },
+                          }
                 );
             })
             .catch((e: Error) => {
@@ -450,7 +464,8 @@ export function NativeMemoryManager(): JSX.Element {
         debounceTimers.clear();
     });
 
-    // Index file first, then alphabetical. The list RPC's own order is a
+    // Index file first, then largest first (tokens), then alphabetical
+    // (SPEC_MEMORY_PANE_TOKENS_2026_10_15.md §5.1). The list RPC's own order is a
     // plain directory listing, which puts MEMORY.md first only by the accident
     // of uppercase sorting ahead of lowercase in ASCII — rename the index and
     // it lands mid-grid. The index is the file loaded into every session, so
@@ -459,6 +474,8 @@ export function NativeMemoryManager(): JSX.Element {
     const sortedFiles = createMemo(() =>
         [...files()].sort((a, b) => {
             if (a.is_index !== b.is_index) return a.is_index ? -1 : 1;
+            const byTokens = (b.tokens_est ?? 0) - (a.tokens_est ?? 0);
+            if (byTokens !== 0) return byTokens;
             return a.filename.localeCompare(b.filename, undefined, { sensitivity: "base" });
         })
     );
