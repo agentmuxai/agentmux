@@ -1,7 +1,7 @@
 # Spec: an agent pane shows its latest content still, on a tab switch and on a send
 
 **Date:** 2026-10-15
-**Status:** active. Shipped: §4.1, rows on screen stay put when rows above are removed or inserted (#4962). Left: §3 (showing a tab), §4.2, §4.3.
+**Status:** active. Shipped: §4.1, rows on screen stay put when rows above are removed or inserted (#4962); §3.1 and §3.2, a pane shown again lands at its latest content (#4963). Left: §3.3-§3.5, §4.2, §4.3.
 **Scope:** the agent pane's transcript (`frontend/app/view/agent/`): the one-way scroll flow, the virtual list, the live-feed roll-off.
 **Related:** `SPEC_AGENT_PANE_ONE_WAY_FLOW_2026_10_07.md` (the follower, spacer room, commit points), `SPEC_RENDERER_RECYCLE_WHEN_IDLE_2026_10_13.md` (stable row ids, #4952).
 
@@ -50,7 +50,7 @@ The send itself changes no transcript rows: `TurnStart` and `PendingMessageQueue
 
 **3.1 Know when the pane is shown.** The virtual list reads dormancy (`useAgentDormant()`; the provider already wraps it, `agent-view.tsx:1219`) and reacts to dormant → active. The reaction only applies while the pane follows (`viewState.stickToBottom()`): a pane the user scrolled up keeps its place, which on-screen compensation already does.
 
-**3.2 Land, don't ease, while the frozen content commits.** On show, `OneWayFlow` opens a settle window (`settleOnShow()`, the commit window's mechanism without its spacer rule, `one-way-flow.ts:256-270`): until it closes, every resize writes the true bottom before paint. Long enough to cover the staged commits (the 90 ms settled render, the 150 ms tool-log transition): 400 ms. The first frame after the switch is then already at the bottom, and so is every frame while the content settles.
+**3.2 Land, don't ease, while the frozen content commits.** On show, `OneWayFlow` lands at the bottom and opens a settle window (`settleOnShow()`, the commit window's mechanism, `one-way-flow.ts:256-270`; spacer room is given up too, since nothing was painted while the pane was hidden): until it closes, every resize writes the true bottom before paint. Long enough to cover the staged commits (the 90 ms settled render, the 150 ms tool-log transition): 400 ms. The first frame after the switch is then already at the bottom, and so is every frame while the content settles.
 
 After the window, output that arrives is new: the follower eases it in as today. That is "if the agent is busy, it scrolls normally as it processes", with no special case for busy.
 

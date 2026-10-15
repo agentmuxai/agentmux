@@ -35,6 +35,14 @@ export const RECHECK_MS = 300;
  */
 const COMMIT_SETTLE_MS = 600;
 
+/**
+ * After the pane is shown again (its tab was hidden), the content it got while
+ * hidden commits in stages: its text, about 90 ms later the text's settled
+ * render, a tool log's 150 ms height transition. For this long each stage lands
+ * at the bottom before paint (`settleOnShow`).
+ */
+export const SHOW_SETTLE_MS = 400;
+
 /** Below this, a move is sub-pixel noise, not something to compensate. */
 const MOVE_EPSILON_PX = 0.5;
 
@@ -107,7 +115,7 @@ export class OneWayFlow {
      */
     private baseline: Map<string, number> | null = null;
     private lastWidth = -1;
-    /** Until when layout changes settle at the bottom without spacer room (see COMMIT_SETTLE_MS). */
+    /** Until when layout changes settle at the bottom without spacer room (see COMMIT_SETTLE_MS, SHOW_SETTLE_MS). */
     private settleUntil = Number.NEGATIVE_INFINITY;
     /** scrollHeight / clientHeight at the last observation, for the geometry of frame-step writes. */
     private lastGeo = { scrollHeight: 0, clientHeight: 0 };
@@ -197,6 +205,31 @@ export class OneWayFlow {
         }
     }
 
+    /**
+     * The pane was shown again after its tab was hidden: land at the bottom now,
+     * and let layout changes for SHOW_SETTLE_MS land there too instead of being
+     * eased to, so the pane appears at its latest content with no catch-up
+     * motion. Output after that eases in as usual. Spacer room is given up:
+     * nothing was painted since the pane was hidden, so that moves nothing
+     * anyone saw. Callers only use it while the pane follows.
+     * SPEC_AGENT_PANE_NO_CATCH_UP_MOTION_2026_10_15.md §3.2.
+     */
+    settleOnShow(): void {
+        this.follower.stop();
+        const el = this.scroller;
+        if (!el || !this.active()) return;
+        this.settleUntil = Math.max(this.settleUntil, performance.now() + SHOW_SETTLE_MS);
+        if (this.spacerPx > 0) this.setSpacer(0);
+        const ch = el.clientHeight; // perf:allow-layout-read — once, when the pane is shown
+        const sh = el.scrollHeight; // perf:allow-layout-read — once, when the pane is shown
+        const target = Math.max(0, sh - ch);
+        if (target > el.scrollTop + MOVE_EPSILON_PX) { // perf:allow-layout-read — once, when the pane is shown
+            el.scrollTop = target;
+            this.host.wrote({ scrollTop: el.scrollTop, scrollHeight: sh, clientHeight: ch }); // perf:allow-layout-read — after a scrollTop write, which does not invalidate layout
+        }
+        this.baseline = this.readAllTops(el);
+    }
+
     /** `/clear` or a fresh session in the pane: no room is owed to anything. */
     reset(): void {
         this.setSpacer(0);
@@ -254,8 +287,9 @@ export class OneWayFlow {
             }
         }
         if (this.active() && performance.now() < this.settleUntil) {
-            // Just after the user committed: their own layout changes move the
-            // content, and we stay at the true bottom with no room held.
+            // Just after the user committed, or the pane was shown again
+            // (settleOnShow): layout changes land at the true bottom with no
+            // room held.
             if (this.spacerPx > 0) {
                 sh -= this.spacerPx;
                 this.setSpacer(0);

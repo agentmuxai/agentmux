@@ -12,7 +12,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FOLLOW_TAU_MS, REST_PX, SNAP_FRACTION, stepToward } from "./follower";
-import { OneWayFlow, RECHECK_MS, largestDownwardMove, spacerFor, type OneWayHost } from "./one-way-flow";
+import { OneWayFlow, RECHECK_MS, SHOW_SETTLE_MS, largestDownwardMove, spacerFor, type OneWayHost } from "./one-way-flow";
 
 describe("stepToward", () => {
     const base = { pos: 0, target: 100, clientHeight: 600, dtMs: 16, reducedMotion: false };
@@ -517,6 +517,57 @@ describe("OneWayFlow", () => {
         } finally {
             spy.mockRestore();
         }
+    });
+
+    // SPEC_AGENT_PANE_NO_CATCH_UP_MOTION_2026_10_15.md §3.2: a pane shown again
+    // lands at its latest content; the stages of what it got while hidden
+    // aren't eased to.
+    it("shown again, content that grew while hidden lands at the bottom at once, stage by stage", () => {
+        let t = 1000;
+        const spy = vi.spyOn(performance, "now").mockImplementation(() => t);
+        try {
+            const { m, flow, fire } = setup();
+            flow.settleOnShow();
+            // The frozen text commits: a third of the viewport, which would be eased.
+            m.rows[7].h += 200;
+            fire();
+            expect(m.top).toBe(m.max()); // no frame ran
+            // Its settled render, 90 ms later, grows it again.
+            t += 90;
+            m.rows[7].h += 60;
+            fire();
+            expect(m.top).toBe(m.max());
+            // After the window, new output eases in as before.
+            t += SHOW_SETTLE_MS;
+            flow.observeRow(m.add(120));
+            fire();
+            expect(m.top).toBeLessThan(m.max());
+            runFrames();
+            expect(m.max() - m.top).toBeLessThan(REST_PX);
+        } finally {
+            spy.mockRestore();
+        }
+    });
+
+    it("shown again, room held while hidden is given up before anything is painted", () => {
+        const { m, flow, fire } = setup();
+        m.rows[6].h -= 80;
+        m.clamp();
+        fire();
+        expect(m.spacerPx()).toBe(80);
+        flow.settleOnShow();
+        expect(m.spacerPx()).toBe(0);
+        expect(m.top).toBe(m.max());
+    });
+
+    it("shown again, a pane that doesn't follow keeps its place", () => {
+        const { m, flow, fire, setFollowing } = setup();
+        setFollowing(false);
+        m.top = 300;
+        flow.settleOnShow();
+        m.rows[7].h += 200;
+        fire();
+        expect(m.top).toBe(300);
     });
 
     it("typing jumps to the bottom but is not a commit: the room stays and the rule stays on", () => {
