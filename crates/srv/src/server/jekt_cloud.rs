@@ -78,8 +78,27 @@ pub(crate) async fn relay(state: &super::AppState, req: &InjectionRequest, calle
         return Ok(None);
     };
     let base = crate::muxbus::relay::rest_base_url();
+    // An install that runs the target must say it can fetch them; one that
+    // can't would deliver the text without its files (spec §3.4). When the
+    // relay can't say who runs it, they go, as text does.
+    let holder = crate::muxbus::wan_lease::holder(&base, &req.target_agent, source, &credential.token, &state.http_client).await;
+    if !takes_cloud_files(&holder) {
+        return Err(format!(
+            "files refused: {}'s AgentMux is too old to receive files through the cloud relay; nothing was sent",
+            req.target_agent
+        ));
+    }
     let cloud_req = upload(&base, &state.http_client, &credential.token, source, req).await?;
     Ok(super::reactive::try_cloud_relay(state, &cloud_req, caller_uid).await)
+}
+
+/// Whether the target's lease holder can fetch files from the relay: every
+/// answer but a live holder that doesn't say so.
+fn takes_cloud_files(holder: &crate::muxbus::wan_lease::Holder) -> bool {
+    match holder {
+        crate::muxbus::wan_lease::Holder::Other(_, features) => features.iter().any(|f| f == jekt_files::CLOUD_FEATURE),
+        _ => true,
+    }
 }
 
 /// Encrypt and upload each file; the request to relay, its files named by
@@ -262,6 +281,16 @@ mod tests {
             key: "A".repeat(43) + "=",
             blob_id: "blob-0123abcd-0000-4000-8000-0123456789ab".into(),
         }]
+    }
+
+    #[test]
+    fn only_a_live_holder_that_says_so_takes_cloud_files() {
+        use crate::muxbus::wan_lease::Holder;
+        assert!(takes_cloud_files(&Holder::Other("computer x".into(), vec![jekt_files::CLOUD_FEATURE.into()])));
+        assert!(!takes_cloud_files(&Holder::Other("computer x".into(), Vec::new())), "an older install");
+        for unknown in [Holder::Free, Holder::Unknown, Holder::Unsupported, Holder::Unreachable] {
+            assert!(takes_cloud_files(&unknown), "{unknown:?}: no live holder to ask");
+        }
     }
 
     #[tokio::test]
