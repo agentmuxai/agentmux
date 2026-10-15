@@ -841,6 +841,7 @@ fn check_memory_base_sha256(filename: &str, base: &str, current: Option<&str>) -
 }
 
 pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    super::memory_launch_cost::register(engine, state);
     let mstore_list = state.mstore.clone();
     let id_store_list = state.id_store.clone();
     engine.register_typed(
@@ -1003,8 +1004,7 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
                             }
                         }
                         live_filenames.insert(name.clone());
-                        // Not read above (unchanged, or the read failed): from the
-                        // mirror; never mirrored: estimated from its bytes.
+                        // Not read above: from the mirror; never mirrored: from its bytes.
                         let counts = counts.or_else(|| id_store.agent_native_memory_counts(&agent.id, &name).ok().flatten());
                         let (tokens_est, lines) = counts.unwrap_or((tokens_for_chars(size_bytes), 0));
 

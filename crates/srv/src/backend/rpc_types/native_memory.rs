@@ -248,3 +248,55 @@ pub struct NativeMemoryRevertResult {
     /// untouched, per the version chain's append-only guarantee.
     pub version: NativeMemoryVersionMeta,
 }
+
+// ---- memory:launchcost — what an agent's next launch delivers, in tokens ----
+
+/// `memory:launchcost` arguments (SPEC_MEMORY_PANE_TOKENS_2026_10_15.md §4.2).
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct CommandMemoryLaunchCostData {
+    pub agent_id: String,
+}
+
+/// One part of what an agent starts with.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS, PartialEq)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct LaunchCostPart {
+    /// `operator_config`, `workspace_global`, `bundle`, `soul`, `agentmd`,
+    /// `agent_memory`, `skills_index`, `formatting` (headings and separators)
+    /// or `personal`.
+    pub kind: String,
+    /// The entry's id, for a Global Memory section or a bundle.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub id: Option<String>,
+    pub name: String,
+    #[ts(type = "number")]
+    pub tokens_est: u64,
+    #[ts(type = "number")]
+    pub size_bytes: u64,
+    #[ts(type = "number")]
+    pub lines: u64,
+    /// How it arrives: `startup_file`, `session_hook` (Claude's SessionStart
+    /// hook) or `cli` (the CLI loads it itself, e.g. Claude's `MEMORY.md`).
+    pub via: String,
+}
+
+/// `memory:launchcost`'s answer.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct LaunchCost {
+    pub agent_id: String,
+    pub provider: String,
+    /// The startup file the provider reads (`CLAUDE.md`, `AGENTS.md`, …);
+    /// `None` for one with no startup file (Kimi).
+    #[ts(optional)]
+    pub startup_file: Option<String>,
+    /// False when the agent's startup file is the user's own: AgentMux
+    /// doesn't overwrite it, so its `startup_file` parts aren't delivered.
+    pub delivered_by_file: bool,
+    pub parts: Vec<LaunchCostPart>,
+    /// Every part's tokens, summed.
+    #[ts(type = "number")]
+    pub total_tokens_est: u64,
+}

@@ -42,6 +42,27 @@ pub struct AgentConfigFile {
     pub content: String,
 }
 
+/// The startup file's skills index, each skill by its `/<trigger>`; empty when
+/// it lists none. Claude Code lists the skills it has a file for
+/// (.claude/commands, .claude/skills) by itself, so for it the index carries
+/// only those without one (LC3, §4.4). By the resolved provider, so an alias
+/// (`claude-code`) counts as Claude. Shared with `memory:launchcost`.
+pub fn skills_index_text(skills: &[AgentSkill], provider_id: &str) -> String {
+    let is_claude = crate::backend::providers::get_provider(provider_id).is_some_and(|p| p.id == "claude");
+    let own_file = skills_with_their_own_file(skills);
+    let indexed: Vec<_> = skills.iter().enumerate().filter(|(i, _)| !is_claude || !own_file[*i]).map(|(_, s)| s).collect();
+    if indexed.is_empty() {
+        return String::new();
+    }
+    let mut out = String::from("\n# Available Skills\n\nUse `/<trigger>` to invoke a skill.\n\n");
+    for skill in indexed {
+        let trigger_part = if skill.trigger.is_empty() { String::new() } else { format!(" (trigger: /{})", skill.trigger) };
+        let desc_part = if skill.description.is_empty() { String::new() } else { format!(" \u{2014} {}", skill.description) };
+        out.push_str(&format!("- **{}**{}{}\n", skill.name, trigger_part, desc_part));
+    }
+    out
+}
+
 /// Build the list of config files to write to the agent working directory.
 ///
 /// Assembles the startup instructions file (`CLAUDE.md`, `AGENTS.md`,
@@ -97,30 +118,7 @@ pub fn build_config_files(
         instructions_parts.push(memory.clone());
     }
 
-    // Append skill index with trigger references. Claude Code lists the
-    // skills it has a file for (.claude/commands, .claude/skills) by itself,
-    // so for it the index carries only those without one (LC3, §4.4).
-    // By the resolved provider, so an alias (`claude-code`) counts as Claude.
-    let is_claude = crate::backend::providers::get_provider(provider_id).is_some_and(|p| p.id == "claude");
-    let own_file = skills_with_their_own_file(skills);
-    let indexed: Vec<_> = skills.iter().enumerate().filter(|(i, _)| !is_claude || !own_file[*i]).map(|(_, s)| s).collect();
-    if !indexed.is_empty() {
-        instructions_parts.push("\n# Available Skills\n\n".to_string());
-        instructions_parts.push("Use `/<trigger>` to invoke a skill.\n\n".to_string());
-        for skill in indexed {
-            let trigger_part = if skill.trigger.is_empty() {
-                String::new()
-            } else {
-                format!(" (trigger: /{})", skill.trigger)
-            };
-            let desc_part = if skill.description.is_empty() {
-                String::new()
-            } else {
-                format!(" \u{2014} {}", skill.description)
-            };
-            instructions_parts.push(format!("- **{}**{}{}\n", skill.name, trigger_part, desc_part));
-        }
-    }
+    instructions_parts.push(skills_index_text(skills, provider_id));
 
     // Resolved per-provider — `None` for an unrecognized provider_id or one
     // with no confirmed native file (kimi) skips writing this file
