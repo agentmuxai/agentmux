@@ -65,6 +65,14 @@ pub fn pane_pointer_down(state: &Arc<AppState>, block: &str) {
     }
 }
 
+/// The user gave pane `block`'s page focus where no click hook sees it (Linux:
+/// CEF's `on_set_focus` with a user source): the same as a click in it, posted.
+pub fn pane_chosen(state: &Arc<AppState>, block: &str) {
+    if let Some(window) = state.browser_pane_window_label(block) {
+        dispatch(state, &window, Event::PanePointerDown(block.to_string()), Run::Posted);
+    }
+}
+
 /// CEF reported that pane `block`'s browser got focus.
 pub fn pane_focus_gained(state: &Arc<AppState>, block: &str) {
     if let Some(window) = state.browser_pane_window_label(block) {

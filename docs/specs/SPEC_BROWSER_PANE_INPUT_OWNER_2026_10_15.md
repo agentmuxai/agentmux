@@ -174,7 +174,7 @@ One adapter serves both, `input_owner/views.rs`, feeding the same machine. Its e
 | Event | macOS | Linux |
 |---|---|---|
 | `Select` | `input_select` (§3.6) | same |
-| `PanePointerDown` | left mouse-down on a pane overlay (`swizzled_nsapp_send_event`) | none observed: the frontend's `Select` stands in |
+| `PanePointerDown` | left mouse-down on a pane overlay (`swizzled_nsapp_send_event`) | CEF `on_set_focus` with `FocusSource::SYSTEM` for a pane browser: focus the user gave the page (a click, Tab), told apart from a page load's `NAVIGATION` focus |
 | `AppPointerDown` | not yet: the same hook still hands key status back to the app window itself; the frontend's `Select` follows | none observed |
 | `FocusGained` | CEF `on_got_focus` for a pane browser | same |
 | `Activated` / `Deactivated` | CEF Views `on_window_activation_changed`, effects posted to run after CEF's own handling | same |
