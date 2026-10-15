@@ -12,7 +12,12 @@ pub fn register(engine: &Arc<WshRpcEngine>, _state: &AppState) {
     engine.register_typed(COMMAND_APP_UPDATE_STATUS, move |_req: Option<NoArgsReq>, _ctx| async move {
         Ok::<_, String>(crate::backend::update_check::current_status())
     });
-    engine.register_typed(COMMAND_APP_UPDATE_DOWNLOAD, move |_req: Option<NoArgsReq>, _ctx| async move {
+    // The user's click only: an agent asks through RequestUpgrade, which
+    // needs the user's say-so (the spec's §5.1).
+    engine.register_typed(COMMAND_APP_UPDATE_DOWNLOAD, move |_req: Option<NoArgsReq>, ctx| async move {
+        if !ctx.agent_id.is_empty() {
+            return Err("FORBIDDEN: only the user starts downloading an AgentMux release".to_string());
+        }
         crate::backend::update_download::start()
     });
 }

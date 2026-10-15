@@ -13,7 +13,9 @@
 //! `app:updatestatus` event (`update_check`).
 //!
 //! The download is kept in `~/.agentmux/updates/<version>/` while it runs and
-//! deleted once unpacked. Unpacking uses Windows' own `tar.exe` (libarchive,
+//! deleted once unpacked. Its file and the unpacking folder carry this
+//! process' id, so two AgentMux instances downloading the same release never
+//! write over each other; whichever stages the folder first, the other uses. Unpacking uses Windows' own `tar.exe` (libarchive,
 //! which reads the release's LZMA2 `.7z`, and refuses `..` and absolute
 //! paths), by its full path so no other `tar` on `PATH` is run. A Windows too
 //! old for that fails with a message, and the release page still works.
@@ -125,7 +127,7 @@ pub fn start() -> Result<AppUpdateStatus, String> {
 async fn run(asset: &ReleaseAsset, version: &str, root: &Path) -> Result<PathBuf, String> {
     let dir = crate::backend::base::get_mux_data_dir().join("updates").join(version);
     tokio::fs::create_dir_all(&dir).await.map_err(|e| format!("can't create {}: {e}", dir.display()))?;
-    let file = dir.join(&asset.name);
+    let file = dir.join(format!("{}-{}", std::process::id(), asset.name));
     if let Err(e) = download(asset, &file, version).await {
         let _ = tokio::fs::remove_file(&file).await;
         return Err(e);
@@ -163,7 +165,9 @@ async fn download(asset: &ReleaseAsset, dest: &Path, version: &str) -> Result<()
         .map_err(|_| "GitHub didn't answer".to_string())?
         .and_then(|r| r.error_for_status())
         .map_err(|e| format!("download failed: {e}"))?;
-    let part = dest.with_file_name(format!("{}.part", asset.name));
+    let mut part = dest.as_os_str().to_owned();
+    part.push(".part");
+    let part = PathBuf::from(part);
     let result = async {
         let mut out = tokio::fs::File::create(&part).await.map_err(|e| e.to_string())?;
         let mut received = Received::new(asset.size);
@@ -213,6 +217,29 @@ fn free_folder(parent: &Path, name: &str) -> PathBuf {
     }
 }
 
+/// Unpacking folders an earlier, interrupted run left behind (an hour old:
+/// never one another AgentMux is still filling).
+async fn remove_stale_partials(parent: &Path, name: &str) {
+    let prefix = format!(".{name}.");
+    let Ok(mut entries) = tokio::fs::read_dir(parent).await else { return };
+    while let Ok(Some(e)) = entries.next_entry().await {
+        let file_name = e.file_name().to_string_lossy().into_owned();
+        if !file_name.starts_with(&prefix) || !file_name.ends_with(".partial") {
+            continue;
+        }
+        let old = e
+            .metadata()
+            .await
+            .ok()
+            .and_then(|m| m.modified().ok())
+            .and_then(|t| t.elapsed().ok())
+            .is_some_and(|age| age > Duration::from_secs(60 * 60));
+        if old {
+            let _ = tokio::fs::remove_dir_all(e.path()).await;
+        }
+    }
+}
+
 fn tar_exe() -> PathBuf {
     if cfg!(windows) {
         let root = std::env::var_os("SystemRoot").unwrap_or_else(|| "C:\\Windows".into());
@@ -229,7 +256,8 @@ async fn unpack_portable(file: &Path, version: &str, parent: &Path) -> Result<Pa
     if is_staged_portable(&parent.join(&name), version) {
         return Ok(parent.join(&name));
     }
-    let partial = parent.join(format!(".{name}.partial"));
+    remove_stale_partials(parent, &name).await;
+    let partial = parent.join(format!(".{name}.{}.partial", std::process::id()));
     let _ = tokio::fs::remove_dir_all(&partial).await;
     tokio::fs::create_dir_all(&partial).await.map_err(|e| format!("can't write to {}: {e}", parent.display()))?;
     use agentmux_common::win32::NoWindow;
@@ -254,6 +282,11 @@ async fn unpack_portable(file: &Path, version: &str, parent: &Path) -> Result<Pa
         }
         Ok(Ok(_)) => Ok(()),
     };
+    // Another AgentMux staged the same release while this one unpacked.
+    if checked.is_ok() && is_staged_portable(&parent.join(&name), version) {
+        let _ = tokio::fs::remove_dir_all(&partial).await;
+        return Ok(parent.join(&name));
+    }
     let target = free_folder(parent, &name);
     let result = match checked {
         Ok(()) => tokio::fs::rename(&partial, &target)
@@ -333,7 +366,7 @@ mod tests {
         let wrong = ReleaseAsset { sha256: "0".repeat(64), ..asset };
         let err = download(&wrong, &dir.path().join("again.7z"), "0.59.27").await.unwrap_err();
         assert!(err.contains("checksum"), "{err}");
-        assert!(!dir.path().join(format!("{name}.part")).exists());
+        assert!(!dir.path().join("again.7z.part").exists());
     }
 
     /// Windows' tar.exe reads the archive and the folder lands in place;
@@ -359,13 +392,14 @@ mod tests {
         let folder = unpack_portable(&archive, "0.59.27", &parent).await.unwrap();
         assert_eq!(folder, parent.join("agentmux-0.59.27-x64-portable"));
         assert!(is_staged_portable(&folder, "0.59.27"));
-        assert!(!parent.join(".agentmux-0.59.27-x64-portable.partial").exists());
+        let leftovers = || std::fs::read_dir(&parent).unwrap().filter(|e| e.as_ref().unwrap().file_name().to_string_lossy().starts_with('.')).count();
+        assert_eq!(leftovers(), 0);
         // Asked again, the staged folder is reused.
         assert_eq!(unpack_portable(&archive, "0.59.27", &parent).await.unwrap(), folder);
         // An archive of another version is refused and leaves nothing.
         let err = unpack_portable(&archive, "0.59.28", &parent).await.unwrap_err();
         assert!(err.contains("isn't an AgentMux 0.59.28 portable"), "{err}");
-        assert!(!parent.join(".agentmux-0.59.28-x64-portable.partial").exists());
+        assert_eq!(leftovers(), 0);
         assert!(!parent.join("agentmux-0.59.28-x64-portable").exists());
     }
 }
