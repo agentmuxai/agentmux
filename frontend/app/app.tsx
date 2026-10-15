@@ -50,6 +50,7 @@ import { CrossWindowDropOverlay } from "./drag/CrossWindowDropOverlay";
 import "./drag/drop-indicators.scss";
 import { CenteredDiv } from "./element/quickelems";
 import { ZoomIndicator } from "./element/zoomindicator";
+import { isOverChrome } from "@/app/store/chrome-zoom-target";
 import { PerfHud } from "@/perf/hud";
 import { DiagPanel } from "./devtools/diag-panel";
 import { checkSeparatorParity, setupDprTracking } from "./init/dpr";
@@ -212,22 +213,6 @@ const AppKeyHandlers = () => {
     });
     return null;
 };
-
-// Shared by AppZoomHandler and AppAllPanesZoomHandler below — both route a
-// wheel event to chrome-zoom vs. pane-zoom based on the identical hit-test.
-// A single helper means a future change to which elements count as "chrome"
-// only has one call site to update, not two that must be remembered and kept
-// in sync (ReAgent P2, PR #3090).
-function isOverChrome(target: HTMLElement): boolean {
-    return (
-        !!target.closest(".window-header") ||
-        !!target.closest(".status-bar") ||
-        !!target.closest(".block-frame-default-header") ||
-        // An open AnchoredPopover that follows chrome zoom (portaled, so not
-        // inside the bars above): Ctrl+wheel over it zooms it with the bar.
-        !!target.closest('[data-zoom-scope="chrome"]')
-    );
-}
 
 const AppZoomHandler = () => {
     onMount(() => {

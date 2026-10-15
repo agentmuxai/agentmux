@@ -102,11 +102,8 @@ export function BrowserNavBar(props: {
         setAddressBar(value);
         if (addressInputRef) addressInputRef.value = value;
     };
-    let goButtonRef: HTMLButtonElement | undefined;
-    // Focus left the address bar and the Go button (which submits the choice,
-    // so moving between the two keeps it). A suggestion previewed with the
-    // arrow keys or completed inline was never opened: show the page's own
-    // address again.
+    // Focus left the address bar. A suggestion previewed with the arrow keys
+    // or completed inline was never opened: show the page's own address again.
     const abandonSuggestions = () => {
         if (addressBar() !== typed() && autocomplete.matches().length > 0) {
             showInInput(model.urlAtom() || typed());
@@ -476,6 +473,9 @@ export function BrowserNavBar(props: {
         <Show when={model.showControlsAtom()}>
             <div
                 class="browser-nav-bar"
+                // The bar follows chrome zoom like the pane header above it, so
+                // Ctrl+wheel over it zooms chrome too (store/chrome-zoom-target.ts).
+                data-zoom-scope="chrome"
                 // Ctrl/Cmd+Shift+N anywhere in the bar, the address bar included,
                 // opens an Incognito tab, as in Chrome, not the app's new window.
                 onKeyDown={(e) => {
@@ -485,200 +485,195 @@ export function BrowserNavBar(props: {
                     openIncognitoTab(model, home());
                 }}
             >
-                <button
-                    class="browser-nav-btn"
-                    disabled={!model.canGoBackAtom()}
-                    onClick={() => model.goBack()}
-                    title="Back"
-                >{"←"}</button>
-                <button
-                    class="browser-nav-btn"
-                    disabled={!model.canGoForwardAtom()}
-                    onClick={() => model.goForward()}
-                    title="Forward"
-                >{"→"}</button>
-                <button
-                    class="browser-nav-btn"
-                    onClick={() => getApi().browserPanes.reload(model.blockId).catch(() => {})}
-                    title="Reload"
-                >{"↻"}</button>
-                <IconButton
-                    class="browser-nav-btn"
-                    icon="house"
-                    label={`Home: ${home()}`}
-                    tooltipPlacement="bottom"
-                    onClick={goHome}
-                    onContextMenu={(e) => {
-                        e.preventDefault();
-                        ContextMenuModel.showContextMenu(
-                            [
-                                {
-                                    label: "Set this page as Home",
-                                    enabled: !!model.urlAtom() && model.urlAtom() !== browserStartPageAtom(),
-                                    click: () => void setCurrentAsStartPage(),
-                                },
-                            ],
-                            e
-                        );
-                    }}
-                />
-                <FlyoutMenu
-                    items={bookmarkMenuItems()}
-                    placement="bottom-start"
-                    onOpenChange={(open) => {
-                        if (open) void loadBookmarks();
-                    }}
-                    // Only the icon slot is customized here — label/onClick/
-                    // divider behavior is identical to FlyoutMenu's default
-                    // rendering. `checked`/`shortcut`/`subItems` are
-                    // deliberately not replicated since this menu never uses
-                    // them (both pinned rows reflect state via their LABEL,
-                    // not `checked` — see the "Set as Start Page" row's own
-                    // comment for why) — not a general-purpose replacement
-                    // for the default renderer.
-                    renderMenuItem={(item, menuItemProps) => (
-                        <div {...menuItemProps}>
-                            <Show
-                                when={typeof item.icon !== "string"}
-                                fallback={
-                                    <Show when={item.icon}>
-                                        <i class={clsx("fa-solid fa-fw", `fa-${item.icon}`, "menu-item-icon")} />
+                {/* One row in a wide pane, two in a thin one (buttons, then the address bar):
+                    only the grid's areas change (browser-view.scss), never the DOM,
+                    so a resize while typing keeps focus, the IME and the suggestions.
+                    SPEC_BROWSER_PANE_NAV_BAR_RESPONSIVE_AND_CHROME_ZOOM_2026_10_14.md §3. */}
+                <div class="browser-nav-bar-grid">
+                    <div class="browser-nav-group browser-nav-group--nav">
+                        <button
+                            class="browser-nav-btn"
+                            disabled={!model.canGoBackAtom()}
+                            onClick={() => model.goBack()}
+                            title="Back"
+                        >{"←"}</button>
+                        <button
+                            class="browser-nav-btn"
+                            disabled={!model.canGoForwardAtom()}
+                            onClick={() => model.goForward()}
+                            title="Forward"
+                        >{"→"}</button>
+                        <button
+                            class="browser-nav-btn"
+                            onClick={() => getApi().browserPanes.reload(model.blockId).catch(() => {})}
+                            title="Reload"
+                        >{"↻"}</button>
+                        <IconButton
+                            class="browser-nav-btn"
+                            icon="house"
+                            label={`Home: ${home()}`}
+                            tooltipPlacement="bottom"
+                            onClick={goHome}
+                            onContextMenu={(e) => {
+                                e.preventDefault();
+                                ContextMenuModel.showContextMenu(
+                                    [
+                                        {
+                                            label: "Set this page as Home",
+                                            enabled: !!model.urlAtom() && model.urlAtom() !== browserStartPageAtom(),
+                                            click: () => void setCurrentAsStartPage(),
+                                        },
+                                    ],
+                                    e
+                                );
+                            }}
+                        />
+                        <FlyoutMenu
+                            items={bookmarkMenuItems()}
+                            placement="bottom-start"
+                            onOpenChange={(open) => {
+                                if (open) void loadBookmarks();
+                            }}
+                            // Only the icon slot is customized here — label/onClick/
+                            // divider behavior is identical to FlyoutMenu's default
+                            // rendering. `checked`/`shortcut`/`subItems` are
+                            // deliberately not replicated since this menu never uses
+                            // them (both pinned rows reflect state via their LABEL,
+                            // not `checked` — see the "Set as Start Page" row's own
+                            // comment for why) — not a general-purpose replacement
+                            // for the default renderer.
+                            renderMenuItem={(item, menuItemProps) => (
+                                <div {...menuItemProps}>
+                                    <Show
+                                        when={typeof item.icon !== "string"}
+                                        fallback={
+                                            <Show when={item.icon}>
+                                                <i class={clsx("fa-solid fa-fw", `fa-${item.icon}`, "menu-item-icon")} />
+                                            </Show>
+                                        }
+                                    >
+                                        {item.icon as JSX.Element}
                                     </Show>
+                                    <span class="label">{item.label}</span>
+                                </div>
+                            )}
+                        >
+                            <button
+                                class="browser-nav-btn"
+                                title={
+                                    bookmarksError()
+                                        ? `Bookmarks: ${bookmarksError()}`
+                                        : startPageError()
+                                          ? `Home page: ${startPageError()}`
+                                          : "Bookmarks"
                                 }
                             >
-                                {item.icon as JSX.Element}
-                            </Show>
-                            <span class="label">{item.label}</span>
-                        </div>
-                    )}
-                >
-                    <button
-                        class="browser-nav-btn"
-                        title={
-                            bookmarksError()
-                                ? `Bookmarks: ${bookmarksError()}`
-                                : startPageError()
-                                  ? `Home page: ${startPageError()}`
-                                  : "Bookmarks"
-                        }
-                    >
-                        <i
-                            class="fa fa-solid fa-bookmark"
-                            classList={{ "browser-bookmark-btn-error": !!bookmarksError() || !!startPageError() }}
-                            aria-hidden="true"
+                                <i
+                                    class="fa fa-solid fa-bookmark"
+                                    classList={{ "browser-bookmark-btn-error": !!bookmarksError() || !!startPageError() }}
+                                    aria-hidden="true"
+                                />
+                            </button>
+                        </FlyoutMenu>
+                    </div>
+                    <div class="browser-address-wrap">
+                        <input
+                            ref={addressInputRef}
+                            class="browser-address-bar"
+                            type="text"
+                            value={addressBar()}
+                            role="combobox"
+                            aria-autocomplete="both"
+                            aria-expanded={autocomplete.open()}
+                            onInput={(e) => {
+                                const value = e.currentTarget.value;
+                                setAddressBar(value);
+                                if (composing || (e as InputEvent).isComposing) return;
+                                deleting = (e as InputEvent).inputType?.startsWith("delete") ?? false;
+                                setTyped(value);
+                                autocomplete.update(value);
+                            }}
+                            onCompositionStart={() => {
+                                composing = true;
+                            }}
+                            onCompositionEnd={(e) => {
+                                // The committed text: ask for it now.
+                                composing = false;
+                                const value = e.currentTarget.value;
+                                deleting = false;
+                                setAddressBar(value);
+                                setTyped(value);
+                                autocomplete.update(value);
+                            }}
+                            onKeyDown={handleAddressKeyDown}
+                            onContextMenu={showTextInputContextMenu}
+                            onMouseDown={(e) => {
+                                firstClickSelectAll.onMouseDown(e.currentTarget);
+                                // Fire main_window_focus on mousedown — BEFORE focus
+                                // moves — so OS keyboard focus reclaims from the pane
+                                // HWND at the start of the click. Without this, the
+                                // first click on the address bar after the pane HWND
+                                // grabbed OS focus only moves DOM focus; OS focus
+                                // stays on the pane HWND and keystrokes route there
+                                // instead of reaching React. Subsequent clicks work
+                                // because OS focus has already transitioned.
+                                //
+                                // Buttons in the same nav bar work without this
+                                // because CEF/Chromium internally calls SetFocus on
+                                // <button> click; <input> doesn't get the same
+                                // treatment when the parent webview HWND lacks focus.
+                                //
+                                // Known limit: this is a round trip to the host, so
+                                // on Windows OS focus moves back 11-38 ms after the
+                                // click, and a key typed sooner (scripted input only)
+                                // still goes to the page (agentmux#4828). Scripted
+                                // input should wait ~50 ms after clicking the bar.
+                                diag(`input-mousedown value=${JSON.stringify(addressBar())}`);
+                                getApi().reclaimWindowFocus(windowLabel).catch(() => {});
+                            }}
+                            onMouseUp={(e) => firstClickSelectAll.onMouseUp(e.currentTarget)}
+                            onFocus={(e) => {
+                                // relatedTarget = the element that LOST focus to us
+                                // (or null if focus came from outside the document,
+                                // e.g. from the embedded CEF browser pane).
+                                // document.activeElement is intentionally NOT logged
+                                // here — by the time onFocus fires it's already this
+                                // input, so it would only ever read as the input
+                                // itself.
+                                const related = e.relatedTarget as Element | null;
+                                diag(`input-focus value=${JSON.stringify(addressBar())} relatedTarget=${tagElement(related)}`);
+                                firstClickSelectAll.onFocus(e.currentTarget);
+                                setTyped(e.currentTarget.value);
+                                // Always fire main_window_focus with window_label —
+                                // the IPC misrouting was the root cause of the bounce
+                                // (see the `main_window_focus` arm in ipc.rs). With
+                                // the correct window_label the IPC is a no-op when
+                                // the target window is already foreground, so it's safe to send on every
+                                // legitimate focus event without triggering loops.
+                                getApi().reclaimWindowFocus(windowLabel).catch(() => {});
+                            }}
+                            onBlur={(e) => {
+                                const next = e.relatedTarget as Element | null;
+                                abandonSuggestions();
+                                // Microtask-deferred so we can see what landed focus AFTER the blur.
+                                queueMicrotask(() => {
+                                    diag(`input-blur value=${JSON.stringify(addressBar())} relatedTarget=${tagElement(next)} now-active=${tagElement(document.activeElement)}`);
+                                });
+                            }}
+                            placeholder="Enter URL or search..."
                         />
-                    </button>
-                </FlyoutMenu>
-                <BrowserProfileButton model={model} home={home} />
-                <div class="browser-address-wrap">
-                    <input
-                        ref={addressInputRef}
-                        class="browser-address-bar"
-                        type="text"
-                        value={addressBar()}
-                        role="combobox"
-                        aria-autocomplete="both"
-                        aria-expanded={autocomplete.open()}
-                        onInput={(e) => {
-                            const value = e.currentTarget.value;
-                            setAddressBar(value);
-                            if (composing || (e as InputEvent).isComposing) return;
-                            deleting = (e as InputEvent).inputType?.startsWith("delete") ?? false;
-                            setTyped(value);
-                            autocomplete.update(value);
-                        }}
-                        onCompositionStart={() => {
-                            composing = true;
-                        }}
-                        onCompositionEnd={(e) => {
-                            // The committed text: ask for it now.
-                            composing = false;
-                            const value = e.currentTarget.value;
-                            deleting = false;
-                            setAddressBar(value);
-                            setTyped(value);
-                            autocomplete.update(value);
-                        }}
-                        onKeyDown={handleAddressKeyDown}
-                        onContextMenu={showTextInputContextMenu}
-                        onMouseDown={(e) => {
-                            firstClickSelectAll.onMouseDown(e.currentTarget);
-                            // Fire main_window_focus on mousedown — BEFORE focus
-                            // moves — so OS keyboard focus reclaims from the pane
-                            // HWND at the start of the click. Without this, the
-                            // first click on the address bar after the pane HWND
-                            // grabbed OS focus only moves DOM focus; OS focus
-                            // stays on the pane HWND and keystrokes route there
-                            // instead of reaching React. Subsequent clicks work
-                            // because OS focus has already transitioned.
-                            //
-                            // Buttons in the same nav bar work without this
-                            // because CEF/Chromium internally calls SetFocus on
-                            // <button> click; <input> doesn't get the same
-                            // treatment when the parent webview HWND lacks focus.
-                            //
-                            // Known limit: this is a round trip to the host, so
-                            // on Windows OS focus moves back 11-38 ms after the
-                            // click, and a key typed sooner (scripted input only)
-                            // still goes to the page (agentmux#4828). Scripted
-                            // input should wait ~50 ms after clicking the bar.
-                            diag(`input-mousedown value=${JSON.stringify(addressBar())}`);
-                            getApi().reclaimWindowFocus(windowLabel).catch(() => {});
-                        }}
-                        onMouseUp={(e) => firstClickSelectAll.onMouseUp(e.currentTarget)}
-                        onFocus={(e) => {
-                            // relatedTarget = the element that LOST focus to us
-                            // (or null if focus came from outside the document,
-                            // e.g. from the embedded CEF browser pane).
-                            // document.activeElement is intentionally NOT logged
-                            // here — by the time onFocus fires it's already this
-                            // input, so it would only ever read as the input
-                            // itself.
-                            const related = e.relatedTarget as Element | null;
-                            diag(`input-focus value=${JSON.stringify(addressBar())} relatedTarget=${tagElement(related)}`);
-                            firstClickSelectAll.onFocus(e.currentTarget);
-                            setTyped(e.currentTarget.value);
-                            // Always fire main_window_focus with window_label —
-                            // the IPC misrouting was the root cause of the bounce
-                            // (see the `main_window_focus` arm in ipc.rs). With
-                            // the correct window_label the IPC is a no-op when
-                            // the target window is already foreground, so it's safe to send on every
-                            // legitimate focus event without triggering loops.
-                            getApi().reclaimWindowFocus(windowLabel).catch(() => {});
-                        }}
-                        onBlur={(e) => {
-                            const next = e.relatedTarget as Element | null;
-                            if (next !== goButtonRef) abandonSuggestions();
-                            // Microtask-deferred so we can see what landed focus AFTER the blur.
-                            queueMicrotask(() => {
-                                diag(`input-blur value=${JSON.stringify(addressBar())} relatedTarget=${tagElement(next)} now-active=${tagElement(document.activeElement)}`);
-                            });
-                        }}
-                        placeholder="Enter URL or search..."
-                    />
-                    <Show when={autocomplete.open()}>
-                        <AddressSuggestions
-                            matches={autocomplete.matches()}
-                            selected={autocomplete.selected()}
-                            onChoose={chooseSuggestion}
-                        />
-                    </Show>
+                        <Show when={autocomplete.open()}>
+                            <AddressSuggestions
+                                matches={autocomplete.matches()}
+                                selected={autocomplete.selected()}
+                                onChoose={chooseSuggestion}
+                            />
+                        </Show>
+                    </div>
+                    <div class="browser-nav-group browser-nav-group--profile">
+                        <BrowserProfileButton model={model} home={home} />
+                    </div>
                 </div>
-                <button
-                    ref={goButtonRef}
-                    class="browser-nav-btn browser-go-btn"
-                    // Keep focus in the address bar on a click. Reaching Go with
-                    // Tab keeps the choice too (the address bar's blur above);
-                    // leaving Go for anywhere but the address bar drops it.
-                    onMouseDown={(e) => e.preventDefault()}
-                    onBlur={(e) => {
-                        if (e.relatedTarget !== addressInputRef) abandonSuggestions();
-                    }}
-                    onClick={handleNavigate}
-                    title="Go"
-                >
-                    <i class="fa fa-solid fa-arrow-right" aria-hidden="true" />
-                </button>
             </div>
         </Show>
     );

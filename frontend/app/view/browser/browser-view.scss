@@ -31,14 +31,67 @@
     background: var(--block-bg-color);
 }
 
+// The bar stacks below this width, measured in its own CSS px (so after chrome
+// zoom: at 1.5 it stacks below 582 screen px). The single row's fixed parts are
+// 208px: five 28px buttons and four 4px gaps (156), two 4px gaps around the
+// address bar, Profile (28) and 16px padding. That leaves the address bar at
+// least 180px, about 22 characters of URL. Another button in the bar adds 32px.
+// SPEC_BROWSER_PANE_NAV_BAR_RESPONSIVE_AND_CHROME_ZOOM_2026_10_14.md §3.2.
+$browser-nav-stack-below: 388px;
+
+// Follows chrome zoom like the pane header (mixins.scss
+// block-frame-default-header-layout). It is the query container; the grid
+// inside it is what changes layout, since an element can't query itself.
 .browser-nav-bar {
-    display: flex;
-    align-items: center;
-    gap: var(--space-1);
-    padding: var(--space-1) var(--space-2);
+    zoom: var(--zoomfactor);
+    container: browser-nav / inline-size;
+    // Over the page placeholder after it, so the suggestion list, which drops
+    // below the bar, stays on top even if the bar becomes a stacking context
+    // (contain, opacity, transform...). `container-type` alone doesn't make
+    // one in Chrome 154: it implies no layout containment.
+    position: relative;
+    z-index: var(--z-pane-overlay);
     background: var(--main-bg-color);
     border-bottom: 1px solid var(--border-color);
     flex-shrink: 0;
+}
+
+.browser-nav-bar-grid {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-areas: "nav address profile";
+    align-items: center;
+    gap: var(--space-1);
+    padding: var(--space-1) var(--space-2);
+}
+
+.browser-nav-group {
+    display: flex;
+    align-items: center;
+    // Only ever wraps in a pane narrower than its buttons (~208px).
+    flex-wrap: wrap;
+    gap: var(--space-1);
+
+    &--nav {
+        grid-area: nav;
+    }
+
+    // At the right end in both layouts.
+    &--profile {
+        grid-area: profile;
+        justify-content: flex-end;
+    }
+}
+
+// Thin pane: the buttons on top (navigation on the left, Profile on the
+// right), the address bar under them at full width. There is no Go button:
+// Enter submits.
+@container browser-nav (max-width: #{$browser-nav-stack-below - 0.02px}) {
+    .browser-nav-bar-grid {
+        grid-template-areas:
+            "nav     .       profile"
+            "address address address";
+    }
 }
 
 .browser-nav-btn {
@@ -92,8 +145,8 @@
 // Holds the address bar and its suggestion list (address-suggestions.tsx),
 // which drops below it.
 .browser-address-wrap {
+    grid-area: address;
     position: relative;
-    flex: 1;
     display: flex;
     min-width: 0;
 }

@@ -72,7 +72,7 @@ export const TIPS: TipRow[] = [
         gesture: "mod+wheel",
         where: "over a pane",
         label: "Zoom that pane; over the title bar, status bar or a pane's header, zoom the app's frame instead",
-        source: { file: "frontend/app/app.tsx", anchor: "function isOverChrome(target: HTMLElement): boolean" },
+        source: { file: "frontend/app/store/chrome-zoom-target.ts", anchor: "export function isOverChrome(target: HTMLElement): boolean" },
     },
     {
         id: "pane:zoom:allPanes",
