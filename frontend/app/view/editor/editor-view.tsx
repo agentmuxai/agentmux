@@ -26,7 +26,7 @@ import { focusManager } from "@/app/store/focusManager";
 import { userIsTypingElsewhereIn } from "./editor-focus-guard";
 import type { EditorMode, EditorViewModel } from "./editor-model";
 import { cursorAtLine } from "./open-at-line";
-import { Button, SegmentedControl } from "@/app/element/ui";
+import { Button, IconButton, SegmentedControl } from "@/app/element/ui";
 import { SaveAsInput } from "./editor-save-as-input";
 import { EDITOR_STATE_FIELDS, editorDocTabs, provideEditorStates, takeMovedEditorState, trackSave } from "./editor-doc-tabs";
 import { registerDocTabDropZone } from "@/app/doc-tabs/doc-tab-hosts";
@@ -1049,7 +1049,7 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
                         <div class="editor-error-panel-title">Couldn't open file</div>
                         <div class="editor-error-panel-path">{model.filePathAtom()}</div>
                         <div class="editor-error-panel-message">{model.errorAtom()}</div>
-                        <button
+                        <Button
                             class="editor-error-panel-close"
                             onClick={() => {
                                 const tab = model.activeTabAtom();
@@ -1057,7 +1057,7 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
                             }}
                         >
                             Close tab
-                        </button>
+                        </Button>
                     </div>
                 </Show>
 
@@ -1079,14 +1079,12 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
                                     <span class="editor-lsp-banner-text">
                                         {hint?.serverName ?? state.language} not installed.
                                     </span>
-                                    <button
-                                        class="editor-lsp-banner-dismiss"
-                                        aria-label="Dismiss banner for this session"
-                                        title="Dismiss for this session"
+                                    <IconButton
+                                        icon="xmark"
+                                        label="Dismiss banner for this session"
+                                        density="compact"
                                         onClick={() => dismissBanner(state.language)}
-                                    >
-                                        ×
-                                    </button>
+                                    />
                                 </div>
                                 <Show when={hint}>
                                     <div class="editor-lsp-banner-row editor-lsp-banner-install">

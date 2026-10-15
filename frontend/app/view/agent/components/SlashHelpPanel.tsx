@@ -16,6 +16,7 @@
 
 import { type JSX, createMemo, onCleanup, onMount } from "solid-js";
 import { For } from "solid-js/web";
+import { IconButton } from "@/app/element/ui";
 import { eventBelongsToPaneOf } from "@/util/focusutil";
 import type { SlashCommand, SlashCommandCategory } from "../commands/types";
 
@@ -87,14 +88,7 @@ export function SlashHelpPanel(props: SlashHelpPanelProps): JSX.Element {
         <div class="slash-help" role="dialog" aria-label="Slash command help" ref={rootRef}>
             <div class="slash-help__header">
                 <span class="slash-help__title">Slash commands</span>
-                <button
-                    type="button"
-                    class="slash-help__close"
-                    aria-label="Close help"
-                    onClick={() => props.onClose()}
-                >
-                    ×
-                </button>
+                <IconButton icon="xmark" label="Close help" density="compact" onClick={() => props.onClose()} />
             </div>
             <div class="slash-help__body">
                 <For each={grouped()}>

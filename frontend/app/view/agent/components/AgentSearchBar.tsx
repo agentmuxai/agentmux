@@ -17,6 +17,7 @@
  */
 
 import { Show, type Accessor, type JSX } from "solid-js";
+import { IconButton } from "@/app/element/ui";
 
 export interface AgentSearchBarProps {
     visible: Accessor<boolean>;
@@ -66,27 +67,9 @@ export const AgentSearchBar = (props: AgentSearchBarProps): JSX.Element => {
                     onKeyDown={handleKeyDown}
                 />
                 <span class="agent-search-counter">{counterText()}</span>
-                <button
-                    class="agent-search-btn"
-                    onClick={props.onPrev}
-                    title="Previous match (Shift+Enter)"
-                >
-                    &#x25B2;
-                </button>
-                <button
-                    class="agent-search-btn"
-                    onClick={props.onNext}
-                    title="Next match (Enter)"
-                >
-                    &#x25BC;
-                </button>
-                <button
-                    class="agent-search-btn agent-search-btn--close"
-                    onClick={props.onClose}
-                    title="Close search (Esc)"
-                >
-                    <i class="fa-solid fa-xmark" aria-hidden="true" />
-                </button>
+                <IconButton icon="caret-up" label="Previous match (Shift+Enter)" density="compact" onClick={() => props.onPrev()} />
+                <IconButton icon="caret-down" label="Next match (Enter)" density="compact" onClick={() => props.onNext()} />
+                <IconButton icon="xmark" label="Close search (Esc)" density="compact" onClick={() => props.onClose()} />
             </div>
         </Show>
     );

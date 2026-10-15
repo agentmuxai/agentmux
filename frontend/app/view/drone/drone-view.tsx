@@ -13,7 +13,7 @@ import type { DroneViewModel } from "./drone-model";
 import type { BlockKind, FlowNode } from "./drone-types";
 import "./drone-view.scss";
 import type { Bundle } from "@/app/store/rpc-api";
-import { Button } from "@/app/element/ui";
+import { Button, IconButton } from "@/app/element/ui";
 import { focusWhenRendered } from "@/util/focusutil";
 
 // The node kind this window is dragging from a top bar, read by the canvas's
@@ -499,16 +499,16 @@ const Canvas = (p: { model: DroneViewModel }): JSX.Element => {
                                 <header class="drone-node-header">
                                     <span class="drone-node-emoji">{meta.emoji}</span>
                                     <span class="drone-node-label">{meta.label}</span>
-                                    <button
+                                    <IconButton
+                                        icon="xmark"
+                                        label="Remove block"
+                                        density="compact"
                                         class="drone-node-close"
                                         onClick={(e) => {
                                             e.stopPropagation();
                                             m.removeNode(n.id);
                                         }}
-                                        aria-label="Remove block"
-                                    >
-                                        ×
-                                    </button>
+                                    />
                                 </header>
                                 <Show
                                     when={selected()}
@@ -846,13 +846,13 @@ const VariablesEditor = (p: {
                             onContextMenu={showTextInputContextMenu}
                             placeholder="value"
                         />
-                        <Button
+                        <IconButton
+                            icon="xmark"
+                            label="Remove variable"
                             density="compact"
                             class="drone-btn drone-btn--small nodrag"
                             onClick={() => p.onChange(p.entries.filter((_, idx) => idx !== i()))}
-                        >
-                            ×
-                        </Button>
+                        />
                     </div>
                 )}
             </For>

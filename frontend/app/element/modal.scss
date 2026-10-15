@@ -164,28 +164,6 @@
     position: absolute;
     top: var(--space-2);
     right: var(--space-2);
-    width: 28px;
-    height: 28px;
-    @include mixins.flex-center;
-    padding: 0;
-    background: transparent;
-    border: 1px solid transparent;
-    border-radius: var(--radius-md);
-    color: var(--secondary-text-color);
-    font-size: var(--text-md);
-    line-height: 1;
-    cursor: default;
-    @include mixins.control-transition(var(--duration-decorative-fast), var(--ease-emphasized));
-
-    &:hover {
-        color: var(--main-text-color);
-        background: var(--tint-3);
-        border-color: var(--border-color);
-    }
-
-    &:focus-visible {
-        @include mixins.focus-ring;
-    }
 }
 
 // ── Panel subcomponents ──────────────────────────────────────────────────────

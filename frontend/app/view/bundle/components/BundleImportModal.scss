@@ -172,15 +172,6 @@
     position: absolute;
     top: 4px;
     right: 6px;
-    background: none;
-    border: none;
-    cursor: pointer;
-    font-size: 1.1em;
-    opacity: 0.6;
-
-    &:hover {
-        opacity: 1;
-    }
 }
 
 .bundle-import-summary-line {

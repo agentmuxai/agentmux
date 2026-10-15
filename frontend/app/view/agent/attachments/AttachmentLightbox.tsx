@@ -13,6 +13,7 @@
 
 import { Portal } from "solid-js/web";
 import { Match, Show, Switch, createEffect, createResource, onCleanup, onMount } from "solid-js";
+import { Button, IconButton } from "@/app/element/ui";
 import { usePaneOverlay } from "@/app/platform/pane-overlay";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
@@ -182,24 +183,36 @@ export function AttachmentLightbox(props: Props) {
                         </Show>
                         <span class="agent-attachment-lightbox__actions">
                             <Show when={props.items.length > 1}>
-                                <button type="button" aria-label={`Previous ${noun()}`} title="Previous (←)" onClick={() => go(-1)}>
-                                    <i class="fa-solid fa-chevron-left" />
-                                </button>
+                                <IconButton
+                                    icon="chevron-left"
+                                    label={`Previous ${noun()}`}
+                                    tooltip={false}
+                                    title="Previous (←)"
+                                    onClick={() => go(-1)}
+                                />
                                 <span class="pos">
                                     {Math.min(props.index, props.items.length - 1) + 1} / {props.items.length}
                                 </span>
-                                <button type="button" aria-label={`Next ${noun()}`} title="Next (→)" onClick={() => go(1)}>
-                                    <i class="fa-solid fa-chevron-right" />
-                                </button>
+                                <IconButton
+                                    icon="chevron-right"
+                                    label={`Next ${noun()}`}
+                                    tooltip={false}
+                                    title="Next (→)"
+                                    onClick={() => go(1)}
+                                />
                             </Show>
                             <Show when={props.onRemove}>
-                                <button type="button" class="remove" onClick={() => props.onRemove!(item()!.key)}>
+                                <Button tone="danger" onClick={() => props.onRemove!(item()!.key)}>
                                     Remove
-                                </button>
+                                </Button>
                             </Show>
-                            <button type="button" aria-label="Close preview" title="Close (Esc)" onClick={() => props.onClose()}>
-                                <i class="fa-solid fa-xmark" />
-                            </button>
+                            <IconButton
+                                icon="xmark"
+                                label="Close preview"
+                                tooltip={false}
+                                title="Close (Esc)"
+                                onClick={() => props.onClose()}
+                            />
                         </span>
                     </div>
                 </div>

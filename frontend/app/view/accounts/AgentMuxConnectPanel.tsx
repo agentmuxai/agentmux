@@ -28,7 +28,7 @@ import { ProviderLogo } from "@/element/ProviderLogo";
 import { CopyableErrorMessage } from "@/app/errors/CopyableErrorMessage";
 import { createMuxBusCloudConfig } from "./muxbus-cloud-config";
 import { muxbusNeedsSignInAgain } from "./muxbus-session";
-import { Button } from "@/app/element/ui";
+import { Button, IconButton } from "@/app/element/ui";
 import { acceptMuxbusDelivery, type MuxBusDeliveryStatus } from "@/store/muxbus-delivery";
 
 // Production Cognito config — set after deployment.
@@ -297,14 +297,7 @@ export function AgentMuxConnectPanel(props: {
                         <ProviderLogo provider="agentmux" size={20} />
                     </span>
                     <span class="accounts-chooser-title">Connect AgentMux</span>
-                    <button
-                        type="button"
-                        class="accounts-chooser-close"
-                        onClick={() => props.onClose()}
-                        aria-label="Close"
-                    >
-                        ✕
-                    </button>
+                    <IconButton icon="xmark" label="Close" tooltip={false} onClick={() => props.onClose()} />
                 </div>
                 <div class="accounts-chooser-modes">
                     <Show when={muxbus.error()}>

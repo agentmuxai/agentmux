@@ -40,6 +40,7 @@
  * below — rather than relying on remount to clear them.
  */
 
+import { IconButton } from "@/app/element/ui";
 import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import { type JSX, Show, createEffect, createSignal, on, onCleanup, onMount } from "solid-js";
@@ -173,14 +174,7 @@ export function BtwOverlay(props: BtwOverlayProps): JSX.Element {
         <div class="btw-overlay" role="dialog" aria-label="Side question" ref={rootRef}>
             <div class="btw-overlay__header">
                 <span class="btw-overlay__title">/btw</span>
-                <button
-                    type="button"
-                    class="btw-overlay__close"
-                    aria-label="Close side question"
-                    onClick={() => props.onClose()}
-                >
-                    ×
-                </button>
+                <IconButton icon="xmark" label="Close side question" density="compact" onClick={() => props.onClose()} />
             </div>
             <div class="btw-overlay__question">{props.question}</div>
             <div class="btw-overlay__body">

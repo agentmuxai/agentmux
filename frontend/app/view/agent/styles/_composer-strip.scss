@@ -283,36 +283,13 @@
 // Explicit close affordance — the panel deliberately stays open across
 // selections (§9.2 of SPEC_AGENT_RUNTIME_DROPUP_2026_07_09.md), unlike every
 // other popup in the app, so it gets the one thing no other non-modal
-// popover here has: a visible way to say "done." Scaled down from Modal's
-// own .modal-panel-close-btn (modal.scss) to match this panel's much more
-// compact chrome (10px base font, 2px row padding) rather than reusing its
-// 28px sizing. See docs/specs/SPEC_AGENT_RUNTIME_DROPUP_CLOSE_BUTTON_2026_08_07.md.
+// popover here has: a visible way to say "done." A compact IconButton, to
+// match this panel's compact chrome; this rule only places it. See
+// docs/specs/SPEC_AGENT_RUNTIME_DROPUP_CLOSE_BUTTON_2026_08_07.md.
 .agent-runtime-dropup-close-btn {
     position: absolute;
     top: 2px;
     right: 2px;
-    width: 16px;
-    height: 16px;
-    @include mixins.flex-center;
-    padding: 0;
-    background: transparent;
-    border: 1px solid transparent;
-    border-radius: var(--radius-sm);
-    color: var(--secondary-text-color);
-    font-size: var(--text-3xs);
-    line-height: 1;
-    cursor: default;
-    @include mixins.control-transition(var(--duration-decorative-fast), var(--ease-emphasized));
-
-    &:hover {
-        color: var(--main-text-color);
-        background: var(--tint-3);
-        border-color: var(--border-color);
-    }
-
-    &:focus-visible {
-        @include mixins.focus-ring;
-    }
 }
 
 .agent-runtime-dropup-section {

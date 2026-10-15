@@ -55,39 +55,6 @@
         opacity: 0.75;
     }
 
-    .agent-search-btn {
-        flex-shrink: 0;
-        width: 22px;
-        height: 22px;
-        padding: 0;
-        @include mixins.flex-center;
-        background: none;
-        border: 1px solid transparent;
-        border-radius: 0;
-        cursor: default;
-        color: var(--secondary-text-color);
-        font-size: var(--text-xs);
-        line-height: 1;
-        transition: background var(--duration-decorative-fast), color var(--duration-decorative-fast), border-color var(--duration-decorative-fast);
-
-        &:hover {
-            background: var(--accent-bg-strong);
-            border-color: var(--border-color);
-            color: var(--main-text-color);
-        }
-
-        &--close {
-            font-size: var(--text-md);
-            margin-left: var(--space-0-5);
-
-            &:hover {
-                background: var(--error-bg-strong);
-                border-color: var(--error-line-strong);
-                color: var(--error-color);
-            }
-        }
-    }
-
     // === Search-match highlight ===
 
     .agent-node-search-match {

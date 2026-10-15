@@ -409,17 +409,6 @@
 
 .editor-error-panel-close {
     margin-top: var(--space-2);
-    padding: var(--space-1-5) var(--space-3);
-    background: transparent;
-    border: 1px solid var(--border-color);
-    border-radius: 3px;
-    color: var(--main-text-color);
-    cursor: default;
-    font-size: var(--text-sm);
-
-    &:hover {
-        background: var(--hover-bg-color);
-    }
 }
 
 .editor-codemirror {
@@ -584,21 +573,6 @@
 
 .editor-lsp-banner-text {
     flex: 1;
-}
-
-.editor-lsp-banner-dismiss {
-    width: 20px;
-    height: 20px;
-    @include mixins.button-reset;
-    color: var(--secondary-text-color);
-    cursor: default;
-    font-size: 16px;
-    line-height: 1;
-    opacity: 0.6;
-
-    &:hover {
-        opacity: 1;
-    }
 }
 
 .editor-lsp-banner-install {

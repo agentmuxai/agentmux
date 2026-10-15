@@ -39,19 +39,5 @@
         .agent-auth-notice-text {
             flex: 1;
         }
-
-        .agent-auth-notice-dismiss {
-            flex: none;
-            background: none;
-            border: none;
-            color: var(--secondary-text-color);
-            cursor: pointer;
-            font-size: var(--text-sm);
-            padding: 0 2px;
-
-            &:hover {
-                color: var(--main-text-color);
-            }
-        }
     }
 }

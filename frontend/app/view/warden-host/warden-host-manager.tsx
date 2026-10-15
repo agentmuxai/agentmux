@@ -10,6 +10,7 @@
 
 import { createMemo, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
 import { useTick } from "@/app/hook/useTick";
+import { IconButton } from "@/app/element/ui";
 
 import { authHeaders } from "@/app/store/auth-headers";
 import { getWebServerEndpoint } from "@/util/endpoints";
@@ -151,13 +152,12 @@ export const WardenHostManager = (): JSX.Element => {
                                             </span>
                                         </td>
                                         <td class="warden-host-actions">
-                                            <button
-                                                class="warden-host-deregister"
-                                                title="Deregister (soft kill — removes from jekt routing, leaves process running)"
+                                            <IconButton
+                                                icon="xmark"
+                                                label="Deregister (soft kill — removes from jekt routing, leaves process running)"
+                                                density="compact"
                                                 onClick={() => void handleDeregister(a.agent_id, a.block_id)}
-                                            >
-                                                ×
-                                            </button>
+                                            />
                                         </td>
                                     </tr>
                                 );

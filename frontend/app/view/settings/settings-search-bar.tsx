@@ -9,6 +9,7 @@
 
 import { createMemo, createSignal, For, Show, type Accessor, type JSX } from "solid-js";
 
+import { IconButton } from "@/app/element/ui";
 import { SETTINGS_INDEX, searchSettings } from "./settings-index";
 import type { SettingsIndexEntry } from "./settings-model";
 import "./settings-search-bar.scss";
@@ -94,15 +95,13 @@ export function SettingsSearchBar(props: SettingsSearchBarProps): JSX.Element {
                     spellcheck={false}
                 />
                 <Show when={props.query()}>
-                    <button
-                        type="button"
-                        class="settings-search-clear"
-                        onClick={() => props.setQuery("")}
-                        aria-label="Clear search"
+                    <IconButton
+                        icon="xmark"
+                        label="Clear search"
+                        density="compact"
                         data-testid="settings-search-clear"
-                    >
-                        <i class="fa-solid fa-xmark" aria-hidden="true" />
-                    </button>
+                        onClick={() => props.setQuery("")}
+                    />
                 </Show>
             </div>
             <Show when={isOpen()}>

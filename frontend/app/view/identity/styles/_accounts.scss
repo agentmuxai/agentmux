@@ -30,21 +30,6 @@
         flex: 1;
         min-width: 0;
     }
-
-    .identity-delete-notice-dismiss {
-        flex: none;
-        border: none;
-        background: transparent;
-        color: var(--secondary-text-color);
-        font-size: var(--text-md);
-        line-height: 1;
-        cursor: pointer;
-        padding: 2px 4px;
-
-        &:hover {
-            color: var(--main-text-color);
-        }
-    }
 }
 
 // ── Accounts layout (list + detail) ──────────────────────────────────────────

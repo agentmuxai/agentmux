@@ -160,4 +160,17 @@ describe("FleetResultPanel", () => {
         render(() => <FleetResultPanel model={model} />);
         expect(document.querySelector(".swarm-fleet-result-row")!.textContent).toContain("blk-x");
     });
+
+    it("is dismissed with its Dismiss button", () => {
+        const entry: FleetResultEntry = {
+            action: "bulk-stop",
+            result: { succeeded: ["blk-x"], failed: [], aborted_early: false },
+            labels: {},
+        };
+        const dismissFleetResult = vi.fn();
+        const model = { lastFleetResultAtom: () => entry, dismissFleetResult } as unknown as SwarmViewModel;
+        render(() => <FleetResultPanel model={model} />);
+        screen.getByRole("button", { name: "Dismiss" }).click();
+        expect(dismissFleetResult).toHaveBeenCalledTimes(1);
+    });
 });
