@@ -11,8 +11,7 @@ import {
     nodeBytes,
     resolveTailPolicy,
     TURN_TAIL_MAX_BYTES,
-    turnScopedFrontier,
-} from "./streaming-buffer";
+    turnScopedFrontier, locateFrontierRow } from "./streaming-buffer";
 
 const md = (id: string): DocumentNode => ({ type: "markdown", id, content: id, timestamp: 0 });
 
@@ -380,5 +379,30 @@ describe("nodeBytes counts every rendered field, not a fixed list (Codex P2, #36
     it("counts a field this module has never heard of", () => {
         const future = { type: "markdown", id: "m", content: "", timestamp: 0, someNewRenderedField: "y".repeat(600_000) } as unknown as DocumentNode;
         expect(nodeBytes(future)).toBeGreaterThan(TURN_TAIL_MAX_BYTES);
+    });
+});
+
+describe("locateFrontierRow", () => {
+    const user = (id: string) => ({ type: "user_message", id, message: "hi", timestamp: 5 }) as unknown as DocumentNode;
+    const text = (id: string) => ({ type: "markdown", id, content: id }) as unknown as DocumentNode;
+
+    it("finds the frontier by id, at the hint or anywhere", () => {
+        const nodes = [text("a"), user("u1"), text("b")];
+        expect(locateFrontierRow(nodes, "u1", 1)).toBe(1);
+        expect(locateFrontierRow([text("old"), ...nodes], "u1", 1)).toBe(2); // older history prepended
+    });
+
+    it("keeps a frontier row that was re-keyed in place", () => {
+        const row = user("user_123");
+        const nodes = [text("a"), { ...row, id: "user_01234567_L9_0" } as DocumentNode, text("b")];
+        expect(locateFrontierRow(nodes, "user_123", 1, row)).toBe(1);
+    });
+
+    it("loses it when the row at the hint is a different row", () => {
+        const row = user("user_123");
+        const other = { ...user("other"), message: "a different message" } as DocumentNode;
+        expect(locateFrontierRow([text("a"), other], "user_123", 1, row)).toBe(-1); // not the same fields
+        expect(locateFrontierRow([text("a")], "user_123", 1, row)).toBe(-1); // truncated
+        expect(locateFrontierRow([text("a"), text("b")], "user_123", 1)).toBe(-1); // no row remembered
     });
 });

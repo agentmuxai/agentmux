@@ -61,6 +61,7 @@ import { computeLayoutView } from "@/app/store/agent-pane-layout/reducer";
 import { inFlowState, ROW_GAP_PX, type ExpansionState } from "@/app/store/agent-pane-layout/types";
 import {
     initialStickyFrontierId,
+    locateFrontierRow,
     nodeBytes,
     partitionAt,
     partitionForVirtualization,
@@ -623,11 +624,9 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
     // Where the frontier was last time: streaming only appends, so this is
     // almost always still right and saves a full findIndex per flush.
     let frontierIndexHint = -1;
-    const locateFrontier = (nodes: readonly DocumentNode[]): number => {
-        if (stickyFrontierId == null) return -1;
-        if (nodes[frontierIndexHint]?.id === stickyFrontierId) return frontierIndexHint;
-        return nodes.findIndex((n) => n.id === stickyFrontierId); // prepend (older history), truncation
-    };
+    let frontierRow: DocumentNode | undefined; // the row itself, so a re-key keeps it (locateFrontierRow)
+    const locateFrontier = (nodes: readonly DocumentNode[]): number =>
+        stickyFrontierId == null ? -1 : locateFrontierRow(nodes, stickyFrontierId, frontierIndexHint, frontierRow);
     const turnPartition = (nodes: readonly DocumentNode[]) => {
         let at = locateFrontier(nodes);
         // `from: at` — the frontier never moves back, so the target search
@@ -637,6 +636,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         if (at < 0) at = target;
         else if (target > at) at = advanceFrontier(nodes, at, target);
         stickyFrontierId = nodes[at]?.id ?? null;
+        frontierRow = nodes[at];
         frontierIndexHint = at;
         const result = partitionAt(nodes, at);
         trail("agent:virt:partition", {

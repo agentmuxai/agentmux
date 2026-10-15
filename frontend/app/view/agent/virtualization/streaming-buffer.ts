@@ -344,3 +344,35 @@ export function locateIndex(
         relativeIndex: absoluteIndex - partition.splitIndex,
     };
 }
+
+/**
+ * Where the turn tail's first row (the frontier) is now: by id, the last
+ * index first (streaming only appends); else the same row under a new id at
+ * the same place, which is what `RekeyNode` does to a sent message once its
+ * transcript record is placed; else -1 (a prepend of older history moved it,
+ * or a truncation removed it: the caller re-targets). Without the re-key
+ * case the frontier, which is usually that very message right after a send,
+ * was lost and re-targeted from scratch, remounting the tail.
+ */
+export function locateFrontierRow(
+    nodes: readonly DocumentNode[],
+    id: string,
+    hint: number,
+    row?: DocumentNode
+): number {
+    if (nodes[hint]?.id === id) return hint;
+    const i = nodes.findIndex((n) => n.id === id);
+    if (i >= 0 || !row) return i;
+    const at = nodes[hint];
+    return at && isRekeyedCopy(at, row) ? hint : -1;
+}
+
+/** `a` is `b` with only its id changed. */
+function isRekeyedCopy(a: DocumentNode, b: DocumentNode): boolean {
+    const keys = Object.keys(a);
+    return (
+        a.id !== b.id &&
+        keys.length === Object.keys(b).length &&
+        keys.every((k) => k === "id" || (a as unknown as Record<string, unknown>)[k] === (b as unknown as Record<string, unknown>)[k])
+    );
+}
