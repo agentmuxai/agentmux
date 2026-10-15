@@ -175,11 +175,11 @@
 
 .agent-identity-unassign-btn {
     padding: var(--space-0-5) var(--space-1-5);
-    border-color: color-mix(in srgb, var(--error-color) 50%, transparent);
+    border-color: var(--error-line-heavy);
     color: color-mix(in srgb, var(--error-color) 70%, transparent);
 
     &:hover:not(:disabled) {
-        background: color-mix(in srgb, var(--error-color) 15%, transparent);
+        background: var(--error-bg-strong);
         color: var(--error-color);
     }
 }

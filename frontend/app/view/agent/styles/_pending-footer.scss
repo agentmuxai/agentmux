@@ -51,7 +51,7 @@
             padding: 3px 5px;
             border-left: 2px solid var(--warning-color);
             border-radius: 0;
-            background: color-mix(in srgb, var(--warning-color) 4%, transparent);
+            background: var(--warning-bg-subtle);
             pre {
                 margin: 0;
                 white-space: pre-wrap;
@@ -122,7 +122,7 @@
 
                 &:focus {
                     outline: none;
-                    border-color: color-mix(in srgb, var(--accent-color) 40%, transparent);
+                    border-color: var(--accent-line-strong);
                 }
 
                 &.bang-command {

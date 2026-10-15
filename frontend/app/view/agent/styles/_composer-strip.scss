@@ -359,8 +359,8 @@
 // it reads as a distinct, always-reachable action rather than blending in
 // with the neutral Mode/Model/Effort pills to its left.
 .agent-composer-strip-log-btn {
-    background: color-mix(in srgb, var(--accent-color) 6%, transparent);
-    border: 1px solid color-mix(in srgb, var(--accent-color) 35%, transparent);
+    background: var(--accent-bg-subtle);
+    border: 1px solid var(--ui-line-accent);
     border-radius: 0;
     color: var(--accent-color);
     font: inherit;
@@ -662,7 +662,7 @@
 
     &:hover,
     &--active {
-        background: color-mix(in srgb, var(--accent-color) 15%, transparent);
+        background: var(--accent-bg-strong);
         border-top-color: var(--accent-color);
     }
 }

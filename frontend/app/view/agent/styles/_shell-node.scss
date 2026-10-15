@@ -339,7 +339,7 @@
         opacity: 1;
         color: var(--error-color);
         background: var(--hover-bg-color);
-        border-color: color-mix(in srgb, var(--error-color) 45%, transparent);
+        border-color: var(--ui-line-danger);
     }
 }
 

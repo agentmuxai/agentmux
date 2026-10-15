@@ -208,7 +208,7 @@
 
         &:hover:not(:disabled) {
             background: var(--error-bg);
-            border-color: color-mix(in srgb, var(--error-color) 40%, transparent);
+            border-color: var(--error-line-strong);
         }
 
         &:disabled {

@@ -97,12 +97,12 @@
 
     &:hover {
         border-color: var(--accent-color);
-        background: color-mix(in srgb, var(--accent-color) 8%, transparent);
+        background: var(--accent-bg-subtle);
     }
 
     &.selected {
         border-color: var(--accent-color);
-        background: color-mix(in srgb, var(--accent-color) 8%, transparent);
+        background: var(--accent-bg-subtle);
     }
 }
 

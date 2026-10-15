@@ -18,6 +18,7 @@ import { isLightThemeActive } from "../block/pane-identity";
 import { ObjectService } from "../store/services";
 import { makeORef, useMuxObjectValue } from "../store/mos";
 import { measureTabWidth } from "./tab-measure";
+import { Z_TRANSIENT } from "../zindex";
 import "./tab.scss";
 import { renameRequest } from "./tab-rename-request";
 
@@ -89,7 +90,7 @@ const TabContextPanel = (props: TabContextPanelProps): JSX.Element => {
         position: "fixed",
         top: `${props.anchor.bottom + 4}px`,
         left: `${props.anchor.left}px`,
-        "z-index": 9999,
+        "z-index": Z_TRANSIENT,
     });
 
     return (

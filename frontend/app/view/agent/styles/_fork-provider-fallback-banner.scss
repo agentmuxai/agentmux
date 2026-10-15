@@ -14,7 +14,7 @@
         gap: var(--space-1-5);
         margin: var(--space-1) 0 var(--space-0-5);
         padding: var(--space-1) var(--space-2);
-        @include line.notice(warning, $text: var(--main-text-color), $line: color-mix(in srgb, var(--warning-color) 40%, transparent));
+        @include line.notice(warning, $text: var(--main-text-color), $line: var(--warning-line-strong));
         border-radius: 0;
         font-size: var(--text-sm);
         flex-shrink: 0;

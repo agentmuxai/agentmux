@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Startup splash control — the pulsing brain in index.html (`#startup-loading`)
-// is a full-cover overlay (position:fixed; inset:0; solid bg; z-index 99999).
+// is a full-cover overlay (position:fixed; inset:0; solid bg; z-index 99999,
+// theme.scss's `--z-splash`).
 //
 // It must stay up — covering the entire bootstrap + mount cascade — until the
 // content-reveal gate (`tab-reveal.ts`) decides the window has settled, then

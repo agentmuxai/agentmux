@@ -1059,7 +1059,7 @@ $transcript-preview-max-height: calc(50vh / 3);
         border: none;
         border-left: 2px solid var(--accent-color);
         border-radius: 0;
-        background: color-mix(in srgb, var(--accent-color) 4%, transparent);
+        background: var(--accent-bg-subtle);
         cursor: default;
 
         &.outgoing {
@@ -2072,17 +2072,17 @@ $transcript-preview-max-height: calc(50vh / 3);
 
         &.agent-fetch-status-ok {
             color: var(--success-color);
-            background: color-mix(in srgb, var(--success-color) 15%, transparent);
+            background: var(--success-bg-strong);
         }
 
         &.agent-fetch-status-redirect {
             color: var(--warning-color);
-            background: color-mix(in srgb, var(--warning-color) 15%, transparent);
+            background: var(--warning-bg-strong);
         }
 
         &.agent-fetch-status-error {
             color: var(--error-color);
-            background: color-mix(in srgb, var(--error-color) 15%, transparent);
+            background: var(--error-bg-strong);
         }
     }
 
@@ -2204,7 +2204,7 @@ $transcript-preview-max-height: calc(50vh / 3);
     padding: var(--space-1) var(--space-1-5);
     margin: var(--space-1) 0;
     border-left: 2px solid var(--error-color);
-    background: color-mix(in srgb, var(--error-color) 8%, transparent);
+    background: var(--error-bg-subtle);
     border-radius: 0 2px 2px 0;
     font-size: var(--text-sm);
     line-height: 1.4;
@@ -2240,7 +2240,7 @@ $transcript-preview-max-height: calc(50vh / 3);
         cursor: default;
 
         &:hover {
-            background: color-mix(in srgb, var(--error-color) 15%, transparent);
+            background: var(--error-bg-strong);
         }
     }
 
@@ -2338,7 +2338,7 @@ $transcript-preview-max-height: calc(50vh / 3);
         letter-spacing: 0.06em;
         color: var(--warning-color);
         padding: 2px 10px;
-        border: 1px solid color-mix(in srgb, var(--warning-color) 40%, transparent);
+        border: 1px solid var(--warning-line-strong);
         border-radius: 10px;
     }
 
@@ -2484,13 +2484,13 @@ $transcript-preview-max-height: calc(50vh / 3);
         .agent-session-outcome-rule {
             &::before,
             &::after {
-                background: color-mix(in srgb, var(--warning-color) 40%, transparent);
+                background: var(--warning-line-strong);
             }
         }
 
         .agent-session-outcome-label {
             color: var(--warning-color);
-            border-color: color-mix(in srgb, var(--warning-color) 40%, transparent);
+            border-color: var(--warning-line-strong);
         }
     }
 }
@@ -2578,7 +2578,7 @@ $transcript-preview-max-height: calc(50vh / 3);
     &:hover,
     &:focus-visible {
         background: var(--panel-bg-color);
-        border-color: color-mix(in srgb, var(--accent-color) 40%, transparent);
+        border-color: var(--accent-line-strong);
     }
 
     &:focus-visible {

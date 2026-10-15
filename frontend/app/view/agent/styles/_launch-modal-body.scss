@@ -82,7 +82,7 @@
 
     &:has(input:checked) {
         border-color: var(--accent-color);
-        background: color-mix(in srgb, var(--accent-color) 8%, transparent);
+        background: var(--accent-bg-subtle);
     }
 
     &:hover:not(.agent-launch-modal-radio--disabled) {
@@ -193,7 +193,7 @@
     gap: 8px;
     padding: 8px 10px;
     border-left: 3px solid var(--warning-color);
-    background: color-mix(in srgb, var(--warning-color) 8%, transparent);
+    background: var(--warning-bg-subtle);
     border-radius: 0 4px 4px 0;
     font-size: var(--text-sm);
     line-height: 1.5;

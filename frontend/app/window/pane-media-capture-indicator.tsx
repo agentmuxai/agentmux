@@ -31,6 +31,7 @@ import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import type { JSX } from "solid-js";
 import { ConfirmModal } from "@/element/confirm-modal";
 import { getApi } from "@/app/store/app-api";
+import { Z_CAPTURE_INDICATOR } from "@/app/zindex";
 
 interface CaptureChange {
     blockId: string;
@@ -97,7 +98,7 @@ export function PaneMediaCaptureIndicator(): JSX.Element {
                         position: "fixed",
                         bottom: "12px",
                         right: "12px",
-                        "z-index": 9998,
+                        "z-index": Z_CAPTURE_INDICATOR,
                         display: "flex",
                         "flex-direction": "column",
                         gap: "6px",

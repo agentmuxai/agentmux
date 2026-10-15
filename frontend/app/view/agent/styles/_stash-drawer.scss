@@ -64,7 +64,7 @@
 
     &:hover,
     &--active {
-        background: color-mix(in srgb, var(--accent-color) 15%, transparent);
+        background: var(--accent-bg-strong);
         border-bottom-color: var(--accent-color);
     }
 }

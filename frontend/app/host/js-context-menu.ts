@@ -13,6 +13,7 @@ import {
     type MenuPositionResult,
 } from "@/app/util/menu-position";
 import { createSubmenuHover, type SubmenuHoverController } from "@/app/util/submenu-hover";
+import { Z_JS_MENU } from "@/app/zindex";
 
 // Context menu click callback — registered by onContextMenuClick, called by showJsContextMenu.
 let contextMenuClickCallback: ((id: string) => void) | null = null;
@@ -92,7 +93,7 @@ export function showJsContextMenu(
     const overlay = document.createElement("div");
     overlay.id = "cef-context-menu-overlay";
     Object.assign(overlay.style, {
-        position: "fixed", inset: "0", zIndex: "99999",
+        position: "fixed", inset: "0", zIndex: String(Z_JS_MENU),
     });
 
     // Every close path goes through closeMenu(): it releases the pane-overlay
