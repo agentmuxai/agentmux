@@ -4,25 +4,22 @@
 /**
  * Sysinfo's area view: the machine one area at a time, or every area at once.
  *
- * - One row of controls: CPU, Memory, Disk or Network alone (`sysinfo-focus.tsx`)
- *   or Advanced, every area; the window (1 to 15 minutes); pause; and a table
- *   of the figures instead of the charts. In a narrow pane the area buttons
- *   take a row of their own.
- * - Advanced adds a tile per area (its value now, its low and high over the
+ * - CPU, Memory, Disk or Network alone (`sysinfo-focus.tsx`), or Everything,
+ *   every area. The control row and the table are the view's
+ *   (`sysinfo-bar.tsx`, `sysinfo-view.tsx`), the same as the simple views'.
+ * - Everything adds a tile per area (its value now, its low and high over the
  *   window, and a sparkline) over charts that share one time axis and one
  *   crosshair: CPU, every core as a heatmap, memory, and network and disk with
  *   what comes in above the axis and what goes out below.
  *
  * Only what is on screen is computed: the tiles' figures exist only in
- * Advanced, and the table's only while the table is shown.
+ * Everything, and the table's only while the table is shown.
  *
  * docs/reports/REPORT_SYSINFO_REWRITE_AND_MODERN_MONITOR_2026_10_13.md section 5.3.
  */
 
 import type { JSX } from "solid-js";
-import { createMemo, createSignal, For, Show } from "solid-js";
-
-import { IconButton, SegmentedControl } from "@/app/element/ui";
+import { createMemo, For, Show } from "solid-js";
 
 import "./sysinfo-overview.scss";
 
@@ -32,12 +29,10 @@ import { CoreHeatmap } from "./sysinfo-heatmap";
 import {
     type AreaChoice,
     coreKeys,
-    FOCUS_CHOICES,
     type FocusArea,
     formatGB,
     formatRate,
     mirroredRange,
-    windowChoices,
     windowStats,
     type WindowStats,
 } from "./sysinfo-overview-data";
@@ -55,14 +50,8 @@ type OverviewProps = {
     plotData: DataItem[];
     targetLen: number;
     intervalSecs: number;
-    /** The window shown now, in seconds, and a way to change it. */
-    windowSecs: number;
-    onWindow: (secs: number) => void;
-    paused: boolean;
-    onPause: (paused: boolean) => void;
-    /** The area shown, and a way to change it. */
+    /** The area shown. */
     focus: AreaChoice;
-    onFocus: (area: AreaChoice) => void;
     syncKey: string;
 };
 
@@ -148,20 +137,18 @@ const DISK_SERIES: SeriesSpec[] = [
     { key: "disk:write", label: "Write", color: OUT, below: true },
 ];
 
-/** Advanced's tiles: each area's figure now, its low and high, and a sparkline. */
+/** Everything's tiles: each area's figure now, its low and high, and a sparkline. */
 function Tiles(props: { plotData: DataItem[]; targetLen: number; intervalSecs: number }): JSX.Element {
     const rows = () => props.plotData;
-    const stats = createMemo(
-        (): Stats => ({
-            cpu: windowStats(rows(), "cpu"),
-            mem: windowStats(rows(), "mem:used"),
-            total: windowStats(rows(), "mem:total"),
-            recv: windowStats(rows(), "net:bytesrecv"),
-            sent: windowStats(rows(), "net:bytessent"),
-            read: windowStats(rows(), "disk:read"),
-            write: windowStats(rows(), "disk:write"),
-        })
-    );
+    const stats = createMemo((): Stats => ({
+        cpu: windowStats(rows(), "cpu"),
+        mem: windowStats(rows(), "mem:used"),
+        total: windowStats(rows(), "mem:total"),
+        recv: windowStats(rows(), "net:bytesrecv"),
+        sent: windowStats(rows(), "net:bytessent"),
+        read: windowStats(rows(), "disk:read"),
+        write: windowStats(rows(), "disk:write"),
+    }));
     return (
         <div class="sysinfo-overview-tiles">
             <For each={TILES}>
@@ -187,8 +174,8 @@ function Tiles(props: { plotData: DataItem[]; targetLen: number; intervalSecs: n
     );
 }
 
-/** The figures as a table: now, low, high and average for the area's measures (every area's in Advanced). */
-function MeasureTable(props: { plotData: DataItem[]; focus: AreaChoice }): JSX.Element {
+/** The figures as a table: now, low, high and average for the area's measures (every area's in Everything). */
+export function MeasureTable(props: { plotData: DataItem[]; focus: AreaChoice }): JSX.Element {
     const rows = createMemo(() => {
         const data = props.plotData;
         const line = (name: string, key: string, f: (v: number) => string) => {
@@ -250,8 +237,8 @@ function MeasureTable(props: { plotData: DataItem[]; focus: AreaChoice }): JSX.E
     );
 }
 
-/** Advanced's charts: CPU, the cores, memory, and network and disk in and out. */
-function AdvancedCharts(props: ChartProps): JSX.Element {
+/** Everything's charts: CPU, the cores, memory, and network and disk in and out. */
+function EverythingCharts(props: ChartProps): JSX.Element {
     const rows = () => props.plotData;
     const cores = createMemo(() => coreKeys(rows()[rows().length - 1]));
     return (
@@ -314,72 +301,30 @@ function AdvancedCharts(props: ChartProps): JSX.Element {
     );
 }
 
+/** The Advanced views' content: one area alone, or every area with its tiles. */
 export function Overview(props: OverviewProps): JSX.Element {
-    const [table, setTable] = createSignal(false);
-    const advanced = () => props.focus === "advanced";
-
+    const everything = () => props.focus === "everything";
     return (
         <div class="sysinfo-overview">
-            <div class="sysinfo-overview-controls">
-                <SegmentedControl
-                    ariaLabel="Area"
-                    density="compact"
-                    options={FOCUS_CHOICES.map((c) => ({ value: c.value, label: c.label }))}
-                    value={props.focus}
-                    onChange={(v) => props.onFocus(v as AreaChoice)}
-                />
-                <SegmentedControl
-                    ariaLabel="Time window"
-                    density="compact"
-                    options={windowChoices(props.intervalSecs, props.windowSecs).map((c) => ({
-                        value: String(c.secs),
-                        label: c.label,
-                    }))}
-                    value={String(props.windowSecs)}
-                    onChange={(v) => props.onWindow(Number(v))}
-                />
-                <Show when={props.paused}>
-                    <span class="sysinfo-overview-paused">Paused</span>
-                </Show>
-                <div class="sysinfo-overview-spacer" />
-                <IconButton
-                    icon={props.paused ? "play" : "pause"}
-                    label={props.paused ? "Resume" : "Pause"}
-                    pressed={props.paused}
-                    onClick={() => props.onPause(!props.paused)}
-                />
-                <IconButton
-                    icon="table"
-                    label={table() ? "Show charts" : "Show as a table"}
-                    pressed={table()}
-                    onClick={() => setTable(!table())}
-                />
-            </div>
-
-            <Show when={advanced()}>
-                <Tiles plotData={props.plotData} targetLen={props.targetLen} intervalSecs={props.intervalSecs} />
-            </Show>
-
-            <Show when={!table()} fallback={<MeasureTable plotData={props.plotData} focus={props.focus} />}>
-                <Show
-                    when={advanced()}
-                    fallback={
-                        <FocusView
-                            area={props.focus as FocusArea}
-                            plotData={props.plotData}
-                            targetLen={props.targetLen}
-                            intervalSecs={props.intervalSecs}
-                            syncKey={props.syncKey}
-                        />
-                    }
-                >
-                    <AdvancedCharts
+            <Show
+                when={everything()}
+                fallback={
+                    <FocusView
+                        area={props.focus as FocusArea}
                         plotData={props.plotData}
                         targetLen={props.targetLen}
                         intervalSecs={props.intervalSecs}
                         syncKey={props.syncKey}
                     />
-                </Show>
+                }
+            >
+                <Tiles plotData={props.plotData} targetLen={props.targetLen} intervalSecs={props.intervalSecs} />
+                <EverythingCharts
+                    plotData={props.plotData}
+                    targetLen={props.targetLen}
+                    intervalSecs={props.intervalSecs}
+                    syncKey={props.syncKey}
+                />
             </Show>
         </div>
     );

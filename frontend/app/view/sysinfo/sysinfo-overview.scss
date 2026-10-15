@@ -14,22 +14,6 @@
     overflow-y: auto;
 }
 
-.sysinfo-overview-controls {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 6px;
-}
-
-.sysinfo-overview-spacer {
-    flex: 1 1 auto;
-}
-
-.sysinfo-overview-paused {
-    font-size: 11px;
-    color: var(--grey-text-color);
-}
-
 .sysinfo-overview-tiles {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));

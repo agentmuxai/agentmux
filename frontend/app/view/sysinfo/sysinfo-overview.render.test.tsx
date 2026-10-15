@@ -2,12 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The Overview as rendered: its tiles' figures, the window and pause controls,
- * the table instead of the charts, an in/out chart drawing out below the axis,
- * and each area shown alone in at most three charts.
+ * The Advanced views as rendered: Everything's tiles and charts, an in/out chart
+ * drawing out below the axis, each area alone in at most three charts, and the
+ * figures as a table.
  * docs/reports/REPORT_SYSINFO_REWRITE_AND_MODERN_MONITOR_2026_10_13.md section 5.3.
  */
-import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
+import { cleanup, render, screen } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -33,7 +33,8 @@ vi.mock("uplot", () => {
 });
 vi.mock("uplot/dist/uPlot.min.css", () => ({}));
 
-import { Overview } from "./sysinfo-overview";
+import { MeasureTable, Overview } from "./sysinfo-overview";
+import type { AreaChoice } from "./sysinfo-overview-data";
 import type { DataItem } from "./sysinfo-types";
 
 class FixedSizeObserver {
@@ -80,12 +81,7 @@ function mount(over: Partial<Parameters<typeof Overview>[0]> = {}) {
         plotData: DATA,
         targetLen: 121,
         intervalSecs: 1,
-        windowSecs: 120,
-        onWindow: vi.fn(),
-        paused: false,
-        onPause: vi.fn(),
-        focus: "advanced" as const,
-        onFocus: vi.fn(),
+        focus: "everything" as AreaChoice,
         syncKey: "sysinfo-b",
         ...over,
     };
@@ -128,23 +124,8 @@ describe("Overview", () => {
         expect(net.opts.axes[1].values(null, [-1, 0, 1])).toEqual(["1.0 MB/s", "0 KB/s", "1.0 MB/s"]);
     });
 
-    it("changes the window and pauses through its controls", async () => {
-        const props = mount();
-        fireEvent.click(screen.getByRole("radio", { name: "15m" }));
-        expect(props.onWindow).toHaveBeenCalledWith(900);
-        fireEvent.click(screen.getByRole("button", { name: "Pause" }));
-        expect(props.onPause).toHaveBeenCalledWith(true);
-    });
-
-    it("says it is paused, and offers to resume", () => {
-        mount({ paused: true });
-        expect(screen.getByText("Paused")).toBeTruthy();
-        expect(screen.getByRole("button", { name: "Resume" })).toBeTruthy();
-    });
-
-    it("can show the figures as a table instead, every core included", () => {
-        mount();
-        fireEvent.click(screen.getByRole("button", { name: "Show as a table" }));
+    it("lists every area's figures as a table, every core included", () => {
+        render(() => <MeasureTable plotData={DATA} focus="everything" />);
         const rows = [...document.querySelectorAll(".sysinfo-overview-table tbody tr")].map((r) =>
             [...r.children].map((c) => c.textContent)
         );
@@ -159,7 +140,6 @@ describe("Overview", () => {
             "Core 0",
             "Core 1",
         ]);
-        expect(document.querySelector(".sysinfo-overview-charts")).toBeNull();
     });
 
     it("names its core heatmap with the number of cores", () => {
@@ -170,18 +150,7 @@ describe("Overview", () => {
     it("keeps its tiles and their sparklines across new samples, giving them new data", async () => {
         const [data, setData] = createSignal(DATA.slice(0, 2));
         render(() => (
-            <Overview
-                plotData={data()}
-                targetLen={121}
-                intervalSecs={1}
-                windowSecs={120}
-                onWindow={vi.fn()}
-                paused={false}
-                onPause={vi.fn()}
-                focus="advanced"
-                onFocus={vi.fn()}
-                syncKey="sysinfo-b"
-            />
+            <Overview plotData={data()} targetLen={121} intervalSecs={1} focus="everything" syncKey="sysinfo-b" />
         ));
         await vi.advanceTimersByTimeAsync(200);
         const built = made.charts.length;
@@ -193,17 +162,7 @@ describe("Overview", () => {
         expect(tileValue("CPU")).toBe("40%");
     });
 
-    it("offers each area alone, then every area last, as Advanced", () => {
-        const props = mount();
-        const names = screen.getAllByRole("radio").map((r) => r.textContent);
-        expect(names.slice(0, 5)).toEqual(["CPU", "Memory", "Disk", "Network", "Advanced"]);
-        fireEvent.click(screen.getByRole("radio", { name: "Network" }));
-        expect(props.onFocus).toHaveBeenCalledWith("net");
-        fireEvent.click(screen.getByRole("radio", { name: "Advanced" }));
-        expect(props.onFocus).toHaveBeenLastCalledWith("advanced");
-    });
-
-    it("computes no tiles outside Advanced", () => {
+    it("computes no tiles outside Everything", () => {
         mount({ focus: "cpu" });
         expect(document.querySelector(".sysinfo-overview-tiles")).toBeNull();
     });
@@ -256,8 +215,7 @@ describe("An area alone", () => {
     });
 
     it("lists only its own measures as a table", () => {
-        mount({ focus: "net" });
-        fireEvent.click(screen.getByRole("button", { name: "Show as a table" }));
+        render(() => <MeasureTable plotData={DATA} focus="net" />);
         const names = [...document.querySelectorAll(".sysinfo-overview-table tbody th")].map((c) => c.textContent);
         expect(names).toEqual(["Network in", "Network out"]);
     });

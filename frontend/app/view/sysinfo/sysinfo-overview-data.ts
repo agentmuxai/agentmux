@@ -87,11 +87,20 @@ export function formatGB(gb: number | null | undefined): string {
     return `${gb.toFixed(1)} GB`;
 }
 
+/** "29% now, 16% – 62%": a chart's title figures over the window. */
+export function figures(rows: DataItem[], key: string, f: (v: number) => string): string {
+    const s = windowStats(rows, key);
+    return s ? `${f(s.now)} now, ${f(s.min)} – ${f(s.max)}` : "";
+}
+
+/** A chart's title: its name, then its figures when it has any. */
+export const titled = (name: string, fig: string): string => (fig ? `${name}: ${fig}` : name);
+
 /** One area shown alone, in up to three charts. */
 export type FocusArea = "cpu" | "mem" | "disk" | "net";
 
-/** What the pane shows: one area, or `advanced`, every area at once. */
-export type AreaChoice = FocusArea | "advanced";
+/** What the pane shows: one area, or `everything`, every area at once. */
+export type AreaChoice = FocusArea | "everything";
 
 /** The area a pane shows until one is chosen. */
 const DEFAULT_AREA: AreaChoice = "cpu";
@@ -102,7 +111,7 @@ export const FOCUS_CHOICES = [
     { value: "mem", label: "Memory" },
     { value: "disk", label: "Disk" },
     { value: "net", label: "Network" },
-    { value: "advanced", label: "Advanced" },
+    { value: "everything", label: "Everything" },
 ] as const;
 
 /** A saved area, or the default for anything else. */

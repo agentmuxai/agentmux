@@ -2,14 +2,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The Sysinfo view: its pause, the area view's own, lifted when a classic plot
- * type is shown; and nothing taken or drawn while the pane is off screen.
+ * The Sysinfo view: one control row for the simple and the Advanced views, its
+ * pause and table shared by both; and nothing taken or drawn while the pane is
+ * off screen.
  */
 import { cleanup, render } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const seen = vi.hoisted(() => ({ overview: [] as any[], subscribed: 0, unsubscribed: 0 }));
+const seen = vi.hoisted(() => ({ overview: [] as any[], bar: [] as any[], table: [] as any[], subscribed: 0, unsubscribed: 0 }));
 
 vi.mock("@/app/store/mps", () => ({
     onMuxEvent: () => {
@@ -25,6 +26,16 @@ vi.mock("./sysinfo-overview", () => ({
         seen.overview.push(props);
         return null;
     },
+    MeasureTable: (props: any) => {
+        seen.table.push(props);
+        return null;
+    },
+}));
+vi.mock("./sysinfo-bar", () => ({
+    SysinfoBar: (props: any) => {
+        seen.bar.push(props);
+        return null;
+    },
 }));
 
 import { SysinfoView } from "./sysinfo-view";
@@ -32,6 +43,8 @@ import { SysinfoView } from "./sysinfo-view";
 afterEach(() => {
     cleanup();
     seen.overview.length = 0;
+    seen.bar.length = 0;
+    seen.table.length = 0;
     seen.subscribed = 0;
     seen.unsubscribed = 0;
 });
@@ -55,6 +68,7 @@ function fakeModel(shown = true) {
         visible,
         setWindow: vi.fn(),
         setFocus: vi.fn(),
+        setSimpleView: vi.fn(),
         dispose: vi.fn(),
         loadInitialData: vi.fn(),
         appendData: vi.fn(),
@@ -62,24 +76,35 @@ function fakeModel(shown = true) {
     return { model, setPlotType, setVisible };
 }
 
-describe("SysinfoView pause", () => {
-    it("is lifted when a classic plot type, which has no resume control, is shown", () => {
+describe("SysinfoView controls", () => {
+    const bar = () => seen.bar[seen.bar.length - 1];
+
+    it("shows one control row in both modes, with each mode's views", () => {
         const { model, setPlotType } = fakeModel();
         render(() => <SysinfoView blockId="b" model={model} />);
-        const overview = () => seen.overview[seen.overview.length - 1];
-        overview().onPause(true);
-        expect(overview().paused).toBe(true);
-        setPlotType("CPU");
-        setPlotType("Overview");
-        expect(overview().paused).toBe(false);
+        expect(bar().views.map((v: any) => v.value)).toEqual(["cpu", "mem", "disk", "net", "everything"]);
+        expect(bar().view).toBe("cpu");
+        setPlotType("Mem");
+        expect(bar().views.map((v: any) => v.label).slice(0, 3)).toEqual(["CPU", "Cores", "Memory"]);
+        expect(bar().view).toBe("Mem");
+        bar().onView("Net");
+        expect(model.setSimpleView).toHaveBeenCalledWith("Net");
     });
 
-    it("holds while the Overview stays", () => {
-        const { model } = fakeModel();
+    it("keeps a pause across modes, since both can resume it", () => {
+        const { model, setPlotType } = fakeModel();
         render(() => <SysinfoView blockId="b" model={model} />);
-        const overview = () => seen.overview[seen.overview.length - 1];
-        overview().onPause(true);
-        expect(overview().paused).toBe(true);
+        bar().onPause(true);
+        setPlotType("CPU");
+        expect(bar().paused).toBe(true);
+    });
+
+    it("shows a simple view's figures as a table of its area", () => {
+        const { model, setPlotType } = fakeModel();
+        setPlotType("Net (Sent/Recv)");
+        render(() => <SysinfoView blockId="b" model={model} />);
+        bar().onTable(true);
+        expect(seen.table[seen.table.length - 1].focus).toBe("net");
     });
 });
 

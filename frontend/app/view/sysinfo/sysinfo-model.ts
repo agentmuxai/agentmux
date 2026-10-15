@@ -16,7 +16,7 @@ import { readMuxEventHistory } from "@/app/store/mps-history";
 import type { ConnStatus } from "@/types/rpc/ConnStatus";
 import { GapBackfiller } from "./sysinfo-backfill";
 import { type AreaChoice, FOCUS_CHOICES, MAX_WINDOW_POINTS, toAreaChoice } from "./sysinfo-overview-data";
-import { DataItem, DefaultNumPoints, DefaultPlotMeta, DefaultPlotType, PlotTypes } from "./sysinfo-types";
+import { AreaPlotType, DataItem, DefaultNumPoints, DefaultPlotMeta, DefaultPlotType, PlotTypes, SIMPLE_VIEWS } from "./sysinfo-types";
 import { convertTimeSeriesToDataItem, getGapThresholdMs } from "./sysinfo-util";
 
 // ---------------------------------------------------------------------------
@@ -247,7 +247,7 @@ class SysinfoViewModel {
     windowSecs: () => number;
     /** Counts history loads, so one overtaken by a newer load is dropped. */
     private loadGeneration = 0;
-    /** The area the pane shows (`sysinfo:focus`): one alone, or every area (`advanced`). */
+    /** The area the pane shows (`sysinfo:focus`): one alone, or every area (`everything`). */
     focus: () => AreaChoice;
     /** Whether the pane is on screen: a hidden one takes no samples and draws nothing. */
     visible: () => boolean;
@@ -390,10 +390,11 @@ class SysinfoViewModel {
 
         this.visible = createMemo(() => ctx.visibility() === "active");
 
-        // The pane is named for the area it shows ("CPU", "Advanced").
+        // The pane is named for the area it shows ("CPU", "Everything"), or
+        // the simple view's label ("Memory", "All cores").
         this.viewName = createMemo(() => {
             const plotType = this.plotTypeSelectedAtom();
-            if (plotType !== DefaultPlotType) return plotType;
+            if (plotType !== AreaPlotType) return SIMPLE_VIEWS.find((v) => v.type === plotType)?.label ?? plotType;
             return FOCUS_CHOICES.find((c) => c.value === this.focus())?.label ?? plotType;
         });
 
@@ -425,7 +426,7 @@ class SysinfoViewModel {
         void this.loadInitialData();
     }
 
-    /** Show one area alone, or every area (`advanced`): saved in the pane's meta. */
+    /** Show one area alone, or every area (`everything`): saved in the pane's meta. */
     setFocus(area: AreaChoice) {
         this.focusChoice._set(area);
         void this.ctx.setMeta({ "sysinfo:focus": area });
@@ -456,54 +457,52 @@ class SysinfoViewModel {
         }
     }
 
+    /**
+     * The menus offer what the area buttons do (CPU, Memory, Disk, Network,
+     * Everything) in an "Advanced" submenu, under a "Simple" one of the simple
+     * views.
+     */
+    private areaMenuItems(): ContextMenuItem[] {
+        const plotType = this.plotTypeSelectedAtom();
+        const onAreas = plotType === AreaPlotType;
+        const areas = FOCUS_CHOICES.map(
+            (c): ContextMenuItem => ({
+                label: c.label,
+                type: "radio",
+                checked: onAreas && this.focus() === c.value,
+                click: async () => {
+                    this.focusChoice._set(c.value);
+                    await this.ctx.setMeta({ "sysinfo:type": AreaPlotType, "sysinfo:focus": c.value });
+                },
+            })
+        );
+        const simple = SIMPLE_VIEWS.map(
+            (v): ContextMenuItem => ({
+                label: v.label,
+                type: "radio",
+                checked: plotType === v.type,
+                click: () => this.setSimpleView(v.type),
+            })
+        );
+        return [
+            { label: "Simple", submenu: simple },
+            { label: "Advanced", submenu: areas },
+        ];
+    }
+
+    /** Show the simple view saved as `type` (`SIMPLE_VIEWS`). */
+    async setSimpleView(type: string) {
+        const latest = this.dataAtom()[this.dataAtom().length - 1];
+        const metrics = latest ? PlotTypes[type](latest) : [];
+        await this.ctx.setMeta({ "sysinfo:type": type, "graph:metrics": metrics });
+    }
+
     getSettingsMenuItems(): ContextMenuItem[] {
-        const fullConfig = atoms.fullConfigAtom();
-        const termThemes = fullConfig?.termthemes ?? {};
-        const termThemeKeys = Object.keys(termThemes);
-        const plotData = this.dataAtom();
-
-        termThemeKeys.sort((a, b) => {
-            return (termThemes[a]["display:order"] ?? 0) - (termThemes[b]["display:order"] ?? 0);
-        });
-        const fullMenu: ContextMenuItem[] = [];
-        let submenu: ContextMenuItem[];
-        if (plotData.length == 0) {
-            submenu = [];
-        } else {
-            const currentlySelected = this.plotTypeSelectedAtom();
-            submenu = Object.keys(PlotTypes).map((plotType) => {
-                const dataTypes = PlotTypes[plotType](plotData[plotData.length - 1]);
-                const menuItem: ContextMenuItem = {
-                    label: plotType,
-                    type: "radio",
-                    checked: currentlySelected == plotType,
-                    click: async () => {
-                        await this.ctx.setMeta({ "graph:metrics": dataTypes, "sysinfo:type": plotType });
-                    },
-                };
-                return menuItem;
-            });
-        }
-
-        fullMenu.push({ label: "Plot Type", submenu: submenu });
-        fullMenu.push({ type: "separator" });
-        return fullMenu;
+        return [{ label: "Plot Type", submenu: this.areaMenuItems() }, { type: "separator" }];
     }
 
     getBodyContextMenuItems(): ContextMenuItem[] {
-        const plotData = this.dataAtom();
-        if (plotData.length === 0) return [];
-
-        const currentlySelected = this.plotTypeSelectedAtom();
-        return Object.keys(PlotTypes).map((plotType): ContextMenuItem => ({
-            label: plotType,
-            type: "radio",
-            checked: currentlySelected === plotType,
-            click: async () => {
-                const dataTypes = PlotTypes[plotType](plotData[plotData.length - 1]);
-                await this.ctx.setMeta({ "graph:metrics": dataTypes, "sysinfo:type": plotType });
-            },
-        }));
+        return this.areaMenuItems();
     }
 
     getDefaultData(): DataItem[] {

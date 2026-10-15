@@ -60,9 +60,9 @@ describe("sysinfoPaneTab", () => {
         createRoot((dispose) => {
             const { ctx, setMeta } = fakeCtx({ "sysinfo:type": "Mem" });
             const inst = sysinfoPaneTab("sysinfo").create!(ctx);
-            expect(inst.liveTitle!().text).toBe("Mem");
+            expect(inst.liveTitle!().text).toBe("Memory");
             void setMeta({ "sysinfo:type": "Net" });
-            expect(inst.liveTitle!().text).toBe("Net");
+            expect(inst.liveTitle!().text).toBe("Network");
             dispose();
         });
     });

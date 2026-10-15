@@ -46,3 +46,44 @@
     white-space: nowrap;
     pointer-events: none;
 }
+
+// A simple view's chart, against the pane's edges (TimeChart `tight`): the
+// title sits in the corner and the plot starts just under it.
+.sysinfo-chart--tight {
+    .sysinfo-chart-title {
+        top: 0;
+        left: 3px;
+    }
+
+    .sysinfo-chart-canvas--titled {
+        margin-top: 13px;
+    }
+}
+
+// The pane (sysinfo-view.tsx): the control row (sysinfo-bar.tsx), the same in
+// the simple and the Advanced views, then the charts or the table.
+.sysinfo-pane {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+}
+
+.sysinfo-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 3px;
+    flex-shrink: 0;
+}
+
+.sysinfo-bar-spacer {
+    flex: 1 1 auto;
+}
+
+.sysinfo-bar-paused {
+    font-size: 11px;
+    color: var(--grey-text-color);
+}
