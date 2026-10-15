@@ -102,6 +102,16 @@ export interface HistoryParserOptions {
      * (SPEC_AGENT_PANE_TOOL_RESULT_UNLOADING_2026_10_01.md §3.2).
      */
     source?: { stream: string; gen: string; firstLine: number };
+    /**
+     * The transcript line `lines[0]` is. When set, a node's counter id is
+     * built from its own line (`node_L<line>_<k>`) instead of a count from
+     * wherever this parse started, which moves as the conversation grows and
+     * repeats on every older page: ids are then unique across pages (an older
+     * page's messages used to collide and be dropped) and the same on every
+     * reload (saved collapsed rows and a scroll anchor find their node).
+     * SPEC_RENDERER_RECYCLE_WHEN_IDLE_2026_10_13.md §2.
+     */
+    idFirstLine?: number;
 }
 
 /**
@@ -155,6 +165,8 @@ export class HistoryParser {
     /** Context windows the lines' `result` frames reported
      *  (`modelUsage[*].contextWindow`), later frames winning. */
     reportedContextWindows: Record<string, number> = {};
+    /** Lines fed so far, for `idFirstLine` across `feed` calls. */
+    private linesFed = 0;
 
     constructor(
         outputFormat: string,
@@ -306,11 +318,15 @@ export class HistoryParser {
         };
 
         const source = opts?.source;
+        const idFirstLine = opts?.idFirstLine;
+        const linesBefore = this.linesFed;
+        this.linesFed += lines.length;
         for (lineIdx = 0; lineIdx < lines.length; lineIdx++) {
             const line = lines[lineIdx];
             const trimmed = line.trim();
             if (!trimmed || !trimmed.startsWith("{")) continue;
             parser.setSourceLine(source ? { stream: source.stream, gen: source.gen, line: source.firstLine + lineIdx } : null);
+            parser.setIdLine(idFirstLine != null ? idFirstLine + linesBefore + lineIdx : null);
 
             let rawEvent: any;
             try {

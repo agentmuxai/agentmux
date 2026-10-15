@@ -304,6 +304,14 @@ export class ClaudeCodeStreamParser {
      */
     private nextIdOf(prefix: string): string {
         const skip = this.skipIdsFn();
+        if (this.idLine != null) {
+            // History replay that knows its transcript line (`setIdLine`): an
+            // id of the node's own line, the same on every load of that line,
+            // so it is unique across history pages and stable across reloads.
+            let id = `${prefix}_L${this.idLine}_${this.idLineSeq++}`;
+            while (skip.has(id)) id = `${prefix}_L${this.idLine}_${this.idLineSeq++}`;
+            return id;
+        }
         let id = `${prefix}_${this.nodeIdCounter++}`;
         while (skip.has(id)) {
             id = `${prefix}_${this.nodeIdCounter++}`;
@@ -758,6 +766,18 @@ export class ClaudeCodeStreamParser {
      */
     setSourceLine(source: ToolResultSource | null): void {
         this.sourceLine = source;
+    }
+
+    private idLine: number | null = null;
+    private idLineSeq = 0;
+    /**
+     * The transcript line the next events come from, for ids (`nextIdOf`):
+     * a history replay sets it per line; null (live parsing) keeps the
+     * counter ids. SPEC_RENDERER_RECYCLE_WHEN_IDLE_2026_10_13.md §2.
+     */
+    setIdLine(line: number | null): void {
+        if (line !== this.idLine) this.idLineSeq = 0;
+        this.idLine = line;
     }
 
     /**

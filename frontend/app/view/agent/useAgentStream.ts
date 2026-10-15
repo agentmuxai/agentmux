@@ -795,6 +795,9 @@ export function useAgentStream({
             for (const line of lines) {
                 // Every element is one transcript line, blank or not.
                 parser.setSourceLine(sourceLine != null && from ? { stream: from.stream, gen: from.gen, line: sourceLine } : null);
+                // The id history gives this line on a reload (node_L<line>_<k>),
+                // so a collapsed row or a scroll anchor finds it again.
+                parser.setIdLine(sourceLine != null && from ? sourceLine : null);
                 if (sourceLine != null) sourceLine++;
                 const trimmed = line.trim();
                 if (!trimmed) continue;
@@ -1069,6 +1072,7 @@ export function useAgentStream({
                 }
             }
             parser.setSourceLine(null);
+            parser.setIdLine(null);
             flushStreamedChars();
 
             // Schedule a single flush per animation frame

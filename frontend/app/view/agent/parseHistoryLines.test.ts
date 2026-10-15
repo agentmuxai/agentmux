@@ -3,12 +3,17 @@
 
 import { describe, expect, it, vi } from "vitest";
 import { HistoryParser, parseHistoryLines } from "./parseHistoryLines";
+import { ClaudeCodeStreamParser } from "./stream-parser";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { contextCompactedNodeId } from "./compact-boundary";
 import { createMemoryReinjectionController } from "./memory-reinjection-controller";
 import { update } from "@/app/store/agent-pane-state/reducer";
 import { initialState } from "@/app/store/agent-pane-state/types";
 import { composeReinjectionMessage } from "./memory-reinjection";
 import type { ToolNode } from "./types";
+import { update as updateDocument } from "@/app/store/agent-document/reducer";
+import { initialState as initialDocument } from "@/app/store/agent-document/types";
 
 vi.mock("./memory-reinjection-controller", async (importOriginal) => {
     const actual = await importOriginal<typeof import("./memory-reinjection-controller")>();
@@ -977,5 +982,74 @@ describe("parseHistoryLines — tool result source line (SPEC_AGENT_PANE_TOOL_RE
     it("leaves it unset when the caller doesn't know the source", () => {
         const { nodes } = parseHistoryLines([toolUse, toolResult], "claude-stream-json");
         expect((nodes.find((n) => n.type === "tool") as any).resultSource).toBeUndefined();
+    });
+});
+
+// SPEC_RENDERER_RECYCLE_WHEN_IDLE_2026_10_13.md §2: with `idFirstLine`, a node's
+// id comes from its own transcript line, not a count from where the parse began.
+describe("line-based history ids (idFirstLine)", () => {
+    const text = (content: string) => line({ type: "text", content });
+    const tool = (id: string) => [
+        line({ type: "tool_call", tool: "Bash", id, params: { command: "ls" } }),
+        line({ type: "tool_result", tool: "Bash", id, status: "success", duration: 0.1 }),
+    ];
+    const transcript = [text("A"), ...tool("t1"), text("B"), line({ type: "user_message", message: "go on" }), text("C")];
+
+    it("builds counter ids from each node's line", () => {
+        const ids = parseHistoryLines(transcript, "claude", undefined, undefined, { idFirstLine: 100 }).nodes.map((n) => n.id);
+        expect(ids).toContain("node_L100_0");
+        expect(ids).toContain("user_L104_0");
+        expect(ids).toContain("t1"); // provider ids are kept
+        expect(ids.filter((id) => /^node_\d+$/.test(id))).toEqual([]);
+    });
+
+    it("gives a line the same id wherever the read starts (a reload that trims differently)", () => {
+        const whole = parseHistoryLines(transcript, "claude", undefined, undefined, { idFirstLine: 100 }).nodes;
+        const tail = parseHistoryLines(transcript.slice(3), "claude", undefined, undefined, { idFirstLine: 103 }).nodes;
+        const idOf = (nodes: typeof whole, content: string) => nodes.find((n) => JSON.stringify(n).includes(`"${content}"`))?.id;
+        expect(idOf(tail, "B")).toBe(idOf(whole, "B"));
+        expect(idOf(tail, "C")).toBe(idOf(whole, "C"));
+    });
+
+    it("an older page loaded under a restored window keeps its messages", () => {
+        // Each page is parsed on its own, as useHistoryPagination's loadOlder does.
+        const older = [text("OLD-A"), ...tool("t1"), text("OLD-B")];
+        const newer = [text("NEW-C"), ...tool("t2"), text("NEW-D")];
+        const newerNodes = parseHistoryLines(newer, "claude", undefined, undefined, { idFirstLine: 4 }).nodes;
+        const olderNodes = parseHistoryLines(older, "claude", undefined, undefined, { idFirstLine: 0 }).nodes;
+        const restored = updateDocument(initialDocument(), { type: "HistoryRestored", fromSnapshot: true, nodes: newerNodes }).state;
+        const r = updateDocument(restored, { type: "HistoryLoaded", nodes: olderNodes });
+        const all = JSON.stringify(r.state.nodes);
+        for (const content of ["OLD-A", "OLD-B", "NEW-C", "NEW-D"]) expect(all).toContain(content);
+        expect(r.events).toEqual([{ type: "history-loaded", addedCount: 3, duplicatesDropped: 0 }]);
+    });
+
+    it("a resumable parser fed in chunks gives the ids of one parse", () => {
+        const one = parseHistoryLines(transcript, "claude", undefined, undefined, { idFirstLine: 7 }).nodes.map((n) => n.id);
+        const parser = new HistoryParser("claude", undefined, { idFirstLine: 7 });
+        parser.feed(transcript.slice(0, 2));
+        parser.feed(transcript.slice(2));
+        expect(parser.nodes.map((n) => n.id)).toEqual(one);
+    });
+
+    it("a line parsed live gets the id history gives it on a reload", () => {
+        const lines = [text("A"), ...tool("t1"), text("B")];
+        // As useAgentStream's live loop does: one parser, setIdLine per transcript line.
+        const live = new ClaudeCodeStreamParser();
+        const liveIds = new Set<string>();
+        lines.forEach((l, i) => {
+            live.setIdLine(200 + i);
+            const node = live.parseLine(l);
+            if (node) liveIds.add(node.id);
+        });
+        live.setIdLine(null);
+        const historyIds = parseHistoryLines(lines, "claude", undefined, undefined, { idFirstLine: 200 }).nodes.map((n) => n.id);
+        expect([...liveIds].sort()).toEqual([...historyIds].sort());
+    });
+
+    it("the live loop sets the line for ids where it sets it for tool results", () => {
+        const src = readFileSync(join(process.cwd(), "frontend/app/view/agent/useAgentStream.ts"), "utf8");
+        expect(src).toMatch(/parser\.setIdLine\(sourceLine != null && from \? sourceLine : null\)/);
+        expect(src).toMatch(/parser\.setSourceLine\(null\);\s*parser\.setIdLine\(null\);/);
     });
 });

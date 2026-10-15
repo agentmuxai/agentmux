@@ -209,8 +209,11 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
     // node records its result's line and the pane can unload it
     // (SPEC_AGENT_PANE_TOOL_RESULT_UNLOADING_2026_10_01.md §3.2). Without a
     // stream and generation the line can't be read back reliably: no source.
-    const parseOptsAt = (resp: { stream?: string; gen?: string }, firstLine: number) =>
-        resp.stream && resp.gen ? { ...parseOpts, source: { stream: resp.stream, gen: resp.gen, firstLine } } : parseOpts;
+    const parseOptsAt = (resp: { stream?: string; gen?: string }, firstLine: number) => ({
+        ...parseOpts,
+        idFirstLine: firstLine,
+        ...(resp.stream && resp.gen ? { source: { stream: resp.stream, gen: resp.gen, firstLine } } : {}),
+    });
     const [historyOffset, setHistoryOffset] = createSignal(0);
     const [historyTotal, setHistoryTotal] = createSignal(0);
     const [loadingOlder, setLoadingOlder] = createSignal(false);
