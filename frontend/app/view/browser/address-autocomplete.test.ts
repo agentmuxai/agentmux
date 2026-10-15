@@ -57,6 +57,60 @@ describe("createAddressAutocomplete", () => {
         expect(ac.matchesFor()).toBe("git");
     });
 
+    it("stays open on the previous list while the next answer is on its way, without acting on it", async () => {
+        const { query, calls } = controlledQuery();
+        const ac = createAddressAutocomplete(query);
+        expect(ac.open()).toBe(false);
+        ac.update("git");
+        calls[0].resolve({ supported: true, matches: [match()] });
+        await settle();
+        expect(ac.open()).toBe(true);
+        // The next key: the list stays on screen (no close-and-reopen flash
+        // through the page) but Enter doesn't pick its stale default.
+        ac.update("gith");
+        expect(ac.open()).toBe(true);
+        expect(ac.chosen("gith")).toBeUndefined();
+        expect(inlineCompletion("gith", { matches: ac.matches(), matchesFor: ac.matchesFor() }, false)).toBe("");
+        calls[1].resolve({ supported: true, matches: [match({ contents: "github.com/x" })] });
+        await settle();
+        expect(ac.matchesFor()).toBe("gith");
+        expect(ac.chosen("gith")?.contents).toBe("github.com/x");
+        // No suggestions for the new text closes it.
+        ac.update("githzz");
+        calls[2].resolve({ supported: true, matches: [] });
+        await settle();
+        expect(ac.open()).toBe(false);
+    });
+
+    it.each([
+        ["no answer", (c: { resolve: (r: any) => void }) => c.resolve(undefined)],
+        ["no autocomplete", (c: { resolve: (r: any) => void }) => c.resolve({ supported: false, matches: [] })],
+    ])("closes the previous list when the newest text gets %s", async (_name, answer) => {
+        const { query, calls } = controlledQuery();
+        const ac = createAddressAutocomplete(query);
+        ac.update("git");
+        calls[0].resolve({ supported: true, matches: [match()] });
+        await settle();
+        ac.update("gith");
+        answer(calls[1]);
+        await settle();
+        expect(ac.open()).toBe(false);
+    });
+
+    it("closes the previous list when the query for the newest text fails", async () => {
+        const query = vi
+            .fn<(text: string) => Promise<BrowserAutocompleteResult | undefined>>()
+            .mockResolvedValueOnce({ supported: true, matches: [match()] })
+            .mockRejectedValueOnce(new Error("host gone"));
+        const ac = createAddressAutocomplete(query);
+        ac.update("git");
+        await settle();
+        expect(ac.open()).toBe(true);
+        ac.update("gith");
+        await settle();
+        expect(ac.open()).toBe(false);
+    });
+
     it("stops asking once the host has no autocomplete", async () => {
         const { query, calls } = controlledQuery();
         const ac = createAddressAutocomplete(query);
