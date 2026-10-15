@@ -14,6 +14,9 @@
 //!   the session over and the old connection is closed.
 //! - `AMR <protocol> END <session>`: end it. Answered `ok` or `none`.
 //! - `AMR <protocol> LIST`: one line per session, `id end exited`.
+//! - `AMR <protocol> STOP`: end every session, then the daemon itself
+//!   (Remotes' Remove helper). Answered `ok`. A daemon older than this
+//!   answers it as a bad request, and exits once idle as before.
 //! - `AMR <protocol> PID <session>`: its shell's process id, for its pane's
 //!   stats badge (`serve`'s `PaneProcs`). Answered `<pid>` or `none`. A
 //!   daemon older than this answers it as a bad request: the pane then reads
@@ -158,17 +161,17 @@ pub fn run(base: &Path) -> io::Result<()> {
     }
     for stream in listener.incoming() {
         let Ok(stream) = stream else { continue };
-        let (sessions, connections) = (sessions.clone(), connections.clone());
+        let (sessions, connections, sock) = (sessions.clone(), connections.clone(), sock.clone());
         connections.fetch_add(1, Ordering::SeqCst);
         std::thread::spawn(move || {
-            let _ = handle(stream, &sessions);
+            let _ = handle(stream, &sessions, &sock);
             connections.fetch_sub(1, Ordering::SeqCst);
         });
     }
     Ok(())
 }
 
-fn handle(stream: UnixStream, sessions: &Sessions) -> io::Result<()> {
+fn handle(stream: UnixStream, sessions: &Sessions, sock: &Path) -> io::Result<()> {
     let mut reader = BufReader::new(stream.try_clone()?);
     let mut line = String::new();
     reader.read_line(&mut line)?;
@@ -213,6 +216,21 @@ fn handle(stream: UnixStream, sessions: &Sessions) -> io::Result<()> {
                     })
                     .collect();
                 out.write_all(list.concat().as_bytes())
+            }
+            ["STOP"] => {
+                // No new connection reaches this daemon from here on.
+                let _ = std::fs::remove_file(sock);
+                let ids: Vec<String> = sessions.lock().unwrap().keys().cloned().collect();
+                for id in ids {
+                    end_session(sessions, &id, None);
+                }
+                let _ = out.write_all(b"ok\n");
+                // The answer is complete once every handle on the connection
+                // is closed.
+                drop((out, reader, stream));
+                // Exit once the ended sessions' leftovers are killed.
+                std::thread::sleep(pty::HANGUP_GRACE + Duration::from_millis(200));
+                std::process::exit(0);
             }
             _ => out.write_all(&Frame::Error("bad request".into()).encode()),
         },

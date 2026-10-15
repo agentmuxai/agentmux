@@ -94,7 +94,11 @@ pub fn resize(master: &File, cols: u16, rows: u16) {
     }
 }
 
-/// End a session's whole process group: hang up, then kill what is left.
+/// How long [`end_group`] gives a hung-up group before killing what is left.
+pub const HANGUP_GRACE: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// End a session's whole process group: hang up, then kill what is left
+/// [`HANGUP_GRACE`] later.
 pub fn end_group(pid: u32) {
     let pgid = -(pid as libc::pid_t);
     // SAFETY: plain signals to a process group this daemon created.
@@ -102,7 +106,7 @@ pub fn end_group(pid: u32) {
         libc::kill(pgid, libc::SIGHUP);
     }
     std::thread::spawn(move || {
-        std::thread::sleep(std::time::Duration::from_secs(2));
+        std::thread::sleep(HANGUP_GRACE);
         unsafe {
             libc::kill(pgid, libc::SIGKILL);
         }

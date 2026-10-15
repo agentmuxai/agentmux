@@ -281,6 +281,64 @@ fn concurrent_attaches_share_one_daemon_and_one_session() {
     }
 }
 
+/// Whether a daemon holds `home`'s daemon lock, which it keeps for its life.
+fn daemon_running(home: &std::path::Path) -> bool {
+    use std::os::fd::AsRawFd;
+    let Ok(lock) = std::fs::OpenOptions::new()
+        .write(true)
+        .open(home.join("run").join("daemon.lock"))
+    else {
+        return false;
+    };
+    // SAFETY: flock on a descriptor this test owns; closing it releases it.
+    unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) != 0 }
+}
+
+/// `stop` (Remotes' Remove helper) ends every session and the daemon at once,
+/// instead of the daemon exiting only after a minute idle (#4513, finding 6).
+#[test]
+fn stop_ends_every_session_and_the_daemon_at_once() {
+    let home = std::env::temp_dir().join(format!("amr-stop-{}", std::process::id()));
+    std::fs::create_dir_all(&home).unwrap();
+    let _cleanup = Cleanup(home.clone());
+    let mut a = attach(&home, "t1", 0);
+    a.until(|f, _| matches!(f, Frame::Hello { .. }));
+    let mut b = attach(&home, "t2", 0);
+    b.until(|f, _| matches!(f, Frame::Hello { .. }));
+    assert!(daemon_running(&home));
+
+    let out = Command::new(BIN)
+        .arg("stop")
+        .env("AGENTMUX_REMOTE_HOME", &home)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+    assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "ok");
+
+    // Both attaches end with their sessions, and the daemon goes within
+    // seconds, not a minute.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    for att in [&mut a, &mut b] {
+        while att.child.try_wait().unwrap().is_none() {
+            assert!(Instant::now() < deadline, "an attach outlived stop");
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+    while daemon_running(&home) {
+        assert!(Instant::now() < deadline, "the daemon outlived stop");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert!(!home.join("run").join("daemon.sock").exists());
+
+    // With no daemon, stop has nothing to do.
+    let out = Command::new(BIN)
+        .arg("stop")
+        .env("AGENTMUX_REMOTE_HOME", &home)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+}
+
 #[test]
 fn version_names_the_protocol() {
     let out = Command::new(BIN).arg("version").output().unwrap();
