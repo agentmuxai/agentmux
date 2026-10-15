@@ -82,9 +82,16 @@ fn the_exit_marker_is_in_the_shells_own_syntax() {
         with_exit_marker("npm test", ShellFamily::Posix, "ab12cd34"),
         "npm test; echo \"__AMX_RC_ab12cd34_$?__\""
     );
+    // fish has no $?: its status, braced so the name ends before the underscores.
+    assert_eq!(
+        with_exit_marker("npm test", ShellFamily::Fish, "ab12cd34"),
+        "npm test; echo \"__AMX_RC_ab12cd34_{$status}__\""
+    );
     // run clears a half-typed line first: Esc in cmd, Ctrl+U in a Unix shell.
     assert_eq!(clear_line(ShellFamily::Cmd), "\x1b");
     assert_eq!(clear_line(ShellFamily::Posix), "\u{15}");
+    assert_eq!(clear_line(ShellFamily::Fish), "\u{15}");
+    assert!(at_prompt("~/x> ", ShellFamily::Fish));
 }
 
 #[test]

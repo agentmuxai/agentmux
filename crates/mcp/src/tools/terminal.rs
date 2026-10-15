@@ -100,11 +100,14 @@ fn target(connection: Option<&str>) -> Value {
 pub(super) enum ShellFamily {
     Cmd,
     Posix,
+    /// fish has no `$?`: its last status is `$status`.
+    Fish,
 }
 
 fn shell_family(connection: Option<&str>) -> ShellFamily {
     match connection.filter(|c| *c != "local") {
         None if cfg!(windows) => ShellFamily::Cmd,
+        None if target(None)["shell"] == "fish" => ShellFamily::Fish,
         _ => ShellFamily::Posix,
     }
 }
@@ -584,7 +587,7 @@ pub(super) fn at_prompt(text: &str, family: ShellFamily) -> bool {
             (b.len() >= 3 && b[0].is_ascii_alphabetic() && b[1] == b':' && b[2] == b'\\' && last.ends_with('>'))
                 || (last.starts_with("PS ") && last.ends_with('>'))
         }
-        ShellFamily::Posix => ["$", "#", "%", ">", "❯"].iter().any(|p| last.ends_with(p)),
+        ShellFamily::Posix | ShellFamily::Fish => ["$", "#", "%", ">", "❯"].iter().any(|p| last.ends_with(p)),
     }
 }
 
@@ -593,21 +596,23 @@ pub(super) fn at_prompt(text: &str, family: ShellFamily) -> bool {
 /// The command with an exit-code marker after it, in the shell's own syntax,
 /// tagged with this run's `nonce` so no earlier run's marker is taken for it.
 /// cmd expands `%ERRORLEVEL%` when it reads the line, before the command runs,
-/// so `call` with `%^ERRORLEVEL%` defers it. The typed line itself never
-/// matches [`exit_marker`]: it has `%^ERRORLEVEL%` or `$?`, not digits.
+/// so `call` with `%^ERRORLEVEL%` defers it; fish has `$status` for `$?`,
+/// braced so the variable name ends there. The typed line itself never
+/// matches [`exit_marker`]: it has `%^ERRORLEVEL%`, `$?` or `{$status}`, not digits.
 pub(super) fn with_exit_marker(command: &str, family: ShellFamily, nonce: &str) -> String {
     match family {
         ShellFamily::Cmd => format!("{command} & call echo __AMX_RC_{nonce}_%^ERRORLEVEL%__"),
         ShellFamily::Posix => format!("{command}; echo \"__AMX_RC_{nonce}_$?__\""),
+        ShellFamily::Fish => format!("{command}; echo \"__AMX_RC_{nonce}_{{$status}}__\""),
     }
 }
 
 /// The key that clears a half-typed input line before `run` types: Esc in
-/// cmd, Ctrl+U in a Unix shell (readline, zsh's line editor).
+/// cmd, Ctrl+U in a Unix shell (readline, zsh's line editor, fish).
 pub(super) fn clear_line(family: ShellFamily) -> &'static str {
     match family {
         ShellFamily::Cmd => "\x1b",
-        ShellFamily::Posix => "\x15",
+        ShellFamily::Posix | ShellFamily::Fish => "\x15",
     }
 }
 

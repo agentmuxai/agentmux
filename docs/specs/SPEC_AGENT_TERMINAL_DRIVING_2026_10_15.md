@@ -99,7 +99,9 @@ The `PtyShell*` names go in the same release (an alias the model can't see helps
 
 The sections below describe each capability. Where a heading or example names `TerminalOpen`, `TerminalType`, `TerminalRead`, `TerminalScreen`, `TerminalWait`, `TerminalRun`, `TerminalCommands`, `TerminalHandoff` or `TerminalClose`, read it as the `Terminal` action (and parameter) above.
 
-### 4.0.2 The tools in detail The existing `PtyShell*` tools keep working; their implementations move onto the same srv code so there is one terminal model.
+### 4.0.2 The tools in detail
+
+The `Shell*`, `PtyShell*` and `ConnList` tools are no longer listed; calling one returns an error naming the `Terminal` action to use instead (§4.0.1). Their srv endpoints stay, and `Terminal` calls them.
 
 A **terminal** is a `term` block with a PTY: the agent pane's shell drawer, or a terminal pane. Every tool takes `terminal` (a block id from `TerminalOpen` or `PtyShell`), defaulting to the agent's own drawer.
 

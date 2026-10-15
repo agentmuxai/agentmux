@@ -580,7 +580,7 @@ pub(super) fn connection_conflict(
         if ssh && !for_an_agent {
             let error = format!(
                 "this pane's shell on '{running_on}' was opened by the user, and its ssh may ask for a \
-                 password in it, so an agent cannot share it. Use Shell instead, or ask the user to close it."
+                 password in it, so an agent cannot share it. Use Terminal with action \"run\" and background: true instead, or ask the user to close it."
             );
             return Some((StatusCode::CONFLICT, Json(json!({ "error": error }))).into_response());
         }
@@ -588,8 +588,8 @@ pub(super) fn connection_conflict(
     }
     let error = format!(
         "this pane's shell is running on '{running_on}', not '{wanted}'. \
-         End it with PtyShellInput(text: \"exit\\r\") and call PtyShell again, \
-         or call PtyShell with connection '{running_on}' to use it"
+         End it with Terminal action \"type\" (text \"exit\", submit: true) and open it again, \
+         or open it with connection '{running_on}' to use it"
     );
     Some((StatusCode::CONFLICT, Json(json!({ "error": error }))).into_response())
 }
