@@ -267,6 +267,13 @@ impl WindowInput {
     }
 
     pub fn step(&mut self, event: Event, now_ms: u64) -> Vec<Effect> {
+        // A selection that waited too long is dropped: the app has had the
+        // keyboard meanwhile, and nothing later (a pane going live, the window
+        // being activated) may apply it.
+        if self.parked && now_ms.saturating_sub(self.want_at_ms) > PARKED_WANT_TTL_MS {
+            self.parked = false;
+            self.want = Owner::App;
+        }
         match event {
             Event::Select(owner) => {
                 self.choose(owner, now_ms);
