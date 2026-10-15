@@ -4182,8 +4182,8 @@ fn test_marker_with_files_counts_them_and_lists_them_after_the_message() {
     assert!(!plain.contains("FILES="), "got: {plain}");
 }
 
-/// muxreview P1 on #4965: a file's name (and its stored copy's path, which
-/// carries the name) goes inside srv's own list, so it is quoted like the body.
+/// A file's name, and its stored copy's path that carries it, go inside srv's
+/// own list, so they are quoted like the body (#4965).
 #[test]
 fn test_a_file_name_cannot_close_the_block_or_open_a_list() {
     use crate::backend::attachments::prompt::{jekt_list_block, Resolved};
