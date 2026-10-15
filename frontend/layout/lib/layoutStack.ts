@@ -11,10 +11,9 @@
  *
  * Deliberately NOT modeled as a new `LayoutTreeActionType` — a stack
  * mutation changes a leaf's `data` payload, not the tree's shape, so it
- * follows the same "mutate `treeState` directly, then `updateTree` +
- * `setter` + `persistToBackend`" pattern `closeNode`'s ephemeral-node
- * branch already uses (`layoutMagnify.ts`) for payload-only changes that
- * don't need `treeReducer`'s balance/validation machinery.
+ * mutates `treeState` directly, then `updateTree` + `setter`. srv makes the
+ * same change from the matching pane-tab command (`sendStackCommand`); no
+ * tree is pushed.
  *
  * NONE of these mutators dispose the leaf's cached `NodeModel` on an
  * active-member change anymore, as of `pane-leaf-chrome.tsx`
@@ -153,7 +152,7 @@ export function pushBlockOntoStack(model: LayoutModel, nodeId: string, blockId: 
     setActive(node.data, blockId, nextStack);
     model.updateTree(false);
     model.setter(model.localTreeStateAtom, { ...model.treeState });
-    model.persistToBackend();
+    // srv placed it already (`pane.open` with `stack_onto_block_id`).
 }
 
 /** Switch the leaf's active member to an EXISTING stack member. No-op if
@@ -176,7 +175,6 @@ export function setActiveBlockInStack(model: LayoutModel, nodeId: string, blockI
     setActive(node.data, blockId, stack);
     model.updateTree(false);
     model.setter(model.localTreeStateAtom, { ...model.treeState });
-    model.persistToBackend();
     void sendStackCommand(model, "pane.activateTab", (action_id) =>
         RpcApi.PaneActivateTabCommand(TabRpcClient, { block_id: blockId, action_id }, {})
     );
@@ -239,7 +237,6 @@ export async function closeBlockInStack(
     removeMemberFromStack(leafData, blockId);
     model.updateTree(false);
     model.setter(model.localTreeStateAtom, { ...model.treeState });
-    model.persistToBackend();
     // Out of the stored pane before ClosePane deletes the block.
     await sendStackCommand(model, "pane.removeTab", (action_id) =>
         RpcApi.PaneRemoveTabCommand(TabRpcClient, { block_id: blockId, action_id }, {})
@@ -310,9 +307,9 @@ export function moveBlockInStack(
     if (result === "emptied") {
         removeLeafEmptiedByMove(model, sourceNode.id);
     }
-    model.updateTree(false);
+    // A removed pane is a structural change: normalize as srv does.
+    model.updateTree(result === "emptied");
     model.setter(model.localTreeStateAtom, { ...model.treeState });
-    model.persistToBackend();
 
     // A tab dragged into another pane is where the user's attention now is:
     // focus that pane. Re-resolved by block id AFTER the edit, not the

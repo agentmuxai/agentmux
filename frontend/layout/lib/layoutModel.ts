@@ -636,8 +636,12 @@ export class LayoutModel {
     /**
      * Perform an action against the layout tree state.
      * @param action The action to perform.
+     * @param opts.actionId Name the nodes the action creates from this id (a
+     * mirrored backend action passes the id srv used).
+     * @param opts.local Apply it here only: srv already did (a mirrored
+     * backend action, or the local half of a pane-tab command).
      */
-    treeReducer(action: LayoutTreeAction, setState = true) {
+    treeReducer(action: LayoutTreeAction, setState = true, opts?: { actionId?: string; local?: boolean }) {
         // ReAgent P0 on PR #3519: focusManager.requestNodeFocus() used to be
         // called INLINE inside the switch below, before localTreeStateAtom
         // ever committed (that happens later, at the bottom of this
@@ -655,12 +659,12 @@ export class LayoutModel {
         // (layoutIntents.ts). Branches the edit creates are named from its
         // action id, as srv names them.
         if (isIntentAction(action.type)) {
-            const actionId = crypto.randomUUID();
+            const actionId = opts?.actionId ?? crypto.randomUUID();
             const intent = intentForAction(action);
             withDerivedNodeIds(actionId, () => applyLayoutAction(this.treeState, action));
-            // A queued backend action being mirrored is not this window's
-            // edit; the push that follows the batch carries it.
-            if (intent && !this.processingBackendActions) this.layoutOutbox.push({ kind: "intent", actionId, intent });
+            // A queued backend action being mirrored is srv's own edit.
+            const local = opts?.local || this.processingBackendActions;
+            if (intent && !local) this.layoutOutbox.push({ kind: "intent", actionId, intent });
             if (action.type === LayoutTreeActionType.FocusNode) shouldRequestFocus = true;
             if (action.type === LayoutTreeActionType.MagnifyNodeToggle) {
                 shouldRequestFocus = (action as LayoutTreeMagnifyNodeToggleAction).focused !== false;

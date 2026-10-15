@@ -316,6 +316,26 @@ replace all round-trip through srv). Do NOT auto-merge on bot approval.**
   commands), minimize and restore, the dangling-leaf prune, and removing a block that moved
   elsewhere.
 
+*Phase 4, srv's own edits, as built (PR_PHASE4B):*
+- **srv places blocks itself.** `place_block` (`server/service/layout_intents.rs`) applies an
+  insert or a split as a layout intent to srv's tree, then queues the matching action under the
+  same action id, with the leaf's node id (`LayoutActionData.nodeid`). Every placement goes
+  through it: `pane.open`, `agent.open`, a redock (insert or the previewed split), the orphan
+  reaper. A split whose target pane is gone or minimized falls back to an insert.
+- **A source delete takes the block out of srv's tree first** (`queue_source_layout_delete` →
+  `LayoutDeleteNodeByBlock`): tear-off, promote, redock, and the delete and close sagas. A pane's
+  removal (`LayoutDeleteNode`, a pane-tab move that empties a pane) unlinks the node and
+  balances, as the frontend does, instead of collapsing the parent into its last child.
+- **The window mirrors, and pushes nothing.** A queued placement is applied with srv's node id
+  and srv's action id for the branches, and skipped when the block is already in the tree. A
+  model that loads a row takes its queued actions as seen. Pane-tab edits send only their
+  command, through the same outbox as the intents. A block that moved elsewhere leaves the local
+  tree only. The dangling-leaf prune sends `delete` intents.
+- **The queue keeps its latest 32 actions** (`persist_subscriber/layout_queue.rs`): nothing pushes
+  a drained queue back any more, and srv applied every action in it.
+- **Still whole-tree pushes:** minimize and restore (Phase 5), and the push that follows a stale
+  refusal of one.
+
 **Phase 5 — model the minimize fields + dissolve intents** (§6). Promote `minimizedSize`/
 `slipMinimize`/`columnDissolve`/`_slipAnchor` to typed fields; add `LayoutDissolveColumn`/
 `Undissolve` intents with the logical/geometric split. *Own sub-spec + visual verification.* Until

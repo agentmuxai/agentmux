@@ -302,6 +302,18 @@ fn delete_node(root: &mut Option<LayoutNode>, node_id: &str) -> Result<(), Layou
     Ok(())
 }
 
+/// The `delete` intent on a tree whose root stays: unlink the node, then
+/// balance (what the frontend does when a move empties a pane).
+pub fn delete_and_balance(root: &mut LayoutNode, node_id: &str) -> Result<(), LayoutError> {
+    if root.id == node_id {
+        return Err(LayoutError::RootCannotBeTarget);
+    }
+    let parent_id = find_parent_id(root, node_id).ok_or_else(|| not_found(node_id))?;
+    let parent = find_node_by_id_mut(root, &parent_id).ok_or_else(|| not_found(&parent_id))?;
+    remove_child(parent, node_id, 0);
+    balance_node(root)
+}
+
 /// `moveNode`: insert the node at its new place, then remove it from the old
 /// one, which leaves a same-parent move one slot earlier when it moves right.
 fn move_node(tree: &mut LayoutNode, node_id: &str, parent_id: &str, index: i64, ids: &mut NodeIds) -> Result<(), LayoutError> {

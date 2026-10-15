@@ -296,8 +296,8 @@ pub fn remove_stack_member(tree: &mut LayoutNode, block_id: &str) -> bool {
 /// the tree.
 ///
 /// When `block_id` is its source leaf's ONLY member, the cross-leaf move
-/// empties that pane, so the source leaf is deleted from the tree (with the
-/// usual single-child-parent collapse, see [`delete_node`]). This is a move:
+/// empties that pane, so the source leaf is deleted from the tree and the
+/// tree balanced, as the frontend does ([`intent::delete_and_balance`]). This is a move:
 /// the block itself lives on in the destination.
 /// [`source_leaf_emptied_by_move`] tells a caller in advance whether this
 /// will happen, so it can reconcile focus/magnify that pointed at that leaf.
@@ -358,7 +358,7 @@ pub fn move_stack_member(
         if !push_stack_member_at(tree, target_block_id, block_id, position, activate) {
             return false;
         }
-        return delete_node(tree, &source_node_id).is_ok();
+        return intent::delete_and_balance(tree, &source_node_id).is_ok();
     }
     if !remove_stack_member(tree, block_id) {
         return false;

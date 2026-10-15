@@ -279,7 +279,7 @@ pub struct StickerType {
 
 // ---- LayoutActionData / LeafOrderEntry ----
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct LayoutActionData {
     pub actiontype: String,
     pub actionid: String,
@@ -306,6 +306,10 @@ pub struct LayoutActionData {
     pub targetblockid: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub position: String,
+    /// The node id srv gave the leaf it placed (insert and split), so the
+    /// frontend's mirror of the action builds the same tree.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nodeid: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

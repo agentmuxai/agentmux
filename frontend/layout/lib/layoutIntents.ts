@@ -25,10 +25,26 @@ import { copyLayoutNode, sameLayoutTree } from "./layoutIntentActions";
 import type { LayoutNode } from "./types";
 import type { LayoutModel } from "./layoutModel";
 
-/** One item of a model's outbox: an intent, or a whole-tree push. */
-export type LayoutOutboxItem = { kind: "intent"; actionId: string; intent: LayoutIntent } | { kind: "push" };
+/** One item of a model's outbox: an intent, a pane-tab command (sent by
+ *  `run`), or a whole-tree push. */
+export type LayoutOutboxItem =
+    | { kind: "intent"; actionId: string; intent: LayoutIntent }
+    | { kind: "command"; run: () => Promise<void> }
+    | { kind: "push" };
 
 // ── The outbox ──────────────────────────────────────────────────────────────
+
+/** Queue an intent with no tree change: the focused and magnified pane only. */
+export function sendViewIntent(model: LayoutModel): void {
+    model.layoutOutbox.push({ kind: "intent", actionId: crypto.randomUUID(), intent: { type: "view" } });
+    void flushLayoutOutbox(model);
+}
+
+/** Queue a pane-tab command behind everything already queued. */
+export function queueLayoutCommand(model: LayoutModel, run: () => Promise<void>): void {
+    model.layoutOutbox.push({ kind: "command", run });
+    void flushLayoutOutbox(model);
+}
 
 /** Queue a whole-tree push behind everything already queued. */
 export function queueLayoutPush(model: LayoutModel): void {
@@ -46,10 +62,13 @@ export async function flushLayoutOutbox(model: LayoutModel): Promise<void> {
         while (model.layoutOutbox.length && !model.disposed) {
             const item = model.layoutOutbox.shift();
             if (item.kind === "push") {
-                // The push carries the whole local tree, so every edit queued
-                // behind it is in it already.
-                model.layoutOutbox.length = 0;
+                // The push carries the whole local tree, so every intent
+                // queued behind it is in it already. Commands still go: their
+                // callers wait for them.
+                model.layoutOutbox = model.layoutOutbox.filter((i) => i.kind === "command");
                 await model.pushLayoutNow();
+            } else if (item.kind === "command") {
+                await item.run();
             } else {
                 await sendIntent(model, item.actionId, item.intent);
             }

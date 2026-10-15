@@ -456,27 +456,27 @@ pub(super) async fn maybe_reuse_editor_pane(
     }))
 }
 
-/// Translate `split_direction` + `split_reference_block_id` into the backend
-/// layout action triple. Returns `(actiontype, targetblockid, position)`.
-/// Falls back to a plain `insert` if direction/reference are missing.
+/// Translate `split_direction` + `split_reference_block_id` into a placement:
+/// a split of the reference block's pane, or the first free slot when either
+/// is missing.
 pub(super) fn resolve_placement(
     direction: Option<&str>,
     reference: Option<&str>,
-) -> (String, String, String) {
-    let reference = match reference.filter(|s| !s.is_empty()) {
-        Some(r) => r,
-        None => return ("insert".to_string(), String::new(), String::new()),
+    focused: bool,
+) -> crate::server::service::layout_intents::Placement {
+    use crate::server::service::layout_intents::Placement;
+    use agentmux_common::SplitPosition::{After, Before};
+    let Some(reference) = reference.filter(|s| !s.is_empty()) else {
+        return Placement::Append { focused };
     };
-
-    let (actiontype, position) = match direction {
-        Some("right") => (crate::backend::wcore::LAYOUT_ACTION_SPLIT_HORIZONTAL, "after"),
-        Some("left") => (crate::backend::wcore::LAYOUT_ACTION_SPLIT_HORIZONTAL, "before"),
-        Some("down") | Some("below") => (crate::backend::wcore::LAYOUT_ACTION_SPLIT_VERTICAL, "after"),
-        Some("up") | Some("above") => (crate::backend::wcore::LAYOUT_ACTION_SPLIT_VERTICAL, "before"),
-        _ => return ("insert".to_string(), String::new(), String::new()),
+    let (horizontal, position) = match direction {
+        Some("right") => (true, After),
+        Some("left") => (true, Before),
+        Some("down") | Some("below") => (false, After),
+        Some("up") | Some("above") => (false, Before),
+        _ => return Placement::Append { focused },
     };
-
-    (actiontype.to_string(), reference.to_string(), position.to_string())
+    Placement::Split { target_block_id: reference.to_string(), horizontal, position, size_fraction: None, focused }
 }
 
 /// `POST /api/v1/agent/pane/close` — backs the `ClosePane` MCP tool.
@@ -1257,39 +1257,16 @@ pub async fn open_pane(state: &AppState, cmd: CommandPaneOpenData) -> Result<Pan
     }
     crate::server::service::publish_events(state, &create_events);
 
-    // Enqueue layout action — split if requested, else append
-    let (actiontype, targetblockid, position) = pane::resolve_placement(
+    // Place it, split if requested, else append: srv's tree, then the queued
+    // action for the window. Best-effort: a failure leaves the block created
+    // but not laid out.
+    let placement = pane::resolve_placement(
         cmd.split_direction.as_deref(),
         cmd.split_reference_block_id.as_deref(),
+        cmd.focus.unwrap_or(true),
     );
-    let focused = cmd.focus.unwrap_or(true);
-
-    // SPEC_864 Phase 4 — append through the reducer (single writer of
-    // db_layout). Best-effort like the store-direct write it replaces:
-    // a failure leaves the block created but not laid out.
-    {
-        let action = obj::LayoutActionData {
-            actiontype,
-            actionid: uuid::Uuid::new_v4().to_string(),
-            blockid: block_id.clone(),
-            nodesize: None,
-            nodesizefraction: None,
-            indexarr: None,
-            focused,
-            magnified: false,
-            ephemeral: false,
-            targetblockid,
-            position,
-        };
-        if let Err(e) = crate::server::service::queue_layout_actions_via_reducer(
-            state,
-            &tab_id,
-            vec![action],
-        )
-        .await
-        {
-            tracing::warn!("pane.open: layout action enqueue failed: {e}");
-        }
+    if let Err(e) = crate::server::service::layout_intents::place_block(state, &tab_id, &block_id, placement).await {
+        tracing::warn!("pane.open: placing the pane failed: {e}");
     }
 
     tracing::info!(

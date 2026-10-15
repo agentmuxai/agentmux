@@ -172,18 +172,16 @@ pub(super) fn handle_layout_delete_node(
             version: v,
         }];
     };
-    let Some(root) = tab.rootnode.as_mut() else {
+    if tab.rootnode.is_none() {
         // Empty tree — nothing to delete; idempotent no-op (no event).
         return Vec::new();
-    };
-    // `backend::layout::delete_node` leaves
-    // root deletion to the caller (returns Ok(()) with the root
-    // unmodified). Detect the root case here and clear the tree
-    // wholesale so the reducer state matches the
-    // `LayoutNodeDeleted` event we emit.
-    if root.id == node_id {
-        tab.rootnode = None;
-    } else if let Err(e) = crate::backend::layout::delete_node(root, &node_id) {
+    }
+    // The frontend's delete, then its balance pass (the `delete` intent), so
+    // the window that mirrors this removal ends with the same tree.
+    let mut tree = tab.rootnode.clone();
+    let delete = agentmux_common::LayoutIntent::Delete { node_id: node_id.clone() };
+    let mut ids = crate::backend::layout::intent::NodeIds::new(&correlation_id);
+    if let Err(e) = crate::backend::layout::intent::apply_intent(&mut tree, delete, &mut ids) {
         let v = state.bump_version();
         return vec![Event::Error {
             code: ErrorCode::InvalidCommand,
@@ -192,24 +190,16 @@ pub(super) fn handle_layout_delete_node(
             version: v,
         }];
     }
+    tab.rootnode = tree;
 
-    // Two ways focus/magnify ids can reference nodes that no longer
-    // exist in the tree post-delete; both must be cleared:
-    //   - `delete_recursive` collapse-sole-child rewrites a
-    //        parent's id to the promoted child's id. If
-    //        focused/magnified was the parent's original id, that
-    //        id is gone from the tree even though the same physical
-    //        node remains.
-    //   - Deleting a container removes all descendants. If
-    //        focused/magnified was a descendant, it's gone too.
-    // A direct-target match (`focused == node_id`) doesn't catch
-    // either case. Reconcile by walking the post-delete tree and
-    // clearing any focus/magnify id that no longer resolves.
+    // Focus or magnify can name a node the delete took: a descendant of a
+    // removed container, or a branch the balance pass collapsed into its one
+    // remaining leaf. Clear whichever no longer resolves.
     let (was_focused, was_magnified) = clear_dangling_focus_magnify(tab);
 
     // SPEC_864 site #6 — carry the resulting tree so the persist
     // subscriber can write db_layout without re-running the algebra
-    // (same single-writer shape as the 7 structural arms). A delete is
+    // (the single-writer shape of every layout arm). A delete is
     // the one structural op that can legitimately EMPTY the tree
     // (root-orphan case), so `tree_cleared` disambiguates a real clear
     // from a version-skewed sender's absent field.

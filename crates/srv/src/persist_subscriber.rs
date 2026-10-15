@@ -32,7 +32,10 @@ use crate::backend::storage::store::Store;
 use crate::backend::wcore;
 use crate::state::State;
 
+mod layout_queue;
 mod resync;
+
+use layout_queue::apply_layout_backend_actions_queued;
 
 /// Spawn the persist subscriber task. Runs until the broadcast
 /// channel closes (i.e., the reducer's bus is dropped at process
@@ -776,51 +779,6 @@ fn apply_layout_tree_replaced(
     layout.magnifiednodeid = new_magnified;
     layout.leaforder = new_leaforder;
     layout.pendingbackendactions = new_pending;
-    mstore.update(&mut layout)?;
-    Ok(())
-}
-
-/// SPEC_864 Phase 4 — apply a `LayoutBackendActionsQueued` event:
-/// APPEND the reducer-validated actions to
-/// `LayoutState.pendingbackendactions`. The queue is a backend→frontend
-/// mailbox: the backend appends here; the frontend drains it by pushing
-/// a full slice without the processed actions (the REPLACE path in
-/// `apply_layout_tree_replaced`). Each action's `rev` sets `layoutrevision`.
-///
-/// Idempotency: the event is applied twice on the happy path (sync in
-/// `queue_layout_actions_via_reducer`, again by the subscriber task
-/// consuming the broadcast), so actions whose `actionid` is already in
-/// the queue are skipped. Every writer stamps a fresh UUID per action;
-/// an (out-of-contract) empty `actionid` dedupes against other empties,
-/// which is the safe direction — skip rather than duplicate.
-fn apply_layout_backend_actions_queued(
-    mstore: &Store,
-    tab_id: &str,
-    actions: &serde_json::Value,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let Some(tab) = mstore.get::<Tab>(tab_id)? else {
-        return Ok(());
-    };
-    if tab.layoutstate.is_empty() {
-        return Ok(());
-    }
-    let Some(mut layout) = mstore.get::<PersistedLayoutState>(&tab.layoutstate)? else {
-        return Ok(());
-    };
-    let incoming: Vec<LayoutActionData> = serde_json::from_value(actions.clone())?;
-    let mut pending = layout.pendingbackendactions.take().unwrap_or_default();
-    let before = pending.len();
-    let revision = actions.as_array().into_iter().flatten().filter_map(|a| a.get("rev")?.as_u64()).fold(layout.layoutrevision, u64::max);
-    for action in incoming {
-        if !pending.iter().any(|p| p.actionid == action.actionid) {
-            pending.push(action);
-        }
-    }
-    if pending.len() == before && revision == layout.layoutrevision {
-        return Ok(()); // a double-apply: no version churn
-    }
-    layout.pendingbackendactions = Some(pending);
-    layout.layoutrevision = revision;
     mstore.update(&mut layout)?;
     Ok(())
 }
@@ -1669,6 +1627,7 @@ mod tests {
                 ephemeral: false,
                 targetblockid: String::new(),
                 position: String::new(),
+                nodeid: None,
             }]);
             s.update(&mut layout).unwrap();
         }
@@ -2138,6 +2097,7 @@ mod tests {
             ephemeral: false,
             targetblockid: String::new(),
             position: String::new(),
+            nodeid: None,
         }
     }
 

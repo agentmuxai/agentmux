@@ -73,47 +73,10 @@ pub(crate) async fn handle_tear_off_block(state: &AppState, call: &WebCallType) 
     if let Err(e) = setup_torn_off_block_layout(state, &new_tab_oid, &block_id).await {
         tracing::warn!(new_tab = %new_tab_oid, "TearOffBlock: layout setup failed: {} (block in tab but layout malformed)", e);
     }
-    // Source tab, backend side: prune the block from the reducer's own copy
-    // of the source tree (`db_layout`) now, the same two-step the
-    // `delete_block` saga does (its steps 2 and 2b). Stack-safe: when the
-    // block is one tab of a multi-tab pane, only that member is removed and
-    // the pane stays (`remove_stack_member`); the leaf goes only if it was
-    // the pane's last tab. Without this the backend tree was only fixed
-    // when the source window echoed its tree back, and a failed or missed
-    // echo left a dangling leaf behind.
-    // SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §3.5 (design 4).
-    let prune_events = dispatch_to_reducer(
-        state,
-        agentmux_common::ipc::Command::LayoutDeleteNodeByBlock {
-            tab_id: source_tab_id.clone(),
-            block_id: block_id.clone(),
-            correlation_id: String::new(),
-        },
-    )
-    .await;
-    // Best-effort, like the delete_block saga's identical dispatch: the block
-    // has already moved, so a failed prune must not fail the tear-off. But it
-    // must not be silent either — it's exactly the dangling-leaf case this
-    // step exists to prevent (reagent P1 on #3708). The queued frontend delete
-    // below still runs either way.
-    if let Some(msg) = prune_events.iter().find_map(|e| match e {
-        agentmux_common::ipc::Event::Error { message, .. } => Some(message.clone()),
-        _ => None,
-    }) {
-        tracing::warn!(
-            source_tab = %source_tab_id,
-            block_id = %block_id,
-            "TearOffBlock: backend source-layout prune failed (best-effort; the source window's queued delete still applies): {}",
-            msg
-        );
-    }
-    for ev in &prune_events {
-        let _ = crate::persist_subscriber::apply_event_to_mstore(ev, store);
-    }
-    publish_events(state, &prune_events);
-
-    // Source tab, frontend side: queue a layout-delete action so the source
-    // window's frontend removes the node from its tree.
+    // Source tab: out of srv's tree, then the queued `delete` for the source
+    // window (`queue_source_layout_delete`). Stack-safe: one tab of a
+    // multi-tab pane leaves only that member (SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md
+    // §3.5, design 4). Best-effort: the block has already moved.
     if let Err(e) = queue_source_layout_delete(state, &source_tab_id, &block_id).await {
         tracing::warn!(source_tab = %source_tab_id, "TearOffBlock: source layout delete-action enqueue failed: {}", e);
     }

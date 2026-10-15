@@ -1488,35 +1488,10 @@ pub enum Event {
 
     // ── Phase E.4.B — Layout tree events ───────────────────────────────
     //
-    // Mirror of the 11 layout commands (§6 of the formal spec). Each
-    // event carries a `correlation_id` matching its command and a
-    // `version` for sequencing. The persist subscriber applies the same
-    // tree mutation as the reducer used, making applies idempotent.
-    //
+    // Each carries the resulting tree (or the queue change), so the
+    // persist subscriber writes it without re-running the algebra.
     // See docs/specs/srv-phase-e4b-formal-spec-2026-05-03.md §6.
 
-    LayoutNodeInserted {
-        tab_id: String,
-        node: crate::LayoutNode,
-        parent_id: Option<String>,
-        index: Option<usize>,
-        correlation_id: String,
-        version: u64,
-    },
-    LayoutNodeInsertedAtIndex {
-        tab_id: String,
-        /// The reducer's resulting tree (post-op, post-balance) for the
-        /// persist subscriber to write to `db_layout` — single-writer, no
-        /// algebra re-run (SPEC_STRONG_REDUCER_AUTHORITY_LAYOUT). `None` =
-        /// empty tree. `#[serde(default)]` for forward-compat with senders
-        /// that predate the field.
-        #[serde(default)]
-        new_tree: Option<crate::LayoutNode>,
-        node: crate::LayoutNode,
-        index_arr: Vec<usize>,
-        correlation_id: String,
-        version: u64,
-    },
     LayoutNodeDeleted {
         tab_id: String,
         node_id: String,
@@ -1552,73 +1527,6 @@ pub enum Event {
         /// #715 round 5).
         #[serde(default)]
         was_magnified: bool,
-        correlation_id: String,
-        version: u64,
-    },
-    LayoutNodeMoved {
-        tab_id: String,
-        /// Resulting tree for the persist subscriber (see LayoutNodeInsertedAtIndex).
-        #[serde(default)]
-        new_tree: Option<crate::LayoutNode>,
-        node_id: String,
-        new_parent_id: String,
-        index: usize,
-        correlation_id: String,
-        version: u64,
-    },
-    LayoutNodesSwapped {
-        tab_id: String,
-        /// Resulting tree for the persist subscriber (see LayoutNodeInsertedAtIndex).
-        #[serde(default)]
-        new_tree: Option<crate::LayoutNode>,
-        node1_id: String,
-        node2_id: String,
-        correlation_id: String,
-        version: u64,
-    },
-    LayoutNodesResized {
-        tab_id: String,
-        /// Resulting tree for the persist subscriber (see LayoutNodeInsertedAtIndex).
-        #[serde(default)]
-        new_tree: Option<crate::LayoutNode>,
-        ops: Vec<crate::ResizeOp>,
-        correlation_id: String,
-        version: u64,
-    },
-    LayoutNodeReplaced {
-        tab_id: String,
-        /// Resulting tree for the persist subscriber (see LayoutNodeInsertedAtIndex).
-        #[serde(default)]
-        new_tree: Option<crate::LayoutNode>,
-        target_id: String,
-        new_node: crate::LayoutNode,
-        correlation_id: String,
-        version: u64,
-    },
-    LayoutSplitHorizontalApplied {
-        tab_id: String,
-        /// Resulting tree for the persist subscriber (see LayoutNodeInsertedAtIndex).
-        #[serde(default)]
-        new_tree: Option<crate::LayoutNode>,
-        target_id: String,
-        new_node: crate::LayoutNode,
-        position: crate::SplitPosition,
-        correlation_id: String,
-        version: u64,
-    },
-    LayoutSplitVerticalApplied {
-        tab_id: String,
-        /// Resulting tree for the persist subscriber (see LayoutNodeInsertedAtIndex).
-        #[serde(default)]
-        new_tree: Option<crate::LayoutNode>,
-        target_id: String,
-        new_node: crate::LayoutNode,
-        position: crate::SplitPosition,
-        correlation_id: String,
-        version: u64,
-    },
-    LayoutCleared {
-        tab_id: String,
         correlation_id: String,
         version: u64,
     },
