@@ -339,6 +339,34 @@ fn stop_ends_every_session_and_the_daemon_at_once() {
     assert!(out.status.success(), "{out:?}");
 }
 
+/// An attach already connected when `stop` comes gets no session: one made
+/// after `stop` would never be ended, and outlive the daemon.
+#[test]
+fn an_attach_connected_before_stop_gets_no_session() {
+    use std::os::unix::net::UnixStream;
+    let home = std::env::temp_dir().join(format!("amr-stop-race-{}", std::process::id()));
+    std::fs::create_dir_all(&home).unwrap();
+    let _cleanup = Cleanup(home.clone());
+    let a = attach(&home, "t1", 0);
+    a.until(|f, _| matches!(f, Frame::Hello { .. }));
+    let mut early = UnixStream::connect(home.join("run").join("daemon.sock")).unwrap();
+
+    let out = Command::new(BIN)
+        .arg("stop")
+        .env("AGENTMUX_REMOTE_HOME", &home)
+        .output()
+        .unwrap();
+    assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "ok");
+
+    let line = format!("AMR {} ATTACH t2 0 80 24\n", agentmux_remote::frame::PROTOCOL);
+    early.write_all(line.as_bytes()).unwrap();
+    early.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+    let (mut d, mut buf) = (Decoder::new(), [0u8; 4096]);
+    let n = early.read(&mut buf).unwrap();
+    let frames = d.push(&buf[..n]).unwrap();
+    assert!(matches!(frames.first(), Some(Frame::Error(_))), "{frames:?}");
+}
+
 #[test]
 fn version_names_the_protocol() {
     let out = Command::new(BIN).arg("version").output().unwrap();

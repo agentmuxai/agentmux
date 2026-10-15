@@ -28,7 +28,7 @@ use std::io::{self, BufRead, BufReader, Read, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -93,6 +93,10 @@ struct Session {
 type Sessions = Arc<Mutex<HashMap<String, Arc<Session>>>>;
 
 static GENERATION: AtomicU64 = AtomicU64::new(1);
+
+/// Set by `STOP`, under the sessions' lock, which every new session is made
+/// under: no session is made after `STOP` has taken the list it ends.
+static STOPPING: AtomicBool = AtomicBool::new(false);
 
 /// Run the daemon in the foreground until it has been idle for a minute.
 pub fn run(base: &Path) -> io::Result<()> {
@@ -220,7 +224,11 @@ fn handle(stream: UnixStream, sessions: &Sessions, sock: &Path) -> io::Result<()
             ["STOP"] => {
                 // No new connection reaches this daemon from here on.
                 let _ = std::fs::remove_file(sock);
-                let ids: Vec<String> = sessions.lock().unwrap().keys().cloned().collect();
+                let ids: Vec<String> = {
+                    let map = sessions.lock().unwrap();
+                    STOPPING.store(true, Ordering::SeqCst);
+                    map.keys().cloned().collect()
+                };
                 for id in ids {
                     end_session(sessions, &id, None);
                 }
@@ -293,6 +301,10 @@ fn attach(
 ) -> io::Result<()> {
     let (session, created) = {
         let mut map = sessions.lock().unwrap();
+        if STOPPING.load(Ordering::SeqCst) {
+            let mut out = stream;
+            return out.write_all(&Frame::Error("the helper is stopping".into()).encode());
+        }
         match map.get(id) {
             Some(s) => (s.clone(), false),
             None => {
