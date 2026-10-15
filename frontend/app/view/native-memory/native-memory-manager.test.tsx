@@ -351,6 +351,10 @@ describe("NativeMemoryManager — filter and sort", () => {
 
         // No open pane, so no window: tokens alone, never a guessed share.
         expect(await screen.findByText("Starts with ~4.8k tok")).toBeInTheDocument();
+        // Announced too: the card's label replaces its content for a screen reader.
+        expect(screen.getByText("Manoz").closest(".memory-agent-card")?.getAttribute("aria-label")).toBe(
+            "Manoz — ~40 tok · 1 file — Starts with ~4.8k tok"
+        );
         fireEvent.click(screen.getByText("Manoz"));
         const cost = await screen.findByTestId("agent-launch-cost");
         expect(cost).toHaveTextContent("Starts with ~4.8k tok");

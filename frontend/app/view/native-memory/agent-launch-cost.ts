@@ -10,7 +10,7 @@
 
 import { contextReadingFromMeta, plausibleReading } from "@/app/store/agent-pane-state/context-reading";
 import { compactionThreshold } from "@/app/store/agent-pane-state/context-window";
-import { memorySizeBand, type SizeBand } from "@/app/view/agent/memory-reinjection";
+import { DEFAULT_MEMORY_SIZE_FRACTION, memorySizeBand, type SizeBand } from "@/app/view/agent/memory-reinjection";
 import type { LaunchCost } from "@/types/rpc/LaunchCost";
 import type { LaunchCostPart } from "@/types/rpc/LaunchCostPart";
 import { formatCompactNumber } from "@/util/format-count";
@@ -70,11 +70,16 @@ export function bandWords(band: SizeBand): string {
 }
 
 /** What a launch of `total` tokens takes of `window`: its share ("6% of 200k"),
- *  band and the room left before auto-compaction. */
-export function launchBudget(total: number, window: number): { share: string; band: SizeBand; room: number } {
+ *  band, how full the budget the band measures against is (`fill`, 0–1), and
+ *  the room left before auto-compaction. */
+export function launchBudget(
+    total: number,
+    window: number
+): { share: string; band: SizeBand; fill: number; room: number } {
     return {
         share: `${shareLabel(total, window) || "0%"} of ${formatCompactNumber(window)}`,
         band: memorySizeBand(total, window),
+        fill: Math.min(1, total / (window * DEFAULT_MEMORY_SIZE_FRACTION)),
         room: Math.max(0, compactionThreshold(window) - total),
     };
 }

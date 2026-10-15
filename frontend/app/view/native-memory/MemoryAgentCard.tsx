@@ -90,7 +90,9 @@ export const MemoryAgentCard = (props: MemoryAgentCardProps): JSX.Element => {
             // An errored card stays clickable on purpose: the detail view
             // surfaces the real error text, which is more useful than a dead
             // card that only says something went wrong.
-            aria-label={`${name()} — ${memoryCountLabel(props.count)}`}
+            aria-label={[name(), memoryCountLabel(props.count), props.launch ? launchLine(props.launch) : ""]
+                .filter(Boolean)
+                .join(" — ")}
             title={props.count.kind === "error" ? props.count.message : undefined}
         >
             <ProviderLogo provider={props.agent.provider} size={28} class="memory-agent-card-icon" />
@@ -122,10 +124,7 @@ export const MemoryAgentCard = (props: MemoryAgentCardProps): JSX.Element => {
                                         <span class="memory-agent-card-launch-bar" aria-hidden="true">
                                             <span
                                                 class={`memory-agent-card-launch-fill memory-agent-card-launch-fill--${b().band}`}
-                                                style={{
-                                                    // Against the budget the bands use: a tenth of the window.
-                                                    width: `${Math.min(100, (launch().total / ((launch().window?.window ?? 1) * 0.1)) * 100)}%`,
-                                                }}
+                                                style={{ width: `${b().fill * 100}%` }}
                                             />
                                         </span>
                                     )}

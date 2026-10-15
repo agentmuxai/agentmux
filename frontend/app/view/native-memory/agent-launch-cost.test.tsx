@@ -43,7 +43,8 @@ describe("agent-launch-cost", () => {
     });
 
     it("bands a launch against a tenth of the window and says so in words when it's large", () => {
-        expect(launchBudget(5_000, 200_000)).toEqual({ share: "3% of 200k", band: "low", room: 162_000 });
+        expect(launchBudget(5_000, 200_000)).toEqual({ share: "3% of 200k", band: "low", fill: 0.25, room: 162_000 });
+        expect(launchBudget(40_000, 200_000).fill).toBe(1);
         expect(launchBudget(16_000, 200_000).band).toBe("high");
         expect(launchBudget(19_000, 200_000).band).toBe("critical");
         expect(bandWords("low")).toBe("");
