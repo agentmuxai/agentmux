@@ -1,6 +1,6 @@
 # SPEC: Agents drive terminals through MuxAPI: keys, screen, wait, commands, terminal panes
 
-**Status:** active — P1 partly built with the `Terminal` tool (SPEC_MUXAPI_TOOL_CONSOLIDATION_2026_10_15.md S1): keys, submit, plain-text reads from a cursor, waits, and `run` with an exit code (§4.7). Not yet: terminal panes, the emulator (P2), shell integration (P3), P4.
+**Status:** active — P1 partly shipped in #5001 with the `Terminal` tool (SPEC_MUXAPI_TOOL_CONSOLIDATION_2026_10_15.md S1): keys, submit, plain-text reads from a cursor, waits, and `run` with an exit code (§4.7). Remaining: terminal panes (P1), the emulator (P2), shell integration (P3), P4.
 **Author:** Agent5@narko, 2026-10-15, at the operator's request
 **Trigger (operator, 2026-10-15):** "can u run it through an agentmux terminal? … can we explore deep agent integration into the terminal pane? we want to be able to efficiently drive work there, when it is needed, like now. research best practices online, write a spec to file" … "via the MuxAPI"
 **Builds on:** `SPEC_AGENT_INTERACTIVE_PTY_SHELL_API_2026_09_10.md` (PtyShell; its §5 deferred a rendered screen), `SPEC_PERSISTENT_SHELL_NODE_2026_06_11.md` (Shell), the browser-pane agent model (`SPEC_AGENT_DRIVEN_BROWSER_PANES_2026_10_07.md`: an agent drives only panes it opened, a "driven by" bar, Take over, handoff).

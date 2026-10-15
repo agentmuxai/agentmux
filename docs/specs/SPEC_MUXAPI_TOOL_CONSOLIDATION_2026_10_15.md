@@ -1,6 +1,6 @@
 # SPEC: MuxAPI in fourteen tools: one per family, with actions
 
-**Status:** active — slice S1 (`Terminal`) built in this PR; S2–S4 to follow (§7).
+**Status:** active — slice S1 (`Terminal`) shipped in #5001; remaining: S2–S4 (§7).
 **Author:** Agent5@narko, 2026-10-15, at the operator's request
 **Trigger (operator, 2026-10-15):** "can we use fewer more powerful tools? like one Terminal tool that covers all those features?" … "lets take this opprunutiy to catalog all of agentmux's tools, we may want to do a similar simplification across the board, write a spec to file"
 **Builds on:** `SPEC_AGENT_TERMINAL_DRIVING_2026_10_15.md` (the first family done this way: one `Terminal` tool with an `action`), `SPEC_AGENT_TASK_EVAL_2026_10_13.md` (the eval that measures what MuxAPI costs an agent).
@@ -129,7 +129,7 @@ Agents' own memories and skills that name old tools are outside the repo; the re
 
 | Slice | PR | Before → after (`tools/list` characters) |
 |---|---|---|
-| S1 `Terminal` | this PR | 11 tools, 8,714 → 1 tool, 4,525 (−48%); 97 tools → 87 |
+| S1 `Terminal` | #5001 | 11 tools, 8,714 → 1 tool, 4,525 (−48%); 97 tools → 87 |
 
 S1 also moved the advertised list into one `ADVERTISED` constant (`crates/mcp/src/tool_schemas.rs`), which the server sends and a test checks, so each later slice changes the list in one place.
 
