@@ -353,6 +353,12 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         // never a lock.
         .route("/api/v1/work-claims", post(work_claims_handlers::handle_claim_work))
         .route("/api/v1/work-claims/release", post(work_claims_handlers::handle_release_work))
+        // PostToChannel / ReadChannel: a repository's coordination channel
+        // (SPEC_AGENT_COORDINATION_CHANNEL_2026_10_15.md).
+        .route(
+            "/api/v1/coord/posts",
+            post(coord_channel_handlers::handle_post_to_channel).get(coord_channel_handlers::handle_read_channel),
+        )
         // MuxAPI — identity / preset / memory namespaces, the MCP-facing
         // slice of the app-API RPC surface (SPEC_AGENT_APP_API_MCP_BINDINGS_2026_06_28).
         // The agent identity (`agent_id`) is supplied by agentmux-mcp from its

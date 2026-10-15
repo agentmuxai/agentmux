@@ -45,6 +45,10 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 None => (None, None),
             };
             let mut query = who_query(arguments, &agent, block_id);
+            // srv's recent_posts then holds the PR's own posts.
+            if let Some(n) = pr {
+                query.push(("pr", n.to_string()));
+            }
             // A PR's URL names its repository: ask about that one.
             if let Some(url_repo) = pr_repo {
                 match arg(arguments, "repo") {
@@ -63,6 +67,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 // here would list agents that touch none of the PR's files.
                 let mut q = query.clone();
                 q.retain(|(k, _)| matches!(*k, "repo" | "agent" | "block"));
+                // Not `pr`: these ask about one of its files, whose posts are merged in.
                 q.push(("path", path));
                 let url = url.clone();
                 async move { srv_get_json(client, &url, auth_key, &q, "WhoIsWorkingOn").await.ok() }
@@ -87,8 +92,80 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             let answer = srv_post_json(client, &url, auth_key, &body, name).await?;
             Ok(serde_json::to_string_pretty(&answer).unwrap_or_else(|_| answer.to_string()))
         }
+        "PostToChannel" | "ReadChannel" => {
+            if local_url.is_empty() || auth_key.is_empty() {
+                anyhow::bail!(
+                    "AGENTMUX_LOCAL_URL and AGENTMUX_AUTH_KEY must be set. \
+                     Is this agent pane opened via AgentMux?"
+                );
+            }
+            let agent = std::env::var("AGENTMUX_AGENT_ID").unwrap_or_default();
+            let url = format!("{}/api/v1/coord/posts", local_url.trim_end_matches('/'));
+            let answer = if name == "PostToChannel" {
+                let body = channel_post_body(arguments, &agent, block_id)?;
+                srv_post_json(client, &url, auth_key, &body, name).await?
+            } else {
+                let query = channel_read_query(arguments, &agent, block_id)?;
+                srv_get_json(client, &url, auth_key, &query, name).await?
+            };
+            Ok(serde_json::to_string_pretty(&answer).unwrap_or_else(|_| answer.to_string()))
+        }
         _ => Err(not_in_family()),
     }
+}
+
+/// A coordination post's PR argument: its number, and the repository its URL
+/// names (which must agree with `repo` when both are given).
+fn channel_pr(arguments: &Value) -> Result<(Option<String>, Option<u64>)> {
+    let Some(v) = arguments.get("pr").filter(|v| !v.is_null()) else { return Ok((None, None)) };
+    let (url_repo, n) =
+        pr_ref(v).ok_or_else(|| anyhow::anyhow!("pr must be a PR number (12, \"#12\") or its GitHub URL"))?;
+    let repo = match (url_repo, arg(arguments, "repo")) {
+        (Some(u), Some(r)) if normalize_repo(r) != normalize_repo(&u) => {
+            anyhow::bail!("pr is a PR of {u}, but repo is {r}: pass one or the other")
+        }
+        (Some(u), None) => Some(u),
+        _ => None,
+    };
+    Ok((repo, Some(n)))
+}
+
+/// `PostToChannel`'s request body.
+fn channel_post_body(arguments: &Value, agent: &str, block_id: &str) -> Result<Value> {
+    let mut body = serde_json::Map::new();
+    for key in ["message", "path", "repo", "branch", "topic"] {
+        if let Some(v) = arg(arguments, key) {
+            body.insert(key.into(), json!(v));
+        }
+    }
+    let (pr_repo, pr) = channel_pr(arguments)?;
+    if let Some(r) = pr_repo {
+        body.insert("repo".into(), json!(r));
+    }
+    if let Some(n) = pr {
+        body.insert("pr".into(), json!(n));
+    }
+    body.insert("agent".into(), json!(agent.trim()));
+    body.insert("block".into(), json!(block_id.trim()));
+    Ok(Value::Object(body))
+}
+
+/// `ReadChannel`'s query string.
+fn channel_read_query(arguments: &Value, agent: &str, block_id: &str) -> Result<Vec<(&'static str, String)>> {
+    let mut q = who_query(arguments, agent, block_id);
+    let (pr_repo, pr) = channel_pr(arguments)?;
+    if let Some(r) = pr_repo {
+        q.push(("repo", r));
+    }
+    if let Some(n) = pr {
+        q.push(("pr", n.to_string()));
+    }
+    for key in ["since_minutes", "limit"] {
+        if let Some(n) = arguments.get(key).and_then(|v| v.as_u64()) {
+            q.push((key, n.to_string()));
+        }
+    }
+    Ok(q)
 }
 
 /// A PR: `12`, `"12"`, `"#12"`, or its URL
@@ -183,12 +260,20 @@ where
     };
     if let Some(files) = pr.and_then(|n| prs.iter().find(|p| p.number == n)).map(|p| p.files.clone()) {
         let mut agents: Vec<Value> = Vec::new();
+        let mut posts: Vec<Value> = body.get("recent_posts").and_then(Value::as_array).cloned().unwrap_or_default();
         for file in files.iter().take(PR_FILES_CHECKED) {
             if let Some(answer) = ask_path(file.clone()).await {
                 merge_agents(&mut agents, answer.get("agents").and_then(Value::as_array).cloned().unwrap_or_default());
+                // Asked without branch and query (for a broad agent lookup): apply them to its posts here.
+                let file_posts = answer.get("recent_posts").and_then(Value::as_array).cloned().unwrap_or_default();
+                merge_posts(&mut posts, file_posts.into_iter().filter(|p| post_matches(p, arguments)).collect());
             }
         }
         body["agents"] = Value::Array(agents);
+        // The PR's own posts and its files' posts, newest first, as srv caps them.
+        posts.sort_by_key(|p| std::cmp::Reverse(p.get("at").and_then(Value::as_i64).unwrap_or(0)));
+        posts.truncate(RECENT_POSTS_MAX);
+        body["recent_posts"] = Value::Array(posts);
         if files.len() > PR_FILES_CHECKED {
             body["pr_note"] = json!(format!(
                 "the PR changes {} files; agents on this computer were checked against the first {PR_FILES_CHECKED}",
@@ -197,6 +282,37 @@ where
         }
     }
     open_prs::merge_into(body, matches, &host, &repo);
+}
+
+/// `WhoIsWorkingOn`'s `recent_posts` holds at most this many (srv's cap).
+const RECENT_POSTS_MAX: usize = 5;
+
+/// Whether a post fits the question's `branch` and `query`, as srv selects
+/// them (`work_facts::coord::matches`): the branch it is about, or none; every
+/// word of `query` in its topic, path or text, case-insensitively.
+fn post_matches(post: &Value, arguments: &Value) -> bool {
+    let field = |k: &str| post.get(k).and_then(Value::as_str).unwrap_or("");
+    if let (Some(asked), Some(on)) = (arg(arguments, "branch"), post.get("branch").and_then(Value::as_str)) {
+        if !asked.eq_ignore_ascii_case(on) {
+            return false;
+        }
+    }
+    match arg(arguments, "query") {
+        Some(q) => {
+            let hay = format!("{} {} {}", field("topic"), field("path"), field("text")).to_lowercase();
+            q.to_lowercase().split_whitespace().all(|w| hay.contains(w))
+        }
+        None => true,
+    }
+}
+
+/// Add posts not already in `into` (by id).
+fn merge_posts(into: &mut Vec<Value>, from: Vec<Value>) {
+    for post in from {
+        if !into.iter().any(|p| p.get("id") == post.get("id")) {
+            into.push(post);
+        }
+    }
 }
 
 /// Merge srv answers for several files: one entry per agent and channel,
@@ -250,6 +366,51 @@ fn release_body(arguments: &Value, agent: &str, block_id: &str) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_channel_post_carries_its_pr_and_the_repository_a_pr_url_names() {
+        let body = channel_post_body(
+            &json!({ "message": "regenerate INDEX.md", "path": "docs/specs", "pr": "https://github.com/o/r/pull/12" }),
+            "Loap-3",
+            "blk",
+        )
+        .unwrap();
+        assert_eq!(body["message"], "regenerate INDEX.md");
+        assert_eq!(body["path"], "docs/specs");
+        assert_eq!(body["repo"], "o/r");
+        assert_eq!(body["pr"], 12);
+        assert_eq!((body["agent"].as_str(), body["block"].as_str()), (Some("Loap-3"), Some("blk")));
+        assert!(channel_post_body(&json!({ "message": "x", "repo": "o/other", "pr": "https://github.com/o/r/pull/12" }), "a", "b").is_err());
+        assert!(channel_post_body(&json!({ "message": "x", "pr": "nope" }), "a", "b").is_err());
+    }
+
+    #[test]
+    fn a_files_posts_keep_the_questions_branch_and_query() {
+        let post = json!({ "branch": "main", "topic": "docs index", "path": "docs/specs/INDEX.md", "text": "regenerate it" });
+        assert!(post_matches(&post, &json!({})));
+        assert!(post_matches(&post, &json!({ "branch": "MAIN", "query": "Index regenerate" })));
+        assert!(!post_matches(&post, &json!({ "branch": "dev" })));
+        assert!(!post_matches(&post, &json!({ "query": "shim" })));
+        assert!(post_matches(&json!({ "text": "x" }), &json!({ "branch": "dev" })), "a post on no branch fits any");
+    }
+
+    #[test]
+    fn posts_from_several_files_merge_once_each() {
+        let mut into = vec![json!({ "id": "a", "at": 3 })];
+        merge_posts(&mut into, vec![json!({ "id": "a", "at": 3 }), json!({ "id": "b", "at": 5 })]);
+        assert_eq!(into.iter().map(|p| p["id"].as_str().unwrap()).collect::<Vec<_>>(), vec!["a", "b"]);
+    }
+
+    #[test]
+    fn a_channel_read_passes_its_filters_window_and_limit() {
+        let q = channel_read_query(&json!({ "path": "a.rs", "pr": 7, "since_minutes": 60, "limit": 5, "query": "index" }), "a", "b").unwrap();
+        let get = |k: &str| q.iter().find(|(key, _)| *key == k).map(|(_, v)| v.as_str());
+        assert_eq!(get("path"), Some("a.rs"));
+        assert_eq!(get("query"), Some("index"));
+        assert_eq!(get("pr"), Some("7"));
+        assert_eq!(get("since_minutes"), Some("60"));
+        assert_eq!(get("limit"), Some("5"));
+    }
 
     #[test]
     fn a_pr_is_a_number_a_hash_number_or_a_url_naming_its_repository() {

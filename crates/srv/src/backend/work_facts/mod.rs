@@ -21,6 +21,7 @@
 //! What agents say they are working on (`ClaimWork`, [`claims`]) joins both.
 
 pub mod claims;
+pub mod coord;
 pub mod cross_channel;
 pub mod git;
 pub mod matching;
