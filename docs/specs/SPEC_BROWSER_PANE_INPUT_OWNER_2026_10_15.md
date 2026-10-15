@@ -33,8 +33,8 @@ being on top, which nothing maintains. Each symptom recovers when something unre
    corrects a focus change only while it has asked for an owner (`Pending`) or when a page takes the keyboard on its own.
    A drift toward the app is recorded, not reversed, and taken as the user's new selection.
 5. **The user's last action wins; a request never fires late.** A selection that can't be applied yet (its pane isn't
-   live) is kept for at most 1.5 s, the same expiry as macOS's parked pane-key request (#4958), and is never applied
-   by a later layout pass after that. #4958 fixed exactly this on macOS: an old request applied on a layout change took
+   live) is kept for at most 1.5 s, the same expiry as macOS's parked pane-key request (#4958). After that it is
+   dropped and the app is the selection, so neither a later layout pass nor a later activation applies it. #4958 fixed exactly this on macOS: an old request applied on a layout change took
    the keyboard mid-typing.
 6. **Verify by asking Windows.** After every request the machine schedules a check of `GetFocus()`; a mismatch retries a
    bounded number of times, then is accepted and logged as a warning.

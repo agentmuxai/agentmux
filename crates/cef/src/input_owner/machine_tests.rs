@@ -253,6 +253,19 @@ fn a_pane_hidden_and_shown_quickly_after_its_selection_does_not_take_the_keys() 
 }
 
 #[test]
+fn a_selection_that_waited_too_long_is_not_applied_by_a_later_activation() {
+    let mut w = window();
+    w.step(Event::Select(pane("x")), 1000);
+    // x goes live too late: nothing happens...
+    assert!(focus_effects(&w.step(Event::PaneLive("x".into()), 3000)).is_empty());
+    // ...and coming back to the window later gives the app the keys, not x (#4970).
+    w.step(Event::Deactivated, 4000);
+    let fx = w.step(Event::Activated, 9000);
+    assert_eq!(focus_effects(&fx), vec![&Effect::FocusApp]);
+    assert_eq!(w.want, Owner::App);
+}
+
+#[test]
 fn hiding_a_pane_in_an_inactive_window_forgets_the_request() {
     let mut w = window();
     w.step(Event::Select(pane("a")), 100);
