@@ -108,7 +108,9 @@ pub struct WindowInput {
     /// The window is the foreground window. Focus effects activate a window, so
     /// an inactive one gets none.
     pub active: bool,
-    /// The user's selection, and when it was made.
+    /// The user's selection, and when it was made. A pane here can always take
+    /// focus, or is `parked` waiting for it; a selection that can do neither
+    /// any more (expired, hidden, closed) is replaced by the app.
     pub want: Owner,
     pub want_at_ms: u64,
     /// The selection couldn't be applied when it was made (its pane wasn't live
@@ -204,13 +206,13 @@ impl WindowInput {
 
     /// Apply the user's selection: ask for it unless it is already there or asked for.
     fn apply_selection(&mut self) -> Vec<Effect> {
+        let target = self.usable(&self.want.clone());
+        // A pane that can't take focus yet: the app has it meanwhile, and the
+        // selection waits for the pane to go live, active window or not.
+        self.parked = target != self.want;
         if !self.active {
             return vec![];
         }
-        let target = self.usable(&self.want.clone());
-        // A pane that can't take focus yet: the app has it meanwhile, and the
-        // selection waits for the pane to go live.
-        self.parked = target != self.want;
         match &self.have {
             Have::Owned(s) if *s == target.surface() => {
                 let check = self.schedule_verify(0);
@@ -238,10 +240,12 @@ impl WindowInput {
 
     /// The pane `b` stopped being able to take focus: if it had the keyboard, the
     /// app takes it. An inactive window can't be given focus; activation decides.
-    /// A selection of `b` waiting to be applied is released: showing `b` again
-    /// doesn't take the keyboard without a fresh selection.
+    /// A selection of `b` ends here: the app is the selection, so neither `b`
+    /// being shown again nor the window being activated takes the keyboard back
+    /// without a fresh selection.
     fn pane_unusable(&mut self, b: &str) -> Vec<Effect> {
         if self.want == Owner::Pane(b.to_string()) {
+            self.want = Owner::App;
             self.parked = false;
         }
         if !self.involves(b) {
@@ -269,9 +273,13 @@ impl WindowInput {
     }
 
     pub fn step(&mut self, event: Event, now_ms: u64) -> Vec<Effect> {
-        // A selection that waited too long is dropped: the app has had the
-        // keyboard meanwhile, and nothing later (a pane going live, the window
-        // being activated) may apply it.
+        // A selection whose pane can take focus now isn't waiting any more. One
+        // that waited too long is dropped: the app has had the keyboard
+        // meanwhile, and nothing later (a pane going live, the window being
+        // activated) may apply it.
+        if self.parked && self.usable(&self.want) == self.want {
+            self.parked = false;
+        }
         if self.parked && now_ms.saturating_sub(self.want_at_ms) > PARKED_WANT_TTL_MS {
             self.parked = false;
             self.want = Owner::App;
@@ -395,8 +403,9 @@ impl WindowInput {
                     self.have = Have::Owned(s);
                     return vec![];
                 }
-                // The target may have stopped being usable meanwhile.
-                let usable = self.usable(&target);
+                // The selection may have changed meanwhile (a pane hidden, a
+                // selection expired): ask for what it is now.
+                let usable = self.usable(&self.want.clone());
                 if usable != target {
                     return self.request(usable, 0);
                 }

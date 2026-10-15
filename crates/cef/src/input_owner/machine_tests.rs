@@ -266,6 +266,29 @@ fn a_selection_that_waited_too_long_is_not_applied_by_a_later_activation() {
 }
 
 #[test]
+fn a_selection_made_while_the_window_is_inactive_still_expires() {
+    // Selected while away, before the pane was live; live too late; then back (#4970).
+    let mut w = window();
+    w.step(Event::Deactivated, 900);
+    w.step(Event::Select(pane("x")), 1000);
+    assert!(w.parked);
+    w.step(Event::PaneLive("x".into()), 3000);
+    let fx = w.step(Event::Activated, 5000);
+    assert_eq!(focus_effects(&fx), vec![&Effect::FocusApp]);
+}
+
+#[test]
+fn a_pane_hidden_then_shown_while_the_window_is_away_does_not_take_the_keys_on_return() {
+    // Hide, leave, show, come back: no fresh selection, so the app keeps the keys (#4970).
+    let mut w = owned_by(window(), "a", 100);
+    w.step(Event::PaneCollapsed("a".into()), 5000);
+    w.step(Event::Deactivated, 5100);
+    w.step(Event::PaneShown("a".into()), 5200);
+    let fx = w.step(Event::Activated, 5300);
+    assert_eq!(focus_effects(&fx), vec![&Effect::FocusApp]);
+}
+
+#[test]
 fn hiding_a_pane_in_an_inactive_window_forgets_the_request() {
     let mut w = window();
     w.step(Event::Select(pane("a")), 100);
@@ -413,6 +436,13 @@ fn assert_invariants(
     for e in &focus {
         if let Effect::FocusPane(b) = e {
             prop_assert_eq!(&w.want, &Owner::Pane(b.clone()), "{:?} -> {:?}", event, fx);
+        }
+    }
+    // A selected pane can take focus, or waits for it within its time.
+    if let Owner::Pane(b) = &w.want {
+        if w.usable(&w.want) != w.want {
+            prop_assert!(w.parked, "{:?} -> want {} not usable, not parked", event, b);
+            prop_assert!(now.saturating_sub(w.want_at_ms) <= PARKED_WANT_TTL_MS, "{:?} -> stale parked {}", event, b);
         }
     }
     // I7: a pane becoming live or shown never applies an old selection.
