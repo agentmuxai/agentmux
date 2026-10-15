@@ -466,6 +466,8 @@ pub fn report_first_paint(state: &Arc<AppState>, args: &serde_json::Value) -> se
         label = %label,
         "[startup-paint] frontend reported first paint"
     );
+    #[cfg(target_os = "windows")]
+    crate::floating_pane::reveal::on_first_paint(&label);
     #[cfg(any(target_os = "linux", target_os = "windows"))]
     crate::client::navigation::on_frontend_first_paint(state.clone(), label);
     #[cfg(not(any(target_os = "linux", target_os = "windows")))]

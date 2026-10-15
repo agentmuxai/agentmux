@@ -266,6 +266,9 @@ function mountRoot(): HTMLElement {
     const loader = document.getElementById("startup-loading");
     if (loader) loader.remove();
     const main = document.getElementById("main") ?? document.body;
+    // The startup guard hides the app root (app-init.ts), not <body>.
+    main.style.visibility = "visible";
+    main.style.opacity = "1";
     main.innerHTML = "";
     return main;
 }
