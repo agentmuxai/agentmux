@@ -16,6 +16,16 @@ use super::AgentMuxHandler;
 
 // ---------------------------------------------------------------------------
 
+/// What CEF's `on_cursor_change` passes as the cursor: its bindings differ per
+/// platform (an `HCURSOR`, a raw pointer, an X11 cursor id). One type for all
+/// three kept the macOS one and broke the Windows and Linux builds (#4959).
+#[cfg(target_os = "windows")]
+type CursorHandle = cef::sys::HCURSOR;
+#[cfg(target_os = "macos")]
+type CursorHandle = *mut u8;
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
+type CursorHandle = ::std::os::raw::c_ulong;
+
 wrap_client! {
     pub struct AgentMuxClient {
         inner: Arc<Mutex<AgentMuxHandler>>,
@@ -669,7 +679,7 @@ wrap_display_handler! {
         fn on_cursor_change(
             &self,
             browser: Option<&mut Browser>,
-            cursor: *mut u8,
+            cursor: CursorHandle,
             _type_: CursorType,
             _custom_cursor_info: Option<&CursorInfo>,
         ) -> ::std::os::raw::c_int {
