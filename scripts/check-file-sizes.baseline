@@ -4,7 +4,7 @@
 # file or raising a number is a hand edit that the PR has to justify.
 3667 crates/bashwrap/src/bash_wrap.rs
 1972 crates/cef/src/client/lifecycle.rs
-1549 crates/cef/src/commands/cli_login.rs
+1524 crates/cef/src/commands/cli_login.rs
 2217 crates/cef/src/commands/window_pool.rs
 1515 crates/cef/src/lib.rs
 1632 crates/cef/src/state/mod.rs
