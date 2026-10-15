@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-30
 **Type:** Implementation spec (full analysis)
-**Status:** active — Phase 2 (`balance_node`, #1866) and Phase 3 (srv reducer arms, #1868) implemented; Phases 4–6 not started (the frontend still pushes the whole tree, `frontend/layout/lib/layoutPersistence.ts`). Verified against code 2026-10-14 ([triage](../analysis/REPORT_REDUCER_STACK_TRIAGE_2026_10_13.md)).
+**Status:** active — Phase 2 (`balance_node`, #1866) and Phase 3 (srv reducer arms, #1868) implemented; Phase 4 implemented in #4946 (the frontend's own tree edits are layout intents); the backend-originated edits, minimize (Phase 5) and Phase 6 not started. Verified against code 2026-10-14 ([triage](../analysis/REPORT_REDUCER_STACK_TRIAGE_2026_10_13.md)).
 **Owner:** asaf
 **Supersedes scope of:** `SPEC_864_LAYOUT_SINGLE_WRITER_2026_06_30.md` (that spec's "weak" single-writer
 becomes Phase 1 here; this spec is the committed end-goal)
@@ -279,7 +279,7 @@ missing `*Applied` events. *Unit-tested per arm against the oracle.*
 behavior-changing core — needs app-running E2E verification (split/move/resize/swap/insert/delete/
 replace all round-trip through srv). Do NOT auto-merge on bot approval.**
 
-*Phase 4 as built (PR_PHASE4):*
+*Phase 4 as built (#4946):*
 - **One command.** `LayoutApplyIntent { tab_id, intent, action_id, view }`, over the RPC
   `layout.applyIntent`. `LayoutIntent` (`agentmux-common/src/layout_intent.rs`) is the frontend's
   tree action with the same `type` tag and field names: insert, insertatindex, delete, move, swap,
