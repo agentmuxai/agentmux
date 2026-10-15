@@ -549,6 +549,35 @@ describe("OneWayFlow", () => {
         }
     });
 
+    it("shown again after a slow first paint, the window still covers the stages after it", () => {
+        let t = 1000;
+        const spy = vi.spyOn(performance, "now").mockImplementation(() => t);
+        try {
+            const notes: string[] = [];
+            const { m, flow, fire } = setup({ note: (l) => notes.push(l) });
+            flow.settleOnShow();
+            expect(notes).toContain("show-settle");
+            t += 350; // drawing what arrived while hidden, before the first paint
+            runFrames(1); // the first painted frame re-arms the window
+            t += 300; // past the call + SHOW_SETTLE_MS, inside the first frame + it
+            m.rows[7].h += 200;
+            fire();
+            expect(m.top).toBe(m.max());
+        } finally {
+            spy.mockRestore();
+        }
+    });
+
+    it("shown again while not following, it notes so and moves nothing", () => {
+        const notes: string[] = [];
+        const { m, flow, setFollowing } = setup({ note: (l) => notes.push(l) });
+        setFollowing(false);
+        m.top = 300;
+        flow.settleOnShow();
+        expect(notes).toContain("show-settle:not-following");
+        expect(m.top).toBe(300);
+    });
+
     it("shown again, room held while hidden is given up before anything is painted", () => {
         const { m, flow, fire } = setup();
         m.rows[6].h -= 80;

@@ -76,9 +76,32 @@ describe("scroll memo (SPEC_RENDERER_RECYCLE_WHEN_IDLE_2026_10_13.md §2)", () =
         expect(scrollToRow).not.toHaveBeenCalled();
         setReady2(true);
         expect(scrollToRow).toHaveBeenCalledWith("b", 20);
+        // Held for a few frames while the rows above settle, always the same row and offset.
+        expect(scrollToRow.mock.calls.every(([id, off]) => id === "b" && off === 20)).toBe(true);
+        const held = scrollToRow.mock.calls.length;
         setReady2(false);
         setReady2(true);
-        expect(scrollToRow).toHaveBeenCalledTimes(1); // once
+        expect(scrollToRow).toHaveBeenCalledTimes(held); // restored once, not again
+    });
+
+    it("stops holding the restored position as soon as the user touches the pane", () => {
+        sessionStorage.setItem("agentmux:scroll:b1", JSON.stringify({ nodeId: "n1", offsetPx: 5 }));
+        const frames: (() => void)[] = [];
+        vi.stubGlobal("requestAnimationFrame", (cb: () => void) => {
+            frames.push(cb);
+            return frames.length;
+        });
+        const el = document.createElement("div");
+        const scrollToRow = vi.fn();
+        createRoot(() =>
+            useScrollMemo({ blockId: "b1", scroller: () => el, following: () => false, historyReady: () => true, scrollToRow })
+        );
+        frames.shift()!(); // first frame: put back
+        frames.shift()!(); // second: held
+        expect(scrollToRow).toHaveBeenCalledTimes(2);
+        el.dispatchEvent(new Event("wheel"));
+        while (frames.length) frames.shift()!();
+        expect(scrollToRow).toHaveBeenCalledTimes(2);
     });
 
     it("a pane that was at the bottom stays there (nothing to do)", () => {

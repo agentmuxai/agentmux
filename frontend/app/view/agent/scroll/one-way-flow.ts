@@ -217,8 +217,17 @@ export class OneWayFlow {
     settleOnShow(): void {
         this.follower.stop();
         const el = this.scroller;
-        if (!el || !this.active()) return;
-        this.settleUntil = Math.max(this.settleUntil, performance.now() + SHOW_SETTLE_MS);
+        const acting = !!el && this.active();
+        this.host.note?.(acting ? "show-settle" : "show-settle:not-following");
+        if (!el || !acting) return;
+        // The window counts from the first painted frame after the show too, not only from
+        // this call: drawing what the pane got while hidden can take a few hundred ms before
+        // anything is painted (measured in the lab), which used up a window started here.
+        const arm = (): void => {
+            this.settleUntil = Math.max(this.settleUntil, performance.now() + SHOW_SETTLE_MS);
+        };
+        arm();
+        if (typeof requestAnimationFrame !== "undefined") requestAnimationFrame(arm);
         if (this.spacerPx > 0) this.setSpacer(0);
         const ch = el.clientHeight; // perf:allow-layout-read — once, when the pane is shown
         const sh = el.scrollHeight; // perf:allow-layout-read — once, when the pane is shown

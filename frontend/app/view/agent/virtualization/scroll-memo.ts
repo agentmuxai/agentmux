@@ -25,6 +25,10 @@ export type ScrollMemo = { bottom: true } | { nodeId: string; offsetPx: number }
 
 const capturers = new Map<string, () => ScrollMemo | null>();
 
+/** How long, and for how many frames at most, a restored position is held while the rows settle. */
+const RESTORE_HOLD_MS = 1000;
+const RESTORE_HOLD_FRAMES = 60;
+
 /** Record every mounted pane's position now. */
 export function saveScrollMemos(): void {
     for (const [blockId, capture] of capturers) writeSession(KEY + blockId, capture() ?? undefined);
@@ -89,7 +93,25 @@ export function useScrollMemo(opts: {
         restored = true;
         const memo = takeScrollMemo(blockId);
         if (!memo || "bottom" in memo) return; // the default: following, at the bottom
-        // After the restored rows' first layout, so the row has a position.
-        requestAnimationFrame(() => opts.scrollToRow(memo.nodeId, memo.offsetPx));
+        // After the restored rows' first layout, so the row has a position; then
+        // on each frame for a while: the rows above it are measured over the next
+        // frames, and a pane that no longer follows keeps nothing in place, so the
+        // row drifted (458 px in the lab). Input in the pane ends it at once.
+        const scroller = opts.scroller();
+        let userMoved = false;
+        const stop = (): void => {
+            userMoved = true;
+        };
+        const types = ["wheel", "pointerdown", "keydown", "touchstart"] as const;
+        for (const t of types) scroller?.addEventListener(t, stop, { passive: true, once: true });
+        const until = performance.now() + RESTORE_HOLD_MS;
+        let frames = 0;
+        const hold = (): void => {
+            if (userMoved) return;
+            opts.scrollToRow(memo.nodeId, memo.offsetPx);
+            if (++frames < RESTORE_HOLD_FRAMES && performance.now() < until) requestAnimationFrame(hold);
+            else for (const t of types) scroller?.removeEventListener(t, stop);
+        };
+        requestAnimationFrame(hold);
     });
 }
