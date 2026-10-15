@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { formatFileSize, shareLabel, tokensLabel, tokensTitle } from "./memory-tokens";
+import { formatFileSize, memoryIndexOverLimit, shareLabel, tokensLabel, tokensTitle } from "./memory-tokens";
 
 describe("memory-tokens", () => {
     it("labels tokens compactly, always as an estimate", () => {
@@ -29,5 +29,16 @@ describe("memory-tokens", () => {
         expect(formatFileSize(512)).toBe("512 B");
         expect(formatFileSize(2048)).toBe("2.0 KB");
         expect(formatFileSize(-1)).toBe("");
+    });
+});
+
+describe("memoryIndexOverLimit", () => {
+    it("names what Claude Code leaves out of a large MEMORY.md, and nothing within the limit", () => {
+        expect(memoryIndexOverLimit({ lines: 200, size_bytes: 25 * 1024 })).toBe("");
+        expect(memoryIndexOverLimit({ lines: 212, size_bytes: 4_000 })).toBe("lines 201–212 aren't loaded");
+        expect(memoryIndexOverLimit({ lines: 150, size_bytes: 30 * 1024 })).toBe("at 30.0 KB it's past the 25 KB loaded");
+        expect(memoryIndexOverLimit({ lines: 201, size_bytes: 25 * 1024 + 1 })).toBe(
+            "line 201 isn't loaded; at 25.0 KB it's past the 25 KB loaded"
+        );
     });
 });

@@ -43,3 +43,18 @@ export function shareLabel(part: number, total: number): string {
     const pct = Math.round((part / total) * 100);
     return pct === 0 ? "<1%" : `${pct}%`;
 }
+
+/** What Claude Code loads of an agent's `MEMORY.md`: its first 200 lines,
+ *  and no more than 25 KB (SPEC_MEMORY_PANE_TOKENS_2026_10_15.md §5.3). */
+export const CLAUDE_MEMORY_INDEX_LIMIT = { lines: 200, bytes: 25 * 1024 } as const;
+
+/** What Claude Code leaves out of an index file this size, or "" when it
+ *  loads all of it. */
+export function memoryIndexOverLimit(file: { lines: number; size_bytes: number }): string {
+    const { lines, bytes } = CLAUDE_MEMORY_INDEX_LIMIT;
+    const over: string[] = [];
+    if (file.lines === lines + 1) over.push(`line ${file.lines} isn't loaded`);
+    else if (file.lines > lines) over.push(`lines ${lines + 1}–${file.lines} aren't loaded`);
+    if (file.size_bytes > bytes) over.push(`at ${formatFileSize(file.size_bytes)} it's past the 25 KB loaded`);
+    return over.join("; ");
+}

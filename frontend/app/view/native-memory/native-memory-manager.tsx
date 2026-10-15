@@ -47,6 +47,7 @@ import { createEffect, createMemo, createSignal, For, onCleanup, Show, untrack, 
 import { MemoryAgentCard, type MemoryCountState } from "./MemoryAgentCard";
 import { DEFAULT_MEMORY_SORT, MemoryAgentFilterBar, type MemoryAgentSortOption } from "./MemoryAgentFilterBar";
 import { MemoryFileCard } from "./MemoryFileCard";
+import { resolveProviderAlias } from "@/app/view/agent/providers/catalog";
 import { NativeMemoryFileView } from "./NativeMemoryFileView";
 import { MemoryAdoptionPanel } from "./MemoryAdoptionPanel";
 import { MemoryClaimsPanel } from "./MemoryClaimsPanel";
@@ -612,7 +613,11 @@ export function NativeMemoryManager(): JSX.Element {
                                             <div class="native-memory-manager-file-grid">
                                                 <For each={sortedFiles()}>
                                                     {(file) => (
-                                                        <MemoryFileCard file={file} onSelect={setSelectedFilename} />
+                                                        <MemoryFileCard
+                                                            file={file}
+                                                            onSelect={setSelectedFilename}
+                                                            claude={resolveProviderAlias(selectedAgent()?.provider ?? "") === "claude"}
+                                                        />
                                                     )}
                                                 </For>
                                             </div>

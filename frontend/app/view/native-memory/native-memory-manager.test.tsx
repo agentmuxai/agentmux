@@ -800,6 +800,24 @@ describe("NativeMemoryManager — file grid", () => {
         await waitFor(() => expect(document.querySelectorAll(".memory-file-card").length).toBe(files.length));
     }
 
+    test("a Claude agent's MEMORY.md past 200 lines says what Claude Code doesn't load", async () => {
+        await openAgentWithFiles([
+            fileMeta("MEMORY.md", { is_index: true, lines: 212 }),
+            fileMeta("notes.md", { lines: 900 }),
+        ]);
+        const badges = () => [...document.querySelectorAll(".memory-file-card-badge--warning")];
+        expect(badges().map((b) => b.textContent?.trim())).toEqual(["not all loaded"]);
+        expect(badges()[0].getAttribute("title")).toBe(
+            "Claude Code loads only the first 200 lines, up to 25 KB: lines 201–212 aren't loaded."
+        );
+    });
+
+    test("an index within the limit, or another provider's, carries no warning", async () => {
+        listAgentDefinitionsMock.mockResolvedValue([{ ...agent("a1", "Manoz"), provider: "codex" }]);
+        await openAgentWithFiles([fileMeta("MEMORY.md", { is_index: true, lines: 500, size_bytes: 40_000 })]);
+        expect(document.querySelector(".memory-file-card-badge--warning")).toBeNull();
+    });
+
     test("a folder found by a guess is badged unverified; the agent's own is not", async () => {
         nativeMemoryListMock.mockResolvedValue({ files: [fileMeta("MEMORY.md")], unverified: true });
         render(() => <NativeMemoryManager />);
