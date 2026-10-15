@@ -109,6 +109,10 @@ pub struct WindowInput {
     /// The user's selection, and when it was made.
     pub want: Owner,
     pub want_at_ms: u64,
+    /// The selection couldn't be applied when it was made (its pane wasn't live
+    /// yet) and may still be, by the pane going live within `PARKED_WANT_TTL_MS`.
+    /// Hiding or closing the pane releases it.
+    pub parked: bool,
     pub have: Have,
     pub panes: BTreeMap<PaneId, PaneLife>,
     /// When a page's own focus was last corrected, and whether a correction was
@@ -126,6 +130,7 @@ impl Default for WindowInput {
             active: false,
             want: Owner::App,
             want_at_ms: 0,
+            parked: false,
             have: Have::Unknown,
             panes: BTreeMap::new(),
             last_restore_ms: None,
@@ -192,6 +197,7 @@ impl WindowInput {
     fn choose(&mut self, owner: Owner, now_ms: u64) {
         self.want = owner;
         self.want_at_ms = now_ms;
+        self.parked = false;
     }
 
     /// Apply the user's selection: ask for it unless it is already there or asked for.
@@ -200,6 +206,9 @@ impl WindowInput {
             return vec![];
         }
         let target = self.usable(&self.want.clone());
+        // A pane that can't take focus yet: the app has it meanwhile, and the
+        // selection waits for the pane to go live.
+        self.parked = target != self.want;
         match &self.have {
             Have::Owned(s) if *s == target.surface() => {
                 let check = self.schedule_verify(0);
@@ -227,7 +236,12 @@ impl WindowInput {
 
     /// The pane `b` stopped being able to take focus: if it had the keyboard, the
     /// app takes it. An inactive window can't be given focus; activation decides.
+    /// A selection of `b` waiting to be applied is released: showing `b` again
+    /// doesn't take the keyboard without a fresh selection.
     fn pane_unusable(&mut self, b: &str) -> Vec<Effect> {
+        if self.want == Owner::Pane(b.to_string()) {
+            self.parked = false;
+        }
         if !self.involves(b) {
             return vec![];
         }
@@ -239,11 +253,13 @@ impl WindowInput {
         }
     }
 
-    /// A pane became live or shown: apply a recent selection of it.
+    /// A pane became live or shown: apply a recent selection of it that was
+    /// waiting for it.
     fn pane_usable(&mut self, b: &str, now_ms: u64) -> Vec<Effect> {
         let wanted = self.want == Owner::Pane(b.to_string());
         let recent = now_ms.saturating_sub(self.want_at_ms) <= PARKED_WANT_TTL_MS;
-        if wanted && recent && self.active && !self.involves(b) {
+        if wanted && self.parked && recent && self.active && !self.involves(b) {
+            self.parked = false;
             self.request(Owner::Pane(b.to_string()), 0)
         } else {
             vec![]
@@ -471,9 +487,10 @@ impl WindowInput {
     /// One line for the `[input]` log: `active want=… have=…`.
     pub fn describe(&self) -> String {
         format!(
-            "{} want={} have={}{}",
+            "{} want={}{} have={}{}",
             if self.active { "active" } else { "inactive" },
             self.want,
+            if self.parked { "(parked)" } else { "" },
             self.have,
             if self.restore_due { " restore-due" } else { "" },
         )

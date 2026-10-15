@@ -101,8 +101,8 @@ closing). A selection that isn't usable falls back to `App` when it is applied.
 | `Activated` | — | `active`, `Pending(usable(want))` | `focus`, `RaisePanes`, `Verify(50)` |
 | `Deactivated` | — | `!active` | none |
 | `WindowShown` | — | unchanged | `RaisePanes` |
-| `PaneLive(b)` / `PaneShown(b)` | b is `want`, chosen within 1.5 s, window active, not owned | `Pending(b)` | `FocusPane(b)`, `Verify(50)` |
-| `PaneCollapsed(b)` | b owns or is pending | `Pending(App)` | `FocusApp`, `Verify(50)`. Showing b again doesn't take the keys back by itself: the frontend's selection, now that the app has them, decides (`focusManager.ts`) |
+| `PaneLive(b)` / `PaneShown(b)` | b is `want`, parked (it couldn't take focus when chosen), chosen within 1.5 s, window active | `Pending(b)` | `FocusPane(b)`, `Verify(50)` |
+| `PaneCollapsed(b)` | b owns or is pending | `Pending(App)` | `FocusApp`, `Verify(50)`. A parked selection of b is released: showing b again doesn't take the keys back by itself, even within 1.5 s; the frontend's selection, now that the app has them, decides (`focusManager.ts`) |
 | `PaneClosing(b)` / `PaneGone(b)` | b owns or is pending | `Pending(App)`, `want = App` if it was b | `FocusApp`, `Verify(50)` |
 | `Verify(s)` | `seq` isn't the latest asked for | unchanged | none |
 | | `Pending(t)` and `s == t` | `Owned(t)` | none |
