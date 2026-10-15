@@ -187,8 +187,8 @@ pub fn spawn_background_subsystems(
     // silently misses them. Route those through their structured channel (live stdin /
     // session/prompt) — which also steers the agent mid-turn — and fall back to PTY
     // keystrokes only for terminal-based agents.
-    reactive_handler.set_message_sender(Arc::new(|block_id: &str, message: &str| {
-        match backend::blockcontroller::deliver_agent_message(block_id, message) {
+    reactive_handler.set_message_sender(Arc::new(|block_id: &str, message: &str, inline: &[serde_json::Value]| {
+        match backend::blockcontroller::deliver_agent_message_from(block_id, message, None, inline) {
             Ok(backend::blockcontroller::AgentDelivery::Structured) => Ok(reactive::SenderDelivery::Delivered),
             Ok(backend::blockcontroller::AgentDelivery::StructuredDeferred) => Ok(reactive::SenderDelivery::Deferred),
             Ok(backend::blockcontroller::AgentDelivery::Pty) => Ok(reactive::SenderDelivery::Pty),

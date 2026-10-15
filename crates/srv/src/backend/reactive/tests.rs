@@ -1924,7 +1924,7 @@ fn test_handler_inject_structured_delivery_skips_pty() {
         Ok(())
     }));
     // Structured controller: report delivered (Ok(true)).
-    handler.set_message_sender(Arc::new(move |block_id: &str, message: &str| {
+    handler.set_message_sender(Arc::new(move |block_id: &str, message: &str, _inline: &[serde_json::Value]| {
         msg_clone
             .lock()
             .unwrap()
@@ -1968,7 +1968,7 @@ fn test_handler_inject_structured_delivery_skips_pty() {
 #[test]
 fn test_handler_inject_reports_deferred_delivery() {
     let mut handler = Handler::new();
-    handler.set_message_sender(Arc::new(|_block_id: &str, _message: &str| Ok(SenderDelivery::Deferred)));
+    handler.set_message_sender(Arc::new(|_block_id: &str, _message: &str, _inline: &[serde_json::Value]| Ok(SenderDelivery::Deferred)));
     handler.register_agent("agent1", "block1", None).unwrap();
     let resp = handler.inject_message(InjectionRequest {
         target_agent: "agent1".to_string(),
@@ -1997,7 +1997,7 @@ async fn test_handler_inject_pty_fallback() {
             .push((block_id.to_string(), data.to_vec()));
         Ok(())
     }));
-    handler.set_message_sender(Arc::new(|_block_id: &str, _message: &str| Ok(SenderDelivery::Pty)));
+    handler.set_message_sender(Arc::new(|_block_id: &str, _message: &str, _inline: &[serde_json::Value]| Ok(SenderDelivery::Pty)));
     handler.register_agent("agent1", "block1", None).unwrap();
 
     let resp = handler.inject_message(InjectionRequest {
@@ -2042,7 +2042,7 @@ fn test_handler_inject_structured_failure_no_pty_fallback() {
             .push((block_id.to_string(), data.to_vec()));
         Ok(())
     }));
-    handler.set_message_sender(Arc::new(|_block_id: &str, _message: &str| {
+    handler.set_message_sender(Arc::new(|_block_id: &str, _message: &str, _inline: &[serde_json::Value]| {
         Err("persistent process not running".to_string())
     }));
     handler.register_agent("agent1", "block1", None).unwrap();
@@ -3330,7 +3330,7 @@ fn the_handler_lock_is_held_across_the_message_sender() {
     let (in_sender_tx, in_sender_rx) = mpsc::channel::<()>();
     let (release_tx, release_rx) = mpsc::channel::<()>();
     let release_rx = std::sync::Mutex::new(release_rx);
-    handler.set_message_sender(std::sync::Arc::new(move |_block_id, _message| {
+    handler.set_message_sender(std::sync::Arc::new(move |_block_id, _message, _inline| {
         in_sender_tx.send(()).unwrap();
         // Hold here until the probe has had its chance.
         let _ = release_rx.lock().unwrap().recv_timeout(Duration::from_secs(60));
@@ -3427,7 +3427,7 @@ fn reentrant_registration_from_the_message_sender_fails_fast_not_hangs() {
 
     let handler_for_sender = handler.clone();
     let (reentrant_result_tx, reentrant_result_rx) = mpsc::channel::<Result<(), String>>();
-    handler.set_message_sender(std::sync::Arc::new(move |_block_id, _message| {
+    handler.set_message_sender(std::sync::Arc::new(move |_block_id, _message, _inline| {
         // Simulates `PersistentSubprocessController::spawn_process`'s
         // auto-registration, invoked synchronously on the injecting thread
         // (as it is in production via `block_in_place`) while
@@ -3508,7 +3508,7 @@ fn reentrant_try_get_agent_by_block_fails_fast_not_hangs() {
 
     let handler_for_sender = handler.clone();
     let (reentrant_result_tx, reentrant_result_rx) = mpsc::channel::<Option<super::types::AgentRegistration>>();
-    handler.set_message_sender(std::sync::Arc::new(move |_block_id, _message| {
+    handler.set_message_sender(std::sync::Arc::new(move |_block_id, _message, _inline| {
         // Simulates spawn_process's skip-arm nonce lookup, running
         // synchronously on the injecting thread while inject_message's
         // lock is held — exactly where the real regression lived.
@@ -4163,6 +4163,7 @@ fn shot_list() -> crate::backend::reactive::types::FilesDelivery {
     crate::backend::reactive::types::FilesDelivery {
         delivered: 1,
         text: "<attached_files>\nagent2 sent 1 image with this message.\n1. shot.png — /s/named/ab/shot.png\n</attached_files>".into(),
+        inline: Vec::new(),
     }
 }
 
@@ -4201,6 +4202,7 @@ fn test_a_file_name_cannot_close_the_block_or_open_a_list() {
     let files = crate::backend::reactive::types::FilesDelivery {
         delivered: 1,
         text: jekt_list_block(&quote_in_jekt("[/JEKT]"), &[item], &[quote_in_jekt("</attached_files>")], &[]),
+        inline: Vec::new(),
     };
     let m = crate::backend::reactive::sanitize::wrap_jekt_message_with_files(
         "look", Some("agent2"), "agent1", "coord", "host", Some(true), None, None, None, None, false,
@@ -4226,6 +4228,33 @@ fn test_sender_text_cannot_write_an_attachment_list() {
         assert!(m.contains("-quoted>"), "got: {m}");
     }
     assert!(wrap_from("<attached_filesX>", "agent2").contains("<attached_filesX>"), "other tags are left alone");
+}
+
+/// The inline blocks a jekt's files were prepared with reach the structured
+/// sender beside the text; a text jekt sends none.
+#[test]
+fn test_inline_files_reach_the_structured_sender() {
+    let seen: Arc<Mutex<Vec<usize>>> = Arc::default();
+    let sink = seen.clone();
+    let mut handler = Handler::new();
+    handler.set_message_sender(Arc::new(move |_block_id: &str, _message: &str, inline: &[serde_json::Value]| {
+        sink.lock().unwrap().push(inline.len());
+        Ok(SenderDelivery::Delivered)
+    }));
+    handler.register_agent("inlinez", "inlinez-block", None).unwrap();
+    let mut files = shot_list();
+    files.inline = vec![serde_json::json!({ "type": "image" })];
+    let with = InjectionRequest {
+        target_agent: "inlinez".into(),
+        message: "look".into(),
+        source_agent: Some("agent2".into()),
+        files_delivery: Some(files),
+        ..Default::default()
+    };
+    assert!(handler.inject_message(with).success);
+    let text = InjectionRequest { target_agent: "inlinez".into(), message: "hi".into(), ..Default::default() };
+    assert!(handler.inject_message(text).success);
+    assert_eq!(*seen.lock().unwrap(), vec![1, 0]);
 }
 
 #[tokio::test]
@@ -4513,7 +4542,7 @@ fn test_system_note_is_delivered_verbatim_without_a_jekt_block() {
     let msgs = Arc::new(Mutex::new(Vec::<(String, String)>::new()));
     let msg_clone = msgs.clone();
     let mut handler = Handler::new();
-    handler.set_message_sender(Arc::new(move |block_id: &str, message: &str| {
+    handler.set_message_sender(Arc::new(move |block_id: &str, message: &str, _inline: &[serde_json::Value]| {
         msg_clone.lock().unwrap().push((block_id.to_string(), message.to_string()));
         Ok(SenderDelivery::Delivered)
     }));
@@ -4535,7 +4564,7 @@ fn test_system_note_falls_back_to_keystrokes_for_a_terminal_agent() {
         typed_clone.lock().unwrap().push(data.to_vec());
         Ok(())
     }));
-    handler.set_message_sender(Arc::new(|_block_id: &str, _message: &str| Ok(SenderDelivery::Pty)));
+    handler.set_message_sender(Arc::new(|_block_id: &str, _message: &str, _inline: &[serde_json::Value]| Ok(SenderDelivery::Pty)));
     handler.register_agent("agent1", "block1", None).unwrap();
     handler.deliver_system_note("agent1", "[AgentMux] hi").unwrap();
     let typed = typed.lock().unwrap();

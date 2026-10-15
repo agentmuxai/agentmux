@@ -3846,6 +3846,24 @@ async fn a_labelled_delivery_sets_the_turn_provenance_the_controller_reports() {
     assert_eq!((p.origin, p.tainted), (TurnOrigin::User, true), "automated input got into the user's turn");
 }
 
+/// Files a verified agent sent with a jekt reach a running Claude inline:
+/// the image blocks first, then the text, on one stdin line
+/// (SPEC_JEKT_FILE_TRANSFER_2026_10_05.md §6.4). Without images the line is
+/// the plain-string message it always was.
+#[tokio::test]
+async fn a_delivery_with_images_writes_content_blocks_before_the_text() {
+    let (c, mut rx) = idle_controller();
+    let image = serde_json::json!({ "type": "image", "source": { "type": "base64", "media_type": "image/png", "data": "AAAA" } });
+    c.send_user_message_with_images_from("look at this".to_string(), None, vec![image.clone()]).unwrap();
+    let line: serde_json::Value = serde_json::from_str(&rx.try_recv().unwrap()).unwrap();
+    let content = line["message"]["content"].as_array().expect("blocks, not a string");
+    assert_eq!(content[0], image);
+    assert_eq!(content[1]["text"], "look at this");
+    c.send_user_message_with_images_from("plain".to_string(), None, Vec::new()).unwrap();
+    let line: serde_json::Value = serde_json::from_str(&rx.try_recv().unwrap()).unwrap();
+    assert_eq!(line["message"]["content"], "plain");
+}
+
 /// A Swarm broadcast to a running persistent agent goes through structured
 /// delivery, labelled as the user's (SPEC_SWARM_BROADCAST_AS_USER_MESSAGE §6
 /// q2): on an idle agent it starts a user turn, exactly as typing would.

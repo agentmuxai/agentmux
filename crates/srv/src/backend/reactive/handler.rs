@@ -1366,7 +1366,7 @@ impl Handler {
         // also lands the message mid-turn (steering) instead of waiting for idle.
         // PTY-based shell/term agents report back so we fall through to keystrokes.
         if let Some(ref deliver) = self.message_sender {
-            match deliver(&block_id, &final_msg) {
+            match deliver(&block_id, &final_msg, req.files_delivery.as_ref().map_or(&[][..], |d| &d.inline)) {
                 Ok(outcome @ (SenderDelivery::Delivered | SenderDelivery::Deferred)) => {
                     let deferred = outcome == SenderDelivery::Deferred;
                     tracing::info!(
@@ -1582,7 +1582,7 @@ impl Handler {
     /// controller takes it, else typed and submitted.
     fn send_to_block(&self, block_id: &str, text: &str) -> Result<(), String> {
         if let Some(deliver) = &self.message_sender {
-            match deliver(block_id, text)? {
+            match deliver(block_id, text, &[])? {
                 SenderDelivery::Delivered | SenderDelivery::Deferred => return Ok(()),
                 SenderDelivery::Pty => {}
             }

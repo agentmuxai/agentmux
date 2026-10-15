@@ -403,10 +403,13 @@ pub struct InjectionRequest {
 /// The files part of a delivered jekt: how many the agent gets (the
 /// marker's `FILES=`) and the text that goes after the message, the
 /// `<attached_files>` list or a line saying why there are none.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct FilesDelivery {
     pub delivered: usize,
     pub text: String,
+    /// The files Claude also gets inline, when `text` says they are shown;
+    /// empty otherwise.
+    pub inline: Vec<serde_json::Value>,
 }
 
 impl InjectionRequest {
@@ -770,7 +773,12 @@ pub type InputSender = Arc<dyn Fn(&str, &[u8]) -> Result<(), String> + Send + Sy
 /// - `Err(_)` — a structured controller failed to accept the message (e.g. the
 ///   persistent process is not running); the caller must NOT fall back to PTY,
 ///   since such controllers reject raw keystrokes.
-pub type MessageSender = Arc<dyn Fn(&str, &str) -> Result<SenderDelivery, String> + Send + Sync>;
+///
+/// The third argument is Claude content blocks (images, PDFs) to send inline
+/// with the text, for a persistent Claude agent; every other controller
+/// ignores it. Empty for every delivery but a jekt's files from a verified
+/// sender (SPEC_JEKT_FILE_TRANSFER_2026_10_05.md §6.4).
+pub type MessageSender = Arc<dyn Fn(&str, &str, &[serde_json::Value]) -> Result<SenderDelivery, String> + Send + Sync>;
 
 /// See [`MessageSender`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

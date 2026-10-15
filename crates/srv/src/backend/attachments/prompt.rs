@@ -108,6 +108,18 @@ pub fn prepare(
     inline_max_count: usize,
     inline_budget: u64,
 ) -> Prepared {
+    prepare_from(None, items, missing, inline_max_count, inline_budget)
+}
+
+/// [`prepare`] for files another agent sent with a jekt: the list's lead
+/// names `sender` (`jekt_list_block`).
+pub fn prepare_from(
+    sender: Option<&str>,
+    items: &[Resolved],
+    missing: &[String],
+    inline_max_count: usize,
+    inline_budget: u64,
+) -> Prepared {
     let mut inline = Vec::new();
     let mut inlined: Vec<usize> = Vec::new();
     let mut budget = (INLINE_MAX_B64_BYTES as u64).min(inline_budget) as usize;
@@ -139,7 +151,7 @@ pub fn prepare(
         inlined.push(item.number);
     }
     Prepared {
-        list: list_block(items, missing, &inlined),
+        list: list_block_from(sender, items, missing, &inlined),
         inline,
     }
 }
@@ -376,6 +388,19 @@ mod tests {
         assert!(list_block(&items, &[], &[1]).contains("Image 1 is shown above"));
         assert!(list_block(&items, &[], &[]).contains("Open them from these paths"));
         assert!(list_block(&items, &[], &[]).contains("The user attached 2 images."));
+    }
+
+    #[test]
+    fn prepare_from_names_the_sender_and_says_what_is_inline() {
+        let d = tempfile::tempdir().unwrap();
+        let png = d.path().join("a.png");
+        std::fs::write(&png, b"not really a png").unwrap();
+        let items = vec![item(1, "a.png", png.to_str().unwrap())];
+        let p = prepare_from(Some("agentx"), &items, &[], 5, u64::MAX);
+        assert_eq!(p.inline.len(), 1);
+        assert!(p.list.contains("agentx sent 1 image with this message. They are shown above"), "{}", p.list);
+        let none = prepare_from(Some("agentx"), &items, &[], 0, u64::MAX);
+        assert!(none.inline.is_empty() && !none.list.contains("shown above"), "{}", none.list);
     }
 
     #[test]
