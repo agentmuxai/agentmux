@@ -4,19 +4,15 @@
 
 import { batch } from "solid-js";
 import { fireAndForget } from "@/util/util";
-// drag-session, not tile-drag: tile-drag imports crossTabDrag, which imports
-// this module.
-import { isUnderway } from "@/app/drag/drag-session";
-import { findNodeByBlockId, newLayoutNode, walkNodes } from "./layoutNode";
+import { findNodeByBlockId, newLayoutNode } from "./layoutNode";
 import { rebuildMinimizedSet } from "./layoutMinimize";
 import { removeBlockFromLeaf, removeLeafEmptiedByMove } from "./layoutMagnify";
+import { queueLayoutCommand, reconcileWithStoredLayout } from "./layoutIntents";
 import { activateMemberInStack, addMemberToStack, moveMemberAcrossStacks, moveMemberInStack } from "./stackMembers";
-import type { LayoutPushResult } from "./layoutAtom";
 import type { PaneTabEditResult } from "@/types/rpc/PaneTabEditResult";
 import {
     LayoutTreeActionType,
     LayoutTreeClearTreeAction,
-    LayoutTreeDeleteNodeAction,
     LayoutTreeInsertNodeAction,
     LayoutTreeInsertNodeAtIndexAction,
     LayoutTreeReplaceNodeAction,
@@ -46,17 +42,12 @@ export function initializeFromMuxObject(model: LayoutModel) {
     model.setter(model.localTreeStateAtom, { ...initialState });
     rebuildMinimizedSet(model);
 
-    if (initialState.pendingBackendActions?.length) {
-        fireAndForget(() => processPendingBackendActions(model));
-    } else {
-        model.updateTree();
+    // srv applied every queued action to the tree just loaded: they are
+    // seen, not replayed.
+    for (const action of initialState.pendingBackendActions ?? []) {
+        if (action.actionid) model.processedActionIds.add(action.actionid);
     }
-
-    // One-shot startup heal: remove dangling leaves persisted by an earlier
-    // session's races once Tab + LayoutState have both settled. Deliberately
-    // a delayed single pass, not a reactive subscription — see the
-    // onBackendUpdate note below and SPEC_DRAG_SESSION_ARCHITECTURE_REFACTOR §3.5.
-    model.startupPruneTimer = setTimeout(() => pruneDanglingLeaves(model), 2000);
+    model.updateTree();
 }
 
 /**
@@ -80,107 +71,7 @@ export function onBackendUpdate(model: LayoutModel) {
     if (pendingActions?.length) {
         fireAndForget(() => processPendingBackendActions(model));
     }
-    // NOTE deliberately NO prune here (SPEC_DRAG_SESSION_ARCHITECTURE_REFACTOR
-    // §3.5): running it reactively on every Tab/LayoutState change made the
-    // Tab object a tracked dependency and could delete a LEGITIMATE
-    // freshly-created leaf whose block hadn't landed in tab.blockids yet
-    // (the round-4 "drops don't stick" regression). Prune triggers are now:
-    // model init (below), the tab bar's post-drag settle pass, and the
-    // redock failure path.
-}
-
-// Age-gate registry (review finding on SPEC_DRAG_SESSION_ARCHITECTURE_REFACTOR
-// PR #2105, P1): createBlock/createBlockSplitHorizontally/createBlockSplit-
-// Vertically (global.ts) insert the new leaf into the local tree
-// SYNCHRONOUSLY via treeReducer, but the block's membership in
-// `tab.blockids` only lands later via an async MuxObject push. Any prune
-// trigger that fires inside that window would see the fresh leaf as
-// "disowned" and delete + persist the deletion — a real, distinct path to
-// the same class of bug pruneDanglingLeaves exists to fix. Call sites for
-// those three functions mark the new block here; pruning skips anything
-// marked within the last RECENT_BLOCK_GRACE_MS.
-const RECENT_BLOCK_GRACE_MS = 3000;
-const recentlyCreatedBlocks = new Map<string, number>();
-
-/** Call immediately after locally inserting a new block's leaf via treeReducer. */
-export function markBlockRecentlyCreated(blockId: string, now: number = Date.now()): void {
-    recentlyCreatedBlocks.set(blockId, now);
-}
-
-function isRecentlyCreated(blockId: string, now: number): boolean {
-    const at = recentlyCreatedBlocks.get(blockId);
-    if (at === undefined) return false;
-    if (now - at > RECENT_BLOCK_GRACE_MS) {
-        recentlyCreatedBlocks.delete(blockId);
-        return false;
-    }
-    return true;
-}
-
-/**
- * Remove leaves whose block is NOT in the tab's `blockids` — dangling
- * references left behind when a frontend's debounced persist clobbers a
- * queued backend layout action (the stale-tree resurrection issue,
- * INVESTIGATION_LAYOUT_DEAD_SPACE_STALE_TREE_RESURRECTION_2026_07_08).
- * A dangling leaf renders a block owned by ANOTHER tab; since every tab
- * stays mounted, the same block mounts twice and the block-component
- * registry breaks — observed as a fully non-responsive tab.
- *
- * Ownership (`Tab.blockids`) is reducer-owned truth, so pruning against
- * it is always safe FOR AN ALREADY-SETTLED leaf: this only ever REMOVES
- * leaves for disowned blocks. But a block just created via
- * createBlock/createBlockSplitHorizontally/createBlockSplitVertically is
- * inserted into the LOCAL tree before its `tab.blockids` membership
- * round-trips through the backend — such a leaf is age-gated via
- * `markBlockRecentlyCreated` so this function never deletes it out from
- * under the user (the round-4-class regression this review caught).
- *
- * Triggers (deliberately sparse — see the round-4 regression note in
- * onBackendUpdate): one-shot at model init (+2s), the tab bar's
- * post-drag settle pass, and the redock failure path. NOT reactive.
- */
-export function pruneDanglingLeaves(model: LayoutModel) {
-    if (model.disposed) return;
-    const rootNode = model.treeState?.rootNode;
-    const tab = model.tabAtom?.();
-    if (!rootNode || !tab?.blockids) return;
-    // Never prune while a pane drag is in flight: MoveBlock's Tab update
-    // can reach this window BEFORE the drag's dragend dispatches (observed
-    // 2ms apart in field logs), and deleting the drag-source leaf mid-drag
-    // unmounts the source element — Chromium then never fires dragend on
-    // it, pragmatic's teardown chain (activeDrag reset and monitor onDrop)
-    // is skipped, and the source tab's overlay wedges at
-    // pointer-events:auto. The drag session (NOT currentDragPayload, which is
-    // already cleared at drop time) spans the gesture until the source
-    // releases it; the tab bar's end-of-drag cleanup re-runs the prune once
-    // the drag has settled.
-    if (isUnderway("tile")) return;
-    const now = Date.now();
-    const owned = new Set(tab.blockids);
-    const danglingIds: string[] = [];
-    walkNodes(rootNode, (node) => {
-        if (
-            !node.children?.length &&
-            node.data?.blockId &&
-            !owned.has(node.data.blockId) &&
-            !isRecentlyCreated(node.data.blockId, now)
-        ) {
-            danglingIds.push(node.id);
-        }
-    });
-    if (!danglingIds.length) return;
-    console.warn("[layout] pruning dangling leaves (blocks not owned by this tab):", danglingIds);
-    for (const nodeId of danglingIds) {
-        model.treeReducer(
-            { type: LayoutTreeActionType.DeleteNode, nodeId } as LayoutTreeDeleteNodeAction,
-            false,
-        );
-    }
-    batch(() => {
-        model.updateTree();
-        model.setter(model.localTreeStateAtom, { ...model.treeState });
-    });
-    model.persistToBackend();
+    reconcileWithStoredLayout(model);
 }
 
 /**
@@ -195,25 +86,42 @@ export async function processPendingBackendActions(model: LayoutModel) {
 
     model.treeState.pendingBackendActions = undefined;
 
-    for (const action of actions) {
-        if (!action.actionid) {
-            console.warn("Dropping layout action without actionid:", action);
-            continue;
+    model.processingBackendActions = true;
+    try {
+        for (const action of actions) {
+            if (!action.actionid) {
+                console.warn("Dropping layout action without actionid:", action);
+                continue;
+            }
+            if (model.processedActionIds.has(action.actionid)) {
+                continue;
+            }
+            model.processedActionIds.add(action.actionid);
+            await handleBackendAction(model, action);
         }
-        if (model.processedActionIds.has(action.actionid)) {
-            continue;
-        }
-        model.processedActionIds.add(action.actionid);
-        await handleBackendAction(model, action);
+    } finally {
+        model.processingBackendActions = false;
     }
 
     batch(() => {
         model.updateTree();
         model.setter(model.localTreeStateAtom, { ...model.treeState });
     });
-    model.persistToBackend();
-    // No prune here — a just-applied queued INSERT's block may not be in the
-    // frontend's tab.blockids yet (SPEC_DRAG_SESSION_ARCHITECTURE_REFACTOR §3.5).
+    // Nothing to send: srv applied each action before queueing it.
+    reconcileWithStoredLayout(model);
+}
+
+/** A queued placement srv already applied, found in this tree (a row this
+ *  model loaded after it, or a second delivery). */
+function alreadyPlaced(model: LayoutModel, action: LayoutActionData): boolean {
+    return !!model.treeState.rootNode && !!findNodeByBlockId(model.treeState.rootNode, action.blockid);
+}
+
+/** The leaf srv placed: its node id when srv sent one. */
+function mirroredLeaf(action: LayoutActionData) {
+    const leaf = newLayoutNode(undefined, action.nodesize, undefined, { blockId: action.blockid });
+    if (action.nodeid) leaf.id = action.nodeid;
+    return leaf;
 }
 
 /**
@@ -228,15 +136,14 @@ async function handleBackendAction(model: LayoutModel, action: LayoutActionData)
                 model.newEphemeralNode(action.blockid);
                 break;
             }
+            if (alreadyPlaced(model, action)) break;
             const insertNodeAction: LayoutTreeInsertNodeAction = {
                 type: LayoutTreeActionType.InsertNode,
-                node: newLayoutNode(undefined, undefined, undefined, {
-                    blockId: action.blockid,
-                }),
+                node: mirroredLeaf(action),
                 magnified: action.magnified,
                 focused: action.focused,
             };
-            model.treeReducer(insertNodeAction, false);
+            model.treeReducer(insertNodeAction, false, { actionId: action.actionid });
             break;
         }
         case LayoutTreeActionType.DeleteNode: {
@@ -263,32 +170,25 @@ async function handleBackendAction(model: LayoutModel, action: LayoutActionData)
             //   not this action.
             // Both rules live in one shared helper, also used by the tear-off
             // paths (SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §3.5). Committed
-            // by processPendingBackendActions' updateTree + persist.
-            if (leaf) {
-                removeBlockFromLeaf(model, leaf, action.blockid);
-            } else {
-                console.error(
-                    "Cannot apply eventbus layout action DeleteNode, could not find leaf node with blockId",
-                    action.blockid
-                );
-            }
+            // by processPendingBackendActions' updateTree; srv applied it already.
+            // No leaf: this window removed it already (a close it made).
+            if (leaf) removeBlockFromLeaf(model, leaf, action.blockid);
             break;
         }
         case LayoutTreeActionType.InsertNodeAtIndex: {
+            if (alreadyPlaced(model, action)) break;
             if (!action.indexarr) {
                 console.error("Cannot apply eventbus layout action InsertNodeAtIndex, indexarr field is missing.");
                 break;
             }
             const insertAction: LayoutTreeInsertNodeAtIndexAction = {
                 type: LayoutTreeActionType.InsertNodeAtIndex,
-                node: newLayoutNode(undefined, action.nodesize, undefined, {
-                    blockId: action.blockid,
-                }),
+                node: mirroredLeaf(action),
                 indexArr: action.indexarr,
                 magnified: action.magnified,
                 focused: action.focused,
             };
-            model.treeReducer(insertAction, false);
+            model.treeReducer(insertAction, false, { actionId: action.actionid });
             break;
         }
         case LayoutTreeActionType.StackPush: {
@@ -363,6 +263,7 @@ async function handleBackendAction(model: LayoutModel, action: LayoutActionData)
             break;
         }
         case LayoutTreeActionType.ReplaceNode: {
+            if (alreadyPlaced(model, action)) break;
             const targetNode = model?.getNodeByBlockId(action.targetblockid);
             if (!targetNode) {
                 console.error(
@@ -374,14 +275,13 @@ async function handleBackendAction(model: LayoutModel, action: LayoutActionData)
             const replaceAction: LayoutTreeReplaceNodeAction = {
                 type: LayoutTreeActionType.ReplaceNode,
                 targetNodeId: targetNode.id,
-                newNode: newLayoutNode(undefined, action.nodesize, undefined, {
-                    blockId: action.blockid,
-                }),
+                newNode: mirroredLeaf(action),
             };
-            model.treeReducer(replaceAction, false);
+            model.treeReducer(replaceAction, false, { actionId: action.actionid });
             break;
         }
         case LayoutTreeActionType.SplitHorizontal: {
+            if (alreadyPlaced(model, action)) break;
             const targetNode = model?.getNodeByBlockId(action.targetblockid);
             if (!targetNode) {
                 console.error(
@@ -397,9 +297,7 @@ async function handleBackendAction(model: LayoutModel, action: LayoutActionData)
                 );
                 break;
             }
-            const newNode = newLayoutNode(undefined, action.nodesize, undefined, {
-                blockId: action.blockid,
-            });
+            const newNode = mirroredLeaf(action);
             const splitAction: LayoutTreeSplitHorizontalAction = {
                 type: LayoutTreeActionType.SplitHorizontal,
                 targetNodeId: targetNode.id,
@@ -410,10 +308,11 @@ async function handleBackendAction(model: LayoutModel, action: LayoutActionData)
                 // calling pane) selects the new pane exactly like an insert does.
                 focused: action.focused,
             };
-            model.treeReducer(splitAction, false);
+            model.treeReducer(splitAction, false, { actionId: action.actionid });
             break;
         }
         case LayoutTreeActionType.SplitVertical: {
+            if (alreadyPlaced(model, action)) break;
             const targetNode = model?.getNodeByBlockId(action.targetblockid);
             if (!targetNode) {
                 console.error(
@@ -429,9 +328,7 @@ async function handleBackendAction(model: LayoutModel, action: LayoutActionData)
                 );
                 break;
             }
-            const newNode = newLayoutNode(undefined, action.nodesize, undefined, {
-                blockId: action.blockid,
-            });
+            const newNode = mirroredLeaf(action);
             const splitAction: LayoutTreeSplitVerticalAction = {
                 type: LayoutTreeActionType.SplitVertical,
                 targetNodeId: targetNode.id,
@@ -440,7 +337,7 @@ async function handleBackendAction(model: LayoutModel, action: LayoutActionData)
                 sizeFraction: action.nodesizefraction,
                 focused: action.focused,
             };
-            model.treeReducer(splitAction, false);
+            model.treeReducer(splitAction, false, { actionId: action.actionid });
             break;
         }
         default:
@@ -450,99 +347,12 @@ async function handleBackendAction(model: LayoutModel, action: LayoutActionData)
 }
 
 /**
- * Persist current tree state to the backend MuxObject (debounced).
- * @param model The LayoutModel instance.
- */
-export function persistToBackend(model: LayoutModel) {
-    if (model.persistDebounceTimer) {
-        clearTimeout(model.persistDebounceTimer);
-    }
-
-    model.persistDebounceTimer = setTimeout(() => {
-        if (model.disposed) return;
-        const muxObj = model.getter(model.muxObjectAtom);
-        if (!muxObj) return;
-
-        muxObj.rootnode = model.treeState.rootNode;
-        muxObj.focusednodeid = model.treeState.focusedNodeId;
-        muxObj.magnifiednodeid = model.treeState.magnifiedNodeId;
-        muxObj.leaforder = model.treeState.leafOrder;
-        // Persistence Phase A (SPEC_DRAG_SESSION_ARCHITECTURE_REFACTOR §3.6):
-        // the pendingbackendactions queue is BACKEND-owned. Never write our
-        // (often stale) local copy — a debounced persist racing a freshly
-        // queued action used to erase it (the stale-tree resurrection
-        // engine). Instead, carry forward the LIVE queue minus the actions
-        // this model has already processed: ordinary persists preserve
-        // unseen actions verbatim, and post-processing persists still clear
-        // consumed ones.
-        const liveQueue = model.getter(model.muxObjectAtom)?.pendingbackendactions;
-        const unprocessed = liveQueue?.filter(
-            (a) => a.actionid && !model.processedActionIds.has(a.actionid)
-        );
-        muxObj.pendingbackendactions = unprocessed?.length ? unprocessed : undefined;
-        muxObj.layoutrevision = pushBaseRevision(model, muxObj.layoutrevision ?? 0);
-
-        model.persistDebounceTimer = null;
-        const push = (model.muxObjectAtom as { _push?: (v: LayoutState) => Promise<LayoutPushResult | null> })._push;
-        if (!push) {
-            model.setter(model.muxObjectAtom, muxObj);
-            return;
-        }
-        push(muxObj)
-            .then((result) => {
-                if (result?.stale) return resyncAfterStalePush(model, result);
-                model.stalePushStreak = 0;
-            })
-            .catch((e) => console.warn("[layout] layout push failed", e));
-    }, 100);
-}
-
-/**
- * The layout revision a push is built on: the stored row's, then on through
- * every following revision this model's own pane-tab commands were queued
- * at (their local edits are already in its tree). srv refuses a push built
- * on an older revision than its own (`stale_push_revision`).
- * SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md §3.5.
- */
-export function pushBaseRevision(model: LayoutModel, rowRevision: number): number {
-    let base = rowRevision;
-    while (model.ownLayoutRevisions.has(base + 1)) base++;
-    for (const rev of model.ownLayoutRevisions) {
-        if (rev <= base) model.ownLayoutRevisions.delete(rev);
-    }
-    return base;
-}
-
-/** A stale push in a row this many times gives up until the next edit pushes:
- *  srv queueing faster than a round trip means something is wrong. */
-const MAX_STALE_PUSH_STREAK = 5;
-
-/**
- * srv refused a push built before an action it queued: nothing was applied,
- * and the row as stored (with the action) is already in this model's cache.
- * Apply the actions it missed onto the local tree, then push again on the
- * newer revision — the push's own edits are still in the tree.
- */
-async function resyncAfterStalePush(model: LayoutModel, result: LayoutPushResult): Promise<void> {
-    if (model.disposed) return;
-    model.stalePushStreak++;
-    if (model.stalePushStreak > MAX_STALE_PUSH_STREAK) {
-        console.error("[layout] layout push refused as stale too many times in a row; waiting for the next edit", result);
-        return;
-    }
-    console.info("[layout] layout push refused as stale; applying the missed actions and pushing again", result);
-    await processPendingBackendActions(model);
-    model.persistToBackend();
-}
-
-/**
  * Send the pane-tab command that mirrors a local edit this model already made
  * (`pane.activateTab`, `pane.removeTab`, `pane.moveTab`). srv applies it and
- * queues it for other views under the id minted here, which this model skips;
- * the revision it was queued at counts as seen for this model's next push.
- * A failure is only logged (the returned promise never rejects): the next
- * tree push carries the same change.
- * SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md §3.3.
+ * queues it for other views under the id minted here, which this model skips.
+ * It leaves through the layout outbox, in order with the intents. A failure
+ * is only logged (the returned promise never rejects): the window then shows
+ * srv's layout. SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md §3.3.
  */
 export function sendStackCommand(
     model: LayoutModel,
@@ -551,15 +361,17 @@ export function sendStackCommand(
 ): Promise<void> {
     const actionId = crypto.randomUUID();
     model.processedActionIds.add(actionId);
-    let sent: Promise<PaneTabEditResult>;
-    try {
-        sent = Promise.resolve(send(actionId));
-    } catch (e) {
-        sent = Promise.reject(e);
-    }
-    return sent
-        .then((res) => {
-            if (res?.layout_revision) model.ownLayoutRevisions.add(res.layout_revision);
+    return new Promise((done) =>
+        queueLayoutCommand(model, async () => {
+            try {
+                const res = await send(actionId);
+                // Compare with srv only once the row shows this change.
+                if (res?.version) model.layoutVersionFloor = Math.max(model.layoutVersionFloor, res.version);
+            } catch (e) {
+                console.warn(`[layout] ${op} failed; showing srv's layout`, e);
+            } finally {
+                done();
+            }
         })
-        .catch((e) => console.warn(`[layout] ${op} failed; the next layout push carries the change`, e));
+    );
 }

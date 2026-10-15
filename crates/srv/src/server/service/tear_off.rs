@@ -73,47 +73,10 @@ pub(crate) async fn handle_tear_off_block(state: &AppState, call: &WebCallType) 
     if let Err(e) = setup_torn_off_block_layout(state, &new_tab_oid, &block_id).await {
         tracing::warn!(new_tab = %new_tab_oid, "TearOffBlock: layout setup failed: {} (block in tab but layout malformed)", e);
     }
-    // Source tab, backend side: prune the block from the reducer's own copy
-    // of the source tree (`db_layout`) now, the same two-step the
-    // `delete_block` saga does (its steps 2 and 2b). Stack-safe: when the
-    // block is one tab of a multi-tab pane, only that member is removed and
-    // the pane stays (`remove_stack_member`); the leaf goes only if it was
-    // the pane's last tab. Without this the backend tree was only fixed
-    // when the source window echoed its tree back, and a failed or missed
-    // echo left a dangling leaf behind.
-    // SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §3.5 (design 4).
-    let prune_events = dispatch_to_reducer(
-        state,
-        agentmux_common::ipc::Command::LayoutDeleteNodeByBlock {
-            tab_id: source_tab_id.clone(),
-            block_id: block_id.clone(),
-            correlation_id: String::new(),
-        },
-    )
-    .await;
-    // Best-effort, like the delete_block saga's identical dispatch: the block
-    // has already moved, so a failed prune must not fail the tear-off. But it
-    // must not be silent either — it's exactly the dangling-leaf case this
-    // step exists to prevent (reagent P1 on #3708). The queued frontend delete
-    // below still runs either way.
-    if let Some(msg) = prune_events.iter().find_map(|e| match e {
-        agentmux_common::ipc::Event::Error { message, .. } => Some(message.clone()),
-        _ => None,
-    }) {
-        tracing::warn!(
-            source_tab = %source_tab_id,
-            block_id = %block_id,
-            "TearOffBlock: backend source-layout prune failed (best-effort; the source window's queued delete still applies): {}",
-            msg
-        );
-    }
-    for ev in &prune_events {
-        let _ = crate::persist_subscriber::apply_event_to_mstore(ev, store);
-    }
-    publish_events(state, &prune_events);
-
-    // Source tab, frontend side: queue a layout-delete action so the source
-    // window's frontend removes the node from its tree.
+    // Source tab: out of srv's tree, then the queued `delete` for the source
+    // window (`queue_source_layout_delete`). Stack-safe: one tab of a
+    // multi-tab pane leaves only that member (SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md
+    // §3.5, design 4). Best-effort: the block has already moved.
     if let Err(e) = queue_source_layout_delete(state, &source_tab_id, &block_id).await {
         tracing::warn!(source_tab = %source_tab_id, "TearOffBlock: source layout delete-action enqueue failed: {}", e);
     }
@@ -250,14 +213,23 @@ pub(crate) async fn handle_redock_floating_pane(state: &AppState, call: &WebCall
         return WebReturnType::error(reason);
     }
 
+    // The block now belongs to the target tab. Take its leaf out of the
+    // source tree first: a failure below must never leave the source showing
+    // a block it no longer owns (the window would mirror that stale tree).
+    if let Err(e) = queue_source_layout_delete(state, &source_tab_id, &block_id).await {
+        tracing::error!(
+            source_tab = %source_tab_id,
+            "RedockFloatingPane: source layout delete failed — moving the block back: {}",
+            e
+        );
+        put_redocked_block_back(state, &block_id, &target_tab_id, &source_tab_id).await;
+        return WebReturnType::error(format!("redock layout delete failed: {e}"));
+    }
     // Target layout: enqueue the appropriate action on its
     // `pendingbackendactions`. Phase 4b: when a direction hint is
     // present, queue SplitHorizontal/SplitVertical so the block lands
     // in the exact slot the ghost previewed. Otherwise fall back to
     // the generic InsertNode (Phase 4a behavior).
-    // Layout writes are required before the Tab broadcast — if either
-    // fails the block becomes invisible. Return error so the caller can
-    // retry; no visible change has propagated to the renderers yet.
     let target_layout_result = match (target_block_id.as_deref(), direction) {
         (Some(tbid), _) if as_tab => redock_as_tab(state, &target_tab_id, &block_id, tbid).await,
         (Some(tbid), Some(dir)) => {
@@ -266,23 +238,16 @@ pub(crate) async fn handle_redock_floating_pane(state: &AppState, call: &WebCall
         _ => queue_target_layout_insert(state, &target_tab_id, &block_id).await,
     };
     if let Err(e) = target_layout_result {
+        // The block is in neither tree now: give it back to the source tab,
+        // in its tree, rather than leave it running with no pane.
         tracing::error!(
             target_tab = %target_tab_id,
-            "RedockFloatingPane: target layout action failed — aborting broadcast: {}",
+            "RedockFloatingPane: target layout action failed — moving the block back: {}",
             e
         );
+        put_redocked_block_back(state, &block_id, &target_tab_id, &source_tab_id).await;
         return WebReturnType::error(format!(
             "redock layout action failed: {e}"
-        ));
-    }
-    if let Err(e) = queue_source_layout_delete(state, &source_tab_id, &block_id).await {
-        tracing::error!(
-            source_tab = %source_tab_id,
-            "RedockFloatingPane: source layout delete failed — aborting broadcast: {}",
-            e
-        );
-        return WebReturnType::error(format!(
-            "redock layout delete failed: {e}"
         ));
     }
 
@@ -347,6 +312,37 @@ pub(crate) async fn handle_redock_floating_pane(state: &AppState, call: &WebCall
         }),
         updates,
     )
+}
+
+/// Undo a redock whose layout step failed after the `MoveBlock` saga moved
+/// `block_id` to `target_tab_id`: move it back to `source_tab_id` and, if the
+/// source tree no longer holds it, append it there. Best effort; the caller
+/// is already returning the original error.
+async fn put_redocked_block_back(state: &AppState, block_id: &str, target_tab_id: &str, source_tab_id: &str) {
+    super::reducer_helpers::compensate_via_reducer(
+        state,
+        agentmux_common::ipc::Command::MoveBlock {
+            block_id: block_id.to_string(),
+            src_tab_id: target_tab_id.to_string(),
+            dst_tab_id: source_tab_id.to_string(),
+            dst_index: u32::MAX,
+        },
+        &state.mstore,
+    )
+    .await;
+    let placed = state
+        .srv_state
+        .lock()
+        .await
+        .tabs
+        .get(source_tab_id)
+        .and_then(|t| t.rootnode.as_ref())
+        .is_some_and(|root| crate::backend::layout::find_leaf_containing_block(root, block_id).is_some());
+    if !placed {
+        if let Err(e) = queue_target_layout_insert(state, source_tab_id, block_id).await {
+            tracing::error!(source_tab = %source_tab_id, "RedockFloatingPane: putting the block back in the source layout failed: {}", e);
+        }
+    }
 }
 
 /// Place a just-redocked block as a TAB of the pane holding
@@ -568,6 +564,45 @@ mod tests {
         let (members, visible, _) = src_pane_members(&state, &tab_id).await;
         assert_eq!(members, vec![b.clone()]);
         assert_eq!(visible, b, "the right-hand neighbour becomes visible");
+    }
+
+    #[tokio::test]
+    async fn a_redock_whose_layout_step_fails_puts_the_block_back_where_it_was() {
+        let state = test_state();
+        let (ws_id, tab_id, _a, b, _c) = two_tab_pane_and_a_neighbour(&state).await;
+        let new_ws = tear_off(&state, &b, &tab_id, &ws_id).await;
+        let floater_tab = state.srv_state.lock().await.workspaces[&new_ws].tab_ids[0].clone();
+
+        // As a tab of a pane that doesn't exist: the ownership move succeeds,
+        // then the layout step fails.
+        let ret = handle_redock_floating_pane(
+            &state,
+            &call(
+                "RedockFloatingPane",
+                vec![
+                    b.clone().into(),
+                    floater_tab.clone().into(),
+                    new_ws.into(),
+                    tab_id.clone().into(),
+                    ws_id.into(),
+                    "no-such-block".into(),
+                    serde_json::Value::Null,
+                    true.into(),
+                ],
+            ),
+        )
+        .await;
+        assert!(ret.error.is_some(), "the redock reports the failure");
+
+        let s = state.srv_state.lock().await;
+        let holds = |tab: &str| {
+            s.tabs[tab].rootnode.as_ref().is_some_and(|r| crate::backend::layout::find_leaf_containing_block(r, &b).is_some())
+        };
+        assert_eq!(s.blocks[&b].tab_id, floater_tab, "the block is back in its own tab");
+        assert!(s.tabs[&floater_tab].block_ids.contains(&b));
+        assert!(holds(&floater_tab), "and in that tab's layout");
+        assert!(!s.tabs[&tab_id].block_ids.contains(&b), "the target tab doesn't own it");
+        assert!(!holds(&tab_id), "and doesn't show it");
     }
 
     #[tokio::test]

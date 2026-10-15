@@ -27,9 +27,22 @@ import { LayoutNodeAdditionalProps, LayoutTreeActionType, LayoutTreeInsertNodeAc
 import type { SignalAtom } from "@/util/util";
 
 const rpcCall = vi.fn();
+// Layout intents (every tree edit) go to their own mock, so `rpcCall` counts
+// the pane-tab commands these tests are about. Its version is one no mocked
+// row reaches, so the model never swaps its tree for the (static) stored one.
+const intentCall = vi.fn(async (..._args: unknown[]) => ({ applied: true, version: Number.MAX_SAFE_INTEGER }));
 const deleteBlock = vi.fn();
-vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: { rpcCall: (...args: unknown[]) => rpcCall(...args) } }));
-vi.mock("@/app/store/services", () => ({ ObjectService: { DeleteBlock: (...args: unknown[]) => deleteBlock(...args) } }));
+vi.mock("@/app/store/rpc-util", () => ({
+    TabRpcClient: {
+        rpcCall: (...args: unknown[]) => (args[0] === "layout.applyIntent" ? intentCall(...args) : rpcCall(...args)),
+    },
+}));
+vi.mock("@/app/store/services", () => ({
+    ObjectService: {
+        DeleteBlock: (...args: unknown[]) => deleteBlock(...args),
+        GetObject: async () => ({ version: 1 }),
+    },
+}));
 
 // Same mock harness as layoutModel.test.ts.
 const layoutStateSignals = new Map<string, SignalAtom<LayoutState>>();
@@ -101,6 +114,12 @@ vi.mock("@/app/store/focusManager", () => ({
         ensureSelectionFocused,
     },
 }));
+
+/** Let the layout outbox send what is queued (pane-tab commands wait behind
+ *  the intents ahead of them). */
+const settle = async () => {
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+};
 
 function createLayoutModel(): LayoutModel {
     const [getTab] = createSignal<Tab>({
@@ -261,30 +280,19 @@ describe("layoutStack", () => {
     });
 
     describe("setActiveBlockInStack", () => {
-        it("sends pane.activateTab under an action id this model then skips", () => {
+        it("sends pane.activateTab under an action id this model then skips", async () => {
             const model = createLayoutModel();
             const nodeId = insertRootBlock(model, "b1");
             pushBlockOntoStack(model, nodeId, "b2");
 
             setActiveBlockInStack(model, nodeId, "b1");
 
+            await settle();
             expect(rpcCall).toHaveBeenCalledTimes(1);
             const [command, data] = rpcCall.mock.calls[0];
             expect(command).toBe("pane.activateTab");
             expect(data.block_id).toBe("b1");
             expect(model.processedActionIds.has(data.action_id)).toBe(true);
-        });
-
-        it("counts the revision its command was queued at as seen", async () => {
-            const model = createLayoutModel();
-            const nodeId = insertRootBlock(model, "b1");
-            pushBlockOntoStack(model, nodeId, "b2");
-            rpcCall.mockResolvedValue({ layout_revision: 4 });
-
-            setActiveBlockInStack(model, nodeId, "b1");
-            await vi.advanceTimersByTimeAsync(0);
-
-            expect([...model.ownLayoutRevisions]).toEqual([4]);
         });
 
         it("switches the active member among existing stack members", () => {
@@ -315,21 +323,23 @@ describe("layoutStack", () => {
         // revealBlockLocally (app/util/reveal-block.ts) calls this unconditionally
         // on every reveal, relying on it to write nothing when there is nothing to
         // switch. SPEC_REVEAL_BLOCK_ONE_PATH_2026_09_27.md §6.
-        it("persists only on a real switch — never for the already-active tab or a single-block pane", () => {
+        it("sends pane.activateTab only on a real switch — never for the already-active tab or a single-block pane, and pushes no tree", async () => {
             const model = createLayoutModel();
             const nodeId = insertRootBlock(model, "b1");
-            const persist = vi.spyOn(model, "persistToBackend");
+            const activations = () => rpcCall.mock.calls.filter((c) => c[0] === "pane.activateTab").length;
 
             setActiveBlockInStack(model, nodeId, "b1"); // single-block pane
-            expect(persist).not.toHaveBeenCalled();
+            await settle();
+            expect(activations()).toBe(0);
 
             pushBlockOntoStack(model, nodeId, "b2"); // active = b2
-            persist.mockClear();
             setActiveBlockInStack(model, nodeId, "b2"); // already active
-            expect(persist).not.toHaveBeenCalled();
+            await settle();
+            expect(activations()).toBe(0);
 
             setActiveBlockInStack(model, nodeId, "b1"); // real switch
-            expect(persist).toHaveBeenCalledTimes(1);
+            await settle();
+            expect(activations()).toBe(1);
             expect(model.treeState.rootNode!.data!.activeBlockId).toBe("b1");
         });
 
@@ -350,7 +360,7 @@ describe("layoutStack", () => {
     describe("moveBlockInStack", () => {
         beforeEach(() => rpcCall.mockReset());
 
-        it("reorders locally and fires pane.moveTab with the same operation", () => {
+        it("reorders locally and fires pane.moveTab with the same operation", async () => {
             const model = createLayoutModel();
             const nodeId = insertRootBlock(model, "b1");
             pushBlockOntoStack(model, nodeId, "b2");
@@ -361,6 +371,7 @@ describe("layoutStack", () => {
 
             const data = model.treeState.rootNode!.data!;
             expect(data.blockStack).toEqual(["b3", "b1", "b2"]);
+            await settle();
             expect(rpcCall).toHaveBeenCalledWith(
                 "pane.moveTab",
                 { block_id: "b3", target_block_id: "b1", position: "before", activate: false, action_id: expect.any(String) },
@@ -382,7 +393,7 @@ describe("layoutStack", () => {
             expect(data.activeBlockId).toBe("b3"); // was already active, reorder alone doesn't change it
         });
 
-        it("activates the moved block when requested", () => {
+        it("activates the moved block when requested", async () => {
             const model = createLayoutModel();
             const nodeId = insertRootBlock(model, "b1");
             pushBlockOntoStack(model, nodeId, "b2"); // active = b2
@@ -394,6 +405,7 @@ describe("layoutStack", () => {
             expect(data.blockStack).toEqual(["b2", "b1"]);
             expect(data.blockId).toBe("b1");
             expect(data.activeBlockId).toBe("b1");
+            await settle();
             expect(rpcCall).toHaveBeenCalledWith(
                 "pane.moveTab",
                 { block_id: "b1", target_block_id: "b2", position: "after", activate: true, action_id: expect.any(String) },
@@ -431,7 +443,7 @@ describe("layoutStack", () => {
             } as LayoutTreeInsertNodeAction);
         }
 
-        it("moves a tab into ANOTHER pane's stack, active there, and fires the RPC", () => {
+        it("moves a tab into ANOTHER pane's stack, active there, and fires the RPC", async () => {
             const model = createLayoutModel();
             const paneA = insertRootBlock(model, "a1");
             pushBlockOntoStack(model, paneA, "a2"); // pane A: [a1,a2]
@@ -447,6 +459,7 @@ describe("layoutStack", () => {
             expect(effectiveStack(b.data!)).toEqual(["b1", "a2"]); // and joined pane B
             expect(b.data!.activeBlockId).toBe("a2");
             expect(b.data!.blockId).toBe("a2");
+            await settle();
             expect(rpcCall).toHaveBeenCalledWith(
                 "pane.moveTab",
                 { block_id: "a2", target_block_id: "b1", position: "end", activate: true, action_id: expect.any(String) },
@@ -498,11 +511,12 @@ describe("layoutStack", () => {
                 expect(deleteBlock).not.toHaveBeenCalled();
             });
 
-            it("fires pane.moveTab exactly once and nothing else", () => {
+            it("fires pane.moveTab exactly once and nothing else", async () => {
                 const { model } = twoPanes();
 
                 moveBlockInStack(model, "a1", "b1", "end", true);
 
+                await settle();
                 expect(rpcCall).toHaveBeenCalledTimes(1);
                 expect(rpcCall).toHaveBeenCalledWith(
                     "pane.moveTab",

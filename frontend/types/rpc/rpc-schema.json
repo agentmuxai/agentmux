@@ -3161,6 +3161,25 @@
     }
   },
   {
+    "command": "layout.applyIntent",
+    "request": "agentmux_srv::backend::rpc_types::layout::CommandLayoutIntentData",
+    "requestName": "CommandLayoutIntentData",
+    "requestTs": {
+      "imports": [
+        "CommandLayoutIntentData"
+      ],
+      "name": "CommandLayoutIntentData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::layout::LayoutIntentResult",
+    "responseName": "LayoutIntentResult",
+    "responseTs": {
+      "imports": [
+        "LayoutIntentResult"
+      ],
+      "name": "LayoutIntentResult"
+    }
+  },
+  {
     "command": "layout.open",
     "request": "agentmux_srv::backend::rpc_types::layout::CommandLayoutOpenData",
     "requestName": "CommandLayoutOpenData",

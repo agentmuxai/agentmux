@@ -10,13 +10,7 @@ import { createSignal } from "solid-js";
 import { LayoutModel } from "@/layout/lib/layoutModel";
 import { findNodeByBlockId, newLayoutNode } from "@/layout/lib/layoutNode";
 import { LayoutTreeActionType, LayoutTreeInsertNodeAction } from "@/layout/lib/types";
-import {
-    processPendingBackendActions,
-    pruneDanglingLeaves,
-    markBlockRecentlyCreated,
-    pushBaseRevision,
-} from "@/layout/lib/layoutPersistence";
-import { beginDrag, endDrag, markReleased } from "@/app/drag/drag-session";
+import { processPendingBackendActions } from "@/layout/lib/layoutPersistence";
 import type { SignalAtom } from "@/util/util";
 
 // -- Mock store (mirrors layoutModel.test.ts) ----------------------------------
@@ -39,6 +33,19 @@ function makeLayoutStateSignal(oid: string): SignalAtom<LayoutState> {
     (atom as any)._set = set;
     return atom as unknown as SignalAtom<LayoutState>;
 }
+
+// Layout intents: recorded, answered with a version no mocked row reaches so
+// the model keeps its own tree (layoutIntents.ts compares only with a row that
+// includes its intents).
+const intentCalls = vi.hoisted(() => [] as { command: string; data: any }[]);
+vi.mock("@/app/store/rpc-util", () => ({
+    TabRpcClient: {
+        rpcCall: async (command: string, data: any) => {
+            intentCalls.push({ command, data });
+            return { applied: true, version: Number.MAX_SAFE_INTEGER };
+        },
+    },
+}));
 
 vi.mock("@/app/store/global", () => {
     return {
@@ -100,11 +107,7 @@ function createLayoutModel(): LayoutModel {
         meta: {},
         name: "Test",
         layoutstate: "layout-1",
-        // Every block id these tests mount or insert-via-action. In
-        // production Tab.blockids is reducer-owned truth and
-        // pruneDanglingLeaves (layoutPersistence.ts) removes any leaf
-        // whose block isn't in it — a stub that owns nothing would get
-        // every test leaf pruned right after insertion.
+        // Every block id these tests mount or insert-via-action.
         blockids: ["existing", "moved-block", "new-block", "dup-block"],
     });
     const m = new LayoutModel(getTab);
@@ -566,120 +569,6 @@ describe("processPendingBackendActions — Phase 4b Split routes", () => {
     });
 });
 
-// -- pruneDanglingLeaves --------------------------------------------------------
-//
-// The stale-tree-resurrection healer (SPEC_PANE_DRAG_TO_TAB addendum A2):
-// a leaf whose block is NOT in the tab's reducer-owned blockids is a
-// dangling reference (renders a block another tab owns, double-mounting
-// it) and must be removed; owned leaves are untouched.
-
-describe("pruneDanglingLeaves", () => {
-    // How a tile drag looks to the prune gate: under way, then released by
-    // its source's onDrop (SPEC_DRAG_AND_DROP_CONSOLIDATION §5.1).
-    const tileDragStarts = () => beginDrag("tile", { nodeId: "n1" });
-    const tileDragReleased = () => markReleased();
-
-    it("keeps a dangling leaf while a tile drag is under way, and prunes it once the drag is released", () => {
-        const model = createLayoutModel();
-        insertBlock(model, "existing");
-        const ghost = newLayoutNode(undefined, undefined, undefined, { blockId: "drag-source-leaf" });
-        model.treeReducer({
-            type: LayoutTreeActionType.InsertNode,
-            node: ghost,
-            magnified: false,
-            focused: false,
-        } as LayoutTreeInsertNodeAction);
-        tileDragStarts();
-        try {
-            pruneDanglingLeaves(model);
-            expect(findBlock(model, "drag-source-leaf")).toBeTruthy();
-        } finally {
-            tileDragReleased();
-        }
-        pruneDanglingLeaves(model);
-        expect(findBlock(model, "drag-source-leaf")).toBeFalsy();
-        endDrag("drop");
-    });
-
-    it("removes leaves for blocks the tab does not own, keeps owned ones", () => {
-        const model = createLayoutModel();
-        insertBlock(model, "existing"); // in the stub tab's blockids
-        // A dangling leaf — "ghost-block" is NOT in the stub's blockids.
-        const ghost = newLayoutNode(undefined, undefined, undefined, { blockId: "ghost-block" });
-        model.treeReducer({
-            type: LayoutTreeActionType.InsertNode,
-            node: ghost,
-            magnified: false,
-            focused: false,
-        } as LayoutTreeInsertNodeAction);
-        expect(findBlock(model, "ghost-block")).toBeTruthy();
-
-        pruneDanglingLeaves(model);
-
-        expect(findBlock(model, "ghost-block")).toBeFalsy();
-        expect(findBlock(model, "existing")).toBeTruthy();
-    });
-
-    it("no-ops when every leaf is owned", () => {
-        const model = createLayoutModel();
-        insertBlock(model, "existing");
-        insertBlock(model, "moved-block");
-        pruneDanglingLeaves(model);
-        expect(findBlock(model, "existing")).toBeTruthy();
-        expect(findBlock(model, "moved-block")).toBeTruthy();
-    });
-
-    // Review finding on PR #2105 (P1): createBlock/createBlockSplit* insert the
-    // new leaf into the local tree BEFORE tab.blockids catches up. A leaf for a
-    // block marked via markBlockRecentlyCreated must survive a prune that runs
-    // in that window, and must become prunable again once the mark expires.
-    it("does not prune a leaf for a block marked recently created", () => {
-        const model = createLayoutModel();
-        insertBlock(model, "existing");
-        const freshLeaf = newLayoutNode(undefined, undefined, undefined, { blockId: "fresh-not-yet-owned" });
-        model.treeReducer({
-            type: LayoutTreeActionType.InsertNode,
-            node: freshLeaf,
-            magnified: false,
-            focused: false,
-        } as LayoutTreeInsertNodeAction);
-        markBlockRecentlyCreated("fresh-not-yet-owned", 1_000_000);
-
-        const originalNow = Date.now;
-        Date.now = () => 1_000_500; // 500ms later — well inside the 3s grace window
-        try {
-            pruneDanglingLeaves(model);
-        } finally {
-            Date.now = originalNow;
-        }
-
-        expect(findBlock(model, "fresh-not-yet-owned")).toBeTruthy();
-        expect(findBlock(model, "existing")).toBeTruthy();
-    });
-
-    it("prunes a leaf once its recently-created mark has expired", () => {
-        const model = createLayoutModel();
-        const staleLeaf = newLayoutNode(undefined, undefined, undefined, { blockId: "was-fresh-now-stale" });
-        model.treeReducer({
-            type: LayoutTreeActionType.InsertNode,
-            node: staleLeaf,
-            magnified: false,
-            focused: false,
-        } as LayoutTreeInsertNodeAction);
-        markBlockRecentlyCreated("was-fresh-now-stale", 1_000_000);
-
-        const originalNow = Date.now;
-        Date.now = () => 1_010_000; // 10s later — past the 3s grace window
-        try {
-            pruneDanglingLeaves(model);
-        } finally {
-            Date.now = originalNow;
-        }
-
-        expect(findBlock(model, "was-fresh-now-stale")).toBeFalsy();
-    });
-});
-
 // Another window watching this layout applies the queued `stackmove` that
 // `pane.moveTab` sends. When the moved tab was its pane's only one, that
 // pane has to go here too — as a move, never through onNodeDelete.
@@ -728,9 +617,7 @@ describe("processPendingBackendActions — StackMove of a pane's only tab", () =
 });
 
 // A tab's model is disposed when the window tab leaves this window
-// (installLayoutModelEviction). Its tree is stale from then on: a debounced
-// persist or the startup prune still pending must not write it over the
-// layout the tab's new window owns.
+// (installLayoutModelEviction). Its tree is stale from then on.
 describe("a disposed model", () => {
     beforeEach(() => {
         layoutStateSignals.clear();
@@ -739,18 +626,6 @@ describe("a disposed model", () => {
 
     afterEach(() => {
         vi.useRealTimers();
-    });
-
-    it("drops its pending persist and startup prune", () => {
-        const model = createLayoutModel();
-        insertBlock(model, "existing");
-        model.persistToBackend();
-        const setter = vi.spyOn(model, "setter");
-        model.dispose();
-        vi.advanceTimersByTime(5000);
-        expect(setter).not.toHaveBeenCalled();
-        expect(model.persistDebounceTimer).toBeNull();
-        expect(model.startupPruneTimer).toBeNull();
     });
 
     it("ignores backend updates", () => {
@@ -763,7 +638,7 @@ describe("a disposed model", () => {
 });
 
 // SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md §3.3, §3.5.
-describe("layout revisions and pane-tab actions", () => {
+describe("pane-tab actions", () => {
     beforeEach(() => {
         layoutStateSignals.clear();
         vi.useFakeTimers();
@@ -795,50 +670,5 @@ describe("layout revisions and pane-tab actions", () => {
         expect(data.blockId).toBe("existing");
         expect(data.activeBlockId).toBe("existing");
         expect(data.blockStack).toEqual(["existing", "new-block"]);
-    });
-
-    it("a push is built on the row's revision, then on through this model's own", () => {
-        const model = createLayoutModel();
-        expect(pushBaseRevision(model, 3)).toBe(3);
-        model.ownLayoutRevisions.add(4);
-        model.ownLayoutRevisions.add(5);
-        model.ownLayoutRevisions.add(7);
-        // 6 is someone else's action this model hasn't seen: stop before it.
-        expect(pushBaseRevision(model, 3)).toBe(5);
-        expect([...model.ownLayoutRevisions]).toEqual([7]);
-        expect(pushBaseRevision(model, 6)).toBe(7);
-        expect(model.ownLayoutRevisions.size).toBe(0);
-    });
-
-    it("a refused stale push applies the missed stackpush and pushes again on the newer revision", async () => {
-        const model = createLayoutModel();
-        insertBlock(model, "existing");
-        const pushes: LayoutState[] = [];
-        (model.muxObjectAtom as any)._push = vi.fn(async (value: LayoutState) => {
-            pushes.push(structuredClone(value));
-            if (pushes.length > 1) return null;
-            // srv queued a stackpush (revision 1) this push never saw: it
-            // answers with the row as stored, then `stale`.
-            const sig = layoutStateSignals.get(value.oid)!;
-            sig._set({
-                ...value,
-                version: value.version + 1,
-                layoutrevision: 1,
-                pendingbackendactions: [stackAction(LayoutTreeActionType.StackPush, "srv-1", "new-block", "existing")],
-            });
-            return { stale: true, layoutrevision: 1 };
-        });
-
-        model.persistToBackend();
-        await vi.advanceTimersByTimeAsync(100);
-        expect(pushes).toHaveLength(1);
-        expect(pushes[0].layoutrevision).toBe(0);
-
-        await vi.advanceTimersByTimeAsync(100);
-        expect(pushes).toHaveLength(2);
-        expect(pushes[1].layoutrevision).toBe(1);
-        expect(pushes[1].rootnode.data.blockStack).toEqual(["existing", "new-block"]);
-        expect(pushes[1].pendingbackendactions).toBeUndefined();
-        expect(model.stalePushStreak).toBe(0);
     });
 });

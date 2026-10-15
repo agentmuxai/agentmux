@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-30
 **Type:** Implementation spec (full analysis)
-**Status:** active — Phase 2 (`balance_node`, #1866) and Phase 3 (srv reducer arms, #1868) implemented; Phases 4–6 not started (the frontend still pushes the whole tree, `frontend/layout/lib/layoutPersistence.ts`). Verified against code 2026-10-14 ([triage](../analysis/REPORT_REDUCER_STACK_TRIAGE_2026_10_13.md)).
+**Status:** implemented — Phase 2 (`balance_node`, #1866) and Phase 3 (srv reducer arms, #1868) implemented; Phase 4 implemented in #4946 (the frontend's own tree edits are layout intents) and #4947 (srv applies its own placements; the window pushes no tree for them); Phase 5 implemented in #4948 (minimize and restore are intents; minimize has been a display mode since #2197, so the dissolve intents were dropped); Phase 6 implemented in #4949 (no window writes a layout row: the whole-tree push, `layout_revision` and the frontend's dangling-leaf prune are gone). Verified against code 2026-10-14 ([triage](../analysis/REPORT_REDUCER_STACK_TRIAGE_2026_10_13.md)).
 **Owner:** asaf
 **Supersedes scope of:** `SPEC_864_LAYOUT_SINGLE_WRITER_2026_06_30.md` (that spec's "weak" single-writer
 becomes Phase 1 here; this spec is the committed end-goal)
@@ -279,13 +279,113 @@ missing `*Applied` events. *Unit-tested per arm against the oracle.*
 behavior-changing core — needs app-running E2E verification (split/move/resize/swap/insert/delete/
 replace all round-trip through srv). Do NOT auto-merge on bot approval.**
 
+*Phase 4 as built (#4946):*
+- **One command.** `LayoutApplyIntent { tab_id, intent, action_id, view }`, over the RPC
+  `layout.applyIntent`. `LayoutIntent` (`agentmux-common/src/layout_intent.rs`) is the frontend's
+  tree action with the same `type` tag and field names: insert, insertatindex, delete, move, swap,
+  resize, replace, splithorizontal, splitvertical, clear, and `view` (focus and magnify only).
+  The nine granular commands of §1.2 were deleted in #4869 and not revived.
+- **The algebra.** `backend/layout/intent.rs` ports `layoutTree.ts` step for step (with
+  `addChildAt` and `addIntermediateNode`), then runs `balance_node`. The older Rust ops in
+  `backend/layout/mod.rs` were not used: they differ from the frontend (delete collapses the parent
+  itself, insert never flattens a same-direction child), and every difference would show as the
+  stored tree replacing the one on screen.
+- **Normalization on every intent:** legacy minimize fields migrated (as `rebuildMinimizedSet`
+  does at load), balance, leaves of deleted blocks pruned, legacy minimize locks, the invariant
+  report.
+- **Ids.** A node the intent adds carries the id the frontend gave it. A branch srv creates gets
+  `derive_node_id(action_id, n)`; the frontend names its own the same way (`withDerivedNodeIds`),
+  so its prediction and srv's result are the same tree.
+- **Refused, where the frontend would corrupt the tree:** a move into the moved node's own
+  subtree, `insertAtRoot`, a negative index, a swap with an ancestor, a resize with any bad op
+  (the frontend applies the ops before it).
+- **Focus and magnify** stay the frontend's to choose (it holds the focus history and the geometry
+  that pick a successor). Each intent carries them; srv stores them, cleared if they name no node.
+- **De-duplication.** A tab remembers its last 64 action ids; a repeat is a no-op, so a resend
+  after a transport failure applies once.
+- **Frontend.** `treeReducer` applies the action (the prediction) and queues the intent instead of
+  calling `persistToBackend`. One outbox (`layoutIntents.ts`) sends intents and the remaining
+  whole-tree pushes in order, one at a time; a push drops the intents queued behind it, which it
+  carries. Once nothing is in flight and the row includes its intents (the answer's `version`), a
+  stored tree that differs replaces the local one.
+- **Parity.** 80 random intent sequences with srv's results
+  (`frontend/layout/tests/fixtures/layout-intent-vectors.json`) are replayed through the frontend's
+  reducer by `layoutIntentVectors.test.ts`; a proptest checks the invariants on 256 more.
+- **Still whole-tree pushes, behind `layout_revision`:** mirroring queued backend actions (srv
+  queues inserts, splits and source deletes without applying them), pane-tab edits (also sent as
+  commands), minimize and restore, the dangling-leaf prune, and removing a block that moved
+  elsewhere.
+
+*Phase 4, srv's own edits, as built (#4947):*
+- **srv places blocks itself.** `place_block` (`server/service/layout_intents.rs`) applies an
+  insert or a split as a layout intent to srv's tree, then queues the matching action under the
+  same action id, with the leaf's node id (`LayoutActionData.nodeid`). Every placement goes
+  through it: `pane.open`, `agent.open`, a redock (insert or the previewed split), the orphan
+  reaper. A split whose target pane is gone or minimized falls back to an insert.
+- **A source delete takes the block out of srv's tree first** (`queue_source_layout_delete` →
+  `LayoutDeleteNodeByBlock`): tear-off, promote, redock, and the delete and close sagas. A pane's
+  removal (`LayoutDeleteNode`, a pane-tab move that empties a pane) unlinks the node and
+  balances, as the frontend does, instead of collapsing the parent into its last child.
+- **The window mirrors, and pushes nothing.** A queued placement is applied with srv's node id
+  and srv's action id for the branches, and skipped when the block is already in the tree. A
+  model that loads a row takes its queued actions as seen. Pane-tab edits send only their
+  command, through the same outbox as the intents (still sent if the window's model is disposed
+  meanwhile, since a tab close waits for it). A block that moved elsewhere leaves the local
+  tree only. The dangling-leaf prune sends `delete` intents.
+- **A window compares only with a row that has its changes.** The pane-tab commands answer with
+  the row's version, as intents do, and adding a pane tab reads it after `pane.open`; until the
+  cached row reaches it, a stale cached row can't undo the window's own edit.
+- **The queue keeps its latest 32 actions** (`persist_subscriber/layout_queue.rs`): nothing pushes
+  a drained queue back any more, and srv applied every action in it.
+- **Still whole-tree pushes:** minimize and restore (Phase 5), and the push that follows a stale
+  refusal of one.
+
 **Phase 5 — model the minimize fields + dissolve intents** (§6). Promote `minimizedSize`/
 `slipMinimize`/`columnDissolve`/`_slipAnchor` to typed fields; add `LayoutDissolveColumn`/
 `Undissolve` intents with the logical/geometric split. *Own sub-spec + visual verification.* Until
 done, minimize routes its result via `LayoutSetTree` (tracked debt).
 
+*Phase 5 as built (#4948):* the design above no longer fits the code. Since #2197 minimize is
+a display mode: a leaf's `minimized` flag, its stored size untouched, and the slip and the column
+dissolve are derived at render (`layoutMinimize.ts`, `resolveRowSlipTargets`); nothing restructures
+the tree, and `minimizedSize`/`slipMinimize`/`columnDissolve`/`_slipAnchor` are legacy fields
+migrated away on load. So there is no geometry to split off and no dissolve intent to add.
+- **`minimize` and `restore` intents.** Minimize sets the flag and ends that pane's magnify;
+  minimizing the last pane still showing content is refused (`countExpandedLeaves`); restore
+  clears it. The frontend's toggle, and the header's Minimize on a maximized pane, send one intent
+  each.
+- **The flag is typed:** `LayoutNode.minimized` (`agentmux-common`), not an `extra` key. The legacy
+  fields stay in `extra`, migrated on every intent (Phase 4).
+- With this, no frontend edit pushes a whole tree.
+
 **Phase 6 — delete the backstops.** Remove `heal_layout` + callers, the relaxed `reorder_tabs_bulk`
 validation + its migration test, the resync layout carve-out. The payoff deletion.
+
+*Phase 6 as built (#4949):* the three backstops named above were already gone: `heal_layout` and
+the `reorder_tabs_bulk` relaxation in #1981, the resync carve-out in #4878. With Phases 4 and 5
+nothing pushed a tree any more, so this phase deletes the whole-tree path and what guarded it:
+- **No layout row is written whole.** `object.UpdateObject` refuses a layout row
+  (`update_object`); the `UpdateObject`→`LayoutSetTree` route, its stale-push refusal and
+  `layout_revision` (on the tab, the row and every queued action) are deleted, and the pane-tab
+  commands answer with only the row's version. `object.ApplyLayoutIntent` is the service form of
+  `layout.applyIntent`, for the `tools/tests` harnesses that used to write rows.
+- **The frontend writes nothing but intents and commands.** `persistToBackend`, the outbox's push
+  item, the stale-push resync and the read-write layout atom are deleted; the layout row is
+  read-only to the window (`layoutAtom.ts`).
+- **No frontend prune.** `pruneDanglingLeaves`, its startup pass, the end-of-drag pass and the
+  recently-created age gate are deleted: srv takes a moved or deleted block out of the tree itself
+  (Phase 4) and the window shows srv's tree. A failed redock shows the source tab as srv stores it.
+  A row stored by an earlier build can still hold a leaf for a block its tab no longer owns, so srv
+  heals each tab's tree once at bootstrap (`heal_loaded_layout`): it removes those leaves, balances,
+  clears a focus/magnify left on nothing, and stores the row with a new version. A clean row is
+  not rewritten.
+- **Dead srv algebra deleted.** The old structural mutators in `backend/layout/mod.rs`,
+  `enforce_minimized_locks` and `ResizeOp` had no caller once every edit was an intent; their
+  tests that still described live behaviour moved to the intent tests.
+- **Not done, and why:** §10's `version` CAS is not needed (srv computes every edit from its own
+  tree, in order, so there is nothing to compare-and-swap) and the stored `leaforder` is written
+  only by srv's seeders and read by nothing (the window computes its own); dropping the column is
+  left for a schema cleanup.
 
 ---
 

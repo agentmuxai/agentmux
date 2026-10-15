@@ -84,6 +84,10 @@ pub struct LayoutNode {
     pub children: Vec<LayoutNode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub data: Option<LayoutNodeData>,
+    /// A leaf shown as a header chip (minimize is a display mode: its stored
+    /// `size` is kept, so restore only clears this). Leaf-only.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub minimized: bool,
     /// Catch-all for unknown top-level fields. Uses `serde_json::Map`
     /// (insertion-ordered) for deterministic round-trips.
     #[serde(flatten, default, skip_serializing_if = "serde_json::Map::is_empty")]
@@ -110,18 +114,14 @@ where
 
 // ── Command helper types ────────────────────────────────────────────────────
 
-/// SPEC_864 Phase 2 — the frontend-owned `LayoutState` slices carried by a
-/// full-row-replace push (the `UpdateObject`→`LayoutSetTree` route). The
-/// reducer applies `focused_node_id`/`magnified_node_id` to its `TabRecord`;
+/// The rest of a `LayoutState` row, carried by a seeding `LayoutSetTree`
+/// (`seed_layout_via_reducer`). The reducer applies `focused_node_id`/`magnified_node_id` to its `TabRecord`;
 /// `leaforder` and `pending_backend_actions` are opaque pass-through JSON the
 /// persist subscriber writes verbatim (no algebra re-run in the subscriber —
 /// that would be a new divergence surface).
 ///
-/// Semantics are REPLACE, mirroring the legacy `update_raw` whole-row write
-/// this route retires: an absent/`null` `leaforder` or
-/// `pending_backend_actions` CLEARS the persisted column (pushing the row
-/// without processed actions is how the frontend acks its backend-action
-/// queue); an empty `focused_node_id`/`magnified_node_id` clears focus/
+/// Semantics are REPLACE: an absent/`null` `leaforder` or
+/// `pending_backend_actions` CLEARS the persisted column; an empty `focused_node_id`/`magnified_node_id` clears focus/
 /// magnify. A `LayoutSetTree` with `slices: None` (granular/tree-only
 /// callers) leaves all four columns untouched.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
@@ -136,18 +136,10 @@ pub struct LayoutClientSlices {
     /// Magnified layout-node id; empty = clear.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub magnified_node_id: String,
-    /// The backend→frontend action queue as the client sees it after
-    /// processing. `None` = clear (the ack path).
+    /// The backend→frontend action queue to store. `None` = clear (a
+    /// freshly seeded tab).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pending_backend_actions: Option<serde_json::Value>,
-}
-
-/// A single resize operation: target node + new flex size (0–100 relative units).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ResizeOp {
-    pub node_id: String,
-    /// New flex size. Must be in 0.0..=100.0; reducer validates.
-    pub size: f32,
 }
 
 /// Position for split commands: where to insert the new node relative to the target.

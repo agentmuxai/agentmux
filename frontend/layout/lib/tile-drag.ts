@@ -10,6 +10,7 @@
 import { setCurrentDragPayload } from "@/app/drag/CrossWindowDragMonitor";
 import { beginDrag, endDrag, markReleased, onSessionEnded, session, type DragEndReason } from "@/app/drag/drag-session";
 import { clearCrossTabDrop } from "./crossTabDrag";
+import { layoutDragEnded } from "./layoutIntents";
 import type { LayoutModel } from "./layoutModel";
 import { dragState } from "./tilelayout-drag-state";
 import type { LayoutNode } from "./types";
@@ -35,6 +36,7 @@ export function releaseTileDrag(model: LayoutModel): void {
     dragState.layoutModel = null;
     dragState.node = null;
     model.activeDrag._set(false);
+    layoutDragEnded(model);
     markReleased();
 }
 

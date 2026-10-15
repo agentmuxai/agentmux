@@ -259,7 +259,7 @@ async fn run_inner(
         tracing::warn!(
             tab_id = %tab_id,
             block_id = %block_id,
-            "[saga] LayoutDeleteNodeByBlock dispatch failed (best-effort; layout node may orphan until frontend push): {}",
+            "[saga] LayoutDeleteNodeByBlock dispatch failed (best-effort; the layout keeps a leaf for a deleted block until the next layout write prunes it): {}",
             reason
         );
     }
@@ -400,7 +400,7 @@ mod tests {
         let (state, _ws_id, tab_id, block_id) = seed().await;
 
         // Seed a layout tree holding the block, reducer-routed +
-        // persisted (same LayoutSetTree path the frontend push uses).
+        // persisted (the LayoutSetTree path srv's seeders use).
         let tree = agentmux_common::LayoutNode {
             id: "n-solo".into(),
             data: Some(agentmux_common::LayoutNodeData {

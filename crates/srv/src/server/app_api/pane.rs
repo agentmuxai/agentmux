@@ -456,27 +456,27 @@ pub(super) async fn maybe_reuse_editor_pane(
     }))
 }
 
-/// Translate `split_direction` + `split_reference_block_id` into the backend
-/// layout action triple. Returns `(actiontype, targetblockid, position)`.
-/// Falls back to a plain `insert` if direction/reference are missing.
+/// Translate `split_direction` + `split_reference_block_id` into a placement:
+/// a split of the reference block's pane, or the first free slot when either
+/// is missing.
 pub(super) fn resolve_placement(
     direction: Option<&str>,
     reference: Option<&str>,
-) -> (String, String, String) {
-    let reference = match reference.filter(|s| !s.is_empty()) {
-        Some(r) => r,
-        None => return ("insert".to_string(), String::new(), String::new()),
+    focused: bool,
+) -> crate::server::service::layout_intents::Placement {
+    use crate::server::service::layout_intents::Placement;
+    use agentmux_common::SplitPosition::{After, Before};
+    let Some(reference) = reference.filter(|s| !s.is_empty()) else {
+        return Placement::Append { focused };
     };
-
-    let (actiontype, position) = match direction {
-        Some("right") => (crate::backend::wcore::LAYOUT_ACTION_SPLIT_HORIZONTAL, "after"),
-        Some("left") => (crate::backend::wcore::LAYOUT_ACTION_SPLIT_HORIZONTAL, "before"),
-        Some("down") | Some("below") => (crate::backend::wcore::LAYOUT_ACTION_SPLIT_VERTICAL, "after"),
-        Some("up") | Some("above") => (crate::backend::wcore::LAYOUT_ACTION_SPLIT_VERTICAL, "before"),
-        _ => return ("insert".to_string(), String::new(), String::new()),
+    let (horizontal, position) = match direction {
+        Some("right") => (true, After),
+        Some("left") => (true, Before),
+        Some("down") | Some("below") => (false, After),
+        Some("up") | Some("above") => (false, Before),
+        _ => return Placement::Append { focused },
     };
-
-    (actiontype.to_string(), reference.to_string(), position.to_string())
+    Placement::Split { target_block_id: reference.to_string(), horizontal, position, size_fraction: None, focused }
 }
 
 /// `POST /api/v1/agent/pane/close` — backs the `ClosePane` MCP tool.
@@ -1257,39 +1257,16 @@ pub async fn open_pane(state: &AppState, cmd: CommandPaneOpenData) -> Result<Pan
     }
     crate::server::service::publish_events(state, &create_events);
 
-    // Enqueue layout action — split if requested, else append
-    let (actiontype, targetblockid, position) = pane::resolve_placement(
+    // Place it, split if requested, else append: srv's tree, then the queued
+    // action for the window. Best-effort: a failure leaves the block created
+    // but not laid out.
+    let placement = pane::resolve_placement(
         cmd.split_direction.as_deref(),
         cmd.split_reference_block_id.as_deref(),
+        cmd.focus.unwrap_or(true),
     );
-    let focused = cmd.focus.unwrap_or(true);
-
-    // SPEC_864 Phase 4 — append through the reducer (single writer of
-    // db_layout). Best-effort like the store-direct write it replaces:
-    // a failure leaves the block created but not laid out.
-    {
-        let action = obj::LayoutActionData {
-            actiontype,
-            actionid: uuid::Uuid::new_v4().to_string(),
-            blockid: block_id.clone(),
-            nodesize: None,
-            nodesizefraction: None,
-            indexarr: None,
-            focused,
-            magnified: false,
-            ephemeral: false,
-            targetblockid,
-            position,
-        };
-        if let Err(e) = crate::server::service::queue_layout_actions_via_reducer(
-            state,
-            &tab_id,
-            vec![action],
-        )
-        .await
-        {
-            tracing::warn!("pane.open: layout action enqueue failed: {e}");
-        }
+    if let Err(e) = crate::server::service::layout_intents::place_block(state, &tab_id, &block_id, placement).await {
+        tracing::warn!("pane.open: placing the pane failed: {e}");
     }
 
     tracing::info!(
@@ -1382,7 +1359,7 @@ pub(crate) async fn move_tab(state: &AppState, cmd: CommandPaneMoveTabData) -> R
     )
     .await;
     tracing::info!(block_id = %cmd.block_id, target = %cmd.target_block_id, position = %cmd.position, "pane.moveTab");
-    Ok(queued_revision("pane.moveTab", &cmd.block_id, queued))
+    Ok(edit_result(state, &tab_id, "pane.moveTab", &cmd.block_id, queued))
 }
 
 /// `pane.activateTab`: make `block_id` its pane's visible tab
@@ -1396,7 +1373,7 @@ pub(crate) async fn activate_tab(state: &AppState, cmd: CommandPaneTabData) -> R
     .await?;
     let action_id = cmd.action_id.as_deref().unwrap_or_default();
     let queued = crate::server::service::layout_helpers::queue_stack_activate(state, &tab_id, &cmd.block_id, action_id).await;
-    Ok(queued_revision("pane.activateTab", &cmd.block_id, queued))
+    Ok(edit_result(state, &tab_id, "pane.activateTab", &cmd.block_id, queued))
 }
 
 /// `pane.removeTab`: take `block_id` out of its pane — that one tab of a
@@ -1411,11 +1388,12 @@ pub(crate) async fn remove_tab(state: &AppState, cmd: CommandPaneTabData) -> Res
     })
     .await?;
     if !changed {
-        return Ok(PaneTabEditResult { layout_revision: 0 });
+        let version = crate::server::service::layout_intents::layout_row_version(&state.mstore, &tab_id);
+        return Ok(PaneTabEditResult { version });
     }
     let action_id = cmd.action_id.as_deref().unwrap_or_default();
     let queued = crate::server::service::layout_helpers::queue_stack_remove(state, &tab_id, &cmd.block_id, action_id).await;
-    Ok(queued_revision("pane.removeTab", &cmd.block_id, queued))
+    Ok(edit_result(state, &tab_id, "pane.removeTab", &cmd.block_id, queued))
 }
 
 /// Resolve `block_id`'s tab, then dispatch `cmd` → mstore → publish, the
@@ -1444,13 +1422,12 @@ async fn apply_pane_tab_command(
     Ok((tab_id, !events.is_empty()))
 }
 
-/// The revision a pane-tab RPC answers with. A failed queue is logged, not
-/// returned: the tree change already happened, and 0 means the caller counts
-/// nothing as seen.
-fn queued_revision(op: &str, block_id: &str, queued: Result<u64, String>) -> PaneTabEditResult {
-    let layout_revision = queued.unwrap_or_else(|e| {
+/// What a pane-tab RPC answers: the row's version once the change is stored. A
+/// failed queue is logged, not returned: the tree change already happened.
+fn edit_result(state: &AppState, tab_id: &str, op: &str, block_id: &str, queued: Result<(), String>) -> PaneTabEditResult {
+    if let Err(e) = queued {
         tracing::warn!(block_id, "{op}: queueing the frontend action failed: {e}");
-        0
-    });
-    PaneTabEditResult { layout_revision }
+    }
+    let version = crate::server::service::layout_intents::layout_row_version(&state.mstore, tab_id);
+    PaneTabEditResult { version }
 }

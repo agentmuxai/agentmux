@@ -42,7 +42,7 @@ import { setKeyUtilPlatform } from "@/util/keyutil";
 import { render } from "solid-js/web";
 import { benchMark, benchDump } from "@/util/startup-bench";
 import { ContextMenuModel } from "@/app/store/contextmenu";
-import { forgetWindowId, previousWindowId, rememberWindowId } from "@/app/init/reload-window-id";
+import { forgetWindowId, previousWindowId, reattachableWindow, rememberWindowId } from "@/app/init/reload-window-id";
 import { isHostApp } from "@/app/init/host-detect";
 import { failStartup, showStartupError, StartupFailureHandled } from "@/app/init/error-display";
 import { describeError, formatDescribedError } from "@/app/errors/error-report";
@@ -314,8 +314,16 @@ async function initHostNewWindow(seedView?: string | null, seedMeta?: Record<str
             getApi().sendLog(`[initCefNewWindow] tear-off workspaceId=${tearOffWsId}`);
         }
 
+        // A reload of this window re-attaches to its own row (reload-window-id.ts).
         t = performance.now();
-        const newWindow = await withTimeout(
+        const reattached = await reattachableWindow(
+            clientData.windowids,
+            currentWindowLabel(),
+            (id) => withTimeout(retryTransient(() => WindowService.GetWindow(id)), RPC_TIMEOUT, "GetWindow"),
+            (id) => withTimeout(retryTransient(() => WorkspaceService.GetWorkspace(id)), RPC_TIMEOUT, "GetWorkspace")
+        );
+        if (reattached) getApi().sendLog(`[initCefNewWindow] reload: re-attached to window ${reattached.oid}`);
+        const newWindow = reattached ?? await withTimeout(
             WindowService.CreateWindow(
                 null,
                 tearOffWsId,

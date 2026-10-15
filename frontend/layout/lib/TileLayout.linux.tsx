@@ -99,7 +99,7 @@ const linux: TileLayoutPlatform = {
     animateDelayMs: 50,
 
     // Guard: only fire during an active tile drag (dragState.nodeId set). Tab DnD must not
-    // trigger persistToBackend via treeReducer, which caused a crash on Linux (see drag.rs notes).
+    // run treeReducer from it, which caused a crash on Linux (see drag.rs notes).
     boundsCheckRequiresTileDrag: true,
 
     clearDraggingWhenInactive: false,

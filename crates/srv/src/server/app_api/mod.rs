@@ -91,6 +91,7 @@ mod presence;
 pub(crate) mod tower_pane;
 mod blockstats;
 mod shells;
+pub(crate) mod layout_intent;
 
 /// Register all MuxAPI handlers on the RPC engine.
 pub fn register_app_api_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
@@ -108,6 +109,7 @@ pub fn register_app_api_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     bookmarks::register(engine, state);
     browser_profiles::register(engine, state);
     layout::register(engine, state);
+    layout_intent::register(engine, state);
     browser_start_page::register(engine, state);
     voice::register(engine, state);
     fleet::register(engine, state);

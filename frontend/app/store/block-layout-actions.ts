@@ -10,7 +10,6 @@ import {
     getLayoutModelForStaticTab,
     LayoutTreeActionType,
     LayoutTreeInsertNodeAction,
-    markBlockRecentlyCreated,
     newLayoutNode,
 } from "@/layout/index";
 import {
@@ -29,7 +28,6 @@ export async function createBlockSplitHorizontally(
     const layoutModel = getLayoutModelForStaticTab();
     const rtOpts: RuntimeOpts = { termsize: { rows: 25, cols: 80 } };
     const newBlockId = await ObjectService.CreateBlock(blockDef, rtOpts);
-    markBlockRecentlyCreated(newBlockId);
     const targetNodeId = layoutModel.getNodeByBlockId(targetBlockId)?.id;
     if (targetNodeId == null) throw new Error(`targetNodeId not found for blockId: ${targetBlockId}`);
     const splitAction: LayoutTreeSplitHorizontalAction = {
@@ -51,7 +49,6 @@ export async function createBlockSplitVertically(
     const layoutModel = getLayoutModelForStaticTab();
     const rtOpts: RuntimeOpts = { termsize: { rows: 25, cols: 80 } };
     const newBlockId = await ObjectService.CreateBlock(blockDef, rtOpts);
-    markBlockRecentlyCreated(newBlockId);
     const targetNodeId = layoutModel.getNodeByBlockId(targetBlockId)?.id;
     if (targetNodeId == null) throw new Error(`targetNodeId not found for blockId: ${targetBlockId}`);
     const splitAction: LayoutTreeSplitVerticalAction = {
@@ -69,10 +66,6 @@ export async function createBlock(blockDef: BlockDef, magnified = false, ephemer
     const layoutModel = getLayoutModelForStaticTab();
     const rtOpts: RuntimeOpts = { termsize: { rows: 25, cols: 80 } };
     const blockId = await ObjectService.CreateBlock(blockDef, rtOpts);
-    // Mark BEFORE branching — the ephemeral path (below) also inserts this
-    // block into the local tree (via addEphemeralNodeToLayout, later) ahead
-    // of tab.blockids catching up, same race as the non-ephemeral path.
-    markBlockRecentlyCreated(blockId);
     if (ephemeral) {
         layoutModel.newEphemeralNode(blockId);
         return blockId;
@@ -91,7 +84,6 @@ export async function replaceBlock(blockId: string, blockDef: BlockDef, focus: b
     const layoutModel = getLayoutModelForStaticTab();
     const rtOpts: RuntimeOpts = { termsize: { rows: 25, cols: 80 } };
     const newBlockId = await ObjectService.CreateBlock(blockDef, rtOpts);
-    markBlockRecentlyCreated(newBlockId);
     setTimeout(() => {
         fireAndForget(() => ObjectService.DeleteBlock(blockId));
     }, 300);

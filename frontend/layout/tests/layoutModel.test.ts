@@ -41,6 +41,19 @@ function makeLayoutStateSignal(oid: string): SignalAtom<LayoutState> {
     return atom as unknown as SignalAtom<LayoutState>;
 }
 
+// Layout intents: recorded, answered with a version no mocked row reaches so
+// the model keeps its own tree (layoutIntents.ts compares only with a row that
+// includes its intents).
+const intentCalls = vi.hoisted(() => [] as { command: string; data: any }[]);
+vi.mock("@/app/store/rpc-util", () => ({
+    TabRpcClient: {
+        rpcCall: async (command: string, data: any) => {
+            intentCalls.push({ command, data });
+            return { applied: true, version: Number.MAX_SAFE_INTEGER };
+        },
+    },
+}));
+
 vi.mock("@/app/store/global", () => {
     return {
         MOS: {
@@ -207,7 +220,7 @@ describe("LayoutModel", () => {
     // SPEC_EDITOR_REUSE_RESTORES_MINIMIZED_PANE_2026_09_30.md: an agent's
     // file-open un-magnifies a pane hiding the Editor, but must not take the
     // user's focus. A plain MagnifyNodeToggle always requests it.
-    it("magnifyNodeToggle(id, true, false) commits and persists the un-magnify without requesting focus", () => {
+    it("magnifyNodeToggle(id, true, false) commits and sends the un-magnify without requesting focus", async () => {
         const model = createLayoutModel();
         const first = newLayoutNode(undefined, undefined, undefined, { blockId: "left" });
         model.treeReducer({
@@ -232,19 +245,22 @@ describe("LayoutModel", () => {
         expect(requestNodeFocusCaptures.length).toBeGreaterThan(0); // the default still focuses
 
         requestNodeFocusCaptures.length = 0;
-        const persist = vi.spyOn(model, "persistToBackend");
+        intentCalls.length = 0;
         model.magnifyNodeToggle(second.id, true, false);
 
         expect(model.magnifiedNodeId).toBeUndefined();
         expect(model.localTreeStateAtom().magnifiedNodeId).toBeUndefined();
-        expect(persist).toHaveBeenCalled();
+        await vi.waitFor(() => expect(intentCalls.some((c) => c.data.intent.type === "view")).toBe(true));
+        const view = intentCalls.find((c) => c.data.intent.type === "view")!;
+        expect(view.command).toBe("layout.applyIntent");
+        expect(view.data.magnified_node_id).toBe("");
         expect(requestNodeFocusCaptures).toHaveLength(0);
     });
 
     // SPEC_PANE_CONTROLS_TILED_RESTORE_ICON_AND_MINIMIZE_FROM_MAXIMIZED_2026_10_12 §5:
     // minimizing a maximized pane ends the maximize and sets the flag in one commit,
     // with no focus request, and leaves the tree's shape and sizes alone.
-    it("minimizeNodeToggle on the maximized pane ends the maximize and minimizes it in one persisted commit", () => {
+    it("minimizeNodeToggle on the maximized pane ends the maximize and minimizes it in one intent", async () => {
         const model = createLayoutModel();
         const first = newLayoutNode(undefined, undefined, undefined, { blockId: "left" });
         model.treeReducer({
@@ -270,14 +286,17 @@ describe("LayoutModel", () => {
         const sizesBefore = JSON.stringify(model.treeState.rootNode!.children!.map((c) => c.size));
 
         requestNodeFocusCaptures.length = 0;
-        const persist = vi.spyOn(model, "persistToBackend");
+        intentCalls.length = 0;
         model.minimizeNodeToggle(second.id);
 
         expect(model.magnifiedNodeId).toBeUndefined();
         expect(model.treeState.magnifiedNodeId).toBeUndefined();
         expect(model.localTreeStateAtom().magnifiedNodeId).toBeUndefined();
         expect(model.minimizedNodeIds().has(second.id)).toBe(true);
-        expect(persist).toHaveBeenCalledTimes(1);
+        await vi.waitFor(() => expect(intentCalls.map((c) => c.data.intent.type)).toContain("minimize"));
+        const sent = intentCalls.find((c) => c.data.intent.type === "minimize")!;
+        expect(sent.data.intent.nodeId).toBe(second.id);
+        expect(sent.data.magnified_node_id).toBe("");
         expect(requestNodeFocusCaptures).toHaveLength(0);
         expect(JSON.stringify(model.treeState.rootNode!.children!.map((c) => c.size))).toBe(sizesBefore);
 

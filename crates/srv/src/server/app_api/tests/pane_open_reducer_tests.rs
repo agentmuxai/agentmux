@@ -742,7 +742,7 @@ fn only_shown_panes_count_as_shown() {
     assert_eq!(shown_block_ids(&layout(row(vec![leaf("a", "agent"), leaf("e", "editor")]), "")), vec!["agent", "editor"]);
 
     let mut minimized = leaf("e", "editor");
-    minimized.extra.insert("minimized".into(), serde_json::json!(true));
+    minimized.minimized = true;
     assert_eq!(shown_block_ids(&layout(row(vec![leaf("a", "agent"), minimized]), "")), vec!["agent"]);
 
     // A stack shows its active member only.

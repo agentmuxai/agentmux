@@ -21,8 +21,11 @@ mod host_ipc;
 mod introspect;
 mod memory_adopt;
 pub(crate) mod layout_helpers;
+pub(crate) mod layout_intents;
 #[cfg(test)]
-mod layout_revision_tests;
+mod layout_intents_tests;
+#[cfg(test)]
+mod pane_tab_command_tests;
 mod misc;
 mod object;
 pub(crate) mod object_helpers;
@@ -55,9 +58,7 @@ pub(crate) use introspect::{
 };
 pub(crate) use layout_helpers::setup_torn_off_block_layout;
 pub(crate) use object_helpers::{schedule_agent_zoom_mirror, update_object_meta};
-pub(crate) use reducer_helpers::{
-    dispatch_to_reducer, publish_events, queue_layout_actions_via_reducer,
-};
+pub(crate) use reducer_helpers::{dispatch_to_reducer, publish_events};
 
 pub(super) async fn handle_service(
     State(state): State<AppState>,

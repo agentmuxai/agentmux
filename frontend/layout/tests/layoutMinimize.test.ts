@@ -20,7 +20,8 @@ import {
     collapsedExtentPx,
 } from "../lib/layoutGeometry";
 import { resizeNode, splitVertical } from "../lib/layoutTree";
-import { FlexDirection, type LayoutNode } from "../lib/types";
+import { FlexDirection, type LayoutNode, type LayoutTreeAction, type LayoutTreeState } from "../lib/types";
+import { applyLayoutAction } from "../lib/layoutIntentActions";
 
 // ── Minimal LayoutModel mock ─────────────────────────────────────────────────
 // The display-mode toggle needs no geometry (no addlProps, no gap, no ratios).
@@ -52,7 +53,14 @@ function makeMockModel(rootNode: LayoutNode) {
             minimizedSet = ids;
         },
         localTreeStateAtom: { _set: () => {} },
-        persistToBackend: () => {},
+        // The real treeReducer applies the action, updates the tree and sends
+        // the intent (layoutModel.ts); `sent` stands for the send.
+        sent: [] as string[],
+        treeReducer: (action: LayoutTreeAction) => {
+            applyLayoutAction(model.treeState as LayoutTreeState, action);
+            model.updateTree();
+            model.sent.push(action.type);
+        },
         getMinimizedSet: () => minimizedSet,
     };
     return model;
@@ -805,7 +813,11 @@ function makeMagnifyMock(rootNode: LayoutNode, magnifiedNodeId: string | undefin
         calls.push("updateTree");
         realUpdateTree();
     };
-    model.persistToBackend = () => calls.push("persist");
+    const realTreeReducer = model.treeReducer;
+    model.treeReducer = (action: LayoutTreeAction) => {
+        realTreeReducer(action);
+        calls.push(`intent:${action.type}`);
+    };
     model.magnifyCalls = [] as { nodeId: string; setState: boolean; focused: boolean; minimizedAtCall: boolean | undefined }[];
     // Mirrors the reducer's toggle (layoutTree.ts magnifyNodeToggle) without the commit when setState is false.
     model.magnifyNodeToggle = (nodeId: string, setState = true, focused = true) => {
@@ -853,14 +865,14 @@ describe("minimizing a maximized pane", () => {
         expect(JSON.stringify(root)).toBe(before);
     });
 
-    it("is one commit: one updateTree, one persist, the maximize ended first without a commit or a focus request", () => {
+    it("is one commit: one updateTree and one minimize intent, which ends the maximize itself", () => {
         const { root, paneA1 } = buildTwoColumnLayout();
         const model = makeMagnifyMock(root, paneA1.id);
 
         minimizeNodeToggle(model, paneA1.id);
 
-        expect(model.magnifyCalls).toEqual([{ nodeId: paneA1.id, setState: false, focused: false, minimizedAtCall: undefined }]);
-        expect(model.calls).toEqual(["updateTree", "persist"]);
+        expect(model.magnifyCalls).toEqual([]);
+        expect(model.calls).toEqual(["updateTree", "intent:minimize"]);
     });
 
     it("produces the same tree as minimizing the same pane while tiled (Column parent and Row parent)", () => {
@@ -931,8 +943,8 @@ describe("a pane that is both minimized and maximized", () => {
 
         expect(paneA1.minimized).toBe(true);
         expect(model.treeState.magnifiedNodeId).toBeUndefined();
-        expect(model.magnifyCalls).toEqual([{ nodeId: paneA1.id, setState: false, focused: false, minimizedAtCall: true }]);
-        expect(model.calls).toEqual(["updateTree", "persist"]);
+        expect(model.magnifyCalls).toEqual([]);
+        expect(model.calls).toEqual(["updateTree", "intent:minimize"]);
     });
 
     it("needs one other expanded pane, like any minimize: with none it does nothing", () => {

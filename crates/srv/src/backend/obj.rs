@@ -279,7 +279,7 @@ pub struct StickerType {
 
 // ---- LayoutActionData / LeafOrderEntry ----
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct LayoutActionData {
     pub actiontype: String,
     pub actionid: String,
@@ -306,6 +306,10 @@ pub struct LayoutActionData {
     pub targetblockid: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub position: String,
+    /// The node id srv gave the leaf it placed (insert and split), so the
+    /// frontend's mirror of the action builds the same tree.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nodeid: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -454,16 +458,8 @@ pub struct LayoutState {
     pub leaforder: Option<Vec<LeafOrderEntry>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pendingbackendactions: Option<Vec<LayoutActionData>>,
-    /// The reducer's `TabRecord::layout_revision` as of the last queued
-    /// action. A frontend push echoes the revision it built on.
-    #[serde(default, skip_serializing_if = "is_zero_u64")]
-    pub layoutrevision: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub meta: Option<MetaMapType>,
-}
-
-fn is_zero_u64(v: &u64) -> bool {
-    *v == 0
 }
 
 // LayoutState has meta as Option<MetaMapType> (Go uses omitempty), so manual impl:

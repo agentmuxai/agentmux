@@ -8,7 +8,7 @@ use crate::backend::service::{self, WebCallType, WebReturnType};
 
 use super::super::AppState;
 use super::object_helpers::{
-    find_tab_for_layout, get_object_by_oref, schedule_agent_zoom_mirror, update_object,
+    get_object_by_oref, schedule_agent_zoom_mirror, update_object,
     update_object_meta,
 };
 use super::reducer_helpers::{compensate_via_reducer, dispatch_to_reducer, publish_events};
@@ -212,50 +212,37 @@ pub(super) async fn handle_object_service(state: &AppState, call: &WebCallType) 
             }
             WebReturnType::success_empty()
         }
+        // `layout.applyIntent` for callers outside a window's websocket (the
+        // tools/tests harnesses): the same srv edit, the same stored row.
+        "ApplyLayoutIntent" => {
+            let tab_id: String = match service::get_arg(args, 0) {
+                Ok(v) => v,
+                Err(e) => return WebReturnType::error(e),
+            };
+            let intent: agentmux_common::LayoutIntent = match service::get_arg(args, 1) {
+                Ok(v) => v,
+                Err(e) => return WebReturnType::error(e),
+            };
+            let action_id: String = match service::get_arg(args, 2) {
+                Ok(v) => v,
+                Err(e) => return WebReturnType::error(e),
+            };
+            match super::layout_intents::apply_layout_intent(state, &tab_id, intent, &action_id, None).await {
+                Ok(outcome) => WebReturnType::success(serde_json::json!({
+                    "applied": outcome.applied,
+                    "error": outcome.error,
+                    "version": outcome.version,
+                })),
+                Err(e) => WebReturnType::error(e),
+            }
+        }
         "UpdateObject" => {
             let mux_obj_value: serde_json::Value = match service::get_arg(args, 0) {
                 Ok(v) => v,
                 Err(e) => return WebReturnType::error(e),
             };
-            // SPEC_864 Phase 2 — an OTYPE_LAYOUT push for a tab's layout row
-            // routes through the reducer as a single `LayoutSetTree` (tree +
-            // client slices); the reducer's tree stays authoritative.
-            if mux_obj_value.get("otype").and_then(|v| v.as_str()) == Some(OTYPE_LAYOUT) {
-                if let Some(tab_id) = mux_obj_value
-                    .get("oid")
-                    .and_then(|v| v.as_str())
-                    .and_then(|layout_oid| find_tab_for_layout(store, layout_oid))
-                {
-                    let tree = match mux_obj_value.get("rootnode") {
-                        None | Some(serde_json::Value::Null) => PushedTree::Replace(None),
-                        Some(v) => match serde_json::from_value(v.clone()) {
-                            Ok(tree) => PushedTree::Replace(Some(tree)),
-                            // Writing the raw tree would leave the reducer's
-                            // copy stale for the next structural edit to
-                            // clobber. Keep the reducer's tree, apply the
-                            // client slices, and answer with the row as
-                            // stored so the pusher resyncs to it.
-                            Err(e) => {
-                                tracing::warn!(
-                                    error = %e,
-                                    tab_id = %tab_id,
-                                    "UpdateObject: layout rootnode failed typed parse; keeping the reducer's tree"
-                                );
-                                PushedTree::KeepCurrent
-                            }
-                        },
-                    };
-                    return update_layout_via_reducer(state, mux_obj_value, tab_id, tree).await;
-                }
-                tracing::warn!(
-                    "UpdateObject: layout row not owned by any tab; writing it directly"
-                );
-            }
-            // Whole-row replace, only for rows the reducer doesn't own (the
-            // client row, an unowned layout row). Workspace/tab/block/window
-            // rows carry reducer-owned fields (`tabids`, `activetabid`,
-            // `blockids`, `workspaceid`); their changes go through the typed
-            // RPCs (`UpdateObjectMeta`, `UpdateTabName`, ...).
+            // Whole-row replace, only for the client row: every other row is
+            // the reducer's (`update_object` says which RPCs change it).
             match update_object(store, mux_obj_value) {
                 Ok((otype, oid, obj_val)) => {
                     let update = MuxObjUpdate {
@@ -432,209 +419,5 @@ pub(super) async fn handle_object_service(state: &AppState, call: &WebCallType) 
             WebReturnType::success_empty()
         }
         _ => WebReturnType::error(format!("unknown object method: {}", call.method)),
-    }
-}
-
-/// The tree a layout push asks for: the pushed one, or (when it didn't
-/// parse) whatever the reducer holds when the push is applied.
-enum PushedTree {
-    Replace(Option<agentmux_common::LayoutNode>),
-    KeepCurrent,
-}
-
-/// SPEC_864 Phase 2 — route a frontend `UpdateObject` layout push through
-/// the reducer as a single `LayoutSetTree` dispatch.
-///
-/// Dispatch AND SQLite apply happen under ONE hold of the `srv_state`
-/// mutex (reagent P1 #1970): with `dispatch_to_reducer`'s usual
-/// release-before-I/O contract, two concurrent pushes for the same tab
-/// could dispatch in order A→B but persist B→A, leaving `db_layout` on
-/// the older tree while `TabRecord` (authoritative as of this route)
-/// holds the newer one — the exact coherence this route exists to
-/// guarantee, and a regression vs. the legacy single atomic `update_raw`.
-/// Holding the lock across the row UPDATE (a sub-ms local SQLite write)
-/// makes persist order equal dispatch order; the SQLite-failure rollback
-/// re-dispatch also runs inside the same hold so no interleaved dispatch
-/// can observe the un-rolled-back state. Publish happens after release
-/// (the wave-obj bridge re-reads the row, so publish must follow the
-/// write; subscribers never see events out of dispatch order because
-/// publish order still matches — see below).
-///
-/// Not carried: `LayoutState.meta`. The legacy whole-row write persisted
-/// it incidentally, but nothing mutates layout meta (`UpdateObjectMeta`
-/// rejects OTYPE_LAYOUT and the frontend's `persistToBackend` writes only
-/// tree/focus/magnify/leaforder/pendingbackendactions), so the reducer
-/// route leaves the stored meta untouched.
-async fn update_layout_via_reducer(
-    state: &AppState,
-    mux_obj_value: serde_json::Value,
-    tab_id: String,
-    pushed_tree: PushedTree,
-) -> WebReturnType {
-    let store = &state.mstore;
-    let oid = mux_obj_value
-        .get("oid")
-        .and_then(|v| v.as_str())
-        .unwrap_or_default()
-        .to_string();
-
-    let get_str = |key: &str| -> String {
-        mux_obj_value
-            .get(key)
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string()
-    };
-    let get_json = |key: &str| -> Option<serde_json::Value> {
-        mux_obj_value.get(key).filter(|v| !v.is_null()).cloned()
-    };
-    // Absent from older clients, which skip the stale check.
-    let base_revision = mux_obj_value.get("layoutrevision").and_then(|v| v.as_u64());
-    let slices = agentmux_common::LayoutClientSlices {
-        leaforder: get_json("leaforder"),
-        focused_node_id: get_str("focusednodeid"),
-        magnified_node_id: get_str("magnifiednodeid"),
-        pending_backend_actions: get_json("pendingbackendactions"),
-    };
-    // ── single critical section: snapshot + dispatch + persist (+ rollback) ──
-    let mut apply_err: Option<String> = None;
-    let mut early_err: Option<String> = None;
-    let stale_at: Option<u64>;
-    let events = {
-        let mut s = state.srv_state.lock().await;
-        // Snapshot the current row for the rollback path INSIDE the
-        // critical section (reagent P1 #1970, review 4): a pre-lock
-        // snapshot could be overtaken by a concurrent push committing
-        // between the read and this lock acquisition — a subsequent
-        // rollback would then restore the STALE snapshot, clobbering the
-        // concurrently-committed newer state in both TabRecord and
-        // db_layout. Read under the lock, immediately before the forward
-        // dispatch, no interleaving is possible.
-        let old_row = match store.get::<LayoutState>(&oid) {
-            Ok(Some(row)) => row,
-            Ok(None) => {
-                early_err = Some(format!("UpdateObject: layout not found: {}", oid));
-                LayoutState::default()
-            }
-            Err(e) => {
-                early_err = Some(format!("UpdateObject: {}", e));
-                LayoutState::default()
-            }
-        };
-        stale_at = base_revision.and_then(|b| crate::reducer::stale_push_revision(&s, &tab_id, b));
-        if let Some(current) = stale_at {
-            tracing::info!(tab_id = %tab_id, base_revision = ?base_revision, current, "UpdateObject: layout push refused, built on a stale layout revision");
-        }
-        if early_err.is_some() || stale_at.is_some() {
-            Vec::new()
-        } else {
-            // Resolved under the lock so a concurrent push can't change the
-            // tree between the read and the dispatch.
-            let new_tree = match pushed_tree {
-                PushedTree::Replace(tree) => tree,
-                PushedTree::KeepCurrent => s.tabs.get(&tab_id).and_then(|t| t.rootnode.clone()),
-            };
-            let cmd = agentmux_common::ipc::Command::LayoutSetTree {
-                tab_id: tab_id.clone(),
-                new_tree,
-                correlation_id: String::new(),
-                slices: Some(slices),
-            };
-            let ctx = crate::reducer::Ctx::new(None);
-            let events = crate::reducer::update(&mut s, cmd, &ctx);
-            let has_error = events
-                .iter()
-                .any(|e| matches!(e, agentmux_common::ipc::Event::Error { .. }));
-            if !has_error {
-                for ev in &events {
-                    if let Err(e) = crate::persist_subscriber::apply_event_to_mstore(ev, store) {
-                        apply_err = Some(e.to_string());
-                        break;
-                    }
-                }
-                if apply_err.is_some() {
-                    // Roll the reducer back to the pre-push row inside the
-                    // same lock hold so no concurrent dispatch can observe
-                    // the divergent state; best-effort mirror to SQLite.
-                    let rollback_cmd = agentmux_common::ipc::Command::LayoutSetTree {
-                        tab_id,
-                        new_tree: old_row.rootnode.clone(),
-                        correlation_id: String::new(),
-                        slices: Some(agentmux_common::LayoutClientSlices {
-                            leaforder: old_row
-                                .leaforder
-                                .as_ref()
-                                .and_then(|v| serde_json::to_value(v).ok()),
-                            focused_node_id: old_row.focusednodeid.clone(),
-                            magnified_node_id: old_row.magnifiednodeid.clone(),
-                            pending_backend_actions: old_row
-                                .pendingbackendactions
-                                .as_ref()
-                                .and_then(|v| serde_json::to_value(v).ok()),
-                        }),
-                    };
-                    let rb_events = crate::reducer::update(&mut s, rollback_cmd, &ctx);
-                    for ev in &rb_events {
-                        if let Err(e) =
-                            crate::persist_subscriber::apply_event_to_mstore(ev, store)
-                        {
-                            tracing::warn!(
-                                error = %e,
-                                "UpdateObject: layout rollback SQLite mirror failed"
-                            );
-                        }
-                    }
-                }
-            }
-            events
-        }
-    };
-
-    if let Some(err) = early_err {
-        return WebReturnType::error(err);
-    }
-    if let Some(current) = stale_at {
-        return refuse_stale_layout_push(store, &oid, current);
-    }
-    if let Some(err_msg) = events.iter().find_map(|e| match e {
-        agentmux_common::ipc::Event::Error { message, .. } => Some(message.clone()),
-        _ => None,
-    }) {
-        return WebReturnType::error(err_msg);
-    }
-    if let Some(err) = apply_err {
-        return WebReturnType::error(format!("UpdateObject: SQLite write failed: {}", err));
-    }
-    publish_events(state, &events);
-
-    // Return the committed row (fresh version) so the pusher's MOS cache
-    // stays in sync — same response shape as the legacy path.
-    match get_object_by_oref(store, &format!("{}:{}", OTYPE_LAYOUT, oid)) {
-        Ok(obj_val) => WebReturnType::success_with_updates(vec![MuxObjUpdate {
-            updatetype: "update".into(),
-            otype: OTYPE_LAYOUT.to_string(),
-            oid,
-            obj: Some(obj_val),
-        }]),
-        Err(e) => WebReturnType::error(format!("UpdateObject: re-read failed: {}", e)),
-    }
-}
-
-/// The answer to a stale layout push: nothing applied, `{stale, layoutrevision}`
-/// as data, and the row as stored, whose queue holds the actions the pusher
-/// missed. SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md §3.5.
-fn refuse_stale_layout_push(store: &crate::backend::storage::store::Store, oid: &str, current: u64) -> WebReturnType {
-    let updates = match get_object_by_oref(store, &format!("{}:{}", OTYPE_LAYOUT, oid)) {
-        Ok(obj_val) => vec![MuxObjUpdate {
-            updatetype: "update".into(),
-            otype: OTYPE_LAYOUT.to_string(),
-            oid: oid.to_string(),
-            obj: Some(obj_val),
-        }],
-        Err(e) => return WebReturnType::error(format!("UpdateObject: re-read failed: {}", e)),
-    };
-    WebReturnType {
-        data: Some(serde_json::json!({ "stale": true, "layoutrevision": current })),
-        ..WebReturnType::success_with_updates(updates)
     }
 }

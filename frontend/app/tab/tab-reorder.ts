@@ -20,7 +20,7 @@ import { onWindowDrag } from "@/app/drag/window-drag-events";
 import { maybeDroppedInAnotherWindow } from "@/app/drag/foreign-drop";
 import { endedByEscape } from "@/app/drag/native-cancel";
 import { endTileDrag } from "@/layout/lib/tile-drag";
-import { pruneDanglingLeaves } from "@/layout/lib/layoutPersistence";
+import { layoutDragEnded } from "@/layout/lib/layoutIntents";
 import { WorkspaceService } from "../store/services";
 import {
     insertionPoint,
@@ -348,20 +348,12 @@ export function useTabDragAndDrop(
             // source unmounted early, …) — and a stuck overlay is a dead
             // tab. Safe here because this only runs at end-of-drag.
             for (const tabId of tabIds()) {
-                getLayoutModelForTabById(tabId)?.activeDrag._set(false);
+                const model = getLayoutModelForTabById(tabId);
+                if (!model?.activeDrag()) continue;
+                model.activeDrag._set(false);
+                layoutDragEnded(model);
             }
             dragActivatedTabIds.clear();
-            // Deferred dangling-leaf prune: mid-drag pruning is gated off
-            // (see pruneDanglingLeaves), so the source tab's disowned
-            // leaf is removed HERE, after the gesture and the move RPC's
-            // Tab updates have settled. 250ms comfortably covers the
-            // observed 20-40ms RPC round-trip.
-            setTimeout(() => {
-                for (const tabId of tabIds()) {
-                    const model = getLayoutModelForTabById(tabId);
-                    if (model) pruneDanglingLeaves(model);
-                }
-            }, 250);
         };
         const stopTileSubscriber = onSessionEnded(({ session: s, reason }) => {
             if (s.kind !== "tile") return;

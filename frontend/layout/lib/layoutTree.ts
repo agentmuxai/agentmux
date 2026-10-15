@@ -24,6 +24,7 @@ import {
     LayoutTreeInsertNodeAction,
     LayoutTreeInsertNodeAtIndexAction,
     LayoutTreeMagnifyNodeToggleAction,
+    LayoutTreeMinimizeNodeAction,
     LayoutTreeMoveNodeAction,
     LayoutTreeResizeNodeAction,
     LayoutTreeState,
@@ -33,7 +34,7 @@ import {
 } from "./types";
 
 import { newLayoutNode } from "./layoutNode";
-import { isEffectivelyMinimized } from "./layoutMinimize";
+import { countExpandedLeaves, isEffectivelyMinimized } from "./layoutMinimize";
 import { LayoutTreeReplaceNodeAction, LayoutTreeSplitHorizontalAction, LayoutTreeSplitVerticalAction } from "./types";
 
 export const DEFAULT_MAX_CHILDREN = 5;
@@ -479,6 +480,27 @@ export function magnifyNodeToggle(layoutState: LayoutTreeState, action: LayoutTr
         layoutState.focusedNodeId = action.nodeId;
     }
     
+}
+
+/**
+ * Show a leaf as a header chip (`minimized`), ending its magnify (also for a
+ * pane that already is a chip). Its size is kept: the chip's geometry is
+ * derived at render. The last pane still showing content stays: the window
+ * always keeps one.
+ */
+export function minimizeNode(layoutState: LayoutTreeState, action: LayoutTreeMinimizeNodeAction) {
+    const node = findNode(layoutState.rootNode, action.nodeId);
+    if (!node || node.children?.length) return;
+    if (!node.minimized && countExpandedLeaves(layoutState.rootNode) <= 1) return;
+    if (layoutState.magnifiedNodeId === action.nodeId) layoutState.magnifiedNodeId = undefined;
+    node.minimized = true;
+}
+
+/** Show a minimized leaf again. */
+export function restoreNode(layoutState: LayoutTreeState, action: LayoutTreeMinimizeNodeAction) {
+    const node = findNode(layoutState.rootNode, action.nodeId);
+    if (!node || node.children?.length) return;
+    node.minimized = undefined;
 }
 
 export function clearTree(layoutState: LayoutTreeState) {

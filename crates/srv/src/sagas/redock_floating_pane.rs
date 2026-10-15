@@ -17,12 +17,10 @@
 // After the move:
 // * Source workspace's tab is empty → frontend's empty-tab watcher
 //   (PR #1089) closes the floating window.
-// * Target tab's `blockids` now includes the moved block. The frontend
-//   target window updates its layout local-state to add a leaf and
-//   persists via the standard `UpdateObject` path. The saga itself
-//   does not touch LayoutState — same pattern as within-window pane
-//   drag (frontend mutates layout locally, persists, backend just
-//   stores).
+// * Target tab's `blockids` now includes the moved block. The handler
+//   (`handle_redock_floating_pane`, tear_off.rs) then places it in the
+//   target tab's layout and takes it out of the source's; the saga itself
+//   does not touch LayoutState.
 //
 // **Compensation:** single-step saga, so no in-saga compensation
 // chain needed. If MoveBlock fails, the reducer's validation rejects

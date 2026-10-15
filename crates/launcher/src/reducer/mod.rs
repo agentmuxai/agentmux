@@ -377,22 +377,14 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Reduced {
         Command::GetSrvSnapshot => srv_pipe_only(state, "GetSrvSnapshot"),
         // Phase E.4.B — layout-tree commands are srv-pipe only; same
         // soft-error treatment as GetSrvSnapshot above.
-        Command::LayoutInsertNode { .. }
-        | Command::LayoutInsertNodeAtIndex { .. }
-        | Command::LayoutDeleteNode { .. }
+        Command::LayoutDeleteNode { .. }
         | Command::LayoutDeleteNodeByBlock { .. }
         | Command::LayoutStackPush { .. }
         | Command::LayoutStackActivate { .. }
         | Command::CreateBlockInStack { .. }
         | Command::LayoutStackMove { .. }
+        | Command::LayoutApplyIntent { .. }
         | Command::LayoutQueueBackendActions { .. }
-        | Command::LayoutMoveNode { .. }
-        | Command::LayoutSwapNodes { .. }
-        | Command::LayoutResizeNodes { .. }
-        | Command::LayoutReplaceNode { .. }
-        | Command::LayoutSplitHorizontal { .. }
-        | Command::LayoutSplitVertical { .. }
-        | Command::LayoutClear { .. }
         | Command::LayoutSetTree { .. }
         | Command::UpdateWindowMeta { .. } => misrouted(
             state,
