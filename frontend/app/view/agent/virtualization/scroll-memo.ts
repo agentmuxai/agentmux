@@ -47,22 +47,33 @@ export function takeScrollMemo(blockId: string): ScrollMemo | undefined {
 
 /**
  * The pane's position, read from the DOM (a one-time read, when the page goes
- * away): the first row whose bottom is below the scroller's top. The offset is
- * stored unzoomed, like `scrollTop`: `getBoundingClientRect` is in zoomed px
- * under the pane's CSS zoom, so it is divided by `zoom`.
+ * away): the first row that starts on screen, and how far below the top it
+ * starts (a negative offset). Anchoring on the row cut by the top edge instead
+ * broke when that row came back a different height (a tall tool output, in the
+ * lab: 1411 px into it landed in a later row); a row that starts on screen is
+ * placed by its start, whatever its height. Only when one row covers the whole
+ * screen is that row used, with the offset into it. Stored unzoomed, like
+ * `scrollTop`: `getBoundingClientRect` is in zoomed px under the pane's CSS
+ * zoom, so it is divided by `zoom`.
  */
 export function captureScrollMemo(scroller: HTMLElement | undefined, following: boolean, zoom = 1): ScrollMemo | null {
     if (following) return { bottom: true };
     if (!scroller) return null;
-    const top = scroller.getBoundingClientRect().top;
+    const view = scroller.getBoundingClientRect();
+    const scale = zoom > 0 ? zoom : 1;
+    let cut: { nodeId: string; offsetPx: number } | null = null;
     for (const row of scroller.querySelectorAll<HTMLElement>("[data-node-id]")) {
         const box = row.getBoundingClientRect();
-        if (box.bottom > top + 1) {
-            const nodeId = row.dataset.nodeId;
-            return nodeId ? { nodeId, offsetPx: (top - box.top) / (zoom > 0 ? zoom : 1) } : null;
+        const nodeId = row.dataset.nodeId;
+        if (!nodeId || box.bottom <= view.top + 1) continue;
+        if (box.top >= view.top - 1) {
+            // Starts on screen (below the top edge, above the bottom one).
+            if (box.top < view.bottom) return { nodeId, offsetPx: (view.top - box.top) / scale };
+            break;
         }
+        cut ??= { nodeId, offsetPx: (view.top - box.top) / scale };
     }
-    return null;
+    return cut;
 }
 
 /**
