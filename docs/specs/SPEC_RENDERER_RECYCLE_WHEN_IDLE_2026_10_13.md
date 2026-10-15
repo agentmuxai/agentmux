@@ -1,7 +1,7 @@
 # Spec: recycle a window's renderer when it's idle and over budget
 
 **Date:** 2026-10-13, revised 2026-10-14 against `main` @ `ab6a9c400`
-**Status:** active. Shipped: §2's reload without a history entry (#4940); composer drafts, sent-message history and attachment drafts across a reload (#4942); pane overlay changes saved, and `flushPaneSnapshots()` (#4943). Left: the rest of Phase A (§2: scroll position, browser panes, secondary windows), Phase B (§3), Phase C (§4).
+**Status:** active. Shipped: §2's reload without a history entry (#4940); composer drafts, sent-message history and attachment drafts across a reload (#4942); pane overlay changes saved, and `flushPaneSnapshots()` (#4943); browser panes keep their page (#4944). Left: the rest of Phase A (§2: scroll position, secondary windows), Phase B (§3), Phase C (§4).
 **Plan item:** #5 of `PLAN_RENDERER_MEMORY_FIXES_2026_10_12.md`.
 **Evidence:** `docs/reports/REPORT_RENDERER_MEMORY_ROOT_CAUSES_2026_10_12.md` §4.3.
 **Related:** `SPEC_WINDOW_CHURN_RENDERER_LEAK_2026_10_13.md` (#4858: a navigation that adds a history entry keeps the old page in the back/forward cache).

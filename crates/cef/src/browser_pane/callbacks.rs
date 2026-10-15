@@ -619,6 +619,25 @@ pub fn on_loading_state_change_browser_pane(
     }
 }
 
+/// Tell a newly loaded frontend where an already-live pane is: its URL, loading
+/// state and back/forward. A pane re-attached without navigating (a reload of
+/// its window, `BrowserPaneManager::create`'s `AlreadyLive` arm) gets none of
+/// the load callbacks that normally carry these.
+pub(crate) fn emit_current_nav_state(state: &Arc<AppState>, block_id: &str, browser: &Browser) {
+    crate::events::emit_browser_pane_event(
+        state,
+        block_id,
+        "browser-pane-nav-state",
+        &serde_json::json!({
+            "block_id": block_id,
+            "url": main_frame_url(browser),
+            "can_go_back": browser.can_go_back() != 0,
+            "can_go_forward": browser.can_go_forward() != 0,
+            "is_loading": is_pane_main_frame_loading(state, block_id),
+        }),
+    );
+}
+
 /// The main frame's current URL, or empty when the browser has no main frame.
 pub(crate) fn main_frame_url(browser: &Browser) -> String {
     let url = browser
