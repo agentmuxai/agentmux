@@ -314,11 +314,6 @@ pub(crate) async fn handle_redock_floating_pane(state: &AppState, call: &WebCall
     )
 }
 
-/// Place a just-redocked block as a TAB of the pane holding
-/// `target_block_id`, active: the reducer's own tree first
-/// (`LayoutStackPush`, which also checks the block now lives in this tab),
-/// then a queued `stackpush` so the window showing that tab adds the pill.
-/// Same backend-then-frontend shape as `pane.moveTab`.
 /// Undo a redock whose layout step failed after the `MoveBlock` saga moved
 /// `block_id` to `target_tab_id`: move it back to `source_tab_id` and, if the
 /// source tree no longer holds it, append it there. Best effort; the caller
@@ -350,6 +345,11 @@ async fn put_redocked_block_back(state: &AppState, block_id: &str, target_tab_id
     }
 }
 
+/// Place a just-redocked block as a TAB of the pane holding
+/// `target_block_id`, active: the reducer's own tree first
+/// (`LayoutStackPush`, which also checks the block now lives in this tab),
+/// then a queued `stackpush` so the window showing that tab adds the pill.
+/// Same backend-then-frontend shape as `pane.moveTab`.
 async fn redock_as_tab(
     state: &AppState,
     target_tab_id: &str,
