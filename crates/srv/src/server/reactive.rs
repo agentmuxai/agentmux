@@ -936,7 +936,7 @@ pub(crate) async fn deliver(
         // entry or its forward failed. Queries each discovered LAN peer for the
         // agent; result is cached for 60s to avoid per-inject mDNS fan-out.
         let lan_peer = match state.lan_discovery.find_agent(&req.target_agent, &state.http_client).await {
-            Some((url, key)) => match super::jekt_files::lan_peer_takes(&state.http_client, &req, &url, &key, &mut files_too_old).await {
+            Some((url, key)) => match super::jekt_files::lan_peer_takes(&state.http_client, &req, &url, &key, &mut files_too_old, &mut candidate_seen).await {
                 Ok(takes) => takes.then_some((url, key)),
                 Err(refusal) => return refusal,
             },

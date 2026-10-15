@@ -205,17 +205,21 @@ async fn transfer_stream(svc: &attachments::Service, req: &InjectionRequest) -> 
 }
 
 /// Whether the LAN peer at `url` takes files for `target`: its agent answer
-/// lists the feature (spec §3.4).
-pub(crate) async fn peer_accepts_files(client: &reqwest::Client, url: &str, auth_key: &str, target: &str) -> bool {
+/// lists the feature (spec §3.4). `None` when the question went unanswered
+/// (unreachable, an error status, a body that isn't JSON), which says
+/// nothing about the peer's build.
+pub(crate) async fn peer_accepts_files(client: &reqwest::Client, url: &str, auth_key: &str, target: &str) -> Option<bool> {
     let mut get = client.get(format!("{url}/agentmux/reactive/agent")).query(&[("id", target)]);
     if !auth_key.is_empty() {
         get = get.header(agentmux_common::AUTH_KEY_HEADER, auth_key);
     }
-    let Ok(resp) = get.send().await else { return false };
-    let Ok(body) = resp.json::<serde_json::Value>().await else { return false };
-    body.get("jekt_features")
-        .and_then(|f| f.as_array())
-        .is_some_and(|f| f.iter().any(|v| v.as_str() == Some(jekt_files::FEATURE)))
+    let resp = get.send().await.ok().filter(|r| r.status().is_success())?;
+    let body = resp.json::<serde_json::Value>().await.ok()?;
+    Some(
+        body.get("jekt_features")
+            .and_then(|f| f.as_array())
+            .is_some_and(|f| f.iter().any(|v| v.as_str() == Some(jekt_files::FEATURE))),
+    )
 }
 
 /// An answer that ends the sender's search: the files were refused for a
@@ -313,20 +317,32 @@ async fn receive<R: tokio::io::AsyncRead + Unpin>(
         return serde_json::json!({ "success": false, "error": format!("agent not found: {target}") });
     }
     let withheld = withheld_reason(&req).is_some();
+    // Files over the LAN come only from a verified sender (spec §4.3): refuse
+    // the rest before reading a byte, rather than drain what anyone holding
+    // the broadcast LAN key chose to upload.
+    if tier == "lan" && withheld {
+        return refused(&req, format!("files refused: {}", withheld_reason(&req).unwrap_or_default()));
+    }
     let msgid = req.request_id.clone().unwrap_or_default();
     let claimed = tier == "lan" && !withheld;
     if claimed && !reserve(&msgid) {
         return refused(&req, "files refused: this message was already delivered");
     }
 
-    if withheld {
-        // Read past the files unstored, so the sender gets this answer
-        // rather than a reset connection.
-        let total: u64 = files.iter().map(|f| f.size).sum();
-        let mut rest = tokio::io::AsyncReadExt::take(reader, total);
-        let _ = tokio::io::copy(&mut rest, &mut tokio::io::sink()).await;
-    } else if let Some(svc) = attachments::get() {
-        store_files(&svc, &files, reader).await;
+    // A transfer that stalls gives its slot back: what arrived whole is kept.
+    let read = async {
+        if withheld {
+            // Same machine, full key: read past the files unstored, so the
+            // sender gets this answer rather than a reset connection.
+            let total: u64 = files.iter().map(|f| f.size).sum();
+            let mut rest = tokio::io::AsyncReadExt::take(reader, total);
+            let _ = tokio::io::copy(&mut rest, &mut tokio::io::sink()).await;
+        } else if let Some(svc) = attachments::get() {
+            store_files(&svc, &files, reader).await;
+        }
+    };
+    if tokio::time::timeout(TRANSFER_TIMEOUT, read).await.is_err() {
+        tracing::warn!(target = %target, "jekt files: transfer timed out");
     }
     prepare(&mut req).await;
     let delivered = req.files_delivery.as_ref().map_or(0, |d| d.delivered);
@@ -404,21 +420,31 @@ pub(crate) fn entry_takes(req: &InjectionRequest, entry: &crate::backend::reacti
 }
 
 /// Whether the LAN peer found for this jekt can take it. A jekt with files
-/// needs the peer to advertise them (else `too_old`), and must be within the
-/// LAN's limits, or it is refused outright: no other route is left for it.
+/// needs the peer to advertise them (else `too_old`; a probe that went
+/// unanswered sets `candidate_seen`, so the sender is told to try again), and
+/// must be within the LAN's limits, or it is refused outright: no other
+/// route is left for it.
 pub(crate) async fn lan_peer_takes(
     client: &reqwest::Client,
     req: &InjectionRequest,
     url: &str,
     auth_key: &str,
     too_old: &mut bool,
+    candidate_seen: &mut bool,
 ) -> Result<bool, serde_json::Value> {
     let Some(files) = req.files.as_deref() else {
         return Ok(true);
     };
-    if !peer_accepts_files(client, url, auth_key, &req.target_agent).await {
-        *too_old = true;
-        return Ok(false);
+    match peer_accepts_files(client, url, auth_key, &req.target_agent).await {
+        Some(true) => {}
+        Some(false) => {
+            *too_old = true;
+            return Ok(false);
+        }
+        None => {
+            *candidate_seen = true;
+            return Ok(false);
+        }
     }
     jekt_files::check_tier_limits(files, "lan").map_err(|e| refused(req, format!("files refused: {e}")))?;
     Ok(true)
@@ -676,6 +702,17 @@ mod tests {
         entry.jekt_features = vec![jekt_files::FEATURE.into()];
         let mut too_old = false;
         assert!(entry_takes(&with_files, &entry, &mut too_old) && !too_old);
+    }
+
+    #[tokio::test]
+    async fn an_unanswered_lan_probe_is_inconclusive_not_too_old() {
+        let f = files();
+        let req = req_with(f.clone(), &jekt_files::bind_msgid("m", &f), "host");
+        let client = reqwest::Client::builder().timeout(std::time::Duration::from_secs(2)).build().unwrap();
+        let (mut too_old, mut seen) = (false, false);
+        let takes = lan_peer_takes(&client, &req, "http://127.0.0.1:1", "", &mut too_old, &mut seen).await;
+        assert_eq!(takes.ok(), Some(false));
+        assert!(!too_old && seen, "a peer that didn't answer may still be up to date");
     }
 
     #[test]
