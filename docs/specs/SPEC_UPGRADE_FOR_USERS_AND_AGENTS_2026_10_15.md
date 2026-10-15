@@ -176,19 +176,34 @@ What already happens, and what's added:
 
 Installed and portable builds keep their data per version
 (`channels/<ch>/versions/<v>/data`); config, agents and accounts are shared
-across versions. I found no code that carries the previous version's
-`objects.db` forward (`launcher/src/data_dir.rs` migrates only the old
-unversioned layout). If that's right, an upgraded stable install starts with
-an empty `objects.db`:
-- the window layout and session snapshot are lost;
-- each pane's `agent:sessionid` is lost, so agents resume only through the
+across versions. Nothing carried the previous version's databases forward
+(`launcher/src/data_dir.rs` migrates only the old unversioned layout), so an
+upgraded install started with an empty `objects.db`:
+- the window layout and session snapshot were lost;
+- each pane's `agent:sessionid` was lost, so agents resumed only through the
   shared registry (OpenAgent's resume).
 
-**To verify first, then fix:** on the first start of a new version in a
-channel, copy the newest older version's `data/` into the new version's, then
-let migrations upgrade it (with the pre-migration snapshot that already
-exists). Local `task package` builds get a fresh channel per build on
-purpose and are out of scope (`REPORT_AGENT_HISTORY_LOST_ON_NEW_BUILD_2026_09_25.md`).
+**Verified** on a real stable install: 0.55.42, 0.56.9 and 0.58.1 each have
+a different `db_client` id, so each started from nothing. Agent definitions
+came back only because they are also kept in the shared store.
+
+**Fixed in phase 2** (`crates/srv/src/bootstrap/carry_forward.rs`): on the
+first start of a version (no `objects.db` yet), before the pre-migration
+snapshot and migrations, srv copies `filestore.db`, `sagas.db` and then
+`objects.db` from the newest older version in the same channel. Each copy
+is `VACUUM INTO` a temporary file, renamed into place:
+- a consistent snapshot even if the older version is still running (two
+  portable folders side by side; on Windows `srv.lock` doesn't exclude);
+- never a half-written file; any failure removes what was copied and the
+  version starts fresh, as before;
+- never from a newer version, and never over a version that has started.
+
+The other files in `data/` are not copied: logs, locks and `authkey.dev` are
+per run, `shell/` is regenerated, and the zones flag only matters to a store
+with no migration records. Dev builds keep data per branch and local
+`task package` builds get a fresh channel per build on purpose, so neither
+has an older version to copy from
+(`REPORT_AGENT_HISTORY_LOST_ON_NEW_BUILD_2026_09_25.md`).
 
 ## 7. Phases
 
