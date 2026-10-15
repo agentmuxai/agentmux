@@ -302,20 +302,6 @@
             background: var(--accent-bg-subtle);
         }
 
-        &--new {
-            border-style: dashed;
-            background: transparent;
-
-            .agent-card-icon {
-                font-weight: bold;
-                color: var(--secondary-text-color);
-            }
-
-            &:hover:not(:disabled) .agent-card-icon {
-                color: var(--accent-color);
-            }
-        }
-
         &--disabled {
             opacity: 0.5;
             cursor: not-allowed;
@@ -447,24 +433,6 @@
             min-width: 0;
         }
 
-        .agent-card-name {
-            font-size: var(--text-base);
-            font-weight: 500;
-        }
-
-        .agent-card-desc {
-            font-size: var(--text-xs);
-            color: var(--secondary-text-color);
-            @include mixins.truncate;
-        }
-
-        .agent-card-slug {
-            font-size: var(--text-2xs);
-            color: color-mix(in srgb, var(--secondary-text-color) 65%, transparent);
-            font-family: var(--font-mono);
-            @include mixins.truncate;
-        }
-
         // Definition card (post-SPEC_AGENT_DEFINITIONS_MODAL) — title
         // is the CLI brand name; the capability blurb and context-file
         // badge live in the caption row below.
@@ -480,62 +448,6 @@
             font-weight: 500;
             color: var(--secondary-text-color);
             @include mixins.truncate;
-        }
-
-        // Inline rename row — replaces the name span while editing
-        .agent-card-rename-row {
-            display: flex;
-            align-items: center;
-            gap: var(--space-1);
-        }
-
-        .agent-card-rename-input {
-            flex: 1;
-            min-width: 0;
-            font-size: var(--text-base);
-            font-weight: 500;
-            font-family: inherit;
-            color: var(--main-text-color);
-            background: var(--tint-2);
-            border: 1px solid var(--accent-color);
-            border-radius: 0;
-            padding: 1px 5px;
-            outline: none;
-
-            &.agent-card-rename-input--error {
-                border-color: var(--error-color);
-            }
-        }
-
-        .agent-card-rename-btn {
-            width: 22px;
-            height: 22px;
-            @include mixins.flex-center(inline-flex);
-            padding: 0;
-            border: 1px solid var(--border-color);
-            background: var(--tint-2);
-            border-radius: 0;
-            color: var(--main-text-color);
-            font-size: var(--text-xs);
-            cursor: default;
-            flex-shrink: 0;
-
-            &:hover {
-                border-color: var(--accent-color);
-                background: var(--accent-bg-strong);
-            }
-
-            &--confirm:hover {
-                color: var(--success-color);
-                border-color: var(--success-color);
-                background: var(--success-bg-strong);
-            }
-
-            &--cancel:hover {
-                color: var(--error-color);
-                border-color: var(--error-color);
-                background: var(--error-bg-strong);
-            }
         }
 
         .agent-card-spinner {

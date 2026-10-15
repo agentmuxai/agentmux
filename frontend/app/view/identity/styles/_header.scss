@@ -1,24 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// Identity view header + body wrapper.
-
-// ── Header ───────────────────────────────────────────────────────────────────
-
-.identity-add-btn {
-    margin-left: auto;
-    padding: 3px 10px;
-    font-size: var(--text-sm);
-    border-radius: 0;
-    border: 1px solid var(--border-color);
-    background: transparent;
-    color: var(--accent-color);
-    cursor: default;
-
-    &:hover {
-        background: var(--hover-bg-color);
-    }
-}
+// Identity view body wrapper.
 
 // ── Body ─────────────────────────────────────────────────────────────────────
 //

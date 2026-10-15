@@ -85,10 +85,6 @@ body {
     }
 }
 
-a.plain-link {
-    color: var(--secondary-text-color);
-}
-
 // A `::-webkit-scrollbar*` pseudo-element INHERITS the `cursor` of its
 // scroll-host element (cursor is an inherited property). So the arrow must be
 // PINNED here explicitly — deleting the declaration does NOT fall back to the
@@ -137,10 +133,6 @@ a.plain-link {
 
 *::-webkit-scrollbar-thumb:hover {
     background-color: var(--scrollbar-thumb-hover-color);
-}
-
-.text-fixed {
-    font: var(--fixed-font);
 }
 
 .error-boundary {

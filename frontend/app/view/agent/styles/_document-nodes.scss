@@ -331,9 +331,10 @@ $transcript-preview-max-height: calc(50vh / 3);
 
     // === Tool Block ===
     .agent-tool-block {
-        // position:relative anchors the `.agent-tool-content` absolute
-        // overlay in `.overlay-mode` (hover / pinned). See
-        // docs/specs/SPEC_TOOL_OVERLAY_AND_SCROLL_ON_TYPE_2026_04_13.md §2.
+        // position:relative makes the block the containing block for anything
+        // inside it positioned absolutely. It first anchored the hover / pinned
+        // tool overlay, since removed
+        // (docs/specs/SPEC_TOOL_OVERLAY_AND_SCROLL_ON_TYPE_2026_04_13.md §2).
         position: relative;
         border: none;
         border-left: 2px solid var(--border-color);
@@ -540,12 +541,6 @@ $transcript-preview-max-height: calc(50vh / 3);
         &.canceled         .agent-tool-status-icon { color: var(--secondary-text-color); }
         &.pending_approval .agent-tool-status-icon { color: var(--warning-color); }
         &.denied           .agent-tool-status-icon { color: var(--secondary-text-color); }
-
-        .agent-tool-content {
-            padding: 0 var(--space-1) var(--space-1) var(--space-4);
-            user-select: text;
-            cursor: text;
-        }
 
         // Phase A of SPEC_TOOL_AUTO_EXPAND_PANEL_2026_05_16.md replaced
         // the portal-based overlay with this inline panel. The panel sits
@@ -1023,11 +1018,6 @@ $transcript-preview-max-height: calc(50vh / 3);
 
             .agent-message-icon {
                 flex: 1;
-            }
-
-            .agent-message-time {
-                color: var(--secondary-text-color);
-                font-size: var(--text-xs);
             }
         }
 
