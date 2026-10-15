@@ -47,6 +47,9 @@ import "./PaneTabStrip.scss";
 // SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §3.1.
 import { asDocTabDragData, docTabItemType, paneTabItemType, type DocTabDragData } from "@/app/drag/drag-types";
 import { createScrollEdges } from "./scroll-edges";
+import { usePaneTabVisibility } from "@/app/block/pane-tab-visibility";
+import { useWindowTabDisplayed } from "@/app/workspace/window-tab-visibility";
+import { createStripReveal, registerStripWithPane } from "./strip-reveal-controller";
 
 // Matches the other reveal-gate/cross-fade durations added alongside this
 // one in SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md §2.4.
@@ -338,6 +341,23 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
     let widthResetTimeout: ReturnType<typeof setTimeout> | undefined;
     onCleanup(() => clearTimeout(widthResetTimeout));
 
+    // Edge fades while the tabs overflow (scroll-edge-fade, PaneTabStrip.scss).
+    const edges = createScrollEdges(() => stripRef);
+
+    // Keeps the selected tab in view (strip-reveal-controller.ts). A strip in a
+    // hidden window tab, or in a kept-alive document block that isn't showing,
+    // reads no geometry; it reveals once when it is shown again.
+    const windowDisplayed = useWindowTabDisplayed();
+    const blockVisibility = props.docDrag ? usePaneTabVisibility(props.docDrag.blockId) : undefined;
+    const reveal = createStripReveal({
+        strip: () => stripRef,
+        activeId: () => props.activeId,
+        tabIds: () => props.tabs.map(props.getId),
+        shown: () => windowDisplayed() && (blockVisibility?.() ?? "active") === "active",
+        overflows: () => edges.moreLeft() || edges.moreRight(),
+    });
+    registerStripWithPane(() => stripRef, reveal);
+
     // Cross-pane drop-to-append (Phase 4, §3.4). A dwell-free hover flash —
     // unlike the outer Window Tab bar's spring-loaded switch (which needs a
     // dwell because committing reveals a HIDDEN tab), a target Pane's
@@ -456,6 +476,7 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
                 const wasAnimating = widthResetTimeout !== undefined;
                 const holdWidth = wasAnimating ? el.getBoundingClientRect().width : lastMeasuredWidth;
                 clearTimeout(widthResetTimeout);
+                reveal.setWidthAnimating(false);
                 el.style.transition = "none";
                 el.style.width = "";
                 // Forces the reflow that reveals the TRUE natural width for
@@ -467,9 +488,11 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
                     el.getBoundingClientRect(); // force reflow before the transition kicks in
                     el.style.transition = `width ${WIDTH_TRANSITION_MS}ms ${EASE_OUT}`;
                     el.style.width = `${newWidth}px`;
+                    reveal.setWidthAnimating(true);
                     widthResetTimeout = setTimeout(() => {
                         el.style.width = "";
                         el.style.transition = "";
+                        reveal.setWidthAnimating(false);
                     }, WIDTH_TRANSITION_MS + 20);
                 }
                 lastMeasuredWidth = newWidth;
@@ -514,17 +537,26 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
         const el = stripRef;
         if (!el) return;
         const handleWheel = (e: WheelEvent) => {
-            if (el.scrollWidth <= el.clientWidth) return;
+            if (el.scrollWidth <= el.clientWidth) return; // nothing to scroll: not the user scrolling it
+            // The user's scroll: it stands until the next reveal, and stops one in flight.
+            reveal.noteUserScroll();
             if (Math.abs(e.deltaX) >= Math.abs(e.deltaY)) return;
             e.preventDefault();
             el.scrollLeft += e.deltaY;
         };
+        const handleTouch = () => {
+            if (el.scrollWidth > el.clientWidth) reveal.noteUserScroll();
+        };
+        const handlePointerDown = () => reveal.notePointerDown();
         el.addEventListener("wheel", handleWheel, { passive: false });
-        onCleanup(() => el.removeEventListener("wheel", handleWheel));
+        el.addEventListener("touchmove", handleTouch, { passive: true });
+        el.addEventListener("pointerdown", handlePointerDown, { passive: true });
+        onCleanup(() => {
+            el.removeEventListener("wheel", handleWheel);
+            el.removeEventListener("touchmove", handleTouch);
+            el.removeEventListener("pointerdown", handlePointerDown);
+        });
     });
-
-    // Edge fades while the tabs overflow (scroll-edge-fade, PaneTabStrip.scss).
-    const edges = createScrollEdges(() => stripRef);
 
     return (
         <div
