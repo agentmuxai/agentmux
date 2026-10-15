@@ -290,6 +290,9 @@ export function NativeMemoryManager(): JSX.Element {
     onCleanup(onMuxEvent(WpsEvent.AgentContentChanged, refetchLaunchCosts));
     onCleanup(onMuxEvent(WpsEvent.SkillsChanged, refetchLaunchCosts));
     onCleanup(onMuxEvent(WpsEvent.AgentSkillsChanged, refetchLaunchCosts));
+    // An agent's own edits (its folder, its kind) change its startup file and
+    // which Operator Config entries it gets.
+    onCleanup(onMuxEvent(WpsEvent.AgentsChanged, refetchLaunchCosts));
 
     // The open panes, for their windows: refetched when a pane opens or
     // closes anywhere (tracked blocks), and when the user comes back to this
