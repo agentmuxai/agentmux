@@ -543,7 +543,14 @@ async fn wait_on(arguments: &Value, cx: &ToolCtx<'_>, id: &str, since: u64, skip
                     c.iter().map(|m| m.map(|m| m.as_str().to_string())).collect::<Vec<_>>()
                 }),
                 Until::Quiet => (quiet_for >= quiet_ms).then(Vec::new),
-                Until::Prompt => (quiet_for >= 300 && at_prompt(&text, family)).then(Vec::new),
+                // The prompt is the terminal's last line now, whenever it was
+                // printed: a shell already idle at it counts, not only output
+                // that came after the call.
+                Until::Prompt if quiet_for >= 300 => {
+                    let now = strip_ansi(&read_log(cx, id, None, 5).await?.content);
+                    at_prompt(&now, family).then(Vec::new)
+                }
+                Until::Prompt => None,
                 Until::Exit => None,
             };
             if let Some(groups) = found {
