@@ -329,7 +329,8 @@ replace all round-trip through srv). Do NOT auto-merge on bot approval.**
 - **The window mirrors, and pushes nothing.** A queued placement is applied with srv's node id
   and srv's action id for the branches, and skipped when the block is already in the tree. A
   model that loads a row takes its queued actions as seen. Pane-tab edits send only their
-  command, through the same outbox as the intents. A block that moved elsewhere leaves the local
+  command, through the same outbox as the intents (still sent if the window's model is disposed
+  meanwhile, since a tab close waits for it). A block that moved elsewhere leaves the local
   tree only. The dangling-leaf prune sends `delete` intents.
 - **A window compares only with a row that has its changes.** The pane-tab commands answer with
   the row's version, as intents do, and adding a pane tab reads it after `pane.open`; until the

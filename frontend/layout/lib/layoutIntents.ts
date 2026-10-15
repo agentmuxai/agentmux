@@ -54,13 +54,17 @@ export function queueLayoutPush(model: LayoutModel): void {
 
 const SEND_ATTEMPTS = 3;
 
-/** Send the outbox in order, one item at a time. */
+/** Send the outbox in order, one item at a time. A disposed model (its tab
+ *  left this window or closed) sends nothing more of its own tree, but its
+ *  pane-tab commands still go: their callers wait for them. */
 export async function flushLayoutOutbox(model: LayoutModel): Promise<void> {
     if (model.layoutSending) return;
     model.layoutSending = true;
     try {
-        while (model.layoutOutbox.length && !model.disposed) {
+        while (model.layoutOutbox.length) {
+            if (model.disposed) model.layoutOutbox = model.layoutOutbox.filter((i) => i.kind === "command");
             const item = model.layoutOutbox.shift();
+            if (!item) break;
             if (item.kind === "push") {
                 // The push carries the whole local tree, so every intent
                 // queued behind it is in it already. Commands still go: their

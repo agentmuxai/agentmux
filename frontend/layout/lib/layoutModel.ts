@@ -391,7 +391,9 @@ export class LayoutModel {
         // Stop every pending write first: a delayed persist or prune from a
         // model whose tab has left could overwrite the tab's new owner.
         this.disposed = true;
-        this.layoutOutbox = [];
+        // Queued pane-tab commands still go (their callers wait on them).
+        this.layoutOutbox = this.layoutOutbox.filter((item) => item.kind === "command");
+        void flushLayoutOutbox(this);
         if (this.persistDebounceTimer) clearTimeout(this.persistDebounceTimer);
         this.persistDebounceTimer = null;
         if (this.startupPruneTimer) clearTimeout(this.startupPruneTimer);

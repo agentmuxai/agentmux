@@ -287,7 +287,7 @@ describe("layoutStack", () => {
 
             setActiveBlockInStack(model, nodeId, "b1");
 
-await settle();
+            await settle();
             expect(rpcCall).toHaveBeenCalledTimes(1);
             const [command, data] = rpcCall.mock.calls[0];
             expect(command).toBe("pane.activateTab");
@@ -385,7 +385,7 @@ await settle();
 
             const data = model.treeState.rootNode!.data!;
             expect(data.blockStack).toEqual(["b3", "b1", "b2"]);
-await settle();
+            await settle();
             expect(rpcCall).toHaveBeenCalledWith(
                 "pane.moveTab",
                 { block_id: "b3", target_block_id: "b1", position: "before", activate: false, action_id: expect.any(String) },
@@ -419,7 +419,7 @@ await settle();
             expect(data.blockStack).toEqual(["b2", "b1"]);
             expect(data.blockId).toBe("b1");
             expect(data.activeBlockId).toBe("b1");
-await settle();
+            await settle();
             expect(rpcCall).toHaveBeenCalledWith(
                 "pane.moveTab",
                 { block_id: "b1", target_block_id: "b2", position: "after", activate: true, action_id: expect.any(String) },
@@ -473,7 +473,7 @@ await settle();
             expect(effectiveStack(b.data!)).toEqual(["b1", "a2"]); // and joined pane B
             expect(b.data!.activeBlockId).toBe("a2");
             expect(b.data!.blockId).toBe("a2");
-await settle();
+            await settle();
             expect(rpcCall).toHaveBeenCalledWith(
                 "pane.moveTab",
                 { block_id: "a2", target_block_id: "b1", position: "end", activate: true, action_id: expect.any(String) },
@@ -530,7 +530,7 @@ await settle();
 
                 moveBlockInStack(model, "a1", "b1", "end", true);
 
-await settle();
+                await settle();
                 expect(rpcCall).toHaveBeenCalledTimes(1);
                 expect(rpcCall).toHaveBeenCalledWith(
                     "pane.moveTab",

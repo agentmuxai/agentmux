@@ -246,7 +246,16 @@ impl BrowserPaneManager {
                 );
                 if let Some(browser) = state.get_browser(&label) {
                     if let Some(frame) = browser.main_frame() {
-                        frame.load_url(Some(&CefString::from(url)));
+                        let current = CefString::from(&frame.url()).to_string();
+                        if same_page(&current, url) {
+                            // A reload of the window re-mounts the pane with
+                            // the page it already shows: keep it (its scroll,
+                            // form input, a playing video) instead of reloading
+                            // it (SPEC_RENDERER_RECYCLE_WHEN_IDLE_2026_10_13.md §2).
+                            crate::browser_pane::callbacks::emit_current_nav_state(state, block_id, &browser);
+                        } else {
+                            frame.load_url(Some(&CefString::from(url)));
+                        }
                     }
                 }
                 Ok(())
@@ -322,5 +331,32 @@ impl BrowserPaneManager {
                 Ok(())
             }
         }
+    }
+}
+
+/// Whether a live pane's committed URL is already the page `requested` asks
+/// for, so re-attaching needs no navigation. A trailing slash is the only
+/// difference ignored; an error page (a `data:` URL) never matches, so it
+/// still retries.
+fn same_page(current: &str, requested: &str) -> bool {
+    !current.is_empty() && current.trim_end_matches('/') == requested.trim_end_matches('/')
+}
+
+#[cfg(test)]
+mod same_page_tests {
+    use super::same_page;
+
+    #[test]
+    fn the_page_already_shown_is_kept() {
+        assert!(same_page("https://example.com/a?q=1", "https://example.com/a?q=1"));
+        assert!(same_page("https://example.com/", "https://example.com"));
+    }
+
+    #[test]
+    fn anything_else_navigates() {
+        assert!(!same_page("https://example.com/a", "https://example.com/b"));
+        assert!(!same_page("", "about:blank"));
+        // A load-error page shows a data: URL; re-mounting retries the address.
+        assert!(!same_page("data:text/html;base64,PGh0bWw+", "https://example.com"));
     }
 }

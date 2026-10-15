@@ -51,21 +51,17 @@ fn main() {
         res.set_manifest(WINDOWS_APP_MANIFEST);
         res.compile().expect("winres compile failed");
 
-        // Decode the brain logo PNG (transparent background, 256×256) to
-        // raw BGRA pre-multiplied bytes for the splash renderer. The
-        // bytes get `include_bytes!`-d into splash.rs — no PNG decoder
-        // shipped in the runtime binary.
-        //
-        // Pre-multiplied alpha is required by `UpdateLayeredWindow`'s
-        // BLENDFUNCTION (AC_SRC_ALPHA): each channel must already be
-        // `channel * alpha / 255`. Doing the multiplication here once
-        // at compile time avoids 65k mul-then-div ops per frame on the
-        // splash thread.
+        // Read the brain logo PNG's header (transparent background, RGBA,
+        // 256×256) so splash.rs gets its dimensions as consts. The pixels
+        // themselves are NOT decoded here: splash.rs embeds the PNG (about
+        // 15 KB) and decodes it once on the first frame, instead of baking
+        // a 256 KB raw bitmap into the exe. The runtime `png` decoder is
+        // already linked for the tray icon, so this costs no new code.
         let png_path = std::path::Path::new("resources/brain.png");
         println!("cargo:rerun-if-changed={}", png_path.display());
         let f = std::fs::File::open(png_path).expect("resources/brain.png not found");
         let decoder = png::Decoder::new(f);
-        let mut reader = decoder.read_info().expect("png header");
+        let reader = decoder.read_info().expect("png header");
         let info = reader.info().clone();
         assert_eq!(
             info.color_type,
@@ -77,22 +73,7 @@ fn main() {
             png::BitDepth::Eight,
             "splash brain.png must be 8-bit"
         );
-        let mut buf = vec![0u8; reader.output_buffer_size()];
-        reader.next_frame(&mut buf).expect("png decode");
-
-        // Convert RGBA straight → BGRA pre-multiplied, in place.
-        for px in buf.chunks_exact_mut(4) {
-            let (r, g, b, a) = (px[0], px[1], px[2], px[3]);
-            let pre = |c: u8| ((c as u16 * a as u16 + 127) / 255) as u8;
-            px[0] = pre(b);
-            px[1] = pre(g);
-            px[2] = pre(r);
-            px[3] = a;
-        }
-
         let out_dir = std::env::var("OUT_DIR").unwrap();
-        let bgra_path = std::path::Path::new(&out_dir).join("brain_bgra.bin");
-        std::fs::write(&bgra_path, &buf).expect("write brain_bgra.bin");
 
         // Emit dimensions as Rust consts so splash.rs `include!`-s them
         // and stays in lockstep with whatever brain.png actually contains.

@@ -11,6 +11,7 @@ import { LayoutModel } from "@/layout/lib/layoutModel";
 import { deriveNodeId, newLayoutNode } from "@/layout/lib/layoutNode";
 import { isLayoutQuiet, reconcileWithStoredLayout } from "@/layout/lib/layoutIntents";
 import { sendStackCommand } from "@/layout/lib/layoutPersistence";
+import { closeBlockInStack, pushBlockOntoStack } from "@/layout/lib/layoutStack";
 import {
     LayoutNode,
     LayoutTreeActionType,
@@ -327,6 +328,36 @@ describe("backend edits srv already applied", () => {
         const model = createModel();
         await sendStackCommand(model, "pane.activateTab", async () => ({ layout_revision: 1, version: 9 }));
         expect(model.layoutVersionFloor).toBe(9);
+    });
+
+    it("a tab close queued on a model that is then disposed still sends its command and deletes the block", async () => {
+        const model = createModel();
+        const a = insert(model, "a"); // its intent stays in flight
+        pushBlockOntoStack(model, a.id, "b");
+        const onNodeDelete = vi.fn(async () => {});
+        model.onNodeDelete = onNodeDelete;
+        const closing = closeBlockInStack(model, a.id, "b", { confirmed: true });
+        await settle();
+        expect(calls.some((c) => c.command === "pane.removeTab")).toBe(false); // queued behind the intent
+        model.dispose();
+        intentsSent()[0].resolve({ applied: true, version: 2 });
+        await settle();
+        const removeTab = calls.find((c) => c.command === "pane.removeTab");
+        expect(removeTab?.data.block_id).toBe("b");
+        removeTab!.resolve({ layout_revision: 3, version: 3 });
+        await closing;
+        expect(onNodeDelete).toHaveBeenCalledWith({ blockId: "b" });
+    });
+
+    it("a pane-tab command queued after the model is disposed still goes", async () => {
+        const model = createModel();
+        model.dispose();
+        let sent = false;
+        await sendStackCommand(model, "pane.activateTab", async () => {
+            sent = true;
+            return { layout_revision: 0, version: 0 };
+        });
+        expect(sent).toBe(true);
     });
 
     it("closing the ephemeral pane sends only the view", async () => {

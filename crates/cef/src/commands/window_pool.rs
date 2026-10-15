@@ -397,7 +397,7 @@ fn reap_unclosed_evicted_pool_browser(state: &Arc<AppState>, label: &str) {
         label: label.to_string(),
     });
     crate::ui_tasks::consume_request_drain(state, &out, "evicted_pool_reap");
-    state.window_hwnds.lock().remove(label);
+    state.evict_window_hwnd(label);
     on_pool_window_destroyed(state, label);
     crate::launcher_ipc::report_window_closed(label.to_string());
     crate::launcher_ipc::compute_and_report_host_counts(state);
@@ -1029,7 +1029,7 @@ pub fn demote_promoted_pool_window(
         );
         set_taskbar_hidden(hwnd, true);
     }
-    state.window_hwnds.lock().remove(label);
+    state.evict_window_hwnd(label);
     if let Ok(mut cache) = pool_hwnd_cache().lock() {
         cache.insert(label.to_string(), hwnd as usize);
     }
@@ -1097,7 +1097,7 @@ pub fn park_and_blank_window(state: &Arc<AppState>, label: &str) -> bool {
         ));
         return false;
     };
-    let main_hwnd = state.window_hwnds.lock().get("main").copied();
+    let main_hwnd = state.window_hwnd("main");
     if main_hwnd == Some(hwnd as isize) {
         crate::client::dlog(&format!(
             "park_and_blank({}): strict HWND resolved to MAIN — refusing, round-5 fallback",
@@ -1123,7 +1123,7 @@ pub fn park_and_blank_window(state: &Arc<AppState>, label: &str) -> bool {
         );
     }
     set_taskbar_hidden(hwnd, true);
-    state.window_hwnds.lock().remove(label);
+    state.evict_window_hwnd(label);
 
     // 3. Blank the content — releases the workspace app (WebGL, websockets,
     // timers). Same load_url-on-a-parked-window call demote's step 5 has
@@ -1584,10 +1584,7 @@ pub fn promote_pool_window(
     // any leftover entry pointing at the off-screen pre-promote pool window.
     // `raw_hwnd` is the CefWindow top-level handle (already the outer HWND),
     // so store it directly.
-    state
-        .window_hwnds
-        .lock()
-        .insert(label.clone(), raw_hwnd as isize);
+    state.bind_window_hwnd(&label, raw_hwnd as isize);
 
     // Phase F.5 — explicit promote signal sent BETWEEN the matching
     // `report_pool_window_removed` (above) and `report_window_opened`
