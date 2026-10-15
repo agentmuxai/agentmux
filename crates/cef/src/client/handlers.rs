@@ -140,11 +140,10 @@ wrap_client! {
 // FocusHandler used only by browser-pane clients. Returns 0 for every
 // focus source (never cancels at the CEF level) — cancelling NAVIGATION
 // focus during the very first navigation of a newly-created pane fires
-// CEF's `on_before_close` on that pane ~10ms later. Focus-steal
-// protection lives entirely in the Win32 `WndProc` subclass below
-// (`browser_pane::hwnd::install_browser_pane_focus_redirect`), which redirects programmatic
-// `WM_SETFOCUS` back to the top-level window. User clicks are let through
-// because `WM_LBUTTONDOWN` in the subclass arms `ALLOW_BROWSER_PANE_FOCUS_ONCE`.
+// CEF's `on_before_close` on that pane ~10ms later. On Windows, a page taking
+// the keyboard on its own is put back by the window's input owner
+// (`crate::input_owner`), which the pane's Win32 subclass reports clicks and
+// `WM_SETFOCUS` to (`browser_pane::hwnd`).
 wrap_focus_handler! {
     struct AgentMuxPaneFocusHandler;
 

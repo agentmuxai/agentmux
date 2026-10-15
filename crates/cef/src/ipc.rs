@@ -1091,6 +1091,13 @@ async fn route_command(
                 });
 
             if let Some((label, _browser)) = target_browser {
+                // Windows: a selection for the window's input owner, which runs
+                // the reclaim below as its `FocusApp` effect when it should.
+                #[cfg(target_os = "windows")]
+                {
+                    crate::input_owner::windows::select_app(state, &label);
+                    return Ok(serde_json::json!(true));
+                }
                 // Full focus reclaim has to run on the CEF UI thread:
                 // `browser_view_get_for_browser`, `host.set_focus`, and
                 // walking the HWND tree all require it. The task also

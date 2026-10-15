@@ -412,31 +412,36 @@ impl BrowserPaneManager {
     /// concurrently tearing down is the exact race documented in
     /// `SPEC_BROWSER_PANE_LIFECYCLE.md` §5 race #2.
     pub fn focus(&self, block_id: &str, state: &Arc<AppState>) {
+        // Windows: a selection for the window's input owner, which moves the
+        // keyboard (`give_keyboard`) on the UI thread if and when it should.
+        #[cfg(target_os = "windows")]
+        crate::input_owner::windows::select_pane(state, block_id);
         // macOS: the page only receives keystrokes while its overlay NSWindow
         // is the key window — set_focus alone leaves AppKit delivering keys to
         // the main window. Posted even when the browser isn't live yet: the UI
         // task parks the request until the overlay is registered.
         #[cfg(target_os = "macos")]
         crate::ui_tasks::post_make_pane_overlay_key(block_id);
+        #[cfg(not(target_os = "windows"))]
         if let Some(browser) = self.live_browser(state, block_id) {
             if let Some(host) = browser.host() {
                 host.set_focus(1);
-                #[cfg(target_os = "windows")]
-                {
-                    let hwnd = host.window_handle();
-                    if !hwnd.0.is_null() {
-                        // Tell the subclass this focus request is intentional
-                        // (not Chromium's on-load focus steal) so it won't be
-                        // redirected back to the parent.
-                        crate::browser_pane::ALLOW_BROWSER_PANE_FOCUS_ONCE.store(
-                            true,
-                            std::sync::atomic::Ordering::Relaxed,
-                        );
-                        unsafe {
-                            windows_sys::Win32::UI::Input::KeyboardAndMouse::SetFocus(hwnd.0 as _);
-                        }
-                    }
-                }
+            }
+        }
+    }
+
+    /// Give pane `block_id`'s page the keyboard, in Chromium and in Win32. The
+    /// input owner's `FocusPane` effect; runs on the UI thread, where Win32
+    /// `SetFocus` works for the pane's windows.
+    #[cfg(target_os = "windows")]
+    pub fn give_keyboard(&self, block_id: &str, state: &Arc<AppState>) {
+        let Some(browser) = self.live_browser(state, block_id) else { return };
+        let Some(host) = browser.host() else { return };
+        host.set_focus(1);
+        let hwnd = host.window_handle();
+        if !hwnd.0.is_null() {
+            unsafe {
+                windows_sys::Win32::UI::Input::KeyboardAndMouse::SetFocus(hwnd.0 as _);
             }
         }
     }

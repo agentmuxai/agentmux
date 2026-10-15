@@ -1,15 +1,9 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Win32 HWND-level helpers for browser panes: the `WM_SETFOCUS` redirect
-//! subclass and the focus-bypass flag.
-//!
-//! Moved out of `client.rs` during Phase 2 of the pane modularization split
-//! (see `docs/specs/SPEC_BROWSER_PANE_MODULARIZATION.md` §6). `client.rs`
-//! still uses `ALLOW_BROWSER_PANE_FOCUS_ONCE` at a distance (nothing there imports
-//! the function directly), but `install_browser_pane_focus_redirect` is the home
-//! for pane-focused Win32 subclass logic and future phases can wire it up
-//! to pane `on_after_created` / `on_load_end` without touching `client.rs`.
+//! Win32 HWND-level helpers for browser panes: the subclass on every window of
+//! a pane, which reports clicks and focus to the input owner
+//! (`crate::input_owner`), and the map from a window to its pane.
 //!
 //! Everything in this file is Windows-only by gating.
 
@@ -41,8 +35,7 @@ static BROWSER_PANE_HWND_CONTEXT: std::sync::LazyLock<
 > = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
 
 /// Restore the original WndProc for every HWND (outer + children) that was
-/// subclassed by `install_browser_pane_focus_redirect` for the given `block_id`,
-/// and clear any `LAST_FOCUSED_BY_ROOT` entries that point at those HWNDs.
+/// subclassed by `install_browser_pane_focus_redirect` for the given `block_id`.
 ///
 /// Call this from `on_before_close_browser_pane` **before**
 /// `remove_contexts_for_block` — we still need `BROWSER_PANE_HWND_CONTEXT` to
@@ -50,8 +43,8 @@ static BROWSER_PANE_HWND_CONTEXT: std::sync::LazyLock<
 ///
 /// If an HWND has already been destroyed by the time this runs, the
 /// `SetWindowLongPtrW` call is skipped (guarded by `IsWindow`) but the entry
-/// is still removed from `BROWSER_PANE_WNDPROCS` and `LAST_FOCUSED_BY_ROOT` is
-/// still cleared. This prevents the closed pane's HWND value from being picked
+/// is still removed from `BROWSER_PANE_WNDPROCS`. This prevents the closed
+/// pane's HWND value from being picked
 /// as the "main render widget" by `find_main_render_widget` if the value is
 /// later recycled by a new `Chrome_RenderWidgetHostHWND`.
 pub fn uninstall_focus_redirect_for_block(block_id: &str) {
@@ -127,9 +120,6 @@ pub fn uninstall_focus_redirect_for_block(block_id: &str) {
                     if IsWindow(hwnd_ptr) != 0 {
                         SetWindowLongPtrW(hwnd_ptr, GWLP_WNDPROC, orig);
                     }
-                    // Clear focus record regardless of liveness — prevents
-                    // WM_ACTIVATE from restoring focus to a dead/recycled HWND.
-                    forget_focus_for_child(hwnd_ptr);
                 }
                 restored += 1;
             }
@@ -139,7 +129,7 @@ pub fn uninstall_focus_redirect_for_block(block_id: &str) {
     tracing::info!(
         block_id = %block_id,
         restored = restored,
-        "[pane-unsubclass] restored WndProcs and cleared LAST_FOCUSED_BY_ROOT for {} HWNDs on pane close",
+        "[pane-unsubclass] restored WndProcs for {} HWNDs on pane close",
         restored,
     );
 }
@@ -181,143 +171,37 @@ pub fn remove_contexts_for_block(block_id: &str) {
     }
 }
 
-/// When `true`, the next `WM_SETFOCUS` delivered to a subclassed pane HWND
-/// is allowed through instead of being redirected back to the parent.
-///
-/// The frontend's `giveFocus()` -> `browser_pane_focus` IPC sets this flag
-/// before calling `SetFocus` on the pane, so user-initiated focus works
-/// even though Chromium's internal focus-steal on navigation is blocked.
-pub static ALLOW_BROWSER_PANE_FOCUS_ONCE: std::sync::atomic::AtomicBool =
-    std::sync::atomic::AtomicBool::new(false);
-
-/// Per-top-level-window record of the last child HWND to receive
-/// *intentional* keyboard focus — written by the pane subclass when an
-/// allowed-through `WM_SETFOCUS` lands and by `MainFocusReclaimTask`
-/// after its `SetFocus` on the main render widget. Programmatic pane
-/// focus that the redirect intercepts is NOT recorded — only paths the
-/// user actually intends.
-///
-/// Keyed by `GetAncestor(child, GA_ROOT)`. AgentMux runs multiple
-/// top-level windows in one process (primary `"main"` plus pool /
-/// sub-windows — see `state::list_browsers`); a single global slot
-/// would let `WM_ACTIVATE` on window A read window B's child and
-/// `SetFocus` the wrong one. See spec §4.5 for the empirical evidence
-/// (`docs/specs/SPEC_WINDOW_REACTIVATE_FOCUS_RESTORE_2026_05_23.md`).
-///
-/// `Mutex` (not `RwLock`): writes are rare (per intentional focus
-/// event), reads rarer still (per top-level `WM_ACTIVATE`). Contention
-/// is negligible.
-///
-/// Stale entries (child HWND destroyed) self-heal: the activate handler
-/// re-validates via `IsWindow` before calling `SetFocus`.
-pub static LAST_FOCUSED_BY_ROOT: std::sync::LazyLock<
-    std::sync::Mutex<std::collections::HashMap<usize, usize>>,
-> = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
-
-/// Single write helper called from both intentional-focus sites (the
-/// pane subclass in this module and `MainFocusReclaimTask` in
-/// `ui_tasks/window.rs`). Resolves `child`'s top-level ancestor via
-/// `GetAncestor(GA_ROOT)` and stores the pair into `LAST_FOCUSED_BY_ROOT`.
-///
-/// Safety: `child` must be a live HWND that the caller intentionally
-/// just focused (so the recorded value is meaningful). Caller must
-/// also be on the Win32 UI thread, since `GetAncestor` and the static
-/// `LazyLock` aren't sensitive to thread but Win32 idiom is to keep
-/// HWND traffic on the message-pump thread.
-pub unsafe fn record_intentional_focus(child: *mut std::ffi::c_void) {
-    use windows_sys::Win32::UI::WindowsAndMessaging::{GetAncestor, GA_ROOT};
-    let root = GetAncestor(child, GA_ROOT);
-    if root.is_null() {
-        return;
-    }
-    if let Ok(mut map) = LAST_FOCUSED_BY_ROOT.lock() {
-        map.insert(root as usize, child as usize);
-        tracing::info!(
-            "[focus-track] LAST_FOCUSED_BY_ROOT[root={:p}] <= child={:p}",
-            root,
-            child,
-        );
-    }
-}
-
-/// Forget any `LAST_FOCUSED_BY_ROOT` entry whose recorded child is `child`.
-/// Called when a pane HWND is destroyed so the `WM_ACTIVATE` focus-restore
-/// hook never tries to `SetFocus` a dead child, and the destroyed pane isn't
-/// "remembered" as the focus target for its (possibly surviving) root.
-/// Returns true if an entry was removed (the dying pane was the recorded focus
-/// holder for some root). See
-/// docs/analysis/ANALYSIS_BROWSER_PANE_REDOCK_BLACK_TYPING_LOCK_2026_06_15.md §1.
-pub fn forget_focus_for_child(child: *mut std::ffi::c_void) -> bool {
-    let target = child as usize;
-    if let Ok(mut map) = LAST_FOCUSED_BY_ROOT.lock() {
-        let before = map.len();
-        map.retain(|_, &mut v| v != target);
-        return map.len() != before;
-    }
-    false
-}
-
-/// Last-redirect timestamp per root HWND, used by
-/// `should_redirect_pane_focus_to_root` to rate-limit programmatic focus
-/// storms (setInterval-driven `window.focus()`, OAuth redirector pages,
-/// DOM mutation observers re-focusing on every change). Keyed by the root
-/// HWND cast to `usize`. Entries are overwritten on each pass and never
-/// explicitly removed — the map is bounded by the count of distinct
-/// top-level AgentMux windows seen in a session, which is small.
-static BROWSER_PANE_REDIRECT_LAST_AT: std::sync::LazyLock<
-    std::sync::Mutex<std::collections::HashMap<usize, std::time::Instant>>,
-> = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
-
-/// Returns `true` iff the pane WM_SETFOCUS subclass should redirect to
-/// `root` via `SetFocus(root)`. Two guards, both motivated by the
-/// 2026-05-02 multi-window freeze investigation:
-///
-/// 1. **Cross-window refusal.** If a *different* top-level HWND currently
-///    owns OS foreground (per `GetForegroundWindow()`), refuse to redirect.
-///    Same-thread `SetFocus` on a top-level HWND triggers `WM_ACTIVATE`,
-///    so redirecting here would steal foreground from the AgentMux window
-///    the user is interacting with. With two windows whose pane content
-///    both call `window.focus()` programmatically, the redirect itself
-///    drives a foreground ping-pong and the host UI thread saturates.
-///
-/// 2. **Per-root rate limit.** Even within the user's active window, cap
-///    redirects at once per 100 ms per root. Tight focus storms from page
-///    content can otherwise pile WM_SETFOCUS / WM_ACTIVATE chains onto
-///    the UI thread faster than they drain.
-///
-/// When this returns `false`, the pane WM_SETFOCUS handler still consumes
-/// the message (returns 0) — the pane simply doesn't get focus and the
-/// previous focus owner is undisturbed.
-unsafe fn should_redirect_pane_focus_to_root(root: *mut std::ffi::c_void) -> bool {
-    use windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
-    let current_fg = GetForegroundWindow();
-    if !current_fg.is_null() && current_fg != root {
-        return false;
-    }
-
-    let key = root as usize;
-    let now = std::time::Instant::now();
-    if let Ok(mut map) = BROWSER_PANE_REDIRECT_LAST_AT.lock() {
-        if let Some(last) = map.get(&key) {
-            if now.duration_since(*last) < std::time::Duration::from_millis(100) {
-                return false;
+/// Walk from `hwnd` up the parent chain to the pane it belongs to. Chromium's
+/// child windows aren't in the map; the pane's outer window is. A bound of 8 is
+/// plenty: Chromium's pane hierarchy is 2-3 deep.
+fn find_context(mut hwnd: *mut std::ffi::c_void) -> Option<BrowserPaneContext> {
+    use windows_sys::Win32::UI::WindowsAndMessaging::GetParent;
+    for _ in 0..8 {
+        if let Ok(map) = BROWSER_PANE_HWND_CONTEXT.lock() {
+            if let Some(ctx) = map.get(&(hwnd as usize)) {
+                return Some(ctx.clone());
             }
         }
-        map.insert(key, now);
+        let parent = unsafe { GetParent(hwnd) };
+        if parent.is_null() || parent == hwnd {
+            return None;
+        }
+        hwnd = parent;
     }
-    true
+    None
+}
+
+/// The block id of the pane `hwnd` is a window of, if any.
+pub fn pane_block_for_hwnd(hwnd: *mut std::ffi::c_void) -> Option<String> {
+    find_context(hwnd).map(|ctx| ctx.block_id)
 }
 
 /// Subclass a browser pane's outer HWND (and every descendant HWND Chromium
-/// has already created) so `WM_SETFOCUS` is redirected back to the parent
-/// top-level window unless the focus change is user-initiated (see
-/// `ALLOW_BROWSER_PANE_FOCUS_ONCE`).
-///
-/// Without this, Chromium's internal SetFocus on the pane HWND (page load,
-/// JS `window.focus()`, etc.) steals the Windows-level keyboard focus —
-/// subsequent keystrokes go to the pane's renderer instead of the main
-/// window, so terminals, URL bars, and other inputs in the main UI stop
-/// responding.
+/// has already created) so a click (`WM_LBUTTONDOWN`) and focus arriving
+/// (`WM_SETFOCUS`) reach the input owner. The input owner decides whether focus
+/// that a page took on its own (page load, JS `window.focus()`) is put back;
+/// the message itself always reaches Chromium, so Chromium never believes it is
+/// blurred while it holds Win32 focus.
 ///
 /// Wired in by `browser_pane::callbacks::on_after_created_browser_pane` at create time and
 /// by `browser_pane::callbacks::on_load_end_browser_pane` after every navigation — Chromium
@@ -328,12 +212,9 @@ pub unsafe fn install_browser_pane_focus_redirect(
     state: Arc<crate::state::AppState>,
     block_id: String,
 ) {
-    use std::sync::atomic::Ordering;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        CallWindowProcW, GetAncestor, SetWindowLongPtrW, GA_ROOT, GWLP_WNDPROC,
-        WM_SETFOCUS, WM_KILLFOCUS, WM_LBUTTONDOWN,
+        CallWindowProcW, SetWindowLongPtrW, GWLP_WNDPROC, WM_KILLFOCUS, WM_LBUTTONDOWN, WM_SETFOCUS,
     };
-    use windows_sys::Win32::UI::Input::KeyboardAndMouse::SetFocus;
 
     // Register context so the WndProc's WM_LBUTTONDOWN handler can emit
     // the click event without going through CEF callbacks (which only
@@ -344,27 +225,6 @@ pub unsafe fn install_browser_pane_focus_redirect(
             state: Arc::downgrade(&state),
             block_id: block_id.clone(),
         });
-    }
-
-    /// Walk from `hwnd` up the parent chain looking for a registered pane
-    /// context. Child HWNDs (Chrome_WidgetWin_1, Chrome_RenderWidgetHostHWND)
-    /// aren't themselves in the map — the outer pane HWND is. Safety bound
-    /// of 8 jumps is plenty; Chromium's pane hierarchy is only 2-3 deep.
-    unsafe fn find_context(mut hwnd: *mut std::ffi::c_void) -> Option<BrowserPaneContext> {
-        use windows_sys::Win32::UI::WindowsAndMessaging::GetParent;
-        for _ in 0..8 {
-            if let Ok(map) = BROWSER_PANE_HWND_CONTEXT.lock() {
-                if let Some(ctx) = map.get(&(hwnd as usize)) {
-                    return Some(ctx.clone());
-                }
-            }
-            let parent = GetParent(hwnd);
-            if parent.is_null() || parent == hwnd {
-                return None;
-            }
-            hwnd = parent;
-        }
-        None
     }
 
     unsafe extern "system" fn wndproc_hook(
@@ -432,17 +292,16 @@ pub unsafe fn install_browser_pane_focus_redirect(
             _ => {}
         }
 
-        // A click inside the pane HWND is the explicit "user wants to
-        // interact with the embedded page" signal. Chromium's own handler
-        // will call SetFocus(pane) next — arm ALLOW_BROWSER_PANE_FOCUS_ONCE so
-        // the WM_SETFOCUS branch below doesn't redirect it. Without this,
-        // clicks on the pane never transfer keyboard focus to Chromium
-        // (cursor works, typing goes nowhere — reported by user after
-        // the onMouseEnter→onMouseDown switch broke hover-focus-grab but
-        // the DOM-level mousedown never fires because the pane HWND
-        // intercepts the click at Win32 level, not DOM level).
+        // A click inside the pane is the user choosing its page: the input
+        // owner selects it, so the focus Chromium takes next is the one asked
+        // for. The DOM-level mousedown never fires for it: the pane's window
+        // takes the click at the Win32 level.
         if msg == WM_LBUTTONDOWN {
-            ALLOW_BROWSER_PANE_FOCUS_ONCE.store(true, Ordering::Relaxed);
+            if let Some(ctx) = find_context(hwnd) {
+                if let Some(state) = ctx.state.upgrade() {
+                    crate::input_owner::windows::pane_pointer_down(&state, &ctx.block_id);
+                }
+            }
             // Emit the click event directly from the WndProc. We can't
             // rely on CEF's FocusHandler::on_set_focus to emit, because
             // CEF only fires that callback when Windows-level focus
@@ -491,51 +350,30 @@ pub unsafe fn install_browser_pane_focus_redirect(
             }
         }
 
-        if msg == WM_SETFOCUS {
-            // Intentional focus from the frontend's giveFocus() IPC: honor it
-            // once, then revert to redirect-mode for subsequent events.
-            if ALLOW_BROWSER_PANE_FOCUS_ONCE.swap(false, Ordering::Relaxed) {
-                tracing::info!("[pane-wndproc] WM_SETFOCUS allowed (intentional)");
-                record_intentional_focus(hwnd);
-                // Fall through to the original WndProc.
-            } else {
-                // Programmatic focus (page load, JS window.focus()): redirect
-                // to the TOP-LEVEL ancestor, not the immediate parent.
-                // `GetParent` on a descendant HWND (Chrome_WidgetWin_1,
-                // Chrome_RenderWidgetHostHWND, …) returns the pane's outer
-                // HWND, which is still inside the pane tree — redirecting
-                // there leaves focus stuck in the pane. `GetAncestor(GA_ROOT)`
-                // walks all the way up to the top-level window that hosts
-                // both main and pane, which is the correct place to land.
-                //
-                // Guard added 2026-05-02: refuse the redirect when another
-                // top-level HWND owns foreground or when this root has been
-                // redirected within the last 100 ms. See
-                // `should_redirect_pane_focus_to_root` for rationale.
-                let root = GetAncestor(hwnd, GA_ROOT);
-                if !root.is_null()
-                    && root != hwnd
-                    && should_redirect_pane_focus_to_root(root)
-                {
-                    SetFocus(root);
-                }
-                return 0;
-            }
-        }
-
         let original = BROWSER_PANE_WNDPROCS
             .lock()
             .ok()
             .and_then(|m| m.get(&(hwnd as usize)).copied())
             .unwrap_or(0);
-        if original != 0 {
+        let result = if original != 0 {
             let proc_fn: unsafe extern "system" fn(
                 *mut std::ffi::c_void, u32, usize, isize,
             ) -> isize = std::mem::transmute(original);
             CallWindowProcW(Some(proc_fn), hwnd, msg, wparam, lparam)
         } else {
             0
+        };
+
+        // Focus arrived in the pane. Chromium has seen it (above); the input
+        // owner decides whether it stays (spec I7: never swallowed).
+        if msg == WM_SETFOCUS {
+            if let Some(ctx) = find_context(hwnd) {
+                if let Some(state) = ctx.state.upgrade() {
+                    crate::input_owner::windows::pane_focus_gained(&state, &ctx.block_id);
+                }
+            }
         }
+        result
     }
 
     // Subclass the outer HWND — but only once. Re-calling SetWindowLongPtrW
@@ -551,7 +389,7 @@ pub unsafe fn install_browser_pane_focus_redirect(
             if let Ok(mut map) = BROWSER_PANE_WNDPROCS.lock() {
                 map.insert(hwnd as usize, original);
             }
-            tracing::info!("[pane-subclass] installed focus-redirect WndProc on pane HWND {:p}", hwnd);
+            tracing::info!("[pane-subclass] installed on pane HWND {:p} block={}", hwnd, block_id);
         }
     }
 
@@ -580,47 +418,12 @@ pub unsafe fn install_browser_pane_focus_redirect(
                 child, class_buf.as_mut_ptr(), class_buf.len() as i32,
             );
             let class_name = String::from_utf16_lossy(&class_buf[..n as usize]);
-            tracing::info!("[pane-subclass] subclassed child HWND {:p} class={}", child, class_name);
+            let block = pane_block_for_hwnd(child).unwrap_or_default();
+            tracing::info!("[pane-subclass] subclassed child HWND {:p} class={} block={}", child, class_name, block);
         }
         1 // continue
     }
     windows_sys::Win32::UI::WindowsAndMessaging::EnumChildWindows(
         hwnd, Some(enum_children), 0,
     );
-}
-
-// ── Tests ───────────────────────────────────────────────────────────────
-//
-// The Win32 calls themselves can't be unit-tested without a real HWND and
-// window message loop. What we can test here is the focus-bypass flag's
-// behavior as a simple AtomicBool — it's the only testable invariant the
-// `wndproc_hook` relies on.
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::sync::atomic::Ordering;
-
-    #[test]
-    fn allow_pane_focus_once_starts_false() {
-        // Note: this static is global to the process, so other tests can
-        // have modified it. Read-only assertion before mutation.
-        let _ = ALLOW_BROWSER_PANE_FOCUS_ONCE.load(Ordering::Relaxed);
-    }
-
-    #[test]
-    fn allow_pane_focus_once_swap_returns_prev_and_clears() {
-        ALLOW_BROWSER_PANE_FOCUS_ONCE.store(true, Ordering::Relaxed);
-        let prev = ALLOW_BROWSER_PANE_FOCUS_ONCE.swap(false, Ordering::Relaxed);
-        assert!(prev, "swap should return the prior true value");
-        assert!(!ALLOW_BROWSER_PANE_FOCUS_ONCE.load(Ordering::Relaxed),
-            "after swap(false), flag must be cleared");
-    }
-
-    #[test]
-    fn allow_pane_focus_once_swap_when_false_returns_false() {
-        ALLOW_BROWSER_PANE_FOCUS_ONCE.store(false, Ordering::Relaxed);
-        let prev = ALLOW_BROWSER_PANE_FOCUS_ONCE.swap(false, Ordering::Relaxed);
-        assert!(!prev, "swap on cleared flag should return false");
-    }
 }

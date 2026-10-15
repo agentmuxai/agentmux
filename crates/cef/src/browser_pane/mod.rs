@@ -20,6 +20,3 @@ pub mod wrapper;
 pub mod creation_views;
 
 pub use creation::CreateBrowserPaneTask;
-
-#[cfg(target_os = "windows")]
-pub use hwnd::ALLOW_BROWSER_PANE_FOCUS_ONCE;

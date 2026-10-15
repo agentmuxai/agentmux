@@ -898,6 +898,7 @@ wrap_task! {
             unsafe {
                 crate::client::wndproc::install_top_level_focus_restore_hook(
                     outer_hwnd as *mut std::ffi::c_void,
+                    &self.state,
                 );
             }
 

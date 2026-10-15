@@ -261,9 +261,8 @@ pub(crate) fn resolve_pane_label(state: &Arc<AppState>, browser: &Browser) -> Op
 /// Responsibilities:
 /// 1. Raise the pane's outer HWND to the top of its parent's Z-order so
 ///    mouse-wheel events reach the pane renderer rather than main's.
-/// 2. Install the WM_SETFOCUS redirect subclass on the pane's HWND tree so
-///    Chromium's internal focus-steals on page load don't yank keyboard
-///    focus away from the main window.
+/// 2. Subclass the pane's HWND tree so clicks and focus reach the input owner
+///    (`crate::input_owner`), and tell it the pane is live.
 pub fn on_after_created_browser_pane(state: &Arc<AppState>, browser: &Browser) {
     #[cfg(target_os = "windows")]
     {
@@ -294,9 +293,10 @@ pub fn on_after_created_browser_pane(state: &Arc<AppState>, browser: &Browser) {
                     crate::browser_pane::hwnd::install_browser_pane_focus_redirect(
                         hwnd,
                         state.clone(),
-                        block_id,
+                        block_id.clone(),
                     );
                 }
+                crate::input_owner::windows::pane_live(state, &block_id);
             }
         }
     }
