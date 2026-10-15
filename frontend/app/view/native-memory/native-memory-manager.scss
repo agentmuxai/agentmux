@@ -803,9 +803,14 @@
         color: var(--main-text-color);
     }
 
-    // Only the part's name wraps.
-    td:nth-child(n + 2),
-    th:nth-child(n + 2) {
+    // The part's name and how it arrives wrap, a long filename anywhere, so
+    // the numbers stay in view in a narrow pane.
+    td:nth-child(1) {
+        overflow-wrap: anywhere;
+    }
+
+    td:nth-child(n + 3),
+    th:nth-child(n + 3) {
         white-space: nowrap;
     }
 
