@@ -237,7 +237,7 @@ fn handle(stream: UnixStream, sessions: &Sessions, sock: &Path) -> io::Result<()
                 // is closed.
                 drop((out, reader, stream));
                 // Exit once the ended sessions' leftovers are killed.
-                std::thread::sleep(pty::HANGUP_GRACE + Duration::from_millis(200));
+                pty::wait_for_kills();
                 std::process::exit(0);
             }
             _ => out.write_all(&Frame::Error("bad request".into()).encode()),

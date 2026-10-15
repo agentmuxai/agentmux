@@ -97,6 +97,9 @@ pub fn resize(master: &File, cols: u16, rows: u16) {
 /// How long [`end_group`] gives a hung-up group before killing what is left.
 pub const HANGUP_GRACE: std::time::Duration = std::time::Duration::from_secs(2);
 
+/// The kills [`end_group`] has scheduled, for [`wait_for_kills`].
+static KILLS: std::sync::Mutex<Vec<std::thread::JoinHandle<()>>> = std::sync::Mutex::new(Vec::new());
+
 /// End a session's whole process group: hang up, then kill what is left
 /// [`HANGUP_GRACE`] later.
 pub fn end_group(pid: u32) {
@@ -105,12 +108,24 @@ pub fn end_group(pid: u32) {
     unsafe {
         libc::kill(pgid, libc::SIGHUP);
     }
-    std::thread::spawn(move || {
+    let kill = std::thread::spawn(move || {
         std::thread::sleep(HANGUP_GRACE);
         unsafe {
             libc::kill(pgid, libc::SIGKILL);
         }
     });
+    let mut kills = KILLS.lock().unwrap_or_else(|e| e.into_inner());
+    kills.retain(|k| !k.is_finished());
+    kills.push(kill);
+}
+
+/// Wait until every kill [`end_group`] scheduled has been sent: before the
+/// daemon exits, which would otherwise drop the ones still waiting.
+pub fn wait_for_kills() {
+    let kills = std::mem::take(&mut *KILLS.lock().unwrap_or_else(|e| e.into_inner()));
+    for kill in kills {
+        let _ = kill.join();
+    }
 }
 
 fn set_cloexec(fd: libc::c_int) {

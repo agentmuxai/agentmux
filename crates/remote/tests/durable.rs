@@ -367,6 +367,52 @@ fn an_attach_connected_before_stop_gets_no_session() {
     assert!(matches!(frames.first(), Some(Frame::Error(_))), "{frames:?}");
 }
 
+/// A session's process that ignores the hang-up (and, unlike a shell, never
+/// notices its terminal close) is still killed by `stop`, before the daemon
+/// exits.
+#[test]
+fn stop_kills_a_process_that_ignores_the_hangup() {
+    let home = std::env::temp_dir().join(format!("amr-stop-hup-{}", std::process::id()));
+    std::fs::create_dir_all(&home).unwrap();
+    let _cleanup = Cleanup(home.clone());
+    let mut a = attach(&home, "t1", 0);
+    a.until(|f, _| matches!(f, Frame::Hello { .. }));
+    a.send(Frame::Input(b"trap '' HUP; echo \"P\"\"ID=$$=\"; exec sleep 300\n".to_vec()));
+    let (_, text) = a.until(|_, t| {
+        String::from_utf8_lossy(t)
+            .split("PID=")
+            .nth(1)
+            .is_some_and(|rest| rest.contains('='))
+    });
+    let text = String::from_utf8_lossy(&text).into_owned();
+    let pid: libc::pid_t = text
+        .split("PID=")
+        .nth(1)
+        .and_then(|rest| rest.split('=').next())
+        .and_then(|p| p.trim().parse().ok())
+        .unwrap_or_else(|| panic!("no pid in {text:?}"));
+    // SAFETY: signal 0 only checks that the process exists.
+    let alive = || unsafe { libc::kill(pid, 0) == 0 };
+    assert!(alive());
+
+    let out = Command::new(BIN)
+        .arg("stop")
+        .env("AGENTMUX_REMOTE_HOME", &home)
+        .output()
+        .unwrap();
+    assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "ok");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while daemon_running(&home) {
+        assert!(Instant::now() < deadline, "the daemon outlived stop");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    // Killed by the time the daemon is gone; reaping by init may lag a little.
+    while alive() {
+        assert!(Instant::now() < deadline, "a process that ignored SIGHUP outlived stop");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
 #[test]
 fn version_names_the_protocol() {
     let out = Command::new(BIN).arg("version").output().unwrap();
