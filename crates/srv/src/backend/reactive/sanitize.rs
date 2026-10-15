@@ -689,6 +689,14 @@ fn neutralize_file_lists(msg: &str) -> String {
     out
 }
 
+/// One line of sender-controlled text that srv puts inside a jekt itself,
+/// outside the message body: a sent file's name, or the sender's name in the
+/// file list. Marker delimiters and attachment list tags are quoted, as in
+/// the body, so the text can't close the block or open a list of its own.
+pub fn quote_in_jekt(text: &str) -> String {
+    neutralize_file_lists(&neutralize_markers(text))
+}
+
 /// Text that goes inside one of srv's own `[AgentMux]` system notes but was
 /// not written by srv: another agent's claim note or topic, a file path, a
 /// branch or agent name. Sanitized like a delivered body, flattened to one

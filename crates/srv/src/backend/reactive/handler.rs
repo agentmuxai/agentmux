@@ -4,44 +4,12 @@
 
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
-use std::time::{Duration, Instant};
 
 use super::sanitize::{format_injected_message, is_sensitive_message, sanitize_message, validate_agent_id, wrap_jekt_message_with_files};
 use super::types::*;
 use super::{audit_hash, now_unix_millis, AUDIT_LOG_MAX, RATE_LIMIT_MAX};
 
-// ---- Rate Limiter ----
-
-pub(super) struct RateLimiter {
-    tokens: u32,
-    max_tokens: u32,
-    last_refill: Instant,
-}
-
-impl RateLimiter {
-    pub(super) fn new(max_tokens: u32) -> Self {
-        Self {
-            tokens: max_tokens,
-            max_tokens,
-            last_refill: Instant::now(),
-        }
-    }
-
-    pub(super) fn check(&mut self) -> bool {
-        let now = Instant::now();
-        let elapsed = now.duration_since(self.last_refill);
-        if elapsed >= Duration::from_secs(1) {
-            self.tokens = self.max_tokens;
-            self.last_refill = now;
-        }
-        if self.tokens > 0 {
-            self.tokens -= 1;
-            true
-        } else {
-            false
-        }
-    }
-}
+pub(super) use super::rate_limiter::RateLimiter;
 
 // ---- Supervisor nudge-ceiling tracking ----
 

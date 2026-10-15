@@ -13,6 +13,7 @@
 use agentmux_common::jekt_files;
 
 use crate::backend::attachments::{self, prompt};
+use crate::backend::reactive::sanitize::quote_in_jekt;
 use crate::backend::reactive::types::{FilesDelivery, InjectionRequest, WanInstanceStatus};
 
 /// Why a request's files can't be accepted at all, before anything is
@@ -91,21 +92,25 @@ pub(crate) async fn prepare(req: &mut InjectionRequest) {
         let ok = svc.ensure_derived(&f.sha256).await.is_some_and(|meta| meta.bytes == f.size);
         present.push(ok);
     }
-    let sender = req.source_agent.clone().unwrap_or_else(|| "Another agent".to_string());
+    // Every name the sender controls is quoted before it is used, the stored
+    // copy's name included, so neither a name nor the path it gives the copy
+    // can close the jekt block or open a list.
+    let sender = quote_in_jekt(req.source_agent.as_deref().unwrap_or("Another agent"));
     let delivery = tokio::task::spawn_blocking(move || {
         let mut found = Vec::new();
         let mut missing = Vec::new();
         for (i, (f, ok)) in files.iter().zip(present).enumerate() {
-            match ok.then(|| svc.send_target(&f.sha256, &f.name)).flatten() {
+            let name = quote_in_jekt(&f.name);
+            match ok.then(|| svc.send_target(&f.sha256, &name)).flatten() {
                 Some(t) => found.push(prompt::Resolved {
                     number: i + 1,
-                    name: f.name.clone(),
+                    name,
                     path: t.path,
                     mime: t.mime,
                     page_count: t.page_count,
                     note: t.note,
                 }),
-                None => missing.push(f.name.clone()),
+                None => missing.push(name),
             }
         }
         FilesDelivery {
