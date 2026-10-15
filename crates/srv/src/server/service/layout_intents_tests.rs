@@ -155,3 +155,128 @@ async fn an_unknown_tab_is_an_error() {
     let err = apply_intent(&state, request("nope", "act-1", LayoutIntent::View, "")).await.unwrap_err();
     assert!(err.contains("nope"), "{err}");
 }
+
+/// `object.ApplyLayoutIntent`, the service form the tools/tests harnesses use,
+/// stores the same edit `layout.applyIntent` does.
+#[tokio::test]
+async fn the_service_method_applies_an_intent() {
+    use crate::backend::service::WebCallType;
+    let state = test_state();
+    let (tab_id, oid, _a, b) = seed(&state).await;
+    let intent = serde_json::json!({
+        "type": "splithorizontal",
+        "targetNodeId": "na",
+        "newNode": { "id": "nb", "flexDirection": "row", "size": 10, "data": { "blockId": b } },
+        "position": "after",
+        "focused": false,
+    });
+    let call = |args: Vec<serde_json::Value>| WebCallType {
+        service: "object".into(),
+        method: "ApplyLayoutIntent".into(),
+        uicontext: None,
+        args,
+    };
+    let ret = super::run_service_call(&state, &call(vec![tab_id.clone().into(), intent, "act-1".into()])).await;
+    let data = ret.data.unwrap_or_else(|| panic!("{:?}", ret.error));
+    assert_eq!(data["applied"], true, "{data}");
+    let stored = row(&state, &oid);
+    assert_eq!(data["version"], stored.version);
+    assert_eq!(stored.rootnode, reducer_tree(&state, &tab_id).await);
+    let kids: Vec<_> = stored.rootnode.unwrap().children.iter().map(|c| c.id.clone()).collect();
+    assert_eq!(kids, ["na", "nb"]);
+
+    let bad = serde_json::json!({ "type": "delete", "nodeId": "missing" });
+    let ret = super::run_service_call(&state, &call(vec![tab_id.into(), bad, "act-2".into()])).await;
+    assert_eq!(ret.data.unwrap()["applied"], false);
+}
+
+/// Bootstrap the reducer from the store into a fresh state, as srv startup does.
+async fn bootstrap_fresh(state: &AppState) -> std::sync::Arc<tokio::sync::Mutex<crate::state::State>> {
+    let fresh = std::sync::Arc::new(tokio::sync::Mutex::new(crate::state::State::default()));
+    crate::persist::bootstrap_state_from_mstore(&fresh, &state.mstore).await;
+    fresh
+}
+
+/// A row stored by an earlier build with a leaf for a block another tab owns
+/// and one for a deleted block: bootstrap removes both from the reducer's tree
+/// and the stored row, and clears the focus that pointed at one of them.
+#[tokio::test]
+async fn bootstrap_heals_leaves_for_blocks_the_tab_does_not_own() {
+    let state = test_state();
+    let (tab_id, oid, a, b) = seed(&state).await;
+    let ws_id = state.mstore.must_get::<Tab>(&tab_id).unwrap();
+    let ws_id = state.srv_state.lock().await.tabs[&ws_id.oid].workspace_id.clone();
+    let other = dispatch_apply(&state, Command::CreateTab { workspace_id: ws_id, name: "o".into() }).await;
+    let other_tab = other
+        .iter()
+        .find_map(|e| match e {
+            Event::TabCreated { tab_id, .. } => Some(tab_id.clone()),
+            _ => None,
+        })
+        .unwrap();
+    let ev = dispatch_apply(&state, Command::CreateBlock { tab_id: other_tab, meta: serde_json::json!({ "view": "term" }) }).await;
+    let elsewhere = ev
+        .iter()
+        .find_map(|e| match e {
+            Event::BlockCreated { block_id, .. } => Some(block_id.clone()),
+            _ => None,
+        })
+        .unwrap();
+
+    let mut stored = row(&state, &oid);
+    stored.rootnode = Some(LayoutNode {
+        id: "root".into(),
+        flex_direction: FlexDirection::Row,
+        size: 10.0,
+        children: vec![leaf("na", &a), leaf("nb", &b), leaf("nx", &elsewhere), leaf("ng", "deleted-block")],
+        ..Default::default()
+    });
+    stored.focusednodeid = "ng".into();
+    state.mstore.update(&mut stored).unwrap();
+    let version_before = row(&state, &oid).version;
+
+    let fresh = bootstrap_fresh(&state).await;
+    let healed = row(&state, &oid);
+    let kids: Vec<_> = healed.rootnode.as_ref().unwrap().children.iter().map(|c| c.id.clone()).collect();
+    assert_eq!(kids, ["na", "nb"]);
+    assert!(healed.version > version_before, "the healed row is stored with a new version");
+    assert_eq!(healed.focusednodeid, "", "the focus on a removed leaf is cleared");
+    let tab = fresh.lock().await.tabs[&tab_id].clone();
+    assert_eq!(tab.rootnode, healed.rootnode, "the reducer holds the stored tree");
+    assert_eq!(tab.focused_node_id, "");
+    assert!(crate::backend::layout::validate_layout_invariants(&healed.rootnode).is_empty());
+}
+
+/// When the blocks can't be read (one row that doesn't decode fails the whole
+/// load), every tab looks like it owns nothing. The heal must not run then, or
+/// it would prune every stored layout to empty.
+#[tokio::test]
+async fn bootstrap_does_not_heal_when_the_blocks_cannot_be_read() {
+    let state = test_state();
+    let (tab_id, oid, ..) = seed(&state).await;
+    let before = serde_json::to_string(&row(&state, &oid)).unwrap();
+    assert!(row(&state, &oid).rootnode.is_some());
+    state
+        .mstore
+        .conn()
+        .lock()
+        .unwrap()
+        .execute("INSERT INTO db_block (oid, version, data) VALUES ('undecodable', 1, ?1)", [b"not json".to_vec()])
+        .unwrap();
+    assert!(state.mstore.get_all::<crate::backend::obj::Block>().is_err(), "the block load fails as a whole");
+
+    let fresh = bootstrap_fresh(&state).await;
+    assert_eq!(serde_json::to_string(&row(&state, &oid)).unwrap(), before, "the stored layout is untouched");
+    assert_eq!(fresh.lock().await.tabs[&tab_id].rootnode, row(&state, &oid).rootnode);
+}
+
+/// A row with nothing to heal is left exactly as stored: no write.
+#[tokio::test]
+async fn bootstrap_leaves_a_clean_layout_row_untouched() {
+    let state = test_state();
+    let (tab_id, oid, ..) = seed(&state).await;
+    let before = serde_json::to_string(&row(&state, &oid)).unwrap();
+    let fresh = bootstrap_fresh(&state).await;
+    assert_eq!(serde_json::to_string(&row(&state, &oid)).unwrap(), before);
+    assert_eq!(fresh.lock().await.tabs[&tab_id].rootnode, row(&state, &oid).rootnode);
+}

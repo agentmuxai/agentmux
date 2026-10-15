@@ -24,8 +24,8 @@ pub(crate) struct IntentOutcome {
 
 /// Dispatch `LayoutApplyIntent` and write its events to the layout row in one
 /// hold of the reducer lock, so rows are written in the order intents are
-/// applied (the contract `update_layout_via_reducer` set for tree pushes). A
-/// failed write puts the tab back as the row has it. Publishes on success.
+/// applied. A failed write puts the tab back as the row has it. Publishes on
+/// success.
 pub(crate) async fn apply_layout_intent(
     state: &AppState,
     tab_id: &str,

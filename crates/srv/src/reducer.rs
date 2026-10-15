@@ -29,6 +29,7 @@
 
 mod block;
 mod layout;
+pub(crate) use layout::heal_loaded_layout;
 mod lifecycle;
 mod snapshot;
 mod tab;
@@ -40,7 +41,6 @@ mod workspace;
 use agentmux_common::ipc::{Command, ErrorCode, Event};
 use crate::state::State;
 
-pub(crate) use layout::stale_push_revision;
 
 /// Text in the `MoveTab` last-tab refusal; `MoveTabToWorkspace` matches on
 /// it to return its long-standing error string unchanged.

@@ -58,8 +58,8 @@ pub(crate) async fn compensate_via_reducer(
 /// SPEC_864 Phase 3 — single-writer layout seeding. Dispatch a
 /// `LayoutSetTree` (tree + focus + leaforder as client slices) and persist
 /// it inside ONE hold of the reducer mutex, so persist order equals
-/// dispatch order — the same contract as `UpdateObject`'s Phase-2 route in
-/// `object.rs`. Replaces the wcore-direct seeders
+/// dispatch order — the same contract as `apply_layout_intent`
+/// (`layout_intents.rs`). Replaces the wcore-direct seeders
 /// (`write_default_three_pane_layout` post-bootstrap caller,
 /// `setup_torn_off_block_layout`): the reducer's `TabRecord.rootnode` is
 /// authoritative, and the persist subscriber is the sole `db_layout`
@@ -149,16 +149,13 @@ pub(crate) async fn seed_layout_via_reducer(
 /// SPEC_864 Phase 4 — single-writer queue append. Dispatch a
 /// `LayoutQueueBackendActions` and persist the resulting
 /// `LayoutBackendActionsQueued` inside ONE hold of the reducer mutex
-/// (same critical-section contract as `seed_layout_via_reducer`), so a
-/// concurrent frontend ACK slice (`LayoutSetTree` REPLACE) can't
-/// interleave between dispatch and persist. Replaces the five
+/// (same critical-section contract as `seed_layout_via_reducer`), so
+/// queue writes land in dispatch order. Replaces the five
 /// store-direct `pendingbackendactions` writers (`layout_helpers`'
 /// insert/split/delete queuers + the two inline app_api sites).
 ///
 /// The reducer does not model the queue in `TabRecord` (pass-through
-/// validation only); its one modeled effect, the `layout_revision` bump, is
-/// rolled back on a SQLite apply failure, or every later frontend push would
-/// be refused as stale against a revision the row never got.
+/// validation only).
 ///
 /// `actions` must be non-empty; the reducer rejects an empty array.
 pub(crate) async fn queue_layout_actions_via_reducer(
@@ -166,16 +163,6 @@ pub(crate) async fn queue_layout_actions_via_reducer(
     tab_id: &str,
     actions: Vec<crate::backend::obj::LayoutActionData>,
 ) -> Result<(), String> {
-    queue_layout_actions_at_revision(state, tab_id, actions).await.map(|_| ())
-}
-
-/// [`queue_layout_actions_via_reducer`], returning the `layout_revision` the
-/// batch was queued at.
-pub(crate) async fn queue_layout_actions_at_revision(
-    state: &AppState,
-    tab_id: &str,
-    actions: Vec<crate::backend::obj::LayoutActionData>,
-) -> Result<u64, String> {
     let store = &state.mstore;
     let actions_json = serde_json::to_value(&actions)
         .map_err(|e| format!("queue actions serialize failed: {}", e))?;
@@ -186,10 +173,9 @@ pub(crate) async fn queue_layout_actions_at_revision(
     };
 
     let mut apply_err: Option<String> = None;
-    let (events, revision) = {
+    let events = {
         let mut s = state.srv_state.lock().await;
         let ctx = crate::reducer::Ctx::new(None);
-        let revision_before = s.tabs.get(tab_id).map(|t| t.layout_revision);
         let events = crate::reducer::update(&mut s, cmd, &ctx);
         let has_error = events
             .iter()
@@ -202,11 +188,7 @@ pub(crate) async fn queue_layout_actions_at_revision(
                 }
             }
         }
-        let tab = s.tabs.get_mut(tab_id);
-        if let (Some(tab), Some(before), true) = (tab, revision_before, apply_err.is_some()) {
-            tab.layout_revision = before;
-        }
-        (events, s.tabs.get(tab_id).map_or(0, |t| t.layout_revision))
+        events
     };
 
     if let Some(err_msg) = events.iter().find_map(|e| match e {
@@ -219,7 +201,7 @@ pub(crate) async fn queue_layout_actions_at_revision(
         return Err(format!("queue append SQLite write failed: {}", err));
     }
     publish_events(state, &events);
-    Ok(revision)
+    Ok(())
 }
 
 /// Existence check used by `DeleteWorkspace` to decide whether to

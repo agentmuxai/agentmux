@@ -78,8 +78,6 @@ import {
 import {
     initializeFromMuxObject as initializeFromMuxObjectImpl,
     onBackendUpdate as onBackendUpdateImpl,
-    persistToBackend as persistToBackendImpl,
-    pushLayout,
 } from "./layoutPersistence";
 import {
     updateTree as updateTreeImpl,
@@ -112,20 +110,10 @@ export class LayoutModel {
      */
     tabAtom: () => Tab;
     /**
-     * MuxObject signal atom for persistence
+     * The tab's stored layout row, read-only (layoutAtom.ts).
      * @internal
      */
-    muxObjectAtom: WritableMuxObjectAtom<LayoutState>;
-    /**
-     * Debounce timer for persistence
-     * @internal
-     */
-    persistDebounceTimer: NodeJS.Timeout | null;
-    /**
-     * The one-shot startup dangling-leaf prune (layoutPersistence.ts).
-     * @internal
-     */
-    startupPruneTimer: ReturnType<typeof setTimeout> | null = null;
+    muxObjectAtom: () => LayoutState | undefined;
     /**
      * Set by dispose(). A disposed model must not write its tree again: its
      * tab has left this window or closed, and another model may own it now.
@@ -137,18 +125,7 @@ export class LayoutModel {
      */
     processedActionIds: Set<string>;
     /**
-     * Layout revisions this model's own pane-tab commands were queued at;
-     * they count as seen when it pushes (layoutPersistence.ts `pushBaseRevision`).
-     * @internal
-     */
-    ownLayoutRevisions = new Set<number>();
-    /**
-     * Pushes refused in a row as stale, reset by one that is applied.
-     * @internal
-     */
-    stalePushStreak = 0;
-    /**
-     * Layout intents and whole-tree pushes waiting to be sent, in order
+     * Layout intents and pane-tab commands waiting to be sent, in order
      * (layoutIntents.ts).
      * @internal
      */
@@ -394,10 +371,6 @@ export class LayoutModel {
         // Queued pane-tab commands still go (their callers wait on them).
         this.layoutOutbox = this.layoutOutbox.filter((item) => item.kind === "command");
         void flushLayoutOutbox(this);
-        if (this.persistDebounceTimer) clearTimeout(this.persistDebounceTimer);
-        this.persistDebounceTimer = null;
-        if (this.startupPruneTimer) clearTimeout(this.startupPruneTimer);
-        this.startupPruneTimer = null;
         if (this._disposeRoot) {
             // reagent P1 on #3091: `createRoot` is DELIBERATELY detached
             // from whatever owner is ambient when it's called — that's the
@@ -453,7 +426,6 @@ export class LayoutModel {
                 return 2 * (gap > 5 ? gap : DefaultGapSizePx);
             });
             this.animationTimeS = createSignalAtom(animationTimeS ?? DefaultAnimationTimeS);
-            this.persistDebounceTimer = null;
             this.processedActionIds = new Set();
 
             this.muxObjectAtom = getLayoutStateAtomFromTab(tabAtom);
@@ -609,16 +581,6 @@ export class LayoutModel {
 
     onBackendUpdate() {
         onBackendUpdateImpl(this);
-    }
-
-    /** @internal */
-    persistToBackend() {
-        persistToBackendImpl(this);
-    }
-
-    /** Send the whole local tree now (the outbox calls it in its turn). @internal */
-    pushLayoutNow(): Promise<void> {
-        return pushLayout(this);
     }
 
     /**

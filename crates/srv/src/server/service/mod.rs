@@ -25,7 +25,7 @@ pub(crate) mod layout_intents;
 #[cfg(test)]
 mod layout_intents_tests;
 #[cfg(test)]
-mod layout_revision_tests;
+mod pane_tab_command_tests;
 mod misc;
 mod object;
 pub(crate) mod object_helpers;

@@ -15,8 +15,7 @@ pub(super) const QUEUE_LIMIT: usize = 32;
 /// `LayoutState.pendingbackendactions`, keeping the latest `QUEUE_LIMIT`.
 /// The queue only tells a window what srv already did to the tree (every
 /// queued action is applied in srv first), so the oldest can go: a window that
-/// missed one shows srv's stored tree anyway. Each action's `rev` sets
-/// `layoutrevision`.
+/// missed one shows srv's stored tree anyway.
 ///
 /// Idempotency: the event is applied twice on the happy path (sync in
 /// `queue_layout_actions_via_reducer`, again by the subscriber task
@@ -41,19 +40,17 @@ pub(super) fn apply_layout_backend_actions_queued(
     let incoming: Vec<LayoutActionData> = serde_json::from_value(actions.clone())?;
     let mut pending = layout.pendingbackendactions.take().unwrap_or_default();
     let before = pending.len();
-    let revision = actions.as_array().into_iter().flatten().filter_map(|a| a.get("rev")?.as_u64()).fold(layout.layoutrevision, u64::max);
     for action in incoming {
         if !pending.iter().any(|p| p.actionid == action.actionid) {
             pending.push(action);
         }
     }
-    if pending.len() == before && revision == layout.layoutrevision {
+    if pending.len() == before {
         return Ok(()); // a double-apply: no version churn
     }
     let excess = pending.len().saturating_sub(QUEUE_LIMIT);
     pending.drain(..excess);
     layout.pendingbackendactions = Some(pending);
-    layout.layoutrevision = revision;
     mstore.update(&mut layout)?;
     Ok(())
 }

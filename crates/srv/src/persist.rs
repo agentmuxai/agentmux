@@ -55,14 +55,21 @@ pub async fn bootstrap_state_from_mstore(state: &Arc<Mutex<State>>, mstore: &Sto
         );
         Vec::new()
     });
-    let blocks = mstore.get_all::<Block>().unwrap_or_else(|e| {
-        tracing::warn!(
-            target: "srv-persist",
-            "[srv-persist] bootstrap: failed to load blocks from mstore: {} — blocks start empty",
-            e
-        );
-        Vec::new()
-    });
+    // `get_all` fails as a whole when one row doesn't decode. Then every tab's
+    // block list below is empty, which is not the truth on disk: the layout
+    // heal must not run against it, or it would prune and store every tree
+    // empty.
+    let (blocks, blocks_loaded) = match mstore.get_all::<Block>() {
+        Ok(blocks) => (blocks, true),
+        Err(e) => {
+            tracing::warn!(
+                target: "srv-persist",
+                "[srv-persist] bootstrap: failed to load blocks from mstore: {} — blocks start empty",
+                e
+            );
+            (Vec::new(), false)
+        }
+    };
     let mut state = state.lock().await;
     for ws in &workspaces {
         // The persistent `Workspace` carries two ordered lists:
@@ -138,17 +145,16 @@ pub async fn bootstrap_state_from_mstore(state: &Arc<Mutex<State>>, mstore: &Sto
         // rootnode is a passive shadow — refreshed on startup, never
         // diverging from disk because no reducer-arm writers exist
         // yet at runtime.
-        let (focused_node_id, magnified_node_id, rootnode, layout_revision) = if tab.layoutstate.is_empty() {
-            (String::new(), String::new(), None, 0)
+        let (focused_node_id, magnified_node_id, rootnode) = if tab.layoutstate.is_empty() {
+            (String::new(), String::new(), None)
         } else {
             match mstore.get::<crate::backend::obj::LayoutState>(&tab.layoutstate) {
                 Ok(Some(layout)) => (
                     layout.focusednodeid,
                     layout.magnifiednodeid,
                     layout.rootnode,
-                    layout.layoutrevision,
                 ),
-                _ => (String::new(), String::new(), None, 0),
+                _ => (String::new(), String::new(), None),
             }
         };
         state.tabs.insert(
@@ -161,10 +167,25 @@ pub async fn bootstrap_state_from_mstore(state: &Arc<Mutex<State>>, mstore: &Sto
                 focused_node_id,
                 magnified_node_id,
                 rootnode,
-                layout_revision,
                 recent_intent_ids: Vec::new(),
             },
         );
+    }
+    // A row written by an earlier build can hold a leaf for a block the tab
+    // no longer owns; heal it now, before any window loads it, and store the
+    // healed row through the same write an intent's events take.
+    let tab_ids: Vec<String> = if blocks_loaded {
+        state.tabs.keys().cloned().collect()
+    } else {
+        tracing::warn!(target: "srv-persist", "[srv-persist] bootstrap: blocks could not be read; skipping the layout heal");
+        Vec::new()
+    };
+    for tab_id in tab_ids {
+        for ev in crate::reducer::heal_loaded_layout(&mut state, &tab_id) {
+            if let Err(e) = crate::persist_subscriber::apply_event_to_mstore(&ev, mstore) {
+                tracing::warn!(target: "srv-persist", tab_id = %tab_id, "[srv-persist] bootstrap: storing the healed layout failed: {}", e);
+            }
+        }
     }
     for block in &blocks {
         // Phase E.3 — recover each block's parent tab via reverse

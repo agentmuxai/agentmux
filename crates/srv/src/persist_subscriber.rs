@@ -249,9 +249,7 @@ pub(crate) fn apply_event_to_mstore(
             (false, false) => Ok(()),
         },
         // SPEC_864 Phase 4 — APPEND to the pending queue (unlike the
-        // slices path above, which REPLACEs it: pushing a slice without
-        // processed actions is how the frontend ACKS the queue; the
-        // backend enqueues by appending). Idempotent under the
+        // slices path above, which REPLACEs it). Idempotent under the
         // double-apply contract (sync from the dispatch helper, again
         // from broadcast) by deduping on `actionid` — every writer
         // stamps a fresh UUID per action.
@@ -700,12 +698,9 @@ const NO_FOCUS_CLEAR: FocusClear = FocusClear { focused: false, magnified: false
 /// empty, also clear the focus/magnify ids (and leaforder) so they don't
 /// dangle at nodes that no longer exist.
 ///
-/// SPEC_864 Phase 2 — when the event carries `slices` (the
-/// `UpdateObject`→`LayoutSetTree` full-row push), the frontend-owned
-/// columns are REPLACED to mirror the legacy `update_raw` whole-row write
-/// this route retires: leaforder / pendingbackendactions are written
-/// verbatim (absent = clear — pushing without processed actions is how
-/// the frontend acks its queue); focus/magnify strings overwrite (empty =
+/// When the event carries `slices` (a seeding `LayoutSetTree`), the rest of
+/// the row is REPLACED: leaforder / pendingbackendactions are written
+/// verbatim (absent = clear); focus/magnify strings overwrite (empty =
 /// clear). `slices: None` (tree-only events) leaves those columns
 /// untouched, except that `clear` empties a focus/magnify id the reducer
 /// dropped with the edit — leaforder is a frontend-recomputed geometry
@@ -757,7 +752,7 @@ fn apply_layout_tree_replaced(
     };
     let new_pending: Option<Vec<LayoutActionData>> = match slices {
         // The pending queue is frontend-acked state, not tree geometry —
-        // an empty-tree push still replaces it (unlike focus/leaforder,
+        // an empty-tree `LayoutSetTree` still replaces it (unlike focus/leaforder,
         // which dangle without a tree).
         Some(s) => match &s.pending_backend_actions {
             Some(v) if !v.is_null() => Some(serde_json::from_value(v.clone())?),

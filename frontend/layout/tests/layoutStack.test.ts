@@ -295,18 +295,6 @@ describe("layoutStack", () => {
             expect(model.processedActionIds.has(data.action_id)).toBe(true);
         });
 
-        it("counts the revision its command was queued at as seen", async () => {
-            const model = createLayoutModel();
-            const nodeId = insertRootBlock(model, "b1");
-            pushBlockOntoStack(model, nodeId, "b2");
-            rpcCall.mockResolvedValue({ layout_revision: 4 });
-
-            setActiveBlockInStack(model, nodeId, "b1");
-            await vi.advanceTimersByTimeAsync(0);
-
-            expect([...model.ownLayoutRevisions]).toEqual([4]);
-        });
-
         it("switches the active member among existing stack members", () => {
             const model = createLayoutModel();
             const nodeId = insertRootBlock(model, "b1");
@@ -338,7 +326,6 @@ describe("layoutStack", () => {
         it("sends pane.activateTab only on a real switch — never for the already-active tab or a single-block pane, and pushes no tree", async () => {
             const model = createLayoutModel();
             const nodeId = insertRootBlock(model, "b1");
-            const persist = vi.spyOn(model, "persistToBackend");
             const activations = () => rpcCall.mock.calls.filter((c) => c[0] === "pane.activateTab").length;
 
             setActiveBlockInStack(model, nodeId, "b1"); // single-block pane
@@ -354,7 +341,6 @@ describe("layoutStack", () => {
             await settle();
             expect(activations()).toBe(1);
             expect(model.treeState.rootNode!.data!.activeBlockId).toBe("b1");
-            expect(persist).not.toHaveBeenCalled();
         });
 
         it("does NOT evict the cached NodeModel, on a real switch or on a no-op re-activation", () => {

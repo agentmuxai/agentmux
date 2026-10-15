@@ -207,11 +207,11 @@ Helper module (dot-source only — not a standalone script). Exports:
   workspaceid}`.
 - `New-AgentMuxThreePaneLayout` — calls `object.CreateBlock` three
   times (browser, terminal, browser) targeting the test tab via
-  `uicontext.activetabid`, then pushes three `pendingbackendactions`
-  (`insert` + two `splithorizontal`) onto the tab's LayoutState via
-  `object.UpdateObject`. The frontend's `LayoutModel` drains those
-  actions and reduces them client-side (see
-  [`frontend/layout/lib/layoutPersistence.ts`](../../frontend/layout/lib/layoutPersistence.ts)).
+  `uicontext.activetabid`, then sends three layout intents (`insert` +
+  two `splithorizontal`) through `object.ApplyLayoutIntent`. srv computes
+  and stores the tree; the window shows it.
+- `New-AgentMuxLayoutLeaf`, `Invoke-AgentMuxLayoutIntent` — build a pane
+  for a block, and apply one layout intent (throws if srv refuses it).
 - `Remove-AgentMuxTestTab` — closes the test tab via
   `workspace.CloseTab`. Safe to call on an already-closed tab.
 

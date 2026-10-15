@@ -227,10 +227,10 @@ export interface LayoutNode {
     minimizedSize?: number;
     /**
      * LEGACY (pre display-mode model) — the flex-unit size a node was locked to
-     * while minimized under the size-squeeze model. No new writes; the frontend
-     * migrates it away in `rebuildMinimizedSet`, and only the Rust-side
-     * `enforce_minimized_locks` still reads it (protection for unmigrated
-     * persisted trees).
+     * while minimized under the size-squeeze model. No new writes, and nothing
+     * sizes by it any more: srv's `migrate_legacy_minimize` and the frontend's
+     * `rebuildMinimizedSet` drop it on load, and only the invariant checks
+     * (I6/I7) still look for it in an unmigrated tree.
      */
     minimizedLockedSize?: number;
     /**

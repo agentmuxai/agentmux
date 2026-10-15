@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-30
 **Type:** Implementation spec (full analysis)
-**Status:** active — Phase 2 (`balance_node`, #1866) and Phase 3 (srv reducer arms, #1868) implemented; Phase 4 implemented in #4946 (the frontend's own tree edits are layout intents) and #4947 (srv applies its own placements; the window pushes no tree for them); Phase 5 implemented in #4948 (minimize and restore are intents; minimize has been a display mode since #2197, so the dissolve intents were dropped); Phase 6 not started. Verified against code 2026-10-14 ([triage](../analysis/REPORT_REDUCER_STACK_TRIAGE_2026_10_13.md)).
+**Status:** implemented — Phase 2 (`balance_node`, #1866) and Phase 3 (srv reducer arms, #1868) implemented; Phase 4 implemented in #4946 (the frontend's own tree edits are layout intents) and #4947 (srv applies its own placements; the window pushes no tree for them); Phase 5 implemented in #4948 (minimize and restore are intents; minimize has been a display mode since #2197, so the dissolve intents were dropped); Phase 6 implemented in #4949 (no window writes a layout row: the whole-tree push, `layout_revision` and the frontend's dangling-leaf prune are gone). Verified against code 2026-10-14 ([triage](../analysis/REPORT_REDUCER_STACK_TRIAGE_2026_10_13.md)).
 **Owner:** asaf
 **Supersedes scope of:** `SPEC_864_LAYOUT_SINGLE_WRITER_2026_06_30.md` (that spec's "weak" single-writer
 becomes Phase 1 here; this spec is the committed end-goal)
@@ -360,6 +360,32 @@ migrated away on load. So there is no geometry to split off and no dissolve inte
 
 **Phase 6 — delete the backstops.** Remove `heal_layout` + callers, the relaxed `reorder_tabs_bulk`
 validation + its migration test, the resync layout carve-out. The payoff deletion.
+
+*Phase 6 as built (#4949):* the three backstops named above were already gone: `heal_layout` and
+the `reorder_tabs_bulk` relaxation in #1981, the resync carve-out in #4878. With Phases 4 and 5
+nothing pushed a tree any more, so this phase deletes the whole-tree path and what guarded it:
+- **No layout row is written whole.** `object.UpdateObject` refuses a layout row
+  (`update_object`); the `UpdateObject`→`LayoutSetTree` route, its stale-push refusal and
+  `layout_revision` (on the tab, the row and every queued action) are deleted, and the pane-tab
+  commands answer with only the row's version. `object.ApplyLayoutIntent` is the service form of
+  `layout.applyIntent`, for the `tools/tests` harnesses that used to write rows.
+- **The frontend writes nothing but intents and commands.** `persistToBackend`, the outbox's push
+  item, the stale-push resync and the read-write layout atom are deleted; the layout row is
+  read-only to the window (`layoutAtom.ts`).
+- **No frontend prune.** `pruneDanglingLeaves`, its startup pass, the end-of-drag pass and the
+  recently-created age gate are deleted: srv takes a moved or deleted block out of the tree itself
+  (Phase 4) and the window shows srv's tree. A failed redock shows the source tab as srv stores it.
+  A row stored by an earlier build can still hold a leaf for a block its tab no longer owns, so srv
+  heals each tab's tree once at bootstrap (`heal_loaded_layout`): it removes those leaves, balances,
+  clears a focus/magnify left on nothing, and stores the row with a new version. A clean row is
+  not rewritten.
+- **Dead srv algebra deleted.** The old structural mutators in `backend/layout/mod.rs`,
+  `enforce_minimized_locks` and `ResizeOp` had no caller once every edit was an intent; their
+  tests that still described live behaviour moved to the intent tests.
+- **Not done, and why:** §10's `version` CAS is not needed (srv computes every edit from its own
+  tree, in order, so there is nothing to compare-and-swap) and the stored `leaforder` is written
+  only by srv's seeders and read by nothing (the window computes its own); dropping the column is
+  left for a schema cleanup.
 
 ---
 

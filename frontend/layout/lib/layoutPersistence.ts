@@ -4,20 +4,15 @@
 
 import { batch } from "solid-js";
 import { fireAndForget } from "@/util/util";
-// drag-session, not tile-drag: tile-drag imports crossTabDrag, which imports
-// this module.
-import { isUnderway } from "@/app/drag/drag-session";
-import { findNodeByBlockId, newLayoutNode, walkNodes } from "./layoutNode";
+import { findNodeByBlockId, newLayoutNode } from "./layoutNode";
 import { rebuildMinimizedSet } from "./layoutMinimize";
 import { removeBlockFromLeaf, removeLeafEmptiedByMove } from "./layoutMagnify";
-import { flushLayoutOutbox, queueLayoutCommand, queueLayoutPush, reconcileWithStoredLayout } from "./layoutIntents";
+import { queueLayoutCommand, reconcileWithStoredLayout } from "./layoutIntents";
 import { activateMemberInStack, addMemberToStack, moveMemberAcrossStacks, moveMemberInStack } from "./stackMembers";
-import type { LayoutPushResult } from "./layoutAtom";
 import type { PaneTabEditResult } from "@/types/rpc/PaneTabEditResult";
 import {
     LayoutTreeActionType,
     LayoutTreeClearTreeAction,
-    LayoutTreeDeleteNodeAction,
     LayoutTreeInsertNodeAction,
     LayoutTreeInsertNodeAtIndexAction,
     LayoutTreeReplaceNodeAction,
@@ -53,12 +48,6 @@ export function initializeFromMuxObject(model: LayoutModel) {
         if (action.actionid) model.processedActionIds.add(action.actionid);
     }
     model.updateTree();
-
-    // One-shot startup heal: remove dangling leaves persisted by an earlier
-    // session's races once Tab + LayoutState have both settled. Deliberately
-    // a delayed single pass, not a reactive subscription — see the
-    // onBackendUpdate note below and SPEC_DRAG_SESSION_ARCHITECTURE_REFACTOR §3.5.
-    model.startupPruneTimer = setTimeout(() => pruneDanglingLeaves(model), 2000);
 }
 
 /**
@@ -83,107 +72,6 @@ export function onBackendUpdate(model: LayoutModel) {
         fireAndForget(() => processPendingBackendActions(model));
     }
     reconcileWithStoredLayout(model);
-    // NOTE deliberately NO prune here (SPEC_DRAG_SESSION_ARCHITECTURE_REFACTOR
-    // §3.5): running it reactively on every Tab/LayoutState change made the
-    // Tab object a tracked dependency and could delete a LEGITIMATE
-    // freshly-created leaf whose block hadn't landed in tab.blockids yet
-    // (the round-4 "drops don't stick" regression). Prune triggers are now:
-    // model init (below), the tab bar's post-drag settle pass, and the
-    // redock failure path.
-}
-
-// Age-gate registry (review finding on SPEC_DRAG_SESSION_ARCHITECTURE_REFACTOR
-// PR #2105, P1): createBlock/createBlockSplitHorizontally/createBlockSplit-
-// Vertically (global.ts) insert the new leaf into the local tree
-// SYNCHRONOUSLY via treeReducer, but the block's membership in
-// `tab.blockids` only lands later via an async MuxObject push. Any prune
-// trigger that fires inside that window would see the fresh leaf as
-// "disowned" and delete + persist the deletion — a real, distinct path to
-// the same class of bug pruneDanglingLeaves exists to fix. Call sites for
-// those three functions mark the new block here; pruning skips anything
-// marked within the last RECENT_BLOCK_GRACE_MS.
-const RECENT_BLOCK_GRACE_MS = 3000;
-const recentlyCreatedBlocks = new Map<string, number>();
-
-/** Call immediately after locally inserting a new block's leaf via treeReducer. */
-export function markBlockRecentlyCreated(blockId: string, now: number = Date.now()): void {
-    recentlyCreatedBlocks.set(blockId, now);
-}
-
-function isRecentlyCreated(blockId: string, now: number): boolean {
-    const at = recentlyCreatedBlocks.get(blockId);
-    if (at === undefined) return false;
-    if (now - at > RECENT_BLOCK_GRACE_MS) {
-        recentlyCreatedBlocks.delete(blockId);
-        return false;
-    }
-    return true;
-}
-
-/**
- * Remove leaves whose block is NOT in the tab's `blockids` — dangling
- * references left behind when a frontend's debounced persist clobbers a
- * queued backend layout action (the stale-tree resurrection issue,
- * INVESTIGATION_LAYOUT_DEAD_SPACE_STALE_TREE_RESURRECTION_2026_07_08).
- * A dangling leaf renders a block owned by ANOTHER tab; since every tab
- * stays mounted, the same block mounts twice and the block-component
- * registry breaks — observed as a fully non-responsive tab.
- *
- * Ownership (`Tab.blockids`) is reducer-owned truth, so pruning against
- * it is always safe FOR AN ALREADY-SETTLED leaf: this only ever REMOVES
- * leaves for disowned blocks. But a block just created via
- * createBlock/createBlockSplitHorizontally/createBlockSplitVertically is
- * inserted into the LOCAL tree before its `tab.blockids` membership
- * round-trips through the backend — such a leaf is age-gated via
- * `markBlockRecentlyCreated` so this function never deletes it out from
- * under the user (the round-4-class regression this review caught).
- *
- * Triggers (deliberately sparse — see the round-4 regression note in
- * onBackendUpdate): one-shot at model init (+2s), the tab bar's
- * post-drag settle pass, and the redock failure path. NOT reactive.
- */
-export function pruneDanglingLeaves(model: LayoutModel) {
-    if (model.disposed) return;
-    const rootNode = model.treeState?.rootNode;
-    const tab = model.tabAtom?.();
-    if (!rootNode || !tab?.blockids) return;
-    // Never prune while a pane drag is in flight: MoveBlock's Tab update
-    // can reach this window BEFORE the drag's dragend dispatches (observed
-    // 2ms apart in field logs), and deleting the drag-source leaf mid-drag
-    // unmounts the source element — Chromium then never fires dragend on
-    // it, pragmatic's teardown chain (activeDrag reset and monitor onDrop)
-    // is skipped, and the source tab's overlay wedges at
-    // pointer-events:auto. The drag session (NOT currentDragPayload, which is
-    // already cleared at drop time) spans the gesture until the source
-    // releases it; the tab bar's end-of-drag cleanup re-runs the prune once
-    // the drag has settled.
-    if (isUnderway("tile")) return;
-    const now = Date.now();
-    const owned = new Set(tab.blockids);
-    const danglingIds: string[] = [];
-    walkNodes(rootNode, (node) => {
-        if (
-            !node.children?.length &&
-            node.data?.blockId &&
-            !owned.has(node.data.blockId) &&
-            !isRecentlyCreated(node.data.blockId, now)
-        ) {
-            danglingIds.push(node.id);
-        }
-    });
-    if (!danglingIds.length) return;
-    console.warn("[layout] pruning dangling leaves (blocks not owned by this tab):", danglingIds);
-    for (const nodeId of danglingIds) {
-        model.treeReducer(
-            { type: LayoutTreeActionType.DeleteNode, nodeId } as LayoutTreeDeleteNodeAction,
-            false,
-        );
-    }
-    batch(() => {
-        model.updateTree();
-        model.setter(model.localTreeStateAtom, { ...model.treeState });
-    });
-    void flushLayoutOutbox(model);
 }
 
 /**
@@ -219,9 +107,7 @@ export async function processPendingBackendActions(model: LayoutModel) {
         model.updateTree();
         model.setter(model.localTreeStateAtom, { ...model.treeState });
     });
-    // Nothing to send: srv applied each action before queueing it. No prune
-    // either — a just-applied queued INSERT's block may not be in the
-    // frontend's tab.blockids yet (SPEC_DRAG_SESSION_ARCHITECTURE_REFACTOR §3.5).
+    // Nothing to send: srv applied each action before queueing it.
     reconcileWithStoredLayout(model);
 }
 
@@ -461,108 +347,9 @@ async function handleBackendAction(model: LayoutModel, action: LayoutActionData)
 }
 
 /**
- * Push the whole local tree to the backend MuxObject (debounced), for the
- * edits that don't reach srv as layout intents yet. It leaves through the
- * same queue as the intents (`queueLayoutPush`, layoutIntents.ts).
- * @param model The LayoutModel instance.
- */
-export function persistToBackend(model: LayoutModel) {
-    if (model.persistDebounceTimer) {
-        clearTimeout(model.persistDebounceTimer);
-    }
-
-    model.persistDebounceTimer = setTimeout(() => {
-        model.persistDebounceTimer = null;
-        if (model.disposed) return;
-        queueLayoutPush(model);
-    }, 100);
-}
-
-/** Send the whole local tree now; resolves once srv has answered. */
-export async function pushLayout(model: LayoutModel): Promise<void> {
-    if (model.disposed) return;
-    const muxObj = model.getter(model.muxObjectAtom);
-    if (!muxObj) return;
-
-    muxObj.rootnode = model.treeState.rootNode;
-    muxObj.focusednodeid = model.treeState.focusedNodeId;
-    muxObj.magnifiednodeid = model.treeState.magnifiedNodeId;
-    muxObj.leaforder = model.treeState.leafOrder;
-    // Persistence Phase A (SPEC_DRAG_SESSION_ARCHITECTURE_REFACTOR §3.6):
-    // the pendingbackendactions queue is BACKEND-owned. Never write our
-    // (often stale) local copy — a debounced persist racing a freshly
-    // queued action used to erase it (the stale-tree resurrection
-    // engine). Instead, carry forward the LIVE queue minus the actions
-    // this model has already processed: ordinary persists preserve
-    // unseen actions verbatim, and post-processing persists still clear
-    // consumed ones.
-    const liveQueue = model.getter(model.muxObjectAtom)?.pendingbackendactions;
-    const unprocessed = liveQueue?.filter(
-        (a) => a.actionid && !model.processedActionIds.has(a.actionid)
-    );
-    muxObj.pendingbackendactions = unprocessed?.length ? unprocessed : undefined;
-    muxObj.layoutrevision = pushBaseRevision(model, muxObj.layoutrevision ?? 0);
-
-    const push = (model.muxObjectAtom as { _push?: (v: LayoutState) => Promise<LayoutPushResult | null> })._push;
-    if (!push) {
-        model.setter(model.muxObjectAtom, muxObj);
-        return;
-    }
-    try {
-        const result = await push(muxObj);
-        if (result?.stale) {
-            await resyncAfterStalePush(model, result);
-            return;
-        }
-        model.stalePushStreak = 0;
-    } catch (e) {
-        console.warn("[layout] layout push failed", e);
-    }
-}
-
-/**
- * The layout revision a push is built on: the stored row's, then on through
- * every following revision this model's own pane-tab commands were queued
- * at (their local edits are already in its tree). srv refuses a push built
- * on an older revision than its own (`stale_push_revision`).
- * SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md §3.5.
- */
-export function pushBaseRevision(model: LayoutModel, rowRevision: number): number {
-    let base = rowRevision;
-    while (model.ownLayoutRevisions.has(base + 1)) base++;
-    for (const rev of model.ownLayoutRevisions) {
-        if (rev <= base) model.ownLayoutRevisions.delete(rev);
-    }
-    return base;
-}
-
-/** A stale push in a row this many times gives up until the next edit pushes:
- *  srv queueing faster than a round trip means something is wrong. */
-const MAX_STALE_PUSH_STREAK = 5;
-
-/**
- * srv refused a push built before an action it queued: nothing was applied,
- * and the row as stored (with the action) is already in this model's cache.
- * Apply the actions it missed onto the local tree, then push again on the
- * newer revision — the push's own edits are still in the tree.
- */
-async function resyncAfterStalePush(model: LayoutModel, result: LayoutPushResult): Promise<void> {
-    if (model.disposed) return;
-    model.stalePushStreak++;
-    if (model.stalePushStreak > MAX_STALE_PUSH_STREAK) {
-        console.error("[layout] layout push refused as stale too many times in a row; waiting for the next edit", result);
-        return;
-    }
-    console.info("[layout] layout push refused as stale; applying the missed actions and pushing again", result);
-    await processPendingBackendActions(model);
-    model.persistToBackend();
-}
-
-/**
  * Send the pane-tab command that mirrors a local edit this model already made
  * (`pane.activateTab`, `pane.removeTab`, `pane.moveTab`). srv applies it and
- * queues it for other views under the id minted here, which this model skips;
- * the revision it was queued at counts as seen for this model's next push.
+ * queues it for other views under the id minted here, which this model skips.
  * It leaves through the layout outbox, in order with the intents. A failure
  * is only logged (the returned promise never rejects): the window then shows
  * srv's layout. SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md §3.3.
@@ -578,7 +365,6 @@ export function sendStackCommand(
         queueLayoutCommand(model, async () => {
             try {
                 const res = await send(actionId);
-                if (res?.layout_revision) model.ownLayoutRevisions.add(res.layout_revision);
                 // Compare with srv only once the row shows this change.
                 if (res?.version) model.layoutVersionFloor = Math.max(model.layoutVersionFloor, res.version);
             } catch (e) {

@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createSignal } from "solid-js";
 import { LayoutModel } from "@/layout/lib/layoutModel";
 import { deriveNodeId, newLayoutNode } from "@/layout/lib/layoutNode";
-import { isLayoutQuiet, reconcileWithStoredLayout } from "@/layout/lib/layoutIntents";
+import { layoutDragEnded, reconcileWithStoredLayout } from "@/layout/lib/layoutIntents";
 import { sendStackCommand } from "@/layout/lib/layoutPersistence";
 import { closeBlockInStack, pushBlockOntoStack } from "@/layout/lib/layoutStack";
 import {
@@ -85,10 +85,8 @@ describe("layout intents", () => {
     });
     afterEach(() => vi.useRealTimers());
 
-    it("an edit is sent as an intent, never as the tree", async () => {
+    it("an edit is sent as an intent", async () => {
         const model = createModel();
-        const push = vi.fn(async () => null);
-        (model.muxObjectAtom as any)._push = push;
         const a = insert(model, "a");
         await settle();
         expect(intentsSent()).toHaveLength(1);
@@ -96,7 +94,6 @@ describe("layout intents", () => {
         expect(sent.tab_id).toBe("tab-1");
         expect(sent.intent).toEqual({ type: "insert", node: JSON.parse(JSON.stringify(a)), magnified: false, focused: true });
         expect(sent.focused_node_id).toBe(a.id);
-        expect(push).not.toHaveBeenCalled();
     });
 
     it("the intent carries the new node as it was before the edit, and the branches are named from the action id", async () => {
@@ -130,26 +127,6 @@ describe("layout intents", () => {
         await settle();
         expect(intentsSent()).toHaveLength(2);
         expect(intentsSent()[1].data.intent.node.data.blockId).toBe("b");
-    });
-
-    it("a whole-tree push waits for the intents ahead of it and carries the ones behind it", async () => {
-        vi.useFakeTimers();
-        const model = createModel();
-        const pushed: LayoutState[] = [];
-        (model.muxObjectAtom as any)._push = vi.fn(async (v: LayoutState) => void pushed.push(JSON.parse(JSON.stringify(v))));
-        insert(model, "a");
-        model.persistToBackend();
-        await vi.advanceTimersByTimeAsync(150);
-        insert(model, "b"); // queued behind the push
-        await settle();
-        expect(pushed).toHaveLength(0);
-        intentsSent()[0].resolve({ applied: true, version: 2 });
-        await vi.advanceTimersByTimeAsync(0);
-        await settle();
-        expect(pushed).toHaveLength(1);
-        expect(pushed[0].rootnode.children?.length ?? 0).toBe(2); // b is in it
-        expect(intentsSent()).toHaveLength(1); // so b's intent was dropped
-        expect(isLayoutQuiet(model)).toBe(true);
     });
 
     it("a resend after a failed send keeps the action id", async () => {
@@ -195,6 +172,26 @@ describe("layout intents", () => {
             expect(model.treeState.rootNode?.id).toBe(a.id);
             reconcileWithStoredLayout(model);
             expect(model.treeState.rootNode?.id).toBe(a.id);
+        });
+
+        // A cross-tab redock srv refuses before the drag's dragend asks for
+        // the comparison while the drag is still active, so it's skipped
+        // then; the drag's end runs it.
+        it("runs the skipped comparison when the drag ends", async () => {
+            const model = createModel();
+            insert(model, "a");
+            intentsSent()[0].resolve({ applied: true, version: 3 });
+            await settle();
+            model.activeDrag._set(true);
+            const stored = { id: "srv-root", flexDirection: "row", size: 10, data: { blockId: "z" } } as LayoutNode;
+            storeRow(model, 3, stored);
+            reconcileWithStoredLayout(model);
+            expect(model.treeState.rootNode?.id).not.toBe("srv-root");
+            model.activeDrag._set(false);
+            layoutDragEnded(model);
+            expect(model.treeState.rootNode?.id).not.toBe("srv-root"); // not before the drag's teardown
+            await new Promise((r) => setTimeout(r, 0));
+            expect(model.treeState.rootNode).toEqual(stored);
         });
 
         it("leaves the local tree alone when srv's normalizes to it", async () => {
@@ -255,8 +252,6 @@ describe("backend edits srv already applied", () => {
         const a = insert(model, "a");
         intentsSent()[0].resolve({ applied: true, version: 2 });
         await settle();
-        const push = vi.fn(async () => null);
-        (model.muxObjectAtom as any)._push = push;
         // srv's tree after its own insert: a and the new leaf in a row.
         const actionId = "a0000009-0000-4000-8000-000000000009";
         const stored = {
@@ -273,8 +268,6 @@ describe("backend edits srv already applied", () => {
         expect(JSON.stringify(model.treeState.rootNode)).toContain("srv-leaf");
         expect(model.treeState.rootNode!.id).toBe(deriveNodeId(actionId, 1));
         expect(intentsSent()).toHaveLength(1); // only the first insert
-        await new Promise((r) => setTimeout(r, 150));
-        expect(push).not.toHaveBeenCalled();
     });
 
     it("a queued placement already in the tree is skipped", async () => {
@@ -315,7 +308,7 @@ describe("backend edits srv already applied", () => {
         let sentCommand = false;
         const done = sendStackCommand(model, "pane.activateTab", async () => {
             sentCommand = true;
-            return { layout_revision: 0, version: 0 };
+            return { version: 0 };
         });
         await settle();
         expect(sentCommand).toBe(false);
@@ -326,7 +319,7 @@ describe("backend edits srv already applied", () => {
 
     it("a pane-tab command's answer holds off the comparison until the row shows it", async () => {
         const model = createModel();
-        await sendStackCommand(model, "pane.activateTab", async () => ({ layout_revision: 1, version: 9 }));
+        await sendStackCommand(model, "pane.activateTab", async () => ({ version: 9 }));
         expect(model.layoutVersionFloor).toBe(9);
     });
 
@@ -344,7 +337,7 @@ describe("backend edits srv already applied", () => {
         await settle();
         const removeTab = calls.find((c) => c.command === "pane.removeTab");
         expect(removeTab?.data.block_id).toBe("b");
-        removeTab!.resolve({ layout_revision: 3, version: 3 });
+        removeTab!.resolve({ version: 3 });
         await closing;
         expect(onNodeDelete).toHaveBeenCalledWith({ blockId: "b" });
     });
@@ -355,7 +348,7 @@ describe("backend edits srv already applied", () => {
         let sent = false;
         await sendStackCommand(model, "pane.activateTab", async () => {
             sent = true;
-            return { layout_revision: 0, version: 0 };
+            return { version: 0 };
         });
         expect(sent).toBe(true);
     });

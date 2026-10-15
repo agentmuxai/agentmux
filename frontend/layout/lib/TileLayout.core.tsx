@@ -106,9 +106,8 @@ export interface TileLayoutPlatform {
     onRootMount?: () => void;
     /**
      * linux: the debounced dragover bounds check only fires during an active
-     * tile drag (`dragState.nodeId` set). Tab DnD must not trigger
-     * persistToBackend via treeReducer — that crashed on Linux (see drag.rs
-     * notes).
+     * tile drag (`dragState.nodeId` set). Tab DnD must not run treeReducer
+     * from it — that crashed on Linux (see drag.rs notes).
      */
     boundsCheckRequiresTileDrag: boolean;
     /**

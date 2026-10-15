@@ -15,7 +15,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const hub = vi.hoisted(() => ({
     monitors: [] as any[],
     models: new Map<string, { activeDrag: any }>(),
-    pruned: [] as string[],
 }));
 
 vi.mock("@atlaskit/pragmatic-drag-and-drop/element/adapter", () => ({
@@ -29,10 +28,8 @@ vi.mock("@/layout/index", () => ({
     clearCrossTabDrop: () => {},
     getLayoutModelForTabById: (id: string) => hub.models.get(id),
 }));
-vi.mock("@/layout/lib/layoutPersistence", () => ({
-    pruneDanglingLeaves: (m: any) => hub.pruned.push(m.id),
-}));
 vi.mock("@/layout/lib/crossTabDrag", () => ({ clearCrossTabDrop: () => {} }));
+vi.mock("@/layout/lib/layoutIntents", () => ({ layoutDragEnded: () => {} }));
 vi.mock("@/app/drag/CrossWindowDragMonitor", () => ({ setCurrentDragPayload: () => {} }));
 vi.mock("../store/services", () => ({ WorkspaceService: { ReorderTab: () => Promise.resolve() } }));
 vi.mock("@/util/platformutil", async (importOriginal) => ({
@@ -106,22 +103,15 @@ describe("tab bar end-of-drag cleanup (tile drags)", () => {
         expect(dragActivatedTabIds.size).toBe(0);
     });
 
-    it("the tile monitor's drop resets the overlays and prunes each tab once the drag settles", () => {
-        vi.useFakeTimers();
-        try {
-            const [tab1, tab2] = mount();
-            tab1.activeDrag._set(true);
-            springSwitchedThrough(tab2, "tab-2");
-            const tileMonitor = hub.monitors.find((m) => m.canMonitor?.({ source: { data: { type: tileItemType } } }));
-            expect(tileMonitor).toBeDefined();
-            tileMonitor.onDrop({ source: { data: { type: tileItemType } }, location: { current: { dropTargets: [] } } });
-            expect(tab1.activeDrag()).toBe(false);
-            expect(tab2.activeDrag()).toBe(false);
-            vi.advanceTimersByTime(250);
-            expect(hub.pruned).toEqual(["tab-1", "tab-2"]);
-        } finally {
-            vi.useRealTimers();
-        }
+    it("the tile monitor's drop resets the overlays", () => {
+        const [tab1, tab2] = mount();
+        tab1.activeDrag._set(true);
+        springSwitchedThrough(tab2, "tab-2");
+        const tileMonitor = hub.monitors.find((m) => m.canMonitor?.({ source: { data: { type: tileItemType } } }));
+        expect(tileMonitor).toBeDefined();
+        tileMonitor.onDrop({ source: { data: { type: tileItemType } }, location: { current: { dropTargets: [] } } });
+        expect(tab1.activeDrag()).toBe(false);
+        expect(tab2.activeDrag()).toBe(false);
     });
 });
 

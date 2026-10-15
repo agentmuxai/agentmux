@@ -8,21 +8,6 @@
 use crate::backend::obj::*;
 use crate::backend::storage::store::Store;
 
-/// Phase E.4 (Option A) — reverse lookup: given a `LayoutState.oid`,
-/// find the `Tab.oid` that owns it (i.e., the tab whose `layoutstate`
-/// field matches). Returns `None` when the layout is unowned (legacy
-/// or partially-migrated row) or the mstore read fails — caller treats
-/// either as "skip the reducer dispatch and fall through to the wcore
-/// write." Linear scan over all tabs; acceptable here because the
-/// layout-update path is low-frequency relative to drag-resize and
-/// the reducer mutex itself is held for sub-millisecond intervals.
-pub(super) fn find_tab_for_layout(store: &Store, layout_oid: &str) -> Option<String> {
-    let tabs = store.get_all::<Tab>().ok()?;
-    tabs.into_iter()
-        .find(|t| t.layoutstate == layout_oid)
-        .map(|t| t.oid)
-}
-
 /// Resolve an "otype:oid" string to the corresponding wave object JSON.
 pub(super) fn get_object_by_oref(store: &Store, oref_str: &str) -> Result<serde_json::Value, String> {
     let oref = crate::backend::ORef::parse(oref_str).map_err(|e| e.to_string())?;
@@ -65,7 +50,15 @@ pub(super) fn update_object(
         .to_string();
 
     match otype.as_str() {
-        OTYPE_CLIENT | OTYPE_LAYOUT => {}
+        OTYPE_CLIENT => {}
+        // A whole tree written here would overwrite the reducer's
+        // (SPEC_STRONG_REDUCER_AUTHORITY_LAYOUT_2026_06_30.md §5).
+        OTYPE_LAYOUT => {
+            return Err(
+                "UpdateObject: a layout row changes through layout intents (layout.applyIntent), not a whole-row write"
+                    .to_string(),
+            )
+        }
         OTYPE_WINDOW | OTYPE_WORKSPACE | OTYPE_TAB | OTYPE_BLOCK => {
             return Err(format!(
                 "UpdateObject: {otype} objects are owned by the srv reducer; \
