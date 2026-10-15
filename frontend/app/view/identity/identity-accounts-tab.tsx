@@ -13,7 +13,7 @@ import { ContextMenuModel } from "@/app/store/contextmenu";
 import { buildAccountRowMenu } from "./bind-to-agent-menu";
 import { ConfirmModal } from "@/app/element/confirm-modal";
 import "./identity-view.scss";
-import { Button } from "@/app/element/ui";
+import { Button, IconButton } from "@/app/element/ui";
 
 // CLI providers whose config dir holds conversation history that a delete
 // keeps: those with a `history_native_subdir` in
@@ -139,15 +139,7 @@ export function AccountDeleteNotice({ model }: { model: IdentityViewModel }): JS
                     <div class="identity-delete-notice" role="status" aria-live="polite">
                         <span class="identity-delete-notice-icon" aria-hidden="true">⚠</span>
                         <span class="identity-delete-notice-text">{notice()}</span>
-                        <button
-                            type="button"
-                            class="identity-delete-notice-dismiss"
-                            title="Dismiss"
-                            aria-label="Dismiss"
-                            onClick={() => model.dismissDeleteNotice()}
-                        >
-                            ×
-                        </button>
+                        <IconButton icon="xmark" label="Dismiss" density="compact" onClick={() => model.dismissDeleteNotice()} />
                     </div>
                 )}
             </Show>

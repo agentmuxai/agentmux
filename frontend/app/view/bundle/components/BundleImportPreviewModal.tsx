@@ -13,6 +13,7 @@
 import { createSignal, For, onMount, Show, type JSX } from "solid-js";
 
 import { Button } from "@/element/button";
+import { IconButton } from "@/app/element/ui";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import type { BundleImportSelectionState, BundleImportSkillSelectionState } from "@/app/element/modal-layer";
@@ -337,14 +338,14 @@ export const BundleImportPreviewModalPanel = (
 
                 <Show when={preview.warnings.length > 0 && !warningsDismissed()}>
                     <div class="bundle-import-warnings-banner">
-                        <button
-                            type="button"
+                        <IconButton
+                            icon="xmark"
+                            label="Dismiss warnings"
+                            tooltip={false}
+                            density="compact"
                             class="bundle-import-warnings-dismiss"
                             onClick={() => setWarningsDismissed(true)}
-                            aria-label="Dismiss warnings"
-                        >
-                            ×
-                        </button>
+                        />
                         <For each={preview.warnings}>{(w) => <div class="bundle-import-warning-line">{w}</div>}</For>
                         <Show when={preview.warnings_truncated}>
                             <div class="bundle-import-warning-line">…more warnings not shown</div>

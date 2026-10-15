@@ -17,7 +17,7 @@ import { OAuthConnectPanel } from "@/app/view/accounts/OAuthConnectPanel";
 import { supportsOAuth } from "@/app/view/accounts/oauth-catalog";
 import "./identity-view.scss";
 import "@/app/view/accounts/oauth-connect.scss";
-import { Button } from "@/app/element/ui";
+import { Button, IconButton } from "@/app/element/ui";
 import { focusOnOpen } from "@/util/focusutil";
 
 // Per-provider validation endpoint, surfaced in the egress help note next to
@@ -223,7 +223,7 @@ export function AccountForm({ model }: { model: IdentityViewModel }): JSX.Elemen
             <div class="identity-form">
                 <div class="identity-form-header">
                     <span>{isEdit() ? "Edit Account" : "Add Account"}</span>
-                    <button class="identity-form-close" onClick={() => model.cancelForm()}>✕</button>
+                    <IconButton icon="xmark" label="Close" tooltip={false} onClick={() => model.cancelForm()} />
                 </div>
 
                 <div class="identity-form-body">

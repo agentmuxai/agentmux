@@ -39,20 +39,6 @@
     }
 }
 
-.settings-search-clear {
-    background: transparent;
-    border: none;
-    color: var(--secondary-text-color);
-    cursor: pointer;
-    font-size: 15px;
-    line-height: 1;
-    padding: 0 2px;
-
-    &:hover {
-        color: var(--main-text-color);
-    }
-}
-
 .settings-search-results {
     position: absolute;
     left: 16px;

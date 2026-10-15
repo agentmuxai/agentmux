@@ -10,7 +10,7 @@ import { summarizeAmbientOutcomes } from "@/app/store/ambient-outcomes";
 import { remoteFleetTargets, unavailableReason, type FleetAction } from "./swarm-fleet-targets";
 import type { SwarmViewModel } from "./swarm-model";
 import { remoteSections } from "./swarm-remote";
-import { Button } from "@/app/element/ui";
+import { Button, IconButton } from "@/app/element/ui";
 import { focusOnOpen } from "@/util/focusutil";
 
 // Staged rollout only offered once a selection is large enough that
@@ -306,9 +306,7 @@ export function FleetResultPanel({ model }: { model: SwarmViewModel }): JSX.Elem
                             {e().result.failed.length} failed
                             <Show when={e().result.aborted_early}> — staged rollout aborted early</Show>
                         </span>
-                        <button type="button" class="swarm-fleet-result-dismiss" onClick={() => model.dismissFleetResult()}>
-                            <i class="fa-solid fa-xmark" />
-                        </button>
+                        <IconButton icon="xmark" label="Dismiss" density="compact" onClick={() => model.dismissFleetResult()} />
                     </div>
                     {/* Per-target rows, never a single aggregate line alone — see
                         this panel's own reason for existing (spec §3/§5.4). */}

@@ -74,19 +74,6 @@
         font-size: var(--text-base);
     }
 
-    .accounts-chooser-close {
-        background: transparent;
-        border: none;
-        color: var(--secondary-text-color);
-        cursor: default;
-        font-size: var(--text-base);
-        padding: 2px 4px;
-
-        &:hover {
-            color: var(--main-text-color);
-        }
-    }
-
     .accounts-chooser-modes {
         display: flex;
         flex-direction: column;

@@ -10,7 +10,7 @@
  */
 
 import { createSignal, For, Show, type JSX } from "solid-js";
-import { Card, CardGrid } from "@/app/element/ui";
+import { Card, CardGrid, IconButton } from "@/app/element/ui";
 import { ProviderLogo } from "@/element/ProviderLogo";
 import type { AccountKind, AccountProvider, IdentityViewModel } from "@/app/view/identity/identity-model";
 import { SERVICE_CATALOG, modeLabel, type AuthMode, type ServiceTile } from "./accounts-catalog";
@@ -108,14 +108,7 @@ export function AccountsGallery(props: {
                                     <ProviderLogo provider={tile().id} size={20} />
                                 </span>
                                 <span class="accounts-chooser-title">Connect {tile().displayName}</span>
-                                <button
-                                    type="button"
-                                    class="accounts-chooser-close"
-                                    onClick={() => setChooser(null)}
-                                    aria-label="Close"
-                                >
-                                    ✕
-                                </button>
+                                <IconButton icon="xmark" label="Close" tooltip={false} onClick={() => setChooser(null)} />
                             </div>
                             <div class="accounts-chooser-modes">
                                 <For each={tile().authModes}>

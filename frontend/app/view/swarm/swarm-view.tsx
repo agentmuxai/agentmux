@@ -8,6 +8,7 @@ import { createMemo, createSignal, createEffect, onCleanup, For, onMount, Show, 
 import type { SwarmViewModel, AgentTreeNode, ActiveSubagent, ActiveShell, ActiveCron, WorkflowDispatch, SubagentEvent, DispatchActivityEntry, TodoItem } from "./swarm-model";
 import { collectClearableRows, subagentDisplayLabel, subagentRowKey, subagentToolDetail, workflowRetireSignal, AUTO_RETIRE_DELAY_MS } from "./swarm-model";
 import { ProviderLogo } from "@/app/element/ProviderLogo";
+import { IconButton } from "@/app/element/ui";
 import AnsiLine from "@/element/ansiline";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
@@ -1032,9 +1033,15 @@ function WorkflowDispatchRow({
                     <span class="swarm-subagent-countdown">disappearing in {countdownSeconds()}s</span>
                 </Show>
                 <Show when={group.status === "retired"}>
-                    <button class="swarm-subagent-retire" title="Retire" onClick={handleRetire}>
-                        <i class="fa-solid fa-xmark" />
-                    </button>
+                    <IconButton
+                        icon="xmark"
+                        label="Retire"
+                        tooltip={false}
+                        title="Retire"
+                        density="compact"
+                        class="swarm-subagent-retire"
+                        onClick={handleRetire}
+                    />
                 </Show>
             </div>
             <Show when={expanded()}>
@@ -1302,9 +1309,15 @@ function SubagentRow({
                     <span class="swarm-subagent-countdown">disappearing in {countdownSeconds()}s</span>
                 </Show>
                 <Show when={canRetire()}>
-                    <button class="swarm-subagent-retire" title="Retire" onClick={handleRetire}>
-                        <i class="fa-solid fa-xmark" />
-                    </button>
+                    <IconButton
+                        icon="xmark"
+                        label="Retire"
+                        tooltip={false}
+                        title="Retire"
+                        density="compact"
+                        class="swarm-subagent-retire"
+                        onClick={handleRetire}
+                    />
                 </Show>
             </div>
             <SubagentBackgroundTasks tasks={visibleBackground()} />

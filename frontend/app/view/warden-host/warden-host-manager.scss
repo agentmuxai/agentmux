@@ -29,28 +29,3 @@
     text-align: right;
     width: 24px;
 }
-
-.warden-host-deregister {
-    background: transparent;
-    border: 1px solid transparent;
-    color: var(--main-text-color);
-    opacity: 0.4;
-    cursor: default;
-    width: 20px;
-    height: 20px;
-    border-radius: 0;
-    font-size: 1em;
-    line-height: 1;
-    padding: 0;
-    transition:
-        opacity var(--duration-decorative-fast) var(--ease-standard),
-        background var(--duration-decorative-fast) var(--ease-standard),
-        border-color var(--duration-decorative-fast) var(--ease-standard);
-
-    &:hover {
-        opacity: 1;
-        background: rgba(239, 68, 68, 0.1);
-        border-color: rgba(239, 68, 68, 0.3);
-        color: #ef4444;
-    }
-}

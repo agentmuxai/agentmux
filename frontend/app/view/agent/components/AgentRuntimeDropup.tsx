@@ -34,6 +34,7 @@
  */
 
 import { AnchoredPopover } from "@/app/element/anchored-popover";
+import { IconButton } from "@/app/element/ui";
 import { createEffect, createMemo, createSignal, For, onCleanup, Show, type JSX } from "solid-js";
 import { getRuntimeConfig } from "../buildRuntimeArgs";
 import { familyKey, getProvider, type ProviderModel } from "../providers";
@@ -492,14 +493,14 @@ export const AgentRuntimeDropup = (props: AgentRuntimeDropupProps): JSX.Element 
                         listbox structure for assistive tech. Placed first
                         (matching Modal's showCloseButton convention) so
                         it's the first Tab stop after the trigger. */}
-                    <button
-                        type="button"
+                    <IconButton
+                        icon="xmark"
+                        label="Close"
+                        tooltip={false}
+                        density="compact"
                         class="agent-runtime-dropup-close-btn"
-                        aria-label="Close"
                         onClick={() => setOpen(false)}
-                    >
-                        {"✕"}
-                    </button>
+                    />
                     {/* Always there, two lines high, whatever the agent is doing: a
                         notice that came and went would resize the panel. */}
                     <div

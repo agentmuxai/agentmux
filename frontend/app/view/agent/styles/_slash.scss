@@ -164,26 +164,6 @@
         color: var(--secondary-text-color);
     }
 
-    .slash-help__close {
-        background: none;
-        border: 1px solid transparent;
-        border-radius: 0;
-        cursor: default;
-        color: var(--secondary-text-color);
-        font-size: 16px;
-        line-height: 1;
-        width: 22px;
-        height: 22px;
-        @include mixins.flex-center;
-        transition: background var(--duration-decorative-fast), color var(--duration-decorative-fast), border-color var(--duration-decorative-fast);
-
-        &:hover {
-            background: var(--error-bg-strong);
-            border-color: var(--error-line-strong);
-            color: var(--error-color);
-        }
-    }
-
     .slash-help__body {
         flex: 1;
         overflow-y: auto;

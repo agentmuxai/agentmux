@@ -291,16 +291,11 @@
     flex: 1;
 }
 
-.drone-node-close {
-    background: transparent;
-    border: none;
-    color: white;
-    cursor: default;
-    font-size: var(--text-md);
-    line-height: 1;
-    padding: 0 4px;
-    opacity: 0.7;
-    &:hover { opacity: 1; }
+// White on the node's colour, like the rest of its header.
+.drone-node-header .drone-node-close {
+    --ui-fg: currentColor;
+    --ui-fg-hover: currentColor;
+    --ui-tone: currentColor;
 }
 
 // Summary line shown when the node is unselected.

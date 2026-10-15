@@ -17,6 +17,7 @@
 import { createMemo, createSignal, For, Show, type JSX } from "solid-js";
 import { AccountForm } from "@/app/view/identity/identity-account-form";
 import { ProviderLogo } from "@/element/ProviderLogo";
+import { IconButton } from "@/app/element/ui";
 import {
     type AccountProvider,
     type AgentAccounts,
@@ -148,14 +149,14 @@ export const AgentIdentityPanel = (props: AgentIdentityPanelProps): JSX.Element 
                                         + New
                                     </button>
                                     <Show when={assigned()}>
-                                        <button
-                                            class="agent-identity-unassign-btn"
+                                        <IconButton
+                                            icon="xmark"
+                                            label="Unassign this account"
+                                            tone="danger"
+                                            density="compact"
                                             disabled={saving()}
-                                            title="Unassign this account"
                                             onClick={() => void handleAssign(provider, null)}
-                                        >
-                                            ×
-                                        </button>
+                                        />
                                     </Show>
                                 </div>
                             </div>

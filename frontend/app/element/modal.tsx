@@ -81,6 +81,7 @@ import { ModalTitleIdContext } from "./modal-parts";
 import { acquireRegionLock, releaseRegionLock } from "./modal-region-lock";
 import { push, remove, isReachable, type StackEntry } from "./modal-stack";
 
+import { IconButton } from "./ui";
 import "./modal.scss";
 import { focusManager } from "@/app/store/focusManager";
 
@@ -422,15 +423,14 @@ export const Modal: Component<ModalProps> = (props) => {
                                 tabIndex={-1}
                             >
                                 <Show when={props.showCloseButton}>
-                                    <button
-                                        type="button"
+                                    <IconButton
+                                        icon="xmark"
+                                        label="Close"
+                                        tooltip={false}
                                         class="modal-panel-close-btn"
-                                        aria-label="Close"
                                         data-modal-dismiss
                                         onClick={() => props.onClose()}
-                                    >
-                                        {"✕"}
-                                    </button>
+                                    />
                                 </Show>
                                 {props.children}
                             </div>

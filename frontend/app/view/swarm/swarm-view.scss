@@ -543,26 +543,11 @@
 // Retire/dismiss (SPEC_SUBAGENT_LIVE_RECONCILIATION_AND_RETIRE_2026_07_20
 // §6) — offered only on a terminal-status row (SubagentRow gates this via
 // `canRetire`; WorkflowDispatchRow via `group.status === "retired"`).
-// Dim by default, full opacity + error tint on hover — same interaction
-// shape as the pinned-activity dock's `.agent-activity-dismiss`
-// (`_shell-node.scss`), scaled down for this row's compact 30px height.
+// A compact IconButton, shown while the row is hovered or the button has
+// keyboard focus.
 .swarm-subagent-retire {
     flex-shrink: 0;
-    @include mixins.flex-center(inline-flex);
-    width: 20px;
-    height: 20px;
-    appearance: none;
-    border: none;
-    background: transparent;
-    color: var(--secondary-text-color);
-    font-size: var(--text-xs);
-    border-radius: 4px;
-    cursor: default;
     opacity: 0;
-    transition:
-        opacity var(--duration-decorative-base) var(--ease-standard),
-        color var(--duration-decorative-base) var(--ease-standard),
-        background var(--duration-decorative-base) var(--ease-standard);
 }
 
 .swarm-subagent-row:hover .swarm-subagent-retire,
@@ -570,10 +555,9 @@
     opacity: 0.75;
 }
 
-.swarm-subagent-retire:hover {
+.swarm-subagent-retire:hover,
+.swarm-subagent-retire:focus-visible {
     opacity: 1;
-    color: var(--error-color);
-    background: var(--hover-bg-color);
 }
 
 // ── Shell row (SPEC_SWARM_LONG_RUNNING_PROCESS_ROWS_2026_07_20 Phase 1) —
@@ -634,11 +618,8 @@
 
 .swarm-shell-stop:hover {
     opacity: 1;
-    // --error-color is unconditionally defined in theme.scss — no hex
-    // fallback needed (unlike the pre-existing .swarm-subagent-retire:hover
-    // this was modeled on, which carries one; not copied here to avoid
-    // adding a new color-no-hex lint violation for a fallback that never
-    // actually applies).
+    // --error-color is unconditionally defined in theme.scss, so it needs
+    // no hex fallback.
     color: var(--error-color);
     background: var(--hover-bg-color);
 }
@@ -980,19 +961,6 @@
     padding: 6px 10px;
     font-size: var(--text-sm);
     font-weight: 500;
-}
-
-.swarm-fleet-result-dismiss {
-    appearance: none;
-    border: none;
-    background: none;
-    color: var(--secondary-text-color);
-    cursor: pointer;
-    padding: 2px 6px;
-
-    &:hover {
-        color: var(--main-text-color);
-    }
 }
 
 .swarm-fleet-result-rows {

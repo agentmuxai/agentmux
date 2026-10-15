@@ -27,6 +27,7 @@
  */
 
 import { createMemo, createSignal, Show, type JSX } from "solid-js";
+import { IconButton } from "@/app/element/ui";
 import { translateError } from "./translate";
 import "./ErrorBanner.scss";
 
@@ -69,14 +70,14 @@ export const ErrorBanner = (props: ErrorBannerProps): JSX.Element => {
                 {t().code}
             </code>
             <Show when={props.onDismiss}>
-                <button
-                    type="button"
+                <IconButton
+                    icon="xmark"
+                    label="Dismiss"
+                    tooltip={false}
+                    density="compact"
                     class="amx-error-banner-dismiss"
                     onClick={() => props.onDismiss?.()}
-                    aria-label="Dismiss"
-                >
-                    ×
-                </button>
+                />
             </Show>
         </div>
     );
