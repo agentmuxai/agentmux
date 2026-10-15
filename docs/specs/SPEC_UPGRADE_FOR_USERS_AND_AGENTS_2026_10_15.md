@@ -197,7 +197,11 @@ is `VACUUM INTO` a temporary file, renamed into place:
   portable folders side by side; on Windows `srv.lock` doesn't exclude);
 - never a half-written file; any failure removes what was copied and the
   version starts fresh, as before;
-- never from a newer version, and never over a version that has started.
+- never from a newer version, and never over a version that has started;
+  a database already in the new version's folder is kept, and a failed copy
+  removes only what it copied;
+- srv first prints `AGENTMUXSRV-MIGRATING`, so the launcher allows 30 minutes
+  instead of 30 s for a large `filestore.db`.
 
 The other files in `data/` are not copied: logs, locks and `authkey.dev` are
 per run, `shell/` is regenerated, and the zones flag only matters to a store

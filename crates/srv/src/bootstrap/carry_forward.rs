@@ -92,18 +92,28 @@ pub(super) fn from_previous_version(db_dir: &Path, version: &str) -> Option<Path
         tracing::warn!(error = %e, "carry-forward: can't create {}; starting fresh", db_dir.display());
         return None;
     }
+    // A large filestore.db takes a while to copy: the same line migrations
+    // print moves the launcher's ESTART deadline from 30 s to 30 minutes.
+    eprintln!(
+        "AGENTMUXSRV-MIGRATING copying-previous-version:{}",
+        from.file_name().map(|n| n.to_string_lossy()).unwrap_or_default()
+    );
+    let mut copied = Vec::new();
     for name in DATABASES {
         let src = source.join(name);
-        if !src.is_file() {
+        let dst = db_dir.join(name);
+        // Already here: copied by a start that was cut short before objects.db.
+        if !src.is_file() || dst.exists() {
             continue;
         }
-        if let Err(e) = copy_database(&src, &db_dir.join(name)) {
+        if let Err(e) = copy_database(&src, &dst) {
             tracing::warn!(error = %e, from = %from.display(), "carry-forward: copy failed; starting fresh");
-            for name in DATABASES {
-                let _ = std::fs::remove_file(db_dir.join(name));
+            for dst in copied {
+                let _ = std::fs::remove_file(dst);
             }
             return None;
         }
+        copied.push(dst);
     }
     tracing::info!(from = %from.display(), "carry-forward: started from the previous version's data");
     Some(from)
@@ -171,16 +181,24 @@ mod tests {
     }
 
     #[test]
-    fn a_failed_copy_leaves_no_partial_databases() {
+    fn a_failed_copy_removes_only_what_it_copied() {
         let root = tempfile::tempdir().unwrap();
         let _prev = seed(root.path(), "0.59.26", "previous");
-        // A file that isn't SQLite fails its copy after filestore.db is skipped.
-        std::fs::write(db_dir(root.path(), "0.59.26").join("sagas.db"), b"not a database").unwrap();
+        let old = db_dir(root.path(), "0.59.26");
+        Connection::open(old.join("filestore.db")).unwrap().execute_batch("CREATE TABLE f (v)").unwrap();
+        // A file that isn't SQLite fails its copy, after filestore.db was copied.
+        std::fs::write(old.join("sagas.db"), b"not a database").unwrap();
         let new = db_dir(root.path(), "0.59.27");
         assert!(from_previous_version(&new, "0.59.27").is_none());
         for name in DATABASES {
             assert!(!new.join(name).exists(), "{name} left behind");
         }
+
+        // One already in the new version's folder is never removed or replaced.
+        std::fs::write(new.join("filestore.db"), b"already here").unwrap();
+        assert!(from_previous_version(&new, "0.59.27").is_none());
+        assert_eq!(std::fs::read(new.join("filestore.db")).unwrap(), b"already here");
+        assert!(!new.join("objects.db").exists());
     }
 
     #[test]

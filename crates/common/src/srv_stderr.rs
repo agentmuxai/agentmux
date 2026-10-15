@@ -12,7 +12,10 @@
 //! Every line is single-line and prefix-tagged. In startup order:
 //!
 //! - `AGENTMUXSRV-MIGRATING migrations:<n>` — in-process migrations are about
-//!   to run; supervisors extend their ESTART deadline. (Still emitted and
+//!   to run; supervisors extend their ESTART deadline. A new version's first
+//!   start prints `AGENTMUXSRV-MIGRATING copying-previous-version:<v>` before
+//!   copying the previous version's databases (`bootstrap/carry_forward.rs`);
+//!   supervisors match the prefix only. (Still emitted and
 //!   parsed with inline literals at the three sites above — not migrated to
 //!   this module yet; only the new line below lives here.)
 //! - `AGENTMUXSRV-MIGRATION-BEGIN id:<id> description:<text>` /
