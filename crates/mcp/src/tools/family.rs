@@ -44,6 +44,43 @@ pub(super) fn pick<'a>(family: &str, acts: &'a [Act], arguments: &Value) -> Resu
     Ok((act, Value::Object(args)))
 }
 
+/// `text` with each action's internal tool name, as a whole word, replaced by
+/// the public one ("BrowserClick" → "Browser click"): handlers name the tool
+/// they ran as in their output and errors, and that name isn't advertised.
+pub(super) fn relabel(family: &str, acts: &[Act], text: &str) -> String {
+    let word = |b: u8| b.is_ascii_alphanumeric() || b == b'_';
+    let mut out = text.to_string();
+    for act in acts {
+        if !out.contains(act.tool) {
+            continue;
+        }
+        let public = format!("{family} {}", act.action);
+        let bytes = out.as_bytes();
+        let mut next = String::with_capacity(out.len());
+        let mut last = 0;
+        for (i, _) in out.match_indices(act.tool) {
+            let end = i + act.tool.len();
+            let alone = (i == 0 || !word(bytes[i - 1])) && (end == bytes.len() || !word(bytes[end]));
+            if alone {
+                next.push_str(&out[last..i]);
+                next.push_str(&public);
+                last = end;
+            }
+        }
+        next.push_str(&out[last..]);
+        out = next;
+    }
+    out
+}
+
+/// A handler's result, output and error alike, under the public names.
+pub(super) fn relabeled(family: &str, acts: &[Act], result: Result<String>) -> Result<String> {
+    match result {
+        Ok(text) => Ok(relabel(family, acts, &text)),
+        Err(e) => Err(anyhow::anyhow!(relabel(family, acts, &format!("{e:#}")))),
+    }
+}
+
 /// The actions' names, for a schema test.
 #[cfg(test)]
 pub(super) fn action_names(acts: &[Act]) -> Vec<&'static str> {
@@ -67,6 +104,16 @@ mod tests {
         let (act, args) = pick("Browser", ACTS, &json!({ "action": "fill", "ref": "e3", "text": "x" })).unwrap();
         assert_eq!(act.tool, "BrowserFill");
         assert_eq!(args, json!({ "ref": "e3", "text": "x" }));
+    }
+
+    #[test]
+    fn handler_output_names_the_action_not_the_internal_tool() {
+        assert_eq!(relabel("Browser", ACTS, "BrowserFill e12: done"), "Browser fill e12: done");
+        assert_eq!(relabel("Browser", ACTS, "BrowserWaitFor failed: HTTP 504"), "Browser wait failed: HTTP 504");
+        // Only whole words: a longer name that contains one is left alone.
+        assert_eq!(relabel("Browser", ACTS, "XBrowserFill BrowserFillAll"), "XBrowserFill BrowserFillAll");
+        let e = relabeled("Browser", ACTS, Err(anyhow::anyhow!("BrowserFill e3 failed"))).unwrap_err();
+        assert_eq!(e.to_string(), "Browser fill e3 failed");
     }
 
     #[test]

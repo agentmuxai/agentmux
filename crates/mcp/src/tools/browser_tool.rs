@@ -7,7 +7,7 @@
 //! (browser.rs) run each action unchanged. An action that changes the page can
 //! wait and read it again in the same call.
 
-use super::family::{pick, Act};
+use super::family::{pick, relabeled, Act};
 use super::*;
 
 pub(super) const ACTS: &[Act] = &[
@@ -39,42 +39,45 @@ const CHANGES_THE_PAGE: &[&str] = &["click", "fill", "select", "check", "key", "
 
 pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
     match name {
-        "Browser" => {
-            let (act, args) = pick("Browser", ACTS, arguments)?;
-            // `wait`'s own conditions are the until_* parameters (pick renamed
-            // them for its handler): for wait they are not a follow-up.
-            let is_wait = act.action == "wait";
-            let follow_wait =
-                !is_wait && ["until_text", "until_url", "until_gone"].iter().any(|k| arguments.get(*k).is_some());
-            let follow_snapshot = arguments.get("snapshot").and_then(|v| v.as_bool()).unwrap_or(false);
-            if (follow_wait || follow_snapshot) && !CHANGES_THE_PAGE.contains(&act.action) {
-                anyhow::bail!(
-                    "until_text/until_url/until_gone and snapshot follow an action that changes the page ({}); \
-                     for action {:?}, call wait or snapshot on its own",
-                    CHANGES_THE_PAGE.join(", "),
-                    act.action
-                );
-            }
-            let mut out = browser::call(act.tool, &args, cx).await?;
-            // The action has run: a follow-up that fails is reported after its
-            // result, never instead of it, so the agent doesn't repeat a click
-            // that already submitted something.
-            if follow_wait {
-                out = match browser::call("BrowserWaitFor", &follow_wait_args(arguments), cx).await {
-                    Ok(waited) => format!("{out}\n\nwait: {waited}"),
-                    Err(e) => format!("{out}\n\nwait failed (the {} itself was done): {e}", act.action),
-                };
-            }
-            if follow_snapshot {
-                out = match browser::call("BrowserSnapshot", &only(arguments, &["pane", "scope"]), cx).await {
-                    Ok(snap) => format!("{out}\n\nsnapshot:\n{snap}"),
-                    Err(e) => format!("{out}\n\nsnapshot failed (the {} itself was done): {e}", act.action),
-                };
-            }
-            Ok(out)
-        }
+        "Browser" => relabeled("Browser", ACTS, run(arguments, cx).await),
         _ => Err(not_in_family()),
     }
+}
+
+/// One Browser call: the action, then any follow-up it asked for.
+async fn run(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
+    let (act, args) = pick("Browser", ACTS, arguments)?;
+    // `wait`'s own conditions are the until_* parameters (pick renamed
+    // them for its handler): for wait they are not a follow-up.
+    let is_wait = act.action == "wait";
+    let follow_wait =
+        !is_wait && ["until_text", "until_url", "until_gone"].iter().any(|k| arguments.get(*k).is_some());
+    let follow_snapshot = arguments.get("snapshot").and_then(|v| v.as_bool()).unwrap_or(false);
+    if (follow_wait || follow_snapshot) && !CHANGES_THE_PAGE.contains(&act.action) {
+        anyhow::bail!(
+            "until_text/until_url/until_gone and snapshot follow an action that changes the page ({}); \
+             for action {:?}, call wait or snapshot on its own",
+            CHANGES_THE_PAGE.join(", "),
+            act.action
+        );
+    }
+    let mut out = browser::call(act.tool, &args, cx).await?;
+    // The action has run: a follow-up that fails is reported after its
+    // result, never instead of it, so the agent doesn't repeat a click
+    // that already submitted something.
+    if follow_wait {
+        out = match browser::call("BrowserWaitFor", &follow_wait_args(arguments), cx).await {
+            Ok(waited) => format!("{out}\n\nwait: {waited}"),
+            Err(e) => format!("{out}\n\nwait failed (the {} itself was done): {e}", act.action),
+        };
+    }
+    if follow_snapshot {
+        out = match browser::call("BrowserSnapshot", &only(arguments, &["pane", "scope"]), cx).await {
+            Ok(snap) => format!("{out}\n\nsnapshot:\n{snap}"),
+            Err(e) => format!("{out}\n\nsnapshot failed (the {} itself was done): {e}", act.action),
+        };
+    }
+    Ok(out)
 }
 
 /// The wait that follows an action, from its `until_*` parameters only: the

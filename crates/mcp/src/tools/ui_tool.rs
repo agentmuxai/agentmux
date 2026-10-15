@@ -7,7 +7,7 @@
 //! PressKeys, CaptureWindow and DiscoverWindows; their handlers (ui.rs) run
 //! each action unchanged.
 
-use super::family::{pick, Act};
+use super::family::{pick, relabeled, Act};
 use super::*;
 
 pub(super) const ACTS: &[Act] = &[
@@ -25,7 +25,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
     match name {
         "UI" => {
             let (act, args) = pick("UI", ACTS, arguments)?;
-            ui::call(act.tool, &args, cx).await
+            relabeled("UI", ACTS, ui::call(act.tool, &args, cx).await)
         }
         _ => Err(not_in_family()),
     }

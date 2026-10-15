@@ -229,7 +229,7 @@ mod tests {
         ("work", include_str!("work.rs")),
     ];
 
-    /// The tool names in a family's `match name` arms (`"A" | "B" => {`),
+    /// The tool names in a family's `match name` arms (`"A" | "B" => ...`),
     /// read from its `call` function only, so another `match` in the file
     /// (an action, an option) isn't taken for a tool.
     fn arm_names(src: &str) -> Vec<String> {
@@ -238,7 +238,7 @@ mod tests {
         let body = &body[..body.find("\n}\n").map(|e| e + 2).unwrap_or(body.len())];
         body.lines()
             .filter_map(|l| l.strip_prefix("        \""))
-            .filter_map(|l| l.strip_suffix(" => {"))
+            .filter_map(|l| l.split_once("\" => ").map(|(pat, _)| pat))
             .flat_map(|pat| pat.split(" | ").map(|n| n.trim_matches('"').to_string()))
             .collect()
     }
