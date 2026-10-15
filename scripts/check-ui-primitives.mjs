@@ -248,7 +248,9 @@ export function usedVars(source) {
 
 // ── Rules 5-8: the shared scales ────────────────────────────────────────────
 
-const RAW_TIME = /(?<![\w.-])\d*\.?\d+m?s\b/g;
+// An optional sign, for a negative delay (`-120ms`); the look-behind still
+// rejects a time inside a name such as `tab-1s`.
+const RAW_TIME = /(?<![\w.-])-?\d*\.?\d+m?s\b/g;
 const unimportant = (value) => value.replace(/\s*!important$/, "");
 
 export function rawDurations(scss) {

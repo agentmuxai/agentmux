@@ -96,6 +96,11 @@ describe("rules 5-8: the shared scales", () => {
         expect(rawDurations(scss)).toBe(3);
     });
 
+    it("counts a negative delay, but not a time inside a name", () => {
+        const scss = `.a { animation-delay: -1s; transition-delay: -120ms; animation: tab-1s 2s; }`;
+        expect(rawDurations(scss)).toBe(3);
+    });
+
     it("counts font sizes given as raw px only", () => {
         const scss = `.a { font-size: 12px; } .b { font-size: var(--text-sm); } .c { font-size: 0.9em; } .d { font-size: 9px !important; }`;
         expect(rawFontSizes(scss).map((d) => d.selector)).toEqual([".a", ".d"]);
