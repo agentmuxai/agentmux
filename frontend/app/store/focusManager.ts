@@ -10,6 +10,7 @@ import { modalsModel } from "@/app/store/modalmodel";
 import { modalCovers } from "@/app/element/modal-stack";
 import { gatingNodeIds, tabSwitching } from "@/app/store/tab-reveal";
 import { caretInEditableOutsidePanes, focusedBlockId, userCaretInBlock } from "@/util/focusutil";
+import { userInThisWindow } from "@/app/store/input-owner";
 import { getLayoutModelForStaticTab } from "@/layout/index";
 
 /**
@@ -180,8 +181,10 @@ function paneFocusElement(blockId: string): HTMLElement | null {
     return null;
 }
 
+// The user is in this window, including while one of its browser panes has the
+// keyboard (`document.hasFocus()` alone reads that as "elsewhere").
 function windowHasFocus(): boolean {
-    return typeof document.hasFocus !== "function" || document.hasFocus();
+    return userInThisWindow();
 }
 
 /**

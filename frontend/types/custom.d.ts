@@ -172,6 +172,14 @@ declare global {
 
     type BrowserAutocompleteResult = { supported: boolean; matches: BrowserAutocompleteMatch[] };
 
+    /** What the host's input owner says about a window: whether it is active,
+     *  and who has its keyboard (`null`: not known yet). */
+    type InputOwnerReport = {
+        active: boolean;
+        keys: "app" | "pane" | "elsewhere" | null;
+        block_id: string | null;
+    };
+
     type BrowserPaneHostApi = {
         /** `opts.allowedOrigins`: the pane's site list (`browser:allowed_origins`), so the
          *  host has it before the first load (SPEC_BROWSER_PANE_ALLOWED_ORIGINS_2026_10_09.md §6).
@@ -333,6 +341,9 @@ declare global {
         takeBackgroundAudit(): Promise<unknown>;
         /** Take OS keyboard focus back from a native browser pane to this window's page. */
         reclaimWindowFocus(windowLabel: string): Promise<void>;
+        /** Whether the window is active and who has its keyboard, as the host's
+         *  input owner last saw it; null where the host doesn't track it. */
+        inputOwnerState(windowLabel: string): Promise<InputOwnerReport | null>;
         getAuthKey(): string;
         /** Reload this window's page, keeping what the host needs to reconnect it. */
         reloadWindow(): void;

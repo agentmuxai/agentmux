@@ -18,12 +18,13 @@
  */
 
 import { createSignal, type Accessor } from "solid-js";
+import { onInputOwnerChange, userInThisWindow } from "@/app/store/input-owner";
 
 let cached: Accessor<boolean> | null = null;
 
 function compute(): boolean {
     if (typeof document === "undefined" || typeof window === "undefined") return true;
-    return document.hasFocus() && document.visibilityState === "visible";
+    return userInThisWindow() && document.visibilityState === "visible";
 }
 
 /**
@@ -39,6 +40,8 @@ export function makeWindowFocusSignal(): Accessor<boolean> {
     window.addEventListener("focus", update);
     window.addEventListener("blur", update);
     document.addEventListener("visibilitychange", update);
+    // A browser pane taking or giving up the keyboard doesn't fire focus/blur.
+    onInputOwnerChange(update);
     cached = focused;
     return focused;
 }
