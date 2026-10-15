@@ -18,12 +18,22 @@ export interface AcpContext {
     tokens: number;
     /** The window it was measured against; null when the agent sent none. */
     window: number | null;
-    /** The session's model, when the agent has named it. */
-    model: string | undefined;
+    /** The session's model; the agent's name until it names one, so the
+     *  window is kept for a pane whose restored tail starts after `session/new`. */
+    model: string;
 }
 
+/** The agent each format that reports its context belongs to. */
+const ACP_CONTEXT_AGENTS: Record<string, string> = { "opencode-acp": "OpenCode" };
+
 export function readsAcpContext(outputFormat: string): boolean {
-    return outputFormat === "opencode-acp";
+    return outputFormat in ACP_CONTEXT_AGENTS;
+}
+
+/** A tracker for `outputFormat`'s lines; null for a format that doesn't report its context. */
+export function acpContextTrackerFor(outputFormat: string): AcpContextTracker | null {
+    const agent = ACP_CONTEXT_AGENTS[outputFormat];
+    return agent ? createAcpContextTracker(agent) : null;
 }
 
 /** Fed every raw line in order; returns the reading a `usage_update` carries. */
@@ -35,8 +45,8 @@ export interface AcpContextTracker {
 const MIN_WINDOW = 1_000;
 const MAX_WINDOW = 100_000_000;
 
-export function createAcpContextTracker(): AcpContextTracker {
-    let model: string | undefined;
+export function createAcpContextTracker(agent: string): AcpContextTracker {
+    let model: string = agent;
     return {
         observe(rawEvent) {
             if (!rawEvent || typeof rawEvent !== "object") return null;

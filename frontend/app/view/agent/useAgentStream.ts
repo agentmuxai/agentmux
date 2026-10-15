@@ -51,7 +51,7 @@ import {
     type StreamedKind,
 } from "./main-agent-usage";
 import { createSessionStartDetector } from "./session-start";
-import { createAcpContextTracker, readsAcpContext, type AcpContextTracker } from "./acp-context";
+import { acpContextTrackerFor, type AcpContextTracker } from "./acp-context";
 import type { PendingMessage } from "./state";
 import { ClaudeCodeStreamParser } from "./stream-parser";
 import type { ContextCompactedNode, DocumentNode, SessionOutcomeNode } from "./types";
@@ -509,7 +509,7 @@ export function useAgentStream({
         // Reset state on new subscription
         lineBuffer = "";
         translator = createTranslator(outputFormat);
-        acpContext = readsAcpContext(outputFormat) ? createAcpContextTracker() : null;
+        acpContext = acpContextTrackerFor(outputFormat);
         compactionSummaries = new CompactionSummaryTracker();
         parser = new ClaudeCodeStreamParser();
         if (agentName) parser.setAgentId(agentName);
@@ -942,7 +942,7 @@ export function useAgentStream({
                     if (windows) model.dispatchPane({ type: "ContextWindowsReported", windows });
                     const reported = acpContext?.observe(rawEvent);
                     if (reported) {
-                        if (reported.model && reported.window != null) {
+                        if (reported.window != null) {
                             model.dispatchPane({ type: "ContextWindowsReported", windows: { [reported.model]: reported.window } });
                         }
                         model.dispatchPane({ type: "ContextReported", tokens: reported.tokens, model: reported.model });

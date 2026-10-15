@@ -17,7 +17,7 @@ import { sessionOutcomeNodeId } from "@/app/store/agent-document/session-outcome
 import { buildMemoryInjectedNode, supersededCard } from "./memory-injected";
 import { ClaudeCodeStreamParser } from "./stream-parser";
 import { mainAgentUsage, readsMainAgentUsage } from "./main-agent-usage";
-import { createAcpContextTracker, readsAcpContext, type AcpContextTracker } from "./acp-context";
+import { acpContextTrackerFor, type AcpContextTracker } from "./acp-context";
 import { reportedContextWindowsFromResult } from "@/app/store/agent-pane-state/context-reading";
 import type { ContextCompactedNode, DocumentNode, SessionOutcomeNode } from "./types";
 
@@ -166,7 +166,7 @@ export class HistoryParser {
     ) {
         this.translator = createTranslator(outputFormat, { replay: true });
         this.readsUsage = readsMainAgentUsage(outputFormat);
-        this.acpContext = readsAcpContext(outputFormat) ? createAcpContextTracker() : null;
+        this.acpContext = acpContextTrackerFor(outputFormat);
         if (agentName) this.parser.setAgentId(agentName);
     }
 
@@ -346,8 +346,8 @@ export class HistoryParser {
             }
             const reported = this.acpContext?.observe(rawEvent);
             if (reported) {
-                if (reported.model) this.lastModel = reported.model;
-                if (reported.model && reported.window != null) {
+                this.lastModel = reported.model;
+                if (reported.window != null) {
                     this.reportedContextWindows = { ...this.reportedContextWindows, [reported.model]: reported.window };
                 }
                 this.lastContext = { tokens: reported.tokens, model: this.lastModel, at: stampFor(lineIdx) ?? null };

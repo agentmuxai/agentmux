@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { createAcpContextTracker, readsAcpContext } from "./acp-context";
+import { acpContextTrackerFor, readsAcpContext } from "./acp-context";
 import { parseHistoryLines } from "./parseHistoryLines";
 
 // Lines as srv writes them to the transcript, shaped like OpenCode 1.19.0's
@@ -30,16 +30,17 @@ describe("acp-context", () => {
         expect(readsAcpContext("opencode-acp")).toBe(true);
         expect(readsAcpContext("acp")).toBe(false);
         expect(readsAcpContext("claude-stream-json")).toBe(false);
+        expect(acpContextTrackerFor("acp")).toBeNull();
     });
 
     it("reads usage_update on the model session/new named", () => {
-        const t = createAcpContextTracker();
+        const t = acpContextTrackerFor("opencode-acp")!;
         expect(t.observe(sessionNew)).toBeNull();
         expect(t.observe(usageUpdate(15_695))).toEqual({ tokens: 15_695, window: 200_000, model: "opencode/big-pickle" });
     });
 
     it("follows a config_option_update to another model", () => {
-        const t = createAcpContextTracker();
+        const t = acpContextTrackerFor("opencode-acp")!;
         t.observe(sessionNew);
         const change = {
             jsonrpc: "2.0",
@@ -50,14 +51,14 @@ describe("acp-context", () => {
         expect(t.observe(usageUpdate(20_000))?.model).toBe("anthropic/claude-sonnet-5-5");
     });
 
-    it("has no model before the agent names one, and no window when the size isn't one", () => {
-        const t = createAcpContextTracker();
-        expect(t.observe(usageUpdate(500, 12))).toEqual({ tokens: 500, window: null, model: undefined });
+    it("uses the agent's name before it names a model, and no window when the size isn't one", () => {
+        const t = acpContextTrackerFor("opencode-acp")!;
+        expect(t.observe(usageUpdate(500, 12))).toEqual({ tokens: 500, window: null, model: "OpenCode" });
         expect(t.observe(usageUpdate(500, "200000"))?.window).toBeNull();
     });
 
     it("ignores a usage_update without a positive used count, and other lines", () => {
-        const t = createAcpContextTracker();
+        const t = acpContextTrackerFor("opencode-acp")!;
         for (const used of [0, -5, "15695", null, Number.NaN]) expect(t.observe(usageUpdate(used))).toBeNull();
         expect(t.observe({ jsonrpc: "2.0", id: 3, result: { stopReason: "end_turn" } })).toBeNull();
         expect(t.observe(null)).toBeNull();
@@ -68,6 +69,10 @@ describe("acp-context", () => {
         const parsed = parseHistoryLines(lines, "opencode-acp", "agent");
         expect(parsed.lastContext).toMatchObject({ tokens: 15_695, model: "opencode/big-pickle" });
         expect(parsed.reportedContextWindows).toEqual({ "opencode/big-pickle": 200_000 });
+        // A tail that starts after session/new still keeps the window.
+        const tail = parseHistoryLines(lines.slice(1), "opencode-acp", "agent");
+        expect(tail.lastContext).toMatchObject({ tokens: 15_695, model: "OpenCode" });
+        expect(tail.reportedContextWindows).toEqual({ OpenCode: 200_000 });
         // A plain ACP pane reads none of it.
         expect(parseHistoryLines(lines, "acp", "agent").lastContext).toBeNull();
     });
