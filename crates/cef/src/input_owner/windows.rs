@@ -7,8 +7,6 @@
 //! the app's keyboard focus on Windows.
 //! docs/specs/SPEC_BROWSER_PANE_INPUT_OWNER_2026_10_15.md §3.2.
 
-#![cfg(target_os = "windows")]
-
 use std::sync::{Arc, OnceLock};
 
 use cef::*;
@@ -74,6 +72,14 @@ pub fn pane_live(state: &Arc<AppState>, block: &str) {
 pub fn pane_laid_out(state: &Arc<AppState>, window: &str, block: &str, collapsed: bool) {
     let event = if collapsed { Event::PaneCollapsed(block.to_string()) } else { Event::PaneShown(block.to_string()) };
     dispatch(state, window, event);
+}
+
+/// Pane `block` is about to be destroyed: if it has the keyboard, the app takes
+/// it before its window goes.
+pub fn pane_closing(state: &Arc<AppState>, block: &str) {
+    if let Some(window) = registry::window_of_pane(block) {
+        dispatch(state, &window, Event::PaneClosing(block.to_string()));
+    }
 }
 
 /// Pane `block` was destroyed.

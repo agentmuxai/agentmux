@@ -86,6 +86,7 @@ impl BrowserPaneManager {
         crate::client::downloads::forget_pane(block_id);
         #[cfg(target_os = "windows")]
         {
+            crate::input_owner::windows::pane_closing(state, block_id);
             let ops = AppStateCloseOps(state);
             Self::close_with(&label, &ops);
             // Destroying the pane's native HWND doesn't hand Win32 focus back:

@@ -1094,20 +1094,17 @@ async fn route_command(
                 // Windows: a selection for the window's input owner, which runs
                 // the reclaim below as its `FocusApp` effect when it should.
                 #[cfg(target_os = "windows")]
-                {
-                    crate::input_owner::windows::select_app(state, &label);
-                    return Ok(serde_json::json!(true));
-                }
+                crate::input_owner::windows::select_app(state, &label);
                 // Full focus reclaim has to run on the CEF UI thread:
                 // `browser_view_get_for_browser`, `host.set_focus`, and
                 // walking the HWND tree all require it. The task also
                 // handles `defocus_all` on panes.
-                let mut task = crate::ui_tasks::MainFocusReclaimTask::new(
-                    state.clone(),
-                    label.clone(),
-                );
-                cef::post_task(cef::ThreadId::UI, Some(&mut task));
-                tracing::info!("[ipc] main_window_focus: posted MainFocusReclaimTask for label={}", label);
+                #[cfg(not(target_os = "windows"))]
+                {
+                    let mut task = crate::ui_tasks::MainFocusReclaimTask::new(state.clone(), label.clone());
+                    cef::post_task(cef::ThreadId::UI, Some(&mut task));
+                    tracing::info!("[ipc] main_window_focus: posted MainFocusReclaimTask for label={}", label);
+                }
             } else {
                 tracing::warn!("[ipc] main_window_focus: no browser found for label={}", window_label);
             }
