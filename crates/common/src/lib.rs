@@ -45,7 +45,7 @@ pub use data_paths::{
 pub use errors::{AgentMuxError, AmxCode};
 pub use layout_intent::{LayoutIntent, LayoutResizeOp, LayoutViewState};
 pub use layout_types::{
-    FlexDirection, LayoutClientSlices, LayoutNode, LayoutNodeData, ResizeOp, SplitPosition,
+    FlexDirection, LayoutClientSlices, LayoutNode, LayoutNodeData, SplitPosition,
     StackMovePosition,
 };
 pub use runtime_mode::{is_dev_build_exe, is_dev_self, RuntimeMode};

@@ -116,17 +116,6 @@ pub(super) fn handle_layout_set_tree(
             "reducer: LayoutSetTree pruned dangling layout leaf/leaves referencing since-deleted blocks"
         );
     }
-    // Minimize-lock enforcement (same write-point-invariant shape as the
-    // prune above; SPEC_LAYOUT_MINIMIZE_LOCKED_STATE_REDESIGN_2026_07_16.md):
-    // a pushed tree that resized a minimized node gets snapped back here.
-    let snapped = crate::backend::layout::enforce_minimized_locks(&mut tab.rootnode);
-    if snapped > 0 {
-        tracing::warn!(
-            tab_id = %tab_id,
-            snapped,
-            "reducer: LayoutSetTree snapped minimize-locked node size(s) back to their locked values"
-        );
-    }
     report_layout_violations(&tab_id, "LayoutSetTree", &tab.rootnode);
     let new_tree = tab.rootnode.clone();
     // A prune can clear focus/magnify; the persisted row must get the same
@@ -302,34 +291,25 @@ pub(super) fn handle_layout_delete_node_by_block(
 
 /// SPEC_864 Phase 4 — append backend actions to a tab's
 /// `pendingbackendactions` queue. The reducer does NOT model the queue
-/// in `TabRecord` (it is a transient backend→frontend mailbox the
-/// frontend drains via REPLACE-clear slices, not layout-tree state), so
-/// this arm only validates and passes the payload through; the persist
-/// subscriber APPENDs it to `LayoutState.pendingbackendactions`.
+/// in `TabRecord` (it tells a window what srv already did to the tree; it
+/// is not layout-tree state), so this arm only validates and passes the
+/// payload through; the persist subscriber APPENDs it to
+/// `LayoutState.pendingbackendactions`.
 ///
 /// `actions` must be a non-empty JSON array of `LayoutActionData`
 /// objects (the type lives in `agentmux-srv::backend::obj`, not the
 /// common crate — hence the raw-value carriage).
-///
-/// Each batch bumps the tab's `layout_revision` and stamps it on every action
-/// as `rev`, so a frontend push that never saw this batch is refused instead
-/// of erasing it (`stale_push_revision`).
 pub(super) fn handle_layout_queue_backend_actions(
     state: &mut State,
     tab_id: String,
-    mut actions: serde_json::Value,
+    actions: serde_json::Value,
     correlation_id: String,
 ) -> Vec<Event> {
-    let Some(tab) = state.tabs.get_mut(&tab_id) else {
+    if !state.tabs.contains_key(&tab_id) {
         return unknown_tab(state, "LayoutQueueBackendActions", &tab_id);
-    };
-    match actions.as_array_mut() {
-        Some(arr) if !arr.is_empty() => {
-            tab.layout_revision += 1;
-            for action in arr.iter_mut().filter_map(|a| a.as_object_mut()) {
-                action.insert("rev".into(), tab.layout_revision.into());
-            }
-        }
+    }
+    match actions.as_array() {
+        Some(arr) if !arr.is_empty() => {}
         _ => {
             return op_error(
                 state,
@@ -347,17 +327,6 @@ pub(super) fn handle_layout_queue_backend_actions(
         correlation_id,
         version: v,
     }]
-}
-
-/// The tab's current `layout_revision` when a frontend tree push built on
-/// `base_revision` is stale, else `None`. A stale push never saw some queued
-/// backend action (a tab pushed into a pane, a pane removed), and applying it
-/// would drop that change from the tree and erase it from the queue the push
-/// replaces. The pusher resyncs: it applies the actions it missed, then pushes
-/// again. SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md §3.5.
-pub(crate) fn stale_push_revision(state: &State, tab_id: &str, base_revision: u64) -> Option<u64> {
-    let current = state.tabs.get(tab_id)?.layout_revision;
-    (base_revision < current).then_some(current)
 }
 
 // ── Pane tabs (SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md §3.2) ─────────

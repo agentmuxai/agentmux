@@ -16,8 +16,8 @@ use crate::state::State;
 pub(crate) const RECENT_INTENTS: usize = 64;
 
 /// Apply `intent` to a copy of the tab's tree, normalize it the way every
-/// layout write is (balance, prune references to deleted blocks, legacy
-/// minimize locks, the invariant report), and commit it. A refused intent
+/// layout write is (balance, prune references to deleted blocks, the
+/// invariant report), and commit it. A refused intent
 /// leaves the tab untouched and answers with an `Error` event.
 ///
 /// Emits `LayoutTreeReplaced` (tree only) when the tree changed, and
@@ -54,7 +54,6 @@ pub(crate) fn handle_layout_apply_intent(
     if pruned > 0 {
         tracing::warn!(tab_id = %tab_id, pruned, "layout intent: pruned leaves of deleted blocks");
     }
-    crate::backend::layout::enforce_minimized_locks(&mut tree);
 
     let tab = state.tabs.get_mut(&tab_id).expect("looked up above");
     let (focused_before, magnified_before) = (tab.focused_node_id.clone(), tab.magnified_node_id.clone());

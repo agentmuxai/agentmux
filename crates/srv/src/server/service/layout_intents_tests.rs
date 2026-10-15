@@ -155,3 +155,37 @@ async fn an_unknown_tab_is_an_error() {
     let err = apply_intent(&state, request("nope", "act-1", LayoutIntent::View, "")).await.unwrap_err();
     assert!(err.contains("nope"), "{err}");
 }
+
+/// `object.ApplyLayoutIntent`, the service form the tools/tests harnesses use,
+/// stores the same edit `layout.applyIntent` does.
+#[tokio::test]
+async fn the_service_method_applies_an_intent() {
+    use crate::backend::service::WebCallType;
+    let state = test_state();
+    let (tab_id, oid, _a, b) = seed(&state).await;
+    let intent = serde_json::json!({
+        "type": "splithorizontal",
+        "targetNodeId": "na",
+        "newNode": { "id": "nb", "flexDirection": "row", "size": 10, "data": { "blockId": b } },
+        "position": "after",
+        "focused": false,
+    });
+    let call = |args: Vec<serde_json::Value>| WebCallType {
+        service: "object".into(),
+        method: "ApplyLayoutIntent".into(),
+        uicontext: None,
+        args,
+    };
+    let ret = super::run_service_call(&state, &call(vec![tab_id.clone().into(), intent, "act-1".into()])).await;
+    let data = ret.data.unwrap_or_else(|| panic!("{:?}", ret.error));
+    assert_eq!(data["applied"], true, "{data}");
+    let stored = row(&state, &oid);
+    assert_eq!(data["version"], stored.version);
+    assert_eq!(stored.rootnode, reducer_tree(&state, &tab_id).await);
+    let kids: Vec<_> = stored.rootnode.unwrap().children.iter().map(|c| c.id.clone()).collect();
+    assert_eq!(kids, ["na", "nb"]);
+
+    let bad = serde_json::json!({ "type": "delete", "nodeId": "missing" });
+    let ret = super::run_service_call(&state, &call(vec![tab_id.into(), bad, "act-2".into()])).await;
+    assert_eq!(ret.data.unwrap()["applied"], false);
+}

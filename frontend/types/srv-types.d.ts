@@ -539,9 +539,6 @@ declare global {
         focusednodeid?: string;
         leaforder?: LeafOrderEntry[];
         pendingbackendactions?: LayoutActionData[];
-        /** srv's layout revision for this tab (`TabRecord::layout_revision`); a
-         *  push echoes the one it was built on. */
-        layoutrevision?: number;
     };
 
     // waveobj.LeafOrderEntry

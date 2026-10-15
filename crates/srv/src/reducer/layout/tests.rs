@@ -391,9 +391,6 @@ proptest! {
     fn invariants_hold_across_random_sequences(ops in prop::collection::vec(op_strategy(), 0..40)) {
         let mut state = State::default();
         let mut last_version: u64 = 0;
-        // (5) A tab's layout_revision counts its queued batches, each stamped
-        // with it, and a push is stale exactly when built on an older one.
-        let mut batches: std::collections::HashMap<String, u64> = Default::default();
         for (i, op) in ops.into_iter().enumerate() {
             let events = apply_prop_op(&mut state, op, (i + 1) as u64);
             for ev in &events {
@@ -406,21 +403,8 @@ proptest! {
                     ev
                 );
                 last_version = v;
-                if let Event::LayoutBackendActionsQueued { tab_id, actions, .. } = ev {
-                    let n = batches.entry(tab_id.clone()).or_default();
-                    *n += 1;
-                    prop_assert_eq!(actions[0]["rev"].as_u64(), Some(*n));
-                }
             }
             assert_invariants(&state);
-            for (tab_id, tab) in &state.tabs {
-                let rev = batches.get(tab_id).copied().unwrap_or(0);
-                prop_assert_eq!(tab.layout_revision, rev);
-                prop_assert_eq!(stale_push_revision(&state, tab_id, rev), None);
-                if rev > 0 {
-                    prop_assert_eq!(stale_push_revision(&state, tab_id, rev - 1), Some(rev));
-                }
-            }
         }
     }
 
@@ -580,9 +564,7 @@ fn layout_queue_backend_actions_passes_through_and_emits_event() {
             ..
         } => {
             assert_eq!(ev_tab_id, &tab_id);
-            let mut stamped = actions.clone();
-            stamped[0]["rev"] = 1.into();
-            assert_eq!(ev_actions, &stamped);
+            assert_eq!(ev_actions, &actions);
             assert_eq!(correlation_id, "corr-q1");
         }
         other => panic!("expected LayoutBackendActionsQueued, got {other:?}"),
@@ -781,56 +763,6 @@ fn layout_set_tree_prune_without_slices_emits_focus_and_magnify_changes() {
         &ctx(2),
     );
     assert!(matches!(&events[..], [Event::LayoutTreeReplaced { .. }]), "got {:?}", events);
-}
-
-/// Minimize-lock enforcement at the set-tree choke point
-/// (SPEC_LAYOUT_MINIMIZE_LOCKED_STATE_REDESIGN_2026_07_16.md): a pushed
-/// tree in which a minimized node's size was tampered with (e.g. a
-/// resize that slipped past a stale frontend's guards) must be snapped
-/// back to its recorded locked size, with the delta repaid to the
-/// unlocked sibling, before the tree is persisted.
-#[test]
-fn layout_set_tree_snaps_tampered_minimized_size_back_to_its_lock() {
-    let (mut state, tab_id) = fresh_tab();
-    seed_block(&mut state, &tab_id, "b1");
-    seed_block(&mut state, &tab_id, "b2");
-
-    let mut minimized = leaf_node("min", "b1");
-    minimized.size = 120.0; // tampered: locked value is 33.0
-    minimized
-        .extra
-        .insert("minimizedSize".into(), serde_json::json!(200.0));
-    minimized
-        .extra
-        .insert("minimizedLockedSize".into(), serde_json::json!(33.0));
-    let mut sibling = leaf_node("sib", "b2");
-    sibling.size = 280.0;
-    let pushed_tree = agentmux_common::LayoutNode {
-        id: "root".into(),
-        children: vec![minimized, sibling],
-        ..Default::default()
-    };
-
-    let events = update(
-        &mut state,
-        Command::LayoutSetTree {
-            tab_id: tab_id.clone(),
-            new_tree: Some(pushed_tree),
-            correlation_id: "corr".into(),
-            slices: None,
-        },
-        &ctx(1),
-    );
-
-    assert!(matches!(&events[0], Event::LayoutTreeReplaced { .. }));
-    let root = state.tabs[&tab_id].rootnode.as_ref().unwrap();
-    assert_eq!(root.children[0].size, 33.0, "tampered size snapped back to lock");
-    assert_eq!(root.children[1].size, 367.0, "delta repaid to the unlocked sibling");
-    // The emitted event's tree must reflect the healed sizes too — it is
-    // what the persist subscriber writes to db_layout.
-    if let Event::LayoutTreeReplaced { new_tree, .. } = &events[0] {
-        assert_eq!(new_tree.as_ref().unwrap().children[0].size, 33.0);
-    }
 }
 
 /// SPEC_864 Phase 2 — a slice-carrying full-row push applies focus/
@@ -1580,58 +1512,6 @@ fn layout_delete_node_clears_focused_when_target_was_focused() {
         Event::LayoutNodeDeleted { was_focused: true, .. }
     ));
     assert_eq!(state.tabs[&tab_id].focused_node_id, "");
-}
-
-// ── layout_revision (SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md §3.5) ────
-
-fn queue(state: &mut State, tab_id: &str, ids: &[&str]) -> Vec<Event> {
-    let actions: Vec<serde_json::Value> =
-        ids.iter().map(|id| serde_json::json!({ "actiontype": "stackpush", "actionid": id, "blockid": "b" })).collect();
-    update(
-        state,
-        Command::LayoutQueueBackendActions {
-            tab_id: tab_id.into(),
-            actions: serde_json::Value::Array(actions),
-            correlation_id: String::new(),
-        },
-        &ctx(1),
-    )
-}
-
-#[test]
-fn each_queued_batch_bumps_the_revision_once_and_stamps_every_action() {
-    let (mut state, tab_id) = fresh_tab();
-    assert_eq!(state.tabs[&tab_id].layout_revision, 0);
-    let events = queue(&mut state, &tab_id, &["a1", "a2"]);
-    let Event::LayoutBackendActionsQueued { actions, .. } = &events[0] else {
-        panic!("expected LayoutBackendActionsQueued, got {events:?}");
-    };
-    assert_eq!(actions[0]["rev"], 1);
-    assert_eq!(actions[1]["rev"], 1);
-    assert_eq!(state.tabs[&tab_id].layout_revision, 1);
-    queue(&mut state, &tab_id, &["a3"]);
-    assert_eq!(state.tabs[&tab_id].layout_revision, 2);
-}
-
-#[test]
-fn a_refused_queue_leaves_the_revision_alone() {
-    let (mut state, tab_id) = fresh_tab();
-    let events = queue(&mut state, &tab_id, &[]);
-    assert!(matches!(&events[0], Event::Error { .. }));
-    assert_eq!(state.tabs[&tab_id].layout_revision, 0);
-}
-
-#[test]
-fn a_push_is_stale_only_when_built_on_an_older_revision() {
-    let (mut state, tab_id) = fresh_tab();
-    assert_eq!(stale_push_revision(&state, &tab_id, 0), None, "nothing queued yet");
-    queue(&mut state, &tab_id, &["a1"]);
-    queue(&mut state, &tab_id, &["a2"]);
-    assert_eq!(stale_push_revision(&state, &tab_id, 0), Some(2));
-    assert_eq!(stale_push_revision(&state, &tab_id, 1), Some(2));
-    assert_eq!(stale_push_revision(&state, &tab_id, 2), None);
-    assert_eq!(stale_push_revision(&state, &tab_id, 3), None, "ahead is not stale");
-    assert_eq!(stale_push_revision(&state, "ghost", 0), None, "an unknown tab is the arm's error, not stale");
 }
 
 /// SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md §5: the stack commands keep

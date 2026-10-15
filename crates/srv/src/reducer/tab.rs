@@ -50,7 +50,6 @@ pub(super) fn handle_create_tab(
             focused_node_id: String::new(),
             magnified_node_id: String::new(),
             rootnode: None,
-            layout_revision: 0,
             recent_intent_ids: Vec::new(),
         },
     );

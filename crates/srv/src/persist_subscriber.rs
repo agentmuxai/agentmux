@@ -700,12 +700,9 @@ const NO_FOCUS_CLEAR: FocusClear = FocusClear { focused: false, magnified: false
 /// empty, also clear the focus/magnify ids (and leaforder) so they don't
 /// dangle at nodes that no longer exist.
 ///
-/// SPEC_864 Phase 2 — when the event carries `slices` (the
-/// `UpdateObject`→`LayoutSetTree` full-row push), the frontend-owned
-/// columns are REPLACED to mirror the legacy `update_raw` whole-row write
-/// this route retires: leaforder / pendingbackendactions are written
-/// verbatim (absent = clear — pushing without processed actions is how
-/// the frontend acks its queue); focus/magnify strings overwrite (empty =
+/// When the event carries `slices` (a seeding `LayoutSetTree`), the rest of
+/// the row is REPLACED: leaforder / pendingbackendactions are written
+/// verbatim (absent = clear); focus/magnify strings overwrite (empty =
 /// clear). `slices: None` (tree-only events) leaves those columns
 /// untouched, except that `clear` empties a focus/magnify id the reducer
 /// dropped with the edit — leaforder is a frontend-recomputed geometry

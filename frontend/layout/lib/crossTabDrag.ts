@@ -19,7 +19,7 @@ import { WorkspaceService } from "@/app/store/services";
 import { Logger } from "@/util/logger";
 import { fireAndForget } from "@/util/util";
 import { getLayoutModelForTabById } from "./layoutModelHooks";
-import { pruneDanglingLeaves } from "./layoutPersistence";
+import { reconcileWithStoredLayout } from "./layoutIntents";
 import { DropDirection } from "./types";
 
 /**
@@ -110,19 +110,15 @@ export function redockDraggedPane(opts: {
             // frame — and unmounting the drag source before dragend
             // suppresses the event entirely, wedging pragmatic's teardown
             // (the dead-source-tab bug). Source-leaf removal is owned by
-            // the queued backend delete plus the end-of-drag prune pass
-            // (tabbar.tsx cleanup → pruneDanglingLeaves), both of which
-            // run only after the gesture has fully settled.
+            // srv, which takes the block out of the source tab's tree and
+            // queues the matching delete for this window.
         } catch (e) {
             Logger.error("dnd", "cross-tab pane redock failed", { error: String(e) });
             // The characteristic failure here is "block X is in tab Y,
-            // not <sourceTabId>" — i.e. the user dragged a DANGLING leaf
-            // (the source tab rendering a block another tab owns, left
-            // by an earlier lost delete). The move correctly didn't
-            // happen; prune the ghost so the source tab heals instead of
-            // keeping a broken double-mounted pane.
+            // not <sourceTabId>": the source tab showed a leaf srv doesn't
+            // hold. Show the source tab as srv stores it.
             const sourceModel = getLayoutModelForTabById(opts.sourceTabId);
-            if (sourceModel) pruneDanglingLeaves(sourceModel);
+            if (sourceModel) reconcileWithStoredLayout(sourceModel);
         }
     });
 }

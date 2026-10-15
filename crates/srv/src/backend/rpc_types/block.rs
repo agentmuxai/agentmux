@@ -853,13 +853,10 @@ pub struct CommandPaneTabData {
     pub action_id: Option<String>,
 }
 
-/// Response from pane.moveTab, pane.activateTab and pane.removeTab: the tab's
-/// `layout_revision` the change was queued at, which the caller counts as seen.
+/// Response from pane.moveTab, pane.activateTab and pane.removeTab.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct PaneTabEditResult {
-    #[ts(type = "number")]
-    pub layout_revision: u64,
     /// The layout row's version once the change is stored: a row update with
     /// this version or later includes it.
     #[serde(default)]

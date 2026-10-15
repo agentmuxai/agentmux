@@ -10,9 +10,7 @@
  * stored one and replaced by it if they differ.
  * SPEC_STRONG_REDUCER_AUTHORITY_LAYOUT_2026_06_30.md §4.
  *
- * Intents and whole-tree pushes (for the edits that are not intents yet) leave
- * in one queue, in order, one at a time: a push sent between two intents can't
- * overtake the first, and the push carries every edit queued behind it.
+ * Intents and pane-tab commands leave in one queue, in order, one at a time.
  */
 
 import { batch } from "solid-js";
@@ -25,12 +23,11 @@ import { copyLayoutNode, sameLayoutTree } from "./layoutIntentActions";
 import type { LayoutNode } from "./types";
 import type { LayoutModel } from "./layoutModel";
 
-/** One item of a model's outbox: an intent, a pane-tab command (sent by
- *  `run`), or a whole-tree push. */
+/** One item of a model's outbox: an intent, or a pane-tab command (sent by
+ *  `run`). */
 export type LayoutOutboxItem =
     | { kind: "intent"; actionId: string; intent: LayoutIntent }
-    | { kind: "command"; run: () => Promise<void> }
-    | { kind: "push" };
+    | { kind: "command"; run: () => Promise<void> };
 
 // ── The outbox ──────────────────────────────────────────────────────────────
 
@@ -43,12 +40,6 @@ export function sendViewIntent(model: LayoutModel): void {
 /** Queue a pane-tab command behind everything already queued. */
 export function queueLayoutCommand(model: LayoutModel, run: () => Promise<void>): void {
     model.layoutOutbox.push({ kind: "command", run });
-    void flushLayoutOutbox(model);
-}
-
-/** Queue a whole-tree push behind everything already queued. */
-export function queueLayoutPush(model: LayoutModel): void {
-    if (!model.layoutOutbox.some((item) => item.kind === "push")) model.layoutOutbox.push({ kind: "push" });
     void flushLayoutOutbox(model);
 }
 
@@ -65,13 +56,7 @@ export async function flushLayoutOutbox(model: LayoutModel): Promise<void> {
             if (model.disposed) model.layoutOutbox = model.layoutOutbox.filter((i) => i.kind === "command");
             const item = model.layoutOutbox.shift();
             if (!item) break;
-            if (item.kind === "push") {
-                // The push carries the whole local tree, so every intent
-                // queued behind it is in it already. Commands still go: their
-                // callers wait for them.
-                model.layoutOutbox = model.layoutOutbox.filter((i) => i.kind === "command");
-                await model.pushLayoutNow();
-            } else if (item.kind === "command") {
+            if (item.kind === "command") {
                 await item.run();
             } else {
                 await sendIntent(model, item.actionId, item.intent);
@@ -116,7 +101,6 @@ export function isLayoutQuiet(model: LayoutModel): boolean {
     return (
         !model.layoutOutbox.length &&
         !model.layoutSending &&
-        !model.persistDebounceTimer &&
         !model.processingBackendActions &&
         !model.getter(model.activeDrag) &&
         !model.pendingTreeAction?.currentValueAtom?.()

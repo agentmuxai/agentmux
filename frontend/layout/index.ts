@@ -13,7 +13,6 @@ import {
 } from "./lib/layoutModelHooks";
 import { newLayoutNode } from "./lib/layoutNode";
 import { clearCrossTabDrop, redockDraggedPane } from "./lib/crossTabDrag";
-import { markBlockRecentlyCreated } from "./lib/layoutPersistence";
 import {
     addWidgetAsPaneTab,
     closeBlockInStack,
@@ -44,7 +43,6 @@ export {
     peekLayoutModelForTab,
     installWindowEdgeResizeListener,
     LayoutTreeActionType,
-    markBlockRecentlyCreated,
     moveBlockInStack,
     NavigateDirection,
     newLayoutNode,

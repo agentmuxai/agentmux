@@ -353,6 +353,63 @@ fn minimize_refuses_the_last_expanded_pane_and_branches() {
 }
 
 #[test]
+fn a_fully_minimized_branch_is_as_locked_as_a_minimized_leaf() {
+    let chips = || branch("col", FlexDirection::Column, vec![minimized(leaf("m1", "b1")), minimized(leaf("m2", "b2"))]);
+    let base = || Some(branch("r", FlexDirection::Row, vec![leaf("a", "ba"), chips(), leaf("c", "bc")]));
+    let resize = vec![LayoutResizeOp { node_id: "col".into(), size: 5.0 }];
+    assert!(matches!(apply(&mut base(), LayoutIntent::Resize { resize_operations: resize }), Err(LayoutError::NodeLocked { .. })));
+    let into = LayoutIntent::Move { node_id: "a".into(), parent_id: Some("col".into()), index: 0, insert_at_root: false };
+    assert!(matches!(apply(&mut base(), into), Err(LayoutError::NodeLocked { .. })));
+    let out = LayoutIntent::Move { node_id: "col".into(), parent_id: Some("r".into()), index: 0, insert_at_root: false };
+    assert!(matches!(apply(&mut base(), out), Err(LayoutError::NodeLocked { .. })));
+}
+
+#[test]
+fn insert_passes_over_a_minimized_leaf() {
+    let mut tree = Some(branch(
+        "r",
+        FlexDirection::Row,
+        (0..5).map(|i| if i == 4 { minimized(leaf("m", "bm")) } else { leaf(&format!("l{i}"), &format!("b{i}")) }).collect(),
+    ));
+    apply(&mut tree, LayoutIntent::Insert { node: leaf("n", "bn"), magnified: false, focused: false }).unwrap();
+    let m = find_node_by_id(tree.as_ref().unwrap(), "m").unwrap();
+    assert!(m.minimized && m.children.is_empty(), "the minimized leaf is never promoted to take the new pane");
+}
+
+#[test]
+fn a_promoted_minimized_leaf_keeps_its_flag_on_the_content() {
+    let mut root = minimized(leaf("a", "ba"));
+    add_intermediate_node(&mut root, &mut NodeIds::new(ACTION));
+    assert!(!root.minimized, "the new branch carries no flag");
+    assert_eq!(root.children[0].id, "a");
+    assert!(root.children[0].minimized);
+}
+
+#[test]
+fn insert_at_index_clamps_each_step_and_stops_at_a_leaf() {
+    let tree = || {
+        Some(branch(
+            "r",
+            FlexDirection::Row,
+            vec![leaf("a", "ba"), branch("col", FlexDirection::Column, vec![leaf("b", "bb"), leaf("c", "bc")])],
+        ))
+    };
+    // Index 9 clamps to the last child at each step.
+    let mut t = tree();
+    apply(&mut t, LayoutIntent::InsertAtIndex { node: leaf("n", "bn"), index_arr: vec![9, 9], magnified: false, focused: false }).unwrap();
+    assert_eq!(kids(&t, "col"), ["b", "c", "n"]);
+    // A leaf ends the descent: the rest of the path is ignored and the leaf
+    // takes the new pane beside it.
+    let mut t = tree();
+    apply(&mut t, LayoutIntent::InsertAtIndex { node: leaf("n", "bn"), index_arr: vec![0, 5, 5], magnified: false, focused: false }).unwrap();
+    let group = derive_node_id(ACTION, 1);
+    assert_eq!(kids(&t, &group), ["a", "n"]);
+    // A path into a child that isn't there is refused, not a panic.
+    let mut t = tree();
+    assert!(apply(&mut t, LayoutIntent::InsertAtIndex { node: leaf("x", "bx"), index_arr: vec![-1, 0], magnified: false, focused: false }).is_err());
+}
+
+#[test]
 fn clear_and_view() {
     let mut tree = three_in_a_row();
     apply(&mut tree, LayoutIntent::View).unwrap();

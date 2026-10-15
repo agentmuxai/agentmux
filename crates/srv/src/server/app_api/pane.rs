@@ -1359,7 +1359,7 @@ pub(crate) async fn move_tab(state: &AppState, cmd: CommandPaneMoveTabData) -> R
     )
     .await;
     tracing::info!(block_id = %cmd.block_id, target = %cmd.target_block_id, position = %cmd.position, "pane.moveTab");
-    Ok(queued_revision(state, &tab_id, "pane.moveTab", &cmd.block_id, queued))
+    Ok(edit_result(state, &tab_id, "pane.moveTab", &cmd.block_id, queued))
 }
 
 /// `pane.activateTab`: make `block_id` its pane's visible tab
@@ -1373,7 +1373,7 @@ pub(crate) async fn activate_tab(state: &AppState, cmd: CommandPaneTabData) -> R
     .await?;
     let action_id = cmd.action_id.as_deref().unwrap_or_default();
     let queued = crate::server::service::layout_helpers::queue_stack_activate(state, &tab_id, &cmd.block_id, action_id).await;
-    Ok(queued_revision(state, &tab_id, "pane.activateTab", &cmd.block_id, queued))
+    Ok(edit_result(state, &tab_id, "pane.activateTab", &cmd.block_id, queued))
 }
 
 /// `pane.removeTab`: take `block_id` out of its pane — that one tab of a
@@ -1389,11 +1389,11 @@ pub(crate) async fn remove_tab(state: &AppState, cmd: CommandPaneTabData) -> Res
     .await?;
     if !changed {
         let version = crate::server::service::layout_intents::layout_row_version(&state.mstore, &tab_id);
-        return Ok(PaneTabEditResult { layout_revision: 0, version });
+        return Ok(PaneTabEditResult { version });
     }
     let action_id = cmd.action_id.as_deref().unwrap_or_default();
     let queued = crate::server::service::layout_helpers::queue_stack_remove(state, &tab_id, &cmd.block_id, action_id).await;
-    Ok(queued_revision(state, &tab_id, "pane.removeTab", &cmd.block_id, queued))
+    Ok(edit_result(state, &tab_id, "pane.removeTab", &cmd.block_id, queued))
 }
 
 /// Resolve `block_id`'s tab, then dispatch `cmd` → mstore → publish, the
@@ -1422,14 +1422,12 @@ async fn apply_pane_tab_command(
     Ok((tab_id, !events.is_empty()))
 }
 
-/// What a pane-tab RPC answers: the revision it was queued at and the row's
-/// version. A failed queue is logged, not returned: the tree change already
-/// happened, and a revision of 0 means the caller counts nothing as seen.
-fn queued_revision(state: &AppState, tab_id: &str, op: &str, block_id: &str, queued: Result<u64, String>) -> PaneTabEditResult {
-    let layout_revision = queued.unwrap_or_else(|e| {
+/// What a pane-tab RPC answers: the row's version once the change is stored. A
+/// failed queue is logged, not returned: the tree change already happened.
+fn edit_result(state: &AppState, tab_id: &str, op: &str, block_id: &str, queued: Result<(), String>) -> PaneTabEditResult {
+    if let Err(e) = queued {
         tracing::warn!(block_id, "{op}: queueing the frontend action failed: {e}");
-        0
-    });
+    }
     let version = crate::server::service::layout_intents::layout_row_version(&state.mstore, tab_id);
-    PaneTabEditResult { layout_revision, version }
+    PaneTabEditResult { version }
 }

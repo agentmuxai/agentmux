@@ -24,7 +24,6 @@ function makeMockModel(rootNode: LayoutNode, addlProps: Record<string, Partial<L
         },
         updateTree: () => {},
         localTreeStateAtom: { _set: () => {} },
-        persistToBackend: () => {},
     };
 }
 

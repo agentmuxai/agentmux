@@ -286,7 +286,6 @@ describe("LayoutModel", () => {
         const sizesBefore = JSON.stringify(model.treeState.rootNode!.children!.map((c) => c.size));
 
         requestNodeFocusCaptures.length = 0;
-        const persist = vi.spyOn(model, "persistToBackend");
         intentCalls.length = 0;
         model.minimizeNodeToggle(second.id);
 
@@ -294,7 +293,6 @@ describe("LayoutModel", () => {
         expect(model.treeState.magnifiedNodeId).toBeUndefined();
         expect(model.localTreeStateAtom().magnifiedNodeId).toBeUndefined();
         expect(model.minimizedNodeIds().has(second.id)).toBe(true);
-        expect(persist).not.toHaveBeenCalled();
         await vi.waitFor(() => expect(intentCalls.map((c) => c.data.intent.type)).toContain("minimize"));
         const sent = intentCalls.find((c) => c.data.intent.type === "minimize")!;
         expect(sent.data.intent.nodeId).toBe(second.id);

@@ -544,8 +544,8 @@ pub enum Command {
     /// reducer arm (the reducer owns the tree), so callers that only
     /// know a block id (the `delete_block` saga) don't need tree
     /// access. Resolving to no node is a silent idempotent no-op:
-    /// blocks may legitimately have no layout node (already pruned by
-    /// a frontend push, or never laid out).
+    /// blocks may legitimately have no layout node (already removed by a
+    /// layout intent, or never laid out).
     LayoutDeleteNodeByBlock {
         tab_id: String,
         block_id: String,
@@ -615,12 +615,10 @@ pub enum Command {
     /// Bulk-replace the tree. Used during Phase 7a writer migration and
     /// for tear-off where the whole subtree changes atomically.
     ///
-    /// SPEC_864 Phase 2 — when the command originates from the frontend's
-    /// full-row `UpdateObject` push, `slices` carries the remaining
-    /// frontend-owned `LayoutState` columns (leaforder / focus / magnify /
-    /// pendingbackendactions) with REPLACE semantics, so the single
-    /// dispatch fully supersedes the legacy `update_raw` whole-row write.
-    /// `slices: None` (tree-only callers) leaves those columns untouched.
+    /// `slices` (srv's seeders) carries the rest of the `LayoutState` row
+    /// (leaforder / focus / magnify / pendingbackendactions) with REPLACE
+    /// semantics. `slices: None` (tree-only callers) leaves those columns
+    /// untouched.
     LayoutSetTree {
         tab_id: String,
         new_tree: Option<crate::LayoutNode>,
@@ -1544,15 +1542,12 @@ pub enum Event {
     },
 
     /// SPEC_864 Phase 4 — actions appended to a tab's
-    /// `pendingbackendactions` queue through the reducer (the
-    /// backend→frontend "please mutate your layout tree" channel).
-    /// `actions` is a JSON array of `LayoutActionData` objects, carried
-    /// as a raw value the same way `LayoutClientSlices` carries the
-    /// queue: the reducer does NOT model the queue in `TabRecord`
-    /// (pass-through), and the persist subscriber APPENDS these to the
-    /// existing `LayoutState.pendingbackendactions` (append semantics —
-    /// unlike the slices REPLACE semantics of a frontend push, which is
-    /// how the frontend acks/clears the queue).
+    /// `pendingbackendactions` queue through the reducer: what srv did to
+    /// the tree, for the window showing the tab to mirror. `actions` is a
+    /// JSON array of `LayoutActionData` objects, carried as a raw value the
+    /// same way `LayoutClientSlices` carries the queue: the reducer does NOT
+    /// model the queue in `TabRecord` (pass-through), and the persist
+    /// subscriber APPENDS these to `LayoutState.pendingbackendactions`.
     LayoutBackendActionsQueued {
         tab_id: String,
         actions: serde_json::Value,

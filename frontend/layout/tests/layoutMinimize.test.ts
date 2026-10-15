@@ -53,7 +53,6 @@ function makeMockModel(rootNode: LayoutNode) {
             minimizedSet = ids;
         },
         localTreeStateAtom: { _set: () => {} },
-        persistToBackend: () => {},
         // The real treeReducer applies the action, updates the tree and sends
         // the intent (layoutModel.ts); `sent` stands for the send.
         sent: [] as string[],
@@ -814,7 +813,6 @@ function makeMagnifyMock(rootNode: LayoutNode, magnifiedNodeId: string | undefin
         calls.push("updateTree");
         realUpdateTree();
     };
-    model.persistToBackend = () => calls.push("persist");
     const realTreeReducer = model.treeReducer;
     model.treeReducer = (action: LayoutTreeAction) => {
         realTreeReducer(action);

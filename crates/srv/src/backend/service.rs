@@ -217,6 +217,11 @@ pub fn get_method_meta(service: &str, method: &str) -> Option<MethodMeta> {
             arg_names: vec!["uiContext".into(), "oref".into(), "meta".into()],
             return_desc: None,
         }),
+        ("object", "ApplyLayoutIntent") => Some(MethodMeta {
+            desc: Some("apply a layout intent to a tab's layout (layout.applyIntent)".into()),
+            arg_names: vec!["tabId".into(), "intent".into(), "actionId".into()],
+            return_desc: Some("{applied, error, version}".into()),
+        }),
         ("object", "UpdateObject") => Some(MethodMeta {
             desc: Some("update a wave object".into()),
             arg_names: vec!["uiContext".into(), "muxObj".into(), "returnUpdates".into()],
