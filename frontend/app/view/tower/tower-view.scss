@@ -227,25 +227,9 @@
     color: var(--secondary-text-color);
 }
 
-.tower-badge--agent {
-    border-color: var(--accent-line-vivid);
-    color: var(--accent-color);
-}
-
 .tower-badge--task {
     max-width: 14em;
     @include mixins.truncate;
-}
-
-// The reveal action appears on hover or focus, so the table reads as numbers.
-.tower-reveal {
-    opacity: 0;
-}
-
-tr:hover .tower-reveal,
-.tower-reveal:focus-within,
-.tower-reveal:focus-visible {
-    opacity: 1;
 }
 
 // ── The Agents view: a rail of agents beside the selected one's processes,

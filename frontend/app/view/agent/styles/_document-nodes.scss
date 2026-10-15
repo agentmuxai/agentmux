@@ -541,12 +541,6 @@ $transcript-preview-max-height: calc(50vh / 3);
         &.pending_approval .agent-tool-status-icon { color: var(--warning-color); }
         &.denied           .agent-tool-status-icon { color: var(--secondary-text-color); }
 
-        .agent-tool-content {
-            padding: 0 var(--space-1) var(--space-1) var(--space-4);
-            user-select: text;
-            cursor: text;
-        }
-
         // Phase A of SPEC_TOOL_AUTO_EXPAND_PANEL_2026_05_16.md replaced
         // the portal-based overlay with this inline panel. The panel sits
         // in normal document flow underneath the summary row. Variable-
@@ -1023,11 +1017,6 @@ $transcript-preview-max-height: calc(50vh / 3);
 
             .agent-message-icon {
                 flex: 1;
-            }
-
-            .agent-message-time {
-                color: var(--secondary-text-color);
-                font-size: var(--text-xs);
             }
         }
 
