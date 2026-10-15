@@ -46,7 +46,12 @@ export function onInputOwnerChange(listener: () => void): () => void {
     return () => listeners.delete(listener);
 }
 
+// Reports are made on more than one host thread and can arrive out of order:
+// keep the highest-numbered one.
 function apply(next: InputOwnerReport | null): void {
+    if (next == null) return;
+    const last = report();
+    if (last != null && next.n <= last.n) return;
     setReport(next);
     for (const listener of listeners) listener();
 }
@@ -57,9 +62,6 @@ export function registerInputOwnerTracking(): void {
     void getApi().listen<InputOwnerReport>("input-owner-changed", (payload) => apply(payload ?? null));
     getApi()
         .inputOwnerState(label)
-        .then((current) => {
-            // A report that arrived while the query was out is newer.
-            if (report() == null) apply(current);
-        })
+        .then((current) => apply(current))
         .catch(() => {});
 }

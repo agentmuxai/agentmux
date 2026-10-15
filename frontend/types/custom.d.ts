@@ -178,6 +178,8 @@ declare global {
         active: boolean;
         keys: "app" | "pane" | "elsewhere" | null;
         block_id: string | null;
+        /** Reports are numbered in the order the host made them. */
+        n: number;
     };
 
     type BrowserPaneHostApi = {

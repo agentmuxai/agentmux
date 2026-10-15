@@ -74,10 +74,14 @@ pub fn accept_selection(window: &str, epoch: &str, seq: u64) -> bool {
 
 /// What a window's frontend is told about its input: whether the window is
 /// active, and where its machine last saw the keyboard (`None`: not yet known).
+/// `n` numbers the reports in the order they were made: reports are made on
+/// the UI thread and on IPC threads and can reach the page in another order,
+/// so the page keeps the highest-numbered one.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Report {
     pub active: bool,
     pub keys: Option<Surface>,
+    pub n: u64,
 }
 
 impl Report {
@@ -90,39 +94,49 @@ impl Report {
             Some(Surface::Elsewhere) => (Some("elsewhere"), None),
             None => (None, None),
         };
-        serde_json::json!({ "active": self.active, "keys": keys, "block_id": block })
+        serde_json::json!({ "active": self.active, "keys": keys, "block_id": block, "n": self.n })
     }
 }
 
-/// The report each window's frontend was last sent.
-static REPORTED: LazyLock<Mutex<HashMap<String, Report>>> = LazyLock::new(Default::default);
+/// The report each window's frontend was last sent, and the last number given.
+static REPORTED: LazyLock<Mutex<(HashMap<String, Report>, u64)>> = LazyLock::new(Default::default);
 
-/// `window`'s report now. While a request is pending, the keyboard is where it
-/// was last seen.
+/// Whether `window` is active and where its machine last saw the keyboard;
+/// while a request is pending, where it was seen before.
+fn current(window: &str, last_keys: Option<Surface>) -> Option<(bool, Option<Surface>)> {
+    let owners = OWNERS.lock();
+    let w = owners.get(window)?;
+    let seen = match &w.have {
+        Have::Owned(s) => Some(s.clone()),
+        _ => None,
+    };
+    Some((w.active, seen.or(last_keys)))
+}
+
+/// `window`'s report now, numbered as the last one sent (for a page that has
+/// just loaded; a later change is numbered higher).
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 pub fn report(window: &str) -> Option<Report> {
-    let (active, seen) = {
-        let owners = OWNERS.lock();
-        let w = owners.get(window)?;
-        let seen = match &w.have {
-            Have::Owned(s) => Some(s.clone()),
-            _ => None,
-        };
-        (w.active, seen)
-    };
-    let last = REPORTED.lock().get(window).and_then(|r| r.keys.clone());
-    Some(Report { active, keys: seen.or(last) })
+    let reported = REPORTED.lock();
+    let last = reported.0.get(window);
+    let (active, keys) = current(window, last.and_then(|r| r.keys.clone()))?;
+    Some(Report { active, keys, n: last.map_or(0, |r| r.n) })
 }
 
-/// `window`'s report if it differs from the one last sent; records it as sent.
+/// `window`'s report if it differs from the one last sent; records it as sent,
+/// with the next number. Made and recorded under one lock, so the numbers
+/// follow the order of the machine's states.
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 pub fn report_if_changed(window: &str) -> Option<Report> {
-    let now = report(window)?;
     let mut reported = REPORTED.lock();
-    if reported.get(window) == Some(&now) {
+    let last = reported.0.get(window).cloned();
+    let (active, keys) = current(window, last.as_ref().and_then(|r| r.keys.clone()))?;
+    if last.as_ref().is_some_and(|r| r.active == active && r.keys == keys) {
         return None;
     }
-    reported.insert(window.to_string(), now.clone());
+    reported.1 += 1;
+    let now = Report { active, keys, n: reported.1 };
+    reported.0.insert(window.to_string(), now.clone());
     Some(now)
 }
 
@@ -177,13 +191,15 @@ mod tests {
         step(w, Event::Deactivated);
         let r = report_if_changed(w).expect("deactivation is reported");
         assert!(!r.active);
+        assert!(r.n > first.n, "numbered in order");
+        assert_eq!(report(w).map(|now| now.n), Some(r.n), "a fresh page gets the last number");
     }
 
     #[test]
     fn the_payload_names_the_pane() {
-        let r = Report { active: true, keys: Some(Surface::Pane("abc".into())) };
-        assert_eq!(r.to_json(), serde_json::json!({ "active": true, "keys": "pane", "block_id": "abc" }));
-        let r = Report { active: false, keys: None };
-        assert_eq!(r.to_json(), serde_json::json!({ "active": false, "keys": null, "block_id": null }));
+        let r = Report { active: true, keys: Some(Surface::Pane("abc".into())), n: 7 };
+        assert_eq!(r.to_json(), serde_json::json!({ "active": true, "keys": "pane", "block_id": "abc", "n": 7 }));
+        let r = Report { active: false, keys: None, n: 0 };
+        assert_eq!(r.to_json(), serde_json::json!({ "active": false, "keys": null, "block_id": null, "n": 0 }));
     }
 }

@@ -30,8 +30,9 @@ import {
     userInThisWindow,
 } from "./input-owner";
 
+let n = 0;
 const report = (r: Partial<InputOwnerReport>) =>
-    host.listeners.get("input-owner-changed")!({ active: true, keys: "app", block_id: null, ...r });
+    host.listeners.get("input-owner-changed")!({ active: true, keys: "app", block_id: null, n: ++n, ...r });
 
 describe("input owner (frontend)", () => {
     let documentFocused = false;
@@ -77,5 +78,14 @@ describe("input owner (frontend)", () => {
         off();
         report({ keys: "pane", block_id: "b2" });
         expect(seen).toEqual(["pane", "app"]);
+    });
+
+    it("a report that arrives after a newer one is dropped", () => {
+        report({ keys: "pane", block_id: "b1", n: 1000 });
+        report({ keys: "app", n: 999 });
+        expect(inputOwnerReport()?.keys).toBe("pane");
+        report({ keys: "app", n: 1001 });
+        expect(inputOwnerReport()?.keys).toBe("app");
+        n = 1001;
     });
 });
