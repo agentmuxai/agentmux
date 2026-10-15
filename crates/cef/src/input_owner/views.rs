@@ -120,8 +120,15 @@ pub fn pane_gone(state: &Arc<AppState>, block: &str) {
 
 fn apply(state: &Arc<AppState>, window: &str, effect: Effect) {
     match effect {
-        Effect::FocusApp => platform::focus_app(state, window),
-        Effect::FocusPane(block) => platform::focus_pane(state, &block),
+        // A posted focus effect runs only if it is still what the machine asks
+        // for, in a window still active (`registry::still_requested`).
+        Effect::FocusApp if registry::still_requested(window, &Owner::App) => platform::focus_app(state, window),
+        Effect::FocusPane(block) if registry::still_requested(window, &Owner::Pane(block.clone())) => {
+            platform::focus_pane(state, &block)
+        }
+        Effect::FocusApp | Effect::FocusPane(_) => {
+            tracing::info!("[input] win={window} {effect} dropped: superseded or the window is inactive");
+        }
         // Pane overlays are their own windows, ordered above the app's.
         Effect::RaisePanes => {}
         Effect::Verify { seq, .. } => {

@@ -11,7 +11,7 @@ use std::time::Instant;
 
 use parking_lot::Mutex;
 
-use super::machine::{Effect, Event, Have, Surface, WindowInput};
+use super::machine::{Effect, Event, Have, Owner, Surface, WindowInput};
 
 /// Each window's machine, by window label (`main`, `floating-<uuid>`, …).
 static OWNERS: LazyLock<Mutex<HashMap<String, WindowInput>>> = LazyLock::new(Default::default);
@@ -39,6 +39,18 @@ pub fn step(window: &str, event: Event) -> Vec<Effect> {
         tracing::info!("[input] win={window} {event}: {before} -> {after} fx=[{}]", fx.join(", "));
     }
     effects
+}
+
+/// Whether `window`'s machine is still asking for `owner` to take the keyboard,
+/// in a window it counts as active. A focus effect runs as a posted task, after
+/// the step that asked for it: by then the window may have been deactivated or
+/// a newer selection made, and the effect must not run (it would take focus in
+/// a background window, or give a pane the keys it is no longer meant to have).
+pub fn still_requested(window: &str, owner: &Owner) -> bool {
+    OWNERS
+        .lock()
+        .get(window)
+        .is_some_and(|w| w.active && matches!(&w.have, Have::Pending { target, .. } if target == owner))
 }
 
 /// Whether `window`'s machine counts the window as active.
@@ -176,7 +188,6 @@ pub fn window_of_pane(block: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::input_owner::machine::Owner;
 
     // Each test uses its own window label: the registry is process-wide.
 
@@ -257,6 +268,19 @@ mod tests {
         assert!(!r.active);
         assert!(r.n > first.n, "numbered in order");
         assert_eq!(report(w).map(|now| now.n), Some(r.n), "a fresh page gets the last number");
+    }
+
+    #[test]
+    fn a_focus_effect_is_still_requested_only_while_its_request_stands() {
+        let w = "t-still";
+        step(w, Event::PaneLive("p".into()));
+        step(w, Event::Activated);
+        assert!(still_requested(w, &Owner::App), "activation asked for the app");
+        step(w, Event::Select(Owner::Pane("p".into())));
+        assert!(!still_requested(w, &Owner::App), "a newer selection");
+        assert!(still_requested(w, &Owner::Pane("p".into())));
+        step(w, Event::Deactivated);
+        assert!(!still_requested(w, &Owner::Pane("p".into())), "the window was deactivated");
     }
 
     #[test]
