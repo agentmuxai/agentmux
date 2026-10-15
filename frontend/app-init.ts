@@ -3,6 +3,7 @@
 
 import { App } from "@/app/app";
 import { registerDefaultCommands } from "@/app/store/command-registry";
+import { registerInputOwnerTracking } from "@/app/store/input-owner";
 import { globalRefocus, installShortcutApi, registerChordCapture, registerControlShiftTracking, registerGlobalKeys, registerHostShortcuts, registerUserKeybindings } from "@/app/store/keymodel";
 import { modalsModel } from "@/app/store/modalmodel";
 import { registerLinkInPaneListener } from "@/app/element/link-open";
@@ -1007,6 +1008,7 @@ async function initMux(initOpts: AgentMuxInitOpts) {
     registerUserKeybindings();
     registerDefaultCommands();
     registerControlShiftTracking();
+    registerInputOwnerTracking();
     registerChordCapture();
     registerHostShortcuts();
     installShortcutApi();

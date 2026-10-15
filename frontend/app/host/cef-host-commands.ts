@@ -71,7 +71,7 @@ export const cefBrowserPanes: BrowserPaneHostApi = {
         await invokeCommand("browser_pane_reload", { block_id: blockId });
     },
     focus: async (blockId) => {
-        await invokeCommand("browser_pane_focus", { block_id: blockId });
+        await selectInput(ownWindowLabel(), blockId);
     },
     async showPopup(popupId) {
         await invokeCommand("browser_popup_show", { id: popupId });
@@ -128,8 +128,33 @@ export const cefBrowserPanes: BrowserPaneHostApi = {
 
 /** `AppApi.reclaimWindowFocus` on CEF. */
 export async function cefReclaimWindowFocus(windowLabel: string): Promise<void> {
-    await invokeCommand("main_window_focus", { window_label: windowLabel });
+    await selectInput(windowLabel);
 }
+
+/** `AppApi.inputOwnerState` on CEF. */
+export function cefInputOwnerState(windowLabel: string): Promise<InputOwnerReport | null> {
+    return invokeCommand<InputOwnerReport | null>("input_owner_state", { window_label: windowLabel });
+}
+
+// Every request for the keyboard, for the page's own content or one of its
+// browser panes, goes out as one numbered `input_select`. The requests are
+// separate IPCs and can reach the host out of order; the host drops one that
+// arrives after a newer one. `inputEpoch`, when this page loaded (in
+// microseconds), orders this page load after the one before a reload, whose
+// numbers it would otherwise repeat. SPEC_BROWSER_PANE_INPUT_OWNER_2026_10_15.md §3.6.
+const inputEpoch = Math.round(performance.timeOrigin * 1000);
+let inputSeq = 0;
+
+function selectInput(windowLabel: string, blockId?: string): Promise<boolean> {
+    inputSeq += 1;
+    return invokeCommand<boolean>("input_select", {
+        window_label: windowLabel,
+        block_id: blockId,
+        epoch: inputEpoch,
+        seq: inputSeq,
+    });
+}
+
 
 /** `AppApi.windows` on CEF. */
 export const cefWindows: WindowHostApi = {

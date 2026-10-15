@@ -152,8 +152,12 @@ describe("BrowserViewModel lifecycle gating", () => {
 
         expect(vm.giveFocus()).toBe(true);
 
-        expect(invokeCommand).toHaveBeenCalledWith("browser_pane_focus", expect.anything());
-        expect(invokeCommand).not.toHaveBeenCalledWith("main_window_focus", expect.anything());
+        // One numbered selection of this pane, not of the app.
+        expect(invokeCommand).toHaveBeenCalledWith("input_select", expect.objectContaining({ block_id: vm.blockId }));
+        expect(invokeCommand).not.toHaveBeenCalledWith(
+            "input_select",
+            expect.not.objectContaining({ block_id: expect.anything() })
+        );
         other.remove();
     });
 

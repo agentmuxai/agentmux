@@ -24,6 +24,7 @@ import { CommandPaletteModal } from "@/app/modals/command-palette";
 import { zoomIn, zoomOut, zoomReset } from "@/app/store/zoom";
 import { openNewWindowFromHere } from "@/app/store/window-appearance";
 import { redockThisFloater } from "@/app/block/floating-redock";
+import { userInThisWindow } from "@/app/store/input-owner";
 import { openConnectors, openMemory } from "@/app/view/section-pane/panes";
 
 // ---------------------------------------------------------------------------
@@ -470,7 +471,8 @@ window.addEventListener("agentmux-run-command", ((e: CustomEvent) => {
 window.addEventListener("agentmux-event", ((e: CustomEvent) => {
     const detail = e.detail;
     if (!detail || detail.event !== "menu:invoke") return;
-    if (!document.hasFocus()) return;
+    // The window the user is in, also while one of its browser panes has the keys.
+    if (!userInThisWindow()) return;
     const id = detail.payload?.commandId as string;
     if (!id) return;
     if (!commandRegistry.run(id)) {

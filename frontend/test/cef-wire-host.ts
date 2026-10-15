@@ -7,7 +7,14 @@
 // same command names and payloads the app sends.
 // docs/specs/SPEC_HOST_API_SEAM_2026_09_26.md
 
-import { cefApprovals, cefBrowserPanes, cefHostMisc, cefReclaimWindowFocus, cefWindows } from "@/app/host/cef-host-commands";
+import {
+    cefApprovals,
+    cefBrowserPanes,
+    cefHostMisc,
+    cefInputOwnerState,
+    cefReclaimWindowFocus,
+    cefWindows,
+} from "@/app/host/cef-host-commands";
 import { CEF_HOST_CAPS } from "@/app/host/host-caps";
 import { makeTestHostApi } from "@/app/host/test-host";
 import { invokeCommand, listenEvent } from "@/app/platform/ipc";
@@ -20,6 +27,7 @@ export function installCefWireHost(overrides: Partial<AppApi> = {}): AppApi {
             approvals: cefApprovals,
             ...cefHostMisc,
             reclaimWindowFocus: cefReclaimWindowFocus,
+            inputOwnerState: cefInputOwnerState,
             listen: (event, callback) => listenEvent(event, callback),
             sendLogStructured: (level, module, message, data) => {
                 invokeCommand("fe_log_structured", { level, module, message, data }).catch(() => {});
