@@ -341,6 +341,8 @@ pub(crate) unsafe fn install_top_level_focus_restore_hook(
             "[focus-restore] installed WM_ACTIVATE observer on top-level HWND {:p}",
             hwnd,
         );
+        // An activation before this hook was never seen.
+        crate::input_owner::windows::window_hooked(hwnd);
     } else {
         tracing::warn!(
             "[focus-restore] SetWindowLongPtrW returned 0 for HWND {:p} — hook not installed",

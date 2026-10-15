@@ -36,14 +36,47 @@ pub fn dispatch(state: &Arc<AppState>, window: &str, event: Event) {
 /// The frontend selected pane `block` (`browser_pane_focus`).
 pub fn select_pane(state: &Arc<AppState>, block: &str) {
     match state.browser_pane_window_label(block) {
-        Some(window) => dispatch(state, &window, Event::Select(Owner::Pane(block.to_string()))),
+        Some(window) => select(state, &window, Owner::Pane(block.to_string())),
         None => tracing::warn!("[input] select of pane {block} with no window"),
     }
 }
 
 /// The frontend selected the app's own content in `window` (`main_window_focus`).
 pub fn select_app(state: &Arc<AppState>, window: &str) {
-    dispatch(state, window, Event::Select(Owner::App));
+    select(state, window, Owner::App);
+}
+
+/// A selection in `window`. A window in the foreground whose activation was
+/// never seen (it came before the window's hook) is made active first, so the
+/// selection is applied rather than kept for an activation that won't come.
+fn select(state: &Arc<AppState>, window: &str, owner: Owner) {
+    if let Some(hwnd) = state.window_hwnd(window) {
+        activate_if_foreground(state, window, hwnd);
+    }
+    dispatch(state, window, Event::Select(owner));
+}
+
+/// The top-level window `hwnd` was just hooked. If it is already the foreground
+/// window, no activation message will say so: its machine starts active.
+/// Posted, so the window's label is bound by the time it runs.
+pub fn window_hooked(hwnd: *mut std::ffi::c_void) {
+    let Some(state) = STATE.get() else { return };
+    let mut task = WindowHookedTask::new(state.clone(), hwnd as isize);
+    post_task(ThreadId::UI, Some(&mut task));
+}
+
+wrap_task! {
+    struct WindowHookedTask {
+        state: Arc<AppState>,
+        hwnd: isize,
+    }
+    impl Task {
+        fn execute(&self) {
+            if let Some(window) = self.state.label_for_hwnd(self.hwnd as _) {
+                activate_if_foreground(&self.state, &window, self.hwnd);
+            }
+        }
+    }
 }
 
 /// A click in pane `block`'s page (`WM_LBUTTONDOWN` in its windows).
@@ -264,7 +297,7 @@ wrap_task! {
             let root = unsafe { GetAncestor(fg, GA_ROOT) };
             if let Some(window) = self.state.label_for_hwnd(root) {
                 tracing::info!("[input] win={window} the keyboard was nowhere after a pane closed");
-                dispatch(&self.state, &window, Event::Select(Owner::App));
+                select(&self.state, &window, Owner::App);
             }
         }
     }
