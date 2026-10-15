@@ -62,7 +62,7 @@ export interface UsePendingMessageAcceptanceOptions {
      * `useAgentStream`'s echo ledger, which pairs it with the message's
      * transcript record (Phase 5a-4, `transcript-cursor.ts`).
      */
-    onAccepted?: (text: string) => void;
+    onAccepted?: (text: string, nodeId: string) => void;
 }
 
 export function usePendingMessageAcceptance(opts: UsePendingMessageAcceptanceOptions): void {
@@ -134,7 +134,7 @@ export function usePendingMessageAcceptance(opts: UsePendingMessageAcceptanceOpt
             };
             if (!opts.hasNodeId(node.id)) {
                 opts.addNodeId(node.id);
-                opts.onAccepted?.(pending.text);
+                opts.onAccepted?.(pending.text, node.id);
                 opts.queue.pushNewNode(node);
                 opts.queue.scheduleFlush();
             }

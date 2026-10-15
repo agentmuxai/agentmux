@@ -1059,9 +1059,25 @@ describe("line-based history ids (idFirstLine)", () => {
         expect(live.parseLine(lines[0])?.id).toBe(genA);
     });
 
+    it("a user record parsed alone gets the id it has in a replay of the whole transcript", () => {
+        // useAgentStream re-keys a sent message's row this way once its record is placed.
+        const user = JSON.stringify({ type: "user", message: { role: "user", content: "please go on" } });
+        const lines = [text("A"), ...tool("t1"), user, text("B")];
+        const whole = parseHistoryLines(lines, "claude", undefined, undefined, { idFirstLine: 60, idGen: "0123456789abcdef" }).nodes;
+        const alone = parseHistoryLines([user], "claude", undefined, undefined, { idFirstLine: 63, idGen: "0123456789abcdef" }).nodes;
+        const userId = (nodes: typeof whole) => nodes.find((n) => n.type === "user_message")?.id;
+        expect(userId(alone)).toBe("user_01234567_L63_0");
+        expect(userId(whole)).toBe(userId(alone));
+    });
+
     it("the live loop sets the line for ids where it sets it for tool results", () => {
         const src = readFileSync(join(process.cwd(), "frontend/app/view/agent/useAgentStream.ts"), "utf8");
         expect(src).toMatch(/parser\.setIdLine\(sourceLine != null && from \? sourceLine : null, from\?\.gen\)/);
         expect(src).toMatch(/parser\.setSourceLine\(null\);\s*parser\.setIdLine\(null\);/);
+        // A sent message's row is re-keyed when its record is placed.
+        expect(src).toMatch(/new EchoLedger\(rekeyAccepted\)/);
+        expect(src).toMatch(/echo: \(text, from\) => echoLedger\.echoed\(text, from\)/);
+        expect(src).toMatch(/isOwnEcho: \(line, at\) => echoLedger\.isOwnEcho\(line, at\)/);
+        expect(src).toMatch(/onAccepted: \(text, nodeId\) => echoLedger\.accepted\(text, nodeId\)/);
     });
 });
