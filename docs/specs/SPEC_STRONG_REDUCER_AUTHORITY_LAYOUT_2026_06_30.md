@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-30
 **Type:** Implementation spec (full analysis)
-**Status:** implemented — Phase 2 (`balance_node`, #1866) and Phase 3 (srv reducer arms, #1868) implemented; Phase 4 implemented in #4946 (the frontend's own tree edits are layout intents) and #4947 (srv applies its own placements; the window pushes no tree for them); Phase 5 implemented in #4948 (minimize and restore are intents; minimize has been a display mode since #2197, so the dissolve intents were dropped); Phase 6 implemented in #PHASE6PR (no window writes a layout row: the whole-tree push, `layout_revision` and the frontend's dangling-leaf prune are gone). Verified against code 2026-10-14 ([triage](../analysis/REPORT_REDUCER_STACK_TRIAGE_2026_10_13.md)).
+**Status:** implemented — Phase 2 (`balance_node`, #1866) and Phase 3 (srv reducer arms, #1868) implemented; Phase 4 implemented in #4946 (the frontend's own tree edits are layout intents) and #4947 (srv applies its own placements; the window pushes no tree for them); Phase 5 implemented in #4948 (minimize and restore are intents; minimize has been a display mode since #2197, so the dissolve intents were dropped); Phase 6 implemented in #4949 (no window writes a layout row: the whole-tree push, `layout_revision` and the frontend's dangling-leaf prune are gone). Verified against code 2026-10-14 ([triage](../analysis/REPORT_REDUCER_STACK_TRIAGE_2026_10_13.md)).
 **Owner:** asaf
 **Supersedes scope of:** `SPEC_864_LAYOUT_SINGLE_WRITER_2026_06_30.md` (that spec's "weak" single-writer
 becomes Phase 1 here; this spec is the committed end-goal)
@@ -361,7 +361,7 @@ migrated away on load. So there is no geometry to split off and no dissolve inte
 **Phase 6 — delete the backstops.** Remove `heal_layout` + callers, the relaxed `reorder_tabs_bulk`
 validation + its migration test, the resync layout carve-out. The payoff deletion.
 
-*Phase 6 as built (#PHASE6PR):* the three backstops named above were already gone: `heal_layout` and
+*Phase 6 as built (#4949):* the three backstops named above were already gone: `heal_layout` and
 the `reorder_tabs_bulk` relaxation in #1981, the resync carve-out in #4878. With Phases 4 and 5
 nothing pushed a tree any more, so this phase deletes the whole-tree path and what guarded it:
 - **No layout row is written whole.** `object.UpdateObject` refuses a layout row

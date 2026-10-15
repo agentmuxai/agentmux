@@ -1,7 +1,7 @@
 # SPEC: Pane tabs as reducer commands — one writer for "which blocks are in which pane"
 
 **Date:** 2026-09-18
-**Status:** implemented — Phase 0 implemented in #3414; Phase 1 in #3424, #3441 (`LayoutStackMove`) and #4882 (tab switch/close commands with `actionid` dedup, I1); Phase 2 (`layout_revision`) in #4882, removed with the whole-tree push it guarded in #PHASE6PR ([strong reducer authority](SPEC_STRONG_REDUCER_AUTHORITY_LAYOUT_2026_06_30.md) Phase 6); Phase 3 (the invariant reaper and loud logging) in #4884. Verified against code 2026-10-14 ([triage](../analysis/REPORT_REDUCER_STACK_TRIAGE_2026_10_13.md)).
+**Status:** implemented — Phase 0 implemented in #3414; Phase 1 in #3424, #3441 (`LayoutStackMove`) and #4882 (tab switch/close commands with `actionid` dedup, I1); Phase 2 (`layout_revision`) in #4882, removed with the whole-tree push it guarded in #4949 ([strong reducer authority](SPEC_STRONG_REDUCER_AUTHORITY_LAYOUT_2026_06_30.md) Phase 6); Phase 3 (the invariant reaper and loud logging) in #4884. Verified against code 2026-10-14 ([triage](../analysis/REPORT_REDUCER_STACK_TRIAGE_2026_10_13.md)).
 **Author:** AgentA@Area54
 **Related:** [`docs/specs/SPEC_AGENT_PANE_CLOSE_GRACEFUL_SHUTDOWN_2026_09_18.md`](SPEC_AGENT_PANE_CLOSE_GRACEFUL_SHUTDOWN_2026_09_18.md)
 (§6 names this as its follow-up; its orphan reaper, §4.9, is the backstop for
