@@ -82,9 +82,34 @@ pub fn pane_focus_gained(state: &Arc<AppState>, block: &str) {
 }
 
 /// `window` became the active window, or stopped being it (CEF Views
-/// `on_window_activation_changed`).
+/// `on_window_activation_changed`). On macOS a pane overlay is a key window of
+/// its own, so the window is reported inactive whenever one of its own pages
+/// takes the keyboard; that isn't the user leaving it. A deactivation counts
+/// once the key change has settled (posted) and neither the window nor one of
+/// its own pane overlays is key.
 pub fn window_activation(state: &Arc<AppState>, window: &str, active: bool) {
-    dispatch(state, window, if active { Event::Activated } else { Event::Deactivated }, Run::Posted);
+    if active {
+        dispatch(state, window, Event::Activated, Run::Posted);
+        return;
+    }
+    let mut task = DeactivationTask::new(state.clone(), window.to_string());
+    post_task(ThreadId::UI, Some(&mut task));
+}
+
+wrap_task! {
+    struct DeactivationTask {
+        state: Arc<AppState>,
+        window: String,
+    }
+    impl Task {
+        fn execute(&self) {
+            if platform::holds_key(&self.state, &self.window) {
+                tracing::debug!("[input] win={} deactivation ignored: it or one of its panes is key", self.window);
+                return;
+            }
+            dispatch(&self.state, &self.window, Event::Deactivated, Run::Posted);
+        }
+    }
 }
 
 /// Pane `block` can take focus now (Linux: its browser was created; macOS: its
@@ -243,6 +268,11 @@ mod platform {
         }
     }
 
+    /// The window, or one of its own pane overlays, is the key window.
+    pub fn holds_key(state: &Arc<AppState>, window: &str) -> bool {
+        crate::ui_tasks::key_surface_of(ns_window(state, window)).is_some()
+    }
+
     pub fn note_focus(_window: &str, _surface: Surface) {}
 }
 
@@ -272,6 +302,11 @@ mod platform {
         LAST.lock().get(window).cloned().unwrap_or(Surface::App)
     }
 
+    /// Panes are views inside the window here: a deactivation is the window's.
+    pub fn holds_key(_state: &Arc<AppState>, _window: &str) -> bool {
+        false
+    }
+
     pub fn note_focus(window: &str, surface: Surface) {
         LAST.lock().insert(window.to_string(), surface);
     }
@@ -293,6 +328,10 @@ mod platform {
 
     pub fn focused(_state: &Arc<AppState>, _window: &str) -> Surface {
         Surface::Elsewhere
+    }
+
+    pub fn holds_key(_state: &Arc<AppState>, _window: &str) -> bool {
+        false
     }
 
     pub fn note_focus(_window: &str, _surface: Surface) {}
