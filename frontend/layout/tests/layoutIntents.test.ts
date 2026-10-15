@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createSignal } from "solid-js";
 import { LayoutModel } from "@/layout/lib/layoutModel";
 import { deriveNodeId, newLayoutNode } from "@/layout/lib/layoutNode";
-import { reconcileWithStoredLayout } from "@/layout/lib/layoutIntents";
+import { layoutDragEnded, reconcileWithStoredLayout } from "@/layout/lib/layoutIntents";
 import { sendStackCommand } from "@/layout/lib/layoutPersistence";
 import { closeBlockInStack, pushBlockOntoStack } from "@/layout/lib/layoutStack";
 import {
@@ -172,6 +172,26 @@ describe("layout intents", () => {
             expect(model.treeState.rootNode?.id).toBe(a.id);
             reconcileWithStoredLayout(model);
             expect(model.treeState.rootNode?.id).toBe(a.id);
+        });
+
+        // A cross-tab redock srv refuses before the drag's dragend asks for
+        // the comparison while the drag is still active, so it's skipped
+        // then; the drag's end runs it.
+        it("runs the skipped comparison when the drag ends", async () => {
+            const model = createModel();
+            insert(model, "a");
+            intentsSent()[0].resolve({ applied: true, version: 3 });
+            await settle();
+            model.activeDrag._set(true);
+            const stored = { id: "srv-root", flexDirection: "row", size: 10, data: { blockId: "z" } } as LayoutNode;
+            storeRow(model, 3, stored);
+            reconcileWithStoredLayout(model);
+            expect(model.treeState.rootNode?.id).not.toBe("srv-root");
+            model.activeDrag._set(false);
+            layoutDragEnded(model);
+            expect(model.treeState.rootNode?.id).not.toBe("srv-root"); // not before the drag's teardown
+            await new Promise((r) => setTimeout(r, 0));
+            expect(model.treeState.rootNode).toEqual(stored);
         });
 
         it("leaves the local tree alone when srv's normalizes to it", async () => {

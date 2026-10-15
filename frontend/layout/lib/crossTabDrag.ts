@@ -116,7 +116,8 @@ export function redockDraggedPane(opts: {
             Logger.error("dnd", "cross-tab pane redock failed", { error: String(e) });
             // The characteristic failure here is "block X is in tab Y,
             // not <sourceTabId>": the source tab showed a leaf srv doesn't
-            // hold. Show the source tab as srv stores it.
+            // hold. Show the source tab as srv stores it; if the drag hasn't
+            // ended yet, that runs when it does (`layoutDragEnded`).
             const sourceModel = getLayoutModelForTabById(opts.sourceTabId);
             if (sourceModel) reconcileWithStoredLayout(sourceModel);
         }
