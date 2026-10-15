@@ -1,7 +1,7 @@
 # Spec: a coordination channel per repository, for agents on this computer
 
 **Date:** 2026-10-15
-**Status:** implemented (PR_PENDING).
+**Status:** implemented (#4969).
 **Related:** `SPEC_AGENT_OVERLAP_AWARENESS_2026_10_10.md` (`WhoIsWorkingOn`, `ClaimWork`, overlap notes; this builds on its store and its question resolution), `SPEC_JEKT_DELIVERY_STATES_AND_MAILBOX_2026_10_01.md` (a per-agent inbox: private, not this), `SPEC_MUXSPECT_CROSS_TIER_CONVERSATION_VISIBILITY_2026_08_21.md` (`conversation_visibility`, `transcript_request`).
 
 ## 1. The problem
