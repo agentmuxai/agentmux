@@ -1,7 +1,7 @@
 # Spec: tell the user what happened after AgentMux recovers, and fix the toasts that carry it
 
 **Date:** 2026-10-16
-**Status:** active. §6's cause fixed in #5024; §4.5 (toasts that show in every build) in #5030; §4.1 and §4.2 for the host's cases (a window's renderer crashing, running out of memory or hanging; the quit watchdog's exit with no window left) in #5032, its causes in plain words in #5038. Left: §4.3 (the status bar's history and marker), the launcher's and srv's cases and GPU detection (§5 Phase C).
+**Status:** active. §6's cause fixed in #5024; §4.5 (toasts that show in every build) in #5030; §4.1 and §4.2 for the host's cases (a window's renderer crashing, running out of memory or hanging; the quit watchdog's exit with no window left) in #5032, its causes in plain words in #5038. §4.3 (the status bar's "Recent incidents" and the uptime's marker) in #5040. Left: §4.3's "Restarted after" tooltip (it needs the launcher's records), the launcher's and srv's cases and GPU detection (§5 Phase C).
 **Author:** Loap-3@narko, at the operator's request
 **Scope:** the frontend's toasts (`frontend/app/notification/`, `store/flash-notifications.ts`), the status bar's backend item (`statusbar/BackendStatus.tsx`, `HealthNotices.tsx`), the host's crash and quit paths (`crates/cef/src/client/crash_recovery.rs`, `client/lifecycle.rs`, `wrr/`, `lib.rs` fast exit), the launcher's supervisor (`crates/launcher/src/supervisor/`), srv's start-up recovery (`blockcontroller/session_recovery.rs`, `service/session_restore.rs`).
 **Related:** `SPEC_GRACEFUL_CRASH_HANDLING_2026_04_13.md` (the renderer recovery page), `SPEC_SERVICE_SUPERVISION_AND_RECOVERY_2026_05_20.md` (crash budgets), `SPEC_SESSION_RESTORE_AND_SAVED_LAYOUTS_2026_08_13.md`, `SPEC_OS_NOTIFICATIONS_SYSTEM_2026_09_24.md`, `SPEC_FLEETWIDE_CRASH_HANG_FORENSICS_2026_08_14.md`, `SPEC_TRAY_OPTIONAL_BACKGROUND_SERVICE_2026_09_04.md` §6 (the background audit), `docs/reports/REPORT_PERFORMANCE_INDICATORS_TO_STATUS_BAR_2026_10_08.md`.
@@ -119,8 +119,8 @@ The status bar's backend item is the right home for the **record**, not for the 
 
 - A resource warning is a **state**: it is true for a while, and the dot shows it while it lasts. A recovery is an **event**: it is over by the time the user can look, and it needs to be read once. A yellow dot the user doesn't open says nothing about what happened.
 - So: the **toast** carries the event to the user, once, until they close it (§4.2). The backend popover keeps the **history**: a "Recent incidents" section under `HealthNotices`, the last 20 records, newest first, each with when, what, why, what was saved, and Copy report.
-- The dot gets no new colour for incidents. While an incident is unacknowledged, the uptime text carries a small marker ("● 2:14:05 ⓘ"). The marker goes when the notice is closed.
-- After a restart, the uptime restarts from zero; its tooltip says "Restarted <time> after <kind>", from the newest record.
+- The dot gets no new colour for incidents. While an incident is unacknowledged, the uptime text carries a small marker ("● 2:14:05 ⓘ"). The marker goes when the notice is closed. Meanwhile the item's tooltip adds "recovered from a problem, see Recent incidents" (`BackendStatus.tsx`, `RecentIncidents.tsx`, the list kept by `init/incidents.ts`).
+- After a restart, the uptime restarts from zero; its tooltip says "Restarted <time> after <kind>", from the newest record. Not yet: only the launcher knows a restart followed an incident, so this comes with its records (Phase C).
 
 ### 4.4 The incidents and their wording
 

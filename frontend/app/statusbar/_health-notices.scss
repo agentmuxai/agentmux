@@ -51,6 +51,55 @@
     }
 }
 
+// What AgentMux recovered from (SPEC_RECOVERY_NOTICES_AND_TOASTS_2026_10_16
+// §4.3): a plain card per incident, outlined in amber while its notice is open.
+.status-bar-incidents {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    max-height: 40vh;
+    overflow-y: auto;
+    margin-bottom: var(--space-1);
+}
+
+.status-bar-incident {
+    padding: var(--space-1) var(--space-2);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+
+    &--open {
+        border-color: var(--warning-color);
+    }
+
+    &-head {
+        display: flex;
+        flex-direction: column;
+    }
+
+    &-what {
+        font-weight: 600;
+    }
+
+    &-when {
+        opacity: 0.6;
+    }
+
+    &-text {
+        margin-top: var(--space-0-5);
+        line-height: 1.35;
+        opacity: 0.85;
+    }
+
+    &-copy {
+        margin-top: var(--space-1);
+    }
+}
+
+.stat-incident-marker {
+    margin-left: var(--space-0-5);
+    color: var(--warning-color);
+}
+
 .status-bar-sr-only {
     @include mixins.sr-only;
 }

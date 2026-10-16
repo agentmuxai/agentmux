@@ -24,7 +24,7 @@ vi.mock("@/store/global", () => ({
 }));
 
 // vi.mock above is hoisted, so this import already sees the mock.
-import { incidentMessage, incidentNotification, surfaceIncidents } from "./incidents";
+import { hasOpenIncident, incidentMessage, incidentNotification, incidentReport, recentIncidents, surfaceIncidents } from "./incidents";
 
 const crash = {
     id: "1-a",
@@ -65,7 +65,29 @@ describe("recovery notices", () => {
         handlers.get("incident-acknowledged")?.({ id: "1-a" });
         expect(removed).toEqual(["incident-1-a"]);
         // Recorded while this window is open: shown now.
-        handlers.get("incident-recorded")?.({ ...crash, id: "3-c" });
+        handlers.get("incident-recorded")?.({ ...crash, id: "3-c", at_ms: 9_000 });
         expect(pushed.at(-1)?.id).toBe("incident-3-c");
+
+        // The status bar's history (§4.3): every one, closed or not, newest first.
+        expect(recentIncidents().map((i) => i.id)).toEqual(["3-c", "2-b", "1-a", "0-z"]);
+        expect(recentIncidents().find((i) => i.id === "1-a")?.acknowledged_at_ms).toBeGreaterThan(0);
+        expect(hasOpenIncident()).toBe(true);
+        for (const id of ["0-z", "3-c"]) handlers.get("incident-acknowledged")?.({ id });
+        expect(hasOpenIncident()).toBe(false);
+    });
+
+    it("copy as a report with everything the record says", () => {
+        const report = incidentReport({ ...crash, lost: ["An unsent message."], evidence: "host log, 2026-10-16T21:31:39Z" });
+        expect(report).toBe(
+            [
+                "AgentMux incident 1-a (renderer_crashed)",
+                "When: 1970-01-01T00:00:01.000Z",
+                "What: An AgentMux window crashed",
+                "Why: GPU process crashed",
+                "Saved: Every agent kept running: agents don't run in the window.",
+                "May be lost: An unsent message.",
+                "Evidence: host log, 2026-10-16T21:31:39Z",
+            ].join("\n")
+        );
     });
 });
