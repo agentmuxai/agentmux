@@ -13,6 +13,7 @@
  */
 
 import { getApi, pushNotification, removeNotificationById } from "@/store/global";
+import { createSignal } from "solid-js";
 
 export type Incident = {
     id: string;
@@ -55,9 +56,39 @@ export function incidentNotification(i: Incident): NotificationType {
     };
 }
 
+/** How many incidents the status bar's history keeps (§4.3). */
+export const HISTORY_MAX = 20;
+
+const [history, setHistory] = createSignal<Incident[]>([]);
+
+/** The newest incidents, newest first, as this window knows them: the
+ *  status bar's "Recent incidents" (§4.3). */
+export const recentIncidents = history;
+
+/** Whether any notice is still open: the uptime's marker (§4.3). */
+export const hasOpenIncident = (): boolean => history().some((i) => !i.acknowledged_at_ms);
+
+function remember(i: Incident): void {
+    setHistory((h) => [i, ...h.filter((x) => x.id !== i.id)].slice(0, HISTORY_MAX));
+}
+
+function acknowledged(id: string): void {
+    setHistory((h) => h.map((x) => (x.id === id && !x.acknowledged_at_ms ? { ...x, acknowledged_at_ms: Date.now() } : x)));
+}
+
 function show(i: Incident): void {
     if (!i?.id || i.acknowledged_at_ms) return;
     pushNotification(incidentNotification(i));
+}
+
+/** An incident as text for a bug report: everything the record says. */
+export function incidentReport(i: Incident): string {
+    const lines = [`AgentMux incident ${i.id} (${i.kind})`, `When: ${new Date(i.at_ms).toISOString()}`, `What: ${i.what}`];
+    if (i.cause) lines.push(`Why: ${i.cause}`);
+    for (const d of i.did ?? []) lines.push(`Saved: ${d}`);
+    for (const l of i.lost ?? []) lines.push(`May be lost: ${l}`);
+    if (i.evidence) lines.push(`Evidence: ${i.evidence}`);
+    return lines.join("\n");
 }
 
 let started = false;
@@ -70,13 +101,25 @@ export async function surfaceIncidents(): Promise<void> {
     started = true;
     const api = getApi();
     try {
-        void api.listen<Incident>("incident-recorded", show);
+        void api.listen<Incident>("incident-recorded", (i) => {
+            if (!i?.id) return;
+            remember(i);
+            show(i);
+        });
         void api.listen<{ id: string }>("incident-acknowledged", (p) => {
-            if (p?.id) removeNotificationById(incidentToastId(p.id));
+            if (!p?.id) return;
+            acknowledged(p.id);
+            removeNotificationById(incidentToastId(p.id));
         });
         const listed = (await api.listIncidents?.()) as { incidents?: Incident[] } | null | undefined;
+        const incidents = (listed?.incidents ?? []).filter((i) => i?.id);
+        // Keep what the events brought while the list was on its way.
+        setHistory((live) => {
+            const ids = new Set(live.map((i) => i.id));
+            return [...live, ...incidents.filter((i) => !ids.has(i.id))].sort((a, b) => b.at_ms - a.at_ms).slice(0, HISTORY_MAX);
+        });
         // Oldest first, so the newest ends up on top.
-        for (const i of [...(listed?.incidents ?? [])].reverse()) show(i);
+        for (const i of [...incidents].reverse()) show(i);
     } catch {
         // An older host, or no record: nothing to tell.
     }
