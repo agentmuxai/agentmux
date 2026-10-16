@@ -1,7 +1,7 @@
 # Spec: an agent pane shows its latest content still, on a tab switch and on a send
 
 **Date:** 2026-10-15
-**Status:** active. Shipped: §4.1, rows on screen stay put when rows above are removed or inserted (#4962); §3.1 and §3.2, a pane shown again lands at its latest content (#4963); §3.2's window counted from the first painted frame (#4974), after the lab (§3.6). Left: §3.3-§3.5, §4.2, §4.3.
+**Status:** active. Shipped: §4.1, rows on screen stay put when rows above are removed or inserted (#4962); §3.1 and §3.2, a pane shown again lands at its latest content (#4963); §3.2's window counted from the first painted frame (#4974), after the lab (§3.6); §3.3 and §3.7, the pane covered on a show until what it got while hidden has been laid out (with the lab report, `REPORT_AGENT_PANE_MOTION_LAB_2026_10_15.md` §3.4). Left: §3.4, §3.5, §4.2, §4.3.
 **Scope:** the agent pane's transcript (`frontend/app/view/agent/`): the one-way scroll flow, the virtual list, the live-feed roll-off.
 **Related:** `SPEC_AGENT_PANE_ONE_WAY_FLOW_2026_10_07.md` (the follower, spacer room, commit points), `SPEC_RENDERER_RECYCLE_WHEN_IDLE_2026_10_13.md` (stable row ids, #4952).
 
@@ -62,7 +62,14 @@ After the window, output that arrives is new: the follower eases it in as today.
 
 **3.5 Legacy path.** Skip `glideContent` and `holdBufferHeight` during the same window (`AgentDocumentVirtualList.tsx:1106-1108`).
 
-**3.6 What the lab showed (2026-10-15).** Sampled after paint in packaged builds, with the app's one-way recorder on: with §3.2, every painted frame after a show is at the bottom (0 frames short of it; 3 frames, up to 584 px, without). But the content the pane got while hidden still arrives in stages after the show (about 4,700, then 2,200, then 1,000 px over three frames), and a pane pinned to the bottom shows each stage as the text jumping up: about 5,400 px of motion in both builds. That is the reported "fast scroll", and no scroll rule removes it. Proposed next: keep the pane covered (its document hidden, the background showing) from the show until its layout has settled (two frames with no resize, at most 400 ms), then reveal it at the bottom. Then the pane appears once, with its latest content; output after that scrolls in as usual.
+**3.6 What the lab showed (2026-10-15).** Sampled after paint in packaged builds, with the app's one-way recorder on: with §3.2, every painted frame after a show is at the bottom (0 frames short of it; 3 frames, up to 584 px, without). But the content the pane got while hidden still arrives in stages after the show (about 4,700, then 2,200, then 1,000 px over three frames), and a pane pinned to the bottom shows each stage as the text jumping up: about 5,400 px of motion in both builds. That is the reported "fast scroll", and no scroll rule removes it. Next: §3.7.
+
+**3.7 Cover the pane until what it got while hidden is laid out.** Why the content arrives in stages: hiding a tab doesn't stop its layout, but the pane's rendering pauses while hidden (`MarkdownBlock`, `ToolBlock`, `agent-dormancy.tsx`) so that hidden panes don't take the main thread from the one being typed into; everything held back is drawn on show. That pause stays. Instead, on a show (`scroll/settle-on-show.ts`):
+- When the pane follows and its document changed while hidden (the nodes array is not the one it had when hidden), the transcript (`.agent-document`) is covered in the same frame: `visibility: hidden; opacity: 0`, laid out but not painted. The composer and the pane's chrome stay.
+- A ResizeObserver on the head and the tail watches it. The cover lifts in the frame after two laid-out frames with no resize, or at most `SHOW_COVER_MAX_MS` (350 ms) after the first frame after the show, under §3.2's 400 ms window, so it lifts at the bottom.
+- A pane with nothing new shows at once, as before; a pane the user scrolled up is never covered. Hidden again while covered: the cover goes.
+
+With §3.3 there are fewer stages to wait out: a markdown block shown again draws its text once, settled (it drew it streaming, then again highlighted about 90 ms later, when the pane was hidden mid-stream), and a tool log catching up because its pane was shown doesn't ease its height.
 
 ## 4. Design: sending after idle
 

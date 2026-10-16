@@ -343,10 +343,13 @@ export const ToolOverlayLog = (props: ToolOverlayLogProps): JSX.Element => {
     // the new tool's height (reagent P1 round 2 on PR #1975).
     let lastNodeId: string = props.node.id;
     let pendingCommit: (() => void) | undefined;
+    let lastDormant = !!props.dormant;
 
     createComputed(() => {
         const b = branch();
         const nodeId = props.node.id;
+        const shownAgain = lastDormant && !props.dormant;
+        lastDormant = !!props.dormant;
         if (nodeId !== lastNodeId) {
             // Different node reused this slot — never animate across the
             // swap: drop anything pending, and stop a FLIP still running for
@@ -365,7 +368,10 @@ export const ToolOverlayLog = (props: ToolOverlayLogProps): JSX.Element => {
         // tool finishes, and measuring (computed style up the ancestors,
         // scrollHeight, offsetHeight) and easing a height nobody sees would
         // force the layout the dormancy gate exists to avoid.
-        if (el && lastBranch !== undefined && b !== lastBranch && props.open !== false) {
+        // Nor when the pane was just shown again: the branch catching up then
+        // is the content it got while hidden, which lands under the show's
+        // cover, not a change to ease (SPEC_AGENT_PANE_NO_CATCH_UP_MOTION_2026_10_15.md §3.3).
+        if (el && lastBranch !== undefined && b !== lastBranch && props.open !== false && !shownAgain) {
             pendingCommit = beginHeightContinuity(el, measureHeight, measureRenderedHeight);
         }
         lastBranch = b;

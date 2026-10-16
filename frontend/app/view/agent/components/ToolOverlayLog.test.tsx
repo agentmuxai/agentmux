@@ -995,6 +995,27 @@ describe("ToolOverlayLog — no rebuild when the stream closes, none at all whil
         expect(reads.geometry).toBe(0);
     });
 
+    it("a log catching up because its pane was shown again doesn't ease its height", () => {
+        const [node, setNode] = createSignal<ToolNode>(streamingNode);
+        const [open, setOpen] = createSignal(true);
+        const { container } = render(() => <ToolOverlayLog node={node()} open={open()} dormant={!open()} />);
+        setOpen(false);
+        setNode({ ...terminalNode, log: { open: false, chunks: [] } });
+        const reads = { geometry: 0, style: 0 };
+        const realGetComputedStyle = window.getComputedStyle;
+        vi.spyOn(window, "getComputedStyle").mockImplementation((el: Element, pseudo?: string | null) => {
+            reads.style++;
+            return realGetComputedStyle(el, pseudo);
+        });
+        for (const prop of ["scrollHeight", "offsetHeight", "clientHeight"] as const) {
+            vi.spyOn(HTMLElement.prototype, prop, "get").mockImplementation(() => (reads.geometry++, 0));
+        }
+        setOpen(true); // shown: none -> the result, under the show's cover
+        expect(container.textContent).toContain("done");
+        expect(reads.style).toBe(0);
+        expect(reads.geometry).toBe(0);
+    });
+
     it("holds the dispatch match with the node while the log can't be seen, and catches up when shown", () => {
         const dispatch = (done: number) =>
             ({

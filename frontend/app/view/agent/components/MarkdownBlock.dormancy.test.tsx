@@ -104,4 +104,29 @@ describe("MarkdownBlock — dormant panes don't render", () => {
         vi.advanceTimersByTime(100);
         expect(container.textContent).toContain("Arrived while hidden");
     });
+
+    it("draws what arrived while hidden once, settled, when shown", () => {
+        const [node, setNode] = createSignal<MarkdownNode>({ type: "markdown", id: "md-1", content: "" });
+        const [dormant, setDormant] = createSignal(false);
+        const { container } = render(() => (
+            <AgentDormancyProvider dormant={dormant}>
+                <MarkdownBlock node={node()} />
+            </AgentDormancyProvider>
+        ));
+        // Streaming while seen, then hidden mid-stream, and more arrives.
+        for (let i = 1; i <= 10; i++) {
+            if (i === 4) setDormant(true);
+            setNode({ type: "markdown", id: "md-1", content: LONG.slice(0, i * 60) });
+            vi.advanceTimersByTime(30);
+        }
+        __resetMarkdownRenderStats();
+        setDormant(false);
+        expect(container.textContent).toContain(LONG.slice(0, 60));
+        const commitsOnShow = __markdownRenderStats.commits;
+        expect(commitsOnShow).toBeGreaterThan(0);
+        // No second, highlighted draw a moment later: that changed the row's
+        // height again after the show (SPEC_AGENT_PANE_NO_CATCH_UP_MOTION §3.3).
+        vi.advanceTimersByTime(500);
+        expect(__markdownRenderStats.commits).toBe(commitsOnShow);
+    });
 });
