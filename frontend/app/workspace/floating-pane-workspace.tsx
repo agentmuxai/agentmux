@@ -52,6 +52,7 @@ import { holdRedock, redockInProgress } from "./floating-redock-guard";
 import { Show, createEffect, createMemo, onCleanup, onMount, type JSX } from "solid-js";
 
 import { createRedockArming } from "./redock-arming";
+import { isFloatingMaximized } from "@/app/block/floating-maximize";
 import { useReapplyFloatingOnTop } from "@/app/block/floating-ontop";
 import "./floating-pane-workspace.scss";
 
@@ -216,6 +217,14 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
         // move (start_window_drag → xdg_toplevel.move), as for the main
         // window (useWindowDrag.linux.ts); a plain click still reaches the grip.
         let compositorPress: { x: number; y: number } | null = null;
+        // Windows: a press on a MAXIMIZED floater's header, waiting to move
+        // past the threshold before the host's move loop (and its restore) starts.
+        let win32MaximizedPress: { x: number; y: number } | null = null;
+        const floaterMaximized = (): boolean => {
+            const tid = tabId();
+            const blockId = tid ? MOS.getObjectValue<Tab>(MOS.makeORef("tab", tid))?.blockids?.[0] : undefined;
+            return !!blockId && isFloatingMaximized(MOS.getObjectValue<Block>(MOS.makeORef("block", blockId))?.meta);
+        };
         const COMPOSITOR_MOVE_THRESHOLD_PX = 4;
         // Per-drag session counter: incremented on every drag start and on cancel.
         // Guards the update_floating_redock_hover IPC .then() against stale responses
@@ -553,10 +562,23 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
             }
 
             // Windows only now (macOS + Linux returned via jsDrivenDrag above).
-            // Win32BeginMoveTask manual loop (zero per-move IPC, no DPR math).
-            // The host owns motion + capture and emits update_floating_redock_hover
-            // itself while the renderer is dark; renderer sees mouseup via the
-            // dispatched WM_LBUTTONUP balance (PR #1181 §5.1).
+            // A MAXIMIZED floater's press waits for real movement, as native
+            // Wayland's does: the host restores a maximized floater as its move
+            // loop starts, so starting it on the press would restore on a plain
+            // click, and a double-click would restore and then re-maximize.
+            // SPEC_FLOATING_PANE_WINDOW_CONTROLS_REFINEMENTS_2026_10_16 §3.3.
+            if (floaterMaximized()) {
+                win32MaximizedPress = { x: e.clientX, y: e.clientY };
+                return;
+            }
+            startWin32Drag();
+        };
+
+        // Win32BeginMoveTask manual loop (zero per-move IPC, no DPR math).
+        // The host owns motion + capture and emits update_floating_redock_hover
+        // itself while the renderer is dark; renderer sees mouseup via the
+        // dispatched WM_LBUTTONUP balance (PR #1181 §5.1).
+        const startWin32Drag = (): void => {
             getApi().windows.startDrag(label).catch(() => {});
             dragging = true;
             hasMoved = false;
@@ -570,6 +592,7 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
 
         const onMouseUp = (e: MouseEvent) => {
             compositorPress = null;
+            win32MaximizedPress = null;
             unmaximizeOnMove = null;
             // Invalidate any in-flight JS-driven get_window_position IPC so a race
             // where mouseup fires before the promise resolves doesn't arm dragging.
@@ -1056,11 +1079,28 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
         };
         document.addEventListener("mousemove", onCompositorPressMove, true);
 
+        // Windows, a maximized floater: start the host's move loop (which
+        // restores it under the cursor) once the press has moved.
+        const onWin32MaximizedPressMove = (e: MouseEvent) => {
+            if (!win32MaximizedPress) return;
+            if ((e.buttons & 1) === 0) {
+                win32MaximizedPress = null;
+                return;
+            }
+            const dx = Math.abs(e.clientX - win32MaximizedPress.x);
+            const dy = Math.abs(e.clientY - win32MaximizedPress.y);
+            if (dx < COMPOSITOR_MOVE_THRESHOLD_PX && dy < COMPOSITOR_MOVE_THRESHOLD_PX) return;
+            win32MaximizedPress = null;
+            startWin32Drag();
+        };
+        document.addEventListener("mousemove", onWin32MaximizedPressMove, true);
+
         onCleanup(() => {
             cleaned = true;
             document.removeEventListener("mousedown", onMouseDown, true);
             document.removeEventListener("mouseup", onMouseUp, true);
             document.removeEventListener("mousemove", onCompositorPressMove, true);
+            document.removeEventListener("mousemove", onWin32MaximizedPressMove, true);
             stopCancelListener();
             stopEndedListener();
             stopHoverStateListener();

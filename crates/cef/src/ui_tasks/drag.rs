@@ -402,7 +402,10 @@ wrap_task! {
                 //      their geometry through the reducer, so SW_RESTORE here
                 //      would desync that state. They restore through the
                 //      reducer instead (`begin_unmaximize_floater_for_drag`),
-                //      then take the same settle delay and placement.
+                //      then take the same settle delay and placement. The
+                //      floater's page sends start_window_drag for a maximized
+                //      floater only once the press has moved, so a plain click
+                //      or a double-click never reaches this restore.
                 //      SPEC_FLOATING_PANE_WINDOW_CONTROLS_REFINEMENTS_2026_10_16 §4.4.
                 if !self.after_unmaximize {
                     let source = self.source_label.as_deref().unwrap_or("main");
