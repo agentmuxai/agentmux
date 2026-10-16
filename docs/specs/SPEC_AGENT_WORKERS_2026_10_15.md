@@ -1,7 +1,7 @@
 # Spec: an agent launches and coaches worker agents in panes
 
 **Date:** 2026-10-15
-**Status:** active. Phase A (§3.1, §3.2's pane mark, §3.5, §3.6) implemented in #5020 (as `Agents` `fork`) and #PRNUM (renamed `Agents` `spawn`; a worker is a new agent, not a fork; its account, §3.5): `app_api/agent_spawn.rs`. Left: Phase B (§3.2's table, §3.3, §3.4), Phase C (§3.7).
+**Status:** active. Phase A (§3.1, §3.2's pane mark, §3.5, §3.6) implemented in #5020 (as `Agents` `fork`) and #5023 (renamed `Agents` `spawn`; a worker is a new agent, not a fork; its account, §3.5): `app_api/agent_spawn.rs`. Left: Phase B (§3.2's table, §3.3, §3.4), Phase C (§3.7).
 **Author:** Loap-3@narko, at the operator's request
 **Scope:** srv (`app_api/agent_open.rs`, `server/agent_handlers/template.rs`, `backend/reactive/handler.rs`), the MCP `Agents` tool (`crates/mcp/src/tools/agents_tool.rs`, `panes.rs`), the agent pane header.
 **Related:** `SPEC_AGENT_QUICK_FORK_NEW_TAB_2026_08_21.md` (the UI's fork), `SPEC_JEKT_DELIVERY_STATES_AND_MAILBOX_2026_10_01.md`, `SPEC_AGENT_COORDINATION_CHANNEL_2026_10_15.md`, the Warden Supervisor (`frontend/app/view/warden-supervisor/`).
@@ -14,7 +14,7 @@ The operator's words: "launch a fork (loap-4) in a new pane, sonnet, that you co
 
 Below, the planner is the **leader** and the agent it launches is its **worker**.
 
-**A worker is not a fork** (the operator, 2026-10-16: "the agent fork feature is different from the Leader/follower work, where an agent spawns other agent panes. in that latter, there is no history"). The pane's Fork (`SPEC_AGENT_QUICK_FORK_NEW_TAB_2026_08_21.md`) copies an agent with its whole conversation and records it in the source's lineage. A worker is built from the leader's definition but has no history and no lineage: it isn't among the leader's forks, and Claude's resume gate, which copies a conversation only into a definition recorded as a fork (`continuity_segments.rs`, `fork_source_head`), never gives it the leader's. #5020 called the action `fork` and made the worker through the fork RPC; #PRNUM renamed it `spawn` and builds the worker with `copy_definition(.., as_fork: false)`.
+**A worker is not a fork** (the operator, 2026-10-16: "the agent fork feature is different from the Leader/follower work, where an agent spawns other agent panes. in that latter, there is no history"). The pane's Fork (`SPEC_AGENT_QUICK_FORK_NEW_TAB_2026_08_21.md`) copies an agent with its whole conversation and records it in the source's lineage. A worker is built from the leader's definition but has no history and no lineage: it isn't among the leader's forks, and Claude's resume gate, which copies a conversation only into a definition recorded as a fork (`continuity_segments.rs`, `fork_source_head`), never gives it the leader's. #5020 called the action `fork` and made the worker through the fork RPC; #5023 renamed it `spawn` and builds the worker with `copy_definition(.., as_fork: false)`.
 
 ## 2. What exists, and what's missing
 
