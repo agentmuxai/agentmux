@@ -5,6 +5,7 @@
 // Each module corresponds to a category of commands ported from src-tauri/src/commands/.
 
 pub mod platform;
+pub mod desktop_settings;
 pub mod autostart;
 pub mod taskbar_attention;
 pub mod cli_login;
