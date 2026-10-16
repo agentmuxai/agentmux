@@ -284,18 +284,30 @@ export const MaintenanceSection = (): JSX.Element => {
                         </span>
                     </Show>
                     {/* Staged by srv: restart into it, once agents finish their turn. */}
-                    <Show when={download()?.state === "ready" && download()?.folder}>
+                    <Show when={download()?.state === "ready" && (download()?.folder || download()?.installer)}>
                         <span class="maintenance-icon maintenance-icon--update">↑</span>
-                        <span class="maintenance-row-text" title={download()?.folder}>
+                        <span class="maintenance-row-text" title={download()?.folder ?? download()?.installer}>
                             v{updaterVersion()} is ready
                         </span>
-                        <Button
-                            density="compact"
-                            class="maintenance-btn"
-                            onClick={() => getApi().openNativePath(download()!.folder!)}
-                        >
-                            Show folder
-                        </Button>
+                        <Show when={download()?.folder}>
+                            <Button
+                                density="compact"
+                                class="maintenance-btn"
+                                onClick={() => getApi().openNativePath(download()!.folder!)}
+                            >
+                                Show folder
+                            </Button>
+                        </Show>
+                        {/* An installer is shown in Explorer, never opened: that would run it. */}
+                        <Show when={download()?.installer}>
+                            <Button
+                                density="compact"
+                                class="maintenance-btn"
+                                onClick={() => getApi().revealInFileExplorer(download()!.installer!)}
+                            >
+                                Show installer
+                            </Button>
+                        </Show>
                         <Button
                             density="compact"
                             tone="accent"

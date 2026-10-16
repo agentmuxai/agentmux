@@ -114,7 +114,7 @@ CI publishes it (`.github/workflows/build-*.yml`).
 | Install | How it's recognised | Release file | Apply | Phase |
 |---|---|---|---|---|
 | Windows portable | `runtime/agentmux-portable.marker` beside srv, `agentmux.exe` above it | `agentmux-<v>-x64-portable.7z` | Unpack with Windows' `tar.exe` into `agentmux-<v>-x64-portable` next to the running folder (or under `updates/<v>/` in the running version's data folder when that can't be written); the launcher starts the new folder's launcher and exits. The old folder stays; Maintenance offers to delete old versions | 3a, 3b |
-| Windows `setup.exe` (Inno Setup, per-user by default, fixed AppId) | any other Windows install | `AgentMux-<v>-x64-setup.exe` | The launcher exits, the installer runs silently (`/VERYSILENT /SUPPRESSMSGBOXES`) and replaces the install in place; a `[Run]` entry for silent runs relaunches it. An all-users install asks Windows for permission | 3d |
+| Windows `setup.exe` (Inno Setup, per-user by default, fixed AppId) | Inno Setup's uninstaller (`unins000.exe`) beside `agentmux.exe` (the install has the portable's `runtime/` and marker too) | `AgentMux-<v>-x64-setup.exe` | Downloaded and verified into this version's `updates/<v>/`. After quit, a hidden `cmd` waits for the launcher to be gone, runs the installer silently (`/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-`, `/ALLUSERS` for an install under Program Files, which asks Windows for permission, else `/CURRENTUSER`), which replaces the install in place, then starts AgentMux again even if the installer failed, so the old version runs rather than none | 3d |
 | Microsoft Store (`.msix`, Store ID 9P9QCXNNCRK3) | under `WindowsApps` | — | The Store updates it; AgentMux can't replace its own files. "Update in the Store" opens the Store page, or asks the Store API to install it. The Store certifies a release after GitHub publishes it, so the chip defers to the Store | 3f |
 | macOS `.dmg` | inside an `.app` | `AgentMux_<v>_arm64.dmg` | Mount, check `codesign --verify` and the Gatekeeper assessment, replace `AgentMux.app` after quit, relaunch. The bundle id carries the version (`ai.agentmux.<channel>.<version>`), so check first whether macOS asks for permissions again after each upgrade | 3c |
 | Linux AppImage | `$APPIMAGE` | `AgentMux_<v>_amd64.AppImage` | Replace that file, relaunch | 3e |
@@ -261,8 +261,14 @@ Each phase is small and useful on its own.
 
      Only the last-closed window's tabs come back after any quit today
      (`session:last_topology`); restoring every window is a follow-up.
-   - **3c** macOS, **3d** `setup.exe`, **3e** AppImage and Linux portable,
-     **3f** the Store, **3g** `.deb`/`.rpm`.
+   - **3d**: `setup.exe` (§4.2): the same flow, with the installer as
+     what srv stages (`installer` in the download status; the startup line
+     names `installer:<path>`), which the launcher accepts only as that
+     version's installer in its own version's `updates/<v>/` on a
+     `setup.exe` install. The panel's **Show installer** reveals it in
+     Explorer; it never opens it.
+   - **3c** macOS, **3e** AppImage and Linux portable, **3f** the Store,
+     **3g** `.deb`/`.rpm`.
 4. **Agents.** `VersionStatus`, `RequestUpgrade` with the gate and the
    banner, the post-restart note, and the result to the asker.
 5. **Hardening and cleanup:** a signed `SHA256SUMS` release step, code

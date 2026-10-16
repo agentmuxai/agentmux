@@ -53,7 +53,7 @@ impl InstallKind {
     /// Whether AgentMux can download and stage this kind's upgrade itself.
     /// The others still open the release page (or the Store).
     pub fn can_download(&self) -> bool {
-        matches!(self, Self::WindowsPortable { .. })
+        matches!(self, Self::WindowsPortable { .. } | Self::WindowsSetup)
     }
 
     /// The release file that upgrades this kind to `version` on `arch`
@@ -181,6 +181,7 @@ mod tests {
             Some("AgentMux-0.59.27-1.x86_64.rpm")
         );
         assert!(p.can_download());
-        assert!(!InstallKind::WindowsSetup.can_download());
+        assert!(InstallKind::WindowsSetup.can_download());
+        assert!(!InstallKind::WindowsStore.can_download());
     }
 }

@@ -25,6 +25,8 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
+use agentmux_common::srv_stderr::UpgradeTarget;
+
 use crate::backend::update_check::{self, AppUpdateStatus, DownloadStatus};
 
 const WAIT_FOR_AGENTS: Duration = Duration::from_secs(10 * 60);
@@ -75,7 +77,7 @@ fn working_agents() -> u32 {
 }
 
 /// The staged release of the latest version, if it is still on disk.
-fn staged(status: &AppUpdateStatus) -> Result<(DownloadStatus, PathBuf), String> {
+fn staged(status: &AppUpdateStatus) -> Result<(DownloadStatus, UpgradeTarget), String> {
     let d = status
         .download
         .clone()
@@ -84,22 +86,30 @@ fn staged(status: &AppUpdateStatus) -> Result<(DownloadStatus, PathBuf), String>
     if !matches!(d.state.as_str(), "ready" | "waiting") {
         return Err("the new version isn't ready yet".into());
     }
-    let folder = PathBuf::from(d.folder.as_deref().ok_or("the new version isn't ready yet")?);
-    if !crate::backend::update_download::is_staged_portable(&folder, &d.version) {
-        return Err(format!("{} is gone; download the new version again", folder.display()));
+    // A portable's new folder, or a setup.exe install's installer.
+    if let Some(folder) = d.folder.as_deref().map(PathBuf::from) {
+        if !crate::backend::update_download::is_staged_portable(&folder, &d.version) {
+            return Err(format!("{} is gone; download the new version again", folder.display()));
+        }
+        let launcher = folder.join("agentmux.exe");
+        return Ok((d, UpgradeTarget::Launcher(launcher)));
     }
-    Ok((d, folder))
+    let installer = PathBuf::from(d.installer.as_deref().ok_or("the new version isn't ready yet")?);
+    if !installer.is_file() {
+        return Err(format!("{} is gone; download the new version again", installer.display()));
+    }
+    Ok((d, UpgradeTarget::Installer(installer)))
 }
 
 /// Start "Upgrade & restart".
 pub fn start(now: bool) -> Result<AppUpdateStatus, String> {
     let mut current = run_lock();
-    let (d, folder) = staged(&update_check::current_status())?;
+    let (d, target) = staged(&update_check::current_status())?;
     *current += 1;
     let run_id = *current;
     set(&d, "waiting", if now { 0 } else { working_agents() }, None);
     drop(current);
-    tokio::spawn(run(run_id, d, folder, now));
+    tokio::spawn(run(run_id, d, target, now));
     Ok(update_check::current_status())
 }
 
@@ -121,7 +131,7 @@ pub fn cancel() -> Result<AppUpdateStatus, String> {
     }
 }
 
-async fn run(run_id: u64, d: DownloadStatus, folder: PathBuf, now: bool) {
+async fn run(run_id: u64, d: DownloadStatus, target: UpgradeTarget, now: bool) {
     let deadline = tokio::time::Instant::now() + WAIT_FOR_AGENTS;
     loop {
         let busy = if now { 0 } else { working_agents() };
@@ -142,8 +152,8 @@ async fn run(run_id: u64, d: DownloadStatus, folder: PathBuf, now: bool) {
     }
     let asked = if_current(run_id, || {
         set(&d, "restarting", 0, None);
-        tracing::info!(version = %d.version, folder = %folder.display(), "upgrade: asking the launcher to restart");
-        eprintln!("{}", agentmux_common::srv_stderr::upgrade_line(&d.version, &folder.join("agentmux.exe")));
+        tracing::info!(version = %d.version, target = ?target, "upgrade: asking the launcher to restart");
+        eprintln!("{}", agentmux_common::srv_stderr::upgrade_line(&d.version, &target));
     });
     if !asked {
         return;
@@ -154,7 +164,7 @@ async fn run(run_id: u64, d: DownloadStatus, folder: PathBuf, now: bool) {
             &d,
             "ready",
             0,
-            Some("AgentMux didn't restart: the upgrade was declined or not answered in time, or this AgentMux can't restart itself. Try again, or start the new version from its folder.".into()),
+            Some("AgentMux didn't restart: the upgrade was declined or not answered in time, or this AgentMux can't restart itself. Try again, or install the new version from the release page.".into()),
         )
     });
 }
@@ -187,6 +197,7 @@ mod tests {
             total: 1,
             error: None,
             folder: folder.map(|f| f.display().to_string()),
+            installer: None,
             waiting_for: 0,
         }
     }
@@ -219,8 +230,16 @@ mod tests {
         std::fs::write(folder.join("agentmux.exe"), b"").unwrap();
         std::fs::write(folder.join("runtime/agentmux-portable.marker"), b"").unwrap();
         std::fs::write(folder.join("runtime/agentmux-0.59.27.exe"), b"").unwrap();
-        let (d, f) = staged(&status(Some(download("ready", Some(&folder))))).unwrap();
-        assert_eq!((d.version.as_str(), f), ("0.59.27", folder.clone()));
+        let (d, t) = staged(&status(Some(download("ready", Some(&folder))))).unwrap();
+        assert_eq!((d.version.as_str(), t), ("0.59.27", UpgradeTarget::Launcher(folder.join("agentmux.exe"))));
+
+        // A setup.exe install restarts through its downloaded installer.
+        let installer = dir.path().join("AgentMux-0.59.27-x64-setup.exe");
+        let mut setup = download("ready", None);
+        setup.installer = Some(installer.display().to_string());
+        assert!(staged(&status(Some(setup.clone()))).unwrap_err().contains("download the new version again"));
+        std::fs::write(&installer, b"x").unwrap();
+        assert_eq!(staged(&status(Some(setup))).unwrap().1, UpgradeTarget::Installer(installer));
         // A download of an older release than the latest doesn't count.
         let mut newer = status(Some(download("ready", Some(&folder))));
         newer.latest = Some("0.59.28".into());

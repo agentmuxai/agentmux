@@ -621,8 +621,8 @@ pub(crate) async fn run_windows(
     // "Upgrade & restart" (upgrade_restart.rs): srv's requests, the user's
     // Yes from the native dialog, and the launcher to start once quit.
     let mut upgrade_requests = crate::upgrade_restart::requests();
-    let (upgrade_yes_tx, mut upgrade_yes) = tokio::sync::mpsc::unbounded_channel::<std::path::PathBuf>();
-    let mut relaunch: Option<(std::path::PathBuf, std::time::Instant)> = None;
+    let (upgrade_yes_tx, mut upgrade_yes) = tokio::sync::mpsc::unbounded_channel::<crate::upgrade_restart::Staged>();
+    let mut relaunch: Option<(crate::upgrade_restart::Staged, std::time::Instant)> = None;
     let mut host_restarts: Vec<std::time::Instant> = Vec::new();
     // Separate budget for system-OOM host exits (memory-aware relaunch); see
     // mem_supervisor + SPEC_MEMORY_PRESSURE_SUPERVISION_2026_06_16.
@@ -695,20 +695,20 @@ pub(crate) async fn run_windows(
     let exit_code = loop {
         tokio::select! {
             Some(req) = upgrade_requests.recv() => {
-                match crate::upgrade_restart::staged_launcher(&req, launcher_exe_dir, version) {
-                    Ok(launcher) => {
-                        log(&format!("upgrade: srv asks to restart into {}; asking the user", launcher.display()));
+                match crate::upgrade_restart::staged(&req, launcher_exe_dir, &paths.data_dir, version) {
+                    Ok(staged) => {
+                        log(&format!("upgrade: srv asks to restart into {staged:?}; asking the user"));
                         let tx = upgrade_yes_tx.clone();
-                        crate::upgrade_restart::ask_then(req.version, launcher, move |l| {
-                            let _ = tx.send(l);
+                        crate::upgrade_restart::ask_then(req.version, staged, move |s| {
+                            let _ = tx.send(s);
                         });
                     }
                     Err(e) => log(&format!("upgrade: refused srv's request: {e}")),
                 }
             }
-            Some(launcher) = upgrade_yes.recv() => {
-                log(&format!("upgrade: the user said yes; quitting to start {}", launcher.display()));
-                relaunch = Some((launcher, std::time::Instant::now()));
+            Some(staged) = upgrade_yes.recv() => {
+                log(&format!("upgrade: the user said yes; quitting to restart into {staged:?}"));
+                relaunch = Some((staged, std::time::Instant::now()));
                 let (data_dir, hash) = (paths.data_dir.clone(), dir_hash.clone());
                 tokio::task::spawn_blocking(move || crate::tray::forward_tray_cmd(&data_dir, &hash, "quit_app"));
             }
@@ -1284,15 +1284,12 @@ pub(crate) async fn run_windows(
     drop(job);
     // srv has stopped, so the new version copies complete data on its first
     // start. Only after a clean quit the user confirmed recently.
-    if let Some((launcher, at)) = relaunch.filter(|(_, at)| exit_code == 0 && crate::upgrade_restart::still_confirmed(*at)) {
-        match crate::upgrade_restart::relaunch(&launcher) {
-            Ok(()) => log(&format!("upgrade: started {} (confirmed {}s ago)", launcher.display(), at.elapsed().as_secs())),
+    if let Some((staged, at)) = relaunch.filter(|(_, at)| exit_code == 0 && crate::upgrade_restart::still_confirmed(*at)) {
+        match crate::upgrade_restart::relaunch(&staged) {
+            Ok(()) => log(&format!("upgrade: started {staged:?} (confirmed {}s ago)", at.elapsed().as_secs())),
             Err(e) => {
-                log(&format!("upgrade: couldn't start {}: {e}", launcher.display()));
-                crate::show_fatal_dialog(
-                    "AgentMux upgrade",
-                    &format!("AgentMux couldn't start the new version:\n{}\n\n{e}", launcher.display()),
-                );
+                log(&format!("upgrade: couldn't start {staged:?}: {e}"));
+                crate::show_fatal_dialog("AgentMux upgrade", &format!("AgentMux couldn't start the new version:\n{staged:?}\n\n{e}"));
             }
         }
     }
