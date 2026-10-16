@@ -276,9 +276,19 @@ pub fn still_confirmed(at: Instant) -> bool {
 }
 
 /// `path` as a PowerShell single-quoted string: nothing in it is expanded
-/// (no `$`, no `%VAR%`), and a `'` is written twice.
+/// (no `$`, no `%VAR%`). Every character PowerShell takes as a single quote
+/// is written twice: `'` and the typographic ones (U+2018 to U+201B), which
+/// a user name can hold.
 fn ps_quote(path: &Path) -> String {
-    format!("'{}'", path.display().to_string().replace('\'', "''"))
+    let mut out = String::from("'");
+    for c in path.display().to_string().chars() {
+        if matches!(c, '\'' | '\u{2018}' | '\u{2019}' | '\u{201A}' | '\u{201B}') {
+            out.push(c);
+        }
+        out.push(c);
+    }
+    out.push('\'');
+    out
 }
 
 /// The hidden PowerShell that upgrades a `setup.exe` install: wait a few
@@ -427,6 +437,9 @@ mod tests {
         // Single-quoted: neither %TEMP% nor $x is expanded; a ' is doubled.
         assert!(script.contains("-FilePath 'C:/Users/A %TEMP% $x/AgentMux-0.59.27-x64-setup.exe' -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-' -Wait; "), "{script}");
         assert!(script.contains("Start-Process -FilePath 'C:/Apps/O''Neil"), "{script}");
+        // Typographic quotes close a PowerShell string too: doubled as well.
+        assert_eq!(ps_quote(Path::new("C:/Users/O\u{2019}Neil")), "'C:/Users/O\u{2019}\u{2019}Neil'");
+        assert_eq!(ps_quote(Path::new("a\u{2018}b\u{201A}c\u{201B}")), "'a\u{2018}\u{2018}b\u{201A}\u{201A}c\u{201B}\u{201B}'");
         // The install keeps its own mode (UsePreviousPrivileges).
         assert!(!script.contains("ALLUSERS") && !script.contains("CURRENTUSER"));
     }
