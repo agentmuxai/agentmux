@@ -6,8 +6,8 @@ mod core;
 mod skills;
 mod history;
 mod template;
-// The fork both the UI and the `Agents` `fork` action make (app_api/agent_fork.rs).
-pub(crate) use template::fork_definition;
+// The fork the UI makes, and the new agent the `Agents` `spawn` action makes (app_api/agent_spawn.rs).
+pub(crate) use template::copy_definition;
 mod identity;
 mod instance;
 mod session;

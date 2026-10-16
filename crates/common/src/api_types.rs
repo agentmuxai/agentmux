@@ -903,14 +903,15 @@ pub struct RequestUpgradeRequest {
     pub version: Option<String>,
 }
 
-/// `POST /api/v1/agent/fork` — backs the `Agents` tool's `fork`
+/// `POST /api/v1/agent/spawn` — backs the `Agents` tool's `spawn`
 /// (docs/specs/SPEC_AGENT_WORKERS_2026_10_15.md §3.1): the calling agent, the
-/// leader, launches a worker, a fork of itself in a pane next to its own.
+/// leader, opens a worker: a new agent built from its own definition (not a
+/// fork: no history), in a pane next to its own.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ForkAgentRequest {
+pub struct SpawnAgentRequest {
     #[serde(flatten)]
     pub auth: UiAutomationAuth,
-    /// The worker's name; absent, the next free `Name #N` of the lineage.
+    /// The worker's name; absent, the first free "<leader> worker N".
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     /// The worker's model and effort; absent, the leader's.
@@ -918,6 +919,10 @@ pub struct ForkAgentRequest {
     pub model: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effort: Option<String>,
+    /// The account to run the worker on, by id or name/email; absent, the
+    /// leader's, or another signed-in one when the leader's can't run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account: Option<String>,
     /// The worker's task, its first message. srv shows its start to the user
     /// when it asks; the MCP server sends it, signed as the leader.
     pub brief: String,

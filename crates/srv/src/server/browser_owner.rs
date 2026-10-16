@@ -144,7 +144,7 @@ pub(crate) fn srv_only_keys() -> [&'static str; 7] {
         crate::server::browser_popup::POPUP_OF_META_KEY,
         crate::server::browser_popup::POPUP_FROM_META_KEY,
         crate::server::browser_popup::POPUP_WINDOWS_META_KEY,
-        crate::server::app_api::agent_fork::COACHED_BY_META_KEY,
+        crate::server::app_api::agent_spawn::COACHED_BY_META_KEY,
     ]
 }
 
@@ -183,7 +183,7 @@ pub(crate) fn guard_client_meta_write(oref: &str, meta: &MetaMapType) -> Result<
         crate::server::browser_popup::POPUP_OF_META_KEY,
         crate::server::browser_popup::POPUP_FROM_META_KEY,
         crate::server::browser_popup::POPUP_WINDOWS_META_KEY,
-        crate::server::app_api::agent_fork::COACHED_BY_META_KEY,
+        crate::server::app_api::agent_spawn::COACHED_BY_META_KEY,
     ] {
         if meta.contains_key(key) {
             return Err(format!("{key} is written only by AgentMux itself"));

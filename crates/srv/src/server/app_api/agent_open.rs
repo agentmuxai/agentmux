@@ -352,7 +352,7 @@ pub(crate) async fn open_agent_into_block(
     .await
 }
 
-/// `extra_meta` goes on a new block as it's created (srv-only keys: `agent_fork.rs`).
+/// `extra_meta` goes on a new block as it's created (srv-only keys: `agent_spawn.rs`).
 pub(super) async fn open_agent_inner(
     state: &AppState,
     cmd: CommandAgentOpenData,
