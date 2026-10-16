@@ -199,7 +199,6 @@ pub fn seed_agents(mstore: &Arc<Store>) -> Result<SeedReport, StoreError> {
             container_name: String::new(),
             use_ambient_login: 0,
             model_vendor_base_url: String::new(), // manifest doesn't declare this yet
-            auto_continue_enabled: 0,
             memory_id: String::new(),
             conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
         };
@@ -466,7 +465,6 @@ fn reseed_if_needed(
             container_name: String::new(),
             use_ambient_login: 0,
             model_vendor_base_url: String::new(), // manifest doesn't declare this yet
-            auto_continue_enabled: 0,
             memory_id: String::new(),
             conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
         };
@@ -577,7 +575,6 @@ mod tests {
             container_volumes: "[]".to_string(),
             container_name: String::new(),
             use_ambient_login: 0,
-            auto_continue_enabled: 0,
             model_vendor_base_url: String::new(),
             memory_id: String::new(),
             conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),

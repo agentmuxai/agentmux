@@ -320,7 +320,6 @@
             container_volumes: "[]".to_string(),
             container_name: String::new(),
             use_ambient_login: 0,
-            auto_continue_enabled: 0,
             model_vendor_base_url: String::new(),
             memory_id: String::new(),
         };
@@ -391,7 +390,6 @@
             container_volumes: "[]".to_string(),
             container_name: String::new(),
             use_ambient_login: 0,
-            auto_continue_enabled: 0,
             model_vendor_base_url: String::new(),
             memory_id: String::new(),
         };
@@ -457,7 +455,6 @@
             container_volumes: "[]".to_string(),
             container_name: String::new(),
             use_ambient_login: 0,
-            auto_continue_enabled: 0,
             model_vendor_base_url: String::new(),
             memory_id: String::new(),
         }
@@ -3572,7 +3569,6 @@
             container_volumes: "[]".to_string(),
             container_name: String::new(),
             use_ambient_login: 0,
-            auto_continue_enabled: 0,
             model_vendor_base_url: String::new(),
             memory_id: String::new(),
         };
@@ -3616,7 +3612,6 @@
             container_volumes: "[]".to_string(),
             container_name: String::new(),
             use_ambient_login: 0,
-            auto_continue_enabled: 0,
             model_vendor_base_url: String::new(),
             memory_id: String::new(),
         };
@@ -3666,7 +3661,6 @@
             container_volumes: "[]".to_string(),
             container_name: String::new(),
             use_ambient_login: 0,
-            auto_continue_enabled: 0,
             model_vendor_base_url: String::new(),
             memory_id: String::new(),
         };
@@ -3717,7 +3711,6 @@
             container_volumes: "[]".to_string(),
             container_name: String::new(),
             use_ambient_login: 0,
-            auto_continue_enabled: 0,
             model_vendor_base_url: String::new(),
             memory_id: String::new(),
         };
@@ -3765,7 +3758,6 @@
             container_volumes: "[]".to_string(),
             container_name: String::new(),
             use_ambient_login: 0,
-            auto_continue_enabled: 0,
             model_vendor_base_url: String::new(),
             memory_id: String::new(),
         };
@@ -3807,7 +3799,6 @@
             container_volumes: "[]".to_string(),
             container_name: String::new(),
             use_ambient_login: 0,
-            auto_continue_enabled: 0,
             model_vendor_base_url: String::new(),
             memory_id: String::new(),
         };
@@ -4541,7 +4532,6 @@
             container_volumes: "[]".to_string(),
             container_name: String::new(),
             use_ambient_login: 0,
-            auto_continue_enabled: 0,
             model_vendor_base_url: String::new(),
             memory_id: String::new(),
         };
@@ -4648,7 +4638,6 @@
             container_volumes: "[]".to_string(),
             container_name: String::new(),
             use_ambient_login: 0,
-            auto_continue_enabled: 0,
             model_vendor_base_url: String::new(),
             memory_id: String::new(),
         };
@@ -4784,7 +4773,6 @@
             container_volumes: "[]".to_string(),
             container_name: String::new(),
             use_ambient_login: 0,
-            auto_continue_enabled: 0,
             model_vendor_base_url: String::new(),
             memory_id: String::new(),
         };
@@ -4883,7 +4871,6 @@
             container_volumes: "[]".to_string(),
             container_name: String::new(),
             use_ambient_login: 0,
-            auto_continue_enabled: 0,
             model_vendor_base_url: String::new(),
             memory_id: String::new(),
         };
@@ -4944,7 +4931,6 @@
             container_volumes: "[]".to_string(),
             container_name: String::new(),
             use_ambient_login: 0,
-            auto_continue_enabled: 0,
             model_vendor_base_url: String::new(),
             memory_id: String::new(),
         };
@@ -5003,7 +4989,6 @@
             container_volumes: "[]".to_string(),
             container_name: String::new(),
             use_ambient_login: 0,
-            auto_continue_enabled: 0,
             model_vendor_base_url: String::new(),
             memory_id: String::new(),
         };
@@ -5074,7 +5059,6 @@
             container_volumes: "[]".to_string(),
             container_name: String::new(),
             use_ambient_login: 0,
-            auto_continue_enabled: 0,
             model_vendor_base_url: String::new(),
             memory_id: String::new(),
             };
@@ -5120,7 +5104,6 @@
             container_volumes: "[]".to_string(),
             container_name: String::new(),
             use_ambient_login: 0,
-            auto_continue_enabled: 0,
             model_vendor_base_url: String::new(),
             memory_id: String::new(),
         };
@@ -5202,7 +5185,6 @@
             container_volumes: "[]".to_string(),
             container_name: String::new(),
             use_ambient_login: 0,
-            auto_continue_enabled: 0,
             model_vendor_base_url: String::new(),
             memory_id: String::new(),
         };

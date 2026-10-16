@@ -227,7 +227,11 @@ pub fn register_notify_handlers(engine: &Arc<WshRpcEngine>, state: &AppState, co
                 // Turn start/finish come from srv's controller status (see
                 // router `TurnStatus`), not from the renderer.
                 NotifyPaneEvent::TurnStarted | NotifyPaneEvent::TurnCompleted | NotifyPaneEvent::TurnErrored => {}
-                NotifyPaneEvent::TurnStopped => r.turn_stopped_nonblocking(&p.block_id),
+                NotifyPaneEvent::TurnStopped => {
+                    // The Swarm Supervisor must not continue a turn the user stopped.
+                    crate::backend::supervisor::note_user_stop(&p.block_id);
+                    r.turn_stopped_nonblocking(&p.block_id)
+                }
                 NotifyPaneEvent::InputResolved => r.resolve_nonblocking(&p.block_id, Family::Input),
                 NotifyPaneEvent::InputWaiting => {
                     r.input_waiting_nonblocking(&p.block_id, p.question, p.question_count.unwrap_or(0) as usize)

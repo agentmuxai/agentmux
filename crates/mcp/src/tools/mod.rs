@@ -192,7 +192,6 @@ const REPLACED: &[(&str, &str)] = &[
     ("GetAgentTranscript", "Agents with action \"transcript\""),
     ("OpenAgent", "Agents with action \"open\""),
     ("SearchHistory", "Agents with action \"search_history\""),
-    ("SupervisorNudge", "Agents with action \"nudge\" (and decision)"),
     ("SendMessage", "Message with action \"send\""),
     ("FleetBroadcast", "Message with action \"broadcast\""),
     ("PostToChannel", "Message with action \"post\""),

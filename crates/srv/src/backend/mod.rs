@@ -134,6 +134,7 @@ pub mod upgrade_notice;
 pub mod upgrade_request;
 pub mod storage;
 pub mod subagent_watcher;
+pub mod supervisor;
 pub mod userinput;
 pub mod viewer;
 pub mod text_encoding;

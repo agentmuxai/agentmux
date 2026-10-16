@@ -35,6 +35,7 @@ import {
 import { buildMemoryReinjectionNodeFromReplay, isCatchUpMessage } from "./memory-reinjection";
 import { splitAttachedImages } from "./attachments/attached-images";
 import { toolDetailOf, toolIcon } from "./tool-meta/tool-descriptors";
+import { parseSupervisorHeader } from "@/app/store/supervisor";
 
 /**
  * Detects the auto-generated startup payload by its literal first
@@ -879,8 +880,10 @@ export class ClaudeCodeStreamParser {
         // A Swarm broadcast: show the user's words with a "Broadcast" note, not the
         // header line srv put in front of them.
         const broadcast = parseBroadcastHeader(event.message);
-        const messageText = broadcast ? broadcast.body : event.message;
-        const isStartup = !broadcast && STARTUP_HEADING_RE.test(event.message);
+        // A Swarm Supervisor continuation: the same, with a "Supervisor" note.
+        const supervisor = broadcast ? null : parseSupervisorHeader(event.message);
+        const messageText = broadcast ? broadcast.body : supervisor ? supervisor.body : event.message;
+        const isStartup = !broadcast && !supervisor && STARTUP_HEADING_RE.test(event.message);
         // A message sent with images carries the backend's <attached_images>
         // list; show the user's own text with thumbnails instead.
         const { text, attachments } = splitAttachedImages(messageText);
@@ -892,6 +895,7 @@ export class ClaudeCodeStreamParser {
             ...(broadcast
                 ? { broadcast: { ...(broadcast.recipients ? { recipients: broadcast.recipients } : {}), ...(broadcast.msgId ? { msgId: broadcast.msgId } : {}) } }
                 : {}),
+            ...(supervisor ? { supervisor: { mode: supervisor.mode, n: supervisor.n, of: supervisor.of } } : {}),
             ...(event.fromDevice ? { fromDevice: event.fromDevice } : {}),
             // Replay: no invented "now" — parseHistoryLines fills the line's
             // stored receive time (ReAgent P1, #3620).

@@ -89,6 +89,14 @@ describe("unavailableReason", () => {
         expect(unavailableReason(remote.get("blk-loap")!, "stop")).toBeNull();
         expect(unavailableReason(remote.get("blk-loap")!, "broadcast")).toBeNull();
     });
+
+    // Each AgentMux supervises its own agents (SPEC_SWARM_SUPERVISOR_2026_10_16.md §2.1).
+    it("supervises this AgentMux's own agents only, even another channel on this machine", () => {
+        const local = localFleetTargets([{ blockId: "blk-korp", agentName: "Korp" }]).get("blk-korp")!;
+        expect(unavailableReason(local, "supervise")).toBeNull();
+        expect(unavailableReason(remote.get("blk-loap")!, "supervise")).toMatch(/^can't supervise/);
+        expect(unavailableReason(remote.get(MANOZ)!, "supervise")).toMatch(/^can't supervise/);
+    });
 });
 
 describe("partitionTargets", () => {

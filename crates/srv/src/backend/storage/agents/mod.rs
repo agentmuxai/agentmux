@@ -167,15 +167,6 @@ pub struct AgentDefinition {
     /// (known limitation, not wired into the registry mirror).
     #[serde(default)]
     pub model_vendor_base_url: String,
-    /// Per-agent opt-in: when non-zero, a running Warden Supervisor watcher
-    /// agent is permitted to auto-continue this agent's session on
-    /// turn-end (subject to a server-side consecutive-nudge ceiling).
-    /// Default 0 = opt-in required. Schema v17. Toggled from the Warden Supervisor
-    /// panel. See
-    /// docs/analysis/ANALYSIS_WARDEN_AUTO_CONTROLLER_CONTINUATION_WATCHER_2026_08_12.md.
-    #[serde(default)]
-    #[ts(type = "number")]
-    pub auto_continue_enabled: i64,
     /// The agent's own dedicated ABF bundle (`db_bundles.id`). Distinct from
     /// `AgentInstance.memory_id` (a specific *launch*'s bundle, which can
     /// still be pointed at a different bundle on purpose — this is just the
@@ -389,7 +380,6 @@ pub(crate) fn test_agent_def(
         container_name: String::new(),
         use_ambient_login: 0,
         model_vendor_base_url: model_vendor_base_url.to_string(),
-        auto_continue_enabled: 0,
         memory_id: String::new(),
         conversation_visibility: default_conversation_visibility(),
     }

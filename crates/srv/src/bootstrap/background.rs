@@ -152,6 +152,16 @@ pub fn spawn_background_subsystems(
         ).await;
     });
 
+    // The Swarm Supervisor: judges supervised agents' turns as they end and
+    // keeps them going (backend/supervisor). Watches the broker's turn ledger,
+    // so it needs no AppState either.
+    backend::supervisor::watcher::start(
+        Arc::clone(mstore),
+        Arc::clone(filestore),
+        event_bus.clone(),
+        broker.clone(),
+    );
+
     // Push each agent's todo checklist + in-flight tool (swarm rows under the
     // agent name). Separate loop from the summary above deliberately: this one
     // is a tail-read + JSON parse with no model call, so it sweeps every 3s

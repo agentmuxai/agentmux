@@ -80,8 +80,8 @@ pub struct InjectionRequest {
     /// (`server/reactive.rs`, which has `AppState::mstore`) may set it,
     /// after independently looking up the claimed `source_agent`'s stored
     /// key and verifying `jekt_sig` against it, before handing the request
-    /// to `Handler::inject_message` (which has no `Store` access "by
-    /// design" — see `record_supervisor_decision`'s doc comment for why).
+    /// to `Handler::inject_message` (which has no `Store` access by design:
+    /// this module doesn't depend on `backend::storage`).
     /// `None` = not checked (network-tier messages are already
     /// unconditionally sensitive regardless of signature; or the claimed
     /// `source_agent` has never had a key minted, so there's nothing to
@@ -623,19 +623,16 @@ pub struct AuditLogEntry {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error_message: Option<String>,
     pub request_id: String,
-    /// "nudge_sent" | "nudge_failed" | "nudge_declined" — present only for
-    /// Warden Supervisor-originated entries (see
-    /// ANALYSIS_WARDEN_AUTO_CONTROLLER_CONTINUATION_WATCHER_2026_08_12.md);
-    /// absent for ordinary jekt injections. "nudge_sent" only when delivery
-    /// actually succeeded; "nudge_failed" when the Supervisor attempted a
-    /// nudge but delivery itself failed (rate limit, unavailable
-    /// controller, etc — see `entry.success`/`error_message` for why). A
-    /// "nudge_declined" entry has no corresponding delivery attempt at
-    /// all — this field is the ONLY record that decision ever existed.
+    /// What kind of delivery this was, when it wasn't an ordinary jekt:
+    /// "held_delivered" | "held_retry" (a held jekt's replay),
+    /// "identity-mismatch" (refused by the recipient identity guard),
+    /// "system_note" (srv's own `[AgentMux]` note). Absent for an ordinary
+    /// jekt injection.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub outcome: Option<String>,
-    /// The Supervisor's stated reasoning, populated alongside `outcome`.
-    /// Not used by ordinary (non-Supervisor) jekt entries.
+    /// A caller's free-text note on a fleet or pane action
+    /// (`ReactiveHandler::log_fleet_action_audit`, e.g. `ClosePane`'s
+    /// `reason`). Absent for jekt deliveries.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
     /// "delivery" (default — an inject_message attempt, the only kind this
@@ -674,27 +671,6 @@ pub struct AuditLogEntry {
 
 fn default_event_kind() -> String {
     "delivery".to_string()
-}
-
-/// A Warden Supervisor watcher agent's decision about a target agent that
-/// just ended its turn: nudge it to continue, or decline (e.g. the target
-/// isn't opted in, or the Supervisor judged it genuinely done/blocked).
-/// See `Handler::record_supervisor_decision` and
-/// ANALYSIS_WARDEN_AUTO_CONTROLLER_CONTINUATION_WATCHER_2026_08_12.md.
-#[derive(Debug, Clone, Copy)]
-pub enum SupervisorAction {
-    /// Deliver a fixed, narrow continuation message to the target as an
-    /// ordinary jekt (via the same path `inject_message` uses), then log
-    /// the decision. Deliberately carries no caller-supplied text — the
-    /// message itself is a constant (`handler::NUDGE_MESSAGE`), not
-    /// composed by the calling Supervisor agent. See
-    /// ANALYSIS_WARDEN_AUTO_CONTROLLER_CONTINUATION_WATCHER_2026_08_12.md
-    /// §4.3 ("never a free-form instruction the watcher composes
-    /// per-situation") — reagentx P1 on PR #2557 flagged an earlier
-    /// version of this type that accepted arbitrary text.
-    Nudge,
-    /// No delivery — just log that the Supervisor decided not to nudge.
-    Decline,
 }
 
 /// Poller configuration for AgentMux cloud service.

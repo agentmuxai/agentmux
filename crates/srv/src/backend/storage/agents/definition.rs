@@ -265,7 +265,7 @@ impl Store {
                 slug, branch_label, working_directory,
                 created_at, updated_at, is_seeded, user_hidden,
                 container_image, container_volumes, container_name,
-                use_ambient_login, model_vendor_base_url, auto_continue_enabled,
+                use_ambient_login, model_vendor_base_url,
                 default_memory_id, conversation_visibility
              ) VALUES (
                 ?1, ?2, ?3, ?4,
@@ -276,8 +276,8 @@ impl Store {
                 ?17, ?18, ?19,
                 ?20, ?21, ?22, ?23,
                 ?24, ?25, ?26,
-                ?27, ?28, ?29,
-                ?30, ?31
+                ?27, ?28,
+                ?29, ?30
              )",
             params![
                 agent.id,
@@ -317,7 +317,6 @@ impl Store {
                 agent.container_name,
                 agent.use_ambient_login,
                 agent.model_vendor_base_url,
-                agent.auto_continue_enabled,
                 agent.memory_id,
                 agent.conversation_visibility,
             ],
@@ -472,7 +471,7 @@ impl Store {
                     slug, branch_label, working_directory,
                     created_at, updated_at, is_seeded, user_hidden,
                     container_image, container_volumes, container_name,
-                    use_ambient_login, model_vendor_base_url, auto_continue_enabled,
+                    use_ambient_login, model_vendor_base_url,
                     default_memory_id, conversation_visibility
                  ) VALUES (
                     ?1, ?2, ?3, ?4,
@@ -483,8 +482,8 @@ impl Store {
                     ?17, ?18, ?19,
                     ?20, ?21, ?22, ?23,
                     ?24, ?25, ?26,
-                    ?27, ?28, ?29,
-                    ?30, ?31
+                    ?27, ?28,
+                    ?29, ?30
                  )",
                 params![
                     agent.id,
@@ -515,7 +514,6 @@ impl Store {
                     agent.container_name,
                     agent.use_ambient_login,
                     agent.model_vendor_base_url,
-                    agent.auto_continue_enabled,
                     agent.memory_id,
                     agent.conversation_visibility,
                 ],
@@ -838,7 +836,7 @@ impl Store {
                  agent_type=?11, environment=?12, agent_bus_id=?13, accounts=?14, updated_at=?15,
                  container_image=?17, container_volumes=?18, container_name=?19,
                  use_ambient_login=?20, branch_label=?21, model_vendor_base_url=?22,
-                 auto_continue_enabled=?23, conversation_visibility=?24
+                 conversation_visibility=?23
                  WHERE id=?16",
                 params![
                     agent.name,
@@ -863,7 +861,6 @@ impl Store {
                     agent.use_ambient_login,
                     agent.branch_label,
                     agent.model_vendor_base_url,
-                    agent.auto_continue_enabled,
                     agent.conversation_visibility,
                 ],
             )?

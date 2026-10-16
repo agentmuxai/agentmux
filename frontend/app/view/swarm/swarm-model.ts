@@ -5,9 +5,13 @@ import { RpcApi, type BackgroundTaskView, type FleetActionResult, type FleetStag
 import type { AmbientOutcomes } from "@/app/store/ambient-outcomes";
 import {
     localFleetTargets,
+    EMPTY_FLEET_RESULT,
+    labelsOf,
     partitionTargets,
     remoteFleetTargets,
-    targetLabel,
+    withUnreachable,
+    type FleetAction,
+    type FleetResultEntry,
     type FleetTargetInfo,
 } from "./swarm-fleet-targets";
 import { TabRpcClient } from "@/app/store/rpc-util";
@@ -19,6 +23,7 @@ import { BlockService } from "@/app/store/services";
 import { readSwarmSummary } from "@/app/store/activitySummary";
 import { contextReadingFromMeta } from "@/app/store/agent-pane-state/context-reading";
 import { resolveSwarmLine, type SwarmLine } from "@/app/store/swarm-line";
+import type { SupervisorMode } from "@/types/rpc/SupervisorMode";
 import { remoteSections, type SwarmOtherInstances } from "./swarm-remote";
 import { createSignal, type Accessor, type Setter } from "solid-js";
 import { groupBackgroundTasks, type AgentBackgroundTasks } from "./swarm-background";
@@ -441,26 +446,7 @@ export function hasRenderableBlock<T>(block: T | null | undefined, isLoading: bo
     return block != null;
 }
 
-/** The last broadcast or stop, with a name for every target so the result
- *  panel can say which agent on which machine, not a block id. */
-export interface FleetResultEntry {
-    action: "broadcast" | "bulk-stop";
-    result: FleetActionResult;
-    labels: Record<string, string>;
-}
-
-const EMPTY_FLEET_RESULT: FleetActionResult = { succeeded: [], failed: [], aborted_early: false };
-
-/** `result` plus the targets the action could not reach, each with its reason,
- *  so a target is never silently left out. */
-function withUnreachable(result: FleetActionResult, unreachable: { key: string; reason: string }[]): FleetActionResult {
-    if (unreachable.length === 0) return result;
-    return { ...result, failed: [...result.failed, ...unreachable.map((u) => ({ id: u.key, error: u.reason }))] };
-}
-
-function labelsOf(keys: string[], known: Map<string, FleetTargetInfo>): Record<string, string> {
-    return Object.fromEntries(keys.map((key) => [key, targetLabel(key, known)]));
-}
+export type { FleetResultEntry } from "./swarm-fleet-targets";
 
 /**
  * Rows eligible for the bulk "Clear completed" action — every terminal-
@@ -1656,19 +1642,8 @@ export class SwarmViewModel {
 
     /** Non-destructive: executes immediately, no confirmation — see spec
      *  §5.2/§3 (reserve blocking confirms for irreversible actions). */
-    async broadcastToSelection(message: string): Promise<FleetActionResult> {
-        const selected = Array.from(this.selectedBlockIdsAtom());
-        const known = this.fleetTargets();
-        const { reachable: targets, unreachable } = partitionTargets(selected, "broadcast", known);
-        this.setFleetActionInFlight(true);
-        try {
-            const sent = targets.length > 0 ? await RpcApi.FleetBroadcastCommand(TabRpcClient, { targets, message }) : EMPTY_FLEET_RESULT;
-            const result = withUnreachable(sent, unreachable);
-            this.setLastFleetResult({ action: "broadcast", result, labels: labelsOf(selected, known) });
-            return result;
-        } finally {
-            this.setFleetActionInFlight(false);
-        }
+    broadcastToSelection(message: string): Promise<FleetActionResult> {
+        return this.runFleetAction("broadcast", "broadcast", (targets) => RpcApi.FleetBroadcastCommand(TabRpcClient, { targets, message }));
     }
 
     /** Destructive — callers must confirm with the user first, showing the
@@ -1677,18 +1652,38 @@ export class SwarmViewModel {
      *  completion regardless of outcome, since the stopped panes are no
      *  longer a meaningful target set to keep checked. */
     async bulkStopSelection(opts?: { signal?: string; staged?: FleetStagePlan }): Promise<FleetActionResult> {
+        try {
+            return await this.runFleetAction("bulk-stop", "stop", (targets) => RpcApi.FleetBulkStopCommand(TabRpcClient, { targets, ...opts }));
+        } finally {
+            this.clearSelection();
+        }
+    }
+
+    /** Sets the Supervisor's mode on the selection. Not destructive, so no
+     *  confirmation, like broadcast; every target's outcome is reported (an
+     *  agent that isn't Claude, or isn't on this AgentMux, says why). */
+    superviseSelection(mode: SupervisorMode): Promise<FleetActionResult> {
+        return this.runFleetAction("supervisor", "supervise", (targets) => RpcApi.SupervisorSetModeCommand(TabRpcClient, { targets, mode }));
+    }
+
+    /** One fleet action on the selection: the targets it can reach go to
+     *  `call`, the rest are reported as failed with the reason, and the result
+     *  panel shows every target by name. */
+    private async runFleetAction(
+        action: FleetResultEntry["action"],
+        reach: FleetAction,
+        call: (targets: string[]) => Promise<FleetActionResult>
+    ): Promise<FleetActionResult> {
         const selected = Array.from(this.selectedBlockIdsAtom());
         const known = this.fleetTargets();
-        const { reachable: targets, unreachable } = partitionTargets(selected, "stop", known);
+        const { reachable: targets, unreachable } = partitionTargets(selected, reach, known);
         this.setFleetActionInFlight(true);
         try {
-            const stopped = targets.length > 0 ? await RpcApi.FleetBulkStopCommand(TabRpcClient, { targets, ...opts }) : EMPTY_FLEET_RESULT;
-            const result = withUnreachable(stopped, unreachable);
-            this.setLastFleetResult({ action: "bulk-stop", result, labels: labelsOf(selected, known) });
+            const result = withUnreachable(targets.length > 0 ? await call(targets) : EMPTY_FLEET_RESULT, unreachable);
+            this.setLastFleetResult({ action, result, labels: labelsOf(selected, known) });
             return result;
         } finally {
             this.setFleetActionInFlight(false);
-            this.clearSelection();
         }
     }
 

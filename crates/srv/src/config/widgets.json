@@ -130,7 +130,7 @@
         "display:pinned": false,
         "icon": "shield-halved",
         "label": "Warden",
-        "description": "Monitor and control AgentMux instances across Host / LAN / Internet layers, plus a jekt audit trail and opt-in continuation Supervisor (spec: SPEC_WARDEN_WIDGET_2026-05-25.md)",
+        "description": "Monitor and control AgentMux instances across Host / LAN / Internet layers, plus a jekt audit trail (spec: SPEC_WARDEN_WIDGET_2026-05-25.md)",
         "blockdef": {
             "meta": {
                 "view": "warden"

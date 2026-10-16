@@ -5,8 +5,8 @@
 //! doing, opening them) and the caller's own history, with an `action`
 //! (docs/specs/SPEC_MUXAPI_TOOL_CONSOLIDATION_2026_10_15.md §4.2, slice S4).
 //! It replaces DiscoverAgents, FleetList (the same call), ListConversations,
-//! GetAgentTranscript, OpenAgent, SearchHistory and SupervisorNudge; their
-//! handlers (fleet.rs, history.rs, panes.rs) run each action unchanged.
+//! GetAgentTranscript, OpenAgent and SearchHistory; their handlers
+//! (fleet.rs, history.rs, panes.rs) run each action unchanged.
 //! `spawn` is its own (SPEC_AGENT_WORKERS_2026_10_15.md §3.1): srv launches
 //! the worker, then this process sends it the brief, signed as the caller.
 
@@ -23,9 +23,6 @@ pub(super) const ACTS: &[Act] = &[
     Act { action: "spawn", tool: "SpawnAgent", rename: &[] },
     Act { action: "workers", tool: "AgentWorkers", rename: &[] },
     Act { action: "search_history", tool: "SearchHistory", rename: &[] },
-    // The handler's own `action` is the decision: `pick` takes Agents'
-    // `action` out before it renames.
-    Act { action: "nudge", tool: "SupervisorNudge", rename: &[("agent", "target_agent"), ("decision", "action")] },
 ];
 
 pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
@@ -41,7 +38,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 );
             }
             let result = match act.tool {
-                "DiscoverAgents" | "SupervisorNudge" => fleet::call(act.tool, &args, cx).await,
+                "DiscoverAgents" => fleet::call(act.tool, &args, cx).await,
                 "OpenAgent" => panes::call(act.tool, &args, cx).await,
                 "SpawnAgent" => spawn(&args, cx).await,
                 "AgentWorkers" => workers(cx).await,
@@ -161,10 +158,7 @@ mod tests {
     }
 
     #[test]
-    fn nudge_and_open_take_the_agent_as_their_handlers_name_it() {
-        let (act, args) = pick("Agents", ACTS, &json!({ "action": "nudge", "agent": "Korp", "decision": "decline", "reason": "done" })).unwrap();
-        assert_eq!(act.tool, "SupervisorNudge");
-        assert_eq!(args, json!({ "target_agent": "Korp", "action": "decline", "reason": "done" }));
+    fn open_takes_the_agent_as_its_handler_names_it() {
         let (act, args) = pick("Agents", ACTS, &json!({ "action": "open", "agent": "Korp", "focus": false })).unwrap();
         assert_eq!(act.tool, "OpenAgent");
         assert_eq!(args, json!({ "agent_id": "Korp", "focus": false }));

@@ -48,7 +48,7 @@ pub(super) const AGENT_DEFINITION_SELECT: &str = "SELECT id, slug, name, icon, p
             agent_type, environment, agent_bus_id, is_seeded,
             accounts, parent_template_id, branch_label, updated_at,
             user_hidden, container_image, container_volumes, container_name,
-            use_ambient_login, model_vendor_base_url, auto_continue_enabled,
+            use_ambient_login, model_vendor_base_url,
             default_memory_id, conversation_visibility
      FROM db_agents";
 
@@ -86,8 +86,7 @@ pub(super) fn map_agent_definition_row(row: &rusqlite::Row) -> rusqlite::Result<
         container_name: row.get(24)?,
         use_ambient_login: row.get(25)?,
         model_vendor_base_url: row.get(26)?,
-        auto_continue_enabled: row.get(27)?,
-        memory_id: row.get(28)?,
-        conversation_visibility: row.get(29)?,
+        memory_id: row.get(27)?,
+        conversation_visibility: row.get(28)?,
     })
 }

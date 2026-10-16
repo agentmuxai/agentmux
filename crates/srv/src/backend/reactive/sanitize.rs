@@ -533,6 +533,27 @@ pub fn broadcast_turn_message(target_agent: &str, recipients: usize, msg_id: &st
     )
 }
 
+/// The opening of the Swarm Supervisor's continuation header. Only srv writes
+/// it (`supervisor_turn_message`): `neutralize_markers` quotes `[SUPERVISOR:`
+/// inside every delivered body, so a jekt or a broadcast cannot start one.
+pub const SUPERVISOR_HEADER_PREFIX: &str = "[SUPERVISOR:";
+
+/// The text an agent receives when the Swarm Supervisor continues it: a
+/// one-line header, then `body`, which the caller composes from fixed text and
+/// already-quoted judge text (`backend::supervisor::message`).
+///
+/// ```text
+/// [SUPERVISOR:MODE=drive N=3 OF=15]
+/// <body>
+/// ```
+///
+/// Delivered as automated input, never as the user's: it can't authorise what
+/// only the user's own message can. docs/specs/SPEC_SWARM_SUPERVISOR_2026_10_16.md §3.5.
+pub fn supervisor_turn_message(mode: &str, n: u32, of: u32, body: &str) -> String {
+    let mode = marker_field(mode);
+    format!("{SUPERVISOR_HEADER_PREFIX}MODE={mode} N={n} OF={of}]\n{body}")
+}
+
 /// The text an agent receives for a message the user sent from a paired
 /// device: what they typed, as a plain user turn with no header (the record
 /// stored beside it says where it came from, `viewer::origin`). Escape
@@ -577,11 +598,17 @@ fn fold(c: char) -> char {
 }
 
 /// Marker words whose delimiters a delivered body must not be able to write:
-/// the jekt block, the Swarm broadcast header (`broadcast_turn_message`), and
+/// the jekt block, the Swarm broadcast header (`broadcast_turn_message`), the
+/// Swarm Supervisor's continuation header (`supervisor_turn_message`), and
 /// the `[AgentMux]` that begins srv's own system notes
 /// (`muxbus::delivery_status::notes::NOTE_MARKER`; only srv writes one, and
 /// delivers it without a jekt block). Each is quoted as `[<WORD>-QUOTED...`.
-const MARKER_WORDS: &[(&str, &str)] = &[("jekt", "JEKT"), ("broadcast", "BROADCAST"), ("agentmux", "AGENTMUX")];
+const MARKER_WORDS: &[(&str, &str)] = &[
+    ("jekt", "JEKT"),
+    ("broadcast", "BROADCAST"),
+    ("supervisor", "SUPERVISOR"),
+    ("agentmux", "AGENTMUX"),
+];
 
 /// If `chars[i..]` starts a marker delimiter — `[`, optional `/`, `word`,
 /// then `:` or `]`, with whitespace/ZWJ/ZWNJ allowed between the parts and

@@ -73,7 +73,7 @@ Things the catalog shows besides size:
 | `Tasks` | Work×6 | `enqueue`, `claim`, `heartbeat`, `complete`, `release`, `list` (renamed from "Work" so it can't be confused with Presence) |
 | `Presence` | WhoIsWorkingOn, ClaimWork, ReleaseWork | `who` (by path, branch, topic or PR), `claim`, `release` |
 | `Schedule` | Cron×5, Loop×3 | `create` (a cron expression, an interval, or a self-paced loop), `list`, `pause`, `resume`, `delete` |
-| `Agents` | DiscoverAgents, FleetList, OpenAgent, GetAgentTranscript, ListConversations, SearchHistory, SupervisorNudge | `list` (local, LAN, cloud; with fleet status), `open`, `transcript`, `conversations`, `search_history`, `nudge` |
+| `Agents` | DiscoverAgents, FleetList, OpenAgent, GetAgentTranscript, ListConversations, SearchHistory, SupervisorNudge | `list` (local, LAN, cloud; with fleet status), `open`, `transcript`, `conversations`, `search_history`, `nudge` (removed 2026-10-16 with the Warden auto-continue it served: the Swarm Supervisor, `SPEC_SWARM_SUPERVISOR_2026_10_16.md`, judges turns in srv and needs no tool) |
 | `Message` | SendMessage, FleetBroadcast, PostToChannel, ReadChannel | `send` (one agent), `broadcast` (several), `post` and `read` (channels) |
 | `Stop` | QuitSelf, FleetBulkStop, ClosePane | `self`, `agents`, `pane`; kept separate because all three end work (rule 6). `pane` takes a `block_id`: ClosePane's no-argument form, which ended the caller's own session without QuitSelf's checks, is gone, and ending your own session is `self` only |
 | `Pane` | WhoAmI, OpenEditor, OpenMedia, OpenFiles, NewTab, SetActiveTab, FocusWindow, Layout, SetName | `whoami`, `open` (`view: "editor" | "media" | "files"`), `new_tab`, `activate_tab`, `focus_window`, `layout`, `rename` (closing a pane is in `Stop`) |

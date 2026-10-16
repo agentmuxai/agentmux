@@ -490,7 +490,6 @@ pub(crate) async fn agent_define_core(
         container_name: String::new(), // assigned by ContainerManager on first spawn
         use_ambient_login: 0,
         model_vendor_base_url: cmd_model_vendor_base_url.clone(),
-        auto_continue_enabled: 0,
         memory_id: String::new(),
         conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
     };

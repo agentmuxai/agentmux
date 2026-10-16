@@ -474,6 +474,9 @@ pub const COMMAND_FLEET_GROUP_CREATE: &str = "fleet.group.create";
 pub const COMMAND_FLEET_GROUP_LIST: &str = "fleet.group.list";
 pub const COMMAND_FLEET_GROUP_UPDATE: &str = "fleet.group.update";
 pub const COMMAND_FLEET_GROUP_DELETE: &str = "fleet.group.delete";
+/// Set the Swarm Supervisor's mode on panes (`CommandSupervisorSetModeData`),
+/// returning `FleetActionResult`. docs/specs/SPEC_SWARM_SUPERVISOR_2026_10_16.md.
+pub const COMMAND_SUPERVISOR_SET_MODE: &str = "supervisor.set-mode";
 
 // Pairing a device with the viewer listener (backend::viewer, agentmux-mobile's
 // SPEC_AGENT_STATUS_AND_LIVE_PANE_FEED_2026_10_07 §13.2).
