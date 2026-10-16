@@ -27,7 +27,7 @@
     font-weight: 600;
 }
 
-.muxbus-signin-google {
+.ui-button.muxbus-signin-google {
     --ui-fg: var(--signin-google-fg);
     --ui-fg-hover: var(--signin-google-fg);
     --ui-bg: var(--signin-google-bg);
@@ -36,7 +36,7 @@
     --ui-line-hover: var(--signin-google-line);
 }
 
-.muxbus-signin-apple {
+.ui-button.muxbus-signin-apple {
     --ui-fg: var(--signin-apple-fg);
     --ui-fg-hover: var(--signin-apple-fg);
     --ui-bg: var(--signin-apple-bg);

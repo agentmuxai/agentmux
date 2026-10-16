@@ -91,15 +91,14 @@ export function MuxBusSignInChoices(props: MuxBusSignInChoicesProps): JSX.Elemen
                 <div class="muxbus-signin-choices">
                     <For each={providers()}>
                         {(p) => (
-                            <button
-                                type="button"
-                                class={`ui-button muxbus-signin-provider ${p.class}`}
+                            <Button
+                                class={`muxbus-signin-provider ${p.class}`}
                                 disabled={props.disabled}
                                 onClick={() => props.onSignIn(p.name)}
                             >
                                 <p.mark />
                                 <span>{p.label}</span>
-                            </button>
+                            </Button>
                         )}
                     </For>
                     <Show when={providers().length}>
