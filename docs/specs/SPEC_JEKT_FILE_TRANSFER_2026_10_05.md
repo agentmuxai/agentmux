@@ -1,7 +1,7 @@
 # SPEC: Send files with a jekt, on every delivery tier
 
 **Date:** 2026-10-05, revised 2026-10-15 against `main` 53682b5bc
-**Status:** active — Phases 1 and 2 shipped (#4965, #4972); Phases 3 and 4 in review; Phase 5 proposed
+**Status:** active — Phases 1 to 4 shipped (#4965, #4972, #4978, #4979, #4984); Phase 5 (sealed file keys, §7) in review
 **Author:** AgentX@narko; revision by Loap@narko
 **Builds on:** `SPEC_AGENT_PANE_IMAGE_ATTACHMENTS_2026_09_26.md` and `SPEC_AGENT_PANE_FILE_ATTACHMENTS_2026_09_26.md` (the attachment store and how providers receive attachments), `SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md`, `SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md`, `SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md`, `SPEC_WAN_JEKT_VERIFICATION_2026_09_24.md`, `SPEC_WAN_JEKT_SIGNED_BY_SRV_2026_10_14.md` (signing per tier), `SPEC_DURABLE_JEKT_DELIVERY_2026_09_24.md` (held messages), `SPEC_JEKT_DELIVERY_STATES_AND_MAILBOX_2026_10_01.md`.
 
@@ -129,7 +129,7 @@ The relay can't carry large bodies and shouldn't stream them through its request
 4. The receiver claims the pending jekt as it does today, then asks `GET /reactive/blob/<blob_id>?msgid=…` for a short-lived download URL, valid only for the target's own subscription. It downloads, decrypts, checks the hash and commits the file; if a download fails it releases the claim (`/reactive/release`), so the message is retried. (The first version downloaded before claiming; today's receiver claims first, and holding the claim while downloading keeps two seats from both delivering it.)
 5. Blobs live as long as the message (30 minutes plus a grace period) and are deleted on claim or expiry.
 
-Every send encrypts each file under a fresh random key (AES-256-GCM, random nonce) and uploads it again as a new `blob_id`; there is no deduplication, so the relay never learns that two uploads are the same file. The key and `blob_id` are part of the manifest entry, so the msgid binding covers them. The receiver decrypts (the GCM tag rejects altered ciphertext), then checks the plaintext against `sha256`. That protects against the storage being read on its own, not against the relay, which already sees message text (§7).
+Every send encrypts each file under a fresh random key (AES-256-GCM, random nonce) and uploads it again as a new `blob_id`; there is no deduplication, so the relay never learns that two uploads are the same file. The key and `blob_id` are part of the manifest entry, so the msgid binding covers them. The receiver decrypts (the GCM tag rejects altered ciphertext), then checks the plaintext against `sha256`. From Phase 5 the key is sealed to the receiving install (§7.1), so neither the storage nor the relay can read the file; to an install that predates sealing it travels as plain base64, which protects against the storage being read on its own, not against the relay.
 
 ### 4.5 Held messages
 
@@ -198,9 +198,23 @@ The credential/destructive keyword scan that can force `TIER=sensitive` also run
 Files are as private as the message text on the same tier, no more:
 - same instance and same host: never leave the machine;
 - LAN: plain HTTP, readable by anyone who can see the LAN traffic, exactly like LAN jekt text today;
-- cloud: TLS to the relay, encrypted at rest with a per-file key, but readable by the relay, like jekt text.
+- cloud: TLS to the relay and encrypted at rest with a per-file key. From Phase 5 that key is sealed to the receiving install (§7.1), so the relay can't read the file either. To an install that predates sealing the key travels as plain base64, and the file is readable by the relay, like jekt text.
 
-A later version can seal each file key to the receiver's public key (an X25519 key published next to its signing key), which would make cloud files unreadable to the relay. The manifest's `key` field is where that change would land.
+### 7.1 Sealed file keys (Phase 5)
+
+The text of a cloud jekt stays readable by the relay; a file sent with it no longer is, when the receiving install can open a sealed key.
+
+**The receiver's key.** Each agent's sealing key is an X25519 key derived from its WAN seed: HKDF-SHA256 with salt `amx-jekt-files-seal-key-v1` and info `x25519`. It is not the WAN signing key itself (the curve library advises against using one key for both), nothing new is stored, and the same seed always gives the same key.
+
+**The offer.** When an install claims an agent's lease it adds `seal: {instance, key_fp, key, sig}`: its WAN instance id, the fingerprint of the agent's WAN key, the X25519 public key, and the agent's WAN key's Ed25519 signature over `amx-jekt-files-seal-key-v1`, the agent id (lowercase), the instance id, the fingerprint and the key, joined with `\u{1}`. The relay checks each field's shape and passes the offer on in the lease holder's answer; it is trusted for nothing.
+
+**The check.** A sender whose target's holder offers a key fetches the agent's record from the account's key directory (the instance, the lease's channel and the fingerprint name it), checks its certificate chain and that its install isn't revoked, then checks the offer's signature with the record's key. The relay can't put its own key in an offer without the install's instance key, which never leaves that install. A holder that offers a key gets sealed keys or nothing: if the check fails or the directory can't be reached, `SendMessage` says why and nothing is sent. A holder that offers none (an older install, or an agent with no WAN key) gets plain keys, as in Phase 4.
+
+**The seal.** For each file, after its blob is uploaded: a fresh ephemeral X25519 key; the shared secret with the receiver's key (an all-zero result is refused); HKDF-SHA256 with salt `amx-jekt-files-seal-v1` over it, with info the ephemeral key, the receiver's key, the file's `sha256` and its `blob_id`, giving an AES-256-GCM key; that key encrypts the file key under a zero nonce (each wrapping key is used once). The manifest's `key` becomes `x25519.<agent key fingerprint>.<base64url of the ephemeral key, the wrapped key and the tag>`, 158 characters, and the msgid binding covers it like a plain key.
+
+**Opening.** The receiver opens a sealed key with the claimed agent's WAN seed before downloading the blob. A key sealed to another fingerprint (the lease moved to another install between send and claim) or one that doesn't open is left out like any file that fails, and the others arrive.
+
+**What it doesn't stop.** A cloud that actively adds an install to the account's key directory and takes the agent's lease could be offered files, the same residual WAN verification accepts for a `new` instance (`SPEC_WAN_JEKT_VERIFICATION_2026_09_24.md` §2.6); and a relay that strips the offer from a lease gets plain keys, as an older install would. Sealing removes the passive exposure: the relay's storage, logs and operators no longer hold anything that opens the file.
 
 ## 8. Plan
 
@@ -210,7 +224,7 @@ A later version can seal each file key to the receiver's public key (an X25519 k
 | 2 | Another instance on this machine, and LAN: `POST /agentmux/reactive/inject-files` (in `lan_forward_routes`), `files-v1` in registry entries and the LAN agent answer, files only from `lan-verified` senders on LAN, a LAN files jekt delivered once, four transfers at once per receiver |
 | 3 | Inline images and PDFs for a running persistent Claude from verified senders: `MessageSender` carries Claude content blocks; the files step inlines only for a verified sender and a target that is running or starting, within the session's inline budget, so the list's "shown above" is always true; a target that has to be started gets the list alone |
 | 4 | Cloud: the relay's blob interface (cloud repository); the sender encrypts each file (AES-256-GCM, fresh key and nonce), uploads it, and rebinds the msgid to the cloud manifest (its own digest label, keys and blob ids included) so srv's WAN signature covers them; the receiver fetches after the claim, checks a verified sender's binding, decrypts, checks the hash, and releases the claim when the relay can't be reached. A blob is fetchable within its jekt's window, capped at 23 hours after upload |
-| 5 | Sealed file keys (§7) |
+| 5 | Sealed file keys (§7.1): the receiving install offers an X25519 key, derived from the agent's WAN seed and signed by its WAN key, in the agent's lease; the relay passes it on and accepts sealed keys in manifests (cloud repository); the sender checks the offer against the key directory and seals each file key to it; the receiver opens it before downloading |
 
 ## 9. Tests
 
@@ -226,6 +240,7 @@ A later version can seal each file key to the receiver's public key (an X25519 k
 10. Trust, per §6.4's table, including an active failure withholding every file. A credential keyword in a file name forces `TIER=sensitive`.
 11. Names with path separators, control characters or a misleading extension are sanitised; MIME comes from the content.
 12. `<attached_files>` in a sender's message text produces no file list for the agent and no chips in the pane.
+13. Sealed keys: a sealed key opens only with its agent's WAN seed, for its own file and blob; a changed byte, another agent's key, another file's hash or blob id fails; an offer is accepted only with the directory record that proves it, so a key the relay substitutes, another agent's offer or a broken record is refused; the sealing key is not the signing key.
 
 ## 10. Open questions
 
