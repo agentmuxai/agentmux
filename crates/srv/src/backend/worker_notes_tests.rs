@@ -103,12 +103,8 @@ async fn pane(state: &AppState, tab: &str, def: &str) -> String {
         .unwrap()
 }
 
-/// A worker's turn that ended without a report notes its leader's open pane;
-/// a pane that isn't a worker's, or a worker whose leader isn't open, notes no one.
-#[tokio::test]
-async fn a_workers_unreported_turn_notes_its_open_leader() {
-    let state = crate::server::tests::test_state();
-    let ws = dispatch_apply(&state, Command::CreateWorkspace { name: "w".into() })
+async fn tab(state: &AppState) -> String {
+    let ws = dispatch_apply(state, Command::CreateWorkspace { name: "w".into() })
         .await
         .iter()
         .find_map(|e| match e {
@@ -116,14 +112,78 @@ async fn a_workers_unreported_turn_notes_its_open_leader() {
             _ => None,
         })
         .unwrap();
-    let tab = dispatch_apply(&state, Command::CreateTab { workspace_id: ws, name: "t".into() })
+    dispatch_apply(state, Command::CreateTab { workspace_id: ws, name: "t".into() })
         .await
         .iter()
         .find_map(|e| match e {
             Event::TabCreated { tab_id, .. } => Some(tab_id.clone()),
             _ => None,
         })
+        .unwrap()
+}
+
+fn mark_worker(state: &AppState, worker_id: &str, lead: &crate::backend::storage::agents::AgentDefinition) {
+    state
+        .mstore
+        .agent_content_set(&crate::backend::storage::store::AgentContent {
+            agent_id: worker_id.to_string(),
+            content_type: crate::server::app_api::agent_spawn::WORKER_OF_CONTENT.into(),
+            content: json!({ "agent": lead.name, "id": lead.id }).to_string(),
+            updated_at: 1,
+        })
         .unwrap();
+}
+
+#[test]
+fn a_question_is_read_from_the_panes_flag_being_set() {
+    let meta = |patch: serde_json::Value| Event::BlockMetaUpdated { block_id: "b1".into(), meta_patch: patch, version: 1 };
+    assert_eq!(asked_in(&meta(json!({ "term:awaiting_user": true }))), Some("b1"));
+    assert_eq!(asked_in(&meta(json!({ "term:awaiting_user": null }))), None, "answered");
+    assert_eq!(asked_in(&meta(json!({ "frame:title": "x" }))), None);
+    assert_eq!(asked_in(&Event::TabMetaUpdated { tab_id: "t".into(), meta_patch: json!({ "term:awaiting_user": true }), version: 1 }), None);
+}
+
+/// A worker still waiting on a question after the grace notes its leader; one
+/// answered by then, or whose turn is over, notes no one.
+#[tokio::test]
+async fn a_workers_question_mid_turn_notes_its_open_leader() {
+    use crate::backend::agent_state::{test_support::register_stub, META_AWAITING_USER};
+    use crate::backend::blockcontroller::{delete_controller, BLOCK_CONTROLLER_PERSISTENT, STATUS_RUNNING};
+    let state = crate::server::tests::test_state();
+    let tab = tab(&state).await;
+    let id = uuid::Uuid::new_v4().to_string();
+    let (lead_id, worker_id) = (format!("lead-{id}"), format!("worker-{id}"));
+    let mut lead = test_agent_def(&lead_id, &format!("Lead {}", &id[..8]), "claude", "host", 1, "");
+    let mut worker = test_agent_def(&worker_id, &format!("Helper {}", &id[..8]), "claude", "host", 1, "");
+    state.mstore.agent_def_insert(&mut lead).unwrap();
+    state.mstore.agent_def_insert(&mut worker).unwrap();
+    mark_worker(&state, &worker_id, &lead);
+    let lead_pane = pane(&state, &tab, &lead_id).await;
+    let worker_pane = pane(&state, &tab, &worker_id).await;
+    let asked = WorkerEvent::Asked { block_id: worker_pane.clone() };
+
+    register_stub(&worker_pane, BLOCK_CONTROLLER_PERSISTENT, STATUS_RUNNING, true);
+    assert_eq!(note_for(&state.mstore, &state.filestore, &asked), None, "answered within the grace");
+
+    dispatch_apply(&state, Command::UpdateBlockMeta { block_id: worker_pane.clone(), meta_patch: json!({ (META_AWAITING_USER): true }) }).await;
+    let (to, text) = note_for(&state.mstore, &state.filestore, &asked).expect("the leader is told");
+    assert_eq!(to, lead_pane);
+    assert_eq!(
+        text,
+        format!("[AgentMux] Your worker {} is waiting for the user to answer a question in its pane; it can't go on until they do.", worker.name)
+    );
+
+    register_stub(&worker_pane, BLOCK_CONTROLLER_PERSISTENT, STATUS_RUNNING, false);
+    assert_eq!(note_for(&state.mstore, &state.filestore, &asked), None, "the turn is over: a flag left behind isn't a question");
+    delete_controller(&worker_pane);
+}
+
+/// A worker's turn that ended without a report notes its leader's open pane;
+/// a pane that isn't a worker's, or a worker whose leader isn't open, notes no one.
+#[tokio::test]
+async fn a_workers_unreported_turn_notes_its_open_leader() {
+    let state = crate::server::tests::test_state();
+    let tab = tab(&state).await;
     let id = uuid::Uuid::new_v4().to_string();
     let (lead_id, worker_id) = (format!("lead-{id}"), format!("worker-{id}"));
     let mut lead = test_agent_def(&lead_id, &format!("Lead {}", &id[..8]), "claude", "host", 1, "");
@@ -134,15 +194,7 @@ async fn a_workers_unreported_turn_notes_its_open_leader() {
     let ev = WorkerEvent::TurnEnded { block_id: worker_pane.clone(), started_at_ms: u64::MAX / 2, key: "k".into() };
     assert_eq!(note_for(&state.mstore, &state.filestore, &ev), None, "not marked as a worker");
 
-    state
-        .mstore
-        .agent_content_set(&crate::backend::storage::store::AgentContent {
-            agent_id: worker_id.clone(),
-            content_type: crate::server::app_api::agent_spawn::WORKER_OF_CONTENT.into(),
-            content: json!({ "agent": lead.name, "id": lead_id }).to_string(),
-            updated_at: 1,
-        })
-        .unwrap();
+    mark_worker(&state, &worker_id, &lead);
     assert_eq!(note_for(&state.mstore, &state.filestore, &ev), None, "its leader isn't open");
 
     let lead_pane = pane(&state, &tab, &lead_id).await;
