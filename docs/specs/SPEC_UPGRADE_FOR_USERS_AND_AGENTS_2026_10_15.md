@@ -4,8 +4,8 @@
 **Status:** active — phase 1 (detection, the chip, Maintenance's "What's
 new" and Download) in #4983; phase 2 (data carries forward) in #4996;
 phase 3a (download and stage, Windows portable) in #5000; phase 3b
-(Upgrade & restart) in #5005; the rest of phase 3 and phases 4–5 are not
-started. The operator took the §8 recommendations on 2026-10-15.
+(Upgrade & restart) in #5005; phase 4b (the note after an upgrade) in
+#NNNN; the rest of phases 3–5 are not started. The operator took the §8 recommendations on 2026-10-15.
 **Asked for:** "agents need a way to upgrade their running instances and
 continue on. Users also need a button to let them know. We did work on this
 in the past, find the history, let's consolidate; we have partial work in the
@@ -177,13 +177,20 @@ What already happens, and what's added:
 - **Each agent resumes its conversation** (eager resume, `--resume`).
 - **Messages sent while AgentMux was down** are held and replayed
   (durable jekts).
-- **New: a system note to each resumed agent**, once, as its next input:
-  `[AgentMux] Upgraded from 0.59.26 to 0.59.27 at 14:02, at QTest's request. Your session resumed; nothing you sent was lost.`
-  srv records the version it last ran in the shared store; on start, if it
-  differs, every agent that resumes gets the note (a system note, like the
-  other `[AgentMux]` notes; never a jekt).
-- **New: the agent that asked** gets the result: "Upgrade to 0.59.27 done",
-  or why not ("cancelled by the user", "the download failed: …").
+- **New: a system note to each resumed agent**, once, as its next input
+  (`backend/upgrade_notice.rs`, phase 4b):
+  `[AgentMux] AgentMux was upgraded from 0.59.26 to 0.59.27 at 14:02. Your session resumed; nothing is needed from you.`
+  srv records the version it runs in the channel folder
+  (`channels/<ch>/agentmux-last-version.json`, like `cli_notice`'s CLI
+  versions: each version's data folder is new after an upgrade). A start on
+  a newer release than the one recorded is an upgrade; then every agent
+  whose session is eagerly resumed gets the note once it has registered (a
+  system note, like the other `[AgentMux]` notes; never a jekt). A first
+  start, the same version, or an older build started again says nothing.
+- **The agent that asked** hears every step: the user's answer to its
+  request as a note (phase 4a), and, after the restart, the note above.
+  A failed download or a restart that didn't happen shows in the version
+  panel, with the reason.
 - **An agent that was mid-turn** when the user chose "Now" resumes with the
   CLI's own interrupted-turn handling and the note.
 
