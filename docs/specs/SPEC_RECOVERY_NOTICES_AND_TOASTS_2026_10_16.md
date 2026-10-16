@@ -95,7 +95,7 @@ Every path in §3.3 appends one record to an **incident log**: one JSON line per
 ```
 
 - `kind`: a closed set (§4.4).
-- `what`, `cause`: plain words for the user. `cause` is left out when it isn't known; it is never guessed.
+- `what`, `cause`: plain words for the user. `cause` is left out when it isn't known; it is never guessed. A renderer's reason often arrives as a Chromium code (`RESULT_CODE_KILLED`, `STATUS_ACCESS_VIOLATION`): the host turns the ones it knows into words and names any other after a sentence saying it is Chromium's (`incidents::plain_cause`). Found in a dev build of #5032, where a renderer ended from outside showed `RESULT_CODE_KILLED` as the whole cause; the same check confirmed the rest of §4.2 (the toast after the reload, still up after its usual lifetime, closing it acknowledges it, and it doesn't come back on the next load).
 - `did`: what AgentMux did that protects the user's work, each a fact the writing path knows (it saved the layout, respawned srv, restored N panes, marked M agent turns interrupted so they resume). `lost`: what may not have survived, when the path knows (an unsent message, a running command in a terminal).
 - `evidence`: log file and time, for a bug report.
 - `acknowledged_at_ms`: set when the user closes the notice (§4.2).
