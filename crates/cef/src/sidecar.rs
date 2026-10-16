@@ -140,6 +140,7 @@ pub fn use_launcher_endpoints(
         // Issue #2977 WS4 — point the background audit log at the RESOLVED
         // (dev-aware) data dir, not the raw env var. See `BackgroundAudit::init`.
         crate::background_audit::init_for_state(&state, std::path::Path::new(&data_dir));
+        crate::commands::incidents::init(std::path::Path::new(&data_dir));
         *state.version_data_dir.lock() = Some(data_dir);
         *state.version_config_dir.lock() = Some(config_dir);
         *state.user_home_dir.lock() = Some(user_home_dir);
@@ -230,6 +231,7 @@ pub async fn spawn_backend(state: &Arc<AppState>) -> Result<BackendSpawnResult, 
     // Store version-specific paths in AppState for frontend IPC commands.
     // Issue #2977 WS4 — see the sibling call above.
     crate::background_audit::init_for_state(state, &data_dir);
+    crate::commands::incidents::init(&data_dir);
     *state.version_data_dir.lock() = Some(data_dir.to_string_lossy().to_string());
     *state.version_config_dir.lock() = Some(config_dir.to_string_lossy().to_string());
     // Frontend "user home" → the AgentMux root (`~/.agentmux/`).

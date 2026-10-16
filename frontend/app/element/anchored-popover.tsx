@@ -80,7 +80,8 @@ export const AnchoredPopover = (props: AnchoredPopoverProps): JSX.Element => {
     let frame: number | undefined;
     let disposed = false;
 
-    usePaneOverlay(() => shell);
+    // A dismissible popover takes Escape; a passive one (a tooltip) does not.
+    usePaneOverlay(() => shell, { keys: !!props.onDismiss });
 
     const registerShell = (el: HTMLDivElement) => {
         shell = el;

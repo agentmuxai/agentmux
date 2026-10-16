@@ -257,6 +257,8 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         // definition (not a fork), in a pane next to its own
         // (SPEC_AGENT_WORKERS_2026_10_15.md §3.1).
         .route("/api/v1/agent/spawn", post(app_api::agent_spawn::handle_agent_spawn))
+        // A leader's own workers and how each is doing (§3.4).
+        .route("/api/v1/agent/workers", post(app_api::agent_spawn::handle_agent_workers))
         // One live instance per agent, Phase 2 (SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24 §4.6).
         .route("/api/v1/agent/takeover", post(agent_takeover::handle_agent_takeover))
         // Voice speech-to-text: the renderer POSTs mic audio (one

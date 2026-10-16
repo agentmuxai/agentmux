@@ -16,7 +16,7 @@
 // host hides a whole pane while any overlay intersects it (see flushClip).
 
 import { getApi } from "@/app/store/app-api";
-import { anyPaneIntersects, paneCount } from "@/app/platform/pane-rect-registry";
+import { anyPaneIntersects, getPaneRect, paneCount } from "@/app/platform/pane-rect-registry";
 import { onCleanup, onMount, type Accessor } from "solid-js";
 
 interface OverlayRect {
@@ -78,6 +78,41 @@ function rectsKey(rects: readonly OverlayRect[]): string {
     let s = "";
     for (const r of rects) s += `${r.x},${r.y},${r.w},${r.h}|`;
     return s;
+}
+
+// Listeners told when an explicitly registered overlay that covered a native
+// browser pane goes away (a menu closing over a page). The keyboard was left
+// with the app while it was open; the focus manager gives it back.
+const releaseListeners = new Set<() => void>();
+// Ids (in `overlayRects`) of overlays that take the keyboard while open: menus
+// and popovers, registered with `{ keys: true }`. The rest only clip (a status
+// bar tooltip, a drag hole): they neither take focus nor handle Escape/arrows.
+const keyOverlays = new Set<number>();
+export interface PaneOverlayOptions {
+    /** The overlay takes the keyboard while open (Escape closes it, arrows move in it). */
+    keys?: boolean;
+}
+let releaseScheduled = false;
+
+/** Run `cb` after an overlay that covered a browser pane is released. Returns an unsubscribe. */
+export function onPaneOverlayReleased(cb: () => void): () => void {
+    releaseListeners.add(cb);
+    return () => releaseListeners.delete(cb);
+}
+
+/** Drop an explicitly registered overlay's rect; true when there was one. */
+function dropOverlayRect(id: number): boolean {
+    const rect = overlayRects.get(id);
+    if (!overlayRects.delete(id)) return false;
+    const holdsKeys = keyOverlays.has(id);
+    if (rect != null && holdsKeys && releaseListeners.size > 0 && anyPaneIntersects(rect) && !releaseScheduled) {
+        releaseScheduled = true;
+        requestAnimationFrame(() => {
+            releaseScheduled = false;
+            for (const cb of [...releaseListeners]) cb();
+        });
+    }
+    return true;
 }
 
 function sendClip(): void {
@@ -282,8 +317,9 @@ export interface PaneOverlayHandle {
  * Windows, so on macOS/Linux a `data-pane-overlay` attribute alone registers
  * nothing — see SPEC_MACOS_BROWSER_PANE_CONTEXT_MENU_2026_09_24.md.
  */
-export function registerPaneOverlay(el: HTMLElement): PaneOverlayHandle {
+export function registerPaneOverlay(el: HTMLElement, opts?: PaneOverlayOptions): PaneOverlayHandle {
     const id = nextOverlayId++;
+    if (opts?.keys) keyOverlays.add(id);
     let released = false;
     registeredOverlayEls.add(el);
     const update = (): void => {
@@ -292,7 +328,7 @@ export function registerPaneOverlay(el: HTMLElement): PaneOverlayHandle {
         const hidden = !el.isConnected || getComputedStyle(el).visibility === "hidden";
         if (!hidden && rect.w > 0 && rect.h > 0) {
             overlayRects.set(id, rect);
-        } else if (!overlayRects.delete(id)) {
+        } else if (!dropOverlayRect(id)) {
             return;
         }
         sendClip();
@@ -312,7 +348,9 @@ export function registerPaneOverlay(el: HTMLElement): PaneOverlayHandle {
             window.removeEventListener("resize", update);
             resizeObserver?.disconnect();
             styleObserver?.disconnect();
-            if (overlayRects.delete(id)) sendClip();
+            const dropped = dropOverlayRect(id);
+            keyOverlays.delete(id);
+            if (dropped) sendClip();
         },
     };
 }
@@ -330,13 +368,36 @@ export function isRegisteredPaneOverlay(el: Element): boolean {
     return registeredOverlayEls.has(el) || autoOverlayRects.has(el);
 }
 
+/**
+ * Whether a menu or popover is drawn over browser pane `blockId`: one of the
+ * overlays registered with `{ keys: true }` (`usePaneOverlay` /
+ * `registerPaneOverlay`) intersects the pane. The keyboard belongs to that
+ * overlay (Escape to close it, arrows to move in it), not to the page under
+ * it. Not the others, which only clip: a tooltip, the drag hole, a pane's own
+ * loading cover (a `data-pane-overlay` element, Windows only). False
+ * for a pane with no registered rect (not a native browser pane, or not placed
+ * yet). `onPaneOverlayReleased` says when one of these goes away.
+ */
+export function overlayCoversPane(blockId: string): boolean {
+    const pane = getPaneRect(blockId);
+    if (pane == null || pane.w <= 0 || pane.h <= 0) return false;
+    const covers = (r: OverlayRect): boolean =>
+        r.w > 0 && r.h > 0 && r.x < pane.x + pane.w && r.x + r.w > pane.x && r.y < pane.y + pane.h && r.y + r.h > pane.y;
+    for (const id of keyOverlays) {
+        const r = overlayRects.get(id);
+        if (r != null && covers(r)) return true;
+    }
+    return false;
+}
+
 /** Test-only: number of live imperative/hook overlay registrations with a rect. */
 export function __overlayRectCount(): number {
     return overlayRects.size;
 }
 
-export function usePaneOverlay(getEl: Accessor<HTMLElement | null | undefined>): void {
+export function usePaneOverlay(getEl: Accessor<HTMLElement | null | undefined>, opts?: PaneOverlayOptions): void {
     const id = nextOverlayId++;
+    if (opts?.keys) keyOverlays.add(id);
     const update = (): void => {
         const el = getEl();
         if (!el) return;
@@ -346,7 +407,7 @@ export function usePaneOverlay(getEl: Accessor<HTMLElement | null | undefined>):
         if (rect.w > 0 && rect.h > 0) {
             overlayRects.set(id, rect);
         } else {
-            overlayRects.delete(id);
+            dropOverlayRect(id);
         }
         sendClip();
     };
@@ -382,8 +443,8 @@ export function usePaneOverlay(getEl: Accessor<HTMLElement | null | undefined>):
         window.removeEventListener("resize", update);
         observer?.disconnect();
         styleObserver?.disconnect();
-        if (overlayRects.delete(id)) {
-            sendClip();
-        }
+        const dropped = dropOverlayRect(id);
+        keyOverlays.delete(id);
+        if (dropped) sendClip();
     });
 }

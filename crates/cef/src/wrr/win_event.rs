@@ -617,6 +617,11 @@ cef::wrap_task! {
                 registered,
                 draining
             );
+            // Kept for the next start's notice (the user sees no window now),
+            // when this is a window gone without being closed, not a quit.
+            if crate::commands::incidents::is_unexpected_quit(registered, draining) {
+                crate::commands::incidents::quit_no_window();
+            }
             cef::quit_message_loop();
         }
     }

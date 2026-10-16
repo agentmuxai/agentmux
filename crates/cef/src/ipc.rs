@@ -242,6 +242,9 @@ async fn route_command(
         // Issue #2977 WS4 — hand the frontend whatever the background
         // service did while no window was open, so it can tell the user.
         "background_audit_take" => crate::background_audit::background_audit_take(state),
+        // What went wrong and what AgentMux did about it (SPEC_RECOVERY_NOTICES_AND_TOASTS §4.2).
+        "incidents_list" => crate::commands::incidents::incidents_list(),
+        "incident_acknowledge" => crate::commands::incidents::incident_acknowledge(state, args),
         "minimize_window" => commands::window::minimize_window(state, args),
         "maximize_window" => commands::window::maximize_window(state, args),
         "toggle_floating_maximize" => commands::window::toggle_floating_maximize(state, args),
@@ -250,6 +253,7 @@ async fn route_command(
         "is_main_window" => Ok(commands::window::is_main_window(args)),
         "get_window_label" => Ok(commands::window::get_window_label(args)),
         "open_new_window" => commands::window::open_new_window(state, args),
+        "open_restored_window" => commands::window::open_restored_window(state, args),
         "open_subwindow" => {
             // Agent / backend-only API — creates a sub-window tied to a full
             // instance. Hidden from the taskbar. Not exposed in user UI.

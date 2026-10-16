@@ -46,7 +46,7 @@ export function AttachmentLightbox(props: Props) {
     let backdropRef: HTMLDivElement | undefined;
     // Native browser panes paint above the HTML renderer; register the
     // backdrop so they clip around it (as modal.tsx does).
-    usePaneOverlay(() => backdropRef);
+    usePaneOverlay(() => backdropRef, { keys: true });
     const item = () => props.items[Math.min(props.index, props.items.length - 1)];
     // The transcript only knows ids and names; fetch the details on demand.
     const [fetched] = createResource(

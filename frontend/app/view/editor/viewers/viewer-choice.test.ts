@@ -26,7 +26,8 @@ describe("chooseViewer", () => {
         expect(chooseViewer(probe("image"))).toBe("image");
         expect(chooseViewer(probe("audio"))).toBe("media");
         expect(chooseViewer(probe("video"))).toBe("media");
-        for (const kind of ["pdf", "archive", "sqlite", "font", "word", "image_file", "other"]) {
+        expect(chooseViewer(probe("pdf"))).toBe("pdf");
+        for (const kind of ["archive", "sqlite", "font", "word", "image_file", "other"]) {
             expect(chooseViewer(probe(kind)), kind).toBe("info");
         }
     });
@@ -64,6 +65,7 @@ describe("viewerForDropped", () => {
         expect(viewerForDropped("clip.mp4", "")).toBe("media");
         expect(viewerForDropped("voice", "audio/ogg")).toBe("media");
         expect(viewerForDropped("app.exe", "application/x-msdownload")).toBe("info");
+        expect(viewerForDropped("paper.pdf", "")).toBe("pdf");
     });
 });
 

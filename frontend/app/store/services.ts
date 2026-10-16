@@ -10,6 +10,11 @@ import * as MOS from "./mos";
 
 import type { BlockControllerRuntimeStatus } from "@/types/rpc/BlockControllerRuntimeStatus";
 import type { ConnStatus } from "@/types/rpc/ConnStatus";
+
+/** A window a restore rebuilt beside the main one: its workspace, and where it
+ *  was (physical pixels, from srv's window row). srv `session_windows.rs`. */
+export type RestoredWindow = { workspaceid: string; x?: number; y?: number; width?: number; height?: number };
+
 // blockservice.BlockService (block)
 class BlockServiceType {
     GetControllerStatus(arg2: string): Promise<BlockControllerRuntimeStatus> {
@@ -165,6 +170,11 @@ class WindowServiceType {
     // `hostLabel` opened after `mark`, whether or not its row exists yet.
     InheritWindowAppearance(sourceWindowId: string, hostLabel: string, mark: number): Promise<void> {
         return MOS.callBackendService("window", "InheritWindowAppearance", Array.from(arguments))
+    }
+    // The workspaces a restore rebuilt beside the main window's, the rest of
+    // the last session's windows, each handed out once (srv `session_windows.rs`).
+    TakeRestoredWindows(): Promise<RestoredWindow[]> {
+        return MOS.callBackendService("window", "TakeRestoredWindows", Array.from(arguments))
     }
 
     // move block to new window

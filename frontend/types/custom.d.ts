@@ -350,6 +350,11 @@ declare global {
         setTaskbarAttention(windowLabel: string, count: number, inputCount: number): Promise<void>;
         /** Take (and clear) what happened while no window was open. */
         takeBackgroundAudit(): Promise<unknown>;
+        /** What went wrong and what AgentMux did about it, newest first:
+         *  `{ incidents: [...] }` (crates/cef `commands::incidents`). */
+        listIncidents?(): Promise<unknown>;
+        /** The user closed an incident's notice: every window closes its copy. */
+        acknowledgeIncident?(id: string): Promise<unknown>;
         /** Take OS keyboard focus back from a native browser pane to this window's page. */
         reclaimWindowFocus(windowLabel: string): Promise<void>;
         /** Whether the window is active and who has its keyboard, as the host's
@@ -397,6 +402,10 @@ declare global {
         openNewWindowWithView: (view: string, meta?: Record<string, unknown>) => Promise<string>;
         /** Open a new window showing an existing workspace, not a fresh one. */
         openWorkspaceInNewWindow: (workspaceId: string) => Promise<string>;
+        /** A window a session restore rebuilt (srv `session_windows.rs`), opened where it
+         *  was: `x`/`y`/`width`/`height` are its saved rect in physical pixels. Opens
+         *  where a new window goes when that spot is on no monitor now. */
+        openRestoredWindow: (w: { workspaceid: string; x?: number; y?: number; width?: number; height?: number }) => Promise<string>;
         closeWindow: (label?: string) => Promise<void>;
         minimizeWindow: () => void;
         maximizeWindow: () => void;
@@ -1004,8 +1013,13 @@ declare global {
         expiration?: number;
         hidden?: boolean;
         actions?: NotificationActionType[];
+        /** Stays until the user closes it: no expiry, and a pin on the toast
+         *  says so. Needs an `id`. */
         persistent?: boolean;
         type?: "error" | "update" | "info" | "warning";
+        /** Runs when the user closes the toast with its X (not when it expires
+         *  or an action button runs), e.g. to record that a notice was read. */
+        onClose?: () => void;
     };
 
     interface AbstractRpcClient {

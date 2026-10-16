@@ -114,6 +114,7 @@
         "linkify-it": "^5.0.1",
         "mermaid": "^11.16.1",
         "overlayscrollbars": "^2.13.0",
+        "pdfjs-dist": "^6.4.299",
         "qrcode": "^1.5.4",
         "rehype-highlight": "^7.0.2",
         "rehype-raw": "^7.0.0",

@@ -19,11 +19,20 @@ export function pushFlashError(ferr: FlashErrorType) {
     setFlashErrors((prev) => [...prev, ferr]);
 }
 
+/** The most toasts kept at once; past it the oldest ordinary one goes first,
+ *  a persistent one (it stays until closed) only when nothing else is left. */
+export const MAX_KEPT_NOTIFICATIONS = 20;
+
 function addOrUpdateNotification(notif: NotificationType) {
-    setNotifications((prev) => {
-        const withoutThis = prev.filter((n) => n.id !== notif.id);
-        return [...withoutThis, notif];
-    });
+    setNotifications((prev) => capNotifications([...prev.filter((n) => n.id !== notif.id), notif]));
+}
+
+/** `list` trimmed to `MAX_KEPT_NOTIFICATIONS`, oldest ordinary toasts first. */
+export function capNotifications(list: NotificationType[]): NotificationType[] {
+    let over = list.length - MAX_KEPT_NOTIFICATIONS;
+    if (over <= 0) return list;
+    const kept = list.filter((n) => n.persistent || over-- <= 0);
+    return kept.slice(-MAX_KEPT_NOTIFICATIONS);
 }
 
 export function pushNotification(notif: NotificationType) {

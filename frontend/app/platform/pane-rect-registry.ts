@@ -40,6 +40,11 @@ export function unregisterPaneRect(blockId: string): void {
     paneRects.delete(blockId);
 }
 
+/** The registered CSS-pixel rect of a pane, or undefined when it has none. */
+export function getPaneRect(blockId: string): PaneRect | undefined {
+    return paneRects.get(blockId);
+}
+
 /** Whether any registered pane rect intersects the given overlay rect.
  *  Used by `pane-overlay.ts:sendClip` to bail out when no clip work is
  *  actually needed. AABB-overlap test, no allocation. */
