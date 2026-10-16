@@ -177,7 +177,7 @@ const SPAWN_INVENTORY: &[(&str, &str, usize, &str)] = &[
      "test: unit-test or fixture code, never on a user machine"),
     ("crates/launcher/src/upgrade_restart.rs", "launcher", 1,
      "no-window: calls no_window()/creation_flags in this file"),
-    ("crates/launcher/src/upgrade_restart.rs", "\"cmd\"", 1,
+    ("crates/launcher/src/upgrade_restart.rs", "powershell_exe(", 1,
      "no-window: calls no_window()/creation_flags in this file"),
     ("crates/launcher/src/autostart/mod.rs", "\"schtasks\"", 1,
      "no-window: calls no_window()/creation_flags in this file"),

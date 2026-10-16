@@ -20,7 +20,7 @@
 //!    saves the session;
 //! 4. after srv has stopped (so the new version copies complete data,
 //!    `srv/src/bootstrap/carry_forward.rs`), starts the new launcher, or a
-//!    hidden `cmd` that waits for this launcher to be gone, runs the
+//!    hidden PowerShell that waits for this launcher to be gone, runs the
 //!    installer silently and starts AgentMux again ([`relaunch`]), and exits.
 
 use std::path::{Path, PathBuf};
@@ -94,9 +94,11 @@ fn is_portable(folder: &Path) -> bool {
 pub enum Staged {
     /// A portable's new folder: start its launcher.
     Launcher(PathBuf),
-    /// A `setup.exe` install: run this installer for all users (an install
-    /// under Program Files) or the current one, then start `own_dir` again.
-    Installer { installer: PathBuf, own_dir: PathBuf, all_users: bool },
+    /// A `setup.exe` install: run this installer, then start `own_dir`
+    /// again. The installer keeps the install's own mode (all users or the
+    /// current one): Inno Setup's default `UsePreviousPrivileges` reads it
+    /// from the previous install, which the folder alone can't tell.
+    Installer { installer: PathBuf, own_dir: PathBuf },
 }
 
 impl std::fmt::Display for Staged {
@@ -107,15 +109,6 @@ impl std::fmt::Display for Staged {
             Staged::Installer { installer, .. } => write!(f, "{}", installer.display()),
         }
     }
-}
-
-/// Whether `dir` is under Program Files, where a `setup.exe` install was made
-/// for all users.
-fn under_program_files(dir: &Path) -> bool {
-    let dir = dir.to_string_lossy().to_ascii_lowercase();
-    ["ProgramFiles", "ProgramW6432", "ProgramFiles(x86)"].iter().any(|var| {
-        std::env::var(var).is_ok_and(|root| !root.is_empty() && dir.starts_with(&root.to_ascii_lowercase()))
-    })
 }
 
 /// What to restart into, if `req` names a newer release than `own_version`
@@ -155,11 +148,7 @@ pub fn staged(req: &UpgradeRequest, own_dir: &Path, data_dir: &Path, own_version
             if !has_uninstaller(own_dir) || !own_dir.join("agentmux.exe").is_file() {
                 return Err("this AgentMux isn't a setup.exe install".into());
             }
-            Ok(Staged::Installer {
-                installer: installer.clone(),
-                own_dir: own_dir.to_path_buf(),
-                all_users: under_program_files(own_dir),
-            })
+            Ok(Staged::Installer { installer: installer.clone(), own_dir: own_dir.to_path_buf() })
         }
     }
 }
@@ -255,11 +244,11 @@ fn confirm(version: &str, staged: &Staged) -> bool {
              from:\n{}\n\nYour tabs come back and agents resume their conversations.",
             launcher.parent().unwrap_or(launcher).display()
         ),
-        Staged::Installer { all_users, .. } => format!(
+        Staged::Installer { .. } => format!(
             "Restart AgentMux to upgrade to {version}?\n\n\
              Every window closes and every agent stops, then the AgentMux {version} installer \
-             runs{} and AgentMux opens again.\n\nYour tabs come back and agents resume their conversations.",
-            if *all_users { " (Windows asks for permission: it is installed for all users)" } else { "" }
+             runs (Windows may ask for permission, if AgentMux is installed for all users) \
+             and AgentMux opens again.\n\nYour tabs come back and agents resume their conversations."
         ),
     };
     let wide = |s: &str| std::ffi::OsStr::new(s).encode_wide().chain(Some(0)).collect::<Vec<u16>>();
@@ -286,17 +275,38 @@ pub fn still_confirmed(at: Instant) -> bool {
     at.elapsed() < CONFIRMED_FOR
 }
 
-/// The hidden `cmd` line that upgrades a `setup.exe` install: wait a few
+/// `path` as a PowerShell single-quoted string: nothing in it is expanded
+/// (no `$`, no `%VAR%`), and a `'` is written twice.
+fn ps_quote(path: &Path) -> String {
+    format!("'{}'", path.display().to_string().replace('\'', "''"))
+}
+
+/// The hidden PowerShell that upgrades a `setup.exe` install: wait a few
 /// seconds for this launcher to be gone (its files are replaced), run the
-/// installer silently, then start AgentMux again whatever the installer
-/// did, so a failed install leaves the old version running, not none.
-fn installer_script(installer: &Path, own_dir: &Path, all_users: bool) -> String {
+/// installer silently, then start AgentMux again whatever the installer did,
+/// so a failed or declined install leaves the old version running, not none.
+fn installer_script(installer: &Path, own_dir: &Path) -> String {
     format!(
-        "ping -n 4 127.0.0.1 >nul & start \"\" /wait \"{}\" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- {} & start \"\" \"{}\"",
-        installer.display(),
-        if all_users { "/ALLUSERS" } else { "/CURRENTUSER" },
-        own_dir.join("agentmux.exe").display()
+        "Start-Sleep -Seconds 3; \
+         Start-Process -FilePath {} -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-' -Wait; \
+         Start-Process -FilePath {}",
+        ps_quote(installer),
+        ps_quote(&own_dir.join("agentmux.exe"))
     )
+}
+
+/// `-EncodedCommand`'s form of `script` (base64 of UTF-16LE): the paths in
+/// it reach PowerShell as they are, through no shell's parsing.
+fn encoded_command(script: &str) -> String {
+    use base64::Engine;
+    let utf16: Vec<u8> = script.encode_utf16().flat_map(u16::to_le_bytes).collect();
+    base64::engine::general_purpose::STANDARD.encode(utf16)
+}
+
+/// Windows PowerShell by its full path, never whatever is first on `PATH`.
+fn powershell_exe() -> PathBuf {
+    let root = std::env::var_os("SystemRoot").unwrap_or_else(|| "C:\\Windows".into());
+    PathBuf::from(root).join("System32").join("WindowsPowerShell").join("v1.0").join("powershell.exe")
 }
 
 /// Restart into `staged`, detached, without this AgentMux's own environment:
@@ -313,17 +323,10 @@ pub fn relaunch(staged: &Staged) -> std::io::Result<()> {
             }
             c
         }
-        Staged::Installer { installer, own_dir, all_users } => {
-            let mut c = std::process::Command::new("cmd");
-            c.args(["/d", "/c"]);
-            #[cfg(target_os = "windows")]
-            {
-                // cmd parses its own line: passed as is, not re-quoted.
-                use std::os::windows::process::CommandExt;
-                c.raw_arg(installer_script(installer, own_dir, *all_users));
-            }
-            #[cfg(not(target_os = "windows"))]
-            c.arg(installer_script(installer, own_dir, *all_users));
+        Staged::Installer { installer, own_dir } => {
+            let mut c = std::process::Command::new(powershell_exe());
+            c.args(["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-EncodedCommand"])
+                .arg(encoded_command(&installer_script(installer, own_dir)));
             c
         }
     };
@@ -417,20 +420,23 @@ mod tests {
         assert!(staged(&setup_req("0.59.27", &installer), &portable_dir, &data, "0.59.26").is_err());
     }
 
-    /// Windows paths, as the line only ever runs there.
-    #[cfg(windows)]
     #[test]
-    fn the_installer_line_waits_runs_silently_and_always_starts_agentmux_again() {
-        let line = installer_script(
-            Path::new(r"C:\Users\A User\updates\0.59.27\AgentMux-0.59.27-x64-setup.exe"),
-            Path::new(r"C:\Users\A User\AppData\Local\Programs\AgentMux"),
-            false,
-        );
-        assert_eq!(
-            line,
-            r#"ping -n 4 127.0.0.1 >nul & start "" /wait "C:\Users\A User\updates\0.59.27\AgentMux-0.59.27-x64-setup.exe" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /CURRENTUSER & start "" "C:\Users\A User\AppData\Local\Programs\AgentMux\agentmux.exe""#
-        );
-        assert!(installer_script(Path::new("i.exe"), Path::new("d"), true).contains("/ALLUSERS"));
+    fn the_installer_script_runs_silently_then_always_starts_agentmux_again() {
+        let script = installer_script(Path::new("C:/Users/A %TEMP% $x/AgentMux-0.59.27-x64-setup.exe"), Path::new("C:/Apps/O'Neil"));
+        assert!(script.starts_with("Start-Sleep -Seconds 3; "), "{script}");
+        // Single-quoted: neither %TEMP% nor $x is expanded; a ' is doubled.
+        assert!(script.contains("-FilePath 'C:/Users/A %TEMP% $x/AgentMux-0.59.27-x64-setup.exe' -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-' -Wait; "), "{script}");
+        assert!(script.contains("Start-Process -FilePath 'C:/Apps/O''Neil"), "{script}");
+        // The install keeps its own mode (UsePreviousPrivileges).
+        assert!(!script.contains("ALLUSERS") && !script.contains("CURRENTUSER"));
+    }
+
+    #[test]
+    fn the_script_reaches_powershell_as_utf16_base64() {
+        use base64::Engine;
+        let bytes = base64::engine::general_purpose::STANDARD.decode(encoded_command("Start-Process 'é'")).unwrap();
+        let units: Vec<u16> = bytes.chunks(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+        assert_eq!(String::from_utf16(&units).unwrap(), "Start-Process 'é'");
     }
 
     #[test]
