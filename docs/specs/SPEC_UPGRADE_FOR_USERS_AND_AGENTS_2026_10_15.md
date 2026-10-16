@@ -6,8 +6,9 @@ new" and Download) in #4983; phase 2 (data carries forward) in #4996;
 phase 3a (download and stage, Windows portable) in #5000; phase 3b
 (Upgrade & restart) in #5005; phase 3d (`setup.exe`) in #5015; phase 4a
 (the `App` tool) in #5012; phase 4b (the note after an upgrade) in #5014;
-phase 5a (the version panel's clicks only through the host) in #5019; the
-rest of phases 3–5 are not started. The operator took the §8
+phase 5a (the version panel's clicks only through the host) in #5019;
+every window coming back after an upgrade (§6.1) in #5033; the rest of
+phases 3–5 are not started. The operator took the §8
 recommendations on 2026-10-15.
 **Asked for:** "agents need a way to upgrade their running instances and
 continue on. Users also need a button to let them know. We did work on this
