@@ -87,7 +87,7 @@ function mountCovered(following = true) {
     return { covered: () => covered(), setDormant, setChanges, frame, observed, observing: () => onResize != null };
 }
 
-// SPEC_AGENT_PANE_NO_CATCH_UP_MOTION_2026_10_15.md §3.6.
+// SPEC_AGENT_PANE_NO_CATCH_UP_MOTION_2026_10_15.md §3.7.
 describe("useSettleOnShow's cover", () => {
     it("covers a pane shown with content it got while hidden until its size holds still", () => {
         const p = mountCovered();

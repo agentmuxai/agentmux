@@ -341,7 +341,7 @@
     // has been drawn and laid out, then shown at once, at the bottom
     // (scroll/settle-on-show.ts). Laid out underneath, not painted; opacity
     // too, so nothing inside can paint through.
-    // SPEC_AGENT_PANE_NO_CATCH_UP_MOTION_2026_10_15.md §3.6.
+    // SPEC_AGENT_PANE_NO_CATCH_UP_MOTION_2026_10_15.md §3.7.
     .agent-document[data-show-cover] {
         visibility: hidden;
         opacity: 0;

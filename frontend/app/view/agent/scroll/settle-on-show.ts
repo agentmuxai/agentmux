@@ -47,7 +47,7 @@ const defaultDeps: ShowCoverDeps = {
  * hidden: from a show where it changed while hidden until its size has held
  * still for SHOW_COVER_QUIET_FRAMES frames (at most SHOW_COVER_MAX_MS), so it
  * appears once, at its latest content, instead of moving up in stages as that
- * content is drawn (§3.6).
+ * content is drawn (§3.7).
  */
 export function useSettleOnShow(
     flow: { settleOnShow(): void } | null,
