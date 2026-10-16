@@ -1,7 +1,7 @@
 # Spec: tell the user what happened after AgentMux recovers, and fix the toasts that carry it
 
 **Date:** 2026-10-16
-**Status:** active. §6's cause fixed in #5024; §4.5 (toasts that show in every build) in #5030; §4.1 and §4.2 for the host's cases (a window's renderer crashing, running out of memory or hanging; the quit watchdog's exit with no window left) in #5032, its causes in plain words in #5038. §4.3 (the status bar's "Recent incidents" and the uptime's marker) in #5040. Left: §4.3's "Restarted after" tooltip (it needs the launcher's records), the launcher's and srv's cases and GPU detection (§5 Phase C).
+**Status:** active. §6's cause fixed in #5024; §4.5 (toasts that show in every build) in #5030; §4.1 and §4.2 for the host's cases (a window's renderer crashing, running out of memory or hanging; the quit watchdog's exit with no window left) in #5032, its causes in plain words in #5038. §4.3 (the status bar's "Recent incidents" and the uptime's marker) in #5040. The launcher's cases (§4.4: restarts, the step down to no graphics acceleration, give-ups; both supervisors, through the record's format now in `agentmux_common::incidents`) in #5041. Left: §4.3's "Restarted after" tooltip, `hang_restarted`, srv's own start-up count of cut-off turns, the OS toast, and GPU detection (§5 Phase C).
 **Author:** Loap-3@narko, at the operator's request
 **Scope:** the frontend's toasts (`frontend/app/notification/`, `store/flash-notifications.ts`), the status bar's backend item (`statusbar/BackendStatus.tsx`, `HealthNotices.tsx`), the host's crash and quit paths (`crates/cef/src/client/crash_recovery.rs`, `client/lifecycle.rs`, `wrr/`, `lib.rs` fast exit), the launcher's supervisor (`crates/launcher/src/supervisor/`), srv's start-up recovery (`blockcontroller/session_recovery.rs`, `service/session_restore.rs`).
 **Related:** `SPEC_GRACEFUL_CRASH_HANDLING_2026_04_13.md` (the renderer recovery page), `SPEC_SERVICE_SUPERVISION_AND_RECOVERY_2026_05_20.md` (crash budgets), `SPEC_SESSION_RESTORE_AND_SAVED_LAYOUTS_2026_08_13.md`, `SPEC_OS_NOTIFICATIONS_SYSTEM_2026_09_24.md`, `SPEC_FLEETWIDE_CRASH_HANG_FORENSICS_2026_08_14.md`, `SPEC_TRAY_OPTIONAL_BACKGROUND_SERVICE_2026_09_04.md` §6 (the background audit), `docs/reports/REPORT_PERFORMANCE_INDICATORS_TO_STATUS_BAR_2026_10_08.md`.
@@ -107,7 +107,7 @@ The writer is the process that handled the incident, at the time it handled it: 
 On start-up, and whenever a record is added while a window is open, the frontend shows each **unacknowledged** record as a toast:
 
 - **It stays until closed:** no expiry, not cleared on hover-out, not removed by a later toast. Closing it (X) acknowledges the record (srv writes `acknowledged_at_ms`), so it doesn't come back in another window or on the next launch.
-- **It says what happened, why, and what was saved**, from the record: title from `kind` (§4.4), body `what` + `cause`, then "AgentMux saved:" and the `did` items, then "May be lost:" and `lost` if any.
+- **It says what happened, why, and what was saved**, from the record: title from `kind` (§4.4), body `what` + `cause`, then the `did` items (each a whole sentence; a first build put "AgentMux saved:" ahead of them, which read "AgentMux saved: AgentMux reopened your windows" for the launcher's lines), then "May be lost:" and `lost` if any.
 - **Actions:** **Details** opens the incident in the backend popover (§4.3); **Copy report** copies the record with its evidence, for an issue.
 - **One per incident**, newest first. More than three at once collapse into one: "AgentMux recovered 5 times since <time>" with Details.
 - **In every window**: acknowledging in one closes it in all (the toast's id is the record's id; srv broadcasts the acknowledgement).
@@ -131,11 +131,12 @@ The status bar's backend item is the right home for the **record**, not for the 
 | `gpu_process_crashed` | host (detection: Phase C, §5) | "The graphics process crashed and was restarted" | windows redrawn; nothing lost |
 | `window_closed_by_page` | host, `do_close` / the watchdog | "A web page closed the AgentMux window" | (with §6 this no longer happens; kept for any other path that removes the last window) |
 | `quit_no_window` | host, `wrr` before its fast exit | "AgentMux quit because no window was left" | saved the layout; every agent's conversation is kept |
-| `host_restarted` | launcher | "AgentMux restarted after it stopped unexpectedly" | restored your windows and panes; agents resumed |
-| `host_restarted_safe_mode` | launcher (`--disable-gpu` step-down) | "AgentMux restarted without graphics acceleration" | as above, and why, and how to turn it back |
-| `srv_restarted` | launcher, srv start-up | "AgentMux's background service restarted" | N agent turns were cut off; each resumes when you open it |
-| `hang_restarted` | launcher | "AgentMux stopped responding and was restarted" | restored windows; a crash report was saved at <path> |
-| `memory_give_up` | launcher | "AgentMux stopped: the computer was out of memory" | what it closed, what is kept |
+| `host_restarted` | launcher (built) | "AgentMux restarted its window after it stopped unexpectedly" | reopened your windows, tabs and panes; every agent kept running |
+| `host_restarted_safe_mode` | launcher (built): the `--disable-gpu` step-down, or the relaunch after the computer ran out of memory | "AgentMux restarted without graphics acceleration" / "AgentMux restarted after the computer ran out of memory" | as above, why, and that acceleration comes back on the next start |
+| `srv_restarted` | launcher (built); srv start-up for the turn count (not yet) | "AgentMux's background service restarted" | started it again (after waiting for memory, when that was why) and reopened the windows; may be lost: a turn under way. Why: its exit code in words, the computer out of memory, or "it stopped answering" when the launcher's liveness prober ended it. Later, from srv's start-up: N agent turns were cut off; each resumes when you open it |
+| `hang_restarted` | launcher (not yet: the launcher writes a minidump of a hung host but doesn't restart it) | "AgentMux stopped responding and was restarted" | restored windows; a crash report was saved at <path> |
+| `memory_give_up` | launcher (built) | "AgentMux stopped: the computer was out of memory" | your windows, tabs and panes are saved for the next start |
+| `host_give_up`, `srv_give_up` | launcher (built): the crash budget ran out | "AgentMux stopped: its window process (background service) kept crashing" | how many times in how long, the last exit in words; the layout is saved for the next start |
 
 Each `did` line is written only when that path actually did it.
 

@@ -36,7 +36,8 @@ export function incidentToastId(id: string): string {
 export function incidentMessage(i: Incident): string {
     const parts: string[] = [];
     if (i.cause) parts.push(i.cause);
-    if (i.did?.length) parts.push(`AgentMux saved: ${i.did.join(" ")}`);
+    // Each `did` line is a whole sentence saying what AgentMux did or kept.
+    if (i.did?.length) parts.push(i.did.join(" "));
     if (i.lost?.length) parts.push(`May be lost: ${i.lost.join(" ")}`);
     return parts.join(" ");
 }
@@ -85,7 +86,7 @@ function show(i: Incident): void {
 export function incidentReport(i: Incident): string {
     const lines = [`AgentMux incident ${i.id} (${i.kind})`, `When: ${new Date(i.at_ms).toISOString()}`, `What: ${i.what}`];
     if (i.cause) lines.push(`Why: ${i.cause}`);
-    for (const d of i.did ?? []) lines.push(`Saved: ${d}`);
+    for (const d of i.did ?? []) lines.push(`Did: ${d}`);
     for (const l of i.lost ?? []) lines.push(`May be lost: ${l}`);
     if (i.evidence) lines.push(`Evidence: ${i.evidence}`);
     return lines.join("\n");

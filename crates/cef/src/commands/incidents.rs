@@ -8,82 +8,28 @@
 //! crashing, running out of memory or hanging; quitting because no window is
 //! left), and the frontend shows each one the user hasn't closed as a toast
 //! that stays until they do. Before this, every recovery path in §3.3 of the
-//! spec logged and told the user nothing.
-//!
-//! An append-only JSON-lines file in the instance's data folder, next to the
-//! background audit log: an incident is one line, closing its notice appends
-//! an acknowledgement line. Written synchronously, because the quit watchdog
-//! records just before the process exits; incidents are rare, and each write
-//! is one small append.
+//! spec logged and told the user nothing. The launcher writes the cases only
+//! it sees to the same file (`agentmux_common::incidents`, which keeps its
+//! format).
 
-use std::io::Write;
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
-use serde::{Deserialize, Serialize};
+pub use agentmux_common::incidents::Incident;
 
 static PATH: OnceLock<PathBuf> = OnceLock::new();
 
-/// The file keeps about this many lines; past twice that it is cut back.
-const KEEP_LINES: usize = 200;
 /// How many incidents `list` hands the frontend.
 const LIST_MAX: usize = 50;
 
 /// Start recording in `dir` (the instance's data folder). Idempotent.
 pub fn init(dir: &std::path::Path) {
-    let _ = PATH.set(dir.join("incidents.jsonl"));
+    let _ = PATH.set(dir.join(agentmux_common::incidents::FILE_NAME));
 }
 
-/// One incident, as the user is told about it.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct Incident {
-    pub id: String,
-    pub at_ms: u64,
-    /// A closed set: `renderer_crashed`, `renderer_oom`, `renderer_hung`,
-    /// `quit_no_window`.
-    pub kind: String,
-    /// What happened, in plain words.
-    pub what: String,
-    /// Why, when it is known; never guessed.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cause: Option<String>,
-    /// What AgentMux did that keeps the user's work: only what this path did.
-    #[serde(default)]
-    pub did: Vec<String>,
-    /// What may not have survived, when this path knows.
-    #[serde(default)]
-    pub lost: Vec<String>,
-    /// The host log and when, for a bug report.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub evidence: Option<String>,
-    /// Set by `list` from the acknowledgement lines.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub acknowledged_at_ms: Option<u64>,
-}
-
-impl Incident {
-    pub fn new(kind: &str, what: impl Into<String>) -> Self {
-        let at_ms = agentmux_common::time::now_ms_u64();
-        Incident {
-            id: format!("{at_ms}-{}", &uuid::Uuid::new_v4().simple().to_string()[..8]),
-            at_ms,
-            kind: kind.to_string(),
-            what: what.into(),
-            cause: None,
-            did: Vec::new(),
-            lost: Vec::new(),
-            evidence: Some(format!("host log, {}", chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ"))),
-            acknowledged_at_ms: None,
-        }
-    }
-}
-
-/// One line of the file.
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(untagged)]
-enum Line {
-    Ack { ack: String, at_ms: u64 },
-    Incident(Incident),
+/// A new incident of the host's, now.
+fn incident(kind: &str, what: &str) -> Incident {
+    Incident::new(kind, what, "host")
 }
 
 /// Append `incident`. Best-effort: a failure is logged, never raised, since
@@ -91,7 +37,9 @@ enum Line {
 pub fn record(incident: &Incident) {
     tracing::warn!(target: "incidents", kind = %incident.kind, id = %incident.id, what = %incident.what, "incident recorded");
     if let Some(path) = PATH.get() {
-        append(path, &Line::Incident(incident.clone()));
+        if let Err(e) = agentmux_common::incidents::append(path, incident) {
+            tracing::warn!(target: "incidents", error = %e, "couldn't write the incident log");
+        }
     }
 }
 
@@ -108,70 +56,18 @@ pub fn record_and_announce(state: &crate::state::AppState, incident: &Incident) 
 /// window, which closes its copy.
 pub fn acknowledge(state: &crate::state::AppState, id: &str) {
     if let Some(path) = PATH.get() {
-        append(path, &Line::Ack { ack: id.to_string(), at_ms: agentmux_common::time::now_ms_u64() });
+        if let Err(e) = agentmux_common::incidents::append_ack(path, id, agentmux_common::time::now_ms_u64()) {
+            tracing::warn!(target: "incidents", error = %e, "couldn't write the incident log");
+        }
     }
     crate::events::emit_event_to_top_level_windows(state, "incident-acknowledged", &serde_json::json!({ "id": id }));
 }
 
 /// The newest incidents, newest first, each with its acknowledgement.
 pub fn list() -> Vec<Incident> {
-    PATH.get().map(|p| read(p)).unwrap_or_default()
+    PATH.get().map(|p| agentmux_common::incidents::read(p, LIST_MAX)).unwrap_or_default()
 }
 
-fn read(path: &std::path::Path) -> Vec<Incident> {
-    let Ok(text) = std::fs::read_to_string(path) else {
-        return Vec::new();
-    };
-    let mut incidents: Vec<Incident> = Vec::new();
-    let mut acks: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
-    // A torn last line (a crash mid-append) costs only itself.
-    for line in text.lines().filter_map(|l| serde_json::from_str::<Line>(l).ok()) {
-        match line {
-            Line::Ack { ack, at_ms } => {
-                acks.insert(ack, at_ms);
-            }
-            Line::Incident(i) => incidents.push(i),
-        }
-    }
-    for i in &mut incidents {
-        i.acknowledged_at_ms = acks.get(&i.id).copied();
-    }
-    incidents.reverse();
-    incidents.truncate(LIST_MAX);
-    incidents
-}
-
-fn append(path: &std::path::Path, line: &Line) {
-    let Ok(json) = serde_json::to_string(line) else {
-        return;
-    };
-    let written = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)
-        .and_then(|mut f| writeln!(f, "{json}"));
-    if let Err(e) = written {
-        tracing::warn!(target: "incidents", error = %e, "couldn't write the incident log");
-        return;
-    }
-    compact(path);
-}
-
-/// Keep the last `KEEP_LINES` lines once the file is past twice that.
-fn compact(path: &std::path::Path) {
-    let Ok(text) = std::fs::read_to_string(path) else {
-        return;
-    };
-    let lines: Vec<&str> = text.lines().collect();
-    if lines.len() <= KEEP_LINES * 2 {
-        return;
-    }
-    let kept = lines[lines.len() - KEEP_LINES..].join("\n") + "\n";
-    let tmp = path.with_extension("jsonl.tmp");
-    if std::fs::write(&tmp, kept).is_ok() {
-        let _ = std::fs::rename(&tmp, path);
-    }
-}
 
 /// A renderer stopped (`client::crash_recovery`). Recorded for an AgentMux
 /// window only, never a web page in a browser pane or a hidden pool window
@@ -209,7 +105,7 @@ fn renderer_incident(hung: bool, oom: bool, detail: &str) -> Incident {
     } else {
         ("renderer_crashed", "An AgentMux window crashed")
     };
-    let mut incident = Incident::new(kind, what);
+    let mut incident = incident(kind, what);
     incident.cause = if hung {
         Some("Its page stopped answering, so AgentMux stopped it.".to_string())
     } else {
@@ -262,7 +158,7 @@ pub fn is_unexpected_quit(registered: usize, draining: bool) -> bool {
 /// a window went without AgentMux closing it. Written before the exit; there
 /// is no window to tell.
 pub fn quit_no_window() {
-    let mut incident = Incident::new("quit_no_window", "AgentMux quit because its window closed unexpectedly");
+    let mut incident = incident("quit_no_window", "AgentMux quit because its window closed unexpectedly");
     incident.cause = Some("The window closed without AgentMux being asked to close it.".to_string());
     incident.did = vec!["Your agents' conversations are saved, and continue when you open the agents again.".to_string()];
     record(&incident);
@@ -285,24 +181,6 @@ pub fn incident_acknowledge(state: &crate::state::AppState, args: &serde_json::V
 mod tests {
     use super::*;
 
-    #[test]
-    fn incidents_read_back_newest_first_with_their_acknowledgements() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("incidents.jsonl");
-        let mut a = Incident::new("renderer_crashed", "A window crashed and was reloaded");
-        a.did = vec!["Every agent kept running".into()];
-        let b = Incident::new("quit_no_window", "AgentMux quit because no window was left");
-        append(&path, &Line::Incident(a.clone()));
-        append(&path, &Line::Incident(b.clone()));
-        append(&path, &Line::Ack { ack: a.id.clone(), at_ms: 99 });
-        // A torn last line costs only itself.
-        std::fs::OpenOptions::new().append(true).open(&path).unwrap().write_all(b"{\"id\":\"torn").unwrap();
-        let got = read(&path);
-        assert_eq!(got.iter().map(|i| i.kind.as_str()).collect::<Vec<_>>(), vec!["quit_no_window", "renderer_crashed"]);
-        assert_eq!(got[1].acknowledged_at_ms, Some(99));
-        assert_eq!(got[0].acknowledged_at_ms, None);
-        assert_eq!(got[1].did, vec!["Every agent kept running".to_string()]);
-    }
 
     #[test]
     fn a_renderer_incident_says_what_stopped_why_and_what_was_kept() {
@@ -337,15 +215,4 @@ mod tests {
         assert!(!is_unexpected_quit(2, true), "a drain under way");
     }
 
-    #[test]
-    fn the_file_is_cut_back_to_its_last_lines() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("incidents.jsonl");
-        for n in 0..(KEEP_LINES * 2 + 1) {
-            append(&path, &Line::Incident(Incident::new("renderer_crashed", format!("n{n}"))));
-        }
-        let lines = std::fs::read_to_string(&path).unwrap().lines().count();
-        assert_eq!(lines, KEEP_LINES);
-        assert_eq!(read(&path).first().map(|i| i.what.as_str()), Some(format!("n{}", KEEP_LINES * 2).as_str()));
-    }
 }
