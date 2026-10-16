@@ -62,7 +62,7 @@ async fn seed_leader(state: &AppState, provider: &str, agent_type: &str, pane_me
     state.reactive_handler.register_agent(&def.slug, &block_id, Some(&tab_id)).unwrap();
     // It runs on a signed-in account of its own.
     let own = leader_account(&def);
-    state.identity_store.identity_upsert(&own).unwrap();
+    state.id_store.identity_upsert(&own).unwrap();
     state.identity_store.agent_identity_link(&def.id, &own.id, provider).unwrap();
     (def, tab_id, block_id)
 }
@@ -366,7 +366,7 @@ async fn failing_pane(state: &AppState, tab: &str, account_id: &str, code: &str)
 async fn a_worker_runs_on_the_leaders_account_while_it_can() {
     let state = test_state();
     let (def, _, block) = seed_leader(&state, "claude", "host", json!({})).await;
-    state.identity_store.identity_upsert(&account("other", "other@example.com", "valid")).unwrap();
+    state.id_store.identity_upsert(&account("other", "other@example.com", "valid")).unwrap();
     let a = choose_account(&state, &leader_in(&state, &def, &block), "claude", None).unwrap();
     assert_eq!((a.id, a.note), (leader_account(&def).id, None));
 }
@@ -378,8 +378,8 @@ async fn a_worker_moves_to_another_account_when_the_leaders_cannot_run() {
     let state = test_state();
     let (def, tab, block) = seed_leader(&state, "claude", "host", json!({})).await;
     let own = leader_account(&def);
-    state.identity_store.identity_upsert(&account("signed-out", "out@example.com", "needs_reauth")).unwrap();
-    state.identity_store.identity_upsert(&account("spare", "spare@example.com", "valid")).unwrap();
+    state.id_store.identity_upsert(&account("signed-out", "out@example.com", "needs_reauth")).unwrap();
+    state.id_store.identity_upsert(&account("spare", "spare@example.com", "valid")).unwrap();
     failing_pane(&state, &tab, &own.id, "usage_limit").await;
     let a = choose_account(&state, &leader_in(&state, &def, &block), "claude", None).unwrap();
     assert_eq!(a.id, "spare", "skips the signed-out one too");
@@ -392,13 +392,34 @@ async fn a_worker_moves_to_another_account_when_the_leaders_cannot_run() {
     assert_eq!(choose_account(&state, &leader_in(&state, &def, &block), "claude", None).unwrap().note, None);
 }
 
+/// The accounts come from this channel's store, the one a spawn launches
+/// with (`resolve_account_for_spawn`); the global mirror can hold an account
+/// signed in only in another channel (Codex on #5023).
+#[tokio::test]
+async fn only_this_channels_accounts_are_candidates() {
+    let mut state = test_state();
+    let (def, tab, block) = seed_leader(&state, "claude", "host", json!({})).await;
+    failing_pane(&state, &tab, &leader_account(&def).id, "usage_limit").await;
+    // This channel's store, apart from the global mirror (`identity_store`,
+    // which keeps the links): the leader's account and one more are signed
+    // in here; the mirror also lists one signed in only elsewhere.
+    let channel = std::sync::Arc::new(crate::backend::storage::store::Store::open_in_memory().unwrap());
+    channel.apply_identity_schema_for_tests().unwrap();
+    channel.identity_upsert(&leader_account(&def)).unwrap();
+    channel.identity_upsert(&account("here", "here@example.com", "valid")).unwrap();
+    state.identity_store.identity_upsert(&account("elsewhere", "aaa-elsewhere@example.com", "valid")).unwrap();
+    state.id_store = channel;
+    let a = choose_account(&state, &leader_in(&state, &def, &block), "claude", None).unwrap();
+    assert_eq!(a.id, "here", "not the account signed in only in another channel");
+}
+
 #[tokio::test]
 async fn an_account_asked_for_is_used_or_refused_with_why() {
     let state = test_state();
     let (def, tab, block) = seed_leader(&state, "claude", "host", json!({})).await;
     let leader = leader_in(&state, &def, &block);
-    state.identity_store.identity_upsert(&account("spare", "Spare@Example.com", "valid")).unwrap();
-    state.identity_store.identity_upsert(&account("tired", "tired@example.com", "valid")).unwrap();
+    state.id_store.identity_upsert(&account("spare", "Spare@Example.com", "valid")).unwrap();
+    state.id_store.identity_upsert(&account("tired", "tired@example.com", "valid")).unwrap();
     failing_pane(&state, &tab, "tired", "usage_limit").await;
     assert_eq!(choose_account(&state, &leader, "claude", Some("spare@example.com")).unwrap().id, "spare", "by email, any case");
     assert_eq!(choose_account(&state, &leader, "claude", Some("spare")).unwrap().id, "spare", "by id");

@@ -310,8 +310,11 @@ pub(crate) struct WorkerAccount {
 fn choose_account(state: &AppState, leader: &Leader, provider: &str, requested: Option<&str>) -> Result<WorkerAccount, SpawnError> {
     use crate::backend::providers::resolve_provider_alias;
     let provider = resolve_provider_alias(provider).to_string();
+    // The channel's own accounts and their sign-in state: what a spawn can
+    // launch with (`resolve_account_for_spawn` reads `id_store` only). The
+    // global mirror can list an account signed in only in another channel.
     let accounts: Vec<IdentityAccount> = state
-        .identity_store
+        .id_store
         .identity_list(None)
         .map_err(|e| refuse(StatusCode::INTERNAL_SERVER_ERROR, format!("agent.spawn: accounts: {e}")))?
         .into_iter()
