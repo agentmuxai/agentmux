@@ -6,9 +6,11 @@
  * (docs/specs/SPEC_UPGRADE_FOR_USERS_AND_AGENTS_2026_10_15.md §5.1).
  *
  * srv holds each request (`app:upgraderequests` event, `app.upgrade-requests`
- * RPC) that an agent made without the user's own turn asking for it. Upgrade
- * now starts the download and the restart (the launcher still asks once more
- * before it restarts); Later declines. Either way srv tells the agent.
+ * RPC) that an agent made without the user's own turn asking for it. The
+ * answer goes to srv the one way an approval can, through the host
+ * (`approvals.decideUpgrade`). Upgrade now starts the download and the
+ * restart (the launcher still asks once more before it restarts); Later
+ * declines. Either way srv tells the agent.
  */
 
 import { createEffect, createRoot, createSignal, on, type JSX } from "solid-js";
@@ -17,6 +19,7 @@ import { ConfirmModal } from "@/app/element/confirm-modal";
 import { modalsModel, type ModalCloseProps } from "@/app/store/modalmodel";
 import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
+import { getApi } from "@/app/store/app-api";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import type { UpgradeRequest } from "@/types/rpc/UpgradeRequest";
@@ -35,8 +38,8 @@ function UpgradeRequestPrompt(props: { request: UpgradeRequest } & ModalClosePro
     });
     const decide = async (accept: boolean) => {
         try {
-            const res = await RpcApi.AppUpgradeRequestAnswerCommand(TabRpcClient, { id: r.id, accept });
-            setRequests(res.requests);
+            await getApi().approvals.decideUpgrade!(r.id, r.version, accept);
+            setRequests((list) => list.filter((x) => x.id !== r.id));
             props.close();
         } catch (e) {
             setError(e instanceof Error ? e.message : String(e));
@@ -70,7 +73,8 @@ let started = false;
 
 /** Follow srv's upgrade requests and open a prompt for each new one. Call once. */
 export function startUpgradeRequests(): void {
-    if (started) return;
+    // Only a host that can relay the answer can show the prompt.
+    if (started || typeof getApi()?.approvals?.decideUpgrade !== "function") return;
     started = true;
     const shown = new Set<string>();
     // An event is newer than the first fetch: once one arrives, the fetch's

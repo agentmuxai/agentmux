@@ -843,25 +843,6 @@
     }
   },
   {
-    "command": "app.upgrade-request-answer",
-    "request": "agentmux_srv::backend::upgrade_request::CommandAppUpgradeRequestAnswerData",
-    "requestName": "CommandAppUpgradeRequestAnswerData",
-    "requestTs": {
-      "imports": [
-        "CommandAppUpgradeRequestAnswerData"
-      ],
-      "name": "CommandAppUpgradeRequestAnswerData"
-    },
-    "response": "agentmux_srv::backend::upgrade_request::UpgradeRequestsEvent",
-    "responseName": "UpgradeRequestsEvent",
-    "responseTs": {
-      "imports": [
-        "UpgradeRequestsEvent"
-      ],
-      "name": "UpgradeRequestsEvent"
-    }
-  },
-  {
     "command": "app.upgrade-requests",
     "request": "core::option::Option<agentmux_srv::backend::rpc_types::websocket::NoArgsReq>",
     "requestName": "core::option::Option<agentmux_srv::backend::rpc_types::websocket::NoArgsReq>",

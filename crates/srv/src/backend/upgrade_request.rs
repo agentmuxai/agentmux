@@ -53,11 +53,12 @@ pub struct UpgradeRequestsEvent {
     pub requests: Vec<UpgradeRequest>,
 }
 
-/// `app.upgrade-request-answer`.
-#[derive(Debug, Clone, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../../frontend/types/rpc/")]
-pub struct CommandAppUpgradeRequestAnswerData {
+/// The user's answer, relayed by the host (`POST /api/v1/host/upgrade_request`).
+#[derive(Debug, Clone, Deserialize)]
+pub struct UpgradeRequestAnswer {
     pub id: String,
+    /// The release the prompt showed: Upgrade now installs only that one.
+    pub version: String,
     /// Upgrade now (true) or Later (false).
     pub accept: bool,
 }
@@ -188,21 +189,39 @@ pub fn ask_user(state: &crate::server::AppState, block_id: &str, agent: &str, re
     id
 }
 
-/// The user's answer to request `id` (`app.upgrade-request-answer`). Upgrade
-/// now answers every waiting request, since there is one AgentMux to upgrade.
-pub fn answer(state: &crate::server::AppState, id: &str, accept: bool) -> Result<(), String> {
-    let answered: Vec<UpgradeRequest> = {
+/// The user's answer to request `id`, for the release the prompt showed
+/// (relayed by the host: `POST /api/v1/host/upgrade_request`). Upgrade now
+/// answers every request for that release, since there is one AgentMux to
+/// upgrade; if the update check has found a newer release since, it installs
+/// nothing and the agent is told to ask again.
+pub fn answer(state: &crate::server::AppState, id: &str, version: &str, accept: bool) -> Result<(), String> {
+    let latest = update_check::current_status().latest.unwrap_or_default();
+    let (answered, stale): (Vec<UpgradeRequest>, bool) = {
         let mut p = pending();
-        let Some(pos) = p.iter().position(|r| r.id == id) else {
+        let Some(pos) = p.iter().position(|r| r.id == id && r.version == version) else {
             return Err("that upgrade request was already answered".into());
         };
-        if accept {
-            std::mem::take(&mut *p)
+        if accept && version == latest {
+            let (same, other): (Vec<_>, Vec<_>) = std::mem::take(&mut *p).into_iter().partition(|r| r.version == version);
+            *p = other;
+            (same, false)
         } else {
-            vec![p.remove(pos)]
+            (vec![p.remove(pos)], accept)
         }
     };
     publish(state);
+    if stale {
+        for r in &answered {
+            tell(
+                &r.block_id,
+                &format!(
+                    "[AgentMux] AgentMux has learned of a newer release ({latest}) since you asked to upgrade to {}; nothing was installed. Ask again if it's still wanted.",
+                    r.version
+                ),
+            );
+        }
+        return Err(format!("a newer release, {latest}, came out since this request; nothing was installed"));
+    }
     for r in &answered {
         let text = if accept {
             format!(
@@ -215,23 +234,30 @@ pub fn answer(state: &crate::server::AppState, id: &str, accept: bool) -> Result
         tell(&r.block_id, &text);
     }
     if accept {
-        start_upgrade();
+        start_upgrade(version.to_string());
     }
     Ok(())
 }
 
-/// Download the release if it isn't yet, then restart once every agent has
-/// finished its turn (the launcher asks the user before it does).
-pub fn start_upgrade() {
+/// Download `version` if it isn't yet, then restart once every agent has
+/// finished its turn (the launcher asks the user before it does). Only while
+/// `version` is still the latest release: the download and restart take the
+/// latest, so a newer one appearing meanwhile stops the flow.
+pub fn start_upgrade(version: String) {
     tokio::spawn(async move {
+        let still_latest = |s: &AppUpdateStatus| s.latest.as_deref() == Some(version.as_str());
         let ready = |s: &AppUpdateStatus| {
-            s.download.as_ref().is_some_and(|d| Some(&d.version) == s.latest.as_ref() && d.state == "ready")
+            s.download.as_ref().is_some_and(|d| d.version == version && d.state == "ready")
         };
         let busy = |s: &AppUpdateStatus| {
             s.download.as_ref().is_some_and(|d| matches!(d.state.as_str(), "waiting" | "restarting"))
         };
         let status = update_check::current_status();
         if busy(&status) {
+            return;
+        }
+        if !still_latest(&status) {
+            tracing::info!(version = %version, "upgrade request: a newer release came out; not installing this one");
             return;
         }
         if !ready(&status) {
@@ -243,6 +269,10 @@ pub fn start_upgrade() {
             loop {
                 tokio::time::sleep(Duration::from_secs(1)).await;
                 let s = update_check::current_status();
+                if !still_latest(&s) {
+                    tracing::info!(version = %version, "upgrade request: a newer release came out while downloading");
+                    return;
+                }
                 if ready(&s) {
                     break;
                 }
@@ -252,6 +282,9 @@ pub fn start_upgrade() {
                     return;
                 }
             }
+        }
+        if !still_latest(&update_check::current_status()) {
+            return;
         }
         if let Err(e) = crate::backend::update_restart::start(false) {
             tracing::warn!(error = %e, "upgrade request: couldn't start the restart");

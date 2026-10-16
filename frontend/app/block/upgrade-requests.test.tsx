@@ -10,10 +10,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 const answer = vi.fn();
 const list = vi.fn();
 vi.mock("@/app/store/rpc-api", () => ({
-    RpcApi: {
-        AppUpgradeRequestAnswerCommand: (...a: unknown[]) => answer(...a),
-        AppUpgradeRequestsCommand: (...a: unknown[]) => list(...a),
-    },
+    RpcApi: { AppUpgradeRequestsCommand: (...a: unknown[]) => list(...a) },
+}));
+vi.mock("@/app/store/app-api", () => ({
+    getApi: () => ({ approvals: { decideUpgrade: (...a: unknown[]) => answer(...a) } }),
 }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 let onEvent: ((data: unknown) => void) | null = null;
@@ -45,10 +45,11 @@ describe("agents' upgrade requests", () => {
         expect(screen.getByText("QTest asks to upgrade AgentMux to 0.59.27")).toBeTruthy();
         expect(screen.getByText("0.59.27 fixes the send bug")).toBeTruthy();
 
-        answer.mockResolvedValue({ requests: [] });
+        answer.mockResolvedValue(undefined);
         fireEvent.click(screen.getByRole("button", { name: "Later" }));
         await Promise.resolve();
-        expect(answer).toHaveBeenCalledWith(expect.anything(), { id: "r1", accept: false });
+        // Through the host, for the version the prompt showed.
+        expect(answer).toHaveBeenCalledWith("r1", "0.59.27", false);
     });
 
     it("Upgrade now accepts, and a request answered elsewhere closes its prompt", async () => {
@@ -57,10 +58,10 @@ describe("agents' upgrade requests", () => {
         const { comp: Prompt, props } = opened[opened.length - 1];
         const close = vi.fn();
         render(() => <Prompt {...props} close={close} />);
-        answer.mockResolvedValue({ requests: [] });
+        answer.mockResolvedValue(undefined);
         fireEvent.click(screen.getByRole("button", { name: "Upgrade now" }));
         await Promise.resolve();
-        expect(answer).toHaveBeenLastCalledWith(expect.anything(), { id: "r2", accept: true });
+        expect(answer).toHaveBeenLastCalledWith("r2", "0.59.27", true);
 
         onEvent!({ requests: [] });
         await Promise.resolve();

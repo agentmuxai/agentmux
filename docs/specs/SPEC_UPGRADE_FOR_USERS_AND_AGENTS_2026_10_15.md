@@ -174,9 +174,14 @@ App({ action: "upgrade", reason: "…", user_instruction?: "…", version?: "0.5
     `pending_user`: every window shows "QTest asks to upgrade AgentMux to
     0.59.27" with the reason, **Upgrade now** / **Later**
     (`frontend/app/block/upgrade-requests.tsx`; `app:upgraderequests`,
-    `app.upgrade-requests`, `app.upgrade-request-answer`, which refuses an
-    agent connection), with the waiting tone. The agent gets an `[AgentMux]`
-    note with the answer; Upgrade now answers every waiting request.
+    `app.upgrade-requests`), with the waiting tone. The answer reaches srv
+    only through the host (`approvals.decideUpgrade` →
+    `POST /api/v1/host/upgrade_request`, checked with the host's own token),
+    like a widget approval, so an agent holding the instance key can't answer
+    its own request. It names the release the prompt showed: if a newer one
+    came out since, nothing is installed and the agent is told to ask again.
+    The agent gets an `[AgentMux]` note with the answer; Upgrade now answers
+    every waiting request for that release.
   - Either way the launcher asks the user once more in its own dialog
     before it restarts (§4.1, phase 3b).
 - **Only what the update check found is installed**: the latest release,

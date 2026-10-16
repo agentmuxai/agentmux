@@ -7,15 +7,16 @@
 //! release it found (`backend::update_download`); progress follows as events.
 //! `app.upgrade-restart` / `app.upgrade-cancel`: restart into it once agents
 //! are idle, or stop waiting (`backend::update_restart`).
-//! `app.upgrade-requests` / `app.upgrade-request-answer`: agents' requests
-//! waiting for the user, and the user's answer (`backend::upgrade_request`).
+//! `app.upgrade-requests`: agents' requests waiting for the user
+//! (`backend::upgrade_request`); the user's answer comes only through the
+//! host (`POST /api/v1/host/upgrade_request`), which agents can't impersonate.
 //! And the agent's side over HTTP: the `App` tool's `version`
 //! (`GET /api/v1/app/update-status`) and `upgrade`
 //! (`POST /api/v1/agent/self/upgrade`).
 
 use super::*;
 
-pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
+pub fn register(engine: &Arc<WshRpcEngine>, _state: &AppState) {
     engine.register_typed(COMMAND_APP_UPDATE_STATUS, move |_req: Option<NoArgsReq>, _ctx| async move {
         Ok::<_, String>(crate::backend::update_check::current_status())
     });
@@ -47,22 +48,27 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
             requests: crate::backend::upgrade_request::list(),
         })
     });
-    let answer_state = state.clone();
-    engine.register_typed(
-        COMMAND_APP_UPGRADE_REQUEST_ANSWER,
-        move |req: crate::backend::upgrade_request::CommandAppUpgradeRequestAnswerData, ctx| {
-            let state = answer_state.clone();
-            async move {
-                if !ctx.agent_id.is_empty() {
-                    return Err("FORBIDDEN: only the user answers an agent's upgrade request".to_string());
-                }
-                crate::backend::upgrade_request::answer(&state, &req.id, req.accept)?;
-                Ok(crate::backend::upgrade_request::UpgradeRequestsEvent {
-                    requests: crate::backend::upgrade_request::list(),
-                })
-            }
-        },
-    );
+}
+
+/// `POST /api/v1/host/upgrade_request`: the user's Upgrade now / Later on an
+/// agent's upgrade request, relayed by the CEF host with its own token. The
+/// instance auth key, which every agent has, isn't enough.
+pub(crate) async fn handle_host_upgrade_request(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    headers: axum::http::HeaderMap,
+    axum::Json(body): axum::Json<crate::backend::upgrade_request::UpgradeRequestAnswer>,
+) -> axum::response::Response {
+    use axum::http::StatusCode;
+    use axum::response::IntoResponse;
+    use axum::Json;
+    if !crate::server::ui_handlers::from_host(&state, &headers).await {
+        return (StatusCode::FORBIDDEN, Json(json!({ "ok": false, "error": "only the AgentMux host can answer an upgrade request" })))
+            .into_response();
+    }
+    match crate::backend::upgrade_request::answer(&state, &body.id, &body.version, body.accept) {
+        Ok(()) => Json(json!({ "ok": true })).into_response(),
+        Err(e) => (StatusCode::CONFLICT, Json(json!({ "ok": false, "error": e }))).into_response(),
+    }
 }
 
 /// `GET /api/v1/app/update-status`: the `App` tool's `version`.
@@ -101,7 +107,7 @@ pub(crate) async fn handle_request_upgrade(
     let outcome = match crate::sagas::self_quit::gate(provenance.as_ref(), &req.user_instruction) {
         Ok(()) => {
             tracing::info!(agent, version = %version, reason, "upgrade: the user's own turn asked; starting");
-            upgrade_request::start_upgrade();
+            upgrade_request::start_upgrade(version.clone());
             Outcome::Started { version }
         }
         Err(refusal) => {

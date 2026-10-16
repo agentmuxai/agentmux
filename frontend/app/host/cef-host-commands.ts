@@ -220,6 +220,9 @@ export const cefApprovals: ApprovalHostApi = {
     decideWidget: async (id, hash, approve, signer) => {
         await invokeCommand("widget_approval_decide", { id, hash, decision: approve ? "approve" : "cancel", signer: signer ?? "" });
     },
+    decideUpgrade: async (id, version, accept) => {
+        await invokeCommand("upgrade_request_decide", { id, version, accept });
+    },
     forgetWidgetKey: async (publisher) => {
         await invokeCommand("widget_approval_decide", { id: publisher, hash: "", decision: "forget_key" });
     },

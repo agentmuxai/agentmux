@@ -438,6 +438,8 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         .route("/api/v1/ui/browser/handoff", post(ui_handlers::handle_ui_browser_handoff))
         .route("/api/v1/host/browser_attention", post(ui_handlers::handle_host_browser_attention))
         .route("/api/v1/host/widget_approval", post(super::widget_handlers::handle_host_widget_approval))
+        // The user's answer to an agent's upgrade request, relayed by the host.
+        .route("/api/v1/host/upgrade_request", post(app_api::app_update::handle_host_upgrade_request))
         .route("/api/v1/host/browser_navigation", post(crate::server::browser_allowlist::handle_host_browser_navigation))
         .route("/api/v1/host/browser_popup", post(ui_handlers::handle_host_browser_popup))
         .route("/api/v1/host/browser_popup_window", post(ui_handlers::handle_host_browser_popup_window))

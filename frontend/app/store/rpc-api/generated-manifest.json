@@ -1330,10 +1330,7 @@
             "command": "app.upgrade-cancel",
             "method": "AppUpgradeCancelCommand"
         },
-        {
-            "command": "app.upgrade-request-answer",
-            "method": "AppUpgradeRequestAnswerCommand"
-        },
+
         {
             "command": "app.upgrade-requests",
             "method": "AppUpgradeRequestsCommand"
