@@ -27,6 +27,8 @@ function meta(id: string): NativeMemoryVersionMeta {
         source_detail: "{}",
         session_id: "",
         created_at: 0,
+        size_bytes: 0,
+        tokens_est: 0,
     };
 }
 

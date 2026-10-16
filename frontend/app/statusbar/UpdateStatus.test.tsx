@@ -7,22 +7,29 @@ import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const updateStatus = vi.fn();
-vi.mock("@/app/store/rpc-api", () => ({ RpcApi: { AppUpdateStatusCommand: (...a: unknown[]) => updateStatus(...a) } }));
+const updateDownload = vi.fn();
+vi.mock("@/app/store/rpc-api", () => ({
+    RpcApi: {
+        AppUpdateStatusCommand: (...a: unknown[]) => updateStatus(...a),
+        AppUpdateDownloadCommand: (...a: unknown[]) => updateDownload(...a),
+    },
+}));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 const openLink = vi.fn();
 const installAppUpdate = vi.fn();
+const openNativePath = vi.fn();
 vi.mock("@/store/global", async (importOriginal) => {
     const { createSignal } = await import("solid-js");
     const [status] = createSignal("up-to-date");
     const [version] = createSignal<string | null>(null);
     return {
         atoms: { updaterStatusAtom: status, updaterVersionAtom: version },
-        getApi: () => ({ installAppUpdate, getBackendInfo: () => Promise.resolve({ pending_migrations: 0 }), listen: () => Promise.resolve(() => {}) }),
+        getApi: () => ({ installAppUpdate, openNativePath, getBackendInfo: () => Promise.resolve({ pending_migrations: 0 }), listen: () => Promise.resolve(() => {}) }),
         openLink: (u: string) => openLink(u),
     };
 });
 
-import { acceptAppUpdate, appUpdate, availableRelease } from "@/app/store/app-update";
+import { acceptAppUpdate, appUpdate, availableRelease, releaseDownload } from "@/app/store/app-update";
 import { MaintenanceSection } from "./MaintenanceSection";
 import { UpdateStatus } from "./UpdateStatus";
 
@@ -33,13 +40,23 @@ const AVAILABLE = {
     url: "https://github.com/agentmuxai/agentmux/releases/tag/v0.59.27",
     notes: "- Sysinfo opens on a new Overview",
     checked_ms: 1,
+    install: "windows-setup",
+    can_download: false,
 };
+
+const PORTABLE = { ...AVAILABLE, install: "windows-portable", can_download: true };
+const download = (state: string, extra: Record<string, unknown> = {}) => ({
+    ...PORTABLE,
+    download: { version: "0.59.27", state, received: 50, total: 200, ...extra },
+});
 
 beforeEach(() => {
     updateStatus.mockReset();
+    updateDownload.mockReset();
     openLink.mockReset();
     installAppUpdate.mockReset();
-    acceptAppUpdate({ state: "unknown", current: "0.59.26", checked_ms: 0 });
+    openNativePath.mockReset();
+    acceptAppUpdate({ state: "unknown", current: "0.59.26", checked_ms: 0, install: "unknown", can_download: false });
 });
 afterEach(() => cleanup());
 
@@ -96,5 +113,40 @@ describe("Maintenance update row", () => {
         expect(screen.queryByRole("button", { name: "Download" })).toBeNull();
         fireEvent.click(screen.getByRole("button", { name: "View" }));
         expect(openLink).toHaveBeenCalledWith(AVAILABLE.url);
+    });
+});
+
+describe("Maintenance download, for an install AgentMux can upgrade itself", () => {
+    it("Download asks srv to fetch it, and the row follows its progress", async () => {
+        updateStatus.mockResolvedValue(PORTABLE);
+        updateDownload.mockResolvedValue(download("downloading"));
+        render(() => <MaintenanceSection />);
+        fireEvent.click(await screen.findByRole("button", { name: "Download" }));
+        expect(updateDownload).toHaveBeenCalledTimes(1);
+        expect(openLink).not.toHaveBeenCalled();
+        expect(await screen.findByText("Downloading v0.59.27… 25%")).toBeTruthy();
+        acceptAppUpdate(download("unpacking"));
+        expect(await screen.findByText("Unpacking v0.59.27…")).toBeTruthy();
+    });
+
+    it("a staged release shows its folder; a failed one says why and can be retried", async () => {
+        updateStatus.mockResolvedValue(download("ready", { folder: "C:/apps/agentmux-0.59.27-x64-portable" }));
+        render(() => <MaintenanceSection />);
+        fireEvent.click(await screen.findByRole("button", { name: "Show folder" }));
+        expect(openNativePath).toHaveBeenCalledWith("C:/apps/agentmux-0.59.27-x64-portable");
+        expect(installAppUpdate).not.toHaveBeenCalled();
+
+        acceptAppUpdate(download("failed", { error: "the download doesn't match the checksum GitHub lists for it" }));
+        expect(await screen.findByText(/Download failed: the download doesn't match/)).toBeTruthy();
+        updateDownload.mockResolvedValue(download("downloading"));
+        fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+        expect(updateDownload).toHaveBeenCalledTimes(1);
+        fireEvent.click(screen.getByRole("button", { name: "Release page" }));
+        expect(openLink).toHaveBeenCalledWith(AVAILABLE.url);
+    });
+
+    it("a download of an older release is not shown against a newer one", () => {
+        acceptAppUpdate({ ...download("ready"), latest: "0.59.28" });
+        expect(releaseDownload()).toBeNull();
     });
 });

@@ -48,12 +48,11 @@ use crate::backend::rpc_types::{
     NativeMemoryListResult,
     NativeMemoryReadFileResult,
     NativeMemoryRevertResult,
-    NativeMemoryVersionMeta,
 };
-use crate::backend::storage::NativeMemoryVersion;
 
 use super::AppState;
 pub(crate) use super::native_memory_diff::line_diff;
+use super::native_memory_versions::{version_summary_to_meta, version_to_meta};
 use agentmux_common::tokens::{count_lines, estimate_tokens, tokens_for_chars};
 
 /// Compute `$CLAUDE_CONFIG_DIR/projects/<sanitized>/memory/` for the given
@@ -759,30 +758,6 @@ fn legacy_memory_dir_by_id(
         .map(|dir| (dir, MemoryDirProvenance::Unverified))
 }
 
-fn version_summary_to_meta(v: crate::backend::storage::NativeMemoryVersionSummary) -> NativeMemoryVersionMeta {
-    NativeMemoryVersionMeta {
-        id: v.id,
-        content_hash: v.content_hash,
-        parent_version_id: v.parent_version_id,
-        source: v.source,
-        source_detail: v.source_detail,
-        session_id: v.session_id,
-        created_at: v.created_at,
-    }
-}
-
-fn version_to_meta(v: &NativeMemoryVersion) -> NativeMemoryVersionMeta {
-    NativeMemoryVersionMeta {
-        id: v.id.clone(),
-        content_hash: v.content_hash.clone(),
-        parent_version_id: v.parent_version_id.clone(),
-        source: v.source.clone(),
-        source_detail: v.source_detail.clone(),
-        session_id: v.session_id.clone(),
-        created_at: v.created_at,
-    }
-}
-
 /// The content `agent:memory:read_file` would return for `path` right now —
 /// live FS first (lossy UTF-8, capped at [`MAX_MEMORY_FILE_BYTES`]), the
 /// durable mirror only when the live file is genuinely absent — WITHOUT
@@ -841,6 +816,7 @@ fn check_memory_base_sha256(filename: &str, base: &str, current: Option<&str>) -
 }
 
 pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    super::memory_launch_cost::register(engine, state);
     let mstore_list = state.mstore.clone();
     let id_store_list = state.id_store.clone();
     engine.register_typed(
@@ -1003,8 +979,7 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
                             }
                         }
                         live_filenames.insert(name.clone());
-                        // Not read above (unchanged, or the read failed): from the
-                        // mirror; never mirrored: estimated from its bytes.
+                        // Not read above: from the mirror; never mirrored: from its bytes.
                         let counts = counts.or_else(|| id_store.agent_native_memory_counts(&agent.id, &name).ok().flatten());
                         let (tokens_est, lines) = counts.unwrap_or((tokens_for_chars(size_bytes), 0));
 

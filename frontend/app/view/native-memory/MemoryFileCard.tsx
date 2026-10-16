@@ -31,7 +31,7 @@
 import type { JSX } from "solid-js";
 import type { NativeMemoryFileMeta } from "@/app/store/rpc-api";
 import { MemoryTile, type MemoryTileBadge } from "./MemoryTile";
-import { tokensLabel, tokensTitle } from "./memory-tokens";
+import { memoryIndexOverLimit, tokensLabel, tokensTitle } from "./memory-tokens";
 
 export { formatFileSize } from "./memory-tokens";
 
@@ -39,6 +39,8 @@ interface MemoryFileCardProps {
     file: NativeMemoryFileMeta;
     /** Opens this file's version history. */
     onSelect: (filename: string) => void;
+    /** The agent is Claude Code's, which loads only part of a large index. */
+    claude?: boolean;
 }
 
 /** Relative modified-time label, same buckets as AgentLaunchModal's
@@ -66,8 +68,27 @@ export function fileMetaLabel(file: NativeMemoryFileMeta): string {
 export const MemoryFileCard = (props: MemoryFileCardProps): JSX.Element => {
     // The index file is the one loaded into every session, so it earns a
     // marker the other tiles don't get.
+    const overLimit = () => (props.claude && props.file.is_index ? memoryIndexOverLimit(props.file) : "");
     const badges = (): MemoryTileBadge[] => [
-        ...(props.file.is_index ? [{ label: "index", variant: "accent" as const }] : []),
+        ...(props.file.is_index
+            ? [
+                  {
+                      label: "index",
+                      variant: "accent" as const,
+                      title: props.claude ? "Loaded by Claude Code: its first 200 lines, up to 25 KB" : undefined,
+                  },
+              ]
+            : []),
+        ...(overLimit()
+            ? [
+                  {
+                      label: "not all loaded",
+                      variant: "warning" as const,
+                      icon: "fa-triangle-exclamation",
+                      title: `Claude Code loads only the first 200 lines, up to 25 KB: ${overLimit()}.`,
+                  },
+              ]
+            : []),
         ...(props.file.metadata_type ? [{ label: props.file.metadata_type }] : []),
     ];
     return (

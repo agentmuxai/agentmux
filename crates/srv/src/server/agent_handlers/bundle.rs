@@ -434,7 +434,10 @@ fn load_global_bundle_for_ui(store: &Store, id: &str, verb: &str) -> Result<Bund
     Ok(bundle)
 }
 
-fn version_summary_meta(v: BundleVersionSummary) -> GlobalMemoryVersionMeta {
+/// A history row as the wire's version metadata. Shared with the
+/// `GlobalMemoryHistory` / `GlobalMemoryRevert` MCP tools (`app_api/global_memory.rs`),
+/// so both surfaces carry the same fields.
+pub(crate) fn version_summary_meta(v: BundleVersionSummary) -> GlobalMemoryVersionMeta {
     GlobalMemoryVersionMeta {
         id: v.id,
         content_hash: v.content_hash,
@@ -444,11 +447,16 @@ fn version_summary_meta(v: BundleVersionSummary) -> GlobalMemoryVersionMeta {
         written_by: v.written_by,
         written_by_uid: v.written_by_uid,
         created_at: v.created_at,
+        size_bytes: v.size_bytes,
+        tokens_est: v.tokens_est,
     }
 }
 
-fn version_meta(v: BundleVersion) -> GlobalMemoryVersionMeta {
+/// A full version as the wire's version metadata, counted from its instructions.
+pub(crate) fn version_meta(v: BundleVersion) -> GlobalMemoryVersionMeta {
     GlobalMemoryVersionMeta {
+        size_bytes: v.instructions.len() as u64,
+        tokens_est: agentmux_common::tokens::estimate_tokens(&v.instructions),
         id: v.id,
         content_hash: v.content_hash,
         parent_version_id: v.parent_version_id,

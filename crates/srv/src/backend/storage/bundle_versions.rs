@@ -73,6 +73,10 @@ pub struct BundleVersionSummary {
     /// See [`BundleVersion::written_by_uid`].
     pub written_by_uid: String,
     pub created_at: i64,
+    /// The version's instructions' size and estimated tokens
+    /// (`agentmux_common::tokens`); the summary doesn't carry the text.
+    pub size_bytes: u64,
+    pub tokens_est: u64,
 }
 
 use agentmux_common::time::now_ms;
@@ -204,15 +208,27 @@ impl Store {
     /// SPEC_AGENT_FACING_GLOBAL_MEMORY_API_2026_09_15.md's Phase-3
     /// follow-up — also still exercised directly by this file's own tests.
     pub fn bundle_version_list(&self, bundle_id: &str) -> Result<Vec<BundleVersionSummary>, StoreError> {
+        self.bundle_versions_newest_first(bundle_id, -1)
+    }
+
+    /// The newest version of `bundle_id`, if any: one row, for a caller that
+    /// needs only that (Global Memory's write record), not the history's text.
+    pub fn bundle_version_latest(&self, bundle_id: &str) -> Result<Option<BundleVersionSummary>, StoreError> {
+        Ok(self.bundle_versions_newest_first(bundle_id, 1)?.into_iter().next())
+    }
+
+    /// Up to `limit` versions, newest first (`-1`: all of them).
+    fn bundle_versions_newest_first(&self, bundle_id: &str, limit: i64) -> Result<Vec<BundleVersionSummary>, StoreError> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, content_hash, parent_version_id, source, source_detail, written_by, created_at, written_by_uid
+            "SELECT id, content_hash, parent_version_id, source, source_detail, written_by, created_at, written_by_uid, instructions
              FROM db_bundle_versions
              WHERE bundle_id = ?1
-             ORDER BY created_at DESC, rowid DESC",
+             ORDER BY created_at DESC, rowid DESC
+             LIMIT ?2",
         )?;
         let rows = stmt
-            .query_map(params![bundle_id], |row| {
+            .query_map(params![bundle_id, limit], |row| {
                 Ok(BundleVersionSummary {
                     id: row.get(0)?,
                     content_hash: row.get(1)?,
@@ -222,6 +238,8 @@ impl Store {
                     written_by: row.get(5)?,
                     created_at: row.get(6)?,
                     written_by_uid: row.get(7)?,
+                    size_bytes: row.get_ref(8)?.as_str().map_or(0, |c| c.len() as u64),
+                    tokens_est: row.get_ref(8)?.as_str().map_or(0, agentmux_common::tokens::estimate_tokens),
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;

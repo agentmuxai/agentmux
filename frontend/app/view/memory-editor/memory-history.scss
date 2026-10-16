@@ -183,3 +183,30 @@
         background: var(--error-bg-subtle);
     }
 }
+
+// A version's size, and the size over time (SPEC_MEMORY_PANE_TOKENS_2026_10_15.md §5.5).
+.native-memory-history-item-tokens {
+    color: var(--secondary-text-color);
+    font-size: var(--text-xs);
+    font-variant-numeric: tabular-nums;
+}
+
+.memory-history-size {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 12px;
+    font-size: var(--text-xs);
+    color: var(--secondary-text-color);
+    font-variant-numeric: tabular-nums;
+
+    strong {
+        color: var(--main-text-color);
+    }
+}
+
+.memory-history-sparkline polyline {
+    fill: none;
+    stroke: var(--accent-color);
+    stroke-width: 1.5;
+}

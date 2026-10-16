@@ -784,6 +784,10 @@
             ]
         },
         {
+            "command": "memory:launchcost",
+            "method": "MemoryLaunchCostCommand"
+        },
+        {
             "command": "movescratchfile",
             "method": "MoveScratchFileCommand"
         },
@@ -1313,6 +1317,10 @@
             "command": "bundle.validate",
             "method": "ValidateBundleCommand",
             "dataType": "import(\"@/app/store/rpc-api/bundle\").BundleValidateInput"
+        },
+        {
+            "command": "app.update-download",
+            "method": "AppUpdateDownloadCommand"
         },
         {
             "command": "app.update-status",

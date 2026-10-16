@@ -42,6 +42,9 @@ async fn history_lists_versions_newest_first() {
     // Summary shape only — no name/instructions.
     assert!(versions[0].get("name").is_none());
     assert!(versions[0].get("instructions").is_none());
+    // The size and estimated tokens, as the pane's history has them.
+    assert_eq!(versions[0].get("size_bytes").and_then(|v| v.as_u64()), Some(9));
+    assert_eq!(versions[0].get("tokens_est").and_then(|v| v.as_u64()), Some(3));
 }
 
 /// Hard invariant, SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md,
