@@ -93,10 +93,49 @@ fn the_exit_marker_is_in_the_shells_own_syntax() {
         "npm test; echo \"__AMX_RC_n_$(if ($?) { 0 } elseif ($LASTEXITCODE) { $LASTEXITCODE } else { 1 })__\""
     );
     assert_eq!(clear_line(ShellFamily::Pwsh), "\x1b");
-    assert_eq!(in_dir("x", "C:\\w", ShellFamily::Pwsh), "Set-Location -LiteralPath \"C:\\w\"; x");
+    assert_eq!(in_dir("x", "C:\\w", ShellFamily::Pwsh).unwrap(), "Set-Location -LiteralPath 'C:\\w'; x");
     // run's cwd is a cd in front of the command, in the shell's syntax.
-    assert_eq!(in_dir("npm test", "D:\\w", ShellFamily::Cmd), "cd /d \"D:\\w\" && npm test");
-    assert_eq!(in_dir("npm test", "/w", ShellFamily::Posix), "cd \"/w\" && npm test");
+    assert_eq!(in_dir("npm test", "D:\\w", ShellFamily::Cmd).unwrap(), "cd /d \"D:\\w\" && npm test");
+    assert_eq!(in_dir("npm test", "/w", ShellFamily::Posix).unwrap(), "cd '/w' && npm test");
+}
+
+#[test]
+fn a_cwd_is_taken_literally_except_for_home() {
+    use ShellFamily::*;
+    // Variables, globs, quotes and command syntax stay part of the path.
+    assert_eq!(in_dir("x", "/w/$HOME/it's", Posix).unwrap(), "cd '/w/$HOME/it'\\''s' && x");
+    assert_eq!(in_dir("x", "/w/a\\b's", Fish).unwrap(), "cd '/w/a\\\\b\\'s' && x");
+    assert_eq!(in_dir("x", "C:\\w\\$env:X\\it's", Pwsh).unwrap(), "Set-Location -LiteralPath 'C:\\w\\$env:X\\it''s'; x");
+    assert!(in_dir("x", "C:\\100%\\w", Cmd).is_err());
+    // A leading ~ is still home.
+    assert_eq!(in_dir("x", "~", Posix).unwrap(), "cd ~ && x");
+    assert_eq!(in_dir("x", "~/my dir", Posix).unwrap(), "cd ~/'my dir' && x");
+    assert_eq!(in_dir("x", "~/src", Pwsh).unwrap(), "Set-Location -LiteralPath (Join-Path $HOME 'src'); x");
+    assert_eq!(in_dir("x", "~", Pwsh).unwrap(), "Set-Location -LiteralPath $HOME; x");
+}
+
+#[test]
+fn output_without_an_echo_keeps_its_first_line() {
+    // stty -echo: no echoed line, so nothing is cut.
+    assert_eq!(exit_marker("first\nsecond\n__AMX_RC_e1_0__\n", "e1"), Some(("first\nsecond".to_string(), 0)));
+    assert_eq!(exit_marker("__AMX_RC_e2_0__\n", "e2"), Some((String::new(), 0)));
+    // An echo that wrapped over two lines is cut whole.
+    let wrapped = "$ some very long command that the terminal wraps; echo \"__AMX_\nRC_e3_$?__\"\nout\n__AMX_RC_e3_0__\n";
+    let (out, _) = exit_marker(wrapped, "e3").unwrap();
+    assert!(out.ends_with("out"), "{out:?}");
+}
+
+#[test]
+fn an_escape_cut_off_at_the_end_waits_for_the_next_read() {
+    assert_eq!(incomplete_escape("ok\x1b["), 2);
+    assert_eq!(incomplete_escape("ok\x1b[31"), 4);
+    assert_eq!(incomplete_escape("ok\x1b"), 1);
+    assert_eq!(incomplete_escape("ok\x1b]0;title"), 9);
+    assert_eq!(incomplete_escape("ok\x1b[31m"), 0);
+    assert_eq!(incomplete_escape("ok\x1b]0;t\x07 done"), 0);
+    assert_eq!(incomplete_escape("plain"), 0);
+    // One that never ends doesn't hold back what follows it for good.
+    assert_eq!(incomplete_escape(&format!("\x1b]0;{}", "x".repeat(300))), 0);
     // run clears a half-typed line first: Esc in cmd, Ctrl+U in a Unix shell.
     assert_eq!(clear_line(ShellFamily::Cmd), "\x1b");
     assert_eq!(clear_line(ShellFamily::Posix), "\u{15}");
