@@ -54,6 +54,7 @@ mod close;
 pub(crate) mod media_grants;
 pub(crate) mod media_prompt;
 mod navigation;
+pub(crate) mod self_close;
 mod zoom;
 
 // `compute_pane_visible` is called from `browser_pane::creation_views` via
@@ -183,6 +184,7 @@ impl BrowserPaneManager {
         // block_id still `Closing`, it stashes them (under the same host_state
         // lock that observed Closing — atomic, no TOCTOU) for the
         // close-completion arm to replay. Ignored for Fresh/AlreadyLive.
+        self_close::note_rect(block_id, &rect);
         let out = state.host_dispatch(
             crate::reducer::HostCommand::TryRegisterBrowserPaneLive {
                 block_id: block_id.to_string(),

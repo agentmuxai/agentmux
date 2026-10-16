@@ -357,6 +357,11 @@ pub enum HostCommand {
     /// `now` stamps the `Closing` state; the caller reads the clock.
     EnqueueBrowserPaneClose { block_id: String, now: Instant },
 
+    /// Stash `pending` as the create to replay once a `Live` pane's close
+    /// completes, so the pane comes back in place: a page that closed itself
+    /// (`browser_panes::self_close`). Ignored for a missing or Closing pane.
+    StashBrowserPaneCreate { block_id: String, pending: crate::state::PendingBrowserPaneCreate },
+
     /// CEF on_before_close fired for a pane; remove entry from map.
     CompleteBrowserPaneClose { block_id: String },
 
@@ -579,6 +584,10 @@ impl std::fmt::Debug for HostCommand {
                 .finish(),
             HostCommand::EnqueueBrowserPaneClose { block_id, .. } => f
                 .debug_struct("EnqueueBrowserPaneClose")
+                .field("block_id", block_id)
+                .finish(),
+            HostCommand::StashBrowserPaneCreate { block_id, .. } => f
+                .debug_struct("StashBrowserPaneCreate")
                 .field("block_id", block_id)
                 .finish(),
             HostCommand::CompleteBrowserPaneClose { block_id } => f
@@ -1094,6 +1103,7 @@ fn is_quit_relevant(cmd: &HostCommand) -> bool {
         | HostCommand::EvictFloatingPaneWindowState { .. }
         | HostCommand::TryRegisterBrowserPaneLive { .. }
         | HostCommand::EnqueueBrowserPaneClose { .. }
+        | HostCommand::StashBrowserPaneCreate { .. }
         | HostCommand::CompleteBrowserPaneClose { .. }
         | HostCommand::DrainBrowserPaneByLabel { .. }
         // The attended/unattended flag is not a quit input, and these two set
@@ -1135,6 +1145,9 @@ pub fn update(state: &mut HostState, cmd: HostCommand) -> DispatchOutput {
         }
         HostCommand::EnqueueBrowserPaneClose { block_id, now } => {
             panes::handle_enqueue_browser_pane_close(state, block_id, now)
+        }
+        HostCommand::StashBrowserPaneCreate { block_id, pending } => {
+            panes::handle_stash_browser_pane_create(state, block_id, pending)
         }
         HostCommand::CompleteBrowserPaneClose { block_id } => {
             panes::handle_complete_browser_pane_close(state, block_id)

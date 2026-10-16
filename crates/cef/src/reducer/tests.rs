@@ -465,6 +465,31 @@ fn closing_register_stashes_pending_and_complete_close_returns_it() {
     assert!(!state.pending_browser_pane_creates.contains_key("b1"), "stash removed on close (no leak)");
 }
 
+// A pane whose page closed itself is replaced in place
+// (`browser_panes::self_close`): the replacement is stashed while the pane is
+// Live, then replayed when its close completes. Nothing is stashed for a pane
+// that is missing or already closing.
+#[test]
+fn a_replacement_stashed_on_a_live_pane_is_replayed_when_it_closes() {
+    use crate::state::PendingBrowserPaneCreate;
+    let pend = PendingBrowserPaneCreate { url: "data:text/html,closed".into(), x: 5, y: 6, width: 7, height: 8, window_label: "main".into() };
+    let mut state = HostState::default();
+    update(&mut state, HostCommand::TryRegisterBrowserPaneLive { block_id: "b1".into(), pending: None });
+    update(&mut state, HostCommand::StashBrowserPaneCreate { block_id: "b1".into(), pending: pend.clone() });
+    update(&mut state, HostCommand::EnqueueBrowserPaneClose { block_id: "b1".into(), now: t0() });
+    let done = update(&mut state, HostCommand::CompleteBrowserPaneClose { block_id: "b1".into() });
+    let (bid, returned) = done.pending_browser_pane_create_to_replay.expect("the replacement is replayed");
+    assert_eq!((bid.as_str(), returned.url.as_str()), ("b1", "data:text/html,closed"));
+    assert_eq!((returned.x, returned.y, returned.width, returned.height), (5, 6, 7, 8));
+
+    update(&mut state, HostCommand::StashBrowserPaneCreate { block_id: "missing".into(), pending: pend.clone() });
+    assert!(!state.pending_browser_pane_creates.contains_key("missing"));
+    update(&mut state, HostCommand::TryRegisterBrowserPaneLive { block_id: "b2".into(), pending: None });
+    update(&mut state, HostCommand::EnqueueBrowserPaneClose { block_id: "b2".into(), now: t0() });
+    update(&mut state, HostCommand::StashBrowserPaneCreate { block_id: "b2".into(), pending: pend });
+    assert!(!state.pending_browser_pane_creates.contains_key("b2"), "a closing pane may be replaying another create");
+}
+
 // ── H.3 drag (singleton invariant) ───────────────────────────────────
 
 fn drag_session(id: &str) -> DragSession {

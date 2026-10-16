@@ -715,6 +715,7 @@ impl AgentMuxHandler {
     pub(crate) fn do_close(&mut self, browser: Option<&mut Browser>) -> bool {
         debug_assert_ne!(currently_on(ThreadId::UI), 0);
 
+        if crate::browser_panes::self_close::intercept(&self.state, browser.as_deref()) { return true; } // a pane's page closed itself
         // Close-cascade diagnostics (window-lifecycle-leak retro round 3,
         // 2026-07-05): do_close firing means CEF actually initiated browser
         // destruction — the missing middle link when secondary-window closes
@@ -770,8 +771,7 @@ impl AgentMuxHandler {
         if self.browser_list.len() == 1 {
             self.is_closing = true;
         }
-        // Return false to allow the close.
-        false
+        false // allow the close
     }
 
     /// Intercept `target="_blank"` / `window.open()` from embedded pages so

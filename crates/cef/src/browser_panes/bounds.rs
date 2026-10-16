@@ -355,6 +355,7 @@ fn apply(state: &Arc<AppState>, window_label: &str, rects: &[(PaneBounds, Option
         }
         if let Some(label) = state.live_browser_pane_label(&r.block_id) {
             note_layout_base(&label, *base);
+            super::self_close::note_rect(&r.block_id, &r.rect());
             live.push((r, label));
         }
     }

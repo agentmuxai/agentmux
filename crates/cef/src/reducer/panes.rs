@@ -159,6 +159,19 @@ pub(super) fn handle_drain_browser_pane_by_label(state: &mut HostState, label: S
     }
 }
 
+/// Stash a create to replay when `block_id`'s close completes. Only for a
+/// `Live` pane: a Closing one may already be replaying another create.
+pub(super) fn handle_stash_browser_pane_create(
+    state: &mut HostState,
+    block_id: String,
+    pending: crate::state::PendingBrowserPaneCreate,
+) -> DispatchOutput {
+    if state.browser_panes.get(&block_id).is_some_and(|e| e.lifecycle == BrowserPaneLifecycle::Live) {
+        state.pending_browser_pane_creates.insert(block_id, pending);
+    }
+    DispatchOutput::default()
+}
+
 pub(super) fn handle_complete_browser_pane_close(state: &mut HostState, block_id: String) -> DispatchOutput {
     if state.browser_panes.remove(&block_id).is_none() {
         return DispatchOutput::default(); // idempotent

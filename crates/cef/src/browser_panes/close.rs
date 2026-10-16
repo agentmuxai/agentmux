@@ -84,6 +84,7 @@ impl BrowserPaneManager {
         state.media_grants.lock().clear_pane(block_id);
         crate::browser_panes::media_prompt::cancel_pane_any_thread(block_id);
         crate::client::downloads::forget_pane(block_id);
+        super::self_close::forget(block_id);
         #[cfg(target_os = "windows")]
         {
             crate::input_owner::windows::pane_closing(state, block_id);
@@ -206,6 +207,7 @@ impl BrowserPaneManager {
             state.media_grants.lock().clear_pane(&block_id);
             crate::browser_panes::media_prompt::cancel_pane_any_thread(&block_id);
             crate::client::downloads::forget_pane(&block_id);
+            super::self_close::forget(&block_id);
             // As in close(): the async on_before_close drain also destroys the pane HWND.
             #[cfg(target_os = "windows")]
             crate::input_owner::windows::pane_gone(state, &block_id);
