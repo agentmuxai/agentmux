@@ -233,7 +233,7 @@ pub fn pr_note_text(branch: &str, overlaps: &[PrOverlap]) -> String {
     };
     system_note(format!(
         "The PR you are opening from {branch} changes files other agents are working on: {}{more}. \
-         Message them before it merges. WhoIsWorkingOn with pr also lists open PRs from other computers.",
+         Message them before it merges. Presence action \"who\" with pr also lists open PRs from other computers.",
         named.join("; ")
     ))
 }
@@ -286,7 +286,7 @@ pub fn summary_text(file: &EditedFile, overlaps: &[Overlap], count: usize, quiet
     system_note(format!(
         "{count} files you edited in the last {} minutes are also being changed by other agents; \
          the latest is {} (repo {}; {}). No more of these notes for {minutes} minute{}: before changing a file, \
-         call WhoIsWorkingOn with its path, and message whoever it names.",
+         ask Presence (action \"who\") with its path, and message whoever it names.",
         WINDOW_MS / 60_000,
         file.rel,
         file.repo,
@@ -545,7 +545,7 @@ mod tests {
                 assert!(t.starts_with("[AgentMux] 4 files you edited in the last 10 minutes"), "{t}");
                 assert!(t.contains("the latest is d.rs (repo o/r; B has uncommitted changes in it)"), "{t}");
                 assert!(t.contains("No more of these notes for 6 minutes"), "{t}");
-                assert!(t.contains("WhoIsWorkingOn"), "{t}");
+                assert!(t.contains("Presence"), "{t}");
             }
             other => panic!("{other:?}"),
         }

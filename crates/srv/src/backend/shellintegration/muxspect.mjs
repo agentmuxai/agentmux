@@ -599,7 +599,7 @@ export function renderWork(data, stateFilter, limit) {
     if (reclaimable) {
         console.log(
             `${reclaimable} item(s) hold an EXPIRED lease — their claimant is gone. ` +
-                `They return to the pool the next time any agent calls WorkClaim.`,
+                `They return to the pool the next time any agent claims from the queue.`,
         );
     }
     if (doomed) {

@@ -183,7 +183,7 @@ pub(crate) async fn handle_post_to_channel(
         "post": coord::render(&post),
         "channel": channel,
         "others_working_in_it": in_channel,
-        "note": "Posted. Agents see it with ReadChannel and in WhoIsWorkingOn's recent_posts for this repository \
+        "note": "Posted. Agents see it with ReadChannel and in Presence who's recent_posts for this repository \
                  for 7 days. For something meant for one agent, use SendMessage instead.",
     }))
     .into_response()

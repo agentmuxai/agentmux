@@ -156,8 +156,8 @@ export const ContextDeliveryCard = (props: ContextDeliveryCardProps): JSX.Elemen
             </Show>
             <Show when={bigMemory()}>
                 <div class="agent-context-delivery-advice">
-                    Personal memory has grown large. Consider consolidating it (MemoryList, then MemoryWrite; check
-                    MemoryHistory first), or handing the next piece of work to another agent (WorkEnqueue).
+                    Personal memory has grown large. Consider consolidating it (Memory list, then write; check its
+                    history first), or handing the next piece of work to another agent (Tasks enqueue).
                 </div>
             </Show>
         </>

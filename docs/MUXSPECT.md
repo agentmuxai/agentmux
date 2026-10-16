@@ -182,7 +182,7 @@ trace on a `done` item and the reason on a `failed` or handed-back one.
 **The thing to look for: `LEASE EXPIRED`.** A claimed item whose lease has
 lapsed has no one working it, but nothing surfaces that on its own — the row
 still says `claimed`, and it only returns to the pool the next time some agent
-calls `WorkClaim` (reaping happens on claim; there is no background sweeper).
+claims from the queue (`Tasks` with action `claim`; reaping happens on claim; there is no background sweeper).
 So a queue that looks busy can be entirely idle. This command flags those rows
 explicitly and totals them at the end, rather than making you compare epoch
 timestamps by eye.

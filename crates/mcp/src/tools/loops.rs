@@ -109,7 +109,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             };
             Ok(format!(
                 "Started {loop_id}: injecting to '{target}' every {interval_display}{cap_note}\
-                 {}. Stop with LoopStop({loop_id}) or use LoopList() to see all running loops.",
+                 {}. Stop it with Schedule action \"delete\" and id {loop_id}; Schedule action \"list\" shows them all.",
                 if immediate { ", first run now" } else { "" }
             ))
         }

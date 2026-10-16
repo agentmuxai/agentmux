@@ -194,8 +194,8 @@ pub(crate) async fn handle_claim_work(
         "claim": stored,
         "claimed": claims::describe(&stored),
         "others_working_on_it": overlapping,
-        "note": "Claimed. Other agents see this in WhoIsWorkingOn and are told when they edit a file in it. It \
-                 blocks no one, and lapses at expires_at unless you claim it again. Release it with ReleaseWork \
+        "note": "Claimed. Other agents see this in Presence who and are told when they edit a file in it. It \
+                 blocks no one, and lapses at expires_at unless you claim it again. Release it with Presence release \
                  when you are done. If others_working_on_it names anyone, message them (SendMessage).",
     }))
     .into_response()

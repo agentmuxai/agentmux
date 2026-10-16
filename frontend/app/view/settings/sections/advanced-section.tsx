@@ -31,7 +31,7 @@ export const ADVANCED_SETTINGS = {
         description:
             "Tell an agent when it edits a file another agent on this computer is also changing, naming that agent so it can message them first",
         section: "advanced",
-        keywords: ["same file", "conflict", "other agents", "WhoIsWorkingOn", "agent:overlapnotes"],
+        keywords: ["same file", "conflict", "other agents", "Presence", "agent:overlapnotes"],
     },
     sampleInterval: {
         id: "advanced.sysinfo_sample_interval",
