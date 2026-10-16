@@ -1334,6 +1334,11 @@
             "command": "app.upgrade-cancel",
             "method": "AppUpgradeCancelCommand"
         },
+
+        {
+            "command": "app.upgrade-requests",
+            "method": "AppUpgradeRequestsCommand"
+        },
         {
             "command": "app.upgrade-restart",
             "method": "AppUpgradeRestartCommand"

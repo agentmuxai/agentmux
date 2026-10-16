@@ -10,6 +10,7 @@ use super::*;
 
 mod accounts;
 mod agents_tool;
+mod app_tool;
 mod browser;
 mod browser_tool;
 mod cron;
@@ -221,7 +222,8 @@ pub(crate) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
         tasks_tool,
         memory_tool,
         identity_tool,
-        widget_tool
+        widget_tool,
+        app_tool
     );
     if let Some((_, instead)) = REPLACED.iter().find(|(old, _)| *old == name) {
         anyhow::bail!("{name} was replaced: use {instead}");
@@ -236,6 +238,7 @@ mod tests {
     /// Families `call` routes to: each of their tools is advertised.
     const FAMILIES: &[(&str, &str)] = &[
         ("agents_tool", include_str!("agents_tool.rs")),
+        ("app_tool", include_str!("app_tool.rs")),
         ("browser_tool", include_str!("browser_tool.rs")),
         ("identity_tool", include_str!("identity_tool.rs")),
         ("memory_tool", include_str!("memory_tool.rs")),

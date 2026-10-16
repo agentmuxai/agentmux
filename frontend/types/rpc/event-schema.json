@@ -225,6 +225,15 @@
     }
   },
   {
+    "event": "app:upgraderequests",
+    "payloadTs": {
+      "imports": [
+        "UpgradeRequestsEvent"
+      ],
+      "name": "UpgradeRequestsEvent"
+    }
+  },
+  {
     "event": "attachment:batch-done",
     "payloadTs": {
       "imports": [

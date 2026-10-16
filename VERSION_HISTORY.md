@@ -1,5 +1,60 @@
 # AgentMux Version History
 
+## 0.59.28 — 2026-10-15
+
+- Loading older messages in an agent pane no longer drops them (only tool calls appeared), and collapsed messages stay collapsed after a reload
+- Sysinfo opens on a simple CPU chart over 2 minutes. Every Sysinfo view now has one control row: a button per view, the time window, pause and a table view. The simple views sit tight to the pane's edges with their figures in the title, the right-click menu offers Simple and Advanced submenus, and the every-area view is called Everything. In a thin pane the controls break onto the next line one at a time
+- OpenCode agents show how full their context is in the context meter
+- Agents can send files with a message to another agent on the same AgentMux: SendMessage takes up to 10 file paths, and the receiving agent gets them listed like files its user attached, with chips on the message in its pane.
+- macOS: typing into a pane no longer stops while a browser pane is open. Clicking back into the app after using a browser pane's page could give the keyboard back to the browser pane, so keys typed into the pane just clicked went nowhere.
+- macOS: after clicking into a browser pane's page, the pointer over the rest of the app shows the right cursor again (the I-beam over a text box, the hand over a link) instead of staying an arrow.
+- Windows: a terminal sign-in (Muse Code, OpenCode, Cline, Pi and others) shows its prompts again instead of a blank console
+- A floating pane has a Redock button in its header that puts it back into the main window's active tab, with no drag; on native Linux Wayland, where a floater can no longer be dragged onto a window, it is the only way to redock
+- An ACP agent that needs signing in (Grok Build, Cline, Pi) says to type /login
+- Sending a message in an agent pane after a long turn no longer makes the conversation flicker
+- Switching to a tab whose agent pane got output while hidden shows the latest content at once, without a fast scroll through it
+- Reloading a window puts each agent pane back where it was scrolled
+- Windows and Linux builds compile again (the macOS cursor fix declared the cursor handle with the macOS type)
+- Remotes: Remove helper stops the helper's daemon on the host at once, instead of leaving it running for up to a minute, and an agent's "Always allow" for a host shows in its Remotes row without a Refresh
+- Animations run whether or not the operating system's animation effects are off: the agent pane's busy ring marches again, along with drop indicators, status pulses, row entrances and panel opens. The Settings toggle that claimed to reduce motion, and did nothing, is gone.
+- Agents can post to and read a coordination channel for each repository (PostToChannel, ReadChannel); WhoIsWorkingOn shows recent posts, and claims are posted there too
+- Motion timings come from shared tokens: two colour fades that never animated (the dialog close button and the composer strip) now do, and repeated animations share one definition.
+- Agents can send files to an agent in another AgentMux on the same computer or on the LAN. Over the LAN only a sender whose signature checks out can send files, and an older AgentMux is told it can't receive them rather than getting the message without its files.
+- Styles that named colours, spacing or a shadow that didn't exist now use the real ones: the search box gets its shadow, Swarm rows and the copy-error button show their hover and highlight backgrounds, two error banners get their padding, and WebFetch results sit on the panel colour. Font sizes and colours elsewhere come from the shared scale, with no visible change.
+- Claude agents now see an image or PDF another agent sends them right in the message, when the sender's identity checks out and the agent is running; otherwise it gets the file's path as before.
+- Keyboard focus shows one consistent ring everywhere: a 2px accent outline. Shared style rules replace about 330 copies of the same few declarations, with no other visible change.
+- A reloaded agent pane comes back exactly where it was scrolled, and a pane shown again is at its latest content on every frame
+- Windows: one place per window now decides whether the app or a browser pane gets the keyboard, and checks that it did. Browser panes are raised back above the app when a window is activated, shown or restored. This targets typing and scrolling that stopped reaching a browser pane (or the app) until you switched tabs.
+- The three approval windows, the status bar's readout popovers, the agent memory and primitive dialogs, and the memory manager's cards share their styles instead of carrying copies. No visible change.
+- Tints, notice boxes and stacking layers come from one shared scale, and unused styles are removed. A few tinted backgrounds and borders shift slightly to the nearest step of the scale.
+- Agents can send files to an agent reachable only through the cloud relay, up to 25 MB a file: each file is encrypted with its own key before it leaves the computer.
+- Browser panes: in a narrow pane the toolbar now wraps to two rows, with the address bar on its own row below the buttons. The toolbar also follows the app's chrome zoom like the pane header, Ctrl+wheel over it zooms chrome, and the Go button is gone (Enter goes to the address).
+- Windows: the log now records when the mouse wheel, a click or typing goes to a different window than the one it should, to help track down input that stops reaching a browser pane or the app
+- AgentMux checks GitHub Releases for a newer version (a minute after start, then every 6 hours; Settings key app:updatecheck turns it off) and shows it in the status bar; the version panel's Maintenance section shows what's new and links to the download
+- Sending files to an agent on another computer that runs an older AgentMux now says it's too old to receive them, rather than delivering the message without its files.
+- An upgraded AgentMux starts with the previous version's data: windows, tabs, layouts and each agent pane's conversation come back after an upgrade instead of starting empty.
+- Keyboard requests between the app and browser panes are numbered, so an older one can no longer undo a newer one; with a browser pane holding the keyboard, the app still knows you're in the window (menu commands and the caret following the selected pane keep working)
+- In a pane with many pane tabs, or an Editor or Media pane with many document tabs, the selected tab now scrolls into view in its strip when you select it, click in the pane, or type in it, instead of staying hidden off to the side.
+- The last tinted hovers, borders and stacking layers come from the shared scales. A few hover tints shift slightly to the nearest step.
+- Close and dismiss buttons across dialogs, panels and panes use the app's shared icon button, so they look, hover and focus the same everywhere.
+- Unused styles are removed from the frontend; nothing on screen changes.
+- Memory: srv reports estimated tokens and lines for each memory file and Global Memory section, counted the same way everywhere
+- Ending a durable SSH session (End session, Remove helper) also ends background jobs started in it, which have process groups of their own
+- The Memory pane counts in tokens: every entry, agent and total shows its estimated tokens instead of bytes, with a Global summary per agent kind
+- Remotes: every ssh alias for the same account on the same machine shows the same helper status, since they share one helper
+- srv: memory:launchcost reports what an agent's next launch delivers into its context, part by part, in estimated tokens
+- Memory: a Claude agent's MEMORY.md says when Claude Code won't load all of it (first 200 lines, up to 25 KB)
+- On a Windows portable install, Download in the version panel now downloads the new AgentMux, checks it against the checksum GitHub lists, and unpacks it next to your current folder, with progress shown.
+- The Memory pane shows what each agent starts with: a launch line and budget bar on its card, and a part-by-part breakdown in its memory view
+- Agents get one Terminal tool in place of the eleven Shell, PtyShell and ConnList tools: run a command and get its exit code, type text and named keys (Enter works the same on Windows, macOS and Linux), read output as plain text from a cursor, and wait for a pattern, a prompt or quiet in the same call.
+- Agents get one Browser tool in place of OpenBrowser and the sixteen Browser* tools, and one UI tool in place of UIScreenshot, UIQuery, UIClick, ListShortcuts, RunCommand, PressKeys, CaptureWindow and DiscoverWindows; a browser action that changes the page can wait for it and read it again in the same call.
+- Memory history shows each version's tokens and change, and a file's size over time: growth over 7 and 30 days and a sparkline
+- Agents get one Memory tool (personal and global scope), one Tasks tool for the shared queue, one Presence tool for who is working on what, and one Schedule tool for cron jobs and loops, in place of thirty-four tools.
+- On a Windows portable, Upgrade & restart in the version panel restarts AgentMux into the version it downloaded, once agents finish their turn, after you confirm in a dialog.
+- The Memory pane shows aggregates: the largest Global Memory entries' share and which startup files carry it, a fleet line for Personal Memory (total, median per agent, agents over twice it), an agent's median and p90 file size, and the launch's largest parts
+- Agents get one Pane tool (where you are, layout, opening files, media and folders, tabs, windows, renaming), one Stop tool (ending your own session, other agents or a pane, kept apart so it can be confirmed), one Widget tool and one Identity tool, in place of nineteen tools
+- Agents get one Agents tool (list who is reachable, see what they are doing, open them, search your own history, supervisor nudges) and one Message tool (send, broadcast, and post to or read a repository's coordination channel) in place of eleven tools; the MCP server now lists 14 tools, down from 95
+
 ## 0.59.27 — 2026-10-15
 
 - A floating pane or window opened without a warm pool window no longer loses its logo for a moment during startup

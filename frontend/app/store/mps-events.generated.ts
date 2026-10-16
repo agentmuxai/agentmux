@@ -73,6 +73,7 @@ import type { SubagentSpawnedEvent } from "@/types/rpc/SubagentSpawnedEvent";
 import type { SubagentUpdatedEvent } from "@/types/rpc/SubagentUpdatedEvent";
 import type { TimeSeriesData } from "@/types/rpc/TimeSeriesData";
 import type { ToolChunk } from "@/types/rpc/ToolChunk";
+import type { UpgradeRequestsEvent } from "@/types/rpc/UpgradeRequestsEvent";
 import type { UserAttentionEvent } from "@/types/rpc/UserAttentionEvent";
 import type { ViewerPairedEvent } from "@/types/rpc/ViewerPairedEvent";
 import type { WSFileEventData } from "@/types/rpc/WSFileEventData";
@@ -104,6 +105,7 @@ export type MuxEventPayloads = {
   "ambient-narration": AmbientNarrationEvent;
   "ambient:spent": AmbientSpentEvent;
   "app:updatestatus": AppUpdateStatus;
+  "app:upgraderequests": UpgradeRequestsEvent;
   "attachment:batch-done": AttachmentBatchDoneEvent;
   "attachment:failed": AttachmentFailedEvent;
   "attachment:progress": AttachmentProgressEvent;
@@ -204,6 +206,7 @@ export const TYPED_MUX_EVENTS = [
   "ambient-narration",
   "ambient:spent",
   "app:updatestatus",
+  "app:upgraderequests",
   "attachment:batch-done",
   "attachment:failed",
   "attachment:progress",
