@@ -9,6 +9,7 @@ import { Button } from "@/app/element/ui";
 import { onMount, Show, type JSX } from "solid-js";
 
 import { useMuxBusStatus } from "@/app/view/accounts/AgentMuxConnectPanel";
+import { MuxBusSignInChoices } from "@/app/view/accounts/muxbus-sign-in-choices";
 import { muxbusDelivery, muxbusDeliveryLine, muxbusOffersSignIn } from "@/store/muxbus-delivery";
 import type { SettingsIndexEntry } from "../settings-model";
 
@@ -33,23 +34,25 @@ export function MuxBusSignIn(): JSX.Element {
                 <span class="setting-presence-line" role="status">
                     {muxbusDeliveryLine(muxbusDelivery())}
                 </span>
-                <Show
-                    when={offersSignIn()}
-                    fallback={
-                        <Button busy={muxbus.loading()} onClick={() => void muxbus.disconnect()}>
-                            Sign out
-                        </Button>
-                    }
-                >
-                    <Button
-                        tone="accent"
-                        disabled={!muxbus.isConfigured()}
-                        onClick={() => void (muxbus.loading() ? muxbus.cancel() : muxbus.connect())}
-                    >
-                        {muxbus.loading() ? "Cancel sign-in" : "Sign in"}
+                <Show when={!offersSignIn()}>
+                    <Button busy={muxbus.loading()} onClick={() => void muxbus.disconnect()}>
+                        Sign out
                     </Button>
                 </Show>
             </div>
+            <Show when={offersSignIn()}>
+                <div class="setting-presence-note">
+                    <MuxBusSignInChoices
+                        identityProviders={muxbus.identityProviders()}
+                        loading={muxbus.loading()}
+                        disabled={!muxbus.isConfigured()}
+                        label="Sign in"
+                        cancelLabel="Cancel sign-in"
+                        onSignIn={(provider) => void muxbus.connect(provider)}
+                        onCancel={() => void muxbus.cancel()}
+                    />
+                </div>
+            </Show>
             <Show when={muxbus.error()}>
                 {(error) => (
                     <div class="settings-config-error" role="alert">

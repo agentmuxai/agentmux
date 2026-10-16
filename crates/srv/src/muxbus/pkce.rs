@@ -90,9 +90,13 @@ pub fn cancel_active_login() -> bool {
     }
 }
 
+/// `identity_provider` (a Cognito provider name, already checked by the
+/// caller) sends the browser straight to that provider; `None` opens
+/// Cognito's own page.
 pub async fn run_pkce_login(
     cognito_domain: &str,
     client_id: &str,
+    identity_provider: Option<String>,
     http_client: &reqwest::Client,
 ) -> Result<PkceResult, String> {
     let my_id = NEXT_LOGIN_ID.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -110,6 +114,7 @@ pub async fn run_pkce_login(
         let task = tokio::spawn(run_pkce_login_inner(
             cognito_domain.to_string(),
             client_id.to_string(),
+            identity_provider,
             http_client.clone(),
         ));
         *guard = Some((my_id, task.abort_handle()));
@@ -150,6 +155,7 @@ pub async fn run_pkce_login(
 async fn run_pkce_login_inner(
     cognito_domain: String,
     client_id: String,
+    identity_provider: Option<String>,
     http_client: reqwest::Client,
 ) -> Result<PkceResult, String> {
     // 1. Generate code_verifier (43–128 chars of URL-safe chars)
@@ -190,17 +196,13 @@ async fn run_pkce_login_inner(
     }
 
     // 5. Build auth URL
-    let scopes = "openid+email+profile+https%3A%2F%2Fmuxbus.agentmux.ai%2Fread+https%3A%2F%2Fmuxbus.agentmux.ai%2Fwrite";
-    let auth_url = format!(
-        "{cognito_domain}/oauth2/authorize\
-         ?response_type=code\
-         &client_id={client_id}\
-         &redirect_uri={redirect_uri_enc}\
-         &scope={scopes}\
-         &code_challenge={code_challenge}\
-         &code_challenge_method=S256\
-         &state={state}",
-        redirect_uri_enc = percent_encode(&redirect_uri),
+    let auth_url = authorize_url(
+        &cognito_domain,
+        &client_id,
+        &redirect_uri,
+        &code_challenge,
+        &state,
+        identity_provider.as_deref(),
     );
 
     // 6. Open browser (suppressed under test — the supersede test drives
@@ -407,6 +409,35 @@ pub async fn refresh_token(
     })
 }
 
+/// Cognito's `/oauth2/authorize` URL for one flow. `identity_provider` is
+/// added only when given.
+fn authorize_url(
+    cognito_domain: &str,
+    client_id: &str,
+    redirect_uri: &str,
+    code_challenge: &str,
+    state: &str,
+    identity_provider: Option<&str>,
+) -> String {
+    let scopes = "openid+email+profile+https%3A%2F%2Fmuxbus.agentmux.ai%2Fread+https%3A%2F%2Fmuxbus.agentmux.ai%2Fwrite";
+    let mut url = format!(
+        "{cognito_domain}/oauth2/authorize\
+         ?response_type=code\
+         &client_id={client_id}\
+         &redirect_uri={redirect_uri_enc}\
+         &scope={scopes}\
+         &code_challenge={code_challenge}\
+         &code_challenge_method=S256\
+         &state={state}",
+        redirect_uri_enc = percent_encode(redirect_uri),
+    );
+    if let Some(provider) = identity_provider {
+        url.push_str("&identity_provider=");
+        url.push_str(&percent_encode(provider));
+    }
+    url
+}
+
 fn percent_encode(s: &str) -> String {
     let mut out = String::with_capacity(s.len() * 3);
     for b in s.bytes() {
@@ -547,14 +578,14 @@ Connection: close
         let http = reqwest::Client::new();
         let flow_a = tokio::spawn({
             let http = http.clone();
-            async move { run_pkce_login("http://127.0.0.1:1", "test-client", &http).await }
+            async move { run_pkce_login("http://127.0.0.1:1", "test-client", None, &http).await }
         });
         // Give A time to register + start polling before B supersedes it.
         tokio::time::sleep(std::time::Duration::from_millis(400)).await;
 
         let flow_b = tokio::spawn({
             let http = http.clone();
-            async move { run_pkce_login("http://127.0.0.1:1", "test-client", &http).await }
+            async move { run_pkce_login("http://127.0.0.1:1", "test-client", None, &http).await }
         });
         tokio::time::sleep(std::time::Duration::from_millis(400)).await;
 
@@ -593,7 +624,7 @@ Connection: close
         let http = reqwest::Client::new();
         let flow = tokio::spawn({
             let http = http.clone();
-            async move { run_pkce_login("http://127.0.0.1:1", "test-client", &http).await }
+            async move { run_pkce_login("http://127.0.0.1:1", "test-client", None, &http).await }
         });
         // Give the flow time to register + start polling before cancelling.
         tokio::time::sleep(std::time::Duration::from_millis(400)).await;
@@ -610,6 +641,21 @@ Connection: close
         );
 
         std::env::remove_var("AGENTMUX_MUXBUS_REST_URL");
+    }
+
+    #[test]
+    fn the_authorize_url_names_a_provider_only_when_one_was_chosen() {
+        let url = |provider| {
+            authorize_url("https://auth.example.test", "client", "https://relay.example.test/desktop-callback", "chal", "st", provider)
+        };
+        let email = url(None);
+        assert!(email.starts_with("https://auth.example.test/oauth2/authorize?response_type=code&client_id=client&"));
+        assert!(email.contains("&redirect_uri=https%3A%2F%2Frelay.example.test%2Fdesktop-callback&"));
+        assert!(email.ends_with("&code_challenge=chal&code_challenge_method=S256&state=st"));
+        assert!(!email.contains("identity_provider"));
+
+        assert_eq!(url(Some("SignInWithApple")), format!("{email}&identity_provider=SignInWithApple"));
+        assert!(url(Some("A&b=c")).ends_with("&identity_provider=A%26b%3Dc"), "the value is encoded");
     }
 
     // Cancelling with no active login is a harmless no-op the UI can call
@@ -643,7 +689,7 @@ Connection: close
         // Flow A: the user-cancel path.
         let flow_a = tokio::spawn({
             let http = http.clone();
-            async move { run_pkce_login("http://127.0.0.1:1", "test-client", &http).await }
+            async move { run_pkce_login("http://127.0.0.1:1", "test-client", None, &http).await }
         });
         tokio::time::sleep(std::time::Duration::from_millis(300)).await;
         assert!(cancel_active_login(), "expected flow A to be active and cancellable");
@@ -653,12 +699,12 @@ Connection: close
         // task.await may not have resumed yet when B/C run.
         let flow_b = tokio::spawn({
             let http = http.clone();
-            async move { run_pkce_login("http://127.0.0.1:1", "test-client", &http).await }
+            async move { run_pkce_login("http://127.0.0.1:1", "test-client", None, &http).await }
         });
         tokio::time::sleep(std::time::Duration::from_millis(300)).await;
         let flow_c = tokio::spawn({
             let http = http.clone();
-            async move { run_pkce_login("http://127.0.0.1:1", "test-client", &http).await }
+            async move { run_pkce_login("http://127.0.0.1:1", "test-client", None, &http).await }
         });
         tokio::time::sleep(std::time::Duration::from_millis(300)).await;
 
@@ -707,7 +753,7 @@ Connection: close
         std::env::set_var("AGENTMUX_MUXBUS_REST_URL", &relay);
 
         let http = reqwest::Client::new();
-        let result = run_pkce_login("http://127.0.0.1:1", "test-client", &http).await;
+        let result = run_pkce_login("http://127.0.0.1:1", "test-client", None, &http).await;
         assert!(
             result.as_ref().is_err_and(|e| e.contains("Cognito returned error")),
             "expected the flow to fail on its own via the relay's failed status, got: {result:?}"

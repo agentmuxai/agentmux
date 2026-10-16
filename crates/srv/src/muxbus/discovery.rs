@@ -48,6 +48,35 @@ pub struct CognitoSettings {
     pub region: String,
     #[serde(default)]
     pub user_pool_id: String,
+    /// The pool's social sign-ins (Cognito names, e.g. `Google`,
+    /// `SignInWithApple`). Empty from a cloud that doesn't publish them.
+    #[serde(default)]
+    pub identity_providers: Vec<String>,
+}
+
+/// The providers a sign-in may go straight to (Cognito's `identity_provider`).
+/// Nothing else reaches the authorize URL.
+pub const DIRECT_IDENTITY_PROVIDERS: &[&str] = &["Google", "SignInWithApple"];
+
+/// Check a requested sign-in provider: one of `DIRECT_IDENTITY_PROVIDERS`, and
+/// one the cloud publishes when it publishes a list. `None` (email, or
+/// Cognito's own page) is always fine.
+pub fn check_identity_provider(
+    discovered: Option<&CloudSettings>,
+    requested: Option<&str>,
+) -> Result<Option<String>, String> {
+    let Some(provider) = requested else {
+        return Ok(None);
+    };
+    if !DIRECT_IDENTITY_PROVIDERS.contains(&provider) {
+        return Err(format!("AgentMux Cloud has no sign-in with \"{provider}\""));
+    }
+    if let Some(published) = discovered.map(|s| &s.cognito.identity_providers) {
+        if !published.is_empty() && !published.iter().any(|p| p == provider) {
+            return Err(format!("AgentMux Cloud doesn't offer sign-in with {provider} right now"));
+        }
+    }
+    Ok(Some(provider.to_string()))
 }
 
 /// Parse and check a discovery document. `None` for anything srv shouldn't
@@ -186,6 +215,33 @@ mod tests {
         assert_eq!(s.ws, "wss://muxbus-ws.example.test");
         assert_eq!(s.cognito.client_id, "abc123");
         assert_eq!(s.cognito.user_pool_id, "us-east-1_X");
+        assert!(s.cognito.identity_providers.is_empty(), "an older document has no provider list");
+    }
+
+    #[test]
+    fn the_published_identity_providers_parse() {
+        let doc = DOC.replace("\"region\"", "\"identityProviders\": [\"Google\", \"SignInWithApple\"], \"region\"");
+        let s = parse(&doc, "https://muxbus.example.test").unwrap();
+        assert_eq!(s.cognito.identity_providers, vec!["Google", "SignInWithApple"]);
+    }
+
+    #[test]
+    fn a_sign_in_provider_must_be_known_and_published() {
+        let old = parse(DOC, "https://muxbus.example.test").unwrap();
+        let google_only = parse(
+            &DOC.replace("\"region\"", "\"identityProviders\": [\"Google\"], \"region\""),
+            "https://muxbus.example.test",
+        )
+        .unwrap();
+        assert_eq!(check_identity_provider(Some(&google_only), None), Ok(None));
+        assert_eq!(check_identity_provider(Some(&google_only), Some("Google")), Ok(Some("Google".to_string())));
+        assert!(check_identity_provider(Some(&google_only), Some("SignInWithApple")).is_err(), "not published");
+        // No list (an older cloud, or no document): any known provider.
+        assert!(check_identity_provider(Some(&old), Some("SignInWithApple")).is_ok());
+        assert!(check_identity_provider(None, Some("Google")).is_ok());
+        assert!(check_identity_provider(None, Some("Facebook")).is_err());
+        assert!(check_identity_provider(None, Some("Google&prompt=none")).is_err());
+        assert!(check_identity_provider(None, Some("")).is_err());
     }
 
     #[test]
