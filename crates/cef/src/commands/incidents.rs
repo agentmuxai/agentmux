@@ -213,13 +213,40 @@ fn renderer_incident(hung: bool, oom: bool, detail: &str) -> Incident {
     incident.cause = if hung {
         Some("Its page stopped answering, so AgentMux stopped it.".to_string())
     } else {
-        Some(detail.trim()).filter(|d| !d.is_empty()).map(|d| d.chars().take(200).collect())
+        plain_cause(detail)
     };
     incident.did = vec![
         "Every agent kept running: agents don't run in the window.".to_string(),
         "Your tabs and panes are kept, and come back when the window reloads.".to_string(),
     ];
     incident
+}
+
+/// Why a renderer stopped, in plain words, from the reason Chromium gave: a
+/// result or exit code (`RESULT_CODE_KILLED`, `STATUS_ACCESS_VIOLATION`) or a
+/// sentence. A code it has no words for is still named, after a sentence
+/// that says it is Chromium's.
+fn plain_cause(detail: &str) -> Option<String> {
+    let detail = detail.trim();
+    if detail.is_empty() {
+        return None;
+    }
+    let is_code = detail.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_');
+    if !is_code {
+        return Some(detail.chars().take(200).collect());
+    }
+    let words = match detail {
+        "RESULT_CODE_KILLED" => "Its process was ended from outside AgentMux, for example by Task Manager or a security tool.",
+        "RESULT_CODE_HUNG" => "It stopped responding.",
+        "RESULT_CODE_KILLED_BAD_MESSAGE" => "Chromium stopped it after it sent an invalid message.",
+        "STATUS_NO_MEMORY" | "STATUS_COMMITMENT_LIMIT" | "RESULT_CODE_OUT_OF_MEMORY" => "It ran out of memory.",
+        "STATUS_ACCESS_VIOLATION" | "STATUS_STACK_BUFFER_OVERRUN" | "STATUS_HEAP_CORRUPTION" | "STATUS_BREAKPOINT"
+        | "STATUS_ILLEGAL_INSTRUCTION" | "STATUS_STACK_OVERFLOW" => {
+            return Some(format!("A fault in its process stopped it ({detail})."));
+        }
+        _ => return Some(format!("Chromium reported its process ended ({detail}).")),
+    };
+    Some(words.to_string())
 }
 
 /// Whether the quit watchdog's exit with no window visible is an incident:
@@ -288,6 +315,18 @@ mod tests {
         let crashed = renderer_incident(false, false, "GPU process crashed");
         assert_eq!((crashed.kind.as_str(), crashed.cause.as_deref()), ("renderer_crashed", Some("GPU process crashed")));
         assert!(crashed.did.iter().any(|d| d.contains("Every agent kept running")));
+    }
+
+    /// Seen in a dev build: a renderer ended with Stop-Process came back as
+    /// `RESULT_CODE_KILLED`, and the notice showed the code.
+    #[test]
+    fn chromiums_codes_become_plain_words_and_an_unknown_one_is_still_named() {
+        let cause = |d: &str| renderer_incident(false, false, d).cause;
+        assert_eq!(cause("RESULT_CODE_KILLED").as_deref(), Some("Its process was ended from outside AgentMux, for example by Task Manager or a security tool."));
+        assert_eq!(cause("STATUS_NO_MEMORY").as_deref(), Some("It ran out of memory."));
+        assert_eq!(cause("STATUS_ACCESS_VIOLATION").as_deref(), Some("A fault in its process stopped it (STATUS_ACCESS_VIOLATION)."));
+        assert_eq!(cause("RESULT_CODE_GPU_DEAD_ON_ARRIVAL").as_deref(), Some("Chromium reported its process ended (RESULT_CODE_GPU_DEAD_ON_ARRIVAL)."));
+        assert_eq!(cause(" ").as_deref(), None);
     }
 
     #[test]

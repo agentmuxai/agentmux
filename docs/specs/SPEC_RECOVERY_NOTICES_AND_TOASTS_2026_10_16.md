@@ -1,7 +1,7 @@
 # Spec: tell the user what happened after AgentMux recovers, and fix the toasts that carry it
 
 **Date:** 2026-10-16
-**Status:** active. §6's cause fixed in #5024; §4.5 (toasts that show in every build) in #5030; §4.1 and §4.2 for the host's cases (a window's renderer crashing, running out of memory or hanging; the quit watchdog's exit with no window left) in #5032. Left: §4.3 (the status bar's history and marker), the launcher's and srv's cases and GPU detection (§5 Phase C).
+**Status:** active. §6's cause fixed in #5024; §4.5 (toasts that show in every build) in #5030; §4.1 and §4.2 for the host's cases (a window's renderer crashing, running out of memory or hanging; the quit watchdog's exit with no window left) in #5032, its causes in plain words in #5038. Left: §4.3 (the status bar's history and marker), the launcher's and srv's cases and GPU detection (§5 Phase C).
 **Author:** Loap-3@narko, at the operator's request
 **Scope:** the frontend's toasts (`frontend/app/notification/`, `store/flash-notifications.ts`), the status bar's backend item (`statusbar/BackendStatus.tsx`, `HealthNotices.tsx`), the host's crash and quit paths (`crates/cef/src/client/crash_recovery.rs`, `client/lifecycle.rs`, `wrr/`, `lib.rs` fast exit), the launcher's supervisor (`crates/launcher/src/supervisor/`), srv's start-up recovery (`blockcontroller/session_recovery.rs`, `service/session_restore.rs`).
 **Related:** `SPEC_GRACEFUL_CRASH_HANDLING_2026_04_13.md` (the renderer recovery page), `SPEC_SERVICE_SUPERVISION_AND_RECOVERY_2026_05_20.md` (crash budgets), `SPEC_SESSION_RESTORE_AND_SAVED_LAYOUTS_2026_08_13.md`, `SPEC_OS_NOTIFICATIONS_SYSTEM_2026_09_24.md`, `SPEC_FLEETWIDE_CRASH_HANG_FORENSICS_2026_08_14.md`, `SPEC_TRAY_OPTIONAL_BACKGROUND_SERVICE_2026_09_04.md` §6 (the background audit), `docs/reports/REPORT_PERFORMANCE_INDICATORS_TO_STATUS_BAR_2026_10_08.md`.
@@ -95,7 +95,7 @@ Every path in §3.3 appends one record to an **incident log**: one JSON line per
 ```
 
 - `kind`: a closed set (§4.4).
-- `what`, `cause`: plain words for the user. `cause` is left out when it isn't known; it is never guessed.
+- `what`, `cause`: plain words for the user. `cause` is left out when it isn't known; it is never guessed. A renderer's reason often arrives as a Chromium code (`RESULT_CODE_KILLED`, `STATUS_ACCESS_VIOLATION`): the host turns the ones it knows into words and names any other after a sentence saying it is Chromium's (`incidents::plain_cause`). Found in a dev build of #5032, where a renderer ended from outside showed `RESULT_CODE_KILLED` as the whole cause; the same check confirmed the rest of §4.2 (the toast after the reload, still up after its usual lifetime, closing it acknowledges it, and it doesn't come back on the next load).
 - `did`: what AgentMux did that protects the user's work, each a fact the writing path knows (it saved the layout, respawned srv, restored N panes, marked M agent turns interrupted so they resume). `lost`: what may not have survived, when the path knows (an unsent message, a running command in a terminal).
 - `evidence`: log file and time, for a bug report.
 - `acknowledged_at_ms`: set when the user closes the notice (§4.2).
