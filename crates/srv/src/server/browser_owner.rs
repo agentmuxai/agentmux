@@ -134,9 +134,9 @@ pub(crate) fn check(
 }
 
 /// Meta keys only srv writes, from its own records: who drives a pane, the
-/// banner that asks the person something, what opened a popup, and the sites
-/// a pane is limited to.
-pub(crate) fn srv_only_keys() -> [&'static str; 6] {
+/// banner that asks the person something, what opened a popup, the sites a
+/// pane is limited to, and which agent coaches a worker.
+pub(crate) fn srv_only_keys() -> [&'static str; 7] {
     [
         OWNER_META_KEY,
         crate::server::browser_allowlist::ALLOWED_META_KEY,
@@ -144,6 +144,7 @@ pub(crate) fn srv_only_keys() -> [&'static str; 6] {
         crate::server::browser_popup::POPUP_OF_META_KEY,
         crate::server::browser_popup::POPUP_FROM_META_KEY,
         crate::server::browser_popup::POPUP_WINDOWS_META_KEY,
+        crate::server::app_api::agent_fork::COACHED_BY_META_KEY,
     ]
 }
 
@@ -173,6 +174,8 @@ pub(crate) fn guard_client_meta_write(oref: &str, meta: &MetaMapType) -> Result<
     // write it could widen it.
     // A tab's identity is fixed when it is opened: changing it would move a
     // live tab to another jar under the person's feet.
+    // Who coaches a worker is what the limits on forking count: a client that
+    // could write it could free a leader's slots or let a worker fork.
     for key in [
         crate::server::browser_attention::ATTENTION_META_KEY,
         crate::server::browser_allowlist::ALLOWED_META_KEY,
@@ -180,6 +183,7 @@ pub(crate) fn guard_client_meta_write(oref: &str, meta: &MetaMapType) -> Result<
         crate::server::browser_popup::POPUP_OF_META_KEY,
         crate::server::browser_popup::POPUP_FROM_META_KEY,
         crate::server::browser_popup::POPUP_WINDOWS_META_KEY,
+        crate::server::app_api::agent_fork::COACHED_BY_META_KEY,
     ] {
         if meta.contains_key(key) {
             return Err(format!("{key} is written only by AgentMux itself"));
