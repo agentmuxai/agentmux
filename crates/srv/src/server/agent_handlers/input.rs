@@ -571,12 +571,13 @@ pub(crate) async fn build_persistent_spawn_env(
     let mut env_vars = crate::identity::resolver::inject_identity_env_async(
         mstore,
         id_store.clone(),
-        identity_store,
+        identity_store.clone(),
         broker,
         block_id.to_string(),
         base_env_vars,
     )
     .await?;
+    crate::server::app_api::agent_spawn::note_run_account(&mstore_for_slug, &identity_store, block_id);
 
     // No MuxBus account login here: agents reach the cloud through the srv,
     // which uses its own stored login (see `account_login_guard`).

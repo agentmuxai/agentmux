@@ -305,6 +305,62 @@ async fn a_worker_whose_open_fails_after_its_pane_exists_leaves_no_pane_behind()
     assert!(state.mstore.agent_def_list().unwrap().iter().all(|d| d.id != fork.id), "and so is the definition");
 }
 
+/// A worker reopened from My Agents gets a pane without `agent:coached_by`
+/// (the ordinary open writes none); its definition still says whose worker it
+/// is, so it can't spawn and still counts toward its leader (#5023).
+#[tokio::test]
+async fn a_worker_reopened_without_its_pane_mark_is_still_a_worker() {
+    let state = test_state();
+    let (lead, tab, _) = seed_leader(&state, "claude", "host", json!({})).await;
+    let worker = crate::server::agent_handlers::copy_definition(&state.mstore, &state.id_store, &state.identity_store, &lead.id, "Lead Helper", false).unwrap();
+    let mark = crate::backend::storage::store::AgentContent {
+        agent_id: worker.id.clone(),
+        content_type: WORKER_OF_CONTENT.to_string(),
+        content: json!({ "agent": lead.name, "id": lead.id }).to_string(),
+        updated_at: 1,
+    };
+    state.mstore.agent_content_set(&mark).unwrap();
+    // Reopened: a pane of the worker's definition, no mark on it.
+    let pane = new_block(&state, &tab, json!({ "view": "agent", "agentId": worker.id })).await;
+    state.reactive_handler.register_agent(&worker.slug, &pane, Some(&tab)).unwrap();
+    assert_eq!(live_workers_of(&state.mstore, &lead.id), 1, "still counts toward its leader");
+    let (status, body) = spawn(&state, request(sign_auth(&state, &worker.slug), "implement the spec")).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    assert!(body["error"].as_str().unwrap().starts_with("WORKER_CANNOT_SPAWN"), "{body}");
+    // A fork of the worker (the pane's Fork) isn't its leader's worker.
+    let fork = crate::server::agent_handlers::copy_definition(&state.mstore, &state.id_store, &state.identity_store, &worker.id, "", true).unwrap();
+    assert_eq!(worker_of(&state.mstore, &fork.id), None);
+    assert_eq!(worker_of(&state.mstore, &worker.id).as_deref(), Some(lead.id.as_str()));
+    // A client can't clear or forge it.
+    assert!(client_may_write_content(WORKER_OF_CONTENT).is_err());
+    assert!(client_may_write_content("soul").is_ok());
+}
+
+/// A pane's failure counts against the account its run was on, not the one
+/// its agent is linked to now (#5023).
+#[tokio::test]
+async fn a_failure_counts_against_the_account_the_run_was_on() {
+    let state = test_state();
+    let (def, tab, block) = seed_leader(&state, "claude", "host", json!({})).await;
+    state.id_store.identity_upsert(&account("old", "old@example.com", "valid")).unwrap();
+    // A pane of another agent, linked to the leader's account now, whose
+    // failed run was on "old".
+    let agent = uuid::Uuid::new_v4().to_string();
+    let mut other = test_agent_def(&agent, &format!("Busy {}", &agent[..8]), "claude", "host", 1, "");
+    state.mstore.agent_def_insert(&mut other).unwrap();
+    state.identity_store.agent_identity_link(&agent, &leader_account(&def).id, "claude").unwrap();
+    let failure = json!({ "code": "usage_limit", "title": "t", "detail": "d", "retryable": false });
+    let pane = new_block(&state, &tab, json!({ "view": "agent", "agentId": agent, LAST_FAILURE_META_KEY: failure, RUN_ACCOUNT_META_KEY: "old" })).await;
+    let a = choose_account(&state, &leader_in(&state, &def, &block), "claude", None).unwrap();
+    assert_eq!((a.id.as_str(), a.note), (leader_account(&def).id.as_str(), None), "the leader's account didn't fail");
+    let e = choose_account(&state, &leader_in(&state, &def, &block), "claude", Some("old")).unwrap_err();
+    assert!(e.message.starts_with("ACCOUNT_CANT_RUN: old@example.com"), "{}", e.message);
+    // The spawn notes the account a run resolves.
+    note_run_account(&state.mstore, &state.identity_store, &pane);
+    let meta = state.mstore.get::<Block>(&pane).unwrap().unwrap().meta;
+    assert_eq!(meta.get(RUN_ACCOUNT_META_KEY), Some(&json!(leader_account(&def).id)));
+}
+
 /// The mark is srv's: a client can neither write it on an existing pane nor
 /// bring it into a new one.
 #[test]

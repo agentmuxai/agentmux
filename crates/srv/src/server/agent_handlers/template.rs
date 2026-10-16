@@ -704,7 +704,8 @@ pub(crate) fn copy_definition(
     let source_contents = mstore
         .agent_content_get_all(&source.id)
         .map_err(|e| format!("forkagentdefinition content: {e}"))?;
-    for c in source_contents {
+    // A fork of a worker isn't its leader's worker (`agent_spawn::WORKER_OF_CONTENT`).
+    for c in source_contents.into_iter().filter(|c| c.content_type != crate::server::app_api::agent_spawn::WORKER_OF_CONTENT) {
         let new_content = AgentContent {
             agent_id: fork.id.clone(),
             content_type: c.content_type,

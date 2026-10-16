@@ -31,6 +31,30 @@ pub(crate) const COACHED_BY_META_KEY: &str = "agent:coached_by";
 /// Live workers a leader may have at once (§3.5).
 pub(crate) const MAX_LIVE_WORKERS: usize = 3;
 
+/// The worker's leader, `{agent, id}`, kept on the worker's definition (agent
+/// content) as well as on its pane, so a worker reopened from My Agents, whose
+/// new pane has no `agent:coached_by`, is still a worker: it can't spawn and
+/// still counts toward its leader's limit. srv writes it; `setagentcontent`
+/// refuses it from a client, and a fork of a worker doesn't inherit it.
+pub(crate) const WORKER_OF_CONTENT: &str = "agent:worker_of";
+
+/// `setagentcontent`'s check (a client's write): which agent a worker reports
+/// to is srv's to write, since clearing it would let a worker spawn and free
+/// its leader's place.
+pub(crate) fn client_may_write_content(content_type: &str) -> Result<(), String> {
+    if content_type == WORKER_OF_CONTENT {
+        return Err(format!("{content_type} is written only by AgentMux itself"));
+    }
+    Ok(())
+}
+
+/// The leader definition `def_id` is a worker of, if any.
+pub(crate) fn worker_of(mstore: &Store, def_id: &str) -> Option<String> {
+    let content = mstore.agent_content_get(def_id, WORKER_OF_CONTENT).ok()??;
+    let value: serde_json::Value = serde_json::from_str(&content.content).ok()?;
+    value.get("id")?.as_str().map(str::to_string)
+}
+
 const MAX_NAME_CHARS: usize = 64;
 
 #[derive(Debug, serde::Serialize)]
@@ -178,10 +202,21 @@ async fn launch(
         refuse(status, e)
     })?;
     state.broker.publish_event::<crate::backend::mps_events::AgentsChanged>(&(), vec![], 0);
-    let linked = state
-        .identity_store
-        .agent_identity_link(&worker.id, &account.id, &account.provider)
-        .map_err(|e| format!("link its account: {e}"));
+    let marked = state
+        .mstore
+        .agent_content_set(&crate::backend::storage::store::AgentContent {
+            agent_id: worker.id.clone(),
+            content_type: WORKER_OF_CONTENT.to_string(),
+            content: json!({ "agent": leader.def.name, "id": leader.def.id }).to_string(),
+            updated_at: agentmux_common::time::now_ms(),
+        })
+        .map_err(|e| format!("mark it as a worker: {e}"));
+    let linked = marked.and_then(|()| {
+        state
+            .identity_store
+            .agent_identity_link(&worker.id, &account.id, &account.provider)
+            .map_err(|e| format!("link its account: {e}"))
+    });
     let opened = match linked {
         Ok(()) => open_worker(state, leader, &worker, tab_id, runtime).await,
         Err(e) => Err(e),
@@ -210,13 +245,15 @@ fn leader_of(
         .ok()
         .flatten()
         .ok_or_else(|| refuse(StatusCode::CONFLICT, "NOT_AN_AGENT_PANE: your pane is gone"))?;
-    if block.meta.get(COACHED_BY_META_KEY).is_some_and(|v| !v.is_null()) {
+    let def_id = obj::meta_get_string(&block.meta, "agentId", "");
+    // Its pane's mark, or its definition's: a worker reopened from My Agents
+    // has only the latter.
+    if block.meta.get(COACHED_BY_META_KEY).is_some_and(|v| !v.is_null()) || worker_of(&state.mstore, &def_id).is_some() {
         return Err(refuse(
             StatusCode::FORBIDDEN,
             "WORKER_CANNOT_SPAWN: you are a worker; only the agent that coaches you can start workers",
         ));
     }
-    let def_id = obj::meta_get_string(&block.meta, "agentId", "");
     let def = state
         .mstore
         .agent_def_list()
@@ -392,10 +429,18 @@ pub(crate) fn account_blocks(state: &AppState, accounts: &[IdentityAccount]) -> 
             Some(FailureClass::Auth) => "had its sign-in refused",
             _ => continue,
         };
-        let agent = obj::meta_get_string(&block.meta, "agentId", "");
-        for link in state.identity_store.agent_identity_list_for_agent(&agent).unwrap_or_default() {
-            if accounts.iter().any(|a| a.id == link.account_id) {
-                blocked.entry(link.account_id).or_insert_with(|| why.to_string());
+        // The account that run was on; a pane from before `agent:run_account`
+        // falls back to its agent's current link.
+        let ran_on: Vec<String> = match block.meta.get(RUN_ACCOUNT_META_KEY).and_then(|a| a.as_str()) {
+            Some(account) => vec![account.to_string()],
+            None => {
+                let agent = obj::meta_get_string(&block.meta, "agentId", "");
+                state.identity_store.agent_identity_list_for_agent(&agent).unwrap_or_default().into_iter().map(|l| l.account_id).collect()
+            }
+        };
+        for account in ran_on {
+            if accounts.iter().any(|a| a.id == account) {
+                blocked.entry(account).or_insert_with(|| why.to_string());
             }
         }
     }
@@ -404,6 +449,41 @@ pub(crate) fn account_blocks(state: &AppState, accounts: &[IdentityAccount]) -> 
 
 /// `agent:last_failure` (`blockcontroller::core::META_LAST_FAILURE`).
 const LAST_FAILURE_META_KEY: &str = "agent:last_failure";
+
+/// The account a pane's run launched on, written at spawn
+/// (`build_persistent_spawn_env`), so a failure that run records counts
+/// against that account even after the agent is linked to another
+/// (`account_blocks`).
+pub(crate) const RUN_ACCOUNT_META_KEY: &str = "agent:run_account";
+
+/// Note on `block_id` the account its spawn resolves: its agent's link for
+/// its provider, as the identity injection resolves it. Best-effort; a pane
+/// without it falls back to the agent's current link.
+pub(crate) fn note_run_account(mstore: &Store, identity_store: &Store, block_id: &str) {
+    use crate::backend::providers::resolve_provider_alias;
+    let Ok(Some(block)) = mstore.get::<Block>(block_id) else {
+        return;
+    };
+    let agent = obj::meta_get_string(&block.meta, "agentId", "");
+    let Some(def) = mstore.agent_def_list().ok().and_then(|d| d.into_iter().find(|d| !agent.is_empty() && d.id == agent)) else {
+        return;
+    };
+    let provider = resolve_provider_alias(&def.provider).to_string();
+    let account = crate::identity::resolver::effective_identity_links(mstore, identity_store, &def)
+        .unwrap_or_default()
+        .into_iter()
+        .find(|l| resolve_provider_alias(&l.provider) == provider)
+        .map(|l| json!(l.account_id))
+        .unwrap_or(serde_json::Value::Null);
+    if block.meta.get(RUN_ACCOUNT_META_KEY).unwrap_or(&serde_json::Value::Null) == &account {
+        return;
+    }
+    let mut meta = MetaMapType::new();
+    meta.insert(RUN_ACCOUNT_META_KEY.to_string(), account);
+    if let Err(e) = crate::server::service::update_object_meta(mstore, &format!("block:{block_id}"), &meta) {
+        tracing::warn!(block_id, error = %e, "agent.spawn: couldn't note the account a pane runs on");
+    }
+}
 
 fn account_label(a: &IdentityAccount) -> String {
     let email = a.context.get("email").and_then(|e| e.as_str()).unwrap_or("");
@@ -437,10 +517,19 @@ pub(crate) fn live_workers_of(mstore: &Store, leader_def_id: &str) -> usize {
     let Ok(tabs) = mstore.get_all::<Tab>() else {
         return 0;
     };
+    // A pane is the leader's worker by its mark, or by its definition's (a
+    // worker reopened from My Agents).
+    let mut leader_of_def: std::collections::HashMap<String, Option<String>> = std::collections::HashMap::new();
     tabs.iter()
         .flat_map(|t| t.blockids.iter())
         .filter_map(|id| mstore.get::<Block>(id).ok().flatten())
-        .filter(|b| coached_by_id(&b.meta) == Some(leader_def_id))
+        .filter(|b| {
+            if coached_by_id(&b.meta) == Some(leader_def_id) {
+                return true;
+            }
+            let def = obj::meta_get_string(&b.meta, "agentId", "");
+            !def.is_empty() && leader_of_def.entry(def.clone()).or_insert_with(|| worker_of(mstore, &def)).as_deref() == Some(leader_def_id)
+        })
         .count()
 }
 

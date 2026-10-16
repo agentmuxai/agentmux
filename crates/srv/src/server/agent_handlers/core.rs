@@ -362,6 +362,8 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
             let mstore = mstore_sfc.clone();
             let broker = broker_sfc.clone();
             async move {
+                crate::server::app_api::agent_spawn::client_may_write_content(&cmd.content_type)
+                    .map_err(|e| format!("setagentcontent: {e}"))?;
                 let now = agentmux_common::time::now_ms();
                 let content = AgentContent {
                     agent_id: cmd.agent_id,
