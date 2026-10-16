@@ -228,7 +228,7 @@ impl Supervisor {
         let now_ms = agentmux_common::time::now_ms_u64();
         // The user's Stop ended this turn: their override wins, and their own
         // action needs no notice (the router doesn't send one either).
-        if trigger.is_some() && super::stopped_by_user(block_id) {
+        if super::stopped_by_user(block_id) {
             self.stand_down_for_stop(block_id, generation, &block, mode, now_ms);
             return;
         }
@@ -307,7 +307,7 @@ impl Supervisor {
         }
 
         // A Stop that reached srv after the turn ended still wins.
-        if trigger.is_some() && super::stopped_by_user(block_id) {
+        if super::stopped_by_user(block_id) {
             self.stand_down_for_stop(block_id, generation, &block, mode, now_ms);
             return;
         }

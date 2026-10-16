@@ -28,7 +28,7 @@ import { BackgroundTaskBucket, SubagentBackgroundTasks, visibleBackgroundTasks }
 import type { BackgroundTaskView } from "@/app/store/rpc-api";
 import { swarmRowColors } from "./swarm-row-colors";
 import { isAwaitingUser, swarmLineTooltip } from "@/app/store/swarm-line";
-import { SupervisorBucket, SupervisorChip, supervisorRows } from "./swarm-supervisor";
+import { setSupervisorMode, SupervisorBucket, SupervisorChip, supervisorRows } from "./swarm-supervisor";
 import { isActiveStatus, rankAgentStatus, subagentStatus } from "@/app/store/agent-status";
 import { questionCountdown } from "@/app/store/question-timer";
 import { remoteAgentKey } from "./swarm-fleet-targets";
@@ -559,7 +559,7 @@ export function AgentRow({
                             <SupervisorChip
                                 meta={blockMeta()}
                                 live={node.agentStatus === "running"}
-                                onSet={(mode) => model.setSupervisorMode(blockId(), mode)}
+                                onSet={(mode) => setSupervisorMode(blockId(), mode)}
                             />
                         )}
                     </Show>

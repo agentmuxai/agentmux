@@ -142,14 +142,11 @@ pub const SHARED_STORE_SCHEMA_VERSION: i64 = 12;
 ///        version (per that spec's non-goals) — this column only makes the
 ///        data storable/exportable/importable.
 ///   v17 — auto_continue_enabled on both db_agent_definitions and db_agents:
-///        per-agent opt-in letting a Warden Supervisor watcher agent
-///        auto-continue this agent's session on turn-end (subject to a
-///        server-side consecutive-nudge ceiling). Defaults to 0 (opt-in
-///        required — fail-by-default, same posture as use_ambient_login).
-///        See docs/analysis/ANALYSIS_WARDEN_AUTO_CONTROLLER_CONTINUATION_WATCHER_2026_08_12.md.
-///        RETIRED: the Warden Supervisor was removed and nothing reads or
-///        writes this column any more. It stays in the schema (older builds
-///        share the data dir and still select it); new rows get DEFAULT 0.
+///        the Warden Supervisor's per-agent auto-continue opt-in (default 0).
+///        RETIRED with the Warden Supervisor: nothing reads or writes it now.
+///        It stays in the schema because older builds sharing the data dir
+///        still select it; new rows get DEFAULT 0. See
+///        docs/analysis/ANALYSIS_WARDEN_AUTO_CONTROLLER_CONTINUATION_WATCHER_2026_08_12.md.
 ///   v18 — db_agent_jekt_keys: per-agent HMAC-SHA256 signing key for
 ///        host-tier jekt sender verification. One row per agent_id, minted
 ///        on first use and injected into that agent's own MCP server
@@ -752,9 +749,8 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
             -- backend (schema v15) — see db_agent_definitions' column doc.
             model_vendor_base_url TEXT NOT NULL DEFAULT '',
 
-            -- Warden Supervisor auto-continue opt-in (schema v17). RETIRED:
-            -- unused since the Warden Supervisor was removed; kept because
-            -- older builds sharing this data dir still select it.
+            -- Warden Supervisor auto-continue opt-in (schema v17). RETIRED,
+            -- unused; kept because older builds sharing the data dir select it.
             auto_continue_enabled INTEGER NOT NULL DEFAULT 0,
 
             -- The DEFINITION's own dedicated ABF bundle (schema v19) —

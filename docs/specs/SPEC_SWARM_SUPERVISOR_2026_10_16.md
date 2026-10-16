@@ -46,7 +46,7 @@ Both modes stop when a limit is reached (§3.4). Every decision is recorded and 
 
 - **Where it lives:** block meta `supervisor:mode`, `"steady"` or `"drive"`. Absent or anything else is Off.
 - **Why on the pane:** a Swarm row is a pane, and "set these agents to Drive" is about running agents. It needs no schema change, it reaches Swarm through the block updates Swarm already reads, and a newly opened agent starts Off.
-- **How it is set:** one RPC, `supervisor.set-mode { block_ids, mode }`, from the Swarm row's chip and from the fleet toolbar.
+- **How it is set:** one RPC, `supervisor.set-mode { targets, mode }` (block ids), from the Swarm row's chip and from the fleet toolbar.
   - It writes the meta, resets the run state (§3.5), and records the change.
   - If the agent is idle at that moment, its last turn is judged at once. Turning on Drive for an agent that just asked "shall I continue?" then gets it going without waiting for another turn.
   - Setting Off clears the state.
@@ -59,9 +59,10 @@ The Supervisor watches the turn ledger (`agentturn`) for completed turns, as the
 |---|---|
 | Mode is Off, or the pane is not a Claude agent | Nothing. |
 | The turn was AgentMux's own hidden turn (`TriggerKind::System`) | Nothing. |
-| The turn ends in a question tool (`AskUserQuestion`, `ExitPlanMode`), or the newest message is the user's | Stop: needs the user. No model call. |
+| The user's Stop ended the turn (§3.4) | Nothing: the user's override wins. |
+| The turn ends in a question tool (`AskUserQuestion`, `ExitPlanMode`) | Stop: needs the user. No model call. |
+| The newest message is the user's, still unanswered | Nothing judged; the usual "finished" notice (§3.7). |
 | The agent has background tasks still running (`db_background_tasks`) | Wait: the CLI wakes the agent when they finish, and that turn is judged then. |
-| A limit is reached (§3.4) | Stop: limit, with the reason. |
 | Otherwise | Judge (§3.3). |
 
 One judgement per pane runs at a time. A turn that ends while one is running supersedes it (the ambient gateway cancels the older call).
@@ -78,8 +79,10 @@ A new ambient purpose, `supervisor_verdict` (background class, 90 s), on the exi
 It asks for exactly one line:
 
 ```
-VERDICT: <continue|done|needs_user|blocked> | REASON: <one sentence> | NEXT: <one sentence, Drive only>
+ANSWER: <verdict> | <reason> | <next>
 ```
+
+in the ambient reply format (`ambient::reply`), where `<verdict>` is `continue`, `done`, `needs_user` or `blocked`, `<reason>` is one sentence, and `<next>` is one sentence in Drive when the verdict is `continue`, otherwise `-`. The limits (§3.4) apply only to a `continue` verdict.
 
 **Rules the prompt states:**
 - "done" needs evidence in the transcript, such as tests passing, a PR merged or opened, or a result shown. A bare claim is not enough: in Drive it becomes `continue` with "show the evidence", and in Steady `needs_user`.

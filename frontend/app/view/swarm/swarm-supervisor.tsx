@@ -11,6 +11,8 @@ import clsx from "clsx";
 import { createMemo, createSignal, For, Show, type JSX } from "solid-js";
 import { Button, type UiTone } from "@/app/element/ui";
 import { ContextMenuModel } from "@/app/store/contextmenu";
+import { RpcApi } from "@/app/store/rpc-api";
+import { TabRpcClient } from "@/app/store/rpc-util";
 import {
     MODE_DESCRIPTIONS,
     MODE_LABELS,
@@ -149,4 +151,15 @@ export function SupervisorBucket(props: { rows: SupervisorDecision[] }): JSX.Ele
             </div>
         </Show>
     );
+}
+
+/** Sets one agent's Supervisor mode, from its row; a refusal (not a Claude
+ *  agent) comes back for the chip to show. */
+export async function setSupervisorMode(blockId: string, mode: SupervisorMode): Promise<string | null> {
+    try {
+        const result = await RpcApi.SupervisorSetModeCommand(TabRpcClient, { targets: [blockId], mode });
+        return result.failed[0]?.error ?? null;
+    } catch (e) {
+        return e instanceof Error ? e.message : String(e);
+    }
 }
