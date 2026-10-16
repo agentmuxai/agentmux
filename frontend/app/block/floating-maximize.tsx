@@ -67,7 +67,8 @@ export function useFloatingPlacementSync(label: () => string, blockId: () => str
             timer = setTimeout(() => {
                 getApi()
                     .windows.isMaximized(label())
-                    .then((maximized) => storePlacement(blockId(), maximized))
+                    // Unknown (null): keep what is stored rather than guess "normal".
+                    .then((maximized) => (maximized == null ? undefined : storePlacement(blockId(), maximized)))
                     .catch(console.error);
             }, PLACEMENT_RESIZE_SETTLE_MS);
         };

@@ -29,7 +29,7 @@ import { FloatingMaximizeButton, isFloatingMaximized, PLACEMENT_RESIZE_SETTLE_MS
 
 const realApi = window.api;
 let toggle: ReturnType<typeof vi.fn>;
-let hostMaximized = false;
+let hostMaximized: boolean | null = false;
 let emit: ((payload: unknown) => void) | null = null;
 let seq = 0;
 
@@ -140,6 +140,23 @@ describe("placement sync", () => {
         render(() => <FloatingMaximizeButton label="floating-5" blockId={blockId} />);
         await vi.waitFor(() => expect(emit).not.toBeNull());
         emit!({ label: "floating-5", placement: "maximized" });
+        await Promise.resolve();
+        await Promise.resolve();
+        expect(h.setMeta).toEqual([]);
+    });
+
+    it("keeps the stored placement when the host can't tell", async () => {
+        vi.useFakeTimers();
+        const blockId = seedBlock({ view: "term", "pane:floating_placement": "maximized" });
+        const isMax = vi.spyOn(window.api.windows, "isMaximized");
+        render(() => <FloatingMaximizeButton label="floating-7" blockId={blockId} />);
+        hostMaximized = null; // e.g. the UI thread didn't answer in time
+
+        window.dispatchEvent(new Event("resize"));
+        vi.advanceTimersByTime(PLACEMENT_RESIZE_SETTLE_MS);
+        vi.useRealTimers();
+
+        await vi.waitFor(() => expect(isMax).toHaveBeenCalledTimes(1));
         await Promise.resolve();
         await Promise.resolve();
         expect(h.setMeta).toEqual([]);

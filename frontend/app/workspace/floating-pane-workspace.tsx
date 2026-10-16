@@ -518,9 +518,11 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
                 const grab = { fracX: e.clientX / Math.max(1, window.innerWidth), offsetY: e.clientY };
                 Promise.all([
                     getApi().windows.getPosition(label),
-                    getApi().windows.isMaximized(label).catch(() => false),
+                    getApi().windows.isMaximized(label).catch(() => null),
                 ])
-                    .then(([pos, maximized]) => {
+                    .then(([pos, answer]) => {
+                        // The host can't tell (null): go by the stored placement.
+                        const maximized = answer ?? floaterMaximized();
                         if (myId !== jsDragMouseDownId) return;
                         jsDragInitWinX = pos.x;
                         jsDragInitWinY = pos.y;

@@ -312,11 +312,14 @@ pub fn toggle_floating_maximize(
 ///   any other window is asked with `IsZoomed`.
 /// - macOS / Linux: CEF Views' `is_maximized()`, read on the UI thread.
 ///
-/// Returns `{ "maximized": bool }`; `false` when the window isn't found.
+/// Returns `{ "maximized": bool }`, or `{ "maximized": null }` when it can't
+/// be told (the window isn't found, or on macOS/Linux the UI thread didn't
+/// answer in time): callers then keep what they had rather than take a
+/// guess for "not maximized".
 pub fn is_window_maximized(state: &Arc<AppState>, args: &serde_json::Value) -> Result<serde_json::Value, String> {
     let label = args.get("label").and_then(|v| v.as_str()).unwrap_or("main");
     #[cfg(target_os = "windows")]
-    let maximized = if label.starts_with("floating-") {
+    let maximized = Some(if label.starts_with("floating-") {
         state
             .host_state
             .lock()
@@ -330,9 +333,9 @@ pub fn is_window_maximized(state: &Arc<AppState>, args: &serde_json::Value) -> R
             let hwnd = super::lifecycle::resolve_window_hwnd(state, label);
             !hwnd.is_null() && windows_sys::Win32::UI::WindowsAndMessaging::IsZoomed(hwnd) != 0
         }
-    };
+    });
     #[cfg(not(target_os = "windows"))]
-    let maximized = crate::ui_tasks::get_window_maximized_blocking(state, label).unwrap_or(false);
+    let maximized = crate::ui_tasks::get_window_maximized_blocking(state, label);
     Ok(serde_json::json!({ "maximized": maximized }))
 }
 
