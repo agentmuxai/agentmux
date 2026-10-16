@@ -140,6 +140,18 @@ fn a_command_left_open_is_refused_not_run_into_the_marker() {
 }
 
 #[test]
+fn a_trailing_semicolon_is_dropped_before_the_markers_own() {
+    use ShellFamily::*;
+    assert_eq!(without_trailing_semicolon("echo hi;", Posix), "echo hi");
+    assert_eq!(without_trailing_semicolon("echo hi ; ", Fish), "echo hi");
+    assert_eq!(without_trailing_semicolon("Get-Date;", Pwsh), "Get-Date");
+    // Escaped, it's an argument; cmd has no separator to drop.
+    assert_eq!(without_trailing_semicolon("echo \\;", Posix), "echo \\;");
+    assert_eq!(without_trailing_semicolon("echo hi;", Cmd), "echo hi;");
+    assert_eq!(without_trailing_semicolon("npm test", Posix), "npm test");
+}
+
+#[test]
 fn the_echo_of_every_typed_line_is_skipped() {
     let text = "first\nsecond READY\nREADY\n";
     assert_eq!(after_lines(text, 0), text);
