@@ -110,7 +110,6 @@ export const JSDOM_TS_TESTS = [
     "frontend/app/view/global-bundle/global-bundle-model.test.ts",
     "frontend/app/view/identity/account-label.test.ts",
     "frontend/app/view/identity/identity-model.test.ts",
-    "frontend/app/view/media/media.test.ts",
     "frontend/app/view/native-memory/MemoryAdoptionPanel.test.ts",
     "frontend/app/view/remotes/open-remotes.test.ts",
     "frontend/app/view/settings/settings-index.test.ts",
