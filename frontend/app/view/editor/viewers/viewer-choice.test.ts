@@ -7,7 +7,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { chooseViewer, TEXT_MAX_BYTES, viewerForDropped, viewerOptions, type FileProbe } from "./viewer-choice";
+import { chooseViewer, isProgramPath, TEXT_MAX_BYTES, viewerForDropped, viewerOptions, type FileProbe } from "./viewer-choice";
 
 const probe = (kind: string, size = 1000, extra: Partial<FileProbe> = {}): FileProbe => ({
     size,
@@ -64,5 +64,14 @@ describe("viewerForDropped", () => {
         expect(viewerForDropped("clip.mp4", "")).toBe("media");
         expect(viewerForDropped("voice", "audio/ogg")).toBe("media");
         expect(viewerForDropped("app.exe", "application/x-msdownload")).toBe("info");
+    });
+});
+
+describe("isProgramPath", () => {
+    it("is true for what the system would run", () => {
+        expect(isProgramPath("C:/x/setup.exe")).toBe(true);
+        expect(isProgramPath("/home/u/build.SH")).toBe(true);
+        expect(isProgramPath("C:/x/photo.png")).toBe(false);
+        expect(isProgramPath("C:/x/exe")).toBe(false);
     });
 });

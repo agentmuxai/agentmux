@@ -20,7 +20,7 @@ import { AvViewer } from "./media/av-viewer";
 import { ImageViewer } from "./image/image-viewer";
 import { InfoCard } from "./info/info-card";
 import { ViewerBar, type ViewerBarProps } from "./viewer-bar";
-import { TEXT_MAX_BYTES, type ViewerId } from "./viewer-choice";
+import { isProgramPath, TEXT_MAX_BYTES, type ViewerId } from "./viewer-choice";
 import { droppedFileOf, isDroppedPath, neighbourInFolder } from "./viewer-tabs";
 import "./viewers.scss";
 
@@ -99,7 +99,8 @@ function ViewerFor(props: { model: EditorViewModel; tabId: string; viewer: Viewe
         onReopenWith: (v) => model.reopenWith(props.tabId, v),
         followFolder: canFollow() ? { on: follows(), toggle: () => model.setFollowFolder(props.tabId, !follows()) } : undefined,
         onReveal: dropped() ? undefined : () => void model.revealInExplorer(path()),
-        onOpenWithSystem: dropped() ? undefined : openWithSystem,
+        // A program opens only from the info card, which asks before running it.
+        onOpenWithSystem: dropped() || isProgramPath(path()) ? undefined : openWithSystem,
     });
     const mime = () => probe()?.mime || file()?.type || "";
 

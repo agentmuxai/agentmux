@@ -71,6 +71,14 @@ export function viewerForDropped(name: string, type: string): ViewerId {
     return "info";
 }
 
+/** Opening these with the system runs them: the editor asks first. */
+const PROGRAM = /\.(exe|msi|com|scr|bat|cmd|ps1|lnk|app|pkg|appx|msix|url|reg|jar|sh)$/i;
+
+/** Whether opening the file with the system's app would run it. */
+export function isProgramPath(path: string): boolean {
+    return PROGRAM.test(path);
+}
+
 /** Whether the probe says the file is binary (not text, and not SVG). */
 export function isBinaryProbe(probe: FileProbe): boolean {
     return probe.text == null;

@@ -13,7 +13,7 @@ import { Button } from "@/app/element/ui";
 import { ConfirmDialog } from "@/app/components/confirm-dialog";
 import { createSignal, Show, type JSX } from "solid-js";
 import { ViewerBar, type ViewerBarProps } from "../viewer-bar";
-import { TEXT_MAX_BYTES, type FileProbe } from "../viewer-choice";
+import { isProgramPath, TEXT_MAX_BYTES, type FileProbe } from "../viewer-choice";
 
 /** What the info card says a probe's kind is. */
 export const KIND_LABELS: Record<string, string> = {
@@ -32,9 +32,6 @@ export const KIND_LABELS: Record<string, string> = {
     text: "Text",
     other: "Binary file",
 };
-
-/** Opening these with the system runs them: ask first. */
-const PROGRAM = /\.(exe|msi|com|scr|bat|cmd|ps1|lnk|app|pkg|appx|msix|url|reg|jar|sh)$/i;
 
 export interface InfoCardProps {
     path: string;
@@ -56,16 +53,19 @@ export function InfoCard(props: InfoCardProps): JSX.Element {
     const kind = () => (props.probe ? (KIND_LABELS[props.probe.kind] ?? "File") : props.file?.type || "File");
     const size = () => props.probe?.size ?? props.file?.size;
     const modified = () => (props.probe?.mtime ? new Date(props.probe.mtime).toLocaleString() : "");
-    const [confirmRun, setConfirmRun] = createSignal(false);
-    const askThenOpen = () => {
-        if (!props.onOpenWithSystem) return;
-        if (PROGRAM.test(props.path)) setConfirmRun(true);
-        else props.onOpenWithSystem();
+    // The open waiting on "Run this file?", for a program.
+    const [confirmRun, setConfirmRun] = createSignal<(() => void) | null>(null);
+    const askThenOpen = (open: (() => void) | undefined) => {
+        if (!open) return;
+        if (isProgramPath(props.path)) setConfirmRun(() => open);
+        else open();
     };
+    const barOpen = () => props.bar.onOpenWithSystem;
 
     return (
         <div class="editor-viewer info-card-viewer">
-            <ViewerBar {...props.bar} />
+            {/* The toolbar's open button asks too: it runs a program as surely as this one. */}
+            <ViewerBar {...props.bar} onOpenWithSystem={barOpen() && (() => askThenOpen(barOpen()))} />
             <div class="info-card" role="region" aria-label="File info">
                 <div class="info-card-name">{name()}</div>
                 <dl class="info-card-facts">
@@ -95,7 +95,7 @@ export function InfoCard(props: InfoCardProps): JSX.Element {
                 </Show>
                 <div class="info-card-actions">
                     <Show when={props.onOpenWithSystem}>
-                        <Button tone="accent" icon="arrow-up-right-from-square" onClick={askThenOpen}>
+                        <Button tone="accent" icon="arrow-up-right-from-square" onClick={() => askThenOpen(props.onOpenWithSystem)}>
                             Open with the system's app
                         </Button>
                     </Show>
@@ -122,10 +122,11 @@ export function InfoCard(props: InfoCardProps): JSX.Element {
                     message={`${name()} is a program or script. Opening it with the system runs it.`}
                     confirmLabel="Run"
                     onConfirm={() => {
-                        setConfirmRun(false);
-                        props.onOpenWithSystem?.();
+                        const open = confirmRun();
+                        setConfirmRun(null);
+                        open?.();
                     }}
-                    onCancel={() => setConfirmRun(false)}
+                    onCancel={() => setConfirmRun(null)}
                 />
             </Show>
         </div>
