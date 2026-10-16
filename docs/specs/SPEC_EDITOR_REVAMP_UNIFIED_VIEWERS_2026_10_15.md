@@ -1,7 +1,7 @@
 # SPEC: Editor revamp — one pane for every file (PDF, images, audio/video, binary, large files), and the Media pane folded into it
 
 **Date:** 2026-10-15
-**Status:** active — phase 1 built in #5016, phase 2 (PDF) next (see "Phase 1 as built" and "Phase 2 as built" at the end); phases 3–5 to follow. Written against `main` @ `521daa2ad`.
+**Status:** active — phase 1 built in #5016, phase 2 (PDF) in #5025 (see "Phase 1 as built" and "Phase 2 as built" at the end); phases 3–5 to follow. Written against `main` @ `521daa2ad`.
 **Author:** Korp@narko
 **Requested by:** the repo owner:
 > *"does agentmux editor support pdf? lets write a quick spec to support pdfs and images in the editor. we need to get the editor wide-ranging editor access, including binary if it detects it, images, etc. we want wide coverage, research latest best practices."*
