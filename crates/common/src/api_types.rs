@@ -903,6 +903,30 @@ pub struct RequestUpgradeRequest {
     pub version: Option<String>,
 }
 
+/// `POST /api/v1/agent/fork` — backs the `Agents` tool's `fork`
+/// (docs/specs/SPEC_AGENT_WORKERS_2026_10_15.md §3.1): the calling agent, the
+/// leader, launches a worker, a fork of itself in a pane next to its own.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ForkAgentRequest {
+    #[serde(flatten)]
+    pub auth: UiAutomationAuth,
+    /// The worker's name; absent, the next free `Name #N` of the lineage.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// The worker's model and effort; absent, the leader's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
+    /// The worker's task, its first message. srv shows its start to the user
+    /// when it asks; the MCP server sends it, signed as the leader.
+    pub brief: String,
+    /// The user's own words in this turn asking for it, verbatim; empty when
+    /// the user didn't ask. Checked like `QuitSelf`'s (`self_quit::gate`).
+    #[serde(default)]
+    pub user_instruction: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClosePaneRequest {
     #[serde(flatten)]

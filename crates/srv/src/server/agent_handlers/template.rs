@@ -463,136 +463,8 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
             let identity_store = identity_store.clone();
             let broker = broker.clone();
             async move {
-
-                // Find the source definition by id.
-                let all_defs = mstore
-                    .agent_def_list()
-                    .map_err(|e| format!("forkagentdefinition: {e}"))?;
-                let source = all_defs
-                    .iter()
-                    .find(|a| a.id == cmd.source_id)
-                    .cloned()
-                    .ok_or_else(|| format!("forkagentdefinition: source not found: {}", cmd.source_id))?;
-
-                // Build a new definition that shares the source's content but
-                // has a fresh id/slug and records the lineage. Seed-bit is
-                // cleared — forks are always user-owned, not built-in.
-                let now = agentmux_common::time::now_ms();
-
-                // branch_label is the fork's full display name when provided.
-                // When empty, auto-generate a flat, lineage-wide "Name #N"
-                // (see suggest_fork_name's doc comment).
-                let fork_name = if cmd.branch_label.is_empty() {
-                    let root_former = mstore.agent_former_names(&fork_lineage_root(&all_defs, &source).id).unwrap_or_default();
-                    suggest_fork_name(&all_defs, &mstore.retired_agent_names().unwrap_or_default(), &root_former, &source, |n| {
-                        name_in_use(&mstore, &all_defs, n)
-                    })
-                } else {
-                    cmd.branch_label.clone()
-                };
-                let branch_label = if cmd.branch_label.is_empty() {
-                    fork_name.clone()
-                } else {
-                    cmd.branch_label.clone()
-                };
-                if !cmd.branch_label.is_empty() && name_in_use(&mstore, &all_defs, &fork_name) {
-                    return Err(format!("forkagentdefinition: an agent named {fork_name:?} already exists"));
-                }
-                // The root's slug and this fork's label: never the source's
-                // slug, which chained every generation (`loap-loap-2-loap-3`).
-                let root = fork_lineage_root(&all_defs, &source);
-                let fork_slug = agentmux_common::slug::fork_slug(&root.slug, &root.name, &branch_label);
-                // Source's EFFECTIVE provider, from the shared resolver
-                // (#2594; same as the create-from-template clone site).
-                let effective_provider = id_store.resolve_effective_provider_id(&source);
-                let mut fork = AgentDefinition {
-                    id: uuid::Uuid::new_v4().to_string(),
-                    // Empty slug → agent_def_insert derives + resolves collisions.
-                    slug: fork_slug,
-                    name: fork_name,
-                    icon: source.icon.clone(),
-                    provider: effective_provider,
-                    description: source.description.clone(),
-                    working_directory: String::new(), // force re-resolve via agentmuxHome()
-                    shell: source.shell.clone(),
-                    provider_flags: source.provider_flags.clone(),
-                    auto_start: 0, // forks don't auto-start; explicit launch only
-                    restart_on_crash: source.restart_on_crash,
-                    idle_timeout_minutes: source.idle_timeout_minutes,
-                    created_at: now,
-                    agent_type: source.agent_type.clone(),
-                    environment: source.environment.clone(),
-                    agent_bus_id: String::new(), // fresh bus id so broadcasts don't cross
-                    is_seeded: 0,
-                    accounts: String::new(),
-                    parent_id: source.id.clone(),
-                    branch_label: branch_label.clone(),
-                    updated_at: now,
-                    user_hidden: 0,
-                    // Forks inherit container config from source so forked container agents
-                    // retain their image and volumes.
-                    container_image: source.container_image.clone(),
-                    container_volumes: source.container_volumes.clone(),
-                    container_name: String::new(),
-                    use_ambient_login: 0,
-                    model_vendor_base_url: source.model_vendor_base_url.clone(),
-                    auto_continue_enabled: 0,
-                    memory_id: String::new(),
-                    // Fail-closed default, not inherited from source — same
-                    // convention as use_ambient_login/auto_continue_enabled
-                    // above (opt-in settings reset on a fork, not carried
-                    // over, even though other config like container image
-                    // and model vendor IS inherited).
-                    conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
-                };
-                mstore
-                    .agent_def_insert(&mut fork)
-                    .map_err(|e| format!("forkagentdefinition: {e}"))?;
-                // Before the fork is returned, so its first spawn already
-                // finds the account (see the function's doc comment).
-                inherit_source_account_links(&mstore, &identity_store, &source, &fork);
-                // Own dedicated ABF bundle, not the source's — same "every
-                // agent has its own" rule as the template-clone path above.
-                mstore.agent_def_provision_and_bind_bundle(&id_store, &mut fork, now);
-
-                // Deep-copy content blobs + skills from source. Cascade foreign
-                // keys on the source are unaffected — we're copying out, not
-                // moving.
-                let source_contents = mstore
-                    .agent_content_get_all(&source.id)
-                    .map_err(|e| format!("forkagentdefinition content: {e}"))?;
-                for c in source_contents {
-                    let new_content = AgentContent {
-                        agent_id: fork.id.clone(),
-                        content_type: c.content_type,
-                        content: c.content,
-                        updated_at: now,
-                    };
-                    mstore
-                        .agent_content_set(&new_content)
-                        .map_err(|e| format!("forkagentdefinition content: {e}"))?;
-                }
-                let source_skills = mstore
-                    .agent_skill_list(&source.id)
-                    .map_err(|e| format!("forkagentdefinition skills: {e}"))?;
-                for s in source_skills {
-                    let new_skill = AgentSkill {
-                        id: uuid::Uuid::new_v4().to_string(),
-                        agent_id: fork.id.clone(),
-                        name: s.name,
-                        trigger: s.trigger,
-                        skill_type: s.skill_type,
-                        description: s.description,
-                        content: s.content,
-                        created_at: now,
-                    };
-                    mstore
-                        .agent_skill_insert(&new_skill)
-                        .map_err(|e| format!("forkagentdefinition skill: {e}"))?;
-                }
-
+                let fork = fork_definition(&mstore, &id_store, &identity_store, &cmd.source_id, &cmd.branch_label)?;
                 broker.publish_event::<crate::backend::mps_events::AgentsChanged>(&(), vec![], 0);
-
                 Ok(fork)
             }
         },
@@ -697,6 +569,148 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
         },
     );
 
+}
+
+/// Fork `source_id` into a new definition: its content, skills, provider and
+/// flags, linked to its account, with a fresh id, workspace, bus id and own
+/// bundle. `branch_label` is the fork's name; empty picks the next free
+/// `Name #N`. The `forkagentdefinition` RPC (the UI's forks) and the
+/// `Agents` `fork` action (`app_api/agent_fork.rs`) both create forks here.
+/// The caller publishes `AgentsChanged`.
+pub(crate) fn fork_definition(
+    mstore: &Store,
+    id_store: &Store,
+    identity_store: &Store,
+    source_id: &str,
+    branch_label: &str,
+) -> Result<AgentDefinition, String> {
+    // Find the source definition by id.
+    let all_defs = mstore
+        .agent_def_list()
+        .map_err(|e| format!("forkagentdefinition: {e}"))?;
+    let source = all_defs
+        .iter()
+        .find(|a| a.id == source_id)
+        .cloned()
+        .ok_or_else(|| format!("forkagentdefinition: source not found: {}", source_id))?;
+
+    // Build a new definition that shares the source's content but
+    // has a fresh id/slug and records the lineage. Seed-bit is
+    // cleared — forks are always user-owned, not built-in.
+    let now = agentmux_common::time::now_ms();
+
+    // branch_label is the fork's full display name when provided.
+    // When empty, auto-generate a flat, lineage-wide "Name #N"
+    // (see suggest_fork_name's doc comment).
+    let fork_name = if branch_label.is_empty() {
+        let root_former = mstore.agent_former_names(&fork_lineage_root(&all_defs, &source).id).unwrap_or_default();
+        suggest_fork_name(&all_defs, &mstore.retired_agent_names().unwrap_or_default(), &root_former, &source, |n| {
+            name_in_use(mstore, &all_defs, n)
+        })
+    } else {
+        branch_label.to_string()
+    };
+    let label = if branch_label.is_empty() {
+        fork_name.clone()
+    } else {
+        branch_label.to_string()
+    };
+    if !branch_label.is_empty() && name_in_use(mstore, &all_defs, &fork_name) {
+        return Err(format!("forkagentdefinition: an agent named {fork_name:?} already exists"));
+    }
+    // The root's slug and this fork's label: never the source's
+    // slug, which chained every generation (`loap-loap-2-loap-3`).
+    let root = fork_lineage_root(&all_defs, &source);
+    let fork_slug = agentmux_common::slug::fork_slug(&root.slug, &root.name, &label);
+    // Source's EFFECTIVE provider, from the shared resolver
+    // (#2594; same as the create-from-template clone site).
+    let effective_provider = id_store.resolve_effective_provider_id(&source);
+    let mut fork = AgentDefinition {
+        id: uuid::Uuid::new_v4().to_string(),
+        // Empty slug → agent_def_insert derives + resolves collisions.
+        slug: fork_slug,
+        name: fork_name,
+        icon: source.icon.clone(),
+        provider: effective_provider,
+        description: source.description.clone(),
+        working_directory: String::new(), // force re-resolve via agentmuxHome()
+        shell: source.shell.clone(),
+        provider_flags: source.provider_flags.clone(),
+        auto_start: 0, // forks don't auto-start; explicit launch only
+        restart_on_crash: source.restart_on_crash,
+        idle_timeout_minutes: source.idle_timeout_minutes,
+        created_at: now,
+        agent_type: source.agent_type.clone(),
+        environment: source.environment.clone(),
+        agent_bus_id: String::new(), // fresh bus id so broadcasts don't cross
+        is_seeded: 0,
+        accounts: String::new(),
+        parent_id: source.id.clone(),
+        branch_label: label.clone(),
+        updated_at: now,
+        user_hidden: 0,
+        // Forks inherit container config from source so forked container agents
+        // retain their image and volumes.
+        container_image: source.container_image.clone(),
+        container_volumes: source.container_volumes.clone(),
+        container_name: String::new(),
+        use_ambient_login: 0,
+        model_vendor_base_url: source.model_vendor_base_url.clone(),
+        auto_continue_enabled: 0,
+        memory_id: String::new(),
+        // Fail-closed default, not inherited from source — same
+        // convention as use_ambient_login/auto_continue_enabled
+        // above (opt-in settings reset on a fork, not carried
+        // over, even though other config like container image
+        // and model vendor IS inherited).
+        conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
+    };
+    mstore
+        .agent_def_insert(&mut fork)
+        .map_err(|e| format!("forkagentdefinition: {e}"))?;
+    // Before the fork is returned, so its first spawn already
+    // finds the account (see the function's doc comment).
+    inherit_source_account_links(mstore, identity_store, &source, &fork);
+    // Own dedicated ABF bundle, not the source's — same "every
+    // agent has its own" rule as the template-clone path above.
+    mstore.agent_def_provision_and_bind_bundle(id_store, &mut fork, now);
+
+    // Deep-copy content blobs + skills from source. Cascade foreign
+    // keys on the source are unaffected — we're copying out, not
+    // moving.
+    let source_contents = mstore
+        .agent_content_get_all(&source.id)
+        .map_err(|e| format!("forkagentdefinition content: {e}"))?;
+    for c in source_contents {
+        let new_content = AgentContent {
+            agent_id: fork.id.clone(),
+            content_type: c.content_type,
+            content: c.content,
+            updated_at: now,
+        };
+        mstore
+            .agent_content_set(&new_content)
+            .map_err(|e| format!("forkagentdefinition content: {e}"))?;
+    }
+    let source_skills = mstore
+        .agent_skill_list(&source.id)
+        .map_err(|e| format!("forkagentdefinition skills: {e}"))?;
+    for s in source_skills {
+        let new_skill = AgentSkill {
+            id: uuid::Uuid::new_v4().to_string(),
+            agent_id: fork.id.clone(),
+            name: s.name,
+            trigger: s.trigger,
+            skill_type: s.skill_type,
+            description: s.description,
+            content: s.content,
+            created_at: now,
+        };
+        mstore
+            .agent_skill_insert(&new_skill)
+            .map_err(|e| format!("forkagentdefinition skill: {e}"))?;
+    }
+    Ok(fork)
 }
 
 #[cfg(test)]

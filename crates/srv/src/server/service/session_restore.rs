@@ -487,11 +487,17 @@ pub(crate) async fn replay_tabs(
         let mut new_block_ids: Vec<String> = Vec::new();
         for meta in &tab.blocks {
             // A replayed pane is a new pane: not an agent's, not a popup of
-            // a pane that no longer has this id, no banner from before.
+            // a pane that no longer has this id, no banner from before. A
+            // worker stays its leader's (SPEC_AGENT_WORKERS_2026_10_15.md
+            // §3.5): the mark names the leader's definition, which a restore
+            // keeps, and dropping it would let the worker fork and free its
+            // leader's place.
             let mut meta = meta.clone();
             if let Some(obj) = meta.as_object_mut() {
                 for key in crate::server::browser_owner::srv_only_keys() {
-                    obj.remove(key);
+                    if key != crate::server::app_api::agent_fork::COACHED_BY_META_KEY {
+                        obj.remove(key);
+                    }
                 }
             }
             if !crate::server::browser_identity::refresh_for_replay(&mut meta, &mut fresh_jars, jars_available, profiles.as_ref()) {
@@ -1017,6 +1023,43 @@ mod tests {
             "the restored workspace's active tab is the NEW tab-two, not whichever \
              CreateTab's first-tab-wins default would otherwise leave active"
         );
+    }
+
+    /// A restored worker is still its leader's; a restored browser pane is
+    /// no longer an agent's.
+    #[tokio::test]
+    async fn a_restored_worker_keeps_its_leaders_mark() {
+        use crate::server::app_api::agent_fork::COACHED_BY_META_KEY;
+        use crate::server::browser_owner::OWNER_META_KEY;
+        let state = test_state();
+        let ws_id = dispatch_apply(&state, Command::CreateWorkspace { name: "w".into() })
+            .await
+            .iter()
+            .find_map(|e| match e {
+                Event::WorkspaceCreated { workspace_id, .. } => Some(workspace_id.clone()),
+                _ => None,
+            })
+            .unwrap();
+        let tab_id = dispatch_apply(&state, Command::CreateTab { workspace_id: ws_id.clone(), name: "t".into() })
+            .await
+            .iter()
+            .find_map(|e| match e {
+                Event::TabCreated { tab_id, .. } => Some(tab_id.clone()),
+                _ => None,
+            })
+            .unwrap();
+        let mark = json!({ "agent": "Lead", "id": "lead-def", "block_id": "lead-pane" });
+        let meta = json!({ "view": "agent", COACHED_BY_META_KEY: mark, OWNER_META_KEY: "lead" });
+        dispatch_apply(&state, Command::CreateBlock { tab_id, meta }).await;
+        let snap = snapshot_workspace(&state.mstore, &ws_id).unwrap();
+        save_last_session_snapshot(&state.mstore, snap);
+
+        let (new_ws_id, _) = restore_last_session(&state).await.unwrap().unwrap();
+        let new_ws = state.mstore.get::<Workspace>(&new_ws_id).unwrap().unwrap();
+        let new_tab = state.mstore.get::<Tab>(&new_ws.tabids[0]).unwrap().unwrap();
+        let block = state.mstore.get::<Block>(&new_tab.blockids[0]).unwrap().unwrap();
+        assert_eq!(block.meta.get(COACHED_BY_META_KEY), Some(&mark));
+        assert!(block.meta.get(OWNER_META_KEY).is_none());
     }
 
     #[tokio::test]

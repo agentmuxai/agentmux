@@ -257,6 +257,9 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         // could not START one anywhere — see
         // REPORT_AGENT_OPEN_API_GAP_2026_09_06.md.
         .route("/api/v1/agent/open", post(handle_agent_open))
+        // An agent launches a worker, a fork of itself in a pane next to its
+        // own (SPEC_AGENT_WORKERS_2026_10_15.md §3.1).
+        .route("/api/v1/agent/fork", post(app_api::agent_fork::handle_agent_fork))
         // One live instance per agent, Phase 2 (SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24 §4.6).
         .route("/api/v1/agent/takeover", post(agent_takeover::handle_agent_takeover))
         // Voice speech-to-text: the renderer POSTs mic audio (one

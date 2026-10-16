@@ -6,6 +6,8 @@ mod core;
 mod skills;
 mod history;
 mod template;
+// The fork both the UI and the `Agents` `fork` action make (app_api/agent_fork.rs).
+pub(crate) use template::fork_definition;
 mod identity;
 mod instance;
 mod session;
@@ -67,7 +69,7 @@ pub fn register_agent_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
 ///
 /// MuxBus keeps the cached cloud credentials in `id_store`, a third database
 /// in a normal boot, so the agent's rows there go too, in every channel.
-pub(super) fn purge_identity_store_rows(
+pub(crate) fn purge_identity_store_rows(
     identity_store: &crate::backend::storage::store::Store,
     id_store: &crate::backend::storage::store::Store,
     agent_id: &str,
