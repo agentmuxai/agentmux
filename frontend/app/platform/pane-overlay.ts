@@ -80,6 +80,32 @@ function rectsKey(rects: readonly OverlayRect[]): string {
     return s;
 }
 
+// Listeners told when an explicitly registered overlay that covered a native
+// browser pane goes away (a menu closing over a page). The keyboard was left
+// with the app while it was open; the focus manager gives it back.
+const releaseListeners = new Set<() => void>();
+let releaseScheduled = false;
+
+/** Run `cb` after an overlay that covered a browser pane is released. Returns an unsubscribe. */
+export function onPaneOverlayReleased(cb: () => void): () => void {
+    releaseListeners.add(cb);
+    return () => releaseListeners.delete(cb);
+}
+
+/** Drop an explicitly registered overlay's rect; true when there was one. */
+function dropOverlayRect(id: number): boolean {
+    const rect = overlayRects.get(id);
+    if (!overlayRects.delete(id)) return false;
+    if (rect != null && releaseListeners.size > 0 && anyPaneIntersects(rect) && !releaseScheduled) {
+        releaseScheduled = true;
+        requestAnimationFrame(() => {
+            releaseScheduled = false;
+            for (const cb of [...releaseListeners]) cb();
+        });
+    }
+    return true;
+}
+
 function sendClip(): void {
     if (clipScheduled) return;
     clipScheduled = true;
@@ -292,7 +318,7 @@ export function registerPaneOverlay(el: HTMLElement): PaneOverlayHandle {
         const hidden = !el.isConnected || getComputedStyle(el).visibility === "hidden";
         if (!hidden && rect.w > 0 && rect.h > 0) {
             overlayRects.set(id, rect);
-        } else if (!overlayRects.delete(id)) {
+        } else if (!dropOverlayRect(id)) {
             return;
         }
         sendClip();
@@ -312,7 +338,7 @@ export function registerPaneOverlay(el: HTMLElement): PaneOverlayHandle {
             window.removeEventListener("resize", update);
             resizeObserver?.disconnect();
             styleObserver?.disconnect();
-            if (overlayRects.delete(id)) sendClip();
+            if (dropOverlayRect(id)) sendClip();
         },
     };
 }
@@ -332,10 +358,13 @@ export function isRegisteredPaneOverlay(el: Element): boolean {
 
 /**
  * Whether a menu, popover or modal is drawn over browser pane `blockId`: one of
- * the open overlays registered for the airspace hole intersects the pane. The
- * keyboard belongs to that overlay (Escape to close it, arrows to move in it),
- * not to the page under it. False for a pane with no registered rect (not a
- * native browser pane, or not placed yet).
+ * the overlays registered with `usePaneOverlay` / `registerPaneOverlay`
+ * intersects the pane. The keyboard belongs to that overlay (Escape to close
+ * it, arrows to move in it), not to the page under it. Not the
+ * `data-pane-overlay` auto-discovered ones (Windows only): those include a
+ * pane's own loading cover and tooltips, which don't take the keyboard. False
+ * for a pane with no registered rect (not a native browser pane, or not placed
+ * yet). `onPaneOverlayReleased` says when one of these goes away.
  */
 export function overlayCoversPane(blockId: string): boolean {
     const pane = getPaneRect(blockId);
@@ -343,7 +372,6 @@ export function overlayCoversPane(blockId: string): boolean {
     const covers = (r: OverlayRect): boolean =>
         r.w > 0 && r.h > 0 && r.x < pane.x + pane.w && r.x + r.w > pane.x && r.y < pane.y + pane.h && r.y + r.h > pane.y;
     for (const r of overlayRects.values()) if (covers(r)) return true;
-    for (const r of autoOverlayRects.values()) if (covers(r)) return true;
     return false;
 }
 
@@ -363,7 +391,7 @@ export function usePaneOverlay(getEl: Accessor<HTMLElement | null | undefined>):
         if (rect.w > 0 && rect.h > 0) {
             overlayRects.set(id, rect);
         } else {
-            overlayRects.delete(id);
+            dropOverlayRect(id);
         }
         sendClip();
     };
@@ -399,7 +427,7 @@ export function usePaneOverlay(getEl: Accessor<HTMLElement | null | undefined>):
         window.removeEventListener("resize", update);
         observer?.disconnect();
         styleObserver?.disconnect();
-        if (overlayRects.delete(id)) {
+        if (dropOverlayRect(id)) {
             sendClip();
         }
     });

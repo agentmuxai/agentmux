@@ -67,8 +67,13 @@ function runFrames(n = 1): void {
 }
 
 let overlayOver: string | null = null;
+let overlayReleased: (() => void) | null = null;
 vi.mock("@/app/platform/pane-overlay", () => ({
     overlayCoversPane: (blockId: string) => overlayOver === blockId,
+    onPaneOverlayReleased: (cb: () => void) => {
+        overlayReleased = cb;
+        return () => {};
+    },
 }));
 
 import { push as pushModal, remove as removeModal } from "@/app/element/modal-stack";
@@ -380,6 +385,15 @@ describe("focusManager", () => {
         beforeEach(() => {
             installFocusFollowsSelection();
             vi.spyOn(console, "info").mockImplementation(() => {});
+        });
+
+        it("gives the selection the caret when a menu over a browser pane is released", () => {
+            overlayOver = "block-1";
+            focusManager.ensureSelectionFocused("window-focus");
+            expect(giveFocus).not.toHaveBeenCalled();
+            overlayOver = null;
+            overlayReleased?.();
+            expect(giveFocus).toHaveBeenCalledTimes(1);
         });
 
         it("returns a caret that fell from a pane to <body> to the selection", () => {

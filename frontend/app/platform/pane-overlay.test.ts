@@ -5,7 +5,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 
 vi.mock("@/app/platform/ipc", () => ({ invokeCommand: vi.fn(() => Promise.resolve()) }));
 
-import { __overlayRectCount, overlayCoversPane, registerPaneOverlay } from "./pane-overlay";
+import { __overlayRectCount, __setAutoOverlayRect, onPaneOverlayReleased, overlayCoversPane, registerPaneOverlay } from "./pane-overlay";
 import { __resetPaneRectRegistry, registerPaneRect } from "./pane-rect-registry";
 
 // registerPaneOverlay — the imperative sibling of usePaneOverlay used by the
@@ -94,5 +94,32 @@ describe("overlayCoversPane", () => {
         expect(overlayCoversPane("pane-a")).toBe(false);
         expect(overlayCoversPane("no-such-pane")).toBe(false);
         h.release();
+    });
+
+    test("a data-pane-overlay (auto) element, such as a loading cover or tooltip, does not count", () => {
+        registerPaneRect("pane-a", { x: 0, y: 0, w: 200, h: 200 });
+        const el = makeEl();
+        __setAutoOverlayRect(el, { x: 0, y: 0, w: 200, h: 200 });
+        expect(overlayCoversPane("pane-a")).toBe(false);
+    });
+
+    test("releasing an overlay that covered a pane tells the listeners once; one elsewhere does not", async () => {
+        const frames: FrameRequestCallback[] = [];
+        vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => frames.push(cb));
+        const cb = vi.fn();
+        const off = onPaneOverlayReleased(cb);
+        registerPaneRect("pane-a", { x: 0, y: 0, w: 100, h: 100 });
+        const away = registerPaneOverlay(makeEl({ left: 300, top: 300, width: 50, height: 50 }));
+        const over = registerPaneOverlay(makeEl({ left: 10, top: 10, width: 50, height: 50 }));
+        frames.splice(0).forEach((f) => f(0));
+        away.release();
+        frames.splice(0).forEach((f) => f(0));
+        expect(cb).not.toHaveBeenCalled();
+        over.release();
+        over.release();
+        frames.splice(0).forEach((f) => f(0));
+        expect(cb).toHaveBeenCalledTimes(1);
+        off();
+        vi.unstubAllGlobals();
     });
 });

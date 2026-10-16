@@ -191,7 +191,9 @@ page gets); the others are posted. `PENDING_PANE_KEY` and its TTL are replaced b
 A menu or popover opened over a pane (a hole in the overlay, macOS) hands the keyboard to the app, so Escape and the
 arrows reach the menu. The frontend's window-focus net must not give it back to the selected pane while the menu is
 open (`overlayCoversPane`, `pane-overlay.ts`): it did, ~100 ms later, and the menu then couldn't be closed from the
-keyboard (found by a real-input run on macOS, 2026-10-16).
+keyboard (found by a real-input run on macOS, 2026-10-16). Only the overlays registered with `usePaneOverlay` /
+`registerPaneOverlay` count, not a pane's own loading cover or tooltips; when one that covered a pane is released, the
+net runs again (`onPaneOverlayReleased`) and the page gets the keyboard back.
 
 ## 4. Phases
 
