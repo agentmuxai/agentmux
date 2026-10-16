@@ -16,6 +16,7 @@ import { Button, IconButton } from "@/app/element/ui";
 import { createEffect, createSignal, on, onCleanup, onMount, Show, type JSX } from "solid-js";
 import { ViewerBar, type ViewerBarProps } from "../viewer-bar";
 import { linkAction } from "./pdf-policy";
+import { loadRange } from "./pdf-range";
 import type { PdfjsModules } from "./pdfjs-runtime";
 import "./pdf-viewer.scss";
 
@@ -81,13 +82,20 @@ export function PdfViewer(props: PdfViewerProps): JSX.Element {
         if (!first.blob) return { data: new Uint8Array(await (await fetchMediaBlob(props.path)).arrayBuffer()) };
         const range = new pdfjs.PDFDataRangeTransport(first.total, new Uint8Array(await first.blob.arrayBuffer()));
         const path = props.path;
-        range.requestDataRange = (begin: number, end: number) => {
-            void fetchMediaRange(path, begin, end - 1)
-                .then(async (r) => {
-                    if (r.blob) range.onDataRange(begin, new Uint8Array(await r.blob.arrayBuffer()));
-                })
-                .catch(() => {});
-        };
+        const mine = generation;
+        range.requestDataRange = (begin: number, end: number) =>
+            void loadRange(
+                (b, e) => fetchMediaRange(path, b, e),
+                begin,
+                end,
+                (b, bytes) => range.onDataRange(b, bytes),
+                (message) => {
+                    if (mine !== generation) return;
+                    teardown();
+                    setError(message);
+                    setStatus("error");
+                }
+            );
         return { range, length: first.total, rangeChunkSize: RANGE_CHUNK, disableAutoFetch: true };
     };
 
