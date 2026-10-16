@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-15
 **Author:** AgentY@narko
-**Status:** active. Approved 2026-10-15: the operator took every recommendation in §8 ("go with recommendations, get it all built"). Phases in §7; each PR updates this line. Phases A (#4968), B (#4971), C (#4973), D1 (#4975) and D2 (#4977) are merged or in review; phase E (tints, z-index, dead CSS) is built.
+**Status:** active. Approved 2026-10-15: the operator took every recommendation in §8 ("go with recommendations, get it all built"). Phases in §7; each PR updates this line. Every phase is merged: A (#4968), B (#4971), C (#4973), D1 (#4975), D2 (#4977) and E (#4980), and the follow-ups #4988 (close buttons), #4989 (the last tints, inline z-indexes) and #4990 (the run-time class candidates).
 **Verified against:** `agentmux` `main` @ `fb6b20ba8`, by reading code (three read-only inventories, spot-checked by hand) and this machine's Windows setting.
 **Scope:** every animation, transition and motion gate in `frontend/` (CSS, SCSS, TS, the vendored Font Awesome CSS, SVG assets, `index.html`), the `window:reducedmotion` setting end to end, and the shared stylesheet layer (`theme.scss`, `mixins.scss`, `element/ui/`).
 **Related:**
@@ -429,7 +429,7 @@ The order is by payoff against risk. The DRY items go in phases C and D (§7); p
 - Item 2: `--modal-box-shadow` is a valid shadow, so the search box shows it.
 - Item 3: undefined variables went from 27 to 0.
   - Corrected at their use: `--highlight-bg` → `--highlight-bg-color`, `--text-color` → `--main-text-color`, `--border-radius-sm` → `--radius-sm`, `--secondary-bg-color` → `--block-bg-color` (the editor, which already fell back to it) or `--panel-bg-color` (the WebFetch result, like the file's other cards), `--space-2-5` → `--space-2` or `--space-3`.
-  - Defined in `theme.scss`, at the fallback most call sites showed: `--tertiary-text-color` (white at 0.5; 0.3 had as many uses, all in one file), with a light-polarity override at half the text colour; `--error-bg-color`; `--button-secondary-bg-color`. `--am-window-fade`, which the Linux host sets inline, gets its default of 1 in `:root.am-uniform-fade`.
+  - Defined in `theme.scss`, at the fallback most call sites showed: `--tertiary-text-color` (white at 0.5; 0.3 had as many uses, all in one file), with a light-polarity override at half the text colour; `--error-bg-color` (since removed in #4989: its two error boxes use `--error-bg-strong`); `--button-secondary-bg-color`. `--am-window-fade`, which the Linux host sets inline, gets its default of 1 in `:root.am-uniform-fade`.
   - Where the fallback differed from the real token, or the call sites differed from each other, the call site keeps the value it rendered, as a literal: `--panel-bg`, `--panel-bg-alt`, `--input-bg`, `--color-input-bg`, `--code-bg-color`, `--color-code-bg`, `--color-warning-bg`, `--border-color-faint`, `--selected-bg-color`, `--radius-2` (4 px), `--font-family` (`sans-serif`), Tailwind's `--default-font-*-settings` (`normal`), and the other alphas of `--tertiary-text-color` and `--button-secondary-bg-color`. The tints are candidates for item 16.
   - Not ours to define: Shiki sets `--shiki-*` on each highlighted run, and `var(--conn-icon-color-${n})` is built in a template literal. The check now leaves both out.
 - Visible changes. Each was a variable with no fallback, so the style rendered nothing:
@@ -473,7 +473,7 @@ The order is by payoff against risk. The DRY items go in phases C and D (§7); p
 - Item 11:
   - `button-reset` (`background: transparent; border: none; padding: 0`) replaces 21 resets, written as `none` or `0` at some sites; both compute the same.
   - The CPU and Disk readout buttons share `statusbar/_stat-button.scss`.
-  - The 21 hand-rolled close and dismiss buttons are not on `IconButton` yet: that changes their markup, so it is a separate change.
+  - The close and dismiss buttons moved to `IconButton` separately, in #4988 (see the follow-ups after §6.5).
 - §5.4: `--motion-scale-decorative: 1` and `--duration-decorative-instant`, `-fast`, `-quick` and `-base`, at the same values. 68 hover and focus fades and hover lifts use them (119 durations), including `control-transition`'s default and every call that passes a duration. The `:root[data-motion-reduce~="decorative"]` rule is not added.
 
 ### 6.4 Near-duplicate stylesheets
@@ -537,13 +537,19 @@ The order is by payoff against risk. The DRY items go in phases C and D (§7); p
   | window | delete confirmation, zoom level | `--z-top` (was a raw 10000 and `--z-context-menu`) | 10000 |
 
   - Raw z-indexes in the stylesheets went from 60 to 51: eight became tokens and one left with `_header-controls.scss`. The 51 left order a component's own children inside its own stacking context.
-  - TypeScript sets these inline, outside the scale, at the same numbers as before: the context menus and the tab colour panel (9999), the media-capture indicator (9998), the JS context menu and the startup splash in `index.html` (99999), and the dev diagnostics and performance HUD (999998, 999999).
+  - TypeScript set these inline, outside the scale (since #4989 they come from `frontend/app/zindex.ts`, see the follow-ups), at the same numbers as before: the context menus and the tab colour panel (9999), the media-capture indicator (9998), the JS context menu and the startup splash in `index.html` (99999), and the dev diagnostics and performance HUD (999998, 999999).
 - Item 18, dead CSS. Each class was checked for a reference anywhere outside the stylesheets and docs, then for names built at run time: a template literal or concatenation ending in one of its prefixes, or starting with one of its suffixes. 106 built selectors went.
   - Whole files: `_import-modal-body.scss`, `_header-controls.scss` (the `agent-header*`, process-control, sidebar and filter classes) and `identity/styles/_assignments.scss`.
   - In `term.scss`: `.term-header`, `.term-toolbar`, `.term-cmd-toolbar*`, `.connection-btn`, `.term-htmlelem` and `.term-sticker-svg`. In `app.scss`: `.flex-spacer`, `.error-color`, `.u-cursor-*` and `.scrollbar-hide-until-hover`.
   - Single rules: `.bst-connection*`, `.browser-error-hint`, the icon button's `.bulb` (and its `--bulb-color`), `.config-error-button`, the typeahead's `.input-decoration.end-position`, `.identity-header*`, `.identity-agent-count`, `.matrix-badge`, `.muxbus-login-chip-connected`, `-dot`, `-email` and `-error`, `.muxbus-login-popover`, `.overlay-leaf`, and the pane header's `.preview-filename` and `.term-activity--flash`. That flash was the only rule that set `am-accent-flash`'s `--flash-end-opacity`, so the keyframes end at opacity 1, as they did everywhere else.
   - Kept: `.os-scrollbar*`, which OverlayScrollbars (`markdown.tsx`) creates; `.identity-form-error-text` and `-copy-btn`, which `CopyableErrorMessage` builds from its `class`; `.markdown-table` and the terminal's `.ijson`; the classes of xterm.css, highlight.js and Tailwind's utilities.
-  - Candidates, not proven: 218 classes with no literal reference whose prefix is built at run time somewhere, for example the `CollapsibleMessage` parts (`agent-jekt-*`, `agent-message-*`), `status-lan-diamond--*`, `files-git-*`, `log-fg-*` and the `is-*` states.
+  - Candidates, not proven: 218 classes with no literal reference whose prefix is built at run time somewhere, for example the `CollapsibleMessage` parts (`agent-jekt-*`, `agent-message-*`), `status-lan-diamond--*`, `files-git-*`, `log-fg-*` and the `is-*` states. Resolved in #4990 (see the follow-ups).
+
+**As built (follow-ups, #4988-#4990).**
+- Close buttons (§6.3 item 11), #4988: 27 hand-rolled close and dismiss buttons in 20 files use `IconButton` (two text buttons use `Button`); hand-rolled buttons went from 184 to 157. Left: the attachment tile's round remove badge (it needs a solid background over the image), the activity row's deliberately large dismiss, and pane/window tab close and window controls (other primitives). Found: the shared Tooltip renders at `z-50`, under dialogs and popovers, so overlay buttons use `tooltip={false}`; the Tooltip layer needs its own fix.
+- The last tints (§6.5 item 16), #4989: six more steps per tone, `-bg-subtle` 6 %, `-bg-strong` 16 %, `-bg-heavy` 23 %, `-line-strong` 40 %, `-line-heavy` 50 %, `-line-vivid` 60 %, a step only where it replaces at least four calls. 84 of the 99 calls left by phase E use a token; 48 sites shift by at most 2 points. `--error-bg-color` is gone. Left: tints that dim text (a text-contrast decision), seven one-off values, and three kept by choice; mixes into an opaque surface are not tints over transparent.
+- Inline z-indexes (§6.5 item 17), #4989: `frontend/app/zindex.ts` exports the scale's numbers for TypeScript (numbers, not `var()`, so the perf HUD works without the stylesheet), with a test against `theme.scss` and on the order of the top layers. New top tokens: `--z-capture-indicator` 9998, `--z-js-menu` and `--z-splash` 99999 (the splash keeps its literal in `index.html`, which paints before any stylesheet), `--z-dev-diagnostics` 999998, `--z-dev-hud` 999999. Every element keeps its number.
+- Run-time class candidates (§6.5 item 18), #4990: of 188 classes with no literal reference, each checked against the values every class-building template can take, 29 are dead (28 removed; `.markdown-table` stays, because removing it from `:is(table, .markdown-table)` would lower that rule's specificity), 150 are live and 9 unsure (the `fa-*` animation classes, `term-mode-vdom`), which stay.
 
 ### 6.6 Small and safe
 
