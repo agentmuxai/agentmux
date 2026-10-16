@@ -231,7 +231,7 @@ sessions and agent state are in <code>~/.agentmux/</code> and are unaffected.</p
 }
 
 /// An srv object id (a UUID): ASCII letters, digits and `-`, 1–64 chars.
-fn is_object_id(s: &str) -> bool {
+pub(super) fn is_object_id(s: &str) -> bool {
     !s.is_empty() && s.len() <= 64 && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
 }
 

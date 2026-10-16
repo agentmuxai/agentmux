@@ -148,14 +148,14 @@ function currentWindowLabel(): string {
 
 /**
  * Open the windows a restore rebuilt beside this one: the rest of the last
- * session's windows, each in a window of its own. Best-effort: one that fails
- * to open leaves the others, and this window, as they are.
+ * session's windows, each in a window of its own where it was. Best-effort:
+ * one that fails to open leaves the others, and this window, as they are.
  */
 async function reopenRestoredWindows(): Promise<void> {
     try {
         const restored = await WindowService.TakeRestoredWindows();
         for (const w of restored ?? []) {
-            await getApi().openWorkspaceInNewWindow(w.workspaceid);
+            await getApi().openRestoredWindow(w);
         }
     } catch (e) {
         console.warn("[session-restore] couldn't reopen the last session's other windows", e);
