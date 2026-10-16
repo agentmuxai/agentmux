@@ -4,8 +4,8 @@
 **Status:** active — phase 1 (detection, the chip, Maintenance's "What's
 new" and Download) in #4983; phase 2 (data carries forward) in #4996;
 phase 3a (download and stage, Windows portable) in #5000; phase 3b
-(Upgrade & restart) in #5005; the rest of phase 3 and phases 4–5 are not
-started. The operator took the §8 recommendations on 2026-10-15.
+(Upgrade & restart) in #5005; phase 3d (`setup.exe`) in #5015; the rest
+of phases 3–5 are not started. The operator took the §8 recommendations on 2026-10-15.
 **Asked for:** "agents need a way to upgrade their running instances and
 continue on. Users also need a button to let them know. We did work on this
 in the past, find the history, let's consolidate; we have partial work in the
