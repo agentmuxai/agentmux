@@ -697,7 +697,7 @@ pub(crate) async fn run_windows(
             Some(req) = upgrade_requests.recv() => {
                 match crate::upgrade_restart::staged(&req, launcher_exe_dir, &paths.data_dir, version) {
                     Ok(staged) => {
-                        log(&format!("upgrade: srv asks to restart into {staged:?}; asking the user"));
+                        log(&format!("upgrade: srv asks to restart into {staged}; asking the user"));
                         let tx = upgrade_yes_tx.clone();
                         crate::upgrade_restart::ask_then(req.version, staged, move |s| {
                             let _ = tx.send(s);
@@ -707,7 +707,7 @@ pub(crate) async fn run_windows(
                 }
             }
             Some(staged) = upgrade_yes.recv() => {
-                log(&format!("upgrade: the user said yes; quitting to restart into {staged:?}"));
+                log(&format!("upgrade: the user said yes; quitting to restart into {staged}"));
                 relaunch = Some((staged, std::time::Instant::now()));
                 let (data_dir, hash) = (paths.data_dir.clone(), dir_hash.clone());
                 tokio::task::spawn_blocking(move || crate::tray::forward_tray_cmd(&data_dir, &hash, "quit_app"));
@@ -1286,10 +1286,10 @@ pub(crate) async fn run_windows(
     // start. Only after a clean quit the user confirmed recently.
     if let Some((staged, at)) = relaunch.filter(|(_, at)| exit_code == 0 && crate::upgrade_restart::still_confirmed(*at)) {
         match crate::upgrade_restart::relaunch(&staged) {
-            Ok(()) => log(&format!("upgrade: started {staged:?} (confirmed {}s ago)", at.elapsed().as_secs())),
+            Ok(()) => log(&format!("upgrade: started {staged} (confirmed {}s ago)", at.elapsed().as_secs())),
             Err(e) => {
-                log(&format!("upgrade: couldn't start {staged:?}: {e}"));
-                crate::show_fatal_dialog("AgentMux upgrade", &format!("AgentMux couldn't start the new version:\n{staged:?}\n\n{e}"));
+                log(&format!("upgrade: couldn't start {staged}: {e}"));
+                crate::show_fatal_dialog("AgentMux upgrade", &format!("AgentMux couldn't start the new version:\n{staged}\n\n{e}"));
             }
         }
     }

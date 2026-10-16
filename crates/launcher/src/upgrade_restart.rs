@@ -99,6 +99,16 @@ pub enum Staged {
     Installer { installer: PathBuf, own_dir: PathBuf, all_users: bool },
 }
 
+impl std::fmt::Display for Staged {
+    /// The path the user would recognise: the new launcher, or the installer.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Staged::Launcher(launcher) => write!(f, "{}", launcher.display()),
+            Staged::Installer { installer, .. } => write!(f, "{}", installer.display()),
+        }
+    }
+}
+
 /// Whether `dir` is under Program Files, where a `setup.exe` install was made
 /// for all users.
 fn under_program_files(dir: &Path) -> bool {

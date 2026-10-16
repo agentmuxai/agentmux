@@ -100,8 +100,11 @@ fn detect_at(exe: &Path, os: &str, appimage: bool, debian: bool) -> InstallKind 
                 portable_root.filter(|r| r.join("agentmux.exe").is_file() && !has_uninstaller(r))
             {
                 InstallKind::WindowsPortable { root }
-            } else {
+            } else if dir.and_then(Path::parent).is_some_and(|app| has_uninstaller(app) && app.join("agentmux.exe").is_file()) {
+                // srv is in `{app}\runtime\`; the launcher checks the same uninstaller.
                 InstallKind::WindowsSetup
+            } else {
+                InstallKind::Unknown
             }
         }
         "macos" if text.contains(".app/Contents/") => InstallKind::MacApp,
@@ -146,8 +149,10 @@ mod tests {
         assert_eq!(detect_at(&exe, "windows", false, false), InstallKind::WindowsPortable { root });
         let store = Path::new(r"C:\Program Files\WindowsApps\AgentMux.AgentMux_0.59.26.0_x64__vqr1k32tkfk4y\runtime\srv.exe");
         assert_eq!(detect_at(store, "windows", false, false), InstallKind::WindowsStore);
-        let setup = Path::new(r"C:\Users\u\AppData\Local\Programs\AgentMux\runtime\srv.exe");
-        assert_eq!(detect_at(setup, "windows", false, false), InstallKind::WindowsSetup);
+        // Neither a portable nor an install with the uninstaller: not one
+        // AgentMux knows how to upgrade (the launcher would refuse it).
+        let other = Path::new(r"C:\Users\u\AppData\Local\Programs\AgentMux\runtime\srv.exe");
+        assert_eq!(detect_at(other, "windows", false, false), InstallKind::Unknown);
         // setup.exe ships the portable's runtime/, marker and all: its
         // uninstaller is what tells the two apart.
         let installed = dir.path().join("Programs/AgentMux");

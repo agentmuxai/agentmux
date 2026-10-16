@@ -82,7 +82,7 @@ pub(crate) use wndproc::install_main_window_floater_cascade_hook;
 // `on_before_close`'s backend cleanup (which never fires for parked
 // pool-window browsers).
 pub(crate) use helpers::{
-    backend_browser_attention, backend_widget_approval, backend_browser_navigation, backend_browser_popup, backend_browser_popup_window,
+    backend_browser_attention, backend_widget_approval, backend_upgrade_request, backend_browser_navigation, backend_browser_popup, backend_browser_popup_window,
 };
 pub(crate) use helpers::backend_close_window;
 // SPEC_PILLAR1_STEP2 Slice A Phase 2 — durable opacity mirror write-through

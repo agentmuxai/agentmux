@@ -136,6 +136,11 @@ declare global {
          *  (`hash`) the user was shown, or cancel. Relayed by the host, which srv
          *  trusts and agents can't impersonate. SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md §8.3. */
         decideWidget(id: string, hash: string, approve: boolean, signer?: string): Promise<void>;
+        /** Answer an agent's request to upgrade AgentMux: Upgrade now (for
+         *  exactly the `version` the prompt showed) or Later. Relayed by the
+         *  host, which srv trusts and agents can't impersonate.
+         *  SPEC_UPGRADE_FOR_USERS_AND_AGENTS_2026_10_15.md §5.1. */
+        decideUpgrade?(id: string, version: string, accept: boolean): Promise<void>;
         /** Forget the key a widget publisher is pinned to (Settings → Widgets),
          *  relayed by the host like an approval: forgetting lets another key pin
          *  that publisher. SPEC_WIDGET_SHARING_2026_10_10.md §2.3. */
