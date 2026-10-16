@@ -201,6 +201,8 @@ export type EditorPaneCommand =
           tabId: string;
           viewer: string;
           override?: boolean;
+          /** Drop the user's earlier choice (it can't show the file). */
+          clearOverride?: boolean;
           source?: EditorCommandSource;
       }
     | { type: "SetFollowFolder"; tabId: string; follow: boolean; source?: EditorCommandSource }
@@ -487,8 +489,9 @@ export function update(state: EditorPaneState, command: EditorPaneCommand): Redu
             const tab = tabById(doc, command.tabId);
             if (!tab) return same(state);
             if (!command.override) {
-                if (tab.payload.viewer === command.viewer) return same(state);
-                return next(state, patchBuffer(doc, tab.id, { viewer: command.viewer }));
+                const clear = command.clearOverride && tab.payload.viewerOverride !== undefined;
+                if (tab.payload.viewer === command.viewer && !clear) return same(state);
+                return next(state, patchBuffer(doc, tab.id, { viewer: command.viewer, ...(clear ? { viewerOverride: undefined } : {}) }));
             }
             // Reopen with: the tab reads its file again, in that viewer.
             return next(

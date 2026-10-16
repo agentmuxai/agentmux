@@ -55,7 +55,7 @@ import { sniffUnopenable } from "./editor-sniff";
 import { openFileInNewTab } from "./editor-open";
 import { applyMetaPatch, migrateMediaMeta } from "./media-migration";
 import { chooseViewer, isBinaryProbe, isViewerId, viewerForDropped, type FileProbe, type ViewerId } from "./viewers/viewer-choice";
-import { droppedFileOf, isDroppedPath, neighbourInFolder, rememberDropped, ViewerTabs } from "./viewers/viewer-tabs";
+import { droppedFileOf, isDroppedPath, rememberDropped, ViewerTabs } from "./viewers/viewer-tabs";
 import { showBlockWithoutFocus } from "@/app/util/reveal-block";
 import { readZoom } from "@/app/store/zoom-factor";
 import { isSshConnection } from "@/app/view/term/ssh-connection";
@@ -594,13 +594,18 @@ export class EditorViewModel {
         // then bail (the RPC's continuation will populate content as
         // usual).
         if (this._loadingPaths.has(canonical)) {
-            dispatch(this.blockId, {
+            const events = dispatch(this.blockId, {
                 type: "OpenFile",
                 path: filePath,
                 language: detectLanguage(filePath),
                 mode,
                 source: "user",
             });
+            // A media open while the file is still loading still follows.
+            const hit = events.find((e) => e.type === "TabOpened" || e.type === "TabActivated");
+            if (opts?.followFolder && hit && (hit.type === "TabOpened" || hit.type === "TabActivated")) {
+                dispatch(this.blockId, { type: "SetFollowFolder", tabId: hit.tabId, follow: true, source: "system" });
+            }
             return;
         }
         this._loadingPaths.add(canonical);
@@ -750,6 +755,15 @@ export class EditorViewModel {
             //      as 512KB of one line).
             // Both fast checks; bail before stashing content or hashing.
             const refusal = sniffUnopenable(content, allowBinaryText);
+            // "Open as text anyway" that CodeMirror can't take after all: back
+            // to the file's own viewer, the choice dropped, and say why.
+            const probe = refusal && allowBinaryText ? this.viewerTabs.probe(tabId) : null;
+            if (refusal && probe) {
+                dispatch(this.blockId, { type: "SetTabViewer", tabId, viewer: chooseViewer(probe), clearOverride: true, source: "system" });
+                this.reportFileOpError("Opening as text", new Error(refusal));
+                this._markViewerLoaded(tabId, `probe:${probe.size}:${probe.mtime}`);
+                return null;
+            }
             if (refusal) {
                 dispatch(this.blockId, {
                     type: "TabContentLoadFailed",
@@ -1421,16 +1435,6 @@ export class EditorViewModel {
     retargetTab(tabId: string, newPath: string): void {
         const events = dispatch(this.blockId, { type: "RetargetTab", tabId, newPath, source: "system" });
         if (events.some((e) => e.type === "TabActivated" && e.tabId === tabId)) this._contentByTab.delete(tabId);
-    }
-
-    async stepInFolder(tabId: string, delta: -1 | 1): Promise<void> {
-        const tab = snapshot(this.blockId)?.tabs.find((t) => t.id === tabId);
-        if (!tab || isDroppedPath(tab.filePath)) return;
-        const next = await neighbourInFolder(tab.filePath, isViewerId(tab.viewer) ? tab.viewer : "image", delta).catch((e) => {
-            this.reportFileOpError("Listing the folder", e);
-            return null;
-        });
-        if (next) this.retargetTab(tabId, next);
     }
 
     /** A dropped file with no host path that isn't text: shown from its

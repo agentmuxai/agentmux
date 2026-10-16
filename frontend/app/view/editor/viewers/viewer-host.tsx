@@ -21,7 +21,7 @@ import { ImageViewer } from "./image/image-viewer";
 import { InfoCard } from "./info/info-card";
 import type { ViewerBarProps } from "./viewer-bar";
 import { TEXT_MAX_BYTES, type ViewerId } from "./viewer-choice";
-import { droppedFileOf, isDroppedPath } from "./viewer-tabs";
+import { droppedFileOf, isDroppedPath, neighbourInFolder } from "./viewer-tabs";
 import "./viewers.scss";
 
 export function ViewerHost(props: { model: EditorViewModel }): JSX.Element {
@@ -92,7 +92,7 @@ function ViewerFor(props: { model: EditorViewModel; tabId: string; viewer: Viewe
                     mime={mime()}
                     size={probe()?.size}
                     bar={bar()}
-                    onStep={dropped() ? undefined : (d) => void model.stepInFolder(props.tabId, d)}
+                    onStep={dropped() ? undefined : (d) => void neighbourInFolder(path(), props.viewer, d).then((p) => p && model.retargetTab(props.tabId, p)).catch(() => {})}
                 />
             </Match>
             <Match when={props.viewer === "media"}>
