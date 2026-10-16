@@ -201,7 +201,7 @@ impl Supervisor {
     /// Judge `block_id`'s last turn and act on it. `notify` is false for the
     /// judgement a mode change asks for: the user is looking at the pane.
     pub async fn evaluate(&self, block_id: &str, trigger: Option<TriggerKind>, steps: u32, notify: bool) {
-        let generation = self.next_generation(block_id);
+        let mut generation = self.next_generation(block_id);
         let lock = self.lock_for(block_id);
         let _held = lock.lock().await;
         if !self.is_current(block_id, generation) {
@@ -249,10 +249,17 @@ impl Supervisor {
         state.reason.clear();
         self.save(block_id, generation, &state);
 
-        let outcome = judge::judge(&self.mstore, block_id, generation, mode, &activity.text, state.continuations).await;
+        let mut outcome = judge::judge(&self.mstore, block_id, generation, mode, &activity.text, state.continuations).await;
+        // One more try for a call that failed or timed out (a busy shared
+        // login), while the turn is still the latest and the agent still idle.
+        if matches!(outcome, judge::Outcome::Failed) && self.is_current(block_id, generation) && !turn_active(block_id) {
+            let retry = self.next_generation(block_id);
+            outcome = judge::judge(&self.mstore, block_id, retry, mode, &activity.text, state.continuations).await;
+            generation = retry;
+        }
         let judged: Option<Judgement> = match outcome {
             judge::Outcome::Superseded => return,
-            judge::Outcome::NoVerdict => None,
+            judge::Outcome::Failed | judge::Outcome::NoVerdict => None,
             judge::Outcome::Judged(j) => Some(j),
         };
         // While the judge ran: a newer turn ended, the mode changed, or the

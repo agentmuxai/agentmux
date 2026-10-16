@@ -42,6 +42,8 @@ const COMMON_RULES: &str = "In every mode:\n\
 - done: the task is complete AND the conversation shows evidence (tests passing, a pull request opened or merged, \
 the result shown). A bare claim of being done is not evidence: in drive say continue and ask it to show the \
 evidence; in steady say needs_user.\n\
+- A turn that ends by asking the user to approve, choose or decide something is never done, even when the user \
+told the agent to ask: something is still waiting on an answer.\n\
 - needs_user: the next step is risky, irreversible or outward-facing (deleting data, force-pushing, deploying, \
 spending money, publishing, messaging people outside the team), even if the agent proposes it.\n\
 - blocked: the agent cannot proceed (a failing tool it cannot fix, missing access) and says so.\n\
@@ -95,7 +97,9 @@ fn clip(text: &str) -> String {
 #[derive(Debug)]
 pub enum Outcome {
     Judged(Judgement),
-    /// The call ran and failed, timed out, or answered out of format.
+    /// The CLI failed or timed out: worth one more try.
+    Failed,
+    /// The model answered, out of format: no verdict.
     NoVerdict,
     /// A newer request for this pane took over, or the call never ran.
     Superseded,
@@ -125,6 +129,9 @@ pub async fn judge(
         .await;
     if slot.is_superseded() {
         return Outcome::Superseded;
+    }
+    if reply.error.is_some() {
+        return Outcome::Failed;
     }
     match parse_answer(&reply.text, mode) {
         Some(j) => Outcome::Judged(j),

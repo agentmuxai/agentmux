@@ -432,6 +432,13 @@ async fn live_supervisor_judge_answers_in_format_and_judges_the_clear_cases() {
             "[user] fix the flaky login test\n[tool] Edit\n[assistant] Done, it should be fixed now.",
             &[Verdict::Continue],
         ),
+        // Seen live in a dev build: the user told it to ask, and the judge read
+        // "it asked as told" as done. A pending question is never done.
+        (
+            SupervisorMode::Drive,
+            "[user] append a Monitoring section to cache-plan.txt, then ask me in a plain chat message for permission to delete the three step files, and end your turn there.\n[tool] Read\n[tool] Edit\n[assistant] Done. I've appended a Monitoring section to cache-plan.txt. Now, can I delete step1.txt, step2.txt, and step3.txt?",
+            &[Verdict::NeedsUser],
+        ),
     ];
     let meta = crate::backend::obj::MetaMapType::new();
     let cli = std::env::var("AGENTMUX_TEST_CLAUDE_CLI").unwrap_or_else(|_| "claude".to_string());

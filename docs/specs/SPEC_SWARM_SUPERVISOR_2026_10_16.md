@@ -68,7 +68,7 @@ One judgement per pane runs at a time. A turn that ends while one is running sup
 
 ### 3.3 The judge
 
-A new ambient purpose, `supervisor_verdict` (background class, 45 s), on the existing gateway, so it gets the same caps, cancellation, spend accounting and outcome log as every other Haiku call. It uses the pane's own CLI and auth (`CliTarget::from_meta`).
+A new ambient purpose, `supervisor_verdict` (background class, 90 s), on the existing gateway, so it gets the same caps, cancellation, spend accounting and outcome log as every other Haiku call. It uses the pane's own CLI and auth (`CliTarget::from_meta`).
 
 **The prompt** gives:
 - the mode and what it allows;
@@ -85,8 +85,11 @@ VERDICT: <continue|done|needs_user|blocked> | REASON: <one sentence> | NEXT: <on
 - "done" needs evidence in the transcript, such as tests passing, a PR merged or opened, or a result shown. A bare claim is not enough: in Drive it becomes `continue` with "show the evidence", and in Steady `needs_user`.
 - Risky, irreversible or outward-facing next steps are `needs_user`: deleting, force-pushing, deploying, spending money, publishing, or messaging people outside the swarm.
 - A question only the user can answer is `needs_user` in both modes. In Drive, a question the agent can research or decide itself is `continue`.
+- A turn that ends by asking the user to approve, choose or decide something is never `done`, even when the user told the agent to ask.
 
-**Parsing** is strict. A malformed reply, an empty reply, or a failed or timed-out call is treated as "no verdict". The Supervisor stops, says it couldn't judge, and the user gets the ordinary "finished" notification. It never continues on a guess.
+**Time and retries.** A verdict took 14 to 27 s on a busy shared login in the dev-build test, and 45 s timed out, so the limit is 90 s, like the continuity state's. A call that fails or times out is tried once more, if the turn is still the latest and the agent is still idle.
+
+**Parsing** is strict. A malformed reply, an empty reply, or a call that failed twice is treated as "no verdict". The Supervisor stops, says it couldn't judge, and the user gets the ordinary "finished" notification. It never continues on a guess.
 
 ### 3.4 Limits
 
