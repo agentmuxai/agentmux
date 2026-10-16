@@ -1,7 +1,7 @@
 # Spec: an agent launches and coaches worker agents in panes
 
 **Date:** 2026-10-15
-**Status:** active. Phase A (§3.1, §3.2's pane mark, §3.5, §3.6) implemented in #5020 (as `Agents` `fork`) and #5023 (renamed `Agents` `spawn`; a worker is a new agent, not a fork; its account, §3.5): `app_api/agent_spawn.rs`. Left: Phase B (§3.2's table, §3.3, §3.4), Phase C (§3.7).
+**Status:** active. Phase A (§3.1, §3.2's pane mark, §3.5, §3.6) implemented in #5020 (as `Agents` `fork`) and #5023 (renamed `Agents` `spawn`; a worker is a new agent, not a fork; its account, §3.5): `app_api/agent_spawn.rs`. Phase B (§3.3, §3.4) implemented in #PRNUM: `backend/worker_notes.rs`, `Agents` `workers`. Left: Phase C (§3.7); §3.2's table was not needed (Phase A's marks serve the counts and the list).
 **Author:** Loap-3@narko, at the operator's request
 **Scope:** srv (`app_api/agent_open.rs`, `server/agent_handlers/template.rs`, `backend/reactive/handler.rs`), the MCP `Agents` tool (`crates/mcp/src/tools/agents_tool.rs`, `panes.rs`), the agent pane header.
 **Related:** `SPEC_AGENT_QUICK_FORK_NEW_TAB_2026_08_21.md` (the UI's fork), `SPEC_JEKT_DELIVERY_STATES_AND_MAILBOX_2026_10_01.md`, `SPEC_AGENT_COORDINATION_CHANNEL_2026_10_15.md`, the Warden Supervisor (`frontend/app/view/warden-supervisor/`).
@@ -65,7 +65,7 @@ It doesn't get the leader's Personal Memory (it gets its own, empty bundle: `age
 
 **Its own workspace.** As for any new agent, a fresh folder under `~/.agentmux/agents/` (`agent-model.ts:491-506`). The workspace rules already say how the worker gets the code: it clones into its own workspace (`git clone --reference` the leader's clone saves disk), reads the leader's uncommitted spec where it is, and never edits the leader's workspace. The brief gives the spec's absolute path.
 
-**How it reports.** AgentMux's line ahead of the brief names the tool: "Report to <leader> with the agentmux Message tool (action send, to <leader>), not a built-in SendMessage". In the first run (2026-10-16, a Haiku worker) the line said only "Message send", and the worker used Claude Code's own cross-session `SendMessage`, which reached the leader unverified instead of as a `host-verified` jekt.
+**How it reports.** AgentMux's line ahead of the brief names the tool: "Report to <leader> with the agentmux Message tool (action send, to <leader>), not a built-in SendMessage". In the first run (2026-10-16, a Haiku worker) the line said only "Message send", and the worker used Claude Code's own cross-session `SendMessage`, which reached the leader unverified instead of as a `host-verified` jekt. A second dev-build run (2026-10-16, after #5023) showed the reason: AgentMux's MCP tools are deferred in Claude Code, the worker searched its tools for "SendMessage", and found Claude Code's own. The line now names the tool exactly (`mcp__agentmux__Message`, action "send"); and a report that doesn't go through AgentMux isn't counted as one, so the leader is told the turn ended without a report (§3.3).
 
 ### 3.2 The link: who coaches whom
 
@@ -84,18 +84,20 @@ srv already computes each agent's state (`working | waiting | idle | stopped | e
 | It failed (`agentfailure`) | `... Loap-4 stopped with an error: <class>.` |
 | Its process exited, or its pane closed | `... Loap-4 stopped.` |
 
-- A turn in which the worker messaged the leader gets no note: the message is the report.
+- A turn in which the worker messaged the leader gets no note: the message is the report. A report is a successful AgentMux delivery from the worker (its agent id) to one of the leader's open panes since the turn began, from the handler's delivery log (`get_audit_log`). The sender's name there is the one it gave; a false claim can only hide a note, never send one.
 - The quoted words are the worker's: they pass through `quote_in_system_note`, so they can't open a marker of their own. They are information, not instructions, like the channel's posts.
-- At most one note per worker per minute; a burst is summed up in the next one, like the overlap notes.
+- At most one note per worker per minute; a held one is counted in the next ("2 earlier updates from it were held back").
+- Implemented in `backend/worker_notes.rs`, installed at boot (not with the notify Router, which starts only when a window connects): a broker observer takes `agentturn` (`end: completed` or `exited`; AgentMux's own hidden turns skipped) and `agentfailure`; a task does the store reads and delivers to the leader's open pane, found by the leader's definition id (a restored pane's `block_id` in the mark is stale).
+- Waiting on a question: a turn whose last message ends in a question, or that ended calling `AskUserQuestion`, is reported as waiting (`ambient::digest`). A worker blocked inside a question dialog mid-turn isn't seen yet: its turn hasn't ended, and srv learns of the dialog only through an open pane.
 
 ### 3.4 `Agents` `workers`: the leader's view
 
 ```
 Agents { action: "workers" }
-→ [{ name, agent_id, block_id, model, state, since_ms, last_turn_end, last_report_ms, open }]
+→ { workers: [{ name, message_to, agent_id, block_id, state, since_ms, last_report_ms }] }
 ```
 
-From the table and the agent state. With this a leader can run a few workers on different projects and see them all in one call. It reads only the caller's own workers.
+From the panes that carry the leader's mark, or whose definition does, and the agent state tracker (`agent_status_of_block`); `last_report_ms` from the delivery log. With this a leader can run a few workers on different projects and see them all in one call. It reads only the caller's own workers; a worker gets an empty list.
 
 ### 3.5 Limits
 

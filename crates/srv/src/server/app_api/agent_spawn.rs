@@ -512,6 +512,102 @@ fn next_worker_name(mstore: &Store, leader: &str) -> String {
         .unwrap_or_default()
 }
 
+/// One of a leader's workers, for `Agents` `workers` (§3.4).
+#[derive(Debug, serde::Serialize, PartialEq)]
+pub(crate) struct WorkerSummary {
+    pub name: String,
+    /// What `Message` `send` addresses it by.
+    pub message_to: String,
+    pub agent_id: String,
+    pub block_id: String,
+    /// working | waiting | idle | stopped | error, and since when (unix ms);
+    /// absent while srv has no controller for the pane.
+    pub state: Option<crate::backend::agent_state::AgentState>,
+    pub since_ms: Option<u64>,
+    /// When it last messaged the leader (unix ms), as far back as the
+    /// delivery log reaches.
+    pub last_report_ms: Option<u64>,
+}
+
+/// `POST /api/v1/agent/workers`: the caller's own open workers. A caller that
+/// isn't a leader gets an empty list.
+pub(crate) async fn handle_agent_workers(
+    State(state): State<AppState>,
+    caller: Option<axum::Extension<crate::server::caller::Caller>>,
+    Json(req): Json<agentmux_common::api_types::AgentWorkersRequest>,
+) -> Response {
+    let block_id = match crate::server::ui_handlers::verified_block_id(&state, caller.as_deref(), &req.auth) {
+        Ok(b) => b,
+        Err(e) => {
+            let error = format!("could not verify which agent is asking: {e}");
+            return (StatusCode::UNAUTHORIZED, Json(json!({ "error": error }))).into_response();
+        }
+    };
+    let mstore = state.mstore.clone();
+    let listed = tokio::task::spawn_blocking(move || {
+        let leader = mstore
+            .get::<Block>(&block_id)
+            .ok()
+            .flatten()
+            .map(|b| obj::meta_get_string(&b.meta, "agentId", ""))
+            .unwrap_or_default();
+        let audit = crate::backend::reactive::get_global_handler().get_audit_log(500);
+        workers_of(&mstore, &leader, &audit)
+    })
+    .await
+    .unwrap_or_default();
+    Json(json!({ "workers": listed })).into_response()
+}
+
+/// `leader_def_id`'s workers open in a tab: panes marked as its (on the pane
+/// or on their definition), with their state and last report.
+pub(crate) fn workers_of(mstore: &Store, leader_def_id: &str, audit: &[crate::backend::reactive::AuditLogEntry]) -> Vec<WorkerSummary> {
+    if leader_def_id.is_empty() {
+        return Vec::new();
+    }
+    let Ok(tabs) = mstore.get_all::<Tab>() else {
+        return Vec::new();
+    };
+    let defs = mstore.agent_def_list().unwrap_or_default();
+    let blocks: Vec<Block> = tabs.iter().flat_map(|t| t.blockids.iter()).filter_map(|id| mstore.get::<Block>(id).ok().flatten()).collect();
+    let leader_panes: Vec<String> = blocks
+        .iter()
+        .filter(|b| obj::meta_get_string(&b.meta, "agentId", "") == leader_def_id)
+        .map(|b| b.oid.clone())
+        .collect();
+    blocks
+        .iter()
+        .filter_map(|b| {
+            let def_id = obj::meta_get_string(&b.meta, "agentId", "");
+            let marked = coached_by_id(&b.meta) == Some(leader_def_id) || worker_of(mstore, &def_id).as_deref() == Some(leader_def_id);
+            if def_id.is_empty() || !marked {
+                return None;
+            }
+            let def = defs.iter().find(|d| d.id == def_id)?;
+            let status = crate::backend::agent_state::agent_status_of_block(mstore, &b.oid);
+            let last_report_ms = audit
+                .iter()
+                .filter(|e| {
+                    e.success
+                        && e.event_kind == "delivery"
+                        && leader_panes.contains(&e.block_id)
+                        && e.source_agent.as_deref().is_some_and(|s| s.eq_ignore_ascii_case(&def.slug))
+                })
+                .map(|e| e.timestamp)
+                .max();
+            Some(WorkerSummary {
+                name: def.name.clone(),
+                message_to: def.slug.clone(),
+                agent_id: def.id.clone(),
+                block_id: b.oid.clone(),
+                state: status.map(|s| s.state),
+                since_ms: status.map(|s| s.since_ms),
+                last_report_ms,
+            })
+        })
+        .collect()
+}
+
 /// How many open panes `leader_def_id` coaches: workers in some tab.
 pub(crate) fn live_workers_of(mstore: &Store, leader_def_id: &str) -> usize {
     let Ok(tabs) = mstore.get_all::<Tab>() else {
