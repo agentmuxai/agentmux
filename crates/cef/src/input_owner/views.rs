@@ -92,7 +92,6 @@ thread_local! {
 /// CEF reported that pane `block`'s browser got focus.
 pub fn pane_focus_gained(state: &Arc<AppState>, block: &str) {
     if let Some(window) = state.browser_pane_window_label(block) {
-        platform::note_focus(&window, Surface::Pane(block.to_string()));
         dispatch(state, &window, Event::FocusGained(Surface::Pane(block.to_string())), Run::Posted);
     }
 }
@@ -327,33 +326,61 @@ mod platform {
         registry::active_windows().into_iter().filter(|w| w != window).collect()
     }
 
-    pub fn note_focus(_window: &str, _surface: Surface) {}
 }
 
-/// Linux: CEF can't be asked where focus is, so the check reads the last
-/// surface CEF reported, or this adapter gave, focus to in that window.
+/// Linux: a pane is an overlay view inside its window's own widget, so the
+/// keyboard follows Views focus there: the window's focus manager routes keys
+/// to the focused view. Focus moves with `request_focus()` on the view (what a
+/// click does) as well as Chromium's `set_focus`, and the check reads which
+/// view has it (`has_focus()`). Unlike macOS, the overlay isn't a window of its
+/// own, so focusing it doesn't touch window activation.
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
 mod platform {
     use super::*;
-    use std::collections::HashMap;
-    use std::sync::LazyLock;
 
-    static LAST: LazyLock<parking_lot::Mutex<HashMap<String, Surface>>> = LazyLock::new(Default::default);
+    /// `window`'s own BrowserView.
+    fn window_view(state: &Arc<AppState>, window: &str) -> Option<BrowserView> {
+        let mut browser = state.get_browser(window)?;
+        browser_view_get_for_browser(Some(&mut browser))
+    }
+
+    /// The contents views of `window`'s panes, by block.
+    fn pane_views(state: &Arc<AppState>, window: &str) -> Vec<(String, View)> {
+        state
+            .browser_pane_overlays
+            .lock()
+            .iter()
+            .filter(|(_, (w, _))| w == window)
+            .filter_map(|(label, (_, controller))| {
+                let block = label.strip_prefix("browser-pane-")?.rsplit_once('-')?.0.to_string();
+                Some((block, controller.contents_view()?))
+            })
+            .collect()
+    }
 
     pub fn focus_app(state: &Arc<AppState>, window: &str) {
+        if let Some(view) = window_view(state, window) {
+            view.request_focus();
+        }
         focus_window_browser(state, window);
-        note_focus(window, Surface::App);
     }
 
     pub fn focus_pane(state: &Arc<AppState>, block: &str) {
-        focus_pane_browser(state, block);
-        if let Some(window) = state.browser_pane_window_label(block) {
-            note_focus(&window, Surface::Pane(block.to_string()));
+        let Some(window) = state.browser_pane_window_label(block) else { return };
+        if let Some((_, view)) = pane_views(state, &window).into_iter().find(|(b, _)| b == block) {
+            view.request_focus();
         }
+        focus_pane_browser(state, block);
     }
 
-    pub fn focused(_state: &Arc<AppState>, window: &str) -> Surface {
-        LAST.lock().get(window).cloned().unwrap_or(Surface::App)
+    pub fn focused(state: &Arc<AppState>, window: &str) -> Surface {
+        if let Some((block, _)) = pane_views(state, window).into_iter().find(|(_, v)| v.has_focus() != 0) {
+            return Surface::Pane(block);
+        }
+        if window_view(state, window).is_some_and(|v| v.has_focus() != 0) {
+            return Surface::App;
+        }
+        Surface::Elsewhere
     }
 
     /// Panes are views inside the window here: a deactivation is the window's.
@@ -369,9 +396,6 @@ mod platform {
         Vec::new()
     }
 
-    pub fn note_focus(window: &str, surface: Surface) {
-        LAST.lock().insert(window.to_string(), surface);
-    }
 }
 
 /// Windows has its own adapter (`super::windows`); this only lets the shared
@@ -404,5 +428,4 @@ mod platform {
         Vec::new()
     }
 
-    pub fn note_focus(_window: &str, _surface: Surface) {}
 }

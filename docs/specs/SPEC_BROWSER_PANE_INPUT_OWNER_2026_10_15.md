@@ -179,12 +179,12 @@ One adapter serves both, `input_owner/views.rs`, feeding the same machine. Its e
 | `FocusGained` | CEF `on_got_focus` for a pane browser | same |
 | `Activated` / `Deactivated` | CEF Views `on_window_activation_changed`, effects posted to run after CEF's own handling. A pane overlay is a key window of its own, so the window is reported inactive whenever one of its pages takes the keyboard: a deactivation counts only once the key change has settled and neither the window nor one of its own overlays is key. Key coming back to a window still counted active (from its own page) is focus arriving at the app, not an activation, and is ignored if a pane has been asked for since. Only one window is key at a time, so an activation deactivates every other window still counted active (a window whose page holds key hears nothing when another takes it) | same; panes are views inside the window, so a deactivation is the window's |
 | `PaneLive` / `PaneShown` / `PaneCollapsed` / `PaneClosing` / `PaneGone` | live: the overlay window registered and on screen (`SetPaneBoundsViewsTask`, also on every re-show); a 0×0 rect is collapsed; close | live: the browser created; shown/collapsed: the rect applied; close |
-| `Verify` | the key window: a tagged pane overlay is that pane, the window's own NSWindow the app | the last surface CEF reported focus to in that window |
+| `Verify` | the key window: a tagged pane overlay is that pane, the window's own NSWindow the app | which view has Views focus (`has_focus()`): a pane's overlay contents view, or the window's own BrowserView |
 
 Its effects go through three per-platform functions (`views::platform`): `focus_app(window)` (macOS: key status back
 to that window's own NSWindow, its main browser focused, only *its* panes blurred; Linux: its main browser focused,
-its panes blurred), `focus_pane(block)` (macOS: the overlay made key and the page first responder, without parking:
-the machine parks; Linux: the pane browser focused) and `focused(window)` for `Verify`. Effects for a pointer event
+its panes blurred, and the window's BrowserView given Views focus with `request_focus()`), `focus_pane(block)` (macOS: the overlay made key and the page first responder, without parking:
+the machine parks; Linux: the pane's overlay view given Views focus, which routes the window's keys to it, and its browser focused) and `focused(window)` for `Verify`. Effects for a pointer event
 run at once, on the UI thread inside the event, as the hook did before (the click that selects a pane is the one the
 page gets); the others are posted. `PENDING_PANE_KEY` and its TTL are replaced by the machine's parked selection.
 
