@@ -839,6 +839,7 @@ partial list.
 | [`SPEC_POOL_WINDOW_HWND_NULL_2026_05_06`](SPEC_POOL_WINDOW_HWND_NULL_2026_05_06.md) | Pool window HWND-null at promote time |
 | [`SPEC_PROVIDER_CLI_VERSION_UPGRADE_2026_09_06`](SPEC_PROVIDER_CLI_VERSION_UPGRADE_2026_09_06.md) | Provider CLI version upgrade (2026-09-06 drift report) |
 | [`SPEC_PROVIDER_ISOLATION_2026_06_20`](SPEC_PROVIDER_ISOLATION_2026_06_20.md) | SPEC: Provider environment isolation — never touch the user's `~/.claude` or global CLI |
+| [`SPEC_RECOVERY_NOTICES_AND_TOASTS_2026_10_16`](SPEC_RECOVERY_NOTICES_AND_TOASTS_2026_10_16.md) | Spec: tell the user what happened after AgentMux recovers, and fix the toasts that carry it |
 | [`SPEC_RELEASE_CICD_CORRECTION_2026_06_30`](SPEC_RELEASE_CICD_CORRECTION_2026_06_30.md) | Release CI/CD Correction — remove the `dl.agentmux.ai` fabrication |
 | [`SPEC_REMOVE_PIN_FEATURE`](SPEC_REMOVE_PIN_FEATURE.md) | SPEC: Remove Tab Pinning, Uniform Inter-Tab Separator |
 | [`SPEC_RUNTIME_MENU_REMAINING_GAPS_2026_10_01`](SPEC_RUNTIME_MENU_REMAINING_GAPS_2026_10_01.md) | SPEC: Finishing the runtime menu — approval prompts, a remembered runtime, the resolved model, and install cleanup |
