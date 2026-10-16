@@ -369,7 +369,7 @@ describe("DocumentRow — memory_reinjection node", () => {
 
         const tooltip = document.body.querySelector(".agent-memory-reinjection-tooltip");
         expect(tooltip?.textContent).not.toMatch(/consider/i);
-        expect(tooltip?.textContent).not.toMatch(/WorkEnqueue/);
+        expect(tooltip?.textContent).not.toMatch(/Tasks enqueue/);
         vi.useRealTimers();
     });
 
