@@ -1,6 +1,6 @@
 # The Swarm Supervisor: keeping agents going, and other fleet features
 
-**Status:** the Supervisor is being built from this report: [`SPEC_SWARM_SUPERVISOR_2026_10_16.md`](../specs/SPEC_SWARM_SUPERVISOR_2026_10_16.md) is the design as built, and supersedes sections 4 and 7 where they differ. Written 2026-10-16 at the operator's request: name a feature that reviews each agent's output when its turn ends and tells it to keep going (an aggressive mode and a normal mode), and gather other swarm features and industry best practice.
+**Status:** analysis. The Supervisor was built from this report (#5036): [`SPEC_SWARM_SUPERVISOR_2026_10_16.md`](../specs/SPEC_SWARM_SUPERVISOR_2026_10_16.md) is the design as built, and supersedes sections 4 and 7 where they differ. Written 2026-10-16 at the operator's request: name a feature that reviews each agent's output when its turn ends and tells it to keep going (an aggressive mode and a normal mode), and gather other swarm features and industry best practice.
 
 ## 1. Summary
 

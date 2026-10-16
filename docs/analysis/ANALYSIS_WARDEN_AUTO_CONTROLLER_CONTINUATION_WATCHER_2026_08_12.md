@@ -1,6 +1,9 @@
 # Warden Auto-Controller: a continuation-nudging watcher for AgentMux agents
 
-**Status:** superseded and removed (2026-10-16). The Swarm Supervisor
+**Status:** superseded and removed (2026-10-16).
+**Superseded-by:** [`SPEC_SWARM_SUPERVISOR_2026_10_16.md`](../specs/SPEC_SWARM_SUPERVISOR_2026_10_16.md)
+
+The Swarm Supervisor
 ([`SPEC_SWARM_SUPERVISOR_2026_10_16.md`](../specs/SPEC_SWARM_SUPERVISOR_2026_10_16.md))
 replaces it: srv judges each supervised agent's turn itself, the controls live
 in Swarm, and the `SupervisorNudge` tool, the `supervisor-decision` endpoint,
