@@ -89,7 +89,8 @@ fn set(version: &str, state: &str, received: u64, total: u64, error: Option<Stri
     }));
 }
 
-/// Start downloading the release the update check found (`app.update-download`).
+/// Start downloading the release the update check found (the user's Download,
+/// through the host).
 /// Returns at once with the status; progress follows as events.
 pub fn start() -> Result<AppUpdateStatus, String> {
     let status = update_check::current_status();
