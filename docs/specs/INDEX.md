@@ -482,6 +482,7 @@ partial list.
 | [`SPEC_SWARM_DISPATCH_NAMING_AND_ROW_MODEL_2026_07_19`](SPEC_SWARM_DISPATCH_NAMING_AND_ROW_MODEL_2026_07_19.md) | SPEC: eager per-dispatch naming + two-bucket swarm row model |
 | [`SPEC_SWARM_QUESTION_STATE_AND_QUESTION_TIMEOUT_ACTIVITY_2026_10_02`](SPEC_SWARM_QUESTION_STATE_AND_QUESTION_TIMEOUT_ACTIVITY_2026_10_02.md) | SPEC: Swarm "question" state and countdown, and activity that resets a question's timeout |
 | [`SPEC_SWARM_ROW_AUTO_LINGER_COUNTDOWN_2026_08_06`](SPEC_SWARM_ROW_AUTO_LINGER_COUNTDOWN_2026_08_06.md) | SPEC — Swarm Row Auto-Linger Countdown on Completion |
+| [`SPEC_SWARM_SUPERVISOR_2026_10_16`](SPEC_SWARM_SUPERVISOR_2026_10_16.md) | Spec: the Swarm Supervisor keeps agents working until they are done or need the user |
 | [`SPEC_SYSTEM_TIER_GLOBAL_MEMORY_SEEDING_2026_09_15`](SPEC_SYSTEM_TIER_GLOBAL_MEMORY_SEEDING_2026_09_15.md) | Spec: Operator Config seeding (AgentMux-shipped, system-tier Global Memory) |
 | [`SPEC_SYSTEM_TOOLCHAIN_INSTALLER_2026_08_24`](SPEC_SYSTEM_TOOLCHAIN_INSTALLER_2026_08_24.md) | SPEC: One-click system-toolchain installer (git, Node/npm, and friends) across Windows/macOS/Linux |
 | [`SPEC_SYSTEM_TOOL_INSTALL_DETAILS_AUTOSCROLL_2026_09_10`](SPEC_SYSTEM_TOOL_INSTALL_DETAILS_AUTOSCROLL_2026_09_10.md) | SPEC: Install-log "Details" panel — auto-scroll, provider-install parity, and brand icons |
@@ -1092,7 +1093,6 @@ partial list.
 | [`SPEC_SUBPROCESS_INTEGRATION_TESTS_2026_04_16`](SPEC_SUBPROCESS_INTEGRATION_TESTS_2026_04_16.md) | SPEC: Subprocess Integration Tests |
 | [`SPEC_SWARM_LIVE_FEED_BINDINGS_2026_07_05`](SPEC_SWARM_LIVE_FEED_BINDINGS_2026_07_05.md) | SPEC: Swarm Live Feed — backend code bindings |
 | [`SPEC_SWARM_LIVE_FEED_UI_2026_07_05`](SPEC_SWARM_LIVE_FEED_UI_2026_07_05.md) | SPEC: Swarm Live Feed — UI |
-| [`SPEC_SWARM_SUPERVISOR_2026_10_16`](SPEC_SWARM_SUPERVISOR_2026_10_16.md) | Spec: the Swarm Supervisor keeps agents working until they are done or need the user |
 | [`SPEC_SWARM_TREE_REDESIGN_2026_06_19`](SPEC_SWARM_TREE_REDESIGN_2026_06_19.md) | Swarm View Tree Redesign |
 | [`SPEC_TABLE_FORMATTER_2026_05_07`](SPEC_TABLE_FORMATTER_2026_05_07.md) | Spec: Refined Table Formatter for Presentation Layer |
 | [`SPEC_TAB_BAR_FIRST_PRINCIPLES_2026_04_25`](SPEC_TAB_BAR_FIRST_PRINCIPLES_2026_04_25.md) | Spec: Tab Bar — Designed From First Principles |
