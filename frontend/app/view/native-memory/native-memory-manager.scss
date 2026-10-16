@@ -688,3 +688,154 @@
     font-size: var(--text-xs);
     white-space: nowrap;
 }
+
+// What an agent starts with (SPEC_MEMORY_PANE_TOKENS_2026_10_15.md §5.3, §5.4).
+// The band's words carry the meaning; the colour only adds to them.
+.memory-agent-card-launch {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    font-size: var(--text-xs);
+    color: var(--secondary-text-color);
+    font-variant-numeric: tabular-nums;
+}
+
+.memory-agent-card-launch-bar {
+    display: block;
+    height: 3px;
+    border: 1px solid var(--border-color);
+}
+
+.memory-agent-card-launch-fill,
+.agent-launch-cost-band {
+    &--low,
+    &--mid {
+        --launch-band-color: var(--accent-color);
+    }
+
+    &--high {
+        --launch-band-color: var(--warning-color);
+    }
+
+    &--critical {
+        --launch-band-color: var(--error-color);
+    }
+}
+
+.memory-agent-card-launch-fill {
+    display: block;
+    height: 100%;
+    background: var(--launch-band-color);
+}
+
+.agent-launch-cost-band--high,
+.agent-launch-cost-band--critical {
+    color: var(--launch-band-color);
+}
+
+.agent-launch-cost {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px 10px;
+    border: 1px solid var(--border-color);
+    font-size: var(--text-xs);
+    color: var(--secondary-text-color);
+}
+
+.agent-launch-cost-head {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 4px 12px;
+    color: var(--main-text-color);
+    font-variant-numeric: tabular-nums;
+}
+
+.agent-launch-cost-note {
+    margin: 0;
+}
+
+.agent-launch-cost-bar {
+    display: flex;
+    height: 6px;
+    gap: 2px;
+}
+
+.agent-launch-cost-segment {
+    min-width: 2px;
+
+    &--operator {
+        background: var(--accent-color);
+    }
+
+    &--workspace {
+        background: var(--secondary-text-color);
+    }
+
+    &--bundles {
+        background: var(--warning-color);
+    }
+
+    &--agent {
+        background: var(--main-text-color);
+    }
+
+    &--personal {
+        background: var(--border-color);
+    }
+}
+
+.agent-launch-cost-table {
+    border-collapse: collapse;
+    width: 100%;
+    font-variant-numeric: tabular-nums;
+
+    th,
+    td {
+        padding: 2px 6px 2px 0;
+        text-align: left;
+        border-bottom: 1px solid var(--border-color);
+    }
+
+    th {
+        font-weight: 600;
+        color: var(--main-text-color);
+    }
+
+    // The part's name and how it arrives wrap, a long filename anywhere, so
+    // the numbers stay in view in a narrow pane.
+    td:nth-child(1) {
+        overflow-wrap: anywhere;
+    }
+
+    td:nth-child(n + 3),
+    th:nth-child(n + 3) {
+        white-space: nowrap;
+    }
+
+    td:nth-child(n + 3),
+    th:nth-child(n + 3) {
+        text-align: right;
+    }
+}
+
+// An agent whose launch doesn't deliver its Personal Memory (spec §5.3).
+.memory-agent-card-undelivered {
+    font-size: var(--text-xs);
+    color: var(--warning-color);
+}
+
+// The fleet line above the agent grid, and an agent's per-file distribution
+// (SPEC_MEMORY_PANE_TOKENS_2026_10_15.md §5.5).
+.memory-fleet-summary,
+.memory-file-distribution {
+    margin: 0 0 var(--space-3);
+    font-size: var(--text-xs);
+    color: var(--secondary-text-color);
+    font-variant-numeric: tabular-nums;
+}
+
+.memory-fleet-summary-outliers {
+    color: var(--warning-color);
+}

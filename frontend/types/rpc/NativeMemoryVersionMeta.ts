@@ -8,4 +8,9 @@
  * directly) so the storage layer never needs a serde dependency just to
  * satisfy an RPC wire shape.
  */
-export type NativeMemoryVersionMeta = { id: string, content_hash: string, parent_version_id: string | null, source: string, source_detail: string, session_id: string, created_at: number, };
+export type NativeMemoryVersionMeta = { id: string, content_hash: string, parent_version_id: string | null, source: string, source_detail: string, session_id: string, created_at: number, 
+/**
+ * The version's size and estimated tokens (`agentmux_common::tokens`),
+ * for the history's size over time (SPEC_MEMORY_PANE_TOKENS_2026_10_15.md §5.5).
+ */
+size_bytes: number, tokens_est: number, };

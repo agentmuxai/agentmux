@@ -107,7 +107,7 @@ pub struct CommandUpsertBundleData {
 // db_bundle_versions rows. SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.3.
 
 /// One `db_bundle_versions` row's metadata, no `name`/`instructions` —
-/// the same fields `bundle_version_meta_json` (app_api) puts on the MCP wire.
+/// also what the `GlobalMemoryHistory` / `GlobalMemoryRevert` MCP tools return.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct GlobalMemoryVersionMeta {
@@ -123,6 +123,12 @@ pub struct GlobalMemoryVersionMeta {
     // plain JS number. See BrowserBookmark::created_at (PR #3293).
     #[ts(type = "number")]
     pub created_at: i64,
+    /// The version's size and estimated tokens (`agentmux_common::tokens`),
+    /// for the history's size over time (SPEC_MEMORY_PANE_TOKENS_2026_10_15.md §5.5).
+    #[ts(type = "number")]
+    pub size_bytes: u64,
+    #[ts(type = "number")]
+    pub tokens_est: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]

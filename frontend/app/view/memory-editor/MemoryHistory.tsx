@@ -14,6 +14,8 @@ import { diffLineClass, diffLines } from "./line-diff";
 import { sourceLabel, sourceWarning, type MemoryHistoryModel, type MemoryVersionMeta } from "./memory-history-model";
 import "./memory-history.scss";
 import { Button } from "@/app/element/ui";
+import { tokensLabel, tokensTitle } from "@/app/view/native-memory/memory-tokens";
+import { growthLabel, growthOver, sparklinePoints, versionDelta } from "./memory-history-tokens";
 
 interface MemoryHistoryProps<V extends MemoryVersionMeta> {
     model: MemoryHistoryModel<V>;
@@ -37,6 +39,30 @@ function writerLabel(v: MemoryVersionMeta): string | null {
     return `by ${v.written_by}`;
 }
 
+/** The size over time above the list: now, growth over 7 and 30 days, and a
+ *  sparkline of every version's tokens (SPEC_MEMORY_PANE_TOKENS_2026_10_15.md §5.5). */
+function HistorySize<V extends MemoryVersionMeta>(props: { versions: V[] }): JSX.Element {
+    const latest = () => props.versions[0]?.tokens_est;
+    const growth = (days: number) => growthOver(props.versions, days, Date.now());
+    const points = () => sparklinePoints(props.versions, 120, 18);
+    return (
+        <Show when={latest() != null}>
+            <div class="memory-history-size" data-testid="memory-history-size">
+                <span title={tokensTitle(latest() ?? 0, props.versions[0]?.size_bytes)}>
+                    Now <strong>{tokensLabel(latest() ?? 0)}</strong>
+                </span>
+                <span>7 days: {growthLabel(growth(7) ?? 0)}</span>
+                <span>30 days: {growthLabel(growth(30) ?? 0)}</span>
+                <Show when={points()}>
+                    <svg class="memory-history-sparkline" viewBox="0 0 120 18" width="120" height="18" aria-hidden="true">
+                        <polyline points={points()} />
+                    </svg>
+                </Show>
+            </div>
+        </Show>
+    );
+}
+
 export function MemoryHistory<V extends MemoryVersionMeta>(props: MemoryHistoryProps<V>): JSX.Element {
     const model = props.model;
     const [confirmingRevert, setConfirmingRevert] = createSignal<string | null>(null);
@@ -55,6 +81,7 @@ export function MemoryHistory<V extends MemoryVersionMeta>(props: MemoryHistoryP
                     when={model.versionsAtom().length > 0}
                     fallback={<div class="native-memory-history-empty">No recorded versions yet.</div>}
                 >
+                    <HistorySize versions={model.versionsAtom()} />
                     <div class="native-memory-history-hint">
                         Select two versions to compare, or revert directly to one.
                     </div>
@@ -90,6 +117,15 @@ export function MemoryHistory<V extends MemoryVersionMeta>(props: MemoryHistoryP
                                                 <span class="native-memory-history-item-time">
                                                     {formatTimestamp(v.created_at)}
                                                 </span>
+                                                <Show when={v.tokens_est != null}>
+                                                    <span
+                                                        class="native-memory-history-item-tokens"
+                                                        title={tokensTitle(v.tokens_est ?? 0, v.size_bytes)}
+                                                    >
+                                                        {tokensLabel(v.tokens_est ?? 0)}
+                                                        {versionDelta(model.versionsAtom(), i()) ? ` · ${versionDelta(model.versionsAtom(), i())}` : ""}
+                                                    </span>
+                                                </Show>
                                                 <Show when={i() === 0}>
                                                     <span class="native-memory-history-item-badge">current</span>
                                                 </Show>

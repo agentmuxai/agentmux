@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { appUpdate, availableRelease, loadAppUpdate } from "@/store/app-update";
+import { appUpdate, availableRelease, loadAppUpdate, releaseDownload, startAppUpdateDownload } from "@/store/app-update";
 import { atoms, getApi, openLink } from "@/store/global";
 import { WpsEvent } from "@/store/mps-events";
 import { createEffect, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
@@ -50,7 +50,20 @@ export const MaintenanceSection = (): JSX.Element => {
     // updater's own states are kept for a host that has one.
     onMount(() => void loadAppUpdate());
     const release = () => availableRelease();
-    const updaterStatus = () => (release() ? "available" : atoms.updaterStatusAtom());
+    const download = () => (release() ? releaseDownload() : null);
+    const updaterStatus = () => {
+        if (!release()) return atoms.updaterStatusAtom();
+        const d = download()?.state;
+        if (d === "downloading" || d === "unpacking") return "downloading";
+        if (d === "ready") return "ready";
+        if (d === "failed") return "error";
+        return "available";
+    };
+    const percent = () => {
+        const d = download();
+        return d && d.total > 0 ? Math.floor((d.received * 100) / d.total) : 0;
+    };
+    const [startError, setStartError] = createSignal<string | null>(null);
     const updaterVersion = () => release()?.version ?? atoms.updaterVersionAtom();
     const [showNotes, setShowNotes] = createSignal(false);
 
@@ -177,11 +190,16 @@ export const MaintenanceSection = (): JSX.Element => {
     };
 
     const handleInstallUpdate = () => {
-        // Until AgentMux installs a release itself (the spec's phase 3), the
-        // release page is where it is downloaded.
         const r = release();
         if (r) {
-            void openLink(r.url);
+            // srv downloads, verifies and unpacks what it can (a Windows
+            // portable); for any other install the release page is the way.
+            if (!appUpdate()?.can_download) {
+                void openLink(r.url);
+                return;
+            }
+            setStartError(null);
+            startAppUpdateDownload().catch((e) => setStartError(String(e?.message ?? e)));
             return;
         }
         getApi().installAppUpdate();
@@ -244,9 +262,29 @@ export const MaintenanceSection = (): JSX.Element => {
                     </Show>
                     <Show when={updaterStatus() === "downloading"}>
                         <span class="maintenance-icon maintenance-icon--working">↓</span>
-                        <span class="maintenance-row-text maintenance-row-text--dim">Downloading…</span>
+                        <span class="maintenance-row-text maintenance-row-text--dim">
+                            {download()?.state === "unpacking"
+                                ? `Unpacking v${updaterVersion()}…`
+                                : download()
+                                  ? `Downloading v${updaterVersion()}… ${percent()}%`
+                                  : "Downloading…"}
+                        </span>
                     </Show>
-                    <Show when={updaterStatus() === "ready"}>
+                    {/* Staged by srv: the new version's folder (restart comes with phase 3b). */}
+                    <Show when={updaterStatus() === "ready" && download()?.folder}>
+                        <span class="maintenance-icon maintenance-icon--update">↑</span>
+                        <span class="maintenance-row-text" title={download()?.folder}>
+                            v{updaterVersion()} is ready
+                        </span>
+                        <Button
+                            density="compact"
+                            class="maintenance-btn"
+                            onClick={() => getApi().openNativePath(download()!.folder!)}
+                        >
+                            Show folder
+                        </Button>
+                    </Show>
+                    <Show when={updaterStatus() === "ready" && !download()}>
                         <span class="maintenance-icon maintenance-icon--update">↑</span>
                         <span class="maintenance-row-text">
                             {updaterVersion() ? `v${updaterVersion()} ready` : "Ready to install"}
@@ -262,11 +300,24 @@ export const MaintenanceSection = (): JSX.Element => {
                     </Show>
                     <Show when={updaterStatus() === "error"}>
                         <span class="maintenance-icon maintenance-icon--error">✗</span>
-                        <span class="maintenance-row-text maintenance-row-text--error">Update failed</span>
+                        <span class="maintenance-row-text maintenance-row-text--error" title={download()?.error}>
+                            {download()?.error ? `Download failed: ${download()!.error}` : "Update failed"}
+                        </span>
+                        <Show when={download()}>
+                            <Button density="compact" class="maintenance-btn" onClick={handleInstallUpdate}>
+                                Try again
+                            </Button>
+                            <Button density="compact" class="maintenance-btn" onClick={() => void openLink(release()!.url)}>
+                                Release page
+                            </Button>
+                        </Show>
                     </Show>
                 </div>
             </Show>
 
+            <Show when={startError()}>
+                <div class="maintenance-row-text maintenance-row-text--error">{startError()}</div>
+            </Show>
             <Show when={showNotes() && release() && appUpdate()?.notes}>
                 <pre class="maintenance-release-notes">{appUpdate()?.notes}</pre>
             </Show>

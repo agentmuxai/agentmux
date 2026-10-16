@@ -1138,6 +1138,13 @@
 
         let row = store.bundle_get("sys-1").unwrap().unwrap();
         assert_eq!(row.instructions, "a real human edit");
+        // The history counts each version's text (SPEC_MEMORY_PANE_TOKENS_2026_10_15.md §5.5).
+        let latest = &store.bundle_version_list("sys-1").unwrap()[0];
+        let only = store.bundle_version_latest("sys-1").unwrap().unwrap();
+        assert_eq!((only.id.as_str(), only.tokens_est), (latest.id.as_str(), latest.tokens_est), "the newest, alone");
+        assert!(store.bundle_version_latest("no-such").unwrap().is_none());
+        assert_eq!(latest.size_bytes, "a real human edit".len() as u64);
+        assert_eq!(latest.tokens_est, agentmux_common::tokens::estimate_tokens("a real human edit"));
     }
 
     // ── bundle_delete_system_if_owned — PR #3244 ──────────────────────────

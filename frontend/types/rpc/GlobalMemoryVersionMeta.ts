@@ -2,10 +2,15 @@
 
 /**
  * One `db_bundle_versions` row's metadata, no `name`/`instructions` —
- * the same fields `bundle_version_meta_json` (app_api) puts on the MCP wire.
+ * also what the `GlobalMemoryHistory` / `GlobalMemoryRevert` MCP tools return.
  */
 export type GlobalMemoryVersionMeta = { id: string, content_hash: string, parent_version_id: string | null, source: string, source_detail: string, 
 /**
  * The trusted writer: an agent's own id, or `"armory-ui"`.
  */
-written_by: string, written_by_uid: string, created_at: number, };
+written_by: string, written_by_uid: string, created_at: number, 
+/**
+ * The version's size and estimated tokens (`agentmux_common::tokens`),
+ * for the history's size over time (SPEC_MEMORY_PANE_TOKENS_2026_10_15.md §5.5).
+ */
+size_bytes: number, tokens_est: number, };
