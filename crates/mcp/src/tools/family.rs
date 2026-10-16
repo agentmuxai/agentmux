@@ -44,33 +44,20 @@ pub(super) fn pick<'a>(family: &str, acts: &'a [Act], arguments: &Value) -> Resu
     Ok((act, Value::Object(args)))
 }
 
-/// `text` with each action's internal tool name, as a whole word, replaced by
-/// the public one ("BrowserClick" → "Browser click"): handlers name the tool
-/// they ran as in their output and errors, and that name isn't advertised.
+/// `text` with the internal tool name it starts with replaced by the public
+/// one ("BrowserClick e12: done" → "Browser click e12: done"): a handler
+/// names the tool it ran as at the start of its output and errors, and that
+/// name isn't advertised. Only that label changes: what follows is the
+/// page, a script's value or a window's title, and is returned exactly.
 pub(super) fn relabel(family: &str, acts: &[Act], text: &str) -> String {
-    let word = |b: u8| b.is_ascii_alphanumeric() || b == b'_';
-    let mut out = text.to_string();
     for act in acts {
-        if !out.contains(act.tool) {
+        let Some(rest) = text.strip_prefix(act.tool) else { continue };
+        if rest.starts_with(|c: char| c.is_ascii_alphanumeric() || c == '_') {
             continue;
         }
-        let public = format!("{family} {}", act.action);
-        let bytes = out.as_bytes();
-        let mut next = String::with_capacity(out.len());
-        let mut last = 0;
-        for (i, _) in out.match_indices(act.tool) {
-            let end = i + act.tool.len();
-            let alone = (i == 0 || !word(bytes[i - 1])) && (end == bytes.len() || !word(bytes[end]));
-            if alone {
-                next.push_str(&out[last..i]);
-                next.push_str(&public);
-                last = end;
-            }
-        }
-        next.push_str(&out[last..]);
-        out = next;
+        return format!("{family} {}{rest}", act.action);
     }
-    out
+    text.to_string()
 }
 
 /// A handler's result, output and error alike, under the public names.
@@ -110,8 +97,10 @@ mod tests {
     fn handler_output_names_the_action_not_the_internal_tool() {
         assert_eq!(relabel("Browser", ACTS, "BrowserFill e12: done"), "Browser fill e12: done");
         assert_eq!(relabel("Browser", ACTS, "BrowserWaitFor failed: HTTP 504"), "Browser wait failed: HTTP 504");
-        // Only whole words: a longer name that contains one is left alone.
-        assert_eq!(relabel("Browser", ACTS, "XBrowserFill BrowserFillAll"), "XBrowserFill BrowserFillAll");
+        // Only a whole name at the start: what follows is returned exactly.
+        assert_eq!(relabel("Browser", ACTS, "BrowserFillAll"), "BrowserFillAll");
+        assert_eq!(relabel("Browser", ACTS, "page: BrowserFill BrowserWaitFor"), "page: BrowserFill BrowserWaitFor");
+        assert_eq!(relabel("Browser", ACTS, "BrowserFill e1: done. The element now: BrowserFill"), "Browser fill e1: done. The element now: BrowserFill");
         let e = relabeled("Browser", ACTS, Err(anyhow::anyhow!("BrowserFill e3 failed"))).unwrap_err();
         assert_eq!(e.to_string(), "Browser fill e3 failed");
     }
