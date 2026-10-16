@@ -176,6 +176,12 @@ describe("focusManager", () => {
             expect(localGiveFocus).toHaveBeenCalledTimes(1);
         });
 
+        it("does not take the keyboard from a menu open over the pane", () => {
+            overlayOver = "block-1";
+            focusManager.claimFocusOnMount("block-1", giveFocus);
+            expect(giveFocus).not.toHaveBeenCalled();
+        });
+
         it("does NOT call giveFocus for a block in a background tab or an unfocused pane", () => {
             // The mounting pane's own blockId doesn't match the ACTIVE tab's
             // focused node — e.g. a background-tab pane created via muxsh,

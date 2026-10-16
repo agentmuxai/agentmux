@@ -123,6 +123,8 @@ class FocusManager {
         const layoutModel = getLayoutModelForStaticTab();
         const lnode = layoutModel?.focusedNode?.();
         if (lnode?.data?.blockId !== blockId) return;
+        // A menu open over the pane holds the keyboard (see ensureSelectionFocused).
+        if (overlayCoversPane(blockId)) return;
         // A pane that finishes mounting after the user already clicked into
         // one of its inputs must not take the caret back.
         if (userCaretInBlock(blockId)) return;
