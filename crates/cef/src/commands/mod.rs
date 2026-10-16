@@ -23,6 +23,8 @@ pub mod stubs;
 pub mod palette;
 pub mod orphan_reconcile;
 pub mod floating_pane;
+/// What went wrong and what AgentMux did about it, kept for the user.
+pub mod incidents;
 
 
 

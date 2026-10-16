@@ -350,6 +350,11 @@ declare global {
         setTaskbarAttention(windowLabel: string, count: number, inputCount: number): Promise<void>;
         /** Take (and clear) what happened while no window was open. */
         takeBackgroundAudit(): Promise<unknown>;
+        /** What went wrong and what AgentMux did about it, newest first:
+         *  `{ incidents: [...] }` (crates/cef `commands::incidents`). */
+        listIncidents?(): Promise<unknown>;
+        /** The user closed an incident's notice: every window closes its copy. */
+        acknowledgeIncident?(id: string): Promise<unknown>;
         /** Take OS keyboard focus back from a native browser pane to this window's page. */
         reclaimWindowFocus(windowLabel: string): Promise<void>;
         /** Whether the window is active and who has its keyboard, as the host's
