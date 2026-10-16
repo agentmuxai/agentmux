@@ -188,6 +188,8 @@ export const WpsEvent = {
     ViewerPaired: "viewer:paired",
     /** What srv knows about newer AgentMux releases (crates/srv/src/backend/update_check.rs). */
     AppUpdateStatus: "app:updatestatus",
+    /** Agents' requests to upgrade AgentMux, waiting for the user (crates/srv/src/backend/upgrade_request.rs). */
+    AppUpgradeRequests: "app:upgraderequests",
     AgentShutdown: "agent:shutdown",
     AgentShutdownPending: "agent:shutdown-pending",
     AgentShutdownPendingCleared: "agent:shutdown-pending-cleared",

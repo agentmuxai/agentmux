@@ -302,6 +302,23 @@ pub(crate) const WIDGET_TOOL: &str = r#"{
   }
 }"#;
 
+/// App: this AgentMux itself; `upgrade` restarts every agent, so it is a
+/// tool of its own a harness can gate (like Stop).
+pub(crate) const APP_TOOL: &str = r#"{
+  "name": "App",
+  "description": "This AgentMux itself. Every call takes an action. version: the AgentMux you run in (version and how it was installed), whether a newer release is out, whether it is downloaded, and whether this install can upgrade itself. upgrade: ask for AgentMux to be upgraded to the latest release, with a one-line reason. An upgrade restarts AgentMux and every agent in it, so it never happens on your word alone: if the user's own message in this turn asked for it, pass their words verbatim as user_instruction and it starts (download, then a restart once every agent has finished its turn; the user still confirms in AgentMux's dialog); otherwise every window asks the user and you get an [AgentMux] note with their answer. Your session resumes after the restart. Only the release AgentMux found itself can be installed: you can't name a file or a URL.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "action":           { "type": "string", "enum": ["version", "upgrade"], "description": "What to do" },
+      "reason":           { "type": "string", "description": "upgrade: one line, why; the user sees it" },
+      "user_instruction": { "type": "string", "description": "upgrade: the user's own words in this turn asking for the upgrade, verbatim; leave it out when the user didn't ask" },
+      "version":          { "type": "string", "description": "upgrade: the release you expect (from version); refused if it isn't the latest" }
+    },
+    "required": ["action"]
+  }
+}"#;
+
 /// Identity: an agent's presets and linked provider accounts.
 pub(crate) const IDENTITY_TOOL: &str = r#"{
   "name": "Identity",
@@ -406,6 +423,7 @@ pub(crate) const ADVERTISED: &[&str] = &[
     IDENTITY_TOOL,
     AGENTS_TOOL,
     MESSAGE_TOOL,
+    APP_TOOL,
 ];
 
 /// [`ADVERTISED`] parsed for the `tools/list` answer.

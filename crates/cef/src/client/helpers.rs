@@ -198,6 +198,19 @@ pub(crate) fn backend_widget_approval(
         .map_err(|e| format!("srv refused the approval: {e}"))
 }
 
+/// Relay the user's answer to an agent's upgrade request, as the host.
+/// Blocking: run it off the UI thread.
+pub(crate) fn backend_upgrade_request(
+    web_endpoint: &str,
+    auth_key: &str,
+    ipc_token: &str,
+    body: &serde_json::Value,
+) -> Result<(), String> {
+    post_as_host(web_endpoint, auth_key, ipc_token, "/api/v1/host/upgrade_request", body)
+        .map(|_| ())
+        .map_err(|e| format!("srv refused the answer: {e}"))
+}
+
 /// Report a popup a browser pane's page opened, as the host, and return
 /// srv's `data`: `{admitted: true, pane}` when srv opened it as a pane beside
 /// its opener, `{admitted: false, reason}` when the caller should open it in
