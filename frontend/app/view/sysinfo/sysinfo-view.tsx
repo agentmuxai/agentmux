@@ -179,6 +179,8 @@ function SysinfoViewInner(props: SysinfoViewProps): JSX.Element {
                     setPaused(p);
                     if (!p) setPlotData(model.dataAtom());
                 }}
+                controls={model.controlsShown()}
+                onControls={(shown) => model.setControlsShown(shown)}
                 table={table()}
                 onTable={setTable}
             />

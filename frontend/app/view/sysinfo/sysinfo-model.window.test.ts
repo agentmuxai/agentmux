@@ -218,3 +218,26 @@ describe("SysinfoViewModel menus", () => {
         });
     });
 });
+
+describe("SysinfoViewModel controls", () => {
+    it("hides the view and window buttons until the pane's meta says to show them", () => {
+        createRoot((dispose) => {
+            expect(model().model.controlsShown()).toBe(false);
+            expect(model({ "sysinfo:showcontrols": false }).model.controlsShown()).toBe(false);
+            expect(model({ "sysinfo:showcontrols": true }).model.controlsShown()).toBe(true);
+            dispose();
+        });
+    });
+
+    it("takes a choice at once and saves it in the pane's meta", () => {
+        createRoot((dispose) => {
+            const { model: m, setMeta } = model();
+            m.setControlsShown(true);
+            expect(m.controlsShown()).toBe(true);
+            expect(setMeta).toHaveBeenCalledWith({ "sysinfo:showcontrols": true });
+            m.setControlsShown(false);
+            expect(m.controlsShown()).toBe(false);
+            dispose();
+        });
+    });
+});

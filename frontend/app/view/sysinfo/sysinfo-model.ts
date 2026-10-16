@@ -266,6 +266,10 @@ class SysinfoViewModel {
     focus: () => AreaChoice;
     /** Whether the pane is on screen: a hidden one takes no samples and draws nothing. */
     visible: () => boolean;
+    /** Whether the view and time-window buttons are shown (`sysinfo:showcontrols`); hidden until chosen. */
+    controlsShown: () => boolean;
+    /** The choice made in this pane this session, until its meta catches up; `undefined` before any. */
+    private controlsChoice: SignalAtom<boolean | undefined>;
     /** The area chosen in this pane this session, until its meta catches up; `undefined` before any. */
     private focusChoice: SignalAtom<AreaChoice | undefined>;
     metrics: () => string[];
@@ -349,6 +353,8 @@ class SysinfoViewModel {
         this.dataAtom = createSignalAtom<DataItem[]>([]);
         this.windowChoice = createSignalAtom<number | null>(null);
         this.focusChoice = createSignalAtom<AreaChoice | undefined>(undefined);
+        this.controlsChoice = createSignalAtom<boolean | undefined>(undefined);
+        this.controlsShown = createMemo(() => this.controlsChoice() ?? this.meta()?.["sysinfo:showcontrols"] === true);
         this.loadingAtom = createSignalAtom(true);
         this.plotMetaAtom = createSignalAtom(new Map(Object.entries(DefaultPlotMeta)));
         this.manageConnection = createMemo(() => true);
@@ -428,6 +434,12 @@ class SysinfoViewModel {
         this.windowChoice._set(secs);
         void this.ctx.setMeta({ "graph:windowsecs": secs });
         void this.loadInitialData();
+    }
+
+    /** Show or hide the view and time-window buttons: saved in the pane's meta. */
+    setControlsShown(shown: boolean) {
+        this.controlsChoice._set(shown);
+        void this.ctx.setMeta({ "sysinfo:showcontrols": shown });
     }
 
     /** Show one area alone, or every area (`everything`): saved in the pane's meta. */

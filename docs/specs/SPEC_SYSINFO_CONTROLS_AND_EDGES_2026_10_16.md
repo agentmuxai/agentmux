@@ -1,7 +1,7 @@
 # Spec: Sysinfo pane — flush top-right controls, a hide-the-selectors button, flush right-hand chart edge
 
 **Date:** 2026-10-16
-**Status:** proposed — not implemented
+**Status:** implemented (decisions below are the owner's, 2026-10-16)
 **Files in scope:**
 - [`frontend/app/view/sysinfo/sysinfo-bar.tsx`](../../frontend/app/view/sysinfo/sysinfo-bar.tsx) — the control row
 - [`frontend/app/view/sysinfo/sysinfo-view.tsx`](../../frontend/app/view/sysinfo/sysinfo-view.tsx) — owns the bar's state, lays out the charts
@@ -12,7 +12,7 @@
 - [`frontend/app/view/sysinfo/sysinfo-heatmap.tsx`](../../frontend/app/view/sysinfo/sysinfo-heatmap.tsx) — uses `PLOT_RIGHT_PX`
 - [`frontend/app/view/sysinfo/sysinfo-model.ts`](../../frontend/app/view/sysinfo/sysinfo-model.ts) — pane meta
 
-Three changes to the Sysinfo pane, one PR.
+Three changes to the Sysinfo pane, one PR. The owner's decisions: the simple and the Advanced views get the same treatment through shared code; the view and window buttons are **hidden by default**; **text sits 1px from the pane's borders and graphics 0px**; the buttons come from the line-style component set (`element/ui`).
 
 ---
 
@@ -40,8 +40,8 @@ A new `IconButton` in the actions group, a toggle (`pressed` = selectors hidden)
 
 | | |
 |---|---|
-| Icon | `sliders` (Font Awesome Free solid) |
-| Label / tooltip | `Hide view buttons` when shown, `Show view buttons` when hidden |
+| Control | the library's labelled `Button` (compact, icon `sliders` and the word "Views", like the composer strip's Shell button), `pressed` while the buttons are shown; pause and table are compact `IconButton`s |
+| Accessible name | `Hide view buttons` when shown, `Show view buttons` when hidden |
 | Position | leftmost in the group: `[sliders] [pause] [table]`, so pause and table do not move when it is toggled |
 | Hides | **both** `SegmentedControl`s: the views (CPU, Cores, …) **and** the time window (1m … 15m) |
 | Keeps | the "Paused" label, pause, table and the toggle itself |
@@ -49,27 +49,26 @@ A new `IconButton` in the actions group, a toggle (`pressed` = selectors hidden)
 - Hidden, the bar is one compact row of three buttons at the top right; the charts (or the table) get the freed height. Each chart already names itself in its title, so the view is still readable without the buttons.
 - It works in the simple and the Advanced views, and with the table showing.
 - Accessibility: `aria-pressed` comes from `IconButton`'s `pressed`; focus stays on the toggle after the press. Tab order is unchanged for the buttons that remain.
-- **Remembered per pane:** saved in the block's meta as `sysinfo:hidecontrols` (boolean; absent = shown), through `ctx.setMeta`, like `graph:windowsecs`. A reload or a layout restore keeps it. `sysinfo-model.ts` gets a `controlsHidden()` accessor and `setControlsHidden()`; `SysinfoBar` takes `controls: boolean` and `onControls`.
-  - Add the key to `MetaType` (`frontend/types/srv-types.d.ts` is generated: add it where the Rust meta struct defines `sysinfo:focus`, then regenerate). `layout_file.rs` copies `sysinfo:focus` and `graph:windowsecs` when exporting and importing a layout; copy this key there too so an exported layout keeps it.
+- **Hidden until chosen, remembered per pane:** saved in the block's meta as `sysinfo:showcontrols` (boolean; absent = hidden), through `ctx.setMeta`, like `graph:windowsecs`. A reload keeps it. `sysinfo-model.ts` has `controlsShown()` and `setControlsShown()`; `SysinfoBar` takes `controls: boolean` and `onControls`. The key is added to `MetaType` in `frontend/types/srv-types.d.ts` (hand-maintained).
+  - Follow-up, not done: `layout_file.rs` copies `sysinfo:focus` and `graph:windowsecs` when a layout is exported or imported; it does not yet copy `sysinfo:showcontrols`.
 - Not a global setting: a user can have one pane tidy and another full.
 
 ### 2.3 The chart's right side flush against the pane's right border
 
 The newest sample is drawn at the right-hand edge of the plot, and that edge is the pane's right border.
 
-- **Simple views (`tight`):** uPlot `padding` becomes `[7, 0, null, 0]`. The last x label would then be centred on the edge and cut off, so `values` blanks the label of any tick whose label would cross the plot's right edge (the tick mark stays). The line is 2px wide, so its end is half clipped at the edge; that is accepted, and the same as the left.
-- **Advanced views (not `tight`):** `PLOT_RIGHT_PX` goes from `36` to `0` with the same label rule. Because `sysinfo-heatmap.tsx` computes its plot width from the same constant, the core heatmap moves with the charts and stays aligned. `PLOT_LEFT_PX` is unchanged (the y axis).
-- `.sysinfo-overview` padding: `6px` → `6px 0 6px 6px` so its charts reach the right border too. Tiles are boxes with a border, not charts: they keep an inset (see Open question 1).
-- The hover tooltip (`.sysinfo-chart-tip`) is centred on the cursor, so at the right edge it would be half off-pane. Clamp its `left` so it stays inside the chart's width.
+- **One layout for every chart (DRY):** the `tight` option of `TimeChart` is gone; every chart, in the simple and the Advanced views, is built flush. uPlot `padding` is `[7, 0, null, 1]`: nothing on the right, 1px of text inset on the left, room for the top y label. The last x label would be centred on the edge and cut off, so `values` blanks the label of any tick whose label (plus the 1px inset) would cross the plot's right edge (the tick mark stays). The line is 2px wide, so its end is half clipped at the edge, the same as on the left.
+- `PLOT_LEFT_PX` and `PLOT_RIGHT_PX` are removed. The core heatmap runs the full width, no gutters. Consequence: the charts' y axes are only as wide as their labels, so in Everything the plot areas of the charts and the heatmap no longer line up to the pixel (the simple views already worked this way).
+- `.sysinfo-overview` padding is `0`: the tiles (bordered boxes) and the charts touch the pane's borders. Text inside a tile keeps the tile's own padding. Chart titles sit `--sysinfo-text-inset` (1px) from the top and left.
+- The hover tooltip (`.sysinfo-chart-tip`) is centred on the cursor, so at the right edge it would be half off-pane. Its `left` is clamped to the chart's width.
 
 ---
 
-## 3. Tests
+## 3. Tests (written)
 
-- `sysinfo-bar.render.test.tsx`: the toggle renders; pressing it calls `onControls`; with `controls` false both segmented controls are absent and pause, table and the toggle remain; the Paused label still shows.
-- `sysinfo-view.render.test.tsx`: the hidden state comes from meta, and toggling writes `sysinfo:hidecontrols`.
-- `sysinfo-plot.render.test.tsx` / `sysinfo-chart.test.ts`: the x label rule blanks a label that would cross the right edge and keeps the rest; the uPlot padding right is 0.
-- `sysinfo-heatmap`: plot width uses the new constant (no test should hard-code 36).
+- `sysinfo-bar.render.test.tsx`: the toggle renders and calls `onControls`; with `controls` false both segmented controls are absent and pause, table and the toggle remain; the Paused label still shows.
+- `sysinfo-model.window.test.ts`: hidden with nothing in meta, shown when `sysinfo:showcontrols` is true; a choice applies at once and is saved.
+- `sysinfo-plot.render.test.tsx`: the x label rule blanks a label that would cross the right edge and keeps the rest; the uPlot padding is `[7, 0, null, 1]`.
 - Manual, in `task dev`: screenshot a narrow and a wide pane, simple and Advanced, selectors shown and hidden, table on; check the pause button touches the right and top borders and the newest point touches the right border.
 
 ## 4. Out of scope
@@ -78,8 +77,8 @@ The newest sample is drawn at the right-hand edge of the plot, and that edge is 
 - Moving the window buttons to the right group.
 - Chart colours, ranges, sample rate.
 
-## 5. Open questions
+## 5. Decisions (were open questions)
 
-1. **Advanced-view tiles:** keep their inset from the right border (my default, they are bordered boxes), or run them flush too?
-2. **Default:** selectors shown for a pane that has no saved choice (my default).
-3. **Icon:** `sliders`, or `eye` / `eye-slash`? `sliders` does not change shape between states; `eye-slash` says "hidden" more literally.
+1. Advanced-view tiles run flush too.
+2. The view and window buttons are hidden for a pane with no saved choice.
+3. The toggle is a labelled `Button` ("Views", `sliders`) from the component set, not a bare icon.

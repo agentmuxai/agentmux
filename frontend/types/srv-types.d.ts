@@ -671,6 +671,7 @@ declare global {
         "graph:metrics"?: string[];
         "sysinfo:type"?: string;
         "sysinfo:focus"?: string | null;
+        "sysinfo:showcontrols"?: boolean;
         "bg:*"?: boolean;
         bg?: string;
         "bg:opacity"?: number;

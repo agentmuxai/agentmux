@@ -1,9 +1,12 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// One Sysinfo chart (sysinfo-plot.tsx): uPlot's canvas fills the panel, the
-// metric's name sits over its top-left corner, and the hover tip floats over it.
+// One Sysinfo chart (sysinfo-plot.tsx): uPlot's canvas fills the panel to its
+// edges, the metric's name sits over its top-left corner, and the hover tip
+// floats over it. Graphics touch the pane's edges; text sits --sysinfo-text-inset
+// (1px) in.
 .sysinfo-chart {
+    --sysinfo-text-inset: 1px;
     position: relative;
     display: flex;
     flex-direction: column;
@@ -20,13 +23,13 @@
 
 // A titled chart starts below its title, so the title never sits on the top y label.
 .sysinfo-chart-canvas--titled {
-    margin-top: 16px;
+    margin-top: 14px;
 }
 
 .sysinfo-chart-title {
     position: absolute;
-    top: 2px;
-    left: 6px;
+    top: var(--sysinfo-text-inset, 1px);
+    left: var(--sysinfo-text-inset, 1px);
     z-index: 1;
     font-size: var(--text-xs);
     color: var(--grey-text-color);
@@ -47,19 +50,6 @@
     pointer-events: none;
 }
 
-// A simple view's chart, against the pane's edges (TimeChart `tight`): the
-// title sits in the corner and the plot starts just under it.
-.sysinfo-chart--tight {
-    .sysinfo-chart-title {
-        top: 0;
-        left: 3px;
-    }
-
-    .sysinfo-chart-canvas--titled {
-        margin-top: 13px;
-    }
-}
-
 // The pane (sysinfo-view.tsx): the control row (sysinfo-bar.tsx), the same in
 // the simple and the Advanced views, then the charts or the table.
 .sysinfo-pane {
@@ -71,13 +61,14 @@
 }
 
 // Each control is one flex item, so a narrowing pane moves them to the next
-// line one at a time from the right; pause and table stay right-aligned.
+// line one at a time from the right; the buttons stay right-aligned, flush
+// with the pane's top and right borders (no padding there).
 .sysinfo-bar {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
     gap: 2px 4px;
-    padding: 2px 3px;
+    padding: 0 0 2px var(--sysinfo-text-inset, 1px);
     flex-shrink: 0;
 
     // A set of buttons wider than the pane wraps within itself.
@@ -92,9 +83,11 @@
     align-items: center;
     gap: 4px;
     margin-left: auto;
+    // Its parent leaves no right padding, so the last button's line is the pane's border.
 }
 
 .sysinfo-bar-paused {
+    margin-right: 2px;
     font-size: var(--text-xs);
     color: var(--grey-text-color);
 }

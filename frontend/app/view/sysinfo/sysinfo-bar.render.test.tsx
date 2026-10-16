@@ -20,6 +20,8 @@ function mount(over: Partial<SysinfoBarProps> = {}) {
         onWindow: vi.fn(),
         paused: false,
         onPause: vi.fn(),
+        controls: true,
+        onControls: vi.fn(),
         table: false,
         onTable: vi.fn(),
         ...over,
@@ -62,5 +64,30 @@ describe("SysinfoBar", () => {
         cleanup();
         mount({ table: true });
         expect(screen.getByRole("button", { name: "Show charts" })).toBeTruthy();
+    });
+
+    it("hides both sets of buttons, and keeps the toggle, pause and table, when the controls are off", () => {
+        mount({ controls: false });
+        expect(screen.queryAllByRole("radio")).toHaveLength(0);
+        expect(screen.getByRole("button", { name: "Show view buttons" }).getAttribute("aria-pressed")).toBe("false");
+        expect(screen.getByRole("button", { name: "Pause" })).toBeTruthy();
+        expect(screen.getByRole("button", { name: "Show as a table" })).toBeTruthy();
+    });
+
+    it("shows or hides the view and window buttons from the toggle", () => {
+        const props = mount();
+        const toggle = screen.getByRole("button", { name: "Hide view buttons" });
+        expect(toggle.getAttribute("aria-pressed")).toBe("true");
+        fireEvent.click(toggle);
+        expect(props.onControls).toHaveBeenCalledWith(false);
+        cleanup();
+        const hidden = mount({ controls: false });
+        fireEvent.click(screen.getByRole("button", { name: "Show view buttons" }));
+        expect(hidden.onControls).toHaveBeenCalledWith(true);
+    });
+
+    it("keeps the Paused label beside the buttons while the controls are hidden", () => {
+        mount({ controls: false, paused: true });
+        expect(screen.getByText("Paused")).toBeTruthy();
     });
 });
