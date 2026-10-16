@@ -4,7 +4,8 @@
 //! The note each agent gets when it resumes after AgentMux was upgraded
 //! (`docs/specs/SPEC_UPGRADE_FOR_USERS_AND_AGENTS_2026_10_15.md` §5.2,
 //! phase 4b): `[AgentMux] AgentMux was upgraded from 0.59.26 to 0.59.27 …`,
-//! once per agent, as its next input. The agent that asked for the upgrade
+//! once per agent, soon after it resumes (a message queued during the resume may
+//! come first; the note asks nothing of it). The agent that asked for the upgrade
 //! (`App` `upgrade`) gets it too, which is how it learns the upgrade is done.
 //!
 //! srv records the version it runs in the channel folder ([`RECORD_FILE`],

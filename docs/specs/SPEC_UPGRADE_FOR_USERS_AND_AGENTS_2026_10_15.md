@@ -198,7 +198,7 @@ What already happens, and what's added:
 - **Each agent resumes its conversation** (eager resume, `--resume`).
 - **Messages sent while AgentMux was down** are held and replayed
   (durable jekts).
-- **New: a system note to each resumed agent**, once, as its next input
+- **New: a system note to each resumed agent**, once, soon after it resumes (a message queued during the resume may come first; the note asks nothing)
   (`backend/upgrade_notice.rs`, phase 4b):
   `[AgentMux] AgentMux was upgraded from 0.59.26 to 0.59.27 at 14:02. Your session resumed; nothing is needed from you.`
   srv records the version it runs in the channel folder
