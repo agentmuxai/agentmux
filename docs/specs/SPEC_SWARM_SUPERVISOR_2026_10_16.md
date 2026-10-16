@@ -1,7 +1,7 @@
 # Spec: the Swarm Supervisor keeps agents working until they are done or need the user
 
 **Date:** 2026-10-16
-**Status:** implemented on `camper/swarm-supervisor`, and checked live in a dev build on 2026-10-16 (§5)
+**Status:** implemented — #5036, and checked live in a dev build on 2026-10-16 (§5)
 **Author:** Camper@narko, at the operator's request
 **Research:** [`REPORT_SWARM_SUPERVISOR_AND_FLEET_FEATURES_2026_10_16.md`](../analysis/REPORT_SWARM_SUPERVISOR_AND_FLEET_FEATURES_2026_10_16.md) (the name, the modes, industry practice, other fleet features)
 **Replaces:** the Warden Supervisor auto-continue ([`ANALYSIS_WARDEN_AUTO_CONTROLLER_CONTINUATION_WATCHER_2026_08_12.md`](../analysis/ANALYSIS_WARDEN_AUTO_CONTROLLER_CONTINUATION_WATCHER_2026_08_12.md)), removed in the same PR
