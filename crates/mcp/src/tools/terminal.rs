@@ -156,14 +156,22 @@ async fn family_of(cx: &ToolCtx<'_>, id: &str) -> Result<ShellFamily> {
 /// One line every shell expands differently: cmd fills in `%COMSPEC%`, fish
 /// `$FISH_VERSION`, PowerShell `$PSVersionTable`; a POSIX shell none of them.
 pub(super) fn probe_line(nonce: &str) -> String {
-    format!("echo __AMX_FAM_{nonce}_%COMSPEC%_$FISH_VERSION.$PSVersionTable.end")
+    format!("echo __AMX_FAM_{nonce}_{PROBE_EXPR}.end")
 }
+
+/// What the probe line asks each shell to expand.
+const PROBE_EXPR: &str = "%COMSPEC%_$FISH_VERSION.$PSVersionTable";
 
 /// The family the probe's output (after the echo of the probe line) shows,
 /// or `None` while it hasn't arrived.
 pub(super) fn classify_probe(text: &str, nonce: &str) -> Option<ShellFamily> {
     let re = regex::Regex::new(&format!(r"__AMX_FAM_{}_(.*?)\.end", regex::escape(nonce))).ok()?;
-    let got = re.captures(after_first_line(text))?.get(1)?.as_str().to_string();
+    // The echo of the probe line is the line as typed, which no shell prints
+    // back unchanged; with echo off there is none.
+    let got = re
+        .captures_iter(text)
+        .filter_map(|c| c.get(1).map(|g| g.as_str().to_string()))
+        .find(|g| g != PROBE_EXPR)?;
     let lower = got.to_ascii_lowercase();
     Some(if lower.contains("cmd.exe") {
         ShellFamily::Cmd
@@ -423,7 +431,34 @@ async fn read_log(cx: &ToolCtx<'_>, id: &str, since: Option<u64>, tail_lines: u3
     };
     let body = srv_post_json(cx.client, &url, cx.auth_key, &serde_json::to_value(&req)?, "Terminal read").await?;
     let r: PtyShellReadResponse = serde_json::from_value(body)?;
-    Ok(Log { content: r.content, end: r.end, truncated: r.truncated })
+    // An escape sequence cut off by the end of what has been written so far
+    // is left for the next read, with the cursor before it, so its tail
+    // (`31m`) isn't read as text.
+    let held = incomplete_escape(&r.content);
+    let mut content = r.content;
+    content.truncate(content.len() - held);
+    Ok(Log { content, end: r.end.saturating_sub(held as u64), truncated: r.truncated })
+}
+
+/// The length in bytes of an escape sequence at the end of `s` that hasn't
+/// ended yet: an `ESC`, a CSI (`ESC [`) without its final byte, or an OSC,
+/// DCS, APC or PM string without its terminator. A long one is let through:
+/// a string that never ends must not hold back everything after it.
+pub(super) fn incomplete_escape(s: &str) -> usize {
+    const MOST: usize = 256;
+    let Some(p) = s.rfind('\x1b') else { return 0 };
+    let rest = &s[p..];
+    if rest.len() > MOST {
+        return 0;
+    }
+    let mut chars = rest.chars().skip(1);
+    let open = match chars.next() {
+        None => true,
+        Some('[') => !chars.any(|d| ('@'..='~').contains(&d)),
+        Some(']' | 'P' | '_' | '^') => !chars.any(|d| d == '\x07'),
+        Some(_) => false,
+    };
+    if open { rest.len() } else { 0 }
 }
 
 async fn read_action(arguments: &Value, cx: &ToolCtx<'_>) -> Result<Value> {
@@ -789,13 +824,44 @@ pub(super) fn with_exit_marker(command: &str, family: ShellFamily, nonce: &str) 
 }
 
 /// `command` run in `cwd`: the drawer is a long-lived shell, so `run`'s cwd
-/// is a `cd` in front of the command (cmd's `/d` changes the drive too).
-pub(super) fn in_dir(command: &str, cwd: &str, family: ShellFamily) -> String {
-    match family {
-        ShellFamily::Cmd => format!("cd /d \"{cwd}\" && {command}"),
-        ShellFamily::Posix | ShellFamily::Fish => format!("cd \"{cwd}\" && {command}"),
-        ShellFamily::Pwsh => format!("Set-Location -LiteralPath \"{cwd}\"; {command}"),
-    }
+/// is a `cd` in front of the command (cmd's `/d` changes the drive too). The
+/// path is quoted so the shell takes it literally (no variables, globs or
+/// command syntax), except a leading `~`, which still means home.
+pub(super) fn in_dir(command: &str, cwd: &str, family: ShellFamily) -> Result<String> {
+    let home_rest = match cwd {
+        "~" => Some(""),
+        _ => cwd.strip_prefix("~/").or_else(|| cwd.strip_prefix("~\\")),
+    };
+    Ok(match family {
+        ShellFamily::Cmd => {
+            // cmd expands %VAR% even inside quotes, and has no way to quote it.
+            if cwd.contains('%') {
+                anyhow::bail!("cmd can't take a cwd with % literally: cd there with type first, then run");
+            }
+            format!("cd /d \"{cwd}\" && {command}")
+        }
+        ShellFamily::Posix | ShellFamily::Fish => {
+            let quote = |s: &str| match family {
+                ShellFamily::Fish => format!("'{}'", s.replace('\\', "\\\\").replace('\'', "\\'")),
+                _ => format!("'{}'", s.replace('\'', "'\\''")),
+            };
+            let dir = match home_rest {
+                Some("") => "~".to_string(),
+                Some(rest) => format!("~/{}", quote(rest)),
+                None => quote(cwd),
+            };
+            format!("cd {dir} && {command}")
+        }
+        ShellFamily::Pwsh => {
+            let quote = |s: &str| format!("'{}'", s.replace('\'', "''"));
+            let dir = match home_rest {
+                Some("") => "$HOME".to_string(),
+                Some(rest) => format!("(Join-Path $HOME {})", quote(rest)),
+                None => quote(cwd),
+            };
+            format!("Set-Location -LiteralPath {dir}; {command}")
+        }
+    })
 }
 
 /// The key that clears a half-typed input line before `run` types: Esc in
@@ -811,14 +877,48 @@ pub(super) fn clear_line(family: ShellFamily) -> &'static str {
 /// the command's own output (between the echo and the marker) and its exit code.
 pub(super) fn exit_marker(text: &str, nonce: &str) -> Option<(String, i64)> {
     let re = regex::Regex::new(&format!(r"__AMX_RC_{}_(-?\d+)__", regex::escape(nonce))).ok()?;
-    let body = after_first_line(text);
-    let caps = re.captures(body)?;
+    let caps = re.captures(text)?;
     let m = caps.get(0)?;
     let code = caps[1].parse().ok()?;
-    // Everything before the marker is output, including a last line that
+    // The output starts after the echo of the typed line, which ends with the
+    // marker as typed (its nonce, then no digits); a long line can wrap over
+    // several. With echo off (`stty -echo`) there is none, and nothing is cut.
+    let tag = format!("__AMX_RC_{nonce}_");
+    let before = &text[..m.start()];
+    // Matched with the line breaks taken out, as the terminal may wrap the
+    // echo in the middle of the tag.
+    let kept: Vec<(usize, char)> = before.char_indices().filter(|(_, c)| *c != '\n').collect();
+    let joined: String = kept.iter().map(|(_, c)| *c).collect();
+    let start = match joined.rfind(&tag) {
+        Some(j) => {
+            let at = kept[joined[..j + tag.len()].chars().count() - 1].0;
+            before[at..].find('\n').map(|n| at + n + 1).unwrap_or(m.start())
+        }
+        None => 0,
+    };
+    // Everything up to the marker is output, including a last line that
     // didn't end in a newline (`printf x` puts the marker right after the x).
-    let output = &body[..m.start()];
-    Some((output.trim_end().to_string(), code))
+    Some((text[start..m.start()].trim_end().to_string(), code))
+}
+
+/// Waits briefly for the terminal to show a shell prompt, and refuses if it
+/// doesn't: something else is running in it.
+async fn await_prompt(cx: &ToolCtx<'_>, id: &str) -> Result<()> {
+    let family = known(id).family;
+    let deadline = Instant::now() + Duration::from_millis(2000);
+    loop {
+        let tail = strip_ansi(&read_log(cx, id, None, 5).await?.content);
+        if at_any_prompt(&tail, family) {
+            return Ok(());
+        }
+        if Instant::now() >= deadline {
+            anyhow::bail!(
+                "the terminal isn't at a shell prompt, so something is running in it: read it, drive it with type, \
+                 or wait with until \"prompt\"; run types a command only at a prompt"
+            );
+        }
+        tokio::time::sleep(POLL).await;
+    }
 }
 
 async fn run_action(arguments: &Value, cx: &ToolCtx<'_>) -> Result<Value> {
@@ -848,6 +948,9 @@ async fn run_action(arguments: &Value, cx: &ToolCtx<'_>) -> Result<Value> {
             id = open(arguments, cx).await?["terminal"].as_str().unwrap_or_default().to_string();
         }
     }
+    // run types a command line, which only a shell at its prompt reads as
+    // one: anything else (a REPL, a wizard, a TUI) would take the keys.
+    await_prompt(cx, &id).await?;
     let family = family_of(cx, &id).await?;
     let command = without_trailing_semicolon(without_trailing_comment(command, family), family);
     if let Some(end) = open_ending(command, family) {
@@ -857,7 +960,7 @@ async fn run_action(arguments: &Value, cx: &ToolCtx<'_>) -> Result<Value> {
         );
     }
     let line = match str_arg(arguments, "cwd") {
-        Some(cwd) => in_dir(command, cwd, family),
+        Some(cwd) => in_dir(command, cwd, family)?,
         None => command.to_string(),
     };
     let nonce = uuid::Uuid::new_v4().simple().to_string()[..8].to_string();
