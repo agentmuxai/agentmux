@@ -8,7 +8,7 @@
 //! GetAgentTranscript, OpenAgent, SearchHistory and SupervisorNudge; their
 //! handlers (fleet.rs, history.rs, panes.rs) run each action unchanged.
 
-use super::family::{pick, relabeled, Act};
+use super::family::{pick, public_params, relabeled, Act};
 use super::*;
 
 pub(super) const ACTS: &[Act] = &[
@@ -39,6 +39,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 "OpenAgent" => panes::call(act.tool, &args, cx).await,
                 _ => history::call(act.tool, &args, cx).await,
             };
+            let result = result.map_err(|e| anyhow::anyhow!(public_params(&format!("{e:#}"), act.rename)));
             relabeled("Agents", ACTS, result)
         }
         _ => Err(not_in_family()),
