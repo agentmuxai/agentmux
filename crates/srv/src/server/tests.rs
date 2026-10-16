@@ -4532,6 +4532,41 @@ async fn ptyshell_create_input_read_stop_round_trips_through_a_real_pty() {
         "expected echoed marker in PTY output, got: {content:?}"
     );
 
+    // `since`: a read from the returned end has only what came after it
+    // (Terminal's read and wait, SPEC_AGENT_TERMINAL_DRIVING_2026_10_15.md §4.2).
+    let (_, json) = post_json(
+        &app,
+        "/api/v1/ptyshell/read",
+        serde_json::json!({ "shell_id": shell_id, "agent_block_id": "test-agent-block" }),
+    )
+    .await;
+    let end = json["end"].as_u64().expect("read returns end");
+    assert!(end > 0);
+    let second = "ptyshell-live-test-second-7c21";
+    post_json(
+        &app,
+        "/api/v1/ptyshell/input",
+        serde_json::json!({ "shell_id": shell_id, "agent_block_id": "test-agent-block", "text": format!("echo {second}\r") }),
+    )
+    .await;
+    let mut since_content = String::new();
+    for _ in 0..40 {
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+        let (_, json) = post_json(
+            &app,
+            "/api/v1/ptyshell/read",
+            serde_json::json!({ "shell_id": shell_id, "agent_block_id": "test-agent-block", "since": end }),
+        )
+        .await;
+        since_content = json["content"].as_str().unwrap_or("").to_string();
+        if since_content.contains(second) {
+            assert!(json["end"].as_u64().unwrap() > end);
+            break;
+        }
+    }
+    assert!(since_content.contains(second), "since read: {since_content:?}");
+    assert!(!since_content.contains(marker), "since read must not repeat earlier output: {since_content:?}");
+
     let (status, json) = post_json(
         &app,
         "/api/v1/ptyshell/status",

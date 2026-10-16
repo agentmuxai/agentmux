@@ -58,7 +58,7 @@ pub(super) async fn handle_pty_shell_create(
         if let Some(conflict) = running_shell_conflict(&state, &req.agent_block_id, &connection) {
             return conflict;
         }
-        if let Err(e) = connections::consent_for_ssh(&state, &req.agent_block_id, &ssh_agent, &connection, "an interactive shell (PtyShell)").await {
+        if let Err(e) = connections::consent_for_ssh(&state, &req.agent_block_id, &ssh_agent, &connection, "an interactive terminal").await {
             return (StatusCode::FORBIDDEN, Json(json!({ "error": e }))).into_response();
         }
     }
@@ -663,12 +663,23 @@ pub(super) async fn handle_pty_shell_read(
     if !is_owned_by_agent(&state.mstore, &req.shell_id, &req.agent_block_id) {
         return (
             StatusCode::OK,
-            Json(PtyShellReadResponse { content: String::new(), truncated: false }),
+            Json(PtyShellReadResponse { content: String::new(), truncated: false, end: 0 }),
         )
             .into_response();
     }
+    let mut end = 0u64;
+    // Where the bytes `read_file` returns start in the whole log: 0, unless the
+    // file is a circular one that has wrapped.
+    let start_idx = match state.filestore.stat(&req.shell_id, "term") {
+        Ok(Some(f)) => f.data_start_idx().max(0) as u64,
+        _ => 0,
+    };
     let content = match state.filestore.read_file(&req.shell_id, "term") {
-        Ok(Some(bytes)) => String::from_utf8_lossy(&bytes).to_string(),
+        Ok(Some(bytes)) => {
+            let (range, abs_end) = since_slice(&bytes, start_idx, req.since);
+            end = abs_end;
+            String::from_utf8_lossy(&bytes[range]).to_string()
+        }
         Ok(None) => String::new(),
         Err(e) => {
             return (
@@ -683,7 +694,49 @@ pub(super) async fn handle_pty_shell_read(
     let start = lines.len().saturating_sub(tail_lines);
     let truncated = start > 0;
     let tail = lines[start..].join("\n");
-    (StatusCode::OK, Json(PtyShellReadResponse { content: tail, truncated })).into_response()
+    (StatusCode::OK, Json(PtyShellReadResponse { content: tail, truncated, end })).into_response()
+}
+
+/// Where to start reading `len` bytes that begin at `start_idx` in the whole
+/// log, for a reader that has seen everything before `since`; and the log's
+/// absolute end, the next `since`. Offsets are absolute, so they keep growing
+/// even when a circular file drops its oldest bytes. A `since` before what is
+/// still held reads all of it; one past the end (a cleared log) reads it all
+/// again. The range holds whole characters only: it starts past any
+/// continuation bytes (a wrapped log can begin mid-character) and stops
+/// before a character still being written, which the next read returns.
+fn since_slice(bytes: &[u8], start_idx: u64, since: Option<u64>) -> (std::ops::Range<usize>, u64) {
+    let len = bytes.len();
+    let to = len - incomplete_tail(bytes);
+    let end = start_idx + to as u64;
+    let mut from = match since {
+        Some(s) if s >= start_idx && s <= end => (s - start_idx) as usize,
+        _ => 0,
+    };
+    while from < to && bytes[from] & 0xC0 == 0x80 {
+        from += 1;
+    }
+    (from..to, end)
+}
+
+/// How many bytes at the end of `bytes` begin a UTF-8 character that isn't
+/// complete yet.
+fn incomplete_tail(bytes: &[u8]) -> usize {
+    let len = bytes.len();
+    for back in 1..=len.min(4) {
+        let b = bytes[len - back];
+        if b & 0xC0 == 0x80 {
+            continue;
+        }
+        let need = match b {
+            0xC0..=0xDF => 2,
+            0xE0..=0xEF => 3,
+            0xF0..=0xF7 => 4,
+            _ => 1,
+        };
+        return if need > back { back } else { 0 };
+    }
+    0
 }
 
 /// `POST /api/v1/ptyshell/status` — query whether the shell is still running.
@@ -762,4 +815,45 @@ fn running_shell_conflict(state: &AppState, agent_block_id: &str, connection: &s
         return None;
     }
     super::http_shell::connection_conflict(&shell, connection)
+}
+
+#[cfg(test)]
+mod since_tests {
+    use super::since_slice;
+
+    fn ascii(n: usize) -> Vec<u8> {
+        vec![b'a'; n]
+    }
+
+    #[test]
+    fn a_cursor_reads_only_what_came_after_it() {
+        // A plain log: offsets are byte positions.
+        assert_eq!(since_slice(&ascii(100), 0, None), (0..100, 100));
+        assert_eq!(since_slice(&ascii(100), 0, Some(40)), (40..100, 100));
+        assert_eq!(since_slice(&ascii(100), 0, Some(100)), (100..100, 100));
+        // A cleared log (the cursor is past the end) is read again from its start.
+        assert_eq!(since_slice(&ascii(10), 0, Some(100)), (0..10, 10));
+    }
+
+    #[test]
+    fn offsets_stay_absolute_when_a_circular_log_wraps() {
+        // 300 bytes written, the newest 256 held: they start at 44.
+        assert_eq!(since_slice(&ascii(256), 44, Some(250)), (206..256, 300));
+        assert_eq!(since_slice(&ascii(256), 44, Some(300)), (256..256, 300));
+        // A cursor older than what is still held reads all of it.
+        assert_eq!(since_slice(&ascii(256), 44, Some(10)), (0..256, 300));
+    }
+
+    #[test]
+    fn a_read_never_splits_a_character() {
+        let done = "ok é ✓".as_bytes().to_vec();
+        assert_eq!(since_slice(&done, 0, None), (0..done.len(), done.len() as u64));
+        // The last character is half written: it waits for the next read.
+        let mut half = "ok ".as_bytes().to_vec();
+        half.extend_from_slice(&"✓".as_bytes()[..2]);
+        assert_eq!(since_slice(&half, 0, None), (0..3, 3));
+        // A wrapped log that starts mid-character skips the leftover bytes.
+        let wrapped = &"✓ok".as_bytes()[1..];
+        assert_eq!(since_slice(wrapped, 1, None), (2..4, 5));
+    }
 }

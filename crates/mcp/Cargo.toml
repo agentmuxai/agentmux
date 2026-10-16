@@ -34,6 +34,8 @@ sysinfo = "0.35"
 # be traced back to the call that produced it (SPEC_AGENT_UNRESTRICTED_CAPTURE_
 # WITH_ACCOUNTABILITY_2026_08_30.md §6). Same pin as crates/common/srv.
 sha2 = "0.10"
+# Terminal: `wait` with until "pattern" (already in the workspace lockfile).
+regex = "1"
 
 [dev-dependencies]
 tempfile = "3"

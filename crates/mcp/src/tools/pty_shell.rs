@@ -1,7 +1,9 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! PtyShell*: interactive PTY shells.
+//! The agent pane's PTY shell (its shell drawer). Not advertised:
+//! `Terminal` (terminal.rs) calls these by their old names for `open`,
+//! writing, resizing and `close`.
 
 use super::*;
 
@@ -183,6 +185,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                     shell_id: shell_id.to_string(),
                     agent_block_id: block_id.to_string(),
                     tail_lines,
+                    since: None,
                 })
                 .send()
                 .await

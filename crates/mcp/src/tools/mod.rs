@@ -23,6 +23,7 @@ mod presets;
 mod pty_shell;
 mod send_files;
 mod shell;
+mod terminal;
 mod ui;
 mod widgets;
 mod work;
@@ -82,6 +83,23 @@ fn not_in_family() -> anyhow::Error {
     anyhow::Error::new(NotInFamily)
 }
 
+/// Tools a family tool replaced (SPEC_MUXAPI_TOOL_CONSOLIDATION_2026_10_15.md
+/// §6): the model only sees listed tools, but a memory, a skill or a script
+/// may still name an old one, so the error says what to use instead.
+const REPLACED: &[(&str, &str)] = &[
+    ("Shell", "Terminal with action \"run\" and background: true"),
+    ("ShellInput", "Terminal with action \"type\""),
+    ("ShellStatus", "Terminal with action \"wait\" and until \"exit\", or \"read\""),
+    ("ShellStop", "Terminal with action \"close\""),
+    ("PtyShell", "Terminal with action \"open\""),
+    ("PtyShellInput", "Terminal with action \"type\" (keys by name; submit presses Enter)"),
+    ("PtyShellResize", "Terminal with action \"type\" and rows/cols"),
+    ("PtyShellRead", "Terminal with action \"read\""),
+    ("PtyShellStatus", "Terminal with action \"read\" (running, exit_code)"),
+    ("PtyShellStop", "Terminal with action \"close\""),
+    ("ConnList", "Terminal with action \"connections\""),
+];
+
 /// Try each family in turn; the first that owns `name` answers.
 pub(crate) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
     macro_rules! route {
@@ -93,8 +111,7 @@ pub(crate) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
         )*};
     }
     route!(
-        shell,
-        pty_shell,
+        terminal,
         panes,
         fleet,
         history,
@@ -110,6 +127,9 @@ pub(crate) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
         accounts,
         widgets
     );
+    if let Some((_, instead)) = REPLACED.iter().find(|(old, _)| *old == name) {
+        anyhow::bail!("{name} was replaced: use {instead}");
+    }
     anyhow::bail!("unknown tool: {name}")
 }
 
@@ -117,6 +137,7 @@ pub(crate) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
 mod tests {
     use std::collections::BTreeMap;
 
+    /// Families `call` routes to: each of their tools is advertised.
     const FAMILIES: &[(&str, &str)] = &[
         ("accounts", include_str!("accounts.rs")),
         ("browser", include_str!("browser.rs")),
@@ -129,16 +150,27 @@ mod tests {
         ("overlap", include_str!("overlap.rs")),
         ("panes", include_str!("panes.rs")),
         ("presets", include_str!("presets.rs")),
-        ("pty_shell", include_str!("pty_shell.rs")),
-        ("shell", include_str!("shell.rs")),
+        ("terminal", include_str!("terminal.rs")),
         ("ui", include_str!("ui.rs")),
         ("widgets", include_str!("widgets.rs")),
         ("work", include_str!("work.rs")),
     ];
 
-    /// The tool names in a family's `match name` arms (`"A" | "B" => {`).
+    /// Families a family tool calls into, never routed to: their names are
+    /// not advertised, and each is in `REPLACED`.
+    const INTERNAL: &[(&str, &str)] = &[
+        ("pty_shell", include_str!("pty_shell.rs")),
+        ("shell", include_str!("shell.rs")),
+    ];
+
+    /// The tool names in a family's `match name` arms (`"A" | "B" => {`),
+    /// read from its `call` function only, so another `match` in the file
+    /// (an action, an option) isn't taken for a tool.
     fn arm_names(src: &str) -> Vec<String> {
-        src.lines()
+        let start = src.find("pub(super) async fn call(").expect("a family has a call function");
+        let body = &src[start..];
+        let body = &body[..body.find("\n}\n").map(|e| e + 2).unwrap_or(body.len())];
+        body.lines()
             .filter_map(|l| l.strip_prefix("        \""))
             .filter_map(|l| l.strip_suffix(" => {"))
             .flat_map(|pat| pat.split(" | ").map(|n| n.trim_matches('"').to_string()))
@@ -174,6 +206,22 @@ mod tests {
         for n in owner.keys() {
             assert!(advertised.contains(n), "{n} has a handler but no schema");
         }
+        for (family, src) in INTERNAL {
+            for n in arm_names(src) {
+                assert!(!advertised.contains(&n), "{n} ({family}) is internal but advertised");
+                assert!(super::REPLACED.iter().any(|(old, _)| *old == n), "{n} ({family}) has no REPLACED entry");
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn a_replaced_tool_names_its_replacement() {
+        let client = reqwest::Client::new();
+        let loops = super::LoopRegistry::default();
+        let counter = std::sync::atomic::AtomicU64::new(0);
+        let cx = super::ToolCtx { local_url: "", auth_key: "", block_id: "", client: &client, loops: &loops, loop_counter: &counter };
+        let err = super::call("PtyShellInput", &serde_json::json!({}), &cx).await.unwrap_err();
+        assert!(err.to_string().starts_with("PtyShellInput was replaced: use Terminal"), "{err}");
     }
 
     #[tokio::test]
