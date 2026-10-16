@@ -79,6 +79,20 @@ async fn a_launch_that_forks_starts_while_its_parent_is_live() {
     assert!(result.is_ok(), "a fork is not a second copy of the parent: {result:?}");
 }
 
+/// The guard and the fork's bookkeeping (its segment, and the outcome when
+/// the fork reports its own id) ask the same question, so a fork the guard
+/// lets through is also recorded as a fork.
+#[test]
+fn a_spawn_forks_on_any_of_its_three_signs() {
+    use super::super::spawn::spawn_forks;
+    let plain = vec!["--verbose".to_string()];
+    let launch = vec!["--verbose".to_string(), "--fork-session".to_string()];
+    assert!(!spawn_forks(false, false, &plain), "a plain resume is not a fork");
+    assert!(spawn_forks(true, false, &plain), "the gate placed a copy");
+    assert!(spawn_forks(false, true, &plain), "the session grew outside AgentMux");
+    assert!(spawn_forks(false, false, &launch), "the launch asks to fork");
+}
+
 #[tokio::test]
 async fn a_session_whose_process_is_still_closing_is_not_resumed_yet() {
     let store = Arc::new(Store::open_in_memory().unwrap());
