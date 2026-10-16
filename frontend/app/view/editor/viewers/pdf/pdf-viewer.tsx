@@ -17,6 +17,7 @@ import { createEffect, createSignal, on, onCleanup, onMount, Show, type JSX } fr
 import { ViewerBar, type ViewerBarProps } from "../viewer-bar";
 import { linkAction } from "./pdf-policy";
 import { loadRange } from "./pdf-range";
+import { acquireViewerSignal } from "./pdf-viewer-signal";
 import { keyLabel } from "@/app/keybindings";
 import type { PdfjsModules } from "./pdfjs-runtime";
 import "./pdf-viewer.scss";
@@ -62,13 +63,18 @@ export function PdfViewer(props: PdfViewerProps): JSX.Element {
     let sendPassword: ((password: string) => void) | null = null;
     let generation = 0;
     // pdf.js's viewer drops its resize observer and scroll listeners only
-    // when this aborts; setDocument(null) leaves them.
-    const viewerAbort = new AbortController();
+    // when its signal aborts; setDocument(null) leaves them. Shared by every
+    // PDF viewer: see pdf-viewer-signal.ts.
+    const viewerSignal = acquireViewerSignal();
+    // The file read in progress, stopped when the viewer moves on.
+    let readAbort: AbortController | null = null;
     // A reload (the file changed on disk) keeps the page and the zoom.
     let keep: { page: number; scale: string | number } | null = null;
 
     const teardown = () => {
         sendPassword = null;
+        readAbort?.abort();
+        readAbort = null;
         void loadingTask?.destroy().catch(() => {});
         loadingTask = null;
         // Destroying the loading task destroys its document and its worker.
@@ -79,17 +85,19 @@ export function PdfViewer(props: PdfViewerProps): JSX.Element {
     /** The document source: the whole file, or a range transport. */
     const source = async (pdfjs: PdfjsModules["pdfjs"]) => {
         if (props.file) return { data: new Uint8Array(await props.file.arrayBuffer()) };
+        readAbort = new AbortController();
+        const signal = readAbort.signal;
         if ((props.size ?? 0) <= WHOLE_FILE_MAX_BYTES) {
-            return { data: new Uint8Array(await (await fetchMediaBlob(props.path)).arrayBuffer()) };
+            return { data: new Uint8Array(await (await fetchMediaBlob(props.path, { signal })).arrayBuffer()) };
         }
-        const first = await fetchMediaRange(props.path, 0, RANGE_CHUNK - 1);
-        if (!first.blob) return { data: new Uint8Array(await (await fetchMediaBlob(props.path)).arrayBuffer()) };
+        const first = await fetchMediaRange(props.path, 0, RANGE_CHUNK - 1, { signal });
+        if (!first.blob) return { data: new Uint8Array(await (await fetchMediaBlob(props.path, { signal })).arrayBuffer()) };
         const range = new pdfjs.PDFDataRangeTransport(first.total, new Uint8Array(await first.blob.arrayBuffer()));
         const path = props.path;
         const mine = generation;
         range.requestDataRange = (begin: number, end: number) =>
             void loadRange(
-                (b, e) => fetchMediaRange(path, b, e),
+                (b, e) => fetchMediaRange(path, b, e, { signal }),
                 begin,
                 end,
                 (b, bytes) => range.onDataRange(b, bytes),
@@ -129,7 +137,7 @@ export function PdfViewer(props: PdfViewerProps): JSX.Element {
                     // A huge page can't allocate gigabytes of canvas.
                     maxCanvasPixels: 2 ** 25,
                     // Read by the constructor, missing from 6.4.299's types.
-                    ...({ abortSignal: viewerAbort.signal } as object),
+                    ...({ abortSignal: viewerSignal.signal } as object),
                 });
                 linkService.setViewer(viewer);
                 eventBus.on("pagesinit", () => {
@@ -195,7 +203,7 @@ export function PdfViewer(props: PdfViewerProps): JSX.Element {
     onCleanup(() => {
         generation++;
         teardown();
-        viewerAbort.abort();
+        viewerSignal.release();
         viewer = null;
         eventBus = null;
     });
