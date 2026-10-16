@@ -1004,8 +1004,13 @@ declare global {
         expiration?: number;
         hidden?: boolean;
         actions?: NotificationActionType[];
+        /** Stays until the user closes it: no expiry, and a pin on the toast
+         *  says so. Needs an `id`. */
         persistent?: boolean;
         type?: "error" | "update" | "info" | "warning";
+        /** Runs when the user closes the toast with its X (not when it expires
+         *  or an action button runs), e.g. to record that a notice was read. */
+        onClose?: () => void;
     };
 
     interface AbstractRpcClient {

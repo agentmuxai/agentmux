@@ -70,6 +70,13 @@ export function useNotification() {
         setNotifications((prevNotifications) => prevNotifications.filter((n) => n.id !== id));
     };
 
+    /** The X: the toast goes, and its sender hears it was closed. */
+    const closeNotification = (id: string) => {
+        const notif = untrack(notifications).find((n) => n.id === id);
+        removeNotification(id);
+        notif?.onClose?.();
+    };
+
     const hideNotification = (id: string) => {
         setNotifications((prevNotifications) =>
             prevNotifications.map((n) => (n.id === id ? { ...n, hidden: true } : n))
@@ -123,7 +130,7 @@ export function useNotification() {
         if (!notifs.some((n) => n.expiration)) return;
         const now = Date.now();
         setNotifications((prev) =>
-            prev.filter((n) => !n.expiration || n.expiration > now || n.id === untrack(hoveredId))
+            prev.filter((n) => !n.expiration || n.persistent || n.expiration > now || n.id === untrack(hoveredId))
         );
     });
 
@@ -153,6 +160,7 @@ export function useNotification() {
         hoveredId,
         setHoveredId,
         removeNotification,
+        closeNotification,
         removeAllNotifications,
         hideNotification,
         hideAllNotifications,

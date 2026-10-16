@@ -67,6 +67,16 @@
         right: 5px;
     }
 
+    // A toast that stays until closed, beside its close button.
+    .pin-btn {
+        position: absolute;
+        top: 5px;
+        right: 34px;
+        padding: 10px var(--space-1);
+        font-size: var(--text-xs);
+        color: rgb(from var(--main-text-color) r g b / 0.5);
+    }
+
     .lock-btn {
         position: absolute;
         top: 5px;

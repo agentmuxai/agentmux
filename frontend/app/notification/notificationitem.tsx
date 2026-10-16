@@ -67,6 +67,11 @@ const NotificationItem = ({
             title="Click to Copy Notification Message"
         >
             {renderCloseButton()}
+            <Show when={isBubble && persistent}>
+                <span class="pin-btn" title="Stays until you close it" aria-label="Stays until you close it">
+                    <i class={makeIconClass("thumbtack", false)}></i>
+                </span>
+            </Show>
             <div class="notification-inner">
                 <Show when={nIcon}>
                     <div class="notification-icon">
