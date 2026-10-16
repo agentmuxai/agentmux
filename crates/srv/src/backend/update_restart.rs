@@ -10,12 +10,17 @@
 //! and Cancel stops it), then srv asks the launcher to restart into the new
 //! version with an `AGENTMUXSRV-UPGRADE` line on its stderr. The launcher
 //! checks the folder again and asks the user itself
-//! (`crates/launcher/src/upgrade_restart.rs`); if nothing has happened
-//! three minutes later (declined, or an AgentMux that can't restart itself),
-//! the status goes back to ready and says so.
+//! (`crates/launcher/src/upgrade_restart.rs`). From then on that dialog is
+//! the only place to decide: srv can't reach it, so `restarting` can't be
+//! cancelled here (No in the dialog does). If nothing has happened three
+//! minutes later (declined, or an AgentMux that can't restart itself), the
+//! status goes back to ready and says so.
+//!
+//! Every change of state happens under [`RUN`], checked against the run it
+//! belongs to, so a Cancel can never be overtaken by a run it stopped.
 
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Mutex;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -27,8 +32,23 @@ const POLL: Duration = Duration::from_secs(2);
 /// How long the launcher has to ask the user and quit.
 const RESTART_GRACE: Duration = Duration::from_secs(3 * 60);
 
-/// Bumped by every start and cancel: a waiting run that sees it change stops.
-static GENERATION: AtomicU64 = AtomicU64::new(0);
+/// The current run, bumped by every start and cancel. Held across each
+/// change of state, so a run that was cancelled changes nothing.
+static RUN: Mutex<u64> = Mutex::new(0);
+
+fn run_lock() -> std::sync::MutexGuard<'static, u64> {
+    RUN.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Do `f` only if `run` is still the current run.
+fn if_current(run: u64, f: impl FnOnce()) -> bool {
+    let current = run_lock();
+    if *current != run {
+        return false;
+    }
+    f();
+    true
+}
 
 /// `app.upgrade-restart`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
@@ -70,54 +90,70 @@ fn staged(status: &AppUpdateStatus) -> Result<(DownloadStatus, PathBuf), String>
 
 /// Start "Upgrade & restart".
 pub fn start(now: bool) -> Result<AppUpdateStatus, String> {
+    let mut current = run_lock();
     let (d, folder) = staged(&update_check::current_status())?;
-    let generation = GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
+    *current += 1;
+    let run_id = *current;
     set(&d, "waiting", if now { 0 } else { working_agents() }, None);
-    tokio::spawn(run(generation, d, folder, now));
+    drop(current);
+    tokio::spawn(run(run_id, d, folder, now));
     Ok(update_check::current_status())
 }
 
-/// Stop waiting (`app.upgrade-cancel`).
-pub fn cancel() -> AppUpdateStatus {
-    GENERATION.fetch_add(1, Ordering::SeqCst);
+/// Stop waiting (`app.upgrade-cancel`). Once the launcher is asking the user,
+/// only its dialog can say no.
+pub fn cancel() -> Result<AppUpdateStatus, String> {
+    let mut current = run_lock();
     let status = update_check::current_status();
-    if let Some(d) = status.download.as_ref().filter(|d| d.state == "waiting" || d.state == "restarting") {
-        set(d, "ready", 0, None);
+    match status.download.as_ref() {
+        Some(d) if d.state == "restarting" => {
+            Err("AgentMux is asking you to confirm the restart: answer No in its dialog to cancel".into())
+        }
+        Some(d) if d.state == "waiting" => {
+            *current += 1;
+            set(d, "ready", 0, None);
+            Ok(update_check::current_status())
+        }
+        _ => Ok(status),
     }
-    update_check::current_status()
 }
 
-async fn run(generation: u64, d: DownloadStatus, folder: PathBuf, now: bool) {
-    let current = || GENERATION.load(Ordering::SeqCst) == generation;
+async fn run(run_id: u64, d: DownloadStatus, folder: PathBuf, now: bool) {
     let deadline = tokio::time::Instant::now() + WAIT_FOR_AGENTS;
     loop {
-        if !current() {
-            return;
-        }
         let busy = if now { 0 } else { working_agents() };
         if busy == 0 {
             break;
         }
-        if tokio::time::Instant::now() >= deadline {
+        let still = if tokio::time::Instant::now() >= deadline {
             let error = format!("{busy} agent(s) were still working after 10 minutes. Restart now, or try again later.");
-            set(&d, "ready", 0, Some(error));
+            if_current(run_id, || set(&d, "ready", 0, Some(error)));
+            false
+        } else {
+            if_current(run_id, || set(&d, "waiting", busy, None))
+        };
+        if !still {
             return;
         }
-        set(&d, "waiting", busy, None);
         tokio::time::sleep(POLL).await;
     }
-    set(&d, "restarting", 0, None);
-    tracing::info!(version = %d.version, folder = %folder.display(), "upgrade: asking the launcher to restart");
-    eprintln!("{}", agentmux_common::srv_stderr::upgrade_line(&d.version, &folder.join("agentmux.exe")));
+    let asked = if_current(run_id, || {
+        set(&d, "restarting", 0, None);
+        tracing::info!(version = %d.version, folder = %folder.display(), "upgrade: asking the launcher to restart");
+        eprintln!("{}", agentmux_common::srv_stderr::upgrade_line(&d.version, &folder.join("agentmux.exe")));
+    });
+    if !asked {
+        return;
+    }
     tokio::time::sleep(RESTART_GRACE).await;
-    if current() {
+    if_current(run_id, || {
         set(
             &d,
             "ready",
             0,
             Some("AgentMux didn't restart: the upgrade was declined, or this AgentMux can't restart itself. You can start the new version from its folder.".into()),
-        );
-    }
+        )
+    });
 }
 
 #[cfg(test)]
@@ -150,6 +186,20 @@ mod tests {
             folder: folder.map(|f| f.display().to_string()),
             waiting_for: 0,
         }
+    }
+
+    #[test]
+    fn a_cancelled_run_changes_nothing() {
+        let run_id = {
+            let mut current = run_lock();
+            *current += 1;
+            *current
+        };
+        let mut ran = false;
+        assert!(if_current(run_id, || ran = true));
+        assert!(ran);
+        *run_lock() += 1; // a Cancel, or a newer start
+        assert!(!if_current(run_id, || panic!("a stale run changed the state")));
     }
 
     #[test]

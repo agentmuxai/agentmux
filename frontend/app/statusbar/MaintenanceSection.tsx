@@ -321,12 +321,10 @@ export const MaintenanceSection = (): JSX.Element => {
                     </Show>
                     <Show when={download()?.state === "restarting"}>
                         <span class="maintenance-icon maintenance-icon--working">↑</span>
+                        {/* Only the launcher's dialog can stop it now: No there cancels. */}
                         <span class="maintenance-row-text maintenance-row-text--dim">
-                            Restarting: confirm in the AgentMux dialog
+                            Restarting: answer the AgentMux dialog (No cancels)
                         </span>
-                        <Button density="compact" class="maintenance-btn" onClick={() => void cancelUpgrade()}>
-                            Cancel
-                        </Button>
                     </Show>
                     <Show when={updaterStatus() === "ready" && !download()}>
                         <span class="maintenance-icon maintenance-icon--update">↑</span>

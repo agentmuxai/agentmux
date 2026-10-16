@@ -31,7 +31,10 @@ pub fn register(engine: &Arc<WshRpcEngine>, _state: &AppState) {
             crate::backend::update_restart::start(req.now)
         },
     );
-    engine.register_typed(COMMAND_APP_UPGRADE_CANCEL, move |_req: Option<NoArgsReq>, _ctx| async move {
-        Ok::<_, String>(crate::backend::update_restart::cancel())
+    engine.register_typed(COMMAND_APP_UPGRADE_CANCEL, move |_req: Option<NoArgsReq>, ctx| async move {
+        if !ctx.agent_id.is_empty() {
+            return Err("FORBIDDEN: only the user cancels an AgentMux upgrade".to_string());
+        }
+        crate::backend::update_restart::cancel()
     });
 }

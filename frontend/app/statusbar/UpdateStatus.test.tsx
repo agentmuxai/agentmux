@@ -171,7 +171,9 @@ describe("Maintenance: Upgrade & restart", () => {
         upgradeRestart.mockResolvedValue(download("restarting", FOLDER));
         fireEvent.click(screen.getByRole("button", { name: "Restart now" }));
         expect(upgradeRestart).toHaveBeenLastCalledWith(expect.anything(), { now: true });
-        expect(await screen.findByText("Restarting: confirm in the AgentMux dialog")).toBeTruthy();
+        expect(await screen.findByText("Restarting: answer the AgentMux dialog (No cancels)")).toBeTruthy();
+        // Only the dialog can stop it now.
+        expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
         expect(installAppUpdate).not.toHaveBeenCalled();
     });
 
