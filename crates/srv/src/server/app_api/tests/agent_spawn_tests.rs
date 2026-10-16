@@ -394,7 +394,7 @@ async fn a_worker_moves_to_another_account_when_the_leaders_cannot_run() {
 
 /// The accounts come from this channel's store, the one a spawn launches
 /// with (`resolve_account_for_spawn`); the global mirror can hold an account
-/// signed in only in another channel (Codex on #5023).
+/// signed in only in another channel (#5023).
 #[tokio::test]
 async fn only_this_channels_accounts_are_candidates() {
     let mut state = test_state();
