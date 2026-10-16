@@ -107,6 +107,8 @@ pub(crate) async fn handle_request_upgrade(
     let outcome = match crate::sagas::self_quit::gate(provenance.as_ref(), &req.user_instruction) {
         Ok(()) => {
             tracing::info!(agent, version = %version, reason, "upgrade: the user's own turn asked; starting");
+            // Prompts other agents raised for this release are answered by it.
+            upgrade_request::resolve_started(&state, &version);
             upgrade_request::start_upgrade(version.clone());
             Outcome::Started { version }
         }

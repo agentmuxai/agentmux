@@ -118,7 +118,7 @@ fn describe_outcome(o: &Value) -> String {
         "started" => format!(
             "Upgrade to {version} started: AgentMux downloads it if needed, asks the user to confirm in its own \
              dialog, then restarts once every agent has finished its turn. End your turn so you don't hold it up. \
-             Your session resumes after the restart, with a note saying it happened."
+             Your session resumes after the restart."
         ),
         "pending_user" => format!(
             "Asked the user: every AgentMux window shows your request to upgrade to {version}. You'll get an \

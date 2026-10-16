@@ -239,6 +239,27 @@ pub fn answer(state: &crate::server::AppState, id: &str, version: &str, accept: 
     Ok(())
 }
 
+/// The user's own turn started the upgrade to `version`: requests for it
+/// that were waiting are answered by that, and their agents told so.
+pub fn resolve_started(state: &crate::server::AppState, version: &str) {
+    let resolved: Vec<UpgradeRequest> = {
+        let mut p = pending();
+        let (same, other): (Vec<_>, Vec<_>) = std::mem::take(&mut *p).into_iter().partition(|r| r.version == version);
+        *p = other;
+        same
+    };
+    if resolved.is_empty() {
+        return;
+    }
+    publish(state);
+    for r in &resolved {
+        tell(
+            &r.block_id,
+            &format!("[AgentMux] The user asked for the upgrade to {version} themselves; it is under way. Your request is answered by that."),
+        );
+    }
+}
+
 /// Download `version` if it isn't yet, then restart once every agent has
 /// finished its turn (the launcher asks the user before it does). Only while
 /// `version` is still the latest release: the download and restart take the
