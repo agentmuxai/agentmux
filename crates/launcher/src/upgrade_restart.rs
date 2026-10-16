@@ -21,7 +21,7 @@
 //!    ([`relaunch`]) and exits.
 
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -33,7 +33,14 @@ use tokio::sync::mpsc;
 pub const CONFIRMED_FOR: Duration = Duration::from_secs(5 * 60);
 
 static REQUESTS: Mutex<Option<mpsc::UnboundedSender<UpgradeRequest>>> = Mutex::new(None);
-static ASKING: AtomicBool = AtomicBool::new(false);
+/// A Yes counts only this long after its dialog opened (the dialog itself
+/// can't time out). Shorter than srv's wait (`RESTART_GRACE`, 3 minutes in
+/// `srv/src/backend/update_restart.rs`), so by the time the panel says the
+/// restart didn't happen, no open dialog can still start one.
+pub const ANSWER_WITHIN: Duration = Duration::from_secs(150);
+
+/// The latest request asked about: only its dialog's Yes counts.
+static LATEST_ASK: AtomicU64 = AtomicU64::new(0);
 
 /// The supervisor's end of srv's upgrade requests. One per process: it lasts
 /// across srv respawns, since the reader of each new srv sends here too.
@@ -96,18 +103,31 @@ pub fn staged_launcher(req: &UpgradeRequest, own_dir: &Path, own_version: &str) 
 }
 
 /// Ask the user on a thread of its own, and call `on_yes` only for an
-/// explicit Yes. One dialog at a time: a request while one is open is dropped.
+/// explicit Yes that still counts ([`answer_counts`]): one given within
+/// [`ANSWER_WITHIN`], to the latest request. Any other Yes is told it expired.
 pub fn ask_then(version: String, launcher: PathBuf, on_yes: impl FnOnce(PathBuf) + Send + 'static) {
-    if ASKING.swap(true, Ordering::SeqCst) {
-        return;
-    }
+    let ask = LATEST_ASK.fetch_add(1, Ordering::SeqCst) + 1;
     std::thread::spawn(move || {
-        let yes = confirm(&version, &launcher);
-        ASKING.store(false, Ordering::SeqCst);
-        if yes {
+        let opened = Instant::now();
+        if !confirm(&version, &launcher) {
+            return;
+        }
+        if answer_counts(ask, LATEST_ASK.load(Ordering::SeqCst), opened.elapsed()) {
             on_yes(launcher);
+        } else {
+            crate::log(&format!("upgrade: a Yes {}s after asking, or to an older request, was ignored", opened.elapsed().as_secs()));
+            crate::show_fatal_dialog(
+                "AgentMux upgrade",
+                "This upgrade request expired, so AgentMux didn't restart.\n\nStart it again from the version panel.",
+            );
         }
     });
+}
+
+/// Whether a Yes to request `ask`, given `waited` after its dialog opened,
+/// still counts when `latest` is the newest request.
+fn answer_counts(ask: u64, latest: u64, waited: Duration) -> bool {
+    ask == latest && waited < ANSWER_WITHIN
 }
 
 #[cfg(target_os = "windows")]
@@ -207,6 +227,15 @@ mod tests {
         portable(&installed, "0.59.26");
         std::fs::write(installed.join("unins000.exe"), b"").unwrap();
         assert!(staged_launcher(&req("0.59.27", &new), &installed, "0.59.26").is_err());
+    }
+
+    #[test]
+    fn a_late_or_superseded_yes_does_not_count() {
+        assert!(answer_counts(3, 3, Duration::from_secs(10)));
+        assert!(!answer_counts(3, 3, ANSWER_WITHIN));
+        assert!(!answer_counts(2, 3, Duration::from_secs(10)));
+        // The dialog must stop counting before srv gives up (3 minutes).
+        assert!(ANSWER_WITHIN < Duration::from_secs(3 * 60));
     }
 
     #[test]

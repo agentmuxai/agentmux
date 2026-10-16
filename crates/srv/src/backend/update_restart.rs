@@ -29,7 +29,10 @@ use crate::backend::update_check::{self, AppUpdateStatus, DownloadStatus};
 
 const WAIT_FOR_AGENTS: Duration = Duration::from_secs(10 * 60);
 const POLL: Duration = Duration::from_secs(2);
-/// How long the launcher has to ask the user and quit.
+/// How long the launcher has to ask the user and quit. Longer than the
+/// launcher counts a Yes (`ANSWER_WITHIN`, 150 s in
+/// `crates/launcher/src/upgrade_restart.rs`), so once this says the restart
+/// didn't happen, no open dialog can still start one.
 const RESTART_GRACE: Duration = Duration::from_secs(3 * 60);
 
 /// The current run, bumped by every start and cancel. Held across each
@@ -151,7 +154,7 @@ async fn run(run_id: u64, d: DownloadStatus, folder: PathBuf, now: bool) {
             &d,
             "ready",
             0,
-            Some("AgentMux didn't restart: the upgrade was declined, or this AgentMux can't restart itself. You can start the new version from its folder.".into()),
+            Some("AgentMux didn't restart: the upgrade was declined or not answered in time, or this AgentMux can't restart itself. Try again, or start the new version from its folder.".into()),
         )
     });
 }
