@@ -12,8 +12,9 @@
 //! minute; a held one is counted in the next.
 //!
 //! Installed at boot (not with the notify Router, which starts only when a
-//! window connects): a broker observer forwards turn ends and failures to a
-//! task that does the store reads and the delivery.
+//! window connects): a broker observer forwards turn ends and failures, and a
+//! reducer subscriber a question still waiting after its grace, to a task
+//! that does the store reads and the delivery.
 
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock};
@@ -38,6 +39,25 @@ pub(crate) enum WorkerEvent {
     Exited { block_id: String, key: String },
     /// It failed (`agentfailure`), with the failure's title.
     Failed { block_id: String, title: String },
+    /// A question has waited for the user for `ASKED_GRACE` in the middle of
+    /// a turn (`term:awaiting_user`, which the agent pane sets).
+    Asked { block_id: String },
+}
+
+/// How long a question waits for the user before the leader hears of it: a
+/// user at the pane usually answers first.
+const ASKED_GRACE: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// The block whose pane just set `term:awaiting_user`, from a reducer event.
+pub(crate) fn asked_in(event: &agentmux_common::ipc::Event) -> Option<&str> {
+    match event {
+        agentmux_common::ipc::Event::BlockMetaUpdated { block_id, meta_patch, .. }
+            if meta_patch.get(crate::backend::agent_state::META_AWAITING_USER).and_then(|v| v.as_bool()) == Some(true) =>
+        {
+            Some(block_id)
+        }
+        _ => None,
+    }
 }
 
 /// Read a broker event as a worker event, for any agent pane; whether the
@@ -76,14 +96,42 @@ pub(crate) fn parse_event(event: &str, scopes: &[String], data: Option<&serde_js
 }
 
 /// Start listening. Called once from `main`.
-pub fn install(broker: Arc<Broker>, mstore: Arc<Store>, filestore: Arc<FileStore>) {
+pub fn install(
+    broker: Arc<Broker>,
+    mut reducer_events: tokio::sync::broadcast::Receiver<agentmux_common::ipc::Event>,
+    mstore: Arc<Store>,
+    filestore: Arc<FileStore>,
+) {
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<WorkerEvent>();
+    let observer_tx = tx.clone();
     // Observers run inside `Broker::publish`, under its locks: parse and hand off only.
     broker.add_observer(Arc::new(move |ev: &MuxEvent| {
         if let Some(e) = parse_event(&ev.event, &ev.scopes, ev.data.as_ref()) {
-            let _ = tx.send(e);
+            let _ = observer_tx.send(e);
         }
     }));
+    // A question in the middle of a turn ends no turn: the pane's flag is the
+    // only sign of it. Looked at again after the grace, one wait per pane.
+    tokio::spawn(async move {
+        let waiting: Arc<parking_lot::Mutex<std::collections::HashSet<String>>> = Default::default();
+        loop {
+            let ev = match reducer_events.recv().await {
+                Ok(ev) => ev,
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+            };
+            let Some(block_id) = asked_in(&ev).map(str::to_string) else { continue };
+            if !waiting.lock().insert(block_id.clone()) {
+                continue;
+            }
+            let (tx, waiting) = (tx.clone(), waiting.clone());
+            tokio::spawn(async move {
+                tokio::time::sleep(ASKED_GRACE).await;
+                waiting.lock().remove(&block_id);
+                let _ = tx.send(WorkerEvent::Asked { block_id });
+            });
+        }
+    });
     // The delivery log is a short ring (`AUDIT_LOG_MAX`): copy reports out
     // of it often enough that one isn't gone before its turn ends.
     tokio::spawn(async move {
@@ -151,8 +199,17 @@ fn live_panes_of(mstore: &Store, def_id: &str) -> Vec<String> {
 /// and its leader is open; `None` otherwise, or while the worker's gap runs.
 fn note_for(mstore: &Store, filestore: &FileStore, ev: &WorkerEvent) -> Option<(String, String)> {
     let block_id = match ev {
-        WorkerEvent::TurnEnded { block_id, .. } | WorkerEvent::Exited { block_id, .. } | WorkerEvent::Failed { block_id, .. } => block_id,
+        WorkerEvent::TurnEnded { block_id, .. }
+        | WorkerEvent::Exited { block_id, .. }
+        | WorkerEvent::Failed { block_id, .. }
+        | WorkerEvent::Asked { block_id } => block_id,
     };
+    // Answered within the grace, or the turn is over (its end has a note of its own).
+    if matches!(ev, WorkerEvent::Asked { .. })
+        && crate::backend::agent_state::current_state(mstore, block_id) != Some(crate::backend::agent_state::AgentState::Waiting)
+    {
+        return None;
+    }
     let worker = worker_of_block(mstore, block_id)?;
     let leader_panes = live_panes_of(mstore, &worker.leader_def_id);
     let leader_block = leader_panes.first()?.clone();
@@ -166,6 +223,10 @@ fn note_for(mstore: &Store, filestore: &FileStore, ev: &WorkerEvent) -> Option<(
         }
         WorkerEvent::Exited { .. } => format!("Your worker {} stopped: its process exited.", worker.name),
         WorkerEvent::Failed { title, .. } => format!("Your worker {} stopped with an error: {title}.", worker.name),
+        WorkerEvent::Asked { .. } => format!(
+            "Your worker {} is waiting for the user to answer a question in its pane; it can't go on until they do.",
+            worker.name
+        ),
     };
     let body = GAPS.lock().admit(&worker.def_id, body, agentmux_common::time::now_ms_u64())?;
     Some((leader_block, format!("[AgentMux] {}", crate::backend::reactive::sanitize::quote_in_system_note(&body))))
@@ -211,7 +272,7 @@ impl Seen {
     fn first(&mut self, ev: &WorkerEvent) -> bool {
         let key = match ev {
             WorkerEvent::TurnEnded { key, .. } | WorkerEvent::Exited { key, .. } => key,
-            WorkerEvent::Failed { .. } => return true,
+            WorkerEvent::Failed { .. } | WorkerEvent::Asked { .. } => return true,
         };
         if self.keys.contains(key) {
             return false;
