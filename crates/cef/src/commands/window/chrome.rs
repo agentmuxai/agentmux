@@ -324,9 +324,12 @@ pub fn is_window_maximized(state: &Arc<AppState>, args: &serde_json::Value) -> R
             .get(label)
             .is_some_and(|e| e.placement == crate::state::WindowPlacement::Maximized)
     } else {
-        let hwnd = super::lifecycle::resolve_window_hwnd(state, label);
-        // SAFETY: IsZoomed only reads the window's state; a stale HWND returns 0.
-        !hwnd.is_null() && unsafe { windows_sys::Win32::UI::WindowsAndMessaging::IsZoomed(hwnd) } != 0
+        // SAFETY: resolving the HWND only reads the label cache, and IsZoomed
+        // only reads the window's state; a stale HWND returns 0.
+        unsafe {
+            let hwnd = super::lifecycle::resolve_window_hwnd(state, label);
+            !hwnd.is_null() && windows_sys::Win32::UI::WindowsAndMessaging::IsZoomed(hwnd) != 0
+        }
     };
     #[cfg(not(target_os = "windows"))]
     let maximized = crate::ui_tasks::get_window_maximized_blocking(state, label).unwrap_or(false);
