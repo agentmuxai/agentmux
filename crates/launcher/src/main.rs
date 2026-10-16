@@ -32,6 +32,7 @@ mod event_log;
 mod hash;
 mod host_pipe;
 mod host_spawn;
+mod incidents;
 mod ipc;
 mod job_object;
 mod logging;
