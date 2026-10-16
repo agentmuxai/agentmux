@@ -173,8 +173,8 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             // agent UID or registered AGENT NAME only (`resolve_target`,
             // crates/srv/src/backend/reactive/handler.rs) — never by
             // block_id, even though this tool's own advertised contract
-            // (FLEET_BROADCAST_TOOL) is block_id values from FleetList, to
-            // stay consistent with FleetBulkStop's targeting scheme. The
+            // (MESSAGE_TOOL, broadcast) is block_id values from Agents list, to
+            // stay consistent with Stop agents' targeting scheme. The
             // WS-RPC path (`fleet_broadcast_impl`, agentmux-srv) already
             // resolves block_id -> agent_id via `get_agent_by_block` before
             // injecting; this MCP path talks to srv over plain HTTP with no

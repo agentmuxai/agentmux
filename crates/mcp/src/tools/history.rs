@@ -12,8 +12,8 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
         "SearchHistory" => {
             // Whose history this is, srv takes from this process's
             // `X-Agent-Token` (sent on every request, see `main`), never from a
-            // name; the tool exposes no `agent` parameter on purpose — see
-            // SEARCH_HISTORY_TOOL's comment. The name is sent only for srv's
+            // name; Agents' search_history refuses an `agent` on purpose — see
+            // AGENTS_TOOL's note. The name is sent only for srv's
             // actor counters, so a process without one still searches.
             let slug = std::env::var("AGENTMUX_AGENT_ID").unwrap_or_default();
             let query = arguments
