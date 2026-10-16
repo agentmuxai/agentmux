@@ -44,6 +44,8 @@ async function openFile(filename: string): Promise<void> {
 
 const listAgentDefinitionsMock = vi.fn();
 const nativeMemoryListMock = vi.fn();
+/** `memory:launchcost`; rejects unless a test gives a cost. */
+const launchCostMock = vi.fn();
 
 // SPEC_ARMORY_REACTIVE_UPDATES_2026_09_02.md's own tests drive
 // `agent:memory:changed:{id}` events through this hub, same pattern as
@@ -78,6 +80,8 @@ vi.mock("@/app/store/rpc-api", () => ({
         // The "earlier memory" panel above the file grid: nothing to offer.
         NativeMemoryAdoptionListCommand: () => Promise.resolve({ list: null }),
         NativeMemoryClaimsCommand: () => Promise.resolve({ list_id: "l", agent_uid: "a", folders: [] }),
+        MemoryLaunchCostCommand: (...args: unknown[]) => launchCostMock(...args),
+        AgentOpenPanesCommand: () => Promise.resolve({ panes: [] }),
     },
 }));
 
@@ -123,6 +127,8 @@ beforeEach(() => {
     window.api = makeTestHostApi();
     listAgentDefinitionsMock.mockReset();
     nativeMemoryListMock.mockReset();
+    launchCostMock.mockReset();
+    launchCostMock.mockRejectedValue(new Error("no srv"));
     listAgentDefinitionsMock.mockResolvedValue([agent("a1", "Manoz"), agent("a2", "AgentY")]);
     nativeMemoryListMock.mockResolvedValue({ files: [] });
     localStorage.clear();
@@ -325,6 +331,126 @@ describe("NativeMemoryManager — filter and sort", () => {
         expect((screen.getByTestId("memory-agent-sort-select") as HTMLSelectElement).value).toBe("tokens");
         expect(cardTitlesInOrder(container)).toEqual(["OneLarge", "ManySmall"]);
         expect(screen.getByText("~12k tok · 1 file").getAttribute("title")).toMatch(/^~12,400 tokens \(est\.\)/);
+    });
+
+    test("the fleet line sums every counted agent, takes the median per agent and names those over twice it", async () => {
+        const tokens: Record<string, number> = { a1: 100, a3: 120, a4: 900 };
+        nativeMemoryListMock.mockImplementation((_c: unknown, req: { agent_id: string }) =>
+            Promise.resolve({ files: tokens[req.agent_id] ? [{ filename: "m.md", tokens_est: tokens[req.agent_id] }] : [] })
+        );
+        listAgentDefinitionsMock.mockResolvedValue([agent("a1", "One"), agent("a2", "Empty"), agent("a3", "Three"), agent("a4", "Big")]);
+        render(() => <NativeMemoryManager />);
+        await waitFor(() =>
+            expect(screen.getByTestId("memory-fleet-summary")).toHaveTextContent(
+                "Personal Memory: ~1.1k tok across 3 of 4 agents · median ~120 tok per agent · over twice the median: Big ~900 tok"
+            )
+        );
+    });
+
+    test("no fleet line before any agent has memory", async () => {
+        render(() => <NativeMemoryManager />);
+        expect(await screen.findAllByText("No memories yet")).toHaveLength(2);
+        expect(screen.queryByTestId("memory-fleet-summary")).toBeNull();
+    });
+
+    test("the launch-cost view names its largest parts' share", async () => {
+        const part = (name: string, tokens: number) => ({
+            kind: "bundle", name, tokens_est: tokens, size_bytes: tokens * 4, lines: 1, via: "startup_file",
+        });
+        launchCostMock.mockResolvedValue({
+            agent_id: "a1", provider: "claude", startup_file: "CLAUDE.md", delivered_by_file: true,
+            parts: [part("A", 600), part("B", 200), part("C", 100), part("D", 60), part("E", 40)], total_tokens_est: 1000,
+        });
+        listAgentDefinitionsMock.mockResolvedValue([agent("a1", "Manoz")]);
+        render(() => <NativeMemoryManager />);
+        fireEvent.click(await screen.findByText("Manoz"));
+        expect(await screen.findByTestId("agent-launch-cost")).toHaveTextContent("The 3 largest parts are 90% of the launch.");
+    });
+
+    test("a card says what the agent starts with, and its detail breaks it down", async () => {
+        nativeMemoryListMock.mockResolvedValue({ files: [{ filename: "MEMORY.md", is_index: true, tokens_est: 40 }] });
+        const part = (kind: string, name: string, tokens: number, via = "startup_file") => ({
+            kind, name, tokens_est: tokens, size_bytes: tokens * 4, lines: 1, via,
+        });
+        launchCostMock.mockResolvedValue({
+            agent_id: "a1",
+            provider: "claude",
+            startup_file: "CLAUDE.md",
+            delivered_by_file: true,
+            parts: [part("operator_config", "Operator Config", 4500), part("soul", "Soul", 300), part("personal", "MEMORY.md", 40, "cli")],
+            total_tokens_est: 4840,
+        });
+        listAgentDefinitionsMock.mockResolvedValue([agent("a1", "Manoz")]);
+        render(() => <NativeMemoryManager />);
+
+        // No open pane, so no window: tokens alone, never a guessed share.
+        expect(await screen.findByText("Starts with ~4.8k tok")).toBeInTheDocument();
+        // Announced too: the card's label replaces its content for a screen reader.
+        expect(screen.getByText("Manoz").closest(".memory-agent-card")?.getAttribute("aria-label")).toBe(
+            "Manoz — ~40 tok · 1 file — Starts with ~4.8k tok"
+        );
+        fireEvent.click(screen.getByText("Manoz"));
+        const cost = await screen.findByTestId("agent-launch-cost");
+        expect(cost).toHaveTextContent("Starts with ~4.8k tok");
+        const rows = [...cost.querySelectorAll("tbody tr")].map((r) => r.textContent);
+        expect(rows).toEqual([
+            "Operator ConfigStartup file~4.5k tok93%",
+            "SoulStartup file~300 tok6%",
+            "MEMORY.mdLoaded by Claude Code~40 tok1%",
+        ]);
+        expect(cost.querySelector(".agent-launch-cost-band")).toBeNull();
+        // Three parts: "the 3 largest" would be all of them.
+        expect(cost).not.toHaveTextContent("largest");
+    });
+
+    test("a user-owned startup file isn't counted, and a Global Memory edit refreshes the launch line", async () => {
+        nativeMemoryListMock.mockResolvedValue({ files: [] });
+        const part = (kind: string, tokens: number, via = "startup_file") => ({
+            kind, name: kind, tokens_est: tokens, size_bytes: tokens * 4, lines: 1, via,
+        });
+        const owned = (operator: number) => ({
+            agent_id: "a1", provider: "codex", startup_file: "AGENTS.md", delivered_by_file: true,
+            parts: [part("operator_config", operator)], total_tokens_est: operator,
+        });
+        launchCostMock.mockResolvedValue({ ...owned(4500), delivered_by_file: false });
+        listAgentDefinitionsMock.mockResolvedValue([agent("a1", "Manoz")]);
+        render(() => <NativeMemoryManager />);
+        expect(await screen.findByText("Starts with ~0 tok")).toBeInTheDocument();
+
+        launchCostMock.mockResolvedValue(owned(5200));
+        mpsHub.handlers.get("memories:changed")?.({ event: "memories:changed" });
+        expect(await screen.findByText("Starts with ~5.2k tok")).toBeInTheDocument();
+    });
+
+    test("an agent whose launch doesn't deliver its Personal Memory says so on its card", async () => {
+        nativeMemoryListMock.mockResolvedValue({ files: [{ filename: "notes.md", tokens_est: 900 }] });
+        launchCostMock.mockResolvedValue({
+            agent_id: "a1", provider: "codex", startup_file: "AGENTS.md", delivered_by_file: true,
+            parts: [{ kind: "operator_config", name: "Operator Config", tokens_est: 4500, size_bytes: 18000, lines: 1, via: "startup_file" }],
+            total_tokens_est: 4500,
+        });
+        listAgentDefinitionsMock.mockResolvedValue([{ ...agent("a1", "Cody"), provider: "codex" } as AgentDefinition]);
+        render(() => <NativeMemoryManager />);
+        expect(await screen.findByText("Not delivered to Codex CLI agents")).toBeInTheDocument();
+        expect(screen.getByText("Cody").closest(".memory-agent-card")?.getAttribute("aria-label")).toBe(
+            "Cody — ~900 tok · 1 file — Not delivered to Codex CLI agents — Starts with ~4.5k tok"
+        );
+    });
+
+    test("coming back to the window refetches the launch costs (a startup file can change on disk)", async () => {
+        const cost = (tokens: number) => ({
+            agent_id: "a1", provider: "claude", startup_file: "CLAUDE.md", delivered_by_file: true,
+            parts: [{ kind: "operator_config", name: "Operator Config", tokens_est: tokens, size_bytes: tokens * 4, lines: 1, via: "startup_file" }],
+            total_tokens_est: tokens,
+        });
+        launchCostMock.mockResolvedValue(cost(4500));
+        listAgentDefinitionsMock.mockResolvedValue([agent("a1", "Manoz")]);
+        render(() => <NativeMemoryManager />);
+        expect(await screen.findByText("Starts with ~4.5k tok")).toBeInTheDocument();
+
+        launchCostMock.mockResolvedValue({ ...cost(4500), delivered_by_file: false });
+        window.dispatchEvent(new Event("focus"));
+        expect(await screen.findByText("Starts with ~0 tok")).toBeInTheDocument();
     });
 
     test("'Has memories' hides zero-count cards but never loading or error ones", async () => {
@@ -800,6 +926,24 @@ describe("NativeMemoryManager — file grid", () => {
         await waitFor(() => expect(document.querySelectorAll(".memory-file-card").length).toBe(files.length));
     }
 
+    test("a Claude agent's MEMORY.md past 200 lines says what Claude Code doesn't load", async () => {
+        await openAgentWithFiles([
+            fileMeta("MEMORY.md", { is_index: true, lines: 212 }),
+            fileMeta("notes.md", { lines: 900 }),
+        ]);
+        const badges = () => [...document.querySelectorAll(".memory-file-card-badge--warning")];
+        expect(badges().map((b) => b.textContent?.trim())).toEqual(["not all loaded"]);
+        expect(badges()[0].getAttribute("title")).toBe(
+            "Claude Code loads only the first 200 lines, up to 25 KB: lines 201–212 aren't loaded."
+        );
+    });
+
+    test("an index within the limit, or another provider's, carries no warning", async () => {
+        listAgentDefinitionsMock.mockResolvedValue([{ ...agent("a1", "Manoz"), provider: "codex" }]);
+        await openAgentWithFiles([fileMeta("MEMORY.md", { is_index: true, lines: 500, size_bytes: 40_000 })]);
+        expect(document.querySelector(".memory-file-card-badge--warning")).toBeNull();
+    });
+
     test("a folder found by a guess is badged unverified; the agent's own is not", async () => {
         nativeMemoryListMock.mockResolvedValue({ files: [fileMeta("MEMORY.md")], unverified: true });
         render(() => <NativeMemoryManager />);
@@ -810,6 +954,16 @@ describe("NativeMemoryManager — file grid", () => {
         fireEvent.click(await screen.findByText("AgentY"));
         await waitFor(() => expect(document.querySelectorAll(".memory-file-card").length).toBe(1));
         expect(screen.queryByText("Unverified folder")).toBeNull();
+    });
+
+    test("five files or more get a median, a p90 and the count over it; fewer get none", async () => {
+        await openAgentWithFiles([10, 20, 30, 40, 50, 60, 70, 80, 90, 4000].map((t, i) => fileMeta(`f${i}.md`, { tokens_est: t })));
+        expect(screen.getByTestId("memory-file-distribution")).toHaveTextContent(
+            "Per file: median ~55 tok, p90 ~90 tok · 1 file over p90"
+        );
+        cleanup();
+        await openAgentWithFiles([fileMeta("a.md"), fileMeta("b.md")]);
+        expect(screen.queryByTestId("memory-file-distribution")).toBeNull();
     });
 
     test("renders one tile per memory file instead of a dropdown", async () => {

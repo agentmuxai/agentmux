@@ -164,7 +164,7 @@ pub(crate) fn history(fs: &FileStore, scope: &str, entry_id: &str) -> Result<Vec
 /// Who wrote what an entry now holds: the latest version row, when it holds
 /// this content.
 fn attribution(store: &Store, id: &str, sha: &str) -> (String, String, String, String) {
-    let latest = store.bundle_version_list(id).ok().and_then(|v| v.into_iter().next());
+    let latest = store.bundle_version_latest(id).ok().flatten();
     match latest {
         Some(v) if v.content_hash == sha => (v.source, v.source_detail, v.written_by, v.written_by_uid),
         _ => ("agentmux".into(), String::new(), String::new(), String::new()),

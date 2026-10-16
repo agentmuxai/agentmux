@@ -9,7 +9,7 @@ mod template;
 mod identity;
 mod instance;
 mod session;
-mod bundle;
+pub(crate) mod bundle;
 mod bash_prefix;
 pub(crate) mod container_turn;
 pub(crate) mod input;

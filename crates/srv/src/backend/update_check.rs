@@ -11,9 +11,10 @@
 //! (`SPEC_FAST_STARTUP_UPGRADE_OWNS_MIGRATIONS_AND_UPDATES_2026_09_15.md` §5).
 //!
 //! The answer is kept here, sent to every window as the `app:updatestatus`
-//! event when it changes, and read on demand with `app.update-status`.
-//! Nothing is downloaded or installed: the status bar offers the release
-//! page. A local or dev build (`local-…`, `dev-…` channel) is not a
+//! event when it changes, and read on demand with `app.update-status`. It
+//! names the release file for this install (`update_install`) with the
+//! SHA-256 GitHub lists for it; `update_download` fetches it when the user
+//! asks, and its progress travels in the same status. A local or dev build (`local-…`, `dev-…` channel) is not a
 //! release, so it is never "behind"; it only reports which release is latest.
 
 use std::sync::{Arc, OnceLock};
@@ -21,6 +22,8 @@ use std::time::Duration;
 
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
+
+use crate::backend::update_install::InstallKind;
 
 /// The event every window gets when the status changes.
 pub const EVENT_APP_UPDATE_STATUS: &str = "app:updatestatus";
@@ -65,6 +68,56 @@ pub struct AppUpdateStatus {
     /// When the last check answered (unix ms), 0 before any.
     #[ts(type = "number")]
     pub checked_ms: i64,
+    /// How this AgentMux was installed (`update_install`): `windows-portable`,
+    /// `windows-setup`, `windows-store`, `macos-app`, `linux-appimage`,
+    /// `linux-portable`, `linux-package` or `unknown`.
+    #[serde(default)]
+    pub install: String,
+    /// The latest release's file for this install, when it has one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub asset: Option<ReleaseAsset>,
+    /// Whether AgentMux can download and stage that file itself; otherwise
+    /// the release page (or the Store) is the way.
+    #[serde(default)]
+    pub can_download: bool,
+    /// A download of the latest release, once one was asked for.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub download: Option<DownloadStatus>,
+}
+
+/// A release file, as GitHub lists it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct ReleaseAsset {
+    pub name: String,
+    #[ts(type = "number")]
+    pub size: u64,
+    pub url: String,
+    /// Lowercase hex.
+    pub sha256: String,
+}
+
+/// Where a download of a release stands.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct DownloadStatus {
+    /// The release being downloaded.
+    pub version: String,
+    /// `downloading`, `unpacking`, `ready` or `failed`.
+    pub state: String,
+    #[ts(type = "number")]
+    pub received: u64,
+    #[ts(type = "number")]
+    pub total: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub error: Option<String>,
+    /// When ready: the folder the new version is in.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub folder: Option<String>,
 }
 
 impl AppUpdateStatus {
@@ -77,6 +130,10 @@ impl AppUpdateStatus {
             notes: None,
             published_at: None,
             checked_ms: 0,
+            install: install_kind().label().to_string(),
+            asset: None,
+            can_download: false,
+            download: None,
         }
     }
 }
@@ -94,6 +151,32 @@ pub(crate) struct Release {
     draft: bool,
     #[serde(default)]
     prerelease: bool,
+    #[serde(default)]
+    assets: Vec<GithubAsset>,
+}
+
+/// A file attached to a GitHub release. `digest` is `sha256:<hex>`.
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct GithubAsset {
+    name: String,
+    size: u64,
+    browser_download_url: String,
+    #[serde(default)]
+    digest: Option<String>,
+}
+
+/// The release file `name`, if the release lists it with a SHA-256 and it is
+/// served from AgentMux's own releases.
+fn find_asset(release: &Release, name: &str) -> Option<ReleaseAsset> {
+    let a = release.assets.iter().find(|a| a.name == name)?;
+    let sha256 = a.digest.as_deref()?.strip_prefix("sha256:")?.to_ascii_lowercase();
+    if sha256.len() != 64 || !sha256.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return None;
+    }
+    if !a.browser_download_url.starts_with(crate::backend::update_download::RELEASE_DOWNLOAD_PREFIX) {
+        return None;
+    }
+    Some(ReleaseAsset { name: a.name.clone(), size: a.size, url: a.browser_download_url.clone(), sha256 })
 }
 
 /// `major.minor.patch` out of a version or tag (`v0.59.27`, `0.59.27+g1a2b`),
@@ -116,8 +199,9 @@ fn is_local_build(channel: &str) -> bool {
     channel.starts_with("local-") || channel.starts_with("dev-") || channel == "dev"
 }
 
-/// The status for a release GitHub reported, seen from `current` on `channel`.
-pub(crate) fn status_for(current: &str, channel: &str, release: &Release, now_ms: i64) -> AppUpdateStatus {
+/// The status for a release GitHub reported, seen from `current` on `channel`
+/// for an install of `kind`.
+pub(crate) fn status_for(current: &str, channel: &str, release: &Release, now_ms: i64, kind: &InstallKind) -> AppUpdateStatus {
     let latest = release.tag_name.trim().trim_start_matches('v').to_string();
     let state = if release.draft || release.prerelease {
         // `releases/latest` never returns these; treat one as no news.
@@ -138,18 +222,38 @@ pub(crate) fn status_for(current: &str, channel: &str, release: &Release, now_ms
         }
         b[..end].to_string()
     });
+    let asset = kind.asset_name(&latest, std::env::consts::ARCH).and_then(|n| find_asset(release, &n));
     AppUpdateStatus {
         state: state.to_string(),
         current: current.to_string(),
+        can_download: state == "available" && kind.can_download() && asset.is_some(),
         latest: Some(latest),
         url: Some(release.html_url.clone()),
         notes,
         published_at: release.published_at.clone(),
         checked_ms: now_ms,
+        install: kind.label().to_string(),
+        asset,
+        download: None,
     }
 }
 
 static STATUS: OnceLock<RwLock<AppUpdateStatus>> = OnceLock::new();
+static EVENT_BUS: OnceLock<Arc<crate::backend::eventbus::EventBus>> = OnceLock::new();
+static INSTALL_KIND: OnceLock<InstallKind> = OnceLock::new();
+
+/// How this AgentMux was installed, read once.
+pub(crate) fn install_kind() -> InstallKind {
+    INSTALL_KIND.get_or_init(crate::backend::update_install::detect).clone()
+}
+
+/// Record where a download stands and tell every window (`update_download`).
+pub(crate) fn set_download(download: Option<DownloadStatus>) {
+    let Some(bus) = EVENT_BUS.get() else { return };
+    let mut next = current_status();
+    next.download = download;
+    publish(bus, next);
+}
 
 /// What srv knows now (`app.update-status`).
 pub fn current_status() -> AppUpdateStatus {
@@ -182,6 +286,8 @@ async fn fetch_latest(client: &reqwest::Client) -> Result<Release, String> {
 pub fn spawn(config: Arc<crate::backend::wconfig::ConfigState>, event_bus: Arc<crate::backend::eventbus::EventBus>) {
     let current = env!("CARGO_PKG_VERSION");
     let _ = STATUS.set(RwLock::new(AppUpdateStatus::initial(current, check_enabled(&config))));
+    let _ = EVENT_BUS.set(event_bus.clone());
+    let kind = install_kind();
     let client = match reqwest::Client::builder()
         .user_agent(format!("AgentMux/{current}"))
         .timeout(REQUEST_TIMEOUT)
@@ -207,7 +313,7 @@ pub fn spawn(config: Arc<crate::backend::wconfig::ConfigState>, event_bus: Arc<c
                 last_asked = Some(std::time::Instant::now());
                 let channel = crate::backend::reactive::registry::local_channel_id();
                 let next = match fetch_latest(&client).await {
-                    Ok(release) => status_for(current, &channel, &release, agentmux_common::time::now_ms()),
+                    Ok(release) => status_for(current, &channel, &release, agentmux_common::time::now_ms(), &kind),
                     Err(e) => {
                         tracing::info!(error = %e, "update check: no answer, trying again later");
                         // Keep what an earlier check found; after "off", say "not checked yet".
@@ -223,10 +329,14 @@ pub fn spawn(config: Arc<crate::backend::wconfig::ConfigState>, event_bus: Arc<c
 }
 
 /// Keep `next` and tell every window when it changed.
-fn publish(event_bus: &crate::backend::eventbus::EventBus, next: AppUpdateStatus) {
+fn publish(event_bus: &crate::backend::eventbus::EventBus, mut next: AppUpdateStatus) {
     let Some(lock) = STATUS.get() else { return };
     let changed = {
         let mut cur = lock.write();
+        // A new check keeps a download of the release it still reports.
+        if next.download.is_none() && next.latest.is_some() && next.latest == cur.latest {
+            next.download = cur.download.clone();
+        }
         // The check time alone changing is not news to a window.
         let same = AppUpdateStatus { checked_ms: cur.checked_ms, ..next.clone() } == *cur;
         *cur = next.clone();
@@ -252,12 +362,13 @@ mod tests {
             published_at: Some("2026-10-15T10:28:48Z".into()),
             draft: false,
             prerelease: false,
+            assets: Vec::new(),
         }
     }
 
     #[test]
     fn a_newer_release_is_available_on_a_release_build() {
-        let s = status_for("0.59.26", "stable", &release("v0.59.27"), 5);
+        let s = status_for("0.59.26", "stable", &release("v0.59.27"), 5, &InstallKind::Unknown);
         assert_eq!(s.state, "available");
         assert_eq!(s.latest.as_deref(), Some("0.59.27"));
         assert_eq!(s.current, "0.59.26");
@@ -268,17 +379,17 @@ mod tests {
 
     #[test]
     fn the_same_or_an_older_release_is_up_to_date() {
-        assert_eq!(status_for("0.59.27", "stable", &release("v0.59.27"), 0).state, "up-to-date");
-        assert_eq!(status_for("0.60.0", "stable", &release("v0.59.27"), 0).state, "up-to-date");
+        assert_eq!(status_for("0.59.27", "stable", &release("v0.59.27"), 0, &InstallKind::Unknown).state, "up-to-date");
+        assert_eq!(status_for("0.60.0", "stable", &release("v0.59.27"), 0, &InstallKind::Unknown).state, "up-to-date");
         // Numbers, not text: 0.59.100 is newer than 0.59.27.
-        assert_eq!(status_for("0.59.27", "stable", &release("v0.59.100"), 0).state, "available");
-        assert_eq!(status_for("0.59.100", "stable", &release("v0.59.27"), 0).state, "up-to-date");
+        assert_eq!(status_for("0.59.27", "stable", &release("v0.59.100"), 0, &InstallKind::Unknown).state, "available");
+        assert_eq!(status_for("0.59.100", "stable", &release("v0.59.27"), 0, &InstallKind::Unknown).state, "up-to-date");
     }
 
     #[test]
     fn a_local_or_dev_build_only_reports_the_latest_release() {
         for channel in ["local-main-b28b7a-f62415cd", "dev-qtest-x-38b2af", "dev"] {
-            let s = status_for("0.59.26", channel, &release("v0.59.27"), 0);
+            let s = status_for("0.59.26", channel, &release("v0.59.27"), 0, &InstallKind::Unknown);
             assert_eq!(s.state, "local-build", "{channel}");
             assert_eq!(s.latest.as_deref(), Some("0.59.27"));
         }
@@ -286,11 +397,11 @@ mod tests {
 
     #[test]
     fn versions_that_dont_parse_are_never_called_newer() {
-        assert_eq!(status_for("0.59.26", "stable", &release("nightly"), 0).state, "unknown");
-        assert_eq!(status_for("weird", "stable", &release("v0.59.27"), 0).state, "unknown");
+        assert_eq!(status_for("0.59.26", "stable", &release("nightly"), 0, &InstallKind::Unknown).state, "unknown");
+        assert_eq!(status_for("weird", "stable", &release("v0.59.27"), 0, &InstallKind::Unknown).state, "unknown");
         let mut pre = release("v0.60.0-rc1");
         pre.prerelease = true;
-        assert_eq!(status_for("0.59.26", "stable", &pre, 0).state, "up-to-date");
+        assert_eq!(status_for("0.59.26", "stable", &pre, 0, &InstallKind::Unknown).state, "up-to-date");
         assert_eq!(version_core("v0.59.27+g1a2b"), Some((0, 59, 27)));
         assert_eq!(version_core("0.59"), None);
         assert_eq!(version_core("0.59.27.1"), None);
@@ -300,18 +411,56 @@ mod tests {
     fn long_notes_are_cut_on_a_character_boundary() {
         let mut r = release("v0.59.27");
         r.body = Some("é".repeat(MAX_NOTES_BYTES));
-        let notes = status_for("0.59.26", "stable", &r, 0).notes.unwrap();
+        let notes = status_for("0.59.26", "stable", &r, 0, &InstallKind::Unknown).notes.unwrap();
         assert!(notes.len() <= MAX_NOTES_BYTES);
         assert!(notes.chars().all(|c| c == 'é'));
     }
 
     #[test]
     fn the_status_reads_as_the_ui_expects() {
-        let s = status_for("0.59.26", "stable", &release("v0.59.27"), 7);
+        let s = status_for("0.59.26", "stable", &release("v0.59.27"), 7, &InstallKind::Unknown);
         let v = serde_json::to_value(&s).unwrap();
         assert_eq!(v["state"], "available");
         assert_eq!(v["checked_ms"], 7);
-        let off = serde_json::to_value(AppUpdateStatus::initial("0.59.26", false)).unwrap();
-        assert_eq!(off, serde_json::json!({ "state": "off", "current": "0.59.26", "checked_ms": 0 }));
+        let mut off = serde_json::to_value(AppUpdateStatus::initial("0.59.26", false)).unwrap();
+        off.as_object_mut().unwrap().remove("install");
+        assert_eq!(off, serde_json::json!({ "state": "off", "current": "0.59.26", "checked_ms": 0, "can_download": false }));
+    }
+
+    fn with_asset(mut r: Release, name: &str, digest: Option<&str>, url: &str) -> Release {
+        r.assets.push(GithubAsset {
+            name: name.into(),
+            size: 124_705_866,
+            browser_download_url: url.into(),
+            digest: digest.map(Into::into),
+        });
+        r
+    }
+
+    #[test]
+    fn a_portable_gets_its_release_file_with_github_s_checksum() {
+        let name = "agentmux-0.59.27-x64-portable.7z";
+        let url = format!("https://github.com/agentmuxai/agentmux/releases/download/v0.59.27/{name}");
+        let sha = "DB750E1689752519AD21B730436F783493C63B59AD734677A433E413C9B47F2A";
+        let kind = InstallKind::WindowsPortable { root: "C:/apps/agentmux".into() };
+        let r = with_asset(release("v0.59.27"), name, Some(&format!("sha256:{sha}")), &url);
+        let s = status_for("0.59.26", "stable", &r, 0, &kind);
+        assert_eq!(s.install, "windows-portable");
+        if std::env::consts::ARCH == "x86_64" {
+            let asset = s.asset.clone().unwrap();
+            assert_eq!(asset.sha256, sha.to_ascii_lowercase());
+            assert_eq!((asset.name.as_str(), asset.size), (name, 124_705_866));
+            assert!(s.can_download);
+        }
+        // Not newer: nothing to download.
+        assert!(!status_for("0.59.27", "stable", &r, 0, &kind).can_download);
+        // No checksum, or served from anywhere else: not offered.
+        let unsigned = with_asset(release("v0.59.27"), name, None, &url);
+        assert!(status_for("0.59.26", "stable", &unsigned, 0, &kind).asset.is_none());
+        let elsewhere = with_asset(release("v0.59.27"), name, Some(&format!("sha256:{sha}")), "https://example.com/x.7z");
+        assert!(status_for("0.59.26", "stable", &elsewhere, 0, &kind).asset.is_none());
+        // A kind AgentMux can't install itself still learns of the release.
+        let store = status_for("0.59.26", "stable", &r, 0, &InstallKind::WindowsStore);
+        assert_eq!((store.state.as_str(), store.can_download), ("available", false));
     }
 }

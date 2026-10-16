@@ -295,6 +295,7 @@ pub const COMMAND_GLOBAL_MEMORY_IMPORT: &str = "globalmemory:import";
 /// what memory reinjection re-delivers, Operator Config included
 /// (SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27.md §7 P1).
 pub const COMMAND_GLOBAL_MEMORY_SECTIONS: &str = "globalmemory:sections";
+pub const COMMAND_MEMORY_LAUNCH_COST: &str = "memory:launchcost";
 /// The frontend's hidden memory reinjection asks whether to deliver, or stand
 /// down because the `SessionStart` hook delivered the same event
 /// (SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27.md §7 P2).
@@ -483,6 +484,8 @@ pub const COMMAND_VIEWER_AGENT_HIDDEN: &str = "viewer.agent-hidden";
 pub const COMMAND_VIEWER_CAN_SEND: &str = "viewer.can-send";
 // What srv knows about newer AgentMux releases (backend::update_check).
 pub const COMMAND_APP_UPDATE_STATUS: &str = "app.update-status";
+// Download and stage the newer release (backend::update_download).
+pub const COMMAND_APP_UPDATE_DOWNLOAD: &str = "app.update-download";
 
 // The cloud presence publisher (muxbus::wan_presence): its state, and a try now.
 pub const COMMAND_PRESENCE_STATUS: &str = "presence.status";

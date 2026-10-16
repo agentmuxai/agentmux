@@ -786,6 +786,25 @@
     }
   },
   {
+    "command": "app.update-download",
+    "request": "core::option::Option<agentmux_srv::backend::rpc_types::websocket::NoArgsReq>",
+    "requestName": "core::option::Option<agentmux_srv::backend::rpc_types::websocket::NoArgsReq>",
+    "requestTs": {
+      "imports": [
+        "NoArgsReq"
+      ],
+      "name": "NoArgsReq | null"
+    },
+    "response": "agentmux_srv::backend::update_check::AppUpdateStatus",
+    "responseName": "AppUpdateStatus",
+    "responseTs": {
+      "imports": [
+        "AppUpdateStatus"
+      ],
+      "name": "AppUpdateStatus"
+    }
+  },
+  {
     "command": "app.update-status",
     "request": "core::option::Option<agentmux_srv::backend::rpc_types::websocket::NoArgsReq>",
     "requestName": "core::option::Option<agentmux_srv::backend::rpc_types::websocket::NoArgsReq>",
@@ -3948,6 +3967,25 @@
     "responseTs": {
       "imports": [],
       "name": "null"
+    }
+  },
+  {
+    "command": "memory:launchcost",
+    "request": "agentmux_srv::backend::rpc_types::native_memory::CommandMemoryLaunchCostData",
+    "requestName": "CommandMemoryLaunchCostData",
+    "requestTs": {
+      "imports": [
+        "CommandMemoryLaunchCostData"
+      ],
+      "name": "CommandMemoryLaunchCostData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::native_memory::LaunchCost",
+    "responseName": "LaunchCost",
+    "responseTs": {
+      "imports": [
+        "LaunchCost"
+      ],
+      "name": "LaunchCost"
     }
   },
   {

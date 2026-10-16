@@ -208,6 +208,42 @@ describe("GlobalBundleManager — tiles first", () => {
         expect(document.querySelector('[data-id="g-a"]')?.getAttribute("draggable")).toBeNull();
     });
 
+    test("the strip names the 3 largest entries' share, and the startup files that carry Global Memory", async () => {
+        listMemoriesMock.mockResolvedValue(["g-a", "g-b", "g-c", "g-d"].map((id) => bundle(id, id, id)));
+        sectionsMock.mockResolvedValue([section("g-a", 10), section("g-b", 60), section("g-c", 20), section("g-d", 10)]);
+        render(() => <GlobalBundleManager />);
+        await waitFor(() =>
+            expect(screen.getByTestId("global-memory-token-strip-top")).toHaveTextContent(
+                "The 3 largest entries are 90% of Global Memory"
+            )
+        );
+        const files = screen.getByTestId("global-memory-token-strip-files");
+        expect(files).toHaveTextContent(/^Sent in .*CLAUDE\.md.*AGENTS\.md.*, except to an agent whose startup file is its user's own/);
+        expect(files).toHaveTextContent(/not sent to Kimi.* \(no startup file\)$/);
+        expect(files.getAttribute("title")).toMatch(/^CLAUDE\.md: .*Claude Code/m);
+    });
+
+    test("no startup-file line while nothing is delivered, or srv hasn't said", async () => {
+        listMemoriesMock.mockResolvedValue([bundle("g-a", "Alpha", "a")]);
+        render(() => <GlobalBundleManager />);
+        await waitFor(() => expect(tileTitles()).toContain("Alpha"));
+        expect(screen.queryByTestId("global-memory-token-strip-files")).toBeNull();
+        cleanup();
+
+        sectionsMock.mockResolvedValue([]);
+        render(() => <GlobalBundleManager />);
+        await waitFor(() => expect(screen.getByTestId("global-memory-token-strip")).toHaveTextContent("~0 tok"));
+        expect(screen.queryByTestId("global-memory-token-strip-files")).toBeNull();
+    });
+
+    test("with no more than 3 entries there is no largest-entries line", async () => {
+        listMemoriesMock.mockResolvedValue([bundle("g-a", "Alpha", "a")]);
+        sectionsMock.mockResolvedValue([section("g-a", 10)]);
+        render(() => <GlobalBundleManager />);
+        await waitFor(() => expect(screen.getByTestId("global-memory-token-strip")).toHaveTextContent("~10 tok"));
+        expect(screen.queryByTestId("global-memory-token-strip-top")).toBeNull();
+    });
+
     test("without srv's figures the tiles still load, with no token chips", async () => {
         listMemoriesMock.mockResolvedValue([bundle("g-a", "Alpha", "hello")]);
         render(() => <GlobalBundleManager />);
