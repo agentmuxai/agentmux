@@ -382,6 +382,7 @@ mod tests {
             total: 1,
             error: None,
             folder: None,
+            installer: None,
             waiting_for: 0,
         });
         let Err(Outcome::Unavailable { message, .. }) = installable(&busy, None) else { panic!("expected unavailable") };

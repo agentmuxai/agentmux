@@ -116,10 +116,14 @@ pub struct DownloadStatus {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub error: Option<String>,
-    /// When ready: the folder the new version is in.
+    /// When ready, on a portable: the folder the new version is in.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub folder: Option<String>,
+    /// When ready, on a `setup.exe` install: the new version's installer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub installer: Option<String>,
     /// While `waiting`: how many agents are still in a turn.
     #[serde(default)]
     pub waiting_for: u32,

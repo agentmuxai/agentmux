@@ -15,9 +15,13 @@ version: string,
  */
 state: string, received: number, total: number, error?: string, 
 /**
- * When ready: the folder the new version is in.
+ * When ready, on a portable: the folder the new version is in.
  */
 folder?: string, 
+/**
+ * When ready, on a `setup.exe` install: the new version's installer.
+ */
+installer?: string, 
 /**
  * While `waiting`: how many agents are still in a turn.
  */
