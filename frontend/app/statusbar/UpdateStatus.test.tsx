@@ -214,6 +214,6 @@ describe("Maintenance on a setup.exe install", () => {
         expect(revealInFileExplorer).toHaveBeenCalledWith(installer);
         expect(openNativePath).not.toHaveBeenCalled();
         fireEvent.click(screen.getByRole("button", { name: "Upgrade & restart" }));
-        expect(upgradeRestart).toHaveBeenCalledWith(expect.anything(), { now: false });
+        expect(upgradeRestart).toHaveBeenCalledWith(false);
     });
 });
