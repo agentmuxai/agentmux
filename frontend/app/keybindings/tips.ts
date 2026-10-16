@@ -237,6 +237,15 @@ export const TIPS: TipRow[] = [
         label: "A click opens a preview tab, a double-click a tab that stays; F2 renames",
         source: { file: "frontend/app/view/editor/file-tree.tsx", anchor: "onDblClick={handleDblClick}" },
     },
+    {
+        // SPEC_EDITOR_TREE_KEYBOARD_ICONS_AND_CLICK_ZOOM_2026_10_16.md §5.2.
+        id: "editor:tree:keys",
+        area: "Editor",
+        gesture: "key:↑ / key:↓ / key:Enter / key:Space / key:Escape",
+        where: "in the editor's file tree",
+        label: "Previous / next row, previewing a file / open the file in a tab that stays and go to the editor / keep its tab / go to the editor; ← → close and open folders, Home, End and the Page keys jump, typing a name jumps to it",
+        source: { file: "frontend/app/view/editor/file-tree.tsx", anchor: "const move = treeMove(list, current, e.key, pageSize());" },
+    },
 
     // Library defaults (CodeMirror basicSetup), checked by hand on macOS,
     // Linux (#4651) and Windows (spec §10). Not code folding: the gutter is

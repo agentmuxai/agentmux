@@ -93,6 +93,7 @@ The same list is in the app: press F1, or open the Help pane. A terminal keeps e
 | Save as (scratch documents) | ⇧⌘S | Ctrl+Shift+S |
 | Find and replace | ⌘F | Ctrl+F |
 | Toggle markdown preview | ⇧⌘V | Ctrl+Shift+V |
+| Switch between the file tree and the editor | ⇧⌘E | Ctrl+Shift+E |
 
 ## Files
 
@@ -170,6 +171,7 @@ Gestures that aren't plain keys: modifier + mouse, double- and middle-click, dra
 | What it does | Where | macOS | Windows / Linux |
 |---|---|---|---|
 | A click opens a preview tab, a double-click a tab that stays; F2 renames | on a file in the editor's file tree | click or double-click | click or double-click |
+| Previous / next row, previewing a file / open the file in a tab that stays and go to the editor / keep its tab / go to the editor; ← → close and open folders, Home, End and the Page keys jump, typing a name jumps to it | in the editor's file tree | ↑ or ↓ or Enter or Space or Escape | ↑ or ↓ or Enter or Space or Escape |
 | Add another cursor | in an editor | ⌘ + click | Ctrl + click |
 | Make a column (block) selection | in an editor | ⌥ + drag | Alt + drag |
 | Select the next match of the selected text | in an editor | ⌘ + D | Ctrl + D |
