@@ -59,7 +59,7 @@ pub(crate) async fn handle_ui_run_command(
         return err_response(StatusCode::FORBIDDEN, format!("{} is not available to agents: {why}", req.command));
     }
     if req.command == "pane:close" {
-        return close_pane(&state, &req, &block_id).await;
+        return close_pane(&state, &req).await;
     }
     tracing::info!(agent_id = %req.auth.agent_id, block_id = %block_id, command = %req.command, "[ui-automation] run command");
     proxy_data(
@@ -92,21 +92,19 @@ pub(crate) async fn handle_ui_press_keys(
 }
 
 /// RunCommand `pane:close`: the pane named by `target`, closed the way
-/// ClosePane closes it (`app_api::pane::close_pane_as`). A pane the agent is
-/// in closes at once; another agent's pane waits 15 s for its user to keep
-/// it, and the answer says so. The key itself closes the focused pane at
-/// once, with no undo, so the page never runs it for MuxAPI.
-async fn close_pane(state: &AppState, req: &UiRunCommandRequest, own_block_id: &str) -> axum::response::Response {
+/// ClosePane closes it (`app_api::pane::close_pane_as`): it waits 15 s for
+/// its user to keep it, and the answer says so. The key itself closes the
+/// focused pane at once, with no undo, so the page never runs it for MuxAPI.
+async fn close_pane(state: &AppState, req: &UiRunCommandRequest) -> axum::response::Response {
     let Some(target) = req.target.as_deref().map(str::trim).filter(|t| !t.is_empty()) else {
         return err_response(
             StatusCode::BAD_REQUEST,
-            "pane:close needs `target`, the pane to close (another agent's pane gets the user's 15-second undo)".to_string(),
+            "pane:close needs `target`, the pane to close (the user gets 15 seconds to keep it)".to_string(),
         );
     };
     let (code, body) = crate::server::app_api::pane::close_pane_as(
         state,
         &req.auth.agent_id,
-        own_block_id,
         target,
         Some("UI command pane:close"),
         "UI command",
@@ -117,7 +115,7 @@ async fn close_pane(state: &AppState, req: &UiRunCommandRequest, own_block_id: &
         StatusCode::ACCEPTED => Json(json!({ "ok": true, "data": {
             "ran": false,
             "pending": body,
-            "reason": "it's another agent's pane: its user has 15 seconds to keep it, and it closes after that unless they do",
+            "reason": "its user has 15 seconds to keep it, and it closes after that unless they do",
         } }))
         .into_response(),
         _ => err_response(code, body.get("error").and_then(|e| e.as_str()).unwrap_or("close failed").to_string()),

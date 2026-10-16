@@ -9,6 +9,7 @@
 use super::*;
 
 mod accounts;
+mod agents_tool;
 mod browser;
 mod browser_tool;
 mod cron;
@@ -16,11 +17,13 @@ mod family;
 mod fleet;
 mod global_memory;
 mod history;
+mod identity_tool;
 mod loops;
 mod memory;
 mod memory_tool;
 mod open_prs;
 mod overlap;
+mod pane_tool;
 mod panes;
 mod presence_tool;
 mod presets;
@@ -28,10 +31,12 @@ mod pty_shell;
 mod schedule_tool;
 mod send_files;
 mod shell;
+mod stop_tool;
 mod tasks_tool;
 mod terminal;
 mod ui;
 mod ui_tool;
+mod widget_tool;
 mod widgets;
 mod work;
 
@@ -160,6 +165,25 @@ const REPLACED: &[(&str, &str)] = &[
     ("Loop", "Schedule with action \"create\" and every"),
     ("LoopList", "Schedule with action \"list\""),
     ("LoopStop", "Schedule with action \"delete\""),
+    ("WhoAmI", "Pane with action \"whoami\""),
+    ("Layout", "Pane with action \"layout\""),
+    ("OpenEditor", "Pane with action \"open\" and view \"editor\""),
+    ("OpenMedia", "Pane with action \"open\" and view \"media\""),
+    ("OpenFiles", "Pane with action \"open\" and view \"files\""),
+    ("NewTab", "Pane with action \"new_tab\""),
+    ("SetActiveTab", "Pane with action \"activate_tab\""),
+    ("FocusWindow", "Pane with action \"focus_window\""),
+    ("SetName", "Pane with action \"rename\""),
+    ("QuitSelf", "Stop with action \"self\""),
+    ("FleetBulkStop", "Stop with action \"agents\""),
+    ("ClosePane", "Stop with action \"pane\" (and block_id; to end your own session, action \"self\")"),
+    ("WidgetList", "Widget with action \"list\""),
+    ("WidgetInstall", "Widget with action \"install\""),
+    ("OpenWidget", "Widget with action \"open\""),
+    ("PresetList", "Identity with action \"presets\""),
+    ("PresetGet", "Identity with action \"preset\""),
+    ("IdentityAccounts", "Identity with action \"accounts\""),
+    ("IdentityValidate", "Identity with action \"validate\""),
 ];
 
 /// Try each family in turn; the first that owns `name` answers.
@@ -174,8 +198,9 @@ pub(crate) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
     }
     route!(
         terminal,
-        panes,
-        fleet,
+        pane_tool,
+        stop_tool,
+        agents_tool,
         history,
         presence_tool,
         ui_tool,
@@ -183,9 +208,8 @@ pub(crate) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
         schedule_tool,
         tasks_tool,
         memory_tool,
-        presets,
-        accounts,
-        widgets
+        identity_tool,
+        widget_tool
     );
     if let Some((_, instead)) = REPLACED.iter().find(|(old, _)| *old == name) {
         anyhow::bail!("{name} was replaced: use {instead}");
@@ -199,33 +223,38 @@ mod tests {
 
     /// Families `call` routes to: each of their tools is advertised.
     const FAMILIES: &[(&str, &str)] = &[
-        ("accounts", include_str!("accounts.rs")),
+        ("agents_tool", include_str!("agents_tool.rs")),
         ("browser_tool", include_str!("browser_tool.rs")),
-        ("fleet", include_str!("fleet.rs")),
         ("history", include_str!("history.rs")),
+        ("identity_tool", include_str!("identity_tool.rs")),
         ("memory_tool", include_str!("memory_tool.rs")),
+        ("pane_tool", include_str!("pane_tool.rs")),
         ("presence_tool", include_str!("presence_tool.rs")),
-        ("panes", include_str!("panes.rs")),
-        ("presets", include_str!("presets.rs")),
         ("schedule_tool", include_str!("schedule_tool.rs")),
+        ("stop_tool", include_str!("stop_tool.rs")),
         ("tasks_tool", include_str!("tasks_tool.rs")),
         ("terminal", include_str!("terminal.rs")),
         ("ui_tool", include_str!("ui_tool.rs")),
-        ("widgets", include_str!("widgets.rs")),
+        ("widget_tool", include_str!("widget_tool.rs")),
     ];
 
     /// Families a family tool calls into, never routed to: their names are
     /// not advertised, and each is in `REPLACED`.
     const INTERNAL: &[(&str, &str)] = &[
+        ("accounts", include_str!("accounts.rs")),
         ("browser", include_str!("browser.rs")),
         ("cron", include_str!("cron.rs")),
+        ("fleet", include_str!("fleet.rs")),
         ("global_memory", include_str!("global_memory.rs")),
         ("loops", include_str!("loops.rs")),
         ("memory", include_str!("memory.rs")),
         ("overlap", include_str!("overlap.rs")),
+        ("panes", include_str!("panes.rs")),
+        ("presets", include_str!("presets.rs")),
         ("pty_shell", include_str!("pty_shell.rs")),
         ("shell", include_str!("shell.rs")),
         ("ui", include_str!("ui.rs")),
+        ("widgets", include_str!("widgets.rs")),
         ("work", include_str!("work.rs")),
     ];
 

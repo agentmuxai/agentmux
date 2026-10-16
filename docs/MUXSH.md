@@ -43,7 +43,7 @@ pane environment. No new IPC, no new auth scheme.
 ## `open` / `web` / `view` / `edit`
 
 Thin wrappers over `POST /api/v1/pane/open` — the same route the frontend and
-the `OpenEditor` MCP tool use.
+the `Pane` MCP tool's `open` action uses.
 
 - **`open <file>`** — editor pane.
 - **`web <url>`** — browser pane.
@@ -142,14 +142,14 @@ code (not assumed from the docs) — see
 [`docs/specs/SPEC_MUXSH_FULL_COLLECTION_2026_09_16.md`](specs/SPEC_MUXSH_FULL_COLLECTION_2026_09_16.md) §5.5/§5.6 for the full
 account:
 
-- **`pane close`** — the real route (`ClosePane`) requires an HMAC signature
+- **`pane close`** — the real route (`Stop` with action `pane`) requires an HMAC signature
   from the calling *agent's own* `AGENTMUX_JEKT_KEY`, a credential only
   injected into `agentmux-mcp`'s spawn environment for a specific registered
   agent — never into a terminal pane's environment. `muxsh` structurally
   cannot produce a valid signature for an identity it isn't. The unsigned
   mechanism the frontend itself uses for "click X on a tab" (`DeleteBlock`,
   a WebSocket RPC) has no REST route yet.
-- **`secret list`** — the real route (`IdentityAccounts`) is scoped to a
+- **`secret list`** — the real route (`Identity` with action `accounts`) is scoped to a
   specific registered *agent*, not to "whoever is running this terminal."
   There's no coherent default answer to "which agent's accounts" from a bare
   shell.

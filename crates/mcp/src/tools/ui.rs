@@ -29,7 +29,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 .await
                 .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
             Ok(format!(
-                "Screenshot saved to {} — use Read on that path to view it yourself, or OpenMedia to show it to the user.",
+                "Screenshot saved to {} — use Read on that path to view it yourself, or Pane (action \"open\", view \"media\") to show it to the user.",
                 result.path
             ))
         }

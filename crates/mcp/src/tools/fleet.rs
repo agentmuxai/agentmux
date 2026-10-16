@@ -1,7 +1,9 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Agent-to-agent messaging and fleet operations.
+//! Agent-to-agent messaging and fleet operations. Not routed to directly:
+//! `Stop` (stop_tool.rs) calls FleetBulkStop by its old name, and the rest
+//! pass through agents_tool.rs.
 
 use super::*;
 
