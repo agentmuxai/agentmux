@@ -2109,7 +2109,6 @@ export const GeneratedApi = {
       | "accounts"
       | "container_image"
       | "container_volumes"
-      | "auto_continue_enabled"
       | "model_vendor_base_url"
     > &
       Partial<
@@ -2128,7 +2127,6 @@ export const GeneratedApi = {
           | "accounts"
           | "container_image"
           | "container_volumes"
-          | "auto_continue_enabled"
           | "model_vendor_base_url"
         >
       >,

@@ -2,9 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Shared audit-log fetch, sourced from ReactiveHandler's ring buffer
-// (crates/srv/src/backend/reactive/handler.rs). Imported by both the
-// Audit manager (shows everything) and the Supervisor manager (shows only
-// Supervisor-originated rows, filtered client-side on `outcome`).
+// (crates/srv/src/backend/reactive/handler.rs), for the Audit manager.
 
 import { authHeaders } from "@/app/store/auth-headers";
 import { getWebServerEndpoint } from "@/util/endpoints";
@@ -21,19 +19,17 @@ export interface AuditEntry {
     success: boolean;
     error_message?: string;
     request_id: string;
-    /** "nudge_sent" | "nudge_failed" | "nudge_declined" — present only for
-     *  Supervisor-originated entries; absent for ordinary jekt entries.
-     *  "nudge_sent" only when delivery actually succeeded; "nudge_failed"
-     *  when a nudge was attempted but delivery itself failed (see
-     *  `success`/`error_message`). Mirrors AuditLogEntry.outcome
-     *  (crates/srv/src/backend/reactive/types.rs). */
+    /** What kind of delivery this was when it wasn't an ordinary jekt
+     *  ("held_delivered", "held_retry", "identity-mismatch",
+     *  "system_note"); absent for an ordinary jekt. Mirrors
+     *  AuditLogEntry.outcome (crates/srv/src/backend/reactive/types.rs). */
     outcome?: string;
-    /** Supervisor's stated reasoning, populated alongside `outcome`. */
+    /** A caller's free-text note on a fleet or pane action (e.g. ClosePane's
+     *  `reason`). */
     reason?: string;
     /** "delivery" (default, the only kind this feed shows) | "register" |
      *  "unregister" — the latter two are agent registration/eviction
-     *  bookkeeping (issue #2694), not a jekt delivery or Supervisor
-     *  decision, and are filtered out of this feed by `fetchWardenAudit`
+     *  bookkeeping (issue #2694), not a jekt delivery, and are filtered out of this feed by `fetchWardenAudit`
      *  below rather than rendered as misleading blank "ok" rows. Surfaced
      *  in the Stash "Registration" tab instead (issue #2696), the
      *  purpose-built surface for registration/eviction history. */
@@ -59,9 +55,8 @@ export async function fetchWardenAudit(): Promise<AuditEntry[]> {
     const data = await resp.json();
     const entries = Array.isArray(data) ? (data as AuditEntry[]) : [];
     // register/unregister entries (issue #2694) are registration
-    // bookkeeping, not a jekt delivery or Supervisor decision — this feed's
-    // rows assume an outcome-less entry is an ordinary delivery (message
-    // bytes, success/fail), so an unfiltered register/unregister row would
+    // bookkeeping, not a jekt delivery — this feed's rows assume an entry
+    // is a delivery (message bytes, success/fail), so an unfiltered register/unregister row would
     // render as a misleading blank "ok, 0b" line. `undefined` passes
     // through too: back-compat with any entry predating this field, which
     // is always a delivery.

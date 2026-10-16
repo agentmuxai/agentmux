@@ -46,6 +46,6 @@ container_volumes?: string,
  * branch). `Some(url)` sets it, rejected at define-time unless the
  * resolved provider declares `ProviderConfig::base_url_env_var`.
  * Mirrors the existing `Option<T>` = "don't touch" idiom already used
- * by `CommandUpdateAgentDefinitionData::auto_continue_enabled`.
+ * by `CommandUpdateAgentDefinitionData::model_vendor_base_url`.
  */
 model_vendor_base_url?: string, };

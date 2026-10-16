@@ -155,7 +155,7 @@ pub struct CommandAgentDefineData {
     /// branch). `Some(url)` sets it, rejected at define-time unless the
     /// resolved provider declares `ProviderConfig::base_url_env_var`.
     /// Mirrors the existing `Option<T>` = "don't touch" idiom already used
-    /// by `CommandUpdateAgentDefinitionData::auto_continue_enabled`.
+    /// by `CommandUpdateAgentDefinitionData::model_vendor_base_url`.
     #[serde(default)]
     #[ts(optional)]
     pub model_vendor_base_url: Option<String>,
@@ -558,20 +558,10 @@ pub struct CommandUpdateAgentDefinitionData {
     /// JSON array of volume mount specs. Empty array (`"[]"`) for host agents.
     #[serde(default = "default_container_volumes")]
     pub container_volumes: String,
-    /// Per-agent opt-in letting a Warden Supervisor watcher agent
-    /// auto-continue this agent's session on turn-end (0/1). `None`
-    /// (omitted) preserves the stored value — callers that only edit
-    /// name/icon/accounts don't carry it. Toggled from the Warden
-    /// Supervisor panel. See
-    /// docs/analysis/ANALYSIS_WARDEN_AUTO_CONTROLLER_CONTINUATION_WATCHER_2026_08_12.md.
-    #[serde(default)]
-    #[ts(type = "number | null")]
-    pub auto_continue_enabled: Option<i64>,
     /// Custom model vendor base URL override — see
     /// `AgentDefinition.model_vendor_base_url`. `None` (omitted) preserves
-    /// the stored value, same "None = don't touch" idiom as
-    /// `auto_continue_enabled` above. `Some("")`
-    /// explicitly clears an existing override back to the harness's
+    /// the stored value (callers that only edit name/icon/accounts don't
+    /// carry it). `Some("")` explicitly clears an existing override back to the harness's
     /// default vendor endpoint. Validated the same way `agent.define`
     /// does — see `agent_define::validate_vendor_base_url`.
     #[serde(default)]

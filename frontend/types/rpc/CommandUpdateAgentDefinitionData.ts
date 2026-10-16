@@ -18,20 +18,10 @@ container_image: string,
  */
 container_volumes: string, 
 /**
- * Per-agent opt-in letting a Warden Supervisor watcher agent
- * auto-continue this agent's session on turn-end (0/1). `None`
- * (omitted) preserves the stored value — callers that only edit
- * name/icon/accounts don't carry it. Toggled from the Warden
- * Supervisor panel. See
- * docs/analysis/ANALYSIS_WARDEN_AUTO_CONTROLLER_CONTINUATION_WATCHER_2026_08_12.md.
- */
-auto_continue_enabled: number | null, 
-/**
  * Custom model vendor base URL override — see
  * `AgentDefinition.model_vendor_base_url`. `None` (omitted) preserves
- * the stored value, same "None = don't touch" idiom as
- * `auto_continue_enabled` above. `Some("")`
- * explicitly clears an existing override back to the harness's
+ * the stored value (callers that only edit name/icon/accounts don't
+ * carry it). `Some("")` explicitly clears an existing override back to the harness's
  * default vendor endpoint. Validated the same way `agent.define`
  * does — see `agent_define::validate_vendor_base_url`.
  */

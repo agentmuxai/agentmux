@@ -133,9 +133,6 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     // Not settable via this RPC yet — only `agent.define`
                     // (the App-API/MCP path) can set a model vendor override.
                     model_vendor_base_url: String::new(),
-                    // Opt-in required. Toggled from the Warden Supervisor
-                    // panel (not this RPC) once that ships.
-                    auto_continue_enabled: 0,
                     memory_id: String::new(),
                     conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
                 };
@@ -245,11 +242,6 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     // Inert; carried over unchanged (see the field's doc).
                     use_ambient_login: old.use_ambient_login,
                     model_vendor_base_url: chosen_model_vendor_base_url,
-                    // Preserve the auto-continue opt-in when the caller omits
-                    // the field (Option — most callers only edit name/icon/
-                    // accounts). The Warden Supervisor panel sends Some(0|1)
-                    // to flip it.
-                    auto_continue_enabled: cmd.auto_continue_enabled.unwrap_or(old.auto_continue_enabled),
                     // Immutable post-insert, same as slug/parent_id/branch_label
                     // above — agent_def_update's SET clause doesn't even
                     // touch this column, but the in-memory struct still
@@ -457,7 +449,6 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     container_name: String::new(),
                     use_ambient_login: 0,
                     model_vendor_base_url: String::new(),
-                    auto_continue_enabled: 0,
                     memory_id: String::new(),
                     conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
                 };
@@ -583,7 +574,6 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         container_name: String::new(),
                         use_ambient_login: 0,
                         model_vendor_base_url: String::new(),
-                        auto_continue_enabled: 0,
                         memory_id: String::new(),
                         conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
                     };
@@ -774,7 +764,6 @@ mod tests {
             container_volumes: "[]".to_string(),
             container_name: String::new(),
             use_ambient_login: 0,
-            auto_continue_enabled: 0,
             model_vendor_base_url: String::new(),
             memory_id: bundle_id.to_string(),
         };

@@ -2099,9 +2099,8 @@ fn test_handler_audit_log() {
     assert!(!log[0].success);
 }
 
-/// Ordinary jekt injections (the only path that runs today) always leave
-/// `outcome`/`reason` unset — those fields exist only for Warden Supervisor
-/// entries, added via `log_audit`'s two new trailing params.
+/// Ordinary jekt injections always leave `outcome`/`reason` unset — those
+/// label held, refused and system-note deliveries and fleet/pane actions.
 #[test]
 fn test_handler_audit_log_ordinary_jekt_has_no_outcome() {
     let mut handler = Handler::new();
@@ -2131,9 +2130,8 @@ fn test_handler_audit_log_ordinary_jekt_has_no_outcome() {
     assert!(log[0].reason.is_none());
 }
 
-/// `log_audit`'s new outcome/reason params, when set, land in the
-/// resulting entry — this is the path `record_supervisor_decision` (a
-/// follow-up PR) will call.
+/// `log_audit`'s outcome/reason params, when set, land in the resulting
+/// entry.
 #[test]
 fn test_log_audit_stores_outcome_and_reason_when_provided() {
     let mut handler = Handler::new();
@@ -2141,21 +2139,18 @@ fn test_log_audit_stores_outcome_and_reason_when_provided() {
         None,
         "agent1",
         "block1",
-        "continue",
+        "pane.close",
         true,
         None,
         "req-1",
-        Some("nudge_sent"),
-        Some("agent paused asking for permission to continue"),
+        Some("system_note"),
+        Some("the pane stopped rendering"),
     );
 
     let log = handler.get_audit_log(10);
     assert_eq!(log.len(), 1);
-    assert_eq!(log[0].outcome.as_deref(), Some("nudge_sent"));
-    assert_eq!(
-        log[0].reason.as_deref(),
-        Some("agent paused asking for permission to continue"),
-    );
+    assert_eq!(log[0].outcome.as_deref(), Some("system_note"));
+    assert_eq!(log[0].reason.as_deref(), Some("the pane stopped rendering"));
 }
 
 /// `AuditLogEntry`'s new fields must round-trip through serde and, per the
@@ -2174,8 +2169,8 @@ fn test_audit_log_entry_outcome_field_serde_roundtrip() {
         success: true,
         error_message: None,
         request_id: "req-1".to_string(),
-        outcome: Some("nudge_declined".to_string()),
-        reason: Some("consecutive-nudge ceiling reached".to_string()),
+        outcome: Some("held_retry".to_string()),
+        reason: Some("the pane stopped rendering".to_string()),
         event_kind: "delivery".to_string(),
         evicted_block: None,
         evicted_agent: None,
@@ -2184,10 +2179,10 @@ fn test_audit_log_entry_outcome_field_serde_roundtrip() {
         wan: None,
     };
     let json = serde_json::to_value(&with_outcome).unwrap();
-    assert_eq!(json["outcome"], "nudge_declined");
-    assert_eq!(json["reason"], "consecutive-nudge ceiling reached");
+    assert_eq!(json["outcome"], "held_retry");
+    assert_eq!(json["reason"], "the pane stopped rendering");
     let round_tripped: AuditLogEntry = serde_json::from_value(json).unwrap();
-    assert_eq!(round_tripped.outcome.as_deref(), Some("nudge_declined"));
+    assert_eq!(round_tripped.outcome.as_deref(), Some("held_retry"));
 
     let without_outcome = AuditLogEntry {
         outcome: None,
@@ -2221,263 +2216,6 @@ fn test_handler_audit_log_ring_buffer() {
     assert_eq!(log.len(), AUDIT_LOG_MAX);
     // Most recent first
     assert_eq!(log[0].request_id, "req-109");
-}
-
-// -- Warden Supervisor decision tests --
-
-/// A `Decline` decision must log exactly one audit entry (`nudge_declined`)
-/// and must not attempt any delivery — no input sender is configured at
-/// all, so a delivery attempt would panic/error, not just be a no-op.
-#[test]
-fn test_record_supervisor_decision_decline_logs_one_entry_no_delivery() {
-    let mut handler = Handler::new();
-    handler.register_agent("agent1", "block1", None).unwrap();
-
-    let resp = handler
-        .record_supervisor_decision(
-            "agent1",
-            SupervisorAction::Decline,
-            "target looks genuinely done, not just pausing",
-            "req-1",
-            Some("warden-supervisor"),
-            "",
-        )
-        .expect("decline never fails");
-
-    assert!(resp.success);
-    assert_eq!(resp.block_id.as_deref(), Some("block1"));
-
-    // register_agent's own setup call above now also audits a "register"
-    // event (event_kind), so filter to the decision's own delivery entry.
-    let log: Vec<_> = handler
-        .get_audit_log(10)
-        .into_iter()
-        .filter(|e| e.event_kind == "delivery")
-        .collect();
-    assert_eq!(log.len(), 1);
-    assert_eq!(log[0].outcome.as_deref(), Some("nudge_declined"));
-    assert_eq!(
-        log[0].reason.as_deref(),
-        Some("target looks genuinely done, not just pausing")
-    );
-}
-
-/// A failed delivery (no input sender configured) must be audited as
-/// `nudge_failed`, not `nudge_sent` — and must NOT consume the
-/// consecutive-nudge ceiling, since nothing was actually delivered
-/// (reagentx P2 on PR #2557, round 2).
-#[tokio::test]
-async fn test_record_supervisor_decision_nudge_failure_is_audited_and_not_counted() {
-    let mut handler = Handler::new();
-    // Deliberately no `set_input_sender` — delivery will fail with
-    // "input sender not configured".
-    handler.register_agent("agent1", "block1", None).unwrap();
-
-    let resp = handler
-        .record_supervisor_decision(
-            "agent1",
-            SupervisorAction::Nudge,
-            "target looks stalled",
-            "req-fail-1",
-            Some("warden-supervisor"),
-            "",
-        )
-        .expect("a failed delivery is still Ok — it's not a ceiling refusal");
-    assert!(!resp.success);
-
-    // register_agent's own setup call above now also audits a "register"
-    // event (event_kind), so filter to the decision's own delivery entry.
-    let log: Vec<_> = handler
-        .get_audit_log(10)
-        .into_iter()
-        .filter(|e| e.event_kind == "delivery")
-        .collect();
-    assert_eq!(log.len(), 1);
-    assert_eq!(log[0].outcome.as_deref(), Some("nudge_failed"));
-    assert!(!log[0].success);
-
-    // Wire up a working sender and confirm the full ceiling is still
-    // available — the failed attempt above must not have consumed any of
-    // it.
-    handler.set_input_sender(Arc::new(|_block_id: &str, _data: &[u8]| Ok(())));
-    for i in 0..MAX_CONSECUTIVE_AUTO_CONTINUES {
-        let resp = handler
-            .record_supervisor_decision(
-                "agent1",
-                SupervisorAction::Nudge,
-                "still making progress",
-                &format!("req-ok-{i}"),
-                Some("warden-supervisor"),
-                "",
-            )
-            .unwrap_or_else(|e| panic!("nudge {i} should not hit the ceiling: {e}"));
-        assert!(resp.success);
-    }
-}
-
-/// `MAX_CONSECUTIVE_AUTO_CONTINUES` nudges to the same target succeed; the
-/// next one is refused with the ceiling error and logs a `nudge_declined`
-/// entry instead of attempting delivery.
-#[tokio::test]
-async fn test_record_supervisor_decision_nudge_ceiling() {
-    let mut handler = Handler::new();
-    handler.set_input_sender(Arc::new(|_block_id: &str, _data: &[u8]| Ok(())));
-    handler.register_agent("agent1", "block1", None).unwrap();
-
-    for i in 0..MAX_CONSECUTIVE_AUTO_CONTINUES {
-        let resp = handler
-            .record_supervisor_decision(
-                "agent1",
-                SupervisorAction::Nudge,
-                "still making progress",
-                &format!("req-{i}"),
-                Some("warden-supervisor"),
-                "",
-            )
-            .unwrap_or_else(|e| panic!("nudge {i} should not hit the ceiling yet: {e}"));
-        assert!(resp.success);
-    }
-
-    let err = handler
-        .record_supervisor_decision(
-            "agent1",
-            SupervisorAction::Nudge,
-            "still making progress",
-            "req-over",
-            Some("warden-supervisor"),
-            "",
-        )
-        .expect_err("the next nudge must be refused");
-    assert_eq!(err, "consecutive-nudge ceiling reached");
-
-    let log = handler.get_audit_log(20);
-    let ceiling_entry = log
-        .iter()
-        .find(|e| e.request_id == "req-over")
-        .expect("the declined attempt must still be audited");
-    assert_eq!(ceiling_entry.outcome.as_deref(), Some("nudge_declined"));
-    assert_eq!(
-        ceiling_entry.reason.as_deref(),
-        Some("consecutive-nudge ceiling reached")
-    );
-    // Every prior nudge must have actually been delivered (nudge_sent), not
-    // silently declined early.
-    let sent_count = log.iter().filter(|e| e.outcome.as_deref() == Some("nudge_sent")).count();
-    assert_eq!(sent_count as u32, MAX_CONSECUTIVE_AUTO_CONTINUES);
-}
-
-/// A respawn (new `registration_nonce`) resets the consecutive-nudge
-/// counter — "consecutive" only makes sense within one continuous run, so a
-/// fresh spawn of the same agent name must not inherit the prior run's
-/// nudge count.
-#[tokio::test]
-async fn test_record_supervisor_decision_nudge_ceiling_resets_on_new_registration_nonce() {
-    let mut handler = Handler::new();
-    handler.set_input_sender(Arc::new(|_block_id: &str, _data: &[u8]| Ok(())));
-    handler
-        .register_agent_with_nonce("agent1", "block1", None, 1, None)
-        .unwrap();
-
-    for i in 0..MAX_CONSECUTIVE_AUTO_CONTINUES {
-        handler
-            .record_supervisor_decision(
-                "agent1",
-                SupervisorAction::Nudge,
-                "still making progress",
-                &format!("req-{i}"),
-                Some("warden-supervisor"),
-                "",
-            )
-            .unwrap_or_else(|e| panic!("nudge {i} should not hit the ceiling yet: {e}"));
-    }
-    assert!(
-        handler
-            .record_supervisor_decision(
-                "agent1",
-                SupervisorAction::Nudge,
-                "still making progress",
-                "req-over",
-                Some("warden-supervisor"),
-                "",
-            )
-            .is_err(),
-        "ceiling must be hit before the respawn"
-    );
-
-    // Respawn: same agent name, new nonce.
-    handler
-        .register_agent_with_nonce("agent1", "block1", None, 2, None)
-        .unwrap();
-
-    let resp = handler
-        .record_supervisor_decision(
-            "agent1",
-            SupervisorAction::Nudge,
-            "fresh run, target paused again",
-            "req-after-respawn",
-            Some("warden-supervisor"),
-            "",
-        )
-        .expect("a fresh registration_nonce must reset the ceiling");
-    assert!(resp.success);
-}
-
-/// PTY/shell and HTTP-register paths always register with
-/// `registration_nonce: 0` ("not recorded") — nonce equality alone can
-/// never detect a respawn for them (0 == 0 every time). A relaunch into a
-/// new pane (new block_id) must still reset the ceiling — this is the P1
-/// reagentx flagged on PR #2557 (nonce-only reset silently never fired for
-/// the common PTY case).
-#[tokio::test]
-async fn test_record_supervisor_decision_nudge_ceiling_resets_on_new_block_id_when_nonce_is_zero() {
-    let mut handler = Handler::new();
-    handler.set_input_sender(Arc::new(|_block_id: &str, _data: &[u8]| Ok(())));
-    // register_agent (not _with_nonce) always passes nonce 0 — the PTY/HTTP
-    // register path this test is guarding.
-    handler.register_agent("agent1", "block1", None).unwrap();
-
-    for i in 0..MAX_CONSECUTIVE_AUTO_CONTINUES {
-        handler
-            .record_supervisor_decision(
-                "agent1",
-                SupervisorAction::Nudge,
-                "still making progress",
-                &format!("req-{i}"),
-                Some("warden-supervisor"),
-                "",
-            )
-            .unwrap_or_else(|e| panic!("nudge {i} should not hit the ceiling yet: {e}"));
-    }
-    assert!(
-        handler
-            .record_supervisor_decision(
-                "agent1",
-                SupervisorAction::Nudge,
-                "still making progress",
-                "req-over",
-                Some("warden-supervisor"),
-                "",
-            )
-            .is_err(),
-        "ceiling must be hit before the relaunch"
-    );
-
-    // Relaunch: same agent name, closed and reopened in a NEW pane — a
-    // different block_id, still nonce 0 (PTY path never records a real
-    // nonce).
-    handler.register_agent("agent1", "block2", None).unwrap();
-
-    let resp = handler
-        .record_supervisor_decision(
-            "agent1",
-            SupervisorAction::Nudge,
-            "fresh run in a new pane, target paused again",
-            "req-after-relaunch",
-            Some("warden-supervisor"),
-            "",
-        )
-        .expect("a new block_id must reset the ceiling even though nonce stayed 0");
-    assert!(resp.success);
 }
 
 // -- Poller tests --
@@ -2705,8 +2443,7 @@ fn injection_request_sig_verified_cannot_be_set_from_the_wire() {
 // -- Host-tier sender verification (SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md §2.2) --
 //
 // `sig_verified` is set by `handle_reactive_inject` (server/reactive.rs), not
-// by `Handler` itself ("no Store access by design" — see
-// `record_supervisor_decision`'s doc comment) — these tests exercise
+// by `Handler` itself (no Store access by design) — these tests exercise
 // `Handler::inject_message`'s own reaction to that pre-computed signal
 // directly, the same way the HTTP layer would hand it off after doing its
 // own key lookup + verification.
@@ -4002,32 +3739,6 @@ async fn an_attributed_delivery_audits_its_sender_uid_and_only_its_own() {
     }))
     .unwrap();
     assert_eq!(forged.audit_source_uid, "", "a body can never set it");
-
-    handler
-        .record_supervisor_decision("m4c2d-nobody", SupervisorAction::Decline, "done", "req-d", None, "uid-sup")
-        .unwrap();
-    let last = handler.get_audit_log(1).pop().unwrap();
-    assert_eq!(last.outcome.as_deref(), Some("nudge_declined"));
-    assert_eq!(last.audit_source_uid, "uid-sup");
-
-    // Nudges up to the ceiling and the refusal past it (ReAgent P1 on
-    // #3608): every entry carries the Supervisor's UID, and nothing after.
-    handler.set_input_sender(Arc::new(|_: &str, _: &[u8]| Ok(())));
-    handler.register_agent("m4c2d-nudged", "m4c2d-nudged-block", None).unwrap();
-    let mut refused = false;
-    for i in 0..=MAX_CONSECUTIVE_AUTO_CONTINUES + 1 {
-        let r = handler.record_supervisor_decision(
-            "m4c2d-nudged", SupervisorAction::Nudge, "stalled", &format!("req-n{i}"), None, "uid-sup",
-        );
-        refused |= r.is_err();
-    }
-    assert!(refused, "the ceiling was reached");
-    let entries = handler.get_audit_log(AUDIT_LOG_MAX);
-    let nudges: Vec<_> = entries.iter().filter(|e| e.request_id.starts_with("req-n")).collect();
-    assert!(nudges.iter().any(|e| e.reason.as_deref() == Some("consecutive-nudge ceiling reached")));
-    assert!(nudges.iter().all(|e| e.audit_source_uid == "uid-sup"), "{nudges:?}");
-    handler.inject_message(InjectionRequest { audit_source_uid: String::new(), ..attributed });
-    assert_eq!(handler.get_audit_log(1)[0].audit_source_uid, "", "restored after the decision");
 }
 
 /// Durable jekt §2.4: a held message is delivered with the verdict it was

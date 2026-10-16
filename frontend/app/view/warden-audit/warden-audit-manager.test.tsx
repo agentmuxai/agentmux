@@ -5,8 +5,7 @@
  * Regression test for reagent P1 / codex P2 on PR #3196: a fleet-action
  * audit entry's caller-supplied `reason` (e.g. ClosePane's cross-pane
  * `reason` field) never rendered, because the reason `<Show>` required
- * `entry.outcome != null` — a condition written for Supervisor-nudge
- * entries specifically. Fleet actions always have `outcome: undefined`, so
+ * `entry.outcome != null`. Fleet actions always have `outcome: undefined`, so
  * their reason silently fell through to the error-message branch instead.
  */
 
@@ -73,19 +72,19 @@ describe("WardenAuditManager — fleet-action reason display", () => {
         });
     });
 
-    it("still prioritizes outcome-gated Supervisor rendering when outcome IS set", async () => {
+    it("shows a delivery's size and status whatever its outcome", async () => {
         mockFetchWardenAudit.mockResolvedValue([
             entry({
                 success: true,
-                outcome: "nudge_sent",
-                reason: "target looked stalled",
+                outcome: "held_delivered",
+                message_length: 42,
             }),
         ]);
         render(() => <WardenAuditManager />);
 
         await waitFor(() => {
-            expect(screen.getByText("target looked stalled")).toBeInTheDocument();
-            expect(screen.getByText("nudged")).toBeInTheDocument();
+            expect(screen.getByText("42b")).toBeInTheDocument();
+            expect(screen.getByText("ok")).toBeInTheDocument();
         });
     });
 });
