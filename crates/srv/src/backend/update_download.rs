@@ -9,7 +9,8 @@
 //! must match the SHA-256 GitHub lists for it. Nothing here names a URL or a
 //! file of its own, and nothing is installed: a Windows portable release is
 //! unpacked into a new folder next to the running one, ready for the launcher
-//! to start (phase 3b). Progress and the result go out as the
+//! to start (phase 3b); a `setup.exe` install's installer is kept, verified,
+//! in this version's `updates/<version>/`, for the launcher to run (phase 3d). Progress and the result go out as the
 //! `app:updatestatus` event (`update_check`).
 //!
 //! The download is kept in `updates/<version>/` in this version's data folder
@@ -77,7 +78,19 @@ impl Received {
     }
 }
 
-fn set(version: &str, state: &str, received: u64, total: u64, error: Option<String>, folder: Option<&Path>) {
+/// What a download leaves ready: a portable's new folder, or an installer.
+enum Staged<'a> {
+    None,
+    Folder(&'a Path),
+    Installer(&'a Path),
+}
+
+fn set(version: &str, state: &str, received: u64, total: u64, error: Option<String>, staged: Staged) {
+    let (folder, installer) = match staged {
+        Staged::None => (None, None),
+        Staged::Folder(f) => (Some(f), None),
+        Staged::Installer(i) => (None, Some(i)),
+    };
     update_check::set_download(Some(DownloadStatus {
         version: version.to_string(),
         state: state.to_string(),
@@ -85,6 +98,7 @@ fn set(version: &str, state: &str, received: u64, total: u64, error: Option<Stri
         total,
         error,
         folder: folder.map(|f| f.display().to_string()),
+        installer: installer.map(|i| i.display().to_string()),
         waiting_for: 0,
     }));
 }
@@ -99,11 +113,16 @@ pub fn start() -> Result<AppUpdateStatus, String> {
     if status.state != "available" || !status.can_download {
         return Err("AgentMux can't download this release itself; use the release page".into());
     }
-    let InstallKind::WindowsPortable { root } = update_check::install_kind() else {
-        return Err("AgentMux can't download this release itself; use the release page".into());
+    // A portable's new folder goes beside the running one; a setup.exe
+    // install's installer is kept as is.
+    let portable_root = match update_check::install_kind() {
+        InstallKind::WindowsPortable { root } => Some(root),
+        InstallKind::WindowsSetup => None,
+        _ => return Err("AgentMux can't download this release itself; use the release page".into()),
     };
     if let Some(d) = &status.download {
-        let staged = d.folder.as_deref().is_some_and(|f| is_staged_portable(Path::new(f), &version));
+        let staged = d.folder.as_deref().is_some_and(|f| is_staged_portable(Path::new(f), &version))
+            || d.installer.as_deref().is_some_and(|i| is_staged_installer(Path::new(i), &asset));
         if d.version == version && matches!(d.state.as_str(), "ready" | "waiting" | "restarting") && staged {
             return Ok(status);
         }
@@ -111,26 +130,40 @@ pub fn start() -> Result<AppUpdateStatus, String> {
     if RUNNING.swap(true, Ordering::SeqCst) {
         return Ok(status);
     }
-    set(&version, "downloading", 0, asset.size, None, None);
+    set(&version, "downloading", 0, asset.size, None, Staged::None);
     tokio::spawn(async move {
-        let result = run(&asset, &version, &root).await;
+        let result = match &portable_root {
+            Some(root) => run(&asset, &version, root).await.map(|f| (f, true)),
+            None => run_installer(&asset, &version).await.map(|i| (i, false)),
+        };
         RUNNING.store(false, Ordering::SeqCst);
         match result {
-            Ok(folder) => {
-                tracing::info!(folder = %folder.display(), "update: {version} is ready");
-                set(&version, "ready", asset.size, asset.size, None, Some(&folder));
+            Ok((path, folder)) => {
+                tracing::info!(path = %path.display(), "update: {version} is ready");
+                let staged = if folder { Staged::Folder(&path) } else { Staged::Installer(&path) };
+                set(&version, "ready", asset.size, asset.size, None, staged);
             }
             Err(e) => {
                 tracing::warn!(error = %e, "update: downloading {version} failed");
-                set(&version, "failed", 0, asset.size, Some(e), None);
+                set(&version, "failed", 0, asset.size, Some(e), Staged::None);
             }
         }
     });
     Ok(update_check::current_status())
 }
 
+/// `updates/` in this version's data folder: `AGENTMUX_DATA_DIR`, the very
+/// folder the launcher checks a staged installer against
+/// (`crates/launcher/src/upgrade_restart.rs`), not a root of srv's own.
+fn updates_root() -> PathBuf {
+    agentmux_common::DataPaths::from_env()
+        .map(|p| p.data_dir)
+        .unwrap_or_else(crate::backend::base::get_mux_data_dir)
+        .join("updates")
+}
+
 async fn run(asset: &ReleaseAsset, version: &str, root: &Path) -> Result<PathBuf, String> {
-    let updates = crate::backend::base::get_mux_data_dir().join("updates");
+    let updates = updates_root();
     remove_abandoned_downloads(&updates).await;
     let dir = updates.join(version);
     tokio::fs::create_dir_all(&dir).await.map_err(|e| format!("can't create {}: {e}", dir.display()))?;
@@ -139,7 +172,7 @@ async fn run(asset: &ReleaseAsset, version: &str, root: &Path) -> Result<PathBuf
         let _ = tokio::fs::remove_file(&file).await;
         return Err(e);
     }
-    set(version, "unpacking", asset.size, asset.size, None, None);
+    set(version, "unpacking", asset.size, asset.size, None, Staged::None);
     // Next to the running folder, so it's where the user expects; under
     // this version's `updates/` when that folder's parent can't be written.
     let mut last = String::new();
@@ -158,6 +191,65 @@ async fn run(asset: &ReleaseAsset, version: &str, root: &Path) -> Result<PathBuf
     // Nothing more can be done with it; a later download fetches it again.
     let _ = tokio::fs::remove_file(&file).await;
     Err(last)
+}
+
+/// The installer's name in `updates/<version>/` once verified: the release's.
+fn installer_path(dir: &Path, asset: &ReleaseAsset) -> PathBuf {
+    dir.join(&asset.name)
+}
+
+/// Whether `path` is that release's installer, whole.
+fn is_staged_installer(path: &Path, asset: &ReleaseAsset) -> bool {
+    path.file_name().is_some_and(|n| n == asset.name.as_str())
+        && std::fs::metadata(path).is_ok_and(|m| m.is_file() && m.len() == asset.size)
+}
+
+/// Whether the file at `path` hashes to the release's digest. A file found
+/// already in place is only reused if it does: the name and size alone say
+/// nothing about who wrote it.
+fn has_release_digest(path: &Path, asset: &ReleaseAsset) -> bool {
+    let Ok(mut file) = std::fs::File::open(path) else { return false };
+    let mut hasher = Sha256::new();
+    std::io::copy(&mut file, &mut hasher).is_ok() && hex::encode(hasher.finalize()).eq_ignore_ascii_case(&asset.sha256)
+}
+
+/// [`is_staged_installer`], and whole by its digest too; off the async threads.
+async fn is_verified_installer(path: &Path, asset: &ReleaseAsset) -> bool {
+    if !is_staged_installer(path, asset) {
+        return false;
+    }
+    let (path, asset) = (path.to_path_buf(), asset.clone());
+    tokio::task::spawn_blocking(move || has_release_digest(&path, &asset)).await.unwrap_or(false)
+}
+
+/// Download a `setup.exe` install's installer into `updates/<version>/`,
+/// verified, under the release's own name: what the launcher runs.
+async fn run_installer(asset: &ReleaseAsset, version: &str) -> Result<PathBuf, String> {
+    let updates = updates_root();
+    remove_abandoned_downloads(&updates).await;
+    let dir = updates.join(version);
+    tokio::fs::create_dir_all(&dir).await.map_err(|e| format!("can't create {}: {e}", dir.display()))?;
+    let target = installer_path(&dir, asset);
+    // Downloaded before, or by another AgentMux meanwhile.
+    if is_verified_installer(&target, asset).await {
+        return Ok(target);
+    }
+    let file = dir.join(format!("{}-{}", std::process::id(), asset.name));
+    if let Err(e) = download(asset, &file, version).await {
+        let _ = tokio::fs::remove_file(&file).await;
+        return Err(e);
+    }
+    match tokio::fs::rename(&file, &target).await {
+        Ok(()) => Ok(target),
+        Err(_) if is_verified_installer(&target, asset).await => {
+            let _ = tokio::fs::remove_file(&file).await;
+            Ok(target)
+        }
+        Err(e) => {
+            let _ = tokio::fs::remove_file(&file).await;
+            Err(format!("can't put the installer in place: {e}"))
+        }
+    }
 }
 
 async fn download(asset: &ReleaseAsset, dest: &Path, version: &str) -> Result<(), String> {
@@ -192,7 +284,7 @@ async fn download(asset: &ReleaseAsset, dest: &Path, version: &str) -> Result<()
             let percent = received.bytes * 100 / asset.size.max(1);
             if percent != shown {
                 shown = percent;
-                set(version, "downloading", received.bytes, asset.size, None, None);
+                set(version, "downloading", received.bytes, asset.size, None, Staged::None);
             }
         }
         out.flush().await.map_err(|e| e.to_string())?;
@@ -249,15 +341,18 @@ async fn abandoned(e: &tokio::fs::DirEntry) -> bool {
 }
 
 /// Download files (each run's `<pid>-<file>` and its `.part`) left in
-/// `updates/<version>/` by runs that were cut short. Folders are kept: one
-/// may be a release staged there when its portable's folder couldn't be
-/// written, and unpacking folders are `remove_stale_partials`' job.
+/// `updates/<version>/` by runs that were cut short. Only those: a verified
+/// installer waiting there for its restart is kept, and so are folders (a
+/// release staged there when its portable's folder couldn't be written;
+/// unpacking folders are `remove_stale_partials`' job).
 async fn remove_abandoned_downloads(updates: &Path) {
+    let pid_prefixed = |name: &str| name.split_once('-').is_some_and(|(pid, _)| !pid.is_empty() && pid.bytes().all(|b| b.is_ascii_digit()));
     let Ok(mut versions) = tokio::fs::read_dir(updates).await else { return };
     while let Ok(Some(v)) = versions.next_entry().await {
         let Ok(mut files) = tokio::fs::read_dir(v.path()).await else { continue };
         while let Ok(Some(f)) = files.next_entry().await {
-            if f.file_type().await.is_ok_and(|t| t.is_file()) && abandoned(&f).await {
+            let named = pid_prefixed(&f.file_name().to_string_lossy());
+            if named && f.file_type().await.is_ok_and(|t| t.is_file()) && abandoned(&f).await {
                 let _ = tokio::fs::remove_file(f.path()).await;
             }
         }
@@ -335,6 +430,25 @@ mod tests {
     use super::*;
 
     #[test]
+    fn an_installer_found_in_place_is_reused_only_if_it_hashes_right() {
+        let dir = tempfile::tempdir().unwrap();
+        let data = b"agentmux installer bytes";
+        let asset = ReleaseAsset {
+            name: "AgentMux-0.59.27-x64-setup.exe".into(),
+            size: data.len() as u64,
+            url: String::new(),
+            sha256: hex::encode(Sha256::digest(data)),
+        };
+        let path = dir.path().join(&asset.name);
+        std::fs::write(&path, data).unwrap();
+        assert!(is_staged_installer(&path, &asset) && has_release_digest(&path, &asset));
+        // The same name and size, other bytes.
+        std::fs::write(&path, b"agentmux installer BYTES").unwrap();
+        assert!(is_staged_installer(&path, &asset) && !has_release_digest(&path, &asset));
+        assert!(!has_release_digest(&dir.path().join("missing.exe"), &asset));
+    }
+
+    #[test]
     fn only_the_exact_file_github_lists_is_accepted() {
         let data = b"agentmux release bytes";
         let sha = hex::encode(Sha256::digest(data));
@@ -367,6 +481,9 @@ mod tests {
         let updates = tempfile::tempdir().unwrap();
         let dir = updates.path().join("0.59.27");
         std::fs::create_dir_all(dir.join("agentmux-0.59.27-x64-portable")).unwrap();
+        // A verified installer waits here for its restart, however long.
+        let installer = dir.join("AgentMux-0.59.27-x64-setup.exe");
+        std::fs::write(&installer, b"x").unwrap();
         let age = |p: &Path, secs: u64| {
             let t = std::time::SystemTime::now() - Duration::from_secs(secs);
             std::fs::File::options().write(true).open(p).unwrap().set_modified(t).unwrap();
@@ -377,9 +494,11 @@ mod tests {
         std::fs::write(&live, b"x").unwrap();
         age(&old, 2 * 60 * 60);
         age(&live, 5);
+        age(&installer, 2 * 60 * 60);
         remove_abandoned_downloads(updates.path()).await;
         assert!(!old.exists());
         assert!(live.exists());
+        assert!(installer.exists());
         assert!(dir.join("agentmux-0.59.27-x64-portable").is_dir());
     }
 
