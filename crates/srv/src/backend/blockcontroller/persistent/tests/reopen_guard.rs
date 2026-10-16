@@ -55,6 +55,30 @@ async fn a_session_live_in_another_pane_is_not_resumed_twice() {
     assert!(reopen.inner.lock().unwrap().current_pid.is_none(), "no second process");
 }
 
+/// A quick fork of a running agent: its launch carries `--fork-session`, so it
+/// reads the parent's session and writes its own, and is no second process on
+/// the parent's transcript. It starts while the parent is live.
+#[tokio::test]
+async fn a_launch_that_forks_starts_while_its_parent_is_live() {
+    let sid = format!("sid-{}", uuid::Uuid::new_v4());
+    let live_block = format!("live-{}", uuid::Uuid::new_v4());
+    let live = controller(&live_block, None);
+    {
+        let mut g = live.inner.lock().unwrap();
+        g.session_id = Some(sid.clone());
+        g.current_pid = Some(4242);
+    }
+    crate::backend::blockcontroller::register_controller(&live_block, live.clone());
+
+    let fork = controller(&format!("fork-{}", uuid::Uuid::new_v4()), None);
+    let mut config = resume_config(&sid);
+    config.cli_args.push("--fork-session".to_string());
+    let result = fork.send_message(MSG.to_string(), config);
+    crate::backend::blockcontroller::delete_controller(&live_block);
+
+    assert!(result.is_ok(), "a fork is not a second copy of the parent: {result:?}");
+}
+
 #[tokio::test]
 async fn a_session_whose_process_is_still_closing_is_not_resumed_yet() {
     let store = Arc::new(Store::open_in_memory().unwrap());

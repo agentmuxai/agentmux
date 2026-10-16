@@ -113,15 +113,19 @@ impl PersistentSubprocessController {
         // seconds a close takes) and tries again. Covers every reopen path
         // (picker reattach, launch modal, MCP), not just `agent.open`
         // (SPEC_AGENT_PANE_CLOSE_GRACEFUL_SHUTDOWN_2026_09_18.md §4.7).
-        // A spawn that forks (the resume gate placed a copy, or the session
-        // grew outside AgentMux) reads the session and writes a new one, so a
+        // A spawn that forks reads the session and writes a new one, so a
         // live process on it is no conflict: a fork started while its parent
-        // runs (the fork-isolation report in #4744, F5).
+        // runs (the fork-isolation report in #4744, F5). It forks when the
+        // resume gate placed a copy, when the session grew outside AgentMux,
+        // or when the launch itself asks to: a quick fork from the picker
+        // carries `--fork-session` in its own args, and was refused here
+        // while its parent ran.
+        let launch_forks = config.cli_args.iter().any(|a| a == "--fork-session");
         let requested_sid = if config.resume_flag.is_empty() {
             None
         } else {
             let inner = self.inner.lock().unwrap();
-            if inner.fork_copy.is_some() || inner.fork_next { None } else { inner.session_id.clone() }
+            if inner.fork_copy.is_some() || inner.fork_next || launch_forks { None } else { inner.session_id.clone() }
         };
         // Check and claim must be one step: the check reads other
         // controllers' `current_pid`, which a concurrent resume of the same
