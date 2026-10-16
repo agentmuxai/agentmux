@@ -617,6 +617,8 @@ cef::wrap_task! {
                 registered,
                 draining
             );
+            // Kept for the next start's notice: the user sees no window now.
+            crate::commands::incidents::quit_no_window();
             cef::quit_message_loop();
         }
     }

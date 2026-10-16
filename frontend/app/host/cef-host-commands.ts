@@ -262,6 +262,8 @@ export const cefHostMisc = {
         await invokeCommand("set_taskbar_attention", { label: windowLabel, count, input_count: inputCount });
     },
     takeBackgroundAudit: () => invokeCommand<unknown>("background_audit_take", {}),
+    listIncidents: () => invokeCommand<unknown>("incidents_list", {}),
+    acknowledgeIncident: (id: string) => invokeCommand<unknown>("incident_acknowledge", { id }),
 } satisfies Partial<AppApi>;
 
 /** This window's label, as set by the host on its startup URL (`?windowLabel=`). */

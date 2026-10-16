@@ -264,6 +264,8 @@ async function initHostMux(): Promise<void> {
             const { surfaceBackgroundAudit } = await import("@/app/init/background-audit");
             await surfaceBackgroundAudit();
         })();
+        // What AgentMux recovered from, until the user closes it (SPEC_RECOVERY_NOTICES_AND_TOASTS §4.2).
+        void import("@/app/init/incidents").then(({ surfaceIncidents }) => surfaceIncidents());
 
         benchDump(); // emit full startup timeline to log
 
@@ -407,6 +409,8 @@ async function initHostNewWindow(seedView?: string | null, seedMeta?: Record<str
             const { surfaceBackgroundAudit } = await import("@/app/init/background-audit");
             await surfaceBackgroundAudit();
         })();
+        // What AgentMux recovered from, until the user closes it (SPEC_RECOVERY_NOTICES_AND_TOASTS §4.2).
+        void import("@/app/init/incidents").then(({ surfaceIncidents }) => surfaceIncidents());
 
     } catch (error) {
         const described = describeError(error);
