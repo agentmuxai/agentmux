@@ -289,7 +289,8 @@ fn binary_mime(kind: &str, head: &[u8], ext: Option<&str>) -> &'static str {
         ("audio", Some("wav")) => "audio/wav",
         ("audio", Some("flac")) => "audio/flac",
         ("audio", Some("ogg") | Some("oga") | Some("opus")) => "audio/ogg",
-        ("audio", Some("m4a") | Some("aac")) => "audio/mp4",
+        ("audio", Some("m4a")) => "audio/mp4",
+        ("audio", Some("aac")) => "audio/aac",
         ("audio", _) if head.starts_with(b"ID3") => "audio/mpeg",
         ("audio", _) if head.starts_with(b"fLaC") => "audio/flac",
         ("audio", _) if head.starts_with(b"OggS") => "audio/ogg",
@@ -393,6 +394,9 @@ mod tests {
         assert_eq!(p(b"RIFF\x24\0\0\0WAVEfmt ", None).kind, "audio");
         assert_eq!(p(b"\0\0\0\x20ftypisom\0\0\x02\0", Some("mp4")).kind, "video");
         assert_eq!(p(b"\0\0\0\x20ftypM4A \0\0\x02\0", Some("m4a")).kind, "audio");
+        // Raw ADTS AAC isn't an MP4 container: Chromium wants audio/aac.
+        let adts = p(&[0xff, 0xf1, 0x50, 0x80, 0x02, 0x1f, 0xfc], Some("aac"));
+        assert_eq!((adts.kind, adts.mime), ("audio", "audio/aac"));
     }
 
     #[test]
