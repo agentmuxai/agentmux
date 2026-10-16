@@ -91,15 +91,28 @@ export const MarkdownBlock = (props: MarkdownBlockProps): JSX.Element => {
     // The agent's own text: local images may show inline (agent-media.tsx).
     const media = useAgentMedia();
 
+    let wasDormant = false;
     createEffect(() => {
         const text = props.node.content; // dep: re-runs on each streamed update
         if (dormant()) {
             // Don't leave a trailing render armed to paint an invisible pane.
             if (trailing) clearTimeout(trailing);
+            wasDormant = true;
             return;
         }
         const now = performance.now();
         if (trailing) clearTimeout(trailing);
+        if (wasDormant) {
+            // Shown again: what arrived meanwhile is drawn once, settled, rather
+            // than drawn and then drawn again highlighted a moment later, which
+            // changed the row's height twice
+            // (SPEC_AGENT_PANE_NO_CATCH_UP_MOTION_2026_10_15.md §3.3).
+            wasDormant = false;
+            streaming = false;
+            lastCommitAt = now;
+            setView({ text, streaming: false });
+            return;
+        }
         if (now - lastCommitAt >= STREAM_RENDER_MS) {
             // Leading edge: cheap intermediate (open tail un-highlighted
             // mid-stream). The first update after a settle is not yet known to
