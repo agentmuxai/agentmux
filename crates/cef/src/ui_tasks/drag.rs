@@ -397,20 +397,21 @@ wrap_task! {
                 //      here; that was not enough (the pipeline spans several
                 //      frames) and the bug survived. Hence a real delay.
                 //
-                //      Floaters are excluded for the same reason they're
-                //      excluded from the snap itself (SPEC §2.4): they are
-                //      borderless WS_POPUPs with no native maximize placement
-                //      — `toggle_floating_maximize` manages their geometry
-                //      through the reducer instead, so SW_RESTORE here would
-                //      desync that state.
-                if !self.after_unmaximize
-                    && !self
-                        .source_label
-                        .as_deref()
-                        .unwrap_or("main")
-                        .starts_with("floating-")
-                    {
-                    if let Some((max_left, max_top, max_width)) = begin_unmaximize_for_drag(h) {
+                //      Floaters are borderless WS_POPUPs with no native
+                //      maximize placement: `toggle_floating_maximize` manages
+                //      their geometry through the reducer, so SW_RESTORE here
+                //      would desync that state. They restore through the
+                //      reducer instead (`begin_unmaximize_floater_for_drag`),
+                //      then take the same settle delay and placement.
+                //      SPEC_FLOATING_PANE_WINDOW_CONTROLS_REFINEMENTS_2026_10_16 §4.4.
+                if !self.after_unmaximize {
+                    let source = self.source_label.as_deref().unwrap_or("main");
+                    let restored = if source.starts_with("floating-") {
+                        begin_unmaximize_floater_for_drag(&self.state, source, h)
+                    } else {
+                        begin_unmaximize_for_drag(h)
+                    };
+                    if let Some((max_left, max_top, max_width)) = restored {
                         let mut task = Win32BeginMoveTask::new(
                             self.hwnd,
                             self.state.clone(),
@@ -856,6 +857,53 @@ unsafe fn begin_unmaximize_for_drag(
         h, UNMAXIMIZE_SETTLE_MS
     );
     Some((maximized.left, maximized.top, maximized.right - maximized.left))
+}
+
+/// [`begin_unmaximize_for_drag`] for a FLOATING pane: restore it through the
+/// pane-state reducer, not `SW_RESTORE`, because a floater's maximize is the
+/// reducer's own geometry (`toggle_floating_maximize`). Sizes the window back
+/// to its pre-maximize size (the reducer's stashed rect; half the maximized
+/// size if none was stashed) without moving it: the caller places it under
+/// the cursor after the settle delay. Tells the floater's page, whose
+/// Maximize/Restore button shows the placement. `None`, and nothing done,
+/// when the floater isn't maximized.
+#[cfg(target_os = "windows")]
+unsafe fn begin_unmaximize_floater_for_drag(
+    state: &Arc<AppState>,
+    label: &str,
+    h: windows_sys::Win32::Foundation::HWND,
+) -> Option<(i32, i32, i32)> {
+    use windows_sys::Win32::Foundation::RECT;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        GetWindowRect, SetWindowPos, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOZORDER,
+    };
+
+    let mut maximized: RECT = std::mem::zeroed();
+    if GetWindowRect(h, &mut maximized) == 0 {
+        return None;
+    }
+    let out = state.host_dispatch(crate::reducer::HostCommand::RestoreFloatingForDrag { label: label.to_string() });
+    let restore_rect = out.events.iter().find_map(|e| match e {
+        crate::reducer::HostEvent::PaneWindowStateChanged { restore_rect, .. } => Some(*restore_rect),
+        _ => None,
+    })?; // no event: it wasn't maximized
+    let max_w = maximized.right - maximized.left;
+    let max_h = maximized.bottom - maximized.top;
+    let (w, h_px) = restore_rect
+        .map(|r| (r.right - r.left, r.bottom - r.top))
+        .filter(|&(w, hh)| w > 0 && hh > 0)
+        .unwrap_or((max_w / 2, max_h / 2));
+    SetWindowPos(h, std::ptr::null_mut(), 0, 0, w, h_px, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+    crate::events::emit_event_to_top_level_windows(
+        state,
+        "floating_placement_changed",
+        &serde_json::json!({ "label": label, "placement": "normal" }),
+    );
+    tracing::info!(
+        "[start_window_drag] restoring maximized floater for drag label={} {}x{} — settling {}ms",
+        label, w, h_px, UNMAXIMIZE_SETTLE_MS
+    );
+    Some((maximized.left, maximized.top, max_w))
 }
 
 /// Place a just-restored window under the CURRENT cursor, using the

@@ -539,6 +539,14 @@ pub enum HostCommand {
     /// co-eviction in the `browser_panes` arms — floaters aren't in
     /// `browser_panes`.
     EvictFloatingPaneWindowState { label: String },
+    /// Restore a MAXIMIZED floater because its header is being dragged
+    /// (SPEC_FLOATING_PANE_WINDOW_CONTROLS_REFINEMENTS_2026_10_16 §4.4).
+    /// `Maximized → Normal`, handing back the stashed normal rect as
+    /// `PaneWindowStateChanged.restore_rect`, exactly like the toggle's way
+    /// down. Anything else (Normal, Minimized, no entry) is a no-op that
+    /// emits nothing, so the caller can tell "was maximized" from the event.
+    #[cfg(any(target_os = "windows", test))]
+    RestoreFloatingForDrag { label: String },
     /// Set a floater's "Always on top" (header tack) flag
     /// (SPEC_FLOATING_PANE_ALWAYS_ON_TOP_2026_09_27). Pure: records it in
     /// `pane_window_states[label].always_on_top` and emits
@@ -675,6 +683,11 @@ impl std::fmt::Debug for HostCommand {
                 .finish(),
             HostCommand::EvictFloatingPaneWindowState { label } => f
                 .debug_struct("EvictFloatingPaneWindowState")
+                .field("label", label)
+                .finish(),
+            #[cfg(any(target_os = "windows", test))]
+            HostCommand::RestoreFloatingForDrag { label } => f
+                .debug_struct("RestoreFloatingForDrag")
                 .field("label", label)
                 .finish(),
             #[cfg(any(target_os = "windows", test))]
@@ -1101,7 +1114,7 @@ fn is_quit_relevant(cmd: &HostCommand) -> bool {
         | HostCommand::SeedBackgroundUnattended { .. }
         | HostCommand::SetStartHiddenHeld { .. } => false,
         #[cfg(any(target_os = "windows", test))]
-        HostCommand::SetFloatingAlwaysOnTop { .. } => false,
+        HostCommand::SetFloatingAlwaysOnTop { .. } | HostCommand::RestoreFloatingForDrag { .. } => false,
         #[cfg(any(target_os = "windows", test))]
         HostCommand::BindWindowHwnd { .. } | HostCommand::EvictWindowHwnd { .. } => false,
         #[cfg(target_os = "windows")]
@@ -1198,6 +1211,8 @@ pub fn update(state: &mut HostState, cmd: HostCommand) -> DispatchOutput {
         HostCommand::EvictFloatingPaneWindowState { label } => {
             pane_window::handle_evict_floating_pane_window_state(state, label)
         }
+        #[cfg(any(target_os = "windows", test))]
+        HostCommand::RestoreFloatingForDrag { label } => pane_window::handle_restore_floating_for_drag(state, label),
         #[cfg(any(target_os = "windows", test))]
         HostCommand::SetFloatingAlwaysOnTop { label, on } => {
             pane_window::handle_set_floating_always_on_top(state, label, on)

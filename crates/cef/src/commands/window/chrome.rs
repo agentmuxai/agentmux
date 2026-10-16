@@ -255,6 +255,13 @@ pub fn toggle_floating_maximize(
         crate::state::WindowPlacement::Maximized => "maximized",
         _ => "normal",
     };
+    // Tell the floater's page now, so its Maximize/Restore button flips without
+    // waiting for the meta write-through below to round-trip through srv.
+    crate::events::emit_event_to_top_level_windows(
+        state,
+        "floating_placement_changed",
+        &serde_json::json!({ "label": &label, "placement": placement_str }),
+    );
 
     // SPEC_PILLAR1_STEP2 Slice B Phase 4 — write-through to the block's
     // durable `meta` mirror (added in Phase 3 via the existing generic
@@ -290,6 +297,40 @@ pub fn toggle_floating_maximize(
     }
 
     Ok(serde_json::json!({ "placement": placement_str }))
+}
+
+/// Whether a window is maximized. Args: `{ "label": string }`.
+///
+/// The page asks after its window resizes, so the Maximize/Restore button
+/// follows changes it didn't make: a drag that restored a maximized floater,
+/// the OS's own un-maximize (GNOME on a compositor move, Super+Down), macOS
+/// zoom from the keyboard.
+/// SPEC_FLOATING_PANE_WINDOW_CONTROLS_REFINEMENTS_2026_10_16 §4.2.
+///
+/// - Windows: a floater's maximize is the reducer's own geometry (borderless
+///   `WS_POPUP`, no native placement), so the reducer answers for floaters;
+///   any other window is asked with `IsZoomed`.
+/// - macOS / Linux: CEF Views' `is_maximized()`, read on the UI thread.
+///
+/// Returns `{ "maximized": bool }`; `false` when the window isn't found.
+pub fn is_window_maximized(state: &Arc<AppState>, args: &serde_json::Value) -> Result<serde_json::Value, String> {
+    let label = args.get("label").and_then(|v| v.as_str()).unwrap_or("main");
+    #[cfg(target_os = "windows")]
+    let maximized = if label.starts_with("floating-") {
+        state
+            .host_state
+            .lock()
+            .pane_window_states
+            .get(label)
+            .is_some_and(|e| e.placement == crate::state::WindowPlacement::Maximized)
+    } else {
+        let hwnd = super::lifecycle::resolve_window_hwnd(state, label);
+        // SAFETY: IsZoomed only reads the window's state; a stale HWND returns 0.
+        !hwnd.is_null() && unsafe { windows_sys::Win32::UI::WindowsAndMessaging::IsZoomed(hwnd) } != 0
+    };
+    #[cfg(not(target_os = "windows"))]
+    let maximized = crate::ui_tasks::get_window_maximized_blocking(state, label).unwrap_or(false);
+    Ok(serde_json::json!({ "maximized": maximized }))
 }
 
 /// "Always on top" for a floating pane — the header tack
