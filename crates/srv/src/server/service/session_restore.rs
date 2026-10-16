@@ -495,7 +495,7 @@ pub(crate) async fn replay_tabs(
             let mut meta = meta.clone();
             if let Some(obj) = meta.as_object_mut() {
                 for key in crate::server::browser_owner::srv_only_keys() {
-                    if key != crate::server::app_api::agent_fork::COACHED_BY_META_KEY {
+                    if key != crate::server::app_api::agent_spawn::COACHED_BY_META_KEY {
                         obj.remove(key);
                     }
                 }
@@ -1029,7 +1029,7 @@ mod tests {
     /// no longer an agent's.
     #[tokio::test]
     async fn a_restored_worker_keeps_its_leaders_mark() {
-        use crate::server::app_api::agent_fork::COACHED_BY_META_KEY;
+        use crate::server::app_api::agent_spawn::COACHED_BY_META_KEY;
         use crate::server::browser_owner::OWNER_META_KEY;
         let state = test_state();
         let ws_id = dispatch_apply(&state, Command::CreateWorkspace { name: "w".into() })

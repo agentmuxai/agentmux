@@ -573,10 +573,9 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
 /// Fork `source_id` into a new definition: its content, skills, provider and
 /// flags, linked to its account, with a fresh id, workspace, bus id and own
-/// bundle. `branch_label` is the fork's name; empty picks the next free
-/// `Name #N`. The `forkagentdefinition` RPC (the UI's forks) and the
-/// `Agents` `fork` action (`app_api/agent_fork.rs`) both create forks here.
-/// The caller publishes `AgentsChanged`.
+/// bundle, recorded as the source's fork. `branch_label` is the fork's name;
+/// empty picks the next free `Name #N`. The `forkagentdefinition` RPC (the
+/// UI's forks) creates forks here. The caller publishes `AgentsChanged`.
 pub(crate) fn fork_definition(
     mstore: &Store,
     id_store: &Store,
@@ -584,6 +583,26 @@ pub(crate) fn fork_definition(
     source_id: &str,
     branch_label: &str,
 ) -> Result<AgentDefinition, String> {
+    copy_definition(mstore, id_store, identity_store, source_id, branch_label, true)
+}
+
+/// A new agent built from `source_id`'s definition, as [`fork_definition`]
+/// builds one, but not a fork (`as_fork: false`): no lineage, so it isn't among
+/// the source's forks, a slug of its own `name` (required), and no account
+/// link, which the caller makes. The `Agents` `spawn` action's workers
+/// (`app_api/agent_spawn.rs`): a worker is a new agent, not a fork, and
+/// doesn't carry the leader's conversation either.
+pub(crate) fn copy_definition(
+    mstore: &Store,
+    id_store: &Store,
+    identity_store: &Store,
+    source_id: &str,
+    branch_label: &str,
+    as_fork: bool,
+) -> Result<AgentDefinition, String> {
+    if !as_fork && branch_label.trim().is_empty() {
+        return Err("forkagentdefinition: a new agent needs a name".to_string());
+    }
     // Find the source definition by id.
     let all_defs = mstore
         .agent_def_list()
@@ -621,7 +640,8 @@ pub(crate) fn fork_definition(
     // The root's slug and this fork's label: never the source's
     // slug, which chained every generation (`loap-loap-2-loap-3`).
     let root = fork_lineage_root(&all_defs, &source);
-    let fork_slug = agentmux_common::slug::fork_slug(&root.slug, &root.name, &label);
+    // Not a fork: empty, so `agent_def_insert` derives it from the name.
+    let fork_slug = if as_fork { agentmux_common::slug::fork_slug(&root.slug, &root.name, &label) } else { String::new() };
     // Source's EFFECTIVE provider, from the shared resolver
     // (#2594; same as the create-from-template clone site).
     let effective_provider = id_store.resolve_effective_provider_id(&source);
@@ -645,8 +665,8 @@ pub(crate) fn fork_definition(
         agent_bus_id: String::new(), // fresh bus id so broadcasts don't cross
         is_seeded: 0,
         accounts: String::new(),
-        parent_id: source.id.clone(),
-        branch_label: label.clone(),
+        parent_id: if as_fork { source.id.clone() } else { String::new() },
+        branch_label: if as_fork { label.clone() } else { String::new() },
         updated_at: now,
         user_hidden: 0,
         // Forks inherit container config from source so forked container agents
@@ -669,8 +689,11 @@ pub(crate) fn fork_definition(
         .agent_def_insert(&mut fork)
         .map_err(|e| format!("forkagentdefinition: {e}"))?;
     // Before the fork is returned, so its first spawn already
-    // finds the account (see the function's doc comment).
-    inherit_source_account_links(mstore, identity_store, &source, &fork);
+    // finds the account (see the function's doc comment). A new agent's
+    // caller links the account it chose.
+    if as_fork {
+        inherit_source_account_links(mstore, identity_store, &source, &fork);
+    }
     // Own dedicated ABF bundle, not the source's — same "every
     // agent has its own" rule as the template-clone path above.
     mstore.agent_def_provision_and_bind_bundle(id_store, &mut fork, now);
@@ -681,7 +704,8 @@ pub(crate) fn fork_definition(
     let source_contents = mstore
         .agent_content_get_all(&source.id)
         .map_err(|e| format!("forkagentdefinition content: {e}"))?;
-    for c in source_contents {
+    // A fork of a worker isn't its leader's worker (`agent_spawn::WORKER_OF_CONTENT`).
+    for c in source_contents.into_iter().filter(|c| c.content_type != crate::server::app_api::agent_spawn::WORKER_OF_CONTENT) {
         let new_content = AgentContent {
             agent_id: fork.id.clone(),
             content_type: c.content_type,
