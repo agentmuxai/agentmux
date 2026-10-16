@@ -27,6 +27,9 @@
         font-weight: 500;
         line-height: 18px;
         margin-bottom: 3px;
+        // Clear of the close and pin buttons (absolute, top right): a long
+        // title ran under the pin.
+        padding-right: 44px;
 
         &.green {
             color: var(--success-color);

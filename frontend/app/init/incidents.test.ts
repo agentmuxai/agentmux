@@ -44,7 +44,7 @@ describe("recovery notices", () => {
     it("say what happened, why, and what AgentMux saved, and stay until closed", () => {
         const n = incidentNotification(crash);
         expect(n.title).toBe("An AgentMux window crashed");
-        expect(n.message).toBe("GPU process crashed AgentMux saved: Every agent kept running: agents don't run in the window.");
+        expect(n.message).toBe("GPU process crashed Every agent kept running: agents don't run in the window.");
         expect(n.persistent).toBe(true);
         expect(n.expiration).toBeUndefined();
         expect(incidentMessage({ ...crash, cause: undefined, did: [], lost: ["An unsent message."] })).toBe("May be lost: An unsent message.");
@@ -84,7 +84,7 @@ describe("recovery notices", () => {
                 "When: 1970-01-01T00:00:01.000Z",
                 "What: An AgentMux window crashed",
                 "Why: GPU process crashed",
-                "Saved: Every agent kept running: agents don't run in the window.",
+                "Did: Every agent kept running: agents don't run in the window.",
                 "May be lost: An unsent message.",
                 "Evidence: host log, 2026-10-16T21:31:39Z",
             ].join("\n")

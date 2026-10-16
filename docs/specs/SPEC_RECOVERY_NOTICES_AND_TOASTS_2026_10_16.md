@@ -107,7 +107,7 @@ The writer is the process that handled the incident, at the time it handled it: 
 On start-up, and whenever a record is added while a window is open, the frontend shows each **unacknowledged** record as a toast:
 
 - **It stays until closed:** no expiry, not cleared on hover-out, not removed by a later toast. Closing it (X) acknowledges the record (srv writes `acknowledged_at_ms`), so it doesn't come back in another window or on the next launch.
-- **It says what happened, why, and what was saved**, from the record: title from `kind` (§4.4), body `what` + `cause`, then "AgentMux saved:" and the `did` items, then "May be lost:" and `lost` if any.
+- **It says what happened, why, and what was saved**, from the record: title from `kind` (§4.4), body `what` + `cause`, then the `did` items (each a whole sentence; a first build put "AgentMux saved:" ahead of them, which read "AgentMux saved: AgentMux reopened your windows" for the launcher's lines), then "May be lost:" and `lost` if any.
 - **Actions:** **Details** opens the incident in the backend popover (§4.3); **Copy report** copies the record with its evidence, for an issue.
 - **One per incident**, newest first. More than three at once collapse into one: "AgentMux recovered 5 times since <time>" with Details.
 - **In every window**: acknowledging in one closes it in all (the toast's id is the record's id; srv broadcasts the acknowledgement).

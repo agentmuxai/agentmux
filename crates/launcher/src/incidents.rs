@@ -51,6 +51,8 @@ pub fn exit_cause(code: i32) -> Option<String> {
         0xC000_0374 => "heap corruption",
         0xC000_0017 | 0xE000_0008 => return Some("It ran out of memory.".to_string()),
         0xC000_013A => return Some("It was ended with Ctrl+C or by Windows shutting it down.".to_string()),
+        // TerminateProcess's usual code: Task Manager, Stop-Process, a security tool.
+        0xFFFF_FFFF => return Some("Its process was ended from outside AgentMux, for example by Task Manager or a security tool.".to_string()),
         _ => return Some(format!("It exited with code {:#X}.", code as u32)),
     };
     Some(format!("A fault in its process stopped it ({words}, {:#X}).", code as u32))
@@ -165,6 +167,8 @@ mod tests {
         assert_eq!(exit_cause(0xC000_0005u32 as i32).as_deref(), Some("A fault in its process stopped it (an access violation, 0xC0000005)."));
         assert_eq!(exit_cause(0xE000_0008u32 as i32).as_deref(), Some("It ran out of memory."));
         assert_eq!(exit_cause(1), None, "a plain failure says nothing");
+        // Seen in a dev build: the host ended with Stop-Process.
+        assert!(exit_cause(-1).unwrap().starts_with("Its process was ended from outside AgentMux"));
         assert_eq!(exit_cause(42).as_deref(), Some("It exited with code 0x2A."));
     }
 
