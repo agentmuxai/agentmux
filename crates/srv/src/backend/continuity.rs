@@ -299,7 +299,7 @@ pub(crate) fn build_continuation_packet(
         "NOT answered: the previous session ended before you replied"
     };
     let omitted_note = if omitted > 0 {
-        format!("\n({omitted} earlier turns omitted; use SearchHistory to recall them.)")
+        format!("\n({omitted} earlier turns omitted; use Agents with action \"search_history\" to recall them.)")
     } else {
         String::new()
     };

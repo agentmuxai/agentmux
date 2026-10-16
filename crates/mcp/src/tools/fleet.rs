@@ -1,9 +1,9 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Agent-to-agent messaging and fleet operations. Not routed to directly:
-//! `Stop` (stop_tool.rs) calls FleetBulkStop by its old name, and the rest
-//! pass through agents_tool.rs.
+//! Agent-to-agent messaging and fleet operations. Not advertised: `Agents`
+//! (agents_tool.rs), `Message` (message_tool.rs) and `Stop` (stop_tool.rs)
+//! call these by their old names.
 
 use super::*;
 
@@ -173,8 +173,8 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             // agent UID or registered AGENT NAME only (`resolve_target`,
             // crates/srv/src/backend/reactive/handler.rs) — never by
             // block_id, even though this tool's own advertised contract
-            // (FLEET_BROADCAST_TOOL) is block_id values from FleetList, to
-            // stay consistent with FleetBulkStop's targeting scheme. The
+            // (MESSAGE_TOOL, broadcast) is block_id values from Agents list, to
+            // stay consistent with Stop agents' targeting scheme. The
             // WS-RPC path (`fleet_broadcast_impl`, agentmux-srv) already
             // resolves block_id -> agent_id via `get_agent_by_block` before
             // injecting; this MCP path talks to srv over plain HTTP with no

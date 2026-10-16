@@ -60,6 +60,22 @@ pub(super) fn relabel(family: &str, acts: &[Act], text: &str) -> String {
     text.to_string()
 }
 
+/// A handler's error about a parameter the family tool renamed, under the
+/// name the caller passes it by ("missing required parameter: target_agent"
+/// → "... agent"): the caller can't pass the handler's name.
+pub(super) fn public_params(message: &str, rename: &[(&str, &str)]) -> String {
+    let mut out = message.to_string();
+    for (ours, theirs) in rename {
+        for (from, to) in [
+            (format!("missing required parameter: {theirs}"), format!("missing required parameter: {ours}")),
+            (format!("invalid {theirs}:"), format!("invalid {ours}:")),
+        ] {
+            out = out.replace(&from, &to);
+        }
+    }
+    out
+}
+
 /// A handler's result, output and error alike, under the public names.
 pub(super) fn relabeled(family: &str, acts: &[Act], result: Result<String>) -> Result<String> {
     match result {
@@ -103,6 +119,18 @@ mod tests {
         assert_eq!(relabel("Browser", ACTS, "BrowserFill e1: done. The element now: BrowserFill"), "Browser fill e1: done. The element now: BrowserFill");
         let e = relabeled("Browser", ACTS, Err(anyhow::anyhow!("BrowserFill e3 failed"))).unwrap_err();
         assert_eq!(e.to_string(), "Browser fill e3 failed");
+    }
+
+    #[test]
+    fn a_renamed_parameter_is_named_as_the_caller_passes_it() {
+        let rename = &[("agent", "target_agent"), ("decision", "action")][..];
+        assert_eq!(public_params("missing required parameter: target_agent", rename), "missing required parameter: agent");
+        assert_eq!(public_params("missing required parameter: action", rename), "missing required parameter: decision");
+        assert_eq!(
+            public_params("invalid action: maybe (expected \"nudge\" or \"decline\")", rename),
+            "invalid decision: maybe (expected \"nudge\" or \"decline\")"
+        );
+        assert_eq!(public_params("missing required parameter: reason", rename), "missing required parameter: reason");
     }
 
     #[test]

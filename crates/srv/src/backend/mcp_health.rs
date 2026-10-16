@@ -543,7 +543,7 @@ pub fn give_up_note(error: Option<&str>) -> String {
         .unwrap_or_default();
     format!(
         "[AgentMux] Your AgentMux tools are not connected: the agentmux MCP server did not start{cause}, \
-         and AgentMux could not repair it. SendMessage, memory, the work queue and the other AgentMux tools \
+         and AgentMux could not repair it. Message, Memory, Tasks and the other AgentMux tools \
          won't work in this session. Run `agentmux-mcp doctor` in your shell to see why, \
          `agentmux-mcp doctor --heal` to try again, and tell the operator."
     )

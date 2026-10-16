@@ -7,6 +7,7 @@
 //! replaces the six Memory* and seven GlobalMemory* tools; their handlers
 //! (memory.rs, global_memory.rs) run each action unchanged.
 
+use super::family::public_params;
 use super::*;
 
 pub(super) const ACTIONS: &[&str] = &["list", "read", "write", "remove", "history", "diff", "revert"];
@@ -43,17 +44,6 @@ pub(super) fn handler(action: &str, scope: &str) -> Result<(&'static str, &'stat
     })
 }
 
-/// A handler's "missing required parameter" error under the name Memory
-/// takes the parameter by (`version_id`, not the handler's `target_version_id`).
-pub(super) fn public_params(message: &str, rename: &[(&str, &str)]) -> String {
-    for (ours, theirs) in rename {
-        let internal = format!("missing required parameter: {theirs}");
-        if let Some(rest) = message.strip_suffix(internal.as_str()) {
-            return format!("{rest}missing required parameter: {ours}");
-        }
-    }
-    message.to_string()
-}
 
 pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
     match name {

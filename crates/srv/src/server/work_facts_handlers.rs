@@ -33,7 +33,7 @@ use super::AppState;
 
 /// Shown with every answer, so an agent reads it as information.
 const NOTE: &str = "Informational only: nothing is locked or blocked. If someone else is changing the same \
-                    thing, message them (SendMessage) before you change it.";
+                    thing, message them (Message send) before you change it.";
 
 /// This srv's own agents' facts. Store reads, so off the async workers.
 pub(super) async fn local_facts(state: &AppState) -> Vec<WorkFacts> {

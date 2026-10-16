@@ -257,7 +257,7 @@ pub(crate) fn send_message_outcome(to: &str, result: &Value) -> Result<String> {
              delivered. The relay accepted it; their AgentMux picks it up when it next syncs, \
              and the relay drops it after 30 minutes if nothing does (which is what happens if \
              that instance stays offline). You get this same result for an agent name that \
-             does not exist anywhere, so check the spelling against DiscoverAgents if you \
+             does not exist anywhere, so check the spelling against Agents list if you \
              expected local delivery.{not_yours}{id}"
         ));
     }
