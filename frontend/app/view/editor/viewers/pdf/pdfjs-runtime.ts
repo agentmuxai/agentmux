@@ -16,28 +16,16 @@
 import * as pdfjs from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import "pdfjs-dist/web/pdf_viewer.css";
+import { pdfAsset } from "./pdf-assets";
 import { SAFE_FLAGS } from "./pdf-policy";
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 
-type UrlLoaders = Record<string, () => Promise<string>>;
-const cmaps = import.meta.glob("/node_modules/pdfjs-dist/cmaps/*.bcmap", { query: "?url", import: "default" }) as UrlLoaders;
-const fonts = import.meta.glob("/node_modules/pdfjs-dist/standard_fonts/*", { query: "?url", import: "default" }) as UrlLoaders;
-const wasm = import.meta.glob("/node_modules/pdfjs-dist/wasm/*.{wasm,js}", { query: "?url", import: "default" }) as UrlLoaders;
-
-const BY_KIND: Record<string, { dir: string; files: UrlLoaders }> = {
-    cMapUrl: { dir: "cmaps", files: cmaps },
-    standardFontDataUrl: { dir: "standard_fonts", files: fonts },
-    wasmUrl: { dir: "wasm", files: wasm },
-};
-
 /** pdf.js asks for a side file by kind and name; this finds its bundled URL. */
 class BundledBinaryDataFactory {
-    constructor(_urls: unknown) {}
 
     async fetch({ kind, filename }: { kind: string; filename: string }): Promise<Uint8Array> {
-        const entry = BY_KIND[kind];
-        const load = entry?.files[`/node_modules/pdfjs-dist/${entry.dir}/${filename}`];
+        const load = pdfAsset(kind, filename);
         if (!load) throw new Error(`pdf.js asked for ${kind} ${filename}, which isn't bundled`);
         const resp = await fetch(await load());
         if (!resp.ok) throw new Error(`${filename}: ${resp.status}`);
