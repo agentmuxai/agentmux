@@ -39,6 +39,11 @@ fn route(arguments: &Value) -> Result<(&'static [Act], Value)> {
             let Some((_, act)) = OPEN.iter().find(|(v, _)| *v == view) else {
                 anyhow::bail!("Pane open needs view: \"editor\" (a file), \"media\" (an image, video or audio file) or \"files\" (a folder)");
             };
+            // Checked here: the editor and media handlers call it `file`,
+            // which Pane doesn't take.
+            if arguments.get("path").and_then(|v| v.as_str()).map_or(true, |p| p.trim().is_empty()) {
+                anyhow::bail!("Pane open: missing required parameter: path (absolute)");
+            }
             let acts = std::slice::from_ref(act);
             let (_, mut args) = pick("Pane", acts, arguments)?;
             if let Value::Object(m) = &mut args {
@@ -100,6 +105,10 @@ mod tests {
         assert_eq!(args, json!({ "path": "/w", "select": ["a"] }));
         let e = route(&json!({ "action": "open", "path": "/w" })).unwrap_err().to_string();
         assert!(e.contains("needs view"), "{e}");
+        for view in ["editor", "media", "files"] {
+            let e = route(&json!({ "action": "open", "view": view })).unwrap_err().to_string();
+            assert_eq!(e, "Pane open: missing required parameter: path (absolute)");
+        }
     }
 
     #[test]

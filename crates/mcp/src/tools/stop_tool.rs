@@ -22,7 +22,9 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
         "Stop" => {
             let (act, args) = pick("Stop", ACTS, arguments)?;
             // ClosePane with no block_id ended the caller's own session without
-            // QuitSelf's checks; here ending your own session is only `self`.
+            // QuitSelf's quote check; here ending your own session is `self`.
+            // (Closing a pane you are in, by id, waits for the user's window
+            // in srv like any other pane.)
             if act.action == "pane" && str_arg(&args, "block_id").is_none() {
                 anyhow::bail!("Stop pane needs block_id (from Pane layout); to end your own session, use action \"self\"");
             }
