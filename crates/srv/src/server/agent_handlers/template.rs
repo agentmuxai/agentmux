@@ -22,8 +22,70 @@ use crate::backend::rpc_types::{
     CommandRenameAgentDefinitionTitleData,
 };
 use crate::backend::storage::{AgentDefinition, AgentContent, AgentSkill};
+use crate::backend::storage::store::Store;
 
 use super::super::AppState;
+
+/// Link a new fork to the account its source runs on, for the fork's own
+/// provider: the source's own links, or its template's when it has none
+/// (`effective_identity_links`, the spawn gate's rule). Every caller of
+/// `forkagentdefinition` launches the fork on its source's account
+/// (`quick-fork.ts`; `AgentPicker.tsx`'s `handleFork`), but the launch wrote
+/// that link only after its first spawn. A quick fork resumes its source's
+/// conversation, so that spawn runs at launch, and it was refused with "no
+/// credentials" until the link landed. Writing it here means a fork never
+/// exists without it.
+///
+/// Links for other providers are not copied, matching what those callers
+/// write. A source with no account leaves the fork unbound: its first spawn
+/// gets the ordinary bind-an-account refusal. Best-effort: a failure is
+/// logged and leaves the fork unbound, as forks were before.
+fn inherit_source_account_links(
+    mstore: &Store,
+    identity_store: &Store,
+    source: &AgentDefinition,
+    fork: &AgentDefinition,
+) -> usize {
+    use crate::backend::providers::resolve_provider_alias;
+    let fork_provider = resolve_provider_alias(&fork.provider);
+    let links = match crate::identity::resolver::effective_identity_links(mstore, identity_store, source) {
+        Ok(links) => links,
+        Err(e) => {
+            tracing::warn!(
+                target: "identity",
+                source = %source.id,
+                fork = %fork.id,
+                error = %e,
+                "forkagentdefinition: could not read the source's account links; the fork starts unbound"
+            );
+            return 0;
+        }
+    };
+    let mut copied = 0;
+    for link in links.iter().filter(|l| resolve_provider_alias(&l.provider) == fork_provider) {
+        match identity_store.agent_identity_link(&fork.id, &link.account_id, &link.provider) {
+            Ok(()) => copied += 1,
+            Err(e) => tracing::warn!(
+                target: "identity",
+                source = %source.id,
+                fork = %fork.id,
+                account_id = %link.account_id,
+                error = %e,
+                "forkagentdefinition: could not link the fork to its source's account"
+            ),
+        }
+    }
+    if copied > 0 {
+        tracing::info!(
+            target: "identity",
+            source = %source.id,
+            fork = %fork.id,
+            provider = %fork_provider,
+            "forkagentdefinition: fork linked to its source's account"
+        );
+    }
+    copied
+}
 
 /// Resolve a definition's **fork**-lineage root by walking `parent_id`.
 ///
@@ -391,12 +453,14 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
     let mstore = state.mstore.clone();
     let id_store = state.id_store.clone();
+    let identity_store = state.identity_store.clone();
     let broker = state.broker.clone();
     engine.register_typed(
         COMMAND_FORK_AGENT_DEFINITION,
         move |cmd: CommandForkAgentDefinitionData, _ctx| {
             let mstore = mstore.clone();
             let id_store = id_store.clone();
+            let identity_store = identity_store.clone();
             let broker = broker.clone();
             async move {
 
@@ -484,6 +548,9 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 mstore
                     .agent_def_insert(&mut fork)
                     .map_err(|e| format!("forkagentdefinition: {e}"))?;
+                // Before the fork is returned, so its first spawn already
+                // finds the account (see the function's doc comment).
+                inherit_source_account_links(&mstore, &identity_store, &source, &fork);
                 // Own dedicated ABF bundle, not the source's — same "every
                 // agent has its own" rule as the template-clone path above.
                 mstore.agent_def_provision_and_bind_bundle(&id_store, &mut fork, now);
@@ -907,6 +974,194 @@ mod tests {
             fork.provider, "codex",
             "the agent owns its harness; the bundle's provider is a hint (SPEC_AGENT_BUNDLE_FORMAT_V0_3_2026_10_05.md §3.1)"
         );
+    }
+
+    // ---- A fork starts on its source's account ----
+    //
+    // A quick fork (`quick-fork.ts`) launches the fork with
+    // `continueSessionId`, so `ControllerResyncCommand` eagerly resumes it
+    // and the spawn gate runs at once. The launch only wrote the fork's
+    // account link AFTER that resync (`agent-model.ts`'s write-through), so
+    // the first spawn found no link and was refused with "no credentials
+    // for claude". The fork now inherits its source's link when it is
+    // created, before any caller can spawn it.
+
+    /// A real OAuth-class account whose config dir the spawn gate injects.
+    fn seed_oauth_account(state: &AppState, id: &str, provider: &str) -> String {
+        use crate::backend::storage::store::{IdentityAccount, SecretRef};
+        let dir = std::env::temp_dir()
+            .join(format!("agentmux-fork-link-test-{}-{id}", std::process::id()))
+            .to_string_lossy()
+            .into_owned();
+        state
+            .id_store
+            .identity_upsert(&IdentityAccount {
+                id: id.to_string(),
+                name: format!("{provider}-{id}"),
+                provider: provider.to_string(),
+                kind: "oauth".to_string(),
+                display_name: String::new(),
+                secret_ref: SecretRef::OAuthConfigDir { dir: dir.clone() },
+                context: serde_json::json!({}),
+                status: "unknown".to_string(),
+                created_at: 0,
+                updated_at: 0,
+            })
+            .unwrap();
+        dir
+    }
+
+    fn seed_user_agent(state: &AppState, id: &str, name: &str, parent_id: &str) {
+        let mut def = crate::backend::storage::agents::test_agent_def(id, name, "claude", "host", 0, "");
+        def.is_seeded = 0;
+        def.parent_id = parent_id.to_string();
+        state.mstore.agent_def_insert(&mut def).unwrap();
+    }
+
+    async fn fork_via_rpc(state: &AppState, source_id: &str) -> AgentDefinition {
+        let (engine, mut output_rx) = WshRpcEngine::new();
+        register(&engine, state);
+        engine.handle_message(RpcMessage {
+            command: COMMAND_FORK_AGENT_DEFINITION.to_string(),
+            reqid: "req-fork".to_string(),
+            data: Some(serde_json::json!({ "source_id": source_id, "branch_label": "" })),
+            ..Default::default()
+        });
+        let resp = tokio::time::timeout(std::time::Duration::from_secs(2), output_rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(resp.error.is_empty(), "unexpected error: {}", resp.error);
+        serde_json::from_value(resp.data.expect("expected result data")).unwrap()
+    }
+
+    /// The fork's first spawn, exactly as the eager resume runs it: an
+    /// instance row and a block naming the fork, then the credential gate.
+    fn first_spawn_env(
+        state: &AppState,
+        fork_id: &str,
+    ) -> Result<std::collections::HashMap<String, String>, crate::identity::resolver::SpawnGateError> {
+        use crate::backend::obj::{Block, MetaMapType};
+        use crate::backend::storage::store::{AgentInstance, InstanceStatus};
+        let block_id = format!("block-{fork_id}");
+        let mut block = Block {
+            oid: block_id.clone(),
+            parentoref: String::new(),
+            version: 0,
+            runtimeopts: None,
+            stickers: None,
+            meta: {
+                let mut m = MetaMapType::new();
+                m.insert("view".to_string(), serde_json::json!("agent"));
+                m.insert("agentId".to_string(), serde_json::json!(fork_id));
+                m
+            },
+            subblockids: None,
+        };
+        state.mstore.insert(&mut block).unwrap();
+        state
+            .mstore
+            .instance_create(&AgentInstance {
+                id: fork_id.to_string(),
+                definition_id: fork_id.to_string(),
+                parent_instance_id: String::new(),
+                block_id: block_id.clone(),
+                session_id: String::new(),
+                status: InstanceStatus::Running.as_str().to_string(),
+                github_context: String::new(),
+                started_at: 0,
+                ended_at: 0,
+                created_at: 0,
+                identity_id: String::new(),
+                memory_id: String::new(),
+                instance_name: String::new(),
+                working_directory: String::new(),
+                display_hidden: false,
+            })
+            .unwrap();
+        let mut env = std::collections::HashMap::new();
+        crate::identity::resolver::inject_identity_env(
+            state.mstore.clone(),
+            state.id_store.clone(),
+            state.identity_store.clone(),
+            &block_id,
+            &mut env,
+        )
+        .map(|()| env)
+    }
+
+    #[tokio::test]
+    async fn a_fork_starts_on_its_sources_account_before_any_later_bind() {
+        let state = test_state();
+        seed_user_agent(&state, "korp", "Korp", "");
+        let dir_a = seed_oauth_account(&state, "acct-a", "claude");
+        // Another account for the same provider exists; the fork must not
+        // land on it.
+        seed_oauth_account(&state, "acct-b", "claude");
+        state.identity_store.agent_identity_link("korp", "acct-a", "claude").unwrap();
+
+        let fork = fork_via_rpc(&state, "korp").await;
+
+        let links: Vec<(String, String)> = state
+            .identity_store
+            .agent_identity_list_for_agent(&fork.id)
+            .unwrap()
+            .into_iter()
+            .map(|l| (l.provider, l.account_id))
+            .collect();
+        assert_eq!(
+            links,
+            vec![("claude".to_string(), "acct-a".to_string())],
+            "the fork must be linked to its source's account from the moment it exists"
+        );
+        let source_links = state.identity_store.agent_identity_list_for_agent("korp").unwrap();
+        assert_eq!(source_links.len(), 1, "the source's own link is untouched");
+
+        let env = first_spawn_env(&state, &fork.id)
+            .expect("the fork's first spawn must pass the credential gate, with no later bind");
+        assert_eq!(
+            env.get("CLAUDE_CONFIG_DIR").map(String::as_str),
+            Some(dir_a.as_str()),
+            "the first spawn must run on the source's account, not another one"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_fork_of_an_unbound_agent_is_still_asked_to_bind_an_account() {
+        let state = test_state();
+        seed_user_agent(&state, "loner", "Loner", "");
+        seed_oauth_account(&state, "acct-unrelated", "claude");
+
+        let fork = fork_via_rpc(&state, "loner").await;
+
+        assert!(
+            state.identity_store.agent_identity_list_for_agent(&fork.id).unwrap().is_empty(),
+            "a fork of an agent with no account gets none"
+        );
+        assert_eq!(
+            first_spawn_env(&state, &fork.id).unwrap_err(),
+            crate::identity::resolver::SpawnGateError::MissingCredentials { provider: "claude".to_string() },
+            "an unbound fork keeps the ordinary bind-an-account refusal"
+        );
+    }
+
+    /// A user agent made from a template has no link of its own when its
+    /// account was bound on the template: its spawn resolves the template's
+    /// link. Its fork resolves the same account.
+    #[tokio::test]
+    async fn a_fork_of_a_template_made_agent_starts_on_the_templates_account() {
+        let state = test_state();
+        let mut tpl = crate::backend::storage::agents::test_agent_def("tpl-k", "Template K", "claude", "host", 0, "");
+        tpl.is_seeded = 1;
+        state.mstore.agent_def_insert(&mut tpl).unwrap();
+        let dir_t = seed_oauth_account(&state, "acct-t", "claude");
+        state.identity_store.agent_identity_link("tpl-k", "acct-t", "claude").unwrap();
+        seed_user_agent(&state, "from-tpl", "From Template", "tpl-k");
+
+        let fork = fork_via_rpc(&state, "from-tpl").await;
+
+        let env = first_spawn_env(&state, &fork.id).expect("the fork must start on the account its source runs on");
+        assert_eq!(env.get("CLAUDE_CONFIG_DIR").map(String::as_str), Some(dir_t.as_str()));
     }
 
     // #2721 Phase 1 (Codex's review) — the auto-suggested name must be a
