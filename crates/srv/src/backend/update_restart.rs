@@ -23,8 +23,6 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::Duration;
 
-use serde::{Deserialize, Serialize};
-
 use agentmux_common::srv_stderr::UpgradeTarget;
 
 use crate::backend::update_check::{self, AppUpdateStatus, DownloadStatus};
@@ -53,15 +51,6 @@ fn if_current(run: u64, f: impl FnOnce()) -> bool {
     }
     f();
     true
-}
-
-/// `app.upgrade-restart`.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../../frontend/types/rpc/")]
-pub struct CommandAppUpgradeRestartData {
-    /// Restart without waiting for agents to finish their turn.
-    #[serde(default)]
-    pub now: bool,
 }
 
 fn set(d: &DownloadStatus, state: &str, waiting_for: u32, error: Option<String>) {
@@ -120,7 +109,7 @@ pub fn start(now: bool) -> Result<AppUpdateStatus, String> {
     Ok(update_check::current_status())
 }
 
-/// Stop waiting (`app.upgrade-cancel`). Once the launcher is asking the user,
+/// Stop waiting (the user's Cancel, through the host). Once the launcher is asking the user,
 /// only its dialog can say no.
 pub fn cancel() -> Result<AppUpdateStatus, String> {
     let mut current = run_lock();

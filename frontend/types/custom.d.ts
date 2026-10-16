@@ -141,6 +141,10 @@ declare global {
          *  host, which srv trusts and agents can't impersonate.
          *  SPEC_UPGRADE_FOR_USERS_AND_AGENTS_2026_10_15.md §5.1. */
         decideUpgrade?(id: string, version: string, accept: boolean): Promise<void>;
+        /** The version panel's Download, Upgrade & restart (`now`: Restart now)
+         *  and Cancel. Relayed by the host, which srv trusts and agents can't
+         *  impersonate; answers srv's update status after the action. */
+        appUpdate?(action: "download" | "restart" | "cancel", now?: boolean): Promise<unknown>;
         /** Forget the key a widget publisher is pinned to (Settings → Widgets),
          *  relayed by the host like an approval: forgetting lets another key pin
          *  that publisher. SPEC_WIDGET_SHARING_2026_10_10.md §2.3. */

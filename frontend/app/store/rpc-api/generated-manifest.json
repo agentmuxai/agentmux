@@ -1319,25 +1319,13 @@
             "dataType": "import(\"@/app/store/rpc-api/bundle\").BundleValidateInput"
         },
         {
-            "command": "app.update-download",
-            "method": "AppUpdateDownloadCommand"
-        },
-        {
             "command": "app.update-status",
             "method": "AppUpdateStatusCommand"
-        },
-        {
-            "command": "app.upgrade-cancel",
-            "method": "AppUpgradeCancelCommand"
         },
 
         {
             "command": "app.upgrade-requests",
             "method": "AppUpgradeRequestsCommand"
-        },
-        {
-            "command": "app.upgrade-restart",
-            "method": "AppUpgradeRestartCommand"
         },
         {
             "command": "viewer.agent-hidden",

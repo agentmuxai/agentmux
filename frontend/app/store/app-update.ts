@@ -12,6 +12,7 @@
 import { createSignal } from "solid-js";
 
 import { WpsEvent } from "@/app/store/mps-events";
+import { getApi } from "@/app/store/app-api";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import type { AppUpdateStatus } from "@/types/rpc/AppUpdateStatus";
@@ -57,9 +58,19 @@ export function releaseDownload(s: AppUpdateStatus | null = appUpdate()): Downlo
     return d && s?.latest && d.version === s.latest ? d : null;
 }
 
+/**
+ * A click in the version panel, through the host: srv takes these only from
+ * it, so an agent holding the instance key can't make them.
+ */
+async function hostAction(action: "download" | "restart" | "cancel", now?: boolean): Promise<void> {
+    const relay = getApi()?.approvals?.appUpdate;
+    if (typeof relay !== "function") throw new Error("This window can't do that; use the release page.");
+    acceptAppUpdate(await relay(action, now));
+}
+
 /** Ask srv to download and stage the newer release; progress arrives as events. */
 export async function startAppUpdateDownload(): Promise<void> {
-    acceptAppUpdate(await RpcApi.AppUpdateDownloadCommand(TabRpcClient));
+    await hostAction("download");
 }
 
 /**
@@ -67,12 +78,12 @@ export async function startAppUpdateDownload(): Promise<void> {
  * The launcher then asks the user in a dialog of its own.
  */
 export async function upgradeAndRestart(now: boolean): Promise<void> {
-    acceptAppUpdate(await RpcApi.AppUpgradeRestartCommand(TabRpcClient, { now }));
+    await hostAction("restart", now);
 }
 
 /** Stop waiting to restart. */
 export async function cancelUpgrade(): Promise<void> {
-    acceptAppUpdate(await RpcApi.AppUpgradeCancelCommand(TabRpcClient));
+    await hostAction("cancel");
 }
 
 /** Open the version panel, where the Maintenance section shows the release. */

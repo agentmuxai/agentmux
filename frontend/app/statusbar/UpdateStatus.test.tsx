@@ -13,12 +13,18 @@ const upgradeCancel = vi.fn();
 vi.mock("@/app/store/rpc-api", () => ({
     RpcApi: {
         AppUpdateStatusCommand: (...a: unknown[]) => updateStatus(...a),
-        AppUpdateDownloadCommand: (...a: unknown[]) => updateDownload(...a),
-        AppUpgradeRestartCommand: (...a: unknown[]) => upgradeRestart(...a),
-        AppUpgradeCancelCommand: (...a: unknown[]) => upgradeCancel(...a),
     },
 }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
+// The version panel's clicks go through the host (approvals.appUpdate).
+vi.mock("@/app/store/app-api", () => ({
+    getApi: () => ({
+        approvals: {
+            appUpdate: (action: string, now?: boolean) =>
+                action === "download" ? updateDownload() : action === "restart" ? upgradeRestart(now) : upgradeCancel(),
+        },
+    }),
+}));
 const openLink = vi.fn();
 const installAppUpdate = vi.fn();
 const openNativePath = vi.fn();
@@ -166,12 +172,12 @@ describe("Maintenance: Upgrade & restart", () => {
         upgradeRestart.mockResolvedValue(download("waiting", { ...FOLDER, waiting_for: 2 }));
         render(() => <MaintenanceSection />);
         fireEvent.click(await screen.findByRole("button", { name: "Upgrade & restart" }));
-        expect(upgradeRestart).toHaveBeenCalledWith(expect.anything(), { now: false });
+        expect(upgradeRestart).toHaveBeenCalledWith(false);
         expect(await screen.findByText("Waiting for 2 agents to finish…")).toBeTruthy();
 
         upgradeRestart.mockResolvedValue(download("restarting", FOLDER));
         fireEvent.click(screen.getByRole("button", { name: "Restart now" }));
-        expect(upgradeRestart).toHaveBeenLastCalledWith(expect.anything(), { now: true });
+        expect(upgradeRestart).toHaveBeenLastCalledWith(true);
         expect(await screen.findByText("Restarting: answer the AgentMux dialog (No cancels)")).toBeTruthy();
         // Only the dialog can stop it now.
         expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
@@ -189,6 +195,15 @@ describe("Maintenance: Upgrade & restart", () => {
 
         acceptAppUpdate(download("ready", { ...FOLDER, error: "AgentMux didn't restart: the upgrade was declined" }));
         expect(await screen.findByText(/the upgrade was declined/)).toBeTruthy();
+    });
+
+    it("a Cancel srv refuses says why", async () => {
+        updateStatus.mockResolvedValue(download("waiting", { ...FOLDER, waiting_for: 1 }));
+        upgradeCancel.mockRejectedValue(new Error("AgentMux is already restarting"));
+        render(() => <MaintenanceSection />);
+        expect(await screen.findByText("Waiting for 1 agent to finish…")).toBeTruthy();
+        fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+        expect(await screen.findByText(/AgentMux is already restarting/)).toBeTruthy();
     });
 });
 
@@ -208,6 +223,6 @@ describe("Maintenance on a setup.exe install", () => {
         expect(revealInFileExplorer).toHaveBeenCalledWith(installer);
         expect(openNativePath).not.toHaveBeenCalled();
         fireEvent.click(screen.getByRole("button", { name: "Upgrade & restart" }));
-        expect(upgradeRestart).toHaveBeenCalledWith(expect.anything(), { now: false });
+        expect(upgradeRestart).toHaveBeenCalledWith(false);
     });
 });
