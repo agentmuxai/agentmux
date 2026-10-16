@@ -5,8 +5,9 @@
 new" and Download) in #4983; phase 2 (data carries forward) in #4996;
 phase 3a (download and stage, Windows portable) in #5000; phase 3b
 (Upgrade & restart) in #5005; phase 3d (`setup.exe`) in #5015; phase 4a
-(the `App` tool) in #5012; the rest of phases 3–5 are not started. The
-operator took the §8 recommendations on 2026-10-15.
+(the `App` tool) in #5012; phase 4b (the note after an upgrade) in #5014;
+the rest of phases 3–5 are not started. The operator took the §8
+recommendations on 2026-10-15.
 **Asked for:** "agents need a way to upgrade their running instances and
 continue on. Users also need a button to let them know. We did work on this
 in the past, find the history, let's consolidate; we have partial work in the
@@ -115,7 +116,7 @@ CI publishes it (`.github/workflows/build-*.yml`).
 | Install | How it's recognised | Release file | Apply | Phase |
 |---|---|---|---|---|
 | Windows portable | `runtime/agentmux-portable.marker` beside srv, `agentmux.exe` above it | `agentmux-<v>-x64-portable.7z` | Unpack with Windows' `tar.exe` into `agentmux-<v>-x64-portable` next to the running folder (or under `updates/<v>/` in the running version's data folder when that can't be written); the launcher starts the new folder's launcher and exits. The old folder stays; Maintenance offers to delete old versions | 3a, 3b |
-| Windows `setup.exe` (Inno Setup, per-user by default, fixed AppId) | Inno Setup's uninstaller (`unins000.exe`) beside `agentmux.exe` (the install has the portable's `runtime/` and marker too) | `AgentMux-<v>-x64-setup.exe` | Downloaded and verified into this version's `updates/<v>/`. After quit, a hidden Windows PowerShell (by its full path, the script passed `-EncodedCommand` so no shell parses the paths) waits for the launcher to be gone, runs the installer silently (`/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-`; the install keeps its own mode, all users or the current one, through Inno's `UsePreviousPrivileges`, and Windows asks for permission for an all-users one), which replaces the install in place, then starts AgentMux again even if the installer failed or was declined, so the old version runs rather than none | 3d |
+| Windows `setup.exe` (Inno Setup, per-user by default, fixed AppId) | Inno Setup's uninstaller (`unins000.exe`) beside `agentmux.exe` (the install has the portable's `runtime/` and marker too) | `AgentMux-<v>-x64-setup.exe` | Downloaded and verified into this version's `updates/<v>/`. After quit, a hidden Windows PowerShell (by its full path, the script passed `-EncodedCommand` so no shell parses the paths) waits for the launcher to be gone, opens the installer so no other process can write, rename or delete it (the folder is the user's own, and an all-users install runs it elevated), checks its SHA-256 through that handle against the release's (which srv sends with the request, and the launcher also checks before asking), and only on a match runs it silently, holding the handle until it exits (`/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-`; the install keeps its own mode, all users or the current one, through Inno's `UsePreviousPrivileges`, and Windows asks for permission for an all-users one), which replaces the install in place, then starts AgentMux again even if the installer failed or was declined, so the old version runs rather than none | 3d |
 | Microsoft Store (`.msix`, Store ID 9P9QCXNNCRK3) | under `WindowsApps` | — | The Store updates it; AgentMux can't replace its own files. "Update in the Store" opens the Store page, or asks the Store API to install it. The Store certifies a release after GitHub publishes it, so the chip defers to the Store | 3f |
 | macOS `.dmg` | inside an `.app` | `AgentMux_<v>_arm64.dmg` | Mount, check `codesign --verify` and the Gatekeeper assessment, replace `AgentMux.app` after quit, relaunch. The bundle id carries the version (`ai.agentmux.<channel>.<version>`), so check first whether macOS asks for permissions again after each upgrade | 3c |
 | Linux AppImage | `$APPIMAGE` | `AgentMux_<v>_amd64.AppImage` | Replace that file, relaunch | 3e |
@@ -198,13 +199,24 @@ What already happens, and what's added:
 - **Each agent resumes its conversation** (eager resume, `--resume`).
 - **Messages sent while AgentMux was down** are held and replayed
   (durable jekts).
-- **New: a system note to each resumed agent**, once, as its next input:
-  `[AgentMux] Upgraded from 0.59.26 to 0.59.27 at 14:02, at QTest's request. Your session resumed; nothing you sent was lost.`
-  srv records the version it last ran in the shared store; on start, if it
-  differs, every agent that resumes gets the note (a system note, like the
-  other `[AgentMux]` notes; never a jekt).
-- **New: the agent that asked** gets the result: "Upgrade to 0.59.27 done",
-  or why not ("cancelled by the user", "the download failed: …").
+- **New: a system note to each resumed agent**, once, soon after it resumes (a message queued during the resume may come first; the note asks nothing)
+  (`backend/upgrade_notice.rs`, phase 4b):
+  `[AgentMux] AgentMux was upgraded from 0.59.26 to 0.59.27 at 14:02. Your session resumed; nothing is needed from you.`
+  srv records the version it runs in the channel folder
+  (`channels/<ch>/agentmux-last-version.json`, like `cli_notice`'s CLI
+  versions: each version's data folder is new after an upgrade). A start on
+  a newer release than the one recorded is an upgrade, and the record keeps
+  it, with the panes already told, for an hour: a crash or another restart
+  soon after still tells the agents not yet told, never one twice. The hook
+  is registration with the reactive handler (`reactive::registered`), which
+  every agent that can receive a note goes through, whatever runs it; the
+  note goes to a pane that already had a session (`agent:sessionid`), not a
+  new one. A first start, the same version, or an older build started again
+  says nothing.
+- **The agent that asked** hears every step: the user's answer to its
+  request as a note (phase 4a), and, after the restart, the note above.
+  A failed download or a restart that didn't happen shows in the version
+  panel, with the reason.
 - **An agent that was mid-turn** when the user chose "Now" resumes with the
   CLI's own interrupted-turn handling and the note.
 

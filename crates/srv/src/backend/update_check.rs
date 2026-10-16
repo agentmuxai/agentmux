@@ -190,7 +190,7 @@ fn find_asset(release: &Release, name: &str) -> Option<ReleaseAsset> {
 
 /// `major.minor.patch` out of a version or tag (`v0.59.27`, `0.59.27+g1a2b`),
 /// or `None` when it doesn't start with three integers.
-fn version_core(v: &str) -> Option<(u64, u64, u64)> {
+pub(crate) fn version_core(v: &str) -> Option<(u64, u64, u64)> {
     let v = v.trim().trim_start_matches('v');
     let core = v.split(['+', '-']).next().unwrap_or(v);
     let mut parts = core.split('.');
