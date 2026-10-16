@@ -98,7 +98,14 @@ fn staged(status: &AppUpdateStatus) -> Result<(DownloadStatus, UpgradeTarget), S
     if !installer.is_file() {
         return Err(format!("{} is gone; download the new version again", installer.display()));
     }
-    Ok((d, UpgradeTarget::Installer(installer)))
+    // The release's digest goes with it: the launcher checks the file it runs.
+    let sha256 = status
+        .asset
+        .as_ref()
+        .filter(|a| installer.file_name().is_some_and(|n| n == a.name.as_str()))
+        .map(|a| a.sha256.to_ascii_lowercase())
+        .ok_or("the new version's checksum is unknown; check for updates again")?;
+    Ok((d, UpgradeTarget::Installer { installer, sha256 }))
 }
 
 /// Start "Upgrade & restart".
@@ -239,7 +246,16 @@ mod tests {
         setup.installer = Some(installer.display().to_string());
         assert!(staged(&status(Some(setup.clone()))).unwrap_err().contains("download the new version again"));
         std::fs::write(&installer, b"x").unwrap();
-        assert_eq!(staged(&status(Some(setup))).unwrap().1, UpgradeTarget::Installer(installer));
+        // Not without the release's digest to check it against.
+        assert!(staged(&status(Some(setup.clone()))).unwrap_err().contains("checksum"));
+        let mut with_asset = status(Some(setup));
+        with_asset.asset = Some(crate::backend::update_check::ReleaseAsset {
+            name: "AgentMux-0.59.27-x64-setup.exe".into(),
+            size: 1,
+            url: String::new(),
+            sha256: "AB".repeat(32),
+        });
+        assert_eq!(staged(&with_asset).unwrap().1, UpgradeTarget::Installer { installer, sha256: "ab".repeat(32) });
         // A download of an older release than the latest doesn't count.
         let mut newer = status(Some(download("ready", Some(&folder))));
         newer.latest = Some("0.59.28".into());

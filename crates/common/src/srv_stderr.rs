@@ -139,7 +139,9 @@ pub enum UpgradeTarget {
     /// A portable's new folder: start this launcher.
     Launcher(std::path::PathBuf),
     /// A `setup.exe` install: run this installer, then start AgentMux again.
-    Installer(std::path::PathBuf),
+    /// `sha256` (lowercase hex) is the release's digest: the launcher checks
+    /// it again on the very file it runs.
+    Installer { installer: std::path::PathBuf, sha256: String },
 }
 
 /// A parsed `UPGRADE_PREFIX` line: upgrade to `version` through `target`.
@@ -151,15 +153,16 @@ pub struct UpgradeRequest {
 
 /// The path goes last: it can hold spaces.
 pub fn upgrade_line(version: &str, target: &UpgradeTarget) -> String {
-    let (field, path) = match target {
-        UpgradeTarget::Launcher(p) => ("launcher", p),
-        UpgradeTarget::Installer(p) => ("installer", p),
-    };
-    format!("{} version:{} {}:{}", UPGRADE_PREFIX, version, field, path.display())
+    match target {
+        UpgradeTarget::Launcher(p) => format!("{} version:{} launcher:{}", UPGRADE_PREFIX, version, p.display()),
+        UpgradeTarget::Installer { installer, sha256 } => {
+            format!("{} version:{} sha256:{} installer:{}", UPGRADE_PREFIX, version, sha256, installer.display())
+        }
+    }
 }
 
 /// Parse an `UPGRADE_PREFIX` line. `None` for any other line, or one missing
-/// either field.
+/// a field (an installer needs its 64-hex-digit `sha256:`).
 pub fn parse_upgrade_line(line: &str) -> Option<UpgradeRequest> {
     let rest = line.strip_prefix(UPGRADE_PREFIX)?.trim_start();
     let (version, rest) = rest.strip_prefix("version:")?.split_once(' ')?;
@@ -167,10 +170,15 @@ pub fn parse_upgrade_line(line: &str) -> Option<UpgradeRequest> {
     let target = if let Some(p) = rest.strip_prefix("launcher:") {
         UpgradeTarget::Launcher(p.trim().into())
     } else {
-        UpgradeTarget::Installer(rest.strip_prefix("installer:")?.trim().into())
+        let (sha256, rest) = rest.strip_prefix("sha256:")?.split_once(' ')?;
+        if sha256.len() != 64 || !sha256.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return None;
+        }
+        let installer = rest.trim_start().strip_prefix("installer:")?.trim().into();
+        UpgradeTarget::Installer { installer, sha256: sha256.to_ascii_lowercase() }
     };
     let empty = match &target {
-        UpgradeTarget::Launcher(p) | UpgradeTarget::Installer(p) => p.as_os_str().is_empty(),
+        UpgradeTarget::Launcher(p) | UpgradeTarget::Installer { installer: p, .. } => p.as_os_str().is_empty(),
     };
     if version.is_empty() || empty {
         return None;
@@ -188,12 +196,19 @@ mod tests {
         let target = UpgradeTarget::Launcher(path.to_path_buf());
         let line = upgrade_line("0.59.27", &target);
         assert_eq!(parse_upgrade_line(&line), Some(UpgradeRequest { version: "0.59.27".into(), target }));
-        let setup = UpgradeTarget::Installer(r"C:\Users\A User\updates\0.59.27\AgentMux-0.59.27-x64-setup.exe".into());
+        let sha = "ab".repeat(32);
+        let setup = UpgradeTarget::Installer {
+            installer: r"C:\Users\A User\updates\0.59.27\AgentMux-0.59.27-x64-setup.exe".into(),
+            sha256: sha.clone(),
+        };
         assert_eq!(
             parse_upgrade_line(&upgrade_line("0.59.27", &setup)),
             Some(UpgradeRequest { version: "0.59.27".into(), target: setup })
         );
-        assert_eq!(parse_upgrade_line("AGENTMUXSRV-UPGRADE version:0.59.27 installer:"), None);
+        assert_eq!(parse_upgrade_line(&format!("AGENTMUXSRV-UPGRADE version:0.59.27 sha256:{sha} installer:")), None);
+        // An installer without its digest, or with a malformed one, is refused.
+        assert_eq!(parse_upgrade_line("AGENTMUXSRV-UPGRADE version:0.59.27 installer:C:/u/setup.exe"), None);
+        assert_eq!(parse_upgrade_line("AGENTMUXSRV-UPGRADE version:0.59.27 sha256:ab installer:C:/u/setup.exe"), None);
         assert_eq!(parse_upgrade_line("AGENTMUXSRV-UPGRADE version:0.59.27"), None);
         assert_eq!(parse_upgrade_line("AGENTMUXSRV-UPGRADE launcher:C:/x/agentmux.exe"), None);
         assert_eq!(parse_upgrade_line("AGENTMUXSRV-MIGRATING migrations:1"), None);

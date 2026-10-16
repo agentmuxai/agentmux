@@ -11,8 +11,8 @@
 //! The supervisor then:
 //! 1. checks what srv names again ([`staged`]): an AgentMux portable of
 //!    exactly that version, newer than this one, beside a portable; or that
-//!    version's installer, in this version's own `updates/<v>/`, on a
-//!    `setup.exe` install;
+//!    version's installer, with the release's digest, in this version's own
+//!    `updates/<v>/`, on a `setup.exe` install;
 //! 2. asks the user with a native dialog ([`confirm`]), which no page or agent
 //!    tool in AgentMux can click: a restart stops every agent, so it takes the
 //!    user's own answer here, whoever asked srv;
@@ -98,7 +98,8 @@ pub enum Staged {
     /// again. The installer keeps the install's own mode (all users or the
     /// current one): Inno Setup's default `UsePreviousPrivileges` reads it
     /// from the previous install, which the folder alone can't tell.
-    Installer { installer: PathBuf, own_dir: PathBuf },
+    /// `sha256` is the release's digest, checked again as it runs.
+    Installer { installer: PathBuf, sha256: String, own_dir: PathBuf },
 }
 
 impl std::fmt::Display for Staged {
@@ -109,6 +110,19 @@ impl std::fmt::Display for Staged {
             Staged::Installer { installer, .. } => write!(f, "{}", installer.display()),
         }
     }
+}
+
+/// 64 lowercase hex digits: all that is ever put in the script.
+fn is_sha256_hex(s: &str) -> bool {
+    s.len() == 64 && s.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+}
+
+/// The file's SHA-256 in lowercase hex, or `None` if it can't be read.
+fn file_sha256(path: &Path) -> Option<String> {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    std::io::copy(&mut std::fs::File::open(path).ok()?, &mut hasher).ok()?;
+    Some(hasher.finalize().iter().map(|b| format!("{b:02x}")).collect())
 }
 
 /// What to restart into, if `req` names a newer release than `own_version`
@@ -138,7 +152,7 @@ pub fn staged(req: &UpgradeRequest, own_dir: &Path, data_dir: &Path, own_version
             }
             Ok(Staged::Launcher(launcher.clone()))
         }
-        UpgradeTarget::Installer(installer) => {
+        UpgradeTarget::Installer { installer, sha256 } => {
             let name = format!("AgentMux-{}-x64-setup.exe", req.version);
             let named_right = installer.file_name().is_some_and(|n| n.eq_ignore_ascii_case(name.as_str()));
             let in_updates = installer.parent() == Some(data_dir.join("updates").join(&req.version).as_path());
@@ -148,7 +162,13 @@ pub fn staged(req: &UpgradeRequest, own_dir: &Path, data_dir: &Path, own_version
             if !has_uninstaller(own_dir) || !own_dir.join("agentmux.exe").is_file() {
                 return Err("this AgentMux isn't a setup.exe install".into());
             }
-            Ok(Staged::Installer { installer: installer.clone(), own_dir: own_dir.to_path_buf() })
+            // Before asking: a file changed since srv checked it fails here,
+            // with a reason. The check that binds is the script's
+            // ([`installer_script`]), on the file as it runs.
+            if !is_sha256_hex(sha256) || file_sha256(installer).as_deref() != Some(sha256.as_str()) {
+                return Err(format!("{} isn't the AgentMux {} release; download it again", installer.display(), req.version));
+            }
+            Ok(Staged::Installer { installer: installer.clone(), sha256: sha256.clone(), own_dir: own_dir.to_path_buf() })
         }
     }
 }
@@ -295,12 +315,27 @@ fn ps_quote(path: &Path) -> String {
 /// seconds for this launcher to be gone (its files are replaced), run the
 /// installer silently, then start AgentMux again whatever the installer did,
 /// so a failed or declined install leaves the old version running, not none.
-fn installer_script(installer: &Path, own_dir: &Path) -> String {
+///
+/// The installer sits in the user's own data folder, which any process of
+/// theirs can write, and on an all-users install Windows runs it elevated.
+/// So the script opens it allowing others only to read, which blocks any
+/// write, rename or delete; hashes it through that handle; and runs it only
+/// if it is `sha256`, holding the handle until the installer exits. The file
+/// that runs is the file that was checked.
+fn installer_script(installer: &Path, sha256: &str, own_dir: &Path) -> String {
+    debug_assert!(is_sha256_hex(sha256));
+    let installer = ps_quote(installer);
     format!(
         "Start-Sleep -Seconds 3; \
-         Start-Process -FilePath {} -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-' -Wait; \
+         $f = $null; \
+         try {{ \
+         $f = [System.IO.File]::Open({installer}, 'Open', 'Read', 'Read'); \
+         $h = [System.BitConverter]::ToString([System.Security.Cryptography.SHA256]::Create().ComputeHash($f)).Replace('-', ''); \
+         if ($h -eq '{sha256}') {{ \
+         Start-Process -FilePath {installer} -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-' -Wait \
+         }} \
+         }} catch {{ }} finally {{ if ($f) {{ $f.Dispose() }} }}; \
          Start-Process -FilePath {}",
-        ps_quote(installer),
         ps_quote(&own_dir.join("agentmux.exe"))
     )
 }
@@ -333,10 +368,10 @@ pub fn relaunch(staged: &Staged) -> std::io::Result<()> {
             }
             c
         }
-        Staged::Installer { installer, own_dir } => {
+        Staged::Installer { installer, sha256, own_dir } => {
             let mut c = std::process::Command::new(powershell_exe());
             c.args(["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-EncodedCommand"])
-                .arg(encoded_command(&installer_script(installer, own_dir)));
+                .arg(encoded_command(&installer_script(installer, sha256, own_dir)));
             c
         }
     };
@@ -370,8 +405,12 @@ mod tests {
         UpgradeRequest { version: version.into(), target: UpgradeTarget::Launcher(launcher.to_path_buf()) }
     }
 
+    /// SHA-256 of the empty file, which the tests' installers are.
+    const EMPTY_SHA256: &str = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+
     fn setup_req(version: &str, installer: &Path) -> UpgradeRequest {
-        UpgradeRequest { version: version.into(), target: UpgradeTarget::Installer(installer.to_path_buf()) }
+        let target = UpgradeTarget::Installer { installer: installer.to_path_buf(), sha256: EMPTY_SHA256.into() };
+        UpgradeRequest { version: version.into(), target }
     }
 
     #[test]
@@ -409,12 +448,21 @@ mod tests {
         std::fs::create_dir_all(&updates).unwrap();
         let installer = updates.join("AgentMux-0.59.27-x64-setup.exe");
         std::fs::write(&installer, b"").unwrap();
-        let Staged::Installer { installer: got, own_dir, .. } =
+        let Staged::Installer { installer: got, sha256, own_dir } =
             staged(&setup_req("0.59.27", &installer), &own, &data, "0.59.26").unwrap()
         else {
             panic!("expected the installer")
         };
-        assert_eq!((got, own_dir), (installer.clone(), own.clone()));
+        assert_eq!((got, sha256.as_str(), own_dir), (installer.clone(), EMPTY_SHA256, own.clone()));
+
+        // Changed since srv checked it, or no proper digest to check against.
+        std::fs::write(&installer, b"not the release").unwrap();
+        let err = staged(&setup_req("0.59.27", &installer), &own, &data, "0.59.26").unwrap_err();
+        assert!(err.contains("download it again"), "{err}");
+        std::fs::write(&installer, b"").unwrap();
+        let mut upper = setup_req("0.59.27", &installer);
+        upper.target = UpgradeTarget::Installer { installer: installer.clone(), sha256: EMPTY_SHA256.to_uppercase() };
+        assert!(staged(&upper, &own, &data, "0.59.26").is_err());
 
         // Not that version's name, not in this version's updates, or older.
         let renamed = updates.join("setup.exe");
@@ -432,11 +480,22 @@ mod tests {
 
     #[test]
     fn the_installer_script_runs_silently_then_always_starts_agentmux_again() {
-        let script = installer_script(Path::new("C:/Users/A %TEMP% $x/AgentMux-0.59.27-x64-setup.exe"), Path::new("C:/Apps/O'Neil"));
+        let path = "C:/Users/A %TEMP% $x/AgentMux-0.59.27-x64-setup.exe";
+        let script = installer_script(Path::new(path), EMPTY_SHA256, Path::new("C:/Apps/O'Neil"));
         assert!(script.starts_with("Start-Sleep -Seconds 3; "), "{script}");
+        // Opened so nothing else can change it, hashed through that handle,
+        // and run only on a match, before the handle is let go.
+        let open = script.find(&format!("[System.IO.File]::Open('{path}', 'Open', 'Read', 'Read')")).expect(&script);
+        let check = script.find(&format!("if ($h -eq '{EMPTY_SHA256}')")).expect(&script);
         // Single-quoted: neither %TEMP% nor $x is expanded; a ' is doubled.
-        assert!(script.contains("-FilePath 'C:/Users/A %TEMP% $x/AgentMux-0.59.27-x64-setup.exe' -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-' -Wait; "), "{script}");
-        assert!(script.contains("Start-Process -FilePath 'C:/Apps/O''Neil"), "{script}");
+        let run = script
+            .find(&format!("Start-Process -FilePath '{path}' -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-' -Wait"))
+            .expect(&script);
+        let release = script.find("$f.Dispose()").expect(&script);
+        assert!(open < check && check < run && run < release, "{script}");
+        // AgentMux starts again whatever happened, last.
+        let restart = script.rfind("Start-Process -FilePath 'C:/Apps/O''Neil").expect(&script);
+        assert!(restart > release, "{script}");
         // Typographic quotes close a PowerShell string too: doubled as well.
         assert_eq!(ps_quote(Path::new("C:/Users/O\u{2019}Neil")), "'C:/Users/O\u{2019}\u{2019}Neil'");
         assert_eq!(ps_quote(Path::new("a\u{2018}b\u{201A}c\u{201B}")), "'a\u{2018}\u{2018}b\u{201A}\u{201A}c\u{201B}\u{201B}'");

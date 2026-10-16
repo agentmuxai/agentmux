@@ -204,6 +204,24 @@ fn is_staged_installer(path: &Path, asset: &ReleaseAsset) -> bool {
         && std::fs::metadata(path).is_ok_and(|m| m.is_file() && m.len() == asset.size)
 }
 
+/// Whether the file at `path` hashes to the release's digest. A file found
+/// already in place is only reused if it does: the name and size alone say
+/// nothing about who wrote it.
+fn has_release_digest(path: &Path, asset: &ReleaseAsset) -> bool {
+    let Ok(mut file) = std::fs::File::open(path) else { return false };
+    let mut hasher = Sha256::new();
+    std::io::copy(&mut file, &mut hasher).is_ok() && hex::encode(hasher.finalize()).eq_ignore_ascii_case(&asset.sha256)
+}
+
+/// [`is_staged_installer`], and whole by its digest too; off the async threads.
+async fn is_verified_installer(path: &Path, asset: &ReleaseAsset) -> bool {
+    if !is_staged_installer(path, asset) {
+        return false;
+    }
+    let (path, asset) = (path.to_path_buf(), asset.clone());
+    tokio::task::spawn_blocking(move || has_release_digest(&path, &asset)).await.unwrap_or(false)
+}
+
 /// Download a `setup.exe` install's installer into `updates/<version>/`,
 /// verified, under the release's own name: what the launcher runs.
 async fn run_installer(asset: &ReleaseAsset, version: &str) -> Result<PathBuf, String> {
@@ -213,7 +231,7 @@ async fn run_installer(asset: &ReleaseAsset, version: &str) -> Result<PathBuf, S
     tokio::fs::create_dir_all(&dir).await.map_err(|e| format!("can't create {}: {e}", dir.display()))?;
     let target = installer_path(&dir, asset);
     // Downloaded before, or by another AgentMux meanwhile.
-    if is_staged_installer(&target, asset) {
+    if is_verified_installer(&target, asset).await {
         return Ok(target);
     }
     let file = dir.join(format!("{}-{}", std::process::id(), asset.name));
@@ -223,7 +241,7 @@ async fn run_installer(asset: &ReleaseAsset, version: &str) -> Result<PathBuf, S
     }
     match tokio::fs::rename(&file, &target).await {
         Ok(()) => Ok(target),
-        Err(_) if is_staged_installer(&target, asset) => {
+        Err(_) if is_verified_installer(&target, asset).await => {
             let _ = tokio::fs::remove_file(&file).await;
             Ok(target)
         }
@@ -410,6 +428,25 @@ async fn unpack_portable(file: &Path, version: &str, parent: &Path) -> Result<Pa
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_installer_found_in_place_is_reused_only_if_it_hashes_right() {
+        let dir = tempfile::tempdir().unwrap();
+        let data = b"agentmux installer bytes";
+        let asset = ReleaseAsset {
+            name: "AgentMux-0.59.27-x64-setup.exe".into(),
+            size: data.len() as u64,
+            url: String::new(),
+            sha256: hex::encode(Sha256::digest(data)),
+        };
+        let path = dir.path().join(&asset.name);
+        std::fs::write(&path, data).unwrap();
+        assert!(is_staged_installer(&path, &asset) && has_release_digest(&path, &asset));
+        // The same name and size, other bytes.
+        std::fs::write(&path, b"agentmux installer BYTES").unwrap();
+        assert!(is_staged_installer(&path, &asset) && !has_release_digest(&path, &asset));
+        assert!(!has_release_digest(&dir.path().join("missing.exe"), &asset));
+    }
 
     #[test]
     fn only_the_exact_file_github_lists_is_accepted() {

@@ -125,6 +125,7 @@ dependencies = [
  "proptest",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "smithay-client-toolkit",
  "tempfile",
  "thiserror 1.0.69",
