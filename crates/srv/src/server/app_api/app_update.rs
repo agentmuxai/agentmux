@@ -137,3 +137,45 @@ pub(crate) async fn handle_request_upgrade(
     };
     Json(outcome).into_response()
 }
+
+#[cfg(test)]
+mod tests {
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode};
+    use serde_json::json;
+    use tower::ServiceExt;
+
+    async fn post(app: &axum::Router, host_token: Option<&str>, body: serde_json::Value) -> (StatusCode, serde_json::Value) {
+        let mut b = Request::builder()
+            .uri("/api/v1/host/app_update")
+            .method("POST")
+            .header("X-AuthKey", "test-secret-key")
+            .header("Content-Type", "application/json");
+        if let Some(token) = host_token {
+            b = b.header("X-Host-Token", token);
+        }
+        let resp = app.clone().oneshot(b.body(Body::from(body.to_string())).unwrap()).await.unwrap();
+        let status = resp.status();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        (status, serde_json::from_slice(&body).unwrap_or_default())
+    }
+
+    // §4.1: the version panel's clicks come only through the host. The
+    // instance auth key, which every agent has, isn't enough.
+    #[tokio::test]
+    async fn only_the_host_can_click_in_the_version_panel() {
+        let state = crate::server::tests::test_state();
+        *state.host_ipc.lock().await = Some(crate::server::state::HostIpc { port: 1, token: "host-ipc-token".into() });
+        let app = crate::server::build_router(state);
+        for action in ["download", "restart", "cancel"] {
+            let (s, body) = post(&app, None, json!({ "action": action })).await;
+            assert_eq!(s, StatusCode::FORBIDDEN, "{action}: {body}");
+            let (s, _) = post(&app, Some("not-the-token"), json!({ "action": action, "now": true })).await;
+            assert_eq!(s, StatusCode::FORBIDDEN, "{action}");
+        }
+        // The host gets through to the action itself.
+        let (s, body) = post(&app, Some("host-ipc-token"), json!({ "action": "launch" })).await;
+        assert_eq!(s, StatusCode::CONFLICT, "{body}");
+        assert!(body["error"].as_str().unwrap_or_default().contains("unknown action"), "{body}");
+    }
+}

@@ -267,11 +267,9 @@ Each phase is small and useful on its own.
    before any in-app upgrade.
 3. **In-app upgrade**, one install kind at a time (§4.2):
    - **3a**: the Windows portable is downloaded, verified and unpacked next
-     to the running folder (`backend/update_download.rs`,
-     `app.update-download`); Maintenance shows the progress, then "Show
+     to the running folder (`backend/update_download.rs`); Maintenance shows the progress, then "Show
      folder". Every other kind still opens the release page.
    - **3b**: **Upgrade & restart** (`backend/update_restart.rs`,
-     `app.upgrade-restart` / `app.upgrade-cancel`,
      `crates/launcher/src/upgrade_restart.rs`):
      1. srv waits for working agents to finish their turn, up to 10 minutes;
         **Restart now** skips the wait and **Cancel** stops it (§8);
@@ -300,8 +298,17 @@ Each phase is small and useful on its own.
      prompt in every window and the answer to the asker (§5.1).
    - **4b**: the post-restart note to each resumed agent, and "done" to the
      agent that asked (§5.2).
-5. **Hardening and cleanup:** a signed `SHA256SUMS` release step, code
-   signature checks before a swap, and deleting old versions.
+5. **Hardening and cleanup:**
+   - **5a**: the version panel's **Download**, **Upgrade & restart** (and
+     **Restart now**) and **Cancel** reach srv only through the host
+     (`POST /api/v1/host/app_update`, the CEF host's `app_update_action`),
+     like the answer to an agent's request (§5.1). They were RPCs any caller
+     with the instance auth key could send, which every agent holds; the
+     `agent_id` check on them stopped only callers that said who they were.
+     The `app.update-download`, `app.upgrade-restart` and
+     `app.upgrade-cancel` commands are gone.
+   - Later: a signed `SHA256SUMS` release step, code signature checks
+     before a swap, and deleting old versions.
 
 ## 8. Decisions (the operator took these recommendations, 2026-10-15)
 
