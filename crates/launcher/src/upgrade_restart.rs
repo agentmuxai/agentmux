@@ -21,7 +21,7 @@
 //!    ([`relaunch`]) and exits.
 
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -41,6 +41,10 @@ pub const ANSWER_WITHIN: Duration = Duration::from_secs(150);
 
 /// The latest request asked about: only its dialog's Yes counts.
 static LATEST_ASK: AtomicU64 = AtomicU64::new(0);
+/// The thread showing the open dialog, 0 when none (Windows).
+static DIALOG_THREAD: AtomicU32 = AtomicU32::new(0);
+
+const DIALOG_TITLE: &str = "Upgrade AgentMux";
 
 /// The supervisor's end of srv's upgrade requests. One per process: it lasts
 /// across srv respawns, since the reader of each new srv sends here too.
@@ -104,12 +108,25 @@ pub fn staged_launcher(req: &UpgradeRequest, own_dir: &Path, own_version: &str) 
 
 /// Ask the user on a thread of its own, and call `on_yes` only for an
 /// explicit Yes that still counts ([`answer_counts`]): one given within
-/// [`ANSWER_WITHIN`], to the latest request. Any other Yes is told it expired.
+/// [`ANSWER_WITHIN`], to the latest request. One dialog at a time: a newer
+/// request closes the open one, and a dialog closes itself (as No) once its
+/// time is up. A Yes that slips past either is told it expired.
 pub fn ask_then(version: String, launcher: PathBuf, on_yes: impl FnOnce(PathBuf) + Send + 'static) {
     let ask = LATEST_ASK.fetch_add(1, Ordering::SeqCst) + 1;
+    dismiss(DIALOG_THREAD.load(Ordering::SeqCst));
     std::thread::spawn(move || {
         let opened = Instant::now();
-        if !confirm(&version, &launcher) {
+        let thread = current_thread();
+        DIALOG_THREAD.store(thread, Ordering::SeqCst);
+        std::thread::spawn(move || {
+            std::thread::sleep(ANSWER_WITHIN);
+            if DIALOG_THREAD.load(Ordering::SeqCst) == thread {
+                dismiss(thread);
+            }
+        });
+        let yes = confirm(&version, &launcher);
+        let _ = DIALOG_THREAD.compare_exchange(thread, 0, Ordering::SeqCst, Ordering::SeqCst);
+        if !yes {
             return;
         }
         if answer_counts(ask, LATEST_ASK.load(Ordering::SeqCst), opened.elapsed()) {
@@ -131,6 +148,43 @@ fn answer_counts(ask: u64, latest: u64, waited: Duration) -> bool {
 }
 
 #[cfg(target_os = "windows")]
+fn current_thread() -> u32 {
+    unsafe { windows_sys::Win32::System::Threading::GetCurrentThreadId() }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn current_thread() -> u32 {
+    0
+}
+
+/// Close the dialog shown on `thread` by clicking its No button.
+#[cfg(target_os = "windows")]
+fn dismiss(thread: u32) {
+    use windows_sys::Win32::Foundation::{BOOL, HWND, LPARAM};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        EnumThreadWindows, GetDlgItem, GetWindowTextW, SendMessageW, BM_CLICK, IDNO,
+    };
+    unsafe extern "system" fn click_no(hwnd: HWND, _: LPARAM) -> BOOL {
+        let mut title = [0u16; 64];
+        let len = GetWindowTextW(hwnd, title.as_mut_ptr(), title.len() as i32).max(0) as usize;
+        if String::from_utf16_lossy(&title[..len]) == DIALOG_TITLE {
+            let no = GetDlgItem(hwnd, IDNO);
+            if !no.is_null() {
+                SendMessageW(no, BM_CLICK, 0, 0);
+            }
+            return 0;
+        }
+        1
+    }
+    if thread != 0 {
+        unsafe { EnumThreadWindows(thread, Some(click_no), 0) };
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn dismiss(_thread: u32) {}
+
+#[cfg(target_os = "windows")]
 fn confirm(version: &str, launcher: &Path) -> bool {
     use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
@@ -143,7 +197,7 @@ fn confirm(version: &str, launcher: &Path) -> bool {
          from:\n{folder}\n\nYour tabs come back and agents resume their conversations."
     );
     let wide = |s: &str| std::ffi::OsStr::new(s).encode_wide().chain(Some(0)).collect::<Vec<u16>>();
-    let (title, body) = (wide("Upgrade AgentMux"), wide(&body));
+    let (title, body) = (wide(DIALOG_TITLE), wide(&body));
     let answer = unsafe {
         MessageBoxW(
             std::ptr::null_mut(),
