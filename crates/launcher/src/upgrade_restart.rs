@@ -417,6 +417,8 @@ mod tests {
         assert!(staged(&setup_req("0.59.27", &installer), &portable_dir, &data, "0.59.26").is_err());
     }
 
+    /// Windows paths, as the line only ever runs there.
+    #[cfg(windows)]
     #[test]
     fn the_installer_line_waits_runs_silently_and_always_starts_agentmux_again() {
         let line = installer_script(

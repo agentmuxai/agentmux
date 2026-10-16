@@ -152,8 +152,18 @@ pub fn start() -> Result<AppUpdateStatus, String> {
     Ok(update_check::current_status())
 }
 
+/// `updates/` in this version's data folder: `AGENTMUX_DATA_DIR`, the very
+/// folder the launcher checks a staged installer against
+/// (`crates/launcher/src/upgrade_restart.rs`), not a root of srv's own.
+fn updates_root() -> PathBuf {
+    agentmux_common::DataPaths::from_env()
+        .map(|p| p.data_dir)
+        .unwrap_or_else(crate::backend::base::get_mux_data_dir)
+        .join("updates")
+}
+
 async fn run(asset: &ReleaseAsset, version: &str, root: &Path) -> Result<PathBuf, String> {
-    let updates = crate::backend::base::get_mux_data_dir().join("updates");
+    let updates = updates_root();
     remove_abandoned_downloads(&updates).await;
     let dir = updates.join(version);
     tokio::fs::create_dir_all(&dir).await.map_err(|e| format!("can't create {}: {e}", dir.display()))?;
@@ -197,7 +207,7 @@ fn is_staged_installer(path: &Path, asset: &ReleaseAsset) -> bool {
 /// Download a `setup.exe` install's installer into `updates/<version>/`,
 /// verified, under the release's own name: what the launcher runs.
 async fn run_installer(asset: &ReleaseAsset, version: &str) -> Result<PathBuf, String> {
-    let updates = crate::backend::base::get_mux_data_dir().join("updates");
+    let updates = updates_root();
     remove_abandoned_downloads(&updates).await;
     let dir = updates.join(version);
     tokio::fs::create_dir_all(&dir).await.map_err(|e| format!("can't create {}: {e}", dir.display()))?;
