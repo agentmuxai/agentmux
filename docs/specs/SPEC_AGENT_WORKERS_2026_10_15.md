@@ -1,7 +1,7 @@
 # Spec: an agent launches and coaches worker agents in panes
 
 **Date:** 2026-10-15
-**Status:** active. Phase A (§3.1, §3.2's pane mark, §3.5, §3.6) implemented in #5020 (as `Agents` `fork`) and #5023 (renamed `Agents` `spawn`; a worker is a new agent, not a fork; its account, §3.5): `app_api/agent_spawn.rs`. Phase B (§3.3, §3.4) implemented in #5031: `backend/worker_notes.rs`, `Agents` `workers`. Left: Phase C (§3.7); §3.2's table was not needed (Phase A's marks serve the counts and the list).
+**Status:** active. Phase A (§3.1, §3.2's pane mark, §3.5, §3.6) implemented in #5020 (as `Agents` `fork`) and #5023 (renamed `Agents` `spawn`; a worker is a new agent, not a fork; its account, §3.5): `app_api/agent_spawn.rs`. Phase B (§3.3, §3.4) implemented in #5031: `backend/worker_notes.rs`, `Agents` `workers`; a question mid-turn (§3.3) in #5035. Left: Phase C (§3.7); §3.2's table was not needed (Phase A's marks serve the counts and the list).
 **Author:** Loap-3@narko, at the operator's request
 **Scope:** srv (`app_api/agent_open.rs`, `server/agent_handlers/template.rs`, `backend/reactive/handler.rs`), the MCP `Agents` tool (`crates/mcp/src/tools/agents_tool.rs`, `panes.rs`), the agent pane header.
 **Related:** `SPEC_AGENT_QUICK_FORK_NEW_TAB_2026_08_21.md` (the UI's fork), `SPEC_JEKT_DELIVERY_STATES_AND_MAILBOX_2026_10_01.md`, `SPEC_AGENT_COORDINATION_CHANNEL_2026_10_15.md`, the Warden Supervisor (`frontend/app/view/warden-supervisor/`).
