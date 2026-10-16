@@ -246,6 +246,9 @@ pub(crate) fn build_pane_meta(cmd: &CommandPaneOpenData) -> Result<MetaMapType, 
             if cmd.follow_folder == Some(true) {
                 meta.insert(META_FOLLOW_FOLDER.to_string(), json!(true));
             }
+            if let Some(viewer) = requested_viewer(cmd)? {
+                meta.insert(META_VIEWER.to_string(), json!(viewer));
+            }
         }
         "term" => {
             meta.insert("view".to_string(), json!("term"));
@@ -379,6 +382,38 @@ const META_PENDING_OPEN_FILES: &str = "editor:pending_open_files";
 /// `{"path": ..., "follow_folder": true}`.
 const META_FOLLOW_FOLDER: &str = "editor:follow_folder";
 
+/// Block-meta key: the viewer the Editor's initial `file` opens in (pane.open's
+/// `viewer`, so `muxsh edit` shows any file as text). An entry of
+/// `editor:pending_open_files` says the same per file, as
+/// `{"path": ..., "viewer": "text"}`.
+const META_VIEWER: &str = "editor:viewer";
+
+/// pane.open's `viewer`, checked: the editor takes only `"text"` so far.
+pub(crate) fn requested_viewer(cmd: &CommandPaneOpenData) -> Result<Option<&'static str>, String> {
+    match cmd.viewer.as_deref() {
+        None => Ok(None),
+        Some("text") => Ok(Some("text")),
+        Some(other) => Err(format!("INVALID_ARG: viewer {other:?} isn't one the editor opens a file in (only \"text\")")),
+    }
+}
+
+/// An `editor:pending_open_files` entry: the path, or `{path, ...}` with how
+/// it opens.
+fn pending_open_entry(file: &str, follow_folder: bool, viewer: Option<&str>) -> serde_json::Value {
+    if !follow_folder && viewer.is_none() {
+        return json!(file);
+    }
+    let mut entry = serde_json::Map::new();
+    entry.insert("path".into(), json!(file));
+    if follow_folder {
+        entry.insert("follow_folder".into(), json!(true));
+    }
+    if let Some(viewer) = viewer {
+        entry.insert("viewer".into(), json!(viewer));
+    }
+    serde_json::Value::Object(entry)
+}
+
 /// If the calling agent (identified by its own block id, `caller_block_id`)
 /// already has an Editor pane open in its own tab, push `file` into that
 /// pane as a new tab instead of creating another Editor pane. Returns
@@ -412,6 +447,7 @@ pub(super) async fn maybe_reuse_editor_pane(
     file: &str,
     connection: &str,
     follow_folder: bool,
+    viewer: Option<&str>,
 ) -> Result<Option<PaneOpenResult>, String> {
     let mstore = &state.mstore;
     let tab_id = match super::resolve_tab_id_for_block(mstore, caller_block_id) {
@@ -433,14 +469,15 @@ pub(super) async fn maybe_reuse_editor_pane(
     // EditorViewModel drains every pending file once at construction, then
     // clears the queue — see META_PENDING_OPEN_FILES's doc comment for why
     // this replaces relying on MPS persist/replay for correctness.
-    // Entries are paths, or `{path, follow_folder}` for a media open.
+    // Entries are paths, or `{path, follow_folder, viewer}` for a media or
+    // text open.
     let mut pending: Vec<serde_json::Value> = existing
         .meta
         .get(META_PENDING_OPEN_FILES)
         .and_then(|v| v.as_array())
         .map(|arr| arr.iter().filter(|v| v.is_string() || v.is_object()).cloned().collect())
         .unwrap_or_default();
-    pending.push(if follow_folder { json!({ "path": file, "follow_folder": true }) } else { json!(file) });
+    pending.push(pending_open_entry(file, follow_folder, viewer));
 
     let meta_events = crate::server::service::dispatch_to_reducer(
         state,
@@ -1046,6 +1083,7 @@ pub async fn open_pane(state: &AppState, mut cmd: CommandPaneOpenData) -> Result
         cmd.view = "editor".to_string();
         cmd.follow_folder.get_or_insert(true);
     }
+    let viewer = pane::requested_viewer(&cmd)?;
     let mstore = state.mstore.clone();
     let event_bus = state.event_bus.clone();
 
@@ -1090,7 +1128,7 @@ pub async fn open_pane(state: &AppState, mut cmd: CommandPaneOpenData) -> Result
         {
             let connection = cmd.connection.as_deref().unwrap_or("");
             let follow = cmd.follow_folder == Some(true);
-            if let Some(result) = pane::maybe_reuse_editor_pane(state, caller_block_id, file, connection, follow).await? {
+            if let Some(result) = pane::maybe_reuse_editor_pane(state, caller_block_id, file, connection, follow, viewer).await? {
                 return Ok(result);
             }
         }

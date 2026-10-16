@@ -77,14 +77,14 @@ const META_LEGACY_FILE = "file";
 // before the pane mounts don't overwrite/lose each other (codex P1, second
 // finding on the same PR).
 const META_PENDING_OPEN_FILES = "editor:pending_open_files";
-// The initial `file` opens following newer files in its folder (a media
-// open, SPEC_EDITOR_REVAMP_UNIFIED_VIEWERS_2026_10_15.md §4.9). Cleared once used.
+// The initial `file` follows its folder (a media open, SPEC_EDITOR_REVAMP_UNIFIED_VIEWERS
+// §4.9) and opens in the viewer pane.open named (`muxsh edit`: text). Cleared once used.
 const META_FOLLOW_FOLDER = "editor:follow_folder";
+const META_VIEWER = "editor:viewer";
 
 export type EditorMode = "preview" | "source" | "split";
 
-/** How a file opens: following newer files in its folder (a media open),
- *  in a given viewer (OpenEditor's `viewer`). */
+/** How a file opens: following its folder (a media open), in a named viewer (pane.open's). */
 export interface OpenFileOpts {
     followFolder?: boolean;
     viewer?: string;
@@ -508,8 +508,9 @@ export class EditorViewModel {
             dispatch(blockId, { type: "RestoreDocTabs", doc: restored, source: "hydrate" });
         } else if (typeof legacyFile === "string" && legacyFile) {
             const followFolder = meta?.[META_FOLLOW_FOLDER] === true;
-            void this.openFile(legacyFile, { followFolder });
-            if (followFolder) void this.persistMeta({ [META_FOLLOW_FOLDER]: null });
+            const viewer = isViewerId(meta?.[META_VIEWER]) ? meta[META_VIEWER] : undefined;
+            void this.openFile(legacyFile, { followFolder, viewer });
+            if (followFolder || viewer) void this.persistMeta({ [META_FOLLOW_FOLDER]: null, [META_VIEWER]: null });
         } else if (meta?.[META_SCRATCH] === true && snapshot(blockId)?.tabs.length === 0) {
             // Widget default: open a scratch buffer when no file was persisted.
             void this.openScratch();

@@ -694,6 +694,9 @@ declare global {
         /** The Editor's initial `file` follows newer files in its folder (a
          *  media open). Cleared once used. */
         "editor:follow_folder"?: boolean;
+        /** The viewer the Editor's initial `file` opens in (pane.open's
+         *  `viewer`: "text" for `muxsh edit`). Cleared once used. */
+        "editor:viewer"?: string;
         // Settings pane: the section it opens at (settings.tsx).
         "settings:section"?: string;
         // Files pane, Hangar (SPEC_FILE_BROWSER_PANE_2026_10_01.md §6.2).

@@ -40,8 +40,8 @@ usage:
   muxsh open <file>              open a file in an editor pane
   muxsh web <url>                open a URL in a browser pane
   muxsh view <path-or-url>       open the right pane type automatically
-                                  (URL -> browser, media file -> media, folder/ -> files, else -> editor)
-  muxsh edit <file>               like 'open', but always forces the editor view
+                                  (URL -> browser, folder/ -> files, else -> editor)
+  muxsh edit <file>               like 'open', but always shows the file as text
     --title <t>                  pane/tab title
     --split <right|left|down|up> split direction relative to the calling pane (default: right)
     --collapse-tree               [open/edit/view-as-editor only] collapse the file-tree sidebar
@@ -170,8 +170,13 @@ export function parseArgs(argv) {
         const isEditor = head === "open" || head === "edit";
         const flags = parsePaneOpenFlags(argv, 2, isEditor);
         if (flags.error) return flags;
-        // 'edit' is 'open' forcing the editor view, everywhere else identical.
+        // 'edit' is 'open' in the text viewer, whatever the file is (the
+        // editor otherwise picks the viewer from its content); everywhere
+        // else identical.
         const subcommand = head === "edit" ? "open" : head;
+        if (head === "edit") {
+            return { command: "open", subcommand, file: target, ...flags, viewer: "text" };
+        }
         if (subcommand === "open") {
             return { command: "open", subcommand, file: target, ...flags };
         }
@@ -293,6 +298,7 @@ export function buildRequestBody(parsed, env = {}) {
         body.view = parsed.view ?? "editor";
         body.file = parsed.file;
         if (parsed.collapseTree && body.view === "editor") body.tree_expanded = false;
+        if (parsed.viewer && body.view === "editor") body.viewer = parsed.viewer;
     } else {
         body.view = "browser";
         body.url = parsed.url;

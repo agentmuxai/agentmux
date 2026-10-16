@@ -66,6 +66,7 @@ async fn docked_pane_open_block_is_in_reducer_and_tears_off() {
         stack_onto_block_id: None,
         reuse_editor_pane: None,
         follow_folder: None,
+        viewer: None,
         select: None,
         line: None,
         connection: None,
@@ -166,6 +167,7 @@ async fn stack_onto_block_id_creates_the_block_as_a_tab_of_that_pane() {
         stack_onto_block_id: Some(anchor.clone()),
         reuse_editor_pane: None,
         follow_folder: None,
+        viewer: None,
         select: None,
         line: None,
         connection: None,
@@ -541,6 +543,7 @@ async fn skip_placement_creates_block_without_touching_the_layout_tree() {
         stack_onto_block_id: None,
         reuse_editor_pane: None,
         follow_folder: None,
+        viewer: None,
         select: None,
         line: None,
         connection: None,
@@ -583,6 +586,7 @@ fn editor_open_cmd(
         stack_onto_block_id: None,
         reuse_editor_pane,
         follow_folder: None,
+        viewer: None,
         select: None,
         line: None,
         connection: None,
@@ -950,6 +954,67 @@ async fn open_editor_reuse_queues_multiple_pending_files() {
     );
 }
 
+/// `viewer: "text"` (`muxsh edit`) reaches a reused Editor with its file,
+/// next to a plain path and a follow-folder entry.
+#[tokio::test]
+async fn open_editor_reuse_queues_the_viewer_with_the_file() {
+    let state = test_state();
+    let ws_id = dispatch_apply(&state, Command::CreateWorkspace { name: "w".into() })
+        .await
+        .iter()
+        .find_map(|e| match e {
+            Event::WorkspaceCreated { workspace_id, .. } => Some(workspace_id.clone()),
+            _ => None,
+        })
+        .unwrap();
+    let tab_id = dispatch_apply(&state, Command::CreateTab { workspace_id: ws_id, name: "t".into() })
+        .await
+        .iter()
+        .find_map(|e| match e {
+            Event::TabCreated { tab_id, .. } => Some(tab_id.clone()),
+            _ => None,
+        })
+        .unwrap();
+    let caller = open_pane(&state, {
+        let mut cmd = editor_open_cmd(Some(tab_id.clone()), "/tmp/unused.txt", None, None);
+        cmd.view = "sysinfo".into();
+        cmd.file = None;
+        cmd
+    })
+    .await
+    .expect("open_pane caller");
+    let editor = open_pane(&state, editor_open_cmd(Some(tab_id.clone()), "/tmp/first.md", None, None))
+        .await
+        .expect("open_pane first editor");
+    show_panes(&state, &tab_id, &[&caller.block_id, &editor.block_id]).await;
+
+    let reuse = |file: &str, follow_folder: Option<bool>, viewer: Option<&str>| {
+        let mut cmd = editor_open_cmd(None, file, Some(caller.block_id.clone()), Some(true));
+        cmd.follow_folder = follow_folder;
+        cmd.viewer = viewer.map(str::to_string);
+        cmd
+    };
+    for cmd in [
+        reuse("/tmp/photo.png", None, Some("text")),
+        reuse("/tmp/plain.md", None, None),
+        reuse("/tmp/render.png", Some(true), None),
+    ] {
+        assert_eq!(open_pane(&state, cmd).await.expect("open_pane reuse").block_id, editor.block_id);
+    }
+    let err = open_pane(&state, reuse("/tmp/photo.png", None, Some("hex"))).await.unwrap_err();
+    assert!(err.starts_with("INVALID_ARG"), "{err}");
+
+    let block: Block = state.mstore.must_get(&editor.block_id).unwrap();
+    assert_eq!(
+        block.meta["editor:pending_open_files"],
+        serde_json::json!([
+            { "path": "/tmp/photo.png", "viewer": "text" },
+            "/tmp/plain.md",
+            { "path": "/tmp/render.png", "follow_folder": true },
+        ])
+    );
+}
+
 /// Regression for reagent P1 on PR #2404: `EditorViewModel.openToTheSide`/
 /// `openInTerminal` (in `frontend/app/view/editor/editor-model.ts`)
 /// call the same generic `pane.open` RPC with `split_reference_block_id`
@@ -1113,6 +1178,23 @@ fn editor_meta_carries_the_line_to_open_at() {
     assert!(!pane::build_pane_meta(&cmd).unwrap().contains_key("editor:line"));
     cmd.line = None;
     assert!(!pane::build_pane_meta(&cmd).unwrap().contains_key("editor:line"));
+}
+
+/// `viewer` on an editor open (`muxsh edit`) becomes `editor:viewer`, which
+/// the editor's initial open uses; only "text" is a viewer it takes.
+#[test]
+fn editor_meta_carries_the_viewer_to_open_in() {
+    let mut cmd = editor_open_cmd(None, "/tmp/photo.png", None, None);
+    assert!(!pane::build_pane_meta(&cmd).unwrap().contains_key("editor:viewer"));
+    cmd.viewer = Some("text".into());
+    assert_eq!(pane::build_pane_meta(&cmd).unwrap()["editor:viewer"], "text");
+    cmd.viewer = Some("image".into());
+    let err = pane::build_pane_meta(&cmd).unwrap_err();
+    assert!(err.starts_with("INVALID_ARG") && err.contains("text"), "{err}");
+
+    let parsed: CommandPaneOpenData =
+        serde_json::from_value(serde_json::json!({ "view": "editor", "file": "/tmp/a.png", "viewer": "text" })).unwrap();
+    assert_eq!(parsed.viewer.as_deref(), Some("text"));
 }
 
 #[test]

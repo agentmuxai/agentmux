@@ -760,10 +760,7 @@ pub(crate) async fn handle_ui_browser_open(
         stack_onto_block_id: None,
         connection: None,
         auth: None,
-        reuse_editor_pane: None,
-        follow_folder: None,
-        select: None,
-        line: None,
+        ..Default::default()
     };
     let mut meta = match crate::server::app_api::pane::build_pane_meta(&cmd) {
         Ok(m) => m,
@@ -1332,10 +1329,7 @@ pub(crate) async fn handle_host_browser_popup(
         stack_onto_block_id: None,
         connection: None,
         auth: None,
-        reuse_editor_pane: None,
-        follow_folder: None,
-        select: None,
-        line: None,
+        ..Default::default()
     };
     let mut meta = match crate::server::app_api::pane::build_pane_meta(&cmd) {
         Ok(m) => m,

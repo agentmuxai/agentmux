@@ -37,6 +37,16 @@ describe("openPendingFiles — one reuse batch", () => {
         expect(open).toHaveBeenCalledWith("C:/renders/out.png", { followFolder: true });
     });
 
+    it("an entry naming the text viewer opens in it (muxsh edit), whatever the file is", () => {
+        const open = vi.fn();
+        openPendingFiles([{ path: "C:/shots/a.png", viewer: "text" }, { path: "C:/b.png", viewer: "nope" }], open, () => {});
+        expect(open.mock.calls).toEqual([
+            ["C:/shots/a.png", { followFolder: false, viewer: "text" }],
+            ["C:/b.png", { followFolder: false }],
+        ]);
+        expect(open.mock.calls[1][1]).not.toHaveProperty("viewer");
+    });
+
     it("tells an object entry apart across reads of the queue", () => {
         expect(pendingEntryKey({ path: "C:/a.png", follow_folder: true })).toBe(pendingEntryKey({ path: "C:/a.png", follow_folder: true }));
         expect(pendingEntryKey("C:/a.png")).not.toBe(pendingEntryKey({ path: "C:/a.png", follow_folder: true }));

@@ -118,7 +118,7 @@ describe("muxsh parseArgs — open/web/edit", () => {
         expect(parseArgs(["open", "/tmp/foo.md", "--wat"]).error).toMatch(/unknown argument '--wat'/);
     });
 
-    it("'edit' parses like 'open' (command/subcommand both 'open')", () => {
+    it("'edit' parses like 'open' (command/subcommand both 'open'), in the text viewer", () => {
         expect(parseArgs(["edit", "/tmp/foo.md"])).toEqual({
             command: "open",
             subcommand: "open",
@@ -128,7 +128,9 @@ describe("muxsh parseArgs — open/web/edit", () => {
             collapseTree: false,
             floating: false,
             focus: true,
+            viewer: "text",
         });
+        expect(parseArgs(["open", "/tmp/foo.md"])).not.toHaveProperty("viewer");
     });
 
     it("'edit' with no file is an error", () => {
@@ -318,6 +320,18 @@ describe("muxsh parseArgs — agent", () => {
 });
 
 describe("muxsh buildRequestBody", () => {
+    it("'edit' asks for the text viewer, so an image opens as text; 'open' lets the editor choose", () => {
+        expect(buildRequestBody(parseArgs(["edit", "/tmp/photo.png"]), {})).toEqual({
+            focus: true,
+            floating: false,
+            view: "editor",
+            file: "/tmp/photo.png",
+            viewer: "text",
+        });
+        expect(buildRequestBody(parseArgs(["open", "/tmp/photo.png"]), {})).not.toHaveProperty("viewer");
+        expect(buildRequestBody(parseArgs(["view", "/tmp/photo.png"]), {})).not.toHaveProperty("viewer");
+    });
+
     it("with no AGENTMUX_BLOCKID in env, 'open' sends no split fields even if --split was passed", () => {
         // resolve_placement (server/app_api/pane.rs) always falls back to plain
         // "insert" without a split_reference_block_id, regardless of
