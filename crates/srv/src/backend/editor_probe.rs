@@ -359,7 +359,7 @@ mod tests {
 
     #[test]
     fn text_starting_like_a_weak_magic_stays_text() {
-        // "BM" and "GIF8" alone don't make an image (muxreview P1 on #5016).
+        // "BM" and "GIF8" alone don't make an image (#5016).
         assert_eq!(p(b"BMW owners club minutes, 2026\n", Some("txt")).kind, "text");
         assert_eq!(p(b"GIF8 notes: the format\n", Some("md")).kind, "text");
         // "%PDF-" in text is text; at the start, or after binary junk, it's a PDF.
