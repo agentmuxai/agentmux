@@ -402,6 +402,10 @@ declare global {
         openNewWindowWithView: (view: string, meta?: Record<string, unknown>) => Promise<string>;
         /** Open a new window showing an existing workspace, not a fresh one. */
         openWorkspaceInNewWindow: (workspaceId: string) => Promise<string>;
+        /** A window a session restore rebuilt (srv `session_windows.rs`), opened where it
+         *  was: `x`/`y`/`width`/`height` are its saved rect in physical pixels. Opens
+         *  where a new window goes when that spot is on no monitor now. */
+        openRestoredWindow: (w: { workspaceid: string; x?: number; y?: number; width?: number; height?: number }) => Promise<string>;
         closeWindow: (label?: string) => Promise<void>;
         minimizeWindow: () => void;
         maximizeWindow: () => void;

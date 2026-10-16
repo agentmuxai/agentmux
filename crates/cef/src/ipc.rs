@@ -253,6 +253,7 @@ async fn route_command(
         "is_main_window" => Ok(commands::window::is_main_window(args)),
         "get_window_label" => Ok(commands::window::get_window_label(args)),
         "open_new_window" => commands::window::open_new_window(state, args),
+        "open_restored_window" => commands::window::open_restored_window(state, args),
         "open_subwindow" => {
             // Agent / backend-only API — creates a sub-window tied to a full
             // instance. Hidden from the taskbar. Not exposed in user UI.
