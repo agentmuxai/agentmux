@@ -12,6 +12,7 @@ const disconnect = vi.fn(async () => {});
 const cancel = vi.fn(async () => {});
 const refresh = vi.fn(async () => {});
 const [loading, setLoading] = createSignal(false);
+const [identityProviders, setIdentityProviders] = createSignal<string[]>([]);
 vi.mock("@/app/view/accounts/AgentMuxConnectPanel", () => ({
     useMuxBusStatus: () => ({
         connect,
@@ -21,6 +22,7 @@ vi.mock("@/app/view/accounts/AgentMuxConnectPanel", () => ({
         loading,
         error: () => null,
         isConfigured: () => true,
+        identityProviders,
     }),
 }));
 
@@ -31,6 +33,7 @@ describe("MuxBusSignIn", () => {
     beforeEach(() => {
         for (const f of [connect, disconnect, cancel, refresh]) f.mockClear();
         setLoading(false);
+        setIdentityProviders([]);
     });
     afterEach(() => cleanup());
 
@@ -46,6 +49,16 @@ describe("MuxBusSignIn", () => {
         expect(screen.getByRole("status").textContent).toBe(muxbusDeliveryLine(status));
         fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
         expect(connect).toHaveBeenCalledTimes(1);
+    });
+
+    it("offers the cloud's published sign-ins", () => {
+        acceptMuxbusDelivery({ state: "signed_out", since_ms: Date.now() });
+        setIdentityProviders(["Google", "SignInWithApple"]);
+        render(() => <MuxBusSignIn />);
+        fireEvent.click(screen.getByRole("button", { name: "Continue with Apple" }));
+        expect(connect).toHaveBeenCalledWith("SignInWithApple");
+        fireEvent.click(screen.getByRole("button", { name: "Sign in with email" }));
+        expect(connect).toHaveBeenLastCalledWith(undefined);
     });
 
     it("shows a working sign-in with Sign out, reconnecting included", () => {

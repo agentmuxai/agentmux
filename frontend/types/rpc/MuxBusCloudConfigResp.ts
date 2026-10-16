@@ -25,4 +25,9 @@ console: string,
  * prefers over the ones in its request. Empty with `source: "default"`:
  * srv has no compiled sign-in settings, only the frontend build does.
  */
-cognitoDomain: string, clientId: string, region: string, userPoolId: string, };
+cognitoDomain: string, clientId: string, region: string, userPoolId: string, 
+/**
+ * The social sign-ins the cloud publishes (`Google`, `SignInWithApple`),
+ * which the sign-in offers as buttons. Empty when it publishes none.
+ */
+identityProviders: Array<string>, };

@@ -30,6 +30,11 @@ pub const COMMAND_MUXBUS_CLOUDCONFIG: &str = "muxbus.cloudconfig";
 pub struct MuxBusLoginReq {
     pub cognito_domain: String,
     pub client_id: String,
+    /// `Google` or `SignInWithApple` to go straight to that provider; absent
+    /// for email (Cognito's own page). Anything else is refused.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub identity_provider: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, ts_rs::TS)]
@@ -143,6 +148,9 @@ pub struct MuxBusCloudConfigResp {
     pub client_id: String,
     pub region: String,
     pub user_pool_id: String,
+    /// The social sign-ins the cloud publishes (`Google`, `SignInWithApple`),
+    /// which the sign-in offers as buttons. Empty when it publishes none.
+    pub identity_providers: Vec<String>,
 }
 
 /// What `muxbus.cloudconfig` reports for a discovery result.
@@ -157,6 +165,7 @@ fn cloud_config(discovered: Option<crate::muxbus::discovery::CloudSettings>, res
             client_id: s.cognito.client_id,
             region: s.cognito.region,
             user_pool_id: s.cognito.user_pool_id,
+            identity_providers: s.cognito.identity_providers,
         },
         None => MuxBusCloudConfigResp {
             source: MuxBusCloudConfigSource::Default,
@@ -167,6 +176,7 @@ fn cloud_config(discovered: Option<crate::muxbus::discovery::CloudSettings>, res
             client_id: String::new(),
             region: String::new(),
             user_pool_id: String::new(),
+            identity_providers: Vec::new(),
         },
     }
 }
@@ -196,10 +206,20 @@ pub fn register_muxbus_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         return Ok(MuxBusLoginResp { success: false, email: String::new(), error: Some(e) });
                     }
                 };
+                let identity_provider = match crate::muxbus::discovery::check_identity_provider(
+                    discovered.as_ref(),
+                    req.identity_provider.as_deref(),
+                ) {
+                    Ok(provider) => provider,
+                    Err(e) => {
+                        return Ok(MuxBusLoginResp { success: false, email: String::new(), error: Some(e) });
+                    }
+                };
 
                 match crate::muxbus::pkce::run_pkce_login(
                     &cognito_domain,
                     &client_id,
+                    identity_provider,
                     &http,
                 )
                 .await
@@ -470,6 +490,12 @@ mod req_shape_tests {
             serde_json::from_value(json!({"cognitoDomain": "d", "clientId": "c"}))
                 .expect("muxbus.login must accept camelCase keys");
         assert_eq!((r.cognito_domain.as_str(), r.client_id.as_str()), ("d", "c"));
+        assert_eq!(r.identity_provider, None, "email sign-in sends no provider");
+
+        let r: MuxBusLoginReq =
+            serde_json::from_value(json!({"cognitoDomain": "d", "clientId": "c", "identityProvider": "Google"}))
+                .expect("a chosen provider");
+        assert_eq!(r.identity_provider.as_deref(), Some("Google"));
 
         assert!(
             serde_json::from_value::<MuxBusLoginReq>(json!({"cognito_domain": "d", "client_id": "c"}))
@@ -512,7 +538,8 @@ mod req_shape_tests {
     fn published() -> crate::muxbus::discovery::CloudSettings {
         crate::muxbus::discovery::parse(
             r#"{"version":1,"api":"https://api.example.test","ws":"wss://ws.example.test","console":"https://console.example.test",
-                "cognito":{"domain":"https://auth.example.test","clientId":"abc123","region":"us-east-1","userPoolId":"us-east-1_X"}}"#,
+                "cognito":{"domain":"https://auth.example.test","clientId":"abc123","region":"us-east-1","userPoolId":"us-east-1_X",
+                "identityProviders":["Google","SignInWithApple"]}}"#,
             "https://relay.example.test",
         )
         .unwrap()
@@ -531,6 +558,7 @@ mod req_shape_tests {
         assert_eq!(r.client_id, "abc123");
         assert_eq!(r.region, "us-east-1");
         assert_eq!(r.user_pool_id, "us-east-1_X");
+        assert_eq!(r.identity_providers, vec!["Google", "SignInWithApple"]);
     }
 
     // No document (an older relay, or discovery failed with no earlier copy):
@@ -543,6 +571,7 @@ mod req_shape_tests {
         assert_eq!(r.api, "https://relay.example.test");
         assert_eq!(r.ws, crate::muxbus::cloud_subscriber::MUXBUS_WS_URL);
         assert!(r.client_id.is_empty() && r.cognito_domain.is_empty() && r.console.is_empty());
+        assert!(r.identity_providers.is_empty(), "no buttons: the plain Sign in");
     }
 
     // The wire shape the frontend reads: camelCase keys, lowercase source.
@@ -553,6 +582,7 @@ mod req_shape_tests {
         assert_eq!(v["clientId"], "abc123");
         assert_eq!(v["cognitoDomain"], "https://auth.example.test");
         assert_eq!(v["userPoolId"], "us-east-1_X");
+        assert_eq!(v["identityProviders"], json!(["Google", "SignInWithApple"]));
         let v = serde_json::to_value(cloud_config(None, String::new())).unwrap();
         assert_eq!(v["source"], "default");
     }

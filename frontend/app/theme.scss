@@ -177,6 +177,14 @@
     --window-close-hover-bg: #c42b1c;
     --window-close-press-bg: #b7201b;
     --window-close-fg: #ffffff;
+    // Google's light and Apple's white sign-in buttons (muxbus-sign-in-choices.scss).
+    // Their branding guidelines fix these colours, so no theme overrides them.
+    --signin-google-bg: #ffffff;
+    --signin-google-fg: #1f1f1f;
+    --signin-google-line: #747775;
+    --signin-apple-bg: #ffffff;
+    --signin-apple-fg: #000000;
+    --signin-brand-hover-bg: #f2f2f2;
     --success-text-color: #10b981;
     --warning-text-color: #d97706;
     // Own literal, NOT an alias to --form-element-bg-color: that resolves to

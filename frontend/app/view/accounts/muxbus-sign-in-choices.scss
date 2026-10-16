@@ -1,0 +1,100 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// The AgentMux Cloud sign-in choices (muxbus-sign-in-choices.tsx). The
+// provider buttons are line-style `.ui-button`s in their brand's colours;
+// the email button is the app's accent `Button`.
+
+.muxbus-signin {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    max-width: 360px;
+}
+
+.muxbus-signin-choices {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+
+    .ui-button {
+        width: 100%;
+        --ui-height: 32px;
+    }
+}
+
+.muxbus-signin-provider {
+    font-weight: 600;
+}
+
+.muxbus-signin-google {
+    --ui-fg: var(--signin-google-fg);
+    --ui-fg-hover: var(--signin-google-fg);
+    --ui-bg: var(--signin-google-bg);
+    --ui-bg-hover: var(--signin-brand-hover-bg);
+    --ui-line: var(--signin-google-line);
+    --ui-line-hover: var(--signin-google-line);
+}
+
+.muxbus-signin-apple {
+    --ui-fg: var(--signin-apple-fg);
+    --ui-fg-hover: var(--signin-apple-fg);
+    --ui-bg: var(--signin-apple-bg);
+    --ui-bg-hover: var(--signin-brand-hover-bg);
+    --ui-line: var(--signin-apple-bg);
+    --ui-line-hover: var(--signin-apple-bg);
+}
+
+.muxbus-signin-mark {
+    width: 16px;
+    height: 16px;
+    flex: none;
+}
+
+.muxbus-signin-or {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    color: var(--secondary-text-color);
+    font-size: var(--text-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+
+    &::before,
+    &::after {
+        content: "";
+        flex: 1;
+        height: 1px;
+        background: var(--border-color);
+    }
+}
+
+.muxbus-signin-scopes {
+    font-size: var(--text-xs);
+    line-height: 1.5;
+    color: var(--secondary-text-color);
+
+    p {
+        margin: 0 0 var(--space-1);
+    }
+
+    ul {
+        margin: 0 0 var(--space-1);
+        padding-left: var(--space-4);
+    }
+
+    li {
+        margin-bottom: var(--space-1);
+    }
+
+    strong,
+    .muxbus-signin-scopes-title {
+        color: var(--main-text-color);
+        font-weight: 600;
+    }
+
+    code {
+        font-family: var(--font-mono);
+        color: var(--main-text-color);
+    }
+}
