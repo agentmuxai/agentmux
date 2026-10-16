@@ -196,6 +196,15 @@ describe("Maintenance: Upgrade & restart", () => {
         acceptAppUpdate(download("ready", { ...FOLDER, error: "AgentMux didn't restart: the upgrade was declined" }));
         expect(await screen.findByText(/the upgrade was declined/)).toBeTruthy();
     });
+
+    it("a Cancel srv refuses says why", async () => {
+        updateStatus.mockResolvedValue(download("waiting", { ...FOLDER, waiting_for: 1 }));
+        upgradeCancel.mockRejectedValue(new Error("AgentMux is already restarting"));
+        render(() => <MaintenanceSection />);
+        expect(await screen.findByText("Waiting for 1 agent to finish…")).toBeTruthy();
+        fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+        expect(await screen.findByText(/AgentMux is already restarting/)).toBeTruthy();
+    });
 });
 
 describe("Maintenance on a setup.exe install", () => {

@@ -23,7 +23,6 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::Duration;
 
-
 use agentmux_common::srv_stderr::UpgradeTarget;
 
 use crate::backend::update_check::{self, AppUpdateStatus, DownloadStatus};

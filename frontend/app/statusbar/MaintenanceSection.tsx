@@ -327,7 +327,7 @@ export const MaintenanceSection = (): JSX.Element => {
                         <Button density="compact" class="maintenance-btn" onClick={() => runUpgrade(true)}>
                             Restart now
                         </Button>
-                        <Button density="compact" class="maintenance-btn" onClick={() => void cancelUpgrade()}>
+                        <Button density="compact" class="maintenance-btn" onClick={() => cancelUpgrade().catch((e) => setStartError(String(e?.message ?? e)))}>
                             Cancel
                         </Button>
                     </Show>
