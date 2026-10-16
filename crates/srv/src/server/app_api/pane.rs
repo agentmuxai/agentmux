@@ -243,6 +243,9 @@ pub(crate) fn build_pane_meta(cmd: &CommandPaneOpenData) -> Result<MetaMapType, 
             if let Some(line) = cmd.line.filter(|&n| n > 0) {
                 meta.insert("editor:line".to_string(), json!(line));
             }
+            if cmd.follow_folder == Some(true) {
+                meta.insert(META_FOLLOW_FOLDER.to_string(), json!(true));
+            }
         }
         "term" => {
             meta.insert("view".to_string(), json!("term"));
@@ -268,11 +271,15 @@ pub(crate) fn build_pane_meta(cmd: &CommandPaneOpenData) -> Result<MetaMapType, 
         "tower" => {
             meta.insert("view".to_string(), json!("tower"));
         }
+        // The Media pane is folded into the Editor: a media request opens an
+        // Editor whose tab follows newer files in the folder, as Media did.
+        // SPEC_EDITOR_REVAMP_UNIFIED_VIEWERS_2026_10_15.md §4.11.
         "media" => {
             let file = cmd.file.as_deref().filter(|s| !s.is_empty())
                 .ok_or_else(|| "MISSING_ARG: view=media requires 'file'".to_string())?;
-            meta.insert("view".to_string(), json!("media"));
-            meta.insert("media:path".to_string(), json!(file));
+            meta.insert("view".to_string(), json!("editor"));
+            meta.insert("file".to_string(), json!(file));
+            meta.insert(META_FOLLOW_FOLDER.to_string(), json!(true));
         }
         // The Files pane ("Hangar"). The folder comes from `file`, else
         // `cwd`, else home; `select` becomes a one-shot `files:select` the
@@ -366,6 +373,12 @@ pub(crate) fn build_pane_meta(cmd: &CommandPaneOpenData) -> Result<MetaMapType, 
 /// machinery.
 const META_PENDING_OPEN_FILES: &str = "editor:pending_open_files";
 
+/// Block-meta key: the Editor's initial `file` opens following newer files
+/// in its folder (an image or video tab). An entry of
+/// `editor:pending_open_files` says the same per file, as
+/// `{"path": ..., "follow_folder": true}`.
+const META_FOLLOW_FOLDER: &str = "editor:follow_folder";
+
 /// If the calling agent (identified by its own block id, `caller_block_id`)
 /// already has an Editor pane open in its own tab, push `file` into that
 /// pane as a new tab instead of creating another Editor pane. Returns
@@ -398,6 +411,7 @@ pub(super) async fn maybe_reuse_editor_pane(
     caller_block_id: &str,
     file: &str,
     connection: &str,
+    follow_folder: bool,
 ) -> Result<Option<PaneOpenResult>, String> {
     let mstore = &state.mstore;
     let tab_id = match super::resolve_tab_id_for_block(mstore, caller_block_id) {
@@ -419,13 +433,14 @@ pub(super) async fn maybe_reuse_editor_pane(
     // EditorViewModel drains every pending file once at construction, then
     // clears the queue — see META_PENDING_OPEN_FILES's doc comment for why
     // this replaces relying on MPS persist/replay for correctness.
-    let mut pending: Vec<String> = existing
+    // Entries are paths, or `{path, follow_folder}` for a media open.
+    let mut pending: Vec<serde_json::Value> = existing
         .meta
         .get(META_PENDING_OPEN_FILES)
         .and_then(|v| v.as_array())
-        .map(|arr| arr.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+        .map(|arr| arr.iter().filter(|v| v.is_string() || v.is_object()).cloned().collect())
         .unwrap_or_default();
-    pending.push(file.to_string());
+    pending.push(if follow_folder { json!({ "path": file, "follow_folder": true }) } else { json!(file) });
 
     let meta_events = crate::server::service::dispatch_to_reducer(
         state,
@@ -1017,7 +1032,20 @@ mod close_pane_tests {
 /// (`agentmux-mcp`'s `OpenEditor` tool). Creates a block for the requested
 /// view, enqueues a layout action (split or insert), and broadcasts the
 /// block/tab/layout updates so the frontend renders the new pane.
-pub async fn open_pane(state: &AppState, cmd: CommandPaneOpenData) -> Result<PaneOpenResult, String> {
+pub async fn open_pane(state: &AppState, mut cmd: CommandPaneOpenData) -> Result<PaneOpenResult, String> {
+    // The Media pane is folded into the Editor
+    // (SPEC_EDITOR_REVAMP_UNIFIED_VIEWERS_2026_10_15.md §4.11): a media open
+    // is an Editor open that follows the folder, and may reuse the Editor
+    // pane on screen like OpenEditor does.
+    if cmd.view == "media" && cmd.meta.is_none() {
+        if let Some(conn) = cmd.connection.as_deref().map(str::trim).filter(|c| !c.is_empty() && *c != "local") {
+            if crate::backend::fs_ops::remote::ssh_connection(Some(conn)).is_some() {
+                return Err(format!("INVALID_ARG: media files on {conn} can't be shown yet"));
+            }
+        }
+        cmd.view = "editor".to_string();
+        cmd.follow_folder.get_or_insert(true);
+    }
     let mstore = state.mstore.clone();
     let event_bus = state.event_bus.clone();
 
@@ -1061,7 +1089,8 @@ pub async fn open_pane(state: &AppState, cmd: CommandPaneOpenData) -> Result<Pan
             (cmd.split_reference_block_id.as_deref(), cmd.file.as_deref())
         {
             let connection = cmd.connection.as_deref().unwrap_or("");
-            if let Some(result) = pane::maybe_reuse_editor_pane(state, caller_block_id, file, connection).await? {
+            let follow = cmd.follow_folder == Some(true);
+            if let Some(result) = pane::maybe_reuse_editor_pane(state, caller_block_id, file, connection, follow).await? {
                 return Ok(result);
             }
         }

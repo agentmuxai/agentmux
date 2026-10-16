@@ -75,6 +75,16 @@ export interface EditorBuffer {
     /** Label to show in the tab instead of the bare filename. Used for
      *  scratch buffers ("Untitled-1") and may be set by pane.open callers. */
     displayName?: string;
+    /** The viewer showing the file ("text", "image", "media", "info"),
+     *  chosen from the file's probe when it loads; absent until then, which
+     *  the view reads as text. Not persisted: a restore probes again.
+     *  docs/specs/SPEC_EDITOR_REVAMP_UNIFIED_VIEWERS_2026_10_15.md §4.1. */
+    viewer?: string;
+    /** "Reopen with…": the viewer the user chose for this tab. Persisted. */
+    viewerOverride?: string;
+    /** An image or video tab follows newer matching files in its folder
+     *  (the retired Media pane's behaviour, §4.9). Persisted. */
+    followFolder?: boolean;
 }
 
 /** One tab as the editor reads it: the document tab, flattened. */
@@ -183,6 +193,26 @@ export type EditorPaneCommand =
           source?: EditorCommandSource;
       }
     | { type: "CloseTab"; tabId: string; force?: boolean; source?: EditorCommandSource }
+    | {
+          /** The viewer the tab's probe chose (`override` unset), or the
+           *  user's "Reopen with…" choice (`override` true: kept, and the
+           *  tab reads its file again in that viewer). */
+          type: "SetTabViewer";
+          tabId: string;
+          viewer: string;
+          override?: boolean;
+          source?: EditorCommandSource;
+      }
+    | { type: "SetFollowFolder"; tabId: string; follow: boolean; source?: EditorCommandSource }
+    | {
+          /** Follow-folder: the tab now shows a newer file from its folder
+           *  (same tab id). A tab already showing that file is activated
+           *  instead, and this one left as it is. */
+          type: "RetargetTab";
+          tabId: string;
+          newPath: string;
+          source?: EditorCommandSource;
+      }
     | { type: "PinTab"; tabId: string; source?: EditorCommandSource }
     | { type: "SwitchTab"; tabId: string; source?: EditorCommandSource }
     | { type: "CycleTab"; delta: number; source?: EditorCommandSource }
@@ -453,6 +483,51 @@ export function update(state: EditorPaneState, command: EditorPaneCommand): Redu
             return next(state, promoteDoc(doc, tab.id));
         }
 
+        case "SetTabViewer": {
+            const tab = tabById(doc, command.tabId);
+            if (!tab) return same(state);
+            if (!command.override) {
+                if (tab.payload.viewer === command.viewer) return same(state);
+                return next(state, patchBuffer(doc, tab.id, { viewer: command.viewer }));
+            }
+            // Reopen with: the tab reads its file again, in that viewer.
+            return next(
+                state,
+                patchBuffer(doc, tab.id, {
+                    viewer: command.viewer,
+                    viewerOverride: command.viewer,
+                    contentLoaded: false,
+                    contentHash: "",
+                    loadError: null,
+                    readOnly: false,
+                }),
+                [{ type: "TabActivated", tabId: tab.id, filePath: tab.payload.filePath }]
+            );
+        }
+
+        case "SetFollowFolder": {
+            const tab = tabById(doc, command.tabId);
+            if (!tab || !!tab.payload.followFolder === command.follow) return same(state);
+            return next(state, patchBuffer(doc, tab.id, { followFolder: command.follow || undefined }));
+        }
+
+        case "RetargetTab": {
+            const tab = tabById(doc, command.tabId);
+            if (!tab) return same(state);
+            const canon = canonicalizePath(command.newPath);
+            if (tab.payload.filePath === canon) return same(state);
+            const other = doc.tabs.find((t) => t.key === canon);
+            if (other) {
+                const d = activateDoc(doc, other.id);
+                return next(state, d, activated(d));
+            }
+            return next(
+                state,
+                patchBuffer(doc, tab.id, { filePath: canon, language: deriveLanguage(canon), contentLoaded: false, contentHash: "" }),
+                doc.activeId === tab.id ? [{ type: "TabActivated", tabId: tab.id, filePath: canon }] : []
+            );
+        }
+
         case "CloseTab": {
             const tab = tabById(doc, command.tabId);
             // Closing an already-closed tab is benign (double-click on the
@@ -636,13 +711,24 @@ export function serializeEditorBuffer(b: EditorBuffer): unknown {
         path: b.filePath,
         language: b.language,
         ...(b.isScratch && b.scratchId ? { scratchId: b.scratchId, displayName: b.displayName } : {}),
+        ...(b.viewerOverride ? { viewer: b.viewerOverride } : {}),
+        ...(b.followFolder ? { followFolder: true } : {}),
     };
 }
 
 export function deserializeEditorBuffer(state: unknown): EditorBuffer | null {
-    const s = state as { path?: unknown; language?: unknown; scratchId?: unknown; displayName?: unknown } | null;
+    const s = state as {
+        path?: unknown;
+        language?: unknown;
+        scratchId?: unknown;
+        displayName?: unknown;
+        viewer?: unknown;
+        followFolder?: unknown;
+    } | null;
     if (!s || typeof s.path !== "string" || !s.path) return null;
     const b = freshBuffer(s.path, typeof s.language === "string" ? s.language : undefined);
+    if (typeof s.viewer === "string" && s.viewer) b.viewerOverride = s.viewer;
+    if (s.followFolder === true) b.followFolder = true;
     if (typeof s.scratchId === "string") {
         b.isScratch = true;
         b.scratchId = s.scratchId;

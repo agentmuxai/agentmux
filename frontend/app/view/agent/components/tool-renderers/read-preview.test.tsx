@@ -85,11 +85,11 @@ describe("a Read of an image", () => {
         expect(container.textContent).not.toContain("keys");
     });
 
-    it("opens the file in a Media pane on click", async () => {
+    it("opens the file in the editor on click", async () => {
         const { container } = show(node({ result: result() }));
         fireEvent.click(container.querySelector("img.agent-tool-image")!);
         await waitFor(() =>
-            expect(h.createBlock).toHaveBeenCalledWith({ meta: { view: "media", "media:path": "C:/shots/a.png" } })
+            expect(h.createBlock).toHaveBeenCalledWith({ meta: { view: "editor", file: "C:/shots/a.png", "editor:follow_folder": true } })
         );
     });
 

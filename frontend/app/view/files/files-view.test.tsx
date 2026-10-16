@@ -325,13 +325,19 @@ describe("the Files pane: navigation", () => {
         const v = mount();
         await waitFor(() => expect(v.names()).toHaveLength(4));
         fireEvent.dblClick(v.row("b.txt"));
-        expect(h.rpcCall).toHaveBeenCalledWith(
-            "pane.open",
-            { view: "editor", file: `${HOME}\\b.txt`, split_direction: "right", split_reference_block_id: "b1" },
-            {}
+        // After looking for an Editor on screen to add the file to (none here).
+        await waitFor(() =>
+            expect(h.rpcCall).toHaveBeenCalledWith(
+                "pane.open",
+                { view: "editor", file: `${HOME}\\b.txt`, split_direction: "right", split_reference_block_id: "b1" },
+                {}
+            )
         );
-        expect(openTargetOf("a.png")).toBe("media");
-        expect(openTargetOf("a.pdf")).toBe("os");
+        // The Editor shows images, video, PDFs and other binaries itself.
+        expect(openTargetOf("a.png")).toBe("editor");
+        expect(openTargetOf("a.pdf")).toBe("editor");
+        expect(openTargetOf("a.zip")).toBe("editor");
+        expect(openTargetOf("a.docx")).toBe("os");
         expect(openTargetOf("setup.exe")).toBe("program");
         expect(openTargetOf("Makefile")).toBe("editor");
     });

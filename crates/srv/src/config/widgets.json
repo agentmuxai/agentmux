@@ -45,7 +45,7 @@
         "display:pinned": true,
         "icon": "file-code",
         "label": "Editor",
-        "description": "Code editor with syntax highlighting",
+        "description": "Open and view any file: code, text, images, video, audio, binary",
         "blockdef": {
             "meta": {
                 "view": "editor",
@@ -222,18 +222,6 @@
                 "view": "browser",
                 "url": "https://teams.microsoft.com/",
                 "browser:show_controls": false
-            }
-        }
-    },
-    "defwidget@media": {
-        "display:order": 14,
-        "display:pinned": false,
-        "icon": "photo-film",
-        "label": "Media",
-        "description": "View images and video files, with live updates as they change on disk",
-        "blockdef": {
-            "meta": {
-                "view": "media"
             }
         }
     },

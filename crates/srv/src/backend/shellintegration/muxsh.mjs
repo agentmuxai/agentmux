@@ -79,14 +79,6 @@ a pane — not duplicated here as 'muxsh agent open'.`;
 
 const EDITOR_ONLY_FLAGS = ["--collapse-tree"];
 const SPLIT_DIRECTIONS = ["right", "left", "down", "up"];
-const MEDIA_EXTENSIONS = [
-    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp", ".ico",
-    ".mp4", ".webm", ".mov", ".avi",
-    ".mp3", ".wav", ".ogg", ".flac",
-    ".pdf",
-];
-// Not derived from a canonical AgentMux list (open question, SPEC_MUXSH_FULL_COLLECTION_2026_09_16.md §7.4) —
-// hand-rolled and may drift from whatever the frontend's own pane-type resolution considers "media".
 const URL_PATTERN = /^\w+:\/\//;
 
 const CONFIG_PATH_ENV_VARS = {
@@ -152,8 +144,8 @@ function parsePaneOpenFlags(argv, startIndex, isEditor) {
 export function guessView(target) {
     if (URL_PATTERN.test(target)) return "browser";
     if (/[\\/]$/.test(target) || target === "." || target === ".." || target === "~") return "files";
-    const lower = target.toLowerCase();
-    if (MEDIA_EXTENSIONS.some((ext) => lower.endsWith(ext))) return "media";
+    // Every file: the Editor opens any file and picks the viewer itself
+    // (SPEC_EDITOR_REVAMP_UNIFIED_VIEWERS_2026_10_15.md §4.11).
     return "editor";
 }
 

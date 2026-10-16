@@ -687,9 +687,13 @@ declare global {
         "term:mode"?: string;
         "term:theme"?: string;
         "help:zoom"?: number;
-        /** Absolute path to a file or directory the Media pane is pointed
-         *  at. See docs/specs/SPEC_MEDIA_PANE_2026_07_26.md. */
+        /** A saved Media pane's file, from before the Media pane was folded
+         *  into the Editor; the Editor migrates it on open
+         *  (SPEC_EDITOR_REVAMP_UNIFIED_VIEWERS_2026_10_15.md §4.12.2). */
         "media:path"?: string;
+        /** The Editor's initial `file` follows newer files in its folder (a
+         *  media open). Cleared once used. */
+        "editor:follow_folder"?: boolean;
         // Settings pane: the section it opens at (settings.tsx).
         "settings:section"?: string;
         // Files pane, Hangar (SPEC_FILE_BROWSER_PANE_2026_10_01.md §6.2).

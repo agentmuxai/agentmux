@@ -381,10 +381,10 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
         // On a host: in an editor on that host; nothing else opens there yet.
         if (model.connection()) {
             if (target === "editor") void openInPane("editor", path, model.blockId, model.connection()).catch(fail);
-            else model.notOnHost(`Opening ${target === "media" ? "media files" : "programs and other files"}`);
+            else model.notOnHost("Opening programs and other files");
             return;
         }
-        if (target === "editor" || target === "media") void openInPane(target, path, model.blockId).catch(fail);
+        if (target === "editor") void openInPane("editor", path, model.blockId).catch(fail);
         else if (target === "os") void openWithOs(path).catch(fail);
         else
             setConfirm({

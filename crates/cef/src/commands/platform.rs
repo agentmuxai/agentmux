@@ -1012,14 +1012,6 @@ pub fn reveal_in_file_explorer(args: &serde_json::Value) -> Result<serde_json::V
     Ok(serde_json::Value::Null)
 }
 
-/// Extensions the Media pane can display. Kept in sync by hand with
-/// `IMAGE_EXTENSIONS`/`VIDEO_EXTENSIONS`/`AUDIO_EXTENSIONS` in
-/// `frontend/app/view/media/media.tsx` — there's no shared-constant
-/// mechanism across the Rust host / TS frontend boundary, so a change to
-/// one list needs the same change here. Deliberately no `mkv`: Chromium's
-/// `<video>` element doesn't reliably accept the Matroska container for
-/// direct playback regardless of the codec inside, so listing it here
-/// would let a user pick a file that then fails to render.
 /// Hold for the lifetime of a native file dialog: on Windows it steps
 /// "Always on top" floaters down so the (unowned) dialog can't end up behind
 /// one (SPEC_FLOATING_PANE_ALWAYS_ON_TOP_2026_09_27 §3.1). No-op elsewhere.
@@ -1034,14 +1026,13 @@ fn host_dialog_guard() -> NoDialogGuard {
 #[cfg(not(target_os = "windows"))]
 struct NoDialogGuard;
 
-const MEDIA_IMAGE_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "gif", "webp"];
-const MEDIA_VIDEO_EXTENSIONS: &[&str] = &["webm", "mp4", "mov"];
-const MEDIA_AUDIO_EXTENSIONS: &[&str] = &["wav"];
 
-/// Show a native "open file" dialog, filtered to the Media pane's supported
-/// image/video/audio types, and return the chosen path (or `null` if the
-/// user cancelled). Used by the Media pane (SPEC_MEDIA_PANE_2026_07_26.md)
-/// so pointing it at a clip doesn't require typing/pasting an absolute path.
+
+/// Show a native "open file" dialog for any file, and return the chosen path
+/// (or `null` if the user cancelled). It had a filter for the Media pane's
+/// image, video and audio types; the Media pane is folded into the Editor,
+/// which opens any file, so the dialog no longer filters
+/// (SPEC_EDITOR_REVAMP_UNIFIED_VIEWERS_2026_10_15.md §4.12.1, M17).
 ///
 /// `rfd::FileDialog::pick_file` blocks the calling thread until the user
 /// responds — wrapped in `spawn_blocking` so it doesn't stall a shared
@@ -1051,15 +1042,7 @@ pub async fn show_open_file_dialog(
 ) -> Result<serde_json::Value, String> {
     let path = tokio::task::spawn_blocking(|| {
         let _dialog_guard = host_dialog_guard();
-        rfd::FileDialog::new()
-            .add_filter(
-                "Supported media",
-                &[MEDIA_IMAGE_EXTENSIONS, MEDIA_VIDEO_EXTENSIONS, MEDIA_AUDIO_EXTENSIONS].concat(),
-            )
-            .add_filter("Images", MEDIA_IMAGE_EXTENSIONS)
-            .add_filter("Videos", MEDIA_VIDEO_EXTENSIONS)
-            .add_filter("Audio", MEDIA_AUDIO_EXTENSIONS)
-            .pick_file()
+        rfd::FileDialog::new().pick_file()
     })
     .await
     .map_err(|e| format!("show_open_file_dialog: task join error: {e}"))?;

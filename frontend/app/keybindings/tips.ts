@@ -315,18 +315,18 @@ export const TIPS: TipRow[] = [
         area: "Files",
         gesture: "drag / drop",
         where: "Files rows onto a pane, or files onto the list",
-        label: "Send files to an agent, editor, media or terminal pane; dropping copies here, or into the folder under the pointer",
+        label: "Send files to an agent, editor or terminal pane; dropping copies here, or into the folder under the pointer",
         source: { file: "frontend/app/view/files/files-view.tsx", anchor: "registerFileDropTarget(model.blockId" },
     },
 
-    // ── Media ──
+    // ── Editor viewers ──
     {
-        id: "media:image",
-        area: "Media",
+        id: "editor:image",
+        area: "Editor",
         gesture: "wheel / drag / dblclick",
-        where: "on an image in the Media pane",
-        label: "Zoom around the pointer / pan / switch between fit and zoomed; + − 0 1 and the arrows too",
-        source: { file: "frontend/app/view/media/media-view.tsx", anchor: "the wheel zooms about the cursor" },
+        where: "on an image in the Editor",
+        label: "Zoom around the pointer / pan / switch between fit and zoomed; + − 0 1 and the arrows too; [ ] the previous or next image in the folder; B the background",
+        source: { file: "frontend/app/view/editor/viewers/image/image-viewer.tsx", anchor: "the wheel zooms about the cursor" },
     },
 
     // ── Agent ──

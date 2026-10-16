@@ -791,6 +791,13 @@ pub struct CommandPaneOpenData {
     /// Part 2.
     #[ts(optional)]
     pub reuse_editor_pane: Option<bool>,
+    /// `view: "editor"` only: the opened image or video tab follows newer
+    /// matching files in its folder (a render pipeline's output), as the
+    /// retired Media pane did. Set by `OpenMedia` and `view: "media"`.
+    /// SPEC_EDITOR_REVAMP_UNIFIED_VIEWERS_2026_10_15.md §4.9, §4.11.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub follow_folder: Option<bool>,
     /// `view: "files"` only: names (or full paths) inside `file` to select
     /// once the pane has listed it, written to `block.meta["files:select"]`
     /// (a one-shot request the view clears). Set by the `OpenFiles` MCP tool.
@@ -1075,6 +1082,7 @@ mod app_api_manifest_contract_tests {
             skip_placement: None,
             stack_onto_block_id: None,
             reuse_editor_pane: None,
+            follow_folder: None,
             select: None,
             line: None,
             connection: None,

@@ -1,9 +1,9 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Zoom and pan for an image in the Media view: the wheel zooms about the
+// Zoom and pan for an image in the Editor's image viewer: the wheel zooms about the
 // cursor, a drag pans, double-click toggles fit and actual size. Plain maths
-// on the image's fitted box; media-view.tsx applies the result as a CSS
+// on the image's fitted box; image-viewer.tsx applies the result as a CSS
 // transform (translate, then scale about the box's centre).
 
 /** How the image is shown: `scale` times its fitted size, moved by `x`/`y`

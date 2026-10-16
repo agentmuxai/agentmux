@@ -142,10 +142,10 @@ describe("muxsh guessView", () => {
         expect(guessView("ftp://example.com/x")).toBe("browser");
     });
 
-    it("a media extension guesses media", () => {
-        expect(guessView("/tmp/photo.PNG")).toBe("media");
-        expect(guessView("/tmp/clip.mp4")).toBe("media");
-        expect(guessView("/tmp/report.pdf")).toBe("media");
+    it("a media file guesses the editor, which opens any file", () => {
+        expect(guessView("/tmp/photo.PNG")).toBe("editor");
+        expect(guessView("/tmp/clip.mp4")).toBe("editor");
+        expect(guessView("/tmp/report.pdf")).toBe("editor");
     });
 
     it("anything else guesses editor", () => {
@@ -207,20 +207,17 @@ describe("muxsh parseArgs — view", () => {
         });
     });
 
-    it("a media file dispatches to the 'open' shape with view='media'", () => {
-        expect(parseArgs(["view", "/tmp/photo.png"])).toMatchObject({ command: "open", view: "media" });
+    it("a media file dispatches to the 'open' shape with view='editor'", () => {
+        expect(parseArgs(["view", "/tmp/photo.png"])).toMatchObject({ command: "open", view: "editor" });
     });
 
     it("'view' with no target is an error", () => {
         expect(parseArgs(["view"]).error).toMatch(/requires a file path or url/);
     });
 
-    // Codex review (PR #3281, P2): an earlier version gated --collapse-tree
-    // on the subcommand name ("open" vs "web"), which incorrectly accepted
-    // it for 'view' on a media target — media isn't the editor view either,
-    // even though it shares 'view's "open"-shaped command discriminant.
-    it("rejects --collapse-tree for a media target (it's not the editor view)", () => {
-        expect(parseArgs(["view", "/tmp/photo.png", "--collapse-tree"]).error).toMatch(/only valid for an editor pane/);
+    // A media file opens in the editor now, so --collapse-tree applies to it.
+    it("accepts --collapse-tree for a media target (it opens in the editor)", () => {
+        expect(parseArgs(["view", "/tmp/photo.png", "--collapse-tree"])).toMatchObject({ view: "editor", collapseTree: true });
     });
 
     it("rejects --collapse-tree for a url target", () => {
@@ -403,11 +400,11 @@ describe("muxsh buildRequestBody", () => {
         });
     });
 
-    it("'view' dispatched to media sends view='media', not 'editor'", () => {
+    it("'view' on a media file sends view='editor': the editor opens any file", () => {
         expect(buildRequestBody(parseArgs(["view", "/tmp/photo.png"]), {})).toEqual({
             focus: true,
             floating: false,
-            view: "media",
+            view: "editor",
             file: "/tmp/photo.png",
         });
     });

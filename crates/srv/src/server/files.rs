@@ -185,6 +185,19 @@ fn mime_from_path(path: &std::path::Path) -> &'static str {
         Some("wav") => "audio/wav",
         Some("woff2") => "font/woff2",
         Some("woff") => "font/woff",
+        // The Editor's viewers (SPEC_EDITOR_REVAMP_UNIFIED_VIEWERS_2026_10_15.md §4.6).
+        Some("avif") => "image/avif",
+        Some("apng") => "image/apng",
+        Some("bmp") => "image/bmp",
+        Some("ico") => "image/x-icon",
+        Some("pdf") => "application/pdf",
+        Some("mp3") => "audio/mpeg",
+        Some("ogg") | Some("oga") | Some("opus") => "audio/ogg",
+        Some("flac") => "audio/flac",
+        Some("m4a") | Some("aac") => "audio/mp4",
+        Some("m4v") => "video/mp4",
+        Some("mjs") => "application/javascript; charset=utf-8",
+        Some("wasm") => "application/wasm",
         _ => "application/octet-stream",
     }
 }

@@ -21,7 +21,7 @@
 
 import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
 import type { EditorView } from "codemirror";
-import { pushNotification, setActiveTab, useBlockAtom, workspace } from "@/app/store/global";
+import { pushNotification, useBlockAtom } from "@/app/store/global";
 import {
     EditorPaneEvent,
     EditorTab,
@@ -39,8 +39,6 @@ import { DOC_TABS_META, hydrateDocTabs } from "@/app/doc-tabs/doc-tabs";
 import { DocTabsSaver } from "@/app/doc-tabs/doc-tabs-controller";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { WorkspaceService } from "@/app/store/services";
-import { createBlockOnModel, waitForLayoutModel } from "@/app/tab/tab-presets";
 import { makeORef } from "@/app/store/mos";
 import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
@@ -51,7 +49,13 @@ import type { CommandReadEditorFileResult } from "@/app/store/rpc-api";
 import { registerFileDropTarget } from "@/app/drag/file-drop";
 import { notifyDrop } from "@/app/drag/file-drop-actions";
 import { createEditorDropHook, openEmptyScratch } from "./editor-drop";
-import { openPendingFiles } from "./pending-open-files";
+import { openPendingFiles, pendingEntryKey } from "./pending-open-files";
+import { detectLanguage } from "./editor-language";
+import { sniffUnopenable } from "./editor-sniff";
+import { openFileInNewTab } from "./editor-open";
+import { applyMetaPatch, migrateMediaMeta } from "./media-migration";
+import { chooseViewer, isBinaryProbe, isViewerId, viewerForDropped, type FileProbe, type ViewerId } from "./viewers/viewer-choice";
+import { droppedFileOf, isDroppedPath, neighbourInFolder, rememberDropped, ViewerTabs } from "./viewers/viewer-tabs";
 import { showBlockWithoutFocus } from "@/app/util/reveal-block";
 import { readZoom } from "@/app/store/zoom-factor";
 import { isSshConnection } from "@/app/view/term/ssh-connection";
@@ -73,8 +77,18 @@ const META_LEGACY_FILE = "file";
 // before the pane mounts don't overwrite/lose each other (codex P1, second
 // finding on the same PR).
 const META_PENDING_OPEN_FILES = "editor:pending_open_files";
+// The initial `file` opens following newer files in its folder (a media
+// open, SPEC_EDITOR_REVAMP_UNIFIED_VIEWERS_2026_10_15.md §4.9). Cleared once used.
+const META_FOLLOW_FOLDER = "editor:follow_folder";
 
 export type EditorMode = "preview" | "source" | "split";
+
+/** How a file opens: following newer files in its folder (a media open),
+ *  in a given viewer (OpenEditor's `viewer`). */
+export interface OpenFileOpts {
+    followFolder?: boolean;
+    viewer?: string;
+}
 const META_SCRATCH = "editor:scratch";
 const TREE_WIDTH_DEFAULT = 240;
 const TREE_WIDTH_MIN = 150;
@@ -186,6 +200,9 @@ export class EditorViewModel {
     private _openFromRemote = createSignal<boolean>(false);
     openFromRemoteAtom: Accessor<boolean> = this._openFromRemote[0];
 
+    // Probes and revisions of the tabs' files (SPEC_EDITOR_REVAMP_UNIFIED_VIEWERS_2026_10_15.md §4.1).
+    readonly viewerTabs = new ViewerTabs();
+
     // Per-tab editor mode: "preview" | "source" | "split".
     // Not persisted — tabs return to their language-appropriate default on reopen.
     readonly _tabModes = new Map<string, EditorMode>();
@@ -271,6 +288,7 @@ export class EditorViewModel {
                     this._contentByTab.delete(ev.tabId);
                     this._encodingByTab.delete(ev.tabId);
                     this._tabModes.delete(ev.tabId);
+                    this.viewerTabs.forget(ev.tabId);
                     this._unwatchTab(ev.tabId);
                 }
                 for (const sub of this._eventSubscribers) sub(ev);
@@ -317,9 +335,10 @@ export class EditorViewModel {
                 // don't switch window tabs or take the user's caret.
                 const processed = openPendingFiles(
                     pending,
-                    (path) => void this.openFile(path),
+                    (path, opts) => void this.openFile(path, opts),
                     () => void showBlockWithoutFocus(this.blockId)
                 );
+                const done = new Set(processed.map(pendingEntryKey));
                 fireAndForget(() => {
                     // Re-read fresh (not the `pending` snapshot above) right
                     // before writing, and remove only the entries THIS run
@@ -338,7 +357,7 @@ export class EditorViewModel {
                     // concurrent reuse call specifically inside it).
                     const current = this.meta()?.[META_PENDING_OPEN_FILES];
                     const remaining = Array.isArray(current)
-                        ? current.filter((p) => !processed.includes(p))
+                        ? current.filter((p) => !done.has(pendingEntryKey(p)))
                         : [];
                     return this.persistMeta({ [META_PENDING_OPEN_FILES]: remaining });
                 });
@@ -445,8 +464,15 @@ export class EditorViewModel {
 
         this.viewText = () => [];
 
+        // A saved Media pane opens as an Editor (the `media` alias): its meta,
+        // rewritten into an Editor's, is what it restores from, and is written
+        // back once (SPEC_EDITOR_REVAMP_UNIFIED_VIEWERS_2026_10_15.md §4.12.2).
+        const rawMeta = this.meta() as Record<string, unknown> | undefined;
+        const mediaPatch = migrateMediaMeta(rawMeta);
+        if (mediaPatch) queueMicrotask(() => void this.persistMeta(mediaPatch));
+
         // Restore persisted tree state from block meta.
-        const meta = this.meta();
+        const meta = (mediaPatch ? applyMetaPatch(rawMeta, mediaPatch) : rawMeta) as MetaType | undefined;
         if (meta?.[META_TREE_EXPANDED] === false) {
             this._treeExpanded[1](false);
         }
@@ -481,7 +507,9 @@ export class EditorViewModel {
             this._docTabsSaver.holds(meta?.[DOC_TABS_META]);
             dispatch(blockId, { type: "RestoreDocTabs", doc: restored, source: "hydrate" });
         } else if (typeof legacyFile === "string" && legacyFile) {
-            void this.openFile(legacyFile);
+            const followFolder = meta?.[META_FOLLOW_FOLDER] === true;
+            void this.openFile(legacyFile, { followFolder });
+            if (followFolder) void this.persistMeta({ [META_FOLLOW_FOLDER]: null });
         } else if (meta?.[META_SCRATCH] === true && snapshot(blockId)?.tabs.length === 0) {
             // Widget default: open a scratch buffer when no file was persisted.
             void this.openScratch();
@@ -500,6 +528,10 @@ export class EditorViewModel {
                 openText: async (name, content) => {
                     if (this.connection()) return notifyDrop.cantOpen(name, "editor");
                     await this.openDroppedText(name, content);
+                },
+                openBytes: async (file) => {
+                    if (this.connection()) return notifyDrop.cantOpen(file.name || "file", "editor");
+                    await this.openDroppedFile(file);
                 },
                 cantOpen: (name) => notifyDrop.cantOpen(name, "editor"),
             }),
@@ -532,8 +564,8 @@ export class EditorViewModel {
     /** Open a file as a *pinned* tab (the default). Use for explicit-open
      *  paths like double-click in the tree, path-input submit, drag-drop,
      *  programmatic open. The pinned tab survives subsequent tree clicks. */
-    async openFile(filePath: string): Promise<void> {
-        return this._openFileWithMode(filePath, "pinned");
+    async openFile(filePath: string, opts?: OpenFileOpts): Promise<void> {
+        return this._openFileWithMode(filePath, "pinned", opts);
     }
 
     /** Open a file as a *preview* tab (VS Code-style). Use for tree single-
@@ -552,7 +584,7 @@ export class EditorViewModel {
         dispatch(this.blockId, { type: "PinTab", tabId: tab.id, source: "user" });
     }
 
-    private async _openFileWithMode(filePath: string, mode: "preview" | "pinned"): Promise<void> {
+    private async _openFileWithMode(filePath: string, mode: "preview" | "pinned", opts?: OpenFileOpts): Promise<void> {
         const canonical = canonicalizePath(filePath);
         // If a load is already in flight for this path, we still need to
         // honor a preview→pinned transition (rapid dbl-click on a tree
@@ -572,6 +604,7 @@ export class EditorViewModel {
             return;
         }
         this._loadingPaths.add(canonical);
+        const followFolder = opts?.followFolder === true;
 
         // Dispatch OpenFile. The slice either activates an existing tab (and
         // emits only TabActivated) or appends a new one (TabOpened +
@@ -596,6 +629,14 @@ export class EditorViewModel {
             return;
         }
         const tabId = opened.tabId;
+        if (followFolder) dispatch(this.blockId, { type: "SetFollowFolder", tabId, follow: true, source: "system" });
+        if (opts?.viewer && isViewerId(opts.viewer)) {
+            const tab = snapshot(this.blockId)?.tabs.find((t) => t.id === tabId);
+            if (tab?.viewerOverride !== opts.viewer) {
+                dispatch(this.blockId, { type: "SetTabViewer", tabId, viewer: opts.viewer, override: true, source: "system" });
+                this._contentByTab.delete(tabId);
+            }
+        }
 
         // If the slice considers content loaded for this tab AND we have it
         // in the view-local cache, we're done. The slice's contentLoaded
@@ -616,8 +657,9 @@ export class EditorViewModel {
                 // Backwards-compat: persist the active file path under the
                 // legacy meta key so a downgrade (or a Phase 1C-less build)
                 // restores it. The 1C saga replaces this with the full
-                // editor:tabs persistence.
-                await this.persistMeta({ [META_LEGACY_FILE]: filePath });
+                // editor:tabs persistence. Not a dropped file's: it is gone
+                // after a restart.
+                if (!isDroppedPath(canonical)) await this.persistMeta({ [META_LEGACY_FILE]: filePath });
                 this._syncWatch(tabId, canonical);
             }
         } finally {
@@ -663,6 +705,24 @@ export class EditorViewModel {
     ): Promise<string | null> {
         const canonical = canonicalizePath(filePath);
         try {
+            // Probe before reading (§4.2): one stat and 8 KB on srv decide the
+            // viewer, so a binary file is never downloaded into CodeMirror.
+            // This computer's files only; a scratch buffer is always text.
+            const tabAtStart = snapshot(this.blockId)?.tabs.find((t) => t.id === tabId);
+            if (isDroppedPath(canonical)) return this._loadDroppedIntoTab(tabId, canonical, opts);
+            let allowBinaryText = false;
+            if (!this.on(tabId).connection && !tabAtStart?.isScratch) {
+                const probe = await RpcApi.FileProbeCommand(TabRpcClient, { path: filePath });
+                const tabNow = snapshot(this.blockId)?.tabs.find((t) => t.id === tabId);
+                if (!tabNow || tabNow.filePath !== canonical) return null;
+                this.viewerTabs.setProbe(tabId, probe as FileProbe);
+                const viewer = chooseViewer(probe, tabNow.viewerOverride);
+                if (tabNow.viewer !== viewer) dispatch(this.blockId, { type: "SetTabViewer", tabId, viewer, source: "system" });
+                if (viewer !== "text") return this._markViewerLoaded(tabId, `probe:${probe.size}:${probe.mtime}`, opts);
+                // "Open as text anyway" on a binary file: show its bytes.
+                allowBinaryText = isBinaryProbe(probe);
+            }
+
             const result = await RpcApi.ReadEditorFileCommand(
                 TabRpcClient,
                 { path: filePath, ...this.on(tabId) },
@@ -689,7 +749,7 @@ export class EditorViewModel {
             //      hit: Windows NTUSER.DAT regtrans-ms files come through
             //      as 512KB of one line).
             // Both fast checks; bail before stashing content or hashing.
-            const refusal = sniffUnopenable(content);
+            const refusal = sniffUnopenable(content, allowBinaryText);
             if (refusal) {
                 dispatch(this.blockId, {
                     type: "TabContentLoadFailed",
@@ -752,7 +812,7 @@ export class EditorViewModel {
     _syncWatch(tabId: string, canonicalPath: string): void {
         // A host's files aren't watched (this computer's watcher can't see
         // them); reopening the file shows changes made there.
-        if (this.connection()) return;
+        if (this.connection() || isDroppedPath(canonicalPath)) return;
         const prev = this._watchedPathByTab.get(tabId);
         if (prev === canonicalPath) return;
         if (prev) {
@@ -882,6 +942,8 @@ export class EditorViewModel {
         if (this.readOnlyAtom()) return;
         const tab = this.activeTabAtom();
         if (!tab) return;
+        // Only the text viewer has a buffer: never write an image's tab.
+        if (tab.viewer && tab.viewer !== "text") return;
 
         // Refuse to save a file that decoded with replacement characters
         // (likely the wrong encoding) — re-encoding the lossy buffer would
@@ -1235,71 +1297,10 @@ export class EditorViewModel {
         }
     }
 
-    /** Open a file in a new editor pane inside a brand-new, otherwise-empty
-     *  app tab. Deliberately bypasses createTab() in store/global.ts, which
-     *  always layers on the agent/sysinfo/swarm default preset — wrong here,
-     *  the user asked for THIS file, not a fresh default workspace.
-     *
-     *  Three things every other CreateTab caller in this codebase gets for
-     *  free via applyTabPreset() (tab-presets.ts), which this method can't
-     *  call directly since it always adds the default widget set — so each
-     *  is replicated individually here:
-     *
-     *  1. waitForLayoutModel(tabId) before touching the new tab at all. The
-     *     tab's MuxObj + LayoutState propagate via subscription some time
-     *     after CreateTab returns, not synchronously with it.
-     *  2. createBlockOnModel(...) — NOT the pane.open RPC used for
-     *     openToTheSide above. Confirmed live: pane.open against a freshly
-     *     created tab_id succeeds server-side with zero errors ("block
-     *     created + layout updated" in the srv log) and the block STILL
-     *     never renders — the tab's client-side layoutModel, even once
-     *     waitForLayoutModel() confirms the object exists, isn't yet
-     *     subscribed to receive the backend's layout:update broadcast for
-     *     that specific brand-new tab. createBlockOnModel goes through
-     *     ObjectService.CreateBlock + layoutModel.treeReducer(...) directly
-     *     — the same client-side path applyTabPreset uses for every preset
-     *     widget — which sidesteps the gap entirely. The constructed
-     *     BlockDef mirrors exactly what the backend's build_pane_meta
-     *     (crates/srv/src/server/app_api/pane.rs) would have produced for
-     *     `pane.open { view: "editor", file }` on the openToTheSide path.
-     *  3. Explicit setActiveTab() AFTER the block exists. Belt-and-suspenders
-     *     alongside CreateTab's own `activate=true` (3rd arg below): the
-     *     reducer itself only auto-activates a workspace's very FIRST tab
-     *     ever (see create_tab_second_tab_does_not_steal_active in
-     *     reducer.rs), but the service layer already compensates —
-     *     `crates/srv/src/server/service/workspace.rs`'s CreateTab handler
-     *     dispatches a follow-up SetActiveTab whenever `activate=true` and
-     *     the reducer didn't auto-activate, so this call is redundant in
-     *     practice, not a workaround for a live bug (#2155's "activate arg
-     *     silently dropped" half was already fixed server-side by the time
-     *     it was filed). Kept anyway: harmless, and it's still what makes
-     *     the destination tab already have its content when the switch's
-     *     reveal-gate opens — avoids a flash of an empty tab. */
+    /** Open a file in a new editor pane inside a brand-new app tab
+     *  (editor-open.ts's openFileInNewTab says why it is built by hand). */
     async openInNewTab(filePath: string): Promise<void> {
-        const ws = workspace();
-        if (!ws) return;
-        try {
-            const tabId = await WorkspaceService.CreateTab(ws.oid, "", true, false);
-            const layoutModel = await waitForLayoutModel(tabId);
-            if (!layoutModel) return; // Tab never propagated — nothing safe to do.
-            const isMarkdown = filePath.toLowerCase().endsWith(".md");
-            await createBlockOnModel(
-                tabId,
-                layoutModel,
-                {
-                    meta: {
-                        view: "editor",
-                        file: filePath,
-                        ...(isMarkdown ? { "editor:tree_expanded": false } : {}),
-                    },
-                },
-                null,
-                null,
-            );
-            await setActiveTab(tabId);
-        } catch {
-            // Fail silently, consistent with the file tree's other pane.open callers.
-        }
+        await openFileInNewTab(filePath);
     }
 
     // ── Tree state (unchanged from Phase 1A of file-tree spec) ─────────
@@ -1394,6 +1395,73 @@ export class EditorViewModel {
         }
     }
 
+    // ── Viewers (SPEC_EDITOR_REVAMP_UNIFIED_VIEWERS_2026_10_15.md §4) ──
+
+    /** The viewer showing the tab in front; "text" until its file is probed. */
+    activeViewer(): ViewerId {
+        const v = this.activeTabAtom()?.viewer;
+        return isViewerId(v) ? v : "text";
+    }
+
+    /** "Reopen with…": show `tabId`'s file in `viewer`, and keep that choice.
+     *  A text buffer with unsaved changes stays text. */
+    reopenWith(tabId: string, viewer: ViewerId): void {
+        const tab = snapshot(this.blockId)?.tabs.find((t) => t.id === tabId);
+        if (!tab || (tab.viewer ?? "text") === viewer || tab.dirty) return;
+        this._contentByTab.delete(tabId);
+        this._contentVersion[1]((v) => v + 1);
+        dispatch(this.blockId, { type: "SetTabViewer", tabId, viewer, override: true, source: "user" });
+    }
+
+    setFollowFolder(tabId: string, follow: boolean): void {
+        dispatch(this.blockId, { type: "SetFollowFolder", tabId, follow, source: "user" });
+    }
+
+    /** The tab shows another file (follow-folder, `[` / `]`); it reads it. */
+    retargetTab(tabId: string, newPath: string): void {
+        const events = dispatch(this.blockId, { type: "RetargetTab", tabId, newPath, source: "system" });
+        if (events.some((e) => e.type === "TabActivated" && e.tabId === tabId)) this._contentByTab.delete(tabId);
+    }
+
+    async stepInFolder(tabId: string, delta: -1 | 1): Promise<void> {
+        const tab = snapshot(this.blockId)?.tabs.find((t) => t.id === tabId);
+        if (!tab || isDroppedPath(tab.filePath)) return;
+        const next = await neighbourInFolder(tab.filePath, isViewerId(tab.viewer) ? tab.viewer : "image", delta).catch((e) => {
+            this.reportFileOpError("Listing the folder", e);
+            return null;
+        });
+        if (next) this.retargetTab(tabId, next);
+    }
+
+    /** A dropped file with no host path that isn't text: shown from its
+     *  bytes (an image, a video), else the info card. */
+    async openDroppedFile(file: File): Promise<void> {
+        await this.openFile(rememberDropped(file));
+    }
+
+    private _loadDroppedIntoTab(tabId: string, path: string, opts?: { skipIfHashMatches?: string }): string | null {
+        const file = droppedFileOf(path);
+        if (!file) {
+            const error = "This dropped file is no longer here: dropped files aren't kept after a restart. Drop it again.";
+            dispatch(this.blockId, { type: "TabContentLoadFailed", tabId, error, source: "system" });
+            return null;
+        }
+        const tab = snapshot(this.blockId)?.tabs.find((t) => t.id === tabId);
+        const viewer = tab?.viewerOverride === "info" ? "info" : viewerForDropped(file.name, file.type);
+        if (tab?.viewer !== viewer) dispatch(this.blockId, { type: "SetTabViewer", tabId, viewer, source: "system" });
+        return this._markViewerLoaded(tabId, `dropped:${file.size}:${file.lastModified}`, opts);
+    }
+
+    /** A non-text viewer's tab is loaded once its viewer is chosen: the
+     *  viewer fetches the bytes. Read-only, so save never writes it. */
+    private _markViewerLoaded(tabId: string, hash: string, opts?: { skipIfHashMatches?: string }): string {
+        if (opts?.skipIfHashMatches === hash) return hash;
+        this._contentByTab.set(tabId, "");
+        this.viewerTabs.bumpRevision(tabId);
+        dispatch(this.blockId, { type: "TabContentLoaded", tabId, contentHash: hash, readOnly: true, source: "system" });
+        return hash;
+    }
+
     giveFocus(): boolean {
         const cm = this.cmViewRef.current;
         if (cm == null) return false;
@@ -1424,90 +1492,4 @@ function clampTreeWidth(w: number): number {
 function clampPreviewHeight(h: number): number {
     if (!Number.isFinite(h)) return PREVIEW_HEIGHT_DEFAULT;
     return Math.max(PREVIEW_HEIGHT_MIN, Math.min(PREVIEW_HEIGHT_MAX, Math.round(h)));
-}
-
-/** Sniff content that's unsafe to hand to CodeMirror. Returns a human-readable
- *  refusal message (used as the tab's loadError) or null when the content is
- *  fine to render. Cheap — scans up to the first 4096 bytes for NUL.
- *
- *  Why this lives in the model: CodeMirror will faithfully try to lay out
- *  half-a-megabyte of binary on one line (the trigger case was a Windows
- *  NTUSER.DAT regtrans-ms file at 512KB) and block the renderer indefinitely.
- *  The 10MB read cap doesn't catch it because the file is small. */
-const MAX_BYTES_FOR_NUL_SNIFF = 4096;
-const MAX_SINGLE_LINE_CHARS = 100_000;
-
-function sniffUnopenable(content: string): string | null {
-    // NUL-byte sniff — any U+0000 in the first few KB means binary.
-    const sniffLen = Math.min(content.length, MAX_BYTES_FOR_NUL_SNIFF);
-    for (let i = 0; i < sniffLen; i++) {
-        if (content.charCodeAt(i) === 0) {
-            return "This file looks binary (contains NUL bytes) and can't be displayed in the editor.";
-        }
-    }
-    // Single-line-too-long sniff — even a "text" file is unsafe to render if
-    // it has no newline within the first 100K chars. CodeMirror's layout
-    // engine handles long files line-by-line; a single 100K+ line stalls it.
-    const firstNewline = content.indexOf("\n");
-    const lineLen = firstNewline === -1 ? content.length : firstNewline;
-    if (lineLen > MAX_SINGLE_LINE_CHARS) {
-        return `This file's first line is ${lineLen.toLocaleString()} characters long — too wide to render. Open it in an external editor.`;
-    }
-    return null;
-}
-
-// ── Language detection ──────────────────────────────────────────────────────
-// Maps file extensions to the canonical names the rest of the editor expects:
-// `loadLanguage` in editor-view.tsx, LSP_SUPPORTED_LANGUAGES in install-hints.ts.
-// The slice's `deriveLanguage` returns raw extensions ("ts", "py") — fine as a
-// fallback label, but downstream lookups need the mapped form ("typescript",
-// "python"). Keep this map in sync with `loadLanguage`'s switch.
-
-const EXTENSION_MAP: Record<string, string> = {
-    ".ts": "typescript",
-    ".tsx": "typescript",
-    ".js": "javascript",
-    ".jsx": "javascript",
-    ".mjs": "javascript",
-    ".cjs": "javascript",
-    ".py": "python",
-    ".rs": "rust",
-    ".html": "html",
-    ".htm": "html",
-    ".css": "css",
-    ".scss": "css",
-    ".json": "json",
-    ".md": "markdown",
-    ".markdown": "markdown",
-    ".yaml": "yaml",
-    ".yml": "yaml",
-    ".toml": "toml",
-    ".sh": "shell",
-    ".bash": "shell",
-    ".zsh": "shell",
-    ".ps1": "powershell",
-    ".sql": "sql",
-    ".go": "go",
-    ".java": "java",
-    ".c": "c",
-    ".cpp": "cpp",
-    ".h": "c",
-    ".hpp": "cpp",
-    ".xml": "html",
-    ".svg": "html",
-};
-
-function detectLanguage(filePath: string): string {
-    const lower = filePath.toLowerCase();
-    // Extension lookup. Use endsWith so multi-segment extensions like
-    // `.test.tsx` still resolve via the trailing component.
-    for (const [ext, lang] of Object.entries(EXTENSION_MAP)) {
-        if (lower.endsWith(ext)) return lang;
-    }
-    // Special bareword filenames (no extension or unusual conventions).
-    const name = lower.split(/[\\/]/).pop() ?? "";
-    if (name === "dockerfile") return "shell";
-    if (name === "makefile") return "shell";
-    if (name === "cargo.toml" || name === "cargo.lock") return "toml";
-    return "text";
 }

@@ -27,6 +27,8 @@ import { userIsTypingElsewhereIn } from "./editor-focus-guard";
 import type { EditorMode, EditorViewModel } from "./editor-model";
 import { cursorAtLine } from "./open-at-line";
 import { Button, IconButton, SegmentedControl } from "@/app/element/ui";
+import { dirnameOf } from "@/app/element/local-media";
+import { ViewerHost } from "./viewers/viewer-host";
 import { SaveAsInput } from "./editor-save-as-input";
 import { EDITOR_STATE_FIELDS, editorDocTabs, provideEditorStates, takeMovedEditorState, trackSave } from "./editor-doc-tabs";
 import { registerDocTabDropZone } from "@/app/doc-tabs/doc-tab-hosts";
@@ -117,7 +119,10 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
     // keystrokes), so it would render stale pre-edit text. We seed liveDoc
     // whenever CM is (re)built or restored, and update it on every doc change.
     const [liveDoc, setLiveDoc] = createSignal("");
-    const isMarkdown = (): boolean => model.languageAtom() === "markdown";
+    // Markdown's preview, and CodeMirror itself, belong to the text viewer:
+    // an image or a PDF tab shows its own viewer (viewers/viewer-host.tsx).
+    const showsText = (): boolean => model.activeViewer() === "text";
+    const isMarkdown = (): boolean => showsText() && model.languageAtom() === "markdown";
 
     // The pane's tabs on the shared strip and keys (PLAN_EDITOR_ON_SHARED_DOC_TABS).
     const docTabs = editorDocTabs(model);
@@ -606,6 +611,16 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
         // this. And _maybeReloadTabs never clobbers a dirty tab, so this only
         // fires for buffers the user has not edited.
         model.contentAtom();
+        // A tab in another viewer (an image, a video) has no CodeMirror
+        // buffer: keep the outgoing text tab's state for when it comes back,
+        // and leave CodeMirror as it is, hidden.
+        if (model.activeViewer() !== "text") {
+            untrack(() => {
+                if (activeTabIdForCm && cmView) cmStates.set(activeTabIdForCm, cmView.state);
+                activeTabIdForCm = null;
+            });
+            return;
+        }
         // containerRef() is reactive: when the body <Show> mounts the container
         // after content loads, this effect re-runs and proceeds (fixes the
         // first-open blank-preview race).
@@ -1124,11 +1139,14 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
                     fallback={<EmptyEditor />}
                 >
                     <div class="editor-body-wrap">
+                        <Show when={!showsText()}>
+                            <ViewerHost model={model} />
+                        </Show>
                         <div
                             class="editor-codemirror"
                             ref={setContainerRef}
                             style={{
-                                display: isMarkdown() && model.editorMode() === "preview" ? "none" : undefined,
+                                display: !showsText() || (isMarkdown() && model.editorMode() === "preview") ? "none" : undefined,
                             }}
                         />
                         <Show when={isMarkdown() && model.editorMode() === "split"}>
@@ -1152,6 +1170,9 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
                                         textAtom={() => liveDoc()}
                                         contentClass="editor-preview-markdown-content"
                                         nativeScrollbar
+                                        // Local images in the document render, relative
+                                        // to its folder (SPEC_EDITOR_REVAMP_UNIFIED_VIEWERS §4.4.1).
+                                        media={{ baseDir: dirnameOf(model.filePathAtom()) }}
                                     />
                                 </div>
                             </div>
@@ -1161,7 +1182,7 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
 
                 {/* LSP status chip — bottom-of-pane indicator. Only shown when
                     there's an active client (i.e. an LSP-supported file is open). */}
-                <Show when={lspState() && lspState()?.kind !== "disposed"}>
+                <Show when={showsText() && lspState() && lspState()?.kind !== "disposed"}>
                     <div class="editor-lsp-status" data-kind={statusChipKind()}>
                         <span class="editor-lsp-status-dot" />
                         <span class="editor-lsp-status-text">{statusChipText()}</span>

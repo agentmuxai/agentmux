@@ -629,6 +629,7 @@ partial list.
 | [`SPEC_DURABLE_CONVERSATION_MEMORY_2026_09_23`](SPEC_DURABLE_CONVERSATION_MEMORY_2026_09_23.md) | SPEC: durable conversation memory — one continuous conversation per agent, in every case |
 | [`SPEC_DURABLE_JEKT_DELIVERY_2026_09_24`](SPEC_DURABLE_JEKT_DELIVERY_2026_09_24.md) | SPEC: durable jekt delivery — a message to an absent agent is held, not dropped |
 | [`SPEC_EDITOR_MCP_OPEN_BLANK_PREVIEW_AND_PANE_REUSE_2026_08_03`](SPEC_EDITOR_MCP_OPEN_BLANK_PREVIEW_AND_PANE_REUSE_2026_08_03.md) | Plan: MCP-opened markdown blank-preview investigation + Editor-pane reuse |
+| [`SPEC_EDITOR_REVAMP_UNIFIED_VIEWERS_2026_10_15`](SPEC_EDITOR_REVAMP_UNIFIED_VIEWERS_2026_10_15.md) | SPEC: Editor revamp — one pane for every file (PDF, images, audio/video, binary, large files), and the Media pane folded into it |
 | [`SPEC_FILE_BROWSER_PANE_2026_10_01`](SPEC_FILE_BROWSER_PANE_2026_10_01.md) | SPEC: A rich file browser pane (working title "Hangar") |
 | [`SPEC_FLOATING_PANE_ALWAYS_ON_TOP_2026_09_27`](SPEC_FLOATING_PANE_ALWAYS_ON_TOP_2026_09_27.md) | SPEC: "Always on top" for floating panes |
 | [`SPEC_FLOATING_PANE_REDOCK_DWELL_2026_09_09`](SPEC_FLOATING_PANE_REDOCK_DWELL_2026_09_09.md) | SPEC: Floating-pane redock — hover-intent dwell and a neutral parking zone |

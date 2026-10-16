@@ -20,8 +20,8 @@ vi.mock("@/util/fetchutil", () => ({ fetch: (...a: unknown[]) => h.fetch(...a) }
 vi.mock("@/util/endpoints", () => ({ getWebServerEndpoint: () => "http://srv" }));
 vi.mock("@/app/store/app-api", () => ({ getApi: () => ({ getAuthKey: () => "k" }) }));
 vi.mock("@/app/store/block-layout-actions", () => ({ createBlock: h.createBlock }));
-// No Media pane on screen: a click opens a new one.
-vi.mock("@/app/view/media/media-open", () => ({ openInMediaPaneOnScreen: async () => false }));
+// No Editor pane on screen: a click opens a new one.
+vi.mock("@/app/view/editor/editor-open", () => ({ openInEditorPaneOnScreen: async () => false }));
 
 import { Markdown } from "./markdown";
 
@@ -140,14 +140,14 @@ describe("video", () => {
         expect(revoked).toContain(src);
     });
 
-    it("shows a card that opens the Media pane over the 200 MB cap", async () => {
+    it("shows a card that opens it in the editor over the 200 MB cap", async () => {
         serve(300 * MB);
         const c = mount("![repro](big.mp4)");
         await waitFor(() => expect(c.querySelector(".am-media-card")).not.toBeNull());
         expect(c.querySelector(".am-media-play")).toBeNull();
         expect(c.querySelector(".am-media-card")!.textContent).toContain("300 MB");
         fireEvent.click(c.querySelector(".am-media-card")!);
-        await waitFor(() => expect(h.createBlock).toHaveBeenCalledWith({ meta: { view: "media", "media:path": "C:/work/big.mp4" } }));
+        await waitFor(() => expect(h.createBlock).toHaveBeenCalledWith({ meta: { view: "editor", file: "C:/work/big.mp4", "editor:follow_folder": true } }));
     });
 });
 

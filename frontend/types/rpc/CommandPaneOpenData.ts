@@ -96,6 +96,13 @@ connection?: string,
  */
 reuse_editor_pane?: boolean, 
 /**
+ * `view: "editor"` only: the opened image or video tab follows newer
+ * matching files in its folder (a render pipeline's output), as the
+ * retired Media pane did. Set by `OpenMedia` and `view: "media"`.
+ * SPEC_EDITOR_REVAMP_UNIFIED_VIEWERS_2026_10_15.md §4.9, §4.11.
+ */
+follow_folder?: boolean, 
+/**
  * `view: "files"` only: names (or full paths) inside `file` to select
  * once the pane has listed it, written to `block.meta["files:select"]`
  * (a one-shot request the view clears). Set by the `OpenFiles` MCP tool.
