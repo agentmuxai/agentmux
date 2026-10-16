@@ -718,6 +718,13 @@ impl Router {
         settings_from_extra(&self.config.get_settings().extra)
     }
 
+    /// Whether the user asked to hear about turns something other than them
+    /// started (`notify:os:turncompleted:external`): the Swarm Supervisor
+    /// applies the same rule to its own "finished" notice.
+    pub fn external_turns_notified(&self) -> bool {
+        self.settings().external_turns
+    }
+
     /// Does this Router's store know the block? BLOCKING (SQLite).
     fn owns_block(&self, block_id: &str) -> bool {
         matches!(self.store.get::<Block>(block_id), Ok(Some(_)))

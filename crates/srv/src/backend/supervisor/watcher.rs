@@ -198,6 +198,19 @@ impl Supervisor {
         tokio::task::spawn_blocking(move || router.emit(kind, &block_id, text.as_deref(), 0));
     }
 
+    /// The "finished" notice the router leaves to the Supervisor for a
+    /// supervised pane (spec §3.7), under the router's own rule: a turn
+    /// something other than the user started is announced only when the user
+    /// asked for those (`notify:os:turncompleted:external`).
+    fn notify_finished(&self, block_id: &str, trigger: Option<TriggerKind>) {
+        if is_external_start(trigger)
+            && !crate::backend::notify::router::get(&self.broker).is_some_and(|r| r.external_turns_notified())
+        {
+            return;
+        }
+        self.notify(block_id, NotifyKind::TurnCompleted, None);
+    }
+
     /// Judge `block_id`'s last turn and act on it. `notify` is false for the
     /// judgement a mode change asks for: the user is looking at the pane.
     pub async fn evaluate(&self, block_id: &str, trigger: Option<TriggerKind>, steps: u32, notify: bool) {
@@ -212,9 +225,21 @@ impl Supervisor {
         if mode == SupervisorMode::Off || !supports(&block.meta) {
             return;
         }
-        // No readable conversation (none yet, or a hidden memory reinjection).
-        let Some(activity) = digest::read_recent_activity(&self.filestore, block_id) else { return };
         let now_ms = agentmux_common::time::now_ms_u64();
+        // The user's Stop ended this turn: their override wins, and their own
+        // action needs no notice (the router doesn't send one either).
+        if trigger.is_some() && super::stopped_by_user(block_id) {
+            self.stand_down_for_stop(block_id, generation, &block, mode, now_ms);
+            return;
+        }
+        // No readable conversation (none yet, or a hidden memory reinjection):
+        // nothing to judge, so the notice the router left to us goes out as usual.
+        let Some(activity) = digest::read_recent_activity(&self.filestore, block_id) else {
+            if notify && trigger != Some(TriggerKind::System) {
+                self.notify_finished(block_id, trigger);
+            }
+            return;
+        };
         let facts = TurnFacts {
             trigger,
             steps,
@@ -227,6 +252,11 @@ impl Supervisor {
         match policy::on_turn_end(&mut state, mode, &facts) {
             PreJudge::Ignore => {
                 self.save(block_id, generation, &state);
+                // Nothing judged: the notice the router left to us goes out as
+                // usual (never for AgentMux's own hidden turn).
+                if notify && trigger != Some(TriggerKind::System) {
+                    self.notify_finished(block_id, trigger);
+                }
                 return;
             }
             PreJudge::Wait => {
@@ -276,6 +306,12 @@ impl Supervisor {
             return;
         }
 
+        // A Stop that reached srv after the turn ended still wins.
+        if trigger.is_some() && super::stopped_by_user(block_id) {
+            self.stand_down_for_stop(block_id, generation, &block, mode, now_ms);
+            return;
+        }
+
         let verdict = judged.as_ref().map(|j| (j.verdict, j.reason.as_str()));
         let mut action = policy::decide(&state, mode, verdict, &facts);
         if let Action::Continue { n, reason } = &action {
@@ -295,8 +331,23 @@ impl Supervisor {
             Action::Pause(why) => {
                 self.notify(block_id, NotifyKind::InputWaiting, Some(format!("Supervisor paused: {why}")))
             }
-            Action::Done(_) | Action::NoVerdict => self.notify(block_id, NotifyKind::TurnCompleted, None),
+            Action::Done(_) | Action::NoVerdict => self.notify_finished(block_id, trigger),
         }
+    }
+
+    /// Record that the user's Stop ended the turn: nothing is judged, sent or
+    /// announced, and the run waits for the user's next message.
+    fn stand_down_for_stop(&self, block_id: &str, generation: u64, block: &Block, mode: SupervisorMode, now_ms: u64) {
+        let mut state = self.state_for(block_id, block, mode, now_ms);
+        state.status = SupervisorStatus::Watching;
+        state.reason = STOPPED_BY_USER.to_string();
+        state.record(SupervisorDecision {
+            at_ms: now_ms,
+            action: SupervisorAction::Stopped,
+            verdict: None,
+            reason: STOPPED_BY_USER.to_string(),
+        });
+        self.save(block_id, generation, &state);
     }
 
     fn background_running(&self, block_id: &str) -> bool {
@@ -357,6 +408,16 @@ impl Supervisor {
     }
 }
 
+const STOPPED_BY_USER: &str = "You stopped it; it waits for your next message.";
+
+/// Started by something other than the user or the Supervisor: another agent,
+/// a service, a schedule, a background task. The router's notice rule
+/// (`notify_turn_end`) applies to these; a Supervisor turn continues the
+/// user's own work.
+fn is_external_start(trigger: Option<TriggerKind>) -> bool {
+    matches!(trigger, Some(TriggerKind::Agent | TriggerKind::Service | TriggerKind::Schedule | TriggerKind::Task))
+}
+
 fn turn_active(block_id: &str) -> bool {
     crate::backend::blockcontroller::get_block_controller_status(block_id).is_some_and(|s| s.turn_active)
 }
@@ -386,4 +447,9 @@ pub(super) fn fingerprint(digest_text: &str) -> String {
 #[cfg(test)]
 pub(super) fn parse_turn_ended_for_test(data: &serde_json::Value) -> Option<(String, Option<TriggerKind>, u32)> {
     parse_turn_ended(data).map(|t| (t.block_id, t.trigger, t.steps))
+}
+
+#[cfg(test)]
+pub(super) fn is_external_start_for_test(trigger: Option<TriggerKind>) -> bool {
+    is_external_start(trigger)
 }

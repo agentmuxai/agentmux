@@ -816,43 +816,13 @@
 }
 
 // ── Supervisor (SPEC_SWARM_SUPERVISOR_2026_10_16.md §3.8) ─────────────────
-// Off is the shield alone, muted, so an unsupervised row stays quiet; a mode
-// shows its name in the accent colour, and a pause in the warning colour,
-// because that is the one state that asks something of the user.
+// The chip is a compact line-style Button: its tone carries the state (quiet
+// Off, accent for a mode, attention for a pause). Only its place in the row
+// is set here.
 
 .swarm-supervisor-chip {
-    display: flex;
-    align-items: center;
-    gap: 4px;
     flex-shrink: 0;
-    padding: 0 4px;
-    border: none;
-    border-radius: var(--radius-sm, 3px);
-    background: transparent;
-    font: inherit;
-    font-size: var(--text-xs);
     white-space: nowrap;
-    color: var(--secondary-text-color);
-    cursor: pointer;
-
-    &:hover {
-        background: var(--highlight-bg-color);
-    }
-
-    &--off {
-        opacity: 0.55;
-        &:hover { opacity: 1; }
-    }
-    &--steady,
-    &--drive {
-        color: var(--accent-color);
-    }
-    &--paused {
-        color: var(--warning-color);
-    }
-    &--error {
-        color: var(--error-color);
-    }
 }
 
 .swarm-supervisor-detail {

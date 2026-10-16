@@ -476,3 +476,25 @@ async fn live_supervisor_judge_answers_in_format_and_judges_the_clear_cases() {
     assert!(malformed.is_empty(), "replies not in the format: {malformed:?}");
     assert!(wrong.is_empty(), "wrong verdicts: {wrong:#?}");
 }
+
+// ── The user's Stop and notices (spec §3.4, §3.7) ───────────────────────
+
+#[test]
+fn a_user_stop_holds_the_pane_for_the_grace_window_only() {
+    let block = "stop-window-test-block";
+    note_user_stop_for_test(block, 1_000_000);
+    assert!(stopped_by_user_for_test(block, 1_000_000 + STOP_GRACE_MS - 1));
+    assert!(!stopped_by_user_for_test(block, 1_000_000 + STOP_GRACE_MS));
+    assert!(!stopped_by_user_for_test("another-block", 1_000_000));
+}
+
+#[test]
+fn only_turns_another_agent_a_service_a_schedule_or_a_task_started_are_external() {
+    for kind in [TriggerKind::Agent, TriggerKind::Service, TriggerKind::Schedule, TriggerKind::Task] {
+        assert!(watcher::is_external_start_for_test(Some(kind)), "{kind:?}");
+    }
+    for kind in [TriggerKind::User, TriggerKind::Broadcast, TriggerKind::Supervisor, TriggerKind::System] {
+        assert!(!watcher::is_external_start_for_test(Some(kind)), "{kind:?}");
+    }
+    assert!(!watcher::is_external_start_for_test(None), "a mode change's own judgement");
+}

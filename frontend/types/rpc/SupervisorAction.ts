@@ -3,4 +3,4 @@
 /**
  * What the Supervisor did after a turn, for the history.
  */
-export type SupervisorAction = "continued" | "paused" | "done" | "waited" | "no_verdict" | "mode_set";
+export type SupervisorAction = "continued" | "paused" | "done" | "waited" | "no_verdict" | "mode_set" | "stopped";

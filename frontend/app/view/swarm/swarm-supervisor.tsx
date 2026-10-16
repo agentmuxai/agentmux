@@ -7,7 +7,9 @@
  * docs/specs/SPEC_SWARM_SUPERVISOR_2026_10_16.md §3.8.
  */
 
+import clsx from "clsx";
 import { createMemo, createSignal, For, Show, type JSX } from "solid-js";
+import { Button, type UiTone } from "@/app/element/ui";
 import { ContextMenuModel } from "@/app/store/contextmenu";
 import {
     MODE_DESCRIPTIONS,
@@ -57,6 +59,9 @@ export function SupervisorChip(props: {
     const state = createMemo(() => readSupervisorState(props.meta));
     const detail = createMemo(() => supervisorChipDetail(state(), mode(), props.live));
     const [error, setError] = createSignal<string | null>(null);
+    // Off stays quiet; a mode shows in the accent; a pause asks for attention.
+    const tone = (): UiTone =>
+        error() ? "danger" : detail() === "paused" ? "attention" : mode() === "off" ? "quiet" : "accent";
     const open = (e: MouseEvent) => {
         e.stopPropagation();
         e.preventDefault();
@@ -70,27 +75,28 @@ export function SupervisorChip(props: {
     };
     return (
         <Show when={supervisorSupported(props.meta)}>
-            <button
-                type="button"
-                classList={{
-                    "swarm-supervisor-chip": true,
-                    [`swarm-supervisor-chip--${mode()}`]: true,
-                    "swarm-supervisor-chip--paused": detail() === "paused",
-                    "swarm-supervisor-chip--error": !!error(),
-                }}
+            <Button
+                tone={tone()}
+                density="compact"
+                icon="user-shield"
+                class={clsx(
+                    "swarm-supervisor-chip",
+                    `swarm-supervisor-chip--${mode()}`,
+                    detail() === "paused" && "swarm-supervisor-chip--paused",
+                    !!error() && "swarm-supervisor-chip--error"
+                )}
                 title={error() ?? supervisorChipTitle(mode(), state())}
                 aria-label={`Supervisor: ${MODE_LABELS[mode()]}`}
                 onClick={open}
                 onContextMenu={open}
             >
-                <i class="fa-solid fa-user-shield" />
                 <Show when={mode() !== "off"}>
                     <span class="swarm-supervisor-mode">{MODE_LABELS[mode()]}</span>
                 </Show>
                 <Show when={detail()}>
                     <span class="swarm-supervisor-detail">{detail()}</span>
                 </Show>
-            </button>
+            </Button>
         </Show>
     );
 }
@@ -109,6 +115,7 @@ const ACTION_LABELS: Record<SupervisorDecision["action"], string> = {
     waited: "waiting",
     no_verdict: "no verdict",
     mode_set: "set",
+    stopped: "stopped by you",
 };
 
 function timeOf(ms: number): string {

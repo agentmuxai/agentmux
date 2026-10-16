@@ -145,6 +145,8 @@ pub enum SupervisorAction {
     NoVerdict,
     /// The mode was set (a new run).
     ModeSet,
+    /// The user's Stop ended the turn: nothing was judged or sent.
+    Stopped,
 }
 
 /// One decision, newest last in `SupervisorState::history`.
@@ -227,6 +229,54 @@ impl SupervisorState {
             self.history.drain(..excess);
         }
     }
+}
+
+/// How long after the user's Stop a turn end counts as their own action, not
+/// a stop to judge: the notification router's grace window
+/// (`notify::router::STOP_GRACE_MS`).
+pub const STOP_GRACE_MS: i64 = 15_000;
+
+fn user_stops() -> &'static std::sync::Mutex<std::collections::HashMap<String, i64>> {
+    static STOPS: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, i64>>> =
+        std::sync::OnceLock::new();
+    STOPS.get_or_init(Default::default)
+}
+
+/// The user pressed Stop on this pane's turn (`notify.emit` `TurnStopped`).
+/// The turn end it causes is never judged or continued: the user's override
+/// wins (spec §3.4).
+pub fn note_user_stop(block_id: &str) {
+    note_user_stop_at(block_id, agentmux_common::time::now_ms());
+}
+
+fn note_user_stop_at(block_id: &str, now_ms: i64) {
+    let mut stops = user_stops().lock().unwrap_or_else(|e| e.into_inner());
+    // Bounded: an entry past the grace window can't matter any more.
+    stops.retain(|_, at| now_ms - *at < STOP_GRACE_MS);
+    stops.insert(block_id.to_string(), now_ms);
+}
+
+/// Whether the user stopped this pane's turn within the grace window.
+pub fn stopped_by_user(block_id: &str) -> bool {
+    stopped_by_user_at(block_id, agentmux_common::time::now_ms())
+}
+
+fn stopped_by_user_at(block_id: &str, now_ms: i64) -> bool {
+    user_stops()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(block_id)
+        .is_some_and(|at| now_ms - *at < STOP_GRACE_MS)
+}
+
+#[cfg(test)]
+pub(crate) fn note_user_stop_for_test(block_id: &str, now_ms: i64) {
+    note_user_stop_at(block_id, now_ms);
+}
+
+#[cfg(test)]
+pub(crate) fn stopped_by_user_for_test(block_id: &str, now_ms: i64) -> bool {
+    stopped_by_user_at(block_id, now_ms)
 }
 
 /// Whether the Supervisor can work on this pane at all: a Claude agent, whose

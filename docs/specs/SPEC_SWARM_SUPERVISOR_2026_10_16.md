@@ -102,6 +102,8 @@ VERDICT: <continue|done|needs_user|blocked> | REASON: <one sentence> | NEXT: <on
 
 Reaching a limit stops the agent with "needs you" and the reason (for example "5 continuations in a row"). Any turn the user starts resets the run, whether typed in the pane or broadcast from Swarm. So does changing the mode. A turn another agent or a service started is judged like any other, but it doesn't reset the run.
 
+**The user's Stop wins.** A turn the user ended with Stop (the pane reports it, as it does to the notification router) is never judged or continued, within the router's 15-second grace window: the Supervisor records "You stopped it" and waits for the user's next message. It checks again just before sending a continuation, for a Stop that reached srv late.
+
 ### 3.5 The continuation
 
 It is delivered through the same route a broadcast takes (`bootstrap::route_agent_message_from`), as **automated** input (`TurnOrigin::Automated`), never as the user's. Nothing that needs the user's own word can be authorised by it, such as an agent quitting itself or an AgentMux upgrade. The text is:
@@ -148,6 +150,10 @@ For a supervised pane, the router skips its generic "finished" notification, bec
 - **Paused:** `InputWaiting`, with "Supervisor paused: <reason>", through the router's own redaction.
 - **Done:** `TurnCompleted`.
 - **No verdict:** `TurnCompleted`, as if the Supervisor were off.
+- **Nothing judged** (no readable conversation, an unanswered user message): `TurnCompleted`, as if the Supervisor were off.
+- **A Stop:** nothing, as the router does for a stopped turn.
+
+"Finished" follows the router's own rule: for a turn another agent, a service, a schedule or a background task started, it goes out only when the user asked for those (`notify:os:turncompleted:external`). A Supervisor turn continues the user's own work and is announced.
 - **Continued:** nothing.
 
 ### 3.8 Swarm
@@ -189,7 +195,7 @@ The Warden Supervisor panel (`frontend/app/view/warden-supervisor/`), the `Super
 A throwaway Claude agent (Haiku) in an isolated `task dev` build, driven over its DevTools port through the same RPCs the Swarm uses:
 
 1. **Steady, "ask me after each of three files":** after step 1 it asked to continue; the judge said `continue`, the Supervisor sent continuation 1 of 5 (shown in the pane as "Supervisor · Steady · 1 of 5", the footer "Worked on a Supervisor continuation"), the agent made the other two files, and the judge said `done`, with the tool results as evidence. Swarm showed "Steady · done".
-2. **Drive, an open choice and then a delete:** the agent asked both questions with the question tool, so AgentMux's 30-second question timeout answered them, delete included, before the Supervisor was involved (the Supervisor never answers that tool, §2.1). Its one continuation then asked for evidence, and it judged the result `done`.
+2. **Drive, questions asked with the question tool:** that tool has its own answer path, which the Supervisor never uses (§2.1), so the Supervisor judged only the turn that followed: its one continuation asked for evidence, and it then judged the result `done`.
 3. **Drive, permission to delete asked in plain text:** the first run timed out at 45 s and, by hand, the judge called the turn `done` ("it asked as told"). Fixed: 90 s with one retry, and a turn ending in a question is never `done` (§3.3). After the fix: `needs_user`, "asking permission to delete … a risky, irreversible action"; nothing was continued, the files were kept, and Swarm showed "Drive paused" and "Needs you: …".
 
 The judge prompt is also checked against real Haiku by `live_supervisor_judge_answers_in_format_and_judges_the_clear_cases` (ignored by default; nine cases, all in format and right as of this date).
