@@ -1389,36 +1389,6 @@ pub fn get_window_position_blocking(state: &Arc<AppState>, label: &str) -> Optio
     rx.recv_timeout(std::time::Duration::from_millis(250)).ok().flatten()
 }
 
-// ── Get window maximized — blocking UI-thread read ───────────────────────
-//
-// For the `is_window_maximized` IPC on macOS / Linux (Windows answers from the
-// reducer or IsZoomed directly).
-wrap_task! {
-    pub struct GetWindowMaximizedTask {
-        state: Arc<AppState>,
-        label: String,
-        tx: std::sync::mpsc::SyncSender<Option<bool>>,
-    }
-
-    impl Task {
-        fn execute(&self) {
-            let maximized = get_window_on_ui(&self.state, &self.label).map(|w| w.is_maximized() != 0);
-            let _ = self.tx.try_send(maximized);
-        }
-    }
-}
-
-/// Whether a CEF Views window is maximized, read from the IPC thread by
-/// bouncing through the UI thread. `None` if the window isn't found or the UI
-/// thread doesn't answer within the timeout.
-#[cfg(not(target_os = "windows"))]
-pub fn get_window_maximized_blocking(state: &Arc<AppState>, label: &str) -> Option<bool> {
-    let (tx, rx) = std::sync::mpsc::sync_channel::<Option<bool>>(1);
-    let mut task = GetWindowMaximizedTask::new(state.clone(), label.to_string(), tx);
-    post_task(ThreadId::UI, Some(&mut task));
-    rx.recv_timeout(std::time::Duration::from_millis(250)).ok().flatten()
-}
-
 // ── Get window full rect (DIP) — blocking UI-thread read ─────────────────
 //
 // Like GetWindowPositionTask but returns (x, y, width, height). Used by the
