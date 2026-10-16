@@ -17,6 +17,7 @@ import { createEffect, createSignal, on, onCleanup, onMount, Show, type JSX } fr
 import { ViewerBar, type ViewerBarProps } from "../viewer-bar";
 import { linkAction } from "./pdf-policy";
 import { loadRange } from "./pdf-range";
+import { keyLabel } from "@/app/keybindings";
 import type { PdfjsModules } from "./pdfjs-runtime";
 import "./pdf-viewer.scss";
 
@@ -266,18 +267,18 @@ export function PdfViewer(props: PdfViewerProps): JSX.Element {
                             ref={pageInput}
                             class="pdf-viewer-page-input"
                             aria-label="Page"
-                            title="Page (Ctrl+G)"
+                            title={`Page (${keyLabel("mod+g")})`}
                             value={page()}
                             onChange={(e) => goTo(Number(e.currentTarget.value) || page())}
                             onKeyDown={(e) => e.key === "Enter" && goTo(Number(e.currentTarget.value) || page())}
                         />
                         <span class="pdf-viewer-of">/ {pages() || "–"}</span>
                         <IconButton icon="chevron-down" density="compact" label="Next page" disabled={page() >= pages()} onClick={() => goTo(page() + 1)} />
-                        <IconButton icon="magnifying-glass-minus" density="compact" label="Zoom out (Ctrl+−)" onClick={() => zoom("out")} />
+                        <IconButton icon="magnifying-glass-minus" density="compact" label={`Zoom out (${keyLabel("mod+-")})`} onClick={() => zoom("out")} />
                         <span class="pdf-viewer-scale" aria-label="Zoom">
                             {Math.round(scale() * 100)}%
                         </span>
-                        <IconButton icon="magnifying-glass-plus" density="compact" label="Zoom in (Ctrl+=)" onClick={() => zoom("in")} />
+                        <IconButton icon="magnifying-glass-plus" density="compact" label={`Zoom in (${keyLabel("mod+=")})`} onClick={() => zoom("in")} />
                         <Button density="compact" title="Fit the page width" onClick={() => zoom("page-width")}>
                             Width
                         </Button>
@@ -297,7 +298,7 @@ export function PdfViewer(props: PdfViewerProps): JSX.Element {
                             type="search"
                             placeholder="Find"
                             aria-label="Find in the document"
-                            title="Find (Ctrl+F); Enter for the next match, Shift+Enter for the previous"
+                            title={`Find (${keyLabel("mod+f")}); Enter for the next match, Shift+Enter for the previous`}
                             value={query()}
                             onInput={(e) => {
                                 setQuery(e.currentTarget.value);
