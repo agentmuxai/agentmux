@@ -1112,9 +1112,5 @@ fn focus_app(state: &Arc<AppState>, window_label: &str) {
     #[cfg(target_os = "windows")]
     crate::input_owner::windows::select_app(state, &label);
     #[cfg(not(target_os = "windows"))]
-    {
-        let mut task = crate::ui_tasks::MainFocusReclaimTask::new(state.clone(), label.clone());
-        cef::post_task(cef::ThreadId::UI, Some(&mut task));
-        tracing::info!("[ipc] focus_app: posted MainFocusReclaimTask for label={}", label);
-    }
+    crate::input_owner::views::select_app(state, &label);
 }

@@ -229,11 +229,11 @@ pub fn window_shown(hwnd: *mut std::ffi::c_void) {
 fn run(state: &Arc<AppState>, window: &str, effect: Effect) {
     match effect {
         Effect::FocusApp => {
-            let mut task = crate::ui_tasks::MainFocusReclaimTask::new(state.clone(), window.to_string());
+            let mut task = FocusTask::new(state.clone(), window.to_string(), Owner::App);
             post_task(ThreadId::UI, Some(&mut task));
         }
         Effect::FocusPane(block) => {
-            let mut task = FocusPaneTask::new(state.clone(), block);
+            let mut task = FocusTask::new(state.clone(), window.to_string(), Owner::Pane(block));
             post_task(ThreadId::UI, Some(&mut task));
         }
         Effect::RaisePanes => {
@@ -249,13 +249,26 @@ fn run(state: &Arc<AppState>, window: &str, effect: Effect) {
 }
 
 wrap_task! {
-    struct FocusPaneTask {
+    struct FocusTask {
         state: Arc<AppState>,
-        block: String,
+        window: String,
+        owner: Owner,
     }
     impl Task {
         fn execute(&self) {
-            self.state.browser_panes.give_keyboard(&self.block, &self.state);
+            // Posted after the step that asked for it: run it only if it is
+            // still what the machine asks for, in a window still active.
+            if !registry::still_requested(&self.window, &self.owner) {
+                tracing::info!("[input] win={} focus on {} dropped: superseded or the window is inactive", self.window, self.owner);
+                return;
+            }
+            match &self.owner {
+                Owner::App => {
+                    let task = crate::ui_tasks::MainFocusReclaimTask::new(self.state.clone(), self.window.clone());
+                    task.execute();
+                }
+                Owner::Pane(block) => self.state.browser_panes.give_keyboard(block, &self.state),
+            }
         }
     }
 }

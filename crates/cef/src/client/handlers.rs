@@ -160,20 +160,37 @@ wrap_focus_handler! {
                 }
             }
             #[cfg(not(target_os = "windows"))]
-            let _ = (browser, &self.state);
+            if let Some(browser) = browser {
+                if let Some(block) = crate::browser_pane::callbacks::resolve_pane_block_id(&self.state, browser) {
+                    crate::input_owner::views::pane_focus_gained(&self.state, &block);
+                }
+            }
         }
 
         fn on_set_focus(
             &self,
-            _browser: Option<&mut Browser>,
+            browser: Option<&mut Browser>,
             source: FocusSource,
         ) -> ::std::os::raw::c_int {
             // Never cancelled: cancelling FocusSource::NAVIGATION during
             // the very first navigation of a newly-created pane made CEF
             // fire `on_before_close` on that pane ~10ms later (reliably,
-            // when creating a 2nd browser pane). On Windows the input
-            // owner puts back focus a page takes that wasn't asked for.
+            // when creating a 2nd browser pane). The input owner puts back
+            // focus a page takes that wasn't asked for.
             tracing::info!("[pane-focus] on_set_focus source={:?} cancel=false", source);
+            // Linux has no click hook into a pane's page (Windows and macOS
+            // do): focus the user gave the page (a click, Tab) is the user
+            // choosing that pane, not the page taking focus by itself
+            // (`pane_chosen` leaves out a pane being created and focus the
+            // input owner gave itself).
+            #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+            if source == FocusSource::SYSTEM {
+                if let Some(block) = browser.and_then(|b| crate::browser_pane::callbacks::resolve_pane_block_id(&self.state, b)) {
+                    crate::input_owner::views::pane_chosen(&self.state, &block);
+                }
+            }
+            #[cfg(any(target_os = "windows", target_os = "macos"))]
+            let _ = browser;
             0
         }
     }
