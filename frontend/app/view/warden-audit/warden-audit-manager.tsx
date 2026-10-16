@@ -78,8 +78,7 @@ export const WardenAuditManager = (): JSX.Element => {
                                     </span>
                                     <span class="warden-audit-bytes">{entry.message_length}b</span>
                                     {/* A caller-supplied `reason` (e.g. ClosePane's) shows on
-                                        its own; outcome is unset for fleet actions (codex P2 /
-                                        reagent P1 on PR #3196). */}
+                                        its own: outcome is unset for fleet actions (#3196). */}
                                     <Show when={entry.reason} fallback={
                                         <Show when={!entry.success && entry.error_message}>
                                             <span class="warden-audit-error">{entry.error_message}</span>
