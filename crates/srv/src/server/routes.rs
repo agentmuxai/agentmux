@@ -458,6 +458,10 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         // way `FleetBulkStop`'s calls are today.
         .route("/api/v1/agent/pane/close", post(app_api::pane::handle_close_pane))
         .route("/api/v1/agent/self/quit", post(app_api::pane::handle_quit_self))
+        // The App tool: what AgentMux runs and whether a newer release is out,
+        // and asking to upgrade (SPEC_UPGRADE_FOR_USERS_AND_AGENTS §5.1).
+        .route("/api/v1/app/update-status", get(app_api::app_update::handle_update_status))
+        .route("/api/v1/agent/self/upgrade", post(app_api::app_update::handle_request_upgrade))
         // `agentmux-mcp doctor`, from the agent's shell: its own pane by token.
         .route("/api/v1/agent/self/mcp-health", post(app_api::mcp_health::handle_mcp_health))
         .route("/api/v1/agent/self/mcp-heal", post(app_api::mcp_health::handle_mcp_heal))

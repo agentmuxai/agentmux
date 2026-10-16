@@ -71,6 +71,7 @@ import type { CommandAgentSessionWriteStateData } from "@/types/rpc/CommandAgent
 import type { CommandAgentShutdownKeepData } from "@/types/rpc/CommandAgentShutdownKeepData";
 import type { CommandAgentStopData } from "@/types/rpc/CommandAgentStopData";
 import type { CommandAmbientNarrateData } from "@/types/rpc/CommandAmbientNarrateData";
+import type { CommandAppUpgradeRequestAnswerData } from "@/types/rpc/CommandAppUpgradeRequestAnswerData";
 import type { CommandAppUpgradeRestartData } from "@/types/rpc/CommandAppUpgradeRestartData";
 import type { CommandAppendAgentHistoryData } from "@/types/rpc/CommandAppendAgentHistoryData";
 import type { CommandAskSideQuestionData } from "@/types/rpc/CommandAskSideQuestionData";
@@ -395,6 +396,7 @@ import type { TowerSampleReq } from "@/types/rpc/TowerSampleReq";
 import type { TowerSnapshot } from "@/types/rpc/TowerSnapshot";
 import type { UnlinkAgentIdentityResult } from "@/types/rpc/UnlinkAgentIdentityResult";
 import type { UnwatchMediaDirReq } from "@/types/rpc/UnwatchMediaDirReq";
+import type { UpgradeRequestsEvent } from "@/types/rpc/UpgradeRequestsEvent";
 import type { ValidationReport } from "@/types/rpc/ValidationReport";
 import type { ViewerAgentHiddenResult } from "@/types/rpc/ViewerAgentHiddenResult";
 import type { ViewerCanSendResult } from "@/types/rpc/ViewerCanSendResult";
@@ -2258,6 +2260,18 @@ export const GeneratedApi = {
   // command "app.upgrade-cancel"
   AppUpgradeCancelCommand(client: RpcClient, opts?: RpcOpts): Promise<AppUpdateStatus> {
     return client.rpcCall("app.upgrade-cancel", {}, opts);
+  },
+  // command "app.upgrade-request-answer"
+  AppUpgradeRequestAnswerCommand(
+    client: RpcClient,
+    data: CommandAppUpgradeRequestAnswerData,
+    opts?: RpcOpts
+  ): Promise<UpgradeRequestsEvent> {
+    return client.rpcCall("app.upgrade-request-answer", data, opts);
+  },
+  // command "app.upgrade-requests"
+  AppUpgradeRequestsCommand(client: RpcClient, opts?: RpcOpts): Promise<UpgradeRequestsEvent> {
+    return client.rpcCall("app.upgrade-requests", {}, opts);
   },
   // command "app.upgrade-restart"
   AppUpgradeRestartCommand(
