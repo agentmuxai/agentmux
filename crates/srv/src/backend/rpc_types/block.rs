@@ -689,7 +689,7 @@ pub struct RunCliLoginResult {
 // on this side, the same way a corresponding muxsh.contract.test.mjs catches
 // it on the Node side.
 // Every Option field may be left out (serde reads a missing one as None), so each is optional in TS.
-#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "snake_case")]
 pub struct CommandPaneOpenData {
@@ -791,6 +791,19 @@ pub struct CommandPaneOpenData {
     /// Part 2.
     #[ts(optional)]
     pub reuse_editor_pane: Option<bool>,
+    /// `view: "editor"` only: the opened image or video tab follows newer
+    /// matching files in its folder (a render pipeline's output), as the
+    /// retired Media pane did. Set by `OpenMedia` and `view: "media"`.
+    /// SPEC_EDITOR_REVAMP_UNIFIED_VIEWERS_2026_10_15.md §4.9, §4.11.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub follow_folder: Option<bool>,
+    /// `view: "editor"` only: the viewer to open `file` in, instead of the
+    /// one the editor picks from the file's content. Only `"text"` for now,
+    /// sent by `muxsh edit` (any file as text); any other value is an error.
+    /// SPEC_EDITOR_REVAMP_UNIFIED_VIEWERS_2026_10_15.md §4.11.
+    #[ts(optional)]
+    pub viewer: Option<String>,
     /// `view: "files"` only: names (or full paths) inside `file` to select
     /// once the pane has listed it, written to `block.meta["files:select"]`
     /// (a one-shot request the view clears). Set by the `OpenFiles` MCP tool.
@@ -1075,6 +1088,8 @@ mod app_api_manifest_contract_tests {
             skip_placement: None,
             stack_onto_block_id: None,
             reuse_editor_pane: None,
+            follow_folder: None,
+            viewer: None,
             select: None,
             line: None,
             connection: None,

@@ -173,6 +173,7 @@ Gestures that aren't plain keys: modifier + mouse, double- and middle-click, dra
 | Add another cursor | in an editor | ⌘ + click | Ctrl + click |
 | Make a column (block) selection | in an editor | ⌥ + drag | Alt + drag |
 | Select the next match of the selected text | in an editor | ⌘ + D | Ctrl + D |
+| Zoom around the pointer / pan / switch between fit and zoomed; + − 0 1 and the arrows too; [ ] the previous or next image in the folder; B the background | on an image in the Editor | scroll or drag or double-click | scroll or drag or double-click |
 
 ### Files
 
@@ -183,13 +184,7 @@ Gestures that aren't plain keys: modifier + mouse, double- and middle-click, dra
 | Preview the file / filter / go back; typing a name jumps to it | in the Files list | Space or / or Backspace | Space or / or Backspace |
 | Open it in a new tab | on a folder in the Files pane | middle-click | middle-click |
 | Type a path | on the Files pane's folder path | double-click | double-click |
-| Send files to an agent, editor, media or terminal pane; dropping copies here, or into the folder under the pointer | Files rows onto a pane, or files onto the list | drag or drop | drag or drop |
-
-### Media
-
-| What it does | Where | macOS | Windows / Linux |
-|---|---|---|---|
-| Zoom around the pointer / pan / switch between fit and zoomed; + − 0 1 and the arrows too | on an image in the Media pane | scroll or drag or double-click | scroll or drag or double-click |
+| Send files to an agent, editor or terminal pane; dropping copies here, or into the folder under the pointer | Files rows onto a pane, or files onto the list | drag or drop | drag or drop |
 
 ### Agent
 

@@ -934,13 +934,18 @@ impl PlanBuilder<'_> {
                     }
                 }
             }
+            // The Media pane is folded into the Editor
+            // (SPEC_EDITOR_REVAMP_UNIFIED_VIEWERS_2026_10_15.md §4.12.1): a
+            // layout's media pane is an Editor following the file's folder.
             "media" => {
-                meta.insert("view".into(), "media".into());
+                meta.insert("view".into(), "editor".into());
                 if let Some(path) = cfg_str(view, "path").map(|p| expand_home(p, home)) {
-                    self.summary.push(format!("Media: {}", path.display()));
-                    meta.insert("media:path".into(), Value::String(path.to_string_lossy().to_string()));
+                    self.summary.push(format!("Editor: {}", path.display()));
+                    meta.insert("file".into(), Value::String(path.to_string_lossy().to_string()));
+                    meta.insert("editor:follow_folder".into(), Value::Bool(true));
                 } else {
-                    self.summary.push("Media".to_string());
+                    meta.insert("editor:scratch".into(), Value::Bool(true));
+                    self.summary.push("Editor".to_string());
                 }
             }
             "files" => {

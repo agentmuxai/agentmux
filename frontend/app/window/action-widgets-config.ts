@@ -186,6 +186,11 @@ export function getPinnedKeys(
     return getSavedPinNames(settings, wmap).filter((id) => !isWidgetHidden(keyOfPinId(id), wmap, settings, hidden));
 }
 
+/** A pin whose widget was folded into another, and the pin that takes its place: the Media
+ *  pane is the Editor's image and video viewers now (SPEC_EDITOR_REVAMP_UNIFIED_VIEWERS_2026_10_15.md),
+ *  so a saved `media` pin stays on the bar as the Editor rather than dropping off it. */
+const RETIRED_PINS = new Map<string, string>([["media", "editor"]]);
+
 /**
  * The pins as saved, hidden or not: `widget:pinned` (or the fresh-install
  * default). Every write of `widget:pinned` starts from this, not from getPinnedKeys, so a pinned
@@ -195,7 +200,7 @@ export function getPinnedKeys(
 export function getSavedPinNames(settings: Record<string, any>, wmap: Record<string, WidgetConfigType>): string[] {
     const pinned: string[] | undefined = settings["widget:pinned"];
     if (pinned !== undefined) {
-        return [...new Set(pinned)].filter((id) => wmap[keyOfPinId(id)] != null);
+        return [...new Set(pinned.map((id) => RETIRED_PINS.get(id) ?? id))].filter((id) => wmap[keyOfPinId(id)] != null);
     }
     const grouped = getGroupedChildKeys(wmap);
     return Object.entries(wmap)

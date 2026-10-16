@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Loading local media files into the UI, shared by the Media pane
- * (`view/media/media.tsx`) and inline media in agent messages
+ * Loading local media files into the UI, shared by the Editor's image and
+ * media viewers (`view/editor/viewers/`) and inline media in agent messages
  * (`markdown-media.tsx`, SPEC_AGENT_PANE_RICH_OUTPUT_2026_09_27.md §4).
  */
 
@@ -15,16 +15,16 @@ import { fetch } from "@/util/fetchutil";
  * Includes SVG: both the Media pane and inline media only ever show it through
  * `<img>` from a blob URL, where its scripts never run.
  */
-export const IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "gif", "webp", "svg"];
-export const VIDEO_EXTENSIONS = ["webm", "mp4", "mov"];
-// PCM WAV only — Chromium's <audio> element supports it natively and
-// unconditionally (open format, no codec-licensing gate), unlike MP4/MOV
-// which need the CEF build's proprietary-codec flag. Not adding mkv:
+export const IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "gif", "webp", "svg", "avif", "apng", "bmp", "ico"];
+export const VIDEO_EXTENSIONS = ["webm", "mp4", "mov", "m4v"];
+// What Chromium's <audio> plays. MP3 and AAC/M4A need the CEF build's
+// proprietary-codec flag, which every build sets (scripts/cef-build/args*.gn,
+// SPEC_EDITOR_REVAMP_UNIFIED_VIEWERS_2026_10_15.md §4.4.3). Not adding mkv:
 // Chromium's <video> element doesn't reliably accept the Matroska
 // container itself for direct playback regardless of codec support
 // (browsers generally only support WebM, a constrained Matroska profile —
 // see the "Post-implementation corrections" note in SPEC_MEDIA_PANE_2026_07_26.md).
-export const AUDIO_EXTENSIONS = ["wav"];
+export const AUDIO_EXTENSIONS = ["wav", "mp3", "ogg", "oga", "opus", "flac", "m4a", "aac"];
 
 /** Client-side caps for inline media (§4.2, §5); srv's own limit is 500 MB. */
 export const INLINE_IMAGE_MAX_BYTES = 25 * 1024 * 1024;

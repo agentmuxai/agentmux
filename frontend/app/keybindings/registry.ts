@@ -21,7 +21,7 @@ export interface KeyContext {
 }
 
 /** View types whose panes have document tabs. */
-export const DOC_TAB_HOSTS = ["editor", "media"];
+export const DOC_TAB_HOSTS = ["editor"];
 
 /** The `when` a pane row implicitly has: its keys only reach it there. */
 const PANE_WHEN: Record<KeyPane, string> = {

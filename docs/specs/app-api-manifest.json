@@ -23,6 +23,7 @@
         "meta",
         "skip_placement",
         "reuse_editor_pane",
+        "viewer",
         "connection",
         "auth"
       ],

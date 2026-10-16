@@ -26,7 +26,7 @@ not an agent-identity-signed one (a distinction that ruled out a couple of
 muxsh open <file>              # open a file in an editor pane
 muxsh web <url>                # open a URL in a browser pane
 muxsh view <path-or-url>       # open the right pane type automatically
-muxsh edit <file>              # like open, but always forces the editor view
+muxsh edit <file>              # like open, but always shows the file as text
 muxsh pane list                # list tabs/panes in your workspace
 muxsh run <cmd...>              # run a background shell
 muxsh config edit               # open settings.json
@@ -45,14 +45,14 @@ pane environment. No new IPC, no new auth scheme.
 Thin wrappers over `POST /api/v1/pane/open` — the same route the frontend and
 the `Pane` MCP tool's `open` action uses.
 
-- **`open <file>`** — editor pane.
+- **`open <file>`** — editor pane, in the viewer the editor picks from the
+  file's content (text, image, audio and video, or a file info card).
 - **`web <url>`** — browser pane.
 - **`view <path-or-url>`** — guesses the right pane type: a URL → browser, a
-  media extension (`.png`/`.jpg`/`.gif`/`.mp4`/`.pdf`/...) → media, anything
-  else → editor. The guess list isn't derived from a canonical AgentMux
-  source (open question, see the full-collection spec §7.4) and may drift
-  from what the frontend itself considers "media."
-- **`edit <file>`** — like `open`, but never guesses; always the editor view.
+  folder (a trailing `/`, `.`, `..` or `~`) → files, anything else → editor,
+  which picks the viewer itself.
+- **`edit <file>`** — like `open`, but always in the text viewer, whatever the
+  file is (pane.open's `viewer: "text"`).
 
 | Option | Effect | Applies to |
 |---|---|---|
@@ -66,8 +66,8 @@ the `Pane` MCP tool's `open` action uses.
 muxsh open ~/notes.md
 muxsh open ./src/main.rs --split down --title "main.rs"
 muxsh web https://grafana.internal/d/api-latency
-muxsh view ./report.pdf          # -> media pane, no need to know that yourself
-muxsh edit ./photo.png            # forces the editor view despite the extension
+muxsh view ./report.pdf          # -> editor, which picks the viewer
+muxsh edit ./photo.png            # the image's bytes as text, not the image
 ```
 
 Splitting relative to the calling pane requires `$AGENTMUX_BLOCKID` (set in

@@ -14,6 +14,10 @@ import { editorSplitBlockDef } from "./editor-split";
 export const editorPaneTab: PaneTabManifest = {
     apiVersion: 1,
     view: "editor",
+    // The Media pane is folded into the Editor: a saved Media pane opens as
+    // an Editor, its files as tabs following their folder (the model's
+    // migrateMediaMeta). SPEC_EDITOR_REVAMP_UNIFIED_VIEWERS_2026_10_15.md §4.12.
+    aliases: ["media"],
     label: "Editor",
     icon: "file-lines",
     defaultHue: 270,

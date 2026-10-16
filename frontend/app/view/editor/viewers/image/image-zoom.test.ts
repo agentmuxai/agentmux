@@ -14,7 +14,7 @@ import {
     zoomAt,
     zoomPercent,
     type ZoomBox,
-} from "./media-zoom";
+} from "./image-zoom";
 
 // A 2000×1000 render fitted into an 800×600 view: 800×400 on screen.
 const box: ZoomBox = { fitWidth: 800, fitHeight: 400, viewWidth: 800, viewHeight: 600, naturalWidth: 2000, naturalHeight: 1000 };

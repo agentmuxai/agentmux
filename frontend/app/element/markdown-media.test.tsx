@@ -24,8 +24,8 @@ vi.mock("@/util/fetchutil", () => ({ fetch: (...a: unknown[]) => h.fetch(...a) }
 vi.mock("@/util/endpoints", () => ({ getWebServerEndpoint: () => "http://srv" }));
 vi.mock("@/app/store/app-api", () => ({ getApi: () => ({ getAuthKey: () => "k" }) }));
 vi.mock("@/app/store/block-layout-actions", () => ({ createBlock: h.createBlock }));
-// No Media pane on screen: a click opens a new one.
-vi.mock("@/app/view/media/media-open", () => ({ openInMediaPaneOnScreen: async () => false }));
+// No Editor pane on screen: a click opens a new one.
+vi.mock("@/app/view/editor/editor-open", () => ({ openInEditorPaneOnScreen: async () => false }));
 
 import { Markdown } from "./markdown";
 import { resolveMediaPath } from "./local-media";
@@ -238,11 +238,11 @@ describe("a local image in an agent message", () => {
         expect(h.fetch).toHaveBeenCalledTimes(1);
     });
 
-    it("opens the file in a Media pane on click", async () => {
+    it("opens the file in the editor on click", async () => {
         const c = mount("![x](shots/a.png)").container;
         await waitFor(() => expect(c.querySelector("img")).not.toBeNull());
         fireEvent.click(c.querySelector("img")!);
-        await waitFor(() => expect(h.createBlock).toHaveBeenCalledWith({ meta: { view: "media", "media:path": "C:/work/shots/a.png" } }));
+        await waitFor(() => expect(h.createBlock).toHaveBeenCalledWith({ meta: { view: "editor", file: "C:/work/shots/a.png", "editor:follow_folder": true } }));
     });
 
     it("shows a card instead of an image over the 25 MB cap, without downloading it", async () => {
@@ -256,7 +256,7 @@ describe("a local image in an agent message", () => {
         expect(card.textContent).toContain("huge.png");
         expect(card.textContent).toContain("30 MB");
         fireEvent.click(card);
-        await waitFor(() => expect(h.createBlock).toHaveBeenCalledWith({ meta: { view: "media", "media:path": "C:/work/shots/huge.png" } }));
+        await waitFor(() => expect(h.createBlock).toHaveBeenCalledWith({ meta: { view: "editor", file: "C:/work/shots/huge.png", "editor:follow_folder": true } }));
     });
 });
 

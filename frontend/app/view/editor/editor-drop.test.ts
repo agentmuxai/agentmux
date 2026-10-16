@@ -22,49 +22,47 @@ describe("editor pane file drop", () => {
         expect(editorDropVerdict(drag(undefined, [""]))).toMatchObject({ ok: true });
     });
 
-    it("blocks any known binary", () => {
-        expect(editorDropVerdict(drag(["notes.md", "photo.jpg"]))).toEqual({
-            ok: false,
-            reason: "The editor opens text files; photo.jpg isn't one",
-        });
-        expect(editorDropVerdict(drag(undefined, ["application/pdf"]))).toMatchObject({ ok: false });
-        expect(editorDropVerdict(drag(undefined, ["image/png"]))).toMatchObject({ ok: false });
+    it("accepts any file: the editor picks the viewer (SPEC_EDITOR_REVAMP_UNIFIED_VIEWERS §4.12.1)", () => {
+        expect(editorDropVerdict(drag(["notes.md", "photo.jpg"]))).toMatchObject({ ok: true, message: "Open 2 files" });
+        expect(editorDropVerdict(drag(undefined, ["application/pdf"]))).toMatchObject({ ok: true });
+        expect(editorDropVerdict(drag(undefined, ["image/png"]))).toMatchObject({ ok: true });
         expect(editorDropVerdict(drag(undefined, ["text/plain", "application/json"]))).toMatchObject({ ok: true });
     });
 
     it("opens every dropped path as a tab", async () => {
-        const target = { openFile: vi.fn().mockResolvedValue(undefined), openText: vi.fn(), cantOpen: vi.fn() };
+        const target = { openFile: vi.fn().mockResolvedValue(undefined), openText: vi.fn(), openBytes: vi.fn(), cantOpen: vi.fn() };
         await createEditorDropHook(target).drop({ paths: ["C:/a.rs", "C:/b.md"], files: [] });
         expect(target.openFile.mock.calls).toEqual([["C:/a.rs"], ["C:/b.md"]]);
     });
 
     it("without paths, opens each file's text in an untitled tab", async () => {
-        const target = { openFile: vi.fn(), openText: vi.fn().mockResolvedValue(undefined), cantOpen: vi.fn() };
+        const target = { openFile: vi.fn(), openText: vi.fn().mockResolvedValue(undefined), openBytes: vi.fn(), cantOpen: vi.fn() };
         const file = new File(["fn main() {}"], "main.rs");
         await createEditorDropHook(target).drop({ paths: [], files: [file] });
         expect(target.openText).toHaveBeenCalledWith("main.rs", "fn main() {}");
         expect(target.openFile).not.toHaveBeenCalled();
     });
 
-    it("skips a binary it only discovers at drop, and reports it", async () => {
-        const target = { openFile: vi.fn(), openText: vi.fn(), cantOpen: vi.fn() };
+    it("opens a binary it only discovers at drop from its bytes", async () => {
+        const target = { openFile: vi.fn(), openText: vi.fn(), openBytes: vi.fn(), cantOpen: vi.fn() };
         const bin = new File([new Uint8Array([0x50, 0x4b, 0, 0])], "data");
         const txt = new File(["ok"], "readme");
         await createEditorDropHook(target).drop({ paths: [], files: [bin, txt] });
-        expect(target.cantOpen).toHaveBeenCalledWith("data");
+        expect(target.openBytes).toHaveBeenCalledWith(bin);
+        expect(target.cantOpen).not.toHaveBeenCalled();
         expect(target.openText).toHaveBeenCalledTimes(1);
         expect(target.openText).toHaveBeenCalledWith("readme", "ok");
     });
 });
 
 describe("a pathless drop's size", () => {
-    it("refuses a file over the editor's read limit without reading it", async () => {
-        const target = { openFile: vi.fn(), openText: vi.fn(), cantOpen: vi.fn() };
+    it("opens a file over the editor's read limit from its bytes, without reading it as text", async () => {
+        const target = { openFile: vi.fn(), openText: vi.fn(), openBytes: vi.fn(), cantOpen: vi.fn() };
         const big = new File(["a".repeat(MAX_DROPPED_TEXT_BYTES + 1)], "huge.log");
         const read = vi.spyOn(big, "text");
         const slice = vi.spyOn(big, "slice");
         await createEditorDropHook(target).drop({ paths: [], files: [big] });
-        expect(target.cantOpen).toHaveBeenCalledWith("huge.log");
+        expect(target.openBytes).toHaveBeenCalledWith(big);
         expect(read).not.toHaveBeenCalled();
         expect(slice).not.toHaveBeenCalled();
         expect(target.openText).not.toHaveBeenCalled();

@@ -2154,6 +2154,25 @@
     }
   },
   {
+    "command": "fileprobe",
+    "request": "agentmux_srv::backend::rpc_types::editor_read::FileProbeReq",
+    "requestName": "FileProbeReq",
+    "requestTs": {
+      "imports": [
+        "FileProbeReq"
+      ],
+      "name": "FileProbeReq"
+    },
+    "response": "agentmux_srv::backend::rpc_types::editor_read::FileProbeResult",
+    "responseName": "FileProbeResult",
+    "responseTs": {
+      "imports": [
+        "FileProbeResult"
+      ],
+      "name": "FileProbeResult"
+    }
+  },
+  {
     "command": "fleet.broadcast",
     "request": "agentmux_srv::backend::rpc_types::fleet::CommandFleetBroadcastData",
     "requestName": "CommandFleetBroadcastData",

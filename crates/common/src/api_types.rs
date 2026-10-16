@@ -421,6 +421,10 @@ pub struct PaneOpenRequest {
     /// reuse (`EditorViewModel.openToTheSide`/`openInTerminal`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reuse_editor_pane: Option<bool>,
+    /// `view: "editor"` only: an image or video tab follows newer matching
+    /// files in its folder. Set by the `OpenMedia` alias (`Pane` open, view `media`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub follow_folder: Option<bool>,
     /// `view: "files"` only: names (or full paths) inside `file` to select
     /// once the Files pane has listed it. Set by the `OpenFiles` MCP tool.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -558,7 +562,7 @@ pub struct UiScreenshotRequest {
 }
 
 /// Response for `POST /api/v1/ui/screenshot`. `path` is a file already
-/// written to disk (openable via the `OpenMedia` tool); `png_base64` is the
+/// written to disk (openable in the Editor, `Pane` open); `png_base64` is the
 /// same image inline, for a caller that can render an MCP `ImageContent`
 /// block directly without a second round trip.
 #[derive(Debug, Clone, Serialize, Deserialize)]

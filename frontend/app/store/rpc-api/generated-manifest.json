@@ -927,6 +927,10 @@
             "method": "ProvidersModelsCommand"
         },
         {
+            "command": "fileprobe",
+            "method": "FileProbeCommand"
+        },
+        {
             "command": "readeditorfile",
             "method": "ReadEditorFileCommand"
         },

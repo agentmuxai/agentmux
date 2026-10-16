@@ -197,3 +197,48 @@ pub struct UnwatchMediaDirReq {
     pub path: String,
     pub block_id: String,
 }
+
+/// Request for `fileprobe`: what a file is, before the Editor reads it.
+/// docs/specs/SPEC_EDITOR_REVAMP_UNIFIED_VIEWERS_2026_10_15.md §4.2.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct FileProbeReq {
+    pub path: String,
+}
+
+/// The text side of a `fileprobe` result.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct FileProbeText {
+    /// "utf-8" | "utf-16le" | "utf-16be" | "legacy" (not UTF-8; the read
+    /// path's detector decides).
+    pub encoding: String,
+    /// "none" | "utf-8" | "utf-16le" | "utf-16be".
+    pub bom: String,
+}
+
+/// Response for `fileprobe`.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct FileProbeResult {
+    /// Bytes.
+    #[ts(type = "number")]
+    pub size: u64,
+    /// Last modified, milliseconds since the epoch (0 when unknown).
+    #[ts(type = "number")]
+    pub mtime: i64,
+    /// image | image_file | svg | pdf | audio | video | archive | word |
+    /// excel | powerpoint | sqlite | font | text | other.
+    pub kind: String,
+    /// From the content first, the extension second.
+    pub mime: String,
+    /// Set for text; absent for binary.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub text: Option<FileProbeText>,
+    /// "nul" | "control_bytes" for binary the magic bytes didn't name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub binary_reason: Option<String>,
+    pub read_only: bool,
+}
