@@ -1,7 +1,7 @@
 # Spec: tell the user what happened after AgentMux recovers, and fix the toasts that carry it
 
 **Date:** 2026-10-16
-**Status:** proposed
+**Status:** active. §6 (a page closing its pane no longer closes the window) implemented in #5026; §4 and §5 proposed.
 **Author:** Loap-3@narko, at the operator's request
 **Scope:** the frontend's toasts (`frontend/app/notification/`, `store/flash-notifications.ts`), the status bar's backend item (`statusbar/BackendStatus.tsx`, `HealthNotices.tsx`), the host's crash and quit paths (`crates/cef/src/client/crash_recovery.rs`, `client/lifecycle.rs`, `wrr/`, `lib.rs` fast exit), the launcher's supervisor (`crates/launcher/src/supervisor/`), srv's start-up recovery (`blockcontroller/session_recovery.rs`, `service/session_restore.rs`).
 **Related:** `SPEC_GRACEFUL_CRASH_HANDLING_2026_04_13.md` (the renderer recovery page), `SPEC_SERVICE_SUPERVISION_AND_RECOVERY_2026_05_20.md` (crash budgets), `SPEC_SESSION_RESTORE_AND_SAVED_LAYOUTS_2026_08_13.md`, `SPEC_OS_NOTIFICATIONS_SYSTEM_2026_09_24.md`, `SPEC_FLEETWIDE_CRASH_HANG_FORENSICS_2026_08_14.md`, `SPEC_TRAY_OPTIONAL_BACKGROUND_SERVICE_2026_09_04.md` §6 (the background audit), `docs/reports/REPORT_PERFORMANCE_INDICATORS_TO_STATUS_BAR_2026_10_08.md`.
@@ -155,7 +155,7 @@ None of this works while toasts are dev-only (§3.1), so the first step is the t
 - **B: the record and the notice for the host's own cases** (§4.1, §4.2, §4.4: `renderer_crashed`, `renderer_oom`, `quit_no_window`, `window_closed_by_page`), the "Recent incidents" section and the uptime marker (§4.3).
 - **C: the launcher's and srv's cases** (`host_restarted`, `host_restarted_safe_mode`, `srv_restarted`, `hang_restarted`, `memory_give_up`), the OS toast when no window is in front, and GPU-process crash detection (Chromium restarts it without a callback CEF exposes; candidates: the browser process's child-process exit, a GPU info change, the compositor losing its surface; to establish).
 
-## 6. The fix for the incident's cause (separate PR, now)
+## 6. The fix for the incident's cause (#5026)
 
 `do_close` cancels a browser **pane's** own script close: for a browser that is a pane (not one of `popup_browser_ids`, not an AgentMux window), return `true` from `do_close` when the close wasn't started by AgentMux, so CEF doesn't send `WM_CLOSE` to the main window. The pane goes back one page if it can, else shows a page saying the site closed itself, with its last address. The OAuth popup path keeps its behaviour. A test drives a pane page that calls `window.close()` and checks the main window and the other panes stay.
 
