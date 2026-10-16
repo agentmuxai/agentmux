@@ -297,7 +297,7 @@ pub fn spawn_background_subsystems(
     // never on the startup path (SPEC_UPGRADE_FOR_USERS_AND_AGENTS §3).
     crate::backend::update_check::spawn(config_watcher.clone(), event_bus.clone());
     // Whether this start is an upgrade, for the note resumed agents get.
-    crate::backend::upgrade_notice::init();
+    crate::backend::upgrade_notice::init(mstore.clone());
 
     // Discord messaging bridge — connects to Discord Gateway if configured.
     // Set messaging:discord:enabled + messaging:discord:token in settings.json to activate.

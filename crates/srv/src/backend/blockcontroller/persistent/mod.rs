@@ -1406,8 +1406,7 @@ impl Controller for PersistentSubprocessController {
         }
 
         match self.try_eager_resume(&block_meta, &session_id) {
-            // After an upgrade, the agent is told once (SPEC_UPGRADE_FOR_USERS_AND_AGENTS §5.2).
-            EagerResumeOutcome::Spawned => crate::backend::upgrade_notice::on_resumed(&self.block_id),
+            EagerResumeOutcome::Spawned => {}
             EagerResumeOutcome::DeclinedTo(reason) => {
                 tracing::info!(
                     block_id = %self.block_id,

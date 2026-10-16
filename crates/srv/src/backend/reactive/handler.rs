@@ -503,7 +503,7 @@ impl Handler {
             evicted_block.as_deref(),
             evicted_agent.as_deref(),
         );
-        super::held_jekt_wake().notify_one();
+        super::registered(block_id);
 
         Ok(())
     }

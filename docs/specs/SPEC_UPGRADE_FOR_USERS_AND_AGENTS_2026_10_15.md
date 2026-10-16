@@ -204,10 +204,14 @@ What already happens, and what's added:
   srv records the version it runs in the channel folder
   (`channels/<ch>/agentmux-last-version.json`, like `cli_notice`'s CLI
   versions: each version's data folder is new after an upgrade). A start on
-  a newer release than the one recorded is an upgrade; then every agent
-  whose session is eagerly resumed gets the note once it has registered (a
-  system note, like the other `[AgentMux]` notes; never a jekt). A first
-  start, the same version, or an older build started again says nothing.
+  a newer release than the one recorded is an upgrade, and the record keeps
+  it, with the panes already told, for an hour: a crash or another restart
+  soon after still tells the agents not yet told, never one twice. The hook
+  is registration with the reactive handler (`reactive::registered`), which
+  every agent that can receive a note goes through, whatever runs it; the
+  note goes to a pane that already had a session (`agent:sessionid`), not a
+  new one. A first start, the same version, or an older build started again
+  says nothing.
 - **The agent that asked** hears every step: the user's answer to its
   request as a note (phase 4a), and, after the restart, the note above.
   A failed download or a restart that didn't happen shows in the version
