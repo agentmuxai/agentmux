@@ -388,13 +388,14 @@ async fn a_leaders_workers_are_listed_with_their_last_report() {
     }))
     .unwrap()];
 
-    let listed = workers_of(&state.mstore, &lead.id, &audit);
+    crate::backend::worker_notes::absorb(&audit);
+    let listed = workers_of(&state.mstore, &lead.id);
     let mut got: Vec<(String, String, Option<u64>)> = listed.iter().map(|w| (w.name.clone(), w.block_id.clone(), w.last_report_ms)).collect();
     got.sort();
     assert_eq!(got, vec![("Lead Helper A".into(), a, Some(1234)), ("Lead Helper B".into(), b, None)]);
     assert_eq!(listed.iter().find(|w| w.name == "Lead Helper A").unwrap().message_to, marked.slug);
-    assert!(workers_of(&state.mstore, &marked.id, &audit).is_empty(), "a worker has no workers");
-    assert!(workers_of(&state.mstore, "", &audit).is_empty());
+    assert!(workers_of(&state.mstore, &marked.id).is_empty(), "a worker has no workers");
+    assert!(workers_of(&state.mstore, "").is_empty());
 }
 
 /// The mark is srv's: a client can neither write it on an existing pane nor

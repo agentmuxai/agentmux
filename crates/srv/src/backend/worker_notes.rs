@@ -31,10 +31,11 @@ const LAST_WORDS_CHARS: usize = 200;
 /// What a worker did that its leader hears about.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum WorkerEvent {
-    /// A turn ended (`agentturn` with `end: completed`), started at `started_at_ms`.
-    TurnEnded { block_id: String, started_at_ms: u64 },
+    /// A turn ended (`agentturn` with `end: completed`), started at
+    /// `started_at_ms`; `key` is the turn's identity (see `Seen`).
+    TurnEnded { block_id: String, started_at_ms: u64, key: String },
     /// Its process exited (`agentturn` with `end: exited`).
-    Exited { block_id: String },
+    Exited { block_id: String, key: String },
     /// It failed (`agentfailure`), with the failure's title.
     Failed { block_id: String, title: String },
 }
@@ -49,12 +50,20 @@ pub(crate) fn parse_event(event: &str, scopes: &[String], data: Option<&serde_js
             return None;
         }
         let block_id = d.get("block_id")?.as_str()?.to_string();
+        // One turn's end can be published twice (when its settle window lapses
+        // and again at the tracker's close): the same turn and end time.
+        let key = format!(
+            "{block_id}/{}/{}",
+            d.get("turn_id").and_then(|t| t.as_u64()).unwrap_or(0),
+            d.get("ended_at_ms").and_then(|t| t.as_u64()).unwrap_or(0)
+        );
         return match d.get("end").and_then(|e| e.as_str()) {
             Some("completed") => Some(WorkerEvent::TurnEnded {
                 block_id,
                 started_at_ms: d.get("started_at_ms").and_then(|s| s.as_u64()).unwrap_or(0),
+                key,
             }),
-            Some("exited") => Some(WorkerEvent::Exited { block_id }),
+            Some("exited") => Some(WorkerEvent::Exited { block_id, key }),
             _ => None,
         };
     }
@@ -75,8 +84,21 @@ pub fn install(broker: Arc<Broker>, mstore: Arc<Store>, filestore: Arc<FileStore
             let _ = tx.send(e);
         }
     }));
+    // The delivery log is a short ring (`AUDIT_LOG_MAX`): copy reports out
+    // of it often enough that one isn't gone before its turn ends.
     tokio::spawn(async move {
+        let mut tick = tokio::time::interval(std::time::Duration::from_secs(2));
+        loop {
+            tick.tick().await;
+            absorb(&crate::backend::reactive::get_global_handler().get_audit_log(usize::MAX));
+        }
+    });
+    tokio::spawn(async move {
+        let mut seen = Seen::default();
         while let Some(ev) = rx.recv().await {
+            if !seen.first(&ev) {
+                continue;
+            }
             let (mstore, filestore) = (mstore.clone(), filestore.clone());
             let note = tokio::task::spawn_blocking(move || note_for(&mstore, &filestore, &ev)).await;
             if let Ok(Some((leader_block, text))) = note {
@@ -129,15 +151,15 @@ fn live_panes_of(mstore: &Store, def_id: &str) -> Vec<String> {
 /// and its leader is open; `None` otherwise, or while the worker's gap runs.
 fn note_for(mstore: &Store, filestore: &FileStore, ev: &WorkerEvent) -> Option<(String, String)> {
     let block_id = match ev {
-        WorkerEvent::TurnEnded { block_id, .. } | WorkerEvent::Exited { block_id } | WorkerEvent::Failed { block_id, .. } => block_id,
+        WorkerEvent::TurnEnded { block_id, .. } | WorkerEvent::Exited { block_id, .. } | WorkerEvent::Failed { block_id, .. } => block_id,
     };
     let worker = worker_of_block(mstore, block_id)?;
     let leader_panes = live_panes_of(mstore, &worker.leader_def_id);
     let leader_block = leader_panes.first()?.clone();
     let body = match ev {
         WorkerEvent::TurnEnded { started_at_ms, .. } => {
-            let audit = crate::backend::reactive::get_global_handler().get_audit_log(500);
-            if reported(&audit, &worker.slug, &leader_panes, *started_at_ms) {
+            absorb(&crate::backend::reactive::get_global_handler().get_audit_log(usize::MAX));
+            if last_report(&worker.slug, &leader_panes).is_some_and(|at| at + 1_000 >= *started_at_ms) {
                 return None;
             }
             turn_end_body(&worker.name, last_words(mstore, filestore, block_id))
@@ -149,17 +171,57 @@ fn note_for(mstore: &Store, filestore: &FileStore, ev: &WorkerEvent) -> Option<(
     Some((leader_block, format!("[AgentMux] {}", crate::backend::reactive::sanitize::quote_in_system_note(&body))))
 }
 
-/// Whether `worker` messaged one of `leader_panes` at or after `since_ms`.
-/// The sender's name in the audit log is the one it gave; a false claim can
-/// only hide a note, never send one.
-fn reported(audit: &[crate::backend::reactive::AuditLogEntry], worker: &str, leader_panes: &[String], since_ms: u64) -> bool {
-    audit.iter().any(|e| {
-        e.success
-            && e.event_kind == "delivery"
-            && e.timestamp + 1_000 >= since_ms
-            && leader_panes.contains(&e.block_id)
-            && e.source_agent.as_deref().is_some_and(|s| s.eq_ignore_ascii_case(worker))
-    })
+/// Reports, kept past the delivery log's ring: (sender, target pane) → the
+/// last successful delivery (unix ms). The sender's name is the one it gave;
+/// a false claim can only hide a note, never send one.
+static REPORTS: LazyLock<parking_lot::Mutex<HashMap<(String, String), u64>>> = LazyLock::new(Default::default);
+const REPORTS_MAX: usize = 4096;
+
+/// Copy the successful deliveries in `audit` into `REPORTS`.
+pub(crate) fn absorb(audit: &[crate::backend::reactive::AuditLogEntry]) {
+    let mut reports = REPORTS.lock();
+    for e in audit.iter().filter(|e| e.success && e.event_kind == "delivery") {
+        let Some(source) = e.source_agent.as_deref().filter(|s| !s.is_empty()) else { continue };
+        let at = reports.entry((source.to_lowercase(), e.block_id.clone())).or_insert(0);
+        *at = (*at).max(e.timestamp);
+    }
+    if reports.len() > REPORTS_MAX {
+        let mut by_age: Vec<u64> = reports.values().copied().collect();
+        by_age.sort_unstable();
+        let cutoff = by_age[reports.len() - REPORTS_MAX];
+        reports.retain(|_, at| *at >= cutoff);
+    }
+}
+
+/// When `worker` (its agent id) last messaged one of `leader_panes`.
+pub(crate) fn last_report(worker: &str, leader_panes: &[String]) -> Option<u64> {
+    let reports = REPORTS.lock();
+    let worker = worker.to_lowercase();
+    leader_panes.iter().filter_map(|p| reports.get(&(worker.clone(), p.clone())).copied()).max()
+}
+
+/// Turn ends already handled, so a second publish of one is skipped.
+#[derive(Default)]
+struct Seen {
+    keys: std::collections::VecDeque<String>,
+}
+
+impl Seen {
+    /// True the first time `ev` is seen; failures have no turn identity.
+    fn first(&mut self, ev: &WorkerEvent) -> bool {
+        let key = match ev {
+            WorkerEvent::TurnEnded { key, .. } | WorkerEvent::Exited { key, .. } => key,
+            WorkerEvent::Failed { .. } => return true,
+        };
+        if self.keys.contains(key) {
+            return false;
+        }
+        if self.keys.len() >= 256 {
+            self.keys.pop_front();
+        }
+        self.keys.push_back(key.clone());
+        true
+    }
 }
 
 /// The worker's last message, and whether it ended asking something.

@@ -12,10 +12,13 @@ use serde_json::json;
 
 #[test]
 fn turn_ends_exits_and_failures_are_read_and_hidden_turns_are_not() {
-    let turn = |end: &str, kind: &str| json!({ "block_id": "b1", "started_at_ms": 5, "end": end, "trigger": { "kind": kind } });
+    let turn = |end: &str, kind: &str| json!({ "block_id": "b1", "turn_id": 7, "started_at_ms": 5, "ended_at_ms": 9, "end": end, "trigger": { "kind": kind } });
     let t = crate::backend::mps::EVENT_AGENT_TURN;
-    assert_eq!(parse_event(t, &[], Some(&turn("completed", "user"))), Some(WorkerEvent::TurnEnded { block_id: "b1".into(), started_at_ms: 5 }));
-    assert_eq!(parse_event(t, &[], Some(&turn("exited", "agent"))), Some(WorkerEvent::Exited { block_id: "b1".into() }));
+    assert_eq!(
+        parse_event(t, &[], Some(&turn("completed", "user"))),
+        Some(WorkerEvent::TurnEnded { block_id: "b1".into(), started_at_ms: 5, key: "b1/7/9".into() })
+    );
+    assert_eq!(parse_event(t, &[], Some(&turn("exited", "agent"))), Some(WorkerEvent::Exited { block_id: "b1".into(), key: "b1/7/9".into() }));
     assert_eq!(parse_event(t, &[], Some(&turn("completed", "system"))), None, "AgentMux's own hidden turn");
     assert_eq!(parse_event(t, &[], Some(&json!({ "block_id": "b1", "active": true }))), None, "a turn still running");
     let f = crate::backend::mps::EVENT_AGENT_FAILURE;
@@ -34,14 +37,29 @@ fn delivery(source: &str, block: &str, at: u64) -> AuditLogEntry {
     .unwrap()
 }
 
+/// A report is kept past the delivery log's short ring: absorbed once, it is
+/// still there when the ring has moved on (#5031).
 #[test]
-fn a_turn_with_a_message_to_the_leader_is_reported() {
-    let panes = vec!["lead-pane".to_string()];
-    let audit = vec![delivery("worker-1", "lead-pane", 2_000)];
-    assert!(reported(&audit, "Worker-1", &panes, 2_500), "during the turn (a second's slack), any case");
-    assert!(!reported(&audit, "worker-1", &panes, 9_000), "before the turn");
-    assert!(!reported(&audit, "worker-2", &panes, 0), "another worker");
-    assert!(!reported(&[delivery("worker-1", "other-pane", 2_000)], "worker-1", &panes, 0), "not to the leader");
+fn a_report_outlives_the_delivery_logs_ring() {
+    let panes = vec!["lead-pane-r".to_string()];
+    absorb(&[delivery("Worker-R1", "lead-pane-r", 2_000), delivery("worker-r1", "other-pane-r", 9_000)]);
+    absorb(&[]); // the ring has moved on
+    assert_eq!(last_report("worker-r1", &panes), Some(2_000), "any case; not the delivery to another pane");
+    assert_eq!(last_report("worker-r2", &panes), None, "another worker");
+    absorb(&[delivery("worker-r1", "lead-pane-r", 1_000)]);
+    assert_eq!(last_report("worker-r1", &panes), Some(2_000), "the latest one");
+}
+
+/// A turn end published twice is handled once, so it isn't counted as held (#5031).
+#[test]
+fn a_turn_end_published_twice_is_handled_once() {
+    let mut seen = Seen::default();
+    let ev = WorkerEvent::TurnEnded { block_id: "b".into(), started_at_ms: 1, key: "b/7/9".into() };
+    assert!(seen.first(&ev));
+    assert!(!seen.first(&ev));
+    assert!(seen.first(&WorkerEvent::TurnEnded { block_id: "b".into(), started_at_ms: 1, key: "b/8/20".into() }), "the next turn");
+    let failed = WorkerEvent::Failed { block_id: "b".into(), title: "x".into() };
+    assert!(seen.first(&failed) && seen.first(&failed), "failures carry no turn identity");
 }
 
 #[test]
@@ -113,7 +131,7 @@ async fn a_workers_unreported_turn_notes_its_open_leader() {
     state.mstore.agent_def_insert(&mut lead).unwrap();
     state.mstore.agent_def_insert(&mut worker).unwrap();
     let worker_pane = pane(&state, &tab, &worker_id).await;
-    let ev = WorkerEvent::TurnEnded { block_id: worker_pane.clone(), started_at_ms: 0 };
+    let ev = WorkerEvent::TurnEnded { block_id: worker_pane.clone(), started_at_ms: u64::MAX / 2, key: "k".into() };
     assert_eq!(note_for(&state.mstore, &state.filestore, &ev), None, "not marked as a worker");
 
     state

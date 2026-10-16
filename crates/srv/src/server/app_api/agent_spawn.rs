@@ -524,8 +524,7 @@ pub(crate) struct WorkerSummary {
     /// absent while srv has no controller for the pane.
     pub state: Option<crate::backend::agent_state::AgentState>,
     pub since_ms: Option<u64>,
-    /// When it last messaged the leader (unix ms), as far back as the
-    /// delivery log reaches.
+    /// When it last messaged the leader (unix ms), since srv started.
     pub last_report_ms: Option<u64>,
 }
 
@@ -551,8 +550,8 @@ pub(crate) async fn handle_agent_workers(
             .flatten()
             .map(|b| obj::meta_get_string(&b.meta, "agentId", ""))
             .unwrap_or_default();
-        let audit = crate::backend::reactive::get_global_handler().get_audit_log(500);
-        workers_of(&mstore, &leader, &audit)
+        crate::backend::worker_notes::absorb(&crate::backend::reactive::get_global_handler().get_audit_log(usize::MAX));
+        workers_of(&mstore, &leader)
     })
     .await
     .unwrap_or_default();
@@ -561,7 +560,7 @@ pub(crate) async fn handle_agent_workers(
 
 /// `leader_def_id`'s workers open in a tab: panes marked as its (on the pane
 /// or on their definition), with their state and last report.
-pub(crate) fn workers_of(mstore: &Store, leader_def_id: &str, audit: &[crate::backend::reactive::AuditLogEntry]) -> Vec<WorkerSummary> {
+pub(crate) fn workers_of(mstore: &Store, leader_def_id: &str) -> Vec<WorkerSummary> {
     if leader_def_id.is_empty() {
         return Vec::new();
     }
@@ -585,16 +584,7 @@ pub(crate) fn workers_of(mstore: &Store, leader_def_id: &str, audit: &[crate::ba
             }
             let def = defs.iter().find(|d| d.id == def_id)?;
             let status = crate::backend::agent_state::agent_status_of_block(mstore, &b.oid);
-            let last_report_ms = audit
-                .iter()
-                .filter(|e| {
-                    e.success
-                        && e.event_kind == "delivery"
-                        && leader_panes.contains(&e.block_id)
-                        && e.source_agent.as_deref().is_some_and(|s| s.eq_ignore_ascii_case(&def.slug))
-                })
-                .map(|e| e.timestamp)
-                .max();
+            let last_report_ms = crate::backend::worker_notes::last_report(&def.slug, &leader_panes);
             Some(WorkerSummary {
                 name: def.name.clone(),
                 message_to: def.slug.clone(),
