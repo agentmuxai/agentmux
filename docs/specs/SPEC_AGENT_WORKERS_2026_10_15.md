@@ -49,7 +49,7 @@ srv does all of it in one handler (`POST /api/v1/agent/fork`), so the result doe
 6. **Mark it** (§3.2).
 7. **Brief it:** the brief goes as a jekt from the leader, sent by the leader's own MCP server after srv answers (`Message` `send`'s path, which queues it while the worker starts), signed as the leader's own messages are, so it arrives `TRUST=host-verified` and the worker can answer with `Message` `send`. AgentMux adds one line to the brief: "You are a worker of `<leader>`. Report to it with Message send when you finish, get stuck, or need a decision."
 
-It answers `{agent_id, name, block_id, tab_id, model, effort}`, or an error naming the step that failed. A failure after step 2 deletes the new definition, as quick-fork removes its pushed block on failure (`quick-fork.ts:151-163`).
+It answers `{agent_id, name, block_id, tab_id, model, effort}`, or an error naming the step that failed. A failure after step 2 deletes the new definition and any pane the open made before it failed (`discard_worker`), as quick-fork removes its pushed block on failure (`quick-fork.ts:151-163`).
 
 **A fresh session, not the leader's conversation** (the operator's decision, 2026-10-16). Quick-fork continues the parent's session (`--fork-session`, Claude only). A worker starts empty:
 - the leader's context is long and expensive, worst of all on the model the worker is meant to save on;

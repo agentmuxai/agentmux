@@ -136,8 +136,9 @@ async fn fork_worker(
 }
 
 /// Fork the leader's definition and open the fork as its worker. A fork that
-/// doesn't open is deleted again: the user didn't get a worker, so there is
-/// no definition of one in My Agents either.
+/// doesn't open is removed again, with any pane the open made before it
+/// failed: the user didn't get a worker, so there is no definition of one in
+/// My Agents and no marked pane taking up one of the leader's places.
 async fn launch(
     state: &AppState,
     leader: &Leader,
@@ -160,7 +161,7 @@ async fn launch(
     match open_worker(state, leader, &fork, tab_id, runtime).await {
         Ok(opened) => Ok((fork, opened)),
         Err(e) => {
-            discard_definition(state, &fork.id);
+            discard_worker(state, tab_id, &fork.id).await;
             Err(refuse(StatusCode::INTERNAL_SERVER_ERROR, format!("the worker couldn't be opened, and was removed: {e}")))
         }
     }
@@ -374,8 +375,15 @@ async fn open_worker(
     .await
 }
 
-/// Delete a fork that never got its pane, as the `deleteagent` RPC does.
-fn discard_definition(state: &AppState, def_id: &str) {
+/// Remove a worker whose open failed: the pane the open may have made in
+/// `tab_id` before failing (closed as any pane is, `delete_block`), then its
+/// definition, as the `deleteagent` RPC deletes one.
+async fn discard_worker(state: &AppState, tab_id: &str, def_id: &str) {
+    if let Ok(Some(block)) = super::find_agent_block(&state.mstore, tab_id, def_id) {
+        if let Err(e) = crate::sagas::delete_block::run(state, tab_id.to_string(), block.oid.clone()).await {
+            tracing::warn!(def_id, block_id = %block.oid, error = %e, "agent.fork: the unopened worker's pane is left behind");
+        }
+    }
     if let Err(e) = state.mstore.agent_def_delete(def_id) {
         tracing::warn!(def_id, error = %e, "agent.fork: the unopened worker's definition is left behind");
         return;

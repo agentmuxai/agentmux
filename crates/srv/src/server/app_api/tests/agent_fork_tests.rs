@@ -249,6 +249,32 @@ async fn a_worker_that_does_not_open_leaves_no_definition_behind() {
     assert!(state.mstore.agent_def_list().unwrap().iter().all(|d| d.name != "Lead 4"));
 }
 
+/// An open that fails after it made the worker's pane (a step after
+/// `CreateBlock`) leaves neither the pane nor the definition: the leader's
+/// place is free again.
+#[tokio::test]
+async fn a_worker_whose_open_fails_after_its_pane_exists_leaves_no_pane_behind() {
+    let state = test_state();
+    let (def, tab, block_id) = seed_leader(&state, "claude", "host", json!({})).await;
+    let fork = crate::server::agent_handlers::fork_definition(&state.mstore, &state.id_store, &state.identity_store, &def.id, "Lead 5").unwrap();
+    // The pane `open_agent_inner` creates, mark included, before its later steps.
+    let pane = new_block(
+        &state,
+        &tab,
+        json!({ "view": "agent", "agentId": fork.id, COACHED_BY_META_KEY: { "agent": def.name, "id": def.id, "block_id": block_id } }),
+    )
+    .await;
+    assert_eq!(live_workers_of(&state.mstore, &def.id), 1);
+
+    discard_worker(&state, &tab, &fork.id).await;
+
+    assert_eq!(live_workers_of(&state.mstore, &def.id), 0, "the leader's place is free");
+    let tab_now: Tab = state.mstore.must_get(&tab).unwrap();
+    assert!(!tab_now.blockids.contains(&pane), "the pane is gone");
+    assert!(tab_now.blockids.contains(&block_id), "the leader's own pane stays");
+    assert!(state.mstore.agent_def_list().unwrap().iter().all(|d| d.id != fork.id), "and so is the definition");
+}
+
 /// The mark is srv's: a client can neither write it on an existing pane nor
 /// bring it into a new one.
 #[test]
