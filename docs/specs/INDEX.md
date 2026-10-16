@@ -783,6 +783,7 @@ partial list.
 | [`SPEC_FLOATING_PANE_REDOCK_PHASE_4A_SCOPING_2026-05-27`](SPEC_FLOATING_PANE_REDOCK_PHASE_4A_SCOPING_2026-05-27.md) | Phase 4a Re-dock — MVP scope decision |
 | [`SPEC_FLOATING_PANE_TEAROFF_2026_05_11`](SPEC_FLOATING_PANE_TEAROFF_2026_05_11.md) | Floating pane tear-off (subordinate window, owned by mother instance) |
 | [`SPEC_FLOATING_PANE_TEAROFF_CROSS_PLATFORM_2026-05-26`](SPEC_FLOATING_PANE_TEAROFF_CROSS_PLATFORM_2026-05-26.md) | Floating pane tear-off — cross-platform recipes |
+| [`SPEC_FLOATING_PANE_WINDOW_CONTROLS_REFINEMENTS_2026_10_16`](SPEC_FLOATING_PANE_WINDOW_CONTROLS_REFINEMENTS_2026_10_16.md) | Spec: Floating pane window controls: Redock placement and size, a real Restore when maximized, and drag-to-restore |
 | [`SPEC_FOREGROUND_BACKGROUND_PROCESS_ABSTRACTION_2026_08_20`](SPEC_FOREGROUND_BACKGROUND_PROCESS_ABSTRACTION_2026_08_20.md) | Spec: Foreground/Background Process Abstraction for Agent-Run Commands |
 | [`SPEC_GLOBAL_IDENTITY_MEMORY_DRONE_2026_06_24`](SPEC_GLOBAL_IDENTITY_MEMORY_DRONE_2026_06_24.md) | SPEC — Global Identity, Memory, and Drone Definitions |
 | [`SPEC_HOST_VS_CONTAINER_AGENTS_2026_06_18`](SPEC_HOST_VS_CONTAINER_AGENTS_2026_06_18.md) | Spec: Host vs Container Agent Differentiation |
@@ -797,6 +798,7 @@ partial list.
 | [`SPEC_LINUX_APPIMAGE_PER_BUILD_CHANNEL_2026_06_25`](SPEC_LINUX_APPIMAGE_PER_BUILD_CHANNEL_2026_06_25.md) | SPEC: Linux AppImage Per-Build Channel Isolation |
 | [`SPEC_LINUX_DOCS_UPDATE_2026_06_06`](SPEC_LINUX_DOCS_UPDATE_2026_06_06.md) | SPEC — Linux documentation catch-up |
 | [`SPEC_LINUX_FLOATING_PANE_TEAROFF_2026_05_30`](SPEC_LINUX_FLOATING_PANE_TEAROFF_2026_05_30.md) | Linux floating-pane tear-off — implementation spec |
+| [`SPEC_LINUX_WINDOW_CONTROLS_GNOME_STYLE_2026_10_16`](SPEC_LINUX_WINDOW_CONTROLS_GNOME_STYLE_2026_10_16.md) | Spec: Linux window controls that look like Linux |
 | [`SPEC_LOCAL_BUILD_VERSIONING_2026_05_28`](SPEC_LOCAL_BUILD_VERSIONING_2026_05_28.md) | SPEC: Local-build versioning — stop committing bumps for smoke builds (2026-05-28) |
 | [`SPEC_LONG_RUNNING_PROCESS_UX_2026_06_24`](SPEC_LONG_RUNNING_PROCESS_UX_2026_06_24.md) | SPEC — Long-Running Process UX: Working Stuck + Red X |
 | [`SPEC_MACOS_CEF_FRAMEWORK_BUNDLING_2026_05_28`](SPEC_MACOS_CEF_FRAMEWORK_BUNDLING_2026_05_28.md) | macOS CEF Framework Bundling for `task dev` and `task package:macos` |
