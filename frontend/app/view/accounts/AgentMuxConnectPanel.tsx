@@ -30,6 +30,7 @@ import { createMuxBusCloudConfig } from "./muxbus-cloud-config";
 import { muxbusNeedsSignInAgain } from "./muxbus-session";
 import { Button, IconButton } from "@/app/element/ui";
 import { acceptMuxbusDelivery, type MuxBusDeliveryStatus } from "@/store/muxbus-delivery";
+import { MuxBusSignInChoices, type MuxBusIdentityProvider } from "./muxbus-sign-in-choices";
 
 // Production Cognito config — set after deployment.
 // Override with VITE_MUXBUS_COGNITO_DOMAIN / VITE_MUXBUS_CLIENT_ID at build time.
@@ -39,8 +40,8 @@ const MUXBUS_COGNITO_DOMAIN =
 const MUXBUS_CLIENT_ID =
     (import.meta.env.VITE_MUXBUS_CLIENT_ID as string | undefined) ?? "";
 
-// One per app: the build's pair, else the one srv discovered (asked only by a
-// build without a compiled client id). Shared by every controller below.
+// One per app: the build's pair, else the one srv discovered, and the sign-ins
+// the cloud publishes. Shared by every controller below.
 const cloudConfig = createMuxBusCloudConfig(
     { cognitoDomain: MUXBUS_COGNITO_DOMAIN, clientId: MUXBUS_CLIENT_ID },
     () => RpcApi.MuxBusCloudConfigCommand(TabRpcClient),
@@ -79,8 +80,11 @@ export interface MuxBusController {
     error: Accessor<string | null>;
     /** Re-pull `muxbus.status`. Treats any error as "disconnected". */
     refresh: () => Promise<void>;
-    /** Run the browser PKCE login (blocks up to 5 min), then refresh. */
-    connect: () => Promise<void>;
+    /**
+     * Run the browser PKCE login (blocks up to 5 min), then refresh. With a
+     * provider the browser goes straight to it; without, Cognito's own page.
+     */
+    connect: (identityProvider?: MuxBusIdentityProvider) => Promise<void>;
     /**
      * Abort an in-flight connect() — e.g. the user closed the login browser
      * tab and doesn't want to wait out the 5-min server-side timeout. Safe
@@ -97,6 +101,8 @@ export interface MuxBusController {
      * turns true once `refresh()` has learned it.
      */
     isConfigured: () => boolean;
+    /** The social sign-ins the cloud publishes, for `MuxBusSignInChoices`. */
+    identityProviders: Accessor<string[]>;
 }
 
 // Every live controller's refresh. Several surfaces own a controller (the
@@ -120,7 +126,7 @@ export function useMuxBusStatus(): MuxBusController {
     const refresh = async () => {
         const seq = ++refreshSeq;
         // Not awaited: the status never waits on the cloud settings. A no-op
-        // once a client id is known, which a production build always has.
+        // once srv has served the cloud's document.
         void cloudConfig.load();
         let next: MuxBusStatus;
         try {
@@ -137,7 +143,7 @@ export function useMuxBusStatus(): MuxBusController {
     liveRefreshers.add(refresh);
     if (getOwner()) onCleanup(() => liveRefreshers.delete(refresh));
 
-    const connect = async () => {
+    const connect = async (identityProvider?: MuxBusIdentityProvider) => {
         await cloudConfig.load();
         const signIn = cloudConfig.signIn();
         if (!signIn) {
@@ -147,7 +153,10 @@ export function useMuxBusStatus(): MuxBusController {
         setError(null);
         setLoading(true);
         try {
-            const result = await RpcApi.MuxBusLoginCommand(TabRpcClient, signIn);
+            const result = await RpcApi.MuxBusLoginCommand(
+                TabRpcClient,
+                identityProvider ? { ...signIn, identityProvider } : signIn
+            );
             if (result.success) {
                 await refresh();
                 refreshOthers(refresh);
@@ -191,7 +200,17 @@ export function useMuxBusStatus(): MuxBusController {
 
     const isConfigured = () => cloudConfig.signIn() !== null;
 
-    return { status, loading, error, refresh, connect, cancel, disconnect, isConfigured };
+    return {
+        status,
+        loading,
+        error,
+        refresh,
+        connect,
+        cancel,
+        disconnect,
+        isConfigured,
+        identityProviders: cloudConfig.identityProviders,
+    };
 }
 
 /** Human-readable local expiry, or null when not connected. */
@@ -321,17 +340,14 @@ export function AgentMuxConnectPanel(props: {
                                         ⓘ Sign in to AgentMux Cloud in your browser — one account per
                                         install, no key to manage.
                                     </div>
-                                    <div class="identity-key-actions">
-                                        <Button
-                                            tone="accent"
-                                            class="identity-btn identity-btn-primary"
-                                            onClick={() =>
-                                                void (muxbus.loading() ? muxbus.cancel() : muxbus.connect())
-                                            }
-                                        >
-                                            {muxbus.loading() ? "Connecting… (Cancel)" : "Connect with AgentMux"}
-                                        </Button>
-                                    </div>
+                                    <MuxBusSignInChoices
+                                        identityProviders={muxbus.identityProviders()}
+                                        loading={muxbus.loading()}
+                                        label="Connect with AgentMux"
+                                        cancelLabel="Connecting… (Cancel)"
+                                        onSignIn={(provider) => void muxbus.connect(provider)}
+                                        onCancel={() => void muxbus.cancel()}
+                                    />
                                 </>
                             }
                         >
@@ -351,16 +367,17 @@ export function AgentMuxConnectPanel(props: {
                                     works. Sign in again to reconnect.
                                 </Show>
                             </div>
+                            <Show when={muxbusNeedsSignInAgain(muxbus.status())}>
+                                <MuxBusSignInChoices
+                                    identityProviders={muxbus.identityProviders()}
+                                    loading={muxbus.loading()}
+                                    label="Sign in again"
+                                    cancelLabel="Connecting… (Cancel)"
+                                    onSignIn={(provider) => void muxbus.connect(provider)}
+                                    onCancel={() => void muxbus.cancel()}
+                                />
+                            </Show>
                             <div class="identity-key-actions">
-                                <Show when={muxbusNeedsSignInAgain(muxbus.status())}>
-                                    <Button
-                                        tone="accent"
-                                        class="identity-btn identity-btn-primary"
-                                        onClick={() => void (muxbus.loading() ? muxbus.cancel() : muxbus.connect())}
-                                    >
-                                        {muxbus.loading() ? "Connecting… (Cancel)" : "Sign in again"}
-                                    </Button>
-                                </Show>
                                 <Button
                                     class="identity-btn identity-btn-secondary"
                                     disabled={muxbus.loading()}

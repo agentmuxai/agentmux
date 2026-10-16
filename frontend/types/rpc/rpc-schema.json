@@ -786,45 +786,7 @@
     }
   },
   {
-    "command": "app.update-download",
-    "request": "core::option::Option<agentmux_srv::backend::rpc_types::websocket::NoArgsReq>",
-    "requestName": "core::option::Option<agentmux_srv::backend::rpc_types::websocket::NoArgsReq>",
-    "requestTs": {
-      "imports": [
-        "NoArgsReq"
-      ],
-      "name": "NoArgsReq | null"
-    },
-    "response": "agentmux_srv::backend::update_check::AppUpdateStatus",
-    "responseName": "AppUpdateStatus",
-    "responseTs": {
-      "imports": [
-        "AppUpdateStatus"
-      ],
-      "name": "AppUpdateStatus"
-    }
-  },
-  {
     "command": "app.update-status",
-    "request": "core::option::Option<agentmux_srv::backend::rpc_types::websocket::NoArgsReq>",
-    "requestName": "core::option::Option<agentmux_srv::backend::rpc_types::websocket::NoArgsReq>",
-    "requestTs": {
-      "imports": [
-        "NoArgsReq"
-      ],
-      "name": "NoArgsReq | null"
-    },
-    "response": "agentmux_srv::backend::update_check::AppUpdateStatus",
-    "responseName": "AppUpdateStatus",
-    "responseTs": {
-      "imports": [
-        "AppUpdateStatus"
-      ],
-      "name": "AppUpdateStatus"
-    }
-  },
-  {
-    "command": "app.upgrade-cancel",
     "request": "core::option::Option<agentmux_srv::backend::rpc_types::websocket::NoArgsReq>",
     "requestName": "core::option::Option<agentmux_srv::backend::rpc_types::websocket::NoArgsReq>",
     "requestTs": {
@@ -859,25 +821,6 @@
         "UpgradeRequestsEvent"
       ],
       "name": "UpgradeRequestsEvent"
-    }
-  },
-  {
-    "command": "app.upgrade-restart",
-    "request": "agentmux_srv::backend::update_restart::CommandAppUpgradeRestartData",
-    "requestName": "CommandAppUpgradeRestartData",
-    "requestTs": {
-      "imports": [
-        "CommandAppUpgradeRestartData"
-      ],
-      "name": "CommandAppUpgradeRestartData"
-    },
-    "response": "agentmux_srv::backend::update_check::AppUpdateStatus",
-    "responseName": "AppUpdateStatus",
-    "responseTs": {
-      "imports": [
-        "AppUpdateStatus"
-      ],
-      "name": "AppUpdateStatus"
     }
   },
   {

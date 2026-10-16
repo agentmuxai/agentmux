@@ -596,6 +596,7 @@ partial list.
 | [`SPEC_AGENT_TURN_MODEL_AND_LIVE_STATUS_2026_10_08`](SPEC_AGENT_TURN_MODEL_AND_LIVE_STATUS_2026_10_08.md) | SPEC: Agent turns that return to the user, what started them, and a live status that says what is happening |
 | [`SPEC_AGENT_UNRESTRICTED_CAPTURE_WITH_ACCOUNTABILITY_2026_08_30`](SPEC_AGENT_UNRESTRICTED_CAPTURE_WITH_ACCOUNTABILITY_2026_08_30.md) | SPEC: Safe unrestricted screen capture for agents |
 | [`SPEC_AGENT_VIEW_MODULARIZATION_2026_04_13`](SPEC_AGENT_VIEW_MODULARIZATION_2026_04_13.md) | Spec: Modularize `frontend/app/view/agent/agent-view.tsx` |
+| [`SPEC_AGENT_WORKERS_2026_10_15`](SPEC_AGENT_WORKERS_2026_10_15.md) | Spec: an agent launches and coaches worker agents in panes |
 | [`SPEC_AGENT_WORKING_STATE_UNIFICATION_2026_09_04`](SPEC_AGENT_WORKING_STATE_UNIFICATION_2026_09_04.md) | Spec: unify the Working/Worked label with the long-running-process axis, and close the two live desync bugs |
 | [`SPEC_AMBIENT_SWARM_SUMMARY_HARDENING_2026_10_02`](SPEC_AMBIENT_SWARM_SUMMARY_HARDENING_2026_10_02.md) | SPEC: The swarm always shows a useful line for every agent — hardening the ambient summary |
 | [`SPEC_ARMORY_NAMING_CONSOLIDATION_2026_09_09`](SPEC_ARMORY_NAMING_CONSOLIDATION_2026_09_09.md) | Spec: Armory Naming Consolidation — Bundle vs Memory |

@@ -11,6 +11,11 @@ name = "agentmux-launcher"
 path = "src/main.rs"
 
 [dependencies]
+# Encodes the hidden PowerShell that runs a setup.exe upgrade (upgrade_restart.rs).
+base64 = "0.22"
+# Checks a setup.exe upgrade's installer against the release's digest
+# before it runs (upgrade_restart.rs). Same version common already uses.
+sha2 = "0.10"
 # Phase B foundation: launcher gains a Tokio runtime so it can
 # manage srv + host concurrently and (in later sub-PRs) host the
 # named-pipe IPC server. Prior to Phase B the launcher was a tiny

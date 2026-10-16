@@ -52,7 +52,8 @@ After sign-in, srv stores the domain and client id with the tokens (`MuxBusCrede
   "api": "https://muxbus.agentmux.ai",
   "ws": "wss://muxbus-ws.agentmux.ai",
   "console": "https://cloud.agentmux.ai",
-  "cognito": { "domain": "https://auth.muxbus.agentmux.ai", "clientId": "…", "region": "us-east-1", "userPoolId": "…" }
+  "cognito": { "domain": "https://auth.muxbus.agentmux.ai", "clientId": "…", "region": "us-east-1", "userPoolId": "…",
+               "identityProviders": ["Google", "SignInWithApple"] }
 }
 ```
 
@@ -68,10 +69,11 @@ After sign-in, srv stores the domain and client id with the tokens (`MuxBusCrede
   - on any failure, the compiled defaults are used, with no error surfaced for that alone.
   - a failed fetch keeps the last good copy, and also waits the 5 minutes before asking again.
 - **Login:** `muxbus.login` uses the discovered `cognito.domain` and `cognito.clientId` when present. It falls back to the values in `MuxBusLoginReq` (the compiled ones), then to nothing (a "cloud not configured" error). The frontend keeps sending its compiled values as the fallback.
+- **Sign-in choice** (added 2026-10-16): `cognito.identityProviders` lists the pool's social sign-ins (optional; absent means none). `muxbus.login` takes an optional `identityProvider`, `Google` or `SignInWithApple` and, when the document has a list, one on it, and adds it to the authorize URL so the browser goes straight to that provider. Anything else is refused.
 - **WebSocket:** the cloud subscriber connects to the discovered `ws`, falling back to `MUXBUS_WS_URL`.
 - **REST:** unchanged. `rest_base_url()` stays the root of trust, because the document is fetched from it.
-- **`muxbus.cloudconfig`** (new RPC, slice 4): returns the resolved settings and their source (`discovered` or `default`). Only needed for a build with **no** compiled client id. Production builds always have one (`vite.config.ts` refuses to build without it), so slice 1 doesn't need it.
-  - Shape (`MuxBusCloudConfigResp`, camelCase): `source`, `api`, `ws`, `console`, `cognitoDomain`, `clientId`, `region`, `userPoolId`.
+- **`muxbus.cloudconfig`** (new RPC, slice 4): returns the resolved settings and their source (`discovered` or `default`). Only needed for a build with **no** compiled client id. Production builds always have one (`vite.config.ts` refuses to build without it), so slice 1 doesn't need it. Since 2026-10-16 every build also asks it for `identityProviders`, to offer Continue with Google and Continue with Apple.
+  - Shape (`MuxBusCloudConfigResp`, camelCase): `source`, `api`, `ws`, `console`, `cognitoDomain`, `clientId`, `region`, `userPoolId`, `identityProviders`.
   - `discovered`: everything but `api` from the document; the last good copy counts, even while later fetches fail.
   - `default` (no document, or discovery failed with no earlier copy): `ws` is `MUXBUS_WS_URL`, and the console and all Cognito fields are empty. srv has no compiled sign-in settings; only the frontend build does.
   - `api` is always `rest_base_url()`, the REST base srv actually uses, whatever the document says.

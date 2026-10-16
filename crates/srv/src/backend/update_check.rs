@@ -116,10 +116,14 @@ pub struct DownloadStatus {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub error: Option<String>,
-    /// When ready: the folder the new version is in.
+    /// When ready, on a portable: the folder the new version is in.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub folder: Option<String>,
+    /// When ready, on a `setup.exe` install: the new version's installer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub installer: Option<String>,
     /// While `waiting`: how many agents are still in a turn.
     #[serde(default)]
     pub waiting_for: u32,
@@ -186,7 +190,7 @@ fn find_asset(release: &Release, name: &str) -> Option<ReleaseAsset> {
 
 /// `major.minor.patch` out of a version or tag (`v0.59.27`, `0.59.27+g1a2b`),
 /// or `None` when it doesn't start with three integers.
-fn version_core(v: &str) -> Option<(u64, u64, u64)> {
+pub(crate) fn version_core(v: &str) -> Option<(u64, u64, u64)> {
     let v = v.trim().trim_start_matches('v');
     let core = v.split(['+', '-']).next().unwrap_or(v);
     let mut parts = core.split('.');

@@ -13,22 +13,29 @@ const upgradeCancel = vi.fn();
 vi.mock("@/app/store/rpc-api", () => ({
     RpcApi: {
         AppUpdateStatusCommand: (...a: unknown[]) => updateStatus(...a),
-        AppUpdateDownloadCommand: (...a: unknown[]) => updateDownload(...a),
-        AppUpgradeRestartCommand: (...a: unknown[]) => upgradeRestart(...a),
-        AppUpgradeCancelCommand: (...a: unknown[]) => upgradeCancel(...a),
     },
 }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
+// The version panel's clicks go through the host (approvals.appUpdate).
+vi.mock("@/app/store/app-api", () => ({
+    getApi: () => ({
+        approvals: {
+            appUpdate: (action: string, now?: boolean) =>
+                action === "download" ? updateDownload() : action === "restart" ? upgradeRestart(now) : upgradeCancel(),
+        },
+    }),
+}));
 const openLink = vi.fn();
 const installAppUpdate = vi.fn();
 const openNativePath = vi.fn();
+const revealInFileExplorer = vi.fn();
 vi.mock("@/store/global", async (importOriginal) => {
     const { createSignal } = await import("solid-js");
     const [status] = createSignal("up-to-date");
     const [version] = createSignal<string | null>(null);
     return {
         atoms: { updaterStatusAtom: status, updaterVersionAtom: version },
-        getApi: () => ({ installAppUpdate, openNativePath, getBackendInfo: () => Promise.resolve({ pending_migrations: 0 }), listen: () => Promise.resolve(() => {}) }),
+        getApi: () => ({ installAppUpdate, openNativePath, revealInFileExplorer, getBackendInfo: () => Promise.resolve({ pending_migrations: 0 }), listen: () => Promise.resolve(() => {}) }),
         openLink: (u: string) => openLink(u),
     };
 });
@@ -165,12 +172,12 @@ describe("Maintenance: Upgrade & restart", () => {
         upgradeRestart.mockResolvedValue(download("waiting", { ...FOLDER, waiting_for: 2 }));
         render(() => <MaintenanceSection />);
         fireEvent.click(await screen.findByRole("button", { name: "Upgrade & restart" }));
-        expect(upgradeRestart).toHaveBeenCalledWith(expect.anything(), { now: false });
+        expect(upgradeRestart).toHaveBeenCalledWith(false);
         expect(await screen.findByText("Waiting for 2 agents to finish…")).toBeTruthy();
 
         upgradeRestart.mockResolvedValue(download("restarting", FOLDER));
         fireEvent.click(screen.getByRole("button", { name: "Restart now" }));
-        expect(upgradeRestart).toHaveBeenLastCalledWith(expect.anything(), { now: true });
+        expect(upgradeRestart).toHaveBeenLastCalledWith(true);
         expect(await screen.findByText("Restarting: answer the AgentMux dialog (No cancels)")).toBeTruthy();
         // Only the dialog can stop it now.
         expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
@@ -188,5 +195,34 @@ describe("Maintenance: Upgrade & restart", () => {
 
         acceptAppUpdate(download("ready", { ...FOLDER, error: "AgentMux didn't restart: the upgrade was declined" }));
         expect(await screen.findByText(/the upgrade was declined/)).toBeTruthy();
+    });
+
+    it("a Cancel srv refuses says why", async () => {
+        updateStatus.mockResolvedValue(download("waiting", { ...FOLDER, waiting_for: 1 }));
+        upgradeCancel.mockRejectedValue(new Error("AgentMux is already restarting"));
+        render(() => <MaintenanceSection />);
+        expect(await screen.findByText("Waiting for 1 agent to finish…")).toBeTruthy();
+        fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+        expect(await screen.findByText(/AgentMux is already restarting/)).toBeTruthy();
+    });
+});
+
+describe("Maintenance on a setup.exe install", () => {
+    it("a downloaded installer is shown in Explorer, never opened, and Upgrade & restart runs it", async () => {
+        const SETUP = { ...AVAILABLE, install: "windows-setup", can_download: true };
+        const installer = "C:/data/updates/0.59.27/AgentMux-0.59.27-x64-setup.exe";
+        updateStatus.mockResolvedValue({
+            ...SETUP,
+            download: { version: "0.59.27", state: "ready", received: 1, total: 1, waiting_for: 0, installer },
+        });
+        upgradeRestart.mockResolvedValue({ ...SETUP, download: { version: "0.59.27", state: "restarting", received: 1, total: 1, waiting_for: 0, installer } });
+        render(() => <MaintenanceSection />);
+        expect(await screen.findByText("v0.59.27 is ready")).toBeTruthy();
+        expect(screen.queryByRole("button", { name: "Show folder" })).toBeNull();
+        fireEvent.click(screen.getByRole("button", { name: "Show installer" }));
+        expect(revealInFileExplorer).toHaveBeenCalledWith(installer);
+        expect(openNativePath).not.toHaveBeenCalled();
+        fireEvent.click(screen.getByRole("button", { name: "Upgrade & restart" }));
+        expect(upgradeRestart).toHaveBeenCalledWith(false);
     });
 });

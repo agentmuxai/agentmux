@@ -41,6 +41,15 @@ pub fn held_jekt_wake() -> &'static tokio::sync::Notify {
     &WAKE
 }
 
+/// An agent just registered in `block_id`: replay what was held for it, and
+/// after an upgrade tell a resumed agent once, whatever runs it
+/// (`SPEC_UPGRADE_FOR_USERS_AND_AGENTS_2026_10_15.md` §5.2). No I/O here:
+/// safe under the handler lock (the note is sent from a task of its own).
+pub fn registered(block_id: &str) {
+    held_jekt_wake().notify_one();
+    crate::backend::upgrade_notice::on_registered(block_id);
+}
+
 /// Rate limit: max tokens (requests per second).
 const RATE_LIMIT_MAX: u32 = 10;
 

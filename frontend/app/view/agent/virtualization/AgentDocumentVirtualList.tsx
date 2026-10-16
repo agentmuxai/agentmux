@@ -1634,7 +1634,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         })
         : null;
     onCleanup(() => oneWayFlow?.dispose());
-    useSettleOnShow(oneWayFlow, props.viewState.stickToBottom);
+    const showCovered = useSettleOnShow(oneWayFlow, props.viewState.stickToBottom, { changes: props.viewState.nodes, observe: () => [virtualContainerRef, streamingBufferRef] });
     onMount(() => {
         if (oneWayFlow && scrollRef && bottomSpacerRef) {
             oneWayFlow.attach(scrollRef, bottomSpacerRef, [virtualContainerRef, streamingBufferRef]);
@@ -1663,10 +1663,9 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         elNodeId.delete(el);
     };
 
-    // Render: scroll container holds the virtualized head and the streaming
-    // buffer. Nothing renders above the rows: the "Loading older messages"
-    // banner that used to sit here pushed the rows down by its height every
-    // time a scroll-up page loaded.
+    // Render: scroll container holds the virtualized head and the streaming buffer. Nothing renders
+    // above the rows: the "Loading older messages" banner that used to sit here pushed the rows down
+    // by its height every time a scroll-up page loaded.
     return (
         <div
             class="agent-document"
@@ -1674,6 +1673,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
             onScroll={handleScroll}
             data-follow-state={props.viewState.stickToBottom() ? "following" : "detached"}
             data-one-way={oneWay || undefined}
+            data-show-cover={showCovered() || undefined}
             data-follow-controller={useFollowController || undefined}
         >
             {/* Virtualized head — only present when document > buffer size.

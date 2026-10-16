@@ -23,6 +23,11 @@ const cloudConfig = (clientId: string) => ({
     clientId,
     region: "",
     userPoolId: "",
+    identityProviders: clientId ? ["Google", "SignInWithApple"] : [],
+});
+
+beforeEach(() => {
+    rpc.MuxBusCloudConfigCommand.mockResolvedValue(cloudConfig(""));
 });
 
 // The controller's one cloud config lives at module level, so each test gets
@@ -46,15 +51,28 @@ describe("useMuxBusStatus isConfigured", () => {
         vi.clearAllMocks();
     });
 
-    it("a build with a compiled client id is configured without asking srv, and signs in with it", async () => {
+    it("a build with a compiled client id is configured at once, and signs in with it", async () => {
         const muxbus = await controller("compiled-id");
         expect(muxbus.isConfigured()).toBe(true);
         await muxbus.refresh();
         await muxbus.connect();
-        expect(rpc.MuxBusCloudConfigCommand).not.toHaveBeenCalled();
         expect(rpc.MuxBusLoginCommand).toHaveBeenCalledWith(expect.anything(), {
             cognitoDomain: "https://auth.compiled.test",
             clientId: "compiled-id",
+        });
+    });
+
+    it("offers the cloud's published sign-ins, and sends the chosen one with the build's pair", async () => {
+        rpc.MuxBusCloudConfigCommand.mockResolvedValue(cloudConfig("discovered-id"));
+        const muxbus = await controller("compiled-id");
+        expect(muxbus.identityProviders()).toEqual([]);
+        await muxbus.refresh();
+        await vi.waitFor(() => expect(muxbus.identityProviders()).toEqual(["Google", "SignInWithApple"]));
+        await muxbus.connect("Google");
+        expect(rpc.MuxBusLoginCommand).toHaveBeenCalledWith(expect.anything(), {
+            cognitoDomain: "https://auth.compiled.test",
+            clientId: "compiled-id",
+            identityProvider: "Google",
         });
     });
 

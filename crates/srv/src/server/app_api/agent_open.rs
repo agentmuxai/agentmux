@@ -320,7 +320,7 @@ pub(crate) async fn open_agent_impl(
     state: &AppState,
     cmd: CommandAgentOpenData,
 ) -> Result<AgentOpenResult, String> {
-    open_agent_inner(state, cmd, None).await
+    open_agent_inner(state, cmd, None, MetaMapType::new()).await
 }
 
 /// `agent.open`, but launching into an existing, empty agent pane
@@ -347,14 +347,17 @@ pub(crate) async fn open_agent_into_block(
             focus: Some(false),
         },
         Some(block_id),
+        MetaMapType::new(),
     )
     .await
 }
 
-async fn open_agent_inner(
+/// `extra_meta` goes on a new block as it's created (srv-only keys: `agent_fork.rs`).
+pub(super) async fn open_agent_inner(
     state: &AppState,
     cmd: CommandAgentOpenData,
     into_block: Option<&str>,
+    extra_meta: MetaMapType,
 ) -> Result<AgentOpenResult, String> {
     let mstore = state.mstore.clone();
     let broker = state.broker.clone();
@@ -833,6 +836,7 @@ async fn open_agent_inner(
                 }
 
                 providers::apply_terminal_pane_meta(provider, &mut meta);
+                meta.extend(extra_meta);
 
                 // 7. Create block + insert into layout tree.
                 // Through the reducer (#1681), not wcore-direct: a store-only
@@ -914,8 +918,8 @@ async fn open_agent_inner(
                 // Place it: srv's tree, then the queued `insert` for the
                 // window. Best-effort: a failure leaves the block unplaced,
                 // for the orphan reaper. `focus` defaults to true, as the UI
-                // flow does (#3032).
-                let placement = crate::server::service::layout_intents::Placement::Append { focused: cmd.focus.unwrap_or(true) };
+                // flow does (#3032). A split of a named pane, as `pane.open`.
+                let placement = super::pane::resolve_placement(cmd.split_direction.as_deref(), cmd.split_reference_block_id.as_deref(), cmd.focus.unwrap_or(true));
                 if let Err(e) = crate::server::service::layout_intents::place_block(&app_state, &tab_id, &block_id, placement).await {
                     tracing::warn!("agent.open: placing the pane failed: {e}");
                 }

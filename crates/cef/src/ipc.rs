@@ -710,6 +710,24 @@ async fn route_command(
             relayed?;
             Ok(serde_json::json!(true))
         }
+        "app_update_action" => {
+            // Download, Upgrade & restart (or Restart now) and Cancel in the
+            // version panel, relayed to srv as the host: an agent holding the
+            // instance key can't click them (SPEC_UPGRADE_FOR_USERS_AND_AGENTS_2026_10_15.md §4.1).
+            let body = serde_json::json!({
+                "action": args.get("action").and_then(|v| v.as_str()).unwrap_or(""),
+                "now": args.get("now").and_then(|v| v.as_bool()).unwrap_or(false),
+            });
+            let web_endpoint = state.backend_endpoints.lock().web_endpoint.clone();
+            let auth_key = state.auth_key.lock().clone();
+            let ipc_token = state.ipc_token.clone();
+            tracing::info!("[ipc] app_update_action action={} now={}", body["action"], body["now"]);
+            tokio::task::spawn_blocking(move || {
+                crate::client::backend_app_update(&web_endpoint, &auth_key, &ipc_token, &body)
+            })
+            .await
+            .map_err(|e| format!("app_update_action: {e}"))?
+        }
         "upgrade_request_decide" => {
             // The user's Upgrade now / Later on an agent's request to upgrade
             // AgentMux, relayed to srv as the host: no agent can approve its

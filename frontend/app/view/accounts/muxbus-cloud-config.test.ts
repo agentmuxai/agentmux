@@ -17,6 +17,7 @@ const resp = (over: Partial<MuxBusCloudConfigResp>): MuxBusCloudConfigResp => ({
     clientId: "",
     region: "",
     userPoolId: "",
+    identityProviders: [],
     ...over,
 });
 
@@ -29,13 +30,34 @@ const DISCOVERED = resp({
 // SPEC_CLOUD_SETTINGS_DISCOVERY_2026_09_27.md §3.5: configured when the build
 // has a client id OR `muxbus.cloudconfig` returns one.
 describe("muxbus cloud config", () => {
-    it("a build with a compiled client id is configured and never asks srv", async () => {
-        const fetch = vi.fn(async () => DISCOVERED);
+    it("a build with a compiled client id keeps it, and asks srv only for the published sign-ins", async () => {
+        const fetch = vi.fn(async () => ({ ...DISCOVERED, identityProviders: ["Google", "SignInWithApple"] }));
         const config = createMuxBusCloudConfig(COMPILED, fetch);
         expect(config.signIn()).toEqual(COMPILED);
+        expect(config.identityProviders()).toEqual([]);
         await config.load();
-        expect(fetch).not.toHaveBeenCalled();
         expect(config.signIn()).toEqual(COMPILED);
+        expect(config.identityProviders()).toEqual(["Google", "SignInWithApple"]);
+        await config.load();
+        expect(fetch).toHaveBeenCalledTimes(1);
+    });
+
+    it("no published sign-ins without a document, from an older srv, or on an error", async () => {
+        const fetch = vi
+            .fn<() => Promise<MuxBusCloudConfigResp>>()
+            .mockResolvedValueOnce(resp({ source: "default" }))
+            .mockResolvedValueOnce({ ...DISCOVERED, identityProviders: undefined } as unknown as MuxBusCloudConfigResp);
+        const config = createMuxBusCloudConfig(COMPILED, fetch);
+        await config.load();
+        expect(config.identityProviders()).toEqual([]);
+        await config.load();
+        expect(config.identityProviders()).toEqual([]);
+        // The older srv's document counts as known: not asked again.
+        await config.load();
+        expect(fetch).toHaveBeenCalledTimes(2);
+        const failing = createMuxBusCloudConfig(COMPILED, vi.fn().mockRejectedValue(new Error("unknown command")));
+        await expect(failing.load()).resolves.toBeUndefined();
+        expect(failing.identityProviders()).toEqual([]);
     });
 
     it("a build without one is configured once srv discovers a client id", async () => {

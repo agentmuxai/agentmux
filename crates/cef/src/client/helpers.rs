@@ -211,6 +211,31 @@ pub(crate) fn backend_upgrade_request(
         .map_err(|e| format!("srv refused the answer: {e}"))
 }
 
+/// Relay a click in the version panel (`download`, `restart`, `cancel`), as
+/// the host, and return srv's status after it. Blocking: run it off the UI
+/// thread.
+pub(crate) fn backend_app_update(
+    web_endpoint: &str,
+    auth_key: &str,
+    ipc_token: &str,
+    body: &serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let raw = post_as_host(web_endpoint, auth_key, ipc_token, "/api/v1/host/app_update", body).map_err(|e| srv_error(&e))?;
+    let parsed: serde_json::Value =
+        serde_json::from_str(&raw).map_err(|e| format!("srv answered something that isn't JSON: {e}"))?;
+    Ok(parsed.get("data").cloned().unwrap_or(serde_json::Value::Null))
+}
+
+/// srv's own `error` from a refusal [`post_as_host`] passed on (status line,
+/// then the JSON body), which the version panel shows as it is; anything else
+/// unchanged.
+fn srv_error(err: &str) -> String {
+    err.find('{')
+        .and_then(|i| serde_json::from_str::<serde_json::Value>(&err[i..]).ok())
+        .and_then(|v| v.get("error").and_then(|e| e.as_str()).map(str::to_string))
+        .unwrap_or_else(|| err.to_string())
+}
+
 /// Report a popup a browser pane's page opened, as the host, and return
 /// srv's `data`: `{admitted: true, pane}` when srv opened it as a pane beside
 /// its opener, `{admitted: false, reason}` when the caller should open it in
@@ -834,5 +859,18 @@ pub(crate) fn backend_save_session_snapshot(web_endpoint: &str, auth_key: &str) 
             );
             false
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::srv_error;
+
+    #[test]
+    fn a_refusal_shows_srvs_own_message() {
+        let refused = r#"HTTP/1.1 409 Conflict {"ok":false,"error":"download the new version first"}"#;
+        assert_eq!(srv_error(refused), "download the new version first");
+        assert_eq!(srv_error("connect to srv: refused"), "connect to srv: refused");
+        assert_eq!(srv_error("HTTP/1.1 500 Internal Server Error {not json"), "HTTP/1.1 500 Internal Server Error {not json");
     }
 }

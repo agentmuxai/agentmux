@@ -114,6 +114,7 @@ name = "agentmux-launcher"
 version = "0.59.28"
 dependencies = [
  "agentmux-common",
+ "base64",
  "chrono",
  "futures-util",
  "ksni",
@@ -124,6 +125,7 @@ dependencies = [
  "proptest",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "smithay-client-toolkit",
  "tempfile",
  "thiserror 1.0.69",
