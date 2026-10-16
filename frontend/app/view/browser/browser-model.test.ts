@@ -66,8 +66,19 @@ const layout = vi.hoisted(() => ({
           }
         | undefined,
     closeBlockInStack: vi.fn((_model: unknown, _nodeId: string, _blockId: string) => Promise.resolve()),
+    // Window tabs other than the one on screen, by tab id.
+    otherTabs: {} as Record<string, unknown>,
 }));
-vi.mock("@/layout/lib/layoutModelHooks", () => ({ getLayoutModelForStaticTab: () => layout.model }));
+vi.mock("@/layout/lib/layoutModelHooks", () => ({
+    getLayoutModelForStaticTab: () => layout.model,
+    getLayoutModelForTabById: (tabId: string) => layout.otherTabs[tabId],
+}));
+vi.mock("@/app/util/reveal-block", () => ({
+    findTabHolding: (blockId: string) =>
+        Promise.resolve(
+            Object.entries(layout.otherTabs).find(([, m]) => (m as { getNodeByBlockId(b: string): unknown }).getNodeByBlockId(blockId))?.[0] ?? null,
+        ),
+}));
 vi.mock("@/layout/lib/layoutStack", () => ({
     closeBlockInStack: layout.closeBlockInStack,
     effectiveStack: (data: { stack: string[] }) => data.stack,
@@ -538,6 +549,7 @@ describe("BrowserViewModel close requested by its page", () => {
             closeNode: vi.fn(() => Promise.resolve()),
         };
         layout.model = model;
+        layout.otherTabs = {};
     });
 
     function vmWithCloseHandler() {
@@ -578,7 +590,16 @@ describe("BrowserViewModel close requested by its page", () => {
         expect(model.closeNode).not.toHaveBeenCalled();
     });
 
-    it("leaves a pane that isn't in the window tab on screen", async () => {
+    it("closes a pane in a window tab that isn't on screen", async () => {
+        model.getNodeByBlockId = vi.fn(() => undefined);
+        const background = { getNodeByBlockId: vi.fn(() => pane(["test-block-id"])), closeNode: vi.fn(() => Promise.resolve()) };
+        layout.otherTabs = { "tab-2": background };
+        await closePaneOrTab("test-block-id");
+        expect(background.closeNode).toHaveBeenCalledWith("node-1");
+        expect(model.closeNode).not.toHaveBeenCalled();
+    });
+
+    it("does nothing for a pane in no window tab of this window", async () => {
         layout.model = undefined;
         await expect(closePaneOrTab("test-block-id")).resolves.toBeUndefined();
         model.getNodeByBlockId = vi.fn(() => undefined);

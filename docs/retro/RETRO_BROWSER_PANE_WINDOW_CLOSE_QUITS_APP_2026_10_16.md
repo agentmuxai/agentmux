@@ -47,7 +47,7 @@ Two Google sign-in popups (13:39:26 and 13:40:19) opened as real popup windows, 
 ## Fix
 
 - **Host** (`do_close`, Windows): when the closing browser is a browser pane's own browser and the pane is still Live, the page started the close. Return `true`, so CEF does not run its default close, and send `browser-pane-close-requested` to the window that holds the pane.
-- **Frontend** (`browser-model.ts`): on `browser-pane-close-requested`, close the pane as its × does: just its tab when the pane holds others, else the pane. That runs AgentMux's normal pane close, which marks the pane Closing and tears it down the safe way.
+- **Frontend** (`browser-model.ts`): on `browser-pane-close-requested`, close the pane as its × does: just its tab when the pane holds others, else the pane. The pane is looked up in the window tab on screen, then in the window's other tabs, since a page can close itself while its tab is in the background. That runs AgentMux's normal pane close, which marks the pane Closing and tears it down the safe way.
 - AgentMux's own closes are unchanged: they mark the pane Closing first, so `block_id_for_browser` no longer returns it and `do_close` returns `false` as before. OAuth popups keep their own path.
 
 ## Reproduction

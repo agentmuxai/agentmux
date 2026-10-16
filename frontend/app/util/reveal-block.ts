@@ -42,7 +42,7 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 /** The tab in THIS window's workspace whose `blockids` include `blockId`.
  *  Reads Tab objects rather than layout models, so it also finds tabs whose
  *  layout hasn't been built yet. Pinned tabs first. */
-async function findTabHolding(blockId: string, hint?: string): Promise<string | null> {
+export async function findTabHolding(blockId: string, hint?: string): Promise<string | null> {
     const ws = workspace();
     if (!ws) return null;
     const tabIds = [...(ws.pinnedtabids ?? []), ...(ws.tabids ?? [])];

@@ -25,16 +25,24 @@ import { browserStartPageAtom } from "@/store/config-signals";
 import { refocusNode } from "@/app/store/global";
 import { createMemo, createRoot, createSignal, type Accessor } from "solid-js";
 import { errorPageFailedUrl } from "./error-page-url";
-import { getLayoutModelForStaticTab } from "@/layout/lib/layoutModelHooks";
+import { findTabHolding } from "@/app/util/reveal-block";
+import { getLayoutModelForStaticTab, getLayoutModelForTabById } from "@/layout/lib/layoutModelHooks";
 import { closeBlockInStack, effectiveStack } from "@/layout/lib/layoutStack";
 
 /** Close `blockId` the way its × would: just its tab when the pane holds
- *  others, else the pane. A pane not in the window tab on screen stays. */
+ *  others, else the pane. Looks in the window tab on screen, then in the
+ *  window's other tabs: a page can close itself while its tab is in the
+ *  background (a sign-in finishing after the user switched tabs). */
 export async function closePaneOrTab(blockId: string): Promise<void> {
-    const model = getLayoutModelForStaticTab();
-    const node = model?.getNodeByBlockId(blockId);
+    let model = getLayoutModelForStaticTab();
+    let node = model?.getNodeByBlockId(blockId);
+    if (!node) {
+        const tabId = await findTabHolding(blockId);
+        model = tabId ? getLayoutModelForTabById(tabId) : undefined;
+        node = model?.getNodeByBlockId(blockId);
+    }
     if (!model || !node) {
-        console.warn(`[browser-pane] close requested for ${blockId}, which isn't in the window tab on screen`);
+        console.warn(`[browser-pane] close requested for ${blockId}, which isn't in a window tab of this window`);
         return;
     }
     if (node.data && effectiveStack(node.data).length > 1) await closeBlockInStack(model, node.id, blockId);
