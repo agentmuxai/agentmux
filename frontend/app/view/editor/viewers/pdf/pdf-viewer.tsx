@@ -61,6 +61,9 @@ export function PdfViewer(props: PdfViewerProps): JSX.Element {
     let doc: Awaited<ReturnType<PdfjsModules["pdfjs"]["getDocument"]>["promise"]> | null = null;
     let sendPassword: ((password: string) => void) | null = null;
     let generation = 0;
+    // pdf.js's viewer drops its resize observer and scroll listeners only
+    // when this aborts; setDocument(null) leaves them.
+    const viewerAbort = new AbortController();
     // A reload (the file changed on disk) keeps the page and the zoom.
     let keep: { page: number; scale: string | number } | null = null;
 
@@ -125,6 +128,8 @@ export function PdfViewer(props: PdfViewerProps): JSX.Element {
                     annotationMode: pdfjs.AnnotationMode.ENABLE,
                     // A huge page can't allocate gigabytes of canvas.
                     maxCanvasPixels: 2 ** 25,
+                    // Read by the constructor, missing from 6.4.299's types.
+                    ...({ abortSignal: viewerAbort.signal } as object),
                 });
                 linkService.setViewer(viewer);
                 eventBus.on("pagesinit", () => {
@@ -190,6 +195,7 @@ export function PdfViewer(props: PdfViewerProps): JSX.Element {
     onCleanup(() => {
         generation++;
         teardown();
+        viewerAbort.abort();
         viewer = null;
         eventBus = null;
     });
