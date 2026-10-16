@@ -633,7 +633,7 @@ pub(crate) fn capture_window_impl(
     };
     Ok(CaptureOutcome {
         message: format!(
-            "Captured window {title:?} to {}{hint} — use Read on that path to view it yourself, or OpenMedia to show it to the user.",
+            "Captured window {title:?} to {}{hint} — use Read on that path to view it yourself, or Pane (action \"open\", view \"media\") to show it to the user.",
             path.display()
         ),
         tier: target.tier,

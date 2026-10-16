@@ -1,7 +1,10 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Panes, tabs and windows: open, name, arrange, focus, close; the agent's own identity and lifecycle.
+//! Panes, tabs and windows: open, name, arrange, focus, close; the agent's own
+//! identity and lifecycle. Not advertised: `Pane` (pane_tool.rs) and `Stop`
+//! (stop_tool.rs) call these by their old names, and OpenAgent and
+//! RegisterDevServer pass through unchanged.
 
 use super::*;
 
@@ -450,7 +453,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             if !resp.status().is_success() {
                 let status = resp.status();
                 let text = resp.text().await.unwrap_or_default();
-                anyhow::bail!("Layout({query}) failed: HTTP {status} — {text}");
+                anyhow::bail!("Layout {query} failed: HTTP {status} — {text}");
             }
             let result: Value = resp
                 .json()

@@ -112,11 +112,22 @@ pub(crate) async fn await_shutdown(
     last
 }
 
+/// srv's name for a pending shutdown's tool (its audit log keeps the endpoint
+/// names) as agents call it now.
+pub(crate) fn public_stop(via: &str) -> &str {
+    match via {
+        "QuitSelf" => "Stop self",
+        "ClosePane" => "Stop pane",
+        "FleetBulkStop" => "Stop agents",
+        other => other,
+    }
+}
+
 /// What `ClosePane block_id=` tells the agent once the target's user has
 /// answered (§6.5).
 pub(crate) fn close_pane_outcome(block: &str, now: &Value) -> anyhow::Result<String> {
     // Joined a shutdown already under way that does less than close the pane.
-    if let Some(via) = now["via"].as_str().filter(|v| *v != "ClosePane") {
+    if let Some(via) = now["via"].as_str().filter(|v| *v != "ClosePane").map(public_stop) {
         let by = now["by"].as_str().unwrap_or("another agent");
         return match now["status"].as_str().unwrap_or("") {
             "kept_by_user" => Ok(format!("Not closed: the user chose to keep pane {block:?} running.")),
@@ -126,7 +137,7 @@ pub(crate) fn close_pane_outcome(block: &str, now: &Value) -> anyhow::Result<Str
             "failed" => anyhow::bail!("close failed: {}", now["error"].as_str().unwrap_or("no detail")),
             "" | "pending" => anyhow::bail!("close of {block:?}: no answer from the user's override window"),
             state => Ok(format!(
-                "{by}'s {via} was already shutting pane {block:?}'s agent down ({state}); the pane itself may still be open — call ClosePane again to close it."
+                "{by}'s {via} was already shutting pane {block:?}'s agent down ({state}); the pane itself may still be open — call Stop with action \"pane\" again to close it."
             )),
         };
     }
@@ -170,7 +181,7 @@ pub(crate) fn merge_bulk_stop_outcomes(pending: Value, outcomes: Vec<(String, Va
 /// settled (§6.5).
 pub(crate) fn quit_self_outcome(state: &str, body: &Value) -> anyhow::Result<String> {
     match state {
-        "kept_by_user" => Ok("The user chose to keep you running. Do NOT quit and do not call QuitSelf again for this; carry on.".to_string()),
+        "kept_by_user" => Ok("The user chose to keep you running. Do NOT quit and do not call Stop self again for this; carry on.".to_string()),
         "proceeding" | "shut_down" => Ok("The user didn't stop it: you shut down when this turn ends. Give the user a one-line goodbye and start no new work.".to_string()),
         "superseded" => Ok("The user closed you themselves meanwhile.".to_string()),
         _ => anyhow::bail!(

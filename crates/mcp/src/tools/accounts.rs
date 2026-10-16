@@ -1,7 +1,8 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Identity accounts.
+//! Identity accounts. Not advertised: `Identity` (identity_tool.rs) calls
+//! these by their old names.
 
 use super::*;
 

@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Widgets: list them, install one the user then approves, open its pane
-//! (docs/specs/SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md §10).
+//! (docs/specs/SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md §10). Not
+//! advertised: `Widget` (widget_tool.rs) calls these by their old names.
 
 use super::*;
 
@@ -90,7 +91,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 p["panes"].as_array().and_then(|ps| ps.iter().find(|x| x["view"] == view)).map(|pane| (p, pane))
             });
             let Some((pkg, pane)) = found else {
-                anyhow::bail!("no installed widget has the view {view}; WidgetList shows the views there are");
+                anyhow::bail!("no installed widget has the view {view}; Widget action \"list\" shows the views there are");
             };
             if pkg["state"] != "approved" {
                 anyhow::bail!(

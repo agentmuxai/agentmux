@@ -1,6 +1,6 @@
 # SPEC: MuxAPI in fourteen tools: one per family, with actions
 
-**Status:** active — slice S1 (`Terminal`) shipped in #5001; remaining: S2–S4 (§7).
+**Status:** active — slices S1 (`Terminal`, #5001), S2 (`Browser`, `UI`, #5003), S3 (`Memory`, `Tasks`, `Presence`, `Schedule`, #5006) and S4a (`Pane`, `Stop`, `Widget`, `Identity`) built; remaining: S4b (`Agents`, `Message`) and the eval (§7).
 **Author:** Agent5@narko, 2026-10-15, at the operator's request
 **Trigger (operator, 2026-10-15):** "can we use fewer more powerful tools? like one Terminal tool that covers all those features?" … "lets take this opprunutiy to catalog all of agentmux's tools, we may want to do a similar simplification across the board, write a spec to file"
 **Builds on:** `SPEC_AGENT_TERMINAL_DRIVING_2026_10_15.md` (the first family done this way: one `Terminal` tool with an `action`), `SPEC_AGENT_TASK_EVAL_2026_10_13.md` (the eval that measures what MuxAPI costs an agent).
@@ -75,12 +75,12 @@ Things the catalog shows besides size:
 | `Schedule` | Cron×5, Loop×3 | `create` (a cron expression, an interval, or a self-paced loop), `list`, `pause`, `resume`, `delete` |
 | `Agents` | DiscoverAgents, FleetList, OpenAgent, GetAgentTranscript, ListConversations, SearchHistory, SupervisorNudge | `list` (local, LAN, cloud; with fleet status), `open`, `transcript`, `conversations`, `search_history`, `nudge` |
 | `Message` | SendMessage, FleetBroadcast, PostToChannel, ReadChannel | `send` (one agent), `broadcast` (several), `post` and `read` (channels) |
-| `Stop` | QuitSelf, FleetBulkStop | `self`, `agents`; kept separate because both end work (rule 6) |
-| `Pane` | WhoAmI, OpenEditor, OpenMedia, OpenFiles, NewTab, SetActiveTab, FocusWindow, Layout, SetName, ClosePane | `whoami`, `open` (`view: "editor" | "media" | "files"`), `close`, `new_tab`, `activate_tab`, `focus_window`, `layout`, `rename` |
+| `Stop` | QuitSelf, FleetBulkStop, ClosePane | `self`, `agents`, `pane`; kept separate because all three end work (rule 6). `pane` takes a `block_id`: ClosePane's no-argument form, which ended the caller's own session without QuitSelf's checks, is gone, and ending your own session is `self` only |
+| `Pane` | WhoAmI, OpenEditor, OpenMedia, OpenFiles, NewTab, SetActiveTab, FocusWindow, Layout, SetName | `whoami`, `open` (`view: "editor" | "media" | "files"`), `new_tab`, `activate_tab`, `focus_window`, `layout`, `rename` (closing a pane is in `Stop`) |
 | `UI` | UIScreenshot, UIClick, UIQuery, ListShortcuts, RunCommand, PressKeys, CaptureWindow, DiscoverWindows | `screenshot` (a pane or, with `window`, a whole window), `query`, `click`, `keys`, `shortcuts`, `command`, `windows` |
 | `Widget` | WidgetList, WidgetInstall, OpenWidget | `list`, `install`, `open` (host agents only) |
 | `Identity` | PresetList, PresetGet, IdentityAccounts, IdentityValidate | `presets`, `preset`, `accounts`, `validate` |
-| `DevServer` | RegisterDevServer | `register` (container agents only) |
+| `DevServer` | RegisterDevServer | `register` (container agents only). Not built: a tool with one action only adds a parameter, so RegisterDevServer stays as it is |
 
 97 tools become 14; a host agent sees 13 (no `DevServer`), a container agent 13 (no `Widget`).
 
@@ -121,7 +121,7 @@ Agents' own memories and skills that name old tools are outside the repo; the re
 | **S1** | `Terminal` | already specified; fixes a real failure |
 | **S2** | `Browser`, `UI` | the two largest (25 KB together) and the most sequential use, so composition saves the most |
 | **S3** | `Memory`, `Tasks`, `Presence`, `Schedule` | CRUD families; the confusable names go |
-| **S4** | `Agents`, `Message`, `Stop`, `Pane`, `Widget`, `Identity`, `DevServer` | the rest; `SendMessage` has the most references, so it goes last, when the pattern is settled |
+| **S4** | `Pane`, `Stop`, `Widget`, `Identity` (S4a), then `Agents`, `Message` (S4b) | the rest, in two PRs so each review stays small; `SendMessage` has the most references, so it goes last, when the pattern is settled |
 
 **Order with the eval (operator, 2026-10-15: "get this in before we even try evals").** All four slices land first, each measured by its `tools/list` size before and after and by its own tests; the eval (`SPEC_AGENT_TASK_EVAL_2026_10_13.md`) then measures the consolidated surface against the pre-consolidation one (0.59.26's 95 tools, kept as an eval arm): the coding tasks for overhead (tokens, turns, pass rate), plus a small task set per family (driving a terminal, filling a form in a browser pane, writing and reading memory) for selection accuracy: the right tool and action chosen, errors from bad parameter combinations, calls per task. A family that comes out worse is reworked.
 
@@ -129,9 +129,10 @@ Agents' own memories and skills that name old tools are outside the repo; the re
 
 | Slice | PR | Before → after (`tools/list` characters) |
 |---|---|---|
-| S1 `Terminal` | #5001 | 11 tools, 8,714 → 1 tool, 4,525 (−48%); 97 tools → 87 |
-| S2 `Browser`, `UI` | this PR | Browser 17 tools, 15,082 → 1, 5,935 (−61%); UI 8 tools, 10,296 → 1, 3,185 (−69%); 87 tools → 64. The Browser actions that change a page take `until_text`/`until_url`/`until_gone` and `snapshot: true`, so act, wait and read is one call. Operator Config gains a Browser line (it had none) |
-| S3 `Memory`, `Tasks`, `Presence`, `Schedule` | this PR | Memory 13 tools, 9,123 → 1, 2,442 (−73%); Tasks 6, 6,555 → 1, 2,969 (−55%); Presence 3, 4,401 → 1, 2,643 (−40%); Schedule 8, 5,884 → 1, 2,167 (−63%); 64 tools → 38. Memory takes a `scope` (personal or global); Schedule's `create` takes `cron` (a persistent job) or `every` (a loop for the session). The channel tools pass through Presence until S4 |
+| S1 `Terminal` | #5001 | 11 tools, 8,714 → 1 tool, 4,602 (−47%); 97 tools → 87 |
+| S2 `Browser`, `UI` | #5003 | Browser 17 tools, 15,082 → 1, 5,935 (−61%); UI 8 tools, 10,296 → 1, 3,185 (−69%); 87 tools → 64. The Browser actions that change a page take `until_text`/`until_url`/`until_gone` and `snapshot: true`, so act, wait and read is one call. Operator Config gains a Browser line (it had none) |
+| S3 `Memory`, `Tasks`, `Presence`, `Schedule` | #5006 | Memory 13 tools, 9,123 → 1, 2,442 (−73%); Tasks 6, 6,555 → 1, 2,969 (−55%); Presence 3, 4,401 → 1, 2,643 (−40%); Schedule 8, 5,884 → 1, 2,167 (−63%); 64 tools → 38. Memory takes a `scope` (personal or global); Schedule's `create` takes `cron` (a persistent job) or `every` (a loop for the session). The channel tools pass through Presence until S4 |
+| S4a `Pane`, `Stop`, `Widget`, `Identity` | this PR | Pane 9 tools, 6,771 → 1, 3,447 (−49%); Stop 3, 4,915 → 1, 3,850 (−22%); Widget 3, 2,238 → 1, 2,175 (−3%); Identity 4, 1,577 → 1, 1,099 (−30%); 38 tools → 23, and the whole list 55,962 → 51,071 characters. `Pane` `open` takes a `view`; `Stop` `pane` needs a `block_id`, and `self` refuses any target. The agent tools left for S4b pass through unchanged |
 
 S1 also moved the advertised list into one `ADVERTISED` constant (`crates/mcp/src/tool_schemas.rs`), which the server sends and a test checks, so each later slice changes the list in one place.
 

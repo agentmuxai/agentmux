@@ -34,10 +34,10 @@ fn close_pane_outcome_says_what_the_user_decided() {
     assert!(close_pane_outcome("b", &Value::Null).is_err());
     let joined = serde_json::json!({ "status": "shut_down", "via": "FleetBulkStop", "by": "Korp" });
     let text = close_pane_outcome("b", &joined).unwrap();
-    assert!(text.contains("Korp's FleetBulkStop") && text.contains("may still be open"), "{text}");
+    assert!(text.contains("Korp's Stop agents") && text.contains("may still be open"), "{text}");
     let gone = serde_json::json!({ "status": "superseded", "via": "FleetBulkStop", "by": "Korp" });
     let text = close_pane_outcome("b", &gone).unwrap();
-    assert!(text.contains("already closed") && !text.contains("call ClosePane again"), "{text}");
+    assert!(text.contains("already closed") && !text.contains("again to close it"), "{text}");
 }
 
 #[test]
@@ -61,26 +61,22 @@ fn bulk_stop_folds_each_users_answer_into_succeeded_and_failed() {
 }
 
 #[test]
-fn the_fleet_tools_warn_they_can_take_15_seconds() {
-    for tool in [CLOSE_PANE_TOOL, FLEET_BULK_STOP_TOOL] {
-        let v: Value = serde_json::from_str(tool).unwrap();
-        assert!(v["description"].as_str().unwrap().contains("at least 15 seconds"), "{}", v["name"]);
-    }
-}
-
-#[test]
-fn quit_self_warns_it_can_take_15_seconds() {
-    let v: Value = serde_json::from_str(QUIT_SELF_TOOL).unwrap();
+fn stop_warns_it_can_take_15_seconds() {
+    let v: Value = serde_json::from_str(STOP_TOOL).unwrap();
     assert!(v["description"].as_str().unwrap().contains("at least 15 seconds"));
 }
 
+
+
+/// Stop's `self` keeps QuitSelf's warning and its required quote; that it
+/// takes no target is checked in stop_tool's own tests.
 #[test]
-fn quit_self_takes_no_target_and_requires_the_users_quote() {
-    let v: Value = serde_json::from_str(QUIT_SELF_TOOL).unwrap();
-    let props = v["inputSchema"]["properties"].as_object().unwrap();
-    assert!(!props.contains_key("block_id") && !props.contains_key("agent"), "no way to aim it at another agent");
-    assert_eq!(v["inputSchema"]["required"], serde_json::json!(["reason", "user_instruction"]));
-    assert!(v["description"].as_str().unwrap().starts_with("⚠️ MAJOR WARNING"));
+fn stop_self_warns_and_requires_the_users_quote() {
+    let v: Value = serde_json::from_str(STOP_TOOL).unwrap();
+    assert!(v["description"].as_str().unwrap().contains("self: ⚠️ MAJOR WARNING — THIS ENDS YOUR OWN SESSION"));
+    let props = &v["inputSchema"]["properties"];
+    assert!(props["user_instruction"]["description"].as_str().unwrap().starts_with("self: a VERBATIM quote"));
+    assert!(props["reason"]["description"].as_str().unwrap().contains("(required)"));
 }
 
 /// The text an agent reads back. Pinned because a lost `\` continuation
@@ -738,21 +734,16 @@ fn all_tool_defs_are_valid_json_with_names() {
 /// model can pick the sub-action (replaces the former one-tool-per-verb set).
 #[test]
 fn consolidated_tools_expose_their_discriminators() {
-    let layout: Value = serde_json::from_str(LAYOUT_TOOL).unwrap();
-    let query = layout["inputSchema"]["properties"]["query"]["enum"]
+    let pane: Value = serde_json::from_str(PANE_TOOL).unwrap();
+    let query = pane["inputSchema"]["properties"]["query"]["enum"]
         .as_array()
-        .expect("Layout.query.enum is an array");
-    assert_eq!(query.len(), 4, "Layout.query folds the 4 read verbs");
+        .expect("Pane.query.enum is an array");
+    assert_eq!(query.len(), 4, "layout's query folds the 4 read verbs");
 
-    let set_name: Value = serde_json::from_str(SET_NAME_TOOL).unwrap();
-    let target = set_name["inputSchema"]["properties"]["target"]["enum"]
+    let target = pane["inputSchema"]["properties"]["target"]["enum"]
         .as_array()
-        .expect("SetName.target.enum is an array");
-    assert_eq!(target.len(), 4, "SetName.target folds the 4 naming verbs");
-    let required = set_name["inputSchema"]["required"]
-        .as_array()
-        .expect("SetName.required is an array");
-    assert_eq!(required.len(), 2, "SetName requires both target and name");
+        .expect("Pane.target.enum is an array");
+    assert_eq!(target.len(), 4, "rename's target folds the 4 naming verbs");
 }
 
 #[test]
