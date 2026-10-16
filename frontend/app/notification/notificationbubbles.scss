@@ -9,3 +9,9 @@
     align-items: flex-start;
     row-gap: var(--space-2);
 }
+
+// "+N more": the toasts past the first few, shown on click.
+.notification-bubbles .notification-more {
+    align-self: flex-end;
+    font-size: var(--text-xs);
+}

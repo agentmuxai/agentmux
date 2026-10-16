@@ -54,7 +54,10 @@ export async function surfaceBackgroundAudit(): Promise<void> {
         const message = summarize(entries);
         if (!message) return;
 
+        // About the past, so it stays until read: no expiry.
         pushNotification({
+            id: "background-audit",
+            persistent: true,
             icon: "moon",
             title: "Ran while you were away",
             message,

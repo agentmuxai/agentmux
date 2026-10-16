@@ -466,9 +466,7 @@ const AppInner = () => {
                     <CrossWindowDropOverlay />
                 </Show>
                 <FlashError />
-                <Show when={isDev()}>
-                    <NotificationBubbles />
-                </Show>
+                <NotificationBubbles />
                 <ZoomIndicator />
                 <Show when={isDev()}>
                     <PerfHud />
