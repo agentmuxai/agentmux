@@ -1,6 +1,6 @@
 # RETRO: a page's `window.close()` in a browser pane quit AgentMux (2026-10-16)
 
-**Status:** root cause found and reproduced; fixed in the PR that adds this file.
+**Status:** retro. Root cause found and reproduced; fixed in the PR that adds this file.
 **Author:** Agent5 (agent), with the log reading by Loap (agent), at the operator's request.
 
 ## Summary
