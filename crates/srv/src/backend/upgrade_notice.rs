@@ -138,7 +138,8 @@ pub fn note_text(u: &Upgraded) -> String {
 struct State {
     upgraded: Upgraded,
     dir: PathBuf,
-    store: Arc<crate::backend::storage::store::Store>,
+    /// Panes that had a session when this srv started: the resumed ones.
+    had_session: HashSet<String>,
     noted: Mutex<HashSet<String>>,
 }
 
@@ -152,27 +153,35 @@ pub fn init(store: Arc<crate::backend::storage::store::Store>) {
         let upgraded = observe_start(&dir, env!("CARGO_PKG_VERSION"), agentmux_common::time::now_ms())?;
         tracing::info!(from = %upgraded.from, to = %upgraded.to, "upgrade notice: resumed agents will be told of the upgrade");
         let noted = Mutex::new(upgraded.notified.iter().cloned().collect());
-        Some(State { upgraded, dir, store, noted })
+        let had_session = with_sessions(&store);
+        Some(State { upgraded, dir, had_session, noted })
     });
     let _ = STATE.set(state);
 }
 
-/// Whether the pane `block_id` already had a session: a resumed agent.
-fn resumed(store: &crate::backend::storage::store::Store, block_id: &str) -> bool {
+/// The panes that have a session now (`agent:sessionid`), read once at
+/// start: those an upgrade resumes. A pane opened later, which gets its
+/// session afterwards, is never among them.
+fn with_sessions(store: &crate::backend::storage::store::Store) -> HashSet<String> {
     store
-        .get::<crate::backend::obj::Block>(block_id)
-        .ok()
-        .flatten()
-        .is_some_and(|b| !crate::backend::obj::meta_get_string(&b.meta, "agent:sessionid", "").trim().is_empty())
+        .get_all::<crate::backend::obj::Block>()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|b| !crate::backend::obj::meta_get_string(&b.meta, "agent:sessionid", "").trim().is_empty())
+        .map(|b| b.oid)
+        .collect()
 }
 
 /// An agent registered in `block_id` (any controller). If an upgrade is being
 /// announced and the pane is a resumed one not yet told, tell it, once.
-/// Called under the handler lock: no I/O here; the store is read, and the
-/// note sent, from a task of its own. A pane is considered once per run.
+/// Called under the handler lock: no I/O here (the note is sent from a task
+/// of its own).
 pub fn on_registered(block_id: &str) {
     let Some(Some(state)) = STATE.get() else { return };
     if agentmux_common::time::now_ms() - state.upgraded.at_ms >= PENDING_FOR.as_millis() as i64 {
+        return;
+    }
+    if !state.had_session.contains(block_id) {
         return;
     }
     if !state.noted.lock().unwrap_or_else(|e| e.into_inner()).insert(block_id.to_string()) {
@@ -182,10 +191,6 @@ pub fn on_registered(block_id: &str) {
     tokio::spawn(async move {
         tokio::time::sleep(SETTLE).await;
         let Some(Some(state)) = STATE.get() else { return };
-        // A new pane (no session before) isn't told; it stays considered.
-        if !resumed(&state.store, &block_id) {
-            return;
-        }
         let handler = crate::backend::reactive::get_global_handler();
         let target = handler
             .list_agents()
