@@ -1663,10 +1663,9 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         elNodeId.delete(el);
     };
 
-    // Render: scroll container holds the virtualized head and the streaming
-    // buffer. Nothing renders above the rows: the "Loading older messages"
-    // banner that used to sit here pushed the rows down by its height every
-    // time a scroll-up page loaded.
+    // Render: scroll container holds the virtualized head and the streaming buffer. Nothing renders
+    // above the rows: the "Loading older messages" banner that used to sit here pushed the rows down
+    // by its height every time a scroll-up page loaded.
     return (
         <div
             class="agent-document"
