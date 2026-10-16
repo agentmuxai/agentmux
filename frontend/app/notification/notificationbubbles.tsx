@@ -13,14 +13,14 @@ import { useNotification } from "./usenotification";
 /** The most toasts shown at once before "+N more". */
 export const MAX_VISIBLE_NOTIFICATIONS = 5;
 
-/** The toasts to show, in order: all when `expanded`; otherwise every
- *  persistent one (it stays until closed, so it isn't tucked away) and the
- *  newest of the rest, up to `MAX_VISIBLE_NOTIFICATIONS` in all. */
+/** The toasts to show, in order: all when `expanded`; otherwise at most
+ *  `MAX_VISIBLE_NOTIFICATIONS`, persistent ones first (they stay until closed,
+ *  so they aren't the ones tucked away), newest first within each kind. */
 export function visibleNotifications(all: NotificationType[], expanded: boolean): NotificationType[] {
     const shown = all.filter((n) => !n.hidden);
     if (expanded) return shown;
-    const sticky = shown.filter((n) => n.persistent);
-    const room = Math.max(0, MAX_VISIBLE_NOTIFICATIONS - sticky.length);
+    const sticky = shown.filter((n) => n.persistent).slice(-MAX_VISIBLE_NOTIFICATIONS);
+    const room = MAX_VISIBLE_NOTIFICATIONS - sticky.length;
     const rest = shown.filter((n) => !n.persistent);
     const keep = new Set([...sticky, ...(room > 0 ? rest.slice(-room) : [])]);
     return shown.filter((n) => keep.has(n));

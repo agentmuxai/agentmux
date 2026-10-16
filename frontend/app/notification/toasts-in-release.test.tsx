@@ -34,6 +34,10 @@ describe("the toast list", () => {
         expect(shown).toEqual(["s1", "s2", "t5", "t6", "t7"]);
         expect(shown).toHaveLength(MAX_VISIBLE_NOTIFICATIONS);
         expect(visibleNotifications([toast("h", { hidden: true }), toast("v")], false).map((n) => n.id)).toEqual(["v"]);
+
+        // More persistent toasts than fit: still five, the newest of them.
+        const manySticky = Array.from({ length: 7 }, (_, i) => toast(`s${i}`, { persistent: true }));
+        expect(visibleNotifications([...manySticky, toast("t")], false).map((n) => n.id)).toEqual(["s2", "s3", "s4", "s5", "s6"]);
     });
 });
 
