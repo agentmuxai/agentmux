@@ -117,7 +117,7 @@ pub(crate) fn check(
     if !recorded.is_some_and(|r| r.eq_ignore_ascii_case(agent_id)) {
         return Err(Denied::Forbidden(format!(
             "pane {pane:?} is not a browser pane you own: an agent can drive only browser \
-             panes it opened itself with OpenBrowser, and loses one the user takes over"
+             panes it opened itself with Browser's open action, and loses one the user takes over"
         )));
     }
     let mirrored = block
@@ -127,7 +127,7 @@ pub(crate) fn check(
         .unwrap_or("");
     if !mirrored.eq_ignore_ascii_case(agent_id) {
         return Err(Denied::Forbidden(format!(
-            "the user took over pane {pane:?}; open a new one with OpenBrowser if you still need a browser"
+            "the user took over pane {pane:?}; open a new one with Browser's open action if you still need a browser"
         )));
     }
     Ok(())

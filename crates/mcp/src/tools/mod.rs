@@ -10,7 +10,9 @@ use super::*;
 
 mod accounts;
 mod browser;
+mod browser_tool;
 mod cron;
+mod family;
 mod fleet;
 mod global_memory;
 mod history;
@@ -25,6 +27,7 @@ mod send_files;
 mod shell;
 mod terminal;
 mod ui;
+mod ui_tool;
 mod widgets;
 mod work;
 
@@ -98,6 +101,31 @@ const REPLACED: &[(&str, &str)] = &[
     ("PtyShellStatus", "Terminal with action \"read\" (running, exit_code)"),
     ("PtyShellStop", "Terminal with action \"close\""),
     ("ConnList", "Terminal with action \"connections\""),
+    ("OpenBrowser", "Browser with action \"open\""),
+    ("BrowserSnapshot", "Browser with action \"snapshot\""),
+    ("BrowserClick", "Browser with action \"click\""),
+    ("BrowserFill", "Browser with action \"fill\""),
+    ("BrowserSelect", "Browser with action \"select\""),
+    ("BrowserCheck", "Browser with action \"check\""),
+    ("BrowserSetFiles", "Browser with action \"set_files\""),
+    ("BrowserWaitFor", "Browser with action \"wait\" (until_text, until_url, until_gone)"),
+    ("BrowserHandoff", "Browser with action \"handoff\""),
+    ("BrowserNavigate", "Browser with action \"navigate\""),
+    ("BrowserBack", "Browser with action \"back\""),
+    ("BrowserForward", "Browser with action \"forward\""),
+    ("BrowserReload", "Browser with action \"reload\""),
+    ("BrowserEval", "Browser with action \"eval\""),
+    ("BrowserDispatchKey", "Browser with action \"key\""),
+    ("BrowserFocusElement", "Browser with action \"focus\""),
+    ("BrowserFocusInfo", "Browser with action \"focus_info\""),
+    ("UIScreenshot", "UI with action \"screenshot\""),
+    ("UIQuery", "UI with action \"query\""),
+    ("UIClick", "UI with action \"click\""),
+    ("ListShortcuts", "UI with action \"shortcuts\""),
+    ("RunCommand", "UI with action \"command\""),
+    ("PressKeys", "UI with action \"keys\""),
+    ("DiscoverWindows", "UI with action \"windows\""),
+    ("CaptureWindow", "UI with action \"window\""),
 ];
 
 /// Try each family in turn; the first that owns `name` answers.
@@ -116,8 +144,8 @@ pub(crate) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
         fleet,
         history,
         overlap,
-        ui,
-        browser,
+        ui_tool,
+        browser_tool,
         loops,
         work,
         cron,
@@ -140,7 +168,7 @@ mod tests {
     /// Families `call` routes to: each of their tools is advertised.
     const FAMILIES: &[(&str, &str)] = &[
         ("accounts", include_str!("accounts.rs")),
-        ("browser", include_str!("browser.rs")),
+        ("browser_tool", include_str!("browser_tool.rs")),
         ("cron", include_str!("cron.rs")),
         ("fleet", include_str!("fleet.rs")),
         ("global_memory", include_str!("global_memory.rs")),
@@ -151,7 +179,7 @@ mod tests {
         ("panes", include_str!("panes.rs")),
         ("presets", include_str!("presets.rs")),
         ("terminal", include_str!("terminal.rs")),
-        ("ui", include_str!("ui.rs")),
+        ("ui_tool", include_str!("ui_tool.rs")),
         ("widgets", include_str!("widgets.rs")),
         ("work", include_str!("work.rs")),
     ];
@@ -159,11 +187,13 @@ mod tests {
     /// Families a family tool calls into, never routed to: their names are
     /// not advertised, and each is in `REPLACED`.
     const INTERNAL: &[(&str, &str)] = &[
+        ("browser", include_str!("browser.rs")),
         ("pty_shell", include_str!("pty_shell.rs")),
         ("shell", include_str!("shell.rs")),
+        ("ui", include_str!("ui.rs")),
     ];
 
-    /// The tool names in a family's `match name` arms (`"A" | "B" => {`),
+    /// The tool names in a family's `match name` arms (`"A" | "B" => ...`),
     /// read from its `call` function only, so another `match` in the file
     /// (an action, an option) isn't taken for a tool.
     fn arm_names(src: &str) -> Vec<String> {
@@ -172,7 +202,7 @@ mod tests {
         let body = &body[..body.find("\n}\n").map(|e| e + 2).unwrap_or(body.len())];
         body.lines()
             .filter_map(|l| l.strip_prefix("        \""))
-            .filter_map(|l| l.strip_suffix(" => {"))
+            .filter_map(|l| l.split_once("\" => ").map(|(pat, _)| pat))
             .flat_map(|pat| pat.split(" | ").map(|n| n.trim_matches('"').to_string()))
             .collect()
     }

@@ -351,7 +351,7 @@ pub(crate) fn sign_ui_automation_auth() -> Result<agentmux_common::api_types::Ui
         anyhow::anyhow!(
             "AGENTMUX_JEKT_KEY is not set (or not valid base64) and srv served no key — this agent \
              needs to be respawned to get a signing key before it can use UI automation \
-             (UIScreenshot/UIClick/UIQuery)"
+             (the UI tool)"
         )
     })?;
     let ts_secs = agentmux_common::time::now_secs();

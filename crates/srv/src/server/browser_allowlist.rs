@@ -187,7 +187,7 @@ pub(crate) fn refuse_agent_navigation(pane: &str, url: &str) -> Option<String> {
     let list = list_for(pane)?;
     (!allowed_origins::allows(&list, url)).then(|| {
         format!(
-            "{url:?} isn't on the sites this pane is limited to ({}): open another pane with OpenBrowser \
+            "{url:?} isn't on the sites this pane is limited to ({}): open another pane with Browser's open action \
              for it, or ask the user",
             list.join(", ")
         )

@@ -122,7 +122,7 @@ pub(crate) fn read_upload_files(workspace: &Path, checked: &[String]) -> Result<
         total += meta.len();
         if total > MAX_UPLOAD_BYTES {
             return Err(format!(
-                "uploads are limited to {} MB in all; for bigger files, ask the user to pick them (BrowserHandoff)",
+                "uploads are limited to {} MB in all; for bigger files, ask the user to pick them (Browser's handoff action)",
                 MAX_UPLOAD_BYTES / (1024 * 1024)
             ));
         }

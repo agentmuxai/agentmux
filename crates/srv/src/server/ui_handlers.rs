@@ -335,7 +335,7 @@ pub(crate) async fn handle_ui_click(
         Ok(b) => b,
         Err((code, e)) => return err_response(code, e),
     };
-    if let Err(resp) = refuse_on_driven_pane(&block_id, "UIClick", "BrowserSnapshot, then BrowserClick on a reference") {
+    if let Err(resp) = refuse_on_driven_pane(&block_id, "UI's click action", "Browser's snapshot action, then its click action on a ref") {
         return resp;
     }
     let host = match get_host_ipc(&state).await {
@@ -563,8 +563,8 @@ pub(crate) async fn handle_ui_browser_eval(
     };
     if let Err(resp) = refuse_on_driven_pane(
         &block_id,
-        "BrowserEval",
-        "BrowserSnapshot to read the page, and BrowserClick/Fill/Select/Check to act on it",
+        "Browser's eval action",
+        "Browser's snapshot action to read the page, and its click, fill, select and check actions to act on it",
     ) {
         return resp;
     }
@@ -620,8 +620,8 @@ pub(crate) async fn handle_ui_browser_dispatch_key(
     if presses {
         if let Err(resp) = refuse_on_driven_pane(
             &block_id,
-            "BrowserDispatchKey with Enter or Space",
-            "BrowserClick on the button (it asks the user when the click submits something)",
+            "Browser's key action with Enter or Space",
+            "Browser's click action on the button (it asks the user when the click submits something)",
         ) {
             return resp;
         }
@@ -729,7 +729,7 @@ pub(crate) async fn handle_ui_browser_open(
     if !(url.starts_with("https://") || url.starts_with("http://")) {
         return err_response(
             StatusCode::BAD_REQUEST,
-            format!("OpenBrowser takes an http:// or https:// URL, not {url:?}"),
+            format!("Browser's open action takes an http:// or https:// URL, not {url:?}"),
         );
     }
     let split = req.split.as_deref().unwrap_or("right");
@@ -996,7 +996,7 @@ fn refuse_on_driven_pane(block_id: &str, what: &str, instead: &str) -> Result<()
     Err(err_response(
         StatusCode::FORBIDDEN,
         format!(
-            "{what} isn't allowed on a browser pane you opened with OpenBrowser: it could submit \
+            "{what} isn't allowed on a browser pane you opened with Browser's open action: it could submit \
              a form without the user's approval. Use {instead}."
         ),
     ))
@@ -1030,7 +1030,7 @@ fn opener_allows(
                 StatusCode::FORBIDDEN,
                 format!(
                     "the user took over pane {opener:?}, which opened popup {pane:?} (directly or \
-                     through other popups); open a new pane with OpenBrowser if you still need a browser"
+                     through other popups); open a new pane with Browser's open action if you still need a browser"
                 ),
             ));
         }
@@ -1100,7 +1100,7 @@ fn popup_window_target(state: &AppState, id: &str, agent_id: &str) -> Result<Str
             StatusCode::FORBIDDEN,
             format!(
                 "the user took over pane {:?}, which opened popup window {id:?}; open a new pane \
-                 with OpenBrowser if you still need a browser",
+                 with Browser's open action if you still need a browser",
                 w.opener
             ),
         ));
@@ -1133,7 +1133,7 @@ fn not_waiting_on_user(pane: &str) -> Result<(), (StatusCode, String)> {
         Some(Kind::Handoff) => Err((
             StatusCode::CONFLICT,
             format!(
-                "the user is working in pane {pane:?} (your BrowserHandoff); your tools on it are \
+                "the user is working in pane {pane:?} (your Browser handoff); your tools on it are \
                  paused until they click Done or Cancel"
             ),
         )),
@@ -1177,7 +1177,7 @@ pub(crate) async fn handle_ui_browser_handoff(
     if !is_browser {
         return err_response(
             StatusCode::BAD_REQUEST,
-            "BrowserHandoff needs a browser pane: pass the `pane` OpenBrowser returned".to_string(),
+            "Browser's handoff action needs a browser pane: pass the `pane` its open action returned".to_string(),
         );
     }
     let reason: String = req.reason.trim().chars().take(300).collect();

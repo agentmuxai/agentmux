@@ -108,8 +108,8 @@ async fn close_pane(state: &AppState, req: &UiRunCommandRequest, own_block_id: &
         &req.auth.agent_id,
         own_block_id,
         target,
-        Some("RunCommand pane:close"),
-        "RunCommand",
+        Some("UI command pane:close"),
+        "UI command",
     )
     .await;
     match code {
