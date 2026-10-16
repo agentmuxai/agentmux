@@ -1,7 +1,7 @@
 # Spec: Sysinfo pane — flush top-right controls, a hide-the-selectors button, flush right-hand chart edge
 
 **Date:** 2026-10-16
-**Status:** implemented (decisions below are the owner's, 2026-10-16)
+**Status:** implemented — in #5022, with the owner's decisions of 2026-10-16 (§5). Only the layout export/import of the new setting is left.
 **Files in scope:**
 - [`frontend/app/view/sysinfo/sysinfo-bar.tsx`](../../frontend/app/view/sysinfo/sysinfo-bar.tsx) — the control row
 - [`frontend/app/view/sysinfo/sysinfo-view.tsx`](../../frontend/app/view/sysinfo/sysinfo-view.tsx) — owns the bar's state, lays out the charts
