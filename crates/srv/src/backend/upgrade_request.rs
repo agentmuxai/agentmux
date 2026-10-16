@@ -102,6 +102,16 @@ pub fn installable(status: &AppUpdateStatus, wanted: Option<&str>) -> Result<Str
         }
     }
     let latest = status.latest.clone().unwrap_or_default();
+    // A restart into an earlier release is under way (the check found a
+    // newer one since): that one goes first.
+    if let Some(d) = status.download.as_ref().filter(|d| matches!(d.state.as_str(), "waiting" | "restarting")) {
+        if d.version != latest {
+            return Err(Outcome::Unavailable {
+                message: format!("AgentMux is already restarting into {}; ask again once it has", d.version),
+                url: None,
+            });
+        }
+    }
     if let Some(w) = wanted.map(|w| w.trim().trim_start_matches('v')).filter(|w| !w.is_empty()) {
         if w != latest {
             return Err(Outcome::Unavailable {
@@ -234,14 +244,14 @@ pub fn answer(state: &crate::server::AppState, id: &str, version: &str, accept: 
         tell(&r.block_id, &text);
     }
     if accept {
-        start_upgrade(version.to_string());
+        start_upgrade(version.to_string(), answered.into_iter().map(|r| r.block_id).collect());
     }
     Ok(())
 }
 
 /// The user's own turn started the upgrade to `version`: requests for it
 /// that were waiting are answered by that, and their agents told so.
-pub fn resolve_started(state: &crate::server::AppState, version: &str) {
+pub fn resolve_started(state: &crate::server::AppState, version: &str) -> Vec<String> {
     let resolved: Vec<UpgradeRequest> = {
         let mut p = pending();
         let (same, other): (Vec<_>, Vec<_>) = std::mem::take(&mut *p).into_iter().partition(|r| r.version == version);
@@ -249,7 +259,7 @@ pub fn resolve_started(state: &crate::server::AppState, version: &str) {
         same
     };
     if resolved.is_empty() {
-        return;
+        return Vec::new();
     }
     publish(state);
     for r in &resolved {
@@ -258,14 +268,22 @@ pub fn resolve_started(state: &crate::server::AppState, version: &str) {
             &format!("[AgentMux] The user asked for the upgrade to {version} themselves; it is under way. Your request is answered by that."),
         );
     }
+    resolved.into_iter().map(|r| r.block_id).collect()
 }
 
 /// Download `version` if it isn't yet, then restart once every agent has
 /// finished its turn (the launcher asks the user before it does). Only while
 /// `version` is still the latest release: the download and restart take the
-/// latest, so a newer one appearing meanwhile stops the flow.
-pub fn start_upgrade(version: String) {
+/// latest, so a newer one appearing meanwhile stops the flow. The agents in
+/// `askers` (their panes) are told if it stops short, and why.
+pub fn start_upgrade(version: String, askers: Vec<String>) {
     tokio::spawn(async move {
+        let stop = |why: &str| {
+            tracing::info!(version = %version, why, "upgrade request: stopped");
+            for block_id in &askers {
+                tell(block_id, &format!("[AgentMux] The upgrade to {version} stopped: {why}. Ask again if it's still wanted."));
+            }
+        };
         let still_latest = |s: &AppUpdateStatus| s.latest.as_deref() == Some(version.as_str());
         let ready = |s: &AppUpdateStatus| {
             s.download.as_ref().is_some_and(|d| d.version == version && d.state == "ready")
@@ -274,41 +292,45 @@ pub fn start_upgrade(version: String) {
             s.download.as_ref().is_some_and(|d| matches!(d.state.as_str(), "waiting" | "restarting"))
         };
         let status = update_check::current_status();
-        if busy(&status) {
+        if let Some(d) = status.download.as_ref().filter(|_| busy(&status)) {
+            // This release's restart is already under way; another's goes first.
+            if d.version != version {
+                stop(&format!("AgentMux is already restarting into {}", d.version));
+            }
             return;
         }
+        let newer = |s: &AppUpdateStatus| format!("a newer release, {}, came out", s.latest.clone().unwrap_or_default());
         if !still_latest(&status) {
-            tracing::info!(version = %version, "upgrade request: a newer release came out; not installing this one");
-            return;
+            return stop(&newer(&status));
         }
         if !ready(&status) {
             if let Err(e) = crate::backend::update_download::start() {
-                tracing::warn!(error = %e, "upgrade request: couldn't start the download");
-                return;
+                return stop(&format!("the download couldn't start ({e})"));
             }
             let deadline = tokio::time::Instant::now() + DOWNLOAD_WAIT;
             loop {
                 tokio::time::sleep(Duration::from_secs(1)).await;
                 let s = update_check::current_status();
                 if !still_latest(&s) {
-                    tracing::info!(version = %version, "upgrade request: a newer release came out while downloading");
-                    return;
+                    return stop(&newer(&s));
                 }
                 if ready(&s) {
                     break;
                 }
-                let failed = s.download.as_ref().is_none_or(|d| d.state == "failed");
-                if failed || tokio::time::Instant::now() >= deadline {
-                    tracing::warn!("upgrade request: the download didn't finish; the panel says why");
-                    return;
+                if let Some(d) = s.download.as_ref().filter(|d| d.state == "failed") {
+                    return stop(&format!("the download failed ({})", d.error.clone().unwrap_or_default()));
+                }
+                if s.download.is_none() || tokio::time::Instant::now() >= deadline {
+                    return stop("the download didn't finish");
                 }
             }
         }
-        if !still_latest(&update_check::current_status()) {
-            return;
+        let s = update_check::current_status();
+        if !still_latest(&s) {
+            return stop(&newer(&s));
         }
         if let Err(e) = crate::backend::update_restart::start(false) {
-            tracing::warn!(error = %e, "upgrade request: couldn't start the restart");
+            stop(&format!("the restart couldn't start ({e})"));
         }
     });
 }
@@ -351,6 +373,19 @@ mod tests {
         for state in ["local-build", "off", "unknown"] {
             assert!(matches!(installable(&status(state, true), None), Err(Outcome::Unavailable { .. })), "{state}");
         }
+        // A restart into an earlier release is under way: that one goes first.
+        let mut busy = status("available", true);
+        busy.download = Some(crate::backend::update_check::DownloadStatus {
+            version: "0.59.26".into(),
+            state: "restarting".into(),
+            received: 1,
+            total: 1,
+            error: None,
+            folder: None,
+            waiting_for: 0,
+        });
+        let Err(Outcome::Unavailable { message, .. }) = installable(&busy, None) else { panic!("expected unavailable") };
+        assert!(message.contains("already restarting into 0.59.26"), "{message}");
     }
 
     #[test]
