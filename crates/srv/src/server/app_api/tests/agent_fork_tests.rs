@@ -195,6 +195,32 @@ async fn a_leader_with_three_workers_open_is_refused_a_fourth() {
     assert_eq!(definitions(&state), before);
 }
 
+/// Parallel forks don't each see room for one more: a fork waits while
+/// another of the same leader's is under way (here, the lock held as that
+/// one would hold it) and counts the worker it opened.
+#[tokio::test]
+async fn a_fork_waits_for_the_leaders_fork_under_way_and_counts_its_worker() {
+    let state = test_state();
+    let (def, tab, _) = seed_leader(&state, "claude", "host", json!({})).await;
+    let worker = || json!({ "view": "agent", COACHED_BY_META_KEY: { "agent": def.name, "id": def.id, "block_id": "x" } });
+    for _ in 1..MAX_LIVE_WORKERS {
+        new_block(&state, &tab, worker()).await;
+    }
+    let lock = leader_lock(&def.id);
+    let under_way = lock.lock().await;
+    let second = tokio::spawn({
+        let (state, req) = (state.clone(), request(sign_auth(&state, &def.slug), "implement the spec"));
+        async move { fork(&state, req).await }
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    assert!(!second.is_finished(), "waits for the fork under way");
+    new_block(&state, &tab, worker()).await; // the one under way opens its worker
+    drop(under_way);
+    let (status, body) = second.await.unwrap();
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert!(body["error"].as_str().unwrap().starts_with("TOO_MANY_WORKERS"), "{body}");
+}
+
 /// A turn the user didn't start (here: no controller can say who did) asks
 /// the user; with no window to ask in, nothing is created.
 #[tokio::test]

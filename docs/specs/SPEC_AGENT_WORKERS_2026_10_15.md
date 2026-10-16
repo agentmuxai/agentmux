@@ -99,7 +99,7 @@ Launching an agent spends tokens until someone stops it. The rules:
 - **The user asked for it.** A fork goes ahead at once only when the leader's current turn was started by the user's own message, the rule `QuitSelf` already applies (`sagas/self_quit.rs:43-79`). Any other turn (one a jekt, a schedule or a worker's report started) asks the user first, with a prompt naming the leader, the worker's name and model, and the brief's first line. The prompt is the one WidgetInstall uses (`widget_agent_handlers.rs:96-140`: `user_attention::Asking`, a 300 s timeout). So a message from another agent can't make an agent spawn agents.
 - **An identified leader.** The handler requires `Caller::Agent` (the agent token, `server/caller.rs`); an unidentified call is refused. Container agents are refused, as they are for `open` (`backend/container_credential.rs:88-111`).
 - **No chains.** A worker (`agent:coached_by` set) can't fork.
-- **A few at a time.** At most 3 live workers per leader (`MAX_LIVE_WORKERS`; a setting can come with Phase B), counted from the panes that carry the leader's mark.
+- **A few at a time.** At most 3 live workers per leader (`MAX_LIVE_WORKERS`; a setting can come with Phase B), counted from the panes that carry the leader's mark. One fork per leader runs at a time (`leader_lock`), from the count through the user's answer to the open, so parallel calls can't each see room for one more.
 - **Its model, the user's account.** The worker runs on the leader's account; there's no other account to choose.
 
 ### 3.6 Ending a worker

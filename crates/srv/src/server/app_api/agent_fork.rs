@@ -96,6 +96,10 @@ async fn fork_worker(
         .map_err(|e| refuse(StatusCode::BAD_REQUEST, format!("INVALID_ARG: {e}")))?;
     let tab_id = super::resolve_tab_id_for_block(&state.mstore, &leader.block_id)
         .map_err(|e| refuse(StatusCode::CONFLICT, format!("NO_TAB: your pane isn't in a tab: {e}")))?;
+    // Held until the worker's pane exists (or nothing was made), so a second
+    // call counts it: parallel forks can't each see room for one more.
+    let lock = leader_lock(&leader.def.id);
+    let _one_at_a_time = lock.lock().await;
     let live = live_workers_of(&state.mstore, &leader.def.id);
     if live >= MAX_LIVE_WORKERS {
         return Err(refuse(
@@ -244,6 +248,18 @@ pub(crate) fn worker_runtime(
     }
     let stored = crate::backend::storage::agents::normalize_last_runtime(&raw)?;
     Ok(WorkerRuntime { stored, model: parsed.model, effort: parsed.effort })
+}
+
+/// One fork at a time per leader, from counting its workers to opening the
+/// new one, including the wait for the user. Like `agent_open`'s locks, it
+/// serializes only this process's calls.
+static LEADER_LOCKS: std::sync::LazyLock<
+    std::sync::Mutex<std::collections::HashMap<String, std::sync::Arc<tokio::sync::Mutex<()>>>>,
+> = std::sync::LazyLock::new(Default::default);
+
+pub(crate) fn leader_lock(leader_def_id: &str) -> std::sync::Arc<tokio::sync::Mutex<()>> {
+    let mut locks = LEADER_LOCKS.lock().unwrap_or_else(|e| e.into_inner());
+    locks.entry(leader_def_id.to_string()).or_default().clone()
 }
 
 /// How many open panes `leader_def_id` coaches: workers in some tab.

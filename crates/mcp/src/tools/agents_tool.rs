@@ -57,6 +57,12 @@ fn str_arg(args: &Value, key: &str) -> Option<String> {
     args.get(key).and_then(|v| v.as_str()).map(str::trim).filter(|s| !s.is_empty()).map(str::to_string)
 }
 
+/// How long `fork` waits for srv: the user's approval window (srv's
+/// `ask_user`, 120 s and 15 s of grace), then an `agent.open` that may
+/// install the worker's CLI (150 s), with room to spare. A wait that ran out
+/// while srv carried on would launch a worker that never gets its brief.
+const FORK_WAIT: std::time::Duration = std::time::Duration::from_secs(360);
+
 /// `fork`: srv forks this agent and opens the worker next to it
 /// (`/api/v1/agent/fork`), then the brief goes to the worker as this
 /// agent's own message, signed with its key, so it arrives host-verified
@@ -73,10 +79,12 @@ async fn fork(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
         user_instruction: str_arg(arguments, "user_instruction").unwrap_or_default(),
     };
     let url = format!("{}/api/v1/agent/fork", cx.local_url.trim_end_matches('/'));
-    // No timeout of ours: srv may be waiting on the user's answer.
+    // Past the shared client's 10 s: srv may wait on the user's answer and
+    // then on the worker's CLI install (FORK_WAIT).
     let resp = cx
         .client
         .post(&url)
+        .timeout(FORK_WAIT)
         .header(AUTH_KEY_HEADER, cx.auth_key)
         .json(&request)
         .send()
@@ -100,9 +108,8 @@ async fn fork(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
 /// The worker's first message: who it reports to, then the leader's brief.
 fn brief_message(leader: &str, brief: &str) -> String {
     format!(
-        "You are a worker of {leader}, started to do the task below. Report to {leader} with Message send          when you finish, get stuck, or need a decision.
-
-{brief}"
+        "You are a worker of {leader}, started to do the task below. Report to {leader} with Message send \
+         when you finish, get stuck, or need a decision.\n\n{brief}"
     )
 }
 
@@ -140,10 +147,12 @@ mod tests {
     #[test]
     fn the_brief_tells_the_worker_who_it_reports_to() {
         let m = brief_message("loap-3", "Implement SPEC_X.");
-        assert!(m.starts_with("You are a worker of loap-3, started to do the task below. Report to loap-3 with Message send"), "{m}");
-        assert!(m.ends_with("
-
-Implement SPEC_X."), "{m}");
+        assert_eq!(
+            m,
+            "You are a worker of loap-3, started to do the task below. Report to loap-3 with Message send \
+             when you finish, get stuck, or need a decision.\n\nImplement SPEC_X."
+        );
+        assert!(!m.contains("  "), "{m}");
     }
 
     #[test]
