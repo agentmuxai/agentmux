@@ -11,6 +11,7 @@ import { modalCovers } from "@/app/element/modal-stack";
 import { gatingNodeIds, tabSwitching } from "@/app/store/tab-reveal";
 import { caretInEditableOutsidePanes, focusedBlockId, userCaretInBlock } from "@/util/focusutil";
 import { userInThisWindow } from "@/app/store/input-owner";
+import { onPaneOverlayReleased, overlayCoversPane } from "@/app/platform/pane-overlay";
 import { getLayoutModelForStaticTab } from "@/layout/index";
 
 /**
@@ -95,6 +96,12 @@ class FocusManager {
         if (caretInEditableOutsidePanes()) return;
         const blockId = active?.focusedNode?.()?.data?.blockId;
         if (blockId == null || modalInTheWay(blockId)) return;
+        // A menu or popover open over a browser pane has the keyboard (the
+        // host handed it back to the app when the hole opened). Giving the
+        // page the keys again, as the window-focus net does ~100 ms after, left
+        // Escape and the arrows going to the page and the menu open. The
+        // caret comes back when the menu is released (installFocusFollowsSelection).
+        if (overlayCoversPane(blockId)) return;
         giveBlockFocus(blockId);
     }
 
@@ -116,6 +123,8 @@ class FocusManager {
         const layoutModel = getLayoutModelForStaticTab();
         const lnode = layoutModel?.focusedNode?.();
         if (lnode?.data?.blockId !== blockId) return;
+        // A menu open over the pane holds the keyboard (see ensureSelectionFocused).
+        if (overlayCoversPane(blockId)) return;
         // A pane that finishes mounting after the user already clicked into
         // one of its inputs must not take the caret back.
         if (userCaretInBlock(blockId)) return;
@@ -272,7 +281,7 @@ function scheduleFocusRetry(blockId: string): void {
             active.id === `${blockId}-dummy-focus` ||
             caretInOtherPane(active, blockId) ||
             (active.closest("[data-blockid]") == null && !caretInEditableOutsidePanes());
-        if (!parked || !windowHasFocus() || modalInTheWay(blockId)) return;
+        if (!parked || !windowHasFocus() || modalInTheWay(blockId) || overlayCoversPane(blockId)) return;
         if (focusBlockTarget(blockId)) return;
         focusRetry = requestAnimationFrame(tick);
     };
@@ -343,6 +352,14 @@ export function installFocusFollowsSelection(): void {
         },
         true
     );
+    // The menu or popover over a browser pane went away: the keyboard it held
+    // goes back to the selection, which the check above deferred.
+    // Only when nothing owns the caret: a closing modal puts it back on its
+    // opener first (modal.tsx), and that stays.
+    onPaneOverlayReleased(() => {
+        const active = document.activeElement;
+        if (active == null || active === document.body) focusManager.ensureSelectionFocused("overlay-closed");
+    });
     const afterReveal = (): void => {
         requestAnimationFrame(() => {
             const active = document.activeElement;

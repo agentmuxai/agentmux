@@ -294,7 +294,7 @@ type MenuBodyProps = MenuLevelProps & {
  */
 const MenuBody = (props: MenuBodyProps): JSX.Element => {
     let menuEl: HTMLDivElement | undefined;
-    usePaneOverlay(() => menuEl);
+    usePaneOverlay(() => menuEl, { keys: true });
 
     const registerFloating = (el: HTMLDivElement) => {
         menuEl = el;
@@ -451,7 +451,7 @@ const SubMenu = (props: SubMenuProps): JSX.Element => {
     // Same rationale as MenuBody above — the submenu also carries
     // `data-pane-overlay`, but macOS/Linux auto-discovery is gated off, so
     // it needs this explicit call to actually occlude the browser pane.
-    usePaneOverlay(() => subMenuEl);
+    usePaneOverlay(() => subMenuEl, { keys: true });
 
     const registerSubMenu = (el: HTMLDivElement) => {
         subMenuEl = el;
