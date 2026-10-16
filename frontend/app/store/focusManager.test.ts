@@ -396,6 +396,25 @@ describe("focusManager", () => {
             expect(giveFocus).toHaveBeenCalledTimes(1);
         });
 
+        it("leaves a caret a closing overlay put back on its opener", () => {
+            document.body.innerHTML = `<button id="opener"></button>`;
+            document.body.querySelector<HTMLButtonElement>("#opener")!.focus();
+            overlayReleased?.();
+            expect(giveFocus).not.toHaveBeenCalled();
+        });
+
+        it("a pending focus retry does not take the keyboard from a menu opened meanwhile", () => {
+            frames = [];
+            // Nothing to type into yet: the retry loop starts.
+            bcmForBlockId = { "block-1": { viewModel: { giveFocus: vi.fn(() => false) } } };
+            focusManager.ensureSelectionFocused("selection");
+            overlayOver = "block-1";
+            const takes = vi.fn(() => true);
+            bcmForBlockId = { "block-1": { viewModel: { giveFocus: takes } } };
+            runFrames(2);
+            expect(takes).not.toHaveBeenCalled();
+        });
+
         it("returns a caret that fell from a pane to <body> to the selection", () => {
             document.body.innerHTML = `<div data-blockid="block-9"><textarea id="t"></textarea></div>`;
             const t = document.body.querySelector<HTMLTextAreaElement>("#t")!;
