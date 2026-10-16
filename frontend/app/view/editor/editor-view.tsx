@@ -28,6 +28,7 @@ import type { EditorMode, EditorViewModel } from "./editor-model";
 import { cursorAtLine } from "./open-at-line";
 import { Button, IconButton, SegmentedControl } from "@/app/element/ui";
 import { previewMedia } from "./editor-preview-media";
+import { bodyFocusTarget } from "./editor-body-focus";
 import { TextViewerSwitch, ViewerHost } from "./viewers/viewer-host";
 import { SaveAsInput } from "./editor-save-as-input";
 import { EDITOR_STATE_FIELDS, editorDocTabs, provideEditorStates, takeMovedEditorState, trackSave } from "./editor-doc-tabs";
@@ -195,8 +196,8 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
             cmView.focus();
             return;
         }
-        const viewer = rootRef?.querySelector<HTMLElement>('.editor-body-wrap [tabindex="0"]');
-        if (viewer) viewer.focus();
+        const body = rootRef ? bodyFocusTarget(rootRef) : null;
+        if (body) body.focus({ preventScroll: true });
         else giveBlockFocus(model.blockId);
     };
 
