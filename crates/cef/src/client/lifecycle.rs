@@ -130,27 +130,6 @@ fn asked_from(d: WindowOpenDisposition) -> super::popup_route::Asked {
     }
 }
 
-/// Asks the window holding browser pane `block_id` to close it, because its
-/// page called `window.close()`. The window closes it as the pane's × does
-/// (`browser-model.ts`), and that close tears the pane down the safe way.
-/// Routed to the pane's own window (a torn-off pane has its own JS context),
-/// like `browser-pane-clicked`.
-#[cfg(target_os = "windows")]
-fn request_pane_close_from_page(state: &crate::state::AppState, block_id: &str) {
-    match state.browser_pane_window_label(block_id) {
-        Some(window_label) => {
-            tracing::info!(block_id = %block_id, window = %window_label, "browser pane's page closed itself; asking its window to close the pane");
-            crate::events::emit_event_to_window(
-                state,
-                &window_label,
-                "browser-pane-close-requested",
-                &serde_json::json!({ "block_id": block_id }),
-            );
-        }
-        None => tracing::warn!(block_id = %block_id, "browser pane's page closed itself, but the pane has no window to close it"),
-    }
-}
-
 /// Where a browser pane's popup went before it could open as a pane, and
 /// still goes when it can't. `open_url_in_default_browser` only spawns a
 /// child process, so it's safe from any thread.
@@ -783,22 +762,8 @@ impl AgentMuxHandler {
                         "[oauth-popup] step 4/4: do_close — Chrome-runtime popup closes itself; nothing to do",
                     ),
                 }
-            } else if self.is_browser_pane {
-                // A browser pane's own page closing itself (`window.close()`).
-                // AgentMux never closes a pane through CEF: `BrowserPaneManager::close`
-                // marks it Closing first, so a pane that is still Live here was
-                // closed by its page. Returning false would let CEF run its
-                // default close, which treats the pane and main as one close
-                // unit (browser_panes/close.rs) and closes the whole window:
-                // a sign-in page's "close this window" quit AgentMux
-                // (docs/retro/RETRO_BROWSER_PANE_WINDOW_CLOSE_QUITS_APP_2026_10_16.md).
-                // Instead the pane's own window closes the pane, as its × does,
-                // which tears it down the safe way.
-                #[cfg(target_os = "windows")]
-                if let Some(block_id) = self.state.block_id_for_browser(b) {
-                    request_pane_close_from_page(&self.state, &block_id);
-                    return true;
-                }
+            } else if self.is_browser_pane && crate::browser_pane::page_close::held_back(&self.state, b) {
+                return true; // its page closed it (browser_pane/page_close.rs)
             }
         }
 
