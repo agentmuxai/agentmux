@@ -595,6 +595,9 @@ declare global {
         /** The window system the host's windows live in (`get_window_system`):
          *  "wayland" is native Wayland, "x11" is X11 or XWayland. */
         getWindowSystem: () => Promise<"wayland" | "x11" | "windows" | "macos">;
+        /** GNOME's window-button layout (`get_window_button_layout`), e.g.
+         *  ":minimize,maximize,close"; null when the desktop has none to read. */
+        getWindowButtonLayout?: () => Promise<string | null>;
         setJsDragActive: (active: boolean) => Promise<void>;
         /** Trigger on-demand migration run (maintenance panel retry).
          *  Returns immediately; progress arrives via `upgrade:migration-event` CEF events. */

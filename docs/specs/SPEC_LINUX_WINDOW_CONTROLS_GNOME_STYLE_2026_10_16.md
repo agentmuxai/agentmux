@@ -90,13 +90,13 @@ When the window loses focus, the buttons dim, as GNOME's backdrop state does. Th
 
 ## 4. Design
 
-- **`window-controls.linux.tsx`:** its own `WindowControlsLeft` and `WindowControlsRight` instead of the re-export. They render the ordered button lists from §3.2: three small components (Minimize, Maximize/Restore, Close) on the same `getApi()` calls as Windows (`minimizeWindow`, `maximizeWindow`, `closeWindow`). Each keeps `data-drag-region="false"`, the `data-testid`s (`window-minimize-btn` etc.), `title` and `aria-label`, so existing tests and automation still find them.
+- **`window-controls.linux.tsx`:** its own `WindowControlsLeft` and `WindowControlsRight` instead of the re-export. They render the ordered button lists from §3.2: three small components (Minimize, Maximize/Restore, Close) on the same `getApi()` calls as Windows (`minimizeWindow`, `maximizeWindow`, `closeWindow`). Each keeps `data-drag-region="false"`, the `data-testid`s (`window-minimize-btn` etc.), `title` and `aria-label`, so existing tests and automation still find them. The buttons are the shared line-style `Button` (`element/ui/`), restyled as caption buttons, because the UI ratchet (`check-ui-primitives.mjs`) allows no new hand-rolled `<button>`.
 - **`window-controls.linux.scss`:** GNOME-style styling as §3.1.
   - Theme-relative colours via `currentColor` and `color-mix`.
   - A `.window-unfocused` class for §3.4.
   - It has none of the Windows file's full-height and negative-margin rules: the round buttons sit inside the 33 px bar.
-- **The layout setting (host):** the Linux host reads `button-layout` once at start, through GIO's GSettings (the `gio` crate). If the schema isn't installed, it gets nothing and the default applies. It does not shell out to `gsettings`. The page gets it from one new host call (`getApi().getWindowButtonLayout()`, like `getWindowSystem()`), and caches it at startup in the module that caches the window system (`frontend/app/host/window-system.ts`).
-- **The maximized state (host):** a new host-to-renderer event, `window-placement-changed { maximized }`, sent from `on_window_bounds_changed` on Linux (and on macOS and Windows if D1 says so), plus a matching `getApi().isWindowMaximized()` for the initial value.
+- **The layout setting (host):** the Linux host reads `button-layout` once, on the first ask, through GSettings in a `libgio-2.0.so.0` loaded at runtime (`commands/desktop_settings.rs`, the way `app/gl_probe.rs` loads EGL), so there is no new build dependency and a system without GLib just gets nothing. The schema and key are looked up first, because `g_settings_new` aborts on an unknown schema. It does not shell out to `gsettings`. The page gets the raw string from one new host call (`getApi().getWindowButtonLayout()`, like `getWindowSystem()`), parses it (`frontend/app/window/window-button-layout.ts`), and loads it at startup from initGlobal on Linux.
+- **The maximized state:** the page asks the host's `is_window_maximized { label }` query (added for floaters in #5037) on mount and after the window's resizes go quiet for 150 ms. A maximize or restore always resizes the window, so this needs no new host event. *(Changed while implementing: the first draft proposed a `window-placement-changed` event from `on_window_bounds_changed`.)* D1 for Windows is left to a follow-up: the query already answers there with `IsZoomed`.
 - **Unchanged:**
   - the Windows and macOS files
   - the header's drag behaviour, double-click and context menu
@@ -113,7 +113,7 @@ When the window loses focus, the buttons dim, as GNOME's backdrop state does. Th
 6. Clicks call `minimizeWindow`, `maximizeWindow` and `closeWindow` once each.
 7. Window blur adds the unfocused class, and focus removes it.
 
-**Host (cargo test):** layout parsing, including empty sides, unknown names, duplicates and whitespace.
+**Layout parsing (vitest):** empty sides, unknown names, duplicates, whitespace, a layout without Close, and nothing to read.
 
 **Live on charlie (GNOME Wayland), then X11/XWayland:**
 - Screenshot the title bar beside a native GNOME app: same shape, size, spacing and placement.

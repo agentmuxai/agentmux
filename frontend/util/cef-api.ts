@@ -568,6 +568,9 @@ export function buildCefApi(): AppApi {
         getWindowSystem: async () => {
             return await invokeCommand<"wayland" | "x11" | "windows" | "macos">("get_window_system");
         },
+        getWindowButtonLayout: async () => {
+            return await invokeCommand<string | null>("get_window_button_layout");
+        },
     };
 
     return api;
