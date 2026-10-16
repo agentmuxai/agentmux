@@ -4,15 +4,17 @@
 import { describe, expect, it } from "vitest";
 import {
     actualSizeScale,
+    atMaxZoom,
     clampPan,
+    clickSteps,
     FIT,
     maxScale,
     panBy,
     showsPixels,
-    toggleZoom,
     wheelFactor,
     zoomAt,
     zoomPercent,
+    zoomStep,
     type ZoomBox,
 } from "./image-zoom";
 
@@ -61,15 +63,58 @@ describe("media zoom", () => {
         expect(clampPan({ scale: 1.2, x: 30, y: 30 }, box)).toEqual({ scale: 1.2, x: 30, y: 0 });
     });
 
-    it("double-click goes to actual size at the cursor, and back to fit", () => {
+    it("goes to actual size at 100%", () => {
         expect(actualSizeScale(box)).toBe(2.5);
-        const z = toggleZoom(FIT, { x: 0, y: 0 }, box);
-        expect(z.scale).toBe(2.5);
-        expect(zoomPercent(z, box)).toBe(100);
-        expect(toggleZoom(z, { x: 0, y: 0 }, box)).toEqual(FIT);
-        // An image already at its own size doubles instead.
-        const small = { ...box, naturalWidth: 800, naturalHeight: 400 };
-        expect(toggleZoom(FIT, { x: 0, y: 0 }, small).scale).toBe(2);
+        expect(zoomPercent(zoomAt(FIT, 2.5, { x: 0, y: 0 }, box), box)).toBe(100);
+    });
+
+    it("clicks through five even steps from fit to the maximum", () => {
+        const steps = clickSteps(box);
+        expect(steps).toHaveLength(6);
+        expect(steps[0]).toBe(1);
+        expect(steps[5]).toBe(80);
+        // Each step the same factor: 80^(1/5), about 2.4.
+        for (let k = 1; k < 6; k++) expect(steps[k] / steps[k - 1]).toBeCloseTo(80 ** 0.2);
+        // An image the size of the pane: 32×, 2× a step.
+        const pane = { ...box, naturalWidth: 800, naturalHeight: 400 };
+        expect(clickSteps(pane)[1]).toBeCloseTo(2);
+    });
+
+    it("five clicks reach the deepest zoom, and five back reach fit", () => {
+        let z = FIT;
+        for (let k = 1; k <= 5; k++) {
+            z = zoomStep(z, 1, { x: 0, y: 0 }, box);
+            expect(z.scale).toBeCloseTo(clickSteps(box)[k]);
+        }
+        expect(atMaxZoom(z, box)).toBe(true);
+        expect(zoomStep(z, 1, { x: 0, y: 0 }, box)).toBe(z);
+        for (let k = 4; k >= 0; k--) {
+            z = zoomStep(z, -1, { x: 0, y: 0 }, box);
+            expect(z.scale).toBeCloseTo(clickSteps(box)[k]);
+        }
+        expect(z).toEqual(FIT);
+        expect(atMaxZoom(z, box)).toBe(false);
+        expect(zoomStep(FIT, -1, { x: 0, y: 0 }, box)).toBe(FIT);
+    });
+
+    it("from between steps, goes to the next step up or down", () => {
+        const [, s1, s2] = clickSteps(box);
+        const between = { scale: (s1 + s2) / 2, x: 0, y: 0 };
+        expect(zoomStep(between, 1, { x: 0, y: 0 }, box).scale).toBeCloseTo(s2);
+        expect(zoomStep(between, -1, { x: 0, y: 0 }, box).scale).toBeCloseTo(s1);
+        // A rounding error off a step counts as on it: the click moves a whole step.
+        const onStep = { scale: s1 * (1 + 1e-9), x: 0, y: 0 };
+        expect(zoomStep(onStep, 1, { x: 0, y: 0 }, box).scale).toBeCloseTo(s2);
+        expect(zoomStep(onStep, -1, { x: 0, y: 0 }, box)).toEqual(FIT);
+    });
+
+    it("a click keeps the point under the cursor where it is", () => {
+        const cursor = { x: 150, y: 60 };
+        const before = { scale: 2, x: 40, y: -20 };
+        const z = zoomStep(before, 1, cursor, box);
+        expect(z.scale).toBeGreaterThan(before.scale);
+        expect((cursor.x - z.x) / z.scale).toBeCloseTo((cursor.x - before.x) / before.scale);
+        expect((cursor.y - z.y) / z.scale).toBeCloseTo((cursor.y - before.y) / before.scale);
     });
 
     it("shows pixels as squares once each is over 2 screen pixels", () => {

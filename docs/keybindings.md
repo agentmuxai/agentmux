@@ -175,7 +175,8 @@ Gestures that aren't plain keys: modifier + mouse, double- and middle-click, dra
 | Add another cursor | in an editor | ⌘ + click | Ctrl + click |
 | Make a column (block) selection | in an editor | ⌥ + drag | Alt + drag |
 | Select the next match of the selected text | in an editor | ⌘ + D | Ctrl + D |
-| Zoom around the pointer / pan / switch between fit and zoomed; + − 0 1 and the arrows too; [ ] the previous or next image in the folder; B the background | on an image in the Editor | scroll or drag or double-click | scroll or drag or double-click |
+| Zoom in a step about the pointer / zoom out a step / pan / zoom smoothly; + − 0 1 and the arrows too; [ ] the previous or next image in the folder; B the background | on an image in the Editor | click or ⌥ + click or drag or scroll | click or Alt + click or drag or scroll |
+| Zoom out a step about the pointer | on an image in the Editor | — | Ctrl + click |
 
 ### Files
 

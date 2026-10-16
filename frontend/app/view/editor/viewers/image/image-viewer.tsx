@@ -3,31 +3,36 @@
 
 /**
  * The Editor's image viewer: moved from the retired Media pane with
- * its zoom and pan unchanged — the wheel zooms about the cursor (Ctrl+wheel
- * stays pane zoom), a drag pans, double-click toggles fit and actual size,
- * `+ - 0 1` and the arrows, pixel squares past 2×, the zoom kept across a
- * same-size re-render. Added: a toolbar (fit, 100%, background), the image's
- * size and type, and `[` / `]` for the previous and next image in the folder.
- * SVG is only ever an `<img>` from a blob, so its scripts never run.
+ * its zoom and pan — the wheel zooms about the cursor (Ctrl+wheel
+ * stays pane zoom), a drag pans, `+ - 0 1` and the arrows, pixel squares
+ * past 2×, the zoom kept across a same-size re-render. Added: a toolbar (fit,
+ * 100%, background), the image's size and type, and `[` / `]` for the
+ * previous and next image in the folder. SVG is only ever an `<img>` from a
+ * blob, so its scripts never run.
  * docs/specs/SPEC_EDITOR_REVAMP_UNIFIED_VIEWERS_2026_10_15.md §4.4.2, §4.13.
+ * A click zooms a step in about the pointer, Ctrl+click (⌥+click on macOS)
+ * or Alt+click a step out; double-click no longer toggles fit.
+ * docs/specs/SPEC_EDITOR_TREE_KEYBOARD_ICONS_AND_CLICK_ZOOM_2026_10_16.md §7.
  */
 
 import { formatBytes } from "@/app/element/local-media";
 import { Button, IconButton } from "@/app/element/ui";
 import { DURATION_QUICK_MS, EASE_STANDARD } from "@/app/motion/tokens";
+import { isMacOS } from "@/util/platformutil";
 import { createEffect, createSignal, on, onCleanup, onMount, Show, type JSX } from "solid-js";
 import { createFileBytes } from "../file-bytes";
 import { ViewerBar, type ViewerBarProps } from "../viewer-bar";
 import {
     actualSizeScale,
+    atMaxZoom,
     clampPan,
     FIT,
     panBy,
     showsPixels,
-    toggleZoom,
     wheelFactor,
     zoomAt,
     zoomPercent,
+    zoomStep,
     type ZoomBox,
     type ZoomState,
 } from "./image-zoom";
@@ -36,6 +41,15 @@ import "./image-viewer.scss";
 export type ImageBackground = "dark" | "light" | "checker";
 
 const BACKGROUNDS: ImageBackground[] = ["checker", "dark", "light"];
+
+/** A press that moves less than this many pixels is a click, not a pan. */
+const CLICK_SLOP_PX = 4;
+
+/** The modifier that makes a click zoom out: Alt (⌥) everywhere, and Ctrl
+ *  too except on macOS, where Ctrl+click is a right-click. */
+function isZoomOutModifier(e: { altKey: boolean; ctrlKey: boolean }): boolean {
+    return e.altKey || (e.ctrlKey && !isMacOS());
+}
 
 /** The background an image starts on: a checkerboard for formats that can be
  *  transparent, the pane's own for those that can't. */
@@ -68,6 +82,8 @@ export function ImageViewer(props: ImageViewerProps): JSX.Element {
     const [ready, setReady] = createSignal(false);
     const [zoom, setZoom] = createSignal<ZoomState>(FIT);
     const [dragging, setDragging] = createSignal(false);
+    // The zoom-out modifier is down: the cursor turns to zoom-out.
+    const [zoomOutHeld, setZoomOutHeld] = createSignal(false);
     const [natural, setNatural] = createSignal<{ w: number; h: number } | null>(null);
     const [background, setBackground] = createSignal<ImageBackground>(defaultBackground(props.mime));
     // A new image fades in once it has decoded.
@@ -115,28 +131,45 @@ export function ImageViewer(props: ImageViewerProps): JSX.Element {
         setZoom(zoomAt(zoom(), wheelFactor(e.deltaY, e.deltaMode), fromCentre(e.clientX, e.clientY), box));
     };
 
-    let dragFrom: { x: number; y: number } | null = null;
+    // A press is a click until it moves CLICK_SLOP_PX; from then on it pans
+    // (when zoomed in), and its release doesn't zoom.
+    let press: { x: number; y: number; lastX: number; lastY: number; panning: boolean } | null = null;
     const onPointerDown = (e: PointerEvent) => {
-        if (e.button !== 0 || zoom().scale <= 1) return;
+        setZoomOutHeld(isZoomOutModifier(e));
+        // On macOS Ctrl+click is a right-click.
+        if (e.button !== 0 || (e.ctrlKey && isMacOS())) return;
+        press = { x: e.clientX, y: e.clientY, lastX: e.clientX, lastY: e.clientY, panning: false };
+        // At fit the image stays draggable out of the pane: a native drag
+        // cancels the pointer, so its release isn't a click.
+        if (zoom().scale <= 1) return;
         e.preventDefault();
         (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-        dragFrom = { x: e.clientX, y: e.clientY };
-        setDragging(true);
     };
     const onPointerMove = (e: PointerEvent) => {
+        setZoomOutHeld(isZoomOutModifier(e));
+        if (!press) return;
+        // Released outside the image, with nothing capturing it.
+        if (e.buttons === 0) return endPress();
+        if (!press.panning && Math.hypot(e.clientX - press.x, e.clientY - press.y) < CLICK_SLOP_PX) return;
+        press.panning = true;
         const box = zoomBox();
-        if (!dragFrom || !box) return;
+        if (!box || zoom().scale <= 1) return;
+        setDragging(true);
         const k = screenScale();
-        setZoom(panBy(zoom(), (e.clientX - dragFrom.x) / k, (e.clientY - dragFrom.y) / k, box));
-        dragFrom = { x: e.clientX, y: e.clientY };
+        setZoom(panBy(zoom(), (e.clientX - press.lastX) / k, (e.clientY - press.lastY) / k, box));
+        press.lastX = e.clientX;
+        press.lastY = e.clientY;
     };
-    const endDrag = () => {
-        dragFrom = null;
-        setDragging(false);
-    };
-    const onDoubleClick = (e: MouseEvent) => {
+    const onPointerUp = (e: PointerEvent) => {
+        const click = press && !press.panning;
+        endPress();
         const box = zoomBox();
-        if (box) setZoom(toggleZoom(zoom(), fromCentre(e.clientX, e.clientY), box));
+        if (!click || !box || !showsImage()) return;
+        setZoom(zoomStep(zoom(), isZoomOutModifier(e) ? -1 : 1, fromCentre(e.clientX, e.clientY), box));
+    };
+    const endPress = () => {
+        press = null;
+        setDragging(false);
     };
     const fit = () => setZoom(FIT);
     const actualSize = () => {
@@ -192,6 +225,18 @@ export function ImageViewer(props: ImageViewerProps): JSX.Element {
         // A real listener, not passive, so it can keep the wheel from scrolling.
         contentRef?.addEventListener("wheel", onWheel, { passive: false });
         onCleanup(() => contentRef?.removeEventListener("wheel", onWheel));
+        // The zoom-out cursor follows the modifier even while the pointer
+        // rests, so it listens on the window, not only the image.
+        const onModifier = (e: KeyboardEvent) => setZoomOutHeld(isZoomOutModifier(e));
+        const onBlur = () => setZoomOutHeld(false);
+        window.addEventListener("keydown", onModifier);
+        window.addEventListener("keyup", onModifier);
+        window.addEventListener("blur", onBlur);
+        onCleanup(() => {
+            window.removeEventListener("keydown", onModifier);
+            window.removeEventListener("keyup", onModifier);
+            window.removeEventListener("blur", onBlur);
+        });
         // A resized pane keeps the image in reach.
         if (typeof ResizeObserver !== "undefined" && contentRef) {
             const resize = new ResizeObserver(() => {
@@ -265,7 +310,11 @@ export function ImageViewer(props: ImageViewerProps): JSX.Element {
                         ref={imgRef}
                         class="image-viewer-img"
                         classList={{
-                            "image-viewer-zoomed": zoom().scale > 1,
+                            "image-viewer-deepest": (() => {
+                                const box = zoomBox();
+                                return !!box && atMaxZoom(zoom(), box);
+                            })(),
+                            "image-viewer-zoom-out": zoomOutHeld(),
                             "image-viewer-dragging": dragging(),
                             "image-viewer-pixels": (() => {
                                 const box = zoomBox();
@@ -281,11 +330,10 @@ export function ImageViewer(props: ImageViewerProps): JSX.Element {
                         src={bytes.url()!}
                         draggable={zoom().scale <= 1}
                         onLoad={onImageLoad}
-                        onDblClick={onDoubleClick}
                         onPointerDown={onPointerDown}
                         onPointerMove={onPointerMove}
-                        onPointerUp={endDrag}
-                        onPointerCancel={endDrag}
+                        onPointerUp={onPointerUp}
+                        onPointerCancel={endPress}
                         onError={() => bytes.setError("Couldn't display the image (unsupported format or a damaged file).")}
                     />
                 </Show>
