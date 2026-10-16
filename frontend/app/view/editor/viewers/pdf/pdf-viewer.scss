@@ -1,0 +1,81 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+//
+// The Editor's PDF viewer (pdf-viewer.tsx). pdf.js's own stylesheet lays out
+// the pages; here, the scroll container it needs (absolutely positioned,
+// scrolling), the theme around the pages, and the toolbar's inputs. The
+// pages stay white: that is the document. "Invert" is for reading in a dark
+// theme, off by default.
+
+@use "../../../../mixins.scss";
+
+.pdf-viewer-body {
+    position: relative;
+    flex: 1 1 auto;
+    min-height: 0;
+    background: var(--block-bg-color);
+}
+
+.pdf-viewer-container {
+    position: absolute;
+    inset: 0;
+    overflow: auto;
+
+    &:focus {
+        outline: none;
+    }
+
+    &:focus-visible {
+        @include mixins.focus-ring;
+    }
+
+    &.pdf-viewer-inverted .page canvas {
+        filter: invert(0.9) hue-rotate(180deg);
+    }
+}
+
+.pdf-viewer-page-input {
+    width: 3.5em;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+}
+
+.pdf-viewer-find {
+    width: 12em;
+}
+
+.pdf-viewer-page-input,
+.pdf-viewer-find {
+    padding: 1px var(--space-1);
+    color: var(--main-text-color);
+    background: transparent;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+}
+
+.pdf-viewer-of,
+.pdf-viewer-scale,
+.pdf-viewer-matches {
+    color: var(--secondary-text-color);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.pdf-viewer-scale {
+    min-width: 3.5em;
+    text-align: center;
+}
+
+.pdf-viewer-password {
+    flex-direction: column;
+    gap: var(--space-2);
+
+    input {
+        width: 16em;
+        padding: var(--space-1) var(--space-2);
+        color: var(--main-text-color);
+        background: transparent;
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-sm);
+    }
+}
