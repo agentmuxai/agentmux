@@ -171,10 +171,6 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
             "/agentmux/reactive/transcript",
             get(reactive::handle_reactive_transcript),
         )
-        .route(
-            "/agentmux/reactive/supervisor-decision",
-            post(reactive::handle_reactive_supervisor_decision),
-        )
         // SPEC_AGENT_HISTORY_SEARCH_2026_09_17.md — search an agent's own past
         // conversations on disk. Distinct from `/transcript`, which is the LIVE
         // session's tail only. Full-auth route (not in the LAN-scoped set):

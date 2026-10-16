@@ -4,9 +4,7 @@
 // Warden — Audit section. The jekt-injection audit feed lifted out of the
 // original monolithic warden.tsx's Host section into its own section
 // (it was never Host-specific — every jekt, from any
-// tier, lands here). Also renders Supervisor's continue/decline decisions
-// once those exist (entries with `outcome` set) — see
-// docs/analysis/ANALYSIS_WARDEN_AUTO_CONTROLLER_CONTINUATION_WATCHER_2026_08_12.md.
+// tier, lands here), plus fleet and pane actions (with their `reason`).
 
 import { createMemo, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
 import { useTick } from "@/app/hook/useTick";
@@ -44,7 +42,7 @@ export const WardenAuditManager = (): JSX.Element => {
 
     return (
         <div class="warden-manager-body">
-            <p class="warden-manager-summary">Every jekt delivery + Supervisor decision, most recent first</p>
+            <p class="warden-manager-summary">Every jekt delivery and fleet action, most recent first</p>
             <Show when={error()}>
                 <div class="warden-manager-error">⚠ {error()}</div>
             </Show>
@@ -59,27 +57,11 @@ export const WardenAuditManager = (): JSX.Element => {
                 <ul class="warden-audit-feed">
                     <For each={audit()}>
                         {(entry) => {
-                            // Supervisor rows get styling by their own outcome, not a
-                            // blanket "outcome set → neutral" rule — a "declined" entry
-                            // has success=true (nothing failed, it just chose not to
-                            // act) and shouldn't read as an error, but "nudge_failed"
-                            // means delivery genuinely failed and must read as one.
-                            const statusVariant = () => {
-                                if (entry.outcome === "nudge_sent") return "nudge";
-                                if (entry.outcome === "nudge_declined") return "declined";
-                                if (entry.outcome === "nudge_failed") return "err";
-                                return entry.success ? "ok" : "err";
-                            };
-                            const statusLabel = () => {
-                                if (entry.outcome === "nudge_sent") return "nudged";
-                                if (entry.outcome === "nudge_declined") return "declined";
-                                if (entry.outcome === "nudge_failed") return "nudge failed";
-                                return entry.success ? "ok" : "err";
-                            };
+                            const status = () => (entry.success ? "ok" : "err");
                             return (
                                 <li
                                     class="warden-audit-row"
-                                    data-variant={statusVariant()}
+                                    data-variant={status()}
                                 >
                                     <span class="warden-audit-time">
                                         {formatAge(ageMs(entry.timestamp, now()))} ago
@@ -91,21 +73,13 @@ export const WardenAuditManager = (): JSX.Element => {
                                         {" → "}
                                         <span class="warden-manager-mono">{entry.target_agent}</span>
                                     </span>
-                                    <span class={`warden-audit-status warden-audit-status--${statusVariant()}`}>
-                                        {statusLabel()}
+                                    <span class={`warden-audit-status warden-audit-status--${status()}`}>
+                                        {status()}
                                     </span>
-                                    <Show
-                                        when={entry.outcome != null}
-                                        fallback={<span class="warden-audit-bytes">{entry.message_length}b</span>}
-                                    >
-                                        <span class="warden-audit-bytes" />
-                                    </Show>
-                                    {/* codex P2 / reagent P1 on PR #3196: this used to require
-                                        entry.outcome != null too — a condition written for
-                                        Supervisor-nudge entries specifically. ClosePane's
-                                        caller-supplied `reason` (fleet-tier close) always has
-                                        outcome=None, so it never rendered — reason alone is
-                                        enough to show it, regardless of which feature set it. */}
+                                    <span class="warden-audit-bytes">{entry.message_length}b</span>
+                                    {/* A caller-supplied `reason` (e.g. ClosePane's) shows on
+                                        its own; outcome is unset for fleet actions (codex P2 /
+                                        reagent P1 on PR #3196). */}
                                     <Show when={entry.reason} fallback={
                                         <Show when={!entry.success && entry.error_message}>
                                             <span class="warden-audit-error">{entry.error_message}</span>

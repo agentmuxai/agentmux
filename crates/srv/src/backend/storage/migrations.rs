@@ -147,6 +147,9 @@ pub const SHARED_STORE_SCHEMA_VERSION: i64 = 12;
 ///        server-side consecutive-nudge ceiling). Defaults to 0 (opt-in
 ///        required — fail-by-default, same posture as use_ambient_login).
 ///        See docs/analysis/ANALYSIS_WARDEN_AUTO_CONTROLLER_CONTINUATION_WATCHER_2026_08_12.md.
+///        RETIRED: the Warden Supervisor was removed and nothing reads or
+///        writes this column any more. It stays in the schema (older builds
+///        share the data dir and still select it); new rows get DEFAULT 0.
 ///   v18 — db_agent_jekt_keys: per-agent HMAC-SHA256 signing key for
 ///        host-tier jekt sender verification. One row per agent_id, minted
 ///        on first use and injected into that agent's own MCP server
@@ -749,8 +752,9 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
             -- backend (schema v15) — see db_agent_definitions' column doc.
             model_vendor_base_url TEXT NOT NULL DEFAULT '',
 
-            -- Warden Supervisor auto-continue opt-in (schema v17) — see
-            -- db_agent_definitions' column doc.
+            -- Warden Supervisor auto-continue opt-in (schema v17). RETIRED:
+            -- unused since the Warden Supervisor was removed; kept because
+            -- older builds sharing this data dir still select it.
             auto_continue_enabled INTEGER NOT NULL DEFAULT 0,
 
             -- The DEFINITION's own dedicated ABF bundle (schema v19) —
@@ -1394,9 +1398,9 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
         // object of {provider_id: content} variants, additive to the
         // existing flat `instructions` column.
         "ALTER TABLE db_bundles ADD COLUMN instructions_by_provider TEXT NOT NULL DEFAULT '{}'",
-        // v17: Warden Supervisor auto-continue opt-in (fail-by-default,
-        // same posture as use_ambient_login) — see
-        // ANALYSIS_WARDEN_AUTO_CONTROLLER_CONTINUATION_WATCHER_2026_08_12.md.
+        // v17: Warden Supervisor auto-continue opt-in. RETIRED: unused since
+        // the Warden Supervisor was removed; the ALTER stays so a pre-v17 DB
+        // still gets the column older builds sharing the data dir select.
         "ALTER TABLE db_agents ADD COLUMN auto_continue_enabled INTEGER NOT NULL DEFAULT 0",
         // v19: the agent's own dedicated ABF bundle, set once at creation.
         // db_agents gets a SEPARATE default_memory_id column (not the

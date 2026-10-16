@@ -34,7 +34,6 @@ function makeAgent(overrides: Partial<AgentDefinition> = {}): AgentDefinition {
         container_name: "",
         use_ambient_login: 0,
         model_vendor_base_url: "",
-        auto_continue_enabled: 0,
         memory_id: "",
         conversation_visibility: "",
         ...overrides,

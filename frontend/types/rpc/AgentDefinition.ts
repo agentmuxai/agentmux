@@ -96,15 +96,6 @@ use_ambient_login: number,
  */
 model_vendor_base_url: string, 
 /**
- * Per-agent opt-in: when non-zero, a running Warden Supervisor watcher
- * agent is permitted to auto-continue this agent's session on
- * turn-end (subject to a server-side consecutive-nudge ceiling).
- * Default 0 = opt-in required. Schema v17. Toggled from the Warden Supervisor
- * panel. See
- * docs/analysis/ANALYSIS_WARDEN_AUTO_CONTROLLER_CONTINUATION_WATCHER_2026_08_12.md.
- */
-auto_continue_enabled: number, 
-/**
  * The agent's own dedicated ABF bundle (`db_bundles.id`). Distinct from
  * `AgentInstance.memory_id` (a specific *launch*'s bundle, which can
  * still be pointed at a different bundle on purpose — this is just the
