@@ -50,6 +50,7 @@ describe("viewerOptions", () => {
     it("offers the default first, then the others", () => {
         expect(viewerOptions(probe("svg"))).toEqual(["image", "text", "info"]);
         expect(viewerOptions(probe("video"))).toEqual(["media", "info"]);
+        expect(viewerOptions(probe("image"))).toEqual(["image", "info", "text"]);
         expect(viewerOptions(probe("other"))).toEqual(["info", "text"]);
         // Too large for the editor: no text option.
         expect(viewerOptions(probe("other", TEXT_MAX_BYTES + 1))).toEqual(["info"]);

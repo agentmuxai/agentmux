@@ -41,7 +41,8 @@ export function viewerOptions(probe: FileProbe): ViewerId[] {
         case "svg":
             return textOk ? ["image", "text", "info"] : ["image", "info"];
         case "image":
-            return ["image", "info"];
+            // Text last: a way out when the probe was wrong about a file.
+            return textOk ? ["image", "info", "text"] : ["image", "info"];
         case "audio":
         case "video":
             return ["media", "info"];

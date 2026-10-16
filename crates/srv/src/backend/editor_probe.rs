@@ -106,9 +106,13 @@ pub fn probe_bytes(head: &[u8], ext: Option<&str>, zip_kind: impl FnOnce() -> Op
     let binary = |kind: &'static str, mime: &'static str| Probe { kind, mime, text: None, binary_reason: None };
 
     // 1. Images by magic. Chromium decodes these itself; TIFF and HEIC it
-    //    doesn't (they get the info card until a converter exists).
+    //    doesn't (they get the info card until a converter exists). BMP's
+    //    "BM" and GIF's "GIF8" are too short to trust alone: a text file can
+    //    begin with them, so those need their full header.
     match process::sniff(head) {
         Sniffed::Image(ImageFormat::Tiff) => return binary("image_file", "image/tiff"),
+        Sniffed::Image(ImageFormat::Bmp) if !is_bmp(head) => {}
+        Sniffed::Image(ImageFormat::Gif) if !(head.starts_with(b"GIF87a") || head.starts_with(b"GIF89a")) => {}
         Sniffed::Image(f) => return binary("image", image_mime(f, head)),
         Sniffed::Heic => return binary("image_file", "image/heic"),
         Sniffed::Avif => return binary("image", "image/avif"),
@@ -125,8 +129,12 @@ pub fn probe_bytes(head: &[u8], ext: Option<&str>, zip_kind: impl FnOnce() -> Op
     if head.starts_with(&[0xFF, 0x0A]) || head.starts_with(b"\0\0\0\x0CJXL \r\n\x87\n") {
         return binary("image_file", "image/jxl");
     }
-    // A PDF header may follow up to 1 KB of junk (ISO 32000 §7.5.2, in practice).
-    if head[..head.len().min(1024)].windows(5).any(|w| w == b"%PDF-") {
+    // A PDF starts with its header. Readers also accept up to 1 KB of junk
+    // before it, but a text file mentioning "%PDF-" near its top is text:
+    // the late header counts only when the bytes aren't text.
+    if head.starts_with(b"%PDF-")
+        || (text_info(head).is_err() && head[..head.len().min(1024)].windows(5).any(|w| w == b"%PDF-"))
+    {
         return binary("pdf", "application/pdf");
     }
     if head.starts_with(b"SQLite format 3\0") {
@@ -239,6 +247,14 @@ fn image_mime(f: ImageFormat, head: &[u8]) -> &'static str {
     }
 }
 
+/// A BMP file header: "BM", then a DIB header whose size (at offset 14) is
+/// one of the known versions (OS/2 1.x, Windows 3.x, the V2–V5 extensions).
+fn is_bmp(head: &[u8]) -> bool {
+    head.len() >= 18
+        && head.starts_with(b"BM")
+        && matches!(u32::from_le_bytes([head[14], head[15], head[16], head[17]]), 12 | 16 | 40 | 52 | 56 | 64 | 108 | 124)
+}
+
 /// An animated PNG has an `acTL` chunk before its first `IDAT`.
 fn is_apng(head: &[u8]) -> bool {
     let actl = head.windows(4).position(|w| w == b"acTL");
@@ -333,12 +349,22 @@ mod tests {
         assert_eq!(p(&[0xFF, 0xD8, 0xFF, 0xE0, 0, 0x10], Some("png")).mime, "image/jpeg");
         assert_eq!(p(b"GIF89a\x01\0\x01\0", None).mime, "image/gif");
         assert_eq!(p(b"RIFF\0\0\0\0WEBPVP8 ", None).mime, "image/webp");
-        assert_eq!(p(b"BM\0\0\0\0\0\0\0\0\0\0\0\0\0\0", None).mime, "image/bmp");
+        assert_eq!(p(b"BM\x36\0\0\0\0\0\0\0\x36\0\0\0\x28\0\0\0\x01\0", None).mime, "image/bmp");
         assert_eq!(p(&[0, 0, 1, 0, 1, 0, 16, 16], Some("ico")).mime, "image/x-icon");
         assert_eq!(p(b"\0\0\0\x1cftypavif\0\0\0\0", None).kind, "image");
         assert_eq!(p(b"\0\0\0\x18ftypheic\0\0\0\0", None).kind, "image_file");
         assert_eq!(p(b"II*\0\x08\0\0\0", None).kind, "image_file");
         assert_eq!(p(&[0xFF, 0x0A, 0xFA], None).mime, "image/jxl");
+    }
+
+    #[test]
+    fn text_starting_like_a_weak_magic_stays_text() {
+        // "BM" and "GIF8" alone don't make an image (muxreview P1 on #5016).
+        assert_eq!(p(b"BMW owners club minutes, 2026\n", Some("txt")).kind, "text");
+        assert_eq!(p(b"GIF8 notes: the format\n", Some("md")).kind, "text");
+        // "%PDF-" in text is text; at the start, or after binary junk, it's a PDF.
+        assert_eq!(p(b"// parses files that start with %PDF-1.7\n", Some("rs")).kind, "text");
+        assert_eq!(p(b"\0\x01junk\0%PDF-1.4\n", None).kind, "pdf");
     }
 
     #[test]
@@ -358,7 +384,6 @@ mod tests {
     #[test]
     fn documents_and_containers() {
         assert_eq!(p(b"%PDF-1.7\n%\xe2\xe3\xcf\xd3\n", None).kind, "pdf");
-        assert_eq!(p(b"junk junk\r\n%PDF-1.4\n", None).kind, "pdf");
         assert_eq!(p(b"SQLite format 3\0\x10\0", Some("db")).kind, "sqlite");
         assert_eq!(p(b"wOF2\0\x01\0\0", None).kind, "font");
         assert_eq!(p(&[0, 1, 0, 0, 0, 0x10], Some("ttf")).kind, "font");
