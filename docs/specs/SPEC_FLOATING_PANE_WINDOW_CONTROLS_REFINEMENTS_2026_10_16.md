@@ -114,7 +114,7 @@ No change to the host: `toggle_floating_maximize` already restores to the stashe
 
   It never calls `SW_RESTORE`, so the reducer cannot desync, which was the reason for the exclusion. The drag-to-top snap stays excluded for floaters (out of scope).
 - **Linux.** Expected to need no geometry change: the compositor un-maximizes a natively maximized window on move. The work is §4.2's report, so the icon and meta follow. The live check must confirm it on GNOME Wayland and X11/XWayland. If a compositor does not un-maximize on move, the fallback is to `restore()` in the renderer's drag-threshold handler before sending `start_window_drag`. That gets no grab-point preservation on native Wayland, since no positions are known there.
-- **macOS.** In `run_macos_native_drag_loop`, if the window is maximized at the first movement past the threshold, call `window.restore()` and recompute `origin` from the restored bounds, placed under the cursor with `unmaximize_drag_origin`, before the loop moves it. Then §4.2's report updates the meta. This needs a Mac to build and check. If no Mac is available, ship Windows and Linux first and leave macOS to whoever has one.
+- **macOS.** In `run_macos_native_drag_loop`, if the window is maximized at the first movement past the threshold, call `window.restore()` and recompute `origin` from the restored bounds, placed under the cursor with `unmaximize_drag_origin`, before the loop moves it. Then §4.2's report updates the meta. This needs a Mac to build and check: Clare on starpower (an Apple-silicon Mac) does both, and first reports what today's build does, so the change is only made if the bug is real there.
 
 ### 4.5 Double-click (optional, D4)
 
@@ -149,7 +149,7 @@ In a floater, the header's `onDblClick` calls the same host toggle as the button
 | D2 | Where the icon reads the placement from | the block meta `pane:floating_placement`, plus the two new writers in §4.2; a direct host event only if the round trip shows |
 | D3 | "Restore" title, or Windows' "Restore Down"? | "Restore": short, and what docked panes already say |
 | D4 | Double-click on a floater's header toggles maximize, like a title bar? | yes, small and expected; it can ship separately if you'd rather keep this change tight |
-| D5 | macOS drag-to-restore needs a Mac | do Windows and Linux in this change, and macOS in a follow-up unless a Mac is available |
+| D5 | macOS drag-to-restore needs a Mac | in this change: Clare on starpower checks it on a Mac (decided 2026-10-16) |
 
 ## 7. Not covered
 
