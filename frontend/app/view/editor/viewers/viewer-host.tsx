@@ -19,6 +19,7 @@ import { createFollowFolder } from "./follow-folder";
 import { AvViewer } from "./media/av-viewer";
 import { ImageViewer } from "./image/image-viewer";
 import { InfoCard } from "./info/info-card";
+import { PdfViewer } from "./pdf/pdf-viewer";
 import { ViewerBar, type ViewerBarProps } from "./viewer-bar";
 import { isProgramPath, TEXT_MAX_BYTES, type ViewerId } from "./viewer-choice";
 import { droppedFileOf, isDroppedPath, neighbourInFolder } from "./viewer-tabs";
@@ -103,6 +104,11 @@ function ViewerFor(props: { model: EditorViewModel; tabId: string; viewer: Viewe
         onOpenWithSystem: dropped() || isProgramPath(path()) ? undefined : openWithSystem,
     });
     const mime = () => probe()?.mime || file()?.type || "";
+    // A PDF's external link: a Browser pane beside this one, never the app.
+    const openLink = (url: string) =>
+        void RpcApi.PaneOpenCommand(TabRpcClient, { view: "browser", url, split_direction: "right", split_reference_block_id: model.blockId }, {}).catch(
+            () => {}
+        );
 
     return (
         <Switch>
@@ -127,6 +133,16 @@ function ViewerFor(props: { model: EditorViewModel; tabId: string; viewer: Viewe
                     bar={bar()}
                 />
             </Match>
+            <Match when={props.viewer === "pdf"}>
+                <PdfViewer
+                    path={dropped() ? "" : path()}
+                    file={file()}
+                    revision={revision()}
+                    size={probe()?.size}
+                    bar={bar()}
+                    onOpenLink={openLink}
+                />
+            </Match>
             <Match when={props.viewer === "info"}>
                 <InfoCard
                     path={path()}
@@ -136,9 +152,7 @@ function ViewerFor(props: { model: EditorViewModel; tabId: string; viewer: Viewe
                     note={
                         probe()?.kind === "text" && (probe()?.size ?? 0) > TEXT_MAX_BYTES
                             ? "This text file is larger than the editor opens (10 MB)."
-                            : probe()?.kind === "pdf"
-                              ? "PDF pages show here once the PDF viewer lands; until then, open it with the system's app."
-                              : undefined
+                            : undefined
                     }
                     onOpenAsText={dropped() ? undefined : () => model.reopenWith(props.tabId, "text")}
                     onOpenWithSystem={dropped() ? undefined : openWithSystem}

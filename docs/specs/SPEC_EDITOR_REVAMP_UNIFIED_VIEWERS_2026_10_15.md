@@ -1,7 +1,7 @@
 # SPEC: Editor revamp — one pane for every file (PDF, images, audio/video, binary, large files), and the Media pane folded into it
 
 **Date:** 2026-10-15
-**Status:** active — phase 1 built in #5016 (see "Phase 1 as built" at the end); phases 2–5 to follow. Written against `main` @ `521daa2ad`.
+**Status:** active — phase 1 built in #5016, phase 2 (PDF) next (see "Phase 1 as built" and "Phase 2 as built" at the end); phases 3–5 to follow. Written against `main` @ `521daa2ad`.
 **Author:** Korp@narko
 **Requested by:** the repo owner:
 > *"does agentmux editor support pdf? lets write a quick spec to support pdfs and images in the editor. we need to get the editor wide-ranging editor access, including binary if it detects it, images, etc. we want wide coverage, research latest best practices."*
@@ -801,3 +801,13 @@ Built as §6 phase 1 describes, with these differences:
 5. **The viewer bar holds its own controls** (fit, 100%, background; the viewer switch; follow folder; reveal; open with the system's app; the file's facts). The markdown Preview/Source/Split switch stays where it was.
 6. **A dropped file with no host path** opens from its bytes in the image or media viewer (else the info card) under a session-only tab path; after a restart its tab says to drop it again, as the Media pane's did.
 7. **Not in phase 1:** the stream token (§4.4.3, open question 1), so audio and video still load whole into a blob as Media did; `editor:viewer.associations` (phase 3).
+
+## Phase 2 as built (2026-10-16)
+
+The PDF viewer (`frontend/app/view/editor/viewers/pdf/`), with pdf.js 6.4.299. Differences from §4.4.4 and §4.7:
+
+1. **pdf.js runs in the Editor's own page, not a sandboxed iframe.** An opaque-origin iframe can't load the app's module scripts or start pdf.js's worker from the app's origin without CORS and blob-worker workarounds on both the Vite dev server and srv. The protection kept: pdf.js at or past 6.2.108 (a test fails the build below it), XFA off, `isEvalSupported: false` (the font-program eval behind CVE-2024-4367), no scripting manager (so a document's JavaScript never runs), and links intercepted: http(s) opens a Browser pane, every other scheme is dropped. Parsing happens in pdf.js's worker. The iframe stays a possible later hardening.
+2. **Large files load in ranges directly** through `fetchMediaRange` (64 KB chunks, `disableAutoFetch`), with no `postMessage` hop, since there is no iframe.
+3. **pdf.js's side files are bundled by Vite** (CMaps, standard fonts, the JBIG2 and JPEG 2000 decoders) and handed to pdf.js through its `BinaryDataFactory`, since Vite gives each a hashed name rather than a folder.
+4. **Find** is the viewer's own box in its toolbar (Ctrl+F there), not the Editor's CodeMirror find bar.
+5. **Not in phase 2:** the thumbnails sidebar and outline (2b), `OpenEditor {page}`, and "Open in browser pane" (a Browser pane doesn't load `file:` URLs); "Open with the system's app" covers printing and forms meanwhile.

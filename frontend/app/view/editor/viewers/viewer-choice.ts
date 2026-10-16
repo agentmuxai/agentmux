@@ -11,17 +11,18 @@
 import type { FileProbeResult } from "@/types/rpc/FileProbeResult";
 import { AUDIO_EXTENSIONS, extOf, IMAGE_EXTENSIONS, VIDEO_EXTENSIONS } from "@/app/element/local-media";
 
-export type ViewerId = "text" | "image" | "media" | "info";
+export type ViewerId = "text" | "image" | "media" | "pdf" | "info";
 
 /** readeditorfile's cap: a larger text file isn't loaded into CodeMirror. */
 export const TEXT_MAX_BYTES = 10_000_000;
 
-export const VIEWER_IDS: readonly ViewerId[] = ["text", "image", "media", "info"];
+export const VIEWER_IDS: readonly ViewerId[] = ["text", "image", "media", "pdf", "info"];
 
 export const VIEWER_LABELS: Record<ViewerId, { label: string; icon: string }> = {
     text: { label: "Text", icon: "file-lines" },
     image: { label: "Image", icon: "image" },
     media: { label: "Audio and video", icon: "film" },
+    pdf: { label: "PDF", icon: "file-pdf" },
     info: { label: "File info", icon: "circle-info" },
 };
 
@@ -46,6 +47,8 @@ export function viewerOptions(probe: FileProbe): ViewerId[] {
         case "audio":
         case "video":
             return ["media", "info"];
+        case "pdf":
+            return textOk ? ["pdf", "info", "text"] : ["pdf", "info"];
         default:
             // Binary nothing renders: the info card, or the bytes as text
             // ("Open as text anyway") while it fits the editor.
@@ -67,6 +70,7 @@ export function viewerForDropped(name: string, type: string): ViewerId {
     const ext = extOf(name);
     if (type.startsWith("image/") || IMAGE_EXTENSIONS.includes(ext)) return "image";
     if (type.startsWith("video/") || type.startsWith("audio/")) return "media";
+    if (type === "application/pdf" || ext === "pdf") return "pdf";
     if (VIDEO_EXTENSIONS.includes(ext) || AUDIO_EXTENSIONS.includes(ext)) return "media";
     return "info";
 }
