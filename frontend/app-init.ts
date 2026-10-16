@@ -146,6 +146,22 @@ function currentWindowLabel(): string {
     return new URLSearchParams(window.location.search).get("windowLabel") ?? "main";
 }
 
+/**
+ * Open the windows a restore rebuilt beside this one: the rest of the last
+ * session's windows, each in a window of its own. Best-effort: one that fails
+ * to open leaves the others, and this window, as they are.
+ */
+async function reopenRestoredWindows(): Promise<void> {
+    try {
+        const restored = await WindowService.TakeRestoredWindows();
+        for (const w of restored ?? []) {
+            await getApi().openWorkspaceInNewWindow(w.workspaceid);
+        }
+    } catch (e) {
+        console.warn("[session-restore] couldn't reopen the last session's other windows", e);
+    }
+}
+
 async function initHostMux(): Promise<void> {
     const t0 = performance.now();
     const tlog = (label: string, since: number) => {
@@ -181,6 +197,8 @@ async function initHostMux(): Promise<void> {
             const newWindow = await withTimeout(WindowService.CreateWindow(null, "", currentWindowLabel(), true), RPC_TIMEOUT, "CreateWindow");
             tlog("CreateWindow (no windows)", t);
             windowId = newWindow.oid;
+            // The last session's other windows come back too, once this one is up.
+            void reopenRestoredWindows();
         }
 
         // Verify window exists

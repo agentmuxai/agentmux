@@ -35,6 +35,9 @@ pub(super) async fn handle_window_service(state: &AppState, call: &WebCallType) 
         "SaveSessionSnapshot" => {
             super::session_restore::handle_save_session_snapshot(state, call).await
         }
+        // The windows a restore rebuilt beside the main one, for the main
+        // window to open (`session_windows`).
+        "TakeRestoredWindows" => super::session_windows::handle_take_restored_windows(state, call),
         "SwitchWorkspace" => handle_switch_workspace(state, call).await,
         "SetWindowPosAndSize" => handle_set_window_pos_and_size(state, call).await,
         "SetWindowOpacity" => handle_set_window_opacity(state, call).await,

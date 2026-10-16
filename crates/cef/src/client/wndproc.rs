@@ -1271,7 +1271,7 @@ fn flush_session_snapshot_once(
     // blocking call rather than holding a lock across it during shutdown.
     let web_endpoint = state.backend_endpoints.lock().web_endpoint.clone();
     let auth_key = state.auth_key.lock().clone();
-    let saved = super::helpers::backend_save_session_snapshot(&web_endpoint, &auth_key);
+    let saved = super::helpers::backend_save_session_snapshot(&web_endpoint, &auth_key, false);
 
     if saved {
         SESSION_END_SUCCEEDED.store(true, Ordering::SeqCst);

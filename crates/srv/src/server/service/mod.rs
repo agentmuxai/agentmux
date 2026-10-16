@@ -31,6 +31,7 @@ mod object;
 pub(crate) mod object_helpers;
 pub(crate) mod reducer_helpers;
 pub(crate) mod session_restore;
+mod session_windows;
 mod tab_lifecycle;
 mod tab_move;
 mod tear_off;
