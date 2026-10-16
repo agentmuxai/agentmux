@@ -350,6 +350,15 @@ async fn route_command(
             .await
             .map_err(|e| format!("get_window_position join error: {}", e))?
         }
+        "is_window_maximized" => {
+            // spawn_blocking: on macOS/Linux this bounces through the UI thread
+            // (up to 250 ms), like get_window_position above.
+            let state_clone = state.clone();
+            let args_clone = args.clone();
+            tokio::task::spawn_blocking(move || commands::window::is_window_maximized(&state_clone, &args_clone))
+                .await
+                .map_err(|e| format!("is_window_maximized join error: {}", e))?
+        }
         "resolve_window_at_cursor" => {
             // spawn_blocking — on macOS/Linux this bounces a CEF Views bounds
             // hit-test through the UI thread (up to 250 ms), same as

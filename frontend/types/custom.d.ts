@@ -271,6 +271,9 @@ declare global {
         captureViewport(windowLabel: string, quality?: number): Promise<{ jpeg_base64: string }>;
         /** Tear a pane off into its own floating window (payload: pane_id, workspace_id, x, y, …). */
         openFloatingPane(args: Record<string, unknown>): Promise<{ window_label: string }>;
+        /** Whether the window is maximized (a floater's own maximize on Windows, the OS's elsewhere);
+         *  null when the host can't tell (no such window, or no answer in time). */
+        isMaximized(windowLabel: string): Promise<boolean | null>;
         toggleFloatingMaximize(windowLabel: string, blockId: string): Promise<void>;
         /** Tack / untack a floating pane: "Always on top" within this instance.
          *  The host also records `pane:floating_ontop` on the block. */

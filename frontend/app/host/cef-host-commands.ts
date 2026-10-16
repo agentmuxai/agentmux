@@ -177,6 +177,9 @@ export const cefWindows: WindowHostApi = {
     captureViewport: (windowLabel, quality) =>
         invokeCommand<{ jpeg_base64: string }>("capture_window_viewport", { label: windowLabel, quality }),
     openFloatingPane: (args) => invokeCommand<{ window_label: string }>("open_floating_pane_window", args),
+    isMaximized: async (windowLabel) =>
+        (await invokeCommand<{ maximized: boolean | null }>("is_window_maximized", { label: windowLabel })).maximized ??
+        null,
     toggleFloatingMaximize: async (windowLabel, blockId) => {
         await invokeCommand("toggle_floating_maximize", { label: windowLabel, block_id: blockId });
     },

@@ -41,6 +41,7 @@ import { CopyButton } from "../element/copybutton";
 import { getEffectiveTitle, isUsableFocusRingColor, pickReadableTextColor } from "./autotitle";
 import { BlockFrameProps } from "./blocktypes";
 import { resolveContextMenuRegion } from "./context-menu-region";
+import { FloatingMaximizeButton } from "./floating-maximize";
 import { canTackFloatingPane, FloatingAlwaysOnTopButton } from "./floating-ontop";
 import { FloatingRedockButton } from "./floating-redock";
 import { partitionHeaderElems } from "./header-elems";
@@ -337,30 +338,6 @@ function OptMagnifyButton(props: { magnified: boolean; toggleMagnify: () => void
     return <IconButton decl={magnifyDecl()} className="block-frame-magnify" />;
 }
 
-/** Maximize button for a torn-off FLOATING pane (the floating half of the
- *  shared maximize button — docked panes use {@link OptMagnifyButton} →
- *  layout magnify; see SPEC_PANE_STATE_REDUCER §3.3a). Routes to the host
- *  `toggle_floating_maximize` IPC, which dispatches the reducer's
- *  `ToggleFloatingMaximize` and applies the OS-window geometry (maximize to
- *  the monitor work area / restore to the captured rect).
- *
- *  Deliberately a FIXED button: the icon and title don't reflect the
- *  maximized/normal state. A single click toggles maximize↔restore (users
- *  expect a maximize button to toggle), which keeps the button stateless —
- *  the reducer is the single source of truth for placement, not a mirrored
- *  frontend signal that can drift. */
-function FloatingMaximizeButton(props: { label: string; blockId: string }): JSX.Element {
-    const decl: IconButtonDecl = {
-        elemtype: "iconbutton",
-        icon: "regular@window-maximize",
-        title: "Maximize",
-        click: () => {
-            getApi().windows.toggleFloatingMaximize(props.label, props.blockId).catch(console.error);
-        },
-    };
-    return <IconButton decl={decl} className="block-frame-magnify" />;
-}
-
 function EndIcons(props: {
     viewModel: ViewModel;
     nodeModel: NodeModel;
@@ -440,14 +417,15 @@ function EndIcons(props: {
                             />
                         }
                     >
-                        {/* Redock first: back into a window's tile layout, with no drag
-                        (SPEC_FLOATING_PANE_REDOCK_BUTTON_2026_10_15). */}
-                        <FloatingRedockButton />
-                        {/* "Always on top" tack, with the window controls
+                        {/* "Always on top" tack, outermost of the window controls
                         (SPEC_FLOATING_PANE_ALWAYS_ON_TOP_2026_09_27 §4). */}
                         <Show when={canTackFloatingPane(floatingLabel())}>
                             <FloatingAlwaysOnTopButton label={floatingLabel()!} blockId={props.blockId()} />
                         </Show>
+                        {/* Redock just left of Maximize, part of the primary window controls
+                        (SPEC_FLOATING_PANE_REDOCK_BUTTON_2026_10_15,
+                        SPEC_FLOATING_PANE_WINDOW_CONTROLS_REFINEMENTS_2026_10_16 §3.1). */}
+                        <FloatingRedockButton />
                         <FloatingMaximizeButton label={floatingLabel()!} blockId={props.blockId()} />
                     </Show>
                 }

@@ -47,8 +47,8 @@ A font icon (`<i>`) ignores the squeeze and keeps its glyph size, but Redock's i
 ### 2.4 Dragging a maximized floater
 
 - **Windows:** the header drag is the host's manual move loop (`Win32BeginMoveTask`, `crates/cef/src/ui_tasks/drag.rs`). For the main window, dragging while maximized restores it under the cursor first: `begin_unmaximize_for_drag`, a 48 ms settle delay (`UNMAXIMIZE_SETTLE_MS`), then `place_restored_window_under_cursor` with `window_snap::unmaximize_drag_origin`. That keeps the grab point proportional horizontally and at the same offset vertically. **Floaters are explicitly excluded** (`source_label.starts_with("floating-")`), because they have no native maximize and `SW_RESTORE` would desync the reducer. So a maximized floater slides around at full-screen size. This is the bug the operator describes.
-- **Linux:** the header drag hands the move to the compositor (`BeginWindowDrag` → `xdg_toplevel.move` on Wayland, `_NET_WM_MOVERESIZE` on X11). The floater is natively maximized there, and GNOME's Mutter un-maximizes a maximized window that is moved this way. So the window itself very likely already restores. **Not verified live.** But the reducer and `pane:floating_placement` still say "maximized", so a Restore icon driven by them would be wrong after the drag. The next button click would also send the reducer the wrong way, although the OS-side toggle would still do the right thing.
-- **macOS:** the header drag is the host's own loop (`run_macos_native_drag_loop`), which moves the window with `set_bounds` at its starting size. A zoomed (maximized) floater is therefore moved at full size, the same bug as on Windows. **Not verified on a Mac.**
+- **Linux on native Wayland:** the floater's header drag hands the move to the compositor (`BeginWindowDrag` → `xdg_toplevel.move`). The floater is natively maximized there, and GNOME's Mutter un-maximizes a maximized window that is moved this way. So the window itself very likely already restores. **Not verified live.** But the reducer and `pane:floating_placement` still say "maximized", so a Restore icon driven by them would be wrong after the drag.
+- **macOS and Linux on X11/XWayland:** *(corrected while implementing: the first draft said macOS used the host's `run_macos_native_drag_loop`; that loop is the main window's.)* A floater's header drag is moved by the page itself (`floating-pane-workspace.tsx`, the JS-driven drag: `get_window_position` at the press, `set_window_position` per move), at the window's current size. A maximized floater is therefore moved at full size, the same bug as on Windows. **Not verified on a Mac.**
 
 ### 2.5 Double-click on the header
 
@@ -90,12 +90,12 @@ A click without a drag does nothing new. If there is no remembered pre-maximize 
 
 ### 4.2 The state the icon shows
 
-The button needs the floater's real placement, reactively. **Recommended: the block meta `pane:floating_placement`** (D2). It is already written on every toggle on all platforms, persisted, typed, and the floater's renderer already subscribes to its block. This spec adds the two places that change placement without a button click, so the meta stops drifting:
+The button needs the floater's real placement, reactively. **Recommended: the block meta `pane:floating_placement`** (D2). It is already written on every toggle on all platforms, persisted, typed, and the floater's renderer already subscribes to its block. The floater's page keeps it true, so the meta stops drifting when the placement changes without a button click (`useFloatingPlacementSync`, `frontend/app/block/floating-maximize.tsx`):
 
-1. **The drag restore (§4.4)** writes `"normal"` (and leaves `pane:floating_normal_rect` as it was).
-2. **The OS changing it on Linux and macOS:** in `on_window_bounds_changed` for a floater window, compare `window.is_maximized()` with the reducer's placement. When they differ, dispatch a new reducer command `ReportFloatingPlacement { label, placement }` (the `ReportOSPlacementChange` the module doc already names as a later phase), and write the meta through the same fire-and-forget helper (`backend_update_block_meta`). This catches the compositor's drag un-maximize, keyboard shortcuts (Super+Up/Down), and macOS zoom from the keyboard.
+1. **The host says what it changed.** `toggle_floating_maximize` and the Windows drag restore (§4.4) send `floating_placement_changed { label, placement }` to the windows; the floater with that label stores it.
+2. **The page asks after a resize.** When the window's resizes go quiet for 150 ms, the page calls a new host query, `is_window_maximized { label }` → `{ maximized }`, and stores the answer. This catches what the host didn't do: the compositor's drag un-maximize and Super+Up/Down on Linux, and zoom from the keyboard on macOS. On Windows the reducer answers for a floater (its maximize is the reducer's own geometry); elsewhere CEF Views' `is_maximized()`.
 
-The meta write goes through srv, so the icon updates a round trip after the window changes (tens of milliseconds). That is acceptable for an icon. If it proves visible, a direct host-to-renderer event can replace it later without changing the behaviour.
+The page stores `pane:floating_placement` (`SetMetaCommand`) only when it differs from what the block has. *(Changed while implementing: the first draft had the host report OS changes from `on_window_bounds_changed`, but a pooled floater keeps its pool label in that hook, and the host does not know a floater's block. The page knows both.)*
 
 `FloatingMaximizeButton` becomes a reactive decl from the block's meta, like `OptMagnifyButton`: `"maximized"` gives `regular@window-restore` titled "Restore", and anything else (including a missing key) gives `regular@window-maximize` titled "Maximize". The click is unchanged (the host toggle), so a stale icon can never make a click do the wrong thing on Linux and macOS, where the toggle reads the OS state. The doc comment's "deliberately fixed" rationale is replaced by this.
 
@@ -107,18 +107,18 @@ No change to the host: `toggle_floating_maximize` already restores to the stashe
 
 - **Windows (the main work).** In `Win32BeginMoveTask`, replace the blanket floater exclusion with a floater branch:
   1. If the reducer's placement for this label is Maximized, dispatch a new reducer command `RestoreFloatingForDrag { label }`. It flips to Normal and returns the stashed rect, like the toggle does, but reads the stash rather than writing one.
-  2. Read the maximized rect (`GetWindowRect`), then `SetWindowPos` to the stashed rect's **width and height**. With no stashed rect, use the default floater size.
+  2. Read the maximized rect (`GetWindowRect`), then `SetWindowPos` to the stashed rect's **width and height**. With no stashed rect, use half the maximized size (there is no fixed default floater size to return to).
   3. Re-post with `after_unmaximize = true` and the maximized `(left, top, width)` after `UNMAXIMIZE_SETTLE_MS`, exactly like the main window. The same settle-delay reason applies: the content must re-lay-out before the nested move loop starts.
   4. `place_restored_window_under_cursor` then runs unchanged.
-  5. Write `pane:floating_placement: "normal"` through to the block.
+  5. Send `floating_placement_changed` (normal), so the page stores it (§4.2).
 
   It never calls `SW_RESTORE`, so the reducer cannot desync, which was the reason for the exclusion. The drag-to-top snap stays excluded for floaters (out of scope).
-- **Linux.** Expected to need no geometry change: the compositor un-maximizes a natively maximized window on move. The work is §4.2's report, so the icon and meta follow. The live check must confirm it on GNOME Wayland and X11/XWayland. If a compositor does not un-maximize on move, the fallback is to `restore()` in the renderer's drag-threshold handler before sending `start_window_drag`. That gets no grab-point preservation on native Wayland, since no positions are known there.
-- **macOS.** In `run_macos_native_drag_loop`, if the window is maximized at the first movement past the threshold, call `window.restore()` and recompute `origin` from the restored bounds, placed under the cursor with `unmaximize_drag_origin`, before the loop moves it. Then §4.2's report updates the meta. This needs a Mac to build and check: Clare on starpower (an Apple-silicon Mac) does both, and first reports what today's build does, so the change is only made if the bug is real there.
+- **Linux on native Wayland.** Expected to need no geometry change: the compositor un-maximizes a natively maximized window on move, and §4.2's resize check updates the icon. The live check must confirm it. If a compositor does not un-maximize on move, the fallback is to restore before sending `start_window_drag`, without grab-point preservation (no positions are known there).
+- **macOS and Linux on X11/XWayland (the page's drag).** At the press the page asks `is_window_maximized` together with the window position. If maximized, the first move past the press (not a plain click) restores it with the host toggle (CEF Views' native `restore()`), waits for the window's resize (at most 300 ms), reads the restored rect, and places the window so the cursor holds the same fraction of the header's width and the same offset from its top. That is the main window's rule (`unmaximize_drag_origin`). The drag then continues from there. Moves are held while the restore settles. The macOS check needs a Mac: Clare on starpower (an Apple-silicon Mac) builds and checks it.
 
 ### 4.5 Double-click (optional, D4)
 
-In a floater, the header's `onDblClick` calls the same host toggle as the button, instead of the layout magnify. Docked panes are unchanged.
+In a floater, a double-click on the header calls the same host toggle as the button, instead of the layout magnify. It is handled by the floater's own header listener (`floating-pane-workspace.tsx`, capture phase, stopping the header's dblclick), so the shared header and docked panes are unchanged.
 
 ## 5. Tests
 

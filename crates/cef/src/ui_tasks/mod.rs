@@ -23,6 +23,8 @@ use cef::*;
 use crate::state::AppState;
 
 mod window;
+#[cfg(not(target_os = "windows"))]
+mod window_maximized;
 mod drag;
 mod pool;
 mod popup;
@@ -34,6 +36,8 @@ pub mod pane_hole_mask;
 mod platform_macos;
 
 pub use window::*;
+#[cfg(not(target_os = "windows"))]
+pub use window_maximized::*;
 pub use drag::*;
 pub use pool::*;
 pub use popup::{post_close_popup, post_close_popup_window, post_show_popup};
