@@ -54,10 +54,29 @@ vi.mock("@/app/store/mos", () => ({
     getObjectValue: () => ({}),
 }));
 
+// The window tab on screen, for a pane whose page asks to be closed.
+const layout = vi.hoisted(() => ({
+    model: {
+        getNodeByBlockId: vi.fn((_blockId: string): { id: string; data: { stack: string[] } } | undefined => undefined),
+        closeNode: vi.fn((_nodeId: string) => Promise.resolve()),
+    } as
+        | {
+              getNodeByBlockId: (blockId: string) => { id: string; data: { stack: string[] } } | undefined;
+              closeNode: (nodeId: string) => Promise<void>;
+          }
+        | undefined,
+    closeBlockInStack: vi.fn((_model: unknown, _nodeId: string, _blockId: string) => Promise.resolve()),
+}));
+vi.mock("@/layout/lib/layoutModelHooks", () => ({ getLayoutModelForStaticTab: () => layout.model }));
+vi.mock("@/layout/lib/layoutStack", () => ({
+    closeBlockInStack: layout.closeBlockInStack,
+    effectiveStack: (data: { stack: string[] }) => data.stack,
+}));
+
 import { invokeCommand, listenEvent } from "@/app/platform/ipc";
 import { RpcApi } from "@/app/store/rpc-api";
 import { setFullConfigAtom } from "@/store/config-signals";
-import { BrowserViewModel } from "./browser-model";
+import { BrowserViewModel, closePaneOrTab } from "./browser-model";
 import { installCefWireHost } from "../../../test/cef-wire-host";
 
 installCefWireHost();
@@ -502,5 +521,69 @@ describe("BrowserViewModel attention banner", () => {
         const vm = makeVM();
         await vm.resolveAttention("cancel");
         expect(invokeCommand).not.toHaveBeenCalledWith("browser_attention_resolve", expect.anything());
+    });
+});
+
+// docs/retro/RETRO_BROWSER_PANE_WINDOW_CLOSE_QUITS_APP_2026_10_16.md: a page's
+// `window.close()` reaches the frontend as `browser-pane-close-requested`, and
+// the pane closes as its × would.
+describe("BrowserViewModel close requested by its page", () => {
+    const pane = (stack: string[]) => ({ id: "node-1", data: { stack } });
+    let model: NonNullable<typeof layout.model>;
+
+    beforeEach(() => {
+        vi.clearAllMocks();
+        model = {
+            getNodeByBlockId: vi.fn(() => pane(["test-block-id"])),
+            closeNode: vi.fn(() => Promise.resolve()),
+        };
+        layout.model = model;
+    });
+
+    function vmWithCloseHandler() {
+        const vm = new BrowserViewModel(fakeCtx());
+        return { vm, closeRequested: capturedHandler("browser-pane-close-requested") };
+    }
+
+    it("closes its pane when it is the pane's only tab", async () => {
+        const { closeRequested } = vmWithCloseHandler();
+        closeRequested({ block_id: "test-block-id" });
+        await Promise.resolve();
+        expect(model.closeNode).toHaveBeenCalledWith("node-1");
+        expect(layout.closeBlockInStack).not.toHaveBeenCalled();
+    });
+
+    it("closes only its tab when the pane holds others", async () => {
+        model.getNodeByBlockId = vi.fn(() => pane(["other-block", "test-block-id"]));
+        const { closeRequested } = vmWithCloseHandler();
+        closeRequested({ block_id: "test-block-id" });
+        await Promise.resolve();
+        expect(layout.closeBlockInStack).toHaveBeenCalledWith(model, "node-1", "test-block-id");
+        expect(model.closeNode).not.toHaveBeenCalled();
+    });
+
+    it("ignores a request for another pane", async () => {
+        const { closeRequested } = vmWithCloseHandler();
+        closeRequested({ block_id: "other-block" });
+        await Promise.resolve();
+        expect(model.closeNode).not.toHaveBeenCalled();
+        expect(layout.closeBlockInStack).not.toHaveBeenCalled();
+    });
+
+    it("ignores a request after the pane was disposed", async () => {
+        const { vm, closeRequested } = vmWithCloseHandler();
+        vm.dispose();
+        closeRequested({ block_id: "test-block-id" });
+        await Promise.resolve();
+        expect(model.closeNode).not.toHaveBeenCalled();
+    });
+
+    it("leaves a pane that isn't in the window tab on screen", async () => {
+        layout.model = undefined;
+        await expect(closePaneOrTab("test-block-id")).resolves.toBeUndefined();
+        model.getNodeByBlockId = vi.fn(() => undefined);
+        layout.model = model;
+        await closePaneOrTab("test-block-id");
+        expect(model.closeNode).not.toHaveBeenCalled();
     });
 });
