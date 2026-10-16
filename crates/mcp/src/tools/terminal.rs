@@ -729,6 +729,21 @@ pub(super) fn without_trailing_comment(command: &str, family: ShellFamily) -> &s
     command
 }
 
+/// `command` without a trailing `;` (a POSIX shell, fish, PowerShell): the
+/// marker starts with its own `;`, and bash refuses `;;` outside a `case`.
+/// cmd has no `;` separator, so its command is unchanged.
+pub(super) fn without_trailing_semicolon(command: &str, family: ShellFamily) -> &str {
+    let c = command.trim_end();
+    let esc = if family == ShellFamily::Pwsh { '`' } else { '\\' };
+    match c.strip_suffix(';') {
+        Some(before) if family != ShellFamily::Cmd => {
+            let escaped = before.chars().rev().take_while(|&ch| ch == esc).count() % 2 == 1;
+            if escaped { c } else { before.trim_end() }
+        }
+        _ => c,
+    }
+}
+
 /// How `command` ends if it doesn't end a command: in the background (`&`),
 /// or waiting for more (a pipe, `&&`, `||`, a line continuation). The exit
 /// marker can't follow such a line, so `run` refuses it instead of waiting
@@ -834,7 +849,7 @@ async fn run_action(arguments: &Value, cx: &ToolCtx<'_>) -> Result<Value> {
         }
     }
     let family = family_of(cx, &id).await?;
-    let command = without_trailing_comment(command, family);
+    let command = without_trailing_semicolon(without_trailing_comment(command, family), family);
     if let Some(end) = open_ending(command, family) {
         anyhow::bail!(
             "run waits for a command to finish, and this one ends with {end:?}: \
