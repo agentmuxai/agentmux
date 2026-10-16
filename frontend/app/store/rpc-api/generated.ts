@@ -395,6 +395,7 @@ import type { TowerSampleReq } from "@/types/rpc/TowerSampleReq";
 import type { TowerSnapshot } from "@/types/rpc/TowerSnapshot";
 import type { UnlinkAgentIdentityResult } from "@/types/rpc/UnlinkAgentIdentityResult";
 import type { UnwatchMediaDirReq } from "@/types/rpc/UnwatchMediaDirReq";
+import type { UpgradeRequestsEvent } from "@/types/rpc/UpgradeRequestsEvent";
 import type { ValidationReport } from "@/types/rpc/ValidationReport";
 import type { ViewerAgentHiddenResult } from "@/types/rpc/ViewerAgentHiddenResult";
 import type { ViewerCanSendResult } from "@/types/rpc/ViewerCanSendResult";
@@ -2258,6 +2259,10 @@ export const GeneratedApi = {
   // command "app.upgrade-cancel"
   AppUpgradeCancelCommand(client: RpcClient, opts?: RpcOpts): Promise<AppUpdateStatus> {
     return client.rpcCall("app.upgrade-cancel", {}, opts);
+  },
+  // command "app.upgrade-requests"
+  AppUpgradeRequestsCommand(client: RpcClient, opts?: RpcOpts): Promise<UpgradeRequestsEvent> {
+    return client.rpcCall("app.upgrade-requests", {}, opts);
   },
   // command "app.upgrade-restart"
   AppUpgradeRestartCommand(

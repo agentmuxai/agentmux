@@ -377,13 +377,14 @@ pub fn create_browser_pane_view(
     // 7b. Return focus to the main window's BrowserView. CEF's default
     //     on_after_created behaviour (fired from add_overlay_view above when
     //     the BrowserView is added to the widget hierarchy) gives focus to the
-    //     new pane browser. (Windows doesn't use this file: there the window's
-    //     input owner, `crate::input_owner`, puts back focus a new page takes.)
-    //     On macOS/Linux there is no input owner yet, so the OverlayController
-    //     holds focus after creation and its BrowserView intercepts all keyboard
-    //     (and, depending on CEF hit-test state, mouse) events for the parent window —
-    //     causing the "black pane + frozen UI" bug. Explicitly refocus the main
-    //     window browser here; the user can then click inside the pane to focus it.
+    //     new pane browser. Left there, the OverlayController holds focus after
+    //     creation and its BrowserView intercepts all keyboard (and, depending
+    //     on CEF hit-test state, mouse) events for the parent window, the
+    //     "black pane + frozen UI" bug. Explicitly refocus the main window
+    //     browser here, as before the window's input owner existed
+    //     (`input_owner::views`); it stays until the creation paths are moved
+    //     onto the input owner, which corrects any disagreement with the
+    //     selection meanwhile. (Windows doesn't use this file.)
     if let Some(main_browser) = state.get_browser(&window_label) {
         if let Some(host) = main_browser.host() {
             host.set_focus(1);

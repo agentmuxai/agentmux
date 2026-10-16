@@ -489,6 +489,8 @@ pub const COMMAND_APP_UPDATE_DOWNLOAD: &str = "app.update-download";
 // Restart into the staged release, or stop waiting to (backend::update_restart).
 pub const COMMAND_APP_UPGRADE_RESTART: &str = "app.upgrade-restart";
 pub const COMMAND_APP_UPGRADE_CANCEL: &str = "app.upgrade-cancel";
+// Agents' upgrade requests waiting for the user (backend::upgrade_request).
+pub const COMMAND_APP_UPGRADE_REQUESTS: &str = "app.upgrade-requests";
 
 // The cloud presence publisher (muxbus::wan_presence): its state, and a try now.
 pub const COMMAND_PRESENCE_STATUS: &str = "presence.status";

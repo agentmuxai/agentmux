@@ -710,6 +710,27 @@ async fn route_command(
             relayed?;
             Ok(serde_json::json!(true))
         }
+        "upgrade_request_decide" => {
+            // The user's Upgrade now / Later on an agent's request to upgrade
+            // AgentMux, relayed to srv as the host: no agent can approve its
+            // own request (SPEC_UPGRADE_FOR_USERS_AND_AGENTS_2026_10_15.md §5.1).
+            let body = serde_json::json!({
+                "id": args.get("id").and_then(|v| v.as_str()).unwrap_or(""),
+                "version": args.get("version").and_then(|v| v.as_str()).unwrap_or(""),
+                "accept": args.get("accept").and_then(|v| v.as_bool()).unwrap_or(false),
+            });
+            let web_endpoint = state.backend_endpoints.lock().web_endpoint.clone();
+            let auth_key = state.auth_key.lock().clone();
+            let ipc_token = state.ipc_token.clone();
+            tracing::info!("[ipc] upgrade_request_decide id={} accept={}", body["id"], body["accept"]);
+            let relayed: Result<(), String> = tokio::task::spawn_blocking(move || {
+                crate::client::backend_upgrade_request(&web_endpoint, &auth_key, &ipc_token, &body)
+            })
+            .await
+            .map_err(|e| format!("upgrade_request_decide: {e}"))?;
+            relayed?;
+            Ok(serde_json::json!(true))
+        }
         "browser_pane_focus" => {
             let block_id = args.get("block_id").and_then(|v| v.as_str()).unwrap_or("");
             tracing::info!("[ipc] browser_pane_focus block_id={}", block_id);
@@ -1112,9 +1133,5 @@ fn focus_app(state: &Arc<AppState>, window_label: &str) {
     #[cfg(target_os = "windows")]
     crate::input_owner::windows::select_app(state, &label);
     #[cfg(not(target_os = "windows"))]
-    {
-        let mut task = crate::ui_tasks::MainFocusReclaimTask::new(state.clone(), label.clone());
-        cef::post_task(cef::ThreadId::UI, Some(&mut task));
-        tracing::info!("[ipc] focus_app: posted MainFocusReclaimTask for label={}", label);
-    }
+    crate::input_owner::views::select_app(state, &label);
 }

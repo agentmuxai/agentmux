@@ -10,6 +10,15 @@
 use agentmux_common::win32::NoWindow;
 use super::*;
 use super::process_waiter::ProcessWaiterCtx;
+
+/// Whether a spawn resumes with `--fork-session`: the resume gate placed a
+/// copy to fork from, the session grew outside AgentMux (`fork_next`), or the
+/// launch itself asks to (a quick fork from the picker carries the flag in
+/// its own args). One answer for the duplicate-session guard and for the
+/// fork's bookkeeping, so the two can't disagree.
+pub(super) fn spawn_forks(fork_copy: bool, fork_next: bool, cli_args: &[String]) -> bool {
+    fork_copy || fork_next || cli_args.iter().any(|a| a == "--fork-session")
+}
 use super::stderr_reader::StderrReaderCtx;
 use super::stdout_reader::StdoutReaderCtx;
 
@@ -113,15 +122,20 @@ impl PersistentSubprocessController {
         // seconds a close takes) and tries again. Covers every reopen path
         // (picker reattach, launch modal, MCP), not just `agent.open`
         // (SPEC_AGENT_PANE_CLOSE_GRACEFUL_SHUTDOWN_2026_09_18.md §4.7).
-        // A spawn that forks (the resume gate placed a copy, or the session
-        // grew outside AgentMux) reads the session and writes a new one, so a
+        // A spawn that forks reads the session and writes a new one, so a
         // live process on it is no conflict: a fork started while its parent
-        // runs (the fork-isolation report in #4744, F5).
+        // runs (the fork-isolation report in #4744, F5). `spawn_forks` says
+        // when; a quick fork from the picker was refused here while its
+        // parent ran, because only the gate's own marks counted.
         let requested_sid = if config.resume_flag.is_empty() {
             None
         } else {
             let inner = self.inner.lock().unwrap();
-            if inner.fork_copy.is_some() || inner.fork_next { None } else { inner.session_id.clone() }
+            if spawn_forks(inner.fork_copy.is_some(), inner.fork_next, &config.cli_args) {
+                None
+            } else {
+                inner.session_id.clone()
+            }
         };
         // Check and claim must be one step: the check reads other
         // controllers' `current_pid`, which a concurrent resume of the same
@@ -176,7 +190,7 @@ impl PersistentSubprocessController {
                 if !config.resume_flag.is_empty() {
                     spawn_args.push(config.resume_flag.clone());
                     spawn_args.push(sid.clone());
-                    if fork_copy.is_some() || fork_next {
+                    if spawn_forks(fork_copy.is_some(), fork_next, &config.cli_args) {
                         // The launch's own args may carry it already (a fork
                         // launched from the picker); once is enough.
                         if !spawn_args.iter().any(|a| a == "--fork-session") {

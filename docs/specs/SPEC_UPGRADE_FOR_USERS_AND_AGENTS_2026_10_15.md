@@ -4,8 +4,9 @@
 **Status:** active — phase 1 (detection, the chip, Maintenance's "What's
 new" and Download) in #4983; phase 2 (data carries forward) in #4996;
 phase 3a (download and stage, Windows portable) in #5000; phase 3b
-(Upgrade & restart) in #5005; phase 4b (the note after an upgrade) in
-#5014; the rest of phases 3–5 are not started. The operator took the §8 recommendations on 2026-10-15.
+(Upgrade & restart) in #5005; phase 4a (the `App` tool) in #5012; phase
+4b (the note after an upgrade) in #5014; the rest of phases 3–5 are not
+started. The operator took the §8 recommendations on 2026-10-15.
 **Asked for:** "agents need a way to upgrade their running instances and
 continue on. Users also need a button to let them know. We did work on this
 in the past, find the history, let's consolidate; we have partial work in the
@@ -144,30 +145,50 @@ CI publishes it (`.github/workflows/build-*.yml`).
 
 ## 5. Agents
 
-### 5.1 `RequestUpgrade`
+### 5.1 The `App` tool: `version` and `upgrade`
 
-An MCP tool:
+One MCP tool with an `action`, as every MuxAPI family is
+(`SPEC_MUXAPI_TOOL_CONSOLIDATION_2026_10_15.md`). It is a tool of its own,
+like `Stop`, because `upgrade` restarts every agent and a harness can gate
+it (`crates/mcp/src/tools/app_tool.rs`):
 
 ```
-RequestUpgrade({ reason: "…", version?: "0.59.27" })
-→ { state: "started" | "pending_user" | "up_to_date" | "unavailable", … }
+App({ action: "version" })
+App({ action: "upgrade", reason: "…", user_instruction?: "…", version?: "0.59.27" })
+→ started | pending_user | up_to_date | unavailable
 ```
 
-- **It never restarts on the agent's word alone.** A restart stops every
-  agent, interrupts the user's own work, and an agent can be prompt-injected.
-  Same trust model as `QuitSelf` (`self_quit::gate`):
-  - the user's own turn asked for it (the turn was started by the user, and
-    nothing else was delivered since) → `started`: the §4.1 flow begins
-    (download if needed, then "when agents are idle");
+- **`version`** (`GET /api/v1/app/update-status`): the running version and
+  install kind, the latest release, whether it is downloaded, and whether
+  this install can upgrade itself. An agent can say "an update is
+  available" without asking for anything.
+- **`upgrade`** (`POST /api/v1/agent/self/upgrade`,
+  `backend/upgrade_request.rs`) **never restarts on the agent's word
+  alone.** A restart stops every agent, interrupts the user's own work, and
+  an agent can be prompt-injected. Same trust model as `QuitSelf`
+  (`self_quit::gate`):
+  - the user's own turn asked for it (the turn was started by the user,
+    nothing else was delivered since, and `user_instruction` quotes them)
+    → `started`: the §4.1 flow begins (download if needed, then "when agents
+    are idle");
   - anything else (an agent's own idea, a jekt, a broadcast, cron) →
-    `pending_user`: a banner in every window, "QTest asks to upgrade
-    AgentMux to 0.59.27: <reason>. Upgrade now / Later", which the user
-    clicks.
-- **No version is installed that the update check didn't find**: the tool
-  can't name a URL or a file.
-- A companion read-only tool, `VersionStatus`, answers what is running, the
-  latest release, and whether a download is staged, so an agent can say "an
-  update is available" without asking for anything.
+    `pending_user`: every window shows "QTest asks to upgrade AgentMux to
+    0.59.27" with the reason, **Upgrade now** / **Later**
+    (`frontend/app/block/upgrade-requests.tsx`; `app:upgraderequests`,
+    `app.upgrade-requests`), with the waiting tone. The answer reaches srv
+    only through the host (`approvals.decideUpgrade` →
+    `POST /api/v1/host/upgrade_request`, checked with the host's own token),
+    like a widget approval, so an agent holding the instance key can't answer
+    its own request. It names the release the prompt showed: if a newer one
+    came out since, nothing is installed and the agent is told to ask again.
+    The agent gets an `[AgentMux]` note with the answer; Upgrade now answers
+    every waiting request for that release.
+  - Either way the launcher asks the user once more in its own dialog
+    before it restarts (§4.1, phase 3b).
+- **Only what the update check found is installed**: the latest release,
+  verified against GitHub's checksum. The tool can't name a URL or a file,
+  and a `version` other than the latest is refused. An install that can't
+  upgrade itself yet answers `unavailable` with the release page.
 
 ### 5.2 Continuing after the restart
 
@@ -270,8 +291,11 @@ Each phase is small and useful on its own.
      (`session:last_topology`); restoring every window is a follow-up.
    - **3c** macOS, **3d** `setup.exe`, **3e** AppImage and Linux portable,
      **3f** the Store, **3g** `.deb`/`.rpm`.
-4. **Agents.** `VersionStatus`, `RequestUpgrade` with the gate and the
-   banner, the post-restart note, and the result to the asker.
+4. **Agents.**
+   - **4a**: the `App` tool's `version` and `upgrade`, with the gate, the
+     prompt in every window and the answer to the asker (§5.1).
+   - **4b**: the post-restart note to each resumed agent, and "done" to the
+     agent that asked (§5.2).
 5. **Hardening and cleanup:** a signed `SHA256SUMS` release step, code
    signature checks before a swap, and deleting old versions.
 

@@ -886,6 +886,23 @@ pub struct QuitSelfRequest {
     pub user_instruction: String,
 }
 
+/// `POST /api/v1/agent/self/upgrade` — backs the `App` tool's `upgrade`
+/// (docs/specs/SPEC_UPGRADE_FOR_USERS_AND_AGENTS_2026_10_15.md §5.1).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RequestUpgradeRequest {
+    #[serde(flatten)]
+    pub auth: UiAutomationAuth,
+    /// One line: why. Shown to the user.
+    pub reason: String,
+    /// The user's own words in this turn asking for it, verbatim; empty when
+    /// the user didn't ask. Checked like `QuitSelf`'s (`self_quit::gate`).
+    #[serde(default)]
+    pub user_instruction: String,
+    /// The release the agent expects; refused unless it is the latest.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClosePaneRequest {
     #[serde(flatten)]
