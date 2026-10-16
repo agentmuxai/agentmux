@@ -166,12 +166,12 @@ struct IdentityBinding {
 /// SOURCE agent id, `is_seeded = 0`. reagent P0 on #3092 caught an earlier
 /// version of this fallback trusting the column unconditionally — a fork
 /// of any regular agent that had a bound identity would silently inherit
-/// and spawn on the SOURCE agent's credentials, even though forks are
-/// deliberately created with `accounts: ""` and no link of their own
-/// (fail-closed by design, the same convention `conversation_visibility`
-/// documents right next to `parent_id` in `template.rs`). Callers MUST
-/// resolve this through `template_parent_id_if_seeded`, never pass
-/// `d.parent_id` directly.
+/// and spawn on the SOURCE agent's credentials whatever its own links said.
+/// A fork gets its source's account once, as its own link written when it is
+/// created (`inherit_source_account_links`, `template.rs`); then only its own
+/// links count, so unlinking a fork never falls back to its source.
+/// Callers MUST resolve this through `template_parent_id_if_seeded`, never
+/// pass `d.parent_id` directly.
 ///
 /// Agent-concept consolidation's definition flip
 /// (`SPEC_AGENT_ARCHITECTURE_2026_05_27.md` Phase 3d) made `agent_def_get`
@@ -199,7 +199,7 @@ struct IdentityBinding {
 /// `agent_def_get` resolved the launch's own row through); an empty
 /// `parent_id`, a lookup failure, or a parent that resolves but isn't
 /// seeded all return `""` — "no eligible template parent," not an error.
-fn template_parent_id_if_seeded(mstore: &Store, parent_id: &str) -> String {
+pub(super) fn template_parent_id_if_seeded(mstore: &Store, parent_id: &str) -> String {
     if parent_id.is_empty() {
         return String::new();
     }
@@ -2185,10 +2185,11 @@ mod tests {
     /// earlier version of the template-link fallback above trusted the
     /// column unconditionally: a fork of ANY regular agent with a bound
     /// identity would silently inherit and spawn on the SOURCE agent's
-    /// credentials, even though forks are deliberately created with
-    /// `accounts: ""` and no link of their own — a credential-scope leak
-    /// across agents. `template_parent_id_if_seeded` closes this by only
-    /// falling back when the parent actually has `is_seeded = 1`.
+    /// credentials through the resolver, whatever links the fork itself
+    /// had — a credential-scope leak across agents. `template_parent_id_if_seeded`
+    /// closes this by only falling back when the parent actually has
+    /// `is_seeded = 1`. (A new fork gets its source's link copied as its own;
+    /// this test's fork has none, as after an unlink.)
     #[test]
     fn a_fork_of_a_regular_agent_does_not_inherit_the_sources_identity_link() {
         let store = make_store();
@@ -2205,10 +2206,9 @@ mod tests {
         store.identity_upsert(&claude).unwrap();
         store.agent_identity_link("agent-source", "acct-source", "claude").unwrap();
 
-        // Mirrors forkagentdefinition's actual shape (template.rs): a
-        // plain, non-template fork with parent_id = the source's id,
+        // A plain, non-template fork with parent_id = the source's id,
         // accounts reset to empty, and — critically — no identity link of
-        // its own (fail-closed by design).
+        // its own (as after the user unlinks the one it was created with).
         let mut fork = gate_def(0);
         fork.id = "agent-fork".to_string();
         fork.is_seeded = 0;
