@@ -1,7 +1,7 @@
 # Spec: an agent launches and coaches worker agents in panes
 
 **Date:** 2026-10-15
-**Status:** active. Phase A (§3.1, §3.2's pane mark, §3.5, §3.6) implemented: `app_api/agent_fork.rs`, `Agents` `fork`. Left: Phase B (§3.2's table, §3.3, §3.4), Phase C (§3.7).
+**Status:** active. Phase A (§3.1, §3.2's pane mark, §3.5, §3.6) implemented in #5020: `app_api/agent_fork.rs`, `Agents` `fork`. Left: Phase B (§3.2's table, §3.3, §3.4), Phase C (§3.7).
 **Author:** Loap-3@narko, at the operator's request
 **Scope:** srv (`app_api/agent_open.rs`, `server/agent_handlers/template.rs`, `backend/reactive/handler.rs`), the MCP `Agents` tool (`crates/mcp/src/tools/agents_tool.rs`, `panes.rs`), the agent pane header.
 **Related:** `SPEC_AGENT_QUICK_FORK_NEW_TAB_2026_08_21.md` (the UI's fork), `SPEC_JEKT_DELIVERY_STATES_AND_MAILBOX_2026_10_01.md`, `SPEC_AGENT_COORDINATION_CHANNEL_2026_10_15.md`, the Warden Supervisor (`frontend/app/view/warden-supervisor/`).
