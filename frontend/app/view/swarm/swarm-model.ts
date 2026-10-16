@@ -19,6 +19,7 @@ import { BlockService } from "@/app/store/services";
 import { readSwarmSummary } from "@/app/store/activitySummary";
 import { contextReadingFromMeta } from "@/app/store/agent-pane-state/context-reading";
 import { resolveSwarmLine, type SwarmLine } from "@/app/store/swarm-line";
+import type { SupervisorMode } from "@/types/rpc/SupervisorMode";
 import { remoteSections, type SwarmOtherInstances } from "./swarm-remote";
 import { createSignal, type Accessor, type Setter } from "solid-js";
 import { groupBackgroundTasks, type AgentBackgroundTasks } from "./swarm-background";
@@ -444,7 +445,7 @@ export function hasRenderableBlock<T>(block: T | null | undefined, isLoading: bo
 /** The last broadcast or stop, with a name for every target so the result
  *  panel can say which agent on which machine, not a block id. */
 export interface FleetResultEntry {
-    action: "broadcast" | "bulk-stop";
+    action: "broadcast" | "bulk-stop" | "supervisor";
     result: FleetActionResult;
     labels: Record<string, string>;
 }
@@ -1689,6 +1690,35 @@ export class SwarmViewModel {
         } finally {
             this.setFleetActionInFlight(false);
             this.clearSelection();
+        }
+    }
+
+    /** Sets the Supervisor's mode on the selection. Not destructive, so no
+     *  confirmation, like broadcast; every target's outcome is reported (an
+     *  agent that isn't Claude, or isn't on this AgentMux, says why). */
+    async superviseSelection(mode: SupervisorMode): Promise<FleetActionResult> {
+        const selected = Array.from(this.selectedBlockIdsAtom());
+        const known = this.fleetTargets();
+        const { reachable: targets, unreachable } = partitionTargets(selected, "supervise", known);
+        this.setFleetActionInFlight(true);
+        try {
+            const set = targets.length > 0 ? await RpcApi.SupervisorSetModeCommand(TabRpcClient, { targets, mode }) : EMPTY_FLEET_RESULT;
+            const result = withUnreachable(set, unreachable);
+            this.setLastFleetResult({ action: "supervisor", result, labels: labelsOf(selected, known) });
+            return result;
+        } finally {
+            this.setFleetActionInFlight(false);
+        }
+    }
+
+    /** Sets one agent's Supervisor mode, from its row. A refusal (not a Claude
+     *  agent) is returned for the row to show. */
+    async setSupervisorMode(blockId: string, mode: SupervisorMode): Promise<string | null> {
+        try {
+            const result = await RpcApi.SupervisorSetModeCommand(TabRpcClient, { targets: [blockId], mode });
+            return result.failed[0]?.error ?? null;
+        } catch (e) {
+            return e instanceof Error ? e.message : String(e);
         }
     }
 

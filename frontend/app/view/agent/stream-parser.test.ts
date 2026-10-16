@@ -899,3 +899,28 @@ describe("swarm broadcast header", () => {
         expect(jekt.type).toBe("jekt_message");
     });
 });
+
+// ── Swarm Supervisor continuation ───────────────────────────────────────────
+// SPEC_SWARM_SUPERVISOR_2026_10_16.md §3.8
+
+describe("swarm supervisor continuation", () => {
+    test("a continuation becomes a user_message with the header removed and a Supervisor note", () => {
+        const node = parser.parseStreamEvent({
+            type: "user_message",
+            message: "[SUPERVISOR:MODE=drive N=3 OF=15]\nKeep going.\nWhy: it asked to proceed.",
+        }) as any;
+        expect(node.type).toBe("user_message");
+        expect(node.message).toBe("Keep going.\nWhy: it asked to proceed.");
+        expect(node.supervisor).toEqual({ mode: "drive", n: 3, of: 15 });
+        expect(node.broadcast).toBeUndefined();
+        expect(node.isStartup).toBe(false);
+    });
+
+    test("anything but srv's exact header stays plain text", () => {
+        for (const message of ["[SUPERVISOR:MODE=yolo N=1 OF=5]\nhi", "see [SUPERVISOR:MODE=drive N=1 OF=5]\nhi", "Keep going."]) {
+            const node = parser.parseStreamEvent({ type: "user_message", message }) as any;
+            expect(node.message).toBe(message);
+            expect(node.supervisor).toBeUndefined();
+        }
+    });
+});

@@ -86,6 +86,7 @@ mod layout;
 mod browser_start_page;
 mod voice;
 pub(crate) mod fleet;
+mod supervisor;
 mod attachments;
 pub(crate) mod connections;
 pub(crate) mod app_update;
@@ -116,6 +117,7 @@ pub fn register_app_api_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     browser_start_page::register(engine, state);
     voice::register(engine, state);
     fleet::register(engine, state);
+    supervisor::register(engine, state);
     attachments::register(engine, state);
     connections::register(engine, state);
     viewer::register(engine, state);

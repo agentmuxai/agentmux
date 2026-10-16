@@ -1091,6 +1091,7 @@ partial list.
 | [`SPEC_SUBPROCESS_INTEGRATION_TESTS_2026_04_16`](SPEC_SUBPROCESS_INTEGRATION_TESTS_2026_04_16.md) | SPEC: Subprocess Integration Tests |
 | [`SPEC_SWARM_LIVE_FEED_BINDINGS_2026_07_05`](SPEC_SWARM_LIVE_FEED_BINDINGS_2026_07_05.md) | SPEC: Swarm Live Feed — backend code bindings |
 | [`SPEC_SWARM_LIVE_FEED_UI_2026_07_05`](SPEC_SWARM_LIVE_FEED_UI_2026_07_05.md) | SPEC: Swarm Live Feed — UI |
+| [`SPEC_SWARM_SUPERVISOR_2026_10_16`](SPEC_SWARM_SUPERVISOR_2026_10_16.md) | Spec: the Swarm Supervisor keeps agents working until they are done or need the user |
 | [`SPEC_SWARM_TREE_REDESIGN_2026_06_19`](SPEC_SWARM_TREE_REDESIGN_2026_06_19.md) | Swarm View Tree Redesign |
 | [`SPEC_TABLE_FORMATTER_2026_05_07`](SPEC_TABLE_FORMATTER_2026_05_07.md) | Spec: Refined Table Formatter for Presentation Layer |
 | [`SPEC_TAB_BAR_FIRST_PRINCIPLES_2026_04_25`](SPEC_TAB_BAR_FIRST_PRINCIPLES_2026_04_25.md) | Spec: Tab Bar — Designed From First Principles |

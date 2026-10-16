@@ -74,6 +74,14 @@ pub const NARRATION: Purpose =
 pub const CONTINUITY_STATE: Purpose =
     Purpose { tag: "continuity_state", timeout: Duration::from_secs(90), class: Class::Background, logs_reply: false };
 
+/// The Swarm Supervisor's verdict on a turn that just ended
+/// (`backend::supervisor`): continue the agent, or stop for the user. Background
+/// class: nobody is waiting on a reply in a pane, and a burst of agents ending
+/// turns together must not hold up a title or a suggestion.
+/// docs/specs/SPEC_SWARM_SUPERVISOR_2026_10_16.md §3.3.
+pub const SUPERVISOR_VERDICT: Purpose =
+    Purpose { tag: "supervisor_verdict", timeout: BACKGROUND_TIMEOUT, class: Class::Background, logs_reply: true };
+
 /// Every purpose, for anything that lists them.
 #[cfg(test)]
 pub const ALL: &[&Purpose] = &[
@@ -85,6 +93,7 @@ pub const ALL: &[&Purpose] = &[
     &NEXT_PROMPT_SUGGESTION,
     &NARRATION,
     &CONTINUITY_STATE,
+    &SUPERVISOR_VERDICT,
 ];
 
 #[cfg(test)]

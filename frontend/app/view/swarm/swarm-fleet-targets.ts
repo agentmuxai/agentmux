@@ -16,7 +16,7 @@
 
 import type { RemoteAgent, RemoteSection } from "./swarm-remote";
 
-export type FleetAction = "broadcast" | "stop";
+export type FleetAction = "broadcast" | "stop" | "supervise";
 
 export interface FleetTargetInfo {
     key: string;
@@ -36,8 +36,11 @@ export interface FleetTargetInfo {
 
 const NO_VERIFIED_LINK = "no verified link to other machines yet";
 
-/** Why `action` can't reach `target`, or null when it can. */
+/** Why `action` can't reach `target`, or null when it can. The Supervisor runs
+ *  in each AgentMux for its own agents, so it reaches this instance's only
+ *  (docs/specs/SPEC_SWARM_SUPERVISOR_2026_10_16.md §2.1). */
 export function unavailableReason(target: FleetTargetInfo, action: FleetAction): string | null {
+    if (action === "supervise") return target.remote ? "can't supervise: only this AgentMux's own agents" : null;
     if (target.actionable) return null;
     return action === "stop" ? `can't stop: ${NO_VERIFIED_LINK}` : `can't message: ${NO_VERIFIED_LINK}`;
 }

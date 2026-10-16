@@ -418,6 +418,10 @@
             "method": "FleetBulkStopCommand"
         },
         {
+            "command": "supervisor.set-mode",
+            "method": "SupervisorSetModeCommand"
+        },
+        {
             "command": "fleet.group.create",
             "method": "FleetGroupCreateCommand"
         },

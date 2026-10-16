@@ -187,6 +187,7 @@ import type { CommandSkillCatalogUpsertData } from "@/types/rpc/CommandSkillCata
 import type { CommandSkillCatalogUpsertForBundleData } from "@/types/rpc/CommandSkillCatalogUpsertForBundleData";
 import type { CommandSkillUpsertData } from "@/types/rpc/CommandSkillUpsertData";
 import type { CommandSubprocessSpawnData } from "@/types/rpc/CommandSubprocessSpawnData";
+import type { CommandSupervisorSetModeData } from "@/types/rpc/CommandSupervisorSetModeData";
 import type { CommandToolDecisionData } from "@/types/rpc/CommandToolDecisionData";
 import type { CommandUnlinkAgentIdentityData } from "@/types/rpc/CommandUnlinkAgentIdentityData";
 import type { CommandUpdateAgentDefinitionData } from "@/types/rpc/CommandUpdateAgentDefinitionData";
@@ -1026,6 +1027,14 @@ export const GeneratedApi = {
   // command "fleet.bulk-stop"
   FleetBulkStopCommand(client: RpcClient, data: CommandFleetBulkStopData, opts?: RpcOpts): Promise<FleetActionResult> {
     return client.rpcCall("fleet.bulk-stop", data, opts);
+  },
+  // command "supervisor.set-mode"
+  SupervisorSetModeCommand(
+    client: RpcClient,
+    data: CommandSupervisorSetModeData,
+    opts?: RpcOpts
+  ): Promise<FleetActionResult> {
+    return client.rpcCall("supervisor.set-mode", data, opts);
   },
   // command "fleet.group.create"
   FleetGroupCreateCommand(client: RpcClient, data: CommandFleetGroupCreateData, opts?: RpcOpts): Promise<FleetGroup> {

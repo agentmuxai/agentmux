@@ -33,6 +33,8 @@ export function triggerLeadIn(t: TurnTrigger | null | undefined): string | null 
             return t.from && t.from !== "cron" ? `↳ ${t.from}` : "↳ scheduled run";
         case "task":
             return `↳ ${t.from ?? "a background task finished"}`;
+        case "supervisor":
+            return "↳ the Supervisor kept it going";
         default:
             return null;
     }
@@ -50,6 +52,8 @@ export function workedVerb(t: TurnTrigger | null | undefined): string {
             return "Worked on a scheduled run";
         case "task":
             return "Worked on a finished task";
+        case "supervisor":
+            return "Worked on a Supervisor continuation";
         default:
             return "Worked";
     }
@@ -62,6 +66,7 @@ const NOUNS: Record<TriggerKind, [string, string]> = {
     service: ["notice", "notices"],
     schedule: ["scheduled run", "scheduled runs"],
     task: ["finished task", "finished tasks"],
+    supervisor: ["Supervisor continuation", "Supervisor continuations"],
     system: ["", ""],
 };
 

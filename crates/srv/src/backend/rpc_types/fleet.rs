@@ -40,6 +40,15 @@ pub struct CommandFleetBroadcastData {
     pub message: String,
 }
 
+/// Input for supervisor.set-mode: the Swarm Supervisor's mode for each target
+/// pane (block ids, as broadcast). docs/specs/SPEC_SWARM_SUPERVISOR_2026_10_16.md §3.1.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct CommandSupervisorSetModeData {
+    pub targets: Vec<String>,
+    pub mode: crate::backend::supervisor::SupervisorMode,
+}
+
 /// Caps blast radius on a bulk-stop: targets are stopped in batches of
 /// `batch_size`; if the failure rate within a completed batch exceeds
 /// `max_fail_percentage`, remaining batches are skipped. A simplified,
