@@ -3,10 +3,11 @@
 
 //! `app.update-status`: what srv knows about newer AgentMux releases
 //! (`backend::update_check`), for a window that opens after the last
-//! `app:updatestatus` event. `app.update-download`: download and stage the
-//! release it found (`backend::update_download`); progress follows as events.
-//! `app.upgrade-restart` / `app.upgrade-cancel`: restart into it once agents
-//! are idle, or stop waiting (`backend::update_restart`).
+//! `app:updatestatus` event. Downloading the release it found
+//! (`backend::update_download`), restarting into it once agents are idle and
+//! stopping that wait (`backend::update_restart`) are the user's clicks only:
+//! they come through the host (`POST /api/v1/host/app_update`), which agents,
+//! holding the instance auth key, can't impersonate.
 //! `app.upgrade-requests`: agents' requests waiting for the user
 //! (`backend::upgrade_request`); the user's answer comes only through the
 //! host (`POST /api/v1/host/upgrade_request`), which agents can't impersonate.
@@ -20,34 +21,48 @@ pub fn register(engine: &Arc<WshRpcEngine>, _state: &AppState) {
     engine.register_typed(COMMAND_APP_UPDATE_STATUS, move |_req: Option<NoArgsReq>, _ctx| async move {
         Ok::<_, String>(crate::backend::update_check::current_status())
     });
-    // The user's click only: an agent asks through RequestUpgrade, which
-    // needs the user's say-so (the spec's §5.1).
-    engine.register_typed(COMMAND_APP_UPDATE_DOWNLOAD, move |_req: Option<NoArgsReq>, ctx| async move {
-        if !ctx.agent_id.is_empty() {
-            return Err("FORBIDDEN: only the user starts downloading an AgentMux release".to_string());
-        }
-        crate::backend::update_download::start()
-    });
-    engine.register_typed(
-        COMMAND_APP_UPGRADE_RESTART,
-        move |req: crate::backend::update_restart::CommandAppUpgradeRestartData, ctx| async move {
-            if !ctx.agent_id.is_empty() {
-                return Err("FORBIDDEN: only the user restarts AgentMux to upgrade it".to_string());
-            }
-            crate::backend::update_restart::start(req.now)
-        },
-    );
-    engine.register_typed(COMMAND_APP_UPGRADE_CANCEL, move |_req: Option<NoArgsReq>, ctx| async move {
-        if !ctx.agent_id.is_empty() {
-            return Err("FORBIDDEN: only the user cancels an AgentMux upgrade".to_string());
-        }
-        crate::backend::update_restart::cancel()
-    });
     engine.register_typed(COMMAND_APP_UPGRADE_REQUESTS, move |_req: Option<NoArgsReq>, _ctx| async move {
         Ok::<_, String>(crate::backend::upgrade_request::UpgradeRequestsEvent {
             requests: crate::backend::upgrade_request::list(),
         })
     });
+}
+
+/// The user's click in the version panel, relayed by the host.
+#[derive(Debug, serde::Deserialize)]
+pub(crate) struct HostAppUpdateAction {
+    /// `download`, `restart` or `cancel`.
+    action: String,
+    /// `restart`: without waiting for agents to finish their turn.
+    #[serde(default)]
+    now: bool,
+}
+
+/// `POST /api/v1/host/app_update`: Download, Upgrade & restart (or Restart
+/// now) and Cancel in the version panel, relayed by the CEF host with its own
+/// token. Answers the status after the action, as `data`.
+pub(crate) async fn handle_host_app_update(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    headers: axum::http::HeaderMap,
+    axum::Json(body): axum::Json<HostAppUpdateAction>,
+) -> axum::response::Response {
+    use axum::http::StatusCode;
+    use axum::response::IntoResponse;
+    use axum::Json;
+    if !crate::server::ui_handlers::from_host(&state, &headers).await {
+        return (StatusCode::FORBIDDEN, Json(json!({ "ok": false, "error": "only the AgentMux host can do that" })))
+            .into_response();
+    }
+    let result = match body.action.as_str() {
+        "download" => crate::backend::update_download::start(),
+        "restart" => crate::backend::update_restart::start(body.now),
+        "cancel" => crate::backend::update_restart::cancel(),
+        other => Err(format!("unknown action {other:?}")),
+    };
+    match result {
+        Ok(status) => Json(json!({ "ok": true, "data": status })).into_response(),
+        Err(e) => (StatusCode::CONFLICT, Json(json!({ "ok": false, "error": e }))).into_response(),
+    }
 }
 
 /// `POST /api/v1/host/upgrade_request`: the user's Upgrade now / Later on an

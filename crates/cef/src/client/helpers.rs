@@ -211,6 +211,21 @@ pub(crate) fn backend_upgrade_request(
         .map_err(|e| format!("srv refused the answer: {e}"))
 }
 
+/// Relay a click in the version panel (`download`, `restart`, `cancel`), as
+/// the host, and return srv's status after it. Blocking: run it off the UI
+/// thread.
+pub(crate) fn backend_app_update(
+    web_endpoint: &str,
+    auth_key: &str,
+    ipc_token: &str,
+    body: &serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let raw = post_as_host(web_endpoint, auth_key, ipc_token, "/api/v1/host/app_update", body)?;
+    let parsed: serde_json::Value =
+        serde_json::from_str(&raw).map_err(|e| format!("srv answered something that isn't JSON: {e}"))?;
+    Ok(parsed.get("data").cloned().unwrap_or(serde_json::Value::Null))
+}
+
 /// Report a popup a browser pane's page opened, as the host, and return
 /// srv's `data`: `{admitted: true, pane}` when srv opened it as a pane beside
 /// its opener, `{admitted: false, reason}` when the caller should open it in
