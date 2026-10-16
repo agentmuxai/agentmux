@@ -60,13 +60,13 @@
     min-height: 0;
 }
 
-// Each control is one flex item, so a narrowing pane moves them to the next
-// line one at a time from the right; the buttons stay right-aligned, flush
-// with the pane's top and right borders (no padding there).
+// Two columns: the view and window buttons (which wrap among themselves as the
+// pane narrows) and the action buttons, which stay on the first line, flush with
+// the pane's top and right borders (no padding there).
 .sysinfo-bar {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
     gap: 2px 4px;
     padding: 0 0 2px var(--sysinfo-text-inset, 1px);
     flex-shrink: 0;
@@ -78,12 +78,21 @@
     }
 }
 
+.sysinfo-bar-selectors {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 2px 4px;
+    grid-column: 1;
+    min-width: 0;
+}
+
+// Its parent leaves no right padding, so the last button's line is the pane's border.
 .sysinfo-bar-actions {
     display: flex;
     align-items: center;
     gap: 4px;
-    margin-left: auto;
-    // Its parent leaves no right padding, so the last button's line is the pane's border.
+    grid-column: 2;
 }
 
 .sysinfo-bar-paused {

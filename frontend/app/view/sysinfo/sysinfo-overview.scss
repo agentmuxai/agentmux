@@ -139,7 +139,8 @@
     flex-wrap: wrap;
     gap: 2px 14px;
     margin: 0;
-    padding: 0;
+    // Text keeps its 1px inset from the pane's border (the overview has no padding).
+    padding: 0 0 0 1px;
     list-style: none;
     font-size: var(--text-xs);
     color: var(--grey-text-color);
