@@ -6,7 +6,7 @@ windows, run shells, and more. It has three faces over one server:
 
 | Surface | Who uses it | Where |
 |---|---|---|
-| **MCP server** (`agentmux-mcp`) | Agents. It is added to every agent's MCP config automatically, with 23 tools (`Terminal`, `Browser`, `UI`, `Memory`, `Tasks`, `Presence`, `Schedule`, `Pane`, `Stop`, `Widget`, `Identity`, `SendMessage`, `OpenAgent`, …), being consolidated into one tool per family with an `action` ([`SPEC_MUXAPI_TOOL_CONSOLIDATION_2026_10_15.md`](../specs/SPEC_MUXAPI_TOOL_CONSOLIDATION_2026_10_15.md)). | [`crates/mcp/src/tools/`](../../crates/mcp/src/tools) |
+| **MCP server** (`agentmux-mcp`) | Agents. It is added to every agent's MCP config automatically, with 14 tools: one per family, each with an `action` (`Terminal`, `Browser`, `UI`, `Memory`, `Tasks`, `Presence`, `Schedule`, `Pane`, `Stop`, `Widget`, `Identity`, `Agents`, `Message`), and `RegisterDevServer` for container agents ([`SPEC_MUXAPI_TOOL_CONSOLIDATION_2026_10_15.md`](../specs/SPEC_MUXAPI_TOOL_CONSOLIDATION_2026_10_15.md)). | [`crates/mcp/src/tools/`](../../crates/mcp/src/tools) |
 | **HTTP** (`/api/v1/…`, `/agentmux/…`) | Shell helpers and scripts. About 100 `/api/v1` routes: panes, agents, tabs, windows, shells, memory. | [`crates/srv/src/server/routes.rs`](../../crates/srv/src/server/routes.rs) |
 | **WebSocket RPC** (`/ws`) | The frontend, and tools that want push events. 250 commands, including the intent layer (`agent.open`, `agent.send`, `pane.open`). | [`app-api-extension.md`](../specs/app-api-extension.md) |
 

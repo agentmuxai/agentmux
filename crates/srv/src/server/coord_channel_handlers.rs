@@ -129,7 +129,7 @@ pub(crate) async fn handle_post_to_channel(
     if everything.iter().flatten().any(|s| is_sensitive_message(s)) {
         return bad_request(
             "not posted: it looks like it is about credentials or a destructive action, which a shared channel \
-             must not hold. Send it to the one agent it concerns with SendMessage, where it is marked sensitive.",
+             must not hold. Send it to the one agent it concerns with Message send, where it is marked sensitive.",
         );
     }
     let identified = caller.as_ref().is_some_and(|c| c.0.uid().is_some());
@@ -183,8 +183,8 @@ pub(crate) async fn handle_post_to_channel(
         "post": coord::render(&post),
         "channel": channel,
         "others_working_in_it": in_channel,
-        "note": "Posted. Agents see it with ReadChannel and in Presence who's recent_posts for this repository \
-                 for 7 days. For something meant for one agent, use SendMessage instead.",
+        "note": "Posted. Agents see it with Message read and in Presence who's recent_posts for this repository \
+                 for 7 days. For something meant for one agent, use Message send instead.",
     }))
     .into_response()
 }

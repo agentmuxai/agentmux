@@ -21,11 +21,6 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             let (act, args) = pick("Presence", ACTS, arguments)?;
             relabeled("Presence", ACTS, overlap::call(act.tool, &args, cx).await)
         }
-        // The channel tools live in overlap.rs too; they pass through here
-        // until the Message family takes them (slice S4).
-        "PostToChannel" | "ReadChannel" => {
-            overlap::call(name, arguments, cx).await
-        }
         _ => Err(not_in_family()),
     }
 }

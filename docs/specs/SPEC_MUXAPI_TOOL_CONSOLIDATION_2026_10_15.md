@@ -1,6 +1,6 @@
 # SPEC: MuxAPI in fourteen tools: one per family, with actions
 
-**Status:** active — slices S1 (`Terminal`, #5001), S2 (`Browser`, `UI`, #5003), S3 (`Memory`, `Tasks`, `Presence`, `Schedule`, #5006) and S4a (`Pane`, `Stop`, `Widget`, `Identity`) built; remaining: S4b (`Agents`, `Message`) and the eval (§7).
+**Status:** active — all slices built: S1 (`Terminal`, #5001), S2 (`Browser`, `UI`, #5003), S3 (`Memory`, `Tasks`, `Presence`, `Schedule`, #5006), S4a (`Pane`, `Stop`, `Widget`, `Identity`, #5008) and S4b (`Agents`, `Message`); remaining: the eval that measures the consolidated surface (§7).
 **Author:** Agent5@narko, 2026-10-15, at the operator's request
 **Trigger (operator, 2026-10-15):** "can we use fewer more powerful tools? like one Terminal tool that covers all those features?" … "lets take this opprunutiy to catalog all of agentmux's tools, we may want to do a similar simplification across the board, write a spec to file"
 **Builds on:** `SPEC_AGENT_TERMINAL_DRIVING_2026_10_15.md` (the first family done this way: one `Terminal` tool with an `action`), `SPEC_AGENT_TASK_EVAL_2026_10_13.md` (the eval that measures what MuxAPI costs an agent).
@@ -132,13 +132,16 @@ Agents' own memories and skills that name old tools are outside the repo; the re
 | S1 `Terminal` | #5001 | 11 tools, 8,714 → 1 tool, 4,602 (−47%); 97 tools → 87 |
 | S2 `Browser`, `UI` | #5003 | Browser 17 tools, 15,082 → 1, 5,935 (−61%); UI 8 tools, 10,296 → 1, 3,185 (−69%); 87 tools → 64. The Browser actions that change a page take `until_text`/`until_url`/`until_gone` and `snapshot: true`, so act, wait and read is one call. Operator Config gains a Browser line (it had none) |
 | S3 `Memory`, `Tasks`, `Presence`, `Schedule` | #5006 | Memory 13 tools, 9,123 → 1, 2,442 (−73%); Tasks 6, 6,555 → 1, 2,969 (−55%); Presence 3, 4,401 → 1, 2,643 (−40%); Schedule 8, 5,884 → 1, 2,167 (−63%); 64 tools → 38. Memory takes a `scope` (personal or global); Schedule's `create` takes `cron` (a persistent job) or `every` (a loop for the session). The channel tools pass through Presence until S4 |
-| S4a `Pane`, `Stop`, `Widget`, `Identity` | this PR | Pane 9 tools, 6,771 → 1, 3,447 (−49%); Stop 3, 4,915 → 1, 3,850 (−22%); Widget 3, 2,238 → 1, 2,175 (−3%); Identity 4, 1,577 → 1, 1,099 (−30%); 38 tools → 23, and the whole list 55,962 → 51,071 characters. `Pane` `open` takes a `view`; `Stop` `pane` needs a `block_id`, and `self` refuses any target. The agent tools left for S4b pass through unchanged |
+| S4a `Pane`, `Stop`, `Widget`, `Identity` | #5008 | Pane 9 tools, 6,771 → 1, 3,447 (−49%); Stop 3, 4,915 → 1, 3,850 (−22%); Widget 3, 2,238 → 1, 2,175 (−3%); Identity 4, 1,577 → 1, 1,099 (−30%); 38 tools → 23, and the whole list 55,962 → 51,071 characters. `Pane` `open` takes a `view`; `Stop` `pane` needs a `block_id`, and `self` refuses any target. The agent tools left for S4b pass through unchanged |
+| S4b `Agents`, `Message` | this PR | Agents 7 tools, 8,715 → 1, 6,464 (−26%); Message 4, 6,699 → 1, 5,584 (−17%); 23 tools → 14. `Agents` `list` is DiscoverAgents and FleetList, which were the same call; `nudge` takes `decision` (the old tool's own `action`); `search_history` refuses an `agent`, as SearchHistory had none. The Presence pass-through for the channel tools is gone |
+
+**All slices together:** 95 tools, 88,158 characters (0.59.26) → 14 tools, 47,709 (−46%). That is short of §4.3's target of half (44 KB): most of what is left is the Terminal, Browser, Agents and Message descriptions, which carry the delivery answers, ownership rules and safety rules an agent needs. Trimming them further is for the eval to justify, not done blind.
 
 S1 also moved the advertised list into one `ADVERTISED` constant (`crates/mcp/src/tool_schemas.rs`), which the server sends and a test checks, so each later slice changes the list in one place.
 
 ## 8. Open questions
 
-1. **`Agents` and `Message` as one tool?** Messaging is the most-used operation and reads clearest on its own; folding it in would save one name. Decide by the S4 measurement.
+1. **`Agents` and `Message` as one tool?** Kept apart (S4b): messaging is the most-used operation and reads clearest on its own, and the two descriptions together (12 KB) would make one tool larger than any other.
 2. **`Pane` and `UI` as one?** `Pane` acts on layout through MuxAPI; `UI` drives the rendered app. They are kept apart because `UI` is the riskier surface (it can click anything), but they overlap at screenshots.
 3. **Action names.** Verbs (`open`, `close`) versus noun-verb (`tab_new`). Anthropic notes the naming scheme affects selection; settle it with the S2 measurement and apply it to later slices.
 4. **Structured outputs.** MCP's newer output schemas let clients that support them parse results without reading prose. Add them per family as slices land, where the client supports the spec version.

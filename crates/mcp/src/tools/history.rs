@@ -1,7 +1,8 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Conversation history search and transcripts.
+//! Conversation history search and transcripts. Not advertised: `Agents`
+//! (agents_tool.rs) calls these by their old names.
 
 use super::*;
 

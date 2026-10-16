@@ -21,6 +21,7 @@ mod identity_tool;
 mod loops;
 mod memory;
 mod memory_tool;
+mod message_tool;
 mod open_prs;
 mod overlap;
 mod pane_tool;
@@ -184,6 +185,17 @@ const REPLACED: &[(&str, &str)] = &[
     ("PresetGet", "Identity with action \"preset\""),
     ("IdentityAccounts", "Identity with action \"accounts\""),
     ("IdentityValidate", "Identity with action \"validate\""),
+    ("DiscoverAgents", "Agents with action \"list\""),
+    ("FleetList", "Agents with action \"list\""),
+    ("ListConversations", "Agents with action \"conversations\""),
+    ("GetAgentTranscript", "Agents with action \"transcript\""),
+    ("OpenAgent", "Agents with action \"open\""),
+    ("SearchHistory", "Agents with action \"search_history\""),
+    ("SupervisorNudge", "Agents with action \"nudge\" (and decision)"),
+    ("SendMessage", "Message with action \"send\""),
+    ("FleetBroadcast", "Message with action \"broadcast\""),
+    ("PostToChannel", "Message with action \"post\""),
+    ("ReadChannel", "Message with action \"read\""),
 ];
 
 /// Try each family in turn; the first that owns `name` answers.
@@ -201,7 +213,7 @@ pub(crate) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
         pane_tool,
         stop_tool,
         agents_tool,
-        history,
+        message_tool,
         presence_tool,
         ui_tool,
         browser_tool,
@@ -225,9 +237,9 @@ mod tests {
     const FAMILIES: &[(&str, &str)] = &[
         ("agents_tool", include_str!("agents_tool.rs")),
         ("browser_tool", include_str!("browser_tool.rs")),
-        ("history", include_str!("history.rs")),
         ("identity_tool", include_str!("identity_tool.rs")),
         ("memory_tool", include_str!("memory_tool.rs")),
+        ("message_tool", include_str!("message_tool.rs")),
         ("pane_tool", include_str!("pane_tool.rs")),
         ("presence_tool", include_str!("presence_tool.rs")),
         ("schedule_tool", include_str!("schedule_tool.rs")),
@@ -246,6 +258,7 @@ mod tests {
         ("cron", include_str!("cron.rs")),
         ("fleet", include_str!("fleet.rs")),
         ("global_memory", include_str!("global_memory.rs")),
+        ("history", include_str!("history.rs")),
         ("loops", include_str!("loops.rs")),
         ("memory", include_str!("memory.rs")),
         ("overlap", include_str!("overlap.rs")),

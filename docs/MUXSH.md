@@ -128,7 +128,7 @@ muxsh agent send Scouto "please rebase your PR branch"
 
 `list` wraps `GET /agentmux/discovery`; `send` wraps
 `POST /agentmux/reactive/inject` — the terminal-side counterpart to an
-agent's own `SendMessage` MCP tool. All arguments after the agent name are
+agent's own `Message` MCP tool (action `send`). All arguments after the agent name are
 joined with spaces to form the message.
 
 To *launch* an agent into a pane, use `muxopen <agent>` (a separate,

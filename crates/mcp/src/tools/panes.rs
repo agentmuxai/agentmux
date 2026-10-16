@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Panes, tabs and windows: open, name, arrange, focus, close; the agent's own
-//! identity and lifecycle. Not advertised: `Pane` (pane_tool.rs) and `Stop`
-//! (stop_tool.rs) call these by their old names, and OpenAgent and
-//! RegisterDevServer pass through unchanged.
+//! identity and lifecycle. Not advertised: `Pane` (pane_tool.rs), `Stop`
+//! (stop_tool.rs) and `Agents` (agents_tool.rs) call these by their old
+//! names, and RegisterDevServer passes through Pane unchanged.
 
 use super::*;
 

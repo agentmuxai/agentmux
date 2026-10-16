@@ -112,7 +112,7 @@ fn send_message_outcome_names_the_state_and_the_id() {
     // Relay: no block_id; the id is the relay's own.
     let t = ok(json!({ "success": true, "request_id": "inj-42" }));
     assert!(t.starts_with("QUEUED for Camper via the cloud relay (unconfirmed, expires in 30 min)"), "{t}");
-    assert!(t.contains("DiscoverAgents") && t.ends_with(" id=inj-42"), "{t}");
+    assert!(t.contains("Agents list") && t.ends_with(" id=inj-42"), "{t}");
     assert!(!t.contains("signed in from your account"), "no hint unless the relay says so: {t}");
     // The relay says the target is not one of the sender's agents
     // (a cloud relay change): a likely typo, still queued.
@@ -157,8 +157,8 @@ fn send_message_outcome_names_the_state_and_the_id() {
 /// The description lists every answer the tool can give (G10: it once
 /// omitted HELD and the failures).
 #[test]
-fn send_message_description_lists_every_answer() {
-    let v: Value = serde_json::from_str(SEND_MESSAGE_TOOL).unwrap();
+fn message_send_description_lists_every_answer() {
+    let v: Value = serde_json::from_str(MESSAGE_TOOL).unwrap();
     let d = v["description"].as_str().unwrap();
     for s in ["Delivered to X", "QUEUED for X — their agent is starting up", "HELD for X (not_running)", "HELD for X (needs_login)",
               "via the cloud relay (unconfirmed", "signed in from your account", "(needs_login)", "(not_found)", "id="] {

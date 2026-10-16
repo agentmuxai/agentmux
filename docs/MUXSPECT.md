@@ -90,7 +90,7 @@ this same host) entries include `turn_active` and a last-message preview
 liveness-only for now (`remote_fetch_required: true` — reading their
 conversation content isn't supported yet). `conversation <agent>` reads
 the actual transcript tail for one named agent, resolving host first,
-then cross-channel — same underlying route `GetAgentTranscript` uses, so
+then cross-channel — same underlying route as the `Agents` tool's `transcript` action, so
 an agent's own MCP tool call and a human running this command see
 identical data.
 
