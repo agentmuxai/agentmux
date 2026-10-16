@@ -27,7 +27,7 @@ import { userIsTypingElsewhereIn } from "./editor-focus-guard";
 import type { EditorMode, EditorViewModel } from "./editor-model";
 import { cursorAtLine } from "./open-at-line";
 import { Button, IconButton, SegmentedControl } from "@/app/element/ui";
-import { dirnameOf } from "@/app/element/local-media";
+import { previewMedia } from "./editor-preview-media";
 import { TextViewerSwitch, ViewerHost } from "./viewers/viewer-host";
 import { SaveAsInput } from "./editor-save-as-input";
 import { EDITOR_STATE_FIELDS, editorDocTabs, provideEditorStates, takeMovedEditorState, trackSave } from "./editor-doc-tabs";
@@ -1170,9 +1170,9 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
                                         textAtom={() => liveDoc()}
                                         contentClass="editor-preview-markdown-content"
                                         nativeScrollbar
-                                        // Local images in the document render, relative
-                                        // to its folder (SPEC_EDITOR_REVAMP_UNIFIED_VIEWERS §4.4.1).
-                                        media={{ baseDir: dirnameOf(model.filePathAtom()) }}
+                                        // Local images in the document render, relative to its
+                                        // folder; none for a document on an SSH host.
+                                        media={previewMedia(model.filePathAtom(), model.connection(), !!model.activeTabAtom()?.isScratch)}
                                     />
                                 </div>
                             </div>
