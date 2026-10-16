@@ -19,7 +19,8 @@
 //!   instead of replacing it with its own workspace ([`save_on_last_close`]);
 //! - restore rebuilds the first entry into the window being created, as
 //!   before, and every other entry into a workspace of its own, which the main
-//!   window then opens in a window (`TakeRestoredWindows`).
+//!   window then opens each where it was (`TakeRestoredWindows`, then the
+//!   host's `open_restored_window`).
 //!
 //! The record keeps the main window's tabs at its top level too, the shape it
 //! always had, so an older AgentMux reading it still restores that window. A
@@ -60,7 +61,8 @@ fn live_windows(store: &Store) -> Vec<(Window, String)> {
             (w, ws)
         })
         .collect();
-    // Stable: the main window first, the others in the order they opened.
+    // The main window first: by its `host:label`, and otherwise by the order
+    // the windows opened, since it opens first (a row can lack the label).
     windows.sort_by_key(|(w, _)| w.meta.get("host:label").and_then(|v| v.as_str()) != Some("main"));
     windows
 }

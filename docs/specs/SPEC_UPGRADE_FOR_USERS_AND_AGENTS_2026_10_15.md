@@ -258,6 +258,60 @@ with no migration records. Dev builds keep data per branch and local
 has an older version to copy from
 (`REPORT_AGENT_HISTORY_LOST_ON_NEW_BUILD_2026_09_25.md`).
 
+### 6.1 Every window comes back
+
+Carrying the databases forward isn't enough on its own. A simulated
+0.59.28 → 0.59.29 upgrade of a portable (two local builds in a channel of
+their own, a local server standing in for GitHub's release) showed every
+step working (download, the launcher's dialog, the restart into the new
+folder, `carry-forward: started from the previous version's data`), but the
+windows came back only as far as the last one:
+
+- An upgrade quits the way the tray's Quit does (`quit_app` in
+  `crates/cef/src/commands/window/lifecycle.rs`): it closes the windows one
+  by one, and each close deletes its workspace.
+- The session record (`Client.meta["session:last_topology"]`,
+  `SPEC_SESSION_RESTORE_AND_SAVED_LAYOUTS_2026_08_13.md` Feature 1) was saved
+  only by the close that empties `Client.windowids`, so it held the last
+  window's workspace alone; the OS-shutdown flush
+  (`SPEC_CONTINUOUS_SESSION_PERSISTENCE_2026_09_08.md` Phase 0) held the first.
+- On the next start the main window restored that one workspace; nothing
+  reopened the others.
+
+**Fixed** (`crates/srv/src/server/service/session_windows.rs`,
+`crates/cef/src/commands/window/restored.rs`):
+
+- **Saved before anything closes.** `quit_app` asks srv to save the session
+  (`window.SaveSessionSnapshot` with `for_quit`) after it marks the app as
+  quitting, which stops new windows, and before it closes the first one. The
+  record holds every full window, the main one first, in `windows`; each
+  entry is the single-workspace shape plus the window's position and size.
+  The OS-shutdown flush saves every window the same way.
+- **Kept through the closes.** The record is marked as a quit's (`saved_for`,
+  `saved_at_ms`). The close that empties `Client.windowids` keeps such a
+  record if it is under two minutes old; otherwise (closing windows one by
+  one, or a quit abandoned partway) it saves its own workspace as before.
+- **Restored.** The main window's restore rebuilds the first entry into
+  itself, as before, and each other entry into a workspace of its own. The
+  main window then takes those (`window.TakeRestoredWindows`, each handed out
+  once) and asks the host to open each (`open_restored_window`).
+- **Where they were.** srv keeps a window's position and size as
+  `GetWindowRect` reports them, in physical pixels, and the host creates
+  windows in DIP, so the host scales them by the monitor the window was on
+  (`dpi_scale_at`). A spot on no monitor now (one unplugged since) opens the
+  window where a new window goes.
+- **Compatible both ways.** The record keeps the main window's tabs at its
+  top level, so an older AgentMux reading it after a downgrade restores that
+  window; a record without `windows` restores as one window.
+
+The same simulation, with three windows (the default three panes, one
+sysinfo pane, one memory pane) and two of them moved, brought all three back
+with their panes, at their positions and sizes.
+
+**Not yet:** the main window opens where the host puts it at startup, not
+where it was. macOS's Cmd+Q doesn't reach `quit_app`, so there the
+last-close record still applies.
+
 ## 7. Phases
 
 Each phase is small and useful on its own.
