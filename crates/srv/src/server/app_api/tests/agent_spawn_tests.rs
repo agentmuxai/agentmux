@@ -361,6 +361,43 @@ async fn a_failure_counts_against_the_account_the_run_was_on() {
     assert_eq!(meta.get(RUN_ACCOUNT_META_KEY), Some(&json!(leader_account(&def).id)));
 }
 
+/// `Agents` `workers` (§3.4): a leader's open workers, marked on the pane or
+/// only on the definition (a reopened worker), with their last report; never
+/// another agent's panes.
+#[tokio::test]
+async fn a_leaders_workers_are_listed_with_their_last_report() {
+    let state = test_state();
+    let (lead, tab, lead_pane) = seed_leader(&state, "claude", "host", json!({})).await;
+    let marked = crate::server::agent_handlers::copy_definition(&state.mstore, &state.id_store, &state.identity_store, &lead.id, "Lead Helper A", false).unwrap();
+    let reopened = crate::server::agent_handlers::copy_definition(&state.mstore, &state.id_store, &state.identity_store, &lead.id, "Lead Helper B", false).unwrap();
+    state
+        .mstore
+        .agent_content_set(&crate::backend::storage::store::AgentContent {
+            agent_id: reopened.id.clone(),
+            content_type: WORKER_OF_CONTENT.to_string(),
+            content: json!({ "agent": lead.name, "id": lead.id }).to_string(),
+            updated_at: 1,
+        })
+        .unwrap();
+    let a = new_block(&state, &tab, json!({ "view": "agent", "agentId": marked.id, COACHED_BY_META_KEY: { "agent": lead.name, "id": lead.id, "block_id": lead_pane } })).await;
+    let b = new_block(&state, &tab, json!({ "view": "agent", "agentId": reopened.id })).await;
+    new_block(&state, &tab, json!({ "view": "agent", "agentId": "someone-else" })).await;
+    let audit: Vec<crate::backend::reactive::AuditLogEntry> = vec![serde_json::from_value(json!({
+        "timestamp": 1234, "source_agent": marked.slug, "target_agent": lead.slug, "block_id": lead_pane,
+        "message_hash": "h", "message_length": 1, "success": true, "request_id": "r"
+    }))
+    .unwrap()];
+
+    crate::backend::worker_notes::absorb(&audit);
+    let listed = workers_of(&state.mstore, &lead.id);
+    let mut got: Vec<(String, String, Option<u64>)> = listed.iter().map(|w| (w.name.clone(), w.block_id.clone(), w.last_report_ms)).collect();
+    got.sort();
+    assert_eq!(got, vec![("Lead Helper A".into(), a, Some(1234)), ("Lead Helper B".into(), b, None)]);
+    assert_eq!(listed.iter().find(|w| w.name == "Lead Helper A").unwrap().message_to, marked.slug);
+    assert!(workers_of(&state.mstore, &marked.id).is_empty(), "a worker has no workers");
+    assert!(workers_of(&state.mstore, "").is_empty());
+}
+
 /// The mark is srv's: a client can neither write it on an existing pane nor
 /// bring it into a new one.
 #[test]

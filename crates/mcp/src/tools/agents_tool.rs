@@ -21,6 +21,7 @@ pub(super) const ACTS: &[Act] = &[
     Act { action: "transcript", tool: "GetAgentTranscript", rename: &[] },
     Act { action: "open", tool: "OpenAgent", rename: &[("agent", "agent_id")] },
     Act { action: "spawn", tool: "SpawnAgent", rename: &[] },
+    Act { action: "workers", tool: "AgentWorkers", rename: &[] },
     Act { action: "search_history", tool: "SearchHistory", rename: &[] },
     // The handler's own `action` is the decision: `pick` takes Agents'
     // `action` out before it renames.
@@ -43,6 +44,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 "DiscoverAgents" | "SupervisorNudge" => fleet::call(act.tool, &args, cx).await,
                 "OpenAgent" => panes::call(act.tool, &args, cx).await,
                 "SpawnAgent" => spawn(&args, cx).await,
+                "AgentWorkers" => workers(cx).await,
                 _ => history::call(act.tool, &args, cx).await,
             };
             let result = result.map_err(|e| anyhow::anyhow!(public_params(&format!("{e:#}"), act.rename)));
@@ -107,12 +109,36 @@ async fn spawn(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
 }
 
 /// The worker's first message: who it reports to, then the leader's brief.
+/// It names the tool exactly: a worker that went looking for "SendMessage"
+/// found Claude Code's own cross-session tool, whose message reaches the
+/// leader unverified and isn't counted as a report.
 fn brief_message(leader: &str, brief: &str) -> String {
     format!(
         "You are a worker of {leader}, started to do the task below. Report to {leader} with the agentmux \
-         Message tool (action send, to {leader}), not a built-in SendMessage, when you finish, get stuck, \
-         or need a decision.\n\n{brief}"
+         MCP server's Message tool (mcp__agentmux__Message in Claude Code; action \"send\", to \"{leader}\"), \
+         never a built-in SendMessage, when you finish, get stuck, or need a decision.\n\n{brief}"
     )
+}
+
+/// `workers`: this agent's own workers, from srv (`/api/v1/agent/workers`).
+async fn workers(cx: &ToolCtx<'_>) -> Result<String> {
+    require_agent_env(cx.local_url, cx.auth_key, cx.block_id)?;
+    let request = agentmux_common::api_types::AgentWorkersRequest { auth: sign_ui_automation_auth()? };
+    let url = format!("{}/api/v1/agent/workers", cx.local_url.trim_end_matches('/'));
+    let resp = cx
+        .client
+        .post(&url)
+        .header(AUTH_KEY_HEADER, cx.auth_key)
+        .json(&request)
+        .send()
+        .await
+        .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+    let status = resp.status();
+    let body: Value = resp.json().await.unwrap_or(Value::Null);
+    if !status.is_success() {
+        anyhow::bail!("AgentWorkers: {}", body["error"].as_str().map(str::to_string).unwrap_or_else(|| format!("srv answered {status}: {body}")));
+    }
+    Ok(serde_json::to_string_pretty(&body)?)
 }
 
 #[cfg(test)]
@@ -152,8 +178,8 @@ mod tests {
         assert_eq!(
             m,
             "You are a worker of loap-3, started to do the task below. Report to loap-3 with the agentmux \
-             Message tool (action send, to loap-3), not a built-in SendMessage, when you finish, get stuck, \
-             or need a decision.\n\nImplement SPEC_X."
+             MCP server's Message tool (mcp__agentmux__Message in Claude Code; action \"send\", to \"loap-3\"), \
+             never a built-in SendMessage, when you finish, get stuck, or need a decision.\n\nImplement SPEC_X."
         );
         assert!(!m.contains("  "), "{m}");
     }

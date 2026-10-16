@@ -154,5 +154,7 @@ pub mod cron;
 pub mod dev_proxy;
 pub mod shell_node;
 pub mod work_facts;
+/// A leader hears when its workers end a turn without reporting, fail or stop.
+pub mod worker_notes;
 
 pub use oref::ORef;
