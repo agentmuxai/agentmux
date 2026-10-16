@@ -40,7 +40,8 @@ pub fn tier_limits(tier: &str) -> Option<(u64, u64)> {
 pub struct CloudFile {
     #[serde(flatten)]
     pub file: JektFile,
-    /// Standard base64 of a 32-byte AES-256-GCM key.
+    /// Standard base64 of a 32-byte AES-256-GCM key, or that key sealed to
+    /// the receiving install ([`is_sealed_key`], spec §7).
     pub key: String,
     pub blob_id: String,
 }
@@ -78,13 +79,29 @@ pub fn cloud_msgid_binds(msgid: &str, files: &[CloudFile]) -> bool {
     bound_digest(msgid).is_some_and(|d| d == cloud_manifest_digest(files))
 }
 
+/// Leads a file key sealed to its receiver: `x25519.<the receiving agent's
+/// WAN key fingerprint>.<base64url of the ephemeral key, the wrapped key and
+/// its tag>` (spec §7).
+pub const SEALED_KEY_PREFIX: &str = "x25519.";
+/// Base64url length of a sealed key's last part: 32 + 32 + 16 bytes.
+const SEALED_KEY_BODY_CHARS: usize = 107;
+
+/// Whether `key` has a sealed key's shape. Says nothing about whether it opens.
+pub fn is_sealed_key(key: &str) -> bool {
+    let b64url = |s: &str| s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-');
+    key.strip_prefix(SEALED_KEY_PREFIX)
+        .and_then(|rest| rest.split_once('.'))
+        .is_some_and(|(fp, body)| fp.len() == 43 && body.len() == SEALED_KEY_BODY_CHARS && b64url(fp) && b64url(body))
+}
+
 /// Why a cloud manifest is refused: the plain checks, plus a 44-character
-/// base64 key and a relay blob id on every entry.
+/// base64 key (or a sealed one) and a relay blob id on every entry.
 pub fn validate_cloud(files: &[CloudFile]) -> Result<(), String> {
     let plain: Vec<JektFile> = files.iter().map(|f| f.file.clone()).collect();
     validate(&plain)?;
     let blob_id = |s: &str| s.len() == 41 && s.starts_with("blob-") && s[5..].bytes().all(|b| b.is_ascii_hexdigit() || b == b'-');
-    if files.iter().any(|f| f.key.len() != 44 || !f.key.ends_with('=') || !blob_id(&f.blob_id)) {
+    let key = |k: &str| (k.len() == 44 && k.ends_with('=')) || is_sealed_key(k);
+    if files.iter().any(|f| !key(&f.key) || !blob_id(&f.blob_id)) {
         return Err("a cloud file entry is malformed".to_string());
     }
     Ok(())
@@ -274,6 +291,26 @@ mod tests {
         let mut bad = files.clone();
         bad[0].key = "short".into();
         assert!(validate_cloud(&bad).is_err());
+    }
+
+    #[test]
+    fn a_sealed_key_passes_only_in_its_exact_shape() {
+        let sealed = format!("{SEALED_KEY_PREFIX}{}.{}", "F_-".repeat(14) + "x", "g".repeat(SEALED_KEY_BODY_CHARS));
+        assert!(is_sealed_key(&sealed));
+        let mut files = vec![cloud(1)];
+        files[0].key = sealed.clone();
+        assert!(validate_cloud(&files).is_ok());
+        for bad in [
+            sealed[..sealed.len() - 1].to_string(),
+            sealed.replace("x25519.", "x448."),
+            format!("{sealed}="),
+            sealed.replacen('g', "+", 1),
+            sealed.replacen('_', ".", 1),
+        ] {
+            assert!(!is_sealed_key(&bad), "{bad}");
+            files[0].key = bad;
+            assert!(validate_cloud(&files).is_err());
+        }
     }
 
     #[test]

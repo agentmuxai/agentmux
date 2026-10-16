@@ -262,6 +262,17 @@ fn claim_outcome(resp: Option<(u16, serde_json::Value)>) -> Outcome {
     }
 }
 
+/// The key this install wants `agent_id`'s file keys sealed to, when it
+/// holds a WAN key for the agent (spec §7). Never mints one: the spawn path
+/// decides an agent's key, importing an older one.
+fn seal_offer(agent_id: &str) -> Option<crate::server::jekt_seal::SealOffer> {
+    let wan = crate::backend::storage::wan_identity::global()?;
+    let key = wan.agent_key_load(agent_id).ok().flatten()?;
+    let instance = wan.instance_ensure(&crate::backend::reactive::registry::local_host_label()).ok()?;
+    let seed: [u8; 32] = agentmux_common::jekt_sign::decode_key(&key.private_key)?.try_into().ok()?;
+    crate::server::jekt_seal::offer(&instance.instance_id, agent_id, &key.public_key_bytes()?, &seed)
+}
+
 /// POST `path` for `agent_id`; `(status, json body)` or `None` on transport error.
 async fn call(base: &str, agent_id: &str, token: &str, http: &reqwest::Client, path: &str) -> Option<(u16, serde_json::Value)> {
     let body = serde_json::json!({
@@ -270,8 +281,10 @@ async fn call(base: &str, agent_id: &str, token: &str, http: &reqwest::Client, p
         "host": crate::backend::reactive::registry::local_host_label(),
         "channel": crate::backend::reactive::registry::local_channel_id(),
         "version": env!("CARGO_PKG_VERSION"),
-        // A sender asks before sending files through the relay.
+        // A sender asks before sending files through the relay, and seals
+        // their keys to this.
         "features": [agentmux_common::jekt_files::CLOUD_FEATURE],
+        "seal": seal_offer(agent_id),
     });
     post(base, path, token, http, Some(agent_id), &body).await
 }
@@ -456,8 +469,7 @@ pub(crate) enum Holder {
     /// This instance holds it.
     Yours,
     /// Another install of the same account holds it: the agent is live there.
-    /// The description, and what that install said it can receive.
-    Other(String, Vec<String>),
+    Other(HeldBy),
     /// A lease the relay won't describe (another account, or none), or a
     /// relay-side error.
     Unknown,
@@ -465,6 +477,20 @@ pub(crate) enum Holder {
     Unsupported,
     /// No answer at all.
     Unreachable,
+}
+
+/// What the relay says about another install holding an agent's lease.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct HeldBy {
+    /// Where, for a person to read ([`describe_holder`]).
+    pub desc: String,
+    /// The channel the agent runs in there, which is the one it signs as.
+    pub channel: String,
+    /// What that install said it can receive.
+    pub features: Vec<String>,
+    /// The key it wants the agent's file keys sealed to; `None` from an
+    /// install that predates sealing (spec §7).
+    pub seal: Option<crate::server::jekt_seal::SealOffer>,
 }
 
 /// How long an answer is reused. Shorter than the lease TTL (60 s), so a
@@ -537,12 +563,16 @@ fn holder_from(status: u16, body: &serde_json::Value) -> Holder {
             Some("yours") => Holder::Yours,
             Some("other") => {
                 let held_by = body.get("held_by");
-                let features = held_by
-                    .and_then(|h| h.get("features"))
-                    .and_then(|f| f.as_array())
-                    .map(|f| f.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
-                    .unwrap_or_default();
-                Holder::Other(held_by.map(describe_holder).unwrap_or_default(), features)
+                let field = |k: &str| held_by.and_then(|h| h.get(k));
+                Holder::Other(HeldBy {
+                    desc: held_by.map(describe_holder).unwrap_or_default(),
+                    channel: field("channel").and_then(|c| c.as_str()).unwrap_or_default().to_string(),
+                    features: field("features")
+                        .and_then(|f| f.as_array())
+                        .map(|f| f.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+                        .unwrap_or_default(),
+                    seal: field("seal").and_then(|s| serde_json::from_value(s.clone()).ok()),
+                })
             }
             _ => Holder::Unknown,
         },
@@ -585,7 +615,7 @@ mod tests {
         let agent = format!("HolderTest-{}", &uuid::Uuid::new_v4().to_string()[..8]);
 
         let first = holder(&base, &agent, "lark", "tok", &http).await;
-        assert!(matches!(&first, Holder::Other(d, _) if d.contains("area54-holder-test")), "{first:?}");
+        assert!(matches!(&first, Holder::Other(h) if h.desc.contains("area54-holder-test")), "{first:?}");
         let again = holder(&base, &agent, "lark", "tok", &http).await;
         assert_eq!(again, first);
         let seen = hits.lock().unwrap().clone();
@@ -621,7 +651,14 @@ mod tests {
         assert_eq!(holder_from(200, &json!({ "state": "free" })), Holder::Free);
         assert_eq!(holder_from(200, &json!({ "state": "yours" })), Holder::Yours);
         let other = holder_from(200, &json!({ "state": "other", "held_by": { "host": "area54", "channel": "stable", "version": "0.59.5" } }));
-        assert!(matches!(&other, Holder::Other(d, _) if d.contains("area54")), "{other:?}");
+        assert!(matches!(&other, Holder::Other(h) if h.desc.contains("area54") && h.channel == "stable" && h.seal.is_none()), "{other:?}");
+        let seal = json!({ "instance": "i", "key_fp": "f", "key": "k", "sig": "s" });
+        let sealed = holder_from(200, &json!({ "state": "other", "held_by": { "host": "area54", "channel": "stable", "features": ["files-cloud-v1"], "seal": seal } }));
+        let Holder::Other(h) = sealed else { panic!("{sealed:?}") };
+        assert_eq!(h.features, vec!["files-cloud-v1".to_string()]);
+        assert_eq!(h.seal.map(|s| s.instance), Some("i".to_string()));
+        let malformed = holder_from(200, &json!({ "state": "other", "held_by": { "seal": { "instance": 3 } } }));
+        assert!(matches!(&malformed, Holder::Other(h) if h.seal.is_none()), "an offer that doesn't parse is no offer");
         assert_eq!(holder_from(200, &json!({ "state": "unknown" })), Holder::Unknown);
         assert_eq!(holder_from(200, &json!({ "state": "weird" })), Holder::Unknown);
         assert_eq!(holder_from(200, &serde_json::Value::Null), Holder::Unknown);

@@ -176,20 +176,24 @@ async fn get_json<T: serde::de::DeserializeOwned>(dir: &Directory<'_>, url: &str
 }
 
 async fn fetch_record(dir: &Directory<'_>, carried: &WanCarried<'_>) -> Fetched<WanKeyRecord> {
+    fetch_record_for(dir, carried.source_agent, carried.source_host, carried.source_channel, carried.key_fp).await
+}
+
+async fn fetch_record_for(dir: &Directory<'_>, agent: &str, instance: &str, channel: &str, key_fp: &str) -> Fetched<WanKeyRecord> {
     let mut url = match reqwest::Url::parse(dir.base_url) {
         Ok(u) => u,
         Err(e) => return Fetched::Unavailable(format!("bad directory URL: {e}")),
     };
     match url.path_segments_mut() {
         Ok(mut segs) => {
-            segs.pop_if_empty().push("agents").push(&carried.source_agent.to_lowercase()).push("wan-key");
+            segs.pop_if_empty().push("agents").push(&agent.to_lowercase()).push("wan-key");
         }
         Err(_) => return Fetched::Unavailable("bad directory URL: cannot be a base".to_string()),
     }
     url.query_pairs_mut()
-        .append_pair("instance", &carried.source_host.to_lowercase())
-        .append_pair("channel", carried.source_channel)
-        .append_pair("fp", carried.key_fp);
+        .append_pair("instance", &instance.to_lowercase())
+        .append_pair("channel", channel)
+        .append_pair("fp", key_fp);
     get_json(dir, url.as_str()).await
 }
 
@@ -320,6 +324,41 @@ pub(crate) async fn verify(
         reason: None,
         detail: None,
     }
+}
+
+/// A *receiver's* record, for a sender sealing files to it
+/// (`server::jekt_cloud`, file transfer spec §7): `agent`'s key on install
+/// `instance`, channel `channel`, fingerprint `key_fp`, as the agent's lease
+/// named them. Only a record whose chain holds is returned or cached, and
+/// never one of a revoked install. `Err` says why not, to follow the agent's
+/// name.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn recipient_record(
+    wan: &WanIdentityStore,
+    own_instance_id: &str,
+    dir: &Directory<'_>,
+    agent: &str,
+    instance: &str,
+    channel: &str,
+    key_fp: &str,
+    now: i64,
+) -> Result<WanKeyRecord, String> {
+    let record = match wan.peer_record_get(instance, agent, channel, key_fp) {
+        Ok(Some(cached)) => cached,
+        _ => match fetch_record_for(dir, agent, instance, channel, key_fp).await {
+            Fetched::Found(record) => record,
+            Fetched::NotFound => return Err("has no key in the account's key directory yet; try again in a minute".to_string()),
+            Fetched::Unavailable(cause) => return Err(format!("couldn't be looked up in the account's key directory ({cause})")),
+        },
+    };
+    if record.check_chain().is_none() {
+        return Err("has a key record whose certificate doesn't check out".to_string());
+    }
+    let _ = wan.peer_record_put(&record);
+    if instance_status(wan, own_instance_id, &record, dir, now).await == WanInstanceStatus::Revoked {
+        return Err("runs on an install its owner revoked".to_string());
+    }
+    Ok(record)
 }
 
 /// After a verified message was delivered locally: remember it, so the same
