@@ -5,7 +5,8 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 
 vi.mock("@/app/platform/ipc", () => ({ invokeCommand: vi.fn(() => Promise.resolve()) }));
 
-import { __overlayRectCount, registerPaneOverlay } from "./pane-overlay";
+import { __overlayRectCount, overlayCoversPane, registerPaneOverlay } from "./pane-overlay";
+import { __resetPaneRectRegistry, registerPaneRect } from "./pane-rect-registry";
 
 // registerPaneOverlay — the imperative sibling of usePaneOverlay used by the
 // plain-DOM context menu (SPEC_MACOS_BROWSER_PANE_CONTEXT_MENU_2026_09_24).
@@ -69,5 +70,29 @@ describe("isRegisteredPaneOverlay", () => {
         expect(isRegisteredPaneOverlay(el)).toBe(true);
         h.release();
         expect(isRegisteredPaneOverlay(el)).toBe(false);
+    });
+});
+
+describe("overlayCoversPane", () => {
+    afterEach(() => {
+        document.body.innerHTML = "";
+        __resetPaneRectRegistry();
+    });
+
+    test("true while an open overlay intersects the pane, false once released", () => {
+        registerPaneRect("pane-a", { x: 0, y: 0, w: 200, h: 200 });
+        expect(overlayCoversPane("pane-a")).toBe(false);
+        const h = registerPaneOverlay(makeEl({ left: 150, top: 150, width: 100, height: 100 }));
+        expect(overlayCoversPane("pane-a")).toBe(true);
+        h.release();
+        expect(overlayCoversPane("pane-a")).toBe(false);
+    });
+
+    test("an overlay elsewhere, or a pane with no rect, is not covered", () => {
+        registerPaneRect("pane-a", { x: 0, y: 0, w: 100, h: 100 });
+        const h = registerPaneOverlay(makeEl({ left: 300, top: 300, width: 50, height: 50 }));
+        expect(overlayCoversPane("pane-a")).toBe(false);
+        expect(overlayCoversPane("no-such-pane")).toBe(false);
+        h.release();
     });
 });

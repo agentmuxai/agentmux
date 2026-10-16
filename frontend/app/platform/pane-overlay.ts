@@ -16,7 +16,7 @@
 // host hides a whole pane while any overlay intersects it (see flushClip).
 
 import { getApi } from "@/app/store/app-api";
-import { anyPaneIntersects, paneCount } from "@/app/platform/pane-rect-registry";
+import { anyPaneIntersects, getPaneRect, paneCount } from "@/app/platform/pane-rect-registry";
 import { onCleanup, onMount, type Accessor } from "solid-js";
 
 interface OverlayRect {
@@ -328,6 +328,23 @@ const registeredOverlayEls = new WeakSet<Element>();
  */
 export function isRegisteredPaneOverlay(el: Element): boolean {
     return registeredOverlayEls.has(el) || autoOverlayRects.has(el);
+}
+
+/**
+ * Whether a menu, popover or modal is drawn over browser pane `blockId`: one of
+ * the open overlays registered for the airspace hole intersects the pane. The
+ * keyboard belongs to that overlay (Escape to close it, arrows to move in it),
+ * not to the page under it. False for a pane with no registered rect (not a
+ * native browser pane, or not placed yet).
+ */
+export function overlayCoversPane(blockId: string): boolean {
+    const pane = getPaneRect(blockId);
+    if (pane == null || pane.w <= 0 || pane.h <= 0) return false;
+    const covers = (r: OverlayRect): boolean =>
+        r.w > 0 && r.h > 0 && r.x < pane.x + pane.w && r.x + r.w > pane.x && r.y < pane.y + pane.h && r.y + r.h > pane.y;
+    for (const r of overlayRects.values()) if (covers(r)) return true;
+    for (const r of autoOverlayRects.values()) if (covers(r)) return true;
+    return false;
 }
 
 /** Test-only: number of live imperative/hook overlay registrations with a rect. */

@@ -11,6 +11,7 @@ import { modalCovers } from "@/app/element/modal-stack";
 import { gatingNodeIds, tabSwitching } from "@/app/store/tab-reveal";
 import { caretInEditableOutsidePanes, focusedBlockId, userCaretInBlock } from "@/util/focusutil";
 import { userInThisWindow } from "@/app/store/input-owner";
+import { overlayCoversPane } from "@/app/platform/pane-overlay";
 import { getLayoutModelForStaticTab } from "@/layout/index";
 
 /**
@@ -95,6 +96,11 @@ class FocusManager {
         if (caretInEditableOutsidePanes()) return;
         const blockId = active?.focusedNode?.()?.data?.blockId;
         if (blockId == null || modalInTheWay(blockId)) return;
+        // A menu or popover open over a browser pane has the keyboard (the
+        // host handed it back to the app when the hole opened). Giving the
+        // page the keys again, as the window-focus net does ~100 ms after, left
+        // Escape and the arrows going to the page and the menu open.
+        if (overlayCoversPane(blockId)) return;
         giveBlockFocus(blockId);
     }
 

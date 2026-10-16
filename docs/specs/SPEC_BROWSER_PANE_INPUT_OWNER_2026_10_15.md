@@ -188,6 +188,11 @@ the machine parks; Linux: the pane's overlay view given Views focus, which route
 run at once, on the UI thread inside the event, as the hook did before (the click that selects a pane is the one the
 page gets); the others are posted. `PENDING_PANE_KEY` and its TTL are replaced by the machine's parked selection.
 
+A menu or popover opened over a pane (a hole in the overlay, macOS) hands the keyboard to the app, so Escape and the
+arrows reach the menu. The frontend's window-focus net must not give it back to the selected pane while the menu is
+open (`overlayCoversPane`, `pane-overlay.ts`): it did, ~100 ms later, and the menu then couldn't be closed from the
+keyboard (found by a real-input run on macOS, 2026-10-16).
+
 ## 4. Phases
 
 | Phase | Content |

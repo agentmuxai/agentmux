@@ -66,6 +66,11 @@ function runFrames(n = 1): void {
     }
 }
 
+let overlayOver: string | null = null;
+vi.mock("@/app/platform/pane-overlay", () => ({
+    overlayCoversPane: (blockId: string) => overlayOver === blockId,
+}));
+
 import { push as pushModal, remove as removeModal } from "@/app/element/modal-stack";
 import { FOCUS_RETRY_FRAMES, focusManager, installFocusFollowsSelection, WINDOW_FOCUS_SETTLE_MS } from "./focusManager";
 
@@ -77,6 +82,7 @@ describe("focusManager", () => {
         focusedNode = { id: "node-1", data: { blockId: "block-1" } };
         caretInBlock = null;
         caretOutsidePanes = false;
+        overlayOver = null;
         frames = [];
         document.body.innerHTML = "";
         vi.spyOn(document, "hasFocus").mockReturnValue(true);
@@ -212,6 +218,15 @@ describe("focusManager", () => {
             hasOpenModals.mockReturnValue(true);
             focusManager.ensureSelectionFocused("selection");
             expect(giveFocus).not.toHaveBeenCalled();
+        });
+
+        it("leaves the keyboard with a menu or popover open over the selected pane", () => {
+            overlayOver = "block-1";
+            focusManager.ensureSelectionFocused("window-focus");
+            expect(giveFocus).not.toHaveBeenCalled();
+            overlayOver = null;
+            focusManager.ensureSelectionFocused("window-focus");
+            expect(giveFocus).toHaveBeenCalledTimes(1);
         });
 
         // The window is in the background (`exit`, then the user switched
