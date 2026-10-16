@@ -83,6 +83,7 @@ fn write(dir: &Path, record: &Record) {
 /// logged and treated as none: at worst a note is missed.
 pub fn observe_start(dir: &Path, version: &str, now_ms: i64) -> Option<Upgraded> {
     use crate::backend::update_check::version_core;
+    let _guard = RECORD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let previous = read(dir);
     let mut record = Record { version: version.to_string(), at: now_ms, ..Default::default() };
     match &previous {
@@ -109,8 +110,12 @@ pub fn observe_start(dir: &Path, version: &str, now_ms: i64) -> Option<Upgraded>
     })
 }
 
+/// Serializes read-modify-write of the record: panes resume together.
+static RECORD_LOCK: Mutex<()> = Mutex::new(());
+
 /// Add `block_id` to the panes told, in the record.
 fn record_notified(dir: &Path, block_id: &str) {
+    let _guard = RECORD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     if let Some(mut record) = read(dir) {
         if !record.notified.iter().any(|b| b == block_id) {
             record.notified.push(block_id.to_string());
@@ -163,12 +168,11 @@ fn resumed(store: &crate::backend::storage::store::Store, block_id: &str) -> boo
 
 /// An agent registered in `block_id` (any controller). If an upgrade is being
 /// announced and the pane is a resumed one not yet told, tell it, once.
+/// Called under the handler lock: no I/O here; the store is read, and the
+/// note sent, from a task of its own. A pane is considered once per run.
 pub fn on_registered(block_id: &str) {
     let Some(Some(state)) = STATE.get() else { return };
     if agentmux_common::time::now_ms() - state.upgraded.at_ms >= PENDING_FOR.as_millis() as i64 {
-        return;
-    }
-    if !resumed(&state.store, block_id) {
         return;
     }
     if !state.noted.lock().unwrap_or_else(|e| e.into_inner()).insert(block_id.to_string()) {
@@ -178,6 +182,10 @@ pub fn on_registered(block_id: &str) {
     tokio::spawn(async move {
         tokio::time::sleep(SETTLE).await;
         let Some(Some(state)) = STATE.get() else { return };
+        // A new pane (no session before) isn't told; it stays considered.
+        if !resumed(&state.store, &block_id) {
+            return;
+        }
         let handler = crate::backend::reactive::get_global_handler();
         let target = handler
             .list_agents()
