@@ -218,9 +218,22 @@ describe("GlobalBundleManager — tiles first", () => {
             )
         );
         const files = screen.getByTestId("global-memory-token-strip-files");
-        expect(files).toHaveTextContent(/^Sent in .*CLAUDE\.md.*AGENTS\.md/);
+        expect(files).toHaveTextContent(/^Sent in .*CLAUDE\.md.*AGENTS\.md.*, except to an agent whose startup file is its user's own/);
         expect(files).toHaveTextContent(/not sent to Kimi.* \(no startup file\)$/);
         expect(files.getAttribute("title")).toMatch(/^CLAUDE\.md: .*Claude Code/m);
+    });
+
+    test("no startup-file line while nothing is delivered, or srv hasn't said", async () => {
+        listMemoriesMock.mockResolvedValue([bundle("g-a", "Alpha", "a")]);
+        render(() => <GlobalBundleManager />);
+        await waitFor(() => expect(tileTitles()).toContain("Alpha"));
+        expect(screen.queryByTestId("global-memory-token-strip-files")).toBeNull();
+        cleanup();
+
+        sectionsMock.mockResolvedValue([]);
+        render(() => <GlobalBundleManager />);
+        await waitFor(() => expect(screen.getByTestId("global-memory-token-strip")).toHaveTextContent("~0 tok"));
+        expect(screen.queryByTestId("global-memory-token-strip-files")).toBeNull();
     });
 
     test("with no more than 3 entries there is no largest-entries line", async () => {

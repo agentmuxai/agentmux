@@ -101,9 +101,12 @@ export function GlobalMemoryTokenStrip(props: { model: GlobalBundleViewModel }):
                     </Show>
                 </div>
             </Show>
-            <Show when={files().length > 0}>
+            {/* Only once srv says something is delivered: the file names come from
+                the provider catalog, which says nothing about delivery. */}
+            <Show when={files().length > 0 && (m.deliveredTotalsAtom()?.count ?? 0) > 0}>
                 <div class="global-memory-token-strip-files" title={filesTitle()} data-testid="global-memory-token-strip-files">
-                    Sent in {files().map((g) => g.filename).join(", ")}
+                    Sent in {files().map((g) => g.filename).join(", ")}, except to an agent whose startup file is its
+                    user's own
                     <Show when={m.noFileProvidersAtom().length > 0}>
                         {" "}· not sent to {m.noFileProvidersAtom().join(", ")} (no startup file)
                     </Show>
