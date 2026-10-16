@@ -222,9 +222,18 @@ fn renderer_incident(hung: bool, oom: bool, detail: &str) -> Incident {
     incident
 }
 
+/// Whether the quit watchdog's exit with no window visible is an incident:
+/// the host still counts a window open and nothing asked to close it. With
+/// no window registered, or a drain under way, it is a quit the user asked
+/// for (the last window closed), not one to report.
+pub fn is_unexpected_quit(registered: usize, draining: bool) -> bool {
+    registered > 0 && !draining
+}
+
 /// The quit watchdog is about to end the app with no window left while the
-/// host still counted one open (`wrr::win_event`): a window went without
-/// AgentMux closing it. Written before the exit; there is no window to tell.
+/// host still counted one open (`wrr::win_event`, when `is_unexpected_quit`):
+/// a window went without AgentMux closing it. Written before the exit; there
+/// is no window to tell.
 pub fn quit_no_window() {
     let mut incident = Incident::new("quit_no_window", "AgentMux quit because its window closed unexpectedly");
     incident.cause = Some("The window closed without AgentMux being asked to close it.".to_string());
@@ -279,6 +288,14 @@ mod tests {
         let crashed = renderer_incident(false, false, "GPU process crashed");
         assert_eq!((crashed.kind.as_str(), crashed.cause.as_deref()), ("renderer_crashed", Some("GPU process crashed")));
         assert!(crashed.did.iter().any(|d| d.contains("Every agent kept running")));
+    }
+
+    #[test]
+    fn only_a_window_gone_without_being_closed_is_an_unexpected_quit() {
+        assert!(is_unexpected_quit(1, false), "a live window nobody closed");
+        assert!(!is_unexpected_quit(0, false), "no window left: the last one was closed");
+        assert!(!is_unexpected_quit(0, true), "a quit draining after the last window closed");
+        assert!(!is_unexpected_quit(2, true), "a drain under way");
     }
 
     #[test]
