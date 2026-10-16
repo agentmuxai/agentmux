@@ -16,6 +16,25 @@ fn is_loop_id(id: &str) -> bool {
     id.starts_with("loop-")
 }
 
+/// `create` parameters only a cron job takes, and only a loop takes.
+const CRON_ONLY: &[&str] = &["name", "max_fires", "max_age_secs"];
+const LOOP_ONLY: &[&str] = &["max_iterations", "immediate"];
+
+/// A parameter of the other kind is an error, not dropped: `max_fires` on a
+/// loop would otherwise leave it running without limit.
+fn refuse_other_kinds(args: &serde_json::Map<String, Value>, kind: &str, others: &[&str]) -> Result<()> {
+    let given: Vec<&str> = others.iter().copied().filter(|k| args.contains_key(*k)).collect();
+    if !given.is_empty() {
+        anyhow::bail!(
+            "Schedule create with {kind} doesn't take {}: {} to {}",
+            given.join(", "),
+            if given.len() == 1 { "it belongs" } else { "they belong" },
+            if kind == "cron" { "a loop (every)" } else { "a cron job (cron)" }
+        );
+    }
+    Ok(())
+}
+
 /// The handler for an action, and its arguments as that handler takes them.
 pub(super) fn route(arguments: &Value) -> Result<(&'static str, Value)> {
     let action = arguments.get("action").and_then(|v| v.as_str()).unwrap_or("");
@@ -33,10 +52,12 @@ pub(super) fn route(arguments: &Value) -> Result<(&'static str, Value)> {
     let tool = match action {
         "create" => match (args.contains_key("cron"), args.contains_key("every")) {
             (true, false) => {
+                refuse_other_kinds(&args, "cron", LOOP_ONLY)?;
                 rename(&mut args, "cron", "expression");
                 "CronCreate"
             }
             (false, true) => {
+                refuse_other_kinds(&args, "every", CRON_ONLY)?;
                 rename(&mut args, "every", "interval");
                 "Loop"
             }
@@ -68,8 +89,12 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             let (tool, args) = route(arguments)?;
             match tool {
                 // Both kinds in one answer: cron jobs, then this session's loops.
+                // The loops live in this process, so srv being unreachable
+                // doesn't hide them.
                 "list" => {
-                    let jobs = cron::call("CronList", &args, cx).await?;
+                    let jobs = cron::call("CronList", &args, cx)
+                        .await
+                        .unwrap_or_else(|e| format!("unavailable: {e:#}"));
                     let loops = loops::call("LoopList", &args, cx).await?;
                     Ok(format!("cron jobs:\n{jobs}\n\nloops (this session):\n{loops}"))
                 }
@@ -84,6 +109,16 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_parameter_of_the_other_kind_is_refused() {
+        let e = route(&json!({ "action": "create", "every": "5m", "prompt": "p", "max_fires": 3 })).unwrap_err().to_string();
+        assert_eq!(e, "Schedule create with every doesn't take max_fires: it belongs to a cron job (cron)");
+        let e = route(&json!({ "action": "create", "cron": "* * * * *", "prompt": "p", "to": "a", "immediate": true, "max_iterations": 2 }))
+            .unwrap_err()
+            .to_string();
+        assert_eq!(e, "Schedule create with cron doesn't take max_iterations, immediate: they belong to a loop (every)");
+    }
 
     #[test]
     fn create_is_a_cron_job_or_a_loop() {

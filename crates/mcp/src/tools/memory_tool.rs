@@ -43,6 +43,18 @@ pub(super) fn handler(action: &str, scope: &str) -> Result<(&'static str, &'stat
     })
 }
 
+/// A handler's "missing required parameter" error under the name Memory
+/// takes the parameter by (`version_id`, not the handler's `target_version_id`).
+pub(super) fn public_params(message: &str, rename: &[(&str, &str)]) -> String {
+    for (ours, theirs) in rename {
+        let internal = format!("missing required parameter: {theirs}");
+        if let Some(rest) = message.strip_suffix(internal.as_str()) {
+            return format!("{rest}missing required parameter: {ours}");
+        }
+    }
+    message.to_string()
+}
+
 pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
     match name {
         "Memory" => {
@@ -61,10 +73,11 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 }
             }
             let args = Value::Object(args);
-            match scope {
+            let result = match scope {
                 "global" => global_memory::call(tool, &args, cx).await,
                 _ => memory::call(tool, &args, cx).await,
-            }
+            };
+            result.map_err(|e| anyhow::anyhow!(public_params(&format!("{e:#}"), rename)))
         }
         _ => Err(not_in_family()),
     }
@@ -86,6 +99,16 @@ mod tests {
         assert!(handler("remove", "personal").unwrap_err().to_string().contains("scope \"global\""));
         assert!(handler("drop", "personal").unwrap_err().to_string().contains("unknown action"));
         assert!(handler("list", "team").unwrap_err().to_string().contains("unknown scope"));
+    }
+
+    #[test]
+    fn a_missing_parameter_is_named_as_memory_takes_it() {
+        let rename = &[("version_id", "target_version_id")][..];
+        assert_eq!(
+            public_params("missing required parameter: target_version_id", rename),
+            "missing required parameter: version_id"
+        );
+        assert_eq!(public_params("missing required parameter: filename", rename), "missing required parameter: filename");
     }
 
     #[test]
