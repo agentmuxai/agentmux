@@ -803,9 +803,14 @@
         color: var(--main-text-color);
     }
 
-    // Only the part's name wraps.
-    td:nth-child(n + 2),
-    th:nth-child(n + 2) {
+    // The part's name and how it arrives wrap, a long filename anywhere, so
+    // the numbers stay in view in a narrow pane.
+    td:nth-child(1) {
+        overflow-wrap: anywhere;
+    }
+
+    td:nth-child(n + 3),
+    th:nth-child(n + 3) {
         white-space: nowrap;
     }
 
@@ -818,5 +823,19 @@
 // An agent whose launch doesn't deliver its Personal Memory (spec §5.3).
 .memory-agent-card-undelivered {
     font-size: var(--text-xs);
+    color: var(--warning-color);
+}
+
+// The fleet line above the agent grid, and an agent's per-file distribution
+// (SPEC_MEMORY_PANE_TOKENS_2026_10_15.md §5.5).
+.memory-fleet-summary,
+.memory-file-distribution {
+    margin: 0 0 var(--space-3);
+    font-size: var(--text-xs);
+    color: var(--secondary-text-color);
+    font-variant-numeric: tabular-nums;
+}
+
+.memory-fleet-summary-outliers {
     color: var(--warning-color);
 }

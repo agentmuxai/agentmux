@@ -333,6 +333,40 @@ describe("NativeMemoryManager — filter and sort", () => {
         expect(screen.getByText("~12k tok · 1 file").getAttribute("title")).toMatch(/^~12,400 tokens \(est\.\)/);
     });
 
+    test("the fleet line sums every counted agent, takes the median per agent and names those over twice it", async () => {
+        const tokens: Record<string, number> = { a1: 100, a3: 120, a4: 900 };
+        nativeMemoryListMock.mockImplementation((_c: unknown, req: { agent_id: string }) =>
+            Promise.resolve({ files: tokens[req.agent_id] ? [{ filename: "m.md", tokens_est: tokens[req.agent_id] }] : [] })
+        );
+        listAgentDefinitionsMock.mockResolvedValue([agent("a1", "One"), agent("a2", "Empty"), agent("a3", "Three"), agent("a4", "Big")]);
+        render(() => <NativeMemoryManager />);
+        await waitFor(() =>
+            expect(screen.getByTestId("memory-fleet-summary")).toHaveTextContent(
+                "Personal Memory: ~1.1k tok across 3 of 4 agents · median ~120 tok per agent · over twice the median: Big ~900 tok"
+            )
+        );
+    });
+
+    test("no fleet line before any agent has memory", async () => {
+        render(() => <NativeMemoryManager />);
+        expect(await screen.findAllByText("No memories yet")).toHaveLength(2);
+        expect(screen.queryByTestId("memory-fleet-summary")).toBeNull();
+    });
+
+    test("the launch-cost view names its largest parts' share", async () => {
+        const part = (name: string, tokens: number) => ({
+            kind: "bundle", name, tokens_est: tokens, size_bytes: tokens * 4, lines: 1, via: "startup_file",
+        });
+        launchCostMock.mockResolvedValue({
+            agent_id: "a1", provider: "claude", startup_file: "CLAUDE.md", delivered_by_file: true,
+            parts: [part("A", 600), part("B", 200), part("C", 100), part("D", 60), part("E", 40)], total_tokens_est: 1000,
+        });
+        listAgentDefinitionsMock.mockResolvedValue([agent("a1", "Manoz")]);
+        render(() => <NativeMemoryManager />);
+        fireEvent.click(await screen.findByText("Manoz"));
+        expect(await screen.findByTestId("agent-launch-cost")).toHaveTextContent("The 3 largest parts are 90% of the launch.");
+    });
+
     test("a card says what the agent starts with, and its detail breaks it down", async () => {
         nativeMemoryListMock.mockResolvedValue({ files: [{ filename: "MEMORY.md", is_index: true, tokens_est: 40 }] });
         const part = (kind: string, name: string, tokens: number, via = "startup_file") => ({
@@ -365,6 +399,8 @@ describe("NativeMemoryManager — filter and sort", () => {
             "MEMORY.mdLoaded by Claude Code~40 tok1%",
         ]);
         expect(cost.querySelector(".agent-launch-cost-band")).toBeNull();
+        // Three parts: "the 3 largest" would be all of them.
+        expect(cost).not.toHaveTextContent("largest");
     });
 
     test("a user-owned startup file isn't counted, and a Global Memory edit refreshes the launch line", async () => {
@@ -918,6 +954,16 @@ describe("NativeMemoryManager — file grid", () => {
         fireEvent.click(await screen.findByText("AgentY"));
         await waitFor(() => expect(document.querySelectorAll(".memory-file-card").length).toBe(1));
         expect(screen.queryByText("Unverified folder")).toBeNull();
+    });
+
+    test("five files or more get a median, a p90 and the count over it; fewer get none", async () => {
+        await openAgentWithFiles([10, 20, 30, 40, 50, 60, 70, 80, 90, 4000].map((t, i) => fileMeta(`f${i}.md`, { tokens_est: t })));
+        expect(screen.getByTestId("memory-file-distribution")).toHaveTextContent(
+            "Per file: median ~55 tok, p90 ~90 tok · 1 file over p90"
+        );
+        cleanup();
+        await openAgentWithFiles([fileMeta("a.md"), fileMeta("b.md")]);
+        expect(screen.queryByTestId("memory-file-distribution")).toBeNull();
     });
 
     test("renders one tile per memory file instead of a dropdown", async () => {
