@@ -39,6 +39,10 @@
 //!   an unknown state.
 //! - `AGENTMUXSRV-ESTART ...` — ready. Parsed separately by each supervisor;
 //!   unchanged.
+//! - `AGENTMUXSRV-UPGRADE version:<v> launcher:<path>` — any time after
+//!   ESTART: the user chose "Upgrade & restart" and `<path>` is the launcher of
+//!   a release srv downloaded and verified. The launcher checks it again, asks
+//!   the user itself, and restarts into it (`crates/launcher/src/upgrade_restart.rs`).
 
 /// Prefix of the line srv writes to stderr immediately before exiting 1
 /// because `run_pending_migrations` failed. Supervisors match on this to fail
@@ -125,9 +129,49 @@ pub fn parse_migration_end_line(line: &str) -> Option<MigrationEnd> {
     Some(MigrationEnd { id: id.to_string(), duration_ms })
 }
 
+/// Prefix of the line srv writes when the user chose "Upgrade & restart".
+pub const UPGRADE_PREFIX: &str = "AGENTMUXSRV-UPGRADE";
+
+/// A parsed `UPGRADE_PREFIX` line: restart into `launcher`, which is `version`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UpgradeRequest {
+    pub version: String,
+    pub launcher: std::path::PathBuf,
+}
+
+/// The path goes last: it can hold spaces.
+pub fn upgrade_line(version: &str, launcher: &std::path::Path) -> String {
+    format!("{} version:{} launcher:{}", UPGRADE_PREFIX, version, launcher.display())
+}
+
+/// Parse an `UPGRADE_PREFIX` line. `None` for any other line, or one missing
+/// either field.
+pub fn parse_upgrade_line(line: &str) -> Option<UpgradeRequest> {
+    let rest = line.strip_prefix(UPGRADE_PREFIX)?.trim_start();
+    let (version, rest) = rest.strip_prefix("version:")?.split_once(' ')?;
+    let launcher = rest.trim_start().strip_prefix("launcher:")?.trim();
+    if version.is_empty() || launcher.is_empty() {
+        return None;
+    }
+    Some(UpgradeRequest { version: version.to_string(), launcher: launcher.into() })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn upgrade_line_round_trips_a_path_with_spaces() {
+        let path = std::path::Path::new(r"C:\Users\A User\Apps\agentmux-0.59.27-x64-portable\agentmux.exe");
+        let line = upgrade_line("0.59.27", path);
+        assert_eq!(
+            parse_upgrade_line(&line),
+            Some(UpgradeRequest { version: "0.59.27".into(), launcher: path.to_path_buf() })
+        );
+        assert_eq!(parse_upgrade_line("AGENTMUXSRV-UPGRADE version:0.59.27"), None);
+        assert_eq!(parse_upgrade_line("AGENTMUXSRV-UPGRADE launcher:C:/x/agentmux.exe"), None);
+        assert_eq!(parse_upgrade_line("AGENTMUXSRV-MIGRATING migrations:1"), None);
+    }
 
     #[test]
     fn line_is_prefixed_and_single_line() {

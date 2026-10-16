@@ -71,6 +71,7 @@ import type { CommandAgentSessionWriteStateData } from "@/types/rpc/CommandAgent
 import type { CommandAgentShutdownKeepData } from "@/types/rpc/CommandAgentShutdownKeepData";
 import type { CommandAgentStopData } from "@/types/rpc/CommandAgentStopData";
 import type { CommandAmbientNarrateData } from "@/types/rpc/CommandAmbientNarrateData";
+import type { CommandAppUpgradeRestartData } from "@/types/rpc/CommandAppUpgradeRestartData";
 import type { CommandAppendAgentHistoryData } from "@/types/rpc/CommandAppendAgentHistoryData";
 import type { CommandAskSideQuestionData } from "@/types/rpc/CommandAskSideQuestionData";
 import type { CommandAttachmentsCancelData } from "@/types/rpc/CommandAttachmentsCancelData";
@@ -2253,6 +2254,18 @@ export const GeneratedApi = {
   // command "app.update-status"
   AppUpdateStatusCommand(client: RpcClient, opts?: RpcOpts): Promise<AppUpdateStatus> {
     return client.rpcCall("app.update-status", {}, opts);
+  },
+  // command "app.upgrade-cancel"
+  AppUpgradeCancelCommand(client: RpcClient, opts?: RpcOpts): Promise<AppUpdateStatus> {
+    return client.rpcCall("app.upgrade-cancel", {}, opts);
+  },
+  // command "app.upgrade-restart"
+  AppUpgradeRestartCommand(
+    client: RpcClient,
+    data: CommandAppUpgradeRestartData,
+    opts?: RpcOpts
+  ): Promise<AppUpdateStatus> {
+    return client.rpcCall("app.upgrade-restart", data, opts);
   },
   // command "viewer.agent-hidden"
   ViewerAgentHiddenCommand(

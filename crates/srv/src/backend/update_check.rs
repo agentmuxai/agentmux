@@ -105,7 +105,9 @@ pub struct ReleaseAsset {
 pub struct DownloadStatus {
     /// The release being downloaded.
     pub version: String,
-    /// `downloading`, `unpacking`, `ready` or `failed`.
+    /// `downloading`, `unpacking`, `ready` or `failed`; then, after "Upgrade
+    /// & restart", `waiting` (for agents to finish their turn) and
+    /// `restarting` (the launcher was asked).
     pub state: String,
     #[ts(type = "number")]
     pub received: u64,
@@ -118,6 +120,9 @@ pub struct DownloadStatus {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub folder: Option<String>,
+    /// While `waiting`: how many agents are still in a turn.
+    #[serde(default)]
+    pub waiting_for: u32,
 }
 
 impl AppUpdateStatus {
@@ -339,11 +344,20 @@ fn publish(event_bus: &crate::backend::eventbus::EventBus, mut next: AppUpdateSt
         }
         // The check time alone changing is not news to a window.
         let same = AppUpdateStatus { checked_ms: cur.checked_ms, ..next.clone() } == *cur;
+        // Download progress is news to a window, not to the log.
+        let step = |s: &AppUpdateStatus| (s.state.clone(), s.latest.clone(), s.download.as_ref().map(|d| d.state.clone()));
+        if step(&cur) != step(&next) {
+            tracing::info!(
+                state = %next.state,
+                latest = ?next.latest,
+                download = ?next.download.as_ref().map(|d| d.state.as_str()),
+                "update check: status changed"
+            );
+        }
         *cur = next.clone();
         !same
     };
     if changed {
-        tracing::info!(state = %next.state, latest = ?next.latest, "update check: status changed");
         event_bus.broadcast_event(&crate::backend::eventbus::EventBus::typed_ws_event::<
             crate::backend::mps_events::AppUpdateStatusChanged,
         >(&next, String::new()));

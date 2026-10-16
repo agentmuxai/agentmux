@@ -615,6 +615,9 @@ pub async fn spawn_srv(
                     crate::startup_events::StartupStatus::Ok,
                     None,
                 );
+            } else if let Some(req) = agentmux_common::srv_stderr::parse_upgrade_line(&line) {
+                crate::log(&format!("[srv {} upgrade] {}", pid_for_log, line));
+                crate::upgrade_restart::forward(req);
             } else if line.starts_with("AGENTMUXSRV-EVENT:") {
                 crate::log(&format!("[srv {} event] {}", pid_for_log, line));
                 // Phase B.2 will forward these to subscribers.

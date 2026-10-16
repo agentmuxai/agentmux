@@ -1327,6 +1327,14 @@
             "method": "AppUpdateStatusCommand"
         },
         {
+            "command": "app.upgrade-cancel",
+            "method": "AppUpgradeCancelCommand"
+        },
+        {
+            "command": "app.upgrade-restart",
+            "method": "AppUpgradeRestartCommand"
+        },
+        {
             "command": "viewer.agent-hidden",
             "method": "ViewerAgentHiddenCommand"
         },

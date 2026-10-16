@@ -12,7 +12,8 @@
 //! to start (phase 3b). Progress and the result go out as the
 //! `app:updatestatus` event (`update_check`).
 //!
-//! The download is kept in `~/.agentmux/updates/<version>/` while it runs and
+//! The download is kept in `updates/<version>/` in this version's data folder
+//! (`AGENTMUX_DATA_HOME`, `channels/<ch>/versions/<v>/data`) while it runs and
 //! deleted once unpacked. Its file and the unpacking folder carry this
 //! process' id, so two AgentMux instances downloading the same release never
 //! write over each other; whichever stages the folder first, the other uses. Unpacking uses Windows' own `tar.exe` (libarchive,
@@ -84,6 +85,7 @@ fn set(version: &str, state: &str, received: u64, total: u64, error: Option<Stri
         total,
         error,
         folder: folder.map(|f| f.display().to_string()),
+        waiting_for: 0,
     }));
 }
 
@@ -102,7 +104,7 @@ pub fn start() -> Result<AppUpdateStatus, String> {
     };
     if let Some(d) = &status.download {
         let staged = d.folder.as_deref().is_some_and(|f| is_staged_portable(Path::new(f), &version));
-        if d.version == version && d.state == "ready" && staged {
+        if d.version == version && matches!(d.state.as_str(), "ready" | "waiting" | "restarting") && staged {
             return Ok(status);
         }
     }
@@ -139,7 +141,7 @@ async fn run(asset: &ReleaseAsset, version: &str, root: &Path) -> Result<PathBuf
     }
     set(version, "unpacking", asset.size, asset.size, None, None);
     // Next to the running folder, so it's where the user expects; under
-    // ~/.agentmux/updates when that folder's parent can't be written.
+    // this version's `updates/` when that folder's parent can't be written.
     let mut last = String::new();
     for parent in [root.parent().map(Path::to_path_buf), Some(dir.clone())].into_iter().flatten() {
         match unpack_portable(&file, version, &parent).await {
@@ -206,7 +208,7 @@ async fn download(asset: &ReleaseAsset, dest: &Path, version: &str) -> Result<()
 }
 
 /// Whether `dir` is an unpacked AgentMux `version` portable.
-fn is_staged_portable(dir: &Path, version: &str) -> bool {
+pub(crate) fn is_staged_portable(dir: &Path, version: &str) -> bool {
     dir.join("agentmux.exe").is_file()
         && dir.join("runtime").join("agentmux-portable.marker").is_file()
         && dir.join("runtime").join(format!("agentmux-{version}.exe")).is_file()

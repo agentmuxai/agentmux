@@ -9,10 +9,16 @@ export type DownloadStatus = {
  */
 version: string, 
 /**
- * `downloading`, `unpacking`, `ready` or `failed`.
+ * `downloading`, `unpacking`, `ready` or `failed`; then, after "Upgrade
+ * & restart", `waiting` (for agents to finish their turn) and
+ * `restarting` (the launcher was asked).
  */
 state: string, received: number, total: number, error?: string, 
 /**
  * When ready: the folder the new version is in.
  */
-folder?: string, };
+folder?: string, 
+/**
+ * While `waiting`: how many agents are still in a turn.
+ */
+waiting_for: number, };

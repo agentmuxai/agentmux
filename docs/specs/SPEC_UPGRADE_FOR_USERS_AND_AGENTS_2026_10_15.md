@@ -3,8 +3,9 @@
 **Date:** 2026-10-15
 **Status:** active — phase 1 (detection, the chip, Maintenance's "What's
 new" and Download) in #4983; phase 2 (data carries forward) in #4996;
-phase 3a (download and stage, Windows portable) in #5000; the rest of
-phase 3 and phases 4–5 are not started. The operator took the §8 recommendations on 2026-10-15.
+phase 3a (download and stage, Windows portable) in #5000; phase 3b
+(Upgrade & restart) in #5005; the rest of phase 3 and phases 4–5 are not
+started. The operator took the §8 recommendations on 2026-10-15.
 **Asked for:** "agents need a way to upgrade their running instances and
 continue on. Users also need a button to let them know. We did work on this
 in the past, find the history, let's consolidate; we have partial work in the
@@ -112,7 +113,7 @@ CI publishes it (`.github/workflows/build-*.yml`).
 
 | Install | How it's recognised | Release file | Apply | Phase |
 |---|---|---|---|---|
-| Windows portable | `runtime/agentmux-portable.marker` beside srv, `agentmux.exe` above it | `agentmux-<v>-x64-portable.7z` | Unpack with Windows' `tar.exe` into `agentmux-<v>-x64-portable` next to the running folder (or under `~/.agentmux/updates/<v>/` when that can't be written); the launcher starts the new folder's launcher and exits. The old folder stays; Maintenance offers to delete old versions | 3a, 3b |
+| Windows portable | `runtime/agentmux-portable.marker` beside srv, `agentmux.exe` above it | `agentmux-<v>-x64-portable.7z` | Unpack with Windows' `tar.exe` into `agentmux-<v>-x64-portable` next to the running folder (or under `updates/<v>/` in the running version's data folder when that can't be written); the launcher starts the new folder's launcher and exits. The old folder stays; Maintenance offers to delete old versions | 3a, 3b |
 | Windows `setup.exe` (Inno Setup, per-user by default, fixed AppId) | any other Windows install | `AgentMux-<v>-x64-setup.exe` | The launcher exits, the installer runs silently (`/VERYSILENT /SUPPRESSMSGBOXES`) and replaces the install in place; a `[Run]` entry for silent runs relaunches it. An all-users install asks Windows for permission | 3d |
 | Microsoft Store (`.msix`, Store ID 9P9QCXNNCRK3) | under `WindowsApps` | — | The Store updates it; AgentMux can't replace its own files. "Update in the Store" opens the Store page, or asks the Store API to install it. The Store certifies a release after GitHub publishes it, so the chip defers to the Store | 3f |
 | macOS `.dmg` | inside an `.app` | `AgentMux_<v>_arm64.dmg` | Mount, check `codesign --verify` and the Gatekeeper assessment, replace `AgentMux.app` after quit, relaunch. The bundle id carries the version (`ai.agentmux.<channel>.<version>`), so check first whether macOS asks for permissions again after each upgrade | 3c |
@@ -237,10 +238,29 @@ Each phase is small and useful on its own.
      to the running folder (`backend/update_download.rs`,
      `app.update-download`); Maintenance shows the progress, then "Show
      folder". Every other kind still opens the release page.
-   - **3b**: **Upgrade & restart**: srv tells the launcher the staged folder
-     (a line on its stderr, which the launcher already reads); the launcher
-     closes the windows (saving the session), stops srv, starts the new
-     launcher and exits. Waits for working agents first (§8).
+   - **3b**: **Upgrade & restart** (`backend/update_restart.rs`,
+     `app.upgrade-restart` / `app.upgrade-cancel`,
+     `crates/launcher/src/upgrade_restart.rs`):
+     1. srv waits for working agents to finish their turn, up to 10 minutes;
+        **Restart now** skips the wait and **Cancel** stops it (§8);
+     2. srv writes `AGENTMUXSRV-UPGRADE version:<v> launcher:<path>` on its
+        stderr, which the launcher already reads;
+     3. the launcher checks the folder again (a portable of exactly that
+        version, newer than itself, and itself a portable, not a `setup.exe`
+        install) and asks the user in a native dialog. No page or agent tool
+        in AgentMux can click it, so a restart always takes the user's own
+        Yes, whoever asked srv;
+     4. it quits the host like the tray's Quit (windows close, the session is
+        saved), stops srv, and only then starts the new launcher without this
+        instance's `AGENTMUX*` environment, and exits. A Yes that hasn't led
+        to a quit within 5 minutes lapses; srv shows "didn't restart" after 3.
+
+     Verified end to end on a packaged portable: download, verification,
+     staging, the wait, the dialog, the quit, and the new launcher coming up
+     on its own channel within a second of the old one exiting.
+
+     Only the last-closed window's tabs come back after any quit today
+     (`session:last_topology`); restoring every window is a follow-up.
    - **3c** macOS, **3d** `setup.exe`, **3e** AppImage and Linux portable,
      **3f** the Store, **3g** `.deb`/`.rpm`.
 4. **Agents.** `VersionStatus`, `RequestUpgrade` with the gate and the

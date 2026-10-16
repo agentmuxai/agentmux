@@ -53,6 +53,7 @@ mod ui_liveness;
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 mod host_hang_dump;
 mod upgrade;
+mod upgrade_restart;
 #[cfg(target_os = "windows")]
 mod splash;
 #[cfg(target_os = "macos")]
