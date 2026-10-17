@@ -212,13 +212,23 @@ pub(crate) fn reset_strips(state: &AppState) {
 }
 
 /// Does the committing click `what` (the approval's "Click \"…\"") spend
-/// money? Those still ask under bypass (spec §11.2): the cost of a mistake is
-/// money, and bulk jobs rarely pay.
+/// or move money? Those still ask under bypass (spec §11.2): the cost of a
+/// mistake is money, and bulk jobs rarely pay. Matched by word stem
+/// ("pay" covers payment, payments, paying), so it errs towards asking.
 pub(crate) fn is_payment(what: &str) -> bool {
     let w = what.to_ascii_lowercase();
     let words: Vec<&str> = w.split(|c: char| !c.is_ascii_alphanumeric()).filter(|s| !s.is_empty()).collect();
-    let one = ["pay", "buy", "purchase", "order", "checkout", "transfer", "donate", "subscribe"];
-    words.iter().any(|x| one.contains(x)) || words.windows(2).any(|p| p == ["check", "out"] || p == ["place", "order"])
+    // A word starting with one of these: pay, payment, purchase, checkout,
+    // transfer, donation, subscription, withdrawal, remittance, deposit, refund.
+    const STEMS: [&str; 11] =
+        ["pay", "purchas", "checkout", "transfer", "donat", "subscri", "withdraw", "remit", "deposit", "refund", "billing"];
+    // Words a stem would get wrong ("payload"), or that only count whole.
+    const NOT: [&str; 2] = ["payload", "payloads"];
+    const WHOLE: [&str; 8] = ["buy", "buys", "order", "orders", "paid", "wire", "bid", "tip"];
+    const PAIRS: [[&str; 2]; 6] =
+        [["check", "out"], ["place", "order"], ["send", "money"], ["send", "funds"], ["add", "funds"], ["add", "money"]];
+    words.iter().any(|x| !NOT.contains(x) && (STEMS.iter().any(|s| x.starts_with(s)) || WHOLE.contains(x)))
+        || words.windows(2).any(|p| PAIRS.iter().any(|q| p == q))
 }
 
 /// The sites a grant on `pane` binds to: the origin of the page it shows
@@ -302,10 +312,34 @@ mod tests {
 
     #[test]
     fn payments_are_recognised() {
-        for what in ["Click \"Pay now\"", "Click \"Buy\"", "Click \"Place order\"", "Click \"Check out\"", "Click \"Checkout\"", "Click \"Transfer funds\""] {
+        for what in [
+            "Click \"Pay now\"",
+            "Click \"Buy\"",
+            "Click \"Place order\"",
+            "Click \"Check out\"",
+            "Click \"Checkout\"",
+            "Click \"Transfer funds\"",
+            "Click \"Confirm payment\"",
+            "Click \"Make a payment\"",
+            "Click \"Submit payment\"",
+            "Click \"Send money\"",
+            "Click \"Withdraw\"",
+            "Click \"Wire funds\"",
+            "Click \"Purchase subscription\"",
+            "Click \"Donate\"",
+        ] {
             assert!(is_payment(what), "{what}");
         }
-        for what in ["Click \"Delete draft\"", "Click \"Submit\"", "Click \"Send\"", "Click \"Reorder list\"", "Click \"Payload settings\""] {
+        for what in [
+            "Click \"Delete draft\"",
+            "Click \"Submit\"",
+            "Click \"Send\"",
+            "Click \"Send message\"",
+            "Click \"Reorder list\"",
+            "Click \"Payload settings\"",
+            "Click \"Delete revision\"",
+            "Click \"Confirm\"",
+        ] {
             assert!(!is_payment(what), "{what}");
         }
     }

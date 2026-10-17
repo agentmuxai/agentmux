@@ -154,7 +154,7 @@ The answer to "can an agent approve itself?" must stay no. So:
 ## 11. Decisions (repo owner: "use your best recommendations", 2026-10-16)
 
 1. **Duration:** 15 minutes, 1 hour (default) or 4 hours. There is no "until I end it": 4 hours is the maximum, and an agent's `minutes` rounds down to one of the three.
-2. **Payment:** clicks named like Pay, Buy, Purchase, Order, Checkout, Check out, Place order, Transfer, Donate or Subscribe still ask under bypass (`browser_bypass::is_payment`). The cost of a mistake is money, and bulk jobs rarely pay.
+2. **Payment:** clicks whose name spends or moves money still ask under bypass (`browser_bypass::is_payment`): a word starting with pay, purchas, checkout, transfer, donat, subscri, withdraw, remit, deposit, refund or billing ("Confirm payment", "Withdraw"), the words buy, order, paid, wire, bid or tip, and Check out, Place order, Send money/funds and Add money/funds. It matches by stem so it errs towards asking (muxreview on #5045). The cost of a mistake is money, and bulk jobs rarely pay.
 3. **Scope across panes:** one grant per pane and its popup chain.
 4. **The agent's session ending** doesn't end a grant. Ownership survives the agent restarting (2026-10-07 spec §3), and the time limit bounds the grant anyway.
 
