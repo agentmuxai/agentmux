@@ -286,9 +286,9 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
                         <Show when={a().kind === "bypass"}>
                             <div class="browser-attention-target">
                                 On <b>{(a().origins ?? []).map(siteLabel).join(", ")}</b>, for{" "}
-                                <b>{minutesLabel(a().minutes ?? 60)}</b>: submits, deletes, sends and scripts run without
-                                asking you. It still can't type passwords or codes, and payments still ask. End it any
-                                time from the red strip.
+                                <b>{minutesLabel(a().minutes ?? 60)}</b>: its clicks that submit, delete or send go
+                                through without asking you. It still can't type passwords or codes or run scripts, and
+                                payments still ask. End it any time from the red strip.
                             </div>
                         </Show>
                         <Show when={a().window}>

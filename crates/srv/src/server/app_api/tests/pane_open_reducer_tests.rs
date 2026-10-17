@@ -1998,9 +1998,10 @@ async fn bypass_is_granted_only_through_the_host_and_lifts_approvals_on_its_site
     assert_eq!(fake.clicks.load(std::sync::atomic::Ordering::SeqCst), 1);
     let block = state.mstore.must_get::<crate::backend::obj::Block>(&pane).unwrap();
     assert!(block.meta.get("browser:attention").is_none_or(|v| v.is_null()));
-    // So is eval.
-    let (s, body) = post_json(&app, "/api/v1/ui/browser/eval", merged(&auth, serde_json::json!({ "pane": pane, "script": "1" }))).await;
-    assert_eq!(s, StatusCode::OK, "{body}");
+    // Eval stays refused: bypass covers committing clicks only, where the
+    // payment and secret-field checks hold.
+    let (s, _) = post_json(&app, "/api/v1/ui/browser/eval", merged(&auth, serde_json::json!({ "pane": pane, "script": "1" }))).await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
 
     // A payment still asks.
     *fake.what.lock().unwrap() = "Click \"Pay now\"".into();
@@ -2017,10 +2018,19 @@ async fn bypass_is_granted_only_through_the_host_and_lifts_approvals_on_its_site
     assert_eq!(fake.clicks.load(std::sync::atomic::Ordering::SeqCst), 1);
     *fake.what.lock().unwrap() = "Click \"Delete draft\"".into();
 
-    // Off the granted site, eval is refused again.
+    // Off the granted site, a committing click asks again.
     *fake.url.lock().unwrap() = "https://accounts.google.com/o/oauth2".into();
-    let (s, _) = post_json(&app, "/api/v1/ui/browser/eval", merged(&auth, serde_json::json!({ "pane": pane, "script": "1" }))).await;
-    assert_eq!(s, StatusCode::FORBIDDEN);
+    let asking = {
+        let (app, click) = (app.clone(), click.clone());
+        tokio::spawn(async move { post_json(&app, "/api/v1/ui/browser/act", click).await })
+    };
+    let banner = wait_for_banner(&state, &pane).await;
+    assert_eq!(banner["kind"], "approval");
+    let answer = serde_json::json!({ "block_id": pane, "id": banner["id"], "decision": "cancel" });
+    let (s, _) = post_json_headers(&app, "/api/v1/host/browser_attention", answer, &host).await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(asking.await.unwrap().0, StatusCode::FORBIDDEN);
+    assert_eq!(fake.clicks.load(std::sync::atomic::Ordering::SeqCst), 1);
     *fake.url.lock().unwrap() = "https://github.com/example/repo/issues/1".into();
 
     // The agent can end its own bypass; the strip goes, and clicks ask again.

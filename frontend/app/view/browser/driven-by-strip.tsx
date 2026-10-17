@@ -126,9 +126,9 @@ export function DrivenByStrip(props: { model: BrowserViewModel; agent: string })
                         fallback={<div class="browser-bypass-confirm-text">Open a web page in this pane first.</div>}
                     >
                         <div class="browser-bypass-confirm-text">
-                            In this pane, on <b>{sites().map(siteLabel).join(", ")}</b>, {props.agent} will submit forms,
-                            delete, send and run scripts <b>without asking you first</b>. It still can't type passwords
-                            or codes, and payments still ask.
+                            In this pane, on <b>{sites().map(siteLabel).join(", ")}</b>, {props.agent}'s clicks that
+                            submit forms, delete or send go through <b>without asking you first</b>. It still can't type
+                            passwords or codes or run scripts, and payments still ask.
                         </div>
                         <div class="browser-bypass-confirm-minutes" role="radiogroup" aria-label="For how long">
                             <For each={BYPASS_MINUTES}>

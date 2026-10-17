@@ -335,9 +335,7 @@ pub(crate) async fn handle_ui_click(
         Ok(b) => b,
         Err((code, e)) => return err_response(code, e),
     };
-    if let Err(resp) =
-        refuse_unless_bypassed(&state, &block_id, &req.auth.agent_id, "UI's click action", "Browser's snapshot action, then its click action on a ref").await
-    {
+    if let Err(resp) = refuse_on_driven_pane(&block_id, "UI's click action", "Browser's snapshot action, then its click action on a ref") {
         return resp;
     }
     let host = match get_host_ipc(&state).await {
@@ -563,15 +561,11 @@ pub(crate) async fn handle_ui_browser_eval(
         Ok(b) => b,
         Err((code, e)) => return err_response(code, e),
     };
-    if let Err(resp) = refuse_unless_bypassed(
-        &state,
+    if let Err(resp) = refuse_on_driven_pane(
         &block_id,
-        &req.auth.agent_id,
         "Browser's eval action",
         "Browser's snapshot action to read the page, and its click, fill, select and check actions to act on it",
-    )
-    .await
-    {
+    ) {
         return resp;
     }
     let host = match get_host_ipc(&state).await {
@@ -624,15 +618,11 @@ pub(crate) async fn handle_ui_browser_dispatch_key(
     let presses = matches!(req.key.as_deref(), Some("Enter") | Some("NumpadEnter") | Some("Space"))
         || req.text.as_deref().is_some_and(|t| t.contains('\n') || t.contains('\r'));
     if presses {
-        if let Err(resp) = refuse_unless_bypassed(
-            &state,
+        if let Err(resp) = refuse_on_driven_pane(
             &block_id,
-            &req.auth.agent_id,
             "Browser's key action with Enter or Space",
             "Browser's click action on the button (it asks the user when the click submits something)",
-        )
-        .await
-        {
+        ) {
             return resp;
         }
     }
@@ -1179,41 +1169,6 @@ async fn page_url(state: &AppState, target: &str) -> Result<String, String> {
         .and_then(|r| r.as_str())
         .map(str::to_string)
         .ok_or_else(|| "couldn't read the page's address".to_string())
-}
-
-/// The live bypass `agent` holds over `target`, if the page `target` shows is
-/// on the grant's sites (bypass spec §4.2). The page's address is asked only
-/// when there is a grant.
-async fn bypass_covering(state: &AppState, target: &str, agent: &str) -> Option<crate::server::browser_bypass::Grant> {
-    let g = crate::server::browser_bypass::active_for(&bypass_pane(state, target), agent)?;
-    match page_url(state, target).await {
-        Ok(url) if g.covers(&url) => Some(g),
-        Ok(url) => {
-            tracing::info!(target = %target, agent = %agent, url = %url, "[browser-bypass] paused: the page is off the granted sites");
-            None
-        }
-        Err(e) => {
-            tracing::info!(target = %target, error = %e, "[browser-bypass] not applied: the page's address couldn't be read");
-            None
-        }
-    }
-}
-
-/// `refuse_on_driven_pane`, unless the person granted `agent` a bypass that
-/// covers the page `block_id` shows (bypass spec §4.1).
-async fn refuse_unless_bypassed(
-    state: &AppState,
-    block_id: &str,
-    agent: &str,
-    what: &str,
-    instead: &str,
-) -> Result<(), axum::response::Response> {
-    let refused = refuse_on_driven_pane(block_id, what, instead);
-    if refused.is_err() && bypass_covering(state, block_id, agent).await.is_some() {
-        tracing::info!(block_id = %block_id, agent = %agent, what = %what, "[browser-bypass] allowed without asking");
-        return Ok(());
-    }
-    refused
 }
 
 /// `POST /api/v1/ui/browser/handoff` — backs `BrowserHandoff` (spec §5.2):

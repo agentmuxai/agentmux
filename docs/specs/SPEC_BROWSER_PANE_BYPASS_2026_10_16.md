@@ -16,7 +16,7 @@
   - The person turns it on unasked with the red **Bypass** button next to **Take over** in the header of a pane an agent is driving.
 
   Either way the person sees what it covers and for how long, and confirms.
-- While it is on, the agent's actions in that pane run **without asking**: committing clicks (Submit, Delete, Send, …) are made at once, and the tools refused on driven panes today (`eval`, UI click by selector, Enter/Space keys) work.
+- While it is on, the agent's committing clicks in that pane (Submit, Delete, Send, …, through `Browser` `click`) are made **without asking**. Everything else stays as it is: `eval`, UI click by selector and Enter/Space stay refused on a driven pane, because only `click` goes through the checks that keep the promises below (§4.1).
 - It is **bound** to this pane, this agent, the site(s) the pane was on when it was turned on, and a time limit. It ends on **End bypass**, the time limit, Take over, closing the pane, or the agent stopping. Leaving the bound sites pauses it.
 - **Only the person can turn it on**, through the host, the same way approvals are answered. No agent route, shortcut, command or synthesized click can turn it on.
 - **Not bypassed:** the agent still never types into password, one-time-code or card fields, and hand-off works as before. Bypass removes waiting for approval; it doesn't give the agent secrets.
@@ -39,7 +39,7 @@ The header strip of a driven pane reads `Driven by <agent> [Limited to N sites] 
 Clicking **Bypass** opens a confirmation panel directly under the header strip, in the pane's own flow. It is not a floating popover: the page is a native window drawn over anything layered on it, and the panel must stay inside the pane's DOM (§5). The page moves down while the panel is open:
 
 > **Let Naki #2 act without asking?**
-> In this pane, on **github.com**, Naki #2 will submit forms, delete, send, and run scripts **without asking you first**. It still can't type passwords or codes.
+> In this pane, on **github.com**, Naki #2's clicks that submit forms, delete or send go through **without asking you first**. It still can't type passwords or codes or run scripts, and payments still ask.
 > Duration: ( 15 min | **1 hour** | 4 hours )
 > **[Turn on bypass]** [Cancel]
 
@@ -70,10 +70,12 @@ Bypass ends on any of: End bypass, the time limit, Take over, closing the pane, 
 | Today on a driven pane | Under bypass |
 |---|---|
 | A committing click returns `needs_approval` and waits for Approve (srv `ui_handlers.rs`, approval branch of `act`) | Made at once. The host's fingerprint check still runs, so the click sent is exactly the one classified. The result says `bypassed: true` |
-| `Browser` `eval` refused ("could submit a form without the user's approval") | Allowed |
-| `UI` `click` by selector refused | Allowed |
-| `Browser` `key` with Enter or Space refused | Allowed |
+| `Browser` `eval` refused ("could submit a form without the user's approval") | Still refused |
+| `UI` `click` by selector refused | Still refused |
+| `Browser` `key` with Enter or Space refused | Still refused |
 | `set_files`: workspace files only | Unchanged (workspace only): an exfiltration guard, not a waiting one |
+
+**Why only `click`:** the promises the person reads ("payments still ask", "it can't type passwords or codes") are enforced on `act`: the host classifies each click, srv applies the payment check, and `fill` refuses secret fields. `eval`, a click by selector and Enter/Space bypass all of that. A script can press any button or read any field, and Enter submits whatever form has focus. Lifting them would make the confirmation's text false (muxreview on #5045). Every bulk job in view is a run of clicks, so this costs nothing in practice.
 
 ### 4.2 Bound
 
@@ -120,7 +122,7 @@ The answer to "can an agent approve itself?" must stay no. So:
 
 | Layer | Change |
 |---|---|
-| srv | New `server/browser_bypass.rs`: the grant table (in memory only), `grant`/`end`/`active_for(pane, agent, origin)`, the expiry timer, and ending on Take over, close, owner change and agent stop (hooks next to `browser_owner` and `browser_attention::cancel_for`). The host route. The approval branch of `act` in `ui_handlers.rs` checks `active_for` and, if active, proxies the approved act directly. `refuse_on_driven_pane` returns Ok when bypass is active for the caller and origin. srv-only meta key `browser:bypass` `{agent, origins, expires_at}` for the UI. Logging: `info` on grant, end (with reason), and every bypassed action (agent, pane, origin, action name). |
+| srv | New `server/browser_bypass.rs`: the grant table (in memory only), `grant`/`end`/`active_for(pane, agent, origin)`, the expiry timer, and ending on Take over, close, owner change and agent stop (hooks next to `browser_owner` and `browser_attention::cancel_for`). The host route. The approval branch of `act` in `ui_handlers.rs` checks `active_for` and, if active, proxies the approved act directly. srv-only meta key `browser:bypass` `{agent, origins, expires_at}` for the UI. Logging: `info` on grant, end (with reason), and every bypassed action (agent, pane, origin, action name). |
 | host (cef) | IPC `browser_bypass_set` → srv host route; `act` returns the page origin it acted on (it already reads it for the fingerprint); trusted-event check if §5 requires it. |
 | frontend | Bypass button, confirmation panel, red/amber strip with countdown, End bypass, tab badge; `browser:bypass` read in `browser-model.ts`; the action-log marks. Reuse the attention banner's components. |
 | mcp | `end_bypass` (phase 1), `request_bypass` (phase 2); `bypassed` in results; the description line. |
@@ -137,7 +139,7 @@ The answer to "can an agent approve itself?" must stay no. So:
 - srv: a grant from a non-host caller is 403. A grant is refused when the owner changed since the confirmation, a hand-off is pending, or the origins don't match the current page.
 - srv: under an active grant, a committing `act` on a bound origin runs without a banner and returns `bypassed: true`. On an unbound origin it asks as before.
 - srv: the grant ends on time-out, Take over, pane close, owner change and agent stop, each logged with its reason. After any of these the next committing act asks again.
-- srv: `eval`, UI click and Enter/Space are allowed under a grant and refused after it ends. Secret fields are refused under a grant.
+- srv: `eval`, UI click and Enter/Space stay refused under a grant. Secret fields are refused under a grant.
 - srv: `browser:bypass` can't be written by a client meta update, and is stripped on restore.
 - frontend: the button shows only on driven panes. The confirmation lists the bound sites and durations. The strip counts down and turns amber when paused. A key press on Turn on bypass doesn't grant.
 - Agent reach: `UI` `click` with a selector for the Bypass button, from the owning agent and from another agent, doesn't grant. No command or shortcut grants.
@@ -145,7 +147,7 @@ The answer to "can an agent approve itself?" must stay no. So:
 
 ## 10. Phases
 
-1. **B-1:** grant and end, from both the agent's request and the button: the `request_bypass` banner, the Bypass button and confirmation, the red strip, the host route, the srv gate for committing clicks, `eval`/UI click/keys, binding, expiry, ending hooks, logging, `end_bypass`. This is what the bulk job needed.
+1. **B-1:** grant and end, from both the agent's request and the button: the `request_bypass` banner, the Bypass button and confirmation, the red strip, the host route, the srv gate for committing clicks, binding, expiry, ending hooks, logging, `end_bypass`. This is what the bulk job needed.
 2. **B-2:** tab badge and notifications, if they didn't make B-1.
 3. **B-3:** the action log, if §5.5 of the 2026-10-07 spec still hasn't built it.
 

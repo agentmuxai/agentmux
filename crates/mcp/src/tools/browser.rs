@@ -300,9 +300,10 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 "granted" => {
                     let sites: Vec<&str> = d["origins"].as_array().map(|a| a.iter().filter_map(|v| v.as_str()).collect()).unwrap_or_default();
                     format!(
-                        "Bypass on for {} more min on {}: committing clicks run without asking, and eval and Enter/Space work. \
-                         Nobody checks them now, so check each one yourself. A payment still asks, and on any other site \
-                         clicks ask as before. End it with action end_bypass when the job is done.",
+                        "Bypass on for {} more min on {}: committing clicks (action click) run without asking. Nobody \
+                         checks them now, so check each one yourself. A payment still asks, eval and Enter/Space stay \
+                         refused, and on any other site clicks ask as before. End it with action end_bypass when the job \
+                         is done.",
                         d["minutes_left"].as_u64().unwrap_or(0),
                         sites.join(", ")
                     )
