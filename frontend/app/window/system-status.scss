@@ -5,7 +5,9 @@
 .system-status {
     display: flex;
     flex-direction: row;
-    gap: var(--space-1-5);
+    // The widget bar's own gap, so the widgets, the grip and the window
+    // controls keep one rhythm (REPORT_WINDOW_HEADER_GRIP_PLACEMENT_2026_10_17 §3.2).
+    gap: var(--space-1);
     height: 100%;
     align-items: center;
     justify-content: flex-end;
