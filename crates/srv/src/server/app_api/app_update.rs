@@ -21,6 +21,10 @@ pub fn register(engine: &Arc<WshRpcEngine>, _state: &AppState) {
     engine.register_typed(COMMAND_APP_UPDATE_STATUS, move |_req: Option<NoArgsReq>, _ctx| async move {
         Ok::<_, String>(crate::backend::update_check::current_status())
     });
+    // Read-only, and rate-limited inside: anyone may ask.
+    engine.register_typed(COMMAND_APP_UPDATE_CHECK, move |_req: Option<NoArgsReq>, _ctx| async move {
+        crate::backend::update_check::check_now().await
+    });
     engine.register_typed(COMMAND_APP_UPGRADE_REQUESTS, move |_req: Option<NoArgsReq>, _ctx| async move {
         Ok::<_, String>(crate::backend::upgrade_request::UpgradeRequestsEvent {
             requests: crate::backend::upgrade_request::list(),
@@ -86,8 +90,25 @@ pub(crate) async fn handle_host_upgrade_request(
     }
 }
 
-/// `GET /api/v1/app/update-status`: the `App` tool's `version`.
-pub(crate) async fn handle_update_status() -> axum::Json<crate::backend::update_check::AppUpdateStatus> {
+/// Query of `GET /api/v1/app/update-status`.
+#[derive(Debug, Default, serde::Deserialize)]
+pub(crate) struct UpdateStatusQuery {
+    /// Ask GitHub now (`update_check::check_now`) rather than answer what the
+    /// last check found.
+    #[serde(default)]
+    check: Option<String>,
+}
+
+/// `GET /api/v1/app/update-status`: the `App` tool's `version`, which asks
+/// with `check=1`. A check that can't reach GitHub answers what srv knew.
+pub(crate) async fn handle_update_status(
+    axum::extract::Query(q): axum::extract::Query<UpdateStatusQuery>,
+) -> axum::Json<crate::backend::update_check::AppUpdateStatus> {
+    if matches!(q.check.as_deref(), Some("1" | "true")) {
+        if let Ok(status) = crate::backend::update_check::check_now().await {
+            return axum::Json(status);
+        }
+    }
     axum::Json(crate::backend::update_check::current_status())
 }
 
@@ -112,7 +133,10 @@ pub(crate) async fn handle_request_upgrade(
     if reason.is_empty() {
         return (StatusCode::BAD_REQUEST, Json(json!({ "error": "a reason is required" }))).into_response();
     }
-    let status = crate::backend::update_check::current_status();
+    // Ask GitHub first, so the agent needn't wait for the next periodic check.
+    let status = crate::backend::update_check::check_now()
+        .await
+        .unwrap_or_else(|_| crate::backend::update_check::current_status());
     let version = match upgrade_request::installable(&status, req.version.as_deref()) {
         Ok(v) => v,
         Err(outcome) => return Json(outcome).into_response(),

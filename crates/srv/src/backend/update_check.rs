@@ -14,8 +14,15 @@
 //! event when it changes, and read on demand with `app.update-status`. It
 //! names the release file for this install (`update_install`) with the
 //! SHA-256 GitHub lists for it; `update_download` fetches it when the user
-//! asks, and its progress travels in the same status. A local or dev build (`local-…`, `dev-…` channel) is not a
-//! release, so it is never "behind"; it only reports which release is latest.
+//! asks, and its progress travels in the same status.
+//!
+//! The user's **Check for update** and an agent's `App` `version` ask at once
+//! ([`check_now`]), at most every 30 seconds between them.
+//!
+//! Any portable or installed build upgrades to a newer release, a local
+//! `task package` build (`local-…` channel) included: it compares versions like
+//! a release. Only a `task dev` build (`dev-…` channel), which runs from source,
+//! never upgrades; it reports which release is latest.
 
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
@@ -36,6 +43,9 @@ const CHECK_EVERY: Duration = Duration::from_secs(6 * 60 * 60);
 /// How often `app:updatecheck` is re-read.
 const SETTING_POLL: Duration = Duration::from_secs(60);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
+/// The shortest gap between two checks the user or an agent asks for: GitHub
+/// allows 60 unauthenticated requests an hour per address.
+const CHECK_NOW_EVERY: Duration = Duration::from_secs(30);
 /// Release notes kept for the panel, in bytes.
 const MAX_NOTES_BYTES: usize = 16 * 1024;
 
@@ -203,9 +213,11 @@ pub(crate) fn version_core(v: &str) -> Option<(u64, u64, u64)> {
     Some((major, minor, patch))
 }
 
-/// Whether `channel` is a local or dev build rather than a release.
-fn is_local_build(channel: &str) -> bool {
-    channel.starts_with("local-") || channel.starts_with("dev-") || channel == "dev"
+/// Whether `channel` is a `task dev` build, which runs from source and so
+/// never upgrades itself. A local `task package` build (`local-…`) is a
+/// portable like a release's, and upgrades like one.
+fn is_dev_build(channel: &str) -> bool {
+    channel.starts_with("dev-") || channel == "dev"
 }
 
 /// The status for a release GitHub reported, seen from `current` on `channel`
@@ -215,7 +227,7 @@ pub(crate) fn status_for(current: &str, channel: &str, release: &Release, now_ms
     let state = if release.draft || release.prerelease {
         // `releases/latest` never returns these; treat one as no news.
         "up-to-date"
-    } else if is_local_build(channel) {
+    } else if is_dev_build(channel) {
         "local-build"
     } else {
         match (version_core(&latest), version_core(current)) {
@@ -250,6 +262,11 @@ pub(crate) fn status_for(current: &str, channel: &str, release: &Release, now_ms
 static STATUS: OnceLock<RwLock<AppUpdateStatus>> = OnceLock::new();
 static EVENT_BUS: OnceLock<Arc<crate::backend::eventbus::EventBus>> = OnceLock::new();
 static INSTALL_KIND: OnceLock<InstallKind> = OnceLock::new();
+/// The client every check uses, made by [`spawn`].
+static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+/// When [`check_now`] last asked GitHub; held while it asks, so clicks that
+/// arrive meanwhile wait for its answer.
+static LAST_CHECK_NOW: tokio::sync::Mutex<Option<std::time::Instant>> = tokio::sync::Mutex::const_new(None);
 
 /// How this AgentMux was installed, read once.
 pub(crate) fn install_kind() -> InstallKind {
@@ -308,17 +325,25 @@ pub fn spawn(config: Arc<crate::backend::wconfig::ConfigState>, event_bus: Arc<c
             return;
         }
     };
+    let _ = CLIENT.set(client.clone());
     tokio::spawn(async move {
         tokio::time::sleep(FIRST_CHECK_AFTER).await;
         // The setting is re-read every minute, so turning it off clears the
         // chip at once and turning it on checks at once; GitHub is asked at
         // most every 6 hours while it stays on.
         let mut last_asked: Option<std::time::Instant> = None;
+        let mut was_on = true;
         loop {
             if !check_enabled(&config) {
+                // Once, when it goes off: a check the user asks for meanwhile
+                // ([`check_now`]) stays on show.
+                if was_on {
+                    publish(&event_bus, AppUpdateStatus::initial(current, false));
+                }
+                was_on = false;
                 last_asked = None;
-                publish(&event_bus, AppUpdateStatus::initial(current, false));
             } else if last_asked.is_none_or(|t| t.elapsed() >= CHECK_EVERY) {
+                was_on = true;
                 last_asked = Some(std::time::Instant::now());
                 let channel = crate::backend::reactive::registry::local_channel_id();
                 let next = match fetch_latest(&client).await {
@@ -335,6 +360,33 @@ pub fn spawn(config: Arc<crate::backend::wconfig::ConfigState>, event_bus: Arc<c
             tokio::time::sleep(SETTING_POLL).await;
         }
     });
+}
+
+/// Ask GitHub now, for the user's **Check for update** or an agent's `App`
+/// `version`, whether or not the periodic check is on, and return what srv
+/// knows after. Asked again within [`CHECK_NOW_EVERY`], it answers what the
+/// last check found; concurrent callers share one request.
+pub async fn check_now() -> Result<AppUpdateStatus, String> {
+    let (Some(client), Some(bus)) = (CLIENT.get(), EVENT_BUS.get()) else {
+        return Err("AgentMux isn't checking for updates yet; try again in a moment".into());
+    };
+    let mut last = LAST_CHECK_NOW.lock().await;
+    if last.is_some_and(|t| t.elapsed() < CHECK_NOW_EVERY) {
+        return Ok(current_status());
+    }
+    *last = Some(std::time::Instant::now());
+    let current = env!("CARGO_PKG_VERSION");
+    let channel = crate::backend::reactive::registry::local_channel_id();
+    match fetch_latest(client).await {
+        Ok(release) => {
+            publish(bus, status_for(current, &channel, &release, agentmux_common::time::now_ms(), &install_kind()));
+            Ok(current_status())
+        }
+        Err(e) => {
+            tracing::info!(error = %e, "update check: asked now, no answer");
+            Err(format!("couldn't reach GitHub: {e}"))
+        }
+    }
 }
 
 /// Keep `next` and tell every window when it changed.
@@ -405,12 +457,20 @@ mod tests {
     }
 
     #[test]
-    fn a_local_or_dev_build_only_reports_the_latest_release() {
-        for channel in ["local-main-b28b7a-f62415cd", "dev-qtest-x-38b2af", "dev"] {
+    fn a_dev_build_only_reports_the_latest_release() {
+        for channel in ["dev-qtest-x-38b2af", "dev"] {
             let s = status_for("0.59.26", channel, &release("v0.59.27"), 0, &InstallKind::Unknown);
             assert_eq!(s.state, "local-build", "{channel}");
             assert_eq!(s.latest.as_deref(), Some("0.59.27"));
         }
+    }
+
+    #[test]
+    fn a_local_package_build_upgrades_like_a_release() {
+        let local = "local-main-b28b7a-f62415cd";
+        assert_eq!(status_for("0.59.26", local, &release("v0.59.27"), 0, &InstallKind::Unknown).state, "available");
+        // Built from main, ahead of the latest release: nothing to upgrade to.
+        assert_eq!(status_for("0.59.28", local, &release("v0.59.27"), 0, &InstallKind::Unknown).state, "up-to-date");
     }
 
     #[test]
