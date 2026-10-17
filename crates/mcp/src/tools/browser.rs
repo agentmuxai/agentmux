@@ -159,7 +159,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             if body.pointer("/data/bypassed").and_then(|v| v.as_bool()) == Some(true) {
                 let left = body.pointer("/data/bypass_minutes_left").and_then(|v| v.as_u64()).unwrap_or(0);
                 return Ok(format!(
-                    "{name} {r}: done without asking (bypass on, {left} min left; nobody checked this one, so check \
+                    "{name} {r}: done without asking (auto-approve on, {left} min left; nobody checked this one, so check \
                      every committing click yourself). The element now: {after}"
                 ));
             }
@@ -292,23 +292,23 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             if !resp.status().is_success() {
                 let status = resp.status();
                 let text = resp.text().await.unwrap_or_default();
-                anyhow::bail!("Browser request_bypass failed: HTTP {status} — {text}");
+                anyhow::bail!("Browser request_auto_approve failed: HTTP {status} — {text}");
             }
-            let body: Value = resp.json().await.map_err(|e| anyhow::anyhow!("Browser request_bypass: bad response: {e}"))?;
+            let body: Value = resp.json().await.map_err(|e| anyhow::anyhow!("Browser request_auto_approve: bad response: {e}"))?;
             let d = body.get("data").cloned().unwrap_or(Value::Null);
             Ok(match d.get("answer").and_then(|v| v.as_str()).unwrap_or("") {
                 "granted" => {
                     let sites: Vec<&str> = d["origins"].as_array().map(|a| a.iter().filter_map(|v| v.as_str()).collect()).unwrap_or_default();
                     format!(
-                        "Bypass on for {} more min on {}: committing clicks (action click) run without asking. Nobody \
+                        "Auto-approve on for {} more min on {}: committing clicks (action click) run without asking. Nobody \
                          checks them now, so check each one yourself. A payment still asks, eval and Enter/Space stay \
-                         refused, and on any other site clicks ask as before. End it with action end_bypass when the job \
+                         refused, and on any other site clicks ask as before. Stop it with action stop_auto_approve when the job \
                          is done.",
                         d["minutes_left"].as_u64().unwrap_or(0),
                         sites.join(", ")
                     )
                 }
-                "declined" => "The user said No. Carry on with per-click approvals, or ask them in chat; don't ask for bypass again on this pane for 10 minutes.".to_string(),
+                "declined" => "The user said No. Carry on with per-click approvals, or ask them in chat; don't ask for auto-approve again on this pane for 10 minutes.".to_string(),
                 _ => "The user didn't answer in time. Carry on with per-click approvals, or ask them in chat.".to_string(),
             })
         }
@@ -326,13 +326,13 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             if !resp.status().is_success() {
                 let status = resp.status();
                 let text = resp.text().await.unwrap_or_default();
-                anyhow::bail!("Browser end_bypass failed: HTTP {status} — {text}");
+                anyhow::bail!("Browser stop_auto_approve failed: HTTP {status} — {text}");
             }
-            let body: Value = resp.json().await.map_err(|e| anyhow::anyhow!("Browser end_bypass: bad response: {e}"))?;
+            let body: Value = resp.json().await.map_err(|e| anyhow::anyhow!("Browser stop_auto_approve: bad response: {e}"))?;
             Ok(if body.pointer("/data/ended").and_then(|v| v.as_bool()) == Some(true) {
-                "Bypass ended: committing clicks ask the user again.".to_string()
+                "Auto-approve stopped: committing clicks ask the user again.".to_string()
             } else {
-                "There was no bypass on that pane for you to end.".to_string()
+                "There was no auto-approve on that pane for you to stop.".to_string()
             })
         }
         "BrowserNavigate" => {
