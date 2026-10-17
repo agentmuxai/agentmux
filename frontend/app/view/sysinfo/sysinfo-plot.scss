@@ -83,7 +83,7 @@
     top: 0;
     left: 0;
     right: 0;
-    z-index: 3;
+    z-index: var(--z-pane-overlay);
     pointer-events: none;
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
@@ -136,5 +136,5 @@
     min-height: 0;
     overflow-y: auto;
     // Its first row starts below the floating buttons.
-    padding-top: var(--ui-height, 24px);
+    padding-top: var(--ui-height);
 }
