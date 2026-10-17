@@ -2264,6 +2264,10 @@ export const GeneratedApi = {
   AppUpdateStatusCommand(client: RpcClient, opts?: RpcOpts): Promise<AppUpdateStatus> {
     return client.rpcCall("app.update-status", {}, opts);
   },
+  // command "app.update-check"
+  AppUpdateCheckCommand(client: RpcClient, opts?: RpcOpts): Promise<AppUpdateStatus> {
+    return client.rpcCall("app.update-check", {}, opts);
+  },
   // command "app.upgrade-requests"
   AppUpgradeRequestsCommand(client: RpcClient, opts?: RpcOpts): Promise<UpgradeRequestsEvent> {
     return client.rpcCall("app.upgrade-requests", {}, opts);
