@@ -83,7 +83,6 @@ fn updateagent_takes_just_the_required_four() {
     let r: CommandUpdateAgentDefinitionData =
         serde_json::from_value(json!({ "id": "a1", "name": "Agent", "icon": "robot", "provider": "claude" })).unwrap();
     assert_eq!(r.description, "");
-    assert_eq!(r.auto_continue_enabled, None);
     assert_eq!(r.model_vendor_base_url, None);
 }
 

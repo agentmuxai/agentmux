@@ -21,9 +21,13 @@ const EDITABLE_CONTROL = 'input, textarea, select, [contenteditable=""], [conten
  * removed from the DOM before the rebuild, so focus that lived there has
  * already fallen back to `document.body`, which is outside `root`. That is
  * what keeps "restore the caret after a reload" working.
+ *
+ * A row of the file tree counts too: ↑/↓ there previews each file it lands
+ * on, which rebuilds CodeMirror, and the keyboard has to stay in the tree
+ * (SPEC_EDITOR_TREE_KEYBOARD_ICONS_AND_CLICK_ZOOM_2026_10_16.md §5.3).
  */
 export function userIsTypingElsewhereIn(root: Element | null | undefined, active: Element | null | undefined): boolean {
     if (!root || !active || active === root) return false;
     if (!root.contains(active)) return false;
-    return active.matches(EDITABLE_CONTROL);
+    return active.matches(EDITABLE_CONTROL) || active.closest('[role="tree"]') != null;
 }

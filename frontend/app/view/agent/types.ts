@@ -451,6 +451,10 @@ export interface UserMessageNode {
      *  `[BROADCAST:...]` header srv prepended already removed.
      *  SPEC_SWARM_BROADCAST_AS_USER_MESSAGE_2026_10_01.md §4.5. */
     broadcast?: { recipients?: number; msgId?: string };
+    /** Set when the Swarm Supervisor sent this turn to keep the agent going:
+     *  `message` is then the body, with srv's `[SUPERVISOR:...]` header removed.
+     *  SPEC_SWARM_SUPERVISOR_2026_10_16.md §3.8. */
+    supervisor?: { mode: "steady" | "drive"; n: number; of: number };
     /** The paired device the user sent this from (their phone), when they did:
      *  shown as "From <device>". From the stored record's `amx`, which only srv
      *  writes, never from the text. agentmux-mobile's

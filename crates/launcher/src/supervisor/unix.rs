@@ -114,6 +114,8 @@ pub(crate) async fn run_unix(
             std::process::exit(1);
         }
     };
+    // What the user is told after a recovery (SPEC_RECOVERY_NOTICES_AND_TOASTS §4.4).
+    crate::incidents::init(&paths.data_dir);
     log(&format!(
         "paths resolved: data={} config={} user_home={} portable={}",
         paths.data_dir.display(),
@@ -608,6 +610,7 @@ pub(crate) async fn run_unix(
                                 mem_supervisor::OOM_RESTART_BUDGET,
                                 mem_supervisor::OOM_RESTART_WINDOW.as_secs()
                             ));
+                            crate::incidents::record(&crate::incidents::memory_give_up());
                             show_fatal_dialog(
                                 mem_supervisor::OOM_GIVEUP_TITLE,
                                 mem_supervisor::OOM_GIVEUP_BODY,
@@ -657,12 +660,14 @@ pub(crate) async fn run_unix(
                             }
                         };
                         if !recovered {
+                            crate::incidents::record(&crate::incidents::memory_give_up());
                             show_fatal_dialog(
                                 mem_supervisor::OOM_GIVEUP_TITLE,
                                 mem_supervisor::OOM_GIVEUP_BODY,
                             );
                             break code;
                         }
+                        crate::incidents::record(&crate::incidents::host_restarted_low_memory());
                         match spawn_host_unix(real_exe, args, &srv_result, &host_env, true) {
                             Some(c) => host_child = c,
                             None => {
@@ -682,13 +687,21 @@ pub(crate) async fn run_unix(
                                 host_restarts.len(),
                                 HOST_RESTART_WINDOW.as_secs()
                             ));
+                            crate::incidents::record(&crate::incidents::crash_give_up(
+                                crate::incidents::GaveUpOn::Window,
+                                code,
+                                host_restarts.len(),
+                                HOST_RESTART_WINDOW.as_secs(),
+                            ));
                             break code;
                         }
                         host_restarts.push(now);
+                        let was_degraded = host_degraded;
                         if last_abnormal_code == Some(code) {
                             host_degraded = true;
                         }
                         last_abnormal_code = Some(code);
+                        crate::incidents::record(&crate::incidents::host_restarted(code, host_degraded && !was_degraded));
                         log(&format!(
                             "CEF host exited abnormally (code {}) — relaunching (restart {}/{}{})",
                             code,

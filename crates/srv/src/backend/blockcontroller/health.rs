@@ -77,17 +77,24 @@ pub enum TriggerKind {
     Schedule,
     /// The CLI woke for a background task it had started.
     Task,
+    /// The Swarm Supervisor continued the agent
+    /// (SPEC_SWARM_SUPERVISOR_2026_10_16.md §3.5).
+    Supervisor,
     /// AgentMux on its own behalf (memory reinjection, a side question).
     System,
 }
 
 impl TriggerKind {
     /// Started by something other than the user: another agent, a service, a
-    /// schedule, a background task (spec §5.2). The one place this is decided:
-    /// srv publishes it on every trigger (`TurnTrigger::external`) and the
-    /// pane and the notification router read that.
+    /// schedule, a background task, the Supervisor (spec §5.2). The one place
+    /// this is decided: srv publishes it on every trigger
+    /// (`TurnTrigger::external`) and the pane and the notification router read
+    /// that.
     pub fn is_external(self) -> bool {
-        matches!(self, TriggerKind::Agent | TriggerKind::Service | TriggerKind::Schedule | TriggerKind::Task)
+        matches!(
+            self,
+            TriggerKind::Agent | TriggerKind::Service | TriggerKind::Schedule | TriggerKind::Task | TriggerKind::Supervisor
+        )
     }
 }
 
@@ -120,6 +127,9 @@ impl TurnTrigger {
             TurnOrigin::User if text.contains("[BROADCAST:FROM=user VIA=swarm") => Self::of(TriggerKind::Broadcast, None),
             TurnOrigin::User => Self::of(TriggerKind::User, None),
             TurnOrigin::System => Self::of(TriggerKind::System, None),
+            // srv quotes this header inside every delivered body, so only the
+            // Supervisor's own delivery can start with it.
+            TurnOrigin::Automated if is_supervisor_input(text) => Self::of(TriggerKind::Supervisor, None),
             TurnOrigin::Automated => match jekt_sender(text) {
                 Some(from @ ("cron" | "loop")) => Self::of(TriggerKind::Schedule, Some(from)),
                 Some(from) if from.ends_with("-consumer") => Self::of(TriggerKind::Service, Some(from)),
@@ -140,6 +150,31 @@ impl TurnTrigger {
         });
         TurnTrigger { kind: TriggerKind::Task, from: summary, external: TriggerKind::Task.is_external() }
     }
+}
+
+/// Whether an automated input is the Swarm Supervisor's continuation. The
+/// input may be the plain text or the stream-json user line carrying it, as
+/// for [`jekt_sender`]; in the line, the text follows the content's opening
+/// quote, so the header is looked for at the start of the text either way.
+fn is_supervisor_input(text: &str) -> bool {
+    let prefix = crate::backend::reactive::sanitize::SUPERVISOR_HEADER_PREFIX;
+    if text.starts_with(prefix) {
+        return true;
+    }
+    // `{"type":"user","message":{"role":"user","content":"[SUPERVISOR:…`
+    serde_json::from_str::<serde_json::Value>(text).ok().is_some_and(|v| {
+        let content = v.get("message").and_then(|m| m.get("content"));
+        let first = match content {
+            Some(serde_json::Value::String(s)) => Some(s.as_str()),
+            Some(serde_json::Value::Array(blocks)) => blocks
+                .iter()
+                .find(|b| b.get("type").and_then(|t| t.as_str()) == Some("text"))
+                .and_then(|b| b.get("text"))
+                .and_then(|t| t.as_str()),
+            _ => None,
+        };
+        first.is_some_and(|s| s.starts_with(prefix))
+    })
 }
 
 /// The `FROM=` of the `[JEKT:…]` marker srv puts at the head of every

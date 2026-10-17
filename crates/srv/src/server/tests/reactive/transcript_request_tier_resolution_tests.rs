@@ -41,7 +41,6 @@ fn insert_named_agent_def(state: &AppState, slug: &str, name: &str, conversation
         container_name: String::new(),
         use_ambient_login: 0,
         model_vendor_base_url: String::new(),
-        auto_continue_enabled: 0,
         memory_id: String::new(),
         conversation_visibility: conversation_visibility.to_string(),
     };
@@ -183,8 +182,7 @@ async fn matches_on_slug_not_display_name() {
     let state = test_state();
     // Insert with a slug matching the target, but a DIFFERENT display name —
     // the lookup must key off slug (the stable AGENTMUX_AGENT_ID-derived
-    // identifier), same cross-namespace hazard the Supervisor-nudge
-    // opt-in check just above this function already guards against.
+    // identifier): a display name can collide with another agent's slug.
     let state_clone = &state;
     {
         let mut def = AgentDefinition {
@@ -215,7 +213,6 @@ async fn matches_on_slug_not_display_name() {
             container_name: String::new(),
             use_ambient_login: 0,
             model_vendor_base_url: String::new(),
-            auto_continue_enabled: 0,
             memory_id: String::new(),
             conversation_visibility: "ask".to_string(),
         };

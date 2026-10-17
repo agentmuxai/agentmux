@@ -68,6 +68,13 @@ describe("rankAgentStatus", () => {
         });
     });
 
+    // SPEC_SWARM_SUPERVISOR_2026_10_16.md §3.6: the mirror of a question.
+    it("a Supervisor pause needs you only while no turn is in flight", () => {
+        expect(rankAgentStatus({ live: false, pausedForYou: true }).kind).toBe("needs-you");
+        expect(rankAgentStatus({ live: false, pausedForYou: true, ended: "errored" }).kind).toBe("needs-you");
+        expect(rankAgentStatus({ live: true, pausedForYou: true }).kind).toBe("working");
+    });
+
     it("holds with no turn in flight", () => {
         expect(rankAgentStatus({ live: false, held: { reconnecting: true } }).kind).toBe("held");
     });

@@ -12,7 +12,8 @@
     width: 100%;
     height: 100%;
     min-height: 0;
-    padding: 6px;
+    // Flush: tiles and charts touch the pane's edges; text sits 1px in.
+    padding: 0;
     overflow-y: auto;
 }
 
@@ -79,6 +80,7 @@
 }
 
 .sysinfo-overview-cores {
+    --sysinfo-text-inset: 1px;
     position: relative;
     display: flex;
     flex-direction: column;
@@ -89,7 +91,7 @@
     position: relative;
     flex: 1 1 auto;
     min-height: 40px;
-    margin-top: 16px;
+    margin-top: 14px;
 
     canvas {
         display: block;
@@ -137,7 +139,8 @@
     flex-wrap: wrap;
     gap: 2px 14px;
     margin: 0;
-    padding: 0;
+    // Text keeps its 1px inset from the pane's border (the overview has no padding).
+    padding: 0 0 0 1px;
     list-style: none;
     font-size: var(--text-xs);
     color: var(--grey-text-color);

@@ -15,6 +15,7 @@ const made = vi.hoisted(() => ({ charts: [] as any[] }));
 
 vi.mock("uplot", () => {
     class FakeUPlot {
+        static pxRatio = 1;
         opts: any;
         data: any;
         setDataCalls: any[] = [];
@@ -67,6 +68,17 @@ afterEach(() => {
     vi.unstubAllGlobals();
 });
 
+/** Just enough of a uPlot instance for the time axis' label rule: `width` px of plot, 10 px per second from `t`. */
+function plotArea(width: number) {
+    const t = new Date(2026, 9, 13, 8, 52, 30).getTime() / 1000;
+    return {
+        bbox: { width },
+        ctx: { font: "", measureText: () => ({ width: 40 }) },
+        axes: [{ font: ["12px sans-serif"] }],
+        valToPos: (v: number) => (v - t) * 10,
+    };
+}
+
 const META = { name: "CPU", label: "%", color: "#a3e635", decimalPlaces: 0, maxy: 100 } as TimeSeriesMeta;
 const sample = (ts: number, cpu: number): DataItem => ({ ts, cpu });
 const series = (...items: DataItem[]) =>
@@ -102,7 +114,7 @@ describe("SingleLinePlot on uPlot", () => {
         expect(opts.cursor.sync.scales).toEqual(["x", null]);
         expect([opts.width, opts.height]).toEqual([600, 200]);
         // Against the pane's edges: no gutter on the left, only the room its last time label needs on the right.
-        expect(opts.padding).toEqual([7, null, null, 0]);
+        expect(opts.padding).toEqual([7, 0, null, 1]);
         expect(opts.scales.y.range()).toEqual([0, 100]);
         // The x window ends at the newest sample and spans five minutes.
         expect(opts.scales.x.range()).toEqual([(base + 1000) / 1000 - 300, (base + 1000) / 1000]);
@@ -133,8 +145,20 @@ describe("SingleLinePlot on uPlot", () => {
         await vi.advanceTimersByTimeAsync(200);
         const [x, y] = made.charts[0].opts.axes;
         const t = new Date(2026, 9, 13, 8, 52, 30).getTime() / 1000;
-        expect(x.values(null, [t, t + 30], 0, 80, 30)).toEqual(["8:52:30", "8:53:00"]);
+        expect(x.values(plotArea(600), [t, t + 30], 0, 80, 30)).toEqual(["8:52:30", "8:53:00"]);
         expect(y.values(null, [0, 50, 100])).toEqual(["0%", "50%", "100%"]);
+    });
+
+    it("leaves a time label blank where it would cross the plot's right edge, keeping the others", async () => {
+        mount(() => series(sample(base, 40)));
+        await vi.advanceTimersByTimeAsync(200);
+        const x = made.charts[0].opts.axes[0];
+        const t = new Date(2026, 9, 13, 8, 52, 30).getTime() / 1000;
+        // 600px wide, 10px per second, labels 40px wide: the tick at 590px would end at 610px.
+        expect(x.values(plotArea(600), [t, t + 30, t + 59], 0, 80, 30)).toEqual(["8:52:30", "8:53:00", ""]);
+        // A tick whose label fits (20px half-width + 1px inset) keeps it; one on the edge does not.
+        expect(x.values(plotArea(600), [t + 57], 0, 80, 30)).toEqual(["8:53:27"]);
+        expect(x.values(plotArea(600), [t + 60], 0, 80, 30)).toEqual([""]);
     });
 
     it("is built again when the theme changes, so its canvas takes the new colors", async () => {

@@ -688,6 +688,7 @@ declare global {
         "graph:metrics"?: string[];
         "sysinfo:type"?: string;
         "sysinfo:focus"?: string | null;
+        "sysinfo:showcontrols"?: boolean;
         "bg:*"?: boolean;
         bg?: string;
         "bg:opacity"?: number;
@@ -797,7 +798,7 @@ declare global {
         // block remount and names the pane (section-pane.tsx, warden-model.ts).
         "connectors:section"?: "accounts" | "mcp" | "remotes";
         "memory:section"?: "global" | "personal" | "skills" | "bundles";
-        "warden:section"?: "host" | "lan" | "internet" | "audit" | "supervisor";
+        "warden:section"?: "host" | "lan" | "internet" | "audit";
         // Set once by quick-fork.ts right after a fork lands on a provider
         // with no --fork-session equivalent and a parent session existed to
         // lose; ForkProviderFallbackBanner (agent-view.tsx) reads it.

@@ -58,7 +58,7 @@
     flex: 1;
     min-height: 0;
     font-size: var(--text-sm);
-    color: var(--main-text-color);
+    color: var(--file-tree-text-color);
 }
 
 .file-tree-toolbar {
@@ -126,11 +126,18 @@
     }
 }
 
+// Room on every side for the focused row's ring, which the scroll box would clip.
 .file-tree-body {
     flex: 1;
     overflow-y: auto;
     overflow-x: hidden;
-    padding: var(--space-1) 0;
+    padding: var(--space-1);
+}
+
+// A treeitem holds its row and, for an open folder, its children: the row
+// draws the item's state, so the item itself draws nothing.
+.file-tree-item:focus {
+    outline: none;
 }
 
 .file-tree-row {
@@ -140,21 +147,50 @@
     padding: 2px var(--space-1);
     cursor: default;
     user-select: none;
+
     @include mixins.truncate;
 
     &:hover {
         background: var(--tint-2);
     }
 
-    &--active {
-        background: rgba(var(--accent-color-rgb), 0.15);
-        color: var(--accent-color, var(--main-text-color));
-    }
-
     &--dir {
         // Folders read slightly bolder to anchor the eye
         font-weight: 500;
     }
+}
+
+// Selected and open rows (spec §4, §6), after :hover so they keep their fill
+// under the pointer. The selected row is where the tree's keyboard is: a
+// neutral fill while the tree isn't focused, a strong accent fill (and the
+// ring, from the keyboard) while it is. The open file has an accent bar on
+// its left edge, which shows either way, and the accent text and tint.
+.file-tree-row.file-tree-row--open {
+    background: var(--accent-bg-strong);
+    color: var(--accent-color);
+    box-shadow: inset 2px 0 0 var(--accent-color);
+}
+
+.file-tree-row.file-tree-row--selected:not(.file-tree-row--open) {
+    background: var(--tint-4);
+}
+
+.file-tree-body:focus-within .file-tree-row.file-tree-row--selected {
+    background: var(--accent-bg-heavy);
+}
+
+.file-tree-item:focus-visible > .file-tree-row {
+    @include mixins.focus-ring;
+}
+
+// Which of the tree and the editor body has the keyboard: an accent line
+// along the top of that column; the other's is transparent, so nothing moves.
+.editor-region {
+    border-top: 2px solid transparent;
+}
+
+.editor-region--focused {
+    border-top-color: var(--accent-color);
 }
 
 .file-tree-chevron {
@@ -170,12 +206,22 @@
     flex: 0 0 auto;
 }
 
+// Each file type's icon in its Seti tone (file-icons.ts, theme.scss).
 .file-tree-icon {
     width: 14px;
     font-size: var(--text-xs);
-    opacity: 0.8;
     flex: 0 0 auto;
     text-align: center;
+
+    &--blue { color: var(--file-icon-blue); }
+    &--green { color: var(--file-icon-green); }
+    &--yellow { color: var(--file-icon-yellow); }
+    &--orange { color: var(--file-icon-orange); }
+    &--red { color: var(--file-icon-red); }
+    &--purple { color: var(--file-icon-purple); }
+    &--pink { color: var(--file-icon-pink); }
+    &--steel { color: var(--file-icon-steel); }
+    &--grey { color: var(--file-icon-grey); }
 }
 
 .file-tree-label {

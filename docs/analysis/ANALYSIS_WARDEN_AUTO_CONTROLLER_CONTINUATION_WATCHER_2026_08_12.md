@@ -1,6 +1,16 @@
 # Warden Auto-Controller: a continuation-nudging watcher for AgentMux agents
 
-**Status:** implemented — §4's design was built, starting the same day. Written
+**Status:** superseded and removed (2026-10-16).
+**Superseded-by:** [`SPEC_SWARM_SUPERVISOR_2026_10_16.md`](../specs/SPEC_SWARM_SUPERVISOR_2026_10_16.md)
+
+The Swarm Supervisor
+([`SPEC_SWARM_SUPERVISOR_2026_10_16.md`](../specs/SPEC_SWARM_SUPERVISOR_2026_10_16.md))
+replaces it: srv judges each supervised agent's turn itself, the controls live
+in Swarm, and the `SupervisorNudge` tool, the `supervisor-decision` endpoint,
+the Warden Supervisor panel and every use of `auto_continue_enabled` are gone
+(the database column stays, unused). Kept for its research and its history.
+
+**Previous status:** implemented — §4's design was built, starting the same day. Written
 per request to (1) research external best practices, (2) propose terminology,
 (3) audit the current AgentMux architecture, (4) propose a design; the closing
 "nothing in this document has been implemented" was accurate for a few hours

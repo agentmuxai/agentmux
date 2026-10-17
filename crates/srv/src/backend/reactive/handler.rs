@@ -11,51 +11,6 @@ use super::{audit_hash, now_unix_millis, AUDIT_LOG_MAX, RATE_LIMIT_MAX};
 
 pub(super) use super::rate_limiter::RateLimiter;
 
-// ---- Supervisor nudge-ceiling tracking ----
-
-/// Per-target-agent consecutive-nudge tracking for the Warden Supervisor
-/// guardrail. Keyed on the target agent's lowercased name in
-/// `Handler::nudge_counters`.
-struct NudgeCounterState {
-    /// The target's `AgentRegistration::registration_nonce` as of the last
-    /// nudge — a respawn (new nonce) resets the counter, since "consecutive"
-    /// only makes sense within one continuous run. Real nonces are ≥ 1
-    /// (persistent-controller spawns only — `persistent::next_registration_
-    /// nonce`); PTY/shell and HTTP-register paths always register with 0
-    /// ("not recorded"), so nonce alone can't detect a respawn for them —
-    /// `block_id` below covers that case instead.
-    registration_nonce: u64,
-    /// The target's block id as of the last nudge. A PTY/shell-registered
-    /// agent that's closed and relaunched gets a fresh block id (a new
-    /// pane), which nonce (always 0 for these paths) can't see — comparing
-    /// block_id catches that respawn case reagent flagged as a P1 gap
-    /// (nonce-only reset never fires for PTY agents). Doesn't help detect a
-    /// respawn that reuses the same pane/block id (e.g. a one-shot
-    /// SubprocessController that re-registers every turn in-place) — that
-    /// case still relies on `NUDGE_COOLDOWN_RESET_MS` alone, same as before.
-    block_id: String,
-    count: u32,
-    last_nudge_at_ms: u64,
-}
-
-/// Max consecutive auto-continue nudges a Supervisor may send to the same
-/// target agent (within one registration / cooldown window) before
-/// `record_supervisor_decision` refuses and forces a decline instead. Bounds
-/// a runaway auto-continue loop — see
-/// docs/analysis/ANALYSIS_WARDEN_AUTO_CONTROLLER_CONTINUATION_WATCHER_2026_08_12.md.
-pub(super) const MAX_CONSECUTIVE_AUTO_CONTINUES: u32 = 5;
-
-/// Gap since the last nudge after which the consecutive counter resets, on
-/// the theory that a long-idle target has effectively started a new work
-/// session even without a fresh `registration_nonce`.
-pub(super) const NUDGE_COOLDOWN_RESET_MS: u64 = 30 * 60 * 1000;
-
-/// The one, fixed message a `SupervisorAction::Nudge` ever delivers.
-/// Deliberately not a parameter — see the doc on `record_supervisor_decision`'s
-/// `Nudge` arm for why a free-form message defeats the guardrail this
-/// exists for.
-pub(super) const NUDGE_MESSAGE: &str = "Continue the task you were already doing.";
-
 // ---- Handler ----
 
 /// Core reactive messaging handler.
@@ -117,11 +72,10 @@ pub struct Handler {
     /// live.
     block_liveness: Option<BlockLivenessProbe>,
     audit_log: Vec<AuditLogEntry>,
-    /// The UID of the delivery or Supervisor decision in flight
+    /// The UID of the delivery in flight
     /// (`InjectionRequest::audit_source_uid`), copied onto every audit entry
-    /// it writes. Set and restored around one `inject_message_inner` or
-    /// `record_supervisor_decision` call, under this handler's mutex, so no
-    /// other delivery can see it.
+    /// it writes. Set and restored around one `inject_message_inner` call,
+    /// under this handler's mutex, so no other delivery can see it.
     delivery_source_uid: String,
     /// The WAN verdict of the delivery in flight (W3-S audit), copied onto
     /// its audit entries. Same set-and-restore discipline as
@@ -132,10 +86,6 @@ pub struct Handler {
     delivery_lan_claimed_uid: String,
     rate_limiter: RateLimiter,
     include_source_in_message: bool,
-    /// Warden Supervisor consecutive-nudge ceiling state, keyed on the
-    /// target agent's lowercased name. In-memory only (same lifecycle as
-    /// `audit_log`) — not persisted across a restart.
-    nudge_counters: HashMap<String, NudgeCounterState>,
 }
 
 /// A block's names, typed (identity M2, spec §4.4.2).
@@ -238,7 +188,6 @@ impl Handler {
             delivery_lan_claimed_uid: String::new(),
             rate_limiter: RateLimiter::new(RATE_LIMIT_MAX),
             include_source_in_message: false,
-            nudge_counters: HashMap::new(),
         }
     }
 
@@ -584,8 +533,8 @@ impl Handler {
         crate::backend::agent_resolve::record_uid_fallback("registry.swept_dead");
     }
 
-    /// Read-only name resolution shared by [`get_agent`], [`lookup_by_name`]
-    /// and [`peek_target`]: `Ok(Some(block))` for a UID hit or a name held
+    /// Read-only name resolution shared by [`get_agent`] and
+    /// [`lookup_by_name`]: `Ok(Some(block))` for a UID hit or a name held
     /// by exactly one live block, `Ok(None)` for nothing, `Err(blocks)` for
     /// a name several live blocks hold. Liveness is consulted **only when
     /// the name is contested** (spec §4.4.4 Q9): an uncontested registration
@@ -662,13 +611,6 @@ impl Handler {
                 TargetResolution::Ambiguous(candidates)
             }
         }
-    }
-
-    /// The block a target would resolve to, without counting or sweeping —
-    /// for callers that resolve *before* handing off to `inject_message_inner`,
-    /// which resolves (and counts) for real. `None` for unknown or ambiguous.
-    fn peek_target(&self, target: &str) -> Option<String> {
-        self.read_resolve(target).ok().flatten()
     }
 
     /// Name lookup that tells an ambiguous name apart from an unknown one
@@ -819,7 +761,7 @@ impl Handler {
     /// Deliver a held jekt (durable jekt spec §2.3): the ordinary delivery
     /// path, audited as `held_delivered` (or `held_retry` on failure).
     pub fn inject_held(&mut self, req: InjectionRequest) -> InjectionResponse {
-        self.inject_message_inner(req, Some("held_delivered"), Some("held_retry"), None)
+        self.inject_message_inner(req, Some("held_delivered"), Some("held_retry"))
     }
 
     /// Get agent registration by block ID.
@@ -855,34 +797,25 @@ impl Handler {
     /// then spawns 3 delayed `\r` sends at 200ms intervals as separate
     /// PTY writes to ensure submission. See `docs/specs/jekt-inject-timing.md`.
     pub fn inject_message(&mut self, req: InjectionRequest) -> InjectionResponse {
-        self.inject_message_inner(req, None, None, None)
+        self.inject_message_inner(req, None, None)
     }
 
-    /// Shared delivery path behind both `inject_message` (ordinary jekt,
-    /// every `outcome`/`reason` param always `None`) and
-    /// `record_supervisor_decision`'s `Nudge` arm (`outcome_on_success:
-    /// Some("nudge_sent")`, `outcome_on_failure: Some("nudge_failed")`,
-    /// `reason` the Supervisor's stated reasoning) — every audit-log write
-    /// below carries these through instead of the two call sites
-    /// duplicating sanitize/deliver logic. Two separate outcome params
-    /// (rather than one applied uniformly) so a failed delivery is audited
-    /// distinctly from a successful one (reagentx P2 on PR #2557 — the
-    /// Supervisor UI's decision feed must not show "nudged" for a delivery
-    /// that actually failed).
+    /// Shared delivery path behind `inject_message` (ordinary jekt, no
+    /// outcome) and `inject_held` (`held_delivered` / `held_retry`). Two
+    /// separate outcome params (rather than one applied uniformly) so a
+    /// failed delivery is audited distinctly from a successful one.
     fn inject_message_inner(
         &mut self,
         mut req: InjectionRequest,
         outcome_on_success: Option<&str>,
         outcome_on_failure: Option<&str>,
-        reason: Option<&str>,
     ) -> InjectionResponse {
         let uid = std::mem::take(&mut req.audit_source_uid);
         let outer = std::mem::replace(&mut self.delivery_source_uid, uid);
         let outer_wan = std::mem::replace(&mut self.delivery_wan, super::types::WanAudit::from_request(&req));
         let outer_lan = std::mem::replace(&mut self.delivery_lan_claimed_uid, std::mem::take(&mut req.lan_claimed_uid));
-        let resp = self.deliver_audited(req, outcome_on_success, outcome_on_failure, reason);
-        // Restore, not clear: a Supervisor nudge runs this inside its own
-        // decision, whose UID stays set for the rest of it.
+        let resp = self.deliver_audited(req, outcome_on_success, outcome_on_failure);
+        // Restore, not clear: leave the fields as the caller had them.
         self.delivery_source_uid = outer;
         self.delivery_wan = outer_wan;
         self.delivery_lan_claimed_uid = outer_lan;
@@ -896,7 +829,6 @@ impl Handler {
         mut req: InjectionRequest,
         outcome_on_success: Option<&str>,
         outcome_on_failure: Option<&str>,
-        reason: Option<&str>,
     ) -> InjectionResponse {
         let now = now_unix_millis();
 
@@ -978,7 +910,7 @@ impl Handler {
                     Some(&err),
                     &request_id,
                     outcome_on_failure,
-                    reason,
+                    None,
                 );
                 return InjectionResponse {
                     deferred: None,
@@ -1003,7 +935,7 @@ impl Handler {
                     Some(&err),
                     &request_id,
                     outcome_on_failure,
-                    reason,
+                    None,
                 );
                 return InjectionResponse {
                     deferred: None,
@@ -1050,7 +982,7 @@ impl Handler {
                         Some(&err),
                         &request_id,
                         Some("identity-mismatch"),
-                        reason,
+                        None,
                     );
                     return InjectionResponse {
                         deferred: None,
@@ -1137,7 +1069,7 @@ impl Handler {
                         Some(&err),
                         &request_id,
                         Some("identity-mismatch"),
-                        reason,
+                        None,
                     );
                     return InjectionResponse {
                         deferred: None,
@@ -1384,7 +1316,7 @@ impl Handler {
                         None,
                         &request_id,
                         outcome_on_success,
-                        reason,
+                        None,
                     );
                     return InjectionResponse {
                         success: true,
@@ -1420,7 +1352,7 @@ impl Handler {
                         Some(&e),
                         &request_id,
                         outcome_on_failure,
-                        reason,
+                        None,
                     );
                     return InjectionResponse {
                         deferred: None,
@@ -1451,7 +1383,7 @@ impl Handler {
                     Some(&err),
                     &request_id,
                     outcome_on_failure,
-                    reason,
+                    None,
                 );
                 return InjectionResponse {
                     deferred: None,
@@ -1495,7 +1427,7 @@ impl Handler {
                 Some(&e),
                 &request_id,
                 outcome_on_failure,
-                reason,
+                None,
             );
             return InjectionResponse {
                 deferred: None,
@@ -1532,7 +1464,7 @@ impl Handler {
             None,
             &request_id,
             outcome_on_success,
-            reason,
+            None,
         );
 
         InjectionResponse {
@@ -1602,205 +1534,6 @@ impl Handler {
         Ok(())
     }
 
-    /// Record a Warden Supervisor watcher agent's decision about
-    /// `target_agent`. A `Nudge` is delivered through the same path
-    /// `inject_message` uses (`inject_message_inner`) and audited with
-    /// `outcome: "nudge_sent"`; a `Decline` sends nothing and is audited
-    /// directly with `outcome: "nudge_declined"`.
-    ///
-    /// Enforces the consecutive-nudge ceiling
-    /// (`MAX_CONSECUTIVE_AUTO_CONTINUES`): if this nudge would exceed it,
-    /// the decision is forced to a decline (audited with
-    /// `outcome: "nudge_declined"`, `reason: "consecutive-nudge ceiling
-    /// reached"`) and `Err` is returned so the calling agent's MCP
-    /// tool-call result surfaces the refusal directly — a signal for it to
-    /// stop nudging and escalate to a human via an ordinary jekt instead of
-    /// retrying. The counter resets when the target's `registration_nonce`
-    /// or `block_id` changes (a respawn — "consecutive" only makes sense
-    /// within one continuous run; see `NudgeCounterState`'s field docs for
-    /// why both signals are needed) or after `NUDGE_COOLDOWN_RESET_MS` of
-    /// inactivity.
-    ///
-    /// Does NOT check the target's `auto_continue_enabled` opt-in itself —
-    /// `Handler` has no `Store` access by design (this module doesn't
-    /// depend on `backend::storage`). That gate lives at the HTTP boundary,
-    /// in `handle_reactive_supervisor_decision`
-    /// (`server/reactive.rs`), which has `AppState::mstore`. Any other
-    /// caller of this method directly is responsible for its own
-    /// entitlement check first.
-    pub fn record_supervisor_decision(
-        &mut self,
-        target_agent: &str,
-        action: SupervisorAction,
-        reason: &str,
-        request_id: &str,
-        source_agent: Option<&str>,
-        source_uid: &str,
-    ) -> Result<InjectionResponse, String> {
-        // Every entry this decision writes — a decline, a nudge refused at
-        // the ceiling, the nudge's own delivery — carries the Supervisor's
-        // UID (ReAgent P1 on #3608: the ceiling refusal used to miss it).
-        let outer = std::mem::replace(&mut self.delivery_source_uid, source_uid.to_string());
-        let result =
-            self.decide_audited(target_agent, action, reason, request_id, source_agent, source_uid);
-        self.delivery_source_uid = outer;
-        result
-    }
-
-    /// The body of [`Self::record_supervisor_decision`], with the
-    /// Supervisor's UID in `delivery_source_uid`.
-    fn decide_audited(
-        &mut self,
-        target_agent: &str,
-        action: SupervisorAction,
-        reason: &str,
-        request_id: &str,
-        source_agent: Option<&str>,
-        source_uid: &str,
-    ) -> Result<InjectionResponse, String> {
-        let now = now_unix_millis();
-        let target_key = target_agent.to_lowercase();
-        // Same resolution as delivery (identity M2, §10 constraint 4 — this
-        // is the site #3520 converted the others around and missed). An
-        // ambiguous or unknown target leaves `block_id` empty exactly as an
-        // unknown one did before.
-        // Peek, don't resolve: `inject_message_inner` below resolves (and
-        // counts, and sweeps) for real on the Nudge path; resolving here too
-        // would double-bump the §9.2 counters. An ambiguous or unknown target
-        // leaves `block_id` empty exactly as an unknown one did before.
-        let block_id = self.peek_target(target_agent).unwrap_or_default();
-
-        match action {
-            SupervisorAction::Decline => {
-                self.log_audit(
-                    source_agent,
-                    target_agent,
-                    &block_id,
-                    "",
-                    true,
-                    None,
-                    request_id,
-                    Some("nudge_declined"),
-                    Some(reason),
-                );
-                Ok(InjectionResponse {
-                    deferred: None,
-                    success: true,
-                    request_id: request_id.to_string(),
-                    block_id: if block_id.is_empty() { None } else { Some(block_id) },
-                    error: None,
-                    timestamp: now,
-                    effective_tier: None,
-                    requires_stop: None,
-                    channel_verified: None,
-                })
-            }
-            SupervisorAction::Nudge => {
-                // Bound `nudge_counters`' growth (reagentx P2 on PR #2557):
-                // an entry idle past the cooldown window is about to be
-                // treated as stale on next use anyway, so dropping it here
-                // is behavior-neutral — just reclaims memory instead of
-                // accumulating one entry per distinct target agent forever.
-                self.nudge_counters
-                    .retain(|_, v| now.saturating_sub(v.last_nudge_at_ms) <= NUDGE_COOLDOWN_RESET_MS);
-
-                let current_nonce = self
-                    .agent_info
-                    .get(&block_id)
-                    .map(|info| info.registration_nonce)
-                    .unwrap_or(0);
-
-                // Scoped borrow: check/reset staleness and read the
-                // pre-delivery count, then drop the borrow before calling
-                // `inject_message_inner` (which needs `&mut self` too).
-                let count_before = {
-                    let entry = self.nudge_counters.entry(target_key.clone()).or_insert(NudgeCounterState {
-                        registration_nonce: current_nonce,
-                        block_id: block_id.clone(),
-                        count: 0,
-                        last_nudge_at_ms: 0,
-                    });
-                    // registration_nonce only distinguishes a respawn for
-                    // persistent-controller agents (real nonces, ≥ 1);
-                    // PTY/shell/HTTP-register paths always register with 0,
-                    // so block_id is the fallback signal for those
-                    // (reagentx P1 on PR #2557 — nonce alone never fired
-                    // for them, leaving a respawned PTY agent stuck behind
-                    // its prior run's exhausted ceiling for up to the full
-                    // cooldown window).
-                    let stale = entry.registration_nonce != current_nonce
-                        || entry.block_id != block_id
-                        || now.saturating_sub(entry.last_nudge_at_ms) > NUDGE_COOLDOWN_RESET_MS;
-                    if stale {
-                        entry.registration_nonce = current_nonce;
-                        entry.block_id = block_id.clone();
-                        entry.count = 0;
-                    }
-                    entry.count
-                };
-
-                if count_before >= MAX_CONSECUTIVE_AUTO_CONTINUES {
-                    let ceiling_reason = "consecutive-nudge ceiling reached".to_string();
-                    self.log_audit(
-                        source_agent,
-                        target_agent,
-                        &block_id,
-                        "",
-                        true,
-                        None,
-                        request_id,
-                        Some("nudge_declined"),
-                        Some(&ceiling_reason),
-                    );
-                    return Err(ceiling_reason);
-                }
-
-                // Fixed, narrow continuation template — deliberately NOT
-                // free-form text composed by the calling Supervisor agent.
-                // ANALYSIS_WARDEN_AUTO_CONTROLLER_CONTINUATION_WATCHER_
-                // 2026_08_12.md §4.3: "The nudge text should be a fixed,
-                // narrow template... not a free-form instruction the
-                // watcher composes per-situation — this is the direct
-                // mitigation for consent-chain degradation." (reagentx P1
-                // on PR #2557 — SupervisorNudge used to accept arbitrary
-                // `message` text.) `reason` (the Supervisor's own
-                // reasoning) still travels separately, into the audit log
-                // only — never into what's delivered to the target.
-                let req = InjectionRequest {
-                    target_agent: target_agent.to_string(),
-                    message: NUDGE_MESSAGE.to_string(),
-                    source_agent: source_agent.map(|s| s.to_string()),
-                    request_id: Some(request_id.to_string()),
-                    priority: Some("normal".to_string()),
-                    jekt_tier: Some(super::types::JektTier::Coord),
-                    delivery_tier: Some("host".to_string()),
-                    forward_hops: 0,
-                    audit_source_uid: source_uid.to_string(),
-                    ..Default::default()
-                };
-                let resp = self.inject_message_inner(
-                    req,
-                    Some("nudge_sent"),
-                    Some("nudge_failed"),
-                    Some(reason),
-                );
-
-                // Only a successful delivery consumes the ceiling
-                // (reagentx P2 on PR #2557) — a rate-limited/unavailable-
-                // controller failure shouldn't cost the Supervisor one of
-                // its 5 consecutive attempts for this target.
-                if resp.success {
-                    if let Some(entry) = self.nudge_counters.get_mut(&target_key) {
-                        entry.count += 1;
-                        entry.last_nudge_at_ms = now;
-                    }
-                }
-
-                Ok(resp)
-            }
-        }
-    }
-
     /// Get audit log entries, most recent first.
     pub fn get_audit_log(&self, limit: usize) -> Vec<AuditLogEntry> {
         let start = if self.audit_log.len() > limit {
@@ -1813,10 +1546,10 @@ impl Handler {
         entries
     }
 
-    /// Add an entry to the audit ring buffer. `outcome`/`reason` are `None`
-    /// for every ordinary jekt injection (all current call sites) — only
-    /// Warden Supervisor decisions (see `record_supervisor_decision`) ever
-    /// set them.
+    /// Add an entry to the audit ring buffer. `outcome` labels a delivery
+    /// that isn't an ordinary jekt (`held_delivered`, `identity-mismatch`,
+    /// `system_note`, …); `reason` is a caller's free-text note
+    /// (`log_fleet_action_audit`). Both are `None` for an ordinary jekt.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn log_audit(
         &mut self,
@@ -2340,22 +2073,6 @@ impl ReactiveHandler {
             None,
             reason,
         );
-    }
-
-    /// See the inner [`Handler::record_supervisor_decision`].
-    pub fn record_supervisor_decision(
-        &self,
-        target_agent: &str,
-        action: SupervisorAction,
-        reason: &str,
-        request_id: &str,
-        source_agent: Option<&str>,
-        source_uid: &str,
-    ) -> Result<InjectionResponse, String> {
-        self.inner
-            .lock()
-            .unwrap()
-            .record_supervisor_decision(target_agent, action, reason, request_id, source_agent, source_uid)
     }
 }
 

@@ -201,6 +201,7 @@ async fn route_command(
         // ---- Tier 1: Bootstrap (must work for frontend to load) ----
         "get_platform" => Ok(commands::platform::get_platform()),
         "get_window_system" => Ok(commands::platform::get_window_system()),
+        "get_window_button_layout" => Ok(commands::desktop_settings::get_window_button_layout()),
         "get_auth_key" => {
             let key = state.auth_key.lock().clone();
             tracing::debug!("Frontend requested auth key: {}...", &key[..8.min(key.len())]);
@@ -242,6 +243,9 @@ async fn route_command(
         // Issue #2977 WS4 — hand the frontend whatever the background
         // service did while no window was open, so it can tell the user.
         "background_audit_take" => crate::background_audit::background_audit_take(state),
+        // What went wrong and what AgentMux did about it (SPEC_RECOVERY_NOTICES_AND_TOASTS §4.2).
+        "incidents_list" => crate::commands::incidents::incidents_list(),
+        "incident_acknowledge" => crate::commands::incidents::incident_acknowledge(state, args),
         "minimize_window" => commands::window::minimize_window(state, args),
         "maximize_window" => commands::window::maximize_window(state, args),
         "toggle_floating_maximize" => commands::window::toggle_floating_maximize(state, args),
@@ -250,6 +254,7 @@ async fn route_command(
         "is_main_window" => Ok(commands::window::is_main_window(args)),
         "get_window_label" => Ok(commands::window::get_window_label(args)),
         "open_new_window" => commands::window::open_new_window(state, args),
+        "open_restored_window" => commands::window::open_restored_window(state, args),
         "open_subwindow" => {
             // Agent / backend-only API — creates a sub-window tied to a full
             // instance. Hidden from the taskbar. Not exposed in user UI.
@@ -345,6 +350,15 @@ async fn route_command(
             })
             .await
             .map_err(|e| format!("get_window_position join error: {}", e))?
+        }
+        "is_window_maximized" => {
+            // spawn_blocking: on macOS/Linux this bounces through the UI thread
+            // (up to 250 ms), like get_window_position above.
+            let state_clone = state.clone();
+            let args_clone = args.clone();
+            tokio::task::spawn_blocking(move || commands::window::is_window_maximized(&state_clone, &args_clone))
+                .await
+                .map_err(|e| format!("is_window_maximized join error: {}", e))?
         }
         "resolve_window_at_cursor" => {
             // spawn_blocking — on macOS/Linux this bounces a CEF Views bounds

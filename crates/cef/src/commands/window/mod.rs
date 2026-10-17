@@ -61,6 +61,10 @@ mod creation;
 pub use creation::*;
 pub(crate) use creation::{assets_missing_data_url, resolve_frontend_base_url};
 
+// The last session's other windows, reopened where they were after a restore.
+mod restored;
+pub use restored::open_restored_window;
+
 // Debounced srv write-through for window position/size (the position-side
 // counterpart to `transparency`'s opacity write-through). Windows-only,
 // matching its one caller: `wrr::win_event`'s EVENT_OBJECT_LOCATIONCHANGE

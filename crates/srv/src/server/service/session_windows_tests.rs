@@ -1,0 +1,218 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+use agentmux_common::ipc::Command;
+use serde_json::json;
+
+use super::*;
+use crate::backend::obj::{Block, Point, Tab, WinSize};
+use crate::server::service::reducer_helpers::dispatch_to_reducer;
+use crate::server::service::session_restore::{
+    handle_save_session_snapshot, load_last_session_snapshot, restore_last_session, save_last_session_snapshot,
+};
+use crate::server::tests::test_state;
+
+async fn dispatch_apply(state: &AppState, cmd: Command) -> Vec<Event> {
+    let events = dispatch_to_reducer(state, cmd).await;
+    for ev in &events {
+        crate::persist_subscriber::apply_event_to_mstore(ev, &state.mstore).unwrap();
+    }
+    events
+}
+
+/// Only the windows a test adds count: the bootstrapped one is dropped.
+fn no_windows(state: &AppState) {
+    let mut client = state.mstore.get_all::<Client>().unwrap().into_iter().next().unwrap();
+    client.windowids.clear();
+    state.mstore.update(&mut client).unwrap();
+}
+
+/// A window labelled `label` at `(x, y)`, its workspace holding one tab with
+/// one `view` pane. Returns the window's and the workspace's ids.
+async fn window(state: &AppState, label: &str, view: &str, x: i64, y: i64) -> (String, String) {
+    let ws_id = dispatch_apply(state, Command::CreateWorkspace { name: String::new() })
+        .await
+        .iter()
+        .find_map(|e| match e {
+            Event::WorkspaceCreated { workspace_id, .. } => Some(workspace_id.clone()),
+            _ => None,
+        })
+        .unwrap();
+    let tab_id = dispatch_apply(state, Command::CreateTab { workspace_id: ws_id.clone(), name: format!("{view} tab") })
+        .await
+        .iter()
+        .find_map(|e| match e {
+            Event::TabCreated { tab_id, .. } => Some(tab_id.clone()),
+            _ => None,
+        })
+        .unwrap();
+    dispatch_apply(state, Command::CreateBlock { tab_id, meta: json!({ "view": view }) }).await;
+    let mut w = Window {
+        oid: format!("win-{label}"),
+        workspaceid: ws_id.clone(),
+        pos: Point { x, y },
+        winsize: WinSize { width: 800, height: 600 },
+        ..Default::default()
+    };
+    w.meta.insert("host:label".into(), json!(label));
+    state.mstore.insert(&mut w).unwrap();
+    let mut client = state.mstore.get_all::<Client>().unwrap().into_iter().next().unwrap();
+    client.windowids.push(w.oid.clone());
+    state.mstore.update(&mut client).unwrap();
+    (w.oid, ws_id)
+}
+
+/// The views of the panes in `ws_id`'s tabs, in order.
+fn views(state: &AppState, ws_id: &str) -> Vec<String> {
+    let ws = state.mstore.get::<Workspace>(ws_id).unwrap().unwrap();
+    ws.pinnedtabids
+        .iter()
+        .chain(ws.tabids.iter())
+        .filter_map(|t| state.mstore.get::<Tab>(t).unwrap())
+        .flat_map(|t| t.blockids)
+        .filter_map(|b| state.mstore.get::<Block>(&b).unwrap())
+        .filter_map(|b| b.meta.get("view").and_then(|v| v.as_str()).map(str::to_string))
+        .collect()
+}
+
+fn entry_views(entry: &Value) -> Vec<String> {
+    entry["tabs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|t| t["blocks"].as_array().unwrap().clone())
+        .map(|b| b["meta"]["view"].as_str().unwrap().to_string())
+        .collect()
+}
+
+#[tokio::test]
+async fn a_quit_saves_every_window_the_main_one_first() {
+    let state = test_state();
+    no_windows(&state);
+    window(&state, "window-2", "sysinfo", 10, 20).await;
+    window(&state, "main", "agent", 0, 0).await;
+
+    let record = snapshot_session(&state.mstore, true).unwrap();
+    let windows = windows_of(&record);
+    assert_eq!(windows.len(), 2);
+    assert_eq!(entry_views(&windows[0]), ["agent"], "the main window first");
+    assert_eq!(entry_views(&windows[1]), ["sysinfo"]);
+    assert_eq!(windows[1]["window"], json!({ "x": 10, "y": 20, "width": 800, "height": 600 }));
+    // The main window's tabs stay at the top level, where an older AgentMux reads them.
+    assert_eq!(entry_views(&record), ["agent"]);
+    assert!(record.get("window").is_none());
+    assert_eq!(record["saved_for"], "quit");
+}
+
+#[tokio::test]
+async fn subwindows_and_windows_sharing_a_workspace_are_not_saved_twice() {
+    let state = test_state();
+    no_windows(&state);
+    let (_, ws) = window(&state, "main", "agent", 0, 0).await;
+    let (sub_id, _) = window(&state, "sub", "term", 0, 0).await;
+    let mut sub = state.mstore.get::<Window>(&sub_id).unwrap().unwrap();
+    sub.kind = Some("subwindow".into());
+    state.mstore.update(&mut sub).unwrap();
+    // A second window onto the main window's workspace.
+    let mut twin = Window { oid: "win-twin".into(), workspaceid: ws, ..Default::default() };
+    state.mstore.insert(&mut twin).unwrap();
+    let mut client = state.mstore.get_all::<Client>().unwrap().into_iter().next().unwrap();
+    client.windowids.push(twin.oid.clone());
+    client.windowids.push("no-such-window".into());
+    state.mstore.update(&mut client).unwrap();
+
+    let record = snapshot_session(&state.mstore, false).unwrap();
+    assert_eq!(windows_of(&record).len(), 1);
+    assert!(record.get("saved_for").is_none(), "only a quit's record is marked");
+}
+
+#[tokio::test]
+async fn a_record_from_before_reads_as_one_window() {
+    let old = json!({ "tabs": [{ "name": "t", "blocks": [] }], "active_tab_index": 0 });
+    assert_eq!(windows_of(&old), vec![old.clone()]);
+}
+
+#[tokio::test]
+async fn the_last_close_of_a_quit_keeps_the_quits_record() {
+    let state = test_state();
+    no_windows(&state);
+    window(&state, "main", "agent", 0, 0).await;
+    let (_, last_ws) = window(&state, "window-2", "sysinfo", 10, 20).await;
+    save_last_session_snapshot(&state.mstore, snapshot_session(&state.mstore, true).unwrap());
+
+    save_on_last_close(&state.mstore, &last_ws);
+    let kept = load_last_session_snapshot(&state.mstore).unwrap();
+    assert_eq!(windows_of(&kept).len(), 2, "the quit's record, not the last window alone");
+
+    // A quit that stalled for minutes was abandoned: the close saves as usual.
+    let mut stale = kept;
+    stale["saved_at_ms"] = json!(agentmux_common::time::now_ms() - QUIT_RECORD_KEPT_FOR_MS - 1);
+    save_last_session_snapshot(&state.mstore, stale);
+    save_on_last_close(&state.mstore, &last_ws);
+    let replaced = load_last_session_snapshot(&state.mstore).unwrap();
+    assert_eq!(entry_views(&replaced), ["sysinfo"]);
+    assert!(replaced.get("windows").is_none());
+
+    // Nor does a record that wasn't a quit's hold the close back.
+    save_last_session_snapshot(&state.mstore, snapshot_session(&state.mstore, false).unwrap());
+    save_on_last_close(&state.mstore, &last_ws);
+    assert!(load_last_session_snapshot(&state.mstore).unwrap().get("windows").is_none());
+}
+
+#[tokio::test]
+async fn the_quit_flush_marks_its_record() {
+    let state = test_state();
+    no_windows(&state);
+    window(&state, "main", "agent", 0, 0).await;
+    let call = |args| WebCallType { service: "window".into(), method: "SaveSessionSnapshot".into(), args, uicontext: None };
+
+    assert!(handle_save_session_snapshot(&state, &call(vec![])).await.error.is_none());
+    assert!(load_last_session_snapshot(&state.mstore).unwrap().get("saved_for").is_none());
+    assert!(handle_save_session_snapshot(&state, &call(vec![json!(true)])).await.error.is_none());
+    assert_eq!(load_last_session_snapshot(&state.mstore).unwrap()["saved_for"], "quit");
+}
+
+#[tokio::test]
+async fn restore_brings_back_every_window_and_hands_out_the_others_once() {
+    let state = test_state();
+    no_windows(&state);
+    window(&state, "main", "agent", 0, 0).await;
+    window(&state, "window-2", "sysinfo", 10, 20).await;
+    save_last_session_snapshot(&state.mstore, snapshot_session(&state.mstore, true).unwrap());
+    no_windows(&state);
+
+    let (main_ws, _) = restore_last_session(&state).await.unwrap().unwrap();
+    assert_eq!(views(&state, &main_ws), ["agent"]);
+
+    let take = WebCallType { service: "window".into(), method: "TakeRestoredWindows".into(), args: vec![], uicontext: None };
+    let others = handle_take_restored_windows(&state, &take).data.unwrap();
+    let others = others.as_array().unwrap();
+    assert_eq!(others.len(), 1);
+    let ws = others[0]["workspaceid"].as_str().unwrap();
+    assert_ne!(ws, main_ws);
+    assert_eq!(views(&state, ws), ["sysinfo"]);
+    assert_eq!((others[0]["x"].as_i64(), others[0]["width"].as_i64()), (Some(10), Some(800)));
+
+    let again = handle_take_restored_windows(&state, &take).data.unwrap();
+    assert_eq!(again, json!([]), "each window is handed out once");
+}
+
+#[tokio::test]
+async fn a_restored_window_whose_workspace_is_gone_is_not_handed_out() {
+    let state = test_state();
+    no_windows(&state);
+    window(&state, "main", "agent", 0, 0).await;
+    window(&state, "window-2", "sysinfo", 10, 20).await;
+    save_last_session_snapshot(&state.mstore, snapshot_session(&state.mstore, true).unwrap());
+    no_windows(&state);
+    restore_last_session(&state).await.unwrap().unwrap();
+    let mut client = state.mstore.get_all::<Client>().unwrap().into_iter().next().unwrap();
+    let waiting = client.meta[WAITING_META_KEY].clone();
+    let gone = waiting[0]["workspaceid"].as_str().unwrap().to_string();
+    state.mstore.delete::<Workspace>(&gone).unwrap();
+    client = state.mstore.get_all::<Client>().unwrap().into_iter().next().unwrap();
+    assert!(client.meta.contains_key(WAITING_META_KEY));
+
+    let take = WebCallType { service: "window".into(), method: "TakeRestoredWindows".into(), args: vec![], uicontext: None };
+    assert_eq!(handle_take_restored_windows(&state, &take).data.unwrap(), json!([]));
+}

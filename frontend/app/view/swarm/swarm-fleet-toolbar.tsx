@@ -6,9 +6,11 @@
 
 import { createMemo, createSignal, For, Show, type JSX } from "solid-js";
 import { ConfirmModal } from "@/app/element/confirm-modal";
+import { ContextMenuModel } from "@/app/store/contextmenu";
+import { MODE_DESCRIPTIONS, MODE_LABELS, SUPERVISOR_MODES } from "@/app/store/supervisor";
 import { summarizeAmbientOutcomes } from "@/app/store/ambient-outcomes";
 import { remoteFleetTargets, unavailableReason, type FleetAction } from "./swarm-fleet-targets";
-import type { SwarmViewModel } from "./swarm-model";
+import type { FleetResultEntry, SwarmViewModel } from "./swarm-model";
 import { remoteSections } from "./swarm-remote";
 import { Button, IconButton } from "@/app/element/ui";
 import { focusOnOpen } from "@/util/focusutil";
@@ -24,6 +26,10 @@ const DEFAULT_MAX_FAIL_PERCENTAGE = 50;
 /** Shown when every selected agent is on another machine, where nothing can
  *  act on it yet. */
 const NOTHING_REACHABLE = "Agents on other machines can't be acted on yet: nothing there can verify the request is yours";
+
+/** Shown when no selected agent is this AgentMux's own: each AgentMux
+ *  supervises its own agents. */
+const NOTHING_SUPERVISABLE = "The Supervisor runs in each AgentMux for its own agents; select agents of this one";
 
 export function FleetToolbar({
     model,
@@ -173,6 +179,27 @@ export function FleetToolbar({
                         >
                             <i class="fa-solid fa-stop" /> Stop {reachable("stop")}
                         </Button>
+                        {/* Sets the Supervisor's mode on the selection, from a
+                            menu of the three modes. Not destructive, so no
+                            confirm, like Broadcast; the result panel reports
+                            each agent (docs/specs/SPEC_SWARM_SUPERVISOR_2026_10_16.md §3.8). */}
+                        <Button
+                            class="swarm-fleet-btn"
+                            disabled={model.fleetActionInFlightAtom() || reachable("supervise") === 0}
+                            title={reachable("supervise") === 0 ? NOTHING_SUPERVISABLE : undefined}
+                            onClick={(e: MouseEvent) =>
+                                ContextMenuModel.showContextMenu(
+                                    SUPERVISOR_MODES.map((mode) => ({
+                                        label: `Supervisor: ${MODE_LABELS[mode]} for ${reachable("supervise")} ${plural(reachable("supervise"))}`,
+                                        sublabel: MODE_DESCRIPTIONS[mode],
+                                        click: () => void model.superviseSelection(mode),
+                                    })),
+                                    e
+                                )
+                            }
+                        >
+                            <i class="fa-solid fa-user-shield" /> Supervisor
+                        </Button>
                     </Show>
                 </Show>
 
@@ -293,6 +320,12 @@ export function StopTargetRows(props: { model: SwarmViewModel }): JSX.Element {
     );
 }
 
+const FLEET_ACTION_TITLES: Record<FleetResultEntry["action"], string> = {
+    broadcast: "Broadcast",
+    "bulk-stop": "Bulk stop",
+    supervisor: "Supervisor",
+};
+
 export function FleetResultPanel({ model }: { model: SwarmViewModel }): JSX.Element {
     const entry = () => model.lastFleetResultAtom();
 
@@ -302,7 +335,7 @@ export function FleetResultPanel({ model }: { model: SwarmViewModel }): JSX.Elem
                 <div class="swarm-fleet-result-panel">
                     <div class="swarm-fleet-result-header">
                         <span>
-                            {e().action === "broadcast" ? "Broadcast" : "Bulk stop"} — {e().result.succeeded.length} succeeded,{" "}
+                            {FLEET_ACTION_TITLES[e().action]} — {e().result.succeeded.length} succeeded,{" "}
                             {e().result.failed.length} failed
                             <Show when={e().result.aborted_early}> — staged rollout aborted early</Show>
                         </span>

@@ -237,6 +237,15 @@ export const TIPS: TipRow[] = [
         label: "A click opens a preview tab, a double-click a tab that stays; F2 renames",
         source: { file: "frontend/app/view/editor/file-tree.tsx", anchor: "onDblClick={handleDblClick}" },
     },
+    {
+        // SPEC_EDITOR_TREE_KEYBOARD_ICONS_AND_CLICK_ZOOM_2026_10_16.md §5.2.
+        id: "editor:tree:keys",
+        area: "Editor",
+        gesture: "key:↑ / key:↓ / key:Enter / key:Space / key:Escape",
+        where: "in the editor's file tree",
+        label: "Previous / next row, previewing a file / open the file in a tab that stays and go to the editor / keep its tab / go to the editor; ← → close and open folders, Home, End and the Page keys jump, typing a name jumps to it",
+        source: { file: "frontend/app/view/editor/file-tree.tsx", anchor: "const move = treeMove(list, current, e.key, pageSize());" },
+    },
 
     // Library defaults (CodeMirror basicSetup), checked by hand on macOS,
     // Linux (#4651) and Windows (spec §10). Not code folding: the gutter is
@@ -323,10 +332,20 @@ export const TIPS: TipRow[] = [
     {
         id: "editor:image",
         area: "Editor",
-        gesture: "wheel / drag / dblclick",
+        gesture: "click / alt+click / drag / wheel",
         where: "on an image in the Editor",
-        label: "Zoom around the pointer / pan / switch between fit and zoomed; + − 0 1 and the arrows too; [ ] the previous or next image in the folder; B the background",
-        source: { file: "frontend/app/view/editor/viewers/image/image-viewer.tsx", anchor: "the wheel zooms about the cursor" },
+        label: "Zoom in a step about the pointer / zoom out a step / pan / zoom smoothly; + − 0 1 and the arrows too; [ ] the previous or next image in the folder; B the background",
+        source: { file: "frontend/app/view/editor/viewers/image/image-viewer.tsx", anchor: "isZoomOutModifier(e) ? -1 : 1" },
+    },
+    {
+        // Not on macOS, where Ctrl+click is a right-click.
+        id: "editor:image:ctrlClick",
+        area: "Editor",
+        gesture: "ctrl+click",
+        where: "on an image in the Editor",
+        label: "Zoom out a step about the pointer",
+        os: ["win32", "linux"],
+        source: { file: "frontend/app/view/editor/viewers/image/image-viewer.tsx", anchor: "e.altKey || (e.ctrlKey && !isMacOS())" },
     },
 
     // ── Agent ──

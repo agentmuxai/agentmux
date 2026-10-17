@@ -123,12 +123,12 @@ mod tests {
 
     #[test]
     fn a_renamed_parameter_is_named_as_the_caller_passes_it() {
-        let rename = &[("agent", "target_agent"), ("decision", "action")][..];
-        assert_eq!(public_params("missing required parameter: target_agent", rename), "missing required parameter: agent");
-        assert_eq!(public_params("missing required parameter: action", rename), "missing required parameter: decision");
+        let rename = &[("agent", "agent_id"), ("view", "kind")][..];
+        assert_eq!(public_params("missing required parameter: agent_id", rename), "missing required parameter: agent");
+        assert_eq!(public_params("missing required parameter: kind", rename), "missing required parameter: view");
         assert_eq!(
-            public_params("invalid action: maybe (expected \"nudge\" or \"decline\")", rename),
-            "invalid decision: maybe (expected \"nudge\" or \"decline\")"
+            public_params("invalid kind: maybe (expected \"editor\" or \"files\")", rename),
+            "invalid view: maybe (expected \"editor\" or \"files\")"
         );
         assert_eq!(public_params("missing required parameter: reason", rename), "missing required parameter: reason");
     }

@@ -1,9 +1,12 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// One Sysinfo chart (sysinfo-plot.tsx): uPlot's canvas fills the panel, the
-// metric's name sits over its top-left corner, and the hover tip floats over it.
+// One Sysinfo chart (sysinfo-plot.tsx): uPlot's canvas fills the panel to its
+// edges, the metric's name sits over its top-left corner, and the hover tip
+// floats over it. Graphics touch the pane's edges; text sits --sysinfo-text-inset
+// (1px) in.
 .sysinfo-chart {
+    --sysinfo-text-inset: 1px;
     position: relative;
     display: flex;
     flex-direction: column;
@@ -20,15 +23,25 @@
 
 // A titled chart starts below its title, so the title never sits on the top y label.
 .sysinfo-chart-canvas--titled {
-    margin-top: 16px;
+    margin-top: 14px;
 }
 
 .sysinfo-chart-title {
+    // Centred over its chart, the same distance from the top on every chart. One
+    // line always (a long title is cut with an ellipsis, never wrapped down onto
+    // the plot), so no chart's title is taller than another's.
     position: absolute;
-    top: 2px;
-    left: 6px;
+    top: var(--sysinfo-text-inset, 1px);
+    left: 0;
+    right: 0;
+    padding: 0 var(--sysinfo-text-inset, 1px);
     z-index: 1;
     font-size: var(--text-xs);
+    line-height: 12px;
+    text-align: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
     color: var(--grey-text-color);
     pointer-events: none;
 }
@@ -47,22 +60,11 @@
     pointer-events: none;
 }
 
-// A simple view's chart, against the pane's edges (TimeChart `tight`): the
-// title sits in the corner and the plot starts just under it.
-.sysinfo-chart--tight {
-    .sysinfo-chart-title {
-        top: 0;
-        left: 3px;
-    }
-
-    .sysinfo-chart-canvas--titled {
-        margin-top: 13px;
-    }
-}
-
-// The pane (sysinfo-view.tsx): the control row (sysinfo-bar.tsx), the same in
-// the simple and the Advanced views, then the charts or the table.
+// The pane (sysinfo-view.tsx): the charts or the table fill it, and the control
+// row (sysinfo-bar.tsx), the same in the simple and the Advanced views, floats
+// over its top.
 .sysinfo-pane {
+    position: relative;
     display: flex;
     flex-direction: column;
     width: 100%;
@@ -70,15 +72,24 @@
     min-height: 0;
 }
 
-// Each control is one flex item, so a narrowing pane moves them to the next
-// line one at a time from the right; pause and table stay right-aligned.
+// Floats over the top of the pane, out of the layout: the charts under it keep
+// their place whether the view buttons are shown or not. The row itself lets
+// the pointer through; only its buttons catch it.
+// Two columns: the view and window buttons (which wrap among themselves as the
+// pane narrows) and the action buttons, which stay on the first line, flush with
+// the pane's top and right borders (no padding there).
 .sysinfo-bar {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: var(--z-pane-overlay);
+    pointer-events: none;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
     gap: 2px 4px;
-    padding: 2px 3px;
-    flex-shrink: 0;
+    padding: 0 0 0 var(--sysinfo-text-inset, 1px);
 
     // A set of buttons wider than the pane wraps within itself.
     .ui-segmented {
@@ -87,14 +98,40 @@
     }
 }
 
+// The table view has no chart to keep still: the row takes its real height in the
+// layout (however many lines the view buttons wrap to) and the table starts below it.
+.sysinfo-bar--in-flow {
+    position: relative;
+}
+
+.sysinfo-bar-selectors {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 2px 4px;
+    grid-column: 1;
+    min-width: 0;
+    justify-self: start;
+    // A frosted strip behind them, no tint: the chart under it is blurred so the
+    // buttons read. Small and only present while the buttons are shown (a
+    // pane-sized backdrop-filter was dropped from block.scss for its per-frame
+    // cost under sysinfo's 1 Hz redraws).
+    backdrop-filter: blur(6px);
+    border-radius: var(--radius-sm);
+    pointer-events: auto;
+}
+
+// Its parent leaves no right padding, so the last button's line is the pane's border.
 .sysinfo-bar-actions {
     display: flex;
     align-items: center;
     gap: 4px;
-    margin-left: auto;
+    grid-column: 2;
+    pointer-events: auto;
 }
 
 .sysinfo-bar-paused {
+    margin-right: 2px;
     font-size: var(--text-xs);
     color: var(--grey-text-color);
 }

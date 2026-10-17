@@ -79,7 +79,6 @@ const claudeAgent = {
     // be immutable" state the issue calls out.
     memory_id: "mem-1",
     model_vendor_base_url: "",
-    auto_continue_enabled: 0,
 } as unknown as AgentDefinition;
 
 describe("AgentIdentityModal — no post-creation model-vendor edit surface", () => {

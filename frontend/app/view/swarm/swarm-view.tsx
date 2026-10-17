@@ -28,6 +28,7 @@ import { BackgroundTaskBucket, SubagentBackgroundTasks, visibleBackgroundTasks }
 import type { BackgroundTaskView } from "@/app/store/rpc-api";
 import { swarmRowColors } from "./swarm-row-colors";
 import { isAwaitingUser, swarmLineTooltip } from "@/app/store/swarm-line";
+import { setSupervisorMode, SupervisorBucket, SupervisorChip, supervisorRows } from "./swarm-supervisor";
 import { isActiveStatus, rankAgentStatus, subagentStatus } from "@/app/store/agent-status";
 import { questionCountdown } from "@/app/store/question-timer";
 import { remoteAgentKey } from "./swarm-fleet-targets";
@@ -410,8 +411,9 @@ export function AgentRow({
         tick();
         return visibleBackgroundTasks(node.backgroundTasks.own, Date.now());
     });
+    const supervisorDecisions = createMemo(() => supervisorRows(blockMeta()));
     const totalRows = createMemo(() =>
-        agentChildRowCount(node, longRunningRows().length, ownBackgroundRows().length)
+        agentChildRowCount(node, longRunningRows().length, ownBackgroundRows().length, supervisorDecisions().length)
     );
     const hasChildren = createMemo(() => totalRows() > 0);
 
@@ -552,6 +554,15 @@ export function AgentRow({
                         awaitingUser={isAwaitingUser(blockMeta(), node.agentStatus)}
                         blockId={node.blockId}
                     />
+                    <Show when={node.blockId}>
+                        {(blockId) => (
+                            <SupervisorChip
+                                meta={blockMeta()}
+                                live={node.agentStatus === "running"}
+                                onSet={(mode) => setSupervisorMode(blockId(), mode)}
+                            />
+                        )}
+                    </Show>
                 </div>
                 {/* Never empty: the generated title, or a fallback shown muted
                     with a tooltip saying it is one (store/swarm-line.ts). */}
@@ -579,6 +590,7 @@ export function AgentRow({
             </div>
             <Show when={!collapsed()}>
                 <div class="swarm-children">
+                    <SupervisorBucket rows={supervisorDecisions()} />
                     <TodoBucket
                         rows={node.todoRows}
                         truncated={node.todosTruncated}
@@ -820,8 +832,16 @@ function ShellRow({ shell }: { shell: ActiveShell }): JSX.Element {
  * A future sixth bucket must be added here too; the test file enumerates each
  * one so forgetting is a failing test rather than an invisible feature.
  */
-export function agentChildRowCount(node: AgentTreeNode, longRunningCount: number, backgroundCount = 0): number {
+export function agentChildRowCount(
+    node: AgentTreeNode,
+    longRunningCount: number,
+    backgroundCount = 0,
+    supervisorCount = 0
+): number {
     return (
+        // The Supervisor's recent decisions (swarm-supervisor.tsx), counted
+        // for the same reason as todos below.
+        supervisorCount +
         // Todos count like any other bucket, and must: this total drives
         // `hasChildren()`, which gates BOTH the expand affordance and the
         // collapse guard that mounts the buckets at all. Omitting them would

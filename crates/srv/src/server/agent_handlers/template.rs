@@ -316,12 +316,11 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     container_name: String::new(),
                     use_ambient_login: 0,
                     model_vendor_base_url: chosen_model_vendor_base_url,
-                    auto_continue_enabled: 0,
                     memory_id: String::new(),
                     // Fail-closed default, not inherited from the template —
-                    // same convention as auto_start/use_ambient_login/
-                    // auto_continue_enabled above (opt-in settings reset on
-                    // a fresh clone, not carried over).
+                    // same convention as auto_start/use_ambient_login above
+                    // (opt-in settings reset on a fresh clone, not carried
+                    // over).
                     conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
                 };
                 mstore
@@ -676,11 +675,10 @@ pub(crate) fn copy_definition(
         container_name: String::new(),
         use_ambient_login: 0,
         model_vendor_base_url: source.model_vendor_base_url.clone(),
-        auto_continue_enabled: 0,
         memory_id: String::new(),
         // Fail-closed default, not inherited from source — same
-        // convention as use_ambient_login/auto_continue_enabled
-        // above (opt-in settings reset on a fork, not carried
+        // convention as use_ambient_login above (opt-in
+        // settings reset on a fork, not carried
         // over, even though other config like container image
         // and model vendor IS inherited).
         conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
@@ -799,7 +797,6 @@ mod tests {
             container_volumes: "[]".to_string(),
             container_name: String::new(),
             use_ambient_login: 0,
-            auto_continue_enabled: 0,
             model_vendor_base_url: String::new(),
             memory_id: bundle_id.to_string(),
         };

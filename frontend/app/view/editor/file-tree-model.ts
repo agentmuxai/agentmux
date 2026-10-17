@@ -17,12 +17,18 @@
 // Hidden-file filtering is applied at render time, not at fetch — so toggling
 // the eye button is free, no RPC.
 //
-// Spec: docs/specs/SPEC_EDITOR_FILE_TREE_2026-05-26.md
+// The selected row (where the tree's keyboard is) lives here too, so it
+// survives hiding and showing the tree; revealPath() opens the folders down
+// to a file, for marking the open file.
+//
+// Spec: docs/specs/SPEC_EDITOR_FILE_TREE_2026-05-26.md,
+// docs/specs/SPEC_EDITOR_TREE_KEYBOARD_ICONS_AND_CLICK_ZOOM_2026_10_16.md §4
 
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import type { DirEntry } from "@/app/store/rpc-api";
 import { createSignal, type Accessor } from "solid-js";
+import { entryNamed, isWindowsPath, joinPath, rootHolding, segmentsBelow } from "./tree-keyboard";
 
 export interface Root {
     /** Display name (e.g. "asaf", "C:", "/", "Macintosh HD") */
@@ -39,27 +45,6 @@ interface NodeData {
     error?: string;
 }
 
-// Names hidden when show-hidden is OFF.
-// Dotfiles match via leading '.' (handled in `isHiddenName`).
-const HIDDEN_NAMES = new Set(["node_modules", "Thumbs.db", "$RECYCLE.BIN"]);
-
-export function isHiddenName(name: string): boolean {
-    if (name.startsWith(".")) return true;
-    return HIDDEN_NAMES.has(name);
-}
-
-/**
- * Join a parent path and a child name using the parent's existing separator
- * (Windows-style if the parent contains `\`, else POSIX). The backend
- * canonicalizes paths so this stays consistent across the tree.
- */
-export function joinPath(base: string, name: string): string {
-    if (!base) return name;
-    const sep = base.includes("\\") ? "\\" : "/";
-    if (base.endsWith(sep) || base.endsWith("/")) return base + name;
-    return base + sep + name;
-}
-
 export class FileTreeModel {
     private _expanded = createSignal<Set<string>>(new Set());
     expandedAtom: Accessor<Set<string>> = this._expanded[0];
@@ -69,6 +54,17 @@ export class FileTreeModel {
 
     private _roots = createSignal<Root[]>([]);
     rootsAtom: Accessor<Root[]> = this._roots[0];
+
+    private _selected = createSignal<string | null>(null);
+    /** The selected row's path: where the tree's keyboard is. */
+    selectedPath: Accessor<string | null> = this._selected[0];
+
+    /** Loads in flight, so a reveal can wait for one already started. */
+    private _loading = new Map<string, Promise<void>>();
+
+    setSelectedPath(path: string | null): void {
+        this._selected[1](path);
+    }
 
     isExpanded(path: string): boolean {
         return this._expanded[0]().has(path);
@@ -105,7 +101,8 @@ export class FileTreeModel {
         const next = new Set(this._expanded[0]());
         next.add(home);
         this._expanded[1](next);
-        await this.load(home);
+        // Setting the roots can start a reveal, which may be loading HOME already.
+        await (this._loading.get(home) ?? this.load(home));
     }
 
     /** Toggle expand/collapse on a folder. Lazy-loads the first time. */
@@ -153,6 +150,41 @@ export class FileTreeModel {
         }
     }
 
+    /**
+     * Open the folders from the root holding `file` down to it, loading each,
+     * and return the file's row path as the tree writes it, or null when no
+     * root holds it or a folder on the way doesn't list it. `file` may be
+     * written differently from the tree (separators, a drive letter's case).
+     */
+    async revealPath(file: string): Promise<string | null> {
+        const root = rootHolding(
+            this._roots[0]().map((r) => r.path),
+            file
+        );
+        if (root == null) return null;
+        const ignoreCase = isWindowsPath(root);
+        let path = root;
+        for (const name of segmentsBelow(root, file)) {
+            if (!this.isExpanded(path)) {
+                const next = new Set(this._expanded[0]());
+                next.add(path);
+                this._expanded[1](next);
+            }
+            await this.ensureLoaded(path);
+            const entry = entryNamed(this._data[0]().get(path)?.entries, name, ignoreCase);
+            if (!entry) return null;
+            path = joinPath(path, entry.name);
+        }
+        return path;
+    }
+
+    private async ensureLoaded(path: string): Promise<void> {
+        const inFlight = this._loading.get(path);
+        if (inFlight) return inFlight;
+        if (this._data[0]().get(path)?.phase === "loaded") return;
+        await this.load(path);
+    }
+
     /** Re-fetch a single path (e.g. after a file-system mutation in that dir). */
     async refreshPath(path: string): Promise<void> {
         await this.load(path);
@@ -198,7 +230,15 @@ export class FileTreeModel {
         });
     }
 
-    private async load(path: string): Promise<void> {
+    private load(path: string): Promise<void> {
+        const loading: Promise<void> = this.fetchDir(path).finally(() => {
+            if (this._loading.get(path) === loading) this._loading.delete(path);
+        });
+        this._loading.set(path, loading);
+        return loading;
+    }
+
+    private async fetchDir(path: string): Promise<void> {
         const setData = (updater: (map: Map<string, NodeData>) => void) => {
             const next = new Map(this._data[0]());
             updater(next);
@@ -217,9 +257,9 @@ export class FileTreeModel {
                     map.set(path, { phase: "loaded", entries: result.entries });
                 }
             });
-        } catch (e: any) {
+        } catch (e) {
             setData((map) => {
-                map.set(path, { phase: "error", error: e?.message ?? String(e) });
+                map.set(path, { phase: "error", error: (e as Error)?.message ?? String(e) });
             });
         }
     }

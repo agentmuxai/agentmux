@@ -105,6 +105,32 @@ pub(super) fn handle_toggle_floating_maximize(
     }
 }
 
+/// Restore a maximized floater because its header is being dragged
+/// (SPEC_FLOATING_PANE_WINDOW_CONTROLS_REFINEMENTS_2026_10_16 §4.4): the
+/// toggle's way down, but only from Maximized. Normal, Minimized or no entry
+/// is a no-op with no event, so the Win32 drag loop learns "it was maximized"
+/// from the event alone and never restores a window that wasn't.
+#[cfg(any(target_os = "windows", test))]
+pub(super) fn handle_restore_floating_for_drag(state: &mut HostState, label: String) -> DispatchOutput {
+    let restore_rect = match state.pane_window_states.get_mut(&label) {
+        Some(entry) if entry.placement == WindowPlacement::Maximized => {
+            entry.placement = WindowPlacement::Normal;
+            entry.last_known_normal_rect.take()
+        }
+        _ => return DispatchOutput::default(),
+    };
+    let version = state.bump_version();
+    DispatchOutput {
+        events: vec![HostEvent::PaneWindowStateChanged {
+            label,
+            placement: WindowPlacement::Normal,
+            restore_rect,
+            version,
+        }],
+        ..Default::default()
+    }
+}
+
 /// Set a floater's "Always on top" flag
 /// (SPEC_FLOATING_PANE_ALWAYS_ON_TOP_2026_09_27 §5). Inserts a default entry
 /// if the floater has none yet, and leaves placement untouched. Pure: the
@@ -217,6 +243,39 @@ mod tests {
             HostEvent::PaneWindowStateChanged { restore_rect, .. } => Some(*restore_rect),
             _ => None,
         }).flatten()
+    }
+
+    #[test]
+    fn restore_for_drag_restores_a_maximized_floater_and_returns_its_rect() {
+        let mut state = HostState::default();
+        let normal = PaneRect { left: 40, top: 60, right: 680, bottom: 560 };
+        update(&mut state, HostCommand::ToggleFloatingMaximize { label: LBL.into(), current_rect: Some(normal) });
+
+        let out = update(&mut state, HostCommand::RestoreFloatingForDrag { label: LBL.into() });
+        assert_eq!(placement_of(&state, LBL), Some(WindowPlacement::Normal));
+        assert_eq!(last_event_placement(&out), Some(WindowPlacement::Normal));
+        assert_eq!(last_event_restore_rect(&out), Some(normal), "the drag restores to the stashed size");
+        assert_eq!(state.pane_window_states.get(LBL).and_then(|e| e.last_known_normal_rect), None);
+
+        // A later toggle maximizes again (the drag left it Normal, not stuck).
+        update(&mut state, HostCommand::ToggleFloatingMaximize { label: LBL.into(), current_rect: None });
+        assert_eq!(placement_of(&state, LBL), Some(WindowPlacement::Maximized));
+    }
+
+    #[test]
+    fn restore_for_drag_is_a_silent_no_op_unless_maximized() {
+        let mut state = HostState::default();
+        // No entry at all.
+        let out = update(&mut state, HostCommand::RestoreFloatingForDrag { label: LBL.into() });
+        assert!(out.events.is_empty());
+        assert_eq!(placement_of(&state, LBL), None, "no entry is created");
+
+        // Normal (maximized, then restored).
+        update(&mut state, HostCommand::ToggleFloatingMaximize { label: LBL.into(), current_rect: None });
+        update(&mut state, HostCommand::ToggleFloatingMaximize { label: LBL.into(), current_rect: None });
+        let out = update(&mut state, HostCommand::RestoreFloatingForDrag { label: LBL.into() });
+        assert!(out.events.is_empty());
+        assert_eq!(placement_of(&state, LBL), Some(WindowPlacement::Normal));
     }
 
     #[test]

@@ -82,6 +82,21 @@
     --widget-icon-hover-color: var(--main-text-color);
     --widget-icon-active-color: var(--accent-color);
 
+    // The editor's file tree (SPEC_EDITOR_TREE_KEYBOARD_ICONS_AND_CLICK_ZOOM_2026_10_16.md §3):
+    // file names in VS Code's grey (`sideBar.foreground`), and each file
+    // type's icon in the Seti palette of VS Code's default file icons
+    // (file-icons.ts picks the tone).
+    --file-tree-text-color: #cccccc;
+    --file-icon-blue: #519aba;
+    --file-icon-green: #8dc149;
+    --file-icon-yellow: #cbcb41;
+    --file-icon-orange: #e37933;
+    --file-icon-red: #cc3e44;
+    --file-icon-purple: #a074c4;
+    --file-icon-pink: #f55385;
+    --file-icon-steel: #7494a3;
+    --file-icon-grey: #6d8086;
+
     // User-input highlight — complementary to --accent-color (blue hue ~210°).
     // Hue ~28° (warm amber) is the colour-wheel complement of the accent.
     // Used as the solid border and as the INPUT to color-mix() in
@@ -638,4 +653,8 @@
     --attention-text-color: rgb(255, 255, 255);
     // The dark default, white at half opacity, is lost on a light page.
     --tertiary-text-color: color-mix(in srgb, var(--main-text-color) 50%, transparent);
+    // The file tree's names in VS Code's light grey, and Seti's darker
+    // yellow: its usual one is unreadable on white.
+    --file-tree-text-color: #3b3b3b;
+    --file-icon-yellow: #a2852f;
 }

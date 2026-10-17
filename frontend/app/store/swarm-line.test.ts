@@ -13,6 +13,7 @@ import {
     META_RESTORED,
     resolveSwarmLine,
     RESTORED_TOOLTIP,
+    STATUS_NEEDS_YOU,
     STATUS_NO_ACTIVITY,
     STATUS_SUMMARIZING,
     STATUS_THINKING,
@@ -150,6 +151,32 @@ describe("resolveSwarmLine", () => {
         expect(isAwaitingUser({ [META_AWAITING_USER]: true }, "idle")).toBe(false);
         expect(isAwaitingUser({ [META_AWAITING_USER]: false }, "running")).toBe(false);
         expect(isAwaitingUser(undefined, "running")).toBe(false);
+    });
+
+    // SPEC_SWARM_SUPERVISOR_2026_10_16.md §3.8: a pause is the one Supervisor
+    // state that asks something of the user, so it leads like a question.
+    it("leads with the Supervisor's reason when it stopped an idle agent for you", () => {
+        const paused = {
+            "supervisor:mode": "drive",
+            "supervisor:state": { mode: "drive", status: "paused", reason: "It needs the staging password.", history: [] },
+            "term:ambient_summary": "Deploy the docs site",
+        };
+        expect(line({ meta: paused, status: "idle" })).toEqual({
+            text: `${STATUS_NEEDS_YOU}: It needs the staging password.`,
+            source: "status",
+        });
+        expect(isAwaitingUser(paused, "idle")).toBe(true);
+        // A turn in flight means the pause is over.
+        expect(line({ meta: paused, status: "running" }).source).toBe("generated");
+        // Turned off: the stored state no longer speaks.
+        expect(line({ meta: { ...paused, "supervisor:mode": undefined }, status: "idle" }).source).toBe("generated");
+        // Any other state is not a pause.
+        const continued = { ...paused, "supervisor:state": { ...paused["supervisor:state"], status: "continued" } };
+        expect(line({ meta: continued, status: "idle" }).source).toBe("generated");
+    });
+
+    it("never turns a Supervisor continuation into a goal", () => {
+        expect(heuristicTitle("[SUPERVISOR:MODE=drive N=1 OF=15]\nKeep going without waiting.")).toBeNull();
     });
 
     it("uses the restored title next, then the heuristic one", () => {

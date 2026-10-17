@@ -5411,6 +5411,25 @@
     }
   },
   {
+    "command": "supervisor.set-mode",
+    "request": "agentmux_srv::backend::rpc_types::fleet::CommandSupervisorSetModeData",
+    "requestName": "CommandSupervisorSetModeData",
+    "requestTs": {
+      "imports": [
+        "CommandSupervisorSetModeData"
+      ],
+      "name": "CommandSupervisorSetModeData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::fleet::FleetActionResult",
+    "responseName": "FleetActionResult",
+    "responseTs": {
+      "imports": [
+        "FleetActionResult"
+      ],
+      "name": "FleetActionResult"
+    }
+  },
+  {
     "command": "swarm.other-instances",
     "request": "serde_json::value::Value",
     "requestName": "Value",

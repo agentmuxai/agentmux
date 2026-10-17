@@ -6,6 +6,7 @@
 
 import { hostHas } from "@/app/host/host-caps";
 import { loadWindowSystem } from "@/app/host/window-system";
+import { loadWindowButtonLayout } from "@/app/window/window-button-layout";
 import { initMotion } from "@/app/motion/motion";
 import { UserInputModal } from "@/app/modals/userinputmodal";
 import { WpsEvent } from "@/app/store/mps-events";
@@ -190,7 +191,10 @@ export function initGlobal(initOpts: GlobalInitOptions) {
     setPlatform(initOpts.platform);
     // Native Wayland vs X11 decides how floaters move and how drags look
     // (window-system.ts); only Linux has the choice.
-    if (initOpts.platform === "linux") void loadWindowSystem();
+    if (initOpts.platform === "linux") {
+        void loadWindowSystem();
+        void loadWindowButtonLayout();
+    }
     // Add platform CSS class to body for platform-specific styling
     document.body.classList.add(`platform-${initOpts.platform}`);
     initGlobalSignals(initOpts);

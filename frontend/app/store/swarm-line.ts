@@ -31,6 +31,7 @@
 import { readSwarmSummary } from "./activitySummary";
 import { rankAgentStatus, type AgentStatus } from "./agent-status";
 import { isUsableTitle } from "./ambient-title";
+import { supervisorPauseReason } from "./supervisor";
 
 export type SwarmLineSource = "generated" | "restored" | "heuristic" | "status";
 
@@ -51,6 +52,8 @@ export const LAST_PROMPT_MAX_CHARS = 240;
 export const STATUS_WORKING = "Working";
 export const STATUS_THINKING = "Thinking";
 export const STATUS_WAITING = "Waiting for you";
+/** The line's lead when the Supervisor stopped the agent: "Needs you: <why>". */
+export const STATUS_NEEDS_YOU = "Needs you";
 export const STATUS_SUMMARIZING = "Summarizing work completed";
 export const STATUS_NO_ACTIVITY = "No activity yet";
 
@@ -83,9 +86,9 @@ const FILLER_PREFIXES = [
 ];
 
 /** Text that arrives as a user turn but is not a person talking: an agent-to-agent
- *  message or a swarm broadcast wrapper. */
+ *  message, a swarm broadcast wrapper, or a Supervisor continuation. */
 function isInjected(message: string): boolean {
-    return /^\s*\[(JEKT|BROADCAST):/i.test(message);
+    return /^\s*\[(JEKT|BROADCAST|SUPERVISOR):/i.test(message);
 }
 
 function normalizeForNudge(text: string): string {
@@ -148,15 +151,21 @@ export interface SwarmLineInput {
 }
 
 /** The ranked status of a Swarm agent, from what its row knows: whether a
- *  turn is in flight, and the pending-question flag (`term:awaiting_user`). */
+ *  turn is in flight, the pending-question flag (`term:awaiting_user`), and
+ *  whether the Swarm Supervisor stopped it for the user. */
 function swarmAgentStatus(meta: Record<string, unknown> | undefined, status: "running" | "idle"): AgentStatus {
-    return rankAgentStatus({ live: status === "running", needsYou: meta?.[META_AWAITING_USER] === true });
+    const live = status === "running";
+    return rankAgentStatus({
+        live,
+        needsYou: meta?.[META_AWAITING_USER] === true,
+        pausedForYou: supervisorPauseReason(meta, live) !== null,
+    });
 }
 
 /**
  * Whether the agent is waiting on the user: a question is pending and a turn
- * is in flight. The row's "Waiting for you" line and the status chip's
- * "question" state both use this.
+ * is in flight, or the Supervisor stopped it for the user. The row's line and
+ * the status chip's "question" state both use this.
  */
 export function isAwaitingUser(meta: Record<string, unknown> | undefined, status: "running" | "idle"): boolean {
     return swarmAgentStatus(meta, status).kind === "needs-you";
@@ -167,7 +176,10 @@ export function resolveSwarmLine(input: SwarmLineInput): SwarmLine {
     const { meta, currentTool, contextTokens } = input;
     const status = swarmAgentStatus(meta, input.status);
 
-    if (status.kind === "needs-you") return { text: STATUS_WAITING, source: "status" };
+    if (status.kind === "needs-you") {
+        const paused = supervisorPauseReason(meta, input.status === "running");
+        return { text: paused ? `${STATUS_NEEDS_YOU}: ${paused}` : STATUS_WAITING, source: "status" };
+    }
 
     const generated = readSwarmSummary(meta);
     if (generated) return { text: generated, source: "generated" };

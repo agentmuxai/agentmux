@@ -937,6 +937,15 @@ pub struct RequestUpgradeRequest {
 /// (docs/specs/SPEC_AGENT_WORKERS_2026_10_15.md §3.1): the calling agent, the
 /// leader, opens a worker: a new agent built from its own definition (not a
 /// fork: no history), in a pane next to its own.
+/// `POST /api/v1/agent/workers` — backs the `Agents` tool's `workers`
+/// (docs/specs/SPEC_AGENT_WORKERS_2026_10_15.md §3.4): the calling agent's own
+/// workers, by its signed identity.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentWorkersRequest {
+    #[serde(flatten)]
+    pub auth: UiAutomationAuth,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SpawnAgentRequest {
     #[serde(flatten)]

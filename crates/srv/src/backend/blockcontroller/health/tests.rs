@@ -588,6 +588,28 @@ fn the_user_s_own_words_are_never_read_as_a_jekt() {
 }
 
 #[test]
+fn the_supervisor_s_continuation_is_labelled_as_the_supervisor() {
+    let text = crate::backend::reactive::sanitize::supervisor_turn_message("drive", 3, 15, "Keep going.");
+    assert_eq!(TurnTrigger::from_input(TurnOrigin::Automated, &text), trig(TriggerKind::Supervisor, None));
+    // The same header inside the stream-json line that carries it.
+    let line = serde_json::json!({"type": "user", "message": {"role": "user", "content": text}});
+    assert_eq!(TurnTrigger::from_input(TurnOrigin::Automated, &line.to_string()), trig(TriggerKind::Supervisor, None));
+    let blocks = serde_json::json!({"type": "user", "message": {"role": "user", "content": [{"type": "text", "text": text}]}});
+    assert_eq!(TurnTrigger::from_input(TurnOrigin::Automated, &blocks.to_string()), trig(TriggerKind::Supervisor, None));
+    assert!(TriggerKind::Supervisor.is_external(), "a Supervisor turn is not the user's");
+}
+
+#[test]
+fn only_an_automated_input_that_starts_with_the_header_is_the_supervisor() {
+    let text = crate::backend::reactive::sanitize::supervisor_turn_message("steady", 1, 5, "Continue.");
+    // The user typing it is still the user.
+    assert_eq!(TurnTrigger::from_input(TurnOrigin::User, &text), trig(TriggerKind::User, None));
+    // Not at the start: some other automated input mentioning it.
+    let later = format!("note\n{text}");
+    assert_eq!(TurnTrigger::from_input(TurnOrigin::Automated, &later), trig(TriggerKind::Agent, None));
+}
+
+#[test]
 fn a_task_summary_is_kept_and_a_long_one_shortened() {
     assert_eq!(TurnTrigger::task(Some("  npm test completed ")), trig(TriggerKind::Task, Some("npm test completed")));
     assert_eq!(TurnTrigger::task(None), trig(TriggerKind::Task, None));

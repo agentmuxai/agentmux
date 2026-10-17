@@ -800,8 +800,11 @@ pub(crate) fn register_ipc_with_backend(
 /// session-end wndproc hook) uses this to decide whether it is safe to leave
 /// the once-per-attempt flush latch set, or whether it must re-arm it so a
 /// later trigger in the same shutdown attempt gets another chance.
-#[cfg(target_os = "windows")]
-pub(crate) fn backend_save_session_snapshot(web_endpoint: &str, auth_key: &str) -> bool {
+///
+/// `quit_app` calls it too, with `for_quit`, before it closes any window: srv
+/// saves every window then, and keeps that record through the closes that
+/// follow (`session_windows.rs` in srv).
+pub(crate) fn backend_save_session_snapshot(web_endpoint: &str, auth_key: &str, for_quit: bool) -> bool {
     use std::io::{Read, Write};
 
     let Some(addr) = parse_web_endpoint(web_endpoint, "session-flush") else {
@@ -811,7 +814,7 @@ pub(crate) fn backend_save_session_snapshot(web_endpoint: &str, auth_key: &str) 
     let body = serde_json::json!({
         "service": "window",
         "method": "SaveSessionSnapshot",
-        "args": [],
+        "args": [for_quit],
         "uicontext": null,
     })
     .to_string();
@@ -830,6 +833,7 @@ pub(crate) fn backend_save_session_snapshot(web_endpoint: &str, auth_key: &str) 
         body
     );
 
+    let why = if for_quit { "quit" } else { "OS shutdown" };
     let timeout = std::time::Duration::from_millis(1500);
     match std::net::TcpStream::connect_timeout(&addr, timeout) {
         Ok(mut stream) => {
@@ -863,7 +867,7 @@ pub(crate) fn backend_save_session_snapshot(web_endpoint: &str, auth_key: &str) 
                 .and_then(|v| v.get("success").and_then(serde_json::Value::as_bool))
                 .unwrap_or(false);
             if success {
-                tracing::info!("[session-flush] session snapshot saved before OS shutdown");
+                tracing::info!("[session-flush] session snapshot saved before {why}");
             } else {
                 tracing::error!(
                     response = %first_line,

@@ -14,9 +14,10 @@
  * docs/specs/SPEC_SWARM_REMOTE_AGENTS_PLATFORM_TAG_AND_SELECTION_2026_10_03.md §4, §5, §6.
  */
 
+import type { FleetActionResult } from "@/app/store/rpc-api";
 import type { RemoteAgent, RemoteSection } from "./swarm-remote";
 
-export type FleetAction = "broadcast" | "stop";
+export type FleetAction = "broadcast" | "stop" | "supervise";
 
 export interface FleetTargetInfo {
     key: string;
@@ -36,8 +37,11 @@ export interface FleetTargetInfo {
 
 const NO_VERIFIED_LINK = "no verified link to other machines yet";
 
-/** Why `action` can't reach `target`, or null when it can. */
+/** Why `action` can't reach `target`, or null when it can. The Supervisor runs
+ *  in each AgentMux for its own agents, so it reaches this instance's only
+ *  (docs/specs/SPEC_SWARM_SUPERVISOR_2026_10_16.md §2.1). */
 export function unavailableReason(target: FleetTargetInfo, action: FleetAction): string | null {
+    if (action === "supervise") return target.remote ? "can't supervise: only this AgentMux's own agents" : null;
     if (target.actionable) return null;
     return action === "stop" ? `can't stop: ${NO_VERIFIED_LINK}` : `can't message: ${NO_VERIFIED_LINK}`;
 }
@@ -118,4 +122,25 @@ export function targetLabel(key: string, known: Map<string, FleetTargetInfo>): s
     const t = known.get(key);
     if (!t) return key;
     return t.where ? `${t.name} · ${t.where}` : t.name;
+}
+
+/** The last broadcast or stop, with a name for every target so the result
+ *  panel can say which agent on which machine, not a block id. */
+export interface FleetResultEntry {
+    action: "broadcast" | "bulk-stop" | "supervisor";
+    result: FleetActionResult;
+    labels: Record<string, string>;
+}
+
+export const EMPTY_FLEET_RESULT: FleetActionResult = { succeeded: [], failed: [], aborted_early: false };
+
+/** `result` plus the targets the action could not reach, each with its reason,
+ *  so a target is never silently left out. */
+export function withUnreachable(result: FleetActionResult, unreachable: { key: string; reason: string }[]): FleetActionResult {
+    if (unreachable.length === 0) return result;
+    return { ...result, failed: [...result.failed, ...unreachable.map((u) => ({ id: u.key, error: u.reason }))] };
+}
+
+export function labelsOf(keys: string[], known: Map<string, FleetTargetInfo>): Record<string, string> {
+    return Object.fromEntries(keys.map((key) => [key, targetLabel(key, known)]));
 }

@@ -143,6 +143,16 @@ pub fn notify_turn_end(end: &LedgerEnd, external_turns: bool) -> bool {
     !end.system && (!end.external || external_turns)
 }
 
+/// Whether the Swarm Supervisor watches this pane, so it, not the generic
+/// "finished", speaks when a turn ends. BLOCKING (store read).
+pub fn is_supervised_block(store: &Store, block_id: &str) -> bool {
+    store
+        .get::<Block>(block_id)
+        .ok()
+        .flatten()
+        .is_some_and(|b| crate::backend::supervisor::is_supervised(&b.meta))
+}
+
 /// How long after a user Stop the turn-ended transition it causes is treated
 /// as "the user's own action", not "finished".
 const STOP_GRACE_MS: i64 = 15_000;
@@ -455,7 +465,16 @@ fn spawn_internal(r: std::sync::Weak<Router>, mut rx: tokio::sync::mpsc::Unbound
                         continue;
                     }
                     let block_id = end.block_id;
-                    let _ = tokio::task::spawn_blocking(move || r.emit(NotifyKind::TurnCompleted, &block_id, None, 0)).await;
+                    let _ = tokio::task::spawn_blocking(move || {
+                        // A supervised pane's Supervisor says "finished" or
+                        // "needs you" itself, once it has judged the turn
+                        // (SPEC_SWARM_SUPERVISOR_2026_10_16.md §3.7).
+                        if is_supervised_block(&r.store, &block_id) {
+                            return;
+                        }
+                        r.emit(NotifyKind::TurnCompleted, &block_id, None, 0)
+                    })
+                    .await;
                 }
                 Internal::TurnStopped { block_id } => {
                     {
@@ -697,6 +716,13 @@ pub fn settings_from_extra(extra: &std::collections::HashMap<String, serde_json:
 impl Router {
     fn settings(&self) -> Settings {
         settings_from_extra(&self.config.get_settings().extra)
+    }
+
+    /// Whether the user asked to hear about turns something other than them
+    /// started (`notify:os:turncompleted:external`): the Swarm Supervisor
+    /// applies the same rule to its own "finished" notice.
+    pub fn external_turns_notified(&self) -> bool {
+        self.settings().external_turns
     }
 
     /// Does this Router's store know the block? BLOCKING (SQLite).
@@ -978,7 +1004,7 @@ mod tests {
 
     #[test]
     fn a_turn_something_else_started_is_notified_only_when_asked() {
-        for kind in ["agent", "service", "schedule", "task"] {
+        for kind in ["agent", "service", "schedule", "task", "supervisor"] {
             let end = parse_ledger_end(&ledger(Some("completed"), kind)).unwrap();
             assert!(end.external, "{kind}");
             assert!(!notify_turn_end(&end, false), "{kind}: quiet by default");
@@ -1121,6 +1147,25 @@ mod tests {
         assert!(ws.tabids.contains(&t.tab_id) || ws.pinnedtabids.contains(&t.tab_id));
         assert_eq!(t.window_ids, vec![win.oid]);
         assert_eq!(resolve_click_target(&store, "gone"), None);
+    }
+
+    /// SPEC_SWARM_SUPERVISOR_2026_10_16.md §3.7: a supervised Claude pane gets
+    /// its notice from the Supervisor; any other pane from the router.
+    #[test]
+    fn a_supervised_pane_is_left_to_the_supervisor() {
+        let store = Store::open_in_memory().unwrap();
+        crate::backend::wcore::ensure_initial_data(&store).unwrap();
+        let mut block = store.get_all::<Block>().unwrap().into_iter().next().expect("seeded block");
+        assert!(!is_supervised_block(&store, &block.oid), "a pane with no mode");
+        for (k, v) in [("agentProvider", "claude"), ("agentOutputFormat", "claude-stream-json"), ("supervisor:mode", "drive")] {
+            block.meta.insert(k.into(), serde_json::json!(v));
+        }
+        store.update(&mut block).unwrap();
+        assert!(is_supervised_block(&store, &block.oid));
+        block.meta.insert("agentProvider".into(), serde_json::json!("codex"));
+        store.update(&mut block).unwrap();
+        assert!(!is_supervised_block(&store, &block.oid), "the Supervisor can't watch it");
+        assert!(!is_supervised_block(&store, "gone"));
     }
 
     #[test]

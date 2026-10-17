@@ -14,6 +14,11 @@ vi.mock("@/app/element/confirm-modal", () => ({
     ConfirmModal: () => null,
 }));
 
+const menu = vi.hoisted(() => ({ show: vi.fn() }));
+vi.mock("@/app/store/contextmenu", () => ({
+    ContextMenuModel: { showContextMenu: menu.show },
+}));
+
 import { FleetToolbar } from "./swarm-fleet-toolbar";
 import type { SwarmViewModel } from "./swarm-model";
 import type { AmbientOutcomes } from "@/app/store/ambient-outcomes";
@@ -38,6 +43,7 @@ function modelStub(initialSelected: string[] = [], outcomes: AmbientOutcomes | n
         isSelected: (id: string) => selected().has(id),
         broadcastToSelection: vi.fn(),
         bulkStopSelection: vi.fn(),
+        superviseSelection: vi.fn(),
     } as unknown as SwarmViewModel;
 
     return model;
@@ -146,5 +152,29 @@ describe("FleetToolbar — broadcast composer vs. Stop button", () => {
         await Promise.resolve();
 
         expect(document.activeElement).toBe(container.querySelector(".swarm-fleet-broadcast-input"));
+    });
+});
+
+// SPEC_SWARM_SUPERVISOR_2026_10_16.md §3.8.
+describe("FleetToolbar — Supervisor", () => {
+    it("offers the three modes for the selection and sets the one picked", () => {
+        menu.show.mockClear();
+        const model = modelStub(["a", "b"]);
+        const { getByText } = render(() => <FleetToolbar model={model} allBlockIds={() => ["a", "b"]} />);
+        fireEvent.click(getByText("Supervisor"));
+        expect(menu.show).toHaveBeenCalledTimes(1);
+        const items = menu.show.mock.calls[0][0] as ContextMenuItem[];
+        expect(items.map((i) => i.label)).toEqual([
+            "Supervisor: Off for 2 agents",
+            "Supervisor: Steady for 2 agents",
+            "Supervisor: Drive for 2 agents",
+        ]);
+        items[2].click!();
+        expect(model.superviseSelection).toHaveBeenCalledWith("drive");
+    });
+
+    it("is not offered with nothing selected", () => {
+        const { queryByText } = render(() => <FleetToolbar model={modelStub([])} allBlockIds={() => ["a"]} />);
+        expect(queryByText("Supervisor")).toBeNull();
     });
 });

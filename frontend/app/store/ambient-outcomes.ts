@@ -24,6 +24,7 @@ const PURPOSE_NAMES: ReadonlyArray<readonly [purpose: string, name: string]> = [
     ["definition_summary", "Agent previews"],
     ["ambient_narration", "Narration"],
     ["continuity_state", "Running summaries"],
+    ["supervisor_verdict", "Supervisor verdicts"],
 ];
 
 type Bucket = "accepted" | "kept" | "refused" | "skipped" | "failed";

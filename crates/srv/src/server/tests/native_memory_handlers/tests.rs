@@ -135,7 +135,6 @@ fn agent_def(id: &str, working_directory: &str) -> AgentDefinition {
         container_volumes: "[]".to_string(),
         container_name: String::new(),
         use_ambient_login: 0,
-        auto_continue_enabled: 0,
         model_vendor_base_url: String::new(),
         memory_id: String::new(),
     }
@@ -1186,7 +1185,6 @@ async fn list_all_memory_targets_dedupes_an_agent_present_in_both_db_agents_and_
         container_volumes: "[]".to_string(),
         container_name: String::new(),
         use_ambient_login: 0,
-        auto_continue_enabled: 0,
         model_vendor_base_url: String::new(),
         memory_id: String::new(),
     };

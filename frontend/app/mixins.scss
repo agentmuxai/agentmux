@@ -230,13 +230,13 @@
             font-size: 18px;
         }
 
-        .block-frame-magnify {
-            justify-content: center;
-            align-items: center;
-            padding: 0;
-        }
-
-        .block-frame-minimize {
+        // The window controls take the whole 26px with no padding, so an SVG
+        // glyph keeps its 18px box: with the padding above, a flex item SVG
+        // shrinks to the 14px left between the paddings (font icons don't).
+        // Redock is one of them. SPEC_FLOATING_PANE_WINDOW_CONTROLS_REFINEMENTS_2026_10_16 §2.2.
+        .block-frame-magnify,
+        .block-frame-minimize,
+        .block-frame-redock {
             justify-content: center;
             align-items: center;
             padding: 0;

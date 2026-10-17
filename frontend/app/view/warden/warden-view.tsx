@@ -8,17 +8,15 @@ import { WardenHostManager } from "@/app/view/warden-host/warden-host-manager";
 import { WardenLanManager } from "@/app/view/warden-lan/warden-lan-manager";
 import { WardenInternetStub } from "@/app/view/warden-internet/warden-internet-stub";
 import { WardenAuditManager } from "@/app/view/warden-audit/warden-audit-manager";
-import { WardenSupervisorManager } from "@/app/view/warden-supervisor/warden-supervisor-manager";
 import { WARDEN_SECTION_LABELS, type WardenSection, type WardenViewModel } from "./warden-model";
 import "./warden-view.scss";
 import { isModKey } from "@/util/platformutil";
 
 const RAIL: TabItem<WardenSection>[] = [
-    { id: "host",       label: WARDEN_SECTION_LABELS.host,       icon: "server" },
-    { id: "lan",        label: WARDEN_SECTION_LABELS.lan,        icon: "network-wired" },
-    { id: "internet",   label: WARDEN_SECTION_LABELS.internet,   icon: "globe" },
-    { id: "audit",      label: WARDEN_SECTION_LABELS.audit,      icon: "list-check" },
-    { id: "supervisor", label: WARDEN_SECTION_LABELS.supervisor, icon: "user-shield" },
+    { id: "host",     label: WARDEN_SECTION_LABELS.host,     icon: "server" },
+    { id: "lan",      label: WARDEN_SECTION_LABELS.lan,      icon: "network-wired" },
+    { id: "internet", label: WARDEN_SECTION_LABELS.internet, icon: "globe" },
+    { id: "audit",    label: WARDEN_SECTION_LABELS.audit,    icon: "list-check" },
 ];
 
 export function WardenView(props: { model: WardenViewModel }): JSX.Element {
@@ -62,7 +60,7 @@ export function WardenView(props: { model: WardenViewModel }): JSX.Element {
                     there's room (SPEC_UI_LINE_STYLE_COMPONENT_SYSTEM_2026_10_05.md §5.4). */}
                 <TabbedPane items={RAIL} value={section()} onChange={setSection} ariaLabel="Warden section" panelClass="bundle-manager-section">
                     {/*
-                     * All five sections stay mounted — toggling is instant
+                     * All four sections stay mounted — toggling is instant
                      * and never re-fetches. Host/LAN/Audit each own their
                      * own 5s poll loop, unaffected by visibility.
                      */}
@@ -77,9 +75,6 @@ export function WardenView(props: { model: WardenViewModel }): JSX.Element {
                     </div>
                     <div class="bundle-manager-pane" classList={{ "is-hidden": section() !== "audit" }}>
                         <WardenAuditManager />
-                    </div>
-                    <div class="bundle-manager-pane" classList={{ "is-hidden": section() !== "supervisor" }}>
-                        <WardenSupervisorManager />
                     </div>
                 </TabbedPane>
             </div>

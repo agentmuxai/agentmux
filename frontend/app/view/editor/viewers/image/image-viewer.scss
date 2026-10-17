@@ -3,7 +3,8 @@
 //
 // The Editor's image viewer (image-viewer.tsx, zoom in image-zoom.ts): the
 // cursor says what a click or drag will do, a zoomed image shows its zoom
-// with a way back to fit. The rules moved from the Media pane unchanged.
+// with a way back to fit. The rules moved from the Media pane; the cursors
+// follow click zoom (SPEC_EDITOR_TREE_KEYBOARD_ICONS_AND_CLICK_ZOOM_2026_10_16.md §7).
 
 @use "../../../../mixins.scss";
 
@@ -60,8 +61,15 @@
 
     // No will-change: it would raster the image once and scale that bitmap,
     // blurring a zoomed-in image.
-    &.image-viewer-zoomed {
+
+    // At the deepest zoom a click does nothing more: only panning is left.
+    &.image-viewer-deepest {
         cursor: grab;
+    }
+
+    // The zoom-out modifier is held (Ctrl or Alt, ⌥ on macOS).
+    &.image-viewer-zoom-out {
+        cursor: zoom-out;
     }
 
     &.image-viewer-dragging {

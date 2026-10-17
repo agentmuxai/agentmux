@@ -60,7 +60,6 @@ async fn skips_a_malformed_linked_account_instead_of_failing_the_whole_call() {
         container_name: String::new(),
         use_ambient_login: 0,
         model_vendor_base_url: String::new(),
-        auto_continue_enabled: 0,
         memory_id: String::new(),
     };
     state.mstore.agent_def_insert(&mut def).unwrap();
@@ -135,7 +134,6 @@ async fn resolve_agent_definition_id_falls_back_to_the_registry_for_a_slug_only_
         container_name: String::new(),
         use_ambient_login: 0,
         model_vendor_base_url: String::new(),
-        auto_continue_enabled: 0,
         memory_id: String::new(),
     };
     state.mstore.agent_def_insert(&mut def).unwrap();

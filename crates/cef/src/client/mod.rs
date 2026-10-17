@@ -85,6 +85,8 @@ pub(crate) use helpers::{
     backend_browser_attention, backend_browser_bypass, backend_widget_approval, backend_upgrade_request, backend_app_update, backend_browser_navigation, backend_browser_popup, backend_browser_popup_window,
 };
 pub(crate) use helpers::backend_close_window;
+// Saving every window before a quit closes them (`commands/window/lifecycle.rs`).
+pub(crate) use helpers::backend_save_session_snapshot;
 // SPEC_PILLAR1_STEP2 Slice A Phase 2 — durable opacity mirror write-through
 // / read-back, used by `commands/window/transparency.rs`.
 pub(crate) use helpers::{backend_get_window_opacity, backend_set_window_opacity};

@@ -1,5 +1,38 @@
 # AgentMux Version History
 
+## 0.59.29 — 2026-10-16
+
+- macOS and Linux: keyboard focus between the app and browser panes is decided per window by the same input owner as on Windows, so a hidden or closed pane no longer keeps or regains the keyboard and one window no longer takes focus for another
+- Switching to a tab whose agent pane got output while hidden shows the pane once, at its latest content, instead of scrolling through what arrived
+- Agents can check which AgentMux they run in and whether a newer release is out, and ask to upgrade it: the upgrade starts only when your own message asked for it, and otherwise every window asks you first.
+- After an upgrade, each agent that resumes gets a note saying AgentMux was upgraded and its session resumed.
+- A quick fork of a running agent starts: it used to be refused as "already open in another pane" and sat unresponsive, because the parent was still running the conversation the fork starts from.
+- AgentMux installed with setup.exe can now upgrade itself from the version panel: it downloads and checks the new installer, then runs it silently after you confirm and opens again.
+- The editor now opens any file: images, video and audio show in the editor itself with zoom and playback, other binary files get an info card (open with the system's app, or as text anyway), and the separate Media pane is gone; saved Media panes reopen as editors.
+- A quick fork now starts on its parent's account at once, instead of being refused for its first few seconds with "no credentials ... the bound account was deleted".
+- PDFs open in the editor: pages render with selectable text, page and zoom controls, find, and an invert option for dark themes; large PDFs load page by page, and links open in a browser pane.
+- Download, Upgrade & restart and Cancel in the version panel can only be clicked by you: agents can no longer trigger them directly.
+- Agents can start a worker: Agents fork opens a fork of the agent on the model it names, in a pane next to its own, and sends it its task. The user is asked unless their own message asked for it; a worker can't start workers, and an agent has at most 3 open at once
+- The desktop app's AgentMux Cloud sign-in offers Continue with Google, Continue with Apple or email, and says what each sign-in shares
+- feat(sysinfo): the buttons sit flush in the pane's top-right corner, a Views button shows or hides the view and window buttons (hidden by default), and every chart runs flush to the pane's edges
+- A worker an agent starts is now a new agent, not a fork: Agents fork is renamed Agents spawn, the worker no longer shows among its leader's forks, and it reports back through AgentMux's Message tool. It runs on its leader's account, or on another signed-in one when the leader's is out of quota or signed out. AgentMux also recognizes Claude's weekly and session limits as the plan's usage limit
+- A page in a browser pane that closes itself (for example a sign-in's "close this window") now closes just that pane; before, it closed the whole AgentMux window and quit.
+- Images in the editor zoom by clicking: each click zooms in a step about the pointer, five clicks reach the deepest zoom, and Ctrl+click (⌥+click on macOS) zooms back out
+- A menu opened over a browser pane now keeps the keyboard, so Escape and the arrow keys work in it instead of reaching the page
+- Files sent to an agent through the cloud relay are now unreadable to the relay: each file's key is sealed to the install that runs the receiving agent.
+- The editor's file tree shows what each file is with coloured icons, marks the open file, and is fully keyboard driven: arrows move and preview, Enter opens, Ctrl+Shift+E switches between the tree and the editor
+- In-app notices (an action that failed, a layout saved, an undo, what ran while you were away) now show in every build, not only development builds; closing one removes it, at most five show at once with the rest behind +N more, and a notice that stays until closed shows a pin
+- Swarm Supervisor: set an agent to Steady or Drive in Swarm, and when it stops to check in, a judge reads its turn and keeps it working until it is done or needs you. Replaces the Warden auto-continue.
+- An agent hears from the workers it starts: when one ends a turn without reporting, waits for an answer, fails or stops, its leader gets a note, and Agents workers lists them with their state and last report
+- When a window's page crashes, runs out of memory or hangs, or AgentMux quits because its window closed, AgentMux now tells you afterwards what happened and what it kept, in a notice that stays until you close it
+- After a restart or upgrade, every AgentMux window comes back with its tabs and panes, where it was, not just the last one you closed.
+- A leader agent now hears when one of its workers is stuck on a question to you in the middle of a turn, not only when the turn ends
+- Floating panes: Redock sits beside Maximize at full size, a maximized floater shows Restore, and dragging or double-clicking its header restores it
+- A recovery notice now says in plain words why a window stopped, instead of Chromium's code (such as RESULT_CODE_KILLED)
+- The status bar's backend panel lists what AgentMux recovered from recently, with a report to copy, and marks the uptime while a recovery notice is still open
+- Linux: GNOME-style window buttons, placed by the desktop's button layout, with Restore while maximized
+- After AgentMux restarts its window or background service, or gives up, the next window says what happened and what was kept, in a notice that stays until you close it
+
 ## 0.59.28 — 2026-10-15
 
 - Loading older messages in an agent pane no longer drops them (only tool calls appeared), and collapsed messages stay collapsed after a reload
