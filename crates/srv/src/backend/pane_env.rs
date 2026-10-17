@@ -158,7 +158,9 @@ pub fn should_strip(key: &str) -> bool {
 /// Call this once on the finished command instead.
 ///
 /// Safe to call after the caller's own `.env()` values: everything a pane
-/// legitimately sets is on [`PANE_ENV_KEEP`], so nothing it just set is removed.
+/// legitimately sets is on [`PANE_ENV_KEEP`], so nothing it just set is removed,
+/// and a launch setting the caller set itself (`LD_LIBRARY_PATH`, say) is kept
+/// ([`apply_edits_pty`]).
 pub fn sanitize_pty_command(c: &mut portable_pty::CommandBuilder) {
     for key in keys_to_strip() {
         c.env_remove(&key);
@@ -265,9 +267,17 @@ pub fn sanitize_external_std_command(cmd: &mut std::process::Command) {
 }
 
 /// Take AgentMux's own launch settings out of `cmd`'s environment
-/// ([`launch_env_edits`]).
+/// ([`launch_env_edits`]): what it inherits, never what the caller set on it.
 fn apply_launch_env(cmd: &mut std::process::Command) {
-    for (key, value) in launch_env_edits() {
+    apply_edits(cmd, launch_env_edits());
+}
+
+/// [`apply_launch_env`] with the edits given. A key the command sets explicitly
+/// (a pane's own `LD_LIBRARY_PATH`, set before this runs) is left as it is.
+fn apply_edits(cmd: &mut std::process::Command, edits: Vec<(String, Option<String>)>) {
+    let explicit: Vec<String> =
+        cmd.get_envs().filter(|(_, v)| v.is_some()).map(|(k, _)| k.to_string_lossy().into_owned()).collect();
+    for (key, value) in edits.into_iter().filter(|(k, _)| !explicit.contains(k)) {
         match value {
             Some(v) => cmd.env(key, v),
             None => cmd.env_remove(key),
@@ -277,7 +287,14 @@ fn apply_launch_env(cmd: &mut std::process::Command) {
 
 /// [`apply_launch_env`] for a PTY command.
 fn apply_launch_env_pty(c: &mut portable_pty::CommandBuilder) {
-    for (key, value) in launch_env_edits() {
+    apply_edits_pty(c, launch_env_edits());
+}
+
+/// [`apply_edits`] for a PTY command, whose environment starts as a copy of this
+/// process's: only what was added on top of that counts as set by the caller.
+fn apply_edits_pty(c: &mut portable_pty::CommandBuilder, edits: Vec<(String, Option<String>)>) {
+    let explicit: Vec<String> = c.iter_extra_env_as_str().map(|(k, _)| k.to_string()).collect();
+    for (key, value) in edits.into_iter().filter(|(k, _)| !explicit.contains(k)) {
         match value {
             Some(v) => c.env(key, v),
             None => c.env_remove(key),
@@ -661,6 +678,31 @@ mod tests {
         // The tarball's: no APPIMAGE, but the same path entry.
         let e = edits(&[("LD_LIBRARY_PATH", "/opt/AgentMux/usr/bin:/lib")], &["/opt/AgentMux/usr/bin"]);
         assert_eq!(e, vec![("LD_LIBRARY_PATH".to_string(), Some("/lib".to_string()))]);
+    }
+
+    #[test]
+    fn what_a_pane_sets_itself_is_kept_and_only_what_it_inherits_is_edited() {
+        let edits = vec![
+            ("LD_LIBRARY_PATH".to_string(), None),
+            ("APPIMAGE".to_string(), None),
+            ("OWD".to_string(), Some("rewritten".to_string())),
+        ];
+        // A PTY command: its own LD_LIBRARY_PATH survives, the others are edited.
+        let mut pty = portable_pty::CommandBuilder::new("sh");
+        pty.env("LD_LIBRARY_PATH", "/opt/cuda/lib64");
+        apply_edits_pty(&mut pty, edits.clone());
+        assert_eq!(pty.get_env("LD_LIBRARY_PATH").and_then(|v| v.to_str()), Some("/opt/cuda/lib64"));
+        assert_eq!(pty.get_env("APPIMAGE"), None);
+        assert_eq!(pty.get_env("OWD").and_then(|v| v.to_str()), Some("rewritten"));
+        // A process command, the same.
+        let mut std_cmd = std::process::Command::new("sh");
+        std_cmd.env("LD_LIBRARY_PATH", "/opt/cuda/lib64").env("APPIMAGE", "/set/by/the/pane");
+        apply_edits(&mut std_cmd, edits);
+        let envs: std::collections::HashMap<_, _> =
+            std_cmd.get_envs().map(|(k, v)| (k.to_string_lossy().into_owned(), v.map(|v| v.to_string_lossy().into_owned()))).collect();
+        assert_eq!(envs["LD_LIBRARY_PATH"].as_deref(), Some("/opt/cuda/lib64"));
+        assert_eq!(envs["APPIMAGE"].as_deref(), Some("/set/by/the/pane"), "a pane that sets APPIMAGE itself keeps it");
+        assert_eq!(envs["OWD"].as_deref(), Some("rewritten"));
     }
 
     #[test]
