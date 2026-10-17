@@ -27,11 +27,21 @@
 }
 
 .sysinfo-chart-title {
+    // Centred over its chart, the same distance from the top on every chart. One
+    // line always (a long title is cut with an ellipsis, never wrapped down onto
+    // the plot), so no chart's title is taller than another's.
     position: absolute;
     top: var(--sysinfo-text-inset, 1px);
-    left: var(--sysinfo-text-inset, 1px);
+    left: 0;
+    right: 0;
+    padding: 0 var(--sysinfo-text-inset, 1px);
     z-index: 1;
     font-size: var(--text-xs);
+    line-height: 12px;
+    text-align: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
     color: var(--grey-text-color);
     pointer-events: none;
 }
