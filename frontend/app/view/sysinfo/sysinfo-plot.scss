@@ -96,10 +96,10 @@
     grid-column: 1;
     min-width: 0;
     justify-self: start;
-    pointer-events: auto;
-    // Over the chart titles while shown: 90% opaque, so they stay readable.
-    background: color-mix(in srgb, var(--main-bg-color) 90%, transparent);
-    border-radius: var(--radius-sm);
+    // No panel behind them: only the buttons catch the pointer, the gaps let it through to the chart.
+    .ui-segmented {
+        pointer-events: auto;
+    }
 }
 
 // Its parent leaves no right padding, so the last button's line is the pane's border.
