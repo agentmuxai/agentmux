@@ -327,6 +327,14 @@ windows came back only as far as the last one:
 - **Compatible both ways.** The record keeps the main window's tabs at its
   top level, so an older AgentMux reading it after a downgrade restores that
   window; a record without `windows` restores as one window.
+- **A close the quit outran.** The host closes windows concurrently and srv
+  can stop before the last close arrives; a simulated upgrade of a local
+  build left the second window's row behind, and the main window then took
+  that row instead of restoring. At startup, when the record is a quit's, srv
+  forgets any window still listed, with its workspace, tabs and panes
+  (`forget_windows_left_by_quit`, from `bootstrap/stores.rs`): the record
+  holds it, and the restore brings it back. Without a quit's record (a
+  crash), the windows are left for the crash recovery to reopen.
 
 The same simulation, with three windows (the default three panes, one
 sysinfo pane, one memory pane) and two of them moved, brought all three back
