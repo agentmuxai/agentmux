@@ -79,6 +79,15 @@ pub fn copy_parent_history(
     else {
         return Ok(ForkHistory::ForkHasHistory);
     };
+    // The check above and the copy are separate reads: the parent may have
+    // moved to a new session in between (a New conversation right after the
+    // fork). What counts is the copy, so it is checked again, and undone if
+    // it doesn't end in the session the fork continues (Codex on #5066).
+    if last_session(gfs, &fork, session_id_field)?.as_deref() != Some(session_id) {
+        gfs.delete_files(&fork, &[OUTPUT_FILE, TSIDX_FILE, state])
+            .map_err(|e| format!("undo copy: {e}"))?;
+        return Ok(ForkHistory::NotTheLastSession);
+    }
     // The pane state is written through the cache, so it's read through it.
     if let Some(snapshot) = gfs.read_file(&parent, SNAPSHOT_FILE).map_err(|e| format!("read pane state: {e}"))? {
         if !snapshot.is_empty() {
@@ -98,19 +107,28 @@ pub fn inherited_session(gfs: &FileStore, zone: &str) -> Option<String> {
     (!sid.is_empty()).then(|| sid.to_string())
 }
 
-/// The session `zone`'s transcript ends in, or `None` when it has none.
+/// The session `zone`'s transcript ends in, or `None` when it has none. The
+/// window widens until it holds a complete record that names one: the last
+/// event can be larger than any fixed tail (Codex on #5066).
 fn last_session(gfs: &FileStore, zone: &str, field: &str) -> Result<Option<String>, String> {
     let Some(file) = gfs.stat(zone, OUTPUT_FILE).map_err(|e| format!("stat transcript: {e}"))? else {
         return Ok(None);
     };
-    if file.size <= 0 {
-        return Ok(None);
+    let mut window = LAST_SESSION_TAIL_BYTES;
+    while file.size > 0 {
+        let offset = (file.size - window).max(0);
+        let (at, tail) = gfs
+            .read_at(zone, OUTPUT_FILE, offset, file.size - offset)
+            .map_err(|e| format!("read transcript tail: {e}"))?;
+        if let Some(sid) = crate::backend::blockcontroller::persistent::last_session_id_in_stream(&tail, at > 0, field) {
+            return Ok(Some(sid));
+        }
+        if at == 0 {
+            break;
+        }
+        window = window.saturating_mul(4);
     }
-    let offset = (file.size - LAST_SESSION_TAIL_BYTES).max(0);
-    let (at, tail) = gfs
-        .read_at(zone, OUTPUT_FILE, offset, file.size - offset)
-        .map_err(|e| format!("read transcript tail: {e}"))?;
-    Ok(crate::backend::blockcontroller::persistent::last_session_id_in_stream(&tail, at > 0, field))
+    Ok(None)
 }
 
 #[cfg(test)]

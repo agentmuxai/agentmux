@@ -48,6 +48,20 @@ fn a_fork_of_the_last_session_gets_the_parents_history_exactly() {
 }
 
 #[test]
+fn a_last_event_larger_than_the_tail_window_still_names_its_session() {
+    let gfs = FileStore::open_in_memory().unwrap();
+    let zone = agent_current_zone(PARENT);
+    // A tool result of 700 KB: the first window starts inside it.
+    let big = format!("{{\"type\":\"user\",\"session_id\":\"sess-big\",\"text\":\"{}\"}}\n", "x".repeat(700 * 1024));
+    gfs.make_file(&zone, OUTPUT_FILE, FileMeta::new(), FileOpts::default()).unwrap();
+    gfs.append_lines(&zone, OUTPUT_FILE, format!("{}{big}", line("sess-big", 0)).as_bytes()).unwrap();
+
+    let out = copy_parent_history(&gfs, PARENT, FORK, "sess-big", "session_id").unwrap();
+
+    assert!(matches!(out, ForkHistory::Copied { .. }), "got {out:?}");
+}
+
+#[test]
 fn a_fork_of_an_older_session_copies_nothing() {
     let gfs = FileStore::open_in_memory().unwrap();
     parent_with(&gfs, "sess-b");
