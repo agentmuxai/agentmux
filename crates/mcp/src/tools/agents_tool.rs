@@ -7,8 +7,10 @@
 //! It replaces DiscoverAgents, FleetList (the same call), ListConversations,
 //! GetAgentTranscript, OpenAgent and SearchHistory; their handlers
 //! (fleet.rs, history.rs, panes.rs) run each action unchanged.
-//! `spawn` is its own (SPEC_AGENT_WORKERS_2026_10_15.md §3.1): srv launches
-//! the worker, then this process sends it the brief, signed as the caller.
+//! `spawn` (the agent-initiated action that makes a worker, not the CLI's
+//! process start) is its own (SPEC_AGENT_WORKERS_2026_10_15.md §3.1): srv
+//! launches the worker, then this process sends it the brief, signed as the
+//! caller.
 
 use agentmux_common::api_types::SpawnAgentRequest;
 

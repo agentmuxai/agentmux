@@ -5,9 +5,11 @@
 //! (docs/specs/SPEC_AGENT_WORKERS_2026_10_15.md §3.1, Phase A): the calling
 //! agent, the leader, opens a worker: a new agent built from its own
 //! definition, on the model it names, in a pane to the right of its own.
-//! A worker is not a fork (the pane's Fork, which carries the conversation):
-//! it isn't among the leader's forks and starts with no history. The MCP
-//! server then sends it the brief, signed as the leader.
+//! A worker is not a fork (the pane's Fork, an exact copy that carries the
+//! conversation): it isn't among the leader's forks, and starts without the
+//! leader's conversation or Personal Memory, with the leader's definition
+//! (instructions, skills), Global Memory and, from the MCP server, the brief
+//! it is sent as the leader's own message.
 //!
 //! Launching an agent spends tokens until someone stops it, so (§3.5): only
 //! a verified host agent spawns, a worker doesn't, a leader has at most
