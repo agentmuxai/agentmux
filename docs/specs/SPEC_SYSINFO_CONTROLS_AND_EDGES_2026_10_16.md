@@ -30,23 +30,24 @@ The control row (`SysinfoBar`) is one flex row: the **view** buttons (CPU, Cores
 
 The right edge of the rightmost button touches the pane's right border, and the top edge of the buttons touches the pane's top border.
 
-- `.sysinfo-bar`: `padding: 0 0 2px 3px` (top and right 0; left and bottom unchanged).
+- `.sysinfo-bar`: `padding: 0 0 0 1px` (nothing on the top or right; the 1px text inset on the left).
 - The button's drawn box must reach the border, not just its hit area: `IconButton` is square with its own padding, so if its box leaves a gap to the border, remove the gap on the last button's outer side rather than shifting the glyph.
-- When the bar wraps onto a second line (narrow pane), the actions group keeps `margin-left: auto` and stays on the first line's right edge; the wrapped controls start the second line at the left.
+- The bar is a two-column grid: the view and window buttons in column 1 (`.sysinfo-bar-selectors`, which wraps onto further lines as the pane narrows) and the actions in column 2 (`.sysinfo-bar-actions`), so the actions stay on the first line, in the corner, at any width.
+- The bar floats over the pane (`position: absolute` at the top, `z-index` above the charts, `pointer-events: none` except on its buttons and the selector panel). It takes no height in the layout, so the charts and their figures (the CPU numbers) are in the same place whether the view buttons are shown or hidden. In the table view the table starts below the buttons (`padding-top` on `.sysinfo-table-scroll`).
 
 ### 2.2 A third button: show / hide the view selectors
 
-A new `IconButton` in the actions group, a toggle (`pressed` = selectors hidden):
+A new `IconButton` in the actions group, a toggle (`pressed` = the view buttons are shown):
 
 | | |
 |---|---|
-| Control | the library's labelled `Button` (compact, icon `sliders` and the word "Views", like the composer strip's Shell button), `pressed` while the buttons are shown; pause and table are compact `IconButton`s |
+| Control | just an eye: a compact `IconButton` from the component set, icon `eye` while the view buttons are shown and `eye-slash` while they are hidden, `pressed` while shown. Pause and table are compact `IconButton`s too |
 | Accessible name | `Hide view buttons` when shown, `Show view buttons` when hidden |
-| Position | leftmost in the group: `[sliders] [pause] [table]`, so pause and table do not move when it is toggled |
+| Position | leftmost in the group: `[eye] [pause] [table]`, so pause and table do not move when it is toggled |
 | Hides | **both** `SegmentedControl`s: the views (CPU, Cores, …) **and** the time window (1m … 15m) |
 | Keeps | the "Paused" label, pause, table and the toggle itself |
 
-- Hidden, the bar is one compact row of three buttons at the top right; the charts (or the table) get the freed height. Each chart already names itself in its title, so the view is still readable without the buttons.
+- Hidden, the bar is one compact row of three buttons at the top right. Shown, the selectors sit on a panel (the main background at 90% opacity) over the top-left of the charts, covering their titles while open; the layout underneath does not move. Each chart names itself in its title, so the view is still readable without the buttons.
 - It works in the simple and the Advanced views, and with the table showing.
 - Accessibility: `aria-pressed` comes from `IconButton`'s `pressed`; focus stays on the toggle after the press. Tab order is unchanged for the buttons that remain.
 - **Hidden until chosen, remembered per pane:** saved in the block's meta as `sysinfo:showcontrols` (boolean; absent = hidden), through `ctx.setMeta`, like `graph:windowsecs`. A reload keeps it. `sysinfo-model.ts` has `controlsShown()` and `setControlsShown()`; `SysinfoBar` takes `controls: boolean` and `onControls`. The key is added to `MetaType` in `frontend/types/srv-types.d.ts` (hand-maintained).
@@ -81,4 +82,5 @@ The newest sample is drawn at the right-hand edge of the plot, and that edge is 
 
 1. Advanced-view tiles run flush too.
 2. The view and window buttons are hidden for a pane with no saved choice.
-3. The toggle is a labelled `Button` ("Views", `sliders`) from the component set, not a bare icon.
+3. The toggle is just an eye (`eye` / `eye-slash`), an `IconButton` from the component set. (It was first a labelled "Views" button.)
+4. The control row floats over the pane instead of taking its own row, and the selector panel is 90% opaque.

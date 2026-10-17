@@ -97,8 +97,8 @@
     min-width: 0;
     justify-self: start;
     pointer-events: auto;
-    // Over the chart titles while shown, so they stay readable.
-    background: var(--main-bg-color);
+    // Over the chart titles while shown: 90% opaque, so they stay readable.
+    background: color-mix(in srgb, var(--main-bg-color) 90%, transparent);
     border-radius: var(--radius-sm);
 }
 
