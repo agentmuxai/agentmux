@@ -762,7 +762,7 @@ mod tests {
         std::fs::write(top.join("usr/share/agentmux/VERSION"), b"0.59.30
 ").unwrap();
         let archive = dir.path().join("AgentMux_0.59.30_amd64-portable.tar.xz");
-        let made = std::process::Command::new("tar").arg("-cJf").arg(&archive).arg("-C").arg(&src).arg("AgentMux").status().unwrap();
+        let made = std::process::Command::new(tar_exe()).arg("-cJf").arg(&archive).arg("-C").arg(&src).arg("AgentMux").status().unwrap();
         assert!(made.success());
         let parent = dir.path().join("apps");
         std::fs::create_dir_all(&parent).unwrap();

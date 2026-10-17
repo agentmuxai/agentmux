@@ -450,6 +450,7 @@ mod tests {
         dir.join("agentmux.exe")
     }
 
+    #[cfg(windows)]
     fn req(version: &str, launcher: &Path) -> UpgradeRequest {
         UpgradeRequest { version: version.into(), target: UpgradeTarget::Launcher(launcher.to_path_buf()) }
     }
@@ -462,6 +463,8 @@ mod tests {
         UpgradeRequest { version: version.into(), target }
     }
 
+    // A Windows portable; Linux's targets are `upgrade_linux`'s tests.
+    #[cfg(windows)]
     #[test]
     fn only_a_newer_portable_beside_a_portable_is_restarted_into() {
         let root = tempfile::tempdir().unwrap();
