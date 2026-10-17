@@ -33,7 +33,7 @@ The right edge of the rightmost button touches the pane's right border, and the 
 - `.sysinfo-bar`: `padding: 0 0 0 1px` (nothing on the top or right; the 1px text inset on the left).
 - The button's drawn box must reach the border, not just its hit area: `IconButton` is square with its own padding, so if its box leaves a gap to the border, remove the gap on the last button's outer side rather than shifting the glyph.
 - The bar is a two-column grid: the view and window buttons in column 1 (`.sysinfo-bar-selectors`, which wraps onto further lines as the pane narrows) and the actions in column 2 (`.sysinfo-bar-actions`), so the actions stay on the first line, in the corner, at any width.
-- The bar floats over the pane (`position: absolute` at the top, `z-index` above the charts, `pointer-events: none` except on its buttons). It takes no height in the layout, so the charts and their figures (the CPU numbers) are in the same place whether the view buttons are shown or hidden. In the table view the table starts below the buttons (`padding-top` on `.sysinfo-table-scroll`).
+- The bar floats over the pane (`position: absolute` at the top, `z-index` above the charts, `pointer-events: none` except on its buttons and the selector strip). It takes no height in the layout, so the charts and their figures (the CPU numbers) are in the same place whether the view buttons are shown or hidden. In the table view the table starts below the buttons (`padding-top` on `.sysinfo-table-scroll`).
 
 ### 2.2 A third button: show / hide the view selectors
 
@@ -47,7 +47,7 @@ A new `IconButton` in the actions group, a toggle (`pressed` = the view buttons 
 | Hides | **both** `SegmentedControl`s: the views (CPU, Cores, …) **and** the time window (1m … 15m) |
 | Keeps | the "Paused" label, pause, table and the toggle itself |
 
-- Hidden, the bar is one compact row of three buttons at the top right. Shown, the selectors sit over the top-left of the charts with a transparent background (no panel), so they overlap the chart titles while open; the layout underneath does not move. Each chart names itself in its title, so the view is still readable without the buttons.
+- Hidden, the bar is one compact row of three buttons at the top right. Shown, the selectors sit over the top-left of the charts on a frosted strip (`backdrop-filter: blur(6px)`, no tint), so they overlap the chart titles while open, blurred; the layout underneath does not move. Each chart names itself in its title, so the view is still readable without the buttons.
 - It works in the simple and the Advanced views, and with the table showing.
 - Accessibility: `aria-pressed` comes from `IconButton`'s `pressed`; focus stays on the toggle after the press. Tab order is unchanged for the buttons that remain.
 - **Hidden until chosen, remembered per pane:** saved in the block's meta as `sysinfo:showcontrols` (boolean; absent = hidden), through `ctx.setMeta`, like `graph:windowsecs`. A reload keeps it. `sysinfo-model.ts` has `controlsShown()` and `setControlsShown()`; `SysinfoBar` takes `controls: boolean` and `onControls`. The key is added to `MetaType` in `frontend/types/srv-types.d.ts` (hand-maintained).
@@ -83,4 +83,4 @@ The newest sample is drawn at the right-hand edge of the plot, and that edge is 
 1. Advanced-view tiles run flush too.
 2. The view and window buttons are hidden for a pane with no saved choice.
 3. The toggle is just an eye (`eye` / `eye-slash`), an `IconButton` from the component set. (It was first a labelled "Views" button.)
-4. The control row floats over the pane instead of taking its own row, and the selectors have no background panel (it was a 90% opaque one first).
+4. The control row floats over the pane instead of taking its own row, and the selectors sit on a blurred, untinted strip (first a 90% opaque panel, then transparent). A `backdrop-filter` is costly per frame under Sysinfo's 1 Hz redraws (see `block.scss`), so it is small and exists only while the buttons are shown.

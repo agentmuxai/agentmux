@@ -96,10 +96,13 @@
     grid-column: 1;
     min-width: 0;
     justify-self: start;
-    // No panel behind them: only the buttons catch the pointer, the gaps let it through to the chart.
-    .ui-segmented {
-        pointer-events: auto;
-    }
+    // A frosted strip behind them, no tint: the chart under it is blurred so the
+    // buttons read. Small and only present while the buttons are shown (a
+    // pane-sized backdrop-filter was dropped from block.scss for its per-frame
+    // cost under sysinfo's 1 Hz redraws).
+    backdrop-filter: blur(6px);
+    border-radius: var(--radius-sm);
+    pointer-events: auto;
 }
 
 // Its parent leaves no right padding, so the last button's line is the pane's border.
