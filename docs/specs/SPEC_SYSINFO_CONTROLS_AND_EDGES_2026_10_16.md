@@ -33,7 +33,7 @@ The right edge of the rightmost button touches the pane's right border, and the 
 - `.sysinfo-bar`: `padding: 0 0 0 1px` (nothing on the top or right; the 1px text inset on the left).
 - The button's drawn box must reach the border, not just its hit area: `IconButton` is square with its own padding, so if its box leaves a gap to the border, remove the gap on the last button's outer side rather than shifting the glyph.
 - The bar is a two-column grid: the view and window buttons in column 1 (`.sysinfo-bar-selectors`, which wraps onto further lines as the pane narrows) and the actions in column 2 (`.sysinfo-bar-actions`), so the actions stay on the first line, in the corner, at any width.
-- The bar floats over the pane (`position: absolute` at the top, `z-index` above the charts, `pointer-events: none` except on its buttons and the selector strip). It takes no height in the layout, so the charts and their figures (the CPU numbers) are in the same place whether the view buttons are shown or hidden. In the table view the table starts below the buttons (`padding-top` on `.sysinfo-table-scroll`).
+- The bar floats over the pane (`position: absolute` at the top, `z-index` above the charts, `pointer-events: none` except on its buttons and the selector strip). It takes no height in the layout, so the charts and their figures (the CPU numbers) are in the same place whether the view buttons are shown or hidden. In the table view there is no chart to keep still, so the bar is in the normal flow (`.sysinfo-bar--in-flow`) and the table starts below its real height, however many lines the view buttons wrap to.
 
 ### 2.2 A third button: show / hide the view selectors
 

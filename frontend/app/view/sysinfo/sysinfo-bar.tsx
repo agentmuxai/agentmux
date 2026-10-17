@@ -9,9 +9,10 @@
  * the top of the pane, so showing or hiding the buttons never moves the charts
  * or their figures. The right-hand buttons sit flush in the pane's top-right
  * corner, in their own grid column, so they stay on the first line however
- * narrow the pane gets. As the pane
- * narrows, the view and window buttons wrap onto further lines inside their
- * column, and a set of buttons wider than the column wraps within itself.
+ * narrow the pane gets. As the pane narrows, the view and window buttons wrap
+ * onto further lines inside their column, and a set of buttons wider than the
+ * column wraps within itself. In the table view the row is in the normal flow
+ * instead, so the table starts below it, however many lines it wraps to.
  */
 
 import type { JSX } from "solid-js";
@@ -42,7 +43,7 @@ export type SysinfoBarProps = {
 
 export function SysinfoBar(props: SysinfoBarProps): JSX.Element {
     return (
-        <div class="sysinfo-bar">
+        <div class="sysinfo-bar" classList={{ "sysinfo-bar--in-flow": props.table }}>
             <Show when={props.controls}>
                 <div class="sysinfo-bar-selectors">
                     <SegmentedControl

@@ -98,6 +98,12 @@
     }
 }
 
+// The table view has no chart to keep still: the row takes its real height in the
+// layout (however many lines the view buttons wrap to) and the table starts below it.
+.sysinfo-bar--in-flow {
+    position: relative;
+}
+
 .sysinfo-bar-selectors {
     display: flex;
     flex-wrap: wrap;
@@ -135,6 +141,4 @@
     flex: 1 1 auto;
     min-height: 0;
     overflow-y: auto;
-    // Its first row starts below the floating buttons.
-    padding-top: var(--ui-height);
 }

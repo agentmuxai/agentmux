@@ -34,7 +34,17 @@ describe("SysinfoBar", () => {
     it("offers the mode's views, then the window, the one shown selected", () => {
         mount();
         const radios = screen.getAllByRole("radio");
-        expect(radios.map((r) => r.textContent)).toEqual(["CPU", "Memory", "Disk", "Network", "Everything", "1m", "2m", "5m", "15m"]);
+        expect(radios.map((r) => r.textContent)).toEqual([
+            "CPU",
+            "Memory",
+            "Disk",
+            "Network",
+            "Everything",
+            "1m",
+            "2m",
+            "5m",
+            "15m",
+        ]);
         expect(screen.getByRole("radio", { name: "CPU" }).getAttribute("aria-checked")).toBe("true");
         expect(screen.getByRole("radio", { name: "2m" }).getAttribute("aria-checked")).toBe("true");
     });
@@ -89,5 +99,43 @@ describe("SysinfoBar", () => {
     it("keeps the Paused label beside the buttons while the controls are hidden", () => {
         mount({ controls: false, paused: true });
         expect(screen.getByText("Paused")).toBeTruthy();
+    });
+
+    it("takes its place in the layout in the table view, and floats over the charts otherwise", () => {
+        const { container } = render(() => (
+            <SysinfoBar
+                views={FOCUS_CHOICES}
+                view="cpu"
+                onView={vi.fn()}
+                windowSecs={120}
+                intervalSecs={1}
+                onWindow={vi.fn()}
+                paused={false}
+                onPause={vi.fn()}
+                controls
+                onControls={vi.fn()}
+                table
+                onTable={vi.fn()}
+            />
+        ));
+        expect(container.querySelector(".sysinfo-bar")?.classList.contains("sysinfo-bar--in-flow")).toBe(true);
+        cleanup();
+        const charts = render(() => (
+            <SysinfoBar
+                views={FOCUS_CHOICES}
+                view="cpu"
+                onView={vi.fn()}
+                windowSecs={120}
+                intervalSecs={1}
+                onWindow={vi.fn()}
+                paused={false}
+                onPause={vi.fn()}
+                controls
+                onControls={vi.fn()}
+                table={false}
+                onTable={vi.fn()}
+            />
+        ));
+        expect(charts.container.querySelector(".sysinfo-bar")?.classList.contains("sysinfo-bar--in-flow")).toBe(false);
     });
 });
