@@ -7,12 +7,14 @@ import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const updateStatus = vi.fn();
+const updateCheck = vi.fn();
 const updateDownload = vi.fn();
 const upgradeRestart = vi.fn();
 const upgradeCancel = vi.fn();
 vi.mock("@/app/store/rpc-api", () => ({
     RpcApi: {
         AppUpdateStatusCommand: (...a: unknown[]) => updateStatus(...a),
+        AppUpdateCheckCommand: (...a: unknown[]) => updateCheck(...a),
     },
 }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
@@ -63,6 +65,7 @@ const download = (state: string, extra: Record<string, unknown> = {}) => ({
 
 beforeEach(() => {
     updateStatus.mockReset();
+    updateCheck.mockReset();
     updateDownload.mockReset();
     upgradeRestart.mockReset();
     upgradeCancel.mockReset();
@@ -119,10 +122,10 @@ describe("Maintenance update row", () => {
         expect(installAppUpdate).not.toHaveBeenCalled();
     });
 
-    it("a local build says which release is latest, and offers nothing to install", async () => {
+    it("a development build says which release is latest, and offers nothing to install", async () => {
         updateStatus.mockResolvedValue({ ...AVAILABLE, state: "local-build" });
         render(() => <MaintenanceSection />);
-        expect(await screen.findByText("Local build. The latest release is v0.59.27.")).toBeTruthy();
+        expect(await screen.findByText("Development build. The latest release is v0.59.27.")).toBeTruthy();
         expect(screen.queryByRole("button", { name: "Download" })).toBeNull();
         fireEvent.click(screen.getByRole("button", { name: "View" }));
         expect(openLink).toHaveBeenCalledWith(AVAILABLE.url);
@@ -224,5 +227,34 @@ describe("Maintenance on a setup.exe install", () => {
         expect(openNativePath).not.toHaveBeenCalled();
         fireEvent.click(screen.getByRole("button", { name: "Upgrade & restart" }));
         expect(upgradeRestart).toHaveBeenCalledWith(false);
+    });
+});
+
+describe("Maintenance: Check for update", () => {
+    it("says this release is up to date, checks on demand and shows what it found", async () => {
+        updateStatus.mockResolvedValue({ state: "up-to-date", current: "0.59.27", latest: "0.59.27", checked_ms: 1, install: "windows-portable", can_download: false });
+        updateCheck.mockResolvedValue({ ...PORTABLE, current: "0.59.27", latest: "0.59.28" });
+        render(() => <MaintenanceSection />);
+        expect(await screen.findByText("v0.59.27 is up to date")).toBeTruthy();
+        fireEvent.click(screen.getByRole("button", { name: "Check for update" }));
+        expect(updateCheck).toHaveBeenCalledTimes(1);
+        expect(await screen.findByText("v0.59.28 is out")).toBeTruthy();
+        expect(screen.queryByRole("button", { name: "Check for update" })).toBeNull();
+    });
+
+    it("says why a check failed", async () => {
+        updateStatus.mockResolvedValue({ state: "unknown", current: "0.59.27", checked_ms: 0, install: "windows-portable", can_download: false });
+        updateCheck.mockRejectedValue(new Error("couldn't reach GitHub: timed out"));
+        render(() => <MaintenanceSection />);
+        expect(await screen.findByText("Not checked for updates yet")).toBeTruthy();
+        fireEvent.click(screen.getByRole("button", { name: "Check for update" }));
+        expect(await screen.findByText(/couldn't reach GitHub: timed out/)).toBeTruthy();
+    });
+
+    it("a development build says which release is latest, with no check", async () => {
+        updateStatus.mockResolvedValue({ state: "local-build", current: "0.59.27", latest: "0.59.28", checked_ms: 1, install: "unknown", can_download: false });
+        render(() => <MaintenanceSection />);
+        expect(await screen.findByText(/Development build. The latest release is v0.59.28/)).toBeTruthy();
+        expect(screen.queryByRole("button", { name: "Check for update" })).toBeNull();
     });
 });

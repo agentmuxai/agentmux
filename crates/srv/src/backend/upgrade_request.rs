@@ -84,7 +84,7 @@ pub fn installable(status: &AppUpdateStatus, wanted: Option<&str>) -> Result<Str
         "up-to-date" => return Err(Outcome::UpToDate { current: status.current.clone() }),
         "local-build" => {
             return Err(Outcome::Unavailable {
-                message: "this is a local build, not a release; it doesn't upgrade itself".into(),
+                message: "this is a development build (`task dev`), which runs from source; it doesn't upgrade itself".into(),
                 url: status.url.clone(),
             })
         }

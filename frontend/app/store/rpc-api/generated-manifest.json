@@ -1329,6 +1329,10 @@
             "command": "app.update-status",
             "method": "AppUpdateStatusCommand"
         },
+        {
+            "command": "app.update-check",
+            "method": "AppUpdateCheckCommand"
+        },
 
         {
             "command": "app.upgrade-requests",

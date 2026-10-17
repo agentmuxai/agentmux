@@ -76,7 +76,9 @@ pub(crate) fn has_live_window(store: &Store) -> bool {
 /// window's tabs also at the top level. `None` when no window has anything to
 /// capture. `for_quit` marks it as a quit's, which the closes that follow keep.
 pub(crate) fn snapshot_session(store: &Store, for_quit: bool) -> Option<Value> {
-    let windows: Vec<Value> = live_windows(store)
+    let live = live_windows(store);
+    let window_ids: Vec<String> = live.iter().map(|(w, _)| w.oid.clone()).collect();
+    let windows: Vec<Value> = live
         .into_iter()
         .filter_map(|(w, ws)| {
             let mut entry = super::session_restore::snapshot_workspace(store, &ws)?;
@@ -97,6 +99,8 @@ pub(crate) fn snapshot_session(store: &Store, for_quit: bool) -> Option<Value> {
     if for_quit {
         record["saved_for"] = json!("quit");
         record["saved_at_ms"] = json!(agentmux_common::time::now_ms());
+        // The windows this quit saved: the only ones startup may forget.
+        record["window_ids"] = json!(window_ids);
     }
     Some(record)
 }
@@ -133,6 +137,48 @@ pub(crate) fn save_on_last_close(store: &Store, ws_id: &str) {
     if let Some(snapshot) = super::session_restore::snapshot_workspace(store, ws_id) {
         super::session_restore::save_last_session_snapshot(store, snapshot);
     }
+}
+
+/// At startup, before anything reads the windows: when the last run ended in
+/// a quit that saved every window (the record is a quit's), a window still
+/// listed is one whose close didn't reach srv before it stopped. The host
+/// closes windows concurrently and srv can exit first; seen in a simulated
+/// upgrade, where the second window's row survived and the main window then
+/// took it instead of restoring the session. The record holds that window, so
+/// forget its row and its workspace (with its tabs and panes): the first
+/// window then restores every window as designed. Only the windows the quit
+/// saved (its `window_ids`) are forgotten: a record left from an older quit
+/// never costs a later run its windows. Returns how many it forgot.
+pub(crate) fn forget_windows_left_by_quit(store: &Store) -> usize {
+    let saved: std::collections::HashSet<String> = super::session_restore::load_last_session_snapshot(store)
+        .filter(|r| r.get("saved_for").and_then(|v| v.as_str()) == Some("quit"))
+        .and_then(|r| r.get("window_ids").and_then(|v| v.as_array()).cloned())
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|v| v.as_str().map(str::to_string))
+        .collect();
+    let Some(mut client) = store.get_all::<Client>().ok().and_then(|cs| cs.into_iter().next()) else {
+        return 0;
+    };
+    let (left, kept): (Vec<String>, Vec<String>) = client.windowids.iter().cloned().partition(|id| saved.contains(id));
+    if left.is_empty() {
+        return 0;
+    }
+    client.windowids = kept;
+    for id in &left {
+        if let Some(w) = store.get::<Window>(id).ok().flatten() {
+            if store.get::<Workspace>(&w.workspaceid).ok().flatten().is_some() {
+                let _ = crate::backend::wcore::delete_workspace(store, &w.workspaceid);
+            }
+            let _ = store.delete::<Window>(id);
+        }
+    }
+    if let Err(e) = store.update(&mut client) {
+        tracing::warn!(error = %e, "session_restore: couldn't forget the windows a quit left behind");
+        return 0;
+    }
+    tracing::info!(windows = left.len(), "session_restore: forgot windows a quit left behind; the session restores them");
+    left.len()
 }
 
 /// Set (or, with `None`, remove) one of the client's meta keys.

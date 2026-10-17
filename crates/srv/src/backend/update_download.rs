@@ -174,11 +174,13 @@ async fn run(asset: &ReleaseAsset, version: &str, root: &Path) -> Result<PathBuf
         return Err(e);
     }
     set(version, "unpacking", asset.size, asset.size, None, Staged::None);
+    // The new folder keeps this AgentMux's data channel, a local build's too.
+    let channel = crate::backend::reactive::registry::local_channel_id();
     // Next to the running folder, so it's where the user expects; under
     // this version's `updates/` when that folder's parent can't be written.
     let mut last = String::new();
     for parent in [root.parent().map(Path::to_path_buf), Some(dir.clone())].into_iter().flatten() {
-        match unpack_portable(&file, version, &parent).await {
+        match unpack_portable(&file, version, &parent, &channel).await {
             Ok(folder) => {
                 let _ = tokio::fs::remove_file(&file).await;
                 return Ok(folder);
@@ -369,11 +371,26 @@ fn tar_exe() -> PathBuf {
     }
 }
 
-/// Unpack the portable archive `file` into a new folder in `parent`.
-async fn unpack_portable(file: &Path, version: &str, parent: &Path) -> Result<PathBuf, String> {
+/// Whether the staged portable `folder` may be used by the AgentMux on
+/// `channel`: it records no channel yet, or that one. A folder another
+/// AgentMux staged for a different channel isn't reused; a copy is made beside it.
+fn for_channel(folder: &Path, channel: &str) -> bool {
+    agentmux_common::runtime_mode::recorded_channel_in(folder).is_none_or(|c| c == channel)
+}
+
+/// Record `channel` in `folder`'s `runtime/`: the data the new version opens.
+fn record_channel(folder: &Path, channel: &str) -> Result<(), String> {
+    let file = folder.join("runtime").join(agentmux_common::runtime_mode::RECORDED_CHANNEL_FILE);
+    std::fs::write(&file, format!("{channel}\n")).map_err(|e| format!("can't write {}: {e}", file.display()))
+}
+
+/// Unpack the release into `parent`, recording `channel` in it.
+async fn unpack_portable(file: &Path, version: &str, parent: &Path, channel: &str) -> Result<PathBuf, String> {
     let name = format!("agentmux-{version}-x64-portable");
+    let fits = |dir: &Path| is_staged_portable(dir, version) && for_channel(dir, channel);
     // Staged by an earlier download that was then interrupted.
-    if is_staged_portable(&parent.join(&name), version) {
+    if fits(&parent.join(&name)) {
+        record_channel(&parent.join(&name), channel)?;
         return Ok(parent.join(&name));
     }
     remove_stale_partials(parent, &name).await;
@@ -403,20 +420,20 @@ async fn unpack_portable(file: &Path, version: &str, parent: &Path) -> Result<Pa
         Ok(Ok(_)) if !is_staged_portable(&partial, version) => {
             Err(format!("what was unpacked isn't an AgentMux {version} portable"))
         }
-        Ok(Ok(_)) => Ok(()),
+        Ok(Ok(_)) => record_channel(&partial, channel),
     };
     let canonical = parent.join(&name);
     let result = match checked {
         Err(e) => Err(e),
-        // Another AgentMux staged the same release while this one unpacked:
-        // use it rather than make a copy beside it.
-        Ok(()) if is_staged_portable(&canonical, version) => Ok(canonical),
+        // Another AgentMux on this channel staged the same release while this
+        // one unpacked: use it rather than make a copy beside it.
+        Ok(()) if fits(&canonical) => record_channel(&canonical, channel).map(|()| canonical),
         Ok(()) => {
             let target = free_folder(parent, &name);
             match tokio::fs::rename(&partial, &target).await {
                 Ok(()) => Ok(target),
                 // The other one's move won the race.
-                Err(_) if is_staged_portable(&canonical, version) => Ok(canonical),
+                Err(_) if fits(&canonical) => record_channel(&canonical, channel).map(|()| canonical),
                 Err(e) => Err(format!("can't move the unpacked folder into place: {e}")),
             }
         }
@@ -530,7 +547,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join(name);
         download(&asset, &file, "0.59.27").await.unwrap();
-        let folder = unpack_portable(&file, "0.59.27", dir.path()).await.unwrap();
+        let folder = unpack_portable(&file, "0.59.27", dir.path(), "stable").await.unwrap();
         assert!(is_staged_portable(&folder, "0.59.27"));
         // One wrong byte of checksum and the download is refused and removed.
         let wrong = ReleaseAsset { sha256: "0".repeat(64), ..asset };
@@ -559,15 +576,23 @@ mod tests {
         assert!(made.success());
         let parent = dir.path().join("apps");
         std::fs::create_dir_all(&parent).unwrap();
-        let folder = unpack_portable(&archive, "0.59.27", &parent).await.unwrap();
+        let local = "local-main-b28b7a-f62415cd";
+        let folder = unpack_portable(&archive, "0.59.27", &parent, local).await.unwrap();
         assert_eq!(folder, parent.join("agentmux-0.59.27-x64-portable"));
         assert!(is_staged_portable(&folder, "0.59.27"));
+        // It opens this AgentMux's data, a local build's channel included.
+        assert_eq!(agentmux_common::runtime_mode::recorded_channel_in(&folder).as_deref(), Some(local));
         let leftovers = || std::fs::read_dir(&parent).unwrap().filter(|e| e.as_ref().unwrap().file_name().to_string_lossy().starts_with('.')).count();
         assert_eq!(leftovers(), 0);
         // Asked again, the staged folder is reused.
-        assert_eq!(unpack_portable(&archive, "0.59.27", &parent).await.unwrap(), folder);
+        assert_eq!(unpack_portable(&archive, "0.59.27", &parent, local).await.unwrap(), folder);
+        // Not by an AgentMux on another channel: it gets a copy of its own.
+        let other = unpack_portable(&archive, "0.59.27", &parent, "stable").await.unwrap();
+        assert_eq!(other, parent.join("agentmux-0.59.27-x64-portable-2"));
+        assert_eq!(agentmux_common::runtime_mode::recorded_channel_in(&other).as_deref(), Some("stable"));
+        assert_eq!(agentmux_common::runtime_mode::recorded_channel_in(&folder).as_deref(), Some(local));
         // An archive of another version is refused and leaves nothing.
-        let err = unpack_portable(&archive, "0.59.28", &parent).await.unwrap_err();
+        let err = unpack_portable(&archive, "0.59.28", &parent, local).await.unwrap_err();
         assert!(err.contains("isn't an AgentMux 0.59.28 portable"), "{err}");
         assert_eq!(leftovers(), 0);
         assert!(!parent.join("agentmux-0.59.28-x64-portable").exists());

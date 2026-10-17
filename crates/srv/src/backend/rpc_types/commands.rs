@@ -487,6 +487,8 @@ pub const COMMAND_VIEWER_AGENT_HIDDEN: &str = "viewer.agent-hidden";
 pub const COMMAND_VIEWER_CAN_SEND: &str = "viewer.can-send";
 // What srv knows about newer AgentMux releases (backend::update_check).
 pub const COMMAND_APP_UPDATE_STATUS: &str = "app.update-status";
+// Ask GitHub now: the version panel's Check for update (backend::update_check).
+pub const COMMAND_APP_UPDATE_CHECK: &str = "app.update-check";
 // Agents' upgrade requests waiting for the user (backend::upgrade_request).
 pub const COMMAND_APP_UPGRADE_REQUESTS: &str = "app.upgrade-requests";
 
