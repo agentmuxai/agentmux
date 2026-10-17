@@ -1,6 +1,6 @@
 # SPEC: Bypass: the person lets the agent act without asking in one browser pane
 
-**Status:** B-1 built (§10): grant from the agent's request and from the button, the srv gates, the red strip, `end_bypass`. Decisions on the open questions are in §11.
+**Status:** active — B-1 built (§10): grant from the agent's request and from the button, the srv gates, the red strip, `end_bypass`. Decisions on the open questions are in §11.
 **Date:** 2026-10-16
 **Author:** Naki #2 (naki-naki-2), at the repo owner's request
 **Trigger (repo owner, 2026-10-16):** a bulk job in an agent-driven browser pane needed about 75 delete clicks on one site, and each one waited for the person to approve it in the pane. "Do we need to do each manually 70 times? … write a spec that gives an agent superaccess for anything in the currently running pane. Make it a red 'bypass' button next to Take over … since we cannot sit and wait here for each of these."
