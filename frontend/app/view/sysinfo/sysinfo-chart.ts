@@ -59,15 +59,6 @@ export function xWindowSecs(rows: DataItem[], targetLen: number, intervalSecs: n
     return [(maxMs - targetLen * intervalSecs * 1000) / 1000, maxMs / 1000];
 }
 
-/**
- * Where a chart's plot area sits in its pane: at least this far in from the
- * left (its y axis) and this far in from the right (room for the last time
- * label). Fixed, so charts stacked in one pane and the core heatmap under them
- * share one time scale on screen.
- */
-export const PLOT_LEFT_PX = 76;
-export const PLOT_RIGHT_PX = 36;
-
 /** The smallest of 1, 2, 2.5 or 5 times a power of ten at or above `v`: a ceiling that reads well on an axis. */
 export function niceCeil(v: number): number {
     if (!(v > 0) || !Number.isFinite(v)) return 1;

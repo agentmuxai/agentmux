@@ -483,6 +483,7 @@ partial list.
 | [`SPEC_SWARM_QUESTION_STATE_AND_QUESTION_TIMEOUT_ACTIVITY_2026_10_02`](SPEC_SWARM_QUESTION_STATE_AND_QUESTION_TIMEOUT_ACTIVITY_2026_10_02.md) | SPEC: Swarm "question" state and countdown, and activity that resets a question's timeout |
 | [`SPEC_SWARM_ROW_AUTO_LINGER_COUNTDOWN_2026_08_06`](SPEC_SWARM_ROW_AUTO_LINGER_COUNTDOWN_2026_08_06.md) | SPEC — Swarm Row Auto-Linger Countdown on Completion |
 | [`SPEC_SWARM_SUPERVISOR_2026_10_16`](SPEC_SWARM_SUPERVISOR_2026_10_16.md) | Spec: the Swarm Supervisor keeps agents working until they are done or need the user |
+| [`SPEC_SYSINFO_CONTROLS_AND_EDGES_2026_10_16`](SPEC_SYSINFO_CONTROLS_AND_EDGES_2026_10_16.md) | Spec: Sysinfo pane — flush top-right controls, a hide-the-selectors button, flush right-hand chart edge |
 | [`SPEC_SYSTEM_TIER_GLOBAL_MEMORY_SEEDING_2026_09_15`](SPEC_SYSTEM_TIER_GLOBAL_MEMORY_SEEDING_2026_09_15.md) | Spec: Operator Config seeding (AgentMux-shipped, system-tier Global Memory) |
 | [`SPEC_SYSTEM_TOOLCHAIN_INSTALLER_2026_08_24`](SPEC_SYSTEM_TOOLCHAIN_INSTALLER_2026_08_24.md) | SPEC: One-click system-toolchain installer (git, Node/npm, and friends) across Windows/macOS/Linux |
 | [`SPEC_SYSTEM_TOOL_INSTALL_DETAILS_AUTOSCROLL_2026_09_10`](SPEC_SYSTEM_TOOL_INSTALL_DETAILS_AUTOSCROLL_2026_09_10.md) | SPEC: Install-log "Details" panel — auto-scroll, provider-install parity, and brand icons |

@@ -22,8 +22,6 @@ import "./sysinfo-plot.scss";
 
 import {
     formatValue,
-    PLOT_LEFT_PX,
-    PLOT_RIGHT_PX,
     resolveCssColor,
     type SeriesSpec,
     timeAxisLabels,
@@ -40,8 +38,10 @@ const CHART_RESIZE_MS = 100;
 /** Least room per x label, so a narrow pane gets fewer of them. */
 const X_LABEL_SPACE_PX = 80;
 
-/** A tight chart's time axis: its labels and ticks, nothing more. */
-const TIGHT_X_AXIS_PX = 22;
+/** A chart's time axis: its labels and ticks, nothing more. */
+const X_AXIS_PX = 22;
+/** Text keeps this far from the pane's edges; graphics (the plot, the line) touch them. */
+const TEXT_INSET_PX = 1;
 
 /** Width of a y axis that fits its widest label (uPlot's own sizing recipe), at least `min`. */
 const yAxisSize = (min: number) => (self: uPlot, values: string[] | null, axisIdx: number, cycleNum: number) => {
@@ -55,6 +55,21 @@ const yAxisSize = (min: number) => (self: uPlot, values: string[] | null, axisId
     }
     return Math.max(min, Math.ceil(size));
 };
+
+/**
+ * The time labels, with the ones that would cross the plot's right edge left
+ * blank (their ticks stay): the plot runs to the edge, and a label centred on a
+ * tick near it would be cut off.
+ */
+function edgeSafe(u: uPlot, splits: number[], labels: string[]): string[] {
+    const right = u.bbox.width / uPlot.pxRatio;
+    if (right <= 0) return labels;
+    u.ctx.font = (u.axes[0] as any).font[0];
+    return labels.map((label, i) => {
+        const half = u.ctx.measureText(label).width / uPlot.pxRatio / 2;
+        return u.valToPos(splits[i], "x") + half + TEXT_INSET_PX > right ? "" : label;
+    });
+}
 
 export type TimeChartProps = {
     plotData: Array<DataItem>;
@@ -73,14 +88,17 @@ export type TimeChartProps = {
     sparkline?: boolean;
     /** `false`: no time labels, for a chart stacked above another that has them. */
     timeAxis?: boolean;
-    /** Against the pane's edges: axes only as wide as their labels, no side gutters. */
-    tight?: boolean;
     /** The chart's name, over its top-left corner. */
     title?: string;
     class?: string;
 };
 
-/** A time chart of one or more series, the ones marked `below` drawn under the axis. */
+/**
+ * A time chart of one or more series, the ones marked `below` drawn under the
+ * axis. It runs flush to the edges of its box (so to the pane's): the plot and
+ * the line touch the right edge, axes are only as wide as their labels, and text
+ * sits TEXT_INSET_PX in.
+ */
 export function TimeChart(props: TimeChartProps): JSX.Element {
     let container!: HTMLDivElement;
     let tip!: HTMLDivElement;
@@ -111,25 +129,26 @@ export function TimeChart(props: TimeChartProps): JSX.Element {
         const ts = (u.data[0][idx] as number) * 1000;
         tip.textContent = `${new Date(ts).toLocaleTimeString()}  ${parts.join("  ")}`;
         tip.style.display = "block";
-        tip.style.left = `${u.over.offsetLeft + (u.cursor.left ?? 0)}px`;
+        // Centred on the cursor, kept inside the chart so the newest samples (at the edge) stay readable.
+        const half = tip.offsetWidth / 2;
+        const x = u.over.offsetLeft + (u.cursor.left ?? 0);
+        tip.style.left = `${Math.max(half, Math.min(x, container.clientWidth - half))}px`;
         tip.style.top = `${Math.max(0, u.over.offsetTop + u.valToPos(anchor, "y") - 30)}px`;
     };
 
     const options = (width: number, height: number): uPlot.Options => {
         const muted = resolveCssColor(container, "var(--grey-text-color)");
         const grid = { stroke: withAlpha(muted, 0.25), width: 1 };
-        const ticks = { stroke: withAlpha(muted, 0.4), width: 1, size: props.tight ? 3 : 4 };
-        const gap = props.tight ? 3 : 5;
+        const ticks = { stroke: withAlpha(muted, 0.4), width: 1, size: 3 };
+        const gap = 3;
         const single = props.series.length === 1;
         return {
             width,
             height,
             legend: { show: false },
-            // Fixed sides, so the plot areas of a pane's charts line up (PLOT_LEFT_PX);
-            // a tight chart keeps only the room its last time label needs.
-            ...(props.sparkline
-                ? {}
-                : { padding: [props.tight ? 7 : null, props.tight ? null : PLOT_RIGHT_PX, null, 0] as uPlot.Padding }),
+            // Nothing on the right: the plot ends at the edge (a label that would
+            // cross it is dropped, see `edgeSafe`). The top keeps room for the top y label.
+            ...(props.sparkline ? {} : { padding: [7, 0, null, TEXT_INSET_PX] as uPlot.Padding }),
             cursor: {
                 // Only the time is shared: each chart has its own y scale, and by
                 // default uPlot would also draw the hovered chart's y value on the others.
@@ -150,16 +169,18 @@ export function TimeChart(props: TimeChartProps): JSX.Element {
                           ticks,
                           gap,
                           space: X_LABEL_SPACE_PX,
-                          values: (_u, splits, _axisIdx, _space, incr) =>
-                              props.timeAxis === false ? splits.map(() => "") : timeAxisLabels(splits, incr),
-                          ...(props.timeAxis === false ? { size: 4 } : props.tight ? { size: TIGHT_X_AXIS_PX } : {}),
+                          values: (u, splits, _axisIdx, _space, incr) =>
+                              props.timeAxis === false
+                                  ? splits.map(() => "")
+                                  : edgeSafe(u, splits, timeAxisLabels(splits, incr)),
+                          size: props.timeAxis === false ? 4 : X_AXIS_PX,
                       },
                       {
                           stroke: muted,
                           grid,
                           ticks,
                           gap,
-                          size: yAxisSize(props.tight ? 0 : PLOT_LEFT_PX),
+                          size: yAxisSize(0),
                           // Below the axis is still an amount: no minus signs.
                           values: (_u, splits) => splits.map((v) => (props.axisFormat ?? props.format)(Math.abs(v))),
                       },
@@ -227,7 +248,7 @@ export function TimeChart(props: TimeChartProps): JSX.Element {
     // has none yet; otherwise only a new size, or new data.
     createEffect(
         on(
-            [() => props.series, () => props.sparkline, () => props.timeAxis, () => props.tight, appliedWindowTheme],
+            [() => props.series, () => props.sparkline, () => props.timeAxis, appliedWindowTheme],
             () => build(),
             { defer: true }
         )
@@ -245,7 +266,7 @@ export function TimeChart(props: TimeChartProps): JSX.Element {
     );
 
     return (
-        <div class={`sysinfo-chart ${props.tight ? "sysinfo-chart--tight" : ""} ${props.class ?? ""}`}>
+        <div class={`sysinfo-chart ${props.class ?? ""}`}>
             <Show when={props.title}>
                 <div class="sysinfo-chart-title">{props.title}</div>
             </Show>
@@ -295,7 +316,6 @@ export function SingleLinePlot(props: SingleLinePlotProps): JSX.Element {
             syncKey={props.syncKey}
             sparkline={props.sparkline}
             title={props.sparkline ? undefined : titled(name(), figures(props.plotData, props.yval, format))}
-            tight
             class="min-h-[100px]"
         />
     );

@@ -5,8 +5,8 @@
  * Every core's load over the window, one row per core and one column per
  * sample, in one hue: the stronger, the busier. A gap is left empty. It fits any
  * number of cores, where one line per core stops being readable past a few.
- * Columns sit by time on the charts' window, inside the same side gutters
- * (`PLOT_LEFT_PX`), so they line up under the charts above.
+ * Columns sit by time on the charts' window and run the full width, flush to
+ * the pane's edges like the charts above.
  * docs/reports/REPORT_SYSINFO_REWRITE_AND_MODERN_MONITOR_2026_10_13.md section 5.3.
  */
 
@@ -15,7 +15,7 @@ import { createEffect, createSignal, onCleanup, onMount } from "solid-js";
 
 import { appliedWindowTheme } from "@/app/store/window-appearance";
 
-import { PLOT_LEFT_PX, PLOT_RIGHT_PX, resolveCssColor, xWindowSecs } from "./sysinfo-chart";
+import { resolveCssColor, xWindowSecs } from "./sysinfo-chart";
 import { columnSpan, coreGrid } from "./sysinfo-overview-data";
 import type { DataItem } from "./sysinfo-types";
 
@@ -52,7 +52,6 @@ export function CoreHeatmap(props: CoreHeatmapProps): JSX.Element {
         onCleanup(() => observer.disconnect());
     });
 
-    const plotWidth = (width: number) => width - PLOT_LEFT_PX - PLOT_RIGHT_PX;
     const win = (rows: DataItem[]) => xWindowSecs(rows, props.targetLen, props.intervalSecs);
 
     createEffect(() => {
@@ -71,7 +70,7 @@ export function CoreHeatmap(props: CoreHeatmapProps): JSX.Element {
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         ctx.clearRect(0, 0, width, height);
         const w = win(rows);
-        const pw = plotWidth(width);
+        const pw = width;
         if (!w || pw <= 0 || grid.length === 0) return;
         // One color for every cell, its opacity set per cell: no color string per cell.
         ctx.fillStyle = resolveCssColor(host, props.color);
@@ -83,7 +82,7 @@ export function CoreHeatmap(props: CoreHeatmapProps): JSX.Element {
                 if (v == null || !span) return;
                 ctx.globalAlpha = cellAlpha(v);
                 // A hairline between rows keeps cores apart without a grid.
-                ctx.fillRect(PLOT_LEFT_PX + span[0], r * rh, Math.ceil(span[1] - span[0]), Math.max(1, rh - 1));
+                ctx.fillRect(span[0], r * rh, Math.ceil(span[1] - span[0]), Math.max(1, rh - 1));
             });
         });
         ctx.globalAlpha = 1;
@@ -93,11 +92,11 @@ export function CoreHeatmap(props: CoreHeatmapProps): JSX.Element {
         const rows = props.plotData ?? [];
         const { width, height } = size();
         const w = win(rows);
-        const pw = plotWidth(width);
+        const pw = width;
         if (!w || !props.cores.length || pw <= 0) return;
         const rect = host.getBoundingClientRect();
         // The sample whose column is under the pointer.
-        const x = e.clientX - rect.left - PLOT_LEFT_PX;
+        const x = e.clientX - rect.left;
         const c = rows.findIndex((row) => {
             const span = columnSpan(row.ts, w, props.intervalSecs, pw);
             return span != null && x >= span[0] && x < span[1];
