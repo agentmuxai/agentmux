@@ -80,6 +80,44 @@ pub const PANE_ENV_KEEP: &[&str] = &[
     "AGENTMUX_INSTANCE_SLUG",
 ];
 
+/// What AppRun's start sets for this AgentMux's own files, which nothing a pane
+/// starts should inherit: `APPIMAGE`, `APPDIR`, `OWD` and `ARGV0` name this
+/// AppImage (another build started from the pane would think it is it, and
+/// `update_install` would take it for this AppImage), and `LD_LIBRARY_PATH`
+/// carries this version's `usr/bin`, whose `libcef.so` any program started
+/// there would load. Both AppRun and the tarball's `agentmux.sh` only *prepend*
+/// to the user's own `LD_LIBRARY_PATH`, so only that entry is removed.
+const APPIMAGE_ENV: &[&str] = &["APPIMAGE", "APPDIR", "OWD", "ARGV0"];
+
+/// The environment changes that take AgentMux's own launch settings out of a
+/// child's: `(key, new value)`, `None` removing the variable. `var` reads this
+/// process's environment; `own_bin` is where its binaries are (`usr/bin`).
+fn launch_env_edits_for(var: &dyn Fn(&str) -> Option<String>, own_bin: &[std::path::PathBuf]) -> Vec<(String, Option<String>)> {
+    let mut edits = Vec::new();
+    if var("APPIMAGE").is_some_and(|v| !v.is_empty()) {
+        edits.extend(APPIMAGE_ENV.iter().map(|k| (k.to_string(), None)));
+    }
+    if let Some(paths) = var("LD_LIBRARY_PATH") {
+        let own: Vec<String> = own_bin.iter().map(|p| p.to_string_lossy().trim_end_matches('/').to_string()).collect();
+        let kept: Vec<&str> = paths.split(':').filter(|e| !own.iter().any(|o| e.trim_end_matches('/') == o)).collect();
+        if kept.len() != paths.split(':').count() {
+            let kept: Vec<&str> = kept.into_iter().filter(|e| !e.is_empty()).collect();
+            edits.push(("LD_LIBRARY_PATH".to_string(), (!kept.is_empty()).then(|| kept.join(":"))));
+        }
+    }
+    edits
+}
+
+/// [`launch_env_edits_for`] for this process: its binaries are in its own
+/// folder, and in `$APPDIR` or AppRun's extraction under `usr/bin`.
+fn launch_env_edits() -> Vec<(String, Option<String>)> {
+    let mut own_bin: Vec<std::path::PathBuf> = std::env::current_exe().ok().and_then(|e| e.parent().map(std::path::Path::to_path_buf)).into_iter().collect();
+    for root in ["APPDIR", "AGENTMUX_EXTRACTED_RUN"] {
+        own_bin.extend(std::env::var_os(root).filter(|r| !r.is_empty()).map(|r| std::path::PathBuf::from(r).join("usr/bin")));
+    }
+    launch_env_edits_for(&|k| std::env::var(k).ok(), &own_bin)
+}
+
 /// The nesting sentinel. Presence tells a launcher started from a pane to
 /// ignore ambient `AGENTMUX_*` and re-derive from its own exe path
 /// (`crates/launcher/src/data_dir.rs`).
@@ -120,11 +158,14 @@ pub fn should_strip(key: &str) -> bool {
 /// Call this once on the finished command instead.
 ///
 /// Safe to call after the caller's own `.env()` values: everything a pane
-/// legitimately sets is on [`PANE_ENV_KEEP`], so nothing it just set is removed.
+/// legitimately sets is on [`PANE_ENV_KEEP`], so nothing it just set is removed,
+/// and a launch setting the caller set itself (`LD_LIBRARY_PATH`, say) is kept
+/// ([`apply_edits_pty`]).
 pub fn sanitize_pty_command(c: &mut portable_pty::CommandBuilder) {
     for key in keys_to_strip() {
         c.env_remove(&key);
     }
+    apply_launch_env_pty(c);
     c.env(NESTING_SENTINEL_KEY, "1");
     for (key, value) in build_info() {
         c.env(key, value);
@@ -167,6 +208,7 @@ pub fn sanitize_process_command(cmd: &mut tokio::process::Command) {
     for key in keys_to_strip() {
         cmd.env_remove(&key);
     }
+    apply_launch_env(cmd.as_std_mut());
     cmd.env(NESTING_SENTINEL_KEY, "1");
     for (key, value) in build_info() {
         cmd.env(key, value);
@@ -189,6 +231,7 @@ pub fn sanitize_external_command(cmd: &mut tokio::process::Command) {
     for key in all_agentmux_keys() {
         cmd.env_remove(&key);
     }
+    apply_launch_env(cmd.as_std_mut());
     cmd.env(NESTING_SENTINEL_KEY, "1");
 }
 
@@ -197,6 +240,7 @@ pub fn sanitize_external_pty_command(c: &mut portable_pty::CommandBuilder) {
     for key in all_agentmux_keys() {
         c.env_remove(&key);
     }
+    apply_launch_env_pty(c);
     c.env(NESTING_SENTINEL_KEY, "1");
 }
 
@@ -218,7 +262,44 @@ pub fn sanitize_external_std_command(cmd: &mut std::process::Command) {
     for key in all_agentmux_keys() {
         cmd.env_remove(&key);
     }
+    apply_launch_env(cmd);
     cmd.env(NESTING_SENTINEL_KEY, "1");
+}
+
+/// Take AgentMux's own launch settings out of `cmd`'s environment
+/// ([`launch_env_edits`]): what it inherits, never what the caller set on it.
+fn apply_launch_env(cmd: &mut std::process::Command) {
+    apply_edits(cmd, launch_env_edits());
+}
+
+/// [`apply_launch_env`] with the edits given. A key the command sets explicitly
+/// (a pane's own `LD_LIBRARY_PATH`, set before this runs) is left as it is.
+fn apply_edits(cmd: &mut std::process::Command, edits: Vec<(String, Option<String>)>) {
+    let explicit: Vec<String> =
+        cmd.get_envs().filter(|(_, v)| v.is_some()).map(|(k, _)| k.to_string_lossy().into_owned()).collect();
+    for (key, value) in edits.into_iter().filter(|(k, _)| !explicit.contains(k)) {
+        match value {
+            Some(v) => cmd.env(key, v),
+            None => cmd.env_remove(key),
+        };
+    }
+}
+
+/// [`apply_launch_env`] for a PTY command.
+fn apply_launch_env_pty(c: &mut portable_pty::CommandBuilder) {
+    apply_edits_pty(c, launch_env_edits());
+}
+
+/// [`apply_edits`] for a PTY command, whose environment starts as a copy of this
+/// process's: only what was added on top of that counts as set by the caller.
+fn apply_edits_pty(c: &mut portable_pty::CommandBuilder, edits: Vec<(String, Option<String>)>) {
+    let explicit: Vec<String> = c.iter_extra_env_as_str().map(|(k, _)| k.to_string()).collect();
+    for (key, value) in edits.into_iter().filter(|(k, _)| !explicit.contains(k)) {
+        match value {
+            Some(v) => c.env(key, v),
+            None => c.env_remove(key),
+        };
+    }
 }
 
 #[cfg(test)]
@@ -569,6 +650,69 @@ mod spawn_site_coverage {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn edits(env: &[(&str, &str)], own: &[&str]) -> Vec<(String, Option<String>)> {
+        let own: Vec<std::path::PathBuf> = own.iter().map(std::path::PathBuf::from).collect();
+        launch_env_edits_for(&|k| env.iter().find(|(n, _)| *n == k).map(|(_, v)| v.to_string()), &own)
+    }
+
+    #[test]
+    fn a_pane_loses_the_appimages_own_settings_and_keeps_the_users_library_path() {
+        let own = ["/home/u/.local/share/agentmux/extracted/0.59.30/usr/bin"];
+        let none = |k: &str| (k.to_string(), None);
+        // From an AppImage: its names go, and only its own entry of the path.
+        let e = edits(
+            &[
+                ("APPIMAGE", "/home/u/AgentMux.AppImage"),
+                ("LD_LIBRARY_PATH", "/home/u/.local/share/agentmux/extracted/0.59.30/usr/bin:/opt/cuda/lib64:/usr/local/lib"),
+            ],
+            &own,
+        );
+        for k in ["APPIMAGE", "APPDIR", "OWD", "ARGV0"] {
+            assert!(e.contains(&none(k)), "{k}");
+        }
+        assert!(e.contains(&("LD_LIBRARY_PATH".to_string(), Some("/opt/cuda/lib64:/usr/local/lib".to_string()))), "{e:?}");
+        // Only our own entry: the variable goes entirely.
+        let e = edits(&[("LD_LIBRARY_PATH", "/home/u/.local/share/agentmux/extracted/0.59.30/usr/bin/")], &own);
+        assert_eq!(e, vec![("LD_LIBRARY_PATH".to_string(), None)]);
+        // The tarball's: no APPIMAGE, but the same path entry.
+        let e = edits(&[("LD_LIBRARY_PATH", "/opt/AgentMux/usr/bin:/lib")], &["/opt/AgentMux/usr/bin"]);
+        assert_eq!(e, vec![("LD_LIBRARY_PATH".to_string(), Some("/lib".to_string()))]);
+    }
+
+    #[test]
+    fn what_a_pane_sets_itself_is_kept_and_only_what_it_inherits_is_edited() {
+        let edits = vec![
+            ("LD_LIBRARY_PATH".to_string(), None),
+            ("APPIMAGE".to_string(), None),
+            ("OWD".to_string(), Some("rewritten".to_string())),
+        ];
+        // A PTY command: its own LD_LIBRARY_PATH survives, the others are edited.
+        let mut pty = portable_pty::CommandBuilder::new("sh");
+        pty.env("LD_LIBRARY_PATH", "/opt/cuda/lib64");
+        apply_edits_pty(&mut pty, edits.clone());
+        assert_eq!(pty.get_env("LD_LIBRARY_PATH").and_then(|v| v.to_str()), Some("/opt/cuda/lib64"));
+        assert_eq!(pty.get_env("APPIMAGE"), None);
+        assert_eq!(pty.get_env("OWD").and_then(|v| v.to_str()), Some("rewritten"));
+        // A process command, the same.
+        let mut std_cmd = std::process::Command::new("sh");
+        std_cmd.env("LD_LIBRARY_PATH", "/opt/cuda/lib64").env("APPIMAGE", "/set/by/the/pane");
+        apply_edits(&mut std_cmd, edits);
+        let envs: std::collections::HashMap<_, _> =
+            std_cmd.get_envs().map(|(k, v)| (k.to_string_lossy().into_owned(), v.map(|v| v.to_string_lossy().into_owned()))).collect();
+        assert_eq!(envs["LD_LIBRARY_PATH"].as_deref(), Some("/opt/cuda/lib64"));
+        assert_eq!(envs["APPIMAGE"].as_deref(), Some("/set/by/the/pane"), "a pane that sets APPIMAGE itself keeps it");
+        assert_eq!(envs["OWD"].as_deref(), Some("rewritten"));
+    }
+
+    #[test]
+    fn nothing_is_touched_when_the_environment_has_none_of_it() {
+        assert!(edits(&[], &["/opt/AgentMux/usr/bin"]).is_empty());
+        assert!(edits(&[("LD_LIBRARY_PATH", "/opt/cuda/lib64")], &["/opt/AgentMux/usr/bin"]).is_empty());
+        // ARGV0 or OWD of something else, with no AppImage, stay.
+        assert!(edits(&[("ARGV0", "busybox"), ("OWD", "/x")], &[]).is_empty());
+        assert!(edits(&[("APPIMAGE", "")], &[]).is_empty());
+    }
 
     /// The four variables behind the confirmed failures in the retro. If any of
     /// these is ever added to the keep-set, the breach reopens.
