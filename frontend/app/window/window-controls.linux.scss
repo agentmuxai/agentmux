@@ -23,6 +23,11 @@
     align-self: center;
     gap: var(--space-1-5);
     flex-shrink: 0;
+    // Centre on the whole title bar, not on the part below the header's top
+    // padding (.window-header's padding-top makes room for the tabs): pulled
+    // up by that padding, the buttons' centre moves up by half of it, onto the
+    // bar's own centre line. window-controls.win32.scss offsets the same padding.
+    margin-top: calc(-1 * var(--space-1-5));
 
     &.gnome-window-buttons--right {
         margin-right: var(--space-1);

@@ -43,6 +43,6 @@
 2000 frontend/app/store/agent-pane-state/reducer.ts
 1506 frontend/app/view/agent/agent-view.tsx
 1564 frontend/app/view/agent/components/AgentComposerStrip.tsx
-1828 frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx
+1806 frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx
 1561 frontend/app/view/files/files-view.tsx
 2129 frontend/app/view/swarm/swarm-model.ts

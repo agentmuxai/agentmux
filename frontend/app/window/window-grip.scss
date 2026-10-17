@@ -1,0 +1,29 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+//
+// The window's grip (window-grip.tsx), in .system-status between the widget bar
+// and the window controls (or the hamburger on macOS). It is as wide as one
+// icon-only widget slot, so the widgets, the grip and the controls read as one
+// row. SPEC_DRAG_SPACE_AFFORDANCE_2026_10_13 §5.1;
+// REPORT_WINDOW_HEADER_GRIP_PLACEMENT_2026_10_17 §3.
+
+@use "../mixins.scss";
+
+.window-grip {
+    flex: 0 0 31px;
+    height: 100%;
+    align-self: stretch;
+    @include mixins.flex-center;
+    font-size: var(--text-sm);
+    color: var(--secondary-text-color);
+
+    svg {
+        opacity: 0.35;
+        pointer-events: none;
+        transition: opacity var(--duration-decorative-quick) var(--ease-standard);
+    }
+
+    &:hover svg {
+        opacity: 0.7;
+    }
+}

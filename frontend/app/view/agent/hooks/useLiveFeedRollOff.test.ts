@@ -5,7 +5,7 @@ import { createRoot, createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DocumentNode } from "../types";
 import { LIVE_FEED_MAX_FINISHED_BYTES } from "../live-feed";
-import { BUDGET_PASS_MS, HIDDEN_HOLD_RELEASE_MS, IN_FLIGHT_TEXT_BUDGET, useLiveFeedRollOff } from "./useLiveFeedRollOff";
+import { BUDGET_PASS_MS, HIDDEN_HELD_UNLOAD_MS, IN_FLIGHT_TEXT_BUDGET, useLiveFeedRollOff } from "./useLiveFeedRollOff";
 
 const userMsg = (id: string) => ({ type: "user_message", id, message: id }) as unknown as DocumentNode;
 
@@ -148,27 +148,55 @@ describe("useLiveFeedRollOff — holds in hidden panes, and passes while over bu
     beforeEach(() => vi.useFakeTimers());
     afterEach(() => vi.useRealTimers());
 
-    it("releases held-open rows once the pane has been hidden for HIDDEN_HOLD_RELEASE_MS, then runs a pass", () => {
+    // REPORT_AGENT_PANE_HELD_TOOLS_COLLAPSE_ON_RETURN_RCA_2026_10_17.md: leaving
+    // a pane must not collapse what was open; only the held rows' text may go.
+    const unloadKeeps = (m: ReturnType<typeof mount>, from: number): Set<string>[] =>
+        m.dispatched
+            .slice(from)
+            .filter((c) => c.type === "UnloadToolResults")
+            .map((c) => (c as unknown as { keepIds: Set<string> }).keepIds);
+
+    it("keeps held-open rows however long the pane is hidden; after HIDDEN_HELD_UNLOAD_MS their results may unload", () => {
         const [hidden, setHidden] = createSignal(false);
         const m = mount({ hidden, held: ["t1"] });
         setHidden(true);
-        vi.advanceTimersByTime(HIDDEN_HOLD_RELEASE_MS - 1);
-        expect(m.docState().heldOpenNodes.has("t1")).toBe(true);
+        vi.advanceTimersByTime(HIDDEN_HELD_UNLOAD_MS - 1);
+        // The pass on hiding still keeps the held row's result.
+        expect(unloadKeeps(m, 0).every((k) => k.has("t1"))).toBe(true);
         const before = m.dispatched.length;
         vi.advanceTimersByTime(1 + 2_000);
-        expect(m.docState().heldOpenNodes.size).toBe(0);
-        expect(m.dispatched.slice(before).some((c) => c.type === "UnloadToolResults")).toBe(true);
+        vi.advanceTimersByTime(HIDDEN_HELD_UNLOAD_MS * 10);
+        // Still held: the row stays open when the pane is shown again.
+        expect(m.docState().heldOpenNodes.has("t1")).toBe(true);
+        // But a pass now lets its text go.
+        const after = unloadKeeps(m, before);
+        expect(after.length).toBeGreaterThan(0);
+        expect(after.some((k) => !k.has("t1"))).toBe(true);
         m.dispose();
     });
 
-    it("keeps holds when the pane is shown again before the grace ends", () => {
+    it("keeps held results loaded when the pane is shown again before the grace ends", () => {
         const [hidden, setHidden] = createSignal(false);
         const m = mount({ hidden, held: ["t1"] });
         setHidden(true);
-        vi.advanceTimersByTime(HIDDEN_HOLD_RELEASE_MS / 2);
+        vi.advanceTimersByTime(HIDDEN_HELD_UNLOAD_MS / 2);
         setHidden(false);
-        vi.advanceTimersByTime(HIDDEN_HOLD_RELEASE_MS * 2);
+        const before = m.dispatched.length;
+        vi.advanceTimersByTime(HIDDEN_HELD_UNLOAD_MS * 2);
         expect(m.docState().heldOpenNodes.has("t1")).toBe(true);
+        expect(unloadKeeps(m, before).every((k) => k.has("t1"))).toBe(true);
+        m.dispose();
+    });
+
+    it("still unloads a hidden pane's finished tools that weren't held", () => {
+        const [hidden, setHidden] = createSignal(false);
+        const m = mount({ hidden, held: ["t1"] });
+        setHidden(true);
+        vi.advanceTimersByTime(2_000);
+        const keeps = unloadKeeps(m, 0);
+        expect(keeps.length).toBeGreaterThan(0);
+        // Only pinned and held ids are ever kept: "t2" (finished, not held) is unloadable.
+        expect(keeps.every((k) => !k.has("t2"))).toBe(true);
         m.dispose();
     });
 

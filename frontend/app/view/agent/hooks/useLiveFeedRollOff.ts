@@ -22,8 +22,11 @@ import { readToolResult, type ToolResultLoader } from "../tool-result-loader";
 import type { AgentAtoms } from "../state";
 import { userIsInteracting } from "../stream-scheduler";
 
-/** How long a pane stays hidden before its held-open rows are released. */
-export const HIDDEN_HOLD_RELEASE_MS = 30_000;
+/**
+ * How long a pane stays hidden before its held-open rows' results may leave
+ * memory. The rows stay open; their text reads back when the pane is shown.
+ */
+export const HIDDEN_HELD_UNLOAD_MS = 30_000;
 /** Loaded text allowed for the turn in flight, on top of the finished turns' budget. */
 export const IN_FLIGHT_TEXT_BUDGET = 512 * 1024;
 /** How often a pass runs while the pane is over its text budget. */
@@ -59,6 +62,8 @@ export function useLiveFeedRollOff(opts: {
     const [rolledOffTurns, setRolledOffTurns] = createSignal(0);
     const [gapsBefore, setGapsBefore] = createSignal<ReadonlySet<string>>(new Set());
     let rollOffDisposed = false;
+    /** Hidden past HIDDEN_HELD_UNLOAD_MS: held rows' results may unload too. */
+    let heldResultsUnloadable = false;
     onCleanup(() => {
         rollOffDisposed = true;
     });
@@ -70,11 +75,13 @@ export function useLiveFeedRollOff(opts: {
         const pinnedIds = untrack(docState).pinnedNodes;
         // Collapsed tool results leave memory in the same idle pass; rows the
         // user pinned or that are held open keep theirs
-        // (SPEC_AGENT_PANE_TOOL_RESULT_UNLOADING_2026_10_01.md §3.3). This
-        // runs with the live feed off too (Codex P2 on #4126).
+        // (SPEC_AGENT_PANE_TOOL_RESULT_UNLOADING_2026_10_01.md §3.3), also with
+        // the live feed off (#4126). A pane hidden past HIDDEN_HELD_UNLOAD_MS
+        // lets held rows' results go too; the rows stay open and reload on show.
+        const keepHeld = !heldResultsUnloadable;
         paneModel.dispatchDoc({
             type: "UnloadToolResults",
-            keepIds: new Set([...pinnedIds, ...untrack(docState).heldOpenNodes]),
+            keepIds: keepHeld ? new Set([...pinnedIds, ...untrack(docState).heldOpenNodes]) : new Set(pinnedIds),
         });
         if (!liveFeedOn()) return;
         const events = paneModel.dispatchDoc({
@@ -201,21 +208,22 @@ export function useLiveFeedRollOff(opts: {
             (hidden) => {
                 if (!hidden) return;
                 scheduleRollOff();
-                // A row is held open after finishing on screen so it doesn't
-                // collapse under a reader; a pane nobody can see has no reader,
-                // and its hidden rows never get the scroll-off scan that
-                // releases holds (their rect is 0×0). Release them after a
-                // grace, so their results can unload
-                // (SPEC_AGENT_PANE_TOOL_OUTPUT_RETENTION_2026_10_13.md §2.3).
+                // A hidden pane's held rows stay held: leaving a pane and
+                // coming back must not collapse what was open
+                // (REPORT_AGENT_PANE_HELD_TOOLS_COLLAPSE_ON_RETURN_RCA_2026_10_17.md).
+                // Their results may still leave memory after a grace, as
+                // SPEC_AGENT_PANE_TOOL_OUTPUT_RETENTION_2026_10_13.md §2.3
+                // wants: the rows keep their place and read the text back on
+                // show (ToolBlock's load-when-open, gated on dormancy).
                 const t = setTimeout(() => {
                     if (rollOffDisposed || !untrack(opts.hidden)) return;
-                    const [, setDocState] = agentAtoms().documentStateAtom;
-                    setDocState((prev) =>
-                        prev.heldOpenNodes.size === 0 ? prev : { ...prev, heldOpenNodes: new Set<string>() }
-                    );
+                    heldResultsUnloadable = true;
                     scheduleRollOff();
-                }, HIDDEN_HOLD_RELEASE_MS);
-                onCleanup(() => clearTimeout(t));
+                }, HIDDEN_HELD_UNLOAD_MS);
+                onCleanup(() => {
+                    clearTimeout(t);
+                    heldResultsUnloadable = false;
+                });
             },
             { defer: true }
         )

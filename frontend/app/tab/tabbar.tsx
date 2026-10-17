@@ -24,7 +24,6 @@ import { revealInStrip } from "@/app/element/strip-reveal";
 import { useTabTearOffEvents } from "./tab-tearoff-events";
 import { createTearOffTabAtRelease } from "./tab-tearoff-rpc";
 import { tabWrapperRefs } from "./tabbar-dnd";
-import { GripDots } from "@/app/element/GripDots";
 import { createScrollEdges } from "@/app/element/scroll-edges";
 import "./tabbar.scss";
 
@@ -412,13 +411,6 @@ function TabBar(props: TabBarProps): JSX.Element {
                     the scroll (as a sibling) left a dead zone — the empty interior
                     of the scroll container looked draggable but wasn't. */}
                 <div ref={tabBarFillRef!} class="tab-bar-fill" data-drag-region="true" />
-            </div>
-            {/* The window's grip: a fixed drag square outside the scrolling
-                tabs, just left of the widgets, so it never scrolls or fades with
-                them (SPEC_DRAG_SPACE_AFFORDANCE_2026_10_13 §5.8). A press on it
-                drags the window like the fill; the dots take no events. */}
-            <div class="tab-bar-grip" data-drag-region="true" aria-hidden="true">
-                <GripDots />
             </div>
             <Show when={pendingCloseTabId() !== null}>
                 <TabCloseConfirmModal

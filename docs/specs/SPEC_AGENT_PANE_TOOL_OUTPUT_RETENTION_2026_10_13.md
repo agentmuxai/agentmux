@@ -49,10 +49,10 @@ Passes run only on events: history ready, turn end, next send, going hidden, and
    - Drop the `i < lastUser` condition. A finished tool whose row isn't pinned, isn't open, and isn't in the Activity Dock can be unloaded in any turn, including the one in flight.
    - Its row stays; only its text goes, as for older turns.
 2. **Count jekts and agent messages as turn boundaries,** for unloading and roll-off: `jekt_message` and `agent_message` start a turn, as srv already counts them. One long-running agent then rolls off like any other.
-3. **Release holds in hidden panes.**
-   - When a pane has been hidden for 30 s, clear its `heldOpenNodes`.
-   - The hold exists so a row the user is watching doesn't collapse under them; a hidden pane has no watcher.
-   - This lines up with the row hibernation spec's grace (`SPEC_AGENT_PANE_HIDDEN_ROW_HIBERNATION_2026_10_13.md`).
+3. **Let held rows' text go in hidden panes; keep the rows open.**
+   - *Amended 2026-10-17 (`REPORT_AGENT_PANE_HELD_TOOLS_COLLAPSE_ON_RETURN_RCA_2026_10_17.md`):* as first built, a pane hidden for 30 s cleared its `heldOpenNodes`, so every held preview was collapsed when the user came back. Leaving a pane must not change what is open.
+   - A tool that finishes while its pane is hidden isn't held at all: nobody saw it finish. Its result unloads like any collapsed row's.
+   - When a pane has been hidden for 30 s, its held rows stop being exempt from unloading. They stay open, and their text reads back through the result loader when the pane is shown again (ToolBlock's load-when-open waits for the pane to be shown).
 4. **Unload smaller results:** `UNLOAD_MIN_BYTES` from 8 KB to 2 KB. The stub (pill and counts) is under 200 bytes, so anything above 2 KB is a real saving. Reloading is one indexed line read.
 5. **Unload large inputs too (phase 2).**
    - An Edit's `old_string`/`new_string` and a Write's `content` above 2 KB are replaced by the same kind of stub and reloaded with the result.
