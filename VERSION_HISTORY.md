@@ -1,5 +1,11 @@
 # AgentMux Version History
 
+## 0.59.30 — 2026-10-17
+
+- Browser panes an agent drives get Bypass: a red button next to Take over (or the agent's one-time request) lets the agent act without asking on the current site for 15 minutes, 1 hour or 4 hours; payments still ask, and End bypass, Take over or the time limit stop it.
+- Check for update in the version panel, and locally built portables can upgrade to a newer release, keeping their windows, agents and settings.
+- The Windows installer builds again: pdf.js's licence files no longer ship as unopenable files, and their texts (with the WebAssembly decoders' licences) are in the third-party notices
+
 ## 0.59.29 — 2026-10-16
 
 - macOS and Linux: keyboard focus between the app and browser panes is decided per window by the same input owner as on Windows, so a hidden or closed pane no longer keeps or regains the keyboard and one window no longer takes focus for another
