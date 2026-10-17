@@ -468,12 +468,19 @@ describe("agent-pane-state reducer", () => {
                 s0,
                 { type: "ProviderWaiting", reason: "rate_limited", retryAfterMs: 5000, at: 110 },
             ).state;
-            expect(s0.turnPhase).toMatchObject({ waitingReason: "rate_limited", retryAfterMs: 5000 });
+            // The deadline a countdown reads: the wait's arrival plus its length.
+            expect(s0.turnPhase).toMatchObject({ waitingReason: "rate_limited", retryAfterMs: 5000, retryAtMs: 5110 });
 
             const r = update(s0, { type: "StreamFlushObserved", addedCount: 1, at: 120 });
             expect(r.state.turnPhase.kind).toBe("Streaming");
             expect((r.state.turnPhase as Extract<TurnPhase, { kind: "Streaming" }>).waitingReason).toBeUndefined();
             expect((r.state.turnPhase as Extract<TurnPhase, { kind: "Streaming" }>).retryAfterMs).toBeUndefined();
+            expect((r.state.turnPhase as Extract<TurnPhase, { kind: "Streaming" }>).retryAtMs).toBeUndefined();
+        });
+
+        it("has no retry deadline when the provider gave no Retry-After", () => {
+            const r = update(streaming(100), { type: "ProviderWaiting", reason: "rate_limited", retryAfterMs: null, at: 110 });
+            expect((r.state.turnPhase as Extract<TurnPhase, { kind: "Streaming" }>).retryAtMs).toBeNull();
         });
     });
 });

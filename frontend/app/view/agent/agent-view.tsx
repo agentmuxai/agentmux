@@ -148,10 +148,9 @@ export const AgentPresentationView = ({
     // True while the user can't see this tab: a hidden, kept-alive
     // pane-tab-strip member (SPEC_AGENT_PANE_TAB_KEEPALIVE_2026_09_18.md), or
     // its window tab isn't displayed (`usePaneTabVisibility`, Pane Tab
-    // contract Phase 3). Render work pauses on it, and it's threaded into
-    // AgentQuestionPanel's auto-timeout and useAgentFailure's auto-retry below
-    // so neither fires invisibly while backgrounded — which, before Phase 3b,
-    // covered only the pane-stack case.
+    // contract Phase 3). Render work pauses on it. Timed decisions don't: the
+    // question timeout and the failure auto-retry run while hidden too
+    // (docs/analysis/REPORT_TIMERS_DEADLINES_AND_CLOCKS_AUDIT_2026_10_17.md §6.4).
     const visibility = usePaneTabVisibility(model.blockId);
     const hidden = (): boolean => visibility() !== "active";
     const providerKey = (): string => block()?.meta?.["agentProvider"] ?? agentId;
@@ -1043,7 +1042,6 @@ export const AgentPresentationView = ({
         blockId: model.blockId,
         // Per-pane model keeps dispatch sites default-safe; see useAgentStream above.
         model: paneModel,
-        isDormant: hidden,
         failure: (() => paneModel.state.failure),
         onRetry: retryLastTurn,
         // live_elsewhere — take the agent over from the other AgentMux
@@ -1395,7 +1393,6 @@ export const AgentPresentationView = ({
                 pendingQuestions={pendingQuestions}
                 onAnswer={handleAnswer}
                 onCancel={handleCancel}
-                hidden={hidden}
                 pendingMessages={pendingMessages}
                 failureRow={failureUI.row}
                 backgroundTasksAtom={backgroundTasksAtom}

@@ -22,7 +22,6 @@ import { SPINNER_FRAMES, SPINNER_STILL } from "@/app/element/AsciiSpinner";
 import {
     noteQuestionActivity,
     resetQuestionTimersForTests,
-    setQuestionTimerDormant,
     startQuestionTimer,
 } from "@/app/store/question-timer";
 import { AgentQuestionPanel } from "@/app/view/agent/components/AgentQuestionPanel";
@@ -93,12 +92,6 @@ describe("AgentStatusChip: question", () => {
         expect(countdown(container)!.textContent).toBe("· paused");
     });
 
-    it("reads paused while the pane tab is in the background", () => {
-        startQuestionTimer("b1", { durationMs: 30_000, onExpire: vi.fn() });
-        setQuestionTimerDormant("b1", true);
-        const { container } = render(() => <AgentStatusChip status="working" awaitingUser blockId="b1" />);
-        expect(countdown(container)!.textContent).toBe("· paused");
-    });
 
     it("shows plain question without timer state", () => {
         const { container } = render(() => <AgentStatusChip status="working" awaitingUser blockId="nobody" />);

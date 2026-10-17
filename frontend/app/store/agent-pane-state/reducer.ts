@@ -40,6 +40,7 @@ import {
     INTERRUPT_TIMEOUT_MS,
     KindBeforeDisconnect,
     LIVENESS_RECOVERY_MS,
+    NO_RATE_LIMIT_WAIT,
     ReducerResult,
     STUCK_THRESHOLD_MS,
     SUBMIT_TIMEOUT_MS,
@@ -301,8 +302,7 @@ export function update(
                           // resumed normal streaming (reported false
                           // positive, see
                           // ANALYSIS_AGENT_INPUT_LIFECYCLE_RATELIMIT_SENDNOW_2026_07_06.md).
-                          waitingReason: undefined,
-                          retryAfterMs: undefined,
+                          ...NO_RATE_LIMIT_WAIT,
                       }
                     : state.turnPhase.kind === "Submitting"
                         || state.turnPhase.kind === "Idle"
@@ -1408,6 +1408,7 @@ export function update(
                     lastEventMs: command.at,
                     waitingReason: command.reason,
                     retryAfterMs: command.retryAfterMs,
+                    retryAtMs: command.retryAfterMs != null ? command.at + command.retryAfterMs : null,
                 };
             }
             return {
@@ -1895,8 +1896,7 @@ function bumpEvent(
             ...next.turnPhase,
             lastEventMs: nowMs,
             toolsActive: Math.max(0, next.turnPhase.toolsActive + toolsDelta),
-            waitingReason: undefined,
-            retryAfterMs: undefined,
+            ...NO_RATE_LIMIT_WAIT,
         };
     } else if (
         next.turnPhase.kind === "Submitting" ||

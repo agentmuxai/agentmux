@@ -257,6 +257,10 @@ export type TurnPhase =
           waitingReason?: "rate_limited";
           /** Milliseconds until the next retry, from the provider's Retry-After header. */
           retryAfterMs?: number | null;
+          /** When that retry is due (epoch ms): `at` of the ProviderWaiting
+           *  plus `retryAfterMs`. A countdown reads this; `retryAfterMs` alone
+           *  is a fixed duration and never counts down. */
+          retryAtMs?: number | null;
           /**
            * The model has ended its turn (`stop_reason: end_turn`) but the turn
            * is still open. Absent/false means the model is still working:
@@ -1369,6 +1373,10 @@ export const LIVENESS_RECOVERY_MS = 180_000;
  * on live agents.
  */
 export const INTERRUPT_TIMEOUT_MS = 5_000;
+
+/** A Streaming phase's rate-limit wait, cleared: the reason, its Retry-After
+ *  and the deadline the countdown reads, all at once. */
+export const NO_RATE_LIMIT_WAIT = { waitingReason: undefined, retryAfterMs: undefined, retryAtMs: undefined } as const;
 
 /**
  * Bounded `Submitting → Done.{errored}` window. After `TurnStart` puts a

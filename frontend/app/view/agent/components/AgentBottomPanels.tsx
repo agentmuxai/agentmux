@@ -58,7 +58,6 @@ export const AgentBottomPanels = (props: {
     pendingQuestions: QuestionProps["pending"];
     onAnswer: QuestionProps["onAnswer"];
     onCancel: QuestionProps["onCancel"];
-    hidden: QuestionProps["isDormant"];
     pendingMessages: ComponentProps<typeof PendingMessagesPanel>["pendingMessages"];
     failureRow: UseAgentFailureResult["row"];
     backgroundTasksAtom: ComponentProps<typeof ActivityDock>["backgroundTasksAtom"];
@@ -129,7 +128,6 @@ export const AgentBottomPanels = (props: {
             pending={props.pendingQuestions}
             onAnswer={props.onAnswer}
             onCancel={props.onCancel}
-            isDormant={props.hidden}
         />
 
         {/* Queue sits directly below the feed so the user's newly-
@@ -263,9 +261,9 @@ export const AgentBottomPanels = (props: {
                         const phase = props.paneModel.state.turnPhase;
                         return phase.kind === "Streaming" ? (phase.waitingReason ?? null) : null;
                     })()}
-                    retryAfterMs={(() => {
+                    retryAtMs={(() => {
                         const phase = props.paneModel.state.turnPhase;
-                        return phase.kind === "Streaming" ? (phase.retryAfterMs ?? null) : null;
+                        return phase.kind === "Streaming" ? (phase.retryAtMs ?? null) : null;
                     })()}
                     compacting={props.paneModel.state.compacting}
                     compactionContextTokens={plausibleReading(props.paneModel.state.context)?.tokens ?? null}

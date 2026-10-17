@@ -125,8 +125,9 @@ interface AgentWorkingRowProps {
     needsYou?: string | null;
     /** Set when the provider is rate-limited; shows "Rate limited…" in place of thinking phrase. */
     waitingReason?: "rate_limited" | null;
-    /** Milliseconds until next retry (from provider Retry-After). Shown when waitingReason is set. */
-    retryAfterMs?: number | null;
+    /** When the provider's next retry is due (epoch ms, from Retry-After). The
+     *  row counts down to it while waitingReason is set. */
+    retryAtMs?: number | null;
     /** What the launch/login flow is doing right now — shown in place of the
      *  generic thinking phrase so a timed wait (login link, login completion)
      *  never renders as bare "Working…". See launch-phase.ts. */
@@ -229,7 +230,7 @@ export const AgentWorkingRow = (props: AgentWorkingRowProps): JSX.Element => {
                 compacting: !!props.compacting,
                 stopping: !!props.stopping,
                 waitingReason: props.waitingReason,
-                retryAfterMs: props.retryAfterMs,
+                retryAfterMs: props.retryAtMs != null ? Math.max(0, props.retryAtMs - now) : null,
                 launchPhase: props.launchPhase,
             },
             now,

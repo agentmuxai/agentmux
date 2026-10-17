@@ -730,6 +730,20 @@ describe("AgentWorkingRow ambient summary and per-turn tokens", () => {
         expect(container.querySelector(".agent-working-row-left")?.textContent).toBe("Stopping…");
     });
 
+    // docs/analysis/REPORT_TIMERS_DEADLINES_AND_CLOCKS_AUDIT_2026_10_17.md §4.6:
+    // the wait counts down to the provider's retry time.
+    it("counts a rate-limit wait down to its retry time", () => {
+        const retryAtMs = Date.now() + 12_000;
+        const { container } = render(() => (
+            <AgentWorkingRow loading={true} waitingReason="rate_limited" retryAtMs={retryAtMs} />
+        ));
+        finishTyping(container);
+        expect(container.querySelector(".agent-working-row-left")?.textContent).toBe("Rate limited — retrying in 12s");
+        vi.advanceTimersByTime(5_000);
+        finishTyping(container);
+        expect(container.querySelector(".agent-working-row-left")?.textContent).toBe("Rate limited — retrying in 7s");
+    });
+
     // SPEC_AGENT_TURN_TOKEN_COUNTER_CLAUDE_CONVENTION_2026_10_07.md: one
     // number, the turn's output, as Claude Code shows it.
     it("shows the turn's output as one counter, ↓ while the model streams, next to the elapsed time", () => {

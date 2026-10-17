@@ -35,6 +35,7 @@ import clsx from "clsx";
 import debug from "debug";
 import "overlayscrollbars/overlayscrollbars.css";
 import { createEffect, createSignal, For, onCleanup, onMount, Show, untrack } from "solid-js";
+import { useTick } from "@/app/hook/useTick";
 import {
     currentWindowLabel,
     currentWindowOpacity,
@@ -302,23 +303,23 @@ const AppAllPanesZoomHandler = () => {
 const FlashError = () => {
     const errors = flashErrors;
     const [hoveredId, setHoveredId] = createSignal<string>(null);
-    const [ticker, setTicker] = createSignal<number>(0);
+    // The shared 1s tick (useTick): one interval for the app, cleared with
+    // this component, instead of a new setTimeout on every run of the effect.
+    const tick = useTick(1000);
 
     createEffect(() => {
         const errs = errors();
         const hovered = hoveredId();
-        // Track ticker to re-run on tick
-        ticker();
         if (errs.length == 0 || hovered != null) {
             return;
         }
+        tick();
         const now = Date.now();
         for (let ferr of errs) {
             if (ferr.expiration == null || ferr.expiration < now) {
                 removeFlashError(ferr.id);
             }
         }
-        setTimeout(() => setTicker((t) => t + 1), 1000);
     });
 
     function copyError(id: string) {

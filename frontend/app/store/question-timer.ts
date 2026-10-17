@@ -8,9 +8,9 @@
  * its own, so the two can't disagree.
  *
  * Owner side (the agent pane holding the question): `startQuestionTimer`,
- * `noteQuestionActivity`, `setQuestionTimerDormant`, `endQuestionTimer`, and
- * `releaseQuestionTimer` on unmount. Only
- * the owner schedules the expiry, so a question can't be auto-answered twice.
+ * `noteQuestionActivity`, `endQuestionTimer`, and `releaseQuestionTimer` on
+ * unmount. Only the owner schedules the expiry, so a question can't be
+ * auto-answered twice.
  *
  * Reader side: `questionTimer` and `questionCountdown`. In the owner's renderer
  * they read the local entry; elsewhere (another window's Swarm) the copy the
@@ -20,6 +20,10 @@
  * is paused while the user is active and resumes at the full duration 15s after
  * the last activity. Activity only ever defers the timeout, never cancels it
  * (auto-timeout spec §5.1).
+ *
+ * Whether the pane is visible doesn't matter: a question in a background pane
+ * tab or window tab is answered on time, so a pending question never stalls
+ * work (docs/analysis/RCA_QUESTION_TIMEOUT_DOES_NOT_FIRE_IN_HIDDEN_PANES_2026_10_17.md).
  *
  * docs/specs/SPEC_SWARM_QUESTION_STATE_AND_QUESTION_TIMEOUT_ACTIVITY_2026_10_02.md §2, §4.
  */
@@ -31,7 +35,7 @@ import { ObjectService } from "@/app/store/services";
 
 export type QuestionTimerState =
     | { kind: "counting"; endsAt: number }
-    | { kind: "paused"; reason: "activity" | "dormant" }
+    | { kind: "paused"; reason: "activity" }
     | null;
 
 export type CountdownBand = "default" | "warning" | "critical";
@@ -54,7 +58,6 @@ interface Owner {
     publish: boolean;
     /** Whether a state was ever written to block meta, so `end` clears it. */
     published: boolean;
-    dormant: boolean;
     expireId?: ReturnType<typeof setTimeout>;
     quietId?: ReturnType<typeof setTimeout>;
 }
@@ -165,13 +168,9 @@ function expire(blockId: string, owner: Owner) {
     owner.onExpire();
 }
 
-/** Count down from the full duration, or stay paused while dormant. */
+/** Count down from the full duration. */
 function arm(blockId: string, owner: Owner) {
     clearTimers(owner);
-    if (owner.dormant) {
-        setState(blockId, owner, { kind: "paused", reason: "dormant" });
-        return;
-    }
     const endsAt = Date.now() + owner.durationMs;
     owner.expireId = setTimeout(() => expire(blockId, owner), owner.durationMs);
     restartClock();
@@ -185,7 +184,7 @@ function arm(blockId: string, owner: Owner) {
  */
 export function startQuestionTimer(
     blockId: string,
-    opts: { durationMs: number; onExpire: () => void; dormant?: boolean; publish?: boolean }
+    opts: { durationMs: number; onExpire: () => void; publish?: boolean }
 ): void {
     const prev = owners.get(blockId);
     if (prev) clearTimers(prev);
@@ -194,32 +193,22 @@ export function startQuestionTimer(
         onExpire: opts.onExpire,
         publish: opts.publish ?? false,
         published: prev?.published ?? false,
-        dormant: opts.dormant ?? false,
     };
     owners.set(blockId, owner);
     arm(blockId, owner);
 }
 
 /** The user did something: pause, and resume at the full duration
- *  `QUESTION_QUIET_MS` after the last call. Ignored while dormant. */
+ *  `QUESTION_QUIET_MS` after the last call. */
 export function noteQuestionActivity(blockId: string): void {
     const owner = owners.get(blockId);
-    if (!owner || owner.dormant) return;
+    if (!owner) return;
     clearTimers(owner);
     owner.quietId = setTimeout(() => {
         owner.quietId = undefined;
         arm(blockId, owner);
     }, QUESTION_QUIET_MS);
     setState(blockId, owner, { kind: "paused", reason: "activity" });
-}
-
-/** The pane tab went to the background (or came back). Waking re-arms at the
- *  full duration. */
-export function setQuestionTimerDormant(blockId: string, dormant: boolean): void {
-    const owner = owners.get(blockId);
-    if (!owner || owner.dormant === dormant) return;
-    owner.dormant = dormant;
-    arm(blockId, owner);
 }
 
 /**
@@ -272,7 +261,7 @@ function isState(v: unknown): v is NonNullable<QuestionTimerState> {
     if (!v || typeof v !== "object") return false;
     const s = v as { kind?: unknown; endsAt?: unknown; reason?: unknown };
     if (s.kind === "counting") return typeof s.endsAt === "number";
-    return s.kind === "paused" && (s.reason === "activity" || s.reason === "dormant");
+    return s.kind === "paused" && s.reason === "activity";
 }
 
 /** The copy in block meta, or `undefined` when there is none. */
