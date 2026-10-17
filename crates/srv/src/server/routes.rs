@@ -439,9 +439,9 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         .route("/api/v1/ui/browser/wait_for", post(ui_handlers::handle_ui_browser_wait_for))
         .route("/api/v1/ui/browser/handoff", post(ui_handlers::handle_ui_browser_handoff))
         .route("/api/v1/host/browser_attention", post(ui_handlers::handle_host_browser_attention))
-        .route("/api/v1/ui/browser/request_bypass", post(ui_handlers::handle_ui_browser_request_bypass))
-        .route("/api/v1/ui/browser/end_bypass", post(ui_handlers::handle_ui_browser_end_bypass))
-        .route("/api/v1/host/browser_bypass", post(ui_handlers::handle_host_browser_bypass))
+        .route("/api/v1/ui/browser/request_bypass", post(crate::server::browser_bypass_routes::handle_ui_browser_request_bypass))
+        .route("/api/v1/ui/browser/end_bypass", post(crate::server::browser_bypass_routes::handle_ui_browser_end_bypass))
+        .route("/api/v1/host/browser_bypass", post(crate::server::browser_bypass_routes::handle_host_browser_bypass))
         .route("/api/v1/host/widget_approval", post(super::widget_handlers::handle_host_widget_approval))
         // The user's clicks in the version panel (Download, Upgrade & restart,
         // Cancel), and their answer to an agent's upgrade request, relayed by the host.

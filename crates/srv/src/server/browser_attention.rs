@@ -46,6 +46,21 @@ impl Kind {
             Kind::Bypass => "bypass",
         }
     }
+
+    /// Why the agent's tools on `pane` are refused while a request of this
+    /// kind is up.
+    pub(crate) fn tools_paused(self, pane: &str) -> String {
+        let why = match self {
+            Kind::Handoff => format!("the user is working in pane {pane:?} (your Browser handoff)"),
+            Kind::Approval => format!("pane {pane:?} is waiting for the user to approve your click"),
+            Kind::Navigation => format!(
+                "the page in pane {pane:?} tried to leave its allowed_origins and the user is being asked whether to allow it"
+            ),
+            Kind::Bypass => format!("pane {pane:?} is asking the user whether you may act without asking"),
+        };
+        let until = if self == Kind::Handoff { "they click Done or Cancel" } else { "they answer" };
+        format!("{why}; your tools on it are paused until {until}")
+    }
 }
 
 /// The human's answer, or the lack of one.

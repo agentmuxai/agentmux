@@ -79,7 +79,7 @@ Bypass ends on any of: End bypass, the time limit, Take over, closing the pane, 
 
 ### 4.2 Bound
 
-- **Pane:** the pane it was granted on, and the popup windows and popup panes it opens (its chain). Not other panes of the same agent.
+- **Pane:** the pane it was granted on, and the popup windows its page opens (native windows with no AgentMux header, whose questions already show on the opener). A popup *pane* has its own header, its own Bypass button and its own grant: a grant on the opener doesn't cover it (muxreview on #5045). Not other panes of the same agent.
 - **Agent:** the pane's owner at grant time. If ownership changes, the grant ends.
 - **Sites:** the origins the person saw in the confirmation: the pane's current origin, plus its site list if the pane has one. Each bypassed action checks the origin of the page it acts on, as the host reports it at action time, not as the agent claims it. If it's off the bound sites, the action takes the normal path (approval or refusal) and the strip shows Paused.
 - **Time:** the chosen duration, checked by srv on every action, plus a timer that takes the strip down.
