@@ -138,9 +138,12 @@ pub fn confirm(title: &str, body: &str) -> bool {
         }
         match cmd.spawn() {
             Ok(mut child) => {
-                DIALOG_PID.store(child.id(), Ordering::SeqCst);
+                let pid = child.id();
+                DIALOG_PID.store(pid, Ordering::SeqCst);
                 let yes = child.wait().is_ok_and(|s| s.success());
-                DIALOG_PID.store(0, Ordering::SeqCst);
+                // Only if it's still ours: a newer dialog may have opened
+                // after this one was closed.
+                let _ = DIALOG_PID.compare_exchange(pid, 0, Ordering::SeqCst, Ordering::SeqCst);
                 return yes;
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
