@@ -18,8 +18,11 @@
 //! tells the agents not yet told, and never one twice.
 //!
 //! Every agent that registers with the reactive handler, whatever runs it, is
-//! a candidate ([`on_registered`]): the note goes to one whose pane already
-//! had a session (`agent:sessionid`), i.e. a resumed one, not a new pane.
+//! a candidate ([`on_registered`]): the note goes to one whose pane has a
+//! session (`agent:sessionid`) as it registers, i.e. a resumed one, not a new
+//! pane. That is read from its block then ([`has_session`]), not from a list
+//! made at start: the quit that precedes an upgrade deletes the panes, and the
+//! next start restores them into new blocks once srv is up.
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -34,6 +37,10 @@ pub const RECORD_FILE: &str = "agentmux-last-version.json";
 pub const PENDING_FOR: Duration = Duration::from_secs(60 * 60);
 /// How long after registering an agent is told, so its spawn has settled.
 const SETTLE: Duration = Duration::from_secs(1);
+/// A restored pane's controller can come up after the pane registers, so a
+/// note that finds none is tried again, this often, up to [`RETRIES`] times.
+const RETRY_GAP: Duration = Duration::from_secs(2);
+const RETRIES: u32 = 15;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 struct Record {
@@ -138,8 +145,8 @@ pub fn note_text(u: &Upgraded) -> String {
 struct State {
     upgraded: Upgraded,
     dir: PathBuf,
-    /// Panes that had a session when this srv started: the resumed ones.
-    had_session: HashSet<String>,
+    /// Where a pane's block says whether it has a session ([`has_session`]).
+    store: Arc<crate::backend::storage::store::Store>,
     noted: Mutex<HashSet<String>>,
 }
 
@@ -153,35 +160,59 @@ pub fn init(store: Arc<crate::backend::storage::store::Store>) {
         let upgraded = observe_start(&dir, env!("CARGO_PKG_VERSION"), agentmux_common::time::now_ms())?;
         tracing::info!(from = %upgraded.from, to = %upgraded.to, "upgrade notice: resumed agents will be told of the upgrade");
         let noted = Mutex::new(upgraded.notified.iter().cloned().collect());
-        let had_session = with_sessions(&store);
-        Some(State { upgraded, dir, had_session, noted })
+        Some(State { upgraded, dir, store, noted })
     });
     let _ = STATE.set(state);
 }
 
-/// The panes that have a session now (`agent:sessionid`), read once at
-/// start: those an upgrade resumes. A pane opened later, which gets its
-/// session afterwards, is never among them.
-fn with_sessions(store: &crate::backend::storage::store::Store) -> HashSet<String> {
+/// Whether the pane `block_id` has a session (`agent:sessionid`) now: it is a
+/// resumed one. Asked as the pane registers, not when srv starts: a graceful
+/// quit, an upgrade's, deletes the panes, and the next start restores them
+/// into blocks with new ids (carrying their session) after srv is up, so a list
+/// read at start would never hold them. A pane opened after the upgrade gets
+/// its session only with its first turn, after it registered.
+fn has_session(store: &crate::backend::storage::store::Store, block_id: &str) -> bool {
     store
-        .get_all::<crate::backend::obj::Block>()
-        .unwrap_or_default()
-        .into_iter()
-        .filter(|b| !crate::backend::obj::meta_get_string(&b.meta, "agent:sessionid", "").trim().is_empty())
-        .map(|b| b.oid)
-        .collect()
+        .get::<crate::backend::obj::Block>(block_id)
+        .ok()
+        .flatten()
+        .is_some_and(|b| !crate::backend::obj::meta_get_string(&b.meta, "agent:sessionid", "").trim().is_empty())
+}
+
+/// Why a note wasn't delivered: the pane is gone, or it may be ready later.
+enum Undelivered {
+    Gone(String),
+    Retry(String),
+}
+
+/// `deliver` until it succeeds, at most `attempts` times, `gap` apart; the
+/// last error when none does. A pane that is gone isn't waited for.
+async fn deliver_with_retry(
+    mut deliver: impl FnMut() -> Result<(), Undelivered>,
+    attempts: u32,
+    gap: Duration,
+) -> Result<(), String> {
+    let mut last = String::from("no attempt made");
+    for attempt in 0..attempts {
+        if attempt > 0 {
+            tokio::time::sleep(gap).await;
+        }
+        match deliver() {
+            Ok(()) => return Ok(()),
+            Err(Undelivered::Gone(e)) => return Err(e),
+            Err(Undelivered::Retry(e)) => last = e,
+        }
+    }
+    Err(last)
 }
 
 /// An agent registered in `block_id` (any controller). If an upgrade is being
 /// announced and the pane is a resumed one not yet told, tell it, once.
-/// Called under the handler lock: no I/O here (the note is sent from a task
-/// of its own).
+/// Called under the handler lock: no I/O here (the pane's block is read, and
+/// the note sent, from a task of its own).
 pub fn on_registered(block_id: &str) {
     let Some(Some(state)) = STATE.get() else { return };
     if agentmux_common::time::now_ms() - state.upgraded.at_ms >= PENDING_FOR.as_millis() as i64 {
-        return;
-    }
-    if !state.had_session.contains(block_id) {
         return;
     }
     if !state.noted.lock().unwrap_or_else(|e| e.into_inner()).insert(block_id.to_string()) {
@@ -189,17 +220,29 @@ pub fn on_registered(block_id: &str) {
     }
     let block_id = block_id.to_string();
     tokio::spawn(async move {
-        tokio::time::sleep(SETTLE).await;
         let Some(Some(state)) = STATE.get() else { return };
+        // A new pane: no session yet, and no note; one that registers again
+        // later, with a session by then, is told then.
+        if !has_session(&state.store, &block_id) {
+            state.noted.lock().unwrap_or_else(|e| e.into_inner()).remove(&block_id);
+            return;
+        }
+        tokio::time::sleep(SETTLE).await;
         let handler = crate::backend::reactive::get_global_handler();
-        let target = handler
-            .list_agents()
-            .into_iter()
-            .find(|r| r.block_id == block_id)
-            .map(|r| r.uid.unwrap_or(r.agent_id));
-        let delivered = target
-            .ok_or_else(|| "not registered any more".to_string())
-            .and_then(|t| handler.deliver_system_note(&t, &note_text(&state.upgraded)));
+        let delivered = deliver_with_retry(
+            || {
+                let target = handler
+                    .list_agents()
+                    .into_iter()
+                    .find(|r| r.block_id == block_id)
+                    .map(|r| r.uid.unwrap_or(r.agent_id))
+                    .ok_or_else(|| Undelivered::Gone("not registered any more".to_string()))?;
+                handler.deliver_system_note(&target, &note_text(&state.upgraded)).map_err(Undelivered::Retry)
+            },
+            RETRIES,
+            RETRY_GAP,
+        )
+        .await;
         match delivered {
             Ok(()) => record_notified(&state.dir, &block_id),
             Err(e) => {
@@ -254,6 +297,66 @@ mod tests {
         std::fs::write(dir.path().join(RECORD_FILE), b"not json").unwrap();
         assert_eq!(observe_start(dir.path(), "0.59.27", 1), None);
         assert_eq!(observe_start(dir.path(), "0.59.28", 2).map(|u| u.from), Some("0.59.27".into()));
+    }
+
+    #[tokio::test]
+    async fn a_pane_restored_after_the_start_is_a_resumed_one_when_its_block_has_a_session() {
+        use crate::backend::obj::Block;
+        let state = crate::server::tests::test_state();
+        let block = |oid: &str, session: Option<&str>| {
+            let mut b = Block { oid: oid.into(), ..Default::default() };
+            if let Some(id) = session {
+                b.meta.insert("agent:sessionid".into(), serde_json::json!(id));
+            }
+            state.mstore.insert(&mut b).unwrap();
+        };
+        // Created after "start", as a restore does with a quit's saved panes.
+        block("restored", Some("28ec4fdb-58a0-4571-9c14-c1b8b877ab60"));
+        block("new-pane", None);
+        block("blank-session", Some("  "));
+        assert!(has_session(&state.mstore, "restored"));
+        assert!(!has_session(&state.mstore, "new-pane"), "a new pane gets its session with its first turn");
+        assert!(!has_session(&state.mstore, "blank-session"));
+        assert!(!has_session(&state.mstore, "no-such-block"));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_note_finding_no_controller_yet_is_tried_again_until_it_goes_through() {
+        let mut calls = 0;
+        let r = deliver_with_retry(
+            || {
+                calls += 1;
+                if calls < 3 { Err(Undelivered::Retry("no controller for block b".into())) } else { Ok(()) }
+            },
+            15,
+            Duration::from_secs(2),
+        )
+        .await;
+        assert_eq!((r, calls), (Ok(()), 3));
+        // Never ready: the last error, after every attempt.
+        let mut calls = 0;
+        let r = deliver_with_retry(
+            || {
+                calls += 1;
+                Err(Undelivered::Retry(format!("no controller (try {calls})")))
+            },
+            4,
+            Duration::from_secs(2),
+        )
+        .await;
+        assert_eq!((r, calls), (Err("no controller (try 4)".to_string()), 4));
+        // A pane that is gone isn't waited for.
+        let mut calls = 0;
+        let r = deliver_with_retry(
+            || {
+                calls += 1;
+                Err(Undelivered::Gone("not registered any more".into()))
+            },
+            15,
+            Duration::from_secs(2),
+        )
+        .await;
+        assert_eq!((r, calls), (Err("not registered any more".to_string()), 1));
     }
 
     #[test]
