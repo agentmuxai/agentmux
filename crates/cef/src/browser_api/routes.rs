@@ -806,10 +806,33 @@ pub async fn navigate(
     }
 }
 
+/// The history entry `delta` steps from `current` in a history of `len`
+/// entries, or None when that is off either end (nothing to go back or
+/// forward to).
+fn history_target(current: i64, len: usize, delta: i64) -> Option<usize> {
+    let target = current.checked_add(delta)?;
+    usize::try_from(target).ok().filter(|t| *t < len)
+}
+
+/// Walk the page's history `delta` steps. CDP has no `Page.goBack` or
+/// `Page.goForward`; it takes an entry id from `Page.getNavigationHistory`.
+/// Past either end of the history this does nothing and succeeds.
+async fn step_history(cdp: &mut CdpSession, delta: i64) -> Result<(), String> {
+    let history = cdp.call("Page.getNavigationHistory", json!({})).await?;
+    let current = history.get("currentIndex").and_then(|v| v.as_i64()).ok_or("no current history entry")?;
+    let entries = history.get("entries").and_then(|v| v.as_array()).ok_or("no history entries")?;
+    let Some(target) = history_target(current, entries.len(), delta) else {
+        return Ok(());
+    };
+    let entry_id = entries[target].get("id").and_then(|v| v.as_i64()).ok_or("history entry without an id")?;
+    cdp.call("Page.navigateToHistoryEntry", json!({ "entryId": entry_id })).await?;
+    Ok(())
+}
+
 /// `POST /agentmux/browser/back` — walk the pane's history one step back.
-/// Routed through CDP (`Page.goBack`) rather than
-/// `BrowserPaneManager::go_back` to keep the resolver cache honest: the
-/// target URL changes after the hop, so we invalidate the cache entry.
+/// Routed through CDP rather than `BrowserPaneManager::go_back` to keep the
+/// resolver cache honest: the target URL changes after the hop, so we
+/// invalidate the cache entry.
 ///
 /// Returns ack-ok even when there's no prior history — CDP is a no-op
 /// in that case, and agents should query `browser-pane-nav-state` events
@@ -835,16 +858,14 @@ pub async fn back(
         return ok_body(ApiResponse::err(e));
     }
 
-    // `Page.navigateToHistoryEntry` needs an entryId; simpler to call
-    // Page.goBack which CDP exposes directly.
-    let reply = cdp.call("Page.goBack", json!({})).await;
+    let reply = step_history(&mut cdp, -1).await;
     let _ = cdp.close().await;
 
     state.browser_api.target_cache.forget(&req.block_id);
 
     match reply {
         Ok(_) => ok_body(ApiResponse::ok(AckData::new())),
-        Err(e) => ok_body(ApiResponse::err(format!("CDP Page.goBack: {e}"))),
+        Err(e) => ok_body(ApiResponse::err(format!("back: {e}"))),
     }
 }
 
@@ -871,14 +892,14 @@ pub async fn forward(
         return ok_body(ApiResponse::err(e));
     }
 
-    let reply = cdp.call("Page.goForward", json!({})).await;
+    let reply = step_history(&mut cdp, 1).await;
     let _ = cdp.close().await;
 
     state.browser_api.target_cache.forget(&req.block_id);
 
     match reply {
         Ok(_) => ok_body(ApiResponse::ok(AckData::new())),
-        Err(e) => ok_body(ApiResponse::err(format!("CDP Page.goForward: {e}"))),
+        Err(e) => ok_body(ApiResponse::err(format!("forward: {e}"))),
     }
 }
 
@@ -1070,6 +1091,16 @@ fn ok_body<T>(body: ApiResponse<T>) -> (StatusCode, Json<ApiResponse<T>>) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn history_steps_stay_inside_the_history() {
+        assert_eq!(super::history_target(2, 5, -1), Some(1));
+        assert_eq!(super::history_target(2, 5, 1), Some(3));
+        assert_eq!(super::history_target(0, 5, -1), None, "nothing before the first entry");
+        assert_eq!(super::history_target(4, 5, 1), None, "nothing after the last entry");
+        assert_eq!(super::history_target(0, 0, 1), None);
+        assert_eq!(super::history_target(i64::MAX, 5, 1), None, "no overflow");
+    }
+
     use super::reject_if_shared_target;
 
     #[test]
