@@ -1,6 +1,7 @@
 # SPEC: Bypass: the person lets the agent act without asking in one browser pane
 
-**Status:** active — B-1 built in #5045 (§10): grant from the agent's request and from the button, the srv gates, the red strip, `end_bypass`. Decisions on the open questions are in §11.
+**Status:** active — B-1 built in #5045 (§10): grant from the agent's request and from the button, the srv gates, the red strip, `stop_auto_approve`. Decisions on the open questions are in §11.
+**Renamed 2026-10-17 (repo owner):** people see **Auto-approve**, not "Bypass", which read as skipping security: the button, *Turn on auto-approve*, *Stop auto-approve*, the red strip, and the request banner's *Allow auto-approve*. The agent's actions are `request_auto_approve` and `stop_auto_approve`. Code identifiers keep `bypass` (`browser_bypass`, the `browser:bypass` meta key, the `bypass` attention kind and the `/request_bypass` routes); this spec keeps the name for the mechanism.
 **Date:** 2026-10-16
 **Author:** Naki #2 (naki-naki-2), at the repo owner's request
 **Trigger (repo owner, 2026-10-16):** a bulk job in an agent-driven browser pane needed about 75 delete clicks on one site, and each one waited for the person to approve it in the pane. "Do we need to do each manually 70 times? … write a spec that gives an agent superaccess for anything in the currently running pane. Make it a red 'bypass' button next to Take over … since we cannot sit and wait here for each of these."
@@ -12,12 +13,12 @@
 ## 1. Summary
 
 - **Two ways to get the person's OK, both one click:**
-  - The agent asks for it with `Browser` action `request_bypass` ("I need to delete 75 old drafts on github.com"). The pane shows the request, and the person answers OK once.
+  - The agent asks for it with `Browser` action `request_auto_approve` ("I need to delete 75 old drafts on github.com"). The pane shows the request, and the person answers OK once.
   - The person turns it on unasked with the red **Bypass** button next to **Take over** in the header of a pane an agent is driving.
 
   Either way the person sees what it covers and for how long, and confirms.
 - While it is on, the agent's committing clicks in that pane (Submit, Delete, Send, …, through `Browser` `click`) are made **without asking**. Everything else stays as it is: `eval`, UI click by selector and Enter/Space stay refused on a driven pane, because only `click` goes through the checks that keep the promises below (§4.1).
-- It is **bound** to this pane, this agent, the site(s) the pane was on when it was turned on, and a time limit. It ends on **End bypass**, the time limit, Take over, closing the pane, or a new owner. Leaving the bound sites pauses it.
+- It is **bound** to this pane, this agent, the site(s) the pane was on when it was turned on, and a time limit. It ends on **Stop auto-approve**, the time limit, Take over, closing the pane, or a new owner. Leaving the bound sites pauses it.
 - **Only the person can turn it on**, through the host, the same way approvals are answered. No agent route, shortcut, command or synthesized click can turn it on.
 - **Not bypassed:** the agent still never types into password, one-time-code or card fields, and hand-off works as before. Bypass removes waiting for approval; it doesn't give the agent secrets.
 - The pane shows it plainly the whole time: a red "Bypass on" strip with who, where and how long, and every action taken under it in the action log.
@@ -32,7 +33,7 @@ Approvals (§5.4 of the 2026-10-07 spec) stop a page from talking an agent into 
 
 The header strip of a driven pane reads `Driven by <agent> [Limited to N sites] [Take over]`. Bypass adds:
 
-- **[Bypass]**, red (`danger` tone), to the right of Take over. Tooltip: "Let <agent> act in this pane without asking you first."
+- **[Auto-approve]**, red (`danger` tone), to the right of Take over. Tooltip: "Let <agent> act in this pane without asking you first."
 
 ### 3.2 Turning it on
 
@@ -41,15 +42,15 @@ Clicking **Bypass** opens a confirmation panel directly under the header strip, 
 > **Let Naki #2 act without asking?**
 > In this pane, on **github.com**, Naki #2's clicks that submit forms, delete or send go through **without asking you first**. It still can't type passwords or codes or run scripts, and payments still ask.
 > Duration: ( 15 min | **1 hour** | 4 hours )
-> **[Turn on bypass]** [Cancel]
+> **[Turn on auto-approve]** [Cancel]
 
 - The sites listed are the bound sites (§4.2), computed when the panel opens.
 - The default duration is 1 hour, and 4 hours is the longest.
-- **Turn on bypass** is the only control that grants it, and only on a pointer click: a key press on the focused button (a click with `detail` 0) does nothing.
+- **Turn on auto-approve** is the only control that grants it, and only on a pointer click: a key press on the focused button (a click with `detail` 0) does nothing.
 
 ### 3.3 On
 
-The header strip turns red: `Bypass on: Naki #2 acts without asking · github.com · 47 min left [End bypass] [Take over]`. Also:
+The header strip turns red: `Bypass on: Naki #2 acts without asking · github.com · 47 min left [Stop auto-approve] [Take over]`. Also:
 
 - *(B-2)* The pane's tab shows a small red badge, so the state is visible when the pane isn't focused.
 - *(B-2)* A notification fires when bypass turns on and when it ends ("Bypass ended for Naki #2: time limit"), so a person who walked away knows.
@@ -57,11 +58,11 @@ The header strip turns red: `Bypass on: Naki #2 acts without asking · github.co
 
 ### 3.4 Paused
 
-When the page goes to a site outside the bound sites (§4.2), the strip turns amber: `Bypass paused: the page left github.com [Extend to this site] [End bypass]`. Approvals apply again until the page is back on a bound site or the person extends it. "Extend to this site" uses the same confirmation as §3.2, listing the added site.
+When the page goes to a site outside the bound sites (§4.2), the strip turns amber: `Bypass paused: the page left github.com [Extend to this site] [Stop auto-approve]`. Approvals apply again until the page is back on a bound site or the person extends it. "Extend to this site" uses the same confirmation as §3.2, listing the added site.
 
 ### 3.5 Ending
 
-Bypass ends on any of: End bypass, the time limit, Take over, closing the pane, the owner changing, and srv restarting (a grant is never restored from disk). Ending is immediate. A committing action already sent to the page is not recalled, and the next one asks again.
+Bypass ends on any of: Stop auto-approve, the time limit, Take over, closing the pane, the owner changing, and srv restarting (a grant is never restored from disk). Ending is immediate. A committing action already sent to the page is not recalled, and the next one asks again.
 
 ## 4. What a grant covers
 
@@ -101,7 +102,7 @@ The answer to "can an agent approve itself?" must stay no. So:
 - **Route:** `POST /api/v1/host/browser_bypass` with `X-Host-Token` only, the same as `/api/v1/host/browser_attention`. srv returns 403 to any other caller, including any agent holding the auth key. Body: `{pane, on: true|false, minutes?: 15|60|null, origins}`.
 - **Path from the button:** the confirmation's Turn on button calls the host over host IPC (`browser_bypass_set`), whose token lives only in the front end and the host. The host posts to srv.
 - **srv re-checks before granting:** the pane exists, is driven, the owner is unchanged since the confirmation opened (it sends the owner it showed), the origins match the pane's current page, and no hand-off is pending.
-- **Turning it off** goes through the same route, but srv also accepts it from the agent itself: an agent may end its own bypass (`Browser` action `end_bypass`) and never start one.
+- **Turning it off** goes through the same route, but srv also accepts it from the agent itself: an agent may end its own bypass (`Browser` action `stop_auto_approve`) and never start one.
 - **Not reachable by an agent's tools, and tested** (§9):
   - `UI` `click`/`query` reach only the caller's own pane and app chrome outside every pane (`scripts/query.js`, `__amq_allowed_for`). On a browser pane they act on its page, not the app document. The Bypass button, the confirmation and the request banner all render inside the browser pane's own `[data-blockid]` subtree, so no agent's selector reaches them. A CDP click is a trusted event, so `event.isTrusted` would not tell them apart: the scoping is the guard, and it must stay that way. Never portal these controls to the document root.
   - No shortcut and no command palette entry, so `UI` `command` and `keys` can't reach it.
@@ -110,9 +111,9 @@ The answer to "can an agent approve itself?" must stay no. So:
 ## 6. Agent-facing behaviour
 
 - A committing click made under bypass returns `bypassed: true` and the grant's remaining minutes (the `Browser` result reads "done without asking"), so the agent knows its actions are no longer being checked by a person and can be more careful.
-- The `Browser` tool description adds one line: "If the person turned on Bypass for your pane, committing actions run without asking: double-check before every one, and end it (`end_bypass`) when the job is done."
-- **Asking for it:** `Browser` action `request_bypass({pane, reason, minutes?})`. This is the main path: an agent that knows it faces a run of approvals asks once, up front.
-  - The pane shows a red banner (a new attention kind, `bypass`): "**Naki #2** asks to act without asking you first: *delete 75 old drafts*. On **github.com**, for **1 hour**. It still can't type passwords or codes. [Allow without asking] [No]". The duration is a chooser defaulting to what the agent asked for, capped at the maximum (§11.1).
+- The `Browser` tool description adds one line: "If the person turned on Bypass for your pane, committing actions run without asking: double-check before every one, and end it (`stop_auto_approve`) when the job is done."
+- **Asking for it:** `Browser` action `request_auto_approve({pane, reason, minutes?})`. This is the main path: an agent that knows it faces a run of approvals asks once, up front.
+  - The pane shows a red banner (a new attention kind, `bypass`): "**Naki #2** asks to act without asking you first: *delete 75 old drafts*. On **github.com**, for **1 hour**. It still can't type passwords or codes. [Allow auto-approve] [No]". The duration is a chooser defaulting to what the agent asked for, capped at the maximum (§11.1).
   - The answer goes through the host exactly as in §5. Allow grants the same bound grant as the button; No leaves approvals in place.
   - The call waits like `handoff` (default 10 min) and returns `granted` with `expires_at`, or `declined`, or `timed_out`. On `declined` the agent carries on with per-action approvals or asks in chat; it never asks again in a loop (at most once per pane per 10 minutes, enforced by srv).
   - Refused while the pane is handed to the person or another question is up, with a reason, so the agent retries after.
@@ -124,8 +125,8 @@ The answer to "can an agent approve itself?" must stay no. So:
 |---|---|
 | srv | New `server/browser_bypass.rs`: the grant table (in memory only), `grant`/`end`/`active_for(pane, agent, origin)`, the expiry timer, and ending on Take over, close and owner change (hooks next to `browser_owner` and `browser_attention::cancel_for`). The host route. The approval branch of `act` in `ui_handlers.rs` checks `active_for` and, if active, proxies the approved act directly. srv-only meta key `browser:bypass` `{agent, origins, expires_at}` for the UI. Logging: `info` on grant, end (with reason), and every bypassed action (agent, pane, origin, action name). |
 | host (cef) | IPC `browser_bypass_set` → srv host route; `act` returns the page origin it acted on (it already reads it for the fingerprint); trusted-event check if §5 requires it. |
-| frontend | Bypass button, confirmation panel, red/amber strip with countdown, End bypass, tab badge; `browser:bypass` read in `browser-model.ts`; the action-log marks. Reuse the attention banner's components. |
-| mcp | `end_bypass` (phase 1), `request_bypass` (phase 2); `bypassed` in results; the description line. |
+| frontend | Bypass button, confirmation panel, red/amber strip with countdown, Stop auto-approve, tab badge; `browser:bypass` read in `browser-model.ts`; the action-log marks. Reuse the attention banner's components. |
+| mcp | `stop_auto_approve` (phase 1), `request_auto_approve` (phase 2); `bypassed` in results; the description line. |
 
 ## 8. Security
 
@@ -135,19 +136,19 @@ The answer to "can an agent approve itself?" must stay no. So:
 
 ## 9. Tests
 
-- srv: `request_bypass` shows the `bypass` banner and grants only on the person's Allow through the host. No, a timeout and Take over return without a grant. A second request within 10 minutes of a No is refused. A request during a hand-off is refused with a reason.
+- srv: `request_auto_approve` shows the `bypass` banner and grants only on the person's Allow through the host. No, a timeout and Take over return without a grant. A second request within 10 minutes of a No is refused. A request during a hand-off is refused with a reason.
 - srv: a grant from a non-host caller is 403. A grant is refused when the owner changed since the confirmation, a hand-off is pending, or the origins don't match the current page.
 - srv: under an active grant, a committing `act` on a bound origin runs without a banner and returns `bypassed: true`. On an unbound origin it asks as before.
 - srv: the grant ends on time-out, Take over, pane close and owner change, each logged with its reason. After any of these the next committing act asks again.
 - srv: `eval`, UI click and Enter/Space stay refused under a grant. Secret fields are refused under a grant.
 - srv: `browser:bypass` can't be written by a client meta update, and is stripped on restore.
-- frontend: the button shows only on driven panes. The confirmation lists the bound sites and durations. The strip counts down and turns amber when paused. A key press on Turn on bypass doesn't grant.
+- frontend: the button shows only on driven panes. The confirmation lists the bound sites and durations. The strip counts down and turns amber when paused. A key press on Turn on auto-approve doesn't grant.
 - Agent reach: `UI` `click` with a selector for the Bypass button, from the owning agent and from another agent, doesn't grant. No command or shortcut grants.
-- e2e (isolated dev build): open a pane on a test site with several delete buttons, turn on bypass for 15 minutes, and have the agent click all of them with no banner. Navigate off the site: it pauses. End bypass: the next delete asks.
+- e2e (isolated dev build): open a pane on a test site with several delete buttons, turn on bypass for 15 minutes, and have the agent click all of them with no banner. Navigate off the site: it pauses. Stop auto-approve: the next delete asks.
 
 ## 10. Phases
 
-1. **B-1:** grant and end, from both the agent's request and the button: the `request_bypass` banner, the Bypass button and confirmation, the red strip, the host route, the srv gate for committing clicks, binding, expiry, ending hooks, logging, `end_bypass`. This is what the bulk job needed.
+1. **B-1:** grant and end, from both the agent's request and the button: the `request_auto_approve` banner, the Bypass button and confirmation, the red strip, the host route, the srv gate for committing clicks, binding, expiry, ending hooks, logging, `stop_auto_approve`. This is what the bulk job needed.
 2. **B-2:** tab badge and notifications, if they didn't make B-1.
 3. **B-3:** the action log, if §5.5 of the 2026-10-07 spec still hasn't built it.
 
