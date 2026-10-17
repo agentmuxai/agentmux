@@ -432,7 +432,7 @@ pub(crate) async fn run_windows(
 
     let (setup_result, srv_spawn_result) = tokio::join!(
         launcher_setup,
-        srv_spawner::spawn_srv(launcher_exe_dir, &paths, &srv_pipe_path, job_handle, &startup_sink)
+        srv_spawner::spawn_srv(launcher_exe_dir, &paths, &srv_pipe_path, job_handle, &startup_sink, None)
     );
     let (saga_coord, _ipc_handle, host_pipe) = setup_result;
     // `mut`: SPEC_SRV_SUPERVISION_RECYCLE — an srv respawn rebinds this to
@@ -1223,12 +1223,22 @@ pub(crate) async fn run_windows(
                         SRV_RESTART_BUDGET
                     ));
                 }
+                // Built before the spawn: srv is told its id, and writes how many
+                // agents it stopped against it (recorded below, once it is up).
+                let restart_incident = crate::incidents::srv_restarted(if wedged {
+                    crate::incidents::SrvStop::Unresponsive
+                } else if low_memory {
+                    crate::incidents::SrvStop::LowMemory
+                } else {
+                    crate::incidents::SrvStop::Exited(code)
+                });
                 match srv_spawner::spawn_srv(
                     launcher_exe_dir,
                     &paths,
                     &srv_pipe_path,
                     job_handle,
                     &startup_sink,
+                    Some(&restart_incident.id),
                 )
                 .await
                 {
@@ -1252,13 +1262,7 @@ pub(crate) async fn run_windows(
                         // is recycled too, so its banner starts clear.
                         srv_recycle = crate::srv_liveness::RecyclePolicy::default();
                         srv_latency = crate::srv_liveness::LatencyTracker::default();
-                        crate::incidents::record(&crate::incidents::srv_restarted(if wedged {
-                            crate::incidents::SrvStop::Unresponsive
-                        } else if low_memory {
-                            crate::incidents::SrvStop::LowMemory
-                        } else {
-                            crate::incidents::SrvStop::Exited(code)
-                        }));
+                        crate::incidents::record(&restart_incident);
                         log(&format!(
                             "srv respawned (pid {}) — new endpoints ws={} web={}; recycling host",
                             srv_result.pid, srv_result.ws_endpoint, srv_result.web_endpoint

@@ -579,7 +579,11 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
             "session_recovery: flagged {} interrupted sessions for user reconnect",
             orphan_count
         );
-        backend::blockcontroller::session_recovery::note_interrupted(&base::get_mux_data_dir(), orphan_count);
+        backend::blockcontroller::session_recovery::note_interrupted(
+            &base::get_mux_data_dir(),
+            orphan_count,
+            std::env::var(agentmux_common::incidents::RESTART_ID_ENV).ok().as_deref(),
+        );
     }
 
     // Auto-seed agent definitions on first launch (or empty DB)

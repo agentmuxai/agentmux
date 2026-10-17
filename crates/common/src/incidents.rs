@@ -83,15 +83,11 @@ impl Incident {
 enum Line {
     Ack { ack: String, at_ms: u64 },
     /// srv's start-up pass found `interrupted` agents whose process was running
-    /// when the previous srv died.
-    Interrupted { interrupted: u32, at_ms: u64 },
+    /// when the previous srv died, as the launcher's respawn `restart` started it.
+    Interrupted { interrupted: u32, restart: String, at_ms: u64 },
     Incident(Incident),
 }
 
-/// How far apart, in milliseconds, srv's count and the launcher's
-/// `srv_restarted` incident may be written and still be one restart. They are
-/// written by different processes, in either order.
-const SAME_RESTART_MS: u64 = 180_000;
 
 /// Append `incident` to the file at `path`.
 pub fn append(path: &Path, incident: &Incident) -> std::io::Result<()> {
@@ -104,11 +100,17 @@ pub fn append_ack(path: &Path, id: &str, at_ms: u64) -> std::io::Result<()> {
 }
 
 /// Append what srv found at start-up: `agents` agent processes were running
-/// when the previous srv died (`session_recovery::scan_orphans`). Shown on the
-/// `srv_restarted` incident the launcher wrote for the same restart, if any.
-pub fn append_interrupted(path: &Path, agents: u32, at_ms: u64) -> std::io::Result<()> {
-    write_line(path, &Line::Interrupted { interrupted: agents, at_ms })
+/// when the previous srv died (`session_recovery::scan_orphans`). `restart` is
+/// the id of the `srv_restarted` incident whose respawn started this srv (the
+/// launcher passes it in `RESTART_ID_ENV`; a cold start has none and writes
+/// nothing). The two are written by different processes, in either order.
+pub fn append_interrupted(path: &Path, agents: u32, restart: &str, at_ms: u64) -> std::io::Result<()> {
+    write_line(path, &Line::Interrupted { interrupted: agents, restart: restart.to_string(), at_ms })
 }
+
+/// The environment variable the launcher starts a respawned srv with: the id
+/// of the incident it records for the restart.
+pub const RESTART_ID_ENV: &str = "AGENTMUX_SRV_RESTART_ID";
 
 /// What the notice says of `agents` agents stopped with srv.
 fn interrupted_did(agents: u32) -> String {
@@ -126,27 +128,23 @@ pub fn read(path: &Path, max: usize) -> Vec<Incident> {
     };
     let mut incidents: Vec<Incident> = Vec::new();
     let mut acks: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
-    let mut interrupted: Vec<(u32, u64)> = Vec::new();
+    let mut interrupted: Vec<(u32, String)> = Vec::new();
     // A torn last line (a crash mid-append) costs only itself.
     for line in text.lines().filter_map(|l| serde_json::from_str::<Line>(l).ok()) {
         match line {
             Line::Ack { ack, at_ms } => {
                 acks.insert(ack, at_ms);
             }
-            Line::Interrupted { interrupted: n, at_ms } => interrupted.push((n, at_ms)),
+            Line::Interrupted { interrupted: n, restart, .. } => interrupted.push((n, restart)),
             Line::Incident(i) => incidents.push(i),
         }
     }
     for i in &mut incidents {
         i.acknowledged_at_ms = acks.get(&i.id).copied();
     }
-    // srv's count belongs to the service restart nearest to it in time.
-    for (n, at_ms) in interrupted {
-        let nearest = incidents
-            .iter_mut()
-            .filter(|i| i.kind == "srv_restarted" && i.at_ms.abs_diff(at_ms) <= SAME_RESTART_MS)
-            .min_by_key(|i| i.at_ms.abs_diff(at_ms));
-        if let Some(i) = nearest {
+    // srv's count belongs to the restart that started that srv, by id.
+    for (n, restart) in interrupted {
+        if let Some(i) = incidents.iter_mut().find(|i| i.kind == "srv_restarted" && i.id == restart) {
             i.did.retain(|d| !d.contains("running agent"));
             i.did.push(interrupted_did(n));
             i.lost = vec![if n == 1 { "Whatever it had under way in its current turn." } else { "Whatever each had under way in its current turn." }.to_string()];
@@ -224,28 +222,34 @@ mod tests {
     }
 
     #[test]
-    fn srvs_count_lands_on_the_service_restart_nearest_to_it_in_either_order() {
+    fn srvs_count_lands_on_the_restart_that_started_that_srv_in_either_order() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join(FILE_NAME);
         let mut restart = Incident::new("srv_restarted", "AgentMux's background service restarted", "launcher");
         restart.did = vec!["AgentMux started the service again.".into()];
         restart.lost = vec!["An agent's turn that was under way may have been cut off.".into()];
+        let mut later = restart.clone();
+        later.id = "later-restart".into();
         let other = Incident::new("host_restarted", "AgentMux restarted its window", "launcher");
         // srv writes its count first (it finishes starting before the launcher records), then the launcher.
-        append_interrupted(&path, 3, restart.at_ms - 2_000).unwrap();
+        append_interrupted(&path, 3, &restart.id, restart.at_ms - 2_000).unwrap();
         append(&path, &other).unwrap();
         append(&path, &restart).unwrap();
+        // A second restart a minute later: the first srv's count is not its.
+        append(&path, &later).unwrap();
         let got = read(&path, 10);
-        let r = got.iter().find(|i| i.kind == "srv_restarted").unwrap();
+        let r = got.iter().find(|i| i.id == restart.id).unwrap();
         assert_eq!(r.did.last().unwrap(), "3 running agents were stopped with the service; each resumes from its saved conversation when you open it.");
         assert_eq!(r.lost, vec!["Whatever each had under way in its current turn.".to_string()]);
+        let l = got.iter().find(|i| i.id == "later-restart").unwrap();
+        assert_eq!(l.did, vec!["AgentMux started the service again.".to_string()], "the neighbouring restart gets none");
         let h = got.iter().find(|i| i.kind == "host_restarted").unwrap();
-        assert!(h.did.is_empty() && h.lost.is_empty(), "only a service restart takes it");
-        // The other order, one agent; and a count from an unrelated start (hours away) lands nowhere.
+        assert!(h.did.is_empty() && h.lost.is_empty());
+        // The other order, one agent; a count for an id that isn't there lands nowhere.
         let path2 = dir.path().join("two.jsonl");
         append(&path2, &restart).unwrap();
-        append_interrupted(&path2, 1, restart.at_ms + 5_000).unwrap();
-        append_interrupted(&path2, 9, restart.at_ms + 3_600_000).unwrap();
+        append_interrupted(&path2, 1, &restart.id, restart.at_ms + 5_000).unwrap();
+        append_interrupted(&path2, 9, "no-such-restart", restart.at_ms + 6_000).unwrap();
         let r = read(&path2, 10).remove(0);
         assert_eq!(r.did.iter().filter(|d| d.contains("running agent")).count(), 1);
         assert!(r.did.last().unwrap().starts_with("1 running agent was stopped"));

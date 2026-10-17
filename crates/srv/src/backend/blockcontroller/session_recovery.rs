@@ -281,16 +281,21 @@ pub fn scan_orphans(mstore: &Arc<Store>) -> u32 {
 }
 
 /// Tell the user how many agents `scan_orphans` found, in the notice the
-/// launcher writes for this service restart (`agentmux_common::incidents`;
+/// launcher writes for the restart that started this srv (`restart_id`, from
+/// `agentmux_common::incidents::RESTART_ID_ENV`;
 /// SPEC_RECOVERY_NOTICES_AND_TOASTS_2026_10_16.md §4.4). Nothing is written
-/// for none: the launcher's own words then stand. Best-effort, like every
-/// incident write.
-pub fn note_interrupted(data_dir: &std::path::Path, agents: u32) {
+/// for none, or for a start the launcher didn't make as a restart (a cold
+/// start has no id, and its count would belong to no notice): the launcher's
+/// own words then stand. Best-effort, like every incident write.
+pub fn note_interrupted(data_dir: &std::path::Path, agents: u32, restart_id: Option<&str>) {
+    let Some(restart_id) = restart_id.filter(|id| !id.is_empty()) else {
+        return;
+    };
     if agents == 0 {
         return;
     }
     let path = data_dir.join(agentmux_common::incidents::FILE_NAME);
-    if let Err(e) = agentmux_common::incidents::append_interrupted(&path, agents, agentmux_common::time::now_ms_u64()) {
+    if let Err(e) = agentmux_common::incidents::append_interrupted(&path, agents, restart_id, agentmux_common::time::now_ms_u64()) {
         tracing::warn!(error = %e, "session_recovery: couldn't write the interrupted-agents count");
     }
 }
@@ -301,13 +306,16 @@ mod tests {
     use crate::backend::obj::Block;
 
     #[test]
-    fn the_count_is_written_for_some_agents_and_not_for_none() {
+    fn the_count_is_written_for_a_restart_with_agents_and_for_nothing_else() {
         let dir = tempfile::tempdir().unwrap();
-        note_interrupted(dir.path(), 0);
-        assert!(!dir.path().join(agentmux_common::incidents::FILE_NAME).exists());
-        note_interrupted(dir.path(), 2);
-        let text = std::fs::read_to_string(dir.path().join(agentmux_common::incidents::FILE_NAME)).unwrap();
-        assert!(text.contains("\"interrupted\":2"), "{text}");
+        let file = dir.path().join(agentmux_common::incidents::FILE_NAME);
+        note_interrupted(dir.path(), 0, Some("r1"));
+        note_interrupted(dir.path(), 2, None);
+        note_interrupted(dir.path(), 2, Some(""));
+        assert!(!file.exists(), "no agents, a cold start, an empty id: nothing");
+        note_interrupted(dir.path(), 2, Some("r1"));
+        let text = std::fs::read_to_string(&file).unwrap();
+        assert!(text.contains("\"interrupted\":2") && text.contains("\"restart\":\"r1\""), "{text}");
     }
 
     /// Verify that scan_orphans transfers active_pid → was_interrupted on
