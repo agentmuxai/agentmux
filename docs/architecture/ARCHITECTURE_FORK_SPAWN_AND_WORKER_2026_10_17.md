@@ -1,6 +1,7 @@
 # Fork, spawn and worker
 
 **Date:** 2026-10-17
+**Status:** living
 **Why this doc:** two features make a new agent from an existing one, and the
 words for them were used loosely. This is the one definition both features'
 code, comments and specs point to. The in-code pointer is the "Fork, spawn and
