@@ -1,5 +1,22 @@
 # AgentMux Version History
 
+## 0.59.31 — 2026-10-17
+
+- Agents never type into or read a Social Security number, ITIN or taxpayer ID field in a browser pane: it is handed to you to fill, like a password.
+- A release page now also lists the changes of an earlier version that was never published, because its build failed
+- Fixed the Browser tool's back and forward actions, which failed on every browser pane because they called a navigation command that doesn't exist.
+- The Agents tool's description now says exactly what a spawned worker starts with (the leader's definition, Global Memory and the brief, but not its conversation) and how that differs from a fork
+- AgentMux on Linux upgrades itself: a portable tarball or AppImage downloads the new release, asks before restarting, and comes back with your windows, agents and settings.
+- Swarm: agents on other instances are rows of the same list as this one's, after them, with where they run beside their name; Select all includes them; the selection drops an agent that leaves the list, so the broadcast count matches what's checked and says why when fewer get the message
+- Swarm: a broadcast reaches agents on other machines on the LAN, as a message signed by this AgentMux that the receiving AgentMux verifies (not as your own turn)
+- A terminal or agent started from an AppImage no longer inherits the AppImage's own settings and library path, which could make programs there load AgentMux's libraries.
+- Swarm: each agent on another instance shows its provider's icon before its name
+- Agent panes: tool previews that were open stay open when you switch away and come back; they still collapse once you watch them scroll off the top.
+- Agents can now read and fill forms inside iframes in a browser pane, including frames from other sites: the page snapshot shows each frame's fields with references like f1e3, and click, fill, select and check work on them.
+- Browser panes label a frame nested inside another site's frame as cross-origin, and the Browser tool's description tells agents that iframe forms can now be read and filled.
+- An agent that resumes after an upgrade is now told AgentMux was upgraded: the note was never delivered to the panes an upgrade restores.
+- The window's grip moves right of the widgets, before the window controls (before the hamburger on macOS), with even spacing
+
 ## 0.59.30 — 2026-10-17
 
 - Browser panes an agent drives get Bypass: a red button next to Take over (or the agent's one-time request) lets the agent act without asking on the current site for 15 minutes, 1 hour or 4 hours; payments still ask, and End bypass, Take over or the time limit stop it.
