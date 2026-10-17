@@ -45,4 +45,4 @@
 1564 frontend/app/view/agent/components/AgentComposerStrip.tsx
 1828 frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx
 1561 frontend/app/view/files/files-view.tsx
-2139 frontend/app/view/swarm/swarm-model.ts
+2131 frontend/app/view/swarm/swarm-model.ts
