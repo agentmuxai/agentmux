@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Zoom and pan for an image in the Editor's image viewer: the wheel zooms about the
-// cursor, a drag pans, double-click toggles fit and actual size. Plain maths
-// on the image's fitted box; image-viewer.tsx applies the result as a CSS
-// transform (translate, then scale about the box's centre).
+// cursor, a click zooms a step in or out, a drag pans. Plain maths on the
+// image's fitted box; image-viewer.tsx applies the result as a CSS transform
+// (translate, then scale about the box's centre).
 
 /** How the image is shown: `scale` times its fitted size, moved by `x`/`y`
  *  CSS pixels from the centre. `scale` 1 is "fit" (the default). */
@@ -86,13 +86,44 @@ export function zoomAt(state: ZoomState, factor: number, cursor: { x: number; y:
     );
 }
 
-/** Double-click: from fit, to actual size (or twice the fit, for an image no
- *  bigger than the view) at the cursor; from any zoom, back to fit. */
-export function toggleZoom(state: ZoomState, cursor: { x: number; y: number }, box: ZoomBox): ZoomState {
-    if (state.scale > 1) return FIT;
-    const actual = actualSizeScale(box);
-    const target = actual > 1.05 ? actual : 2;
-    return zoomAt(state, target / state.scale, cursor, box);
+/** How many steps a click takes from fit to the deepest zoom. */
+const CLICK_STEPS = 5;
+
+/** The scales a click zooms through: fit, then five more, evenly spaced on a
+ *  log scale up to the maximum, so each click looks like the same amount of
+ *  zoom. docs/specs/SPEC_EDITOR_TREE_KEYBOARD_ICONS_AND_CLICK_ZOOM_2026_10_16.md §7. */
+export function clickSteps(box: ZoomBox): number[] {
+    const max = maxScale(box);
+    const steps = [1];
+    for (let k = 1; k < CLICK_STEPS; k++) steps.push(max ** (k / CLICK_STEPS));
+    steps.push(max);
+    return steps;
+}
+
+/** The next step strictly above (`direction` 1) or below (-1) `scale`, if
+ *  any. A scale a rounding error off a step counts as on it. */
+function nextStep(scale: number, direction: 1 | -1, box: ZoomBox): number | undefined {
+    const steps = clickSteps(box);
+    const beyond = (s: number) => (s - scale) * direction > scale * 1e-6;
+    return direction > 0 ? steps.find(beyond) : steps.reverse().find(beyond);
+}
+
+/** One click: to the next step above or below the current scale, about the
+ *  cursor. After a wheel zoom that is the nearest step that way, not a fixed
+ *  jump; nothing past the deepest step or fit. */
+export function zoomStep(
+    state: ZoomState,
+    direction: 1 | -1,
+    cursor: { x: number; y: number },
+    box: ZoomBox
+): ZoomState {
+    const target = nextStep(state.scale, direction, box);
+    return target === undefined ? state : zoomAt(state, target / state.scale, cursor, box);
+}
+
+/** At the deepest step, where a click can't zoom in any further. */
+export function atMaxZoom(state: ZoomState, box: ZoomBox): boolean {
+    return nextStep(state.scale, 1, box) === undefined;
 }
 
 /** Moved by a drag of `dx`/`dy` CSS pixels. */
