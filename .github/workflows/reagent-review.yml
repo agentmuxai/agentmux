@@ -59,15 +59,25 @@ jobs:
     # which reviews the diff, and the new head went unreviewed with no failure
     # to point at. Only runs that review the diff share the first group:
     #   text: a title/body edit with no base change, which only scans the text
-    #   talk: a comment that doesn't mention the reviewer (a reply, if any)
+    #   talk: a comment that doesn't mention the reviewer, or mentions it
+    #         without asking for a review (a question gets a reply, which
+    #         doesn't review the diff)
     #   diff: everything else (opened, synchronize, reopened, a base change, a
-    #         mention such as "review again"), which reviews the current head,
-    #         so one replacing another loses nothing.
+    #         mention that asks for a review: "review", "review again",
+    #         "re-review", "look again", "check again"), which reviews the
+    #         current head, so one replacing another loses nothing.
+    # A question used to join `diff` too, so it could still replace a queued
+    # push review and leave that commit unreviewed. GitHub's contains() is
+    # case-insensitive. " review" has its space because the handle
+    # "@muxreview" contains "review" itself. A request worded some other way
+    # ("review again @muxreview") lands in `talk`, which only means it can't
+    # replace a queued push review; it is still reviewed.
     concurrency:
       group: >-
         reagent-review-${{ github.event.pull_request.number || github.event.issue.number }}-${{
           (github.event_name == 'pull_request_target' && github.event.action == 'edited' && !github.event.changes.base) && 'text' ||
           (github.event_name == 'issue_comment' && !(contains(github.event.comment.body, '@reagentx-workflow') || contains(github.event.comment.body, '@muxreview'))) && 'talk' ||
+          (github.event_name == 'issue_comment' && !(contains(github.event.comment.body, ' review') || contains(github.event.comment.body, 're-review') || contains(github.event.comment.body, 'rereview') || contains(github.event.comment.body, 'look again') || contains(github.event.comment.body, 'check again'))) && 'talk' ||
           'diff' }}
       cancel-in-progress: false
     permissions:
