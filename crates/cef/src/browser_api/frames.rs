@@ -202,13 +202,32 @@ pub async fn check_frame(root: &mut CdpSession, f: &FrameRef, r: &str) -> Result
     }
 }
 
+/// The hops whose boxes are added to place a frame on the page. Chromium
+/// measures an element's box from the top of its own process's frames (the
+/// "local root"), so for frames nested in the same process the inner
+/// `<iframe>`'s box already includes the outer frames' offsets: only the last
+/// hop of each run of hops through the same session counts.
+fn hops_to_add(chain: &[FrameHop]) -> Vec<&FrameHop> {
+    let mut out: Vec<&FrameHop> = Vec::new();
+    for hop in chain {
+        match out.last() {
+            Some(last) if last.parent_session == hop.parent_session => {
+                out.pop();
+            }
+            _ => {}
+        }
+        out.push(hop);
+    }
+    out
+}
+
 /// Where the frame's top-left corner is in the main frame's viewport, in CSS
-/// pixels: the sum, down the chain, of each `<iframe>` element's content box
-/// in the frame that holds it. Add it to a point measured inside the frame
-/// to click that point from the page.
+/// pixels: the sum of the `<iframe>` element boxes [`hops_to_add`] picks out.
+/// Add it to a point measured inside the frame to click that point from the
+/// page.
 pub async fn frame_offset(root: &mut CdpSession, f: &FrameRef) -> Result<(f64, f64), String> {
     let (mut x, mut y) = (0.0, 0.0);
-    for hop in &f.chain {
+    for hop in hops_to_add(&f.chain) {
         let mut on = root.in_session(hop.parent_session.as_deref());
         let model = on
             .call("DOM.getBoxModel", json!({ "backendNodeId": hop.owner_backend }))
@@ -393,6 +412,38 @@ mod tests {
     fn no_frames_below_the_main_one_is_an_empty_arrangement() {
         assert!(arrange(&[frame("M", None, "x", None)], &HashMap::new()).is_empty());
         assert!(arrange(&[], &HashMap::new()).is_empty());
+    }
+
+    fn hop(owner: i64, session: Option<&str>) -> FrameHop {
+        FrameHop { owner_backend: owner, parent_session: session.map(str::to_string) }
+    }
+
+    #[test]
+    fn one_hop_is_added_as_it_is() {
+        assert_eq!(hops_to_add(&[hop(5, None)]), vec![&hop(5, None)]);
+        assert!(hops_to_add(&[]).is_empty());
+    }
+
+    #[test]
+    fn frames_nested_in_one_process_count_only_the_innermost_box() {
+        // main -> A -> B, all in the page's own process: B's iframe box
+        // (owner 9, in A) already includes A's offset, so owner 5 is skipped.
+        let chain = [hop(5, None), hop(9, None)];
+        assert_eq!(hops_to_add(&chain), vec![&hop(9, None)]);
+        let deeper = [hop(5, None), hop(9, None), hop(12, None)];
+        assert_eq!(hops_to_add(&deeper), vec![&hop(12, None)]);
+    }
+
+    #[test]
+    fn crossing_into_another_process_starts_a_new_measurement() {
+        // main -> A (same process) -> B (own process S) -> C (inside S):
+        // owner 9 (in A, measured from the page) places B; owner 20 (in B,
+        // measured from B) places C. Owner 5 is inside owner 9's box.
+        let chain = [hop(5, None), hop(9, None), hop(20, Some("S"))];
+        assert_eq!(hops_to_add(&chain), vec![&hop(9, None), &hop(20, Some("S"))]);
+        // main -> B (S) -> C (S) -> D (S): one run in S, the last counts.
+        let chain = [hop(7, None), hop(8, Some("S")), hop(9, Some("S"))];
+        assert_eq!(hops_to_add(&chain), vec![&hop(7, None), &hop(9, Some("S"))]);
     }
 
     #[test]
