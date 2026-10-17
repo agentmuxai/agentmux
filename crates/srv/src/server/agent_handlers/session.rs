@@ -1096,7 +1096,6 @@ mod tests {
             container_name: String::new(),
             use_ambient_login: 0,
             model_vendor_base_url: String::new(),
-            auto_continue_enabled: 0,
             memory_id: String::new(),
             conversation_visibility: "private".to_string(),
         }

@@ -57,7 +57,7 @@ const PinnedWidgetFlyout = (props: {
     // Cut a transparent hole through any browser pane HWND behind this
     // flyout so DOM renders above the pane in this rect — same requirement
     // as MoreDropdown. See `frontend/app/platform/pane-overlay.ts`.
-    usePaneOverlay(() => overlayEl);
+    usePaneOverlay(() => overlayEl, { keys: true });
 
     const [floatingStyle, setFloatingStyle] = createSignal<JSX.CSSProperties>({
         position: "fixed",

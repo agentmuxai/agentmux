@@ -194,6 +194,7 @@ dependencies = [
  "clap",
  "crash-handler",
  "cron",
+ "curve25519-dalek",
  "dirs 5.0.1",
  "ed25519-dalek",
  "encoding_rs",

@@ -52,7 +52,7 @@ const PopoverMenu = (props: PopoverMenuProps): JSX.Element => {
 
     // Required: cuts a transparent clip through any CEF browser-pane HWND
     // behind this popover so the DOM renders above native pane content.
-    usePaneOverlay(menuEl);
+    usePaneOverlay(menuEl, { keys: true });
 
     const registerMenu = (el: HTMLDivElement) => {
         setMenuEl(el);

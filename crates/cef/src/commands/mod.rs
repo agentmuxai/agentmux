@@ -5,6 +5,7 @@
 // Each module corresponds to a category of commands ported from src-tauri/src/commands/.
 
 pub mod platform;
+pub mod desktop_settings;
 pub mod autostart;
 pub mod taskbar_attention;
 pub mod cli_login;
@@ -23,6 +24,8 @@ pub mod stubs;
 pub mod palette;
 pub mod orphan_reconcile;
 pub mod floating_pane;
+/// What went wrong and what AgentMux did about it, kept for the user.
+pub mod incidents;
 
 
 

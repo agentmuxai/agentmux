@@ -126,7 +126,6 @@ mod resolve_vendor_env_override_tests {
             container_volumes: "[]".to_string(),
             container_name: String::new(),
             use_ambient_login: 0,
-            auto_continue_enabled: 0,
             model_vendor_base_url: model_vendor_base_url.to_string(),
             memory_id: String::new(),
         }
@@ -352,7 +351,7 @@ pub(crate) async fn open_agent_into_block(
     .await
 }
 
-/// `extra_meta` goes on a new block as it's created (srv-only keys: `agent_fork.rs`).
+/// `extra_meta` goes on a new block as it's created (srv-only keys: `agent_spawn.rs`).
 pub(super) async fn open_agent_inner(
     state: &AppState,
     cmd: CommandAgentOpenData,
@@ -1336,7 +1335,6 @@ mod write_agent_config_files_tests {
             container_volumes: "[]".to_string(),
             container_name: String::new(),
             use_ambient_login: 0,
-            auto_continue_enabled: 0,
             model_vendor_base_url: String::new(),
             memory_id: String::new(),
         }

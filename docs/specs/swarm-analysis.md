@@ -4,6 +4,9 @@
 **Issue:** [#101 — Swarm Orchestration: Multi-Agent Parallel Execution](https://github.com/agentmuxai/agentmux/issues/101)
 **Author:** AgentX
 
+> [!NOTE]
+> **Updated 2026-10-16: Swarm watches and steers.** This analysis scoped Swarm to observing subagents. Swarm has since become where the user acts on their agents too: fleet broadcast and bulk stop ([`SPEC_MULTI_AGENT_FLEET_CONTROL_2026_08_20.md`](SPEC_MULTI_AGENT_FLEET_CONTROL_2026_08_20.md)), and the Supervisor, which keeps agents working until they are done or need the user ([`SPEC_SWARM_SUPERVISOR_2026_10_16.md`](SPEC_SWARM_SUPERVISOR_2026_10_16.md)). In the operator's words: "Swarm is active input"; Warden is the surface for watching. The subagent-observability design below still stands; the "not orchestration" scope in §1 does not.
+
 ---
 
 ## 1. Executive Summary

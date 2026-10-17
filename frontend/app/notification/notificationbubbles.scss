@@ -8,4 +8,14 @@
     flex-direction: column;
     align-items: flex-start;
     row-gap: var(--space-2);
+    // Expanded (+N more) the stack can outgrow a short window: it scrolls
+    // rather than running off the top, where a toast can't be read or closed.
+    max-height: calc(100vh - 80px);
+    overflow-y: auto;
+}
+
+// "+N more": the toasts past the first few, shown on click.
+.notification-bubbles .notification-more {
+    align-self: flex-end;
+    font-size: var(--text-xs);
 }

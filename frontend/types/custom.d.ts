@@ -271,6 +271,9 @@ declare global {
         captureViewport(windowLabel: string, quality?: number): Promise<{ jpeg_base64: string }>;
         /** Tear a pane off into its own floating window (payload: pane_id, workspace_id, x, y, …). */
         openFloatingPane(args: Record<string, unknown>): Promise<{ window_label: string }>;
+        /** Whether the window is maximized (a floater's own maximize on Windows, the OS's elsewhere);
+         *  null when the host can't tell (no such window, or no answer in time). */
+        isMaximized(windowLabel: string): Promise<boolean | null>;
         toggleFloatingMaximize(windowLabel: string, blockId: string): Promise<void>;
         /** Tack / untack a floating pane: "Always on top" within this instance.
          *  The host also records `pane:floating_ontop` on the block. */
@@ -350,6 +353,11 @@ declare global {
         setTaskbarAttention(windowLabel: string, count: number, inputCount: number): Promise<void>;
         /** Take (and clear) what happened while no window was open. */
         takeBackgroundAudit(): Promise<unknown>;
+        /** What went wrong and what AgentMux did about it, newest first:
+         *  `{ incidents: [...] }` (crates/cef `commands::incidents`). */
+        listIncidents?(): Promise<unknown>;
+        /** The user closed an incident's notice: every window closes its copy. */
+        acknowledgeIncident?(id: string): Promise<unknown>;
         /** Take OS keyboard focus back from a native browser pane to this window's page. */
         reclaimWindowFocus(windowLabel: string): Promise<void>;
         /** Whether the window is active and who has its keyboard, as the host's
@@ -397,6 +405,10 @@ declare global {
         openNewWindowWithView: (view: string, meta?: Record<string, unknown>) => Promise<string>;
         /** Open a new window showing an existing workspace, not a fresh one. */
         openWorkspaceInNewWindow: (workspaceId: string) => Promise<string>;
+        /** A window a session restore rebuilt (srv `session_windows.rs`), opened where it
+         *  was: `x`/`y`/`width`/`height` are its saved rect in physical pixels. Opens
+         *  where a new window goes when that spot is on no monitor now. */
+        openRestoredWindow: (w: { workspaceid: string; x?: number; y?: number; width?: number; height?: number }) => Promise<string>;
         closeWindow: (label?: string) => Promise<void>;
         minimizeWindow: () => void;
         maximizeWindow: () => void;
@@ -583,6 +595,9 @@ declare global {
         /** The window system the host's windows live in (`get_window_system`):
          *  "wayland" is native Wayland, "x11" is X11 or XWayland. */
         getWindowSystem: () => Promise<"wayland" | "x11" | "windows" | "macos">;
+        /** GNOME's window-button layout (`get_window_button_layout`), e.g.
+         *  ":minimize,maximize,close"; null when the desktop has none to read. */
+        getWindowButtonLayout?: () => Promise<string | null>;
         setJsDragActive: (active: boolean) => Promise<void>;
         /** Trigger on-demand migration run (maintenance panel retry).
          *  Returns immediately; progress arrives via `upgrade:migration-event` CEF events. */
@@ -1004,8 +1019,13 @@ declare global {
         expiration?: number;
         hidden?: boolean;
         actions?: NotificationActionType[];
+        /** Stays until the user closes it: no expiry, and a pin on the toast
+         *  says so. Needs an `id`. */
         persistent?: boolean;
         type?: "error" | "update" | "info" | "warning";
+        /** Runs when the user closes the toast with its X (not when it expires
+         *  or an action button runs), e.g. to record that a notice was read. */
+        onClose?: () => void;
     };
 
     interface AbstractRpcClient {

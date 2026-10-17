@@ -11,7 +11,11 @@ use super::*;
 pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
     let ToolCtx { local_url, auth_key, block_id, client, .. } = *cx;
     match name {
-        "OpenEditor" => {
+        // OpenMedia is an alias of OpenEditor since the Media pane was folded
+        // into the Editor: the same open, with the tab following newer files
+        // in the folder. SPEC_EDITOR_REVAMP_UNIFIED_VIEWERS_2026_10_15.md §4.11.
+        "OpenEditor" | "OpenMedia" => {
+            let media = name == "OpenMedia";
             let connection = connection_arg(arguments);
             let file = arguments
                 .get("file")
@@ -70,6 +74,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 // PaneOpenRequest for why this can't be inferred from
                 // split_reference_block_id alone).
                 reuse_editor_pane: Some(true),
+                follow_folder: media.then_some(true),
                 select: None,
                 // On an SSH host: srv asks the user to allow it, checking this
                 // agent's signed identity (remote terminals spec §8.2).
@@ -96,81 +101,14 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 .await
                 .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
 
-            Ok(format!("Opened {file} in editor pane (block {})", result.block_id))
-        }
-        "OpenMedia" => {
-            let file = arguments
-                .get("file")
-                .and_then(|v| v.as_str())
-                .filter(|s| !s.is_empty())
-                .ok_or_else(|| anyhow::anyhow!("missing required parameter: file"))?;
-
-            if local_url.is_empty() || auth_key.is_empty() {
-                anyhow::bail!(
-                    "AGENTMUX_LOCAL_URL and AGENTMUX_AUTH_KEY must be set. \
-                     Is this agent pane opened via AgentMux?"
-                );
-            }
-
-            let split = arguments
-                .get("split")
-                .and_then(|v| v.as_str())
-                .filter(|s| matches!(*s, "right" | "left" | "down" | "up"))
-                .unwrap_or("right");
-
-            let url = format!("{}/api/v1/pane/open", local_url.trim_end_matches('/'));
-            // Place the media pane relative to the calling agent pane when we
-            // know its block id (AGENTMUX_BLOCKID); otherwise the sidecar
-            // inserts it at the tab root.
-            let (split_direction, split_reference_block_id) = if block_id.is_empty() {
-                (None, None)
+            Ok(if media {
+                format!(
+                    "Opened {file} in the editor (block {}); OpenMedia is now an alias of OpenEditor",
+                    result.block_id
+                )
             } else {
-                (Some(split.to_string()), Some(block_id.to_string()))
-            };
-            let req = PaneOpenRequest {
-                view: "media".to_string(),
-                file: Some(file.to_string()),
-                focus: Some(true),
-                split_direction,
-                split_reference_block_id,
-                title: arguments.get("title").and_then(|v| v.as_str()).map(str::to_string),
-                // The Media pane has no file-tree sidebar, unlike Editor.
-                tree_expanded: None,
-                // `floating: true` → open in a floating window instead of a docked split.
-                floating: if arguments.get("floating").and_then(|v| v.as_bool()) == Some(true) {
-                    Some(true)
-                } else {
-                    None
-                },
-                url: None,
-                cwd: None,
-                tab_id: None,
-                reuse_editor_pane: None, // view != "editor" — irrelevant here
-                select: None,
-                connection: None,
-                auth: None,
-            };
-
-            let resp = client
-                .post(&url)
-                .header(AUTH_KEY_HEADER, auth_key)
-                .json(&req)
-                .send()
-                .await
-                .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
-
-            if !resp.status().is_success() {
-                let status = resp.status();
-                let text = resp.text().await.unwrap_or_default();
-                anyhow::bail!("pane.open failed: HTTP {status} — {text}");
-            }
-
-            let result: PaneOpenResponse = resp
-                .json()
-                .await
-                .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
-
-            Ok(format!("Opened {file} in media pane (block {})", result.block_id))
+                format!("Opened {file} in editor pane (block {})", result.block_id)
+            })
         }
         // A Files pane on a folder, optionally with entries selected.
         // Navigation only (SPEC_FILE_BROWSER_PANE_2026_10_01.md §8.1, §9:
@@ -224,6 +162,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 cwd: None,
                 tab_id: None,
                 reuse_editor_pane: None, // view != "editor" — irrelevant here
+                follow_folder: None,
                 select: if select.is_empty() { None } else { Some(select) },
                 // On an SSH host: srv asks the user to allow it, checking this
                 // agent's signed identity (remote terminals spec §8.2).

@@ -40,8 +40,8 @@ usage:
   muxsh open <file>              open a file in an editor pane
   muxsh web <url>                open a URL in a browser pane
   muxsh view <path-or-url>       open the right pane type automatically
-                                  (URL -> browser, media file -> media, folder/ -> files, else -> editor)
-  muxsh edit <file>               like 'open', but always forces the editor view
+                                  (URL -> browser, folder/ -> files, else -> editor)
+  muxsh edit <file>               like 'open', but always shows the file as text
     --title <t>                  pane/tab title
     --split <right|left|down|up> split direction relative to the calling pane (default: right)
     --collapse-tree               [open/edit/view-as-editor only] collapse the file-tree sidebar
@@ -79,14 +79,6 @@ a pane — not duplicated here as 'muxsh agent open'.`;
 
 const EDITOR_ONLY_FLAGS = ["--collapse-tree"];
 const SPLIT_DIRECTIONS = ["right", "left", "down", "up"];
-const MEDIA_EXTENSIONS = [
-    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp", ".ico",
-    ".mp4", ".webm", ".mov", ".avi",
-    ".mp3", ".wav", ".ogg", ".flac",
-    ".pdf",
-];
-// Not derived from a canonical AgentMux list (open question, SPEC_MUXSH_FULL_COLLECTION_2026_09_16.md §7.4) —
-// hand-rolled and may drift from whatever the frontend's own pane-type resolution considers "media".
 const URL_PATTERN = /^\w+:\/\//;
 
 const CONFIG_PATH_ENV_VARS = {
@@ -152,8 +144,8 @@ function parsePaneOpenFlags(argv, startIndex, isEditor) {
 export function guessView(target) {
     if (URL_PATTERN.test(target)) return "browser";
     if (/[\\/]$/.test(target) || target === "." || target === ".." || target === "~") return "files";
-    const lower = target.toLowerCase();
-    if (MEDIA_EXTENSIONS.some((ext) => lower.endsWith(ext))) return "media";
+    // Every file: the Editor opens any file and picks the viewer itself
+    // (SPEC_EDITOR_REVAMP_UNIFIED_VIEWERS_2026_10_15.md §4.11).
     return "editor";
 }
 
@@ -178,8 +170,13 @@ export function parseArgs(argv) {
         const isEditor = head === "open" || head === "edit";
         const flags = parsePaneOpenFlags(argv, 2, isEditor);
         if (flags.error) return flags;
-        // 'edit' is 'open' forcing the editor view, everywhere else identical.
+        // 'edit' is 'open' in the text viewer, whatever the file is (the
+        // editor otherwise picks the viewer from its content); everywhere
+        // else identical.
         const subcommand = head === "edit" ? "open" : head;
+        if (head === "edit") {
+            return { command: "open", subcommand, file: target, ...flags, viewer: "text" };
+        }
         if (subcommand === "open") {
             return { command: "open", subcommand, file: target, ...flags };
         }
@@ -301,6 +298,7 @@ export function buildRequestBody(parsed, env = {}) {
         body.view = parsed.view ?? "editor";
         body.file = parsed.file;
         if (parsed.collapseTree && body.view === "editor") body.tree_expanded = false;
+        if (parsed.viewer && body.view === "editor") body.viewer = parsed.viewer;
     } else {
         body.view = "browser";
         body.url = parsed.url;

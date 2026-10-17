@@ -762,6 +762,8 @@ impl AgentMuxHandler {
                         "[oauth-popup] step 4/4: do_close — Chrome-runtime popup closes itself; nothing to do",
                     ),
                 }
+            } else if self.is_browser_pane && crate::browser_pane::page_close::held_back(&self.state, b) {
+                return true; // its page closed it (browser_pane/page_close.rs)
             }
         }
 

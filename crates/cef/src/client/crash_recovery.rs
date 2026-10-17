@@ -48,6 +48,11 @@ impl AgentMuxHandler {
         };
 
         let detail = error_string.map(CefString::to_string).unwrap_or_default();
+        // The user is told afterwards, once the window is back (commands::incidents).
+        if let Some(b) = browser.as_ref() {
+            let oom = status == TerminationStatus::PROCESS_OOM;
+            crate::commands::incidents::renderer_terminated(&self.state, b.identifier(), killed_for_hang, oom, &detail);
+        }
         // Rate-limit the renderer_terminated event on the `crash`
         // target. The crash budget below caps per-browser crashes at
         // CRASH_BUDGET within CRASH_BUDGET_WINDOW, but if many

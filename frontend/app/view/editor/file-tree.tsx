@@ -8,11 +8,18 @@
 // JS, no delay). SCSS rules in editor-view.scss scope `[data-tip]:hover::after`
 // to the file-tree-toolbar so they don't leak to the rest of the editor.
 //
+// Keyboard (the WAI-ARIA tree pattern: roles, one tab stop, arrows over the
+// visible rows), icons and the open file's mark:
+// docs/specs/SPEC_EDITOR_TREE_KEYBOARD_ICONS_AND_CLICK_ZOOM_2026_10_16.md §3–§6.
+// The key logic is pure, in tree-keyboard.ts.
+//
 // Spec: docs/specs/SPEC_EDITOR_FILE_TREE_2026-05-26.md
 // Context menu: docs/specs/SPEC_FILE_TREE_CONTEXT_MENU_2026_06_14.md
 
-import { createEffect, createMemo, createSignal, For, Show, type JSX } from "solid-js";
-import { FileTreeModel, isHiddenName, joinPath, type Root } from "./file-tree-model";
+import { createEffect, createMemo, createSignal, For, on, onCleanup, Show, type Accessor, type JSX } from "solid-js";
+import { fileIcon } from "./file-icons";
+import { FileTreeModel, type Root } from "./file-tree-model";
+import { isOpenFile, joinPath, shownEntries, treeMove, TreeTypeAhead, visibleRows } from "./tree-keyboard";
 
 interface FileTreeProps {
     model: FileTreeModel;
@@ -38,9 +45,152 @@ interface FileTreeProps {
     onNewEntryCancel?: () => void;
     /** Called when F2 is pressed in the tree — trigger rename for the given path. */
     onStartRename?: (path: string) => void;
+    /** Enter on a file, or Escape: the keyboard goes to the editor body. */
+    onFocusEditor?: () => void;
 }
 
+/** How long a file waits under the keyboard's selection before it previews,
+ *  so holding ↓ doesn't load every file it passes (spec §5.3). */
+const PREVIEW_DELAY_MS = 100;
+
 export function FileTree(props: FileTreeProps): JSX.Element {
+    let treeRef: HTMLDivElement | undefined;
+    const rowEls = new Map<string, HTMLElement>();
+    const registerRow = (path: string, el: HTMLElement, mounted: boolean) => {
+        if (mounted) rowEls.set(path, el);
+        else if (rowEls.get(path) === el) rowEls.delete(path);
+    };
+
+    const rows = createMemo(() =>
+        visibleRows(
+            {
+                roots: props.model.rootsAtom(),
+                isExpanded: (p) => props.model.isExpanded(p),
+                entries: (p) => props.model.getNodeData(p)?.entries,
+            },
+            props.showHidden
+        )
+    );
+    // The one row in the Tab order (roving tabindex): the selected row while
+    // it's visible, else the first.
+    const tabStop = createMemo(() => {
+        const selected = props.model.selectedPath();
+        const list = rows();
+        return list.find((r) => r.path === selected)?.path ?? list[0]?.path ?? null;
+    });
+    const treeHasFocus = () => !!treeRef?.contains(document.activeElement);
+
+    // A file opened from the tree: the reveal below skips it, since the user
+    // is already on its row. Only when it changes the open file, or nothing
+    // would clear it.
+    let openedHere: string | null = null;
+    let previewTimer: ReturnType<typeof setTimeout> | undefined;
+    onCleanup(() => clearTimeout(previewTimer));
+    const openFrom = (open: (path: string) => void, path: string) => {
+        clearTimeout(previewTimer);
+        if (!isOpenFile(path, props.activeFilePath)) openedHere = path;
+        open(path);
+    };
+    const preview = (path: string) => openFrom(props.onFileClick, path);
+    const keep = (path: string) => openFrom(props.onFileDblClick ?? props.onFileClick, path);
+
+    const scrollToRow = (path: string) => {
+        // The row itself, not its item: an open folder's item holds its children.
+        rowEls.get(path)?.querySelector(".file-tree-row")?.scrollIntoView?.({ block: "nearest" });
+    };
+    /** Select a row from the keyboard, and preview it if it's a file. */
+    const select = (path: string) => {
+        props.model.setSelectedPath(path);
+        rowEls.get(path)?.focus({ preventScroll: true });
+        scrollToRow(path);
+        clearTimeout(previewTimer);
+        if (rows().find((r) => r.path === path)?.isDir === false) {
+            previewTimer = setTimeout(() => preview(path), PREVIEW_DELAY_MS);
+        }
+    };
+
+    // Reveal the open file (VS Code's explorer.autoReveal): open the folders
+    // down to it, select it unless the user is in the tree, and scroll it into
+    // view if it's off screen. Again once the roots arrive.
+    createEffect(
+        on([() => props.activeFilePath, () => props.model.rootsAtom()], ([file]) => {
+            if (!file) return;
+            if (openedHere != null && isOpenFile(openedHere, file)) {
+                openedHere = null;
+                return;
+            }
+            void props.model.revealPath(file).then((row) => {
+                if (row == null || !isOpenFile(row, props.activeFilePath)) return;
+                if (!treeHasFocus()) props.model.setSelectedPath(row);
+                scrollToRow(row);
+            });
+        })
+    );
+
+    const typeAhead = new TreeTypeAhead();
+    const pageSize = (): number => {
+        const rowHeight = treeRef?.querySelector<HTMLElement>(".file-tree-row")?.offsetHeight ?? 0;
+        if (!treeRef || rowHeight <= 0) return 10;
+        return Math.max(1, Math.floor(treeRef.clientHeight / rowHeight) - 1);
+    };
+
+    // The WAI-ARIA tree pattern's keys (spec §5.2). Modified keys are left to
+    // the app's shortcuts.
+    const handleKeyDown = (e: KeyboardEvent) => {
+        if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey) return;
+        const list = rows();
+        const current = tabStop();
+        const row = list.find((r) => r.path === current);
+        const handled = () => {
+            e.preventDefault();
+            e.stopPropagation();
+        };
+        const move = treeMove(list, current, e.key, pageSize());
+        if (move) {
+            handled();
+            if (move.kind === "select") select(move.path);
+            else if (move.kind === "expand") void props.model.expandFolder(move.path);
+            else if (move.kind === "collapse") props.model.collapseFolder(move.path);
+            return;
+        }
+        switch (e.key) {
+            case "Enter":
+                if (!row) return;
+                handled();
+                if (row.isDir) {
+                    void props.model.toggleExpand(row.path);
+                } else {
+                    keep(row.path);
+                    props.onFocusEditor?.();
+                }
+                return;
+            case " ":
+                // A space inside a name being typed belongs to it.
+                if (typeAhead.active()) break;
+                if (!row) return;
+                handled();
+                if (row.isDir) void props.model.toggleExpand(row.path);
+                else keep(row.path);
+                return;
+            case "F2":
+                // Not a root: those are HOME and the drives.
+                if (!props.onStartRename || !row || row.depth === 0) return;
+                handled();
+                props.onStartRename(row.path);
+                return;
+            case "Escape":
+                if (!props.onFocusEditor) return;
+                handled();
+                props.onFocusEditor();
+                return;
+        }
+        if (e.key.length === 1) {
+            handled();
+            const hit = typeAhead.next(e.key, list, current);
+            if (hit) select(hit);
+        }
+    };
+
     const handleBackgroundContextMenu = (e: MouseEvent) => {
         if (props.onContextMenu) {
             e.preventDefault();
@@ -49,15 +199,8 @@ export function FileTree(props: FileTreeProps): JSX.Element {
         }
     };
 
-    const handleKeyDown = (e: KeyboardEvent) => {
-        if (e.key === "F2" && props.onStartRename && props.activeFilePath) {
-            e.preventDefault();
-            props.onStartRename(props.activeFilePath);
-        }
-    };
-
     return (
-        <div class="file-tree" tabIndex={0} onKeyDown={handleKeyDown}>
+        <div class="file-tree">
             <FileTreeToolbar
                 model={props.model}
                 showHidden={props.showHidden}
@@ -65,16 +208,32 @@ export function FileTree(props: FileTreeProps): JSX.Element {
                 onHideTree={props.onHideTree}
             />
             <div
+                ref={treeRef}
                 class="file-tree-body"
+                role="tree"
+                aria-label="Files"
+                onKeyDown={handleKeyDown}
+                // Focus and selection go together: a click or Tab that lands
+                // on a row selects it.
+                onFocusIn={(e) => {
+                    const item = (e.target as HTMLElement).closest<HTMLElement>("[role=treeitem]");
+                    if (item?.dataset.path) props.model.setSelectedPath(item.dataset.path);
+                }}
                 onContextMenu={handleBackgroundContextMenu}
             >
                 <For each={props.model.rootsAtom()}>
-                    {(root: Root) => (
+                    {(root: Root, i) => (
                         <TreeNode
                             {...props}
+                            onFileClick={preview}
+                            onFileDblClick={keep}
+                            tabStop={tabStop}
+                            registerRow={registerRow}
                             path={root.path}
                             name={root.name}
                             depth={0}
+                            posInSet={i() + 1}
+                            setSize={props.model.rootsAtom().length}
                             isDir={true}
                             isSymlink={false}
                         />
@@ -141,17 +300,24 @@ function FileTreeToolbar(props: FileTreeToolbarProps): JSX.Element {
 }
 
 /**
- * Everything except `path` / `name` / `depth` / `isDir` / `isSymlink` is
- * per-tree state that every node forwards unchanged to its children; the
- * two `<TreeNode {...props} …/>` sites spread it rather than re-listing it.
+ * Everything except `path` / `name` / `depth` / `posInSet` / `setSize` /
+ * `isDir` / `isSymlink` is per-tree state that every node forwards unchanged
+ * to its children; the two `<TreeNode {...props} …/>` sites spread it rather
+ * than re-listing it.
  */
 interface TreeNodeProps {
     model: FileTreeModel;
     path: string;
     name: string;
     depth: number;
+    /** Its place among its siblings, from 1, and their number (aria-posinset/-setsize). */
+    posInSet: number;
+    setSize: number;
     isDir: boolean;
     isSymlink: boolean;
+    /** The row in the Tab order. */
+    tabStop: Accessor<string | null>;
+    registerRow: (path: string, el: HTMLElement, mounted: boolean) => void;
     activeFilePath: string;
     showHidden: boolean;
     onFileClick: (path: string) => void;
@@ -168,15 +334,12 @@ interface TreeNodeProps {
 function TreeNode(props: TreeNodeProps): JSX.Element {
     const expanded = createMemo(() => props.model.isExpanded(props.path));
     const nodeData = createMemo(() => props.model.getNodeData(props.path));
-    const isActive = createMemo(() => props.path === props.activeFilePath);
+    const isOpen = createMemo(() => !props.isDir && isOpenFile(props.path, props.activeFilePath));
+    const isSelected = createMemo(() => props.model.selectedPath() === props.path);
     const isRenaming = createMemo(() => props.renamingPath === props.path);
+    const icon = createMemo(() => fileIcon(props.name, props.isDir, expanded()));
 
-    const filteredEntries = createMemo(() => {
-        const data = nodeData();
-        if (!data?.entries) return [];
-        if (props.showHidden) return data.entries;
-        return data.entries.filter((e) => !isHiddenName(e.name));
-    });
+    const filteredEntries = createMemo(() => shownEntries(nodeData()?.entries, props.showHidden));
 
     const handleClick = (e: MouseEvent) => {
         e.stopPropagation();
@@ -204,11 +367,28 @@ function TreeNode(props: TreeNodeProps): JSX.Element {
     };
 
     return (
-        <div>
+        <div
+            ref={(el) => {
+                props.registerRow(props.path, el, true);
+                onCleanup(() => props.registerRow(props.path, el, false));
+            }}
+            class="file-tree-item"
+            role="treeitem"
+            data-path={props.path}
+            tabIndex={props.tabStop() === props.path ? 0 : -1}
+            // Named by its row alone: the item also holds an open folder's children.
+            aria-label={props.name}
+            aria-level={props.depth + 1}
+            aria-posinset={props.posInSet}
+            aria-setsize={props.setSize}
+            aria-expanded={props.isDir ? expanded() : undefined}
+            aria-selected={isSelected() ? true : undefined}
+        >
             <div
                 class="file-tree-row"
                 classList={{
-                    "file-tree-row--active": isActive(),
+                    "file-tree-row--open": isOpen(),
+                    "file-tree-row--selected": isSelected(),
                     "file-tree-row--dir": props.isDir,
                     "file-tree-row--renaming": isRenaming(),
                 }}
@@ -236,7 +416,7 @@ function TreeNode(props: TreeNodeProps): JSX.Element {
                         />
                     }
                 >
-                    <i class={`fa fa-${iconForEntry(props.name, props.isDir, isActive())} file-tree-icon`} />
+                    <i class={`${icon().icon} file-tree-icon file-tree-icon--${icon().tone}`} aria-hidden="true" />
                     <span class="file-tree-label">{props.name}</span>
                     <Show when={props.isSymlink}>
                         <span class="file-tree-symlink" aria-label="symlink">↗</span>
@@ -244,54 +424,64 @@ function TreeNode(props: TreeNodeProps): JSX.Element {
                 </Show>
             </div>
             <Show when={props.isDir && expanded()}>
-                <Show when={nodeData()?.phase === "loading"}>
-                    <div
-                        class="file-tree-loading"
-                        style={{ "padding-left": `${4 + (props.depth + 1) * 16}px` }}
-                    >
-                        Loading…
-                    </div>
-                </Show>
-                <Show when={nodeData()?.phase === "error"}>
-                    <div
-                        class="file-tree-error"
-                        style={{ "padding-left": `${4 + (props.depth + 1) * 16}px` }}
-                    >
-                        ⚠ {nodeData()?.error}
-                    </div>
-                </Show>
-                {/* New-entry placeholder — rendered inside this dir when active */}
-                <Show when={props.newEntry?.parentPath === props.path}>
-                    <div
-                        class="file-tree-row file-tree-row--new-entry"
-                        style={{ "padding-left": `${4 + (props.depth + 1) * 16}px` }}
-                    >
-                        <span class="file-tree-chevron-spacer" />
-                        <i class={`fa fa-${props.newEntry?.kind === "dir" ? "folder" : "file"} file-tree-icon`} />
-                        <InlineInput
-                            initialValue=""
-                            placeholder={props.newEntry?.kind === "dir" ? "folder name" : "file name"}
-                            onConfirm={(v) => {
-                                if (props.newEntry) {
-                                    props.onNewEntryConfirm?.(props.newEntry.parentPath, v, props.newEntry.kind);
-                                }
-                            }}
-                            onCancel={() => props.onNewEntryCancel?.()}
-                        />
-                    </div>
-                </Show>
-                <For each={filteredEntries()}>
-                    {(entry) => (
-                        <TreeNode
-                            {...props}
-                            path={joinPath(props.path, entry.name)}
-                            name={entry.name}
-                            depth={props.depth + 1}
-                            isDir={entry.is_dir}
-                            isSymlink={entry.is_symlink}
-                        />
-                    )}
-                </For>
+                <div role="group">
+                    <Show when={nodeData()?.phase === "loading"}>
+                        <div
+                            class="file-tree-loading"
+                            style={{ "padding-left": `${4 + (props.depth + 1) * 16}px` }}
+                        >
+                            Loading…
+                        </div>
+                    </Show>
+                    <Show when={nodeData()?.phase === "error"}>
+                        <div
+                            class="file-tree-error"
+                            style={{ "padding-left": `${4 + (props.depth + 1) * 16}px` }}
+                        >
+                            ⚠ {nodeData()?.error}
+                        </div>
+                    </Show>
+                    {/* New-entry placeholder — rendered inside this dir when active */}
+                    <Show when={props.newEntry?.parentPath === props.path}>
+                        <div
+                            class="file-tree-row file-tree-row--new-entry"
+                            style={{ "padding-left": `${4 + (props.depth + 1) * 16}px` }}
+                        >
+                            <span class="file-tree-chevron-spacer" />
+                            <i
+                                class={(() => {
+                                    const { icon, tone } = fileIcon("", props.newEntry?.kind === "dir");
+                                    return `${icon} file-tree-icon file-tree-icon--${tone}`;
+                                })()}
+                                aria-hidden="true"
+                            />
+                            <InlineInput
+                                initialValue=""
+                                placeholder={props.newEntry?.kind === "dir" ? "folder name" : "file name"}
+                                onConfirm={(v) => {
+                                    if (props.newEntry) {
+                                        props.onNewEntryConfirm?.(props.newEntry.parentPath, v, props.newEntry.kind);
+                                    }
+                                }}
+                                onCancel={() => props.onNewEntryCancel?.()}
+                            />
+                        </div>
+                    </Show>
+                    <For each={filteredEntries()}>
+                        {(entry, i) => (
+                            <TreeNode
+                                {...props}
+                                path={joinPath(props.path, entry.name)}
+                                name={entry.name}
+                                depth={props.depth + 1}
+                                posInSet={i() + 1}
+                                setSize={filteredEntries().length}
+                                isDir={entry.is_dir}
+                                isSymlink={entry.is_symlink}
+                            />
+                        )}
+                    </For>
+                </div>
             </Show>
         </div>
     );
@@ -348,19 +538,4 @@ function InlineInput(props: InlineInputProps): JSX.Element {
             onClick={(e) => e.stopPropagation()}
         />
     );
-}
-
-function iconForEntry(name: string, isDir: boolean, isActive: boolean): string {
-    if (isDir) return "folder";
-    if (isActive) return "circle-dot";
-    const lower = name.toLowerCase();
-    if (/\.(ts|tsx|js|jsx|mjs|cjs)$/.test(lower)) return "file-code";
-    if (/\.(py|rs|go|java|c|cpp|h|hpp|sh|bash|zsh|ps1)$/.test(lower)) return "file-code";
-    if (/\.(html|htm|css|scss|sass|less|svg|xml)$/.test(lower)) return "file-code";
-    if (/\.(json|toml|yaml|yml|ini|env|conf)$/.test(lower)) return "file-code";
-    if (/\.(md|markdown|txt|rst|adoc)$/.test(lower)) return "file-lines";
-    if (/\.(png|jpe?g|gif|webp|bmp|ico)$/.test(lower)) return "file-image";
-    if (/\.pdf$/.test(lower)) return "file-pdf";
-    if (/\.(zip|tar|gz|7z|rar|bz2|xz)$/.test(lower)) return "file-zipper";
-    return "file";
 }

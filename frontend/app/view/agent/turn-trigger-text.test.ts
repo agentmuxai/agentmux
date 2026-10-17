@@ -6,7 +6,7 @@ import { parseTurnLedger, type TurnTrigger } from "@/app/store/agent-pane-state/
 import { absorbedSummary, isExternalTrigger, triggerLeadIn, workedVerb } from "./turn-trigger-text";
 
 /** srv's `TriggerKind::is_external`, as srv would set it. */
-const EXTERNAL = new Set(["agent", "service", "schedule", "task"]);
+const EXTERNAL = new Set(["agent", "service", "schedule", "task", "supervisor"]);
 const t = (kind: TurnTrigger["kind"], from: string | null = null): TurnTrigger => ({ kind, from, external: EXTERNAL.has(kind) });
 
 describe("turn trigger words", () => {
@@ -29,6 +29,8 @@ describe("turn trigger words", () => {
         const done = 'Background command "npm test" completed (exit code 0)';
         expect(triggerLeadIn(t("task", done))).toBe(`↳ ${done}`);
         expect(workedVerb(t("task", done))).toBe("Worked on a finished task");
+        expect(triggerLeadIn(t("supervisor"))).toBe("↳ the Supervisor kept it going");
+        expect(workedVerb(t("supervisor"))).toBe("Worked on a Supervisor continuation");
     });
 
     it("an unnamed sender still reads as a sentence", () => {

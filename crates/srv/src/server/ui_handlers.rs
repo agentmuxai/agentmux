@@ -232,7 +232,7 @@ fn prune_old_screenshots(dir: &std::path::Path) {
 /// `POST /api/v1/ui/screenshot` — backs the `UIScreenshot` MCP tool.
 /// Captures a PNG clipped to the caller's own pane, writes it to
 /// `<mux_data_dir>/tmp/ui-screenshots/<uuid>.png`, and returns both the
-/// path (openable via `OpenMedia`) and the base64 bytes inline.
+/// path (openable in the Editor) and the base64 bytes inline.
 pub(crate) async fn handle_ui_screenshot(
     State(state): State<AppState>,
     caller: Option<axum::Extension<crate::server::caller::Caller>>,
@@ -760,9 +760,7 @@ pub(crate) async fn handle_ui_browser_open(
         stack_onto_block_id: None,
         connection: None,
         auth: None,
-        reuse_editor_pane: None,
-        select: None,
-        line: None,
+        ..Default::default()
     };
     let mut meta = match crate::server::app_api::pane::build_pane_meta(&cmd) {
         Ok(m) => m,
@@ -1331,9 +1329,7 @@ pub(crate) async fn handle_host_browser_popup(
         stack_onto_block_id: None,
         connection: None,
         auth: None,
-        reuse_editor_pane: None,
-        select: None,
-        line: None,
+        ..Default::default()
     };
     let mut meta = match crate::server::app_api::pane::build_pane_meta(&cmd) {
         Ok(m) => m,

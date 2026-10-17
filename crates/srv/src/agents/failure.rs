@@ -358,7 +358,12 @@ pub fn classify(
             &tail,
         );
     }
+    // Claude's plan limits read "You've hit your weekly limit · resets …" (or
+    // "session limit"), with no "usage" in them.
     if hay.contains("usage limit")
+        || hay.contains("weekly limit")
+        || hay.contains("hit your limit")
+        || hay.contains("hit your session limit")
         || hay.contains("out of credits")
         || hay.contains("quota")
         || hay.contains("billing")
@@ -629,6 +634,21 @@ mod tests {
             None,
         );
         assert_eq!(f.code, FailureClass::RateLimited);
+    }
+
+    /// Claude's plan limits name no "usage limit": the account is out of
+    /// quota all the same (AgentMux saw this one on 2026-10-16).
+    #[test]
+    fn a_weekly_or_session_limit_is_the_plans_usage_limit() {
+        for stderr in [
+            "You've hit your weekly limit · resets Oct 19, 7pm (America/Los_Angeles)",
+            "You've hit your session limit · resets 3pm",
+            "Claude AI usage limit reached|1792156633",
+        ] {
+            let f = classify(Some(1), None, stderr, None);
+            assert_eq!(f.code, FailureClass::UsageLimit, "{stderr}");
+            assert!(!f.retryable, "{stderr}");
+        }
     }
 
     #[test]

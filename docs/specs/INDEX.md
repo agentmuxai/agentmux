@@ -482,6 +482,7 @@ partial list.
 | [`SPEC_SWARM_DISPATCH_NAMING_AND_ROW_MODEL_2026_07_19`](SPEC_SWARM_DISPATCH_NAMING_AND_ROW_MODEL_2026_07_19.md) | SPEC: eager per-dispatch naming + two-bucket swarm row model |
 | [`SPEC_SWARM_QUESTION_STATE_AND_QUESTION_TIMEOUT_ACTIVITY_2026_10_02`](SPEC_SWARM_QUESTION_STATE_AND_QUESTION_TIMEOUT_ACTIVITY_2026_10_02.md) | SPEC: Swarm "question" state and countdown, and activity that resets a question's timeout |
 | [`SPEC_SWARM_ROW_AUTO_LINGER_COUNTDOWN_2026_08_06`](SPEC_SWARM_ROW_AUTO_LINGER_COUNTDOWN_2026_08_06.md) | SPEC — Swarm Row Auto-Linger Countdown on Completion |
+| [`SPEC_SWARM_SUPERVISOR_2026_10_16`](SPEC_SWARM_SUPERVISOR_2026_10_16.md) | Spec: the Swarm Supervisor keeps agents working until they are done or need the user |
 | [`SPEC_SYSINFO_CONTROLS_AND_EDGES_2026_10_16`](SPEC_SYSINFO_CONTROLS_AND_EDGES_2026_10_16.md) | Spec: Sysinfo pane — flush top-right controls, a hide-the-selectors button, flush right-hand chart edge |
 | [`SPEC_SYSTEM_TIER_GLOBAL_MEMORY_SEEDING_2026_09_15`](SPEC_SYSTEM_TIER_GLOBAL_MEMORY_SEEDING_2026_09_15.md) | Spec: Operator Config seeding (AgentMux-shipped, system-tier Global Memory) |
 | [`SPEC_SYSTEM_TOOLCHAIN_INSTALLER_2026_08_24`](SPEC_SYSTEM_TOOLCHAIN_INSTALLER_2026_08_24.md) | SPEC: One-click system-toolchain installer (git, Node/npm, and friends) across Windows/macOS/Linux |
@@ -631,6 +632,8 @@ partial list.
 | [`SPEC_DURABLE_CONVERSATION_MEMORY_2026_09_23`](SPEC_DURABLE_CONVERSATION_MEMORY_2026_09_23.md) | SPEC: durable conversation memory — one continuous conversation per agent, in every case |
 | [`SPEC_DURABLE_JEKT_DELIVERY_2026_09_24`](SPEC_DURABLE_JEKT_DELIVERY_2026_09_24.md) | SPEC: durable jekt delivery — a message to an absent agent is held, not dropped |
 | [`SPEC_EDITOR_MCP_OPEN_BLANK_PREVIEW_AND_PANE_REUSE_2026_08_03`](SPEC_EDITOR_MCP_OPEN_BLANK_PREVIEW_AND_PANE_REUSE_2026_08_03.md) | Plan: MCP-opened markdown blank-preview investigation + Editor-pane reuse |
+| [`SPEC_EDITOR_REVAMP_UNIFIED_VIEWERS_2026_10_15`](SPEC_EDITOR_REVAMP_UNIFIED_VIEWERS_2026_10_15.md) | SPEC: Editor revamp — one pane for every file (PDF, images, audio/video, binary, large files), and the Media pane folded into it |
+| [`SPEC_EDITOR_TREE_KEYBOARD_ICONS_AND_CLICK_ZOOM_2026_10_16`](SPEC_EDITOR_TREE_KEYBOARD_ICONS_AND_CLICK_ZOOM_2026_10_16.md) | Editor: file tree icons and keyboard, which region has focus, click zoom, and files another program is using |
 | [`SPEC_FILE_BROWSER_PANE_2026_10_01`](SPEC_FILE_BROWSER_PANE_2026_10_01.md) | SPEC: A rich file browser pane (working title "Hangar") |
 | [`SPEC_FLOATING_PANE_ALWAYS_ON_TOP_2026_09_27`](SPEC_FLOATING_PANE_ALWAYS_ON_TOP_2026_09_27.md) | SPEC: "Always on top" for floating panes |
 | [`SPEC_FLOATING_PANE_REDOCK_DWELL_2026_09_09`](SPEC_FLOATING_PANE_REDOCK_DWELL_2026_09_09.md) | SPEC: Floating-pane redock — hover-intent dwell and a neutral parking zone |
@@ -678,6 +681,7 @@ partial list.
 | [`SPEC_PROCESS_AND_TURN_STATE_TRACKING_CONSOLIDATION_2026_07_31`](SPEC_PROCESS_AND_TURN_STATE_TRACKING_CONSOLIDATION_2026_07_31.md) | SPEC — Process & Turn-State Tracking: This Session's Findings, and the Case for a Unified State Machine |
 | [`SPEC_PROVIDER_LOGIN_THROUGH_SRV_2026_10_09`](SPEC_PROVIDER_LOGIN_THROUGH_SRV_2026_10_09.md) | SPEC: One provider-login implementation, in srv |
 | [`SPEC_REAUTH_FROM_AUTH_ERROR_2026_06_20`](SPEC_REAUTH_FROM_AUTH_ERROR_2026_06_20.md) | SPEC: Re-authentication from Agent Auth Failure |
+| [`SPEC_RECOVERY_NOTICES_AND_TOASTS_2026_10_16`](SPEC_RECOVERY_NOTICES_AND_TOASTS_2026_10_16.md) | Spec: tell the user what happened after AgentMux recovers, and fix the toasts that carry it |
 | [`SPEC_REMOTE_TERMINALS_AND_DURABLE_SESSIONS_2026_10_02`](SPEC_REMOTE_TERMINALS_AND_DURABLE_SESSIONS_2026_10_02.md) | SPEC: Remote terminals (SSH, WSL) and durable remote sessions — implementation plan |
 | [`SPEC_RENAME_KNOWLEDGE_TO_MEMORY_2026_10_06`](SPEC_RENAME_KNOWLEDGE_TO_MEMORY_2026_10_06.md) | SPEC: Rename the Knowledge pane to Memory, and give "memory" one set of meanings |
 | [`SPEC_RENDERER_RECYCLE_WHEN_IDLE_2026_10_13`](SPEC_RENDERER_RECYCLE_WHEN_IDLE_2026_10_13.md) | Spec: recycle a window's renderer when it's idle and over budget |
@@ -782,6 +786,7 @@ partial list.
 | [`SPEC_FLOATING_PANE_REDOCK_PHASE_4A_SCOPING_2026-05-27`](SPEC_FLOATING_PANE_REDOCK_PHASE_4A_SCOPING_2026-05-27.md) | Phase 4a Re-dock — MVP scope decision |
 | [`SPEC_FLOATING_PANE_TEAROFF_2026_05_11`](SPEC_FLOATING_PANE_TEAROFF_2026_05_11.md) | Floating pane tear-off (subordinate window, owned by mother instance) |
 | [`SPEC_FLOATING_PANE_TEAROFF_CROSS_PLATFORM_2026-05-26`](SPEC_FLOATING_PANE_TEAROFF_CROSS_PLATFORM_2026-05-26.md) | Floating pane tear-off — cross-platform recipes |
+| [`SPEC_FLOATING_PANE_WINDOW_CONTROLS_REFINEMENTS_2026_10_16`](SPEC_FLOATING_PANE_WINDOW_CONTROLS_REFINEMENTS_2026_10_16.md) | Spec: Floating pane window controls: Redock placement and size, a real Restore when maximized, and drag-to-restore |
 | [`SPEC_FOREGROUND_BACKGROUND_PROCESS_ABSTRACTION_2026_08_20`](SPEC_FOREGROUND_BACKGROUND_PROCESS_ABSTRACTION_2026_08_20.md) | Spec: Foreground/Background Process Abstraction for Agent-Run Commands |
 | [`SPEC_GLOBAL_IDENTITY_MEMORY_DRONE_2026_06_24`](SPEC_GLOBAL_IDENTITY_MEMORY_DRONE_2026_06_24.md) | SPEC — Global Identity, Memory, and Drone Definitions |
 | [`SPEC_HOST_VS_CONTAINER_AGENTS_2026_06_18`](SPEC_HOST_VS_CONTAINER_AGENTS_2026_06_18.md) | Spec: Host vs Container Agent Differentiation |
@@ -796,6 +801,7 @@ partial list.
 | [`SPEC_LINUX_APPIMAGE_PER_BUILD_CHANNEL_2026_06_25`](SPEC_LINUX_APPIMAGE_PER_BUILD_CHANNEL_2026_06_25.md) | SPEC: Linux AppImage Per-Build Channel Isolation |
 | [`SPEC_LINUX_DOCS_UPDATE_2026_06_06`](SPEC_LINUX_DOCS_UPDATE_2026_06_06.md) | SPEC — Linux documentation catch-up |
 | [`SPEC_LINUX_FLOATING_PANE_TEAROFF_2026_05_30`](SPEC_LINUX_FLOATING_PANE_TEAROFF_2026_05_30.md) | Linux floating-pane tear-off — implementation spec |
+| [`SPEC_LINUX_WINDOW_CONTROLS_GNOME_STYLE_2026_10_16`](SPEC_LINUX_WINDOW_CONTROLS_GNOME_STYLE_2026_10_16.md) | Spec: Linux window controls that look like Linux |
 | [`SPEC_LOCAL_BUILD_VERSIONING_2026_05_28`](SPEC_LOCAL_BUILD_VERSIONING_2026_05_28.md) | SPEC: Local-build versioning — stop committing bumps for smoke builds (2026-05-28) |
 | [`SPEC_LONG_RUNNING_PROCESS_UX_2026_06_24`](SPEC_LONG_RUNNING_PROCESS_UX_2026_06_24.md) | SPEC — Long-Running Process UX: Working Stuck + Red X |
 | [`SPEC_MACOS_CEF_FRAMEWORK_BUNDLING_2026_05_28`](SPEC_MACOS_CEF_FRAMEWORK_BUNDLING_2026_05_28.md) | macOS CEF Framework Bundling for `task dev` and `task package:macos` |

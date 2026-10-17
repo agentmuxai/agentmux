@@ -138,9 +138,7 @@ pub(crate) async fn handle_close_window(state: &AppState, call: &WebCallType) ->
                     .unwrap_or(false);
                 // Best-effort: a failure here must never block the close itself.
                 if will_empty_windowids {
-                    if let Some(snapshot) = super::session_restore::snapshot_workspace(store, &ws_id) {
-                        super::session_restore::save_last_session_snapshot(store, snapshot);
-                    }
+                    super::session_windows::save_on_last_close(store, &ws_id);
                 }
                 close_workspace(state, ws_id).await;
             }
@@ -194,9 +192,7 @@ pub(crate) async fn handle_close_window(state: &AppState, call: &WebCallType) ->
                 .map(|c| c.windowids.is_empty())
                 .unwrap_or(false);
             if will_empty_windowids {
-                if let Some(snapshot) = super::session_restore::snapshot_workspace(store, &ws_id) {
-                    super::session_restore::save_last_session_snapshot(store, snapshot);
-                }
+                super::session_windows::save_on_last_close(store, &ws_id);
             }
             close_workspace(state, ws_id).await;
         }

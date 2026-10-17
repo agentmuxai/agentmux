@@ -13,6 +13,8 @@ import { Button } from "@/app/element/ui";
 import { healthSignals, startHealthSignals, worstHealthLevel } from "@/app/store/health-signals";
 import { healthLabel } from "@/app/store/health-signals-text";
 import { HealthNotices } from "./HealthNotices";
+import { RecentIncidents } from "./RecentIncidents";
+import { hasOpenIncident } from "@/app/init/incidents";
 import { statusDotColor, statusDotTip } from "./backend-dot";
 
 function gpuColor(c: ReturnType<typeof getGpuInfo>["classification"]): string {
@@ -25,6 +27,9 @@ function gpuColor(c: ReturnType<typeof getGpuInfo>["classification"]): string {
             return "var(--error-color)";
     }
 }
+
+/** The tooltip's words while a recovery notice is open. */
+const RECOVERED_LABEL = "recovered from a problem, see Recent incidents";
 
 type BackendInfo = {
     pid?: number;
@@ -72,6 +77,7 @@ const BackendStatusPanel = (props: BackendStatusPanelProps): JSX.Element => {
             style={{ width: `${POPOVER_WIDTH}px` }}
         >
             <HealthNotices />
+            <RecentIncidents />
             <div class="status-bar-popover-row">
                 <span class="status-bar-popover-label">Status</span>
                 <span style={{ color: color() }}>{backendStatus()}</span>
@@ -279,6 +285,7 @@ const BackendStatus = (): JSX.Element => {
 
     const color = () => statusDotColor(backendStatus(), worstHealthLevel());
     const healthLabels = () => healthSignals().map((s) => healthLabel(s.kind, s.payload));
+    const tipLabels = () => (hasOpenIncident() ? [...healthLabels(), RECOVERED_LABEL] : healthLabels());
 
     const iconSpin = () => backendStatus() === "connecting";
 
@@ -301,8 +308,8 @@ const BackendStatus = (): JSX.Element => {
             <div
                 ref={(el) => { triggerRef = el; }}
                 class="status-bar-item clickable"
-                data-tip={statusDotTip(healthLabels())}
-                aria-label={statusDotTip(healthLabels())}
+                data-tip={statusDotTip(tipLabels())}
+                aria-label={statusDotTip(tipLabels())}
                 onClick={handleClick}
             >
                 {/* Says a new signal aloud, as the old banner did; nothing visible. */}
@@ -317,6 +324,10 @@ const BackendStatus = (): JSX.Element => {
                         class="stat-mono stat-uptime"
                         style={{ "min-width": uptimeSecs() < 3600 ? "5ch" : uptimeSecs() < 86400 ? "8ch" : "12ch" }}
                     >{formatUptime(uptimeSecs())}</span>
+                </Show>
+                {/* A recovery notice is still open (spec §4.3); the dot keeps its colour. */}
+                <Show when={hasOpenIncident()}>
+                    <span class="stat-incident-marker" aria-hidden="true">ⓘ</span>
                 </Show>
                 <Show when={backendStatus() === "connecting"}>
                     <span style={{ color: color() }}>Connecting…</span>

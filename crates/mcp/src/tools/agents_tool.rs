@@ -5,12 +5,12 @@
 //! doing, opening them) and the caller's own history, with an `action`
 //! (docs/specs/SPEC_MUXAPI_TOOL_CONSOLIDATION_2026_10_15.md §4.2, slice S4).
 //! It replaces DiscoverAgents, FleetList (the same call), ListConversations,
-//! GetAgentTranscript, OpenAgent, SearchHistory and SupervisorNudge; their
-//! handlers (fleet.rs, history.rs, panes.rs) run each action unchanged.
-//! `fork` is its own (SPEC_AGENT_WORKERS_2026_10_15.md §3.1): srv launches
+//! GetAgentTranscript, OpenAgent and SearchHistory; their handlers
+//! (fleet.rs, history.rs, panes.rs) run each action unchanged.
+//! `spawn` is its own (SPEC_AGENT_WORKERS_2026_10_15.md §3.1): srv launches
 //! the worker, then this process sends it the brief, signed as the caller.
 
-use agentmux_common::api_types::ForkAgentRequest;
+use agentmux_common::api_types::SpawnAgentRequest;
 
 use super::family::{pick, public_params, relabeled, Act};
 use super::*;
@@ -20,11 +20,9 @@ pub(super) const ACTS: &[Act] = &[
     Act { action: "conversations", tool: "ListConversations", rename: &[] },
     Act { action: "transcript", tool: "GetAgentTranscript", rename: &[] },
     Act { action: "open", tool: "OpenAgent", rename: &[("agent", "agent_id")] },
-    Act { action: "fork", tool: "ForkAgent", rename: &[] },
+    Act { action: "spawn", tool: "SpawnAgent", rename: &[] },
+    Act { action: "workers", tool: "AgentWorkers", rename: &[] },
     Act { action: "search_history", tool: "SearchHistory", rename: &[] },
-    // The handler's own `action` is the decision: `pick` takes Agents'
-    // `action` out before it renames.
-    Act { action: "nudge", tool: "SupervisorNudge", rename: &[("agent", "target_agent"), ("decision", "action")] },
 ];
 
 pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
@@ -40,9 +38,10 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 );
             }
             let result = match act.tool {
-                "DiscoverAgents" | "SupervisorNudge" => fleet::call(act.tool, &args, cx).await,
+                "DiscoverAgents" => fleet::call(act.tool, &args, cx).await,
                 "OpenAgent" => panes::call(act.tool, &args, cx).await,
-                "ForkAgent" => fork(&args, cx).await,
+                "SpawnAgent" => spawn(&args, cx).await,
+                "AgentWorkers" => workers(cx).await,
                 _ => history::call(act.tool, &args, cx).await,
             };
             let result = result.map_err(|e| anyhow::anyhow!(public_params(&format!("{e:#}"), act.rename)));
@@ -57,34 +56,35 @@ fn str_arg(args: &Value, key: &str) -> Option<String> {
     args.get(key).and_then(|v| v.as_str()).map(str::trim).filter(|s| !s.is_empty()).map(str::to_string)
 }
 
-/// How long `fork` waits for srv: the user's approval window (srv's
+/// How long `spawn` waits for srv: the user's approval window (srv's
 /// `ask_user`, 120 s and 15 s of grace), then an `agent.open` that may
 /// install the worker's CLI (150 s), with room to spare. A wait that ran out
 /// while srv carried on would launch a worker that never gets its brief.
-const FORK_WAIT: std::time::Duration = std::time::Duration::from_secs(360);
+const SPAWN_WAIT: std::time::Duration = std::time::Duration::from_secs(360);
 
-/// `fork`: srv forks this agent and opens the worker next to it
-/// (`/api/v1/agent/fork`), then the brief goes to the worker as this
+/// `spawn`: srv builds a worker from this agent's definition and opens it next to it
+/// (`/api/v1/agent/spawn`), then the brief goes to the worker as this
 /// agent's own message, signed with its key, so it arrives host-verified
 /// and the worker can answer with Message send.
-async fn fork(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
+async fn spawn(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
     require_agent_env(cx.local_url, cx.auth_key, cx.block_id)?;
     let brief = str_arg(arguments, "brief").ok_or_else(|| anyhow::anyhow!("missing required parameter: brief"))?;
-    let request = ForkAgentRequest {
+    let request = SpawnAgentRequest {
         auth: sign_ui_automation_auth()?,
         name: str_arg(arguments, "name"),
         model: str_arg(arguments, "model"),
         effort: str_arg(arguments, "effort"),
         brief: brief.clone(),
+        account: str_arg(arguments, "account"),
         user_instruction: str_arg(arguments, "user_instruction").unwrap_or_default(),
     };
-    let url = format!("{}/api/v1/agent/fork", cx.local_url.trim_end_matches('/'));
+    let url = format!("{}/api/v1/agent/spawn", cx.local_url.trim_end_matches('/'));
     // Past the shared client's 10 s: srv may wait on the user's answer and
-    // then on the worker's CLI install (FORK_WAIT).
+    // then on the worker's CLI install (SPAWN_WAIT).
     let resp = cx
         .client
         .post(&url)
-        .timeout(FORK_WAIT)
+        .timeout(SPAWN_WAIT)
         .header(AUTH_KEY_HEADER, cx.auth_key)
         .json(&request)
         .send()
@@ -93,7 +93,7 @@ async fn fork(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
     let status = resp.status();
     let mut body: Value = resp.json().await.unwrap_or(Value::Null);
     if !status.is_success() {
-        anyhow::bail!("ForkAgent: {}", body["error"].as_str().map(str::to_string).unwrap_or_else(|| format!("srv answered {status}: {body}")));
+        anyhow::bail!("SpawnAgent: {}", body["error"].as_str().map(str::to_string).unwrap_or_else(|| format!("srv answered {status}: {body}")));
     }
     let to = body["message_to"].as_str().unwrap_or_default().to_string();
     let leader = std::env::var("AGENTMUX_AGENT_ID").unwrap_or_default();
@@ -106,11 +106,36 @@ async fn fork(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
 }
 
 /// The worker's first message: who it reports to, then the leader's brief.
+/// It names the tool exactly: a worker that went looking for "SendMessage"
+/// found Claude Code's own cross-session tool, whose message reaches the
+/// leader unverified and isn't counted as a report.
 fn brief_message(leader: &str, brief: &str) -> String {
     format!(
-        "You are a worker of {leader}, started to do the task below. Report to {leader} with Message send \
-         when you finish, get stuck, or need a decision.\n\n{brief}"
+        "You are a worker of {leader}, started to do the task below. Report to {leader} with the agentmux \
+         MCP server's Message tool (mcp__agentmux__Message in Claude Code; action \"send\", to \"{leader}\"), \
+         never a built-in SendMessage, when you finish, get stuck, or need a decision.\n\n{brief}"
     )
+}
+
+/// `workers`: this agent's own workers, from srv (`/api/v1/agent/workers`).
+async fn workers(cx: &ToolCtx<'_>) -> Result<String> {
+    require_agent_env(cx.local_url, cx.auth_key, cx.block_id)?;
+    let request = agentmux_common::api_types::AgentWorkersRequest { auth: sign_ui_automation_auth()? };
+    let url = format!("{}/api/v1/agent/workers", cx.local_url.trim_end_matches('/'));
+    let resp = cx
+        .client
+        .post(&url)
+        .header(AUTH_KEY_HEADER, cx.auth_key)
+        .json(&request)
+        .send()
+        .await
+        .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+    let status = resp.status();
+    let body: Value = resp.json().await.unwrap_or(Value::Null);
+    if !status.is_success() {
+        anyhow::bail!("AgentWorkers: {}", body["error"].as_str().map(str::to_string).unwrap_or_else(|| format!("srv answered {status}: {body}")));
+    }
+    Ok(serde_json::to_string_pretty(&body)?)
 }
 
 #[cfg(test)]
@@ -133,10 +158,7 @@ mod tests {
     }
 
     #[test]
-    fn nudge_and_open_take_the_agent_as_their_handlers_name_it() {
-        let (act, args) = pick("Agents", ACTS, &json!({ "action": "nudge", "agent": "Korp", "decision": "decline", "reason": "done" })).unwrap();
-        assert_eq!(act.tool, "SupervisorNudge");
-        assert_eq!(args, json!({ "target_agent": "Korp", "action": "decline", "reason": "done" }));
+    fn open_takes_the_agent_as_its_handler_names_it() {
         let (act, args) = pick("Agents", ACTS, &json!({ "action": "open", "agent": "Korp", "focus": false })).unwrap();
         assert_eq!(act.tool, "OpenAgent");
         assert_eq!(args, json!({ "agent_id": "Korp", "focus": false }));
@@ -149,16 +171,17 @@ mod tests {
         let m = brief_message("loap-3", "Implement SPEC_X.");
         assert_eq!(
             m,
-            "You are a worker of loap-3, started to do the task below. Report to loap-3 with Message send \
-             when you finish, get stuck, or need a decision.\n\nImplement SPEC_X."
+            "You are a worker of loap-3, started to do the task below. Report to loap-3 with the agentmux \
+             MCP server's Message tool (mcp__agentmux__Message in Claude Code; action \"send\", to \"loap-3\"), \
+             never a built-in SendMessage, when you finish, get stuck, or need a decision.\n\nImplement SPEC_X."
         );
         assert!(!m.contains("  "), "{m}");
     }
 
     #[test]
-    fn fork_runs_its_own_handler_with_its_arguments() {
-        let (act, args) = pick("Agents", ACTS, &json!({ "action": "fork", "name": "Loap-4", "model": "sonnet", "brief": "b" })).unwrap();
-        assert_eq!(act.tool, "ForkAgent");
+    fn spawn_runs_its_own_handler_with_its_arguments() {
+        let (act, args) = pick("Agents", ACTS, &json!({ "action": "spawn", "name": "Loap-4", "model": "sonnet", "brief": "b" })).unwrap();
+        assert_eq!(act.tool, "SpawnAgent");
         assert_eq!(args, json!({ "name": "Loap-4", "model": "sonnet", "brief": "b" }));
     }
 

@@ -88,7 +88,6 @@ actor_sites! {
     WorkRelease => "work_release",
     CronCreate => "cron_create",
     Inject => "inject",
-    SupervisorDecision => "supervisor_decision",
     BusSend => "bus_send",
     BusInject => "bus_inject",
     BusBroadcast => "bus_broadcast",

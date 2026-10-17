@@ -11,6 +11,7 @@ import {
     getHiddenKeys,
     getPinnedKeys,
     getPinnedWidgets,
+    getSavedPinNames,
     getWidgetBarModel,
     isWidgetHidden,
     nextWidgetBarConfig,
@@ -261,6 +262,18 @@ function barWmap(): Record<string, WidgetConfigType> {
         "ext@acme.board/main": widget({ "display:order": 50, label: "Board", blockdef: { meta: { view: "ext:acme.board/main" } } }),
     };
 }
+
+describe("a retired pin", () => {
+    const wmap = () => ({ ...barWmap(), "defwidget@term": widget({ label: "Terminal", blockdef: { meta: { view: "term" } } }) });
+
+    it("keeps the Media pane's place on the bar as the Editor", () => {
+        expect(getSavedPinNames({ "widget:pinned": ["term", "media", "agent"] }, wmap())).toEqual(["term", "editor", "agent"]);
+    });
+
+    it("isn't pinned twice when the Editor already is", () => {
+        expect(getSavedPinNames({ "widget:pinned": ["editor", "media"] }, wmap())).toEqual(["editor"]);
+    });
+});
 
 describe("widget:hidden", () => {
     it("reads full keys and never hides Settings", () => {

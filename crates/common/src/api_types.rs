@@ -421,6 +421,10 @@ pub struct PaneOpenRequest {
     /// reuse (`EditorViewModel.openToTheSide`/`openInTerminal`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reuse_editor_pane: Option<bool>,
+    /// `view: "editor"` only: an image or video tab follows newer matching
+    /// files in its folder. Set by the `OpenMedia` alias (`Pane` open, view `media`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub follow_folder: Option<bool>,
     /// `view: "files"` only: names (or full paths) inside `file` to select
     /// once the Files pane has listed it. Set by the `OpenFiles` MCP tool.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -558,7 +562,7 @@ pub struct UiScreenshotRequest {
 }
 
 /// Response for `POST /api/v1/ui/screenshot`. `path` is a file already
-/// written to disk (openable via the `OpenMedia` tool); `png_base64` is the
+/// written to disk (openable in the Editor, `Pane` open); `png_base64` is the
 /// same image inline, for a caller that can render an MCP `ImageContent`
 /// block directly without a second round trip.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -903,14 +907,24 @@ pub struct RequestUpgradeRequest {
     pub version: Option<String>,
 }
 
-/// `POST /api/v1/agent/fork` — backs the `Agents` tool's `fork`
+/// `POST /api/v1/agent/spawn` — backs the `Agents` tool's `spawn`
 /// (docs/specs/SPEC_AGENT_WORKERS_2026_10_15.md §3.1): the calling agent, the
-/// leader, launches a worker, a fork of itself in a pane next to its own.
+/// leader, opens a worker: a new agent built from its own definition (not a
+/// fork: no history), in a pane next to its own.
+/// `POST /api/v1/agent/workers` — backs the `Agents` tool's `workers`
+/// (docs/specs/SPEC_AGENT_WORKERS_2026_10_15.md §3.4): the calling agent's own
+/// workers, by its signed identity.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ForkAgentRequest {
+pub struct AgentWorkersRequest {
     #[serde(flatten)]
     pub auth: UiAutomationAuth,
-    /// The worker's name; absent, the next free `Name #N` of the lineage.
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SpawnAgentRequest {
+    #[serde(flatten)]
+    pub auth: UiAutomationAuth,
+    /// The worker's name; absent, the first free "<leader> worker N".
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     /// The worker's model and effort; absent, the leader's.
@@ -918,6 +932,10 @@ pub struct ForkAgentRequest {
     pub model: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effort: Option<String>,
+    /// The account to run the worker on, by id or name/email; absent, the
+    /// leader's, or another signed-in one when the leader's can't run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account: Option<String>,
     /// The worker's task, its first message. srv shows its start to the user
     /// when it asks; the MCP server sends it, signed as the leader.
     pub brief: String,

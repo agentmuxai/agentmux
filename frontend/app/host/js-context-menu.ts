@@ -255,7 +255,7 @@ export function showJsContextMenu(
                 row.appendChild(sub);
                 // display:none until hovered → no hole until it's shown and
                 // placed; the style observer picks up each open/close.
-                submenuHandles.push(registerPaneOverlay(sub));
+                submenuHandles.push(registerPaneOverlay(sub, { keys: true }));
                 // Positioned through the shared framework, like the top-level
                 // menu: anchored to the row, preferring right-start — flip()
                 // sends it left of the parent near the right edge, shift()
@@ -374,7 +374,7 @@ export function showJsContextMenu(
     overlay.appendChild(menuEl);
     document.body.appendChild(overlay);
     // visibility:hidden until placed below → registers no hole until then.
-    overlayHandles.push(registerPaneOverlay(menuEl));
+    overlayHandles.push(registerPaneOverlay(menuEl, { keys: true }));
 
     // Position at the cursor via the shared framework — flip/shift/size keep
     // the menu on-screen near window edges. Unlike FlyoutMenu/Popover, a

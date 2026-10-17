@@ -66,6 +66,16 @@ function runFrames(n = 1): void {
     }
 }
 
+let overlayOver: string | null = null;
+let overlayReleased: (() => void) | null = null;
+vi.mock("@/app/platform/pane-overlay", () => ({
+    overlayCoversPane: (blockId: string) => overlayOver === blockId,
+    onPaneOverlayReleased: (cb: () => void) => {
+        overlayReleased = cb;
+        return () => {};
+    },
+}));
+
 import { push as pushModal, remove as removeModal } from "@/app/element/modal-stack";
 import { FOCUS_RETRY_FRAMES, focusManager, installFocusFollowsSelection, WINDOW_FOCUS_SETTLE_MS } from "./focusManager";
 
@@ -77,6 +87,7 @@ describe("focusManager", () => {
         focusedNode = { id: "node-1", data: { blockId: "block-1" } };
         caretInBlock = null;
         caretOutsidePanes = false;
+        overlayOver = null;
         frames = [];
         document.body.innerHTML = "";
         vi.spyOn(document, "hasFocus").mockReturnValue(true);
@@ -165,6 +176,12 @@ describe("focusManager", () => {
             expect(localGiveFocus).toHaveBeenCalledTimes(1);
         });
 
+        it("does not take the keyboard from a menu open over the pane", () => {
+            overlayOver = "block-1";
+            focusManager.claimFocusOnMount("block-1", giveFocus);
+            expect(giveFocus).not.toHaveBeenCalled();
+        });
+
         it("does NOT call giveFocus for a block in a background tab or an unfocused pane", () => {
             // The mounting pane's own blockId doesn't match the ACTIVE tab's
             // focused node — e.g. a background-tab pane created via muxsh,
@@ -212,6 +229,15 @@ describe("focusManager", () => {
             hasOpenModals.mockReturnValue(true);
             focusManager.ensureSelectionFocused("selection");
             expect(giveFocus).not.toHaveBeenCalled();
+        });
+
+        it("leaves the keyboard with a menu or popover open over the selected pane", () => {
+            overlayOver = "block-1";
+            focusManager.ensureSelectionFocused("window-focus");
+            expect(giveFocus).not.toHaveBeenCalled();
+            overlayOver = null;
+            focusManager.ensureSelectionFocused("window-focus");
+            expect(giveFocus).toHaveBeenCalledTimes(1);
         });
 
         // The window is in the background (`exit`, then the user switched
@@ -365,6 +391,34 @@ describe("focusManager", () => {
         beforeEach(() => {
             installFocusFollowsSelection();
             vi.spyOn(console, "info").mockImplementation(() => {});
+        });
+
+        it("gives the selection the caret when a menu over a browser pane is released", () => {
+            overlayOver = "block-1";
+            focusManager.ensureSelectionFocused("window-focus");
+            expect(giveFocus).not.toHaveBeenCalled();
+            overlayOver = null;
+            overlayReleased?.();
+            expect(giveFocus).toHaveBeenCalledTimes(1);
+        });
+
+        it("leaves a caret a closing overlay put back on its opener", () => {
+            document.body.innerHTML = `<button id="opener"></button>`;
+            document.body.querySelector<HTMLButtonElement>("#opener")!.focus();
+            overlayReleased?.();
+            expect(giveFocus).not.toHaveBeenCalled();
+        });
+
+        it("a pending focus retry does not take the keyboard from a menu opened meanwhile", () => {
+            frames = [];
+            // Nothing to type into yet: the retry loop starts.
+            bcmForBlockId = { "block-1": { viewModel: { giveFocus: vi.fn(() => false) } } };
+            focusManager.ensureSelectionFocused("selection");
+            overlayOver = "block-1";
+            const takes = vi.fn(() => true);
+            bcmForBlockId = { "block-1": { viewModel: { giveFocus: takes } } };
+            runFrames(2);
+            expect(takes).not.toHaveBeenCalled();
         });
 
         it("returns a caret that fell from a pane to <body> to the selection", () => {

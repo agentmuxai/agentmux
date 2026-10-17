@@ -2,33 +2,32 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Opening a file from the Files pane by its kind (§5.4): text and code in an
- * Editor pane, images, video and audio in a Media pane, both beside the Files
- * pane; anything else with the OS's default app. A program asks first.
- * docs/specs/SPEC_FILE_BROWSER_PANE_2026_10_01.md §5.4.
+ * Opening a file from the Files pane by its kind (§5.4): most files in an
+ * Editor pane beside the Files pane — text and code, and since the Media pane
+ * was folded into the Editor also images, video, audio, PDFs, archives and
+ * other binaries, which the Editor shows in their own viewer or its info
+ * card. Office documents and design files go to the OS's default app. A
+ * program asks first.
+ * docs/specs/SPEC_FILE_BROWSER_PANE_2026_10_01.md §5.4,
+ * SPEC_EDITOR_REVAMP_UNIFIED_VIEWERS_2026_10_15.md §4.12.1.
  */
 
-import { AUDIO_EXTENSIONS, IMAGE_EXTENSIONS, VIDEO_EXTENSIONS } from "@/app/element/local-media";
 import { RpcApi } from "@/app/store/rpc-api";
-import { openInMediaPaneOnScreen } from "@/app/view/media/media-open";
+import { openInEditorPaneOnScreen } from "@/app/view/editor/editor-open";
 import type { LayoutModel } from "@/layout/lib/layoutModel";
 import { getLayoutModelForStaticTab } from "@/layout/lib/layoutModelHooks";
 import { addWidgetAsPaneTab, closeBlockInStack, effectiveStack } from "@/layout/lib/layoutStack";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { extensionOf } from "./files-sort";
 
-export type OpenTarget = "editor" | "media" | "os" | "program";
+export type OpenTarget = "editor" | "os" | "program";
 
-/** Formats the Editor can't show and that have a better home elsewhere. */
-const BINARY = new Set(
+/** Documents the system's own apps edit: the Editor only lists their facts,
+ *  so they open there. Everything else opens in the Editor. */
+const OS_APP = new Set(
     (
-        "pdf doc docx xls xlsx ppt pptx odt ods odp rtf pages numbers key " +
-        "zip 7z rar gz tgz bz2 xz zst tar iso dmg cab jar war apk " +
-        "dll so dylib lib a o obj class pyc wasm bin dat db sqlite sqlite3 mdb " +
-        "psd ai sketch fig xcf blend fbx glb gltf stl " +
-        "mp3 flac ogg m4a aac wma mkv avi wmv flv mpg mpeg m4v 3gp " +
-        "bmp tif tiff heic heif raw cr2 nef ico icns " +
-        "ttf otf woff woff2 eot"
+        "doc docx xls xlsx ppt pptx odt ods odp pages numbers key " +
+        "psd ai sketch fig xcf blend fbx glb gltf stl"
     ).split(" ")
 );
 
@@ -38,21 +37,15 @@ const PROGRAM = new Set("exe msi com scr lnk app pkg appx msix url reg".split(" 
 export function openTargetOf(name: string): OpenTarget {
     const ext = extensionOf(name);
     if (PROGRAM.has(ext)) return "program";
-    if (IMAGE_EXTENSIONS.includes(ext) || VIDEO_EXTENSIONS.includes(ext) || AUDIO_EXTENSIONS.includes(ext)) return "media";
-    if (BINARY.has(ext)) return "os";
+    if (OS_APP.has(ext)) return "os";
     return "editor";
 }
 
-/** Opens `path` in a new pane of `view` to the right of the Files pane; a
- *  media file joins the Media pane on screen as a tab, if there is one. */
-export async function openInPane(
-    view: "editor" | "media",
-    path: string,
-    besideBlockId: string,
-    connection?: string
-): Promise<void> {
-    if (connection && view === "media") throw new Error(`Media files on ${connection} can't be shown yet`);
-    if (view === "media" && (await openInMediaPaneOnScreen(path))) return;
+/** Opens `path` in the Editor: a tab of the Editor pane on screen when there
+ *  is one, else a new Editor pane to the right of the Files pane. A file on a
+ *  host opens in an editor on that host. */
+export async function openInPane(view: "editor", path: string, besideBlockId: string, connection?: string): Promise<void> {
+    if (!connection && (await openInEditorPaneOnScreen(path))) return;
     await RpcApi.PaneOpenCommand(
         TabRpcClient,
         {

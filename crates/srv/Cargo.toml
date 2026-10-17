@@ -95,6 +95,9 @@ calamine = { version = "0.36", default-features = false }
 lopdf = { version = "0.45", default-features = false }
 hex = "0.4"
 ed25519-dalek = { version = "3", default-features = false, features = ["alloc"] }
+# X25519 for sealing a cloud file's key to its receiver (server/jekt_seal.rs);
+# already in the build through ed25519-dalek.
+curve25519-dalek = { version = "5", default-features = false }
 # HMAC-SHA256 for the WhatsApp Cloud API webhook signature check
 # (X-Hub-Signature-256). `Mac::verify_slice` is constant-time internally
 # (backed by `subtle`, already present transitively). See

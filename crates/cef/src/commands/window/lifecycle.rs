@@ -101,6 +101,17 @@ pub fn quit_app(state: &Arc<AppState>) -> Result<serde_json::Value, String> {
         "[quit] explicit quit requested (tray/launcher) — drained with LauncherRequested"
     );
 
+    // 2b. Save every window before any closes: each close deletes its
+    //     workspace, and srv on its own keeps only the last window's
+    //     (`session_windows.rs` in srv). Blocking, on this worker thread,
+    //     bounded by the helper's 1.5 s; a failure only means srv falls back
+    //     to saving the last window as before.
+    if !labels.is_empty() {
+        let web_endpoint = state.backend_endpoints.lock().web_endpoint.clone();
+        let auth_key = state.auth_key.lock().clone();
+        crate::client::backend_save_session_snapshot(&web_endpoint, &auth_key, true);
+    }
+
     // 3. Cascade-close the warm pool and re-run the Stage-2 gate. Posted:
     //    that part IS UI-thread-only. Its own `BeginDrain` is idempotent
     //    (`handle_begin_drain` returns early when not `Running`), so

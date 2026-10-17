@@ -42,6 +42,7 @@ const TRIGGER_KINDS: Readonly<Record<TriggerKind, true>> = {
     service: true,
     schedule: true,
     task: true,
+    supervisor: true,
     system: true,
 };
 

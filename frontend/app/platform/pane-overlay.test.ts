@@ -5,7 +5,8 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 
 vi.mock("@/app/platform/ipc", () => ({ invokeCommand: vi.fn(() => Promise.resolve()) }));
 
-import { __overlayRectCount, registerPaneOverlay } from "./pane-overlay";
+import { __overlayRectCount, __setAutoOverlayRect, onPaneOverlayReleased, overlayCoversPane, registerPaneOverlay } from "./pane-overlay";
+import { __resetPaneRectRegistry, registerPaneRect } from "./pane-rect-registry";
 
 // registerPaneOverlay — the imperative sibling of usePaneOverlay used by the
 // plain-DOM context menu (SPEC_MACOS_BROWSER_PANE_CONTEXT_MENU_2026_09_24).
@@ -69,5 +70,71 @@ describe("isRegisteredPaneOverlay", () => {
         expect(isRegisteredPaneOverlay(el)).toBe(true);
         h.release();
         expect(isRegisteredPaneOverlay(el)).toBe(false);
+    });
+});
+
+describe("overlayCoversPane", () => {
+    afterEach(() => {
+        document.body.innerHTML = "";
+        __resetPaneRectRegistry();
+    });
+
+    test("true while an open overlay intersects the pane, false once released", () => {
+        registerPaneRect("pane-a", { x: 0, y: 0, w: 200, h: 200 });
+        expect(overlayCoversPane("pane-a")).toBe(false);
+        const h = registerPaneOverlay(makeEl({ left: 150, top: 150, width: 100, height: 100 }), { keys: true });
+        expect(overlayCoversPane("pane-a")).toBe(true);
+        h.release();
+        expect(overlayCoversPane("pane-a")).toBe(false);
+    });
+
+    test("an overlay elsewhere, or a pane with no rect, is not covered", () => {
+        registerPaneRect("pane-a", { x: 0, y: 0, w: 100, h: 100 });
+        const h = registerPaneOverlay(makeEl({ left: 300, top: 300, width: 50, height: 50 }), { keys: true });
+        expect(overlayCoversPane("pane-a")).toBe(false);
+        expect(overlayCoversPane("no-such-pane")).toBe(false);
+        h.release();
+    });
+
+    test("an overlay that only clips (a tooltip, the drag hole) does not hold the keyboard, and its release tells no one", () => {
+        const frames: FrameRequestCallback[] = [];
+        vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => frames.push(cb));
+        const cb = vi.fn();
+        const off = onPaneOverlayReleased(cb);
+        registerPaneRect("pane-a", { x: 0, y: 0, w: 200, h: 200 });
+        const h = registerPaneOverlay(makeEl({ left: 10, top: 10, width: 50, height: 50 }));
+        expect(overlayCoversPane("pane-a")).toBe(false);
+        h.release();
+        frames.splice(0).forEach((f) => f(0));
+        expect(cb).not.toHaveBeenCalled();
+        off();
+        vi.unstubAllGlobals();
+    });
+
+    test("a data-pane-overlay (auto) element, such as a loading cover or tooltip, does not count", () => {
+        registerPaneRect("pane-a", { x: 0, y: 0, w: 200, h: 200 });
+        const el = makeEl();
+        __setAutoOverlayRect(el, { x: 0, y: 0, w: 200, h: 200 });
+        expect(overlayCoversPane("pane-a")).toBe(false);
+    });
+
+    test("releasing an overlay that covered a pane tells the listeners once; one elsewhere does not", async () => {
+        const frames: FrameRequestCallback[] = [];
+        vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => frames.push(cb));
+        const cb = vi.fn();
+        const off = onPaneOverlayReleased(cb);
+        registerPaneRect("pane-a", { x: 0, y: 0, w: 100, h: 100 });
+        const away = registerPaneOverlay(makeEl({ left: 300, top: 300, width: 50, height: 50 }), { keys: true });
+        const over = registerPaneOverlay(makeEl({ left: 10, top: 10, width: 50, height: 50 }), { keys: true });
+        frames.splice(0).forEach((f) => f(0));
+        away.release();
+        frames.splice(0).forEach((f) => f(0));
+        expect(cb).not.toHaveBeenCalled();
+        over.release();
+        over.release();
+        frames.splice(0).forEach((f) => f(0));
+        expect(cb).toHaveBeenCalledTimes(1);
+        off();
+        vi.unstubAllGlobals();
     });
 });

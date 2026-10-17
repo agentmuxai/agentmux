@@ -25,6 +25,29 @@ import { browserStartPageAtom } from "@/store/config-signals";
 import { refocusNode } from "@/app/store/global";
 import { createMemo, createRoot, createSignal, type Accessor } from "solid-js";
 import { errorPageFailedUrl } from "./error-page-url";
+import { findTabHolding } from "@/app/util/reveal-block";
+import { getLayoutModelForStaticTab, getLayoutModelForTabById } from "@/layout/lib/layoutModelHooks";
+import { closeBlockInStack, effectiveStack } from "@/layout/lib/layoutStack";
+
+/** Close `blockId` the way its × would: just its tab when the pane holds
+ *  others, else the pane. Looks in the window tab on screen, then in the
+ *  window's other tabs: a page can close itself while its tab is in the
+ *  background (a sign-in finishing after the user switched tabs). */
+export async function closePaneOrTab(blockId: string): Promise<void> {
+    let model = getLayoutModelForStaticTab();
+    let node = model?.getNodeByBlockId(blockId);
+    if (!node) {
+        const tabId = await findTabHolding(blockId);
+        model = tabId ? getLayoutModelForTabById(tabId) : undefined;
+        node = model?.getNodeByBlockId(blockId);
+    }
+    if (!model || !node) {
+        console.warn(`[browser-pane] close requested for ${blockId}, which isn't in a window tab of this window`);
+        return;
+    }
+    if (node.data && effectiveStack(node.data).length > 1) await closeBlockInStack(model, node.id, blockId);
+    else await model.closeNode(node.id);
+}
 
 /**
  * One-time install of the slice #9 event sink. Hands `pane-clicked`
@@ -144,6 +167,10 @@ export class BrowserViewModel {
      * shows the blue focus border and keyboard shortcuts target it.
      */
     private _clickUnsub: (() => void) | null = null;
+
+    /** Unsubscribe from `browser-pane-close-requested`: the page called
+     *  `window.close()`, so the pane closes as its × would. */
+    private _closeRequestUnsub: (() => void) | null = null;
 
     /** Unsubscribe from `browser-pane-title-change` IPC events. */
     private _titleUnsub: (() => void) | null = null;
@@ -579,6 +606,19 @@ export class BrowserViewModel {
             else this._clickUnsub = unsub;
         });
 
+        // The page called `window.close()` (a sign-in's "close this window").
+        // The host held the close back, because CEF's own close would take the
+        // whole window down (docs/retro/RETRO_BROWSER_PANE_WINDOW_CLOSE_QUITS_APP_2026_10_16.md);
+        // close the pane here as its × does, which tears it down safely.
+        void getApi().listen<{ block_id: string }>("browser-pane-close-requested", (payload) => {
+            if (this.closed || payload.block_id !== this.blockId) return;
+            this.diag(`close-requested recv`);
+            void closePaneOrTab(this.blockId);
+        }).then((unsub) => {
+            if (this.closed) unsub();
+            else this._closeRequestUnsub = unsub;
+        });
+
         // Load URL from block meta on init. An empty/missing `url` falls
         // back to the user's configured start page
         // (`browserStartPageAtom`, "Set as Start Page" in the bookmarks
@@ -840,6 +880,10 @@ export class BrowserViewModel {
         if (this._clickUnsub) {
             this._clickUnsub();
             this._clickUnsub = null;
+        }
+        if (this._closeRequestUnsub) {
+            this._closeRequestUnsub();
+            this._closeRequestUnsub = null;
         }
         if (this._titleUnsub) {
             this._titleUnsub();

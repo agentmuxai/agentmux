@@ -2,11 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Migrated from the original monolithic warden stylesheet's audit-feed rules, now
-// scoped to its own manager component. Extended with "nudge"/"declined"
-// status variants for Supervisor-originated rows (entry.outcome set) —
-// deliberately neutral (blue-ish), not red/green, since a decline is not a
-// failure and a nudge is not a success/error in the same sense an ordinary
-// jekt delivery is.
+// scoped to its own manager component.
 
 @use "../../mixins.scss";
 
@@ -30,11 +26,6 @@
     &[data-variant="err"] {
         background: rgba(239, 68, 68, 0.08);
     }
-
-    &[data-variant="nudge"],
-    &[data-variant="declined"] {
-        background: rgba(96, 165, 250, 0.08);
-    }
 }
 
 .warden-audit-time {
@@ -57,11 +48,6 @@
 
     &--err {
         color: #ef4444;
-    }
-
-    &--nudge,
-    &--declined {
-        color: #60a5fa;
     }
 }
 

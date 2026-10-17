@@ -128,6 +128,9 @@ fn test_object_schema_has_model_vendor_base_url_on_db_agents() {
 
 #[test]
 fn test_object_schema_has_auto_continue_enabled_on_db_agents() {
+    // The column is retired (nothing reads or writes it since the Warden
+    // Supervisor was removed) but stays in the schema: older builds share
+    // the data dir and still select it.
     let conn = Connection::open_in_memory().unwrap();
     conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
     run_object_schema(&conn).unwrap();

@@ -228,7 +228,7 @@ pub(crate) fn save_last_session_snapshot(store: &Store, snapshot: Value) -> bool
     }
 }
 
-fn load_last_session_snapshot(store: &Store) -> Option<Value> {
+pub(crate) fn load_last_session_snapshot(store: &Store) -> Option<Value> {
     let clients = store.get_all::<Client>().ok()?;
     let client = clients.into_iter().next()?;
     client.meta.get(SNAPSHOT_META_KEY).cloned()
@@ -284,21 +284,6 @@ async fn apply_and_publish(
     Ok(())
 }
 
-/// Attempt to replay the durable "last session" snapshot (if any) into a
-/// fresh workspace: `CreateWorkspace` → per-tab `CreateTab` + per-block
-/// `CreateBlock` (reusing each block's saved `meta`, so a restored agent pane
-/// relaunches the same way opening a fresh one does) → `LayoutSetTree` with
-/// the saved split tree (block ids remapped from placeholders to the newly
-/// created ones).
-///
-/// Returns `Ok(None)` when there's nothing to restore (no snapshot, or every
-/// tab in it failed to recreate) — the caller falls back to the hardcoded
-/// default seed exactly as it did before this feature existed. Returns
-/// `Err` only for a failure in the very first step (creating the workspace
-/// itself); per-tab/per-block failures during replay are logged and skipped
-/// rather than aborting the whole restore, so a partially-stale snapshot
-/// (e.g. one tab's block meta no longer makes sense) still restores
-/// everything else instead of failing shut.
 /// Snapshot the current session WITHOUT tearing anything down.
 ///
 /// This is the OS-shutdown flush point (`SPEC_CONTINUOUS_SESSION_PERSISTENCE_2026_09_08.md`
@@ -315,11 +300,15 @@ async fn apply_and_publish(
 /// not fit inside the OS's shutdown budget (historically ~5s total, and
 /// Windows kills apps that overstay it). Save, then let the process die.
 ///
-/// Takes no arguments: during shutdown the caller is a native wndproc with no
+/// Takes no window ids: during shutdown the caller is a native wndproc with no
 /// convenient window-id/label mapping in hand, and srv already knows its own
-/// current topology. Resolves the workspace the same way the close path does —
-/// via the single `Client`'s first window — so a restore after an OS shutdown
-/// reconstructs exactly what a restore after a clean quit would have.
+/// current topology. Captures every live window (`session_windows`), so a
+/// restore after an OS shutdown reconstructs exactly what a restore after a
+/// quit would have.
+///
+/// The host's quit calls it too, with `for_quit` (arg 0) set, before it closes
+/// any window: the record is then marked as a quit's, and the close that
+/// empties `Client.windowids` keeps it (`session_windows::save_on_last_close`).
 ///
 /// Idempotent and safe to call repeatedly: it overwrites the same
 /// `Client.meta` key, and a single attempt here never retries or blocks on
@@ -333,18 +322,23 @@ async fn apply_and_publish(
 /// second trigger.
 pub(crate) async fn handle_save_session_snapshot(
     state: &AppState,
-    _call: &WebCallType,
+    call: &WebCallType,
 ) -> WebReturnType {
     let store = &state.mstore;
+    let for_quit = crate::backend::service::get_optional_arg::<bool>(&call.args, 0)
+        .ok()
+        .flatten()
+        .unwrap_or(false);
+    let why = if for_quit { "quit" } else { "OS shutdown" };
 
-    let Some(ws_id) = current_workspace_id(store) else {
+    if !super::session_windows::has_live_window(store) {
         // No client, no window, or no workspace — nothing to capture. Not an
         // error: a shutdown arriving before the first window exists is
         // ordinary, and reporting failure would only add noise to a path
         // that runs while the machine is going down.
-        tracing::debug!("session_restore: shutdown flush found no workspace to snapshot");
+        tracing::debug!("session_restore: {why} flush found no workspace to snapshot");
         return WebReturnType::success_empty();
-    };
+    }
 
     // reagentx P1 on #3106: the cef-side client (helpers.rs) parses this
     // response's `success` field to decide whether to re-arm its
@@ -356,13 +350,11 @@ pub(crate) async fn handle_save_session_snapshot(
     // failures (connection refused/timeout) the client can already detect on
     // its own. Both paths below now propagate `success: false` instead of
     // this handler always claiming success once it started running.
-    match snapshot_workspace(store, &ws_id) {
+    match super::session_windows::snapshot_session(store, for_quit) {
         Some(snapshot) => {
+            let windows = snapshot["windows"].as_array().map_or(1, Vec::len);
             if save_last_session_snapshot(store, snapshot) {
-                tracing::info!(
-                    workspace_id = %ws_id,
-                    "session_restore: snapshot flushed for OS shutdown"
-                );
+                tracing::info!(windows, "session_restore: snapshot flushed for {why}");
                 WebReturnType::success_empty()
             } else {
                 // save_last_session_snapshot already logged the specific
@@ -372,22 +364,16 @@ pub(crate) async fn handle_save_session_snapshot(
             }
         }
         None => {
-            tracing::warn!(
-                workspace_id = %ws_id,
-                "session_restore: shutdown flush could not build a snapshot"
-            );
-            WebReturnType::error("shutdown flush: could not build a snapshot for the current workspace")
+            tracing::warn!("session_restore: {why} flush could not build a snapshot of any window");
+            WebReturnType::error("shutdown flush: could not build a snapshot of any window")
         }
     }
 }
 
-/// The workspace backing one of this client's windows, if any.
-///
-/// Mirrors how `window_close.rs` picks the workspace to snapshot, so the
-/// shutdown path and the clean-quit path capture the same thing. With
-/// multiple windows this captures the first *live* one — the same
-/// single-workspace limitation restore-on-relaunch already has, not a new
-/// one introduced here.
+/// The workspace backing the first of this client's live windows, if any:
+/// the tests' bootstrapped session. The flush itself captures every live
+/// window (`session_windows::snapshot_session`), skipping stale ids the same
+/// way.
 ///
 /// Walks `windowids` rather than only checking the first: the repo's own
 /// restart/reprojection paths already tolerate a polluted `windowids` list
@@ -400,6 +386,7 @@ pub(crate) async fn handle_save_session_snapshot(
 /// #3106's first fix, then again on the fix itself: the first pass only
 /// checked that the `Window` row existed, not that its `workspaceid` still
 /// resolved to a live `Workspace`).
+#[cfg(test)]
 fn current_workspace_id(store: &Store) -> Option<String> {
     let client = store.get_all::<Client>().ok()?.into_iter().next()?;
     client.windowids.iter().find_map(|window_id| {
@@ -495,7 +482,7 @@ pub(crate) async fn replay_tabs(
             let mut meta = meta.clone();
             if let Some(obj) = meta.as_object_mut() {
                 for key in crate::server::browser_owner::srv_only_keys() {
-                    if key != crate::server::app_api::agent_fork::COACHED_BY_META_KEY {
+                    if key != crate::server::app_api::agent_spawn::COACHED_BY_META_KEY {
                         obj.remove(key);
                     }
                 }
@@ -544,12 +531,36 @@ pub(crate) async fn replay_tabs(
     (all_events, replayed)
 }
 
+/// Restore the last session: every window it holds (`session_windows::restore_all`).
+/// The one returned is for the window being created.
 pub(crate) async fn restore_last_session(
     state: &AppState,
 ) -> Result<Option<(String, Vec<Event>)>, String> {
     let Some(snapshot) = load_last_session_snapshot(&state.mstore) else {
         return Ok(None);
     };
+    super::session_windows::restore_all(state, &snapshot).await
+}
+
+/// Attempt to replay the durable "last session" snapshot (if any) into a
+/// fresh workspace: `CreateWorkspace` → per-tab `CreateTab` + per-block
+/// `CreateBlock` (reusing each block's saved `meta`, so a restored agent pane
+/// relaunches the same way opening a fresh one does) → `LayoutSetTree` with
+/// the saved split tree (block ids remapped from placeholders to the newly
+/// created ones).
+///
+/// Returns `Ok(None)` when there's nothing to restore (no snapshot, or every
+/// tab in it failed to recreate) — the caller falls back to the hardcoded
+/// default seed exactly as it did before this feature existed. Returns
+/// `Err` only for a failure in the very first step (creating the workspace
+/// itself); per-tab/per-block failures during replay are logged and skipped
+/// rather than aborting the whole restore, so a partially-stale snapshot
+/// (e.g. one tab's block meta no longer makes sense) still restores
+/// everything else instead of failing shut.
+pub(crate) async fn restore_workspace(
+    state: &AppState,
+    snapshot: &Value,
+) -> Result<Option<(String, Vec<Event>)>, String> {
     let tabs_json = snapshot
         .get("tabs")
         .and_then(|v| v.as_array())
@@ -1029,7 +1040,7 @@ mod tests {
     /// no longer an agent's.
     #[tokio::test]
     async fn a_restored_worker_keeps_its_leaders_mark() {
-        use crate::server::app_api::agent_fork::COACHED_BY_META_KEY;
+        use crate::server::app_api::agent_spawn::COACHED_BY_META_KEY;
         use crate::server::browser_owner::OWNER_META_KEY;
         let state = test_state();
         let ws_id = dispatch_apply(&state, Command::CreateWorkspace { name: "w".into() })
@@ -1349,8 +1360,16 @@ mod tests {
             .expect("the live workspace behind the second window id must still be captured");
         let expected = snapshot_workspace(&state.mstore, &ws_id)
             .expect("the real workspace is independently snapshot-able");
+        // The record holds every window; at its top level, the main one's.
         assert_eq!(
-            snapshot, expected,
+            super::super::session_windows::windows_of(&snapshot).len(),
+            1,
+            "only the live window is saved"
+        );
+        let mut top = snapshot;
+        top.as_object_mut().unwrap().remove("windows");
+        assert_eq!(
+            top, expected,
             "must resolve to and capture the real workspace, not silently skip it"
         );
     }
@@ -1406,8 +1425,16 @@ mod tests {
             .expect("the live workspace behind the second window must still be captured");
         let expected = snapshot_workspace(&state.mstore, &live_ws_id)
             .expect("the real workspace is independently snapshot-able");
+        // The record holds every window; at its top level, the main one's.
         assert_eq!(
-            snapshot, expected,
+            super::super::session_windows::windows_of(&snapshot).len(),
+            1,
+            "only the live window is saved"
+        );
+        let mut top = snapshot;
+        top.as_object_mut().unwrap().remove("windows");
+        assert_eq!(
+            top, expected,
             "must resolve to and capture the live workspace, not the dead one it's paired with"
         );
         // Sanity: prove the two windows really do disagree, so a bug that

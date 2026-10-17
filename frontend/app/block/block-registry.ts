@@ -16,7 +16,6 @@ import { editorPaneTab } from "@/app/view/editor/editor";
 import { filesPaneTab } from "@/app/view/files/files";
 import { identityPaneTab } from "@/app/view/identity/identity-pane";
 import { launcherPaneTab } from "@/app/view/launcher/launcher";
-import { mediaPaneTab } from "@/app/view/media/media";
 import { memoryPaneTab } from "@/app/view/memory/memory";
 import { settingsPaneTab } from "@/app/view/settings/settings";
 import { swarmPaneTab } from "@/app/view/swarm/swarm";
@@ -49,7 +48,6 @@ const builtins = [
     helpPaneTab, // native (create(ctx)) — the Phase 2b pilot
     launcherPaneTab, // native — Phase 2c (no header)
     swarmPaneTab, // native — Phase 2c
-    mediaPaneTab, // native — Phase 2c
     identityPaneTab, // native — Phase 2c
     dronePaneTab, // native — Phase 2c (keeps the "workflows" alias)
     wardenPaneTab, // native — Phase 2c

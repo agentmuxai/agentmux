@@ -187,6 +187,7 @@ import type { CommandSkillCatalogUpsertData } from "@/types/rpc/CommandSkillCata
 import type { CommandSkillCatalogUpsertForBundleData } from "@/types/rpc/CommandSkillCatalogUpsertForBundleData";
 import type { CommandSkillUpsertData } from "@/types/rpc/CommandSkillUpsertData";
 import type { CommandSubprocessSpawnData } from "@/types/rpc/CommandSubprocessSpawnData";
+import type { CommandSupervisorSetModeData } from "@/types/rpc/CommandSupervisorSetModeData";
 import type { CommandToolDecisionData } from "@/types/rpc/CommandToolDecisionData";
 import type { CommandUnlinkAgentIdentityData } from "@/types/rpc/CommandUnlinkAgentIdentityData";
 import type { CommandUpdateAgentDefinitionData } from "@/types/rpc/CommandUpdateAgentDefinitionData";
@@ -222,6 +223,8 @@ import type { EnsureAccountDirResp } from "@/types/rpc/EnsureAccountDirResp";
 import type { EnsureProviderAuthDirReq } from "@/types/rpc/EnsureProviderAuthDirReq";
 import type { EnsureProviderAuthDirResult } from "@/types/rpc/EnsureProviderAuthDirResult";
 import type { ExportAgentDefinitionsResult } from "@/types/rpc/ExportAgentDefinitionsResult";
+import type { FileProbeReq } from "@/types/rpc/FileProbeReq";
+import type { FileProbeResult } from "@/types/rpc/FileProbeResult";
 import type { FleetActionResult } from "@/types/rpc/FleetActionResult";
 import type { FleetGroup } from "@/types/rpc/FleetGroup";
 import type { FleetGroupDeleteResult } from "@/types/rpc/FleetGroupDeleteResult";
@@ -1025,6 +1028,14 @@ export const GeneratedApi = {
   FleetBulkStopCommand(client: RpcClient, data: CommandFleetBulkStopData, opts?: RpcOpts): Promise<FleetActionResult> {
     return client.rpcCall("fleet.bulk-stop", data, opts);
   },
+  // command "supervisor.set-mode"
+  SupervisorSetModeCommand(
+    client: RpcClient,
+    data: CommandSupervisorSetModeData,
+    opts?: RpcOpts
+  ): Promise<FleetActionResult> {
+    return client.rpcCall("supervisor.set-mode", data, opts);
+  },
   // command "fleet.group.create"
   FleetGroupCreateCommand(client: RpcClient, data: CommandFleetGroupCreateData, opts?: RpcOpts): Promise<FleetGroup> {
     return client.rpcCall("fleet.group.create", data, opts);
@@ -1695,6 +1706,10 @@ export const GeneratedApi = {
   ): Promise<ProvidersModelsResult> {
     return client.rpcCall("providers.models", data, opts);
   },
+  // command "fileprobe"
+  FileProbeCommand(client: RpcClient, data: FileProbeReq, opts?: RpcOpts): Promise<FileProbeResult> {
+    return client.rpcCall("fileprobe", data, opts);
+  },
   // command "readeditorfile"
   ReadEditorFileCommand(
     client: RpcClient,
@@ -2094,7 +2109,6 @@ export const GeneratedApi = {
       | "accounts"
       | "container_image"
       | "container_volumes"
-      | "auto_continue_enabled"
       | "model_vendor_base_url"
     > &
       Partial<
@@ -2113,7 +2127,6 @@ export const GeneratedApi = {
           | "accounts"
           | "container_image"
           | "container_volumes"
-          | "auto_continue_enabled"
           | "model_vendor_base_url"
         >
       >,

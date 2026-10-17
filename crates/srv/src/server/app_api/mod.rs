@@ -31,8 +31,8 @@ mod agent_open;
 /// RPC path's exact implementation, including its AGENT_OPEN_LOCKS TOCTOU
 /// serialization. See REPORT_AGENT_OPEN_API_GAP_2026_09_06.md.
 pub(crate) use agent_open::open_agent_impl;
-/// The `Agents` `fork` action's route (SPEC_AGENT_WORKERS_2026_10_15.md).
-pub(crate) mod agent_fork;
+/// The `Agents` `spawn` action's route (SPEC_AGENT_WORKERS_2026_10_15.md).
+pub(crate) mod agent_spawn;
 // pub(crate): `server/mod.rs`'s `/agentmux/agent/stop` handler (the
 // cross-channel bulk-stop forward target,
 // SPEC_FLEET_BULK_STOP_CROSS_CHANNEL_2026_08_22.md) calls
@@ -86,6 +86,7 @@ mod layout;
 mod browser_start_page;
 mod voice;
 pub(crate) mod fleet;
+mod supervisor;
 mod attachments;
 pub(crate) mod connections;
 pub(crate) mod app_update;
@@ -116,6 +117,7 @@ pub fn register_app_api_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     browser_start_page::register(engine, state);
     voice::register(engine, state);
     fleet::register(engine, state);
+    supervisor::register(engine, state);
     attachments::register(engine, state);
     connections::register(engine, state);
     viewer::register(engine, state);

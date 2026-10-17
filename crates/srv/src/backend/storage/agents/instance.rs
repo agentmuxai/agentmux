@@ -233,7 +233,7 @@ impl Store {
                         created_at, updated_at, is_seeded, user_hidden,
                         last_block_id,
                         container_image, container_volumes, container_name,
-                        use_ambient_login, model_vendor_base_url, auto_continue_enabled,
+                        use_ambient_login, model_vendor_base_url,
                         conversation_visibility,
                         session_id, status, started_at, ended_at
                      ) VALUES (
@@ -248,9 +248,9 @@ impl Store {
                         ?23, ?24, 0, ?25,
                         ?26,
                         ?27, ?28, ?29,
-                        ?30, ?31, ?32,
-                        ?33,
-                        ?34, ?35, ?36, ?37
+                        ?30, ?31,
+                        ?32,
+                        ?33, ?34, ?35, ?36
                      )
                      ON CONFLICT(id) DO UPDATE SET
                         name = excluded.name,
@@ -298,7 +298,6 @@ impl Store {
                         def.container_name,
                         def.use_ambient_login,
                         def.model_vendor_base_url,
-                        def.auto_continue_enabled,
                         def.conversation_visibility,
                         inst.session_id,
                         inst.status,

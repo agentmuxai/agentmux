@@ -1,0 +1,90 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+//
+// The Editor's image viewer (image-viewer.tsx, zoom in image-zoom.ts): the
+// cursor says what a click or drag will do, a zoomed image shows its zoom
+// with a way back to fit. The rules moved from the Media pane unchanged.
+
+@use "../../../../mixins.scss";
+
+.image-viewer-content {
+    position: relative;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
+
+    &:focus {
+        outline: none;
+    }
+
+    &:focus-visible {
+        @include mixins.focus-ring;
+    }
+}
+
+// Backgrounds: the pane's own (dark), a light one, or a checkerboard of two
+// neutrals from the theme's text colour, for images with transparency.
+.image-viewer-bg-dark {
+    background: var(--block-bg-color);
+}
+
+.image-viewer-bg-light {
+    background: color-mix(in srgb, var(--main-text-color) 88%, transparent);
+}
+
+.image-viewer-bg-checker {
+    --checker-a: color-mix(in srgb, var(--main-text-color) 8%, transparent);
+    --checker-b: color-mix(in srgb, var(--main-text-color) 16%, transparent);
+    background-color: var(--block-bg-color);
+    background-image:
+        linear-gradient(45deg, var(--checker-b) 25%, transparent 25%),
+        linear-gradient(-45deg, var(--checker-b) 25%, transparent 25%),
+        linear-gradient(45deg, transparent 75%, var(--checker-b) 75%),
+        linear-gradient(-45deg, transparent 75%, var(--checker-b) 75%);
+    background-size: 16px 16px;
+    background-position:
+        0 0,
+        0 8px,
+        8px -8px,
+        -8px 0;
+}
+
+.image-viewer-img {
+    position: absolute;
+    inset: 0;
+    margin: auto;
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+    cursor: zoom-in;
+
+    // No will-change: it would raster the image once and scale that bitmap,
+    // blurring a zoomed-in image.
+    &.image-viewer-zoomed {
+        cursor: grab;
+    }
+
+    &.image-viewer-dragging {
+        cursor: grabbing;
+    }
+
+    // Each image pixel drawn larger than 2 CSS pixels: squares, not blur.
+    &.image-viewer-pixels {
+        image-rendering: pixelated;
+    }
+}
+
+.image-viewer-zoom-badge {
+    position: absolute;
+    right: var(--space-2);
+    bottom: var(--space-2);
+    z-index: var(--z-pane-overlay);
+    opacity: 0.85;
+}
+
+.image-viewer-percent {
+    min-width: 3.5em;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+    color: var(--secondary-text-color);
+}

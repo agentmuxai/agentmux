@@ -78,6 +78,8 @@ pub(crate) async fn run_windows(
             std::process::exit(1);
         }
     };
+    // What the user is told after a recovery (SPEC_RECOVERY_NOTICES_AND_TOASTS §4.4).
+    crate::incidents::init(&paths.data_dir);
     log(&format!(
         "paths resolved: data={} config={} user_home={} portable={}",
         paths.data_dir.display(),
@@ -488,6 +490,9 @@ pub(crate) async fn run_windows(
     // the liveness prober's recycle decision and latency signal, clean for
     // this srv instance (and reset again on every respawn below).
     let mut srv_recycle = crate::srv_liveness::RecyclePolicy::default();
+    // The liveness prober ended srv (below): its exit is a wedge, not a crash,
+    // when the user is told (crate::incidents).
+    let mut srv_killed_wedged = false;
     let mut srv_latency = crate::srv_liveness::LatencyTracker::default();
     let mut srv_probe_count: u64 = 0;
 
@@ -852,6 +857,7 @@ pub(crate) async fn run_windows(
                             // already-shipped #2107 respawn/rebind/host-recycle
                             // path unmodified — this arm's only job is deciding
                             // "treat this as a crash".
+                            srv_killed_wedged = true;
                             let _ = srv_child.start_kill();
                         }
                     }
@@ -923,6 +929,7 @@ pub(crate) async fn run_windows(
                                 mem_supervisor::OOM_RESTART_BUDGET,
                                 mem_supervisor::OOM_RESTART_WINDOW.as_secs()
                             ));
+                            crate::incidents::record(&crate::incidents::memory_give_up());
                             show_fatal_dialog(
                                 mem_supervisor::OOM_GIVEUP_TITLE,
                                 mem_supervisor::OOM_GIVEUP_BODY,
@@ -954,6 +961,7 @@ pub(crate) async fn run_windows(
                             }
                         };
                         if !recovered {
+                            crate::incidents::record(&crate::incidents::memory_give_up());
                             show_fatal_dialog(
                                 mem_supervisor::OOM_GIVEUP_TITLE,
                                 mem_supervisor::OOM_GIVEUP_BODY,
@@ -963,6 +971,7 @@ pub(crate) async fn run_windows(
                         // Relaunch degraded: the GPU process is a large commit
                         // consumer, so skip straight to software rendering for an
                         // OOM relaunch (SPEC §5.B.4).
+                        crate::incidents::record(&crate::incidents::host_restarted_low_memory());
                         //
                         // SPEC_PILLAR1_STEP4 Phase 4 — re-spawn the splash (fresh
                         // event + consumer thread) with the "Restoring session..."
@@ -1014,6 +1023,12 @@ pub(crate) async fn run_windows(
                                 host_restarts.len(),
                                 HOST_RESTART_WINDOW.as_secs()
                             ));
+                            crate::incidents::record(&crate::incidents::crash_give_up(
+                                crate::incidents::GaveUpOn::Window,
+                                code,
+                                host_restarts.len(),
+                                HOST_RESTART_WINDOW.as_secs(),
+                            ));
                             break code;
                         }
                         host_restarts.push(now);
@@ -1031,10 +1046,13 @@ pub(crate) async fn run_windows(
                         // above — runaway protection stays. The flag itself
                         // was consumed before classification — reagent P1.)
                         if !recycle_kill {
+                            let was_degraded = host_degraded;
                             if last_abnormal_code == Some(code) {
                                 host_degraded = true;
                             }
                             last_abnormal_code = Some(code);
+                            // A recycle is srv's restart, told about there.
+                            crate::incidents::record(&crate::incidents::host_restarted(code, host_degraded && !was_degraded));
                         }
                         log(&format!(
                             "CEF host exited abnormally (code {}) — relaunching (restart {}/{}{})",
@@ -1111,10 +1129,12 @@ pub(crate) async fn run_windows(
                 // transient commit pressure. See
                 // docs/retro/retro-subagent-backfill-storm-oom-2026-07-17.md.
                 let commit_free = mem_supervisor::commit_free_mb();
-                if matches!(
+                let wedged = std::mem::replace(&mut srv_killed_wedged, false);
+                let low_memory = matches!(
                     mem_supervisor::classify_host_exit(code, commit_free),
                     mem_supervisor::HostExitClass::SystemOom
-                ) {
+                );
+                if low_memory {
                     let now = std::time::Instant::now();
                     if mem_supervisor::budget_exhausted(
                         &mut srv_oom_restarts,
@@ -1130,6 +1150,7 @@ pub(crate) async fn run_windows(
                             mem_supervisor::OOM_RESTART_BUDGET,
                             mem_supervisor::OOM_RESTART_WINDOW.as_secs()
                         ));
+                        crate::incidents::record(&crate::incidents::memory_give_up());
                         show_fatal_dialog(
                             mem_supervisor::OOM_GIVEUP_TITLE,
                             mem_supervisor::OOM_GIVEUP_BODY,
@@ -1162,6 +1183,7 @@ pub(crate) async fn run_windows(
                         }
                     };
                     if !recovered {
+                        crate::incidents::record(&crate::incidents::memory_give_up());
                         show_fatal_dialog(
                             mem_supervisor::OOM_GIVEUP_TITLE,
                             mem_supervisor::OOM_GIVEUP_BODY,
@@ -1185,6 +1207,12 @@ pub(crate) async fn run_windows(
                             code,
                             SRV_RESTART_BUDGET,
                             SRV_RESTART_WINDOW.as_secs()
+                        ));
+                        crate::incidents::record(&crate::incidents::crash_give_up(
+                            crate::incidents::GaveUpOn::Service,
+                            code,
+                            SRV_RESTART_BUDGET,
+                            SRV_RESTART_WINDOW.as_secs(),
                         ));
                         break 1;
                     }
@@ -1224,6 +1252,13 @@ pub(crate) async fn run_windows(
                         // is recycled too, so its banner starts clear.
                         srv_recycle = crate::srv_liveness::RecyclePolicy::default();
                         srv_latency = crate::srv_liveness::LatencyTracker::default();
+                        crate::incidents::record(&crate::incidents::srv_restarted(if wedged {
+                            crate::incidents::SrvStop::Unresponsive
+                        } else if low_memory {
+                            crate::incidents::SrvStop::LowMemory
+                        } else {
+                            crate::incidents::SrvStop::Exited(code)
+                        }));
                         log(&format!(
                             "srv respawned (pid {}) — new endpoints ws={} web={}; recycling host",
                             srv_result.pid, srv_result.ws_endpoint, srv_result.web_endpoint

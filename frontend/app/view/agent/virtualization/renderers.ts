@@ -89,9 +89,9 @@ const COLLAPSED_MESSAGE_PX = 32;
 /** The "Broadcast · N agents" note above a Swarm broadcast's body. */
 export const BROADCAST_NOTE_PX = 20;
 
-/** A user message's body height, plus the broadcast note when it has one. */
+/** A user message's body height, plus the broadcast or Supervisor note when it has one. */
 function estimateUserMessage(node: Extract<DocumentNode, { type: "user_message" }>): number {
-    return estimateUnwrappedTextHeight(node.message) + (node.broadcast ? BROADCAST_NOTE_PX : 0);
+    return estimateUnwrappedTextHeight(node.message) + (node.broadcast || node.supervisor ? BROADCAST_NOTE_PX : 0);
 }
 
 /**

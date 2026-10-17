@@ -17,18 +17,18 @@ import { getPaneTab, isKeepAliveView, paneTabCapability, resolvePaneTabView } fr
 
 const VIEWS = [
     "term", "cpuplot", "sysinfo", "help", "launcher", "agent", "swarm", "editor", "browser",
-    "memory", "media", "identity", "drone", "warden", "toolchain", "settings",
+    "memory", "identity", "drone", "warden", "toolchain", "settings",
     "connectors",
 ];
 
 const OLD_ICONS: Record<string, string> = {
     // agent: "sparkles" was a Font Awesome Pro icon; its Free equivalent since the switch to Free.
     term: "terminal", agent: "wand-magic-sparkles", browser: "globe", sysinfo: "chart-line", editor: "file-lines",
-    help: "circle-question", swarm: "diagram-project", drone: "diagram-project", media: "photo-film",
+    help: "circle-question", swarm: "diagram-project", drone: "diagram-project",
 };
 const OLD_LABELS: Record<string, string> = {
     agent: "Agent", browser: "Browser", drone: "Drone", editor: "Editor", help: "Help", identity: "Identity",
-    media: "Media", memory: "Memory", swarm: "Swarm", sysinfo: "Sysinfo", term: "Terminal", warden: "Warden",
+    memory: "Memory", swarm: "Swarm", sysinfo: "Sysinfo", term: "Terminal", warden: "Warden",
 };
 
 // Deliberate differences since the tables: "cpuplot" is sysinfo under an older
@@ -69,6 +69,9 @@ describe("built-in pane tabs (block-registry.ts)", () => {
     it("keeps the old migration aliases", () => {
         expect(resolvePaneTabView("forge")).toBe("agent");
         expect(resolvePaneTabView("workflows")).toBe("drone");
+        // The Media pane is folded into the Editor (SPEC_EDITOR_REVAMP_UNIFIED_VIEWERS §4.12).
+        expect(resolvePaneTabView("media")).toBe("editor");
+        expect(getPaneTab("media")).toBe(getPaneTab("editor"));
     });
 
     // Phase 5: each capability replaces a view-name check in shared code, so
@@ -91,9 +94,9 @@ describe("built-in pane tabs (block-registry.ts)", () => {
         expect(holders("acceptsInput")).toEqual(["term"]);
         expect(holders("shellKeys")).toEqual(["term"]);
         expect(holders("sharesCwd")).toEqual(["term"]);
-        // Agent: a fresh picker. Editor and media: an empty pane of their
-        // kind (SPEC_EDITOR_MEDIA_SPLIT_OPENS_EMPTY_2026_10_10.md).
-        expect(holders("splitBlockDef")).toEqual(["agent", "editor", "media"]);
+        // Agent: a fresh picker. Editor: an empty pane of its kind
+        // (SPEC_EDITOR_MEDIA_SPLIT_OPENS_EMPTY_2026_10_10.md).
+        expect(holders("splitBlockDef")).toEqual(["agent", "editor"]);
         // An alias carries its view's capabilities.
         expect(paneTabCapability("forge", "header")).toBe("surface");
     });
@@ -121,7 +124,7 @@ describe("built-in widget colors", () => {
     });
 
     it("gives the most used widgets distinct colors", () => {
-        const common = ["term", "agent", "browser", "editor", "files", "sysinfo", "swarm", "media", "help", "launcher", "memory"];
+        const common = ["term", "agent", "browser", "editor", "files", "sysinfo", "swarm", "help", "launcher", "memory"];
         expect(new Set(common.map((v) => getPaneTab(v)?.defaultHue)).size).toBe(common.length);
     });
 });

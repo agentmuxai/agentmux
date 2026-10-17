@@ -19,7 +19,7 @@ import { MarkdownContentBlockType } from "@/app/element/markdown-util";
 import { createBlock } from "@/app/store/block-layout-actions";
 import { openLink } from "@/app/store/global";
 import { withHeightContinuity } from "@/app/view/agent/resize-contract";
-import { openInMediaPaneOnScreen } from "@/app/view/media/media-open";
+import { openInEditorPaneOnScreen } from "@/app/view/editor/editor-open";
 import { fireAndForget } from "@/util/util";
 import { createSignal, Match, onCleanup, onMount, Show, Switch, type JSX } from "solid-js";
 
@@ -62,12 +62,13 @@ const MuxBlock = (props: MuxBlockProps) => {
     );
 };
 
-/** Open the file in Media: a tab of the Media pane on screen, else a new
- *  Media pane (SPEC_DOCUMENT_TABS_2026_10_02.md §5.7). */
-export function openInMediaPane(path: string): void {
+/** Open an image or video in the Editor: a tab of the Editor pane on screen,
+ *  else a new Editor pane, following newer files in its folder as the Media
+ *  pane did (SPEC_EDITOR_REVAMP_UNIFIED_VIEWERS_2026_10_15.md §4.12.1). */
+export function openMediaInEditor(path: string): void {
     fireAndForget(async () => {
-        if (await openInMediaPaneOnScreen(path)) return;
-        await createBlock({ meta: { view: "media", "media:path": path } });
+        if (await openInEditorPaneOnScreen(path, { followFolder: true })) return;
+        await createBlock({ meta: { view: "editor", file: path, "editor:follow_folder": true } });
     });
 }
 
@@ -206,9 +207,9 @@ function LocalImage(props: { path: string; src: string; alt: string }): JSX.Elem
                                 class="am-media-img"
                                 src={src()}
                                 alt={props.alt}
-                                title="Open in Media pane"
+                                title="Open in the editor"
                                 style={ratio() ? { "aspect-ratio": ratio() } : undefined}
-                                onClick={() => openInMediaPane(props.path)}
+                                onClick={() => openMediaInEditor(props.path)}
                                 onError={() => {
                                     // Undecodable: free the blob now, not at unmount.
                                     if (url) URL.revokeObjectURL(url);
@@ -234,14 +235,14 @@ function LocalImage(props: { path: string; src: string; alt: string }): JSX.Elem
     );
 }
 
-/** Over the inline cap: the file's name and size, opening a Media pane. */
+/** Over the inline cap: the file's name and size, opening it in the Editor. */
 function MediaCard(props: { path: string; size: number; icon: string }): JSX.Element {
     return (
-        <button type="button" class="am-media-card" onClick={() => openInMediaPane(props.path)}>
+        <button type="button" class="am-media-card" onClick={() => openMediaInEditor(props.path)}>
             <i class={`fa ${props.icon}`} aria-hidden="true" />
             <span class="am-media-card-name">{basenameOf(props.path)}</span>
             <span class="am-muted">{formatBytes(props.size)}</span>
-            <span class="am-media-card-action">Open in Media pane</span>
+            <span class="am-media-card-action">Open in the editor</span>
         </button>
     );
 }

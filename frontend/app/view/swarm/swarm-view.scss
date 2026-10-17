@@ -815,6 +815,57 @@
     color: currentColor;
 }
 
+// ── Supervisor (SPEC_SWARM_SUPERVISOR_2026_10_16.md §3.8) ─────────────────
+// The chip is a compact line-style Button: its tone carries the state (quiet
+// Off, accent for a mode, attention for a pause). Only its place in the row
+// is set here.
+
+.swarm-supervisor-chip {
+    flex-shrink: 0;
+    white-space: nowrap;
+}
+
+.swarm-supervisor-detail {
+    font-variant-numeric: tabular-nums;
+    opacity: 0.85;
+}
+
+.swarm-bucket--supervisor .swarm-bucket-label {
+    color: var(--accent-color);
+}
+
+.swarm-supervisor-row {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    padding: 1px 6px 1px 22px;
+    font-size: var(--text-xs);
+    line-height: 1.4;
+    min-width: 0;
+
+    &--paused .swarm-supervisor-action { color: var(--warning-color); }
+    &--done .swarm-supervisor-action { color: var(--success-color); }
+    &--continued .swarm-supervisor-action { color: var(--accent-color); }
+}
+
+.swarm-supervisor-time {
+    flex: 0 0 auto;
+    font-variant-numeric: tabular-nums;
+    color: var(--secondary-text-color);
+}
+
+.swarm-supervisor-action {
+    flex: 0 0 auto;
+    font-weight: 600;
+    color: var(--secondary-text-color);
+}
+
+.swarm-supervisor-reason {
+    @include mixins.truncate;
+    min-width: 0;
+    color: var(--secondary-text-color);
+}
+
 // ── Fleet control (SPEC_MULTI_AGENT_FLEET_CONTROL_2026_08_20.md) ───────────
 
 .swarm-agent-select-checkbox {

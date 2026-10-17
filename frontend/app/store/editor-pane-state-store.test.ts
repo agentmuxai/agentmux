@@ -144,6 +144,37 @@ describe("editor-pane-state-store (slice #10, Phase 1A)", () => {
         assertActiveInvariant(r.state);
     });
 
+    // ─── viewers (SPEC_EDITOR_REVAMP_UNIFIED_VIEWERS §4.1) ──────────
+    it("a probe's viewer is set quietly; Reopen with keeps the choice and reads the file again", () => {
+        let s = initialState();
+        s = update(s, { type: "OpenFile", path: "C:/r/a.png" }).state;
+        const id = s.tabs[0].id;
+        s = update(s, { type: "TabContentLoaded", tabId: id, contentHash: "h" }).state;
+        const quiet = update(s, { type: "SetTabViewer", tabId: id, viewer: "image" });
+        expect(quiet.events).toEqual([]);
+        expect(quiet.state.tabs[0]).toMatchObject({ viewer: "image", contentLoaded: true });
+        const chosen = update(quiet.state, { type: "SetTabViewer", tabId: id, viewer: "info", override: true });
+        expect(chosen.state.tabs[0]).toMatchObject({ viewer: "info", viewerOverride: "info", contentLoaded: false });
+        expect(eventTypes(chosen.events)).toEqual(["TabActivated"]);
+        // A choice that can't show the file is dropped.
+        const back = update(chosen.state, { type: "SetTabViewer", tabId: id, viewer: "image", clearOverride: true });
+        expect(back.state.tabs[0].viewerOverride).toBeUndefined();
+        expect(back.state.tabs[0].viewer).toBe("image");
+    });
+
+    it("follow-folder retargets a tab to a newer file, or activates the tab already on it", () => {
+        let s = initialState();
+        s = update(s, { type: "OpenFile", path: "C:/r/1.png" }).state;
+        s = update(s, { type: "SetFollowFolder", tabId: s.tabs[0].id, follow: true }).state;
+        const id = s.tabs[0].id;
+        s = update(s, { type: "RetargetTab", tabId: id, newPath: "C:/r/2.png" }).state;
+        expect(s.tabs[0]).toMatchObject({ id, filePath: "c:/r/2.png", followFolder: true, contentLoaded: false });
+        s = update(s, { type: "OpenFile", path: "C:/r/3.png" }).state;
+        const r = update(s, { type: "RetargetTab", tabId: s.tabs[1].id, newPath: "C:/r/2.png" });
+        expect(r.state.tabs).toHaveLength(2);
+        expect(r.state.activeTabId).toBe(id);
+    });
+
     // ─── invariant 3: CloseTab clean → drops + neighbour-activate ────
 
     it("CloseTab on clean tab drops it, activates right-neighbour, records recentlyClosed", () => {

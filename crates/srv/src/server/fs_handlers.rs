@@ -63,6 +63,9 @@ fn remote_of<'a>(conn: &'a str, block_id: Option<&'a str>, auth_key: &'a str) ->
 }
 
 pub fn register_fs_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    // fileprobe → what a file is, before the Editor reads it (one stat, the
+    // first 8 KB): SPEC_EDITOR_REVAMP_UNIFIED_VIEWERS_2026_10_15.md §4.2.
+    crate::backend::editor_probe::register(engine);
     // fs.list → one page of a folder. The first page opens it; later pages
     // continue from `cursor`. Spec §6.3.
     // A request naming an SSH connection runs on that host, through its

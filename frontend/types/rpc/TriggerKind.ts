@@ -4,4 +4,4 @@
  * What kind of thing started, or joined, a turn (turn-model spec §5.2).
  * Display data next to [`TurnOrigin`], which stays the security class.
  */
-export type TriggerKind = "user" | "broadcast" | "agent" | "service" | "schedule" | "task" | "system";
+export type TriggerKind = "user" | "broadcast" | "agent" | "service" | "schedule" | "task" | "supervisor" | "system";

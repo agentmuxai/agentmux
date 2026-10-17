@@ -11,7 +11,8 @@
  * Best first:
  *
  *   needs-you    a question or approval is waiting on the user, while a turn
- *                is in flight
+ *                is in flight; or the Swarm Supervisor stopped the agent for
+ *                the user, while it is idle
  *   held         the agent can't go on yet: reconnecting > compacting >
  *                stopping > rate limited > launching
  *   working      a turn is in flight
@@ -47,6 +48,10 @@ export interface AgentStatusFacts {
      *  the pane was not mounted, must not outrank anything for an idle agent
      *  (#4234). */
     needsYou?: boolean;
+    /** The Swarm Supervisor stopped the agent for the user. Counts only while
+     *  nothing is `live`: a turn in flight means the pause is over
+     *  (docs/specs/SPEC_SWARM_SUPERVISOR_2026_10_16.md §3.6). */
+    pausedForYou?: boolean;
     /** Each reason that applies. Reconnecting and compacting can hold an
      *  agent with no turn in flight. */
     held?: Partial<Record<HeldReason, boolean>>;
@@ -56,7 +61,7 @@ export interface AgentStatusFacts {
 
 /** The status that wins for these facts. */
 export function rankAgentStatus(facts: AgentStatusFacts): AgentStatus {
-    if (facts.live && facts.needsYou) return { kind: "needs-you" };
+    if (facts.live ? facts.needsYou : facts.pausedForYou) return { kind: "needs-you" };
     const reason = HELD_ORDER.find((r) => facts.held?.[r]);
     if (reason) return { kind: "held", reason };
     if (facts.live) return { kind: "working" };

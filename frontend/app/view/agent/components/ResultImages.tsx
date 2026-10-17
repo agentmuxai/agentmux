@@ -6,13 +6,13 @@
  * an MCP tool's screenshot. The translator keeps them as base64
  * (`mediaResultOf`), so they render from memory with no fetch.
  *
- * Clicking an image with a known file opens it in a Media pane, the same as
+ * Clicking an image with a known file opens it in the editor, the same as
  * an image in the agent's own message; one without (a screenshot) toggles
  * between fitted and full size.
  * docs/analysis/ANALYSIS_READ_TOOL_PREVIEW_2026_10_01.md §6.
  */
 
-import { openInMediaPane } from "@/app/element/markdown-media";
+import { openMediaInEditor } from "@/app/element/markdown-media";
 import { createSignal, For, type JSX } from "solid-js";
 import type { ResultImage } from "../providers/claude-translator";
 
@@ -41,7 +41,7 @@ function ResultImageView(props: { image: ResultImage; path?: string; width?: num
             classList={{ "agent-tool-image-full": full() }}
             src={`data:${props.image.mediaType};base64,${props.image.data}`}
             alt={props.path ? `the image ${props.path}` : "an image the tool returned"}
-            title={props.path ? "Open in Media pane" : full() ? "Fit to the pane" : "Show at full size"}
+            title={props.path ? "Open in the editor" : full() ? "Fit to the pane" : "Show at full size"}
             // The dimensions, when known, reserve the image's height before it
             // decodes, so the row doesn't grow under the reader.
             style={
@@ -49,14 +49,14 @@ function ResultImageView(props: { image: ResultImage; path?: string; width?: num
                     ? { width: `min(100%, ${props.width}px)`, "aspect-ratio": `${props.width} / ${props.height}` }
                     : undefined
             }
-            onClick={() => (props.path ? openInMediaPane(props.path) : setFull((v) => !v))}
+            onClick={() => (props.path ? openMediaInEditor(props.path) : setFull((v) => !v))}
         />
     );
 }
 
 export function ResultImages(props: {
     images: ResultImage[];
-    /** The file the image is, for a Read; opens it in a Media pane on click. */
+    /** The file the image is, for a Read; opens it in the editor on click. */
     path?: string;
     /** The image's dimensions, when the result says (only for one image). */
     width?: number;

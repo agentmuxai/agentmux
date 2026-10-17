@@ -30,6 +30,12 @@ vi.mock("@/app/store/global", () => ({
 }));
 vi.mock("@/app/store/rpc-api", () => ({
     RpcApi: {
+        // The probe that picks the viewer (SPEC_EDITOR_REVAMP_UNIFIED_VIEWERS §4.2): every file here is text.
+        FileProbeCommand: vi.fn(async (_c: unknown, req: { path: string }) => {
+            const content = h.files.get(req.path);
+            if (content === undefined) throw new Error(`no such file: ${req.path}`);
+            return { size: content.length, mtime: 0, kind: "text", mime: "text/plain", text: { encoding: "utf-8", bom: "none" }, read_only: false };
+        }),
         ReadEditorFileCommand: vi.fn((_c: unknown, req: { path: string }) => {
             const read = (async () => {
                 h.reads.push(req.path);

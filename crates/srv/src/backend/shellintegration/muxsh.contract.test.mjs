@@ -63,6 +63,7 @@ describe("muxsh <-> app-api-manifest.json contract", () => {
             parseArgs(["open", "/tmp/foo.md", "--title", "t", "--split", "down", "--collapse-tree", "--floating", "--no-focus"]),
             { AGENTMUX_BLOCKID: "b-1", AGENTMUX_TABID: "t-1" },
         ],
+        ["edit (exercises viewer)", parseArgs(["edit", "/tmp/photo.png"]), {}],
         ["web bare, no env", parseArgs(["web", "https://example.com"]), {}],
         [
             "web, known block+tab, NOT floating (exercises split_direction/split_reference_block_id)",
