@@ -30,7 +30,7 @@ mod lan_instances;
 mod udp_peers;
 
 pub use events::{LanDiscoverability, LanDiscoveryError, LanInstanceList};
-pub(crate) use agent_names::{parse_agent_names_body, PeerAgents};
+pub(crate) use agent_names::{agent_names_body, parse_agent_names_body, PeerAgents};
 pub(crate) use udp_peers::DESKTOP_DISCOVERY_PORT;
 
 const SERVICE_TYPE: &str = "_agentmux._tcp.local.";

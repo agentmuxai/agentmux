@@ -9,6 +9,56 @@
 use super::*;
 use std::collections::HashSet;
 
+/// This instance's `/agentmux/reactive/agent-names` answer. Readable with the
+/// LAN key, so public to the local network: each field needed the owner's
+/// decision.
+/// - `agents`, enumerating names (2026-09-08): a `lan_key` holder could
+///   already confirm a specific name via `/agentmux/reactive/agent?id=…`.
+/// - `agent_kinds` (`{name: "host" | "container"}`, 2026-10-06, agentmux-mobile's
+///   SPEC_FLEET_HOST_TAGS_AND_CLOUD_HOSTS_2026_10_06 §5.2, §11).
+/// - `agent_status` (`{name: {state, since_ms}}`) and `now_ms`, decision D1 of
+///   2026-10-07 (agentmux-mobile's SPEC_AGENT_STATUS_AND_LIVE_PANE_FEED_2026_10_07
+///   §3.4, §11), also on the fleet feed this route is the fallback for.
+/// - `agent_lines` (`{name: line}`, 2026-10-13): content, each agent's Swarm
+///   summary line (`backend::agent_line`); absent with `swarm:sharesummaries` off.
+/// - `agent_providers` (`{name: provider id}`, decision D1 of 2026-10-17,
+///   SPEC_SWARM_REFINEMENTS_2026_10_17 §3, §7): the Swarm's provider icon on
+///   remote rows. Only an id this build knows (`providers::resolve_provider_alias`).
+///
+/// An agent with no kind, state, line or provider is left out of that map.
+pub(crate) fn agent_names_body(
+    mstore: &crate::backend::storage::store::Store,
+    settings: &crate::backend::wconfig::SettingsType,
+    agents: &[crate::backend::reactive::types::AgentRegistration],
+) -> serde_json::Value {
+    let pairs = || agents.iter().map(|a| (a.agent_id.as_str(), a.block_id.as_str()));
+    let kinds = crate::backend::fleet_source::kinds_by_name(pairs(), |block_id| {
+        crate::backend::operator_config_seed::agent_kind_of_block(mstore, block_id)
+    });
+    let status: BTreeMap<&str, _> = pairs()
+        .filter_map(|(name, block_id)| crate::backend::agent_state::agent_status_of_block(mstore, block_id).map(|s| (name, s)))
+        .collect();
+    let providers: BTreeMap<&str, &str> = pairs()
+        .filter_map(|(name, block_id)| {
+            let block = mstore.get::<crate::backend::obj::Block>(block_id).ok()??;
+            let raw = crate::backend::obj::meta_get_string(&block.meta, "agentProvider", "");
+            let id = crate::backend::providers::resolve_provider_alias(&raw);
+            (!id.is_empty()).then_some((name, id))
+        })
+        .collect();
+    let mut body = json!({
+        "agents": agents.iter().map(|a| a.agent_id.as_str()).collect::<Vec<_>>(),
+        "agent_kinds": kinds,
+        "now_ms": agentmux_common::time::now_ms_u64(),
+        "agent_status": status,
+        "agent_providers": providers,
+    });
+    if let Some(lines) = crate::backend::agent_line::lines_by_name(mstore, settings, pairs()) {
+        body["agent_lines"] = json!(lines);
+    }
+    body
+}
+
 /// What an instance's `/agentmux/reactive/agent-names` answer says about its
 /// agents.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]

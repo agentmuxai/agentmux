@@ -1453,60 +1453,16 @@ pub(super) async fn handle_reactive_agents(
 ///
 /// Reachable with the broadcast `lan_key` (`lan_or_full_auth_middleware`), so
 /// its output is public to anyone on the local network. **Do not extend it**
-/// without the owner's decision. Each field so far had one:
-/// - `agents`, enumerating names (2026-09-08): a `lan_key` holder could
-///   already confirm a specific name via `/agentmux/reactive/agent?id=…`.
-/// - `agent_kinds` (`{name: "host" | "container"}`, 2026-10-06, agentmux-mobile's
-///   SPEC_FLEET_HOST_TAGS_AND_CLOUD_HOSTS_2026_10_06 §5.2, §11).
-/// - `agent_status` (`{name: {state, since_ms}}`) and `now_ms`, decision D1 of
-///   2026-10-07 (agentmux-mobile's SPEC_AGENT_STATUS_AND_LIVE_PANE_FEED_2026_10_07
-///   §3.4, §11), also on the fleet feed this route is the fallback for.
-/// - `agent_lines` (`{name: line}`, 2026-10-13): content, each agent's Swarm
-///   summary line (`backend::agent_line`); absent with `swarm:sharesummaries` off.
-/// - `agent_providers` (`{name: provider id}`, decision D1 of 2026-10-17,
-///   SPEC_SWARM_REFINEMENTS_2026_10_17 §3, §7): the Swarm's provider icon on
-///   remote rows. Only an id this build knows (`providers::resolve_provider_alias`).
+/// without the owner's decision.
 ///
-/// An agent with no kind, state, line or provider is left out of that map.
+/// Built by [`crate::backend::lan_discovery::agent_names_body`], which lists
+/// the fields and the decision behind each.
 pub(super) async fn handle_reactive_agent_names(
     State(state): State<AppState>,
 ) -> Json<serde_json::Value> {
-    let agents = state.reactive_handler.list_agents();
-    let kinds = crate::backend::fleet_source::kinds_by_name(
-        agents.iter().map(|a| (a.agent_id.as_str(), a.block_id.as_str())),
-        |block_id| crate::backend::operator_config_seed::agent_kind_of_block(&state.mstore, block_id),
-    );
-    let status: std::collections::BTreeMap<&str, _> = agents
-        .iter()
-        .filter_map(|a| {
-            crate::backend::agent_state::agent_status_of_block(&state.mstore, &a.block_id)
-                .map(|s| (a.agent_id.as_str(), s))
-        })
-        .collect();
-    let status = serde_json::to_value(status).unwrap_or_else(|_| json!({}));
-    let providers: std::collections::BTreeMap<&str, &str> = agents
-        .iter()
-        .filter_map(|a| {
-            let block = state.mstore.get::<crate::backend::obj::Block>(&a.block_id).ok()??;
-            let raw = crate::backend::obj::meta_get_string(&block.meta, "agentProvider", "");
-            let id = crate::backend::providers::resolve_provider_alias(&raw);
-            (!id.is_empty()).then_some((a.agent_id.as_str(), id))
-        })
-        .collect();
-    let names: Vec<String> = agents.iter().map(|a| a.agent_id.clone()).collect();
-    let mut body = json!({
-        "agents": names,
-        "agent_kinds": kinds,
-        "now_ms": agentmux_common::time::now_ms_u64(),
-        "agent_status": status,
-        "agent_providers": providers,
-    });
     let settings = state.config_watcher.get_full_config();
-    let pairs = agents.iter().map(|a| (a.agent_id.as_str(), a.block_id.as_str()));
-    if let Some(lines) = crate::backend::agent_line::lines_by_name(&state.mstore, &settings.settings, pairs) {
-        body["agent_lines"] = json!(lines);
-    }
-    Json(body)
+    let agents = state.reactive_handler.list_agents();
+    Json(crate::backend::lan_discovery::agent_names_body(&state.mstore, &settings.settings, &agents))
 }
 
 #[derive(serde::Deserialize)]

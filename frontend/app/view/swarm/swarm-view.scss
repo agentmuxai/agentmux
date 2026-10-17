@@ -1154,9 +1154,10 @@
 }
 
 // The agent's own summary line, styled as a local row's generated line and
-// aligned with the name (past the row's checkbox).
+// aligned with the name: past the row's checkbox and its 16px provider icon
+// with the row's 6px gap.
 .swarm-remote-agent-line {
-    padding: 0 10px 4px 32px;
+    padding: 0 10px 4px 54px;
     font-size: var(--text-xs);
     color: var(--secondary-text-color);
     font-style: italic;
