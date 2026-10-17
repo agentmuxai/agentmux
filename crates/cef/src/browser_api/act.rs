@@ -23,6 +23,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use super::cdp::CdpSession;
+use super::frames::{self, FrameRef};
 use super::snapshot::{self, DomFacts};
 use super::types::ApiResponse;
 use crate::state::AppState;
@@ -33,6 +34,8 @@ use crate::state::AppState;
 pub struct RefTable {
     pub url: String,
     pub refs: HashMap<String, i64>,
+    /// For each reference inside an iframe (`f1e3`), how to find its frame.
+    pub frames: HashMap<String, FrameRef>,
 }
 
 /// Per-host store of each pane's latest reference table, by block id.
@@ -321,14 +324,18 @@ async fn call(cdp: &mut CdpSession, method: &str, params: Value) -> Result<Value
     cdp.call(method, params).await.map_err(|e| format!("CDP {method}: {e}"))
 }
 
-/// A fresh isolated world in the pane's main frame.
-async fn isolated_context(cdp: &mut CdpSession) -> Result<i64, String> {
-    let tree = call(cdp, "Page.getFrameTree", json!({})).await?;
-    let frame_id = tree
-        .pointer("/frameTree/frame/id")
-        .and_then(|v| v.as_str())
-        .ok_or("CDP Page.getFrameTree: no main frame")?
-        .to_string();
+/// A fresh isolated world in `frame_id`, or in the pane's main frame.
+async fn isolated_context(cdp: &mut CdpSession, frame_id: Option<&str>) -> Result<i64, String> {
+    let frame_id = match frame_id {
+        Some(f) => f.to_string(),
+        None => {
+            let tree = call(cdp, "Page.getFrameTree", json!({})).await?;
+            tree.pointer("/frameTree/frame/id")
+                .and_then(|v| v.as_str())
+                .ok_or("CDP Page.getFrameTree: no main frame")?
+                .to_string()
+        }
+    };
     let world = call(
         cdp,
         "Page.createIsolatedWorld",
@@ -382,7 +389,7 @@ async fn call_on(cdp: &mut CdpSession, object_id: &str, func: &str, args: Vec<Va
 /// The element's markup facts, without its accessible name: for a caller that
 /// already has the name (the snapshot reads it from the accessibility tree it
 /// just fetched) or doesn't need it (is the element still there).
-async fn describe_markup(cdp: &mut CdpSession, backend: i64) -> Option<DomFacts> {
+pub(super) async fn describe_markup(cdp: &mut CdpSession, backend: i64) -> Option<DomFacts> {
     let v = cdp.call("DOM.describeNode", json!({ "backendNodeId": backend })).await.ok()?;
     v.get("node").map(DomFacts::from_described)
 }
@@ -423,17 +430,40 @@ async fn click_at(cdp: &mut CdpSession, x: f64, y: f64) -> Result<(), String> {
     Ok(())
 }
 
-async fn click_element(cdp: &mut CdpSession, object_id: &str) -> Result<(), String> {
+/// Click an element. `cdp` reaches the element's own frame; `root` is the
+/// page's own session, which the mouse events go through: the browser routes
+/// them to whichever frame is under the point. A point measured inside a frame
+/// is moved to where that frame is on the page first.
+async fn click_element(
+    cdp: &mut CdpSession,
+    root: &mut CdpSession,
+    frame: Option<&FrameRef>,
+    object_id: &str,
+) -> Result<(), String> {
     let p = call_on(cdp, object_id, CLICK_POINT, vec![]).await?;
-    let x = p.get("x").and_then(|v| v.as_f64()).ok_or("no click point")?;
-    let y = p.get("y").and_then(|v| v.as_f64()).ok_or("no click point")?;
-    click_at(cdp, x, y).await
+    let mut x = p.get("x").and_then(|v| v.as_f64()).ok_or("no click point")?;
+    let mut y = p.get("y").and_then(|v| v.as_f64()).ok_or("no click point")?;
+    if let Some(f) = frame {
+        // Scrolling the element into view moves the frames around it too, and
+        // for a frame in another process it finishes a moment later.
+        tokio::time::sleep(std::time::Duration::from_millis(60)).await;
+        let (ox, oy) = frames::frame_offset(root, f).await?;
+        x += ox;
+        y += oy;
+    }
+    click_at(root, x, y).await
 }
 
 /// The secret-field guard for typing into whatever has focus (spec §5.1),
 /// used by `dispatch_key`. `Err` names the refusal.
 pub async fn refuse_typing_into_secret_field(cdp: &mut CdpSession) -> Result<(), String> {
-    let ctx = isolated_context(cdp).await?;
+    refuse_typing_in_frame(cdp, None).await
+}
+
+/// The same guard for whatever has focus in `frame_id` (`cdp` reaches that
+/// frame), or in the main frame.
+async fn refuse_typing_in_frame(cdp: &mut CdpSession, frame_id: Option<&str>) -> Result<(), String> {
+    let ctx = isolated_context(cdp, frame_id).await?;
     let v = call(
         cdp,
         "Runtime.evaluate",
@@ -488,6 +518,12 @@ pub async fn snapshot_route(
     let scope = match &req.scope {
         Some(r) => {
             let table = state.browser_api.ref_tables.get(&req.block_id).unwrap_or_default();
+            if table.frames.contains_key(r) {
+                let _ = cdp.close().await;
+                return fail(format!(
+                    "{r} is inside an iframe, and scoping to a part of a frame isn't supported yet: take a snapshot without scope"
+                ));
+            }
             let now = page_url(&mut cdp).await;
             match table.refs.get(r).copied() {
                 Some(b) if table.url == now => Some(b),
@@ -540,7 +576,14 @@ pub async fn snapshot_route(
         Some(r) => format!("{r}."),
         None => String::new(),
     };
-    let rendered = snapshot::render(&nodes, &facts, scope, &prefix);
+    // The iframes' own trees go under their elements. A scoped snapshot shows
+    // only the element, so its references can't clash with the full one's.
+    let mut describes_left = MAX_DESCRIBES.saturating_sub(facts.len());
+    let (frame_trees, frame_refs) = match scope {
+        Some(_) => (Vec::new(), HashMap::new()),
+        None => frames::read_frames(&mut cdp, &mut describes_left).await,
+    };
+    let rendered = snapshot::render_with_frames(&nodes, &facts, scope, &prefix, &frame_trees);
     // A scoped snapshot adds its references to the full snapshot's table, so
     // those stay usable; but never across a navigation.
     let mut table = match scope {
@@ -552,6 +595,11 @@ pub async fn snapshot_route(
     }
     table.url = url.clone();
     table.refs.extend(rendered.refs.iter().cloned());
+    for (r, ordinal) in &rendered.ref_frames {
+        if let Some(f) = frame_refs.get(ordinal) {
+            table.frames.insert(r.clone(), f.clone());
+        }
+    }
     state.browser_api.ref_tables.put(&req.block_id, table);
     let _ = cdp.close().await;
     (
@@ -583,7 +631,8 @@ pub async fn act_route(
         Ok(c) => c,
         Err(e) => return fail(e),
     };
-    let result = act(&mut cdp, &table, backend, &req).await;
+    let frame = table.frames.get(&req.ref_).cloned();
+    let result = act(&mut cdp, &table, backend, frame.as_ref(), &req).await;
     let _ = cdp.close().await;
     match result {
         Ok(after) => (StatusCode::OK, Json(ApiResponse::ok(ActData { after }))),
@@ -591,15 +640,31 @@ pub async fn act_route(
     }
 }
 
-async fn act(cdp: &mut CdpSession, table: &RefTable, backend: i64, req: &ActReq) -> Result<Value, String> {
-    let now = page_url(cdp).await;
+/// `root` is the pane's own session; an element inside an iframe is reached
+/// through that frame's session (`frame`), which every call about the element
+/// goes through.
+async fn act(
+    root: &mut CdpSession,
+    table: &RefTable,
+    backend: i64,
+    frame: Option<&FrameRef>,
+    req: &ActReq,
+) -> Result<Value, String> {
+    let now = page_url(root).await;
     if !table.url.is_empty() && now != table.url {
         return Err(format!("the page changed since the snapshot (now {now}); take a new snapshot"));
     }
+    if let Some(f) = frame {
+        frames::check_frame(root, f, &req.ref_).await?;
+    }
+    let mut in_frame = root.in_session(frame.and_then(|f| f.session.as_deref()));
+    let cdp = &mut in_frame;
+    let frame_id = frame.map(|f| f.frame_id.as_str());
+    let in_a_frame = frame.map(|f| format!(" (in a frame from {})", f.origin)).unwrap_or_default();
     let facts = describe(cdp, backend).await.ok_or_else(|| {
         format!("the element for {} is gone from the page; take a new snapshot", req.ref_)
     })?;
-    let ctx = isolated_context(cdp).await?;
+    let ctx = isolated_context(cdp, frame_id).await?;
     let obj = resolve(cdp, backend, ctx, &req.ref_).await?;
     let after = match req.action.as_str() {
         "click" => {
@@ -618,7 +683,7 @@ async fn act(cdp: &mut CdpSession, table: &RefTable, backend: i64, req: &ActReq)
                 .ok_or_else(|| unclassified("no answer from the page".to_string()))?;
             let name = info.get("name").and_then(|v| v.as_str()).unwrap_or("");
             let ask = json!({
-                "what": if name.is_empty() { "Click a button that submits a form".to_string() } else { format!("Click \"{name}\"") },
+                "what": if name.is_empty() { format!("Click a button that submits a form{in_a_frame}") } else { format!("Click \"{name}\"{in_a_frame}") },
                 "page": now,
                 "action": info.get("action").cloned().unwrap_or(Value::Null),
                 "fields": info.get("fields").cloned().unwrap_or(json!([])),
@@ -639,7 +704,7 @@ async fn act(cdp: &mut CdpSession, table: &RefTable, backend: i64, req: &ActReq)
             } else if committing {
                 return Ok(json!({ "needs_approval": ask }));
             }
-            click_element(cdp, &obj).await?;
+            click_element(cdp, root, frame, &obj).await?;
             Ok(call_on(cdp, &obj, READ_BACK, vec![]).await.unwrap_or(Value::Null))
         }
         "fill" => {
@@ -657,7 +722,7 @@ async fn act(cdp: &mut CdpSession, table: &RefTable, backend: i64, req: &ActReq)
             if describe(cdp, backend).await.as_ref().is_some_and(snapshot::is_secret) {
                 return Err(SECRET_REFUSAL.to_string());
             }
-            refuse_typing_into_secret_field(cdp).await?;
+            refuse_typing_in_frame(cdp, frame_id).await?;
             if text.is_empty() {
                 call_on(cdp, &obj, SET_VALUE, vec![json!("")]).await?;
             } else {
@@ -683,7 +748,7 @@ async fn act(cdp: &mut CdpSession, table: &RefTable, backend: i64, req: &ActReq)
                 // Nothing was clicked: redact on the facts from before.
                 return Ok(redact_secret(before, &facts));
             }
-            click_element(cdp, &obj).await?;
+            click_element(cdp, root, frame, &obj).await?;
             let after = call_on(cdp, &obj, READ_BACK, vec![]).await?;
             if after.get("checked").and_then(|v| v.as_bool()) != Some(want) {
                 return Err(format!(
@@ -927,6 +992,10 @@ pub async fn set_files_route(
         Ok(c) => c,
         Err(e) => return fail(e),
     };
+    if table.frames.contains_key(&req.ref_) {
+        let _ = cdp.close().await;
+        return fail("uploading a file into a field inside an iframe isn't supported yet: ask the user to choose the file in the pane");
+    }
     let result = set_files(&mut cdp, &table, backend, &req).await;
     let _ = cdp.close().await;
     match result {
@@ -949,7 +1018,7 @@ async fn set_files(cdp: &mut CdpSession, table: &RefTable, backend: i64, req: &S
     if req.files.len() > 1 && !facts.attrs.contains_key("multiple") {
         return Err("this file input takes one file".to_string());
     }
-    let ctx = isolated_context(cdp).await?;
+    let ctx = isolated_context(cdp, None).await?;
     let obj = resolve(cdp, backend, ctx, &req.ref_).await?;
     let files = serde_json::to_value(&req.files).map_err(|e| e.to_string())?;
     call_on(cdp, &obj, SET_FILES, vec![files]).await?;
@@ -970,10 +1039,16 @@ pub async fn wait_for_route(
         return fail("give exactly one of `text`, `url_contains` or `gone`");
     }
     let gone_backend = match &req.gone {
-        Some(r) => match state.browser_api.ref_tables.get(&req.block_id).and_then(|t| t.refs.get(r).copied()) {
-            Some(b) => Some(b),
-            None => return fail(format!("unknown reference {r:?}; take a new snapshot")),
-        },
+        Some(r) => {
+            let table = state.browser_api.ref_tables.get(&req.block_id);
+            if table.as_ref().is_some_and(|t| t.frames.contains_key(r)) {
+                return fail("waiting for an element inside an iframe to leave isn't supported yet: wait for text instead");
+            }
+            match table.and_then(|t| t.refs.get(r).copied()) {
+                Some(b) => Some(b),
+                None => return fail(format!("unknown reference {r:?}; take a new snapshot")),
+            }
+        }
         None => None,
     };
     let timeout = std::time::Duration::from_millis(req.timeout_ms.unwrap_or(10_000).clamp(250, 60_000));

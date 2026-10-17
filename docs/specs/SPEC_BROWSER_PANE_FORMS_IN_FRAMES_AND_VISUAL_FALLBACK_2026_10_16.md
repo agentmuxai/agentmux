@@ -1,6 +1,6 @@
 # SPEC: agents fill forms inside iframes, with a visual fallback for what the snapshot can't see
 
-**Status:** proposed
+**Status:** active. F1 (SSN/ITIN/TIN fields are secret) shipped in #5047. F2 built in the frames PR: the frame-aware CDP transport, the joined snapshot with `f1e12` references, and click, fill, select and check inside same-process and out-of-process frames, verified live on a fixture page (same-origin, cross-origin). Not built yet: frame origin rules (§5.3), uploads, scope and `gone` waits inside frames, frame waits, the visual fallback (§4.6), the fill ladder and comboboxes (§4.4, §4.5). One detail differs from §4.1: a frame in another process is found through that process's own frame tree (its root frame names its parent), because the page's frame tree doesn't list it.
 **Date:** 2026-10-16
 **Author:** Korp@narko, at the operator's request
 **Trigger (operator, 2026-10-16):** "we may hit a future situation like this, forms where the site has a esoteric setup. we want to update agents in agentmux with the tooling to handle form filling in these situations too. research best pratices online, write a spec to file."
