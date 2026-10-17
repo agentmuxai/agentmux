@@ -88,7 +88,6 @@ enum Line {
     Incident(Incident),
 }
 
-
 /// Append `incident` to the file at `path`.
 pub fn append(path: &Path, incident: &Incident) -> std::io::Result<()> {
     write_line(path, &Line::Incident(incident.clone()))
