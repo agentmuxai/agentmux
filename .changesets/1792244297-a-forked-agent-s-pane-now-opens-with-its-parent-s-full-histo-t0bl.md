@@ -2,4 +2,4 @@
 type: patch
 ---
 
-A forked agent's pane now opens with its parent's full history, an exact copy, instead of a blank pane
+Quick Fork goes straight to the new conversation: the forked agent's pane opens with its parent's full history, an exact copy, with no black pane or My Agents screen in between
