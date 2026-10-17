@@ -1067,32 +1067,6 @@ fn should_route_to_decision_panel(_tool_name: &str) -> bool {
     false
 }
 
-/// Park an ordinary (non-AskUserQuestion) tool-permission `can_use_tool`
-/// control_request into `PersistentInner::pending_permissions`, mirroring
-/// how AskUserQuestion is parked into `pending_questions` two branches up in
-/// `handle_control_frame` — same in-memory-only, per-controller-instance
-/// lifetime, and the same "process respawned" failure mode on decide
-/// (`PersistentSubprocessController::decide_tool_permission`'s error text
-/// explains it the same way `answer_question`'s does).
-///
-/// Currently unreachable in production: `should_route_to_decision_panel`
-/// always returns `false`, so `handle_control_frame` never calls this. Kept
-/// as its own function (rather than inlined, unlike the AskUserQuestion
-/// branch) specifically so it can be unit tested directly, independent of
-/// that gate.
-fn park_tool_permission_request(
-    inner: &Arc<Mutex<PersistentInner>>,
-    tool_use_id: String,
-    request_id: String,
-    tool_name: String,
-    input: serde_json::Value,
-) {
-    let mut guard = inner.lock().unwrap();
-    guard
-        .pending_permissions
-        .insert(tool_use_id, (request_id, tool_name, input));
-}
-
 /// Compose the directive follow-up message used by the tool-permission
 /// dead-air fallback (mirrors `build_answer_resume_message` /
 /// `build_deny_resume_message`'s directive tone — resume the task, don't
@@ -1585,6 +1559,10 @@ impl Controller for PersistentSubprocessController {
         Some(Arc::clone(&self.health_monitor))
     }
 
+    fn awaiting_user_reply(&self) -> bool {
+        self.has_parked_request()
+    }
+
     fn controller_type(&self) -> &str {
         BLOCK_CONTROLLER_PERSISTENT
     }
@@ -1679,6 +1657,8 @@ fn surface_error_line(
 
 mod eager_resume;
 mod input;
+#[cfg(test)]
+use input::park_tool_permission_request;
 mod lifecycle;
 mod outcome_line;
 mod process_waiter;

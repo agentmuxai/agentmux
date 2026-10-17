@@ -268,3 +268,18 @@ async fn a_running_agent_reports_its_spawn_time_and_last_output() {
     let _ = c.shutdown(std::time::Instant::now() + std::time::Duration::from_secs(5)).await;
     let _ = std::fs::remove_file(stub);
 }
+
+/// The watchdog reads srv's own record of a parked question or permission
+/// request, which holds whether or not any window shows the pane.
+#[test]
+fn a_parked_question_or_permission_request_awaits_the_user() {
+    let c = PersistentSubprocessController::new("tab".to_string(), "blk-parked".to_string(), None, None, None, None);
+    assert!(!c.awaiting_user_reply());
+    let question = ("req-q".to_string(), serde_json::json!([{ "question": "Pick?" }]));
+    c.inner.lock().unwrap().pending_questions.insert("tu-q".to_string(), question);
+    assert!(c.awaiting_user_reply(), "a parked AskUserQuestion");
+    c.inner.lock().unwrap().pending_questions.clear();
+    assert!(!c.awaiting_user_reply());
+    park_tool_permission_request(&c.inner, "tu-p".to_string(), "req-p".to_string(), "Bash".to_string(), serde_json::json!({}));
+    assert!(c.awaiting_user_reply(), "a parked tool permission");
+}

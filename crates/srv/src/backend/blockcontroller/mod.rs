@@ -386,12 +386,20 @@ pub trait Controller: Send + Sync {
     }
 
     /// When this agent last wrote output (unix ms), for the watchdog's idle
-    /// limit. Read from the turn tracker, which the persistent, ACP, MSP and
-    /// App Server controllers stamp from their stdout or protocol frames;
-    /// `None` for controllers that don't. The shell controller reports its
-    /// PTY output itself (`ShellController::last_output_secs_ago`).
+    /// limit. Read from the turn tracker, which the persistent, subprocess,
+    /// ACP, MSP and App Server controllers stamp from their stdout or protocol
+    /// frames; `None` for controllers that don't. The shell controller reports
+    /// its PTY output itself (`ShellController::last_output_secs_ago`).
     fn last_output_ms(&self) -> Option<i64> {
         self.turn_tracker().and_then(|t| t.last_output_ms())
+    }
+
+    /// Whether this agent holds a request parked for the user's answer (an
+    /// AskUserQuestion or a tool permission). srv's own record, so it holds
+    /// whether or not any window shows the pane; the watchdog never counts
+    /// that wait as idle.
+    fn awaiting_user_reply(&self) -> bool {
+        false
     }
 
     /// Refresh this block's own captured jekt/muxbus identity (see

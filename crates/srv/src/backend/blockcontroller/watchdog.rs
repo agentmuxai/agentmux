@@ -3,9 +3,9 @@
 
 //! Agent process watchdog: kills agent panes that exceed max-runtime or idle-output limits.
 //!
-//! Runs every 60 seconds and inspects every running controller that reports
-//! `is_agent_pane = true`: PTY agent panes and the persistent, ACP, MSP and
-//! App Server controllers. Two independent kill conditions:
+//! Runs every 60 seconds and inspects every running agent: PTY agent panes and
+//! the persistent, subprocess, ACP, MSP and App Server controllers. Two
+//! independent kill conditions:
 //!
 //!   A) `term:agentmaxruntimehours` — wall-clock runtime since spawn (0 = disabled)
 //!   B) `term:agentidletimeoutmins` — minutes without output (0 = disabled).
@@ -42,7 +42,9 @@ pub(crate) struct AgentClock {
     /// When the pass in flight started, if one is.
     pub pass_started_ms: Option<i64>,
     pub turn_active: bool,
-    /// A question in the pane waits for the user (`term:awaiting_user`).
+    /// A question or permission request waits for the user: parked in srv
+    /// (`Controller::awaiting_user_reply`) or flagged by the pane
+    /// (`term:awaiting_user`).
     pub awaiting_user: bool,
     /// A PTY pane (`ShellController`), idle whenever its PTY is quiet.
     pub is_shell: bool,
@@ -119,21 +121,28 @@ pub async fn run_watchdog_loop(config: Arc<ConfigState>, store: Arc<Store>) {
             if status.shellprocstatus != STATUS_RUNNING {
                 continue;
             }
-            if !status.is_agent_pane {
+            // The one-shot subprocess controller's status says
+            // `is_agent_pane: false` (other readers rely on that), but every
+            // pane it runs is an agent.
+            let is_subprocess = ctrl.as_any().is::<super::subprocess::SubprocessController>();
+            if !status.is_agent_pane && !is_subprocess {
                 continue;
             }
             let shell = ctrl.as_any().downcast_ref::<super::shell::ShellController>();
+            let tracker = ctrl.turn_tracker();
             let last_output_ms = match shell {
                 Some(shell) => shell.last_output_secs_ago().map(|secs| now_ms - secs as i64 * 1000),
                 None => ctrl.last_output_ms(),
             };
+            // srv's own parked request first; the pane's flag covers what srv
+            // doesn't park itself.
             let check_question = shell.is_none() && status.turn_active && limits.idle_timeout_mins > 0.0;
             let agent = AgentClock {
-                spawn_ms: status.spawn_ts_ms,
+                spawn_ms: status.spawn_ts_ms.or_else(|| tracker.as_ref().and_then(|t| t.spawned_at_ms())),
                 last_output_ms,
-                pass_started_ms: ctrl.turn_tracker().and_then(|t| t.pass_started_ms()),
+                pass_started_ms: tracker.as_ref().and_then(|t| t.pass_started_ms()),
                 turn_active: status.turn_active,
-                awaiting_user: check_question && awaiting_user(&store, &block_id),
+                awaiting_user: check_question && (ctrl.awaiting_user_reply() || awaiting_user(&store, &block_id)),
                 is_shell: shell.is_some(),
             };
 
