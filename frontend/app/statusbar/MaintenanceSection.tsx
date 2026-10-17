@@ -5,6 +5,7 @@ import {
     appUpdate,
     availableRelease,
     cancelUpgrade,
+    checkForUpdate,
     loadAppUpdate,
     releaseDownload,
     startAppUpdateDownload,
@@ -72,6 +73,22 @@ export const MaintenanceSection = (): JSX.Element => {
         return d && d.total > 0 ? Math.floor((d.received * 100) / d.total) : 0;
     };
     const [startError, setStartError] = createSignal<string | null>(null);
+    const [checking, setChecking] = createSignal(false);
+    const [checkError, setCheckError] = createSignal<string | null>(null);
+    const handleCheck = () => {
+        setChecking(true);
+        setCheckError(null);
+        checkForUpdate()
+            .catch((e) => setCheckError(String(e?.message ?? e)))
+            .finally(() => setChecking(false));
+    };
+    // Where this AgentMux stands when no newer release is known.
+    const standing = () => {
+        const s = appUpdate();
+        if (s?.state === "up-to-date") return `v${s.current} is up to date`;
+        if (s?.state === "off") return "Automatic update checks are off";
+        return "Not checked for updates yet";
+    };
     const updaterVersion = () => release()?.version ?? atoms.updaterVersionAtom();
     const [showNotes, setShowNotes] = createSignal(false);
 
@@ -378,11 +395,23 @@ export const MaintenanceSection = (): JSX.Element => {
             <Show when={showNotes() && release() && appUpdate()?.notes}>
                 <pre class="maintenance-release-notes">{appUpdate()?.notes}</pre>
             </Show>
-            {/* A local or dev build isn't a release: say which one is. */}
+            {/* No newer release known: where this one stands, and Check for update. */}
+            <Show when={!release() && appUpdate()?.state !== "local-build"}>
+                <div class="maintenance-update-row">
+                    <span class="maintenance-row-text maintenance-row-text--dim">{standing()}</span>
+                    <Button density="compact" class="maintenance-btn" disabled={checking()} onClick={handleCheck}>
+                        {checking() ? "Checking…" : "Check for update"}
+                    </Button>
+                </div>
+            </Show>
+            <Show when={checkError()}>
+                <div class="maintenance-row-text maintenance-row-text--error">{checkError()}</div>
+            </Show>
+            {/* A `task dev` build runs from source and doesn't upgrade: say which release is latest. */}
             <Show when={appUpdate()?.state === "local-build" && appUpdate()?.latest}>
                 <div class="maintenance-update-row">
                     <span class="maintenance-row-text maintenance-row-text--dim">
-                        Local build. The latest release is v{appUpdate()?.latest}.
+                        Development build. The latest release is v{appUpdate()?.latest}.
                     </span>
                     <Show when={appUpdate()?.url}>
                         <Button density="compact" class="maintenance-btn" onClick={() => void openLink(appUpdate()!.url!)}>

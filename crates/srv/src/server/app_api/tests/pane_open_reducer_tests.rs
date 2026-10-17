@@ -1855,3 +1855,232 @@ async fn a_popup_window_is_driven_through_the_pane_that_opened_it() {
     let block = state.mstore.must_get::<crate::backend::obj::Block>(&persons).unwrap();
     assert!(block.meta.get("browser:popup_windows").is_none_or(|v| v.is_null()));
 }
+
+/// A stand-in CEF host for the bypass tests: `eval` answers the page's
+/// address (`url`), and `act` asks for approval of a click named `what` on
+/// that page, then makes it only when sent back exactly what it asked.
+#[derive(Clone, Default)]
+struct BypassFakeHost {
+    url: std::sync::Arc<std::sync::Mutex<String>>,
+    what: std::sync::Arc<std::sync::Mutex<String>>,
+    clicks: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+}
+
+impl BypassFakeHost {
+    fn ask(&self) -> serde_json::Value {
+        serde_json::json!({
+            "what": self.what.lock().unwrap().clone(),
+            "page": self.url.lock().unwrap().clone(),
+            "action": null,
+            "fields": [],
+            "fingerprint": "fp",
+        })
+    }
+
+    async fn serve(&self) -> u16 {
+        use axum::{routing::post, Json, Router};
+        let (h1, h2) = (self.clone(), self.clone());
+        let app = Router::new()
+            .route(
+                "/agentmux/browser/eval",
+                post(move |Json(_b): Json<serde_json::Value>| {
+                    let h = h1.clone();
+                    async move {
+                        let url = h.url.lock().unwrap().clone();
+                        Json(serde_json::json!({ "ok": true, "data": { "result": url, "type": "string", "exception": null } }))
+                    }
+                }),
+            )
+            .route(
+                "/agentmux/browser/act",
+                post(move |Json(b): Json<serde_json::Value>| {
+                    let h = h2.clone();
+                    async move {
+                        let ask = h.ask();
+                        if b["approved"].as_bool() == Some(true) {
+                            if b["approved_as"] != ask {
+                                return Json(serde_json::json!({ "ok": false, "error": "the form changed" }));
+                            }
+                            h.clicks.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                            return Json(serde_json::json!({ "ok": true, "data": { "after": { "tag": "button" } } }));
+                        }
+                        Json(serde_json::json!({ "ok": true, "data": { "after": { "needs_approval": ask } } }))
+                    }
+                }),
+            );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        port
+    }
+}
+
+async fn wait_for_banner(state: &AppState, pane: &str) -> serde_json::Value {
+    for _ in 0..200 {
+        let block = state.mstore.must_get::<crate::backend::obj::Block>(pane).unwrap();
+        if let Some(b) = block.meta.get("browser:attention").filter(|v| !v.is_null()) {
+            return b.clone();
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    panic!("no banner on {pane}");
+}
+
+// SPEC_BROWSER_PANE_BYPASS_2026_10_16.md: only the person grants a bypass,
+// through the host; under it the agent's committing clicks on the granted
+// site run without a banner; off that site, and for payments, they ask; the
+// agent can end it but never start it.
+#[tokio::test]
+async fn bypass_is_granted_only_through_the_host_and_lifts_approvals_on_its_site() {
+    use axum::http::StatusCode;
+    let state = test_state();
+    let ws_id = dispatch_apply(&state, Command::CreateWorkspace { name: "w".into() })
+        .await
+        .iter()
+        .find_map(|e| match e {
+            Event::WorkspaceCreated { workspace_id, .. } => Some(workspace_id.clone()),
+            _ => None,
+        })
+        .unwrap();
+    let tab_id = dispatch_apply(&state, Command::CreateTab { workspace_id: ws_id, name: "t".into() })
+        .await
+        .iter()
+        .find_map(|e| match e {
+            Event::TabCreated { tab_id, .. } => Some(tab_id.clone()),
+            _ => None,
+        })
+        .unwrap();
+    let own = stand_in_pane(&state, &tab_id).await;
+    let (agent, auth) = signed_agent_on(&state, &own);
+    let fake = BypassFakeHost::default();
+    *fake.url.lock().unwrap() = "https://github.com/example/repo/issues/1".into();
+    *fake.what.lock().unwrap() = "Click \"Delete draft\"".into();
+    let port = fake.serve().await;
+    *state.host_ipc.lock().await = Some(crate::server::state::HostIpc { port, token: "host-ipc-token".into() });
+    let app = crate::server::build_router(state.clone());
+    let host = [("X-Host-Token", "host-ipc-token")];
+
+    let (s, body) = post_json(&app, "/api/v1/ui/browser/open", merged(&auth, serde_json::json!({ "url": "https://github.com/" }))).await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    let pane = body["data"]["pane"].as_str().unwrap().to_string();
+    let grant = |origins: serde_json::Value, who: &str| {
+        serde_json::json!({ "block_id": pane, "on": true, "minutes": 15, "agent": who, "origins": origins })
+    };
+
+    // Without bypass, eval on a driven pane is refused.
+    let (s, _) = post_json(&app, "/api/v1/ui/browser/eval", merged(&auth, serde_json::json!({ "pane": pane, "script": "1" }))).await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+
+    // An agent can't grant itself one: the host route wants the host's token.
+    let ok_grant = grant(serde_json::json!(["https://github.com"]), &agent);
+    let (s, _) = post_json_headers(&app, "/api/v1/host/browser_bypass", ok_grant.clone(), &[]).await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+    let (s, _) = post_json_headers(&app, "/api/v1/host/browser_bypass", ok_grant.clone(), &[("X-Host-Token", "guess")]).await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+    // The host's grant holds only if what the person was shown still holds.
+    let (s, body) = post_json_headers(&app, "/api/v1/host/browser_bypass", grant(serde_json::json!(["https://github.com"]), "someone-else"), &host).await;
+    assert_eq!(s, StatusCode::CONFLICT, "{body}");
+    let (s, body) = post_json_headers(&app, "/api/v1/host/browser_bypass", grant(serde_json::json!(["https://evil.example"]), &agent), &host).await;
+    assert_eq!(s, StatusCode::CONFLICT, "{body}");
+    assert!(crate::server::browser_bypass::active_for(&pane, &agent).is_none());
+
+    let (s, body) = post_json_headers(&app, "/api/v1/host/browser_bypass", ok_grant.clone(), &host).await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    assert_eq!(body["data"]["minutes"], 15);
+    let block = state.mstore.must_get::<crate::backend::obj::Block>(&pane).unwrap();
+    assert_eq!(block.meta.get("browser:bypass").unwrap()["agent"], agent.as_str());
+
+    // A committing click on the granted site is made at once, with no banner.
+    let click = merged(&auth, serde_json::json!({ "pane": pane, "ref": "e1", "action": "click" }));
+    let (s, body) = post_json(&app, "/api/v1/ui/browser/act", click.clone()).await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    assert_eq!(body["data"]["bypassed"], true);
+    assert_eq!(fake.clicks.load(std::sync::atomic::Ordering::SeqCst), 1);
+    let block = state.mstore.must_get::<crate::backend::obj::Block>(&pane).unwrap();
+    assert!(block.meta.get("browser:attention").is_none_or(|v| v.is_null()));
+    // Eval stays refused: bypass covers committing clicks only, where the
+    // payment and secret-field checks hold.
+    let (s, _) = post_json(&app, "/api/v1/ui/browser/eval", merged(&auth, serde_json::json!({ "pane": pane, "script": "1" }))).await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+
+    // A payment still asks.
+    *fake.what.lock().unwrap() = "Click \"Pay now\"".into();
+    let asking = {
+        let (app, click) = (app.clone(), click.clone());
+        tokio::spawn(async move { post_json(&app, "/api/v1/ui/browser/act", click).await })
+    };
+    let banner = wait_for_banner(&state, &pane).await;
+    assert_eq!(banner["kind"], "approval");
+    let answer = serde_json::json!({ "block_id": pane, "id": banner["id"], "decision": "cancel" });
+    let (s, _) = post_json_headers(&app, "/api/v1/host/browser_attention", answer, &host).await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(asking.await.unwrap().0, StatusCode::FORBIDDEN);
+    assert_eq!(fake.clicks.load(std::sync::atomic::Ordering::SeqCst), 1);
+    *fake.what.lock().unwrap() = "Click \"Delete draft\"".into();
+
+    // Off the granted site, a committing click asks again.
+    *fake.url.lock().unwrap() = "https://accounts.google.com/o/oauth2".into();
+    let asking = {
+        let (app, click) = (app.clone(), click.clone());
+        tokio::spawn(async move { post_json(&app, "/api/v1/ui/browser/act", click).await })
+    };
+    let banner = wait_for_banner(&state, &pane).await;
+    assert_eq!(banner["kind"], "approval");
+    let answer = serde_json::json!({ "block_id": pane, "id": banner["id"], "decision": "cancel" });
+    let (s, _) = post_json_headers(&app, "/api/v1/host/browser_attention", answer, &host).await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(asking.await.unwrap().0, StatusCode::FORBIDDEN);
+    assert_eq!(fake.clicks.load(std::sync::atomic::Ordering::SeqCst), 1);
+    *fake.url.lock().unwrap() = "https://github.com/example/repo/issues/1".into();
+
+    // The agent can end its own bypass; the strip goes, and clicks ask again.
+    let (s, body) = post_json(&app, "/api/v1/ui/browser/end_bypass", merged(&auth, serde_json::json!({ "pane": pane }))).await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    assert_eq!(body["data"]["ended"], true);
+    let block = state.mstore.must_get::<crate::backend::obj::Block>(&pane).unwrap();
+    assert!(block.meta.get("browser:bypass").is_none_or(|v| v.is_null()));
+    assert!(crate::server::browser_bypass::active_for(&pane, &agent).is_none());
+
+    // The agent asks; the person's Allow, through the host, grants it.
+    let request = merged(&auth, serde_json::json!({ "pane": pane, "reason": "Delete 75 old drafts", "minutes": 60 }));
+    let asking = {
+        let (app, request) = (app.clone(), request.clone());
+        tokio::spawn(async move { post_json(&app, "/api/v1/ui/browser/request_bypass", request).await })
+    };
+    let banner = wait_for_banner(&state, &pane).await;
+    assert_eq!(banner["kind"], "bypass");
+    assert_eq!(banner["reason"], "Delete 75 old drafts");
+    assert_eq!(banner["origins"], serde_json::json!(["https://github.com"]));
+    assert_eq!(banner["minutes"], 60);
+    // Not by the agent itself.
+    let answer = serde_json::json!({ "block_id": pane, "id": banner["id"], "decision": "approve" });
+    let (s, _) = post_json_headers(&app, "/api/v1/host/browser_attention", answer.clone(), &[]).await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+    let (s, _) = post_json_headers(&app, "/api/v1/host/browser_attention", answer, &host).await;
+    assert_eq!(s, StatusCode::OK);
+    let (s, body) = asking.await.unwrap();
+    assert_eq!(s, StatusCode::OK, "{body}");
+    assert_eq!(body["data"]["answer"], "granted");
+    assert_eq!(body["data"]["minutes"], 60);
+    assert!(crate::server::browser_bypass::active_for(&pane, &agent).is_some());
+
+    // The person's End bypass, through the host.
+    let (s, body) = post_json_headers(&app, "/api/v1/host/browser_bypass", serde_json::json!({ "block_id": pane, "on": false }), &host).await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    assert!(crate::server::browser_bypass::active_for(&pane, &agent).is_none());
+
+    // A No cools down: the agent can't ask again at once.
+    let asking = {
+        let (app, request) = (app.clone(), request.clone());
+        tokio::spawn(async move { post_json(&app, "/api/v1/ui/browser/request_bypass", request).await })
+    };
+    let banner = wait_for_banner(&state, &pane).await;
+    let answer = serde_json::json!({ "block_id": pane, "id": banner["id"], "decision": "cancel" });
+    let (s, _) = post_json_headers(&app, "/api/v1/host/browser_attention", answer, &host).await;
+    assert_eq!(s, StatusCode::OK);
+    let (s, body) = asking.await.unwrap();
+    assert_eq!(s, StatusCode::OK, "{body}");
+    assert_eq!(body["data"]["answer"], "declined");
+    let (s, _) = post_json(&app, "/api/v1/ui/browser/request_bypass", request).await;
+    assert_eq!(s, StatusCode::TOO_MANY_REQUESTS);
+}

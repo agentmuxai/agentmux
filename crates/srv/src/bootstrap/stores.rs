@@ -551,6 +551,8 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
     if first_launch {
         tracing::info!("First launch: created initial data");
     }
+    // A window whose close a quit outran: the session record restores it.
+    crate::server::service::forget_windows_left_by_quit(&mstore);
 
     // Seed ~/.agentmux/.gitignore so accidental git operations inside the
     // data directory (e.g. an agent running `git init` or `git clone` in its

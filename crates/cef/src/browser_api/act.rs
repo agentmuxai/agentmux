@@ -200,7 +200,7 @@ const COMMIT_INFO: &str = r#"function () {
     const byIds = (el.getAttribute("aria-labelledby") || "").split(/\s+/).map(i => { const t = i && el.ownerDocument.getElementById(i); return t ? t.textContent : ""; }).join(" ");
     const words = ((el.name || "") + " " + (el.id || "") + " " + (el.getAttribute("aria-label") || "") + " " + (el.getAttribute("placeholder") || "") + " " + byIds + " " +
       (el.labels ? Array.from(el.labels).map(l => l.textContent).join(" ") : ""))
-      .replace(/([a-z])([A-Z])/g, "$1 $2").replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2").replace(/([a-zA-Z])([0-9])|([0-9])([a-zA-Z])/g, "$1$3 $2$4")
+      .replace(/([a-z])([A-Z])/g, "$1 $2").replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2").replace(/(?<=[a-zA-Z])(?=[0-9])|(?<=[0-9])(?=[a-zA-Z])/g, " ")
       .toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
     const taxId = words.some(w => w === "ssn" || w === "itin" || w === "tin") || /socialsecurity|taxpayerid/.test(words.join(""));
     return taxId || ty === "password" || /one-time-code|cc-|password/.test(ac) || /pass(word|code)?|otp|one.?time|cvc|cvv|card.?num|security.?code/.test(nm);

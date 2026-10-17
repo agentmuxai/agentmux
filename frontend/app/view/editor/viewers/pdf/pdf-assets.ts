@@ -8,13 +8,18 @@
  * base here is already inside `node_modules`, so they match without it, but
  * that is Vite's detail to change. pdf-assets.test.ts checks they aren't
  * empty.
+ *
+ * Each glob names its extensions, so the folders' LICENSE_* files stay out:
+ * Vite names an extensionless asset with a trailing dot, which Windows can't
+ * open, and the Inno Setup installer build fails on it. Their texts ship in
+ * the third-party notices instead (licenses/bundled/pdfjs-*.txt).
  */
 
 export type UrlLoaders = Record<string, () => Promise<string>>;
 
 // Vite reads glob options only as a literal written in the call.
 const cmaps = import.meta.glob("/node_modules/pdfjs-dist/cmaps/*.bcmap", { query: "?url", import: "default", exhaustive: true }) as UrlLoaders;
-const fonts = import.meta.glob("/node_modules/pdfjs-dist/standard_fonts/*", { query: "?url", import: "default", exhaustive: true }) as UrlLoaders;
+const fonts = import.meta.glob("/node_modules/pdfjs-dist/standard_fonts/*.{pfb,ttf}", { query: "?url", import: "default", exhaustive: true }) as UrlLoaders;
 const wasm = import.meta.glob("/node_modules/pdfjs-dist/wasm/*.{wasm,js}", { query: "?url", import: "default", exhaustive: true }) as UrlLoaders;
 
 /** By the kind pdf.js asks for: the folder it means and the bundled files. */

@@ -23,7 +23,8 @@ import {
 } from "@/app/store/browser-pane-state-store";
 import { browserStartPageAtom } from "@/store/config-signals";
 import { refocusNode } from "@/app/store/global";
-import { createMemo, createRoot, createSignal, type Accessor } from "solid-js";
+import { createEffect, createMemo, createRoot, createSignal, onCleanup, type Accessor } from "solid-js";
+import { originCovered, pageOrigin } from "./bypass";
 import { errorPageFailedUrl } from "./error-page-url";
 import { findTabHolding } from "@/app/util/reveal-block";
 import { getLayoutModelForStaticTab, getLayoutModelForTabById } from "@/layout/lib/layoutModelHooks";
@@ -194,6 +195,11 @@ export class BrowserViewModel {
     /** The driving agent's pending request to the user (hand-off, approval,
      *  or a navigation off the pane's sites). */
     attentionAtom: Accessor<BrowserAttention | undefined>;
+    /** The bypass the person granted the driving agent, while it lasts
+     *  (`browser:bypass`, written by srv; SPEC_BROWSER_PANE_BYPASS_2026_10_16.md §3.3). */
+    bypassAtom: Accessor<BrowserBypass | undefined>;
+    /** Now, in ms: ticks while a bypass shows, for its countdown and expiry. */
+    private _now = createSignal(Date.now());
     /** The sites the driving agent limited this pane to (`browser:allowed_origins`,
      *  written by srv; SPEC_BROWSER_PANE_ALLOWED_ORIGINS_2026_10_09.md §5). */
     allowedOriginsAtom: Accessor<string[]>;
@@ -415,6 +421,24 @@ export class BrowserViewModel {
             this.attentionAtom = createMemo(() => {
                 const v = this.meta()?.["browser:attention"];
                 return v && typeof v === "object" && typeof v.id === "string" ? v : undefined;
+            });
+            const rawBypass = createMemo((): BrowserBypass | undefined => {
+                const v = this.meta()?.["browser:bypass"];
+                return v && typeof v === "object" && typeof v.expires_at === "number" && Array.isArray(v.origins)
+                    ? v
+                    : undefined;
+            });
+            this.bypassAtom = createMemo(() => {
+                const b = rawBypass();
+                return b && b.expires_at > this._now[0]() ? b : undefined;
+            });
+            // Tick only while a bypass is shown: its countdown, and the strip
+            // going away at expiry even before srv's own update arrives.
+            createEffect(() => {
+                if (!rawBypass()) return;
+                this._now[1](Date.now());
+                const t = setInterval(() => this._now[1](Date.now()), 15_000);
+                onCleanup(() => clearInterval(t));
             });
             this.driverAgentAtom = createMemo(() => {
                 const v = this.meta()?.["browser:owner_agent"];
@@ -859,6 +883,45 @@ export class BrowserViewModel {
         // If srv no longer knows the request (it restarted), it takes the
         // banner down itself; the banner key is srv's alone to write.
         return getApi().approvals.decideBrowserAttention(this.blockId, a.id, decision);
+    }
+
+    /** The sites a bypass turned on now would cover: the page's own site and
+     *  the pane's site list. srv works out the same and refuses the grant if
+     *  they differ from what the person was shown (bypass spec §4.2, §5). */
+    bypassOriginsPreview(): string[] {
+        const out: string[] = [];
+        const own = pageOrigin(this.urlAtom());
+        if (own) out.push(own);
+        for (const o of this.allowedOriginsAtom()) {
+            if (!out.includes(o)) out.push(o);
+        }
+        return out;
+    }
+
+    /** The page is off the bypass's sites: the agent's clicks ask again there. */
+    bypassPaused(): boolean {
+        const b = this.bypassAtom();
+        return !!b && !originCovered(b.origins, this.urlAtom());
+    }
+
+    bypassMinutesLeft(): number {
+        const b = this.bypassAtom();
+        return b ? Math.max(1, Math.ceil((b.expires_at - this._now[0]()) / 60_000)) : 0;
+    }
+
+    /** The person's Bypass (on, for `minutes`) or End bypass. Through the
+     *  host, never srv directly: srv grants a bypass only from the host, so
+     *  no agent can grant itself one (bypass spec §5). Rejects with srv's
+     *  reason, for the confirmation to show. */
+    setBypass(on: boolean, minutes?: number): Promise<void> {
+        const approvals = getApi().approvals;
+        if (typeof approvals?.setBrowserBypass !== "function") {
+            return Promise.reject(new Error("This build of AgentMux can't turn bypass on."));
+        }
+        return approvals.setBrowserBypass(
+            this.blockId,
+            on ? { on, minutes, agent: this.driverAgentAtom(), origins: this.bypassOriginsPreview() } : { on: false },
+        );
     }
 
     /** The human takes the pane back from the agent driving it: clearing

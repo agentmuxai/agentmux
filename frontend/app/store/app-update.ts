@@ -37,6 +37,14 @@ export function acceptAppUpdate(next: unknown): void {
     setAppUpdate(s as AppUpdateStatus);
 }
 
+/**
+ * Check for update: srv asks GitHub now (at most every 30 seconds) and every
+ * window gets the answer. Throws when GitHub can't be reached.
+ */
+export async function checkForUpdate(): Promise<void> {
+    acceptAppUpdate(await RpcApi.AppUpdateCheckCommand(TabRpcClient));
+}
+
 /** Ask srv for the status now (a window opened after the last event). */
 export async function loadAppUpdate(): Promise<void> {
     try {

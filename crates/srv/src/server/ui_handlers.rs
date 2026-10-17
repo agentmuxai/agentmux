@@ -791,7 +791,7 @@ pub(crate) async fn handle_ui_browser_open(
 
 /// Proxy a browser-pane request to the host and pass its `data` through:
 /// the shared tail of the snapshot and act handlers.
-async fn proxy_value(
+pub(crate) async fn proxy_value(
     state: &AppState,
     route: &str,
     body: serde_json::Value,
@@ -1122,30 +1122,12 @@ pub(crate) fn banner_for(target: &str) -> (String, Option<String>) {
 }
 
 /// Refuse a tool call on a pane that is waiting for the user: a hand-off
-/// (they're working in it) or an approval (they're reading the form the
-/// approved click will send, which mustn't change under them).
+/// (they're working in it), an approval (they're reading the form the
+/// approved click will send, which mustn't change under them), or a question.
 fn not_waiting_on_user(pane: &str) -> Result<(), (StatusCode, String)> {
-    use crate::server::browser_attention::{waiting_on_user, Kind};
-    match waiting_on_user(pane) {
+    match crate::server::browser_attention::waiting_on_user(pane) {
         None => Ok(()),
-        Some(Kind::Handoff) => Err((
-            StatusCode::CONFLICT,
-            format!(
-                "the user is working in pane {pane:?} (your Browser handoff); your tools on it are \
-                 paused until they click Done or Cancel"
-            ),
-        )),
-        Some(Kind::Approval) => Err((
-            StatusCode::CONFLICT,
-            format!(
-                "pane {pane:?} is waiting for the user to approve your click; your tools on it are \
-                 paused until they answer"
-            ),
-        )),
-        Some(Kind::Navigation) => Err((
-            StatusCode::CONFLICT,
-            format!("the page in pane {pane:?} tried to leave its allowed_origins and the user is being asked whether to allow it; your tools on it are paused until they answer"),
-        )),
+        Some(kind) => Err((StatusCode::CONFLICT, kind.tools_paused(pane))),
     }
 }
 
@@ -1252,7 +1234,7 @@ pub(crate) async fn from_host(state: &AppState, headers: &axum::http::HeaderMap)
 
 /// The agent that owns `block_id`, if one does and the person hasn't taken
 /// the pane over: the same test every `pane` argument passes.
-fn owning_agent(block: &crate::backend::obj::Block, block_id: &str) -> Option<String> {
+pub(crate) fn owning_agent(block: &crate::backend::obj::Block, block_id: &str) -> Option<String> {
     let agent = crate::server::browser_owner::owner_of(block_id)?;
     crate::server::browser_owner::check(Some(block), Some(agent.as_str()), &agent, block_id)
         .ok()
@@ -1509,6 +1491,13 @@ pub(crate) async fn handle_ui_browser_act(
     let Some(ask) = first.pointer("/after/needs_approval").cloned() else {
         return (StatusCode::OK, Json(json!({ "ok": true, "data": first }))).into_response();
     };
+    // Bypass (bypass spec §4.1): the person let this agent click without
+    // asking on this page's site.
+    if let Some(resp) =
+        crate::server::browser_bypass_routes::bypassed_click(&state, &block_id, &req.auth.agent_id, &ask, body(Some(&ask))).await
+    {
+        return resp;
+    }
     tracing::info!(agent_id = %req.auth.agent_id, block_id = %block_id, "[ui-automation] browser act waits for approval");
     // `_waiting` keeps the pane locked until the approved click is done, so
     // the form can't change between what the user approved and what's sent.

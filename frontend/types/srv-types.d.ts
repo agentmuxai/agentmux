@@ -550,7 +550,7 @@ declare global {
     // waveobj.MetaTSType
     type BrowserAttention = {
         id: string;
-        kind: "handoff" | "approval" | "navigation";
+        kind: "handoff" | "approval" | "navigation" | "bypass";
         agent?: string;
         /** Hand-off: what the user should do. */
         reason?: string;
@@ -568,6 +568,19 @@ declare global {
         origin?: string;
         /** Navigation: it was a popup, which isn't reopened on Allow. */
         popup?: boolean;
+        /** Bypass: the sites it would cover, and for how long. */
+        origins?: string[];
+        minutes?: number;
+    };
+
+    /** A bypass the person granted the agent driving a browser pane: it acts
+     *  without asking on `origins` until `expires_at` (ms since the epoch).
+     *  SPEC_BROWSER_PANE_BYPASS_2026_10_16.md §3.3. */
+    type BrowserBypass = {
+        agent: string;
+        origins: string[];
+        minutes: number;
+        expires_at: number;
     };
 
     type MetaType = {
@@ -584,6 +597,10 @@ declare global {
          *  hand-off or an approval. Written by srv; the user's answer goes back
          *  through the host (SPEC_AGENT_DRIVEN_BROWSER_PANES_2026_10_07.md §5.2, §5.4). */
         "browser:attention"?: BrowserAttention | null;
+        /** The bypass the person granted the driving agent, shown as a red
+         *  strip in the header. Written by srv only
+         *  (SPEC_BROWSER_PANE_BYPASS_2026_10_16.md §3.3). */
+        "browser:bypass"?: BrowserBypass | null;
         /** The pane whose page opened this one as a popup, and that page's
          *  origin, shown as "Popup from …". Written by srv only
          *  (SPEC_BROWSER_PANE_POPUPS_ADOPTED_2026_10_08.md §3.4, §5). */

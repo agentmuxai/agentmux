@@ -12,6 +12,13 @@ describe("pdf.js side files", () => {
         expect(Object.keys(PDF_ASSETS.standardFontDataUrl.files).length).toBeGreaterThan(10);
     });
 
+    // Vite names an extensionless asset "name-hash.", which Windows can't open
+    // (the installer build fails on it): the LICENSE_* files beside them.
+    it("all have an extension", () => {
+        const names = Object.values(PDF_ASSETS).flatMap((a) => Object.keys(a.files));
+        expect(names.filter((n) => !/\.[a-z0-9]+$/i.test(n.split("/").pop()!))).toEqual([]);
+    });
+
     it("are found by the names pdf.js asks for", () => {
         expect(pdfAsset("cMapUrl", "UniJIS-UCS2-H.bcmap")).toBeTypeOf("function");
         expect(pdfAsset("standardFontDataUrl", "FoxitSerif.pfb")).toBeTypeOf("function");

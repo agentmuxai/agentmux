@@ -607,6 +607,7 @@ partial list.
 | [`SPEC_ATTACHED_TASK_STATUS_AXIS_2026_08_02`](SPEC_ATTACHED_TASK_STATUS_AXIS_2026_08_02.md) | Spec: an orthogonal "attached task" status axis, sibling to `TurnPhase` |
 | [`SPEC_BACKGROUND_TASK_STRUCTURED_FEED_AND_SWARM_OWNERSHIP_2026_09_27`](SPEC_BACKGROUND_TASK_STRUCTURED_FEED_AND_SWARM_OWNERSHIP_2026_09_27.md) | Spec: Background tasks from the CLI's structured task feed, owned in Swarm |
 | [`SPEC_BROWSER_AND_EDITOR_PANES_2026_04_16`](SPEC_BROWSER_AND_EDITOR_PANES_2026_04_16.md) | SPEC: Browser and Editor Panes |
+| [`SPEC_BROWSER_PANE_BYPASS_2026_10_16`](SPEC_BROWSER_PANE_BYPASS_2026_10_16.md) | SPEC: Bypass: the person lets the agent act without asking in one browser pane |
 | [`SPEC_BROWSER_PANE_DOWNLOADS_2026_10_14`](SPEC_BROWSER_PANE_DOWNLOADS_2026_10_14.md) | SPEC: Downloads in a browser pane open the system "Save as" dialog |
 | [`SPEC_BROWSER_PANE_INPUT_OWNER_2026_10_15`](SPEC_BROWSER_PANE_INPUT_OWNER_2026_10_15.md) | Browser pane input owner: one state machine per window |
 | [`SPEC_BROWSER_PANE_NATIVE_POPUPS_AGENT_DRIVEN_2026_10_08`](SPEC_BROWSER_PANE_NATIVE_POPUPS_AGENT_DRIVEN_2026_10_08.md) | SPEC: A browser pane's new windows open the way the page asked, and the agent that owns the opener drives them |

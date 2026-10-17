@@ -216,3 +216,58 @@ async fn a_restored_window_whose_workspace_is_gone_is_not_handed_out() {
     let take = WebCallType { service: "window".into(), method: "TakeRestoredWindows".into(), args: vec![], uicontext: None };
     assert_eq!(handle_take_restored_windows(&state, &take).data.unwrap(), json!([]));
 }
+
+#[tokio::test]
+async fn a_window_a_quit_left_behind_is_forgotten_at_startup_and_restored() {
+    let state = test_state();
+    no_windows(&state);
+    window(&state, "main", "agent", 0, 0).await;
+    let (left_id, left_ws) = window(&state, "window-2", "memory", 10, 20).await;
+    save_last_session_snapshot(&state.mstore, snapshot_session(&state.mstore, true).unwrap());
+    // The quit closed the main window; the second one's close never arrived.
+    let mut client = state.mstore.get_all::<Client>().unwrap().into_iter().next().unwrap();
+    client.windowids.retain(|id| *id == left_id);
+    state.mstore.update(&mut client).unwrap();
+
+    assert_eq!(forget_windows_left_by_quit(&state.mstore), 1);
+    let client = state.mstore.get_all::<Client>().unwrap().into_iter().next().unwrap();
+    assert!(client.windowids.is_empty());
+    assert!(state.mstore.get::<Window>(&left_id).unwrap().is_none());
+    assert!(state.mstore.get::<Workspace>(&left_ws).unwrap().is_none(), "its workspace isn't left behind");
+    // Both windows come back from the record.
+    let (main_ws, _) = restore_last_session(&state).await.unwrap().unwrap();
+    assert_eq!(views(&state, &main_ws), ["agent"]);
+    let take = WebCallType { service: "window".into(), method: "TakeRestoredWindows".into(), args: vec![], uicontext: None };
+    let others = handle_take_restored_windows(&state, &take).data.unwrap();
+    assert_eq!(views(&state, others[0]["workspaceid"].as_str().unwrap()), ["memory"]);
+}
+
+#[tokio::test]
+async fn windows_are_kept_at_startup_unless_a_quit_saved_them() {
+    let state = test_state();
+    no_windows(&state);
+    let (id, _) = window(&state, "main", "agent", 0, 0).await;
+    // No record (a crash): the windows are what the crash recovery reopens.
+    assert_eq!(forget_windows_left_by_quit(&state.mstore), 0);
+    // A record the last close saved (not a quit's) doesn't count either.
+    save_last_session_snapshot(&state.mstore, snapshot_session(&state.mstore, false).unwrap());
+    assert_eq!(forget_windows_left_by_quit(&state.mstore), 0);
+    let client = state.mstore.get_all::<Client>().unwrap().into_iter().next().unwrap();
+    assert_eq!(client.windowids, vec![id]);
+}
+
+#[tokio::test]
+async fn an_older_quits_record_never_costs_a_later_run_its_windows() {
+    let state = test_state();
+    no_windows(&state);
+    window(&state, "main", "agent", 0, 0).await;
+    save_last_session_snapshot(&state.mstore, snapshot_session(&state.mstore, true).unwrap());
+    // The next run's restore never finished, so the record stayed; that run
+    // has its own windows when it crashes.
+    no_windows(&state);
+    let (later, later_ws) = window(&state, "main-2", "memory", 0, 0).await;
+    assert_eq!(forget_windows_left_by_quit(&state.mstore), 0);
+    let client = state.mstore.get_all::<Client>().unwrap().into_iter().next().unwrap();
+    assert_eq!(client.windowids, vec![later]);
+    assert!(state.mstore.get::<Workspace>(&later_ws).unwrap().is_some());
+}

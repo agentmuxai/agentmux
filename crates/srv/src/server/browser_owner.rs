@@ -35,6 +35,8 @@ fn owners() -> &'static Mutex<HashMap<String, String>> {
 
 /// Record `agent_id` as the owner of `block_id`. Only `OpenBrowser` calls this.
 pub(crate) fn record(block_id: &str, agent_id: &str) {
+    // A bypass belongs to the owner it was granted to.
+    crate::server::browser_bypass::forget(block_id, "the pane got a new owner");
     owners()
         .lock()
         .unwrap_or_else(|p| p.into_inner())
@@ -42,8 +44,10 @@ pub(crate) fn record(block_id: &str, agent_id: &str) {
     changed().notify_one();
 }
 
-/// Drop `block_id`'s owner: the pane was deleted or taken over.
+/// Drop `block_id`'s owner: the pane was deleted or taken over. Its bypass,
+/// if any, ends with the ownership.
 pub(crate) fn forget(block_id: &str) {
+    crate::server::browser_bypass::forget(block_id, "the agent no longer drives the pane");
     let removed = owners()
         .lock()
         .unwrap_or_else(|p| p.into_inner())
@@ -134,13 +138,15 @@ pub(crate) fn check(
 }
 
 /// Meta keys only srv writes, from its own records: who drives a pane, the
-/// banner that asks the person something, what opened a popup, the sites a
-/// pane is limited to, and which agent coaches a worker.
-pub(crate) fn srv_only_keys() -> [&'static str; 7] {
+/// banner that asks the person something, the bypass the person granted,
+/// what opened a popup, the sites a pane is limited to, and which agent
+/// coaches a worker.
+pub(crate) fn srv_only_keys() -> [&'static str; 8] {
     [
         OWNER_META_KEY,
         crate::server::browser_allowlist::ALLOWED_META_KEY,
         crate::server::browser_attention::ATTENTION_META_KEY,
+        crate::server::browser_bypass::BYPASS_META_KEY,
         crate::server::browser_popup::POPUP_OF_META_KEY,
         crate::server::browser_popup::POPUP_FROM_META_KEY,
         crate::server::browser_popup::POPUP_WINDOWS_META_KEY,
@@ -176,8 +182,11 @@ pub(crate) fn guard_client_meta_write(oref: &str, meta: &MetaMapType) -> Result<
     // live tab to another jar under the person's feet.
     // Who coaches a worker is what the limits on forking count: a client that
     // could write it could free a leader's slots or let a worker fork.
+    // The bypass strip shows what the person granted: a client that could
+    // write it could show a grant that doesn't exist, or hide one that does.
     for key in [
         crate::server::browser_attention::ATTENTION_META_KEY,
+        crate::server::browser_bypass::BYPASS_META_KEY,
         crate::server::browser_allowlist::ALLOWED_META_KEY,
         crate::server::browser_identity::IDENTITY_META_KEY,
         crate::server::browser_popup::POPUP_OF_META_KEY,
@@ -328,6 +337,26 @@ mod tests {
         let forged = json!({ "id": "real-id", "kind": "approval", "what": "Click \"Cancel\"" });
         assert!(guard_client_meta_write("block:test-guard-attn", &meta(key, forged)).is_err());
         assert!(guard_client_meta_write("block:test-guard-attn", &meta(key, serde_json::Value::Null)).is_err());
+    }
+
+    #[test]
+    fn a_client_cannot_write_the_bypass_strip() {
+        let key = crate::server::browser_bypass::BYPASS_META_KEY;
+        let forged = json!({ "agent": "lark", "origins": ["https://github.com"], "expires_at": 0 });
+        assert!(guard_client_meta_write("block:test-guard-bypass", &meta(key, forged)).is_err());
+        assert!(guard_client_meta_write("block:test-guard-bypass", &meta(key, serde_json::Value::Null)).is_err());
+        let mut m = MetaMapType::new();
+        m.insert(key.into(), json!({ "agent": "lark" }));
+        assert_eq!(strip_srv_only_keys(&mut m), vec![key]);
+    }
+
+    #[test]
+    fn take_over_ends_a_bypass() {
+        record("test-guard-bypass-end", "lark");
+        crate::server::browser_bypass::tests_put("test-guard-bypass-end", "lark");
+        assert!(crate::server::browser_bypass::active_for("test-guard-bypass-end", "lark").is_some());
+        guard_client_meta_write("block:test-guard-bypass-end", &meta(OWNER_META_KEY, serde_json::Value::Null)).unwrap();
+        assert!(crate::server::browser_bypass::active_for("test-guard-bypass-end", "lark").is_none());
     }
 
     #[test]

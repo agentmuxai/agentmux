@@ -23,7 +23,8 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
 }
 
 async fn version(cx: &ToolCtx<'_>) -> Result<String> {
-    let url = format!("{}/api/v1/app/update-status", cx.local_url.trim_end_matches('/'));
+    // `check=1`: ask GitHub now (srv limits it to once every 30 seconds).
+    let url = format!("{}/api/v1/app/update-status?check=1", cx.local_url.trim_end_matches('/'));
     let resp = cx
         .client
         .get(&url)
@@ -83,7 +84,7 @@ fn describe_status(st: &Value) -> String {
     match s(st, "state") {
         "available" => out.push_str(&format!(" A newer release is out: {latest}.")),
         "up-to-date" => out.push_str(" This is the latest release."),
-        "local-build" => out.push_str(&format!(" A local build, not a release; the latest release is {latest}.")),
+        "local-build" => out.push_str(&format!(" A development build (`task dev`), which doesn't upgrade itself; the latest release is {latest}.")),
         "off" => out.push_str(" The update check is turned off."),
         _ => out.push_str(" Not checked for a newer release yet."),
     }

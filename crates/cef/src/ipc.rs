@@ -700,6 +700,29 @@ async fn route_command(
             relayed?;
             Ok(serde_json::json!(true))
         }
+        "browser_bypass_set" => {
+            // The person's Bypass (on) or End bypass (off) in an agent-driven
+            // browser pane's header. Relayed to srv as the host, so no agent
+            // can grant itself a bypass (SPEC_BROWSER_PANE_BYPASS_2026_10_16.md §5).
+            // `agent` and `origins` are what the confirmation showed: srv
+            // grants only if they still hold.
+            let body = serde_json::json!({
+                "block_id": args.get("block_id").and_then(|v| v.as_str()).unwrap_or(""),
+                "on": args.get("on").and_then(|v| v.as_bool()).unwrap_or(false),
+                "minutes": args.get("minutes").and_then(|v| v.as_u64()),
+                "agent": args.get("agent").and_then(|v| v.as_str()).unwrap_or(""),
+                "origins": args.get("origins").cloned().unwrap_or(serde_json::json!([])),
+            });
+            let web_endpoint = state.backend_endpoints.lock().web_endpoint.clone();
+            let auth_key = state.auth_key.lock().clone();
+            let ipc_token = state.ipc_token.clone();
+            tracing::info!("[ipc] browser_bypass_set on={}", body["on"]);
+            tokio::task::spawn_blocking(move || {
+                crate::client::backend_browser_bypass(&web_endpoint, &auth_key, &ipc_token, &body)
+            })
+            .await
+            .map_err(|e| format!("browser_bypass_set: {e}"))?
+        }
         "widget_approval_decide" => {
             // The user's Install/Cancel on a widget's install prompt, relayed
             // to srv as the host: no agent can approve a widget itself

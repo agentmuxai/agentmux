@@ -391,6 +391,27 @@ pub fn portable_build_label(exe_dir: &Path) -> Option<String> {
     })
 }
 
+/// The file in a portable's `runtime/` that names its data channel, when an
+/// upgrade carried one over (srv `update_download.rs`): a local build's
+/// `local-…` channel, kept by the release it upgraded to, so the upgrade
+/// continues with that build's windows, agents and settings.
+pub const RECORDED_CHANNEL_FILE: &str = "agentmux-channel";
+
+/// The data channel the portable folder at or above `exe_dir` records: next to
+/// the host and srv (both in `runtime/`), or in `runtime/` below the launcher.
+pub fn recorded_channel_in(exe_dir: &Path) -> Option<String> {
+    [exe_dir.join(RECORDED_CHANNEL_FILE), exe_dir.join("runtime").join(RECORDED_CHANNEL_FILE)]
+        .into_iter()
+        .find_map(|p| std::fs::read_to_string(p).ok())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+/// [`recorded_channel_in`] for the running binary's own folder.
+pub fn recorded_channel() -> Option<String> {
+    recorded_channel_in(std::env::current_exe().ok()?.parent()?)
+}
+
 /// True when `exe_dir` is one of our known dev-build output dirs.
 /// Walks parents to handle nested cases (CEF subprocesses run from
 /// `runtime/` even in dev).
@@ -923,5 +944,19 @@ mod tests {
                 "current() still honors an explicit AGENTMUX_RUNTIME_MODE override"
             );
         });
+    }
+
+    #[test]
+    fn a_portable_folder_records_its_channel_for_every_binary_in_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let runtime = dir.path().join("runtime");
+        std::fs::create_dir_all(&runtime).unwrap();
+        assert_eq!(recorded_channel_in(dir.path()), None);
+        std::fs::write(runtime.join(RECORDED_CHANNEL_FILE), "local-main-b28b7a-f62415cd\n").unwrap();
+        // The launcher, at the root, and the host and srv, in `runtime/`.
+        assert_eq!(recorded_channel_in(dir.path()).as_deref(), Some("local-main-b28b7a-f62415cd"));
+        assert_eq!(recorded_channel_in(&runtime).as_deref(), Some("local-main-b28b7a-f62415cd"));
+        std::fs::write(runtime.join(RECORDED_CHANNEL_FILE), "  \n").unwrap();
+        assert_eq!(recorded_channel_in(&runtime), None);
     }
 }
