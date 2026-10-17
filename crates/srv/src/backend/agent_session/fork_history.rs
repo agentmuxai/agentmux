@@ -82,7 +82,7 @@ pub fn copy_parent_history(
     // The check above and the copy are separate reads: the parent may have
     // moved to a new session in between (a New conversation right after the
     // fork). What counts is the copy, so it is checked again, and undone if
-    // it doesn't end in the session the fork continues (Codex on #5066).
+    // it doesn't end in the session the fork continues.
     if last_session(gfs, &fork, session_id_field)?.as_deref() != Some(session_id) {
         gfs.delete_files(&fork, &[OUTPUT_FILE, TSIDX_FILE, state])
             .map_err(|e| format!("undo copy: {e}"))?;
@@ -109,7 +109,7 @@ pub fn inherited_session(gfs: &FileStore, zone: &str) -> Option<String> {
 
 /// The session `zone`'s transcript ends in, or `None` when it has none. The
 /// window widens until it holds a complete record that names one: the last
-/// event can be larger than any fixed tail (Codex on #5066).
+/// event can be larger than any fixed tail.
 fn last_session(gfs: &FileStore, zone: &str, field: &str) -> Result<Option<String>, String> {
     let Some(file) = gfs.stat(zone, OUTPUT_FILE).map_err(|e| format!("stat transcript: {e}"))? else {
         return Ok(None);
