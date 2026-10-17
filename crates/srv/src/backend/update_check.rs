@@ -264,9 +264,9 @@ static EVENT_BUS: OnceLock<Arc<crate::backend::eventbus::EventBus>> = OnceLock::
 static INSTALL_KIND: OnceLock<InstallKind> = OnceLock::new();
 /// The client every check uses, made by [`spawn`].
 static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
-/// When [`check_now`] last asked GitHub; held while it asks, so clicks that
-/// arrive meanwhile wait for its answer.
-static LAST_CHECK_NOW: tokio::sync::Mutex<Option<std::time::Instant>> = tokio::sync::Mutex::const_new(None);
+/// When [`check_now`] last asked GitHub, and why it failed if it did; held
+/// while it asks, so clicks that arrive meanwhile wait for its answer.
+static LAST_CHECK_NOW: tokio::sync::Mutex<Option<(std::time::Instant, Option<String>)>> = tokio::sync::Mutex::const_new(None);
 
 /// How this AgentMux was installed, read once.
 pub(crate) fn install_kind() -> InstallKind {
@@ -365,19 +365,18 @@ pub fn spawn(config: Arc<crate::backend::wconfig::ConfigState>, event_bus: Arc<c
 /// Ask GitHub now, for the user's **Check for update** or an agent's `App`
 /// `version`, whether or not the periodic check is on, and return what srv
 /// knows after. Asked again within [`CHECK_NOW_EVERY`], it answers what the
-/// last check found; concurrent callers share one request.
+/// last check found, its failure included; concurrent callers share one request.
 pub async fn check_now() -> Result<AppUpdateStatus, String> {
     let (Some(client), Some(bus)) = (CLIENT.get(), EVENT_BUS.get()) else {
         return Err("AgentMux isn't checking for updates yet; try again in a moment".into());
     };
     let mut last = LAST_CHECK_NOW.lock().await;
-    if last.is_some_and(|t| t.elapsed() < CHECK_NOW_EVERY) {
-        return Ok(current_status());
+    if let Some((_, failed)) = last.as_ref().filter(|(at, _)| at.elapsed() < CHECK_NOW_EVERY) {
+        return failed.clone().map_or_else(|| Ok(current_status()), Err);
     }
-    *last = Some(std::time::Instant::now());
     let current = env!("CARGO_PKG_VERSION");
     let channel = crate::backend::reactive::registry::local_channel_id();
-    match fetch_latest(client).await {
+    let outcome = match fetch_latest(client).await {
         Ok(release) => {
             publish(bus, status_for(current, &channel, &release, agentmux_common::time::now_ms(), &install_kind()));
             Ok(current_status())
@@ -386,7 +385,9 @@ pub async fn check_now() -> Result<AppUpdateStatus, String> {
             tracing::info!(error = %e, "update check: asked now, no answer");
             Err(format!("couldn't reach GitHub: {e}"))
         }
-    }
+    };
+    *last = Some((std::time::Instant::now(), outcome.as_ref().err().cloned()));
+    outcome
 }
 
 /// Keep `next` and tell every window when it changed.

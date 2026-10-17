@@ -371,7 +371,6 @@ fn tar_exe() -> PathBuf {
     }
 }
 
-/// Unpack the portable archive `file` into a new folder in `parent`.
 /// Whether the staged portable `folder` may be used by the AgentMux on
 /// `channel`: it records no channel yet, or that one. A folder another
 /// AgentMux staged for a different channel isn't reused; a copy is made beside it.
