@@ -17,7 +17,7 @@
 
   Either way the person sees what it covers and for how long, and confirms.
 - While it is on, the agent's committing clicks in that pane (Submit, Delete, Send, …, through `Browser` `click`) are made **without asking**. Everything else stays as it is: `eval`, UI click by selector and Enter/Space stay refused on a driven pane, because only `click` goes through the checks that keep the promises below (§4.1).
-- It is **bound** to this pane, this agent, the site(s) the pane was on when it was turned on, and a time limit. It ends on **End bypass**, the time limit, Take over, closing the pane, or the agent stopping. Leaving the bound sites pauses it.
+- It is **bound** to this pane, this agent, the site(s) the pane was on when it was turned on, and a time limit. It ends on **End bypass**, the time limit, Take over, closing the pane, or a new owner. Leaving the bound sites pauses it.
 - **Only the person can turn it on**, through the host, the same way approvals are answered. No agent route, shortcut, command or synthesized click can turn it on.
 - **Not bypassed:** the agent still never types into password, one-time-code or card fields, and hand-off works as before. Bypass removes waiting for approval; it doesn't give the agent secrets.
 - The pane shows it plainly the whole time: a red "Bypass on" strip with who, where and how long, and every action taken under it in the action log.
@@ -44,7 +44,7 @@ Clicking **Bypass** opens a confirmation panel directly under the header strip, 
 > **[Turn on bypass]** [Cancel]
 
 - The sites listed are the bound sites (§4.2), computed when the panel opens.
-- The default duration is 1 hour. "Until I end it" still ends on Take over, close and agent stop.
+- The default duration is 1 hour, and 4 hours is the longest.
 - **Turn on bypass** is the only control that grants it, and only on a pointer click: a key press on the focused button (a click with `detail` 0) does nothing.
 
 ### 3.3 On
@@ -122,7 +122,7 @@ The answer to "can an agent approve itself?" must stay no. So:
 
 | Layer | Change |
 |---|---|
-| srv | New `server/browser_bypass.rs`: the grant table (in memory only), `grant`/`end`/`active_for(pane, agent, origin)`, the expiry timer, and ending on Take over, close, owner change and agent stop (hooks next to `browser_owner` and `browser_attention::cancel_for`). The host route. The approval branch of `act` in `ui_handlers.rs` checks `active_for` and, if active, proxies the approved act directly. srv-only meta key `browser:bypass` `{agent, origins, expires_at}` for the UI. Logging: `info` on grant, end (with reason), and every bypassed action (agent, pane, origin, action name). |
+| srv | New `server/browser_bypass.rs`: the grant table (in memory only), `grant`/`end`/`active_for(pane, agent, origin)`, the expiry timer, and ending on Take over, close and owner change (hooks next to `browser_owner` and `browser_attention::cancel_for`). The host route. The approval branch of `act` in `ui_handlers.rs` checks `active_for` and, if active, proxies the approved act directly. srv-only meta key `browser:bypass` `{agent, origins, expires_at}` for the UI. Logging: `info` on grant, end (with reason), and every bypassed action (agent, pane, origin, action name). |
 | host (cef) | IPC `browser_bypass_set` → srv host route; `act` returns the page origin it acted on (it already reads it for the fingerprint); trusted-event check if §5 requires it. |
 | frontend | Bypass button, confirmation panel, red/amber strip with countdown, End bypass, tab badge; `browser:bypass` read in `browser-model.ts`; the action-log marks. Reuse the attention banner's components. |
 | mcp | `end_bypass` (phase 1), `request_bypass` (phase 2); `bypassed` in results; the description line. |
@@ -138,7 +138,7 @@ The answer to "can an agent approve itself?" must stay no. So:
 - srv: `request_bypass` shows the `bypass` banner and grants only on the person's Allow through the host. No, a timeout and Take over return without a grant. A second request within 10 minutes of a No is refused. A request during a hand-off is refused with a reason.
 - srv: a grant from a non-host caller is 403. A grant is refused when the owner changed since the confirmation, a hand-off is pending, or the origins don't match the current page.
 - srv: under an active grant, a committing `act` on a bound origin runs without a banner and returns `bypassed: true`. On an unbound origin it asks as before.
-- srv: the grant ends on time-out, Take over, pane close, owner change and agent stop, each logged with its reason. After any of these the next committing act asks again.
+- srv: the grant ends on time-out, Take over, pane close and owner change, each logged with its reason. After any of these the next committing act asks again.
 - srv: `eval`, UI click and Enter/Space stay refused under a grant. Secret fields are refused under a grant.
 - srv: `browser:bypass` can't be written by a client meta update, and is stripped on restore.
 - frontend: the button shows only on driven panes. The confirmation lists the bound sites and durations. The strip counts down and turns amber when paused. A key press on Turn on bypass doesn't grant.
@@ -155,7 +155,7 @@ The answer to "can an agent approve itself?" must stay no. So:
 
 1. **Duration:** 15 minutes, 1 hour (default) or 4 hours. There is no "until I end it": 4 hours is the maximum, and an agent's `minutes` rounds down to one of the three.
 2. **Payment:** clicks whose name spends or moves money still ask under bypass (`browser_bypass::is_payment`): a word starting with pay, purchas, checkout, transfer, donat, subscri, withdraw, remit, deposit, refund or billing ("Confirm payment", "Withdraw"), the words buy, order, paid, wire, bid or tip, and Check out, Place order, Send money/funds and Add money/funds. It matches by stem so it errs towards asking (muxreview on #5045). The cost of a mistake is money, and bulk jobs rarely pay.
-3. **Scope across panes:** one grant per pane and its popup chain.
+3. **Scope across panes:** one grant per pane, covering the popup windows its page opens. A popup pane has its own header and its own grant (§4.2).
 4. **The agent's session ending** doesn't end a grant. Ownership survives the agent restarting (2026-10-07 spec §3), and the time limit bounds the grant anyway.
 
 Still open:

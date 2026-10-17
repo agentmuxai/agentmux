@@ -34,8 +34,11 @@ export function DrivenByStrip(props: { model: BrowserViewModel; agent: string })
             .catch((err) => setError(String(err?.message ?? err)))
             .finally(() => setBusy(false));
     };
+    // A failed End bypass shows in the red strip itself: the confirmation,
+    // where other errors show, is hidden while a bypass is on.
     const end = () => {
-        model.setBypass(false).catch((err) => setError(String(err?.message ?? err)));
+        setError(undefined);
+        model.setBypass(false).catch((err) => setError(`Couldn't end bypass: ${String(err?.message ?? err)}`));
     };
 
     return (
@@ -97,6 +100,11 @@ export function DrivenByStrip(props: { model: BrowserViewModel; agent: string })
                             <span>
                                 <b>Bypass on:</b> <b>{b().agent}</b> acts without asking on{" "}
                                 {b().origins.map(siteLabel).join(", ")} · {model.bypassMinutesLeft()} min left
+                            </span>
+                        </Show>
+                        <Show when={error()}>
+                            <span class="browser-bypass-strip-error" role="alert">
+                                {error()}
                             </span>
                         </Show>
                         <Button density="compact" tone="danger" class="browser-bypass-end" onClick={end}>

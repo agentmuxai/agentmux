@@ -68,4 +68,13 @@ describe("DrivenByStrip", () => {
         fireEvent.click(screen.getByText("End bypass"));
         expect(setBypass).toHaveBeenCalledWith(false);
     });
+
+    it("shows a failed End bypass in the red strip", async () => {
+        const { model, setBypass, setBypassMeta } = fakeModel();
+        setBypass.mockRejectedValueOnce(new Error("srv is down"));
+        render(() => <DrivenByStrip model={model} agent="Naki" />);
+        setBypassMeta({ agent: "Naki", origins: ["https://github.com"], minutes: 60, expires_at: Date.now() + 3_600_000 });
+        fireEvent.click(screen.getByText("End bypass"));
+        expect((await screen.findByRole("alert")).textContent).toBe("Couldn't end bypass: srv is down");
+    });
 });

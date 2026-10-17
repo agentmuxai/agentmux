@@ -317,6 +317,10 @@ $browser-nav-stack-below: 388px;
         }
     }
 
+    .browser-bypass-strip-error {
+        color: var(--error-color);
+    }
+
     .browser-bypass-end {
         margin-left: auto;
     }

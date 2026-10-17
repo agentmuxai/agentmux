@@ -12,7 +12,8 @@
 //! an agent's `request_bypass` banner, which also arrives only through the
 //! host. An agent may end its own grant, never start one.
 //!
-//! A grant is for one pane (its popup chain shares it), one agent (the owner
+//! A grant is for one pane (and the popup windows its page opens; a popup
+//! pane has its own header and its own grant), one agent (the owner
 //! when it was granted), the sites the person was shown, and a time limit.
 //! Take over, closing the pane, a change of owner and the time limit end it.
 
