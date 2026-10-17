@@ -209,55 +209,17 @@ describe("quickForkAgent", () => {
         });
     });
 
-    // SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22: the pane must be
-    // hidden for the whole duration of the fork (every RPC in the chain,
-    // not just the final pushBlockOntoStack remount), and always revealed
-    // again on every exit path.
-    describe("reveal gate (SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22)", () => {
-        it("holds the gate on the source pane's own node id only around the stack push, and schedules the lift (with the SAME generation token) once settled", async () => {
-            holdLeafRevealGate.mockReturnValue(7);
-            await quickForkAgent(model);
-            expect(holdLeafRevealGate).toHaveBeenCalledWith("node-1");
-            // Codex's review of PR #2761: the generation token returned by
-            // holdLeafRevealGate must be threaded through unchanged, not a
-            // fresh/undefined value — that's what lets tab-reveal.ts detect
-            // a stale (superseded or already-resolved) generation.
-            expect(scheduleLeafRevealLift).toHaveBeenCalledWith("node-1", 7);
-            // Not hidden during the fork, account lookup and history copy (a
-            // black pane for all of them): held just before the push, lifted
-            // after the launch.
-            const held = holdLeafRevealGate.mock.invocationCallOrder[0];
-            expect(held).toBeGreaterThan(forkAgentDefinitionCommand.mock.invocationCallOrder[0]);
-            expect(held).toBeGreaterThan(copyForkHistoryCommand.mock.invocationCallOrder[0]);
-            expect(held).toBeLessThan(openBlockInStack.mock.invocationCallOrder[0]);
-            expect(scheduleLeafRevealLift.mock.invocationCallOrder[0])
-                .toBeGreaterThan(launchAgentDefinition.mock.invocationCallOrder[0]);
-        });
-
-        it("never hides the pane when ForkAgentDefinitionCommand rejects (nothing was pushed)", async () => {
-            forkAgentDefinitionCommand.mockRejectedValue(new Error("boom"));
-            await quickForkAgent(model);
-            expect(holdLeafRevealGate).not.toHaveBeenCalled();
-            expect(scheduleLeafRevealLift).not.toHaveBeenCalled();
-        });
-
-        it("schedules the lift even when launchAgentDefinition reports failure", async () => {
-            launchAgentDefinition.mockResolvedValue(false);
-            await quickForkAgent(model);
-            expect(scheduleLeafRevealLift).toHaveBeenCalledWith("node-1", 1);
-        });
-
-        it("schedules the lift even when launchAgentDefinition rejects", async () => {
-            launchAgentDefinition.mockRejectedValue(new Error("boom"));
-            await quickForkAgent(model);
-            expect(scheduleLeafRevealLift).toHaveBeenCalledWith("node-1", 1);
-        });
-
-        it("does not hold the gate at all when there's no live agent to fork", async () => {
-            getObjectValue.mockReturnValue(undefined);
-            await quickForkAgent(model);
-            expect(holdLeafRevealGate).not.toHaveBeenCalled();
-        });
+    // No leaf reveal gate: it hid the whole pane (black) until the main thread
+    // went quiet, which a long copied history keeps busy. The new tab is created
+    // naming its agent and mounts behind its own loading cover instead.
+    it("never hides the pane while it forks", async () => {
+        await quickForkAgent(model);
+        launchAgentDefinition.mockResolvedValue(false);
+        await quickForkAgent(model);
+        forkAgentDefinitionCommand.mockRejectedValue(new Error("boom"));
+        await quickForkAgent(model);
+        expect(holdLeafRevealGate).not.toHaveBeenCalled();
+        expect(scheduleLeafRevealLift).not.toHaveBeenCalled();
     });
 
     // Codex's review of PR #2746: the several RPCs this function awaits
