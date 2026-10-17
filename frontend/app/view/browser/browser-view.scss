@@ -308,8 +308,74 @@ $browser-nav-stack-below: 388px;
         color: var(--secondary-text-color);
     }
 
-    .browser-take-over {
+    // Bypass sits next to Take over, both at the right end.
+    .browser-bypass-button {
         margin-left: auto;
+
+        + .browser-take-over {
+            margin-left: 0;
+        }
+    }
+
+    .browser-bypass-end {
+        margin-left: auto;
+    }
+
+    // Bypass on: the whole strip turns red, so it can't be missed
+    // (SPEC_BROWSER_PANE_BYPASS_2026_10_16.md §3.3).
+    &--bypass {
+        background: var(--error-bg);
+        border-left: 3px solid var(--error-color);
+        border-bottom-color: var(--error-line);
+
+        > i {
+            color: var(--error-color);
+        }
+    }
+
+    // Paused: the page left the granted sites, so clicks ask again (§3.4).
+    &--paused {
+        background: var(--attention-bg-color);
+        border-left-color: var(--attention-color);
+
+        > i {
+            color: var(--attention-color);
+        }
+    }
+}
+
+// Bypass's confirmation, in the pane's flow under the header strip (§3.2).
+.browser-bypass-confirm {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-4);
+    background: var(--error-bg);
+    border-left: 3px solid var(--error-color);
+    border-bottom: 1px solid var(--error-line);
+    color: var(--main-text-color);
+    font-size: var(--text-sm);
+    flex-shrink: 0;
+
+    .browser-bypass-confirm-head {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        font-size: var(--text-md);
+
+        > i {
+            color: var(--error-color);
+        }
+    }
+
+    .browser-bypass-confirm-minutes,
+    .browser-bypass-confirm-actions {
+        display: flex;
+        gap: var(--space-2);
+    }
+
+    .browser-bypass-confirm-error {
+        color: var(--error-color);
     }
 }
 

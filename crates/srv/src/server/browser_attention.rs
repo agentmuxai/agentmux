@@ -32,6 +32,9 @@ pub(crate) enum Kind {
     /// The page tried to leave the sites the pane is limited to
     /// (SPEC_BROWSER_PANE_ALLOWED_ORIGINS_2026_10_09.md §4).
     Navigation,
+    /// The agent asks to act without asking for a while
+    /// (SPEC_BROWSER_PANE_BYPASS_2026_10_16.md §6).
+    Bypass,
 }
 
 impl Kind {
@@ -40,6 +43,7 @@ impl Kind {
             Kind::Handoff => "handoff",
             Kind::Approval => "approval",
             Kind::Navigation => "navigation",
+            Kind::Bypass => "bypass",
         }
     }
 }

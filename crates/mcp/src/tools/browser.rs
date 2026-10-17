@@ -156,6 +156,13 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             }
             let body: Value = resp.json().await.map_err(|e| anyhow::anyhow!("{name}: bad response: {e}"))?;
             let after = body.pointer("/data/after").cloned().unwrap_or(Value::Null);
+            if body.pointer("/data/bypassed").and_then(|v| v.as_bool()) == Some(true) {
+                let left = body.pointer("/data/bypass_minutes_left").and_then(|v| v.as_u64()).unwrap_or(0);
+                return Ok(format!(
+                    "{name} {r}: done without asking (bypass on, {left} min left; nobody checked this one, so check \
+                     every committing click yourself). The element now: {after}"
+                ));
+            }
             Ok(format!("{name} {r}: done. The element now: {after}"))
         }
         "BrowserSetFiles" => {
@@ -261,6 +268,70 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 "done" => "The user clicked Done. Take a new snapshot: don't assume what they changed.".to_string(),
                 "cancelled" => "The user clicked Cancel. Ask them in chat how to proceed; don't retry the hand-off unasked.".to_string(),
                 _ => "The user didn't answer in time. Ask them in chat.".to_string(),
+            })
+        }
+        "BrowserRequestBypass" => {
+            require_agent_env(local_url, auth_key, block_id)?;
+            let auth = sign_ui_automation_auth()?;
+            let reason = arguments
+                .get("reason")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("missing required parameter: reason (what you need it for)"))?
+                .to_string();
+            let minutes = arguments.get("minutes").and_then(|v| v.as_u64());
+            let req_url = format!("{}/api/v1/ui/browser/request_bypass", local_url.trim_end_matches('/'));
+            let resp = client
+                .post(&req_url)
+                .header(AUTH_KEY_HEADER, auth_key)
+                .json(&agentmux_common::api_types::UiBrowserRequestBypassRequest { auth, pane: pane_arg(arguments), reason, minutes })
+                // The banner waits up to 10 minutes for the user.
+                .timeout(std::time::Duration::from_secs(11 * 60))
+                .send()
+                .await
+                .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let text = resp.text().await.unwrap_or_default();
+                anyhow::bail!("Browser request_bypass failed: HTTP {status} — {text}");
+            }
+            let body: Value = resp.json().await.map_err(|e| anyhow::anyhow!("Browser request_bypass: bad response: {e}"))?;
+            let d = body.get("data").cloned().unwrap_or(Value::Null);
+            Ok(match d.get("answer").and_then(|v| v.as_str()).unwrap_or("") {
+                "granted" => {
+                    let sites: Vec<&str> = d["origins"].as_array().map(|a| a.iter().filter_map(|v| v.as_str()).collect()).unwrap_or_default();
+                    format!(
+                        "Bypass on for {} more min on {}: committing clicks run without asking, and eval and Enter/Space work. \
+                         Nobody checks them now, so check each one yourself. A payment still asks, and on any other site \
+                         clicks ask as before. End it with action end_bypass when the job is done.",
+                        d["minutes_left"].as_u64().unwrap_or(0),
+                        sites.join(", ")
+                    )
+                }
+                "declined" => "The user said No. Carry on with per-click approvals, or ask them in chat; don't ask for bypass again on this pane for 10 minutes.".to_string(),
+                _ => "The user didn't answer in time. Carry on with per-click approvals, or ask them in chat.".to_string(),
+            })
+        }
+        "BrowserEndBypass" => {
+            require_agent_env(local_url, auth_key, block_id)?;
+            let auth = sign_ui_automation_auth()?;
+            let req_url = format!("{}/api/v1/ui/browser/end_bypass", local_url.trim_end_matches('/'));
+            let resp = client
+                .post(&req_url)
+                .header(AUTH_KEY_HEADER, auth_key)
+                .json(&agentmux_common::api_types::UiBrowserEndBypassRequest { auth, pane: pane_arg(arguments) })
+                .send()
+                .await
+                .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let text = resp.text().await.unwrap_or_default();
+                anyhow::bail!("Browser end_bypass failed: HTTP {status} — {text}");
+            }
+            let body: Value = resp.json().await.map_err(|e| anyhow::anyhow!("Browser end_bypass: bad response: {e}"))?;
+            Ok(if body.pointer("/data/ended").and_then(|v| v.as_bool()) == Some(true) {
+                "Bypass ended: committing clicks ask the user again.".to_string()
+            } else {
+                "There was no bypass on that pane for you to end.".to_string()
             })
         }
         "BrowserNavigate" => {

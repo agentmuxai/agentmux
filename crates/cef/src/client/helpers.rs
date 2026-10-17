@@ -184,6 +184,28 @@ pub(crate) fn backend_browser_attention(
         .map_err(|e| format!("srv refused the answer: {e}"))
 }
 
+/// Relay the person's Bypass or End bypass to srv, as the host
+/// (SPEC_BROWSER_PANE_BYPASS_2026_10_16.md §5). Returns srv's `data`; srv's
+/// refusal (the page moved, the owner changed) comes back as the error, for
+/// the confirmation to show.
+pub(crate) fn backend_browser_bypass(
+    web_endpoint: &str,
+    auth_key: &str,
+    ipc_token: &str,
+    body: &serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    // srv's own reason, not the status line, is what the person should read.
+    let raw = post_as_host(web_endpoint, auth_key, ipc_token, "/api/v1/host/browser_bypass", body).map_err(|e| {
+        e.find('{')
+            .and_then(|i| serde_json::from_str::<serde_json::Value>(&e[i..]).ok())
+            .and_then(|v| v.get("error").and_then(|m| m.as_str()).map(str::to_string))
+            .unwrap_or(e)
+    })?;
+    let parsed: serde_json::Value =
+        serde_json::from_str(&raw).map_err(|e| format!("srv answered something that isn't JSON: {e}"))?;
+    Ok(parsed.get("data").cloned().unwrap_or(serde_json::Value::Null))
+}
+
 /// Relay the user's answer to a widget install prompt to srv, as the host:
 /// srv accepts an approval only with this host's IPC token, which agents never
 /// see (SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md §8.3).

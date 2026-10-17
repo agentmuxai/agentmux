@@ -32,6 +32,8 @@ pub(super) const ACTS: &[Act] = &[
     },
     Act { action: "eval", tool: "BrowserEval", rename: &[] },
     Act { action: "handoff", tool: "BrowserHandoff", rename: &[] },
+    Act { action: "request_bypass", tool: "BrowserRequestBypass", rename: &[] },
+    Act { action: "end_bypass", tool: "BrowserEndBypass", rename: &[] },
 ];
 
 /// Actions after which `until_*` and `snapshot` may follow in the same call.

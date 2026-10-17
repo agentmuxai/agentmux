@@ -835,6 +835,32 @@ pub struct UiBrowserHandoffRequest {
     pub timeout_minutes: Option<u64>,
 }
 
+/// `POST /api/v1/ui/browser/request_bypass` — backs Browser's `request_bypass`
+/// (SPEC_BROWSER_PANE_BYPASS_2026_10_16.md §6): ask the user, in the pane, to
+/// let the agent act without asking first, and wait for their answer.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UiBrowserRequestBypassRequest {
+    #[serde(flatten)]
+    pub auth: UiAutomationAuth,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pane: Option<String>,
+    /// What the agent needs it for, e.g. "Delete 75 old drafts".
+    pub reason: String,
+    /// How long, in minutes: 15, 60 (default) or 240; other values round down.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub minutes: Option<u64>,
+}
+
+/// `POST /api/v1/ui/browser/end_bypass` — backs Browser's `end_bypass`: the
+/// agent ends its own bypass when the job is done.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UiBrowserEndBypassRequest {
+    #[serde(flatten)]
+    pub auth: UiAutomationAuth,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pane: Option<String>,
+}
+
 /// `POST /api/v1/ui/browser/open` — backs `OpenBrowser`. Opens a browser
 /// pane next to the caller's own pane and records the caller as its owner
 /// (SPEC_AGENT_DRIVEN_BROWSER_PANES_2026_10_07.md §3).
