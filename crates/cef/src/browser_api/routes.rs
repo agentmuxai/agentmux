@@ -13,7 +13,7 @@ use serde_json::json;
 
 use super::cdp::CdpSession;
 use super::types::{
-    AckData, ApiResponse, ClickElementReq, DispatchKeyReq, Element, EvalData, EvalReq,
+    AckData, ApiResponse, DispatchKeyData, ClickElementReq, DispatchKeyReq, Element, EvalData, EvalReq,
     FocusElementReq, FocusInfoData, FocusInfoReq, HistoryReq, NavigateReq, QueryData, QueryReq,
     ScreenshotData, ScreenshotReq,
 };
@@ -388,6 +388,10 @@ pub async fn screenshot(
         }
     }
 
+    // A browser pane's secret fields are found now, before the capture, and
+    // blacked out by srv before the image reaches an agent (plan §4.1).
+    let secrets = if scope_to_block { None } else { Some(super::act::secret_boxes(&mut cdp).await) };
+
     let cap = match cdp
         .call("Page.captureScreenshot", params)
         .await
@@ -410,7 +414,11 @@ pub async fn screenshot(
         }
     };
 
-    ok_body(ApiResponse::ok(ScreenshotData { png_base64: data }))
+    let (secret_boxes, css_width) = match secrets {
+        Some(s) => (s.boxes, s.css_width),
+        None => (Vec::new(), None),
+    };
+    ok_body(ApiResponse::ok(ScreenshotData { png_base64: data, secret_boxes, css_width }))
 }
 
 /// `POST /agentmux/browser/click_element` — synthesize a real mouse
@@ -601,7 +609,7 @@ pub async fn dispatch_key(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     Json(req): Json<DispatchKeyReq>,
-) -> (StatusCode, Json<ApiResponse<AckData>>) {
+) -> (StatusCode, Json<ApiResponse<DispatchKeyData>>) {
     if !authorized(&headers, &state.ipc_token) {
         return (
             StatusCode::UNAUTHORIZED,
@@ -711,6 +719,9 @@ pub async fn dispatch_key(
             return ok_body(ApiResponse::err(e));
         }
     }
+    // On a browser pane, read what has focus before and after, so the answer
+    // says whether the keys did anything (plan §2.2).
+    let before = if scope_to_block { None } else { Some(super::act::focused_state(&mut cdp).await) };
     if let Some(text) = &req.text {
         // Input.insertText is atomic and handles IME / composition
         // correctly. Preferred over key-by-key dispatch for strings.
@@ -763,8 +774,19 @@ pub async fn dispatch_key(
         }
     }
 
+    let after = match before {
+        Some(_) => Some(super::act::focused_state(&mut cdp).await),
+        None => None,
+    };
     let _ = cdp.close().await;
-    ok_body(ApiResponse::ok(AckData::new()))
+    let (changed, focus_moved) = match (&before, &after) {
+        (Some(b), Some(a)) if !a.is_null() => (
+            Some(b.get("value") != a.get("value") || b.get("checked") != a.get("checked")),
+            Some(b.get("element") != a.get("element")),
+        ),
+        _ => (None, None),
+    };
+    ok_body(ApiResponse::ok(DispatchKeyData { ok: true, after, changed, focus_moved }))
 }
 
 /// `POST /agentmux/browser/navigate` — navigate the pane to a new

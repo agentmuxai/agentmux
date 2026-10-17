@@ -129,6 +129,30 @@ pub struct ScreenshotData {
     /// Base64-encoded image bytes in the requested format. Field name
     /// kept from the PNG-only era for wire compatibility.
     pub png_base64: String,
+    /// The boxes (x, y, width, height, in the page's CSS pixels) of the
+    /// secret fields on a browser pane: srv blacks them out before the image
+    /// reaches an agent (forms-in-frames spec §5.1).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub secret_boxes: Vec<[f64; 4]>,
+    /// The page's viewport width in CSS pixels, to scale the boxes to the image.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub css_width: Option<f64>,
+}
+
+/// `dispatch_key`'s answer: what has focus after the keys, so an agent can
+/// tell whether they did anything (a date field ignores inserted text).
+#[derive(Debug, Serialize)]
+pub struct DispatchKeyData {
+    pub ok: bool,
+    /// The focused element after the keys (a secret field's value hidden).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub after: Option<serde_json::Value>,
+    /// The focused field's value or checked state changed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub changed: Option<bool>,
+    /// Focus moved to another element.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub focus_moved: Option<bool>,
 }
 
 // ── browser.click_element ───────────────────────────────────────────────

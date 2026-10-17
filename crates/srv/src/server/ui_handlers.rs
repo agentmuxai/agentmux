@@ -299,6 +299,30 @@ pub(crate) async fn handle_ui_screenshot(
             return err_response(StatusCode::BAD_GATEWAY, format!("decode png_base64: {e}"))
         }
     };
+    // A browser pane's secret fields (passwords, one-time codes, card and
+    // tax-ID numbers) are blacked out before the image is saved or returned.
+    // If that fails, the screenshot isn't given out at all.
+    let secret_boxes: Vec<[f64; 4]> = host_resp
+        .pointer("/data/secret_boxes")
+        .and_then(|v| serde_json::from_value(v.clone()).ok())
+        .unwrap_or_default();
+    let (bytes, png_base64) = if secret_boxes.is_empty() {
+        (bytes, png_base64)
+    } else {
+        let css_width = host_resp.pointer("/data/css_width").and_then(|v| v.as_f64());
+        match crate::server::screenshot_redact::black_out(&bytes, &secret_boxes, css_width) {
+            Ok(b) => {
+                let encoded = base64::engine::general_purpose::STANDARD.encode(&b);
+                (b, encoded)
+            }
+            Err(e) => {
+                return err_response(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("couldn't black out the secret fields on this page, so the screenshot isn't returned: {e}"),
+                )
+            }
+        }
+    };
 
     let dir = crate::backend::base::get_mux_data_dir().join("tmp/ui-screenshots");
     if let Err(e) = std::fs::create_dir_all(&dir) {
@@ -631,17 +655,16 @@ pub(crate) async fn handle_ui_browser_dispatch_key(
             return resp;
         }
     }
-    let host = match get_host_ipc(&state).await {
-        Ok(h) => h,
-        Err(e) => return err_response(StatusCode::SERVICE_UNAVAILABLE, e),
-    };
+    // The answer carries what has focus after the keys (on a browser pane),
+    // so the agent can tell whether they did anything.
     let body = json!({ "block_id": block_id, "selector": req.selector, "text": req.text, "key": req.key });
-    if let Err(resp) = proxy_ack(&state, &host, "dispatch_key", body).await {
-        return resp;
-    }
+    let data = match proxy_value(&state, "dispatch_key", body, std::time::Duration::from_secs(20)).await {
+        Ok(d) => d,
+        Err((code, e)) => return err_response(code, e),
+    };
     tracing::info!(agent_id = %req.auth.agent_id, block_id = %block_id, "[ui-automation] browser dispatch_key");
     log().record(&state);
-    (StatusCode::OK, Json(json!({ "ok": true }))).into_response()
+    (StatusCode::OK, Json(json!({ "ok": true, "data": data }))).into_response()
 }
 
 /// `POST /api/v1/ui/browser/focus_element` — backs `BrowserFocusElement`.

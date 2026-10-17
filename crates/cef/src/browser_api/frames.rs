@@ -142,12 +142,6 @@ pub fn arrange(frames: &[RawFrame], owners: &HashMap<String, i64>) -> Vec<Placed
     out
 }
 
-/// The origin of the frame holding `raw`, if it is known.
-fn parent_origin<'a>(all: &'a [RawFrame], raw: &RawFrame) -> Option<&'a str> {
-    let parent = raw.parent_id.as_deref()?;
-    all.iter().find(|f| f.id == parent).map(|f| f.origin.as_str())
-}
-
 /// A frame is cross-origin when it differs from the page it is shown on, or
 /// from the frame that holds it: a same-site frame inside a frame from another
 /// site is still sitting in that site's page.
@@ -239,8 +233,13 @@ fn hops_to_add(chain: &[FrameHop]) -> Vec<&FrameHop> {
 /// Add it to a point measured inside the frame to click that point from the
 /// page.
 pub async fn frame_offset(root: &mut CdpSession, f: &FrameRef) -> Result<(f64, f64), String> {
+    chain_offset(root, &f.chain).await
+}
+
+/// [`frame_offset`] for a frame known only by its chain.
+pub async fn chain_offset(root: &mut CdpSession, chain: &[FrameHop]) -> Result<(f64, f64), String> {
     let (mut x, mut y) = (0.0, 0.0);
-    for hop in hops_to_add(&f.chain) {
+    for hop in hops_to_add(chain) {
         let mut on = root.in_session(hop.parent_session.as_deref());
         let model = on
             .call("DOM.getBoxModel", json!({ "backendNodeId": hop.owner_backend }))
@@ -257,18 +256,57 @@ pub async fn frame_offset(root: &mut CdpSession, f: &FrameRef) -> Result<(f64, f
     Ok((x, y))
 }
 
-/// Read every iframe of the pane: each one's accessibility tree and the
-/// references' routes back to their elements. `describes_left` is the shared
-/// budget of DOM lookups (the top frame spent some).
-pub async fn read_frames(root: &mut CdpSession, describes_left: &mut usize) -> (Vec<FrameTree>, HashMap<usize, FrameRef>) {
-    let mut trees = Vec::new();
-    let mut refs = HashMap::new();
+/// The frame's own box on the page (x, y, width, height in the main frame's
+/// CSS pixels): where its content starts, and its `<iframe>`'s content size.
+pub async fn frame_box(root: &mut CdpSession, chain: &[FrameHop]) -> Option<[f64; 4]> {
+    let last = chain.last()?;
+    let (x, y) = chain_offset(root, chain).await.ok()?;
+    let mut on = root.in_session(last.parent_session.as_deref());
+    let model = on.call("DOM.getBoxModel", json!({ "backendNodeId": last.owner_backend })).await.ok()?;
+    let w = model.pointer("/model/width").and_then(Value::as_f64)?;
+    let h = model.pointer("/model/height").and_then(Value::as_f64)?;
+    Some([x, y, w, h])
+}
+
+/// A frame's place on the page, without its contents: enough to find it,
+/// place a point inside it on the page, and label it.
+#[derive(Debug, Clone)]
+pub struct FrameLayout {
+    /// `f{ordinal}`, 1.. in document order.
+    pub ordinal: usize,
+    /// The ordinal of the frame holding its `<iframe>` (0: the top).
+    pub parent: usize,
+    pub depth: usize,
+    pub raw: RawFrame,
+    /// The `<iframe>` element's backend node id, in the parent's tree.
+    pub owner: Option<i64>,
+    pub chain: Vec<FrameHop>,
+    /// It is the root frame of its own session (a frame in another process).
+    pub is_session_root: bool,
+    /// Its own origin, or for an `about:` frame the one it inherits.
+    pub origin: String,
+    pub cross_origin: bool,
+}
+
+/// The origin a frame runs with: an `about:blank` or `about:srcdoc` frame (or
+/// one whose URL hasn't been set yet) reports none of its own and inherits its
+/// parent's.
+fn effective_origin(raw: &RawFrame, parent_origin: &str) -> String {
+    if raw.origin.is_empty() && (raw.url.is_empty() || raw.url.starts_with("about:")) {
+        parent_origin.to_string()
+    } else {
+        raw.origin.clone()
+    }
+}
+
+/// Every iframe of the pane, in document order, placed and labelled.
+pub async fn layout(root: &mut CdpSession) -> Vec<FrameLayout> {
     let (all, targets) = current_frames(root).await;
     let Some(main) = all.first().cloned() else {
-        return (trees, refs);
+        return Vec::new();
     };
     if all.len() == 1 {
-        return (trees, refs);
+        return Vec::new();
     }
     // Each `<iframe>` element, asked of the frame that holds it.
     let session_of: HashMap<&str, Option<&str>> = all.iter().map(|f| (f.id.as_str(), f.session.as_deref())).collect();
@@ -282,38 +320,64 @@ pub async fn read_frames(root: &mut CdpSession, describes_left: &mut usize) -> (
             }
         }
     }
-    let placed = arrange(&all, &owners);
-    let mut enabled: HashSet<Option<String>> = HashSet::new();
-    let mut chains: Vec<Vec<FrameHop>> = Vec::new();
-    for (n, p) in placed.iter().enumerate() {
-        let ordinal = n + 1;
-        let raw = &all[p.index];
+    let mut out: Vec<FrameLayout> = Vec::new();
+    for p in arrange(&all, &owners) {
+        let raw = all[p.index].clone();
         let parent_session = all.iter().find(|f| Some(f.id.as_str()) == raw.parent_id.as_deref()).and_then(|f| f.session.clone());
-        let mut chain = if p.parent == 0 { Vec::new() } else { chains[p.parent - 1].clone() };
+        let (mut chain, parent_origin) = if p.parent == 0 {
+            (Vec::new(), main.origin.clone())
+        } else {
+            let holder = &out[p.parent - 1];
+            (holder.chain.clone(), holder.origin.clone())
+        };
         if let Some(&owner) = owners.get(&raw.id) {
             chain.push(FrameHop { owner_backend: owner, parent_session });
         }
-        chains.push(chain.clone());
-        let mut tree = FrameTree {
-            ordinal,
+        let origin = effective_origin(&raw, &parent_origin);
+        let cross_origin = is_cross_origin(&origin, &main.origin, Some(&parent_origin));
+        let is_session_root = raw.session.is_some() && targets.iter().any(|t| t.target_id == raw.id);
+        out.push(FrameLayout {
+            ordinal: out.len() + 1,
             parent: p.parent,
-            owner_backend: owners.get(&raw.id).copied(),
-            origin: raw.origin.clone(),
-            cross_origin: is_cross_origin(&raw.origin, &main.origin, parent_origin(&all, raw)),
+            depth: p.depth,
+            owner: owners.get(&raw.id).copied(),
+            raw,
+            chain,
+            is_session_root,
+            origin,
+            cross_origin,
+        });
+    }
+    out
+}
+
+/// Read every iframe of the pane: each one's accessibility tree and the
+/// references' routes back to their elements. `describes_left` is the shared
+/// budget of DOM lookups (the top frame spent some).
+pub async fn read_frames(root: &mut CdpSession, describes_left: &mut usize) -> (Vec<FrameTree>, HashMap<usize, FrameRef>) {
+    let mut trees = Vec::new();
+    let mut refs = HashMap::new();
+    let mut enabled: HashSet<Option<String>> = HashSet::new();
+    for fl in layout(root).await {
+        let mut tree = FrameTree {
+            ordinal: fl.ordinal,
+            parent: fl.parent,
+            owner_backend: fl.owner,
+            origin: fl.origin.clone(),
+            cross_origin: fl.cross_origin,
             ..Default::default()
         };
-        if ordinal > MAX_FRAMES || p.depth > MAX_FRAME_DEPTH {
+        if fl.ordinal > MAX_FRAMES || fl.depth > MAX_FRAME_DEPTH {
             tree.note = Some("not shown: over the frame limit".to_string());
             trees.push(tree);
             continue;
         }
-        let mut on = root.in_session(raw.session.as_deref());
-        if enabled.insert(raw.session.clone()) {
+        let mut on = root.in_session(fl.raw.session.as_deref());
+        if enabled.insert(fl.raw.session.clone()) {
             let _ = on.call("Accessibility.enable", json!({})).await;
         }
         // The root frame of an attached session is the whole of that session's tree.
-        let is_session_root = raw.session.is_some() && targets.iter().any(|t| t.target_id == raw.id);
-        let params = if is_session_root { json!({}) } else { json!({ "frameId": raw.id }) };
+        let params = if fl.is_session_root { json!({}) } else { json!({ "frameId": fl.raw.id }) };
         match on.call("Accessibility.getFullAXTree", params).await {
             Ok(t) => {
                 tree.nodes = t.get("nodes").and_then(Value::as_array).cloned().unwrap_or_default();
@@ -327,13 +391,13 @@ pub async fn read_frames(root: &mut CdpSession, describes_left: &mut usize) -> (
                     }
                 }
                 refs.insert(
-                    ordinal,
+                    fl.ordinal,
                     FrameRef {
-                        frame_id: raw.id.clone(),
-                        session: raw.session.clone(),
-                        origin: raw.origin.clone(),
-                        url: raw.url.clone(),
-                        chain,
+                        frame_id: fl.raw.id.clone(),
+                        session: fl.raw.session.clone(),
+                        origin: fl.origin.clone(),
+                        url: fl.raw.url.clone(),
+                        chain: fl.chain.clone(),
                     },
                 );
             }
@@ -439,6 +503,18 @@ mod tests {
         assert!(is_cross_origin(page, page, Some("http://b.test")), "same as the page, inside another site's frame");
         assert!(is_cross_origin("http://b.test", page, Some("http://b.test")), "differs from the page");
         assert!(!is_cross_origin(page, page, None), "parent unknown: judged against the page only");
+    }
+
+    #[test]
+    fn an_about_frame_inherits_its_parents_origin() {
+        let srcdoc = RawFrame { id: "F".into(), parent_id: Some("M".into()), url: "about:srcdoc".into(), origin: String::new(), session: None };
+        assert_eq!(effective_origin(&srcdoc, "https://forms.example.gov"), "https://forms.example.gov");
+        let blank = RawFrame { url: String::new(), ..srcdoc.clone() };
+        assert_eq!(effective_origin(&blank, "https://a.test"), "https://a.test");
+        let own = RawFrame { url: "https://b.test/x".into(), origin: "https://b.test".into(), ..srcdoc.clone() };
+        assert_eq!(effective_origin(&own, "https://a.test"), "https://b.test", "a frame with its own origin keeps it");
+        let opaque = RawFrame { url: "data:text/html,hi".into(), origin: String::new(), ..srcdoc };
+        assert_eq!(effective_origin(&opaque, "https://a.test"), "", "only about: frames inherit");
     }
 
     #[test]
