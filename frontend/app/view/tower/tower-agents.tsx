@@ -14,6 +14,7 @@ import { pickAgentColor } from "@/app/view/agent/agent-color";
 import clsx from "clsx";
 import { createMemo, createSignal, For, type JSX, Show } from "solid-js";
 import { HistoryCharts } from "./tower-history";
+import { KindIcon, LoadCells } from "./tower-kind-ui";
 import { HISTORY_POINTS, type TowerViewModel } from "./tower-model";
 import { ProcessName } from "./tower-process-name";
 import { SortHeader } from "./tower-sort-header";
@@ -24,6 +25,7 @@ import {
     formatAgo,
     formatCpuTime,
     formatMem,
+    loadLevel,
     orderRail,
     processDetail,
     type ProcessNode,
@@ -181,7 +183,15 @@ function RailRow(props: { model: TowerViewModel; entry: RailEntry; cpu: Cpu; sel
         >
             <Swatch entry={props.entry} remote={remote()} />
             <span class="tower-rail-name">{props.entry.label}</span>
-            <span class="tower-rail-cpu tower-num">{props.cpu(props.entry.cpu)}</span>
+            <span
+                class={clsx(
+                    "tower-rail-cpu tower-num",
+                    loadLevel("cpu", "item", m.cpuShare(props.entry.cpu)) &&
+                        `tower-level--${loadLevel("cpu", "item", m.cpuShare(props.entry.cpu))}`
+                )}
+            >
+                {props.cpu(props.entry.cpu)}
+            </span>
             <span class="tower-rail-mem tower-num tower-muted">{formatMem(props.entry.mem)}</span>
             <Sparkline points={m.recentCpu(props.entry.id)} color={entryColor(props.entry, remote())} />
         </div>
@@ -234,8 +244,15 @@ function Detail(props: { model: TowerViewModel; entry: RailEntry; cpu: Cpu }) {
                 </Show>
                 <span class="tower-toolbar-spacer" />
                 <span class="tower-detail-totals">
-                    CPU {props.cpu(props.entry.cpu)} · Memory {formatMem(props.entry.mem)} ·{" "}
-                    {count(props.entry.processes, "process")}
+                    CPU{" "}
+                    <span class={clsx("tower-total tower-total--cpu", level("cpu", m.cpuShare(props.entry.cpu)))}>
+                        {props.cpu(props.entry.cpu)}
+                    </span>{" "}
+                    · Memory{" "}
+                    <span class={clsx("tower-total tower-total--mem", level("mem", m.memShare(props.entry.mem)))}>
+                        {formatMem(props.entry.mem)}
+                    </span>{" "}
+                    · {count(props.entry.processes, "process")}
                 </span>
             </div>
             <HistoryCharts
@@ -313,6 +330,12 @@ function Detail(props: { model: TowerViewModel; entry: RailEntry; cpu: Cpu }) {
     );
 }
 
+/** A figure's level class, for one agent or entry. */
+function level(figure: "cpu" | "mem", share: number | undefined): string | undefined {
+    const l = loadLevel(figure, "item", share);
+    return l && `tower-level--${l}`;
+}
+
 function foldKey(p: TowerProcess): string {
     return `fold:${p.id}`;
 }
@@ -335,8 +358,13 @@ function TaskTree(props: { model: TowerViewModel; task: TowerTask; cpu: Cpu; hea
                             <span class="tower-label">{props.task.label}</span>
                         </div>
                     </td>
-                    <td class="tower-num">{props.cpu(props.task.cpu)}</td>
-                    <td class="tower-num">{formatMem(props.task.mem)}</td>
+                    <LoadCells
+                        model={props.model}
+                        cpu={props.cpu}
+                        cpuValue={props.task.cpu}
+                        mem={props.task.mem}
+                        fill="var(--process-kind-shells)"
+                    />
                     <Show when={props.model.moreColumns()}>
                         <td />
                         <td />
@@ -413,7 +441,11 @@ function ManyRows(props: { model: TowerViewModel; line: ManyLine; depth: number;
     return (
         <>
             <tr
-                class={clsx("tower-process-row tower-many-row", props.line.exited && "tower-process-row--exited")}
+                class={clsx(
+                    "tower-process-row tower-many-row",
+                    props.line.exited && "tower-process-row--exited",
+                    props.line.nodes[0]?.process.kind && `tower-kind--${props.line.nodes[0].process.kind}`
+                )}
                 data-testid={`tower-many-${props.line.name}${props.line.exited ? "-exited" : ""}`}
             >
                 <td class="tower-name">
@@ -430,6 +462,7 @@ function ManyRows(props: { model: TowerViewModel; line: ManyLine; depth: number;
                             aria-expanded={open()}
                             onClick={() => m.toggleExpanded(openKey())}
                         />
+                        <KindIcon kind={props.line.nodes[0]?.process.kind} />
                         <span class="tower-label">{props.line.name}</span>
                         <span class="tower-muted">×{props.line.nodes.length}</span>
                         <Show when={props.line.exited}>
@@ -437,8 +470,7 @@ function ManyRows(props: { model: TowerViewModel; line: ManyLine; depth: number;
                         </Show>
                     </div>
                 </td>
-                <td class="tower-num">{props.cpu(props.line.cpu)}</td>
-                <td class="tower-num">{formatMem(props.line.mem)}</td>
+                <LoadCells model={m} cpu={props.cpu} cpuValue={props.line.cpu} mem={props.line.mem} />
                 <Show when={m.moreColumns()}>
                     <td class="tower-num">{formatCpuTime(props.line.cpuTime)}</td>
                     <td class="tower-num">{formatMem(props.line.peak)}</td>
@@ -473,7 +505,8 @@ function ProcessRows(props: { model: TowerViewModel; node: ProcessNode; depth: n
                 class={clsx(
                     "tower-process-row",
                     props.node.process.role && `tower-role--${props.node.process.role}`,
-                    exitedMs() != null && "tower-process-row--exited"
+                    exitedMs() != null && "tower-process-row--exited",
+                    props.node.process.kind && `tower-kind--${props.node.process.kind}`
                 )}
                 title={processDetail(props.node.process, m.snapshot()?.memory_metric ?? "")}
             >
@@ -503,12 +536,7 @@ function ProcessRows(props: { model: TowerViewModel; node: ProcessNode; depth: n
                         </ProcessName>
                     </div>
                 </td>
-                <td class="tower-num" title={subtree()}>
-                    {props.cpu(props.node.cpu)}
-                </td>
-                <td class="tower-num" title={subtree()}>
-                    {formatMem(props.node.mem)}
-                </td>
+                <LoadCells model={m} cpu={props.cpu} cpuValue={props.node.cpu} mem={props.node.mem} title={subtree()} />
                 <Show when={m.moreColumns()}>
                     <td class="tower-num" title={subtree()}>
                         {formatCpuTime(props.node.cpuTime)}

@@ -74,7 +74,7 @@ async fn pane_stats_are_measured_only_while_something_subscribes() {
     pidregistry::register(block, std::process::id());
     // Every pane is named, as the store would name a real one.
     let panes = crate::backend::sampler::panes::tower_sampler(|_| {
-        Some(crate::backend::tower_sampler::BlockLabel { label: "Terminal".into(), agent: false })
+        Some(crate::backend::tower_sampler::BlockLabel { label: "Terminal".into(), agent: false, provider: None })
     });
     let task = tokio::spawn(crate::backend::sysinfo::run_sysinfo_loop(Arc::clone(&broker), config, "local".into(), panes));
 

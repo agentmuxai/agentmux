@@ -897,3 +897,188 @@ describe("Tower", () => {
         expect(screen.queryByRole("alert")).toBeNull();
     });
 });
+
+/** A machine whose processes carry their kinds, as srv sends them. */
+function kindSnapshot(): TowerSnapshot {
+    const snap = snapshot(true);
+    snap.tasks[0].processes[0] = { ...snap.tasks[0].processes[0], kind: "agents", provider: "claude" };
+    snap.tasks[0].processes[1] = { ...snap.tasks[0].processes[1], kind: "builds" };
+    snap.machine = { cpu: 3.3, mem: 8 * GB, processes: 7, mem_total: 16 * GB };
+    snap.host!.processes = [
+        {
+            id: "10:1",
+            pid: 10,
+            name: "claude.exe",
+            cpu: 0.5,
+            mem: GB / 2,
+            task: "block-a",
+            kind: "agents",
+            provider: "claude",
+        },
+        // 1.5 cores of 4: 38% of the machine, over a process's 25% warning.
+        { id: "11:1", pid: 11, ppid: 10, name: "node.exe", cpu: 1.5, mem: GB / 2, task: "block-a", kind: "builds" },
+        { id: "20:1", pid: 20, name: "chrome.exe", cpu: 0.4, mem: GB, kind: "browsers" },
+        { id: "21:1", pid: 21, name: "chrome.exe", cpu: 0.2, mem: GB, kind: "browsers" },
+        { id: "30:1", pid: 30, name: "svchost.exe", cpu: 0.05, mem: GB / 8, kind: "system" },
+        { id: "31:1", pid: 31, name: "svchost.exe", cpu: 0.05, mem: GB / 8, kind: "system" },
+        {
+            id: "5:1",
+            pid: 5,
+            name: "agentmux-srv.exe",
+            cpu: 0.1,
+            mem: 2 * GB,
+            task: "agentmux",
+            kind: "agentmux",
+            detail: "Server",
+        },
+    ];
+    snap.host!.cpu = 2.8;
+    snap.host!.mem = 5.25 * GB;
+    snap.host!.total = 7;
+    snap.host!.matched = 7;
+    return snap;
+}
+
+describe("Tower: kinds of process", () => {
+    beforeEach(() => {
+        peersCmd.mockResolvedValue({ peers: [] });
+        sample.mockImplementation(() => Promise.resolve(kindSnapshot()));
+    });
+    afterEach(() => {
+        cleanup();
+        vi.clearAllMocks();
+        vi.useRealTimers();
+        setMeta({});
+        setVisibility("active");
+    });
+
+    const row = (name: string) => screen.getAllByText(name)[0].closest("tr")!;
+
+    it("every process row starts with its kind's icon, in its colour; an agent's is its provider's logo", async () => {
+        setMeta({ "tower:view": "processes", "tower:group": "none" });
+        renderTower();
+        await screen.findByText("node.exe");
+        expect(row("node.exe")).toHaveClass("tower-kind--builds");
+        expect(within(row("node.exe")).getByRole("img", { name: "Builds & tools" })).toBeInTheDocument();
+        const claudeIcon = within(row("claude.exe")).getByRole("img", { name: "Agents & AI" });
+        expect(claudeIcon.querySelector(".fa-robot"), "the provider's logo, not the generic robot").toBeNull();
+        expect(within(row("Server")).getByRole("img", { name: "AgentMux" })).toBeInTheDocument();
+    });
+
+    it("the system's processes start folded into one row, which opens to them", async () => {
+        setMeta({ "tower:view": "processes", "tower:group": "none" });
+        renderTower();
+        const system = await screen.findByTestId("tower-kind-system");
+        expect(within(system).getByText("(2)")).toBeInTheDocument();
+        expect(screen.queryByText("svchost.exe")).toBeNull();
+        fireEvent.click(within(system).getByRole("button", { name: "Show System" }));
+        expect(screen.getAllByText("svchost.exe")).toHaveLength(2);
+    });
+
+    it("the system folds in the list by app too, but not when it is the kind asked for", async () => {
+        setMeta({ "tower:view": "processes", "tower:group": "app" });
+        renderTower();
+        await screen.findByTestId("tower-kind-system");
+        expect(screen.queryByText("svchost.exe")).toBeNull();
+        cleanup();
+        setMeta({ "tower:view": "processes", "tower:group": "none", "tower:kind": "system" });
+        renderTower();
+        await screen.findAllByText("svchost.exe");
+        expect(screen.queryByTestId("tower-kind-system")).toBeNull();
+    });
+
+    it("a kind's chip shows only that kind, and Show all brings every kind back", async () => {
+        setMeta({ "tower:view": "processes", "tower:group": "none" });
+        renderTower();
+        const chip = await screen.findByTestId("tower-kind-chip-browsers");
+        expect(chip).toHaveTextContent("Browsers");
+        expect(chip).toHaveTextContent("2 ·");
+        fireEvent.click(chip);
+        expect(setMetaMock).toHaveBeenCalledWith({ "tower:kind": "browsers" });
+        await waitFor(() => expect(screen.queryByText("node.exe")).toBeNull());
+        expect(screen.getAllByText("chrome.exe")).toHaveLength(2);
+        expect(screen.getByTestId("tower-kind-chip-browsers")).toHaveAttribute("aria-pressed", "true");
+        const only = screen.getByTestId("tower-kind-only");
+        expect(only).toHaveTextContent("Only Browsers & web views");
+        fireEvent.click(within(only).getByRole("button", { name: "Show all" }));
+        expect(setMetaMock).toHaveBeenLastCalledWith({ "tower:kind": null });
+        await screen.findByText("node.exe");
+    });
+
+    it("groups by type: a header per kind present, the busiest open, the system last", async () => {
+        setMeta({ "tower:view": "processes" });
+        renderTower();
+        await screen.findByTestId("tower-owner-block-a");
+        fireEvent.click(screen.getByRole("radio", { name: "Type" }));
+        expect(setMetaMock).toHaveBeenCalledWith({ "tower:group": "type" });
+        await screen.findByTestId("tower-kind-builds");
+        const headers = screen.getAllByTestId(/^tower-kind-(?!chip|only)/).map((r) => r.dataset.testid);
+        expect(headers[headers.length - 1]).toBe("tower-kind-system");
+        expect(headers).toEqual(
+            expect.arrayContaining([
+                "tower-kind-agents",
+                "tower-kind-builds",
+                "tower-kind-browsers",
+                "tower-kind-agentmux",
+            ])
+        );
+        // The two busiest kinds open: builds (1.5 cores) and browsers (0.6).
+        expect(
+            within(screen.getByTestId("tower-kind-builds")).getByRole("button", { name: "Hide Builds & tools" })
+        ).toBeInTheDocument();
+        expect(screen.getByText("node.exe")).toBeInTheDocument();
+        expect(
+            within(screen.getByTestId("tower-kind-system")).getByRole("button", { name: "Show System" })
+        ).toBeInTheDocument();
+    });
+
+    it("a process of an agent's task carries the agent's colour in the flat list", async () => {
+        setMeta({ "tower:view": "processes", "tower:group": "none" });
+        renderTower();
+        await screen.findByText("node.exe");
+        expect(row("node.exe")).toHaveClass("tower-process-row--owned");
+        expect(row("node.exe").style.getPropertyValue("--tower-owner-color")).toBe("#ff8800");
+        expect(row("chrome.exe")).not.toHaveClass("tower-process-row--owned");
+    });
+
+    it("a heavy figure is marked, and every figure has a bar for its share of the machine", async () => {
+        setMeta({ "tower:view": "processes", "tower:group": "none" });
+        renderTower();
+        await screen.findByText("node.exe");
+        const [nodeCpu, nodeMem] = within(row("node.exe")).getAllByRole("cell").slice(1, 3);
+        expect(nodeCpu).toHaveClass("tower-level--warn");
+        expect(nodeMem).not.toHaveClass("tower-level--warn");
+        // Half a GB of 16: about 3% of the machine's memory.
+        expect((nodeMem.querySelector(".tower-load-bar") as HTMLElement).style.width).toBe("3.125%");
+        const claudeCpu = within(row("claude.exe")).getAllByRole("cell")[1];
+        expect(claudeCpu.className).not.toMatch(/tower-level--/);
+    });
+
+    it("the breakdown splits the machine's CPU and memory by kind", async () => {
+        setMeta({ "tower:view": "processes", "tower:group": "none" });
+        renderTower();
+        const kinds = await screen.findByTestId("tower-kinds");
+        const builds = kinds.querySelector(".tower-kind-segment.tower-kind--builds") as HTMLElement;
+        expect(builds.title).toContain("Builds & tools · 1 process");
+        // 1.5 cores of 4.
+        expect(builds.style.width).toBe("37.5%");
+        expect(within(kinds).getByText("5.3 GB of 16.0 GB")).toBeInTheDocument();
+    });
+
+    it("the agent's charts: CPU in its colour, Memory in the theme's memory colour", async () => {
+        vi.useFakeTimers();
+        let ts = 1_000_000;
+        sample.mockImplementation(() => {
+            const snap = kindSnapshot();
+            snap.ts_ms = ts;
+            ts += 2000;
+            return Promise.resolve(snap);
+        });
+        renderTower();
+        await vi.advanceTimersByTimeAsync(0);
+        await vi.advanceTimersByTimeAsync(2000);
+        const [cpu, mem] = screen.getAllByRole("img", { name: /over the last 10 minutes/ });
+        expect((cpu.querySelector(".tower-chart-line") as SVGElement).style.stroke).toBe("rgb(255, 136, 0)");
+        expect((mem.querySelector(".tower-chart-line") as SVGElement).style.stroke).toBe("var(--sysinfo-mem-color)");
+    });
+});

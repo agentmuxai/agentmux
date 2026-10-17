@@ -32,6 +32,38 @@ pub enum TowerProcessRole {
     Started,
 }
 
+/// What kind of process it is (`backend::tower_kind`;
+/// SPEC_TOWER_THEME_SURFACE_AND_COLOR_2026_10_17.md §3.1). The pane gives
+/// each its icon and colour.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, ts_rs::TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub enum TowerProcessKind {
+    /// Agent CLIs, an agent pane's own process, local model servers.
+    Agents,
+    /// AgentMux's own processes.
+    Agentmux,
+    /// Shells, consoles, terminal hosts, remote sessions, and the commands
+    /// run in them.
+    Shells,
+    /// Compilers, linkers, build systems, package managers, test runners,
+    /// version control.
+    Builds,
+    /// Interpreters running a program, language servers, databases, local
+    /// servers.
+    Runtimes,
+    /// Browsers and embedded web views.
+    Browsers,
+    /// Container engines, WSL, virtual machines.
+    Containers,
+    /// Code editors and IDEs.
+    Editors,
+    /// Anything else the user runs.
+    Apps,
+    /// The OS, its services, security software, device drivers.
+    System,
+}
+
 /// One process. CPU is a fraction of one core since the previous sample
 /// (1.0 = one core fully busy); the pane divides by `cpu_count` for "percent
 /// of the machine". Absent values are ones the OS wouldn't give without
@@ -97,6 +129,16 @@ pub struct TowerProcess {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub started_by: Option<String>,
+    /// What kind of process it is. Absent from an AgentMux that predates
+    /// kinds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub kind: Option<TowerProcessKind>,
+    /// An agent pane's own process: its provider (`agentProvider`), for the
+    /// row's logo.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub provider: Option<String>,
 }
 
 /// A pane and every process it started, or AgentMux itself.
@@ -168,6 +210,10 @@ pub struct TowerMachine {
     #[ts(type = "number")]
     pub mem: u64,
     pub processes: u32,
+    /// The machine's installed memory, bytes: what a memory share is of.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub mem_total: Option<u64>,
 }
 
 /// `tower.sample`.

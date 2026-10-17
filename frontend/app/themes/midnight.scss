@@ -80,4 +80,7 @@
     .agent-view .agent-document {
         background: #000;
     }
+
+    // Process kinds (theme.scss, measured by process-kind-colours.test.ts).
+    --process-kind-agentmux: var(--term-bright-cyan);
 }

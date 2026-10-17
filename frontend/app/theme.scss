@@ -273,6 +273,19 @@
     --sysinfo-in-color: #d55181;
     --sysinfo-out-color: #c98500;
 
+    // What kind of process a row is (Tower; any pane listing processes may
+    // use them). Aliases of the terminal palette, which every theme tunes to
+    // read on its own surface; a theme overrides one where its palette can't
+    // keep the five apart or readable, measured by
+    // view/tower/process-kind-colours.test.ts
+    // (SPEC_TOWER_THEME_SURFACE_AND_COLOR_2026_10_17.md §4). Red is never a
+    // kind: it means trouble.
+    --process-kind-agents: var(--term-magenta);
+    --process-kind-agentmux: var(--term-cyan);
+    --process-kind-shells: var(--term-green);
+    --process-kind-builds: var(--term-yellow);
+    --process-kind-runtimes: var(--term-blue);
+
 
     // term colors (16 + 6) form the base terminal theme
     // for consistency these colors should be used by plugins/applications
@@ -641,6 +654,13 @@
         pointer-events: none;
         background: var(--main-bg-color);
     }
+}
+
+// The default theme (no `data-theme`): its terminal blue is 2.68:1 on its
+// surface, too faint for an icon, and its brighter cyan sits further from it.
+:root:not([data-theme]) {
+    --process-kind-agentmux: var(--term-bright-cyan);
+    --process-kind-runtimes: var(--term-bright-blue);
 }
 
 // Light-family override for the `color-scheme` fix above — same marker

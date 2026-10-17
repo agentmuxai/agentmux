@@ -6,12 +6,17 @@
 
 @use "../../mixins.scss";
 
+// The theme's own surface, as the Hangar paints it: without it the pane
+// showed its frame's darker layer, near-black in the dark themes, with the
+// sticky header a lighter band over it
+// (SPEC_TOWER_THEME_SURFACE_AND_COLOR_2026_10_17.md §1.1, §5.1).
 .tower-view {
     display: flex;
     flex-direction: column;
     width: 100%;
     height: 100%;
     overflow: hidden;
+    background: var(--main-bg-color);
     color: var(--main-text-color);
     font-size: var(--text-base);
 }
@@ -179,6 +184,11 @@
     border-color: transparent;
 }
 
+th[aria-sort="ascending"] .tower-sort,
+th[aria-sort="descending"] .tower-sort {
+    color: var(--accent-color);
+}
+
 .tower-name-line {
     display: flex;
     align-items: center;
@@ -326,8 +336,12 @@
 }
 
 .tower-rail-row--selected {
-    background: var(--hover-bg-color);
+    background: var(--highlight-bg-color);
     box-shadow: inset 2px 0 0 var(--accent-color);
+
+    .tower-swatch--fixed {
+        color: var(--accent-color);
+    }
 }
 
 // The fixed entries sit under the agents, set apart by a rule above the first.
@@ -524,7 +538,7 @@
 }
 
 .tower-chart-area {
-    opacity: 0.15;
+    opacity: 0.2;
 }
 
 .tower-chart-line {
@@ -596,4 +610,177 @@
 .tower-exited-ago {
     flex-shrink: 0;
     white-space: nowrap;
+}
+
+// ── Kinds of process (SPEC_TOWER_THEME_SURFACE_AND_COLOR_2026_10_17.md §3–§4) ──
+// A `tower-kind--<kind>` class sets the kind's colour for its icon and its
+// fill for bars. The five coloured kinds are the theme's `--process-kind-*`
+// (theme.scss); the rest are text-coloured, their fills graded tints so the
+// breakdown still tells them apart, the system faintest.
+
+@each $kind in agents, agentmux, shells, builds, runtimes {
+    .tower-kind--#{$kind} {
+        --tower-kind-color: var(--process-kind-#{$kind});
+        --tower-kind-fill: var(--process-kind-#{$kind});
+    }
+}
+
+@each $kind, $tint in (browsers: 46%, containers: 38%, editors: 30%, apps: 22%) {
+    .tower-kind--#{$kind} {
+        --tower-kind-color: var(--main-text-color);
+        --tower-kind-fill: color-mix(in srgb, var(--main-text-color) #{$tint}, transparent);
+    }
+}
+
+.tower-kind--system {
+    --tower-kind-color: var(--secondary-text-color);
+    --tower-kind-fill: color-mix(in srgb, var(--main-text-color) 13%, transparent);
+}
+
+.tower-kind-icon {
+    @include mixins.flex-center(inline-flex);
+    flex-shrink: 0;
+    width: 14px;
+    height: 14px;
+    font-size: 11px;
+    color: var(--tower-kind-color, var(--secondary-text-color));
+}
+
+// The system's rows are the background: muted, like support processes.
+.tower-process-row.tower-kind--system .tower-label,
+.tower-group-row.tower-kind--system .tower-label {
+    color: var(--secondary-text-color);
+}
+
+// A kind's header in the list grouped by type: its colour as a bar, as an
+// agent's header carries the agent's.
+.tower-kind-row {
+    .tower-label {
+        font-weight: 600;
+    }
+
+    td:first-child {
+        box-shadow: inset 3px 0 0 var(--tower-kind-color);
+    }
+}
+
+// An agent's header: a wash of its colour behind it, the bar kept. A mix over
+// the theme's surface, so it holds in light and dark themes alike.
+.tower-owner-row--agent {
+    background: color-mix(in srgb, var(--tower-owner-color, transparent) 8%, transparent);
+}
+
+// ── Load (§5.4) ──
+// Under each CPU and memory figure, a bar as long as its share of the
+// machine, in the row's kind colour (an agent's header: its colour). The
+// column reads as a bar chart of what is taking the machine.
+.tower-load {
+    position: relative;
+}
+
+.tower-load-bar {
+    position: absolute;
+    right: var(--space-2);
+    bottom: 1px;
+    height: 2px;
+    max-width: calc(100% - 2 * var(--space-2));
+    border-radius: 1px;
+    background: var(--tower-load-fill, var(--tower-kind-fill, var(--tint-4)));
+    opacity: 0.55;
+    pointer-events: none;
+}
+
+// A figure heavy for its scope: the warning, then the error colour, and bold,
+// so it reads without colour too.
+.tower-level--warn {
+    color: var(--warning-color);
+    font-weight: 600;
+}
+
+.tower-level--high {
+    color: var(--error-color);
+    font-weight: 600;
+}
+
+.tower-level--warn .tower-load-bar,
+.tower-level--high .tower-load-bar {
+    background: currentColor;
+    opacity: 0.8;
+}
+
+// The totals in the charts' colours: CPU the theme's CPU colour, memory its
+// memory colour, unless a level says otherwise.
+.tower-total {
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+}
+
+.tower-total--cpu:not(.tower-level--warn, .tower-level--high) {
+    color: var(--sysinfo-cpu-color);
+}
+
+.tower-total--mem:not(.tower-level--warn, .tower-level--high) {
+    color: var(--sysinfo-mem-color);
+}
+
+// ── The breakdown: where the machine goes, by kind (§3.3) ──
+.tower-kinds {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.tower-kind-bar-row {
+    display: grid;
+    grid-template-columns: 56px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: var(--space-2);
+    font-size: 0.85em;
+}
+
+.tower-kind-bar-label {
+    color: var(--secondary-text-color);
+}
+
+.tower-kind-bar {
+    display: flex;
+    height: 8px;
+    overflow: hidden;
+    border-radius: 2px;
+    background: var(--tint-1);
+}
+
+.tower-kind-segment {
+    flex-shrink: 0;
+    height: 100%;
+    background: var(--tower-kind-fill);
+
+    & + & {
+        box-shadow: inset 1px 0 0 var(--main-bg-color);
+    }
+}
+
+.tower-kind-segment--unlisted {
+    background: repeating-linear-gradient(135deg, var(--tint-3) 0 3px, transparent 3px 6px);
+}
+
+.tower-kind-bar-total {
+    min-width: 7em;
+    color: var(--secondary-text-color);
+}
+
+.tower-kind-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px var(--space-1);
+    padding-top: 2px;
+}
+
+.tower-kind-chip {
+    gap: var(--space-1);
+}
+
+// A pressed chip carries its kind's colour on its line.
+.tower-kind-chip[aria-pressed="true"] {
+    border-color: var(--tower-kind-color);
 }

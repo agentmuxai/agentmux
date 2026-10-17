@@ -35,6 +35,36 @@ export function formatCpu(fraction: number | undefined, cpuCount: number, mode: 
     return `${pct < 10 ? pct.toFixed(1) : Math.round(pct)}%`;
 }
 
+/** How heavy a figure is for its scope: `warn`, `high`, or nothing.
+ *  SPEC_TOWER_THEME_SURFACE_AND_COLOR_2026_10_17.md §5.4. */
+export type LoadLevel = "warn" | "high" | undefined;
+
+/** `item`: one process, group or agent. `machine`: the whole machine. */
+export type LoadScope = "item" | "machine";
+
+/** The shares of the machine (0–1) at which a figure turns warning, then
+ *  high. First guesses, kept here so they are tuned in one place. */
+const LOAD_THRESHOLDS: Record<"cpu" | "mem", Record<LoadScope, [number, number]>> = {
+    cpu: { item: [0.25, 0.5], machine: [0.6, 0.85] },
+    mem: { item: [0.1, 0.25], machine: [0.7, 0.9] },
+};
+
+export function loadLevel(figure: "cpu" | "mem", scope: LoadScope, share: number | undefined): LoadLevel {
+    if (share == null || !Number.isFinite(share)) return undefined;
+    const [warn, high] = LOAD_THRESHOLDS[figure][scope];
+    return share >= high ? "high" : share >= warn ? "warn" : undefined;
+}
+
+/** CPU (a fraction of one core) as a share of the whole machine, 0–1. */
+export function cpuShare(fraction: number | undefined, cpuCount: number): number | undefined {
+    return fraction == null || !Number.isFinite(fraction) ? undefined : fraction / Math.max(1, cpuCount);
+}
+
+/** Memory as a share of installed memory, 0–1; unknown without the total. */
+export function memShare(bytes: number | undefined, total: number | undefined): number | undefined {
+    return bytes == null || !total ? undefined : bytes / total;
+}
+
 /** "1 task", "3 tasks". */
 export function count(n: number, noun: string): string {
     return `${n} ${noun}${n === 1 ? "" : noun.endsWith("s") ? "es" : "s"}`;
@@ -135,9 +165,10 @@ export function sortGroups(groups: ProcessGroup[], sort: Sort): ProcessGroup[] {
 }
 
 /** How the Processes view groups its list: by who started each process (the
- *  agent, a terminal, AgentMux, or nothing AgentMux knows), by app, or not
- *  at all. SPEC_TOWER_AGENT_CENTRIC_VIEWS_2026_10_08.md §3.2. */
-export type ProcessGrouping = "agent" | "app" | "none";
+ *  agent, a terminal, AgentMux, or nothing AgentMux knows), by app, by kind
+ *  of process, or not at all. SPEC_TOWER_AGENT_CENTRIC_VIEWS_2026_10_08.md
+ *  §3.2, SPEC_TOWER_THEME_SURFACE_AND_COLOR_2026_10_17.md §3.3. */
+export type ProcessGrouping = "agent" | "app" | "type" | "none";
 
 /** The processes one owner started, for the Processes view grouped by agent. */
 export interface OwnerGroup {

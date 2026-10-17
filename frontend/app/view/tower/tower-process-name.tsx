@@ -3,8 +3,10 @@
 
 import type { TowerProcess } from "@/app/store/rpc-api";
 import { type JSX, Show } from "solid-js";
+import { KindIcon } from "./tower-kind-ui";
 
-/** A process row's name. AgentMux's own processes say what they are ("GPU",
+/** A process row's name, after its kind's icon
+ *  (SPEC_TOWER_THEME_SURFACE_AND_COLOR_2026_10_17.md §3.3). AgentMux's own processes say what they are ("GPU",
  *  "Renderer · window Main"), since many run the same executable; the
  *  executable's name follows, muted. The process an agent's tool call runs
  *  says which call ("⟵ Run the srv tests"), as the agent described it
@@ -15,6 +17,7 @@ import { type JSX, Show } from "solid-js";
 export function ProcessName(props: { process: TowerProcess; children?: JSX.Element }): JSX.Element {
     return (
         <>
+            <KindIcon kind={props.process.kind} provider={props.process.provider} />
             <span class="tower-label">{props.process.detail || props.process.name || `PID ${props.process.pid}`}</span>
             <span class="tower-name-tail">
                 <Show when={props.process.detail}>

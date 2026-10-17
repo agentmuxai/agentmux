@@ -88,4 +88,7 @@
     --color-highlightbg: var(--highlight-bg-color);
     --color-border: var(--border-color);
     --color-modalbg: var(--modal-bg-color);
+
+    // Process kinds (theme.scss, measured by process-kind-colours.test.ts).
+    --process-kind-shells: var(--term-bright-green);
 }

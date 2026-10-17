@@ -1,0 +1,444 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+//! What kind of process each Tower row is (`TowerProcess::kind`;
+//! SPEC_TOWER_THEME_SURFACE_AND_COLOR_2026_10_17.md §3.2).
+//!
+//! The first rule that matches wins:
+//!
+//! 1. AgentMux's own: its task, a process it described, or an AgentMux name.
+//! 2. The main process of an agent pane: an agent, whatever its executable.
+//! 3. The main process of a terminal pane: a shell.
+//! 4. A generic runtime (`node`, `python`, …) inside a pane's task, by its
+//!    command line: a package manager or build tool, or an agent CLI's
+//!    package. Read here, never sent: only the kind leaves srv.
+//! 5. The name, in one table: every provider's CLI, then known names, then
+//!    known prefixes.
+//! 6. Anything else is an app.
+//!
+//! Another machine's rows carry names only, so they get rules 1 (by name)
+//! and 5 ([`fill_missing`]).
+
+use std::collections::{HashMap, HashSet};
+use std::sync::LazyLock;
+
+use crate::backend::rpc_types::{TowerProcessKind as K, TowerProcessRole, TowerSnapshot, TowerTaskKind};
+
+/// A name as the table knows it: lower case, without `.exe`, without a
+/// version after a dash (`agentmux-srv-0.59.30-windows.x64` → `agentmux-srv`)
+/// or glued on (`python3.12` → `python`, `idea64` → `idea`).
+pub fn normalize(name: &str) -> String {
+    let mut n = name.trim().to_lowercase();
+    if let Some(stripped) = n.strip_suffix(".exe") {
+        n = stripped.to_string();
+    }
+    let parts: Vec<&str> = n.split('-').collect();
+    if let Some(at) = parts.iter().position(|p| p.starts_with(|c: char| c.is_ascii_digit())) {
+        if at > 0 {
+            n = parts[..at].join("-");
+        }
+    }
+    let trimmed = n.trim_end_matches(|c: char| c.is_ascii_digit() || c == '.');
+    if trimmed.len() >= 2 && trimmed.len() < n.len() && trimmed.ends_with(|c: char| c.is_ascii_alphabetic()) {
+        n = trimmed.to_string();
+    }
+    n
+}
+
+/// Names, after [`normalize`].
+const NAMES: &[(K, &[&str])] = &[
+    (
+        K::Agents,
+        &[
+            "ollama", "ollama app", "ollama_llama_server", "llama-server", "llama-cli", "lmstudio", "lm studio",
+            "lms", "koboldcpp", "jan", "gpt4all", "cursor-agent", "amp", "chatgpt",
+        ],
+    ),
+    (
+        K::Shells,
+        &[
+            // Shells and terminal hosts.
+            "bash", "sh", "zsh", "fish", "nu", "dash", "ksh", "tcsh", "csh", "elvish", "xonsh", "pwsh",
+            "powershell", "cmd", "conhost", "openconsole", "windowsterminal", "wt", "tmux", "screen", "login",
+            "wezterm", "wezterm-gui", "alacritty", "kitty", "iterm2", "terminal", "gnome-terminal-server",
+            "konsole", "xterm", "ghostty", "warp",
+            // Remote sessions.
+            "ssh", "sshd", "mosh-client", "mosh-server", "sftp", "scp", "telnet",
+            // Commands run in them.
+            "grep", "rg", "ag", "sed", "awk", "gawk", "find", "fd", "xargs", "head", "tail", "cat", "less",
+            "more", "sort", "uniq", "wc", "cut", "tr", "tee", "jq", "yq", "fold", "ls", "cp", "mv", "rm",
+            "mkdir", "touch", "chmod", "sleep", "watch", "timeout", "env", "curl", "wget", "http", "nc", "ping",
+            "tar", "zip", "unzip", "7z", "gzip", "xz", "du", "df", "ps", "top", "htop", "btop", "kill", "which",
+            "where", "findstr", "clip", "tasklist", "taskkill", "netstat", "ipconfig", "whoami", "hostname",
+            "date", "diff", "patch", "rsync", "fzf", "bat", "eza", "tree",
+        ],
+    ),
+    (
+        K::Builds,
+        &[
+            // Compilers, linkers, build systems.
+            "cargo", "rustc", "rustup", "rustfmt", "clippy-driver", "cargo-clippy", "cargo-nextest", "rustdoc",
+            "cc", "c++", "cl", "link", "lib", "ml", "rc", "mt", "lld", "lld-link", "ld", "ld.lld", "gold", "ar",
+            "ranlib", "nm", "strip", "objcopy", "clang", "clang++", "clang-cl", "gcc", "g++", "cc1", "cc1plus",
+            "as", "collect2", "make", "mingw32-make", "gmake", "cmake", "ninja", "meson", "bazel", "bazelisk",
+            "buck2", "msbuild", "vbcscompiler", "csc", "tsc", "esbuild", "swc", "go", "compile", "asm", "gradle",
+            "mvn", "ant", "javac", "kotlinc", "scalac", "sbt", "zig", "nim", "ghc", "dune", "swiftc",
+            "swift-frontend", "xcodebuild", "xcrun", "protoc", "flatc", "wasm-pack", "wasm-opt", "wasm-bindgen",
+            "trunk", "task", "just",
+            // Package managers.
+            "npm", "npx", "pnpm", "yarn", "pip", "uv", "uvx", "poetry", "pipx", "conda", "mamba", "gem", "bundle",
+            "bundler", "composer", "brew", "apt", "apt-get", "dpkg", "dnf", "yum", "pacman", "winget", "choco",
+            "scoop", "nuget", "vcpkg",
+            // Version control.
+            "git", "git-remote-https", "git-lfs", "git-credential-manager", "gh", "gh-agent", "glab", "hg", "svn",
+            "jj",
+            // Test runners with their own executable.
+            "pytest", "cargo-test",
+        ],
+    ),
+    (
+        K::Runtimes,
+        &[
+            "node", "nodejs", "deno", "bun", "python", "pythonw", "py", "ruby", "rubyw", "java", "javaw", "dotnet",
+            "php", "php-cgi", "perl", "lua", "luajit", "r", "rscript", "julia", "erl", "beam.smp", "elixir", "iex",
+            "mono", "wasmtime", "wasmer",
+            // Language servers.
+            "rust-analyzer", "gopls", "clangd", "pylsp", "omnisharp", "sourcekit-lsp", "lua-language-server",
+            "zls", "marksman", "taplo", "eslint_d",
+            // Databases and local servers.
+            "postgres", "postmaster", "mysqld", "mariadbd", "mongod", "mongos", "redis-server", "valkey-server",
+            "sqlservr", "memcached", "etcd", "clickhouse", "influxd", "nginx", "httpd", "apache2", "caddy",
+            "traefik", "envoy", "haproxy", "php-fpm", "iisexpress", "w3wp",
+        ],
+    ),
+    (
+        K::Browsers,
+        &[
+            "chrome", "msedge", "firefox", "brave", "opera", "vivaldi", "safari", "chromium", "chromium-browser",
+            "msedgewebview", "iexplore", "arc", "plugin-container", "chrome-native-host", "safariviewservice",
+        ],
+    ),
+    (
+        K::Containers,
+        &[
+            "docker", "dockerd", "docker desktop", "docker-desktop", "containerd", "runc", "podman",
+            "podman-machine", "buildkitd", "minikube", "colima", "limactl", "vboxheadless", "vboxsvc",
+            "vboxnetdhcp", "vmmem", "vmmemwsl", "vmwp", "vmcompute", "vmms", "wsl", "wslhost", "wslrelay",
+            "wslservice", "hyperkit", "vpnkit", "utm", "virtualbox", "vmnat", "vmnetdhcp",
+        ],
+    ),
+    (
+        K::Editors,
+        &[
+            "code", "code - insiders", "cursor", "windsurf", "zed", "sublime_text", "subl", "atom", "notepad++",
+            "notepad", "idea", "pycharm", "webstorm", "rider", "goland", "clion", "rustrover", "datagrip",
+            "phpstorm", "studio", "devenv", "xcode", "nvim", "vim", "gvim", "emacs", "nano", "hx", "helix", "kak",
+            "micro", "fleet",
+        ],
+    ),
+    (
+        K::System,
+        &[
+            // Windows.
+            "system", "registry", "idle", "secure system", "memory compression", "smss", "csrss", "wininit",
+            "winlogon", "services", "lsass", "lsaiso", "svchost", "dwm", "explorer", "runtimebroker", "dllhost",
+            "taskhostw", "sihost", "fontdrvhost", "ctfmon", "searchhost", "searchindexer", "searchprotocolhost",
+            "searchfilterhost", "wmiprvse", "spoolsv", "audiodg", "textinputhost", "startmenuexperiencehost",
+            "shellexperiencehost", "shellhost", "applicationframehost", "backgroundtaskhost", "unsecapp", "wudfhost",
+            "dashost", "aggregatorhost", "smartscreen", "securityhealthservice", "securityhealthsystray",
+            "securityhealthhost", "sechealthui", "msmpeng", "mpdefendercoreservice", "nissrv", "sgrmbroker",
+            "sysmon", "lsm", "ngciso", "widgetservice", "widgetboard", "phoneexperiencehost", "lockapp",
+            "useroobebroker", "crossdeviceresume", "tabtip", "mousocoreworker", "trustedinstaller", "tiworker",
+            "compattelrunner", "msiexec", "werfault", "ipoverusbsvc", "defendersessionhelper",
+            "midisrv", "monotificationux", "apphostregistrationverifier",
+            // macOS.
+            "kernel_task", "launchd", "windowserver", "mds", "mds_stores", "mdworker", "mdworker_shared",
+            "coreaudiod", "loginwindow", "distnoted", "cfprefsd", "trustd", "syspolicyd", "opendirectoryd",
+            "configd", "powerd", "logd", "notifyd", "coreservicesd", "bluetoothd", "airportd", "controlcenter",
+            "systemuiserver", "usereventagent", "secd", "nsurlsessiond", "sharingd", "rapportd", "finder", "dock",
+            "spotlight", "corespotlightd",
+            // Linux.
+            "init", "kthreadd", "kswapd", "dbus-daemon", "dbus-broker", "xorg", "xwayland", "gnome-shell",
+            "plasmashell", "kwin_x11", "kwin_wayland", "pipewire", "wireplumber", "pulseaudio", "networkmanager",
+            "polkitd", "udisksd", "upowerd", "cron", "crond", "rsyslogd", "snapd", "agetty", "kauditd",
+            "khugepaged", "oom_reaper", "gdm", "sddm", "lightdm",
+        ],
+    ),
+];
+
+/// Prefixes, after [`normalize`]; the longest that matches wins.
+const PREFIXES: &[(K, &[&str])] = &[
+    (K::Agentmux, &["agentmux"]),
+    (K::Browsers, &["google chrome", "microsoft edge", "firefox", "brave browser", "com.apple.webkit.", "msedgewebview"]),
+    (K::Containers, &["com.docker.", "containerd-shim", "qemu-", "qemu-system", "vmware", "virtualbox", "vbox", "lima", "com.apple.virtualization."]),
+    (K::Editors, &["code helper", "cursor helper", "jetbrains"]),
+    (
+        K::System,
+        &[
+            "systemd", "kworker/", "ksoftirqd/", "migration/", "rcu_", "irq/", "jbd2/", "watchdog/", "com.apple.",
+            "nvcontainer", "nvdisplay.container", "nvidia", "amd3dvcache", "amdrs", "amdppkg", "amdfend", "amdow",
+            "amdappcompat", "atiesrxx", "atieclxx", "radeonsoftware", "rtk", "realtek", "igfx", "intelcp", "logi_",
+            "logioptionsplus", "lghub", "razer", "asus", "dtsapo", "nahimic", "securityhealth", "mpdefender",
+            "searchapp", "microsoft.photos", "microsoftstartfeedprovider",
+        ],
+    ),
+];
+
+static BY_NAME: LazyLock<HashMap<&'static str, K>> = LazyLock::new(|| {
+    let mut m = HashMap::new();
+    for (kind, names) in NAMES {
+        for n in *names {
+            m.insert(*n, *kind);
+        }
+    }
+    m
+});
+
+/// Every provider's CLI, from the registry (`providers::all_providers`), so a
+/// new provider is an agent here with no edit.
+static AGENT_CLIS: LazyLock<HashSet<String>> =
+    LazyLock::new(|| crate::backend::providers::all_providers().map(|p| normalize(p.cli_command)).collect());
+
+/// Every provider's npm packages: what a `node` running an agent CLI has in
+/// its command line.
+static AGENT_PACKAGES: LazyLock<Vec<String>> = LazyLock::new(|| {
+    let mut out = Vec::new();
+    for p in crate::backend::providers::all_providers() {
+        if !p.npm_package.is_empty() {
+            out.push(p.npm_package.to_ascii_lowercase());
+        }
+        for (pkg, _) in p.companion_npm_packages() {
+            out.push(pkg.to_ascii_lowercase());
+        }
+    }
+    out
+});
+
+/// What `name` alone says (rules 1 by name, and 5).
+pub fn by_name(name: &str) -> K {
+    let n = normalize(name);
+    if AGENT_CLIS.contains(&n) {
+        return K::Agents;
+    }
+    if let Some(&kind) = BY_NAME.get(n.as_str()) {
+        return kind;
+    }
+    PREFIXES
+        .iter()
+        .flat_map(|(kind, prefixes)| prefixes.iter().map(move |p| (*kind, *p)))
+        .filter(|(_, p)| n.starts_with(p))
+        .max_by_key(|(_, p)| p.len())
+        .map(|(kind, _)| kind)
+        .unwrap_or(K::Apps)
+}
+
+/// A runtime whose command line says more than its name (rule 4).
+pub fn is_generic_runtime(name: &str) -> bool {
+    matches!(
+        normalize(name).as_str(),
+        "node" | "nodejs" | "python" | "pythonw" | "py" | "java" | "javaw" | "dotnet" | "deno" | "bun" | "ruby" | "php"
+    )
+}
+
+/// Parts of a command line that make a runtime a build or package tool.
+const BUILD_MARKERS: &[&str] = &[
+    "/npm-cli.js", "/npx-cli.js", "/pnpm", "/yarn", "/vite/", "/webpack", "/typescript/bin/tsc", "/typescript/lib/tsc.js",
+    "/jest", "/vitest", "/mocha", "/esbuild", "/rollup", "/turbo", "/playwright", "/eslint", "/prettier", "/@biomejs",
+    "/nx/", "/pytest", "-m pytest", "-m pip", "/pip/", "setup.py", "-m build", "maturin", "gradle", "plexus-classworlds",
+    "/maven", "msbuild.dll", "vbcscompiler",
+];
+
+/// What a generic runtime's command line says (rule 4): `None` keeps it a
+/// runtime. Pure: the caller reads the command line.
+pub fn by_command_line(command_line: &str) -> Option<K> {
+    let c = command_line.to_ascii_lowercase().replace('\\', "/");
+    if AGENT_PACKAGES.iter().any(|p| c.contains(&format!("node_modules/{p}/"))) {
+        return Some(K::Agents);
+    }
+    if BUILD_MARKERS.iter().any(|m| c.contains(m)) {
+        return Some(K::Builds);
+    }
+    // `dotnet build`, `dotnet test`, …: the verb is the word after the program.
+    let mut words = c.split_whitespace();
+    let program = words.next().unwrap_or("").trim_matches('"');
+    if program.ends_with("dotnet") || program.ends_with("dotnet.exe") {
+        if let Some(verb) = words.next() {
+            if matches!(verb, "build" | "test" | "restore" | "publish" | "pack" | "msbuild") {
+                return Some(K::Builds);
+            }
+        }
+    }
+    None
+}
+
+/// Where a process sits, for rules 1–3.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Context {
+    /// Its part in a pane's task, and that task's kind.
+    pub task: Option<(TowerProcessRole, TowerTaskKind)>,
+    /// One of AgentMux's own, by its grouping or a description.
+    pub agentmux: bool,
+}
+
+/// The kind, from where the process sits (rules 1–3), else `named`: what its
+/// name, or its command line, said ([`by_name`], [`by_command_line`]).
+pub fn classify(ctx: Context, named: K) -> K {
+    if ctx.agentmux || named == K::Agentmux {
+        return K::Agentmux;
+    }
+    match ctx.task {
+        Some((_, TowerTaskKind::Agentmux)) => K::Agentmux,
+        Some((TowerProcessRole::Main, TowerTaskKind::Agent)) => K::Agents,
+        Some((TowerProcessRole::Main, TowerTaskKind::Terminal)) => K::Shells,
+        _ => named,
+    }
+}
+
+/// Fill the kind of every row that has none, by its name: another machine's
+/// frame, or a paired computer's AgentMux that predates kinds.
+pub fn fill_missing(snap: &mut TowerSnapshot) {
+    let fill = |p: &mut crate::backend::rpc_types::TowerProcess| {
+        if p.kind.is_none() {
+            p.kind = Some(by_name(&p.name));
+        }
+    };
+    for t in &mut snap.tasks {
+        t.processes.iter_mut().for_each(fill);
+        t.exited.iter_mut().flatten().for_each(fill);
+    }
+    if let Some(host) = snap.host.as_mut() {
+        host.processes.iter_mut().for_each(fill);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn names_are_normalized_before_lookup() {
+        assert_eq!(normalize("agentmux-srv-0.59.30-windows.x64.exe"), "agentmux-srv");
+        assert_eq!(normalize("agentmux-0.59.28.exe"), "agentmux");
+        assert_eq!(normalize("python3.12"), "python");
+        assert_eq!(normalize("idea64.exe"), "idea");
+        assert_eq!(normalize("MsEdgeWebView2.exe"), "msedgewebview");
+        assert_eq!(normalize("x86_64-w64-mingw32-gcc"), "x86_64-w64-mingw32-gcc");
+        assert_eq!(normalize("7z.exe"), "7z");
+        assert_eq!(normalize("Google Chrome Helper (Renderer)"), "google chrome helper (renderer)");
+    }
+
+    #[test]
+    fn names_from_each_os_get_their_kind() {
+        let cases = [
+            ("svchost.exe", K::System),
+            ("csrss.exe", K::System),
+            ("kernel_task", K::System),
+            ("WindowServer", K::System),
+            ("kworker/0:1H-events", K::System),
+            ("systemd-journald", K::System),
+            ("nvcontainer.exe", K::System),
+            ("conhost.exe", K::Shells),
+            ("bash", K::Shells),
+            ("pwsh.exe", K::Shells),
+            ("grep", K::Shells),
+            ("cargo.exe", K::Builds),
+            ("rustc", K::Builds),
+            ("git.exe", K::Builds),
+            ("gh-agent", K::Builds),
+            ("node.exe", K::Runtimes),
+            ("python3.11", K::Runtimes),
+            ("rust-analyzer", K::Runtimes),
+            ("postgres", K::Runtimes),
+            ("chrome.exe", K::Browsers),
+            ("msedgewebview2.exe", K::Browsers),
+            ("Google Chrome Helper (Renderer)", K::Browsers),
+            ("com.apple.WebKit.WebContent", K::Browsers),
+            ("vmmemWSL", K::Containers),
+            ("com.docker.backend.exe", K::Containers),
+            ("Docker Desktop.exe", K::Containers),
+            ("qemu-system-x86_64", K::Containers),
+            ("Code.exe", K::Editors),
+            ("Code Helper (Renderer)", K::Editors),
+            ("idea64.exe", K::Editors),
+            ("ollama.exe", K::Agents),
+            ("agentmux-cef.exe", K::Agentmux),
+            ("agentmux-srv-0.59.30-windows.x64.exe", K::Agentmux),
+            ("Discord.exe", K::Apps),
+            ("KeePass.exe", K::Apps),
+            ("CodeMeter.exe", K::Apps),
+            ("", K::Apps),
+        ];
+        for (name, want) in cases {
+            assert_eq!(by_name(name), want, "{name}");
+        }
+    }
+
+    #[test]
+    fn every_provider_cli_is_an_agent() {
+        for p in crate::backend::providers::all_providers() {
+            assert_eq!(by_name(p.cli_command), K::Agents, "{}", p.cli_command);
+            assert_eq!(by_name(&format!("{}.exe", p.cli_command)), K::Agents, "{}", p.cli_command);
+        }
+    }
+
+    #[test]
+    fn a_runtime_command_line_says_build_or_agent() {
+        let npm = r#""C:\Program Files\nodejs\node.exe" "C:\Program Files\nodejs\node_modules\npm\bin\npm-cli.js" install"#;
+        assert_eq!(by_command_line(npm), Some(K::Builds));
+        assert_eq!(by_command_line("node /repo/node_modules/vite/bin/vite.js --port 5173"), Some(K::Builds));
+        assert_eq!(by_command_line("python -m pytest tests/"), Some(K::Builds));
+        assert_eq!(by_command_line(r#""C:\dotnet\dotnet.exe" build app.sln"#), Some(K::Builds));
+        let gemini = r"C:\Users\x\AppData\Roaming\npm\node_modules\@google\gemini-cli\dist\index.js";
+        assert_eq!(by_command_line(&format!("node {gemini}")), Some(K::Agents));
+        let claude = "/usr/lib/node_modules/@anthropic-ai/claude-code/cli.js";
+        assert_eq!(by_command_line(&format!("node {claude} --print")), Some(K::Agents));
+        // A server or a language server stays a runtime.
+        assert_eq!(by_command_line("node server.js"), None);
+        assert_eq!(by_command_line("node /x/node_modules/typescript/lib/tsserver.js"), None);
+        assert_eq!(by_command_line("python manage.py runserver"), None);
+        assert!(is_generic_runtime("node.exe") && is_generic_runtime("python3.12") && !is_generic_runtime("cargo"));
+    }
+
+    #[test]
+    fn where_a_process_sits_comes_before_its_name() {
+        let main_of = |kind| Context { task: Some((TowerProcessRole::Main, kind)), agentmux: false };
+        // An agent CLI run by a generic `node`: still the agent pane's agent.
+        assert_eq!(classify(main_of(TowerTaskKind::Agent), K::Runtimes), K::Agents);
+        assert_eq!(classify(main_of(TowerTaskKind::Terminal), K::Apps), K::Shells);
+        assert_eq!(classify(main_of(TowerTaskKind::Agentmux), K::Apps), K::Agentmux);
+        let started = Context { task: Some((TowerProcessRole::Started, TowerTaskKind::Agent)), agentmux: false };
+        assert_eq!(classify(started, K::Builds), K::Builds, "what an agent runs keeps its own kind");
+        assert_eq!(classify(Context { task: None, agentmux: true }, K::Browsers), K::Agentmux, "a renderer is AgentMux's");
+        assert_eq!(classify(Context::default(), K::Agentmux), K::Agentmux);
+    }
+
+    #[test]
+    fn a_frame_without_kinds_is_filled_by_name() {
+        use crate::backend::rpc_types::{TowerHost, TowerProcess};
+        let mut snap = TowerSnapshot {
+            ts_ms: 0,
+            hostname: "h".into(),
+            os: "linux".into(),
+            cpu_count: 1,
+            memory_metric: String::new(),
+            interval_ms: 2000,
+            remote: true,
+            tasks: Vec::new(),
+            machine: None,
+            host: Some(TowerHost {
+                processes: vec![
+                    TowerProcess { name: "cargo".into(), ..Default::default() },
+                    TowerProcess { name: "node".into(), kind: Some(K::Builds), ..Default::default() },
+                ],
+                unmeasured: 0,
+                cpu: None,
+                mem: 0,
+                total: 2,
+                matched: 2,
+            }),
+        };
+        fill_missing(&mut snap);
+        let kinds: Vec<_> = snap.host.unwrap().processes.into_iter().map(|p| p.kind).collect();
+        assert_eq!(kinds, vec![Some(K::Builds), Some(K::Builds)], "a kind already set is kept");
+    }
+}
