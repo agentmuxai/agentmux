@@ -160,12 +160,12 @@ export async function quickForkAgent(model: QuickForkModel): Promise<boolean> {
     // resolves the tab from THIS pane's own block server-side.)
     const ownerTabId = atoms.activeTabId();
 
-    // Hide this pane while the fork settles — the whole RPC chain below
-    // (fork, identity lookup, pane.open, launch) precedes the same
-    // pushBlockOntoStack-forced remount `openOrFocusHistoryTab` is also
-    // gated against.
-    // SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md.
-    const revealGen = holdLeafRevealGate(node.id);
+    // The pane is hidden only around the stack push below, the remount
+    // `openOrFocusHistoryTab` is also gated against
+    // (SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md). Held from the
+    // first RPC, it showed a black pane for the whole fork, account lookup
+    // and history copy; until the push, the source pane stays as it is.
+    let revealGen: number | null = null;
 
     // Declared outside the try so the catch block below can tell whether a
     // block was actually pushed onto the stack before the failure — only
@@ -234,8 +234,18 @@ export async function quickForkAgent(model: QuickForkModel): Promise<boolean> {
             await copyForkHistory(forkedDef.id, definitionId, sessionId, provider?.id ?? canonicalForkProvider);
 
             // Create the new block as a tab of THIS pane. Null means the pane
-            // closed while the RPCs above were in flight.
-            newBlockId = await openBlockInStack(layoutModel, { blockId: model.blockId }, "agent", { view: "agent" });
+            // closed while the RPCs above were in flight. Created already
+            // naming its agent, so it opens on the conversation (the copied
+            // history) rather than on the picker while the launch below
+            // writes the rest of its meta.
+            revealGen = holdLeafRevealGate(node.id);
+            newBlockId = await openBlockInStack(layoutModel, { blockId: model.blockId }, "agent", {
+                view: "agent",
+                agentId: forkedDef.id,
+                agentName: forkedDef.name,
+                agentProvider: effectiveProvider,
+                ...(forkedDef.icon ? { agentIcon: forkedDef.icon } : {}),
+            });
             if (!newBlockId) return false;
 
             const launched = await model.launchAgentDefinition(
@@ -301,7 +311,8 @@ export async function quickForkAgent(model: QuickForkModel): Promise<boolean> {
             return false;
         }
     } finally {
-        // Pair with holdLeafRevealGate above — runs on every exit path.
-        scheduleLeafRevealLift(node.id, revealGen);
+        // Pair with holdLeafRevealGate above — runs on every exit path that
+        // reached it.
+        if (revealGen !== null) scheduleLeafRevealLift(node.id, revealGen);
     }
 }
