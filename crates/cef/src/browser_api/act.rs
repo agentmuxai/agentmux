@@ -193,7 +193,17 @@ const COMMIT_INFO: &str = r#"function () {
     const ty = (el.type || "").toLowerCase();
     const ac = (el.getAttribute("autocomplete") || "").toLowerCase();
     const nm = ((el.name || "") + " " + (el.id || "")).toLowerCase();
-    return ty === "password" || /one-time-code|cc-|password/.test(ac) || /pass(word|code)?|otp|one.?time|cvc|cvv|card.?num|security.?code/.test(nm);
+    // A person's tax identification number, by markup or by what is read
+    // next to the field: the same words as snapshot.rs's `names_a_tax_id`,
+    // read from <label>s and aria-labelledby where that code uses the
+    // accessibility tree's name.
+    const byIds = (el.getAttribute("aria-labelledby") || "").split(/\s+/).map(i => { const t = i && el.ownerDocument.getElementById(i); return t ? t.textContent : ""; }).join(" ");
+    const words = ((el.name || "") + " " + (el.id || "") + " " + (el.getAttribute("aria-label") || "") + " " + (el.getAttribute("placeholder") || "") + " " + byIds + " " +
+      (el.labels ? Array.from(el.labels).map(l => l.textContent).join(" ") : ""))
+      .replace(/([a-z])([A-Z])/g, "$1 $2").replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2").replace(/(?<=[a-zA-Z])(?=[0-9])|(?<=[0-9])(?=[a-zA-Z])/g, " ")
+      .toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+    const taxId = words.some(w => w === "ssn" || w === "itin" || w === "tin") || /socialsecurity|taxpayerid/.test(words.join(""));
+    return taxId || ty === "password" || /one-time-code|cc-|password/.test(ac) || /pass(word|code)?|otp|one.?time|cvc|cvv|card.?num|security.?code/.test(nm);
   };
   // A form's own properties can be shadowed by controls named after them
   // (<input name="action">, <input name="elements">): read them through the
@@ -300,7 +310,9 @@ const FOCUSED_FACTS: &str = r#"(() => {
   if (!el) return null;
   const attrs = [];
   for (const a of el.attributes) { attrs.push(a.name, a.value); }
-  return { localName: el.localName, attributes: attrs };
+  const byIds = (el.getAttribute("aria-labelledby") || "").split(/\s+/).map(i => { const t = i && el.ownerDocument.getElementById(i); return t ? t.textContent : ""; }).join(" ");
+  const label = (el.labels ? Array.from(el.labels).map(l => l.textContent).join(" ") : "") + " " + byIds;
+  return { localName: el.localName, attributes: attrs, label: label.replace(/\s+/g, " ").trim() };
 })()"#;
 
 // ── CDP steps ───────────────────────────────────────────────────────────────
@@ -367,9 +379,27 @@ async fn call_on(cdp: &mut CdpSession, object_id: &str, func: &str, args: Vec<Va
     Ok(out)
 }
 
-async fn describe(cdp: &mut CdpSession, backend: i64) -> Option<DomFacts> {
+/// The element's markup facts, without its accessible name: for a caller that
+/// already has the name (the snapshot reads it from the accessibility tree it
+/// just fetched) or doesn't need it (is the element still there).
+async fn describe_markup(cdp: &mut CdpSession, backend: i64) -> Option<DomFacts> {
     let v = cdp.call("DOM.describeNode", json!({ "backendNodeId": backend })).await.ok()?;
     v.get("node").map(DomFacts::from_described)
+}
+
+/// The element's facts including its accessible name, for acting on one
+/// element: one more round trip than `describe_markup`.
+async fn describe(cdp: &mut CdpSession, backend: i64) -> Option<DomFacts> {
+    let facts = describe_markup(cdp, backend).await?;
+    // The accessible name is what a person reads next to the field ("Taxpayer's
+    // TIN"), which the markup may not repeat. A failed lookup leaves it empty.
+    let label = cdp
+        .call("Accessibility.getPartialAXTree", json!({ "backendNodeId": backend, "fetchRelatives": false }))
+        .await
+        .ok()
+        .and_then(|t| t.pointer("/nodes/0/name/value").and_then(|n| n.as_str()).map(str::to_string))
+        .unwrap_or_default();
+    Some(facts.with_label(&label))
 }
 
 async fn page_url(cdp: &mut CdpSession) -> String {
@@ -423,7 +453,7 @@ pub async fn refuse_typing_into_secret_field(cdp: &mut CdpSession) -> Result<(),
     Ok(())
 }
 
-const SECRET_REFUSAL: &str = "this is a password, one-time-code or card field: AgentMux never lets an agent type into one. \
+const SECRET_REFUSAL: &str = "this is a password, one-time-code, card or Social Security / taxpayer ID field: AgentMux never lets an agent type into one. \
      Ask the user to fill it in the pane themselves, then take a new snapshot.";
 
 // ── Routes ──────────────────────────────────────────────────────────────────
@@ -499,8 +529,9 @@ pub async fn snapshot_route(
             break;
         }
         if let Some(b) = n.get("backendDOMNodeId").and_then(|v| v.as_i64()) {
-            if let Some(f) = describe(&mut cdp, b).await {
-                facts.insert(b, f);
+            if let Some(f) = describe_markup(&mut cdp, b).await {
+                let name = n.pointer("/name/value").and_then(|v| v.as_str()).unwrap_or("");
+                facts.insert(b, f.with_label(name));
             }
         }
     }
@@ -715,7 +746,7 @@ mod tests {
     use super::*;
 
     fn facts(tag: &str, attrs: &[(&str, &str)]) -> DomFacts {
-        DomFacts { local_name: tag.into(), attrs: attrs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect() }
+        DomFacts { local_name: tag.into(), attrs: attrs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(), label: String::new() }
     }
 
     /// POST `body` to a local server with the set_files body limit and
@@ -966,7 +997,7 @@ pub async fn wait_for_route(
         } else if let Some(u) = &req.url_contains {
             url.contains(u.as_str())
         } else if let Some(b) = gone_backend {
-            describe(&mut cdp, b).await.is_none()
+            describe_markup(&mut cdp, b).await.is_none()
         } else {
             false
         };

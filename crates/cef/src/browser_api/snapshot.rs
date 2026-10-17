@@ -43,6 +43,9 @@ const TEXT_SHOWN_ELSEWHERE: &[&str] = &[
 pub struct DomFacts {
     pub local_name: String,
     pub attrs: HashMap<String, String>,
+    /// What a person reads as the field's name: its label's text, or its
+    /// accessible name. Empty when unknown.
+    pub label: String,
 }
 
 impl DomFacts {
@@ -59,7 +62,15 @@ impl DomFacts {
                 }
             }
         }
-        Self { local_name, attrs }
+        // Only the focused-field script reports a label in the node it returns.
+        let label = node.get("label").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        Self { local_name, attrs, label }
+    }
+
+    /// The same facts with the field's accessible name filled in.
+    pub fn with_label(mut self, label: &str) -> Self {
+        self.label = label.to_string();
+        self
     }
 
     fn attr(&self, name: &str) -> &str {
@@ -71,8 +82,53 @@ impl DomFacts {
     }
 }
 
-/// A field the agent must never type into or read: passwords, one-time codes
-/// and card details (spec §5.1). A guard against mistakes and page tricks,
+/// Split a field name or label into lower-case words at spaces, punctuation,
+/// camelCase and letter/digit boundaries: `taxpayerTIN` → `taxpayer`, `tin`;
+/// `SSNInput` → `ssn`, `input`; `last4ssn` → `last`, `4`, `ssn`.
+fn words_of(text: &str) -> Vec<String> {
+    let chars: Vec<char> = text.chars().collect();
+    let mut words = Vec::new();
+    let mut cur = String::new();
+    for (i, &c) in chars.iter().enumerate() {
+        if !c.is_alphanumeric() {
+            if !cur.is_empty() {
+                words.push(std::mem::take(&mut cur).to_lowercase());
+            }
+            continue;
+        }
+        if let Some(prev) = cur.chars().last() {
+            let next_is_lower = chars.get(i + 1).is_some_and(|n| n.is_lowercase());
+            let boundary = (prev.is_lowercase() && c.is_uppercase())
+                || (prev.is_uppercase() && c.is_uppercase() && next_is_lower)
+                || (prev.is_alphabetic() != c.is_alphabetic());
+            if boundary {
+                words.push(std::mem::take(&mut cur).to_lowercase());
+            }
+        }
+        cur.push(c);
+    }
+    if !cur.is_empty() {
+        words.push(cur.to_lowercase());
+    }
+    words
+}
+
+/// Does any of these names a person's taxpayer identification number: an SSN,
+/// ITIN or TIN? A guard for mistakes and page tricks, so a false alarm (a
+/// field about tin cans) only means the user fills it. A company's EIN isn't
+/// one: it is printed on public filings.
+fn names_a_tax_id(texts: &[&str]) -> bool {
+    texts.iter().any(|t| {
+        let words = words_of(t);
+        let squashed: String = words.concat();
+        words.iter().any(|w| w == "ssn" || w == "itin" || w == "tin")
+            || squashed.contains("socialsecurity")
+            || squashed.contains("taxpayerid")
+    })
+}
+
+/// A field the agent must never type into or read: passwords, one-time codes,
+/// card details and taxpayer identification numbers (spec §5.1). A guard against mistakes and page tricks,
 /// not a sandbox.
 pub fn is_secret(f: &DomFacts) -> bool {
     if f.local_name == "input" && f.attr("type").eq_ignore_ascii_case("password") {
@@ -82,6 +138,11 @@ pub fn is_secret(f: &DomFacts) -> bool {
     if autocomplete.split_whitespace().any(|t| {
         t == "current-password" || t == "new-password" || t == "one-time-code" || t.starts_with("cc-")
     }) {
+        return true;
+    }
+    // A person's tax identification number: named by the markup or by what a
+    // person reads next to the field.
+    if names_a_tax_id(&[f.attr("name"), f.attr("id"), f.attr("aria-label"), f.attr("placeholder"), &f.label]) {
         return true;
     }
     // Named like one: password, passcode, otp, one-time code, cvc/cvv, card number.
@@ -356,6 +417,7 @@ mod tests {
                     DomFacts {
                         local_name: tag.to_string(),
                         attrs: attrs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
+                        label: String::new(),
                     },
                 )
             })
@@ -364,7 +426,7 @@ mod tests {
 
     /// Facts for every backend id given, as plain text inputs.
     fn plain(ids: &[i64]) -> HashMap<i64, DomFacts> {
-        ids.iter().map(|b| (*b, DomFacts { local_name: "input".into(), attrs: HashMap::new() })).collect()
+        ids.iter().map(|b| (*b, DomFacts { local_name: "input".into(), attrs: HashMap::new(), label: String::new() })).collect()
     }
 
     #[test]
@@ -507,6 +569,7 @@ mod tests {
         let f = |tag: &str, attrs: &[(&str, &str)]| DomFacts {
             local_name: tag.into(),
             attrs: attrs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
+            label: String::new(),
         };
         assert!(is_secret(&f("input", &[("type", "password")])));
         assert!(is_secret(&f("input", &[("autocomplete", "one-time-code")])));
@@ -521,6 +584,64 @@ mod tests {
         assert!(!is_secret(&f("input", &[("type", "email"), ("name", "email")])));
         assert!(!is_secret(&f("input", &[("name", "detection_name"), ("autocomplete", "off")])));
         assert!(!is_secret(&f("textarea", &[("name", "comments")])));
+    }
+
+    #[test]
+    fn taxpayer_identification_numbers_are_secret_fields() {
+        let f = |attrs: &[(&str, &str)], label: &str| DomFacts {
+            local_name: "input".into(),
+            attrs: attrs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
+            label: label.into(),
+        };
+        // By what a person reads next to the field, by markup, in any casing.
+        assert!(is_secret(&f(&[("type", "text")], "Taxpayer's TIN")));
+        assert!(is_secret(&f(&[], "Social Security Number (SSN)")));
+        assert!(is_secret(&f(&[], "Taxpayer identification number")));
+        assert!(is_secret(&f(&[("name", "taxpayerTIN")], "")));
+        assert!(is_secret(&f(&[("id", "payer_tin")], "")));
+        assert!(is_secret(&f(&[("name", "SSNInput")], "")));
+        assert!(is_secret(&f(&[("name", "last4ssn")], "")));
+        assert!(is_secret(&f(&[("name", "ssn-1")], "")));
+        assert!(is_secret(&f(&[("aria-label", "ITIN")], "")));
+        assert!(is_secret(&f(&[("placeholder", "Enter your SSN")], "")));
+        assert!(is_secret(&f(&[("name", "socialSecurityNumber")], "")));
+        assert!(is_secret(&f(&[("name", "taxpayer-id")], "")));
+        // Words that merely contain the letters, and a company's EIN, are not.
+        assert!(!is_secret(&f(&[("name", "setting")], "Settings")));
+        assert!(!is_secret(&f(&[("name", "routing")], "Routing preference")));
+        assert!(!is_secret(&f(&[("name", "destination")], "Destination")));
+        assert!(!is_secret(&f(&[("name", "ein")], "Employer identification number (EIN)")));
+        assert!(!is_secret(&f(&[("name", "street")], "Street address")));
+    }
+
+    #[test]
+    fn words_split_at_case_digit_and_punctuation_boundaries() {
+        assert_eq!(words_of("taxpayerTIN"), ["taxpayer", "tin"]);
+        assert_eq!(words_of("SSNInput"), ["ssn", "input"]);
+        assert_eq!(words_of("last4ssn"), ["last", "4", "ssn"]);
+        assert_eq!(words_of("Taxpayer's TIN"), ["taxpayer", "s", "tin"]);
+        assert_eq!(words_of("card[cvc]"), ["card", "cvc"]);
+        assert!(words_of("").is_empty());
+    }
+
+    #[test]
+    fn a_tax_id_field_is_marked_secret_in_the_snapshot_and_its_value_hidden() {
+        let nodes = vec![
+            n("root", None, "RootWebArea", "", Some(1), &["tin"]),
+            {
+                let mut v = n("tin", Some("root"), "textbox", "Taxpayer's TIN", Some(7), &[]);
+                v["value"] = json!({ "type": "string", "value": "123456789" });
+                v
+            },
+        ];
+        let mut facts = HashMap::new();
+        facts.insert(
+            7,
+            DomFacts { local_name: "input".into(), attrs: HashMap::new(), label: "Taxpayer's TIN".into() },
+        );
+        let s = render(&nodes, &facts, None, "");
+        assert!(s.text.contains("[secret: ask the user to fill this]"), "{}", s.text);
+        assert!(!s.text.contains("123456789"), "{}", s.text);
     }
 
     #[test]
