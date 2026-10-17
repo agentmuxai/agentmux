@@ -135,6 +135,40 @@ pub(crate) fn save_on_last_close(store: &Store, ws_id: &str) {
     }
 }
 
+/// At startup, before anything reads the windows: when the last run ended in
+/// a quit that saved every window (the record is a quit's), a window still
+/// listed is one whose close didn't reach srv before it stopped. The host
+/// closes windows concurrently and srv can exit first; seen in a simulated
+/// upgrade, where the second window's row survived and the main window then
+/// took it instead of restoring the session. The record holds that window, so
+/// forget its row and its workspace (with its tabs and panes): the first
+/// window then restores every window as designed. Returns how many it forgot.
+pub(crate) fn forget_windows_left_by_quit(store: &Store) -> usize {
+    let is_quits = super::session_restore::load_last_session_snapshot(store)
+        .is_some_and(|r| r.get("saved_for").and_then(|v| v.as_str()) == Some("quit"));
+    let Some(mut client) = store.get_all::<Client>().ok().and_then(|cs| cs.into_iter().next()) else {
+        return 0;
+    };
+    if !is_quits || client.windowids.is_empty() {
+        return 0;
+    }
+    let left = std::mem::take(&mut client.windowids);
+    for id in &left {
+        if let Some(w) = store.get::<Window>(id).ok().flatten() {
+            if store.get::<Workspace>(&w.workspaceid).ok().flatten().is_some() {
+                let _ = crate::backend::wcore::delete_workspace(store, &w.workspaceid);
+            }
+            let _ = store.delete::<Window>(id);
+        }
+    }
+    if let Err(e) = store.update(&mut client) {
+        tracing::warn!(error = %e, "session_restore: couldn't forget the windows a quit left behind");
+        return 0;
+    }
+    tracing::info!(windows = left.len(), "session_restore: forgot windows a quit left behind; the session restores them");
+    left.len()
+}
+
 /// Set (or, with `None`, remove) one of the client's meta keys.
 fn set_client_meta(store: &Store, key: &str, value: Option<Value>) {
     let result = store.with_tx(|tx| {
