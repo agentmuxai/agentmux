@@ -2,4 +2,4 @@
 type: minor
 ---
 
-Swarm: a broadcast reaches agents on other machines on the LAN, as a message signed by this AgentMux that the receiving AgentMux verifies (not as your own turn); remote agents show their provider's icon
+Swarm: a broadcast reaches agents on other machines on the LAN, as a message signed by this AgentMux that the receiving AgentMux verifies (not as your own turn)
