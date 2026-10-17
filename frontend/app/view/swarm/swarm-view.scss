@@ -32,6 +32,13 @@
     padding: 24px;
     text-align: center;
 
+    // Other instances' agents follow in the same list: say it in a line, not
+    // a pane-high placeholder that pushes them to the bottom.
+    &.swarm-empty-root--compact {
+        height: auto;
+        padding: 8px 10px;
+    }
+
     .swarm-empty-icon {
         font-size: 28px;
         opacity: 0.3;

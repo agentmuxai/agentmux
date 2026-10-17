@@ -154,7 +154,7 @@ export function SwarmView(props: { model: SwarmViewModel; ctx: PaneTabHostContex
                 <Show
                     when={tree().length > 0}
                     fallback={
-                        <div class="swarm-empty-root">
+                        <div classList={{ "swarm-empty-root": true, "swarm-empty-root--compact": remote().length > 0 }}>
                             <span class="swarm-empty-icon">⬡</span>
                             <div class="swarm-empty-title">No active agent panes</div>
                             <div class="swarm-empty-desc">
