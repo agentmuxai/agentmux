@@ -20,11 +20,6 @@
     // long labels from dominating the bar.
     --ws-tab-min: 60px;
     --ws-tab-max: 260px;
-    // Width of the window's grip, the fixed drag square just left of the
-    // widgets: one icon-only action widget (px-2 either side + a text-sm
-    // icon). See .tab-bar-grip.
-    --tab-bar-drag-gutter: 32px;
-
     display: flex;
     flex-direction: row;
     align-items: flex-end;
@@ -187,7 +182,7 @@
         // reaches the renderer normally.
         flex: 1 1 auto;
         // May shrink to nothing: the guaranteed place to grab the window is
-        // the fixed .tab-bar-grip outside the strip (SPEC_DRAG_SPACE_
+        // the window's grip after the widgets (window-grip.tsx, SPEC_DRAG_SPACE_
         // AFFORDANCE_2026_10_13 §5.8). A minimum here would also make the strip
         // overflow by its own width alone and show a fade with no tab hidden.
         min-width: 0;
@@ -197,32 +192,6 @@
         // extends the hairline that .tab:not(.active) draws across the fill
         // area so the full-width line is unbroken except under the active tab.
         border-bottom: var(--snap-chrome) solid var(--border-color);
-    }
-
-    // The window's grip (tabbar.tsx): a fixed drag square after the scrolling
-    // tabs, just left of the widgets (SPEC_DRAG_SPACE_AFFORDANCE_2026_10_13
-    // §5.1, §5.8). Same hairline as the fill so the line stays unbroken.
-    .tab-bar-grip {
-        flex: 0 0 var(--tab-bar-drag-gutter);
-        height: 100%;
-        align-self: stretch;
-        @include mixins.flex-center;
-        border-bottom: var(--snap-chrome) solid var(--border-color);
-        font-size: var(--text-sm);
-        color: var(--secondary-text-color);
-
-        svg {
-            opacity: 0.35;
-            pointer-events: none;
-            transition: opacity var(--duration-decorative-quick) var(--ease-standard);
-            // The bar's box sits 1.5px lower than the widget bar's (its bottom
-            // hairline); lift the dots onto the widget icons' centre line.
-            transform: translateY(-1.5px);
-        }
-
-        &:hover svg {
-            opacity: 0.7;
-        }
     }
 
 }
