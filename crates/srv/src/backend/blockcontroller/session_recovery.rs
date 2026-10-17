@@ -280,10 +280,35 @@ pub fn scan_orphans(mstore: &Arc<Store>) -> u32 {
     count
 }
 
+/// Tell the user how many agents `scan_orphans` found, in the notice the
+/// launcher writes for this service restart (`agentmux_common::incidents`;
+/// SPEC_RECOVERY_NOTICES_AND_TOASTS_2026_10_16.md §4.4). Nothing is written
+/// for none: the launcher's own words then stand. Best-effort, like every
+/// incident write.
+pub fn note_interrupted(data_dir: &std::path::Path, agents: u32) {
+    if agents == 0 {
+        return;
+    }
+    let path = data_dir.join(agentmux_common::incidents::FILE_NAME);
+    if let Err(e) = agentmux_common::incidents::append_interrupted(&path, agents, agentmux_common::time::now_ms_u64()) {
+        tracing::warn!(error = %e, "session_recovery: couldn't write the interrupted-agents count");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::backend::obj::Block;
+
+    #[test]
+    fn the_count_is_written_for_some_agents_and_not_for_none() {
+        let dir = tempfile::tempdir().unwrap();
+        note_interrupted(dir.path(), 0);
+        assert!(!dir.path().join(agentmux_common::incidents::FILE_NAME).exists());
+        note_interrupted(dir.path(), 2);
+        let text = std::fs::read_to_string(dir.path().join(agentmux_common::incidents::FILE_NAME)).unwrap();
+        assert!(text.contains("\"interrupted\":2"), "{text}");
+    }
 
     /// Verify that scan_orphans transfers active_pid → was_interrupted on
     /// agent blocks, and leaves non-agent blocks + blocks without active_pid
