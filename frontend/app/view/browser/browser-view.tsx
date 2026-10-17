@@ -17,6 +17,8 @@ import { useFreezeFrame } from "./use-freeze-frame";
 import { useBrowserAuth } from "./use-browser-auth";
 import { Button } from "@/app/element/ui";
 import { BrowserNavBar } from "./browser-nav-bar";
+import { DrivenByStrip } from "./driven-by-strip";
+import { minutesLabel, siteLabel } from "./bypass";
 import "./browser-view.scss";
 
 // Matches BrainSpinner.scss's `.is-fading` transition duration — the DOM
@@ -253,8 +255,12 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
                                 fallback={
                                     <span>
                                         <b>{a().agent || "An agent"}</b>{" "}
-                                        {a().kind === "handoff" ? "needs you: " : "wants to: "}
-                                        {a().kind === "handoff" ? a().reason : a().what}
+                                        {a().kind === "handoff"
+                                            ? "needs you: "
+                                            : a().kind === "bypass"
+                                              ? "asks to act without asking you first: "
+                                              : "wants to: "}
+                                        {a().kind === "handoff" || a().kind === "bypass" ? a().reason : a().what}
                                     </span>
                                 }
                             >
@@ -275,6 +281,14 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
                                 {a().popup
                                     ? "Allow adds this site to the pane's list; then click again to open the window."
                                     : "Allow adds this site to the pane's list and goes there. A form's data isn't sent again."}
+                            </div>
+                        </Show>
+                        <Show when={a().kind === "bypass"}>
+                            <div class="browser-attention-target">
+                                On <b>{(a().origins ?? []).map(siteLabel).join(", ")}</b>, for{" "}
+                                <b>{minutesLabel(a().minutes ?? 60)}</b>: its clicks that submit, delete or send go
+                                through without asking you. It still can't type passwords or codes or run scripts, and
+                                payments still ask. End it any time from the red strip.
                             </div>
                         </Show>
                         <Show when={a().window}>
@@ -302,17 +316,23 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
                                 a page asking to leave the pane's sites keeps the quieter
                                 accent, since Block is the safe answer there. */}
                             <Button
-                                tone={a().kind === "navigation" ? "accent" : "attention"}
+                                tone={a().kind === "navigation" ? "accent" : a().kind === "bypass" ? "danger" : "attention"}
                                 density={a().kind === "navigation" ? "compact" : "comfortable"}
                                 onClick={() => model.resolveAttention(a().kind === "handoff" ? "done" : "approve").catch(() => {})}
                             >
-                                {a().kind === "handoff" ? "Done" : a().kind === "navigation" ? "Allow" : "Approve"}
+                                {a().kind === "handoff"
+                                    ? "Done"
+                                    : a().kind === "navigation"
+                                      ? "Allow"
+                                      : a().kind === "bypass"
+                                        ? "Allow without asking"
+                                        : "Approve"}
                             </Button>
                             <Button
                                 density={a().kind === "navigation" ? "compact" : "comfortable"}
                                 onClick={() => model.resolveAttention("cancel").catch(() => {})}
                             >
-                                {a().kind === "navigation" ? "Block" : "Cancel"}
+                                {a().kind === "navigation" ? "Block" : a().kind === "bypass" ? "No" : "Cancel"}
                             </Button>
                         </div>
                     </div>
@@ -356,33 +376,7 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
                     </div>
                 )}
             </Show>
-            <Show when={model.driverAgentAtom()}>
-                {(agent) => (
-                    <div class="browser-driven-by" role="status">
-                        <i class="fa-solid fa-robot" aria-hidden="true" />
-                        <span>
-                            Driven by <b>{agent()}</b>
-                        </span>
-                        <Show when={model.allowedOriginsAtom().length > 0}>
-                            <span
-                                class="browser-limited-to"
-                                title={`Limited to: ${model.allowedOriginsAtom().join(", ")}`}
-                            >
-                                Limited to {model.allowedOriginsAtom().length}{" "}
-                                {model.allowedOriginsAtom().length === 1 ? "site" : "sites"}
-                            </span>
-                        </Show>
-                        <Button
-                            density="compact"
-                            class="browser-take-over"
-                            title="End the agent's control of this pane; its next action here will fail."
-                            onClick={() => model.takeOver().catch(() => {})}
-                        >
-                            Take over
-                        </Button>
-                    </div>
-                )}
-            </Show>
+            <Show when={model.driverAgentAtom()}>{(agent) => <DrivenByStrip model={model} agent={agent()} />}</Show>
             <Show when={model.errorAtom()}>
                 <div class="browser-error">{model.errorAtom()}</div>
             </Show>

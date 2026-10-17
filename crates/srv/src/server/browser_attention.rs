@@ -32,6 +32,9 @@ pub(crate) enum Kind {
     /// The page tried to leave the sites the pane is limited to
     /// (SPEC_BROWSER_PANE_ALLOWED_ORIGINS_2026_10_09.md §4).
     Navigation,
+    /// The agent asks to act without asking for a while
+    /// (SPEC_BROWSER_PANE_BYPASS_2026_10_16.md §6).
+    Bypass,
 }
 
 impl Kind {
@@ -40,7 +43,23 @@ impl Kind {
             Kind::Handoff => "handoff",
             Kind::Approval => "approval",
             Kind::Navigation => "navigation",
+            Kind::Bypass => "bypass",
         }
+    }
+
+    /// Why the agent's tools on `pane` are refused while a request of this
+    /// kind is up.
+    pub(crate) fn tools_paused(self, pane: &str) -> String {
+        let why = match self {
+            Kind::Handoff => format!("the user is working in pane {pane:?} (your Browser handoff)"),
+            Kind::Approval => format!("pane {pane:?} is waiting for the user to approve your click"),
+            Kind::Navigation => format!(
+                "the page in pane {pane:?} tried to leave its allowed_origins and the user is being asked whether to allow it"
+            ),
+            Kind::Bypass => format!("pane {pane:?} is asking the user whether you may act without asking"),
+        };
+        let until = if self == Kind::Handoff { "they click Done or Cancel" } else { "they answer" };
+        format!("{why}; your tools on it are paused until {until}")
     }
 }
 

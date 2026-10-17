@@ -189,5 +189,7 @@ async fn handle_register(state: &AppState, call: &WebCallType) -> WebReturnType 
     // (SPEC_BROWSER_PANE_NATIVE_POPUPS_AGENT_DRIVEN_2026_10_08.md §3–§4).
     crate::server::browser_owner::changed().notify_one();
     crate::server::ui_handlers::reset_popup_windows(state);
+    // A bypass never outlives srv: clear a strip saved with a pane from before.
+    crate::server::browser_bypass::reset_strips(state);
     WebReturnType::success_empty()
 }

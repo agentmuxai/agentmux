@@ -132,6 +132,15 @@ declare global {
          *  (`approve`), or `cancel`. Relayed by the host, which srv trusts and
          *  agents can't impersonate. SPEC_AGENT_DRIVEN_BROWSER_PANES_2026_10_07.md §5.6. */
         decideBrowserAttention(blockId: string, id: string, decision: "done" | "approve" | "cancel"): Promise<void>;
+        /** The person's Bypass (`on`) or End bypass in an agent-driven browser
+         *  pane's header. `agent` and `origins` are what the confirmation
+         *  showed: srv grants only if they still hold, else rejects with why.
+         *  Relayed by the host, which srv trusts and agents can't impersonate.
+         *  SPEC_BROWSER_PANE_BYPASS_2026_10_16.md §5. */
+        setBrowserBypass?(
+            blockId: string,
+            args: { on: boolean; minutes?: number; agent?: string; origins?: string[] },
+        ): Promise<void>;
         /** Answer a widget's install prompt: approve exactly the package version
          *  (`hash`) the user was shown, or cancel. Relayed by the host, which srv
          *  trusts and agents can't impersonate. SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md §8.3. */
