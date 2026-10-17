@@ -1039,8 +1039,6 @@ export class SwarmViewModel {
     // blocks' poll, since the source (the host-global registry) has no event.
     private _otherInstances = createSignal<SwarmOtherInstances | null>(null);
     otherInstancesAtom: Accessor<SwarmOtherInstances | null> = this._otherInstances[0];
-    // Remote sections the user collapsed. Expanded by default, unlike agent rows:
-    // a section is a handful of names, and hiding them would hide the feature.
     private _expandedAgentIds = createSignal<Set<string>>(new Set());
     expandedAgentIdsAtom: Accessor<Set<string>> = this._expandedAgentIds[0];
     private setExpandedAgentIds: Setter<Set<string>> = this._expandedAgentIds[1];
