@@ -10,17 +10,22 @@
 //! file of its own, and nothing is installed: a Windows portable release is
 //! unpacked into a new folder next to the running one, ready for the launcher
 //! to start (phase 3b); a `setup.exe` install's installer is kept, verified,
-//! in this version's `updates/<version>/`, for the launcher to run (phase 3d). Progress and the result go out as the
-//! `app:updatestatus` event (`update_check`).
+//! in this version's `updates/<version>/`, for the launcher to run (phase 3d);
+//! a Linux portable's tarball is unpacked into `AgentMux-<version>` next to the
+//! running folder, and an AppImage's next version is put beside it, executable
+//! (phase 3e). Progress and the result go out as the `app:updatestatus` event
+//! (`update_check`).
 //!
 //! The download is kept in `updates/<version>/` in this version's data folder
 //! (`AGENTMUX_DATA_HOME`, `channels/<ch>/versions/<v>/data`) while it runs and
 //! deleted once unpacked. Its file and the unpacking folder carry this
 //! process' id, so two AgentMux instances downloading the same release never
-//! write over each other; whichever stages the folder first, the other uses. Unpacking uses Windows' own `tar.exe` (libarchive,
-//! which reads the release's LZMA2 `.7z`, and refuses `..` and absolute
-//! paths), by its full path so no other `tar` on `PATH` is run. A Windows too
-//! old for that fails with a message, and the release page still works.
+//! write over each other; whichever stages the folder first, the other uses.
+//! On Windows unpacking uses its own `tar.exe` (libarchive, which reads the
+//! release's LZMA2 `.7z`, and refuses `..` and absolute paths), by its full
+//! path so no other `tar` on `PATH` is run; a Windows too old for that fails
+//! with a message, and the release page still works. On Linux it is the
+//! system's `tar` (with `xz` for the `.tar.xz`).
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -103,6 +108,16 @@ fn set(version: &str, state: &str, received: u64, total: u64, error: Option<Stri
     }));
 }
 
+/// What a download stages, by install.
+enum Job {
+    /// A new portable folder beside `root`'s.
+    Portable(PathBuf),
+    /// A `setup.exe` installer in `updates/<version>/`.
+    Installer,
+    /// The next AppImage beside this one.
+    AppImage(PathBuf),
+}
+
 /// Start downloading the release the update check found (the user's Download,
 /// through the host).
 /// Returns at once with the status; progress follows as events.
@@ -115,10 +130,17 @@ pub fn start() -> Result<AppUpdateStatus, String> {
         return Err("AgentMux can't download this release itself; use the release page".into());
     }
     // A portable's new folder goes beside the running one; a setup.exe
-    // install's installer is kept as is.
-    let portable_root = match update_check::install_kind() {
-        InstallKind::WindowsPortable { root } => Some(root),
-        InstallKind::WindowsSetup => None,
+    // install's installer is kept as is; an AppImage's next one goes beside it.
+    let job = match update_check::install_kind() {
+        InstallKind::WindowsPortable { root } | InstallKind::LinuxPortable { root } => Job::Portable(root),
+        InstallKind::WindowsSetup => Job::Installer,
+        InstallKind::LinuxAppImage => match std::env::current_exe()
+            .ok()
+            .and_then(|exe| agentmux_common::runtime_mode::running_appimage(&exe))
+        {
+            Some(appimage) => Job::AppImage(appimage),
+            None => return Err("can't tell which AppImage this AgentMux runs from; use the release page".into()),
+        },
         _ => return Err("AgentMux can't download this release itself; use the release page".into()),
     };
     if let Some(d) = &status.download {
@@ -133,9 +155,10 @@ pub fn start() -> Result<AppUpdateStatus, String> {
     }
     set(&version, "downloading", 0, asset.size, None, Staged::None);
     tokio::spawn(async move {
-        let result = match &portable_root {
-            Some(root) => run(&asset, &version, root).await.map(|f| (f, true)),
-            None => run_installer(&asset, &version).await.map(|i| (i, false)),
+        let result = match &job {
+            Job::Portable(root) => run(&asset, &version, root).await.map(|f| (f, true)),
+            Job::Installer => run_installer(&asset, &version).await.map(|i| (i, false)),
+            Job::AppImage(appimage) => run_appimage(&asset, &version, appimage).await.map(|i| (i, false)),
         };
         RUNNING.store(false, Ordering::SeqCst);
         match result {
@@ -201,9 +224,19 @@ fn installer_path(dir: &Path, asset: &ReleaseAsset) -> PathBuf {
     dir.join(&asset.name)
 }
 
-/// Whether `path` is that release's installer, whole.
+/// `name`, or with `-n` before its extension for n > 1
+/// (`AgentMux_0.59.30_amd64-2.AppImage`): a copy beside one that isn't ours.
+fn release_file_variant(name: &str, n: u32) -> String {
+    match (n, name.rsplit_once('.')) {
+        (1, _) => name.to_string(),
+        (_, Some((stem, ext))) => format!("{stem}-{n}.{ext}"),
+        (_, None) => format!("{name}-{n}"),
+    }
+}
+
+/// Whether `path` is that release's installer (or AppImage), whole.
 fn is_staged_installer(path: &Path, asset: &ReleaseAsset) -> bool {
-    path.file_name().is_some_and(|n| n == asset.name.as_str())
+    path.file_name().is_some_and(|n| (1..100).any(|i| n.to_string_lossy() == release_file_variant(&asset.name, i)))
         && std::fs::metadata(path).is_ok_and(|m| m.is_file() && m.len() == asset.size)
 }
 
@@ -230,12 +263,65 @@ async fn is_verified_installer(path: &Path, asset: &ReleaseAsset) -> bool {
 async fn run_installer(asset: &ReleaseAsset, version: &str) -> Result<PathBuf, String> {
     let updates = updates_root();
     remove_abandoned_downloads(&updates).await;
-    let dir = updates.join(version);
-    tokio::fs::create_dir_all(&dir).await.map_err(|e| format!("can't create {}: {e}", dir.display()))?;
-    let target = installer_path(&dir, asset);
+    fetch_file(asset, version, &updates.join(version), None).await
+}
+
+/// Put the next AppImage beside this one, or in `updates/<version>/` when that
+/// folder can't be written; executable, with this AgentMux's channel recorded
+/// beside it, so the new version opens this one's data.
+async fn run_appimage(asset: &ReleaseAsset, version: &str, appimage: &Path) -> Result<PathBuf, String> {
+    let updates = updates_root();
+    remove_abandoned_downloads(&updates).await;
+    let channel = crate::backend::reactive::registry::local_channel_id();
+    let mut last = String::new();
+    for dir in [appimage.parent().map(Path::to_path_buf), Some(updates.join(version))].into_iter().flatten() {
+        match fetch_file(asset, version, &dir, Some(&channel)).await {
+            Ok(file) => return Ok(file),
+            Err(e) => {
+                tracing::info!(error = %e, dir = %dir.display(), "update: couldn't put the AppImage here");
+                last = e;
+            }
+        }
+    }
+    Err(last)
+}
+
+/// The data channel recorded beside the AppImage at `file`, if any.
+fn appimage_channel(file: &Path) -> Option<String> {
+    let record = agentmux_common::runtime_mode::appimage_channel_file(file);
+    std::fs::read_to_string(record).ok().map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
+}
+
+/// An AppImage at `file`: executable, its channel recorded beside it.
+fn finish_appimage(file: &Path, channel: &str) -> Result<(), String> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(file, std::fs::Permissions::from_mode(0o755))
+            .map_err(|e| format!("can't make {} executable: {e}", file.display()))?;
+    }
+    let record = agentmux_common::runtime_mode::appimage_channel_file(file);
+    std::fs::write(&record, format!("{channel}\n")).map_err(|e| format!("can't write {}: {e}", record.display()))
+}
+
+/// Download the release file into `dir` under the release's own name,
+/// verified. With `appimage_channel` it is an AppImage: made executable with
+/// that channel recorded beside it, and never one recorded for another channel
+/// (a copy `…-2.AppImage` is made beside it instead).
+async fn fetch_file(asset: &ReleaseAsset, version: &str, dir: &Path, appimage_channel_of: Option<&str>) -> Result<PathBuf, String> {
+    tokio::fs::create_dir_all(dir).await.map_err(|e| format!("can't create {}: {e}", dir.display()))?;
+    let ours = |p: &Path| appimage_channel_of.is_none_or(|ch| appimage_channel(p).is_none_or(|c| c == ch));
+    let target = (1..100)
+        .map(|n| dir.join(release_file_variant(&asset.name, n)))
+        .find(|p| !p.exists() || ours(p))
+        .unwrap_or_else(|| installer_path(dir, asset));
+    let finish = |file: PathBuf| match appimage_channel_of {
+        Some(channel) => finish_appimage(&file, channel).map(|()| file),
+        None => Ok(file),
+    };
     // Downloaded before, or by another AgentMux meanwhile.
     if is_verified_installer(&target, asset).await {
-        return Ok(target);
+        return finish(target);
     }
     let file = dir.join(format!("{}-{}", std::process::id(), asset.name));
     if let Err(e) = download(asset, &file, version).await {
@@ -243,14 +329,14 @@ async fn run_installer(asset: &ReleaseAsset, version: &str) -> Result<PathBuf, S
         return Err(e);
     }
     match tokio::fs::rename(&file, &target).await {
-        Ok(()) => Ok(target),
+        Ok(()) => finish(target),
         Err(_) if is_verified_installer(&target, asset).await => {
             let _ = tokio::fs::remove_file(&file).await;
-            Ok(target)
+            finish(target)
         }
         Err(e) => {
             let _ = tokio::fs::remove_file(&file).await;
-            Err(format!("can't put the installer in place: {e}"))
+            Err(format!("can't put the release file in place: {e}"))
         }
     }
 }
@@ -302,11 +388,39 @@ async fn download(asset: &ReleaseAsset, dest: &Path, version: &str) -> Result<()
     result
 }
 
-/// Whether `dir` is an unpacked AgentMux `version` portable.
+/// Whether `dir` is an unpacked AgentMux `version` portable: on Windows the
+/// release's folder (`agentmux.exe`, `runtime/` with the marker and that
+/// version's host); on Linux the tarball's `AgentMux/` (`agentmux.sh`, that
+/// version's srv in `usr/bin/`, and `usr/share/agentmux/VERSION` saying so).
 pub(crate) fn is_staged_portable(dir: &Path, version: &str) -> bool {
-    dir.join("agentmux.exe").is_file()
-        && dir.join("runtime").join("agentmux-portable.marker").is_file()
-        && dir.join("runtime").join(format!("agentmux-{version}.exe")).is_file()
+    if cfg!(windows) {
+        dir.join("agentmux.exe").is_file()
+            && dir.join("runtime").join("agentmux-portable.marker").is_file()
+            && dir.join("runtime").join(format!("agentmux-{version}.exe")).is_file()
+    } else {
+        dir.join("agentmux.sh").is_file()
+            && dir.join("usr/bin").join(format!("agentmux-srv-{version}-linux.x64")).is_file()
+            && std::fs::read_to_string(dir.join("usr/share/agentmux/VERSION")).is_ok_and(|v| v.trim() == version)
+    }
+}
+
+/// The folder a release's portable is unpacked into, beside the running one.
+fn portable_folder_name(version: &str) -> String {
+    if cfg!(windows) {
+        format!("agentmux-{version}-x64-portable")
+    } else {
+        format!("AgentMux-{version}")
+    }
+}
+
+/// Where in what `tar` unpacked into `partial` the portable is: the Windows
+/// archive holds the folder's contents, the Linux tarball an `AgentMux/` folder.
+fn unpacked_root(partial: &Path) -> PathBuf {
+    if cfg!(windows) {
+        partial.to_path_buf()
+    } else {
+        partial.join("AgentMux")
+    }
 }
 
 /// `parent/name`, or `name-2`, `name-3`… when that is taken by something else.
@@ -378,15 +492,18 @@ fn for_channel(folder: &Path, channel: &str) -> bool {
     agentmux_common::runtime_mode::recorded_channel_in(folder).is_none_or(|c| c == channel)
 }
 
-/// Record `channel` in `folder`'s `runtime/`: the data the new version opens.
+/// Record `channel` in the portable `folder`: the data the new version opens.
+/// In `runtime/` on Windows, at the top on Linux, where its binaries look
+/// (`runtime_mode::recorded_channel_in`).
 fn record_channel(folder: &Path, channel: &str) -> Result<(), String> {
-    let file = folder.join("runtime").join(agentmux_common::runtime_mode::RECORDED_CHANNEL_FILE);
+    let at = if cfg!(windows) { folder.join("runtime") } else { folder.to_path_buf() };
+    let file = at.join(agentmux_common::runtime_mode::RECORDED_CHANNEL_FILE);
     std::fs::write(&file, format!("{channel}\n")).map_err(|e| format!("can't write {}: {e}", file.display()))
 }
 
 /// Unpack the release into `parent`, recording `channel` in it.
 async fn unpack_portable(file: &Path, version: &str, parent: &Path, channel: &str) -> Result<PathBuf, String> {
-    let name = format!("agentmux-{version}-x64-portable");
+    let name = portable_folder_name(version);
     let fits = |dir: &Path| is_staged_portable(dir, version) && for_channel(dir, channel);
     // Staged by an earlier download that was then interrupted.
     if fits(&parent.join(&name)) {
@@ -415,12 +532,13 @@ async fn unpack_portable(file: &Path, version: &str, parent: &Path, channel: &st
         Ok(Err(e)) => Err(format!("couldn't run tar to unpack it: {e}")),
         Ok(Ok(o)) if !o.status.success() => {
             let why = String::from_utf8_lossy(&o.stderr).lines().next().unwrap_or("").to_string();
-            Err(format!("tar couldn't unpack it ({why}); this Windows may be too old to read .7z files"))
+            let hint = if cfg!(windows) { "this Windows may be too old to read .7z files" } else { "is `xz` installed?" };
+            Err(format!("tar couldn't unpack it ({why}); {hint}"))
         }
-        Ok(Ok(_)) if !is_staged_portable(&partial, version) => {
+        Ok(Ok(_)) if !is_staged_portable(&unpacked_root(&partial), version) => {
             Err(format!("what was unpacked isn't an AgentMux {version} portable"))
         }
-        Ok(Ok(_)) => record_channel(&partial, channel),
+        Ok(Ok(_)) => record_channel(&unpacked_root(&partial), channel),
     };
     let canonical = parent.join(&name);
     let result = match checked {
@@ -430,7 +548,7 @@ async fn unpack_portable(file: &Path, version: &str, parent: &Path, channel: &st
         Ok(()) if fits(&canonical) => record_channel(&canonical, channel).map(|()| canonical),
         Ok(()) => {
             let target = free_folder(parent, &name);
-            match tokio::fs::rename(&partial, &target).await {
+            match tokio::fs::rename(unpacked_root(&partial), &target).await {
                 Ok(()) => Ok(target),
                 // The other one's move won the race.
                 Err(_) if fits(&canonical) => record_channel(&canonical, channel).map(|()| canonical),

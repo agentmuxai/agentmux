@@ -75,17 +75,24 @@ fn staged(status: &AppUpdateStatus) -> Result<(DownloadStatus, UpgradeTarget), S
     if !matches!(d.state.as_str(), "ready" | "waiting") {
         return Err("the new version isn't ready yet".into());
     }
-    // A portable's new folder, or a setup.exe install's installer.
+    // A portable's new folder, a setup.exe install's installer, or an
+    // AppImage's next one.
     if let Some(folder) = d.folder.as_deref().map(PathBuf::from) {
         if !crate::backend::update_download::is_staged_portable(&folder, &d.version) {
             return Err(format!("{} is gone; download the new version again", folder.display()));
         }
-        let launcher = folder.join("agentmux.exe");
+        // On Linux the tarball's script, which sets the library path for the
+        // new folder's binaries before it starts the launcher.
+        let launcher = folder.join(if cfg!(windows) { "agentmux.exe" } else { "agentmux.sh" });
         return Ok((d, UpgradeTarget::Launcher(launcher)));
     }
     let installer = PathBuf::from(d.installer.as_deref().ok_or("the new version isn't ready yet")?);
     if !installer.is_file() {
         return Err(format!("{} is gone; download the new version again", installer.display()));
+    }
+    // An AppImage is started as it is, like a portable's launcher.
+    if status.install == "linux-appimage" {
+        return Ok((d, UpgradeTarget::Launcher(installer)));
     }
     // The release's digest goes with it: the launcher checks the file it runs.
     let sha256 = status
@@ -244,7 +251,11 @@ mod tests {
             url: String::new(),
             sha256: "AB".repeat(32),
         });
-        assert_eq!(staged(&with_asset).unwrap().1, UpgradeTarget::Installer { installer, sha256: "ab".repeat(32) });
+        assert_eq!(staged(&with_asset).unwrap().1, UpgradeTarget::Installer { installer: installer.clone(), sha256: "ab".repeat(32) });
+        // An AppImage's next one is started as it is.
+        let mut appimage = with_asset.clone();
+        appimage.install = "linux-appimage".into();
+        assert_eq!(staged(&appimage).unwrap().1, UpgradeTarget::Launcher(installer));
         // A download of an older release than the latest doesn't count.
         let mut newer = status(Some(download("ready", Some(&folder))));
         newer.latest = Some("0.59.28".into());

@@ -29,6 +29,8 @@ pub enum InstallKind {
     WindowsStore,
     MacApp,
     LinuxAppImage,
+    /// A Linux portable: the release tarball's `AgentMux/` folder, which holds
+    /// `agentmux.sh` above `usr/bin/` (or an older folder with the marker).
     LinuxPortable { root: PathBuf },
     /// A `.deb` (`debian`) or `.rpm` install.
     LinuxPackage { debian: bool },
@@ -53,7 +55,10 @@ impl InstallKind {
     /// Whether AgentMux can download and stage this kind's upgrade itself.
     /// The others still open the release page (or the Store).
     pub fn can_download(&self) -> bool {
-        matches!(self, Self::WindowsPortable { .. } | Self::WindowsSetup)
+        matches!(
+            self,
+            Self::WindowsPortable { .. } | Self::WindowsSetup | Self::LinuxPortable { .. } | Self::LinuxAppImage
+        )
     }
 
     /// The release file that upgrades this kind to `version` on `arch`
@@ -108,6 +113,10 @@ fn detect_at(exe: &Path, os: &str, appimage: bool, debian: bool) -> InstallKind 
             }
         }
         "macos" if text.contains(".app/Contents/") => InstallKind::MacApp,
+        // The release tarball: `AgentMux/agentmux.sh` above srv's `usr/bin/`.
+        "linux" if dir.is_some_and(|d| d.ends_with("usr/bin")) && linux_portable_root(exe).is_some() => {
+            InstallKind::LinuxPortable { root: linux_portable_root(exe).unwrap_or_default() }
+        }
         "linux" if appimage => InstallKind::LinuxAppImage,
         "linux" => match portable_root {
             Some(root) => InstallKind::LinuxPortable { root },
@@ -118,13 +127,20 @@ fn detect_at(exe: &Path, os: &str, appimage: bool, debian: bool) -> InstallKind 
     }
 }
 
+/// The Linux portable folder above srv at `exe` (`AgentMux/usr/bin/srv`):
+/// the one holding `agentmux.sh`.
+pub fn linux_portable_root(exe: &Path) -> Option<PathBuf> {
+    let root = exe.parent()?.parent()?.parent()?;
+    root.join("agentmux.sh").is_file().then(|| root.to_path_buf())
+}
+
 /// How the running AgentMux was installed.
 pub fn detect() -> InstallKind {
     let Ok(exe) = std::env::current_exe() else { return InstallKind::Unknown };
     detect_at(
         &exe,
         std::env::consts::OS,
-        std::env::var_os("APPIMAGE").is_some(),
+        agentmux_common::runtime_mode::running_appimage(&exe).is_some(),
         Path::new("/etc/debian_version").exists(),
     )
 }
@@ -172,6 +188,17 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let exe = portable(dir.path());
         assert_eq!(detect_at(&exe, "linux", false, false), InstallKind::LinuxPortable { root: dir.path().to_path_buf() });
+        // The release tarball: `AgentMux/agentmux.sh` above `usr/bin/`, no
+        // marker. It wins over an `APPIMAGE` a pane passed down.
+        let tarball = tempfile::tempdir().unwrap();
+        let root = tarball.path().join("AgentMux");
+        std::fs::create_dir_all(root.join("usr/bin")).unwrap();
+        std::fs::write(root.join("agentmux.sh"), b"").unwrap();
+        let srv = root.join("usr/bin/agentmux-srv-0.59.30-linux.x64");
+        for appimage in [false, true] {
+            assert_eq!(detect_at(&srv, "linux", appimage, true), InstallKind::LinuxPortable { root: root.clone() });
+        }
+        assert!(InstallKind::LinuxPortable { root }.can_download() && InstallKind::LinuxAppImage.can_download());
     }
 
     #[test]

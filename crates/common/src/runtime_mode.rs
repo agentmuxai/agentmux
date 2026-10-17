@@ -31,7 +31,7 @@
 
 #[cfg(windows)]
 use crate::win32::NoWindow;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// Where this AgentMux binary is running from. Determines data path
@@ -397,19 +397,53 @@ pub fn portable_build_label(exe_dir: &Path) -> Option<String> {
 /// continues with that build's windows, agents and settings.
 pub const RECORDED_CHANNEL_FILE: &str = "agentmux-channel";
 
-/// The data channel the portable folder at or above `exe_dir` records: next to
-/// the host and srv (both in `runtime/`), or in `runtime/` below the launcher.
-pub fn recorded_channel_in(exe_dir: &Path) -> Option<String> {
-    [exe_dir.join(RECORDED_CHANNEL_FILE), exe_dir.join("runtime").join(RECORDED_CHANNEL_FILE)]
-        .into_iter()
-        .find_map(|p| std::fs::read_to_string(p).ok())
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
+/// The channel named in the record file `path`, if it names one.
+fn read_channel_file(path: &Path) -> Option<String> {
+    std::fs::read_to_string(path).ok().map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
 }
 
-/// [`recorded_channel_in`] for the running binary's own folder.
+/// The data channel the portable folder at or above `exe_dir` records: next to
+/// the host and srv (Windows: both in `runtime/`), in `runtime/` below the
+/// launcher, or at the top of a Linux portable (`AgentMux/`, two levels above
+/// the binaries' `usr/bin/`).
+pub fn recorded_channel_in(exe_dir: &Path) -> Option<String> {
+    let mut candidates = vec![exe_dir.join(RECORDED_CHANNEL_FILE), exe_dir.join("runtime").join(RECORDED_CHANNEL_FILE)];
+    if exe_dir.ends_with("usr/bin") {
+        candidates.extend(exe_dir.parent().and_then(Path::parent).map(|top| top.join(RECORDED_CHANNEL_FILE)));
+    }
+    candidates.iter().find_map(|p| read_channel_file(p))
+}
+
+/// Where an upgrade records the data channel of an AppImage: beside it, as
+/// `<file>.agentmux-channel`, since the AppImage itself can't be written.
+pub fn appimage_channel_file(appimage: &Path) -> PathBuf {
+    let name = appimage.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    appimage.with_file_name(format!("{name}.{RECORDED_CHANNEL_FILE}"))
+}
+
+/// The AppImage the binary at `exe` runs from: `$APPIMAGE`, when `exe` is
+/// inside that AppImage's mount (`$APPDIR`) or the folder AppRun extracted it
+/// to (`$AGENTMUX_EXTRACTED_RUN`). `APPIMAGE` alone isn't enough: any other
+/// build started from an AppImage instance's pane inherits it.
+pub fn running_appimage(exe: &Path) -> Option<PathBuf> {
+    let appimage = std::env::var_os("APPIMAGE").filter(|v| !v.is_empty())?;
+    let roots: Vec<_> = ["APPDIR", "AGENTMUX_EXTRACTED_RUN"].iter().filter_map(std::env::var_os).collect();
+    inside_appimage(exe, &roots).then(|| PathBuf::from(appimage))
+}
+
+/// Whether `exe` is under one of the AppImage `roots` (`$APPDIR`, the extraction).
+pub fn inside_appimage(exe: &Path, roots: &[std::ffi::OsString]) -> bool {
+    roots.iter().any(|root| !root.is_empty() && exe.starts_with(root))
+}
+
+/// The data channel the running binary's install records: beside the AppImage
+/// it runs from, else in its portable folder ([`recorded_channel_in`]).
 pub fn recorded_channel() -> Option<String> {
-    recorded_channel_in(std::env::current_exe().ok()?.parent()?)
+    let exe = std::env::current_exe().ok()?;
+    match running_appimage(&exe) {
+        Some(appimage) => read_channel_file(&appimage_channel_file(&appimage)),
+        None => recorded_channel_in(exe.parent()?),
+    }
 }
 
 /// True when `exe_dir` is one of our known dev-build output dirs.
@@ -958,5 +992,30 @@ mod tests {
         assert_eq!(recorded_channel_in(&runtime).as_deref(), Some("local-main-b28b7a-f62415cd"));
         std::fs::write(runtime.join(RECORDED_CHANNEL_FILE), "  \n").unwrap();
         assert_eq!(recorded_channel_in(&runtime), None);
+    }
+
+    #[test]
+    fn a_linux_portable_records_its_channel_at_its_top() {
+        let dir = tempfile::tempdir().unwrap();
+        let bin = dir.path().join("AgentMux/usr/bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::write(dir.path().join("AgentMux").join(RECORDED_CHANNEL_FILE), "local-main-1\n").unwrap();
+        assert_eq!(recorded_channel_in(&bin).as_deref(), Some("local-main-1"));
+        // Only from `usr/bin`: two levels above another folder isn't its install.
+        let other = dir.path().join("AgentMux/usr/lib");
+        std::fs::create_dir_all(&other).unwrap();
+        assert_eq!(recorded_channel_in(&other), None);
+    }
+
+    #[test]
+    fn an_appimage_records_its_channel_beside_it_and_only_its_own_binaries_read_it() {
+        let file = Path::new("/home/u/Apps/AgentMux_0.59.30_amd64.AppImage");
+        assert_eq!(appimage_channel_file(file), Path::new("/home/u/Apps/AgentMux_0.59.30_amd64.AppImage.agentmux-channel"));
+        let extracted = std::ffi::OsString::from("/home/u/.local/share/agentmux/extracted/0.59.30");
+        let inside = Path::new("/home/u/.local/share/agentmux/extracted/0.59.30/usr/bin/agentmux-launcher");
+        let elsewhere = Path::new("/home/u/AgentMux/usr/bin/agentmux-launcher");
+        assert!(inside_appimage(inside, &[extracted.clone()]));
+        assert!(!inside_appimage(elsewhere, &[extracted]), "another build that only inherited APPIMAGE");
+        assert!(!inside_appimage(inside, &[std::ffi::OsString::new()]));
     }
 }
