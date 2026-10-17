@@ -130,6 +130,15 @@ impl PersistentSubprocessController {
             .then_some(sid)
     }
 
+    /// The parent session this pane's agent was forked from, when its history
+    /// is a copy of the parent's (`agent_session::fork_history`). A spawn that
+    /// resumes it forks it: a fork never writes into its parent's conversation.
+    pub(super) fn inherited_fork_session(&self) -> Option<String> {
+        let zone = global_prior_zone(self.mstore.as_deref(), &self.block_id)?;
+        let gfs = crate::backend::agent_session::global_transcript_store()?;
+        crate::backend::agent_session::fork_history::inherited_session(gfs, &zone)
+    }
+
     /// AgentMux's record of the conversation this pane renders, as a
     /// continuation packet for a process that starts without it
     /// (SPEC_DURABLE_CONVERSATION_MEMORY_2026_09_23.md §4.4).

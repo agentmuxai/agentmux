@@ -94,6 +94,7 @@ import type { CommandBundleImportCommitData } from "@/types/rpc/CommandBundleImp
 import type { CommandBundleImportPreviewData } from "@/types/rpc/CommandBundleImportPreviewData";
 import type { CommandCheckCliAuthData } from "@/types/rpc/CommandCheckCliAuthData";
 import type { CommandContainerImageCheckData } from "@/types/rpc/CommandContainerImageCheckData";
+import type { CommandCopyForkHistoryData } from "@/types/rpc/CommandCopyForkHistoryData";
 import type { CommandCreateAgentDefinitionData } from "@/types/rpc/CommandCreateAgentDefinitionData";
 import type { CommandCreateAgentInstanceData } from "@/types/rpc/CommandCreateAgentInstanceData";
 import type { CommandCreateAgentSkillData } from "@/types/rpc/CommandCreateAgentSkillData";
@@ -203,6 +204,7 @@ import type { CommandWriteAgentConfigResult } from "@/types/rpc/CommandWriteAgen
 import type { CommandWriteEditorFileData } from "@/types/rpc/CommandWriteEditorFileData";
 import type { ContainerImageCheckResult } from "@/types/rpc/ContainerImageCheckResult";
 import type { ContainerRuntimeAvailableResult } from "@/types/rpc/ContainerRuntimeAvailableResult";
+import type { CopyForkHistoryResult } from "@/types/rpc/CopyForkHistoryResult";
 import type { CreateEditorDirReq } from "@/types/rpc/CreateEditorDirReq";
 import type { CreateEditorDirResult } from "@/types/rpc/CreateEditorDirResult";
 import type { CreateEditorFileReq } from "@/types/rpc/CreateEditorFileReq";
@@ -816,6 +818,14 @@ export const GeneratedApi = {
     opts?: RpcOpts
   ): Promise<void> {
     return client.rpcCall("controllerinput", data, opts);
+  },
+  // command "copyforkhistory"
+  CopyForkHistoryCommand(
+    client: RpcClient,
+    data: CommandCopyForkHistoryData,
+    opts?: RpcOpts
+  ): Promise<CopyForkHistoryResult> {
+    return client.rpcCall("copyforkhistory", data, opts);
   },
   // command "controllerresync"
   ControllerResyncCommand(client: RpcClient, data: CommandControllerResyncData, opts?: RpcOpts): Promise<void> {

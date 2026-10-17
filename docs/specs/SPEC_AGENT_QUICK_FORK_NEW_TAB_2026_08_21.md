@@ -15,6 +15,14 @@ correction notice below**), `SPEC_AGENT_API_FIRST_CLASS_SURFACE_2026_06_17.md`
 `SPEC_AGENT_NAMING_AND_ADDRESSING_HOST_LAN_WAN_2026_08_22.md` (the naming
 scheme this spec's forked agents follow, §4.5)
 
+> **Fork, not spawn (2026-10-17).** A fork is an exact copy of its agent,
+> conversation included: its CLI continues the parent's conversation, and its
+> pane opens with the parent's history (`copyforkhistory`,
+> `agent_session::fork_history`). The `Agents` tool's `spawn` is a different
+> feature: it makes a worker from the leader's definition plus a brief, with
+> no conversation history (`SPEC_AGENT_WORKERS_2026_10_15.md`). Glossary:
+> [`ARCHITECTURE_FORK_SPAWN_AND_WORKER_2026_10_17.md`](../architecture/ARCHITECTURE_FORK_SPAWN_AND_WORKER_2026_10_17.md).
+
 > **Correction (2026-08-22, repo-owner-directed).** This spec originally
 > proposed landing the fork in a brand-new top-level **window** tab
 > (`WorkspaceService.CreateTab`), reasoning (§4.2 below, kept verbatim for the

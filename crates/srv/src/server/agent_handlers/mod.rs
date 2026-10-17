@@ -1,12 +1,19 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+// # Fork, spawn and worker
+// A fork (the user's Quick Fork or Fork) is an exact copy of its agent,
+// conversation and pane history included (`fork_history.rs`). The `Agents`
+// `spawn` action makes a worker: the leader's definition plus a brief, no
+// conversation history. A process spawn starts any agent's CLI. Definitions:
+// docs/architecture/ARCHITECTURE_FORK_SPAWN_AND_WORKER_2026_10_17.md.
 mod account_label;
 mod core;
 mod skills;
 mod history;
 mod template;
-// The fork the UI makes, and the new agent the `Agents` `spawn` action makes (app_api/agent_spawn.rs).
+mod fork_history;
+// Builds a fork's and a worker's definition ("Fork, spawn and worker" above).
 pub(crate) use template::copy_definition;
 mod identity;
 mod instance;
@@ -41,6 +48,7 @@ pub fn register_agent_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     skills::register(engine, state);
     history::register(engine, state);
     template::register(engine, state);
+    fork_history::register(engine, state);
     identity::register(engine, state);
     instance::register(engine, state);
     session::register(engine, state);

@@ -160,7 +160,7 @@ const CONTINUATION_TAIL_BYTES: i64 = 256 * 1024;
 /// The last non-empty `field` on a complete JSON line of `tail`.
 /// `starts_mid_line`: `tail` was cut from a longer file, so its first line is
 /// a fragment and is dropped.
-fn last_session_id_in_stream(tail: &[u8], starts_mid_line: bool, field: &str) -> Option<String> {
+pub(crate) fn last_session_id_in_stream(tail: &[u8], starts_mid_line: bool, field: &str) -> Option<String> {
     let text = String::from_utf8_lossy(tail);
     let skip = usize::from(starts_mid_line);
     let lines: Vec<&str> = text.split('\n').skip(skip).collect();

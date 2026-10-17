@@ -70,9 +70,13 @@ impl PersistentSubprocessController {
         // The session the pane's history belongs to when `--resume` can't
         // reach it here: the resume gate may relocate it (spec §4.3).
         let mut unreachable_history_session: Option<String> = None;
+        // A fork's history is a copy of its parent's, ending in the parent's
+        // session; that session is continued as a fork (below), so its parent
+        // being live is no reason to start blank.
+        let inherited = self.inherited_fork_session();
         if first_spawn_without_sid {
             if let Some(sid) = self.find_continuation_session_id(&config) {
-                if self.session_held_elsewhere(&sid).is_none() {
+                if inherited.as_deref() == Some(sid.as_str()) || self.session_held_elsewhere(&sid).is_none() {
                     tracing::info!(
                         block_id = %self.block_id,
                         session_id = %sid,
@@ -101,6 +105,15 @@ impl PersistentSubprocessController {
         // after this point drops the handle, which releases the lease.
         let gfs = crate::backend::agent_session::global_transcript_store();
         let agent_lease = self.lease_then_gate(&config, gfs.map(|g| &**g), unreachable_history_session)?;
+        // The parent session a fork inherited is resumed as a fork, never in
+        // place, however its id got here: the launch, the pane's history, the
+        // gate (`agent_session::fork_history`).
+        if let Some(parent_sid) = inherited.as_deref() {
+            let mut inner = self.inner.lock().unwrap();
+            if inner.session_id.as_deref() == Some(parent_sid) {
+                inner.fork_next = true;
+            }
+        }
 
         // Append `--resume <sid>` when we have a session id and the provider
         // supports simple-flag resume — same construction as

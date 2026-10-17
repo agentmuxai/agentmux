@@ -35,6 +35,7 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { ObjectService } from "@/app/store/services";
 import { holdLeafRevealGate, scheduleLeafRevealLift } from "@/app/store/tab-reveal";
 import { resolveEffectiveLaunchProvider } from "./agent-launch-env";
+import { resolveForkSessionArgs } from "./fork-session-args";
 import { getRuntimeConfig } from "./buildRuntimeArgs";
 import { PROVIDER_FLAGS_META_KEY } from "./launch-args";
 import { effectiveRuntime } from "./runtime-capabilities";
@@ -68,11 +69,39 @@ export interface QuickForkModel {
 }
 
 /**
+ * Give a fork its parent's history before it launches, so its pane opens as
+ * an exact copy of the parent's (`copyforkhistory`,
+ * `agent_session::fork_history`). Only when the launch continues the parent's
+ * conversation (`resolveForkSessionArgs`: Claude, a real session); otherwise
+ * the fork starts fresh and showing the parent's history would be wrong. The
+ * server copies nothing unless the parent's history ends in `sessionId`.
+ * A failure is logged and the fork launches anyway, as before, with an empty
+ * pane. Forks only: a worker (the `Agents` `spawn` action) never comes here
+ * ("Fork, spawn and worker" in `server/agent_handlers/mod.rs`).
+ */
+export async function copyForkHistory(forkId: string, sourceId: string, sessionId: string, providerId: string): Promise<void> {
+    if (!resolveForkSessionArgs({ continueSessionId: sessionId, forkSession: true }, providerId).appendForkFlag) return;
+    try {
+        const result = await RpcApi.CopyForkHistoryCommand(TabRpcClient, {
+            fork_id: forkId,
+            source_id: sourceId,
+            session_id: sessionId,
+            provider: providerId,
+        });
+        if (!result.copied) Logger.info("quick-fork", "fork starts without its parent's history", { forkId, reason: result.reason });
+    } catch (e: any) {
+        Logger.warn("quick-fork", "copying the parent's history failed", { forkId, error: String(e) });
+    }
+}
+
+/**
  * Fork `model`'s own live agent into a new sibling tab in the SAME pane.
  * Full independent identity (new `AgentDefinition`, never shares
  * `AGENTMUX_AGENT_ID` or a jekt signing key with the source, per
  * `template.rs`'s `forkagentdefinition` handler), conversation history
- * carried forward via `continueSessionId`/`forkSession`.
+ * carried forward via `continueSessionId`/`forkSession`, and the parent's
+ * pane history copied into the fork's ([`copyForkHistory`]): a fork is an
+ * exact copy of its agent.
  *
  * Always inherits the source's own bound account (spec §5, revised
  * 2026-08-22) — sourced via `ListAgentIdentitiesCommand`, filtered to the
@@ -199,6 +228,10 @@ export async function quickForkAgent(model: QuickForkModel): Promise<boolean> {
             // a session to lose (an empty sessionId is already a fresh start
             // regardless of provider — nothing silently changed).
             const showNoHistoryFallback = !!sessionId && provider?.id !== "claude";
+
+            // Before the pane opens: it shows the parent's history from its
+            // first render.
+            await copyForkHistory(forkedDef.id, definitionId, sessionId, provider?.id ?? canonicalForkProvider);
 
             // Create the new block as a tab of THIS pane. Null means the pane
             // closed while the RPCs above were in flight.

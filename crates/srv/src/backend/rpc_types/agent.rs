@@ -823,6 +823,36 @@ pub struct ForkAgentDefinitionSuggestResult {
     pub suggested_label: String,
 }
 
+/// `copyforkhistory`: a fork's pane starts with its parent's history, an
+/// exact copy (`agent_session::fork_history`). Called by the user's two fork
+/// paths (Quick Fork, the picker's Fork) once the fork is known to continue
+/// the parent's conversation, before it launches. Never by the `Agents`
+/// `spawn` action: a worker is not a fork.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct CommandCopyForkHistoryData {
+    /// The fork, as `forkagentdefinition` returned it.
+    pub fork_id: String,
+    /// The definition it was forked from: the fork's `parent_id`.
+    pub source_id: String,
+    /// The parent's session the fork continues.
+    pub session_id: String,
+    /// The provider the fork launches on.
+    pub provider: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct CopyForkHistoryResult {
+    /// The fork's history is now a copy of its parent's.
+    pub copied: bool,
+    /// Why not, when `copied` is false: `no_parent_history`,
+    /// `not_the_last_session` or `fork_has_history`.
+    pub reason: String,
+    #[ts(type = "number")]
+    pub bytes: u64,
+}
+
 /// SPEC_PANE_TAB_STRIP_COMPACT_SIZING_AND_RENAME_2026_07_22.md §4 — renames
 /// whichever field a fork tab's title actually resolves from.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]

@@ -23,6 +23,7 @@
 //! them there.
 
 pub mod archive;
+pub mod fork_history;
 pub mod global_store;
 pub mod history_summary;
 pub(crate) mod helpers;
