@@ -22,7 +22,8 @@ import { decideTopBarTier } from "./top-bar-tier";
 // Fallbacks for the tab bar's CSS variables (tabbar.scss), used only if a
 // computed value can't be read: the natural width before a tab is measured
 // (TAB_STANDARD_WIDTH), the floor (--ws-tab-min) and the fill's minimum width
-// after the last tab (0: the window's drag square is the grip outside the strip).
+// after the last tab (0: the window's guaranteed drag square is the grip in the
+// status area, window-grip.tsx, counted with the status area below).
 const TAB_NATURAL_FALLBACK_PX = 232;
 const TAB_FLOOR_FALLBACK_PX = 60;
 const DRAG_GUTTER_FALLBACK_PX = 0;
@@ -45,8 +46,8 @@ function outerWidth(el: HTMLElement): number {
 /**
  * The tab bar's width with every tab at its natural width, and with every tab
  * at its floor: tabs plus separators, the fill's minimum width after the last
- * tab, and anything else in the tab bar (the hamburger on Windows/Linux, the
- * window's grip). Read from the
+ * tab, and anything else in the tab bar (the hamburger on Windows/Linux; the
+ * window's grip is in the status area now). Read from the
  * same inline `--tab-natural-width` and CSS variables the layout uses.
  */
 function measureTabStrip(tabBar: HTMLElement, tabScroll: HTMLElement): { naturalPx: number; floorPx: number } {
@@ -66,8 +67,7 @@ function measureTabStrip(tabBar: HTMLElement, tabScroll: HTMLElement): { natural
     for (const sep of tabScroll.querySelectorAll<HTMLElement>(":scope > .tab-separator")) separators += outerWidth(sep);
     const fill = tabScroll.querySelector<HTMLElement>(":scope > .tab-bar-fill");
     const gutter = fill ? px(getComputedStyle(fill).minWidth, DRAG_GUTTER_FALLBACK_PX) : DRAG_GUTTER_FALLBACK_PX;
-    // Everything in the tab bar that isn't the scrolling strip (the hamburger,
-    // the grip).
+    // Everything in the tab bar that isn't the scrolling strip (the hamburger).
     const rest = Math.max(0, tabBar.clientWidth - tabScroll.offsetWidth);
     const fixed = rest + separators + gutter;
     return { naturalPx: fixed + natural, floorPx: fixed + tabs * floor };
