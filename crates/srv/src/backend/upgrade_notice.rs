@@ -37,6 +37,10 @@ pub const RECORD_FILE: &str = "agentmux-last-version.json";
 pub const PENDING_FOR: Duration = Duration::from_secs(60 * 60);
 /// How long after registering an agent is told, so its spawn has settled.
 const SETTLE: Duration = Duration::from_secs(1);
+/// A restored pane's controller can come up after the pane registers, so a
+/// note that finds none is tried again, this often, up to [`RETRIES`] times.
+const RETRY_GAP: Duration = Duration::from_secs(2);
+const RETRIES: u32 = 15;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 struct Record {
@@ -175,6 +179,33 @@ fn has_session(store: &crate::backend::storage::store::Store, block_id: &str) ->
         .is_some_and(|b| !crate::backend::obj::meta_get_string(&b.meta, "agent:sessionid", "").trim().is_empty())
 }
 
+/// Why a note wasn't delivered: the pane is gone, or it may be ready later.
+enum Undelivered {
+    Gone(String),
+    Retry(String),
+}
+
+/// `deliver` until it succeeds, at most `attempts` times, `gap` apart; the
+/// last error when none does. A pane that is gone isn't waited for.
+async fn deliver_with_retry(
+    mut deliver: impl FnMut() -> Result<(), Undelivered>,
+    attempts: u32,
+    gap: Duration,
+) -> Result<(), String> {
+    let mut last = String::from("no attempt made");
+    for attempt in 0..attempts {
+        if attempt > 0 {
+            tokio::time::sleep(gap).await;
+        }
+        match deliver() {
+            Ok(()) => return Ok(()),
+            Err(Undelivered::Gone(e)) => return Err(e),
+            Err(Undelivered::Retry(e)) => last = e,
+        }
+    }
+    Err(last)
+}
+
 /// An agent registered in `block_id` (any controller). If an upgrade is being
 /// announced and the pane is a resumed one not yet told, tell it, once.
 /// Called under the handler lock: no I/O here (the pane's block is read, and
@@ -198,14 +229,20 @@ pub fn on_registered(block_id: &str) {
         }
         tokio::time::sleep(SETTLE).await;
         let handler = crate::backend::reactive::get_global_handler();
-        let target = handler
-            .list_agents()
-            .into_iter()
-            .find(|r| r.block_id == block_id)
-            .map(|r| r.uid.unwrap_or(r.agent_id));
-        let delivered = target
-            .ok_or_else(|| "not registered any more".to_string())
-            .and_then(|t| handler.deliver_system_note(&t, &note_text(&state.upgraded)));
+        let delivered = deliver_with_retry(
+            || {
+                let target = handler
+                    .list_agents()
+                    .into_iter()
+                    .find(|r| r.block_id == block_id)
+                    .map(|r| r.uid.unwrap_or(r.agent_id))
+                    .ok_or_else(|| Undelivered::Gone("not registered any more".to_string()))?;
+                handler.deliver_system_note(&target, &note_text(&state.upgraded)).map_err(Undelivered::Retry)
+            },
+            RETRIES,
+            RETRY_GAP,
+        )
+        .await;
         match delivered {
             Ok(()) => record_notified(&state.dir, &block_id),
             Err(e) => {
@@ -281,6 +318,45 @@ mod tests {
         assert!(!has_session(&state.mstore, "new-pane"), "a new pane gets its session with its first turn");
         assert!(!has_session(&state.mstore, "blank-session"));
         assert!(!has_session(&state.mstore, "no-such-block"));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_note_finding_no_controller_yet_is_tried_again_until_it_goes_through() {
+        let mut calls = 0;
+        let r = deliver_with_retry(
+            || {
+                calls += 1;
+                if calls < 3 { Err(Undelivered::Retry("no controller for block b".into())) } else { Ok(()) }
+            },
+            15,
+            Duration::from_secs(2),
+        )
+        .await;
+        assert_eq!((r, calls), (Ok(()), 3));
+        // Never ready: the last error, after every attempt.
+        let mut calls = 0;
+        let r = deliver_with_retry(
+            || {
+                calls += 1;
+                Err(Undelivered::Retry(format!("no controller (try {calls})")))
+            },
+            4,
+            Duration::from_secs(2),
+        )
+        .await;
+        assert_eq!((r, calls), (Err("no controller (try 4)".to_string()), 4));
+        // A pane that is gone isn't waited for.
+        let mut calls = 0;
+        let r = deliver_with_retry(
+            || {
+                calls += 1;
+                Err(Undelivered::Gone("not registered any more".into()))
+            },
+            15,
+            Duration::from_secs(2),
+        )
+        .await;
+        assert_eq!((r, calls), (Err("not registered any more".to_string()), 1));
     }
 
     #[test]
