@@ -715,4 +715,64 @@ mod tests {
         assert_eq!(leftovers(), 0);
         assert!(!parent.join("agentmux-0.59.28-x64-portable").exists());
     }
+
+    #[test]
+    fn a_copy_beside_a_release_file_keeps_its_extension() {
+        assert_eq!(release_file_variant("AgentMux_0.59.30_amd64.AppImage", 1), "AgentMux_0.59.30_amd64.AppImage");
+        assert_eq!(release_file_variant("AgentMux_0.59.30_amd64.AppImage", 2), "AgentMux_0.59.30_amd64-2.AppImage");
+        let dir = tempfile::tempdir().unwrap();
+        let asset = ReleaseAsset { name: "AgentMux_0.59.30_amd64.AppImage".into(), size: 3, url: String::new(), sha256: String::new() };
+        let copy = dir.path().join("AgentMux_0.59.30_amd64-2.AppImage");
+        std::fs::write(&copy, b"abc").unwrap();
+        assert!(is_staged_installer(&copy, &asset));
+        let other = dir.path().join("AgentMux_0.59.31_amd64.AppImage");
+        std::fs::write(&other, b"abc").unwrap();
+        assert!(!is_staged_installer(&other, &asset));
+    }
+
+    #[test]
+    fn an_appimage_is_made_executable_with_its_channel_beside_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("AgentMux_0.59.30_amd64.AppImage");
+        std::fs::write(&file, b"x").unwrap();
+        assert_eq!(appimage_channel(&file), None);
+        finish_appimage(&file, "local-main-b28b7a-f62415cd").unwrap();
+        assert_eq!(appimage_channel(&file).as_deref(), Some("local-main-b28b7a-f62415cd"));
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(std::fs::metadata(&file).unwrap().permissions().mode() & 0o777, 0o755);
+        }
+    }
+
+    /// The system `tar` unpacks a release-shaped tarball (`AgentMux/` with
+    /// `agentmux.sh` above `usr/bin/`) into `AgentMux-<v>` beside the running
+    /// folder, recording the channel at its top.
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn unpacks_a_linux_tarball_beside_the_running_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("src");
+        let top = src.join("AgentMux");
+        std::fs::create_dir_all(top.join("usr/bin")).unwrap();
+        std::fs::create_dir_all(top.join("usr/share/agentmux")).unwrap();
+        std::fs::write(top.join("agentmux.sh"), b"#!/bin/sh
+").unwrap();
+        std::fs::write(top.join("usr/bin/agentmux-srv-0.59.30-linux.x64"), b"").unwrap();
+        std::fs::write(top.join("usr/share/agentmux/VERSION"), b"0.59.30
+").unwrap();
+        let archive = dir.path().join("AgentMux_0.59.30_amd64-portable.tar.xz");
+        let made = std::process::Command::new("tar").arg("-cJf").arg(&archive).arg("-C").arg(&src).arg("AgentMux").status().unwrap();
+        assert!(made.success());
+        let parent = dir.path().join("apps");
+        std::fs::create_dir_all(&parent).unwrap();
+        let local = "local-main-b28b7a-f62415cd";
+        let folder = unpack_portable(&archive, "0.59.30", &parent, local).await.unwrap();
+        assert_eq!(folder, parent.join("AgentMux-0.59.30"));
+        assert!(is_staged_portable(&folder, "0.59.30"));
+        assert_eq!(agentmux_common::runtime_mode::recorded_channel_in(&folder.join("usr/bin")).as_deref(), Some(local));
+        let err = unpack_portable(&archive, "0.59.31", &parent, local).await.unwrap_err();
+        assert!(err.contains("isn't an AgentMux 0.59.31 portable"), "{err}");
+    }
+
 }
