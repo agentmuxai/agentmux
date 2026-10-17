@@ -411,6 +411,10 @@ pub async fn spawn_srv(
     srv_pipe_path: &str,
     #[cfg(target_os = "windows")] job_handle: windows_sys::Win32::Foundation::HANDLE,
     sink: &crate::startup_events::StartupEventSink,
+    // The incident the launcher records for this respawn (`incidents`), so srv's
+    // start-up count of the agents it stopped lands on that notice; `None` for a
+    // cold start.
+    restart_id: Option<&str>,
 ) -> Result<(SrvSpawnResult, Child), SrvSpawnError> {
     sink.stage_begin("backend", "Backend startup");
     let srv_t = std::time::Instant::now();
@@ -458,6 +462,9 @@ pub async fn spawn_srv(
     .stdout(Stdio::piped())
     .stderr(Stdio::piped())
     .kill_on_drop(false); // Job Object handles cleanup; tokio's kill-on-drop would force-kill.
+    if let Some(id) = restart_id {
+        cmd.env(agentmux_common::incidents::RESTART_ID_ENV, id);
+    }
 
     // Windows: spawn suspended so we can assign-to-job before any
     // child code runs (PR #570 race pattern, now applied to srv).

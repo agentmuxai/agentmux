@@ -344,7 +344,7 @@ pub(crate) async fn run_unix(
     crate::stale_srv::reclaim_stale_srv_lock(&paths.data_dir);
     let (setup_result, srv_spawn_result) = tokio::join!(
         launcher_setup,
-        srv_spawner::spawn_srv(launcher_exe_dir, &paths, &srv_pipe_path, &startup_sink)
+        srv_spawner::spawn_srv(launcher_exe_dir, &paths, &srv_pipe_path, &startup_sink, None)
     );
     let (saga_coord, _ipc_handle, host_pipe) = setup_result;
     let (srv_result, mut srv_child) = match srv_spawn_result {
