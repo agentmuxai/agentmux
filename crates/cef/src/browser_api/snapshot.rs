@@ -170,7 +170,29 @@ pub fn is_secret(f: &DomFacts) -> bool {
 pub struct Snapshot {
     pub text: String,
     pub refs: Vec<(String, i64)>,
+    /// For each reference inside a frame, the frame's ordinal (`f2e5` → 2).
+    /// References in the top frame are not listed.
+    pub ref_frames: Vec<(String, usize)>,
     pub truncated: bool,
+}
+
+/// One iframe's accessibility tree, to be shown under the `<iframe>` element
+/// that holds it (spec §4.2). Built by the route that read the tree.
+#[derive(Debug, Clone, Default)]
+pub struct FrameTree {
+    /// `f{ordinal}` in references; 1.. in document order. The top frame is 0.
+    pub ordinal: usize,
+    /// The ordinal of the frame the `<iframe>` element is in (0: the top).
+    pub parent: usize,
+    /// The `<iframe>` element's backend node id, in the parent's tree.
+    pub owner_backend: Option<i64>,
+    pub origin: String,
+    pub cross_origin: bool,
+    pub nodes: Vec<Value>,
+    pub facts: HashMap<i64, DomFacts>,
+    /// Why the frame's contents aren't shown (it was over the limit, or its
+    /// tree couldn't be read), shown on its line instead of a silent bare one.
+    pub note: Option<String>,
 }
 
 fn str_of<'a>(node: &'a Value, key: &str) -> &'a str {
@@ -255,6 +277,18 @@ pub fn render(
     scope_backend_id: Option<i64>,
     ref_prefix: &str,
 ) -> Snapshot {
+    render_with_frames(nodes, facts, scope_backend_id, ref_prefix, &[])
+}
+
+/// [`render`], with each iframe's tree shown under its `<iframe>` element.
+/// References inside frame `N` are named `fNe1`, `fNe2`, …
+pub fn render_with_frames(
+    nodes: &[Value],
+    facts: &HashMap<i64, DomFacts>,
+    scope_backend_id: Option<i64>,
+    ref_prefix: &str,
+    frames: &[FrameTree],
+) -> Snapshot {
     let by_id: HashMap<&str, &Value> =
         nodes.iter().filter_map(|n| Some((n.get("nodeId")?.as_str()?, n))).collect();
     let root = match scope_backend_id {
@@ -264,9 +298,9 @@ pub fn render(
             .find(|n| n.get("parentId").is_none())
             .or_else(|| nodes.first()),
     };
-    let mut out = Snapshot { text: String::new(), refs: Vec::new(), truncated: false };
+    let mut out = Snapshot { text: String::new(), refs: Vec::new(), ref_frames: Vec::new(), truncated: false };
     if let Some(root) = root {
-        walk(root, &by_id, facts, ref_prefix, 0, "", false, &mut out);
+        walk(root, &by_id, facts, ref_prefix, 0, "", false, 0, frames, &mut out);
     }
     if out.truncated {
         out.text.push_str("- … snapshot truncated at 40 KB: pass `scope` (a reference) to read one part of the page\n");
@@ -282,6 +316,8 @@ fn walk(
     depth: usize,
     parent_name: &str,
     hide_text: bool,
+    frame: usize,
+    frames: &[FrameTree],
     out: &mut Snapshot,
 ) {
     if out.truncated {
@@ -300,7 +336,7 @@ fn walk(
     let mut child_depth = depth;
     let mut name_for_children = parent_name;
     if !transparent {
-        let line = line_for(node, role, name, backend, facts, ref_prefix, out);
+        let line = line_for(node, role, name, backend, facts, ref_prefix, frame, frames, out);
         let indent = "  ".repeat(depth);
         if out.text.len() + indent.len() + line.len() + 1 > MAX_SNAPSHOT_BYTES {
             out.truncated = true;
@@ -311,13 +347,39 @@ fn walk(
         out.text.push('\n');
         child_depth = depth + 1;
         name_for_children = name;
+        // An iframe's own tree goes under its element.
+        if let Some(inner) = frame_of_owner(frames, frame, role, backend) {
+            if inner.note.is_none() {
+                render_frame(inner, frames, child_depth, out);
+            }
+        }
     }
     if let Some(children) = node.get("childIds").and_then(|v| v.as_array()) {
         for c in children {
             if let Some(child) = c.as_str().and_then(|id| by_id.get(id)) {
-                walk(child, by_id, facts, ref_prefix, child_depth, name_for_children, hide_text || TEXT_SHOWN_ELSEWHERE.contains(&role), out);
+                walk(child, by_id, facts, ref_prefix, child_depth, name_for_children, hide_text || TEXT_SHOWN_ELSEWHERE.contains(&role), frame, frames, out);
             }
         }
+    }
+}
+
+/// The frame held by the `<iframe>` element `backend` (with accessible role
+/// `role`) in frame `frame`, if one was read.
+fn frame_of_owner<'a>(frames: &'a [FrameTree], frame: usize, role: &str, backend: Option<i64>) -> Option<&'a FrameTree> {
+    if role != "Iframe" {
+        return None;
+    }
+    let b = backend?;
+    frames.iter().find(|f| f.parent == frame && f.owner_backend == Some(b))
+}
+
+/// Render one frame's tree at `depth`, under its `<iframe>` line.
+fn render_frame(f: &FrameTree, frames: &[FrameTree], depth: usize, out: &mut Snapshot) {
+    let by_id: HashMap<&str, &Value> =
+        f.nodes.iter().filter_map(|n| Some((n.get("nodeId")?.as_str()?, n))).collect();
+    let root = f.nodes.iter().find(|n| n.get("parentId").is_none()).or_else(|| f.nodes.first());
+    if let Some(root) = root {
+        walk(root, &by_id, &f.facts, "", depth, "", false, f.ordinal, frames, out);
     }
 }
 
@@ -328,6 +390,8 @@ fn line_for(
     backend: Option<i64>,
     facts: &HashMap<i64, DomFacts>,
     ref_prefix: &str,
+    frame: usize,
+    frames: &[FrameTree],
     out: &mut Snapshot,
 ) -> String {
     let fact = backend.and_then(|b| facts.get(&b));
@@ -341,9 +405,27 @@ fn line_for(
     }
     if let Some(b) = backend {
         if INTERACTIVE_ROLES.contains(&role) || file {
-            let r = format!("{ref_prefix}e{}", out.refs.len() + 1);
+            let r = if frame == 0 {
+                // Top-frame references count only themselves, not the frames'.
+                format!("{ref_prefix}e{}", out.refs.len() - out.ref_frames.len() + 1)
+            } else {
+                let n = out.ref_frames.iter().filter(|(_, f)| *f == frame).count() + 1;
+                out.ref_frames.push((format!("f{frame}e{n}"), frame));
+                format!("f{frame}e{n}")
+            };
             line.push_str(&format!(" [ref={r}]"));
             out.refs.push((r, b));
+        }
+    }
+    if let Some(inner) = frame_of_owner(frames, frame, role, backend) {
+        let n = inner.ordinal;
+        match &inner.note {
+            None => line.push_str(&format!(
+                " [frame=f{n} origin={} {}]",
+                if inner.origin.is_empty() { "unknown" } else { &inner.origin },
+                if inner.cross_origin { "cross-origin" } else { "same-origin" },
+            )),
+            Some(why) => line.push_str(&format!(" [frame=f{n} {why}]")),
         }
     }
     if role == "heading" {
@@ -642,6 +724,108 @@ mod tests {
         let s = render(&nodes, &facts, None, "");
         assert!(s.text.contains("[secret: ask the user to fill this]"), "{}", s.text);
         assert!(!s.text.contains("123456789"), "{}", s.text);
+    }
+
+    fn frame_page() -> (Vec<Value>, FrameTree) {
+        let top = vec![
+            n("root", None, "RootWebArea", "", Some(1), &["b", "ifr", "c"]),
+            n("b", Some("root"), "button", "Top button", Some(2), &[]),
+            n("ifr", Some("root"), "Iframe", "Application form", Some(3), &[]),
+            n("c", Some("root"), "link", "Top link", Some(4), &[]),
+        ];
+        let mut inner_nodes = vec![
+            n("r", None, "RootWebArea", "", Some(1), &["h", "t", "go"]),
+            n("h", Some("r"), "heading", "Step 3", Some(2), &[]),
+            n("t", Some("r"), "textbox", "Taxpayer's TIN", Some(10), &[]),
+            n("go", Some("r"), "button", "Next", Some(11), &[]),
+        ];
+        inner_nodes[2]["value"] = json!({ "type": "string", "value": "123456789" });
+        let mut facts = HashMap::new();
+        facts.insert(10, DomFacts { local_name: "input".into(), attrs: HashMap::new(), label: "Taxpayer's TIN".into() });
+        let frame = FrameTree {
+            ordinal: 1,
+            parent: 0,
+            owner_backend: Some(3),
+            origin: "https://forms.example.gov".into(),
+            cross_origin: true,
+            nodes: inner_nodes,
+            facts,
+            note: None,
+        };
+        (top, frame)
+    }
+
+    #[test]
+    fn an_iframes_tree_is_shown_under_it_with_frame_prefixed_references() {
+        let (top, frame) = frame_page();
+        let s = render_with_frames(&top, &HashMap::new(), None, "", &[frame]);
+        let lines: Vec<&str> = s.text.lines().collect();
+        assert_eq!(lines[0], "- button \"Top button\" [ref=e1]");
+        assert_eq!(
+            lines[1],
+            "- Iframe \"Application form\" [frame=f1 origin=https://forms.example.gov cross-origin]"
+        );
+        assert_eq!(lines[2], "  - heading \"Step 3\"");
+        assert!(lines[3].starts_with("  - textbox \"Taxpayer's TIN\" [ref=f1e1]"), "{}", lines[3]);
+        assert_eq!(lines[4], "  - button \"Next\" [ref=f1e2]");
+        assert_eq!(lines[5], "- link \"Top link\" [ref=e2]", "top-frame numbering carries on after the frame");
+        assert_eq!(
+            s.refs.iter().map(|(r, b)| (r.as_str(), *b)).collect::<Vec<_>>(),
+            vec![("e1", 2), ("f1e1", 10), ("f1e2", 11), ("e2", 4)]
+        );
+        assert_eq!(s.ref_frames, vec![("f1e1".to_string(), 1), ("f1e2".to_string(), 1)]);
+    }
+
+    #[test]
+    fn a_secret_field_inside_a_frame_is_marked_and_its_value_hidden() {
+        let (top, frame) = frame_page();
+        let s = render_with_frames(&top, &HashMap::new(), None, "", &[frame]);
+        assert!(s.text.contains("[secret: ask the user to fill this]"), "{}", s.text);
+        assert!(!s.text.contains("123456789"), "{}", s.text);
+    }
+
+    #[test]
+    fn a_frame_that_isnt_shown_says_why_on_its_own_line() {
+        let (top, mut frame) = frame_page();
+        frame.note = Some("not shown: over the frame limit".into());
+        frame.nodes.clear();
+        let s = render_with_frames(&top, &HashMap::new(), None, "", &[frame]);
+        assert!(s.text.contains("- Iframe \"Application form\" [frame=f1 not shown: over the frame limit]"), "{}", s.text);
+        assert!(!s.text.contains("Step 3"));
+    }
+
+    #[test]
+    fn a_frame_inside_a_frame_nests_and_numbers_its_own_references() {
+        let (top, outer) = frame_page();
+        let mut outer = outer;
+        // The outer frame's tree gets an iframe of its own (backend 12) ...
+        outer.nodes.push(n("deep", Some("r"), "Iframe", "Inner", Some(12), &[]));
+        outer.nodes[0]["childIds"] = json!(["h", "t", "go", "deep"]);
+        // ... holding a text field.
+        let inner = FrameTree {
+            ordinal: 2,
+            parent: 1,
+            owner_backend: Some(12),
+            origin: "https://other.example".into(),
+            cross_origin: true,
+            nodes: vec![
+                n("r", None, "RootWebArea", "", Some(1), &["x"]),
+                n("x", Some("r"), "textbox", "City", Some(20), &[]),
+            ],
+            facts: HashMap::from([(20, DomFacts { local_name: "input".into(), attrs: HashMap::new(), label: String::new() })]),
+            note: None,
+        };
+        let s = render_with_frames(&top, &HashMap::new(), None, "", &[outer, inner]);
+        assert!(s.text.contains("    - textbox \"City\" [ref=f2e1]"), "{}", s.text);
+        assert!(s.text.contains("  - Iframe \"Inner\" [frame=f2 origin=https://other.example cross-origin]"), "{}", s.text);
+    }
+
+    #[test]
+    fn an_iframe_with_no_frame_read_stays_a_bare_line() {
+        let (top, _) = frame_page();
+        let s = render_with_frames(&top, &HashMap::new(), None, "", &[]);
+        assert!(s.text.contains("- Iframe \"Application form\"\n"), "{}", s.text);
+        assert!(s.ref_frames.is_empty());
     }
 
     #[test]
