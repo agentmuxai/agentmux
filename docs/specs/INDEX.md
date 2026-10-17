@@ -609,6 +609,7 @@ partial list.
 | [`SPEC_BROWSER_AND_EDITOR_PANES_2026_04_16`](SPEC_BROWSER_AND_EDITOR_PANES_2026_04_16.md) | SPEC: Browser and Editor Panes |
 | [`SPEC_BROWSER_PANE_BYPASS_2026_10_16`](SPEC_BROWSER_PANE_BYPASS_2026_10_16.md) | SPEC: Bypass: the person lets the agent act without asking in one browser pane |
 | [`SPEC_BROWSER_PANE_DOWNLOADS_2026_10_14`](SPEC_BROWSER_PANE_DOWNLOADS_2026_10_14.md) | SPEC: Downloads in a browser pane open the system "Save as" dialog |
+| [`SPEC_BROWSER_PANE_FORMS_IN_FRAMES_AND_VISUAL_FALLBACK_2026_10_16`](SPEC_BROWSER_PANE_FORMS_IN_FRAMES_AND_VISUAL_FALLBACK_2026_10_16.md) | SPEC: agents fill forms inside iframes, with a visual fallback for what the snapshot can't see |
 | [`SPEC_BROWSER_PANE_INPUT_OWNER_2026_10_15`](SPEC_BROWSER_PANE_INPUT_OWNER_2026_10_15.md) | Browser pane input owner: one state machine per window |
 | [`SPEC_BROWSER_PANE_NATIVE_POPUPS_AGENT_DRIVEN_2026_10_08`](SPEC_BROWSER_PANE_NATIVE_POPUPS_AGENT_DRIVEN_2026_10_08.md) | SPEC: A browser pane's new windows open the way the page asked, and the agent that owns the opener drives them |
 | [`SPEC_BROWSER_PANE_NAV_BAR_RESPONSIVE_AND_CHROME_ZOOM_2026_10_14`](SPEC_BROWSER_PANE_NAV_BAR_RESPONSIVE_AND_CHROME_ZOOM_2026_10_14.md) | SPEC: The browser pane's nav bar stacks in thin panes and follows chrome zoom |
@@ -757,7 +758,6 @@ partial list.
 | [`SPEC_ASK_USER_QUESTION_TIMEOUT_KEYBOARD_PAUSE_2026_08_20`](SPEC_ASK_USER_QUESTION_TIMEOUT_KEYBOARD_PAUSE_2026_08_20.md) | SPEC: Keyboard-driven pause for the AskUserQuestion auto-timeout countdown |
 | [`SPEC_AUTH_CHECK_FALSE_POSITIVE_2026_04_15`](SPEC_AUTH_CHECK_FALSE_POSITIVE_2026_04_15.md) | SPEC: Auth Check False Positive — "authenticated as max" on Load |
 | [`SPEC_BROWSER_PANE_FAVICON_TITLE_2026-05-15`](SPEC_BROWSER_PANE_FAVICON_TITLE_2026-05-15.md) | Browser Pane: Live Favicon + Page Title in Pane Header |
-| [`SPEC_BROWSER_PANE_FORMS_IN_FRAMES_AND_VISUAL_FALLBACK_2026_10_16`](SPEC_BROWSER_PANE_FORMS_IN_FRAMES_AND_VISUAL_FALLBACK_2026_10_16.md) | SPEC: agents fill forms inside iframes, with a visual fallback for what the snapshot can't see |
 | [`SPEC_BROWSER_PANE_IDENTITIES_2026_09_22`](SPEC_BROWSER_PANE_IDENTITIES_2026_09_22.md) | Spec: Browser pane identities — shared by default, private (unique incognito) per pane tab, named profiles later |
 | [`SPEC_CEF_148_LINUX_FORWARD_PORT_2026_06_04`](SPEC_CEF_148_LINUX_FORWARD_PORT_2026_06_04.md) | CEF 148 — Linux Drag/Right-Click/Transparency Forward-Port |
 | [`SPEC_CEF_SANDBOX_2026_06_20`](SPEC_CEF_SANDBOX_2026_06_20.md) | SPEC: Enable CEF Renderer Sandbox |
