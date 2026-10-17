@@ -255,3 +255,19 @@ async fn windows_are_kept_at_startup_unless_a_quit_saved_them() {
     let client = state.mstore.get_all::<Client>().unwrap().into_iter().next().unwrap();
     assert_eq!(client.windowids, vec![id]);
 }
+
+#[tokio::test]
+async fn an_older_quits_record_never_costs_a_later_run_its_windows() {
+    let state = test_state();
+    no_windows(&state);
+    window(&state, "main", "agent", 0, 0).await;
+    save_last_session_snapshot(&state.mstore, snapshot_session(&state.mstore, true).unwrap());
+    // The next run's restore never finished, so the record stayed; that run
+    // has its own windows when it crashes.
+    no_windows(&state);
+    let (later, later_ws) = window(&state, "main-2", "memory", 0, 0).await;
+    assert_eq!(forget_windows_left_by_quit(&state.mstore), 0);
+    let client = state.mstore.get_all::<Client>().unwrap().into_iter().next().unwrap();
+    assert_eq!(client.windowids, vec![later]);
+    assert!(state.mstore.get::<Workspace>(&later_ws).unwrap().is_some());
+}
