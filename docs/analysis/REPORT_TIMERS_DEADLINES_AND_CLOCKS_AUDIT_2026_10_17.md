@@ -1,6 +1,6 @@
 # Report: timers, deadlines and clocks across AgentMux, and how to make them one system
 
-**Status:** analysis. Written 2026-10-17; the code reading is checked against `main` at 8525dbdb0. Nothing is changed yet.
+**Status:** analysis. Written 2026-10-17; the code reading is checked against `main` at 8525dbdb0. Phase 0 (§7) is under way: the frontend half in #5068.
 **Author:** Camper@narko, at the operator's request
 **Trigger (operator, 2026-10-17):** "Let's take a closer look as to whether this needs a greater framework to operate within, in fact I thought we already had a timer system. Audit the entire codebase to ensure it is cohesive, write a report on how it can be improved." It follows [`RCA_QUESTION_TIMEOUT_DOES_NOT_FIRE_IN_HIDDEN_PANES_2026_10_17.md`](RCA_QUESTION_TIMEOUT_DOES_NOT_FIRE_IN_HIDDEN_PANES_2026_10_17.md).
 **Method:** four sweeps of the whole repository:

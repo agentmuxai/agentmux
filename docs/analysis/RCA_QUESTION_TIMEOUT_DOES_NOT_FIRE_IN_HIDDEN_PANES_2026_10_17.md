@@ -1,6 +1,6 @@
 # RCA: the question auto-timeout never fires for an agent in a pane that isn't visible
 
-**Status:** analysis. Written 2026-10-17; the code reading is checked against `main` at 8525dbdb0. Nothing is changed yet.
+**Status:** analysis. Written 2026-10-17; the code reading is checked against `main` at 8525dbdb0. Option A is implemented in #5068; option B is Phase 1 of [`REPORT_TIMERS_DEADLINES_AND_CLOCKS_AUDIT_2026_10_17.md`](REPORT_TIMERS_DEADLINES_AND_CLOCKS_AUDIT_2026_10_17.md).
 **Author:** Camper@narko, at the operator's request
 **Trigger (operator, 2026-10-17):** "I notice that the auto does not select in cases where the agent asks the question from a non-visible pane. The timeout should trigger regardless of if the agent is visible or not."
 **Related:** [`SPEC_ASK_USER_QUESTION_AUTO_TIMEOUT_2026_08_06.md`](../specs/SPEC_ASK_USER_QUESTION_AUTO_TIMEOUT_2026_08_06.md) (the feature and its goal), [`SPEC_AGENT_PANE_TAB_KEEPALIVE_2026_09_18.md`](../specs/SPEC_AGENT_PANE_TAB_KEEPALIVE_2026_09_18.md) §2 and §3 (where the pause was added), [`SPEC_SWARM_QUESTION_STATE_AND_QUESTION_TIMEOUT_ACTIVITY_2026_10_02.md`](../specs/SPEC_SWARM_QUESTION_STATE_AND_QUESTION_TIMEOUT_ACTIVITY_2026_10_02.md) (the shared timer), [`SPEC_PANE_TAB_CONTRACT_V1_2026_09_24.md`](../specs/SPEC_PANE_TAB_CONTRACT_V1_2026_09_24.md) (the visibility signal)
