@@ -700,7 +700,7 @@ pub async fn dispatch_key(
         }
     }
 
-    // Never type into, or erase, a password, one-time-code or card field
+    // Never type into, or erase, a password, one-time-code, card or tax-ID field
     // (SPEC_AGENT_DRIVEN_BROWSER_PANES_2026_10_07.md §5.1): text, and the
     // named keys that write or delete. Only for a dedicated browser pane:
     // AgentMux's own panes have no such fields.
