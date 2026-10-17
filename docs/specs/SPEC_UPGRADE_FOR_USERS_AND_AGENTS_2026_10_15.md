@@ -73,6 +73,15 @@ an agent asking for something that affects the user),
 - **When:** 60 s after srv starts, then every 6 h while running. Never
   during startup, never blocking anything (fast-startup §5). Offline,
   rate-limited or any error means "no news", not a retry loop.
+- **On demand** (`update_check::check_now`): Maintenance's **Check for
+  update** (`app.update-check`), the `App` tool's `version`
+  (`GET /api/v1/app/update-status?check=1`) and its `upgrade` ask GitHub at
+  once, even with the periodic check off, at most every 30 s between them
+  (GitHub allows 60 unauthenticated requests an hour); asked again sooner,
+  they answer what the last check found. A failed check says why. With no
+  newer release known, Maintenance says where this one stands ("v0.59.28 is
+  up to date", "Not checked for updates yet", "Automatic update checks are
+  off") beside the button.
 - **What's kept** (`backend::update_check::AppUpdateStatus`): this build's
   version, the latest release's version, page and notes (the release body,
   which is the `VERSION_HISTORY.md` section, up to 16 KB), when it was
@@ -82,12 +91,26 @@ an agent asking for something that affects the user),
   later. States: `up-to-date`, `available`, `local-build`, `off` (the check
   is turned off) and `unknown` (not checked yet). Phase 3 adds the download
   states.
-- **Setting:** `app:updatecheck` (on by default; off means no request is
-  ever made). It is re-read every minute: turning it off clears the chip at
-  once, turning it on checks at once.
-- **Local and dev builds** (`task package`, `task dev`; channel `local-…` or
-  `dev-…`) don't offer an update: they aren't released versions. The panel
-  says "Local build. The latest release is v0.59.27." and links the release.
+- **Setting:** `app:updatecheck` (on by default; off means no periodic
+  request is made, only the ones asked for above). It is re-read every
+  minute: turning it off clears the chip at once, turning it on checks at once.
+- **Local builds upgrade too.** Agents develop AgentMux and run what they
+  build, so a portable from `task package` (channel `local-…`) compares
+  versions like a release: a 0.59.60 local portable is offered 0.59.61 once
+  it is published, to the user and to an agent alike, through the same flow.
+  Only a `task dev` build (channel `dev-…`), which runs from source, doesn't
+  upgrade; the panel says "Development build. The latest release is
+  v0.59.27." and links the release.
+- **The upgrade keeps the data it came from.** A local build's windows,
+  agents and settings are in its own channel, and a release is built for
+  `stable`, so the unpack records this AgentMux's channel in the new folder
+  (`runtime/agentmux-channel`, `update_download.rs`), and every binary in a
+  portable folder opens the channel it records
+  (`agentmux_common::runtime_mode::recorded_channel`): after an explicit
+  `AGENTMUX_CHANNEL`, before the build-time one. Carry-forward, restoring
+  every window and the agents' note then work as for a release. A staged
+  folder recording another channel (two AgentMux side by side upgrading to
+  the same release) isn't shared: a copy is unpacked beside it.
 
 ## 4. Applying it
 
