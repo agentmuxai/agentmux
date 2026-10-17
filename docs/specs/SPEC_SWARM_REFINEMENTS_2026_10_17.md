@@ -1,6 +1,6 @@
 # Spec: Swarm refinements — the selection count, provider icons on remote agents, broadcast to remote agents
 
-**Status:** active. §2 (the selection count) and §5 (one list) shipped in #5055, §3 (provider icons) in #5057; §4.2 (LAN broadcast) follows in its own PR. The owner said "ok lets build it" (2026-10-17) to the recommendations in §7: D1, D2 and D5 yes, D3 not now.
+**Status:** active. Shipped: §2 (the selection count) and §5 (one list) in #5055, §3 (provider icons) in #5057, §4.2 (LAN broadcast) in #5060. Left: broadcast to cloud-only installs (§6 phase 4), which waits on the Swarm's cloud tier. The owner said "ok lets build it" (2026-10-17) to the recommendations in §7: D1, D2 and D5 yes, D3 not now.
 **Date:** 2026-10-17
 **Author:** Lazo
 **Verified against:** `agentmux` `main` @ `ae0fbb2b3` (2026-10-17), by reading code.
