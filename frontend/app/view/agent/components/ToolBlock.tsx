@@ -44,7 +44,7 @@ import { useTick } from "@/app/hook/useTick";
 import { estimateTokenCount, formatCompactNumber } from "@/util/format-count";
 import { formatExactTime, formatTimeAgo } from "@/util/format-time";
 import clsx from "clsx";
-import { Show, createEffect, createMemo, createSignal, untrack, type JSX } from "solid-js";
+import { Show, createEffect, createMemo, createSignal, onCleanup, untrack, type JSX } from "solid-js";
 import { useNodePeek } from "../hooks/useNodePeek";
 import type { AgentDispatch } from "../../swarm/swarm-model";
 import { OpenInEditorButton } from "../agent-open-in-editor";
@@ -279,9 +279,14 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
     // (SPEC_AGENT_PANE_TOOL_RESULT_UNLOADING_2026_10_01.md §3.4).
     const hasResult = (): boolean => props.node.result != null || props.node.resultUnloaded != null;
     const loadResult = useToolResultLoader();
+    let panelEl: HTMLDivElement | undefined;
+    /** The result body's height when its text last left memory; 0 if unknown. */
+    let unloadedBodyPx = 0;
     const [loadState, setLoadState] = createSignal<"idle" | "loading" | "failed">("idle");
+    // Not while the pane is hidden: a hidden pane's held rows stay open but may
+    // have their text unloaded (useLiveFeedRollOff), and read it back on show.
     createEffect(() => {
-        if (!expanded() || !props.node.resultUnloaded || !loadResult || untrack(loadState) !== "idle") return;
+        if (dormant() || !expanded() || !props.node.resultUnloaded || !loadResult || untrack(loadState) !== "idle") return;
         setLoadState("loading");
         void loadResult(props.node).then((ok) => setLoadState(ok ? "idle" : "failed"));
     });
@@ -609,6 +614,7 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
                  * remove it from the focus/a11y tree when hidden.
                  */}
                 <div
+                    ref={panelEl}
                     class={clsx("agent-tool-panel", {
                         "agent-tool-panel--hidden": panelMode() === "hidden",
                         "agent-tool-panel--flow": panelMode() === "flow",
@@ -649,14 +655,28 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
                         <Show
                             when={!props.node.resultUnloaded}
                             fallback={
-                                <div class="agent-tool-result-unloaded">
+                                // As tall as the body it stands in for, so a held row
+                                // whose text left memory in a hidden pane doesn't
+                                // shrink and move the rows below it while it reads back.
+                                <div
+                                    class="agent-tool-result-unloaded"
+                                    style={unloadedBodyPx > 0 ? { "min-height": `${unloadedBodyPx}px` } : undefined}
+                                >
                                     {loadState() === "failed"
                                         ? "This result is no longer available in the pane. Open History to see it."
                                         : "Loading result…"}
                                 </div>
                             }
                         >
-                            <ToolBlockOverlay node={props.node} dispatchMatch={props.dispatchMatch} open={bodyShowing()} dormant={dormant()} onOverflowChange={setScrolls} />
+                            {(() => {
+                                // Its height just before the result unloads (the old
+                                // nodes are still in place when this branch is disposed).
+                                onCleanup(() => {
+                                    const body = panelEl?.querySelector<HTMLElement>(".agent-tool-overlay");
+                                    unloadedBodyPx = body?.offsetHeight ?? 0; // perf:allow-layout-read — once, as the result unloads
+                                });
+                                return <ToolBlockOverlay node={props.node} dispatchMatch={props.dispatchMatch} open={bodyShowing()} dormant={dormant()} onOverflowChange={setScrolls} />;
+                            })()}
                         </Show>
                     </Show>
                 </div>
