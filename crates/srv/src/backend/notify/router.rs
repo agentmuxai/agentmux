@@ -153,9 +153,6 @@ pub fn is_supervised_block(store: &Store, block_id: &str) -> bool {
         .is_some_and(|b| crate::backend::supervisor::is_supervised(&b.meta))
 }
 
-/// How long after a user Stop the turn-ended transition it causes is treated
-/// as "the user's own action", not "finished".
-const STOP_GRACE_MS: i64 = 15_000;
 /// Cap on tracked blocks' turn state (see `Internal::TurnStatus` handling).
 const TURN_MAP_MAX: usize = 1024;
 
@@ -303,8 +300,6 @@ pub struct Router {
     last_tray: Mutex<Option<TrayState>>,
     /// block_id → last `turn_active` seen in `controllerstatus`.
     turn_active: Mutex<std::collections::HashMap<String, bool>>,
-    /// block_id → when the user last stopped its turn (epoch ms).
-    stopped_at: Mutex<std::collections::HashMap<String, i64>>,
     /// (block_id, turn_id, ended_at_ms) of turn ends already notified.
     notified_turns: Mutex<std::collections::HashSet<(String, u64, u64)>>,
 }
@@ -349,7 +344,6 @@ pub fn init(
                 internal: tx,
                 last_tray: Mutex::new(None),
                 turn_active: Mutex::new(Default::default()),
-                stopped_at: Mutex::new(Default::default()),
                 notified_turns: Mutex::new(Default::default()),
             });
             spawn_ticker(Arc::downgrade(&r));
@@ -455,12 +449,7 @@ fn spawn_internal(r: std::sync::Weak<Router>, mut rx: tokio::sync::mpsc::Unbound
                             continue;
                         }
                     }
-                    let stopped_recently = r
-                        .stopped_at
-                        .lock()
-                        .unwrap_or_else(|e| e.into_inner())
-                        .get(&end.block_id)
-                        .is_some_and(|t| now_ms() - *t < STOP_GRACE_MS);
+                    let stopped_recently = crate::backend::user_stop::stopped_recently(&end.block_id);
                     if stopped_recently || !notify_turn_end(&end, r.settings().external_turns) {
                         continue;
                     }
@@ -476,16 +465,8 @@ fn spawn_internal(r: std::sync::Weak<Router>, mut rx: tokio::sync::mpsc::Unbound
                     })
                     .await;
                 }
-                Internal::TurnStopped { block_id } => {
-                    {
-                        let mut stopped = r.stopped_at.lock().unwrap_or_else(|e| e.into_inner());
-                        // Bounded: entries past the grace window can't matter.
-                        let now = now_ms();
-                        stopped.retain(|_, t| now - *t < STOP_GRACE_MS);
-                        stopped.insert(block_id.clone(), now);
-                    }
-                    r.resolve(&block_id, Family::Turn);
-                }
+                // The stop itself is already recorded (`backend::user_stop`).
+                Internal::TurnStopped { block_id } => r.resolve(&block_id, Family::Turn),
                 Internal::TurnStatus { block_id, active } => {
                     let prev = {
                         let mut turns = r.turn_active.lock().unwrap_or_else(|e| e.into_inner());
@@ -496,17 +477,12 @@ fn spawn_internal(r: std::sync::Weak<Router>, mut rx: tokio::sync::mpsc::Unbound
                         }
                         turns.insert(block_id.clone(), active)
                     };
-                    let stopped_recently = r
-                        .stopped_at
-                        .lock()
-                        .unwrap_or_else(|e| e.into_inner())
-                        .get(&block_id)
-                        .is_some_and(|t| now_ms() - *t < STOP_GRACE_MS);
+                    let stopped_recently = crate::backend::user_stop::stopped_recently(&block_id);
                     match turn_transition(prev, active, stopped_recently) {
                         TurnTransition::Started => {
                             // A new turn: the earlier stop no longer applies
                             // to it (Codex P2 on #3705).
-                            r.stopped_at.lock().unwrap_or_else(|e| e.into_inner()).remove(&block_id);
+                            crate::backend::user_stop::forget(&block_id);
                             r.resolve(&block_id, Family::Turn)
                         }
                         // Notified from the turn's ledger instead
@@ -836,8 +812,9 @@ impl Router {
         let _ = self.internal.send(Internal::InputWaiting { block_id: block_id.to_string(), question, count });
     }
 
-    /// The user stopped this block's turn: cancel "finished" for it, and don't
-    /// turn the resulting turn-end into one (queued, ordered).
+    /// The user stopped this block's turn: cancel "finished" for it (queued,
+    /// ordered). The caller records the stop (`backend::user_stop`), which
+    /// keeps the resulting turn end from becoming a new one.
     pub fn turn_stopped_nonblocking(&self, block_id: &str) {
         let _ = self.internal.send(Internal::TurnStopped { block_id: block_id.to_string() });
     }

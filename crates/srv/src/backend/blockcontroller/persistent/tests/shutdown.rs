@@ -250,3 +250,21 @@ async fn stubborn_process_is_killed_at_the_deadline() {
     assert!(elapsed < std::time::Duration::from_secs(4), "killed late: {elapsed:?}");
     let _ = std::fs::remove_file(stub);
 }
+
+/// The watchdog's inputs for a persistent agent: its status carries the spawn
+/// time (the max-runtime limit), and its stdout stamps the last output (the
+/// idle limit). Both were missing, so neither limit ever acted on it.
+#[tokio::test]
+async fn a_running_agent_reports_its_spawn_time_and_last_output() {
+    let Some(stub) = stub_path() else { return };
+    let (c, _broker) = start("blk-watchdog-stamps", "turn", &stub);
+    wait_for_pid(&c).await; // the stub's init line has been read
+    let status = c.get_runtime_status();
+    let spawned = status.spawn_ts_ms.expect("a running agent reports when it was spawned");
+    let output = c.last_output_ms().expect("its stdout stamps the last output");
+    assert!(output >= spawned, "output {output} before spawn {spawned}");
+    assert!(status.turn_active);
+    assert!(c.turn_tracker().and_then(|t| t.pass_started_ms()).is_some(), "the turn's start is known");
+    let _ = c.shutdown(std::time::Instant::now() + std::time::Duration::from_secs(5)).await;
+    let _ = std::fs::remove_file(stub);
+}

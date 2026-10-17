@@ -385,6 +385,15 @@ pub trait Controller: Send + Sync {
         None
     }
 
+    /// When this agent last wrote output (unix ms), for the watchdog's idle
+    /// limit. Read from the turn tracker, which the persistent, ACP, MSP and
+    /// App Server controllers stamp from their stdout or protocol frames;
+    /// `None` for controllers that don't. The shell controller reports its
+    /// PTY output itself (`ShellController::last_output_secs_ago`).
+    fn last_output_ms(&self) -> Option<i64> {
+        self.turn_tracker().and_then(|t| t.last_output_ms())
+    }
+
     /// Refresh this block's own captured jekt/muxbus identity (see
     /// [`agent_id`](Controller::agent_id)'s doc comment). Called whenever
     /// `ReactiveHandler::register_agent`/`register_agent_with_nonce`
@@ -1190,8 +1199,17 @@ pub fn publish_controller_status(
     broker.publish_event::<super::mps_events::ControllerStatus>(status, vec![format!("block:{}", status.blockid)], 1);
 }
 
-/// The status an agent-CLI controller reports: a local agent pane with no PID,
-/// program name or spawn time, so only these five fields vary between sites.
+impl BlockControllerRuntimeStatus {
+    /// This status with the process's spawn time (`TurnActivityTracker::spawned_at_ms`).
+    pub(crate) fn spawned_at(mut self, spawn_ts_ms: Option<i64>) -> Self {
+        self.spawn_ts_ms = spawn_ts_ms;
+        self
+    }
+}
+
+/// The status an agent-CLI controller reports: a local agent pane with no PID
+/// or program name, so only these five fields vary between sites. Its own
+/// snapshot adds the spawn time ([`BlockControllerRuntimeStatus::spawned_at`]).
 pub(crate) fn agent_runtime_status(
     block_id: &str,
     version: i32,

@@ -226,6 +226,7 @@ impl AppServerController {
                     }
                 };
                 if let Some(controller) = weak.as_ref().and_then(Weak::upgrade) {
+                    controller.health_monitor.note_output();
                     controller.publish_protocol_frame(frame, global_zone.as_deref());
                     match incoming {
                         notification @ AppServerIncoming::Notification { .. } => {
@@ -429,6 +430,7 @@ impl Controller for AppServerController {
         let process_for_task = process.clone();
         let weak = self.self_ref.lock().unwrap().clone();
         self.inner.lock().unwrap().process = Some(process.clone());
+        self.health_monitor.note_spawned();
         self.set_status(STATUS_RUNNING);
         tokio::spawn(async move {
             let Some(controller) = weak.and_then(|weak| Weak::upgrade(&weak)) else {
@@ -522,6 +524,7 @@ impl Controller for AppServerController {
             inner.proc_exit_code,
             self.health_monitor.is_active_turn(),
         )
+        .spawned_at(self.health_monitor.spawned_at_ms())
     }
 
     fn send_input(&self, input: BlockInputUnion, _seq: Option<u64>) -> Result<(), String> {
@@ -875,6 +878,31 @@ mod tests {
         // as long as it's reading — `kill_on_drop` never fires without an
         // explicit stop, which would otherwise leak the child for the rest of
         // this test binary's run.
+        controller.stop(true, STATUS_DONE).unwrap();
+    }
+
+    /// The watchdog's inputs: the status carries the spawn time (max-runtime
+    /// limit) and each protocol frame stamps the last output (idle limit).
+    #[tokio::test]
+    async fn the_status_carries_the_spawn_time_and_frames_stamp_the_last_output() {
+        let (controller, _broker) = controller_with_broker();
+        assert_eq!(controller.get_runtime_status().spawn_ts_ms, None, "not spawned yet");
+        controller
+            .start(app_server_meta("requeue-after-turn-completes"), None, false)
+            .unwrap();
+        assert!(controller.get_runtime_status().spawn_ts_ms.is_some());
+
+        let session_ready = wait_until(
+            || controller.inner.lock().unwrap().session.is_some(),
+            Duration::from_secs(5),
+        )
+        .await;
+        assert!(session_ready, "controller session was never established");
+        controller.send_message("first message".to_string()).unwrap();
+        // The fixture answers the turn with a `turn/completed` notification.
+        let stamped = wait_until(|| controller.last_output_ms().is_some(), Duration::from_secs(5)).await;
+        assert!(stamped, "a protocol frame never stamped the last output");
+
         controller.stop(true, STATUS_DONE).unwrap();
     }
 

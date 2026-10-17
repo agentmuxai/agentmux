@@ -228,8 +228,10 @@ pub fn register_notify_handlers(engine: &Arc<WshRpcEngine>, state: &AppState, co
                 // router `TurnStatus`), not from the renderer.
                 NotifyPaneEvent::TurnStarted | NotifyPaneEvent::TurnCompleted | NotifyPaneEvent::TurnErrored => {}
                 NotifyPaneEvent::TurnStopped => {
-                    // The Swarm Supervisor must not continue a turn the user stopped.
-                    crate::backend::supervisor::note_user_stop(&p.block_id);
+                    // One record for both readers: the router sends no
+                    // "finished" for the turn end, and the Swarm Supervisor
+                    // doesn't continue it.
+                    crate::backend::user_stop::note_user_stop(&p.block_id);
                     r.turn_stopped_nonblocking(&p.block_id)
                 }
                 NotifyPaneEvent::InputResolved => r.resolve_nonblocking(&p.block_id, Family::Input),
