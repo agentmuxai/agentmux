@@ -56,7 +56,7 @@ impl Kind {
             Kind::Navigation => format!(
                 "the page in pane {pane:?} tried to leave its allowed_origins and the user is being asked whether to allow it"
             ),
-            Kind::Bypass => format!("pane {pane:?} is asking the user whether you may act without asking"),
+            Kind::Bypass => format!("pane {pane:?} is asking the user whether to auto-approve your clicks"),
         };
         let until = if self == Kind::Handoff { "they click Done or Cancel" } else { "they answer" };
         format!("{why}; your tools on it are paused until {until}")

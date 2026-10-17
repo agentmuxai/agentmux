@@ -916,7 +916,7 @@ export class BrowserViewModel {
     setBypass(on: boolean, minutes?: number): Promise<void> {
         const approvals = getApi().approvals;
         if (typeof approvals?.setBrowserBypass !== "function") {
-            return Promise.reject(new Error("This build of AgentMux can't turn bypass on."));
+            return Promise.reject(new Error("This build of AgentMux can't turn auto-approve on."));
         }
         return approvals.setBrowserBypass(
             this.blockId,

@@ -116,14 +116,14 @@ pub(crate) async fn handle_ui_browser_request_bypass(
     if !is_browser || crate::server::browser_owner::owner_of(&pane).is_none() {
         return err_response(
             StatusCode::BAD_REQUEST,
-            "Browser's request_bypass action needs a browser pane you opened: pass the `pane` its open action returned".to_string(),
+            "Browser's request_auto_approve action needs a browser pane you opened: pass the `pane` its open action returned".to_string(),
         );
     }
     if let Some(left) = bypass::cooling_down(&pane) {
         return err_response(
             StatusCode::TOO_MANY_REQUESTS,
             format!(
-                "the user said No to bypass on this pane; don't ask again for {} more minutes. Carry on with \
+                "the user said No to auto-approve on this pane; don't ask again for {} more minutes. Carry on with \
                  per-click approvals, or ask them in chat",
                 left.as_secs().div_ceil(60)
             ),
@@ -164,7 +164,7 @@ pub(crate) async fn handle_ui_browser_request_bypass(
     let answer = match answer {
         // A Take over while the banner was up wins over an Allow after it.
         Answer::Yes if crate::server::browser_owner::owner_of(&pane) != owner_before => {
-            return err_response(StatusCode::FORBIDDEN, "the user took over this pane, so no bypass was granted".to_string());
+            return err_response(StatusCode::FORBIDDEN, "the user took over this pane, so auto-approve wasn't turned on".to_string());
         }
         Answer::Yes => return granted(&bypass::grant(&state, &pane, &agent, origins, minutes)),
         Answer::Cancelled => {
@@ -206,7 +206,7 @@ pub(crate) async fn handle_host_browser_bypass(
     Json(body): Json<serde_json::Value>,
 ) -> impl IntoResponse {
     if !from_host(&state, &headers).await {
-        return err_response(StatusCode::FORBIDDEN, "only the AgentMux host can turn bypass on or off".to_string());
+        return err_response(StatusCode::FORBIDDEN, "only the AgentMux host can turn auto-approve on or off".to_string());
     }
     let s = |k: &str| body.get(k).and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
     let block_id = s("block_id");

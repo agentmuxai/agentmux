@@ -258,7 +258,7 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
                                         {a().kind === "handoff"
                                             ? "needs you: "
                                             : a().kind === "bypass"
-                                              ? "asks to act without asking you first: "
+                                              ? "asks you to auto-approve its clicks: "
                                               : "wants to: "}
                                         {a().kind === "handoff" || a().kind === "bypass" ? a().reason : a().what}
                                     </span>
@@ -288,7 +288,7 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
                                 On <b>{(a().origins ?? []).map(siteLabel).join(", ")}</b>, for{" "}
                                 <b>{minutesLabel(a().minutes ?? 60)}</b>: its clicks that submit, delete or send go
                                 through without asking you. It still can't type passwords or codes or run scripts, and
-                                payments still ask. End it any time from the red strip.
+                                payments still ask. Stop it any time from the red strip.
                             </div>
                         </Show>
                         <Show when={a().window}>
@@ -325,7 +325,7 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
                                     : a().kind === "navigation"
                                       ? "Allow"
                                       : a().kind === "bypass"
-                                        ? "Allow without asking"
+                                        ? "Allow auto-approve"
                                         : "Approve"}
                             </Button>
                             <Button

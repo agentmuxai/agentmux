@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The header strip of an agent-driven browser pane: the red Bypass button
+ * The header strip of an agent-driven browser pane: the red Auto-approve button
  * next to Take over, its confirmation, and the red strip while it lasts.
  * docs/specs/SPEC_BROWSER_PANE_BYPASS_2026_10_16.md §3.
  */
@@ -33,10 +33,10 @@ function fakeModel(over: Partial<Record<string, unknown>> = {}) {
 }
 
 describe("DrivenByStrip", () => {
-    it("puts a red Bypass button next to Take over", () => {
+    it("puts a red Auto-approve button next to Take over", () => {
         const { model } = fakeModel();
         render(() => <DrivenByStrip model={model} agent="Naki" />);
-        const bypass = screen.getByText("Bypass").closest("button")!;
+        const bypass = screen.getByText("Auto-approve").closest("button")!;
         const takeOver = screen.getByText("Take over").closest("button")!;
         expect(bypass.className).toContain("ui-tone-danger");
         expect(bypass.nextElementSibling).toBe(takeOver);
@@ -45,10 +45,10 @@ describe("DrivenByStrip", () => {
     it("confirms with the sites and a duration, and grants only on a pointer click", () => {
         const { model, setBypass } = fakeModel();
         render(() => <DrivenByStrip model={model} agent="Naki" />);
-        fireEvent.click(screen.getByText("Bypass"));
-        expect(screen.getByRole("dialog", { name: "Turn on bypass" }).textContent).toContain("github.com");
+        fireEvent.click(screen.getByText("Auto-approve"));
+        expect(screen.getByRole("dialog", { name: "Turn on auto-approve" }).textContent).toContain("github.com");
         fireEvent.click(screen.getByText("4 hours"));
-        const turnOn = screen.getByText("Turn on bypass").closest("button")!;
+        const turnOn = screen.getByText("Turn on auto-approve").closest("button")!;
         // A key press on the focused button (detail 0) doesn't grant it.
         fireEvent.click(turnOn, { detail: 0 });
         expect(setBypass).not.toHaveBeenCalled();
@@ -56,25 +56,25 @@ describe("DrivenByStrip", () => {
         expect(setBypass).toHaveBeenCalledWith(true, 240);
     });
 
-    it("shows a red strip with End bypass while it lasts", () => {
+    it("shows a red strip with Stop auto-approve while it lasts", () => {
         const { model, setBypass, setBypassMeta } = fakeModel();
         render(() => <DrivenByStrip model={model} agent="Naki" />);
         setBypassMeta({ agent: "Naki", origins: ["https://github.com"], minutes: 60, expires_at: Date.now() + 3_600_000 });
         const strip = screen.getByRole("status");
         expect(strip.className).toContain("browser-driven-by--bypass");
-        expect(strip.textContent).toContain("acts without asking on github.com");
+        expect(strip.textContent).toContain("clicks go through without asking on github.com");
         expect(strip.textContent).toContain("42 min left");
-        expect(screen.queryByText("Bypass")).toBeNull();
-        fireEvent.click(screen.getByText("End bypass"));
+        expect(screen.queryByText("Auto-approve")).toBeNull();
+        fireEvent.click(screen.getByText("Stop auto-approve"));
         expect(setBypass).toHaveBeenCalledWith(false);
     });
 
-    it("shows a failed End bypass in the red strip", async () => {
+    it("shows a failed Stop auto-approve in the red strip", async () => {
         const { model, setBypass, setBypassMeta } = fakeModel();
         setBypass.mockRejectedValueOnce(new Error("srv is down"));
         render(() => <DrivenByStrip model={model} agent="Naki" />);
         setBypassMeta({ agent: "Naki", origins: ["https://github.com"], minutes: 60, expires_at: Date.now() + 3_600_000 });
-        fireEvent.click(screen.getByText("End bypass"));
-        expect((await screen.findByRole("alert")).textContent).toBe("Couldn't end bypass: srv is down");
+        fireEvent.click(screen.getByText("Stop auto-approve"));
+        expect((await screen.findByRole("alert")).textContent).toBe("Couldn't stop auto-approve: srv is down");
     });
 });

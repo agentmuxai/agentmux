@@ -2,9 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // The header strip of a browser pane an agent drives: who drives it, its site
-// limit, Take over, and Bypass (SPEC_BROWSER_PANE_BYPASS_2026_10_16.md §3).
+// limit, Take over, and Auto-approve (SPEC_BROWSER_PANE_BYPASS_2026_10_16.md §3;
+// the spec's "Bypass", renamed for people).
 //
-// Bypass's confirmation is a panel in the pane's own flow, not a floating
+// Auto-approve's confirmation is a panel in the pane's own flow, not a floating
 // popover: the page is a native window drawn over anything layered on it,
 // and the panel must stay inside the pane's DOM, where no other agent's UI
 // click can reach (spec §5).
@@ -34,11 +35,11 @@ export function DrivenByStrip(props: { model: BrowserViewModel; agent: string })
             .catch((err) => setError(String(err?.message ?? err)))
             .finally(() => setBusy(false));
     };
-    // A failed End bypass shows in the red strip itself: the confirmation,
-    // where other errors show, is hidden while a bypass is on.
+    // A failed Stop auto-approve shows in the red strip itself: the
+    // confirmation, where other errors show, is hidden while it is on.
     const end = () => {
         setError(undefined);
-        model.setBypass(false).catch((err) => setError(`Couldn't end bypass: ${String(err?.message ?? err)}`));
+        model.setBypass(false).catch((err) => setError(`Couldn't stop auto-approve: ${String(err?.message ?? err)}`));
     };
 
     return (
@@ -62,13 +63,13 @@ export function DrivenByStrip(props: { model: BrowserViewModel; agent: string })
                             tone="danger"
                             class="browser-bypass-button"
                             pressed={confirming()}
-                            title={`Let ${props.agent} act in this pane without asking you first.`}
+                            title={`Let ${props.agent}'s clicks in this pane go through without asking you first.`}
                             onClick={() => {
                                 setError(undefined);
                                 setConfirming(!confirming());
                             }}
                         >
-                            Bypass
+                            Auto-approve
                         </Button>
                         <Button
                             density="compact"
@@ -92,13 +93,13 @@ export function DrivenByStrip(props: { model: BrowserViewModel; agent: string })
                             when={!model.bypassPaused()}
                             fallback={
                                 <span>
-                                    <b>Bypass paused:</b> the page left {b().origins.map(siteLabel).join(", ")}, so{" "}
+                                    <b>Auto-approve paused:</b> the page left {b().origins.map(siteLabel).join(", ")}, so{" "}
                                     <b>{b().agent}</b> asks again here
                                 </span>
                             }
                         >
                             <span>
-                                <b>Bypass on:</b> <b>{b().agent}</b> acts without asking on{" "}
+                                <b>Auto-approve on:</b> <b>{b().agent}</b>'s clicks go through without asking on{" "}
                                 {b().origins.map(siteLabel).join(", ")} · {model.bypassMinutesLeft()} min left
                             </span>
                         </Show>
@@ -108,7 +109,7 @@ export function DrivenByStrip(props: { model: BrowserViewModel; agent: string })
                             </span>
                         </Show>
                         <Button density="compact" tone="danger" class="browser-bypass-end" onClick={end}>
-                            End bypass
+                            Stop auto-approve
                         </Button>
                         <Button
                             density="compact"
@@ -122,11 +123,11 @@ export function DrivenByStrip(props: { model: BrowserViewModel; agent: string })
                 )}
             </Show>
             <Show when={confirming() && !model.bypassAtom()}>
-                <div class="browser-bypass-confirm" role="dialog" aria-label="Turn on bypass">
+                <div class="browser-bypass-confirm" role="dialog" aria-label="Turn on auto-approve">
                     <div class="browser-bypass-confirm-head">
                         <i class="fa-solid fa-bolt" aria-hidden="true" />
                         <span>
-                            Let <b>{props.agent}</b> act without asking?
+                            Auto-approve <b>{props.agent}</b>'s clicks?
                         </span>
                     </div>
                     <Show
@@ -167,7 +168,7 @@ export function DrivenByStrip(props: { model: BrowserViewModel; agent: string })
                             disabled={sites().length === 0}
                             onClick={turnOn}
                         >
-                            Turn on bypass
+                            Turn on auto-approve
                         </Button>
                         <Button density="compact" onClick={() => setConfirming(false)}>
                             Cancel
