@@ -29,13 +29,14 @@
  * automatically, Dismiss cancels. Bounded by `AUTO_RETRY_BACKOFF_S` —
  * 5 rungs (5 s → 15 s → 30 s → 60 s → 120 s, each ±20% jittered), ~3.9 min
  * of coverage, then manual-only. See that constant for why the ladder is
- * this long and why it is nonetheless finite. The countdown pauses (not
- * resets) while this agent's own tab is dormant (backgrounded under
- * pane-tab-strip keep-alive) — see `isDormant` below — so a hidden tab never
- * auto-resends a turn nobody can see.
+ * this long and why it is nonetheless finite. The countdown runs whether or
+ * not the pane is visible, like the question timeout, so a transient failure in
+ * a background pane recovers on its own. It counts down to a fixed `retryAt`
+ * rather than decrementing per tick, so a throttled background window fires on
+ * time when its timer finally runs instead of falling behind.
  *
  * Spec: docs/specs/SPEC_AGENT_FAILURE_RECOVERY_UI_2026_06_16.md §4–§6,
- * docs/specs/SPEC_AGENT_PANE_TAB_KEEPALIVE_2026_09_18.md.
+ * docs/analysis/REPORT_TIMERS_DEADLINES_AND_CLOCKS_AUDIT_2026_10_17.md §4.2.
  */
 
 import { createEffect, createSignal, onCleanup, onMount, type Accessor } from "solid-js";
@@ -94,21 +95,6 @@ export interface UseAgentFailureOptions {
     blockId: string;
     /** Per-pane dispatch handle — default-safe against post-unmount races. */
     model: AgentPaneModel;
-    /**
-     * True while this agent's own tab is a hidden, kept-alive pane-tab-strip
-     * member (`block-component-registry.ts`'s `isBlockDormant`) rather than
-     * the one the user is currently looking at. Optional — defaults to
-     * "never dormant" for every pre-existing call site/test.
-     *
-     * Pauses the auto-retry countdown's ticking (see `armAutoRetry` below):
-     * a backgrounded tab must not silently re-send a turn to the CLI while
-     * nobody can see or cancel it. Ticking resumes exactly where it left off
-     * once the tab is visible again — this is a fixed backoff budget, not a
-     * "give the user a chance to notice" window like AgentQuestionPanel's
-     * auto-timeout, so there's no reason to restart it from scratch. See
-     * docs/specs/SPEC_AGENT_PANE_TAB_KEEPALIVE_2026_09_18.md.
-     */
-    isDormant?: Accessor<boolean>;
     /** Reactive read of the canonical `state.failure` (single source of
      *  truth, set by `FailureObserved` / cleared by `FailureCleared` or the
      *  next `TurnStart`). */
@@ -252,10 +238,10 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
         if (autoRetries >= AUTO_RETRY_BACKOFF_S.length) return; // capped → manual only
         const seconds = jitteredBackoffSeconds(AUTO_RETRY_BACKOFF_S[autoRetries]);
         autoRetries += 1;
+        const retryAt = Date.now() + seconds * 1000;
         setAutoRetryIn(seconds);
         countdown = setInterval(() => {
-            if (opts.isDormant?.()) return; // paused while backgrounded — resumes right where it left off once visible
-            const left = (autoRetryIn() ?? 1) - 1;
+            const left = Math.ceil((retryAt - Date.now()) / 1000);
             if (left <= 0) {
                 doRetry();
             } else {

@@ -30,11 +30,9 @@
  * key aren't activity, so nobody being there can't hold it forever, and
  * activity only defers the timeout, never cancels it (§5.1).
  *
- * Also paused for as long as this panel's own agent tab is a backgrounded,
- * kept-alive pane-tab-strip member (`isDormant` prop) — unbounded, since
- * there's no way for a user to "interact" with a tab they can't see. Re-arms
- * a fresh countdown on reveal. See
- * docs/specs/SPEC_AGENT_PANE_TAB_KEEPALIVE_2026_09_18.md.
+ * It runs whether or not the pane is visible: a question in a background pane
+ * tab or window tab is answered on time too, so a pending question never stalls
+ * work (docs/analysis/RCA_QUESTION_TIMEOUT_DOES_NOT_FIRE_IN_HIDDEN_PANES_2026_10_17.md).
  *
  * Spec: docs/specs/SPEC_ASK_USER_QUESTION_2026_06_15.md,
  * docs/specs/SPEC_ASK_USER_QUESTION_AUTO_TIMEOUT_2026_08_06.md,
@@ -52,7 +50,6 @@ import {
     questionCountdown,
     reconcileQuestionTimer,
     releaseQuestionTimer,
-    setQuestionTimerDormant,
     startQuestionTimer,
 } from "@/app/store/question-timer";
 import { usePanelKeys, type PanelKeyContext } from "./use-panel-keys";
@@ -107,6 +104,9 @@ export interface AnswerOutcome {
      *  some, timeout filled the rest" with "user never touched anything,"
      *  which matters for anyone auditing the transcript later. */
     autoFilledCount: number;
+    /** The timeout that filled them, when `autoFilledCount` > 0: the value of
+     *  `agent:askquestiontimeoutms` the timer ran with, for the transcript note. */
+    autoTimeoutMs?: number;
 }
 
 interface AgentQuestionPanelProps {
@@ -118,23 +118,6 @@ interface AgentQuestionPanelProps {
     pending: Accessor<ToolNode[]>;
     /** User answer. Caller advances the queue by transitioning the node. */
     onAnswer: (outcome: AnswerOutcome) => void | Promise<void>;
-    /**
-     * True while this panel's own agent tab is a hidden, kept-alive stack
-     * member (`block-component-registry.ts`'s `isBlockDormant`) — i.e. a
-     * background pane-tab-strip tab, not the one the user is currently
-     * looking at. Optional so every pre-existing call site/test (only ever
-     * one visible tab per pane before agent keep-alive existed) keeps
-     * working unchanged; defaults to "never dormant."
-     *
-     * Pauses the auto-timeout: a hidden tab must not silently auto-answer a
-     * question the user was never shown. Unlike the activity pause this
-     * isn't a bounded window — it pauses for exactly as long as the tab
-     * stays backgrounded and re-arms a fresh countdown the moment it's
-     * revealed again, matching "fresh retrigger, not resumed from wherever
-     * it was paused." See
-     * docs/specs/SPEC_AGENT_PANE_TAB_KEEPALIVE_2026_09_18.md.
-     */
-    isDormant?: Accessor<boolean>;
     /** Cancel — a real protocol-level decline (Cancel button / Escape), not a
      *  UI-only dismiss. Passed the declined question's `tool_use_id`, same
      *  pattern as `onAnswer` receiving the full outcome — the caller
@@ -238,7 +221,7 @@ export const AgentQuestionPanel = (props: AgentQuestionPanelProps): JSX.Element 
         return r.questions.every((_, i) => questionAnswered(i));
     });
 
-    const buildOutcome = (autoFilledCount: number): AnswerOutcome | null => {
+    const buildOutcome = (autoFilledCount: number, autoTimeoutMs?: number): AnswerOutcome | null => {
         const r = request();
         if (!r) return null;
         const answers: AskUserQuestionAnswer[] = r.questions.map((q, i) => {
@@ -263,15 +246,22 @@ export const AgentQuestionPanel = (props: AgentQuestionPanelProps): JSX.Element 
             else if (q.multiSelect) answers_map[q.question] = s.selected;
             else answers_map[q.question] = s.selected[0] ?? "";
         });
-        return { tool_use_id: r.tool_use_id, answers, answers_map, answer_text, autoFilledCount };
+        return {
+            tool_use_id: r.tool_use_id,
+            answers,
+            answers_map,
+            answer_text,
+            autoFilledCount,
+            ...(autoFilledCount > 0 && autoTimeoutMs != null ? { autoTimeoutMs } : {}),
+        };
     };
 
     // `autoFilledCount` defaults to 0 — every manual call site (the Submit
     // button, Enter-to-submit) leaves it unset. Only the timeout path below
     // passes a non-zero count.
-    const submit = (autoFilledCount = 0) => {
+    const submit = (autoFilledCount = 0, autoTimeoutMs?: number) => {
         if (!allAnswered()) return;
-        const outcome = buildOutcome(autoFilledCount);
+        const outcome = buildOutcome(autoFilledCount, autoTimeoutMs);
         if (outcome) void props.onAnswer(outcome);
     };
 
@@ -366,16 +356,15 @@ export const AgentQuestionPanel = (props: AgentQuestionPanelProps): JSX.Element 
                     endQuestionTimer(timerKey, { publish });
                     return;
                 }
+                const durationMs = autoTimeoutMs();
                 startQuestionTimer(timerKey, {
-                    durationMs: autoTimeoutMs(),
-                    onExpire: () => submit(applyRecommendedDefaults()),
-                    dormant: untrack(() => props.isDormant?.() ?? false),
+                    durationMs,
+                    onExpire: () => submit(applyRecommendedDefaults(), durationMs),
                     publish,
                 });
             }
         )
     );
-    createEffect(() => setQuestionTimerDormant(timerKey, props.isDormant?.() ?? false));
     // Keep the published copy in step with this panel's timer (Swarm question spec §2.2).
     if (publish) createEffect(() => reconcileQuestionTimer(timerKey));
     onCleanup(() => releaseQuestionTimer(timerKey));

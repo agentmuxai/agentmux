@@ -37,6 +37,7 @@ import { META_AWAITING_USER } from "@/app/store/swarm-line";
 import type { DocumentNode, ToolNode } from "../types";
 import type { AnswerOutcome } from "../components/AgentQuestionPanel";
 import type { LogFn } from "./useAgentControllerStatus";
+import { formatDurationShort } from "@/util/format-time";
 
 export interface UseAgentQuestionsOptions {
     blockId: string;
@@ -179,12 +180,15 @@ export function useAgentQuestions(opts: UseAgentQuestionsOptions): UseAgentQuest
         // `outcome.autoFilledCount`/`outcome.answers.length` directly,
         // makes that whole class of bug impossible — there's no string to
         // misparse.
+        // The timeout the panel actually ran with (`agent:askquestiontimeoutms`).
+        const noResponse =
+            outcome.autoTimeoutMs != null ? `no response in ${formatDurationShort(outcome.autoTimeoutMs)}` : "no response";
         const timeoutNote =
             outcome.autoFilledCount === 0
                 ? undefined
                 : outcome.autoFilledCount === outcome.answers.length
-                  ? "⏱️ Auto-answered (no response in 30s)"
-                  : `⏱️ Partly auto-answered (${outcome.autoFilledCount}/${outcome.answers.length} — no response in 30s)`;
+                  ? `⏱️ Auto-answered (${noResponse})`
+                  : `⏱️ Partly auto-answered (${outcome.autoFilledCount}/${outcome.answers.length} — ${noResponse})`;
         const summary =
             outcome.autoFilledCount === 0 ? `❓ Answered — ${flatText}` : `${timeoutNote} — ${flatText}`;
         const originals: ToolNode[] = [];

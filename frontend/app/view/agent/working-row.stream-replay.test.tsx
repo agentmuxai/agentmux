@@ -121,7 +121,7 @@ function mount(): { container: HTMLElement; model: AgentPaneModel } {
                 turnLedger={model.state.turnLedger}
                 activity={model.state.activity}
                 waitingReason={streaming()?.waitingReason ?? null}
-                retryAfterMs={streaming()?.retryAfterMs ?? null}
+                retryAtMs={streaming()?.retryAtMs ?? null}
                 compacting={model.state.compacting}
                 reconnecting={model.state.reconnecting}
             />

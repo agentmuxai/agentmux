@@ -530,7 +530,11 @@ working throughout through a legacy adapter.
      `PaneTabInstance` gain `onActivate`/`onDeactivate`. The agent's question
      auto-timeout and failure auto-retry now pause whenever the tab isn't
      visible (their stated intent: never fire invisibly), not only while it's
-     a dormant pane-stack member.
+     a dormant pane-stack member. **Reversed 2026-10-17:** both now run
+     whether or not the tab is visible, so a hidden agent doesn't stall; the
+     visibility signal still pauses rendering and polling
+     (`docs/analysis/RCA_QUESTION_TIMEOUT_DOES_NOT_FIRE_IN_HIDDEN_PANES_2026_10_17.md`,
+     `docs/analysis/REPORT_TIMERS_DEADLINES_AND_CLOCKS_AUDIT_2026_10_17.md` §6.4).
 4. **Per-active-tab chrome:** `PaneChromeModel` becomes `instance.chrome`,
    read for the active tab.
    - **Implemented** as a manifest field rather than an instance one:

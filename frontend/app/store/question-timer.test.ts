@@ -45,7 +45,6 @@ import {
     reconcileQuestionTimer,
     releaseQuestionTimer,
     resetQuestionTimersForTests,
-    setQuestionTimerDormant,
     startQuestionTimer,
 } from "./question-timer";
 
@@ -101,27 +100,16 @@ describe("question timer: owner", () => {
         expect(onExpire).toHaveBeenCalledTimes(1);
     });
 
-    it("dormant pauses without limit, and waking re-arms at the full duration", () => {
+    // docs/analysis/RCA_QUESTION_TIMEOUT_DOES_NOT_FIRE_IN_HIDDEN_PANES_2026_10_17.md:
+    // visibility isn't an input at all, so nothing but activity defers it.
+    it("has no pause but activity: only a paused/activity state exists", () => {
         const onExpire = vi.fn();
         startQuestionTimer("b1", { durationMs: 30_000, onExpire });
-        setQuestionTimerDormant("b1", true);
-        expect(questionTimer("b1")).toEqual({ kind: "paused", reason: "dormant" });
-        noteQuestionActivity("b1"); // ignored while the tab is hidden
-        vi.advanceTimersByTime(120_000);
-        expect(onExpire).not.toHaveBeenCalled();
-
-        setQuestionTimerDormant("b1", false);
-        expect(questionTimer("b1")).toEqual({ kind: "counting", endsAt: Date.now() + 30_000 });
         vi.advanceTimersByTime(30_000);
         expect(onExpire).toHaveBeenCalledTimes(1);
-    });
-
-    it("starting dormant stays paused until woken", () => {
-        const onExpire = vi.fn();
-        startQuestionTimer("b1", { durationMs: 30_000, onExpire, dormant: true });
-        expect(questionTimer("b1")).toEqual({ kind: "paused", reason: "dormant" });
-        vi.advanceTimersByTime(60_000);
-        expect(onExpire).not.toHaveBeenCalled();
+        // A stale published pause from an older build reads as nothing.
+        setMetaByBlock({ b2: { [META_QUESTION_TIMER]: { kind: "paused", reason: "dormant" } } });
+        expect(questionTimer("b2")).toBeNull();
     });
 
     it("end clears the state and never fires", () => {
@@ -270,7 +258,7 @@ describe("question timer: readers", () => {
     });
 
     it("the owner's local state wins over its own published copy", () => {
-        setMetaByBlock({ b1: { [META_QUESTION_TIMER]: { kind: "paused", reason: "dormant" } } });
+        setMetaByBlock({ b1: { [META_QUESTION_TIMER]: { kind: "paused", reason: "activity" } } });
         startQuestionTimer("b1", { durationMs: 30_000, onExpire: vi.fn() });
         expect(questionTimer("b1")?.kind).toBe("counting");
     });

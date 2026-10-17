@@ -192,6 +192,7 @@ describe("useAgentQuestions — handleAnswer fallback", () => {
             answers_map: { "Pick one": "the answer — with its own em dash", "Pick two": "b", "Pick three": "c" },
             answer_text: "the answer — with its own em dash\nb\nc",
             autoFilledCount: 2,
+            autoTimeoutMs: 30_000,
         });
         await Promise.resolve();
         await Promise.resolve();
@@ -213,11 +214,12 @@ describe("useAgentQuestions — handleAnswer fallback", () => {
             answers_map: { "Pick one": "a" },
             answer_text: "a",
             autoFilledCount: 1,
+            autoTimeoutMs: 120_000,
         });
         await Promise.resolve();
         await Promise.resolve();
 
-        expect(updatedNodeFromDispatch()?.timeoutNote).toBe("⏱️ Auto-answered (no response in 30s)");
+        expect(updatedNodeFromDispatch()?.timeoutNote).toBe("⏱️ Auto-answered (no response in 2m)");
         dispose();
     });
 

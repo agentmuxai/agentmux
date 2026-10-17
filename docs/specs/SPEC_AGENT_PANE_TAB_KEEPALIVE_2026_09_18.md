@@ -5,6 +5,9 @@
 `pane-leaf-chrome.tsx`'s `KEEP_ALIVE_TYPES`, alongside the two
 dormancy-gated timer fixes this audit found were needed first
 (`AgentQuestionPanel`'s auto-timeout, `useAgentFailure`'s auto-retry).
+Those two gates were removed on 2026-10-17: a hidden agent's question and
+retry run on time, because pausing them stalled hidden agents indefinitely
+(`docs/analysis/RCA_QUESTION_TIMEOUT_DOES_NOT_FIRE_IN_HIDDEN_PANES_2026_10_17.md`).
 **Related:** [`docs/specs/SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07.md`](SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07.md)
 (shipped the keep-alive machinery this reuses, scoped to `"term"` only, and
 is the source of the "not yet audited for keep-alive safety" warning this
