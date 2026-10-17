@@ -110,6 +110,19 @@ export function remoteSections(data: SwarmOtherInstances | null | undefined): Re
     return out;
 }
 
+/** One remote agent as a row of the Swarm's single list, with the section it
+ *  came from for its "where" tag (docs/specs/SPEC_SWARM_REFINEMENTS_2026_10_17.md §5). */
+export interface RemoteRow {
+    section: RemoteSection;
+    agent: RemoteAgent;
+}
+
+/** Every remote agent in the sections' order (this machine's other channels,
+ *  then LAN, then cloud; by machine; by name). */
+export function remoteRows(sections: RemoteSection[]): RemoteRow[] {
+    return sections.flatMap((section) => section.agents.map((agent) => ({ section, agent })));
+}
+
 /** What a remote agent's status chip shows, in the chip's own terms. */
 export interface RemoteChip {
     status: AgentDisplayStatus;

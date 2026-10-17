@@ -68,9 +68,13 @@ const both: SwarmOtherInstances = {
     ],
 };
 
+/** This instance's own agents, as the tree lists them. */
+const LOCAL = ["blk-a", "blk-b"];
+
 async function modelWith(data: SwarmOtherInstances) {
     rpc.other.mockResolvedValue(data);
     const vm = new SwarmViewModel("block-1");
+    vi.spyOn(vm, "buildTree").mockReturnValue(LOCAL.map((blockId) => ({ blockId, agentName: blockId })) as ReturnType<SwarmViewModel["buildTree"]>);
     await vm.loadOtherInstances();
     return vm;
 }
@@ -131,6 +135,14 @@ describe("broadcast to a mixed selection", () => {
         expect(rpc.broadcast).toHaveBeenCalledWith({}, { targets: ["blk-a", "blk-b"], message: "hi" });
         expect(result.failed).toEqual([]);
     });
+
+    it("doesn't send to a key the Swarm no longer lists, and says so", async () => {
+        const vm = await modelWith(both);
+        vm.setManySelected(["blk-a", "blk-gone"], true);
+        const result = await vm.broadcastToSelection("hi");
+        expect(rpc.broadcast).toHaveBeenCalledWith({}, { targets: ["blk-a"], message: "hi" });
+        expect(result.failed).toEqual([{ id: "blk-gone", error: "can't message: no longer listed" }]);
+    });
 });
 
 describe("stop on a mixed selection", () => {
@@ -164,13 +176,16 @@ describe("selection", () => {
         expect(vm.selectedBlockIdsAtom().size).toBe(0);
     });
 
-    it("drops a remote agent that has gone away on the next refresh, and keeps the rest", async () => {
+    // The view calls pruneSelection with its tree's keys whenever its list
+    // changes (docs/specs/SPEC_SWARM_REFINEMENTS_2026_10_17.md §2).
+    it("drops a remote agent that has gone away, and keeps the rest", async () => {
         const vm = await modelWith(both);
         vm.setManySelected(["blk-a", LOAP, MANOZ, OPAZ], true);
         const lan = structuredClone(both);
         lan.hosts[1].channels[0].agents = [{ name: "Opaz", block_id: "" }]; // Manoz left
         rpc.other.mockResolvedValue(lan);
         await vm.loadOtherInstances();
+        vm.pruneSelection(LOCAL);
         expect([...vm.selectedBlockIdsAtom()].sort()).toEqual(["blk-a", LOAP, OPAZ].sort());
     });
 
@@ -181,14 +196,22 @@ describe("selection", () => {
         stale.hosts[1].channels[0].stale = true;
         rpc.other.mockResolvedValue(stale);
         await vm.loadOtherInstances();
+        vm.pruneSelection(LOCAL);
         expect([...vm.selectedBlockIdsAtom()]).toEqual([LOAP]);
     });
 
-    it("never touches a local selection on refresh", async () => {
+    it("drops a local agent that left the tree: the '2 checked, send to 4' bug", async () => {
         const vm = await modelWith(both);
-        vm.setManySelected(["blk-a", "blk-b"], true);
-        rpc.other.mockResolvedValue({ ...both, hosts: [] });
-        await vm.loadOtherInstances();
-        expect([...vm.selectedBlockIdsAtom()]).toEqual(["blk-a", "blk-b"]);
+        vm.setManySelected(["blk-a", "blk-b", MANOZ], true);
+        vm.pruneSelection(["blk-a"]); // blk-b's pane closed
+        expect([...vm.selectedBlockIdsAtom()].sort()).toEqual(["blk-a", MANOZ].sort());
+    });
+
+    it("keeps the same selection object when nothing needs dropping", async () => {
+        const vm = await modelWith(both);
+        vm.setManySelected(["blk-a", LOAP], true);
+        const before = vm.selectedBlockIdsAtom();
+        vm.pruneSelection(LOCAL);
+        expect(vm.selectedBlockIdsAtom()).toBe(before);
     });
 });

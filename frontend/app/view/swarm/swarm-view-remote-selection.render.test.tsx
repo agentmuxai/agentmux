@@ -43,13 +43,13 @@ const others: SwarmOtherInstances = {
 
 function setup() {
     const [selected, setSelected] = createSignal<Set<string>>(new Set());
+    const pruneSelection = vi.fn();
     const model = {
         blockId: "swarm-1",
         loadingAtom: () => false,
         buildTree: () => [],
         otherInstancesAtom: () => others,
-        isRemoteCollapsed: () => false,
-        toggleRemoteCollapsed: () => {},
+        pruneSelection,
         selectedBlockIdsAtom: selected,
         isSelected: (k: string) => selected().has(k),
         toggleSelected: (k: string) =>
@@ -66,17 +66,25 @@ function setup() {
         lastFleetResultAtom: () => null,
         dismissFleetResult: () => {},
         clearSelection: () => setSelected(new Set<string>()),
-        selectAll: () => {},
+        selectAll: (keys: string[]) => setSelected(new Set(keys)),
     } as unknown as SwarmViewModel;
     const ctx = { meta: () => ({}), setMeta: async () => {} } as unknown as PaneTabHostContext;
-    return render(() => <SwarmView model={model} ctx={ctx} />);
+    return { ...render(() => <SwarmView model={model} ctx={ctx} />), model, pruneSelection };
 }
 
 describe("SwarmView with no agents here and agents on another machine", () => {
-    it("shows no toolbar until something is selected", () => {
-        const { container } = setup();
+    it("offers Select all for the remote agents, which selects them", () => {
+        const { container, model } = setup();
         expect(container.querySelector(".swarm-empty-title")?.textContent).toBe("No active agent panes");
-        expect(container.querySelector(".swarm-fleet-toolbar")).toBeNull();
+        const selectAll = [...container.querySelectorAll(".swarm-fleet-toolbar button")].find((b) => b.textContent?.includes("Select all"));
+        expect(selectAll).toBeDefined();
+        fireEvent.click(selectAll!);
+        expect([...model.selectedBlockIdsAtom()]).toEqual(["remote:lan:area54#1/stable/Manoz"]);
+    });
+
+    it("prunes the selection to what it lists, giving the model this instance's keys", () => {
+        const { pruneSelection } = setup();
+        expect(pruneSelection).toHaveBeenCalledWith([]);
     });
 
     it("shows the toolbar once a remote agent is selected, so there is something to act with", () => {

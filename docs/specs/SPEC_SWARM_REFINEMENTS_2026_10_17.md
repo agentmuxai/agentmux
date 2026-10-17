@@ -1,6 +1,6 @@
 # Spec: Swarm refinements — the selection count, provider icons on remote agents, broadcast to remote agents
 
-**Status:** draft. Being refined with the owner; nothing here is built yet.
+**Status:** proposed. The owner said "ok lets build it" (2026-10-17) to the recommendations in §7: D1, D2 and D5 yes, D3 not now. Built in §6's order.
 **Date:** 2026-10-17
 **Author:** Lazo
 **Verified against:** `agentmux` `main` @ `ae0fbb2b3` (2026-10-17), by reading code.
@@ -133,6 +133,8 @@ The Swarm renders this instance's tree, then `OtherInstanceSections` (`swarm-vie
 4. **Cloud broadcast:** waits on the Swarm's cloud tier (other-hosts Phase 3).
 
 ## 7. Decisions for the owner
+
+Decided 2026-10-17 ("ok lets build it"): the recommendation on each.
 
 - **D1. Add `agent_providers` to the LAN-readable `agent-names` route?** Anyone on the local network could then see which provider each agent runs. *Recommended: yes.* It's the same kind of fact as `agent_kinds`, it reveals no content, and agent names are already listed.
 - **D2. A remote broadcast arrives as a verified jekt from the sending instance, not as the user's own turn.** That means building an instance-level LAN signing key. *Recommended: yes*, as §4.2.
