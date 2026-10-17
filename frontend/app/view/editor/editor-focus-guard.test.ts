@@ -39,6 +39,13 @@ describe("userIsTypingElsewhereIn", () => {
         expect(userIsTypingElsewhereIn(root, document.activeElement)).toBe(true);
     });
 
+    it("is true for a row of the file tree, so a ↓ preview's rebuild leaves the keyboard there", () => {
+        const root = mount('<div role="tree"><div role="treeitem" tabindex="0">a.ts</div></div>');
+        const row = root.querySelector<HTMLElement>("[role=treeitem]")!;
+        row.focus();
+        expect(userIsTypingElsewhereIn(root, document.activeElement)).toBe(true);
+    });
+
     it("is false when focus has fallen back to <body> — the state right after CodeMirror is destroyed for a rebuild", () => {
         const root = mount("<div></div>");
         // Nothing focused inside root; jsdom reports body.

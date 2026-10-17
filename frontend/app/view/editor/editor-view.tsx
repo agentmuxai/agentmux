@@ -22,12 +22,13 @@ import { EmptyPaneLogo } from "@/app/element/EmptyPaneLogo";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { settingsAtom } from "@/store/global";
-import { focusManager } from "@/app/store/focusManager";
+import { focusManager, giveBlockFocus } from "@/app/store/focusManager";
 import { userIsTypingElsewhereIn } from "./editor-focus-guard";
 import type { EditorMode, EditorViewModel } from "./editor-model";
 import { cursorAtLine } from "./open-at-line";
 import { Button, IconButton, SegmentedControl } from "@/app/element/ui";
 import { previewMedia } from "./editor-preview-media";
+import { bodyFocusTarget } from "./editor-body-focus";
 import { TextViewerSwitch, ViewerHost } from "./viewers/viewer-host";
 import { SaveAsInput } from "./editor-save-as-input";
 import { EDITOR_STATE_FIELDS, editorDocTabs, provideEditorStates, takeMovedEditorState, trackSave } from "./editor-doc-tabs";
@@ -161,10 +162,44 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
                 if (!model.activeTabAtom()?.isScratch) return false;
                 triggerSaveAs();
                 return true;
+            // From the editor body to the tree, showing it if it's hidden,
+            // and back. A remote editor has no tree.
+            case "editor:focusTree":
+                if (model.connection()) return false;
+                if (focusRegion() === "tree") {
+                    focusEditorBody();
+                } else {
+                    if (!model.treeExpandedAtom()) void model.toggleTreeExpanded();
+                    rootRef?.querySelector<HTMLElement>('.file-tree [role="treeitem"][tabindex="0"]')?.focus();
+                }
+                return true;
         }
         return false;
     };
     onCleanup(registerPaneCommandRunner(model.blockId, runEditorCommand));
+
+    // Which of the tree and the editor body has the keyboard: its column
+    // gets an accent line along the top (spec §6).
+    const [focusRegion, setFocusRegion] = createSignal<"tree" | "body" | null>(null);
+    const trackFocusRegion = (e: FocusEvent) => {
+        const target = e.target as Element;
+        setFocusRegion(target.closest(".editor-tree-column") ? "tree" : target.closest(".editor-main-column") ? "body" : null);
+    };
+    const leaveFocusRegion = (e: FocusEvent) => {
+        if (!rootRef?.contains(e.relatedTarget as Node | null)) setFocusRegion(null);
+    };
+
+    /** The keyboard to the editor body: the text, else the viewer showing the file. */
+    const focusEditorBody = () => {
+        const textShown = showsText() && !(isMarkdown() && model.editorMode() === "preview");
+        if (cmView && textShown) {
+            cmView.focus();
+            return;
+        }
+        const body = rootRef ? bodyFocusTarget(rootRef) : null;
+        if (body) body.focus({ preventScroll: true });
+        else giveBlockFocus(model.blockId);
+    };
 
     // Ctrl+Wheel zoom — plugs into the universal zoom system (term:zoom on
     // block meta, same path used by terminal/agent/swarm). Capture phase so
@@ -208,7 +243,7 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
             // The editor's keys are the `editor:*` rows of the shortcut table.
             // Save and Save As are CodeMirror keys (saveKeymap below).
             const command = paneCommandFor(ev, "editor");
-            if ((command === "editor:find" || command === "editor:togglePreview") && runEditorCommand(command)) {
+            if ((command === "editor:find" || command === "editor:togglePreview" || command === "editor:focusTree") && runEditorCommand(command)) {
                 ev.preventDefault();
                 ev.stopPropagation();
             }
@@ -954,6 +989,8 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
             class="editor-view"
             classList={{ "editor-view--tree-collapsed": !model.treeExpandedAtom() }}
             style={{ zoom: model.zoomAtom() }}
+            onFocusIn={trackFocusRegion}
+            onFocusOut={leaveFocusRegion}
         >
             <Show when={model.openFromRemoteAtom() && rootRef}>
                 <OpenFromRemoteModal
@@ -966,7 +1003,8 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
             </Show>
             <Show when={model.treeExpandedAtom()}>
                 <div
-                    class="editor-tree-column"
+                    class="editor-tree-column editor-region"
+                    classList={{ "editor-region--focused": focusRegion() === "tree" }}
                     style={{
                         width: `${model.treeWidthAtom()}px`,
                         flex: `0 0 ${model.treeWidthAtom()}px`,
@@ -988,6 +1026,7 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
                         onNewEntryConfirm={(parent, name, kind) => void handleNewEntryConfirm(parent, name, kind)}
                         onNewEntryCancel={() => setNewEntry(null)}
                         onStartRename={(path) => setRenamingPath(path)}
+                        onFocusEditor={focusEditorBody}
                     />
                 </div>
                 <div
@@ -997,7 +1036,14 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
                 />
             </Show>
 
-            <div class="editor-main-column">
+            {/* The focus line only says something beside the tree. */}
+            <div
+                class="editor-main-column"
+                classList={{
+                    "editor-region": model.treeExpandedAtom(),
+                    "editor-region--focused": model.treeExpandedAtom() && focusRegion() === "body",
+                }}
+            >
                 <DocTabStrip
                     ctl={docTabs}
                     docType="editor"
