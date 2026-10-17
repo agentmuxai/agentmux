@@ -26,6 +26,9 @@ export interface RemoteAgent {
     /** Its summary line, as its instance shares it (srv `backend::agent_line`).
      *  Absent when that instance shares none. */
     line?: string;
+    /** Its provider id (`claude`, `codex`, ...), a known one only; absent from
+     *  an older build (docs/specs/SPEC_SWARM_REFINEMENTS_2026_10_17.md §3). */
+    provider?: string;
 }
 
 export interface RemoteChannel {

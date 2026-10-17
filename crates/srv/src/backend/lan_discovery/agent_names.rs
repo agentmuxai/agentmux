@@ -19,6 +19,10 @@ pub(crate) struct PeerAgents {
     /// Lower-cased name → summary line (`backend::agent_line`), for listed
     /// names only, each cleaned again here.
     pub lines: BTreeMap<String, String>,
+    /// Lower-cased name → provider id, for listed names only, and only an id
+    /// this build knows (`providers::resolve_provider_alias`), so a peer can't
+    /// put free text in a row (SPEC_SWARM_REFINEMENTS_2026_10_17.md §3).
+    pub providers: BTreeMap<String, String>,
 }
 
 /// Reads an `agent-names` body: the names, capped as above, and each listed
@@ -68,7 +72,20 @@ pub(crate) fn parse_agent_names_body(value: &serde_json::Value) -> PeerAgents {
                 .collect()
         })
         .unwrap_or_default();
-    PeerAgents { names, status, lines }
+    let providers = value
+        .get("agent_providers")
+        .and_then(|s| s.as_object())
+        .map(|map| {
+            map.iter()
+                .filter(|(name, _)| listed.contains(&name.to_lowercase()))
+                .filter_map(|(name, provider)| {
+                    let id = crate::backend::providers::resolve_provider_alias(provider.as_str()?);
+                    (!id.is_empty()).then(|| (name.to_lowercase(), id.to_string()))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    PeerAgents { names, status, lines, providers }
 }
 
 /// Applies one poll of a peer's `agent-names` route to its entry, and says
@@ -91,10 +108,12 @@ pub(super) fn apply_agent_names_poll(
     entry.last_polled_ok = now_secs;
     let changed = entry.agents != peer.names
         || entry.agent_status != peer.status
-        || entry.agent_lines != peer.lines;
+        || entry.agent_lines != peer.lines
+        || entry.agent_providers != peer.providers;
     entry.agents = peer.names;
     entry.agent_status = peer.status;
     entry.agent_lines = peer.lines;
+    entry.agent_providers = peer.providers;
     changed
 }
 
@@ -153,6 +172,26 @@ mod tests {
             Some(crate::backend::agent_line::MAX_LINE_CHARS)
         );
         assert_eq!(peer.lines.len(), 2, "{:?}", peer.lines);
+    }
+
+    /// The Swarm's provider icon on remote rows (SPEC_SWARM_REFINEMENTS_2026_10_17.md §3).
+    #[test]
+    fn agent_providers_keep_only_known_ids_for_listed_agents() {
+        let body = serde_json::json!({
+            "agents": ["Manoz", "Opaz", "Loap", "Korp"],
+            "agent_providers": {
+                "Manoz": "claude",
+                "opaz": "codex-cli",
+                "Loap": "<script>",
+                "Korp": 7,
+                "Ghost": "gemini",
+            },
+        });
+        let peer = parse_agent_names_body(&body);
+        let got: Vec<(&str, &str)> = peer.providers.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
+        // A legacy alias resolves to its id; free text, a non-string and a name
+        // the body doesn't list are dropped.
+        assert_eq!(got, [("manoz", "claude"), ("opaz", "codex")]);
     }
 
     #[test]
@@ -248,6 +287,7 @@ mod tests {
             agents: vec!["Manoz".into()],
             agent_status: Default::default(),
             agent_lines: Default::default(),
+            agent_providers: Default::default(),
             first_seen: 0,
             last_seen: 0,
             last_polled_ok: 0,

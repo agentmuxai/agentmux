@@ -240,6 +240,9 @@ pub struct LanInstance {
     pub agent_status: BTreeMap<String, AgentState>,
     #[serde(default)]
     pub agent_lines: BTreeMap<String, String>,
+    /// Each listed agent's provider id, a known one only (`agent_names.rs`).
+    #[serde(default)]
+    pub agent_providers: BTreeMap<String, String>,
     #[ts(type = "number")]
     pub first_seen: u64,
     #[ts(type = "number")]
@@ -1187,6 +1190,7 @@ impl LanDiscovery {
                     agents: Vec::new(),
                     agent_status: Default::default(),
                     agent_lines: Default::default(),
+                    agent_providers: Default::default(),
                     first_seen: now,
                     last_seen: now,
                     last_polled_ok: 0,
@@ -2989,6 +2993,7 @@ mod peer_fanout_tests {
             agents: vec![],
             agent_status: Default::default(),
             agent_lines: Default::default(),
+            agent_providers: Default::default(),
             first_seen: 0,
             last_seen: 0,
             last_polled_ok: 0,

@@ -1463,8 +1463,11 @@ pub(super) async fn handle_reactive_agents(
 ///   §3.4, §11), also on the fleet feed this route is the fallback for.
 /// - `agent_lines` (`{name: line}`, 2026-10-13): content, each agent's Swarm
 ///   summary line (`backend::agent_line`); absent with `swarm:sharesummaries` off.
+/// - `agent_providers` (`{name: provider id}`, decision D1 of 2026-10-17,
+///   SPEC_SWARM_REFINEMENTS_2026_10_17 §3, §7): the Swarm's provider icon on
+///   remote rows. Only an id this build knows (`providers::resolve_provider_alias`).
 ///
-/// An agent with no kind, state or line is left out of that map.
+/// An agent with no kind, state, line or provider is left out of that map.
 pub(super) async fn handle_reactive_agent_names(
     State(state): State<AppState>,
 ) -> Json<serde_json::Value> {
@@ -1481,12 +1484,22 @@ pub(super) async fn handle_reactive_agent_names(
         })
         .collect();
     let status = serde_json::to_value(status).unwrap_or_else(|_| json!({}));
+    let providers: std::collections::BTreeMap<&str, &str> = agents
+        .iter()
+        .filter_map(|a| {
+            let block = state.mstore.get::<crate::backend::obj::Block>(&a.block_id).ok()??;
+            let raw = crate::backend::obj::meta_get_string(&block.meta, "agentProvider", "");
+            let id = crate::backend::providers::resolve_provider_alias(&raw);
+            (!id.is_empty()).then_some((a.agent_id.as_str(), id))
+        })
+        .collect();
     let names: Vec<String> = agents.iter().map(|a| a.agent_id.clone()).collect();
     let mut body = json!({
         "agents": names,
         "agent_kinds": kinds,
         "now_ms": agentmux_common::time::now_ms_u64(),
         "agent_status": status,
+        "agent_providers": providers,
     });
     let settings = state.config_watcher.get_full_config();
     let pairs = agents.iter().map(|a| (a.agent_id.as_str(), a.block_id.as_str()));

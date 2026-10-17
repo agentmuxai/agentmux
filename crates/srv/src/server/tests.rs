@@ -1632,6 +1632,48 @@ async fn agent_names_carries_kinds_from_the_block() {
     assert!(kinds.get(&blockless).is_none(), "no block, no kind: {kinds}");
 }
 
+/// The names route carries each agent's provider id, resolved from its block's
+/// `agentProvider` (an alias to its id); an agent with no block, or a provider
+/// this build doesn't know, gets no entry (SPEC_SWARM_REFINEMENTS_2026_10_17.md §3).
+#[tokio::test]
+async fn agent_names_carries_known_provider_ids() {
+    let state = test_state();
+    let unique = uuid::Uuid::new_v4();
+    let on_claude = format!("prov-claude-{unique}");
+    let on_alias = format!("prov-alias-{unique}");
+    let on_unknown = format!("prov-unknown-{unique}");
+    let blockless = format!("prov-noblock-{unique}");
+    for (agent, provider) in [(&on_claude, "claude"), (&on_alias, "codex-cli"), (&on_unknown, "not-a-provider")] {
+        let mut block = crate::backend::obj::Block {
+            oid: uuid::Uuid::new_v4().to_string(),
+            ..Default::default()
+        };
+        block.meta.insert("agentProvider".to_string(), serde_json::json!(provider));
+        state.mstore.insert(&mut block).expect("insert agent block");
+        state.reactive_handler.register_agent(agent, &block.oid, None).unwrap();
+    }
+    state
+        .reactive_handler
+        .register_agent(&blockless, &format!("missing-block-{unique}"), None)
+        .unwrap();
+
+    let req = Request::builder()
+        .method(Method::GET)
+        .uri("/agentmux/reactive/agent-names")
+        .header("X-AuthKey", "test-lan-key")
+        .body(Body::empty())
+        .unwrap();
+    let resp = build_router(state).oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let providers = &json["agent_providers"];
+    assert_eq!(providers[&on_claude], "claude");
+    assert_eq!(providers[&on_alias], "codex");
+    assert!(providers.get(&on_unknown).is_none(), "unknown provider, no entry: {providers}");
+    assert!(providers.get(&blockless).is_none(), "no block, no provider: {providers}");
+}
+
 /// The names fallback carries each agent's state and since when, plus this
 /// machine's clock; an agent with no known state (a terminal pane, no
 /// controller) gets no entry.
