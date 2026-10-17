@@ -136,9 +136,15 @@ createEffect(on(hidden, (hidden) => {
 
 Coordinated with Loap-3 (#4847's author), who agreed with §6.1 and suggested the unloading variant to keep #4847's bound in bytes, not just rows.
 
-- **No mass release.** A pane hidden for `HIDDEN_HOLD_RELEASE_MS` (30 s) keeps its holds. Instead, the next pass stops exempting held rows from `UnloadToolResults`, so their text leaves memory while the rows stay open (`useLiveFeedRollOff.ts`).
+- **No mass release.** A pane hidden for `HIDDEN_HELD_UNLOAD_MS` (30 s; it was `HIDDEN_HOLD_RELEASE_MS`) keeps its holds. Instead, the next pass stops exempting held rows from `UnloadToolResults`, so their text leaves memory while the rows stay open (`useLiveFeedRollOff.ts`).
 - **Read back on show.** ToolBlock's load-when-open effect waits for the pane to be shown (`ToolBlock.tsx`), so an open row reads its text back on return and not while hidden.
 - **No hold while hidden.** `holdNodeOpen` does nothing while the pane is dormant (`AgentDocumentView.tsx`). That covers a tool that started on screen and finished after the pane was hidden.
 - **No scan while hidden; re-baseline on return.** The scan moved out of `AgentDocumentVirtualList.tsx` into `virtualization/held-release.ts` (`useScrolledOffRelease`), and it returns at once while the pane is dormant. Rows held when it is shown again are *carried*: they are released only after they have been on screen in this visit, counted once the show has settled (`RETURN_SETTLE_MS`, 400 ms, and the show cover lifted). The rule is a pure function, `virtualization/held-release.ts`.
 - **Not done:** saving `heldOpenNodes` in the snapshot (§6.4). Loap-3: it changes as you scroll, which is why `useSnapshotPersistence.ts:150` leaves it out. Within a session the agent view is kept alive, so the held set already survives leaving.
 - **Tests:** `held-release.test.ts`; `AgentDocumentVirtualList.collapse.test.tsx` (hidden at full size, carried rows, settling); `AgentDocumentView.hold.test.tsx`; ToolBlock's reload-on-show; `useLiveFeedRollOff.test.ts`, where #4847's release test is replaced by "holds survive, held results unload after 30 s hidden", plus "a hidden pane's unheld finished tools still unload".
+
+**After Loap-3's review of #5059:**
+
+- **No jump while held text reads back.** An open row whose result was unloaded drew a one-line "Loading result…". So after a return from more than 30 s away, a held 40-line preview shrank and then grew back, moving the rows below it. The placeholder now keeps the body's height from the moment its text left (`ToolBlock.tsx`, `unloadedBodyPx`), so nothing below it moves while it reads back.
+- **Carried rows don't keep their text forever.** A carried row that hasn't been on screen after the pane has been shown for `CARRY_MAX_MS` (60 s), and is still off screen, is released. That is what would have happened had the reader been watching, and it lets the row's text unload.
+- `HIDDEN_HOLD_RELEASE_MS` is renamed `HIDDEN_HELD_UNLOAD_MS`: it no longer releases anything.

@@ -15,6 +15,7 @@ const input = (over: Partial<HeldReleaseInput>): HeldReleaseInput => ({
     pinned: new Set(),
     carried: new Set(),
     settled: true,
+    carryExpired: false,
     ...VIEW,
     rect: (id) => rects[id] ?? null,
     ...over,
@@ -50,5 +51,12 @@ describe("heldRowsToRelease", () => {
         // Later, output pushes it off the top while the reader watches.
         const later = input({ held: ["onScreen"], carried, rect: () => ({ top: 0, bottom: 50 }) });
         expect(heldRowsToRelease(later)).toEqual(["onScreen"]);
+    });
+
+    it("releases a carried row still off screen once the pane has been shown CARRY_MAX_MS", () => {
+        const carried = new Set(["above", "onScreen", "gone"]);
+        expect(heldRowsToRelease(input({ carried, carryExpired: true }))).toEqual(["above", "gone"]);
+        // The one on screen was seen, and keeps its hold.
+        expect(carried.size).toBe(0);
     });
 });

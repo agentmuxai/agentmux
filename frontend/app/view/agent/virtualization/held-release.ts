@@ -24,6 +24,12 @@ import type { DocumentState } from "../types";
  * content drawn on return lands within this (one-way flow's SHOW_SETTLE_MS).
  */
 export const RETURN_SETTLE_MS = 400;
+/**
+ * How long a carried row that hasn't been on screen keeps its hold while the
+ * pane is shown. Then, if it is still off screen, it is released as it would
+ * have been had the reader been watching, and its text can leave memory.
+ */
+export const CARRY_MAX_MS = 60_000;
 
 export interface HeldReleaseInput {
     held: Iterable<string>;
@@ -32,6 +38,8 @@ export interface HeldReleaseInput {
     carried: Set<string>;
     /** The show's catch-up layout is done, so a carried row on screen now really is in view. */
     settled: boolean;
+    /** The pane has been shown for CARRY_MAX_MS: carried rows still off screen are released. */
+    carryExpired: boolean;
     viewportTop: number;
     viewportBottom: number;
     /** The row's box in the same space as the viewport, or null when it isn't rendered. */
@@ -47,6 +55,9 @@ export function heldRowsToRelease(input: HeldReleaseInput): string[] {
             // Not released until seen in this visit; once seen, the plain rule.
             if (input.settled && r && r.bottom > input.viewportTop && r.top < input.viewportBottom) {
                 input.carried.delete(id);
+            } else if (input.carryExpired && (!r || r.bottom <= input.viewportTop)) {
+                input.carried.delete(id);
+                release.push(id);
             }
             continue;
         }
@@ -96,6 +107,7 @@ export function useScrolledOffRelease(opts: {
             pinned: ds.pinnedNodes,
             carried,
             settled: performance.now() - shownAt >= RETURN_SETTLE_MS && !opts.covered(),
+            carryExpired: performance.now() - shownAt >= CARRY_MAX_MS,
             viewportTop: box.top,
             viewportBottom: box.bottom,
             rect: (id) => {

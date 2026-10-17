@@ -26,7 +26,7 @@ import { userIsInteracting } from "../stream-scheduler";
  * How long a pane stays hidden before its held-open rows' results may leave
  * memory. The rows stay open; their text reads back when the pane is shown.
  */
-export const HIDDEN_HOLD_RELEASE_MS = 30_000;
+export const HIDDEN_HELD_UNLOAD_MS = 30_000;
 /** Loaded text allowed for the turn in flight, on top of the finished turns' budget. */
 export const IN_FLIGHT_TEXT_BUDGET = 512 * 1024;
 /** How often a pass runs while the pane is over its text budget. */
@@ -62,7 +62,7 @@ export function useLiveFeedRollOff(opts: {
     const [rolledOffTurns, setRolledOffTurns] = createSignal(0);
     const [gapsBefore, setGapsBefore] = createSignal<ReadonlySet<string>>(new Set());
     let rollOffDisposed = false;
-    /** Hidden past HIDDEN_HOLD_RELEASE_MS: held rows' results may unload too. */
+    /** Hidden past HIDDEN_HELD_UNLOAD_MS: held rows' results may unload too. */
     let heldResultsUnloadable = false;
     onCleanup(() => {
         rollOffDisposed = true;
@@ -76,7 +76,7 @@ export function useLiveFeedRollOff(opts: {
         // Collapsed tool results leave memory in the same idle pass; rows the
         // user pinned or that are held open keep theirs
         // (SPEC_AGENT_PANE_TOOL_RESULT_UNLOADING_2026_10_01.md §3.3), also with
-        // the live feed off (#4126). A pane hidden past HIDDEN_HOLD_RELEASE_MS
+        // the live feed off (#4126). A pane hidden past HIDDEN_HELD_UNLOAD_MS
         // lets held rows' results go too; the rows stay open and reload on show.
         const keepHeld = !heldResultsUnloadable;
         paneModel.dispatchDoc({
@@ -219,7 +219,7 @@ export function useLiveFeedRollOff(opts: {
                     if (rollOffDisposed || !untrack(opts.hidden)) return;
                     heldResultsUnloadable = true;
                     scheduleRollOff();
-                }, HIDDEN_HOLD_RELEASE_MS);
+                }, HIDDEN_HELD_UNLOAD_MS);
                 onCleanup(() => {
                     clearTimeout(t);
                     heldResultsUnloadable = false;

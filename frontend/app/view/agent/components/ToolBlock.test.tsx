@@ -1137,4 +1137,30 @@ describe("ToolBlock — a held row's unloaded result in a hidden pane", () => {
         setDormant(false);
         expect(load).toHaveBeenCalledTimes(1);
     });
+
+    it("keeps the body's height while its text is out, so the rows below don't move", () => {
+        const height = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetHeight");
+        Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
+            configurable: true,
+            get() {
+                return (this as HTMLElement).classList.contains("agent-tool-overlay") ? 400 : 0;
+            },
+        });
+        try {
+            const loaded: ToolNode = { ...baseTool, result: { exitCode: 0 } as any };
+            const [node, setNode] = createSignal<ToolNode>(loaded);
+            const { container } = render(() => (
+                <AgentDormancyProvider dormant={() => true}>
+                    <ToolResultLoaderProvider load={async () => true}>
+                        <ToolBlock node={node()} pinned={false} heldOpen={true} onTogglePin={() => {}} />
+                    </ToolResultLoaderProvider>
+                </AgentDormancyProvider>
+            ));
+            setNode({ ...baseTool, resultUnloaded: { pill: null, bytes: 4_000, tokens: 1_000 } });
+            const placeholder = container.querySelector(".agent-tool-result-unloaded") as HTMLElement;
+            expect(placeholder.style.minHeight).toBe("400px");
+        } finally {
+            if (height) Object.defineProperty(HTMLElement.prototype, "offsetHeight", height);
+        }
+    });
 });
