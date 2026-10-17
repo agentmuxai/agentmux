@@ -9,6 +9,56 @@
 use super::*;
 use std::collections::HashSet;
 
+/// This instance's `/agentmux/reactive/agent-names` answer. Readable with the
+/// LAN key, so public to the local network: each field needed the owner's
+/// decision.
+/// - `agents`, enumerating names (2026-09-08): a `lan_key` holder could
+///   already confirm a specific name via `/agentmux/reactive/agent?id=…`.
+/// - `agent_kinds` (`{name: "host" | "container"}`, 2026-10-06, agentmux-mobile's
+///   SPEC_FLEET_HOST_TAGS_AND_CLOUD_HOSTS_2026_10_06 §5.2, §11).
+/// - `agent_status` (`{name: {state, since_ms}}`) and `now_ms`, decision D1 of
+///   2026-10-07 (agentmux-mobile's SPEC_AGENT_STATUS_AND_LIVE_PANE_FEED_2026_10_07
+///   §3.4, §11), also on the fleet feed this route is the fallback for.
+/// - `agent_lines` (`{name: line}`, 2026-10-13): content, each agent's Swarm
+///   summary line (`backend::agent_line`); absent with `swarm:sharesummaries` off.
+/// - `agent_providers` (`{name: provider id}`, decision D1 of 2026-10-17,
+///   SPEC_SWARM_REFINEMENTS_2026_10_17 §3, §7): the Swarm's provider icon on
+///   remote rows. Only an id this build knows (`providers::resolve_provider_alias`).
+///
+/// An agent with no kind, state, line or provider is left out of that map.
+pub(crate) fn agent_names_body(
+    mstore: &crate::backend::storage::store::Store,
+    settings: &crate::backend::wconfig::SettingsType,
+    agents: &[crate::backend::reactive::types::AgentRegistration],
+) -> serde_json::Value {
+    let pairs = || agents.iter().map(|a| (a.agent_id.as_str(), a.block_id.as_str()));
+    let kinds = crate::backend::fleet_source::kinds_by_name(pairs(), |block_id| {
+        crate::backend::operator_config_seed::agent_kind_of_block(mstore, block_id)
+    });
+    let status: BTreeMap<&str, _> = pairs()
+        .filter_map(|(name, block_id)| crate::backend::agent_state::agent_status_of_block(mstore, block_id).map(|s| (name, s)))
+        .collect();
+    let providers: BTreeMap<&str, &str> = pairs()
+        .filter_map(|(name, block_id)| {
+            let block = mstore.get::<crate::backend::obj::Block>(block_id).ok()??;
+            let raw = crate::backend::obj::meta_get_string(&block.meta, "agentProvider", "");
+            let id = crate::backend::providers::resolve_provider_alias(&raw);
+            (!id.is_empty()).then_some((name, id))
+        })
+        .collect();
+    let mut body = json!({
+        "agents": agents.iter().map(|a| a.agent_id.as_str()).collect::<Vec<_>>(),
+        "agent_kinds": kinds,
+        "now_ms": agentmux_common::time::now_ms_u64(),
+        "agent_status": status,
+        "agent_providers": providers,
+    });
+    if let Some(lines) = crate::backend::agent_line::lines_by_name(mstore, settings, pairs()) {
+        body["agent_lines"] = json!(lines);
+    }
+    body
+}
+
 /// What an instance's `/agentmux/reactive/agent-names` answer says about its
 /// agents.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -19,6 +69,10 @@ pub(crate) struct PeerAgents {
     /// Lower-cased name → summary line (`backend::agent_line`), for listed
     /// names only, each cleaned again here.
     pub lines: BTreeMap<String, String>,
+    /// Lower-cased name → provider id, for listed names only, and only an id
+    /// this build knows (`providers::resolve_provider_alias`), so a peer can't
+    /// put free text in a row (SPEC_SWARM_REFINEMENTS_2026_10_17.md §3).
+    pub providers: BTreeMap<String, String>,
 }
 
 /// Reads an `agent-names` body: the names, capped as above, and each listed
@@ -68,7 +122,20 @@ pub(crate) fn parse_agent_names_body(value: &serde_json::Value) -> PeerAgents {
                 .collect()
         })
         .unwrap_or_default();
-    PeerAgents { names, status, lines }
+    let providers = value
+        .get("agent_providers")
+        .and_then(|s| s.as_object())
+        .map(|map| {
+            map.iter()
+                .filter(|(name, _)| listed.contains(&name.to_lowercase()))
+                .filter_map(|(name, provider)| {
+                    let id = crate::backend::providers::resolve_provider_alias(provider.as_str()?);
+                    (!id.is_empty()).then(|| (name.to_lowercase(), id.to_string()))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    PeerAgents { names, status, lines, providers }
 }
 
 /// Applies one poll of a peer's `agent-names` route to its entry, and says
@@ -91,10 +158,12 @@ pub(super) fn apply_agent_names_poll(
     entry.last_polled_ok = now_secs;
     let changed = entry.agents != peer.names
         || entry.agent_status != peer.status
-        || entry.agent_lines != peer.lines;
+        || entry.agent_lines != peer.lines
+        || entry.agent_providers != peer.providers;
     entry.agents = peer.names;
     entry.agent_status = peer.status;
     entry.agent_lines = peer.lines;
+    entry.agent_providers = peer.providers;
     changed
 }
 
@@ -153,6 +222,26 @@ mod tests {
             Some(crate::backend::agent_line::MAX_LINE_CHARS)
         );
         assert_eq!(peer.lines.len(), 2, "{:?}", peer.lines);
+    }
+
+    /// The Swarm's provider icon on remote rows (SPEC_SWARM_REFINEMENTS_2026_10_17.md §3).
+    #[test]
+    fn agent_providers_keep_only_known_ids_for_listed_agents() {
+        let body = serde_json::json!({
+            "agents": ["Manoz", "Opaz", "Loap", "Korp"],
+            "agent_providers": {
+                "Manoz": "claude",
+                "opaz": "codex-cli",
+                "Loap": "<script>",
+                "Korp": 7,
+                "Ghost": "gemini",
+            },
+        });
+        let peer = parse_agent_names_body(&body);
+        let got: Vec<(&str, &str)> = peer.providers.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
+        // A legacy alias resolves to its id; free text, a non-string and a name
+        // the body doesn't list are dropped.
+        assert_eq!(got, [("manoz", "claude"), ("opaz", "codex")]);
     }
 
     #[test]
@@ -248,6 +337,7 @@ mod tests {
             agents: vec!["Manoz".into()],
             agent_status: Default::default(),
             agent_lines: Default::default(),
+            agent_providers: Default::default(),
             first_seen: 0,
             last_seen: 0,
             last_polled_ok: 0,

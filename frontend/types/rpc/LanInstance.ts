@@ -19,7 +19,11 @@ os: string, address: string, port: number, agents: Array<string>,
  * Each listed agent's state and summary line as the peer reported them, by
  * lower-cased name (`lan_discovery/agent_names.rs`). Self-reported, for the Swarm.
  */
-agent_status: { [key in string]: AgentState }, agent_lines: { [key in string]: string }, first_seen: number, last_seen: number, 
+agent_status: { [key in string]: AgentState }, agent_lines: { [key in string]: string }, 
+/**
+ * Each listed agent's provider id, a known one only (`agent_names.rs`).
+ */
+agent_providers: { [key in string]: string }, first_seen: number, last_seen: number, 
 /**
  * Unix seconds of the last answered agent-name poll, 0 for never. The Swarm
  * judges liveness by the later of this and `last_seen` (mDNS re-resolves only).

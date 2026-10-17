@@ -48,7 +48,7 @@ const data: SwarmOtherInstances = {
             display_name: "narko",
             tier: "host",
             channels: [
-                { channel: "dev-fix-lan", seen_at_ms: Date.now(), stale: false, os: "windows", agents: [{ name: "Loap", block_id: "b1", status: "working", line: "Fixing the login race" }, { name: "Korp", block_id: "b2", status: "waiting" }] },
+                { channel: "dev-fix-lan", seen_at_ms: Date.now(), stale: false, os: "windows", agents: [{ name: "Loap", block_id: "b1", status: "working", line: "Fixing the login race", provider: "claude" }, { name: "Korp", block_id: "b2", status: "waiting" }] },
                 { channel: "old", seen_at_ms: Date.now() - 120_000, stale: true, os: "windows", agents: [{ name: "Opaz", block_id: "b3", status: "working", line: "Old news" }] },
             ],
         },
@@ -149,6 +149,20 @@ describe("RemoteAgentRows", () => {
             null,
             null,
         ]);
+    });
+
+    // docs/specs/SPEC_SWARM_REFINEMENTS_2026_10_17.md §3: left of the name, as on a local row.
+    it("shows each agent's provider icon before its name, and the AgentMux one when none was reported", () => {
+        const { container } = setup();
+        const [korp, loap] = rows(container);
+        const logo = (r: Element) => r.querySelector(".provider-logo")!;
+        // Claude draws an inline SVG; the AgentMux fallback is its PNG.
+        expect(logo(loap).tagName).toBe("SPAN");
+        expect(logo(korp).tagName).toBe("IMG");
+        for (const r of [korp, loap]) {
+            const name = r.querySelector(".swarm-remote-agent-name")!;
+            expect(logo(r).compareDocumentPosition(name) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+        }
     });
 
     it("renders nothing with no other instances", () => {

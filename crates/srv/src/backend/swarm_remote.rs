@@ -57,6 +57,11 @@ pub struct RemoteAgent {
     /// instance shared none (an older build, or `swarm:sharesummaries` off).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub line: Option<String>,
+    /// Its provider id (`claude`, `codex`, ...) as its instance reported it,
+    /// a known one only; absent from an older build. Display only: the Swarm's
+    /// provider icon (SPEC_SWARM_REFINEMENTS_2026_10_17.md §3).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
 }
 
 /// What one channel of this machine said about its agents, by lower-cased name.
@@ -64,6 +69,7 @@ pub struct RemoteAgent {
 pub struct ChannelReport {
     pub status: BTreeMap<String, AgentState>,
     pub lines: BTreeMap<String, String>,
+    pub providers: BTreeMap<String, String>,
 }
 
 /// Each channel's report, by channel.
@@ -142,6 +148,7 @@ pub fn other_channels(
                     block_id: e.block_id.clone(),
                     status: report.and_then(|r| r.status.get(&key)).copied(),
                     line: report.and_then(|r| r.lines.get(&key)).cloned(),
+                    provider: report.and_then(|r| r.providers.get(&key)).cloned(),
                 }
             });
     }
@@ -224,6 +231,7 @@ pub fn lan_hosts(
                 block_id: String::new(),
                 status: p.agent_status.get(&name.to_lowercase()).copied(),
                 line: p.agent_lines.get(&name.to_lowercase()).cloned(),
+                provider: p.agent_providers.get(&name.to_lowercase()).cloned(),
             })
             .collect();
         agents.sort_by_key(|a| a.name.to_lowercase());
@@ -381,6 +389,7 @@ pub async fn channel_statuses(
         let report = out.entry(channel).or_default();
         report.status.extend(peer.status);
         report.lines.extend(peer.lines);
+        report.providers.extend(peer.providers);
     }
     out
 }
@@ -579,6 +588,7 @@ mod tests {
             agents: agents.iter().map(|a| a.to_string()).collect(),
             agent_status: Default::default(),
             agent_lines: Default::default(),
+            agent_providers: Default::default(),
             first_seen: 0,
             last_seen: NOW / 1000 - age_secs,
             last_polled_ok: 0,
@@ -799,6 +809,7 @@ mod tests {
         let report = ChannelReport {
             status: [("korp".to_string(), AgentState::Waiting)].into_iter().collect(),
             lines: [("korp".to_string(), "Fixing the login race".to_string())].into_iter().collect(),
+            providers: [("korp".to_string(), "codex".to_string())].into_iter().collect(),
         };
         let statuses: ChannelStatuses = [("dev".to_string(), report)].into_iter().collect();
         let chans = other_channels(
@@ -818,9 +829,11 @@ mod tests {
         let json = serde_json::to_value(&chans[0].agents).unwrap();
         assert_eq!(json[0]["status"], "waiting");
         assert!(json[1].get("status").is_none(), "{json}");
-        // The same for the line.
+        // The same for the line, and the provider.
         assert_eq!(json[0]["line"], "Fixing the login race");
         assert!(json[1].get("line").is_none(), "{json}");
+        assert_eq!(json[0]["provider"], "codex");
+        assert!(json[1].get("provider").is_none(), "{json}");
     }
 
     #[test]
@@ -835,15 +848,19 @@ mod tests {
         );
         p.agent_status.insert("manoz".into(), AgentState::Working);
         p.agent_lines.insert("manoz".into(), "Fixing the login race".into());
+        p.agent_providers.insert("manoz".into(), "claude".into());
         let hosts = lan_hosts(&[p], &HashSet::new(), NOW);
-        let got: Vec<(Option<AgentState>, Option<&str>)> = hosts[0].channels[0]
+        let got: Vec<(Option<AgentState>, Option<&str>, Option<&str>)> = hosts[0].channels[0]
             .agents
             .iter()
-            .map(|a| (a.status, a.line.as_deref()))
+            .map(|a| (a.status, a.line.as_deref(), a.provider.as_deref()))
             .collect();
         assert_eq!(
             got,
-            [(Some(AgentState::Working), Some("Fixing the login race")), (None, None)]
+            [
+                (Some(AgentState::Working), Some("Fixing the login race"), Some("claude")),
+                (None, None, None)
+            ]
         );
     }
 

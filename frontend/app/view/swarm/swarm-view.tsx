@@ -219,6 +219,8 @@ export function RemoteAgentRows(props: { model: SwarmViewModel; rows: RemoteRow[
                                 onChange={() => props.model.toggleSelected(key)}
                                 title={section.stale ? "Not seen recently, so it can't be selected" : "Select for a fleet action (broadcast/stop)"}
                             />
+                            {/* As on a local row, with the same fallback for none reported. */}
+                            <ProviderLogo provider={row.agent.provider ?? "agentmux"} size={16} />
                             <span class="swarm-remote-agent-name">{row.agent.name}</span>
                             <span class="swarm-remote-where">
                                 <span class="swarm-remote-title">{section.title}</span>
