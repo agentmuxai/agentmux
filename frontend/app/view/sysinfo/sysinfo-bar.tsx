@@ -4,10 +4,12 @@
 /**
  * Sysinfo's one control row, the same in the simple and the Advanced views: a
  * button per view to switch in one click, the window (1 to 15 minutes), and on
- * the right a button that shows or hides those two sets (hidden until chosen),
- * pause, and a table of the figures instead of the charts. The right-hand
- * buttons sit flush in the pane's top-right corner, in their own grid column, so
- * they stay on the first line however narrow the pane gets. As the pane
+ * the right an eye that shows or hides those two sets (hidden until chosen),
+ * pause, and a table of the figures instead of the charts. The row floats over
+ * the top of the pane, so showing or hiding the buttons never moves the charts
+ * or their figures. The right-hand buttons sit flush in the pane's top-right
+ * corner, in their own grid column, so they stay on the first line however
+ * narrow the pane gets. As the pane
  * narrows, the view and window buttons wrap onto further lines inside their
  * column, and a set of buttons wider than the column wraps within itself.
  */
@@ -15,7 +17,7 @@
 import type { JSX } from "solid-js";
 import { Show } from "solid-js";
 
-import { Button, IconButton, SegmentedControl } from "@/app/element/ui";
+import { IconButton, SegmentedControl } from "@/app/element/ui";
 
 import { windowChoices } from "./sysinfo-overview-data";
 
@@ -66,15 +68,13 @@ export function SysinfoBar(props: SysinfoBarProps): JSX.Element {
                 <Show when={props.paused}>
                     <span class="sysinfo-bar-paused">Paused</span>
                 </Show>
-                <Button
-                    icon="sliders"
+                <IconButton
+                    icon={props.controls ? "eye" : "eye-slash"}
                     density="compact"
+                    label={props.controls ? "Hide view buttons" : "Show view buttons"}
                     pressed={props.controls}
-                    aria-label={props.controls ? "Hide view buttons" : "Show view buttons"}
                     onClick={() => props.onControls(!props.controls)}
-                >
-                    Views
-                </Button>
+                />
                 <IconButton
                     icon={props.paused ? "play" : "pause"}
                     density="compact"

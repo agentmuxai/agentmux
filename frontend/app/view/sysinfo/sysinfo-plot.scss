@@ -50,9 +50,11 @@
     pointer-events: none;
 }
 
-// The pane (sysinfo-view.tsx): the control row (sysinfo-bar.tsx), the same in
-// the simple and the Advanced views, then the charts or the table.
+// The pane (sysinfo-view.tsx): the charts or the table fill it, and the control
+// row (sysinfo-bar.tsx), the same in the simple and the Advanced views, floats
+// over its top.
 .sysinfo-pane {
+    position: relative;
     display: flex;
     flex-direction: column;
     width: 100%;
@@ -60,16 +62,24 @@
     min-height: 0;
 }
 
+// Floats over the top of the pane, out of the layout: the charts under it keep
+// their place whether the view buttons are shown or not. The row itself lets
+// the pointer through; only its buttons catch it.
 // Two columns: the view and window buttons (which wrap among themselves as the
 // pane narrows) and the action buttons, which stay on the first line, flush with
 // the pane's top and right borders (no padding there).
 .sysinfo-bar {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 3;
+    pointer-events: none;
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
     align-items: start;
     gap: 2px 4px;
-    padding: 0 0 2px var(--sysinfo-text-inset, 1px);
-    flex-shrink: 0;
+    padding: 0 0 0 var(--sysinfo-text-inset, 1px);
 
     // A set of buttons wider than the pane wraps within itself.
     .ui-segmented {
@@ -85,6 +95,11 @@
     gap: 2px 4px;
     grid-column: 1;
     min-width: 0;
+    justify-self: start;
+    pointer-events: auto;
+    // Over the chart titles while shown, so they stay readable.
+    background: var(--main-bg-color);
+    border-radius: var(--radius-sm);
 }
 
 // Its parent leaves no right padding, so the last button's line is the pane's border.
@@ -93,6 +108,7 @@
     align-items: center;
     gap: 4px;
     grid-column: 2;
+    pointer-events: auto;
 }
 
 .sysinfo-bar-paused {
@@ -106,4 +122,6 @@
     flex: 1 1 auto;
     min-height: 0;
     overflow-y: auto;
+    // Its first row starts below the floating buttons.
+    padding-top: var(--ui-height, 24px);
 }
