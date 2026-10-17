@@ -1484,14 +1484,8 @@ pub(super) async fn handle_reactive_agent(
                 .into_response()
         }
     };
-    // This instance's own Swarm sender: its public key, so a peer can verify a
-    // Swarm broadcast from here (SPEC_SWARM_REFINEMENTS_2026_10_17.md §4.2).
-    // Minted on the first broadcast; until then there is nothing to verify.
-    let swarm_sender = crate::backend::swarm_lan_broadcast::this_sender_id(&state.hostname);
-    if id.eq_ignore_ascii_case(&swarm_sender) {
-        if let Ok(Some(pubkey)) = state.mstore.agent_lan_public_key_load(&swarm_sender) {
-            return Json(json!({"agent_id": swarm_sender, "lan_public_key": pubkey})).into_response();
-        }
+    if let Some(sender) = crate::backend::swarm_lan_broadcast::sender_lookup(&state.mstore, &state.hostname, id) {
+        return Json(sender).into_response();
     }
     match state.reactive_handler.get_agent(id) {
         Some(agent) => {

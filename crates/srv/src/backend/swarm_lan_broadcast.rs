@@ -48,6 +48,19 @@ pub fn this_sender_id(hostname: &str) -> String {
     instance_sender_id(hostname, &crate::backend::reactive::registry::local_channel_id())
 }
 
+/// `/agentmux/reactive/agent?id=`'s answer when `id` is this instance's own
+/// sender: its name and public key, so a peer can verify a Swarm broadcast from
+/// here. `None` for any other id, and before the first LAN broadcast minted the
+/// key, when there is nothing to verify.
+pub fn sender_lookup(store: &crate::backend::storage::store::Store, hostname: &str, id: &str) -> Option<serde_json::Value> {
+    let sender = this_sender_id(hostname);
+    if !id.eq_ignore_ascii_case(&sender) {
+        return None;
+    }
+    let pubkey = store.agent_lan_public_key_load(&sender).ok()??;
+    Some(serde_json::json!({ "agent_id": sender, "lan_public_key": pubkey }))
+}
+
 /// `remote:<host id>/<channel>/<name>` as `(section key, agent name)`, the
 /// section key being `<host id>/<channel>`. `None` for any other key.
 pub fn parse_remote_key(key: &str) -> Option<(&str, &str)> {
@@ -164,6 +177,19 @@ mod tests {
     }
 
     #[test]
+    fn the_lookup_answers_for_this_sender_only_once_its_key_exists() {
+        let store = crate::backend::storage::store::Store::open_in_memory().unwrap();
+        let sender = this_sender_id("Area54");
+        assert!(sender_lookup(&store, "Area54", &sender).is_none(), "no key minted yet");
+        let key = store.agent_lan_key_ensure(&sender).unwrap();
+        let answer = sender_lookup(&store, "Area54", &sender.to_uppercase()).expect("answers, case-insensitively");
+        assert_eq!(answer["agent_id"], sender);
+        assert_eq!(answer["lan_public_key"], key.public_key);
+        assert!(answer.get("private_key").is_none() && !answer.to_string().contains(&key.private_key));
+        assert!(sender_lookup(&store, "Area54", "Manoz").is_none());
+    }
+
+    #[test]
     fn the_route_never_prints_its_key() {
         let route = PeerRoute { url: "http://192.0.2.7:29700".into(), auth_key: "lan-secret".into() };
         assert!(!format!("{route:?}").contains("lan-secret"));
@@ -187,6 +213,73 @@ mod tests {
             req.lan_sig.as_deref().unwrap(),
         ));
         assert!(signed_request("s", "not base64!", "Manoz", &text, "m", 1).is_none());
+    }
+
+    type Seen = std::sync::Arc<std::sync::Mutex<Vec<(Option<String>, serde_json::Value)>>>;
+
+    /// A fake LAN peer's inject route: records each request's `X-AuthKey` and
+    /// body, and answers with `reply`.
+    async fn peer(reply: serde_json::Value) -> (PeerRoute, Seen) {
+        let seen: Seen = Default::default();
+        let s = seen.clone();
+        let app = axum::Router::new().route(
+            "/agentmux/reactive/inject",
+            axum::routing::post(move |headers: axum::http::HeaderMap, axum::Json(body): axum::Json<serde_json::Value>| {
+                let (s, reply) = (s.clone(), reply.clone());
+                async move {
+                    let key = headers.get("X-AuthKey").and_then(|v| v.to_str().ok()).map(str::to_string);
+                    s.lock().unwrap().push((key, body));
+                    axum::Json(reply)
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+        (PeerRoute { url, auth_key: "peer-lan-key".into() }, seen)
+    }
+
+    fn request() -> (InjectionRequest, [u8; 32]) {
+        use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+        let (public, seed) = agentmux_common::jekt_sign::generate_lan_keypair([9u8; 32]);
+        let text = broadcast_text("Area54", 1, "hi");
+        (signed_request("swarm-area54-0000abcd", &BASE64.encode(seed), "Manoz", &text, "m-1", 1_000).unwrap(), public)
+    }
+
+    #[tokio::test]
+    async fn a_delivery_goes_with_the_peers_key_and_a_signature_it_can_check() {
+        let (route, seen) = peer(serde_json::json!({ "success": true })).await;
+        let (req, public) = request();
+        assert_eq!(send(&reqwest::Client::new(), &route, &req).await, Ok(()));
+        let seen = seen.lock().unwrap();
+        assert_eq!(seen[0].0.as_deref(), Some("peer-lan-key"));
+        let body = &seen[0].1;
+        assert_eq!(body["source_agent"], "swarm-area54-0000abcd");
+        assert_eq!(body["target_agent"], "Manoz");
+        assert!(agentmux_common::jekt_sign::verify_lan_jekt(
+            &public,
+            body["request_id"].as_str().unwrap(),
+            body["source_agent"].as_str().unwrap(),
+            body["target_agent"].as_str().unwrap(),
+            body["ts_secs"].as_i64().unwrap(),
+            body["message"].as_str().unwrap(),
+            body["lan_sig"].as_str().unwrap(),
+        ));
+    }
+
+    #[tokio::test]
+    async fn a_refusal_carries_the_peers_reason() {
+        let (route, _) = peer(serde_json::json!({ "success": false, "error": "agent not found" })).await;
+        assert_eq!(send(&reqwest::Client::new(), &route, &request().0).await, Err("agent not found".to_string()));
+    }
+
+    #[tokio::test]
+    async fn an_unreachable_peer_says_so() {
+        let route = PeerRoute { url: "http://127.0.0.1:9".into(), auth_key: "k".into() };
+        let Err(e) = send(&reqwest::Client::new(), &route, &request().0).await else { panic!("must fail") };
+        assert!(e.starts_with("couldn't reach that machine"), "{e}");
     }
 
     #[test]
