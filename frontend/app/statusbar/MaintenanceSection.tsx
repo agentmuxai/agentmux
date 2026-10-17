@@ -315,14 +315,15 @@ export const MaintenanceSection = (): JSX.Element => {
                                 Show folder
                             </Button>
                         </Show>
-                        {/* An installer is shown in Explorer, never opened: that would run it. */}
+                        {/* An installer (or an AppImage's next version) is shown in its folder,
+                            never opened: that would run it. */}
                         <Show when={download()?.installer}>
                             <Button
                                 density="compact"
                                 class="maintenance-btn"
                                 onClick={() => getApi().revealInFileExplorer(download()!.installer!)}
                             >
-                                Show installer
+                                {appUpdate()?.install === "linux-appimage" ? "Show file" : "Show installer"}
                             </Button>
                         </Show>
                         <Button

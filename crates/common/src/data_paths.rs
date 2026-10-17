@@ -1137,9 +1137,9 @@ fn resolve_channel_and_dir(
         return Ok((channel, dir));
     }
 
-    // (3) Installed / Portable default: the channel a portable's folder
-    // records (`runtime_mode::recorded_channel`), else the build-time one.
-    let recorded = (*mode == RuntimeMode::Portable).then(crate::runtime_mode::recorded_channel).flatten();
+    // (3) Installed / Portable default: the channel an upgrade recorded for this
+    // install (`runtime_mode::recorded_channel`), else the build-time one.
+    let recorded = crate::runtime_mode::recorded_channel();
     let channel = recorded.as_deref().and_then(sanitize_channel_name).or_else(|| sanitize_channel_name(BUILD_CHANNEL_DEFAULT));
     let channel = channel.ok_or_else(|| format!("compile-time AGENTMUX_BUILD_CHANNEL_DEFAULT is invalid: {BUILD_CHANNEL_DEFAULT:?}"))?;
     let dir = root.join("channels").join(&channel);

@@ -102,6 +102,13 @@ an agent asking for something that affects the user),
   Only a `task dev` build (channel `dev-…`), which runs from source, doesn't
   upgrade; the panel says "Development build. The latest release is
   v0.59.27." and links the release.
+- **Linux asks with `zenity` or `kdialog`** (`crates/launcher/src/upgrade_linux.rs`):
+  a separate program no page or agent in AgentMux can click, as Windows'
+  native dialog, closed by a newer request or after the same 150 s. With
+  neither installed the new version stays staged and nothing restarts; the
+  launcher's log says to start it. The Unix supervisor handles srv's request
+  as Windows' does (`supervisor/unix.rs`): staged check, the dialog, the
+  host's `quit_app`, then the new version once srv has stopped.
 - **The upgrade keeps the data it came from.** A local build's windows,
   agents and settings are in its own channel, and a release is built for
   `stable`, so the unpack records this AgentMux's channel in the new folder
@@ -145,8 +152,8 @@ CI publishes it (`.github/workflows/build-*.yml`).
 | Windows `setup.exe` (Inno Setup, per-user by default, fixed AppId) | Inno Setup's uninstaller (`unins000.exe`) beside `agentmux.exe` (the install has the portable's `runtime/` and marker too) | `AgentMux-<v>-x64-setup.exe` | Downloaded and verified into this version's `updates/<v>/`. After quit, a hidden Windows PowerShell (by its full path, the script passed `-EncodedCommand` so no shell parses the paths) waits for the launcher to be gone, opens the installer so no other process can write, rename or delete it (the folder is the user's own, and an all-users install runs it elevated), checks its SHA-256 through that handle against the release's (which srv sends with the request, and the launcher also checks before asking), and only on a match runs it silently, holding the handle until it exits (`/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-`; the install keeps its own mode, all users or the current one, through Inno's `UsePreviousPrivileges`, and Windows asks for permission for an all-users one), which replaces the install in place, then starts AgentMux again even if the installer failed or was declined, so the old version runs rather than none | 3d |
 | Microsoft Store (`.msix`, Store ID 9P9QCXNNCRK3) | under `WindowsApps` | — | The Store updates it; AgentMux can't replace its own files. "Update in the Store" opens the Store page, or asks the Store API to install it. The Store certifies a release after GitHub publishes it, so the chip defers to the Store | 3f |
 | macOS `.dmg` | inside an `.app` | `AgentMux_<v>_arm64.dmg` | Mount, check `codesign --verify` and the Gatekeeper assessment, replace `AgentMux.app` after quit, relaunch. The bundle id carries the version (`ai.agentmux.<channel>.<version>`), so check first whether macOS asks for permissions again after each upgrade | 3c |
-| Linux AppImage | `$APPIMAGE` | `AgentMux_<v>_amd64.AppImage` | Replace that file, relaunch | 3e |
-| Linux portable | the portable marker | `AgentMux_<v>_amd64-portable.tar.xz` | Like the Windows portable, with the system `tar` | 3e |
+| Linux AppImage | `$APPIMAGE`, and srv itself runs from it (inside `$APPDIR` or AppRun's extraction, `$AGENTMUX_EXTRACTED_RUN`): `APPIMAGE` alone is inherited by anything started from an AppImage instance's pane | `AgentMux_<v>_amd64.AppImage` | Downloaded and verified beside the running AppImage (or in `updates/<v>/` when that folder can't be written), made executable, this AgentMux's channel recorded beside it (`<file>.agentmux-channel`: the AppImage itself can't be written). After quit the launcher starts it with `APPIMAGELAUNCHER_DISABLE=1` (AppImageLauncher would otherwise stop it at its "integrate?" window until someone answers, tested on a GNOME host) and without what AppRun set for this version (`LD_LIBRARY_PATH`, `APPIMAGE`, `APPDIR`, `OWD`, `ARGV0`). The old file stays | 3e |
+| Linux portable (the release tarball) | `AgentMux/agentmux.sh` two levels above srv's `usr/bin/` (the tarball has no portable marker) | `AgentMux_<v>_amd64-portable.tar.xz` | Unpacked with the system `tar` (with `xz`) into `AgentMux-<v>` beside the running folder (or under `updates/<v>/`), checked by its `usr/share/agentmux/VERSION` and that version's srv, the channel recorded at its top. After quit the launcher starts its `agentmux.sh`, which sets the library path for the new folder, without the old one's environment (as for the AppImage) | 3e |
 | Linux `.deb` / `.rpm` | under `/usr` or `/opt` | `AgentMux_<v>_amd64.deb` / `AgentMux-<v>-1.x86_64.rpm` | Install with the desktop's password prompt (`pkexec`); later an apt/dnf repository so system updates do it | 3g |
 
 ### 4.3 Verifying a download

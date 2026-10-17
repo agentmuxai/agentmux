@@ -135,6 +135,15 @@ pub fn staged(req: &UpgradeRequest, own_dir: &Path, data_dir: &Path, own_version
         _ => return Err(format!("{} isn't newer than {own_version}", req.version)),
     }
     match &req.target {
+        // Linux: a portable's `agentmux.sh`, or an AppImage (`upgrade_linux`).
+        UpgradeTarget::Launcher(launcher) if !cfg!(windows) => {
+            let own_appimage = std::env::current_exe()
+                .ok()
+                .and_then(|exe| agentmux_common::runtime_mode::running_appimage(&exe));
+            let own_root = crate::upgrade_linux::portable_root(own_dir);
+            crate::upgrade_linux::check_target(launcher, &req.version, own_root.as_deref(), own_appimage.as_deref(), data_dir)?;
+            Ok(Staged::Launcher(launcher.clone()))
+        }
         UpgradeTarget::Launcher(launcher) => {
             let named_right = launcher.file_name().is_some_and(|n| n.eq_ignore_ascii_case("agentmux.exe"));
             if !launcher.is_absolute() || !named_right || !launcher.is_file() {
@@ -219,9 +228,12 @@ fn current_thread() -> u32 {
     unsafe { windows_sys::Win32::System::Threading::GetCurrentThreadId() }
 }
 
+/// Off Windows, an id of its own for each dialog, so a superseded dialog's
+/// timer never closes a newer one.
 #[cfg(not(target_os = "windows"))]
 fn current_thread() -> u32 {
-    0
+    static NEXT: AtomicU32 = AtomicU32::new(1);
+    NEXT.fetch_add(1, Ordering::SeqCst)
 }
 
 /// Close the dialog shown on `thread` by clicking its No button.
@@ -248,8 +260,27 @@ fn dismiss(thread: u32) {
     }
 }
 
-#[cfg(not(target_os = "windows"))]
+/// Close the open dialog; the callers check `thread` is its.
+#[cfg(target_os = "linux")]
+fn dismiss(thread: u32) {
+    if thread != 0 {
+        crate::upgrade_linux::dismiss();
+    }
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "linux")))]
 fn dismiss(_thread: u32) {}
+
+/// The question for a restart into the new version at `from`.
+#[cfg_attr(not(any(target_os = "windows", target_os = "linux")), allow(dead_code))]
+fn restart_question(version: &str, from: &Path) -> String {
+    format!(
+        "Restart AgentMux to upgrade to {version}?\n\n\
+         Every window closes and every agent stops, then AgentMux {version} opens \
+         from:\n{}\n\nYour tabs come back and agents resume their conversations.",
+        from.display()
+    )
+}
 
 #[cfg(target_os = "windows")]
 fn confirm(version: &str, staged: &Staged) -> bool {
@@ -258,12 +289,7 @@ fn confirm(version: &str, staged: &Staged) -> bool {
         MessageBoxW, IDYES, MB_DEFBUTTON2, MB_ICONQUESTION, MB_SETFOREGROUND, MB_TOPMOST, MB_YESNO,
     };
     let body = match staged {
-        Staged::Launcher(launcher) => format!(
-            "Restart AgentMux to upgrade to {version}?\n\n\
-             Every window closes and every agent stops, then AgentMux {version} opens \
-             from:\n{}\n\nYour tabs come back and agents resume their conversations.",
-            launcher.parent().unwrap_or(launcher).display()
-        ),
+        Staged::Launcher(launcher) => restart_question(version, launcher.parent().unwrap_or(launcher)),
         Staged::Installer { .. } => format!(
             "Restart AgentMux to upgrade to {version}?\n\n\
              Every window closes and every agent stops, then the AgentMux {version} installer \
@@ -284,9 +310,20 @@ fn confirm(version: &str, staged: &Staged) -> bool {
     answer == IDYES
 }
 
-#[cfg(not(target_os = "windows"))]
+/// Linux: zenity or kdialog (`upgrade_linux::confirm`). Shows the AppImage,
+/// or the portable's folder.
+#[cfg(target_os = "linux")]
+fn confirm(version: &str, staged: &Staged) -> bool {
+    let shown = match staged {
+        Staged::Launcher(p) if p.file_name().is_some_and(|n| n == "agentmux.sh") => p.parent().unwrap_or(p),
+        Staged::Launcher(p) | Staged::Installer { installer: p, .. } => p.as_path(),
+    };
+    crate::upgrade_linux::confirm(DIALOG_TITLE, &restart_question(version, shown))
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "linux")))]
 fn confirm(_version: &str, _staged: &Staged) -> bool {
-    // Only the Windows portable restarts itself so far (phase 3b).
+    // macOS restarts itself in phase 3c.
     false
 }
 
@@ -381,6 +418,18 @@ pub fn relaunch(staged: &Staged) -> std::io::Result<()> {
             cmd.env_remove(&key);
         }
     }
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        for key in crate::upgrade_linux::NOT_INHERITED {
+            cmd.env_remove(key);
+        }
+        let (key, value) = crate::upgrade_linux::APPIMAGELAUNCHER_OFF;
+        cmd.env(key, value);
+        // Its own process group: it outlives this launcher, and a signal to
+        // this one's group never reaches it.
+        cmd.process_group(0);
+    }
     cmd.stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
@@ -401,6 +450,7 @@ mod tests {
         dir.join("agentmux.exe")
     }
 
+    #[cfg(windows)]
     fn req(version: &str, launcher: &Path) -> UpgradeRequest {
         UpgradeRequest { version: version.into(), target: UpgradeTarget::Launcher(launcher.to_path_buf()) }
     }
@@ -413,6 +463,8 @@ mod tests {
         UpgradeRequest { version: version.into(), target }
     }
 
+    // A Windows portable; Linux's targets are `upgrade_linux`'s tests.
+    #[cfg(windows)]
     #[test]
     fn only_a_newer_portable_beside_a_portable_is_restarted_into() {
         let root = tempfile::tempdir().unwrap();

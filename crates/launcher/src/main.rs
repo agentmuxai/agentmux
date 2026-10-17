@@ -55,6 +55,8 @@ mod ui_liveness;
 mod host_hang_dump;
 mod upgrade;
 mod upgrade_restart;
+// Linux's "Upgrade & restart": its targets, its dialog (upgrade_restart.rs).
+mod upgrade_linux;
 #[cfg(target_os = "windows")]
 mod splash;
 #[cfg(target_os = "macos")]

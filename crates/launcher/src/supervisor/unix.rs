@@ -480,8 +480,31 @@ pub(crate) async fn run_unix(
     // Same distinct exit code as Windows so wedged-host teardown is
     // unambiguous in log/exit-code triage across platforms.
     const TEARDOWN_BACKSTOP_EXIT_CODE: i32 = 86;
+    // "Upgrade & restart" (upgrade_restart.rs), as on Windows: srv's requests,
+    // the user's answer in the native dialog, and what to start once quit.
+    let mut upgrade_requests = crate::upgrade_restart::requests();
+    let (upgrade_yes_tx, mut upgrade_yes) = tokio::sync::mpsc::unbounded_channel::<crate::upgrade_restart::Staged>();
+    let mut relaunch: Option<(crate::upgrade_restart::Staged, std::time::Instant)> = None;
     let exit_code = loop {
         tokio::select! {
+            Some(req) = upgrade_requests.recv() => {
+                match crate::upgrade_restart::staged(&req, launcher_exe_dir, &paths.data_dir, version) {
+                    Ok(staged) => {
+                        log(&format!("upgrade: srv asks to restart into {staged}; asking the user"));
+                        let tx = upgrade_yes_tx.clone();
+                        crate::upgrade_restart::ask_then(req.version, staged, move |s| {
+                            let _ = tx.send(s);
+                        });
+                    }
+                    Err(e) => log(&format!("upgrade: refused srv's request: {e}")),
+                }
+            }
+            Some(staged) = upgrade_yes.recv() => {
+                log(&format!("upgrade: the user said yes; quitting to restart into {staged}"));
+                relaunch = Some((staged, std::time::Instant::now()));
+                let (data_dir, hash) = (paths.data_dir.clone(), dir_hash.clone());
+                tokio::task::spawn_blocking(move || crate::tray::forward_tray_cmd(&data_dir, &hash, "quit_app"));
+            }
             _ = teardown_check_interval.tick() => {
                 let misses = crate::ui_liveness::consecutive_misses();
                 if crate::teardown_backstop::should_teardown(misses) {
@@ -802,6 +825,14 @@ pub(crate) async fn run_unix(
         }
         Ok((_, outcome)) => log(&format!("srv stopped ({outcome:?})")),
         Err(e) => log(&format!("WARN: stopping srv failed: {e}")),
+    }
+    // srv has stopped, so the new version copies complete data on its first
+    // start. Only after a clean quit the user confirmed recently.
+    if let Some((staged, at)) = relaunch.filter(|(_, at)| exit_code == 0 && crate::upgrade_restart::still_confirmed(*at)) {
+        match crate::upgrade_restart::relaunch(&staged) {
+            Ok(()) => log(&format!("upgrade: started {staged} (confirmed {}s ago)", at.elapsed().as_secs())),
+            Err(e) => log(&format!("upgrade: couldn't start {staged}: {e}")),
+        }
     }
     log(&format!("launcher exiting with code {}", exit_code));
     std::process::exit(exit_code);
