@@ -229,12 +229,10 @@ mod tests {
         let err = staged(&status(Some(download("ready", Some(&folder))))).unwrap_err();
         assert!(err.contains("download the new version again"), "{err}");
 
-        std::fs::create_dir_all(folder.join("runtime")).unwrap();
-        std::fs::write(folder.join("agentmux.exe"), b"").unwrap();
-        std::fs::write(folder.join("runtime/agentmux-portable.marker"), b"").unwrap();
-        std::fs::write(folder.join("runtime/agentmux-0.59.27.exe"), b"").unwrap();
+        crate::backend::update_download::fake_portable(&folder, "0.59.27");
         let (d, t) = staged(&status(Some(download("ready", Some(&folder))))).unwrap();
-        assert_eq!((d.version.as_str(), t), ("0.59.27", UpgradeTarget::Launcher(folder.join("agentmux.exe"))));
+        let launcher = folder.join(if cfg!(windows) { "agentmux.exe" } else { "agentmux.sh" });
+        assert_eq!((d.version.as_str(), t), ("0.59.27", UpgradeTarget::Launcher(launcher)));
 
         // A setup.exe install restarts through its downloaded installer.
         let installer = dir.path().join("AgentMux-0.59.27-x64-setup.exe");

@@ -404,6 +404,25 @@ pub(crate) fn is_staged_portable(dir: &Path, version: &str) -> bool {
     }
 }
 
+/// A staged portable of `version` at `dir`, laid out as this platform's
+/// release is (tests).
+#[cfg(test)]
+pub(crate) fn fake_portable(dir: &Path, version: &str) {
+    if cfg!(windows) {
+        std::fs::create_dir_all(dir.join("runtime")).unwrap();
+        std::fs::write(dir.join("agentmux.exe"), b"").unwrap();
+        std::fs::write(dir.join("runtime/agentmux-portable.marker"), b"").unwrap();
+        std::fs::write(dir.join(format!("runtime/agentmux-{version}.exe")), b"").unwrap();
+    } else {
+        std::fs::create_dir_all(dir.join("usr/bin")).unwrap();
+        std::fs::create_dir_all(dir.join("usr/share/agentmux")).unwrap();
+        std::fs::write(dir.join("agentmux.sh"), b"").unwrap();
+        std::fs::write(dir.join(format!("usr/bin/agentmux-srv-{version}-linux.x64")), b"").unwrap();
+        std::fs::write(dir.join("usr/share/agentmux/VERSION"), format!("{version}
+")).unwrap();
+    }
+}
+
 /// The folder a release's portable is unpacked into, beside the running one.
 fn portable_folder_name(version: &str) -> String {
     if cfg!(windows) {
@@ -605,12 +624,6 @@ mod tests {
         assert!(other.finish(&sha).unwrap_err().contains("checksum"));
     }
 
-    fn fake_portable(dir: &Path, version: &str) {
-        std::fs::create_dir_all(dir.join("runtime")).unwrap();
-        std::fs::write(dir.join("agentmux.exe"), b"").unwrap();
-        std::fs::write(dir.join("runtime/agentmux-portable.marker"), b"").unwrap();
-        std::fs::write(dir.join(format!("runtime/agentmux-{version}.exe")), b"").unwrap();
-    }
 
     #[tokio::test]
     async fn downloads_left_by_an_interrupted_run_are_removed_and_folders_kept() {
