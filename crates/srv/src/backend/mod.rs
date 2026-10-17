@@ -117,6 +117,7 @@ pub mod pane_env;
 pub mod posix_shell;
 pub mod shellintegration;
 pub mod shells;
+pub mod swarm_lan_broadcast;
 pub mod swarm_remote;
 pub mod sampler;
 pub mod sysinfo;

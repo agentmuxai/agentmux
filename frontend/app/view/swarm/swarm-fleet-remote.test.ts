@@ -46,6 +46,7 @@ import type { SwarmOtherInstances } from "./swarm-remote";
 const LOAP = "blk-loap"; // another channel on this machine: has a block id
 const MANOZ = "remote:lan:area54#1/stable/Manoz";
 const OPAZ = "remote:lan:area54#1/stable/Opaz";
+const ROOK = "remote:cloud:home#3/stable/Rook"; // a cloud install: nothing reaches it yet
 
 const both: SwarmOtherInstances = {
     hostname: "narko",
@@ -64,6 +65,12 @@ const both: SwarmOtherInstances = {
             channels: [
                 { channel: "stable", seen_at_ms: 1, stale: false, os: "macos", agents: [{ name: "Manoz", block_id: "" }, { name: "Opaz", block_id: "" }] },
             ],
+        },
+        {
+            host_id: "cloud:home#3",
+            display_name: "home",
+            tier: "cloud",
+            channels: [{ channel: "stable", seen_at_ms: 1, stale: false, os: "linux", agents: [{ name: "Rook", block_id: "" }] }],
         },
     ],
 };
@@ -96,17 +103,18 @@ beforeEach(() => {
 afterEach(() => vi.useRealTimers());
 
 describe("broadcast to a mixed selection", () => {
-    it("sends the agents it can reach and reports the others with the reason", async () => {
+    // A LAN peer's agents get the broadcast as a message signed by this
+    // AgentMux (docs/specs/SPEC_SWARM_REFINEMENTS_2026_10_17.md §4.2).
+    it("sends the agents it can reach, LAN peers' included, and reports the others with the reason", async () => {
         const vm = await modelWith(both);
-        vm.setManySelected([LOAP, MANOZ, OPAZ], true);
+        vm.setManySelected([LOAP, MANOZ, OPAZ, ROOK], true);
 
         const result = await vm.broadcastToSelection("merge on approval");
 
         expect(rpc.broadcast).toHaveBeenCalledTimes(1);
-        expect(rpc.broadcast).toHaveBeenCalledWith({}, { targets: [LOAP], message: "merge on approval" });
-        expect(result.succeeded).toEqual([LOAP]);
-        expect(result.failed.map((f) => f.id)).toEqual([MANOZ, OPAZ]);
-        expect(result.failed[0].error).toMatch(/can't message: .*verified link/);
+        expect(rpc.broadcast).toHaveBeenCalledWith({}, { targets: [LOAP, MANOZ, OPAZ], message: "merge on approval" });
+        expect(result.succeeded).toEqual([LOAP, MANOZ, OPAZ]);
+        expect(result.failed).toEqual([{ id: ROOK, error: "can't message: no verified link to that machine yet" }]);
     });
 
     it("names every target in the result, so the panel never prints a block id or a key", async () => {
@@ -119,9 +127,9 @@ describe("broadcast to a mixed selection", () => {
         });
     });
 
-    it("sends nothing at all when every selected agent is on another machine", async () => {
+    it("sends nothing at all when no selected agent can be messaged", async () => {
         const vm = await modelWith(both);
-        vm.setManySelected([MANOZ], true);
+        vm.setManySelected([ROOK], true);
         const result = await vm.broadcastToSelection("hi");
         expect(rpc.broadcast).not.toHaveBeenCalled();
         expect(result.succeeded).toEqual([]);

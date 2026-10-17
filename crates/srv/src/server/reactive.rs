@@ -1484,6 +1484,9 @@ pub(super) async fn handle_reactive_agent(
                 .into_response()
         }
     };
+    if let Some(sender) = crate::backend::swarm_lan_broadcast::sender_lookup(&state.mstore, &state.hostname, id) {
+        return Json(sender).into_response();
+    }
     match state.reactive_handler.get_agent(id) {
         Some(agent) => {
             // Merged in, not part of AgentRegistration's own serialization —

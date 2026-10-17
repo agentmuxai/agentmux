@@ -1,6 +1,6 @@
 # Spec: Swarm refinements — the selection count, provider icons on remote agents, broadcast to remote agents
 
-**Status:** active. §2 (the selection count) and §5 (one list) shipped in #5055, §3 (provider icons) in #5057; §4.2 (LAN broadcast) follows in its own PR. The owner said "ok lets build it" (2026-10-17) to the recommendations in §7: D1, D2 and D5 yes, D3 not now.
+**Status:** active. Shipped: §2 (the selection count) and §5 (one list) in #5055, §3 (provider icons) in #5057, §4.2 (LAN broadcast) in #5060. Left: broadcast to cloud-only installs (§6 phase 4), which waits on the Swarm's cloud tier. The owner said "ok lets build it" (2026-10-17) to the recommendations in §7: D1, D2 and D5 yes, D3 not now.
 **Date:** 2026-10-17
 **Author:** Lazo
 **Verified against:** `agentmux` `main` @ `ae0fbb2b3` (2026-10-17), by reading code.
@@ -92,7 +92,9 @@ The LAN refusal is deliberate (SPEC_SWARM_REMOTE_AGENTS_PLATFORM_TAG_AND_SELECTI
 On another machine, a broadcast arrives the way an agent's message does: as a jekt, checked against a signature, at the normal tier, from the operator of the sending instance, with no claim of user authority. The receiving agent reads it as information from a verified sender, not as its owner speaking.
 
 - **Sender identity:** the sending **instance** signs, not an agent. The cloud tier has this already (the install keypair and the account's key directory). The LAN has only per-agent keys (SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15), so this needs an **instance LAN key**, published the way per-agent LAN keys are (the `/agentmux/reactive/agent?id=` pubkey half), which the receiver checks. **Needs decision D2.**
-- **What the agent sees:** a jekt with `FROM=<owner's instance>@<host> VIA=swarm`, `TRUST=lan-verified` (or `wan-verified`), normal tier. The text says it's a Swarm broadcast from that instance, so the agent knows it's fleet-wide, not addressed to it alone.
+  - **As built:** the instance signs under a reserved sender name, `swarm-<host>-<8 hex>` (`backend/swarm_lan_broadcast.rs`, `instance_sender_id`). It's a valid agent id, and the hash of hostname and channel keeps it unique per instance and stable across restarts. Its keypair is a row of the existing `db_agent_lan_keys` under that name, minted on the first broadcast that reaches a LAN peer. This instance's `/agentmux/reactive/agent?id=` answers for that name with the public key. So the receiving instance's existing `verify_lan_signature` works unchanged: it finds the key on the peers, pins it on first use, and verifies. Nothing changes on the receiving side.
+  - **Routing:** the Swarm key `remote:<host id>/<channel>/<name>` is resolved through the same LAN host list the Swarm shows (`swarm_remote::lan_hosts`, whose channels now carry their peer route, never serialized). So the message goes to the instance the row names, not to whichever peer first claims an agent of that name.
+- **What the agent sees:** a jekt with `FROM=swarm-<host>-<hash>`, `TRUST=lan-verified` (or `wan-verified`), normal tier. The text begins "Swarm broadcast from <host>, sent by its operator to N agents:", so the agent knows it's fleet-wide, not addressed to it alone.
 - **The result panel** reports each remote target's delivery like a local one: delivered, queued, held, or failed with the receiver's reason.
 - **Stop stays out of scope.** A remote stop is destructive. It needs the 15 s override window on the target's own screen (SPEC_AGENT_SELF_QUIT §6.5) as well as the verified identity. The toolbar keeps saying why it's unavailable.
 

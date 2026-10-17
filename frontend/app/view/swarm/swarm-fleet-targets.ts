@@ -8,10 +8,11 @@
  * this machine runs is its block id, which the fleet RPCs already take. A target
  * with no block id here (an agent on a LAN peer or in the cloud) is keyed by
  * where it is and its name. Which actions can reach a target depends on how it
- * was found: another channel on this machine is reached over loopback, while an
- * agent on another machine can't be acted on yet because nothing there can
- * verify the request is yours.
- * docs/specs/SPEC_SWARM_REMOTE_AGENTS_PLATFORM_TAG_AND_SELECTION_2026_10_03.md §4, §5, §6.
+ * was found: another channel on this machine is reached over loopback; an agent
+ * on a LAN peer gets a broadcast as a message signed by this AgentMux, not as the
+ * user's turn, and can't be stopped from here yet.
+ * docs/specs/SPEC_SWARM_REMOTE_AGENTS_PLATFORM_TAG_AND_SELECTION_2026_10_03.md §4, §5, §6;
+ * docs/specs/SPEC_SWARM_REFINEMENTS_2026_10_17.md §4.
  */
 
 import type { FleetActionResult } from "@/app/store/rpc-api";
@@ -31,11 +32,17 @@ export interface FleetTargetInfo {
     /** Runs on another machine (LAN or cloud), not another channel of this one. */
     otherMachine: boolean;
     stale: boolean;
-    /** Whether the target has a block id an action can name. */
+    /** Whether a stop can reach it: it has a block id here or on another
+     *  channel of this machine. */
     actionable: boolean;
+    /** Whether a broadcast can reach it: what a stop can, plus an agent on a
+     *  LAN peer, which gets a signed message from this AgentMux
+     *  (docs/specs/SPEC_SWARM_REFINEMENTS_2026_10_17.md §4.2). */
+    messageable: boolean;
 }
 
-const NO_VERIFIED_LINK = "no verified link to other machines yet";
+const NO_VERIFIED_LINK = "no verified link to that machine yet";
+const NO_REMOTE_STOP = "stopping an agent on another machine isn't supported yet";
 const NO_LONGER_LISTED = "no longer listed";
 const NOT_SEEN_RECENTLY = "not seen recently";
 
@@ -48,8 +55,8 @@ const VERBS: Record<FleetAction, string> = { broadcast: "can't message", stop: "
 export function unavailableReason(target: FleetTargetInfo, action: FleetAction): string | null {
     if (action === "supervise") return target.remote ? "can't supervise: only this AgentMux's own agents" : null;
     if (target.stale) return `${VERBS[action]}: ${NOT_SEEN_RECENTLY}`;
-    if (target.actionable) return null;
-    return `${VERBS[action]}: ${NO_VERIFIED_LINK}`;
+    if (action === "stop") return target.actionable ? null : `${VERBS.stop}: ${NO_REMOTE_STOP}`;
+    return target.messageable ? null : `${VERBS[action]}: ${NO_VERIFIED_LINK}`;
 }
 
 /** The selection key of a remote agent: its block id when it has one (this
@@ -74,9 +81,11 @@ export function remoteFleetTargets(sections: RemoteSection[]): Map<string, Fleet
                 remote: true,
                 otherMachine: section.tier !== "host",
                 stale: section.stale,
-                // Another channel on this machine is reached over loopback. Anything
-                // else has no verified path (spec §6).
+                // Another channel on this machine is reached over loopback. A LAN
+                // peer's agent gets a signed message, but no stop; a cloud one
+                // neither yet.
                 actionable: section.tier === "host" && !!agent.block_id,
+                messageable: (section.tier === "host" && !!agent.block_id) || section.tier === "lan",
             });
         }
     }
@@ -125,7 +134,7 @@ export function gapSummary(unreachable: { reason: string }[], total: number, act
 
 /** This instance's agent `key` as a target, for a list that only has its key. */
 export function localTarget(key: string, name = key): FleetTargetInfo {
-    return { key, name, where: null, badge: null, platform: null, remote: false, otherMachine: false, stale: false, actionable: true };
+    return { key, name, where: null, badge: null, platform: null, remote: false, otherMachine: false, stale: false, actionable: true, messageable: true };
 }
 
 /** "Loap · narko · dev-fix-lan", or just "Loap" for this instance's own. Falls

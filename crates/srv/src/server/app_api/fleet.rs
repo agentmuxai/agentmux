@@ -29,9 +29,12 @@
 //! the way a stop is (`forward_broadcast_to_channel`): the sender passes only the
 //! target block, the body, the `MSGID` and the `RECIPIENTS` count, and the
 //! receiving instance builds the header and starts the turn itself
-//! (`deliver_forwarded_broadcast`). Agents on other machines are not reachable
-//! this way: nothing on the LAN proves who is asking
+//! (`deliver_forwarded_broadcast`). An agent on a LAN peer can't get a user
+//! turn: nothing on the LAN proves who is asking
 //! (docs/specs/SPEC_SWARM_REMOTE_AGENTS_PLATFORM_TAG_AND_SELECTION_2026_10_03.md §6).
+//! It gets a jekt from this instance instead, signed with this instance's own
+//! LAN key, which its instance verifies as it does any agent's
+//! (`backend::swarm_lan_broadcast`, SPEC_SWARM_REFINEMENTS_2026_10_17.md §4.2).
 //! The forward uses the same loopback auth as the stop forward, and reaches only
 //! what that channel's own `fleet.broadcast` already does.
 //! An AGENT-initiated broadcast instead loops the EXISTING signed single-target
@@ -210,6 +213,9 @@ enum BroadcastRoute {
     Local(String),
     /// An agent on another channel on this machine, via its own srv.
     Channel(crate::backend::reactive::registry::AgentEntry),
+    /// An agent on a LAN peer: a signed jekt from this instance, not a user
+    /// turn (`backend::swarm_lan_broadcast`).
+    Lan { route: crate::backend::swarm_remote::PeerRoute, agent: String },
 }
 
 impl BroadcastRoute {
@@ -217,7 +223,38 @@ impl BroadcastRoute {
         match self {
             BroadcastRoute::Local(agent) => agent,
             BroadcastRoute::Channel(entry) => &entry.agent_id,
+            BroadcastRoute::Lan { agent, .. } => agent,
         }
+    }
+}
+
+/// What every LAN delivery of one broadcast shares: this instance's sender name
+/// and key, or why it can't sign.
+struct LanSender {
+    sender_id: String,
+    private_key: Result<String, String>,
+    hostname: String,
+}
+
+impl LanSender {
+    fn for_state(state: &AppState) -> Self {
+        let sender_id = crate::backend::swarm_lan_broadcast::this_sender_id(&state.hostname);
+        let private_key = state
+            .mstore
+            .agent_lan_key_ensure(&sender_id)
+            .map(|k| k.private_key)
+            .map_err(|e| format!("can't sign for this AgentMux: {e}"));
+        Self { sender_id, private_key, hostname: state.hostname.clone() }
+    }
+
+    async fn deliver(&self, client: &reqwest::Client, route: &crate::backend::swarm_remote::PeerRoute, agent: &str, body: &str, recipients: usize) -> Result<(), String> {
+        use crate::backend::swarm_lan_broadcast as lan;
+        let key = self.private_key.as_ref().map_err(Clone::clone)?;
+        let text = lan::broadcast_text(&self.hostname, recipients, body);
+        let msg_id = uuid::Uuid::new_v4().to_string();
+        let req = lan::signed_request(&self.sender_id, key, agent, &text, &msg_id, agentmux_common::time::now_secs())
+            .ok_or_else(|| "can't sign for this AgentMux: its LAN key is unreadable".to_string())?;
+        lan::send(client, route, &req).await
     }
 }
 
@@ -314,18 +351,36 @@ pub(crate) async fn fleet_broadcast_impl(
 ) -> FleetActionResult {
     let deps = AgentTurnDeps::from_state(state);
     let msg_id = uuid::Uuid::new_v4().to_string();
-    // This instance's own panes first, then the machine's other channels. A
-    // block known to neither has no route and fails, as before.
+    // This instance's own panes first, then the machine's other channels, then
+    // an agent on a LAN peer by its Swarm key, resolved through the same hosts
+    // the Swarm lists. A target known to none has no route and fails, as before.
+    use crate::backend::swarm_lan_broadcast::{parse_remote_key, route_for};
+    let lan_hosts = if targets.iter().any(|t| parse_remote_key(t).is_some()) {
+        crate::backend::swarm_remote::lan_hosts(
+            &state.lan_discovery.get_instances(),
+            &crate::backend::lan_listeners::cached_local_addresses(),
+            agentmux_common::time::now_ms_u64(),
+        )
+    } else {
+        Vec::new()
+    };
     let routes: std::collections::HashMap<String, BroadcastRoute> = targets
         .iter()
-        .filter_map(|block_id| {
-            let route = match state.reactive_handler.get_agent_by_block(block_id) {
-                Some(agent) => BroadcastRoute::Local(agent.agent_id),
-                None => BroadcastRoute::Channel(shared_channel_for(state, block_id)?),
+        .filter_map(|key| {
+            let route = if let Some((section, name)) = parse_remote_key(key) {
+                BroadcastRoute::Lan { route: route_for(&lan_hosts, section)?, agent: name.to_string() }
+            } else {
+                match state.reactive_handler.get_agent_by_block(key) {
+                    Some(agent) => BroadcastRoute::Local(agent.agent_id),
+                    None => BroadcastRoute::Channel(shared_channel_for(state, key)?),
+                }
             };
-            Some((block_id.clone(), route))
+            Some((key.clone(), route))
         })
         .collect();
+    // Only a broadcast that reaches a LAN peer mints this instance's key.
+    let any_lan = routes.values().any(|r| matches!(r, BroadcastRoute::Lan { .. }));
+    let lan_sender = Arc::new(any_lan.then(|| LanSender::for_state(state)));
     let routes = Arc::new(routes);
     // The same count `run_broadcast` puts in the local headers: every target
     // that resolved, here or on another channel.
@@ -339,6 +394,7 @@ pub(crate) async fn fleet_broadcast_impl(
         |block_id, text, origin| {
             let deps = deps.clone();
             let routes = routes.clone();
+            let lan_sender = lan_sender.clone();
             let client = state.http_client.clone();
             let (body, msg_id) = (message.clone(), msg_id.clone());
             async move {
@@ -347,6 +403,10 @@ pub(crate) async fn fleet_broadcast_impl(
                         let forward = BroadcastForward { block_id: &block_id, body: &body, msg_id: &msg_id, recipients };
                         forward_broadcast_to_channel(&client, &entry.local_url, &entry.auth_key, &forward).await
                     }
+                    Some(BroadcastRoute::Lan { route, agent }) => match lan_sender.as_ref() {
+                        Some(sender) => sender.deliver(&client, route, agent, &body, recipients).await,
+                        None => Err("no LAN sender".to_string()),
+                    },
                     _ => deliver_broadcast_turn(&deps, block_id, text, origin).await,
                 }
             }

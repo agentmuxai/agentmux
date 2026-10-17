@@ -93,13 +93,15 @@ describe("FleetToolbar with agents of other instances selected", () => {
         expect(screen.getByText(/Stop 2/)).toBeTruthy();
     });
 
-    it("can't stop or broadcast when everything selected is on another machine, and says why", () => {
+    // A LAN peer's agent gets a signed message, but no stop
+    // (docs/specs/SPEC_SWARM_REFINEMENTS_2026_10_17.md §4.2).
+    it("can broadcast but not stop when everything selected is on a LAN peer, and says why", () => {
         toolbar(modelStub([MANOZ]));
         const stop = screen.getByText(/Stop 0/).closest("button")!;
         const broadcast = screen.getByText("Broadcast").closest("button")!;
         expect(stop.disabled).toBe(true);
-        expect(broadcast.disabled).toBe(true);
-        expect(stop.title).toMatch(/other machines/);
+        expect(broadcast.disabled).toBe(false);
+        expect(stop.title).toBe("Stopping agents on another machine isn't supported yet");
     });
 
     it("leaves Broadcast and Stop enabled when something selected can be reached", () => {
@@ -114,10 +116,8 @@ describe("FleetToolbar with agents of other instances selected", () => {
         toolbar(modelStub(["blk-korp", LOAP, MANOZ, "blk-gone"]));
         fireEvent.click(screen.getByText("Broadcast").closest("button")!);
         const input = document.querySelector<HTMLInputElement>(".swarm-fleet-broadcast-input")!;
-        expect(input.placeholder).toBe("Message to send to 2 agents…");
-        expect(document.querySelector(".swarm-fleet-broadcast-gap")!.textContent).toBe(
-            "2 of 4 can't be messaged: no verified link to other machines yet; no longer listed"
-        );
+        expect(input.placeholder).toBe("Message to send to 3 agents…");
+        expect(document.querySelector(".swarm-fleet-broadcast-gap")!.textContent).toBe("1 of 4 can't be messaged: no longer listed");
     });
 
     it("says nothing extra when every selected agent gets the message", () => {
@@ -145,7 +145,7 @@ describe("StopTargetRows", () => {
 
     it("lists an agent on another machine with why it can't be stopped, marked as left out", () => {
         const [row] = rows([MANOZ]);
-        expect(text(row)).toMatch(/^Manoz Area54 macOS LAN can't stop: .*verified link/);
+        expect(text(row)).toBe("Manoz Area54 macOS LAN can't stop: stopping an agent on another machine isn't supported yet");
         expect(row.classList.contains("swarm-fleet-confirm-target-row--unavailable")).toBe(true);
     });
 
