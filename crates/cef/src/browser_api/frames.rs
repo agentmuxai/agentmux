@@ -142,6 +142,19 @@ pub fn arrange(frames: &[RawFrame], owners: &HashMap<String, i64>) -> Vec<Placed
     out
 }
 
+/// The origin of the frame holding `raw`, if it is known.
+fn parent_origin<'a>(all: &'a [RawFrame], raw: &RawFrame) -> Option<&'a str> {
+    let parent = raw.parent_id.as_deref()?;
+    all.iter().find(|f| f.id == parent).map(|f| f.origin.as_str())
+}
+
+/// A frame is cross-origin when it differs from the page it is shown on, or
+/// from the frame that holds it: a same-site frame inside a frame from another
+/// site is still sitting in that site's page.
+fn is_cross_origin(origin: &str, top: &str, parent: Option<&str>) -> bool {
+    origin != top || parent.is_some_and(|p| p != origin)
+}
+
 /// Role of the buttons whose DOM facts are also looked up (a file input's role).
 const BUTTON_ROLE: &str = "button";
 
@@ -286,7 +299,7 @@ pub async fn read_frames(root: &mut CdpSession, describes_left: &mut usize) -> (
             parent: p.parent,
             owner_backend: owners.get(&raw.id).copied(),
             origin: raw.origin.clone(),
-            cross_origin: raw.origin != main.origin,
+            cross_origin: is_cross_origin(&raw.origin, &main.origin, parent_origin(&all, raw)),
             ..Default::default()
         };
         if ordinal > MAX_FRAMES || p.depth > MAX_FRAME_DEPTH {
@@ -416,6 +429,16 @@ mod tests {
 
     fn hop(owner: i64, session: Option<&str>) -> FrameHop {
         FrameHop { owner_backend: owner, parent_session: session.map(str::to_string) }
+    }
+
+    #[test]
+    fn a_frame_is_cross_origin_to_the_page_or_to_the_frame_holding_it() {
+        let page = "http://a.test";
+        assert!(!is_cross_origin(page, page, Some(page)), "same as both");
+        assert!(is_cross_origin("http://b.test", page, Some(page)), "differs from the page");
+        assert!(is_cross_origin(page, page, Some("http://b.test")), "same as the page, inside another site's frame");
+        assert!(is_cross_origin("http://b.test", page, Some("http://b.test")), "differs from the page");
+        assert!(!is_cross_origin(page, page, None), "parent unknown: judged against the page only");
     }
 
     #[test]
