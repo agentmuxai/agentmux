@@ -369,11 +369,15 @@ jobs:
 
       - name: Extract changelog for this version
         id: changelog
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           # extract-changelog.sh exits non-zero on a missing entry, so an
           # empty-NOTES fallback here is dead code — the step would already
           # have failed under set -e before reaching it.
-          NOTES=$(bash scripts/extract-changelog.sh "$VERSION")
+          # --include-unpublished adds the older versions with no GitHub
+          # release (a failed build skips publish), whose changes ship here.
+          NOTES=$(bash scripts/extract-changelog.sh --include-unpublished "$VERSION")
           # Write to file to safely pass multiline content to gh release create
           echo "$NOTES" > /tmp/release-notes.md
           echo "Release notes:"
