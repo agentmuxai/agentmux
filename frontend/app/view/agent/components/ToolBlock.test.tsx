@@ -20,6 +20,7 @@ import type { ToolLogChunk, ToolNode } from "../types";
 import { ToolBlock } from "./ToolBlock";
 import { BODY_LINGER_MS } from "./body-mount";
 import { AgentDormancyProvider } from "../agent-dormancy";
+import { ToolResultLoaderProvider } from "../tool-result-loader";
 
 afterEach(() => {
     cleanup();
@@ -1114,5 +1115,26 @@ describe("ToolBlock — a dormant pane's tool output waits until the pane is sho
         expect(body()).toContain("line 1");
         setDormant(false);
         expect(body()).toContain("line 2");
+    });
+});
+
+// REPORT_AGENT_PANE_HELD_TOOLS_COLLAPSE_ON_RETURN_RCA_2026_10_17.md: a hidden
+// pane's held rows stay open while their text may leave memory; they read it
+// back when the pane is shown, not while hidden (which would undo the unload).
+describe("ToolBlock — a held row's unloaded result in a hidden pane", () => {
+    it("reads the result back only once the pane is shown", () => {
+        const load = vi.fn(async () => true);
+        const [dormant, setDormant] = createSignal(true);
+        const node: ToolNode = { ...baseTool, resultUnloaded: { pill: null, bytes: 4_000, tokens: 1_000 } };
+        render(() => (
+            <AgentDormancyProvider dormant={dormant}>
+                <ToolResultLoaderProvider load={load}>
+                    <ToolBlock node={node} pinned={false} heldOpen={true} onTogglePin={() => {}} />
+                </ToolResultLoaderProvider>
+            </AgentDormancyProvider>
+        ));
+        expect(load).not.toHaveBeenCalled();
+        setDormant(false);
+        expect(load).toHaveBeenCalledTimes(1);
     });
 });

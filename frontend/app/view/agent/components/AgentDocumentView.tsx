@@ -31,6 +31,7 @@ import type { DocumentNode, DocumentState } from "../types";
 import type { ScrollCommand } from "../hooks/useScrollToNode";
 import type { LayoutView } from "@/app/store/agent-pane-layout-store";
 import { AgentDocumentVirtualList } from "../virtualization/AgentDocumentVirtualList";
+import { useAgentDormant } from "../agent-dormancy";
 import { createAgentViewState } from "../virtualization/state";
 import { resolveTailPolicy } from "../virtualization/streaming-buffer";
 import { followControllerOn } from "../scroll/follow-setting";
@@ -157,7 +158,12 @@ export const AgentDocumentView = (props: AgentDocumentViewProps): JSX.Element =>
     // scrolls off the top, at which point the VirtualList calls releaseNodeHold.
     // Replaces the old 3 s post-completion timer — see
     // docs/specs/PLAN_TOOL_BLOCK_SCROLL_DRIVEN_COLLAPSE_2026_06_16.md.
+    // Only while the pane is shown: a tool that finishes in a hidden pane
+    // didn't finish under anyone's eyes, so it isn't held, and its result can
+    // leave memory like any collapsed row's (#4847's bound on hidden panes).
+    const dormant = useAgentDormant();
     const holdNodeOpen = (nodeId: string): void => {
+        if (untrack(dormant)) return;
         setDocumentState((prev) => {
             if (prev.heldOpenNodes.has(nodeId)) return prev; // already held — no churn
             const heldOpenNodes = new Set(prev.heldOpenNodes);

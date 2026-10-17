@@ -280,8 +280,10 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
     const hasResult = (): boolean => props.node.result != null || props.node.resultUnloaded != null;
     const loadResult = useToolResultLoader();
     const [loadState, setLoadState] = createSignal<"idle" | "loading" | "failed">("idle");
+    // Not while the pane is hidden: a hidden pane's held rows stay open but may
+    // have their text unloaded (useLiveFeedRollOff), and read it back on show.
     createEffect(() => {
-        if (!expanded() || !props.node.resultUnloaded || !loadResult || untrack(loadState) !== "idle") return;
+        if (dormant() || !expanded() || !props.node.resultUnloaded || !loadResult || untrack(loadState) !== "idle") return;
         setLoadState("loading");
         void loadResult(props.node).then((ok) => setLoadState(ok ? "idle" : "failed"));
     });

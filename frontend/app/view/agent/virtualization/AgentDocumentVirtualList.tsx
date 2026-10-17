@@ -62,6 +62,7 @@ import {
 import { computeLayoutView } from "@/app/store/agent-pane-layout/reducer";
 import { captureOnScreen, restoreOnScreen } from "./keep-on-screen";
 import { useSettleOnShow } from "../scroll/settle-on-show";
+import { useScrolledOffRelease } from "./held-release";
 import { useScrollMemo } from "./scroll-memo";
 import { inFlowState, ROW_GAP_PX, type ExpansionState } from "@/app/store/agent-pane-layout/types";
 import {
@@ -1186,39 +1187,15 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
     });
     useScrollMemo({ blockId: props.blockId, scroller: () => scrollRef, following: props.viewState.stickToBottom, zoom: props.zoomFactor, historyReady: props.viewState.historyReady, scrollToRow: scrollToNode });
 
-    // Release (latched-collapse) any held-open tool whose row has scrolled fully
-    // above the viewport top. DOM-based so it works uniformly for virtualized
-    // and streaming-buffer rows and is zoom-safe (both rects share the zoomed
-    // space). `heldOpenNodes` is tiny (a few recently-completed tools), so this
-    // is a handful of lookups per scroll. Pinned tools are skipped — pin wins.
-    const releaseScrolledOffHolds = (): void => {
-        const release = props.onReleaseNodeHold;
-        if (!release || !scrollRef) return;
-        const ds = props.documentState();
-        if (ds.heldOpenNodes.size === 0) return;
-        const containerRect = scrollRef.getBoundingClientRect(); // perf:allow-layout-read — pin pass (RO) or a user scroll batch
-        // A hidden pane (inactive tab: display:none, same "0×0" signature the
-        // ResizeObserver comment above already relies on) or a minimized window
-        // reports a zero-size rect for every element, not just this container's
-        // children — a real "scrolled off the top" collapse can never be
-        // determined when nothing has size, so skip the scan rather than
-        // mass-releasing every held-open tool the instant hidden-but-still-
-        // streaming content arrives (user-reported: tool blocks were
-        // collapsing on tab-switch/window-minimize with no actual scroll).
-        if (containerRect.width === 0 && containerRect.height === 0) return;
-        const containerTop = containerRect.top;
-        for (const id of ds.heldOpenNodes) {
-            if (ds.pinnedNodes.has(id)) continue;
-            const el = scrollRef.querySelector(
-                `[data-node-id="${id}"]`,
-            ) as HTMLElement | null;
-            // No element → not rendered → already off-screen (unmounted): release
-            // as a safety net. Otherwise release once it's fully above the top.
-            if (!el || el.getBoundingClientRect().bottom <= containerTop) { // perf:allow-layout-read — pin pass (RO) or a user scroll batch
-                release(id);
-            }
-        }
-    };
+    // Collapse held-open tools once they scroll off the top while the reader
+    // watches: never while hidden, nor on the catch-up drawn on return (`held-release.ts`).
+    let showCoveredNow: () => boolean = () => false;
+    const releaseScrolledOffHolds = useScrolledOffRelease({
+        scroller: () => scrollRef,
+        documentState: props.documentState,
+        onRelease: (id) => props.onReleaseNodeHold?.(id),
+        covered: () => showCoveredNow(),
+    });
 
     const handleScrollNow = (): void => {
         if (!scrollRef) return;
@@ -1635,6 +1612,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         : null;
     onCleanup(() => oneWayFlow?.dispose());
     const showCovered = useSettleOnShow(oneWayFlow, props.viewState.stickToBottom, { changes: props.viewState.nodes, observe: () => [virtualContainerRef, streamingBufferRef] });
+    showCoveredNow = () => untrack(showCovered);
     onMount(() => {
         if (oneWayFlow && scrollRef && bottomSpacerRef) {
             oneWayFlow.attach(scrollRef, bottomSpacerRef, [virtualContainerRef, streamingBufferRef]);
