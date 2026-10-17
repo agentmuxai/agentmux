@@ -80,10 +80,23 @@ describe("remoteFleetTargets", () => {
 });
 
 describe("unavailableReason", () => {
-    it("says why, per action, for an agent on another machine", () => {
+    // docs/specs/SPEC_SWARM_REFINEMENTS_2026_10_17.md §4.2.
+    it("lets a broadcast reach a LAN peer's agent, but not a stop", () => {
         const manoz = remote.get(MANOZ)!;
-        expect(unavailableReason(manoz, "stop")).toMatch(/^can't stop: .*verified link/);
-        expect(unavailableReason(manoz, "broadcast")).toMatch(/^can't message: .*verified link/);
+        expect(unavailableReason(manoz, "broadcast")).toBeNull();
+        expect(unavailableReason(manoz, "stop")).toBe("can't stop: stopping an agent on another machine isn't supported yet");
+    });
+
+    it("reaches nothing on a cloud install yet, and says why", () => {
+        const cloud = remoteFleetTargets(
+            remoteSections({
+                hostname: "narko",
+                channel: "stable",
+                hosts: [{ host_id: "cloud:home#3", display_name: "home", tier: "cloud", channels: [{ channel: "stable", seen_at_ms: 1, stale: false, agents: [{ name: "Rook", block_id: "" }] }] }],
+            })
+        ).get("remote:cloud:home#3/stable/Rook")!;
+        expect(unavailableReason(cloud, "broadcast")).toBe("can't message: no verified link to that machine yet");
+        expect(unavailableReason(cloud, "stop")).toMatch(/^can't stop/);
     });
 
     it("is null for anything an action can reach", () => {

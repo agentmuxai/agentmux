@@ -23,9 +23,9 @@ const STAGING_ELIGIBLE_AT = 5;
 const DEFAULT_BATCH_SIZE = 3;
 const DEFAULT_MAX_FAIL_PERCENTAGE = 50;
 
-/** Shown when every selected agent is on another machine, where nothing can
- *  act on it yet. */
-const NOTHING_REACHABLE = "Agents on other machines can't be acted on yet: nothing there can verify the request is yours";
+/** Shown on Stop when every selected agent is on another machine: a broadcast
+ *  reaches a LAN peer's agents, a stop doesn't yet. */
+const NOTHING_REACHABLE = "Stopping agents on another machine isn't supported yet";
 
 /** Shown when no selected agent is this AgentMux's own: each AgentMux
  *  supervises its own agents. */

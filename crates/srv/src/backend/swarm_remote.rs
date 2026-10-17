@@ -88,6 +88,25 @@ pub struct RemoteChannel {
     pub os: String,
     /// Sorted by name, case-insensitively.
     pub agents: Vec<RemoteAgent>,
+    /// How to reach a LAN peer's instance, for a Swarm broadcast to one of its
+    /// agents (SPEC_SWARM_REFINEMENTS_2026_10_17.md §4.2). Never serialized:
+    /// the answer to the frontend carries no address or credential.
+    #[serde(skip)]
+    pub route: Option<PeerRoute>,
+}
+
+/// A LAN peer's address and the broadcast key it advertised.
+#[derive(Clone, PartialEq, Eq)]
+pub struct PeerRoute {
+    pub url: String,
+    pub auth_key: String,
+}
+
+// By hand, so the key never reaches a log line.
+impl std::fmt::Debug for PeerRoute {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PeerRoute").field("url", &self.url).field("auth_key", &"<redacted>").finish()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -155,6 +174,7 @@ pub fn other_channels(
     by_channel
         .into_iter()
         .map(|(channel, (seen_at_ms, agents))| RemoteChannel {
+            route: None,
             channel,
             seen_at_ms,
             stale: now_ms.saturating_sub(seen_at_ms) > STALE_AFTER_MS,
@@ -165,7 +185,7 @@ pub fn other_channels(
         .collect()
 }
 
-fn fnv1a32(text: &str) -> u32 {
+pub(crate) fn fnv1a32(text: &str) -> u32 {
     text.bytes().fold(0x811c_9dc5u32, |h, b| {
         (h ^ u32::from(b)).wrapping_mul(0x0100_0193)
     })
@@ -256,6 +276,7 @@ pub fn lan_hosts(
             host.1.insert(
                 instance_key,
                 RemoteChannel {
+                    route: Some(PeerRoute { url: format!("http://{}:{}", p.address, p.port), auth_key: p.auth_key.clone() }),
                     channel,
                     seen_at_ms,
                     stale: now_ms.saturating_sub(seen_at_ms) > STALE_AFTER_MS,
