@@ -32,6 +32,13 @@
     padding: 24px;
     text-align: center;
 
+    // Other instances' agents follow in the same list: say it in a line, not
+    // a pane-high placeholder that pushes them to the bottom.
+    &.swarm-empty-root--compact {
+        height: auto;
+        padding: 8px 10px;
+    }
+
     .swarm-empty-icon {
         font-size: 28px;
         opacity: 0.3;
@@ -909,10 +916,18 @@
 
 .swarm-fleet-broadcast-inline {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 6px;
     flex: 1;
     min-width: 220px;
+}
+
+// Why fewer agents get the message than are selected, on its own line.
+.swarm-fleet-broadcast-gap {
+    flex-basis: 100%;
+    font-size: var(--text-xs);
+    color: var(--secondary-text-color);
 }
 
 .swarm-fleet-broadcast-input {
@@ -1076,57 +1091,32 @@
 
 // ── Other instances (SPEC_SWARM_OTHER_HOSTS_AND_CHANNELS_2026_10_02.md) ─────
 
-.swarm-remote {
-    margin-top: 10px;
-    border-top: 1px solid var(--border-color);
-    padding-top: 6px;
+// Remote agents are rows of the same list as this instance's, after them, with
+// no separator of their own (docs/specs/SPEC_SWARM_REFINEMENTS_2026_10_17.md §5).
+// A stale one is dimmed: it is about to disappear.
+.swarm-remote-agent-group--stale {
+    opacity: 0.6;
 }
 
-.swarm-remote-section {
-    margin-bottom: 4px;
-
-    &.swarm-remote-section--stale {
-        opacity: 0.6;
-    }
-}
-
-// The header's checkbox sits beside the collapse button, not inside it (a
-// checkbox in a button is invalid markup and would collapse the section too).
-.swarm-remote-header-row {
+// Where the agent runs, after its name: machine (and channel), how it was
+// found, platform, and "seen …" when stale. Muted, and the first to shrink.
+.swarm-remote-where {
     display: flex;
     align-items: center;
-    padding-left: 10px;
-}
-
-.swarm-remote-header {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    flex: 1;
+    gap: 4px;
     min-width: 0;
-    padding: 4px 10px 4px 6px;
-    border: none;
-    background: transparent;
-    color: var(--main-text-color);
-    font: inherit;
-    font-size: var(--text-sm);
-    text-align: left;
-    cursor: pointer;
-
-    i {
-        width: 10px;
-        font-size: var(--text-3xs);
-        color: var(--secondary-text-color);
-    }
+    overflow: hidden;
 }
 
 .swarm-remote-title {
-    font-weight: 600;
+    font-size: var(--text-2xs);
+    color: var(--secondary-text-color);
     @include mixins.truncate;
 }
 
 .swarm-remote-badge,
 .swarm-remote-platform {
+    flex-shrink: 0;
     padding: 0 6px;
     border-radius: 8px;
     border: 1px solid var(--border-color);
@@ -1135,7 +1125,7 @@
 }
 
 .swarm-remote-seen {
-    margin-left: auto;
+    flex-shrink: 0;
     font-size: var(--text-2xs);
     color: var(--secondary-text-color);
 }
@@ -1149,7 +1139,11 @@
     color: var(--secondary-text-color);
 }
 
+// As a local row's name; the "where" tag after it gives way first.
 .swarm-remote-agent-name {
+    flex-shrink: 0;
+    max-width: 50%;
+    color: var(--main-text-color);
     @include mixins.truncate;
 }
 

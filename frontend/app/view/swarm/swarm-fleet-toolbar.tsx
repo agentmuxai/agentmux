@@ -9,7 +9,7 @@ import { ConfirmModal } from "@/app/element/confirm-modal";
 import { ContextMenuModel } from "@/app/store/contextmenu";
 import { MODE_DESCRIPTIONS, MODE_LABELS, SUPERVISOR_MODES } from "@/app/store/supervisor";
 import { summarizeAmbientOutcomes } from "@/app/store/ambient-outcomes";
-import { remoteFleetTargets, unavailableReason, type FleetAction } from "./swarm-fleet-targets";
+import { gapSummary, localTarget, partitionTargets, remoteFleetTargets, unavailableReason, type FleetAction } from "./swarm-fleet-targets";
 import type { FleetResultEntry, SwarmViewModel } from "./swarm-model";
 import { remoteSections } from "./swarm-remote";
 import { Button, IconButton } from "@/app/element/ui";
@@ -58,14 +58,17 @@ export function FleetToolbar({
         for (const key of selected()) if (remoteMap().get(key)?.otherMachine) n++;
         return n;
     };
-    const reachable = (action: FleetAction) => {
-        let n = 0;
-        for (const key of selected()) {
-            const t = remoteMap().get(key);
-            if (!t || !unavailableReason(t, action)) n++;
-        }
-        return n;
-    };
+    // Every listed target: the remote ones, and this instance's by key. A
+    // selected key in neither counts as unreachable, as the action treats it.
+    const known = createMemo(() => {
+        const map = new Map(remoteMap());
+        for (const key of allBlockIds()) if (!map.has(key)) map.set(key, localTarget(key));
+        return map;
+    });
+    const split = (action: FleetAction) => partitionTargets([...selected()], action, known());
+    const reachable = (action: FleetAction) => split(action).reachable.length;
+    // Why "N selected" and "send to M" differ, when they do (spec §2.2).
+    const broadcastGap = () => gapSummary(split("broadcast").unreachable, count(), "broadcast");
     const plural = (n: number) => `agent${n === 1 ? "" : "s"}`;
 
     const [broadcastOpen, setBroadcastOpen] = createSignal(false);
@@ -151,13 +154,16 @@ export function FleetToolbar({
                                 <Button class="swarm-fleet-btn" onClick={() => { setBroadcastOpen(false); setBroadcastText(""); }}>
                                     Cancel
                                 </Button>
+                                <Show when={broadcastGap()}>
+                                    {(gap) => <span class="swarm-fleet-broadcast-gap">{gap()}</span>}
+                                </Show>
                             </div>
                         }
                     >
                         <Button
                             class="swarm-fleet-btn"
                             disabled={reachable("broadcast") === 0}
-                            title={reachable("broadcast") === 0 ? NOTHING_REACHABLE : undefined}
+                            title={broadcastGap() ?? undefined}
                             onClick={() => setBroadcastOpen(true)}
                         >
                             <i class="fa-solid fa-tower-broadcast" /> Broadcast

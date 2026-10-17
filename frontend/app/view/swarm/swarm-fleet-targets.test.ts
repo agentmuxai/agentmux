@@ -3,6 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import {
+    gapSummary,
     localFleetTargets,
     partitionTargets,
     remoteAgentKey,
@@ -109,12 +110,39 @@ describe("partitionTargets", () => {
         expect(unreachable).toEqual([{ key: MANOZ, reason: expect.stringContaining("can't stop") }]);
     });
 
-    it("passes through a key no longer listed: the action reports it per target", () => {
-        expect(partitionTargets(["gone-block"], "broadcast", known).reachable).toEqual(["gone-block"]);
+    // docs/specs/SPEC_SWARM_REFINEMENTS_2026_10_17.md §2.2: never sent on.
+    it("can't reach a key no longer listed, and says so", () => {
+        expect(partitionTargets(["gone-block"], "broadcast", known)).toEqual({
+            reachable: [],
+            unreachable: [{ key: "gone-block", reason: "can't message: no longer listed" }],
+        });
+    });
+
+    it("can't reach a stale agent, even on this machine", () => {
+        const staleHere = new Map([["blk-x", { ...remote.get("blk-loap")!, key: "blk-x", stale: true }]]);
+        expect(partitionTargets(["blk-x"], "stop", staleHere).unreachable).toEqual([{ key: "blk-x", reason: "can't stop: not seen recently" }]);
     });
 
     it("keeps the order of the selection", () => {
         expect(partitionTargets(["blk-loap", "blk-korp"], "broadcast", known).reachable).toEqual(["blk-loap", "blk-korp"]);
+    });
+});
+
+describe("gapSummary", () => {
+    it("is null when everything selected can be reached", () => {
+        expect(gapSummary([], 3, "broadcast")).toBeNull();
+    });
+
+    it("says how many of the selection won't be reached, and each reason once", () => {
+        const unreachable = [
+            { reason: "can't message: no verified link to other machines yet" },
+            { reason: "can't message: no verified link to other machines yet" },
+            { reason: "can't message: no longer listed" },
+        ];
+        expect(gapSummary(unreachable, 4, "broadcast")).toBe(
+            "3 of 4 can't be messaged: no verified link to other machines yet; no longer listed"
+        );
+        expect(gapSummary(unreachable.slice(0, 1), 2, "stop")).toBe("1 of 2 can't be stopped: no verified link to other machines yet");
     });
 });
 

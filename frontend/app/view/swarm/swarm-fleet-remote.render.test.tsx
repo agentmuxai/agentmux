@@ -9,7 +9,7 @@
  * docs/specs/SPEC_SWARM_REMOTE_AGENTS_PLATFORM_TAG_AND_SELECTION_2026_10_03.md §4, §5.
  */
 
-import { cleanup, render, screen } from "@solidjs/testing-library";
+import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -106,6 +106,24 @@ describe("FleetToolbar with agents of other instances selected", () => {
         toolbar(modelStub([MANOZ, LOAP]));
         expect((screen.getByText("Broadcast").closest("button") as HTMLButtonElement).disabled).toBe(false);
         expect((screen.getByText(/Stop 1/).closest("button") as HTMLButtonElement).disabled).toBe(false);
+    });
+
+    // docs/specs/SPEC_SWARM_REFINEMENTS_2026_10_17.md §2.2: the two numbers never
+    // differ without saying why.
+    it("says in the composer why fewer agents get the message than are selected", () => {
+        toolbar(modelStub(["blk-korp", LOAP, MANOZ, "blk-gone"]));
+        fireEvent.click(screen.getByText("Broadcast").closest("button")!);
+        const input = document.querySelector<HTMLInputElement>(".swarm-fleet-broadcast-input")!;
+        expect(input.placeholder).toBe("Message to send to 2 agents…");
+        expect(document.querySelector(".swarm-fleet-broadcast-gap")!.textContent).toBe(
+            "2 of 4 can't be messaged: no verified link to other machines yet; no longer listed"
+        );
+    });
+
+    it("says nothing extra when every selected agent gets the message", () => {
+        toolbar(modelStub(["blk-korp", LOAP]));
+        fireEvent.click(screen.getByText("Broadcast").closest("button")!);
+        expect(document.querySelector(".swarm-fleet-broadcast-gap")).toBeNull();
     });
 });
 

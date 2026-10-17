@@ -1039,11 +1039,6 @@ export class SwarmViewModel {
     // blocks' poll, since the source (the host-global registry) has no event.
     private _otherInstances = createSignal<SwarmOtherInstances | null>(null);
     otherInstancesAtom: Accessor<SwarmOtherInstances | null> = this._otherInstances[0];
-    // Remote sections the user collapsed. Expanded by default, unlike agent rows:
-    // a section is a handful of names, and hiding them would hide the feature.
-    private _collapsedRemote = createSignal<Set<string>>(new Set());
-    collapsedRemoteAtom: Accessor<Set<string>> = this._collapsedRemote[0];
-
     private _expandedAgentIds = createSignal<Set<string>>(new Set());
     expandedAgentIdsAtom: Accessor<Set<string>> = this._expandedAgentIds[0];
     private setExpandedAgentIds: Setter<Set<string>> = this._expandedAgentIds[1];
@@ -1559,31 +1554,26 @@ export class SwarmViewModel {
     loadOtherInstances = async (): Promise<void> => {
         try {
             const result = await RpcApi.SwarmOtherInstancesCommand(TabRpcClient, {});
-            const before = remoteFleetTargets(remoteSections(this._otherInstances[0]()));
             this._otherInstances[1](result ?? null);
-            // A selected remote agent that has gone, or whose section went stale,
-            // leaves the selection: an action on it would only fail.
-            const after = remoteFleetTargets(remoteSections(result ?? null));
-            const gone = (key: string) => before.has(key) && (!after.has(key) || after.get(key)!.stale);
-            if ([...this.selectedBlockIdsAtom()].some(gone)) {
-                this.setSelectedBlockIds((prev) => new Set([...prev].filter((key) => !gone(key))));
-            }
         } catch {
             // Older srv without the command, or a transient failure.
         }
     };
 
-    isRemoteCollapsed(key: string): boolean {
-        return this.collapsedRemoteAtom().has(key);
-    }
-
-    toggleRemoteCollapsed(key: string): void {
-        this._collapsedRemote[1]((prev) => {
-            const next = new Set(prev);
-            if (next.has(key)) next.delete(key);
-            else next.add(key);
-            return next;
-        });
+    /** Keeps in the selection only what the Swarm lists: `localKeys` (this
+     *  instance's selectable agents, from the view's tree) and the remote agents
+     *  not gone stale. An agent whose pane closed, or a remote one that left,
+     *  would otherwise stay selected with no checkbox showing it, and count in
+     *  the toolbar (docs/specs/SPEC_SWARM_REFINEMENTS_2026_10_17.md §2). The view
+     *  calls this whenever its list changes. */
+    pruneSelection(localKeys: Iterable<string>): void {
+        const listed = new Set(localKeys);
+        for (const [key, target] of remoteFleetTargets(remoteSections(this.otherInstancesAtom()))) {
+            if (!target.stale) listed.add(key);
+        }
+        const selected = this.selectedBlockIdsAtom();
+        if ([...selected].every((key) => listed.has(key))) return;
+        this.setSelectedBlockIds(new Set([...selected].filter((key) => listed.has(key))));
     }
 
     toggleAgentCollapsed(blockId: string): void {

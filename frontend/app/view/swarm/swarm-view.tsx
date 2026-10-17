@@ -32,7 +32,7 @@ import { setSupervisorMode, SupervisorBucket, SupervisorChip, supervisorRows } f
 import { isActiveStatus, rankAgentStatus, subagentStatus } from "@/app/store/agent-status";
 import { questionCountdown } from "@/app/store/question-timer";
 import { remoteAgentKey } from "./swarm-fleet-targets";
-import { remoteChip, remoteLine, remoteSections, seenAgo } from "./swarm-remote";
+import { remoteChip, remoteLine, remoteRows, remoteSections, seenAgo, type RemoteRow } from "./swarm-remote";
 import { FleetToolbar, FleetResultPanel } from "./swarm-fleet-toolbar";
 import { SwarmStatsPanel } from "./swarm-stats";
 import "./swarm-view.scss";
@@ -109,6 +109,19 @@ export function SwarmView(props: { model: SwarmViewModel; ctx: PaneTabHostContex
 
     const tree = createMemo(() => model.buildTree());
     const clearableCount = createMemo(() => collectClearableRows(tree()).length);
+    const remote = createMemo(() => remoteRows(remoteSections(model.otherInstancesAtom())));
+    const localKeys = createMemo(() => tree().flatMap((n) => (n.blockId ? [n.blockId] : [])));
+    // Everything a checkbox can select: this instance's agents, then the remote
+    // ones not gone stale. Select all and the selection both follow it.
+    const selectableKeys = createMemo(() => [
+        ...localKeys(),
+        ...remote().flatMap((r) => (r.section.stale ? [] : [remoteAgentKey(r.section, r.agent)])),
+    ]);
+    // An agent that leaves the list leaves the selection, so the toolbar never
+    // counts one no checkbox shows (docs/specs/SPEC_SWARM_REFINEMENTS_2026_10_17.md §2).
+    createEffect(() => {
+        if (!model.loadingAtom()) model.pruneSelection(localKeys());
+    });
 
     // Derive the currently-focused block ID from the active tab's layout model.
     // Switching a multi-tab pane to another tab keeps the SAME focused node and
@@ -135,13 +148,13 @@ export function SwarmView(props: { model: SwarmViewModel; ctx: PaneTabHostContex
                 {/* Outside the tree's own Show: agents on other instances can be selected
                     when this instance has none, and the toolbar is what acts on them. It
                     shows itself only when there is something to select or act on. */}
-                <FleetToolbar model={model} allBlockIds={() => tree().flatMap((n) => (n.blockId ? [n.blockId] : []))} />
+                <FleetToolbar model={model} allBlockIds={selectableKeys} />
                 <SwarmStatsPanel model={model} />
                 <FleetResultPanel model={model} />
                 <Show
                     when={tree().length > 0}
                     fallback={
-                        <div class="swarm-empty-root">
+                        <div classList={{ "swarm-empty-root": true, "swarm-empty-root--compact": remote().length > 0 }}>
                             <span class="swarm-empty-icon">⬡</span>
                             <div class="swarm-empty-title">No active agent panes</div>
                             <div class="swarm-empty-desc">
@@ -162,126 +175,76 @@ export function SwarmView(props: { model: SwarmViewModel; ctx: PaneTabHostContex
                             </button>
                         </div>
                     </Show>
+                </Show>
+                {/* One list: this instance's agents, then the other instances'
+                    (docs/specs/SPEC_SWARM_REFINEMENTS_2026_10_17.md §5). */}
+                <Show when={tree().length > 0 || remote().length > 0}>
                     <div class="swarm-tree">
                         <For each={tree()}>
                             {(node) => <AgentRow node={node} focusedBlockId={focusedBlockId} model={model} />}
                         </For>
+                        <RemoteAgentRows model={model} rows={remote()} />
                     </div>
                 </Show>
-                {/* Below this instance's own tree, whether or not it has agents. */}
-                <OtherInstanceSections model={model} />
             </Show>
         </div>
     );
 }
 
 /**
- * The agents of other AgentMux instances: one section per host and channel
- * (SPEC_SWARM_OTHER_HOSTS_AND_CHANNELS_2026_10_02.md), each with the machine's
- * platform and how it was found. Every agent has the same selection checkbox as
- * a local row, and a section's header selects that machine's agents
- * (SPEC_SWARM_REMOTE_AGENTS_PLATFORM_TAG_AND_SELECTION_2026_10_03.md). A stale
- * section can't be selected: it is about to disappear. An agent whose instance
- * reports its state gets the same status chip as a local row (Phase 4), and its
- * summary line under it when it shares one; an agent with neither shows its
- * name alone.
+ * The agents of other AgentMux instances, as rows of the Swarm's one list after
+ * this instance's own (docs/specs/SPEC_SWARM_REFINEMENTS_2026_10_17.md §5). Each
+ * has the same selection checkbox as a local row and says where it runs: the
+ * machine (and channel), how it was found, and its platform
+ * (SPEC_SWARM_OTHER_HOSTS_AND_CHANNELS_2026_10_02.md,
+ * SPEC_SWARM_REMOTE_AGENTS_PLATFORM_TAG_AND_SELECTION_2026_10_03.md). A stale
+ * agent can't be selected and says when it was last seen: it is about to
+ * disappear. An agent whose instance reports its state gets the same status chip
+ * as a local row, and its summary line under it when it shares one.
  */
-export function OtherInstanceSections(props: { model: SwarmViewModel }): JSX.Element {
-    const sections = createMemo(() => remoteSections(props.model.otherInstancesAtom()));
+export function RemoteAgentRows(props: { model: SwarmViewModel; rows: RemoteRow[] }): JSX.Element {
     return (
-        <Show when={sections().length > 0}>
-            <div class="swarm-remote">
-                <For each={sections()}>
-                    {(section) => {
-                        const collapsed = () => props.model.isRemoteCollapsed(section.key);
-                        const keys = () => section.agents.map((agent) => remoteAgentKey(section, agent));
-                        const selectedHere = () => keys().filter((key) => props.model.isSelected(key)).length;
-                        let selectAll: HTMLInputElement | undefined;
-                        // `indeterminate` is a property, not an attribute.
-                        createEffect(() => {
-                            if (selectAll) selectAll.indeterminate = selectedHere() > 0 && selectedHere() < keys().length;
-                        });
-                        return (
-                            <div classList={{ "swarm-remote-section": true, "swarm-remote-section--stale": section.stale }}>
-                                <div class="swarm-remote-header-row">
-                                    <input
-                                        type="checkbox"
-                                        class="swarm-agent-select-checkbox swarm-remote-select-all"
-                                        ref={(el) => (selectAll = el)}
-                                        checked={selectedHere() > 0 && selectedHere() === keys().length}
-                                        disabled={section.stale}
-                                        onChange={() => props.model.setManySelected(keys(), selectedHere() < keys().length)}
-                                        title={
-                                            section.stale
-                                                ? "Not seen recently, so it can't be selected"
-                                                : `Select every agent on ${section.title}`
-                                        }
-                                    />
-                                    <button
-                                        type="button"
-                                        class="swarm-remote-header"
-                                        aria-expanded={!collapsed()}
-                                        onClick={() => props.model.toggleRemoteCollapsed(section.key)}
-                                    >
-                                        <i classList={{ "fa-solid": true, "fa-chevron-down": !collapsed(), "fa-chevron-right": collapsed() }} />
-                                        <span class="swarm-remote-title">{section.title}</span>
-                                        <Show when={section.platform}>
-                                            <span class="swarm-remote-platform">{section.platform}</span>
-                                        </Show>
-                                        <span class="swarm-remote-badge">{section.badge}</span>
-                                        <Show when={collapsed()}>
-                                            <span class="swarm-agent-collapsed-count">{section.agents.length}</span>
-                                        </Show>
-                                        <Show when={section.stale}>
-                                            <span class="swarm-remote-seen">{seenAgo(section.seenAtMs, Date.now())}</span>
-                                        </Show>
-                                    </button>
-                                </div>
-                                <Show when={!collapsed()}>
-                                    <For each={section.agents}>
-                                        {(agent) => {
-                                            const key = remoteAgentKey(section, agent);
-                                            return (
-                                                <>
-                                                    <div class="swarm-remote-agent">
-                                                        <input
-                                                            type="checkbox"
-                                                            class="swarm-agent-select-checkbox"
-                                                            checked={props.model.isSelected(key)}
-                                                            disabled={section.stale}
-                                                            onChange={() => props.model.toggleSelected(key)}
-                                                            title={
-                                                                section.stale
-                                                                    ? "Not seen recently, so it can't be selected"
-                                                                    : "Select for a fleet action (broadcast/stop)"
-                                                            }
-                                                        />
-                                                        <span class="swarm-remote-agent-name">{agent.name}</span>
-                                                        <Show when={remoteChip(agent.status, section.stale)}>
-                                                            {(chip) => (
-                                                                <span class="swarm-remote-agent-status" title={chip().label}>
-                                                                    <AgentStatusChip
-                                                                        status={chip().status}
-                                                                        awaitingUser={chip().awaitingUser}
-                                                                    />
-                                                                </span>
-                                                            )}
-                                                        </Show>
-                                                    </div>
-                                                    <Show when={remoteLine(agent.line, section.stale)}>
-                                                        {(line) => <div class="swarm-remote-agent-line">{line()}</div>}
-                                                    </Show>
-                                                </>
-                                            );
-                                        }}
-                                    </For>
+        <For each={props.rows}>
+            {(row) => {
+                const key = remoteAgentKey(row.section, row.agent);
+                const section = row.section;
+                return (
+                    <div classList={{ "swarm-agent-group": true, "swarm-remote-agent-group": true, "swarm-remote-agent-group--stale": section.stale }}>
+                        <div class="swarm-remote-agent">
+                            <input
+                                type="checkbox"
+                                class="swarm-agent-select-checkbox"
+                                checked={props.model.isSelected(key)}
+                                disabled={section.stale}
+                                onChange={() => props.model.toggleSelected(key)}
+                                title={section.stale ? "Not seen recently, so it can't be selected" : "Select for a fleet action (broadcast/stop)"}
+                            />
+                            <span class="swarm-remote-agent-name">{row.agent.name}</span>
+                            <span class="swarm-remote-where">
+                                <span class="swarm-remote-title">{section.title}</span>
+                                <span class="swarm-remote-badge">{section.badge}</span>
+                                <Show when={section.platform}>
+                                    <span class="swarm-remote-platform">{section.platform}</span>
                                 </Show>
-                            </div>
-                        );
-                    }}
-                </For>
-            </div>
-        </Show>
+                                <Show when={section.stale}>
+                                    <span class="swarm-remote-seen">{seenAgo(section.seenAtMs, Date.now())}</span>
+                                </Show>
+                            </span>
+                            <Show when={remoteChip(row.agent.status, section.stale)}>
+                                {(chip) => (
+                                    <span class="swarm-remote-agent-status" title={chip().label}>
+                                        <AgentStatusChip status={chip().status} awaitingUser={chip().awaitingUser} />
+                                    </span>
+                                )}
+                            </Show>
+                        </div>
+                        <Show when={remoteLine(row.agent.line, section.stale)}>
+                            {(line) => <div class="swarm-remote-agent-line">{line()}</div>}
+                        </Show>
+                    </div>
+                );
+            }}
+        </For>
     );
 }
 

@@ -2,9 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The other-instance sections, through the real component: names, the machine's
- * platform and how it was found, the same selection checkbox as a local row,
- * collapsible, and absent when there is nothing to show.
+ * The other instances' agents as rows of the Swarm's one list, through the real
+ * component: names, where each runs (machine, how it was found, platform), the
+ * same selection checkbox as a local row, and no machine headers or separator.
+ * docs/specs/SPEC_SWARM_REFINEMENTS_2026_10_17.md §5, building on
  * docs/specs/SPEC_SWARM_OTHER_HOSTS_AND_CHANNELS_2026_10_02.md section 3 and
  * docs/specs/SPEC_SWARM_REMOTE_AGENTS_PLATFORM_TAG_AND_SELECTION_2026_10_03.md.
  */
@@ -18,24 +19,14 @@ vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 vi.mock("@/app/util/reveal-block", () => ({ revealBlock: () => {} }));
 
 import type { SwarmViewModel } from "./swarm-model";
-import type { SwarmOtherInstances } from "./swarm-remote";
-import { OtherInstanceSections } from "./swarm-view";
+import { remoteRows, remoteSections, type SwarmOtherInstances } from "./swarm-remote";
+import { RemoteAgentRows } from "./swarm-view";
 
 afterEach(cleanup);
 
-function modelWith(data: SwarmOtherInstances | null) {
-    const [collapsed, setCollapsed] = createSignal<Set<string>>(new Set());
+function modelWith() {
     const [selected, setSelected] = createSignal<Set<string>>(new Set());
     return {
-        otherInstancesAtom: () => data,
-        isRemoteCollapsed: (key: string) => collapsed().has(key),
-        toggleRemoteCollapsed: (key: string) =>
-            setCollapsed((prev) => {
-                const next = new Set(prev);
-                if (next.has(key)) next.delete(key);
-                else next.add(key);
-                return next;
-            }),
         selectedBlockIdsAtom: selected,
         isSelected: (key: string) => selected().has(key),
         toggleSelected: (key: string) =>
@@ -43,15 +34,6 @@ function modelWith(data: SwarmOtherInstances | null) {
                 const next = new Set(prev);
                 if (next.has(key)) next.delete(key);
                 else next.add(key);
-                return next;
-            }),
-        setManySelected: (keys: string[], on: boolean) =>
-            setSelected((prev) => {
-                const next = new Set(prev);
-                for (const k of keys) {
-                    if (on) next.add(k);
-                    else next.delete(k);
-                }
                 return next;
             }),
     } as unknown as SwarmViewModel;
@@ -85,154 +67,103 @@ const data: SwarmOtherInstances = {
     ],
 };
 
-const sections = (container: HTMLElement) => [...container.querySelectorAll(".swarm-remote-section")];
-const names = (el: Element) => [...el.querySelectorAll(".swarm-remote-agent-name")].map((e) => e.textContent);
+function setup(d: SwarmOtherInstances | null = data, model = modelWith()) {
+    const rows = remoteRows(remoteSections(d));
+    const r = render(() => <RemoteAgentRows model={model} rows={rows} />);
+    return { ...r, model };
+}
 
-describe("OtherInstanceSections", () => {
-    it("lists each channel of this machine with its agents' names", () => {
-        const { container } = render(() => <OtherInstanceSections model={modelWith(data)} />);
-        const titles = [...container.querySelectorAll(".swarm-remote-title")].map((e) => e.textContent);
-        // This machine first, then the LAN.
-        expect(titles).toEqual(["narko · dev-fix-lan", "narko · old", "Area54", "legacy"]);
-        expect(names(sections(container)[0])).toEqual(["Korp", "Loap"]);
-        expect(names(sections(container)[2])).toEqual(["Manoz", "Opaz"]);
-    });
+const rows = (container: HTMLElement) => [...container.querySelectorAll(".swarm-remote-agent-group")];
+const text = (el: Element, sel: string) => el.querySelector(sel)?.textContent ?? null;
+const box = (row: Element) => row.querySelector<HTMLInputElement>("input.swarm-agent-select-checkbox")!;
 
-    it("tags each section with the machine's platform and how it was found", () => {
-        const { container } = render(() => <OtherInstanceSections model={modelWith(data)} />);
-        const tags = sections(container).map((s) => [
-            s.querySelector(".swarm-remote-title")!.textContent,
-            s.querySelector(".swarm-remote-platform")?.textContent ?? null,
-            s.querySelector(".swarm-remote-badge")!.textContent,
-        ]);
-        expect(tags).toEqual([
-            ["narko · dev-fix-lan", "Windows", "this machine"],
-            ["narko · old", "Windows", "this machine"],
-            ["Area54", "macOS", "LAN"],
-            ["legacy", null, "LAN"],
+describe("RemoteAgentRows", () => {
+    it("lists every remote agent as a row: this machine's channels, then the LAN, by machine, by name", () => {
+        const { container } = setup();
+        expect(rows(container).map((r) => [text(r, ".swarm-remote-agent-name"), text(r, ".swarm-remote-title")])).toEqual([
+            ["Korp", "narko · dev-fix-lan"],
+            ["Loap", "narko · dev-fix-lan"],
+            ["Opaz", "narko · old"],
+            ["Manoz", "Area54"],
+            ["Opaz", "Area54"],
+            ["Zed", "legacy"],
         ]);
     });
 
-    it("dims a stale channel and says when it was last seen", () => {
-        const { container } = render(() => <OtherInstanceSections model={modelWith(data)} />);
-        const stale = sections(container)[1];
-        expect(stale.classList.contains("swarm-remote-section--stale")).toBe(true);
-        expect(stale.querySelector(".swarm-remote-seen")?.textContent).toBe("seen 2m ago");
+    it("has no machine headers, collapse buttons or separator of its own", () => {
+        const { container } = setup();
+        expect(container.querySelector(".swarm-remote")).toBeNull();
+        expect(container.querySelector(".swarm-remote-section")).toBeNull();
+        expect(container.querySelector(".swarm-remote-select-all")).toBeNull();
+        expect(container.querySelector("button")).toBeNull();
+        // Each row is an agent group like a local agent's, so the list's own
+        // spacing applies between all of them alike.
+        expect(rows(container).every((r) => r.classList.contains("swarm-agent-group"))).toBe(true);
     });
 
-    it("collapses a section to a count", () => {
-        // Built outside the JSX: a prop expression is re-evaluated on each read.
-        const model = modelWith(data);
-        const { container } = render(() => <OtherInstanceSections model={model} />);
-        fireEvent.click(container.querySelector(".swarm-remote-header")!);
-        expect(names(sections(container)[0])).toEqual([]);
-        expect(sections(container)[0].querySelector(".swarm-agent-collapsed-count")?.textContent).toBe("2");
+    it("tags each row with how its machine was found and its platform", () => {
+        const { container } = setup();
+        expect(rows(container).map((r) => [text(r, ".swarm-remote-badge"), text(r, ".swarm-remote-platform")])).toEqual([
+            ["this machine", "Windows"],
+            ["this machine", "Windows"],
+            ["this machine", "Windows"],
+            ["LAN", "macOS"],
+            ["LAN", "macOS"],
+            ["LAN", null],
+        ]);
     });
 
-    it("shows each agent's reported state as a status chip, and none when it has no state or its section is stale", () => {
-        const { container } = render(() => <OtherInstanceSections model={modelWith(data)} />);
-        const chips = sections(container).map((s) =>
-            [...s.querySelectorAll(".swarm-remote-agent")].map((row) => {
-                const chip = row.querySelector(".swarm-remote-agent-status");
-                // The label span only: the chip also holds the spinner glyph.
-                return chip
-                    ? [chip.querySelector(".swarm-status-label")!.textContent, chip.getAttribute("title")]
-                    : null;
-            })
-        );
+    it("dims a stale agent, says when it was last seen, and can't select it", () => {
+        const { container } = setup();
+        const stale = rows(container)[2];
+        expect(stale.classList.contains("swarm-remote-agent-group--stale")).toBe(true);
+        expect(text(stale, ".swarm-remote-seen")).toBe("seen 2m ago");
+        expect(box(stale).disabled).toBe(true);
+        expect(box(rows(container)[0]).disabled).toBe(false);
+    });
+
+    it("shows each agent's reported state as a status chip, and none when it has no state or is stale", () => {
+        const { container } = setup();
+        const chips = rows(container).map((r) => {
+            const chip = r.querySelector(".swarm-remote-agent-status");
+            // The label span only: the chip also holds the spinner glyph.
+            return chip ? [chip.querySelector(".swarm-status-label")!.textContent, chip.getAttribute("title")] : null;
+        });
         expect(chips).toEqual([
-            // Korp, Loap
-            [
-                ["question", "Waiting for an answer"],
-                ["working", "Working"],
-            ],
-            // Stale: whatever it last said may be long out of date.
-            [null],
-            // Manoz stopped (the chip says idle, the tooltip says which); Opaz gave no state.
-            [["idle", "Stopped"], null],
-            [null],
+            ["question", "Waiting for an answer"], // Korp
+            ["working", "Working"], // Loap
+            null, // stale: whatever it last said may be long out of date
+            ["idle", "Stopped"], // Manoz: the chip says idle, the tooltip says which
+            null, // Opaz gave no state
+            null, // Zed
         ]);
     });
 
-    it("shows an agent's summary line under its row, and none when it shared none or its section is stale", () => {
-        const { container } = render(() => <OtherInstanceSections model={modelWith(data)} />);
-        const lines = sections(container).map((s) =>
-            [...s.querySelectorAll(".swarm-remote-agent-line")].map((e) => e.textContent)
-        );
-        // Loap shared one, Korp none; the stale section's "Old news" is not shown.
-        expect(lines).toEqual([["Fixing the login race"], [], [], []]);
-        const line = sections(container)[0].querySelector(".swarm-remote-agent-line")!;
-        expect(line.previousElementSibling?.querySelector(".swarm-remote-agent-name")?.textContent).toBe("Loap");
+    it("shows an agent's summary line under its row, and none when it shared none or is stale", () => {
+        const { container } = setup();
+        expect(rows(container).map((r) => text(r, ".swarm-remote-agent-line"))).toEqual([
+            null,
+            "Fixing the login race",
+            null,
+            null,
+            null,
+            null,
+        ]);
     });
 
     it("renders nothing with no other instances", () => {
         for (const d of [null, { ...data, hosts: [] }]) {
-            const { container } = render(() => <OtherInstanceSections model={modelWith(d)} />);
-            expect(container.querySelector(".swarm-remote")).toBeNull();
+            const { container } = setup(d);
+            expect(rows(container)).toHaveLength(0);
             cleanup();
         }
     });
-});
 
-describe("OtherInstanceSections: selection", () => {
-    const rowBox = (section: Element, i: number) =>
-        section.querySelectorAll<HTMLInputElement>(".swarm-remote-agent input[type=checkbox]")[i];
-    const headerBox = (section: Element) => section.querySelector<HTMLInputElement>(".swarm-remote-select-all")!;
-
-    it("gives every remote agent the same checkbox a local row has", () => {
-        const model = modelWith(data);
-        const { container } = render(() => <OtherInstanceSections model={model} />);
-        const area54 = sections(container)[2];
-        expect(area54.querySelectorAll(".swarm-remote-agent input.swarm-agent-select-checkbox")).toHaveLength(2);
-
-        fireEvent.click(rowBox(area54, 0));
-        // An agent on another machine is keyed by where it is and its name; one on
-        // this machine by its block id.
+    it("selects an agent on another machine by where it is and its name, and one on this machine by its block id", () => {
+        const { container, model } = setup();
+        fireEvent.click(box(rows(container)[3]));
         expect([...model.selectedBlockIdsAtom()]).toEqual(["remote:lan:area54#1/stable/Manoz"]);
-        fireEvent.click(rowBox(sections(container)[0], 0));
+        fireEvent.click(box(rows(container)[0]));
         expect(model.isSelected("b2")).toBe(true);
-    });
-
-    it("a header checkbox selects exactly that machine's agents, and clears them", () => {
-        const model = modelWith(data);
-        const { container } = render(() => <OtherInstanceSections model={model} />);
-        const area54 = sections(container)[2];
-
-        fireEvent.click(headerBox(area54));
-        expect([...model.selectedBlockIdsAtom()].sort()).toEqual([
-            "remote:lan:area54#1/stable/Manoz",
-            "remote:lan:area54#1/stable/Opaz",
-        ]);
-        expect(headerBox(area54).checked).toBe(true);
-
-        fireEvent.click(headerBox(area54));
-        expect(model.selectedBlockIdsAtom().size).toBe(0);
-    });
-
-    it("shows a header checkbox half-checked when only some of its agents are selected", () => {
-        const model = modelWith(data);
-        const { container } = render(() => <OtherInstanceSections model={model} />);
-        const area54 = sections(container)[2];
-        fireEvent.click(rowBox(area54, 1));
-        expect(headerBox(area54).indeterminate).toBe(true);
-        expect(headerBox(area54).checked).toBe(false);
-
-        // Clicking a half-checked header completes the selection.
-        fireEvent.click(headerBox(area54));
-        expect(headerBox(area54).indeterminate).toBe(false);
-        expect(headerBox(area54).checked).toBe(true);
-    });
-
-    it("can't select the agents of a stale section", () => {
-        const { container } = render(() => <OtherInstanceSections model={modelWith(data)} />);
-        const stale = sections(container)[1];
-        expect(headerBox(stale).disabled).toBe(true);
-        expect(rowBox(stale, 0).disabled).toBe(true);
-        expect(headerBox(sections(container)[0]).disabled).toBe(false);
-    });
-
-    it("keeps the checkbox out of the collapse button", () => {
-        const { container } = render(() => <OtherInstanceSections model={modelWith(data)} />);
-        expect(container.querySelector("button input")).toBeNull();
     });
 });

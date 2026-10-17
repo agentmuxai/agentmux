@@ -36,14 +36,20 @@ export interface FleetTargetInfo {
 }
 
 const NO_VERIFIED_LINK = "no verified link to other machines yet";
+const NO_LONGER_LISTED = "no longer listed";
+const NOT_SEEN_RECENTLY = "not seen recently";
+
+const VERBS: Record<FleetAction, string> = { broadcast: "can't message", stop: "can't stop", supervise: "can't supervise" };
 
 /** Why `action` can't reach `target`, or null when it can. The Supervisor runs
  *  in each AgentMux for its own agents, so it reaches this instance's only
- *  (docs/specs/SPEC_SWARM_SUPERVISOR_2026_10_16.md §2.1). */
+ *  (docs/specs/SPEC_SWARM_SUPERVISOR_2026_10_16.md §2.1). A stale target is
+ *  about to disappear and its last state may be long out of date. */
 export function unavailableReason(target: FleetTargetInfo, action: FleetAction): string | null {
     if (action === "supervise") return target.remote ? "can't supervise: only this AgentMux's own agents" : null;
+    if (target.stale) return `${VERBS[action]}: ${NOT_SEEN_RECENTLY}`;
     if (target.actionable) return null;
-    return action === "stop" ? `can't stop: ${NO_VERIFIED_LINK}` : `can't message: ${NO_VERIFIED_LINK}`;
+    return `${VERBS[action]}: ${NO_VERIFIED_LINK}`;
 }
 
 /** The selection key of a remote agent: its block id when it has one (this
@@ -81,25 +87,16 @@ export function remoteFleetTargets(sections: RemoteSection[]): Map<string, Fleet
 export function localFleetTargets(nodes: { blockId?: string | null; agentName: string }[]): Map<string, FleetTargetInfo> {
     const out = new Map<string, FleetTargetInfo>();
     for (const n of nodes) {
-        if (!n.blockId) continue;
-        out.set(n.blockId, {
-            key: n.blockId,
-            name: n.agentName,
-            where: null,
-            badge: null,
-            platform: null,
-            remote: false,
-            otherMachine: false,
-            stale: false,
-            actionable: true,
-        });
+        if (n.blockId) out.set(n.blockId, localTarget(n.blockId, n.agentName));
     }
     return out;
 }
 
 /** The keys an action can name, and the targets it can't reach with why. A key
- *  that is neither local nor remote any more (the agent went away) is passed
- *  through as before: the action reports it per target. */
+ *  the Swarm no longer lists (its agent went away) can't be reached either: the
+ *  view prunes those from the selection, so this only catches a race, and it
+ *  says so rather than sending it on
+ *  (docs/specs/SPEC_SWARM_REFINEMENTS_2026_10_17.md §2.2). */
 export function partitionTargets(
     keys: string[],
     action: FleetAction,
@@ -109,11 +106,26 @@ export function partitionTargets(
     const unreachable: { key: string; reason: string }[] = [];
     for (const key of keys) {
         const target = known.get(key);
-        const reason = target ? unavailableReason(target, action) : null;
+        const reason = target ? unavailableReason(target, action) : `${VERBS[action]}: ${NO_LONGER_LISTED}`;
         if (reason) unreachable.push({ key, reason });
         else reachable.push(key);
     }
     return { reachable, unreachable };
+}
+
+/** "2 of 4 can't be messaged: no verified link to other machines yet", or null
+ *  when every selected target can be reached. Each distinct reason once, so the
+ *  toolbar says why its two numbers differ (spec §2.2). */
+export function gapSummary(unreachable: { reason: string }[], total: number, action: FleetAction): string | null {
+    if (unreachable.length === 0) return null;
+    const details = [...new Set(unreachable.map((u) => u.reason.replace(/^[^:]*:\s*/, "")))];
+    const verb = action === "broadcast" ? "can't be messaged" : action === "stop" ? "can't be stopped" : "can't be supervised";
+    return `${unreachable.length} of ${total} ${verb}: ${details.join("; ")}`;
+}
+
+/** This instance's agent `key` as a target, for a list that only has its key. */
+export function localTarget(key: string, name = key): FleetTargetInfo {
+    return { key, name, where: null, badge: null, platform: null, remote: false, otherMachine: false, stale: false, actionable: true };
 }
 
 /** "Loap · narko · dev-fix-lan", or just "Loap" for this instance's own. Falls
