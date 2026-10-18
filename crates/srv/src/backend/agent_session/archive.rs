@@ -61,18 +61,17 @@ pub(crate) fn archive_session_in(
     // only when there's no global store or it holds nothing for this agent
     // (pure pre-global / same-channel-only data). (codex + reagent P1/P2 #1399.)
     if let Some(gfs) = global {
-        match archive_global_current(gfs, definition_id)? {
+        // This channel's current is at most a subset of the global one, so it
+        // is cleared first: a crash before the move leaves the conversation
+        // current and readable from the global store, never a stale local copy
+        // with no global current to win over it.
+        match archive_global_current(gfs, definition_id, || clear_local_current_zone(filestore, &current_zone))? {
             GlobalArchive::Archived(zone, ts) => {
-                clear_local_current_zone(filestore, &current_zone);
                 clear_global_current_zone_in(gfs, definition_id);
                 return Ok(Some((zone, ts)));
             }
-            // Another instance archived and cleared it first: this channel's
-            // copy still goes, or its stale snapshot would bring it back.
-            GlobalArchive::ArchivedElsewhere => {
-                clear_local_current_zone(filestore, &current_zone);
-                return Ok(None);
-            }
+            // Another instance archived and cleared it first.
+            GlobalArchive::ArchivedElsewhere => return Ok(None),
             GlobalArchive::Nothing => {}
         }
     }
@@ -180,8 +179,8 @@ pub(crate) fn archive_session_in(
 /// The files are moved (renamed) inside the database, in one transaction: a
 /// conversation of any size never passes through memory, and only one
 /// archive can take it. The output's timestamps and the running summary go
-/// with it.
-fn archive_global_current(gfs: &FileStore, definition_id: &str) -> Result<GlobalArchive, String> {
+/// with it. `before_move` runs once there is something to archive.
+fn archive_global_current(gfs: &FileStore, definition_id: &str, before_move: impl FnOnce()) -> Result<GlobalArchive, String> {
     let current_zone = validate_and_current(definition_id)?;
     let has = |name: &str| -> Result<bool, String> {
         Ok(gfs.stat(&current_zone, name).map_err(|e| format!("stat: {e}"))?.is_some_and(|f| f.size > 0))
@@ -191,6 +190,7 @@ fn archive_global_current(gfs: &FileStore, definition_id: &str) -> Result<Global
     if !has(SNAPSHOT_FILE)? && !has(OUTPUT_FILE)? {
         return Ok(GlobalArchive::Nothing);
     }
+    before_move();
 
     let files = [SNAPSHOT_FILE, OUTPUT_FILE, TSIDX_FILE, crate::backend::continuity_state::STATE_FILE];
     // The store is shared by every instance on the machine. The files are
