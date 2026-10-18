@@ -27,6 +27,7 @@ impl PersistentSubprocessController {
             inner.proc_exit_code,
             self.health_monitor.is_active_turn(),
         )
+        .spawned_at(self.health_monitor.spawned_at_ms())
     }
 
     pub(super) fn publish_status(&self) {
@@ -103,6 +104,7 @@ impl PersistentSubprocessController {
                         g.proc_exit_code,
                         still_active,
                     )
+                    .spawned_at(health_monitor.spawned_at_ms())
                 };
                 super::super::publish_controller_status(&broker, &status);
                 // Publish the final `turn_active: false` snapshot BEFORE

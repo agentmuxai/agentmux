@@ -293,6 +293,16 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
                                 </Match>
                             </Switch>
                         </div>
+                        <Show when={a().kind === "approval" && a().description}>
+                            <div class="browser-attention-target browser-attention-description">
+                                {(a().description ?? "").length > 200
+                                    ? `${(a().description ?? "").slice(0, 200)}…`
+                                    : a().description}
+                            </div>
+                        </Show>
+                        <Show when={a().kind === "approval" && a().why}>
+                            <div class="browser-attention-target">Asked because {a().why}.</div>
+                        </Show>
                         {/* The page's own words, as text in a box of their own, so
                             they can't pass for AgentMux's (dialogs spec §8.1). */}
                         <Show when={a().kind === "dialog" && dialogMessage(a().message)}>

@@ -177,6 +177,7 @@ impl MspController {
     fn get_status_snapshot(&self) -> BlockControllerRuntimeStatus {
         let inner = self.inner.lock().unwrap();
         agent_runtime_status(&self.block_id, inner.status_version, &inner.proc_status, inner.proc_exit_code, self.health_monitor.is_active_turn())
+            .spawned_at(self.health_monitor.spawned_at_ms())
     }
 
     pub(crate) fn is_running(&self) -> bool {
@@ -240,6 +241,7 @@ impl MspController {
             (inner.generation, init)
         };
         self.health_monitor.set_active_turn(false);
+        self.health_monitor.note_spawned();
         self.publish_status();
 
         if let Some(stderr) = stderr {
@@ -284,6 +286,7 @@ impl MspController {
                 if line.trim().is_empty() {
                     continue;
                 }
+                outlet.health.note_output();
                 let Ok(json) = serde_json::from_str::<serde_json::Value>(&line) else {
                     outlet.write(&line);
                     continue;
