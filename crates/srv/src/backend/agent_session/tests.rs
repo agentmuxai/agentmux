@@ -4,6 +4,7 @@
 use super::*;
 // Public items not on the flat re-export path, plus the two crate-internal
 // helpers these tests exercise directly. Reached via their submodule paths.
+use super::archive::{archive_session_in, list_archives_in};
 use super::helpers::{now_ms, write_zone_file};
 use super::migrations::v1_blocks::MIGRATION_MARKER_V1;
 use super::migrations::v1_templates::TEMPLATE_PROMOTE_MARKER_V1;
@@ -97,8 +98,11 @@ fn global_store_read_fallback_and_archive_clear() {
     assert!(global.stat(&zone, SNAPSHOT_FILE).unwrap().is_none(), "global snapshot not cleared (empty-local path)");
     assert!(global.stat(&zone, OUTPUT_FILE).unwrap().is_none(), "global output not cleared (empty-local path)");
     assert!(global.stat(&zone, "output.idx").unwrap().is_none(), "global output.idx not cleared (empty-local path)");
-    // Preserved as a local archive (browsable here), not silently discarded.
-    assert!(!list_archives(&per_channel, def_id, 0).unwrap().is_empty(), "global content must be archived locally");
+    // Preserved as an archive in the global store, where the agent's record
+    // reads it, not silently discarded.
+    let archives = global.zone_ids_with_prefix(&format!("agent:{def_id}:archive:")).unwrap();
+    assert_eq!(archives.len(), 1, "archived in the global store");
+    assert!(!list_archives(&per_channel, def_id, 0).unwrap().is_empty(), "and listed");
     // No resurrection on the next open.
     let (after, _) = read_session_state(&per_channel, def_id).unwrap();
     assert_eq!(after, None, "archived conversation must not be resurrected from global zone");
@@ -216,7 +220,7 @@ fn archive_moves_content_and_clears_current() {
     write_session_state(&fs, "def-a", payload).unwrap();
     append_session_output(&fs, "def-a", "raw1").unwrap();
 
-    let result = archive_session(&fs, "def-a").unwrap();
+    let result = archive_session_in(&fs, None, "def-a").unwrap();
     let (zone, ts) = result.expect("archive should have happened");
     assert!(zone.starts_with("agent:def-a:archive:"));
     assert!(ts > 0);
@@ -254,7 +258,7 @@ fn archive_carries_and_clears_tsidx_sidecar() {
     write_zone_file(&fs, &current_zone, TSIDX_FILE, b"{\"off\":0,\"ms\":123}
 ").unwrap();
 
-    let (zone, _) = archive_session(&fs, "def-ts").unwrap().expect("archived");
+    let (zone, _) = archive_session_in(&fs, None, "def-ts").unwrap().expect("archived");
 
     let archived_ts = fs.read_file(&zone, TSIDX_FILE).unwrap().unwrap();
     assert_eq!(archived_ts, b"{\"off\":0,\"ms\":123}
@@ -279,7 +283,7 @@ fn archive_clears_output_idx_sidecar() {
     let current_zone = agent_current_zone("def-idx");
     write_zone_file(&fs, &current_zone, "output.idx", b"stale-idx-bytes").unwrap();
 
-    archive_session(&fs, "def-idx").unwrap().expect("archived");
+    archive_session_in(&fs, None, "def-idx").unwrap().expect("archived");
 
     assert!(
         fs.stat(&current_zone, "output.idx").unwrap().is_none(),
@@ -291,7 +295,7 @@ fn archive_clears_output_idx_sidecar() {
 fn archive_on_empty_current_is_noop() {
     let fs = fresh_filestore();
     // Nothing was ever written.
-    let result = archive_session(&fs, "def-empty").unwrap();
+    let result = archive_session_in(&fs, None, "def-empty").unwrap();
     assert!(result.is_none(), "archive on empty :current should no-op");
     // No archive zones should exist.
     let zones = fs.get_all_zone_ids().unwrap();
@@ -308,8 +312,77 @@ fn archive_on_zero_byte_state_is_noop() {
     let zone = agent_current_zone("def-zero");
     fs.make_file(&zone, SNAPSHOT_FILE, FileMeta::default(), FileOpts::default())
         .unwrap();
-    let result = archive_session(&fs, "def-zero").unwrap();
+    let result = archive_session_in(&fs, None, "def-zero").unwrap();
     assert!(result.is_none(), "zero-byte :current must NOT create archive");
+}
+
+/// "New conversation" keeps the conversation it archives in the agent's
+/// record (SearchHistory, the Agent History view): the archive goes to the
+/// global store, where the record reads archives, with its timestamps and
+/// running summary.
+#[test]
+fn an_archived_conversation_stays_in_the_agents_record() {
+    use crate::backend::continuity_state::STATE_FILE;
+    use crate::backend::history::record::{fixtures as rec, AgentRecords};
+    let local = fresh_filestore();
+    let global = fresh_filestore();
+    let zone = agent_current_zone(rec::UID);
+    rec::append(&global, &zone, &[rec::init("s1", "/w"), rec::assistant("s1", "before the archive")]);
+    rec::stamp(&global, &zone, 0, 1_790_000_000_000);
+    write_zone_file(&global, &zone, STATE_FILE, b"{\"summary\":\"s1\"}\n").unwrap();
+    let before = global.read_file(&zone, OUTPUT_FILE).unwrap().unwrap();
+
+    let (archive, _) = archive_session_in(&local, Some(&global), rec::UID).unwrap().expect("archived");
+
+    assert_eq!(global.read_file(&archive, OUTPUT_FILE).unwrap().unwrap(), before, "byte for byte");
+    assert!(global.stat(&archive, TSIDX_FILE).unwrap().is_some(), "timestamps travel with it");
+    assert_eq!(global.read_file(&archive, STATE_FILE).unwrap().unwrap(), b"{\"summary\":\"s1\"}\n");
+    assert!(global.stat(&zone, OUTPUT_FILE).unwrap().is_none(), "the current conversation starts over");
+    assert!(local.zone_ids_with_prefix("agent:").unwrap().is_empty(), "nothing lands in the per-channel store");
+
+    let (sessions, problems) = AgentRecords::new(Some(global.clone())).sessions_of(rec::UID);
+    assert!(problems.is_empty(), "{problems:?}");
+    let ids: Vec<&str> = sessions.iter().map(|s| s.session_id.as_str()).collect();
+    assert_eq!(ids, vec!["s1"], "the archived session is still in the record");
+    assert_eq!(list_archives_in(&local, Some(&global), rec::UID, 0).unwrap().len(), 1);
+}
+
+/// A conversation only this channel holds is archived into the global store
+/// too, and the listing finds it there.
+#[test]
+fn a_per_channel_conversation_is_archived_into_the_global_store() {
+    let local = fresh_filestore();
+    let global = fresh_filestore();
+    let zone = agent_current_zone("def-local-only");
+    write_zone_file(&local, &zone, SNAPSHOT_FILE, br#"{"nodes":[{"type":"user_message","message":"only here"}]}"#).unwrap();
+    append_session_output(&local, "def-local-only", "raw1").unwrap();
+
+    let (archive, _) = archive_session_in(&local, Some(&global), "def-local-only").unwrap().expect("archived");
+
+    assert_eq!(global.read_file(&archive, OUTPUT_FILE).unwrap().unwrap(), b"raw1\n");
+    assert!(local.stat(&archive, OUTPUT_FILE).unwrap().is_none());
+    assert!(local.stat(&zone, OUTPUT_FILE).unwrap().is_none(), "the channel's current is cleared");
+    let rows = list_archives_in(&local, Some(&global), "def-local-only", 0).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].preview, "only here");
+}
+
+/// Archives written to the per-channel store before archives moved to the
+/// global store are still listed, newest first, alongside the global ones.
+#[test]
+fn list_archives_reads_both_stores_newest_first() {
+    let local = fresh_filestore();
+    let global = fresh_filestore();
+    let snap = |msg: &str| format!(r#"{{"nodes":[{{"type":"user_message","message":"{msg}"}}]}}"#);
+    write_zone_file(&local, &agent_archive_zone("def-both", 1_000), SNAPSHOT_FILE, snap("old, per-channel").as_bytes()).unwrap();
+    write_zone_file(&global, &agent_archive_zone("def-both", 2_000), SNAPSHOT_FILE, snap("new, global").as_bytes()).unwrap();
+    // The same archive in both stores is listed once, from the global store.
+    write_zone_file(&local, &agent_archive_zone("def-both", 3_000), SNAPSHOT_FILE, snap("stale local copy").as_bytes()).unwrap();
+    write_zone_file(&global, &agent_archive_zone("def-both", 3_000), SNAPSHOT_FILE, snap("global copy").as_bytes()).unwrap();
+
+    let rows = list_archives_in(&local, Some(&global), "def-both", 0).unwrap();
+    let previews: Vec<&str> = rows.iter().map(|r| r.preview.as_str()).collect();
+    assert_eq!(previews, vec!["global copy", "new, global", "old, per-channel"]);
 }
 
 /// Critical scoping invariant: agents are independent, even when
