@@ -483,9 +483,33 @@ pub(crate) async fn handle_host_browser_pause(
     (StatusCode::OK, Json(json!({ "ok": true, "data": { "paused": is_paused(&pane) } }))).into_response()
 }
 
+/// An approved click's result, saying it was the user's approval that let
+/// it through and how long they took: the agent can't see the banner or a
+/// clock, and once reported "no banner appeared" for a click the user had
+/// approved (form-filling fixes plan §2.5).
+pub(crate) fn approved_by_user(r: Result<Value, (StatusCode, String)>, waited: Duration) -> Result<Value, (StatusCode, String)> {
+    r.map(|mut data| {
+        if let Some(o) = data.as_object_mut() {
+            o.insert("approved_by_user".to_string(), json!(true));
+            o.insert("waited_ms".to_string(), json!(waited.as_millis() as u64));
+        }
+        data
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_approved_click_says_the_user_approved_it_and_after_how_long() {
+        let data = approved_by_user(Ok(json!({ "after": { "tag": "button" } })), Duration::from_millis(12_300)).unwrap();
+        assert_eq!(data["approved_by_user"], true);
+        assert_eq!(data["waited_ms"], 12_300);
+        assert_eq!(data["after"]["tag"], "button");
+        let refused = approved_by_user(Err((StatusCode::BAD_GATEWAY, "gone".into())), Duration::ZERO);
+        assert_eq!(refused.unwrap_err().1, "gone");
+    }
 
     fn entry(n: usize) -> Entry {
         note("x", "naki", Kind::Click).target(&format!("e{n}")).entry(How::Allowed, None)

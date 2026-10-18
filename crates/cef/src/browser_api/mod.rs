@@ -30,6 +30,7 @@ use crate::state::AppState;
 
 pub mod act;
 pub mod cdp;
+pub mod dates;
 pub mod frames;
 pub mod page_state;
 pub mod resolver;
@@ -37,6 +38,7 @@ pub mod routes;
 pub mod shortcuts;
 pub mod snapshot;
 pub mod types;
+pub mod wait;
 
 /// Register `/agentmux/browser/*` routes on the given axum Router.
 /// Called from `ipc::start_ipc_server` alongside the existing
@@ -55,7 +57,7 @@ pub fn register_routes(router: Router<Arc<AppState>>) -> Router<Arc<AppState>> {
             "/agentmux/browser/set_files",
             post(act::set_files_route).layer(act::set_files_body_limit()),
         )
-        .route("/agentmux/browser/wait_for", post(act::wait_for_route))
+        .route("/agentmux/browser/wait_for", post(wait::wait_for_route))
         .route("/agentmux/browser/screenshot", post(routes::screenshot))
         .route("/agentmux/browser/click_element", post(routes::click_element))
         .route("/agentmux/browser/focus_element", post(routes::focus_element))
