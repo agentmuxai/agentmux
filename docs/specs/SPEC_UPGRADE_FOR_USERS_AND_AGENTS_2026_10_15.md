@@ -302,7 +302,9 @@ the folder (`crates/cef/src/browser_pane/profile_carry.rs`): `Network`, `Local S
 `IndexedDB` and `Login Data` of each profile, then `Local State`, which
 holds the key the cookies are encrypted with. Caches that rebuild
 themselves are left out. Copied, not moved, so the older version still works
-for a rollback; never from a newer version, whose profile Chromium refuses.
+for a rollback; never from a newer version, whose profile Chromium refuses,
+nor from one still running, whose files change under the copy. An item that
+fails to copy is removed, and `Local State` is placed whole or not at all.
 
 The other files in `data/` are not copied: logs, locks and `authkey.dev` are
 per run, `shell/` is regenerated, and the zones flag only matters to a store

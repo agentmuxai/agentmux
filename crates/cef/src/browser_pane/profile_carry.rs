@@ -18,9 +18,10 @@
 //! are encrypted with (`os_crypt`), without which the copies can't be read.
 //! Copied, not moved, so the older version still works for a rollback, and
 //! only forward: Chromium refuses a profile a newer Chromium wrote. The caches
-//! that rebuild themselves (HTTP, code, GPU, shader) aren't copied. Anything
-//! that fails is logged and left out: the version then starts that part
-//! fresh, as it did before.
+//! that rebuild themselves (HTTP, code, GPU, shader) aren't copied. Nothing is
+//! copied from a version that is still running (its cookie and LevelDB files
+//! change under the copy); an item that fails to copy is removed and logged,
+//! and starts fresh, as before.
 
 use std::path::{Path, PathBuf};
 
@@ -30,6 +31,20 @@ const PROFILE_ITEMS: [&str; 4] = ["Network", "Local Storage", "IndexedDB", "Logi
 const SKIPPED: [&str; 8] = ["Cache", "Code Cache", "GPUCache", "DawnCache", "DawnGraphiteCache", "DawnWebGPUCache", "GrShaderCache", "ShaderCache"];
 /// The file that marks a cache folder as used, and holds the cookie key.
 const LOCAL_STATE: &str = "Local State";
+
+/// Whether the CEF that owns `cache` is running: Chromium holds `lockfile`
+/// open, unshared, on Windows, and keeps `SingletonLock` elsewhere.
+fn in_use(cache: &Path) -> bool {
+    #[cfg(windows)]
+    {
+        let lock = cache.join("lockfile");
+        lock.exists() && std::fs::OpenOptions::new().read(true).write(true).open(&lock).is_err()
+    }
+    #[cfg(not(windows))]
+    {
+        cache.join("SingletonLock").symlink_metadata().is_ok()
+    }
+}
 
 /// `major.minor.patch` of a version directory's name.
 fn version_core(name: &str) -> Option<(u64, u64, u64)> {
@@ -107,6 +122,10 @@ pub fn from_previous_version(cache_dir: &Path) -> Option<PathBuf> {
         return None;
     }
     let from = previous_cache(cache_dir)?;
+    if in_use(&from) {
+        tracing::warn!(from = %from.display(), "profile carry: the previous version is still running; browser panes start signed out");
+        return None;
+    }
     if let Err(e) = std::fs::create_dir_all(cache_dir) {
         tracing::warn!(error = %e, "profile carry: can't create {}", cache_dir.display());
         return None;
@@ -118,15 +137,25 @@ pub fn from_previous_version(cache_dir: &Path) -> Option<PathBuf> {
             if !src.exists() {
                 continue;
             }
-            match copy_tree(&src, &cache_dir.join(&profile).join(item)) {
+            let dst = cache_dir.join(&profile).join(item);
+            match copy_tree(&src, &dst) {
                 Ok(n) => copied += n,
-                Err(e) => tracing::warn!(error = %e, "profile carry: left out {}", src.display()),
+                Err(e) => {
+                    // Half a database is worse than none: it starts fresh.
+                    let _ = if dst.is_dir() { std::fs::remove_dir_all(&dst) } else { std::fs::remove_file(&dst) };
+                    tracing::warn!(error = %e, "profile carry: left out {}", src.display());
+                }
             }
         }
     }
-    // Last: its presence marks this cache as used, so a copy cut short is
-    // tried again on the next start.
-    if let Err(e) = std::fs::copy(from.join(LOCAL_STATE), cache_dir.join(LOCAL_STATE)) {
+    // Last, and whole or not at all (a copy, then a rename): its presence
+    // marks this cache as used, so a copy cut short is tried again on the
+    // next start.
+    let partial = cache_dir.join("Local State.carrying");
+    let placed = std::fs::copy(from.join(LOCAL_STATE), &partial)
+        .and_then(|_| std::fs::rename(&partial, cache_dir.join(LOCAL_STATE)));
+    if let Err(e) = placed {
+        let _ = std::fs::remove_file(&partial);
         tracing::warn!(error = %e, "profile carry: couldn't copy Local State; the copied sign-ins won't open");
         return None;
     }
@@ -195,5 +224,23 @@ mod tests {
         assert!(!new.join(LOCAL_STATE).exists());
         // A dev build's cache isn't under a version folder at all.
         assert_eq!(from_previous_version(&root.path().join("dev").join("cef-cache")), None);
+    }
+
+    #[test]
+    fn nothing_is_copied_from_a_version_still_running() {
+        let root = tempfile::tempdir().unwrap();
+        let versions = root.path().join("versions");
+        let old = used_cache(&versions, "0.59.31", "31");
+        let new = versions.join("0.59.32").join("cef-cache");
+        #[cfg(windows)]
+        let _held = {
+            use std::os::windows::fs::OpenOptionsExt;
+            // As Chromium holds it: open, shared with no one.
+            std::fs::OpenOptions::new().read(true).write(true).create(true).share_mode(0).open(old.join("lockfile")).unwrap()
+        };
+        #[cfg(unix)]
+        std::os::unix::fs::symlink("host-1234", old.join("SingletonLock")).unwrap();
+        assert_eq!(from_previous_version(&new), None);
+        assert!(!new.join(LOCAL_STATE).exists() && !new.join("Default").exists());
     }
 }
