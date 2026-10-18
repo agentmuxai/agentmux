@@ -1,0 +1,96 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// Ctrl+R in the composer: search what was typed to this agent
+// (InputHistorySearch.tsx). Laid out like the slash autocomplete above the
+// composer (_slash.scss), above the pane's content.
+
+@use "../../../mixins.scss";
+.agent-view {
+    .input-history-search {
+        position: absolute;
+        bottom: calc(100% + 2px);
+        left: 0;
+        right: 0;
+        background: var(--main-bg-color);
+        border: 1px solid color-mix(in srgb, var(--accent-color) 50%, var(--border-color));
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+        z-index: var(--z-composer-popup);
+        font-size: var(--text-sm);
+        display: flex;
+        flex-direction: column;
+    }
+
+    .input-history-search__query {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        padding: var(--space-1) 10px;
+        border-bottom: 1px solid var(--border-color);
+        color: var(--secondary-text-color);
+        font-size: var(--text-xs);
+
+        input {
+            flex: 1;
+            min-width: 0;
+            background: transparent;
+            border: none;
+            outline: none;
+            color: var(--main-text-color);
+            font: inherit;
+            font-size: var(--text-sm);
+        }
+    }
+
+    .input-history-search__list {
+        max-height: 240px;
+        overflow-y: auto;
+    }
+
+    .input-history-search__row {
+        display: flex;
+        align-items: baseline;
+        gap: 10px;
+        padding: var(--space-1) 10px;
+        cursor: default;
+        line-height: 1.4;
+        color: var(--main-text-color);
+
+        &--selected {
+            background: var(--accent-bg-heavy);
+        }
+    }
+
+    .input-history-search__text {
+        flex: 1;
+        min-width: 0;
+
+        @include mixins.truncate;
+    }
+
+    .input-history-search__meta {
+        flex-shrink: 0;
+        color: var(--secondary-text-color);
+        font-size: var(--text-xs);
+    }
+
+    .input-history-search__empty {
+        padding: var(--space-2) 10px;
+        color: var(--secondary-text-color);
+        font-size: var(--text-xs);
+    }
+
+    .input-history-search__hint {
+        display: flex;
+        align-items: center;
+        gap: var(--space-3);
+        padding: 3px 10px;
+        border-top: 1px solid var(--border-color);
+        font-size: var(--text-2xs);
+        color: var(--secondary-text-color);
+
+        .input-history-search__clear {
+            margin-left: auto;
+        }
+    }
+}

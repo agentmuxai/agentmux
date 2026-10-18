@@ -204,11 +204,23 @@ pub fn recycle_declined(args: &serde_json::Value) -> Result<serde_json::Value, S
 /// The app windows the governor looks after: user windows, not pool windows,
 /// floating panes, browser panes or approval windows (§4).
 fn app_windows(state: &AppState) -> Vec<String> {
-    state
-        .user_window_labels()
-        .into_iter()
-        .filter(|l| state.is_live_top_level_browser(l) && !state.is_approval_window(l))
-        .collect()
+    let labels = {
+        let st = state.host_state.lock();
+        crate::reducer::live_user_window_labels(&st)
+    };
+    labels.into_iter().filter(|l| !state.is_approval_window(l)).collect()
+}
+
+/// Whether a native file dialog is open (it blocks the window's thread).
+/// Only the Windows host tracks them.
+#[cfg(target_os = "windows")]
+fn host_dialog_open() -> bool {
+    crate::floating_pane::host_dialog_open()
+}
+
+#[cfg(not(target_os = "windows"))]
+fn host_dialog_open() -> bool {
+    false
 }
 
 #[cfg(target_os = "windows")]
@@ -250,7 +262,7 @@ fn tick(state: &Arc<AppState>, limits: &Limits) {
         decide(now, &samples, &g.tracks, limits, pressure, g.last_any_request)
     };
     let Some(label) = pick else { return };
-    if crate::floating_pane::host_dialog_open() {
+    if host_dialog_open() {
         return;
     }
     // Read live, so turning it off takes effect at the next tick.
@@ -262,7 +274,7 @@ fn tick(state: &Arc<AppState>, limits: &Limits) {
     std::thread::sleep(Duration::from_secs(2));
     // The window may have come into use meanwhile (activated from the taskbar
     // makes no input in the page), or a native dialog opened: look again.
-    if crate::input_owner::registry::is_active(&label) || crate::floating_pane::host_dialog_open() {
+    if crate::input_owner::registry::is_active(&label) || host_dialog_open() {
         if let Some(t) = GOVERNOR.lock().unwrap().tracks.get_mut(&label) {
             t.last_active = Instant::now();
         }

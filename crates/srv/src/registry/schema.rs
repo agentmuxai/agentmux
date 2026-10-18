@@ -11,7 +11,9 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 /// Lowest envelope schema this binary will load. Bumped only with a
-/// deprecation cycle (see SPEC §6).
+/// deprecation cycle (see SPEC §6). A record below it is skipped, not
+/// migrated, so raising it hides the agents of an install that skipped the
+/// versions in between: raise the repo's `UPGRADE_FLOOR` with it.
 pub const MIN_SUPPORTED_SCHEMA: u32 = 1;
 /// Highest envelope schema this binary will write or read. Bumped
 /// per release that adds fields.

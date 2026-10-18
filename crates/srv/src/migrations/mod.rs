@@ -13,7 +13,10 @@
 //! file under this module. The ID must be unique and lexicographically ordered
 //! (use the `NNNN_slug` convention). Retiring old migrations: remove from
 //! [`REGISTRY`] once the minimum supported upgrade path passes the migration's
-//! origin version — the `db_migrations` row stays as a permanent record.
+//! origin version — the `db_migrations` row stays as a permanent record. That
+//! path is the repo's `UPGRADE_FLOOR`: raise it past the migration's origin
+//! version first, so an install older than that is told to install the floor
+//! version before upgrading (`backend::update_check::upgrade_floor`).
 //!
 //! # No private marker files
 //!

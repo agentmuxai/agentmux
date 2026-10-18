@@ -574,6 +574,7 @@
     --z-pane-ring:     50;  // the focused pane's ring and block mask
     --z-pane-progress: 51;  // the busy band, over the ring
     --z-file-drop:     60;  // the file drop target, over the ring
+    --z-composer-popup: 61; // the composer's history search, over the pane's content and ring
     --z-pane-modal:    100; // a dialog inside a pane (the identity form)
 
     // Over the whole window.

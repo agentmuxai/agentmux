@@ -39,10 +39,11 @@ import { absorbedSummary, TRIGGER_LEAD_IN_MS, triggerLeadIn, workedVerb } from "
 import { SlashAutocomplete } from "./SlashAutocomplete";
 import { isBangCommand } from "../bang-command";
 import { caretAtSelectionEdge } from "./composer-caret";
+import { InputHistorySearch } from "./InputHistorySearch";
 import { AttachmentTray } from "../attachments/AttachmentTray";
 import { getAttachmentDraft } from "../attachments/attachment-draft";
 import { getComposerDraft, getSentHistory, saveSentHistory, SENT_HISTORY_MAX, setComposerDraft } from "../reload-persistence";
-import { agentDraft, agentHistory, historyAgentId, loadOlderAgentHistory, rememberSent, saveAgentDraft, watchAgentHistory } from "../agent-input-history";
+import { agentDraft, agentHistory, historyAgentId, loadOlderAgentHistory, movedCursor, rememberSent, saveAgentDraft, watchAgentHistory } from "../agent-input-history";
 import { attachmentNoun, fileKind } from "../attachments/file-kind";
 import { isContainerPane, spliceComposerTokens } from "../hooks/useAgentDropAttach";
 import { copyIntoWorkdir, type CopySource } from "@/app/drag/file-drop-actions";
@@ -706,11 +707,11 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
           : [];
     let histPos = sentHistory.length;
     let histDraft = "";
+    const [historySearch, setHistorySearch] = createSignal(false); // Ctrl+R
     if (historyAgent) {
         onCleanup(
-            watchAgentHistory(historyAgent, (where, n) => {
-                if (where === "older") histPos += n;
-                else if (histPos === sentHistory.length - n) histPos += n;
+            watchAgentHistory(historyAgent, (where, n, at) => {
+                histPos = movedCursor(histPos, sentHistory.length, where, n, at);
             })
         );
     }
@@ -1306,6 +1307,11 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
         // draft, past the newest entry, parks the caret at the END instead of
         // the front — it's the user's own in-progress text to resume typing,
         // not a historical entry still being reviewed.
+        if (historyAgent && e.key === "r" && e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey) {
+            e.preventDefault();
+            setHistorySearch(true);
+            return;
+        }
         if (textareaRef && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
             const empty = textareaRef.value.length === 0;
             const navigating = histPos < sentHistory.length;
@@ -1418,6 +1424,13 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
                     <div class="agent-attachment-send-hint" role="status">
                         {sendHint()}
                     </div>
+                </Show>
+                <Show when={historySearch() && historyAgent}>
+                    <InputHistorySearch agentId={historyAgent!} onDone={(text) => {
+                        setHistorySearch(false);
+                        if (text !== undefined) setComposerValue(text);
+                        textareaRef?.focus();
+                    }} />
                 </Show>
                 <Show when={autocompletePrefix() !== null && completions().length > 0}>
                     <SlashAutocomplete

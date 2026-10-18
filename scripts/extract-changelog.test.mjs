@@ -43,17 +43,21 @@ afterEach(() => {
     dirs = [];
 });
 
-/** Run the script with `published` as the releases gh knows, or `ghError` as gh's failure. */
-function run(args, { published = [], ghError = null } = {}) {
+/**
+ * Run the script with `published` as the releases gh knows, or `ghError` as gh's failure, and
+ * `floor` as the upgrade floor file's contents (none by default).
+ */
+function run(args, { published = [], ghError = null, floor = null } = {}) {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "extract-changelog-"));
     dirs.push(dir);
     fs.writeFileSync(path.join(dir, "VERSION_HISTORY.md"), HISTORY);
     const fail = ghError ? `echo "${ghError}" >&2; exit 1` : `echo "release not found" >&2; exit 1`;
     const fake = `#!/usr/bin/env bash\ncase " ${published.join(" ")} " in *" $3 "*) exit 0;; esac\n${fail}\n`;
     fs.writeFileSync(path.join(dir, "gh"), fake, { mode: 0o755 });
+    if (floor !== null) fs.writeFileSync(path.join(dir, "UPGRADE_FLOOR"), floor);
     const r = spawnSync("bash", [script, ...args], {
         encoding: "utf8",
-        env: { ...process.env, PATH: `${dir}${path.delimiter}${process.env.PATH}`, VERSION_HISTORY_FILE: path.join(dir, "VERSION_HISTORY.md") },
+        env: { ...process.env, PATH: `${dir}${path.delimiter}${process.env.PATH}`, VERSION_HISTORY_FILE: path.join(dir, "VERSION_HISTORY.md"), UPGRADE_FLOOR_FILE: path.join(dir, "UPGRADE_FLOOR") },
     });
     return { code: r.status, out: r.stdout.trimEnd(), err: r.stderr };
 }
@@ -78,6 +82,13 @@ describe("extract-changelog.sh", () => {
         expect(code).toBe(0);
         expect(out).toBe("- four");
         expect(err).toContain("couldn't check v0.9.3");
+    });
+
+    it("carries the upgrade floor as a hidden line srv reads", () => {
+        expect(run(["0.9.4"], { floor: "0.9.1\n" }).out).toBe(["- four", "", "<!-- agentmux:min-upgrade-from=0.9.1 -->"].join("\n"));
+        const bad = run(["0.9.4"], { floor: "soon" });
+        expect(bad.code).toBe(1);
+        expect(bad.err).toContain("must hold one version");
     });
 
     it("fails on a version with no entry", () => {

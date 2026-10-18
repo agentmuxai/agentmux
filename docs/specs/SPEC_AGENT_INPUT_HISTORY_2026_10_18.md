@@ -177,11 +177,17 @@ notes can't leak into it.
 
 ### 4.6 Seeing and managing it
 
-- **Reverse search in the composer** (Ctrl+R, as in a shell): type to filter
-  this agent's history, Enter puts the entry in the composer, Escape returns.
+- **Reverse search in the composer** (Ctrl+R, as in a shell; phase 3,
+  `components/InputHistorySearch.tsx`): the newest 50 entries, filtered as
+  you type, each with when it was last sent and how often in a row. Up/Down
+  or Ctrl+R again move, Enter puts the entry in the composer, Escape returns.
+  Shift+Delete forgets the selected entry; "Clear history" forgets them all
+  after a second click. The composers showing the agent move their ArrowUp
+  cursor with what was removed.
 - **A History tab** in the agent's settings or Agent History pane: the list
-  with times, search across all agents, send again, copy, delete, clear.
-- **Command palette:** "Search input history".
+  with times, search across all agents, send again, copy. Later; the search
+  covers finding, forgetting and clearing.
+- **Command palette:** "Search input history". Later.
 
 ### 4.7 Backfill from existing conversations
 
@@ -226,7 +232,7 @@ files `Agents search_history` already reads) and records them with
 |---|---|---|
 | 1 (done) | Tables, append/list/search/delete/clear/draft API, composer reads and writes it, events | The loss the operator reported: ArrowUp and the draft survive restarts and upgrades |
 | 2 (done) | Backfill from past sessions | History starts full |
-| 3 | Reverse search, the History tab, delete and clear, palette entry | Finding and managing it |
+| 3 (search done) | Reverse search, the History tab, delete and clear, palette entry | Finding and managing it |
 | 4 (done) | Retention setting, Swarm broadcasts recorded | Completeness |
 
 ## 6. Testing

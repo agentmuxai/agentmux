@@ -225,7 +225,42 @@ checksums, a signature check before the swap, removing old versions), `.deb`
 and `.rpm`, the Microsoft Store hand-off, restoring the main window's position,
 and the `-x64-setup.exe` real-install test on Area54.
 
-## 5. Evidence
+## 5. Status (same day)
+
+Every item in §4 is done or in review:
+
+| # | Item | PR |
+|---|------|----|
+| 1 | Update check on demand only; button always shown; a check pins its result | #5099 |
+| 2 | MuxBus stays signed in across restarts and upgrades | #5098 |
+| 3 | Window and workspace names restored | #5101 |
+| 4 | Agents' background work: listed before, another AgentMux's windows kept, the agent told after | #5104 |
+| 5 | Browser-pane sign-ins carried forward | #5105 |
+| 6 | Agent input history, phase 1 (its spec: `SPEC_AGENT_INPUT_HISTORY_2026_10_18.md`) | #5109 |
+| 7 | Long jumps checked on real old data (`scripts/check-long-jump.sh`) | #5110 |
+| 8 | Upgrade floor (`UPGRADE_FLOOR`) | #5110 |
+| 9 | Note delivery logged (#5099); state outside the databases audited (below) | #5110 |
+
+**The audit (item 9).** What else an install keeps, and whether a long jump
+can trip on it:
+
+- Registry and definition records (`registry/schema.rs`, `def_schema.rs`):
+  both still load schema 1 (`MIN_SUPPORTED_SCHEMA`, `DEF_MIN_SUPPORTED_SCHEMA`),
+  so every older record loads. A record below the minimum is skipped, not
+  migrated; both constants now say to raise `UPGRADE_FLOOR` with them.
+- Settings (`settings.json`, `widgets.json`): unknown keys are kept as they
+  are, and renamed ones are moved by a migration (`m0037`), which a long jump
+  runs like any other.
+- The session record: a record without `windows` restores as one window, and
+  one without names as unnamed windows (#5101).
+- The upgrade notice record and the channel record compare versions, not
+  steps, so any older version reads correctly.
+- The browser profile and the databases are copied from the newest older
+  version present, whichever it is.
+
+Nothing found needs a change beyond the two comments.
+
+## 6. Evidence
 
 - New version: `channels/local-main-b28b7a-651ced27/versions/0.59.32/logs/agentmuxsrv-v0.59.32.log.2026-10-18`
   (carry-forward, resume, MuxBus lines, `init_global skipped (ISOLATED …)`).
