@@ -822,6 +822,27 @@ mod tests {
         assert!(f.detail.contains("Claude"), "detail: {}", f.detail);
     }
 
+    /// Both wordings of the refusal, an agent with no link and a link to a
+    /// gone account, classify the same way, from the gate's own Display.
+    #[test]
+    fn spawn_gate_refusal_classifies_the_same_with_or_without_a_link() {
+        use crate::identity::resolver::SpawnGateError;
+        for linked in [false, true] {
+            let refusal = SpawnGateError::MissingCredentials { provider: "codex".to_string(), linked };
+            let frame = json!({
+                "type": "result",
+                "is_error": true,
+                "subtype": "error_during_execution",
+                "error": { "message": format!("[AgentMux] {refusal}") }
+            });
+            let f = classify(Some(1), None, "", Some(&frame));
+            assert_eq!(f.code, FailureClass::Auth, "linked={linked}: {refusal}");
+            assert!(f.detail.contains("Codex"), "linked={linked}: {}", f.detail);
+        }
+        let unlinked = SpawnGateError::MissingCredentials { provider: "claude".to_string(), linked: false };
+        assert!(!unlinked.to_string().contains("deleted"), "{unlinked}");
+    }
+
     #[test]
     fn spawn_gate_missing_credentials_from_before_the_armory_split_still_classifies() {
         // A failure recorded while the message still said "in the Armory".
