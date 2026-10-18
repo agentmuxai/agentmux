@@ -751,7 +751,7 @@ async fn run_proc(
 
 /// PTY-backed run path. Holds master alive across child.wait() and
 /// answers DSR queries from bash at startup.
-async fn run_via_pty(
+pub(crate) async fn run_via_pty(
     args: &Args,
     command: &str,
     mps: Option<&WpsClient>,
@@ -895,7 +895,7 @@ async fn run_via_pty(
     let (idle_tx, idle_rx) = oneshot::channel::<()>();
     let pty_idle_timeout = effective_idle_timeout(args);
     tokio::task::spawn_blocking(move || {
-        pty_reader_loop(reader, tx_reader, idle_tx, pty_idle_timeout);
+        pty_reader_loop(reader, tx_reader, idle_tx, pty_idle_timeout, child_pid);
     });
     drop(tx);
 
@@ -1020,7 +1020,7 @@ paging output that doesn't fit one screen). Try `git --no-pager <cmd>` or \
 /// Pipe-backed run path. Safety net for environments where PTY
 /// allocation fails (CI, sandboxes). Same byte semantics as the old
 /// pipe-only wrapper.
-async fn run_via_pipes(
+pub(crate) async fn run_via_pipes(
     args: &Args,
     command: &str,
     mps: Option<&WpsClient>,
@@ -1091,23 +1091,8 @@ async fn run_via_pipes(
 
     let (idle_tx, idle_rx) = oneshot::channel::<()>();
     let idle_timeout = effective_idle_timeout(args);
-    let watcher_activity = last_activity.clone();
-    let idle_watcher = tokio::spawn(async move {
-        let mut idle_tx = Some(idle_tx);
-        loop {
-            tokio::time::sleep(Duration::from_millis(200)).await;
-            let elapsed = watcher_activity
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .elapsed();
-            if elapsed >= idle_timeout {
-                if let Some(tx) = idle_tx.take() {
-                    let _ = tx.send(());
-                }
-                return;
-            }
-        }
-    });
+    // Silent is not stuck: a busy process tree restarts the clock (idle_gate.rs).
+    let idle_watcher = tokio::spawn(crate::idle_gate::watch(last_activity.clone(), child_pid, idle_timeout, idle_tx));
 
     // Same Ok/Err distinction as run_via_pty's select (reagent P1 follow-up):
     // idle_rx resolving with Err just means pty_reader_loop-equivalent
@@ -1227,6 +1212,7 @@ fn pty_reader_loop(
     tx: mpsc::Sender<LineEvent>,
     idle_tx: oneshot::Sender<()>,
     idle_timeout: Duration,
+    root_pid: Option<u32>,
 ) {
     use std::sync::mpsc as std_mpsc;
     // PTY collapses stdout + stderr onto one stream — the slave's
@@ -1300,10 +1286,13 @@ fn pty_reader_loop(
     // own copy of `Args`.
     let mut last_activity = std::time::Instant::now();
     let mut idle_tx = Some(idle_tx);
+    // Silent is not stuck: a busy process tree restarts the clock (idle_gate.rs).
+    let mut gate = crate::idle_gate::IdleGate::new(root_pid, idle_timeout);
     loop {
         match data_rx.recv_timeout(FLUSH_QUIET_WINDOW) {
             Ok(Some(mut chunk)) => {
                 last_activity = std::time::Instant::now();
+                gate.reset();
                 let raw_n = chunk.len();
                 strip_dsr(&mut chunk);
                 // Phase γ (partial): convert the CHA(col-1)/EL cursor-
@@ -1412,8 +1401,10 @@ fn pty_reader_loop(
                     // tick after that — the async side kills the child on
                     // receipt, which will eventually produce real EOF/error
                     // here and end the loop normally.
-                    if let Some(sender) = idle_tx.take() {
-                        let _ = sender.send(());
+                    if gate.stuck(&mut last_activity) {
+                        if let Some(sender) = idle_tx.take() {
+                            let _ = sender.send(());
+                        }
                     }
                 }
                 // P1b/A1: quiet-window expiry.

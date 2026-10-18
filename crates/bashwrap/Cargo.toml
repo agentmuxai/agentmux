@@ -18,6 +18,7 @@ harness = false
 
 [dependencies]
 agentmux-common = { path = "../common" }
+agentmux-procstats = { path = "../procstats" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "io-util", "time", "sync"] }
 # Talks only to srv at AGENTMUX_LOCAL_URL (http://127.0.0.1:<port>): no TLS feature on purpose (#4207).
 reqwest = { version = "0.12", default-features = false, features = ["json"] }

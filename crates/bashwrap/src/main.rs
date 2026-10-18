@@ -55,6 +55,7 @@ mod askpass;
 mod bash_wrap;
 mod cwd_state;
 mod exec_args;
+mod idle_gate;
 mod hook;
 mod precompact;
 mod prefix;
