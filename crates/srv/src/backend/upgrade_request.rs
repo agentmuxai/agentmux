@@ -101,6 +101,15 @@ pub fn installable(status: &AppUpdateStatus, wanted: Option<&str>) -> Result<Str
         }
     }
     let latest = status.latest.clone().unwrap_or_default();
+    if let Some(floor) = &status.install_first {
+        return Err(Outcome::Unavailable {
+            message: format!(
+                "this AgentMux ({}) is older than {latest} can upgrade from; the user installs {floor} first, then upgrades",
+                status.current
+            ),
+            url: Some(format!("https://github.com/agentmuxai/agentmux/releases/tag/v{floor}")),
+        });
+    }
     // A restart into an earlier release is under way (the check found a
     // newer one since): that one goes first.
     if let Some(d) = status.download.as_ref().filter(|d| matches!(d.state.as_str(), "waiting" | "restarting")) {
@@ -351,6 +360,7 @@ mod tests {
             asset: None,
             can_download,
             download: None,
+            install_first: None,
         }
     }
 
@@ -387,6 +397,12 @@ mod tests {
         });
         let Err(Outcome::Unavailable { message, .. }) = installable(&busy, None) else { panic!("expected unavailable") };
         assert!(message.contains("already restarting into 0.59.26"), "{message}");
+        // Older than the release upgrades from: the floor version first.
+        let mut old = status("available", false);
+        old.install_first = Some("0.58.0".into());
+        let Err(Outcome::Unavailable { message, url }) = installable(&old, None) else { panic!("expected unavailable") };
+        assert!(message.contains("installs 0.58.0 first"), "{message}");
+        assert!(url.unwrap().ends_with("/v0.58.0"));
     }
 
     #[test]

@@ -51,4 +51,10 @@ can_download: boolean,
 /**
  * A download of the latest release, once one was asked for.
  */
-download?: DownloadStatus, };
+download?: DownloadStatus, 
+/**
+ * When this AgentMux is older than the latest release can upgrade from
+ * (the release's upgrade floor, [`upgrade_floor`]): the version to
+ * install first. The latest release then isn't offered for download.
+ */
+install_first?: string, };
