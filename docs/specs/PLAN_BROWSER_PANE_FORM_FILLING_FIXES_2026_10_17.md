@@ -1,6 +1,6 @@
 # PLAN: browser pane form filling, fixes from the first real multi-step form
 
-**Status:** active. Step 1 built in the first PR: §2.1 (limits shown, over-long fills refused, a warning when the page changed a value), §2.2 (`key` reads back what has focus), §2.4 (review sections get references; tool guidance), §4.1 (screenshots black out secret fields in every frame, fail closed), plus §3.6 (`about:` frames inherit their parent's origin). Steps 2 and 3 not built.
+**Status:** active — Step 1 built in #5089: §2.1 (limits shown, over-long fills refused, a warning when the page changed a value), §2.2 (`key` reads back what has focus), §2.4 (review sections get references; tool guidance), §4.1 (screenshots black out secret fields in every frame, fail closed), plus §3.6 (`about:` frames inherit their parent's origin). Steps 2 and 3 not built.
 **Date:** 2026-10-17
 **Author:** Korp@narko, at the operator's request
 **Trigger (operator, 2026-10-17):** "for the 350 characters, the agent filling the form could have known that. so is that something we can fix for the future?" … "were there other learnings from this? lets put it all into a fix plan, write to file"
