@@ -478,14 +478,15 @@ async fn live_supervisor_judge_answers_in_format_and_judges_the_clear_cases() {
 }
 
 // ── The user's Stop and notices (spec §3.4, §3.7) ───────────────────────
+// The Stop's grace window itself is tested in `backend::user_stop`.
 
 #[test]
-fn a_user_stop_holds_the_pane_for_the_grace_window_only() {
-    let block = "stop-window-test-block";
-    note_user_stop_for_test(block, 1_000_000);
-    assert!(stopped_by_user_for_test(block, 1_000_000 + STOP_GRACE_MS - 1));
-    assert!(!stopped_by_user_for_test(block, 1_000_000 + STOP_GRACE_MS));
-    assert!(!stopped_by_user_for_test("another-block", 1_000_000));
+fn a_user_stop_is_what_the_supervisor_stands_down_for() {
+    let block = "supervisor-stop-test-block";
+    assert!(!stopped_by_user(block));
+    crate::backend::user_stop::note_user_stop(block);
+    assert!(stopped_by_user(block), "the Stop notify.emit records is the one the Supervisor reads");
+    crate::backend::user_stop::forget(block);
 }
 
 #[test]

@@ -439,3 +439,55 @@ fn user_record_matches_the_persistent_controllers_stdin_line() {
     // single transcript line.
     assert!(!rec.to_string().contains('\n'));
 }
+
+/// The watchdog's inputs for a one-shot agent: each turn's process stamps its
+/// spawn time (the max-runtime limit) and its stdout stamps the last output
+/// (the idle limit).
+#[tokio::test]
+async fn a_turn_stamps_its_spawn_time_and_last_output() {
+    // A PATH lookup, not a probe spawn (see persistent/tests/shutdown.rs).
+    let has_node = std::env::var_os("PATH").is_some_and(|path| {
+        std::env::split_paths(&path).any(|dir| dir.join("node").is_file() || dir.join("node.exe").is_file())
+    });
+    if !has_node {
+        eprintln!("subprocess tests: `node` not on PATH — skipping");
+        return;
+    }
+    let script = std::env::temp_dir().join(format!("agentmux-subprocess-stamp-{}.js", uuid::Uuid::new_v4()));
+    std::fs::write(&script, "console.log(JSON.stringify({ type: 'system', subtype: 'init' }));\n").unwrap();
+    let ctrl = SubprocessController::new(
+        "tab-1".to_string(),
+        "block-watchdog-stamps".to_string(),
+        None,
+        None,
+        None,
+        None,
+        None,
+        std::sync::Arc::from("test-boot"),
+    );
+    let tracker = ctrl.turn_tracker().unwrap();
+    assert_eq!(tracker.spawned_at_ms(), None);
+    let config = SubprocessSpawnConfig {
+        cli_command: "node".to_string(),
+        cli_args: vec![script.to_string_lossy().into_owned()],
+        working_dir: String::new(),
+        env_vars: HashMap::new(),
+        message: "hi".to_string(),
+        resume_flag: String::new(),
+        resume_strategy: "none".to_string(),
+        session_id_field: "session_id".to_string(),
+        prompt_arg_flag: String::new(),
+        message_id: None,
+        session_id: None,
+        instance_id: String::new(),
+    };
+    ctrl.spawn_turn(config).unwrap();
+    let spawned = tracker.spawned_at_ms().expect("the turn's process stamps its spawn time");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while ctrl.last_output_ms().is_none() && std::time::Instant::now() < deadline {
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    let output = ctrl.last_output_ms().expect("its stdout stamps the last output");
+    assert!(output >= spawned, "output {output} before spawn {spawned}");
+    let _ = std::fs::remove_file(script);
+}

@@ -154,6 +154,8 @@ impl SubprocessController {
         // Router pairs with the process_waiter's turn_active=false to detect
         // "finished" (subprocess agents otherwise never showed a true→false).
         self.health_monitor.set_active_turn(true);
+        // Each turn runs its own process: the watchdog's runtime counts from here.
+        self.health_monitor.note_spawned();
         self.publish_status();
 
         // Build command — on Windows, .cmd batch wrappers can't be reliably spawned
@@ -303,6 +305,7 @@ impl SubprocessController {
         let mstore_read = self.mstore.clone();
         let event_bus_read = self.event_bus.clone();
         let filestore_read = self.filestore.clone();
+        let health_read = Arc::clone(&self.health_monitor);
         let session_id_field = config.session_id_field.clone();
         // Resolve the agent's GLOBAL transcript zone once (see persistent/spawn.rs).
         let global_output_zone =
@@ -346,6 +349,7 @@ impl SubprocessController {
                         // Use `line.len()` (not `trimmed.len()`) to match persistent/stdout_reader.rs
                         // so token_estimate stays consistent across controller types.
                         stats.record_line(line.len(), &mstore_read);
+                        health_read.note_output();
 
                         if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(trimmed) {
                             // Try to capture session/thread ID from the provider's init event.

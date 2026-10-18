@@ -300,6 +300,8 @@ impl SubprocessController {
             // turn_active=true on the start publish — the start edge the
             // notification Router needs (same as host_spawn).
             health_monitor.set_active_turn(true);
+            // Each turn runs its own exec: the watchdog's runtime counts from here.
+            health_monitor.note_spawned();
             if let Some(ref b) = broker {
                 let status = {
                     let inner = inner_arc.lock().unwrap();
@@ -508,7 +510,10 @@ impl SubprocessController {
                             }
                             Some(Ok(log_output)) => {
                                 let bytes = match log_output {
-                                    LogOutput::StdOut { message } => message,
+                                    LogOutput::StdOut { message } => {
+                                        health_monitor.note_output();
+                                        message
+                                    }
                                     LogOutput::StdErr { message } => {
                                         // Log stderr but don't publish as blockfile output.
                                         let s = String::from_utf8_lossy(&message);
