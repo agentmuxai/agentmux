@@ -198,6 +198,18 @@ describe("answerRecycleRequest (the governor's request)", () => {
         await expect(answerRecycleRequest(2 * 60_000)).resolves.toBe(true);
     });
 
+    it("looks at the window again just before reloading, and declines if it came into use", async () => {
+        api.windows.recycleBegin.mockImplementationOnce(async () => {
+            // A dialog opens while the host takes the picture.
+            idle.modal = true;
+            return { before_mb: 900 };
+        });
+        await expect(answerRecycleRequest()).resolves.toBe(false);
+        expect(api.windows.recycleDeclined).toHaveBeenCalledWith("main", "a dialog is open");
+        expect(api.windows.recycleCancel).toHaveBeenCalledWith("main");
+        expect(api.reloadWindow).not.toHaveBeenCalled();
+    });
+
     it("a recycle blocker declines to the host instead of showing a toast", async () => {
         const off = registerRecycleBlocker(() => "a file is still uploading");
         await expect(answerRecycleRequest()).resolves.toBe(false);

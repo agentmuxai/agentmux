@@ -257,6 +257,14 @@ fn tick(state: &Arc<AppState>, limits: &Limits) {
     let before = samples.iter().find(|s| s.label == label).and_then(|s| s.mb);
     collect_garbage(state, &label);
     std::thread::sleep(Duration::from_secs(2));
+    // The window may have come into use meanwhile (activated from the taskbar
+    // makes no input in the page), or a native dialog opened: look again.
+    if crate::input_owner::registry::is_active(&label) || crate::floating_pane::host_dialog_open() {
+        if let Some(t) = GOVERNOR.lock().unwrap().tracks.get_mut(&label) {
+            t.last_active = Instant::now();
+        }
+        return;
+    }
     let after_gc = super::recycle::renderer_mb(state, &label);
     let still_over = {
         let g = GOVERNOR.lock().unwrap();

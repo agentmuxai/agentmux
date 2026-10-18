@@ -46,11 +46,13 @@ export function resetRecycleForTests(): void {
  */
 export async function recycleWindow(
     reason = "command",
-    onRefused: (reasons: string[]) => void = refuse
+    onRefused: (reasons: string[]) => void = refuse,
+    /** More reasons to wait, checked with the blockers at the start and again just before the reload. */
+    busyNow: () => string[] = () => []
 ): Promise<boolean> {
     // A second call (a double Enter in the palette) would measure and reload twice.
     if (recycling) return false;
-    const blocked = recycleBlockers();
+    const blocked = [...recycleBlockers(), ...busyNow()];
     if (blocked.length > 0) {
         onRefused(blocked);
         return false;
@@ -87,7 +89,7 @@ export async function recycleWindow(
     }
     // Saving and the cover can take seconds while the window stays usable:
     // whatever started meanwhile would be lost too, so look again.
-    const late = recycleBlockers();
+    const late = [...recycleBlockers(), ...busyNow()];
     if (late.length > 0) {
         recycling = false;
         void getApi().windows.recycleCancel(ownWindowLabel()).catch(() => {});
@@ -136,17 +138,18 @@ export async function answerRecycleRequest(idleMs = IDLE_MS): Promise<boolean> {
             import("@/app/element/modal-stack"),
             import("@/app/drag/drag-session"),
         ]);
-    const busy: string[] = [];
-    if (msSinceLastInput() < idleMs) busy.push("the window was used recently");
-    if (anyAgentWaitingForYou()) busy.push("an agent is waiting for an answer");
-    // `openModal` dialogs and declarative `<Modal>`s are tracked apart.
-    if (modalsModel.hasOpenModals() || anyModalOpen()) busy.push("a dialog is open");
-    if (isAnyUnderway(ALL_DRAG_KINDS)) busy.push("a drag is in progress");
-    if (busy.length > 0) {
-        decline(busy);
-        return false;
-    }
-    return recycleWindow("idle", decline);
+    // Checked now and again just before the reload: the window can come into
+    // use while the recycle saves and the host takes its picture.
+    const busyNow = (): string[] => {
+        const busy: string[] = [];
+        if (msSinceLastInput() < idleMs) busy.push("the window was used recently");
+        if (anyAgentWaitingForYou()) busy.push("an agent is waiting for an answer");
+        // `openModal` dialogs and declarative `<Modal>`s are tracked apart.
+        if (modalsModel.hasOpenModals() || anyModalOpen()) busy.push("a dialog is open");
+        if (isAnyUnderway(ALL_DRAG_KINDS)) busy.push("a drag is in progress");
+        return busy;
+    };
+    return recycleWindow("idle", decline, busyNow);
 }
 
 /** Answer the governor's requests in this window (once, at startup). */
