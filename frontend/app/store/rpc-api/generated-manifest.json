@@ -1209,6 +1209,14 @@
             "method": "BlockStatsDetailCommand"
         },
         {
+            "command": "history.agents",
+            "method": "HistoryAgentsCommand"
+        },
+        {
+            "command": "history.agent_sessions",
+            "method": "HistoryAgentSessionsCommand"
+        },
+        {
             "command": "history.usage",
             "method": "HistoryUsageCommand"
         },

@@ -36,6 +36,10 @@ vi.mock("@/app/store/global", () => ({
     },
 }));
 
+vi.mock("./providers", () => ({
+    getProvider: (id: string) => (id === "claude" ? { styledOutputFormat: "claude-stream-json" } : undefined),
+}));
+
 const holdLeafRevealGate = vi.fn();
 const scheduleLeafRevealLift = vi.fn();
 vi.mock("@/app/store/tab-reveal", () => ({
@@ -77,7 +81,7 @@ describe("openOrFocusHistoryTab concurrency (reagent P2 / codex P2 on PR #2539)"
     });
 
     it("opens the history block as a tab of the live block's own pane, with the history meta", async () => {
-        getObjectValue.mockReturnValue({ meta: { agentOutputFormat: "claude-stream-json", agentName: "Ann" } });
+        getObjectValue.mockReturnValue({ meta: { agentId: "agent-1", agentOutputFormat: "claude-stream-json", agentName: "Ann" } });
         openBlockInStack.mockResolvedValue("history-block-1");
         await openOrFocusHistoryTab({ currentBlockId: "live-block", agentId: "agent-1" });
         expect(openBlockInStack).toHaveBeenCalledWith(expect.anything(), { blockId: "live-block" }, "agent", {
@@ -85,6 +89,19 @@ describe("openOrFocusHistoryTab concurrency (reagent P2 / codex P2 on PR #2539)"
             agentId: "agent-1",
             "agent:historyTabFor": "agent-1",
             "agent:historySourceBlockId": "live-block",
+            agentOutputFormat: "claude-stream-json",
+            agentName: "Ann",
+        });
+    });
+
+    it("from a pane that isn't the agent's own (Warden, the picker), the tab reads through itself", async () => {
+        getObjectValue.mockReturnValue({ meta: { view: "warden" } });
+        openBlockInStack.mockResolvedValue("history-block-1");
+        await openOrFocusHistoryTab({ currentBlockId: "warden-block", agentId: "agent-1", provider: "claude", agentName: "Ann" });
+        expect(openBlockInStack).toHaveBeenCalledWith(expect.anything(), { blockId: "warden-block" }, "agent", {
+            view: "agent",
+            agentId: "agent-1",
+            "agent:historyTabFor": "agent-1",
             agentOutputFormat: "claude-stream-json",
             agentName: "Ann",
         });

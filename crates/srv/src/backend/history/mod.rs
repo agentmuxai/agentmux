@@ -6,6 +6,7 @@
 pub mod adapter;
 pub mod claude_adapter;
 pub mod index;
+mod agent_sessions;
 pub(crate) mod record;
 
 use std::sync::Arc;

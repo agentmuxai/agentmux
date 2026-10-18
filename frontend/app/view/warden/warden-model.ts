@@ -5,7 +5,7 @@ import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
 import { createMemo, type Accessor } from "solid-js";
 import { readZoom } from "@/app/store/zoom-factor";
 
-export type WardenSection = "host" | "lan" | "internet" | "audit";
+export type WardenSection = "host" | "lan" | "internet" | "audit" | "history";
 
 // Label text only (not icon), hoisted here so viewName can read it without
 // importing from warden-view.tsx, which would reintroduce the circular
@@ -17,6 +17,7 @@ export const WARDEN_SECTION_LABELS: Record<WardenSection, string> = {
     lan: "LAN",
     internet: "Internet",
     audit: "Audit",
+    history: "History",
 };
 
 function isWardenSection(v: unknown): v is WardenSection {

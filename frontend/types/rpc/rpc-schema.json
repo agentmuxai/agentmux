@@ -3047,6 +3047,44 @@
     }
   },
   {
+    "command": "history.agent_sessions",
+    "request": "agentmux_srv::backend::rpc_types::history::HistoryAgentSessionsReq",
+    "requestName": "HistoryAgentSessionsReq",
+    "requestTs": {
+      "imports": [
+        "HistoryAgentSessionsReq"
+      ],
+      "name": "HistoryAgentSessionsReq"
+    },
+    "response": "agentmux_srv::backend::rpc_types::history::HistoryAgentSessions",
+    "responseName": "HistoryAgentSessions",
+    "responseTs": {
+      "imports": [
+        "HistoryAgentSessions"
+      ],
+      "name": "HistoryAgentSessions"
+    }
+  },
+  {
+    "command": "history.agents",
+    "request": "agentmux_srv::backend::rpc_types::history::HistoryAgentsReq",
+    "requestName": "HistoryAgentsReq",
+    "requestTs": {
+      "imports": [
+        "HistoryAgentsReq"
+      ],
+      "name": "HistoryAgentsReq"
+    },
+    "response": "agentmux_srv::backend::rpc_types::history::HistoryAgents",
+    "responseName": "HistoryAgents",
+    "responseTs": {
+      "imports": [
+        "HistoryAgents"
+      ],
+      "name": "HistoryAgents"
+    }
+  },
+  {
     "command": "history.usage",
     "request": "agentmux_srv::backend::rpc_types::history::HistoryUsageReq",
     "requestName": "HistoryUsageReq",

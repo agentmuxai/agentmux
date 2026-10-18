@@ -860,7 +860,7 @@ declare global {
         // block remount and names the pane (section-pane.tsx, warden-model.ts).
         "connectors:section"?: "accounts" | "mcp" | "remotes";
         "memory:section"?: "global" | "personal" | "skills" | "bundles";
-        "warden:section"?: "host" | "lan" | "internet" | "audit";
+        "warden:section"?: "host" | "lan" | "internet" | "audit" | "history";
         // Set once by quick-fork.ts right after a fork lands on a provider
         // with no --fork-session equivalent and a parent session existed to
         // lose; ForkProviderFallbackBanner (agent-view.tsx) reads it.
