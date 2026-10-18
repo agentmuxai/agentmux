@@ -67,6 +67,8 @@ This plan lists every gap found, its cause in the code, and the fix, in priority
 
 ### 3.2 A link whose text contains "confirm" needs the user's approval
 
+**Owner:** Naki-2, in their browser small-fixes PR (agreed 2026-10-17), as written here, plus: classification reads the label's full text, so a later line can only make a click ask, never stop it asking.
+
 - **What happened:** a download link reading "This acknowledgement … does not confirm the accuracy … Click here to download a PDF" was treated as committing (`COMMIT_INFO` verb list, `act.rs` line 193, matches anywhere in the name) and the user had to approve or refuse a download.
 - **Fix:** for links outside a form, match the verbs only in a short name (at most about six words) or at its start; a link with a `download` attribute or to a file URL is never committing. Buttons keep today's rule. The approval banner says why a click counted as committing.
 - **Test:** the long link above: no approval. A link "Confirm order": approval.
