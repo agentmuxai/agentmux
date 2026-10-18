@@ -8,9 +8,8 @@ import type { ReleaseAsset } from "./ReleaseAsset";
 export type AppUpdateStatus = { 
 /**
  * `up-to-date`, `available` (a newer release exists), `local-build`
- * (this build isn't a release; `latest` says which release is),
- * `off` (the check is turned off) or `unknown` (not checked yet, or the
- * last check failed).
+ * (this build isn't a release; `latest` says which release is) or
+ * `unknown` (not checked yet).
  */
 state: string, 
 /**
@@ -30,7 +29,8 @@ url?: string,
  */
 notes?: string, published_at?: string, 
 /**
- * When the last check answered (unix ms), 0 before any.
+ * When the last check answered (unix ms), 0 before any. The status is
+ * that check's answer until the next one.
  */
 checked_ms: number, 
 /**

@@ -71,30 +71,37 @@ an agent asking for something that affects the user),
   unauthenticated, from srv (it already has an HTTP client and the network
   settings). Compare the tag's semver with this build's. Pre-releases are
   ignored.
-- **When:** 60 s after srv starts, then every 6 h while running. Never
-  during startup, never blocking anything (fast-startup §5). Offline,
-  rate-limited or any error means "no news", not a retry loop.
-- **On demand** (`update_check::check_now`): Maintenance's **Check for
-  update** (`app.update-check`), the `App` tool's `version`
+- **When: only when asked** (`update_check::check_now`), never on its own
+  (the operator's decision, 2026-10-18: AgentMux makes no request to a
+  server the user didn't ask for). Maintenance's **Check for update**
+  (`app.update-check`), the `App` tool's `version`
   (`GET /api/v1/app/update-status?check=1`) and its `upgrade` ask GitHub at
-  once, even with the periodic check off, at most every 30 s between them
-  (GitHub allows 60 unauthenticated requests an hour); asked again sooner,
-  they answer what the last check found. A failed check says why. With no
-  newer release known, Maintenance says where this one stands ("v0.59.28 is
-  up to date", "Not checked for updates yet", "Automatic update checks are
-  off") beside the button.
+  once, at most every 30 s between them (GitHub allows 60 unauthenticated
+  requests an hour); asked again sooner, they answer what the last check
+  found. A failed check says why and keeps what the last one found. Up to
+  0.59.32 srv also checked 60 s after start and every 6 h, under the
+  `app:updatecheck` setting; both are gone.
+- **The button is always there.** Maintenance shows **Check for update** in
+  every state, as **Check again** once a release is on offer, so an install
+  is never left offering a release that has since been superseded. Beside
+  it, where this one stands: "Not checked for updates yet", "v0.59.28 is up
+  to date (checked 14:05)", "Checked 14:05" under an offered release, or
+  for a `task dev` build which release is latest. It is disabled only while
+  a check, a download or a restart is under way.
+- **A check pins what is installed.** The release, file and SHA-256 that
+  check found are what Download fetches and the restart verifies; nothing
+  reads "latest" again later. A new check replaces the offer, except while a
+  download or a restart into it is under way (`downloading`, `unpacking`,
+  `waiting`, `restarting`): that one finishes first, and a check after it
+  offers the newer release.
 - **What's kept** (`backend::update_check::AppUpdateStatus`): this build's
   version, the latest release's version, page and notes (the release body,
   which is the `VERSION_HISTORY.md` section, up to 16 KB), when it was
   published, and when it was checked. Phase 3 adds its assets and their sizes.
 - **Published as:** the typed `app:updatestatus` event when the status
   changes, and the `app.update-status` command for a window that opens
-  later. States: `up-to-date`, `available`, `local-build`, `off` (the check
-  is turned off) and `unknown` (not checked yet). Phase 3 adds the download
-  states.
-- **Setting:** `app:updatecheck` (on by default; off means no periodic
-  request is made, only the ones asked for above). It is re-read every
-  minute: turning it off clears the chip at once, turning it on checks at once.
+  later. States: `up-to-date`, `available`, `local-build` and `unknown`
+  (not checked yet). Phase 3 adds the download states.
 - **Local builds upgrade too.** Agents develop AgentMux and run what they
   build, so a portable from `task package` (channel `local-…`) compares
   versions like a release: a 0.59.60 local portable is offered 0.59.61 once
@@ -423,8 +430,11 @@ Each phase is small and useful on its own.
    turn, up to 10 minutes, then asks again; **Now** is always available.
 3. **`RequestUpgrade`:** the user's own turn asking for it is enough, as for
    `QuitSelf`; anything else raises the banner and waits for a click.
-4. **The update check is on by default** (`app:updatecheck`), one
-   unauthenticated request to GitHub every 6 hours.
+4. ~~The update check is on by default (`app:updatecheck`), one
+   unauthenticated request to GitHub every 6 hours.~~ Replaced 2026-10-18:
+   **no automatic check.** AgentMux asks GitHub only when the user clicks
+   Check for update or an agent asks; the button is always shown, and a
+   check pins what is installed (§3).
 5. **Old versions:** keep the running version and the one before it; after
    a successful upgrade, Maintenance offers to delete older version folders
    and their data.
