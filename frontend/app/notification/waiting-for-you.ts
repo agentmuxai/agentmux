@@ -95,6 +95,12 @@ export function isWaitingForYou(blockId: string): boolean {
     return (waiting.get(blockId)?.size ?? 0) > 0;
 }
 
+/** Whether any agent in this window waits for the user. */
+export function anyAgentWaitingForYou(): boolean {
+    for (const blockId of waiting.keys()) if (isAgentWaitingForYou(blockId)) return true;
+    return false;
+}
+
 /** Whether the agent itself waits in this pane (a question or a tool
  *  permission), which the pane's `term:awaiting_user` meta reports. */
 export function isAgentWaitingForYou(blockId: string): boolean {

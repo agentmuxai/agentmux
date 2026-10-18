@@ -542,7 +542,10 @@ async function initAppInner() {
     );
 
     // A recycle reloaded this window: cover the boot with its picture.
-    void import("@/app/store/recycle").then(({ showReloadCover }) => showReloadCover());
+    void import("@/app/store/recycle").then(({ showReloadCover, installRecycleRequests }) => {
+        void showReloadCover();
+        installRecycleRequests();
+    });
 
     // Use Promise.race to add a timeout fallback for fonts.ready
     const fontsPromise = document.fonts.ready;

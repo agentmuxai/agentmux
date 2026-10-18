@@ -1005,6 +1005,8 @@ declare global {
         "statusbar:showmuxbuscloud"?: boolean;
         "window:*"?: boolean;
         "window:transparent"?: boolean;
+        /** Reload an idle window over its memory budget (absent = on). */
+        "window:autorecycle"?: boolean;
         "window:blur"?: boolean;
         "window:opacity"?: number;
         "window:bgcolor"?: string;

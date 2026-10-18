@@ -238,7 +238,7 @@ fn tacked_snapshot() -> std::collections::HashSet<isize> {
     TACKED_FLOATERS.lock().map(|s| s.clone()).unwrap_or_default()
 }
 
-fn host_dialog_open() -> bool {
+pub(crate) fn host_dialog_open() -> bool {
     HOST_DIALOGS_OPEN.load(std::sync::atomic::Ordering::SeqCst) > 0
 }
 

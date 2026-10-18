@@ -1,7 +1,7 @@
 # Spec: recycle a window's renderer when it's idle and over budget
 
 **Date:** 2026-10-13, revised 2026-10-14 against `main` @ `ab6a9c400`
-**Status:** active. Shipped: §2's reload without a history entry (#4940); composer drafts, sent-message history and attachment drafts across a reload (#4942); pane overlay changes saved, and `flushPaneSnapshots()` (#4943); browser panes keep their page (#4944); secondary windows re-attach to their own row (#4945); rows get ids from their transcript line (#4952); the scroll position across a reload (#4964): Phase A is complete; the scroll position kept by the first row that starts on screen and held while the rows settle (#4974), after the lab. Since then: chrome zoom across a reload (#5084); Phase B (§3): the command, its data-loss blockers and the cover picture. Left: Phase C (§4) and the blockers §2.1 adds for it (Camper@narko builds B and C; Loap-3 reviews).
+**Status:** active. Shipped: §2's reload without a history entry (#4940); composer drafts, sent-message history and attachment drafts across a reload (#4942); pane overlay changes saved, and `flushPaneSnapshots()` (#4943); browser panes keep their page (#4944); secondary windows re-attach to their own row (#4945); rows get ids from their transcript line (#4952); the scroll position across a reload (#4964): Phase A is complete; the scroll position kept by the first row that starts on screen and held while the rows settle (#4974), after the lab. Since then: chrome zoom across a reload (#5084); Phase B (§3): the command, its data-loss blockers and the cover picture. Phase B shipped in #5086. Phase C (§4) is built as §4.7 describes. Left: the open question in §4.7 (Camper@narko builds B and C; Loap-3 reviews).
 **Plan item:** #5 of `PLAN_RENDERER_MEMORY_FIXES_2026_10_12.md`.
 **Evidence:** `docs/reports/REPORT_RENDERER_MEMORY_ROOT_CAUSES_2026_10_12.md` §4.3.
 **Related:** `SPEC_WINDOW_CHURN_RENDERER_LEAK_2026_10_13.md` (#4858: a navigation that adds a history entry keeps the old page in the back/forward cache).
@@ -119,6 +119,20 @@ At most once per window per hour. Never two windows within 60 s of each other.
 ### 4.6 Kill switch
 
 `window:autorecycle` (default `true`) turns the governor off; the command stays. It follows the existing `window:` keys: `crates/srv/src/backend/wconfig/types.rs:241-286`, `schema/settings.json`, `settings-template.jsonc`, `frontend/types/srv-types.d.ts`. The host reads it from `settings.json` as it reads `window:transparent` (`crates/cef/src/app/window_settings.rs:257`).
+
+### 4.7 As built
+
+`crates/cef/src/commands/recycle_governor.rs`, its own thread (started next to the memory heartbeat), every 60 s:
+
+1. **Measure** each app window (`user_window_labels`, live top-level, not an approval window) with `recycle::renderer_mb`, and whether it is minimized (`IsIconic`). A shared or Linux renderer isn't measured (§4.1), so it is never picked.
+2. **Track**: a window becomes active again whenever the input owner says it is (`input_owner::registry::is_active`); its baseline is its size 60 s after its last load, and every page load resets it (the new document's `take_reload_snapshot` calls `note_window_loaded`).
+3. **Decide** (`decide`, pure): §4.2's budget, §4.3's idle time (minimized, or not active for 10 minutes; 2 under `Warn`), §4.4's pressure rules and §4.5's limits, the largest window first.
+4. **Before asking**: skip while a native file dialog is open or `window:autorecycle` is false (read from settings.json each time). Force a major garbage collection in the window over CDP (`HeapProfiler.collectGarbage`) and measure again: many panes closed at once leave garbage a collection frees, and Chromium collects it itself within about 30 s (Opaz's measurement on Linux), so a reload would be wasted on it. Ask only if it is still over budget.
+5. **Ask**: `recycle:request` to the window. The page (`answerRecycleRequest`, `frontend/app/store/recycle.ts`) declines if the window had input in the last 10 minutes (`store/last-input.ts`), an agent is waiting for an answer, a dialog is open or a drag is underway, and otherwise runs the same recycle as the command with every blocker, without a toast. A decline goes back to the host (`recycle_declined`), which leaves the window alone for the idle time.
+
+Test-only overrides for the memory lab: `AGENTMUX_RECYCLE_MIN_MB` (sets the size floor and drops the 2× rule) and `AGENTMUX_RECYCLE_IDLE_SECS` (the idle time and the per-window limit).
+
+**Open question (2026-10-18).** In the lab, a window recycled after 5 rounds and then used for 5 more came back to its un-recycled size, possibly above it (Loap-3, one pair: 836 against 783 MB app). If a restored page holds more than the live one did (for example tool bodies the live page had already unloaded), that is a fix in the restore path, and it decides how long a recycle pays for itself. Longer pairs are being measured. A read of the two paths found nothing that makes a restored pane heavier: restored tool rows open collapsed with no body mounted, the same unload and roll-off pass runs right after the restore, and both are capped at the same bytes (about 1 MB of finished turns and 512 KB in flight). A restored pane starts below the cap and refills it turn by turn, which explains the climb back; an overshoot would then be heap regrowth or garbage not yet collected at the sample, which the pairs will show by comparing each pane's store size, not only the renderer's.
 
 ## 5. Tests
 

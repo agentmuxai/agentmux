@@ -164,6 +164,12 @@ pub(crate) fn keep_view_background_transparent(view: Option<&mut cef::View>, whi
 /// windows don't pay the LCD-text and opacity-flash penalties. Returns false
 /// if the file is absent or the key is missing (default = opaque).
 pub(crate) fn read_window_transparent_setting() -> bool {
+    read_window_bool_setting("window:transparent", false)
+}
+
+/// A boolean `window:` key from the live settings.json, or `default` when the
+/// file or the key is absent.
+pub(crate) fn read_window_bool_setting(key: &str, default: bool) -> bool {
     // Candidate locations for the LIVE settings.json, in priority order —
     // mirrors srv's `config_watcher_fs::resolve_settings_dir()` (the file the
     // settings UI actually edits). See
@@ -254,14 +260,14 @@ pub(crate) fn read_window_transparent_setting() -> bool {
         // serde_json parse fails on the shipped template. Use the same
         // lenient reader the settings command path uses.
         let map = crate::commands::platform::read_settings_jsonc(&path);
-        if let Some(v) = map.get("window:transparent").and_then(|v| v.as_bool()) {
-            tracing::info!("window:transparent={} (from {})", v, path.display());
+        if let Some(v) = map.get(key).and_then(|v| v.as_bool()) {
+            tracing::info!("{}={} (from {})", key, v, path.display());
             return v;
         }
-        // File exists but has no (uncommented) key → default false, but keep
+        // File exists but has no (uncommented) key → the default, but keep
         // scanning lower-priority locations in case an older file has it.
     }
-    false
+    default
 }
 
 #[cfg(all(test, target_os = "linux"))]

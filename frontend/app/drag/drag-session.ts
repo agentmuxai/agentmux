@@ -19,6 +19,8 @@
 import { createSignal } from "solid-js";
 
 export type DragKind = "files" | "tile" | "window-tab" | "pane-tab" | "doc-tab" | "drone-kind" | "list-item";
+/** Every kind, for "is any drag underway at all". */
+export const ALL_DRAG_KINDS: readonly DragKind[] = ["files", "tile", "window-tab", "pane-tab", "doc-tab", "drone-kind", "list-item"];
 /** "unobserved": the safety net saw a pointerdown with the drag still open. */
 export type DragEndReason = "drop" | "cancel" | "dragend" | "button-up" | "files-idle" | "unobserved";
 

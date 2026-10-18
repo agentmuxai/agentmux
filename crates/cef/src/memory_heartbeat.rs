@@ -113,6 +113,8 @@ fn pagefile_disk_context() -> Option<(bool, f64)> {
 /// Also refreshes the log pointer file on UTC date rollover.
 /// Runs for the lifetime of the process — no shutdown signal needed.
 pub fn start(state: std::sync::Arc<crate::state::AppState>) {
+    // The renderer recycle governor watches the same budget on its own thread.
+    crate::commands::recycle_governor::start(state.clone());
     std::thread::Builder::new()
         .name("mem-heartbeat".into())
         .spawn(move || {

@@ -23,6 +23,7 @@ pub mod clipboard;
 pub mod stubs;
 pub mod palette;
 pub mod recycle;
+pub mod recycle_governor;
 pub mod orphan_reconcile;
 pub mod floating_pane;
 /// What went wrong and what AgentMux did about it, kept for the user.

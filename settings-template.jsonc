@@ -25,6 +25,7 @@
 
     // -- Window --
     // "window:transparent":       false,
+    // "window:autorecycle":       true,
     // "window:blur":              false,
     // "window:opacity":           0.8,
     // "window:bgcolor":           "",
