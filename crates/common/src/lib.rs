@@ -17,6 +17,7 @@ pub mod jekt_sign;
 pub mod layout_intent;
 pub mod layout_types;
 pub mod log_retention;
+pub mod muxbus_reconnect;
 pub mod incidents;
 pub mod login_pty;
 pub mod pagefile;
