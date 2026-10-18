@@ -93,29 +93,51 @@ export async function launch({ exe, home, port, script, log, env = process.env }
         }
         await sleep(8000); // the first run writes the data folder's shared/ part
     } catch (e) {
-        stopTree(child.pid); // don't leave it holding the port and the data folder
+        await stopTree(child.pid); // don't leave it holding the port and the data folder
         throw e;
     }
     return { pid: child.pid, port, home, stop: () => stopTree(child.pid) };
 }
 
-/** Ends the instance: the process it was started as, and everything under it, by process id. */
-export function stopTree(pid) {
+/** Whether anything is left in the process group `pid` leads. */
+const groupAlive = (pid) => {
     try {
-        if (process.platform === "win32") {
-            execFileSync("taskkill", ["/PID", String(pid), "/T", "/F"], { stdio: "ignore" });
-        } else {
-            process.kill(-pid, "SIGTERM"); // the group the instance was started in
-            setTimeout(() => {
-                try {
-                    process.kill(-pid, "SIGKILL");
-                } catch {
-                    // all gone
-                }
-            }, 3000).unref();
-        }
+        process.kill(-pid, 0);
+        return true;
     } catch {
-        // already gone
+        return false;
+    }
+};
+
+/**
+ * Ends the instance: the process it was started as, and everything under it,
+ * by process id. On macOS and Linux that is its process group: SIGTERM, then
+ * SIGKILL for whatever is still there after `graceMs`; it returns when the
+ * group is gone, so the port and the data folder are free for the next run.
+ */
+export async function stopTree(pid, graceMs = 5000) {
+    if (process.platform === "win32") {
+        try {
+            execFileSync("taskkill", ["/PID", String(pid), "/T", "/F"], { stdio: "ignore" });
+        } catch {
+            // already gone
+        }
+        return;
+    }
+    try {
+        process.kill(-pid, "SIGTERM");
+    } catch {
+        return; // already gone
+    }
+    const end = Date.now() + graceMs;
+    while (groupAlive(pid) && Date.now() < end) await sleep(100);
+    if (groupAlive(pid)) {
+        try {
+            process.kill(-pid, "SIGKILL");
+        } catch {
+            // gone in between
+        }
+        while (groupAlive(pid)) await sleep(50);
     }
 }
 

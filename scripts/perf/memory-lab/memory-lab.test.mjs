@@ -10,7 +10,7 @@ import { describe, expect, it } from "vitest";
 
 import { mismatch } from "./compare.mjs";
 import { generateConversation } from "./lib/conversation.mjs";
-import { allocatorRoots, dumpedProcesses, mainPage } from "./lib/sample.mjs";
+import { allocatorRoots, dumpedProcesses, lastSample, mainPage } from "./lib/sample.mjs";
 import { compare, comparisonTable, groupOf, groupSample, inMegabytes, median, MB, steady, table } from "./lib/summary.mjs";
 
 const proc = (pid, name, role, app, privateMB, commitMB = privateMB * 2) => ({ pid, name, role, app, private: privateMB * MB, commit: commitMB * MB });
@@ -131,6 +131,14 @@ describe("memory lab sampling", () => {
         expect(roots.v8).toBe(100);
         expect(roots.malloc).toBe(7);
         expect(allocatorRoots({ malloc: { size: 40 }, "malloc/a": { size: 5 } }).malloc).toBe(40);
+    });
+});
+
+describe("memory lab OS samples", () => {
+    it("takes the last record that has processes, not a trailing macOS footprint record", () => {
+        const text = [{ run: { os: "macos" } }, { procs: [{ pid: 1 }] }, { procs: [{ pid: 2 }] }, { footprint: { total: 5 } }].map((r) => JSON.stringify(r)).join("\n") + "\n";
+        expect(lastSample(text).procs[0].pid).toBe(2);
+        expect(() => lastSample(JSON.stringify({ run: {} }))).toThrow(/no sample/);
     });
 });
 

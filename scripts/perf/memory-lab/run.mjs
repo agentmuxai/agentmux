@@ -139,7 +139,7 @@ async function main() {
         console.log(`\n-> ${join(dir, "result.json")}`);
     } finally {
         driver?.close();
-        if (!args.keep) instance.stop();
+        if (!args.keep) await instance.stop();
         else console.log(`left running: pid ${instance.pid}, CDP port ${args.port}`);
     }
 }

@@ -24,14 +24,28 @@ import { connectBrowser, connectPage, listTargets } from "../../../ui-screenshot
 
 const hex = (v) => (typeof v === "string" ? parseInt(v, 16) : Number(v ?? 0));
 
+/**
+ * The last sample in a `memtree --json` file: the last line with a `procs`
+ * array. On macOS memtree appends a `{"footprint": ...}` cross-check record
+ * after the samples, which isn't one.
+ */
+export function lastSample(text) {
+    const records = text
+        .split(/\r?\n/)
+        .filter(Boolean)
+        .map((line) => JSON.parse(line))
+        .filter((rec) => Array.isArray(rec.procs));
+    if (records.length === 0) throw new Error("memtree wrote no sample");
+    return records[records.length - 1];
+}
+
 /** OS numbers: one `memtree` sample of the tree under `rootPid`. */
 export function osSample(memtree, rootPid) {
     const dir = mkdtempSync(join(tmpdir(), "memory-lab-"));
     const file = join(dir, "memtree.jsonl");
     try {
         execFileSync(memtree, ["--pid", String(rootPid), "--samples", "1", "--json", file], { stdio: ["ignore", "ignore", "pipe"] });
-        const lines = readFileSync(file, "utf8").split(/\r?\n/).filter(Boolean);
-        return JSON.parse(lines[lines.length - 1]);
+        return lastSample(readFileSync(file, "utf8"));
     } finally {
         rmSync(dir, { recursive: true, force: true });
     }
