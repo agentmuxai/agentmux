@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
@@ -68,7 +69,8 @@ for (const view of ["term", "agent", "swarm", "memory", "warden"]) {
 registerPaneTab(stubPaneTab("editor", { capabilities: { paneZoom: { baseFontSize: 13 } } }));
 registerPaneTab(stubPaneTab("browser"));
 
-import { zoomAllPanesIn, zoomAllPanesOut, zoomBlockIn, zoomIndicatorTextAtom } from "./zoom";
+import { chromeZoomAtom } from "./chrome-zoom";
+import { chromeZoomIn, initChromeZoom, zoomAllPanesIn, zoomAllPanesOut, zoomBlockIn, zoomIndicatorTextAtom } from "./zoom";
 
 // term:fontsize is pinned to 20 for every test block so effective font size
 // (round(base * zoom)) changes by exactly 1px per 0.05 WHEEL_STEP, with no
@@ -271,5 +273,25 @@ describe("zoomAllPanesIn/Out", () => {
             zoomBlockIn("t1");
             expect(zoomIndicatorTextAtom()).toBe("105%");
         });
+    });
+});
+
+describe("chrome zoom across a reload", () => {
+    beforeEach(() => sessionStorage.clear());
+
+    it("comes back at the factor the window had", () => {
+        initChromeZoom();
+        chromeZoomIn(0.1);
+        const before = chromeZoomAtom();
+        expect(before).toBeCloseTo(1.1);
+        // A reload: the module's signal starts over, sessionStorage doesn't.
+        initChromeZoom();
+        expect(chromeZoomAtom()).toBe(before);
+        expect(document.documentElement.style.getPropertyValue("--zoomfactor")).toBe(String(before));
+    });
+
+    it("starts at 100% in a new session", () => {
+        initChromeZoom();
+        expect(chromeZoomAtom()).toBe(1);
     });
 });
