@@ -196,6 +196,7 @@ partial list.
 
 | Spec | Title |
 |---|---|
+| [`PLAN_BROWSER_DRIVER_FIXES_2026_10_17`](PLAN_BROWSER_DRIVER_FIXES_2026_10_17.md) | Plan: fix the browser driver's roadblocks (R1–R11) |
 | [`PLAN_DOCS_CLEANUP_EXECUTION_2026_09_01`](PLAN_DOCS_CLEANUP_EXECUTION_2026_09_01.md) | Docs cleanup — execution plan |
 | [`PLAN_EDITOR_ON_SHARED_DOC_TABS_2026_10_10`](PLAN_EDITOR_ON_SHARED_DOC_TABS_2026_10_10.md) | Plan — the Editor's document tabs on the shared surfaces |
 | [`PLAN_LOGIN_CTA_SURFACE_CONSOLIDATION_2026_09_02`](PLAN_LOGIN_CTA_SURFACE_CONSOLIDATION_2026_09_02.md) | Plan — consolidate the agent pane's two (really three) separate login CTAs |
@@ -553,7 +554,6 @@ partial list.
 | Spec | Title |
 |---|---|
 | [`ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14`](ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14.md) | Architecture rethink: making ABF mandatory ("every agent must have an ABF") |
-| [`PLAN_BROWSER_DRIVER_FIXES_2026_10_17`](PLAN_BROWSER_DRIVER_FIXES_2026_10_17.md) | Plan: fix the browser driver's roadblocks (R1–R11) |
 | [`PLAN_CI_TEST_SPEED_AND_DRY_FOLLOWUPS_2026_10_09`](PLAN_CI_TEST_SPEED_AND_DRY_FOLLOWUPS_2026_10_09.md) | Plan — faster CI tests, and the open architecture / DRY follow-ups |
 | [`PLAN_CODEX_GATE_TRANSIENT_FAILURES_AND_CI_SCRIPT_DRY_2026_10_14`](PLAN_CODEX_GATE_TRANSIENT_FAILURES_AND_CI_SCRIPT_DRY_2026_10_14.md) | Plan — the Codex review gate survives a transient GitHub error, and the CI script clean-ups around it |
 | [`PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20`](PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20.md) | Plan — collapse every provider-login code path onto one |
