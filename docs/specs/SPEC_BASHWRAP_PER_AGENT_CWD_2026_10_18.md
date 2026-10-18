@@ -31,7 +31,7 @@ Nothing failed, so it was found only by reading branch names in output.
 
 In prefix mode a call is matched to its record by session and command text, because the CLI gives a subagent's shell no identity of its own. Two agents running the very same command at the same moment can therefore take each other's records (Codex, P1 on #5096). Before this change that only swapped two output cards; with per-agent directories it would swap working directories.
 
-- When the hook records a call, or a claim sees two waiting records of the same command from different agents, it marks that command (`<hash>.ambiguous` in the session's calls directory) before either is claimed. The marker leaves with the last such record, or after 2 minutes.
+- When the hook records a call, or a claim sees two waiting records of the same command from different agents, it marks that command (`<hash>.ambiguous` in the session's calls directory) before either is claimed. The marker holds the command and lasts exactly as long as a record of that command waits, however long the second call waits at a permission prompt; it leaves with the last one, claimed or expired.
 - A claim of a marked command is flagged as ambiguous. That call runs in the directory the CLI started the shell in, reads and writes no agent's state (`CwdState::for_call`), and its output starts with one line saying so.
 - Rewrite mode passes the agent on the command line, so it is never ambiguous.
 

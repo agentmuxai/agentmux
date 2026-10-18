@@ -64,32 +64,21 @@ pub struct CallRecord {
     pub agent_ambiguous: bool,
 }
 
-/// How long a marker of an ambiguous command (`mark_ambiguous`) is honored:
-/// a call's claim follows its hook within seconds.
-const MARKER_MAX_AGE: Duration = Duration::from_secs(120);
-
 /// The marker, in a session's directory, saying two agents wait on `command`.
-/// Not a `.json`, so it is never read as a record.
+/// Not a `.json`, so it is never read as a record. It holds the command, and
+/// lasts as long as a record of that command waits (`read_records`): the
+/// second call can wait at a permission prompt for long after the first.
 fn marker_path(dir: &Path, command: &str) -> PathBuf {
     let hash = command.bytes().fold(0xcbf2_9ce4_8422_2325u64, |h, b| (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3));
     dir.join(format!("{hash:016x}.ambiguous"))
 }
 
 fn mark_ambiguous(dir: &Path, command: &str) {
-    let _ = std::fs::write(marker_path(dir, command), b"");
+    let _ = std::fs::write(marker_path(dir, command), command.as_bytes());
 }
 
-/// Whether `command` is marked ambiguous; an old marker is removed instead.
 fn marked_ambiguous(dir: &Path, command: &str) -> bool {
-    let path = marker_path(dir, command);
-    let Ok(age) = std::fs::metadata(&path).and_then(|m| m.modified()).map(|t| t.elapsed().unwrap_or_default()) else {
-        return false;
-    };
-    if age > MARKER_MAX_AGE {
-        let _ = std::fs::remove_file(&path);
-        return false;
-    }
-    true
+    marker_path(dir, command).exists()
 }
 
 /// Two waiting records of `command` from different agents (or one agent and
@@ -323,16 +312,12 @@ fn read_records(dir: &Path) -> Vec<(PathBuf, CallRecord)> {
     };
     let cutoff = now_ms().saturating_sub(RECORD_MAX_AGE.as_millis() as u64);
     let mut out = Vec::new();
+    let mut markers = Vec::new();
     for entry in entries.flatten() {
         let path = entry.path();
         let ext = path.extension().and_then(|e| e.to_str());
-        // A marker outlives its use when one of its two calls never ran (a
-        // deny rule): gone once old, so the directory can go too.
         if ext == Some("ambiguous") {
-            let old = entry.metadata().and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).is_none_or(|a| a > MARKER_MAX_AGE);
-            if old {
-                let _ = std::fs::remove_file(&path);
-            }
+            markers.push(path);
             continue;
         }
         let is_record = ext == Some("json") && !path.file_name().and_then(|n| n.to_str()).unwrap_or("").starts_with('.');
@@ -344,6 +329,14 @@ fn read_records(dir: &Path) -> Vec<(PathBuf, CallRecord)> {
             _ => {
                 let _ = std::fs::remove_file(&path);
             }
+        }
+    }
+    // A marker whose command no longer waits (claimed, or a denied call's
+    // record expired) is done, and must not keep the directory.
+    for marker in markers {
+        let command = std::fs::read_to_string(&marker).unwrap_or_default();
+        if !out.iter().any(|(_, r)| r.command == command) {
+            let _ = std::fs::remove_file(&marker);
         }
     }
     out
@@ -698,22 +691,30 @@ mod tests {
         });
     }
 
-    /// One of the two calls never ran (denied): its marker doesn't outlive
-    /// its age, and doesn't keep the session's directory.
+    /// The second call can wait at a permission prompt for minutes: its
+    /// marker stays while its record waits, however old, and goes once no
+    /// record of the command waits (a denied call's expires), so it never
+    /// keeps the session's directory.
     #[test]
-    fn an_old_marker_is_swept_with_the_records() {
+    fn a_marker_lasts_as_long_as_its_command_waits() {
         with_calls_dir(|| {
+            register("s", &by("toolu_a", "git status", Some("sub-a"))).unwrap();
+            register("s", &by("toolu_b", "git status", Some("sub-b"))).unwrap();
             let dir = session_dir("s").unwrap();
-            std::fs::create_dir_all(&dir).unwrap();
-            mark_ambiguous(&dir, "git status");
             let marker = marker_path(&dir, "git status");
-            read_records(&dir);
-            assert!(marker.exists(), "a fresh marker stays");
-            let old = std::time::SystemTime::now() - MARKER_MAX_AGE - Duration::from_secs(1);
+            assert!(claim("s", "git status").unwrap().agent_ambiguous);
+            let old = std::time::SystemTime::now() - Duration::from_secs(30 * 60);
             std::fs::File::options().write(true).open(&marker).unwrap().set_modified(old).unwrap();
-            assert!(read_records(&dir).is_empty());
-            assert!(!marker.exists(), "an old marker is swept");
-            assert!(std::fs::remove_dir(&dir).is_ok(), "and the directory can go");
+            read_records(&dir);
+            assert!(marker.exists(), "the other call still waits");
+            assert!(claim("s", "git status").unwrap().agent_ambiguous, "and is still told");
+            // A marker with nothing of its command waiting goes.
+            mark_ambiguous(&dir, "ls");
+            register("s", &by("toolu_c", "pwd", None)).unwrap();
+            read_records(&dir);
+            assert!(!marker_path(&dir, "ls").exists());
+            assert!(claim("s", "pwd").is_some());
+            assert!(std::fs::remove_dir(&dir).is_ok() || !dir.exists(), "nothing keeps the directory");
         });
     }
 
