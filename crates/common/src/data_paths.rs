@@ -890,8 +890,16 @@ pub fn isolated_settings_reason() -> IsolatedSettingsReason {
 /// Resolution order:
 /// 1. `AGENTMUX_ISOLATED_MUXBUS=1` / `=0` — explicit override, always wins.
 /// 2. Otherwise, defaults to isolated (skip the eager reconnect) for a
-///    **local package channel** — `AGENTMUX_CHANNEL` is set, isn't
-///    `"stable"`, and doesn't start with `"dev-"`. `stable` is the real
+///    **local package channel on macOS** — `AGENTMUX_CHANNEL` is set, isn't
+///    `"stable"`, and doesn't start with `"dev-"`, and the keychain asks
+///    consent per code signature ([`keychain_prompts_per_build`]). On Windows
+///    and Linux the stored sign-in is read without any prompt, so a local
+///    channel reconnects like any other: skipping it there only signed MuxBus
+///    out on every restart of a local build, and on every upgrade of one
+///    (the release it upgrades to keeps its `local-…` channel), which stopped
+///    review and CI notices until someone noticed
+///    (`docs/reports/REPORT_UPGRADE_0_59_32_DOGFOOD_FINDINGS_2026_10_18.md`
+///    §2.2). `stable` is the real
 ///    release channel; `dev-<branch>[-<clone-id>]` (`RuntimeMode::Dev`'s
 ///    channel format, below) is `task dev`'s **stable, per-branch**
 ///    channel name — reused across every `task dev`
@@ -936,8 +944,12 @@ pub enum IsolatedMuxbusReconnectReason {
     /// state.
     ExplicitOptOut,
     /// No override; `AGENTMUX_CHANNEL` is set, isn't `"stable"`, and
-    /// doesn't start with `"dev-"` — a randomized local-package channel.
+    /// doesn't start with `"dev-"` — a randomized local-package channel — on
+    /// macOS, where the keychain would ask again for every build.
     ChannelDefaultIsolated,
+    /// No override; a local-package channel, on an OS whose stored sign-in
+    /// is read without a prompt (Windows, Linux): reconnects as usual.
+    LocalChannelNoPrompt,
     /// No override; `AGENTMUX_CHANNEL` is `"stable"`, starts with
     /// `"dev-"`, or is unset entirely.
     ChannelDefaultGlobal,
@@ -954,18 +966,45 @@ impl IsolatedMuxbusReconnectReason {
             Self::ExplicitOptIn => "explicit opt-in",
             Self::ExplicitOptOut => "explicit opt-out",
             Self::ChannelDefaultIsolated => "channel default — isolated",
+            Self::LocalChannelNoPrompt => "local channel — reconnects (no keychain prompt on this OS)",
             Self::ChannelDefaultGlobal => "channel default — global",
         }
     }
 }
 
 pub fn isolated_muxbus_reconnect_reason() -> IsolatedMuxbusReconnectReason {
-    match std::env::var("AGENTMUX_ISOLATED_MUXBUS") {
-        Ok(v) if v == "1" => IsolatedMuxbusReconnectReason::ExplicitOptIn,
-        Ok(_) => IsolatedMuxbusReconnectReason::ExplicitOptOut,
-        Err(_) => match std::env::var("AGENTMUX_CHANNEL") {
-            Ok(ch) if ch != "stable" && !ch.starts_with("dev-") => {
-                IsolatedMuxbusReconnectReason::ChannelDefaultIsolated
+    muxbus_reconnect_reason_for(
+        std::env::var("AGENTMUX_ISOLATED_MUXBUS").ok().as_deref(),
+        std::env::var("AGENTMUX_CHANNEL").ok().as_deref(),
+        keychain_prompts_per_build(),
+    )
+}
+
+/// Whether reading the stored MuxBus sign-in can make the OS ask the user,
+/// once per code signature: macOS's keychain does, and a local build is a
+/// new signature every time. Windows' Credential Manager and Linux's secret
+/// store don't.
+pub fn keychain_prompts_per_build() -> bool {
+    cfg!(target_os = "macos")
+}
+
+/// [`isolated_muxbus_reconnect_reason`] for an explicit override, a channel
+/// and whether this OS's keychain prompts per build.
+fn muxbus_reconnect_reason_for(
+    isolated: Option<&str>,
+    channel: Option<&str>,
+    keychain_prompts: bool,
+) -> IsolatedMuxbusReconnectReason {
+    match isolated {
+        Some("1") => IsolatedMuxbusReconnectReason::ExplicitOptIn,
+        Some(_) => IsolatedMuxbusReconnectReason::ExplicitOptOut,
+        None => match channel {
+            Some(ch) if ch != "stable" && !ch.starts_with("dev-") => {
+                if keychain_prompts {
+                    IsolatedMuxbusReconnectReason::ChannelDefaultIsolated
+                } else {
+                    IsolatedMuxbusReconnectReason::LocalChannelNoPrompt
+                }
             }
             _ => IsolatedMuxbusReconnectReason::ChannelDefaultGlobal,
         },
@@ -1937,10 +1976,10 @@ mod tests {
         std::env::remove_var("AGENTMUX_ISOLATED_MUXBUS");
         std::env::set_var("AGENTMUX_CHANNEL", "local-some-branch-abc123-1");
         assert_eq!(
-            isolated_muxbus_reconnect_reason(),
-            IsolatedMuxbusReconnectReason::ChannelDefaultIsolated
+            isolated_muxbus_reconnect_reason().is_isolated(),
+            keychain_prompts_per_build(),
+            "a local channel skips the reconnect only where the keychain prompts"
         );
-        assert!(isolated_muxbus_reconnect_reason().is_isolated());
 
         std::env::set_var("AGENTMUX_CHANNEL", "stable");
         assert_eq!(
@@ -1981,16 +2020,42 @@ mod tests {
             assert!(!isolated_muxbus_reconnect_reason().is_isolated());
         }
 
-        // A local-package channel (no "dev-" prefix) is still isolated —
-        // the exemption is specific to "dev-", not "anything but stable".
-        std::env::set_var("AGENTMUX_CHANNEL", "local-main-abc123-9");
+        // A local-package channel (no "dev-" prefix) is still isolated where
+        // the keychain prompts — the exemption is specific to "dev-", not
+        // "anything but stable".
         assert_eq!(
-            isolated_muxbus_reconnect_reason(),
+            muxbus_reconnect_reason_for(None, Some("local-main-abc123-9"), true),
             IsolatedMuxbusReconnectReason::ChannelDefaultIsolated
         );
-        assert!(isolated_muxbus_reconnect_reason().is_isolated());
 
         clear_channel_env();
+    }
+
+    #[test]
+    fn a_local_channel_reconnects_where_the_keychain_never_prompts() {
+        // Windows and Linux: a local build, or a release a local build
+        // upgraded to (it keeps the `local-…` channel), stays signed in to
+        // MuxBus across restarts. macOS keeps skipping the eager read.
+        for channel in ["local-main-b28b7a-651ced27", "local-agent4-release-v0.59.20-e732be-02929809"] {
+            let no_prompt = muxbus_reconnect_reason_for(None, Some(channel), false);
+            assert_eq!(no_prompt, IsolatedMuxbusReconnectReason::LocalChannelNoPrompt, "{channel}");
+            assert!(!no_prompt.is_isolated(), "{channel}");
+            let prompts = muxbus_reconnect_reason_for(None, Some(channel), true);
+            assert_eq!(prompts, IsolatedMuxbusReconnectReason::ChannelDefaultIsolated, "{channel}");
+            assert!(prompts.is_isolated(), "{channel}");
+        }
+        // The overrides and the other channels read the same on every OS.
+        for prompts in [false, true] {
+            assert!(muxbus_reconnect_reason_for(Some("1"), Some("stable"), prompts).is_isolated());
+            assert!(!muxbus_reconnect_reason_for(Some("0"), Some("local-x-1"), prompts).is_isolated());
+            for channel in [Some("stable"), Some("dev-main"), None] {
+                assert_eq!(
+                    muxbus_reconnect_reason_for(None, channel, prompts),
+                    IsolatedMuxbusReconnectReason::ChannelDefaultGlobal,
+                    "{channel:?}"
+                );
+            }
+        }
     }
 
     #[test]
@@ -2053,13 +2118,15 @@ mod tests {
             "AGENTMUX_ISOLATED_MUXBUS=0 must not disable settings isolation"
         );
 
-        std::env::remove_var("AGENTMUX_ISOLATED_MUXBUS");
+        // Opted in explicitly: a local channel's own default depends on the OS.
+        std::env::set_var("AGENTMUX_ISOLATED_MUXBUS", "1");
         std::env::set_var("AGENTMUX_ISOLATED_AUTH", "0");
         assert!(!isolated_auth_enabled());
         assert!(
             isolated_muxbus_reconnect_enabled(),
             "AGENTMUX_ISOLATED_AUTH=0 must not disable muxbus-reconnect isolation"
         );
+        std::env::remove_var("AGENTMUX_ISOLATED_MUXBUS");
 
         std::env::remove_var("AGENTMUX_ISOLATED_AUTH");
         clear_channel_env();
