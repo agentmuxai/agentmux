@@ -15,7 +15,11 @@
 //! A grant is for one pane (and the popup windows its page opens; a popup
 //! pane has its own header and its own grant), one agent (the owner
 //! when it was granted), the sites the person was shown, and a time limit.
-//! Take over, closing the pane, a change of owner and the time limit end it.
+//! Take over, closing the pane, a change of owner and the time limit end it,
+//! and so do [`IDLE_LIMIT`] minutes without a `Browser` call from its agent
+//! on the pane: a hung or stopped agent doesn't keep one alive. While the
+//! person has paused the pane (`browser_actions`), both clocks stand still:
+//! the agent can't call then, so it isn't going quiet.
 
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
@@ -37,6 +41,14 @@ pub(crate) const DEFAULT_MINUTES: u64 = 60;
 /// again on that pane for this long.
 pub(crate) const REQUEST_COOLDOWN: Duration = Duration::from_secs(10 * 60);
 
+/// A grant ends after this long without a `Browser` call from its agent on
+/// the pane ([`touch`]), with [`IDLE_REASON`]. Time the pane spends waiting
+/// on the person (a hand-off, a question) doesn't count: the agent is waiting
+/// for them then, not stuck.
+pub(crate) const IDLE_LIMIT: Duration = Duration::from_secs(15 * 60);
+pub(crate) const IDLE_REASON: &str = "no activity for 15 minutes";
+const TIME_UP_REASON: &str = "its time ran out";
+
 #[derive(Debug, Clone)]
 pub(crate) struct Grant {
     /// Distinguishes this grant from a later one on the same pane, so an old
@@ -49,8 +61,11 @@ pub(crate) struct Grant {
     pub expires: Instant,
     /// For the header's countdown: milliseconds since the Unix epoch.
     pub expires_at_ms: i64,
-    /// Since when the person has paused the pane: the clock stands still
-    /// until they resume, then `expires` moves by the paused time.
+    /// The agent's last `Browser` call on the pane, or the grant itself.
+    last_active: Instant,
+    /// Since when the person has paused the pane: the time limit and the
+    /// idle limit stand still until they resume, then both move later by
+    /// the paused time.
     pub paused_at: Option<Instant>,
 }
 
@@ -68,14 +83,21 @@ impl Grant {
         self.left(Instant::now()).as_secs().div_ceil(60)
     }
 
-    /// How long until the expiry timer should look again; None when the
-    /// grant is due to end now. A paused grant can't end before it has been
-    /// resumed for at least the time it had left, so that is when to look.
-    fn due_in(&self, now: Instant) -> Option<Duration> {
-        match self.paused_at {
-            Some(_) => Some(self.left(now).max(Duration::from_secs(1))),
-            None => Some(self.expires.saturating_duration_since(now)).filter(|d| !d.is_zero()),
+    /// Stop (`hold`) or restart the grant's clocks at `now`. Resuming moves
+    /// its end and its idle deadline later by the paused time. Returns
+    /// whether anything changed.
+    fn hold(&mut self, hold: bool, now: Instant) -> bool {
+        match (hold, self.paused_at) {
+            (true, None) if now < self.expires => self.paused_at = Some(now),
+            (false, Some(at)) => {
+                (self.expires, self.expires_at_ms) =
+                    crate::server::browser_actions::resumed_clock(self.expires, self.expires_at_ms, at, now);
+                self.last_active += now.saturating_duration_since(at);
+                self.paused_at = None;
+            }
+            _ => return false,
         }
+        true
     }
 
     /// Is `url` on the sites this grant is bound to? A page with no web
@@ -86,9 +108,16 @@ impl Grant {
     }
 }
 
+/// A grant, and the srv state it was made with: [`forget`]'s callers have
+/// none of their own, and it still takes the header strip down through it.
+struct Live {
+    grant: Grant,
+    state: Option<AppState>,
+}
+
 #[derive(Default)]
 struct Table {
-    grants: HashMap<String, Grant>,
+    grants: HashMap<String, Live>,
     declined: HashMap<String, Instant>,
 }
 
@@ -113,7 +142,7 @@ pub(crate) fn clamp_minutes(asked: Option<u64>) -> u64 {
 /// here, without waiting for its timer.
 pub(crate) fn active_for(pane: &str, agent: &str) -> Option<Grant> {
     let mut t = table();
-    let g = t.grants.get(pane)?.clone();
+    let g = t.grants.get(pane)?.grant.clone();
     if !g.live() {
         t.grants.remove(pane);
         return None;
@@ -138,9 +167,21 @@ pub(crate) fn note_declined(pane: &str) {
 
 /// Record a grant on `pane` for `agent` over `origins`, show it in the
 /// pane's header, log it (`how`: the person's header button, or their answer
-/// to the agent's request), and end it when its time is up. Replaces any
-/// grant the pane had.
+/// to the agent's request), and end it when its time is up or its agent goes
+/// quiet. Replaces any grant the pane had.
 pub(crate) fn grant(state: &AppState, pane: &str, agent: &str, origins: Vec<String>, minutes: u64, how: How) -> Grant {
+    grant_watched(state, pane, agent, origins, minutes, how, IDLE_LIMIT)
+}
+
+fn grant_watched(
+    state: &AppState,
+    pane: &str,
+    agent: &str,
+    origins: Vec<String>,
+    minutes: u64,
+    how: How,
+    idle: Duration,
+) -> Grant {
     let minutes = clamp_minutes(Some(minutes));
     let dur = Duration::from_secs(minutes * 60);
     let now = Instant::now();
@@ -151,104 +192,154 @@ pub(crate) fn grant(state: &AppState, pane: &str, agent: &str, origins: Vec<Stri
         minutes,
         expires: now + dur,
         expires_at_ms: chrono::Utc::now().timestamp_millis() + dur.as_millis() as i64,
-        // Granted on a paused pane: its clock starts on resume.
+        last_active: now,
+        // Granted on a paused pane: its clocks start on resume.
         paused_at: crate::server::browser_actions::is_paused(pane).then_some(now),
     };
     {
         let mut t = table();
         t.declined.remove(pane);
-        t.grants.insert(pane.to_string(), g.clone());
+        t.grants.insert(pane.to_string(), Live { grant: g.clone(), state: Some(state.clone()) });
     }
     tracing::info!(
         pane = %pane, agent = %agent, origins = ?g.origins, minutes,
         "[browser-bypass] granted: the agent acts without asking"
     );
-    publish(state, pane, Some(&g));
+    publish(state, pane, strip_value(&g));
     let detail = format!("{minutes} min on {}", g.origins.join(", "));
     crate::server::browser_actions::note(pane, agent, Kind::AutoApproveOn).detail(&detail).how(how).record(state);
-    let st = state.clone();
-    let (pane_owned, id) = (pane.to_string(), g.id.clone());
-    tokio::spawn(async move {
-        // Look again when the time should be up: a pause in between moves it.
-        loop {
-            let wait = match table().grants.get(&pane_owned) {
-                Some(g) if g.id == id => g.due_in(Instant::now()),
-                _ => return,
-            };
-            match wait {
-                Some(d) => tokio::time::sleep(d).await,
-                None => {
-                    end_if(&st, &pane_owned, Some(&id), "its time ran out", How::TimedOut);
-                    return;
-                }
-            }
-        }
-    });
+    tokio::spawn(watch(state.clone(), pane.to_string(), g.id.clone(), idle));
     g
 }
 
-/// Stop (`hold`) or restart `pane`'s grant clock: the person paused or
-/// resumed the pane. Resuming moves the grant's end by the paused time.
+/// Stop (`hold`) or restart `pane`'s grant clocks: the person paused or
+/// resumed the pane. The watcher needs no word: it finds the new deadlines
+/// when it next wakes, which is never later than they are.
 pub(crate) fn hold_clock(state: &AppState, pane: &str, hold: bool) {
     let g = {
         let mut t = table();
-        let Some(g) = t.grants.get_mut(pane) else { return };
-        let now = Instant::now();
-        match (hold, g.paused_at) {
-            (true, None) if now < g.expires => g.paused_at = Some(now),
-            (false, Some(at)) => {
-                (g.expires, g.expires_at_ms) =
-                    crate::server::browser_actions::resumed_clock(g.expires, g.expires_at_ms, at, now);
-                g.paused_at = None;
-            }
-            _ => return,
+        let Some(l) = t.grants.get_mut(pane) else { return };
+        if !l.grant.hold(hold, Instant::now()) {
+            return;
         }
-        g.clone()
+        l.grant.clone()
     };
-    publish(state, pane, Some(&g));
+    publish(state, pane, strip_value(&g));
 }
 
-/// End `pane`'s grant, if it has one, and take the header strip down.
-/// Returns whether there was one. `how` is for the log: the agent's own
-/// stop is `Allowed`, the person's `ByUser`.
-pub(crate) fn end(state: &AppState, pane: &str, reason: &str, how: How) -> bool {
-    end_if(state, pane, None, reason, how)
-}
-
-/// End `pane`'s grant without touching its meta: for callers that have no
-/// [`AppState`] (Take over and closing the pane, where the header stops
-/// showing the strip anyway, since the pane is no longer driven).
-pub(crate) fn forget(pane: &str, reason: &str) {
-    if table().grants.remove(pane).is_some() {
-        tracing::info!(pane = %pane, reason = %reason, "[browser-bypass] ended");
+/// A `Browser` call from `agent` on `target` (a pane, or a popup window,
+/// whose grant is its opener's): it keeps that agent's grant there alive.
+/// Every agent browser call resolves its pane through
+/// `ui_handlers::target_block_id`, which calls this.
+pub(crate) fn touch(target: &str, agent: &str) {
+    let pane = crate::server::ui_handlers::banner_for(target).0;
+    if let Some(l) = table().grants.get_mut(&pane).filter(|l| l.grant.agent.eq_ignore_ascii_case(agent)) {
+        l.grant.last_active = Instant::now();
     }
 }
 
-fn end_if(state: &AppState, pane: &str, id: Option<&str>, reason: &str, how: How) -> bool {
+/// What the watcher of grant `id` on `pane` does next.
+#[derive(Debug, PartialEq)]
+enum Due {
+    /// The grant has ended or been replaced: stop watching.
+    Gone,
+    End(&'static str),
+    /// Nothing yet: look again then.
+    At(Instant),
+}
+
+/// Grant `id` on `pane` at `now`: past its time, or `idle` since its agent's
+/// last `Browser` call there. `busy`: the pane waits on the person, which
+/// counts as activity. A paused grant is never due.
+fn due(pane: &str, id: &str, idle: Duration, now: Instant, busy: bool) -> Due {
+    let mut t = table();
+    let Some(g) = t.grants.get_mut(pane).map(|l| &mut l.grant).filter(|g| g.id == id) else {
+        return Due::Gone;
+    };
+    if let Some(at) = g.paused_at {
+        // Resuming moves both deadlines by the paused time, so neither can
+        // come sooner than this much after now: look again then.
+        let left = g.left(now).min((g.last_active + idle).saturating_duration_since(at));
+        return Due::At(now + left.max(Duration::from_secs(1)));
+    }
+    if now >= g.expires {
+        return Due::End(TIME_UP_REASON);
+    }
+    if busy {
+        g.last_active = now;
+    }
+    let idle_at = g.last_active + idle;
+    if now >= idle_at {
+        return Due::End(IDLE_REASON);
+    }
+    Due::At(idle_at.min(g.expires))
+}
+
+/// One task per grant ends it on time or when its agent goes quiet. A
+/// [`touch`] only moves the deadline: the task wakes at the old one, finds
+/// the grant still in use, and sleeps until the new one.
+async fn watch(state: AppState, pane: String, id: String, idle: Duration) {
+    loop {
+        let busy = crate::server::browser_attention::waiting_on_user(&pane).is_some();
+        match due(&pane, &id, idle, Instant::now(), busy) {
+            Due::Gone => return,
+            Due::End(reason) => {
+                end_if(&state, &pane, Some(&id), reason, true, How::TimedOut);
+                return;
+            }
+            Due::At(at) => tokio::time::sleep_until(tokio::time::Instant::from_std(at)).await,
+        }
+    }
+}
+
+/// End `pane`'s grant, if it has one, and take the header strip down; with
+/// `say_why`, the strip says why it ended instead (the person who ended it
+/// themselves needs no note). Returns whether there was one. `how` is for
+/// the action log: the agent's own stop is `Allowed`, the person's `ByUser`.
+pub(crate) fn end(state: &AppState, pane: &str, reason: &str, say_why: bool, how: How) -> bool {
+    end_if(state, pane, None, reason, say_why, how)
+}
+
+/// End `pane`'s grant for callers that have no [`AppState`]: Take over,
+/// closing the pane, a new owner. The strip is cleared through the state the
+/// grant was made with, so it can't go on showing a grant that has ended.
+pub(crate) fn forget(pane: &str, reason: &str) {
+    let Some(live) = table().grants.remove(pane) else { return };
+    tracing::info!(pane = %pane, reason = %reason, "[browser-bypass] ended");
+    if let Some(state) = live.state {
+        publish(&state, pane, Value::Null);
+    }
+}
+
+fn end_if(state: &AppState, pane: &str, id: Option<&str>, reason: &str, say_why: bool, how: How) -> bool {
     let removed = {
         let mut t = table();
         match t.grants.get(pane) {
-            Some(g) if id.is_none_or(|id| g.id == id) => t.grants.remove(pane),
+            Some(l) if id.is_none_or(|id| l.grant.id == id) => t.grants.remove(pane).map(|l| l.grant),
             _ => None,
         }
     };
     let Some(g) = removed else { return false };
     tracing::info!(pane = %pane, reason = %reason, "[browser-bypass] ended");
-    publish(state, pane, None);
+    // The note has no `expires_at`, so the header never takes it for a
+    // grant; the next grant, or the host registering, replaces it.
+    publish(state, pane, if say_why { json!({ "agent": g.agent, "ended": reason }) } else { Value::Null });
     crate::server::browser_actions::note(pane, &g.agent, Kind::AutoApproveOff).detail(reason).how(how).record(state);
     true
 }
 
-/// Write (or clear) the header strip's copy of the grant.
-fn publish(state: &AppState, pane: &str, g: Option<&Grant>) {
-    let value = g.map_or(Value::Null, |g| {
-        let mut v = json!({ "agent": g.agent, "origins": g.origins, "minutes": g.minutes, "expires_at": g.expires_at_ms });
-        // Paused: the header shows the time left, which isn't running down.
-        if g.paused_at.is_some() {
-            v["paused_left"] = json!(g.left(Instant::now()).as_millis() as u64);
-        }
-        v
-    });
+/// The header strip's copy of a live grant.
+fn strip_value(g: &Grant) -> Value {
+    let mut v = json!({ "agent": g.agent, "origins": g.origins, "minutes": g.minutes, "expires_at": g.expires_at_ms });
+    // Paused: the header shows the time left, which isn't running down.
+    if g.paused_at.is_some() {
+        v["paused_left"] = json!(g.left(Instant::now()).as_millis() as u64);
+    }
+    v
+}
+
+/// Write `value` as the header strip's `browser:bypass`.
+fn publish(state: &AppState, pane: &str, value: Value) {
     let mut meta = crate::backend::obj::MetaMapType::new();
     meta.insert(BYPASS_META_KEY.to_string(), value);
     if let Err(e) = crate::server::http_shell::broadcast_meta_update(state, pane, &meta) {
@@ -272,7 +363,7 @@ pub(crate) fn reset_strips(state: &AppState) {
         .into_iter()
         .filter(|b| !live.contains(&b.oid) && b.meta.get(BYPASS_META_KEY).is_some_and(|v| !v.is_null()))
     {
-        publish(state, &b.oid, None);
+        publish(state, &b.oid, Value::Null);
     }
 }
 
@@ -317,23 +408,122 @@ pub(crate) fn tests_put(pane: &str, agent: &str) {
     tests::put(pane, agent, &["https://github.com"], 60);
 }
 
+/// A real grant (strip and watcher) that ends after `idle` without a
+/// `Browser` call, for other modules' tests.
+#[cfg(test)]
+pub(crate) fn tests_grant_idle(state: &AppState, pane: &str, agent: &str, idle: Duration) -> Grant {
+    grant_watched(state, pane, agent, vec!["https://github.com".to_string()], 15, How::ByUser, idle)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     pub(super) fn put(pane: &str, agent: &str, origins: &[&str], secs: u64) {
-        table().grants.insert(
-            pane.to_string(),
-            Grant {
-                id: format!("{pane}-id"),
-                agent: agent.to_string(),
-                origins: origins.iter().map(|s| s.to_string()).collect(),
-                minutes: 1,
-                expires: Instant::now() + Duration::from_secs(secs),
-                expires_at_ms: 0,
-                paused_at: None,
-            },
-        );
+        let grant = Grant {
+            id: format!("{pane}-id"),
+            agent: agent.to_string(),
+            origins: origins.iter().map(|s| s.to_string()).collect(),
+            minutes: 1,
+            expires: Instant::now() + Duration::from_secs(secs),
+            expires_at_ms: 0,
+            last_active: Instant::now(),
+            paused_at: None,
+        };
+        table().grants.insert(pane.to_string(), Live { grant, state: None });
+    }
+
+    #[test]
+    fn a_pause_stops_both_clocks_and_resume_restarts_them() {
+        let idle = IDLE_LIMIT;
+        let t0 = Instant::now();
+        // Paused right after the agent's last call, with 30 minutes left.
+        put("bp-held", "naki", &["https://github.com"], 60);
+        {
+            let mut t = table();
+            let g = &mut t.grants.get_mut("bp-held").unwrap().grant;
+            g.last_active = t0;
+            g.paused_at = Some(t0);
+            g.expires = t0 + Duration::from_secs(30 * 60);
+        }
+        // Paused for longer than the idle limit: still not due.
+        let later = t0 + idle + Duration::from_secs(120);
+        assert!(matches!(due("bp-held", "bp-held-id", idle, later, false), Due::At(_)), "paused, so not due");
+        assert!(active_for("bp-held", "naki").is_some(), "a paused grant stays");
+        // Resume: the idle deadline is a whole quiet IDLE_LIMIT away again,
+        // and the end the 30 minutes it had left.
+        assert!(table().grants.get_mut("bp-held").unwrap().grant.hold(false, later));
+        let g = active_for("bp-held", "naki").unwrap();
+        assert_eq!(g.paused_at, None);
+        assert_eq!(g.expires, later + Duration::from_secs(30 * 60));
+        assert_eq!(due("bp-held", "bp-held-id", idle, later, false), Due::At(later + idle));
+        assert!(matches!(due("bp-held", "bp-held-id", idle, later + idle - Duration::from_secs(1), false), Due::At(_)));
+        assert_eq!(due("bp-held", "bp-held-id", idle, later + idle, false), Due::End(IDLE_REASON));
+        forget("bp-held", "test");
+    }
+
+    #[test]
+    fn a_paused_grant_does_not_run_out() {
+        put("bp-held-time", "naki", &["https://github.com"], 0);
+        let now = Instant::now();
+        table().grants.get_mut("bp-held-time").unwrap().grant.paused_at = Some(now);
+        assert!(active_for("bp-held-time", "naki").is_some(), "a paused grant stays, though its time is past");
+        let Due::At(at) = due("bp-held-time", "bp-held-time-id", IDLE_LIMIT, now, false) else { panic!("not ended") };
+        assert_eq!(at, now + Duration::from_secs(1), "the watcher looks again rather than ending it");
+        table().grants.get_mut("bp-held-time").unwrap().grant.paused_at = None;
+        assert!(active_for("bp-held-time", "naki").is_none());
+    }
+
+    fn quiet_for(pane: &str, d: Duration) {
+        table().grants.get_mut(pane).unwrap().grant.last_active = Instant::now() - d;
+    }
+
+    #[test]
+    fn a_grant_ends_after_its_agent_goes_quiet() {
+        let idle = Duration::from_secs(15 * 60);
+        put("bp-idle", "naki", &["https://github.com"], 3600);
+        let id = "bp-idle-id";
+        // Fresh: look again when the idle limit would be reached.
+        let Due::At(at) = due("bp-idle", id, idle, Instant::now(), false) else { panic!("not due yet") };
+        assert!(at > Instant::now() + Duration::from_secs(14 * 60));
+        quiet_for("bp-idle", idle + Duration::from_secs(1));
+        assert_eq!(due("bp-idle", id, idle, Instant::now(), false), Due::End(IDLE_REASON));
+        // Another grant's watcher, or one for a replaced grant, stops.
+        assert_eq!(due("bp-idle", "an-older-grant", idle, Instant::now(), false), Due::Gone);
+        assert_eq!(due("bp-none", id, idle, Instant::now(), false), Due::Gone);
+        forget("bp-idle", "test");
+    }
+
+    #[test]
+    fn a_browser_call_from_its_agent_keeps_a_grant_alive() {
+        let idle = Duration::from_secs(15 * 60);
+        put("bp-touch", "naki", &["https://github.com"], 3600);
+        quiet_for("bp-touch", idle + Duration::from_secs(1));
+        // Another agent's call doesn't count.
+        touch("bp-touch", "korp");
+        assert_eq!(due("bp-touch", "bp-touch-id", idle, Instant::now(), false), Due::End(IDLE_REASON));
+        touch("bp-touch", "Naki");
+        assert!(matches!(due("bp-touch", "bp-touch-id", idle, Instant::now(), false), Due::At(_)));
+        forget("bp-touch", "test");
+    }
+
+    #[test]
+    fn waiting_on_the_person_is_not_going_quiet() {
+        let idle = Duration::from_secs(15 * 60);
+        put("bp-busy", "naki", &["https://github.com"], 3600);
+        quiet_for("bp-busy", idle + Duration::from_secs(60));
+        // A hand-off is up: the agent waits for the person, it isn't stuck.
+        assert!(matches!(due("bp-busy", "bp-busy-id", idle, Instant::now(), true), Due::At(_)));
+        // And the wait counts as activity once it's over.
+        assert!(matches!(due("bp-busy", "bp-busy-id", idle, Instant::now(), false), Due::At(_)));
+        forget("bp-busy", "test");
+    }
+
+    #[test]
+    fn the_time_limit_ends_a_grant_however_busy() {
+        put("bp-time", "naki", &["https://github.com"], 0);
+        assert_eq!(due("bp-time", "bp-time-id", Duration::from_secs(900), Instant::now(), true), Due::End(TIME_UP_REASON));
+        forget("bp-time", "test");
     }
 
     #[test]
@@ -408,22 +598,6 @@ mod tests {
         ] {
             assert!(!is_payment(what), "{what}");
         }
-    }
-
-    #[test]
-    fn a_paused_grant_does_not_run_out() {
-        put("bp-held", "naki", &["https://github.com"], 0);
-        let now = Instant::now();
-        table().grants.get_mut("bp-held").unwrap().paused_at = Some(now);
-        let g = active_for("bp-held", "naki").expect("a paused grant stays, though its time is past");
-        assert_eq!(g.due_in(now), Some(Duration::from_secs(1)), "the timer looks again rather than ending it");
-        table().grants.get_mut("bp-held").unwrap().paused_at = None;
-        assert!(active_for("bp-held", "naki").is_none());
-        put("bp-running", "naki", &["https://github.com"], 60);
-        let g = active_for("bp-running", "naki").unwrap();
-        assert!(g.due_in(Instant::now()).is_some_and(|d| d <= Duration::from_secs(60)));
-        assert_eq!(g.due_in(g.expires), None, "due at its end");
-        forget("bp-running", "test");
     }
 
     #[test]

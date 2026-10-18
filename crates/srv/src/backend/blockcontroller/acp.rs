@@ -320,6 +320,7 @@ impl AcpController {
             inner.proc_exit_code,
             self.health_monitor.is_active_turn(),
         )
+        .spawned_at(self.health_monitor.spawned_at_ms())
     }
 
     fn publish_status(&self) {
@@ -439,6 +440,7 @@ impl AcpController {
             inner.stdin_tx = Some(msg_tx.clone());
             Self::set_status(&mut inner, STATUS_RUNNING);
         }
+        self.health_monitor.note_spawned();
         self.publish_status();
 
         // Spawn stdin writer task
@@ -493,6 +495,7 @@ impl AcpController {
                 if line.is_empty() {
                     continue;
                 }
+                health_clone.note_output();
                 // A failed `session/load` the handshake recovers from (it
                 // opens a new session): not shown, or the pane reads it as
                 // an error that ended a turn.

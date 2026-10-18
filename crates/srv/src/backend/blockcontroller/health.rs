@@ -16,6 +16,7 @@
 //! docs/specs/SPEC_AGENT_TURN_MODEL_AND_LIVE_STATUS_2026_10_08.md §3, §4.3).
 //! `active_turn` stays per pass; the ledger is display data on top of it.
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 /// Who delivered input to an agent (SPEC_AGENT_SELF_QUIT_2026_09_24.md §6.3).
@@ -473,6 +474,8 @@ struct TurnActivityTrackerInner {
     next_turn_trigger: Option<TurnTrigger>,
     /// The task the CLI last reported finished, for the pass it wakes for.
     pending_task_trigger: Option<TurnTrigger>,
+    /// When the running pass started (tracker clock, ms).
+    pass_started_ms: u64,
 }
 
 impl TurnActivityTrackerInner {
@@ -508,6 +511,7 @@ impl TurnActivityTrackerInner {
     /// A pass starts (idle→active): join the current turn or open a new one
     /// (turn-model spec §4.3).
     fn begin_pass(&mut self, start: PassStart, trigger: Option<TurnTrigger>, now: u64) {
+        self.pass_started_ms = now;
         self.input_during_pass = false;
         self.cli_wake_pending = false;
         self.continuation_expected = false;
@@ -619,6 +623,15 @@ pub struct TurnActivityTracker {
     /// gets (#4492). Lock order: `inner` → `publish_order`.
     publish_order: Mutex<()>,
     clock: Box<dyn Fn() -> u64 + Send + Sync>,
+    /// When the agent's process was last spawned, and when it last wrote
+    /// output (ms; 0 = not yet): the watchdog's runtime and idle limits
+    /// (`watchdog.rs`). Atomics, so a reader task can stamp every line
+    /// without the lock.
+    spawned_ms: AtomicU64,
+    output_ms: AtomicU64,
+    /// When the user's answer to a parked request was delivered (ms; 0 = not
+    /// yet): the time spent waiting for it is not idleness.
+    reply_ms: AtomicU64,
 }
 
 impl TurnActivityTracker {
@@ -652,10 +665,14 @@ impl TurnActivityTracker {
                 ledger_seq: 0,
                 next_turn_trigger: None,
                 pending_task_trigger: None,
+                pass_started_ms: 0,
             }),
             publisher: Mutex::new(None),
             publish_order: Mutex::new(()),
             clock,
+            spawned_ms: AtomicU64::new(0),
+            output_ms: AtomicU64::new(0),
+            reply_ms: AtomicU64::new(0),
         }
     }
 
@@ -969,6 +986,47 @@ impl TurnActivityTracker {
         was_active
     }
 
+    /// The agent's process was spawned just now.
+    pub fn note_spawned(&self) {
+        self.spawned_ms.store((self.clock)(), Ordering::Relaxed);
+    }
+
+    /// The agent wrote output just now: a stdout line or a protocol frame.
+    pub fn note_output(&self) {
+        self.output_ms.store((self.clock)(), Ordering::Relaxed);
+    }
+
+    /// The user's answer to a parked question or permission request was
+    /// delivered to the agent just now.
+    pub fn note_user_reply(&self) {
+        self.reply_ms.store((self.clock)(), Ordering::Relaxed);
+    }
+
+    /// When the user's last answer to a parked request was delivered (unix ms).
+    pub fn last_user_reply_ms(&self) -> Option<i64> {
+        stamp_ms(self.reply_ms.load(Ordering::Relaxed))
+    }
+
+    /// When the agent's process was last spawned (unix ms), if it has been.
+    pub fn spawned_at_ms(&self) -> Option<i64> {
+        stamp_ms(self.spawned_ms.load(Ordering::Relaxed))
+    }
+
+    /// When the agent last wrote output (unix ms), if it has.
+    pub fn last_output_ms(&self) -> Option<i64> {
+        stamp_ms(self.output_ms.load(Ordering::Relaxed))
+    }
+
+    /// When the pass in flight started (unix ms); `None` between passes.
+    pub fn pass_started_ms(&self) -> Option<i64> {
+        let inner = self.inner.lock().unwrap();
+        if inner.active_turn {
+            stamp_ms(inner.pass_started_ms)
+        } else {
+            None
+        }
+    }
+
     /// What started the turn in flight, if one is and it was reported.
     pub fn provenance(&self) -> Option<TurnProvenance> {
         let inner = self.inner.lock().unwrap();
@@ -978,6 +1036,11 @@ impl TurnActivityTracker {
             None
         }
     }
+}
+
+/// A stored stamp as unix ms; 0 means it was never set.
+fn stamp_ms(ms: u64) -> Option<i64> {
+    (ms != 0).then(|| i64::try_from(ms).unwrap_or(i64::MAX))
 }
 
 #[cfg(test)]

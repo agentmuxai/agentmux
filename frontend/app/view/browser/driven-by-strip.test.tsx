@@ -19,6 +19,7 @@ afterEach(() => cleanup());
 
 function fakeModel(over: Partial<Record<string, unknown>> = {}) {
     const [bypass, setBypassMeta] = createSignal<BrowserBypass | undefined>(undefined);
+    const [ended, setEnded] = createSignal<string | undefined>(undefined);
     const setBypass = vi.fn(async () => {});
     const [actions, setActions] = createSignal<BrowserActions>({ count: 0, entries: [] });
     const [paused, setPausedMeta] = createSignal(false);
@@ -29,6 +30,7 @@ function fakeModel(over: Partial<Record<string, unknown>> = {}) {
         setPaused,
         allowedOriginsAtom: () => [] as string[],
         bypassAtom: bypass,
+        bypassEndedAtom: ended,
         bypassPaused: () => false,
         bypassMinutesLeft: () => 42,
         bypassOriginsPreview: () => ["https://github.com"],
@@ -36,7 +38,7 @@ function fakeModel(over: Partial<Record<string, unknown>> = {}) {
         takeOver: vi.fn(async () => {}),
         ...over,
     } as unknown as BrowserViewModel;
-    return { model, setBypass, setBypassMeta, setActions, setPausedMeta, setPaused };
+    return { model, setBypass, setBypassMeta, setEnded, setActions, setPausedMeta, setPaused };
 }
 
 describe("DrivenByStrip", () => {
@@ -152,5 +154,14 @@ describe("DrivenByStrip", () => {
         const panel = screen.getByRole("log", { name: "What Naki did in this pane" });
         expect(panel.parentElement).toBe(strip.parentElement);
         expect(panel.querySelectorAll("li")).toHaveLength(1);
+    });
+
+    it("says why srv ended auto-approve, until the next grant", () => {
+        const { model, setBypassMeta, setEnded } = fakeModel();
+        render(() => <DrivenByStrip model={model} agent="Naki" />);
+        setEnded("no activity for 15 minutes");
+        expect(screen.getByRole("status").textContent).toContain("Auto-approve ended: no activity for 15 minutes");
+        setBypassMeta({ agent: "Naki", origins: ["https://github.com"], minutes: 60, expires_at: Date.now() + 3_600_000 });
+        expect(screen.getByRole("status").textContent).not.toContain("Auto-approve ended");
     });
 });

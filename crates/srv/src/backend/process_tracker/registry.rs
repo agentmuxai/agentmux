@@ -458,26 +458,27 @@ impl AgentProcessRegistry {
 
 }
 
-/// Spawn the polling task. Drops when the registry's `Arc` refcount
-/// hits zero (host shutdown). ~2s cadence balances latency (new
-/// processes show up fast) with CPU overhead (job queries are cheap
-/// but not free).
-pub fn spawn_poller(registry: Arc<AgentProcessRegistry>) {
+/// Spawn the polling task. It holds the registry weakly and ends once the
+/// registry's last `Arc` is dropped (host shutdown). ~2s cadence balances
+/// latency (new processes show up fast) with CPU overhead (job queries are
+/// cheap but not free).
+pub fn spawn_poller(registry: Arc<AgentProcessRegistry>) -> tokio::task::JoinHandle<()> {
+    let registry = Arc::downgrade(&registry);
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(2));
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
             interval.tick().await;
+            let Some(registry) = registry.upgrade() else { break };
             // Per-process OS queries for every tracked block plus a
             // system-wide process snapshot, under two mutexes — never on an
             // async worker (see `backend::blocking`). Awaited, so still one
             // pass at a time.
-            let registry = Arc::clone(&registry);
             if let Err(e) = tokio::task::spawn_blocking(move || registry.poll_and_emit()).await {
                 tracing::warn!(error = %e, "[process-tracker] poll task failed");
             }
         }
-    });
+    })
 }
 
 #[cfg(test)]
@@ -717,5 +718,21 @@ mod tests {
         assert!(tracker.list_members().iter().any(|p| p.pid == second.id()));
         tracker.kill_tree();
         let _ = second.wait();
+    }
+
+    /// The poller holds the registry weakly: once the last `Arc` is gone, its
+    /// next tick ends the task instead of polling a registry nobody owns.
+    #[tokio::test]
+    async fn the_poller_ends_when_its_registry_is_dropped() {
+        let registry = Arc::new(AgentProcessRegistry::new(None));
+        let poller = spawn_poller(Arc::clone(&registry));
+        // Let it poll once while the registry is alive.
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        assert!(!poller.is_finished(), "polls while the registry lives");
+        drop(registry);
+        tokio::time::timeout(std::time::Duration::from_secs(10), poller)
+            .await
+            .expect("the poller ends after its registry is dropped")
+            .unwrap();
     }
 }

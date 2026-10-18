@@ -754,6 +754,38 @@ pub struct UiBrowserSnapshotRequest {
     /// A reference from the previous snapshot: narrow to that element.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scope: Option<String>,
+    /// Or narrow to the first element with this role and name, as `find`
+    /// would list it, so a page's first read can be narrow. Not with `scope`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope_match: Option<UiBrowserElementMatch>,
+}
+
+/// Elements by role and accessible name: `find`'s query, and a `scope`
+/// given by name. `role` is the role a snapshot line shows, in any case;
+/// `name` a part of the accessible name in any case, or with `exact` the
+/// whole name as written.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct UiBrowserElementMatch {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role: Option<String>,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub exact: bool,
+}
+
+/// `POST /api/v1/ui/browser/find` — backs Browser's `find`: only the lines
+/// of the elements matching, each with a reference `click` and the rest take.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UiBrowserFindRequest {
+    #[serde(flatten)]
+    pub auth: UiAutomationAuth,
+    /// Target a browser pane this agent opened with `OpenBrowser`; absent =
+    /// the caller's own pane.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pane: Option<String>,
+    #[serde(flatten)]
+    pub query: UiBrowserElementMatch,
 }
 
 /// `POST /api/v1/ui/browser/act` — backs `BrowserClick`, `BrowserFill`,

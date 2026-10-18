@@ -137,6 +137,7 @@ pub mod storage;
 pub mod subagent_watcher;
 pub mod supervisor;
 pub mod userinput;
+pub mod user_stop;
 pub mod viewer;
 pub mod text_encoding;
 pub mod base;

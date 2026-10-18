@@ -748,6 +748,7 @@ fn a_cli_pass_with_no_task_has_no_trigger() {
         ledger_seq: 0,
         next_turn_trigger: None,
         pending_task_trigger: None,
+        pass_started_ms: 0,
     };
     inner.begin_pass(PassStart::CliWake, None, 1_000);
     assert_eq!(inner.ledger.unwrap().trigger, None);
@@ -795,4 +796,39 @@ fn ledger_changes_are_named_for_the_log() {
             "ended",
         ]
     );
+}
+
+// ---- process stamps for the watchdog (`watchdog.rs`) ----
+
+#[test]
+fn spawn_and_output_stamps_start_unset_and_follow_the_clock() {
+    let (t, clock, _) = ledger_tracker();
+    assert_eq!(t.spawned_at_ms(), None);
+    assert_eq!(t.last_output_ms(), None);
+    t.note_spawned();
+    advance(&clock, 2_000);
+    t.note_output();
+    assert_eq!(t.spawned_at_ms(), Some(1_000_000));
+    assert_eq!(t.last_output_ms(), Some(1_002_000));
+    advance(&clock, 3_000);
+    t.note_output();
+    assert_eq!(t.last_output_ms(), Some(1_005_000), "the latest line wins");
+    assert_eq!(t.spawned_at_ms(), Some(1_000_000), "output doesn't move the spawn time");
+}
+
+#[test]
+fn the_pass_start_is_known_only_while_a_pass_runs() {
+    let (t, clock, _) = ledger_tracker();
+    assert_eq!(t.pass_started_ms(), None);
+    advance(&clock, 1_000);
+    t.mark_turn_active_from(Some(user("go")));
+    assert_eq!(t.pass_started_ms(), Some(1_001_000));
+    advance(&clock, 5_000);
+    t.mark_turn_active_from(Some(user("more"))); // into the running pass
+    assert_eq!(t.pass_started_ms(), Some(1_001_000), "input mid-pass is not a new pass");
+    t.end_pass(None);
+    assert_eq!(t.pass_started_ms(), None, "between passes the agent waits for the user");
+    advance(&clock, 60_000);
+    t.set_active_turn(true);
+    assert_eq!(t.pass_started_ms(), Some(1_066_000), "the next pass starts its own clock");
 }

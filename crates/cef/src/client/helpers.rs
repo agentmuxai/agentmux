@@ -310,18 +310,18 @@ pub(crate) fn backend_browser_popup_window(
 
 /// Report a navigation stopped because it left its pane's site list
 /// (SPEC_BROWSER_PANE_ALLOWED_ORIGINS_2026_10_09.md §6), as the host. srv
-/// asks the person. Returns whether it did (`asked`). Blocking: run it off
-/// the UI thread.
+/// asks the person, loads it, or shows why it stopped. Returns srv's `data`:
+/// `{asked, settled, reason}`. Blocking: run it off the UI thread.
 pub(crate) fn backend_browser_navigation(
     web_endpoint: &str,
     auth_key: &str,
     ipc_token: &str,
     body: &serde_json::Value,
-) -> Result<bool, String> {
+) -> Result<serde_json::Value, String> {
     let raw = post_as_host(web_endpoint, auth_key, ipc_token, "/api/v1/host/browser_navigation", body)?;
     let parsed: serde_json::Value =
         serde_json::from_str(&raw).map_err(|e| format!("srv answered something that isn't JSON: {e}"))?;
-    Ok(parsed.pointer("/data/asked").and_then(|v| v.as_bool()) == Some(true))
+    Ok(parsed.get("data").cloned().unwrap_or(serde_json::Value::Null))
 }
 
 /// Ask srv what to do with a page's dialog in an agent-driven pane

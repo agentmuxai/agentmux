@@ -703,6 +703,9 @@ impl PersistentSubprocessController {
         resume_msg: String,
         logs: &'static DeadAirLogs,
     ) -> Result<(), String> {
+        // The wait for the user ends here: the watchdog's idle time counts
+        // from now, not from the agent's last output before it asked.
+        self.health_monitor.note_user_reply();
         let control_response = serde_json::json!({
             "type": "control_response",
             "response": {
@@ -991,5 +994,40 @@ impl RedeliveryPersister {
             self.filestore.as_ref(),
             global_zone.as_deref(),
         );
+    }
+}
+
+/// Park an ordinary (non-AskUserQuestion) tool-permission `can_use_tool`
+/// control_request into `PersistentInner::pending_permissions`, mirroring
+/// how AskUserQuestion is parked into `pending_questions` two branches up in
+/// `handle_control_frame` — same in-memory-only, per-controller-instance
+/// lifetime, and the same "process respawned" failure mode on decide
+/// (`PersistentSubprocessController::decide_tool_permission`'s error text
+/// explains it the same way `answer_question`'s does).
+///
+/// Currently unreachable in production: `should_route_to_decision_panel`
+/// always returns `false`, so `handle_control_frame` never calls this. Kept
+/// as its own function (rather than inlined, unlike the AskUserQuestion
+/// branch) specifically so it can be unit tested directly, independent of
+/// that gate.
+pub(super) fn park_tool_permission_request(
+    inner: &Arc<Mutex<PersistentInner>>,
+    tool_use_id: String,
+    request_id: String,
+    tool_name: String,
+    input: serde_json::Value,
+) {
+    let mut guard = inner.lock().unwrap();
+    guard
+        .pending_permissions
+        .insert(tool_use_id, (request_id, tool_name, input));
+}
+
+impl PersistentSubprocessController {
+    /// Whether an AskUserQuestion or a tool-permission request is parked
+    /// waiting for the user (`Controller::awaiting_user_reply`).
+    pub(super) fn has_parked_request(&self) -> bool {
+        let inner = self.inner.lock().unwrap();
+        !inner.pending_questions.is_empty() || !inner.pending_permissions.is_empty()
     }
 }

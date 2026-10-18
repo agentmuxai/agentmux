@@ -199,85 +199,203 @@ pub(crate) fn refuse_agent_navigation(pane: &str, url: &str) -> Option<String> {
 /// kind}`: `pane` is the pane the list belongs to, `target` the pane or popup
 /// window that was navigating, `kind` `navigate` (replayed on Allow) or
 /// `popup` (not: the person or agent clicks again). Only the host calls it.
-/// Answers at once; the question runs on its own.
+/// Answers at once, with how the attempt was settled (`settled`); a question
+/// runs on its own. The host shows its own notice for anything it doesn't
+/// recognise there, so a stopped navigation never ends in a blank pane.
 pub(crate) async fn handle_host_browser_navigation(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
     Json(body): Json<serde_json::Value>,
 ) -> impl IntoResponse {
-    use crate::server::{browser_allowlist, browser_attention};
     if !ui::from_host(&state, &headers).await {
         return ui::err_response(StatusCode::FORBIDDEN, "only the AgentMux host can report a navigation".to_string());
     }
     let s = |k: &str| body.get(k).and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
-    let (pane, target, url, kind) = (s("pane"), s("target"), s("url"), s("kind"));
-    let answered = |asked: bool, reason: &str| {
-        (StatusCode::OK, Json(json!({ "ok": true, "data": { "asked": asked, "reason": reason } }))).into_response()
-    };
-    let list = browser_allowlist::list_for(&pane).or_else(|| opener_list(&state, &pane));
+    let stopped = Stopped { pane: s("pane"), target: s("target"), url: s("url"), kind: s("kind") };
+    let settled = settle_stopped_navigation(&state, stopped.clone(), ASK_TIMEOUT).await;
+    let (outcome, reason) = settled.describe();
+    tracing::info!(
+        pane = %stopped.pane, target = %stopped.target, kind = %stopped.kind, outcome, reason = %reason,
+        "[browser-allowlist] stopped navigation"
+    );
+    let data = json!({ "asked": settled == Settled::Asking, "settled": outcome, "reason": reason });
+    (StatusCode::OK, Json(json!({ "ok": true, "data": data }))).into_response()
+}
+
+/// A navigation the host stopped: in `pane`'s chain, by `target`, to `url`,
+/// a `navigate` or a `popup`.
+#[derive(Clone)]
+struct Stopped {
+    pane: String,
+    target: String,
+    url: String,
+    kind: String,
+}
+
+/// How a stopped navigation ended (RCA §7.1). Each one loads, asks, or
+/// shows why: none leaves the pane where the cancel left it.
+#[derive(Debug, PartialEq)]
+enum Settled {
+    /// It may go after all, and is loaded again.
+    Replayed(&'static str),
+    /// The person is being asked.
+    Asking,
+    /// A question about another address is up: that banner speaks for this.
+    Busy,
+    /// Nobody is asked; the pane's notice says why it stopped.
+    Notice(String),
+    /// Not even a notice could be shown: the host shows its own.
+    Unshown(String),
+}
+
+impl Settled {
+    /// The outcome's name, for the host and the log, and why.
+    fn describe(&self) -> (&'static str, String) {
+        match self {
+            Settled::Replayed(why) => ("replayed", why.to_string()),
+            Settled::Asking => ("asking", String::new()),
+            Settled::Busy => ("busy", "the pane is already asking about another address".to_string()),
+            Settled::Notice(why) => ("notice", why.clone()),
+            Settled::Unshown(why) => ("unshown", why.clone()),
+        }
+    }
+}
+
+/// Where a stopped navigation goes, decided in one place, so every branch
+/// replays, asks, or shows a notice. A question waits up to `timeout`.
+async fn settle_stopped_navigation(state: &AppState, stopped: Stopped, timeout: std::time::Duration) -> Settled {
+    use crate::server::browser_attention::{self, AskError, Kind};
+    let list = list_for(&stopped.pane).or_else(|| opener_list(state, &stopped.pane));
     let Some(list) = list else {
-        // Taken over or closed since: the host's copy was behind. Send it
-        // the current one, and let the navigation it stopped go on.
-        crate::server::browser_host_sync::push(&state).await;
-        if kind == "navigate" {
-            replay_navigation(&state, &target, &url).await;
-        }
-        return answered(false, "the pane isn't limited to any sites");
+        // Taken over or closed since: the host's copy was behind.
+        push_then_replay(state, &stopped).await;
+        return Settled::Replayed("the pane isn't limited to any sites");
     };
-    if allowed_origins::allows(&list, &url) {
-        // Allowed already (the host's copy was behind): send it the list, and go on.
-        crate::server::browser_host_sync::push(&state).await;
-        if kind == "navigate" {
-            replay_navigation(&state, &target, &url).await;
-        }
-        return answered(false, "it is on the pane's sites");
+    if allowed_origins::allows(&list, &stopped.url) {
+        // Allowed already (the host's copy was behind).
+        push_then_replay(state, &stopped).await;
+        return Settled::Replayed("it is on the pane's sites");
     }
-    let Some(origin) = allowed_origins::target_origin(&url) else {
-        return answered(false, "not a web address");
+    let Some(origin) = allowed_origins::target_origin(&stopped.url) else {
+        return show_notice(state, &stopped, None, "It isn't a web address.");
     };
-    if browser_attention::waiting_on_user(&pane).is_some() {
-        return answered(false, "the pane is already waiting for the user");
-    }
-    let agent = crate::server::browser_owner::owner_of(&pane).unwrap_or_default();
-    let window = crate::server::browser_popup::is_window_id(&target)
-        .then(|| crate::server::browser_popup::window(&target).map(|w| w.url))
-        .flatten();
-    tracing::info!(pane = %pane, target = %target, origin = %origin, kind = %kind, "[browser-allowlist] asking the user");
-    let st = state.clone();
-    tokio::spawn(async move {
-        let asked = browser_attention::ask(
-            &st,
-            &pane,
-            &agent,
-            browser_attention::Kind::Navigation,
-            json!({ "url": url, "origin": origin, "window": window, "popup": kind == "popup" }),
-            std::time::Duration::from_secs(10 * 60),
-        )
-        .await;
-        let (answer, waiting) = match asked {
-            Ok(a) => a,
-            Err(e) => {
-                tracing::debug!(pane = %pane, error = %e, "[browser-allowlist] couldn't ask");
-                return;
-            }
-        };
-        if answer != browser_attention::Answer::Yes {
-            tracing::info!(pane = %pane, origin = %origin, answer = ?answer, "[browser-allowlist] not allowed");
-        } else if let Some((list, members)) = browser_allowlist::allow(&pane, &origin) {
-            // (None: taken over or closed meanwhile, no list left to add to.)
-            tracing::info!(pane = %pane, origin = %origin, "[browser-allowlist] allowed by the user");
-            browser_allowlist::publish(&st, &members, Some(&list));
-            crate::server::browser_host_sync::push(&st).await;
-            if kind == "navigate" {
-                replay_navigation(&st, &target, &url).await;
-            }
-        }
-        // The pane stays locked until the load is on its way. Then the host
-        // hears the question is over, and reports this pane's attempts again.
-        drop(waiting);
-        crate::server::browser_host_sync::push(&st).await;
+    let agent = crate::server::browser_owner::owner_of(&stopped.pane).unwrap_or_default();
+    let payload = json!({
+        "url": stopped.url, "origin": origin, "window": window_of(&stopped), "popup": stopped.kind == "popup",
     });
-    answered(true, "")
+    // A hand-off or approval up doesn't stop this: the question goes over it.
+    match browser_attention::raise(state, &stopped.pane, &agent, Kind::Navigation, payload) {
+        Ok(raised) => {
+            let st = state.clone();
+            tokio::spawn(async move {
+                let (answer, waiting) = raised.answer(Some(timeout)).await;
+                let outcome = match answer {
+                    browser_attention::Answer::Yes => allow_and_load(&st, &stopped, &origin).await,
+                    // Taken over: it isn't limited any more, so it goes on.
+                    _ if list_for(&stopped.pane).is_none() => {
+                        let open = st.mstore.get::<crate::backend::obj::Block>(&stopped.pane).ok().flatten().is_some();
+                        if !open {
+                            "dropped: the pane was closed".to_string()
+                        } else {
+                            push_then_replay(&st, &stopped).await;
+                            "replayed: the pane isn't limited any more".to_string()
+                        }
+                    }
+                    // Shown before the question comes down, so the banner goes
+                    // straight to it.
+                    browser_attention::Answer::Cancelled => notice_outcome(&st, &stopped, &origin, "You blocked it."),
+                    browser_attention::Answer::TimedOut => {
+                        notice_outcome(&st, &stopped, &origin, "Nobody answered within 10 minutes.")
+                    }
+                };
+                tracing::info!(pane = %stopped.pane, origin = %origin, answer = ?answer, outcome = %outcome, "[browser-allowlist] question answered");
+                // The pane stays locked until the load is on its way. Then the
+                // host hears the question is over, and reports this pane's
+                // attempts again.
+                drop(waiting);
+                crate::server::browser_host_sync::push(&st).await;
+            });
+            Settled::Asking
+        }
+        Err(AskError::Busy { .. }) => Settled::Busy,
+        Err(e @ AskError::NotShown(_)) => {
+            tracing::warn!(pane = %stopped.pane, error = %e, "[browser-allowlist] couldn't ask");
+            show_notice(state, &stopped, Some(&origin), "AgentMux couldn't ask you about it.")
+        }
+    }
+}
+
+/// How long the person has to answer a question about a navigation.
+const ASK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10 * 60);
+
+/// The popup window `stopped` was in, by its address, if it was in one.
+fn window_of(stopped: &Stopped) -> Option<String> {
+    crate::server::browser_popup::is_window_id(&stopped.target)
+        .then(|| crate::server::browser_popup::window(&stopped.target).map(|w| w.url))
+        .flatten()
+}
+
+/// The log line's outcome for a notice shown after a question.
+fn notice_outcome(state: &AppState, stopped: &Stopped, origin: &str, why: &str) -> String {
+    let (outcome, why) = show_notice(state, stopped, Some(origin), why).describe();
+    format!("{outcome}: {why}")
+}
+
+/// Show in the pane why `stopped` didn't load (RCA §6.2), with Back, and
+/// Allow while its site (`origin`) can still be added. Allow adds it and
+/// loads the address; Back and Dismiss only take the notice down.
+fn show_notice(state: &AppState, stopped: &Stopped, origin: Option<&str>, why: &str) -> Settled {
+    use crate::server::browser_attention::{self, Answer, Kind};
+    let sites = list_for(&stopped.pane).or_else(|| opener_list(state, &stopped.pane)).unwrap_or_default();
+    let allow = origin.filter(|_| !sites.is_empty()).map(str::to_string);
+    let payload = json!({
+        "url": stopped.url, "origin": origin.unwrap_or(""), "sites": sites, "why": why, "allow": allow.is_some(),
+        "popup": stopped.kind == "popup", "window": window_of(stopped),
+    });
+    match browser_attention::raise(state, &stopped.pane, "", Kind::Notice, payload) {
+        Ok(raised) => {
+            let (st, stopped) = (state.clone(), stopped.clone());
+            tokio::spawn(async move {
+                let (answer, waiting) = raised.answer(None).await;
+                if let (Answer::Yes, Some(origin)) = (answer, allow) {
+                    let outcome = allow_and_load(&st, &stopped, &origin).await;
+                    tracing::info!(pane = %stopped.pane, origin = %origin, outcome = %outcome, "[browser-allowlist] allowed from the notice");
+                }
+                drop(waiting);
+            });
+            Settled::Notice(why.to_string())
+        }
+        Err(e) => {
+            tracing::warn!(pane = %stopped.pane, error = %e, "[browser-allowlist] couldn't show why a navigation stopped");
+            Settled::Unshown(format!("{why} ({e})"))
+        }
+    }
+}
+
+/// The person allowed `origin`: add it to the chain's list, show the longer
+/// list, and load the stopped address.
+async fn allow_and_load(state: &AppState, stopped: &Stopped, origin: &str) -> String {
+    match allow(&stopped.pane, origin) {
+        Some((list, members)) => {
+            publish(state, &members, Some(&list));
+            push_then_replay(state, stopped).await;
+            "allowed by the user".to_string()
+        }
+        // Taken over or closed meanwhile: no list is left to add to.
+        None => {
+            push_then_replay(state, stopped).await;
+            "replayed: the pane isn't limited any more".to_string()
+        }
+    }
+}
+
+/// Send the host the current lists, then load what it stopped, if it was a
+/// navigation (a popup is clicked again).
+async fn push_then_replay(state: &AppState, stopped: &Stopped) {
+    crate::server::browser_host_sync::push(state).await;
+    if stopped.kind == "navigate" {
+        replay_navigation(state, &stopped.target, &stopped.url).await;
+    }
 }
 
 /// The site list of the pane `pane` was opened from as a popup, from srv's
@@ -302,6 +420,49 @@ async fn replay_navigation(state: &AppState, target: &str, url: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // RCA §6.2: a question about a stopped navigation that nobody answers
+    // ends in a notice saying so, not in a blank pane.
+    #[tokio::test]
+    async fn a_question_nobody_answers_ends_in_a_notice() {
+        use crate::server::browser_attention::tests::{banner, browser_block};
+        let state = crate::server::tests::test_state();
+        let pane = uuid::Uuid::new_v4().to_string();
+        browser_block(&state, &pane);
+        set(&pane, vec!["https://github.com".into()]);
+        let stopped = Stopped {
+            pane: pane.clone(),
+            target: pane.clone(),
+            url: "https://accounts.google.com/o/oauth2".into(),
+            kind: "navigate".into(),
+        };
+        let settled = settle_stopped_navigation(&state, stopped, std::time::Duration::from_millis(100)).await;
+        assert_eq!(settled, Settled::Asking);
+        assert_eq!(banner(&state, &pane)["kind"], "navigation");
+        let mut shown = Value::Null;
+        for _ in 0..200 {
+            shown = banner(&state, &pane);
+            if shown["kind"] == "notice" {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert_eq!(shown["kind"], "notice", "{shown}");
+        assert_eq!(shown["why"], "Nobody answered within 10 minutes.");
+        assert_eq!(shown["origin"], "https://accounts.google.com");
+        assert_eq!(shown["allow"], true);
+        // The question is gone; only the notice, which holds nothing, is left.
+        for _ in 0..200 {
+            if crate::server::browser_attention::waiting_on_user(&pane).is_none() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert_eq!(crate::server::browser_attention::waiting_on_user(&pane), None);
+        assert_eq!(banner(&state, &pane)["kind"], "notice");
+        crate::server::browser_attention::cancel_for(&pane);
+        drop_pane(&pane);
+    }
 
     #[test]
     fn a_chain_shares_one_list_and_keeps_it_past_its_root() {

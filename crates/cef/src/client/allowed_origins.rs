@@ -149,11 +149,46 @@ impl AgentMuxHandler {
     }
 }
 
+/// What the host does once srv has answered a report, or failed to.
+#[derive(Debug, PartialEq, Eq)]
+enum AfterReport {
+    /// srv is asking the person: further attempts wait for its push.
+    Asking,
+    /// srv loaded it again, or the pane already says why it stopped.
+    Settled,
+    /// Nothing in the pane says why: the host shows its own notice, so a
+    /// stopped navigation never ends in a blank pane with no word
+    /// (REPORT_BROWSER_PANE_BLANK_AFTER_BLOCKED_SIGN_IN_REDIRECT_RCA_2026_10_16.md §6.2).
+    Notice,
+}
+
+fn after_report(answer: &Result<serde_json::Value, String>) -> AfterReport {
+    let Ok(data) = answer else { return AfterReport::Notice };
+    if data.get("asked").and_then(|v| v.as_bool()) == Some(true) {
+        return AfterReport::Asking;
+    }
+    match data.get("settled").and_then(|v| v.as_str()) {
+        Some("replayed" | "asking" | "busy" | "notice") => AfterReport::Settled,
+        _ => AfterReport::Notice,
+    }
+}
+
+/// The pane's own notice that a navigation was stopped, for when srv
+/// couldn't show one: a line in the pane's banner area, from the host alone.
+fn local_notice(state: &crate::state::AppState, pane: &str, url: &str, why: &str) {
+    let sites = state.site_limits.lists.lock().get(pane).cloned().unwrap_or_default();
+    let payload = serde_json::json!({ "block_id": pane, "url": url, "sites": sites, "why": why });
+    if !crate::events::emit_browser_pane_event(state, pane, "browser-pane-notice", &payload) {
+        tracing::warn!(pane = %pane, "couldn't show the pane why a navigation stopped");
+    }
+}
+
 /// Tell srv that `target` (a pane, or a popup window by its label) tried to
 /// go to `url`, off the site list of `pane`, and was stopped; srv asks the
 /// person (SPEC_BROWSER_PANE_ALLOWED_ORIGINS_2026_10_09.md §4). On its own
 /// thread, since the caller is a CEF callback on the UI thread, and one at a
-/// time per pane: srv asks one question at a time anyway.
+/// time per pane: srv asks one question at a time anyway. When srv can't be
+/// told, or doesn't settle it, the pane shows the host's own notice.
 fn report_off_list(state: &std::sync::Arc<crate::state::AppState>, pane: &str, target: &str, url: &str, kind: &str) {
     if !state.site_limits.reports.lock().insert(pane.to_string()) {
         return;
@@ -165,16 +200,23 @@ fn report_off_list(state: &std::sync::Arc<crate::state::AppState>, pane: &str, t
     let state = state.clone();
     let pane = pane.to_string();
     let spawned = std::thread::Builder::new().name("browser-off-list".into()).spawn({
-        let pane = pane.clone();
+        let (pane, url) = (pane.clone(), url.to_string());
         let state = state.clone();
         move || {
             // While srv asks, the marker stays: the page's further attempts
             // are cancelled without another report, until a push from srv
             // shows the question is over (browser_api::routes::owned_panes).
-            match crate::client::backend_browser_navigation(&web_endpoint, &auth_key, &ipc_token, &body) {
-                Ok(true) => return,
-                Ok(false) => {}
-                Err(e) => tracing::warn!(pane = %pane, error = %e, "couldn't tell srv about a navigation off the allowed sites"),
+            let answer = crate::client::backend_browser_navigation(&web_endpoint, &auth_key, &ipc_token, &body);
+            match after_report(&answer) {
+                AfterReport::Asking => return,
+                AfterReport::Settled => {}
+                AfterReport::Notice => {
+                    match &answer {
+                        Err(e) => tracing::warn!(pane = %pane, error = %e, "couldn't tell srv about a navigation off the allowed sites"),
+                        Ok(data) => tracing::info!(pane = %pane, answer = %data, "srv didn't settle a stopped navigation"),
+                    }
+                    local_notice(&state, &pane, &url, "AgentMux couldn't ask you about it.");
+                }
             }
             state.site_limits.reports.lock().remove(&pane);
         }
@@ -182,6 +224,7 @@ fn report_off_list(state: &std::sync::Arc<crate::state::AppState>, pane: &str, t
     if let Err(e) = spawned {
         tracing::warn!(error = %e, "couldn't start the browser-off-list thread");
         state.site_limits.reports.lock().remove(&pane);
+        local_notice(&state, &pane, url, "AgentMux couldn't ask you about it.");
     }
 }
 
@@ -219,6 +262,21 @@ mod tests {
         // And a push without it after that drops it: the limit ended.
         replace_lists(&limits, std::collections::HashMap::new());
         assert!(!limits.lists.lock().contains_key("new"));
+    }
+
+    #[test]
+    fn a_report_srv_didnt_settle_gets_the_hosts_own_notice() {
+        use serde_json::json;
+        // srv unreachable, or not JSON.
+        assert_eq!(after_report(&Err("connection refused".into())), AfterReport::Notice);
+        assert_eq!(after_report(&Ok(json!({ "asked": true, "settled": "asking" }))), AfterReport::Asking);
+        for settled in ["replayed", "busy", "notice"] {
+            assert_eq!(after_report(&Ok(json!({ "asked": false, "settled": settled }))), AfterReport::Settled, "{settled}");
+        }
+        // srv couldn't show its notice, or answered something unknown.
+        assert_eq!(after_report(&Ok(json!({ "asked": false, "settled": "unshown" }))), AfterReport::Notice);
+        assert_eq!(after_report(&Ok(json!({ "asked": false }))), AfterReport::Notice);
+        assert_eq!(after_report(&Ok(serde_json::Value::Null)), AfterReport::Notice);
     }
 
     #[test]

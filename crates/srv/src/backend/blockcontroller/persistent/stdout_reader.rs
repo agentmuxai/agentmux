@@ -88,6 +88,7 @@ impl PersistentSubprocessController {
             // the AskUserQuestion dead-air fallback can tell whether the
             // turn resumed. See `answer_question`.
             stdout_seq_read.fetch_add(1, Ordering::Relaxed);
+            health_read.note_output();
 
             // Track session metadata (debounced 1 s)
             stats.record_line(line.len(), &mstore_read);

@@ -246,11 +246,12 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
                     <div
                         class="browser-attention"
                         classList={{ "browser-attention--agent": attentionLook(a()).agent }}
+                        data-kind={a().kind}
                         role="alertdialog"
                         aria-live="assertive"
                     >
                         <div class="browser-attention-head">
-                            <i class="fa-solid fa-hand" aria-hidden="true" />
+                            <i class={`fa-solid ${attentionLook(a()).icon}`} aria-hidden="true" />
                             <Switch
                                 fallback={
                                     <span>
@@ -264,6 +265,7 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
                                     </span>
                                 }
                             >
+                                <Match when={attentionLook(a()).text}>{(text) => <span>{text()}</span>}</Match>
                                 <Match when={a().kind === "navigation"}>
                                     <span>
                                         This pane is limited to the sites it was opened for. The page wants to{" "}
@@ -293,12 +295,22 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
                                 </Match>
                             </Switch>
                         </div>
+                        <Show when={a().kind === "approval" && a().description}>
+                            <div class="browser-attention-target browser-attention-description">
+                                {(a().description ?? "").length > 200
+                                    ? `${(a().description ?? "").slice(0, 200)}…`
+                                    : a().description}
+                            </div>
+                        </Show>
+                        <Show when={a().kind === "approval" && a().why}>
+                            <div class="browser-attention-target">Asked because {a().why}.</div>
+                        </Show>
                         {/* The page's own words, as text in a box of their own, so
                             they can't pass for AgentMux's (dialogs spec §8.1). */}
                         <Show when={a().kind === "dialog" && dialogMessage(a().message)}>
                             <blockquote class="browser-attention-page-text">{dialogMessage(a().message)}</blockquote>
                         </Show>
-                        <Show when={a().kind === "navigation" && a().url}>
+                        <Show when={attentionLook(a()).showUrl && a().url}>
                             <div class="browser-attention-target" title={a().url}>
                                 {a().url}
                             </div>
@@ -339,13 +351,26 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
                             <div class="browser-attention-target">Sends to {a().action}</div>
                         </Show>
                         <div class="browser-attention-actions">
-                            <Button
-                                tone={attentionLook(a()).tone}
-                                density={attentionLook(a()).density}
-                                onClick={() => model.resolveAttention(attentionLook(a()).answer).catch(() => {})}
-                            >
-                                {attentionLook(a()).yes}
-                            </Button>
+                            <Show when={attentionLook(a()).back}>
+                                <Button
+                                    density={attentionLook(a()).density}
+                                    disabled={!model.canGoBackAtom()}
+                                    onClick={() => model.resolveAttention("back").catch(() => {})}
+                                >
+                                    Back
+                                </Button>
+                            </Show>
+                            <Show when={attentionLook(a()).yes}>
+                                {(yes) => (
+                                    <Button
+                                        tone={attentionLook(a()).tone}
+                                        density={attentionLook(a()).density}
+                                        onClick={() => model.resolveAttention(attentionLook(a()).answer).catch(() => {})}
+                                    >
+                                        {yes()}
+                                    </Button>
+                                )}
+                            </Show>
                             <Button
                                 density={attentionLook(a()).density}
                                 onClick={() => model.resolveAttention("cancel").catch(() => {})}

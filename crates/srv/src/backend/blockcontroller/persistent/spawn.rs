@@ -531,6 +531,7 @@ impl PersistentSubprocessController {
         // Now visible to `session_held_elsewhere` — a concurrent resume of
         // the same session may run its check.
         drop(resume_claim);
+        self.health_monitor.note_spawned();
         self.publish_status();
 
         // Auto-register with the muxbus reactive handler so inter-agent

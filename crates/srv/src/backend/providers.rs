@@ -636,9 +636,14 @@ pub fn seed_claude_md_placeholder_if_missing(
     Ok(true)
 }
 
-/// Days Claude Code keeps session transcripts in an AgentMux-owned config dir
-/// (SPEC_DURABLE_CONVERSATION_MEMORY_2026_09_23.md §4.1).
-pub const CLAUDE_TRANSCRIPT_RETENTION_DAYS: u32 = 180;
+/// Days Claude Code keeps session transcripts in an AgentMux-owned config dir:
+/// forever. 36500 days (100 years) is the most Claude Code accepts, and larger
+/// values are rejected. Never 0, which deletes a transcript when its session ends.
+pub const CLAUDE_TRANSCRIPT_RETENTION_DAYS: u32 = 36_500;
+
+/// What AgentMux seeded before history was kept forever. Found in a config dir,
+/// it is AgentMux's own old value rather than a choice, so it is raised.
+const SUPERSEDED_TRANSCRIPT_RETENTION_DAYS: u64 = 180;
 
 /// Seeds `cleanupPeriodDays` into an isolated Claude Code config dir's
 /// `settings.json` when it isn't set. Claude Code's default is 30 days, and
@@ -647,10 +652,11 @@ pub const CLAUDE_TRANSCRIPT_RETENTION_DAYS: u32 = 180;
 /// launched an agent without this setting deleted every channel's month-old
 /// conversations, leaving `--resume` nothing to find.
 ///
-/// Claude only. Leaves an explicit `cleanupPeriodDays` alone, and never
-/// rewrites a `settings.json` it can't parse as a JSON object. Callers must
-/// only pass a dir already confirmed not to be the operator's ambient home.
-/// Returns `Ok(true)` only when it wrote the setting.
+/// Claude only. Leaves an explicit `cleanupPeriodDays` alone, except the 180
+/// AgentMux itself used to seed, and never rewrites a `settings.json` it can't
+/// parse as a JSON object. Callers must only pass a dir already confirmed not
+/// to be the operator's ambient home. Returns `Ok(true)` only when it wrote the
+/// setting.
 pub fn seed_transcript_retention_if_missing(
     provider: &ProviderConfig,
     config_dir: &str,
@@ -673,7 +679,7 @@ pub fn seed_transcript_retention_if_missing(
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => serde_json::Map::new(),
         Err(e) => return Err(e),
     };
-    if settings.contains_key("cleanupPeriodDays") {
+    if settings.get("cleanupPeriodDays").is_some_and(|v| v.as_u64() != Some(SUPERSEDED_TRANSCRIPT_RETENTION_DAYS)) {
         return Ok(false);
     }
     settings.insert(

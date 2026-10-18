@@ -550,12 +550,18 @@ declare global {
     // waveobj.MetaTSType
     type BrowserAttention = {
         id: string;
-        kind: "handoff" | "approval" | "navigation" | "bypass" | "dialog";
+        kind: "handoff" | "approval" | "navigation" | "bypass" | "dialog" | "notice";
         agent?: string;
         /** Hand-off: what the user should do. */
         reason?: string;
         /** Approval: the action, e.g. `Click "Submit"`. */
         what?: string;
+        /** Approval: the clicked element's text after its name (a menu
+         *  item's description), shown smaller under `what`. */
+        description?: string;
+        /** Approval: what made the click need it ("it submits a form",
+         *  `its name says "Delete"`). */
+        why?: string;
         page?: string;
         /** Approval: where the form is sent. */
         action?: string;
@@ -576,6 +582,16 @@ declare global {
          *  site that asked. SPEC_BROWSER_PANE_NATIVE_DIALOGS_2026_10_17.md §4.4. */
         message?: string;
         dialogKind?: "alert" | "confirm" | "prompt" | "beforeunload";
+        /** Notice: a navigation the pane stopped didn't load. `url` and `origin`
+         *  are where it tried to go, `sites` the pane's list, `why` srv's sentence
+         *  for it, and `allow` whether Allow can still add the site. Nothing waits
+         *  on a notice. REPORT_BROWSER_PANE_BLANK_AFTER_BLOCKED_SIGN_IN_REDIRECT_RCA_2026_10_16.md §6.2. */
+        sites?: string[];
+        why?: string;
+        allow?: boolean;
+        /** Never from srv: the host's own notice, for when srv couldn't be told.
+         *  The pane takes it down itself. */
+        local?: boolean;
     };
 
     /** A bypass the person granted the agent driving a browser pane: it acts
@@ -615,6 +631,14 @@ declare global {
         entries: BrowserActionEntry[];
     };
 
+    /** What `browser:bypass` holds after srv ended a grant on its own (its
+     *  time ran out, the agent went quiet, the agent turned it off): why, for
+     *  the header strip, until the next grant. */
+    type BrowserBypassEnded = {
+        agent: string;
+        ended: string;
+    };
+
     type MetaType = {
         view?: string;
         controller?: string;
@@ -632,7 +656,7 @@ declare global {
         /** The bypass the person granted the driving agent, shown as a red
          *  strip in the header. Written by srv only
          *  (SPEC_BROWSER_PANE_BYPASS_2026_10_16.md §3.3). */
-        "browser:bypass"?: BrowserBypass | null;
+        "browser:bypass"?: BrowserBypass | BrowserBypassEnded | null;
         /** What the driving agent did in this pane, for the header's Log.
          *  Written by srv only (PLAN_BROWSER_DRIVER_FIXES_2026_10_17.md §5). */
         "browser:actions"?: BrowserActions | null;

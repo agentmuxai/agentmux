@@ -466,6 +466,26 @@ mod transcript_retention_tests {
         assert_eq!(s["env"]["A"], "1");
     }
 
+    /// History is kept forever: the most Claude Code accepts, and not 0, which
+    /// deletes a transcript when its session ends.
+    #[test]
+    fn the_retention_is_the_most_claude_code_accepts() {
+        assert_eq!(CLAUDE_TRANSCRIPT_RETENTION_DAYS, 36_500);
+    }
+
+    /// Config dirs seeded when AgentMux used 180 days are raised, and nothing
+    /// else in their settings changes.
+    #[test]
+    fn the_old_180_day_seed_is_raised() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("settings.json"), r#"{"model":"opus","cleanupPeriodDays":180}"#).unwrap();
+        assert!(seed(dir.path()));
+        let s = settings(dir.path());
+        assert_eq!(s["cleanupPeriodDays"], serde_json::json!(CLAUDE_TRANSCRIPT_RETENTION_DAYS));
+        assert_eq!(s["model"], "opus");
+        assert!(!seed(dir.path()), "and once raised it is left alone");
+    }
+
     /// An operator who set their own retention keeps it, shorter or longer.
     #[test]
     fn an_explicit_retention_is_left_alone() {

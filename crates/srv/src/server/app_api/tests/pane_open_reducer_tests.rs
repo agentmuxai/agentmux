@@ -1858,12 +1858,14 @@ async fn a_popup_window_is_driven_through_the_pane_that_opened_it() {
 
 /// A stand-in CEF host for the bypass tests: `eval` answers the page's
 /// address (`url`), and `act` asks for approval of a click named `what` on
-/// that page, then makes it only when sent back exactly what it asked. With
-/// `plain` set, `act` just acts, as for a fill or an ordinary click.
+/// that page, then makes it only when sent back exactly what it asked. The
+/// click's `description` (a menu item's text under its name) rides along.
+/// With `plain` set, `act` just acts, as for a fill or an ordinary click.
 #[derive(Clone, Default)]
 struct BypassFakeHost {
     url: std::sync::Arc<std::sync::Mutex<String>>,
     what: std::sync::Arc<std::sync::Mutex<String>>,
+    description: std::sync::Arc<std::sync::Mutex<String>>,
     clicks: std::sync::Arc<std::sync::atomic::AtomicUsize>,
     plain: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// What srv answered page dialogs with (`dialog_answer`).
@@ -1877,6 +1879,7 @@ impl BypassFakeHost {
     fn ask(&self) -> serde_json::Value {
         serde_json::json!({
             "what": self.what.lock().unwrap().clone(),
+            "description": self.description.lock().unwrap().clone(),
             "page": self.url.lock().unwrap().clone(),
             "action": null,
             "fields": [],
@@ -2021,6 +2024,14 @@ async fn bypass_is_granted_only_through_the_host_and_lifts_approvals_on_its_site
     assert_eq!(fake.clicks.load(std::sync::atomic::Ordering::SeqCst), 1);
     let block = state.mstore.must_get::<crate::backend::obj::Block>(&pane).unwrap();
     assert!(block.meta.get("browser:attention").is_none_or(|v| v.is_null()));
+    // A description under the name rides along to the banner (roadblocks
+    // report R7) and changes nothing about a click it doesn't make a payment.
+    *fake.description.lock().unwrap() = "This can't be undone".into();
+    let (s, body) = post_json(&app, "/api/v1/ui/browser/act", click.clone()).await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    assert_eq!(body["data"]["bypassed"], true);
+    assert_eq!(fake.clicks.load(std::sync::atomic::Ordering::SeqCst), 2);
+    *fake.description.lock().unwrap() = String::new();
     // Eval stays refused: bypass covers committing clicks only, where the
     // payment and secret-field checks hold.
     let (s, _) = post_json(&app, "/api/v1/ui/browser/eval", merged(&auth, serde_json::json!({ "pane": pane, "script": "1" }))).await;
@@ -2038,8 +2049,27 @@ async fn bypass_is_granted_only_through_the_host_and_lifts_approvals_on_its_site
     let (s, _) = post_json_headers(&app, "/api/v1/host/browser_attention", answer, &host).await;
     assert_eq!(s, StatusCode::OK);
     assert_eq!(asking.await.unwrap().0, StatusCode::FORBIDDEN);
-    assert_eq!(fake.clicks.load(std::sync::atomic::Ordering::SeqCst), 1);
+    assert_eq!(fake.clicks.load(std::sync::atomic::Ordering::SeqCst), 2);
     *fake.what.lock().unwrap() = "Click \"Delete draft\"".into();
+
+    // So does a payment word on a later line of the element's text: the
+    // description can only make a click ask, never stop it asking (R7).
+    *fake.what.lock().unwrap() = "Click \"$20.00\"".into();
+    *fake.description.lock().unwrap() = "Pay now".into();
+    let asking = {
+        let (app, click) = (app.clone(), click.clone());
+        tokio::spawn(async move { post_json(&app, "/api/v1/ui/browser/act", click).await })
+    };
+    let banner = wait_for_banner(&state, &pane).await;
+    assert_eq!(banner["kind"], "approval");
+    assert_eq!(banner["description"], "Pay now");
+    let answer = serde_json::json!({ "block_id": pane, "id": banner["id"], "decision": "cancel" });
+    let (s, _) = post_json_headers(&app, "/api/v1/host/browser_attention", answer, &host).await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(asking.await.unwrap().0, StatusCode::FORBIDDEN);
+    assert_eq!(fake.clicks.load(std::sync::atomic::Ordering::SeqCst), 2);
+    *fake.what.lock().unwrap() = "Click \"Delete draft\"".into();
+    *fake.description.lock().unwrap() = String::new();
 
     // Off the granted site, a committing click asks again.
     *fake.url.lock().unwrap() = "https://accounts.google.com/o/oauth2".into();
@@ -2053,7 +2083,7 @@ async fn bypass_is_granted_only_through_the_host_and_lifts_approvals_on_its_site
     let (s, _) = post_json_headers(&app, "/api/v1/host/browser_attention", answer, &host).await;
     assert_eq!(s, StatusCode::OK);
     assert_eq!(asking.await.unwrap().0, StatusCode::FORBIDDEN);
-    assert_eq!(fake.clicks.load(std::sync::atomic::Ordering::SeqCst), 1);
+    assert_eq!(fake.clicks.load(std::sync::atomic::Ordering::SeqCst), 2);
     *fake.url.lock().unwrap() = "https://github.com/example/repo/issues/1".into();
 
     // The agent can end its own bypass; the strip goes, and clicks ask again.
@@ -2061,7 +2091,7 @@ async fn bypass_is_granted_only_through_the_host_and_lifts_approvals_on_its_site
     assert_eq!(s, StatusCode::OK, "{body}");
     assert_eq!(body["data"]["ended"], true);
     let block = state.mstore.must_get::<crate::backend::obj::Block>(&pane).unwrap();
-    assert!(block.meta.get("browser:bypass").is_none_or(|v| v.is_null()));
+    assert_eq!(block.meta["browser:bypass"], serde_json::json!({ "agent": agent, "ended": "the agent turned it off" }));
     assert!(crate::server::browser_bypass::active_for(&pane, &agent).is_none());
 
     // The agent asks; the person's Allow, through the host, grants it.
@@ -2091,6 +2121,9 @@ async fn bypass_is_granted_only_through_the_host_and_lifts_approvals_on_its_site
     let (s, body) = post_json_headers(&app, "/api/v1/host/browser_bypass", serde_json::json!({ "block_id": pane, "on": false }), &host).await;
     assert_eq!(s, StatusCode::OK, "{body}");
     assert!(crate::server::browser_bypass::active_for(&pane, &agent).is_none());
+    // The person ended it: the strip just goes, with no note telling them so.
+    let block = state.mstore.must_get::<crate::backend::obj::Block>(&pane).unwrap();
+    assert!(block.meta.get("browser:bypass").is_none_or(|v| v.is_null()));
 
     // A No cools down: the agent can't ask again at once.
     let asking = {
@@ -2263,6 +2296,80 @@ async fn a_driven_panes_actions_are_logged_and_only_the_person_pauses_them() {
     assert_eq!(crate::server::browser_actions::entries(&pane).0, 0);
 }
 
+/// An Auto-approve grant ends after its agent goes quiet on the pane, and the
+/// strip says why; a Browser call keeps it alive. Take over takes the strip
+/// down with the grant (roadblocks report R9, R11).
+#[tokio::test]
+async fn auto_approve_ends_when_its_agent_goes_quiet_or_the_user_takes_over() {
+    use axum::http::StatusCode;
+    use crate::server::browser_bypass;
+    let state = test_state();
+    let ws_id = dispatch_apply(&state, Command::CreateWorkspace { name: "w".into() })
+        .await
+        .iter()
+        .find_map(|e| match e {
+            Event::WorkspaceCreated { workspace_id, .. } => Some(workspace_id.clone()),
+            _ => None,
+        })
+        .unwrap();
+    let tab_id = dispatch_apply(&state, Command::CreateTab { workspace_id: ws_id, name: "t".into() })
+        .await
+        .iter()
+        .find_map(|e| match e {
+            Event::TabCreated { tab_id, .. } => Some(tab_id.clone()),
+            _ => None,
+        })
+        .unwrap();
+    let own = stand_in_pane(&state, &tab_id).await;
+    let (agent, auth) = signed_agent_on(&state, &own);
+    let fake = BypassFakeHost::default();
+    *fake.url.lock().unwrap() = "https://github.com/example/repo/issues/1".into();
+    let port = fake.serve().await;
+    *state.host_ipc.lock().await = Some(crate::server::state::HostIpc { port, token: "host-ipc-token".into() });
+    let app = crate::server::build_router(state.clone());
+    let (s, body) = post_json(&app, "/api/v1/ui/browser/open", merged(&auth, serde_json::json!({ "url": "https://github.com/" }))).await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    let pane = body["data"]["pane"].as_str().unwrap().to_string();
+    let strip = |state: &AppState| {
+        let block = state.mstore.must_get::<crate::backend::obj::Block>(&pane).unwrap();
+        block.meta.get("browser:bypass").cloned().unwrap_or(serde_json::Value::Null)
+    };
+
+    // A grant that ends after one quiet second.
+    let idle = std::time::Duration::from_secs(1);
+    browser_bypass::tests_grant_idle(&state, &pane, &agent, idle);
+    assert_eq!(strip(&state)["agent"], agent.as_str());
+    // A Browser call on the pane, before the second is up, keeps it alive past it.
+    tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+    let (s, body) = post_json(&app, "/api/v1/ui/browser/request_bypass", merged(&auth, serde_json::json!({ "pane": pane, "reason": "x" }))).await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    assert_eq!(body["data"]["answer"], "granted");
+    tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+    assert!(browser_bypass::active_for(&pane, &agent).is_some(), "touched 0.6 s ago, so not quiet yet");
+    // Then nothing: it ends, and the strip says why.
+    let mut ended = serde_json::Value::Null;
+    for _ in 0..100 {
+        ended = strip(&state);
+        if ended.get("ended").is_some() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    assert_eq!(ended, serde_json::json!({ "agent": agent, "ended": browser_bypass::IDLE_REASON }));
+    assert!(browser_bypass::active_for(&pane, &agent).is_none());
+
+    // Take over ends a grant and takes its strip down.
+    browser_bypass::tests_grant_idle(&state, &pane, &agent, std::time::Duration::from_secs(600));
+    assert_eq!(strip(&state)["agent"], agent.as_str());
+    let oref = format!("block:{pane}");
+    let mut clear = crate::backend::obj::MetaMapType::new();
+    clear.insert("browser:owner_agent".into(), serde_json::Value::Null);
+    crate::server::browser_owner::guard_client_meta_write(&oref, &clear).unwrap();
+    crate::server::service::update_object_meta(&state.mstore, &oref, &clear).unwrap();
+    assert!(browser_bypass::active_for(&pane, &agent).is_none());
+    assert!(strip(&state).is_null(), "{}", strip(&state));
+}
+
 // SPEC_BROWSER_PANE_NATIVE_DIALOGS_2026_10_17.md: only the host reports a
 // page's dialog; an alert is accepted and a prompt cancelled; a confirm asks
 // the person, unless it follows the agent's own click under auto-approve; and
@@ -2385,4 +2492,186 @@ async fn a_page_dialog_is_decided_by_policy_or_asked_and_only_the_host_reports_o
     assert_eq!(seen.iter().filter(|(_, d)| d == "cancelled").count(), 1, "only the prompt: {seen:?}");
     let (_, body) = post_json(&app, "/api/v1/ui/browser/dialogs", auth).await;
     assert!(body["data"]["dialogs"].as_array().unwrap().is_empty());
+}
+
+/// A CEF host stand-in that records the addresses srv loads in a pane
+/// (`navigate`) and takes srv's pushes of the owned panes.
+#[derive(Clone, Default)]
+struct NavFakeHost {
+    loads: std::sync::Arc<std::sync::Mutex<Vec<serde_json::Value>>>,
+}
+
+impl NavFakeHost {
+    async fn serve(&self) -> u16 {
+        use axum::{routing::post, Json, Router};
+        let h = self.clone();
+        let app = Router::new()
+            .route(
+                "/agentmux/browser/navigate",
+                post(move |Json(b): Json<serde_json::Value>| {
+                    let h = h.clone();
+                    async move {
+                        h.loads.lock().unwrap().push(b);
+                        Json(serde_json::json!({ "ok": true, "data": {} }))
+                    }
+                }),
+            )
+            .route(
+                "/agentmux/browser/owned_panes",
+                post(|| async { Json(serde_json::json!({ "ok": true, "data": {} })) }),
+            );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        port
+    }
+
+    async fn wait_for_loads(&self, n: usize) -> Vec<serde_json::Value> {
+        for _ in 0..200 {
+            if self.loads.lock().unwrap().len() >= n {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        self.loads.lock().unwrap().clone()
+    }
+}
+
+async fn wait_for_banner_where(state: &AppState, pane: &str, want: impl Fn(&serde_json::Value) -> bool) -> serde_json::Value {
+    let mut last = serde_json::Value::Null;
+    for _ in 0..200 {
+        let block = state.mstore.must_get::<crate::backend::obj::Block>(pane).unwrap();
+        last = block.meta.get("browser:attention").cloned().unwrap_or(serde_json::Value::Null);
+        if want(&last) {
+            return last;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    panic!("the banner on {pane} never matched; last {last}");
+}
+
+// REPORT_BROWSER_PANE_BLANK_AFTER_BLOCKED_SIGN_IN_REDIRECT_RCA_2026_10_16.md
+// §6.4: a navigation the host stopped during a hand-off (a sign-in leaving
+// the pane's sites) is asked about over the hand-off; answering it brings the
+// hand-off back, still waiting; Allow loads the address; Block and an address
+// that isn't a web one end in a notice, never in nothing.
+#[tokio::test]
+async fn a_navigation_stopped_during_a_handoff_is_asked_about_over_it() {
+    use axum::http::StatusCode;
+    let state = test_state();
+    let ws_id = dispatch_apply(&state, Command::CreateWorkspace { name: "w".into() })
+        .await
+        .iter()
+        .find_map(|e| match e {
+            Event::WorkspaceCreated { workspace_id, .. } => Some(workspace_id.clone()),
+            _ => None,
+        })
+        .unwrap();
+    let tab_id = dispatch_apply(&state, Command::CreateTab { workspace_id: ws_id, name: "t".into() })
+        .await
+        .iter()
+        .find_map(|e| match e {
+            Event::TabCreated { tab_id, .. } => Some(tab_id.clone()),
+            _ => None,
+        })
+        .unwrap();
+    let own = stand_in_pane(&state, &tab_id).await;
+    let (_agent, auth) = signed_agent_on(&state, &own);
+    let fake = NavFakeHost::default();
+    let port = fake.serve().await;
+    *state.host_ipc.lock().await = Some(crate::server::state::HostIpc { port, token: "host-ipc-token".into() });
+    let app = crate::server::build_router(state.clone());
+    let host = [("X-Host-Token", "host-ipc-token")];
+    let open = merged(&auth, serde_json::json!({ "url": "https://github.com/login", "allowed_origins": ["github.com"] }));
+    let (s, body) = post_json(&app, "/api/v1/ui/browser/open", open).await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    let pane = body["data"]["pane"].as_str().unwrap().to_string();
+    let report = |url: &str| serde_json::json!({ "pane": pane, "target": pane, "url": url, "kind": "navigate" });
+    let answer = |id: &serde_json::Value, decision: &str| serde_json::json!({ "block_id": pane, "id": id, "decision": decision });
+
+    // The agent hands the pane over to sign in, and waits.
+    let handoff = {
+        let app = app.clone();
+        let body = merged(&auth, serde_json::json!({ "pane": pane, "reason": "Sign in to GitHub" }));
+        tokio::spawn(async move { post_json(&app, "/api/v1/ui/browser/handoff", body).await })
+    };
+    let h = wait_for_banner(&state, &pane).await;
+    assert_eq!(h["kind"], "handoff");
+
+    // "Continue with Google": the host stopped the redirect. Only the host reports one.
+    let google = "https://accounts.google.com/o/oauth2/v2/auth?client_id=x";
+    let (s, _) = post_json_headers(&app, "/api/v1/host/browser_navigation", report(google), &[]).await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+    let (s, body) = post_json_headers(&app, "/api/v1/host/browser_navigation", report(google), &host).await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    assert_eq!(body["data"]["asked"], true, "{body}");
+    assert_eq!(body["data"]["settled"], "asking");
+    let q = wait_for_banner_where(&state, &pane, |b| b["kind"] == "navigation").await;
+    assert_eq!(q["origin"], "https://accounts.google.com");
+    assert_eq!(q["url"], google);
+
+    // Another attempt while that question is up is dropped, with a reason,
+    // and no second banner.
+    let (_, body) = post_json_headers(&app, "/api/v1/host/browser_navigation", report("https://accounts.google.com/x"), &host).await;
+    assert_eq!(body["data"]["asked"], false, "{body}");
+    assert_eq!(body["data"]["settled"], "busy");
+    assert!(!body["data"]["reason"].as_str().unwrap_or("").is_empty());
+    assert_eq!(wait_for_banner(&state, &pane).await["id"], q["id"]);
+
+    // Allow: the site joins the list, the address loads, and the hand-off's
+    // banner is back with the hand-off still waiting.
+    let (s, _) = post_json_headers(&app, "/api/v1/host/browser_attention", answer(&q["id"], "approve"), &host).await;
+    assert_eq!(s, StatusCode::OK);
+    let loads = fake.wait_for_loads(1).await;
+    assert_eq!(loads, vec![serde_json::json!({ "block_id": pane, "url": google })]);
+    let back = wait_for_banner_where(&state, &pane, |b| b["kind"] == "handoff").await;
+    assert_eq!(back["id"], h["id"]);
+    assert!(crate::server::browser_allowlist::list_for(&pane).unwrap().contains(&"https://accounts.google.com".to_string()));
+    assert!(!handoff.is_finished(), "the hand-off still waits for Done");
+    assert_eq!(crate::server::browser_attention::waiting_on_user(&pane), Some(crate::server::browser_attention::Kind::Handoff));
+
+    // Block ends in a notice saying so, with Allow still on offer; Allow
+    // there loads it after all.
+    let microsoft = "https://login.microsoftonline.com/common/oauth2";
+    let (_, body) = post_json_headers(&app, "/api/v1/host/browser_navigation", report(microsoft), &host).await;
+    assert_eq!(body["data"]["asked"], true, "{body}");
+    let q = wait_for_banner_where(&state, &pane, |b| b["kind"] == "navigation").await;
+    let (s, _) = post_json_headers(&app, "/api/v1/host/browser_attention", answer(&q["id"], "cancel"), &host).await;
+    assert_eq!(s, StatusCode::OK);
+    let n = wait_for_banner_where(&state, &pane, |b| b["kind"] == "notice").await;
+    assert_eq!(n["why"], "You blocked it.");
+    assert_eq!(n["allow"], true);
+    assert_eq!(n["origin"], "https://login.microsoftonline.com");
+    assert!(n["sites"].as_array().unwrap().contains(&serde_json::json!("https://github.com")));
+    let (s, _) = post_json_headers(&app, "/api/v1/host/browser_attention", answer(&n["id"], "approve"), &host).await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(fake.wait_for_loads(2).await[1], serde_json::json!({ "block_id": pane, "url": microsoft }));
+    wait_for_banner_where(&state, &pane, |b| b["id"] == h["id"]).await;
+
+    // An address that isn't a web one is never asked about: the pane says why.
+    let (_, body) = post_json_headers(&app, "/api/v1/host/browser_navigation", report("data:text/html,hi"), &host).await;
+    assert_eq!(body["data"]["settled"], "notice", "{body}");
+    let n = wait_for_banner_where(&state, &pane, |b| b["kind"] == "notice").await;
+    assert_eq!(n["allow"], false);
+    // Dismissed (or Back), the hand-off is back.
+    let (s, _) = post_json_headers(&app, "/api/v1/host/browser_attention", answer(&n["id"], "cancel"), &host).await;
+    assert_eq!(s, StatusCode::OK);
+    wait_for_banner_where(&state, &pane, |b| b["id"] == h["id"]).await;
+    assert!(!handoff.is_finished());
+
+    // Done ends the hand-off as before.
+    let (s, _) = post_json_headers(&app, "/api/v1/host/browser_attention", answer(&h["id"], "done"), &host).await;
+    assert_eq!(s, StatusCode::OK);
+    let (s, body) = handoff.await.unwrap();
+    assert_eq!(s, StatusCode::OK, "{body}");
+    assert_eq!(body["data"]["answer"], "done");
+    wait_for_banner_where(&state, &pane, |b| b.is_null()).await;
+
+    // A notice locks nothing: with one up, the agent's tools still reach the pane.
+    let (_, body) = post_json_headers(&app, "/api/v1/host/browser_navigation", report("data:,x"), &host).await;
+    assert_eq!(body["data"]["settled"], "notice", "{body}");
+    wait_for_banner_where(&state, &pane, |b| b["kind"] == "notice").await;
+    assert_eq!(crate::server::browser_attention::waiting_on_user(&pane), None);
+    let (s, body) = post_json(&app, "/api/v1/ui/browser/focus_info", merged(&auth, serde_json::json!({ "pane": pane }))).await;
+    assert_ne!(s, StatusCode::CONFLICT, "{body}");
 }

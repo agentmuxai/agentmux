@@ -7,8 +7,8 @@
 //!   1. Periodic sweep: archive sessions inactive for `inactive_days` days by
 //!      compressing their FileStore "output" file to `archive_dir/<block_id>.jsonl.gz`
 //!      and freeing the FileStore entry.
-//!   2. Storage cap: after archiving, prune oldest `.gz` files until total archive
-//!      disk usage is below `max_total_bytes` (default 2 GB).
+//!
+//! Archives are never deleted: AgentMux keeps agent history forever.
 //!
 //! The sweep archives through the same `archive_session_output` the RPC
 //! handlers in `server/app_api/session.rs` call; those handlers also use
@@ -319,14 +319,12 @@ pub fn default_archive_dir() -> Option<PathBuf> {
 // SessionArchiver — periodic sweep
 // ---------------------------------------------------------------------------
 
-/// Periodic session archival + storage cap enforcement.
+/// Periodic session archival.
 pub struct SessionArchiver {
     mstore: Arc<Store>,
     filestore: Arc<FileStore>,
     /// Sessions with no activity for this many days get archived.
     pub inactive_days: u64,
-    /// Maximum total bytes across all `.jsonl.gz` archives.
-    pub max_total_bytes: u64,
     /// Directory where `.jsonl.gz` files are written.
     pub archive_dir: PathBuf,
 }
@@ -335,7 +333,6 @@ pub struct SessionArchiver {
 #[derive(Debug, Clone, Default)]
 pub struct SessionArchiverStats {
     pub archived_count: u32,
-    pub pruned_count: u32,
     pub bytes_freed: u64,
 }
 
@@ -344,16 +341,14 @@ impl SessionArchiver {
         mstore: Arc<Store>,
         filestore: Arc<FileStore>,
         inactive_days: u64,
-        max_total_bytes: u64,
         archive_dir: PathBuf,
     ) -> Self {
-        Self { mstore, filestore, inactive_days, max_total_bytes, archive_dir }
+        Self { mstore, filestore, inactive_days, archive_dir }
     }
 
     /// Run one sweep:
     ///   1. Find all agent blocks inactive for `inactive_days`.
     ///   2. Archive each one (compress → delete FileStore).
-    ///   3. Prune oldest archives if total disk usage exceeds `max_total_bytes`.
     pub async fn sweep(&self) -> Result<SessionArchiverStats, String> {
         let mut stats = SessionArchiverStats::default();
         let now = now_ms();
@@ -433,66 +428,7 @@ impl SessionArchiver {
             }
         }
 
-        // Prune oldest archives if over the storage cap
-        stats.pruned_count = self.prune_archives(&mut stats.bytes_freed)?;
-
         Ok(stats)
-    }
-
-    /// Delete oldest `.jsonl.gz` files until total size is under `max_total_bytes`.
-    /// Returns number of files deleted.
-    fn prune_archives(&self, bytes_freed: &mut u64) -> Result<u32, String> {
-        let Ok(entries) = std::fs::read_dir(&self.archive_dir) else {
-            return Ok(0);
-        };
-
-        // Collect (mtime, path, size) for all .jsonl.gz files
-        let mut files: Vec<(std::time::SystemTime, PathBuf, u64)> = entries
-            .flatten()
-            .filter(|e| {
-                e.path()
-                    .extension()
-                    .map(|x| x == "gz")
-                    .unwrap_or(false)
-            })
-            .filter_map(|e| {
-                let meta = e.metadata().ok()?;
-                let mtime = meta.modified().ok()?;
-                let size = meta.len();
-                Some((mtime, e.path(), size))
-            })
-            .collect();
-
-        // Sort oldest-first
-        files.sort_by_key(|(mtime, _, _)| *mtime);
-
-        let total: u64 = files.iter().map(|(_, _, s)| s).sum();
-        if total <= self.max_total_bytes {
-            return Ok(0);
-        }
-
-        let mut remaining = total;
-        let mut pruned = 0u32;
-
-        for (_, path, size) in &files {
-            if remaining <= self.max_total_bytes {
-                break;
-            }
-            if let Err(e) = std::fs::remove_file(path) {
-                tracing::warn!(path = %path.display(), error = %e, "session archiver: failed to prune archive");
-                continue;
-            }
-            remaining = remaining.saturating_sub(*size);
-            *bytes_freed += size;
-            pruned += 1;
-            tracing::info!(
-                path = %path.display(),
-                size_freed = size,
-                "session archiver: pruned archive"
-            );
-        }
-
-        Ok(pruned)
     }
 }
 
@@ -570,7 +506,6 @@ mod tests {
             mstore.clone(),
             filestore.clone(),
             1, // 1 day inactive threshold
-            2 * 1024 * 1024 * 1024,
             archive_dir.clone(),
         );
 
