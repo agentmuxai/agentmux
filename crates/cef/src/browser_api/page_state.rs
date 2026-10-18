@@ -71,9 +71,45 @@ pub async fn focused_state(cdp: &mut CdpSession) -> Value {
     if !facts.label.is_empty() {
         shown.insert("label".to_string(), json!(facts.label));
     }
-    let id = [facts.local_name.as_str(), facts.attrs.get("id").map(String::as_str).unwrap_or(""), facts.attrs.get("name").map(String::as_str).unwrap_or(""), facts.label.as_str()].join("|");
+    // Which element has focus, by its node: fields alike in tag, id, name and
+    // label (a row of one-digit code inputs) are still told apart.
+    let id = match focused_node(cdp, ctx).await {
+        Some(node) => format!("node:{node}"),
+        None => [facts.local_name.as_str(), facts.attrs.get("id").map(String::as_str).unwrap_or(""), facts.attrs.get("name").map(String::as_str).unwrap_or(""), facts.label.as_str()].join("|"),
+    };
     shown.insert("element".to_string(), json!(id));
     redact_secret(Value::Object(shown), &facts)
+}
+
+/// The element that really has focus (through shadow roots and same-origin
+/// frames), as a page object, or null.
+const DEEP_ACTIVE: &str = r#"(() => {
+  let doc = document;
+  let el = doc.activeElement;
+  for (let depth = 0; el && depth < 16; depth++) {
+    if (el.shadowRoot && el.shadowRoot.activeElement) { el = el.shadowRoot.activeElement; continue; }
+    if (el.tagName === "IFRAME" || el.tagName === "FRAME") {
+      let inner = null;
+      try { inner = el.contentDocument; } catch (e) { inner = null; }
+      if (!inner) return null;
+      doc = inner;
+      el = doc.activeElement;
+      continue;
+    }
+    break;
+  }
+  return el || null;
+})()"#;
+
+/// The backend node id of the focused element, if it can be read.
+async fn focused_node(cdp: &mut CdpSession, ctx: i64) -> Option<i64> {
+    let v = cdp
+        .call("Runtime.evaluate", json!({ "expression": DEEP_ACTIVE, "contextId": ctx, "returnByValue": false }))
+        .await
+        .ok()?;
+    let object_id = v.pointer("/result/objectId")?.as_str()?.to_string();
+    let node = cdp.call("DOM.describeNode", json!({ "objectId": object_id })).await.ok()?;
+    node.pointer("/node/backendNodeId").and_then(Value::as_i64)
 }
 
 /// Every field in the pane that is a secret field (passwords, one-time codes,
@@ -148,6 +184,40 @@ async fn secret_boxes_in(cdp: &mut CdpSession, frame_id: Option<&str>) -> Option
     Some((boxes, result.get("width").and_then(|w| w.as_f64())))
 }
 
+/// Whether a `DOM.getDocument { depth: -1, pierce: true }` tree has a text
+/// field inside a closed shadow root, which the page script can't see (so
+/// it can't be checked for being a secret field).
+fn closed_shadow_has_fields(node: &Value, inside_closed: bool) -> bool {
+    let name = node.get("nodeName").and_then(Value::as_str).unwrap_or("").to_ascii_uppercase();
+    let editable = node
+        .get("attributes")
+        .and_then(Value::as_array)
+        .is_some_and(|a| a.chunks(2).any(|kv| kv.first().and_then(Value::as_str) == Some("contenteditable") && kv.get(1).and_then(Value::as_str) != Some("false")));
+    if inside_closed && (name == "INPUT" || name == "TEXTAREA" || editable) {
+        return true;
+    }
+    let shadows = node.get("shadowRoots").and_then(Value::as_array).into_iter().flatten();
+    for root in shadows {
+        let closed = root.get("shadowRootType").and_then(Value::as_str) == Some("closed");
+        if closed_shadow_has_fields(root, inside_closed || closed) {
+            return true;
+        }
+    }
+    let children = node.get("children").and_then(Value::as_array).into_iter().flatten();
+    if children.into_iter().any(|c| closed_shadow_has_fields(c, inside_closed)) {
+        return true;
+    }
+    // A same-process frame's document comes along under its <iframe>.
+    node.get("contentDocument").is_some_and(|d| closed_shadow_has_fields(d, false))
+}
+
+/// Whether the documents reached through `cdp` hold a field the scan can't
+/// see (in a closed shadow root); `None` when the tree couldn't be read.
+async fn has_unseen_fields(cdp: &mut CdpSession) -> Option<bool> {
+    let doc = cdp.call("DOM.getDocument", json!({ "depth": -1, "pierce": true })).await.ok()?;
+    Some(closed_shadow_has_fields(doc.get("root")?, false))
+}
+
 /// [`SecretBoxes`] for the whole pane: the top frame and every iframe.
 pub async fn secret_boxes(root: &mut CdpSession) -> SecretBoxes {
     let mut out = SecretBoxes { boxes: Vec::new(), css_width: None, complete: true };
@@ -166,6 +236,11 @@ pub async fn secret_boxes(root: &mut CdpSession) -> SecretBoxes {
             .await
             .ok()
             .and_then(|v| v.pointer("/result/value").and_then(|w| w.as_f64()));
+    }
+    // Fields in closed shadow roots are out of the page script's reach: the
+    // page and its same-process frames here, frames in their own process below.
+    if has_unseen_fields(root).await != Some(false) {
+        out.complete = false;
     }
     let (laid_out, unplaced) = frames::layout_counting_unplaced(root).await;
     if unplaced > 0 {
@@ -187,6 +262,9 @@ pub async fn secret_boxes(root: &mut CdpSession) -> SecretBoxes {
             }
         };
         let mut on = root.in_session(fl.raw.session.as_deref());
+        if fl.is_session_root && has_unseen_fields(&mut on).await != Some(false) {
+            out.complete = false;
+        }
         match secret_boxes_in(&mut on, Some(&fl.raw.id)).await {
             Some((boxes, _)) if boxes.is_empty() => {}
             Some((boxes, _)) if geometry.plain => {
@@ -242,6 +320,28 @@ mod tests {
         let added = merge_scans(scan(&[], true), scan(&[[1.0, 2.0, 3.0, 4.0]], true));
         assert!(!added.complete, "a field appeared during the capture");
         assert!(!merge_scans(scan(&[], false), scan(&[], true)).complete);
+    }
+
+    #[test]
+    fn a_field_in_a_closed_shadow_root_is_found_and_an_open_one_is_left_to_the_script() {
+        let closed = json!({ "nodeName": "#document", "children": [
+            { "nodeName": "PAY-FORM", "shadowRoots": [
+                { "nodeName": "#document-fragment", "shadowRootType": "closed", "children": [ { "nodeName": "INPUT" } ] }
+            ] }
+        ] });
+        assert!(closed_shadow_has_fields(&closed, false));
+        let open = json!({ "nodeName": "#document", "children": [
+            { "nodeName": "X-FIELD", "shadowRoots": [
+                { "nodeName": "#document-fragment", "shadowRootType": "open", "children": [ { "nodeName": "INPUT" } ] }
+            ] }
+        ] });
+        assert!(!closed_shadow_has_fields(&open, false), "the page script reaches open roots");
+        let editable = json!({ "nodeName": "#document", "children": [ { "nodeName": "X", "shadowRoots": [
+            { "shadowRootType": "closed", "children": [ { "nodeName": "DIV", "attributes": ["contenteditable", "true"] } ] }
+        ] } ] });
+        assert!(closed_shadow_has_fields(&editable, false));
+        let framed = json!({ "nodeName": "IFRAME", "contentDocument": closed });
+        assert!(closed_shadow_has_fields(&framed, false), "a same-process frame's document is searched too");
     }
 
     #[test]
