@@ -160,6 +160,9 @@ const PAGE_PROBE = `(() => {
     tabs: q(".tab"),
     elements: document.getElementsByTagName("*").length,
     imgs: q("img"),
+    // What the tool rows hold: a restored page that mounts bodies a live one had unloaded shows here.
+    toolBlocks: q(".agent-tool-block"),
+    toolTextKB: Math.round([...document.querySelectorAll(".agent-tool-block")].reduce((n, e) => n + e.textContent.length, 0) / 1024),
   };
 })()`;
 

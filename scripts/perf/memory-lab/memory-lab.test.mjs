@@ -120,6 +120,8 @@ describe("memory lab summary", () => {
         expect(mismatch(did(true), did(true))).toBeNull();
         expect(mismatch(did(false, "a"), did(false, "b"))).toBeNull();
         expect(mismatch({ ...same }, { ...same, recycleAfter: 0, recycleCommand: null })).toBeNull();
+        expect(mismatch({ ...same, holdMinutes: 10 }, { ...same, holdMinutes: 0 })).toMatch(/different idle holds/);
+        expect(mismatch({ ...same, holdMinutes: 10 }, { ...same, holdMinutes: 10 })).toBeNull();
         expect(mismatch({ ...run, gapSeconds: 15, platform: "win32" }, { ...run, gapSeconds: 15, platform: "linux" })).toMatch(/different operating systems/);
     });
 });
@@ -223,12 +225,18 @@ describe("memory lab recycle check", () => {
 
     const sample = (rendererMB, documents) => ({
         procs: [proc(1, "agentmux.exe", "renderer", true, rendererMB), proc(2, "agentmux.exe", "renderer", true, 50), proc(3, "agentmux-srv.exe", "main", true, 100)],
-        pages: [{ id: "x", url: "http://127.0.0.1:5000/index.html", dom: { documents } }, { id: "pool", url: "http://localhost/?windowLabel=window-pool-1", dom: { documents: 9 } }],
+        pages: [
+            { id: "x", url: "http://127.0.0.1:5000/index.html", dom: { documents, nodes: 30000, jsEventListeners: 900 }, jsHeapUsed: 80 * MB, layoutObjects: 12000, probe: { toolBlocks: 40, toolTextKB: 2048 } },
+            { id: "pool", url: "http://localhost/?windowLabel=window-pool-1", dom: { documents: 9 } },
+        ],
     });
 
     it("reads the app and renderer totals and the main window's document count from a sample", () => {
         const m = recycleMark(sample(700, 1), 30);
-        expect(m).toEqual({ atSeconds: 30, appMB: 850, rendererMB: 750, rendererProcs: 2, documents: 1, pages: 2 });
+        expect(m).toEqual({
+            atSeconds: 30, appMB: 850, rendererMB: 750, rendererProcs: 2, documents: 1, pages: 2,
+            nodes: 30000, jsHeapMB: 80, layoutObjects: 12000, listeners: 900, toolBlocks: 40, toolTextKB: 2048,
+        });
     });
 
     it("measures the saving from the settled mark against the mark before, and none for a refused recycle", () => {

@@ -44,8 +44,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 class InvalidRun extends Error {}
 
 function parseArgs(argv) {
-    const a = { panes: 4, rounds: 10, port: 9333, every: 5, gapS: 15, settleS: 20, samples: 3, seed: 1, attempts: 2, recycleAfter: 0, recycleCommand: "Reload Window (Free Memory)", out: "memory-lab-out", keep: false };
-    const num = new Set(["panes", "rounds", "port", "every", "gapS", "settleS", "samples", "seed", "attempts", "recycleAfter"]);
+    const a = { panes: 4, rounds: 10, port: 9333, every: 5, gapS: 15, settleS: 20, samples: 3, seed: 1, attempts: 2, recycleAfter: 0, holdMinutes: 0, recycleCommand: "Reload Window (Free Memory)", out: "memory-lab-out", keep: false };
+    const num = new Set(["panes", "rounds", "port", "every", "gapS", "settleS", "samples", "seed", "attempts", "recycleAfter", "holdMinutes"]);
     const flags = { "--keep": "keep" };
     for (let i = 0; i < argv.length; i++) {
         const raw = argv[i];
@@ -63,6 +63,7 @@ function parseArgs(argv) {
     if (a.recycleAfter !== 0 && !(Number.isInteger(a.recycleAfter) && a.recycleAfter >= 1 && a.recycleAfter <= a.rounds)) {
         throw new Error(`--recycle-after ${a.recycleAfter} is not a round of this run: a whole number from 1 to --rounds (${a.rounds}), or leave it out`);
     }
+    if (a.holdMinutes < 0 || (a.holdMinutes > 0 && a.recycleAfter === 0)) throw new Error("--hold-minutes needs --recycle-after (use --recycle-command none for the control): the agents stop after that round and the window is left idle");
     a.label ??= basename(a.portable ?? dirname(a.exe));
     return a;
 }
@@ -127,6 +128,12 @@ async function requireIdle(driver, timeoutS = 300) {
 
 /** What a recycle did, in a few lines. */
 function reportRecycle(rec) {
+    if (rec.control) {
+        console.log("    control: nothing pressed, same arming and samples");
+        console.log(`    before: app ${rec.before.appMB} MB, renderers ${rec.before.rendererMB} MB (${rec.before.rendererProcs}), documents ${rec.before.documents}`);
+        for (const m of rec.after) console.log(`    +${String(m.atSeconds).padStart(2)} s: app ${m.appMB} MB, renderers ${m.rendererMB} MB (${m.rendererProcs}), documents ${m.documents}`);
+        return;
+    }
     if (!rec.recycled) {
         console.log(`  the command did not recycle the window: ${rec.blocked}`);
         console.log("  (the build must have the command: \"Reload Window (Free Memory)\", #5086; on a build without it the palette finds nothing)");
@@ -138,6 +145,20 @@ function reportRecycle(rec) {
     const s = recycleSaving(rec);
     const scroll = rec.state.scroll.notArmed ? "not tested (could not be armed)" : rec.state.scroll.pass ? "kept" : "LOST";
     console.log(`    saved: app ${s.appMB} MB, renderers ${s.rendererMB} MB; draft ${rec.state.draft.pass ? "kept" : "LOST"}, scroll position ${scroll}`);
+}
+
+/** After the recycle (or its control) the agents stop: the window's memory once a minute, with no GC forced, for `holdMinutes`. */
+async function holdIdle(args, memtree, rootPid) {
+    const rows = [];
+    for (let minute = 1; minute <= args.holdMinutes; minute++) {
+        await sleep(60_000);
+        const s = await osSample(memtree, rootPid, args.port);
+        const g = groupSample(s);
+        const mb = (b) => (b == null ? null : Math.round((b / 1048576) * 10) / 10);
+        rows.push({ minute, appMB: mb(g.app.private), rendererMB: mb(g.groups.renderer.private), srvMB: mb(g.groups.srv.private) });
+        console.log(`    idle +${String(minute).padStart(2)} min: app ${rows.at(-1).appMB} MB, renderers ${rows.at(-1).rendererMB} MB, srv ${rows.at(-1).srvMB} MB`);
+    }
+    return rows;
 }
 
 /** One try: starts the instance, runs the load, measures, writes the result. */
@@ -175,15 +196,19 @@ async function attempt(args, ctx) {
         };
         await mark(0);
         let recycle = null;
-        for (let r = 1; r <= args.rounds; r++) {
+        // With --hold-minutes the agents stop at the recycle round: what matters then is how long the window stays down.
+        const playedRounds = args.holdMinutes > 0 ? args.recycleAfter : args.rounds;
+        let hold = null;
+        for (let r = 1; r <= playedRounds; r++) {
             await driver.send();
             await sleep(args.gapS * 1000);
             if (r === 1) await requireTurns(driver, args);
-            if (r % args.every === 0 || r === args.rounds) await mark(r);
+            if (r % args.every === 0 || r === playedRounds) await mark(r);
             if (r === args.recycleAfter) {
                 console.log(`  recycling the window after round ${r}: ${args.recycleCommand}`);
                 recycle = await runRecycle({ driver, memtree, port: args.port, rootPid: instance.pid, label: args.label, command: args.recycleCommand });
                 reportRecycle(recycle);
+                if (args.holdMinutes > 0) hold = await holdIdle(args, memtree, instance.pid);
             }
         }
 
@@ -199,12 +224,12 @@ async function attempt(args, ctx) {
         const summary = inMegabytes(steady(samples));
 
         // The store of record: the agents' turns must be in it, whatever the page shows.
-        const turnBytes = JSON.parse(readFileSync(script, "utf8")).turns.slice(0, args.rounds).map((t) => JSON.stringify(t).length);
+        const turnBytes = JSON.parse(readFileSync(script, "utf8")).turns.slice(0, playedRounds).map((t) => JSON.stringify(t).length);
         const problem = transcriptGrowthProblem({
             before: transcriptsBefore,
             after: transcriptBytes(home),
             agents: args.panes,
-            rounds: args.rounds,
+            rounds: playedRounds,
             bytesPerTurn: turnBytes.reduce((a, b) => a + b, 0) / turnBytes.length,
         });
         if (problem) throw new InvalidRun(problem);
@@ -219,11 +244,15 @@ async function attempt(args, ctx) {
             layout: { panes: args.panes, tabs: layout },
             agents: driver.agents.map((a) => ({ name: a.name, id: a.id, tabId: a.tabId })),
             toolRows: await driver.toolRows(),
+            // What was asked; `playedRounds` is how many were played (fewer with --hold-minutes).
             rounds: args.rounds,
             gapSeconds: args.gapS,
             settleSeconds: args.settleS,
             recycleAfter: args.recycleAfter,
             recycleCommand: args.recycleAfter ? args.recycleCommand : null,
+            holdMinutes: args.holdMinutes,
+            playedRounds,
+            hold,
             seed: args.seed,
             notes,
             curve,
@@ -232,7 +261,7 @@ async function attempt(args, ctx) {
             steady: summary,
         };
         writeFileSync(join(dir, "result.json"), JSON.stringify(result, null, 1));
-        const md = [`# ${args.label}`, "", `${args.panes} agents over ${layout.length} tab(s), ${args.rounds} rounds (${args.gapS} s apart), forced GC, median of ${summary.samples} samples.`, "", table(summary), ...notes.map((n) => `\n> ${n}`)].join("\n");
+        const md = [`# ${args.label}`, "", `${args.panes} agents over ${layout.length} tab(s), ${playedRounds} rounds (${args.gapS} s apart)${args.holdMinutes > 0 ? `, then held idle ${args.holdMinutes} min` : ""}, forced GC, median of ${summary.samples} samples.`, "", table(summary), ...notes.map((n) => `\n> ${n}`)].join("\n");
         writeFileSync(join(dir, "summary.md"), md + "\n");
         console.log("\n" + md);
         console.log(`\n-> ${join(dir, "result.json")}`);
@@ -263,7 +292,7 @@ async function main() {
     writeFileSync(script, JSON.stringify(generateConversation({ turns: args.rounds + 2, seed: args.seed })));
 
     const layout = layoutFor(args.panes);
-    console.log(`${args.label}: ${args.panes} agents over ${layout.length} tab(s) [${layout.join("/")}], ${args.rounds} rounds, port ${args.port}`);
+    console.log(`${args.label}: ${args.panes} agents over ${layout.length} tab(s) [${layout.join("/")}], ${args.holdMinutes > 0 ? args.recycleAfter : args.rounds} rounds${args.holdMinutes > 0 ? ` then ${args.holdMinutes} min idle` : ""}, port ${args.port}`);
     for (let n = 1; ; n++) {
         try {
             await attempt(args, { exe, memtree, dir, home, script, layout });

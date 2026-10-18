@@ -139,6 +139,13 @@ export function recycleMark(sample, atSeconds) {
         // not 1; a recycle must not make it grow (a back/forward-cache entry would).
         documents: main?.dom?.documents ?? null,
         pages: (sample.pages ?? []).length,
+        // What the main page holds, to tell a restored page from a live one at the same point.
+        nodes: main?.dom?.nodes ?? null,
+        jsHeapMB: main?.jsHeapUsed != null ? Math.round((main.jsHeapUsed / MB) * 10) / 10 : null,
+        layoutObjects: main?.layoutObjects ?? null,
+        listeners: main?.dom?.jsEventListeners ?? null,
+        toolBlocks: main?.probe?.toolBlocks ?? null,
+        toolTextKB: main?.probe?.toolTextKB ?? null,
     };
 }
 
@@ -160,10 +167,12 @@ export async function runRecycle({ driver, memtree, port, rootPid, label, comman
     const mark = `lab-${Date.now().toString(36)}`;
     await driver.eval(`window.__labDocument = ${JSON.stringify(mark)}`);
 
-    await driver.paletteCommand(command);
+    // "none" presses nothing: the control of a pair, with the same arming and the same samples.
+    const control = command === "none";
+    if (!control) await driver.paletteCommand(command);
     const t0 = Date.now();
 
-    let replaced = false;
+    let replaced = control;
     for (let waited = 0; waited < 45_000 && !replaced; waited += 500) {
         await sleep(500);
         replaced = (await driver.eval("window.__labDocument ?? null").catch(() => null)) !== mark;
@@ -172,7 +181,7 @@ export async function runRecycle({ driver, memtree, port, rootPid, label, comman
         const blocked = await driver.eval(FLASH_TEXT).catch(() => "");
         return { command, recycled: false, blocked: blocked || "no notice", before };
     }
-    await driver.reconnect();
+    if (!control) await driver.reconnect();
 
     const after = [];
     for (const s of afterSeconds) {
@@ -181,12 +190,12 @@ export async function runRecycle({ driver, memtree, port, rootPid, label, comman
         after.push(recycleMark(await takeSample({ port, memtree, rootPid, label: `${label}-recycle-${s}s`, gc: true }), s));
     }
     const state = await checkState(driver, armed);
-    return { command, recycled: true, before, after, state };
+    return { command, recycled: !control, control, before, after, state };
 }
 
 /** The recycle's saving, in MB of app and renderer private working set, from the settled mark (the last one) against the mark before. */
 export function recycleSaving(rec) {
-    if (!rec?.recycled) return null;
+    if (!rec?.recycled || rec.control) return null;
     const settled = rec.after.at(-1);
     const d = (a, b) => (a == null || b == null ? null : Math.round((a - b) * 10) / 10);
     return { appMB: d(rec.before.appMB, settled.appMB), rendererMB: d(rec.before.rendererMB, settled.rendererMB) };
