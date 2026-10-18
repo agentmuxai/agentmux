@@ -1034,7 +1034,7 @@ pub fn run(windows_sandbox_info: *mut std::ffi::c_void) -> i32 {
         tracing::warn!("Removing stale CEF lockfile: {}", lockfile.display());
         let _ = std::fs::remove_file(&lockfile);
     }
-    tracing::info!("CEF cache dir: {}", data_dir.display());
+    browser_pane::profile_carry::prepare(&data_dir); // logs it; carries the last version's profiles
     let cache_dir = CefString::from(data_dir.to_str().unwrap_or(""));
     // Expose root_cache_path. Secondary windows share the default context
     // (`commands::secondary_window_request_context`) and create nothing under
