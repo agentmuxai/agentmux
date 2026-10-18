@@ -70,9 +70,16 @@ jobs:
         run: |
           archive=$(ls portable-archive/agentmux-*-x64-portable.7z | head -n 1)
           7z x "$archive" -oportable -y > /dev/null
-          dir=$(ls -d portable/agentmux-*-x64-portable | head -n 1)
+          # The folder holding agentmux.exe, wherever the archive puts it (with or without a top-level folder).
+          exe=$(find portable -name agentmux.exe | head -n 1)
+          if [ -z "$exe" ]; then
+            echo "::error::no agentmux.exe in the extracted portable; top level:"
+            ls -la portable
+            exit 1
+          fi
+          dir=$(dirname "$exe")
           echo "PORTABLE=$dir" >> "$GITHUB_ENV"
-          echo "measuring $(basename "$dir") from run ${{ steps.build.outputs.run-id }}"
+          echo "measuring $dir from run ${{ steps.build.outputs.run-id }}"
 
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
