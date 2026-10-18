@@ -152,6 +152,7 @@ pub async fn connect_to_srv(
                             // immediately. No-op (returns 0) for a block_id
                             // with nothing pending, same as `close()` below.
                             crate::browser_pane::auth::cancel_for_block(block_id);
+                            crate::client::jsdialog::cancel_for_block(block_id);
                             state_for_reader.browser_panes.close(block_id, &state_for_reader);
                         }
                         crate::srv_event_bridge::dispatch_to_renderers(&state_for_reader, &event);

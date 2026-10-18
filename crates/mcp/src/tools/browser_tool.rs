@@ -64,7 +64,15 @@ async fn run(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
             act.action
         );
     }
-    let mut out = browser::call(act.tool, &args, cx).await?;
+    // A page dialog the action opened is reported with it, also when the
+    // action failed (a click whose confirm is waiting for the user times out).
+    let mut out = match browser::call(act.tool, &args, cx).await {
+        Ok(out) => out,
+        Err(e) => {
+            let dialogs = browser::dialogs_note(cx).await;
+            return Err(if dialogs.is_empty() { e } else { anyhow::anyhow!("{e}{dialogs}") });
+        }
+    };
     // The action has run: a follow-up that fails is reported after its
     // result, never instead of it, so the agent doesn't repeat a click
     // that already submitted something.
@@ -80,6 +88,7 @@ async fn run(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
             Err(e) => format!("{out}\n\nsnapshot failed (the {} itself was done): {e}", act.action),
         };
     }
+    out.push_str(&browser::dialogs_note(cx).await);
     Ok(out)
 }
 

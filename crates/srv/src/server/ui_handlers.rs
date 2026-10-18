@@ -1500,6 +1500,7 @@ pub(crate) async fn handle_ui_browser_act(
             asked().fail(&state, StatusCode::FORBIDDEN, "the user took over this pane, so the approved click wasn't made".to_string())
         }
         crate::server::browser_attention::Answer::Yes => {
+            crate::server::browser_dialog::note_approved_click(&block_id, &ask);
             asked().how(How::Approved).outcome(&state, proxy_value(&state, "act", body(Some(&ask)), std::time::Duration::from_secs(20)).await)
         }
         crate::server::browser_attention::Answer::Cancelled => asked().how(How::Declined).fail(&state, StatusCode::FORBIDDEN,

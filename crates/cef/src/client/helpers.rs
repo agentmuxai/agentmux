@@ -324,6 +324,26 @@ pub(crate) fn backend_browser_navigation(
     Ok(parsed.pointer("/data/asked").and_then(|v| v.as_bool()) == Some(true))
 }
 
+/// Ask srv what to do with a page's dialog in an agent-driven pane
+/// (SPEC_BROWSER_PANE_NATIVE_DIALOGS_2026_10_17.md §4.1), or tell it one
+/// ended. Returns srv's `decision`: `accept`, `cancel` or `parked`. Blocking:
+/// run it off the UI thread.
+pub(crate) fn backend_browser_dialog(
+    web_endpoint: &str,
+    auth_key: &str,
+    ipc_token: &str,
+    body: &serde_json::Value,
+) -> Result<String, String> {
+    let raw = post_as_host(web_endpoint, auth_key, ipc_token, "/api/v1/host/browser_dialog", body)?;
+    let parsed: serde_json::Value =
+        serde_json::from_str(&raw).map_err(|e| format!("srv answered something that isn't JSON: {e}"))?;
+    parsed
+        .pointer("/data/decision")
+        .and_then(|v| v.as_str())
+        .map(str::to_string)
+        .ok_or_else(|| "srv's answer has no decision".to_string())
+}
+
 /// POST `body` to srv's `path` as the host: `X-Host-Token` carries this
 /// host's IPC token, which srv checks against the one we registered and
 /// agents never see. Returns the response body on a 200, else an error with

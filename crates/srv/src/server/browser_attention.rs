@@ -35,6 +35,9 @@ pub(crate) enum Kind {
     /// The agent asks to act without asking for a while
     /// (SPEC_BROWSER_PANE_BYPASS_2026_10_16.md §6).
     Bypass,
+    /// The page's own confirm or "Leave site?" box
+    /// (SPEC_BROWSER_PANE_NATIVE_DIALOGS_2026_10_17.md §5).
+    Dialog,
 }
 
 impl Kind {
@@ -44,6 +47,7 @@ impl Kind {
             Kind::Approval => "approval",
             Kind::Navigation => "navigation",
             Kind::Bypass => "bypass",
+            Kind::Dialog => "dialog",
         }
     }
 
@@ -57,6 +61,9 @@ impl Kind {
                 "the page in pane {pane:?} tried to leave its allowed_origins and the user is being asked whether to allow it"
             ),
             Kind::Bypass => format!("pane {pane:?} is asking the user whether to auto-approve your clicks"),
+            Kind::Dialog => format!(
+                "the page in pane {pane:?} is showing its own question (a confirm or \"Leave site?\" box) and the user is being asked to answer it"
+            ),
         };
         let until = if self == Kind::Handoff { "they click Done or Cancel" } else { "they answer" };
         format!("{why}; your tools on it are paused until {until}")
@@ -146,6 +153,17 @@ pub(crate) fn cancel_for(block_id: &str) {
     }
 }
 
+/// Answer `block_id`'s unanswered request of `kind`, if any, with Cancelled:
+/// what it asked about ended on its own (a page dialog whose page navigated).
+pub(crate) fn cancel_kind_for(block_id: &str, kind: Kind) {
+    let mut map = pending().lock().unwrap_or_else(|p| p.into_inner());
+    for p in map.values_mut().filter(|p| p.block_id == block_id && p.kind == kind) {
+        if let Some(tx) = p.tx.take() {
+            let _ = tx.send(Answer::Cancelled);
+        }
+    }
+}
+
 /// A request that is still up. Dropping it takes the request down: it
 /// leaves the pending map, which unlocks the pane, and the banner is
 /// cleared. That happens on every path, including when the waiting HTTP
@@ -154,6 +172,7 @@ pub(crate) struct Waiting {
     state: AppState,
     id: String,
     block_id: String,
+    kind: Kind,
 }
 
 impl Drop for Waiting {
@@ -164,6 +183,10 @@ impl Drop for Waiting {
         let mut map = pending().lock().unwrap_or_else(|p| p.into_inner());
         map.remove(&self.id);
         clear_banner_if(&self.state, &self.block_id, &self.id);
+        drop(map);
+        if self.kind == Kind::Handoff {
+            crate::server::browser_owner::changed().notify_one();
+        }
     }
 }
 
@@ -195,10 +218,18 @@ pub(crate) fn clear_stale(state: &AppState, block_id: &str, id: &str) {
     clear_banner_if(state, block_id, id);
 }
 
+/// Whether a new request of `kind` on `block_id` must wait: any request is up
+/// there, except that a page dialog may follow one already answered.
+fn slot_taken(map: &HashMap<String, Pending>, block_id: &str, kind: Kind) -> bool {
+    map.values().any(|p| p.block_id == block_id && (kind != Kind::Dialog || p.tx.is_some()))
+}
+
 /// Show `payload` in `block_id`'s banner and wait for the human, up to
 /// `timeout`. One request per pane at a time. The pane stays locked until
 /// the returned [`Waiting`] is dropped, so a caller that acts on a Yes
-/// holds it until that action is done.
+/// holds it until that action is done. The one exception: the page's own
+/// dialog may ask while the pane's other request is answered and being acted
+/// on, since that action (an approved click) is what opened the dialog.
 pub(crate) async fn ask(
     state: &AppState,
     block_id: &str,
@@ -211,12 +242,17 @@ pub(crate) async fn ask(
     let (tx, rx) = oneshot::channel();
     {
         let mut map = pending().lock().unwrap_or_else(|p| p.into_inner());
-        if map.values().any(|p| p.block_id == block_id) {
+        if slot_taken(&map, block_id, kind) {
             return Err("this pane is already waiting for the user".to_string());
         }
         map.insert(id.clone(), Pending { block_id: block_id.to_string(), kind, tx: Some(tx) });
     }
-    let waiting = Waiting { state: state.clone(), id: id.clone(), block_id: block_id.to_string() };
+    let waiting = Waiting { state: state.clone(), id: id.clone(), block_id: block_id.to_string(), kind };
+    // The host leaves a page's dialogs to the person during a hand-off
+    // (dialogs spec §4.3): it learns of one from the next push.
+    if kind == Kind::Handoff {
+        crate::server::browser_owner::changed().notify_one();
+    }
     let mut banner = json!({ "id": id, "kind": kind.as_str(), "agent": agent_id });
     if let (Some(b), Some(p)) = (banner.as_object_mut(), payload.as_object()) {
         for (k, v) in p {
@@ -298,6 +334,29 @@ mod tests {
         let _rx = park("attn-test-2", "pane-b", Kind::Approval);
         assert!(resolve("attn-test-2", "pane-other", Answer::Yes).is_err());
         pending().lock().unwrap().remove("attn-test-2");
+    }
+
+    #[test]
+    fn a_page_dialog_may_follow_an_answered_request_only() {
+        let _rx = park("attn-test-7", "pane-h", Kind::Approval);
+        let busy = |kind: Kind| slot_taken(&pending().lock().unwrap(), "pane-h", kind);
+        assert!(busy(Kind::Dialog), "the approval is still up");
+        resolve("attn-test-7", "pane-h", Answer::Yes).unwrap();
+        assert!(!busy(Kind::Dialog), "approved, and the click it allowed opened the dialog");
+        assert!(busy(Kind::Handoff), "anything else still waits its turn");
+        pending().lock().unwrap().remove("attn-test-7");
+    }
+
+    #[tokio::test]
+    async fn a_dialog_that_ended_is_cancelled() {
+        let rx = park("attn-test-8", "pane-i", Kind::Dialog);
+        let _other = park("attn-test-9", "pane-j", Kind::Dialog);
+        cancel_kind_for("pane-i", Kind::Approval);
+        cancel_kind_for("pane-i", Kind::Dialog);
+        assert_eq!(rx.await.unwrap(), Answer::Cancelled);
+        assert!(resolve("attn-test-9", "pane-j", Answer::Yes).is_ok());
+        pending().lock().unwrap().remove("attn-test-8");
+        pending().lock().unwrap().remove("attn-test-9");
     }
 
     #[test]
