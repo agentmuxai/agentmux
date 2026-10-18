@@ -32,6 +32,7 @@ import { fileURLToPath } from "node:url";
 
 import { generateConversation } from "./lib/conversation.mjs";
 import { connect, installScript, launch, layoutFor, portableExe } from "./lib/driver.mjs";
+import { runRecycle, recycleSaving } from "./lib/recycle.mjs";
 import { osSample, portBelongsTo, takeSample } from "./lib/sample.mjs";
 import { agentsWithoutTurns, groupSample, inMegabytes, steady, table, transcriptGrowthProblem } from "./lib/summary.mjs";
 
@@ -43,8 +44,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 class InvalidRun extends Error {}
 
 function parseArgs(argv) {
-    const a = { panes: 4, rounds: 10, port: 9333, every: 5, gapS: 15, settleS: 20, samples: 3, seed: 1, attempts: 2, out: "memory-lab-out", keep: false };
-    const num = new Set(["panes", "rounds", "port", "every", "gapS", "settleS", "samples", "seed", "attempts"]);
+    const a = { panes: 4, rounds: 10, port: 9333, every: 5, gapS: 15, settleS: 20, samples: 3, seed: 1, attempts: 2, recycleAfter: 0, recycleCommand: "Reload Window (Free Memory)", out: "memory-lab-out", keep: false };
+    const num = new Set(["panes", "rounds", "port", "every", "gapS", "settleS", "samples", "seed", "attempts", "recycleAfter"]);
     const flags = { "--keep": "keep" };
     for (let i = 0; i < argv.length; i++) {
         const raw = argv[i];
@@ -121,6 +122,19 @@ async function requireIdle(driver, timeoutS = 300) {
     throw new InvalidRun(`agents were still playing turns ${timeoutS} s after the last round`);
 }
 
+/** What a recycle did, in a few lines. */
+function reportRecycle(rec) {
+    if (!rec.recycled) {
+        console.log(`  the command did not recycle the window: ${rec.blocked}`);
+        return;
+    }
+    const row = (m) => `    +${String(m.atSeconds).padStart(2)} s: app ${m.appMB} MB, renderers ${m.rendererMB} MB (${m.rendererProcs}), documents ${m.documents}`;
+    console.log(`    before: app ${rec.before.appMB} MB, renderers ${rec.before.rendererMB} MB (${rec.before.rendererProcs}), documents ${rec.before.documents}`);
+    for (const m of rec.after) console.log(row(m));
+    const s = recycleSaving(rec);
+    console.log(`    saved: app ${s.appMB} MB, renderers ${s.rendererMB} MB; draft ${rec.state.draft.pass ? "kept" : "LOST"}, scroll position ${rec.state.scroll.pass ? "kept" : "LOST"}`);
+}
+
 /** One try: starts the instance, runs the load, measures, writes the result. */
 async function attempt(args, ctx) {
     const { exe, memtree, dir, home, script, layout } = ctx;
@@ -155,11 +169,17 @@ async function attempt(args, ctx) {
             console.log(`  round ${String(round).padStart(3)}: app ${row.appMB} MB  ${Object.entries(row.groupsMB).map(([k, v]) => `${k} ${v}`).join("  ")}`);
         };
         await mark(0);
+        let recycle = null;
         for (let r = 1; r <= args.rounds; r++) {
             await driver.send();
             await sleep(args.gapS * 1000);
             if (r === 1) await requireTurns(driver, args);
             if (r % args.every === 0 || r === args.rounds) await mark(r);
+            if (r === args.recycleAfter) {
+                console.log(`  recycling the window after round ${r}: ${args.recycleCommand}`);
+                recycle = await runRecycle({ driver, memtree, port: args.port, rootPid: instance.pid, label: args.label, command: args.recycleCommand });
+                reportRecycle(recycle);
+            }
         }
 
         // Let the last turns finish and the frontend go idle, then measure with a forced GC.
@@ -200,6 +220,7 @@ async function attempt(args, ctx) {
             seed: args.seed,
             notes,
             curve,
+            recycle: recycle ? { ...recycle, afterRound: args.recycleAfter, saving: recycleSaving(recycle) } : null,
             final,
             steady: summary,
         };
