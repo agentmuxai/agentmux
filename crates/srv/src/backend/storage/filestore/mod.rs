@@ -24,6 +24,8 @@ mod zone_txn;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
+mod tests_append_reference;
+#[cfg(test)]
 mod tests_atomic;
 #[cfg(test)]
 mod tests_copy;
