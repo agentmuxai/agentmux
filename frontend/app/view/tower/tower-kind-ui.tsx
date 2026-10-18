@@ -16,8 +16,8 @@ import type { TowerViewModel } from "./tower-model";
 import { count, formatMem, type LoadLevel, loadLevel, type LoadScope } from "./tower-util";
 
 /** A kind's icon in its colour; an agent's own process shows its provider's
- *  logo, AgentMux's processes AgentMux's. Nothing for a row without a kind
- *  (an AgentMux that predates kinds). */
+ *  logo instead, which says which agent it is. Nothing for a row without a
+ *  kind (an AgentMux that predates kinds). */
 export function KindIcon(props: { kind?: TowerProcessKind; provider?: string }): JSX.Element {
     return (
         <Show when={props.kind}>
@@ -37,9 +37,6 @@ export function KindIcon(props: { kind?: TowerProcessKind; provider?: string }):
                     >
                         <Match when={kind() === "agents" && props.provider}>
                             {(provider) => <ProviderLogo provider={provider()} size={12} />}
-                        </Match>
-                        <Match when={kind() === "agentmux"}>
-                            <ProviderLogo provider="agentmux" size={12} />
                         </Match>
                     </Switch>
                 </span>
