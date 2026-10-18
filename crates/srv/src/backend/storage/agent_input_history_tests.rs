@@ -91,6 +91,10 @@ fn the_draft_is_kept_until_sent_and_goes_with_the_agent() {
     assert!(store.input_draft_set("a", "half a thought, finished", 2).unwrap());
     assert_eq!(store.input_draft_get("a").unwrap().as_deref(), Some("half a thought, finished"));
     assert!(!store.input_draft_set("nobody", "x", 3).unwrap());
+    // A pasted file isn't kept, and the older draft doesn't stay in its place.
+    assert!(store.input_draft_set("a", &"x".repeat(INPUT_HISTORY_MAX_TEXT + 1), 3).unwrap());
+    assert_eq!(store.input_draft_get("a").unwrap(), None);
+    store.input_draft_set("a", "half a thought, finished", 3).unwrap();
     assert!(store.input_draft_set("a", "", 4).unwrap());
     assert_eq!(store.input_draft_get("a").unwrap(), None);
     // Deleting the agent takes its history and draft (purge_agent_dependents).

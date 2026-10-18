@@ -26,6 +26,8 @@ import { PROVIDERS } from "./providers";
 
 /** Entries read from srv at a time. */
 const PAGE = 200;
+/** The longest draft srv keeps (64 KB; characters count at least one byte each). */
+const DRAFT_MAX_CHARS = 64 * 1024;
 /** How long the draft waits after the last keystroke before it is kept. */
 const DRAFT_WRITE_DELAY_MS = 500;
 
@@ -187,7 +189,8 @@ function flushDraft(agentId: string): void {
 
 /** Keep the agent's draft in srv, a moment after the last change; an empty one removes it. */
 export function saveAgentDraft(agentId: string, text: string): void {
-    draftPending.set(agentId, text);
+    // srv keeps none over 64 KB (a pasted file); say so once, not every half second.
+    draftPending.set(agentId, text.length > DRAFT_MAX_CHARS ? "" : text);
     clearTimeout(draftTimers.get(agentId));
     draftTimers.set(agentId, setTimeout(() => flushDraft(agentId), DRAFT_WRITE_DELAY_MS));
 }

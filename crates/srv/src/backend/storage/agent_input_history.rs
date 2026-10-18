@@ -214,8 +214,10 @@ impl Store {
             .optional()?)
     }
 
-    /// Keep the agent's unsent draft; an empty one removes it. `false` when
-    /// there is no such agent.
+    /// Keep the agent's unsent draft; an empty one removes it, and so does one
+    /// over [`INPUT_HISTORY_MAX_TEXT`] (a pasted file isn't kept, and an older
+    /// draft mustn't come back in its place). `false` when there is no such
+    /// agent.
     pub fn input_draft_set(&self, agent_id: &str, text: &str, now_ms: i64) -> Result<bool, StoreError> {
         let conn = self.conn.lock().unwrap();
         let known: Option<i64> =
@@ -223,7 +225,7 @@ impl Store {
         if known.is_none() {
             return Ok(false);
         }
-        if text.is_empty() {
+        if text.is_empty() || text.len() > INPUT_HISTORY_MAX_TEXT {
             conn.execute("DELETE FROM db_agent_input_drafts WHERE agent_id = ?1", params![agent_id])?;
         } else {
             conn.execute(
