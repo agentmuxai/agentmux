@@ -547,6 +547,10 @@ impl ElementQuery {
     fn name_matches(&self, name: &str) -> bool {
         let words = |s: &str| s.split_whitespace().collect::<Vec<_>>().join(" ");
         let (want, have) = (words(&self.name), words(name));
+        // No name asks for any name, exact or not: a role alone.
+        if want.is_empty() {
+            return true;
+        }
         if self.exact {
             have == want
         } else {
@@ -1120,6 +1124,8 @@ mod tests {
         assert_eq!(find(&nodes, &f, &q(None, " Saved items ", true), "n4").total, 1);
         // A role alone lists every element of that role.
         assert_eq!(find(&nodes, &f, &q(Some("dialog"), "", false), "n5").text, "- dialog \"Edit item\"\n");
+        // Exact with no name is still a role alone, not "nameless only".
+        assert_eq!(find(&nodes, &f, &q(Some("dialog"), "", true), "n6").text, "- dialog \"Edit item\"\n");
     }
 
     #[test]
