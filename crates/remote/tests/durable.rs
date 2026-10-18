@@ -6,6 +6,9 @@
 //! exactly what was missed, then end the session (spec §7.2, §7.3).
 #![cfg(unix)]
 
+// This binary must hold this checkout's code (`agentmux_common::checkout`).
+agentmux_common::checkout_guard!();
+
 use std::io::{Read, Write};
 use std::process::{Child, Command, Stdio};
 use std::sync::mpsc;

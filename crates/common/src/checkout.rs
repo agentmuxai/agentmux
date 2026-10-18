@@ -12,14 +12,16 @@
 //! target dir: passes and failures that belonged to other branches, and a
 //! "cannot find type" for code that was plainly there.
 //!
-//! Each crate has a test that calls [`check`]. The path compiled into the binary
-//! (`env!("CARGO_MANIFEST_DIR")` at the call site) must be the crate folder of
-//! the checkout `cargo test` runs in (its `CARGO_MANIFEST_DIR` at run time).
+//! Every test binary of the workspace (each crate's unit tests and each file
+//! under `tests/`) invokes [`checkout_guard!`]. It runs [`guard`] when the
+//! binary starts, before the test harness, so a test-name filter can't skip
+//! it: the crate folder compiled into the binary (`CARGO_MANIFEST_DIR` at build
+//! time) must be the one cargo runs it for (`CARGO_MANIFEST_DIR` at run time).
 
 use std::path::Path;
 
 /// `Err` with what to do when the test binary was compiled from another
-/// checkout than the one running it. `compiled` is the caller's
+/// checkout than the one running it. `compiled` is the invoking crate's
 /// `env!("CARGO_MANIFEST_DIR")`. `Ok` when the binary isn't run by cargo (no
 /// `CARGO_MANIFEST_DIR` at run time), so it can't tell.
 pub fn check(compiled: &str) -> Result<(), String> {
@@ -27,6 +29,37 @@ pub fn check(compiled: &str) -> Result<(), String> {
         Ok(running) if !running.is_empty() => compare(Path::new(compiled), Path::new(&running)),
         _ => Ok(()),
     }
+}
+
+/// What [`checkout_guard!`] runs at a test binary's start: on a mismatch, the
+/// reason on stderr and exit code 101, as a failed test run would.
+#[doc(hidden)]
+pub fn guard(compiled: &str) {
+    if let Err(e) = check(compiled) {
+        eprintln!("error: {e}");
+        std::process::exit(101);
+    }
+}
+
+/// Runs [`guard`] for the invoking crate when its test binary starts, from the
+/// platform's initializer section (as the `ctor` crate does). Invoke it once
+/// per test binary: at a crate's root, behind `#[cfg(test)]` where the crate
+/// has `agentmux-common` only as a dev-dependency, and at the top of each
+/// file under `tests/`.
+#[macro_export]
+macro_rules! checkout_guard {
+    () => {
+        const _: () = {
+            extern "C" fn agentmux_checkout_guard() {
+                $crate::checkout::guard(env!("CARGO_MANIFEST_DIR"));
+            }
+            #[used]
+            #[cfg_attr(any(target_os = "linux", target_os = "android", target_os = "freebsd"), link_section = ".init_array")]
+            #[cfg_attr(target_os = "windows", link_section = ".CRT$XCU")]
+            #[cfg_attr(target_vendor = "apple", link_section = "__DATA,__mod_init_func")]
+            static AGENTMUX_CHECKOUT_GUARD: extern "C" fn() = agentmux_checkout_guard;
+        };
+    };
 }
 
 fn compare(compiled: &Path, running: &Path) -> Result<(), String> {
@@ -43,31 +76,21 @@ fn compare(compiled: &Path, running: &Path) -> Result<(), String> {
     ))
 }
 
-/// The same folder by path, after resolving links and `..`, or, when the paths
-/// differ (a `subst` drive, a junction), because they hold the same
-/// `Cargo.toml`: two clones' copies differ in their timestamps.
+/// The same folder: the same path once links and `..` are resolved, or, when
+/// the paths differ (a `subst` drive, a junction), the same `Cargo.toml` file
+/// on disk, by file identity, never by look-alike metadata.
 fn same_folder(a: &Path, b: &Path) -> bool {
     if let (Ok(ca), Ok(cb)) = (a.canonicalize(), b.canonicalize()) {
         if ca == cb {
             return true;
         }
     }
-    let stamp = |p: &Path| {
-        let m = std::fs::metadata(p.join("Cargo.toml")).ok()?;
-        Some((m.len(), m.modified().ok()?, m.created().ok()))
-    };
-    matches!((stamp(a), stamp(b)), (Some(x), Some(y)) if x == y)
+    same_file::is_same_file(a.join("Cargo.toml"), b.join("Cargo.toml")).unwrap_or(false)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// The guard itself, for this crate.
-    #[test]
-    fn this_test_binary_was_built_from_this_checkout() {
-        check(env!("CARGO_MANIFEST_DIR")).unwrap();
-    }
 
     /// The guard only works while cargo tells a test where it runs: under
     /// cargo (`CARGO` set), `CARGO_MANIFEST_DIR` must be there too, or every
@@ -89,11 +112,14 @@ mod tests {
         let base = std::env::temp_dir().join(format!("agentmux-checkout-test-{}", std::process::id()));
         let (a, b) = (base.join("clone-a"), base.join("clone-b"));
         checkout(&a);
-        std::thread::sleep(std::time::Duration::from_millis(20));
         checkout(&b);
         let err = compare(&a, &b).unwrap_err();
         assert!(err.contains("share a cargo target directory"), "{err}");
         assert!(err.contains("CARGO_TARGET_DIR"), "{err}");
+        // Two copies with the same contents and timestamps are still two.
+        let stamp = std::fs::metadata(a.join("Cargo.toml")).unwrap().modified().unwrap();
+        std::fs::File::options().write(true).open(b.join("Cargo.toml")).unwrap().set_modified(stamp).unwrap();
+        assert!(compare(&a, &b).is_err(), "look-alike copies aren't the same checkout");
         // The same folder by another spelling is the same checkout.
         assert!(compare(&a, &a.join("..").join("clone-a")).is_ok());
         let _ = std::fs::remove_dir_all(&base);

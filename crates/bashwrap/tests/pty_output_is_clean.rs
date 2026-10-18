@@ -9,6 +9,9 @@
 
 #![cfg(unix)]
 
+// This binary must hold this checkout's code (`agentmux_common::checkout`).
+agentmux_common::checkout_guard!();
+
 fn b64(s: &str) -> String {
     use base64::Engine as _;
     use base64::engine::general_purpose::URL_SAFE_NO_PAD;

@@ -17,6 +17,11 @@ use std::time::{Duration, Instant};
 use cef::*;
 use parking_lot::Mutex;
 
+// The cef library's test binary must hold this checkout's code
+// (`agentmux_common::checkout`); here because `lib.rs` is at its size cap.
+#[cfg(test)]
+agentmux_common::checkout_guard!();
+
 /// srv asks the person for up to 10 minutes; past that, nobody will answer.
 const PARKED_TTL: Duration = Duration::from_secs(11 * 60);
 /// More than this many dialogs from one pane within `FLOOD_WINDOW` are
@@ -250,13 +255,6 @@ mod tests {
         assert_eq!(count_recent(&mut times, t0), FLOOD_MAX + 1, "the next one is over");
         // After the window, the count starts again.
         assert_eq!(count_recent(&mut times, t0 + FLOOD_WINDOW), 1);
-    }
-
-    /// `agentmux_common::checkout`: this crate's test binary must hold this
-    /// checkout's code (here because `lib.rs` is at its size cap).
-    #[test]
-    fn this_test_binary_was_built_from_this_checkout() {
-        agentmux_common::checkout::check(env!("CARGO_MANIFEST_DIR")).unwrap();
     }
 
     #[test]

@@ -168,12 +168,7 @@ fn init_tracing() {
         .try_init();
 }
 
-/// `agentmux_common::checkout`: this test binary must hold this checkout's
-/// code, not another clone's from a shared target directory.
+// This test binary must hold this checkout's code, not another clone's from
+// a shared target directory (`agentmux_common::checkout`).
 #[cfg(test)]
-mod checkout_guard {
-    #[test]
-    fn this_test_binary_was_built_from_this_checkout() {
-        agentmux_common::checkout::check(env!("CARGO_MANIFEST_DIR")).unwrap();
-    }
-}
+agentmux_common::checkout_guard!();
