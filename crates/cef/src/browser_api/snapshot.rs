@@ -8,10 +8,12 @@
 //! Pure functions over CDP `Accessibility.getFullAXTree` output plus a few
 //! `DOM.describeNode` facts, so the format and the secret-field rule are
 //! unit-testable without a browser. The routes in `routes.rs` gather the
-//! inputs and act on the references.
+//! inputs and act on the references. `find` reads the same tree but returns
+//! only the lines of elements named like what the agent asked for.
 
 use std::collections::HashMap;
 
+use serde::Deserialize;
 use serde_json::Value;
 
 /// Snapshot text is capped so one page can't flood an agent's context.
@@ -323,24 +325,26 @@ fn walk(
     if out.truncated {
         return;
     }
-    let ignored = node.get("ignored").and_then(|v| v.as_bool()).unwrap_or(false);
     let role = str_of(node, "role");
     let name = str_of(node, "name").trim();
     let backend = node.get("backendDOMNodeId").and_then(|v| v.as_i64());
-    let is_text = role == "StaticText";
-    let transparent = ignored
-        || TRANSPARENT_ROLES.contains(&role)
-        || (is_text && (hide_text || name.is_empty() || name == parent_name))
-        || role.is_empty();
+    let transparent = is_transparent(node, role, name, hide_text, parent_name);
 
     let mut child_depth = depth;
     let mut name_for_children = parent_name;
     if !transparent {
-        let line = line_for(node, role, name, backend, facts, ref_prefix, frame, frames, out);
+        // The reference goes into the table only once its line is known to
+        // fit: a line cut by the cap would hand out a reference the agent
+        // never sees.
+        let r = takes_ref(role, backend, facts).then(|| next_ref(out, ref_prefix, frame));
+        let line = line_for(node, role, name, backend, facts, r.as_deref(), frame, frames);
         let indent = "  ".repeat(depth);
         if out.text.len() + indent.len() + line.len() + 1 > MAX_SNAPSHOT_BYTES {
             out.truncated = true;
             return;
+        }
+        if let (Some(r), Some(b)) = (r, backend) {
+            hand_out(out, r, b, frame);
         }
         out.text.push_str(&indent);
         out.text.push_str(&line);
@@ -383,39 +387,72 @@ fn render_frame(f: &FrameTree, frames: &[FrameTree], depth: usize, out: &mut Sna
     }
 }
 
+/// A node the snapshot shows no line for: its children are shown in its place.
+/// `hide_text` and `parent_name` drop text already shown by an ancestor.
+fn is_transparent(node: &Value, role: &str, name: &str, hide_text: bool, parent_name: &str) -> bool {
+    let ignored = node.get("ignored").and_then(|v| v.as_bool()).unwrap_or(false);
+    ignored
+        || TRANSPARENT_ROLES.contains(&role)
+        || (role == "StaticText" && (hide_text || name.is_empty() || name == parent_name))
+        || role.is_empty()
+}
+
+/// The role a line shows: `text` for text, `file input` for a file input.
+fn shown_role<'a>(role: &'a str, fact: Option<&DomFacts>) -> &'a str {
+    if role == "StaticText" {
+        "text"
+    } else if fact.is_some_and(DomFacts::is_file_input) {
+        "file input"
+    } else {
+        role
+    }
+}
+
+/// Does this node get a reference: something an agent can act on.
+fn takes_ref(role: &str, backend: Option<i64>, facts: &HashMap<i64, DomFacts>) -> bool {
+    let Some(b) = backend else { return false };
+    INTERACTIVE_ROLES.contains(&role) || facts.get(&b).is_some_and(DomFacts::is_file_input)
+}
+
+/// The reference the next acted-on node in `frame` would get, without
+/// handing it out (`hand_out` does).
+fn next_ref(out: &Snapshot, ref_prefix: &str, frame: usize) -> String {
+    if frame == 0 {
+        // Top-frame references count only themselves, not the frames'.
+        format!("{ref_prefix}e{}", out.refs.len() - out.ref_frames.len() + 1)
+    } else {
+        let n = out.ref_frames.iter().filter(|(_, f)| *f == frame).count() + 1;
+        format!("f{frame}e{n}")
+    }
+}
+
+fn hand_out(out: &mut Snapshot, r: String, backend: i64, frame: usize) {
+    if frame != 0 {
+        out.ref_frames.push((r.clone(), frame));
+    }
+    out.refs.push((r, backend));
+}
+
+/// One node's line, with `r` as its reference if it has one.
 fn line_for(
     node: &Value,
     role: &str,
     name: &str,
     backend: Option<i64>,
     facts: &HashMap<i64, DomFacts>,
-    ref_prefix: &str,
+    r: Option<&str>,
     frame: usize,
     frames: &[FrameTree],
-    out: &mut Snapshot,
 ) -> String {
     let fact = backend.and_then(|b| facts.get(&b));
     let secret = fact.is_some_and(is_secret);
-    let file = fact.is_some_and(DomFacts::is_file_input);
-    let shown_role = if role == "StaticText" { "text" } else if file { "file input" } else { role };
-    let mut line = format!("- {shown_role}");
+    let mut line = format!("- {}", shown_role(role, fact));
     if !name.is_empty() {
         line.push(' ');
         line.push_str(&quote(name));
     }
-    if let Some(b) = backend {
-        if INTERACTIVE_ROLES.contains(&role) || file {
-            let r = if frame == 0 {
-                // Top-frame references count only themselves, not the frames'.
-                format!("{ref_prefix}e{}", out.refs.len() - out.ref_frames.len() + 1)
-            } else {
-                let n = out.ref_frames.iter().filter(|(_, f)| *f == frame).count() + 1;
-                out.ref_frames.push((format!("f{frame}e{n}"), frame));
-                format!("f{frame}e{n}")
-            };
-            line.push_str(&format!(" [ref={r}]"));
-            out.refs.push((r, b));
-        }
+    if let Some(r) = r {
+        line.push_str(&format!(" [ref={r}]"));
     }
     if let Some(inner) = frame_of_owner(frames, frame, role, backend) {
         let n = inner.ordinal;
@@ -466,6 +503,165 @@ fn line_for(
         }
     }
     line
+}
+
+// ── find: the lines for elements named like this, not the whole page ──────
+
+/// The most matches one `find` shows: enough to pick from, short enough to
+/// be cheaper than a snapshot.
+pub const MAX_FIND_MATCHES: usize = 20;
+
+/// Elements by role and accessible name, for `find` and for a `scope` given
+/// by name. `role` is the role a snapshot line shows (`button`, `link`,
+/// `menuitem`, `text`, `file input`), in any case. `name` is a part of the
+/// accessible name in any case, or with `exact` the whole name as written.
+/// Empty matches every name.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct ElementQuery {
+    #[serde(default)]
+    pub role: Option<String>,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub exact: bool,
+}
+
+impl ElementQuery {
+    fn role(&self) -> Option<String> {
+        self.role.as_deref().map(|r| r.trim().to_lowercase()).filter(|r| !r.is_empty())
+    }
+
+    /// Does a node match? Without `fact` the node's markup wasn't read, so a
+    /// button counts as a possible `file input` (the route reads it, then asks again).
+    fn matches(&self, role: &str, name: &str, fact: Option<&DomFacts>, checked: bool) -> bool {
+        let role_ok = match self.role().as_deref() {
+            // Text is shown only when asked for: otherwise a word in a
+            // paragraph would crowd out the button named by it.
+            None => role != "StaticText",
+            Some("file input") => role == "button" && (fact.is_some_and(DomFacts::is_file_input) || (!checked && fact.is_none())),
+            Some(want) => shown_role(role, fact).eq_ignore_ascii_case(want),
+        };
+        role_ok && self.name_matches(name)
+    }
+
+    fn name_matches(&self, name: &str) -> bool {
+        let words = |s: &str| s.split_whitespace().collect::<Vec<_>>().join(" ");
+        let (want, have) = (words(&self.name), words(name));
+        if self.exact {
+            have == want
+        } else {
+            have.to_lowercase().contains(&want.to_lowercase())
+        }
+    }
+
+    /// How the query reads in a message: `button "Save"`.
+    pub fn describe(&self) -> String {
+        match (self.role(), self.name.trim()) {
+            (Some(r), "") => r,
+            (Some(r), n) => format!("{r} {}", quote(n)),
+            (None, n) => quote(n),
+        }
+    }
+}
+
+/// A shown node, and its nearest shown ancestor with a name: `(role, name)`.
+type Shown<'a> = (&'a Value, Option<(&'a str, &'a str)>);
+
+/// Every node a snapshot would show a line for, in document order, with its
+/// nearest shown ancestor that has a name, for context.
+fn shown_nodes(nodes: &[Value]) -> Vec<Shown<'_>> {
+    let by_id: HashMap<&str, &Value> =
+        nodes.iter().filter_map(|n| Some((n.get("nodeId")?.as_str()?, n))).collect();
+    let mut out = Vec::new();
+    let root = nodes.iter().find(|n| n.get("parentId").is_none()).or_else(|| nodes.first());
+    // (node, parent's name, hide text, named ancestor): iterative, children
+    // pushed in reverse so they come off in document order.
+    type Pending<'a> = (&'a Value, &'a str, bool, Option<(&'a str, &'a str)>);
+    let mut stack: Vec<Pending> = root.map(|r| (r, "", false, None)).into_iter().collect();
+    while let Some((node, parent_name, hide_text, context)) = stack.pop() {
+        let role = str_of(node, "role");
+        let name = str_of(node, "name").trim();
+        let (mut name_for_children, mut context_for_children) = (parent_name, context);
+        if !is_transparent(node, role, name, hide_text, parent_name) {
+            out.push((node, context));
+            name_for_children = name;
+            if !name.is_empty() {
+                context_for_children = Some((if role == "StaticText" { "text" } else { role }, name));
+            }
+        }
+        let hide = hide_text || TEXT_SHOWN_ELSEWHERE.contains(&role);
+        if let Some(kids) = node.get("childIds").and_then(|v| v.as_array()) {
+            for k in kids.iter().rev() {
+                if let Some(c) = k.as_str().and_then(|id| by_id.get(id)) {
+                    stack.push((c, name_for_children, hide, context_for_children));
+                }
+            }
+        }
+    }
+    out
+}
+
+/// The nodes that may match `q` before their markup is read: what the find
+/// route looks up `DomFacts` for (a field's value, whether a button is a file
+/// input). In document order.
+pub fn find_candidates<'a>(nodes: &'a [Value], q: &ElementQuery) -> Vec<&'a Value> {
+    shown_nodes(nodes)
+        .into_iter()
+        .filter(|(n, _)| q.matches(str_of(n, "role"), str_of(n, "name").trim(), None, false))
+        .map(|(n, _)| n)
+        .collect()
+}
+
+/// The element a `scope` given by role and name narrows a snapshot to: the
+/// first match, as `find` would list it.
+pub fn first_match(nodes: &[Value], q: &ElementQuery) -> Option<i64> {
+    find_candidates(nodes, q).into_iter().find_map(|n| n.get("backendDOMNodeId").and_then(|v| v.as_i64()))
+}
+
+/// `find`'s answer: the matching lines, the references on them, and how
+/// many matched in all.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Found {
+    pub text: String,
+    pub refs: Vec<(String, i64)>,
+    /// Every match, shown or not: the text holds the first `MAX_FIND_MATCHES`.
+    pub total: usize,
+    /// The page's iframes, whose contents `find` doesn't search.
+    pub frames: usize,
+}
+
+/// The lines of the elements matching `q`, each formatted as in a snapshot
+/// (the same secret-field rule: a field without facts has its value hidden)
+/// with `(in <role> "<name>")` naming its nearest named ancestor. References
+/// are `{ref_prefix}e1`, `{ref_prefix}e2`, …; top frame only.
+pub fn find(nodes: &[Value], facts: &HashMap<i64, DomFacts>, q: &ElementQuery, ref_prefix: &str) -> Found {
+    let mut found = Found { text: String::new(), refs: Vec::new(), total: 0, frames: 0 };
+    for (node, context) in shown_nodes(nodes) {
+        let role = str_of(node, "role");
+        let name = str_of(node, "name").trim();
+        if role == "Iframe" {
+            found.frames += 1;
+        }
+        let backend = node.get("backendDOMNodeId").and_then(|v| v.as_i64());
+        if !q.matches(role, name, backend.and_then(|b| facts.get(&b)), true) {
+            continue;
+        }
+        found.total += 1;
+        if found.total > MAX_FIND_MATCHES {
+            continue;
+        }
+        let r = takes_ref(role, backend, facts).then(|| format!("{ref_prefix}e{}", found.refs.len() + 1));
+        let mut line = line_for(node, role, name, backend, facts, r.as_deref(), 0, &[]);
+        if let Some((in_role, in_name)) = context {
+            line.push_str(&format!(" (in {in_role} {})", quote(in_name)));
+        }
+        if let (Some(r), Some(b)) = (r, backend) {
+            found.refs.push((r, b));
+        }
+        found.text.push_str(&line);
+        found.text.push('\n');
+    }
+    found
 }
 
 #[cfg(test)]
@@ -826,6 +1022,176 @@ mod tests {
         let s = render_with_frames(&top, &HashMap::new(), None, "", &[]);
         assert!(s.text.contains("- Iframe \"Application form\"\n"), "{}", s.text);
         assert!(s.ref_frames.is_empty());
+    }
+
+    /// Every reference handed out is on a line the agent reads, once.
+    fn assert_every_ref_is_shown(s: &Snapshot) {
+        for (r, _) in &s.refs {
+            assert_eq!(s.text.matches(&format!("[ref={r}]")).count(), 1, "{r} is in the table but not in the text once");
+        }
+        assert_eq!(s.text.matches("[ref=").count(), s.refs.len(), "a line shows a reference the table doesn't have");
+    }
+
+    #[test]
+    fn no_reference_is_handed_out_for_a_line_cut_by_the_cap() {
+        // Many sizes, so the line that crosses the cap falls on every kind of
+        // boundary: a link, a field with a value, a heading without a ref.
+        for name_len in [5usize, 17, 40, 61, 99, 150] {
+            let count = MAX_SNAPSHOT_BYTES / (name_len + 10) + 50;
+            let kids: Vec<String> = (0..count).map(|i| format!("c{i}")).collect();
+            let kid_refs: Vec<&str> = kids.iter().map(String::as_str).collect();
+            let mut nodes = vec![n("root", None, "RootWebArea", "", Some(1), &kid_refs)];
+            let mut ids = Vec::new();
+            for (i, k) in kids.iter().enumerate() {
+                let role = ["link", "textbox", "heading", "button"][i % 4];
+                let name = format!("{i:05}{}", "x".repeat(name_len));
+                let mut node = n(k, Some("root"), role, &name, Some(10 + i as i64), &[]);
+                if role == "textbox" {
+                    node["value"] = json!({ "type": "string", "value": "v" });
+                    ids.push(10 + i as i64);
+                }
+                nodes.push(node);
+            }
+            let s = render(&nodes, &plain(&ids), None, "");
+            assert!(s.truncated, "{name_len}: the fixture should be over the cap");
+            assert_every_ref_is_shown(&s);
+        }
+        // And when nothing is cut.
+        let (top, frame) = frame_page();
+        assert_every_ref_is_shown(&render_with_frames(&top, &HashMap::new(), None, "", &[frame]));
+    }
+
+    /// A page with a dialog, a toolbar, text, a password field and an iframe.
+    fn find_page() -> (Vec<Value>, HashMap<i64, DomFacts>) {
+        let mut pw = n("pw", Some("form"), "textbox", "Password", Some(31), &[]);
+        pw["value"] = json!({ "type": "string", "value": "hunter2" });
+        let mut title = n("title", Some("dlg"), "textbox", "Title", Some(21), &[]);
+        title["value"] = json!({ "type": "string", "value": "Draft one" });
+        let nodes = vec![
+            n("root", None, "RootWebArea", "Page", Some(1), &["bar", "p", "dlg", "form", "ifr"]),
+            n("bar", Some("root"), "toolbar", "Actions", Some(10), &["sd", "si", "upl"]),
+            n("sd", Some("bar"), "button", "Save draft", Some(11), &["sdt"]),
+            n("sdt", Some("sd"), "StaticText", "Save draft", None, &[]),
+            n("si", Some("bar"), "link", "Saved   items", Some(12), &[]),
+            n("upl", Some("bar"), "button", "Attach", Some(13), &[]),
+            n("p", Some("root"), "paragraph", "", Some(14), &["pt"]),
+            n("pt", Some("p"), "StaticText", "Save your work often", None, &[]),
+            n("dlg", Some("root"), "dialog", "Edit item", Some(20), &["g"]),
+            n("g", Some("dlg"), "generic", "", Some(19), &["title", "save", "cancel"]),
+            title,
+            n("save", Some("g"), "button", "Save", Some(22), &[]),
+            n("cancel", Some("g"), "button", "Cancel", Some(23), &[]),
+            n("form", Some("root"), "form", "", Some(30), &["pw"]),
+            pw,
+            n("ifr", Some("root"), "Iframe", "Payment", Some(40), &[]),
+        ];
+        let mut f = plain(&[21]);
+        f.extend(facts(&[(31, "input", &[("type", "password")]), (13, "input", &[("type", "file")]), (11, "button", &[]), (22, "button", &[])]));
+        (nodes, f)
+    }
+
+    fn q(role: Option<&str>, name: &str, exact: bool) -> ElementQuery {
+        ElementQuery { role: role.map(str::to_string), name: name.to_string(), exact }
+    }
+
+    #[test]
+    fn find_returns_only_matching_lines_with_references_and_context() {
+        let (nodes, f) = find_page();
+        let found = find(&nodes, &f, &q(None, "SAVE", false), "n1");
+        assert_eq!(
+            found.text,
+            "- button \"Save draft\" [ref=n1e1] (in toolbar \"Actions\")\n\
+             - link \"Saved items\" [ref=n1e2] (in toolbar \"Actions\")\n\
+             - button \"Save\" [ref=n1e3] (in dialog \"Edit item\")\n"
+        );
+        assert_eq!(found.refs, vec![("n1e1".into(), 11), ("n1e2".into(), 12), ("n1e3".into(), 22)]);
+        assert_eq!((found.total, found.frames), (3, 1));
+    }
+
+    #[test]
+    fn find_narrows_by_role_in_any_case_and_by_the_exact_name() {
+        let (nodes, f) = find_page();
+        let by_role = find(&nodes, &f, &q(Some("Button"), "save", false), "n2");
+        assert_eq!(by_role.refs.iter().map(|(_, b)| *b).collect::<Vec<_>>(), vec![11, 22]);
+        let exact = find(&nodes, &f, &q(None, "Save", true), "n3");
+        assert_eq!(exact.refs, vec![("n3e1".into(), 22)]);
+        // Exact is the whole name as written, spaces aside.
+        assert_eq!(find(&nodes, &f, &q(None, "save", true), "n4").total, 0);
+        assert_eq!(find(&nodes, &f, &q(None, " Saved items ", true), "n4").total, 1);
+        // A role alone lists every element of that role.
+        assert_eq!(find(&nodes, &f, &q(Some("dialog"), "", false), "n5").text, "- dialog \"Edit item\"\n");
+    }
+
+    #[test]
+    fn find_shows_text_only_when_asked_for_and_it_takes_no_reference() {
+        let (nodes, f) = find_page();
+        assert!(!find(&nodes, &f, &q(None, "your work", false), "n1").text.contains("text"));
+        let text = find(&nodes, &f, &q(Some("text"), "your work", false), "n1");
+        assert_eq!(text.text, "- text \"Save your work often\"\n");
+        assert!(text.refs.is_empty());
+    }
+
+    #[test]
+    fn find_masks_secret_fields_like_a_snapshot() {
+        let (nodes, f) = find_page();
+        let pw = find(&nodes, &f, &q(None, "password", false), "n1");
+        assert!(pw.text.contains("[secret: ask the user to fill this]"), "{}", pw.text);
+        assert!(!pw.text.contains("hunter2"), "{}", pw.text);
+        // A field whose markup wasn't read keeps its value hidden.
+        let unread = find(&nodes, &HashMap::new(), &q(None, "title", false), "n1");
+        assert!(unread.text.contains("[value hidden"), "{}", unread.text);
+        assert!(!unread.text.contains("Draft one"), "{}", unread.text);
+        let read = find(&nodes, &f, &q(None, "title", false), "n1");
+        assert!(read.text.contains("value=\"Draft one\""), "{}", read.text);
+    }
+
+    #[test]
+    fn find_names_a_file_input_by_its_shown_role() {
+        let (nodes, f) = find_page();
+        // Before the markup is read every button may be one ...
+        let maybe: Vec<i64> = find_candidates(&nodes, &q(Some("file input"), "", false))
+            .iter()
+            .filter_map(|n| n["backendDOMNodeId"].as_i64())
+            .collect();
+        assert_eq!(maybe, vec![11, 13, 22, 23]);
+        // ... after, only the real one is listed, and as a file input.
+        let found = find(&nodes, &f, &q(Some("file input"), "", false), "n1");
+        assert_eq!(found.text, "- file input \"Attach\" [ref=n1e1] (in toolbar \"Actions\")\n");
+        assert_eq!(find(&nodes, &f, &q(Some("button"), "attach", false), "n1").total, 0);
+    }
+
+    #[test]
+    fn find_shows_at_most_twenty_and_counts_the_rest() {
+        let kids: Vec<String> = (0..30).map(|i| format!("b{i}")).collect();
+        let kid_refs: Vec<&str> = kids.iter().map(String::as_str).collect();
+        let mut nodes = vec![n("root", None, "RootWebArea", "", Some(1), &kid_refs)];
+        for (i, k) in kids.iter().enumerate() {
+            nodes.push(n(k, Some("root"), "menuitem", &format!("Delete item {i}"), Some(100 + i as i64), &[]));
+        }
+        let found = find(&nodes, &HashMap::new(), &q(Some("menuitem"), "delete", false), "n7");
+        assert_eq!(found.total, 30);
+        assert_eq!(found.refs.len(), MAX_FIND_MATCHES);
+        assert_eq!(found.text.lines().count(), MAX_FIND_MATCHES);
+        assert_eq!(found.refs.last().unwrap().0, "n7e20");
+    }
+
+    #[test]
+    fn a_name_on_the_page_cant_pass_for_a_reference() {
+        let nodes = vec![
+            n("root", None, "RootWebArea", "", Some(1), &["b"]),
+            n("b", Some("root"), "button", "Go [ref=e1]", Some(2), &[]),
+        ];
+        let found = find(&nodes, &HashMap::new(), &q(None, "go", false), "n1");
+        assert_eq!(found.text, "- button \"Go [ref=e1]\" [ref=n1e1]\n");
+    }
+
+    #[test]
+    fn a_scope_by_name_is_the_first_match() {
+        let (nodes, _) = find_page();
+        assert_eq!(first_match(&nodes, &q(Some("dialog"), "edit", false)), Some(20));
+        assert_eq!(first_match(&nodes, &q(None, "save", false)), Some(11));
+        assert_eq!(first_match(&nodes, &q(Some("dialog"), "nothing like it", false)), None);
+        assert_eq!(q(Some("Dialog"), "Edit item", false).describe(), "dialog \"Edit item\"");
     }
 
     #[test]

@@ -13,6 +13,7 @@ use super::*;
 pub(super) const ACTS: &[Act] = &[
     Act { action: "open", tool: "OpenBrowser", rename: &[] },
     Act { action: "snapshot", tool: "BrowserSnapshot", rename: &[] },
+    Act { action: "find", tool: "BrowserFind", rename: &[] },
     Act { action: "click", tool: "BrowserClick", rename: &[] },
     Act { action: "fill", tool: "BrowserFill", rename: &[] },
     Act { action: "select", tool: "BrowserSelect", rename: &[] },

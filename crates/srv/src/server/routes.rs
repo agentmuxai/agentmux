@@ -434,6 +434,7 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         // host-side in browser_api::routes::reject_if_shared_target).
         .route("/api/v1/ui/browser/open", post(ui_handlers::handle_ui_browser_open))
         .route("/api/v1/ui/browser/snapshot", post(ui_handlers::handle_ui_browser_snapshot))
+        .route("/api/v1/ui/browser/find", post(crate::server::browser_find::handle_ui_browser_find))
         .route("/api/v1/ui/browser/act", post(ui_handlers::handle_ui_browser_act))
         .route("/api/v1/ui/browser/set_files", post(ui_handlers::handle_ui_browser_set_files))
         .route("/api/v1/ui/browser/wait_for", post(ui_handlers::handle_ui_browser_wait_for))

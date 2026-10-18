@@ -5,6 +5,8 @@
 //! pane as an accessibility snapshot with element references, and click,
 //! fill, select or check by reference
 //! (docs/specs/SPEC_AGENT_DRIVEN_BROWSER_PANES_2026_10_07.md §4).
+//! `/agentmux/browser/find` hands out references for the elements with a
+//! given role and name only, without the rest of the page.
 //!
 //! Elements are acted on in an **isolated JavaScript world**
 //! (`Page.createIsolatedWorld`): it shares the page's DOM but not its
@@ -36,19 +38,35 @@ pub struct RefTable {
     pub refs: HashMap<String, i64>,
     /// For each reference inside an iframe (`f1e3`), how to find its frame.
     pub frames: HashMap<String, FrameRef>,
+    /// How many `find`s (and snapshots scoped by name) this pane has had: the
+    /// `k` of their `n{k}e1` references. Kept when the table is replaced, so a
+    /// reference from an earlier find never comes to name another element.
+    pub finds: u32,
 }
 
 /// Per-host store of each pane's latest reference table, by block id.
 /// Bounded: past `MAX_TABLES` panes, the least recently snapshotted is
 /// dropped (its agent just takes a new snapshot).
 #[derive(Default)]
-pub struct RefTables(std::sync::Mutex<(u64, HashMap<String, (u64, RefTable)>)>);
+pub struct RefTables(std::sync::Mutex<Tables>);
+
+type Tables = (u64, HashMap<String, (u64, RefTable)>);
 
 const MAX_TABLES: usize = 64;
 
 impl RefTables {
+    fn lock(&self) -> std::sync::MutexGuard<'_, Tables> {
+        self.0.lock().unwrap_or_else(|p| p.into_inner())
+    }
+
     fn put(&self, block_id: &str, table: RefTable) {
-        let mut g = self.0.lock().unwrap_or_else(|p| p.into_inner());
+        Self::put_locked(&mut self.lock(), block_id, table);
+    }
+
+    fn put_locked(g: &mut Tables, block_id: &str, mut table: RefTable) {
+        if let Some((_, old)) = g.1.get(block_id) {
+            table.finds = table.finds.max(old.finds);
+        }
         g.0 += 1;
         let stamp = g.0;
         g.1.insert(block_id.to_string(), (stamp, table));
@@ -62,8 +80,34 @@ impl RefTables {
             }
         }
     }
+
     fn get(&self, block_id: &str) -> Option<RefTable> {
-        self.0.lock().unwrap_or_else(|p| p.into_inner()).1.get(block_id).map(|(_, t)| t.clone())
+        self.lock().1.get(block_id).map(|(_, t)| t.clone())
+    }
+
+    /// The prefix for the next find's references on this pane, `n{k}`.
+    /// Counted under one lock, so two finds at once can't share one.
+    fn next_find_prefix(&self, block_id: &str) -> String {
+        let mut g = self.lock();
+        let mut table = g.1.get(block_id).map(|(_, t)| t.clone()).unwrap_or_default();
+        table.finds += 1;
+        let k = table.finds;
+        Self::put_locked(&mut g, block_id, table);
+        format!("n{k}")
+    }
+
+    /// Add references to the pane's table for `url`, the way a scoped
+    /// snapshot's are: beside the ones already there, unless the page
+    /// changed, which starts a new table.
+    fn merge(&self, block_id: &str, url: &str, refs: &[(String, i64)]) {
+        let mut g = self.lock();
+        let mut table = g.1.get(block_id).map(|(_, t)| t.clone()).unwrap_or_default();
+        if table.url != url {
+            table = RefTable { finds: table.finds, ..RefTable::default() };
+        }
+        table.url = url.to_string();
+        table.refs.extend(refs.iter().cloned());
+        Self::put_locked(&mut g, block_id, table);
     }
 }
 
@@ -73,6 +117,29 @@ pub struct SnapshotReq {
     /// A reference from the previous snapshot: narrow to that element's subtree.
     #[serde(default)]
     pub scope: Option<String>,
+    /// Or narrow to the first element named like this, as `find` would list
+    /// it: no earlier snapshot needed, so a page's first read can be narrow.
+    #[serde(default)]
+    pub scope_match: Option<snapshot::ElementQuery>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct FindReq {
+    pub block_id: String,
+    #[serde(flatten)]
+    pub query: snapshot::ElementQuery,
+}
+
+#[derive(Debug, Serialize)]
+pub struct FindData {
+    pub url: String,
+    /// The matching lines, as a snapshot shows them, each with its context.
+    pub matches: String,
+    /// How many lines `matches` holds, and how many elements matched in all.
+    pub shown: usize,
+    pub total: usize,
+    /// The page's iframes, which find doesn't look inside.
+    pub frames: usize,
 }
 
 #[derive(Debug, Serialize)]
@@ -511,6 +578,9 @@ pub async fn snapshot_route(
     if !super::routes::authorized_pub(&headers, &state.ipc_token) {
         return unauthorized();
     }
+    if req.scope.is_some() && req.scope_match.is_some() {
+        return fail("give scope as a reference or as a role and name, not both");
+    }
     let mut cdp = match super::routes::open_dedicated_pane(&state, &req.block_id, "snapshot").await {
         Ok(c) => c,
         Err(e) => return fail(e),
@@ -548,6 +618,19 @@ pub async fn snapshot_route(
         }
     };
     let nodes: Vec<Value> = tree.get("nodes").and_then(|n| n.as_array()).cloned().unwrap_or_default();
+    let scope = match &req.scope_match {
+        Some(q) => match snapshot::first_match(&nodes, q) {
+            Some(b) => Some(b),
+            None => {
+                let _ = cdp.close().await;
+                return fail(format!(
+                    "nothing on the page matches scope {}: take a snapshot without scope, or find with a shorter name",
+                    q.describe()
+                ));
+            }
+        },
+        None => scope,
+    };
     let mut facts = HashMap::new();
     let role_of = |n: &Value| n.pointer("/role/value").and_then(|v| v.as_str()).unwrap_or("").to_string();
     // A scoped snapshot renders only its subtree, so it looks up facts only there.
@@ -572,9 +655,12 @@ pub async fn snapshot_route(
         }
     }
     let url = page_url(&mut cdp).await;
-    let prefix = match &req.scope {
-        Some(r) => format!("{r}."),
-        None => String::new(),
+    // A scope by name has no reference to prefix with: its references are
+    // numbered like a find's, which can't clash with any other.
+    let prefix = match (&req.scope, &req.scope_match) {
+        (Some(r), _) => format!("{r}."),
+        (None, Some(_)) => state.browser_api.ref_tables.next_find_prefix(&req.block_id),
+        (None, None) => String::new(),
     };
     // The iframes' own trees go under their elements. A scoped snapshot shows
     // only the element, so its references can't clash with the full one's.
@@ -585,22 +671,20 @@ pub async fn snapshot_route(
     };
     let rendered = snapshot::render_with_frames(&nodes, &facts, scope, &prefix, &frame_trees);
     // A scoped snapshot adds its references to the full snapshot's table, so
-    // those stay usable; but never across a navigation.
-    let mut table = match scope {
-        Some(_) => state.browser_api.ref_tables.get(&req.block_id).unwrap_or_default(),
-        None => RefTable::default(),
-    };
-    if table.url != url {
-        table = RefTable::default();
-    }
-    table.url = url.clone();
-    table.refs.extend(rendered.refs.iter().cloned());
-    for (r, ordinal) in &rendered.ref_frames {
-        if let Some(f) = frame_refs.get(ordinal) {
-            table.frames.insert(r.clone(), f.clone());
+    // those stay usable; but never across a navigation. It reads no frames.
+    match scope {
+        Some(_) => state.browser_api.ref_tables.merge(&req.block_id, &url, &rendered.refs),
+        None => {
+            let mut table = RefTable { url: url.clone(), ..RefTable::default() };
+            table.refs.extend(rendered.refs.iter().cloned());
+            for (r, ordinal) in &rendered.ref_frames {
+                if let Some(f) = frame_refs.get(ordinal) {
+                    table.frames.insert(r.clone(), f.clone());
+                }
+            }
+            state.browser_api.ref_tables.put(&req.block_id, table);
         }
     }
-    state.browser_api.ref_tables.put(&req.block_id, table);
     let _ = cdp.close().await;
     (
         StatusCode::OK,
@@ -612,6 +696,70 @@ pub async fn snapshot_route(
         })),
     )
 }
+
+/// Matches whose markup `find` reads (for a field's value and whether a
+/// button is a file input): a few more than it shows, since reading can
+/// drop a button asked for as a file input.
+const MAX_FIND_DESCRIBES: usize = snapshot::MAX_FIND_MATCHES * 3;
+
+/// `POST /agentmux/browser/find`: the lines of the elements with a role and
+/// name, each with a reference added to the pane's table, so a big page
+/// needn't be read whole to click one button. Top frame only.
+pub async fn find_route(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(req): Json<FindReq>,
+) -> (StatusCode, Json<ApiResponse<FindData>>) {
+    if !super::routes::authorized_pub(&headers, &state.ipc_token) {
+        return unauthorized();
+    }
+    let q = &req.query;
+    if q.name.trim().is_empty() && q.role.as_deref().unwrap_or("").trim().is_empty() {
+        return fail("find needs a name (part of the element's accessible name), a role, or both");
+    }
+    let mut cdp = match super::routes::open_dedicated_pane(&state, &req.block_id, "find").await {
+        Ok(c) => c,
+        Err(e) => return fail(e),
+    };
+    let _ = cdp.call("Accessibility.enable", json!({})).await;
+    let tree = match call(&mut cdp, "Accessibility.getFullAXTree", json!({})).await {
+        Ok(t) => t,
+        Err(e) => {
+            let _ = cdp.close().await;
+            return fail(e);
+        }
+    };
+    let nodes: Vec<Value> = tree.get("nodes").and_then(|n| n.as_array()).cloned().unwrap_or_default();
+    let needs_facts = |n: &&Value| {
+        let role = n.pointer("/role/value").and_then(|v| v.as_str()).unwrap_or("");
+        snapshot::VALUE_ROLES.contains(&role) || role == "button"
+    };
+    let mut facts = HashMap::new();
+    for n in snapshot::find_candidates(&nodes, q).into_iter().filter(needs_facts).take(MAX_FIND_DESCRIBES) {
+        if let Some(b) = n.get("backendDOMNodeId").and_then(|v| v.as_i64()) {
+            if let Some(f) = describe_markup(&mut cdp, b).await {
+                let name = n.pointer("/name/value").and_then(|v| v.as_str()).unwrap_or("");
+                facts.insert(b, f.with_label(name));
+            }
+        }
+    }
+    let url = page_url(&mut cdp).await;
+    let _ = cdp.close().await;
+    let prefix = state.browser_api.ref_tables.next_find_prefix(&req.block_id);
+    let found = snapshot::find(&nodes, &facts, q, &prefix);
+    state.browser_api.ref_tables.merge(&req.block_id, &url, &found.refs);
+    (
+        StatusCode::OK,
+        Json(ApiResponse::ok(FindData {
+            url,
+            shown: found.total.min(snapshot::MAX_FIND_MATCHES),
+            total: found.total,
+            frames: found.frames,
+            matches: found.text,
+        })),
+    )
+}
+
 /// `POST /agentmux/browser/act`.
 pub async fn act_route(
     State(state): State<Arc<AppState>>,
@@ -622,7 +770,7 @@ pub async fn act_route(
         return unauthorized();
     }
     let Some(table) = state.browser_api.ref_tables.get(&req.block_id) else {
-        return fail("no snapshot of this pane yet: take one with Browser's snapshot action first");
+        return fail("no snapshot of this pane yet: take one with Browser's snapshot action first, or find the element");
     };
     let Some(&backend) = table.refs.get(&req.ref_) else {
         return fail(format!("unknown reference {:?}; take a new snapshot", req.ref_));
@@ -886,6 +1034,26 @@ Connection: close
         let out = redact_secret(after, &facts("input", &[("type", "password")]));
         assert_eq!(out["value"], "[secret: hidden]");
         assert_eq!(out["type"], "password");
+    }
+
+    #[test]
+    fn find_references_merge_into_the_table_and_are_never_numbered_twice() {
+        let tables = RefTables::default();
+        // A find on a fresh pane starts the table.
+        assert_eq!(tables.next_find_prefix("b"), "n1");
+        tables.merge("b", "https://a.example/", &[("n1e1".into(), 7)]);
+        // A full snapshot replaces the table, but not the find count.
+        tables.put("b", RefTable { url: "https://a.example/".into(), refs: HashMap::from([("e1".into(), 3)]), ..RefTable::default() });
+        assert_eq!(tables.next_find_prefix("b"), "n2");
+        tables.merge("b", "https://a.example/", &[("n2e1".into(), 9)]);
+        let t = tables.get("b").unwrap();
+        assert_eq!((t.refs.get("e1"), t.refs.get("n2e1"), t.refs.get("n1e1")), (Some(&3), Some(&9), None));
+        // Another page starts a new table; the count goes on.
+        tables.merge("b", "https://b.example/", &[("e4.e1".into(), 1)]);
+        let t = tables.get("b").unwrap();
+        assert_eq!((t.url.as_str(), t.refs.len()), ("https://b.example/", 1));
+        assert_eq!(tables.next_find_prefix("b"), "n3");
+        assert_eq!(tables.next_find_prefix("other"), "n1");
     }
 
     #[test]
