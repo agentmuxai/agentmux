@@ -112,4 +112,62 @@ impl FileStore {
         self.forget_cached(dst_zone, names);
         Ok(copied)
     }
+
+    /// Move `names` from `src_zone` to `dst_zone` in one transaction, by
+    /// renaming their rows: nothing is copied, and two callers moving the same
+    /// source can't both get it, because the second finds nothing left. An
+    /// archive takes the current conversation this way (`agent_session::archive`).
+    ///
+    /// Moves nothing and returns `Ok(None)` when `dst_zone` already holds any
+    /// of `names`. A name the source lacks is skipped. Returns the bytes moved
+    /// otherwise: `Some(0)` when the source held none of them.
+    ///
+    /// A moved file keeps its rows as they were (`gen`, line count,
+    /// incarnation): the revision triggers fire on inserted, deleted and
+    /// rewritten parts, not on a rename. Like [`Self::copy_files_to_zone`] it
+    /// reads the database: flush the cache first if the source was written
+    /// through it.
+    #[track_caller]
+    pub fn move_files_to_zone(&self, src_zone: &str, dst_zone: &str, names: &[&str]) -> Result<Option<u64>, StoreError> {
+        let moved = self.write_txn(|tx| {
+            for name in names {
+                let exists = tx
+                    .query_row(
+                        "SELECT 1 FROM db_wave_file WHERE zoneid = ?1 AND name = ?2",
+                        params![dst_zone, name],
+                        |_| Ok(()),
+                    )
+                    .optional()?
+                    .is_some();
+                if exists {
+                    return Ok(None);
+                }
+            }
+            let mut moved = 0u64;
+            for name in names {
+                let size: Option<i64> = tx
+                    .query_row(
+                        "SELECT size FROM db_wave_file WHERE zoneid = ?1 AND name = ?2",
+                        params![src_zone, name],
+                        |r| r.get(0),
+                    )
+                    .optional()?;
+                let Some(size) = size else { continue };
+                tx.execute(
+                    "UPDATE db_file_data SET zoneid = ?1 WHERE zoneid = ?2 AND name = ?3",
+                    params![dst_zone, src_zone, name],
+                )?;
+                tx.execute(
+                    "UPDATE db_wave_file SET zoneid = ?1 WHERE zoneid = ?2 AND name = ?3",
+                    params![dst_zone, src_zone, name],
+                )?;
+                moved += size.max(0) as u64;
+            }
+            Ok(Some(moved))
+        })?;
+        // Rows this process may have cached for either zone are stale.
+        self.forget_cached(src_zone, names);
+        self.forget_cached(dst_zone, names);
+        Ok(moved)
+    }
 }

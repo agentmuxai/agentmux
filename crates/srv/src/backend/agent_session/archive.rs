@@ -32,6 +32,20 @@ pub fn archive_session(
     filestore: &FileStore,
     definition_id: &str,
 ) -> Result<Option<(String, i64)>, String> {
+    archive_session_in(filestore, global_transcript_store().map(|g| g.as_ref()), definition_id)
+}
+
+/// [`archive_session`] with the global transcript store passed in (`None`
+/// when there is none). The archive is written to the global store whenever
+/// there is one: the agent's record (`history/record.rs`, behind
+/// SearchHistory and the Agent History view) and the history summary read
+/// archives only there, so an archive written to the per-channel store drops
+/// out of the agent's history.
+pub(crate) fn archive_session_in(
+    filestore: &FileStore,
+    global: Option<&FileStore>,
+    definition_id: &str,
+) -> Result<Option<(String, i64)>, String> {
     let current_zone = validate_and_current(definition_id)?;
 
     // Prefer the GLOBAL current zone as the archive source. It is the complete
@@ -46,10 +60,20 @@ pub fn archive_session(
     // just-archived conversation. Falls through to the per-channel path below
     // only when there's no global store or it holds nothing for this agent
     // (pure pre-global / same-channel-only data). (codex + reagent P1/P2 #1399.)
-    if let Some(archived) = archive_global_current(filestore, definition_id)? {
-        clear_local_current_zone(filestore, &current_zone);
-        clear_global_current_zone(definition_id);
-        return Ok(Some(archived));
+    if let Some(gfs) = global {
+        // This channel's current is at most a subset of the global one, so it
+        // is cleared first: a crash before the move leaves the conversation
+        // current and readable from the global store, never a stale local copy
+        // with no global current to win over it.
+        match archive_global_current(gfs, definition_id, || clear_local_current_zone(filestore, &current_zone))? {
+            GlobalArchive::Archived(zone, ts) => {
+                clear_global_current_zone_in(gfs, definition_id);
+                return Ok(Some((zone, ts)));
+            }
+            // Another instance archived and cleared it first.
+            GlobalArchive::ArchivedElsewhere => return Ok(None),
+            GlobalArchive::Nothing => {}
+        }
     }
 
     // Determine whether there's anything worth archiving.
@@ -71,8 +95,12 @@ pub fn archive_session(
         return Ok(None);
     }
 
-    let ts = now_ms();
-    let archive_zone = agent_archive_zone(definition_id, ts);
+    // Per-channel content is archived into the global store too, when there is
+    // one. It is written to a staging zone of this call's own and then moved
+    // under a free archive name in one transaction, so two instances archiving
+    // at once can't write into the same archive.
+    let target = global.unwrap_or(filestore);
+    let staging = format!("agent:{definition_id}:archiving:{}", uuid::Uuid::new_v4());
 
     // Copy snapshot first (the canonical "history" file).
     if has_state {
@@ -80,7 +108,7 @@ pub fn archive_session(
             .read_file(&current_zone, SNAPSHOT_FILE)
             .map_err(|e| format!("read current snapshot: {e}"))?
             .unwrap_or_default();
-        write_zone_file(filestore, &archive_zone, SNAPSHOT_FILE, &snapshot_bytes)?;
+        write_zone_file(target, &staging, SNAPSHOT_FILE, &snapshot_bytes)?;
     }
     // Copy NDJSON output if present.
     if has_output {
@@ -89,7 +117,7 @@ pub fn archive_session(
             .map_err(|e| format!("read current output: {e}"))?
             .unwrap_or_default();
         if !output_bytes.is_empty() {
-            write_zone_file(filestore, &archive_zone, OUTPUT_FILE, &output_bytes)?;
+            write_zone_file(target, &staging, OUTPUT_FILE, &output_bytes)?;
         }
         // The tsidx sidecar travels with output (codex P2 on PR #2508):
         // without it, archived history loses its receive-time stamps and —
@@ -97,8 +125,9 @@ pub fn archive_session(
         // session (fresh output restarts at offset 0 under old entries).
         // Best-effort: the sidecar is auxiliary and must never abort an
         // archive.
-        copy_tsidx_best_effort(filestore, &current_zone, filestore, &archive_zone);
+        copy_tsidx_best_effort(filestore, &current_zone, target, &staging);
     }
+    let (archive_zone, ts) = claim_archive_zone(target, &staging, definition_id)?;
 
     // Archive write succeeded. Now safe to clear the current zone: the files
     // that were archived, and both sidecars with `output` — a stale tsidx
@@ -130,7 +159,9 @@ pub fn archive_session(
     // conversation on the next open — so a "new session" for this definition
     // would inherit stale history. Best-effort, same as the per-channel clear.
     // (codex P1 on PR #1399.)
-    clear_global_current_zone(definition_id);
+    if let Some(gfs) = global {
+        clear_global_current_zone_in(gfs, definition_id);
+    }
 
     tracing::info!(
         definition_id = %definition_id,
@@ -142,59 +173,93 @@ pub fn archive_session(
     Ok(Some((archive_zone, ts as i64)))
 }
 
-/// Archive the agent's GLOBAL `agent:<defId>:current` content into a *local*
-/// (per-`filestore`) archive zone, so a cross-channel viewer's conversation is
-/// preserved + browsable in this channel before the global current is cleared.
+/// Archive the agent's GLOBAL `agent:<defId>:current` into a global
+/// `agent:<defId>:archive:<ms>` zone, where the agent's record reads it.
 ///
-/// Returns `Ok(Some((archive_zoneid, ts)))` when the global current held
-/// content (snapshot or output), `Ok(None)` when there was nothing to archive
-/// (no global store, or both files empty/absent). The archive lands in the
-/// per-channel store because archive browsing (`list_archives`) is per-channel.
-pub fn archive_global_current(
-    filestore: &FileStore,
-    definition_id: &str,
-) -> Result<Option<(String, i64)>, String> {
-    let Some(gfs) = global_transcript_store() else {
-        return Ok(None);
-    };
+/// The files are moved (renamed) inside the database, in one transaction: a
+/// conversation of any size never passes through memory, and only one
+/// archive can take it. The output's timestamps and the running summary go
+/// with it. `before_move` runs once there is something to archive.
+fn archive_global_current(gfs: &FileStore, definition_id: &str, before_move: impl FnOnce()) -> Result<GlobalArchive, String> {
     let current_zone = validate_and_current(definition_id)?;
+    let has = |name: &str| -> Result<bool, String> {
+        Ok(gfs.stat(&current_zone, name).map_err(|e| format!("stat: {e}"))?.is_some_and(|f| f.size > 0))
+    };
+    // A snapshot written through the cache may not be in the database yet.
+    gfs.flush_cache().map_err(|e| format!("flush before archive: {e}"))?;
+    if !has(SNAPSHOT_FILE)? && !has(OUTPUT_FILE)? {
+        return Ok(GlobalArchive::Nothing);
+    }
+    before_move();
 
-    let snap = read_snapshot_bytes(gfs, &current_zone, SNAPSHOT_FILE)?;
-    let out = read_snapshot_bytes(gfs, &current_zone, OUTPUT_FILE)?;
-    let has_snap = snap.as_ref().is_some_and(|b| !b.is_empty());
-    let has_out = out.as_ref().is_some_and(|b| !b.is_empty());
-    if !has_snap && !has_out {
-        return Ok(None);
+    let files = [SNAPSHOT_FILE, OUTPUT_FILE, TSIDX_FILE, crate::backend::continuity_state::STATE_FILE];
+    // The store is shared by every instance on the machine. The files are
+    // moved, not copied, so only one archive can take them; another instance
+    // can still take the free name between the check and the move.
+    for _ in 0..8 {
+        let (archive_zone, ts) = free_archive_zone(gfs, definition_id)?;
+        match gfs
+            .move_files_to_zone(&current_zone, &archive_zone, &files)
+            .map_err(|e| format!("move to archive: {e}"))?
+        {
+            // The name was taken in between: try the next one.
+            None => continue,
+            // Nothing left to move: another instance archived it first.
+            Some(0) => return Ok(GlobalArchive::ArchivedElsewhere),
+            Some(_) => {
+                tracing::info!(
+                    definition_id = %definition_id,
+                    archive_zoneid = %archive_zone,
+                    archived_at_ms = ts,
+                    "agent_session: archived the global session"
+                );
+                return Ok(GlobalArchive::Archived(archive_zone, ts as i64));
+            }
+        }
     }
-
-    let ts = now_ms();
-    let archive_zone = agent_archive_zone(definition_id, ts);
-    if has_snap {
-        write_zone_file(filestore, &archive_zone, SNAPSHOT_FILE, snap.as_ref().unwrap())?;
-    }
-    if has_out {
-        write_zone_file(filestore, &archive_zone, OUTPUT_FILE, out.as_ref().unwrap())?;
-        // Sidecar travels with output — same rationale as the per-channel
-        // path (codex P2 on PR #2508).
-        copy_tsidx_best_effort(gfs, &current_zone, filestore, &archive_zone);
-    }
-    tracing::info!(
-        definition_id = %definition_id,
-        archive_zoneid = %archive_zone,
-        archived_at_ms = ts,
-        "agent_session: archived cross-channel (global) session into local archive"
-    );
-    Ok(Some((archive_zone, ts as i64)))
+    Err(format!("no free archive zone for {definition_id}"))
 }
 
-/// Read a zone file's full bytes, mapping absence to `Ok(None)`.
-fn read_snapshot_bytes(store: &FileStore, zone: &str, name: &str) -> Result<Option<Vec<u8>>, String> {
-    match store.stat(zone, name).map_err(|e| format!("stat: {e}"))? {
-        Some(_) => store
-            .read_file(zone, name)
-            .map_err(|e| format!("read_file: {e}")),
-        None => Ok(None),
+/// What [`archive_global_current`] did.
+enum GlobalArchive {
+    Archived(String, i64),
+    /// The global current held nothing to archive.
+    Nothing,
+    /// Another instance archived and cleared the global current first.
+    ArchivedElsewhere,
+}
+
+/// Move what [`archive_session_in`] staged in `staging` under a free archive
+/// name. The move fails, and the next name is tried, when another instance
+/// took the name first.
+fn claim_archive_zone(store: &FileStore, staging: &str, definition_id: &str) -> Result<(String, u64), String> {
+    // The staged files were written through the cache; the move reads the database.
+    store.flush_cache().map_err(|e| format!("flush before archive: {e}"))?;
+    for _ in 0..8 {
+        let (zone, ts) = free_archive_zone(store, definition_id)?;
+        let moved = store
+            .move_files_to_zone(staging, &zone, &[SNAPSHOT_FILE, OUTPUT_FILE, TSIDX_FILE])
+            .map_err(|e| format!("move to archive: {e}"))?;
+        if moved.is_some() {
+            return Ok((zone, ts));
+        }
     }
+    Err(format!("no free archive zone for {definition_id}; the conversation stays in {staging}"))
+}
+
+/// An archive zone for now that holds nothing yet in `store`. Two archives in
+/// the same millisecond would otherwise share a name, and the second would
+/// overwrite the first.
+fn free_archive_zone(store: &FileStore, definition_id: &str) -> Result<(String, u64), String> {
+    let mut ts = now_ms();
+    for _ in 0..1000 {
+        let zone = agent_archive_zone(definition_id, ts);
+        if store.zone_ids_with_prefix(&zone).map_err(|e| format!("zone_ids_with_prefix: {e}"))?.iter().all(|z| *z != zone) {
+            return Ok((zone, ts));
+        }
+        ts += 1;
+    }
+    Err(format!("no free archive zone for {definition_id}"))
 }
 
 /// Copy the `output.tsidx` sidecar from `src` zone to `dst` zone,
@@ -232,7 +297,7 @@ pub fn clear_local_current_zone(filestore: &FileStore, zone: &str) {
 }
 
 /// Delete `output.state.json` + `output` from the agent's GLOBAL
-/// `agent:<defId>:current` zone, if a global store is installed. Best-effort:
+/// `agent:<defId>:current` zone in `gfs`. Best-effort:
 /// a missing file is the expected "agent never mirrored" case (silent), other
 /// errors are logged but never propagated. Keeps the global zone in lockstep
 /// with the per-channel `:current` clear in [`archive_session`].
@@ -242,10 +307,7 @@ pub fn clear_local_current_zone(filestore: &FileStore, zone: &str) {
 /// same byte size. Since #3634 the index also carries the output generation it
 /// was built for, which catches that too; deleting it here forces a rebuild
 /// against the new content regardless.
-pub fn clear_global_current_zone(definition_id: &str) {
-    let Some(gfs) = global_transcript_store() else {
-        return;
-    };
+fn clear_global_current_zone_in(gfs: &FileStore, definition_id: &str) {
     let Ok(zone) = validate_and_current(definition_id) else {
         return;
     };
@@ -278,6 +340,17 @@ pub fn list_archives(
     definition_id: &str,
     limit: usize,
 ) -> Result<Vec<ArchiveSummary>, String> {
+    list_archives_in(filestore, global_transcript_store().map(|g| g.as_ref()), definition_id, limit)
+}
+
+/// [`list_archives`] over the global store, where archives are written, and
+/// the per-channel store, which holds archives written before that.
+pub(crate) fn list_archives_in(
+    filestore: &FileStore,
+    global: Option<&FileStore>,
+    definition_id: &str,
+    limit: usize,
+) -> Result<Vec<ArchiveSummary>, String> {
     if !is_valid_definition_id(definition_id) {
         return Err(format!(
             "INVALID_DEFINITION_ID: must match [A-Za-z0-9_-]+, got {:?}",
@@ -287,15 +360,18 @@ pub fn list_archives(
     let prefix = format!("agent:{}:archive:", definition_id);
     let limit = if limit == 0 { 20 } else { limit.min(100) };
 
-    let all_zones = filestore
-        .get_all_zone_ids()
-        .map_err(|e| format!("get_all_zone_ids: {e}"))?;
-
-    let mut matches: Vec<(u64, String)> = Vec::new();
-    for zone in all_zones {
-        if let Some(suffix) = zone.strip_prefix(&prefix) {
-            if let Ok(ts) = suffix.parse::<u64>() {
-                matches.push((ts, zone));
+    let mut matches: Vec<(u64, String, &FileStore)> = Vec::new();
+    for store in global.into_iter().chain(std::iter::once(filestore)) {
+        let zones = store
+            .zone_ids_with_prefix(&prefix)
+            .map_err(|e| format!("zone_ids_with_prefix: {e}"))?;
+        for zone in zones {
+            let Some(Ok(ts)) = zone.strip_prefix(&prefix).map(str::parse::<u64>) else {
+                continue;
+            };
+            // The global copy wins when both stores hold the same archive.
+            if !matches.iter().any(|(_, z, _)| *z == zone) {
+                matches.push((ts, zone, store));
             }
         }
     }
@@ -304,8 +380,8 @@ pub fn list_archives(
     matches.truncate(limit);
 
     let mut rows = Vec::with_capacity(matches.len());
-    for (ts, zone) in matches {
-        let (preview, node_count) = read_archive_preview(filestore, &zone);
+    for (ts, zone, store) in matches {
+        let (preview, node_count) = read_archive_preview(store, &zone);
         rows.push(ArchiveSummary {
             archive_zoneid: zone,
             archived_at_ms: ts as i64,

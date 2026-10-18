@@ -84,3 +84,36 @@ fn an_uncounted_source_is_copied_and_counted_from_zero() {
     assert_eq!(all(&fs, DST, "output"), b"a\nb\n");
     assert_eq!(fs.catch_up_line_counter(DST, "output").unwrap().unwrap().counted.unwrap().lines, 2);
 }
+
+/// A move renames the files: same bytes, same line count and generation, the
+/// source is gone, and a second move of the same source finds nothing.
+#[test]
+fn a_move_takes_the_files_once_and_keeps_them_as_they_were() {
+    let fs = mem();
+    let data = transcript();
+    file(&fs, SRC, "output");
+    fs.append_lines_stamped(SRC, "output", &data, "output.tsidx").unwrap();
+    let tsidx = all(&fs, SRC, "output.tsidx");
+    let before = fs.line_state(SRC, "output").unwrap().unwrap().counted.unwrap();
+
+    let moved = fs.move_files_to_zone(SRC, DST, &["output", "output.tsidx", "absent"]).unwrap();
+
+    assert_eq!(moved, Some((data.len() + tsidx.len()) as u64));
+    assert_eq!(all(&fs, DST, "output"), data);
+    assert_eq!(all(&fs, DST, "output.tsidx"), tsidx);
+    assert!(fs.line_state(SRC, "output").unwrap().is_none(), "the source is gone");
+    let after = fs.line_state(DST, "output").unwrap().unwrap().counted.expect("still counted");
+    assert_eq!((after.lines, after.gen), (before.lines, before.gen), "the same file, renamed");
+    assert_eq!(fs.move_files_to_zone(SRC, "agent:other:current", &["output"]).unwrap(), Some(0), "nothing left to take");
+}
+
+#[test]
+fn a_move_never_overwrites_a_destination_that_has_any_of_the_files() {
+    let fs = mem();
+    file(&fs, SRC, "output");
+    fs.append_lines(SRC, "output", b"{\"src\":1}\n").unwrap();
+    file(&fs, DST, "output.tsidx");
+
+    assert_eq!(fs.move_files_to_zone(SRC, DST, &["output", "output.tsidx"]).unwrap(), None);
+    assert_eq!(all(&fs, SRC, "output"), b"{\"src\":1}\n", "the source stays where it was");
+}
