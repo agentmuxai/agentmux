@@ -129,6 +129,5 @@ Extend the frames fixture (`frames` test page: top frame, same-origin and cross-
 ## 6. Other learnings (not browser code)
 
 - **Agents can't see wall-clock time.** A test agent's "it returned at once" was wrong twice; timing claims must come from logs (`browser_attention_resolve decision=…` in the host log). §2.5 puts the facts in the tool result.
-- **Messaging an agent in another AgentMux instance on the same machine:** `Message send` with a block id goes to the cloud relay, and two agents with the same name in different instances are ambiguous. `broadcast` with the block id delivers locally. `send` should accept a cross-instance block id, or say which instance a name resolved to.
 - **The approval banner's Approve is easy to hit by mistake** (the user approved three times when asked to cancel during testing). Consider making Cancel the first, focused button for clicks that submit, or naming the button for the action ("Submit form").
 - **The operator types secrets; the agent checks the result.** The split worked well: the user signed in and typed the two identification numbers and pressed the final Submit; the agent filled the rest and verified computed totals on screen before moving on. Write it into the Browser tool's guidance as the pattern for forms with identity numbers.
