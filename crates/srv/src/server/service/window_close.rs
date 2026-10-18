@@ -28,9 +28,11 @@ pub(crate) async fn handle_close_window(state: &AppState, call: &WebCallType) ->
     };
     // Look up the window's workspace before we close it.
     // Read SQLite (source of truth during migration).
-    let ws_id: Option<String> = match store.get::<Window>(&window_id) {
-        Ok(Some(w)) => Some(w.workspaceid.clone()),
-        Ok(None) => None,
+    // And its name, which the last close's session record keeps: the row is
+    // gone by then.
+    let (ws_id, window_name): (Option<String>, Option<String>) = match store.get::<Window>(&window_id) {
+        Ok(Some(w)) => (Some(w.workspaceid.clone()), super::session_windows::saved_name(store, &w)),
+        Ok(None) => (None, None),
         Err(e) => {
             return WebReturnType::error(format!(
                 "CloseWindow: window lookup failed: {}",
@@ -138,7 +140,7 @@ pub(crate) async fn handle_close_window(state: &AppState, call: &WebCallType) ->
                     .unwrap_or(false);
                 // Best-effort: a failure here must never block the close itself.
                 if will_empty_windowids {
-                    super::session_windows::save_on_last_close(store, &ws_id);
+                    super::session_windows::save_on_last_close(store, &ws_id, window_name.as_deref());
                 }
                 close_workspace(state, ws_id).await;
             }
@@ -192,7 +194,7 @@ pub(crate) async fn handle_close_window(state: &AppState, call: &WebCallType) ->
                 .map(|c| c.windowids.is_empty())
                 .unwrap_or(false);
             if will_empty_windowids {
-                super::session_windows::save_on_last_close(store, &ws_id);
+                super::session_windows::save_on_last_close(store, &ws_id, window_name.as_deref());
             }
             close_workspace(state, ws_id).await;
         }

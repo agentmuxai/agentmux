@@ -140,7 +140,7 @@ async fn the_last_close_of_a_quit_keeps_the_quits_record() {
     let (_, last_ws) = window(&state, "window-2", "sysinfo", 10, 20).await;
     save_last_session_snapshot(&state.mstore, snapshot_session(&state.mstore, true).unwrap());
 
-    save_on_last_close(&state.mstore, &last_ws);
+    save_on_last_close(&state.mstore, &last_ws, None);
     let kept = load_last_session_snapshot(&state.mstore).unwrap();
     assert_eq!(windows_of(&kept).len(), 2, "the quit's record, not the last window alone");
 
@@ -148,14 +148,14 @@ async fn the_last_close_of_a_quit_keeps_the_quits_record() {
     let mut stale = kept;
     stale["saved_at_ms"] = json!(agentmux_common::time::now_ms() - QUIT_RECORD_KEPT_FOR_MS - 1);
     save_last_session_snapshot(&state.mstore, stale);
-    save_on_last_close(&state.mstore, &last_ws);
+    save_on_last_close(&state.mstore, &last_ws, None);
     let replaced = load_last_session_snapshot(&state.mstore).unwrap();
     assert_eq!(entry_views(&replaced), ["sysinfo"]);
     assert!(replaced.get("windows").is_none());
 
     // Nor does a record that wasn't a quit's hold the close back.
     save_last_session_snapshot(&state.mstore, snapshot_session(&state.mstore, false).unwrap());
-    save_on_last_close(&state.mstore, &last_ws);
+    save_on_last_close(&state.mstore, &last_ws, None);
     assert!(load_last_session_snapshot(&state.mstore).unwrap().get("windows").is_none());
 }
 
@@ -270,4 +270,106 @@ async fn an_older_quits_record_never_costs_a_later_run_its_windows() {
     let client = state.mstore.get_all::<Client>().unwrap().into_iter().next().unwrap();
     assert_eq!(client.windowids, vec![later]);
     assert!(state.mstore.get::<Workspace>(&later_ws).unwrap().is_some());
+}
+
+/// Name `ws_id`'s workspace and window `win_id` as the user would have.
+async fn name(state: &AppState, win_id: &str, ws_id: &str, window_name: &str, workspace_name: &str) {
+    dispatch_apply(state, Command::RenameWorkspace { workspace_id: ws_id.into(), name: workspace_name.into() }).await;
+    let mut w = state.mstore.get::<Window>(win_id).unwrap().unwrap();
+    w.meta.insert("window:displayname".into(), json!(window_name));
+    state.mstore.update(&mut w).unwrap();
+}
+
+#[tokio::test]
+async fn windows_and_their_workspaces_come_back_with_their_names() {
+    let state = test_state();
+    no_windows(&state);
+    let (main_id, main_ws) = window(&state, "main", "agent", 0, 0).await;
+    let (other_id, other_ws) = window(&state, "window-2", "sysinfo", 10, 20).await;
+    name(&state, &main_id, &main_ws, "Release work", "Upgrades").await;
+    name(&state, &other_id, &other_ws, "Monitoring", "Ops").await;
+    let record = snapshot_session(&state.mstore, true).unwrap();
+    assert_eq!(record["windows"][0]["window"]["name"], "Release work");
+    assert_eq!(record["windows"][1]["name"], "Ops");
+    save_last_session_snapshot(&state.mstore, record);
+    no_windows(&state);
+
+    let (restored_main, _) = restore_last_session(&state).await.unwrap().unwrap();
+    let take = WebCallType { service: "window".into(), method: "TakeRestoredWindows".into(), args: vec![], uicontext: None };
+    let others = handle_take_restored_windows(&state, &take).data.unwrap();
+    let restored_other = others[0]["workspaceid"].as_str().unwrap().to_string();
+    let ws_name = |ws: &str| state.mstore.get::<Workspace>(ws).unwrap().unwrap().name;
+    assert_eq!((ws_name(&restored_main), ws_name(&restored_other)), ("Upgrades".into(), "Ops".into()));
+
+    // The window that opens onto each restored workspace takes its name, once.
+    let create = |ws: &str| WebCallType {
+        service: "window".into(),
+        method: "CreateWindow".into(),
+        args: vec![Value::Null, json!(ws), json!("window-x")],
+        uicontext: None,
+    };
+    for (ws, expected) in [(&restored_other, "Monitoring"), (&restored_main, "Release work")] {
+        let ret = crate::server::service::window::handle_window_service(&state, &create(ws)).await;
+        assert!(ret.error.is_none(), "{:?}", ret.error);
+        let win_id = ret.data.unwrap()["oid"].as_str().unwrap().to_string();
+        let win = state.mstore.get::<Window>(&win_id).unwrap().unwrap();
+        assert_eq!(win.meta.get("window:displayname"), Some(&json!(expected)));
+    }
+    assert_eq!(restored_window_name(&state.mstore, &restored_main), None, "handed out once");
+    let client = state.mstore.get_all::<Client>().unwrap().into_iter().next().unwrap();
+    assert!(!client.meta.contains_key(NAMES_META_KEY), "nothing left waiting");
+}
+
+#[tokio::test]
+async fn an_unnamed_window_and_an_older_record_restore_without_names() {
+    let state = test_state();
+    no_windows(&state);
+    window(&state, "main", "agent", 0, 0).await;
+    let record = snapshot_session(&state.mstore, true).unwrap();
+    assert!(record["windows"][0]["window"].get("name").is_none());
+    assert!(record["windows"][0].get("name").is_none());
+    save_last_session_snapshot(&state.mstore, record);
+    no_windows(&state);
+    let (ws, _) = restore_last_session(&state).await.unwrap().unwrap();
+    assert_eq!(state.mstore.get::<Workspace>(&ws).unwrap().unwrap().name, "");
+    assert_eq!(restored_window_name(&state.mstore, &ws), None);
+}
+
+#[tokio::test]
+async fn closing_the_last_window_keeps_its_name_for_the_next_start() {
+    let state = test_state();
+    no_windows(&state);
+    let (win_id, ws) = window(&state, "main", "agent", 0, 0).await;
+    name(&state, &win_id, &ws, "Release work", "Upgrades").await;
+    // CloseWindow reads the name before it prunes the row.
+    let closing = window_name(&state.mstore.get::<Window>(&win_id).unwrap().unwrap());
+    no_windows(&state);
+    save_on_last_close(&state.mstore, &ws, closing.as_deref());
+    let record = load_last_session_snapshot(&state.mstore).unwrap();
+    assert_eq!((record["window"]["name"].as_str(), record["name"].as_str()), (Some("Release work"), Some("Upgrades")));
+
+    let (restored, _) = restore_last_session(&state).await.unwrap().unwrap();
+    assert_eq!(state.mstore.get::<Workspace>(&restored).unwrap().unwrap().name, "Upgrades");
+    assert_eq!(restored_window_name(&state.mstore, &restored).as_deref(), Some("Release work"));
+    // Kept until the window has it: reading it again finds it again.
+    assert_eq!(restored_window_name(&state.mstore, &restored).as_deref(), Some("Release work"));
+    assert_eq!(forget_restored_window_name(&state.mstore, &restored).as_deref(), Some("Release work"));
+    assert_eq!(restored_window_name(&state.mstore, &restored), None);
+    assert_eq!(forget_restored_window_name(&state.mstore, &restored), None);
+}
+
+#[tokio::test]
+async fn a_name_whose_write_failed_is_kept_by_the_next_save() {
+    let state = test_state();
+    no_windows(&state);
+    let (win_id, ws) = window(&state, "main", "agent", 0, 0).await;
+    // A restore left this window's name waiting; writing it to the window failed.
+    let mut client = state.mstore.get_all::<Client>().unwrap().into_iter().next().unwrap();
+    client.meta.insert(NAMES_META_KEY.into(), json!({ ws.clone(): "Release work" }));
+    state.mstore.update(&mut client).unwrap();
+    let win = state.mstore.get::<Window>(&win_id).unwrap().unwrap();
+    assert_eq!(window_name(&win), None);
+    assert_eq!(saved_name(&state.mstore, &win).as_deref(), Some("Release work"));
+    let record = snapshot_session(&state.mstore, true).unwrap();
+    assert_eq!(record["windows"][0]["window"]["name"], "Release work");
 }

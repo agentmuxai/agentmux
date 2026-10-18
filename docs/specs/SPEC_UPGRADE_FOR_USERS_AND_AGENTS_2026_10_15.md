@@ -340,6 +340,14 @@ windows came back only as far as the last one:
   windows in DIP, so the host scales them by the monitor the window was on
   (`dpi_scale_at`). A spot on no monitor now (one unplugged since) opens the
   window where a new window goes.
+- **With their names** (added 2026-10-18, after the operator's own upgrade
+  came back with an unnamed window). Each entry keeps the window's name
+  (`window:displayname`, under `window.name`) and its workspace's (`name`).
+  The restore creates each workspace with its name; a window's name waits
+  in the client's meta (`session:restored_window_names`, by workspace) until
+  `CreateWindow` opens a window onto that workspace and has written the
+  name to it; a window whose name couldn't be written gets it on its next try.
+  Tab names were always kept.
 - **Compatible both ways.** The record keeps the main window's tabs at its
   top level, so an older AgentMux reading it after a downgrade restores that
   window; a record without `windows` restores as one window.

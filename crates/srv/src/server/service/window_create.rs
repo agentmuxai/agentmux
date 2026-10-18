@@ -395,6 +395,33 @@ pub(crate) async fn handle_create_window(state: &AppState, call: &WebCallType) -
         }
         evs
     };
+    // A window a session restore rebuilt gets back the name it had
+    // (session_windows.rs): the main one, and each reopened beside it.
+    // The saved name is forgotten only once it is written.
+    let name_events = match super::session_windows::restored_window_name(store, &ws_id) {
+        None => Vec::new(),
+        Some(name) => {
+            let evs = dispatch_to_reducer(
+                state,
+                agentmux_common::ipc::Command::UpdateWindowMeta {
+                    window_id: window_id.clone(),
+                    meta_patch: serde_json::json!({ "window:displayname": name }),
+                },
+            )
+            .await;
+            let mut written = !evs.iter().any(|e| matches!(e, agentmux_common::ipc::Event::Error { .. }));
+            for ev in &evs {
+                if let Err(e) = crate::persist_subscriber::apply_event_to_mstore(ev, store) {
+                    tracing::warn!(window_id = %window_id, error = %e, "CreateWindow: restored window name write failed");
+                    written = false;
+                }
+            }
+            if written {
+                super::session_windows::forget_restored_window_name(store, &ws_id);
+            }
+            evs
+        }
+    };
     // SPEC_PER_WINDOW_THEME_AND_OPACITY_2026_10_12 §4.6 — a reloaded window
     // other than the main one gets a new row each load (optional arg 6 is
     // the row it had before), so its own theme and opacity come across.
@@ -422,6 +449,7 @@ pub(crate) async fn handle_create_window(state: &AppState, call: &WebCallType) -
     let mut all_events = fresh_workspace_events;
     all_events.extend(win_events);
     all_events.extend(crumb_events);
+    all_events.extend(name_events);
     reload_events.extend(inherit_events);
     all_events.extend(reload_events);
     publish_events(state, &all_events);
