@@ -370,8 +370,9 @@ fn publish(event_bus: &crate::backend::eventbus::EventBus, mut next: AppUpdateSt
         if next.download.is_none() && next.latest.is_some() && next.latest == cur.latest {
             next.download = cur.download.clone();
         }
-        // The check time alone changing is not news to a window.
-        let same = AppUpdateStatus { checked_ms: cur.checked_ms, ..next.clone() } == *cur;
+        // A new check time alone is news to every window: the panel shows
+        // when the last check was, whoever asked for it.
+        let same = next == *cur;
         // Download progress is news to a window, not to the log.
         let step = |s: &AppUpdateStatus| (s.state.clone(), s.latest.clone(), s.download.as_ref().map(|d| d.state.clone()));
         if step(&cur) != step(&next) {
