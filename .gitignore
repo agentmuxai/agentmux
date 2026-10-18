@@ -92,3 +92,6 @@ build/AgentMux.AppDir/
 # Python bytecode from local tooling scripts
 __pycache__/
 *.pyc
+
+# Output of scripts/perf/memory-lab
+memory-lab-out/
