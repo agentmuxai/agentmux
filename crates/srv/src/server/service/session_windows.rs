@@ -48,7 +48,7 @@ const WAITING_META_KEY: &str = "session:restored_windows";
 const NAMES_META_KEY: &str = "session:restored_window_names";
 
 /// The name the user gave window `w`, if any.
-fn window_name(w: &Window) -> Option<String> {
+pub(crate) fn window_name(w: &Window) -> Option<String> {
     w.meta
         .get("window:displayname")
         .and_then(|v| v.as_str())
@@ -148,16 +148,20 @@ fn is_recent_quit_record(record: &Value, now_ms: i64) -> bool {
 }
 
 /// The close that empties `Client.windowids`, before `ws_id` is deleted:
-/// saves that workspace as the session, unless this close is one of a quit's
+/// saves that workspace as the session, with the closing window's `name`
+/// (read before its row was pruned), unless this close is one of a quit's
 /// that already saved every window.
-pub(crate) fn save_on_last_close(store: &Store, ws_id: &str) {
+pub(crate) fn save_on_last_close(store: &Store, ws_id: &str, name: Option<&str>) {
     let kept = super::session_restore::load_last_session_snapshot(store)
         .is_some_and(|r| is_recent_quit_record(&r, agentmux_common::time::now_ms()));
     if kept {
         tracing::info!(workspace_id = %ws_id, "session_restore: keeping the record the quit saved for every window");
         return;
     }
-    if let Some(snapshot) = super::session_restore::snapshot_workspace(store, ws_id) {
+    if let Some(mut snapshot) = super::session_restore::snapshot_workspace(store, ws_id) {
+        if let Some(name) = name.map(str::trim).filter(|n| !n.is_empty()) {
+            snapshot["window"] = json!({ "name": name });
+        }
         super::session_restore::save_last_session_snapshot(store, snapshot);
     }
 }

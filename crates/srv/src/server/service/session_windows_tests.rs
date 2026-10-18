@@ -140,7 +140,7 @@ async fn the_last_close_of_a_quit_keeps_the_quits_record() {
     let (_, last_ws) = window(&state, "window-2", "sysinfo", 10, 20).await;
     save_last_session_snapshot(&state.mstore, snapshot_session(&state.mstore, true).unwrap());
 
-    save_on_last_close(&state.mstore, &last_ws);
+    save_on_last_close(&state.mstore, &last_ws, None);
     let kept = load_last_session_snapshot(&state.mstore).unwrap();
     assert_eq!(windows_of(&kept).len(), 2, "the quit's record, not the last window alone");
 
@@ -148,14 +148,14 @@ async fn the_last_close_of_a_quit_keeps_the_quits_record() {
     let mut stale = kept;
     stale["saved_at_ms"] = json!(agentmux_common::time::now_ms() - QUIT_RECORD_KEPT_FOR_MS - 1);
     save_last_session_snapshot(&state.mstore, stale);
-    save_on_last_close(&state.mstore, &last_ws);
+    save_on_last_close(&state.mstore, &last_ws, None);
     let replaced = load_last_session_snapshot(&state.mstore).unwrap();
     assert_eq!(entry_views(&replaced), ["sysinfo"]);
     assert!(replaced.get("windows").is_none());
 
     // Nor does a record that wasn't a quit's hold the close back.
     save_last_session_snapshot(&state.mstore, snapshot_session(&state.mstore, false).unwrap());
-    save_on_last_close(&state.mstore, &last_ws);
+    save_on_last_close(&state.mstore, &last_ws, None);
     assert!(load_last_session_snapshot(&state.mstore).unwrap().get("windows").is_none());
 }
 
@@ -333,4 +333,22 @@ async fn an_unnamed_window_and_an_older_record_restore_without_names() {
     let (ws, _) = restore_last_session(&state).await.unwrap().unwrap();
     assert_eq!(state.mstore.get::<Workspace>(&ws).unwrap().unwrap().name, "");
     assert_eq!(take_restored_window_name(&state.mstore, &ws), None);
+}
+
+#[tokio::test]
+async fn closing_the_last_window_keeps_its_name_for_the_next_start() {
+    let state = test_state();
+    no_windows(&state);
+    let (win_id, ws) = window(&state, "main", "agent", 0, 0).await;
+    name(&state, &win_id, &ws, "Release work", "Upgrades").await;
+    // CloseWindow reads the name before it prunes the row.
+    let closing = window_name(&state.mstore.get::<Window>(&win_id).unwrap().unwrap());
+    no_windows(&state);
+    save_on_last_close(&state.mstore, &ws, closing.as_deref());
+    let record = load_last_session_snapshot(&state.mstore).unwrap();
+    assert_eq!((record["window"]["name"].as_str(), record["name"].as_str()), (Some("Release work"), Some("Upgrades")));
+
+    let (restored, _) = restore_last_session(&state).await.unwrap().unwrap();
+    assert_eq!(state.mstore.get::<Workspace>(&restored).unwrap().unwrap().name, "Upgrades");
+    assert_eq!(take_restored_window_name(&state.mstore, &restored).as_deref(), Some("Release work"));
 }
