@@ -96,8 +96,4 @@
         border-top: 1px solid var(--border-color);
         margin-top: var(--space-1);
     }
-
-    .history-usage-refresh {
-        @include statButton.stat-button($padding: 0 6px);
-    }
 }

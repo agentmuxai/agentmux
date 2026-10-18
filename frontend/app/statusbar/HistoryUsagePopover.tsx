@@ -9,6 +9,7 @@
 
 import { createSignal, For, Show, type JSX } from "solid-js";
 import { AnchoredPopover, type PopoverAnchor } from "@/app/element/anchored-popover";
+import { Button } from "@/app/element/ui";
 import type { HistoryUsage } from "@/types/rpc/HistoryUsage";
 import { formatBytes } from "@/util/format-bytes";
 
@@ -89,9 +90,9 @@ export const HistoryUsagePopover = (props: HistoryUsagePopoverProps): JSX.Elemen
                         </Show>
                         <div class="history-usage-footer">
                             <span class="history-usage-note">Measured {measuredAgo(usage().computed_at_ms, Date.now())}</span>
-                            <button type="button" class="history-usage-refresh" disabled={refreshing()} onClick={() => void refresh()}>
+                            <Button tone="quiet" density="compact" busy={refreshing()} onClick={() => void refresh()}>
                                 {refreshing() ? "Measuring…" : "Measure again"}
-                            </button>
+                            </Button>
                         </div>
                     </>
                 )}

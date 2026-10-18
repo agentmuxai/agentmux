@@ -9,6 +9,7 @@
  */
 
 import { createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
+import { Button } from "@/app/element/ui";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import type { HistoryUsage } from "@/types/rpc/HistoryUsage";
@@ -41,9 +42,10 @@ export const HistoryUsageIndicator = (): JSX.Element => {
 
     return (
         <>
-            <button
-                type="button"
+            <Button
                 ref={ref}
+                tone="quiet"
+                density="compact"
                 class="history-usage-indicator"
                 onClick={() => setOpen(!open())}
                 aria-label="History kept on this machine, click for details"
@@ -53,7 +55,7 @@ export const HistoryUsageIndicator = (): JSX.Element => {
             >
                 <i class="fa-regular fa-clock-rotate-left" aria-hidden="true" />{" "}
                 {usage() ? formatBytes(usage()!.total_bytes) : "…"}
-            </button>
+            </Button>
             <Show when={open()}>
                 <HistoryUsagePopover
                     anchor={ref}
