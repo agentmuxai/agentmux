@@ -94,7 +94,16 @@ In `store/zoom-factor.ts` (a leaf module, so views can import it):
 
 Help declares `paneZoom: {}` (`apply: "css"`), reads `term:zoom`, and its local keys, wheel and indicator call go. On first load, a pane with `help:zoom` set and no `term:zoom` moves the value across once (`writePaneZoom`, then `help:zoom: null`), so nobody's saved Help zoom is lost. `help:zoom` is then dropped from `MetaType`.
 
-### A.6 Not unified, on purpose
+### A.6 Zoom levels are retained
+
+Requirement (owner, 2026-10-18): "we want to retain the zoom levels of the panes".
+
+- **Kept, unchanged:** the level stays in the pane's `term:zoom` block meta, written through `SetMeta` and saved server-side, so it survives a restart, a reload, and moving the pane to another tab or window (`zoom-architecture.md`: "Zoom is metadata, not local state"). An agent's level is also saved with the agent (`ui:zoom`) and seeded into a new pane for that agent (`command-registry.ts`, `agent-model.ts`). Part A changes none of this: every path still reads and writes `term:zoom`.
+- **Kept across the Help move:** A.5's one-time `help:zoom` → `term:zoom` move.
+- **New: layout files keep it.** `crates/srv/src/backend/layout_file.rs` copies only chosen meta keys when a layout is exported or imported (`sysinfo:focus`, `graph:windowsecs`, …) and `term:zoom` is not one of them, so a restored layout opens every pane at 100%. Add `term:zoom` (a number in 0.5–2.0; anything else dropped, as `graph:windowsecs` is validated), and in the same change `sysinfo:showcontrols`, the follow-up `SPEC_SYSINFO_CONTROLS_AND_EDGES_2026_10_16.md` left open. Tests in `layout_file/tests.rs`: round trip, and an out-of-range value dropped.
+- **To verify in the PR:** whether a split carries the zoom. A default split copies the source's meta, so it should; the agent split (a fresh picker) and the editor split (an empty editor "with the source's settings") need checking, and the editor's should keep the zoom.
+
+### A.7 Not unified, on purpose
 
 - **Browser panes:** their zoom is Chromium's page zoom of the embedded browser (the page's own zoom, as in Chrome), not a pane-content zoom. Untouched.
 - **Chrome zoom** (title bar, status bar, pane headers, `--zoomfactor`): a separate scope by design (`zoom.ts` header). Untouched.
@@ -184,4 +193,5 @@ A simple-view row is at least 100px (`minmax(100px, 1fr)`), so text takes 43% of
 1. **Ctrl+scroll step:** the unified step is the global 0.05 with the indicator (Part A). The terminal and editor have stepped by 0.1 until now; fine to change, or should the wheel step be 0.1 everywhere?
 2. **Does the control row zoom?** B.1 says yes (it zooms like controls in other panes). The alternative keeps it at 100% so it never covers more of the charts when zoomed in.
 3. **Gap value:** 2px everywhere, or 1px with a hairline (`--border-color`) between charts?
-4. **"Between panes":** this spec reads it as between the charts inside a Sysinfo pane. The gap between AgentMux panes themselves is a layout-wide setting, out of scope here.
+4. **A new pane's starting zoom:** a new pane starts at 100% (except an agent, which starts at its saved level). Should a new pane of a kind (terminal, Sysinfo, …) start at the last zoom used for that kind instead?
+5. **"Between panes":** this spec reads it as between the charts inside a Sysinfo pane. The gap between AgentMux panes themselves is a layout-wide setting, out of scope here.
