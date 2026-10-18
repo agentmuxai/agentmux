@@ -129,8 +129,9 @@ struct Log {
 #[derive(Default)]
 struct Table {
     logs: HashMap<String, Log>,
-    /// Paused panes, and since when.
-    paused: HashMap<String, Instant>,
+    /// Paused panes, since when, and the state to clear the header's
+    /// `browser:paused` with when Take over (which has no `AppState`) ends it.
+    paused: HashMap<String, (Instant, AppState)>,
 }
 
 fn table() -> std::sync::MutexGuard<'static, Table> {
@@ -329,9 +330,9 @@ pub(crate) fn not_paused(pane: &str) -> Result<(), (StatusCode, String)> {
 pub(crate) fn set_paused(state: &AppState, pane: &str, on: bool) -> bool {
     let held = {
         let mut t = table();
-        match (on, t.paused.get(pane).copied()) {
+        match (on, t.paused.get(pane).map(|(since, _)| *since)) {
             (true, None) => {
-                t.paused.insert(pane.to_string(), Instant::now());
+                t.paused.insert(pane.to_string(), (Instant::now(), state.clone()));
                 None
             }
             (false, Some(since)) => {
@@ -349,12 +350,16 @@ pub(crate) fn set_paused(state: &AppState, pane: &str, on: bool) -> bool {
         None => n.record(state),
     }
     tracing::info!(pane = %pane, paused = on, "[browser-actions] the user {} the agent", if on { "paused" } else { "resumed" });
+    publish_paused(state, pane, on);
+    true
+}
+
+fn publish_paused(state: &AppState, pane: &str, on: bool) {
     let mut meta = crate::backend::obj::MetaMapType::new();
     meta.insert(PAUSED_META_KEY.to_string(), if on { json!(true) } else { Value::Null });
     if let Err(e) = crate::server::http_shell::broadcast_meta_update(state, pane, &meta) {
         tracing::debug!(pane = %pane, error = %e, "[browser-actions] header pause not updated");
     }
-    true
 }
 
 fn held_for(d: Duration) -> String {
@@ -372,10 +377,16 @@ pub(crate) fn resumed_clock(expires: Instant, expires_at_ms: i64, paused_at: Ins
     (expires + held, expires_at_ms + held.as_millis() as i64)
 }
 
-/// The agent no longer drives `pane` (Take over): the pause goes with it.
-/// The log stays.
+/// The agent no longer drives `pane` (Take over): the pause goes with it,
+/// and so does the header's `browser:paused`, or a later driver's strip would
+/// read as paused. The log stays.
 pub(crate) fn forget_pause(pane: &str) {
-    table().paused.remove(pane);
+    // Taken out under the lock, published after releasing it: publishing
+    // writes the block, and nothing else should wait on this table meanwhile.
+    let removed = table().paused.remove(pane);
+    if let Some((_, state)) = removed {
+        publish_paused(&state, pane, false);
+    }
 }
 
 /// `pane` was closed: its log and pause go.
@@ -556,9 +567,9 @@ mod tests {
         assert_eq!(resumed_clock(expires, 5, now, paused_at), (expires, 5));
     }
 
-    #[test]
-    fn a_paused_pane_refuses_and_a_resumed_one_does_not() {
-        table().paused.insert("ba-paused".into(), Instant::now());
+    #[tokio::test]
+    async fn a_paused_pane_refuses_and_a_resumed_one_does_not() {
+        table().paused.insert("ba-paused".into(), (Instant::now(), crate::server::tests::test_state()));
         let (code, msg) = not_paused("ba-paused").unwrap_err();
         assert_eq!(code, StatusCode::CONFLICT);
         assert!(msg.starts_with("the user paused this pane"), "{msg}");

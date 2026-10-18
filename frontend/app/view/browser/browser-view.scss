@@ -351,6 +351,12 @@ $browser-nav-stack-below: 388px;
         }
     }
 
+    // No agent drives the pane any more (Take over): only its Log is left.
+    &--ended {
+        background: var(--panel-bg-color, var(--highlight-bg-color));
+        color: var(--secondary-text-color);
+    }
+
     // The person paused the agent: its actions wait until they resume.
     &--held {
         background: var(--attention-bg-color);

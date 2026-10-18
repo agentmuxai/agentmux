@@ -13,7 +13,7 @@ import { createSignal } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { BrowserViewModel } from "./browser-model";
-import { DrivenByStrip } from "./driven-by-strip";
+import { ActionLogStrip, DrivenByStrip } from "./driven-by-strip";
 
 afterEach(() => cleanup());
 
@@ -134,5 +134,23 @@ describe("DrivenByStrip", () => {
         expect(setPaused).toHaveBeenCalledTimes(1);
         fireEvent.click(resume, { detail: 1 });
         expect(setPaused).toHaveBeenLastCalledWith(false);
+    });
+
+    it("keeps the log reachable after Take over, in a slim strip with only Log", () => {
+        const { model, setActions } = fakeModel();
+        setActions({
+            count: 1,
+            entries: [{ ts: Date.UTC(2026, 9, 17, 9, 0, 0), agent: "Naki", kind: "click", target: "e2", how: "allowed" }],
+        });
+        render(() => <ActionLogStrip model={model} />);
+        const strip = screen.getByRole("status");
+        expect(strip.textContent).toContain("Naki's actions here");
+        expect(screen.queryByText("Take over")).toBeNull();
+        expect(screen.queryByText("Pause")).toBeNull();
+        expect(screen.queryByText("Auto-approve")).toBeNull();
+        fireEvent.click(screen.getByText("Log (1)"));
+        const panel = screen.getByRole("log", { name: "What Naki did in this pane" });
+        expect(panel.parentElement).toBe(strip.parentElement);
+        expect(panel.querySelectorAll("li")).toHaveLength(1);
     });
 });

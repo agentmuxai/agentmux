@@ -17,7 +17,7 @@ import { useFreezeFrame } from "./use-freeze-frame";
 import { useBrowserAuth } from "./use-browser-auth";
 import { Button } from "@/app/element/ui";
 import { BrowserNavBar } from "./browser-nav-bar";
-import { DrivenByStrip } from "./driven-by-strip";
+import { ActionLogStrip, DrivenByStrip } from "./driven-by-strip";
 import { minutesLabel, siteLabel } from "./bypass";
 import { attentionLook, dialogMessage } from "./attention-kinds";
 import "./browser-view.scss";
@@ -394,7 +394,16 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
                     </div>
                 )}
             </Show>
-            <Show when={model.driverAgentAtom()}>{(agent) => <DrivenByStrip model={model} agent={agent()} />}</Show>
+            <Show
+                when={model.driverAgentAtom()}
+                fallback={
+                    <Show when={model.actionsAtom().count > 0}>
+                        <ActionLogStrip model={model} />
+                    </Show>
+                }
+            >
+                {(agent) => <DrivenByStrip model={model} agent={agent()} />}
+            </Show>
             <Show when={model.errorAtom()}>
                 <div class="browser-error">{model.errorAtom()}</div>
             </Show>

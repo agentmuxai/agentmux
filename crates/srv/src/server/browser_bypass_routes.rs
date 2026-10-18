@@ -53,6 +53,11 @@ pub(crate) async fn bypassed_click(
     log: Note,
 ) -> Option<Response> {
     let g = bypass::active_for(&bypass_pane(block_id), agent)?;
+    // The person may have paused the pane after this act passed
+    // `target_block_id`: a paused grant is still live, so check again here.
+    if let Err((code, e)) = crate::server::browser_actions::not_paused(block_id) {
+        return Some(log.asked(ask).fail(state, code, e));
+    }
     let what = ask.get("what").and_then(|v| v.as_str()).unwrap_or("");
     let page = ask.get("page").and_then(|v| v.as_str()).unwrap_or("");
     let origin = agentmux_common::allowed_origins::target_origin(page).unwrap_or_default();

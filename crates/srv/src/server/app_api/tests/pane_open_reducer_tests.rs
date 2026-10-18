@@ -1868,6 +1868,9 @@ struct BypassFakeHost {
     plain: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// What srv answered page dialogs with (`dialog_answer`).
     dialog_answers: std::sync::Arc<std::sync::Mutex<Vec<serde_json::Value>>>,
+    /// When set, `act` pauses this pane (as the person's Pause would) before
+    /// it answers: a Pause that lands while the agent's act is in flight.
+    pause_on_act: std::sync::Arc<std::sync::Mutex<Option<(AppState, String)>>>,
 }
 
 impl BypassFakeHost {
@@ -1900,6 +1903,9 @@ impl BypassFakeHost {
                 post(move |Json(b): Json<serde_json::Value>| {
                     let h = h2.clone();
                     async move {
+                        if let Some((state, pane)) = h.pause_on_act.lock().unwrap().take() {
+                            crate::server::browser_actions::set_paused(&state, &pane, true);
+                        }
                         if h.plain.load(std::sync::atomic::Ordering::SeqCst) {
                             return Json(serde_json::json!({ "ok": true, "data": { "after": { "tag": "input" } } }));
                         }
@@ -2234,9 +2240,25 @@ async fn a_driven_panes_actions_are_logged_and_only_the_person_pauses_them() {
     let kinds: Vec<&str> = log.iter().map(|e| e["kind"].as_str().unwrap()).collect();
     assert_eq!(kinds, ["fill", "eval", "auto-approve-on", "click", "pause", "resume", "click"]);
 
-    // The log outlives Take over, and goes with the pane.
-    crate::server::browser_owner::forget(&pane);
-    assert_eq!(crate::server::browser_actions::entries(&pane).1.len(), 7);
+    // A Pause that lands after the act passed target_block_id still stops
+    // the click Auto-approve would have made.
+    *fake.pause_on_act.lock().unwrap() = Some((state.clone(), pane.clone()));
+    let (s, body) = post_json(&app, "/api/v1/ui/browser/act", merged(&auth, serde_json::json!({ "pane": pane, "ref": "e9", "action": "click" }))).await;
+    assert_eq!(s, StatusCode::CONFLICT, "{body}");
+    assert_eq!(fake.clicks.load(SeqCst), 2, "nothing was clicked");
+    let log = logged(&state, &pane);
+    assert_eq!(log.last().unwrap()["kind"], "click");
+    assert!(log.last().unwrap()["how"].as_str().unwrap().starts_with("refused: the user paused this pane"), "{}", log.last().unwrap());
+
+    // Take over ends the pause, and the header's copy of it too; the log
+    // outlives it, and goes with the pane.
+    let mut clear = crate::backend::obj::MetaMapType::new();
+    clear.insert("browser:owner_agent".into(), serde_json::Value::Null);
+    crate::server::browser_owner::guard_client_meta_write(&format!("block:{pane}"), &clear).unwrap();
+    assert!(!crate::server::browser_actions::is_paused(&pane));
+    let block = state.mstore.must_get::<crate::backend::obj::Block>(&pane).unwrap();
+    assert!(block.meta.get("browser:paused").is_none_or(|v| v.is_null()), "{:?}", block.meta.get("browser:paused"));
+    assert_eq!(crate::server::browser_actions::entries(&pane).1.len(), 9);
     crate::server::browser_actions::drop_pane(&pane);
     assert_eq!(crate::server::browser_actions::entries(&pane).0, 0);
 }

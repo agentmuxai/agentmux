@@ -26,7 +26,6 @@ export function DrivenByStrip(props: { model: BrowserViewModel; agent: string })
     const sites = () => model.bypassOriginsPreview();
     const [showLog, setShowLog] = createSignal(false);
     const [pauseError, setPauseError] = createSignal<string | undefined>();
-    const newestFirst = () => [...model.actionsAtom().entries].reverse();
 
     const turnOn = (e: MouseEvent) => {
         // Only a pointer click grants it: a key press on the focused button
@@ -200,51 +199,7 @@ export function DrivenByStrip(props: { model: BrowserViewModel; agent: string })
                 )}
             </Show>
             <Show when={showLog()}>
-                <div class="browser-action-log" role="log" aria-label={`What ${props.agent} did in this pane`}>
-                    <div class="browser-action-log-head">
-                        <span>
-                            What <b>{props.agent}</b> did here, newest first
-                            <Show when={model.actionsAtom().count > model.actionsAtom().entries.length}>
-                                {" "}
-                                (the latest {model.actionsAtom().entries.length} of {model.actionsAtom().count})
-                            </Show>
-                        </span>
-                        <Button density="compact" onClick={() => setShowLog(false)}>
-                            Close
-                        </Button>
-                    </div>
-                    <Show
-                        when={newestFirst().length > 0}
-                        fallback={<div class="browser-action-log-empty">Nothing yet.</div>}
-                    >
-                        <ol class="browser-action-log-list">
-                            <For each={newestFirst()}>
-                                {(e) => (
-                                    <li
-                                        class="browser-action-log-row"
-                                        classList={{ "browser-action-log-row--failed": actionFailed(e.how) }}
-                                    >
-                                        <span class="browser-action-log-time">{actionTime(e.ts)}</span>
-                                        <span class="browser-action-log-kind">{actionKind(e.kind)}</span>
-                                        <span class="browser-action-log-target">
-                                            {e.target ?? ""}
-                                            <Show when={e.detail}>
-                                                <span class="browser-action-log-detail">
-                                                    {e.target ? " · " : ""}
-                                                    {e.detail}
-                                                </span>
-                                            </Show>
-                                        </span>
-                                        <span class="browser-action-log-how">{e.how}</span>
-                                        <span class="browser-action-log-url" title={e.url}>
-                                            {shortUrl(e.url)}
-                                        </span>
-                                    </li>
-                                )}
-                            </For>
-                        </ol>
-                    </Show>
-                </div>
+                <ActionLogPanel model={model} agent={props.agent} onClose={() => setShowLog(false)} />
             </Show>
             <Show when={confirming() && !model.bypassAtom()}>
                 <div class="browser-bypass-confirm" role="dialog" aria-label="Turn on auto-approve">
@@ -300,6 +255,89 @@ export function DrivenByStrip(props: { model: BrowserViewModel; agent: string })
                         </Button>
                     </div>
                 </div>
+            </Show>
+        </>
+    );
+}
+
+/** The list of what the agent did, newest first, in the pane's flow. */
+function ActionLogPanel(props: { model: BrowserViewModel; agent: string; onClose: () => void }): JSX.Element {
+    const newestFirst = () => [...props.model.actionsAtom().entries].reverse();
+    return (
+        <div class="browser-action-log" role="log" aria-label={`What ${props.agent} did in this pane`}>
+            <div class="browser-action-log-head">
+                <span>
+                    What <b>{props.agent}</b> did here, newest first
+                    <Show when={props.model.actionsAtom().count > props.model.actionsAtom().entries.length}>
+                        {" "}
+                        (the latest {props.model.actionsAtom().entries.length} of {props.model.actionsAtom().count})
+                    </Show>
+                </span>
+                <Button density="compact" onClick={props.onClose}>
+                    Close
+                </Button>
+            </div>
+            <Show
+                when={newestFirst().length > 0}
+                fallback={<div class="browser-action-log-empty">Nothing yet.</div>}
+            >
+                <ol class="browser-action-log-list">
+                    <For each={newestFirst()}>
+                        {(e) => (
+                            <li
+                                class="browser-action-log-row"
+                                classList={{ "browser-action-log-row--failed": actionFailed(e.how) }}
+                            >
+                                <span class="browser-action-log-time">{actionTime(e.ts)}</span>
+                                <span class="browser-action-log-kind">{actionKind(e.kind)}</span>
+                                <span class="browser-action-log-target">
+                                    {e.target ?? ""}
+                                    <Show when={e.detail}>
+                                        <span class="browser-action-log-detail">
+                                            {e.target ? " · " : ""}
+                                            {e.detail}
+                                        </span>
+                                    </Show>
+                                </span>
+                                <span class="browser-action-log-how">{e.how}</span>
+                                <span class="browser-action-log-url" title={e.url}>
+                                    {shortUrl(e.url)}
+                                </span>
+                            </li>
+                        )}
+                    </For>
+                </ol>
+            </Show>
+        </div>
+    );
+}
+
+/** After Take over (or once no agent drives the pane) the log srv kept is
+ *  still the person's to read: a slim strip with only its Log. */
+export function ActionLogStrip(props: { model: BrowserViewModel }): JSX.Element {
+    const [showLog, setShowLog] = createSignal(false);
+    const entries = () => props.model.actionsAtom().entries;
+    // Whoever drove it last: the newest entry's agent.
+    const agent = () => entries()[entries().length - 1]?.agent || "The agent";
+    return (
+        <>
+            <div class="browser-driven-by browser-driven-by--ended" role="status">
+                <i class="fa-solid fa-list" aria-hidden="true" />
+                <span>
+                    <b>{agent()}</b>'s actions here
+                </span>
+                <Button
+                    density="compact"
+                    class="browser-actions-log-button"
+                    pressed={showLog()}
+                    title={`What ${agent()} did in this pane`}
+                    onClick={() => setShowLog(!showLog())}
+                >
+                    Log ({props.model.actionsAtom().count})
+                </Button>
+            </div>
+            <Show when={showLog()}>
+                <ActionLogPanel model={props.model} agent={agent()} onClose={() => setShowLog(false)} />
             </Show>
         </>
     );
