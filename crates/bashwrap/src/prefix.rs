@@ -56,6 +56,46 @@ pub struct CallRecord {
     /// its own (`cwd_state::CwdState::load`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_id: Option<String>,
+    /// Set on a claimed record when another agent ran the very same command
+    /// at the same moment: the CLI gives its shell no agent identity, so which
+    /// of the two records is this call's can't be told, and neither agent's
+    /// working directory is used (`claim`, `run`). Never stored.
+    #[serde(skip)]
+    pub agent_ambiguous: bool,
+}
+
+/// How long a marker of an ambiguous command (`mark_ambiguous`) is honored:
+/// a call's claim follows its hook within seconds.
+const MARKER_MAX_AGE: Duration = Duration::from_secs(120);
+
+/// The marker, in a session's directory, saying two agents wait on `command`.
+/// Not a `.json`, so it is never read as a record.
+fn marker_path(dir: &Path, command: &str) -> PathBuf {
+    let hash = command.bytes().fold(0xcbf2_9ce4_8422_2325u64, |h, b| (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3));
+    dir.join(format!("{hash:016x}.ambiguous"))
+}
+
+fn mark_ambiguous(dir: &Path, command: &str) {
+    let _ = std::fs::write(marker_path(dir, command), b"");
+}
+
+/// Whether `command` is marked ambiguous; an old marker is removed instead.
+fn marked_ambiguous(dir: &Path, command: &str) -> bool {
+    let path = marker_path(dir, command);
+    let Ok(age) = std::fs::metadata(&path).and_then(|m| m.modified()).map(|t| t.elapsed().unwrap_or_default()) else {
+        return false;
+    };
+    if age > MARKER_MAX_AGE {
+        let _ = std::fs::remove_file(&path);
+        return false;
+    }
+    true
+}
+
+/// Two waiting records of `command` from different agents (or one agent and
+/// the main conversation).
+fn agents_differ(records: &[&(PathBuf, CallRecord)]) -> bool {
+    records.windows(2).any(|w| w[0].1.agent_id != w[1].1.agent_id)
 }
 
 /// The longest description reported for a call.
@@ -197,6 +237,13 @@ pub fn register(session_id: &str, record: &CallRecord) -> std::io::Result<()> {
     // A claim or a sweep removes a directory it finds empty, which can land
     // between creating it and writing into it: then once more.
     write().or_else(|e| if e.kind() == std::io::ErrorKind::NotFound { write() } else { Err(e) })?;
+    // Another agent waiting on the very same command: mark it before either
+    // is claimed, so both claims know (`claim`).
+    let records = read_records(&dir);
+    let same: Vec<&(PathBuf, CallRecord)> = records.iter().filter(|(_, r)| r.command == record.command).collect();
+    if agents_differ(&same) {
+        mark_ambiguous(&dir, &record.command);
+    }
     if let Some(root) = calls_root() {
         sweep_other_sessions(&root, &dir);
     }
@@ -235,6 +282,14 @@ pub fn claim(session_id: &str, command: &str) -> Option<CallRecord> {
     records.sort_by_key(|(_, r)| std::cmp::Reverse(r.created_ms));
     let matching: Vec<&(PathBuf, CallRecord)> =
         records.iter().filter(|(_, r)| r.command == command).collect();
+    // Two agents ran this very command at once: either record could be this
+    // call's. Marked before claiming, so the other claim knows too.
+    let ambiguous = if agents_differ(&matching) {
+        mark_ambiguous(&dir, command);
+        true
+    } else {
+        marked_ambiguous(&dir, command)
+    };
     let candidates: Vec<&(PathBuf, CallRecord)> = if !matching.is_empty() {
         matching
     } else if records.len() == 1 {
@@ -247,9 +302,13 @@ pub fn claim(session_id: &str, command: &str) -> Option<CallRecord> {
         let claimed = path.with_extension(format!("claimed.{}", std::process::id()));
         if std::fs::rename(path, &claimed).is_ok() {
             let _ = std::fs::remove_file(&claimed);
-            claimed_record = Some(record.clone());
+            claimed_record = Some(CallRecord { agent_ambiguous: ambiguous, ..record.clone() });
             break;
         }
+    }
+    // The last waiting record of an ambiguous command takes its marker along.
+    if ambiguous && !read_records(&dir).iter().any(|(_, r)| r.command == command) {
+        let _ = std::fs::remove_file(marker_path(&dir, command));
     }
     // The session's last waiting call: its directory goes too (it is made
     // again for the next one). Fails, and stays, while anything is in it.
@@ -316,8 +375,16 @@ pub async fn run(script: String) -> Result<i32> {
         b64_cmd: String::new(),
         block_id: None,
         declared_background: record.run_in_background,
-        agent: record.agent_id,
+        agent: if record.agent_ambiguous { None } else { record.agent_id },
+        agent_unknown: record.agent_ambiguous,
     };
+    if record.agent_ambiguous {
+        // Said where the model reads it: no agent's folder was used.
+        println!(
+            "[bashwrap] another agent ran this same command at the same moment, so which agent it belongs to can't be \
+             told: it runs in the folder Claude Code gave it, and no agent's saved folder is used or changed"
+        );
+    }
     let result = crate::bash_wrap::run_command(args, script).await;
     if let Some(task) = report {
         // Bounded past the publish's own timeout; main exits right after.
@@ -411,6 +478,7 @@ pub fn new_record(tool_use_id: &str, command: &str, run_in_background: bool) -> 
         created_ms: now_ms(),
         description: None,
         agent_id: None,
+        agent_ambiguous: false,
     }
 }
 
@@ -595,6 +663,41 @@ mod tests {
             register("s", &new_record("toolu_3", "c", false)).unwrap();
             assert_eq!(claim("s", "zzz"), None, "two candidates: ambiguous");
             assert_eq!(claim("other-session", "b"), None, "another session's records are never claimed");
+        });
+    }
+
+    fn by(id: &str, command: &str, agent: Option<&str>) -> CallRecord {
+        CallRecord { agent_id: agent.map(str::to_string), ..new_record(id, command, false) }
+    }
+
+    /// Codex P1 on #5096: the CLI gives a subagent's shell no identity, so
+    /// two agents' identical commands at once can't be told apart. Both
+    /// claims say so, the second too although it sees one record, and
+    /// neither takes an agent's directory (`run`).
+    #[test]
+    fn two_agents_identical_commands_are_claimed_as_ambiguous() {
+        with_calls_dir(|| {
+            register("s", &by("toolu_a", "git status", Some("sub-a"))).unwrap();
+            register("s", &by("toolu_b", "git status", Some("sub-b"))).unwrap();
+            let first = claim("s", "git status").unwrap();
+            let second = claim("s", "git status").unwrap();
+            assert!(first.agent_ambiguous && second.agent_ambiguous);
+            assert!(!marker_path(&session_dir("s").unwrap(), "git status").exists(), "gone with the last record");
+            // Alone again, the command is its agent's again.
+            register("s", &by("toolu_c", "git status", Some("sub-a"))).unwrap();
+            assert!(!claim("s", "git status").unwrap().agent_ambiguous);
+        });
+    }
+
+    #[test]
+    fn one_agents_parallel_calls_and_different_commands_are_not_ambiguous() {
+        with_calls_dir(|| {
+            register("s", &by("t1", "cargo test", Some("sub-a"))).unwrap();
+            register("s", &by("t2", "cargo test", Some("sub-a"))).unwrap();
+            register("s", &by("t3", "ls", Some("sub-b"))).unwrap();
+            assert!(!claim("s", "cargo test").unwrap().agent_ambiguous);
+            assert!(!claim("s", "cargo test").unwrap().agent_ambiguous);
+            assert!(!claim("s", "ls").unwrap().agent_ambiguous);
         });
     }
 

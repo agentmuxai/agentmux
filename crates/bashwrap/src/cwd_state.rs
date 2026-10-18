@@ -64,6 +64,16 @@ pub(crate) struct CwdState {
 }
 
 impl CwdState {
+    /// [`CwdState::load`], or, when the call's agent can't be told
+    /// (`Args::agent_unknown`), the directory the shell was started in and
+    /// nothing written: any agent's would be a guess.
+    pub(crate) fn for_call(agent: Option<&str>, agent_unknown: bool) -> Self {
+        if agent_unknown {
+            return Self { path: None, start_dir: std::env::current_dir().ok() };
+        }
+        Self::load(agent)
+    }
+
     /// `agent`: the subagent that made the call, if any. A subagent keeps
     /// its own state file next to the instance's: it starts where it last
     /// left off, or, on its first call, where the main agent is; and its
@@ -302,6 +312,14 @@ mod tests {
         assert_eq!(CwdState::load(Some("  ")).path.as_deref(), Some(main_file.as_path()));
         drop(_override);
         let _ = std::fs::remove_dir_all(&scratch);
+    }
+
+    /// A call whose agent can't be told uses no agent's file, and writes none.
+    #[test]
+    fn a_call_of_unknown_agent_uses_and_writes_no_state() {
+        let state = CwdState::for_call(Some("sub-1"), true);
+        assert_eq!(state.path, None);
+        assert_eq!(state.start_dir, std::env::current_dir().ok());
     }
 
     #[test]

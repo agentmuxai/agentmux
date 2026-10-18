@@ -95,6 +95,12 @@ pub struct Args {
     /// (`CwdState::load`).
     #[arg(long)]
     pub agent: Option<String>,
+
+    /// Set by prefix mode when two agents ran the very same command at once
+    /// and this call's agent can't be told: no agent's saved directory is
+    /// used or written (`cwd_state::CwdState::for_call`).
+    #[arg(skip)]
+    pub agent_unknown: bool,
 }
 
 /// Cap the model-visible head/tail sections of the aggregated blob.
@@ -817,7 +823,7 @@ async fn run_via_pty(
     // fd 0 (the console) stays open, so children see EOF and ConPTY never
     // fires ctrl-c. The leading newline terminates the group list cleanly
     // regardless of how `command` ends (trailing comment, no newline, etc.).
-    let cwd_state = CwdState::load(args.agent.as_deref());
+    let cwd_state = CwdState::for_call(args.agent.as_deref(), args.agent_unknown);
     // Wrapped a second time by `append_cwd_capture` so the ending `$PWD`
     // survives this disposable process — see the module doc of
     // `cwd_state.rs` for why that's necessary.
@@ -1068,7 +1074,7 @@ async fn run_via_pipes(
     bash: &std::path::Path,
 ) -> Result<i32> {
     // Same cwd-persistence rationale as run_via_pty — see `cwd_state.rs`.
-    let cwd_state = CwdState::load(args.agent.as_deref());
+    let cwd_state = CwdState::for_call(args.agent.as_deref(), args.agent_unknown);
     let mut cmd = Command::new(bash);
     cmd.arg("-c")
         .arg(append_cwd_capture(command))
@@ -2165,6 +2171,7 @@ mod tests {
             block_id: None,
             declared_background: false,
             agent: None,
+            agent_unknown: false,
         };
         let args_b = Args {
             tool_id: "test-concurrent-b".to_string(),
@@ -2172,6 +2179,7 @@ mod tests {
             block_id: None,
             declared_background: false,
             agent: None,
+            agent_unknown: false,
         };
         let cd_a = format!("cd \"{}\"", dir_a.display());
         let cd_b = format!("cd \"{}\"", dir_b.display());
@@ -2229,6 +2237,7 @@ mod tests {
             block_id: None,
             declared_background: false,
             agent: None,
+            agent_unknown: false,
         };
 
         // Call 1: cd into target_dir. Nothing about this process's own env
@@ -2871,6 +2880,7 @@ mod tests {
             block_id: None,
             declared_background: false,
             agent: None,
+            agent_unknown: false,
         };
         // `Mutex` in this module scope resolves to `std::sync::Mutex`
         // (shadowed for `ENV_LOCK` above) — `run_via_pty` needs the async
@@ -3030,6 +3040,7 @@ mod tests {
                 block_id: None,
                 declared_background: false,
                 agent: None,
+                agent_unknown: false,
             };
             let buffered = Arc::new(tokio::sync::Mutex::new(Vec::<u8>::new()));
 
@@ -3092,6 +3103,7 @@ mod tests {
             block_id: None,
             declared_background: true,
             agent: None,
+            agent_unknown: false,
         };
         let buffered = Arc::new(tokio::sync::Mutex::new(Vec::<u8>::new()));
 
@@ -3207,6 +3219,7 @@ mod tests {
                 block_id: None,
                 declared_background: false,
                 agent: None,
+                agent_unknown: false,
             };
             let buffered = Arc::new(tokio::sync::Mutex::new(Vec::<u8>::new()));
 
