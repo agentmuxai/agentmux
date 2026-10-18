@@ -294,29 +294,66 @@ fn is_plain_box(border: &[f64], width: f64, height: f64) -> bool {
     close(a.1, b.1) && close(b.0, c.0) && close(c.1, d.1) && close(d.0, a.0) && close(b.0 - a.0, width) && close(d.1 - a.1, height)
 }
 
-/// [`ChainGeometry`] for a frame known by its chain. `None` when an
-/// `<iframe>` on the way has no box.
-pub async fn chain_geometry(root: &mut CdpSession, chain: &[FrameHop]) -> Option<ChainGeometry> {
+/// Where a frame is drawn, if it is.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Placement {
+    Shown(ChainGeometry),
+    /// An `<iframe>` on the way isn't drawn at all (`display: none`, or inside
+    /// something hidden): nothing in the frame appears on the page.
+    NotRendered,
+    /// It couldn't be worked out.
+    Unknown,
+}
+
+/// A `DOM.getContentQuads` answer that says the element isn't drawn.
+fn has_no_quads(reply: &Value) -> bool {
+    reply.get("quads").and_then(Value::as_array).is_some_and(|q| q.is_empty())
+}
+
+/// [`ChainGeometry`] for a frame known by its chain, or why there is none.
+pub async fn chain_geometry(root: &mut CdpSession, chain: &[FrameHop]) -> Placement {
+    match chain_geometry_inner(root, chain).await {
+        Ok(Some(g)) => Placement::Shown(g),
+        Ok(None) => Placement::Unknown,
+        Err(placement) => placement,
+    }
+}
+
+async fn chain_geometry_inner(root: &mut CdpSession, chain: &[FrameHop]) -> Result<Option<ChainGeometry>, Placement> {
     let hops = hops_to_add(chain);
     let (mut ox, mut oy) = (0.0, 0.0);
     let mut outer_plain = true;
     for (i, hop) in hops.iter().enumerate() {
         let mut on = root.in_session(hop.parent_session.as_deref());
-        let model = on.call("DOM.getBoxModel", json!({ "backendNodeId": hop.owner_backend })).await.ok()?;
-        let m = model.get("model")?;
-        let content: Vec<f64> = m.get("content")?.as_array()?.iter().filter_map(Value::as_f64).collect();
-        let border: Vec<f64> = m.get("border")?.as_array()?.iter().filter_map(Value::as_f64).collect();
-        let plain = is_plain_box(&border, m.get("width")?.as_f64()?, m.get("height")?.as_f64()?);
-        let [x, y, w, h] = quad_bounds(&content)?;
+        let model = match on.call("DOM.getBoxModel", json!({ "backendNodeId": hop.owner_backend })).await {
+            Ok(m) => m,
+            // No box: either it isn't drawn (no content quads), or it is unknown.
+            Err(_) => {
+                let quads = on.call("DOM.getContentQuads", json!({ "backendNodeId": hop.owner_backend })).await;
+                return Err(match quads {
+                    Ok(q) if has_no_quads(&q) => Placement::NotRendered,
+                    _ => Placement::Unknown,
+                });
+            }
+        };
+        let Some(m) = model.get("model") else { return Ok(None) };
+        let parts = || -> Option<(Vec<f64>, Vec<f64>, f64, f64)> {
+            let content: Vec<f64> = m.get("content")?.as_array()?.iter().filter_map(Value::as_f64).collect();
+            let border: Vec<f64> = m.get("border")?.as_array()?.iter().filter_map(Value::as_f64).collect();
+            Some((content, border, m.get("width")?.as_f64()?, m.get("height")?.as_f64()?))
+        };
+        let Some((content, border, width, height)) = parts() else { return Ok(None) };
+        let plain = is_plain_box(&border, width, height);
+        let Some([x, y, w, h]) = quad_bounds(&content) else { return Ok(None) };
         if i + 1 < hops.len() {
             outer_plain &= plain;
             ox += content[0];
             oy += content[1];
         } else {
-            return Some(ChainGeometry { offset: (ox + content[0], oy + content[1]), bounds: [x + ox, y + oy, w, h], plain, outer_plain });
+            return Ok(Some(ChainGeometry { offset: (ox + content[0], oy + content[1]), bounds: [x + ox, y + oy, w, h], plain, outer_plain }));
         }
     }
-    None
+    Ok(None)
 }
 
 /// A frame's place on the page, without its contents: enough to find it,
@@ -588,6 +625,13 @@ mod tests {
         let rotated = [60.0, 0.0, 110.0, 50.0, 60.0, 100.0, 10.0, 50.0];
         assert!(!is_plain_box(&rotated, 70.7, 70.7));
         assert!(!is_plain_box(&[1.0, 2.0], 1.0, 1.0), "not a quad");
+    }
+
+    #[test]
+    fn an_element_with_no_content_quads_is_not_drawn() {
+        assert!(has_no_quads(&json!({ "quads": [] })));
+        assert!(!has_no_quads(&json!({ "quads": [[0.0, 0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0]] })));
+        assert!(!has_no_quads(&json!({})), "an answer without quads is unknown, not hidden");
     }
 
     #[test]

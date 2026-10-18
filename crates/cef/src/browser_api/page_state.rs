@@ -177,7 +177,10 @@ pub async fn secret_boxes(root: &mut CdpSession) -> SecretBoxes {
         // in a transformed outer frame: nothing in it can be placed, or even
         // hidden, on the page.
         let geometry = match frames::chain_geometry(root, &fl.chain).await {
-            Some(g) if fl.placeable && g.outer_plain => g,
+            frames::Placement::Shown(g) if fl.placeable && g.outer_plain => g,
+            // Not drawn (a hidden tracking or captcha frame): nothing of it
+            // can appear in the image.
+            frames::Placement::NotRendered if fl.placeable => continue,
             _ => {
                 out.complete = false;
                 continue;
