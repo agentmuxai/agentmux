@@ -10,7 +10,7 @@ import { describe, expect, it } from "vitest";
 
 import { mismatch } from "./compare.mjs";
 import { generateConversation } from "./lib/conversation.mjs";
-import { allocatorRoots, dumpedProcesses, lastSample, mainPage } from "./lib/sample.mjs";
+import { allocatorRoots, dumpedProcesses, lastSample, mainPage, withChromiumRoles } from "./lib/sample.mjs";
 import { compare, comparisonTable, groupOf, groupSample, inMegabytes, median, MB, steady, table } from "./lib/summary.mjs";
 
 const proc = (pid, name, role, app, privateMB, commitMB = privateMB * 2) => ({ pid, name, role, app, private: privateMB * MB, commit: commitMB * MB });
@@ -139,6 +139,16 @@ describe("memory lab OS samples", () => {
         const text = [{ run: { os: "macos" } }, { procs: [{ pid: 1 }] }, { procs: [{ pid: 2 }] }, { footprint: { total: 5 } }].map((r) => JSON.stringify(r)).join("\n") + "\n";
         expect(lastSample(text).procs[0].pid).toBe(2);
         expect(() => lastSample(JSON.stringify({ run: {} }))).toThrow(/no sample/);
+    });
+});
+
+describe("memory lab Linux roles", () => {
+    it("gives a zygote-forked process the type Chromium reports for it", () => {
+        const sample = { procs: [proc(10, "agentmux", "zygote-forked", true, 400), proc(11, "agentmux", "zygote-forked", true, 90), proc(12, "agentmux", "zygote", true, 5), proc(13, "agentmux", "renderer", true, 1)] };
+        const fixed = withChromiumRoles(sample, [{ id: 10, type: "renderer" }, { id: 11, type: "gpu" }, { id: 13, type: "renderer" }]);
+        expect(fixed.procs.map((p) => p.role)).toEqual(["renderer", "gpu-process", "zygote", "renderer"]);
+        expect(groupSample(fixed).groups.renderer.private).toBe(401 * MB);
+        expect(groupSample(fixed).groups.gpu.private).toBe(90 * MB);
     });
 });
 

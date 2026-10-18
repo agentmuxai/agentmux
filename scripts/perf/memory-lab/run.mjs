@@ -85,6 +85,13 @@ async function main() {
     const instance = await launch({ exe, home, port: args.port, script, log: join(dir, "instance.log") });
     const curve = [];
     let driver;
+    // The instance has its own process group on macOS and Linux, so Ctrl-C reaches only the lab: end the instance first.
+    const interrupted = async () => {
+        await instance.stop();
+        process.exit(130);
+    };
+    process.once("SIGINT", interrupted);
+    process.once("SIGTERM", interrupted);
     try {
         if (!(await portBelongsTo(args.port, memtree, instance.pid))) {
             throw new Error(`CDP port ${args.port} isn't answered by the instance the lab started (the instance took another port, or something else answers there)`);
@@ -94,19 +101,24 @@ async function main() {
         await driver.setupAccount();
         await driver.build(layout);
         await sleep(15_000);
+        // The layout must be what was asked for: a run with extra or missing panes measures a different load.
+        const composers = await driver.eval(`document.querySelectorAll("textarea.agent-input").length`);
+        if (composers !== args.panes || driver.agents.length !== args.panes) {
+            throw new Error(`the run has ${composers} agent panes on screen and ${driver.agents.length} agents made, expected ${args.panes}: ${driver.agents.map((a) => a.name).join(", ")}`);
+        }
 
-        const mark = (round) => {
-            const s = osSample(memtree, instance.pid);
+        const mark = async (round) => {
+            const s = await osSample(memtree, instance.pid, args.port);
             const g = groupSample(s);
             const row = { round, appMB: appMB(s), groupsMB: Object.fromEntries(Object.entries(g.groups).filter(([, v]) => v.procs).map(([k, v]) => [k, Math.round((v.private / 1048576) * 10) / 10])) };
             curve.push(row);
             console.log(`  round ${String(round).padStart(3)}: app ${row.appMB} MB  ${Object.entries(row.groupsMB).map(([k, v]) => `${k} ${v}`).join("  ")}`);
         };
-        mark(0);
+        await mark(0);
         for (let r = 1; r <= args.rounds; r++) {
             await driver.send();
             await sleep(args.gapS * 1000);
-            if (r % args.every === 0 || r === args.rounds) mark(r);
+            if (r % args.every === 0 || r === args.rounds) await mark(r);
         }
 
         // Let the last turns finish and the frontend go idle, then measure with a forced GC.
@@ -115,7 +127,7 @@ async function main() {
         const samples = [final];
         for (let i = 1; i < args.samples; i++) {
             await sleep(2000);
-            samples.push(osSample(memtree, instance.pid));
+            samples.push(await osSample(memtree, instance.pid, args.port));
         }
         const summary = inMegabytes(steady(samples));
 
@@ -125,6 +137,7 @@ async function main() {
             platform: process.platform,
             portable: args.portable ?? null,
             layout: { panes: args.panes, tabs: layout },
+            agents: driver.agents.map((a) => ({ name: a.name, id: a.id, tabId: a.tabId })),
             rounds: args.rounds,
             gapSeconds: args.gapS,
             seed: args.seed,

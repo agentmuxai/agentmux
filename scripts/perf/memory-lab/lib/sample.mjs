@@ -39,13 +39,36 @@ export function lastSample(text) {
     return records[records.length - 1];
 }
 
-/** OS numbers: one `memtree` sample of the tree under `rootPid`. */
-export function osSample(memtree, rootPid) {
+/**
+ * `memtree` labels a process by its command line's `--type=`; on Linux a
+ * renderer or the GPU process forked from the zygote keeps the zygote's, and
+ * reads "zygote-forked". Chromium itself says what each process is
+ * (`SystemInfo.getProcessInfo`: browser, renderer, gpu, utility, ...), so a
+ * forked one takes its type from there.
+ */
+export function withChromiumRoles(sample, processInfo) {
+    const type = new Map(processInfo.map((p) => [p.id, p.type]));
+    const role = (t) => (t === "gpu" ? "gpu-process" : t === "browser" ? "main" : t);
+    return { ...sample, procs: sample.procs.map((p) => (p.role === "zygote-forked" && type.has(p.pid) ? { ...p, role: role(type.get(p.pid)) } : p)) };
+}
+
+/**
+ * OS numbers: one `memtree` sample of the tree under `rootPid`; with the CDP
+ * `port`, a zygote-forked process gets its real role (`withChromiumRoles`).
+ */
+export async function osSample(memtree, rootPid, port = null) {
     const dir = mkdtempSync(join(tmpdir(), "memory-lab-"));
     const file = join(dir, "memtree.jsonl");
     try {
         execFileSync(memtree, ["--pid", String(rootPid), "--samples", "1", "--json", file], { stdio: ["ignore", "ignore", "pipe"] });
-        return lastSample(readFileSync(file, "utf8"));
+        const sample = lastSample(readFileSync(file, "utf8"));
+        if (port == null || !sample.procs.some((p) => p.role === "zygote-forked")) return sample;
+        const browser = await connectBrowser(port, { timeoutMs: 15_000 });
+        try {
+            return withChromiumRoles(sample, (await browser.send("SystemInfo.getProcessInfo")).processInfo);
+        } finally {
+            await browser.close();
+        }
     } finally {
         rmSync(dir, { recursive: true, force: true });
     }
@@ -176,7 +199,7 @@ export async function portBelongsTo(port, memtree, rootPid) {
     const browser = await connectBrowser(port, { timeoutMs: 15_000 });
     try {
         const { processInfo } = await browser.send("SystemInfo.getProcessInfo");
-        const mine = new Set(osSample(memtree, rootPid).procs.map((p) => p.pid));
+        const mine = new Set((await osSample(memtree, rootPid)).procs.map((p) => p.pid));
         return processInfo.some((p) => p.type === "browser" && mine.has(p.id));
     } finally {
         await browser.close();
@@ -219,7 +242,7 @@ export async function takeSample({ port, memtree, rootPid, label, gc = false, pa
         await browser.close();
     }
     // The OS numbers right after the dump, so both describe the same moment.
-    const os = osSample(memtree, rootPid);
+    const os = await osSample(memtree, rootPid, port);
     const byPid = new Map(dumps.map((d) => [d.pid, d]));
     const procs = os.procs.map((p) => {
         const d = byPid.get(p.pid);
