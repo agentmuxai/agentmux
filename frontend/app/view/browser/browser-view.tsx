@@ -272,7 +272,11 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
                             </Show>
                         </div>
                         <Show when={a().kind === "approval" && a().description}>
-                            <div class="browser-attention-target browser-attention-description">{a().description}</div>
+                            <div class="browser-attention-target browser-attention-description">
+                                {(a().description ?? "").length > 200
+                                    ? `${(a().description ?? "").slice(0, 200)}…`
+                                    : a().description}
+                            </div>
                         </Show>
                         <Show when={a().kind === "approval" && a().why}>
                             <div class="browser-attention-target">Asked because {a().why}.</div>

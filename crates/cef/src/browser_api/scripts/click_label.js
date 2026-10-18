@@ -39,7 +39,9 @@ function clickLabel(ariaLabel, labelledBy, text, el) {
   const fullName = named || lines[0] || "";
   const rest = named ? "" : lines.slice(1).join(" ");
   const name = fullName.slice(0, 120);
-  const description = rest.slice(0, 200);
+  // Long enough for srv's payment check to see a word far down; the banner
+  // shows less.
+  const description = rest.slice(0, 1000);
   const e = el || {};
   const found = (s, re) => {
     const m = re.exec(s);

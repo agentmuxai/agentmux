@@ -36,9 +36,9 @@ describe("clickLabel: the name and the description", () => {
     });
 
     it("caps the name and the description", () => {
-        const got = clickLabel(null, "", `${"a".repeat(300)}\n${"b".repeat(300)}`, button);
+        const got = clickLabel(null, "", `${"a".repeat(300)}\n${"b".repeat(1300)}`, button);
         expect(got.name).toHaveLength(120);
-        expect(got.description).toHaveLength(200);
+        expect(got.description).toHaveLength(1000);
     });
 });
 
