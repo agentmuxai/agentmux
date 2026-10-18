@@ -15,8 +15,15 @@
 //! Every test binary of the workspace (each crate's unit tests and each file
 //! under `tests/`) invokes [`checkout_guard!`]. It runs [`guard`] when the
 //! binary starts, before the test harness, so a test-name filter can't skip
-//! it: the crate folder compiled into the binary (`CARGO_MANIFEST_DIR` at build
-//! time) must be the one cargo runs it for (`CARGO_MANIFEST_DIR` at run time).
+//! it. The crate folder compiled into the binary (`CARGO_MANIFEST_DIR` at build
+//! time) must be the one cargo runs it for (`CARGO_MANIFEST_DIR` at run time);
+//! and each workspace library it links must have been compiled in the same
+//! workspace, since cargo can rebuild the test binary yet link another
+//! checkout's library it thinks fresh. Each library exports the folder it was
+//! compiled in (`COMPILED_IN` here, `CHECKOUT_DIR` in the others) for that.
+
+/// The folder this library was compiled in, for [`checkout_guard!`].
+pub const COMPILED_IN: &str = env!("CARGO_MANIFEST_DIR");
 
 use std::path::Path;
 
@@ -31,11 +38,35 @@ pub fn check(compiled: &str) -> Result<(), String> {
     }
 }
 
+/// `Err` when a workspace library `linked` into the test binary was compiled
+/// in another workspace than the binary itself (`compiled`): their workspace
+/// roots, two folders up, must be the same folder.
+pub fn check_linked(compiled: &str, linked: &[&str]) -> Result<(), String> {
+    let root = |dir: &str| Path::new(dir).parent().and_then(Path::parent).map(Path::to_path_buf);
+    let Some(mine) = root(compiled) else { return Ok(()) };
+    for lib in linked {
+        let Some(theirs) = root(lib) else { continue };
+        if !same_folder(&mine, &theirs) {
+            return Err(format!(
+                "this test binary was built from {compiled} but links a workspace library compiled from {lib}: \
+                 checkouts sharing a cargo target directory reuse each other's libraries, so the tests would run \
+                 the other checkout's code. Give each checkout its own target directory (unset CARGO_TARGET_DIR, \
+                 or point it at a folder of this checkout's own), then build again."
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// What [`checkout_guard!`] runs at a test binary's start: on a mismatch, the
-/// reason on stderr and exit code 101, as a failed test run would.
+/// reason on stderr and exit code 101, as a failed test run would. Only under
+/// cargo: a binary run by hand elsewhere may name folders that aren't there.
 #[doc(hidden)]
-pub fn guard(compiled: &str) {
-    if let Err(e) = check(compiled) {
+pub fn guard(compiled: &str, linked: &[&str]) {
+    if std::env::var_os("CARGO_MANIFEST_DIR").is_none() {
+        return;
+    }
+    if let Err(e) = check(compiled).and_then(|()| check_linked(compiled, linked)) {
         eprintln!("error: {e}");
         std::process::exit(101);
     }
@@ -45,13 +76,14 @@ pub fn guard(compiled: &str) {
 /// platform's initializer section (as the `ctor` crate does). Invoke it once
 /// per test binary: at a crate's root, behind `#[cfg(test)]` where the crate
 /// has `agentmux-common` only as a dev-dependency, and at the top of each
-/// file under `tests/`.
+/// file under `tests/`. Pass the `CHECKOUT_DIR` of each other workspace
+/// library the binary links (`agentmux_common`'s is always checked).
 #[macro_export]
 macro_rules! checkout_guard {
-    () => {
+    ($($lib:expr),* $(,)?) => {
         const _: () = {
             extern "C" fn agentmux_checkout_guard() {
-                $crate::checkout::guard(env!("CARGO_MANIFEST_DIR"));
+                $crate::checkout::guard(env!("CARGO_MANIFEST_DIR"), &[$crate::checkout::COMPILED_IN, $($lib),*]);
             }
             #[used]
             #[cfg_attr(any(target_os = "linux", target_os = "android", target_os = "freebsd"), link_section = ".init_array")]
@@ -122,6 +154,23 @@ mod tests {
         assert!(compare(&a, &b).is_err(), "look-alike copies aren't the same checkout");
         // The same folder by another spelling is the same checkout.
         assert!(compare(&a, &a.join("..").join("clone-a")).is_ok());
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// A test binary rebuilt in one checkout that links a library cargo
+    /// thought fresh from another (#5097).
+    #[test]
+    fn a_library_from_another_checkout_is_refused() {
+        let base = std::env::temp_dir().join(format!("agentmux-linked-test-{}", std::process::id()));
+        for clone in ["clone-a", "clone-b"] {
+            checkout(&base.join(clone));
+            std::fs::create_dir_all(base.join(clone).join("crates").join("lib")).unwrap();
+            std::fs::create_dir_all(base.join(clone).join("crates").join("app")).unwrap();
+        }
+        let dir = |clone: &str, krate: &str| base.join(clone).join("crates").join(krate).to_string_lossy().into_owned();
+        assert!(check_linked(&dir("clone-a", "app"), &[&dir("clone-a", "lib")]).is_ok());
+        let err = check_linked(&dir("clone-a", "app"), &[&dir("clone-a", "lib"), &dir("clone-b", "lib")]).unwrap_err();
+        assert!(err.contains("links a workspace library compiled from") && err.contains("clone-b"), "{err}");
         let _ = std::fs::remove_dir_all(&base);
     }
 }

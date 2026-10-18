@@ -403,3 +403,8 @@ mod tests {
 // a shared target directory (`agentmux_common::checkout`).
 #[cfg(test)]
 agentmux_common::checkout_guard!();
+
+/// The folder this library was compiled in, for the checkout guard of the
+/// test binaries that link it (`agentmux_common::checkout_guard!`).
+#[doc(hidden)]
+pub const CHECKOUT_DIR: &str = env!("CARGO_MANIFEST_DIR");

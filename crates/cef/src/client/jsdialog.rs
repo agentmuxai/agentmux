@@ -20,7 +20,7 @@ use parking_lot::Mutex;
 // The cef library's test binary must hold this checkout's code
 // (`agentmux_common::checkout`); here because `lib.rs` is at its size cap.
 #[cfg(test)]
-agentmux_common::checkout_guard!();
+agentmux_common::checkout_guard!(agentmux_procstats::CHECKOUT_DIR);
 
 /// srv asks the person for up to 10 minutes; past that, nobody will answer.
 const PARKED_TTL: Duration = Duration::from_secs(11 * 60);
