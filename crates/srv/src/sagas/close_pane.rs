@@ -20,10 +20,9 @@
 //
 // **Then, once for the pane:** if every member of the leaf is gone, delete
 // the leaf (`LayoutDeleteNode`) and queue one frontend `delete` for it.
-// A leaf that still has a live member is left alone — closing one tab of a
-// stack (`closeBlockInStack`) must never take its siblings with it; the
-// frontend has already pushed the shortened stack, and the reducer's
-// `prune_dangling_stack_members` covers any stale copy.
+// A leaf that still has a live member keeps its pane: closing one tab of a
+// stack must never take its siblings with it. Just the closed tabs leave
+// srv's tree (`LayoutDeleteNodeByBlock`), whichever frontend flow closed them.
 //
 // **Compensation:** none, same as `delete_block` — a stopped process and a
 // deleted record cannot be recreated from saga state. A block whose
@@ -196,6 +195,30 @@ async fn run_inner(
     }
 
     let leaf_removed = leaf_to_delete.is_some();
+    // A kept pane loses just these tabs in srv's own tree too, before any
+    // frontend is told: the frontend shows srv's stored tree whenever its own
+    // differs (#4946), so a member left here came back as a "(No View)" tab.
+    // Removing a member no pane holds any more (the frontend's own
+    // `pane.removeTab` got there first) changes nothing.
+    if !leaf_removed {
+        for block_id in block_ids.iter().chain(gone.iter()) {
+            if let Err(reason) = ctx
+                .dispatch(Command::LayoutDeleteNodeByBlock {
+                    tab_id: tab_id.clone(),
+                    block_id: block_id.clone(),
+                    correlation_id: String::new(),
+                })
+                .await
+            {
+                tracing::warn!(
+                    tab_id = %tab_id,
+                    block_id = %block_id,
+                    "[saga] ClosePane: LayoutDeleteNodeByBlock failed (best-effort): {}",
+                    reason
+                );
+            }
+        }
+    }
     if opts.frontend_waits {
         // The frontend still shows every member (§5.5): one `delete` each, in
         // one batch. Its handler removes just that member; the last one
@@ -603,6 +626,18 @@ mod tests {
         assert_eq!(out["leaf_removed"], false);
         assert!(state.srv_state.lock().await.blocks.contains_key(&b), "sibling survives");
         assert_eq!(queued_deletes(&state, &tab_id), vec![a.clone()], "the kept pane drops just that tab");
+        // srv's stored tree drops it too: the frontend shows that tree when
+        // its own differs, and a member left in it came back as "(No View)".
+        assert_eq!(stored_stack(&state, &tab_id), (vec![b.clone()], b.clone()));
+    }
+
+    /// The stored layout's one leaf: its tabs and the visible one.
+    fn stored_stack(state: &AppState, tab_id: &str) -> (Vec<String>, String) {
+        let tab = state.mstore.must_get::<crate::backend::obj::Tab>(tab_id).unwrap();
+        let layout = state.mstore.must_get::<crate::backend::obj::LayoutState>(&tab.layoutstate).unwrap();
+        let data = layout.rootnode.and_then(|n| n.data).expect("the pane is kept");
+        let stack = if data.block_stack.is_empty() { vec![data.block_id.clone()] } else { data.block_stack };
+        (stack, data.block_id)
     }
 
     /// The shutdown log (§5.5, §12.1): ordered lines scoped to the block,
@@ -717,6 +752,7 @@ mod tests {
         assert!(s.tabs[&tab_id].rootnode.is_some(), "pane survives");
         drop(s);
         assert!(queued_deletes(&state, &tab_id).is_empty());
+        assert_eq!(stored_stack(&state, &tab_id), (vec![b.clone()], b.clone()), "and leaves srv's tree");
     }
 
     fn sample_agent(id: &str) -> crate::backend::storage::agents::AgentDefinition {
