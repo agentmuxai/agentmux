@@ -287,7 +287,9 @@ pub fn spawn_background_subsystems(
     // macOS, a bundle identifier derived from it) into the binary, so it
     // is a never-before-seen code signature to the Keychain every single
     // time — the SAME already-`Always Allow`'d muxbus credential prompts
-    // again on every fresh local build, indefinitely. Unlike
+    // again on every fresh local build, indefinitely. Only on macOS: Windows
+    // and Linux read the stored sign-in without a prompt, so there a local
+    // channel reconnects at launch like any other. Unlike
     // `isolated_auth_enabled`/`isolated_settings_enabled` (which also
     // isolate `task dev`'s `dev-<branch>` channel), this flag deliberately
     // exempts `dev-*` — see its own doc comment for why a per-branch-stable
