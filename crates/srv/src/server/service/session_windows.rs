@@ -22,6 +22,13 @@
 //!   window then opens each where it was (`TakeRestoredWindows`, then the
 //!   host's `open_restored_window`).
 //!
+//! Names come back too: each window's own (`window:displayname`, under
+//! `window.name`) and its workspace's (`name`). The restore names each
+//! workspace as it creates it; a window's name waits in the client's meta
+//! (`session:restored_window_names`, by workspace) for the window that opens
+//! onto that workspace, which `CreateWindow` names
+//! ([`take_restored_window_name`]).
+//!
 //! The record keeps the main window's tabs at its top level too, the shape it
 //! always had, so an older AgentMux reading it still restores that window. A
 //! record without `windows` reads as one window.
@@ -36,6 +43,19 @@ use crate::server::AppState;
 
 /// Restored workspaces waiting for the main window to open them.
 const WAITING_META_KEY: &str = "session:restored_windows";
+
+/// Restored windows' names, by workspace, waiting for their windows.
+const NAMES_META_KEY: &str = "session:restored_window_names";
+
+/// The name the user gave window `w`, if any.
+fn window_name(w: &Window) -> Option<String> {
+    w.meta
+        .get("window:displayname")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|n| !n.is_empty())
+        .map(str::to_string)
+}
 
 /// How long a quit's record outranks the last close's: a quit closes every
 /// window within seconds, and one that stalls longer than this was abandoned.
@@ -88,6 +108,9 @@ pub(crate) fn snapshot_session(store: &Store, for_quit: bool) -> Option<Value> {
                 "width": w.winsize.width,
                 "height": w.winsize.height,
             });
+            if let Some(name) = window_name(&w) {
+                entry["window"]["name"] = json!(name);
+            }
             Some(entry)
         })
         .collect();
@@ -212,9 +235,16 @@ fn set_client_meta(store: &Store, key: &str, value: Option<Value>) {
 pub(crate) async fn restore_all(state: &AppState, record: &Value) -> Result<Option<(String, Vec<Event>)>, String> {
     let mut main = None;
     let mut waiting = Vec::new();
+    let mut names = serde_json::Map::new();
     let mut first_err = None;
     for (i, window) in windows_of(record).iter().enumerate() {
-        match super::session_restore::restore_workspace(state, window).await {
+        let restored = super::session_restore::restore_workspace(state, window).await;
+        if let (Ok(Some((ws_id, _))), Some(name)) =
+            (&restored, window.pointer("/window/name").and_then(|v| v.as_str()).filter(|n| !n.trim().is_empty()))
+        {
+            names.insert(ws_id.clone(), json!(name));
+        }
+        match restored {
             Ok(Some(restored)) if main.is_none() => main = Some(restored),
             Ok(Some((ws_id, events))) => {
                 super::reducer_helpers::publish_events(state, &events);
@@ -233,11 +263,25 @@ pub(crate) async fn restore_all(state: &AppState, record: &Value) -> Result<Opti
         tracing::info!(windows = waiting.len() + 1, "session_restore: restored every window of the last session");
     }
     set_client_meta(&state.mstore, WAITING_META_KEY, (!waiting.is_empty()).then(|| Value::Array(waiting)));
+    set_client_meta(&state.mstore, NAMES_META_KEY, (!names.is_empty()).then(|| Value::Object(names)));
     match (main, first_err) {
         (Some(main), _) => Ok(Some(main)),
         (None, Some(e)) => Err(e),
         (None, None) => Ok(None),
     }
+}
+
+/// The name a restored window had, for the window now opening onto its
+/// workspace `ws_id`; handed out once (`CreateWindow`).
+pub(crate) fn take_restored_window_name(store: &Store, ws_id: &str) -> Option<String> {
+    let mut names = store
+        .get_all::<Client>()
+        .ok()
+        .and_then(|cs| cs.into_iter().next())
+        .and_then(|c| c.meta.get(NAMES_META_KEY).and_then(|v| v.as_object().cloned()))?;
+    let name = names.remove(ws_id)?.as_str().map(str::to_string)?;
+    set_client_meta(store, NAMES_META_KEY, (!names.is_empty()).then(|| Value::Object(names)));
+    Some(name)
 }
 
 /// `window.TakeRestoredWindows`: the workspaces a restore rebuilt beside the

@@ -271,3 +271,66 @@ async fn an_older_quits_record_never_costs_a_later_run_its_windows() {
     assert_eq!(client.windowids, vec![later]);
     assert!(state.mstore.get::<Workspace>(&later_ws).unwrap().is_some());
 }
+
+/// Name `ws_id`'s workspace and window `win_id` as the user would have.
+async fn name(state: &AppState, win_id: &str, ws_id: &str, window_name: &str, workspace_name: &str) {
+    dispatch_apply(state, Command::RenameWorkspace { workspace_id: ws_id.into(), name: workspace_name.into() }).await;
+    let mut w = state.mstore.get::<Window>(win_id).unwrap().unwrap();
+    w.meta.insert("window:displayname".into(), json!(window_name));
+    state.mstore.update(&mut w).unwrap();
+}
+
+#[tokio::test]
+async fn windows_and_their_workspaces_come_back_with_their_names() {
+    let state = test_state();
+    no_windows(&state);
+    let (main_id, main_ws) = window(&state, "main", "agent", 0, 0).await;
+    let (other_id, other_ws) = window(&state, "window-2", "sysinfo", 10, 20).await;
+    name(&state, &main_id, &main_ws, "Release work", "Upgrades").await;
+    name(&state, &other_id, &other_ws, "Monitoring", "Ops").await;
+    let record = snapshot_session(&state.mstore, true).unwrap();
+    assert_eq!(record["windows"][0]["window"]["name"], "Release work");
+    assert_eq!(record["windows"][1]["name"], "Ops");
+    save_last_session_snapshot(&state.mstore, record);
+    no_windows(&state);
+
+    let (restored_main, _) = restore_last_session(&state).await.unwrap().unwrap();
+    let take = WebCallType { service: "window".into(), method: "TakeRestoredWindows".into(), args: vec![], uicontext: None };
+    let others = handle_take_restored_windows(&state, &take).data.unwrap();
+    let restored_other = others[0]["workspaceid"].as_str().unwrap().to_string();
+    let ws_name = |ws: &str| state.mstore.get::<Workspace>(ws).unwrap().unwrap().name;
+    assert_eq!((ws_name(&restored_main), ws_name(&restored_other)), ("Upgrades".into(), "Ops".into()));
+
+    // The window that opens onto each restored workspace takes its name, once.
+    let create = |ws: &str| WebCallType {
+        service: "window".into(),
+        method: "CreateWindow".into(),
+        args: vec![Value::Null, json!(ws), json!("window-x")],
+        uicontext: None,
+    };
+    for (ws, expected) in [(&restored_other, "Monitoring"), (&restored_main, "Release work")] {
+        let ret = crate::server::service::window::handle_window_service(&state, &create(ws)).await;
+        assert!(ret.error.is_none(), "{:?}", ret.error);
+        let win_id = ret.data.unwrap()["oid"].as_str().unwrap().to_string();
+        let win = state.mstore.get::<Window>(&win_id).unwrap().unwrap();
+        assert_eq!(win.meta.get("window:displayname"), Some(&json!(expected)));
+    }
+    assert_eq!(take_restored_window_name(&state.mstore, &restored_main), None, "handed out once");
+    let client = state.mstore.get_all::<Client>().unwrap().into_iter().next().unwrap();
+    assert!(!client.meta.contains_key(NAMES_META_KEY), "nothing left waiting");
+}
+
+#[tokio::test]
+async fn an_unnamed_window_and_an_older_record_restore_without_names() {
+    let state = test_state();
+    no_windows(&state);
+    window(&state, "main", "agent", 0, 0).await;
+    let record = snapshot_session(&state.mstore, true).unwrap();
+    assert!(record["windows"][0]["window"].get("name").is_none());
+    assert!(record["windows"][0].get("name").is_none());
+    save_last_session_snapshot(&state.mstore, record);
+    no_windows(&state);
+    let (ws, _) = restore_last_session(&state).await.unwrap().unwrap();
+    assert_eq!(state.mstore.get::<Workspace>(&ws).unwrap().unwrap().name, "");
+    assert_eq!(take_restored_window_name(&state.mstore, &ws), None);
+}

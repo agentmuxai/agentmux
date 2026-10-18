@@ -125,7 +125,12 @@ pub(crate) fn snapshot_workspace(store: &Store, workspace_id: &str) -> Option<Va
     if tabs.is_empty() {
         return None;
     }
-    Some(json!({ "tabs": tabs, "active_tab_index": active_tab_index }))
+    let mut snapshot = json!({ "tabs": tabs, "active_tab_index": active_tab_index });
+    // The workspace's name comes back with it (an older record has none).
+    if !workspace.name.trim().is_empty() {
+        snapshot["name"] = json!(workspace.name);
+    }
+    Some(snapshot)
 }
 
 /// Replace every leaf's real block id (in `data.block_id`, `block_stack`,
@@ -570,11 +575,8 @@ pub(crate) async fn restore_workspace(
         return Ok(None);
     }
 
-    let ws_events = dispatch_to_reducer(
-        state,
-        Command::CreateWorkspace { name: String::new() },
-    )
-    .await;
+    let name = snapshot.get("name").and_then(|v| v.as_str()).unwrap_or_default().to_string();
+    let ws_events = dispatch_to_reducer(state, Command::CreateWorkspace { name }).await;
     if let Some(err) = find_error(&ws_events) {
         return Err(format!("restore_last_session: CreateWorkspace failed: {}", err));
     }
