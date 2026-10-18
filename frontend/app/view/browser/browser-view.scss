@@ -306,7 +306,7 @@ $browser-nav-stack-below: 388px;
     // Why a navigation stopped: information, not a question, so it stays
     // quieter than one (REPORT_BROWSER_PANE_BLANK_AFTER_BLOCKED_SIGN_IN_REDIRECT_RCA_2026_10_16.md §6.2).
     &[data-kind="notice"] {
-        background: var(--panel-bg-color, var(--highlight-bg-color));
+        background: var(--highlight-bg-color);
 
         .browser-attention-head > i {
             color: var(--accent-color);
