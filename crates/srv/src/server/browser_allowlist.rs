@@ -212,7 +212,7 @@ pub(crate) async fn handle_host_browser_navigation(
     }
     let s = |k: &str| body.get(k).and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
     let stopped = Stopped { pane: s("pane"), target: s("target"), url: s("url"), kind: s("kind") };
-    let settled = settle_stopped_navigation(&state, stopped.clone()).await;
+    let settled = settle_stopped_navigation(&state, stopped.clone(), ASK_TIMEOUT).await;
     let (outcome, reason) = settled.describe();
     tracing::info!(
         pane = %stopped.pane, target = %stopped.target, kind = %stopped.kind, outcome, reason = %reason,
@@ -262,8 +262,8 @@ impl Settled {
 }
 
 /// Where a stopped navigation goes, decided in one place, so every branch
-/// replays, asks, or shows a notice.
-async fn settle_stopped_navigation(state: &AppState, stopped: Stopped) -> Settled {
+/// replays, asks, or shows a notice. A question waits up to `timeout`.
+async fn settle_stopped_navigation(state: &AppState, stopped: Stopped, timeout: std::time::Duration) -> Settled {
     use crate::server::browser_attention::{self, AskError, Kind};
     let list = list_for(&stopped.pane).or_else(|| opener_list(state, &stopped.pane));
     let Some(list) = list else {
@@ -288,7 +288,7 @@ async fn settle_stopped_navigation(state: &AppState, stopped: Stopped) -> Settle
         Ok(raised) => {
             let st = state.clone();
             tokio::spawn(async move {
-                let (answer, waiting) = raised.answer(Some(ASK_TIMEOUT)).await;
+                let (answer, waiting) = raised.answer(Some(timeout)).await;
                 let outcome = match answer {
                     browser_attention::Answer::Yes => allow_and_load(&st, &stopped, &origin).await,
                     // Taken over: it isn't limited any more, so it goes on.
@@ -420,6 +420,49 @@ async fn replay_navigation(state: &AppState, target: &str, url: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // RCA §6.2: a question about a stopped navigation that nobody answers
+    // ends in a notice saying so, not in a blank pane.
+    #[tokio::test]
+    async fn a_question_nobody_answers_ends_in_a_notice() {
+        use crate::server::browser_attention::tests::{banner, browser_block};
+        let state = crate::server::tests::test_state();
+        let pane = uuid::Uuid::new_v4().to_string();
+        browser_block(&state, &pane);
+        set(&pane, vec!["https://github.com".into()]);
+        let stopped = Stopped {
+            pane: pane.clone(),
+            target: pane.clone(),
+            url: "https://accounts.google.com/o/oauth2".into(),
+            kind: "navigate".into(),
+        };
+        let settled = settle_stopped_navigation(&state, stopped, std::time::Duration::from_millis(100)).await;
+        assert_eq!(settled, Settled::Asking);
+        assert_eq!(banner(&state, &pane)["kind"], "navigation");
+        let mut shown = Value::Null;
+        for _ in 0..200 {
+            shown = banner(&state, &pane);
+            if shown["kind"] == "notice" {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert_eq!(shown["kind"], "notice", "{shown}");
+        assert_eq!(shown["why"], "Nobody answered within 10 minutes.");
+        assert_eq!(shown["origin"], "https://accounts.google.com");
+        assert_eq!(shown["allow"], true);
+        // The question is gone; only the notice, which holds nothing, is left.
+        for _ in 0..200 {
+            if crate::server::browser_attention::waiting_on_user(&pane).is_none() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert_eq!(crate::server::browser_attention::waiting_on_user(&pane), None);
+        assert_eq!(banner(&state, &pane)["kind"], "notice");
+        crate::server::browser_attention::cancel_for(&pane);
+        drop_pane(&pane);
+    }
 
     #[test]
     fn a_chain_shares_one_list_and_keeps_it_past_its_root() {

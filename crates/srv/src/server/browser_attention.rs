@@ -328,7 +328,16 @@ impl Raised {
             Some(t) => match tokio::time::timeout(t, rx).await {
                 Ok(Ok(a)) => a,
                 Ok(Err(_)) => Answer::Cancelled,
-                Err(_) => Answer::TimedOut,
+                Err(_) => {
+                    // Settled as answered, like any other answer: a late click
+                    // finds it over, and the slot is free for what follows
+                    // (a notice saying nobody answered) while `waiting` lives.
+                    let mut map = pending().lock().unwrap_or_else(|p| p.into_inner());
+                    if let Some(p) = map.get_mut(&waiting.id) {
+                        p.tx = None;
+                    }
+                    Answer::TimedOut
+                }
             },
             None => rx.await.unwrap_or(Answer::Cancelled),
         };
@@ -399,7 +408,7 @@ pub(crate) async fn ask(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     fn park(id: &str, block: &str, kind: Kind) -> oneshot::Receiver<Answer> {
@@ -410,7 +419,7 @@ mod tests {
     }
 
     /// A browser pane in `state`'s store, for the banner to be written to.
-    fn browser_block(state: &AppState, id: &str) {
+    pub(crate) fn browser_block(state: &AppState, id: &str) {
         let mut meta = crate::backend::obj::MetaMapType::new();
         meta.insert("view".to_string(), json!("browser"));
         let mut block = crate::backend::obj::Block {
@@ -425,7 +434,7 @@ mod tests {
         state.mstore.insert(&mut block).unwrap();
     }
 
-    fn banner(state: &AppState, id: &str) -> Value {
+    pub(crate) fn banner(state: &AppState, id: &str) -> Value {
         let block = state.mstore.must_get::<crate::backend::obj::Block>(id).unwrap();
         block.meta.get(ATTENTION_META_KEY).cloned().unwrap_or(Value::Null)
     }
@@ -494,6 +503,28 @@ mod tests {
         let (answer, waiting) = handoff_wait.await.unwrap();
         assert_eq!(answer, Answer::Yes);
         drop(waiting);
+        assert!(banner(&state, &pane).is_null());
+    }
+
+    // A request nobody answers in time is settled like an answered one: a
+    // late click finds it over, and the notice saying so can go up while its
+    // asker still holds the pane.
+    #[tokio::test]
+    async fn a_request_that_times_out_is_settled_as_answered() {
+        let state = crate::server::tests::test_state();
+        let pane = uuid::Uuid::new_v4().to_string();
+        browser_block(&state, &pane);
+        let question = raise(&state, &pane, "", Kind::Navigation, json!({ "origin": "https://b.example" })).unwrap();
+        let id = banner(&state, &pane)["id"].as_str().unwrap().to_string();
+        let (answer, waiting) = question.answer(Some(Duration::from_millis(50))).await;
+        assert_eq!(answer, Answer::TimedOut);
+        assert_eq!(resolve(&id, &pane, Answer::Yes), Err("that request was already answered".to_string()));
+        assert_eq!(slot_taken(&pending().lock().unwrap(), &pane, Kind::Notice), None);
+        let notice = raise(&state, &pane, "", Kind::Notice, json!({ "why": "Nobody answered." })).unwrap();
+        assert_eq!(banner(&state, &pane)["kind"], "notice");
+        drop(waiting);
+        assert_eq!(banner(&state, &pane)["kind"], "notice", "the question going away leaves the notice up");
+        drop(notice);
         assert!(banner(&state, &pane).is_null());
     }
 
