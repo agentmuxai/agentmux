@@ -2215,6 +2215,8 @@ async fn a_page_dialog_is_decided_by_policy_or_asked_and_only_the_host_reports_o
         assert!(seen.contains(&(want.0.to_string(), want.1.to_string())), "{want:?} in {seen:?}");
     }
     assert!(seen.contains(&("dialog".to_string(), "ended".to_string())), "{seen:?}");
+    // Ended is what became of it: not a Cancel the user never gave.
+    assert_eq!(seen.iter().filter(|(_, d)| d == "cancelled").count(), 1, "only the prompt: {seen:?}");
     let (_, body) = post_json(&app, "/api/v1/ui/browser/dialogs", auth).await;
     assert!(body["data"]["dialogs"].as_array().unwrap().is_empty());
 }

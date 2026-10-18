@@ -168,6 +168,31 @@ fn record(agent: &str, target: &str, kind: &str, message: &str, decision: &str, 
     }));
 }
 
+/// Dialogs the host said ended (navigation, close) while srv was asking or
+/// about to ask about them: their question's outcome isn't the person's
+/// answer, and the host has nothing left to answer. Bounded: an id stays
+/// only until its question notices, or until it is old.
+fn ended() -> std::sync::MutexGuard<'static, VecDeque<String>> {
+    static E: OnceLock<Mutex<VecDeque<String>>> = OnceLock::new();
+    E.get_or_init(Default::default).lock().unwrap_or_else(|p| p.into_inner())
+}
+
+fn mark_ended(id: &str) {
+    let mut e = ended();
+    if e.len() >= 64 {
+        e.pop_front();
+    }
+    e.push_back(id.to_string());
+}
+
+/// Whether dialog `id` ended; forgets it once asked.
+fn take_ended(id: &str) -> bool {
+    let mut e = ended();
+    let Some(i) = e.iter().position(|x| x == id) else { return false };
+    e.remove(i);
+    true
+}
+
 /// The dialogs `agent`'s panes showed since it last asked, oldest first.
 pub(crate) fn drain(agent: &str) -> Vec<Value> {
     log().remove(agent).map(Vec::from).unwrap_or_default()
@@ -215,6 +240,7 @@ pub(crate) async fn handle_host_browser_dialog(
     let message = clip(&s("message"));
     let kind_str = s("kind");
     if flag("ended") {
+        mark_ended(&id);
         browser_attention::cancel_kind_for(&banner_at, Kind::Dialog);
         // The host doesn't keep which kind it was.
         record(&agent, &target, "dialog", &message, "ended", "the page navigated or closed before it was answered");
@@ -245,6 +271,9 @@ pub(crate) async fn handle_host_browser_dialog(
     let st = state.clone();
     let site = agentmux_common::allowed_origins::target_origin(&origin).unwrap_or(origin);
     tokio::spawn(async move {
+        if take_ended(&id) {
+            return;
+        }
         let asked = browser_attention::ask(
             &st,
             &banner_at,
@@ -257,9 +286,14 @@ pub(crate) async fn handle_host_browser_dialog(
             ASK_TIMEOUT,
         )
         .await;
+        // Ended under the question: it was recorded as such, and the host
+        // has dropped it.
+        if take_ended(&id) {
+            return;
+        }
         let (accept, decision, why) = match &asked {
             Ok((Answer::Yes, _)) => (true, "accepted", "the user answered OK".to_string()),
-            Ok((Answer::Cancelled, _)) => (false, "cancelled", "the user answered Cancel".to_string()),
+            Ok((Answer::Cancelled, _)) => (false, "cancelled", "the user answered Cancel, or took the pane over".to_string()),
             Ok((Answer::TimedOut, _)) => (false, "cancelled", "the user didn't answer within 10 minutes".to_string()),
             Err(e) => (false, "cancelled", format!("couldn't ask the user: {e}")),
         };
@@ -343,6 +377,14 @@ mod tests {
         assert_eq!(got[0]["message"], "m3", "the oldest go first");
         assert!(drain("dlg-test-agent").is_empty());
         assert_eq!(drain("dlg-test-other").len(), 1);
+    }
+
+    #[test]
+    fn an_ended_dialog_is_noticed_once() {
+        mark_ended("dlg-test-ended-1");
+        assert!(take_ended("dlg-test-ended-1"));
+        assert!(!take_ended("dlg-test-ended-1"));
+        assert!(!take_ended("dlg-test-never"));
     }
 
     #[test]
