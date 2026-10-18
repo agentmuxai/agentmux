@@ -1194,6 +1194,32 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
             last_seen_ms INTEGER NOT NULL DEFAULT 0
         );
 
+        -- What the user typed to an agent, kept with the agent (ArrowUp
+        -- recall, search): one row per send, a run of the same text one row
+        -- counting `sends`. And the agent's unsent draft. No FK, like
+        -- db_agent_bundles: an agent's rows go with it in
+        -- purge_agent_dependents. Additive, applied on every open, so no
+        -- version bump. `storage/agent_input_history.rs`,
+        -- SPEC_AGENT_INPUT_HISTORY_2026_10_18.md.
+        CREATE TABLE IF NOT EXISTS db_agent_input_history (
+            id          INTEGER PRIMARY KEY,
+            agent_id    TEXT NOT NULL,
+            sent_at_ms  INTEGER NOT NULL,
+            text        TEXT NOT NULL,
+            kind        TEXT NOT NULL,
+            source      TEXT NOT NULL,
+            session_id  TEXT,
+            attachments TEXT,
+            sends       INTEGER NOT NULL DEFAULT 1
+        );
+        CREATE INDEX IF NOT EXISTS idx_agent_input_history_agent
+            ON db_agent_input_history (agent_id, id);
+        CREATE TABLE IF NOT EXISTS db_agent_input_drafts (
+            agent_id      TEXT PRIMARY KEY,
+            text          TEXT NOT NULL,
+            updated_at_ms INTEGER NOT NULL
+        );
+
         -- The bundles picked for an agent, in order; its own bundle
         -- (db_agents.default_memory_id) is not listed here
         -- (SPEC_RENAME_KNOWLEDGE_TO_MEMORY_2026_10_06.md §3.6). No FK: a

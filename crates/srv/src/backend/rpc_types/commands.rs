@@ -487,6 +487,14 @@ pub const COMMAND_VIEWER_DEVICES: &str = "viewer.devices";
 pub const COMMAND_VIEWER_REVOKE: &str = "viewer.revoke";
 pub const COMMAND_VIEWER_AGENT_HIDDEN: &str = "viewer.agent-hidden";
 pub const COMMAND_VIEWER_CAN_SEND: &str = "viewer.can-send";
+// What the user typed to an agent, kept with it (storage::agent_input_history,
+// SPEC_AGENT_INPUT_HISTORY_2026_10_18.md): the composer's ArrowUp and draft.
+pub const COMMAND_AGENT_INPUT_HISTORY: &str = "agent.input-history";
+pub const COMMAND_AGENT_INPUT_HISTORY_APPEND: &str = "agent.input-history-append";
+pub const COMMAND_AGENT_INPUT_HISTORY_SEARCH: &str = "agent.input-history-search";
+pub const COMMAND_AGENT_INPUT_HISTORY_DELETE: &str = "agent.input-history-delete";
+pub const COMMAND_AGENT_INPUT_HISTORY_CLEAR: &str = "agent.input-history-clear";
+pub const COMMAND_AGENT_INPUT_DRAFT: &str = "agent.input-draft";
 // What srv knows about newer AgentMux releases (backend::update_check).
 pub const COMMAND_APP_UPDATE_STATUS: &str = "app.update-status";
 // Ask GitHub now: the version panel's Check for update (backend::update_check).

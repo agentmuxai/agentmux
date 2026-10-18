@@ -205,6 +205,8 @@ events! {
     MuxbusStatus: crate::muxbus::delivery_status::EVENT_MUXBUS_STATUS => crate::backend::rpc_types::MuxBusDeliveryStatus,
     /// A mobile viewer paired with this machine (`http_viewer`).
     ViewerPaired: "viewer:paired" => ViewerPairedEvent,
+    /// An agent's input history or draft changed (`app_api::input_history`).
+    AgentInputHistoryChanged: "agent:inputhistory" => crate::backend::rpc_types::InputHistoryChangedEvent,
     /// Agents' upgrade requests waiting for the user (`upgrade_request`).
     AppUpgradeRequests: "app:upgraderequests" => crate::backend::upgrade_request::UpgradeRequestsEvent,
     /// What srv knows about newer releases changed (`update_check`).

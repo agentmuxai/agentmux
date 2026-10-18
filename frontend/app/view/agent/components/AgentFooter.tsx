@@ -41,6 +41,15 @@ import { isBangCommand } from "../bang-command";
 import { AttachmentTray } from "../attachments/AttachmentTray";
 import { getAttachmentDraft } from "../attachments/attachment-draft";
 import { getComposerDraft, getSentHistory, saveSentHistory, SENT_HISTORY_MAX, setComposerDraft } from "../reload-persistence";
+import {
+    agentDraft,
+    agentHistory,
+    historyAgentId,
+    loadOlderAgentHistory,
+    rememberSent,
+    saveAgentDraft,
+    watchAgentHistory,
+} from "../agent-input-history";
 import { attachmentNoun, fileKind } from "../attachments/file-kind";
 import { isContainerPane, spliceComposerTokens } from "../hooks/useAgentDropAttach";
 import { copyIntoWorkdir, type CopySource } from "@/app/drag/file-drop-actions";
@@ -735,9 +744,27 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
     // "not navigating — showing the live draft"; lower values point at a prior
     // sent message. `histDraft` stashes the in-progress text while navigating
     // so ArrowDown past the newest entry restores it.
-    const sentHistory: string[] = draftBlockId ? getSentHistory(draftBlockId) : [];
+    //
+    // A defined agent's history is the agent's own, kept by srv
+    // (agent-input-history.ts): it survives a restart, an upgrade and a new
+    // pane. It loads after mount, pages back on demand and takes sends from
+    // other panes, so the cursor moves with what arrives around it.
+    const historyAgent = historyAgentId(props.viewModel?.blockAtom()?.meta);
+    const sentHistory: string[] = historyAgent
+        ? agentHistory(historyAgent)
+        : draftBlockId
+          ? getSentHistory(draftBlockId)
+          : [];
     let histPos = sentHistory.length;
     let histDraft = "";
+    if (historyAgent) {
+        onCleanup(
+            watchAgentHistory(historyAgent, (where, n) => {
+                if (where === "older") histPos += n;
+                else if (histPos === sentHistory.length - n) histPos += n;
+            })
+        );
+    }
 
     // ── Slash autocomplete state ──────────────────────────────────────
     // Tracks the current `/prefix` (without the leading slash) when the
@@ -853,6 +880,7 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
         // instead of resurrecting the pre-clear text on the next tab
         // switch back. See the composer draft note above.
         if (draftBlockId) setComposerDraft(draftBlockId, text);
+        if (historyAgent) saveAgentDraft(historyAgent, text);
     };
 
     const acceptCompletion = (cmd: SlashCommand): void => {
@@ -907,6 +935,7 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
         // `props.onTyping` being provided (that callback is optional; the
         // draft guarantee isn't).
         if (draftBlockId && textareaRef) setComposerDraft(draftBlockId, textareaRef.value);
+        if (historyAgent && textareaRef) saveAgentDraft(historyAgent, textareaRef.value);
         // Perf marks per SPEC_INPUT_RESPONSIVENESS §7.1. Target: handler
         // body P95 < 5 ms. The mark span ends BEFORE the RAF enqueue so
         // we measure only the synchronous handler cost.
@@ -964,13 +993,18 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
     // doesn't trip handleInput's history-cursor reset before the user has
     // touched anything.
     onMount(() => {
-        if (!draftBlockId || !textareaRef) return;
-        const draft = getComposerDraft(draftBlockId);
-        if (draft) {
+        if (!textareaRef) return;
+        const restore = (draft: string | undefined) => {
+            if (!draft || !textareaRef || textareaRef.value) return;
             textareaRef.value = draft;
             setIsBangCmd(isBangCommand(draft));
             updateAutocomplete();
-        }
+        };
+        const draft = draftBlockId ? getComposerDraft(draftBlockId) : undefined;
+        if (draft) restore(draft);
+        // After a restart or in a new pane, the agent's own draft, if the
+        // composer is still empty when it arrives.
+        else if (historyAgent) void agentDraft(historyAgent).then(restore);
     });
 
     // ── Voice input handle ───────────────────────────────────────────
@@ -1134,7 +1168,9 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
             }
             // Record in shell-style history (skip a consecutive duplicate) and
             // reset the navigation cursor back to the live (now empty) draft.
-            if (message.trim() && message !== sentHistory[sentHistory.length - 1]) {
+            if (historyAgent) {
+                rememberSent(historyAgent, message);
+            } else if (message.trim() && message !== sentHistory[sentHistory.length - 1]) {
                 sentHistory.push(message);
                 if (sentHistory.length > SENT_HISTORY_MAX) sentHistory.shift();
                 if (draftBlockId) saveSentHistory(draftBlockId);
@@ -1346,6 +1382,10 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
             // back while already navigating. Caret lands back at position 0
             // (not the end) so a repeated ArrowUp immediately steps back
             // again instead of first having to re-reach the start.
+            // Near the oldest entry shown, read the page before it.
+            if (e.key === "ArrowUp" && historyAgent && histPos <= 10 && caretAtStart) {
+                void loadOlderAgentHistory(historyAgent);
+            }
             if (e.key === "ArrowUp" && histPos > 0 && caretAtStart) {
                 if (!navigating) histDraft = textareaRef.value; // stash the live draft
                 histPos--;

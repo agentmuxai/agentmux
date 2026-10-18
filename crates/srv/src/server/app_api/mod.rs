@@ -91,6 +91,7 @@ mod attachments;
 pub(crate) mod connections;
 pub(crate) mod app_update;
 pub(crate) mod viewer;
+mod input_history;
 mod presence;
 pub(crate) mod tower_pane;
 mod blockstats;
@@ -122,6 +123,7 @@ pub fn register_app_api_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     attachments::register(engine, state);
     connections::register(engine, state);
     viewer::register(engine, state);
+    input_history::register(engine, state);
     app_update::register(engine, state);
     presence::register(engine, state);
     tower_pane::register(engine, state);

@@ -32,6 +32,7 @@ import type { DispatchUpdatedEvent } from "@/types/rpc/DispatchUpdatedEvent";
 import type { DockClearEvent } from "@/types/rpc/DockClearEvent";
 import type { FilesChangedEvent } from "@/types/rpc/FilesChangedEvent";
 import type { FsOpEvent } from "@/types/rpc/FsOpEvent";
+import type { InputHistoryChangedEvent } from "@/types/rpc/InputHistoryChangedEvent";
 import type { InstallChunkEvent } from "@/types/rpc/InstallChunkEvent";
 import type { InstallProgressEvent } from "@/types/rpc/InstallProgressEvent";
 import type { LanDiscoverability } from "@/types/rpc/LanDiscoverability";
@@ -86,6 +87,7 @@ import type { WidgetStorageEvent } from "@/types/rpc/WidgetStorageEvent";
 export type MuxEventPayloads = {
   "agent-message-accepted": MessageAcceptedEvent;
   "agent-resume-retry": ResumeRetryEvent;
+  "agent:inputhistory": InputHistoryChangedEvent;
   "agent:process-added": ProcessAddedEvent;
   "agent:process-exited": ProcessExitedEvent;
   "agent:progress": AgentProgressEvent;
@@ -187,6 +189,7 @@ export type MuxEventPayloads = {
 export const TYPED_MUX_EVENTS = [
   "agent-message-accepted",
   "agent-resume-retry",
+  "agent:inputhistory",
   "agent:process-added",
   "agent:process-exited",
   "agent:progress",
