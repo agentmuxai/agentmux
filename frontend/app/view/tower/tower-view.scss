@@ -618,11 +618,29 @@ th[aria-sort="descending"] .tower-sort {
 // (theme.scss); the rest are text-coloured, their fills graded tints so the
 // breakdown still tells them apart, the system faintest.
 
-@each $kind in agents, agentmux, shells, builds, runtimes {
-    .tower-kind--#{$kind} {
-        --tower-kind-color: var(--process-kind-#{$kind});
-        --tower-kind-fill: var(--process-kind-#{$kind});
-    }
+.tower-kind--agents {
+    --tower-kind-color: var(--process-kind-agents);
+    --tower-kind-fill: var(--process-kind-agents);
+}
+
+.tower-kind--agentmux {
+    --tower-kind-color: var(--process-kind-agentmux);
+    --tower-kind-fill: var(--process-kind-agentmux);
+}
+
+.tower-kind--shells {
+    --tower-kind-color: var(--process-kind-shells);
+    --tower-kind-fill: var(--process-kind-shells);
+}
+
+.tower-kind--builds {
+    --tower-kind-color: var(--process-kind-builds);
+    --tower-kind-fill: var(--process-kind-builds);
+}
+
+.tower-kind--runtimes {
+    --tower-kind-color: var(--process-kind-runtimes);
+    --tower-kind-fill: var(--process-kind-runtimes);
 }
 
 @each $kind, $tint in (browsers: 46%, containers: 38%, editors: 30%, apps: 22%) {
@@ -642,7 +660,7 @@ th[aria-sort="descending"] .tower-sort {
     flex-shrink: 0;
     width: 14px;
     height: 14px;
-    font-size: 11px;
+    font-size: var(--text-xs);
     color: var(--tower-kind-color, var(--secondary-text-color));
 }
 
@@ -684,7 +702,7 @@ th[aria-sort="descending"] .tower-sort {
     bottom: 1px;
     height: 2px;
     max-width: calc(100% - 2 * var(--space-2));
-    border-radius: 1px;
+    border-radius: var(--radius-sm);
     background: var(--tower-load-fill, var(--tower-kind-fill, var(--tint-4)));
     opacity: 0.55;
     pointer-events: none;
@@ -746,7 +764,7 @@ th[aria-sort="descending"] .tower-sort {
     display: flex;
     height: 8px;
     overflow: hidden;
-    border-radius: 2px;
+    border-radius: var(--radius-sm);
     background: var(--tint-1);
 }
 

@@ -240,35 +240,101 @@ pub fn is_generic_runtime(name: &str) -> bool {
     )
 }
 
-/// Parts of a command line that make a runtime a build or package tool.
-const BUILD_MARKERS: &[&str] = &[
-    "/npm-cli.js", "/npx-cli.js", "/pnpm", "/yarn", "/vite/", "/webpack", "/typescript/bin/tsc", "/typescript/lib/tsc.js",
-    "/jest", "/vitest", "/mocha", "/esbuild", "/rollup", "/turbo", "/playwright", "/eslint", "/prettier", "/@biomejs",
-    "/nx/", "/pytest", "-m pytest", "-m pip", "/pip/", "setup.py", "-m build", "maturin", "gradle", "plexus-classworlds",
-    "/maven", "msbuild.dll", "vbcscompiler",
+/// Build and package tools a runtime runs, by their npm package: matched only
+/// as the package directory of the script it runs (`/node_modules/<pkg>/`) or
+/// as a `node_modules/.bin/<tool>` shim, never as any part of a path, so a
+/// project at `~/turbo-app` is not a build.
+const BUILD_PACKAGES: &[&str] = &[
+    "npm", "pnpm", "yarn", "corepack", "vite", "webpack", "webpack-cli", "jest", "vitest", "mocha",
+    "esbuild", "rollup", "turbo", "playwright", "@playwright/test", "eslint", "prettier", "@biomejs/biome", "nx",
+    "parcel", "gulp", "grunt", "lerna", "@changesets/cli", "@angular/cli",
 ];
 
-/// What a generic runtime's command line says (rule 4): `None` keeps it a
-/// runtime. Pure: the caller reads the command line.
-pub fn by_command_line(command_line: &str) -> Option<K> {
-    let c = command_line.to_ascii_lowercase().replace('\\', "/");
-    if AGENT_PACKAGES.iter().any(|p| c.contains(&format!("node_modules/{p}/"))) {
-        return Some(K::Agents);
-    }
-    if BUILD_MARKERS.iter().any(|m| c.contains(m)) {
-        return Some(K::Builds);
-    }
-    // `dotnet build`, `dotnet test`, …: the verb is the word after the program.
-    let mut words = c.split_whitespace();
-    let program = words.next().unwrap_or("").trim_matches('"');
-    if program.ends_with("dotnet") || program.ends_with("dotnet.exe") {
-        if let Some(verb) = words.next() {
-            if matches!(verb, "build" | "test" | "restore" | "publish" | "pack" | "msbuild") {
-                return Some(K::Builds);
+/// The same tools as a `node_modules/.bin/` shim names them.
+const BUILD_BINS: &[&str] = &[
+    "npm", "npx", "pnpm", "yarn", "vite", "webpack", "tsc", "jest", "vitest", "mocha", "esbuild", "rollup", "turbo",
+    "playwright", "eslint", "prettier", "biome", "nx", "parcel", "gulp", "grunt", "lerna", "changeset", "ng",
+];
+
+/// Python modules (`-m <module>`) and scripts that build, test or install.
+const BUILD_PYTHON: &[&str] = &[
+    "pytest", "pip", "pip3", "build", "unittest", "tox", "nox", "poetry", "pdm", "hatch", "twine", "maturin", "mypy",
+    "ruff", "setup.py",
+];
+
+/// A command line's words, double quotes respected: `"C:\Program Files\x"`
+/// is one word.
+fn words(command_line: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut word = String::new();
+    let mut quoted = false;
+    for ch in command_line.chars() {
+        match ch {
+            '"' => quoted = !quoted,
+            c if c.is_whitespace() && !quoted => {
+                if !word.is_empty() {
+                    out.push(std::mem::take(&mut word));
+                }
             }
+            c => word.push(c),
         }
     }
-    None
+    if !word.is_empty() {
+        out.push(word);
+    }
+    out
+}
+
+/// The last part of a path, after `/`.
+fn basename(path: &str) -> &str {
+    path.rsplit('/').next().unwrap_or(path)
+}
+
+/// What a generic runtime's command line says (rule 4): `None` keeps it a
+/// runtime. Only what it runs counts, never any word of a path: the script's
+/// package directory, a `.bin` shim, Python's `-m` module or script name, a
+/// JVM's launcher class, `dotnet`'s verb. Pure: the caller reads the command
+/// line.
+pub fn by_command_line(command_line: &str) -> Option<K> {
+    let words: Vec<String> = words(&command_line.to_ascii_lowercase().replace('\\', "/"));
+    let program = basename(words.first()?).trim_end_matches(".exe").to_string();
+    let rest = &words[1..];
+    // The first word that isn't a flag: the script a runtime runs.
+    let script = rest.iter().find(|w| !w.starts_with('-')).map(String::as_str).unwrap_or("");
+    let in_package = |pkg: &str| script.contains(&format!("/node_modules/{pkg}/"));
+
+    if AGENT_PACKAGES.iter().any(|p| in_package(p)) {
+        return Some(K::Agents);
+    }
+    match normalize(&program).as_str() {
+        "node" | "nodejs" | "deno" | "bun" => {
+            let shim = script
+                .rsplit_once("/node_modules/.bin/")
+                .is_some_and(|(_, tool)| BUILD_BINS.contains(&tool.trim_end_matches(".js")));
+            let yarn_release = script.contains("/.yarn/releases/");
+            // TypeScript's package also holds its language server: only `tsc` builds.
+            let tsc = script.contains("/node_modules/typescript/bin/tsc")
+                || script.contains("/node_modules/typescript/lib/tsc.js");
+            (BUILD_PACKAGES.iter().any(|p| in_package(p)) || shim || yarn_release || tsc).then_some(K::Builds)
+        }
+        "python" | "pythonw" | "py" => {
+            let module = rest.iter().position(|w| w == "-m").and_then(|i| rest.get(i + 1));
+            let named = module.map(String::as_str).unwrap_or_else(|| basename(script));
+            let named = named.trim_end_matches(".exe");
+            BUILD_PYTHON.contains(&named).then_some(K::Builds)
+        }
+        // Gradle's daemon and Maven run in a JVM: their launcher classes say so.
+        "java" | "javaw" => rest
+            .iter()
+            .any(|w| w.starts_with("org.gradle.") || w.contains("org.codehaus.plexus.classworlds") || w.contains("plexus-classworlds"))
+            .then_some(K::Builds),
+        "dotnet" => {
+            let verb = matches!(script, "build" | "test" | "restore" | "publish" | "pack" | "msbuild");
+            let tool = matches!(basename(script), "msbuild.dll" | "vbcscompiler.dll");
+            (verb || tool).then_some(K::Builds)
+        }
+        _ => None,
+    }
 }
 
 /// Where a process sits, for rules 1–3.
@@ -386,17 +452,42 @@ mod tests {
         let npm = r#""C:\Program Files\nodejs\node.exe" "C:\Program Files\nodejs\node_modules\npm\bin\npm-cli.js" install"#;
         assert_eq!(by_command_line(npm), Some(K::Builds));
         assert_eq!(by_command_line("node /repo/node_modules/vite/bin/vite.js --port 5173"), Some(K::Builds));
+        assert_eq!(by_command_line("node --max-old-space-size=4096 /repo/node_modules/.bin/vitest run"), Some(K::Builds));
+        assert_eq!(by_command_line("node /repo/.yarn/releases/yarn-4.1.0.cjs install"), Some(K::Builds));
+        assert_eq!(by_command_line("node /repo/node_modules/typescript/bin/tsc -p ."), Some(K::Builds));
         assert_eq!(by_command_line("python -m pytest tests/"), Some(K::Builds));
+        assert_eq!(by_command_line("python3 /repo/.venv/bin/pytest -q"), Some(K::Builds));
+        assert_eq!(by_command_line("python setup.py build"), Some(K::Builds));
         assert_eq!(by_command_line(r#""C:\dotnet\dotnet.exe" build app.sln"#), Some(K::Builds));
+        let gradle = "java -Xmx2g -cp /home/u/.gradle/wrapper/dists/gradle-8.5/lib/gradle-launcher-8.5.jar \
+                      org.gradle.launcher.daemon.bootstrap.GradleDaemon 8.5";
+        assert_eq!(by_command_line(gradle), Some(K::Builds));
         let gemini = r"C:\Users\x\AppData\Roaming\npm\node_modules\@google\gemini-cli\dist\index.js";
         assert_eq!(by_command_line(&format!("node {gemini}")), Some(K::Agents));
         let claude = "/usr/lib/node_modules/@anthropic-ai/claude-code/cli.js";
-        assert_eq!(by_command_line(&format!("node {claude} --print")), Some(K::Agents));
+        assert_eq!(by_command_line(&format!("node --no-warnings {claude} --print")), Some(K::Agents));
         // A server or a language server stays a runtime.
         assert_eq!(by_command_line("node server.js"), None);
         assert_eq!(by_command_line("node /x/node_modules/typescript/lib/tsserver.js"), None);
         assert_eq!(by_command_line("python manage.py runserver"), None);
         assert!(is_generic_runtime("node.exe") && is_generic_runtime("python3.12") && !is_generic_runtime("cargo"));
+    }
+
+    #[test]
+    fn a_tool_name_in_a_project_path_is_not_a_build() {
+        // A tool's name as any part of a path proves nothing: only what runs counts.
+        for c in [
+            "node /home/u/yarn-site/server.js",
+            "node /home/u/turbo-app/server.js",
+            "node /srv/jest-dashboard/index.js",
+            "node /work/webpack-notes/serve.js --gradle",
+            "node /work/nx/app.js",
+            "python /home/u/setup.py.d/serve.py",
+            "python /home/u/pytest-reports/app.py",
+            "java -jar /opt/gradle-dashboard/app.jar",
+        ] {
+            assert_eq!(by_command_line(c), None, "{c}");
+        }
     }
 
     #[test]
