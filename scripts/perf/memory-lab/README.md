@@ -88,6 +88,25 @@ scroll position was lost: a recycle that frees memory but loses state hasn't
 helped anyone. If the command refuses (something a reload would lose), `recycle`
 says `recycled: false` and the notice's words.
 
+### Is the saving still there later?
+
+A recycle frees memory at once; what matters is where the window is some minutes
+later. Two ways to find out, each against a control that does everything but
+press the command (`--recycle-command none`: the same arming, the same samples):
+
+- **Keep working:** run, say, `--rounds 20 --recycle-after 5` and the same with
+  `--recycle-command none`; the curve (`--every 3`) shows whether the recycled
+  window climbs back to the other's level.
+- **Go idle** (what an idle-window governor does): `--recycle-after 5
+  --hold-minutes 10` plays 5 rounds, recycles, stops the agents and samples the
+  window once a minute for 10 minutes, without forcing a GC. `result.hold` has
+  the samples.
+
+Each mark after the recycle also carries what the page holds (DOM nodes, JS heap,
+layout objects, listeners, tool blocks and the text inside them), so a restored
+page can be set against a live one at the same point: a restore that mounts tool
+bodies a live page had unloaded shows in `toolTextKB`.
+
 ## A run that isn't the load it was asked for
 
 A run whose agents never played reports a plausible, far too low number (an
