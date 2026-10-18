@@ -265,6 +265,8 @@ import type { GlobalMemoryImportSources } from "@/types/rpc/GlobalMemoryImportSo
 import type { GlobalMemoryRevertResult } from "@/types/rpc/GlobalMemoryRevertResult";
 import type { GlobalMemorySection } from "@/types/rpc/GlobalMemorySection";
 import type { HideNamedAgentResult } from "@/types/rpc/HideNamedAgentResult";
+import type { HistoryUsage } from "@/types/rpc/HistoryUsage";
+import type { HistoryUsageReq } from "@/types/rpc/HistoryUsageReq";
 import type { HostSession } from "@/types/rpc/HostSession";
 import type { IdentityAccount } from "@/types/rpc/IdentityAccount";
 import type { ImportAgentDefinitionsResult } from "@/types/rpc/ImportAgentDefinitionsResult";
@@ -2064,6 +2066,10 @@ export const GeneratedApi = {
   // command "blockstats.detail"
   BlockStatsDetailCommand(client: RpcClient, data: BlockStatsDetailReq, opts?: RpcOpts): Promise<BlockStatsDetail> {
     return client.rpcCall("blockstats.detail", data, opts);
+  },
+  // command "history.usage"
+  HistoryUsageCommand(client: RpcClient, data: HistoryUsageReq, opts?: RpcOpts): Promise<HistoryUsage> {
+    return client.rpcCall("history.usage", data, opts);
   },
   // command "shell.list"
   ShellListCommand(client: RpcClient, opts?: RpcOpts): Promise<ShellList> {

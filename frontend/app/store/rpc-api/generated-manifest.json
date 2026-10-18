@@ -1209,6 +1209,10 @@
             "method": "BlockStatsDetailCommand"
         },
         {
+            "command": "history.usage",
+            "method": "HistoryUsageCommand"
+        },
+        {
             "command": "shell.list",
             "method": "ShellListCommand"
         },
