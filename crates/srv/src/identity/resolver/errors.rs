@@ -124,19 +124,22 @@ impl std::fmt::Display for SpawnGateError {
 
 impl std::error::Error for SpawnGateError {}
 
-/// The `linked` of a no-binding refusal for `provider`: `false` only when the
-/// agent's links (`agent_id`, then its template's, `""` for none) were read
-/// and none is for the provider. The binding lookup turns a failed read into
-/// an empty list, so a read that fails here too counts as linked: the
-/// refusal then says the account is unresolvable, not that none is linked.
+/// The `linked` of a no-binding refusal for `provider`, following the
+/// binding lookup: the agent's own links, or its template's (`""` for none)
+/// only when the agent has none. `false` only when those links were read and
+/// none is for the provider. The binding lookup turns a failed read into an
+/// empty list, so a read that fails here too counts as linked: the refusal
+/// then says the account is unresolvable, not that none is linked.
 pub(super) fn refusal_linked(identity_store: &crate::backend::storage::store::Store, agent_id: &str, template_id: &str, provider: &str) -> bool {
-    let unlinked = |id: &str| {
-        id.is_empty()
-            || identity_store
-                .agent_identity_list_for_agent(id)
-                .is_ok_and(|links| links.iter().all(|l| crate::backend::providers::resolve_provider_alias(&l.provider) != provider))
+    let for_provider = |links: Vec<crate::backend::storage::identities::AgentIdentityLink>| {
+        links.iter().any(|l| crate::backend::providers::resolve_provider_alias(&l.provider) == provider)
     };
-    !(unlinked(agent_id) && unlinked(template_id))
+    match identity_store.agent_identity_list_for_agent(agent_id) {
+        Err(_) => true,
+        Ok(own) if !own.is_empty() => for_provider(own),
+        Ok(_) if template_id.is_empty() => false,
+        Ok(_) => identity_store.agent_identity_list_for_agent(template_id).map_or(true, for_provider),
+    }
 }
 
 /// Errors specific to the resolver. Every variant is recoverable
@@ -218,5 +221,6 @@ mod tests {
         assert!(refusal_linked(&store, "def-own", "", "claude"), "a link the gate couldn't resolve");
         link(&store, "tmpl", "claude");
         assert!(refusal_linked(&store, "def-none", "tmpl", "claude"), "its template's link");
+        assert!(!refusal_linked(&store, "def-other", "tmpl", "claude"), "an agent with links of its own doesn't use its template's");
     }
 }
