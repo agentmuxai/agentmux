@@ -1864,6 +1864,8 @@ struct BypassFakeHost {
     url: std::sync::Arc<std::sync::Mutex<String>>,
     what: std::sync::Arc<std::sync::Mutex<String>>,
     clicks: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    /// What srv answered page dialogs with (`dialog_answer`).
+    dialog_answers: std::sync::Arc<std::sync::Mutex<Vec<serde_json::Value>>>,
 }
 
 impl BypassFakeHost {
@@ -1879,7 +1881,7 @@ impl BypassFakeHost {
 
     async fn serve(&self) -> u16 {
         use axum::{routing::post, Json, Router};
-        let (h1, h2) = (self.clone(), self.clone());
+        let (h1, h2, h3) = (self.clone(), self.clone(), self.clone());
         let app = Router::new()
             .route(
                 "/agentmux/browser/eval",
@@ -1905,6 +1907,16 @@ impl BypassFakeHost {
                             return Json(serde_json::json!({ "ok": true, "data": { "after": { "tag": "button" } } }));
                         }
                         Json(serde_json::json!({ "ok": true, "data": { "after": { "needs_approval": ask } } }))
+                    }
+                }),
+            )
+            .route(
+                "/agentmux/browser/dialog_answer",
+                post(move |Json(b): Json<serde_json::Value>| {
+                    let h = h3.clone();
+                    async move {
+                        h.dialog_answers.lock().unwrap().push(b);
+                        Json(serde_json::json!({ "ok": true, "data": {} }))
                     }
                 }),
             );
@@ -2083,4 +2095,128 @@ async fn bypass_is_granted_only_through_the_host_and_lifts_approvals_on_its_site
     assert_eq!(body["data"]["answer"], "declined");
     let (s, _) = post_json(&app, "/api/v1/ui/browser/request_bypass", request).await;
     assert_eq!(s, StatusCode::TOO_MANY_REQUESTS);
+}
+
+// SPEC_BROWSER_PANE_NATIVE_DIALOGS_2026_10_17.md: only the host reports a
+// page's dialog; an alert is accepted and a prompt cancelled; a confirm asks
+// the person, unless it follows the agent's own click under auto-approve; and
+// the agent hears of each one.
+#[tokio::test]
+async fn a_page_dialog_is_decided_by_policy_or_asked_and_only_the_host_reports_one() {
+    use axum::http::StatusCode;
+    let state = test_state();
+    let ws_id = dispatch_apply(&state, Command::CreateWorkspace { name: "w".into() })
+        .await
+        .iter()
+        .find_map(|e| match e {
+            Event::WorkspaceCreated { workspace_id, .. } => Some(workspace_id.clone()),
+            _ => None,
+        })
+        .unwrap();
+    let tab_id = dispatch_apply(&state, Command::CreateTab { workspace_id: ws_id, name: "t".into() })
+        .await
+        .iter()
+        .find_map(|e| match e {
+            Event::TabCreated { tab_id, .. } => Some(tab_id.clone()),
+            _ => None,
+        })
+        .unwrap();
+    let own = stand_in_pane(&state, &tab_id).await;
+    let (agent, auth) = signed_agent_on(&state, &own);
+    let fake = BypassFakeHost::default();
+    *fake.url.lock().unwrap() = "https://github.com/example/repo/issues/1".into();
+    *fake.what.lock().unwrap() = "Click \"Delete revision\"".into();
+    let port = fake.serve().await;
+    *state.host_ipc.lock().await = Some(crate::server::state::HostIpc { port, token: "host-ipc-token".into() });
+    let app = crate::server::build_router(state.clone());
+    let host = [("X-Host-Token", "host-ipc-token")];
+    let (s, body) = post_json(&app, "/api/v1/ui/browser/open", merged(&auth, serde_json::json!({ "url": "https://github.com/" }))).await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    let pane = body["data"]["pane"].as_str().unwrap().to_string();
+    let report = |id: &str, kind: &str, message: &str| {
+        serde_json::json!({ "id": id, "target": pane, "kind": kind, "message": message, "origin": "https://github.com" })
+    };
+    let decision = |body: &serde_json::Value| body["data"]["decision"].as_str().unwrap_or("").to_string();
+
+    // Only the host reports one.
+    let (s, _) = post_json_headers(&app, "/api/v1/host/browser_dialog", report("d0", "confirm", "Sure?"), &[]).await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+
+    // An alert only informs; a prompt wants typed text.
+    let (_, body) = post_json_headers(&app, "/api/v1/host/browser_dialog", report("d1", "alert", "Saved"), &host).await;
+    assert_eq!(decision(&body), "accept");
+    let (_, body) = post_json_headers(&app, "/api/v1/host/browser_dialog", report("d2", "prompt", "Name?"), &host).await;
+    assert_eq!(decision(&body), "cancel");
+
+    // A confirm the page shows on its own asks the person, and the agent's
+    // tools on the pane wait meanwhile.
+    let (_, body) = post_json_headers(&app, "/api/v1/host/browser_dialog", report("d3", "confirm", "Leave this <b>page</b>?"), &host).await;
+    assert_eq!(decision(&body), "parked");
+    let banner = wait_for_banner(&state, &pane).await;
+    assert_eq!(banner["kind"], "dialog");
+    assert_eq!(banner["dialogKind"], "confirm");
+    assert_eq!(banner["message"], "Leave this <b>page</b>?");
+    assert_eq!(banner["origin"], "https://github.com");
+    let click = merged(&auth, serde_json::json!({ "pane": pane, "ref": "e1", "action": "click" }));
+    let (s, _) = post_json(&app, "/api/v1/ui/browser/act", click.clone()).await;
+    assert_eq!(s, StatusCode::CONFLICT);
+    // The person's OK goes to the host as the dialog's answer.
+    let answer = serde_json::json!({ "block_id": pane, "id": banner["id"], "decision": "approve" });
+    let (s, _) = post_json_headers(&app, "/api/v1/host/browser_attention", answer, &host).await;
+    assert_eq!(s, StatusCode::OK);
+    for _ in 0..200 {
+        if !fake.dialog_answers.lock().unwrap().is_empty() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    assert_eq!(*fake.dialog_answers.lock().unwrap(), vec![serde_json::json!({ "id": "d3", "accept": true })]);
+
+    // Under auto-approve, the confirm that follows the agent's own click is
+    // accepted for it; a second one is not that click's.
+    let grant = serde_json::json!({ "block_id": pane, "on": true, "minutes": 15, "agent": agent, "origins": ["https://github.com"] });
+    for _ in 0..200 {
+        if crate::server::browser_attention::waiting_on_user(&pane).is_none() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    let (s, body) = post_json_headers(&app, "/api/v1/host/browser_bypass", grant, &host).await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    let (s, body) = post_json(&app, "/api/v1/ui/browser/act", click).await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    let (_, body) = post_json_headers(&app, "/api/v1/host/browser_dialog", report("d4", "confirm", "Are you sure?"), &host).await;
+    assert_eq!(decision(&body), "accept");
+    let (_, body) = post_json_headers(&app, "/api/v1/host/browser_dialog", report("d5", "confirm", "Really delete everything?"), &host).await;
+    assert_eq!(decision(&body), "parked");
+    wait_for_banner(&state, &pane).await;
+    // The page navigated away: the question comes down.
+    let ended = serde_json::json!({ "id": "d5", "target": pane, "ended": true });
+    let (s, _) = post_json_headers(&app, "/api/v1/host/browser_dialog", ended, &host).await;
+    assert_eq!(s, StatusCode::OK);
+    for _ in 0..200 {
+        if crate::server::browser_attention::waiting_on_user(&pane).is_none() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    assert!(crate::server::browser_attention::waiting_on_user(&pane).is_none());
+
+    // The agent hears of every one, with what became of it, once.
+    let (s, body) = post_json(&app, "/api/v1/ui/browser/dialogs", auth.clone()).await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    let seen: Vec<(String, String)> = body["data"]["dialogs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|d| (d["kind"].as_str().unwrap().to_string(), d["decision"].as_str().unwrap().to_string()))
+        .collect();
+    for want in [("alert", "accepted"), ("prompt", "cancelled"), ("confirm", "asking the user"), ("confirm", "accepted")] {
+        assert!(seen.contains(&(want.0.to_string(), want.1.to_string())), "{want:?} in {seen:?}");
+    }
+    assert!(seen.contains(&("dialog".to_string(), "ended".to_string())), "{seen:?}");
+    // Ended is what became of it: not a Cancel the user never gave.
+    assert_eq!(seen.iter().filter(|(_, d)| d == "cancelled").count(), 1, "only the prompt: {seen:?}");
+    let (_, body) = post_json(&app, "/api/v1/ui/browser/dialogs", auth).await;
+    assert!(body["data"]["dialogs"].as_array().unwrap().is_empty());
 }

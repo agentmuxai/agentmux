@@ -448,6 +448,8 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         .route("/api/v1/host/app_update", post(app_api::app_update::handle_host_app_update))
         .route("/api/v1/host/upgrade_request", post(app_api::app_update::handle_host_upgrade_request))
         .route("/api/v1/host/browser_navigation", post(crate::server::browser_allowlist::handle_host_browser_navigation))
+        .route("/api/v1/host/browser_dialog", post(crate::server::browser_dialog::handle_host_browser_dialog))
+        .route("/api/v1/ui/browser/dialogs", post(crate::server::browser_dialog::handle_ui_browser_dialogs))
         .route("/api/v1/host/browser_popup", post(ui_handlers::handle_host_browser_popup))
         .route("/api/v1/host/browser_popup_window", post(ui_handlers::handle_host_browser_popup_window))
         .route("/api/v1/ui/browser/navigate", post(ui_handlers::handle_ui_browser_navigate))

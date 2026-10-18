@@ -136,7 +136,8 @@ export function DrivenByStrip(props: { model: BrowserViewModel; agent: string })
                     >
                         <div class="browser-bypass-confirm-text">
                             In this pane, on <b>{sites().map(siteLabel).join(", ")}</b>, {props.agent}'s clicks that
-                            submit forms, delete or send go through <b>without asking you first</b>. It still can't type
+                            submit forms, delete or send go through <b>without asking you first</b>, and so does the page's own
+                            "Are you sure?" that follows one. It still can't type
                             passwords or codes or run scripts, and payments still ask.
                         </div>
                         <div class="browser-bypass-confirm-minutes" role="radiogroup" aria-label="For how long">

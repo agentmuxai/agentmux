@@ -65,6 +65,8 @@ pub(crate) async fn bypassed_click(
         agent_id = %agent, block_id = %block_id, what = %what, origin = %origin,
         "[browser-bypass] committing click made without asking"
     );
+    // The page may confirm it while the click is still running.
+    crate::server::browser_dialog::note_click(block_id, what, crate::server::browser_dialog::How::Auto);
     Some(match proxy_value(state, "act", approved, std::time::Duration::from_secs(20)).await {
         Ok(mut data) => {
             if let Some(o) = data.as_object_mut() {

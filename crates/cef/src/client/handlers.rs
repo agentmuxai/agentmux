@@ -102,6 +102,18 @@ wrap_client! {
             Some(super::downloads::AgentMuxDownloadHandler::new(state))
         }
 
+        fn jsdialog_handler(&self) -> Option<JsdialogHandler> {
+            // Real web panes only, like downloads: the app's own confirm()
+            // boxes stay CEF's. It answers only for panes an agent drives and
+            // leaves every other dialog to CEF
+            // (SPEC_BROWSER_PANE_NATIVE_DIALOGS_2026_10_17.md §4.1).
+            if !self.is_browser_pane || self.drag_capture {
+                return None;
+            }
+            let state = self.inner.lock().state.clone();
+            Some(super::jsdialog::AgentMuxJsdialogHandler::new(state))
+        }
+
         fn permission_handler(&self) -> Option<PermissionHandler> {
             // Two different policies, deliberately two different handlers.
             //
