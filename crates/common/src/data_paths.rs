@@ -897,9 +897,8 @@ pub fn isolated_settings_reason() -> IsolatedSettingsReason {
 ///    channel reconnects like any other: skipping it there only signed MuxBus
 ///    out on every restart of a local build, and on every upgrade of one
 ///    (the release it upgrades to keeps its `local-…` channel), which stopped
-///    review and CI notices until someone noticed
-///    (`docs/reports/REPORT_UPGRADE_0_59_32_DOGFOOD_FINDINGS_2026_10_18.md`
-///    §2.2). `stable` is the real
+///    review and CI notices until someone noticed (seen on the operator's
+///    0.59.31 → 0.59.32 upgrade, 2026-10-18). `stable` is the real
 ///    release channel; `dev-<branch>[-<clone-id>]` (`RuntimeMode::Dev`'s
 ///    channel format, below) is `task dev`'s **stable, per-branch**
 ///    channel name — reused across every `task dev`
