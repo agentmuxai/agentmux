@@ -395,9 +395,11 @@ pub trait Controller: Send + Sync {
     }
 
     /// Whether this agent holds a request parked for the user's answer (an
-    /// AskUserQuestion or a tool permission). srv's own record, so it holds
-    /// whether or not any window shows the pane; the watchdog never counts
-    /// that wait as idle.
+    /// AskUserQuestion, a tool permission or an approval). srv's own record,
+    /// so it holds whether or not any window shows the pane; the watchdog
+    /// never counts that wait as idle. The persistent and App Server
+    /// controllers park such requests. ACP and MSP answer theirs at once
+    /// (`acp::reply_to_agent_request`, `msp_protocol`), so they never wait.
     fn awaiting_user_reply(&self) -> bool {
         false
     }

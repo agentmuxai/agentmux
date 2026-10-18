@@ -556,6 +556,14 @@ impl Controller for AppServerController {
         Some(Arc::clone(&self.health_monitor))
     }
 
+    /// An approval or user-input request the App Server queued and nobody has
+    /// answered yet.
+    fn awaiting_user_reply(&self) -> bool {
+        // Cloned out, so the inner lock isn't held across the session's own.
+        let session = self.inner.lock().unwrap().session.clone();
+        session.is_some_and(|s| !s.pending_server_requests().is_empty())
+    }
+
     fn controller_type(&self) -> &str {
         super::BLOCK_CONTROLLER_APP_SERVER
     }
@@ -902,6 +910,31 @@ mod tests {
         // The fixture answers the turn with a `turn/completed` notification.
         let stamped = wait_until(|| controller.last_output_ms().is_some(), Duration::from_secs(5)).await;
         assert!(stamped, "a protocol frame never stamped the last output");
+
+        controller.stop(true, STATUS_DONE).unwrap();
+    }
+
+    /// An approval or input request the App Server queued is srv's own record
+    /// that the agent waits for the user: the watchdog never counts it idle.
+    #[tokio::test]
+    async fn a_queued_server_request_awaits_the_user() {
+        let (controller, _broker) = controller_with_broker();
+        assert!(!controller.awaiting_user_reply(), "no session yet");
+        controller
+            .start(app_server_meta("requeue-after-turn-completes"), None, false)
+            .unwrap();
+        let ready = wait_until(|| controller.inner.lock().unwrap().session.is_some(), Duration::from_secs(5)).await;
+        assert!(ready, "controller session was never established");
+        assert!(!controller.awaiting_user_reply());
+        let session = controller.inner.lock().unwrap().session.clone().unwrap();
+        session
+            .accept_server_request(AppServerIncoming::Request {
+                id: super::super::app_server::RpcId::String("elicit-1".to_string()),
+                method: "mcpServer/elicitation/request".to_string(),
+                params: serde_json::json!({}),
+            })
+            .unwrap();
+        assert!(controller.awaiting_user_reply());
 
         controller.stop(true, STATUS_DONE).unwrap();
     }
