@@ -401,10 +401,13 @@ export class AttachmentDraft {
      * Keep the ready attachments (id and name) for a reload of this window. An
      * upload or ingest still in progress can't continue after one.
      */
-    private store(): void {
+    private store(): boolean {
         const refs: AttachmentRef[] = this.readyItems().map((i) => ({ id: i.info!.id, name: i.name }));
-        writeSession(STORED_KEY + this.blockId, refs.length > 0 ? refs : undefined);
+        return writeSession(STORED_KEY + this.blockId, refs.length > 0 ? refs : undefined);
     }
+
+    /** Store the ready attachments now, for a recycle; false when the storage refused them. */
+    persist = (): boolean => this.store();
 
     /** After a send: the tray empties; the files stay in the store for the transcript. */
     clearAfterSend(): void {
@@ -517,6 +520,13 @@ const drafts = new Map<string, AttachmentDraft>();
 registerRecycleBlocker(() =>
     [...drafts.values()].some((d) => d.processingCount() > 0 || d.ingestInFlight()) ? "a file is still uploading" : null
 );
+
+/** Store every pane's ready attachments, for a recycle; false when one couldn't be stored. */
+export function saveAllAttachmentDrafts(): boolean {
+    let saved = true;
+    for (const d of drafts.values()) saved = d.persist() && saved;
+    return saved;
+}
 
 /** The attachment draft for an agent pane, created on first use. */
 export function getAttachmentDraft(blockId: string): AttachmentDraft {

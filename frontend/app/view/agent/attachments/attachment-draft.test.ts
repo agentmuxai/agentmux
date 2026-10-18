@@ -35,7 +35,7 @@ vi.mock("@/app/store/app-api", () => ({ getApi: () => ({ getAuthKey: () => "k" }
 vi.mock("@/util/endpoints", () => ({ getWebServerEndpoint: () => "http://x" }));
 
 import { recycleBlockers } from "@/app/store/recycle-blockers";
-import { AttachmentDraft, getAttachmentDraft, pastedFileName } from "./attachment-draft";
+import { AttachmentDraft, getAttachmentDraft, pastedFileName, saveAllAttachmentDrafts } from "./attachment-draft";
 
 const info = (id: string, bytes = 10): AttachmentInfo => ({
     id,
@@ -262,6 +262,25 @@ describe("AttachmentDraft.uploadFiles", () => {
         expect(recycleBlockers()).toContain("a file is still uploading");
         FakeXhr.made[0].succeed("g".repeat(64));
         expect(recycleBlockers()).not.toContain("a file is still uploading");
+    });
+
+    it("saving every draft for a recycle says false when the storage refuses one", () => {
+        const d = getAttachmentDraft("u10");
+        d.uploadFiles(files(1));
+        FakeXhr.made[FakeXhr.made.length - 1].succeed("h".repeat(64));
+        const kept = new Map<string, string>();
+        const storage = {
+            getItem: (k: string) => kept.get(k) ?? null,
+            setItem: (k: string, v: string) => void kept.set(k, v),
+            removeItem: (k: string) => void kept.delete(k),
+        };
+        vi.stubGlobal("sessionStorage", storage);
+        expect(saveAllAttachmentDrafts()).toBe(true);
+        storage.setItem = () => {
+            throw new Error("QuotaExceededError");
+        };
+        expect(saveAllAttachmentDrafts()).toBe(false);
+        vi.unstubAllGlobals();
     });
 
     it("a path batch srv hasn't answered yet blocks a renderer recycle", async () => {

@@ -47,12 +47,16 @@ export interface UseSnapshotPersistenceOptions {
 
 const SNAPSHOT_INTERVAL_MS = 30_000;
 
-/** Every mounted pane's "write now if dirty" (c). */
-const flushers = new Set<() => Promise<void>>();
+/** Every mounted pane's "write now if dirty" (c); resolves whether its last write landed. */
+const flushers = new Set<() => Promise<boolean>>();
 
-/** Write every pane's pending snapshot now; resolves when the writes are done (failures are logged, not thrown). */
-export function flushPaneSnapshots(): Promise<void> {
-    return Promise.all([...flushers].map((flush) => flush())).then(() => {});
+/**
+ * Write every pane's pending snapshot now. Resolves true when every pane's
+ * latest snapshot is stored, false when a write failed (it is logged, and the
+ * pane stays dirty for its next tick): a recycle must not reload then.
+ */
+export function flushPaneSnapshots(): Promise<boolean> {
+    return Promise.all([...flushers].map((flush) => flush())).then((saved) => saved.every(Boolean));
 }
 
 export function useSnapshotPersistence(opts: UseSnapshotPersistenceOptions): void {
@@ -62,6 +66,8 @@ export function useSnapshotPersistence(opts: UseSnapshotPersistenceOptions): voi
     // line-count RPC and write. Without ordering, the older interval write
     // can resolve LAST and overwrite the close-time snapshot, losing recent nodes.
     let inFlightSnapshot: Promise<void> = Promise.resolve();
+    /** Whether the last write landed (a failure leaves the pane dirty). */
+    let lastWriteOk = true;
     const writeSnapshotNow = () => {
         // Don't let a cross-block continuation pane (one that mounted against a
         // snapshot whose sourceBlockId names another block) overwrite the
@@ -128,7 +134,10 @@ export function useSnapshotPersistence(opts: UseSnapshotPersistenceOptions): voi
                 definition_id: opts.definitionId,
                 content: JSON.stringify(snapshot),
             }, { timeout: 10000 });
+            lastWriteOk = true;
         }).catch((e) => {
+            lastWriteOk = false;
+            dirty = true;
             opts.log("history", `snapshot write failed: ${e?.message ?? e}`, "warn");
         });
     };
@@ -162,12 +171,12 @@ export function useSnapshotPersistence(opts: UseSnapshotPersistenceOptions): voi
         writeSnapshotNow();
     }, SNAPSHOT_INTERVAL_MS);
     onCleanup(() => clearInterval(snapshotInterval));
-    const flush = (): Promise<void> => {
+    const flush = (): Promise<boolean> => {
         if (dirty) {
             dirty = false;
             writeSnapshotNow();
         }
-        return inFlightSnapshot;
+        return inFlightSnapshot.then(() => lastWriteOk);
     };
     flushers.add(flush);
     onCleanup(() => flushers.delete(flush));

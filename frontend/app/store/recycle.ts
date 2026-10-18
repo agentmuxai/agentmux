@@ -49,23 +49,27 @@ export async function recycleWindow(reason = "command"): Promise<boolean> {
         return false;
     }
     recycling = true;
-    let draftsSaved: boolean;
+    const unsaved: string[] = [];
     try {
-        const [{ flushPaneSnapshots }, { saveScrollMemos }, { saveAllComposerDrafts }] = await Promise.all([
-            import("@/app/view/agent/hooks/useSnapshotPersistence"),
-            import("@/app/view/agent/virtualization/scroll-memo"),
-            import("@/app/view/agent/reload-persistence"),
-        ]);
-        await flushPaneSnapshots();
+        const [{ flushPaneSnapshots }, { saveScrollMemos }, { saveAllComposerDrafts }, { saveAllAttachmentDrafts }] =
+            await Promise.all([
+                import("@/app/view/agent/hooks/useSnapshotPersistence"),
+                import("@/app/view/agent/virtualization/scroll-memo"),
+                import("@/app/view/agent/reload-persistence"),
+                import("@/app/view/agent/attachments/attachment-draft"),
+            ]);
+        if (!(await flushPaneSnapshots())) unsaved.push("a pane's collapsed rows, pins or filter couldn't be saved");
         saveScrollMemos();
-        draftsSaved = saveAllComposerDrafts();
+        if (!saveAllComposerDrafts()) unsaved.push("a draft couldn't be saved (the browser storage is full or off)");
+        if (!saveAllAttachmentDrafts()) unsaved.push("an attachment couldn't be kept (the browser storage is full or off)");
     } catch (e) {
         recycling = false;
         throw e;
     }
-    if (!draftsSaved) {
+    // A reload now would lose what didn't save.
+    if (unsaved.length > 0) {
         recycling = false;
-        refuse(["a draft couldn't be saved for the reload (the browser storage is full or off)"]);
+        refuse(unsaved);
         return false;
     }
     try {

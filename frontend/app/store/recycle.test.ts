@@ -16,8 +16,18 @@ vi.mock("@/app/store/global", () => ({ getApi: () => api }));
 const pushFlashError = vi.fn();
 vi.mock("@/app/store/flash-notifications", () => ({ pushFlashError: (e: unknown) => pushFlashError(e) }));
 const order: string[] = [];
+const saved = vi.hoisted(() => ({ snapshots: true, attachments: true }));
 vi.mock("@/app/view/agent/hooks/useSnapshotPersistence", () => ({
-    flushPaneSnapshots: async () => void order.push("snapshots"),
+    flushPaneSnapshots: async () => {
+        order.push("snapshots");
+        return saved.snapshots;
+    },
+}));
+vi.mock("@/app/view/agent/attachments/attachment-draft", () => ({
+    saveAllAttachmentDrafts: () => {
+        order.push("attachments");
+        return saved.attachments;
+    },
 }));
 vi.mock("@/app/view/agent/virtualization/scroll-memo", () => ({ saveScrollMemos: () => void order.push("scroll") }));
 const drafts = vi.hoisted(() => ({ saved: true }));
@@ -37,6 +47,8 @@ beforeEach(() => {
     vi.clearAllMocks();
     resetRecycleForTests();
     drafts.saved = true;
+    saved.snapshots = true;
+    saved.attachments = true;
     order.length = 0;
     api.windows.recycleBegin.mockImplementation(async () => {
         order.push("begin");
@@ -72,7 +84,7 @@ describe("recycleWindow", () => {
 
     it("saves every pane's state, tells the host, then reloads", async () => {
         await expect(recycleWindow("command")).resolves.toBe(true);
-        expect(order).toEqual(["snapshots", "scroll", "drafts", "begin", "reload"]);
+        expect(order).toEqual(["snapshots", "scroll", "drafts", "attachments", "begin", "reload"]);
         expect(api.windows.recycleBegin).toHaveBeenCalledWith("main", "command");
     });
 
@@ -100,6 +112,16 @@ describe("recycleWindow", () => {
         expect(api.reloadWindow).not.toHaveBeenCalled();
         drafts.saved = true;
         await expect(recycleWindow()).resolves.toBe(true);
+    });
+
+    it("refuses when a pane's snapshot or an attachment can't be saved", async () => {
+        saved.snapshots = false;
+        await expect(recycleWindow()).resolves.toBe(false);
+        saved.snapshots = true;
+        saved.attachments = false;
+        await expect(recycleWindow()).resolves.toBe(false);
+        expect(pushFlashError).toHaveBeenCalledTimes(2);
+        expect(api.reloadWindow).not.toHaveBeenCalled();
     });
 
     it("frees the command again when the reload itself fails", async () => {

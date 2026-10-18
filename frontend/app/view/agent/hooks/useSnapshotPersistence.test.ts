@@ -97,6 +97,17 @@ describe("useSnapshotPersistence: the overlay is saved, and can be flushed", () 
         pane.dispose();
     });
 
+    it("a failed write makes the flush say false, and the change is written again", async () => {
+        const pane = mountPane();
+        pane.setDocState((prev) => ({ ...prev, pinnedNodes: new Set(["n2"]) }));
+        rpc.writeState.mockRejectedValueOnce(new Error("timeout"));
+        await expect(flushPaneSnapshots()).resolves.toBe(false);
+        // Still dirty: the next flush writes it, and then it's saved.
+        await expect(flushPaneSnapshots()).resolves.toBe(true);
+        expect(rpc.writeState).toHaveBeenCalledTimes(2);
+        pane.dispose();
+    });
+
     it("with nothing changed a flush writes nothing; a closed pane is no longer flushed, and its close-time write still lands", async () => {
         const pane = mountPane();
         await flushPaneSnapshots();
