@@ -277,15 +277,27 @@ pub(crate) async fn restore_all(state: &AppState, record: &Value) -> Result<Opti
 
 /// The name a restored window had, for the window now opening onto its
 /// workspace `ws_id`; handed out once (`CreateWindow`).
+/// Read, remove and write back in one transaction: restored windows open
+/// together, and two takes must not each write back the other's name.
 pub(crate) fn take_restored_window_name(store: &Store, ws_id: &str) -> Option<String> {
-    let mut names = store
-        .get_all::<Client>()
-        .ok()
-        .and_then(|cs| cs.into_iter().next())
-        .and_then(|c| c.meta.get(NAMES_META_KEY).and_then(|v| v.as_object().cloned()))?;
-    let name = names.remove(ws_id)?.as_str().map(str::to_string)?;
-    set_client_meta(store, NAMES_META_KEY, (!names.is_empty()).then(|| Value::Object(names)));
-    Some(name)
+    let taken = store.with_tx(|tx| {
+        let Some(mut client) = tx.get_all::<Client>()?.into_iter().next() else { return Ok(None) };
+        let Some(mut names) = client.meta.get(NAMES_META_KEY).and_then(|v| v.as_object().cloned()) else {
+            return Ok(None);
+        };
+        let Some(name) = names.remove(ws_id) else { return Ok(None) };
+        if names.is_empty() {
+            client.meta.remove(NAMES_META_KEY);
+        } else {
+            client.meta.insert(NAMES_META_KEY.to_string(), Value::Object(names));
+        }
+        tx.update(&mut client)?;
+        Ok(name.as_str().map(str::to_string))
+    });
+    taken.unwrap_or_else(|e| {
+        tracing::warn!(error = %e, "session_restore: couldn't take a restored window's name");
+        None
+    })
 }
 
 /// `window.TakeRestoredWindows`: the workspaces a restore rebuilt beside the
