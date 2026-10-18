@@ -189,6 +189,13 @@ describe("answerRecycleRequest (the governor's request)", () => {
         expect(pushFlashError).not.toHaveBeenCalled();
     });
 
+    it("uses the host's idle time, which pressure or a lab override shortens", async () => {
+        idle.sinceInputMs = 3 * 60_000;
+        await expect(answerRecycleRequest(10 * 60_000)).resolves.toBe(false);
+        resetRecycleForTests();
+        await expect(answerRecycleRequest(2 * 60_000)).resolves.toBe(true);
+    });
+
     it("a recycle blocker declines to the host instead of showing a toast", async () => {
         const off = registerRecycleBlocker(() => "a file is still uploading");
         await expect(answerRecycleRequest()).resolves.toBe(false);

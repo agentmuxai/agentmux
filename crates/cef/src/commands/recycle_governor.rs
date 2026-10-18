@@ -100,6 +100,11 @@ impl Track {
     }
 }
 
+/// How long a window must have been out of use (§4.3, §4.4).
+fn idle_time(limits: &Limits, pressure: PressureLevel) -> Duration {
+    if pressure == PressureLevel::Normal { limits.idle } else { limits.idle_under_pressure }
+}
+
 /// Whether `sample` is over budget (§4.2, §4.4).
 fn over_budget(sample: &Sample, track: &Track, limits: &Limits, pressure: PressureLevel) -> bool {
     let Some(mb) = sample.mb else { return false };
@@ -126,7 +131,7 @@ pub(crate) fn decide(
     if last_any_request.is_some_and(|at| now.duration_since(at) < limits.between) {
         return None;
     }
-    let idle_for = if pressure == PressureLevel::Normal { limits.idle } else { limits.idle_under_pressure };
+    let idle_for = idle_time(limits, pressure);
     samples
         .iter()
         .filter(|s| {
@@ -268,7 +273,10 @@ fn tick(state: &Arc<AppState>, limits: &Limits) {
         return;
     }
     tracing::info!(target: "recycle", label, before_mb = before, after_gc_mb = after_gc, "[recycle] {label} idle and over budget: asking it to recycle");
-    crate::events::emit_event_to_window(state, &label, "recycle:request", &serde_json::json!({ "reason": "idle" }));
+    // The page checks its own input against the same idle time (pressure and
+    // the lab's override shorten it).
+    let idle_ms = idle_time(limits, pressure).as_millis() as u64;
+    crate::events::emit_event_to_window(state, &label, "recycle:request", &serde_json::json!({ "reason": "idle", "idle_ms": idle_ms }));
 }
 
 /// Start the governor's thread. Runs for the life of the process.

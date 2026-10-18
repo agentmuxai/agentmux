@@ -115,7 +115,7 @@ function abandon(): void {
     void getApi().windows.recycleCancel(ownWindowLabel()).catch(() => {});
 }
 
-/** How long the window must have had no input before the governor's request is accepted. */
+/** How long the window must have had no input, when the host's request doesn't say (spec §4.3). */
 const IDLE_MS = 10 * 60_000;
 
 /**
@@ -150,8 +150,10 @@ export async function answerRecycleRequest(idleMs = IDLE_MS): Promise<boolean> {
 /** Answer the governor's requests in this window (once, at startup). */
 export function installRecycleRequests(): void {
     void import("@/app/store/last-input").then(({ installLastInput }) => installLastInput());
-    void getApi().listen("recycle:request", () => {
-        void answerRecycleRequest();
+    void getApi().listen<{ idle_ms?: number }>("recycle:request", (payload) => {
+        // The host's idle time: shorter under memory pressure or a lab override.
+        const idleMs = typeof payload?.idle_ms === "number" ? payload.idle_ms : IDLE_MS;
+        void answerRecycleRequest(idleMs);
     });
 }
 
