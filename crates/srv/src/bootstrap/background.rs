@@ -133,8 +133,9 @@ pub fn spawn_background_subsystems(
 
     // Start agent process watchdog (kills panes that exceed max-runtime or idle-output limits)
     let watchdog_config = config_watcher.clone();
+    let watchdog_store = Arc::clone(mstore);
     tokio::spawn(async move {
-        backend::blockcontroller::watchdog::run_watchdog_loop(watchdog_config).await;
+        backend::blockcontroller::watchdog::run_watchdog_loop(watchdog_config, watchdog_store).await;
     });
 
     // Recover a missing session title for a running agent (the Swarm row and
@@ -538,15 +539,15 @@ pub fn spawn_background_subsystems(
             7,                              // inactive days
             archive_dir,
         ));
-        tokio::spawn(async move {
-            loop {
-                tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
+        tokio::spawn(run_archive_sweeps(move || {
+            let archiver = Arc::clone(&archiver);
+            async move {
                 match archiver.sweep().await {
                     Ok(stats) => tracing::info!(?stats, "session archiver sweep complete"),
                     Err(e) => tracing::warn!(error = %e, "session archiver sweep failed"),
                 }
             }
-        });
+        }));
     } else {
         tracing::warn!("session archiver: home dir unavailable, archiver disabled");
     }
@@ -579,6 +580,51 @@ pub fn spawn_background_subsystems(
 /// ad-hoc/dev-signed `target/debug` binary spawned by an integration test.
 fn cloud_subscriber_disabled_from_env() -> bool {
     std::env::var("AGENTMUX_DISABLE_CLOUD_SUBSCRIBER").is_ok()
+}
+
+/// The session archiver sweeps a minute after srv starts, then hourly. Waiting
+/// the full hour first meant an srv restarted more often than hourly never
+/// archived anything.
+const ARCHIVE_FIRST_SWEEP: std::time::Duration = std::time::Duration::from_secs(60);
+const ARCHIVE_SWEEP_EVERY: std::time::Duration = std::time::Duration::from_secs(3600);
+
+/// Run `sweep` on the session archiver's schedule. Never returns.
+async fn run_archive_sweeps<F, Fut>(mut sweep: F)
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = ()>,
+{
+    tokio::time::sleep(ARCHIVE_FIRST_SWEEP).await;
+    loop {
+        sweep().await;
+        tokio::time::sleep(ARCHIVE_SWEEP_EVERY).await;
+    }
+}
+
+#[cfg(test)]
+mod archive_schedule_tests {
+    use super::*;
+    use std::sync::atomic::{AtomicU32, Ordering};
+    use std::time::Duration;
+
+    #[tokio::test(start_paused = true)]
+    async fn the_archiver_sweeps_a_minute_after_start_then_hourly() {
+        let sweeps = Arc::new(AtomicU32::new(0));
+        let counter = Arc::clone(&sweeps);
+        let task = tokio::spawn(run_archive_sweeps(move || {
+            let counter = Arc::clone(&counter);
+            async move {
+                counter.fetch_add(1, Ordering::SeqCst);
+            }
+        }));
+        tokio::time::sleep(Duration::from_secs(59)).await;
+        assert_eq!(sweeps.load(Ordering::SeqCst), 0);
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        assert_eq!(sweeps.load(Ordering::SeqCst), 1, "the first sweep comes after a minute, not an hour");
+        tokio::time::sleep(Duration::from_secs(3600)).await;
+        assert_eq!(sweeps.load(Ordering::SeqCst), 2, "then hourly");
+        task.abort();
+    }
 }
 
 #[cfg(test)]

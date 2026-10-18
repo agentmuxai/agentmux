@@ -603,14 +603,17 @@ impl PolicyState {
         out
     }
 
+    /// A pending shutdown is never paused or rate-limited: it is the only
+    /// warning that an agent stops in 15 s, so holding it back lets the agent
+    /// stop unannounced. Only the master switch silences it.
     fn paused(&self, n: &Notification, now_ms: i64, s: &Settings) -> bool {
-        n.kind != NotifyKind::Test
+        !matches!(n.kind, NotifyKind::Test | NotifyKind::ShutdownPending)
             && now_ms < s.pause_until_ms.max(s.quiet_until_ms)
             && !(s.pause_allow_attention && n.priority == Priority::Attention)
     }
 
     fn rate_limited(&self, n: &Notification, now_ms: i64, replaces_shown: bool) -> bool {
-        if matches!(n.kind, NotifyKind::Test | NotifyKind::Summary) {
+        if matches!(n.kind, NotifyKind::Test | NotifyKind::Summary | NotifyKind::ShutdownPending) {
             return false;
         }
         if self.recent.len() >= GLOBAL_MAX {
@@ -922,6 +925,41 @@ mod tests {
         // Pause expired → normal again.
         p.step(Input::Emit(req_b(NotifyKind::TurnCompleted, "b5")), 100_000, &s);
         assert_eq!(shows(&p.step(Input::Tick, 110_000, &s)).len(), 1);
+    }
+
+    #[test]
+    fn a_pending_shutdown_gets_through_a_pause_and_quiet_hours() {
+        for s in [
+            Settings { pause_until_ms: 100_000, ..Settings::default() },
+            Settings { quiet_until_ms: 100_000, ..Settings::default() },
+        ] {
+            assert!(!s.pause_allow_attention, "the default, which held it back");
+            let mut p = PolicyState::new();
+            p.step(Input::Emit(req_b(NotifyKind::ShutdownPending, "b1")), 0, &s);
+            let a = p.step(Input::Tick, 0, &s);
+            assert_eq!(shows(&a).len(), 1, "{s:?}");
+            assert_eq!(shows(&a)[0].kind, NotifyKind::ShutdownPending);
+        }
+        // The master switch still silences it.
+        let off = Settings { enabled: false, pause_until_ms: 100_000, ..Settings::default() };
+        let mut p = PolicyState::new();
+        p.step(Input::Emit(req_b(NotifyKind::ShutdownPending, "b1")), 0, &off);
+        assert!(shows(&p.step(Input::Tick, 0, &off)).is_empty());
+    }
+
+    #[test]
+    fn a_pending_shutdown_is_not_folded_by_the_global_rate_cap() {
+        let s = Settings::default();
+        let mut p = PolicyState::new();
+        for i in 0..GLOBAL_MAX {
+            p.step(Input::Emit(req_b(NotifyKind::InputWaiting, &format!("b{i}"))), 0, &s);
+        }
+        assert_eq!(shows(&p.step(Input::Tick, 6_000, &s)).len(), GLOBAL_MAX, "the cap is now full");
+        p.step(Input::Emit(req_b(NotifyKind::ShutdownPending, "b9")), 7_000, &s);
+        let a = p.step(Input::Tick, 7_000, &s);
+        let n = shows(&a);
+        assert_eq!(n.len(), 1, "shown itself, not folded into the summary: {n:?}");
+        assert_eq!(n[0].kind, NotifyKind::ShutdownPending);
     }
 
     #[test]
