@@ -3,7 +3,7 @@
 **Date:** 2026-10-18
 **Author:** Maricon@charlie
 **Type:** Spec (an allocator setting; no behaviour change)
-**Status:** proposed
+**Status:** active — the change and its tests are in PR #5103; remaining: a Windows reading (Camper, with Loap-3's memory lab) to see whether Windows' heap behaves the same; this change does nothing there.
 **Part of:** track E (srv's memory) of the 500 MB budget (`docs/reports/REPORT_MEMORY_FOOTPRINT_500MB_BUDGET_2026_10_12.md`). Asked by Camper@narko, after the measurements below.
 **Platform:** **Linux with glibc only.** Windows and macOS have their own allocators; this changes nothing there.
 

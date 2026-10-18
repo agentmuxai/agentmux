@@ -699,6 +699,7 @@ partial list.
 | [`SPEC_SESSION_RESTORE_AND_SAVED_LAYOUTS_2026_08_13`](SPEC_SESSION_RESTORE_AND_SAVED_LAYOUTS_2026_08_13.md) | Spec: Restore-on-relaunch + named, reloadable "Layouts" |
 | [`SPEC_SHARED_AUTH_ACROSS_CHANNELS_2026_10_03`](SPEC_SHARED_AUTH_ACROSS_CHANNELS_2026_10_03.md) | SPEC: share authentication across channels — no re-login on every build |
 | [`SPEC_SRV_INFO_ON_CONNECT_2026_10_09`](SPEC_SRV_INFO_ON_CONNECT_2026_10_09.md) | SPEC: srv describes itself on every connect (`srvinfo`) |
+| [`SPEC_SRV_MALLOC_ARENA_CAP_2026_10_18`](SPEC_SRV_MALLOC_ARENA_CAP_2026_10_18.md) | Spec: srv caps glibc's malloc arenas at two (Linux only) |
 | [`SPEC_START_WITH_OS_2026_09_25`](SPEC_START_WITH_OS_2026_09_25.md) | SPEC: Start with OS — AgentMux starts quietly at login, on every platform, and keeps working after updates |
 | [`SPEC_STREAMING_BASH_RUNNER_2026_05_11`](SPEC_STREAMING_BASH_RUNNER_2026_05_11.md) | Streaming bash runner — PreToolUse command rewrite |
 | [`SPEC_SUBAGENT_LIVE_RECONCILIATION_AND_RETIRE_2026_07_20`](SPEC_SUBAGENT_LIVE_RECONCILIATION_AND_RETIRE_2026_07_20.md) | SPEC — live subagent reconciliation + Retire action (best-practices plan) |
@@ -860,7 +861,6 @@ partial list.
 | [`SPEC_SHARED_AGENT_REGISTRY_2026_05_12`](SPEC_SHARED_AGENT_REGISTRY_2026_05_12.md) | Spec: Shared agent registry — cross-version "Continue agent" dropdown |
 | [`SPEC_SHUTDOWN_COUNTDOWN_MODAL_2026_09_04`](SPEC_SHUTDOWN_COUNTDOWN_MODAL_2026_09_04.md) | A formal shutdown sequence: countdown-confirm modal + splash-style progress |
 | [`SPEC_SPLASH_TELEMETRY_LINUX_2026_06_27`](SPEC_SPLASH_TELEMETRY_LINUX_2026_06_27.md) | SPEC: Splash Startup Telemetry — Linux |
-| [`SPEC_SRV_MALLOC_ARENA_CAP_2026_10_18`](SPEC_SRV_MALLOC_ARENA_CAP_2026_10_18.md) | Spec: srv caps glibc's malloc arenas at two (Linux only) |
 | [`SPEC_SRV_SUPERVISION_RECYCLE_2026_07_11`](SPEC_SRV_SUPERVISION_RECYCLE_2026_07_11.md) | SPEC: srv supervision via host recycle (#942 Phase 2) |
 | [`SPEC_SUPPRESS_OS_CREDENTIAL_PROMPTS_2026_05_30`](SPEC_SUPPRESS_OS_CREDENTIAL_PROMPTS_2026_05_30.md) | Spec: Never request OS credential / keychain access (all runtime modes) |
 | [`SPEC_SWARM_REMOTE_AGENTS_PLATFORM_TAG_AND_SELECTION_2026_10_03`](SPEC_SWARM_REMOTE_AGENTS_PLATFORM_TAG_AND_SELECTION_2026_10_03.md) | SPEC: Swarm remote agents: a platform tag, and selecting them like local agents |
