@@ -61,10 +61,19 @@ pub(crate) fn archive_session_in(
     // only when there's no global store or it holds nothing for this agent
     // (pure pre-global / same-channel-only data). (codex + reagent P1/P2 #1399.)
     if let Some(gfs) = global {
-        if let Some(archived) = archive_global_current(gfs, definition_id)? {
-            clear_local_current_zone(filestore, &current_zone);
-            clear_global_current_zone_in(gfs, definition_id);
-            return Ok(Some(archived));
+        match archive_global_current(gfs, definition_id)? {
+            GlobalArchive::Archived(zone, ts) => {
+                clear_local_current_zone(filestore, &current_zone);
+                clear_global_current_zone_in(gfs, definition_id);
+                return Ok(Some((zone, ts)));
+            }
+            // Another instance archived and cleared it first: this channel's
+            // copy still goes, or its stale snapshot would bring it back.
+            GlobalArchive::ArchivedElsewhere => {
+                clear_local_current_zone(filestore, &current_zone);
+                return Ok(None);
+            }
+            GlobalArchive::Nothing => {}
         }
     }
 
@@ -169,7 +178,7 @@ pub(crate) fn archive_session_in(
 /// (both files empty or absent). The copy runs inside the database, in one
 /// transaction, so a conversation of any size never passes through memory.
 /// The output's sidecars and the running summary go with it.
-fn archive_global_current(gfs: &FileStore, definition_id: &str) -> Result<Option<(String, i64)>, String> {
+fn archive_global_current(gfs: &FileStore, definition_id: &str) -> Result<GlobalArchive, String> {
     let current_zone = validate_and_current(definition_id)?;
     let has = |name: &str| -> Result<bool, String> {
         Ok(gfs.stat(&current_zone, name).map_err(|e| format!("stat: {e}"))?.is_some_and(|f| f.size > 0))
@@ -177,25 +186,44 @@ fn archive_global_current(gfs: &FileStore, definition_id: &str) -> Result<Option
     // A snapshot written through the cache may not be in the database yet.
     gfs.flush_cache().map_err(|e| format!("flush before archive: {e}"))?;
     if !has(SNAPSHOT_FILE)? && !has(OUTPUT_FILE)? {
-        return Ok(None);
+        return Ok(GlobalArchive::Nothing);
     }
 
-    let (archive_zone, ts) = free_archive_zone(gfs, definition_id)?;
     let files = [SNAPSHOT_FILE, OUTPUT_FILE, TSIDX_FILE, crate::backend::continuity_state::STATE_FILE];
-    if gfs
-        .copy_files_to_zone(&current_zone, &archive_zone, &files)
-        .map_err(|e| format!("copy to archive: {e}"))?
-        .is_none()
-    {
-        return Err(format!("archive zone {archive_zone} already exists"));
+    // The store is shared by every instance on the machine: another one can
+    // take the free name, or archive this conversation, between the check
+    // above and the copy.
+    for _ in 0..8 {
+        let (archive_zone, ts) = free_archive_zone(gfs, definition_id)?;
+        match gfs
+            .copy_files_to_zone(&current_zone, &archive_zone, &files)
+            .map_err(|e| format!("copy to archive: {e}"))?
+        {
+            // The name was taken in between: try the next one.
+            None => continue,
+            // Nothing left to copy: another instance archived it first.
+            Some(0) => return Ok(GlobalArchive::ArchivedElsewhere),
+            Some(_) => {
+                tracing::info!(
+                    definition_id = %definition_id,
+                    archive_zoneid = %archive_zone,
+                    archived_at_ms = ts,
+                    "agent_session: archived the global session"
+                );
+                return Ok(GlobalArchive::Archived(archive_zone, ts as i64));
+            }
+        }
     }
-    tracing::info!(
-        definition_id = %definition_id,
-        archive_zoneid = %archive_zone,
-        archived_at_ms = ts,
-        "agent_session: archived the global session"
-    );
-    Ok(Some((archive_zone, ts as i64)))
+    Err(format!("no free archive zone for {definition_id}"))
+}
+
+/// What [`archive_global_current`] did.
+enum GlobalArchive {
+    Archived(String, i64),
+    /// The global current held nothing to archive.
+    Nothing,
+    /// Another instance archived and cleared the global current first.
+    ArchivedElsewhere,
 }
 
 /// An archive zone for now that holds nothing yet in `store`. Two archives in
