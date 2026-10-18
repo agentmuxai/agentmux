@@ -92,6 +92,12 @@ pub struct AppUpdateStatus {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub download: Option<DownloadStatus>,
+    /// When this AgentMux is older than the latest release can upgrade from
+    /// (the release's upgrade floor, [`upgrade_floor`]): the version to
+    /// install first. The latest release then isn't offered for download.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub install_first: Option<String>,
 }
 
 /// A release file, as GitHub lists it.
@@ -155,6 +161,7 @@ impl AppUpdateStatus {
             asset: None,
             can_download: false,
             download: None,
+            install_first: None,
         }
     }
 }
@@ -215,6 +222,25 @@ pub(crate) fn version_core(v: &str) -> Option<(u64, u64, u64)> {
     Some((major, minor, patch))
 }
 
+/// The hidden line a release's notes carry with the oldest version it
+/// upgrades from in place (`scripts/extract-changelog.sh`, the repo's
+/// `UPGRADE_FLOOR`).
+const FLOOR_MARKER: &str = "<!-- agentmux:min-upgrade-from=";
+
+/// The release's upgrade floor, from its notes: an install older than this
+/// can't take its data forward in one start (its migrations no longer
+/// reach that far back) and installs the floor version first.
+pub(crate) fn upgrade_floor(body: &str) -> Option<String> {
+    let rest = &body[body.find(FLOOR_MARKER)? + FLOOR_MARKER.len()..];
+    let floor = rest[..rest.find("-->")?].trim();
+    version_core(floor).map(|_| floor.to_string())
+}
+
+/// `body` without the floor's line, for the notes the user reads.
+fn without_floor(body: &str) -> String {
+    body.lines().filter(|l| !l.trim_start().starts_with(FLOOR_MARKER)).collect::<Vec<_>>().join("\n").trim_end().to_string()
+}
+
 /// Whether `channel` is a `task dev` build, which runs from source and so
 /// never upgrades itself. A local `task package` build (`local-…`) is a
 /// portable like a release's, and upgrades like one.
@@ -238,7 +264,7 @@ pub(crate) fn status_for(current: &str, channel: &str, release: &Release, now_ms
             _ => "unknown",
         }
     };
-    let notes = release.body.as_deref().map(|b| {
+    let notes = release.body.as_deref().map(without_floor).map(|b| {
         let mut end = b.len().min(MAX_NOTES_BYTES);
         while !b.is_char_boundary(end) {
             end -= 1;
@@ -246,10 +272,17 @@ pub(crate) fn status_for(current: &str, channel: &str, release: &Release, now_ms
         b[..end].to_string()
     });
     let asset = kind.asset_name(&latest, std::env::consts::ARCH).and_then(|n| find_asset(release, &n));
+    // Older than the release upgrades from: install the floor first.
+    let install_first = release
+        .body
+        .as_deref()
+        .and_then(upgrade_floor)
+        .filter(|floor| state == "available" && version_core(current) < version_core(floor));
     AppUpdateStatus {
         state: state.to_string(),
         current: current.to_string(),
-        can_download: state == "available" && kind.can_download() && asset.is_some(),
+        can_download: state == "available" && kind.can_download() && asset.is_some() && install_first.is_none(),
+        install_first,
         latest: Some(latest),
         url: Some(release.html_url.clone()),
         notes,
@@ -485,6 +518,27 @@ mod tests {
         assert_eq!(version_core("v0.59.27+g1a2b"), Some((0, 59, 27)));
         assert_eq!(version_core("0.59"), None);
         assert_eq!(version_core("0.59.27.1"), None);
+    }
+
+    #[test]
+    fn an_install_older_than_the_release_upgrades_from_installs_the_floor_first() {
+        let kind = InstallKind::WindowsPortable { root: "C:/apps/agentmux".into() };
+        let name = "agentmux-0.60.0-x64-portable.7z";
+        let url = format!("https://github.com/agentmuxai/agentmux/releases/download/v0.60.0/{name}");
+        let mut r = with_asset(release("v0.60.0"), name, Some(&format!("sha256:{}", "ab".repeat(32))), &url);
+        r.body = Some("- Faster startup\n\n<!-- agentmux:min-upgrade-from=0.58.0 -->".into());
+        let old = status_for("0.57.3", "stable", &r, 0, &kind);
+        assert_eq!((old.state.as_str(), old.install_first.as_deref(), old.can_download), ("available", Some("0.58.0"), false));
+        assert_eq!(old.notes.as_deref(), Some("- Faster startup"), "the floor's line isn't shown");
+        // At or above the floor: as before.
+        for current in ["0.58.0", "0.59.31"] {
+            let s = status_for(current, "stable", &r, 0, &kind);
+            assert_eq!(s.install_first, None, "{current}");
+            assert_eq!(s.can_download, std::env::consts::ARCH == "x86_64", "{current}");
+        }
+        assert_eq!(upgrade_floor("notes\n<!-- agentmux:min-upgrade-from= 0.55.0 -->"), Some("0.55.0".into()));
+        assert_eq!(upgrade_floor("<!-- agentmux:min-upgrade-from=soon -->"), None);
+        assert_eq!(upgrade_floor("no floor"), None);
     }
 
     #[test]

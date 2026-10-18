@@ -99,7 +99,13 @@ fn describe_status(st: &Value) -> String {
                 _ => {}
             }
         }
-        if st["can_download"].as_bool() == Some(true) {
+        let first = s(st, "install_first");
+        if !first.is_empty() {
+            out.push_str(&format!(
+                " This version is older than {latest} upgrades from: the user installs {first} first \
+                 (https://github.com/agentmuxai/agentmux/releases/tag/v{first}), then upgrades."
+            ));
+        } else if st["can_download"].as_bool() == Some(true) {
             out.push_str(" This install can upgrade itself: App with action \"upgrade\" asks for it.");
         } else {
             out.push_str(&format!(
@@ -169,6 +175,11 @@ mod tests {
         assert!(describe_status(&setup).contains("can't upgrade itself yet; the user can download it from https://example/r"));
         let same = json!({ "state": "up-to-date", "current": "0.59.27", "latest": "0.59.27", "install": "windows-portable", "checked_ms": 1 });
         assert!(describe_status(&same).ends_with("This is the latest release."));
+        let old = json!({ "state": "available", "current": "0.57.3", "latest": "0.60.0", "install": "windows-portable",
+            "can_download": false, "install_first": "0.58.0", "checked_ms": 1 });
+        let text = describe_status(&old);
+        assert!(text.contains("older than 0.60.0 upgrades from: the user installs 0.58.0 first"), "{text}");
+        assert!(!text.contains("action \"upgrade\""), "{text}");
     }
 
     #[test]

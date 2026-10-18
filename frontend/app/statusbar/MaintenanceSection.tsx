@@ -224,8 +224,15 @@ export const MaintenanceSection = (): JSX.Element => {
         upgradeAndRestart(now).catch((e) => setStartError(String(e?.message ?? e)));
     };
 
+    // Older than the release upgrades from: its floor version first, from its page.
+    const installFirst = () => (release() ? appUpdate()?.install_first : undefined);
     const handleInstallUpdate = () => {
         const r = release();
+        const first = installFirst();
+        if (first) {
+            void openLink(`https://github.com/agentmuxai/agentmux/releases/tag/v${first}`);
+            return;
+        }
         if (r) {
             // srv downloads, verifies and unpacks what it can (a Windows
             // portable); for any other install the release page is the way.
@@ -292,7 +299,7 @@ export const MaintenanceSection = (): JSX.Element => {
                             class="maintenance-btn maintenance-btn--primary"
                             onClick={handleInstallUpdate}
                         >
-                            Download
+                            {installFirst() ? `Get v${installFirst()}` : "Download"}
                         </Button>
                     </Show>
                     <Show when={updaterStatus() === "downloading"}>
@@ -401,6 +408,11 @@ export const MaintenanceSection = (): JSX.Element => {
             </Show>
             <Show when={download()?.state === "ready" && download()?.error}>
                 <div class="maintenance-row-text maintenance-row-text--error">{download()!.error}</div>
+            </Show>
+            <Show when={installFirst()}>
+                <div class="maintenance-row-text maintenance-row-text--warn">
+                    This version is older than v{updaterVersion()} upgrades from: install v{installFirst()} first, then upgrade.
+                </div>
             </Show>
             <Show when={startError()}>
                 <div class="maintenance-row-text maintenance-row-text--error">{startError()}</div>

@@ -1,0 +1,5 @@
+{
+  "mode": "report",
+  "workload": { "platform": "win32", "panes": 12, "rounds": 10, "seed": 1, "recycleAfter": 0 },
+  "limitsMB": { "app": null, "renderer": null, "srv": null }
+}

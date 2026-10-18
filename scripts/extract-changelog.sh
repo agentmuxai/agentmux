@@ -5,6 +5,11 @@
 # Outputs the markdown body between "## <version>" and the next "## " heading.
 # Exits 1 if the version entry is missing — never silently ships empty notes.
 #
+# The notes also carry the oldest version a release can upgrade from in place
+# (UPGRADE_FLOOR, or $UPGRADE_FLOOR_FILE), as a hidden line srv's update check
+# reads: `<!-- agentmux:min-upgrade-from=0.55.0 -->`
+# (docs/specs/SPEC_UPGRADE_FOR_USERS_AND_AGENTS_2026_10_15.md §3).
+#
 # --include-unpublished: also append each older version that has no GitHub
 # release, newest first, stopping at the first one that has. A release whose
 # build failed is never published (release.yml's publish needs every build), so
@@ -42,6 +47,17 @@ if [ -z "$NOTES" ]; then
 fi
 
 echo "$NOTES"
+
+FLOOR_FILE="${UPGRADE_FLOOR_FILE:-$REPO_ROOT/UPGRADE_FLOOR}"
+if [ -f "$FLOOR_FILE" ]; then
+  FLOOR=$(tr -d '[:space:]' < "$FLOOR_FILE")
+  if ! [[ "$FLOOR" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    echo "❌ extract-changelog: $FLOOR_FILE must hold one version (major.minor.patch), not '${FLOOR}'" >&2
+    exit 1
+  fi
+  echo ""
+  echo "<!-- agentmux:min-upgrade-from=${FLOOR} -->"
+fi
 
 [ "$INCLUDE_UNPUBLISHED" = 1 ] || exit 0
 

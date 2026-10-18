@@ -210,6 +210,7 @@ mod tests {
             asset: None,
             can_download: true,
             download,
+            install_first: None,
         }
     }
 

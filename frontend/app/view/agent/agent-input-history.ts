@@ -31,8 +31,11 @@ const DRAFT_MAX_CHARS = 64 * 1024;
 /** How long the draft waits after the last keystroke before it is kept. */
 const DRAFT_WRITE_DELAY_MS = 500;
 
-/** Where new entries went: before the oldest shown, or after the newest. */
-export type Arrival = "older" | "newer";
+/**
+ * What changed in the entries shown: `older` ones went before them, `newer`
+ * ones after, or `n` from index `at` were `removed` (forgotten, cleared).
+ */
+export type Arrival = "older" | "newer" | "removed";
 
 type Cache = {
     /** Oldest first: the array the composer walks. */
@@ -44,7 +47,7 @@ type Cache = {
     loading: Promise<void> | null;
     /** Sends whose answer hasn't come back. */
     pending: number;
-    watchers: Set<(where: Arrival, n: number) => void>;
+    watchers: Set<(where: Arrival, n: number, at: number) => void>;
 };
 
 const caches = new Map<string, Cache>();
@@ -62,8 +65,8 @@ export function sendKind(text: string): "message" | "slash" | "bang" {
     return text.startsWith("/") ? "slash" : "message";
 }
 
-function tell(c: Cache, where: Arrival, n: number): void {
-    if (n > 0) for (const w of c.watchers) w(where, n);
+function tell(c: Cache, where: Arrival, n: number, at = 0): void {
+    if (n > 0) for (const w of c.watchers) w(where, n, at);
 }
 
 /** Put `newestFirst` (srv's order) before what is shown; returns how many went in. */
@@ -126,7 +129,7 @@ export function agentHistory(agentId: string): string[] {
 }
 
 /** Hear where entries arrive in the agent's history; returns the stop. */
-export function watchAgentHistory(agentId: string, watcher: (where: Arrival, n: number) => void): () => void {
+export function watchAgentHistory(agentId: string, watcher: (where: Arrival, n: number, at: number) => void): () => void {
     const c = cacheFor(agentId);
     c.watchers.add(watcher);
     return () => c.watchers.delete(watcher);
@@ -164,6 +167,36 @@ export function rememberSent(agentId: string, text: string): void {
         .finally(() => {
             c.pending--;
         });
+}
+
+/** Forget one entry, in srv and in every composer of the agent here. */
+export async function forgetInputHistoryEntry(agentId: string, id: number): Promise<void> {
+    await RpcApi.AgentInputHistoryDeleteCommand(TabRpcClient, { id });
+    const c = caches.get(agentId);
+    const at = c ? c.ids.indexOf(id) : -1;
+    if (!c || at < 0) return;
+    c.entries.splice(at, 1);
+    c.ids.splice(at, 1);
+    tell(c, "removed", 1, at);
+}
+
+/** Forget everything typed to the agent. */
+export async function clearInputHistory(agentId: string): Promise<void> {
+    await RpcApi.AgentInputHistoryClearCommand(TabRpcClient, { agent_id: agentId });
+    const c = caches.get(agentId);
+    if (!c) return;
+    const n = c.entries.length;
+    c.entries.length = 0;
+    c.ids.length = 0;
+    c.complete = true;
+    tell(c, "removed", n, 0);
+}
+
+/** Where the composer's history cursor goes when entries change around it. */
+export function movedCursor(pos: number, length: number, where: Arrival, n: number, at: number): number {
+    if (where === "older") return pos + n;
+    if (where === "newer") return pos === length - n ? pos + n : pos;
+    return pos >= at + n ? pos - n : Math.min(pos, at);
 }
 
 /** The agent's draft as srv keeps it. */
