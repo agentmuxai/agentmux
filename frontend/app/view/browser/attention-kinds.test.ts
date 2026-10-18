@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { attentionLook, DIALOG_MESSAGE_MAX, dialogMessage } from "./attention-kinds";
+import { attentionLook, DIALOG_MESSAGE_MAX, dialogMessage, noticeText } from "./attention-kinds";
 
 const a = (over: Partial<BrowserAttention>): BrowserAttention => ({ id: "1", kind: "approval", ...over });
 
@@ -22,6 +22,43 @@ describe("attentionLook", () => {
             no: "Stay",
             answer: "approve",
         });
+    });
+
+    it("shows the address a navigation question is about", () => {
+        expect(attentionLook(a({ kind: "navigation" }))).toMatchObject({ showUrl: true, icon: "fa-hand" });
+        expect(attentionLook(a({ kind: "handoff" })).showUrl).toBeFalsy();
+    });
+
+    it("offers Back and Dismiss on a notice, and Allow only when srv can still add the site", () => {
+        const withAllow = attentionLook(a({ kind: "notice", allow: true, origin: "https://accounts.google.com" }));
+        expect(withAllow).toMatchObject({ agent: false, back: true, yes: "Allow", answer: "approve", no: "Dismiss" });
+        expect(attentionLook(a({ kind: "notice", allow: false })).yes).toBeUndefined();
+        expect(attentionLook(a({ kind: "notice" })).icon).toBe("fa-circle-info");
+    });
+});
+
+describe("noticeText", () => {
+    it("says where the pane is limited to, where the page tried to go, and why it stopped", () => {
+        const n = a({
+            kind: "notice",
+            sites: ["https://github.com"],
+            origin: "https://accounts.google.com",
+            url: "https://accounts.google.com/o/oauth2",
+            why: "You blocked it.",
+        });
+        expect(noticeText(n)).toBe(
+            "Stopped: this pane is limited to github.com, and the page tried to go to accounts.google.com. You blocked it.",
+        );
+        expect(attentionLook(n).text).toBe(noticeText(n));
+    });
+
+    it("falls back to the address when it has no site, and names a popup", () => {
+        expect(noticeText(a({ kind: "notice", url: "data:,x", sites: [] }))).toBe(
+            "Stopped: this pane is limited to some sites, and the page tried to go to data:,x.",
+        );
+        expect(noticeText(a({ kind: "notice", popup: true, origin: "https://b.example", sites: ["https://a.example"] }))).toContain(
+            "tried to open a window at b.example",
+        );
     });
 });
 

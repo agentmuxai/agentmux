@@ -1196,7 +1196,7 @@ pub(crate) async fn handle_ui_browser_handoff(
     .await
     {
         Ok((a, _waiting)) => a,
-        Err(e) => return err_response(StatusCode::CONFLICT, e),
+        Err(e) => return err_response(e.status(), e.to_string()),
     };
     let answer = match answer {
         crate::server::browser_attention::Answer::Yes => "done",
@@ -1535,7 +1535,7 @@ pub(crate) async fn handle_ui_browser_act(
     .await
     {
         Ok(a) => a,
-        Err(e) => return err_response(StatusCode::CONFLICT, e),
+        Err(e) => return err_response(e.status(), e.to_string()),
     };
     match answer {
         // The user may have taken the pane over while the banner was up:

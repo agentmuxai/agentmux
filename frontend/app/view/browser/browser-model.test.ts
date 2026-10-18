@@ -533,6 +533,36 @@ describe("BrowserViewModel attention banner", () => {
         await vm.resolveAttention("cancel");
         expect(invokeCommand).not.toHaveBeenCalledWith("browser_attention_resolve", expect.anything());
     });
+
+    // REPORT_BROWSER_PANE_BLANK_AFTER_BLOCKED_SIGN_IN_REDIRECT_RCA_2026_10_16.md §6.2.
+    it("Back on a notice goes back and dismisses it through the host", async () => {
+        const { invokeCommand } = await import("@/app/platform/ipc");
+        const notice = { id: "n-1", kind: "notice" as const, url: "https://accounts.google.com/x", why: "You blocked it." };
+        const vm = new BrowserViewModel({ ...fakeCtx(), meta: () => ({ "browser:attention": notice }) });
+        vi.clearAllMocks();
+        await vm.resolveAttention("back");
+        expect(invokeCommand).toHaveBeenCalledWith("browser_pane_go_back", { block_id: "test-block-id" });
+        expect(invokeCommand).toHaveBeenCalledWith("browser_attention_resolve", {
+            block_id: "test-block-id",
+            id: "n-1",
+            decision: "cancel",
+        });
+    });
+
+    it("shows the host's own notice when srv couldn't, and takes it down itself", async () => {
+        const { invokeCommand } = await import("@/app/platform/ipc");
+        const vm = new BrowserViewModel(fakeCtx());
+        const onNotice = capturedHandler("browser-pane-notice");
+        vi.clearAllMocks();
+        onNotice({ block_id: "other-pane", url: "https://b.example/", sites: [], why: "x" });
+        expect(vm.attentionAtom()).toBeUndefined();
+        onNotice({ block_id: "test-block-id", url: "https://accounts.google.com/x", sites: ["https://github.com"], why: "AgentMux couldn't ask you about it." });
+        const shown = vm.attentionAtom();
+        expect(shown).toMatchObject({ kind: "notice", local: true, origin: "https://accounts.google.com", sites: ["https://github.com"] });
+        await vm.resolveAttention("cancel");
+        expect(vm.attentionAtom()).toBeUndefined();
+        expect(invokeCommand).not.toHaveBeenCalledWith("browser_attention_resolve", expect.anything());
+    });
 });
 
 // docs/retro/RETRO_BROWSER_PANE_WINDOW_CLOSE_QUITS_APP_2026_10_16.md: a page's
