@@ -95,6 +95,120 @@
     }
   },
   {
+    "command": "agent.input-draft",
+    "request": "agentmux_srv::backend::rpc_types::input_history::CommandInputDraftData",
+    "requestName": "CommandInputDraftData",
+    "requestTs": {
+      "imports": [
+        "CommandInputDraftData"
+      ],
+      "name": "CommandInputDraftData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::input_history::InputDraftResult",
+    "responseName": "InputDraftResult",
+    "responseTs": {
+      "imports": [
+        "InputDraftResult"
+      ],
+      "name": "InputDraftResult"
+    }
+  },
+  {
+    "command": "agent.input-history",
+    "request": "agentmux_srv::backend::rpc_types::input_history::CommandInputHistoryData",
+    "requestName": "CommandInputHistoryData",
+    "requestTs": {
+      "imports": [
+        "CommandInputHistoryData"
+      ],
+      "name": "CommandInputHistoryData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::input_history::InputHistoryResult",
+    "responseName": "InputHistoryResult",
+    "responseTs": {
+      "imports": [
+        "InputHistoryResult"
+      ],
+      "name": "InputHistoryResult"
+    }
+  },
+  {
+    "command": "agent.input-history-append",
+    "request": "agentmux_srv::backend::rpc_types::input_history::CommandInputHistoryAppendData",
+    "requestName": "CommandInputHistoryAppendData",
+    "requestTs": {
+      "imports": [
+        "CommandInputHistoryAppendData"
+      ],
+      "name": "CommandInputHistoryAppendData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::input_history::InputHistoryAppendResult",
+    "responseName": "InputHistoryAppendResult",
+    "responseTs": {
+      "imports": [
+        "InputHistoryAppendResult"
+      ],
+      "name": "InputHistoryAppendResult"
+    }
+  },
+  {
+    "command": "agent.input-history-clear",
+    "request": "agentmux_srv::backend::rpc_types::input_history::CommandInputHistoryClearData",
+    "requestName": "CommandInputHistoryClearData",
+    "requestTs": {
+      "imports": [
+        "CommandInputHistoryClearData"
+      ],
+      "name": "CommandInputHistoryClearData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::input_history::InputHistoryRemovedResult",
+    "responseName": "InputHistoryRemovedResult",
+    "responseTs": {
+      "imports": [
+        "InputHistoryRemovedResult"
+      ],
+      "name": "InputHistoryRemovedResult"
+    }
+  },
+  {
+    "command": "agent.input-history-delete",
+    "request": "agentmux_srv::backend::rpc_types::input_history::CommandInputHistoryDeleteData",
+    "requestName": "CommandInputHistoryDeleteData",
+    "requestTs": {
+      "imports": [
+        "CommandInputHistoryDeleteData"
+      ],
+      "name": "CommandInputHistoryDeleteData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::input_history::InputHistoryRemovedResult",
+    "responseName": "InputHistoryRemovedResult",
+    "responseTs": {
+      "imports": [
+        "InputHistoryRemovedResult"
+      ],
+      "name": "InputHistoryRemovedResult"
+    }
+  },
+  {
+    "command": "agent.input-history-search",
+    "request": "agentmux_srv::backend::rpc_types::input_history::CommandInputHistorySearchData",
+    "requestName": "CommandInputHistorySearchData",
+    "requestTs": {
+      "imports": [
+        "CommandInputHistorySearchData"
+      ],
+      "name": "CommandInputHistorySearchData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::input_history::InputHistoryResult",
+    "responseName": "InputHistoryResult",
+    "responseTs": {
+      "imports": [
+        "InputHistoryResult"
+      ],
+      "name": "InputHistoryResult"
+    }
+  },
+  {
     "command": "agent.kill-process",
     "request": "agentmux_srv::backend::rpc_types::agent::AgentKillProcessCommand",
     "requestName": "AgentKillProcessCommand",

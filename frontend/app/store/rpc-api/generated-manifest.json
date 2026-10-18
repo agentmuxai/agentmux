@@ -1341,6 +1341,30 @@
             "command": "app.update-check",
             "method": "AppUpdateCheckCommand"
         },
+        {
+            "command": "agent.input-history",
+            "method": "AgentInputHistoryCommand"
+        },
+        {
+            "command": "agent.input-history-append",
+            "method": "AgentInputHistoryAppendCommand"
+        },
+        {
+            "command": "agent.input-history-search",
+            "method": "AgentInputHistorySearchCommand"
+        },
+        {
+            "command": "agent.input-history-delete",
+            "method": "AgentInputHistoryDeleteCommand"
+        },
+        {
+            "command": "agent.input-history-clear",
+            "method": "AgentInputHistoryClearCommand"
+        },
+        {
+            "command": "agent.input-draft",
+            "method": "AgentInputDraftCommand"
+        },
 
         {
             "command": "app.upgrade-requests",

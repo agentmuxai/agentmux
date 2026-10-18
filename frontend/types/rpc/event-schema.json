@@ -18,6 +18,15 @@
     }
   },
   {
+    "event": "agent:inputhistory",
+    "payloadTs": {
+      "imports": [
+        "InputHistoryChangedEvent"
+      ],
+      "name": "InputHistoryChangedEvent"
+    }
+  },
+  {
     "event": "agent:memory:changed:",
     "payloadTs": {
       "imports": [],

@@ -40,6 +40,7 @@ mod skill;
 mod toolchain;
 mod tower;
 mod viewer;
+mod input_history;
 mod websocket;
 #[cfg(test)]
 mod optional_fields_tests;
@@ -72,6 +73,7 @@ pub use skill::*;
 pub use toolchain::*;
 pub use tower::*;
 pub use viewer::*;
+pub use input_history::*;
 pub use websocket::*;
 
 // ---- RpcMessage wire format ----

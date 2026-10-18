@@ -129,6 +129,12 @@ import type { CommandGlobalMemorySectionsData } from "@/types/rpc/CommandGlobalM
 import type { CommandHideNamedAgentData } from "@/types/rpc/CommandHideNamedAgentData";
 import type { CommandImportAgentDefinitionsData } from "@/types/rpc/CommandImportAgentDefinitionsData";
 import type { CommandImportAgentFromClawData } from "@/types/rpc/CommandImportAgentFromClawData";
+import type { CommandInputDraftData } from "@/types/rpc/CommandInputDraftData";
+import type { CommandInputHistoryAppendData } from "@/types/rpc/CommandInputHistoryAppendData";
+import type { CommandInputHistoryClearData } from "@/types/rpc/CommandInputHistoryClearData";
+import type { CommandInputHistoryData } from "@/types/rpc/CommandInputHistoryData";
+import type { CommandInputHistoryDeleteData } from "@/types/rpc/CommandInputHistoryDeleteData";
+import type { CommandInputHistorySearchData } from "@/types/rpc/CommandInputHistorySearchData";
 import type { CommandInstallToolData } from "@/types/rpc/CommandInstallToolData";
 import type { CommandLayoutIntentData } from "@/types/rpc/CommandLayoutIntentData";
 import type { CommandLayoutOpenData } from "@/types/rpc/CommandLayoutOpenData";
@@ -270,6 +276,10 @@ import type { HistoryUsageReq } from "@/types/rpc/HistoryUsageReq";
 import type { HostSession } from "@/types/rpc/HostSession";
 import type { IdentityAccount } from "@/types/rpc/IdentityAccount";
 import type { ImportAgentDefinitionsResult } from "@/types/rpc/ImportAgentDefinitionsResult";
+import type { InputDraftResult } from "@/types/rpc/InputDraftResult";
+import type { InputHistoryAppendResult } from "@/types/rpc/InputHistoryAppendResult";
+import type { InputHistoryRemovedResult } from "@/types/rpc/InputHistoryRemovedResult";
+import type { InputHistoryResult } from "@/types/rpc/InputHistoryResult";
 import type { InstallCancelReq } from "@/types/rpc/InstallCancelReq";
 import type { InstallCancelResult } from "@/types/rpc/InstallCancelResult";
 import type { InstallCheckReq } from "@/types/rpc/InstallCheckReq";
@@ -2283,6 +2293,50 @@ export const GeneratedApi = {
   // command "app.update-check"
   AppUpdateCheckCommand(client: RpcClient, opts?: RpcOpts): Promise<AppUpdateStatus> {
     return client.rpcCall("app.update-check", {}, opts);
+  },
+  // command "agent.input-history"
+  AgentInputHistoryCommand(
+    client: RpcClient,
+    data: CommandInputHistoryData,
+    opts?: RpcOpts
+  ): Promise<InputHistoryResult> {
+    return client.rpcCall("agent.input-history", data, opts);
+  },
+  // command "agent.input-history-append"
+  AgentInputHistoryAppendCommand(
+    client: RpcClient,
+    data: CommandInputHistoryAppendData,
+    opts?: RpcOpts
+  ): Promise<InputHistoryAppendResult> {
+    return client.rpcCall("agent.input-history-append", data, opts);
+  },
+  // command "agent.input-history-search"
+  AgentInputHistorySearchCommand(
+    client: RpcClient,
+    data: CommandInputHistorySearchData,
+    opts?: RpcOpts
+  ): Promise<InputHistoryResult> {
+    return client.rpcCall("agent.input-history-search", data, opts);
+  },
+  // command "agent.input-history-delete"
+  AgentInputHistoryDeleteCommand(
+    client: RpcClient,
+    data: CommandInputHistoryDeleteData,
+    opts?: RpcOpts
+  ): Promise<InputHistoryRemovedResult> {
+    return client.rpcCall("agent.input-history-delete", data, opts);
+  },
+  // command "agent.input-history-clear"
+  AgentInputHistoryClearCommand(
+    client: RpcClient,
+    data: CommandInputHistoryClearData,
+    opts?: RpcOpts
+  ): Promise<InputHistoryRemovedResult> {
+    return client.rpcCall("agent.input-history-clear", data, opts);
+  },
+  // command "agent.input-draft"
+  AgentInputDraftCommand(client: RpcClient, data: CommandInputDraftData, opts?: RpcOpts): Promise<InputDraftResult> {
+    return client.rpcCall("agent.input-draft", data, opts);
   },
   // command "app.upgrade-requests"
   AppUpgradeRequestsCommand(client: RpcClient, opts?: RpcOpts): Promise<UpgradeRequestsEvent> {

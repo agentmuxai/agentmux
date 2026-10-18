@@ -190,6 +190,7 @@ export const WpsEvent = {
     AppUpdateStatus: "app:updatestatus",
     /** Agents' requests to upgrade AgentMux, waiting for the user (crates/srv/src/backend/upgrade_request.rs). */
     AppUpgradeRequests: "app:upgraderequests",
+    AgentInputHistoryChanged: "agent:inputhistory",
     AgentShutdown: "agent:shutdown",
     AgentShutdownPending: "agent:shutdown-pending",
     AgentShutdownPendingCleared: "agent:shutdown-pending-cleared",

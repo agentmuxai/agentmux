@@ -576,6 +576,7 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
         ))?;
     }
 
+    conn.execute_batch(super::agent_input_history::SCHEMA)?; // what the user typed to each agent
     // ---- Agent + identity + memory + drone schema ----
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS db_agent_content (
