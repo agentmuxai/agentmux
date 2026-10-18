@@ -122,6 +122,24 @@ describe("agent input history", () => {
         expect(newer).toBe(1);
     });
 
+    it("takes the entries srv filled from past conversations, before the oldest shown", async () => {
+        history.mockResolvedValueOnce(page(["typed today"], 7));
+        const entries = agentHistory("a1");
+        let pos = entries.length;
+        watchAgentHistory("a1", (where, n) => {
+            if (where === "older") pos += n;
+        });
+        await flush();
+        // Filled entries have ids below the oldest kept, down past zero.
+        history.mockResolvedValueOnce(page(["last week", "last month"], 0));
+        handlers.get("agent:inputhistory")!({ agent_id: "a1", what: "backfill" });
+        await flush();
+        await flush();
+        expect(history).toHaveBeenLastCalledWith({}, { agent_id: "a1", before_id: 7, limit: 200 });
+        expect(entries).toEqual(["last month", "last week", "typed today"]);
+        expect(pos, "still on the live draft").toBe(3);
+    });
+
     it("keeps the draft a moment after the last change, and reads it back", async () => {
         vi.useFakeTimers();
         draft.mockResolvedValue({});

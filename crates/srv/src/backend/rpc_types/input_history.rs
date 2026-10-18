@@ -135,6 +135,7 @@ pub struct InputDraftResult {
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct InputHistoryChangedEvent {
     pub agent_id: String,
-    /// `history` or `draft`.
+    /// `history`, `draft`, or `backfill` (older entries came in, from the
+    /// agent's past conversations).
     pub what: String,
 }

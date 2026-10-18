@@ -7,6 +7,7 @@ pub mod adapter;
 pub mod claude_adapter;
 pub mod index;
 pub(crate) mod record;
+mod typed;
 
 use std::sync::Arc;
 

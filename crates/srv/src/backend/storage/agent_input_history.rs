@@ -37,6 +37,10 @@ CREATE TABLE IF NOT EXISTS db_agent_input_drafts (
     text          TEXT NOT NULL,
     updated_at_ms INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS db_agent_input_history_backfilled (
+    agent_id TEXT PRIMARY KEY,
+    at_ms    INTEGER NOT NULL
+);
 ";
 
 /// The longest entry kept, in bytes (a pasted file is not history).
@@ -146,13 +150,82 @@ impl Store {
             }
         };
         tx.execute(
-            "DELETE FROM db_agent_input_history WHERE agent_id = ?1 AND id NOT IN              (SELECT id FROM db_agent_input_history WHERE agent_id = ?1 ORDER BY id DESC LIMIT ?2)",
+            "DELETE FROM db_agent_input_history WHERE agent_id = ?1 AND id NOT IN \
+             (SELECT id FROM db_agent_input_history WHERE agent_id = ?1 ORDER BY id DESC LIMIT ?2)",
             params![entry.agent_id, max as i64],
         )?;
         let saved =
             tx.query_row(&format!("SELECT {COLUMNS} FROM db_agent_input_history WHERE id = ?1"), params![id], entry_row)?;
         tx.commit()?;
         Ok(Some(saved))
+    }
+
+    /// Whether the agent's history was already filled from its past
+    /// conversations ([`Self::input_history_backfill`]).
+    pub fn input_history_backfilled(&self, agent_id: &str) -> Result<bool, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let found: Option<i64> = conn
+            .query_row("SELECT 1 FROM db_agent_input_history_backfilled WHERE agent_id = ?1", params![agent_id], |r| r.get(0))
+            .optional()?;
+        Ok(found.is_some())
+    }
+
+    /// Fill the agent's history, once, with what was typed in its past
+    /// conversations (`typed`, oldest first, with when each was sent). They go
+    /// before every entry already kept, with ids below the oldest of any
+    /// agent's (ids are one space, and can go below zero), so the order by id stays the order they were sent. Keeps
+    /// the newest `max` in all. How many went in; 0 when it was filled before.
+    pub fn input_history_backfill(&self, agent_id: &str, typed: &[(i64, String)], max: usize, now_ms: i64) -> Result<usize, StoreError> {
+        let mut guard = self.conn.lock().unwrap();
+        let tx = guard.transaction()?;
+        let done: Option<i64> = tx
+            .query_row("SELECT 1 FROM db_agent_input_history_backfilled WHERE agent_id = ?1", params![agent_id], |r| r.get(0))
+            .optional()?;
+        if done.is_some() {
+            return Ok(0);
+        }
+        // Ids are one space for every agent: start below the oldest of all.
+        let oldest: Option<i64> = tx.query_row("SELECT MIN(id) FROM db_agent_input_history", [], |r| r.get(0))?;
+        // Never 0: the composer's cache marks a send still on its way with id 0.
+        let mut next = oldest.unwrap_or(1).min(0) - 1;
+        // What the composer kept is in the transcripts too: only messages sent
+        // before this agent's oldest kept entry are new here.
+        let kept_since: Option<i64> = tx.query_row(
+            "SELECT MIN(sent_at_ms) FROM db_agent_input_history WHERE agent_id = ?1",
+            params![agent_id],
+            |r| r.get(0),
+        )?;
+        let mut inserted = 0;
+        for (at, text) in typed.iter().filter(|(at, _)| kept_since.is_none_or(|k| *at < k)).rev().take(max) {
+            tx.execute(
+                "INSERT INTO db_agent_input_history (id, agent_id, sent_at_ms, text, kind, source) VALUES (?1, ?2, ?3, ?4, ?5, 'backfill')",
+                params![next, agent_id, at, text, Self::input_kind(text)],
+            )?;
+            next -= 1;
+            inserted += 1;
+        }
+        tx.execute(
+            "DELETE FROM db_agent_input_history WHERE agent_id = ?1 AND id NOT IN \
+             (SELECT id FROM db_agent_input_history WHERE agent_id = ?1 ORDER BY id DESC LIMIT ?2)",
+            params![agent_id, max as i64],
+        )?;
+        tx.execute(
+            "INSERT INTO db_agent_input_history_backfilled (agent_id, at_ms) VALUES (?1, ?2)",
+            params![agent_id, now_ms],
+        )?;
+        tx.commit()?;
+        Ok(inserted)
+    }
+
+    /// `message`, `slash` or `bang`, for text read back from a conversation.
+    fn input_kind(text: &str) -> &'static str {
+        if text.starts_with('/') {
+            "slash"
+        } else if text.starts_with('!') {
+            "bang"
+        } else {
+            "message"
+        }
     }
 
     /// An agent's entries, newest first: the newest `limit`, or the `limit`

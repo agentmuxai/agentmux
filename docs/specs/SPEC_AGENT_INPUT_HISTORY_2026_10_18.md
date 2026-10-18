@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-18
 **Author:** QTest
-**Status:** active — phase 1 shipped in PR #5109, phase 3's search in the composer in PR #5111, phase 4 in PR #5112; phase 2, the History tab and the palette entry not started.
+**Status:** active — phases 1 to 4 shipped (PRs #5109, #5111, #5112, #5115); the History tab and the palette entry not started.
 **Origin:** the 0.59.31 → 0.59.32 upgrade lost every pane's ArrowUp history
 (`docs/reports/REPORT_UPGRADE_0_59_32_DOGFOOD_FINDINGS_2026_10_18.md` §2.4). The
 operator asked for "a robust system to track that data over the long term; it
@@ -196,14 +196,26 @@ reads the user messages from the agent's past provider sessions (the session
 files `Agents search_history` already reads) and records them with
 `source: backfill` and their original times.
 
+- Only the agent's own sessions (its record, as `search_for_agent` reads
+  first), never ones found by folder or account alone
+  (`history/typed.rs`).
 - Only messages the user typed are imported: never jekts (`[JEKT:` markers),
-  `[AgentMux]` notes, Swarm broadcast headers, tool results, or provider
-  system messages.
-- It runs in the background after the first composer mount for that agent,
-  never during startup. It caps at the retention limit and records that it
-  ran (a column on the agent, not a marker file), so it runs once.
-- The `sessionStorage` histories of the current window are also imported once
-  where the block's agent is known, so nothing typed in this release is lost.
+  `[AgentMux]` notes (also when they arrived late), Swarm broadcast headers,
+  tool results, the CLI's injected text (`<system-reminder>`,
+  `<command-name>`, `Caveat:`, a compaction's summary) or anything over
+  64 KB. A repeat of the message before is left out.
+- It runs in the background when a composer first reads the agent's history
+  (`agent.input-history` without `before_id`), never during startup, and
+  every window hears `agent:inputhistory {what: backfill}` once the older
+  entries are in. A history index still being built leaves it to the next
+  read.
+- The entries go before every one already kept, with ids below its oldest
+  (ids go below zero), so the order by id stays the order they were sent.
+  It caps at the retention limit, and is recorded in
+  `db_agent_input_history_backfilled`, so it runs once.
+- The `sessionStorage` histories of the current window are not imported: a
+  reload keeps them in their own panes, and what they hold was typed in
+  conversations the backfill reads anyway.
 
 ### 4.8 Privacy
 
@@ -219,7 +231,7 @@ files `Agents search_history` already reads) and records them with
 | Phase | Scope | Fixes |
 |---|---|---|
 | 1 (done) | Tables, append/list/search/delete/clear/draft API, composer reads and writes it, events | The loss the operator reported: ArrowUp and the draft survive restarts and upgrades |
-| 2 | Backfill from past sessions, import of `sessionStorage` | History starts full |
+| 2 (done) | Backfill from past sessions | History starts full |
 | 3 (search done) | Reverse search, the History tab, delete and clear, palette entry | Finding and managing it |
 | 4 (done) | Retention setting, Swarm broadcasts recorded | Completeness |
 
