@@ -1,6 +1,6 @@
 # SPEC: agent history in Warden — the History section
 
-**Status:** active — phase 1 (§4: Agents and Storage, the status bar link, the history tab fix) is built in the PR that adds this spec; phases 2 and 3 (§5) are not started.
+**Status:** active — phase 1 (§4: Agents and Storage, the status bar link, the history tab fix) ships in PR #5116; phases 2 and 3 (§5) are not started.
 **Date:** 2026-10-18
 **Author:** Agent5@narko, at the repo owner's direction
 **Decided by the repo owner (2026-10-18):** history lives in Warden, as a section beside Audit, not as a page of its own ("build it into warden").
