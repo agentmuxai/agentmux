@@ -139,3 +139,16 @@ fn a_backfill_keeps_the_newest_up_to_the_cap() {
     assert_eq!(store.input_history_backfill("b", &[], 3, 1).unwrap(), 0);
     assert!(store.input_history_backfilled("b").unwrap());
 }
+
+#[test]
+fn several_agents_are_filled_in_one_id_space() {
+    let store = store_with(&["a", "b", "c"]);
+    store.input_history_append(&send("b", "b today", 50), 100).unwrap();
+    let typed = |who: &str| vec![(1, format!("{who} first")), (2, format!("{who} second"))];
+    assert_eq!(store.input_history_backfill("a", &typed("a"), 100, 9).unwrap(), 2);
+    assert_eq!(store.input_history_backfill("b", &typed("b"), 100, 9).unwrap(), 2);
+    assert_eq!(store.input_history_backfill("c", &typed("c"), 100, 9).unwrap(), 2);
+    assert_eq!(texts(&store.input_history_list("a", None, 10).unwrap()), ["a second", "a first"]);
+    assert_eq!(texts(&store.input_history_list("b", None, 10).unwrap()), ["b today", "b second", "b first"]);
+    assert_eq!(texts(&store.input_history_list("c", None, 10).unwrap()), ["c second", "c first"]);
+}

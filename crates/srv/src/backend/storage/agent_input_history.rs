@@ -172,8 +172,8 @@ impl Store {
 
     /// Fill the agent's history, once, with what was typed in its past
     /// conversations (`typed`, oldest first, with when each was sent). They go
-    /// before every entry already kept, with ids below its oldest (ids can go
-    /// below zero), so the order by id stays the order they were sent. Keeps
+    /// before every entry already kept, with ids below the oldest of any
+    /// agent's (ids are one space, and can go below zero), so the order by id stays the order they were sent. Keeps
     /// the newest `max` in all. How many went in; 0 when it was filled before.
     pub fn input_history_backfill(&self, agent_id: &str, typed: &[(i64, String)], max: usize, now_ms: i64) -> Result<usize, StoreError> {
         let mut guard = self.conn.lock().unwrap();
@@ -184,8 +184,8 @@ impl Store {
         if done.is_some() {
             return Ok(0);
         }
-        let oldest: Option<i64> =
-            tx.query_row("SELECT MIN(id) FROM db_agent_input_history WHERE agent_id = ?1", params![agent_id], |r| r.get(0))?;
+        // Ids are one space for every agent: start below the oldest of all.
+        let oldest: Option<i64> = tx.query_row("SELECT MIN(id) FROM db_agent_input_history", [], |r| r.get(0))?;
         let mut next = oldest.unwrap_or(1).min(1) - 1;
         let mut inserted = 0;
         for (at, text) in typed.iter().rev().take(max) {

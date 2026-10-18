@@ -67,7 +67,7 @@ fn maybe_backfill(state: &AppState, agent_id: &str) {
                 tracing::info!(agent_id = %agent_id, entries = n, "input history: filled from past conversations");
                 changed(&state, &agent_id, "backfill");
             }
-            Ok(Err(e)) => tracing::info!(agent_id = %agent_id, error = %e, "input history: not filled yet; the next read tries again"),
+            Ok(Err(e)) => tracing::warn!(agent_id = %agent_id, error = %e, "input history: not filled yet; the next read tries again"),
             Err(e) => tracing::warn!(agent_id = %agent_id, error = %e, "input history: the fill stopped"),
         }
     });
