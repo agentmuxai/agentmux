@@ -399,11 +399,14 @@ pub async fn layout(root: &mut CdpSession) -> Vec<FrameLayout> {
 /// frame isn't known (so they can't be shown, placed or hidden).
 pub async fn layout_counting_unplaced(root: &mut CdpSession) -> (Vec<FrameLayout>, usize) {
     let (all, targets) = current_frames(root).await;
+    // Discovery stopped at its depth limit: there may be frames nobody saw,
+    // counted as one that can't be placed.
+    let missing = usize::from(root.frames_may_be_missing());
     let Some(main) = all.first().cloned() else {
-        return (Vec::new(), 0);
+        return (Vec::new(), missing);
     };
     if all.len() == 1 {
-        return (Vec::new(), 0);
+        return (Vec::new(), missing);
     }
     // Each `<iframe>` element, asked of the frame that holds it.
     let session_of: HashMap<&str, Option<&str>> = all.iter().map(|f| (f.id.as_str(), f.session.as_deref())).collect();
@@ -447,7 +450,7 @@ pub async fn layout_counting_unplaced(root: &mut CdpSession) -> (Vec<FrameLayout
             placeable,
         });
     }
-    let unplaced = (all.len() - 1).saturating_sub(out.len());
+    let unplaced = (all.len() - 1).saturating_sub(out.len()) + missing;
     (out, unplaced)
 }
 

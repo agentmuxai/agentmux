@@ -207,7 +207,12 @@ pub async fn secret_boxes(root: &mut CdpSession) -> SecretBoxes {
 pub fn merge_scans(before: SecretBoxes, after: SecretBoxes) -> SecretBoxes {
     let same = before.boxes.len() == after.boxes.len()
         && before.boxes.iter().zip(&after.boxes).all(|(a, b)| a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1.0));
-    let complete = before.complete && after.complete && same;
+    // A resize between the scans changes how the boxes scale to the image.
+    let same_width = match (before.css_width, after.css_width) {
+        (Some(a), Some(b)) => (a - b).abs() < 0.5,
+        _ => false,
+    };
+    let complete = before.complete && after.complete && same && same_width;
     let css_width = before.css_width.or(after.css_width);
     let mut boxes = before.boxes;
     boxes.extend(after.boxes);
@@ -237,5 +242,15 @@ mod tests {
         let added = merge_scans(scan(&[], true), scan(&[[1.0, 2.0, 3.0, 4.0]], true));
         assert!(!added.complete, "a field appeared during the capture");
         assert!(!merge_scans(scan(&[], false), scan(&[], true)).complete);
+    }
+
+    #[test]
+    fn a_resize_between_the_scans_is_incomplete() {
+        let mut wider = scan(&[[1.0, 2.0, 3.0, 4.0]], true);
+        wider.css_width = Some(1200.0);
+        assert!(!merge_scans(scan(&[[1.0, 2.0, 3.0, 4.0]], true), wider).complete);
+        let mut unknown = scan(&[], true);
+        unknown.css_width = None;
+        assert!(!merge_scans(scan(&[], true), unknown).complete, "an unknown width can't be checked");
     }
 }

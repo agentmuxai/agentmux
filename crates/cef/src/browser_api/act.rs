@@ -970,7 +970,11 @@ async fn act(
 fn warn_if_changed(mut after: Value, text: &str) -> Value {
     let got = after.get("value").and_then(|v| v.as_str()).map(str::to_string);
     if let (Some(got), Some(obj)) = (got, after.as_object_mut()) {
-        if got != text && !obj.contains_key("contentEditable") {
+        // An editor's text differs from what was typed by its own spacing
+        // (line breaks, non-breaking spaces): compare the words, not those.
+        let words = |s: &str| s.split(|c: char| c.is_whitespace() || c == '\u{a0}').filter(|w| !w.is_empty()).collect::<Vec<_>>().join(" ");
+        let differs = if obj.contains_key("contentEditable") { words(&got) != words(text) } else { got != text };
+        if differs {
             let cut = text.starts_with(got.as_str()) && got.len() < text.len();
             obj.insert(
                 "warning".to_string(),
@@ -1106,7 +1110,9 @@ Connection: close
         let exact = warn_if_changed(json!({ "tag": "input", "value": "Springfield" }), "Springfield");
         assert!(exact.get("warning").is_none());
         let editable = warn_if_changed(json!({ "value": "x", "contentEditable": true }), "y");
-        assert!(editable.get("warning").is_none(), "contenteditable text is checked differently");
+        assert!(editable.get("warning").is_some(), "an editor that changed the text says so too");
+        let spaced = warn_if_changed(json!({ "value": "Hello\u{a0}world\n", "contentEditable": true }), "Hello world");
+        assert!(spaced.get("warning").is_none(), "an editor's own spacing isn't a change");
     }
 
     #[test]
