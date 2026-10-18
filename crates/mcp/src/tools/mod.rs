@@ -114,6 +114,7 @@ const REPLACED: &[(&str, &str)] = &[
     ("ConnList", "Terminal with action \"connections\""),
     ("OpenBrowser", "Browser with action \"open\""),
     ("BrowserSnapshot", "Browser with action \"snapshot\""),
+    ("BrowserFind", "Browser with action \"find\""),
     ("BrowserClick", "Browser with action \"click\""),
     ("BrowserFill", "Browser with action \"fill\""),
     ("BrowserSelect", "Browser with action \"select\""),

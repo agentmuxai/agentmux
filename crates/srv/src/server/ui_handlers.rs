@@ -852,7 +852,7 @@ pub(crate) async fn handle_ui_browser_snapshot(
     let mut data = match proxy_value(
         &state,
         "snapshot",
-        json!({ "block_id": block_id, "scope": req.scope }),
+        json!({ "block_id": block_id, "scope": req.scope, "scope_match": req.scope_match }),
         std::time::Duration::from_secs(30),
     )
     .await

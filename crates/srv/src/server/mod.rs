@@ -60,6 +60,7 @@ pub(crate) mod browser_attention;
 pub(crate) mod browser_bypass;
 pub(crate) mod browser_bypass_routes;
 pub(crate) mod browser_dialog;
+pub(crate) mod browser_find;
 pub(crate) mod browser_host_sync;
 pub(crate) mod browser_identity;
 pub(crate) mod browser_owner;
