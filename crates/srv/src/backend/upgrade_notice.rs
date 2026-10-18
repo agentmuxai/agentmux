@@ -136,8 +136,14 @@ pub fn note_text(u: &Upgraded) -> String {
     let at = chrono::DateTime::from_timestamp_millis(u.at_ms)
         .map(|t| t.with_timezone(&chrono::Local).format(" at %H:%M").to_string())
         .unwrap_or_default();
+    // The resumed conversation still holds any tool description the agent
+    // loaded before the upgrade (a deferred tool's schema is a message in
+    // it), while the tool itself is the new version's: the list of actions it
+    // read can be missing new ones (browser driver roadblocks, R8).
     format!(
-        "[AgentMux] AgentMux was upgraded from {} to {}{at}. Your session resumed; nothing is needed from you.",
+        "[AgentMux] AgentMux was upgraded from {} to {}{at}. Your session resumed; nothing is needed from you. \
+         Its tools may have changed: a tool description you loaded before the upgrade can be out of date, so \
+         load it again before relying on the actions it lists.",
         u.from, u.to
     )
 }
@@ -363,6 +369,7 @@ mod tests {
     fn the_note_is_a_system_note() {
         let text = note_text(&up("0.59.26", "0.59.27", 1_792_000_000_000, &[]).unwrap());
         assert!(text.starts_with("[AgentMux] AgentMux was upgraded from 0.59.26 to 0.59.27 at "), "{text}");
-        assert!(text.ends_with("Your session resumed; nothing is needed from you."));
+        assert!(text.contains("Your session resumed; nothing is needed from you. Its tools may have changed: "), "{text}");
+        assert!(text.ends_with("load it again before relying on the actions it lists."), "{text}");
     }
 }
