@@ -1583,10 +1583,7 @@ impl Handler {
             wan: self.delivery_wan.clone(),
         };
 
-        if self.audit_log.len() >= AUDIT_LOG_MAX {
-            self.audit_log.remove(0);
-        }
-        self.audit_log.push(entry);
+        super::audit_store::push(&mut self.audit_log, AUDIT_LOG_MAX, entry);
     }
 
     /// Record a registration/eviction event in the audit log — the
@@ -1623,10 +1620,7 @@ impl Handler {
             wan: None,
         };
 
-        if self.audit_log.len() >= AUDIT_LOG_MAX {
-            self.audit_log.remove(0);
-        }
-        self.audit_log.push(entry);
+        super::audit_store::push(&mut self.audit_log, AUDIT_LOG_MAX, entry);
     }
 }
 
