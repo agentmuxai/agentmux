@@ -79,6 +79,59 @@ async fn a_launch_that_forks_starts_while_its_parent_is_live() {
     assert!(result.is_ok(), "a fork is not a second copy of the parent: {result:?}");
 }
 
+/// A fork whose pane history is a copy of its parent's
+/// (`agent_session::fork_history`) resumes the parent's session as a fork
+/// even when its launch didn't ask to: it starts while the parent runs, and
+/// never writes into the parent's conversation.
+#[tokio::test]
+async fn a_fork_with_its_parents_history_resumes_the_parents_session_as_a_fork() {
+    use crate::backend::agent_session::{agent_current_zone, fork_history, global_transcript_store, set_global_transcript_store};
+    let sid = format!("sid-{}", uuid::Uuid::new_v4());
+    let live_block = format!("live-{}", uuid::Uuid::new_v4());
+    let live = controller(&live_block, None);
+    {
+        let mut g = live.inner.lock().unwrap();
+        g.session_id = Some(sid.clone());
+        g.current_pid = Some(4242);
+    }
+    crate::backend::blockcontroller::register_controller(&live_block, live.clone());
+
+    // Whichever store this test binary installed first.
+    set_global_transcript_store(Arc::new(crate::backend::storage::filestore::FileStore::open_in_memory().unwrap()));
+    let gfs = global_transcript_store().unwrap();
+    let (parent_def, fork_def) = (format!("parent-{}", uuid::Uuid::new_v4()), format!("fork-{}", uuid::Uuid::new_v4()));
+    let line = format!("{{\"type\":\"system\",\"session_id\":\"{sid}\"}}
+");
+    let parent_zone = agent_current_zone(&parent_def);
+    let new_file = (crate::backend::storage::filestore::FileMeta::new(), crate::backend::storage::filestore::FileOpts::default());
+    gfs.make_file(&parent_zone, "output", new_file.0, new_file.1).unwrap();
+    gfs.append_lines(&parent_zone, "output", line.as_bytes()).unwrap();
+    fork_history::copy_parent_history(gfs, &parent_def, &fork_def, &sid, "session_id").unwrap();
+
+    let store = Arc::new(Store::open_in_memory().unwrap());
+    let fork_block = format!("fork-block-{}", uuid::Uuid::new_v4());
+    let mut block = Block {
+        oid: fork_block.clone(),
+        parentoref: String::new(),
+        version: 1,
+        runtimeopts: None,
+        stickers: None,
+        meta: {
+            let mut m = crate::backend::obj::MetaMapType::new();
+            m.insert("agentId".to_string(), serde_json::json!(fork_def));
+            m
+        },
+        subblockids: None,
+    };
+    store.insert(&mut block).unwrap();
+    let fork = controller(&fork_block, Some(store));
+    // No `--fork-session` in the launch: the inherited history decides.
+    let result = fork.send_message(MSG.to_string(), resume_config(&sid));
+    crate::backend::blockcontroller::delete_controller(&live_block);
+
+    assert!(result.is_ok(), "the parent's session is forked, not resumed a second time: {result:?}");
+}
+
 /// The guard and the fork's bookkeeping (its segment, and the outcome when
 /// the fork reports its own id) ask the same question, so a fork the guard
 /// lets through is also recorded as a fork.

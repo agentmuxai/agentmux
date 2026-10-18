@@ -269,6 +269,10 @@
             ]
         },
         {
+            "command": "copyforkhistory",
+            "method": "CopyForkHistoryCommand"
+        },
+        {
             "command": "controllerresync",
             "method": "ControllerResyncCommand",
             "dataType": "CommandControllerResyncData"

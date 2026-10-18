@@ -12,6 +12,7 @@
 
 mod cache;
 mod checkpointer;
+mod copy;
 mod core;
 mod counter;
 mod ijson;
@@ -24,6 +25,8 @@ mod zone_txn;
 mod tests;
 #[cfg(test)]
 mod tests_atomic;
+#[cfg(test)]
+mod tests_copy;
 #[cfg(test)]
 mod tests_counter;
 #[cfg(test)]

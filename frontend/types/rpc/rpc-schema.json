@@ -1773,6 +1773,25 @@
     }
   },
   {
+    "command": "copyforkhistory",
+    "request": "agentmux_srv::backend::rpc_types::agent::CommandCopyForkHistoryData",
+    "requestName": "CommandCopyForkHistoryData",
+    "requestTs": {
+      "imports": [
+        "CommandCopyForkHistoryData"
+      ],
+      "name": "CommandCopyForkHistoryData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::agent::CopyForkHistoryResult",
+    "responseName": "CopyForkHistoryResult",
+    "responseTs": {
+      "imports": [
+        "CopyForkHistoryResult"
+      ],
+      "name": "CopyForkHistoryResult"
+    }
+  },
+  {
     "command": "createagent",
     "request": "agentmux_srv::backend::rpc_types::agent::CommandCreateAgentDefinitionData",
     "requestName": "CommandCreateAgentDefinitionData",

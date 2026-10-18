@@ -33,8 +33,8 @@ import { atoms, pushNotification, MOS } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { ObjectService } from "@/app/store/services";
-import { holdLeafRevealGate, scheduleLeafRevealLift } from "@/app/store/tab-reveal";
 import { resolveEffectiveLaunchProvider } from "./agent-launch-env";
+import { resolveForkSessionArgs } from "./fork-session-args";
 import { getRuntimeConfig } from "./buildRuntimeArgs";
 import { PROVIDER_FLAGS_META_KEY } from "./launch-args";
 import { effectiveRuntime } from "./runtime-capabilities";
@@ -68,11 +68,39 @@ export interface QuickForkModel {
 }
 
 /**
+ * Give a fork its parent's history before it launches, so its pane opens as
+ * an exact copy of the parent's (`copyforkhistory`,
+ * `agent_session::fork_history`). Only when the launch continues the parent's
+ * conversation (`resolveForkSessionArgs`: Claude, a real session); otherwise
+ * the fork starts fresh and showing the parent's history would be wrong. The
+ * server copies nothing unless the parent's history ends in `sessionId`.
+ * A failure is logged and the fork launches anyway, as before, with an empty
+ * pane. Forks only: a worker (the `Agents` `spawn` action) never comes here
+ * ("Fork, spawn and worker" in `server/agent_handlers/mod.rs`).
+ */
+export async function copyForkHistory(forkId: string, sourceId: string, sessionId: string, providerId: string): Promise<void> {
+    if (!resolveForkSessionArgs({ continueSessionId: sessionId, forkSession: true }, providerId).appendForkFlag) return;
+    try {
+        const result = await RpcApi.CopyForkHistoryCommand(TabRpcClient, {
+            fork_id: forkId,
+            source_id: sourceId,
+            session_id: sessionId,
+            provider: providerId,
+        });
+        if (!result.copied) Logger.info("quick-fork", "fork starts without its parent's history", { forkId, reason: result.reason });
+    } catch (e: any) {
+        Logger.warn("quick-fork", "copying the parent's history failed", { forkId, error: String(e) });
+    }
+}
+
+/**
  * Fork `model`'s own live agent into a new sibling tab in the SAME pane.
  * Full independent identity (new `AgentDefinition`, never shares
  * `AGENTMUX_AGENT_ID` or a jekt signing key with the source, per
  * `template.rs`'s `forkagentdefinition` handler), conversation history
- * carried forward via `continueSessionId`/`forkSession`.
+ * carried forward via `continueSessionId`/`forkSession`, and the parent's
+ * pane history copied into the fork's ([`copyForkHistory`]): a fork is an
+ * exact copy of its agent.
  *
  * Always inherits the source's own bound account (spec §5, revised
  * 2026-08-22) — sourced via `ListAgentIdentitiesCommand`, filtered to the
@@ -131,12 +159,12 @@ export async function quickForkAgent(model: QuickForkModel): Promise<boolean> {
     // resolves the tab from THIS pane's own block server-side.)
     const ownerTabId = atoms.activeTabId();
 
-    // Hide this pane while the fork settles — the whole RPC chain below
-    // (fork, identity lookup, pane.open, launch) precedes the same
-    // pushBlockOntoStack-forced remount `openOrFocusHistoryTab` is also
-    // gated against.
-    // SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md.
-    const revealGen = holdLeafRevealGate(node.id);
+    // No leaf reveal gate (SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md),
+    // unlike `openOrFocusHistoryTab`: it hid the whole pane until the main
+    // thread went quiet, which a long copied history keeps busy up to the
+    // gate's cap, so the pane showed black. The cuts it hid are gone: the new
+    // tab is created naming its agent (no picker), and the conversation view
+    // mounts behind its own loading cover, with the tab strip still showing.
 
     // Declared outside the try so the catch block below can tell whether a
     // block was actually pushed onto the stack before the failure — only
@@ -163,112 +191,120 @@ export async function quickForkAgent(model: QuickForkModel): Promise<boolean> {
     };
 
     try {
-        try {
-            const forkedDef = await RpcApi.ForkAgentDefinitionCommand(TabRpcClient, {
-                source_id: definitionId,
-                branch_label: "",
-            });
+        const forkedDef = await RpcApi.ForkAgentDefinitionCommand(TabRpcClient, {
+            source_id: definitionId,
+            branch_label: "",
+        });
 
-            // Same resolution as launchAgentDefinition itself (agent-model.ts):
-            // effective provider -> PROVIDERS lookup, with an alias fallback.
-            const effectiveProvider = await resolveEffectiveLaunchProvider(forkedDef);
-            const canonicalForkProvider = resolveProviderAlias(effectiveProvider);
-            const provider = PROVIDERS[effectiveProvider] ?? PROVIDERS[canonicalForkProvider];
+        // Same resolution as launchAgentDefinition itself (agent-model.ts):
+        // effective provider -> PROVIDERS lookup, with an alias fallback.
+        const effectiveProvider = await resolveEffectiveLaunchProvider(forkedDef);
+        const canonicalForkProvider = resolveProviderAlias(effectiveProvider);
+        const provider = PROVIDERS[effectiveProvider] ?? PROVIDERS[canonicalForkProvider];
 
-            // Spec §5 (revised 2026-08-22): always inherit the source's own
-            // bound account — see this function's doc comment for why an
-            // "unbound" alternative wouldn't actually be a safer/different
-            // option (binding never copies the credential; it's shared by
-            // account_id regardless of who links to it).
-            //
-            // A lookup failure here is NOT swallowed into "proceed unbound"
-            // (Codex's review of PR #2756): the backend's OAuth-class layer-3
-            // spawn gate (`identity/resolver/inject.rs`) blocks a definition
-            // with no resolved binding at all, unless it opted into ambient
-            // login — so an unresolved lookup would let `launchAgentDefinition`
-            // report success while the new agent can never actually spawn its
-            // first turn, silently contradicting quick-fork's own "always
-            // inherits identity" promise. Rethrown into the outer catch, which
-            // already handles cleanup + notification identically.
-            const links = await RpcApi.ListAgentIdentitiesCommand(TabRpcClient, {
-                agent_id: definitionId,
-            });
-            const accountId = lastLinkedAccountId(links, provider?.id ?? canonicalForkProvider) ?? "";
+        // Spec §5 (revised 2026-08-22): always inherit the source's own
+        // bound account — see this function's doc comment for why an
+        // "unbound" alternative wouldn't actually be a safer/different
+        // option (binding never copies the credential; it's shared by
+        // account_id regardless of who links to it).
+        //
+        // A lookup failure here is NOT swallowed into "proceed unbound"
+        // (Codex's review of PR #2756): the backend's OAuth-class layer-3
+        // spawn gate (`identity/resolver/inject.rs`) blocks a definition
+        // with no resolved binding at all, unless it opted into ambient
+        // login — so an unresolved lookup would let `launchAgentDefinition`
+        // report success while the new agent can never actually spawn its
+        // first turn, silently contradicting quick-fork's own "always
+        // inherits identity" promise. Rethrown into the outer catch, which
+        // already handles cleanup + notification identically.
+        const links = await RpcApi.ListAgentIdentitiesCommand(TabRpcClient, {
+            agent_id: definitionId,
+        });
+        const accountId = lastLinkedAccountId(links, provider?.id ?? canonicalForkProvider) ?? "";
 
-            // Non-Claude fallback note — only relevant when there was actually
-            // a session to lose (an empty sessionId is already a fresh start
-            // regardless of provider — nothing silently changed).
-            const showNoHistoryFallback = !!sessionId && provider?.id !== "claude";
+        // Non-Claude fallback note — only relevant when there was actually
+        // a session to lose (an empty sessionId is already a fresh start
+        // regardless of provider — nothing silently changed).
+        const showNoHistoryFallback = !!sessionId && provider?.id !== "claude";
 
-            // Create the new block as a tab of THIS pane. Null means the pane
-            // closed while the RPCs above were in flight.
-            newBlockId = await openBlockInStack(layoutModel, { blockId: model.blockId }, "agent", { view: "agent" });
-            if (!newBlockId) return false;
+        // Before the pane opens: it shows the parent's history from its
+        // first render.
+        await copyForkHistory(forkedDef.id, definitionId, sessionId, provider?.id ?? canonicalForkProvider);
 
-            const launched = await model.launchAgentDefinition(
-                forkedDef,
-                {
-                    instanceName: forkedDef.name,
-                    agentType: (forkedDef.agent_type as "host" | "container") || "host",
-                    environment: forkedDef.agent_type === "container" ? "docker" : "local",
-                    accountId,
-                    bundleId: "",
-                    continueSessionId: sessionId,
-                    forkSession: true,
-                    // The fork starts as the source is RUNNING (its effective
-                    // model/effort/mode), not on the defaults.
-                    carryOverRuntime: effectiveRuntime(getRuntimeConfig(meta), meta?.[PROVIDER_FLAGS_META_KEY]),
-                },
-                newBlockId,
-                ownerTabId,
-            );
-            if (!launched) {
-                Logger.warn("quick-fork", "launchAgentDefinition reported failure", { blockId: newBlockId });
-                // Don't leave the user on a blank/broken pane-stack tab — pop it
-                // back out and delete the block, same as the "pane closed
-                // mid-flight" cleanup above (Codex P2 on PR #2746).
-                await cleanupPushedBlock();
-                // The cleanup above is otherwise silent — without this, the fork
-                // just flashes in and back out with no indication anything went
-                // wrong (Codex's second-round review of PR #2746).
-                pushNotification({
-                    icon: "fa-triangle-exclamation",
-                    title: "Quick Fork failed",
-                    message: "The forked agent could not be launched.",
-                    timestamp: new Date().toISOString(),
-                    type: "error",
-                    expiration: Date.now() + 8000,
-                });
-            } else if (showNoHistoryFallback) {
-                await setBlockMeta(newBlockId, { [FORK_NO_HISTORY_FALLBACK_META_KEY]: true }).catch((e: any) =>
-                    Logger.warn("quick-fork", "failed to set no-history-fallback meta", { error: String(e) })
-                );
-            }
-            return launched;
-        } catch (e: any) {
-            Logger.error("quick-fork", "failed", { error: String(e) });
-            // launchAgentDefinition's own doc comment claims it never throws,
-            // but that only covers its internal try/catches — several awaited
-            // calls inside it (resolveEffectiveLaunchProvider,
-            // checkNodejsForProvider, ensureProviderAuthDir) run unguarded before
-            // those, so a rejection here CAN happen after the block was
-            // already pushed onto the stack (Codex's review of this PR).
-            // cleanupPushedBlock() is a no-op if newBlockId was never set
-            // (e.g. ForkAgentDefinitionCommand itself failed, before any block
-            // existed to clean up).
+        // Create the new block as a tab of THIS pane. Null means the pane
+        // closed while the RPCs above were in flight. Created already
+        // naming its agent, so it opens on the conversation (the copied
+        // history) rather than on the picker while the launch below
+        // writes the rest of its meta.
+        newBlockId = await openBlockInStack(layoutModel, { blockId: model.blockId }, "agent", {
+            view: "agent",
+            agentId: forkedDef.id,
+            agentName: forkedDef.name,
+            agentProvider: effectiveProvider,
+            ...(forkedDef.icon ? { agentIcon: forkedDef.icon } : {}),
+        });
+        if (!newBlockId) return false;
+
+        const launched = await model.launchAgentDefinition(
+            forkedDef,
+            {
+                instanceName: forkedDef.name,
+                agentType: (forkedDef.agent_type as "host" | "container") || "host",
+                environment: forkedDef.agent_type === "container" ? "docker" : "local",
+                accountId,
+                bundleId: "",
+                continueSessionId: sessionId,
+                forkSession: true,
+                // The fork starts as the source is RUNNING (its effective
+                // model/effort/mode), not on the defaults.
+                carryOverRuntime: effectiveRuntime(getRuntimeConfig(meta), meta?.[PROVIDER_FLAGS_META_KEY]),
+            },
+            newBlockId,
+            ownerTabId,
+        );
+        if (!launched) {
+            Logger.warn("quick-fork", "launchAgentDefinition reported failure", { blockId: newBlockId });
+            // Don't leave the user on a blank/broken pane-stack tab — pop it
+            // back out and delete the block, same as the "pane closed
+            // mid-flight" cleanup above (Codex P2 on PR #2746).
             await cleanupPushedBlock();
+            // The cleanup above is otherwise silent — without this, the fork
+            // just flashes in and back out with no indication anything went
+            // wrong (Codex's second-round review of PR #2746).
             pushNotification({
                 icon: "fa-triangle-exclamation",
                 title: "Quick Fork failed",
-                message: e instanceof Error ? e.message : String(e),
+                message: "The forked agent could not be launched.",
                 timestamp: new Date().toISOString(),
                 type: "error",
                 expiration: Date.now() + 8000,
             });
-            return false;
+        } else if (showNoHistoryFallback) {
+            await setBlockMeta(newBlockId, { [FORK_NO_HISTORY_FALLBACK_META_KEY]: true }).catch((e: any) =>
+                Logger.warn("quick-fork", "failed to set no-history-fallback meta", { error: String(e) })
+            );
         }
-    } finally {
-        // Pair with holdLeafRevealGate above — runs on every exit path.
-        scheduleLeafRevealLift(node.id, revealGen);
+        return launched;
+    } catch (e: any) {
+        Logger.error("quick-fork", "failed", { error: String(e) });
+        // launchAgentDefinition's own doc comment claims it never throws,
+        // but that only covers its internal try/catches — several awaited
+        // calls inside it (resolveEffectiveLaunchProvider,
+        // checkNodejsForProvider, ensureProviderAuthDir) run unguarded before
+        // those, so a rejection here CAN happen after the block was
+        // already pushed onto the stack (Codex's review of this PR).
+        // cleanupPushedBlock() is a no-op if newBlockId was never set
+        // (e.g. ForkAgentDefinitionCommand itself failed, before any block
+        // existed to clean up).
+        await cleanupPushedBlock();
+        pushNotification({
+            icon: "fa-triangle-exclamation",
+            title: "Quick Fork failed",
+            message: e instanceof Error ? e.message : String(e),
+            timestamp: new Date().toISOString(),
+            type: "error",
+            expiration: Date.now() + 8000,
+        });
+        return false;
     }
 }

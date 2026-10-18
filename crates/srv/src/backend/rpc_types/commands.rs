@@ -330,6 +330,8 @@ pub const COMMAND_FORK_AGENT_DEFINITION: &str = "forkagentdefinition";
 /// Returns the suggested branch label for a fork without mutating anything.
 /// Called when the user clicks "Open new session" to pre-fill the name input.
 pub const COMMAND_FORK_AGENT_DEFINITION_SUGGEST: &str = "forkagentdefinitionsuggest";
+/// Copies a fork's parent's history into the fork: `CommandCopyForkHistoryData`.
+pub const COMMAND_COPY_FORK_HISTORY: &str = "copyforkhistory";
 /// Renames a fork/agent tab's displayed title — SPEC_PANE_TAB_STRIP_COMPACT_SIZING_AND_RENAME_2026_07_22.md §4.
 /// Writes `branch_label` when the definition already has one set (a fork),
 /// else `name` (a lineage root) — whichever field `fork-set.ts`'s `titleOf()`

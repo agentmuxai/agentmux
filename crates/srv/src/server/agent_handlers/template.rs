@@ -574,7 +574,10 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
 /// flags, linked to its account, with a fresh id, workspace, bus id and own
 /// bundle, recorded as the source's fork. `branch_label` is the fork's name;
 /// empty picks the next free `Name #N`. The `forkagentdefinition` RPC (the
-/// UI's forks) creates forks here. The caller publishes `AgentsChanged`.
+/// user's forks) creates forks here; the history is copied separately, by
+/// `copyforkhistory`, once the fork is known to continue the parent's
+/// conversation ("Fork, spawn and worker" in `mod.rs`). The caller publishes
+/// `AgentsChanged`.
 pub(crate) fn fork_definition(
     mstore: &Store,
     id_store: &Store,
@@ -589,8 +592,9 @@ pub(crate) fn fork_definition(
 /// builds one, but not a fork (`as_fork: false`): no lineage, so it isn't among
 /// the source's forks, a slug of its own `name` (required), and no account
 /// link, which the caller makes. The `Agents` `spawn` action's workers
-/// (`app_api/agent_spawn.rs`): a worker is a new agent, not a fork, and
-/// doesn't carry the leader's conversation either.
+/// (`app_api/agent_spawn.rs`): a worker is a new agent, not a fork. It gets
+/// the leader's definition and a brief, never the leader's conversation
+/// ("Fork, spawn and worker" in `mod.rs`).
 pub(crate) fn copy_definition(
     mstore: &Store,
     id_store: &Store,

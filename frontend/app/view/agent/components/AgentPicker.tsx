@@ -52,6 +52,7 @@ import type { RecentSessionRow } from "@/types/rpc/RecentSessionRow";
 import { getPlatform } from "@/util/platformutil";
 import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show, untrack, type JSX } from "solid-js";
 import { resolveEffectiveLaunchProvider } from "../agent-launch-env";
+import { copyForkHistory } from "../quick-fork";
 import type { AgentViewModel } from "../agent-model";
 import { realAccountIdOrEmpty } from "../identity-carry-over";
 import { checkProviderInstalled, invalidateInstallCheck } from "../install-check-cache";
@@ -571,6 +572,12 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
             // refreshOpenDefinitions after fork so the new def won't
             // also show as "active" before it's actually launched.
             refreshOpenDefinitions();
+            // A fork is an exact copy: its pane opens with the parent's
+            // history, when it continues the parent's conversation.
+            if (row.session_id) {
+                const providerId = getProvider(await resolveEffectiveLaunchProvider(forkedDef))?.id ?? "";
+                await copyForkHistory(forkedDef.id, row.definition_id, row.session_id, providerId);
+            }
             await props.model.launchAgentDefinition(forkedDef, {
                 instanceName: branchLabel,
                 agentType: (forkedDef.agent_type as "host" | "container") || "host",

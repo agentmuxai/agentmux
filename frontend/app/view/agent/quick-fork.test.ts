@@ -31,8 +31,10 @@ vi.mock("@/app/store/global", () => ({
 const forkAgentDefinitionCommand = vi.fn();
 const listAgentIdentitiesCommand = vi.fn();
 const setMetaCommand = vi.fn();
+const copyForkHistoryCommand = vi.fn();
 vi.mock("@/app/store/rpc-api", () => ({
     RpcApi: {
+        CopyForkHistoryCommand: (...args: unknown[]) => copyForkHistoryCommand(...args),
         ForkAgentDefinitionCommand: (...args: unknown[]) => forkAgentDefinitionCommand(...args),
         ListAgentIdentitiesCommand: (...args: unknown[]) => listAgentIdentitiesCommand(...args),
         SetMetaCommand: (...args: unknown[]) => setMetaCommand(...args),
@@ -90,6 +92,7 @@ describe("quickForkAgent", () => {
         resolveProviderAlias.mockImplementation((id: string) => id);
         listAgentIdentitiesCommand.mockResolvedValue([]);
         setMetaCommand.mockResolvedValue(undefined);
+        copyForkHistoryCommand.mockResolvedValue({ copied: true, reason: "", bytes: 10 });
         closeBlockInStack.mockResolvedValue(undefined);
         deleteBlock.mockResolvedValue(undefined);
         holdLeafRevealGate.mockReturnValue(1);
@@ -121,8 +124,13 @@ describe("quickForkAgent", () => {
         );
         // A tab of the source block's own pane — the same primitive Agent
         // History and the "+" new-tab button use, NOT a WorkspaceService.CreateTab call.
+        // Created already naming its agent, so the tab opens on the
+        // conversation, never on the picker ("My Agents").
         expect(openBlockInStack).toHaveBeenCalledWith(expect.anything(), { blockId: "source-block" }, "agent", {
             view: "agent",
+            agentId: "forked-def",
+            agentName: "X #2",
+            agentProvider: "claude",
         });
         expect(launchAgentDefinition).toHaveBeenCalledTimes(1);
         const [forkedDef, overrides, targetBlockId, targetTabId] = launchAgentDefinition.mock.calls[0];
@@ -135,6 +143,44 @@ describe("quickForkAgent", () => {
         expect(targetBlockId).toBe("new-block-1");
         expect(targetTabId).toBe("tab-1");
         expect(result).toBe(true);
+    });
+
+    describe("a fork is an exact copy: its pane opens with the parent's history", () => {
+        it("copies the parent's history into the fork before the fork's pane opens", async () => {
+            const order: string[] = [];
+            copyForkHistoryCommand.mockImplementation(async () => {
+                order.push("copy");
+                return { copied: true, reason: "", bytes: 10 };
+            });
+            openBlockInStack.mockImplementation(async () => {
+                order.push("open");
+                return "new-block-1";
+            });
+            await quickForkAgent(model);
+            expect(copyForkHistoryCommand).toHaveBeenCalledWith(expect.anything(), {
+                fork_id: "forked-def",
+                source_id: "source-def",
+                session_id: "sid-parent",
+                provider: "claude",
+            });
+            expect(order).toEqual(["copy", "open"]);
+        });
+
+        it("copies nothing when the fork starts fresh: a provider that can't continue the conversation, or no session", async () => {
+            resolveEffectiveLaunchProvider.mockResolvedValue("codex");
+            await quickForkAgent(model);
+            getObjectValue.mockReturnValue({ meta: { view: "agent", agentId: "source-def" } });
+            resolveEffectiveLaunchProvider.mockResolvedValue("claude");
+            await quickForkAgent(model);
+            expect(copyForkHistoryCommand).not.toHaveBeenCalled();
+            expect(launchAgentDefinition).toHaveBeenCalledTimes(2);
+        });
+
+        it("still launches the fork when the copy fails", async () => {
+            copyForkHistoryCommand.mockRejectedValue(new Error("store busy"));
+            expect(await quickForkAgent(model)).toBe(true);
+            expect(launchAgentDefinition).toHaveBeenCalledTimes(1);
+        });
     });
 
     describe("the fork starts as the source is RUNNING", () => {
@@ -163,51 +209,17 @@ describe("quickForkAgent", () => {
         });
     });
 
-    // SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22: the pane must be
-    // hidden for the whole duration of the fork (every RPC in the chain,
-    // not just the final pushBlockOntoStack remount), and always revealed
-    // again on every exit path.
-    describe("reveal gate (SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22)", () => {
-        it("holds the gate on the source pane's own node id before any RPC, and schedules the lift (with the SAME generation token) once settled", async () => {
-            holdLeafRevealGate.mockReturnValue(7);
-            await quickForkAgent(model);
-            expect(holdLeafRevealGate).toHaveBeenCalledWith("node-1");
-            // Codex's review of PR #2761: the generation token returned by
-            // holdLeafRevealGate must be threaded through unchanged, not a
-            // fresh/undefined value — that's what lets tab-reveal.ts detect
-            // a stale (superseded or already-resolved) generation.
-            expect(scheduleLeafRevealLift).toHaveBeenCalledWith("node-1", 7);
-            // Held before scheduled, and the whole RPC chain runs in between.
-            expect(holdLeafRevealGate.mock.invocationCallOrder[0])
-                .toBeLessThan(forkAgentDefinitionCommand.mock.invocationCallOrder[0]);
-            expect(scheduleLeafRevealLift.mock.invocationCallOrder[0])
-                .toBeGreaterThan(launchAgentDefinition.mock.invocationCallOrder[0]);
-        });
-
-        it("schedules the lift even when ForkAgentDefinitionCommand rejects", async () => {
-            forkAgentDefinitionCommand.mockRejectedValue(new Error("boom"));
-            await quickForkAgent(model);
-            expect(holdLeafRevealGate).toHaveBeenCalledWith("node-1");
-            expect(scheduleLeafRevealLift).toHaveBeenCalledWith("node-1", 1);
-        });
-
-        it("schedules the lift even when launchAgentDefinition reports failure", async () => {
-            launchAgentDefinition.mockResolvedValue(false);
-            await quickForkAgent(model);
-            expect(scheduleLeafRevealLift).toHaveBeenCalledWith("node-1", 1);
-        });
-
-        it("schedules the lift even when launchAgentDefinition rejects", async () => {
-            launchAgentDefinition.mockRejectedValue(new Error("boom"));
-            await quickForkAgent(model);
-            expect(scheduleLeafRevealLift).toHaveBeenCalledWith("node-1", 1);
-        });
-
-        it("does not hold the gate at all when there's no live agent to fork", async () => {
-            getObjectValue.mockReturnValue(undefined);
-            await quickForkAgent(model);
-            expect(holdLeafRevealGate).not.toHaveBeenCalled();
-        });
+    // No leaf reveal gate: it hid the whole pane (black) until the main thread
+    // went quiet, which a long copied history keeps busy. The new tab is created
+    // naming its agent and mounts behind its own loading cover instead.
+    it("never hides the pane while it forks", async () => {
+        await quickForkAgent(model);
+        launchAgentDefinition.mockResolvedValue(false);
+        await quickForkAgent(model);
+        forkAgentDefinitionCommand.mockRejectedValue(new Error("boom"));
+        await quickForkAgent(model);
+        expect(holdLeafRevealGate).not.toHaveBeenCalled();
+        expect(scheduleLeafRevealLift).not.toHaveBeenCalled();
     });
 
     // Codex's review of PR #2746: the several RPCs this function awaits
