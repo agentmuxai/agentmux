@@ -39,6 +39,8 @@
 //! millisecond, Codex on #3631 — so it only marks an epoch as needing a
 //! check.)
 
+use std::sync::Mutex;
+
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
 
 use super::core::{FileStore, PART_DATA_SIZE};
@@ -266,6 +268,20 @@ pub(super) fn read_bytes_exact(
     Ok((covered == len.max(0) as usize).then_some(bytes))
 }
 
+/// A blob column's bytes, borrowed from the row (`row.get::<Vec<u8>>` copies them).
+fn blob_ref<'a>(row: &'a rusqlite::Row<'_>, idx: usize) -> rusqlite::Result<&'a [u8]> {
+    row.get_ref(idx)?
+        .as_blob()
+        .map_err(|e| rusqlite::Error::FromSqlConversionFailure(idx, rusqlite::types::Type::Blob, Box::new(e)))
+}
+
+/// The tail part an append extends, reused from one append to the next. An
+/// append reads the last (partly filled) part, adds to it and writes it back;
+/// a fresh 64 KB `Vec` for each of those, thousands of times a minute, was
+/// most of the srv heap's churn (SPEC_FILESTORE_APPEND_WITHOUT_COPIES_2026_10_18.md).
+/// Appends run one at a time under the connection lock, so one buffer is enough.
+static TAIL_SCRATCH: Mutex<Vec<u8>> = Mutex::new(Vec::new());
+
 /// The bytes, and how many of them came from stored parts.
 fn read_bytes_covered(
     conn: &Connection,
@@ -285,11 +301,12 @@ fn read_bytes_covered(
         "SELECT partidx, data FROM db_file_data
          WHERE zoneid = ?1 AND name = ?2 AND partidx BETWEEN ?3 AND ?4",
     )?;
-    let rows = stmt.query_map(params![zone_id, name, first, last], |r| {
-        Ok((r.get::<_, i32>(0)?, r.get::<_, Vec<u8>>(1)?))
-    })?;
-    for row in rows {
-        let (idx, data) = row?;
+    let mut rows = stmt.query(params![zone_id, name, first, last])?;
+    while let Some(row) = rows.next()? {
+        let idx: i32 = row.get(0)?;
+        // Borrowed from SQLite's row, not copied: the caller wants a few bytes
+        // (a torn-line check reads one) out of a part that can be 64 KB.
+        let data = blob_ref(row, 1)?;
         let part_start = idx as i64 * pds;
         // Overlap of this part's bytes with the requested range.
         let from = offset.max(part_start);
@@ -427,22 +444,33 @@ impl FileStore {
         if offset_in_part > 0 {
             // Keep only the bytes the size covers: anything past it (a
             // torn append by a build without transactions) is not content.
-            let mut part: Vec<u8> = tx
-                .query_row(
-                    "SELECT data FROM db_file_data WHERE zoneid = ?1 AND name = ?2 AND partidx = ?3",
-                    params![zone_id, name, start_part],
-                    |r| r.get(0),
-                )
-                .optional()?
-                .unwrap_or_default();
+            let mut scratch = TAIL_SCRATCH.lock().unwrap_or_else(|e| e.into_inner());
+            let part: &mut Vec<u8> = &mut scratch;
+            part.clear();
+            // The stored bytes are copied once, into the reused buffer (no row
+            // leaves `part` empty, as `unwrap_or_default` did).
+            tx.query_row(
+                "SELECT data FROM db_file_data WHERE zoneid = ?1 AND name = ?2 AND partidx = ?3",
+                params![zone_id, name, start_part],
+                |r| {
+                    part.extend_from_slice(blob_ref(r, 0)?);
+                    Ok(())
+                },
+            )
+            .optional()?;
             part.resize(offset_in_part, 0);
             let to_copy = (PART_DATA_SIZE - offset_in_part).min(data.len());
             part.extend_from_slice(&data[..to_copy]);
             data_offset = to_copy;
             tx.execute(
                 "REPLACE INTO db_file_data (zoneid, name, partidx, data) VALUES (?1, ?2, ?3, ?4)",
-                params![zone_id, name, current_part, part],
+                params![zone_id, name, current_part, &part[..]],
             )?;
+            // A part that was stored longer than a part (a torn append) must not
+            // leave a big buffer behind.
+            if part.capacity() > 2 * PART_DATA_SIZE {
+                part.shrink_to(PART_DATA_SIZE);
+            }
             current_part += 1;
         }
         while data_offset < data.len() {

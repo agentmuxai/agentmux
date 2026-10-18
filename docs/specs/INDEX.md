@@ -641,6 +641,7 @@ partial list.
 | [`SPEC_EDITOR_MCP_OPEN_BLANK_PREVIEW_AND_PANE_REUSE_2026_08_03`](SPEC_EDITOR_MCP_OPEN_BLANK_PREVIEW_AND_PANE_REUSE_2026_08_03.md) | Plan: MCP-opened markdown blank-preview investigation + Editor-pane reuse |
 | [`SPEC_EDITOR_REVAMP_UNIFIED_VIEWERS_2026_10_15`](SPEC_EDITOR_REVAMP_UNIFIED_VIEWERS_2026_10_15.md) | SPEC: Editor revamp — one pane for every file (PDF, images, audio/video, binary, large files), and the Media pane folded into it |
 | [`SPEC_EDITOR_TREE_KEYBOARD_ICONS_AND_CLICK_ZOOM_2026_10_16`](SPEC_EDITOR_TREE_KEYBOARD_ICONS_AND_CLICK_ZOOM_2026_10_16.md) | Editor: file tree icons and keyboard, which region has focus, click zoom, and files another program is using |
+| [`SPEC_FILESTORE_APPEND_WITHOUT_COPIES_2026_10_18`](SPEC_FILESTORE_APPEND_WITHOUT_COPIES_2026_10_18.md) | Spec: A transcript append without whole-part copies |
 | [`SPEC_FILE_BROWSER_PANE_2026_10_01`](SPEC_FILE_BROWSER_PANE_2026_10_01.md) | SPEC: A rich file browser pane (working title "Hangar") |
 | [`SPEC_FLOATING_PANE_ALWAYS_ON_TOP_2026_09_27`](SPEC_FLOATING_PANE_ALWAYS_ON_TOP_2026_09_27.md) | SPEC: "Always on top" for floating panes |
 | [`SPEC_FLOATING_PANE_REDOCK_DWELL_2026_09_09`](SPEC_FLOATING_PANE_REDOCK_DWELL_2026_09_09.md) | SPEC: Floating-pane redock — hover-intent dwell and a neutral parking zone |
