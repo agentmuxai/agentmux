@@ -37,6 +37,9 @@
 //! What this does not prove: that the flag is on *that* spawn rather than a neighbour. It
 //! proves a human classified every spawn, and that the file calls the helper at least once.
 
+// This binary must hold this checkout's code (`agentmux_common::checkout`).
+agentmux_common::checkout_guard!();
+
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 

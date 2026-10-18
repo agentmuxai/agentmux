@@ -98,6 +98,7 @@ dependencies = [
  "junction",
  "libc",
  "psl",
+ "same-file",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -165,6 +166,7 @@ dependencies = [
 name = "agentmux-procstats"
 version = "0.59.32"
 dependencies = [
+ "agentmux-common",
  "libc",
  "windows-sys 0.59.0",
 ]
@@ -173,6 +175,7 @@ dependencies = [
 name = "agentmux-remote"
 version = "0.59.32"
 dependencies = [
+ "agentmux-common",
  "agentmux-procstats",
  "libc",
  "tempfile",
