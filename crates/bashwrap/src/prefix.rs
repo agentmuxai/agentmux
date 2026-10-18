@@ -51,6 +51,11 @@ pub struct CallRecord {
     /// it with this (`report_call`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    /// The subagent that made the call (the PreToolUse payload's
+    /// `agent_id`); none for the main conversation. Its working directory is
+    /// its own (`bash_wrap::CwdState::load`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_id: Option<String>,
 }
 
 /// The longest description reported for a call.
@@ -311,6 +316,7 @@ pub async fn run(script: String) -> Result<i32> {
         b64_cmd: String::new(),
         block_id: None,
         declared_background: record.run_in_background,
+        agent: record.agent_id,
     };
     let result = crate::bash_wrap::run_command(args, script).await;
     if let Some(task) = report {
@@ -404,6 +410,7 @@ pub fn new_record(tool_use_id: &str, command: &str, run_in_background: bool) -> 
         run_in_background,
         created_ms: now_ms(),
         description: None,
+        agent_id: None,
     }
 }
 
