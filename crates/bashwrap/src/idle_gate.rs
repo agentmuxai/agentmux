@@ -228,7 +228,7 @@ mod tests {
         const BUSY_AND_SILENT: &str = "end=$((SECONDS+4)); while [ $SECONDS -lt $end ]; do :; done; echo finished";
 
         fn args(tool: &str) -> Args {
-            Args { tool_id: tool.into(), b64_cmd: String::new(), block_id: None, declared_background: false, agent: None }
+            Args { tool_id: tool.into(), b64_cmd: String::new(), block_id: None, declared_background: false, agent: None, agent_unknown: false }
         }
 
         #[tokio::test]
