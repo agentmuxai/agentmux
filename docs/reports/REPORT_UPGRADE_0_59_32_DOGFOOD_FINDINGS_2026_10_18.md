@@ -146,8 +146,8 @@ entries). It survives a reload of the window, but not an app restart, and a
 restore gives the panes new block ids anyway. The unsent draft is kept the
 same way and is lost the same way.
 
-**Proposal.** A per-agent, durable input history that lives with the agent:
-see `docs/specs/SPEC_AGENT_INPUT_HISTORY_2026_10_18.md`.
+**Proposal.** A per-agent, durable input history that lives with the agent,
+in a spec of its own that lands with its first phase.
 
 ### 2.5 Browser-pane sign-ins and the app's own local storage (found while checking)
 
