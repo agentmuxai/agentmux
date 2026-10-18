@@ -13,6 +13,8 @@ use sysinfo::{DiskRefreshKind, Disks, Networks, Pid, ProcessRefreshKind, Process
 
 use crate::backend::blockcontroller::pidregistry;
 use crate::backend::blockcontroller::process_tree;
+#[cfg(target_os = "windows")]
+use crate::backend::own_instance;
 use crate::backend::rpc_types::TimeSeriesData;
 use crate::backend::wconfig::ConfigState;
 use crate::backend::mps::Broker;
@@ -163,6 +165,11 @@ struct ProcSample {
     pid: u32,
     name: String,
     commit_mb: f64,
+    /// Whether this process belongs to THIS instance (the launcher's tree that
+    /// srv is in, `own_instance::own_instance_pids`), not just whether it is
+    /// named `agentmux*`: a stable install beside a dev build both have
+    /// `agentmux*` processes, and only this instance's belong in `agentmux_mb`.
+    own: bool,
 }
 
 #[cfg(target_os = "windows")]
@@ -193,7 +200,7 @@ fn classify_commit_attribution(
     let mut panes_mb = 0.0;
     let mut other_by_name: HashMap<String, f64> = HashMap::new();
     for s in samples {
-        if s.name.to_ascii_lowercase().starts_with("agentmux") {
+        if s.own && s.name.to_ascii_lowercase().starts_with("agentmux") {
             agentmux_mb += s.commit_mb;
         } else if pane_pids.contains(&s.pid) {
             panes_mb += s.commit_mb;
@@ -387,6 +394,20 @@ fn log_memory_attribution(sys: &mut sysinfo::System, commit_used_gb: f64, commit
         pane_pids.extend(tree.into_iter().map(|pid| pid.as_u32()));
     }
 
+    // This instance's own processes, so a second AgentMux on the machine (a
+    // stable install beside a dev build, another channel) is counted under
+    // "other" by name, not folded into `agentmux_mb`.
+    let nodes: Vec<own_instance::ProcNode> = sys
+        .processes()
+        .iter()
+        .map(|(pid, proc)| own_instance::ProcNode {
+            pid: pid.as_u32(),
+            parent: proc.parent().map(|p| p.as_u32()),
+            is_agentmux: proc.name().to_string_lossy().to_ascii_lowercase().starts_with("agentmux"),
+            started_at_ms: Some(proc.start_time().saturating_mul(1000)),
+        })
+        .collect();
+    let own_pids = own_instance::own_instance_pids(&nodes, std::process::id());
     let samples: Vec<ProcSample> = sys
         .processes()
         .iter()
@@ -394,6 +415,7 @@ fn log_memory_attribution(sys: &mut sysinfo::System, commit_used_gb: f64, commit
             pid: pid.as_u32(),
             name: proc.name().to_string_lossy().into_owned(),
             commit_mb: proc.virtual_memory() as f64 / BYTES_PER_MB,
+            own: own_pids.contains(&pid.as_u32()),
         })
         .collect();
 
@@ -810,7 +832,27 @@ mod commit_attribution_tests {
     use super::*;
 
     fn sample(pid: u32, name: &str, commit_mb: f64) -> ProcSample {
-        ProcSample { pid, name: name.to_string(), commit_mb }
+        ProcSample { pid, name: name.to_string(), commit_mb, own: true }
+    }
+
+    fn foreign(pid: u32, name: &str, commit_mb: f64) -> ProcSample {
+        ProcSample { pid, name: name.to_string(), commit_mb, own: false }
+    }
+
+    #[test]
+    fn another_instances_agentmux_processes_are_other_not_ours() {
+        // A stable install running beside this dev build: its agentmux*
+        // processes are named the same but are not this instance's.
+        let samples = vec![
+            sample(201, "agentmux-srv-0.59.31-windows.x64.exe", 90.0),
+            sample(202, "agentmux-cef.exe", 300.0),
+            foreign(101, "agentmux-srv-0.59.30-windows.x64.exe", 120.0),
+            foreign(102, "agentmux-cef.exe", 900.0),
+        ];
+        let result = classify_commit_attribution(&samples, &HashSet::new(), 5);
+        assert_eq!(result.agentmux_mb, 390.0, "only this instance's processes");
+        assert_eq!(result.other_mb, 1020.0, "the other instance is counted, under other");
+        assert_eq!(result.panes_mb, 0.0);
     }
 
     #[test]
