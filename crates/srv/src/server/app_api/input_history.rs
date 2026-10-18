@@ -50,7 +50,7 @@ pub(crate) fn record_broadcast(state: &AppState, block_id: &str, text: &str) {
         .get::<crate::backend::obj::Block>(block_id)
         .ok()
         .flatten()
-        .map(|b| crate::backend::obj::meta_get_string(&b.meta, "agentId", ""))
+        .and_then(|b| crate::backend::obj::block_meta_agent_id(&b.meta).map(|id| id.trim().to_string()))
         .filter(|id| !id.is_empty())
     else {
         return;
@@ -197,14 +197,23 @@ mod tests {
             }
             state.mstore.insert(&mut b).unwrap();
         };
-        block("b-agent", Some("uid-1"));
+        block("b-agent", Some(" uid-1 "));
+        {
+            // The legacy key is read too.
+            let mut b = crate::backend::obj::Block { oid: "b-legacy".into(), ..Default::default() };
+            b.meta.insert("agent:id".into(), serde_json::json!("uid-1"));
+            state.mstore.insert(&mut b).unwrap();
+        }
         block("b-quick", Some("claude"));
         block("b-shell", None);
         for b in ["b-agent", "b-quick", "b-shell"] {
             record_broadcast(&state, b, "merge on approval");
         }
+        record_broadcast(&state, "b-legacy", "and then release");
         let kept = state.mstore.input_history_list("uid-1", None, 10).unwrap();
-        assert_eq!(kept.len(), 1);
+        assert_eq!(kept.len(), 2);
+        assert_eq!(kept[0].text, "and then release");
+        let kept = &kept[1..];
         assert_eq!((kept[0].text.as_str(), kept[0].source.as_str()), ("merge on approval", "swarm"));
         assert!(state.mstore.input_history_list("claude", None, 10).unwrap().is_empty(), "a provider key isn't an agent");
         assert_eq!(kept_per_agent(&state), 10000, "the default");
