@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { createEffect, createSignal, For, onCleanup, Show, type JSX } from "solid-js";
+import { createEffect, createSignal, For, Match, onCleanup, Show, Switch, type JSX } from "solid-js";
 import { isAnyUnderway } from "@/app/drag/drag-session";
 import { hostHas } from "@/app/host/host-caps";
 import { getApi } from "@/app/store/app-api";
@@ -19,6 +19,7 @@ import { Button } from "@/app/element/ui";
 import { BrowserNavBar } from "./browser-nav-bar";
 import { DrivenByStrip } from "./driven-by-strip";
 import { minutesLabel, siteLabel } from "./bypass";
+import { attentionLook, dialogMessage } from "./attention-kinds";
 import "./browser-view.scss";
 
 // Matches BrainSpinner.scss's `.is-fading` transition duration — the DOM
@@ -244,14 +245,13 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
                 {(a) => (
                     <div
                         class="browser-attention"
-                        classList={{ "browser-attention--agent": a().kind !== "navigation" }}
+                        classList={{ "browser-attention--agent": attentionLook(a()).agent }}
                         role="alertdialog"
                         aria-live="assertive"
                     >
                         <div class="browser-attention-head">
                             <i class="fa-solid fa-hand" aria-hidden="true" />
-                            <Show
-                                when={a().kind === "navigation"}
+                            <Switch
                                 fallback={
                                     <span>
                                         <b>{a().agent || "An agent"}</b>{" "}
@@ -264,12 +264,34 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
                                     </span>
                                 }
                             >
-                                <span>
-                                    This pane is limited to the sites it was opened for. The page wants to{" "}
-                                    {a().popup ? "open a window at " : "go to "}
-                                    <b>{a().origin}</b>.
-                                </span>
-                            </Show>
+                                <Match when={a().kind === "navigation"}>
+                                    <span>
+                                        This pane is limited to the sites it was opened for. The page wants to{" "}
+                                        {a().popup ? "open a window at " : "go to "}
+                                        <b>{a().origin}</b>.
+                                    </span>
+                                </Match>
+                                <Match when={a().kind === "dialog"}>
+                                    <span>
+                                        {a().dialogKind === "beforeunload" ? (
+                                            <>
+                                                The page at <b>{a().origin || "this site"}</b> asks whether to leave it
+                                            </>
+                                        ) : (
+                                            <>
+                                                The page at <b>{a().origin || "this site"}</b> asks
+                                            </>
+                                        )}
+                                        {a().agent ? (
+                                            <>
+                                                {" "}
+                                                (after <b>{a().agent}</b>'s action)
+                                            </>
+                                        ) : null}
+                                        :
+                                    </span>
+                                </Match>
+                            </Switch>
                         </div>
                         <Show when={a().kind === "approval" && a().description}>
                             <div class="browser-attention-target browser-attention-description">
@@ -280,6 +302,11 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
                         </Show>
                         <Show when={a().kind === "approval" && a().why}>
                             <div class="browser-attention-target">Asked because {a().why}.</div>
+                        </Show>
+                        {/* The page's own words, as text in a box of their own, so
+                            they can't pass for AgentMux's (dialogs spec §8.1). */}
+                        <Show when={a().kind === "dialog" && dialogMessage(a().message)}>
+                            <blockquote class="browser-attention-page-text">{dialogMessage(a().message)}</blockquote>
                         </Show>
                         <Show when={a().kind === "navigation" && a().url}>
                             <div class="browser-attention-target" title={a().url}>
@@ -297,7 +324,7 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
                             <div class="browser-attention-target">
                                 On <b>{(a().origins ?? []).map(siteLabel).join(", ")}</b>, for{" "}
                                 <b>{minutesLabel(a().minutes ?? 60)}</b>: its clicks that submit, delete or send go
-                                through without asking you. It still can't type passwords or codes or run scripts, and
+                                through without asking you, and so does the page's own "Are you sure?" that follows one. It still can't type passwords or codes or run scripts, and
                                 payments still ask. Stop it any time from the red strip.
                             </div>
                         </Show>
@@ -322,27 +349,18 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
                             <div class="browser-attention-target">Sends to {a().action}</div>
                         </Show>
                         <div class="browser-attention-actions">
-                            {/* An agent's hand-off or approval is the loud call to action;
-                                a page asking to leave the pane's sites keeps the quieter
-                                accent, since Block is the safe answer there. */}
                             <Button
-                                tone={a().kind === "navigation" ? "accent" : a().kind === "bypass" ? "danger" : "attention"}
-                                density={a().kind === "navigation" ? "compact" : "comfortable"}
-                                onClick={() => model.resolveAttention(a().kind === "handoff" ? "done" : "approve").catch(() => {})}
+                                tone={attentionLook(a()).tone}
+                                density={attentionLook(a()).density}
+                                onClick={() => model.resolveAttention(attentionLook(a()).answer).catch(() => {})}
                             >
-                                {a().kind === "handoff"
-                                    ? "Done"
-                                    : a().kind === "navigation"
-                                      ? "Allow"
-                                      : a().kind === "bypass"
-                                        ? "Allow auto-approve"
-                                        : "Approve"}
+                                {attentionLook(a()).yes}
                             </Button>
                             <Button
-                                density={a().kind === "navigation" ? "compact" : "comfortable"}
+                                density={attentionLook(a()).density}
                                 onClick={() => model.resolveAttention("cancel").catch(() => {})}
                             >
-                                {a().kind === "navigation" ? "Block" : a().kind === "bypass" ? "No" : "Cancel"}
+                                {attentionLook(a()).no}
                             </Button>
                         </div>
                     </div>

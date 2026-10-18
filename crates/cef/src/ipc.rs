@@ -611,6 +611,7 @@ async fn route_command(
             // pane mid-auth-prompt leaks the CEF AuthCallback refcount
             // until the 5-minute TTL fires.
             crate::browser_pane::auth::cancel_for_block(block_id);
+            crate::client::jsdialog::cancel_for_block(block_id);
             // Un-join this pane's request from any pending credential
             // approval it was riding (possibly shared with a sibling pane
             // hitting the same protection space — see

@@ -287,6 +287,17 @@ $browser-nav-stack-below: 388px;
         color: var(--secondary-text-color);
     }
 
+    // A page's own dialog text: quoted, as text, apart from AgentMux's words.
+    .browser-attention-page-text {
+        margin: 0;
+        padding: var(--space-1) var(--space-3);
+        border-left: 2px solid var(--border-color);
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        max-height: 120px;
+        overflow: auto;
+    }
+
     .browser-attention-actions {
         display: flex;
         gap: var(--space-2);

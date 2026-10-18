@@ -55,6 +55,12 @@ pub fn set_runtime_handle(h: Handle) {
     let _ = TOKIO_HANDLE.set(h);
 }
 
+/// The Tokio runtime, for other CEF callbacks that park something and need a
+/// timer (`client::jsdialog`). None before `set_runtime_handle`.
+pub(crate) fn runtime() -> Option<&'static Handle> {
+    TOKIO_HANDLE.get()
+}
+
 /// Maximum time a callback can sit parked before we cancel it
 /// automatically. Bounds the leak if the renderer never replies
 /// (background tab + suspended JS, hung modal). 5 minutes is well

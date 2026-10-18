@@ -550,7 +550,7 @@ declare global {
     // waveobj.MetaTSType
     type BrowserAttention = {
         id: string;
-        kind: "handoff" | "approval" | "navigation" | "bypass";
+        kind: "handoff" | "approval" | "navigation" | "bypass" | "dialog";
         agent?: string;
         /** Hand-off: what the user should do. */
         reason?: string;
@@ -577,6 +577,11 @@ declare global {
         /** Bypass: the sites it would cover, and for how long. */
         origins?: string[];
         minutes?: number;
+        /** Dialog: the page's own question, its words untrusted (they're shown as
+         *  the page's, never as AgentMux's), and which kind it is. `origin` is the
+         *  site that asked. SPEC_BROWSER_PANE_NATIVE_DIALOGS_2026_10_17.md §4.4. */
+        message?: string;
+        dialogKind?: "alert" | "confirm" | "prompt" | "beforeunload";
     };
 
     /** A bypass the person granted the agent driving a browser pane: it acts

@@ -84,29 +84,34 @@ pub(crate) fn limit_before_create(limits: &SiteLimits, pane: &str, list: Option<
     }
 }
 
+/// The pane `browser` belongs to, and the id srv knows it by: a pane is both;
+/// a popup window belongs to its opener and is known by its label.
+pub(crate) fn pane_and_target(state: &std::sync::Arc<crate::state::AppState>, browser: &Browser) -> Option<(String, String)> {
+    if let Some(block) = crate::browser_pane::callbacks::resolve_pane_block_id(state, browser) {
+        return Some((block.clone(), block));
+    }
+    if state.popup_openers.lock().is_empty() {
+        return None;
+    }
+    let label = state
+        .list_browsers()
+        .into_iter()
+        .find(|(_, b)| {
+            let b = b.clone();
+            let mut other: cef::Browser = browser.clone();
+            b.is_same(Some(&mut other)) != 0
+        })
+        .map(|(label, _)| label)?;
+    let opener = state.popup_openers.lock().get(&label).cloned()?;
+    Some((opener, label))
+}
+
 impl AgentMuxHandler {
     /// The pane whose site list governs `browser`, and the id srv loads in on
     /// Allow: a pane is both; a popup window is governed by its opener and
     /// loaded by its label.
     pub(super) fn limited_pane_of(&self, browser: &Browser) -> Option<(String, String)> {
-        if let Some(block) = crate::browser_pane::callbacks::resolve_pane_block_id(&self.state, browser) {
-            return Some((block.clone(), block));
-        }
-        if self.state.popup_openers.lock().is_empty() {
-            return None;
-        }
-        let label = self
-            .state
-            .list_browsers()
-            .into_iter()
-            .find(|(_, b)| {
-                let b = b.clone();
-                let mut other: cef::Browser = browser.clone();
-                b.is_same(Some(&mut other)) != 0
-            })
-            .map(|(label, _)| label)?;
-        let opener = self.state.popup_openers.lock().get(&label).cloned()?;
-        Some((opener, label))
+        pane_and_target(&self.state, browser)
     }
 
     /// Is `url` off the site list srv sent for `pane`? False when the pane

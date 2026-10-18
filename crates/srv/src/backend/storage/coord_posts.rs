@@ -118,13 +118,15 @@ impl Store {
         )?;
         conn.execute(
             "DELETE FROM db_coord_posts WHERE repo = ?1 AND id NOT IN
-               (SELECT id FROM db_coord_posts WHERE repo = ?1 ORDER BY created_at DESC, id DESC LIMIT ?2)",
+               (SELECT id FROM db_coord_posts WHERE repo = ?1 ORDER BY created_at DESC, rowid DESC LIMIT ?2)",
             params![post.repo, MAX_PER_REPO],
         )?;
         Ok(())
     }
 
-    /// `repo`'s unexpired posts created at or after `since_ms`, newest first.
+    /// `repo`'s unexpired posts created at or after `since_ms`, newest first;
+    /// posts of the same millisecond newest-written first (`rowid`: the ids are
+    /// random, so they say nothing of order).
     /// The finer filters (path, branch, pr, words) are the caller's
     /// (`work_facts::coord`): a repository holds a bounded number.
     pub fn coord_posts_in(&self, repo: &str, since_ms: i64, now_ms: i64) -> Result<Vec<CoordPost>, StoreError> {
@@ -132,7 +134,7 @@ impl Store {
         let mut stmt = conn.prepare(&format!(
             "SELECT {COLS} FROM db_coord_posts
               WHERE repo = ?1 AND created_at >= ?2 AND expires_at > ?3
-              ORDER BY created_at DESC, id DESC"
+              ORDER BY created_at DESC, rowid DESC"
         ))?;
         let rows = stmt.query_map(params![repo, since_ms, now_ms], row_to_post)?;
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
@@ -177,6 +179,19 @@ mod tests {
         let got = s.coord_posts_in("o/r", 0, NOW).unwrap();
         assert_eq!(got.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(), vec!["b", "a"]);
         assert_eq!(got[0], post("b", "o/r", NOW - MIN));
+    }
+
+    /// Posts made in the same millisecond (a claim and its release, say) read
+    /// in the order they were written, whatever their random ids sort as.
+    #[test]
+    fn posts_made_in_the_same_millisecond_read_newest_written_first() {
+        let (_d, s) = store();
+        // Ids that sort against the order they were written in, so an id tiebreak would get it wrong.
+        s.coord_post_put(&post("z", "o/r", NOW - MIN), NOW).unwrap();
+        s.coord_post_put(&post("m", "o/r", NOW - MIN), NOW).unwrap();
+        s.coord_post_put(&post("a", "o/r", NOW - MIN), NOW).unwrap();
+        let got = s.coord_posts_in("o/r", 0, NOW).unwrap();
+        assert_eq!(got.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(), vec!["a", "m", "z"]);
     }
 
     #[test]
