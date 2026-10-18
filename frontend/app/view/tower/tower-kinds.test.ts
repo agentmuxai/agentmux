@@ -4,7 +4,7 @@
 import type { TowerProcess } from "@/app/store/rpc-api";
 import { describe, expect, it } from "vitest";
 import { isKind, KIND_ORDER, kindGroups, KINDS, sortKindGroups } from "./tower-kinds";
-import { cpuShare, groupProcesses, loadLevel, memShare } from "./tower-util";
+import { buildProcessTree, cpuShare, groupProcesses, loadLevel, memShare, treeLines } from "./tower-util";
 
 const p = (id: number, kind: TowerProcess["kind"], cpu?: number, mem?: number): TowerProcess => ({
     id: `${id}:1`,
@@ -118,5 +118,18 @@ describe("app groups and kinds", () => {
             { ...p(2, undefined), name: "Chrome.exe" },
         ]);
         expect(groups.map((g) => g.key)).toEqual(["chrome.exe"]);
+    });
+});
+
+describe("tree lines and kinds", () => {
+    it("same-named siblings of different kinds fold into a line per kind", () => {
+        const node = (id: number, kind: TowerProcess["kind"]) => ({ ...p(id, kind, id), name: "node.exe", ppid: 1 });
+        const shell = { ...p(1, "shells", 0), name: "bash" };
+        const [root] = buildProcessTree([shell, node(2, "builds"), node(3, "builds"), node(4, "runtimes")]);
+        const lines = treeLines(root.children, { key: "cpu", desc: true });
+        const many = lines.filter((l) => l.kind === "many");
+        expect(many).toHaveLength(1);
+        expect(many[0].kind === "many" && many[0].nodes.map((n) => n.process.kind)).toEqual(["builds", "builds"]);
+        expect(lines).toHaveLength(2);
     });
 });

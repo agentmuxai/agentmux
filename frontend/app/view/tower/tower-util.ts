@@ -486,9 +486,11 @@ export function treeLines(siblings: ProcessNode[], sort: Sort, opts: { fold?: bo
     const fold = opts.fold ?? true;
     const value = (n: ProcessNode) => (sort.key === "cpu" ? n.cpu : sort.key === "mem" ? n.mem : n.process.pid);
     const sorted = [...siblings].sort(compareWith(sort, value, (n) => processLabel(n.process)));
-    // Exited processes fold apart from live ones of the same name.
+    // Exited processes fold apart from live ones of the same name, and so do
+    // processes of different kinds: a `node` build and a `node` server are two
+    // lines, each with its own icon and totals.
     const foldKey = (n: ProcessNode) =>
-        `${processLabel(n.process).toLowerCase()}${n.process.exited_ms != null ? "|exited" : ""}`;
+        `${processLabel(n.process).toLowerCase()}${n.process.exited_ms != null ? "|exited" : ""}${n.process.kind ? `#${n.process.kind}` : ""}`;
     const leavesByName = new Map<string, ProcessNode[]>();
     for (const n of sorted) {
         if (n.children.length) continue;
