@@ -30,6 +30,11 @@ pub struct ProcNode {
 /// terminal, `task` or AppImageLauncher that started the instance is not part
 /// of it. Empty when `self_pid` isn't in the table.
 ///
+/// Another AgentMux started from inside this one, say an agent running
+/// `task dev` in a pane's shell, is below this instance's root too, but it is
+/// its own instance: an `agentmux*` process whose parent is not `agentmux*`
+/// is a launcher, so it and everything under it are left out.
+///
 /// The table's parent links can be stale (a parent that exited and whose pid
 /// was reused), so the upward walk is bounded by the table's size and a seen
 /// set rather than trusted to end.
@@ -59,8 +64,11 @@ pub fn own_instance_pids(nodes: &[ProcNode], self_pid: u32) -> HashSet<u32> {
     let mut own = HashSet::from([root.pid]);
     let mut queue = vec![root.pid];
     while let Some(pid) = queue.pop() {
+        let parent_is_agentmux = by_pid.get(&pid).is_some_and(|p| p.is_agentmux);
         for &child in children.get(&pid).into_iter().flatten() {
-            if own.insert(child) {
+            // A nested launcher: AgentMux started by something that isn't AgentMux.
+            let nested_root = !parent_is_agentmux && by_pid.get(&child).is_some_and(|c| c.is_agentmux);
+            if !nested_root && own.insert(child) {
                 queue.push(child);
             }
         }
@@ -98,6 +106,24 @@ mod tests {
         let t = two_instances();
         assert_eq!(own_instance_pids(&t, 201), HashSet::from([200, 201, 202, 203, 300]));
         assert_eq!(own_instance_pids(&t, 101), HashSet::from([100, 101, 102, 103]));
+    }
+
+    #[test]
+    fn an_agentmux_started_from_a_pane_of_this_one_is_its_own_instance() {
+        // An agent's shell (300, under srv 201) runs `task dev` (301), which
+        // starts a launcher (400) with its own srv (401) and host (402).
+        let mut t = two_instances();
+        t.extend([
+            n(301, Some(300), false),
+            n(400, Some(301), true),
+            n(401, Some(400), true),
+            n(402, Some(400), true),
+        ]);
+        let outer = own_instance_pids(&t, 201);
+        assert_eq!(outer, HashSet::from([200, 201, 202, 203, 300, 301]));
+        assert!(![400, 401, 402].iter().any(|p| outer.contains(p)), "the nested instance is not the outer one's");
+        // And from the nested srv, only the nested tree.
+        assert_eq!(own_instance_pids(&t, 401), HashSet::from([400, 401, 402]));
     }
 
     #[test]

@@ -19,6 +19,7 @@ With two AgentMux instances running, a stable install beside a `task dev` build,
 
 - **An instance is a process tree.** The launcher starts srv and the CEF host; the host starts the GPU, utility and renderer processes. srv is somewhere in that tree, so it finds the tree from its own pid.
 - **Finding it:** from srv's own process, walk up through parents while the parent is also named `agentmux*` (the launcher); stop at the first parent that is not (the terminal, `task`, or AppImageLauncher that started the instance is not part of it; with a by-hand srv, srv is its own root). The instance is that root and every descendant of it.
+- **A nested instance is its own:** an agent running `task dev` in a pane's shell starts a second AgentMux below this one. An `agentmux*` process whose parent is not `agentmux*` is a launcher, so it and everything under it are left out of this instance's tree (its processes count under `other_mb`, and from its own srv the nested tree is the instance).
 - **Counting:** a process counts in `agentmux_mb` when it is named `agentmux*` **and** is in this instance's tree. An `agentmux*` process of another instance falls into `other_mb` under its own name (for example `agentmux-cef.exe`), so it is still visible, and the top-contributors list can show it. `panes_mb` is unchanged.
 - **Not changed:** the handle-count leak detector (`classify_handle_anomalies`) still treats any `agentmux*` process as ours: a leaking process is ours to act on whichever instance it is in.
 
@@ -30,7 +31,7 @@ With two AgentMux instances running, a stable install beside a `task dev` build,
 
 ## 4. Tests
 
-- **`own_instance.rs` (every platform):** two instances side by side, a stable install and a dev build, each with srv, a CEF host, a renderer, and in one a shell (the case that mixed): from either srv, only that instance's pids; the same tree from any member; the walk stops at a non-`agentmux*` parent (an AppImageLauncher-style parent); a by-hand srv is its own root; an unknown pid and a missing parent; a cycle in stale links ends.
+- **`own_instance.rs` (every platform):** two instances side by side, a stable install and a dev build, each with srv, a CEF host, a renderer, and in one a shell (the case that mixed): from either srv, only that instance's pids; the same tree from any member; the walk stops at a non-`agentmux*` parent (an AppImageLauncher-style parent); an AgentMux started from a pane's shell inside another is left out of the outer one's tree, and is its own from its own srv; a by-hand srv is its own root; an unknown pid and a missing parent; a cycle in stale links ends.
 - **`sysinfo.rs` (Windows):** `another_instances_agentmux_processes_are_other_not_ours`: this instance's processes are 390 MB of `agentmux_mb`, the other instance's 1,020 MB land in `other_mb`.
 - The existing classification tests still hold (their samples are this instance's).
 
