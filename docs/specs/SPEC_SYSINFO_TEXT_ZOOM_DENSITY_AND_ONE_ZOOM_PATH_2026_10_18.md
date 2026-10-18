@@ -15,7 +15,7 @@
 
 ## 1. Goal
 
-1. **Sysinfo text zooms with the shared pane zoom** (Ctrl/Cmd `+` `-` `0`, Ctrl+scroll, Ctrl+Shift+scroll, "Reset zoom on all panes"). Text grows and shrinks; the graphics (plot lines, fills, heatmap cells, sparklines, chart minimum heights) are drawn at the same scale. The only thing that moves is the room text needs: an axis widens when its labels widen.
+1. **Sysinfo zooms with the shared pane zoom** (Ctrl/Cmd `+` `-` `0`, Ctrl+scroll, Ctrl+Shift+scroll, "Reset zoom on all panes") and contracts naturally (owner: "sysinfo rows should zoom with text, we want a naturally contracting experience"): the text, the room reserved for it, the control row and the chart rows' minimum heights all follow the zoom, so zooming out packs more charts into the pane and zooming in gives each more room. The drawing itself stays at 1:1: plot line widths, fills, heatmap cells and row hairlines, sparklines.
 2. **Denser Sysinfo layouts**, most of all where there are many charts (All CPU, CPU + Mem + Net, Everything, the Advanced focus views): less space between charts and none spent on text a neighbouring chart already shows.
 3. **Text placed by rule, not by reserved bands**: titles over the plot instead of above it, one time axis per column of stacked charts, one y axis per row of charts that share a range, and titles that keep clear of the floating buttons.
 4. **One zoom path.** Every pane that zooms stores, steps, receives and exposes its level the same way. Panes differ only in the one place they must (how the level is applied), and they declare that rather than code it.
@@ -123,11 +123,12 @@ Sysinfo becomes a `paneZoom` holder with `apply: "custom"` and `baseFontSize: 11
 | Hover tooltip (charts and heatmap) | `--text-xs` | `calc(... * var(--pane-zoom))` |
 | Tiles (Everything): name, value, range | xs, 15px, xs | scaled the same way; the sparkline keeps 28px |
 | Table view, the Disk volume list, "Paused" | sm / xs | scaled |
-| The floating control row (view, window, eye, pause, table) | compact controls | `zoom: var(--pane-zoom)` on `.sysinfo-bar` only: it is not a chart, and it zooms like the controls in every other pane |
+| The floating control row (view, window, eye, pause, table) | compact controls | `zoom: var(--pane-zoom)` on `.sysinfo-bar` (decided: it zooms with the text) |
+| Chart rows: minimum heights (C.3) | fixed px | `calc(<min> * var(--pane-zoom))`: rows contract when zoomed out, so more fit; grow when zoomed in |
 
 ### B.2 What does not scale
 
-Plot line widths, fills, the heatmap's cells and row hairlines, sparkline heights, chart minimum heights (C.3), gaps between charts. A chart at 150% has bigger labels and a slightly smaller plot (its axes need more room); its drawing is unchanged.
+Plot line widths, fills, the heatmap's cells and row hairlines, sparkline heights, the 2px gap between charts. A chart at 150% has bigger labels, more room around them and a taller minimum row; its strokes and fills are drawn exactly as at 100%. At 50% a row's minimum is half as tall, so twice as many cores fit before the pane scrolls.
 
 ### B.3 How
 
@@ -162,7 +163,7 @@ A simple-view row is at least 100px (`minmax(100px, 1fr)`), so text takes 43% of
 
 - **One gap for Sysinfo,** `--sysinfo-gap: 2px`, used between simple-view charts (already 2px), Advanced charts (10px today), focus charts (8px), the sections of Everything (8px) and the tiles (6px). Written once, in `sysinfo-plot.scss`.
 - **Tiles:** padding 6px 8px → 3px 4px (the text inside still keeps its own room; the border is the tile's edge).
-- **Minimum chart heights** (graphics, so they don't zoom): with the text overhead down from 43px to about 11px for charts above the bottom row, a simple-view row can drop from 100px to **64px** and still keep almost the same plot height as a minimum-height chart today (53px against 57px) in two thirds of the space. Advanced chart rows: 120px → **84px**. Focus charts: 70px → **56px**. All CPU on 16 cores then fits in about 8 × 64 = 512px without scrolling, where today it needs 800px+.
+- **Minimum chart heights** (at 100% zoom; they scale with the zoom, B.1): with the text overhead down from 43px to about 11px for charts above the bottom row, a simple-view row can drop from 100px to **64px** and still keep almost the same plot height as a minimum-height chart today (53px against 57px) in two thirds of the space. Advanced chart rows: 120px → **84px**. Focus charts: 70px → **56px**. All CPU on 16 cores then fits in about 8 × 64 = 512px without scrolling, where today it needs 800px+.
 - **Heatmap:** its title keeps a reserved band (text over coloured cells reads worse than over a line), but the band follows the zoomed line-height (B.1) instead of a fixed 14px.
 
 ### C.4 Before / after, one All CPU chart above the bottom row (100% zoom)
@@ -191,7 +192,7 @@ A simple-view row is at least 100px (`minmax(100px, 1fr)`), so text takes 43% of
 ## 8. Open questions
 
 1. **Ctrl+scroll step:** the unified step is the global 0.05 with the indicator (Part A). The terminal and editor have stepped by 0.1 until now; fine to change, or should the wheel step be 0.1 everywhere?
-2. **Does the control row zoom?** B.1 says yes (it zooms like controls in other panes). The alternative keeps it at 100% so it never covers more of the charts when zoomed in.
+2. ~~Does the control row zoom?~~ **Decided 2026-10-18:** yes, and the chart rows' minimum heights zoom too ("a naturally contracting experience"), B.1.
 3. **Gap value:** 2px everywhere, or 1px with a hairline (`--border-color`) between charts?
 4. **A new pane's starting zoom:** a new pane starts at 100% (except an agent, which starts at its saved level). Should a new pane of a kind (terminal, Sysinfo, …) start at the last zoom used for that kind instead?
 5. **"Between panes":** this spec reads it as between the charts inside a Sysinfo pane. The gap between AgentMux panes themselves is a layout-wide setting, out of scope here.
