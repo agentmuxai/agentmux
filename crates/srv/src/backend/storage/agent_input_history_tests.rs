@@ -112,7 +112,14 @@ fn past_conversations_fill_the_history_once_before_what_is_kept() {
     let store = store_with(&["a"]);
     // Kept since input history shipped.
     store.input_history_append(&send("a", "newest, typed today", 50), 100).unwrap();
-    let typed = vec![(10, "first ever".to_string()), (20, "/compact".to_string()), (30, "!git status".to_string())];
+    // The transcripts also hold what the composer kept (at 50) and anything after.
+    let typed = vec![
+        (10, "first ever".to_string()),
+        (20, "/compact".to_string()),
+        (30, "!git status".to_string()),
+        (50, "newest, typed today".to_string()),
+        (55, "typed after it, in another window".to_string()),
+    ];
     assert!(!store.input_history_backfilled("a").unwrap());
     assert_eq!(store.input_history_backfill("a", &typed, 100, 60).unwrap(), 3);
     assert!(store.input_history_backfilled("a").unwrap());

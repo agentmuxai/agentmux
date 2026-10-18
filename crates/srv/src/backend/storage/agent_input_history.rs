@@ -187,8 +187,15 @@ impl Store {
         // Ids are one space for every agent: start below the oldest of all.
         let oldest: Option<i64> = tx.query_row("SELECT MIN(id) FROM db_agent_input_history", [], |r| r.get(0))?;
         let mut next = oldest.unwrap_or(1).min(1) - 1;
+        // What the composer kept is in the transcripts too: only messages sent
+        // before this agent's oldest kept entry are new here.
+        let kept_since: Option<i64> = tx.query_row(
+            "SELECT MIN(sent_at_ms) FROM db_agent_input_history WHERE agent_id = ?1",
+            params![agent_id],
+            |r| r.get(0),
+        )?;
         let mut inserted = 0;
-        for (at, text) in typed.iter().rev().take(max) {
+        for (at, text) in typed.iter().filter(|(at, _)| kept_since.is_none_or(|k| *at < k)).rev().take(max) {
             tx.execute(
                 "INSERT INTO db_agent_input_history (id, agent_id, sent_at_ms, text, kind, source) VALUES (?1, ?2, ?3, ?4, ?5, 'backfill')",
                 params![next, agent_id, at, text, Self::input_kind(text)],
