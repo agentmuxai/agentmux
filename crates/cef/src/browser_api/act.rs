@@ -25,6 +25,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use super::cdp::CdpSession;
+use super::dates;
 use super::frames::{self, FrameRef};
 use super::snapshot::{self, DomFacts};
 use super::types::ApiResponse;
@@ -81,7 +82,7 @@ impl RefTables {
         }
     }
 
-    fn get(&self, block_id: &str) -> Option<RefTable> {
+    pub(super) fn get(&self, block_id: &str) -> Option<RefTable> {
         self.lock().1.get(block_id).map(|(_, t)| t.clone())
     }
 
@@ -220,6 +221,20 @@ const SET_VALUE: &str = r#"function (v) {
   this.dispatchEvent(new Event("input", { bubbles: true }));
   this.dispatchEvent(new Event("change", { bubbles: true }));
   return true;
+}"#;
+
+/// Set a native date or time input's value (already in its format,
+/// `dates::to_input_value`) and fire input/change: its segments read key
+/// events, not inserted text, so typing can't fill it.
+const SET_DATE: &str = r#"function (v) {
+  if (this.disabled || (this.matches && this.matches(":disabled"))) return { error: "the field is disabled" };
+  if (this.readOnly) return { error: "the field is read-only" };
+  this.scrollIntoView({ block: "center", inline: "center" });
+  this.focus();
+  Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(this, v);
+  this.dispatchEvent(new Event("input", { bubbles: true }));
+  this.dispatchEvent(new Event("change", { bubbles: true }));
+  return { ok: true };
 }"#;
 
 /// Choose an option of a native <select> by its label or value.
@@ -489,7 +504,7 @@ async fn describe(cdp: &mut CdpSession, backend: i64) -> Option<DomFacts> {
     Some(facts.with_label(&label))
 }
 
-async fn page_url(cdp: &mut CdpSession) -> String {
+pub(super) async fn page_url(cdp: &mut CdpSession) -> String {
     cdp.call("Runtime.evaluate", json!({ "expression": "location.href", "returnByValue": true }))
         .await
         .ok()
@@ -568,11 +583,11 @@ const SECRET_REFUSAL: &str = "this is a password, one-time-code, card or Social 
 
 // ── Routes ──────────────────────────────────────────────────────────────────
 
-fn unauthorized<T>() -> (StatusCode, Json<ApiResponse<T>>) {
+pub(super) fn unauthorized<T>() -> (StatusCode, Json<ApiResponse<T>>) {
     (StatusCode::UNAUTHORIZED, Json(ApiResponse::err("unauthorized: missing or invalid bearer token")))
 }
 
-fn fail<T>(msg: impl Into<String>) -> (StatusCode, Json<ApiResponse<T>>) {
+pub(super) fn fail<T>(msg: impl Into<String>) -> (StatusCode, Json<ApiResponse<T>>) {
     (StatusCode::OK, Json(ApiResponse::err(msg.into())))
 }
 
@@ -874,6 +889,15 @@ async fn act(
             click_element(cdp, root, frame, &obj).await?;
             Ok(call_on(cdp, &obj, READ_BACK, vec![]).await.unwrap_or(Value::Null))
         }
+        // A secret field falls through to the plain fill, which refuses it.
+        "fill" if date_type(&facts).is_some() && !snapshot::is_secret(&facts) => {
+            let text = req.text.clone().ok_or("fill needs `text`")?;
+            let ty = date_type(&facts).unwrap_or_default();
+            let value = if text.trim().is_empty() { String::new() } else { dates::to_input_value(&ty, &text)? };
+            call_on(cdp, &obj, SET_DATE, vec![json!(value)]).await?;
+            let after = call_on(cdp, &obj, READ_BACK, vec![]).await?;
+            Ok(warn_if_changed(after, &value))
+        }
         "fill" => {
             if snapshot::is_secret(&facts) {
                 return Err(SECRET_REFUSAL.to_string());
@@ -964,6 +988,13 @@ async fn act(
     })
 }
 
+/// The type of a native date or time input (`date`, `time`, `month`, `week`,
+/// `datetime-local`), which `fill` sets whole instead of typing into.
+fn date_type(facts: &DomFacts) -> Option<String> {
+    let ty = facts.attrs.get("type")?.trim().to_ascii_lowercase();
+    (facts.local_name == "input" && dates::is_date_input(&ty)).then_some(ty)
+}
+
 /// A fill's read-back, with a warning when the field doesn't hold exactly the
 /// text given: a mask reformatted it, or a script cut or changed it. The
 /// agent must not take the fill as done as asked.
@@ -1034,6 +1065,15 @@ mod tests {
 
     fn facts(tag: &str, attrs: &[(&str, &str)]) -> DomFacts {
         DomFacts { local_name: tag.into(), attrs: attrs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(), label: String::new() }
+    }
+
+    #[test]
+    fn only_native_date_and_time_inputs_are_set_whole() {
+        assert_eq!(date_type(&facts("input", &[("type", "Date ")])).as_deref(), Some("date"));
+        assert_eq!(date_type(&facts("input", &[("type", "datetime-local")])).as_deref(), Some("datetime-local"));
+        assert_eq!(date_type(&facts("input", &[("type", "text")])), None);
+        assert_eq!(date_type(&facts("input", &[])), None);
+        assert_eq!(date_type(&facts("div", &[("type", "date")])), None);
     }
 
     #[test]
@@ -1214,28 +1254,6 @@ const SET_FILES: &str = r#"function (files) {
   return this.files.length;
 }"#;
 
-#[derive(Debug, Deserialize)]
-pub struct WaitForReq {
-    pub block_id: String,
-    /// Wait until the page's visible text contains this.
-    #[serde(default)]
-    pub text: Option<String>,
-    /// Wait until the page URL contains this.
-    #[serde(default)]
-    pub url_contains: Option<String>,
-    /// Wait until the element behind this reference has left the page.
-    #[serde(default)]
-    pub gone: Option<String>,
-    #[serde(default)]
-    pub timeout_ms: Option<u64>,
-}
-
-#[derive(Debug, Serialize)]
-pub struct WaitForData {
-    pub waited_ms: u64,
-    pub url: String,
-}
-
 /// The files a file input now holds, for read-back after an upload.
 const FILES_READ_BACK: &str = r#"function () {
   return { tag: "input", type: "file", files: Array.from(this.files || []).map(f => ({ name: f.name, size: f.size })) };
@@ -1294,71 +1312,4 @@ async fn set_files(cdp: &mut CdpSession, table: &RefTable, backend: i64, req: &S
     let files = serde_json::to_value(&req.files).map_err(|e| e.to_string())?;
     call_on(cdp, &obj, SET_FILES, vec![files]).await?;
     call_on(cdp, &obj, FILES_READ_BACK, vec![]).await
-}
-
-/// `POST /agentmux/browser/wait_for`.
-pub async fn wait_for_route(
-    State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
-    Json(req): Json<WaitForReq>,
-) -> (StatusCode, Json<ApiResponse<WaitForData>>) {
-    if !super::routes::authorized_pub(&headers, &state.ipc_token) {
-        return unauthorized();
-    }
-    let conditions = [req.text.is_some(), req.url_contains.is_some(), req.gone.is_some()];
-    if conditions.iter().filter(|c| **c).count() != 1 {
-        return fail("give exactly one of `text`, `url_contains` or `gone`");
-    }
-    let gone_backend = match &req.gone {
-        Some(r) => {
-            let table = state.browser_api.ref_tables.get(&req.block_id);
-            if table.as_ref().is_some_and(|t| t.frames.contains_key(r)) {
-                return fail("waiting for an element inside an iframe to leave isn't supported yet: wait for text instead");
-            }
-            match table.and_then(|t| t.refs.get(r).copied()) {
-                Some(b) => Some(b),
-                None => return fail(format!("unknown reference {r:?}; take a new snapshot")),
-            }
-        }
-        None => None,
-    };
-    let timeout = std::time::Duration::from_millis(req.timeout_ms.unwrap_or(10_000).clamp(250, 60_000));
-    let started = std::time::Instant::now();
-    let mut cdp = match super::routes::open_dedicated_pane(&state, &req.block_id, "wait_for").await {
-        Ok(c) => c,
-        Err(e) => return fail(e),
-    };
-    loop {
-        let url = page_url(&mut cdp).await;
-        let met = if let Some(t) = &req.text {
-            let expr = format!(
-                "!!(document.body && document.body.innerText.includes({}))",
-                serde_json::to_string(t).unwrap_or_else(|_| "\"\"".into())
-            );
-            cdp.call("Runtime.evaluate", json!({ "expression": expr, "returnByValue": true }))
-                .await
-                .ok()
-                .and_then(|v| v.pointer("/result/value").and_then(|b| b.as_bool()))
-                .unwrap_or(false)
-        } else if let Some(u) = &req.url_contains {
-            url.contains(u.as_str())
-        } else if let Some(b) = gone_backend {
-            describe_markup(&mut cdp, b).await.is_none()
-        } else {
-            false
-        };
-        let waited_ms = started.elapsed().as_millis() as u64;
-        if met {
-            let _ = cdp.close().await;
-            return (StatusCode::OK, Json(ApiResponse::ok(WaitForData { waited_ms, url })));
-        }
-        if started.elapsed() >= timeout {
-            let _ = cdp.close().await;
-            return fail(format!(
-                "still waiting after {:.1} s (page now {url}); take a snapshot to see where it is",
-                timeout.as_secs_f64()
-            ));
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
-    }
 }

@@ -1478,18 +1478,17 @@ pub(crate) async fn handle_ui_browser_act(
         return resp;
     }
     tracing::info!(agent_id = %req.auth.agent_id, block_id = %block_id, "[ui-automation] browser act waits for approval");
-    // `_waiting` keeps the pane locked until the approved click is done, so
-    // the form can't change between what the user approved and what's sent.
-    // The banner shows the summary, not the fingerprint of everything the
-    // click sends (hidden controls included): that stays here, for the check
-    // the host makes before the approved click.
+    // `_waiting` keeps the pane locked until the approved click is done, so the form
+    // can't change between what the user approved and what's sent. The banner shows
+    // the summary, not the fingerprint of everything the click sends (hidden controls
+    // included): that stays here, for the host's check before the approved click.
     let (banner_at, in_window) = banner_for(&block_id);
     let mut banner = ask.clone();
     if let Some(b) = banner.as_object_mut() {
         b.remove("fingerprint");
         b.insert("window".to_string(), json!(in_window));
     }
-    let owner_before = crate::server::browser_owner::owner_of(&banner_at);
+    let (owner_before, asked_at) = (crate::server::browser_owner::owner_of(&banner_at), std::time::Instant::now());
     let (answer, _waiting) = match crate::server::browser_attention::ask(
         &state,
         &banner_at,
@@ -1514,7 +1513,8 @@ pub(crate) async fn handle_ui_browser_act(
         }
         crate::server::browser_attention::Answer::Yes => {
             crate::server::browser_dialog::note_approved_click(&block_id, &ask);
-            asked().how(How::Approved).outcome(&state, proxy_value(&state, "act", body(Some(&ask)), std::time::Duration::from_secs(20)).await)
+            let clicked = proxy_value(&state, "act", body(Some(&ask)), std::time::Duration::from_secs(20)).await;
+            asked().how(How::Approved).outcome(&state, crate::server::browser_actions::approved_by_user(clicked, asked_at.elapsed()))
         }
         crate::server::browser_attention::Answer::Cancelled => asked().how(How::Declined).fail(&state, StatusCode::FORBIDDEN,
             "the user didn't approve this action: don't retry it; ask them what to do".to_string()),

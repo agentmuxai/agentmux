@@ -27,7 +27,13 @@ const INTERACTIVE_ROLES: &[&str] = &[
     // A <details> section's <summary>: opening it is often the only way to
     // read a review page.
     "DisclosureTriangle", "DisclosureTriangleGrouped",
+    // Native date, time, month, week and datetime-local inputs: `fill` sets them.
+    "Date", "DateTime", "InputTime",
 ];
+
+/// The roles of native date and time inputs. Their segments (day, month,
+/// year spin buttons) aren't shown: the control is filled whole.
+const DATE_ROLES: &[&str] = &["Date", "DateTime", "InputTime"];
 
 /// Roles that carry no meaning of their own; their children are shown in
 /// their place.
@@ -289,7 +295,8 @@ fn quote(s: &str) -> String {
 
 /// Roles that carry a typed value, which the snapshot shows only once the
 /// element's DOM facts prove it isn't a secret field.
-pub const VALUE_ROLES: &[&str] = &["textbox", "searchbox", "combobox", "spinbutton", "slider", "textarea"];
+pub const VALUE_ROLES: &[&str] =
+    &["textbox", "searchbox", "combobox", "spinbutton", "slider", "textarea", "Date", "DateTime", "InputTime"];
 
 /// The nodes of the subtree rooted at the element with `backend_id`, in
 /// document order (empty if it isn't in `nodes`).
@@ -406,6 +413,9 @@ fn walk(
                 render_frame(inner, frames, child_depth, out);
             }
         }
+    }
+    if DATE_ROLES.contains(&role) && !transparent {
+        return;
     }
     if let Some(children) = node.get("childIds").and_then(|v| v.as_array()) {
         for c in children {
@@ -1298,6 +1308,24 @@ mod tests {
         ];
         let s = render(&nodes, &HashMap::new(), None, "");
         assert!(s.text.contains("- DisclosureTriangle \"Market Values\" [ref=e1]"), "{}", s.text);
+    }
+
+    #[test]
+    fn a_date_input_is_one_field_with_its_value_not_three_spin_buttons() {
+        let mut date = n("d", Some("root"), "Date", "Date of transfer", Some(2), &["m", "dd", "y"]);
+        date["value"] = json!({ "type": "string", "value": "2026-10-15" });
+        let nodes = vec![
+            n("root", None, "RootWebArea", "", Some(1), &["d"]),
+            date,
+            n("m", Some("d"), "spinbutton", "Month", Some(3), &[]),
+            n("dd", Some("d"), "spinbutton", "Day", Some(4), &[]),
+            n("y", Some("d"), "spinbutton", "Year", Some(5), &[]),
+        ];
+        let facts = HashMap::from([(2, DomFacts::from_described(&json!({ "localName": "input", "attributes": ["type", "date"] })))]);
+        let s = render(&nodes, &facts, None, "");
+        assert!(s.text.contains("- Date \"Date of transfer\" [ref=e1] value=\"2026-10-15\""), "{}", s.text);
+        assert!(!s.text.contains("spinbutton"), "{}", s.text);
+        assert_eq!(s.refs, vec![("e1".to_string(), 2)]);
     }
 
     #[test]
