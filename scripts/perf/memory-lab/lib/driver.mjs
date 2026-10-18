@@ -259,6 +259,27 @@ export async function connect(port, home, workDir) {
             }
         },
 
+        /**
+         * How many tool rows each agent's transcript shows: a played turn of the
+         * scripted conversation has 8-20 of them (the fake Claude names its tool
+         * ids `toolu_...`), an agent that never played has none.
+         */
+        async toolRows() {
+            const counts = [];
+            for (const a of agents) {
+                const n = await ev(`(document.querySelector('[data-blockid="${a.blockId}"]')?.querySelectorAll('[data-node-id^="toolu_"]') ?? []).length`);
+                counts.push({ name: a.name, blockId: a.blockId, tools: n });
+            }
+            return counts;
+        },
+
+        /** The names of the agent definitions srv holds that the lab made (`t<tab>-<n>`, with any collision suffix). */
+        async labAgentNames() {
+            const list = await rpc("listagents", {});
+            const defs = Array.isArray(list) ? list : (list?.agents ?? list?.definitions ?? []);
+            return defs.map((d) => d.name).filter((n) => /^t\d+-\d+/.test(String(n)));
+        },
+
         /** How many agents are in the middle of a turn. */
         busy: () => ev(`document.querySelectorAll('.agent-working-row:not(.agent-working-row--worked)').length`),
 

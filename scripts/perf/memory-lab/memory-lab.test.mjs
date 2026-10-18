@@ -11,7 +11,7 @@ import { describe, expect, it } from "vitest";
 import { mismatch } from "./compare.mjs";
 import { generateConversation } from "./lib/conversation.mjs";
 import { allocatorRoots, dumpedProcesses, lastSample, mainPage, withChromiumRoles } from "./lib/sample.mjs";
-import { compare, comparisonTable, groupOf, groupSample, inMegabytes, median, MB, steady, table } from "./lib/summary.mjs";
+import { agentsWithoutTurns, compare, comparisonTable, groupOf, groupSample, inMegabytes, median, MB, steady, table, transcriptGrowthProblem } from "./lib/summary.mjs";
 
 const proc = (pid, name, role, app, privateMB, commitMB = privateMB * 2) => ({ pid, name, role, app, private: privateMB * MB, commit: commitMB * MB });
 
@@ -139,6 +139,33 @@ describe("memory lab OS samples", () => {
         const text = [{ run: { os: "macos" } }, { procs: [{ pid: 1 }] }, { procs: [{ pid: 2 }] }, { footprint: { total: 5 } }].map((r) => JSON.stringify(r)).join("\n") + "\n";
         expect(lastSample(text).procs[0].pid).toBe(2);
         expect(() => lastSample(JSON.stringify({ run: {} }))).toThrow(/no sample/);
+    });
+});
+
+describe("memory lab validity guards", () => {
+    it("names the agents whose transcript shows no played turn", () => {
+        const rows = [{ name: "t1-1", tools: 14 }, { name: "t1-2", tools: 0 }, { name: "t1-3", tools: 6 }, { name: "t1-4", tools: 3 }];
+        expect(agentsWithoutTurns(rows)).toEqual(["t1-2", "t1-4"]);
+        expect(agentsWithoutTurns(rows.slice(0, 1))).toEqual([]);
+        expect(agentsWithoutTurns([{ name: "x", tools: undefined }])).toEqual(["x"]);
+    });
+
+    const base = { before: 2 * MB, agents: 4, rounds: 10, bytesPerTurn: 145_000 };
+    it("accepts a transcript store that grew by about what the played turns weigh", () => {
+        expect(transcriptGrowthProblem({ ...base, after: 2 * MB + 4 * 10 * 145_000 })).toBeNull();
+        expect(transcriptGrowthProblem({ ...base, after: 2 * MB + 4 * 10 * 145_000 * 0.85 })).toBeNull();
+    });
+
+    it("refuses a store that barely grew: the agents never played", () => {
+        expect(transcriptGrowthProblem({ ...base, after: 2 * MB + 30_000 })).toMatch(/grew by 0\.0 MB; 4 agents playing 10 turns should add at least 4\.4 MB/);
+    });
+
+    it("keeps macOS's footprint record beside the last sample", () => {
+        const text = [{ procs: [{ pid: 1 }] }, { footprint: { output: "total 1 GB" } }].map((r) => JSON.stringify(r)).join("\n");
+        const s = lastSample(text);
+        expect(s.procs[0].pid).toBe(1);
+        expect(s.footprint.output).toBe("total 1 GB");
+        expect(lastSample(JSON.stringify({ procs: [] })).footprint).toBeUndefined();
     });
 });
 

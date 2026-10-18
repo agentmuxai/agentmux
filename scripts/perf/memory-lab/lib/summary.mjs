@@ -70,6 +70,25 @@ export function steady(samples) {
     return out;
 }
 
+/** The agents whose transcript shows fewer than `min` tool rows: they didn't play a turn. */
+export function agentsWithoutTurns(rows, min = 6) {
+    return rows.filter((r) => !(r.tools >= min)).map((r) => r.name);
+}
+
+/**
+ * Why a run's transcripts grew too little for the turns it should have played,
+ * or null. `before` and `after` are the transcript store's size (the database
+ * and its write-ahead log, in bytes); each played turn adds about what the
+ * scripted turn weighs in the conversation, so a store that grew by less than
+ * `factor` of that (0.8 by default) means the agents didn't play.
+ */
+export function transcriptGrowthProblem({ before, after, agents, rounds, bytesPerTurn, factor = 0.8 }) {
+    const expected = agents * rounds * bytesPerTurn * factor;
+    const grew = after - before;
+    if (grew >= expected) return null;
+    return `the transcript store grew by ${(grew / MB).toFixed(1)} MB; ${agents} agents playing ${rounds} turns should add at least ${(expected / MB).toFixed(1)} MB`;
+}
+
 const mb = (bytes) => (bytes == null ? null : Math.round((bytes / MB) * 10) / 10);
 
 /** A steady summary in megabytes, rounded, for the report file. */

@@ -30,14 +30,17 @@ const hex = (v) => (typeof v === "string" ? parseInt(v, 16) : Number(v ?? 0));
  * after the samples, which isn't one.
  */
 export function lastSample(text) {
-    const records = text
-        .split(/\r?\n/)
-        .filter(Boolean)
-        .map((line) => JSON.parse(line))
-        .filter((rec) => Array.isArray(rec.procs));
+    const lines = text.split(/\r?\n/).filter(Boolean).map((line) => JSON.parse(line));
+    const records = lines.filter((rec) => Array.isArray(rec.procs));
     if (records.length === 0) throw new Error("memtree wrote no sample");
-    return records[records.length - 1];
+    const footprint = lines.find((rec) => rec.footprint)?.footprint;
+    // On macOS the per-process sums can count a shared region in each process; footprint's own
+    // total over the same processes counts it once, and is kept beside the sample.
+    return footprint ? { ...records[records.length - 1], footprint } : records[records.length - 1];
 }
+
+/** What the lab's own scripted agents run as: the fake Claude is a Node script, so its process is a pane's child. */
+export const FAKE_CLI_ROOTS = "node";
 
 /**
  * `memtree` labels a process by its command line's `--type=`; on Linux a
@@ -60,7 +63,7 @@ export async function osSample(memtree, rootPid, port = null) {
     const dir = mkdtempSync(join(tmpdir(), "memory-lab-"));
     const file = join(dir, "memtree.jsonl");
     try {
-        execFileSync(memtree, ["--pid", String(rootPid), "--samples", "1", "--json", file], { stdio: ["ignore", "ignore", "pipe"] });
+        execFileSync(memtree, ["--pid", String(rootPid), "--samples", "1", "--extra-pane-roots", FAKE_CLI_ROOTS, "--json", file], { stdio: ["ignore", "ignore", "pipe"] });
         const sample = lastSample(readFileSync(file, "utf8"));
         if (port == null || !sample.procs.some((p) => p.role === "zygote-forked")) return sample;
         const browser = await connectBrowser(port, { timeoutMs: 15_000 });
