@@ -2,8 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // How each kind of browser-pane request looks and answers: one row per kind,
-// so a new kind is a row here, not another branch in the banner
-// (REPORT_BROWSER_PANE_BLANK_AFTER_BLOCKED_SIGN_IN_REDIRECT_RCA_2026_10_16.md §7.4).
+// so a new kind is a row here, not another branch in the banner.
 
 export type AttentionLook = {
     /** Shown in the agent's attention colours: an agent (or its page) waits on the person. */
