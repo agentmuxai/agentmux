@@ -12,7 +12,7 @@
 // refuses that), nor port 9222.
 
 import { execFileSync, spawn } from "node:child_process";
-import { mkdirSync, openSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, openSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { installFakeClaude } from "../../../ui-screenshots/install-fake-claude.mjs";
@@ -32,9 +32,20 @@ export function layoutFor(panes) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-/** The portable's executable. */
-export function portableExe(dir, platform = process.platform) {
-    return join(dir, platform === "win32" ? "agentmux.exe" : "agentmux");
+/**
+ * The executable of a packaged build, from the folder (or bundle) `task package` made:
+ * Windows `agentmux.exe`; macOS `AgentMux.app/Contents/MacOS/agentmux-launcher` (the
+ * `.app` itself, or the folder holding it); Linux's extracted tarball `agentmux.sh`, else
+ * `agentmux`. A Linux AppImage is passed to `--exe` directly.
+ */
+export function portableExe(dir, platform = process.platform, exists = existsSync) {
+    if (platform === "win32") return join(dir, "agentmux.exe");
+    if (platform === "darwin") {
+        const inBundle = (app) => join(app, "Contents", "MacOS", "agentmux-launcher");
+        if (dir.endsWith(".app")) return inBundle(dir);
+        return exists(join(dir, "AgentMux.app")) ? inBundle(join(dir, "AgentMux.app")) : join(dir, "agentmux-launcher");
+    }
+    return exists(join(dir, "agentmux.sh")) ? join(dir, "agentmux.sh") : join(dir, "agentmux");
 }
 
 /** Whether something already answers CDP on `port`. */

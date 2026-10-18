@@ -26,7 +26,7 @@
 // (a production build: a `task dev` build inflates every number).
 
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -227,6 +227,8 @@ async function main() {
     const dir = resolve(args.out, args.label);
     const home = join(dir, "home");
     mkdirSync(dir, { recursive: true });
+    // Nothing of an earlier run under this label may stand in for this one: a run that fails leaves no report.
+    for (const old of ["result.json", "summary.md", ...readdirSync(dir).filter((f) => /^invalid-run-\d+\.txt$/.test(f))]) rmSync(join(dir, old), { force: true });
 
     // The same conversation for every build: a seed fixes it.
     const script = join(dir, "conversation.json");

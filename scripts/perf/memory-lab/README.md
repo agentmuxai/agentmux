@@ -15,6 +15,11 @@ made into scripts. The budget it serves is 500 MB for the app's own processes.
    node scripts/perf/memory-lab/run.mjs --portable <the portable folder> --label my-branch
    ```
 
+   On macOS `--portable` takes the `AgentMux.app` (or the folder holding it) and
+   runs its `Contents/MacOS/agentmux-launcher`; on Linux the extracted tarball's
+   folder (its `agentmux.sh`). For an AppImage or any other executable, pass it
+   with `--exe <path>` instead of `--portable`.
+
    Options: `--panes 4|12` (4 agents in one tab, or 12 over 4 tabs as 4/2/4/2;
    default 4), `--rounds 10`, `--gap-s 15` (seconds between rounds), `--every 5`
    (a curve point every N rounds), `--settle-s 20`, `--samples 3`, `--seed 1`,

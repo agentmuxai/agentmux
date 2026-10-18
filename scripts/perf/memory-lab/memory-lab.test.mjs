@@ -10,6 +10,7 @@ import { describe, expect, it } from "vitest";
 
 import { mismatch } from "./compare.mjs";
 import { generateConversation } from "./lib/conversation.mjs";
+import { portableExe } from "./lib/driver.mjs";
 import { allocatorRoots, dumpedProcesses, lastSample, mainPage, withChromiumRoles } from "./lib/sample.mjs";
 import { agentsWithoutTurns, compare, comparisonTable, groupOf, groupSample, inMegabytes, median, MB, steady, table, transcriptGrowthProblem } from "./lib/summary.mjs";
 
@@ -184,6 +185,17 @@ describe("memory lab validity guards", () => {
         expect(s.procs[0].pid).toBe(1);
         expect(s.footprint.output).toBe("total 1 GB");
         expect(lastSample(JSON.stringify({ procs: [] })).footprint).toBeUndefined();
+    });
+});
+
+describe("memory lab packaged builds", () => {
+    const has = (...present) => (p) => present.some((x) => p.replace(/\\/g, "/").endsWith(x));
+    it("finds each platform's executable in what `task package` makes", () => {
+        expect(portableExe("C:/p/agentmux-0.59.32-x64-portable", "win32")).toMatch(/agentmux\.exe$/);
+        expect(portableExe("/p/dist", "darwin", has("AgentMux.app")).replace(/\\/g, "/")).toBe("/p/dist/AgentMux.app/Contents/MacOS/agentmux-launcher");
+        expect(portableExe("/p/AgentMux.app", "darwin", has()).replace(/\\/g, "/")).toBe("/p/AgentMux.app/Contents/MacOS/agentmux-launcher");
+        expect(portableExe("/p/agentmux-linux", "linux", has("agentmux.sh")).replace(/\\/g, "/")).toBe("/p/agentmux-linux/agentmux.sh");
+        expect(portableExe("/p/agentmux-linux", "linux", has()).replace(/\\/g, "/")).toBe("/p/agentmux-linux/agentmux");
     });
 });
 
