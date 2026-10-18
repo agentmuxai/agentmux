@@ -2,6 +2,7 @@
 
 **Date:** 2026-10-18
 **Author:** QTest
+**Status:** analysis
 **Context:** the operator upgraded their own working instance (a Windows portable,
 local channel `local-main-…`, 0.59.31 built from `main`) to the v0.59.32 release
 from Maintenance, with several agents running in it. This was the first
