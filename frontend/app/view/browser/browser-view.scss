@@ -304,7 +304,8 @@ $browser-nav-stack-below: 388px;
     border-bottom: 1px solid var(--border-color);
     flex-shrink: 0;
 
-    .browser-limited-to {
+    .browser-limited-to,
+    .browser-bypass-ended {
         color: var(--secondary-text-color);
     }
 

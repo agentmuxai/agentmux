@@ -58,6 +58,9 @@ export function DrivenByStrip(props: { model: BrowserViewModel; agent: string })
                                 {model.allowedOriginsAtom().length === 1 ? "site" : "sites"}
                             </span>
                         </Show>
+                        <Show when={model.bypassEndedAtom()}>
+                            {(why) => <span class="browser-bypass-ended">Auto-approve ended: {why()}</span>}
+                        </Show>
                         <Button
                             density="compact"
                             tone="danger"

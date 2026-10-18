@@ -190,7 +190,7 @@ pub(crate) async fn handle_ui_browser_end_bypass(
         Err((code, e)) => return err_response(code, e),
     };
     let pane = bypass_pane(&block_id);
-    let ended = bypass::active_for(&pane, &req.auth.agent_id).is_some() && bypass::end(&state, &pane, "the agent ended it");
+    let ended = bypass::active_for(&pane, &req.auth.agent_id).is_some() && bypass::end(&state, &pane, "the agent turned it off", true);
     (StatusCode::OK, Json(json!({ "ok": true, "data": { "ended": ended } }))).into_response()
 }
 
@@ -212,7 +212,7 @@ pub(crate) async fn handle_host_browser_bypass(
     let block_id = s("block_id");
     let pane = bypass_pane(&block_id);
     if body.get("on").and_then(|v| v.as_bool()) != Some(true) {
-        let ended = bypass::end(&state, &pane, "the user ended it");
+        let ended = bypass::end(&state, &pane, "the user turned it off", false);
         return (StatusCode::OK, Json(json!({ "ok": true, "data": { "ended": ended } }))).into_response();
     }
     let block = match state.mstore.get::<crate::backend::obj::Block>(&pane) {

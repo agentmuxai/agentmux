@@ -198,6 +198,9 @@ export class BrowserViewModel {
     /** The bypass the person granted the driving agent, while it lasts
      *  (`browser:bypass`, written by srv; SPEC_BROWSER_PANE_BYPASS_2026_10_16.md §3.3). */
     bypassAtom: Accessor<BrowserBypass | undefined>;
+    /** Why srv ended the last bypass on its own (its time ran out, the agent
+     *  went quiet or turned it off), shown in the strip until the next one. */
+    bypassEndedAtom: Accessor<string | undefined>;
     /** Now, in ms: ticks while a bypass shows, for its countdown and expiry. */
     private _now = createSignal(Date.now());
     /** The sites the driving agent limited this pane to (`browser:allowed_origins`,
@@ -424,9 +427,17 @@ export class BrowserViewModel {
             });
             const rawBypass = createMemo((): BrowserBypass | undefined => {
                 const v = this.meta()?.["browser:bypass"];
-                return v && typeof v === "object" && typeof v.expires_at === "number" && Array.isArray(v.origins)
+                return v &&
+                    typeof v === "object" &&
+                    "expires_at" in v &&
+                    typeof v.expires_at === "number" &&
+                    Array.isArray(v.origins)
                     ? v
                     : undefined;
+            });
+            this.bypassEndedAtom = createMemo(() => {
+                const v = this.meta()?.["browser:bypass"];
+                return v && typeof v === "object" && "ended" in v && typeof v.ended === "string" ? v.ended : undefined;
             });
             this.bypassAtom = createMemo(() => {
                 const b = rawBypass();

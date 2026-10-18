@@ -15,7 +15,9 @@
 //! A grant is for one pane (and the popup windows its page opens; a popup
 //! pane has its own header and its own grant), one agent (the owner
 //! when it was granted), the sites the person was shown, and a time limit.
-//! Take over, closing the pane, a change of owner and the time limit end it.
+//! Take over, closing the pane, a change of owner and the time limit end it,
+//! and so do [`IDLE_LIMIT`] minutes without a `Browser` call from its agent
+//! on the pane: a hung or stopped agent doesn't keep one alive.
 
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
@@ -36,6 +38,14 @@ pub(crate) const DEFAULT_MINUTES: u64 = 60;
 /// again on that pane for this long.
 pub(crate) const REQUEST_COOLDOWN: Duration = Duration::from_secs(10 * 60);
 
+/// A grant ends after this long without a `Browser` call from its agent on
+/// the pane ([`touch`]), with [`IDLE_REASON`]. Time the pane spends waiting
+/// on the person (a hand-off, a question) doesn't count: the agent is waiting
+/// for them then, not stuck.
+pub(crate) const IDLE_LIMIT: Duration = Duration::from_secs(15 * 60);
+pub(crate) const IDLE_REASON: &str = "no activity for 15 minutes";
+const TIME_UP_REASON: &str = "its time ran out";
+
 #[derive(Debug, Clone)]
 pub(crate) struct Grant {
     /// Distinguishes this grant from a later one on the same pane, so an old
@@ -48,6 +58,8 @@ pub(crate) struct Grant {
     pub expires: Instant,
     /// For the header's countdown: milliseconds since the Unix epoch.
     pub expires_at_ms: i64,
+    /// The agent's last `Browser` call on the pane, or the grant itself.
+    last_active: Instant,
 }
 
 impl Grant {
@@ -67,9 +79,16 @@ impl Grant {
     }
 }
 
+/// A grant, and the srv state it was made with: [`forget`]'s callers have
+/// none of their own, and it still takes the header strip down through it.
+struct Live {
+    grant: Grant,
+    state: Option<AppState>,
+}
+
 #[derive(Default)]
 struct Table {
-    grants: HashMap<String, Grant>,
+    grants: HashMap<String, Live>,
     declined: HashMap<String, Instant>,
 }
 
@@ -94,7 +113,7 @@ pub(crate) fn clamp_minutes(asked: Option<u64>) -> u64 {
 /// here, without waiting for its timer.
 pub(crate) fn active_for(pane: &str, agent: &str) -> Option<Grant> {
     let mut t = table();
-    let g = t.grants.get(pane)?.clone();
+    let g = t.grants.get(pane)?.grant.clone();
     if !g.live() {
         t.grants.remove(pane);
         return None;
@@ -118,73 +137,139 @@ pub(crate) fn note_declined(pane: &str) {
 }
 
 /// Record a grant on `pane` for `agent` over `origins`, show it in the
-/// pane's header, and end it when its time is up. Replaces any grant the
-/// pane had.
+/// pane's header, and end it when its time is up or its agent goes quiet.
+/// Replaces any grant the pane had.
 pub(crate) fn grant(state: &AppState, pane: &str, agent: &str, origins: Vec<String>, minutes: u64) -> Grant {
+    grant_watched(state, pane, agent, origins, minutes, IDLE_LIMIT)
+}
+
+fn grant_watched(state: &AppState, pane: &str, agent: &str, origins: Vec<String>, minutes: u64, idle: Duration) -> Grant {
     let minutes = clamp_minutes(Some(minutes));
     let dur = Duration::from_secs(minutes * 60);
+    let now = Instant::now();
     let g = Grant {
         id: uuid::Uuid::new_v4().to_string(),
         agent: agent.to_string(),
         origins,
         minutes,
-        expires: Instant::now() + dur,
+        expires: now + dur,
         expires_at_ms: chrono::Utc::now().timestamp_millis() + dur.as_millis() as i64,
+        last_active: now,
     };
     {
         let mut t = table();
         t.declined.remove(pane);
-        t.grants.insert(pane.to_string(), g.clone());
+        t.grants.insert(pane.to_string(), Live { grant: g.clone(), state: Some(state.clone()) });
     }
     tracing::info!(
         pane = %pane, agent = %agent, origins = ?g.origins, minutes,
         "[browser-bypass] granted: the agent acts without asking"
     );
-    publish(state, pane, Some(&g));
-    let st = state.clone();
-    let (pane_owned, id) = (pane.to_string(), g.id.clone());
-    tokio::spawn(async move {
-        tokio::time::sleep(dur).await;
-        end_if(&st, &pane_owned, Some(&id), "its time ran out");
-    });
+    publish(state, pane, strip_value(&g));
+    tokio::spawn(watch(state.clone(), pane.to_string(), g.id.clone(), idle));
     g
 }
 
-/// End `pane`'s grant, if it has one, and take the header strip down.
-/// Returns whether there was one.
-pub(crate) fn end(state: &AppState, pane: &str, reason: &str) -> bool {
-    end_if(state, pane, None, reason)
-}
-
-/// End `pane`'s grant without touching its meta: for callers that have no
-/// [`AppState`] (Take over and closing the pane, where the header stops
-/// showing the strip anyway, since the pane is no longer driven).
-pub(crate) fn forget(pane: &str, reason: &str) {
-    if table().grants.remove(pane).is_some() {
-        tracing::info!(pane = %pane, reason = %reason, "[browser-bypass] ended");
+/// A `Browser` call from `agent` on `target` (a pane, or a popup window,
+/// whose grant is its opener's): it keeps that agent's grant there alive.
+/// Every agent browser call resolves its pane through
+/// `ui_handlers::target_block_id`, which calls this.
+pub(crate) fn touch(target: &str, agent: &str) {
+    let pane = crate::server::ui_handlers::banner_for(target).0;
+    if let Some(l) = table().grants.get_mut(&pane).filter(|l| l.grant.agent.eq_ignore_ascii_case(agent)) {
+        l.grant.last_active = Instant::now();
     }
 }
 
-fn end_if(state: &AppState, pane: &str, id: Option<&str>, reason: &str) -> bool {
+/// What the watcher of grant `id` on `pane` does next.
+#[derive(Debug, PartialEq)]
+enum Due {
+    /// The grant has ended or been replaced: stop watching.
+    Gone,
+    End(&'static str),
+    /// Nothing yet: look again then.
+    At(Instant),
+}
+
+/// Grant `id` on `pane` at `now`: past its time, or `idle` since its agent's
+/// last `Browser` call there. `busy`: the pane waits on the person, which
+/// counts as activity.
+fn due(pane: &str, id: &str, idle: Duration, now: Instant, busy: bool) -> Due {
+    let mut t = table();
+    let Some(g) = t.grants.get_mut(pane).map(|l| &mut l.grant).filter(|g| g.id == id) else {
+        return Due::Gone;
+    };
+    if now >= g.expires {
+        return Due::End(TIME_UP_REASON);
+    }
+    if busy {
+        g.last_active = now;
+    }
+    let idle_at = g.last_active + idle;
+    if now >= idle_at {
+        return Due::End(IDLE_REASON);
+    }
+    Due::At(idle_at.min(g.expires))
+}
+
+/// One task per grant ends it on time or when its agent goes quiet. A
+/// [`touch`] only moves the deadline: the task wakes at the old one, finds
+/// the grant still in use, and sleeps until the new one.
+async fn watch(state: AppState, pane: String, id: String, idle: Duration) {
+    loop {
+        let busy = crate::server::browser_attention::waiting_on_user(&pane).is_some();
+        match due(&pane, &id, idle, Instant::now(), busy) {
+            Due::Gone => return,
+            Due::End(reason) => {
+                end_if(&state, &pane, Some(&id), reason, true);
+                return;
+            }
+            Due::At(at) => tokio::time::sleep_until(tokio::time::Instant::from_std(at)).await,
+        }
+    }
+}
+
+/// End `pane`'s grant, if it has one, and take the header strip down; with
+/// `say_why`, the strip says why it ended instead (the person who ended it
+/// themselves needs no note). Returns whether there was one.
+pub(crate) fn end(state: &AppState, pane: &str, reason: &str, say_why: bool) -> bool {
+    end_if(state, pane, None, reason, say_why)
+}
+
+/// End `pane`'s grant for callers that have no [`AppState`]: Take over,
+/// closing the pane, a new owner. The strip is cleared through the state the
+/// grant was made with, so it can't go on showing a grant that has ended.
+pub(crate) fn forget(pane: &str, reason: &str) {
+    let Some(live) = table().grants.remove(pane) else { return };
+    tracing::info!(pane = %pane, reason = %reason, "[browser-bypass] ended");
+    if let Some(state) = live.state {
+        publish(&state, pane, Value::Null);
+    }
+}
+
+fn end_if(state: &AppState, pane: &str, id: Option<&str>, reason: &str, say_why: bool) -> bool {
     let removed = {
         let mut t = table();
         match t.grants.get(pane) {
-            Some(g) if id.is_none_or(|id| g.id == id) => t.grants.remove(pane).is_some(),
-            _ => false,
+            Some(l) if id.is_none_or(|id| l.grant.id == id) => t.grants.remove(pane).map(|l| l.grant),
+            _ => None,
         }
     };
-    if removed {
-        tracing::info!(pane = %pane, reason = %reason, "[browser-bypass] ended");
-        publish(state, pane, None);
-    }
-    removed
+    let Some(g) = removed else { return false };
+    tracing::info!(pane = %pane, reason = %reason, "[browser-bypass] ended");
+    // The note has no `expires_at`, so the header never takes it for a
+    // grant; the next grant, or the host registering, replaces it.
+    publish(state, pane, if say_why { json!({ "agent": g.agent, "ended": reason }) } else { Value::Null });
+    true
 }
 
-/// Write (or clear) the header strip's copy of the grant.
-fn publish(state: &AppState, pane: &str, g: Option<&Grant>) {
-    let value = g.map_or(Value::Null, |g| {
-        json!({ "agent": g.agent, "origins": g.origins, "minutes": g.minutes, "expires_at": g.expires_at_ms })
-    });
+/// The header strip's copy of a live grant.
+fn strip_value(g: &Grant) -> Value {
+    json!({ "agent": g.agent, "origins": g.origins, "minutes": g.minutes, "expires_at": g.expires_at_ms })
+}
+
+/// Write `value` as the header strip's `browser:bypass`.
+fn publish(state: &AppState, pane: &str, value: Value) {
     let mut meta = crate::backend::obj::MetaMapType::new();
     meta.insert(BYPASS_META_KEY.to_string(), value);
     if let Err(e) = crate::server::http_shell::broadcast_meta_update(state, pane, &meta) {
@@ -208,7 +293,7 @@ pub(crate) fn reset_strips(state: &AppState) {
         .into_iter()
         .filter(|b| !live.contains(&b.oid) && b.meta.get(BYPASS_META_KEY).is_some_and(|v| !v.is_null()))
     {
-        publish(state, &b.oid, None);
+        publish(state, &b.oid, Value::Null);
     }
 }
 
@@ -253,22 +338,80 @@ pub(crate) fn tests_put(pane: &str, agent: &str) {
     tests::put(pane, agent, &["https://github.com"], 60);
 }
 
+/// A real grant (strip and watcher) that ends after `idle` without a
+/// `Browser` call, for other modules' tests.
+#[cfg(test)]
+pub(crate) fn tests_grant_idle(state: &AppState, pane: &str, agent: &str, idle: Duration) -> Grant {
+    grant_watched(state, pane, agent, vec!["https://github.com".to_string()], 15, idle)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     pub(super) fn put(pane: &str, agent: &str, origins: &[&str], secs: u64) {
-        table().grants.insert(
-            pane.to_string(),
-            Grant {
-                id: format!("{pane}-id"),
-                agent: agent.to_string(),
-                origins: origins.iter().map(|s| s.to_string()).collect(),
-                minutes: 1,
-                expires: Instant::now() + Duration::from_secs(secs),
-                expires_at_ms: 0,
-            },
-        );
+        let grant = Grant {
+            id: format!("{pane}-id"),
+            agent: agent.to_string(),
+            origins: origins.iter().map(|s| s.to_string()).collect(),
+            minutes: 1,
+            expires: Instant::now() + Duration::from_secs(secs),
+            expires_at_ms: 0,
+            last_active: Instant::now(),
+        };
+        table().grants.insert(pane.to_string(), Live { grant, state: None });
+    }
+
+    fn quiet_for(pane: &str, d: Duration) {
+        table().grants.get_mut(pane).unwrap().grant.last_active = Instant::now() - d;
+    }
+
+    #[test]
+    fn a_grant_ends_after_its_agent_goes_quiet() {
+        let idle = Duration::from_secs(15 * 60);
+        put("bp-idle", "naki", &["https://github.com"], 3600);
+        let id = "bp-idle-id";
+        // Fresh: look again when the idle limit would be reached.
+        let Due::At(at) = due("bp-idle", id, idle, Instant::now(), false) else { panic!("not due yet") };
+        assert!(at > Instant::now() + Duration::from_secs(14 * 60));
+        quiet_for("bp-idle", idle + Duration::from_secs(1));
+        assert_eq!(due("bp-idle", id, idle, Instant::now(), false), Due::End(IDLE_REASON));
+        // Another grant's watcher, or one for a replaced grant, stops.
+        assert_eq!(due("bp-idle", "an-older-grant", idle, Instant::now(), false), Due::Gone);
+        assert_eq!(due("bp-none", id, idle, Instant::now(), false), Due::Gone);
+        forget("bp-idle", "test");
+    }
+
+    #[test]
+    fn a_browser_call_from_its_agent_keeps_a_grant_alive() {
+        let idle = Duration::from_secs(15 * 60);
+        put("bp-touch", "naki", &["https://github.com"], 3600);
+        quiet_for("bp-touch", idle + Duration::from_secs(1));
+        // Another agent's call doesn't count.
+        touch("bp-touch", "korp");
+        assert_eq!(due("bp-touch", "bp-touch-id", idle, Instant::now(), false), Due::End(IDLE_REASON));
+        touch("bp-touch", "Naki");
+        assert!(matches!(due("bp-touch", "bp-touch-id", idle, Instant::now(), false), Due::At(_)));
+        forget("bp-touch", "test");
+    }
+
+    #[test]
+    fn waiting_on_the_person_is_not_going_quiet() {
+        let idle = Duration::from_secs(15 * 60);
+        put("bp-busy", "naki", &["https://github.com"], 3600);
+        quiet_for("bp-busy", idle + Duration::from_secs(60));
+        // A hand-off is up: the agent waits for the person, it isn't stuck.
+        assert!(matches!(due("bp-busy", "bp-busy-id", idle, Instant::now(), true), Due::At(_)));
+        // And the wait counts as activity once it's over.
+        assert!(matches!(due("bp-busy", "bp-busy-id", idle, Instant::now(), false), Due::At(_)));
+        forget("bp-busy", "test");
+    }
+
+    #[test]
+    fn the_time_limit_ends_a_grant_however_busy() {
+        put("bp-time", "naki", &["https://github.com"], 0);
+        assert_eq!(due("bp-time", "bp-time-id", Duration::from_secs(900), Instant::now(), true), Due::End(TIME_UP_REASON));
+        forget("bp-time", "test");
     }
 
     #[test]

@@ -1858,11 +1858,13 @@ async fn a_popup_window_is_driven_through_the_pane_that_opened_it() {
 
 /// A stand-in CEF host for the bypass tests: `eval` answers the page's
 /// address (`url`), and `act` asks for approval of a click named `what` on
-/// that page, then makes it only when sent back exactly what it asked.
+/// that page, then makes it only when sent back exactly what it asked. The
+/// click's `description` (a menu item's text under its name) rides along.
 #[derive(Clone, Default)]
 struct BypassFakeHost {
     url: std::sync::Arc<std::sync::Mutex<String>>,
     what: std::sync::Arc<std::sync::Mutex<String>>,
+    description: std::sync::Arc<std::sync::Mutex<String>>,
     clicks: std::sync::Arc<std::sync::atomic::AtomicUsize>,
 }
 
@@ -1870,6 +1872,7 @@ impl BypassFakeHost {
     fn ask(&self) -> serde_json::Value {
         serde_json::json!({
             "what": self.what.lock().unwrap().clone(),
+            "description": self.description.lock().unwrap().clone(),
             "page": self.url.lock().unwrap().clone(),
             "action": null,
             "fields": [],
@@ -1998,6 +2001,14 @@ async fn bypass_is_granted_only_through_the_host_and_lifts_approvals_on_its_site
     assert_eq!(fake.clicks.load(std::sync::atomic::Ordering::SeqCst), 1);
     let block = state.mstore.must_get::<crate::backend::obj::Block>(&pane).unwrap();
     assert!(block.meta.get("browser:attention").is_none_or(|v| v.is_null()));
+    // Only the name is judged: a menu item whose description mentions a
+    // payment is not one (roadblocks report R7).
+    *fake.description.lock().unwrap() = "Your payment history is kept".into();
+    let (s, body) = post_json(&app, "/api/v1/ui/browser/act", click.clone()).await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    assert_eq!(body["data"]["bypassed"], true);
+    assert_eq!(fake.clicks.load(std::sync::atomic::Ordering::SeqCst), 2);
+    *fake.description.lock().unwrap() = String::new();
     // Eval stays refused: bypass covers committing clicks only, where the
     // payment and secret-field checks hold.
     let (s, _) = post_json(&app, "/api/v1/ui/browser/eval", merged(&auth, serde_json::json!({ "pane": pane, "script": "1" }))).await;
@@ -2015,7 +2026,7 @@ async fn bypass_is_granted_only_through_the_host_and_lifts_approvals_on_its_site
     let (s, _) = post_json_headers(&app, "/api/v1/host/browser_attention", answer, &host).await;
     assert_eq!(s, StatusCode::OK);
     assert_eq!(asking.await.unwrap().0, StatusCode::FORBIDDEN);
-    assert_eq!(fake.clicks.load(std::sync::atomic::Ordering::SeqCst), 1);
+    assert_eq!(fake.clicks.load(std::sync::atomic::Ordering::SeqCst), 2);
     *fake.what.lock().unwrap() = "Click \"Delete draft\"".into();
 
     // Off the granted site, a committing click asks again.
@@ -2030,7 +2041,7 @@ async fn bypass_is_granted_only_through_the_host_and_lifts_approvals_on_its_site
     let (s, _) = post_json_headers(&app, "/api/v1/host/browser_attention", answer, &host).await;
     assert_eq!(s, StatusCode::OK);
     assert_eq!(asking.await.unwrap().0, StatusCode::FORBIDDEN);
-    assert_eq!(fake.clicks.load(std::sync::atomic::Ordering::SeqCst), 1);
+    assert_eq!(fake.clicks.load(std::sync::atomic::Ordering::SeqCst), 2);
     *fake.url.lock().unwrap() = "https://github.com/example/repo/issues/1".into();
 
     // The agent can end its own bypass; the strip goes, and clicks ask again.
@@ -2038,7 +2049,7 @@ async fn bypass_is_granted_only_through_the_host_and_lifts_approvals_on_its_site
     assert_eq!(s, StatusCode::OK, "{body}");
     assert_eq!(body["data"]["ended"], true);
     let block = state.mstore.must_get::<crate::backend::obj::Block>(&pane).unwrap();
-    assert!(block.meta.get("browser:bypass").is_none_or(|v| v.is_null()));
+    assert_eq!(block.meta["browser:bypass"], serde_json::json!({ "agent": agent, "ended": "the agent turned it off" }));
     assert!(crate::server::browser_bypass::active_for(&pane, &agent).is_none());
 
     // The agent asks; the person's Allow, through the host, grants it.
@@ -2068,6 +2079,9 @@ async fn bypass_is_granted_only_through_the_host_and_lifts_approvals_on_its_site
     let (s, body) = post_json_headers(&app, "/api/v1/host/browser_bypass", serde_json::json!({ "block_id": pane, "on": false }), &host).await;
     assert_eq!(s, StatusCode::OK, "{body}");
     assert!(crate::server::browser_bypass::active_for(&pane, &agent).is_none());
+    // The person ended it: the strip just goes, with no note telling them so.
+    let block = state.mstore.must_get::<crate::backend::obj::Block>(&pane).unwrap();
+    assert!(block.meta.get("browser:bypass").is_none_or(|v| v.is_null()));
 
     // A No cools down: the agent can't ask again at once.
     let asking = {
@@ -2083,4 +2097,78 @@ async fn bypass_is_granted_only_through_the_host_and_lifts_approvals_on_its_site
     assert_eq!(body["data"]["answer"], "declined");
     let (s, _) = post_json(&app, "/api/v1/ui/browser/request_bypass", request).await;
     assert_eq!(s, StatusCode::TOO_MANY_REQUESTS);
+}
+
+/// An Auto-approve grant ends after its agent goes quiet on the pane, and the
+/// strip says why; a Browser call keeps it alive. Take over takes the strip
+/// down with the grant (roadblocks report R9, R11).
+#[tokio::test]
+async fn auto_approve_ends_when_its_agent_goes_quiet_or_the_user_takes_over() {
+    use axum::http::StatusCode;
+    use crate::server::browser_bypass;
+    let state = test_state();
+    let ws_id = dispatch_apply(&state, Command::CreateWorkspace { name: "w".into() })
+        .await
+        .iter()
+        .find_map(|e| match e {
+            Event::WorkspaceCreated { workspace_id, .. } => Some(workspace_id.clone()),
+            _ => None,
+        })
+        .unwrap();
+    let tab_id = dispatch_apply(&state, Command::CreateTab { workspace_id: ws_id, name: "t".into() })
+        .await
+        .iter()
+        .find_map(|e| match e {
+            Event::TabCreated { tab_id, .. } => Some(tab_id.clone()),
+            _ => None,
+        })
+        .unwrap();
+    let own = stand_in_pane(&state, &tab_id).await;
+    let (agent, auth) = signed_agent_on(&state, &own);
+    let fake = BypassFakeHost::default();
+    *fake.url.lock().unwrap() = "https://github.com/example/repo/issues/1".into();
+    let port = fake.serve().await;
+    *state.host_ipc.lock().await = Some(crate::server::state::HostIpc { port, token: "host-ipc-token".into() });
+    let app = crate::server::build_router(state.clone());
+    let (s, body) = post_json(&app, "/api/v1/ui/browser/open", merged(&auth, serde_json::json!({ "url": "https://github.com/" }))).await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    let pane = body["data"]["pane"].as_str().unwrap().to_string();
+    let strip = |state: &AppState| {
+        let block = state.mstore.must_get::<crate::backend::obj::Block>(&pane).unwrap();
+        block.meta.get("browser:bypass").cloned().unwrap_or(serde_json::Value::Null)
+    };
+
+    // A grant that ends after one quiet second.
+    let idle = std::time::Duration::from_secs(1);
+    browser_bypass::tests_grant_idle(&state, &pane, &agent, idle);
+    assert_eq!(strip(&state)["agent"], agent.as_str());
+    // A Browser call on the pane, before the second is up, keeps it alive past it.
+    tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+    let (s, body) = post_json(&app, "/api/v1/ui/browser/request_bypass", merged(&auth, serde_json::json!({ "pane": pane, "reason": "x" }))).await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    assert_eq!(body["data"]["answer"], "granted");
+    tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+    assert!(browser_bypass::active_for(&pane, &agent).is_some(), "touched 0.6 s ago, so not quiet yet");
+    // Then nothing: it ends, and the strip says why.
+    let mut ended = serde_json::Value::Null;
+    for _ in 0..100 {
+        ended = strip(&state);
+        if ended.get("ended").is_some() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    assert_eq!(ended, serde_json::json!({ "agent": agent, "ended": browser_bypass::IDLE_REASON }));
+    assert!(browser_bypass::active_for(&pane, &agent).is_none());
+
+    // Take over ends a grant and takes its strip down.
+    browser_bypass::tests_grant_idle(&state, &pane, &agent, std::time::Duration::from_secs(600));
+    assert_eq!(strip(&state)["agent"], agent.as_str());
+    let oref = format!("block:{pane}");
+    let mut clear = crate::backend::obj::MetaMapType::new();
+    clear.insert("browser:owner_agent".into(), serde_json::Value::Null);
+    crate::server::browser_owner::guard_client_meta_write(&oref, &clear).unwrap();
+    crate::server::service::update_object_meta(&state.mstore, &oref, &clear).unwrap();
+    assert!(browser_bypass::active_for(&pane, &agent).is_none());
+    assert!(strip(&state).is_null(), "{}", strip(&state));
 }

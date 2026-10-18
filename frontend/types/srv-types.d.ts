@@ -556,6 +556,9 @@ declare global {
         reason?: string;
         /** Approval: the action, e.g. `Click "Submit"`. */
         what?: string;
+        /** Approval: the clicked element's text after its name (a menu
+         *  item's description), shown smaller; never part of `what`. */
+        description?: string;
         page?: string;
         /** Approval: where the form is sent. */
         action?: string;
@@ -583,6 +586,14 @@ declare global {
         expires_at: number;
     };
 
+    /** What `browser:bypass` holds after srv ended a grant on its own (its
+     *  time ran out, the agent went quiet, the agent turned it off): why, for
+     *  the header strip, until the next grant. */
+    type BrowserBypassEnded = {
+        agent: string;
+        ended: string;
+    };
+
     type MetaType = {
         view?: string;
         controller?: string;
@@ -600,7 +611,7 @@ declare global {
         /** The bypass the person granted the driving agent, shown as a red
          *  strip in the header. Written by srv only
          *  (SPEC_BROWSER_PANE_BYPASS_2026_10_16.md §3.3). */
-        "browser:bypass"?: BrowserBypass | null;
+        "browser:bypass"?: BrowserBypass | BrowserBypassEnded | null;
         /** The pane whose page opened this one as a popup, and that page's
          *  origin, shown as "Popup from …". Written by srv only
          *  (SPEC_BROWSER_PANE_POPUPS_ADOPTED_2026_10_08.md §3.4, §5). */
