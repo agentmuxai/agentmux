@@ -106,3 +106,36 @@ fn the_draft_is_kept_until_sent_and_goes_with_the_agent() {
     assert!(store.input_history_list("a", None, 10).unwrap().is_empty());
     assert_eq!(store.input_draft_get("a").unwrap(), None);
 }
+
+#[test]
+fn past_conversations_fill_the_history_once_before_what_is_kept() {
+    let store = store_with(&["a"]);
+    // Kept since input history shipped.
+    store.input_history_append(&send("a", "newest, typed today", 50), 100).unwrap();
+    let typed = vec![(10, "first ever".to_string()), (20, "/compact".to_string()), (30, "!git status".to_string())];
+    assert!(!store.input_history_backfilled("a").unwrap());
+    assert_eq!(store.input_history_backfill("a", &typed, 100, 60).unwrap(), 3);
+    assert!(store.input_history_backfilled("a").unwrap());
+    let all = store.input_history_list("a", None, 10).unwrap();
+    assert_eq!(texts(&all), ["newest, typed today", "!git status", "/compact", "first ever"], "older ones go before, by id");
+    assert!(all[1..].iter().all(|e| e.source == "backfill" && e.id <= 0));
+    assert_eq!((all[1].kind.as_str(), all[2].kind.as_str(), all[3].kind.as_str()), ("bang", "slash", "message"));
+    // Paging back walks into them.
+    let older = store.input_history_list("a", Some(all[1].id), 10).unwrap();
+    assert_eq!(texts(&older), ["/compact", "first ever"]);
+    // Once only.
+    assert_eq!(store.input_history_backfill("a", &typed, 100, 70).unwrap(), 0);
+    assert_eq!(store.input_history_list("a", None, 10).unwrap().len(), 4);
+}
+
+#[test]
+fn a_backfill_keeps_the_newest_up_to_the_cap() {
+    let store = store_with(&["a", "b"]);
+    store.input_history_append(&send("a", "kept", 100), 3).unwrap();
+    let typed: Vec<(i64, String)> = (0..5).map(|i| (i, format!("old {i}"))).collect();
+    store.input_history_backfill("a", &typed, 3, 1).unwrap();
+    assert_eq!(texts(&store.input_history_list("a", None, 10).unwrap()), ["kept", "old 4", "old 3"]);
+    // An agent with nothing typed before is marked filled too.
+    assert_eq!(store.input_history_backfill("b", &[], 3, 1).unwrap(), 0);
+    assert!(store.input_history_backfilled("b").unwrap());
+}

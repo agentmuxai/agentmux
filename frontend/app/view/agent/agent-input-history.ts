@@ -104,6 +104,15 @@ function onChanged(agentId: string): void {
         .catch(() => {});
 }
 
+/** srv filled the agent's history from its past conversations: those are older than every entry shown. */
+function onBackfilled(agentId: string): void {
+    const c = caches.get(agentId);
+    if (!c) return;
+    c.complete = false;
+    const oldest = c.ids.find((id) => id !== 0);
+    void (c.loading ?? Promise.resolve()).then(() => load(agentId, c, oldest));
+}
+
 function cacheFor(agentId: string): Cache {
     let c = caches.get(agentId);
     if (!c) {
@@ -115,6 +124,7 @@ function cacheFor(agentId: string): Cache {
         subscribed = true;
         onMuxEvent(WpsEvent.AgentInputHistoryChanged, (data) => {
             if (data.what === "history") onChanged(data.agent_id);
+            else if (data.what === "backfill") onBackfilled(data.agent_id);
         });
     }
     return c;
@@ -136,7 +146,8 @@ export function watchAgentHistory(agentId: string, watcher: (where: Arrival, n: 
 export function loadOlderAgentHistory(agentId: string): Promise<void> {
     const c = cacheFor(agentId);
     if (c.complete || c.loading) return c.loading ?? Promise.resolve();
-    const oldest = c.ids.find((id) => id > 0);
+    // Ids of entries filled from past conversations go below zero.
+    const oldest = c.ids.find((id) => id !== 0);
     return load(agentId, c, oldest);
 }
 

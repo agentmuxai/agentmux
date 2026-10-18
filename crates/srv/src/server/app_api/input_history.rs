@@ -31,6 +31,48 @@ fn kept_per_agent(state: &AppState) -> usize {
     extra.get("agent:inputhistory:max").and_then(|v| v.as_u64()).unwrap_or(10000) as usize
 }
 
+/// Agents whose history is being filled from their past conversations, so a
+/// second composer opening meanwhile doesn't start another fill.
+static BACKFILLING: std::sync::Mutex<std::collections::BTreeSet<String>> = std::sync::Mutex::new(std::collections::BTreeSet::new());
+
+/// The first time a composer reads an agent's history, fill it once with what
+/// the user typed in the agent's past conversations (spec §4.7), in the
+/// background: the composer gets what is kept now, and every window hears
+/// `backfill` when the older entries are in. A history index still being
+/// built, or any failure, leaves it to the next read.
+fn maybe_backfill(state: &AppState, agent_id: &str) {
+    let max = kept_per_agent(state);
+    if max == 0 || state.mstore.input_history_backfilled(agent_id).unwrap_or(true) {
+        return;
+    }
+    if !BACKFILLING.lock().unwrap_or_else(|e| e.into_inner()).insert(agent_id.to_string()) {
+        return;
+    }
+    let (state, agent_id) = (state.clone(), agent_id.to_string());
+    tokio::spawn(async move {
+        let (s, id) = (state.clone(), agent_id.clone());
+        let filled = tokio::task::spawn_blocking(move || -> Result<usize, String> {
+            let Some(row) = s.mstore.agent_def_get(&id).map_err(|e| e.to_string())? else { return Ok(0) };
+            let owner = crate::backend::history::HistoryOwner::of_row(&row);
+            let typed = s.history_service.typed_by_user(&owner, max).map_err(|e| e.to_string())?;
+            s.mstore
+                .input_history_backfill(&id, &typed, max, agentmux_common::time::now_ms())
+                .map_err(|e| e.to_string())
+        })
+        .await;
+        BACKFILLING.lock().unwrap_or_else(|e| e.into_inner()).remove(&agent_id);
+        match filled {
+            Ok(Ok(0)) => {}
+            Ok(Ok(n)) => {
+                tracing::info!(agent_id = %agent_id, entries = n, "input history: filled from past conversations");
+                changed(&state, &agent_id, "backfill");
+            }
+            Ok(Err(e)) => tracing::info!(agent_id = %agent_id, error = %e, "input history: not filled yet; the next read tries again"),
+            Err(e) => tracing::warn!(agent_id = %agent_id, error = %e, "input history: the fill stopped"),
+        }
+    });
+}
+
 /// Tell every window `agent_id`'s history or draft changed.
 fn changed(state: &AppState, agent_id: &str, what: &str) {
     state.broker.publish_event::<crate::backend::mps_events::AgentInputHistoryChanged>(
@@ -79,6 +121,9 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     engine.register_typed(COMMAND_AGENT_INPUT_HISTORY, move |cmd: CommandInputHistoryData, _ctx| {
         let s = s.clone();
         async move {
+            if cmd.before_id.is_none() {
+                maybe_backfill(&s, &cmd.agent_id);
+            }
             let limit = cmd.limit.unwrap_or(DEFAULT_LIMIT).min(MAX_LIMIT) as usize;
             let entries = s
                 .mstore

@@ -38,6 +38,7 @@ pub(super) fn purge_agent_dependents(
         // What the user typed to it, and its unsent draft.
         "db_agent_input_history",
         "db_agent_input_drafts",
+        "db_agent_input_history_backfilled",
     ];
     let present: std::collections::HashSet<String> = {
         let mut stmt = conn.prepare("SELECT name FROM sqlite_master WHERE type='table'")?;
