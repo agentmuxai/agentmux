@@ -357,3 +357,19 @@ async fn closing_the_last_window_keeps_its_name_for_the_next_start() {
     assert_eq!(restored_window_name(&state.mstore, &restored), None);
     assert_eq!(forget_restored_window_name(&state.mstore, &restored), None);
 }
+
+#[tokio::test]
+async fn a_name_whose_write_failed_is_kept_by_the_next_save() {
+    let state = test_state();
+    no_windows(&state);
+    let (win_id, ws) = window(&state, "main", "agent", 0, 0).await;
+    // A restore left this window's name waiting; writing it to the window failed.
+    let mut client = state.mstore.get_all::<Client>().unwrap().into_iter().next().unwrap();
+    client.meta.insert(NAMES_META_KEY.into(), json!({ ws.clone(): "Release work" }));
+    state.mstore.update(&mut client).unwrap();
+    let win = state.mstore.get::<Window>(&win_id).unwrap().unwrap();
+    assert_eq!(window_name(&win), None);
+    assert_eq!(saved_name(&state.mstore, &win).as_deref(), Some("Release work"));
+    let record = snapshot_session(&state.mstore, true).unwrap();
+    assert_eq!(record["windows"][0]["window"]["name"], "Release work");
+}

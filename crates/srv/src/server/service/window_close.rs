@@ -31,7 +31,7 @@ pub(crate) async fn handle_close_window(state: &AppState, call: &WebCallType) ->
     // And its name, which the last close's session record keeps: the row is
     // gone by then.
     let (ws_id, window_name): (Option<String>, Option<String>) = match store.get::<Window>(&window_id) {
-        Ok(Some(w)) => (Some(w.workspaceid.clone()), super::session_windows::window_name(&w)),
+        Ok(Some(w)) => (Some(w.workspaceid.clone()), super::session_windows::saved_name(store, &w)),
         Ok(None) => (None, None),
         Err(e) => {
             return WebReturnType::error(format!(

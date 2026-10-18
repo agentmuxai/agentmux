@@ -48,6 +48,13 @@ const WAITING_META_KEY: &str = "session:restored_windows";
 /// Restored windows' names, by workspace, waiting for their windows.
 const NAMES_META_KEY: &str = "session:restored_window_names";
 
+/// The name window `w` goes by in a session record: the user's, or one a
+/// restore still holds for it, whose write to the window failed: the next
+/// save keeps it, so the restore after names it.
+pub(crate) fn saved_name(store: &Store, w: &Window) -> Option<String> {
+    window_name(w).or_else(|| restored_window_name(store, &w.workspaceid))
+}
+
 /// The name the user gave window `w`, if any.
 pub(crate) fn window_name(w: &Window) -> Option<String> {
     w.meta
@@ -109,7 +116,7 @@ pub(crate) fn snapshot_session(store: &Store, for_quit: bool) -> Option<Value> {
                 "width": w.winsize.width,
                 "height": w.winsize.height,
             });
-            if let Some(name) = window_name(&w) {
+            if let Some(name) = saved_name(store, &w) {
                 entry["window"]["name"] = json!(name);
             }
             Some(entry)
