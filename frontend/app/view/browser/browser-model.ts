@@ -198,6 +198,11 @@ export class BrowserViewModel {
     /** The bypass the person granted the driving agent, while it lasts
      *  (`browser:bypass`, written by srv; SPEC_BROWSER_PANE_BYPASS_2026_10_16.md §3.3). */
     bypassAtom: Accessor<BrowserBypass | undefined>;
+    /** What the driving agent did here, newest last (`browser:actions`,
+     *  written by srv; PLAN_BROWSER_DRIVER_FIXES_2026_10_17.md §5). */
+    actionsAtom: Accessor<BrowserActions>;
+    /** The person paused the driving agent (`browser:paused`, written by srv). */
+    pausedAtom: Accessor<boolean>;
     /** Now, in ms: ticks while a bypass shows, for its countdown and expiry. */
     private _now = createSignal(Date.now());
     /** The sites the driving agent limited this pane to (`browser:allowed_origins`,
@@ -430,7 +435,8 @@ export class BrowserViewModel {
             });
             this.bypassAtom = createMemo(() => {
                 const b = rawBypass();
-                return b && b.expires_at > this._now[0]() ? b : undefined;
+                // Paused, its clock stands still: shown however long the pause.
+                return b && (typeof b.paused_left === "number" || b.expires_at > this._now[0]()) ? b : undefined;
             });
             // Tick only while a bypass is shown: its countdown, and the strip
             // going away at expiry even before srv's own update arrives.
@@ -440,6 +446,14 @@ export class BrowserViewModel {
                 const t = setInterval(() => this._now[1](Date.now()), 15_000);
                 onCleanup(() => clearInterval(t));
             });
+            this.actionsAtom = createMemo((): BrowserActions => {
+                const v = this.meta()?.["browser:actions"];
+                const entries = Array.isArray(v?.entries)
+                    ? v.entries.filter((e) => typeof e?.ts === "number" && typeof e?.kind === "string")
+                    : [];
+                return { count: typeof v?.count === "number" ? v.count : entries.length, entries };
+            });
+            this.pausedAtom = createMemo(() => this.meta()?.["browser:paused"] === true);
             this.driverAgentAtom = createMemo(() => {
                 const v = this.meta()?.["browser:owner_agent"];
                 return typeof v === "string" && v.trim() ? v.trim() : undefined;
@@ -906,7 +920,20 @@ export class BrowserViewModel {
 
     bypassMinutesLeft(): number {
         const b = this.bypassAtom();
-        return b ? Math.max(1, Math.ceil((b.expires_at - this._now[0]()) / 60_000)) : 0;
+        if (!b) return 0;
+        const left = typeof b.paused_left === "number" ? b.paused_left : b.expires_at - this._now[0]();
+        return Math.max(1, Math.ceil(left / 60_000));
+    }
+
+    /** The person's Pause or Resume. Through the host, never srv directly:
+     *  srv takes it only from the host, so no agent can resume itself.
+     *  Rejects with srv's reason, for the strip to show. */
+    setPaused(paused: boolean): Promise<void> {
+        const approvals = getApi().approvals;
+        if (typeof approvals?.setBrowserPaused !== "function") {
+            return Promise.reject(new Error("This build of AgentMux can't pause an agent."));
+        }
+        return approvals.setBrowserPaused(this.blockId, paused);
     }
 
     /** The person's Bypass (on, for `minutes`) or End bypass. Through the
