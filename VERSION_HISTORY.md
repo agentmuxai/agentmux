@@ -1,5 +1,22 @@
 # AgentMux Version History
 
+## 0.59.32 — 2026-10-17
+
+- Quick Fork goes straight to the new conversation: the forked agent's pane opens with its parent's full history, an exact copy, with no black pane or My Agents screen in between
+- Browser panes: the red Bypass button is now called Auto-approve (Turn on auto-approve, Stop auto-approve), and an agent asks with request_auto_approve.
+- After AgentMux restarts its background service, the notice says how many running agents it stopped; each resumes when you open it
+- An agent's question is auto-answered on time and a failed turn is retried on time even when its pane isn't visible, the rate-limit wait counts down, and the auto-answer note in the transcript states the real timeout.
+- Closing one agent tab of a pane with several tabs removes it, instead of leaving a "(No View)" tab behind
+- The agent watchdog's max-runtime and idle limits now work for every kind of agent, not only terminal ones (idle time counts only while a turn runs). A pending-shutdown warning now gets through a notification pause, and the session archiver runs its first sweep a minute after start instead of an hour.
+- When a page in a browser pane an agent drives shows its own alert, confirm or "Leave site?" box, the pane no longer hangs: the confirm that follows the agent's own click under auto-approve is accepted for it, any other is shown to you in the pane, and the agent is told what happened.
+- Browser panes: an approval shows a menu item's description apart from its name and says why it asks; a long link that merely mentions a word like "confirm", a download link and a file: link no longer ask for approval; Auto-approve ends after 15 minutes without a Browser call from its agent and the header says why it ended; Take over no longer leaves the Auto-approve strip showing; the upgrade note tells resumed agents to reload tool descriptions they loaded before.
+- A browser pane an agent drives now keeps a log of what the agent did there (each click, fill, navigation, upload and approval, and how it went; never what it typed): open it from Log in the pane's header, and the agent can read it with Browser's log action. A new Pause button holds the agent's actions in that pane, and its auto-approve time, until you resume.
+- Agents can find a page element by its role and name without reading the whole page, and can narrow a first snapshot to one part of a page by its name
+- Every window has the same minimum size on Windows, Linux and macOS: 380 wide and 39 tall
+- AgentMux keeps agent history forever: Claude keeps its session files for the most it allows (100 years) instead of 180 days, old archives are no longer deleted at 2 GB, and every jekt audit entry is kept in a file instead of the last 100 in memory
+- Signing in from a browser pane an agent limited to some sites no longer leaves the pane blank: AgentMux asks whether to allow the sign-in site, even during a hand-off, and a navigation it stops always says why.
+- Coordination-channel posts made in the same millisecond now read newest-first in the order they were written, which also fixes a test that failed about half the time
+
 ## 0.59.31 — 2026-10-17
 
 - Agents never type into or read a Social Security number, ITIN or taxpayer ID field in a browser pane: it is handed to you to fill, like a password.
