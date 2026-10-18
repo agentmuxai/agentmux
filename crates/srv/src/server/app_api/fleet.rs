@@ -423,6 +423,10 @@ pub(crate) async fn fleet_broadcast_impl(
                     None, target_agent, &outcome.block_id, FLEET_BROADCAST_AUDIT_ACTION,
                     true, None, &msg_id, None,
                 );
+                // What the user typed, in each recipient of this instance's history.
+                if matches!(routes.get(&outcome.block_id), Some(BroadcastRoute::Local(_))) {
+                    super::input_history::record_broadcast(state, &outcome.block_id, &message);
+                }
                 result.succeeded.push(outcome.block_id);
             }
             Err(error) => {

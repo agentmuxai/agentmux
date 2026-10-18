@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-18
 **Author:** QTest
-**Status:** active — phase 1 shipped in PR #5109, phase 3's search in the composer in PR #5111; phases 2 and 4, the History tab and the palette entry not started.
+**Status:** active — phase 1 shipped in PR #5109, phase 3's search in the composer in PR #5111, phase 4 in PR #5112; phase 2, the History tab and the palette entry not started.
 **Origin:** the 0.59.31 → 0.59.32 upgrade lost every pane's ArrowUp history
 (`docs/reports/REPORT_UPGRADE_0_59_32_DOGFOOD_FINDINGS_2026_10_18.md` §2.4). The
 operator asked for "a robust system to track that data over the long term; it
@@ -67,7 +67,7 @@ One entry per message the user sends to an agent from AgentMux's own UI:
 | Source | Recorded | Notes |
 |---|---|---|
 | The agent pane's composer | yes | Plain text, slash commands (`/compact`), bang commands (`!cmd`) |
-| A Swarm broadcast the user typed | yes, in each recipient's history | `source: swarm`, so a later view can group them |
+| A Swarm broadcast the user typed | yes, in each recipient's history | `source: swarm`, so a later view can group them; recorded by srv for each recipient on this instance it reached (`fleet.rs`, phase 4) |
 | Jekts, `[AgentMux]` system notes, scheduled prompts | no | Not the user's typing |
 | Attachments | names only | A reference (`name`, `kind`), never the file's contents |
 
@@ -126,8 +126,9 @@ migration.
 - Default: keep the newest **10,000 entries per agent**, with no age limit
   (`INPUT_HISTORY_MAX`). At typical use that is years of history and a few
   MB per agent. An entry is at most 64 KB: a pasted file is not history.
-- Setting `agent:inputhistory:max` (0 turns recording off for every agent):
-  phase 4.
+- Setting `agent:inputhistory:max` (default 10000; 0 keeps nothing new,
+  for every agent, while what is kept stays until cleared), read on every
+  send (phase 4).
 - Trimming runs on append, in the same transaction, oldest first.
 - Deleting an agent deletes its history and draft, at the moment its other
   data is deleted: a deletion that can still be undone keeps them.
@@ -220,7 +221,7 @@ files `Agents search_history` already reads) and records them with
 | 1 (done) | Tables, append/list/search/delete/clear/draft API, composer reads and writes it, events | The loss the operator reported: ArrowUp and the draft survive restarts and upgrades |
 | 2 | Backfill from past sessions, import of `sessionStorage` | History starts full |
 | 3 (search done) | Reverse search, the History tab, delete and clear, palette entry | Finding and managing it |
-| 4 | Retention setting in Settings, Swarm broadcasts recorded | Completeness |
+| 4 (done) | Retention setting, Swarm broadcasts recorded | Completeness |
 
 ## 6. Testing
 

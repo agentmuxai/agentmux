@@ -24,6 +24,13 @@ fn item(e: crate::backend::storage::agent_input_history::InputHistoryEntry) -> I
     }
 }
 
+/// How many entries each agent keeps, newest first (`agent:inputhistory:max`,
+/// 10,000 unless set); 0 turns recording off.
+fn kept_per_agent(state: &AppState) -> usize {
+    let extra = state.config_watcher.get_settings().extra;
+    extra.get("agent:inputhistory:max").and_then(|v| v.as_u64()).unwrap_or(10000) as usize
+}
+
 /// Tell every window `agent_id`'s history or draft changed.
 fn changed(state: &AppState, agent_id: &str, what: &str) {
     state.broker.publish_event::<crate::backend::mps_events::AgentInputHistoryChanged>(
@@ -31,6 +38,40 @@ fn changed(state: &AppState, agent_id: &str, what: &str) {
         vec![],
         0,
     );
+}
+
+/// A Swarm broadcast the user typed reached the agent in `block_id`: keep it
+/// in that agent's history (`source: swarm`), as if typed in its composer.
+/// A pane with no defined agent keeps nothing.
+pub(crate) fn record_broadcast(state: &AppState, block_id: &str, text: &str) {
+    let max = kept_per_agent(state);
+    let Some(agent_id) = state
+        .mstore
+        .get::<crate::backend::obj::Block>(block_id)
+        .ok()
+        .flatten()
+        .and_then(|b| crate::backend::obj::block_meta_agent_id(&b.meta).map(|id| id.trim().to_string()))
+        .filter(|id| !id.is_empty())
+    else {
+        return;
+    };
+    if max == 0 {
+        return;
+    }
+    let entry = crate::backend::storage::agent_input_history::NewInputHistoryEntry {
+        agent_id: &agent_id,
+        sent_at_ms: agentmux_common::time::now_ms(),
+        text,
+        kind: "message",
+        source: "swarm",
+        session_id: None,
+        attachments: None,
+    };
+    match state.mstore.input_history_append(&entry, max) {
+        Ok(Some(_)) => changed(state, &agent_id, "history"),
+        Ok(None) => {}
+        Err(e) => tracing::warn!(block_id, error = %e, "input history: couldn't keep a broadcast"),
+    }
 }
 
 pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
@@ -67,10 +108,11 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 session_id: None,
                 attachments: attachments.as_deref(),
             };
-            let saved = s
-                .mstore
-                .input_history_append(&entry, crate::backend::storage::agent_input_history::INPUT_HISTORY_MAX)
-                .map_err(|e| format!("agent.input-history-append: {e}"))?;
+            let max = kept_per_agent(&s);
+            if max == 0 {
+                return Ok(InputHistoryAppendResult { entry: None });
+            }
+            let saved = s.mstore.input_history_append(&entry, max).map_err(|e| format!("agent.input-history-append: {e}"))?;
             if saved.is_some() {
                 changed(&s, &cmd.agent_id, "history");
             }
@@ -132,4 +174,48 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
             Ok(InputDraftResult { text })
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn a_swarm_broadcast_is_kept_in_the_recipient_agents_history() {
+        let state = crate::server::tests::test_state();
+        state
+            .mstore
+            .conn()
+            .lock()
+            .unwrap()
+            .execute("INSERT INTO db_agents (id, name, provider) VALUES ('uid-1', 'A', 'claude')", [])
+            .unwrap();
+        let block = |oid: &str, agent: Option<&str>| {
+            let mut b = crate::backend::obj::Block { oid: oid.into(), ..Default::default() };
+            if let Some(a) = agent {
+                b.meta.insert("agentId".into(), serde_json::json!(a));
+            }
+            state.mstore.insert(&mut b).unwrap();
+        };
+        block("b-agent", Some(" uid-1 "));
+        {
+            // The legacy key is read too.
+            let mut b = crate::backend::obj::Block { oid: "b-legacy".into(), ..Default::default() };
+            b.meta.insert("agent:id".into(), serde_json::json!("uid-1"));
+            state.mstore.insert(&mut b).unwrap();
+        }
+        block("b-quick", Some("claude"));
+        block("b-shell", None);
+        for b in ["b-agent", "b-quick", "b-shell"] {
+            record_broadcast(&state, b, "merge on approval");
+        }
+        record_broadcast(&state, "b-legacy", "and then release");
+        let kept = state.mstore.input_history_list("uid-1", None, 10).unwrap();
+        assert_eq!(kept.len(), 2);
+        assert_eq!(kept[0].text, "and then release");
+        let kept = &kept[1..];
+        assert_eq!((kept[0].text.as_str(), kept[0].source.as_str()), ("merge on approval", "swarm"));
+        assert!(state.mstore.input_history_list("claude", None, 10).unwrap().is_empty(), "a provider key isn't an agent");
+        assert_eq!(kept_per_agent(&state), 10000, "the default");
+    }
 }
