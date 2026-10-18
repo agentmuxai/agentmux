@@ -428,8 +428,6 @@ impl SessionArchiver {
             }
         }
 
-
-
         Ok(stats)
     }
 }

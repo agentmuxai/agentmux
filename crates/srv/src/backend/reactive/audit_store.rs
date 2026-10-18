@@ -88,7 +88,7 @@ fn write_line(file: &mut std::fs::File, channel_name: &str, entry: &AuditLogEntr
 }
 
 /// The entries in the file at `path`, oldest first; lines that don't parse are skipped.
-#[allow(dead_code)] // read by the History page's audit view
+#[allow(dead_code)] // used by the tests; no production reader yet
 pub fn read_all(path: &Path) -> Vec<AuditLogEntry> {
     let Ok(text) = std::fs::read_to_string(path) else { return Vec::new() };
     text.lines().filter_map(|l| serde_json::from_str(l).ok()).collect()
