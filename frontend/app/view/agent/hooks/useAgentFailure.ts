@@ -48,6 +48,7 @@ import { addEventListener as addPaneEventListener } from "@/app/store/agent-pane
 import type { AgentPaneModel } from "@/app/store/agent-pane-model";
 import type { PaneFailure } from "@/app/store/agent-pane-state/types";
 import { failureToRow, isTransient, type FailureRow } from "../failure/failure-accessory";
+import { registerRecycleBlocker } from "@/app/store/recycle-blockers";
 import { copyErrorReport } from "@/app/errors/CopyErrorButton";
 import { formatErrorReport } from "@/app/errors/error-report";
 
@@ -157,6 +158,8 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
     const [expanded, setExpanded] = createSignal(false);
     const [retrying, setRetrying] = createSignal(false);
     const [autoRetryIn, setAutoRetryIn] = createSignal<number | null>(null);
+    // A reload doesn't re-arm the countdown (only a live failure does).
+    onCleanup(registerRecycleBlocker(() => (autoRetryIn() != null ? "a failed turn is about to be retried" : null)));
     // Take over's two-step confirmation (`live_elsewhere` only). View-local,
     // like `expanded`: nothing else needs to agree on it.
     const [takeoverArmed, setTakeoverArmed] = createSignal(false);

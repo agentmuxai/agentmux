@@ -11,7 +11,9 @@
 //! reloads; the new document calls `take_reload_snapshot` while it boots, which
 //! hands back the picture and, 60 s later, logs the renderer's settled size.
 //!
-//! The IPC router has no browser context, so the page passes its own label.
+//! The IPC router has no browser context, so the page passes its own label. Any
+//! app page could therefore name another window and take its pending cover;
+//! only the app's own pages hold the IPC token, so that is accepted.
 
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock, Mutex};
@@ -54,6 +56,7 @@ fn take(label: &str) -> Option<Pending> {
 /// window has no reported renderer, or shares it with another window: a reload
 /// then frees only part of what the process holds, so its size says nothing
 /// about this window (spec §4.1).
+#[cfg_attr(target_os = "linux", allow(dead_code))]
 fn own_renderer_pid(entries: &[crate::renderer_map::RendererEntry], label: &str) -> Option<u32> {
     let pid = entries.iter().find(|e| e.label == label)?.pid;
     let shared = entries.iter().any(|e| e.pid == pid && e.label != label);
@@ -61,12 +64,20 @@ fn own_renderer_pid(entries: &[crate::renderer_map::RendererEntry], label: &str)
 }
 
 /// Private memory of `label`'s renderer in MB (private working set on
-/// Windows, Tower's metric).
+/// Windows, Tower's metric). Not on Linux: the renderer map holds the
+/// sandbox-namespace PID there, which only srv translates (Tower), so a match
+/// against host PIDs could name another process.
+#[cfg(not(target_os = "linux"))]
 fn renderer_mb(state: &AppState, label: &str) -> Option<u64> {
     let pid = own_renderer_pid(&crate::renderer_map::snapshot(state), label)?;
     let procs = agentmux_procstats::snapshot().ok()?;
     let bytes = procs.iter().find(|p| p.pid == pid)?.mem_private?;
     Some(bytes / (1024 * 1024))
+}
+
+#[cfg(target_os = "linux")]
+fn renderer_mb(_state: &AppState, _label: &str) -> Option<u64> {
+    None
 }
 
 /// Whether the window is on screen, so a picture of it can cover the reload.
@@ -115,6 +126,20 @@ pub async fn recycle_begin(state: &Arc<AppState>, args: &serde_json::Value) -> R
     );
     put(label, Pending { at: Instant::now(), reason, before_mb, cover });
     Ok(serde_json::json!({ "before_mb": before_mb }))
+}
+
+/// `recycle_cancel { label }`: something the reload would lose started while
+/// the page prepared, so it won't reload. Drop the pending recycle, so a later
+/// ordinary load of the window doesn't show its picture.
+pub fn recycle_cancel(args: &serde_json::Value) -> Result<serde_json::Value, String> {
+    let label = args
+        .get("label")
+        .and_then(|v| v.as_str())
+        .ok_or("recycle_cancel: label is required")?;
+    if take(label).is_some() {
+        tracing::info!(target: "recycle", label, "[recycle] {label} cancelled before the reload");
+    }
+    Ok(serde_json::Value::Null)
 }
 
 /// `take_reload_snapshot { label }`: the new document is booting. Hand back
@@ -179,6 +204,14 @@ mod tests {
         assert_eq!(first.cover.as_deref(), Some("jpeg"));
         assert_eq!(first.before_mb, Some(900));
         assert!(take(label).is_none(), "a later ordinary load of the window is not a recycle");
+    }
+
+    #[test]
+    fn a_cancelled_recycle_leaves_nothing_for_the_next_load() {
+        let label = "recycle-test-cancel";
+        put(label, Pending { at: Instant::now(), reason: "command".into(), before_mb: None, cover: Some("jpeg".into()) });
+        recycle_cancel(&serde_json::json!({ "label": label })).unwrap();
+        assert!(take(label).is_none());
     }
 
     #[test]

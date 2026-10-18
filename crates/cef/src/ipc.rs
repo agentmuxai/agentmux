@@ -270,6 +270,7 @@ async fn route_command(
         // A window recycling its renderer (commands/recycle.rs): the old page
         // begins it, the new one takes its cover picture while it boots.
         "recycle_begin" => commands::recycle::recycle_begin(state, args).await,
+        "recycle_cancel" => commands::recycle::recycle_cancel(args),
         "take_reload_snapshot" => commands::recycle::take_reload_snapshot(state, args),
         "capture_window_viewport" => {
             // The calling window's own viewport, unclipped, for its tear-off

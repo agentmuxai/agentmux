@@ -32,6 +32,7 @@
  */
 
 import { batch, createSignal, onCleanup, onMount, type Accessor } from "solid-js";
+import { noteOlderHistoryLoaded } from "../virtualization/scroll-memo";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import type { AgentPaneModel } from "@/app/store/agent-pane-registration";
@@ -256,6 +257,7 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
             }
 
             setHistoryOffset(newOffset);
+            if (newNodes.length > 0) noteOlderHistoryLoaded(opts.blockId);
             opts.log("history", `loaded ${newNodes.length} older messages (offset ${historyOffset()})`);
         } catch (err: any) {
             opts.log("history", `failed to load older messages: ${err?.message ?? String(err)}`, "warn");

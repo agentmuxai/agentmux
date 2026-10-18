@@ -44,6 +44,7 @@ import { IconButton } from "@/app/element/ui";
 import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import { type JSX, Show, createEffect, createSignal, on, onCleanup, onMount } from "solid-js";
+import { registerRecycleBlocker } from "@/app/store/recycle-blockers";
 import { eventBelongsToPaneOf } from "@/util/focusutil";
 
 export interface BtwOverlayProps {
@@ -69,6 +70,12 @@ export function BtwOverlay(props: BtwOverlayProps): JSX.Element {
     const [answer, setAnswer] = createSignal("");
     const [streamError, setStreamError] = createSignal<string | null>(null);
     const [done, setDone] = createSignal(false);
+    // The answer streams into this component only: a reload would cut it off.
+    onCleanup(
+        registerRecycleBlocker(() =>
+            !done() && !props.error && !streamError() ? "a /btw answer is still coming in" : null
+        )
+    );
 
     // Reset local streaming state whenever a NEW ask starts, keyed on
     // `askId` rather than `requestId`/`question` — this component's

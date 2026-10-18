@@ -7,6 +7,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const api = {
     windows: {
         recycleBegin: vi.fn(async () => ({ before_mb: 900 })),
+        recycleCancel: vi.fn(async () => {}),
         takeReloadSnapshot: vi.fn(async () => ({ jpeg_base64: null as string | null })),
     },
     reloadWindow: vi.fn(),
@@ -24,10 +25,11 @@ const showTearOffSnapshot = vi.fn();
 vi.mock("@/app/init/startup-splash", () => ({ showTearOffSnapshot: (j: string) => showTearOffSnapshot(j) }));
 
 import { recycleBlockers, registerRecycleBlocker } from "./recycle-blockers";
-import { recycleWindow, showReloadCover } from "./recycle";
+import { recycleWindow, resetRecycleForTests, showReloadCover } from "./recycle";
 
 beforeEach(() => {
     vi.clearAllMocks();
+    resetRecycleForTests();
     order.length = 0;
     api.windows.recycleBegin.mockImplementation(async () => {
         order.push("begin");
@@ -65,6 +67,30 @@ describe("recycleWindow", () => {
         await expect(recycleWindow("command")).resolves.toBe(true);
         expect(order).toEqual(["snapshots", "scroll", "drafts", "begin", "reload"]);
         expect(api.windows.recycleBegin).toHaveBeenCalledWith("main", "command");
+    });
+
+    it("looks again before reloading, and cancels if something started meanwhile", async () => {
+        let off = () => {};
+        api.windows.recycleBegin.mockImplementationOnce(async () => {
+            // The user queues a message while the host takes the picture.
+            off = registerRecycleBlocker(() => "a message is waiting to be sent");
+            return { before_mb: 900 };
+        });
+        await expect(recycleWindow()).resolves.toBe(false);
+        off();
+        expect(api.windows.recycleCancel).toHaveBeenCalledWith("main");
+        expect(api.reloadWindow).not.toHaveBeenCalled();
+        expect(pushFlashError).toHaveBeenCalledTimes(1);
+        // Not stuck: the next try runs.
+        await expect(recycleWindow()).resolves.toBe(true);
+    });
+
+    it("refuses a second recycle while one is in flight", async () => {
+        const first = recycleWindow();
+        await expect(recycleWindow()).resolves.toBe(false);
+        await expect(first).resolves.toBe(true);
+        expect(api.windows.recycleBegin).toHaveBeenCalledTimes(1);
+        expect(api.reloadWindow).toHaveBeenCalledTimes(1);
     });
 
     it("still reloads when the host can't record it", async () => {

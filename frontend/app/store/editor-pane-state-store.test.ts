@@ -32,6 +32,7 @@ import {
     deserializeEditorBuffer,
 } from "./editor-pane-state-store";
 import { hydrateDocTabs, persistDocTabs } from "@/app/doc-tabs/doc-tabs";
+import { recycleBlockers } from "./recycle-blockers";
 
 function assertActiveInvariant(state: EditorPaneState): void {
     if (state.tabs.length === 0) {
@@ -393,6 +394,16 @@ describe("editor-pane-state-store (slice #10, Phase 1A)", () => {
         // ClearDirty on already-clean tab → no event
         const r2 = update(r.state, { type: "ClearDirty", tabId: a.id });
         expect(r2.events).toEqual([]);
+    });
+
+    it("a dirty tab blocks a renderer recycle until it is saved", () => {
+        registerEditorPane("blk-1");
+        dispatch("blk-1", { type: "OpenFile", path: "C:/a.ts" });
+        const tabId = snapshot("blk-1")!.tabs[0].id;
+        dispatch("blk-1", { type: "MarkDirty", tabId });
+        expect(recycleBlockers()).toContain("an editor has unsaved changes");
+        dispatch("blk-1", { type: "ClearDirty", tabId });
+        expect(recycleBlockers()).not.toContain("an editor has unsaved changes");
     });
 
     // ─── invariant 10: TabContentLoaded sets loaded + hash, clears err ─

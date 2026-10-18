@@ -17,6 +17,7 @@
  */
 
 import { createEffect, onCleanup, untrack, type Accessor } from "solid-js";
+import { registerRecycleBlocker } from "@/app/store/recycle-blockers";
 import { readSession, writeSession } from "../reload-persistence";
 
 const KEY = "agentmux:scroll:";
@@ -24,6 +25,14 @@ const KEY = "agentmux:scroll:";
 export type ScrollMemo = { bottom: true } | { nodeId: string; offsetPx: number };
 
 const capturers = new Map<string, () => ScrollMemo | null>();
+
+/** Panes that loaded history older than their restore read, this page. */
+const olderLoaded = new Set<string>();
+
+/** `useHistoryPagination` loaded an older page into `blockId`'s pane. */
+export function noteOlderHistoryLoaded(blockId: string): void {
+    olderLoaded.add(blockId);
+}
 
 /** How long, and for how many frames at most, a restored position is held while the rows settle. */
 const RESTORE_HOLD_MS = 1000;
@@ -98,6 +107,13 @@ export function useScrollMemo(opts: {
     onCleanup(() => {
         if (capturers.get(blockId) === capture) capturers.delete(blockId);
     });
+    // A reload reads only the tail, so a pane scrolled up into pages it loaded
+    // later would come back at the bottom.
+    onCleanup(
+        registerRecycleBlocker(() =>
+            olderLoaded.has(blockId) && !untrack(opts.following) ? "an agent pane is scrolled up into older history" : null
+        )
+    );
     let restored = false;
     createEffect(() => {
         if (restored || !opts.historyReady()) return;

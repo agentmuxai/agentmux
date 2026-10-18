@@ -30,6 +30,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PaneFailure } from "@/app/store/agent-pane-state/types";
 import type { AgentPaneEvent } from "@/app/store/agent-pane-state-store";
 import { __resetListeners, fireEvent } from "@/app/store/agent-pane-state-store";
+import { recycleBlockers } from "@/app/store/recycle-blockers";
 
 const hub = vi.hoisted(() => ({
     handlers: new Map<string, (e: unknown) => void>(),
@@ -388,6 +389,20 @@ describe("useAgentFailure auto-retry deadline", () => {
             expect(onRetry).not.toHaveBeenCalled();
             vi.advanceTimersByTime(1_000);
             expect(onRetry).toHaveBeenCalledTimes(1);
+
+            dispose();
+        });
+    });
+
+    it("an armed countdown blocks a renderer recycle until the retry fires", async () => {
+        await createRoot(async (dispose) => {
+            mkUI(vi.fn());
+            await Promise.resolve();
+
+            failingTurn();
+            expect(recycleBlockers()).toContain("a failed turn is about to be retried");
+            vi.advanceTimersByTime(5_000);
+            expect(recycleBlockers()).not.toContain("a failed turn is about to be retried");
 
             dispose();
         });

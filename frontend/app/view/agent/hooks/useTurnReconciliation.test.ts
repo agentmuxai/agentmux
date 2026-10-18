@@ -4,6 +4,7 @@
 import { createRoot, createSignal } from "solid-js";
 import { createStore } from "solid-js/store";
 import { describe, expect, it, vi } from "vitest";
+import { recycleBlockers } from "@/app/store/recycle-blockers";
 import { useFocusRepoll, useHeldMessageDelivery } from "./useTurnReconciliation";
 
 const flush = () => new Promise((r) => setTimeout(r, 0));
@@ -119,5 +120,12 @@ describe("useHeldMessageDelivery", () => {
         expect(m.flushHeld).not.toHaveBeenCalled();
         expect(m.flushRefresh).not.toHaveBeenCalled();
         m.dispose();
+    });
+
+    it("a held message blocks a renderer recycle while the pane is mounted", () => {
+        const m = mount(true);
+        expect(recycleBlockers()).toContain("a message is waiting to be sent");
+        m.dispose();
+        expect(recycleBlockers()).not.toContain("a message is waiting to be sent");
     });
 });

@@ -159,6 +159,8 @@ export class AttachmentDraft {
     count = () => this.items().length;
     totalBytes = () => this.items().reduce((sum, i) => sum + i.bytes, 0);
     processingCount = () => this.items().filter((i) => i.status === "processing").length;
+    /** A path batch srv accepted but hasn't answered for yet: no item shows it until it does. */
+    ingestInFlight = () => this.early.size > 0;
     readyItems = () => this.items().filter((i) => i.status === "ready" && i.info);
     /**
      * The aggregate bar, over items still in flight, by bytes: a copy or
@@ -513,7 +515,7 @@ const drafts = new Map<string, AttachmentDraft>();
 
 // An upload in progress is an XHR in this page: a reload would cancel it.
 registerRecycleBlocker(() =>
-    [...drafts.values()].some((d) => d.processingCount() > 0) ? "a file is still uploading" : null
+    [...drafts.values()].some((d) => d.processingCount() > 0 || d.ingestInFlight()) ? "a file is still uploading" : null
 );
 
 /** The attachment draft for an agent pane, created on first use. */

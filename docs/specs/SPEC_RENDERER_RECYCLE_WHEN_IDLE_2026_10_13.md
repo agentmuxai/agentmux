@@ -67,10 +67,12 @@ A Window command in the palette (`frontend/app/store/command-registry.ts`, Windo
 
 ### 3.1 The recycle
 
-1. **Prepare.** The host emits `recycle:prepare` to the window. The frontend checks the blockers (§4.3; for the command, only those that would lose data: a held queue, an upload in progress, a dirty editor), runs `flushBeforeRecycle()`, and answers with the `recycle_ready` IPC: `{ ok }` or `{ ok: false, reason }`. No answer within 2 s means don't recycle this time.
+1. **Prepare.** The page runs the recycle (`recycleWindow`, `frontend/app/store/recycle.ts`). A second call while one is in flight is refused. It checks every registered blocker (`frontend/app/store/recycle-blockers.ts`): the data-loss ones (a held message, an upload in progress, a dirty editor) and §2.1's (an auth prompt, a pending auto-retry, a pane scrolled into older history, an open transcript search or a streaming `/btw`). Any of them refuses, with a toast that says why. It then writes every pane's snapshot, scroll position and draft (`flushPaneSnapshots`, `saveScrollMemos`, `flushComposerDrafts`) and calls the host's `recycle_begin` (`crates/cef/src/commands/recycle.rs`), which measures the renderer and takes step 2's picture. The governor (§4) will start the same function in the window and add the host-side conditions of §4.3.
 2. **Cover.** If the window is visible, the host captures its viewport (the capture tear-offs use, `browser_api/routes.rs:295-309`) and keeps it for this label. The new document asks for it while booting (a `take_reload_snapshot` IPC) and shows it in the startup splash, as a promoted tear-off shows its snapshot (`showTearOffSnapshot`, `app/init/startup-splash.ts:56-80`). Today nothing carries a picture across a reload of the same window. Minimized or occluded windows skip this.
 3. **Reload** with `location.replace(credUrl)` (§2). The splash and each pane's reveal cover hide the rebuild; the snapshot fades out as the splash lifts.
 4. **Log** `[recycle] {label} {reason} {before_mb} MB`, then, 60 s after the load settles, `[recycle] {label} settled at {after_mb} MB`, which becomes the window's new baseline (§4.1).
+
+If the host refuses `recycle_begin` (the page's label isn't a live app window, as can happen for a window promoted from the pool, whose URL may still carry its pool label), the page reloads anyway, with no measurement and no cover: the memory is still freed.
 
 A recycle is a navigation, not a crash: it doesn't touch the crash budget (`crates/cef/src/client/mod.rs:24-50`).
 

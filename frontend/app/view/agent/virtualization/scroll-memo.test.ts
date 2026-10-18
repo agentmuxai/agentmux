@@ -4,7 +4,8 @@
 
 import { createRoot, createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { captureScrollMemo, saveScrollMemos, takeScrollMemo, useScrollMemo } from "./scroll-memo";
+import { recycleBlockers } from "@/app/store/recycle-blockers";
+import { captureScrollMemo, noteOlderHistoryLoaded, saveScrollMemos, takeScrollMemo, useScrollMemo } from "./scroll-memo";
 
 /** A scroller whose top is at 100 px, with rows of 50 px from `firstTop`. */
 function scroller(ids: string[], firstTop: number): HTMLElement {
@@ -133,5 +134,22 @@ describe("scroll memo (SPEC_RENDERER_RECYCLE_WHEN_IDLE_2026_10_13.md §2)", () =
         );
         saveScrollMemos();
         expect(JSON.parse(sessionStorage.getItem("agentmux:scroll:b9")!)).toEqual({ bottom: true });
+    });
+
+    it("a pane scrolled up into older history it loaded blocks a renderer recycle", () => {
+        const reason = "an agent pane is scrolled up into older history";
+        const [following, setFollowing] = createSignal(false);
+        const dispose = createRoot((d) => {
+            useScrollMemo({ blockId: "b-older", scroller: () => undefined, following, historyReady: () => false, scrollToRow: vi.fn() });
+            return d;
+        });
+        expect(recycleBlockers()).not.toContain(reason); // no older page loaded yet
+        noteOlderHistoryLoaded("b-older");
+        expect(recycleBlockers()).toContain(reason);
+        setFollowing(true);
+        expect(recycleBlockers()).not.toContain(reason); // back at the bottom
+        setFollowing(false);
+        dispose();
+        expect(recycleBlockers()).not.toContain(reason);
     });
 });
