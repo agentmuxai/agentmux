@@ -508,6 +508,9 @@ pub const COMMAND_TOWER_FORGET: &str = "tower.forget";
 // A terminal's stats badge tooltip (backend::blockstats_detail). The window's,
 // not an agent API.
 pub const COMMAND_BLOCKSTATS_DETAIL: &str = "blockstats.detail";
+// How much agent history is on this machine and where (the status bar total and its
+// panel, backend::history_usage). The window's, not an agent API.
+pub const COMMAND_HISTORY_USAGE: &str = "history.usage";
 /// The shells installed here, and which one a new local terminal starts with (`backend::shells`).
 pub const COMMAND_SHELL_LIST: &str = "shell.list";
 

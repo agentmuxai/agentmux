@@ -3,6 +3,7 @@
 
 @use "../element/popover-frame" as popoverFrame;
 @use "./token-usage";
+@use "./history-usage";
 @use "./instance-panel";
 @use "./cpu-cores-popover";
 @use "./disk-volumes-popover";

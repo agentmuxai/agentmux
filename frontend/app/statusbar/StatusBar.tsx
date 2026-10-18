@@ -13,6 +13,7 @@ import { MuxBusIndicator } from "./MuxBusIndicator";
 import { registerStatusBarItem, statusBarItems } from "./status-bar-registry";
 import { StatusBarTip } from "./StatusBarTip";
 import { SystemStats } from "./SystemStats";
+import { HistoryUsageIndicator } from "./HistoryUsageIndicator";
 import { TokenUsageIndicator } from "./TokenUsageIndicator";
 import { UpdateStatus } from "./UpdateStatus";
 import { VersionSkewStatus } from "./VersionSkewStatus";
@@ -95,6 +96,7 @@ function registerBuiltinStatusBarItems(): void {
         ["system-stats", "left", () => <SystemStats />],
         ["gpu", "left", () => <GpuStatus />],
         ["multi-input", "right", () => <MultiInputStatus />],
+        ["history-usage", "right", () => <HistoryUsageIndicator />],
         ["token-usage", "right", () => <TokenUsageIndicator />],
         ["config", "right", () => <ConfigStatus />],
         ["muxbus", "right", () => <MuxBusIndicator />],

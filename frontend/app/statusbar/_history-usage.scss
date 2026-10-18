@@ -1,0 +1,103 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// Status-bar history total + the panel that opens from it.
+
+@use "../element/popover-frame" as popoverFrame;
+@use "./stat-button" as statButton;
+@use "../mixins.scss";
+
+// The total, just left of the token count: the same quiet look.
+.history-usage-indicator {
+    @include statButton.stat-button($padding: 0 5px);
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    height: 100%;
+    white-space: nowrap;
+    opacity: 0.6;
+
+    &:hover {
+        opacity: 1;
+    }
+}
+
+.history-usage-popover {
+    @include popoverFrame.readout-popover;
+
+    .history-usage-header {
+        @include popoverFrame.readout-popover-header;
+    }
+
+    .history-usage-title {
+        @include popoverFrame.readout-popover-title;
+    }
+
+    .history-usage-note {
+        @include popoverFrame.readout-popover-note;
+    }
+
+    .history-usage-empty {
+        @include popoverFrame.readout-popover-empty($centered: false);
+    }
+
+    .history-usage-total {
+        padding: var(--space-2) var(--space-3) 0;
+        font-family: var(--font-mono);
+        font-size: var(--text-lg);
+    }
+
+    .history-usage-subtitle {
+        padding: var(--space-2) var(--space-3) 0;
+
+        @include popoverFrame.readout-popover-note;
+    }
+
+    .history-usage-list {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-1);
+        padding: var(--space-2) var(--space-3) var(--space-1);
+        max-height: 240px;
+        overflow-y: auto;
+    }
+
+    .history-usage-row {
+        @include popoverFrame.readout-row;
+    }
+
+    .history-usage-label {
+        flex: 0 1 150px;
+        min-width: 0;
+
+        @include mixins.truncate;
+    }
+
+    .history-usage-bar {
+        @include popoverFrame.readout-bar;
+        background: color-mix(in srgb, var(--border-color) 60%, transparent);
+    }
+
+    .history-usage-bar-fill {
+        @include popoverFrame.readout-bar-fill;
+        background: var(--accent-color);
+    }
+
+    .history-usage-bytes {
+        @include popoverFrame.readout-value;
+        margin-left: auto;
+    }
+
+    .history-usage-footer {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: var(--space-1-5) var(--space-3) 0;
+        border-top: 1px solid var(--border-color);
+        margin-top: var(--space-1);
+    }
+
+    .history-usage-refresh {
+        @include statButton.stat-button($padding: 0 6px);
+    }
+}

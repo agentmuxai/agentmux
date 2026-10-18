@@ -3047,6 +3047,25 @@
     }
   },
   {
+    "command": "history.usage",
+    "request": "agentmux_srv::backend::rpc_types::history::HistoryUsageReq",
+    "requestName": "HistoryUsageReq",
+    "requestTs": {
+      "imports": [
+        "HistoryUsageReq"
+      ],
+      "name": "HistoryUsageReq"
+    },
+    "response": "agentmux_srv::backend::rpc_types::history::HistoryUsage",
+    "responseName": "HistoryUsage",
+    "responseTs": {
+      "imports": [
+        "HistoryUsage"
+      ],
+      "name": "HistoryUsage"
+    }
+  },
+  {
     "command": "identity.account.upsert",
     "request": "agentmux_srv::server::app_api::identity::IdentityAccountUpsertReq",
     "requestName": "IdentityAccountUpsertReq",

@@ -92,6 +92,7 @@ pub mod rpc_types;
 pub mod schema;
 pub mod service;
 pub mod session_archive;
+pub mod history_usage;
 pub mod session_backfill;
 pub mod claude_layout;
 pub mod continuity;
