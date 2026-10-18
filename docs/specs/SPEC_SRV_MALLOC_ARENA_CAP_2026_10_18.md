@@ -17,7 +17,8 @@ glibc gives a thread its own malloc **arena**, up to eight per core, and each ar
 
 At the start of `main`, before any thread exists, srv sets glibc's `M_ARENA_MAX` to 2 (`mallopt`), so its threads share two arenas.
 
-- **Before any thread:** a thread already attached to an arena keeps it, and `#[tokio::main]` starts the runtime's workers before `main`'s body runs. `main` therefore builds the same runtime by hand (`new_multi_thread().enable_all()`, which is what `#[tokio::main]` expands to) after the call.
+- **Before any thread:** a thread already attached to an arena keeps it, and `#[tokio::main]` starts the runtime's workers before `main`'s body runs. `main` therefore builds the runtime by hand after the call.
+- **On every platform, not only Linux:** only the `mallopt` call is compiled for Linux/glibc; the hand-built runtime replaces `#[tokio::main]` on Windows and macOS too. It is what a bare `#[tokio::main]` expands to (tokio-macros 2.7: `Builder::new_multi_thread().enable_all().build().expect("Failed building the Runtime").block_on(body)`): the multi-thread flavor, `enable_all`, the default worker count and thread names (srv's attribute had no arguments, and srv sets no runtime option anywhere), and the same panic message. Reviewers should read that part for all platforms.
 - **The operator wins:** if `MALLOC_ARENA_MAX` is set in the environment (an empty value counts as unset), srv does not touch it.
 - **Compiled only for** `target_os = "linux"` and `target_env = "gnu"` (`crates/srv/src/malloc_arenas.rs`). musl, Windows and macOS don't build it.
 - The same srv binary also runs as the document-reading child and the crash monitor; they get the cap too, which costs them nothing.

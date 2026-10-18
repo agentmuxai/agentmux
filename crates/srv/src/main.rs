@@ -45,12 +45,14 @@ fn main() {
     // workers below share them (malloc_arenas.rs).
     #[cfg(all(target_os = "linux", target_env = "gnu"))]
     malloc_arenas::apply();
-    // What `#[tokio::main]` expands to, built by hand so the call above runs
-    // first: the runtime starts its worker threads when it is built.
+    // What a bare `#[tokio::main]` expands to (tokio-macros 2.7: the multi-thread
+    // flavor, `enable_all`, no worker count, thread name or other setting, and the
+    // same panic message), built by hand so the call above runs first: the runtime
+    // starts its worker threads when it is built. This is on EVERY platform.
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
-        .expect("failed to build the tokio runtime")
+        .expect("Failed building the Runtime")
         .block_on(app_main());
 }
 
