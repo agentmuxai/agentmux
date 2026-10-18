@@ -522,6 +522,20 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
 /// a string written like a snapshot line, `dialog "Edit item"` or
 /// `"Edit item"` (an unquoted string that isn't a reference is a name too),
 /// or an object `{role, name, exact}`.
+/// One part of a reference as snapshots and finds hand them out: `e12`, a
+/// frame's `f1e3`, a find's `n2e1`. Anything else (`Section2`) is a name.
+fn is_ref_segment(seg: &str) -> bool {
+    let digits = |t: &str| !t.is_empty() && t.bytes().all(|b| b.is_ascii_digit());
+    let rest = match seg.as_bytes().first() {
+        Some(b'n' | b'f') => match seg[1..].find('e') {
+            Some(at) if digits(&seg[1..1 + at]) => &seg[1 + at..],
+            _ => return false,
+        },
+        _ => seg,
+    };
+    rest.strip_prefix('e').is_some_and(digits)
+}
+
 fn scope_arg(scope: Option<&Value>) -> Result<(Option<String>, Option<agentmux_common::api_types::UiBrowserElementMatch>)> {
     use agentmux_common::api_types::UiBrowserElementMatch;
     let by_name = |m: UiBrowserElementMatch| {
@@ -539,8 +553,7 @@ fn scope_arg(scope: Option<&Value>) -> Result<(Option<String>, Option<agentmux_c
         }
         Some(Value::String(s)) => {
             let s = s.trim();
-            // References are letters, digits and dots, with a number in them.
-            let is_ref = s.chars().all(|c| c.is_ascii_alphanumeric() || c == '.') && s.chars().any(|c| c.is_ascii_digit());
+            let is_ref = !s.is_empty() && s.split('.').all(is_ref_segment);
             if s.is_empty() {
                 return Ok((None, None));
             }
@@ -642,8 +655,12 @@ mod tests {
     #[test]
     fn scope_is_a_reference_or_a_role_and_name() {
         assert_eq!(scope_arg(None).unwrap(), (None, None));
-        for r in ["e12", "e4.e1", "f1e3", "n2e1"] {
+        for r in ["e12", "e4.e1", "f1e3", "n2e1", "e4.n3e2"] {
             assert_eq!(scope_arg(Some(&json!(r))).unwrap(), (Some(r.to_string()), None), "{r}");
+        }
+        // A name with a number in it is a name, not a reference.
+        for name in ["Section2", "Step3", "e", "n2", "e1.", "f1e", "e1x"] {
+            assert_eq!(scope_arg(Some(&json!(name))).unwrap(), (None, Some(m(None, name, false))), "{name}");
         }
         // Written like a snapshot line.
         assert_eq!(scope_arg(Some(&json!("dialog \"Edit item\""))).unwrap(), (None, Some(m(Some("dialog"), "Edit item", false))));
