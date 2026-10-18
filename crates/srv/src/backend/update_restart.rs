@@ -53,8 +53,25 @@ fn if_current(run: u64, f: impl FnOnce()) -> bool {
     true
 }
 
-fn set(d: &DownloadStatus, state: &str, waiting_for: u32, error: Option<String>) {
-    update_check::set_download(Some(DownloadStatus { state: state.to_string(), waiting_for, error, ..d.clone() }));
+/// While the restart waits or is asked for, `stopping` (what agents left
+/// running that it stops, [`stopping`]) is listed with it; the launcher's
+/// dialog lists it too. Gathered by the caller, outside [`RUN`]: it scans
+/// every agent pane's processes.
+fn set(d: &DownloadStatus, state: &str, waiting_for: u32, error: Option<String>, stopping: Vec<String>) {
+    let stopping = if matches!(state, "waiting" | "restarting") { stopping } else { Vec::new() };
+    crate::backend::background_work::write_for_launcher(&stopping);
+    update_check::set_download(Some(DownloadStatus { state: state.to_string(), waiting_for, error, stopping, ..d.clone() }));
+}
+
+/// [`stopping`] off the async threads.
+pub(crate) async fn stopping_now() -> Vec<String> {
+    tokio::task::spawn_blocking(stopping).await.unwrap_or_default()
+}
+
+/// What agents left running now, a line each.
+pub(crate) fn stopping() -> Vec<String> {
+    let now = agentmux_common::time::now_ms_u64();
+    crate::backend::background_work::running().iter().map(|w| crate::backend::background_work::describe(w, now)).collect()
 }
 
 /// Agents in the middle of a turn.
@@ -110,7 +127,8 @@ pub fn start(now: bool) -> Result<AppUpdateStatus, String> {
     let (d, target) = staged(&update_check::current_status())?;
     *current += 1;
     let run_id = *current;
-    set(&d, "waiting", if now { 0 } else { working_agents() }, None);
+    // The list follows at once from `run`, off the async threads.
+    set(&d, "waiting", if now { 0 } else { working_agents() }, None, Vec::new());
     drop(current);
     tokio::spawn(run(run_id, d, target, now));
     Ok(update_check::current_status())
@@ -127,7 +145,7 @@ pub fn cancel() -> Result<AppUpdateStatus, String> {
         }
         Some(d) if d.state == "waiting" => {
             *current += 1;
-            set(d, "ready", 0, None);
+            set(d, "ready", 0, None, Vec::new());
             Ok(update_check::current_status())
         }
         _ => Ok(status),
@@ -143,18 +161,20 @@ async fn run(run_id: u64, d: DownloadStatus, target: UpgradeTarget, now: bool) {
         }
         let still = if tokio::time::Instant::now() >= deadline {
             let error = format!("{busy} agent(s) were still working after 10 minutes. Restart now, or try again later.");
-            if_current(run_id, || set(&d, "ready", 0, Some(error)));
+            if_current(run_id, || set(&d, "ready", 0, Some(error), Vec::new()));
             false
         } else {
-            if_current(run_id, || set(&d, "waiting", busy, None))
+            let listed = stopping_now().await;
+            if_current(run_id, || set(&d, "waiting", busy, None, listed))
         };
         if !still {
             return;
         }
         tokio::time::sleep(POLL).await;
     }
+    let listed = stopping_now().await;
     let asked = if_current(run_id, || {
-        set(&d, "restarting", 0, None);
+        set(&d, "restarting", 0, None, listed);
         tracing::info!(version = %d.version, target = ?target, "upgrade: asking the launcher to restart");
         eprintln!("{}", agentmux_common::srv_stderr::upgrade_line(&d.version, &target));
     });
@@ -168,6 +188,7 @@ async fn run(run_id: u64, d: DownloadStatus, target: UpgradeTarget, now: bool) {
             "ready",
             0,
             Some("AgentMux didn't restart: the upgrade was declined or not answered in time, or this AgentMux can't restart itself. Try again, or install the new version from the release page.".into()),
+            Vec::new(),
         )
     });
 }
@@ -202,6 +223,7 @@ mod tests {
             folder: folder.map(|f| f.display().to_string()),
             installer: None,
             waiting_for: 0,
+            stopping: Vec::new(),
         }
     }
 

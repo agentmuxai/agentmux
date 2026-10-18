@@ -4,6 +4,9 @@
 //! `agentmux-remote serve --stdio` as srv runs it: the real binary, spoken to
 //! over its stdin and stdout.
 
+// This binary must hold this checkout's code (`agentmux_common::checkout`).
+agentmux_common::checkout_guard!(agentmux_remote::CHECKOUT_DIR, agentmux_procstats::CHECKOUT_DIR);
+
 use std::io::{Read, Write};
 use std::process::{Command, Stdio};
 

@@ -384,3 +384,8 @@ async fn app_main() {
     );
     tracing::info!(agents = closed, "shutdown: agents closed");
 }
+
+// This test binary must hold this checkout's code, not another clone's from
+// a shared target directory (`agentmux_common::checkout`).
+#[cfg(test)]
+agentmux_common::checkout_guard!(agentmux_remote::CHECKOUT_DIR, agentmux_procstats::CHECKOUT_DIR);

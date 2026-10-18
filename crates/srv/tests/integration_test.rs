@@ -1,6 +1,9 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+// This binary must hold this checkout's code (`agentmux_common::checkout`).
+agentmux_common::checkout_guard!();
+
 use std::io::{BufRead, BufReader};
 use std::process::{Command, Stdio};
 

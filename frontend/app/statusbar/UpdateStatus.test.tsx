@@ -187,6 +187,20 @@ describe("Maintenance: Upgrade & restart", () => {
         expect(installAppUpdate).not.toHaveBeenCalled();
     });
 
+    it("says what agents left running that the restart stops", async () => {
+        const stopping = ["Korp: an AgentMux instance (`task dev TITLE=KorpForms`), running 9 h", "Naki-2: `node server.js`"];
+        updateStatus.mockResolvedValue(download("waiting", { ...FOLDER, waiting_for: 1, stopping }));
+        render(() => <MaintenanceSection />);
+        expect(await screen.findByText("The restart also stops what agents left running:")).toBeTruthy();
+        for (const line of stopping) expect(screen.getByText(line)).toBeTruthy();
+        cleanup();
+        // Nothing left running: nothing said.
+        updateStatus.mockResolvedValue(download("waiting", { ...FOLDER, waiting_for: 1, stopping: [] }));
+        render(() => <MaintenanceSection />);
+        expect(await screen.findByText("Waiting for 1 agent to finish…")).toBeTruthy();
+        expect(screen.queryByText("The restart also stops what agents left running:")).toBeNull();
+    });
+
     it("Cancel stops waiting, and a restart that didn't happen says why", async () => {
         updateStatus.mockResolvedValue(download("waiting", { ...FOLDER, waiting_for: 1 }));
         upgradeCancel.mockResolvedValue(download("ready", FOLDER));

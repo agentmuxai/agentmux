@@ -67,8 +67,13 @@ pub struct UpgradeRequestAnswer {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum Outcome {
-    /// The user's own turn asked: the upgrade is under way.
-    Started { version: String },
+    /// The user's own turn asked: the upgrade is under way. `stopping`: what
+    /// agents left running that the restart stops (`background_work`).
+    Started {
+        version: String,
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        stopping: Vec<String>,
+    },
     /// Every window asks the user; the agent hears the answer as a note.
     PendingUser { version: String, id: String },
     UpToDate { current: String },
@@ -378,6 +383,7 @@ mod tests {
             folder: None,
             installer: None,
             waiting_for: 0,
+            stopping: Vec::new(),
         });
         let Err(Outcome::Unavailable { message, .. }) = installable(&busy, None) else { panic!("expected unavailable") };
         assert!(message.contains("already restarting into 0.59.26"), "{message}");

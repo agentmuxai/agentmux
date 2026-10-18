@@ -26,4 +26,6 @@ agentmux-procstats = { path = "../procstats" }
 libc = "0.2"
 
 [dev-dependencies]
+# The test-binary checkout guard (agentmux_common::checkout).
+agentmux-common = { path = "../common" }
 tempfile = "3"

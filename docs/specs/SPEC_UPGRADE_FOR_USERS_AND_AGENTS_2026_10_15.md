@@ -291,6 +291,21 @@ is `VACUUM INTO` a temporary file, renamed into place:
 - srv first prints `AGENTMUXSRV-MIGRATING`, so the launcher allows 30 minutes
   instead of 30 s for a large `filestore.db`.
 
+**Browser profiles too** (added 2026-10-18, after the operator's own upgrade
+signed every browser pane out: 17 cookies for 4 sites in 0.59.31's jar, an
+empty one in 0.59.32). CEF's cache folder is per version as well
+(`versions/<v>/cef-cache`), and holds the Personal profile's cookies, local
+storage and IndexedDB, each named profile (`profile-<id>`) and the app UI's
+`localStorage`. On a version's first start (no `Local State` yet) the host
+copies those from the newest older version in the channel before CEF opens
+the folder (`crates/cef/src/browser_pane/profile_carry.rs`): `Network`, `Local Storage`,
+`IndexedDB` and `Login Data` of each profile, then `Local State`, which
+holds the key the cookies are encrypted with. Caches that rebuild
+themselves are left out. Copied, not moved, so the older version still works
+for a rollback; never from a newer version, whose profile Chromium refuses,
+nor from one still running, whose files change under the copy. An item that
+fails to copy is removed, and `Local State` is placed whole or not at all.
+
 The other files in `data/` are not copied: logs, locks and `authkey.dev` are
 per run, `shell/` is regenerated, and the zones flag only matters to a store
 with no migration records. Dev builds keep data per branch and local
@@ -369,6 +384,47 @@ with their panes, at their positions and sizes.
 **Not yet:** the main window opens where the host puts it at startup, not
 where it was. macOS's Cmd+Q doesn't reach `quit_app`, so there the
 last-close record still applies.
+
+### 6.2 What agents left running
+
+Added 2026-10-18, after the operator's own upgrade killed an AgentMux an
+agent had started (`task dev`, through `Start-Process` from its Bash tool),
+without a word to anyone.
+
+Everything an agent starts runs in its pane's process tracker (a Windows job
+object, a Linux cgroup) that nothing can leave, so a quit, an upgrade's
+included, stops it with the pane. That stays: letting processes escape a
+pane was rejected on purpose (`SPEC_BACKGROUND_TASK_TEARDOWN_SURVIVAL_2026_08_20.md`
+§0). What changes is that it no longer happens silently
+(`crates/srv/src/backend/background_work.rs`):
+
+- **Listed before.** While an upgrade's restart waits or is asked for, the
+  version panel lists what agents left running, one line each ("Agent-1: an
+  AgentMux instance (`task dev`), running 9 h"), from each
+  agent pane's tracked processes (`AgentProcessRegistry::list_block`, one
+  item per process tree; another AgentMux is recognised by its launcher,
+  host or srv). The launcher's dialog names the same list (srv leaves it in
+  `updates/stopping.txt` beside the staged update), and an agent whose own
+  turn started the upgrade (`App` `upgrade`) is told in the answer.
+- **Another AgentMux keeps its windows.** On Windows the quit's session save
+  (`SaveSessionSnapshot` with `for_quit`) then tells another AgentMux among
+  it that the session is ending (`WM_QUERYENDSESSION` to one of its host's
+  windows), so it saves every window as at an OS shutdown, waiting up to
+  0.9 s within the host's 1.5 s. Its windows aren't closed: a close deletes
+  the window's workspace, while an instance stopped as it is keeps them all
+  for its next start, as after a crash. On Linux and macOS nothing is sent;
+  it keeps its windows the same way.
+- **macOS:** Cmd+Q doesn't reach `quit_app` yet (macOS phase), so a macOS
+  quit isn't recorded and its agents aren't told; the upgrade's own list
+  does show there once macOS upgrades.
+- **Told after.** The quit records the list in the channel folder
+  (`agentmux-stopped-at-quit.json`); after the next start each agent that
+  resumes within the hour is told, once, what of its own was stopped:
+  `[AgentMux] When AgentMux quit at 00:23, it stopped what you had running in
+  the background: an AgentMux instance (`task dev`, started
+  22:30). Start it again if you still need it.`
+
+Any quit does this, not only an upgrade's.
 
 ## 7. Phases
 

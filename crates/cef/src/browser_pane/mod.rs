@@ -12,6 +12,7 @@ pub mod callbacks;
 pub mod creation;
 pub mod page_close;
 pub mod identity;
+pub mod profile_carry;
 pub mod trace;
 #[cfg(target_os = "windows")]
 pub mod hwnd;

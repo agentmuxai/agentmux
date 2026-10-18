@@ -6,6 +6,8 @@ edition = "2021"
 description = "Shared utilities for AgentMux crates"
 
 [dependencies]
+# File identity for the test-binary checkout guard (checkout.rs).
+same-file = "1"
 # `fs` / `io-util` / `sync` for `event_log::run_disk_writer` (lifted here
 # from launcher + srv — see event_log.rs); `rt` + `macros` for its
 # `#[tokio::test]`.

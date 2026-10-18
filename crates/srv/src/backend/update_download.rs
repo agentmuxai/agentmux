@@ -107,6 +107,7 @@ fn set(version: &str, state: &str, received: u64, total: u64, error: Option<Stri
         folder: folder.map(|f| f.display().to_string()),
         installer: installer.map(|i| i.display().to_string()),
         waiting_for: 0,
+        stopping: Vec::new(),
     }))
 }
 

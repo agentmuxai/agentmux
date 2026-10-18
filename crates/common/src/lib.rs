@@ -4,6 +4,7 @@
 //! Shared utilities for AgentMux crates.
 
 pub mod api_types;
+pub mod checkout;
 pub mod client_events;
 mod cli;
 pub mod copy_into_dir;
@@ -77,3 +78,8 @@ pub const AUTH_KEY_HEADER: &str = "X-AuthKey";
 /// need to share the same Mutex instance.
 #[cfg(test)]
 pub(crate) static TEST_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+// This test binary must hold this checkout's code, not another clone's from
+// a shared target directory (`agentmux_common::checkout`).
+#[cfg(test)]
+crate::checkout_guard!();

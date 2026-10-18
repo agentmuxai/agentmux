@@ -17,6 +17,9 @@
 
 #![cfg(unix)]
 
+// This binary must hold this checkout's code (`agentmux_common::checkout`).
+agentmux_common::checkout_guard!();
+
 use std::io::{BufRead, BufReader};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};

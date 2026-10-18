@@ -15,6 +15,9 @@
 //! failed in CI's clean checkout, where nothing had built that plain
 //! binary yet. See docs/retro/RETRO_BASHWRAP_PAGER_HANG_LEAK_2026_07_14.md.
 
+// This binary must hold this checkout's code (`agentmux_common::checkout`).
+agentmux_common::checkout_guard!();
+
 use std::process::Stdio;
 use std::time::{Duration, Instant};
 
