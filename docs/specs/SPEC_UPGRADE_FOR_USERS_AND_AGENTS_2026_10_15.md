@@ -376,8 +376,8 @@ pane was rejected on purpose (`SPEC_BACKGROUND_TASK_TEARDOWN_SURVIVAL_2026_08_20
 (`crates/srv/src/backend/background_work.rs`):
 
 - **Listed before.** While an upgrade's restart waits or is asked for, the
-  version panel lists what agents left running, one line each ("Korp: an
-  AgentMux instance (`task dev TITLE=KorpForms`), running 9 h"), from each
+  version panel lists what agents left running, one line each ("Agent-1: an
+  AgentMux instance (`task dev`), running 9 h"), from each
   agent pane's tracked processes (`AgentProcessRegistry::list_block`, one
   item per process tree; another AgentMux is recognised by its launcher,
   host or srv). The launcher's dialog names the same list (srv leaves it in
@@ -398,7 +398,7 @@ pane was rejected on purpose (`SPEC_BACKGROUND_TASK_TEARDOWN_SURVIVAL_2026_08_20
   (`agentmux-stopped-at-quit.json`); after the next start each agent that
   resumes within the hour is told, once, what of its own was stopped:
   `[AgentMux] When AgentMux quit at 00:23, it stopped what you had running in
-  the background: an AgentMux instance (`task dev TITLE=KorpForms`, started
+  the background: an AgentMux instance (`task dev`, started
   22:30). Start it again if you still need it.`
 
 Any quit does this, not only an upgrade's.

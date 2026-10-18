@@ -169,7 +169,7 @@ fn ran_for(started_at_ms: u64, now_ms: u64) -> Option<String> {
     })
 }
 
-/// One line for the user: "Korp: an AgentMux instance (`task dev`), running 9 h".
+/// One line for the user: "Agent-1: an AgentMux instance (`task dev`), running 9 h".
 pub fn describe(w: &Work, now_ms: u64) -> String {
     let what = if w.agentmux { format!("an AgentMux instance (`{}`)", w.label) } else { format!("`{}`", w.label) };
     match ran_for(w.started_at_ms, now_ms) {

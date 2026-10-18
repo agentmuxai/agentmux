@@ -28,7 +28,7 @@ installer?: string,
 waiting_for: number, 
 /**
  * While `waiting` or `restarting`: what agents left running that the
- * restart stops, a line each ("Korp: an AgentMux instance (`task
+ * restart stops, a line each ("Agent-1: an AgentMux instance (`task
  * dev`), running 9 h"; `background_work`).
  */
 stopping: Array<string>, };
