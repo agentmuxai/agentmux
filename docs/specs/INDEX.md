@@ -576,6 +576,7 @@ partial list.
 | [`SPEC_AGENT_DRIVEN_BROWSER_PANES_2026_10_07`](SPEC_AGENT_DRIVEN_BROWSER_PANES_2026_10_07.md) | SPEC: Agents drive a browser pane they open: forms, uploads, and the human in the loop |
 | [`SPEC_AGENT_IDENTITY_CARRIED_NOT_DERIVED_2026_09_23`](SPEC_AGENT_IDENTITY_CARRIED_NOT_DERIVED_2026_09_23.md) | SPEC: agent identity is carried, never derived |
 | [`SPEC_AGENT_IDENTITY_HISTORY_PERSISTENCE_PROTOCOL_2026_08_16`](SPEC_AGENT_IDENTITY_HISTORY_PERSISTENCE_PROTOCOL_2026_08_16.md) | Canonical Agent Identity/History Persistence Protocol — Synthesis with Mandatory ABF |
+| [`SPEC_AGENT_INPUT_HISTORY_2026_10_18`](SPEC_AGENT_INPUT_HISTORY_2026_10_18.md) | Spec: Agent input history that lives with the agent |
 | [`SPEC_AGENT_INSTALL_STAGE_2026_05_17`](SPEC_AGENT_INSTALL_STAGE_2026_05_17.md) | SPEC: Agent Install Stage |
 | [`SPEC_AGENT_OVERLAP_AWARENESS_2026_10_10`](SPEC_AGENT_OVERLAP_AWARENESS_2026_10_10.md) | SPEC: agents can see who else is working on the same thing |
 | [`SPEC_AGENT_PANE_BASH_HIGHLIGHTING_2026_10_04`](SPEC_AGENT_PANE_BASH_HIGHLIGHTING_2026_10_04.md) | SPEC: Robust highlighting for Bash tool panels in the agent pane |

@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-18
 **Author:** QTest
-**Status:** active (phase 1 implemented; phases 2 to 4 to follow)
+**Status:** active — phase 1 shipped in PR #5109; phases 2 to 4 not started.
 **Origin:** the 0.59.31 → 0.59.32 upgrade lost every pane's ArrowUp history
 (`docs/reports/REPORT_UPGRADE_0_59_32_DOGFOOD_FINDINGS_2026_10_18.md` §2.4). The
 operator asked for "a robust system to track that data over the long term; it
