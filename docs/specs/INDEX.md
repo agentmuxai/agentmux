@@ -559,6 +559,7 @@ partial list.
 | [`PLAN_CODEX_GATE_TRANSIENT_FAILURES_AND_CI_SCRIPT_DRY_2026_10_14`](PLAN_CODEX_GATE_TRANSIENT_FAILURES_AND_CI_SCRIPT_DRY_2026_10_14.md) | Plan — the Codex review gate survives a transient GitHub error, and the CI script clean-ups around it |
 | [`PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20`](PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20.md) | Plan — collapse every provider-login code path onto one |
 | [`PLAN_MACOS_COMPILE_GATE_2026_10_09`](PLAN_MACOS_COMPILE_GATE_2026_10_09.md) | Plan — a macOS compile check on PRs, and a nightly macOS leg that can fail |
+| [`PLAN_MEMORY_BUDGET_CLOSE_THE_GAP_2026_10_18`](PLAN_MEMORY_BUDGET_CLOSE_THE_GAP_2026_10_18.md) | Plan: close the gap to the 500 MB memory budget |
 | [`PLAN_PANE_TABS_UNIVERSAL_IMPLEMENTATION_2026_09_17`](PLAN_PANE_TABS_UNIVERSAL_IMPLEMENTATION_2026_09_17.md) | PLAN: Universal Pane Tabs — Implementation Task Breakdown |
 | [`PLAN_RENDERER_MEMORY_FIXES_2026_10_12`](PLAN_RENDERER_MEMORY_FIXES_2026_10_12.md) | Plan: renderer memory fixes, in ROI order |
 | [`PLAN_SHORTCUTS_VERIFIED_AND_APP_API_2026_10_10`](PLAN_SHORTCUTS_VERIFIED_AND_APP_API_2026_10_10.md) | Plan — every shortcut in the Help pane works on every platform, and agents can drive them |

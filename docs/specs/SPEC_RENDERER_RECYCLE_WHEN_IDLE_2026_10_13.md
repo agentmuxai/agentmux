@@ -1,7 +1,7 @@
 # Spec: recycle a window's renderer when it's idle and over budget
 
 **Date:** 2026-10-13, revised 2026-10-14 against `main` @ `ab6a9c400`
-**Status:** active. Shipped: §2's reload without a history entry (#4940); composer drafts, sent-message history and attachment drafts across a reload (#4942); pane overlay changes saved, and `flushPaneSnapshots()` (#4943); browser panes keep their page (#4944); secondary windows re-attach to their own row (#4945); rows get ids from their transcript line (#4952); the scroll position across a reload (#4964): Phase A is complete; the scroll position kept by the first row that starts on screen and held while the rows settle (#4974), after the lab. Since then: chrome zoom across a reload. Left: Phase B (§3), Phase C (§4).
+**Status:** active. Shipped: §2's reload without a history entry (#4940); composer drafts, sent-message history and attachment drafts across a reload (#4942); pane overlay changes saved, and `flushPaneSnapshots()` (#4943); browser panes keep their page (#4944); secondary windows re-attach to their own row (#4945); rows get ids from their transcript line (#4952); the scroll position across a reload (#4964): Phase A is complete; the scroll position kept by the first row that starts on screen and held while the rows settle (#4974), after the lab. Since then: chrome zoom across a reload (#5084); Phase B (§3): the command, its data-loss blockers and the cover picture. Left: Phase C (§4) and the blockers §2.1 adds for it (Camper@narko builds B and C; Loap-3 reviews).
 **Plan item:** #5 of `PLAN_RENDERER_MEMORY_FIXES_2026_10_12.md`.
 **Evidence:** `docs/reports/REPORT_RENDERER_MEMORY_ROOT_CAUSES_2026_10_12.md` §4.3.
 **Related:** `SPEC_WINDOW_CHURN_RENDERER_LEAK_2026_10_13.md` (#4858: a navigation that adds a history entry keeps the old page in the back/forward cache).
@@ -46,16 +46,33 @@ Today a reload of the main window restores the workspace, layout, agent transcri
 
 **The reload must not add a history entry.** `reloadKeepingHostCredentials` (`app/init/error-display.ts:114-118`, wired as `AppApi.reloadWindow`, `util/cef-api.ts:134-135`) navigates with `location.assign`. That adds an entry, and the back/forward cache keeps the old page, the whole app with its heap (`crates/cef/src/commands/replace_page.rs:5-14`): the reload frees nothing. Use `location.replace(credUrl)`. A plain `location.reload()` adds no entry either, and keeps working without the credentialed URL, because the host re-injects the IPC credentials on every main-frame load of its frontend (`crates/cef/src/client/navigation.rs:698-739`) and the frontend waits up to 2.5 s for them (`cef-init.ts:73-77`). The credentialed URL only removes that wait (`error-display.ts:19-30`). The plain reloads in `bootstrap.ts:80,99` should use the same helper.
 
+### 2.1 Gaps found on 2026-10-18
+
+An audit of what lives only in the page (every pane kind and the app shell) found these on top of the table above. Each is either fixed or a blocker: a recycle waits until it no longer holds (§4.3). A blocker is checked by the frontend in the prepare step (§3.1, step 1).
+
+| Gap | Where | Treatment |
+|---|---|---|
+| Chrome zoom reset to 100% on every load | `store/zoom.ts`, `initChromeZoom` | **Fixed** (#5084): kept in `sessionStorage`; a pool boot forgets it. |
+| `flushPaneSnapshots()` has no caller, so up to 30 s of collapse, pin and filter changes are lost | `useSnapshotPersistence.ts` | **Fixed** by Phase B: `flushBeforeRecycle()` calls it. |
+| A failed turn's auto-retry countdown isn't re-armed after a load (only a live `AgentFailure` event arms it), and its budget resets | `useAgentFailure.ts`, the auto-retry state | **Blocker** while a countdown is pending. Re-arming it from a persisted deadline is Phase 1 of the timer work (`REPORT_TIMERS_DEADLINES_AND_CLOCKS_AUDIT_2026_10_17.md`). |
+| Older history pages loaded by scrolling up aren't read again (the restore reads the tail), so a pane scrolled into them comes back at the bottom | `useHistoryPagination.ts`, the tail restore | **Blocker** while an agent pane's scroll anchor is above the restored tail; reading pages back until the anchor's row is loaded is a follow-up. |
+| A browser pane's HTTP-auth prompt: its queue is in the page, while CEF's callback stays parked in the host, so after a load the page waits with no prompt | `use-browser-auth.ts`; the parked callback in `crates/cef/src/client/crash_recovery.rs` | **Blocker** while a prompt is queued. |
+| An open transcript search (Ctrl+F) or a `/btw` answer still streaming | `useInSessionSearch.ts`, `BtwOverlay.tsx` | **Blocker** while open or streaming. |
+| Smaller view state: permission-panel inputs, held-open rows (they come back closed), Files, Swarm and Tower selections, expansions and filters, a terminal scrolled up or with a selection, the editor tree's open folders, a widget's own JS state, the working row's phrase | each pane's signals | **Accepted** for a window that has been idle for 10 minutes (§4.3) or that the user asked to reload (§3). Each can move into block meta or `sessionStorage` later if it proves noticeable. |
+| A running turn | srv keeps it; the pane catches up from the transcript (`transcript-cursor.ts`) | **Not a blocker** (§4.3). Whether anything visible is lost mid-turn (streaming text, a tool row in flight) is checked in the lab; anything found is a gap to fix, not a reason to wait. |
+
 ## 3. Phase B: "Reload window (free memory)"
 
 A Window command in the palette (`frontend/app/store/command-registry.ts`, Window category from `:232`; reachable from the host's `run_command`, `crates/cef/src/commands/palette.rs:20-50`). It runs the recycle below on the window it's invoked in, skipping the governor's conditions (§4.2, §4.3) but not the flush.
 
 ### 3.1 The recycle
 
-1. **Prepare.** The host emits `recycle:prepare` to the window. The frontend checks the blockers (§4.3; for the command, only those that would lose data: a held queue, an upload in progress, a dirty editor), runs `flushBeforeRecycle()`, and answers with the `recycle_ready` IPC: `{ ok }` or `{ ok: false, reason }`. No answer within 2 s means don't recycle this time.
+1. **Prepare.** The page runs the recycle (`recycleWindow`, `frontend/app/store/recycle.ts`). A second call while one is in flight is refused. It checks every registered blocker (`frontend/app/store/recycle-blockers.ts`): the data-loss ones (a held message, an upload in progress, a dirty editor) and §2.1's (an auth prompt, a pending auto-retry, a pane scrolled into older history, an open transcript search or a streaming `/btw`). Any of them refuses, with a toast that says why. It then writes every pane's snapshot, scroll position and draft (`flushPaneSnapshots`, `saveScrollMemos`, `flushComposerDrafts`) and calls the host's `recycle_begin` (`crates/cef/src/commands/recycle.rs`), which measures the renderer and takes step 2's picture. The governor (§4) will start the same function in the window and add the host-side conditions of §4.3.
 2. **Cover.** If the window is visible, the host captures its viewport (the capture tear-offs use, `browser_api/routes.rs:295-309`) and keeps it for this label. The new document asks for it while booting (a `take_reload_snapshot` IPC) and shows it in the startup splash, as a promoted tear-off shows its snapshot (`showTearOffSnapshot`, `app/init/startup-splash.ts:56-80`). Today nothing carries a picture across a reload of the same window. Minimized or occluded windows skip this.
 3. **Reload** with `location.replace(credUrl)` (§2). The splash and each pane's reveal cover hide the rebuild; the snapshot fades out as the splash lifts.
 4. **Log** `[recycle] {label} {reason} {before_mb} MB`, then, 60 s after the load settles, `[recycle] {label} settled at {after_mb} MB`, which becomes the window's new baseline (§4.1).
+
+If the host refuses `recycle_begin` (the page's label isn't a live app window, as can happen for a window promoted from the pool, whose URL may still carry its pool label), the page reloads anyway, with no measurement and no cover: the memory is still freed.
 
 A recycle is a navigation, not a crash: it doesn't touch the crash budget (`crates/cef/src/client/mod.rs:24-50`).
 
@@ -85,6 +102,7 @@ All of these must hold:
 - No attachment upload in progress.
 - No dirty editor, no open modal or menu, no drag in progress (`isAnyUnderway`, `app/drag/drag-session.ts:100`), no native file dialog (`host_dialog_open()`, private today in `crates/cef/src/floating_pane.rs:241-243`).
 - No agent pane in it is waiting for the user (`term:awaiting_user`, `crates/srv/src/backend/agent_state.rs:25`; `view/agent/hooks/awaiting-user.ts`). A question panel's timer and focus would be reset.
+- None of the gaps in §2.1 marked as a blocker: no pending auto-retry countdown, no agent pane scrolled above its restored tail, no queued browser-pane auth prompt, no open transcript search or streaming `/btw` answer.
 
 The host checks what it knows (foreground, minimized, file dialog) before asking; the frontend checks the rest in step 1.
 

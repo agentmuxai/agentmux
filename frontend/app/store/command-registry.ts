@@ -256,6 +256,16 @@ export function registerDefaultCommands(): void {
         execute: () => getApi().closeWindow().catch(console.error),
     });
     commandRegistry.register({
+        id: "window:recycle",
+        label: "Reload Window (Free Memory)",
+        category: "Window",
+        icon: "rotate-right",
+        keywords: "memory reload refresh recycle free",
+        execute: () => {
+            void import("@/app/store/recycle").then(({ recycleWindow }) => recycleWindow("command"));
+        },
+    });
+    commandRegistry.register({
         id: "window:minimize",
         label: "Minimize Window",
         category: "Window",

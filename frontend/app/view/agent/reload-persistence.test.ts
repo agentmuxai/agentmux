@@ -7,6 +7,7 @@ import {
     getComposerDraft,
     getSentHistory,
     resetReloadPersistenceForTests,
+    saveAllComposerDrafts,
     saveSentHistory,
     setComposerDraft,
 } from "./reload-persistence";
@@ -66,5 +67,29 @@ describe("reload persistence", () => {
         sessionStorage.setItem("agentmux:sent-history:b2", JSON.stringify(["ok", 3, null]));
         expect(getSentHistory("b1")).toEqual([]);
         expect(getSentHistory("b2")).toEqual(["ok"]);
+    });
+});
+
+describe("saving every draft for a recycle", () => {
+    beforeEach(() => {
+        sessionStorage.clear();
+        resetReloadPersistenceForTests();
+    });
+    afterEach(() => {
+        vi.restoreAllMocks();
+    });
+
+    it("writes each draft now and says so", () => {
+        setComposerDraft("b1", "half a thought");
+        expect(saveAllComposerDrafts()).toBe(true);
+        expect(sessionStorage.getItem("agentmux:composer-draft:b1")).toBe(JSON.stringify("half a thought"));
+    });
+
+    it("says false when the storage refuses one, so the recycle doesn't reload", () => {
+        setComposerDraft("b1", "half a thought");
+        vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+            throw new DOMException("full", "QuotaExceededError");
+        });
+        expect(saveAllComposerDrafts()).toBe(false);
     });
 });

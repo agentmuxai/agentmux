@@ -3,6 +3,7 @@
 
 import { onCleanup, onMount } from "solid-js";
 import { getApi } from "@/app/store/app-api";
+import { registerRecycleBlocker } from "@/app/store/recycle-blockers";
 import type { ModalLayerApi } from "@/element/modal-layer";
 import type { BrowserViewModel } from "./browser-model";
 
@@ -45,6 +46,13 @@ export function useBrowserAuth(params: {
     // after the active one resolves.
     const authQueue: AuthChallenge[] = [];
     let authActive = false;
+    // The queue lives in this page while CEF's callback waits in the host: a
+    // reload would leave the browser pane waiting for a prompt never shown.
+    onCleanup(
+        registerRecycleBlocker(() =>
+            authActive || authQueue.length > 0 || pendingAuthIds.size > 0 ? "a browser pane is asking for a sign-in" : null
+        )
+    );
 
     const openAuthPrompt = (c: AuthChallenge) => {
         authActive = true;

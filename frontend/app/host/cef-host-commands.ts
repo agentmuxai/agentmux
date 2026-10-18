@@ -176,6 +176,13 @@ export const cefWindows: WindowHostApi = {
     getPaneDebugState: () => invokeCommand<Record<string, unknown>>("get_pane_debug_state", {}),
     captureViewport: (windowLabel, quality) =>
         invokeCommand<{ jpeg_base64: string }>("capture_window_viewport", { label: windowLabel, quality }),
+    recycleBegin: (windowLabel, reason) =>
+        invokeCommand<{ before_mb: number | null }>("recycle_begin", { label: windowLabel, reason }),
+    recycleCancel: async (windowLabel) => {
+        await invokeCommand("recycle_cancel", { label: windowLabel });
+    },
+    takeReloadSnapshot: (windowLabel) =>
+        invokeCommand<{ jpeg_base64: string | null }>("take_reload_snapshot", { label: windowLabel }),
     openFloatingPane: (args) => invokeCommand<{ window_label: string }>("open_floating_pane_window", args),
     isMaximized: async (windowLabel) =>
         (await invokeCommand<{ maximized: boolean | null }>("is_window_maximized", { label: windowLabel })).maximized ??

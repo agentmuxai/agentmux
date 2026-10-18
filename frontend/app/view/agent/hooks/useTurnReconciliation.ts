@@ -5,7 +5,8 @@
 
 import type { AgentPaneModel } from "@/app/store/agent-pane-registration";
 import { BlockService } from "@/app/store/services";
-import { createEffect, on, type Accessor } from "solid-js";
+import { registerRecycleBlocker } from "@/app/store/recycle-blockers";
+import { createEffect, on, onCleanup, type Accessor } from "solid-js";
 
 /**
  * Focus/visibility-triggered re-poll — the mount-time GetControllerStatus
@@ -110,6 +111,8 @@ export function useHeldMessageDelivery(opts: {
     flushPendingControllerRefresh: () => unknown;
 }): void {
     const { paneModel } = opts;
+    // A reload would drop them: they live only in this page.
+    onCleanup(registerRecycleBlocker(() => (opts.hasHeldMessages() ? "a message is waiting to be sent" : null)));
     let prevTool: string | null = null;
     createEffect(() => {
         const tool = paneModel.state.currentTool;

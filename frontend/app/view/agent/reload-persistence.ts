@@ -30,13 +30,15 @@ export function readSession<T>(key: string): T | undefined {
     }
 }
 
-/** Store a JSON value; `undefined` removes it. A full or disabled storage is ignored. */
-export function writeSession(key: string, value: unknown): void {
+/** Store a JSON value; `undefined` removes it. A full or disabled storage is
+ *  ignored (the in-memory copy still serves this page); false says so. */
+export function writeSession(key: string, value: unknown): boolean {
     try {
         if (value === undefined) sessionStorage.removeItem(key);
         else sessionStorage.setItem(key, JSON.stringify(value));
+        return true;
     } catch {
-        // Over quota or unavailable: the in-memory copy still serves this page.
+        return false;
     }
 }
 
@@ -46,11 +48,26 @@ const drafts = new Map<string, string>();
 const pendingDrafts = new Set<string>();
 let draftTimer: ReturnType<typeof setTimeout> | undefined;
 
-function flushDrafts(): void {
+/** Write every pending draft now (the debounce, and `pagehide`). */
+export function flushComposerDrafts(): void {
     clearTimeout(draftTimer);
     draftTimer = undefined;
     for (const blockId of pendingDrafts) writeSession(DRAFT_KEY + blockId, drafts.get(blockId) || undefined);
     pendingDrafts.clear();
+}
+
+/**
+ * Write every draft this page holds, for a recycle that is about to reload it.
+ * False when one couldn't be stored: the reload would lose it, so the recycle
+ * doesn't happen.
+ */
+export function saveAllComposerDrafts(): boolean {
+    clearTimeout(draftTimer);
+    draftTimer = undefined;
+    pendingDrafts.clear();
+    let saved = true;
+    for (const [blockId, text] of drafts) saved = writeSession(DRAFT_KEY + blockId, text || undefined) && saved;
+    return saved;
 }
 
 export function getComposerDraft(blockId: string): string | undefined {
@@ -64,7 +81,7 @@ export function getComposerDraft(blockId: string): string | undefined {
 export function setComposerDraft(blockId: string, text: string): void {
     drafts.set(blockId, text);
     pendingDrafts.add(blockId);
-    draftTimer ??= setTimeout(flushDrafts, DRAFT_WRITE_DELAY_MS);
+    draftTimer ??= setTimeout(flushComposerDrafts, DRAFT_WRITE_DELAY_MS);
 }
 
 // ── Sent-message history ────────────────────────────────────────────────────
@@ -87,11 +104,11 @@ export function saveSentHistory(blockId: string): void {
     if (history) writeSession(HISTORY_KEY + blockId, history.length > 0 ? history : undefined);
 }
 
-if (typeof window !== "undefined") window.addEventListener("pagehide", flushDrafts);
+if (typeof window !== "undefined") window.addEventListener("pagehide", flushComposerDrafts);
 
 /** Test hook: forget the in-memory copies, as a reload does. */
 export function resetReloadPersistenceForTests(): void {
-    flushDrafts();
+    flushComposerDrafts();
     drafts.clear();
     histories.clear();
 }

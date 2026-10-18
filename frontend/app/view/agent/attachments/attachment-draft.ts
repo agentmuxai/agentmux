@@ -26,6 +26,7 @@ import { authHeaders } from "@/app/store/auth-headers";
 import { MOS, pushNotification } from "@/app/store/global";
 import { WpsEvent } from "@/app/store/mps-events";
 import { onMuxEvent } from "@/app/store/mps";
+import { registerRecycleBlocker } from "@/app/store/recycle-blockers";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { getWebServerEndpoint } from "@/util/endpoints";
@@ -158,6 +159,8 @@ export class AttachmentDraft {
     count = () => this.items().length;
     totalBytes = () => this.items().reduce((sum, i) => sum + i.bytes, 0);
     processingCount = () => this.items().filter((i) => i.status === "processing").length;
+    /** A path batch srv accepted but hasn't answered for yet: no item shows it until it does. */
+    ingestInFlight = () => this.early.size > 0;
     readyItems = () => this.items().filter((i) => i.status === "ready" && i.info);
     /**
      * The aggregate bar, over items still in flight, by bytes: a copy or
@@ -398,10 +401,13 @@ export class AttachmentDraft {
      * Keep the ready attachments (id and name) for a reload of this window. An
      * upload or ingest still in progress can't continue after one.
      */
-    private store(): void {
+    private store(): boolean {
         const refs: AttachmentRef[] = this.readyItems().map((i) => ({ id: i.info!.id, name: i.name }));
-        writeSession(STORED_KEY + this.blockId, refs.length > 0 ? refs : undefined);
+        return writeSession(STORED_KEY + this.blockId, refs.length > 0 ? refs : undefined);
     }
+
+    /** Store the ready attachments now, for a recycle; false when the storage refused them. */
+    persist = (): boolean => this.store();
 
     /** After a send: the tray empties; the files stay in the store for the transcript. */
     clearAfterSend(): void {
@@ -509,6 +515,18 @@ export class AttachmentDraft {
 }
 
 const drafts = new Map<string, AttachmentDraft>();
+
+// An upload in progress is an XHR in this page: a reload would cancel it.
+registerRecycleBlocker(() =>
+    [...drafts.values()].some((d) => d.processingCount() > 0 || d.ingestInFlight()) ? "a file is still uploading" : null
+);
+
+/** Store every pane's ready attachments, for a recycle; false when one couldn't be stored. */
+export function saveAllAttachmentDrafts(): boolean {
+    let saved = true;
+    for (const d of drafts.values()) saved = d.persist() && saved;
+    return saved;
+}
 
 /** The attachment draft for an agent pane, created on first use. */
 export function getAttachmentDraft(blockId: string): AttachmentDraft {

@@ -47,12 +47,19 @@ export interface UseSnapshotPersistenceOptions {
 
 const SNAPSHOT_INTERVAL_MS = 30_000;
 
-/** Every mounted pane's "write now if dirty" (c). */
-const flushers = new Set<() => Promise<void>>();
+/** Writes a recycle's flush makes while the user keeps changing the overlay. */
+const FLUSH_PASSES = 5;
 
-/** Write every pane's pending snapshot now; resolves when the writes are done (failures are logged, not thrown). */
-export function flushPaneSnapshots(): Promise<void> {
-    return Promise.all([...flushers].map((flush) => flush())).then(() => {});
+/** Every mounted pane's "write now if dirty" (c); resolves whether its last write landed. */
+const flushers = new Set<() => Promise<boolean>>();
+
+/**
+ * Write every pane's pending snapshot now. Resolves true when every pane's
+ * latest snapshot is stored, false when a write failed (it is logged, and the
+ * pane stays dirty for its next tick): a recycle must not reload then.
+ */
+export function flushPaneSnapshots(): Promise<boolean> {
+    return Promise.all([...flushers].map((flush) => flush())).then((saved) => saved.every(Boolean));
 }
 
 export function useSnapshotPersistence(opts: UseSnapshotPersistenceOptions): void {
@@ -62,6 +69,8 @@ export function useSnapshotPersistence(opts: UseSnapshotPersistenceOptions): voi
     // line-count RPC and write. Without ordering, the older interval write
     // can resolve LAST and overwrite the close-time snapshot, losing recent nodes.
     let inFlightSnapshot: Promise<void> = Promise.resolve();
+    /** Whether the last write landed (a failure leaves the pane dirty). */
+    let lastWriteOk = true;
     const writeSnapshotNow = () => {
         // Don't let a cross-block continuation pane (one that mounted against a
         // snapshot whose sourceBlockId names another block) overwrite the
@@ -128,7 +137,10 @@ export function useSnapshotPersistence(opts: UseSnapshotPersistenceOptions): voi
                 definition_id: opts.definitionId,
                 content: JSON.stringify(snapshot),
             }, { timeout: 10000 });
+            lastWriteOk = true;
         }).catch((e) => {
+            lastWriteOk = false;
+            dirty = true;
             opts.log("history", `snapshot write failed: ${e?.message ?? e}`, "warn");
         });
     };
@@ -137,6 +149,10 @@ export function useSnapshotPersistence(opts: UseSnapshotPersistenceOptions): voi
     // and avoids dispatching a save on every reactive change. A change
     // sets `dirty`; the 30s tick flushes if dirty and resets.
     let dirty = false;
+    // The overlay (collapsed, pinned, filter, details) changed since the last
+    // write captured it: the user's own state, which a reload can't rebuild from
+    // the transcript the way it rebuilds the nodes.
+    let overlayDirty = false;
     let lastNodes = opts.getDocument();
     createEffect(() => {
         const next = opts.getDocument();
@@ -153,7 +169,7 @@ export function useSnapshotPersistence(opts: UseSnapshotPersistenceOptions): voi
     createEffect(() => {
         const ds = opts.getAtoms().documentStateAtom[0]();
         const overlay = [ds?.collapsedNodes, ds?.pinnedNodes, ds?.filter, ds?.scrollPosition, opts.getDetailsOpen()];
-        if (lastOverlay && overlay.some((v, i) => v !== lastOverlay![i])) dirty = true;
+        if (lastOverlay && overlay.some((v, i) => v !== lastOverlay![i])) dirty = overlayDirty = true;
         lastOverlay = overlay;
     });
     const snapshotInterval = setInterval(() => {
@@ -162,12 +178,20 @@ export function useSnapshotPersistence(opts: UseSnapshotPersistenceOptions): voi
         writeSnapshotNow();
     }, SNAPSHOT_INTERVAL_MS);
     onCleanup(() => clearInterval(snapshotInterval));
-    const flush = (): Promise<void> => {
-        if (dirty) {
-            dirty = false;
-            writeSnapshotNow();
+    // For a recycle: write until a write captured the latest overlay. A change
+    // made while a write is in flight would otherwise miss it. Bounded, and
+    // false when the overlay keeps changing, so the recycle waits.
+    const flush = async (): Promise<boolean> => {
+        for (let pass = 0; pass < FLUSH_PASSES; pass++) {
+            if (dirty) {
+                dirty = overlayDirty = false;
+                writeSnapshotNow();
+            }
+            await inFlightSnapshot;
+            if (!lastWriteOk) return false;
+            if (!overlayDirty) return true;
         }
-        return inFlightSnapshot;
+        return false;
     };
     flushers.add(flush);
     onCleanup(() => flushers.delete(flush));

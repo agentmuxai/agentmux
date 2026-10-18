@@ -28,7 +28,8 @@
  * `jumpTo(nodeId)` callback that gets invoked on every navigation.
  */
 
-import { createMemo, createSignal, type Accessor, type Setter } from "solid-js";
+import { createMemo, createSignal, onCleanup, type Accessor, type Setter } from "solid-js";
+import { registerRecycleBlocker } from "@/app/store/recycle-blockers";
 import type { DocumentNode } from "../types";
 
 export interface UseInSessionSearchOptions {
@@ -73,6 +74,7 @@ function nodeSearchText(node: DocumentNode): string {
 
 export function useInSessionSearch(opts: UseInSessionSearchOptions): UseInSessionSearch {
     const [visible, setVisible] = createSignal(false);
+    onCleanup(registerRecycleBlocker(() => (visible() ? "a transcript search is open" : null)));
     const [matches, setMatches] = createSignal<string[]>([]);
     const [currentIndex, setCurrentIndex] = createSignal(-1);
 

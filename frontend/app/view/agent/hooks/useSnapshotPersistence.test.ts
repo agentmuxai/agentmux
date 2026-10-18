@@ -97,6 +97,32 @@ describe("useSnapshotPersistence: the overlay is saved, and can be flushed", () 
         pane.dispose();
     });
 
+    it("a failed write makes the flush say false, and the change is written again", async () => {
+        const pane = mountPane();
+        pane.setDocState((prev) => ({ ...prev, pinnedNodes: new Set(["n2"]) }));
+        rpc.writeState.mockRejectedValueOnce(new Error("timeout"));
+        await expect(flushPaneSnapshots()).resolves.toBe(false);
+        // Still dirty: the next flush writes it, and then it's saved.
+        await expect(flushPaneSnapshots()).resolves.toBe(true);
+        expect(rpc.writeState).toHaveBeenCalledTimes(2);
+        pane.dispose();
+    });
+
+    it("an overlay change made while the flush's write is in flight is written before the flush resolves", async () => {
+        const pane = mountPane();
+        pane.setDocState((prev) => ({ ...prev, pinnedNodes: new Set(["n2"]) }));
+        let release: () => void = () => {};
+        rpc.writeState.mockImplementationOnce(() => new Promise<void>((r) => (release = r)));
+        const flushed = flushPaneSnapshots();
+        await vi.advanceTimersByTimeAsync(0);
+        // The user pins another row while the first write waits.
+        pane.setDocState((prev) => ({ ...prev, pinnedNodes: new Set(["n2", "n3"]) }));
+        release();
+        await expect(flushed).resolves.toBe(true);
+        expect(written().at(-1)!.documentState.pinnedNodeIds).toEqual(["n2", "n3"]);
+        pane.dispose();
+    });
+
     it("with nothing changed a flush writes nothing; a closed pane is no longer flushed, and its close-time write still lands", async () => {
         const pane = mountPane();
         await flushPaneSnapshots();

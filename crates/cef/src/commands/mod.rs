@@ -22,6 +22,7 @@ pub mod startup_pools;
 pub mod clipboard;
 pub mod stubs;
 pub mod palette;
+pub mod recycle;
 pub mod orphan_reconcile;
 pub mod floating_pane;
 /// What went wrong and what AgentMux did about it, kept for the user.

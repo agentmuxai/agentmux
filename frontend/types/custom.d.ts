@@ -282,6 +282,13 @@ declare global {
         getPaneDebugState(): Promise<Record<string, unknown>>;
         /** This window's whole viewport as a base64 JPEG, unclipped (a tear-off snapshot's source). */
         captureViewport(windowLabel: string, quality?: number): Promise<{ jpeg_base64: string }>;
+        /** This window is about to reload to free its renderer's memory: the host measures it
+         *  and keeps a picture of it to cover the reload (SPEC_RENDERER_RECYCLE_WHEN_IDLE §3). */
+        recycleBegin(windowLabel: string, reason: string): Promise<{ before_mb: number | null }>;
+        /** A recycle `recycleBegin` started won't reload after all: drop its picture. */
+        recycleCancel(windowLabel: string): Promise<void>;
+        /** While booting: the cover picture of the recycle that reloaded this window, if one did. */
+        takeReloadSnapshot(windowLabel: string): Promise<{ jpeg_base64: string | null }>;
         /** Tear a pane off into its own floating window (payload: pane_id, workspace_id, x, y, …). */
         openFloatingPane(args: Record<string, unknown>): Promise<{ window_label: string }>;
         /** Whether the window is maximized (a floater's own maximize on Windows, the OS's elsewhere);

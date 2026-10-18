@@ -34,7 +34,8 @@ vi.mock("@/app/store/global", () => ({
 vi.mock("@/app/store/app-api", () => ({ getApi: () => ({ getAuthKey: () => "k" }) }));
 vi.mock("@/util/endpoints", () => ({ getWebServerEndpoint: () => "http://x" }));
 
-import { AttachmentDraft, pastedFileName } from "./attachment-draft";
+import { recycleBlockers } from "@/app/store/recycle-blockers";
+import { AttachmentDraft, getAttachmentDraft, pastedFileName, saveAllAttachmentDrafts } from "./attachment-draft";
 
 const info = (id: string, bytes = 10): AttachmentInfo => ({
     id,
@@ -253,6 +254,51 @@ describe("AttachmentDraft.uploadFiles", () => {
         expect(sent()).toEqual(["f0.png", "f1.png"]);
         FakeXhr.made[1].onerror?.();
         expect(sent()).toEqual(["f0.png", "f1.png", "g0.png"]);
+    });
+
+    it("an upload in flight blocks a renderer recycle until it ends", () => {
+        const d = getAttachmentDraft("u8");
+        d.uploadFiles(files(1));
+        expect(recycleBlockers()).toContain("a file is still uploading");
+        FakeXhr.made[0].succeed("g".repeat(64));
+        expect(recycleBlockers()).not.toContain("a file is still uploading");
+    });
+
+    it("saving every draft for a recycle says false when the storage refuses one", () => {
+        const d = getAttachmentDraft("u10");
+        d.uploadFiles(files(1));
+        FakeXhr.made[FakeXhr.made.length - 1].succeed("h".repeat(64));
+        const kept = new Map<string, string>();
+        const storage = {
+            getItem: (k: string) => kept.get(k) ?? null,
+            setItem: (k: string, v: string) => void kept.set(k, v),
+            removeItem: (k: string) => void kept.delete(k),
+        };
+        vi.stubGlobal("sessionStorage", storage);
+        expect(saveAllAttachmentDrafts()).toBe(true);
+        storage.setItem = () => {
+            throw new Error("QuotaExceededError");
+        };
+        expect(saveAllAttachmentDrafts()).toBe(false);
+        vi.unstubAllGlobals();
+    });
+
+    it("a path batch srv hasn't answered yet blocks a renderer recycle", async () => {
+        const d = getAttachmentDraft("u9");
+        let batch = "";
+        let reply: (v: unknown) => void = () => {};
+        hub.ingest.mockImplementationOnce((_c: unknown, req: { batch_id: string }) => {
+            batch = req.batch_id;
+            return new Promise((r) => (reply = r));
+        });
+        const pending = d.ingestPaths(["/p/x.png"]);
+        // Accepted by srv, no item yet: only the batch shows it.
+        expect(recycleBlockers()).toContain("a file is still uploading");
+        d.onReady({ batch_id: batch, index: 0, info: info("x".repeat(64)) });
+        d.onBatchDone({ batch_id: batch });
+        reply(accepted(batch, ["x.png"]));
+        await pending;
+        expect(recycleBlockers()).not.toContain("a file is still uploading");
     });
 });
 

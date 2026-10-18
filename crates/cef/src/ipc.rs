@@ -267,6 +267,11 @@ async fn route_command(
             let initial_meta = args.get("initial_meta").and_then(|v| v.as_str());
             commands::window::open_subwindow(state, parent, initial_view, initial_meta)
         }
+        // A window recycling its renderer (commands/recycle.rs): the old page
+        // begins it, the new one takes its cover picture while it boots.
+        "recycle_begin" => commands::recycle::recycle_begin(state, args).await,
+        "recycle_cancel" => commands::recycle::recycle_cancel(args),
+        "take_reload_snapshot" => commands::recycle::take_reload_snapshot(state, args),
         "capture_window_viewport" => {
             // The calling window's own viewport, unclipped, for its tear-off
             // snapshot (browser_api::routes::capture_window_viewport).
