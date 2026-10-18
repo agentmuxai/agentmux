@@ -82,4 +82,13 @@ describe("Ctrl+R history search", () => {
         await waitFor(() => expect(screen.getByText("Nothing typed to this agent yet.")).toBeTruthy());
         expect(clear).toHaveBeenCalledWith({}, { agent_id: "a1" });
     });
+
+    it("says so when forgetting fails, and keeps the entry", async () => {
+        del.mockRejectedValue(new Error("srv went away"));
+        render(() => <InputHistorySearch agentId="a1" onDone={() => {}} />);
+        await screen.findByText("run the tests");
+        fireEvent.keyDown(screen.getByPlaceholderText("Type to filter"), { key: "Delete", shiftKey: true });
+        expect(await screen.findByText(/Couldn't forget it: srv went away/)).toBeTruthy();
+        expect(screen.getByText("run the tests")).toBeTruthy();
+    });
 });

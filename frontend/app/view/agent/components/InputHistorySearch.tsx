@@ -37,7 +37,9 @@ export function InputHistorySearch(props: {
     const [items, setItems] = createSignal<InputHistoryItem[]>([]);
     const [selected, setSelected] = createSignal(0);
     const [confirmClear, setConfirmClear] = createSignal(false);
+    const [error, setError] = createSignal<string | null>(null);
     let input: HTMLInputElement | undefined;
+    let list: HTMLDivElement | undefined;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let asked = 0;
 
@@ -59,6 +61,10 @@ export function InputHistorySearch(props: {
         })
     );
     onCleanup(() => clearTimeout(timer));
+    // Keep the selected row in sight as the arrows move past the visible ones.
+    createEffect(
+        on(selected, (i) => (list?.children[i] as HTMLElement | undefined)?.scrollIntoView?.({ block: "nearest" }))
+    );
     onMount(() => input?.focus());
 
     const move = (by: number) => {
@@ -68,17 +74,23 @@ export function InputHistorySearch(props: {
     const forgetSelected = () => {
         const item = items()[selected()];
         if (!item) return;
-        void forgetInputHistoryEntry(props.agentId, item.id).then(() => {
-            setItems((list) => list.filter((e) => e.id !== item.id));
-            setSelected((i) => Math.min(i, Math.max(0, items().length - 1)));
-        });
+        setError(null);
+        forgetInputHistoryEntry(props.agentId, item.id)
+            .then(() => {
+                setItems((entries) => entries.filter((e) => e.id !== item.id));
+                setSelected((i) => Math.min(i, Math.max(0, items().length - 1)));
+            })
+            .catch((e) => setError(`Couldn't forget it: ${String(e?.message ?? e)}`));
     };
     const clearAll = () => {
-        void clearInputHistory(props.agentId).then(() => {
-            setItems([]);
-            setConfirmClear(false);
-            input?.focus();
-        });
+        setError(null);
+        clearInputHistory(props.agentId)
+            .then(() => setItems([]))
+            .catch((e) => setError(`Couldn't clear the history: ${String(e?.message ?? e)}`))
+            .finally(() => {
+                setConfirmClear(false);
+                input?.focus();
+            });
     };
 
     const onKeyDown = (e: KeyboardEvent) => {
@@ -121,7 +133,7 @@ export function InputHistorySearch(props: {
                     }}
                 />
             </div>
-            <div class="input-history-search__list" id="input-history-search-list" role="listbox">
+            <div class="input-history-search__list" id="input-history-search-list" role="listbox" ref={list}>
                 <For each={items()}>
                     {(item, i) => (
                         <div
@@ -148,6 +160,9 @@ export function InputHistorySearch(props: {
                     <div class="input-history-search__empty">{query() ? "Nothing typed to this agent matches." : "Nothing typed to this agent yet."}</div>
                 </Show>
             </div>
+            <Show when={error()}>
+                <div class="input-history-search__empty" role="alert">{error()}</div>
+            </Show>
             <div class="input-history-search__hint">
                 <span>Enter to use</span>
                 <span>Shift+Del to forget</span>
