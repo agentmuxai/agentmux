@@ -47,6 +47,9 @@ export interface UseSnapshotPersistenceOptions {
 
 const SNAPSHOT_INTERVAL_MS = 30_000;
 
+/** Writes a recycle's flush makes while the user keeps changing the overlay. */
+const FLUSH_PASSES = 5;
+
 /** Every mounted pane's "write now if dirty" (c); resolves whether its last write landed. */
 const flushers = new Set<() => Promise<boolean>>();
 
@@ -146,6 +149,10 @@ export function useSnapshotPersistence(opts: UseSnapshotPersistenceOptions): voi
     // and avoids dispatching a save on every reactive change. A change
     // sets `dirty`; the 30s tick flushes if dirty and resets.
     let dirty = false;
+    // The overlay (collapsed, pinned, filter, details) changed since the last
+    // write captured it: the user's own state, which a reload can't rebuild from
+    // the transcript the way it rebuilds the nodes.
+    let overlayDirty = false;
     let lastNodes = opts.getDocument();
     createEffect(() => {
         const next = opts.getDocument();
@@ -162,7 +169,7 @@ export function useSnapshotPersistence(opts: UseSnapshotPersistenceOptions): voi
     createEffect(() => {
         const ds = opts.getAtoms().documentStateAtom[0]();
         const overlay = [ds?.collapsedNodes, ds?.pinnedNodes, ds?.filter, ds?.scrollPosition, opts.getDetailsOpen()];
-        if (lastOverlay && overlay.some((v, i) => v !== lastOverlay![i])) dirty = true;
+        if (lastOverlay && overlay.some((v, i) => v !== lastOverlay![i])) dirty = overlayDirty = true;
         lastOverlay = overlay;
     });
     const snapshotInterval = setInterval(() => {
@@ -171,12 +178,20 @@ export function useSnapshotPersistence(opts: UseSnapshotPersistenceOptions): voi
         writeSnapshotNow();
     }, SNAPSHOT_INTERVAL_MS);
     onCleanup(() => clearInterval(snapshotInterval));
-    const flush = (): Promise<boolean> => {
-        if (dirty) {
-            dirty = false;
-            writeSnapshotNow();
+    // For a recycle: write until a write captured the latest overlay. A change
+    // made while a write is in flight would otherwise miss it. Bounded, and
+    // false when the overlay keeps changing, so the recycle waits.
+    const flush = async (): Promise<boolean> => {
+        for (let pass = 0; pass < FLUSH_PASSES; pass++) {
+            if (dirty) {
+                dirty = overlayDirty = false;
+                writeSnapshotNow();
+            }
+            await inFlightSnapshot;
+            if (!lastWriteOk) return false;
+            if (!overlayDirty) return true;
         }
-        return inFlightSnapshot.then(() => lastWriteOk);
+        return false;
     };
     flushers.add(flush);
     onCleanup(() => flushers.delete(flush));
