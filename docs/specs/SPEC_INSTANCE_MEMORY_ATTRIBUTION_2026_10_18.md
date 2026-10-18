@@ -3,7 +3,7 @@
 **Date:** 2026-10-18
 **Author:** Maricon@charlie
 **Type:** Spec (a diagnostic's accounting; no behaviour change)
-**Status:** active — shipped in PR #5083 (the module, the Windows attribution change, its tests); remaining: a real two-instance reading on Windows, which CI cannot give (the Windows-only part is compiled by CI but not run)
+**Status:** implemented — shipped in PR #5083 (the module, the Windows attribution change, its tests). Verified on a real Windows machine running two instances (0.59.30 beside 0.59.31): the walk from 0.59.30's srv reaches its launcher and stops at explorer.exe, and 0.59.31 has its own tree (Camper@narko, 2026-10-18).
 **Part of:** `PLAN_RENDERER_MEMORY_FIXES_2026_10_12.md` item 4, under track E (srv's memory) of the 500 MB budget (`docs/reports/REPORT_MEMORY_FOOTPRINT_500MB_BUDGET_2026_10_12.md`).
 **Asked by:** Camper@narko, coordinating the budget: "Count only this instance's own process tree. Small, and it makes field numbers trustworthy."
 
