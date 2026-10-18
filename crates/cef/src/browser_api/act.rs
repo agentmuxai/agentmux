@@ -913,11 +913,21 @@ async fn act(
             // the page changed (cut to a limit, reformatted by a mask) is the
             // page's rule: keep it, and say so.
             let ignored = got.is_empty() || before.as_deref() == Some(got.as_str());
-            if got != text && ignored && after.get("contentEditable").is_none() {
+            let forced = got != text && ignored && after.get("contentEditable").is_none();
+            if forced {
                 call_on(cdp, &obj, SET_VALUE, vec![json!(text)]).await?;
                 after = call_on(cdp, &obj, READ_BACK, vec![]).await?;
             }
-            Ok(warn_if_changed(after, &text))
+            let mut after = warn_if_changed(after, &text);
+            if forced {
+                // Never silent: a field that rejected the text on purpose was overridden.
+                if let Some(o) = after.as_object_mut() {
+                    o.entry("note").or_insert(json!(
+                        "the field didn't take the typed text, so it was set directly: check the page accepts this value (a snapshot, or its own error message)"
+                    ));
+                }
+            }
+            Ok(after)
         }
         "select" => {
             let option = req.option.clone().ok_or("select needs `option`")?;
