@@ -72,11 +72,12 @@ pub fn copy_parent_history(
         let mark = serde_json::json!({ "from": parent_id, "session_id": session_id, "at_ms": now_ms() });
         write_zone_file(gfs, &fork, FORK_MARK_FILE, mark.to_string().as_bytes())?;
     }
-    let state = crate::backend::continuity_state::STATE_FILE;
-    let Some(bytes) = gfs
-        .copy_files_to_zone(&parent, &fork, &[OUTPUT_FILE, TSIDX_FILE, state])
-        .map_err(|e| format!("copy transcript: {e}"))?
-    else {
+    // One copy of all four files, in one transaction, so the pane state can't
+    // come from a different moment than the transcript. The pane state is
+    // written through the cache, so the cache is flushed to the database first.
+    gfs.flush_cache().map_err(|e| format!("flush before copy: {e}"))?;
+    let files = [OUTPUT_FILE, TSIDX_FILE, crate::backend::continuity_state::STATE_FILE, SNAPSHOT_FILE];
+    let Some(bytes) = gfs.copy_files_to_zone(&parent, &fork, &files).map_err(|e| format!("copy transcript: {e}"))? else {
         return Ok(ForkHistory::ForkHasHistory);
     };
     // The check above and the copy are separate reads: the parent may have
@@ -84,15 +85,8 @@ pub fn copy_parent_history(
     // fork). What counts is the copy, so it is checked again, and undone if
     // it doesn't end in the session the fork continues.
     if last_session(gfs, &fork, session_id_field)?.as_deref() != Some(session_id) {
-        gfs.delete_files(&fork, &[OUTPUT_FILE, TSIDX_FILE, state])
-            .map_err(|e| format!("undo copy: {e}"))?;
+        gfs.delete_files(&fork, &files).map_err(|e| format!("undo copy: {e}"))?;
         return Ok(ForkHistory::NotTheLastSession);
-    }
-    // The pane state is written through the cache, so it's read through it.
-    if let Some(snapshot) = gfs.read_file(&parent, SNAPSHOT_FILE).map_err(|e| format!("read pane state: {e}"))? {
-        if !snapshot.is_empty() {
-            write_zone_file(gfs, &fork, SNAPSHOT_FILE, &snapshot)?;
-        }
     }
     tracing::info!(parent = %parent_id, fork = %fork_id, session_id = %session_id, bytes, "fork: copied its parent's history");
     Ok(ForkHistory::Copied { bytes })

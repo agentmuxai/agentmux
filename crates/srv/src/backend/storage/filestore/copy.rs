@@ -35,7 +35,7 @@ impl FileStore {
     ///
     /// Reads the database, not this process's cache: transcript appends are
     /// written straight to it (`append_lines`). A file written through the
-    /// cache (`write_file`) may be behind; copy those with `read_file`.
+    /// cache (`write_file`) may be behind: flush the cache first (`flush_cache`).
     ///
     /// Each copy is a new file: a fresh `gen`, and its own incarnation (set
     /// by the insert trigger). Its line count is carried over when the

@@ -38,7 +38,9 @@ fn a_fork_of_the_last_session_gets_the_parents_history_exactly() {
 
     let out = copy_parent_history(&gfs, PARENT, FORK, "sess-b", "session_id").unwrap();
 
-    assert_eq!(out, ForkHistory::Copied { bytes: (data.len() + read_all(&gfs, &agent_current_zone(PARENT), TSIDX_FILE).len()) as u64 });
+    let parent = agent_current_zone(PARENT);
+    let sidecars = read_all(&gfs, &parent, TSIDX_FILE).len() + read_all(&gfs, &parent, SNAPSHOT_FILE).len();
+    assert_eq!(out, ForkHistory::Copied { bytes: (data.len() + sidecars) as u64 });
     let fork = agent_current_zone(FORK);
     assert_eq!(read_all(&gfs, &fork, OUTPUT_FILE), data);
     assert_eq!(read_all(&gfs, &fork, TSIDX_FILE), read_all(&gfs, &agent_current_zone(PARENT), TSIDX_FILE));
