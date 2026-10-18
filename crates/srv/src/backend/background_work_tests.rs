@@ -36,7 +36,7 @@ fn an_agents_dev_instance_is_one_tree_known_as_an_agentmux() {
     assert!(w.agentmux);
     assert_eq!((w.agent.as_str(), w.key.as_str(), w.started_at_ms), ("Korp", "uid-korp", 1_000));
     assert!(w.label.contains("task dev TITLE=KorpForms"), "{}", w.label);
-    assert_eq!(w.hosts, vec![13], "its host, asked to close its windows; not its CEF helpers");
+    assert_eq!(w.hosts, vec![13], "its host, asked to save its windows; not its CEF helpers");
 }
 
 #[test]

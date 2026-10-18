@@ -17,10 +17,12 @@
 //!   dialog (`updates/stopping.txt`, [`write_for_launcher`]) and an agent
 //!   asking for the upgrade are told.
 //! - **At the quit** ([`at_quit`], from the quit's session save): it is
-//!   recorded, and on Windows another AgentMux among it is asked to close its
-//!   windows first, so it saves its own session as a quit does, before its
-//!   tracker is closed. Elsewhere it is stopped with its pane as before: its
-//!   host doesn't take a signal as a quit, and its own quit can't be reached.
+//!   recorded, and on Windows another AgentMux among it is told the session
+//!   is ending (`WM_QUERYENDSESSION`), so it saves all its windows as at an
+//!   OS shutdown before its tracker stops it. Its windows aren't closed: a
+//!   close deletes the window's workspace, and stopped as it is, its windows
+//!   all come back on its next start. Elsewhere it is stopped with its pane
+//!   as before, which keeps its windows the same way.
 //! - **After:** each agent that resumes is told what of its own was stopped
 //!   ([`on_registered`]), once, so it can start it again.
 
@@ -38,8 +40,9 @@ use crate::backend::process_tracker::TrackedProcess;
 pub const RECORD_FILE: &str = "agentmux-stopped-at-quit.json";
 /// How long after a quit resumed agents are still told.
 const TELL_FOR: Duration = Duration::from_secs(60 * 60);
-/// How long the quit waits for another AgentMux to close its windows.
-const CLOSE_WAIT: Duration = Duration::from_millis(900);
+/// How long another AgentMux has to save its windows, within the host's
+/// 1.5 s for the whole quit save.
+const SAVE_WAIT_MS: u32 = 900;
 /// The longest command shown for one item.
 const MAX_LABEL: usize = 90;
 
@@ -62,7 +65,7 @@ pub struct Work {
     pub agentmux: bool,
     /// When its root started (unix ms), 0 if unknown.
     pub started_at_ms: u64,
-    /// Its AgentMux host processes, asked to close their windows at a quit.
+    /// Its AgentMux host process, asked to save its windows at a quit.
     #[serde(skip)]
     pub hosts: Vec<u32>,
 }
@@ -233,9 +236,8 @@ fn channel_dir() -> Option<PathBuf> {
 
 /// A quit is about to close every pane (`SaveSessionSnapshot` with
 /// `for_quit`): record what agents left running, for their note after the
-/// next start, and on Windows ask another AgentMux among it to close its
-/// windows, so it saves its session before its tracker is closed. Waits a
-/// little for those to go; the host allows the whole save 1.5 s.
+/// next start, and on Windows tell another AgentMux among it that the
+/// session is ending, so it saves its windows before its tracker stops it.
 pub async fn at_quit() {
     let work = tokio::task::spawn_blocking(running).await.unwrap_or_default();
     if work.is_empty() {
@@ -247,51 +249,54 @@ pub async fn at_quit() {
         write(&dir, &Record { at_ms: now as i64, items: work.clone() });
     }
     let hosts: Vec<u32> = work.iter().flat_map(|w| w.hosts.iter().copied()).collect();
-    if hosts.is_empty() || !cfg!(windows) {
-        return;
-    }
-    for pid in &hosts {
-        close_windows_of(*pid);
-    }
-    let deadline = tokio::time::Instant::now() + CLOSE_WAIT;
-    while tokio::time::Instant::now() < deadline && hosts.iter().any(|p| alive(*p)) {
-        tokio::time::sleep(Duration::from_millis(100)).await;
+    if !hosts.is_empty() {
+        let _ = tokio::task::spawn_blocking(move || hosts.iter().for_each(|pid| save_windows_of(*pid))).await;
     }
 }
 
-/// Ask process `pid` to close its windows, as a click on each one's close
-/// button does: the visible top-level windows get `WM_CLOSE`.
+/// Tell host process `pid` the session is ending, as Windows does at a
+/// shutdown: `WM_QUERYENDSESSION` to one of its visible windows, which saves
+/// every window (`client/wndproc.rs`'s session-end flush), and waits for the
+/// answer up to [`SAVE_WAIT_MS`]. Nothing is closed.
 #[cfg(windows)]
-fn close_windows_of(pid: u32) {
+fn save_windows_of(pid: u32) {
     use windows_sys::Win32::Foundation::{BOOL, HWND, LPARAM, TRUE};
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        EnumWindows, GetWindowThreadProcessId, IsWindowVisible, PostMessageW, WM_CLOSE,
+        EnumWindows, GetWindowThreadProcessId, IsWindowVisible, SendMessageTimeoutW, SMTO_ABORTIFHUNG,
+        WM_QUERYENDSESSION,
     };
+    struct Find {
+        pid: u32,
+        found: HWND,
+    }
     unsafe extern "system" fn each(hwnd: HWND, lparam: LPARAM) -> BOOL {
+        // SAFETY: lparam is the `Find` passed below, alive for the whole call.
+        let find = unsafe { &mut *(lparam as *mut Find) };
         let mut owner = 0u32;
         // SAFETY: hwnd comes from EnumWindows; owner is a valid out pointer.
         unsafe { GetWindowThreadProcessId(hwnd, &mut owner) };
-        if owner == lparam as u32 && unsafe { IsWindowVisible(hwnd) } != 0 {
-            // SAFETY: posting a message to a window handle is always safe.
-            unsafe { PostMessageW(hwnd, WM_CLOSE, 0, 0) };
+        if owner == find.pid && unsafe { IsWindowVisible(hwnd) } != 0 {
+            find.found = hwnd;
+            return 0;
         }
         TRUE
     }
-    // SAFETY: the callback reads only its arguments.
-    unsafe { EnumWindows(Some(each), pid as LPARAM) };
+    let mut find = Find { pid, found: std::ptr::null_mut() };
+    // SAFETY: the callback only reads its window and writes `find`.
+    unsafe { EnumWindows(Some(each), &mut find as *mut Find as LPARAM) };
+    if find.found.is_null() {
+        return;
+    }
+    let mut answer = 0usize;
+    // SAFETY: a message to a window handle; the timeout bounds the wait.
+    unsafe { SendMessageTimeoutW(find.found, WM_QUERYENDSESSION, 0, 0, SMTO_ABORTIFHUNG, SAVE_WAIT_MS, &mut answer) };
+    tracing::info!(pid, "background work: told another AgentMux to save its windows");
 }
 
-/// Off Windows nothing asks: a signal to the host ends it without its quit,
-/// which is no better than its pane closing.
+/// Off Windows nothing is sent: stopped with its pane, another AgentMux keeps
+/// its windows for its next start.
 #[cfg(not(windows))]
-fn close_windows_of(_pid: u32) {}
-
-fn alive(pid: u32) -> bool {
-    let mut sys = sysinfo::System::new();
-    let pid = sysinfo::Pid::from_u32(pid);
-    sys.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[pid]), true);
-    sys.process(pid).is_some()
-}
+fn save_windows_of(_pid: u32) {}
 
 // ── After the next start ────────────────────────────────────────────────────
 
@@ -349,8 +354,12 @@ pub fn note_text(items: &[Work], at_ms: i64) -> String {
 /// looked up, and told, from a task of its own.
 pub fn on_registered(block_id: &str) {
     let Some(Some(state)) = STATE.get() else { return };
-    if state.record.lock().unwrap_or_else(|e| e.into_inner()).items.is_empty() {
-        return;
+    {
+        let record = state.record.lock().unwrap_or_else(|e| e.into_inner());
+        // Told only within the hour after the quit, however long srv has run.
+        if record.items.is_empty() || agentmux_common::time::now_ms() - record.at_ms >= TELL_FOR.as_millis() as i64 {
+            return;
+        }
     }
     let block_id = block_id.to_string();
     tokio::spawn(async move {
