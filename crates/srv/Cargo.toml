@@ -172,6 +172,9 @@ windows-sys = { version = "0.59", features = [
     "Win32_System_ProcessStatus",
     "Win32_System_SystemInformation",
     "Win32_System_Diagnostics_ToolHelp",
+    # Asking another AgentMux an agent started to close its windows at a quit
+    # (backend/background_work.rs).
+    "Win32_UI_WindowsAndMessaging",
     # Win32_System_Registry dropped: its only caller (the PagingFiles
     # registry read) moved to crates/common/src/pagefile.rs, which
     # declares its own windows-sys dependency with that feature —

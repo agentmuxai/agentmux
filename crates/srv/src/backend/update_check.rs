@@ -134,6 +134,11 @@ pub struct DownloadStatus {
     /// While `waiting`: how many agents are still in a turn.
     #[serde(default)]
     pub waiting_for: u32,
+    /// While `waiting` or `restarting`: what agents left running that the
+    /// restart stops, a line each ("Agent-1: an AgentMux instance (`task
+    /// dev`), running 9 h"; `background_work`).
+    #[serde(default)]
+    pub stopping: Vec<String>,
 }
 
 impl AppUpdateStatus {
@@ -513,6 +518,7 @@ mod tests {
             folder: None,
             installer: None,
             waiting_for: 0,
+            stopping: Vec::new(),
         };
         let newer = status_for("0.59.26", "stable", &release("v0.59.28"), 9, &InstallKind::Unknown);
         let same = status_for("0.59.26", "stable", &release("v0.59.27"), 9, &InstallKind::Unknown);

@@ -39,8 +39,8 @@ pub const PENDING_FOR: Duration = Duration::from_secs(60 * 60);
 const SETTLE: Duration = Duration::from_secs(1);
 /// A restored pane's controller can come up after the pane registers, so a
 /// note that finds none is tried again, this often, up to [`RETRIES`] times.
-const RETRY_GAP: Duration = Duration::from_secs(2);
-const RETRIES: u32 = 15;
+pub(crate) const RETRY_GAP: Duration = Duration::from_secs(2);
+pub(crate) const RETRIES: u32 = 15;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 struct Record {
@@ -186,14 +186,14 @@ fn has_session(store: &crate::backend::storage::store::Store, block_id: &str) ->
 }
 
 /// Why a note wasn't delivered: the pane is gone, or it may be ready later.
-enum Undelivered {
+pub(crate) enum Undelivered {
     Gone(String),
     Retry(String),
 }
 
 /// `deliver` until it succeeds, at most `attempts` times, `gap` apart; the
 /// last error when none does. A pane that is gone isn't waited for.
-async fn deliver_with_retry(
+pub(crate) async fn deliver_with_retry(
     mut deliver: impl FnMut() -> Result<(), Undelivered>,
     attempts: u32,
     gap: Duration,

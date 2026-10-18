@@ -187,7 +187,9 @@ pub fn staged(req: &UpgradeRequest, own_dir: &Path, data_dir: &Path, own_version
 /// [`ANSWER_WITHIN`], to the latest request. One dialog at a time: a newer
 /// request closes the open one, and a dialog closes itself (as No) once its
 /// time is up. A Yes that slips past either is told it expired.
-pub fn ask_then(version: String, staged: Staged, on_yes: impl FnOnce(Staged) + Send + 'static) {
+/// `stopping` lists what agents left running that the restart stops
+/// ([`stopping_note`]); the dialog names it.
+pub fn ask_then(version: String, staged: Staged, stopping: Vec<String>, on_yes: impl FnOnce(Staged) + Send + 'static) {
     let ask = LATEST_ASK.fetch_add(1, Ordering::SeqCst) + 1;
     dismiss(DIALOG_THREAD.load(Ordering::SeqCst));
     std::thread::spawn(move || {
@@ -200,7 +202,7 @@ pub fn ask_then(version: String, staged: Staged, on_yes: impl FnOnce(Staged) + S
                 dismiss(thread);
             }
         });
-        let yes = confirm(&version, &staged);
+        let yes = confirm(&version, &staged, &stopping);
         let _ = DIALOG_THREAD.compare_exchange(thread, 0, Ordering::SeqCst, Ordering::SeqCst);
         if !yes {
             return;
@@ -273,28 +275,66 @@ fn dismiss(_thread: u32) {}
 
 /// The question for a restart into the new version at `from`.
 #[cfg_attr(not(any(target_os = "windows", target_os = "linux")), allow(dead_code))]
-fn restart_question(version: &str, from: &Path) -> String {
+fn restart_question(version: &str, from: &Path, stopping: &[String]) -> String {
     format!(
         "Restart AgentMux to upgrade to {version}?\n\n\
          Every window closes and every agent stops, then AgentMux {version} opens \
-         from:\n{}\n\nYour tabs come back and agents resume their conversations.",
-        from.display()
+         from:\n{}\n\nYour tabs come back and agents resume their conversations.{}",
+        from.display(),
+        stopping_paragraph(stopping)
+    )
+}
+
+/// The list srv leaves beside the staged update (`updates/stopping.txt` in
+/// this version's data folder; srv's `background_work`) of what agents left
+/// running that the restart stops: a dev server, another AgentMux. One
+/// written more than 15 minutes ago is from an earlier attempt and ignored.
+pub fn stopping_note(data_dir: &Path) -> Vec<String> {
+    let path = data_dir.join("updates").join("stopping.txt");
+    let fresh = std::fs::metadata(&path)
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| t.elapsed().ok())
+        .is_some_and(|age| age < Duration::from_secs(15 * 60));
+    if !fresh {
+        return Vec::new();
+    }
+    std::fs::read_to_string(&path)
+        .unwrap_or_default()
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .take(8)
+        .map(|l| l.chars().take(160).collect())
+        .collect()
+}
+
+/// The dialog's paragraph naming what the restart stops, or nothing.
+fn stopping_paragraph(stopping: &[String]) -> String {
+    if stopping.is_empty() {
+        return String::new();
+    }
+    let lines: Vec<String> = stopping.iter().map(|l| format!("- {l}")).collect();
+    format!(
+        "\n\nThis also stops what agents left running in the background; each agent is told afterwards:\n{}",
+        lines.join("\n")
     )
 }
 
 #[cfg(target_os = "windows")]
-fn confirm(version: &str, staged: &Staged) -> bool {
+fn confirm(version: &str, staged: &Staged, stopping: &[String]) -> bool {
     use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         MessageBoxW, IDYES, MB_DEFBUTTON2, MB_ICONQUESTION, MB_SETFOREGROUND, MB_TOPMOST, MB_YESNO,
     };
     let body = match staged {
-        Staged::Launcher(launcher) => restart_question(version, launcher.parent().unwrap_or(launcher)),
+        Staged::Launcher(launcher) => restart_question(version, launcher.parent().unwrap_or(launcher), stopping),
         Staged::Installer { .. } => format!(
             "Restart AgentMux to upgrade to {version}?\n\n\
              Every window closes and every agent stops, then the AgentMux {version} installer \
              runs (Windows may ask for permission, if AgentMux is installed for all users) \
-             and AgentMux opens again.\n\nYour tabs come back and agents resume their conversations."
+             and AgentMux opens again.\n\nYour tabs come back and agents resume their conversations.{}",
+            stopping_paragraph(stopping)
         ),
     };
     let wide = |s: &str| std::ffi::OsStr::new(s).encode_wide().chain(Some(0)).collect::<Vec<u16>>();
@@ -313,16 +353,16 @@ fn confirm(version: &str, staged: &Staged) -> bool {
 /// Linux: zenity or kdialog (`upgrade_linux::confirm`). Shows the AppImage,
 /// or the portable's folder.
 #[cfg(target_os = "linux")]
-fn confirm(version: &str, staged: &Staged) -> bool {
+fn confirm(version: &str, staged: &Staged, stopping: &[String]) -> bool {
     let shown = match staged {
         Staged::Launcher(p) if p.file_name().is_some_and(|n| n == "agentmux.sh") => p.parent().unwrap_or(p),
         Staged::Launcher(p) | Staged::Installer { installer: p, .. } => p.as_path(),
     };
-    crate::upgrade_linux::confirm(DIALOG_TITLE, &restart_question(version, shown))
+    crate::upgrade_linux::confirm(DIALOG_TITLE, &restart_question(version, shown, stopping))
 }
 
 #[cfg(not(any(target_os = "windows", target_os = "linux")))]
-fn confirm(_version: &str, _staged: &Staged) -> bool {
+fn confirm(_version: &str, _staged: &Staged, _stopping: &[String]) -> bool {
     // macOS restarts itself in phase 3c.
     false
 }
@@ -578,5 +618,26 @@ mod tests {
         if let Some(long_ago) = Instant::now().checked_sub(CONFIRMED_FOR + Duration::from_secs(1)) {
             assert!(!still_confirmed(long_ago));
         }
+    }
+
+    #[test]
+    fn the_dialog_names_what_agents_left_running() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(stopping_note(dir.path()).is_empty(), "no list: nothing to say");
+        std::fs::create_dir_all(dir.path().join("updates")).unwrap();
+        std::fs::write(
+            dir.path().join("updates").join("stopping.txt"),
+            "Korp: an AgentMux instance (`task dev`), running 9 h
+
+Naki-2: `node server.js`
+",
+        )
+        .unwrap();
+        let note = stopping_note(dir.path());
+        assert_eq!(note, ["Korp: an AgentMux instance (`task dev`), running 9 h", "Naki-2: `node server.js`"]);
+        let question = restart_question("0.59.33", Path::new("C:/apps/agentmux-0.59.33"), &note);
+        assert!(question.contains("also stops what agents left running"), "{question}");
+        assert!(question.ends_with("- Naki-2: `node server.js`"), "{question}");
+        assert!(!restart_question("0.59.33", Path::new("C:/x"), &[]).contains("also stops"));
     }
 }
