@@ -3,7 +3,7 @@
 **Date:** 2026-10-18
 **Status:** active — built in #5096.
 **Author:** Naki #2 (naki-naki-2), at the repo owner's request.
-**Builds on:** the cwd persistence in `crates/bashwrap/src/bash_wrap.rs` (`CwdState`, `docs/retro/RETRO_BASH_CWD_RESET_NOTICE_WINDOWS_2026_08_02.md`).
+**Builds on:** the cwd persistence in `crates/bashwrap/src/cwd_state.rs` (`CwdState`, moved there from `bash_wrap.rs` by this change; `docs/retro/RETRO_BASH_CWD_RESET_NOTICE_WINDOWS_2026_08_02.md`).
 
 ## 1. Problem
 
@@ -34,7 +34,7 @@ Nothing failed, so it was found only by reading branch names in output.
 
 ## 4. Tests
 
-`bash_wrap.rs`:
+`cwd_state.rs`:
 - `a_subagents_cd_never_moves_the_main_agent`: a new subagent starts where the main agent is; its `cd` moves only itself; another subagent and the main agent are unaffected; an empty id is the main agent.
 - `subagent_state_files_are_swept_but_an_instances_own_never_is`.
 

@@ -53,7 +53,7 @@ pub struct CallRecord {
     pub description: Option<String>,
     /// The subagent that made the call (the PreToolUse payload's
     /// `agent_id`); none for the main conversation. Its working directory is
-    /// its own (`bash_wrap::CwdState::load`).
+    /// its own (`cwd_state::CwdState::load`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_id: Option<String>,
 }

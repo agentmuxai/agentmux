@@ -819,8 +819,8 @@ async fn run_via_pty(
     // regardless of how `command` ends (trailing comment, no newline, etc.).
     let cwd_state = CwdState::load(args.agent.as_deref());
     // Wrapped a second time by `append_cwd_capture` so the ending `$PWD`
-    // survives this disposable process — see the cwd-persistence block
-    // above `Args` for why that's necessary.
+    // survives this disposable process — see the module doc of
+    // `cwd_state.rs` for why that's necessary.
     cmd.arg(append_cwd_capture(&format!("{{\n{}\n}} </dev/null", command)));
 
     // Disable pagers. The PTY above deliberately makes the child see
@@ -1067,8 +1067,7 @@ async fn run_via_pipes(
     buffered: Arc<Mutex<Vec<u8>>>,
     bash: &std::path::Path,
 ) -> Result<i32> {
-    // Same cwd-persistence rationale as run_via_pty — see the block above
-    // `Args`.
+    // Same cwd-persistence rationale as run_via_pty — see `cwd_state.rs`.
     let cwd_state = CwdState::load(args.agent.as_deref());
     let mut cmd = Command::new(bash);
     cmd.arg("-c")
