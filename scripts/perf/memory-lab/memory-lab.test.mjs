@@ -11,6 +11,7 @@ import { describe, expect, it } from "vitest";
 import { mismatch } from "./compare.mjs";
 import { generateConversation } from "./lib/conversation.mjs";
 import { portableExe } from "./lib/driver.mjs";
+import { draftText, recycleMark, recycleSaving, scrollRestored } from "./lib/recycle.mjs";
 import { allocatorRoots, dumpedProcesses, lastSample, mainPage, withChromiumRoles } from "./lib/sample.mjs";
 import { agentsWithoutTurns, compare, comparisonTable, groupOf, groupSample, inMegabytes, median, MB, steady, table, transcriptGrowthProblem } from "./lib/summary.mjs";
 
@@ -185,6 +186,39 @@ describe("memory lab validity guards", () => {
         expect(s.procs[0].pid).toBe(1);
         expect(s.footprint.output).toBe("total 1 GB");
         expect(lastSample(JSON.stringify({ procs: [] })).footprint).toBeUndefined();
+    });
+});
+
+describe("memory lab recycle check", () => {
+    it("counts a scroll position as restored when the same row is at the top, about where it was", () => {
+        const before = { scrollTop: 900, range: 1500, node: "tool_42", offset: -12 };
+        expect(scrollRestored(before, { ...before, offset: 10 })).toBe(true);
+        expect(scrollRestored(before, { ...before, offset: 80 })).toBe(false);
+        expect(scrollRestored(before, { ...before, node: "tool_43" })).toBe(false);
+        expect(scrollRestored(before, null)).toBe(false);
+        expect(scrollRestored({ ...before, node: null }, { ...before, node: null })).toBe(false);
+    });
+
+    it("makes a different draft each run, so a stale one can't pass", () => {
+        expect(draftText("a")).not.toBe(draftText("b"));
+        expect(draftText("a")).toMatch(/^lab-draft-a:/);
+    });
+
+    const sample = (rendererMB, documents) => ({
+        procs: [proc(1, "agentmux.exe", "renderer", true, rendererMB), proc(2, "agentmux.exe", "renderer", true, 50), proc(3, "agentmux-srv.exe", "main", true, 100)],
+        pages: [{ id: "x", url: "http://127.0.0.1:5000/index.html", dom: { documents } }, { id: "pool", url: "http://localhost/?windowLabel=window-pool-1", dom: { documents: 9 } }],
+    });
+
+    it("reads the app and renderer totals and the main window's document count from a sample", () => {
+        const m = recycleMark(sample(700, 1), 30);
+        expect(m).toEqual({ atSeconds: 30, appMB: 850, rendererMB: 750, rendererProcs: 2, documents: 1, pages: 2 });
+    });
+
+    it("measures the saving from the settled mark against the mark before, and none for a refused recycle", () => {
+        const rec = { recycled: true, before: recycleMark(sample(700, 1), 0), after: [recycleMark(sample(500, 2), 5), recycleMark(sample(300, 1), 60)], state: { pass: true } };
+        expect(recycleSaving(rec)).toEqual({ appMB: 400, rendererMB: 400 });
+        expect(recycleSaving({ recycled: false, blocked: "a file is still uploading" })).toBeNull();
+        expect(recycleSaving(null)).toBeNull();
     });
 });
 
