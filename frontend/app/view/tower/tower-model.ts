@@ -8,14 +8,17 @@
 
 import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
 import { remotesList } from "@/app/store/remotes-store";
-import { RpcApi, type TowerPeerInfo, type TowerSnapshot } from "@/app/store/rpc-api";
+import { RpcApi, type TowerPeerInfo, type TowerProcessKind, type TowerSnapshot } from "@/app/store/rpc-api";
 import type { RemoteRecord } from "@/app/store/rpc-api/remotes";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { settingsAtom } from "@/store/global";
 import { type Accessor, createEffect, createMemo, createSignal, on, onCleanup, type Setter } from "solid-js";
 import { createStore, reconcile } from "solid-js/store";
+import { isKind } from "./tower-kinds";
 import {
     type CpuMode,
+    cpuShare,
+    memShare,
     orderRail,
     type ProcessGrouping,
     railEntries,
@@ -93,6 +96,11 @@ export class TowerViewModel {
     ownersOpened = false;
     filter: Accessor<string>;
     setFilter: Setter<string>;
+    /** The Processes view shows only this kind of process (a type chip);
+     *  `""` for every kind. */
+    kindFilter: Accessor<TowerProcessKind | "">;
+    /** The list grouped by type has opened its busiest kinds once. */
+    kindsOpened = false;
     /** The Agents view's tree shows CPU time and peak memory too. */
     moreColumns: Accessor<boolean>;
     viewName: Accessor<string>;
@@ -159,6 +167,7 @@ export class TowerViewModel {
             const g = ctx.meta()?.["tower:group"];
             if (g === "off" || g === "none") return "none";
             if (g === "app") return "app";
+            if (g === "type") return "type";
             return this.hasTasks() ? "agent" : "app";
         });
         this.viewName = createMemo(() => {
@@ -190,6 +199,10 @@ export class TowerViewModel {
         [this.sort, this.setSort] = createSignal<Sort>({ key: "cpu", desc: true });
         [this.expanded, this.setExpanded] = createSignal<ReadonlySet<string>>(new Set<string>());
         [this.filter, this.setFilter] = createSignal("");
+        this.kindFilter = createMemo(() => {
+            const k = ctx.meta()?.["tower:kind"];
+            return isKind(k) ? k : "";
+        });
 
         // Another machine filters there, so its filter restarts the polling
         // once typing pauses; this computer's list is filtered in the pane.
@@ -329,6 +342,19 @@ export class TowerViewModel {
             "tower:sharewithpaired": on ? true : null,
         } as unknown as SettingsType);
     }
+
+    /** Show only one kind of process, or (`""`) every kind again. */
+    setKindFilter(kind: TowerProcessKind | ""): void {
+        this.setMeta({ "tower:kind": kind || null });
+    }
+
+    /** CPU, a fraction of one core, as a share of this machine (0–1). */
+    cpuShare = (fraction: number | undefined): number | undefined =>
+        cpuShare(fraction, this.snapshot()?.cpu_count ?? 1);
+
+    /** Memory as a share of this machine's installed memory (0–1); unknown
+     *  when the machine doesn't say (another machine's helper). */
+    memShare = (bytes: number | undefined): number | undefined => memShare(bytes, this.snapshot()?.machine?.mem_total);
 
     setGrouping(grouping: ProcessGrouping): void {
         this.setMeta({ "tower:group": grouping === "agent" ? null : grouping });

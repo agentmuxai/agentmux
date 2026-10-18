@@ -35,6 +35,36 @@ export function formatCpu(fraction: number | undefined, cpuCount: number, mode: 
     return `${pct < 10 ? pct.toFixed(1) : Math.round(pct)}%`;
 }
 
+/** How heavy a figure is for its scope: `warn`, `high`, or nothing.
+ *  SPEC_TOWER_THEME_SURFACE_AND_COLOR_2026_10_17.md §5.4. */
+export type LoadLevel = "warn" | "high" | undefined;
+
+/** `item`: one process, group or agent. `machine`: the whole machine. */
+export type LoadScope = "item" | "machine";
+
+/** The shares of the machine (0–1) at which a figure turns warning, then
+ *  high. First guesses, kept here so they are tuned in one place. */
+const LOAD_THRESHOLDS: Record<"cpu" | "mem", Record<LoadScope, [number, number]>> = {
+    cpu: { item: [0.25, 0.5], machine: [0.6, 0.85] },
+    mem: { item: [0.1, 0.25], machine: [0.7, 0.9] },
+};
+
+export function loadLevel(figure: "cpu" | "mem", scope: LoadScope, share: number | undefined): LoadLevel {
+    if (share == null || !Number.isFinite(share)) return undefined;
+    const [warn, high] = LOAD_THRESHOLDS[figure][scope];
+    return share >= high ? "high" : share >= warn ? "warn" : undefined;
+}
+
+/** CPU (a fraction of one core) as a share of the whole machine, 0–1. */
+export function cpuShare(fraction: number | undefined, cpuCount: number): number | undefined {
+    return fraction == null || !Number.isFinite(fraction) ? undefined : fraction / Math.max(1, cpuCount);
+}
+
+/** Memory as a share of installed memory, 0–1; unknown without the total. */
+export function memShare(bytes: number | undefined, total: number | undefined): number | undefined {
+    return bytes == null || !total ? undefined : bytes / total;
+}
+
 /** "1 task", "3 tasks". */
 export function count(n: number, noun: string): string {
     return `${n} ${noun}${n === 1 ? "" : noun.endsWith("s") ? "es" : "s"}`;
@@ -93,7 +123,8 @@ export function sortProcesses(processes: TowerProcess[], sort: Sort): TowerProce
  *  them: their combined CPU and memory, and the task they belong to when
  *  they all belong to the same one. */
 export interface ProcessGroup {
-    /** The name, lowercased: what the processes are grouped by. */
+    /** The name, lowercased, and the kind where there is one: what the
+     *  processes are grouped by. */
     key: string;
     name: string;
     processes: TowerProcess[];
@@ -102,11 +133,14 @@ export interface ProcessGroup {
     task?: string;
 }
 
-/** Group processes by executable name (`chrome.exe` ×24 → one group). */
+/** Group processes by executable name (`chrome.exe` ×24 → one group), and
+ *  by kind where they have one: a `node.exe` that is an agent, one that runs a
+ *  build and one that serves are three groups, each with its own icon and
+ *  totals, never one labelled by whichever came first. */
 export function groupProcesses(processes: TowerProcess[]): ProcessGroup[] {
     const byName = new Map<string, TowerProcess[]>();
     for (const p of processes) {
-        const key = (p.name || `pid ${p.pid}`).toLowerCase();
+        const key = `${(p.name || `pid ${p.pid}`).toLowerCase()}${p.kind ? `#${p.kind}` : ""}`;
         const list = byName.get(key);
         if (list) list.push(p);
         else byName.set(key, [p]);
@@ -135,9 +169,10 @@ export function sortGroups(groups: ProcessGroup[], sort: Sort): ProcessGroup[] {
 }
 
 /** How the Processes view groups its list: by who started each process (the
- *  agent, a terminal, AgentMux, or nothing AgentMux knows), by app, or not
- *  at all. SPEC_TOWER_AGENT_CENTRIC_VIEWS_2026_10_08.md §3.2. */
-export type ProcessGrouping = "agent" | "app" | "none";
+ *  agent, a terminal, AgentMux, or nothing AgentMux knows), by app, by kind
+ *  of process, or not at all. SPEC_TOWER_AGENT_CENTRIC_VIEWS_2026_10_08.md
+ *  §3.2, SPEC_TOWER_THEME_SURFACE_AND_COLOR_2026_10_17.md §3.3. */
+export type ProcessGrouping = "agent" | "app" | "type" | "none";
 
 /** The processes one owner started, for the Processes view grouped by agent. */
 export interface OwnerGroup {
@@ -451,9 +486,11 @@ export function treeLines(siblings: ProcessNode[], sort: Sort, opts: { fold?: bo
     const fold = opts.fold ?? true;
     const value = (n: ProcessNode) => (sort.key === "cpu" ? n.cpu : sort.key === "mem" ? n.mem : n.process.pid);
     const sorted = [...siblings].sort(compareWith(sort, value, (n) => processLabel(n.process)));
-    // Exited processes fold apart from live ones of the same name.
+    // Exited processes fold apart from live ones of the same name, and so do
+    // processes of different kinds: a `node` build and a `node` server are two
+    // lines, each with its own icon and totals.
     const foldKey = (n: ProcessNode) =>
-        `${processLabel(n.process).toLowerCase()}${n.process.exited_ms != null ? "|exited" : ""}`;
+        `${processLabel(n.process).toLowerCase()}${n.process.exited_ms != null ? "|exited" : ""}${n.process.kind ? `#${n.process.kind}` : ""}`;
     const leavesByName = new Map<string, ProcessNode[]>();
     for (const n of sorted) {
         if (n.children.length) continue;

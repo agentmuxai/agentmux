@@ -75,4 +75,9 @@
     --color-highlightbg: var(--highlight-bg-color);
     --color-border: var(--border-color);
     --color-modalbg: var(--modal-bg-color);
+
+    // Process kinds (theme.scss, measured by process-kind-colours.test.ts).
+    // Green and cyan are close, and blue and lavender: sky and lavender.
+    --process-kind-agentmux: #89dceb;
+    --process-kind-runtimes: #b4befe;
 }

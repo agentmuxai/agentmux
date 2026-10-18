@@ -38,7 +38,10 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     .filter(|i| !hostname.is_empty() && i.hostname.eq_ignore_ascii_case(&hostname))
                     .map(|i| i.address)
                     .collect();
-                return tower_peers::sample(peers, id, req.filter.as_deref().unwrap_or(""), moved).await;
+                // A paired computer's AgentMux may predate kinds: fill them by name.
+                let mut snap = tower_peers::sample(peers, id, req.filter.as_deref().unwrap_or(""), moved).await?;
+                crate::backend::tower_kind::fill_missing(&mut snap);
+                return Ok(snap);
             }
             // Another machine: its helper samples it (`tower_remote`).
             if let Some(conn) = req.connection.as_deref().filter(|c| !tower_remote::is_local(c)) {
@@ -47,7 +50,10 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     block_id: &block_id,
                     auth_key: &auth_key,
                 });
-                return tower_remote::sample(conn, req.filter.as_deref().unwrap_or(""), ask).await;
+                // The helper's frame carries names only: kinds by name.
+                let mut snap = tower_remote::sample(conn, req.filter.as_deref().unwrap_or(""), ask).await?;
+                crate::backend::tower_kind::fill_missing(&mut snap);
+                return Ok(snap);
             }
             let renderers = renderer_map(&http_client, &host_ipc).await;
             // The process table, and a store read per pane: off the async workers.

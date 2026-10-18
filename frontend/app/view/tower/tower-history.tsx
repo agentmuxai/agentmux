@@ -3,9 +3,11 @@
 
 // The Agents view's history: the selected entry's CPU and memory over the last
 // 10 minutes, as two small charts (two measures, two scales: never one chart
-// with two y-axes), each a line in the agent's color over a faint area, with a
-// crosshair and tooltip under the pointer
-// (SPEC_TOWER_AGENT_CENTRIC_VIEWS_2026_10_08.md §3.1, §5.5). Kept in the pane
+// with two y-axes), each a line over a faint area, with a crosshair and
+// tooltip under the pointer (SPEC_TOWER_AGENT_CENTRIC_VIEWS_2026_10_08.md
+// §3.1, §5.5). CPU is in the agent's colour, as its rail sparkline, else the
+// theme's CPU colour; Memory is always the theme's memory colour, so the two
+// read apart (SPEC_TOWER_THEME_SURFACE_AND_COLOR_2026_10_17.md §5.3). Kept in the pane
 // only; reopening starts empty.
 
 import { createMemo, createSignal, For, type JSX, Show } from "solid-js";
@@ -25,6 +27,7 @@ interface Series {
     /** The top of the scale: at least this, so a quiet entry stays flat
      *  rather than magnifying noise. */
     floor: number;
+    color: string;
 }
 
 export function HistoryCharts(props: {
@@ -41,19 +44,26 @@ export function HistoryCharts(props: {
             // Back from percent to the pane's own CPU format.
             format: (v) => (v == null ? "—" : props.formatCpu(v / props.cpuPercent(1))),
             floor: 5,
+            color: props.color ?? "var(--sysinfo-cpu-color)",
         },
-        { label: "Memory", value: (p) => p.mem, format: (v) => formatMem(v), floor: 64 * 1024 * 1024 },
+        {
+            label: "Memory",
+            value: (p) => p.mem,
+            format: (v) => formatMem(v),
+            floor: 64 * 1024 * 1024,
+            color: "var(--sysinfo-mem-color)",
+        },
     ];
     return (
         <Show when={props.points.length >= 2}>
             <div class="tower-history" data-testid="tower-history">
-                <For each={series()}>{(s) => <Chart points={props.points} series={s} color={props.color} />}</For>
+                <For each={series()}>{(s) => <Chart points={props.points} series={s} />}</For>
             </div>
         </Show>
     );
 }
 
-function Chart(props: { points: readonly HistoryPoint[]; series: Series; color?: string }) {
+function Chart(props: { points: readonly HistoryPoint[]; series: Series }) {
     const end = () => props.points[props.points.length - 1]?.t ?? 0;
     const known = createMemo(() =>
         props.points
@@ -98,11 +108,11 @@ function Chart(props: { points: readonly HistoryPoint[]; series: Series; color?:
                 onPointerLeave={() => setHover(null)}
             >
                 <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" aria-hidden="true">
-                    <path class="tower-chart-area" d={area()} style={{ fill: props.color ?? "currentColor" }} />
+                    <path class="tower-chart-area" d={area()} style={{ fill: props.series.color }} />
                     <path
                         class="tower-chart-line"
                         d={line()}
-                        style={{ stroke: props.color ?? "currentColor" }}
+                        style={{ stroke: props.series.color }}
                         vector-effect="non-scaling-stroke"
                     />
                     <Show when={hover()}>

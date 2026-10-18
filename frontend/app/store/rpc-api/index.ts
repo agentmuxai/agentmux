@@ -243,7 +243,7 @@ export type {
     SessionRestoreResult,
     SessionResumePreflightResult,
 } from "./session";
-export type { TowerMachine, TowerPeerInfo, TowerProcess, TowerSnapshot, TowerTask } from "./tower";
+export type { TowerMachine, TowerPeerInfo, TowerProcess, TowerProcessKind, TowerSnapshot, TowerTask } from "./tower";
 export type { OAuthFlowStatus } from "./types";
 export type { ViewerDeviceInfo, ViewerPairStartResult } from "./viewer";
 export type {

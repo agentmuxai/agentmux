@@ -49,7 +49,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // grouped even if the store doesn't know it.
                 let labels = |id: &str| {
                     block_label(&mstore, id).or_else(|| {
-                        (id == block_id).then(|| BlockLabel { label: "Terminal".to_string(), agent: false })
+                        (id == block_id).then(|| BlockLabel { label: "Terminal".to_string(), agent: false, provider: None })
                     })
                 };
                 let snap = panes::tower_snapshot(labels).map_err(|e| format!("blockstats.detail: {e}"))?;

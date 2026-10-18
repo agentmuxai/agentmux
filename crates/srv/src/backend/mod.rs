@@ -124,6 +124,7 @@ pub mod sampler;
 pub mod sysinfo;
 pub mod blockstats_detail;
 pub mod tower_agentmux;
+pub mod tower_kind;
 pub mod tower_peers;
 pub mod tower_remote;
 pub mod tool_calls;

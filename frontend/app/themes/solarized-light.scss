@@ -97,4 +97,13 @@
     --color-highlightbg: var(--highlight-bg-color);
     --color-border: var(--border-color);
     --color-modalbg: var(--modal-bg-color);
+
+    // Process kinds (theme.scss, measured by process-kind-colours.test.ts).
+    // Green and yellow are close: Solarized's orange, and every kind a touch
+    // deeper toward the text so it reads on the cream page.
+    --process-kind-agents: color-mix(in oklab, var(--term-magenta) 95%, var(--main-text-color));
+    --process-kind-agentmux: color-mix(in oklab, var(--term-cyan) 95%, var(--main-text-color));
+    --process-kind-shells: color-mix(in oklab, var(--term-green) 95%, var(--main-text-color));
+    --process-kind-builds: color-mix(in oklab, var(--term-bright-red) 95%, var(--main-text-color));
+    --process-kind-runtimes: color-mix(in oklab, var(--term-blue) 95%, var(--main-text-color));
 }

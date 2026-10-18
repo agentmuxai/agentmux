@@ -30,7 +30,10 @@ use agentmux_procstats::{ProcInfo, ProcKey, RateMeter};
 use crate::backend::process_tracker::registry::BlockMembers;
 use crate::backend::tower_agentmux::Describer;
 use crate::backend::process_tracker::{agent_started, TrackedProcess, TrackingConfidence};
-use crate::backend::rpc_types::{TowerHost, TowerMachine, TowerProcess, TowerProcessRole, TowerSnapshot, TowerTask, TowerTaskKind};
+use crate::backend::rpc_types::{
+    TowerHost, TowerMachine, TowerProcess, TowerProcessKind, TowerProcessRole, TowerSnapshot, TowerTask, TowerTaskKind,
+};
+use crate::backend::tower_kind;
 
 /// `TowerTask::id` of AgentMux's own processes.
 pub const AGENTMUX_TASK_ID: &str = "agentmux";
@@ -65,6 +68,9 @@ struct Exited {
     info: ProcInfo,
     task: String,
     role: TowerProcessRole,
+    /// What its name or command line said it was when last seen: a `node`
+    /// that ran a build stays a build while it lingers.
+    named: TowerProcessKind,
     peak: Option<u64>,
     gone: Instant,
     gone_ms: u64,
@@ -83,10 +89,12 @@ pub struct Inputs {
 }
 
 /// How a block is named and what kind of task it is.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct BlockLabel {
     pub label: String,
     pub agent: bool,
+    /// An agent pane's provider (`agentProvider`), for its process's logo.
+    pub provider: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -341,6 +349,9 @@ struct State {
     peaks: HashMap<ProcKey, u64>,
     /// Tasks' processes that exited within [`EXITED_LINGER`], oldest first.
     exited: VecDeque<Exited>,
+    /// What a generic runtime's command line said (`tower_kind::by_command_line`),
+    /// read once per process: `None` when it said nothing more.
+    refined: HashMap<ProcKey, Option<TowerProcessKind>>,
 }
 
 /// One measurement: the process table, every process's CPU rate, the grouping
@@ -361,6 +372,9 @@ struct Sampled {
     peaks: Vec<Option<u64>>,
     /// Tasks' processes that exited within [`EXITED_LINGER`].
     exited: Vec<Exited>,
+    /// What each process's name, or a runtime's command line, says it is
+    /// (`tower_kind` rules 4–6), by index. Where it sits is applied in [`render`].
+    named: Vec<TowerProcessKind>,
 }
 
 /// The process-wide sampler. Its state is the previous sample (for CPU
@@ -386,6 +400,7 @@ impl Tower {
                 last: None,
                 peaks: HashMap::new(),
                 exited: VecDeque::new(),
+                refined: HashMap::new(),
             }),
         }
     }
@@ -459,6 +474,7 @@ pub fn block_label(mstore: &crate::backend::storage::store::Store, block_id: &st
     let agent_name = [meta("agentName"), meta("agentId")].into_iter().find(|s| !s.is_empty());
     let agent = agent_name.is_some()
         || blockcontroller::get_controller(block_id).is_some_and(|c| c.get_runtime_status().is_agent_pane);
+    let provider = agent.then(|| meta("agentProvider")).filter(|p| !p.is_empty());
     let label = agent_name.unwrap_or_else(|| {
         let title = meta("frame:title");
         let connection = meta("connection");
@@ -472,13 +488,14 @@ pub fn block_label(mstore: &crate::backend::storage::store::Store, block_id: &st
             "Terminal".to_string()
         }
     });
-    Some(BlockLabel { label, agent })
+    Some(BlockLabel { label, agent, provider })
 }
 
 /// Measure: group the table, take every process's and task account's rate
 /// since the previous measurement, and remember sticky membership.
 /// `cmdline` reads a process's command line, for labelling AgentMux's own
-/// processes only (`tower_agentmux`).
+/// processes (`tower_agentmux`) and telling what a runtime in a pane's task
+/// runs (`tower_kind`). Neither command line leaves srv.
 fn advance(
     st: &mut State,
     procs: Vec<ProcInfo>,
@@ -489,6 +506,7 @@ fn advance(
     let grouping = group(&procs, inputs, &st.sticky);
     let details = st.describer.describe(&procs, &grouping.agentmux, inputs.own_pid, cmdline);
     let (peaks, exited) = track_peaks_and_exits(st, &procs, now);
+    let named = name_kinds(st, &procs, &grouping, cmdline);
     // Every process's rate, every round, so the Host view has rates the
     // moment it is opened.
     let rates: Vec<Option<f64>> = procs
@@ -519,7 +537,51 @@ fn advance(
         details,
         peaks,
         exited,
+        named,
     }
+}
+
+/// What each process's name says it is, and for a generic runtime inside a
+/// pane's task what its command line says: read once per process and
+/// remembered, so a `node` that runs a build is read once, not every 2 s.
+fn name_kinds(
+    st: &mut State,
+    procs: &[ProcInfo],
+    grouping: &Grouping,
+    cmdline: &dyn Fn(ProcKey) -> Option<String>,
+) -> Vec<TowerProcessKind> {
+    let in_task: HashSet<usize> = grouping.tasks.iter().flat_map(|g| g.members.iter().map(|m| m.0)).collect();
+    let mut refined = HashMap::new();
+    let kinds = procs
+        .iter()
+        .enumerate()
+        .map(|(i, p)| {
+            let by_name = tower_kind::by_name(&p.name);
+            if !in_task.contains(&i) || !tower_kind::is_generic_runtime(&p.name) {
+                return by_name;
+            }
+            let said = match st.refined.get(&p.key()) {
+                Some(said) => *said,
+                None => cmdline(p.key()).and_then(|c| tower_kind::by_command_line(&c)),
+            };
+            refined.insert(p.key(), said);
+            said.unwrap_or(by_name)
+        })
+        .collect();
+    // Only live processes are remembered.
+    st.refined = refined;
+    kinds
+}
+
+/// The machine's installed memory, read once: it doesn't change while
+/// AgentMux runs.
+fn installed_memory() -> Option<u64> {
+    static TOTAL: OnceLock<Option<u64>> = OnceLock::new();
+    *TOTAL.get_or_init(|| {
+        let mut sys = sysinfo::System::new();
+        sys.refresh_memory();
+        Some(sys.total_memory()).filter(|&t| t > 0)
+    })
 }
 
 /// What a renderer row adds after its type: the window or pane it serves.
@@ -545,7 +607,8 @@ fn track_peaks_and_exits(st: &mut State, procs: &[ProcInfo], now: Instant) -> (V
                     continue;
                 }
                 let peak = st.peaks.get(&p.key()).copied().or(p.mem_private);
-                st.exited.push_back(Exited { info: p.clone(), task: g.id.clone(), role, peak, gone: now, gone_ms });
+                let named = prev.named.get(i).copied().unwrap_or_else(|| tower_kind::by_name(&p.name));
+                st.exited.push_back(Exited { info: p.clone(), task: g.id.clone(), role, named, peak, gone: now, gone_ms });
             }
         }
     }
@@ -585,8 +648,34 @@ fn render(
     renderer: &dyn Fn(u32) -> Option<String>,
 ) -> TowerSnapshot {
     let (procs, rates, grouping) = (&s.procs, &s.rates, &s.grouping);
+    // Each task's label, asked once, and where each process sits in a task:
+    // what `tower_kind` rules 1–3 need.
+    let task_labels: HashMap<&str, BlockLabel> =
+        grouping.tasks.iter().filter_map(|g| labels(&g.id).map(|l| (g.id.as_str(), l))).collect();
+    let task_kind = |label: &BlockLabel| if label.agent { TowerTaskKind::Agent } else { TowerTaskKind::Terminal };
+    let mut sits: HashMap<usize, (TowerProcessRole, &str)> = HashMap::new();
+    for g in &grouping.tasks {
+        for &(i, role) in &g.members {
+            sits.insert(i, (role, g.id.as_str()));
+        }
+    }
+    let agentmux_members: HashSet<usize> = grouping.agentmux.iter().copied().collect();
+    let kind_and_provider = |i: usize| -> (TowerProcessKind, Option<String>) {
+        let place = sits.get(&i).and_then(|&(role, id)| task_labels.get(id).map(|l| (role, l)));
+        let ctx = tower_kind::Context {
+            task: place.map(|(role, l)| (role, task_kind(l))),
+            agentmux: agentmux_members.contains(&i) || s.details.contains_key(&i),
+        };
+        let kind = tower_kind::classify(ctx, s.named[i]);
+        let provider = match place {
+            Some((TowerProcessRole::Main, l)) if l.agent => l.provider.clone(),
+            _ => None,
+        };
+        (kind, provider)
+    };
     let row = |i: usize, role: Option<TowerProcessRole>, task: Option<String>| {
         let p = &procs[i];
+        let (kind, provider) = kind_and_provider(i);
         TowerProcess {
             id: proc_id(p),
             pid: p.pid,
@@ -607,6 +696,8 @@ fn render(
             peak_mem: s.peaks.get(i).copied().flatten(),
             exited_ms: None,
             started_by: crate::backend::tool_calls::lookup(p.pid, p.started_at_ms).map(|c| c.description),
+            kind: Some(kind),
+            provider,
         }
     };
     let exited_of = |task: &str| -> Vec<TowerProcess> {
@@ -624,6 +715,13 @@ fn render(
                 peak_mem: e.peak,
                 exited_ms: Some(e.gone_ms),
                 started_by: crate::backend::tool_calls::lookup(e.info.pid, e.info.started_at_ms).map(|c| c.description),
+                kind: Some(tower_kind::classify(
+                    tower_kind::Context {
+                        task: task_labels.get(e.task.as_str()).map(|l| (e.role, task_kind(l))),
+                        agentmux: false,
+                    },
+                    e.named,
+                )),
                 ..Default::default()
             })
             .collect()
@@ -642,11 +740,11 @@ fn render(
         if g.members.is_empty() && cpu.unwrap_or(0.0) <= 0.0 && exited.is_empty() {
             continue;
         }
-        let Some(label) = labels(&g.id) else { continue };
+        let Some(label) = task_labels.get(g.id.as_str()) else { continue };
         tasks.push(TowerTask {
             id: g.id.clone(),
-            kind: if label.agent { TowerTaskKind::Agent } else { TowerTaskKind::Terminal },
-            label: label.label,
+            kind: task_kind(label),
+            label: label.label.clone(),
             tracking: g.tracking.to_string(),
             cpu,
             cpu_account: g.cpu_time_ns.is_some(),
@@ -709,6 +807,7 @@ fn render(
             cpu: sum_known(rates.iter().copied()),
             mem: procs.iter().filter_map(|p| p.mem_private).sum(),
             processes: procs.len() as u32,
+            mem_total: installed_memory(),
         }),
         host,
     }
@@ -775,6 +874,7 @@ mod tests {
             last: None,
             peaks: HashMap::new(),
             exited: VecDeque::new(),
+            refined: HashMap::new(),
         }
     }
 
@@ -858,6 +958,70 @@ mod tests {
     }
 
     #[test]
+    fn every_row_says_what_kind_of_process_it_is() {
+        let procs = machine();
+        let inputs = Inputs {
+            blocks: vec![tracked("agent-a", &[200, 201, 202, 203], &[200])],
+            roots: vec![("term-b".into(), 300)],
+            own_pid: 110,
+        };
+        let mut st = state();
+        // The node under the agent runs npm: its command line says so, and is
+        // read once for the process, not on every sample.
+        let reads = std::cell::Cell::new(0);
+        let cmdline = |k: ProcKey| -> Option<String> {
+            (k.pid == 203).then(|| {
+                reads.set(reads.get() + 1);
+                "node /x/node_modules/npm/bin/npm-cli.js ci".to_string()
+            })
+        };
+        let labels = |id: &str| -> Option<BlockLabel> {
+            let agent = id.starts_with("agent");
+            Some(BlockLabel { label: id.into(), agent, provider: agent.then(|| "claude".into()) })
+        };
+        let now = Instant::now();
+        let sampled = advance(&mut st, procs.clone(), &inputs, now, &cmdline);
+        let snap = render(&sampled, true, "h", &labels, &|_| None);
+        let host = snap.host.as_ref().unwrap();
+        let row = |pid: u32| host.processes.iter().find(|p| p.pid == pid).unwrap();
+        use TowerProcessKind as K;
+        for (pid, want) in [
+            (200, K::Agents),
+            (201, K::Agentmux),
+            (202, K::Shells),
+            (203, K::Builds),
+            (300, K::Shells),
+            (301, K::Editors),
+            (100, K::Agentmux),
+            (110, K::Agentmux),
+            (120, K::Agentmux),
+            (121, K::Agentmux),
+            (900, K::System),
+            (1, K::System),
+        ] {
+            assert_eq!(row(pid).kind, Some(want), "pid {pid}");
+        }
+        assert_eq!(row(200).provider.as_deref(), Some("claude"), "the agent's own process carries its provider");
+        assert_eq!(row(202).provider, None);
+        let agent = snap.tasks.iter().find(|t| t.id == "agent-a").unwrap();
+        assert!(agent.processes.iter().all(|p| p.kind.is_some()), "a task's rows carry kinds too");
+        assert!(snap.machine.as_ref().unwrap().mem_total.is_some_and(|t| t > 0), "installed memory is sent");
+
+        st.last = Some(sampled);
+        let second = advance(&mut st, procs.clone(), &inputs, now + Duration::from_secs(2), &cmdline);
+        assert_eq!(reads.get(), 1, "the command line is remembered for the live process");
+
+        // The npm run exits: while it lingers it is still a build, not a bare runtime.
+        st.last = Some(second);
+        let gone: Vec<ProcInfo> = procs.into_iter().filter(|p| p.pid != 203).collect();
+        let third = advance(&mut st, gone, &inputs, now + Duration::from_secs(4), &cmdline);
+        let snap = render(&third, false, "h", &labels, &|_| None);
+        let agent = snap.tasks.iter().find(|t| t.id == "agent-a").unwrap();
+        let exited = agent.exited.as_ref().and_then(|e| e.iter().find(|p| p.pid == 203)).expect("node lingers");
+        assert_eq!(exited.kind, Some(K::Builds));
+    }
+
+    #[test]
     fn a_tracker_covers_a_block_its_tree_would_have() {
         // The terminal has a Job Object too (Windows): its members win.
         let snap = machine();
@@ -916,7 +1080,7 @@ mod tests {
     }
 
     fn label(id: &str) -> Option<BlockLabel> {
-        Some(BlockLabel { label: format!("label {id}"), agent: id.starts_with("agent") })
+        Some(BlockLabel { label: format!("label {id}"), agent: id.starts_with("agent"), provider: id.starts_with("agent").then(|| "claude".to_string()) })
     }
 
     /// A build's compiler that exits between samples stays in its task's

@@ -13,4 +13,8 @@ cpu?: number,
 /**
  * All processes' private memory, bytes.
  */
-mem: number, processes: number, };
+mem: number, processes: number, 
+/**
+ * The machine's installed memory, bytes: what a memory share is of.
+ */
+mem_total?: number, };
