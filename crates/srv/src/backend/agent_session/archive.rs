@@ -173,11 +173,10 @@ pub(crate) fn archive_session_in(
 /// Archive the agent's GLOBAL `agent:<defId>:current` into a global
 /// `agent:<defId>:archive:<ms>` zone, where the agent's record reads it.
 ///
-/// Returns `Ok(Some((archive_zoneid, ts)))` when the global current held
-/// content (snapshot or output), `Ok(None)` when there was nothing to archive
-/// (both files empty or absent). The copy runs inside the database, in one
-/// transaction, so a conversation of any size never passes through memory.
-/// The output's sidecars and the running summary go with it.
+/// The files are moved (renamed) inside the database, in one transaction: a
+/// conversation of any size never passes through memory, and only one
+/// archive can take it. The output's timestamps and the running summary go
+/// with it.
 fn archive_global_current(gfs: &FileStore, definition_id: &str) -> Result<GlobalArchive, String> {
     let current_zone = validate_and_current(definition_id)?;
     let has = |name: &str| -> Result<bool, String> {
@@ -190,18 +189,18 @@ fn archive_global_current(gfs: &FileStore, definition_id: &str) -> Result<Global
     }
 
     let files = [SNAPSHOT_FILE, OUTPUT_FILE, TSIDX_FILE, crate::backend::continuity_state::STATE_FILE];
-    // The store is shared by every instance on the machine: another one can
-    // take the free name, or archive this conversation, between the check
-    // above and the copy.
+    // The store is shared by every instance on the machine. The files are
+    // moved, not copied, so only one archive can take them; another instance
+    // can still take the free name between the check and the move.
     for _ in 0..8 {
         let (archive_zone, ts) = free_archive_zone(gfs, definition_id)?;
         match gfs
-            .copy_files_to_zone(&current_zone, &archive_zone, &files)
-            .map_err(|e| format!("copy to archive: {e}"))?
+            .move_files_to_zone(&current_zone, &archive_zone, &files)
+            .map_err(|e| format!("move to archive: {e}"))?
         {
             // The name was taken in between: try the next one.
             None => continue,
-            // Nothing left to copy: another instance archived it first.
+            // Nothing left to move: another instance archived it first.
             Some(0) => return Ok(GlobalArchive::ArchivedElsewhere),
             Some(_) => {
                 tracing::info!(
