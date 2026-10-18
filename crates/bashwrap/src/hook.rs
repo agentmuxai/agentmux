@@ -32,6 +32,10 @@ struct PreToolUseInput {
     session_id: String,
     #[serde(default)]
     tool_input: Value,
+    /// Present only when a subagent made the call (Claude Code's hook
+    /// input); its working directory is kept apart from the main agent's.
+    #[serde(default)]
+    agent_id: Option<String>,
 }
 
 const WRAPPER_BINARY: &str = "agentmux-bashwrap";
@@ -109,12 +113,20 @@ pub fn build_response(stdin_payload: &str) -> Value {
         .unwrap_or(false);
 
     let b64 = URL_SAFE_NO_PAD.encode(effective_command.as_bytes());
+    let agent = input
+        .agent_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|a| !a.is_empty())
+        .map(|a| format!(" --agent={}", shell_quote(a)))
+        .unwrap_or_default();
     let wrapped = format!(
-        "{} exec --tool-id={} --b64-cmd={}{}",
+        "{} exec --tool-id={} --b64-cmd={}{}{}",
         WRAPPER_BINARY,
         shell_quote(&input.tool_use_id),
         b64,
-        if declared_background { " --declared-background" } else { "" }
+        if declared_background { " --declared-background" } else { "" },
+        agent
     );
 
     // `updatedInput` replaces the tool's whole input; the CLI doesn't merge
@@ -164,6 +176,7 @@ pub fn record_response(stdin_payload: &str) -> Value {
             .map(str::trim)
             .filter(|d| !d.is_empty())
             .map(str::to_string);
+        record.agent_id = input.agent_id.as_deref().map(str::trim).filter(|a| !a.is_empty()).map(str::to_string);
         if let Err(e) = crate::prefix::register(&input.session_id, &record) {
             tracing::warn!(target: "bashwrap", tool_id = %input.tool_use_id, error = %e, "couldn't record the Bash call; it runs unstreamed");
         }
@@ -774,6 +787,36 @@ line' && cat $HOME/.env"#;
         assert_eq!(updated["dangerouslyDisableSandbox"], json!(false));
         assert_eq!(updated["some_future_field"], json!({ "nested": [1, 2] }));
         assert_eq!(updated.as_object().unwrap().len(), 6);
+    }
+
+    /// A subagent's call carries its id to the wrapper, which keeps its
+    /// working directory apart (SPEC_BASHWRAP_PER_AGENT_CWD_2026_10_18.md).
+    #[test]
+    fn a_subagents_call_names_the_agent_and_the_main_conversation_none() {
+        let mut p: Value = serde_json::from_str(&payload("echo hi", "toolu_sub")).unwrap();
+        p["agent_id"] = json!("a7e1898179149a4f7");
+        let resp = build_response(&p.to_string());
+        let cmd = resp["hookSpecificOutput"]["updatedInput"]["command"].as_str().unwrap().to_string();
+        assert!(cmd.ends_with(" --agent=a7e1898179149a4f7"), "{cmd}");
+        let main = build_response(&payload("echo hi", "toolu_main"));
+        assert!(!main["hookSpecificOutput"]["updatedInput"]["command"].as_str().unwrap().contains("--agent"));
+    }
+
+    #[test]
+    fn record_mode_keeps_the_subagent_on_the_record() {
+        let _guard = crate::test_env_lock::ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = std::env::temp_dir().join(format!("bashwrap-hook-agent-{}", std::process::id()));
+        std::env::set_var("AGENTMUX_BASHWRAP_CALLS_DIR", &dir);
+        let payload = json!({
+            "tool_name": "Bash", "tool_use_id": "toolu_sub", "session_id": "sess-sub", "agent_id": "sub-7",
+            "tool_input": { "command": "git status" }
+        })
+        .to_string();
+        record_response(&payload);
+        let claimed = crate::prefix::claim("sess-sub", "git status");
+        std::env::remove_var("AGENTMUX_BASHWRAP_CALLS_DIR");
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(claimed.expect("recorded").agent_id.as_deref(), Some("sub-7"));
     }
 
     /// Prefix mode: the call is recorded for the prefix process and the
