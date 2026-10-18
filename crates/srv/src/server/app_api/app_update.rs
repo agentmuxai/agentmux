@@ -151,7 +151,7 @@ pub(crate) async fn handle_request_upgrade(
             let mut askers = upgrade_request::resolve_started(&state, &version);
             askers.push(block_id.clone());
             upgrade_request::start_upgrade(version.clone(), askers);
-            Outcome::Started { version, stopping: crate::backend::update_restart::stopping() }
+            Outcome::Started { version, stopping: crate::backend::update_restart::stopping_now().await }
         }
         Err(refusal) => {
             tracing::info!(agent, version = %version, reason, why = refusal.as_str(), "upgrade: asking the user");

@@ -64,7 +64,7 @@ fn set(d: &DownloadStatus, state: &str, waiting_for: u32, error: Option<String>,
 }
 
 /// [`stopping`] off the async threads.
-async fn stopping_now() -> Vec<String> {
+pub(crate) async fn stopping_now() -> Vec<String> {
     tokio::task::spawn_blocking(stopping).await.unwrap_or_default()
 }
 
@@ -123,12 +123,12 @@ fn staged(status: &AppUpdateStatus) -> Result<(DownloadStatus, UpgradeTarget), S
 
 /// Start "Upgrade & restart".
 pub fn start(now: bool) -> Result<AppUpdateStatus, String> {
-    let listed = stopping();
     let mut current = run_lock();
     let (d, target) = staged(&update_check::current_status())?;
     *current += 1;
     let run_id = *current;
-    set(&d, "waiting", if now { 0 } else { working_agents() }, None, listed);
+    // The list follows at once from `run`, off the async threads.
+    set(&d, "waiting", if now { 0 } else { working_agents() }, None, Vec::new());
     drop(current);
     tokio::spawn(run(run_id, d, target, now));
     Ok(update_check::current_status())

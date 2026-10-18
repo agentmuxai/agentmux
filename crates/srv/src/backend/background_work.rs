@@ -237,7 +237,7 @@ fn channel_dir() -> Option<PathBuf> {
 /// windows, so it saves its session before its tracker is closed. Waits a
 /// little for those to go; the host allows the whole save 1.5 s.
 pub async fn at_quit() {
-    let work = running();
+    let work = tokio::task::spawn_blocking(running).await.unwrap_or_default();
     if work.is_empty() {
         return;
     }
