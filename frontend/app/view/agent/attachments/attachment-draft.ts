@@ -26,6 +26,7 @@ import { authHeaders } from "@/app/store/auth-headers";
 import { MOS, pushNotification } from "@/app/store/global";
 import { WpsEvent } from "@/app/store/mps-events";
 import { onMuxEvent } from "@/app/store/mps";
+import { registerRecycleBlocker } from "@/app/store/recycle-blockers";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { getWebServerEndpoint } from "@/util/endpoints";
@@ -509,6 +510,11 @@ export class AttachmentDraft {
 }
 
 const drafts = new Map<string, AttachmentDraft>();
+
+// An upload in progress is an XHR in this page: a reload would cancel it.
+registerRecycleBlocker(() =>
+    [...drafts.values()].some((d) => d.processingCount() > 0) ? "a file is still uploading" : null
+);
 
 /** The attachment draft for an agent pane, created on first use. */
 export function getAttachmentDraft(blockId: string): AttachmentDraft {

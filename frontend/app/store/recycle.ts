@@ -1,0 +1,67 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+/*
+ * "Reload window (free memory)": reload this window's page to give back the
+ * memory its renderer keeps after a long session, without the user losing
+ * anything (docs/specs/SPEC_RENDERER_RECYCLE_WHEN_IDLE_2026_10_13.md §3).
+ *
+ * 1. Refuse while something a reload would lose is in flight (recycle-blockers.ts).
+ * 2. Write what each pane keeps for a reload: snapshots, scroll positions, drafts.
+ * 3. Ask the host to measure the renderer and keep a picture of the window.
+ * 4. Reload; the new document shows that picture while it boots (`showReloadCover`).
+ */
+
+import { getApi } from "@/app/store/global";
+import { pushFlashError } from "@/app/store/flash-notifications";
+import { recycleBlockers } from "@/app/store/recycle-blockers";
+
+function ownWindowLabel(): string {
+    return new URLSearchParams(window.location.search).get("windowLabel") ?? "main";
+}
+
+/** Recycle this window's renderer now, unless something would be lost. Resolves false when refused. */
+export async function recycleWindow(reason = "command"): Promise<boolean> {
+    const blocked = recycleBlockers();
+    if (blocked.length > 0) {
+        pushFlashError({
+            id: "",
+            icon: "triangle-exclamation",
+            title: "Can't reload the window yet",
+            message: `${blocked.join("; ")}. Try again when that's done.`,
+            expiration: Date.now() + 8_000,
+        });
+        return false;
+    }
+    const [{ flushPaneSnapshots }, { saveScrollMemos }, { flushComposerDrafts }] = await Promise.all([
+        import("@/app/view/agent/hooks/useSnapshotPersistence"),
+        import("@/app/view/agent/virtualization/scroll-memo"),
+        import("@/app/view/agent/reload-persistence"),
+    ]);
+    await flushPaneSnapshots();
+    saveScrollMemos();
+    flushComposerDrafts();
+    try {
+        await getApi().windows.recycleBegin(ownWindowLabel(), reason);
+    } catch (e) {
+        // No measurement and no cover picture; the reload still frees the memory.
+        console.warn("recycle: the host didn't record the recycle", e);
+    }
+    getApi().reloadWindow();
+    return true;
+}
+
+/**
+ * While booting: if a recycle reloaded this window, show its picture in the
+ * startup splash until the app is back (the tear-off snapshot's mechanism).
+ */
+export async function showReloadCover(): Promise<void> {
+    try {
+        const { jpeg_base64 } = await getApi().windows.takeReloadSnapshot(ownWindowLabel());
+        if (!jpeg_base64) return;
+        const { showTearOffSnapshot } = await import("@/app/init/startup-splash");
+        showTearOffSnapshot(jpeg_base64);
+    } catch {
+        // Not a recycle, or a host without it: the ordinary splash.
+    }
+}

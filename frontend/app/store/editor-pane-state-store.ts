@@ -47,6 +47,7 @@ import {
     updateDoc,
 } from "@/app/doc-tabs/doc-tabs";
 import { type CommandSource, recordDispatch } from "./command-source";
+import { registerRecycleBlocker } from "./recycle-blockers";
 
 // ─────────────────────────────────────────────────────────────────────
 // Types
@@ -843,6 +844,14 @@ export function dispatchIfRegistered(
 export function snapshot(blockId: string): EditorPaneState | null {
     return slots.get(blockId)?.state ?? null;
 }
+
+// Unsaved text lives only in this page: a reload would lose it.
+registerRecycleBlocker(() => {
+    for (const slot of slots.values()) {
+        if (slot.state.tabs.some((tab) => tab.dirty)) return "an editor has unsaved changes";
+    }
+    return null;
+});
 
 /** Return the scratchId of every scratch tab currently open across ALL editor panes. */
 export function getAllActiveScratchIds(): string[] {
