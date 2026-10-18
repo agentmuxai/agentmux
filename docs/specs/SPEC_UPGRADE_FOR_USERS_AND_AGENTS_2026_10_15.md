@@ -234,7 +234,8 @@ What already happens, and what's added:
   (durable jekts).
 - **New: a system note to each resumed agent**, once, soon after it resumes (a message queued during the resume may come first; the note asks nothing)
   (`backend/upgrade_notice.rs`, phase 4b):
-  `[AgentMux] AgentMux was upgraded from 0.59.26 to 0.59.27 at 14:02. Your session resumed; nothing is needed from you.`
+  `[AgentMux] AgentMux was upgraded from 0.59.26 to 0.59.27 at 14:02. Your session resumed; nothing is needed from you. Its tools may have changed: a tool description you loaded before the upgrade can be out of date, so load it again before relying on the actions it lists.`
+  The last sentence (added 2026-10-17): a resumed conversation still holds any tool schema the agent loaded before the upgrade, so it can miss actions the new tool has.
   srv records the version it runs in the channel folder
   (`channels/<ch>/agentmux-last-version.json`, like `cli_notice`'s CLI
   versions: each version's data folder is new after an upgrade). A start on
