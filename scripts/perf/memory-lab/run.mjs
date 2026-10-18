@@ -27,7 +27,7 @@ import { fileURLToPath } from "node:url";
 
 import { generateConversation } from "./lib/conversation.mjs";
 import { connect, installScript, launch, layoutFor, portableExe } from "./lib/driver.mjs";
-import { osSample, takeSample } from "./lib/sample.mjs";
+import { osSample, portBelongsTo, takeSample } from "./lib/sample.mjs";
 import { groupSample, inMegabytes, steady, table } from "./lib/summary.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -86,6 +86,9 @@ async function main() {
     const curve = [];
     let driver;
     try {
+        if (!(await portBelongsTo(args.port, memtree, instance.pid))) {
+            throw new Error(`CDP port ${args.port} isn't answered by the instance the lab started (the instance took another port, or something else answers there)`);
+        }
         installScript(home, script);
         driver = await connect(args.port, home, join(dir, "work"));
         await driver.setupAccount();

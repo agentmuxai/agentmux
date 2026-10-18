@@ -32,15 +32,18 @@ made into scripts. The budget it serves is 500 MB for the app's own processes.
    node scripts/perf/memory-lab/compare.mjs memory-lab-out/main/result.json memory-lab-out/my-branch/result.json
    ```
 
-   It refuses two runs with a different layout, rounds or seed: the same
-   conversation on both is what makes the numbers comparable.
+   It refuses two runs with a different layout, rounds, round spacing, seed
+   or operating system: the same conversation on the same OS is what makes the
+   numbers comparable.
 
 ## What it does
 
 - Starts the portable **isolated**: its own data folder
-  (`AGENTMUX_HOME_OVERRIDE`, under the output folder) and its own CDP port. Any
-  `AGENTMUX_*` variable of your shell is dropped. It never touches your own
-  `~/.agentmux`.
+  (`AGENTMUX_HOME_OVERRIDE`, under the output folder, emptied at the start of
+  every run) and its own CDP port. Any `AGENTMUX_*` variable of your shell is
+  dropped. It never touches your own `~/.agentmux`. It refuses a CDP port that
+  already answers, and checks that the instance it drives is the one it
+  started (the app only prefers its port, and takes another when it is busy).
 - The agents are the scripted Claude stand-in
   (`scripts/ui-screenshots/fake-claude`), so the panes run the real pipeline
   (srv, the translator, the stores, the renderer) with no model, no account and
@@ -52,7 +55,7 @@ made into scripts. The budget it serves is 500 MB for the app's own processes.
 - After the last round the agents settle, then it takes **the final**: a
   Chromium memory-infra dump over CDP with a forced garbage collection (each
   process's allocator roots: v8, blink_gc, partition_alloc, malloc, cc, gpu,
-  ...), per-page JS heap and DOM counters, and OS samples. The median of the
+  ...), per-page JS heap and DOM counters (read after the GC), and OS samples. The median of the
   final's OS samples is the steady value reported.
 
 ## What it reports

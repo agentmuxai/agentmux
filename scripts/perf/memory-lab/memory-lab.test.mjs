@@ -10,7 +10,7 @@ import { describe, expect, it } from "vitest";
 
 import { mismatch } from "./compare.mjs";
 import { generateConversation } from "./lib/conversation.mjs";
-import { allocatorRoots, dumpedProcesses } from "./lib/sample.mjs";
+import { allocatorRoots, dumpedProcesses, mainPage } from "./lib/sample.mjs";
 import { compare, comparisonTable, groupOf, groupSample, inMegabytes, median, MB, steady, table } from "./lib/summary.mjs";
 
 const proc = (pid, name, role, app, privateMB, commitMB = privateMB * 2) => ({ pid, name, role, app, private: privateMB * MB, commit: commitMB * MB });
@@ -89,6 +89,8 @@ describe("memory lab summary", () => {
         expect(mismatch(run, { ...run, layout: { panes: 12, tabs: [4, 2, 4, 2] } })).toMatch(/different layouts/);
         expect(mismatch(run, { ...run, rounds: 20 })).toMatch(/different rounds/);
         expect(mismatch(run, { ...run, seed: 2 })).toMatch(/different conversations/);
+        expect(mismatch({ ...run, gapSeconds: 15, platform: "win32" }, { ...run, gapSeconds: 5, platform: "win32" })).toMatch(/different round spacing/);
+        expect(mismatch({ ...run, gapSeconds: 15, platform: "win32" }, { ...run, gapSeconds: 15, platform: "linux" })).toMatch(/different operating systems/);
     });
 });
 
@@ -129,6 +131,18 @@ describe("memory lab sampling", () => {
         expect(roots.v8).toBe(100);
         expect(roots.malloc).toBe(7);
         expect(allocatorRoots({ malloc: { size: 40 }, "malloc/a": { size: 5 } }).malloc).toBe(40);
+    });
+});
+
+describe("memory lab pages", () => {
+    it("finds the main window's page, not a pool window or a browser pane", () => {
+        const pages = [
+            { id: "a", url: "http://localhost:5173/?windowLabel=window-pool-1&pool=1" },
+            { id: "b", url: "https://example.com/" },
+            { id: "c", url: "http://127.0.0.1:55001/index.html" },
+        ];
+        expect(mainPage(pages).id).toBe("c");
+        expect(mainPage(pages.slice(0, 2))).toBeNull();
     });
 });
 

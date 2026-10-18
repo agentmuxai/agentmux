@@ -12,7 +12,7 @@
 // refuses that), nor port 9222.
 
 import { execFileSync, spawn } from "node:child_process";
-import { mkdirSync, openSync, writeFileSync } from "node:fs";
+import { mkdirSync, openSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { installFakeClaude } from "../../../ui-screenshots/install-fake-claude.mjs";
@@ -37,14 +37,34 @@ export function portableExe(dir, platform = process.platform) {
     return join(dir, platform === "win32" ? "agentmux.exe" : "agentmux");
 }
 
+/** Whether something already answers CDP on `port`. */
+export async function portInUse(port) {
+    try {
+        await fetch(`http://127.0.0.1:${port}/json/version`, { signal: AbortSignal.timeout(2000) });
+        return true;
+    } catch {
+        return false;
+    }
+}
+
 /**
- * Starts the instance. `env` is what it gets besides its own variables: any
- * AGENTMUX_* variable of the shell that started the lab is dropped, so it
- * can't join another instance's channel or data folder.
+ * Starts the instance with a data folder of its own, emptied first: a run
+ * starts from nothing, so the same options always build the same layout.
+ * `env` is what it gets besides its own variables: any AGENTMUX_* variable of
+ * the shell that started the lab is dropped, so it can't join another
+ * instance's channel or data folder.
+ *
+ * The CDP port is only the instance's preferred one (it takes another when
+ * that is busy), so a busy port is refused up front: the lab would drive the
+ * other instance.
  * @returns {Promise<{ pid: number, port: number, home: string, stop: () => void }>}
  */
 export async function launch({ exe, home, port, script, log, env = process.env }) {
     if (Number(port) === 9222) throw new Error("port 9222 is the production instance's");
+    if (await portInUse(port)) {
+        throw new Error(`something already answers on CDP port ${port} (another instance, or one a lab run left behind); stop it or pick another --port`);
+    }
+    rmSync(home, { recursive: true, force: true });
     mkdirSync(home, { recursive: true });
     const clean = Object.fromEntries(Object.entries(env).filter(([k]) => !k.startsWith("AGENTMUX_")));
     const out = openSync(log, "a");
@@ -52,30 +72,48 @@ export async function launch({ exe, home, port, script, log, env = process.env }
         env: { ...clean, AGENTMUX_HOME_OVERRIDE: home, AGENTMUX_CDP_PORT: String(port), FAKE_CLAUDE_SCRIPT: script },
         stdio: ["ignore", out, out],
         windowsHide: false,
+        detached: process.platform !== "win32", // its own process group, so stopTree reaches everything under it
     });
+    let spawnError = null;
     child.on("error", (e) => {
-        throw e;
+        spawnError = e;
     });
-    const end = Date.now() + 120_000;
-    for (;;) {
-        if (Date.now() > end) throw new Error(`${exe} didn't open a page on CDP port ${port} in 2 minutes (see ${log})`);
-        try {
-            const targets = await (await fetch(`http://127.0.0.1:${port}/json`)).json();
-            if (targets.some((t) => t.type === "page")) break;
-        } catch {
-            // not listening yet
+    try {
+        const end = Date.now() + 120_000;
+        for (;;) {
+            if (spawnError) throw spawnError;
+            if (Date.now() > end) throw new Error(`${exe} didn't open a page on CDP port ${port} in 2 minutes (see ${log})`);
+            try {
+                const targets = await (await fetch(`http://127.0.0.1:${port}/json`)).json();
+                if (targets.some((t) => t.type === "page")) break;
+            } catch {
+                // not listening yet
+            }
+            await sleep(1000);
         }
-        await sleep(1000);
+        await sleep(8000); // the first run writes the data folder's shared/ part
+    } catch (e) {
+        stopTree(child.pid); // don't leave it holding the port and the data folder
+        throw e;
     }
-    await sleep(8000); // the first run writes the data folder's shared/ part
     return { pid: child.pid, port, home, stop: () => stopTree(child.pid) };
 }
 
 /** Ends the instance: the process it was started as, and everything under it, by process id. */
 export function stopTree(pid) {
     try {
-        if (process.platform === "win32") execFileSync("taskkill", ["/PID", String(pid), "/T", "/F"], { stdio: "ignore" });
-        else process.kill(pid, "SIGTERM");
+        if (process.platform === "win32") {
+            execFileSync("taskkill", ["/PID", String(pid), "/T", "/F"], { stdio: "ignore" });
+        } else {
+            process.kill(-pid, "SIGTERM"); // the group the instance was started in
+            setTimeout(() => {
+                try {
+                    process.kill(-pid, "SIGKILL");
+                } catch {
+                    // all gone
+                }
+            }, 3000).unref();
+        }
     } catch {
         // already gone
     }
@@ -88,8 +126,7 @@ export function installScript(home, scriptPath) {
 
 /** The driver of one running instance. */
 export async function connect(port, home, workDir) {
-    const target = await findMainTarget(port);
-    const session = await CdpSession.connect(target.webSocketDebuggerUrl);
+    let session = await CdpSession.connect((await findMainTarget(port)).webSocketDebuggerUrl);
     const ev = (expr) => session.evaluate(expr);
     const rpc = (command, data) => ev(`TabRpcClient.rpcCall(${JSON.stringify(command)}, ${JSON.stringify(data)})`);
     const activeTab = () => ev(`document.querySelector('.tab.active')?.getAttribute('data-tab-id') ?? null`);
@@ -97,9 +134,36 @@ export async function connect(port, home, workDir) {
     mkdirSync(workDir, { recursive: true });
 
     return {
-        session,
+        get session() {
+            return session;
+        },
         agents,
         eval: ev,
+
+        /** The main window's page was replaced (a recycled renderer): connect to the new one. */
+        async reconnect(timeoutMs = 90_000) {
+            session.close();
+            const end = Date.now() + timeoutMs;
+            for (;;) {
+                try {
+                    session = await CdpSession.connect((await findMainTarget(port)).webSocketDebuggerUrl);
+                    await session.evaluate("1");
+                    return;
+                } catch (e) {
+                    if (Date.now() > end) throw new Error(`no main window page on port ${port} after ${timeoutMs / 1000} s: ${e.message}`);
+                    await sleep(1000);
+                }
+            }
+        },
+
+        /** Runs a command from the palette, as a user would: open it, type, Enter. */
+        async paletteCommand(query) {
+            await session.pressKey("p", { ctrl: true, shift: true });
+            await sleep(600);
+            await session.typeText(query);
+            await sleep(600);
+            await session.pressKey("Enter");
+        },
 
         /** A demo Claude account the scripted agents are linked to, then a reload. */
         async setupAccount() {

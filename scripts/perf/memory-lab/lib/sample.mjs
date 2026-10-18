@@ -155,6 +155,31 @@ async function pageStats(port, target) {
 }
 
 /**
+ * Whether the browser process on CDP `port` is one of the tree under `rootPid`,
+ * so the lab drives the instance it started and not another that answers there.
+ */
+export async function portBelongsTo(port, memtree, rootPid) {
+    const browser = await connectBrowser(port, { timeoutMs: 15_000 });
+    try {
+        const { processInfo } = await browser.send("SystemInfo.getProcessInfo");
+        const mine = new Set(osSample(memtree, rootPid).procs.map((p) => p.pid));
+        return processInfo.some((p) => p.type === "browser" && mine.has(p.id));
+    } finally {
+        await browser.close();
+    }
+}
+
+/**
+ * The main window's page among a sample's pages: the one the app itself serves
+ * without a `windowLabel` (pool and floating-pool windows have one; a browser
+ * pane's page is on an outside URL).
+ */
+export function mainPage(pages) {
+    const isApp = (p) => /^https?:\/\/(127\.0\.0\.1|localhost)[:/]/.test(p.url ?? "");
+    return pages.find((p) => isApp(p) && !String(p.url).includes("windowLabel=")) ?? null;
+}
+
+/**
  * One sample: the OS numbers (`procs`, as `memtree` gives them, each CEF
  * process also with its allocator roots) and the pages.
  * @param {{ port: number, memtree: string, rootPid: number, label: string, gc?: boolean, pages?: boolean }} o
@@ -164,6 +189,9 @@ export async function takeSample({ port, memtree, rootPid, label, gc = false, pa
     let dumps = [];
     let pageList = [];
     try {
+        // The dump first: with `gc` it collects garbage, and the pages' JS heap and DOM
+        // counters are then read after that, not before.
+        dumps = await memoryInfraDump(browser, gc);
         if (pages) {
             for (const t of (await listTargets(port)).filter((x) => x.type === "page")) {
                 try {
@@ -173,7 +201,6 @@ export async function takeSample({ port, memtree, rootPid, label, gc = false, pa
                 }
             }
         }
-        dumps = await memoryInfraDump(browser, gc);
     } finally {
         await browser.close();
     }

@@ -23,6 +23,8 @@ export function mismatch(base, head) {
     if (!same(base.layout, head.layout)) return `different layouts: ${JSON.stringify(base.layout)} vs ${JSON.stringify(head.layout)}`;
     if (base.rounds !== head.rounds) return `different rounds: ${base.rounds} vs ${head.rounds}`;
     if (base.seed !== head.seed) return `different conversations (seed ${base.seed} vs ${head.seed})`;
+    if (base.gapSeconds !== head.gapSeconds) return `different round spacing: ${base.gapSeconds} s vs ${head.gapSeconds} s`;
+    if (base.platform !== head.platform) return `different operating systems (${base.platform} vs ${head.platform}): each reports its own memory metric`;
     return null;
 }
 
