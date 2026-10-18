@@ -192,6 +192,11 @@
         "window:transparent": {
           "type": "boolean"
         },
+        "window:autorecycle": {
+          "type": "boolean",
+          "default": true,
+          "description": "Reload a window that has been idle for 10 minutes when its page uses much more memory than it did after loading (over 600 MB and twice its size after load), to give that memory back. Drafts, scroll positions and layout are kept, and it waits while anything would be lost. Default true; set false to only reload on request (Reload Window (Free Memory))."
+        },
         "window:blur": {
           "type": "boolean"
         },

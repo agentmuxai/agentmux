@@ -31,7 +31,7 @@ use crate::state::AppState;
 pub(crate) mod gl_probe;
 mod gpu;
 mod monitor;
-mod window_settings;
+pub(crate) mod window_settings;
 
 #[cfg(target_os = "linux")]
 pub(crate) use gpu::{detect_gpu_tier, GpuTier};

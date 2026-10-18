@@ -449,6 +449,7 @@ partial list.
 | [`SPEC_REMOTES_INTO_CONNECTORS_2026_10_08`](SPEC_REMOTES_INTO_CONNECTORS_2026_10_08.md) | Remotes becomes a section of Connectors; the model/effort panel keeps its size |
 | [`SPEC_REMOTES_PANE_2026_10_05`](SPEC_REMOTES_PANE_2026_10_05.md) | SPEC: The Remotes pane: one place for every remote machine |
 | [`SPEC_REMOVE_AGENT_UNRESPONSIVE_DETECTION_2026_08_25`](SPEC_REMOVE_AGENT_UNRESPONSIVE_DETECTION_2026_08_25.md) | SPEC: Agent-pane status cleanup — remove "unresponsive" detection, consolidate Reconnecting/Compacting/Working |
+| [`SPEC_RENDERER_RECYCLE_WHEN_IDLE_2026_10_13`](SPEC_RENDERER_RECYCLE_WHEN_IDLE_2026_10_13.md) | Spec: recycle a window's renderer when it's idle and over budget |
 | [`SPEC_REPLACECHILD_CRASH_FULL_ANALYSIS_AND_FIX_2026-06-06`](SPEC_REPLACECHILD_CRASH_FULL_ANALYSIS_AND_FIX_2026-06-06.md) | Spec: `replaceChild` crash in the agent-pane virtualizer — full analysis and fix plan |
 | [`SPEC_RESIZE_DEFAULT_FLIP_AND_WINDOW_EDGE_SHIFT_2026_08_26`](SPEC_RESIZE_DEFAULT_FLIP_AND_WINDOW_EDGE_SHIFT_2026_08_26.md) | SPEC: Resize refinements — flip group/direct defaults, and Shift+window-resize feeding only the edge panes |
 | [`SPEC_RESIZE_THROUGH_COLLAPSED_PANES_2026_10_03`](SPEC_RESIZE_THROUGH_COLLAPSED_PANES_2026_10_03.md) | SPEC: resize through collapsed panes — every edge of a collapsed run resizes the expanded panes either side |
@@ -691,7 +692,6 @@ partial list.
 | [`SPEC_RECOVERY_NOTICES_AND_TOASTS_2026_10_16`](SPEC_RECOVERY_NOTICES_AND_TOASTS_2026_10_16.md) | Spec: tell the user what happened after AgentMux recovers, and fix the toasts that carry it |
 | [`SPEC_REMOTE_TERMINALS_AND_DURABLE_SESSIONS_2026_10_02`](SPEC_REMOTE_TERMINALS_AND_DURABLE_SESSIONS_2026_10_02.md) | SPEC: Remote terminals (SSH, WSL) and durable remote sessions — implementation plan |
 | [`SPEC_RENAME_KNOWLEDGE_TO_MEMORY_2026_10_06`](SPEC_RENAME_KNOWLEDGE_TO_MEMORY_2026_10_06.md) | SPEC: Rename the Knowledge pane to Memory, and give "memory" one set of meanings |
-| [`SPEC_RENDERER_RECYCLE_WHEN_IDLE_2026_10_13`](SPEC_RENDERER_RECYCLE_WHEN_IDLE_2026_10_13.md) | Spec: recycle a window's renderer when it's idle and over budget |
 | [`SPEC_RESUME_GATE_AND_SAME_IDENTITY_CONTINUATION_2026_09_25`](SPEC_RESUME_GATE_AND_SAME_IDENTITY_CONTINUATION_2026_09_25.md) | SPEC: one resume gate, and native continuation across logins of the same identity |
 | [`SPEC_RESUME_PHASE_CATCH_UP_TURN_2026_10_13`](SPEC_RESUME_PHASE_CATCH_UP_TURN_2026_10_13.md) | SPEC: Resume phases: the "Given to the agent" card in its place, then the agent catches up and tells the user where it is |
 | [`SPEC_REVEAL_BLOCK_ONE_PATH_2026_09_27`](SPEC_REVEAL_BLOCK_ONE_PATH_2026_09_27.md) | SPEC: one way to reveal a block — including a background tab in a multi-tab pane |

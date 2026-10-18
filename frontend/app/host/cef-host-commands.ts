@@ -178,6 +178,9 @@ export const cefWindows: WindowHostApi = {
         invokeCommand<{ jpeg_base64: string }>("capture_window_viewport", { label: windowLabel, quality }),
     recycleBegin: (windowLabel, reason) =>
         invokeCommand<{ before_mb: number | null }>("recycle_begin", { label: windowLabel, reason }),
+    recycleDeclined: async (windowLabel, reason) => {
+        await invokeCommand("recycle_declined", { label: windowLabel, reason });
+    },
     recycleCancel: async (windowLabel) => {
         await invokeCommand("recycle_cancel", { label: windowLabel });
     },

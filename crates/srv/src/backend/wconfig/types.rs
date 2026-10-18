@@ -235,6 +235,12 @@ pub struct SettingsType {
     #[serde(rename = "window:bgcolor", default, skip_serializing_if = "String::is_empty")]
     pub window_bg_color: String,
 
+    /// Reload an idle window's page when its renderer is over budget, to give
+    /// back the memory a long session builds up (absent = on). The CEF host
+    /// reads it from settings.json itself (`commands/recycle_governor.rs`).
+    #[serde(rename = "window:autorecycle", default, skip_serializing_if = "Option::is_none")]
+    pub window_autorecycle: Option<bool>,
+
     /// Deprecated, ignored: motion follows the system (SPEC_MOTION_TIERS_AND_STYLESHEET_DRY_2026_10_15).
     /// Kept so settings files that still set it load.
     #[serde(rename = "window:reducedmotion", default, skip_serializing_if = "is_false")]

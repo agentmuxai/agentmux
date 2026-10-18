@@ -8,6 +8,7 @@ const api = {
     windows: {
         recycleBegin: vi.fn(async () => ({ before_mb: 900 })),
         recycleCancel: vi.fn(async () => {}),
+        recycleDeclined: vi.fn(async () => {}),
         takeReloadSnapshot: vi.fn(async () => ({ jpeg_base64: null as string | null })),
     },
     reloadWindow: vi.fn(),
@@ -37,11 +38,17 @@ vi.mock("@/app/view/agent/reload-persistence", () => ({
         return drafts.saved;
     },
 }));
+const idle = vi.hoisted(() => ({ sinceInputMs: 60 * 60_000, waiting: false, modal: false, declarativeModal: false, drag: false }));
+vi.mock("@/app/store/last-input", () => ({ msSinceLastInput: () => idle.sinceInputMs, installLastInput: () => {} }));
+vi.mock("@/app/notification/waiting-for-you", () => ({ anyAgentWaitingForYou: () => idle.waiting }));
+vi.mock("@/app/store/modalmodel", () => ({ modalsModel: { hasOpenModals: () => idle.modal } }));
+vi.mock("@/app/element/modal-stack", () => ({ anyModalOpen: () => idle.declarativeModal }));
+vi.mock("@/app/drag/drag-session", () => ({ ALL_DRAG_KINDS: [], isAnyUnderway: () => idle.drag }));
 const showTearOffSnapshot = vi.fn();
 vi.mock("@/app/init/startup-splash", () => ({ showTearOffSnapshot: (j: string) => showTearOffSnapshot(j) }));
 
 import { recycleBlockers, registerRecycleBlocker } from "./recycle-blockers";
-import { recycleWindow, resetRecycleForTests, showReloadCover } from "./recycle";
+import { answerRecycleRequest, recycleWindow, resetRecycleForTests, showReloadCover } from "./recycle";
 
 beforeEach(() => {
     vi.clearAllMocks();
@@ -49,6 +56,7 @@ beforeEach(() => {
     drafts.saved = true;
     saved.snapshots = true;
     saved.attachments = true;
+    Object.assign(idle, { sinceInputMs: 60 * 60_000, waiting: false, modal: false, declarativeModal: false, drag: false });
     order.length = 0;
     api.windows.recycleBegin.mockImplementation(async () => {
         order.push("begin");
@@ -158,5 +166,56 @@ describe("showReloadCover", () => {
     it("shows nothing on an ordinary load", async () => {
         await showReloadCover();
         expect(showTearOffSnapshot).not.toHaveBeenCalled();
+    });
+});
+
+describe("answerRecycleRequest (the governor's request)", () => {
+    it("recycles an idle window, quietly", async () => {
+        await expect(answerRecycleRequest()).resolves.toBe(true);
+        expect(api.windows.recycleBegin).toHaveBeenCalledWith("main", "idle");
+        expect(api.reloadWindow).toHaveBeenCalled();
+        expect(pushFlashError).not.toHaveBeenCalled();
+    });
+
+    it.each([
+        ["input in the last 10 minutes", () => (idle.sinceInputMs = 60_000), "the window was used recently"],
+        ["an agent waiting for an answer", () => (idle.waiting = true), "an agent is waiting for an answer"],
+        ["an open dialog", () => (idle.modal = true), "a dialog is open"],
+        ["an open declarative <Modal>", () => (idle.declarativeModal = true), "a dialog is open"],
+        ["a drag", () => (idle.drag = true), "a drag is in progress"],
+    ])("declines with %s, and tells the host why", async (_name, arrange, reason) => {
+        arrange();
+        await expect(answerRecycleRequest()).resolves.toBe(false);
+        expect(api.windows.recycleDeclined).toHaveBeenCalledWith("main", expect.stringContaining(reason));
+        expect(api.windows.recycleBegin).not.toHaveBeenCalled();
+        expect(pushFlashError).not.toHaveBeenCalled();
+    });
+
+    it("uses the host's idle time, which pressure or a lab override shortens", async () => {
+        idle.sinceInputMs = 3 * 60_000;
+        await expect(answerRecycleRequest(10 * 60_000)).resolves.toBe(false);
+        resetRecycleForTests();
+        await expect(answerRecycleRequest(2 * 60_000)).resolves.toBe(true);
+    });
+
+    it("looks at the window again just before reloading, and declines if it came into use", async () => {
+        api.windows.recycleBegin.mockImplementationOnce(async () => {
+            // A dialog opens while the host takes the picture.
+            idle.modal = true;
+            return { before_mb: 900 };
+        });
+        await expect(answerRecycleRequest()).resolves.toBe(false);
+        expect(api.windows.recycleDeclined).toHaveBeenCalledWith("main", "a dialog is open");
+        expect(api.windows.recycleCancel).toHaveBeenCalledWith("main");
+        expect(api.reloadWindow).not.toHaveBeenCalled();
+    });
+
+    it("a recycle blocker declines to the host instead of showing a toast", async () => {
+        const off = registerRecycleBlocker(() => "a file is still uploading");
+        await expect(answerRecycleRequest()).resolves.toBe(false);
+        off();
+        expect(api.windows.recycleDeclined).toHaveBeenCalledWith("main", "a file is still uploading");
+        expect(pushFlashError).not.toHaveBeenCalled();
+        expect(api.reloadWindow).not.toHaveBeenCalled();
     });
 });

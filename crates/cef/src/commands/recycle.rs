@@ -68,7 +68,7 @@ fn own_renderer_pid(entries: &[crate::renderer_map::RendererEntry], label: &str)
 /// sandbox-namespace PID there, which only srv translates (Tower), so a match
 /// against host PIDs could name another process.
 #[cfg(not(target_os = "linux"))]
-fn renderer_mb(state: &AppState, label: &str) -> Option<u64> {
+pub(crate) fn renderer_mb(state: &AppState, label: &str) -> Option<u64> {
     let pid = own_renderer_pid(&crate::renderer_map::snapshot(state), label)?;
     let procs = agentmux_procstats::snapshot().ok()?;
     let bytes = procs.iter().find(|p| p.pid == pid)?.mem_private?;
@@ -76,7 +76,7 @@ fn renderer_mb(state: &AppState, label: &str) -> Option<u64> {
 }
 
 #[cfg(target_os = "linux")]
-fn renderer_mb(_state: &AppState, _label: &str) -> Option<u64> {
+pub(crate) fn renderer_mb(_state: &AppState, _label: &str) -> Option<u64> {
     None
 }
 
@@ -149,6 +149,8 @@ pub fn take_reload_snapshot(state: &Arc<AppState>, args: &serde_json::Value) -> 
         .get("label")
         .and_then(|v| v.as_str())
         .ok_or("take_reload_snapshot: label is required")?;
+    // Every load of the window comes here: its governor baseline starts over.
+    super::recycle_governor::note_window_loaded(label);
     let Some(pending) = take(label) else {
         return Ok(serde_json::json!({ "jpeg_base64": null }));
     };

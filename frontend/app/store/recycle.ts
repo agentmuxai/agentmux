@@ -39,13 +39,22 @@ export function resetRecycleForTests(): void {
     recycling = false;
 }
 
-/** Recycle this window's renderer now, unless something would be lost. Resolves false when refused. */
-export async function recycleWindow(reason = "command"): Promise<boolean> {
+/**
+ * Recycle this window's renderer now, unless something would be lost.
+ * Resolves false when refused. `onRefused` replaces the toast (the governor's
+ * request reports to the host instead of interrupting the user).
+ */
+export async function recycleWindow(
+    reason = "command",
+    onRefused: (reasons: string[]) => void = refuse,
+    /** More reasons to wait, checked with the blockers at the start and again just before the reload. */
+    busyNow: () => string[] = () => []
+): Promise<boolean> {
     // A second call (a double Enter in the palette) would measure and reload twice.
     if (recycling) return false;
-    const blocked = recycleBlockers();
+    const blocked = [...recycleBlockers(), ...busyNow()];
     if (blocked.length > 0) {
-        refuse(blocked);
+        onRefused(blocked);
         return false;
     }
     recycling = true;
@@ -69,7 +78,7 @@ export async function recycleWindow(reason = "command"): Promise<boolean> {
     // A reload now would lose what didn't save.
     if (unsaved.length > 0) {
         recycling = false;
-        refuse(unsaved);
+        onRefused(unsaved);
         return false;
     }
     try {
@@ -80,11 +89,11 @@ export async function recycleWindow(reason = "command"): Promise<boolean> {
     }
     // Saving and the cover can take seconds while the window stays usable:
     // whatever started meanwhile would be lost too, so look again.
-    const late = recycleBlockers();
+    const late = [...recycleBlockers(), ...busyNow()];
     if (late.length > 0) {
         recycling = false;
         void getApi().windows.recycleCancel(ownWindowLabel()).catch(() => {});
-        refuse(late);
+        onRefused(late);
         return false;
     }
     try {
@@ -106,6 +115,51 @@ function abandon(): void {
     if (!recycling) return;
     recycling = false;
     void getApi().windows.recycleCancel(ownWindowLabel()).catch(() => {});
+}
+
+/** How long the window must have had no input, when the host's request doesn't say (spec §4.3). */
+const IDLE_MS = 10 * 60_000;
+
+/**
+ * The governor's `recycle:request` (spec §4.3): recycle this window if nobody
+ * has used it for the idle time and nothing would be lost; otherwise tell the
+ * host why not, so it leaves the window alone for a while. Never a toast: the
+ * user didn't ask for this.
+ */
+export async function answerRecycleRequest(idleMs = IDLE_MS): Promise<boolean> {
+    const decline = (reasons: string[]) => {
+        void getApi().windows.recycleDeclined(ownWindowLabel(), reasons.join("; ")).catch(() => {});
+    };
+    const [{ msSinceLastInput }, { anyAgentWaitingForYou }, { modalsModel }, { anyModalOpen }, { isAnyUnderway, ALL_DRAG_KINDS }] =
+        await Promise.all([
+            import("@/app/store/last-input"),
+            import("@/app/notification/waiting-for-you"),
+            import("@/app/store/modalmodel"),
+            import("@/app/element/modal-stack"),
+            import("@/app/drag/drag-session"),
+        ]);
+    // Checked now and again just before the reload: the window can come into
+    // use while the recycle saves and the host takes its picture.
+    const busyNow = (): string[] => {
+        const busy: string[] = [];
+        if (msSinceLastInput() < idleMs) busy.push("the window was used recently");
+        if (anyAgentWaitingForYou()) busy.push("an agent is waiting for an answer");
+        // `openModal` dialogs and declarative `<Modal>`s are tracked apart.
+        if (modalsModel.hasOpenModals() || anyModalOpen()) busy.push("a dialog is open");
+        if (isAnyUnderway(ALL_DRAG_KINDS)) busy.push("a drag is in progress");
+        return busy;
+    };
+    return recycleWindow("idle", decline, busyNow);
+}
+
+/** Answer the governor's requests in this window (once, at startup). */
+export function installRecycleRequests(): void {
+    void import("@/app/store/last-input").then(({ installLastInput }) => installLastInput());
+    void getApi().listen<{ idle_ms?: number }>("recycle:request", (payload) => {
+        // The host's idle time: shorter under memory pressure or a lab override.
+        const idleMs = typeof payload?.idle_ms === "number" ? payload.idle_ms : IDLE_MS;
+        void answerRecycleRequest(idleMs);
+    });
 }
 
 /**
