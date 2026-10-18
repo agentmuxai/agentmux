@@ -167,7 +167,17 @@ pub async fn secret_boxes(root: &mut CdpSession) -> SecretBoxes {
             .ok()
             .and_then(|v| v.pointer("/result/value").and_then(|w| w.as_f64()));
     }
-    for fl in frames::layout(root).await {
+    let (laid_out, unplaced) = frames::layout_counting_unplaced(root).await;
+    if unplaced > 0 {
+        // Frames whose parent isn't known can be neither checked nor hidden.
+        out.complete = false;
+    }
+    for fl in laid_out {
+        if !fl.placeable {
+            // Its <iframe> wasn't found: its boxes would land in the wrong place.
+            out.complete = false;
+            continue;
+        }
         let mut on = root.in_session(fl.raw.session.as_deref());
         match secret_boxes_in(&mut on, Some(&fl.raw.id)).await {
             Some((boxes, _)) if boxes.is_empty() => {}

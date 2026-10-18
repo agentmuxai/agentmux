@@ -286,6 +286,9 @@ pub struct FrameLayout {
     /// Its own origin, or for an `about:` frame the one it inherits.
     pub origin: String,
     pub cross_origin: bool,
+    /// Its `<iframe>` element, and every ancestor's, was found, so `chain`
+    /// places it on the page. When false, a point inside it can't be placed.
+    pub placeable: bool,
 }
 
 /// The origin a frame runs with: an `about:blank` or `about:srcdoc` frame (or
@@ -301,12 +304,18 @@ fn effective_origin(raw: &RawFrame, parent_origin: &str) -> String {
 
 /// Every iframe of the pane, in document order, placed and labelled.
 pub async fn layout(root: &mut CdpSession) -> Vec<FrameLayout> {
+    layout_counting_unplaced(root).await.0
+}
+
+/// [`layout`], and how many frames it had to leave out because their parent
+/// frame isn't known (so they can't be shown, placed or hidden).
+pub async fn layout_counting_unplaced(root: &mut CdpSession) -> (Vec<FrameLayout>, usize) {
     let (all, targets) = current_frames(root).await;
     let Some(main) = all.first().cloned() else {
-        return Vec::new();
+        return (Vec::new(), 0);
     };
     if all.len() == 1 {
-        return Vec::new();
+        return (Vec::new(), 0);
     }
     // Each `<iframe>` element, asked of the frame that holds it.
     let session_of: HashMap<&str, Option<&str>> = all.iter().map(|f| (f.id.as_str(), f.session.as_deref())).collect();
@@ -324,12 +333,13 @@ pub async fn layout(root: &mut CdpSession) -> Vec<FrameLayout> {
     for p in arrange(&all, &owners) {
         let raw = all[p.index].clone();
         let parent_session = all.iter().find(|f| Some(f.id.as_str()) == raw.parent_id.as_deref()).and_then(|f| f.session.clone());
-        let (mut chain, parent_origin) = if p.parent == 0 {
-            (Vec::new(), main.origin.clone())
+        let (mut chain, parent_origin, parent_placeable) = if p.parent == 0 {
+            (Vec::new(), main.origin.clone(), true)
         } else {
             let holder = &out[p.parent - 1];
-            (holder.chain.clone(), holder.origin.clone())
+            (holder.chain.clone(), holder.origin.clone(), holder.placeable)
         };
+        let placeable = parent_placeable && owners.contains_key(&raw.id);
         if let Some(&owner) = owners.get(&raw.id) {
             chain.push(FrameHop { owner_backend: owner, parent_session });
         }
@@ -346,9 +356,11 @@ pub async fn layout(root: &mut CdpSession) -> Vec<FrameLayout> {
             is_session_root,
             origin,
             cross_origin,
+            placeable,
         });
     }
-    out
+    let unplaced = (all.len() - 1).saturating_sub(out.len());
+    (out, unplaced)
 }
 
 /// Read every iframe of the pane: each one's accessibility tree and the
