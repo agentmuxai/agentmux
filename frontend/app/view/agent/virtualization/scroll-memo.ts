@@ -109,11 +109,13 @@ export function useScrollMemo(opts: {
     });
     // A reload reads only the tail, so a pane scrolled up into pages it loaded
     // later would come back at the bottom.
-    onCleanup(
-        registerRecycleBlocker(() =>
-            olderLoaded.has(blockId) && !untrack(opts.following) ? "an agent pane is scrolled up into older history" : null
-        )
+    const unregister = registerRecycleBlocker(() =>
+        olderLoaded.has(blockId) && !untrack(opts.following) ? "an agent pane is scrolled up into older history" : null
     );
+    onCleanup(() => {
+        unregister();
+        olderLoaded.delete(blockId);
+    });
     let restored = false;
     createEffect(() => {
         if (restored || !opts.historyReady()) return;

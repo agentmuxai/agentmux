@@ -49,18 +49,24 @@ export async function recycleWindow(reason = "command"): Promise<boolean> {
         return false;
     }
     recycling = true;
+    let draftsSaved: boolean;
     try {
-        const [{ flushPaneSnapshots }, { saveScrollMemos }, { flushComposerDrafts }] = await Promise.all([
+        const [{ flushPaneSnapshots }, { saveScrollMemos }, { saveAllComposerDrafts }] = await Promise.all([
             import("@/app/view/agent/hooks/useSnapshotPersistence"),
             import("@/app/view/agent/virtualization/scroll-memo"),
             import("@/app/view/agent/reload-persistence"),
         ]);
         await flushPaneSnapshots();
         saveScrollMemos();
-        flushComposerDrafts();
+        draftsSaved = saveAllComposerDrafts();
     } catch (e) {
         recycling = false;
         throw e;
+    }
+    if (!draftsSaved) {
+        recycling = false;
+        refuse(["a draft couldn't be saved for the reload (the browser storage is full or off)"]);
+        return false;
     }
     try {
         await getApi().windows.recycleBegin(ownWindowLabel(), reason);
@@ -77,8 +83,25 @@ export async function recycleWindow(reason = "command"): Promise<boolean> {
         refuse(late);
         return false;
     }
-    getApi().reloadWindow();
+    try {
+        getApi().reloadWindow();
+    } catch (e) {
+        abandon();
+        throw e;
+    }
+    // The page normally goes away now; if it is still here later, the reload
+    // didn't happen, so free the command again.
+    setTimeout(abandon, RELOAD_GRACE_MS);
     return true;
+}
+
+/** How long a reload may take to unload the page before it counts as not happening. */
+const RELOAD_GRACE_MS = 15_000;
+
+function abandon(): void {
+    if (!recycling) return;
+    recycling = false;
+    void getApi().windows.recycleCancel(ownWindowLabel()).catch(() => {});
 }
 
 /**

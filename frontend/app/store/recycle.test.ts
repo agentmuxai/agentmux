@@ -20,7 +20,13 @@ vi.mock("@/app/view/agent/hooks/useSnapshotPersistence", () => ({
     flushPaneSnapshots: async () => void order.push("snapshots"),
 }));
 vi.mock("@/app/view/agent/virtualization/scroll-memo", () => ({ saveScrollMemos: () => void order.push("scroll") }));
-vi.mock("@/app/view/agent/reload-persistence", () => ({ flushComposerDrafts: () => void order.push("drafts") }));
+const drafts = vi.hoisted(() => ({ saved: true }));
+vi.mock("@/app/view/agent/reload-persistence", () => ({
+    saveAllComposerDrafts: () => {
+        order.push("drafts");
+        return drafts.saved;
+    },
+}));
 const showTearOffSnapshot = vi.fn();
 vi.mock("@/app/init/startup-splash", () => ({ showTearOffSnapshot: (j: string) => showTearOffSnapshot(j) }));
 
@@ -30,6 +36,7 @@ import { recycleWindow, resetRecycleForTests, showReloadCover } from "./recycle"
 beforeEach(() => {
     vi.clearAllMocks();
     resetRecycleForTests();
+    drafts.saved = true;
     order.length = 0;
     api.windows.recycleBegin.mockImplementation(async () => {
         order.push("begin");
@@ -82,6 +89,25 @@ describe("recycleWindow", () => {
         expect(api.reloadWindow).not.toHaveBeenCalled();
         expect(pushFlashError).toHaveBeenCalledTimes(1);
         // Not stuck: the next try runs.
+        await expect(recycleWindow()).resolves.toBe(true);
+    });
+
+    it("refuses when a draft can't be saved for the reload", async () => {
+        drafts.saved = false;
+        await expect(recycleWindow()).resolves.toBe(false);
+        expect(pushFlashError).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining("draft") }));
+        expect(api.windows.recycleBegin).not.toHaveBeenCalled();
+        expect(api.reloadWindow).not.toHaveBeenCalled();
+        drafts.saved = true;
+        await expect(recycleWindow()).resolves.toBe(true);
+    });
+
+    it("frees the command again when the reload itself fails", async () => {
+        api.reloadWindow.mockImplementationOnce(() => {
+            throw new Error("no navigation");
+        });
+        await expect(recycleWindow()).rejects.toThrow("no navigation");
+        expect(api.windows.recycleCancel).toHaveBeenCalledWith("main");
         await expect(recycleWindow()).resolves.toBe(true);
     });
 
