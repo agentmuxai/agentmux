@@ -259,3 +259,13 @@ async fn call_tool(
 #[cfg(test)]
 #[path = "tests/main_tests.rs"]
 mod tests;
+
+/// `agentmux_common::checkout`: this test binary must hold this checkout's
+/// code, not another clone's from a shared target directory.
+#[cfg(test)]
+mod checkout_guard {
+    #[test]
+    fn this_test_binary_was_built_from_this_checkout() {
+        agentmux_common::checkout::check(env!("CARGO_MANIFEST_DIR")).unwrap();
+    }
+}

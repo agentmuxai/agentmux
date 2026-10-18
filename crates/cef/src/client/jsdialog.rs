@@ -252,6 +252,13 @@ mod tests {
         assert_eq!(count_recent(&mut times, t0 + FLOOD_WINDOW), 1);
     }
 
+    /// `agentmux_common::checkout`: this crate's test binary must hold this
+    /// checkout's code (here because `lib.rs` is at its size cap).
+    #[test]
+    fn this_test_binary_was_built_from_this_checkout() {
+        agentmux_common::checkout::check(env!("CARGO_MANIFEST_DIR")).unwrap();
+    }
+
     #[test]
     fn answering_an_unknown_dialog_does_nothing() {
         assert!(!answer("jsdialog-test-unknown", true));
