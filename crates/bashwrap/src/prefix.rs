@@ -273,12 +273,9 @@ pub fn claim(session_id: &str, command: &str) -> Option<CallRecord> {
         records.iter().filter(|(_, r)| r.command == command).collect();
     // Two agents ran this very command at once: either record could be this
     // call's. Marked before claiming, so the other claim knows too.
-    let ambiguous = if agents_differ(&matching) {
+    if agents_differ(&matching) {
         mark_ambiguous(&dir, command);
-        true
-    } else {
-        marked_ambiguous(&dir, command)
-    };
+    }
     let candidates: Vec<&(PathBuf, CallRecord)> = if !matching.is_empty() {
         matching
     } else if records.len() == 1 {
@@ -291,13 +288,18 @@ pub fn claim(session_id: &str, command: &str) -> Option<CallRecord> {
         let claimed = path.with_extension(format!("claimed.{}", std::process::id()));
         if std::fs::rename(path, &claimed).is_ok() {
             let _ = std::fs::remove_file(&claimed);
+            // By the record's own command: the lone-record fallback can take
+            // a record whose command the CLI tidied (#5096).
+            let ambiguous = marked_ambiguous(&dir, &record.command);
             claimed_record = Some(CallRecord { agent_ambiguous: ambiguous, ..record.clone() });
             break;
         }
     }
     // The last waiting record of an ambiguous command takes its marker along.
-    if ambiguous && !read_records(&dir).iter().any(|(_, r)| r.command == command) {
-        let _ = std::fs::remove_file(marker_path(&dir, command));
+    if let Some(r) = claimed_record.as_ref().filter(|r| r.agent_ambiguous) {
+        if !read_records(&dir).iter().any(|(_, w)| w.command == r.command) {
+            let _ = std::fs::remove_file(marker_path(&dir, &r.command));
+        }
     }
     // The session's last waiting call: its directory goes too (it is made
     // again for the next one). Fails, and stays, while anything is in it.
@@ -715,6 +717,19 @@ mod tests {
             assert!(!marker_path(&dir, "ls").exists());
             assert!(claim("s", "pwd").is_some());
             assert!(std::fs::remove_dir(&dir).is_ok() || !dir.exists(), "nothing keeps the directory");
+        });
+    }
+
+    /// The lone-record fallback claims a record whose command the CLI tidied:
+    /// its marker is found by the record's command, not the incoming text.
+    #[test]
+    fn a_tidied_command_still_finds_its_records_marker() {
+        with_calls_dir(|| {
+            register("s", &by("toolu_a", "git status", Some("sub-a"))).unwrap();
+            register("s", &by("toolu_b", "git status", Some("sub-b"))).unwrap();
+            assert!(claim("s", "git status").unwrap().agent_ambiguous);
+            assert!(claim("s", "git status ").unwrap().agent_ambiguous, "the remaining record is still unsure");
+            assert!(!marker_path(&session_dir("s").unwrap(), "git status").exists());
         });
     }
 
