@@ -117,7 +117,18 @@ pub fn trees(agent: &str, key: &str, members: &[TrackedProcess]) -> Vec<Work> {
                 label: shorten(if root.command.is_empty() { &root.exe } else { &root.command }),
                 agentmux: images.iter().any(|i| AGENTMUX_IMAGES.contains(&i.as_str())),
                 started_at_ms: root.started_at_ms,
-                hosts: tree.iter().zip(&images).filter(|(_, i)| *i == HOST_IMAGE).map(|(p, _)| p.pid).collect(),
+                hosts: tree
+                    .iter()
+                    .zip(&images)
+                    .filter(|(p, i)| {
+                        // The host itself, not its CEF helpers (renderer, GPU):
+                        // they have a `--type=` and a host for a parent.
+                        let parent_is_host =
+                            tree.iter().zip(&images).any(|(q, qi)| Some(q.pid) == p.parent_pid && *qi == HOST_IMAGE);
+                        *i == HOST_IMAGE && !p.command.contains("--type=") && !parent_is_host
+                    })
+                    .map(|(p, _)| p.pid)
+                    .collect(),
             }
         })
         .collect();
