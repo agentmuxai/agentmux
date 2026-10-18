@@ -185,13 +185,14 @@ pub(crate) fn note_window_loaded(label: &str) {
 }
 
 /// `recycle_declined { label, reason }`: the page wouldn't recycle (input, a
-/// waiting agent, a blocker). Leave the window alone for the idle time.
+/// waiting agent, a blocker). Leave the window alone for the idle time (the
+/// same one the request used, shorter under memory pressure).
 pub fn recycle_declined(args: &serde_json::Value) -> Result<serde_json::Value, String> {
     let label = args.get("label").and_then(|v| v.as_str()).ok_or("recycle_declined: label is required")?;
     let reason = args.get("reason").and_then(|v| v.as_str()).unwrap_or("");
     let limits = Limits::from_env();
     if let Some(t) = GOVERNOR.lock().unwrap().tracks.get_mut(label) {
-        t.declined_until = Some(Instant::now() + limits.idle);
+        t.declined_until = Some(Instant::now() + idle_time(&limits, crate::memory_pressure::current_level()));
     }
     tracing::info!(target: "recycle", label, reason, "[recycle] {label} declined: {reason}");
     Ok(serde_json::Value::Null)
