@@ -65,6 +65,29 @@ made into scripts. The budget it serves is 500 MB for the app's own processes.
   ...), per-page JS heap and DOM counters (read after the GC), and OS samples. The median of the
   final's OS samples is the steady value reported.
 
+## Measuring a window recycle
+
+`--recycle-after <round>` runs the window recycle command (the palette's
+"Reload Window (Free Memory)", `--recycle-command` for another) in the main
+window after that round, from the palette as a user would. The build must have
+the command (#5086): on one without it the palette finds nothing, and the lab
+reports `recycled: false`. Two results compare only with the same recycle
+(round and command), or none in both: a final that follows a recycle is a
+different measurement. Before it, the lab
+puts a draft in one agent's composer and scrolls another agent's transcript up a
+little. It then samples (with a forced GC) just before, and at 5, 30 and 60
+seconds after: the app and renderer totals, the number of renderer processes, and
+the main window's document count (it counts every document in the renderer, so
+it reads 4 on a normal window: what matters is that it doesn't grow, which it
+would if the old page were held in the back/forward cache). The scroll is armed
+with real mouse-wheel input, as a user scrolls: a scripted `scrollTop` leaves the
+pane following the bottom, which is not what a user's scroll leaves. Last, it
+reads the draft and the scroll position back. `result.json` has it all under `recycle`, with the saving
+(before against the 60 s mark) and `state.pass`, which is false when a draft or a
+scroll position was lost: a recycle that frees memory but loses state hasn't
+helped anyone. If the command refuses (something a reload would lose), `recycle`
+says `recycled: false` and the notice's words.
+
 ## A run that isn't the load it was asked for
 
 A run whose agents never played reports a plausible, far too low number (an

@@ -11,6 +11,7 @@ import { describe, expect, it } from "vitest";
 import { mismatch } from "./compare.mjs";
 import { generateConversation } from "./lib/conversation.mjs";
 import { portableExe } from "./lib/driver.mjs";
+import { draftText, recycleMark, recycleSaving, scrollArmed, scrollRestored } from "./lib/recycle.mjs";
 import { allocatorRoots, dumpedProcesses, lastSample, mainPage, withChromiumRoles } from "./lib/sample.mjs";
 import { agentsWithoutTurns, compare, comparisonTable, groupOf, groupSample, inMegabytes, median, MB, steady, table, transcriptGrowthProblem } from "./lib/summary.mjs";
 
@@ -109,6 +110,16 @@ describe("memory lab summary", () => {
         expect(mismatch(run, { ...run, rounds: 20 })).toMatch(/different rounds/);
         expect(mismatch(run, { ...run, seed: 2 })).toMatch(/different conversations/);
         expect(mismatch({ ...run, gapSeconds: 15, platform: "win32" }, { ...run, gapSeconds: 5, platform: "win32" })).toMatch(/different round spacing/);
+        const same = { ...run, settleSeconds: 20, steady: { samples: 3 }, gapSeconds: 15, platform: "win32" };
+        expect(mismatch({ ...same, recycleAfter: 3, recycleCommand: "R" }, { ...same, recycleAfter: 0 })).toMatch(/different recycles/);
+        expect(mismatch({ ...same, recycleAfter: 3, recycleCommand: "R" }, { ...same })).toMatch(/different recycles/);
+        expect(mismatch({ ...same, recycleAfter: 3, recycleCommand: "R" }, { ...same, recycleAfter: 5, recycleCommand: "R" })).toMatch(/different recycles/);
+        expect(mismatch({ ...same, recycleAfter: 3, recycleCommand: "R" }, { ...same, recycleAfter: 3, recycleCommand: "S" })).toMatch(/different recycle commands/);
+        const did = (recycled, blocked) => ({ ...same, recycleAfter: 3, recycleCommand: "R", recycle: { recycled, blocked } });
+        expect(mismatch({ ...did(true), label: "main" }, { ...did(false, "no notice"), label: "branch" })).toMatch(/only one of the runs recycled its window: branch did not \(no notice\)/);
+        expect(mismatch(did(true), did(true))).toBeNull();
+        expect(mismatch(did(false, "a"), did(false, "b"))).toBeNull();
+        expect(mismatch({ ...same }, { ...same, recycleAfter: 0, recycleCommand: null })).toBeNull();
         expect(mismatch({ ...run, gapSeconds: 15, platform: "win32" }, { ...run, gapSeconds: 15, platform: "linux" })).toMatch(/different operating systems/);
     });
 });
@@ -185,6 +196,46 @@ describe("memory lab validity guards", () => {
         expect(s.procs[0].pid).toBe(1);
         expect(s.footprint.output).toBe("total 1 GB");
         expect(lastSample(JSON.stringify({ procs: [] })).footprint).toBeUndefined();
+    });
+});
+
+describe("memory lab recycle check", () => {
+    it("counts a scroll position as restored when the same row is at the top, about where it was", () => {
+        const before = { scrollTop: 900, range: 1500, node: "tool_42", offset: -12 };
+        expect(scrollRestored(before, { ...before, offset: 10 })).toBe(true);
+        expect(scrollRestored(before, { ...before, offset: 80 })).toBe(false);
+        expect(scrollRestored(before, { ...before, node: "tool_43" })).toBe(false);
+        expect(scrollRestored(before, null)).toBe(false);
+        expect(scrollRestored({ ...before, node: null }, { ...before, node: null })).toBe(false);
+    });
+
+    it("only counts a scroll as armed when the pane really is above the end of its transcript", () => {
+        expect(scrollArmed({ scrollTop: 8471, range: 9071, node: "n", offset: 0 })).toBe(true);
+        expect(scrollArmed({ scrollTop: 8960, range: 9071, node: "n", offset: 0 })).toBe(false);
+        expect(scrollArmed({ scrollTop: 0, range: 0, node: "n", offset: 0 })).toBe(false);
+        expect(scrollArmed(null)).toBe(false);
+    });
+
+    it("makes a different draft each run, so a stale one can't pass", () => {
+        expect(draftText("a")).not.toBe(draftText("b"));
+        expect(draftText("a")).toMatch(/^lab-draft-a:/);
+    });
+
+    const sample = (rendererMB, documents) => ({
+        procs: [proc(1, "agentmux.exe", "renderer", true, rendererMB), proc(2, "agentmux.exe", "renderer", true, 50), proc(3, "agentmux-srv.exe", "main", true, 100)],
+        pages: [{ id: "x", url: "http://127.0.0.1:5000/index.html", dom: { documents } }, { id: "pool", url: "http://localhost/?windowLabel=window-pool-1", dom: { documents: 9 } }],
+    });
+
+    it("reads the app and renderer totals and the main window's document count from a sample", () => {
+        const m = recycleMark(sample(700, 1), 30);
+        expect(m).toEqual({ atSeconds: 30, appMB: 850, rendererMB: 750, rendererProcs: 2, documents: 1, pages: 2 });
+    });
+
+    it("measures the saving from the settled mark against the mark before, and none for a refused recycle", () => {
+        const rec = { recycled: true, before: recycleMark(sample(700, 1), 0), after: [recycleMark(sample(500, 2), 5), recycleMark(sample(300, 1), 60)], state: { pass: true } };
+        expect(recycleSaving(rec)).toEqual({ appMB: 400, rendererMB: 400 });
+        expect(recycleSaving({ recycled: false, blocked: "a file is still uploading" })).toBeNull();
+        expect(recycleSaving(null)).toBeNull();
     });
 });
 
