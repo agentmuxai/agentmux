@@ -26,11 +26,18 @@ describe("clickLabel", () => {
         });
     });
 
-    it("judges the name only: a payment word in the description doesn't make it a payment", () => {
-        const got = clickLabel(null, "", "Archive invoice\nYou can still pay it later");
-        expect(got.name).toBe("Archive invoice");
-        expect(got.description).toBe("You can still pay it later");
-        expect(got.verb).toBe(false);
+    it("judges the whole text: a verb on a later line still makes the click commit", () => {
+        const got = clickLabel(null, "", "Archive\nThis will delete it permanently");
+        expect(got.name).toBe("Archive");
+        expect(got.description).toBe("This will delete it permanently");
+        expect(got.verb).toBe(true);
+        // A price over "Pay now": shown as "$20.00", still committing.
+        const pay = clickLabel(null, "", "$20.00\nPay now");
+        expect(pay).toEqual({ name: "$20.00", description: "Pay now", verb: true });
+    });
+
+    it("a click with no committing word anywhere doesn't commit", () => {
+        expect(clickLabel(null, "", "Archive invoice\nMoves it out of your inbox").verb).toBe(false);
     });
 
     it("a Delete whose description says it is safe still commits", () => {

@@ -2001,9 +2001,9 @@ async fn bypass_is_granted_only_through_the_host_and_lifts_approvals_on_its_site
     assert_eq!(fake.clicks.load(std::sync::atomic::Ordering::SeqCst), 1);
     let block = state.mstore.must_get::<crate::backend::obj::Block>(&pane).unwrap();
     assert!(block.meta.get("browser:attention").is_none_or(|v| v.is_null()));
-    // Only the name is judged: a menu item whose description mentions a
-    // payment is not one (roadblocks report R7).
-    *fake.description.lock().unwrap() = "Your payment history is kept".into();
+    // A description under the name rides along to the banner (roadblocks
+    // report R7) and changes nothing about a click it doesn't make a payment.
+    *fake.description.lock().unwrap() = "This can't be undone".into();
     let (s, body) = post_json(&app, "/api/v1/ui/browser/act", click.clone()).await;
     assert_eq!(s, StatusCode::OK, "{body}");
     assert_eq!(body["data"]["bypassed"], true);
@@ -2028,6 +2028,25 @@ async fn bypass_is_granted_only_through_the_host_and_lifts_approvals_on_its_site
     assert_eq!(asking.await.unwrap().0, StatusCode::FORBIDDEN);
     assert_eq!(fake.clicks.load(std::sync::atomic::Ordering::SeqCst), 2);
     *fake.what.lock().unwrap() = "Click \"Delete draft\"".into();
+
+    // So does a payment word on a later line of the element's text: the
+    // description can only make a click ask, never stop it asking (R7).
+    *fake.what.lock().unwrap() = "Click \"$20.00\"".into();
+    *fake.description.lock().unwrap() = "Pay now".into();
+    let asking = {
+        let (app, click) = (app.clone(), click.clone());
+        tokio::spawn(async move { post_json(&app, "/api/v1/ui/browser/act", click).await })
+    };
+    let banner = wait_for_banner(&state, &pane).await;
+    assert_eq!(banner["kind"], "approval");
+    assert_eq!(banner["description"], "Pay now");
+    let answer = serde_json::json!({ "block_id": pane, "id": banner["id"], "decision": "cancel" });
+    let (s, _) = post_json_headers(&app, "/api/v1/host/browser_attention", answer, &host).await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(asking.await.unwrap().0, StatusCode::FORBIDDEN);
+    assert_eq!(fake.clicks.load(std::sync::atomic::Ordering::SeqCst), 2);
+    *fake.what.lock().unwrap() = "Click \"Delete draft\"".into();
+    *fake.description.lock().unwrap() = String::new();
 
     // Off the granted site, a committing click asks again.
     *fake.url.lock().unwrap() = "https://accounts.google.com/o/oauth2".into();

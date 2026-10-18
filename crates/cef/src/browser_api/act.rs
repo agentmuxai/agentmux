@@ -690,8 +690,8 @@ async fn act(
             let name = info.get("name").and_then(|v| v.as_str()).unwrap_or("");
             let ask = json!({
                 "what": if name.is_empty() { format!("Click a button that submits a form{in_a_frame}") } else { format!("Click \"{name}\"{in_a_frame}") },
-                // Shown under `what`, never judged: srv's payment check reads
-                // `what` alone (scripts/click_label.js).
+                // Shown under `what`, and judged with it: srv's payment check
+                // reads both (scripts/click_label.js).
                 "description": info.get("description").and_then(|v| v.as_str()).unwrap_or(""),
                 "page": now,
                 "action": info.get("action").cloned().unwrap_or(Value::Null),

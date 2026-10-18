@@ -51,13 +51,16 @@ pub(crate) async fn bypassed_click(
 ) -> Option<Response> {
     let g = bypass::active_for(&bypass_pane(block_id), agent)?;
     let what = ask.get("what").and_then(|v| v.as_str()).unwrap_or("");
+    // The element's text after its name: shown apart from `what`, but judged
+    // with it, so a payment word on any line asks (roadblocks report R7).
+    let description = ask.get("description").and_then(|v| v.as_str()).unwrap_or("");
     let page = ask.get("page").and_then(|v| v.as_str()).unwrap_or("");
     let origin = agentmux_common::allowed_origins::target_origin(page).unwrap_or_default();
     if !g.covers(page) {
         tracing::info!(agent_id = %agent, block_id = %block_id, origin = %origin, "[browser-bypass] paused: the page is off the granted sites, so the click asks");
         return None;
     }
-    if bypass::is_payment(what) {
+    if bypass::is_payment(what) || bypass::is_payment(description) {
         tracing::info!(agent_id = %agent, block_id = %block_id, what = %what, "[browser-bypass] a payment still asks");
         return None;
     }

@@ -557,7 +557,7 @@ declare global {
         /** Approval: the action, e.g. `Click "Submit"`. */
         what?: string;
         /** Approval: the clicked element's text after its name (a menu
-         *  item's description), shown smaller; never part of `what`. */
+         *  item's description), shown smaller under `what`. */
         description?: string;
         page?: string;
         /** Approval: where the form is sent. */
