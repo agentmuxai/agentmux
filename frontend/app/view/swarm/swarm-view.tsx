@@ -7,7 +7,7 @@ import { holdPaneContent, trackPaneContent } from "@/app/store/pane-content-hold
 import { createMemo, createSignal, createEffect, onCleanup, For, onMount, Show, type Accessor, type JSX } from "solid-js";
 import type { SwarmViewModel, AgentTreeNode, ActiveSubagent, ActiveShell, ActiveCron, WorkflowDispatch, SubagentEvent, DispatchActivityEntry, TodoItem } from "./swarm-model";
 import { collectClearableRows, subagentDisplayLabel, subagentRowKey, subagentToolDetail, workflowRetireSignal, AUTO_RETIRE_DELAY_MS } from "./swarm-model";
-import { ProviderLogo } from "@/app/element/ProviderLogo";
+import { LOCAL_PROVIDER_UNKNOWN, REMOTE_PROVIDER_UNKNOWN, SwarmProviderIcon } from "./swarm-provider-icon";
 import { IconButton } from "@/app/element/ui";
 import AnsiLine from "@/element/ansiline";
 import { RpcApi } from "@/app/store/rpc-api";
@@ -219,8 +219,7 @@ export function RemoteAgentRows(props: { model: SwarmViewModel; rows: RemoteRow[
                                 onChange={() => props.model.toggleSelected(key)}
                                 title={section.stale ? "Not seen recently, so it can't be selected" : "Select for a fleet action (broadcast/stop)"}
                             />
-                            {/* As on a local row, with the same fallback for none reported. */}
-                            <ProviderLogo provider={row.agent.provider ?? "agentmux"} size={16} />
+                            <SwarmProviderIcon provider={row.agent.provider} unknownTitle={REMOTE_PROVIDER_UNKNOWN} />
                             <span class="swarm-remote-agent-name">{row.agent.name}</span>
                             <span class="swarm-remote-where">
                                 <span class="swarm-remote-title">{section.title}</span>
@@ -502,7 +501,7 @@ export function AgentRow({
                         />
                     </Show>
                     <span class="swarm-agent-icon">
-                        <ProviderLogo provider={node.agentProvider ?? "agentmux"} size={16} />
+                        <SwarmProviderIcon provider={node.agentProvider} unknownTitle={LOCAL_PROVIDER_UNKNOWN} />
                     </span>
                     <span class="swarm-agent-label">{node.agentName}</span>
                     {/* Turns this agent didn't get from you that finished

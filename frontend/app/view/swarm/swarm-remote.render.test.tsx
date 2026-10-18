@@ -152,16 +152,19 @@ describe("RemoteAgentRows", () => {
     });
 
     // docs/specs/SPEC_SWARM_REFINEMENTS_2026_10_17.md §3: left of the name, as on a local row.
-    it("shows each agent's provider icon before its name, and the AgentMux one when none was reported", () => {
+    // A provider nobody reported is a neutral mark, not the AgentMux logo
+    // (REPORT_SWARM_REMOTE_PROVIDER_ICON_RCA_2026_10_18.md §6.2).
+    it("shows each agent's provider icon before its name, and a neutral mark when none was reported", () => {
         const { container } = setup();
         const [korp, loap] = rows(container);
-        const logo = (r: Element) => r.querySelector(".provider-logo")!;
-        // Claude draws an inline SVG; the AgentMux fallback is its PNG.
-        expect(logo(loap).tagName).toBe("SPAN");
-        expect(logo(korp).tagName).toBe("IMG");
+        const icon = (r: Element) => r.querySelector(".provider-logo, .swarm-provider-unknown")!;
+        expect(loap.querySelector(".provider-logo")).not.toBeNull();
+        expect(korp.querySelector(".provider-logo")).toBeNull();
+        expect(korp.querySelector(".swarm-provider-unknown")).not.toBeNull();
+        expect(korp.querySelector("img")).toBeNull();
         for (const r of [korp, loap]) {
             const name = r.querySelector(".swarm-remote-agent-name")!;
-            expect(logo(r).compareDocumentPosition(name) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+            expect(icon(r).compareDocumentPosition(name) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
         }
     });
 
