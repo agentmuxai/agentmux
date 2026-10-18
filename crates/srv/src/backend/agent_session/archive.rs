@@ -96,9 +96,12 @@ pub(crate) fn archive_session_in(
         return Ok(None);
     }
 
-    // Per-channel content is archived into the global store too, when there is one.
+    // Per-channel content is archived into the global store too, when there is
+    // one. It is written to a staging zone of this call's own and then moved
+    // under a free archive name in one transaction, so two instances archiving
+    // at once can't write into the same archive.
     let target = global.unwrap_or(filestore);
-    let (archive_zone, ts) = free_archive_zone(target, definition_id)?;
+    let staging = format!("agent:{definition_id}:archiving:{}", uuid::Uuid::new_v4());
 
     // Copy snapshot first (the canonical "history" file).
     if has_state {
@@ -106,7 +109,7 @@ pub(crate) fn archive_session_in(
             .read_file(&current_zone, SNAPSHOT_FILE)
             .map_err(|e| format!("read current snapshot: {e}"))?
             .unwrap_or_default();
-        write_zone_file(target, &archive_zone, SNAPSHOT_FILE, &snapshot_bytes)?;
+        write_zone_file(target, &staging, SNAPSHOT_FILE, &snapshot_bytes)?;
     }
     // Copy NDJSON output if present.
     if has_output {
@@ -115,7 +118,7 @@ pub(crate) fn archive_session_in(
             .map_err(|e| format!("read current output: {e}"))?
             .unwrap_or_default();
         if !output_bytes.is_empty() {
-            write_zone_file(target, &archive_zone, OUTPUT_FILE, &output_bytes)?;
+            write_zone_file(target, &staging, OUTPUT_FILE, &output_bytes)?;
         }
         // The tsidx sidecar travels with output (codex P2 on PR #2508):
         // without it, archived history loses its receive-time stamps and —
@@ -123,8 +126,9 @@ pub(crate) fn archive_session_in(
         // session (fresh output restarts at offset 0 under old entries).
         // Best-effort: the sidecar is auxiliary and must never abort an
         // archive.
-        copy_tsidx_best_effort(filestore, &current_zone, target, &archive_zone);
+        copy_tsidx_best_effort(filestore, &current_zone, target, &staging);
     }
+    let (archive_zone, ts) = claim_archive_zone(target, &staging, definition_id)?;
 
     // Archive write succeeded. Now safe to clear the current zone: the files
     // that were archived, and both sidecars with `output` — a stale tsidx
@@ -223,6 +227,24 @@ enum GlobalArchive {
     Nothing,
     /// Another instance archived and cleared the global current first.
     ArchivedElsewhere,
+}
+
+/// Move what [`archive_session_in`] staged in `staging` under a free archive
+/// name. The move fails, and the next name is tried, when another instance
+/// took the name first.
+fn claim_archive_zone(store: &FileStore, staging: &str, definition_id: &str) -> Result<(String, u64), String> {
+    // The staged files were written through the cache; the move reads the database.
+    store.flush_cache().map_err(|e| format!("flush before archive: {e}"))?;
+    for _ in 0..8 {
+        let (zone, ts) = free_archive_zone(store, definition_id)?;
+        let moved = store
+            .move_files_to_zone(staging, &zone, &[SNAPSHOT_FILE, OUTPUT_FILE, TSIDX_FILE])
+            .map_err(|e| format!("move to archive: {e}"))?;
+        if moved.is_some() {
+            return Ok((zone, ts));
+        }
+    }
+    Err(format!("no free archive zone for {definition_id}; the conversation stays in {staging}"))
 }
 
 /// An archive zone for now that holds nothing yet in `store`. Two archives in

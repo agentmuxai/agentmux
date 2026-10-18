@@ -360,6 +360,7 @@ fn a_per_channel_conversation_is_archived_into_the_global_store() {
     let (archive, _) = archive_session_in(&local, Some(&global), "def-local-only").unwrap().expect("archived");
 
     assert_eq!(global.read_file(&archive, OUTPUT_FILE).unwrap().unwrap(), b"raw1\n");
+    assert!(global.zone_ids_with_prefix("agent:def-local-only:archiving:").unwrap().is_empty(), "no staging left");
     assert!(local.stat(&archive, OUTPUT_FILE).unwrap().is_none());
     assert!(local.stat(&zone, OUTPUT_FILE).unwrap().is_none(), "the channel's current is cleared");
     let rows = list_archives_in(&local, Some(&global), "def-local-only", 0).unwrap();
