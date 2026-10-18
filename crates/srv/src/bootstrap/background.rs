@@ -184,6 +184,16 @@ pub fn spawn_background_subsystems(
     });
 
     // Reactive handler (global singleton) + poller
+    // Before the handler records anything: every jekt audit entry is also kept in a file.
+    match backend::reactive::audit_store::default_path() {
+        Some(path) => {
+            let channel_name = std::env::var("AGENTMUX_INSTANCE_CHANNEL").unwrap_or_default();
+            if let Err(e) = backend::reactive::audit_store::install(path.clone(), channel_name) {
+                tracing::warn!(path = %path.display(), error = %e, "jekt audit: not kept in a file");
+            }
+        }
+        None => tracing::warn!("jekt audit: no shared directory; not kept in a file"),
+    }
     let reactive_handler = reactive::get_global_handler();
     reactive_handler.set_input_sender(Arc::new(|block_id: &str, data: &[u8]| {
         backend::blockcontroller::send_input(
@@ -518,7 +528,7 @@ pub fn spawn_background_subsystems(
         }
     }
 
-    // Session archiver — auto-archive sessions inactive for >7 days, cap at 2 GB.
+    // Session archiver — auto-archive sessions inactive for >7 days. Archives are kept forever.
     // Skip if home directory can't be determined (would otherwise fall back to a
     // relative path and create archives under the current working directory).
     if let Some(archive_dir) = backend::session_archive::default_archive_dir() {
@@ -526,7 +536,6 @@ pub fn spawn_background_subsystems(
             mstore.clone(),
             filestore.clone(),
             7,                              // inactive days
-            2 * 1024 * 1024 * 1024,         // 2 GB max
             archive_dir,
         ));
         tokio::spawn(async move {
