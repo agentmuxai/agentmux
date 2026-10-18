@@ -244,6 +244,7 @@ async function attempt(args, ctx) {
             layout: { panes: args.panes, tabs: layout },
             agents: driver.agents.map((a) => ({ name: a.name, id: a.id, tabId: a.tabId })),
             toolRows: await driver.toolRows(),
+            // What was asked; `playedRounds` is how many were played (fewer with --hold-minutes).
             rounds: args.rounds,
             gapSeconds: args.gapS,
             settleSeconds: args.settleS,
@@ -260,7 +261,7 @@ async function attempt(args, ctx) {
             steady: summary,
         };
         writeFileSync(join(dir, "result.json"), JSON.stringify(result, null, 1));
-        const md = [`# ${args.label}`, "", `${args.panes} agents over ${layout.length} tab(s), ${args.rounds} rounds (${args.gapS} s apart), forced GC, median of ${summary.samples} samples.`, "", table(summary), ...notes.map((n) => `\n> ${n}`)].join("\n");
+        const md = [`# ${args.label}`, "", `${args.panes} agents over ${layout.length} tab(s), ${playedRounds} rounds (${args.gapS} s apart)${args.holdMinutes > 0 ? `, then held idle ${args.holdMinutes} min` : ""}, forced GC, median of ${summary.samples} samples.`, "", table(summary), ...notes.map((n) => `\n> ${n}`)].join("\n");
         writeFileSync(join(dir, "summary.md"), md + "\n");
         console.log("\n" + md);
         console.log(`\n-> ${join(dir, "result.json")}`);
@@ -291,7 +292,7 @@ async function main() {
     writeFileSync(script, JSON.stringify(generateConversation({ turns: args.rounds + 2, seed: args.seed })));
 
     const layout = layoutFor(args.panes);
-    console.log(`${args.label}: ${args.panes} agents over ${layout.length} tab(s) [${layout.join("/")}], ${args.rounds} rounds, port ${args.port}`);
+    console.log(`${args.label}: ${args.panes} agents over ${layout.length} tab(s) [${layout.join("/")}], ${args.holdMinutes > 0 ? args.recycleAfter : args.rounds} rounds${args.holdMinutes > 0 ? ` then ${args.holdMinutes} min idle` : ""}, port ${args.port}`);
     for (let n = 1; ; n++) {
         try {
             await attempt(args, { exe, memtree, dir, home, script, layout });
