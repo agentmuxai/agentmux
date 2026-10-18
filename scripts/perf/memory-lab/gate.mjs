@@ -63,7 +63,7 @@ export function report(outcome, result, budget) {
     if (outcome.problem) lines.push(`**Not measured:** ${outcome.problem}.`, "");
     lines.push("| metric | MB | line (MB) | |", "|---|---:|---:|---|");
     for (const r of outcome.rows) {
-        const verdict = r.limitMB == null ? "no line set" : r.over ? (budget.mode === "enforce" ? "OVER" : "would be over") : "within";
+        const verdict = r.limitMB == null ? "no line set" : r.valueMB == null ? "not read" : r.over ? (budget.mode === "enforce" ? "OVER" : "would be over") : "within";
         lines.push(`| ${r.label} | ${f(r.valueMB)} | ${f(r.limitMB)} | ${verdict} |`);
     }
     if (!outcome.problem) lines.push("", `${result.layout?.panes} agents, ${result.rounds} rounds, seed ${result.seed}, ${result.platform}; median of ${result.steady?.samples} forced-GC samples.`);

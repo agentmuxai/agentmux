@@ -335,5 +335,6 @@ describe("memory soak gate", () => {
         const out = evaluate(r, budget("enforce", { srv: 120 }));
         expect(out.over).toBe(true);
         expect(out.exitCode).toBe(2);
+        expect(report(out, r, budget("enforce", { srv: 120 }))).toMatch(/\| srv \| n\/a \| 120 \| not read \|/);
     });
 });
