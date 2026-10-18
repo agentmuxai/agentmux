@@ -305,7 +305,7 @@ pub fn render_with_frames(
         walk(root, &by_id, facts, ref_prefix, 0, "", false, 0, frames, &mut out);
     }
     if out.truncated {
-        out.text.push_str("- … snapshot truncated at 40 KB: pass `scope` (a reference) to read one part of the page\n");
+        out.text.push_str("- … snapshot truncated at 40 KB: use find (a role and name), or pass `scope` (a reference, or a role and quoted name) to read one part of the page\n");
     }
     out
 }
@@ -839,7 +839,7 @@ mod tests {
         let s = render(&nodes, &HashMap::new(), None, "");
         assert!(s.truncated);
         assert!(s.text.len() <= MAX_SNAPSHOT_BYTES + 200);
-        assert!(s.text.ends_with("pass `scope` (a reference) to read one part of the page\n"));
+        assert!(s.text.ends_with("use find (a role and name), or pass `scope` (a reference, or a role and quoted name) to read one part of the page\n"));
     }
 
     #[test]
