@@ -55,6 +55,7 @@ pub(crate) mod native_memory_handlers;
 pub(crate) mod native_memory_versions;
 pub(crate) mod memory_delivery_handlers;
 mod notify_handlers;
+pub(crate) mod browser_actions;
 pub(crate) mod browser_allowlist;
 pub(crate) mod browser_attention;
 pub(crate) mod browser_bypass;

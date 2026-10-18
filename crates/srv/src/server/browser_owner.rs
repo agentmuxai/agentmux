@@ -48,6 +48,8 @@ pub(crate) fn record(block_id: &str, agent_id: &str) {
 /// if any, ends with the ownership.
 pub(crate) fn forget(block_id: &str) {
     crate::server::browser_bypass::forget(block_id, "the agent no longer drives the pane");
+    // So does a pause; the action log stays, for the person to read.
+    crate::server::browser_actions::forget_pause(block_id);
     let removed = owners()
         .lock()
         .unwrap_or_else(|p| p.into_inner())
@@ -139,14 +141,16 @@ pub(crate) fn check(
 
 /// Meta keys only srv writes, from its own records: who drives a pane, the
 /// banner that asks the person something, the bypass the person granted,
-/// what opened a popup, the sites a pane is limited to, and which agent
-/// coaches a worker.
-pub(crate) fn srv_only_keys() -> [&'static str; 8] {
+/// what the agent did and whether the person paused it, what opened a
+/// popup, the sites a pane is limited to, and which agent coaches a worker.
+pub(crate) fn srv_only_keys() -> [&'static str; 10] {
     [
         OWNER_META_KEY,
         crate::server::browser_allowlist::ALLOWED_META_KEY,
         crate::server::browser_attention::ATTENTION_META_KEY,
         crate::server::browser_bypass::BYPASS_META_KEY,
+        crate::server::browser_actions::ACTIONS_META_KEY,
+        crate::server::browser_actions::PAUSED_META_KEY,
         crate::server::browser_popup::POPUP_OF_META_KEY,
         crate::server::browser_popup::POPUP_FROM_META_KEY,
         crate::server::browser_popup::POPUP_WINDOWS_META_KEY,
@@ -184,9 +188,13 @@ pub(crate) fn guard_client_meta_write(oref: &str, meta: &MetaMapType) -> Result<
     // could write it could free a leader's slots or let a worker fork.
     // The bypass strip shows what the person granted: a client that could
     // write it could show a grant that doesn't exist, or hide one that does.
+    // The action log is the person's record of what the agent did, and the
+    // pause flag what they decided: a client could rewrite or hide either.
     for key in [
         crate::server::browser_attention::ATTENTION_META_KEY,
         crate::server::browser_bypass::BYPASS_META_KEY,
+        crate::server::browser_actions::ACTIONS_META_KEY,
+        crate::server::browser_actions::PAUSED_META_KEY,
         crate::server::browser_allowlist::ALLOWED_META_KEY,
         crate::server::browser_identity::IDENTITY_META_KEY,
         crate::server::browser_popup::POPUP_OF_META_KEY,
@@ -348,6 +356,18 @@ mod tests {
         let mut m = MetaMapType::new();
         m.insert(key.into(), json!({ "agent": "lark" }));
         assert_eq!(strip_srv_only_keys(&mut m), vec![key]);
+    }
+
+    #[test]
+    fn a_client_cannot_write_the_action_log_or_the_pause() {
+        use crate::server::browser_actions::{ACTIONS_META_KEY, PAUSED_META_KEY};
+        for key in [ACTIONS_META_KEY, PAUSED_META_KEY] {
+            assert!(guard_client_meta_write("block:test-guard-log", &meta(key, json!({ "count": 0, "entries": [] }))).is_err());
+            assert!(guard_client_meta_write("block:test-guard-log", &meta(key, serde_json::Value::Null)).is_err());
+            let mut m = MetaMapType::new();
+            m.insert(key.into(), json!(true));
+            assert_eq!(strip_srv_only_keys(&mut m), vec![key]);
+        }
     }
 
     #[test]
