@@ -291,6 +291,21 @@ is `VACUUM INTO` a temporary file, renamed into place:
 - srv first prints `AGENTMUXSRV-MIGRATING`, so the launcher allows 30 minutes
   instead of 30 s for a large `filestore.db`.
 
+**Browser profiles too** (added 2026-10-18, after the operator's own upgrade
+signed every browser pane out: 17 cookies for 4 sites in 0.59.31's jar, an
+empty one in 0.59.32). CEF's cache folder is per version as well
+(`versions/<v>/cef-cache`), and holds the Personal profile's cookies, local
+storage and IndexedDB, each named profile (`profile-<id>`) and the app UI's
+`localStorage`. On a version's first start (no `Local State` yet) the host
+copies those from the newest older version in the channel before CEF opens
+the folder (`crates/cef/src/browser_pane/profile_carry.rs`): `Network`, `Local Storage`,
+`IndexedDB` and `Login Data` of each profile, then `Local State`, which
+holds the key the cookies are encrypted with. Caches that rebuild
+themselves are left out. Copied, not moved, so the older version still works
+for a rollback; never from a newer version, whose profile Chromium refuses,
+nor from one still running, whose files change under the copy. An item that
+fails to copy is removed, and `Local State` is placed whole or not at all.
+
 The other files in `data/` are not copied: logs, locks and `authkey.dev` are
 per run, `shell/` is regenerated, and the zones flag only matters to a store
 with no migration records. Dev builds keep data per branch and local
