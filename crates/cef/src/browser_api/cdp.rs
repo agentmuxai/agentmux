@@ -414,10 +414,6 @@ impl CdpSession {
         self.state.get_browser(&self.label).map(|b| b.identifier())
     }
 
-    /// Make Chromium announce every iframe running in its own process (and,
-    /// level by level, the frames inside those), and return the sessions to
-    /// reach them. Cheap when already done: `Target.setAutoAttach` is sent
-    /// once per session, and its state lives as long as the DevTools session.
     /// After [`attach_frames`](Self::attach_frames): whether discovery stopped
     /// at its depth limit with frames left unexplored, so the frame list may be
     /// incomplete.
@@ -425,6 +421,10 @@ impl CdpSession {
         self.browser_id().is_some_and(|id| ATTACHED.lock().has_unexplored(id))
     }
 
+    /// Make Chromium announce every iframe running in its own process (and,
+    /// level by level, the frames inside those), and return the sessions to
+    /// reach them. Cheap when already done: `Target.setAutoAttach` is sent
+    /// once per session, and its state lives as long as the DevTools session.
     pub async fn attach_frames(&mut self) -> Vec<AttachedTarget> {
         let Some(browser_id) = self.browser_id() else {
             return Vec::new();
