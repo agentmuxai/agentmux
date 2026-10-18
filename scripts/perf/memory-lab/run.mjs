@@ -127,6 +127,7 @@ async function attempt(args, ctx) {
     const instance = await launch({ exe, home, port: args.port, script, log: join(dir, "instance.log") });
     const curve = [];
     let driver;
+    let succeeded = false;
     // The instance has its own process group on macOS and Linux, so Ctrl-C reaches only the lab: end the instance first.
     const interrupted = async () => {
         await instance.stop();
@@ -195,6 +196,7 @@ async function attempt(args, ctx) {
             toolRows: await driver.toolRows(),
             rounds: args.rounds,
             gapSeconds: args.gapS,
+            settleSeconds: args.settleS,
             seed: args.seed,
             notes,
             curve,
@@ -206,11 +208,13 @@ async function attempt(args, ctx) {
         writeFileSync(join(dir, "summary.md"), md + "\n");
         console.log("\n" + md);
         console.log(`\n-> ${join(dir, "result.json")}`);
+        succeeded = true;
     } finally {
         process.off("SIGINT", interrupted);
         process.off("SIGTERM", interrupted);
         driver?.close();
-        if (!args.keep) await instance.stop();
+        // --keep leaves a good run's instance for inspection; a run about to be retried must free its port.
+        if (!(args.keep && succeeded)) await instance.stop();
         else console.log(`left running: pid ${instance.pid}, CDP port ${args.port}`);
     }
 }

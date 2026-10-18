@@ -29,6 +29,9 @@ export function groupOf(proc) {
 
 const empty = () => ({ procs: 0, private: 0, commit: 0 });
 
+/** `total + value`, or null once any value is missing: a total over processes whose memory couldn't be read isn't a total. */
+const plus = (total, value) => (total == null || value == null ? null : total + value);
+
 /**
  * One sample's processes by group. `app` is the sum of the app's own
  * processes, the number the 500 MB budget is about; `panes` is what the
@@ -43,8 +46,8 @@ export function groupSample(sample) {
         const totals = p.app ? [groups[groupOf(p)], app] : [panes];
         for (const t of totals) {
             t.procs += 1;
-            t.private += p.private ?? 0;
-            t.commit += p.commit ?? 0;
+            t.private = plus(t.private, p.private);
+            t.commit = plus(t.commit, p.commit);
         }
     }
     return { groups, app, panes };
@@ -109,12 +112,13 @@ export function inMegabytes(summary) {
  */
 export function compare(base, head) {
     const row = (name, b, h) => {
-        const delta = Math.round(((h.privateMB ?? 0) - (b.privateMB ?? 0)) * 10) / 10;
-        const pct = b.privateMB ? Math.round((delta / b.privateMB) * 1000) / 10 : null;
+        const known = b.privateMB != null && h.privateMB != null; // a missing number is not zero
+        const delta = known ? Math.round((h.privateMB - b.privateMB) * 10) / 10 : null;
+        const pct = known && b.privateMB ? Math.round((delta / b.privateMB) * 1000) / 10 : null;
         return { name, baseMB: b.privateMB, headMB: h.privateMB, deltaMB: delta, pct, baseCommitMB: b.commitMB, headCommitMB: h.commitMB };
     };
-    const rows = GROUPS.map((g) => row(g, base.groups[g], head.groups[g])).filter((r) => r.baseMB || r.headMB);
-    rows.sort((a, b) => b.deltaMB - a.deltaMB);
+    const rows = GROUPS.map((g) => row(g, base.groups[g], head.groups[g])).filter((r) => r.baseMB !== 0 || r.headMB !== 0);
+    rows.sort((a, b) => (b.deltaMB ?? -Infinity) - (a.deltaMB ?? -Infinity));
     return { app: row("app", base.app, head.app), groups: rows };
 }
 
@@ -134,7 +138,7 @@ export function table(summary, title = "") {
 
 /** A markdown table of `compare`. */
 export function comparisonTable(cmp, baseLabel = "base", headLabel = "head") {
-    const sign = (n) => (n > 0 ? `+${n}` : String(n));
+    const sign = (n) => (n == null ? "n/a" : n > 0 ? `+${n}` : String(n));
     const lines = [`| group | ${baseLabel} MB | ${headLabel} MB | change MB | change % |`, "|---|---:|---:|---:|---:|"];
     for (const r of cmp.groups) lines.push(`| ${r.name} | ${r.baseMB} | ${r.headMB} | ${sign(r.deltaMB)} | ${r.pct == null ? "-" : sign(r.pct) + "%"} |`);
     const a = cmp.app;

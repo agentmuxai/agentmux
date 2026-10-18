@@ -83,8 +83,26 @@ describe("memory lab summary", () => {
         expect(md).not.toMatch(/\| other \| 0 /);
     });
 
+    it("doesn't sum a missing metric as zero: the group's total is unknown, and so is its change", () => {
+        const sample = { procs: [proc(1, "a.exe", "renderer", true, 400), { ...proc(2, "a.exe", "renderer", true, 0), private: null }, proc(3, "a.exe", "gpu-process", true, 90)] };
+        const g = groupSample(sample);
+        expect(g.groups.renderer.private).toBeNull();
+        expect(g.groups.gpu.private).toBe(90 * MB);
+        expect(g.app.private).toBeNull();
+        // a steady value skips the samples that lack it
+        const whole = { procs: [proc(1, "a.exe", "renderer", true, 420)] };
+        expect(steady([sample, whole, whole]).groups.renderer.private).toBe(420 * MB);
+        const unknown = inMegabytes(steady([sample]));
+        expect(unknown.groups.renderer.privateMB).toBeNull();
+        const cmp = compare(unknown, inMegabytes(steady([whole])));
+        expect(cmp.groups.find((r) => r.name === "renderer").deltaMB).toBeNull();
+        expect(comparisonTable(cmp)).toMatch(/\| renderer \| null \| 420 \| n\/a \| - \|/);
+    });
+
     it("refuses to compare runs of a different layout, length or conversation", () => {
         const run = { layout: { panes: 4, tabs: [4] }, rounds: 10, seed: 1 };
+        expect(mismatch({ ...run, settleSeconds: 20, steady: { samples: 3 } }, { ...run, settleSeconds: 5, steady: { samples: 3 } })).toMatch(/different settle delays/);
+        expect(mismatch({ ...run, settleSeconds: 20, steady: { samples: 3 } }, { ...run, settleSeconds: 20, steady: { samples: 1 } })).toMatch(/different sample counts/);
         expect(mismatch(run, { ...run })).toBeNull();
         expect(mismatch(run, { ...run, layout: { panes: 12, tabs: [4, 2, 4, 2] } })).toMatch(/different layouts/);
         expect(mismatch(run, { ...run, rounds: 20 })).toMatch(/different rounds/);
