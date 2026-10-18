@@ -1,6 +1,6 @@
 # SPEC: Page dialogs (alert, confirm, prompt, leave-site) in an agent-driven browser pane
 
-**Status:** proposed, not built.
+**Status:** active — D-1 built in #5074; D-2 partly (the tool description and the Auto-approve wording); D-3 and D-4 not started.
 **Date:** 2026-10-17
 **Author:** Naki #2 (naki-naki-2), at the repo owner's request
 **Trigger (repo owner, 2026-10-17):** an agent clicked a button that asks "Are you sure?" through the page's own `confirm()`, and the pane hung. "What about browser-native prompts? … agents need to handle native `confirm()`." Found while bulk-deleting items on a third-party site with Auto-approve on.
