@@ -261,11 +261,17 @@ function setChromeZoom(factor: number): void {
     showZoomIndicator(`Chrome ${Math.round(clamped * 100)}%`);
 }
 
-/** The chrome zoom this window had before a reload, or the default. */
-export function initChromeZoom(): void {
+/**
+ * The chrome zoom this window had before a reload, or the default. `fresh`
+ * (a pool boot) forgets the stored value: a pool renderer keeps its
+ * sessionStorage when a window is demoted back to it, and the next window
+ * promoted from it is a different one.
+ */
+export function initChromeZoom(opts?: { fresh?: boolean }): void {
     let stored = NaN;
     try {
-        stored = Number(sessionStorage.getItem(CHROME_ZOOM_KEY) ?? NaN);
+        if (opts?.fresh) sessionStorage.removeItem(CHROME_ZOOM_KEY);
+        else stored = Number(sessionStorage.getItem(CHROME_ZOOM_KEY) ?? NaN);
     } catch {
         // Unavailable: start at the default.
     }

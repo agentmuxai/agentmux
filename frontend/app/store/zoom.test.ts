@@ -290,6 +290,17 @@ describe("chrome zoom across a reload", () => {
         expect(document.documentElement.style.getPropertyValue("--zoomfactor")).toBe(String(before));
     });
 
+    it("starts at 100% on a pool boot, and forgets the previous window's zoom", () => {
+        initChromeZoom();
+        chromeZoomIn(0.2);
+        // The window is demoted back to the pool: same renderer, same sessionStorage.
+        initChromeZoom({ fresh: true });
+        expect(chromeZoomAtom()).toBe(1);
+        // The window promoted from it next, and its own reloads, start from 100%.
+        initChromeZoom();
+        expect(chromeZoomAtom()).toBe(1);
+    });
+
     it("starts at 100% in a new session", () => {
         initChromeZoom();
         expect(chromeZoomAtom()).toBe(1);

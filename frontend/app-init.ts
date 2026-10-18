@@ -533,9 +533,13 @@ async function initAppInner() {
     // properties. Window-level zoom reset is not needed.
 
     // Initialize chrome zoom CSS variables
-    import("@/app/store/zoom").then(({ initChromeZoom }) => {
-        initChromeZoom();
-    });
+    // A pool boot starts at the default: the window it was before isn't the
+    // one it will become.
+    Promise.all([import("@/app/store/zoom"), import("@/app/init/pool")]).then(
+        ([{ initChromeZoom }, { isPoolMode, isPanePoolMode }]) => {
+            initChromeZoom({ fresh: isPoolMode() || isPanePoolMode() });
+        }
+    );
 
     // Use Promise.race to add a timeout fallback for fonts.ready
     const fontsPromise = document.fonts.ready;
