@@ -33,7 +33,7 @@ pub struct Args {
     /// legitimately produce zero output forever (a GUI window, a dev
     /// server once its logs go quiet) — the idle-kill heuristic exists for
     /// commands that SHOULD exit and are stuck, not for this class. See
-    /// `effective_idle_timeout` below, issue #2491, and
+    /// `bash_wrap::effective_idle_timeout`, issue #2491, and
     /// docs/retro/RETRO_TASK_DEV_IDLE_KILL_FALSE_POSITIVE_2026_07_31.md.
     #[arg(long, default_value_t = false)]
     pub declared_background: bool,
