@@ -1179,7 +1179,7 @@ mod tests {
         );
         assert_eq!(
             first_spawn_env(&state, &fork.id).unwrap_err(),
-            crate::identity::resolver::SpawnGateError::MissingCredentials { provider: "claude".to_string() },
+            crate::identity::resolver::SpawnGateError::MissingCredentials { provider: "claude".to_string(), linked: false },
             "an unbound fork keeps the ordinary bind-an-account refusal"
         );
     }

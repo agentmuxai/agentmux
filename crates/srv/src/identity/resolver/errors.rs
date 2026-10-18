@@ -24,8 +24,11 @@ use crate::backend::storage::error::StoreError;
 /// was deleted.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SpawnGateError {
-    /// The gate's credentials verdict: no resolvable account.
-    MissingCredentials { provider: String },
+    /// The gate's credentials verdict: no resolvable account. `linked` says
+    /// whether the agent has a link for the provider at all: `false` is an
+    /// agent no account was ever linked to (or whose link went with its
+    /// account), `true` a link to an account that is gone or unusable.
+    MissingCredentials { provider: String, linked: bool },
     /// The injection task itself could not run to completion (task-join
     /// failure — e.g. a panic inside the blocking closure, which also
     /// poisons the `Store` mutex for every later call). The gate FAILS
@@ -80,11 +83,19 @@ impl std::fmt::Display for SpawnGateError {
             // 2026_07_20.md §7): it let a credential the app couldn't
             // attribute to any account run indefinitely, invisible to
             // Connectors. Don't point users at a toggle that no longer works.
-            SpawnGateError::MissingCredentials { provider } => write!(
+            // Both keep "no credentials for {provider}:" and "Bind an account
+            // for this provider in Connectors", which `agents/failure.rs` and
+            // muxspect classify the refusal by.
+            SpawnGateError::MissingCredentials { provider, linked: true } => write!(
                 f,
                 "no credentials for {}: the bound account was deleted or is \
                  unresolvable. Bind an account for this provider in Connectors → Accounts.",
                 provider,
+            ),
+            SpawnGateError::MissingCredentials { provider, linked: false } => write!(
+                f,
+                "no credentials for {provider}: no {provider} account is linked to this \
+                 agent. Bind an account for this provider in Connectors → Accounts.",
             ),
             SpawnGateError::InjectionUnavailable { detail } => write!(
                 f,

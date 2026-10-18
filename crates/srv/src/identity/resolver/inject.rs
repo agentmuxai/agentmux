@@ -632,7 +632,7 @@ pub fn inject_identity_env_with_broker(
     // a specific account is exactly the state that left Marks
     // silently working with an untracked, unrefreshed shared-dir credential
     // and no visible account anywhere in Connectors. The flag is no longer read.
-    let gate_oauth_failure = |provider: &str, detail: &str| -> Result<(), SpawnGateError> {
+    let gate_oauth_failure = |provider: &str, linked: bool, detail: &str| -> Result<(), SpawnGateError> {
         tracing::warn!(
             target: "identity",
             "identity.spawn.blocked: no credentials for provider {} \
@@ -645,6 +645,7 @@ pub fn inject_identity_env_with_broker(
         );
         Err(SpawnGateError::MissingCredentials {
             provider: provider.to_string(),
+            linked,
         })
     };
 
@@ -676,6 +677,7 @@ pub fn inject_identity_env_with_broker(
                 if is_oauth_class {
                     gate_oauth_failure(
                         &binding.provider,
+                        true,
                         &format!("account {} row not found", binding.account_id),
                     )?;
                     continue;
@@ -692,6 +694,7 @@ pub fn inject_identity_env_with_broker(
                 if is_oauth_class {
                     gate_oauth_failure(
                         &binding.provider,
+                        true,
                         &format!("account lookup failed for {}: {}", binding.account_id, e),
                     )?;
                     continue;
@@ -745,6 +748,7 @@ pub fn inject_identity_env_with_broker(
                     other => {
                         gate_oauth_failure(
                             &binding.provider,
+                            true,
                             &format!(
                                 "non-OAuthConfigDir secret_ref ({:?}) on account {}",
                                 other, binding.account_id,
@@ -967,7 +971,7 @@ pub fn inject_identity_env_with_broker(
             // stored under an alias.
             && !bindings.iter().any(|b| resolve_provider_alias(&b.provider) == p)
         {
-            gate_oauth_failure(&p, "no account bound for the agent's provider")?;
+            gate_oauth_failure(&p, false, "no account bound for the agent's provider")?;
         }
     }
 
@@ -1779,7 +1783,7 @@ mod tests {
         // Blocking spawn-gate error — and nothing injected.
         assert_eq!(
             res,
-            Err(SpawnGateError::MissingCredentials { provider: "claude".to_string() }),
+            Err(SpawnGateError::MissingCredentials { provider: "claude".to_string(), linked: true }),
         );
         assert!(env.get("CLAUDE_CONFIG_DIR").is_none());
         assert!(env.is_empty());
@@ -1948,7 +1952,7 @@ mod tests {
 
         assert_eq!(
             res,
-            Err(SpawnGateError::MissingCredentials { provider: "claude".to_string() }),
+            Err(SpawnGateError::MissingCredentials { provider: "claude".to_string(), linked: true }),
         );
         // Nothing was injected — the CLI process must never be created.
         assert!(env.is_empty());
@@ -1993,7 +1997,7 @@ mod tests {
 
         assert_eq!(
             res,
-            Err(SpawnGateError::MissingCredentials { provider: "claude".to_string() }),
+            Err(SpawnGateError::MissingCredentials { provider: "claude".to_string(), linked: true }),
         );
         assert!(env.is_empty());
     }
@@ -2031,7 +2035,7 @@ mod tests {
 
         assert_eq!(
             res,
-            Err(SpawnGateError::MissingCredentials { provider: "claude".to_string() }),
+            Err(SpawnGateError::MissingCredentials { provider: "claude".to_string(), linked: false }),
         );
         assert!(env.is_empty());
     }
@@ -2100,7 +2104,7 @@ mod tests {
 
         assert_eq!(
             res,
-            Err(SpawnGateError::MissingCredentials { provider: "claude".to_string() }),
+            Err(SpawnGateError::MissingCredentials { provider: "claude".to_string(), linked: false }),
             "a template launch's zero-binding oauth-class provider must now reach Step 5's gate, not skip it",
         );
         assert!(env.is_empty());
@@ -2235,7 +2239,7 @@ mod tests {
 
         assert_eq!(
             res,
-            Err(SpawnGateError::MissingCredentials { provider: "claude".to_string() }),
+            Err(SpawnGateError::MissingCredentials { provider: "claude".to_string(), linked: false }),
             "a fork must NOT silently inherit and spawn on its source agent's credentials",
         );
         assert!(env.is_empty(), "nothing must be injected — especially not the source's config dir");
@@ -2275,7 +2279,7 @@ mod tests {
 
         assert_eq!(
             res,
-            Err(SpawnGateError::MissingCredentials { provider: "claude".to_string() }),
+            Err(SpawnGateError::MissingCredentials { provider: "claude".to_string(), linked: false }),
         );
         assert!(env.is_empty());
     }
@@ -2299,7 +2303,7 @@ mod tests {
 
         assert_eq!(
             res,
-            Err(SpawnGateError::MissingCredentials { provider: "claude".to_string() }),
+            Err(SpawnGateError::MissingCredentials { provider: "claude".to_string(), linked: false }),
         );
         assert!(env.is_empty());
     }
@@ -3206,7 +3210,7 @@ mod tests {
         // The gate checks the agent's own provider (codex), which has no
         // account bound; the bundle's claude is only a hint.
         assert!(
-            matches!(&res, Err(SpawnGateError::MissingCredentials { provider }) if provider == "codex"),
+            matches!(&res, Err(SpawnGateError::MissingCredentials { provider, .. }) if provider == "codex"),
             "the agent owns its harness; the bundle's provider is a hint (SPEC_AGENT_BUNDLE_FORMAT_V0_3_2026_10_05.md §3.1): {res:?}"
         );
     }
