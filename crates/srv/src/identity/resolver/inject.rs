@@ -25,7 +25,7 @@ use crate::backend::storage::store::{IdentityAccount, SecretRef, Store};
 use crate::backend::storage::StoreError;
 use crate::backend::mps::Broker;
 
-use super::errors::SpawnGateError;
+use super::errors::{refusal_linked, SpawnGateError};
 use super::oauth_probe::{oauth_status, probe_oauth_status};
 use super::provider::{provider_class, ProviderClass};
 use super::secret::resolve_secret;
@@ -644,8 +644,7 @@ pub fn inject_identity_env_with_broker(
             detail,
         );
         Err(SpawnGateError::MissingCredentials {
-            provider: provider.to_string(),
-            linked,
+            provider: provider.to_string(), linked,
         })
     };
 
@@ -676,8 +675,7 @@ pub fn inject_identity_env_with_broker(
                 // the user's global login.
                 if is_oauth_class {
                     gate_oauth_failure(
-                        &binding.provider,
-                        true,
+                        &binding.provider, true,
                         &format!("account {} row not found", binding.account_id),
                     )?;
                     continue;
@@ -693,8 +691,7 @@ pub fn inject_identity_env_with_broker(
             Err(e) => {
                 if is_oauth_class {
                     gate_oauth_failure(
-                        &binding.provider,
-                        true,
+                        &binding.provider, true,
                         &format!("account lookup failed for {}: {}", binding.account_id, e),
                     )?;
                     continue;
@@ -747,8 +744,7 @@ pub fn inject_identity_env_with_broker(
                     SecretRef::OAuthConfigDir { dir } => dir.clone(),
                     other => {
                         gate_oauth_failure(
-                            &binding.provider,
-                            true,
+                            &binding.provider, true,
                             &format!(
                                 "non-OAuthConfigDir secret_ref ({:?}) on account {}",
                                 other, binding.account_id,
@@ -971,7 +967,7 @@ pub fn inject_identity_env_with_broker(
             // stored under an alias.
             && !bindings.iter().any(|b| resolve_provider_alias(&b.provider) == p)
         {
-            gate_oauth_failure(&p, false, "no account bound for the agent's provider")?;
+            gate_oauth_failure(&p, refusal_linked(&identity_store, &instance.definition_id, &parent_template_id, &p), "no account bound for the agent's provider")?;
         }
     }
 

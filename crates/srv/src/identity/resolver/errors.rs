@@ -124,6 +124,21 @@ impl std::fmt::Display for SpawnGateError {
 
 impl std::error::Error for SpawnGateError {}
 
+/// The `linked` of a no-binding refusal for `provider`: `false` only when the
+/// agent's links (`agent_id`, then its template's, `""` for none) were read
+/// and none is for the provider. The binding lookup turns a failed read into
+/// an empty list, so a read that fails here too counts as linked: the
+/// refusal then says the account is unresolvable, not that none is linked.
+pub(super) fn refusal_linked(identity_store: &crate::backend::storage::store::Store, agent_id: &str, template_id: &str, provider: &str) -> bool {
+    let unlinked = |id: &str| {
+        id.is_empty()
+            || identity_store
+                .agent_identity_list_for_agent(id)
+                .is_ok_and(|links| links.iter().all(|l| crate::backend::providers::resolve_provider_alias(&l.provider) != provider))
+    };
+    !(unlinked(agent_id) && unlinked(template_id))
+}
+
 /// Errors specific to the resolver. Every variant is recoverable
 /// (the spawn proceeds with whatever env vars resolved successfully)
 /// — they exist for tracing visibility, not control flow.
@@ -157,4 +172,51 @@ pub enum ResolverError {
 
     #[error("storage error: {0}")]
     Storage(#[from] StoreError),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::refusal_linked;
+    use crate::backend::storage::agents::test_agent_def;
+    use crate::backend::storage::store::{IdentityAccount, SecretRef, Store};
+
+    fn agent(store: &Store, id: &str) {
+        store.agent_def_insert(&mut test_agent_def(id, id, "claude", "host", 0, "")).unwrap();
+    }
+
+    fn link(store: &Store, agent_id: &str, provider: &str) {
+        let account = format!("acct-{agent_id}-{provider}");
+        store
+            .identity_upsert(&IdentityAccount {
+                id: account.clone(),
+                name: account.clone(),
+                provider: provider.to_string(),
+                kind: "pat".to_string(),
+                display_name: String::new(),
+                secret_ref: SecretRef::OAuthConfigDir { dir: String::new() },
+                context: serde_json::json!({}),
+                status: "unknown".to_string(),
+                created_at: 0,
+                updated_at: 0,
+            })
+            .unwrap();
+        store.agent_identity_link(agent_id, &account, provider).unwrap();
+    }
+
+    /// "Not linked" only when the links were read and none is for the provider:
+    /// the agent's own, or its template's when it has a template.
+    #[test]
+    fn a_refusal_is_unlinked_only_when_no_link_for_the_provider_was_found() {
+        let store = Store::open_in_memory().unwrap();
+        for id in ["def-none", "def-other", "def-own", "tmpl"] {
+            agent(&store, id);
+        }
+        assert!(!refusal_linked(&store, "def-none", "", "claude"), "no links at all");
+        link(&store, "def-other", "codex");
+        assert!(!refusal_linked(&store, "def-other", "", "claude"), "a link for another provider only");
+        link(&store, "def-own", "claude");
+        assert!(refusal_linked(&store, "def-own", "", "claude"), "a link the gate couldn't resolve");
+        link(&store, "tmpl", "claude");
+        assert!(refusal_linked(&store, "def-none", "tmpl", "claude"), "its template's link");
+    }
 }
