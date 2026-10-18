@@ -21,6 +21,26 @@ pub struct ProcNode {
     pub parent: Option<u32>,
     /// Whether the process is named `agentmux*`.
     pub is_agentmux: bool,
+    /// When it started, unix ms; `None` when unknown. A parent link can be
+    /// stale (on Windows it is never updated and can name a newer process that
+    /// reused the parent's pid), and a parent that started after its child is
+    /// exactly that.
+    pub started_at_ms: Option<u64>,
+}
+
+impl ProcNode {
+    /// Whether `parent` is really this process's parent: the link names its pid
+    /// and, where both start times are known, the parent did not start later
+    /// (the rule `agentmux_procstats::ProcInfo::is_child_of` applies).
+    fn is_child_of(&self, parent: &ProcNode) -> bool {
+        if self.parent != Some(parent.pid) || parent.pid == self.pid {
+            return false;
+        }
+        match (parent.started_at_ms, self.started_at_ms) {
+            (Some(p), Some(c)) => p <= c,
+            _ => true,
+        }
+    }
 }
 
 /// The pids of the instance `self_pid` (srv) belongs to: the topmost `agentmux*`
@@ -46,8 +66,8 @@ pub fn own_instance_pids(nodes: &[ProcNode], self_pid: u32) -> HashSet<u32> {
 
     let mut root = start;
     let mut seen = HashSet::from([start.pid]);
-    while let Some(parent) = root.parent.and_then(|p| by_pid.get(&p)) {
-        if !parent.is_agentmux || !seen.insert(parent.pid) {
+    while let Some(parent) = root.parent.and_then(|p| by_pid.get(&p).copied()) {
+        if !root.is_child_of(parent) || !parent.is_agentmux || !seen.insert(parent.pid) {
             break;
         }
         root = parent;
@@ -55,9 +75,10 @@ pub fn own_instance_pids(nodes: &[ProcNode], self_pid: u32) -> HashSet<u32> {
 
     let mut children: HashMap<u32, Vec<u32>> = HashMap::new();
     for n in nodes {
-        if let Some(parent) = n.parent {
-            if parent != n.pid {
-                children.entry(parent).or_default().push(n.pid);
+        // Only a link to a parent that could really be the parent.
+        if let Some(parent) = n.parent.and_then(|p| by_pid.get(&p)) {
+            if n.is_child_of(parent) {
+                children.entry(parent.pid).or_default().push(n.pid);
             }
         }
     }
@@ -81,7 +102,12 @@ mod tests {
     use super::*;
 
     fn n(pid: u32, parent: Option<u32>, is_agentmux: bool) -> ProcNode {
-        ProcNode { pid, parent, is_agentmux }
+        ProcNode { pid, parent, is_agentmux, started_at_ms: None }
+    }
+
+    fn started(mut node: ProcNode, at_ms: u64) -> ProcNode {
+        node.started_at_ms = Some(at_ms);
+        node
     }
 
     /// A stable install (launcher 100) beside a dev build (launcher 200), each
@@ -124,6 +150,35 @@ mod tests {
         assert!(![400, 401, 402].iter().any(|p| outer.contains(p)), "the nested instance is not the outer one's");
         // And from the nested srv, only the nested tree.
         assert_eq!(own_instance_pids(&t, 401), HashSet::from([400, 401, 402]));
+    }
+
+    #[test]
+    fn a_stale_parent_link_to_a_reused_pid_does_not_cross_into_another_instance() {
+        // srv 201's launcher (200) started at t=1000. A process that started
+        // later at t=5000 now has the pid of srv 301's long-gone parent, 400,
+        // and is itself an agentmux* launcher with its own srv: 301's recorded
+        // parent (400) is a reused pid, not its parent.
+        let t = vec![
+            started(n(400, None, true), 5_000), // a NEWER process reusing pid 400
+            started(n(401, Some(400), true), 5_100), // its real child
+            started(n(301, Some(400), true), 1_000), // the stale link: started before 400
+            started(n(302, Some(301), true), 1_100),
+        ];
+        // From 301: the walk up refuses 400 (it started after 301), so 301 is
+        // its own root, with its child 302 and without 400's real tree.
+        assert_eq!(own_instance_pids(&t, 301), HashSet::from([301, 302]));
+        // From 401: its tree is 400 and 401 only; 301 is not 400's child.
+        assert_eq!(own_instance_pids(&t, 401), HashSet::from([400, 401]));
+    }
+
+    #[test]
+    fn a_parent_that_started_first_or_at_the_same_time_is_trusted() {
+        let t = vec![
+            started(n(10, None, true), 1_000),
+            started(n(11, Some(10), true), 1_000),
+            started(n(12, Some(11), true), 2_000),
+        ];
+        assert_eq!(own_instance_pids(&t, 12), HashSet::from([10, 11, 12]));
     }
 
     #[test]

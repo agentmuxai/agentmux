@@ -404,6 +404,7 @@ fn log_memory_attribution(sys: &mut sysinfo::System, commit_used_gb: f64, commit
             pid: pid.as_u32(),
             parent: proc.parent().map(|p| p.as_u32()),
             is_agentmux: proc.name().to_string_lossy().to_ascii_lowercase().starts_with("agentmux"),
+            started_at_ms: Some(proc.start_time().saturating_mul(1000)),
         })
         .collect();
     let own_pids = own_instance::own_instance_pids(&nodes, std::process::id());
