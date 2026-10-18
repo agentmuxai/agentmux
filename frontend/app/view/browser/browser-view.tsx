@@ -274,6 +274,9 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
                         <Show when={a().kind === "approval" && a().description}>
                             <div class="browser-attention-target browser-attention-description">{a().description}</div>
                         </Show>
+                        <Show when={a().kind === "approval" && a().why}>
+                            <div class="browser-attention-target">Asked because {a().why}.</div>
+                        </Show>
                         <Show when={a().kind === "navigation" && a().url}>
                             <div class="browser-attention-target" title={a().url}>
                                 {a().url}

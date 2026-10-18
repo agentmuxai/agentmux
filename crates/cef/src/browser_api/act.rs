@@ -195,7 +195,22 @@ const COMMIT_INFO: &str = concat!(
   const form = this.form || (this.closest && this.closest("form"));
   const submits = !!form && ((t === "button" && type === "submit") || (t === "input" && (type === "submit" || type === "image")));
   const labelledBy = (this.getAttribute("aria-labelledby") || "").split(/\s+/).map(i => { const n = i && this.ownerDocument.getElementById(i); return n ? n.textContent : ""; }).join(" ");
-  const { name, description, verb } = clickLabel(this.getAttribute("aria-label"), labelledBy, this.innerText || this.value || "");
+  let action = "";
+  // Outside a form, a committing link's destination is its href (read
+  // through the prototype, like the form's): shown in the banner and
+  // checked again after approval.
+  const link = !form && this.closest ? this.closest("a[href], area[href]") : null;
+  if (link) {
+    action = String(Object.getOwnPropertyDescriptor(link.tagName === "AREA" ? HTMLAreaElement.prototype : HTMLAnchorElement.prototype, "href").get.call(link));
+  }
+  // A link fetches unless its name says it commits; a download or a file:
+  // link never does (scripts/click_label.js).
+  const { name, description, committing, why } = clickLabel(this.getAttribute("aria-label"), labelledBy, this.innerText || this.value || "", {
+    submits,
+    link: !!link,
+    download: !!link && link.hasAttribute("download"),
+    fileHref: /^file:/i.test(action),
+  });
   const fields = [];
   const secret = el => {
     const ty = (el.type || "").toLowerCase();
@@ -217,14 +232,6 @@ const COMMIT_INFO: &str = concat!(
   // (<input name="action">, <input name="elements">): read them through the
   // prototype's getters, which the page can't shadow that way.
   const formGet = (prop) => Object.getOwnPropertyDescriptor(HTMLFormElement.prototype, prop).get.call(form);
-  let action = "";
-  // Outside a form, a committing link's destination is its href (read
-  // through the prototype, like the form's): shown in the banner and
-  // checked again after approval.
-  const link = !form && this.closest ? this.closest("a[href], area[href]") : null;
-  if (link) {
-    action = String(Object.getOwnPropertyDescriptor(link.tagName === "AREA" ? HTMLAreaElement.prototype : HTMLAnchorElement.prototype, "href").get.call(link));
-  }
   if (form) {
     const own = (t === "button" || t === "input") && this.hasAttribute("formaction");
     action = String(own ? Object.getOwnPropertyDescriptor(t === "button" ? HTMLButtonElement.prototype : HTMLInputElement.prototype, "formAction").get.call(this) : formGet("action"));
@@ -277,7 +284,7 @@ const COMMIT_INFO: &str = concat!(
   }
   const sub = ["formmethod", "formenctype", "formtarget", "name", "value"].map(a => this.getAttribute(a));
   const fingerprint = JSON.stringify([action, form ? [formGet("method"), formGet("enctype"), formGet("target")] : null, sub, this.outerHTML, link ? link.outerHTML : null, sent]);
-  return { committing: submits || verb, name, description, action, fields, fingerprint, secrets };
+  return { committing, why, name, description, action, fields, fingerprint, secrets };
 }"#
 );
 
@@ -693,6 +700,9 @@ async fn act(
                 // Shown under `what`, and judged with it: srv's payment check
                 // reads both (scripts/click_label.js).
                 "description": info.get("description").and_then(|v| v.as_str()).unwrap_or(""),
+                // What made it commit, for the banner: "it submits a form",
+                // "its name says \"Delete\"".
+                "why": info.get("why").and_then(|v| v.as_str()).unwrap_or(""),
                 "page": now,
                 "action": info.get("action").cloned().unwrap_or(Value::Null),
                 "fields": info.get("fields").cloned().unwrap_or(json!([])),
@@ -828,9 +838,9 @@ mod tests {
         // click_label.js is one function expression assigned to `clickLabel`
         // (its own tests run it); COMMIT_INFO is still one function.
         assert!(COMMIT_INFO.starts_with("function () {\n  const clickLabel = // Copyright"));
-        assert!(COMMIT_INFO.contains("function clickLabel(ariaLabel, labelledBy, text) {"));
+        assert!(COMMIT_INFO.contains("function clickLabel(ariaLabel, labelledBy, text, el) {"));
         assert!(COMMIT_INFO.contains("}\n;\n  const t = "), "the rule ends before the rest of the function");
-        assert!(COMMIT_INFO.contains("const { name, description, verb } = clickLabel("));
+        assert!(COMMIT_INFO.contains("const { name, description, committing, why } = clickLabel("));
         assert!(COMMIT_INFO.trim_end().ends_with('}'));
     }
 

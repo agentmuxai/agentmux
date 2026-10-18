@@ -559,6 +559,9 @@ declare global {
         /** Approval: the clicked element's text after its name (a menu
          *  item's description), shown smaller under `what`. */
         description?: string;
+        /** Approval: what made the click need it ("it submits a form",
+         *  `its name says "Delete"`). */
+        why?: string;
         page?: string;
         /** Approval: where the form is sent. */
         action?: string;
