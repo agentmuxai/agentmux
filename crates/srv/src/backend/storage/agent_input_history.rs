@@ -186,7 +186,8 @@ impl Store {
         }
         // Ids are one space for every agent: start below the oldest of all.
         let oldest: Option<i64> = tx.query_row("SELECT MIN(id) FROM db_agent_input_history", [], |r| r.get(0))?;
-        let mut next = oldest.unwrap_or(1).min(1) - 1;
+        // Never 0: the composer's cache marks a send still on its way with id 0.
+        let mut next = oldest.unwrap_or(1).min(0) - 1;
         // What the composer kept is in the transcripts too: only messages sent
         // before this agent's oldest kept entry are new here.
         let kept_since: Option<i64> = tx.query_row(

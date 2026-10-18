@@ -125,7 +125,7 @@ fn past_conversations_fill_the_history_once_before_what_is_kept() {
     assert!(store.input_history_backfilled("a").unwrap());
     let all = store.input_history_list("a", None, 10).unwrap();
     assert_eq!(texts(&all), ["newest, typed today", "!git status", "/compact", "first ever"], "older ones go before, by id");
-    assert!(all[1..].iter().all(|e| e.source == "backfill" && e.id <= 0));
+    assert!(all[1..].iter().all(|e| e.source == "backfill" && e.id < 0), "never 0, the composer's mark for a send on its way");
     assert_eq!((all[1].kind.as_str(), all[2].kind.as_str(), all[3].kind.as_str()), ("bang", "slash", "message"));
     // Paging back walks into them.
     let older = store.input_history_list("a", Some(all[1].id), 10).unwrap();
