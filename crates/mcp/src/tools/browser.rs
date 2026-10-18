@@ -517,11 +517,6 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
     }
 }
 
-/// Snapshot's `scope`: a reference (`e12`, `e4.e1`, `n2e1`), or the element
-/// to narrow to by role and name, for a page not read yet. The name form is
-/// a string written like a snapshot line, `dialog "Edit item"` or
-/// `"Edit item"` (an unquoted string that isn't a reference is a name too),
-/// or an object `{role, name, exact}`.
 /// One part of a reference as snapshots and finds hand them out: `e12`, a
 /// frame's `f1e3`, a find's `n2e1`. Anything else (`Section2`) is a name.
 fn is_ref_segment(seg: &str) -> bool {
@@ -536,6 +531,11 @@ fn is_ref_segment(seg: &str) -> bool {
     rest.strip_prefix('e').is_some_and(digits)
 }
 
+/// Snapshot's `scope`: a reference (`e12`, `e4.e1`, `n2e1`), or the element
+/// to narrow to by role and name, for a page not read yet. The name form is
+/// a string written like a snapshot line, `dialog "Edit item"` or
+/// `"Edit item"` (an unquoted string that isn't a reference is a name too),
+/// or an object `{role, name, exact}`.
 fn scope_arg(scope: Option<&Value>) -> Result<(Option<String>, Option<agentmux_common::api_types::UiBrowserElementMatch>)> {
     use agentmux_common::api_types::UiBrowserElementMatch;
     let by_name = |m: UiBrowserElementMatch| {
