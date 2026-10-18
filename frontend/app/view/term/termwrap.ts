@@ -590,7 +590,9 @@ export class TermWrap {
         try {
             const gl = (canvas.getContext("webgl2") ?? canvas.getContext("webgl")) as WebGLRenderingContext | null;
             if (gl && !gl.isContextLost()) gl.getExtension("WEBGL_lose_context")?.loseContext();
-        } catch (_) {}
+        } catch {
+            // Best effort: the context is released when the canvas is collected anyway.
+        }
     }
 
     // Predictive local echo: paints a just-typed printable char in the keydown
