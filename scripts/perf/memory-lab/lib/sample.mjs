@@ -24,14 +24,54 @@ import { connectBrowser, connectPage, listTargets } from "../../../ui-screenshot
 
 const hex = (v) => (typeof v === "string" ? parseInt(v, 16) : Number(v ?? 0));
 
-/** OS numbers: one `memtree` sample of the tree under `rootPid`. */
-export function osSample(memtree, rootPid) {
+/**
+ * The last sample in a `memtree --json` file: the last line with a `procs`
+ * array. On macOS memtree appends a `{"footprint": ...}` cross-check record
+ * after the samples, which isn't one.
+ */
+export function lastSample(text) {
+    const lines = text.split(/\r?\n/).filter(Boolean).map((line) => JSON.parse(line));
+    const records = lines.filter((rec) => Array.isArray(rec.procs));
+    if (records.length === 0) throw new Error("memtree wrote no sample");
+    const footprint = lines.find((rec) => rec.footprint)?.footprint;
+    // On macOS the per-process sums can count a shared region in each process; footprint's own
+    // total over the same processes counts it once, and is kept beside the sample.
+    return footprint ? { ...records[records.length - 1], footprint } : records[records.length - 1];
+}
+
+/** What the lab's own scripted agents run as: the fake Claude is a Node script, so its process is a pane's child. */
+export const FAKE_CLI_ROOTS = "node";
+
+/**
+ * `memtree` labels a process by its command line's `--type=`; on Linux a
+ * renderer or the GPU process forked from the zygote keeps the zygote's, and
+ * reads "zygote-forked". Chromium itself says what each process is
+ * (`SystemInfo.getProcessInfo`: browser, renderer, gpu, utility, ...), so a
+ * forked one takes its type from there.
+ */
+export function withChromiumRoles(sample, processInfo) {
+    const type = new Map(processInfo.map((p) => [p.id, p.type]));
+    const role = (t) => (t === "gpu" ? "gpu-process" : t === "browser" ? "main" : t);
+    return { ...sample, procs: sample.procs.map((p) => (p.role === "zygote-forked" && type.has(p.pid) ? { ...p, role: role(type.get(p.pid)) } : p)) };
+}
+
+/**
+ * OS numbers: one `memtree` sample of the tree under `rootPid`; with the CDP
+ * `port`, a zygote-forked process gets its real role (`withChromiumRoles`).
+ */
+export async function osSample(memtree, rootPid, port = null) {
     const dir = mkdtempSync(join(tmpdir(), "memory-lab-"));
     const file = join(dir, "memtree.jsonl");
     try {
-        execFileSync(memtree, ["--pid", String(rootPid), "--samples", "1", "--json", file], { stdio: ["ignore", "ignore", "pipe"] });
-        const lines = readFileSync(file, "utf8").split(/\r?\n/).filter(Boolean);
-        return JSON.parse(lines[lines.length - 1]);
+        execFileSync(memtree, ["--pid", String(rootPid), "--samples", "1", "--extra-pane-roots", FAKE_CLI_ROOTS, "--json", file], { stdio: ["ignore", "ignore", "pipe"] });
+        const sample = lastSample(readFileSync(file, "utf8"));
+        if (port == null || !sample.procs.some((p) => p.role === "zygote-forked")) return sample;
+        const browser = await connectBrowser(port, { timeoutMs: 15_000 });
+        try {
+            return withChromiumRoles(sample, (await browser.send("SystemInfo.getProcessInfo")).processInfo);
+        } finally {
+            await browser.close();
+        }
     } finally {
         rmSync(dir, { recursive: true, force: true });
     }
@@ -155,6 +195,31 @@ async function pageStats(port, target) {
 }
 
 /**
+ * Whether the browser process on CDP `port` is one of the tree under `rootPid`,
+ * so the lab drives the instance it started and not another that answers there.
+ */
+export async function portBelongsTo(port, memtree, rootPid) {
+    const browser = await connectBrowser(port, { timeoutMs: 15_000 });
+    try {
+        const { processInfo } = await browser.send("SystemInfo.getProcessInfo");
+        const mine = new Set((await osSample(memtree, rootPid)).procs.map((p) => p.pid));
+        return processInfo.some((p) => p.type === "browser" && mine.has(p.id));
+    } finally {
+        await browser.close();
+    }
+}
+
+/**
+ * The main window's page among a sample's pages: the one the app itself serves
+ * without a `windowLabel` (pool and floating-pool windows have one; a browser
+ * pane's page is on an outside URL).
+ */
+export function mainPage(pages) {
+    const isApp = (p) => /^https?:\/\/(127\.0\.0\.1|localhost)[:/]/.test(p.url ?? "");
+    return pages.find((p) => isApp(p) && !String(p.url).includes("windowLabel=")) ?? null;
+}
+
+/**
  * One sample: the OS numbers (`procs`, as `memtree` gives them, each CEF
  * process also with its allocator roots) and the pages.
  * @param {{ port: number, memtree: string, rootPid: number, label: string, gc?: boolean, pages?: boolean }} o
@@ -164,6 +229,9 @@ export async function takeSample({ port, memtree, rootPid, label, gc = false, pa
     let dumps = [];
     let pageList = [];
     try {
+        // The dump first: with `gc` it collects garbage, and the pages' JS heap and DOM
+        // counters are then read after that, not before.
+        dumps = await memoryInfraDump(browser, gc);
         if (pages) {
             for (const t of (await listTargets(port)).filter((x) => x.type === "page")) {
                 try {
@@ -173,12 +241,11 @@ export async function takeSample({ port, memtree, rootPid, label, gc = false, pa
                 }
             }
         }
-        dumps = await memoryInfraDump(browser, gc);
     } finally {
         await browser.close();
     }
     // The OS numbers right after the dump, so both describe the same moment.
-    const os = osSample(memtree, rootPid);
+    const os = await osSample(memtree, rootPid, port);
     const byPid = new Map(dumps.map((d) => [d.pid, d]));
     const procs = os.procs.map((p) => {
         const d = byPid.get(p.pid);

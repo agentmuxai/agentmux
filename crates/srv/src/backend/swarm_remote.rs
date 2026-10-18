@@ -445,6 +445,61 @@ pub fn snapshot(
     }
 }
 
+/// Each agent's provider id as this machine's agent definitions record it, by
+/// the `uid` its registry entry carries; a known id only.
+pub type DefinedProviders = HashMap<String, String>;
+
+/// The definitions' providers for `entries`, read from the host-global
+/// definition store. Blocking: it reads one file per agent.
+pub fn defined_providers(entries: &[AgentEntry]) -> DefinedProviders {
+    let Some(store) = crate::registry::resolve_shared_definitions_dir()
+        .and_then(|dir| crate::registry::DefinitionStore::open(dir).ok())
+    else {
+        return DefinedProviders::new();
+    };
+    defined_providers_from(entries, |uid| store.get(uid).ok().flatten().map(|r| r.data.provider))
+}
+
+fn defined_providers_from(entries: &[AgentEntry], lookup: impl Fn(&str) -> Option<String>) -> DefinedProviders {
+    let mut out = DefinedProviders::new();
+    for e in entries {
+        if e.uid.is_empty() || out.contains_key(&e.uid) {
+            continue;
+        }
+        let Some(raw) = lookup(&e.uid) else { continue };
+        let id = crate::backend::providers::resolve_provider_alias(raw.trim());
+        if !id.is_empty() {
+            out.insert(e.uid.clone(), id.to_string());
+        }
+    }
+    out
+}
+
+/// Give this machine's other channels' agents the provider their definition
+/// records, where their instance reported none: an instance from before it
+/// reported providers (0.59.30 and older) still shows its agents' icons
+/// (REPORT_SWARM_REMOTE_PROVIDER_ICON_RCA_2026_10_18.md §6.1). A provider the
+/// instance reported wins: it describes the live pane. LAN hosts are left as
+/// they are: their definitions aren't on this machine.
+pub fn fill_defined_providers(result: &mut SwarmOtherInstancesResult, entries: &[AgentEntry], defined: &DefinedProviders) {
+    let uid_of: HashMap<(&str, String), &str> = entries
+        .iter()
+        .filter(|e| !e.uid.is_empty())
+        .map(|e| ((e.channel.as_str(), e.agent_id.to_lowercase()), e.uid.as_str()))
+        .collect();
+    for host in result.hosts.iter_mut().filter(|h| h.tier == "host") {
+        for ch in &mut host.channels {
+            let channel = ch.channel.clone();
+            for a in ch.agents.iter_mut().filter(|a| a.provider.is_none()) {
+                a.provider = uid_of
+                    .get(&(channel.as_str(), a.name.to_lowercase()))
+                    .and_then(|uid| defined.get(*uid))
+                    .cloned();
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -999,5 +1054,63 @@ mod tests {
             )),
             "{request}"
         );
+    }
+
+    fn with_uid(name: &str, channel: &str, uid: &str) -> AgentEntry {
+        AgentEntry { uid: uid.to_string(), ..entry(name, channel, 0) }
+    }
+
+    /// REPORT_SWARM_REMOTE_PROVIDER_ICON_RCA_2026_10_18.md: an instance from
+    /// before providers were reported still shows its agents' providers, from
+    /// this machine's definitions.
+    #[test]
+    fn an_older_channels_agents_get_their_defined_provider() {
+        let entries = [with_uid("Camper", "dev", "uid-camper"), with_uid("Clamk", "dev", "uid-clamk"), entry("Loap", "dev", 0)];
+        let defined: DefinedProviders =
+            [("uid-camper".to_string(), "claude".to_string()), ("uid-clamk".to_string(), "codex".to_string())].into();
+        let mut snap = snapshot(&entries, &ChannelStatuses::new(), &[], &HashSet::new(), "narko", "stable", "", NOW);
+        fill_defined_providers(&mut snap, &entries, &defined);
+        let got: Vec<(&str, Option<&str>)> =
+            snap.hosts[0].channels[0].agents.iter().map(|a| (a.name.as_str(), a.provider.as_deref())).collect();
+        // Loap's entry has no uid, so nothing is known about it.
+        assert_eq!(got, vec![("Camper", Some("claude")), ("Clamk", Some("codex")), ("Loap", None)]);
+    }
+
+    #[test]
+    fn the_instances_own_report_wins_over_the_definition() {
+        let entries = [with_uid("Camper", "dev", "uid-camper")];
+        let mut report = ChannelReport::default();
+        report.providers.insert("camper".into(), "codex".into());
+        let statuses: ChannelStatuses = [("dev".to_string(), report)].into();
+        let defined: DefinedProviders = [("uid-camper".to_string(), "claude".to_string())].into();
+        let mut snap = snapshot(&entries, &statuses, &[], &HashSet::new(), "narko", "stable", "", NOW);
+        fill_defined_providers(&mut snap, &entries, &defined);
+        assert_eq!(snap.hosts[0].channels[0].agents[0].provider.as_deref(), Some("codex"));
+    }
+
+    #[test]
+    fn lan_hosts_are_left_as_they_are() {
+        let entries = [with_uid("Camper", "dev", "uid-camper")];
+        let defined: DefinedProviders = [("uid-camper".to_string(), "claude".to_string())].into();
+        let agent = RemoteAgent { name: "Camper".into(), block_id: String::new(), status: None, line: None, provider: None };
+        let channel = RemoteChannel { channel: "dev".into(), seen_at_ms: NOW, stale: false, os: String::new(), agents: vec![agent], route: None };
+        let mut snap = SwarmOtherInstancesResult {
+            hostname: "narko".into(),
+            channel: "stable".into(),
+            hosts: vec![RemoteHost { host_id: "lan:x".into(), display_name: "x".into(), tier: "lan", channels: vec![channel] }],
+        };
+        fill_defined_providers(&mut snap, &entries, &defined);
+        assert_eq!(snap.hosts[0].channels[0].agents[0].provider, None, "another machine's agent isn't this machine's definition");
+    }
+
+    #[test]
+    fn only_known_providers_are_read_from_the_definitions() {
+        let entries = [with_uid("A", "dev", "u1"), with_uid("B", "dev", "u2"), with_uid("C", "dev", "u3"), entry("D", "dev", 0)];
+        let defined = defined_providers_from(&entries, |uid| match uid {
+            "u1" => Some(" claude ".to_string()),
+            "u2" => Some("<b>made-up</b>".to_string()),
+            _ => None,
+        });
+        assert_eq!(defined, [("u1".to_string(), "claude".to_string())].into());
     }
 }

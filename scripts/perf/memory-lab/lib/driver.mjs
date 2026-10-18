@@ -12,7 +12,7 @@
 // refuses that), nor port 9222.
 
 import { execFileSync, spawn } from "node:child_process";
-import { mkdirSync, openSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, openSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { installFakeClaude } from "../../../ui-screenshots/install-fake-claude.mjs";
@@ -32,19 +32,50 @@ export function layoutFor(panes) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-/** The portable's executable. */
-export function portableExe(dir, platform = process.platform) {
-    return join(dir, platform === "win32" ? "agentmux.exe" : "agentmux");
+/**
+ * The executable of a packaged build, from the folder (or bundle) `task package` made:
+ * Windows `agentmux.exe`; macOS `AgentMux.app/Contents/MacOS/agentmux-launcher` (the
+ * `.app` itself, or the folder holding it); Linux's extracted tarball `agentmux.sh`, else
+ * `agentmux`. A Linux AppImage is passed to `--exe` directly.
+ */
+export function portableExe(dir, platform = process.platform, exists = existsSync) {
+    if (platform === "win32") return join(dir, "agentmux.exe");
+    if (platform === "darwin") {
+        const inBundle = (app) => join(app, "Contents", "MacOS", "agentmux-launcher");
+        if (dir.endsWith(".app")) return inBundle(dir);
+        return exists(join(dir, "AgentMux.app")) ? inBundle(join(dir, "AgentMux.app")) : join(dir, "agentmux-launcher");
+    }
+    return exists(join(dir, "agentmux.sh")) ? join(dir, "agentmux.sh") : join(dir, "agentmux");
+}
+
+/** Whether something already answers CDP on `port`. */
+export async function portInUse(port) {
+    try {
+        await fetch(`http://127.0.0.1:${port}/json/version`, { signal: AbortSignal.timeout(2000) });
+        return true;
+    } catch {
+        return false;
+    }
 }
 
 /**
- * Starts the instance. `env` is what it gets besides its own variables: any
- * AGENTMUX_* variable of the shell that started the lab is dropped, so it
- * can't join another instance's channel or data folder.
+ * Starts the instance with a data folder of its own, emptied first: a run
+ * starts from nothing, so the same options always build the same layout.
+ * `env` is what it gets besides its own variables: any AGENTMUX_* variable of
+ * the shell that started the lab is dropped, so it can't join another
+ * instance's channel or data folder.
+ *
+ * The CDP port is only the instance's preferred one (it takes another when
+ * that is busy), so a busy port is refused up front: the lab would drive the
+ * other instance.
  * @returns {Promise<{ pid: number, port: number, home: string, stop: () => void }>}
  */
 export async function launch({ exe, home, port, script, log, env = process.env }) {
     if (Number(port) === 9222) throw new Error("port 9222 is the production instance's");
+    if (await portInUse(port)) {
+        throw new Error(`something already answers on CDP port ${port} (another instance, or one a lab run left behind); stop it or pick another --port`);
+    }
+    rmSync(home, { recursive: true, force: true });
     mkdirSync(home, { recursive: true });
     const clean = Object.fromEntries(Object.entries(env).filter(([k]) => !k.startsWith("AGENTMUX_")));
     const out = openSync(log, "a");
@@ -52,32 +83,72 @@ export async function launch({ exe, home, port, script, log, env = process.env }
         env: { ...clean, AGENTMUX_HOME_OVERRIDE: home, AGENTMUX_CDP_PORT: String(port), FAKE_CLAUDE_SCRIPT: script },
         stdio: ["ignore", out, out],
         windowsHide: false,
+        detached: process.platform !== "win32", // its own process group, so stopTree reaches everything under it
     });
+    let spawnError = null;
     child.on("error", (e) => {
-        throw e;
+        spawnError = e;
     });
-    const end = Date.now() + 120_000;
-    for (;;) {
-        if (Date.now() > end) throw new Error(`${exe} didn't open a page on CDP port ${port} in 2 minutes (see ${log})`);
-        try {
-            const targets = await (await fetch(`http://127.0.0.1:${port}/json`)).json();
-            if (targets.some((t) => t.type === "page")) break;
-        } catch {
-            // not listening yet
+    try {
+        const end = Date.now() + 120_000;
+        for (;;) {
+            if (spawnError) throw spawnError;
+            if (Date.now() > end) throw new Error(`${exe} didn't open a page on CDP port ${port} in 2 minutes (see ${log})`);
+            try {
+                const targets = await (await fetch(`http://127.0.0.1:${port}/json`)).json();
+                if (targets.some((t) => t.type === "page")) break;
+            } catch {
+                // not listening yet
+            }
+            await sleep(1000);
         }
-        await sleep(1000);
+        await sleep(8000); // the first run writes the data folder's shared/ part
+    } catch (e) {
+        await stopTree(child.pid); // don't leave it holding the port and the data folder
+        throw e;
     }
-    await sleep(8000); // the first run writes the data folder's shared/ part
     return { pid: child.pid, port, home, stop: () => stopTree(child.pid) };
 }
 
-/** Ends the instance: the process it was started as, and everything under it, by process id. */
-export function stopTree(pid) {
+/** Whether anything is left in the process group `pid` leads. */
+const groupAlive = (pid) => {
     try {
-        if (process.platform === "win32") execFileSync("taskkill", ["/PID", String(pid), "/T", "/F"], { stdio: "ignore" });
-        else process.kill(pid, "SIGTERM");
+        process.kill(-pid, 0);
+        return true;
     } catch {
-        // already gone
+        return false;
+    }
+};
+
+/**
+ * Ends the instance: the process it was started as, and everything under it,
+ * by process id. On macOS and Linux that is its process group: SIGTERM, then
+ * SIGKILL for whatever is still there after `graceMs`; it returns when the
+ * group is gone, so the port and the data folder are free for the next run.
+ */
+export async function stopTree(pid, graceMs = 5000) {
+    if (process.platform === "win32") {
+        try {
+            execFileSync("taskkill", ["/PID", String(pid), "/T", "/F"], { stdio: "ignore" });
+        } catch {
+            // already gone
+        }
+        return;
+    }
+    try {
+        process.kill(-pid, "SIGTERM");
+    } catch {
+        return; // already gone
+    }
+    const end = Date.now() + graceMs;
+    while (groupAlive(pid) && Date.now() < end) await sleep(100);
+    if (groupAlive(pid)) {
+        try {
+            process.kill(-pid, "SIGKILL");
+        } catch {
+            // gone in between
+        }
+        while (groupAlive(pid)) await sleep(50);
     }
 }
 
@@ -88,8 +159,7 @@ export function installScript(home, scriptPath) {
 
 /** The driver of one running instance. */
 export async function connect(port, home, workDir) {
-    const target = await findMainTarget(port);
-    const session = await CdpSession.connect(target.webSocketDebuggerUrl);
+    let session = await CdpSession.connect((await findMainTarget(port)).webSocketDebuggerUrl);
     const ev = (expr) => session.evaluate(expr);
     const rpc = (command, data) => ev(`TabRpcClient.rpcCall(${JSON.stringify(command)}, ${JSON.stringify(data)})`);
     const activeTab = () => ev(`document.querySelector('.tab.active')?.getAttribute('data-tab-id') ?? null`);
@@ -97,9 +167,36 @@ export async function connect(port, home, workDir) {
     mkdirSync(workDir, { recursive: true });
 
     return {
-        session,
+        get session() {
+            return session;
+        },
         agents,
         eval: ev,
+
+        /** The main window's page was replaced (a recycled renderer): connect to the new one. */
+        async reconnect(timeoutMs = 90_000) {
+            session.close();
+            const end = Date.now() + timeoutMs;
+            for (;;) {
+                try {
+                    session = await CdpSession.connect((await findMainTarget(port)).webSocketDebuggerUrl);
+                    await session.evaluate("1");
+                    return;
+                } catch (e) {
+                    if (Date.now() > end) throw new Error(`no main window page on port ${port} after ${timeoutMs / 1000} s: ${e.message}`);
+                    await sleep(1000);
+                }
+            }
+        },
+
+        /** Runs a command from the palette, as a user would: open it, type, Enter. */
+        async paletteCommand(query) {
+            await session.pressKey("p", { ctrl: true, shift: true });
+            await sleep(600);
+            await session.typeText(query);
+            await sleep(600);
+            await session.pressKey("Enter");
+        },
 
         /** A demo Claude account the scripted agents are linked to, then a reload. */
         async setupAccount() {
@@ -171,6 +268,27 @@ export async function connect(port, home, workDir) {
                 await ev(`RpcApi.AgentInputCommand(TabRpcClient, { blockid: ${JSON.stringify(b)}, message: ${JSON.stringify(text)}, message_id: ${JSON.stringify(mid)} })`);
                 if (staggerMs) await sleep(staggerMs);
             }
+        },
+
+        /**
+         * How many tool rows each agent's transcript shows: a played turn of the
+         * scripted conversation has 8-20 of them (the fake Claude names its tool
+         * ids `toolu_...`), an agent that never played has none.
+         */
+        async toolRows() {
+            const counts = [];
+            for (const a of agents) {
+                const n = await ev(`(document.querySelector('[data-blockid="${a.blockId}"]')?.querySelectorAll('[data-node-id^="toolu_"]') ?? []).length`);
+                counts.push({ name: a.name, blockId: a.blockId, tools: n });
+            }
+            return counts;
+        },
+
+        /** The names of the agent definitions srv holds that the lab made (`t<tab>-<n>`, with any collision suffix). */
+        async labAgentNames() {
+            const list = await rpc("listagents", {});
+            const defs = Array.isArray(list) ? list : (list?.agents ?? list?.definitions ?? []);
+            return defs.map((d) => d.name).filter((n) => /^t\d+-\d+/.test(String(n)));
         },
 
         /** How many agents are in the middle of a turn. */

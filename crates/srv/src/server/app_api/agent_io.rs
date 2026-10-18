@@ -87,11 +87,15 @@ fn register_swarm_other_instances(engine: &Arc<WshRpcEngine>, state: &AppState) 
         let lan_peers = lan_discovery.get_instances();
         let http = http.clone();
         async move {
-                // A directory read; off the async runtime's worker threads.
-                let entries = tokio::task::spawn_blocking(|| {
-                    crate::registry::resolve_shared_reactive_dir()
+                // Directory and file reads; off the async runtime's worker
+                // threads. The definitions give an older channel's agents their
+                // provider (REPORT_SWARM_REMOTE_PROVIDER_ICON_RCA_2026_10_18.md §6.1).
+                let (entries, defined) = tokio::task::spawn_blocking(|| {
+                    let entries = crate::registry::resolve_shared_reactive_dir()
                         .map(|dir| crate::backend::reactive::registry::list_all_shared(&dir))
-                        .unwrap_or_default()
+                        .unwrap_or_default();
+                    let defined = crate::backend::swarm_remote::defined_providers(&entries);
+                    (entries, defined)
                 })
                 .await
                 .unwrap_or_default();
@@ -100,7 +104,7 @@ fn register_swarm_other_instances(engine: &Arc<WshRpcEngine>, state: &AppState) 
                 let now_ms = agentmux_common::time::now_ms_u64();
                 let targets = crate::backend::swarm_remote::channel_status_targets(&entries, &own_channel, &own_url, now_ms);
                 let statuses = crate::backend::swarm_remote::channel_statuses(&http, &targets).await;
-                let snapshot = crate::backend::swarm_remote::snapshot(
+                let mut snapshot = crate::backend::swarm_remote::snapshot(
                     &entries,
                     &statuses,
                     &lan_peers,
@@ -110,6 +114,7 @@ fn register_swarm_other_instances(engine: &Arc<WshRpcEngine>, state: &AppState) 
                     &own_url,
                     now_ms,
                 );
+                crate::backend::swarm_remote::fill_defined_providers(&mut snapshot, &entries, &defined);
                 serde_json::to_value(&snapshot).map_err(|e| format!("swarm.other-instances: {e}"))
         }
     });

@@ -66,7 +66,10 @@ A local agent row shows `<ProviderLogo provider={node.agentProvider ?? "agentmux
 
 - **srv (each instance, as a sender):** `agent-names` adds `agent_providers: {name: provider}`, the provider id the local tree already has (`claude`, `codex`, `gemini`, `opencode`, …). An agent with none is left out, like the other maps. **Needs decision D1.**
 - **srv (as a reader):** `parse_agent_names_body` reads it, capped like the other maps (known names only, bounded length). `RemoteAgent` gains `provider: Option<String>`, serialized only when present.
-- **Frontend:** the remote row shows `<ProviderLogo provider={agent.provider ?? "agentmux"} size={16} />` before the name, as the local row does (same fallback, so rows stay aligned when a peer is from before this change or reports none). A provider id `ProviderLogo` doesn't know draws its first letter in a circle, as on local rows.
+- **Frontend:** the remote row shows the agent's provider logo before the name, as the local row does. A provider id `ProviderLogo` doesn't know draws its first letter in a circle, as on local rows.
+- **Amended 2026-10-18** (`docs/reports/REPORT_SWARM_REMOTE_PROVIDER_ICON_RCA_2026_10_18.md`):
+  - This section first drew a missing provider as `agentmux`, the AgentMux logo, "so rows stay aligned". That read as a definite provider, and every agent of a peer older than 0.59.31 showed it. A missing provider is now a neutral mark of the same size (`swarm-provider-icon.tsx`), on remote and local rows.
+  - For this machine's other channels, srv takes the provider from the host-global agent definitions, by the `uid` in the agent's registry entry, when the instance reports none. The instance's own report still wins.
 - Display only: the provider is self-reported by the peer, like `os`, and nothing decides anything on it.
 
 ### 3.3 Tests

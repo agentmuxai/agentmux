@@ -10,8 +10,9 @@ import { describe, expect, it } from "vitest";
 
 import { mismatch } from "./compare.mjs";
 import { generateConversation } from "./lib/conversation.mjs";
-import { allocatorRoots, dumpedProcesses } from "./lib/sample.mjs";
-import { compare, comparisonTable, groupOf, groupSample, inMegabytes, median, MB, steady, table } from "./lib/summary.mjs";
+import { portableExe } from "./lib/driver.mjs";
+import { allocatorRoots, dumpedProcesses, lastSample, mainPage, withChromiumRoles } from "./lib/sample.mjs";
+import { agentsWithoutTurns, compare, comparisonTable, groupOf, groupSample, inMegabytes, median, MB, steady, table, transcriptGrowthProblem } from "./lib/summary.mjs";
 
 const proc = (pid, name, role, app, privateMB, commitMB = privateMB * 2) => ({ pid, name, role, app, private: privateMB * MB, commit: commitMB * MB });
 
@@ -83,12 +84,32 @@ describe("memory lab summary", () => {
         expect(md).not.toMatch(/\| other \| 0 /);
     });
 
+    it("doesn't sum a missing metric as zero: the group's total is unknown, and so is its change", () => {
+        const sample = { procs: [proc(1, "a.exe", "renderer", true, 400), { ...proc(2, "a.exe", "renderer", true, 0), private: null }, proc(3, "a.exe", "gpu-process", true, 90)] };
+        const g = groupSample(sample);
+        expect(g.groups.renderer.private).toBeNull();
+        expect(g.groups.gpu.private).toBe(90 * MB);
+        expect(g.app.private).toBeNull();
+        // a steady value skips the samples that lack it
+        const whole = { procs: [proc(1, "a.exe", "renderer", true, 420)] };
+        expect(steady([sample, whole, whole]).groups.renderer.private).toBe(420 * MB);
+        const unknown = inMegabytes(steady([sample]));
+        expect(unknown.groups.renderer.privateMB).toBeNull();
+        const cmp = compare(unknown, inMegabytes(steady([whole])));
+        expect(cmp.groups.find((r) => r.name === "renderer").deltaMB).toBeNull();
+        expect(comparisonTable(cmp)).toMatch(/\| renderer \| null \| 420 \| n\/a \| - \|/);
+    });
+
     it("refuses to compare runs of a different layout, length or conversation", () => {
         const run = { layout: { panes: 4, tabs: [4] }, rounds: 10, seed: 1 };
+        expect(mismatch({ ...run, settleSeconds: 20, steady: { samples: 3 } }, { ...run, settleSeconds: 5, steady: { samples: 3 } })).toMatch(/different settle delays/);
+        expect(mismatch({ ...run, settleSeconds: 20, steady: { samples: 3 } }, { ...run, settleSeconds: 20, steady: { samples: 1 } })).toMatch(/different sample counts/);
         expect(mismatch(run, { ...run })).toBeNull();
         expect(mismatch(run, { ...run, layout: { panes: 12, tabs: [4, 2, 4, 2] } })).toMatch(/different layouts/);
         expect(mismatch(run, { ...run, rounds: 20 })).toMatch(/different rounds/);
         expect(mismatch(run, { ...run, seed: 2 })).toMatch(/different conversations/);
+        expect(mismatch({ ...run, gapSeconds: 15, platform: "win32" }, { ...run, gapSeconds: 5, platform: "win32" })).toMatch(/different round spacing/);
+        expect(mismatch({ ...run, gapSeconds: 15, platform: "win32" }, { ...run, gapSeconds: 15, platform: "linux" })).toMatch(/different operating systems/);
     });
 });
 
@@ -129,6 +150,74 @@ describe("memory lab sampling", () => {
         expect(roots.v8).toBe(100);
         expect(roots.malloc).toBe(7);
         expect(allocatorRoots({ malloc: { size: 40 }, "malloc/a": { size: 5 } }).malloc).toBe(40);
+    });
+});
+
+describe("memory lab OS samples", () => {
+    it("takes the last record that has processes, not a trailing macOS footprint record", () => {
+        const text = [{ run: { os: "macos" } }, { procs: [{ pid: 1 }] }, { procs: [{ pid: 2 }] }, { footprint: { total: 5 } }].map((r) => JSON.stringify(r)).join("\n") + "\n";
+        expect(lastSample(text).procs[0].pid).toBe(2);
+        expect(() => lastSample(JSON.stringify({ run: {} }))).toThrow(/no sample/);
+    });
+});
+
+describe("memory lab validity guards", () => {
+    it("names the agents whose transcript shows no played turn", () => {
+        const rows = [{ name: "t1-1", tools: 14 }, { name: "t1-2", tools: 0 }, { name: "t1-3", tools: 6 }, { name: "t1-4", tools: 3 }];
+        expect(agentsWithoutTurns(rows)).toEqual(["t1-2", "t1-4"]);
+        expect(agentsWithoutTurns(rows.slice(0, 1))).toEqual([]);
+        expect(agentsWithoutTurns([{ name: "x", tools: undefined }])).toEqual(["x"]);
+    });
+
+    const base = { before: 2 * MB, agents: 4, rounds: 10, bytesPerTurn: 145_000 };
+    it("accepts a transcript store that grew by about what the played turns weigh", () => {
+        expect(transcriptGrowthProblem({ ...base, after: 2 * MB + 4 * 10 * 145_000 })).toBeNull();
+        expect(transcriptGrowthProblem({ ...base, after: 2 * MB + 4 * 10 * 145_000 * 0.85 })).toBeNull();
+    });
+
+    it("refuses a store that barely grew: the agents never played", () => {
+        expect(transcriptGrowthProblem({ ...base, after: 2 * MB + 30_000 })).toMatch(/grew by 0\.0 MB; 4 agents playing 10 turns should add at least 4\.4 MB/);
+    });
+
+    it("keeps macOS's footprint record beside the last sample", () => {
+        const text = [{ procs: [{ pid: 1 }] }, { footprint: { output: "total 1 GB" } }].map((r) => JSON.stringify(r)).join("\n");
+        const s = lastSample(text);
+        expect(s.procs[0].pid).toBe(1);
+        expect(s.footprint.output).toBe("total 1 GB");
+        expect(lastSample(JSON.stringify({ procs: [] })).footprint).toBeUndefined();
+    });
+});
+
+describe("memory lab packaged builds", () => {
+    const has = (...present) => (p) => present.some((x) => p.replace(/\\/g, "/").endsWith(x));
+    it("finds each platform's executable in what `task package` makes", () => {
+        expect(portableExe("C:/p/agentmux-0.59.32-x64-portable", "win32")).toMatch(/agentmux\.exe$/);
+        expect(portableExe("/p/dist", "darwin", has("AgentMux.app")).replace(/\\/g, "/")).toBe("/p/dist/AgentMux.app/Contents/MacOS/agentmux-launcher");
+        expect(portableExe("/p/AgentMux.app", "darwin", has()).replace(/\\/g, "/")).toBe("/p/AgentMux.app/Contents/MacOS/agentmux-launcher");
+        expect(portableExe("/p/agentmux-linux", "linux", has("agentmux.sh")).replace(/\\/g, "/")).toBe("/p/agentmux-linux/agentmux.sh");
+        expect(portableExe("/p/agentmux-linux", "linux", has()).replace(/\\/g, "/")).toBe("/p/agentmux-linux/agentmux");
+    });
+});
+
+describe("memory lab Linux roles", () => {
+    it("gives a zygote-forked process the type Chromium reports for it", () => {
+        const sample = { procs: [proc(10, "agentmux", "zygote-forked", true, 400), proc(11, "agentmux", "zygote-forked", true, 90), proc(12, "agentmux", "zygote", true, 5), proc(13, "agentmux", "renderer", true, 1)] };
+        const fixed = withChromiumRoles(sample, [{ id: 10, type: "renderer" }, { id: 11, type: "gpu" }, { id: 13, type: "renderer" }]);
+        expect(fixed.procs.map((p) => p.role)).toEqual(["renderer", "gpu-process", "zygote", "renderer"]);
+        expect(groupSample(fixed).groups.renderer.private).toBe(401 * MB);
+        expect(groupSample(fixed).groups.gpu.private).toBe(90 * MB);
+    });
+});
+
+describe("memory lab pages", () => {
+    it("finds the main window's page, not a pool window or a browser pane", () => {
+        const pages = [
+            { id: "a", url: "http://localhost:5173/?windowLabel=window-pool-1&pool=1" },
+            { id: "b", url: "https://example.com/" },
+            { id: "c", url: "http://127.0.0.1:55001/index.html" },
+        ];
+        expect(mainPage(pages).id).toBe("c");
+        expect(mainPage(pages.slice(0, 2))).toBeNull();
     });
 });
 

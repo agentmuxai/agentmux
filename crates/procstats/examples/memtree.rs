@@ -11,7 +11,7 @@
 // (one per running copy of the app), so you can pick the right `--pid`.
 // Sampling then walks everything under that process. A process is "child"
 // when it is, or runs under, a pane root: a shell, a console host or a
-// per-pane helper (`--pane-roots` changes the list). Everything else the app
+// per-pane helper (`--pane-roots` replaces the list, `--extra-pane-roots` adds to it). Everything else the app
 // started, its own helpers and language servers included, is "app". Totals
 // are given for both. The metrics are each OS's own
 // (`agentmux_procstats::MEMORY_METRIC`): Windows private working set and
@@ -90,6 +90,11 @@ fn parse_args() -> Result<Args, String> {
         match arg.as_str() {
             "--list" => a.list = Some(val()?.to_lowercase()),
             "--pid" => a.pid = Some(val()?.parse().map_err(|e| format!("--pid: {e}"))?),
+            // Added to the roots, not replacing them: a scripted stand-in for an agent CLI
+            // runs as `node`, which isn't a root by default.
+            "--extra-pane-roots" => {
+                a.pane_roots.extend(val()?.split(',').filter(|s| !s.is_empty()).map(|s| s.to_lowercase()));
+            }
             "--pane-roots" => {
                 a.pane_roots = val()?
                     .split(',')
@@ -370,7 +375,7 @@ fn main() {
             if !e.is_empty() {
                 eprintln!("memtree: {e}");
             }
-            eprintln!("usage: memtree --list <name> | --pid <pid> [--pane-roots a,b] [--samples 60] [--interval-ms 1000] [--json out.jsonl]");
+            eprintln!("usage: memtree --list <name> | --pid <pid> [--pane-roots a,b] [--extra-pane-roots a,b] [--samples 60] [--interval-ms 1000] [--json out.jsonl]");
             std::process::exit(2);
         }
     };
