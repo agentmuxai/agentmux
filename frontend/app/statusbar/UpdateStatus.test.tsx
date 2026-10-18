@@ -201,6 +201,15 @@ describe("Maintenance: Upgrade & restart", () => {
         expect(screen.queryByText("The restart also stops what agents left running:")).toBeNull();
     });
 
+    it("an install older than the release upgrades from gets the floor version first", async () => {
+        updateStatus.mockResolvedValue({ ...PORTABLE, can_download: false, install_first: "0.58.0" });
+        render(() => <MaintenanceSection />);
+        fireEvent.click(await screen.findByRole("button", { name: "Get v0.58.0" }));
+        expect(openLink).toHaveBeenCalledWith("https://github.com/agentmuxai/agentmux/releases/tag/v0.58.0");
+        expect(updateDownload).not.toHaveBeenCalled();
+        expect(screen.getByText(/install v0.58.0 first, then upgrade/)).toBeTruthy();
+    });
+
     it("Cancel stops waiting, and a restart that didn't happen says why", async () => {
         updateStatus.mockResolvedValue(download("waiting", { ...FOLDER, waiting_for: 1 }));
         upgradeCancel.mockResolvedValue(download("ready", FOLDER));

@@ -20,7 +20,9 @@
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-/// Lowest envelope schema this binary will load.
+/// Lowest envelope schema this binary will load. A definition below it is
+/// skipped, not migrated: raise the repo's `UPGRADE_FLOOR` with it, as for
+/// `MIN_SUPPORTED_SCHEMA`.
 pub const DEF_MIN_SUPPORTED_SCHEMA: u32 = 1;
 /// Highest envelope schema this binary will write or read. Bumped per
 /// release that adds fields to the definition payload.

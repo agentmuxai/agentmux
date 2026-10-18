@@ -94,6 +94,24 @@ an agent asking for something that affects the user),
   download or a restart into it is under way (`downloading`, `unpacking`,
   `waiting`, `restarting`): that one finishes first, and a check after it
   offers the newer release.
+- **Skipping versions** (added 2026-10-18). A check offers the latest
+  release, whatever this one is, and one start brings the data the rest of
+  the way: srv applies every migration its data hasn't recorded, by id, in
+  order (`migrations/runner.rs`), and the objects schema steps from any
+  `user_version`. Checked on copies of real old data with
+  `scripts/check-long-jump.sh`: channel data from before 0.55.4 (31
+  migrations in one start), shared and channel stores from before 0.56.6,
+  0.57.0, 0.58.0 and 0.59.1 (38 each) and from before 0.59.10 and 0.59.20
+  (20), each migrated and `migrate --verify` clean.
+- **The upgrade floor.** `UPGRADE_FLOOR` (repo root) names the oldest
+  version whose data this release still migrates in one start; release
+  notes carry it as a hidden line (`<!-- agentmux:min-upgrade-from=0.55.0 -->`,
+  `scripts/extract-changelog.sh`), and the check reads it
+  (`update_check::upgrade_floor`). An install older than that isn't offered
+  the download: Maintenance and `App` `version` say to install the floor
+  version first (`install_first`), and `App` `upgrade` refuses with the same.
+  Retiring a migration (`migrations/mod.rs`) means raising the floor past its
+  origin version first.
 - **What's kept** (`backend::update_check::AppUpdateStatus`): this build's
   version, the latest release's version, page and notes (the release body,
   which is the `VERSION_HISTORY.md` section, up to 16 KB), when it was
