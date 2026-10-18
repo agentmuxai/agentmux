@@ -24,6 +24,11 @@ export interface StackEntry {
 
 const stack: StackEntry[] = [];
 
+/** Whether any `<Modal>` is open in this window, declarative ones included. */
+export function anyModalOpen(): boolean {
+    return stack.length > 0;
+}
+
 export const push = (entry: StackEntry): void => {
     stack.push(entry);
 };

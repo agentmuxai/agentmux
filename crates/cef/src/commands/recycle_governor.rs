@@ -264,15 +264,21 @@ fn tick(state: &Arc<AppState>, limits: &Limits) {
         g.tracks.get(&label).is_some_and(|t| over_budget(&sample, t, limits, pressure))
     };
     let mut g = GOVERNOR.lock().unwrap();
+    if !still_over {
+        // Nothing was reloaded, so no limit is used up; only this window rests
+        // for the idle time, so it isn't collected every minute.
+        if let Some(t) = g.tracks.get_mut(&label) {
+            t.declined_until = Some(now + idle_time(limits, pressure));
+        }
+        drop(g);
+        tracing::info!(target: "recycle", label, before_mb = before, after_gc_mb = after_gc, "[recycle] {label} back under budget after a garbage collection");
+        return;
+    }
     g.last_any_request = Some(now);
     if let Some(t) = g.tracks.get_mut(&label) {
         t.last_request = Some(now);
     }
     drop(g);
-    if !still_over {
-        tracing::info!(target: "recycle", label, before_mb = before, after_gc_mb = after_gc, "[recycle] {label} back under budget after a garbage collection");
-        return;
-    }
     tracing::info!(target: "recycle", label, before_mb = before, after_gc_mb = after_gc, "[recycle] {label} idle and over budget: asking it to recycle");
     // The page checks its own input against the same idle time (pressure and
     // the lab's override shorten it).

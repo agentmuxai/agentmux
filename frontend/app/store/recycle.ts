@@ -128,17 +128,19 @@ export async function answerRecycleRequest(idleMs = IDLE_MS): Promise<boolean> {
     const decline = (reasons: string[]) => {
         void getApi().windows.recycleDeclined(ownWindowLabel(), reasons.join("; ")).catch(() => {});
     };
-    const [{ msSinceLastInput }, { anyAgentWaitingForYou }, { modalsModel }, { isAnyUnderway, ALL_DRAG_KINDS }] =
+    const [{ msSinceLastInput }, { anyAgentWaitingForYou }, { modalsModel }, { anyModalOpen }, { isAnyUnderway, ALL_DRAG_KINDS }] =
         await Promise.all([
             import("@/app/store/last-input"),
             import("@/app/notification/waiting-for-you"),
             import("@/app/store/modalmodel"),
+            import("@/app/element/modal-stack"),
             import("@/app/drag/drag-session"),
         ]);
     const busy: string[] = [];
     if (msSinceLastInput() < idleMs) busy.push("the window was used recently");
     if (anyAgentWaitingForYou()) busy.push("an agent is waiting for an answer");
-    if (modalsModel.hasOpenModals()) busy.push("a dialog is open");
+    // `openModal` dialogs and declarative `<Modal>`s are tracked apart.
+    if (modalsModel.hasOpenModals() || anyModalOpen()) busy.push("a dialog is open");
     if (isAnyUnderway(ALL_DRAG_KINDS)) busy.push("a drag is in progress");
     if (busy.length > 0) {
         decline(busy);
