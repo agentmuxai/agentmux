@@ -68,6 +68,9 @@ struct Exited {
     info: ProcInfo,
     task: String,
     role: TowerProcessRole,
+    /// What its name or command line said it was when last seen: a `node`
+    /// that ran a build stays a build while it lingers.
+    named: TowerProcessKind,
     peak: Option<u64>,
     gone: Instant,
     gone_ms: u64,
@@ -604,7 +607,8 @@ fn track_peaks_and_exits(st: &mut State, procs: &[ProcInfo], now: Instant) -> (V
                     continue;
                 }
                 let peak = st.peaks.get(&p.key()).copied().or(p.mem_private);
-                st.exited.push_back(Exited { info: p.clone(), task: g.id.clone(), role, peak, gone: now, gone_ms });
+                let named = prev.named.get(i).copied().unwrap_or_else(|| tower_kind::by_name(&p.name));
+                st.exited.push_back(Exited { info: p.clone(), task: g.id.clone(), role, named, peak, gone: now, gone_ms });
             }
         }
     }
@@ -716,7 +720,7 @@ fn render(
                         task: task_labels.get(e.task.as_str()).map(|l| (e.role, task_kind(l))),
                         agentmux: false,
                     },
-                    tower_kind::by_name(&e.info.name),
+                    e.named,
                 )),
                 ..Default::default()
             })
@@ -1004,8 +1008,17 @@ mod tests {
         assert!(snap.machine.as_ref().unwrap().mem_total.is_some_and(|t| t > 0), "installed memory is sent");
 
         st.last = Some(sampled);
-        advance(&mut st, procs, &inputs, now + Duration::from_secs(2), &cmdline);
+        let second = advance(&mut st, procs.clone(), &inputs, now + Duration::from_secs(2), &cmdline);
         assert_eq!(reads.get(), 1, "the command line is remembered for the live process");
+
+        // The npm run exits: while it lingers it is still a build, not a bare runtime.
+        st.last = Some(second);
+        let gone: Vec<ProcInfo> = procs.into_iter().filter(|p| p.pid != 203).collect();
+        let third = advance(&mut st, gone, &inputs, now + Duration::from_secs(4), &cmdline);
+        let snap = render(&third, false, "h", &labels, &|_| None);
+        let agent = snap.tasks.iter().find(|t| t.id == "agent-a").unwrap();
+        let exited = agent.exited.as_ref().and_then(|e| e.iter().find(|p| p.pid == 203)).expect("node lingers");
+        assert_eq!(exited.kind, Some(K::Builds));
     }
 
     #[test]

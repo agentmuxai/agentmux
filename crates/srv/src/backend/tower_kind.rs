@@ -360,20 +360,40 @@ pub fn classify(ctx: Context, named: K) -> K {
     }
 }
 
-/// Fill the kind of every row that has none, by its name: another machine's
-/// frame, or a paired computer's AgentMux that predates kinds.
+/// Fill the kind of every row that has none: another machine's frame (names
+/// only), or a paired computer's AgentMux that predates kinds, whose tasks
+/// still say what each process is to its pane, so rules 1–3 apply there too.
 pub fn fill_missing(snap: &mut TowerSnapshot) {
-    let fill = |p: &mut crate::backend::rpc_types::TowerProcess| {
-        if p.kind.is_none() {
-            p.kind = Some(by_name(&p.name));
-        }
+    use crate::backend::rpc_types::TowerProcess;
+    let kind_of = |p: &TowerProcess, task: Option<TowerTaskKind>, role: Option<TowerProcessRole>| {
+        let ctx = Context {
+            task: task.map(|t| (role.unwrap_or(TowerProcessRole::Started), t)),
+            agentmux: p.detail.is_some(),
+        };
+        classify(ctx, by_name(&p.name))
     };
+    // A host row names its task; its role is on the task's own row for it.
+    let mut placed: HashMap<String, (TowerTaskKind, Option<TowerProcessRole>)> = HashMap::new();
     for t in &mut snap.tasks {
-        t.processes.iter_mut().for_each(fill);
-        t.exited.iter_mut().flatten().for_each(fill);
+        for p in t.processes.iter_mut().chain(t.exited.iter_mut().flatten()) {
+            placed.insert(p.id.clone(), (t.kind, p.role));
+            if p.kind.is_none() {
+                p.kind = Some(kind_of(p, Some(t.kind), p.role));
+            }
+        }
     }
+    let task_kinds: HashMap<String, TowerTaskKind> = snap.tasks.iter().map(|t| (t.id.clone(), t.kind)).collect();
     if let Some(host) = snap.host.as_mut() {
-        host.processes.iter_mut().for_each(fill);
+        for p in &mut host.processes {
+            if p.kind.is_some() {
+                continue;
+            }
+            let (task, role) = match placed.get(&p.id) {
+                Some(&(kind, role)) => (Some(kind), role),
+                None => (p.task.as_ref().and_then(|t| task_kinds.get(t)).copied(), None),
+            };
+            p.kind = Some(kind_of(p, task, role));
+        }
     }
 }
 
@@ -501,6 +521,67 @@ mod tests {
         assert_eq!(classify(started, K::Builds), K::Builds, "what an agent runs keeps its own kind");
         assert_eq!(classify(Context { task: None, agentmux: true }, K::Browsers), K::Agentmux, "a renderer is AgentMux's");
         assert_eq!(classify(Context::default(), K::Agentmux), K::Agentmux);
+    }
+
+    #[test]
+    fn an_older_paired_snapshot_is_filled_from_its_tasks() {
+        use crate::backend::rpc_types::{TowerHost, TowerProcess, TowerTask};
+        let row = |id: &str, name: &str, role: Option<TowerProcessRole>, task: Option<&str>| TowerProcess {
+            id: id.into(),
+            name: name.into(),
+            role,
+            task: task.map(str::to_string),
+            ..Default::default()
+        };
+        let task = |id: &str, kind, processes| TowerTask {
+            id: id.into(),
+            kind,
+            label: id.into(),
+            tracking: "high".into(),
+            cpu: None,
+            cpu_account: false,
+            mem: 0,
+            processes,
+            exited: None,
+        };
+        let mut snap = TowerSnapshot {
+            ts_ms: 0,
+            hostname: "studio".into(),
+            os: "macos".into(),
+            cpu_count: 1,
+            memory_metric: String::new(),
+            interval_ms: 2000,
+            remote: true,
+            tasks: vec![
+                task("agent-a", TowerTaskKind::Agent, vec![
+                    row("1:1", "node", Some(TowerProcessRole::Main), None),
+                    row("2:1", "cargo", Some(TowerProcessRole::Started), None),
+                ]),
+                task("agentmux", TowerTaskKind::Agentmux, vec![row("3:1", "helper-x", Some(TowerProcessRole::Main), None)]),
+            ],
+            machine: None,
+            host: Some(TowerHost {
+                processes: vec![
+                    row("1:1", "node", None, Some("agent-a")),
+                    row("3:1", "helper-x", None, Some("agentmux")),
+                    row("9:1", "node", None, None),
+                ],
+                unmeasured: 0,
+                cpu: None,
+                mem: 0,
+                total: 3,
+                matched: 3,
+            }),
+        };
+        fill_missing(&mut snap);
+        let kinds = |ps: &[TowerProcess]| ps.iter().map(|p| p.kind).collect::<Vec<_>>();
+        assert_eq!(kinds(&snap.tasks[0].processes), vec![Some(K::Agents), Some(K::Builds)], "the agent's own node is the agent");
+        assert_eq!(kinds(&snap.tasks[1].processes), vec![Some(K::Agentmux)]);
+        assert_eq!(
+            kinds(&snap.host.unwrap().processes),
+            vec![Some(K::Agents), Some(K::Agentmux), Some(K::Runtimes)],
+            "host rows take their task's reading; a node of no task is a runtime"
+        );
     }
 
     #[test]

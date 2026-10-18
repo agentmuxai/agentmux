@@ -4,7 +4,7 @@
 import type { TowerProcess } from "@/app/store/rpc-api";
 import { describe, expect, it } from "vitest";
 import { isKind, KIND_ORDER, kindGroups, KINDS, sortKindGroups } from "./tower-kinds";
-import { cpuShare, loadLevel, memShare } from "./tower-util";
+import { cpuShare, groupProcesses, loadLevel, memShare } from "./tower-util";
 
 const p = (id: number, kind: TowerProcess["kind"], cpu?: number, mem?: number): TowerProcess => ({
     id: `${id}:1`,
@@ -91,5 +91,32 @@ describe("load levels", () => {
         expect(cpuShare(undefined, 4)).toBeUndefined();
         expect(memShare(2, 8)).toBe(0.25);
         expect(memShare(2, undefined)).toBeUndefined();
+    });
+});
+
+describe("app groups and kinds", () => {
+    it("one executable of several kinds is a group per kind, each with its own totals", () => {
+        const node = (id: number, kind: TowerProcess["kind"], cpu: number) => ({
+            ...p(id, kind, cpu),
+            name: "node.exe",
+        });
+        const groups = groupProcesses([
+            node(1, "agents", 1),
+            node(2, "builds", 2),
+            node(3, "builds", 3),
+            node(4, "runtimes", 4),
+        ]);
+        const byKey = new Map(groups.map((g) => [g.key, g]));
+        expect([...byKey.keys()].sort()).toEqual(["node.exe#agents", "node.exe#builds", "node.exe#runtimes"]);
+        expect(byKey.get("node.exe#builds")!.cpu).toBe(5);
+        expect(groups.every((g) => g.name === "node.exe")).toBe(true);
+    });
+
+    it("rows without a kind group by name alone, as before", () => {
+        const groups = groupProcesses([
+            { ...p(1, undefined), name: "chrome.exe" },
+            { ...p(2, undefined), name: "Chrome.exe" },
+        ]);
+        expect(groups.map((g) => g.key)).toEqual(["chrome.exe"]);
     });
 });

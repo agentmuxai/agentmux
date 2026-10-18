@@ -123,7 +123,8 @@ export function sortProcesses(processes: TowerProcess[], sort: Sort): TowerProce
  *  them: their combined CPU and memory, and the task they belong to when
  *  they all belong to the same one. */
 export interface ProcessGroup {
-    /** The name, lowercased: what the processes are grouped by. */
+    /** The name, lowercased, and the kind where there is one: what the
+     *  processes are grouped by. */
     key: string;
     name: string;
     processes: TowerProcess[];
@@ -132,11 +133,14 @@ export interface ProcessGroup {
     task?: string;
 }
 
-/** Group processes by executable name (`chrome.exe` ×24 → one group). */
+/** Group processes by executable name (`chrome.exe` ×24 → one group), and
+ *  by kind where they have one: a `node.exe` that is an agent, one that runs a
+ *  build and one that serves are three groups, each with its own icon and
+ *  totals, never one labelled by whichever came first. */
 export function groupProcesses(processes: TowerProcess[]): ProcessGroup[] {
     const byName = new Map<string, TowerProcess[]>();
     for (const p of processes) {
-        const key = (p.name || `pid ${p.pid}`).toLowerCase();
+        const key = `${(p.name || `pid ${p.pid}`).toLowerCase()}${p.kind ? `#${p.kind}` : ""}`;
         const list = byName.get(key);
         if (list) list.push(p);
         else byName.set(key, [p]);
