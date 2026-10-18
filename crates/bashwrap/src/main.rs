@@ -174,4 +174,4 @@ fn init_tracing() {
 // This test binary must hold this checkout's code, not another clone's from
 // a shared target directory (`agentmux_common::checkout`).
 #[cfg(test)]
-agentmux_common::checkout_guard!();
+agentmux_common::checkout_guard!(agentmux_procstats::CHECKOUT_DIR);
