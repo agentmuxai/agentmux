@@ -405,7 +405,7 @@ async fn call(cdp: &mut CdpSession, method: &str, params: Value) -> Result<Value
 }
 
 /// A fresh isolated world in `frame_id`, or in the pane's main frame.
-async fn isolated_context(cdp: &mut CdpSession, frame_id: Option<&str>) -> Result<i64, String> {
+pub(super) async fn isolated_context(cdp: &mut CdpSession, frame_id: Option<&str>) -> Result<i64, String> {
     let frame_id = match frame_id {
         Some(f) => f.to_string(),
         None => {
@@ -882,6 +882,17 @@ async fn act(
                 return Err("this is a file input: it takes a file upload, not text".to_string());
             }
             let text = req.text.clone().ok_or("fill needs `text`")?;
+            // The browser counts maxlength in UTF-16 code units, as here.
+            let length = text.encode_utf16().count();
+            if let Some(max) = snapshot::max_length(&facts).filter(|max| length > *max) {
+                return Err(format!(
+                    "this field holds at most {max} characters and the text has {length}: shorten it and fill again (nothing was typed)"
+                ));
+            }
+            let before = call_on(cdp, &obj, READ_BACK, vec![])
+                .await
+                .ok()
+                .and_then(|v| v.get("value").and_then(|x| x.as_str()).map(str::to_string));
             call_on(cdp, &obj, PREPARE_FILL, vec![]).await?;
             // Focusing ran the page's own handlers, which could have turned
             // the field into a secret one, or moved focus to one (insertText
@@ -896,10 +907,25 @@ async fn act(
                 call(cdp, "Input.insertText", json!({ "text": text })).await?;
             }
             let mut after = call_on(cdp, &obj, READ_BACK, vec![]).await?;
-            let got = after.get("value").and_then(|v| v.as_str()).unwrap_or("");
-            if got != text && after.get("contentEditable").is_none() {
+            let got = after.get("value").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            // Set the value directly only for a widget that took nothing from
+            // the inserted text (the value is empty or what it was). A value
+            // the page changed (cut to a limit, reformatted by a mask) is the
+            // page's rule: keep it, and say so.
+            let ignored = got.is_empty() || before.as_deref() == Some(got.as_str());
+            let forced = got != text && ignored && after.get("contentEditable").is_none();
+            if forced {
                 call_on(cdp, &obj, SET_VALUE, vec![json!(text)]).await?;
                 after = call_on(cdp, &obj, READ_BACK, vec![]).await?;
+            }
+            let mut after = warn_if_changed(after, &text);
+            if forced {
+                // Never silent: a field that rejected the text on purpose was overridden.
+                if let Some(o) = after.as_object_mut() {
+                    o.entry("note").or_insert(json!(
+                        "the field didn't take the typed text, so it was set directly: check the page accepts this value (a snapshot, or its own error message)"
+                    ));
+                }
             }
             Ok(after)
         }
@@ -938,6 +964,35 @@ async fn act(
     })
 }
 
+/// A fill's read-back, with a warning when the field doesn't hold exactly the
+/// text given: a mask reformatted it, or a script cut or changed it. The
+/// agent must not take the fill as done as asked.
+fn warn_if_changed(mut after: Value, text: &str) -> Value {
+    let got = after.get("value").and_then(|v| v.as_str()).map(str::to_string);
+    if let (Some(got), Some(obj)) = (got, after.as_object_mut()) {
+        // An editor's text differs from what was typed by its own spacing
+        // (line breaks, non-breaking spaces): compare the words, not those.
+        let words = |s: &str| s.split(|c: char| c.is_whitespace() || c == '\u{a0}').filter(|w| !w.is_empty()).collect::<Vec<_>>().join(" ");
+        let differs = if obj.contains_key("contentEditable") { words(&got) != words(text) } else { got != text };
+        if differs {
+            let cut = text.starts_with(got.as_str()) && got.len() < text.len();
+            obj.insert(
+                "warning".to_string(),
+                json!(if cut {
+                    format!(
+                        "the page kept only the first {} of {} characters; shorten the text to fit and fill again",
+                        got.encode_utf16().count(),
+                        text.encode_utf16().count()
+                    )
+                } else {
+                    "the field doesn't hold the text given: the page changed it (a format mask or a script); check the value above".to_string()
+                }),
+            );
+        }
+    }
+    after
+}
+
 /// One digest of everything an approved click would send (the page's
 /// `fingerprint` string and its secret values), so the check after approval
 /// notices any change during the wait, however large the form, without the
@@ -962,7 +1017,7 @@ fn submission_digest(fingerprint: Option<&Value>, secrets: Option<&Value>) -> St
 
 /// A secret field's value never reaches the agent, whatever the action
 /// (spec §5.1): the read-back keeps the field's shape but not its value.
-fn redact_secret(mut after: Value, facts: &DomFacts) -> Value {
+pub(super) fn redact_secret(mut after: Value, facts: &DomFacts) -> Value {
     if snapshot::is_secret(facts) {
         if let Some(obj) = after.as_object_mut() {
             if obj.remove("value").is_some() {
@@ -1040,6 +1095,24 @@ Connection: close
         assert!(status.contains(" 200 "), "{status}");
         let status = post_to_limited(upload_body(SET_FILES_BODY_LIMIT)).await;
         assert!(status.contains(" 413 "), "{status}");
+    }
+
+    #[test]
+    fn a_fill_the_page_cut_short_says_so() {
+        let after = warn_if_changed(json!({ "tag": "textarea", "value": "abc" }), "abcdef");
+        assert_eq!(after["warning"], "the page kept only the first 3 of 6 characters; shorten the text to fit and fill again");
+    }
+
+    #[test]
+    fn a_fill_the_page_reformatted_says_so_and_an_exact_one_doesnt() {
+        let changed = warn_if_changed(json!({ "tag": "input", "value": "(555) 010-1234" }), "5550101234");
+        assert!(changed["warning"].as_str().unwrap().contains("the page changed it"));
+        let exact = warn_if_changed(json!({ "tag": "input", "value": "Springfield" }), "Springfield");
+        assert!(exact.get("warning").is_none());
+        let editable = warn_if_changed(json!({ "value": "x", "contentEditable": true }), "y");
+        assert!(editable.get("warning").is_some(), "an editor that changed the text says so too");
+        let spaced = warn_if_changed(json!({ "value": "Hello\u{a0}world\n", "contentEditable": true }), "Hello world");
+        assert!(spaced.get("warning").is_none(), "an editor's own spacing isn't a change");
     }
 
     #[test]

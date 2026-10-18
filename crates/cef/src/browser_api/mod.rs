@@ -31,6 +31,7 @@ use crate::state::AppState;
 pub mod act;
 pub mod cdp;
 pub mod frames;
+pub mod page_state;
 pub mod resolver;
 pub mod routes;
 pub mod shortcuts;

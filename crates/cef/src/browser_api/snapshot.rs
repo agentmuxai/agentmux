@@ -24,6 +24,9 @@ const INTERACTIVE_ROLES: &[&str] = &[
     "button", "link", "textbox", "searchbox", "combobox", "listbox", "option", "checkbox", "radio",
     "switch", "slider", "spinbutton", "menuitem", "menuitemcheckbox", "menuitemradio", "tab",
     "treeitem", "textarea", "PopUpButton", "ComboBoxMenuButton", "ComboBoxSelect",
+    // A <details> section's <summary>: opening it is often the only way to
+    // read a review page.
+    "DisclosureTriangle", "DisclosureTriangleGrouped",
 ];
 
 /// Roles that carry no meaning of their own; their children are shown in
@@ -165,6 +168,52 @@ pub fn is_secret(f: &DomFacts) -> bool {
             || w.contains("ccnumber")
             || w.contains("securitycode")
     }) || names.contains("one-time") || names.contains("one_time") || names.contains("card-number") || names.contains("card_number")
+}
+
+/// The limits a field puts on what can be typed, as the browser enforces
+/// them: ` [maxlength=350]`, ` [minlength=2]`, ` [pattern="[0-9]{9}"]`.
+/// Empty when it has none. Shown so an agent writes within them instead of
+/// finding out from a cut-off value.
+pub fn limits_of(f: &DomFacts) -> String {
+    let mut out = String::new();
+    if !takes_length_limits(f) {
+        return out;
+    }
+    for key in ["maxlength", "minlength"] {
+        if let Some(n) = f.attrs.get(key).and_then(|v| v.trim().parse::<u64>().ok()) {
+            out.push_str(&format!(" [{key}={n}]"));
+        }
+    }
+    if let Some(p) = f.attrs.get("pattern").filter(|p| !p.is_empty() && f.local_name == "input") {
+        out.push_str(&format!(" [pattern={}]", quote(p)));
+    }
+    out
+}
+
+/// The `maxlength` of a field, if it has a valid one the browser enforces.
+pub fn max_length(f: &DomFacts) -> Option<usize> {
+    if !takes_length_limits(f) {
+        return None;
+    }
+    f.attrs.get("maxlength").and_then(|v| v.trim().parse::<usize>().ok())
+}
+
+/// Whether the browser applies `maxlength`, `minlength` and `pattern` to this
+/// field: a `textarea`, or an `input` of a text-like type (an unknown type is
+/// `text`). Number, date, time and the other non-text inputs ignore them.
+fn takes_length_limits(f: &DomFacts) -> bool {
+    match f.local_name.as_str() {
+        "textarea" => true,
+        "input" => {
+            let ty = f.attrs.get("type").map(|t| t.trim().to_ascii_lowercase()).unwrap_or_default();
+            !matches!(
+                ty.as_str(),
+                "number" | "date" | "time" | "datetime-local" | "month" | "week" | "range" | "color" | "checkbox"
+                    | "radio" | "file" | "hidden" | "submit" | "image" | "reset" | "button"
+            )
+        }
+        _ => false,
+    }
 }
 
 /// A rendered snapshot and the references it handed out (`e1` → backend node id).
@@ -490,6 +539,11 @@ fn line_for(
         };
         if on {
             line.push_str(&format!(" [{label}]"));
+        }
+    }
+    if VALUE_ROLES.contains(&role) {
+        if let Some(f) = fact {
+            line.push_str(&limits_of(f));
         }
     }
     if secret {
@@ -1198,6 +1252,52 @@ mod tests {
         assert_eq!(first_match(&nodes, &q(None, "save", false)), Some(11));
         assert_eq!(first_match(&nodes, &q(Some("dialog"), "nothing like it", false)), None);
         assert_eq!(q(Some("Dialog"), "Edit item", false).describe(), "dialog \"Edit item\"");
+    }
+
+    #[test]
+    fn a_fields_length_limits_and_pattern_show_on_its_line() {
+        let nodes = vec![
+            n("root", None, "RootWebArea", "", Some(1), &["a", "b", "c"]),
+            n("a", Some("root"), "textbox", "Restrictions", Some(2), &[]),
+            n("b", Some("root"), "textbox", "ZIP", Some(3), &[]),
+            n("c", Some("root"), "textbox", "Name", Some(4), &[]),
+        ];
+        let f = facts(&[
+            (2, "textarea", &[("maxlength", "350")]),
+            (3, "input", &[("minlength", "5"), ("maxlength", "9"), ("pattern", "[0-9]{5,9}")]),
+            (4, "input", &[("maxlength", "lots")]),
+        ]);
+        let s = render(&nodes, &f, None, "");
+        assert!(s.text.contains("textbox \"Restrictions\" [ref=e1] [maxlength=350]"), "{}", s.text);
+        assert!(s.text.contains("textbox \"ZIP\" [ref=e2] [maxlength=9] [minlength=5] [pattern=\"[0-9]{5,9}\"]"), "{}", s.text);
+        assert!(s.text.contains("textbox \"Name\" [ref=e3]\n"), "an invalid maxlength is not shown: {}", s.text);
+    }
+
+    #[test]
+    fn limits_are_shown_and_enforced_only_where_the_browser_applies_them() {
+        let f = |tag: &str, attrs: &[(&str, &str)]| DomFacts {
+            local_name: tag.into(),
+            attrs: attrs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
+            label: String::new(),
+        };
+        let number = f("input", &[("type", "number"), ("maxlength", "2")]);
+        assert_eq!(limits_of(&number), "");
+        assert_eq!(max_length(&number), None, "a number input ignores maxlength");
+        assert_eq!(max_length(&f("input", &[("type", "date"), ("maxlength", "4")])), None);
+        assert_eq!(max_length(&f("div", &[("contenteditable", "true"), ("maxlength", "4")])), None);
+        assert_eq!(max_length(&f("input", &[("type", "email"), ("maxlength", "40")])), Some(40));
+        assert_eq!(max_length(&f("input", &[("type", "bogus"), ("maxlength", "5")])), Some(5), "an unknown type is text");
+        assert_eq!(limits_of(&f("textarea", &[("maxlength", "9"), ("pattern", "x")])), " [maxlength=9]", "a textarea has no pattern");
+    }
+
+    #[test]
+    fn a_summary_gets_a_reference_so_a_section_can_be_opened() {
+        let nodes = vec![
+            n("root", None, "RootWebArea", "", Some(1), &["d"]),
+            n("d", Some("root"), "DisclosureTriangle", "Market Values", Some(2), &[]),
+        ];
+        let s = render(&nodes, &HashMap::new(), None, "");
+        assert!(s.text.contains("- DisclosureTriangle \"Market Values\" [ref=e1]"), "{}", s.text);
     }
 
     #[test]

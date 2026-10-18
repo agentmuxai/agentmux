@@ -240,6 +240,14 @@ impl Attached {
         }
     }
 
+    /// An attached frame whose own frames were never looked for (discovery
+    /// stopped at [`MAX_FRAME_DEPTH`]): frames may exist that nobody saw.
+    fn has_unexplored(&self, browser_id: i32) -> bool {
+        self.targets
+            .get(&browser_id)
+            .is_some_and(|l| l.iter().any(|t| !self.configured.contains(&(browser_id, t.session_id.clone()))))
+    }
+
     fn forget_browser(&mut self, browser_id: i32) {
         self.targets.remove(&browser_id);
         self.configured.retain(|(b, _)| *b != browser_id);
@@ -404,6 +412,13 @@ impl CdpSession {
 
     fn browser_id(&self) -> Option<i32> {
         self.state.get_browser(&self.label).map(|b| b.identifier())
+    }
+
+    /// After [`attach_frames`](Self::attach_frames): whether discovery stopped
+    /// at its depth limit with frames left unexplored, so the frame list may be
+    /// incomplete.
+    pub fn frames_may_be_missing(&self) -> bool {
+        self.browser_id().is_some_and(|id| ATTACHED.lock().has_unexplored(id))
     }
 
     /// Make Chromium announce every iframe running in its own process (and,
@@ -623,6 +638,16 @@ mod tests {
         assert_eq!(a.to_configure(8), vec![None], "another browser starts over");
         a.forget_browser(7);
         assert_eq!(a.to_configure(7), vec![None], "a closed browser is forgotten");
+    }
+
+    #[test]
+    fn a_frame_attached_but_not_yet_explored_means_frames_may_be_missing() {
+        let mut a = Attached::default();
+        assert!(!a.has_unexplored(7));
+        a.note_event(7, &attach("S1", "F1", "http://a.test/", None));
+        assert!(a.has_unexplored(7), "S1's own frames were never looked for");
+        a.to_configure(7);
+        assert!(!a.has_unexplored(7));
     }
 
     #[test]

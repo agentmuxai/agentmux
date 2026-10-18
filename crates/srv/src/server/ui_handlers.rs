@@ -299,6 +299,10 @@ pub(crate) async fn handle_ui_screenshot(
             return err_response(StatusCode::BAD_GATEWAY, format!("decode png_base64: {e}"))
         }
     };
+    let (bytes, png_base64) = match crate::server::screenshot_redact::redact_host_screenshot(&host_resp, bytes, png_base64) {
+        Ok(v) => v, // a browser pane's secret fields blacked out, or none on the page
+        Err(e) => return err_response(StatusCode::INTERNAL_SERVER_ERROR, e),
+    };
 
     let dir = crate::backend::base::get_mux_data_dir().join("tmp/ui-screenshots");
     if let Err(e) = std::fs::create_dir_all(&dir) {
@@ -631,17 +635,13 @@ pub(crate) async fn handle_ui_browser_dispatch_key(
             return resp;
         }
     }
-    let host = match get_host_ipc(&state).await {
-        Ok(h) => h,
-        Err(e) => return err_response(StatusCode::SERVICE_UNAVAILABLE, e),
+    let data = match proxy_value(&state, "dispatch_key", json!({ "block_id": block_id, "selector": req.selector, "text": req.text, "key": req.key }), std::time::Duration::from_secs(20)).await {
+        Ok(d) => d, // on a browser pane, what has focus after the keys
+        Err((code, e)) => return err_response(code, e),
     };
-    let body = json!({ "block_id": block_id, "selector": req.selector, "text": req.text, "key": req.key });
-    if let Err(resp) = proxy_ack(&state, &host, "dispatch_key", body).await {
-        return resp;
-    }
     tracing::info!(agent_id = %req.auth.agent_id, block_id = %block_id, "[ui-automation] browser dispatch_key");
     log().record(&state);
-    (StatusCode::OK, Json(json!({ "ok": true }))).into_response()
+    (StatusCode::OK, Json(json!({ "ok": true, "data": data }))).into_response()
 }
 
 /// `POST /api/v1/ui/browser/focus_element` — backs `BrowserFocusElement`.
