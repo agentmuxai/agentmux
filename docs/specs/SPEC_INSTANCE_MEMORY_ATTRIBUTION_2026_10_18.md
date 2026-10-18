@@ -3,7 +3,7 @@
 **Date:** 2026-10-18
 **Author:** Maricon@charlie
 **Type:** Spec (a diagnostic's accounting; no behaviour change)
-**Status:** active — implemented in the PR that adds this file
+**Status:** active — shipped in PR #5083 (the module, the Windows attribution change, its tests); remaining: a real two-instance reading on Windows, which CI cannot give (the Windows-only part is compiled by CI but not run)
 **Part of:** `PLAN_RENDERER_MEMORY_FIXES_2026_10_12.md` item 4, under track E (srv's memory) of the 500 MB budget (`docs/reports/REPORT_MEMORY_FOOTPRINT_500MB_BUDGET_2026_10_12.md`).
 **Asked by:** Camper@narko, coordinating the budget: "Count only this instance's own process tree. Small, and it makes field numbers trustworthy."
 
