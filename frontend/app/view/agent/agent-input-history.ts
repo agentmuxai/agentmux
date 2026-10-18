@@ -150,6 +150,8 @@ export function rememberSent(agentId: string, text: string): void {
         c.entries.push(text);
         c.ids.push(0);
         at = c.entries.length - 1;
+        // Every composer of this agent in this window shares the array.
+        tell(c, "newer", 1);
     }
     c.pending++;
     void RpcApi.AgentInputHistoryAppendCommand(TabRpcClient, { agent_id: agentId, text, kind: sendKind(text) })

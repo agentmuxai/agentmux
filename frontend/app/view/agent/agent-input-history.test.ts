@@ -93,10 +93,16 @@ describe("agent input history", () => {
         history.mockResolvedValueOnce(page(["older"], 1));
         const entries = agentHistory("a1");
         await flush();
+        // Another composer of the same agent, on its live draft.
+        let otherPos = entries.length;
+        watchAgentHistory("a1", (where, n) => {
+            if (where === "newer" && otherPos === entries.length - n) otherPos += n;
+        });
         rememberSent("a1", "run the tests");
         rememberSent("a1", "run the tests");
         rememberSent("a1", "   ");
         expect(entries).toEqual(["older", "run the tests"]);
+        expect(otherPos, "the other composer stays on its live draft").toBe(2);
         expect(append).toHaveBeenCalledTimes(2);
         expect(append).toHaveBeenCalledWith({}, { agent_id: "a1", text: "run the tests", kind: "message" });
     });
