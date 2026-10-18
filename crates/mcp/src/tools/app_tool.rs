@@ -116,11 +116,21 @@ fn describe_status(st: &Value) -> String {
 fn describe_outcome(o: &Value) -> String {
     let version = s(o, "version");
     match s(o, "status") {
-        "started" => format!(
-            "Upgrade to {version} started: AgentMux downloads it if needed, asks the user to confirm in its own \
-             dialog, then restarts once every agent has finished its turn. End your turn so you don't hold it up. \
-             Your session resumes after the restart."
-        ),
+        "started" => {
+            let mut text = format!(
+                "Upgrade to {version} started: AgentMux downloads it if needed, asks the user to confirm in its own \
+                 dialog, then restarts once every agent has finished its turn. End your turn so you don't hold it up. \
+                 Your session resumes after the restart."
+            );
+            let stopping: Vec<&str> = o["stopping"].as_array().into_iter().flatten().filter_map(|v| v.as_str()).collect();
+            if !stopping.is_empty() {
+                text.push_str(&format!(
+                    " The restart also stops what agents left running in the background: {}. Each agent is told afterwards.",
+                    stopping.join("; ")
+                ));
+            }
+            text
+        }
         "pending_user" => format!(
             "Asked the user: every AgentMux window shows your request to upgrade to {version}. You'll get an \
              [AgentMux] note with their answer; don't ask again meanwhile."
@@ -164,7 +174,14 @@ mod tests {
 
     #[test]
     fn every_outcome_tells_the_agent_what_happens_next() {
-        assert!(describe_outcome(&json!({ "status": "started", "version": "0.59.27" })).contains("End your turn"));
+        let started = describe_outcome(&json!({ "status": "started", "version": "0.59.27" }));
+        assert!(started.contains("End your turn") && !started.contains("background"), "{started}");
+        let stopping = describe_outcome(&json!({
+            "status": "started",
+            "version": "0.59.27",
+            "stopping": ["Korp: an AgentMux instance (`task dev`), running 9 h"],
+        }));
+        assert!(stopping.contains("also stops what agents left running in the background: Korp: an AgentMux instance"), "{stopping}");
         assert!(describe_outcome(&json!({ "status": "pending_user", "version": "0.59.27", "id": "r" })).contains("[AgentMux] note"));
         assert!(describe_outcome(&json!({ "status": "up_to_date", "current": "0.59.27" })).contains("latest release"));
         let u = describe_outcome(&json!({ "status": "unavailable", "message": "no", "url": "https://x" }));

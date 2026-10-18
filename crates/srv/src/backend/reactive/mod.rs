@@ -49,6 +49,7 @@ pub fn held_jekt_wake() -> &'static tokio::sync::Notify {
 pub fn registered(block_id: &str) {
     held_jekt_wake().notify_one();
     crate::backend::upgrade_notice::on_registered(block_id);
+    crate::backend::background_work::on_registered(block_id);
 }
 
 /// Rate limit: max tokens (requests per second).

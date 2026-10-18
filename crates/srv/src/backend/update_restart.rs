@@ -53,8 +53,18 @@ fn if_current(run: u64, f: impl FnOnce()) -> bool {
     true
 }
 
+/// While the restart waits or is asked for, what agents left running that it
+/// stops is listed with it; the launcher's dialog lists it too.
 fn set(d: &DownloadStatus, state: &str, waiting_for: u32, error: Option<String>) {
-    update_check::set_download(Some(DownloadStatus { state: state.to_string(), waiting_for, error, ..d.clone() }));
+    let stopping = if matches!(state, "waiting" | "restarting") { stopping() } else { Vec::new() };
+    crate::backend::background_work::write_for_launcher(&stopping);
+    update_check::set_download(Some(DownloadStatus { state: state.to_string(), waiting_for, error, stopping, ..d.clone() }));
+}
+
+/// What agents left running now, a line each.
+pub(crate) fn stopping() -> Vec<String> {
+    let now = agentmux_common::time::now_ms_u64();
+    crate::backend::background_work::running().iter().map(|w| crate::backend::background_work::describe(w, now)).collect()
 }
 
 /// Agents in the middle of a turn.
@@ -202,6 +212,7 @@ mod tests {
             folder: folder.map(|f| f.display().to_string()),
             installer: None,
             waiting_for: 0,
+            stopping: Vec::new(),
         }
     }
 

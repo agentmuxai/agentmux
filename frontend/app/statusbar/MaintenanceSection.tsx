@@ -387,6 +387,13 @@ export const MaintenanceSection = (): JSX.Element => {
                 </div>
             </Show>
 
+            {/* What agents left running that the restart stops (srv's background_work). */}
+            <Show when={(download()?.state === "waiting" || download()?.state === "restarting") && (download()?.stopping?.length ?? 0) > 0}>
+                <div class="maintenance-row-text maintenance-row-text--warn">The restart also stops what agents left running:</div>
+                <For each={download()!.stopping}>
+                    {(line) => <div class="maintenance-row-text maintenance-row-text--dim">{line}</div>}
+                </For>
+            </Show>
             <Show when={download()?.state === "ready" && download()?.error}>
                 <div class="maintenance-row-text maintenance-row-text--error">{download()!.error}</div>
             </Show>

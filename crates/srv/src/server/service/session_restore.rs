@@ -329,8 +329,19 @@ pub(crate) async fn handle_save_session_snapshot(
         .ok()
         .flatten()
         .unwrap_or(false);
-    let why = if for_quit { "quit" } else { "OS shutdown" };
+    let result = flush_snapshot(store, for_quit);
+    // A quit closes every pane, and with them what agents left running:
+    // record it for their note, and let another AgentMux among it save its
+    // own session first (`background_work`). After this session's own save.
+    if for_quit {
+        crate::backend::background_work::at_quit().await;
+    }
+    result
+}
 
+/// Save the session now, for a quit or an OS shutdown.
+fn flush_snapshot(store: &Store, for_quit: bool) -> WebReturnType {
+    let why = if for_quit { "quit" } else { "OS shutdown" };
     if !super::session_windows::has_live_window(store) {
         // No client, no window, or no workspace — nothing to capture. Not an
         // error: a shutdown arriving before the first window exists is

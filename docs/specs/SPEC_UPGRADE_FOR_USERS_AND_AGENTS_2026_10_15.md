@@ -355,6 +355,41 @@ with their panes, at their positions and sizes.
 where it was. macOS's Cmd+Q doesn't reach `quit_app`, so there the
 last-close record still applies.
 
+### 6.2 What agents left running
+
+Added 2026-10-18, after the operator's own upgrade killed an AgentMux an
+agent had started (`task dev`, through `Start-Process` from its Bash tool),
+without a word to anyone.
+
+Everything an agent starts runs in its pane's process tracker (a Windows job
+object, a Linux cgroup) that nothing can leave, so a quit, an upgrade's
+included, stops it with the pane. That stays: letting processes escape a
+pane was rejected on purpose (`SPEC_BACKGROUND_TASK_TEARDOWN_SURVIVAL_2026_08_20.md`
+§0). What changes is that it no longer happens silently
+(`crates/srv/src/backend/background_work.rs`):
+
+- **Listed before.** While an upgrade's restart waits or is asked for, the
+  version panel lists what agents left running, one line each ("Korp: an
+  AgentMux instance (`task dev TITLE=KorpForms`), running 9 h"), from each
+  agent pane's tracked processes (`AgentProcessRegistry::list_block`, one
+  item per process tree; another AgentMux is recognised by its launcher,
+  host or srv). The launcher's dialog names the same list (srv leaves it in
+  `updates/stopping.txt` beside the staged update), and an agent whose own
+  turn started the upgrade (`App` `upgrade`) is told in the answer.
+- **Stopped gracefully where it matters.** The quit's session save
+  (`SaveSessionSnapshot` with `for_quit`) asks another AgentMux among it to
+  close its windows first (`WM_CLOSE` on Windows, `SIGTERM` elsewhere), so it
+  saves its own session as a quit does, and waits up to 0.9 s for it within
+  the host's 1.5 s.
+- **Told after.** The quit records the list in the channel folder
+  (`agentmux-stopped-at-quit.json`); after the next start each agent that
+  resumes within the hour is told, once, what of its own was stopped:
+  `[AgentMux] When AgentMux quit at 00:23, it stopped what you had running in
+  the background: an AgentMux instance (`task dev TITLE=KorpForms`, started
+  22:30). Start it again if you still need it.`
+
+Any quit does this, not only an upgrade's.
+
 ## 7. Phases
 
 Each phase is small and useful on its own.

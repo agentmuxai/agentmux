@@ -137,6 +137,7 @@ pub mod update_download;
 pub mod update_install;
 pub mod update_restart;
 pub mod upgrade_notice;
+pub mod background_work;
 pub mod upgrade_request;
 pub mod storage;
 pub mod subagent_watcher;
