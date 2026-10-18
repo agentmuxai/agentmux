@@ -573,6 +573,26 @@ export class TermWrap {
         } catch (e) {
             console.log("[termwrap] error disposing terminal:", e);
         }
+        this.releaseWebglContext();
+    }
+
+    /**
+     * Release this terminal's WebGL context now. xterm's WebGL addon removes its
+     * canvas on dispose but never loses the context, so the GPU process keeps the
+     * context (and its glyph atlas textures) until the canvas is garbage-collected,
+     * and the page's limit of 16 live contexts counts it meanwhile. The addon's
+     * listeners are gone by now, so this fires no context-loss fallback.
+     */
+    private releaseWebglContext() {
+        const canvas = this.glCanvas;
+        this.glCanvas = null;
+        if (!canvas || !this.webglRequested || this.webglFellBack) return;
+        try {
+            const gl = (canvas.getContext("webgl2") ?? canvas.getContext("webgl")) as WebGLRenderingContext | null;
+            if (gl && !gl.isContextLost()) gl.getExtension("WEBGL_lose_context")?.loseContext();
+        } catch {
+            // Best effort: the context is released when the canvas is collected anyway.
+        }
     }
 
     // Predictive local echo: paints a just-typed printable char in the keydown
