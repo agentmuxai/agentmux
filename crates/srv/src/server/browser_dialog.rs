@@ -216,7 +216,8 @@ pub(crate) async fn handle_host_browser_dialog(
     let kind_str = s("kind");
     if flag("ended") {
         browser_attention::cancel_kind_for(&banner_at, Kind::Dialog);
-        record(&agent, &target, &kind_str, &message, "ended", "the page navigated or closed before it was answered");
+        // The host doesn't keep which kind it was.
+        record(&agent, &target, "dialog", &message, "ended", "the page navigated or closed before it was answered");
         return answered("ok");
     }
     if flag("suppressed") {

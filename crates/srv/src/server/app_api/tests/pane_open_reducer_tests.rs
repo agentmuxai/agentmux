@@ -2214,7 +2214,7 @@ async fn a_page_dialog_is_decided_by_policy_or_asked_and_only_the_host_reports_o
     for want in [("alert", "accepted"), ("prompt", "cancelled"), ("confirm", "asking the user"), ("confirm", "accepted")] {
         assert!(seen.contains(&(want.0.to_string(), want.1.to_string())), "{want:?} in {seen:?}");
     }
-    assert!(seen.contains(&("confirm".to_string(), "ended".to_string())), "{seen:?}");
+    assert!(seen.contains(&("dialog".to_string(), "ended".to_string())), "{seen:?}");
     let (_, body) = post_json(&app, "/api/v1/ui/browser/dialogs", auth).await;
     assert!(body["data"]["dialogs"].as_array().unwrap().is_empty());
 }
