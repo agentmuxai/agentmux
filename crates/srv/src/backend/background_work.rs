@@ -17,9 +17,10 @@
 //!   dialog (`updates/stopping.txt`, [`write_for_launcher`]) and an agent
 //!   asking for the upgrade are told.
 //! - **At the quit** ([`at_quit`], from the quit's session save): it is
-//!   recorded, and another AgentMux among it is asked to close its windows
-//!   first, so it saves its own session as a quit does, before its tracker
-//!   is closed.
+//!   recorded, and on Windows another AgentMux among it is asked to close its
+//!   windows first, so it saves its own session as a quit does, before its
+//!   tracker is closed. Elsewhere it is stopped with its pane as before: its
+//!   host doesn't take a signal as a quit, and its own quit can't be reached.
 //! - **After:** each agent that resumes is told what of its own was stopped
 //!   ([`on_registered`]), once, so it can start it again.
 
@@ -232,9 +233,9 @@ fn channel_dir() -> Option<PathBuf> {
 
 /// A quit is about to close every pane (`SaveSessionSnapshot` with
 /// `for_quit`): record what agents left running, for their note after the
-/// next start, and ask another AgentMux among it to close its windows, so it
-/// saves its session before its tracker is closed. Waits a little for those
-/// to go; the host allows the whole save 1.5 s.
+/// next start, and on Windows ask another AgentMux among it to close its
+/// windows, so it saves its session before its tracker is closed. Waits a
+/// little for those to go; the host allows the whole save 1.5 s.
 pub async fn at_quit() {
     let work = running();
     if work.is_empty() {
@@ -246,7 +247,7 @@ pub async fn at_quit() {
         write(&dir, &Record { at_ms: now as i64, items: work.clone() });
     }
     let hosts: Vec<u32> = work.iter().flat_map(|w| w.hosts.iter().copied()).collect();
-    if hosts.is_empty() {
+    if hosts.is_empty() || !cfg!(windows) {
         return;
     }
     for pid in &hosts {
@@ -280,13 +281,9 @@ fn close_windows_of(pid: u32) {
     unsafe { EnumWindows(Some(each), pid as LPARAM) };
 }
 
-/// Unix: ask it to end (`SIGTERM`), which the host takes as a quit.
-#[cfg(unix)]
-fn close_windows_of(pid: u32) {
-    let _ = agentmux_common::process::kill_pid(pid);
-}
-
-#[cfg(not(any(windows, unix)))]
+/// Off Windows nothing asks: a signal to the host ends it without its quit,
+/// which is no better than its pane closing.
+#[cfg(not(windows))]
 fn close_windows_of(_pid: u32) {}
 
 fn alive(pid: u32) -> bool {

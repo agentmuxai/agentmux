@@ -383,11 +383,13 @@ pane was rejected on purpose (`SPEC_BACKGROUND_TASK_TEARDOWN_SURVIVAL_2026_08_20
   host or srv). The launcher's dialog names the same list (srv leaves it in
   `updates/stopping.txt` beside the staged update), and an agent whose own
   turn started the upgrade (`App` `upgrade`) is told in the answer.
-- **Stopped gracefully where it matters.** The quit's session save
-  (`SaveSessionSnapshot` with `for_quit`) asks another AgentMux among it to
-  close its windows first (`WM_CLOSE` on Windows, `SIGTERM` elsewhere), so it
-  saves its own session as a quit does, and waits up to 0.9 s for it within
-  the host's 1.5 s.
+- **Stopped gracefully where it matters.** On Windows the quit's session
+  save (`SaveSessionSnapshot` with `for_quit`) then asks another AgentMux
+  among it to close its windows (`WM_CLOSE` to its host's visible windows),
+  so it saves its own session as a quit does, and waits up to 0.9 s for it
+  within the host's 1.5 s. On Linux and macOS it still stops with its pane:
+  a signal to its host ends it without its quit, and reaching its own quit
+  (its tray command) is left for later.
 - **Told after.** The quit records the list in the channel folder
   (`agentmux-stopped-at-quit.json`); after the next start each agent that
   resumes within the hour is told, once, what of its own was stopped:
