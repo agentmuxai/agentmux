@@ -703,6 +703,9 @@ impl PersistentSubprocessController {
         resume_msg: String,
         logs: &'static DeadAirLogs,
     ) -> Result<(), String> {
+        // The wait for the user ends here: the watchdog's idle time counts
+        // from now, not from the agent's last output before it asked.
+        self.health_monitor.note_user_reply();
         let control_response = serde_json::json!({
             "type": "control_response",
             "response": {

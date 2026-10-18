@@ -46,6 +46,10 @@ pub(crate) struct AgentClock {
     /// (`Controller::awaiting_user_reply`) or flagged by the pane
     /// (`term:awaiting_user`).
     pub awaiting_user: bool,
+    /// When the agent last stopped waiting for the user: its answer was
+    /// delivered, or the watchdog last saw it waiting. Idle time never counts
+    /// from before this.
+    pub wait_ended_ms: Option<i64>,
     /// A PTY pane (`ShellController`), idle whenever its PTY is quiet.
     pub is_shell: bool,
 }
@@ -71,9 +75,9 @@ pub(crate) fn verdict(limits: Limits, now_ms: i64, agent: &AgentClock) -> Option
         let quiet_since = if agent.is_shell {
             agent.last_output_ms
         } else if agent.turn_active && !agent.awaiting_user {
-            // Counted from the pass's start at the earliest: the time the agent
-            // spent waiting for the user before it is not idleness.
-            [agent.last_output_ms, agent.pass_started_ms, agent.spawn_ms].into_iter().flatten().max()
+            // Counted from the pass's start, or the end of a wait for the user,
+            // at the earliest: time spent waiting for the user is not idleness.
+            [agent.last_output_ms, agent.pass_started_ms, agent.spawn_ms, agent.wait_ended_ms].into_iter().flatten().max()
         } else {
             None
         };
@@ -101,6 +105,10 @@ fn awaiting_user(store: &Store, block_id: &str) -> bool {
 /// Run the agent watchdog loop. Never returns.
 pub async fn run_watchdog_loop(config: Arc<ConfigState>, store: Arc<Store>) {
     let mut ticker = interval(Duration::from_secs(WATCHDOG_INTERVAL_SECS));
+    // block_id → when a scan last saw the agent waiting for the user. Covers a
+    // wait that ends without srv delivering an answer (an App Server request
+    // resolved on its own, the pane's flag cleared), to within one scan.
+    let mut seen_waiting: std::collections::HashMap<String, i64> = Default::default();
     loop {
         ticker.tick().await;
         let settings = config.get_settings();
@@ -115,8 +123,10 @@ pub async fn run_watchdog_loop(config: Arc<ConfigState>, store: Arc<Store>) {
         }
 
         let now_ms = agentmux_common::time::now_ms();
+        let controllers = get_all_controllers();
+        seen_waiting.retain(|id, _| controllers.contains_key(id));
 
-        for (block_id, ctrl) in get_all_controllers() {
+        for (block_id, ctrl) in controllers {
             let status = ctrl.get_runtime_status();
             if status.shellprocstatus != STATUS_RUNNING {
                 continue;
@@ -137,12 +147,18 @@ pub async fn run_watchdog_loop(config: Arc<ConfigState>, store: Arc<Store>) {
             // srv's own parked request first; the pane's flag covers what srv
             // doesn't park itself.
             let check_question = shell.is_none() && status.turn_active && limits.idle_timeout_mins > 0.0;
+            let awaiting = check_question && (ctrl.awaiting_user_reply() || awaiting_user(&store, &block_id));
+            if awaiting {
+                seen_waiting.insert(block_id.clone(), now_ms);
+            }
+            let replied_ms = tracker.as_ref().and_then(|t| t.last_user_reply_ms());
             let agent = AgentClock {
                 spawn_ms: status.spawn_ts_ms.or_else(|| tracker.as_ref().and_then(|t| t.spawned_at_ms())),
                 last_output_ms,
                 pass_started_ms: tracker.as_ref().and_then(|t| t.pass_started_ms()),
                 turn_active: status.turn_active,
-                awaiting_user: check_question && (ctrl.awaiting_user_reply() || awaiting_user(&store, &block_id)),
+                awaiting_user: awaiting,
+                wait_ended_ms: replied_ms.max(seen_waiting.get(&block_id).copied()),
                 is_shell: shell.is_some(),
             };
 
@@ -231,6 +247,14 @@ mod tests {
     fn a_new_turn_after_a_long_wait_starts_its_idle_clock_at_the_turn() {
         // Last output was the previous turn, an hour ago; this pass began 2 min ago.
         let agent = AgentClock { pass_started_ms: Some(NOW - 2 * MIN), ..mid_turn(5 * HOUR, HOUR) };
+        assert_eq!(verdict(limits(0.0, 30.0), NOW, &agent), None);
+        assert_eq!(verdict(limits(0.0, 2.0), NOW, &agent), Some(StopReason::IdleOutput { idle_ms: 2 * MIN }));
+    }
+
+    #[test]
+    fn an_answered_wait_starts_the_idle_clock_at_the_answer() {
+        // Silent for an hour, all of it waiting on a question answered 2 min ago.
+        let agent = AgentClock { wait_ended_ms: Some(NOW - 2 * MIN), ..mid_turn(2 * HOUR, HOUR) };
         assert_eq!(verdict(limits(0.0, 30.0), NOW, &agent), None);
         assert_eq!(verdict(limits(0.0, 2.0), NOW, &agent), Some(StopReason::IdleOutput { idle_ms: 2 * MIN }));
     }

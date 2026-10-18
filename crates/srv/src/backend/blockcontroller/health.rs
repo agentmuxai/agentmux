@@ -629,6 +629,9 @@ pub struct TurnActivityTracker {
     /// without the lock.
     spawned_ms: AtomicU64,
     output_ms: AtomicU64,
+    /// When the user's answer to a parked request was delivered (ms; 0 = not
+    /// yet): the time spent waiting for it is not idleness.
+    reply_ms: AtomicU64,
 }
 
 impl TurnActivityTracker {
@@ -669,6 +672,7 @@ impl TurnActivityTracker {
             clock,
             spawned_ms: AtomicU64::new(0),
             output_ms: AtomicU64::new(0),
+            reply_ms: AtomicU64::new(0),
         }
     }
 
@@ -990,6 +994,17 @@ impl TurnActivityTracker {
     /// The agent wrote output just now: a stdout line or a protocol frame.
     pub fn note_output(&self) {
         self.output_ms.store((self.clock)(), Ordering::Relaxed);
+    }
+
+    /// The user's answer to a parked question or permission request was
+    /// delivered to the agent just now.
+    pub fn note_user_reply(&self) {
+        self.reply_ms.store((self.clock)(), Ordering::Relaxed);
+    }
+
+    /// When the user's last answer to a parked request was delivered (unix ms).
+    pub fn last_user_reply_ms(&self) -> Option<i64> {
+        stamp_ms(self.reply_ms.load(Ordering::Relaxed))
     }
 
     /// When the agent's process was last spawned (unix ms), if it has been.

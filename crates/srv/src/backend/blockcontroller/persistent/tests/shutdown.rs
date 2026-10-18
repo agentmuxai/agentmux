@@ -283,3 +283,22 @@ fn a_parked_question_or_permission_request_awaits_the_user() {
     park_tool_permission_request(&c.inner, "tu-p".to_string(), "req-p".to_string(), "Bash".to_string(), serde_json::json!({}));
     assert!(c.awaiting_user_reply(), "a parked tool permission");
 }
+
+/// Delivering the user's answer ends the wait: the watchdog's idle time counts
+/// from it, not from the agent's last output before it asked.
+#[tokio::test]
+async fn delivering_an_answer_stamps_the_end_of_the_wait() {
+    let c = PersistentSubprocessController::new("tab".to_string(), "blk-answered".to_string(), None, None, None, None);
+    let (tx, _rx) = tokio::sync::mpsc::channel::<String>(8);
+    {
+        let mut inner = c.inner.lock().unwrap();
+        inner.stdin_tx = Some(tx);
+        let question = ("req-q".to_string(), serde_json::json!([{ "question": "Pick?", "header": "Pick" }]));
+        inner.pending_questions.insert("tu-q".to_string(), question);
+    }
+    let tracker = c.turn_tracker().unwrap();
+    assert_eq!(tracker.last_user_reply_ms(), None);
+    c.answer_question("tu-q".to_string(), serde_json::json!({ "Pick?": "A" })).unwrap();
+    assert!(tracker.last_user_reply_ms().is_some());
+    assert!(!c.awaiting_user_reply());
+}
