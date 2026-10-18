@@ -912,6 +912,9 @@ pub struct OwnedPanesReq {
     /// The panes srv is asking the person about a navigation.
     #[serde(default)]
     pub asking: Vec<String>,
+    /// The panes handed to the person: their page dialogs stay the browser's own.
+    #[serde(default)]
+    pub handoff: Vec<String>,
     /// The `browser:identity` values blocks still use: other jars are dropped
     /// (SPEC_BROWSER_PANE_PROFILES_MENU_2026_10_09.md §6). Absent from an
     /// older srv: keep every jar.
@@ -959,6 +962,7 @@ pub async fn owned_panes(
         owned.clear();
         owned.extend(req.panes);
     }
+    crate::client::jsdialog::set_handoff(req.handoff);
     crate::client::allowed_origins::replace_lists(&state.site_limits, req.allowed);
     // A pane whose question is over reports its attempts again.
     state.site_limits.reports.lock().retain(|p| req.asking.contains(p));
@@ -969,6 +973,30 @@ pub async fn owned_panes(
         let root = state.cef_cache_dir.lock().clone();
         crate::browser_pane::identity::retain_profiles(&profiles.into_iter().collect(), root.as_deref());
     }
+    ok_body(ApiResponse::ok(AckData::new()))
+}
+
+#[derive(serde::Deserialize)]
+pub struct DialogAnswerReq {
+    pub id: String,
+    pub accept: bool,
+}
+
+/// `POST /agentmux/browser/dialog_answer` — srv's answer to a page dialog it
+/// asked the person about (SPEC_BROWSER_PANE_NATIVE_DIALOGS_2026_10_17.md
+/// §4.1). A dialog that already ended is nothing to do.
+pub async fn dialog_answer(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(req): Json<DialogAnswerReq>,
+) -> (StatusCode, Json<ApiResponse<AckData>>) {
+    if !authorized(&headers, &state.ipc_token) {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(ApiResponse::err("unauthorized: missing or invalid bearer token")),
+        );
+    }
+    crate::client::jsdialog::answer(&req.id, req.accept);
     ok_body(ApiResponse::ok(AckData::new()))
 }
 

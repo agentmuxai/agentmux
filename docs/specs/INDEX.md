@@ -729,6 +729,7 @@ partial list.
 | Spec | Title |
 |---|---|
 | [`ARCHITECTURE_ARMORY_FOUNDATION_CONSOLIDATION_2026_08_19`](ARCHITECTURE_ARMORY_FOUNDATION_CONSOLIDATION_2026_08_19.md) | Architecture: Armory/Stash Foundation Consolidation (North Star) |
+| [`PLAN_BROWSER_DRIVER_FIXES_2026_10_17`](PLAN_BROWSER_DRIVER_FIXES_2026_10_17.md) | Plan: fix the browser driver's roadblocks (R1–R11) |
 | [`PLAN_MACOS_CLAUDE_KEYCHAIN_CREDENTIAL_ISOLATION_2026_08_17`](PLAN_MACOS_CLAUDE_KEYCHAIN_CREDENTIAL_ISOLATION_2026_08_17.md) | Plan — enforce the same per-agent Claude auth isolation on macOS that already holds on Windows |
 | [`PLAN_TAB_TEAROFF_PHASE1_WIN32_2026-05-07`](PLAN_TAB_TEAROFF_PHASE1_WIN32_2026-05-07.md) | Tab tear-off Phase 1 — Win32 native drag loop |
 | [`PROPOSAL_COMPOSABLE_AGENT_MODEL_2026_06_30`](PROPOSAL_COMPOSABLE_AGENT_MODEL_2026_06_30.md) | Proposal: A Composable Agent Model for the Armory |
@@ -760,6 +761,7 @@ partial list.
 | [`SPEC_AUTH_CHECK_FALSE_POSITIVE_2026_04_15`](SPEC_AUTH_CHECK_FALSE_POSITIVE_2026_04_15.md) | SPEC: Auth Check False Positive — "authenticated as max" on Load |
 | [`SPEC_BROWSER_PANE_FAVICON_TITLE_2026-05-15`](SPEC_BROWSER_PANE_FAVICON_TITLE_2026-05-15.md) | Browser Pane: Live Favicon + Page Title in Pane Header |
 | [`SPEC_BROWSER_PANE_IDENTITIES_2026_09_22`](SPEC_BROWSER_PANE_IDENTITIES_2026_09_22.md) | Spec: Browser pane identities — shared by default, private (unique incognito) per pane tab, named profiles later |
+| [`SPEC_BROWSER_PANE_NATIVE_DIALOGS_2026_10_17`](SPEC_BROWSER_PANE_NATIVE_DIALOGS_2026_10_17.md) | SPEC: Page dialogs (alert, confirm, prompt, leave-site) in an agent-driven browser pane |
 | [`SPEC_CEF_148_LINUX_FORWARD_PORT_2026_06_04`](SPEC_CEF_148_LINUX_FORWARD_PORT_2026_06_04.md) | CEF 148 — Linux Drag/Right-Click/Transparency Forward-Port |
 | [`SPEC_CEF_SANDBOX_2026_06_20`](SPEC_CEF_SANDBOX_2026_06_20.md) | SPEC: Enable CEF Renderer Sandbox |
 | [`SPEC_CEF_SANDBOX_WIN_PHASE3_2026_06_20`](SPEC_CEF_SANDBOX_WIN_PHASE3_2026_06_20.md) | SPEC: CEF Windows Renderer Sandbox — Phase 3 |

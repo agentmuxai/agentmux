@@ -1536,12 +1536,12 @@ pub(crate) async fn handle_ui_browser_act(
             )
         }
         crate::server::browser_attention::Answer::Yes => {
+            crate::server::browser_dialog::note_approved_click(&block_id, &ask);
             proxy_data(&state, "act", body(Some(&ask)), std::time::Duration::from_secs(20)).await
         }
-        crate::server::browser_attention::Answer::Cancelled => err_response(
-            StatusCode::FORBIDDEN,
-            "the user didn't approve this action: don't retry it; ask them what to do".to_string(),
-        ),
+        crate::server::browser_attention::Answer::Cancelled => {
+            err_response(StatusCode::FORBIDDEN, "the user didn't approve this action: don't retry it; ask them what to do".to_string())
+        }
         crate::server::browser_attention::Answer::TimedOut => err_response(
             StatusCode::REQUEST_TIMEOUT,
             "the user didn't answer the approval within 10 minutes; ask them in chat before trying again".to_string(),
