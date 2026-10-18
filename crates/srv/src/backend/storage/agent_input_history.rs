@@ -14,6 +14,31 @@ use rusqlite::{params, OptionalExtension};
 use super::error::StoreError;
 use super::store::Store;
 
+/// The tables, created on every open of the channel store
+/// (`migrations::run_object_schema`). Additive, like `db_agent_bundles`, so no
+/// schema version bump; no foreign key, also like it: an agent's rows go with
+/// it in `purge_agent_dependents`.
+pub(crate) const SCHEMA: &str = "
+CREATE TABLE IF NOT EXISTS db_agent_input_history (
+    id          INTEGER PRIMARY KEY,
+    agent_id    TEXT NOT NULL,
+    sent_at_ms  INTEGER NOT NULL,
+    text        TEXT NOT NULL,
+    kind        TEXT NOT NULL,
+    source      TEXT NOT NULL,
+    session_id  TEXT,
+    attachments TEXT,
+    sends       INTEGER NOT NULL DEFAULT 1
+);
+CREATE INDEX IF NOT EXISTS idx_agent_input_history_agent
+    ON db_agent_input_history (agent_id, id);
+CREATE TABLE IF NOT EXISTS db_agent_input_drafts (
+    agent_id      TEXT PRIMARY KEY,
+    text          TEXT NOT NULL,
+    updated_at_ms INTEGER NOT NULL
+);
+";
+
 /// The newest entries kept per agent; older ones are dropped as new ones come.
 pub const INPUT_HISTORY_MAX: usize = 10_000;
 /// The longest entry kept, in bytes (a pasted file is not history).
