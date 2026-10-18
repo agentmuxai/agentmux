@@ -1,6 +1,6 @@
 # SPEC: Tower in the theme's colours, with process types you can see
 
-**Status:** active — built on branch `loap/tower-process-types`, under test
+**Status:** active — built in #5072 (surface, process kinds, breakdown and chips, group by type, load bars, chart colours); remaining: the operator's by-eye test across themes, and the open questions in §9
 **Date:** 2026-10-17
 **Requested by:** the operator:
 - "write a spec to add more color to the tower. It also needs to more closely respect the color theme, it is hard black background throughout all the dark themes, which is wrong. have it follow a look similar to hangar"
