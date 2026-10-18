@@ -335,6 +335,25 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 "There was no auto-approve on that pane for you to stop.".to_string()
             })
         }
+        "BrowserLog" => {
+            require_agent_env(local_url, auth_key, block_id)?;
+            let auth = sign_ui_automation_auth()?;
+            let req_url = format!("{}/api/v1/ui/browser/actions", local_url.trim_end_matches('/'));
+            let resp = client
+                .post(&req_url)
+                .header(AUTH_KEY_HEADER, auth_key)
+                .json(&agentmux_common::api_types::UiBrowserActionsRequest { auth, pane: pane_arg(arguments) })
+                .send()
+                .await
+                .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let text = resp.text().await.unwrap_or_default();
+                anyhow::bail!("BrowserLog failed: HTTP {status} — {text}");
+            }
+            let body: Value = resp.json().await.map_err(|e| anyhow::anyhow!("BrowserLog: bad response: {e}"))?;
+            Ok(log_text(&body.get("data").cloned().unwrap_or(Value::Null)))
+        }
         "BrowserNavigate" => {
             require_agent_env(local_url, auth_key, block_id)?;
             let auth = sign_ui_automation_auth()?;
@@ -491,6 +510,40 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
     }
 }
 
+/// How many of the pane's entries `log` shows: the newest.
+const LOG_LINES: usize = 50;
+
+/// The pane's action log as `log` returns it: one line per entry, oldest
+/// first, time in UTC. The same entries the person sees under Log in the pane.
+fn log_text(data: &Value) -> String {
+    let s = |v: &Value, k: &str| v.get(k).and_then(|x| x.as_str()).unwrap_or("").to_string();
+    let entries = data.get("entries").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+    let count = data.get("count").and_then(|v| v.as_u64()).unwrap_or(entries.len() as u64);
+    let paused = data.get("paused").and_then(|v| v.as_bool()) == Some(true);
+    let mut out = format!("Action log of pane {}: {count} recorded", s(data, "pane"));
+    if entries.len() > LOG_LINES || (count as usize) > entries.len() {
+        out.push_str(&format!(", the newest {} shown", entries.len().min(LOG_LINES)));
+    }
+    out.push_str(if paused { ". The user has paused this pane: your calls on it are refused until they resume it.\n" } else { ".\n" });
+    if entries.is_empty() {
+        out.push_str("Nothing yet.\n");
+    }
+    for e in entries.iter().skip(entries.len().saturating_sub(LOG_LINES)) {
+        let secs = e.get("ts").and_then(|v| v.as_i64()).unwrap_or(0).div_euclid(1000).rem_euclid(86_400);
+        let mut line = format!("{:02}:{:02}:{:02} {} {}", secs / 3600, secs / 60 % 60, secs % 60, s(e, "agent"), s(e, "kind"));
+        for (k, pre) in [("target", " "), ("detail", " · "), ("how", " — "), ("url", " at ")] {
+            let v = s(e, k);
+            if !v.is_empty() {
+                line.push_str(pre);
+                line.push_str(&v);
+            }
+        }
+        out.push_str(&line);
+        out.push('\n');
+    }
+    out
+}
+
 /// The snapshot's lines about new windows the page opened: popup windows
 /// (`kind: "window"`, a native window, id `popup-…`) and popup panes (a
 /// browser pane beside it). Empty when there are none. Each address is
@@ -521,8 +574,23 @@ fn popups_note(popups: Option<&Value>) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::popups_note;
+    use super::{log_text, popups_note};
     use serde_json::json;
+
+    #[test]
+    fn the_log_reads_one_line_per_entry() {
+        let text = log_text(&json!({
+            "pane": "p1", "paused": true, "count": 2,
+            "entries": [
+                { "ts": 3_723_000, "agent": "naki", "kind": "fill", "target": "e4", "how": "allowed" },
+                { "ts": 3_724_000, "agent": "naki", "kind": "click", "target": "\"Delete draft\"", "how": "auto-approved", "url": "https://github.com/x", "detail": "ref e9" },
+            ],
+        }));
+        assert!(text.starts_with("Action log of pane p1: 2 recorded. The user has paused this pane"), "{text}");
+        assert!(text.contains("\n01:02:03 naki fill e4 — allowed\n"), "{text}");
+        assert!(text.contains("01:02:04 naki click \"Delete draft\" · ref e9 — auto-approved at https://github.com/x"), "{text}");
+        assert!(log_text(&json!({ "pane": "p", "count": 0, "entries": [] })).contains("Nothing yet."));
+    }
 
     #[test]
     fn no_popups_no_line() {
