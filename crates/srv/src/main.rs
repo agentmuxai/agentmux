@@ -12,6 +12,8 @@ mod config;
 mod event_log;
 mod headless;
 mod identity;
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+mod malloc_arenas;
 mod migrations;
 mod persist;
 mod persist_subscriber;
@@ -38,8 +40,23 @@ use std::sync::Arc;
 
 use server::build_routers;
 
-#[tokio::main]
-async fn main() {
+fn main() {
+    // Linux (glibc): cap malloc arenas before any thread exists, so the runtime's
+    // workers below share them (malloc_arenas.rs).
+    #[cfg(all(target_os = "linux", target_env = "gnu"))]
+    malloc_arenas::apply();
+    // What a bare `#[tokio::main]` expands to (tokio-macros 2.7: the multi-thread
+    // flavor, `enable_all`, no worker count, thread name or other setting, and the
+    // same panic message), built by hand so the call above runs first: the runtime
+    // starts its worker threads when it is built. This is on EVERY platform.
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("Failed building the Runtime")
+        .block_on(app_main());
+}
+
+async fn app_main() {
     // -2. Document reading child: srv re-runs itself to parse one attached
     //     document (PDF, Word, Excel, PowerPoint, ODF, RTF) out of process,
     //     since parsers can crash, recurse or run long on hostile input and
