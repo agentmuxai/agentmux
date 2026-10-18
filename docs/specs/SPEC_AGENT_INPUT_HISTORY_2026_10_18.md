@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-18
 **Author:** QTest
-**Status:** active — phases 1 to 4 shipped (PRs #5109, #5111, #5112, #5113); the History tab and the palette entry not started.
+**Status:** active — phases 1 to 4 shipped (PRs #5109, #5111, #5112, #5115); the History tab and the palette entry not started.
 **Origin:** the 0.59.31 → 0.59.32 upgrade lost every pane's ArrowUp history
 (`docs/reports/REPORT_UPGRADE_0_59_32_DOGFOOD_FINDINGS_2026_10_18.md` §2.4). The
 operator asked for "a robust system to track that data over the long term; it
