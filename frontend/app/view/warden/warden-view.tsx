@@ -8,6 +8,7 @@ import { WardenHostManager } from "@/app/view/warden-host/warden-host-manager";
 import { WardenLanManager } from "@/app/view/warden-lan/warden-lan-manager";
 import { WardenInternetStub } from "@/app/view/warden-internet/warden-internet-stub";
 import { WardenAuditManager } from "@/app/view/warden-audit/warden-audit-manager";
+import { WardenHistoryManager } from "@/app/view/warden-history/warden-history-manager";
 import { WARDEN_SECTION_LABELS, type WardenSection, type WardenViewModel } from "./warden-model";
 import "./warden-view.scss";
 import { isModKey } from "@/util/platformutil";
@@ -17,6 +18,7 @@ const RAIL: TabItem<WardenSection>[] = [
     { id: "lan",      label: WARDEN_SECTION_LABELS.lan,      icon: "network-wired" },
     { id: "internet", label: WARDEN_SECTION_LABELS.internet, icon: "globe" },
     { id: "audit",    label: WARDEN_SECTION_LABELS.audit,    icon: "list-check" },
+    { id: "history",  label: WARDEN_SECTION_LABELS.history,  icon: "clock-rotate-left" },
 ];
 
 export function WardenView(props: { model: WardenViewModel }): JSX.Element {
@@ -60,9 +62,10 @@ export function WardenView(props: { model: WardenViewModel }): JSX.Element {
                     there's room (SPEC_UI_LINE_STYLE_COMPONENT_SYSTEM_2026_10_05.md §5.4). */}
                 <TabbedPane items={RAIL} value={section()} onChange={setSection} ariaLabel="Warden section" panelClass="bundle-manager-section">
                     {/*
-                     * All four sections stay mounted — toggling is instant
-                     * and never re-fetches. Host/LAN/Audit each own their
-                     * own 5s poll loop, unaffected by visibility.
+                     * All sections stay mounted — toggling is instant and
+                     * never re-fetches. Host/LAN/Audit each own their own 5s
+                     * poll loop, unaffected by visibility; History loads when
+                     * first shown and on Refresh.
                      */}
                     <div class="bundle-manager-pane" classList={{ "is-hidden": section() !== "host" }}>
                         <WardenHostManager />
@@ -75,6 +78,9 @@ export function WardenView(props: { model: WardenViewModel }): JSX.Element {
                     </div>
                     <div class="bundle-manager-pane" classList={{ "is-hidden": section() !== "audit" }}>
                         <WardenAuditManager />
+                    </div>
+                    <div class="bundle-manager-pane" classList={{ "is-hidden": section() !== "history" }}>
+                        <WardenHistoryManager wardenBlockId={model.blockId} visible={section() === "history"} />
                     </div>
                 </TabbedPane>
             </div>

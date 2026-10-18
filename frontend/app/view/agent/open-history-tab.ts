@@ -26,6 +26,7 @@
 import { getLayoutModelForStaticTab, openBlockInStack, setActiveBlockInStack } from "@/layout/index";
 import { pushNotification, MOS } from "@/app/store/global";
 import { holdLeafRevealGate, scheduleLeafRevealLift } from "@/app/store/tab-reveal";
+import { getProvider } from "./providers";
 
 /** Block-meta key marking a block as a read-only history reader for the
  *  named agent, rather than a live launch. Never set alongside a live
@@ -66,7 +67,17 @@ function isHistoryTabFor(blockId: string, agentId: string): boolean {
 // of re-running the body, so it does no work of its own and can't race.
 const inFlightOpens = new Map<string, Promise<void>>();
 
-export async function openOrFocusHistoryTab(opts: { currentBlockId: string; agentId: string }): Promise<void> {
+/** What [`openOrFocusHistoryTab`] opens. `currentBlockId` is the pane the tab
+ *  joins; `provider` and `agentName` fill in the tab's display fields when that
+ *  pane isn't one of the agent's own (Warden, the agent picker). */
+export interface HistoryTabTarget {
+    currentBlockId: string;
+    agentId: string;
+    provider?: string;
+    agentName?: string;
+}
+
+export async function openOrFocusHistoryTab(opts: HistoryTabTarget): Promise<void> {
     const key = `${opts.currentBlockId}|${opts.agentId}`;
     const inFlight = inFlightOpens.get(key);
     if (inFlight) return inFlight;
@@ -80,7 +91,7 @@ export async function openOrFocusHistoryTab(opts: { currentBlockId: string; agen
     }
 }
 
-async function openOrFocusHistoryTabImpl(opts: { currentBlockId: string; agentId: string }): Promise<void> {
+async function openOrFocusHistoryTabImpl(opts: HistoryTabTarget): Promise<void> {
     const { currentBlockId, agentId } = opts;
     const layoutModel = getLayoutModelForStaticTab();
     const node = layoutModel.getNodeByBlockId(currentBlockId);
@@ -106,15 +117,21 @@ async function openOrFocusHistoryTabImpl(opts: { currentBlockId: string; agentId
         // `agent:historyTabFor` block otherwise has no provider/name info of
         // its own, since it's never actually launched.
         const liveMeta = MOS.getObjectValue<Block>(MOS.makeORef("block", currentBlockId))?.meta;
+        // The transcript is read through a block whose `agentId` names the agent
+        // (the server resolves its shared zone from it). The pane it joins is
+        // that block only when it is one of this agent's own panes; otherwise
+        // the history tab reads through itself, which carries `agentId`.
+        const ownPane = liveMeta?.["agentId"] === agentId;
+        const format = ownPane ? liveMeta?.["agentOutputFormat"] : opts.provider ? getProvider(opts.provider)?.styledOutputFormat : undefined;
 
         try {
             await openBlockInStack(layoutModel, { blockId: currentBlockId }, "agent", {
                 view: "agent",
                 agentId,
                 [HISTORY_TAB_FOR_META_KEY]: agentId,
-                [HISTORY_SOURCE_BLOCK_ID_META_KEY]: currentBlockId,
-                agentOutputFormat: liveMeta?.["agentOutputFormat"],
-                agentName: liveMeta?.["agentName"],
+                ...(ownPane ? { [HISTORY_SOURCE_BLOCK_ID_META_KEY]: currentBlockId } : {}),
+                agentOutputFormat: format,
+                agentName: ownPane ? liveMeta?.["agentName"] : opts.agentName,
             });
         } catch (e: unknown) {
             pushNotification({

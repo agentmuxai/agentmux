@@ -3,8 +3,8 @@
 
 /**
  * Tests for the Warden rail (`WardenView`) — mirrors section-pane.test.tsx's
- * structure/pattern exactly, adapted for Warden's 4 sections (Host, LAN,
- * Internet, Audit).
+ * structure/pattern exactly, adapted for Warden's 5 sections (Host, LAN,
+ * Internet, Audit, History).
  */
 
 import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
@@ -23,6 +23,11 @@ vi.mock("@/app/view/warden-internet/warden-internet-stub", () => ({
 }));
 vi.mock("@/app/view/warden-audit/warden-audit-manager", () => ({
     WardenAuditManager: () => <div data-testid="audit-manager" />,
+}));
+vi.mock("@/app/view/warden-history/warden-history-manager", () => ({
+    WardenHistoryManager: (props: { wardenBlockId: string; visible: boolean }) => (
+        <div data-testid="history-manager" data-block={props.wardenBlockId} data-visible={String(props.visible)} />
+    ),
 }));
 
 // blockMeta is a real Solid signal, not a plain object — warden-model.ts's
@@ -58,11 +63,11 @@ describe("WardenView rail", () => {
         ));
     }
 
-    it("orders the rail as Host, LAN, Internet, Audit", () => {
+    it("orders the rail as Host, LAN, Internet, Audit, History", () => {
         renderWarden();
         const rail = screen.getByRole("tablist", { name: "Warden section" });
         const labels = Array.from(rail.querySelectorAll('[role="tab"]')).map((el) => el.textContent);
-        expect(labels).toEqual(["Host", "LAN", "Internet", "Audit"]);
+        expect(labels).toEqual(["Host", "LAN", "Internet", "Audit", "History"]);
     });
 
     it("defaults to the Host section active and visible", () => {
@@ -88,12 +93,23 @@ describe("WardenView rail", () => {
         expect(screen.getByTestId("host-manager")).toBeInTheDocument();
     });
 
-    it("all 4 sections mount simultaneously (keep-mounted pane pattern)", () => {
+    it("all 5 sections mount simultaneously (keep-mounted pane pattern)", () => {
         renderWarden();
         expect(screen.getByTestId("host-manager")).toBeInTheDocument();
         expect(screen.getByTestId("lan-manager")).toBeInTheDocument();
         expect(screen.getByTestId("internet-stub")).toBeInTheDocument();
         expect(screen.getByTestId("audit-manager")).toBeInTheDocument();
+        expect(screen.getByTestId("history-manager")).toBeInTheDocument();
+    });
+
+    it("History gets the Warden block and knows when it is shown", () => {
+        renderWarden();
+        const history = screen.getByTestId("history-manager");
+        expect(history.dataset.visible).toBe("false");
+        screen.getByRole("tab", { name: "History" }).click();
+        expect(history.dataset.visible).toBe("true");
+        expect(history.dataset.block).toBeTruthy();
+        expect(history.closest(".bundle-manager-pane")?.classList.contains("is-hidden")).toBe(false);
     });
 });
 
@@ -131,8 +147,8 @@ describe("WardenView pane title", () => {
     it("selecting a section from the keyboard writes warden:section and updates viewName()", () => {
         const { model } = renderWarden();
         fireEvent.keyDown(screen.getByRole("tab", { name: "Host" }), { key: "End" });
-        expect(setMetaMock).toHaveBeenCalledWith({ "warden:section": "audit" });
-        expect(model.viewName()).toBe("Audit");
+        expect(setMetaMock).toHaveBeenCalledWith({ "warden:section": "history" });
+        expect(model.viewName()).toBe("History");
     });
 
     // SPEC_RESPONSIVE_TAB_BAR_TOP_POSITION_2026_08_24.md

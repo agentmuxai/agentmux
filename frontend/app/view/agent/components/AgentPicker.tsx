@@ -625,7 +625,12 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
     // history tab onto as a sibling tab — this picker's OWN blockId (it's
     // the blank/picker tab itself, pre-launch) is exactly that pane.
     const handleViewHistory = (row: RecentSessionRow): void => {
-        void openOrFocusHistoryTab({ currentBlockId: props.model.blockId, agentId: row.definition_id });
+        void openOrFocusHistoryTab({
+            currentBlockId: props.model.blockId,
+            agentId: row.definition_id,
+            provider: row.provider,
+            agentName: row.definition_name,
+        });
     };
 
     // (`buildInstallRequest` — the generic, pre-two-tier install

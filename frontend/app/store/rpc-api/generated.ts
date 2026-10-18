@@ -271,6 +271,10 @@ import type { GlobalMemoryImportSources } from "@/types/rpc/GlobalMemoryImportSo
 import type { GlobalMemoryRevertResult } from "@/types/rpc/GlobalMemoryRevertResult";
 import type { GlobalMemorySection } from "@/types/rpc/GlobalMemorySection";
 import type { HideNamedAgentResult } from "@/types/rpc/HideNamedAgentResult";
+import type { HistoryAgentSessions } from "@/types/rpc/HistoryAgentSessions";
+import type { HistoryAgentSessionsReq } from "@/types/rpc/HistoryAgentSessionsReq";
+import type { HistoryAgents } from "@/types/rpc/HistoryAgents";
+import type { HistoryAgentsReq } from "@/types/rpc/HistoryAgentsReq";
 import type { HistoryUsage } from "@/types/rpc/HistoryUsage";
 import type { HistoryUsageReq } from "@/types/rpc/HistoryUsageReq";
 import type { HostSession } from "@/types/rpc/HostSession";
@@ -2076,6 +2080,18 @@ export const GeneratedApi = {
   // command "blockstats.detail"
   BlockStatsDetailCommand(client: RpcClient, data: BlockStatsDetailReq, opts?: RpcOpts): Promise<BlockStatsDetail> {
     return client.rpcCall("blockstats.detail", data, opts);
+  },
+  // command "history.agents"
+  HistoryAgentsCommand(client: RpcClient, data: HistoryAgentsReq, opts?: RpcOpts): Promise<HistoryAgents> {
+    return client.rpcCall("history.agents", data, opts);
+  },
+  // command "history.agent_sessions"
+  HistoryAgentSessionsCommand(
+    client: RpcClient,
+    data: HistoryAgentSessionsReq,
+    opts?: RpcOpts
+  ): Promise<HistoryAgentSessions> {
+    return client.rpcCall("history.agent_sessions", data, opts);
   },
   // command "history.usage"
   HistoryUsageCommand(client: RpcClient, data: HistoryUsageReq, opts?: RpcOpts): Promise<HistoryUsage> {

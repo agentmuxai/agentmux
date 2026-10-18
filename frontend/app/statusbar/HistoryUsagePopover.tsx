@@ -4,12 +4,13 @@
 /**
  * HistoryUsagePopover: where the agent history on this machine is kept, from
  * the status-bar total. Read-only. Nothing here deletes history, because
- * AgentMux keeps it forever. The sibling of DiskVolumesPopover.
+ * AgentMux keeps it forever. "Open in Warden" goes to the History section. The sibling of DiskVolumesPopover.
  */
 
 import { createSignal, For, Show, type JSX } from "solid-js";
 import { AnchoredPopover, type PopoverAnchor } from "@/app/element/anchored-popover";
 import { Button } from "@/app/element/ui";
+import { openWarden } from "@/app/view/warden/open-warden";
 import type { HistoryUsage } from "@/types/rpc/HistoryUsage";
 import { formatBytes } from "@/util/format-bytes";
 
@@ -92,6 +93,16 @@ export const HistoryUsagePopover = (props: HistoryUsagePopoverProps): JSX.Elemen
                             <span class="history-usage-note">Measured {measuredAgo(usage().computed_at_ms, Date.now())}</span>
                             <Button tone="quiet" density="compact" busy={refreshing()} onClick={() => void refresh()}>
                                 {refreshing() ? "Measuring…" : "Measure again"}
+                            </Button>
+                            <Button
+                                tone="quiet"
+                                density="compact"
+                                onClick={() => {
+                                    props.onClose();
+                                    void openWarden("history");
+                                }}
+                            >
+                                Open in Warden
                             </Button>
                         </div>
                     </>

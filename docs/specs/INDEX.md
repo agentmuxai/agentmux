@@ -723,6 +723,7 @@ partial list.
 | [`SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09`](SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md) | User widgets and the widget API |
 | [`SPEC_VERSION_DRIFT_UPGRADES_AND_PROVIDER_HARNESS_TESTS_2026_10_01`](SPEC_VERSION_DRIFT_UPGRADES_AND_PROVIDER_HARNESS_TESTS_2026_10_01.md) | Version drift upgrades (2026-10-01 report) and provider harness tests |
 | [`SPEC_WAN_JEKT_VERIFICATION_2026_09_24`](SPEC_WAN_JEKT_VERIFICATION_2026_09_24.md) | SPEC: WAN jekt verification — same-account agent jekts verified end to end over the cloud relay |
+| [`SPEC_WARDEN_HISTORY_SECTION_2026_10_18`](SPEC_WARDEN_HISTORY_SECTION_2026_10_18.md) | SPEC: agent history in Warden — the History section |
 | [`SPEC_WIDGET_BAR_VISIBILITY_SETTINGS_2026_10_12`](SPEC_WIDGET_BAR_VISIBILITY_SETTINGS_2026_10_12.md) | Widget bar visibility in Settings: pin, keep in More, or hide |
 | [`SPEC_WIDGET_SHARING_2026_10_10`](SPEC_WIDGET_SHARING_2026_10_10.md) | Sharing widgets: signed packages, widgets in agent bundles, a catalog |
 | [`SPEC_WINDOWS_LIFECYCLE_ROBUSTNESS_2026_06_26`](SPEC_WINDOWS_LIFECYCLE_ROBUSTNESS_2026_06_26.md) | Windows Lifecycle Robustness — Surviving External Termination |

@@ -1,0 +1,119 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// Warden — History section (warden-history-manager.tsx and its two views).
+
+@use "../../element/popover-frame" as popoverFrame;
+
+.warden-history {
+    .is-hidden {
+        display: none;
+    }
+}
+
+.warden-history-agents,
+.warden-history-storage {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+}
+
+.warden-history-bar {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+}
+
+.warden-history-table,
+.warden-history-sessions,
+.warden-history-stores {
+    td {
+        vertical-align: middle;
+    }
+}
+
+.warden-history-num {
+    text-align: right;
+    white-space: nowrap;
+}
+
+.warden-history-agent {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    min-width: 0;
+}
+
+.warden-history-id,
+.warden-history-fork {
+    font-size: var(--text-sm);
+}
+
+.warden-history-actions {
+    text-align: right;
+    white-space: nowrap;
+}
+
+tr[data-deleted] td {
+    opacity: 0.75;
+}
+
+.warden-history-sessions-row > td {
+    padding-left: var(--space-4);
+    background: color-mix(in srgb, var(--border-color) 25%, transparent);
+}
+
+.warden-history-cwd {
+    max-width: 24em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.warden-history-total {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-2);
+}
+
+.warden-history-total-bytes {
+    font-size: var(--text-xl);
+    font-weight: 600;
+}
+
+.warden-history-share-col {
+    width: 40%;
+}
+
+.warden-history-share {
+    @include popoverFrame.readout-bar;
+    display: block;
+    background: color-mix(in srgb, var(--border-color) 60%, transparent);
+}
+
+.warden-history-share-fill {
+    @include popoverFrame.readout-bar-fill;
+    background: var(--accent-color);
+}
+
+.warden-history-retention {
+    margin-top: var(--space-2);
+    font-size: 0.9em;
+    line-height: 1.5;
+
+    h3 {
+        margin: 0 0 var(--space-1);
+        font-size: var(--text-base);
+        font-weight: 600;
+    }
+
+    p,
+    ul {
+        margin: 0 0 var(--space-1);
+    }
+
+    ul {
+        padding-left: var(--space-4);
+        list-style: disc;
+    }
+}
