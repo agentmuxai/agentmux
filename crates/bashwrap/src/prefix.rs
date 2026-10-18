@@ -325,8 +325,17 @@ fn read_records(dir: &Path) -> Vec<(PathBuf, CallRecord)> {
     let mut out = Vec::new();
     for entry in entries.flatten() {
         let path = entry.path();
-        let is_record = path.extension().and_then(|e| e.to_str()) == Some("json")
-            && !path.file_name().and_then(|n| n.to_str()).unwrap_or("").starts_with('.');
+        let ext = path.extension().and_then(|e| e.to_str());
+        // A marker outlives its use when one of its two calls never ran (a
+        // deny rule): gone once old, so the directory can go too.
+        if ext == Some("ambiguous") {
+            let old = entry.metadata().and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).is_none_or(|a| a > MARKER_MAX_AGE);
+            if old {
+                let _ = std::fs::remove_file(&path);
+            }
+            continue;
+        }
+        let is_record = ext == Some("json") && !path.file_name().and_then(|n| n.to_str()).unwrap_or("").starts_with('.');
         if !is_record {
             continue;
         }
@@ -686,6 +695,25 @@ mod tests {
             // Alone again, the command is its agent's again.
             register("s", &by("toolu_c", "git status", Some("sub-a"))).unwrap();
             assert!(!claim("s", "git status").unwrap().agent_ambiguous);
+        });
+    }
+
+    /// One of the two calls never ran (denied): its marker doesn't outlive
+    /// its age, and doesn't keep the session's directory.
+    #[test]
+    fn an_old_marker_is_swept_with_the_records() {
+        with_calls_dir(|| {
+            let dir = session_dir("s").unwrap();
+            std::fs::create_dir_all(&dir).unwrap();
+            mark_ambiguous(&dir, "git status");
+            let marker = marker_path(&dir, "git status");
+            read_records(&dir);
+            assert!(marker.exists(), "a fresh marker stays");
+            let old = std::time::SystemTime::now() - MARKER_MAX_AGE - Duration::from_secs(1);
+            std::fs::File::options().write(true).open(&marker).unwrap().set_modified(old).unwrap();
+            assert!(read_records(&dir).is_empty());
+            assert!(!marker.exists(), "an old marker is swept");
+            assert!(std::fs::remove_dir(&dir).is_ok(), "and the directory can go");
         });
     }
 
