@@ -1,8 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! How much agent history is on this machine, and where
-//! (docs/reports/REPORT_AGENT_HISTORY_STORE_DEDUP_COMPRESSION_2026_10_17.md §4.1).
+//! How much agent history is on this machine, and where.
 //! The running total in the status bar and its details panel read this.
 //!
 //! History is kept forever, so this only measures. It walks the stores' files

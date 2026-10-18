@@ -4,9 +4,8 @@
 /**
  * HistoryUsageIndicator: the running total of agent history on this machine,
  * in the status bar just left of the token count. Clicking opens the
- * HistoryUsagePopover with where it is kept. History is kept forever
- * (docs/reports/REPORT_AGENT_HISTORY_STORE_DEDUP_COMPRESSION_2026_10_17.md §0),
- * so the total only grows; this is how the user sees that.
+ * HistoryUsagePopover with where it is kept. History is kept forever, so the
+ * total only grows; this is how the user sees that.
  */
 
 import { createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
