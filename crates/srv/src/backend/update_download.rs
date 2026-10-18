@@ -90,7 +90,9 @@ enum Staged<'a> {
     Installer(&'a Path),
 }
 
-fn set(version: &str, state: &str, received: u64, total: u64, error: Option<String>, staged: Staged) {
+/// Record where the download of `version` stands; `false` when that release
+/// is no longer the one on offer (`update_check::set_download`).
+fn set(version: &str, state: &str, received: u64, total: u64, error: Option<String>, staged: Staged) -> bool {
     let (folder, installer) = match staged {
         Staged::None => (None, None),
         Staged::Folder(f) => (Some(f), None),
@@ -106,7 +108,7 @@ fn set(version: &str, state: &str, received: u64, total: u64, error: Option<Stri
         installer: installer.map(|i| i.display().to_string()),
         waiting_for: 0,
         stopping: Vec::new(),
-    }));
+    }))
 }
 
 /// What a download stages, by install.
@@ -154,7 +156,12 @@ pub fn start() -> Result<AppUpdateStatus, String> {
     if RUNNING.swap(true, Ordering::SeqCst) {
         return Ok(status);
     }
-    set(&version, "downloading", 0, asset.size, None, Staged::None);
+    // A check that found a newer release since `status` was read wins: start
+    // nothing for this one (the user downloads the newer one instead).
+    if !set(&version, "downloading", 0, asset.size, None, Staged::None) {
+        RUNNING.store(false, Ordering::SeqCst);
+        return Err(format!("a newer release than {version} was found just now; download that one"));
+    }
     tokio::spawn(async move {
         let result = match &job {
             Job::Portable(root) => run(&asset, &version, root).await.map(|f| (f, true)),

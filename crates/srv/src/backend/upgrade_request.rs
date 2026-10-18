@@ -93,15 +93,9 @@ pub fn installable(status: &AppUpdateStatus, wanted: Option<&str>) -> Result<Str
                 url: status.url.clone(),
             })
         }
-        "off" => {
-            return Err(Outcome::Unavailable {
-                message: "the update check is turned off (Settings: app:updatecheck)".into(),
-                url: None,
-            })
-        }
         _ => {
             return Err(Outcome::Unavailable {
-                message: "AgentMux hasn't learned of a newer release yet; try again in a few minutes".into(),
+                message: "AgentMux couldn't learn which release is the latest (GitHub didn't answer); try again in a few minutes".into(),
                 url: None,
             })
         }
@@ -375,7 +369,7 @@ mod tests {
         };
         assert!(message.contains("windows-setup"), "{message}");
         assert!(url.unwrap().ends_with("v0.59.27"));
-        for state in ["local-build", "off", "unknown"] {
+        for state in ["local-build", "unknown"] {
             assert!(matches!(installable(&status(state, true), None), Err(Outcome::Unavailable { .. })), "{state}");
         }
         // A restart into an earlier release is under way: that one goes first.

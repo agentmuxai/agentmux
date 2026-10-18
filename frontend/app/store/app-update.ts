@@ -3,9 +3,10 @@
 
 /**
  * Whether a newer AgentMux release exists, as srv learns it from GitHub
- * Releases (crates/srv/src/backend/update_check.rs): `app.update-status`
- * when a window opens, kept current by the `app:updatestatus` event. The
- * status-bar chip and the version panel's Maintenance section read it.
+ * Releases (crates/srv/src/backend/update_check.rs), only when the user clicks
+ * Check for update or an agent asks: `app.update-status` when a window opens,
+ * kept current by the `app:updatestatus` event. The status-bar chip and the
+ * version panel's Maintenance section read it.
  * docs/specs/SPEC_UPGRADE_FOR_USERS_AND_AGENTS_2026_10_15.md §3.
  */
 
@@ -23,7 +24,7 @@ export type { AppUpdateStatus } from "@/types/rpc/AppUpdateStatus";
 /** The `app:updatestatus` WebSocket event. */
 export const APP_UPDATE_EVENT = WpsEvent.AppUpdateStatus;
 
-const STATES = new Set(["up-to-date", "available", "local-build", "off", "unknown"]);
+const STATES = new Set(["up-to-date", "available", "local-build", "unknown"]);
 
 const [appUpdate, setAppUpdate] = createSignal<AppUpdateStatus | null>(null);
 
@@ -58,6 +59,24 @@ export async function loadAppUpdate(): Promise<void> {
 export function availableRelease(s: AppUpdateStatus | null = appUpdate()): { version: string; url: string } | null {
     if (s?.state !== "available" || !s.latest || !s.url) return null;
     return { version: s.latest, url: s.url };
+}
+
+/**
+ * Whether a download of the offered release, or a restart into it, is under
+ * way: a new check then can't replace the release on offer, so the panel
+ * doesn't offer one.
+ */
+export function upgradeUnderWay(s: AppUpdateStatus | null = appUpdate()): boolean {
+    const state = releaseDownload(s)?.state;
+    return state === "downloading" || state === "unpacking" || state === "waiting" || state === "restarting";
+}
+
+/** When the last check answered, for "Checked 14:05" (a date when not today). */
+export function checkedAt(ms: number, now: Date = new Date()): string {
+    const at = new Date(ms);
+    return at.toDateString() === now.toDateString()
+        ? at.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+        : at.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
 /** srv's download of the newer release, or null before one was asked for. */

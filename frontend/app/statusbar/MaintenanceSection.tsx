@@ -5,11 +5,13 @@ import {
     appUpdate,
     availableRelease,
     cancelUpgrade,
+    checkedAt,
     checkForUpdate,
     loadAppUpdate,
     releaseDownload,
     startAppUpdateDownload,
     upgradeAndRestart,
+    upgradeUnderWay,
 } from "@/store/app-update";
 import { atoms, getApi, openLink } from "@/store/global";
 import { WpsEvent } from "@/store/mps-events";
@@ -82,11 +84,14 @@ export const MaintenanceSection = (): JSX.Element => {
             .catch((e) => setCheckError(String(e?.message ?? e)))
             .finally(() => setChecking(false));
     };
-    // Where this AgentMux stands when no newer release is known.
+    // Where this AgentMux stands, beside Check for update. Nothing checks on
+    // its own, so before the first check it says so.
     const standing = () => {
         const s = appUpdate();
-        if (s?.state === "up-to-date") return `v${s.current} is up to date`;
-        if (s?.state === "off") return "Automatic update checks are off";
+        const checked = s && s.checked_ms > 0 ? checkedAt(s.checked_ms) : null;
+        if (s?.state === "local-build" && s.latest) return `Development build. The latest release is v${s.latest}.`;
+        if (s?.state === "up-to-date") return `v${s.current} is up to date${checked ? ` (checked ${checked})` : ""}`;
+        if (s?.state === "available" && checked) return `Checked ${checked}`;
         return "Not checked for updates yet";
     };
     const updaterVersion = () => release()?.version ?? atoms.updaterVersionAtom();
@@ -403,30 +408,28 @@ export const MaintenanceSection = (): JSX.Element => {
             <Show when={showNotes() && release() && appUpdate()?.notes}>
                 <pre class="maintenance-release-notes">{appUpdate()?.notes}</pre>
             </Show>
-            {/* No newer release known: where this one stands, and Check for update. */}
-            <Show when={!release() && appUpdate()?.state !== "local-build"}>
-                <div class="maintenance-update-row">
-                    <span class="maintenance-row-text maintenance-row-text--dim">{standing()}</span>
-                    <Button density="compact" class="maintenance-btn" disabled={checking()} onClick={handleCheck}>
-                        {checking() ? "Checking…" : "Check for update"}
+            {/* Check for update, always: nothing checks on its own, and a new
+                check replaces the release on offer (not while a download or
+                restart into it is under way). A `task dev` build, which
+                doesn't upgrade, learns which release is latest. */}
+            <div class="maintenance-update-row">
+                <span class="maintenance-row-text maintenance-row-text--dim">{standing()}</span>
+                <Show when={appUpdate()?.state === "local-build" && appUpdate()?.url}>
+                    <Button density="compact" class="maintenance-btn" onClick={() => void openLink(appUpdate()!.url!)}>
+                        View
                     </Button>
-                </div>
-            </Show>
+                </Show>
+                <Button
+                    density="compact"
+                    class="maintenance-btn"
+                    disabled={checking() || upgradeUnderWay()}
+                    onClick={handleCheck}
+                >
+                    {checking() ? "Checking…" : release() ? "Check again" : "Check for update"}
+                </Button>
+            </div>
             <Show when={checkError()}>
                 <div class="maintenance-row-text maintenance-row-text--error">{checkError()}</div>
-            </Show>
-            {/* A `task dev` build runs from source and doesn't upgrade: say which release is latest. */}
-            <Show when={appUpdate()?.state === "local-build" && appUpdate()?.latest}>
-                <div class="maintenance-update-row">
-                    <span class="maintenance-row-text maintenance-row-text--dim">
-                        Development build. The latest release is v{appUpdate()?.latest}.
-                    </span>
-                    <Show when={appUpdate()?.url}>
-                        <Button density="compact" class="maintenance-btn" onClick={() => void openLink(appUpdate()!.url!)}>
-                            View
-                        </Button>
-                    </Show>
-                </div>
             </Show>
 
             {/* ── Migration rows ─────────────────────────────────────────── */}

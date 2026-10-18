@@ -133,7 +133,7 @@ pub(crate) async fn handle_request_upgrade(
     if reason.is_empty() {
         return (StatusCode::BAD_REQUEST, Json(json!({ "error": "a reason is required" }))).into_response();
     }
-    // Ask GitHub first, so the agent needn't wait for the next periodic check.
+    // Ask GitHub first: nothing checks on its own.
     let status = crate::backend::update_check::check_now()
         .await
         .unwrap_or_else(|_| crate::backend::update_check::current_status());
