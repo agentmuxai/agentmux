@@ -138,6 +138,7 @@ vi.mock("@/app/store/global", () => ({
 
 // The locate flash's own logic is covered in util/pane-locate.test.ts; here the
 // DOM-facing parts are doubled so the test pins how the pane drives them.
+let slotWait = 0;
 const showLocateFlash = vi.fn((_host: HTMLElement, _opts: unknown) => stopLocateFlash);
 const stopLocateFlash = vi.fn();
 vi.mock("@/app/util/pane-locate", async (importOriginal) => {
@@ -146,7 +147,8 @@ vi.mock("@/app/util/pane-locate", async (importOriginal) => {
         ...real,
         // Seen and still whenever the pane's own conditions hold.
         samplePane: (_el: unknown, holds: boolean) => (holds ? { ok: true, box: "0,0,10,10" } : { ok: false, box: "" }),
-        claimLocateSlot: () => true,
+        locateSlotWaitMs: () => slotWait,
+        recordLocateStart: () => {},
         showLocateFlash: (host: HTMLElement, opts: unknown) => showLocateFlash(host, opts),
     };
 });
@@ -1078,6 +1080,7 @@ describe("renderPaneChromeShell — locate flash", () => {
     beforeEach(() => {
         showLocateFlash.mockClear();
         stopLocateFlash.mockClear();
+        slotWait = 0;
         played = [];
         offPlay = onPaneLocatePlay((id) => played.push(id));
         mockLayoutModel = fakeLayoutModel(["b1", "b2"]);
@@ -1125,6 +1128,26 @@ describe("renderPaneChromeShell — locate flash", () => {
         expect(stopLocateFlash).not.toHaveBeenCalled();
         emitPaneLocate("elsewhere");
         expect(stopLocateFlash).toHaveBeenCalledTimes(1);
+    });
+
+    it("a flash that comes within the gap of the last waits its turn instead of being dropped", async () => {
+        render(() => renderPaneChromeShell(fakeNodeModel({ isFocused: () => true }), <div>content</div>) as any);
+        slotWait = 150;
+        emitPaneLocate("b1");
+        await new Promise((r) => setTimeout(r, 100));
+        expect(showLocateFlash).not.toHaveBeenCalled();
+        await vi.waitFor(() => expect(showLocateFlash).toHaveBeenCalledTimes(1));
+        expect(played).toEqual(["b1"]);
+    });
+
+    it("a newer reveal replaces one that is still waiting for its turn", async () => {
+        render(() => renderPaneChromeShell(fakeNodeModel({ isFocused: () => true }), <div>content</div>) as any);
+        slotWait = 200;
+        emitPaneLocate("b1");
+        await new Promise((r) => setTimeout(r, 80));
+        emitPaneLocate("elsewhere");
+        await new Promise((r) => setTimeout(r, 300));
+        expect(showLocateFlash).not.toHaveBeenCalled();
     });
 
     it("a pane that is closed before it is ready never flashes", async () => {

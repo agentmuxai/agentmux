@@ -151,8 +151,9 @@ the signals:
    active only after `showBlockInPane`).
 2. **Its window tab is displayed and the tab is not dormant.** `usePaneTabVisibility(blockId) === "active"`
    (`block/pane-tab-visibility.ts`: not `windowHidden`, not `dormant`).
-3. **The window is visible.** `document.visibilityState === "visible"`. For a cross-window reveal this is what waits for
-   `focusWindow` to take effect. If not visible, listen for `visibilitychange`.
+3. **The window is visible and in front.** `document.visibilityState === "visible"` and `userInThisWindow()`
+   (`store/input-owner.ts`). A window can be visible while still behind another, so for a cross-window reveal the second
+   condition is what waits for `focusWindow` to take effect.
 4. **It has a real, stable size.** A `ResizeObserver` reports a non-zero rect that is unchanged across two animation
    frames. This also covers a pane that was minimized, restored or un-magnified a moment ago.
 5. **Then start on the next frame.** Two `requestAnimationFrame` calls after the last condition becomes true, so the first
@@ -229,7 +230,8 @@ The operator answered "use best practice, proceed", so the proposals were taken:
 What was built differs from section 6 in two small ways: the gate reads what the browser paints
 (`checkVisibility`, document visibility, the pane's box unchanged for two frames) instead of the individual tab and
 dormancy signals, which also covers the window tab's own settle step; and the pane owns the request/play pair, so a
-reveal elsewhere ends the running flash. The code is `frontend/app/util/pane-locate.ts` and the hooks in
+reveal elsewhere ends the running flash, and a flash that comes within the 340 ms gap of the last waits for its turn
+instead of being dropped (a newer reveal replaces one that is still waiting). The code is `frontend/app/util/pane-locate.ts` and the hooks in
 `PaneChrome.tsx`, `PaneTabStrip.tsx` and `reveal-block.ts`.
 
 ## 8. Sources

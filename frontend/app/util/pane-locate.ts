@@ -17,12 +17,13 @@
  *
  * One flash, never a repeat: the overlay covers a whole pane, which is larger
  * than the small-area exemption of WCAG 2.3.1, so it is a single slow fade and
- * starts at most three times a second (`claimLocateSlot`). The animation moves
+ * starts at most three times a second (`locateSlotWaitMs`). The animation moves
  * nothing (opacity only), so it has no reduced-motion variant beyond dropping
  * the ring when the motion policy asks for it.
  */
 
 import { EASE_OUT } from "@/app/motion/tokens";
+import { userInThisWindow } from "@/app/store/input-owner";
 import type { FlashPattern } from "@/app/notification/activity-flash";
 
 /** The flash rises over this long... */
@@ -90,11 +91,14 @@ export function onPaneLocatePlay(listener: BlockListener): () => void {
 
 let lastStartAt = -Infinity;
 
-/** Whether a flash may start at `nowMs`; true records it as the latest start. */
-export function claimLocateSlot(nowMs: number): boolean {
-    if (nowMs - lastStartAt < LOCATE_MIN_GAP_MS) return false;
+/** How long until a flash may start: 0 when it may start at `nowMs`. */
+export function locateSlotWaitMs(nowMs: number): number {
+    return Math.max(0, lastStartAt + LOCATE_MIN_GAP_MS - nowMs);
+}
+
+/** A flash started at `nowMs`. */
+export function recordLocateStart(nowMs: number): void {
     lastStartAt = nowMs;
-    return true;
 }
 
 // ── Readiness ────────────────────────────────────────────────────────────
@@ -169,10 +173,11 @@ export function whenPaneReady(sample: () => PaneSample, opts: ReadyOptions): Rea
 /**
  * What a frame sees of the pane at `el`: its box, and whether it is painted
  * (not behind a hidden window tab, not `visibility: hidden` while a tab
- * settles, not in a hidden window).
+ * settles, not in a hidden window) in the window the user is in. A window can
+ * be visible yet still behind another while it is being raised.
  */
 export function samplePane(el: HTMLElement | undefined, holds: boolean): PaneSample {
-    if (!el || !holds || document.visibilityState !== "visible") return { ok: false, box: "" };
+    if (!el || !holds || document.visibilityState !== "visible" || !userInThisWindow()) return { ok: false, box: "" };
     if (typeof el.checkVisibility === "function" && !el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })) {
         return { ok: false, box: "" };
     }

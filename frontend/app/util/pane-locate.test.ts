@@ -7,8 +7,12 @@
  */
 
 import { afterEach, describe, expect, it, vi } from "vitest";
+
+// Whether the user is in this window (the host's view, not just document focus).
+let userInWindow = true;
+vi.mock("@/app/store/input-owner", () => ({ userInThisWindow: () => userInWindow }));
+
 import {
-    claimLocateSlot,
     emitPaneLocate,
     emitPaneLocatePlay,
     LOCATE_HOLD_MS,
@@ -17,8 +21,11 @@ import {
     LOCATE_STABLE_FRAMES,
     LOCATE_TOTAL_MS,
     locateKeyframes,
+    locateSlotWaitMs,
     onPaneLocate,
     onPaneLocatePlay,
+    recordLocateStart,
+    samplePane,
     showLocateFlash,
     whenPaneReady,
     type PaneSample,
@@ -57,15 +64,49 @@ describe("the bus", () => {
     });
 });
 
-describe("claimLocateSlot", () => {
-    it("allows three starts a second at most", () => {
+describe("the start rate", () => {
+    it("says how long a flash must wait for the previous one's gap, so three start a second at most", () => {
         const t0 = 1_000_000;
-        expect(claimLocateSlot(t0)).toBe(true);
-        expect(claimLocateSlot(t0 + LOCATE_MIN_GAP_MS - 1)).toBe(false);
-        // A refused start doesn't move the window.
-        expect(claimLocateSlot(t0 + LOCATE_MIN_GAP_MS)).toBe(true);
-        expect(claimLocateSlot(t0 + 2 * LOCATE_MIN_GAP_MS)).toBe(true);
+        recordLocateStart(t0);
+        expect(locateSlotWaitMs(t0)).toBe(LOCATE_MIN_GAP_MS);
+        expect(locateSlotWaitMs(t0 + 100)).toBe(LOCATE_MIN_GAP_MS - 100);
+        expect(locateSlotWaitMs(t0 + LOCATE_MIN_GAP_MS)).toBe(0);
+        expect(locateSlotWaitMs(t0 + 5000)).toBe(0);
         expect(LOCATE_MIN_GAP_MS * 3).toBeGreaterThan(1000);
+    });
+});
+
+describe("samplePane", () => {
+    const el = (checkVisibility = () => true): any => ({
+        checkVisibility,
+        getBoundingClientRect: () => ({ left: 1.4, top: 2, width: 100, height: 50 }),
+    });
+    const setDocument = (over: { visibilityState?: string; hasFocus?: boolean }) => {
+        vi.stubGlobal("document", { visibilityState: over.visibilityState ?? "visible" });
+        userInWindow = over.hasFocus ?? true;
+    };
+    afterEach(() => {
+        vi.unstubAllGlobals();
+        userInWindow = true;
+    });
+
+    it("reports the rounded box of a painted pane in the window the user is in", () => {
+        setDocument({});
+        expect(samplePane(el(), true)).toEqual({ ok: true, box: "1,2,100,50" });
+    });
+
+    it("is not ready while the window is hidden, not in front, or the pane is not painted or sized", () => {
+        setDocument({ visibilityState: "hidden" });
+        expect(samplePane(el(), true).ok).toBe(false);
+        // Visible but still behind another window, as while it is being raised.
+        setDocument({ hasFocus: false });
+        expect(samplePane(el(), true).ok).toBe(false);
+        setDocument({});
+        expect(samplePane(el(() => false), true).ok).toBe(false);
+        expect(samplePane(el(), false).ok).toBe(false);
+        expect(samplePane(undefined, true).ok).toBe(false);
+        const empty = { ...el(), getBoundingClientRect: () => ({ left: 0, top: 0, width: 0, height: 0 }) };
+        expect(samplePane(empty, true)).toEqual({ ok: false, box: "" });
     });
 });
 

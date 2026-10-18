@@ -47,11 +47,12 @@ import { PaneTabRenameInput } from "./PaneTabRenameInput";
 import type { PaneTabColors } from "./PaneTabStrip";
 import { DropIndicator } from "@/app/drag/DropIndicator";
 import {
-    claimLocateSlot,
     emitPaneLocatePlay,
     LOCATE_READY_TIMEOUT_HIDDEN_MS,
     LOCATE_READY_TIMEOUT_MS,
+    locateSlotWaitMs,
     onPaneLocate,
+    recordLocateStart,
     samplePane,
     showLocateFlash,
     whenPaneReady,
@@ -103,10 +104,12 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
     // flashes the pane once it is on screen. Any other reveal ends the one
     // running or waiting here, so only the newest pane flashes.
     let locateGate: ReadyGate | null = null;
+    let locateDelay: ReturnType<typeof setTimeout> | undefined;
     let stopLocateFlash: (() => void) | null = null;
     const endLocate = () => {
         locateGate?.cancel();
         locateGate = null;
+        clearTimeout(locateDelay);
         stopLocateFlash?.();
         stopLocateFlash = null;
     };
@@ -120,12 +123,21 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
             );
             locateGate = gate;
             void gate.ready.then((ready) => {
-                if (!ready || locateGate !== gate || !paneRoot || !claimLocateSlot(performance.now())) return;
-                stopLocateFlash = showLocateFlash(paneRoot, {
-                    light: isLightThemeActive(),
-                    reduced: shouldReduceMotion("feedback"),
-                });
-                emitPaneLocatePlay(blockId);
+                if (!ready || locateGate !== gate) return;
+                const begin = () => {
+                    if (locateGate !== gate || !paneRoot) return;
+                    recordLocateStart(performance.now());
+                    stopLocateFlash = showLocateFlash(paneRoot, {
+                        light: isLightThemeActive(),
+                        reduced: shouldReduceMotion("feedback"),
+                    });
+                    emitPaneLocatePlay(blockId);
+                };
+                // Flashes start at least a gap apart. The newest request waits for
+                // its turn rather than being dropped; a newer one replaces it.
+                const wait = locateSlotWaitMs(performance.now());
+                if (wait <= 0) begin();
+                else locateDelay = setTimeout(begin, wait);
             });
         });
         onCleanup(() => {
