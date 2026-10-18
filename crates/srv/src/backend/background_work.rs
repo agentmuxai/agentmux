@@ -250,7 +250,15 @@ pub async fn at_quit() {
     }
     let hosts: Vec<u32> = work.iter().flat_map(|w| w.hosts.iter().copied()).collect();
     if !hosts.is_empty() {
-        let _ = tokio::task::spawn_blocking(move || hosts.iter().for_each(|pid| save_windows_of(*pid))).await;
+        // All at once, so several instances still answer within the one wait.
+        let _ = tokio::task::spawn_blocking(move || {
+            std::thread::scope(|s| {
+                for pid in &hosts {
+                    s.spawn(move || save_windows_of(*pid));
+                }
+            })
+        })
+        .await;
     }
 }
 
