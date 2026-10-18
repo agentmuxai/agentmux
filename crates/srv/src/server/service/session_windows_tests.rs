@@ -315,7 +315,7 @@ async fn windows_and_their_workspaces_come_back_with_their_names() {
         let win = state.mstore.get::<Window>(&win_id).unwrap().unwrap();
         assert_eq!(win.meta.get("window:displayname"), Some(&json!(expected)));
     }
-    assert_eq!(take_restored_window_name(&state.mstore, &restored_main), None, "handed out once");
+    assert_eq!(restored_window_name(&state.mstore, &restored_main), None, "handed out once");
     let client = state.mstore.get_all::<Client>().unwrap().into_iter().next().unwrap();
     assert!(!client.meta.contains_key(NAMES_META_KEY), "nothing left waiting");
 }
@@ -332,7 +332,7 @@ async fn an_unnamed_window_and_an_older_record_restore_without_names() {
     no_windows(&state);
     let (ws, _) = restore_last_session(&state).await.unwrap().unwrap();
     assert_eq!(state.mstore.get::<Workspace>(&ws).unwrap().unwrap().name, "");
-    assert_eq!(take_restored_window_name(&state.mstore, &ws), None);
+    assert_eq!(restored_window_name(&state.mstore, &ws), None);
 }
 
 #[tokio::test]
@@ -350,5 +350,10 @@ async fn closing_the_last_window_keeps_its_name_for_the_next_start() {
 
     let (restored, _) = restore_last_session(&state).await.unwrap().unwrap();
     assert_eq!(state.mstore.get::<Workspace>(&restored).unwrap().unwrap().name, "Upgrades");
-    assert_eq!(take_restored_window_name(&state.mstore, &restored).as_deref(), Some("Release work"));
+    assert_eq!(restored_window_name(&state.mstore, &restored).as_deref(), Some("Release work"));
+    // Kept until the window has it: reading it again finds it again.
+    assert_eq!(restored_window_name(&state.mstore, &restored).as_deref(), Some("Release work"));
+    assert_eq!(forget_restored_window_name(&state.mstore, &restored).as_deref(), Some("Release work"));
+    assert_eq!(restored_window_name(&state.mstore, &restored), None);
+    assert_eq!(forget_restored_window_name(&state.mstore, &restored), None);
 }

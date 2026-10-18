@@ -338,7 +338,8 @@ windows came back only as far as the last one:
   (`window:displayname`, under `window.name`) and its workspace's (`name`).
   The restore creates each workspace with its name; a window's name waits
   in the client's meta (`session:restored_window_names`, by workspace) until
-  `CreateWindow` opens a window onto that workspace, which takes it, once.
+  `CreateWindow` opens a window onto that workspace and has written the
+  name to it; a window whose name couldn't be written gets it on its next try.
   Tab names were always kept.
 - **Compatible both ways.** The record keeps the main window's tabs at its
   top level, so an older AgentMux reading it after a downgrade restores that

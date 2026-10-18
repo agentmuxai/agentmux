@@ -27,7 +27,8 @@
 //! workspace as it creates it; a window's name waits in the client's meta
 //! (`session:restored_window_names`, by workspace) for the window that opens
 //! onto that workspace, which `CreateWindow` names
-//! ([`take_restored_window_name`]).
+//! ([`restored_window_name`]), and is forgotten only once that name is
+//! written ([`forget_restored_window_name`]).
 //!
 //! The record keeps the main window's tabs at its top level too, the shape it
 //! always had, so an older AgentMux reading it still restores that window. A
@@ -276,10 +277,21 @@ pub(crate) async fn restore_all(state: &AppState, record: &Value) -> Result<Opti
 }
 
 /// The name a restored window had, for the window now opening onto its
-/// workspace `ws_id`; handed out once (`CreateWindow`).
-/// Read, remove and write back in one transaction: restored windows open
-/// together, and two takes must not each write back the other's name.
-pub(crate) fn take_restored_window_name(store: &Store, ws_id: &str) -> Option<String> {
+/// workspace `ws_id` (`CreateWindow`). It stays until
+/// [`forget_restored_window_name`]: a window whose name couldn't be written
+/// (srv stopped in between, a failed write) gets it on its next try.
+pub(crate) fn restored_window_name(store: &Store, ws_id: &str) -> Option<String> {
+    store
+        .get_all::<Client>()
+        .ok()
+        .and_then(|cs| cs.into_iter().next())
+        .and_then(|c| c.meta.get(NAMES_META_KEY)?.get(ws_id)?.as_str().map(str::to_string))
+}
+
+/// `ws_id`'s window has its name: forget it, once. Read, remove and write
+/// back in one transaction: restored windows open together, and two of these
+/// must not each write back the name the other removed.
+pub(crate) fn forget_restored_window_name(store: &Store, ws_id: &str) -> Option<String> {
     let taken = store.with_tx(|tx| {
         let Some(mut client) = tx.get_all::<Client>()?.into_iter().next() else { return Ok(None) };
         let Some(mut names) = client.meta.get(NAMES_META_KEY).and_then(|v| v.as_object().cloned()) else {
@@ -295,7 +307,7 @@ pub(crate) fn take_restored_window_name(store: &Store, ws_id: &str) -> Option<St
         Ok(name.as_str().map(str::to_string))
     });
     taken.unwrap_or_else(|e| {
-        tracing::warn!(error = %e, "session_restore: couldn't take a restored window's name");
+        tracing::warn!(error = %e, "session_restore: couldn't forget a restored window's name");
         None
     })
 }

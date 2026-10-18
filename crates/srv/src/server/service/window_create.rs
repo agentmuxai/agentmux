@@ -397,7 +397,8 @@ pub(crate) async fn handle_create_window(state: &AppState, call: &WebCallType) -
     };
     // A window a session restore rebuilt gets back the name it had
     // (session_windows.rs): the main one, and each reopened beside it.
-    let name_events = match super::session_windows::take_restored_window_name(store, &ws_id) {
+    // The saved name is forgotten only once it is written.
+    let name_events = match super::session_windows::restored_window_name(store, &ws_id) {
         None => Vec::new(),
         Some(name) => {
             let evs = dispatch_to_reducer(
@@ -408,10 +409,15 @@ pub(crate) async fn handle_create_window(state: &AppState, call: &WebCallType) -
                 },
             )
             .await;
+            let mut written = !evs.iter().any(|e| matches!(e, agentmux_common::ipc::Event::Error { .. }));
             for ev in &evs {
                 if let Err(e) = crate::persist_subscriber::apply_event_to_mstore(ev, store) {
                     tracing::warn!(window_id = %window_id, error = %e, "CreateWindow: restored window name write failed");
+                    written = false;
                 }
+            }
+            if written {
+                super::session_windows::forget_restored_window_name(store, &ws_id);
             }
             evs
         }
