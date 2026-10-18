@@ -1165,3 +1165,16 @@
     word-break: break-word;
     overflow-wrap: break-word;
 }
+
+// An agent whose provider nobody reported: a neutral mark the size of a
+// provider logo, so rows stay aligned (swarm-provider-icon.tsx).
+.swarm-provider-unknown {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 16px;
+    height: 16px;
+    font-size: var(--text-xs);
+    color: var(--secondary-text-color);
+}
