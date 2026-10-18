@@ -137,6 +137,10 @@ pub struct ScreenshotData {
     /// The page's viewport width in CSS pixels, to scale the boxes to the image.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub css_width: Option<f64>,
+    /// The page couldn't be fully checked for secret fields: srv refuses to
+    /// give the screenshot out.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub secrets_unchecked: bool,
 }
 
 /// `dispatch_key`'s answer: what has focus after the keys, so an agent can

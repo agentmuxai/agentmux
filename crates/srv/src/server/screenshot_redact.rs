@@ -8,6 +8,35 @@
 
 use image::{DynamicImage, ImageFormat, Rgba};
 
+/// The host's screenshot answer (`data.secret_boxes`, `data.css_width`)
+/// applied to its decoded image: unchanged when the page has no secret
+/// fields, otherwise blacked out and re-encoded. `Err` is the message to give
+/// instead of the image.
+pub(crate) fn redact_host_screenshot(
+    host_resp: &serde_json::Value,
+    bytes: Vec<u8>,
+    encoded: String,
+) -> Result<(Vec<u8>, String), String> {
+    use base64::Engine as _;
+    if host_resp.pointer("/data/secrets_unchecked").and_then(|v| v.as_bool()) == Some(true) {
+        return Err("AgentMux couldn't check this page for password, card or tax-ID fields, so the screenshot \
+                    isn't returned: take a snapshot instead, or try again once the page has loaded"
+            .to_string());
+    }
+    let boxes: Vec<[f64; 4]> = host_resp
+        .pointer("/data/secret_boxes")
+        .and_then(|v| serde_json::from_value(v.clone()).ok())
+        .unwrap_or_default();
+    if boxes.is_empty() {
+        return Ok((bytes, encoded));
+    }
+    let css_width = host_resp.pointer("/data/css_width").and_then(|v| v.as_f64());
+    let out = black_out(&bytes, &boxes, css_width)
+        .map_err(|e| format!("couldn't black out the secret fields on this page, so the screenshot isn't returned: {e}"))?;
+    let encoded = base64::engine::general_purpose::STANDARD.encode(&out);
+    Ok((out, encoded))
+}
+
 /// CSS pixels added around each box: a field's border and its focus ring.
 const PAD: f64 = 3.0;
 
@@ -75,6 +104,28 @@ mod tests {
     fn a_box_past_the_edge_is_clipped_not_an_error() {
         let out = black_out(&white_png(50, 50), &[[40.0, 40.0, 100.0, 100.0]], Some(50.0)).unwrap();
         assert_eq!(pixel(&out, 49, 49), [0, 0, 0, 255]);
+    }
+
+    #[test]
+    fn a_host_answer_without_secret_fields_passes_through_untouched() {
+        let png = white_png(4, 4);
+        let (bytes, encoded) = redact_host_screenshot(&serde_json::json!({ "ok": true, "data": { "png_base64": "x" } }), png.clone(), "x".into()).unwrap();
+        assert_eq!((bytes, encoded.as_str()), (png, "x"));
+    }
+
+    #[test]
+    fn a_host_answer_with_secret_fields_is_redacted_or_refused() {
+        let resp = serde_json::json!({ "data": { "secret_boxes": [[1.0, 1.0, 2.0, 2.0]], "css_width": 10.0 } });
+        let (bytes, _) = redact_host_screenshot(&resp, white_png(10, 10), String::new()).unwrap();
+        assert_eq!(pixel(&bytes, 2, 2), [0, 0, 0, 255]);
+        let no_width = serde_json::json!({ "data": { "secret_boxes": [[1.0, 1.0, 2.0, 2.0]] } });
+        assert!(redact_host_screenshot(&no_width, white_png(10, 10), String::new()).unwrap_err().contains("isn't returned"));
+    }
+
+    #[test]
+    fn a_page_that_couldnt_be_checked_is_refused_even_with_no_boxes() {
+        let resp = serde_json::json!({ "data": { "secrets_unchecked": true } });
+        assert!(redact_host_screenshot(&resp, white_png(4, 4), String::new()).unwrap_err().contains("couldn't check this page"));
     }
 
     #[test]

@@ -405,7 +405,7 @@ async fn call(cdp: &mut CdpSession, method: &str, params: Value) -> Result<Value
 }
 
 /// A fresh isolated world in `frame_id`, or in the pane's main frame.
-async fn isolated_context(cdp: &mut CdpSession, frame_id: Option<&str>) -> Result<i64, String> {
+pub(super) async fn isolated_context(cdp: &mut CdpSession, frame_id: Option<&str>) -> Result<i64, String> {
     let frame_id = match frame_id {
         Some(f) => f.to_string(),
         None => {
@@ -970,154 +970,6 @@ fn warn_if_changed(mut after: Value, text: &str) -> Value {
     after
 }
 
-/// The focused element's state, for the read-back after `key` (the same
-/// fields as a fill's). Descends shadow roots and same-origin frames, as the
-/// secret guard does; a focused frame from another site comes back as
-/// `uninspectable`.
-const FOCUSED_STATE: &str = r#"(() => {
-  let doc = document;
-  let el = doc.activeElement;
-  for (let depth = 0; el && depth < 16; depth++) {
-    if (el.shadowRoot && el.shadowRoot.activeElement) { el = el.shadowRoot.activeElement; continue; }
-    if (el.tagName === "IFRAME" || el.tagName === "FRAME") {
-      let inner = null;
-      try { inner = el.contentDocument; } catch (e) { inner = null; }
-      if (!inner) return { uninspectable: true };
-      doc = inner;
-      el = doc.activeElement;
-      continue;
-    }
-    break;
-  }
-  if (!el || el === doc.body || el === doc.documentElement) return { nothing: true };
-  const attrs = [];
-  for (const a of el.attributes) { attrs.push(a.name, a.value); }
-  const byIds = (el.getAttribute("aria-labelledby") || "").split(/\s+/).map(i => { const t = i && el.ownerDocument.getElementById(i); return t ? t.textContent : ""; }).join(" ");
-  const label = ((el.labels ? Array.from(el.labels).map(l => l.textContent).join(" ") : "") + " " + byIds).replace(/\s+/g, " ").trim();
-  const out = { localName: el.localName, attributes: attrs, label, tag: el.tagName.toLowerCase() };
-  if (el.type) out.type = el.type;
-  if (el.isContentEditable) { out.value = el.textContent; out.contentEditable = true; }
-  else if ("value" in el && el.tagName !== "BUTTON") out.value = el.value;
-  if ("checked" in el && (el.type === "checkbox" || el.type === "radio")) out.checked = el.checked;
-  if (el.validationMessage) out.validationMessage = el.validationMessage;
-  return out;
-})()"#;
-
-/// What has focus now, as an agent may see it: the fields a fill's read-back
-/// has, a secret field's value hidden. `Value::Null` when it can't be read.
-pub async fn focused_state(cdp: &mut CdpSession) -> Value {
-    let Ok(ctx) = isolated_context(cdp, None).await else {
-        return Value::Null;
-    };
-    let raw = cdp
-        .call("Runtime.evaluate", json!({ "expression": FOCUSED_STATE, "contextId": ctx, "returnByValue": true }))
-        .await
-        .ok()
-        .and_then(|v| v.pointer("/result/value").cloned())
-        .unwrap_or(Value::Null);
-    if raw.get("uninspectable").is_some() || raw.get("nothing").is_some() || raw.is_null() {
-        return raw;
-    }
-    let facts = DomFacts::from_described(&raw);
-    let mut shown = serde_json::Map::new();
-    for key in ["tag", "type", "value", "checked", "validationMessage", "contentEditable"] {
-        if let Some(v) = raw.get(key) {
-            shown.insert(key.to_string(), v.clone());
-        }
-    }
-    if !facts.label.is_empty() {
-        shown.insert("label".to_string(), json!(facts.label));
-    }
-    let id = [facts.local_name.as_str(), facts.attrs.get("id").map(String::as_str).unwrap_or(""), facts.attrs.get("name").map(String::as_str).unwrap_or(""), facts.label.as_str()].join("|");
-    shown.insert("element".to_string(), json!(id));
-    redact_secret(Value::Object(shown), &facts)
-}
-
-/// Every field in the pane that is a secret field (passwords, one-time codes,
-/// card and tax-ID numbers), with its box on the page in the main frame's CSS
-/// pixels, so a screenshot can black them out before an agent sees it
-/// (frames spec §5.1, plan §4.1). A frame that can't be looked into is
-/// returned whole: fail closed. `css_width` is the page's viewport width, to
-/// scale the boxes to the image.
-pub struct SecretBoxes {
-    pub boxes: Vec<[f64; 4]>,
-    pub css_width: Option<f64>,
-}
-
-/// Lists the fields that could hold a secret, with their facts and boxes in
-/// this document's viewport. Descends open shadow roots.
-const SECRET_CANDIDATES: &str = r#"(() => {
-  const out = [];
-  const visit = (root) => {
-    for (const el of root.querySelectorAll("*")) {
-      if (out.length >= 500) return;
-      if (el.shadowRoot) visit(el.shadowRoot);
-      const tag = el.localName;
-      if (!(tag === "input" || tag === "textarea" || (el.isContentEditable && !(el.parentElement && el.parentElement.isContentEditable)))) continue;
-      const r = el.getBoundingClientRect();
-      if (r.width === 0 || r.height === 0) continue;
-      const attrs = [];
-      for (const a of el.attributes) { attrs.push(a.name, a.value); }
-      const byIds = (el.getAttribute("aria-labelledby") || "").split(/\s+/).map(i => { const t = i && el.ownerDocument.getElementById(i); return t ? t.textContent : ""; }).join(" ");
-      const label = ((el.labels ? Array.from(el.labels).map(l => l.textContent).join(" ") : "") + " " + byIds).replace(/\s+/g, " ").trim();
-      out.push({ localName: tag, attributes: attrs, label, x: r.left, y: r.top, w: r.width, h: r.height });
-    }
-  };
-  visit(document);
-  return { fields: out, width: window.innerWidth };
-})()"#;
-
-/// The secret fields' boxes in one document (`frame_id`, or the main frame),
-/// in that document's viewport. `None`: it couldn't be read.
-async fn secret_boxes_in(cdp: &mut CdpSession, frame_id: Option<&str>) -> Option<(Vec<[f64; 4]>, Option<f64>)> {
-    let ctx = isolated_context(cdp, frame_id).await.ok()?;
-    let v = cdp
-        .call("Runtime.evaluate", json!({ "expression": SECRET_CANDIDATES, "contextId": ctx, "returnByValue": true }))
-        .await
-        .ok()?;
-    let result = v.pointer("/result/value")?;
-    let fields = result.get("fields")?.as_array()?;
-    let boxes = fields
-        .iter()
-        .filter(|f| snapshot::is_secret(&DomFacts::from_described(f)))
-        .filter_map(|f| {
-            let n = |k: &str| f.get(k).and_then(|v| v.as_f64());
-            Some([n("x")?, n("y")?, n("w")?, n("h")?])
-        })
-        .collect();
-    Some((boxes, result.get("width").and_then(|w| w.as_f64())))
-}
-
-/// [`SecretBoxes`] for the whole pane: the top frame and every iframe.
-pub async fn secret_boxes(root: &mut CdpSession) -> SecretBoxes {
-    let mut out = SecretBoxes { boxes: Vec::new(), css_width: None };
-    if let Some((boxes, width)) = secret_boxes_in(root, None).await {
-        out.boxes.extend(boxes);
-        out.css_width = width;
-    }
-    if out.css_width.is_none() {
-        out.css_width = root
-            .call("Runtime.evaluate", json!({ "expression": "window.innerWidth", "returnByValue": true }))
-            .await
-            .ok()
-            .and_then(|v| v.pointer("/result/value").and_then(|w| w.as_f64()));
-    }
-    for fl in frames::layout(root).await {
-        let mut on = root.in_session(fl.raw.session.as_deref());
-        match secret_boxes_in(&mut on, Some(&fl.raw.id)).await {
-            Some((boxes, _)) if boxes.is_empty() => {}
-            Some((boxes, _)) => match frames::chain_offset(root, &fl.chain).await {
-                Ok((ox, oy)) => out.boxes.extend(boxes.into_iter().map(|[x, y, w, h]| [x + ox, y + oy, w, h])),
-                // Can't place its fields on the page: hide the whole frame.
-                Err(_) => out.boxes.extend(frames::frame_box(root, &fl.chain).await),
-            },
-            // Couldn't look inside: hide the whole frame.
-            None => out.boxes.extend(frames::frame_box(root, &fl.chain).await),
-        }
-    }
-    out
-}
-
 /// One digest of everything an approved click would send (the page's
 /// `fingerprint` string and its secret values), so the check after approval
 /// notices any change during the wait, however large the form, without the
@@ -1142,7 +994,7 @@ fn submission_digest(fingerprint: Option<&Value>, secrets: Option<&Value>) -> St
 
 /// A secret field's value never reaches the agent, whatever the action
 /// (spec §5.1): the read-back keeps the field's shape but not its value.
-fn redact_secret(mut after: Value, facts: &DomFacts) -> Value {
+pub(super) fn redact_secret(mut after: Value, facts: &DomFacts) -> Value {
     if snapshot::is_secret(facts) {
         if let Some(obj) = after.as_object_mut() {
             if obj.remove("value").is_some() {

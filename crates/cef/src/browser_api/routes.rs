@@ -390,7 +390,7 @@ pub async fn screenshot(
 
     // A browser pane's secret fields are found now, before the capture, and
     // blacked out by srv before the image reaches an agent (plan §4.1).
-    let secrets = if scope_to_block { None } else { Some(super::act::secret_boxes(&mut cdp).await) };
+    let secrets = if scope_to_block { None } else { Some(super::page_state::secret_boxes(&mut cdp).await) };
 
     let cap = match cdp
         .call("Page.captureScreenshot", params)
@@ -414,11 +414,11 @@ pub async fn screenshot(
         }
     };
 
-    let (secret_boxes, css_width) = match secrets {
-        Some(s) => (s.boxes, s.css_width),
-        None => (Vec::new(), None),
+    let (secret_boxes, css_width, secrets_unchecked) = match secrets {
+        Some(s) => (s.boxes, s.css_width, !s.complete),
+        None => (Vec::new(), None, false),
     };
-    ok_body(ApiResponse::ok(ScreenshotData { png_base64: data, secret_boxes, css_width }))
+    ok_body(ApiResponse::ok(ScreenshotData { png_base64: data, secret_boxes, css_width, secrets_unchecked }))
 }
 
 /// `POST /agentmux/browser/click_element` — synthesize a real mouse
@@ -721,7 +721,7 @@ pub async fn dispatch_key(
     }
     // On a browser pane, read what has focus before and after, so the answer
     // says whether the keys did anything (plan §2.2).
-    let before = if scope_to_block { None } else { Some(super::act::focused_state(&mut cdp).await) };
+    let before = if scope_to_block { None } else { Some(super::page_state::focused_state(&mut cdp).await) };
     if let Some(text) = &req.text {
         // Input.insertText is atomic and handles IME / composition
         // correctly. Preferred over key-by-key dispatch for strings.
@@ -775,7 +775,7 @@ pub async fn dispatch_key(
     }
 
     let after = match before {
-        Some(_) => Some(super::act::focused_state(&mut cdp).await),
+        Some(_) => Some(super::page_state::focused_state(&mut cdp).await),
         None => None,
     };
     let _ = cdp.close().await;
