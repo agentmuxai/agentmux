@@ -889,6 +889,10 @@ async fn act(
                     "this field holds at most {max} characters and the text has {length}: shorten it and fill again (nothing was typed)"
                 ));
             }
+            let before = call_on(cdp, &obj, READ_BACK, vec![])
+                .await
+                .ok()
+                .and_then(|v| v.get("value").and_then(|x| x.as_str()).map(str::to_string));
             call_on(cdp, &obj, PREPARE_FILL, vec![]).await?;
             // Focusing ran the page's own handlers, which could have turned
             // the field into a secret one, or moved focus to one (insertText
@@ -903,8 +907,13 @@ async fn act(
                 call(cdp, "Input.insertText", json!({ "text": text })).await?;
             }
             let mut after = call_on(cdp, &obj, READ_BACK, vec![]).await?;
-            let got = after.get("value").and_then(|v| v.as_str()).unwrap_or("");
-            if got != text && after.get("contentEditable").is_none() {
+            let got = after.get("value").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            // Set the value directly only for a widget that took nothing from
+            // the inserted text (the value is empty or what it was). A value
+            // the page changed (cut to a limit, reformatted by a mask) is the
+            // page's rule: keep it, and say so.
+            let ignored = got.is_empty() || before.as_deref() == Some(got.as_str());
+            if got != text && ignored && after.get("contentEditable").is_none() {
                 call_on(cdp, &obj, SET_VALUE, vec![json!(text)]).await?;
                 after = call_on(cdp, &obj, READ_BACK, vec![]).await?;
             }

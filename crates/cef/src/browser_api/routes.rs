@@ -388,20 +388,30 @@ pub async fn screenshot(
         }
     }
 
-    // A browser pane's secret fields are found now, before the capture, and
-    // blacked out by srv before the image reaches an agent (plan §4.1).
-    let secrets = if scope_to_block { None } else { Some(super::page_state::secret_boxes(&mut cdp).await) };
-
-    let cap = match cdp
-        .call("Page.captureScreenshot", params)
-        .await
-    {
-        Ok(v) => v,
-        Err(e) => {
-            let _ = cdp.close().await;
-            return ok_body(ApiResponse::err(format!("CDP Page.captureScreenshot: {e}")));
+    // A browser pane's secret fields are found just before and just after the
+    // capture, and blacked out by srv before the image reaches an agent (plan
+    // §4.1). If the two scans disagree the page changed meanwhile: one more
+    // try, then the screenshot is marked unchecked and srv refuses it.
+    let mut secrets = None;
+    let mut cap = serde_json::Value::Null;
+    for _attempt in 0..2 {
+        let before = if scope_to_block { None } else { Some(super::page_state::secret_boxes(&mut cdp).await) };
+        cap = match cdp.call("Page.captureScreenshot", params.clone()).await {
+            Ok(v) => v,
+            Err(e) => {
+                let _ = cdp.close().await;
+                return ok_body(ApiResponse::err(format!("CDP Page.captureScreenshot: {e}")));
+            }
+        };
+        let Some(before) = before else { break };
+        let after = super::page_state::secret_boxes(&mut cdp).await;
+        let merged = super::page_state::merge_scans(before, after);
+        let done = merged.complete;
+        secrets = Some(merged);
+        if done {
+            break;
         }
-    };
+    }
 
     let _ = cdp.close().await;
 

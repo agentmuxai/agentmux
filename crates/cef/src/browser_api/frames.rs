@@ -256,16 +256,67 @@ pub async fn chain_offset(root: &mut CdpSession, chain: &[FrameHop]) -> Result<(
     Ok((x, y))
 }
 
-/// The frame's own box on the page (x, y, width, height in the main frame's
-/// CSS pixels): where its content starts, and its `<iframe>`'s content size.
-pub async fn frame_box(root: &mut CdpSession, chain: &[FrameHop]) -> Option<[f64; 4]> {
-    let last = chain.last()?;
-    let (x, y) = chain_offset(root, chain).await.ok()?;
-    let mut on = root.in_session(last.parent_session.as_deref());
-    let model = on.call("DOM.getBoxModel", json!({ "backendNodeId": last.owner_backend })).await.ok()?;
-    let w = model.pointer("/model/width").and_then(Value::as_f64)?;
-    let h = model.pointer("/model/height").and_then(Value::as_f64)?;
-    Some([x, y, w, h])
+/// Where a frame is on the page, and whether a point inside it is placed by
+/// adding an offset (every `<iframe>` on the way is an unscaled, unrotated
+/// box).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ChainGeometry {
+    /// The frame's content origin in the main frame's CSS pixels.
+    pub offset: (f64, f64),
+    /// The box around the frame's `<iframe>` content on the page (x, y, w, h).
+    pub bounds: [f64; 4],
+    /// The frame's own `<iframe>` is a plain box.
+    pub plain: bool,
+    /// Every outer `<iframe>` is a plain box, so `bounds` is right even when
+    /// the frame's own isn't.
+    pub outer_plain: bool,
+}
+
+/// The eight numbers of a quad as four points.
+fn points(q: &[f64]) -> Option<[(f64, f64); 4]> {
+    (q.len() >= 8).then(|| [(q[0], q[1]), (q[2], q[3]), (q[4], q[5]), (q[6], q[7])])
+}
+
+/// The axis-aligned box around a quad (x, y, w, h).
+fn quad_bounds(q: &[f64]) -> Option<[f64; 4]> {
+    let p = points(q)?;
+    let (xs, ys) = (p.map(|p| p.0), p.map(|p| p.1));
+    let (x0, x1) = (xs.iter().copied().fold(f64::MAX, f64::min), xs.iter().copied().fold(f64::MIN, f64::max));
+    let (y0, y1) = (ys.iter().copied().fold(f64::MAX, f64::min), ys.iter().copied().fold(f64::MIN, f64::max));
+    Some([x0, y0, x1 - x0, y1 - y0])
+}
+
+/// A box model whose element is neither rotated, skewed nor scaled: its border
+/// quad is an axis-aligned rectangle the size of its layout box.
+fn is_plain_box(border: &[f64], width: f64, height: f64) -> bool {
+    let Some([a, b, c, d]) = points(border) else { return false };
+    let close = |x: f64, y: f64| (x - y).abs() < 0.5;
+    close(a.1, b.1) && close(b.0, c.0) && close(c.1, d.1) && close(d.0, a.0) && close(b.0 - a.0, width) && close(d.1 - a.1, height)
+}
+
+/// [`ChainGeometry`] for a frame known by its chain. `None` when an
+/// `<iframe>` on the way has no box.
+pub async fn chain_geometry(root: &mut CdpSession, chain: &[FrameHop]) -> Option<ChainGeometry> {
+    let hops = hops_to_add(chain);
+    let (mut ox, mut oy) = (0.0, 0.0);
+    let mut outer_plain = true;
+    for (i, hop) in hops.iter().enumerate() {
+        let mut on = root.in_session(hop.parent_session.as_deref());
+        let model = on.call("DOM.getBoxModel", json!({ "backendNodeId": hop.owner_backend })).await.ok()?;
+        let m = model.get("model")?;
+        let content: Vec<f64> = m.get("content")?.as_array()?.iter().filter_map(Value::as_f64).collect();
+        let border: Vec<f64> = m.get("border")?.as_array()?.iter().filter_map(Value::as_f64).collect();
+        let plain = is_plain_box(&border, m.get("width")?.as_f64()?, m.get("height")?.as_f64()?);
+        let [x, y, w, h] = quad_bounds(&content)?;
+        if i + 1 < hops.len() {
+            outer_plain &= plain;
+            ox += content[0];
+            oy += content[1];
+        } else {
+            return Some(ChainGeometry { offset: (ox + content[0], oy + content[1]), bounds: [x + ox, y + oy, w, h], plain, outer_plain });
+        }
+    }
+    None
 }
 
 /// A frame's place on the page, without its contents: enough to find it,
@@ -527,6 +578,22 @@ mod tests {
         assert_eq!(effective_origin(&own, "https://a.test"), "https://b.test", "a frame with its own origin keeps it");
         let opaque = RawFrame { url: "data:text/html,hi".into(), origin: String::new(), ..srcdoc };
         assert_eq!(effective_origin(&opaque, "https://a.test"), "", "only about: frames inherit");
+    }
+
+    #[test]
+    fn a_plain_box_is_axis_aligned_and_its_layout_size() {
+        let border = [10.0, 20.0, 110.0, 20.0, 110.0, 70.0, 10.0, 70.0];
+        assert!(is_plain_box(&border, 100.0, 50.0));
+        assert!(!is_plain_box(&border, 50.0, 25.0), "drawn at twice its layout size: scaled");
+        let rotated = [60.0, 0.0, 110.0, 50.0, 60.0, 100.0, 10.0, 50.0];
+        assert!(!is_plain_box(&rotated, 70.7, 70.7));
+        assert!(!is_plain_box(&[1.0, 2.0], 1.0, 1.0), "not a quad");
+    }
+
+    #[test]
+    fn the_bounds_of_a_rotated_quad_cover_all_its_corners() {
+        let rotated = [60.0, 0.0, 110.0, 50.0, 60.0, 100.0, 10.0, 50.0];
+        assert_eq!(quad_bounds(&rotated), Some([10.0, 0.0, 100.0, 100.0]));
     }
 
     #[test]

@@ -176,20 +176,44 @@ pub fn is_secret(f: &DomFacts) -> bool {
 /// finding out from a cut-off value.
 pub fn limits_of(f: &DomFacts) -> String {
     let mut out = String::new();
+    if !takes_length_limits(f) {
+        return out;
+    }
     for key in ["maxlength", "minlength"] {
         if let Some(n) = f.attrs.get(key).and_then(|v| v.trim().parse::<u64>().ok()) {
             out.push_str(&format!(" [{key}={n}]"));
         }
     }
-    if let Some(p) = f.attrs.get("pattern").filter(|p| !p.is_empty()) {
+    if let Some(p) = f.attrs.get("pattern").filter(|p| !p.is_empty() && f.local_name == "input") {
         out.push_str(&format!(" [pattern={}]", quote(p)));
     }
     out
 }
 
-/// The `maxlength` of a field, if it has a valid one.
+/// The `maxlength` of a field, if it has a valid one the browser enforces.
 pub fn max_length(f: &DomFacts) -> Option<usize> {
+    if !takes_length_limits(f) {
+        return None;
+    }
     f.attrs.get("maxlength").and_then(|v| v.trim().parse::<usize>().ok())
+}
+
+/// Whether the browser applies `maxlength`, `minlength` and `pattern` to this
+/// field: a `textarea`, or an `input` of a text-like type (an unknown type is
+/// `text`). Number, date, time and the other non-text inputs ignore them.
+fn takes_length_limits(f: &DomFacts) -> bool {
+    match f.local_name.as_str() {
+        "textarea" => true,
+        "input" => {
+            let ty = f.attrs.get("type").map(|t| t.trim().to_ascii_lowercase()).unwrap_or_default();
+            !matches!(
+                ty.as_str(),
+                "number" | "date" | "time" | "datetime-local" | "month" | "week" | "range" | "color" | "checkbox"
+                    | "radio" | "file" | "hidden" | "submit" | "image" | "reset" | "button"
+            )
+        }
+        _ => false,
+    }
 }
 
 /// A rendered snapshot and the references it handed out (`e1` → backend node id).
@@ -1247,6 +1271,23 @@ mod tests {
         assert!(s.text.contains("textbox \"Restrictions\" [ref=e1] [maxlength=350]"), "{}", s.text);
         assert!(s.text.contains("textbox \"ZIP\" [ref=e2] [maxlength=9] [minlength=5] [pattern=\"[0-9]{5,9}\"]"), "{}", s.text);
         assert!(s.text.contains("textbox \"Name\" [ref=e3]\n"), "an invalid maxlength is not shown: {}", s.text);
+    }
+
+    #[test]
+    fn limits_are_shown_and_enforced_only_where_the_browser_applies_them() {
+        let f = |tag: &str, attrs: &[(&str, &str)]| DomFacts {
+            local_name: tag.into(),
+            attrs: attrs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
+            label: String::new(),
+        };
+        let number = f("input", &[("type", "number"), ("maxlength", "2")]);
+        assert_eq!(limits_of(&number), "");
+        assert_eq!(max_length(&number), None, "a number input ignores maxlength");
+        assert_eq!(max_length(&f("input", &[("type", "date"), ("maxlength", "4")])), None);
+        assert_eq!(max_length(&f("div", &[("contenteditable", "true"), ("maxlength", "4")])), None);
+        assert_eq!(max_length(&f("input", &[("type", "email"), ("maxlength", "40")])), Some(40));
+        assert_eq!(max_length(&f("input", &[("type", "bogus"), ("maxlength", "5")])), Some(5), "an unknown type is text");
+        assert_eq!(limits_of(&f("textarea", &[("maxlength", "9"), ("pattern", "x")])), " [maxlength=9]", "a textarea has no pattern");
     }
 
     #[test]

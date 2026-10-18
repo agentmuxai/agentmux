@@ -173,31 +173,66 @@ pub async fn secret_boxes(root: &mut CdpSession) -> SecretBoxes {
         out.complete = false;
     }
     for fl in laid_out {
-        if !fl.placeable {
-            // Its <iframe> wasn't found: its boxes would land in the wrong place.
-            out.complete = false;
-            continue;
-        }
+        // Its <iframe> (or an outer one) wasn't found, has no box, or sits
+        // in a transformed outer frame: nothing in it can be placed, or even
+        // hidden, on the page.
+        let geometry = match frames::chain_geometry(root, &fl.chain).await {
+            Some(g) if fl.placeable && g.outer_plain => g,
+            _ => {
+                out.complete = false;
+                continue;
+            }
+        };
         let mut on = root.in_session(fl.raw.session.as_deref());
         match secret_boxes_in(&mut on, Some(&fl.raw.id)).await {
             Some((boxes, _)) if boxes.is_empty() => {}
-            Some((boxes, _)) => match frames::chain_offset(root, &fl.chain).await {
-                Ok((ox, oy)) => out.boxes.extend(boxes.into_iter().map(|[x, y, w, h]| [x + ox, y + oy, w, h])),
-                // Can't place its fields on the page: hide the whole frame.
-                Err(_) => hide_whole_frame(root, &fl.chain, &mut out).await,
-            },
-            // Couldn't look inside: hide the whole frame.
-            None => hide_whole_frame(root, &fl.chain, &mut out).await,
+            Some((boxes, _)) if geometry.plain => {
+                let (ox, oy) = geometry.offset;
+                out.boxes.extend(boxes.into_iter().map(|[x, y, w, h]| [x + ox, y + oy, w, h]));
+            }
+            // Couldn't look inside, or its own <iframe> is scaled or rotated
+            // (its fields can't be placed by an offset): hide the whole frame.
+            _ => out.boxes.push(geometry.bounds),
         }
     }
     out
 }
 
-/// Hide a frame that couldn't be checked; if it can't even be placed on the
-/// page, the scan is incomplete.
-async fn hide_whole_frame(root: &mut CdpSession, chain: &[frames::FrameHop], out: &mut SecretBoxes) {
-    match frames::frame_box(root, chain).await {
-        Some(b) => out.boxes.push(b),
-        None => out.complete = false,
+/// The scans before and after one capture, as one: the boxes of both, and
+/// complete only if both were complete and found the same fields in the same
+/// places (the page didn't move or change while the image was taken).
+pub fn merge_scans(before: SecretBoxes, after: SecretBoxes) -> SecretBoxes {
+    let same = before.boxes.len() == after.boxes.len()
+        && before.boxes.iter().zip(&after.boxes).all(|(a, b)| a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1.0));
+    let complete = before.complete && after.complete && same;
+    let css_width = before.css_width.or(after.css_width);
+    let mut boxes = before.boxes;
+    boxes.extend(after.boxes);
+    SecretBoxes { boxes, css_width, complete }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn scan(boxes: &[[f64; 4]], complete: bool) -> SecretBoxes {
+        SecretBoxes { boxes: boxes.to_vec(), css_width: Some(800.0), complete }
+    }
+
+    #[test]
+    fn two_matching_scans_are_complete_and_keep_their_boxes() {
+        let m = merge_scans(scan(&[[1.0, 2.0, 3.0, 4.0]], true), scan(&[[1.2, 2.0, 3.0, 4.0]], true));
+        assert!(m.complete);
+        assert_eq!(m.boxes.len(), 2);
+    }
+
+    #[test]
+    fn a_page_that_moved_or_changed_between_scans_is_incomplete_and_hides_both() {
+        let moved = merge_scans(scan(&[[1.0, 2.0, 3.0, 4.0]], true), scan(&[[40.0, 2.0, 3.0, 4.0]], true));
+        assert!(!moved.complete);
+        assert_eq!(moved.boxes.len(), 2, "both positions stay hidden");
+        let added = merge_scans(scan(&[], true), scan(&[[1.0, 2.0, 3.0, 4.0]], true));
+        assert!(!added.complete, "a field appeared during the capture");
+        assert!(!merge_scans(scan(&[], false), scan(&[], true)).complete);
     }
 }
