@@ -230,6 +230,11 @@ export function zoomReset(): void {
 
 // ── Chrome zoom (title bar + status bar) ──────────────────────────
 
+// Kept in sessionStorage, so a reload of the window (a recycle, a version-skew
+// reload) keeps it, and an app restart starts at 100% as before
+// (docs/specs/SPEC_RENDERER_RECYCLE_WHEN_IDLE_2026_10_13.md §2).
+const CHROME_ZOOM_KEY = "agentmux:chrome-zoom";
+
 function applyChromeZoomCSS(factor: number): void {
     // Only set --zoomfactor. Width compensation is pure CSS on every
     // platform — see the header comment for the per-platform rule.
@@ -248,11 +253,31 @@ function setChromeZoom(factor: number): void {
     const clamped = clampZoom(roundZoom(factor));
     setChromeZoomSignal(clamped);
     applyChromeZoomCSS(clamped);
+    try {
+        sessionStorage.setItem(CHROME_ZOOM_KEY, String(clamped));
+    } catch {
+        // Unavailable: the zoom still applies to this page.
+    }
     showZoomIndicator(`Chrome ${Math.round(clamped * 100)}%`);
 }
 
-export function initChromeZoom(): void {
-    applyChromeZoomCSS(DEFAULT_ZOOM);
+/**
+ * The chrome zoom this window had before a reload, or the default. `fresh`
+ * (a pool boot) forgets the stored value: a pool renderer keeps its
+ * sessionStorage when a window is demoted back to it, and the next window
+ * promoted from it is a different one.
+ */
+export function initChromeZoom(opts?: { fresh?: boolean }): void {
+    let stored = NaN;
+    try {
+        if (opts?.fresh) sessionStorage.removeItem(CHROME_ZOOM_KEY);
+        else stored = Number(sessionStorage.getItem(CHROME_ZOOM_KEY) ?? NaN);
+    } catch {
+        // Unavailable: start at the default.
+    }
+    const factor = Number.isFinite(stored) ? clampZoom(stored) : DEFAULT_ZOOM;
+    setChromeZoomSignal(factor);
+    applyChromeZoomCSS(factor);
 }
 
 // ── Shared helpers ────────────────────────────────────────────────
