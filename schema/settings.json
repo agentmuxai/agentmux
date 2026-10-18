@@ -496,6 +496,12 @@
           "default": true,
           "description": "Paste or drop files (images and any other kind) into the agent composer as attachments, shown as tiles above the text. False restores the old behavior: pasted and dropped files are copied into the working folder. Default true. See docs/specs/SPEC_AGENT_PANE_IMAGE_ATTACHMENTS_2026_09_26.md and SPEC_AGENT_PANE_FILE_ATTACHMENTS_2026_09_26.md."
         },
+        "agent:inputhistory:max": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 10000,
+          "description": "How many messages you sent each agent are kept for ArrowUp and Ctrl+R in its composer, newest first. Default 10000; 0 keeps none from now on (what is kept stays until cleared with Ctrl+R's Clear history). Kept on this computer only. See docs/specs/SPEC_AGENT_INPUT_HISTORY_2026_10_18.md."
+        },
         "attachments:maxfiles": {
           "type": "integer",
           "minimum": 1,

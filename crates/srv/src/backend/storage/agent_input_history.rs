@@ -39,8 +39,6 @@ CREATE TABLE IF NOT EXISTS db_agent_input_drafts (
 );
 ";
 
-/// The newest entries kept per agent; older ones are dropped as new ones come.
-pub const INPUT_HISTORY_MAX: usize = 10_000;
 /// The longest entry kept, in bytes (a pasted file is not history).
 pub const INPUT_HISTORY_MAX_TEXT: usize = 64 * 1024;
 
