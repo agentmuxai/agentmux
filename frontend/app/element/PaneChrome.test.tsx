@@ -1141,6 +1141,24 @@ describe("renderPaneChromeShell — locate flash", () => {
         expect(played).toEqual(["b1@node-1"]);
     });
 
+    it("a flash that waited for its turn is dropped if the pane has moved on to another tab", async () => {
+        let active = "b1";
+        render(
+            () =>
+                renderPaneChromeShell(
+                    fakeNodeModel({ isFocused: () => true, activeBlockId: () => active }),
+                    <div>content</div>
+                ) as any
+        );
+        slotWait = 200;
+        emitPaneLocate("b1");
+        await new Promise((r) => setTimeout(r, 80));
+        active = "b2";
+        await new Promise((r) => setTimeout(r, 300));
+        expect(showLocateFlash).not.toHaveBeenCalled();
+        expect(played).toEqual([]);
+    });
+
     it("a newer reveal replaces one that is still waiting for its turn", async () => {
         render(() => renderPaneChromeShell(fakeNodeModel({ isFocused: () => true }), <div>content</div>) as any);
         slotWait = 200;

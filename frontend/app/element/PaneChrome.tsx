@@ -125,7 +125,8 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
             void gate.ready.then((ready) => {
                 if (!ready || locateGate !== gate) return;
                 const begin = () => {
-                    if (locateGate !== gate || !paneRoot) return;
+                    // Still the same target: the user may have switched tab while it waited.
+                    if (locateGate !== gate || !paneRoot || !isFocused() || activeBlockId() !== blockId) return;
                     recordLocateStart(performance.now());
                     stopLocateFlash = showLocateFlash(paneRoot, {
                         light: isLightThemeActive(),

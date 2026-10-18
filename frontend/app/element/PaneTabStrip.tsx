@@ -36,8 +36,8 @@ import {
     startDocTabDrag,
     startPaneTabDrag,
 } from "@/app/drag/pane-tab-drag";
-import { flashElement, onActivityFlash } from "@/app/notification/activity-flash";
-import { LOCATE_PILL_FLASH, onPaneLocatePlay } from "@/app/util/pane-locate";
+import { cancelFlashPattern, flashElement, onActivityFlash } from "@/app/notification/activity-flash";
+import { LOCATE_PILL_FLASH, onPaneLocate, onPaneLocatePlay } from "@/app/util/pane-locate";
 import { shouldReduceMotion } from "@/app/motion/motion";
 import { DURATION_BASE_MS, EASE_OUT } from "@/app/motion/tokens";
 import { isWindows } from "@/util/platformutil";
@@ -696,9 +696,14 @@ function PaneTabStripItem<T>(props: PaneTabStripItemProps<T>): JSX.Element {
         const unsubscribeLocate = onPaneLocatePlay((blockId, paneKey) => {
             if (blockId === id() && paneKey === props.paneKey && pillRef) flashElement(pillRef, LOCATE_PILL_FLASH);
         });
+        // A newer reveal replaces the earlier one's pill, so two never show at once.
+        const unsubscribeRequest = onPaneLocate(() => {
+            if (pillRef) cancelFlashPattern(pillRef, LOCATE_PILL_FLASH.pattern);
+        });
         onCleanup(() => {
             unsubscribe();
             unsubscribeLocate();
+            unsubscribeRequest();
         });
     });
 

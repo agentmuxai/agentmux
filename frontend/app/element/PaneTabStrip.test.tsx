@@ -12,7 +12,7 @@ import { createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { emitActivityFlash, type FlashTarget } from "@/app/notification/activity-flash";
-import { emitPaneLocatePlay } from "@/app/util/pane-locate";
+import { emitPaneLocate, emitPaneLocatePlay } from "@/app/util/pane-locate";
 import { dropPositionForPointerX, foreignDropHighlightFor, foreignDropRootFor, PaneTabStrip } from "./PaneTabStrip";
 
 const flashFrom = (blockId: string): FlashTarget => ({
@@ -763,6 +763,16 @@ describe("PaneTabStrip activity flash", () => {
         emitPaneLocatePlay("b", "pane-1");
         expect(animate).toHaveBeenCalledTimes(1);
         expect(animate.mock.instances[0]).toBe(container.querySelectorAll(".pane-tab")[1]);
+    });
+
+    it("a newer reveal takes the earlier locate flash off its pill", () => {
+        const cancel = vi.fn();
+        animate.mockImplementation(() => ({ cancel }) as unknown as Animation);
+        renderStrip(true, "pane-1");
+        emitPaneLocatePlay("b", "pane-1");
+        expect(animate).toHaveBeenCalledTimes(1);
+        emitPaneLocate("a");
+        expect(cancel).toHaveBeenCalledTimes(1);
     });
 
     it("a strip without flashOnActivity ignores a locate flash too", () => {

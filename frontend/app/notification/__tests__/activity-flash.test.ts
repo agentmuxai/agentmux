@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
     __resetActivityFlash,
     buildFlashKeyframes,
+    cancelFlashPattern,
     easeOut,
     emitActivityFlash,
     envelopeAt,
@@ -272,5 +273,39 @@ describe("flashElement", () => {
     it("ignores an empty pattern", () => {
         flashElement(makeEl(), { pattern: { strikes: [] }, delayMs: 0 });
         expect(animate).not.toHaveBeenCalled();
+    });
+
+    describe("cancelFlashPattern", () => {
+        it("stops a flash that has nothing else with it", () => {
+            const el = makeEl();
+            flashElement(el, { pattern: SINGLE, delayMs: 0 });
+            cancelFlashPattern(el, SINGLE);
+            expect(cancel).toHaveBeenCalledTimes(1);
+            expect(animate).toHaveBeenCalledTimes(1);
+        });
+
+        it("takes one flash out and leaves the others playing as they were", () => {
+            const el = makeEl();
+            flashElement(el, { pattern: THREE, delayMs: 0 });
+            vi.advanceTimersByTime(30);
+            flashElement(el, { pattern: SINGLE, delayMs: 0 });
+            cancel.mockClear();
+            animate.mockClear();
+            cancelFlashPattern(el, SINGLE);
+            // The merged animation is replaced by one with only THREE's remaining strikes.
+            expect(cancel).toHaveBeenCalledTimes(1);
+            expect(animate).toHaveBeenCalledTimes(1);
+            const [, options] = animate.mock.calls[0];
+            expect(options.duration).toBeCloseTo(patternDurationMs(THREE) - 30, 5);
+        });
+
+        it("does nothing for a pattern that is not showing", () => {
+            const el = makeEl();
+            cancelFlashPattern(el, SINGLE);
+            flashElement(el, { pattern: THREE, delayMs: 0 });
+            cancelFlashPattern(el, SINGLE);
+            expect(cancel).not.toHaveBeenCalled();
+            expect(animate).toHaveBeenCalledTimes(1);
+        });
     });
 });

@@ -261,7 +261,12 @@ export function flashElement(
     if (baseColor) el.style.setProperty(FLASH_BASE_COLOR_VAR, baseColor);
     else el.style.removeProperty(FLASH_BASE_COLOR_VAR);
 
-    if (typeof el.animate !== "function") {
+    playScheduled(el, scheduled, t);
+}
+
+/** Play `scheduled` on `el`'s overlay from page time `t` to the end of the last one. */
+function playScheduled(el: HTMLElement, scheduled: ScheduledFlash[], t: number): void {
+    if (scheduled.length === 0 || typeof el.animate !== "function") {
         running.set(el, { scheduled, anim: null });
         return;
     }
@@ -279,6 +284,20 @@ export function flashElement(
         // No timeline (tests): the animation just starts when it starts.
     }
     running.set(el, { scheduled, anim });
+}
+
+/**
+ * Stop showing `pattern` on `el` (the very object passed to `flashElement`),
+ * leaving any other flash on it playing as it was. For a flash that a newer
+ * one replaces, so two never show at once.
+ */
+export function cancelFlashPattern(el: HTMLElement, pattern: FlashPattern): void {
+    const prev = running.get(el);
+    if (!prev || !prev.scheduled.some((s) => s.pattern === pattern)) return;
+    const t = now();
+    prev.anim?.cancel();
+    const rest = prev.scheduled.filter((s) => s.pattern !== pattern && s.startAt + patternDurationMs(s.pattern) > t);
+    playScheduled(el, rest, t);
 }
 
 // ── Test helpers (NEVER call from production) ────────────────────────────
