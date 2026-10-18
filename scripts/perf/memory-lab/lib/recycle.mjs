@@ -85,6 +85,14 @@ export async function armState(driver, { scrollUp = 600 } = {}) {
     };
 }
 
+/** How far above the end of its transcript a pane must be scrolled for the check to mean anything. */
+export const MIN_SCROLL_UP_PX = 200;
+
+/** Whether the pane was scrolled up for real: a wheel turn a nested scroller took, or too short a transcript, leaves it at the bottom, where "the same position" is the default. */
+export function scrollArmed(before, minPx = MIN_SCROLL_UP_PX) {
+    return Boolean(before) && before.range - before.scrollTop >= minPx;
+}
+
 /** Whether a scroll position came back: the same row at the top, about where it was. */
 export function scrollRestored(before, after, tolerancePx = 40) {
     if (!before || !after) return false;
@@ -100,11 +108,18 @@ export async function checkState(driver, armed) {
     const got = await driver.eval(`${COMPOSER(armed.draft.blockId)}?.value ?? null`);
     const after = await driver.eval(SCROLL_PROBE(armed.scroll.blockId));
     const draftOk = got === armed.draft.text;
-    const scrollOk = scrollRestored(armed.scroll.before, after);
+    // A scroll that wasn't armed tests nothing: at the bottom, "restored" is what happens anyway.
+    const armedOk = armed.scroll.scrolled && scrollArmed(armed.scroll.before);
+    const scrollOk = armedOk && scrollRestored(armed.scroll.before, after);
     return {
         pass: draftOk && scrollOk,
         draft: { pass: draftOk, expected: armed.draft.text, got },
-        scroll: { pass: scrollOk, before: armed.scroll.before, after },
+        scroll: {
+            pass: scrollOk,
+            ...(armedOk ? {} : { notArmed: "the transcript could not be scrolled up before the recycle (too short, or the wheel turn didn't move it): nothing was tested" }),
+            before: armed.scroll.before,
+            after,
+        },
     };
 }
 

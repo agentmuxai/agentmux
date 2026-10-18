@@ -136,7 +136,8 @@ function reportRecycle(rec) {
     console.log(`    before: app ${rec.before.appMB} MB, renderers ${rec.before.rendererMB} MB (${rec.before.rendererProcs}), documents ${rec.before.documents}`);
     for (const m of rec.after) console.log(row(m));
     const s = recycleSaving(rec);
-    console.log(`    saved: app ${s.appMB} MB, renderers ${s.rendererMB} MB; draft ${rec.state.draft.pass ? "kept" : "LOST"}, scroll position ${rec.state.scroll.pass ? "kept" : "LOST"}`);
+    const scroll = rec.state.scroll.notArmed ? "not tested (could not be armed)" : rec.state.scroll.pass ? "kept" : "LOST";
+    console.log(`    saved: app ${s.appMB} MB, renderers ${s.rendererMB} MB; draft ${rec.state.draft.pass ? "kept" : "LOST"}, scroll position ${scroll}`);
 }
 
 /** One try: starts the instance, runs the load, measures, writes the result. */

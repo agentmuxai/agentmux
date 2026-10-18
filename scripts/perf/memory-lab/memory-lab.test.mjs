@@ -11,7 +11,7 @@ import { describe, expect, it } from "vitest";
 import { mismatch } from "./compare.mjs";
 import { generateConversation } from "./lib/conversation.mjs";
 import { portableExe } from "./lib/driver.mjs";
-import { draftText, recycleMark, recycleSaving, scrollRestored } from "./lib/recycle.mjs";
+import { draftText, recycleMark, recycleSaving, scrollArmed, scrollRestored } from "./lib/recycle.mjs";
 import { allocatorRoots, dumpedProcesses, lastSample, mainPage, withChromiumRoles } from "./lib/sample.mjs";
 import { agentsWithoutTurns, compare, comparisonTable, groupOf, groupSample, inMegabytes, median, MB, steady, table, transcriptGrowthProblem } from "./lib/summary.mjs";
 
@@ -204,6 +204,13 @@ describe("memory lab recycle check", () => {
         expect(scrollRestored(before, { ...before, node: "tool_43" })).toBe(false);
         expect(scrollRestored(before, null)).toBe(false);
         expect(scrollRestored({ ...before, node: null }, { ...before, node: null })).toBe(false);
+    });
+
+    it("only counts a scroll as armed when the pane really is above the end of its transcript", () => {
+        expect(scrollArmed({ scrollTop: 8471, range: 9071, node: "n", offset: 0 })).toBe(true);
+        expect(scrollArmed({ scrollTop: 8960, range: 9071, node: "n", offset: 0 })).toBe(false);
+        expect(scrollArmed({ scrollTop: 0, range: 0, node: "n", offset: 0 })).toBe(false);
+        expect(scrollArmed(null)).toBe(false);
     });
 
     it("makes a different draft each run, so a stale one can't pass", () => {
