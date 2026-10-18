@@ -54,6 +54,7 @@ use clap::{Parser, Subcommand};
 mod askpass;
 mod bash_wrap;
 mod cwd_state;
+mod exec_args;
 mod hook;
 mod precompact;
 mod prefix;

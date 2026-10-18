@@ -670,7 +670,7 @@ mod tests {
         CallRecord { agent_id: agent.map(str::to_string), ..new_record(id, command, false) }
     }
 
-    /// Codex P1 on #5096: the CLI gives a subagent's shell no identity, so
+    /// The CLI gives a subagent's shell no identity (#5096), so
     /// two agents' identical commands at once can't be told apart. Both
     /// claims say so, the second too although it sees one record, and
     /// neither takes an agent's directory (`run`).
