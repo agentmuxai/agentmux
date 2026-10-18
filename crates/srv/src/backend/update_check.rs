@@ -270,12 +270,23 @@ pub(crate) fn install_kind() -> InstallKind {
     INSTALL_KIND.get_or_init(crate::backend::update_install::detect).clone()
 }
 
-/// Record where a download stands and tell every window (`update_download`).
-pub(crate) fn set_download(download: Option<DownloadStatus>) {
-    let Some(bus) = EVENT_BUS.get() else { return };
-    let mut next = current_status();
-    next.download = download;
-    publish(bus, next);
+/// Record where a download stands and tell every window (`update_download`,
+/// `update_restart`). A download of a release no longer on offer (a check
+/// replaced it before the download's first step was recorded) isn't: `false`.
+/// Decided under the same lock a check's answer is, so a check and a
+/// download starting together can't each see the other's old state.
+pub(crate) fn set_download(download: Option<DownloadStatus>) -> bool {
+    let Some(bus) = EVENT_BUS.get() else { return false };
+    update(bus, |cur| with_download(cur, download))
+}
+
+/// `cur` with `download`, or `None` when it is for a release no longer on
+/// offer.
+fn with_download(cur: &AppUpdateStatus, download: Option<DownloadStatus>) -> Option<AppUpdateStatus> {
+    if download.as_ref().is_some_and(|d| cur.latest.as_deref() != Some(d.version.as_str())) {
+        return None;
+    }
+    Some(AppUpdateStatus { download, ..cur.clone() })
 }
 
 /// What srv knows now (`app.update-status`).
@@ -333,14 +344,7 @@ pub async fn check_now() -> Result<AppUpdateStatus, String> {
     let outcome = match fetch_latest(client).await {
         Ok(release) => {
             let next = status_for(current, &channel, &release, agentmux_common::time::now_ms(), &install_kind());
-            match pinned_by_upgrade(&current_status(), &next) {
-                Some(version) => tracing::info!(
-                    latest = ?next.latest,
-                    version,
-                    "update check: a newer release is out; the upgrade under way finishes first"
-                ),
-                None => publish(bus, next),
-            }
+            publish_check(bus, next);
             Ok(current_status())
         }
         Err(e) => {
@@ -361,15 +365,34 @@ fn pinned_by_upgrade(cur: &AppUpdateStatus, next: &AppUpdateStatus) -> Option<St
     (under_way && next.latest.as_deref() != Some(d.version.as_str())).then(|| d.version.clone())
 }
 
-/// Keep `next` and tell every window when it changed.
-fn publish(event_bus: &crate::backend::eventbus::EventBus, mut next: AppUpdateStatus) {
-    let Some(lock) = STATUS.get() else { return };
-    let changed = {
-        let mut cur = lock.write();
-        // A new check keeps a download of the release it still reports.
+/// A check's answer: it replaces what srv knows, unless an upgrade under way
+/// pins the release on offer ([`pinned_by_upgrade`]). A new check keeps a
+/// download of the release it still reports.
+fn publish_check(event_bus: &crate::backend::eventbus::EventBus, next: AppUpdateStatus) {
+    update(event_bus, |cur| {
+        if let Some(version) = pinned_by_upgrade(cur, &next) {
+            tracing::info!(latest = ?next.latest, version, "update check: a newer release is out; the upgrade under way finishes first");
+            return None;
+        }
+        let mut next = next.clone();
         if next.download.is_none() && next.latest.is_some() && next.latest == cur.latest {
             next.download = cur.download.clone();
         }
+        Some(next)
+    });
+}
+
+/// Replace what srv knows with what `change` makes of it (`None`: leave it),
+/// in one step under the lock, and tell every window when it changed.
+/// Whether it was replaced.
+fn update(
+    event_bus: &crate::backend::eventbus::EventBus,
+    change: impl FnOnce(&AppUpdateStatus) -> Option<AppUpdateStatus>,
+) -> bool {
+    let Some(lock) = STATUS.get() else { return false };
+    let next = {
+        let mut cur = lock.write();
+        let Some(next) = change(&cur) else { return false };
         // A new check time alone is news to every window: the panel shows
         // when the last check was, whoever asked for it.
         let same = next == *cur;
@@ -384,13 +407,14 @@ fn publish(event_bus: &crate::backend::eventbus::EventBus, mut next: AppUpdateSt
             );
         }
         *cur = next.clone();
-        !same
+        (!same).then_some(next)
     };
-    if changed {
+    if let Some(next) = next {
         event_bus.broadcast_event(&crate::backend::eventbus::EventBus::typed_ws_event::<
             crate::backend::mps_events::AppUpdateStatusChanged,
         >(&next, String::new()));
     }
+    true
 }
 
 #[cfg(test)]
@@ -505,6 +529,14 @@ mod tests {
         }
         cur.download = None;
         assert_eq!(pinned_by_upgrade(&cur, &newer), None);
+
+        // A download of the release a check has since replaced isn't recorded.
+        let mut d = download("downloading");
+        assert!(with_download(&cur, Some(d.clone())).is_some_and(|s| s.download.is_some()));
+        assert!(with_download(&newer, Some(d.clone())).is_none(), "0.59.27's download on a 0.59.28 offer");
+        d.version = "0.59.28".into();
+        assert!(with_download(&newer, Some(d)).is_some());
+        assert!(with_download(&newer, None).is_some_and(|s| s.download.is_none()), "clearing is always allowed");
     }
 
     fn with_asset(mut r: Release, name: &str, digest: Option<&str>, url: &str) -> Release {
