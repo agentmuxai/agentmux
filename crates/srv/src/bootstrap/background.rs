@@ -314,9 +314,9 @@ pub fn spawn_background_subsystems(
     // account's cloud directory. Not gated on the subscriber: a logged-out
     // or isolated channel simply finds no token and publishes nothing.
     crate::muxbus::wan_publish::spawn(mstore.clone(), id_store.clone());
-    // Whether a newer release exists: a minute after start, then every 6 h,
-    // never on the startup path (SPEC_UPGRADE_FOR_USERS_AND_AGENTS §3).
-    crate::backend::update_check::spawn(config_watcher.clone(), event_bus.clone());
+    // Whether a newer release exists: checked only when the user or an agent
+    // asks, never on a timer (SPEC_UPGRADE_FOR_USERS_AND_AGENTS §3).
+    crate::backend::update_check::init(event_bus.clone());
     // Whether this start is an upgrade, for the note resumed agents get.
     crate::backend::upgrade_notice::init(mstore.clone());
 

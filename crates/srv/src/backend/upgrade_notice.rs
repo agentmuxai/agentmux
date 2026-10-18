@@ -250,7 +250,10 @@ pub fn on_registered(block_id: &str) {
         )
         .await;
         match delivered {
-            Ok(()) => record_notified(&state.dir, &block_id),
+            Ok(()) => {
+                tracing::info!(block_id = %block_id, "upgrade notice: delivered");
+                record_notified(&state.dir, &block_id);
+            }
             Err(e) => {
                 tracing::info!(block_id = %block_id, error = %e, "upgrade notice: not delivered; the next registration tries again");
                 state.noted.lock().unwrap_or_else(|e| e.into_inner()).remove(&block_id);

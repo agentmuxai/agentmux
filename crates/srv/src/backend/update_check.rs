@@ -4,20 +4,21 @@
 //! Whether a newer AgentMux release exists
 //! (`docs/specs/SPEC_UPGRADE_FOR_USERS_AND_AGENTS_2026_10_15.md` §3).
 //!
-//! srv asks GitHub Releases for the latest release a minute after it starts,
-//! then every 6 hours, while the `app:updatecheck` setting is on (the
-//! default). Never during startup and never blocking anything: offline, a
-//! rate limit or any error just means "no news" until the next check
-//! (`SPEC_FAST_STARTUP_UPGRADE_OWNS_MIGRATIONS_AND_UPDATES_2026_09_15.md` §5).
+//! srv asks GitHub Releases for the latest release only when asked: the
+//! user's **Check for update** in the version panel, or an agent's `App`
+//! `version` or `upgrade` ([`check_now`]), at most every 30 seconds between
+//! them. Nothing checks on its own, at startup or on a timer: AgentMux makes
+//! no request the user didn't ask for. Offline, a rate limit or any error
+//! keeps what the last check found.
 //!
 //! The answer is kept here, sent to every window as the `app:updatestatus`
 //! event when it changes, and read on demand with `app.update-status`. It
 //! names the release file for this install (`update_install`) with the
-//! SHA-256 GitHub lists for it; `update_download` fetches it when the user
-//! asks, and its progress travels in the same status.
-//!
-//! The user's **Check for update** and an agent's `App` `version` ask at once
-//! ([`check_now`]), at most every 30 seconds between them.
+//! SHA-256 GitHub lists for it, and that check's answer is what the rest
+//! installs: `update_download` fetches exactly that file, and
+//! `update_restart` verifies it against that checksum. A new check replaces
+//! the release on offer, except while a download or a restart into it is
+//! under way, which finishes first.
 //!
 //! Any portable or installed build upgrades to a newer release, a local
 //! `task package` build (`local-…` channel) included: it compares versions like
@@ -36,12 +37,8 @@ use crate::backend::update_install::InstallKind;
 pub const EVENT_APP_UPDATE_STATUS: &str = "app:updatestatus";
 
 /// GitHub's latest-release endpoint for the public repo. Unauthenticated:
-/// 60 requests an hour per address, against one request every 6 hours.
+/// 60 requests an hour per address.
 const LATEST_RELEASE_URL: &str = "https://api.github.com/repos/agentmuxai/agentmux/releases/latest";
-const FIRST_CHECK_AFTER: Duration = Duration::from_secs(60);
-const CHECK_EVERY: Duration = Duration::from_secs(6 * 60 * 60);
-/// How often `app:updatecheck` is re-read.
-const SETTING_POLL: Duration = Duration::from_secs(60);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 /// The shortest gap between two checks the user or an agent asks for: GitHub
 /// allows 60 unauthenticated requests an hour per address.
@@ -54,9 +51,8 @@ const MAX_NOTES_BYTES: usize = 16 * 1024;
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct AppUpdateStatus {
     /// `up-to-date`, `available` (a newer release exists), `local-build`
-    /// (this build isn't a release; `latest` says which release is),
-    /// `off` (the check is turned off) or `unknown` (not checked yet, or the
-    /// last check failed).
+    /// (this build isn't a release; `latest` says which release is) or
+    /// `unknown` (not checked yet).
     pub state: String,
     /// This build's version.
     pub current: String,
@@ -75,7 +71,8 @@ pub struct AppUpdateStatus {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub published_at: Option<String>,
-    /// When the last check answered (unix ms), 0 before any.
+    /// When the last check answered (unix ms), 0 before any. The status is
+    /// that check's answer until the next one.
     #[ts(type = "number")]
     pub checked_ms: i64,
     /// How this AgentMux was installed (`update_install`): `windows-portable`,
@@ -140,9 +137,9 @@ pub struct DownloadStatus {
 }
 
 impl AppUpdateStatus {
-    fn initial(current: &str, enabled: bool) -> Self {
+    fn initial(current: &str) -> Self {
         Self {
-            state: if enabled { "unknown" } else { "off" }.to_string(),
+            state: "unknown".to_string(),
             current: current.to_string(),
             latest: None,
             url: None,
@@ -262,7 +259,7 @@ pub(crate) fn status_for(current: &str, channel: &str, release: &Release, now_ms
 static STATUS: OnceLock<RwLock<AppUpdateStatus>> = OnceLock::new();
 static EVENT_BUS: OnceLock<Arc<crate::backend::eventbus::EventBus>> = OnceLock::new();
 static INSTALL_KIND: OnceLock<InstallKind> = OnceLock::new();
-/// The client every check uses, made by [`spawn`].
+/// The client every check uses, made by [`init`].
 static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
 /// When [`check_now`] last asked GitHub, and why it failed if it did; held
 /// while it asks, so clicks that arrive meanwhile wait for its answer.
@@ -286,13 +283,7 @@ pub fn current_status() -> AppUpdateStatus {
     STATUS
         .get()
         .map(|s| s.read().clone())
-        .unwrap_or_else(|| AppUpdateStatus::initial(env!("CARGO_PKG_VERSION"), true))
-}
-
-/// Whether the user lets AgentMux check (`app:updatecheck`): on unless set
-/// to `false`. The key is written out so settings-defaults.test.ts sees the default.
-fn check_enabled(config: &crate::backend::wconfig::ConfigState) -> bool {
-    config.get_settings().extra.get("app:updatecheck").and_then(|v| v.as_bool()).unwrap_or(true)
+        .unwrap_or_else(|| AppUpdateStatus::initial(env!("CARGO_PKG_VERSION")))
 }
 
 async fn fetch_latest(client: &reqwest::Client) -> Result<Release, String> {
@@ -308,64 +299,27 @@ async fn fetch_latest(client: &reqwest::Client) -> Result<Release, String> {
     resp.json::<Release>().await.map_err(|e| e.to_string())
 }
 
-/// Start the periodic check (`bootstrap::background`).
-pub fn spawn(config: Arc<crate::backend::wconfig::ConfigState>, event_bus: Arc<crate::backend::eventbus::EventBus>) {
+/// Get ready to check when asked (`bootstrap::background`). Asks nothing.
+pub fn init(event_bus: Arc<crate::backend::eventbus::EventBus>) {
     let current = env!("CARGO_PKG_VERSION");
-    let _ = STATUS.set(RwLock::new(AppUpdateStatus::initial(current, check_enabled(&config))));
-    let _ = EVENT_BUS.set(event_bus.clone());
-    let kind = install_kind();
-    let client = match reqwest::Client::builder()
+    let _ = STATUS.set(RwLock::new(AppUpdateStatus::initial(current)));
+    let _ = EVENT_BUS.set(event_bus);
+    match reqwest::Client::builder()
         .user_agent(format!("AgentMux/{current}"))
         .timeout(REQUEST_TIMEOUT)
         .build()
     {
-        Ok(c) => c,
-        Err(e) => {
-            tracing::warn!(error = %e, "update check: no HTTP client, not checking");
-            return;
+        Ok(c) => {
+            let _ = CLIENT.set(c);
         }
-    };
-    let _ = CLIENT.set(client.clone());
-    tokio::spawn(async move {
-        tokio::time::sleep(FIRST_CHECK_AFTER).await;
-        // The setting is re-read every minute, so turning it off clears the
-        // chip at once and turning it on checks at once; GitHub is asked at
-        // most every 6 hours while it stays on.
-        let mut last_asked: Option<std::time::Instant> = None;
-        let mut was_on = true;
-        loop {
-            if !check_enabled(&config) {
-                // Once, when it goes off: a check the user asks for meanwhile
-                // ([`check_now`]) stays on show.
-                if was_on {
-                    publish(&event_bus, AppUpdateStatus::initial(current, false));
-                }
-                was_on = false;
-                last_asked = None;
-            } else if last_asked.is_none_or(|t| t.elapsed() >= CHECK_EVERY) {
-                was_on = true;
-                last_asked = Some(std::time::Instant::now());
-                let channel = crate::backend::reactive::registry::local_channel_id();
-                let next = match fetch_latest(&client).await {
-                    Ok(release) => status_for(current, &channel, &release, agentmux_common::time::now_ms(), &kind),
-                    Err(e) => {
-                        tracing::info!(error = %e, "update check: no answer, trying again later");
-                        // Keep what an earlier check found; after "off", say "not checked yet".
-                        let cur = current_status();
-                        if cur.state == "off" { AppUpdateStatus::initial(current, true) } else { cur }
-                    }
-                };
-                publish(&event_bus, next);
-            }
-            tokio::time::sleep(SETTING_POLL).await;
-        }
-    });
+        Err(e) => tracing::warn!(error = %e, "update check: no HTTP client, can't check"),
+    }
 }
 
 /// Ask GitHub now, for the user's **Check for update** or an agent's `App`
-/// `version`, whether or not the periodic check is on, and return what srv
-/// knows after. Asked again within [`CHECK_NOW_EVERY`], it answers what the
-/// last check found, its failure included; concurrent callers share one request.
+/// `version` or `upgrade`, and return what srv knows after. Asked again within
+/// [`CHECK_NOW_EVERY`], it answers what the last check found, its failure
+/// included; concurrent callers share one request.
 pub async fn check_now() -> Result<AppUpdateStatus, String> {
     let (Some(client), Some(bus)) = (CLIENT.get(), EVENT_BUS.get()) else {
         return Err("AgentMux isn't checking for updates yet; try again in a moment".into());
@@ -378,7 +332,15 @@ pub async fn check_now() -> Result<AppUpdateStatus, String> {
     let channel = crate::backend::reactive::registry::local_channel_id();
     let outcome = match fetch_latest(client).await {
         Ok(release) => {
-            publish(bus, status_for(current, &channel, &release, agentmux_common::time::now_ms(), &install_kind()));
+            let next = status_for(current, &channel, &release, agentmux_common::time::now_ms(), &install_kind());
+            match pinned_by_upgrade(&current_status(), &next) {
+                Some(version) => tracing::info!(
+                    latest = ?next.latest,
+                    version,
+                    "update check: a newer release is out; the upgrade under way finishes first"
+                ),
+                None => publish(bus, next),
+            }
             Ok(current_status())
         }
         Err(e) => {
@@ -388,6 +350,15 @@ pub async fn check_now() -> Result<AppUpdateStatus, String> {
     };
     *last = Some((std::time::Instant::now(), outcome.as_ref().err().cloned()));
     outcome
+}
+
+/// The release a download or restart under way is installing, when `next`
+/// would replace it with another: that one finishes first, and a check after
+/// it offers the newer release.
+fn pinned_by_upgrade(cur: &AppUpdateStatus, next: &AppUpdateStatus) -> Option<String> {
+    let d = cur.download.as_ref()?;
+    let under_way = matches!(d.state.as_str(), "downloading" | "unpacking" | "waiting" | "restarting");
+    (under_way && next.latest.as_deref() != Some(d.version.as_str())).then(|| d.version.clone())
 }
 
 /// Keep `next` and tell every window when it changed.
@@ -501,9 +472,38 @@ mod tests {
         let v = serde_json::to_value(&s).unwrap();
         assert_eq!(v["state"], "available");
         assert_eq!(v["checked_ms"], 7);
-        let mut off = serde_json::to_value(AppUpdateStatus::initial("0.59.26", false)).unwrap();
-        off.as_object_mut().unwrap().remove("install");
-        assert_eq!(off, serde_json::json!({ "state": "off", "current": "0.59.26", "checked_ms": 0, "can_download": false }));
+        let mut unchecked = serde_json::to_value(AppUpdateStatus::initial("0.59.26")).unwrap();
+        unchecked.as_object_mut().unwrap().remove("install");
+        assert_eq!(unchecked, serde_json::json!({ "state": "unknown", "current": "0.59.26", "checked_ms": 0, "can_download": false }));
+    }
+
+    #[test]
+    fn a_check_doesnt_replace_the_release_an_upgrade_is_installing() {
+        let download = |state: &str| DownloadStatus {
+            version: "0.59.27".into(),
+            state: state.into(),
+            received: 1,
+            total: 2,
+            error: None,
+            folder: None,
+            installer: None,
+            waiting_for: 0,
+        };
+        let newer = status_for("0.59.26", "stable", &release("v0.59.28"), 9, &InstallKind::Unknown);
+        let same = status_for("0.59.26", "stable", &release("v0.59.27"), 9, &InstallKind::Unknown);
+        let mut cur = status_for("0.59.26", "stable", &release("v0.59.27"), 1, &InstallKind::Unknown);
+        for state in ["downloading", "unpacking", "waiting", "restarting"] {
+            cur.download = Some(download(state));
+            assert_eq!(pinned_by_upgrade(&cur, &newer).as_deref(), Some("0.59.27"), "{state}");
+            assert_eq!(pinned_by_upgrade(&cur, &same), None, "{state}: the same release is no change");
+        }
+        // Downloaded but not restarting, failed, or nothing asked: the newer one is offered.
+        for state in ["ready", "failed"] {
+            cur.download = Some(download(state));
+            assert_eq!(pinned_by_upgrade(&cur, &newer), None, "{state}");
+        }
+        cur.download = None;
+        assert_eq!(pinned_by_upgrade(&cur, &newer), None);
     }
 
     fn with_asset(mut r: Release, name: &str, digest: Option<&str>, url: &str) -> Release {

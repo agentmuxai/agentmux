@@ -3,7 +3,7 @@
 
 /** The update chip and the Maintenance row, fed by srv's release check (store/app-update.ts). */
 
-import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
+import { cleanup, fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const updateStatus = vi.fn();
@@ -235,11 +235,31 @@ describe("Maintenance: Check for update", () => {
         updateStatus.mockResolvedValue({ state: "up-to-date", current: "0.59.27", latest: "0.59.27", checked_ms: 1, install: "windows-portable", can_download: false });
         updateCheck.mockResolvedValue({ ...PORTABLE, current: "0.59.27", latest: "0.59.28" });
         render(() => <MaintenanceSection />);
-        expect(await screen.findByText("v0.59.27 is up to date")).toBeTruthy();
+        expect(await screen.findByText(/^v0\.59\.27 is up to date \(checked /)).toBeTruthy();
         fireEvent.click(screen.getByRole("button", { name: "Check for update" }));
         expect(updateCheck).toHaveBeenCalledTimes(1);
         expect(await screen.findByText("v0.59.28 is out")).toBeTruthy();
+        // A release on offer: the button stays, to look again.
         expect(screen.queryByRole("button", { name: "Check for update" })).toBeNull();
+        fireEvent.click(await screen.findByRole("button", { name: "Check again" }));
+        expect(updateCheck).toHaveBeenCalledTimes(2);
+    });
+
+    it("can't check while a download or a restart into the offered release is under way", async () => {
+        for (const state of ["downloading", "unpacking", "waiting", "restarting"]) {
+            updateStatus.mockResolvedValue(download(state));
+            const { unmount } = render(() => <MaintenanceSection />);
+            const button = (await screen.findByRole("button", { name: "Check again" })) as HTMLButtonElement;
+            await waitFor(() => expect(button.disabled).toBe(true));
+            unmount();
+        }
+        for (const state of ["ready", "failed"]) {
+            updateStatus.mockResolvedValue(download(state));
+            const { unmount } = render(() => <MaintenanceSection />);
+            const button = (await screen.findByRole("button", { name: "Check again" })) as HTMLButtonElement;
+            await waitFor(() => expect(button.disabled).toBe(false));
+            unmount();
+        }
     });
 
     it("says why a check failed", async () => {
@@ -251,10 +271,10 @@ describe("Maintenance: Check for update", () => {
         expect(await screen.findByText(/couldn't reach GitHub: timed out/)).toBeTruthy();
     });
 
-    it("a development build says which release is latest, with no check", async () => {
+    it("a development build says which release is latest, and can check again", async () => {
         updateStatus.mockResolvedValue({ state: "local-build", current: "0.59.27", latest: "0.59.28", checked_ms: 1, install: "unknown", can_download: false });
         render(() => <MaintenanceSection />);
         expect(await screen.findByText(/Development build. The latest release is v0.59.28/)).toBeTruthy();
-        expect(screen.queryByRole("button", { name: "Check for update" })).toBeNull();
+        expect(screen.getByRole("button", { name: "Check for update" })).toBeTruthy();
     });
 });

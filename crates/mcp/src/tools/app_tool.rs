@@ -85,8 +85,7 @@ fn describe_status(st: &Value) -> String {
         "available" => out.push_str(&format!(" A newer release is out: {latest}.")),
         "up-to-date" => out.push_str(" This is the latest release."),
         "local-build" => out.push_str(&format!(" A development build (`task dev`), which doesn't upgrade itself; the latest release is {latest}.")),
-        "off" => out.push_str(" The update check is turned off."),
-        _ => out.push_str(" Not checked for a newer release yet."),
+        _ => out.push_str(" Couldn't learn which release is the latest (GitHub didn't answer)."),
     }
     if s(st, "state") == "available" {
         let d = &st["download"];
