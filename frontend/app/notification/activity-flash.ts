@@ -30,6 +30,8 @@ export interface FlashStrike {
 /** The strikes of one sound, sorted by `atMs`, the first at 0. */
 export interface FlashPattern {
     strikes: FlashStrike[];
+    /** How long the last strike fades out; `FLASH_TAIL_MS` when absent. */
+    tailMs?: number;
 }
 
 /**
@@ -134,7 +136,7 @@ export function easeOut(x: number): number {
 /** How long a pattern stays visible, from its first strike. */
 export function patternDurationMs(pattern: FlashPattern): number {
     const last = pattern.strikes.at(-1);
-    return last ? last.atMs + FLASH_STRIKE_HOLD_MS + FLASH_TAIL_MS : 0;
+    return last ? last.atMs + FLASH_STRIKE_HOLD_MS + (pattern.tailMs ?? FLASH_TAIL_MS) : 0;
 }
 
 /** Overlay opacity `t` ms after the pattern starts. Zero before and after it. */
@@ -152,7 +154,7 @@ export function patternEnvelopeAt(pattern: FlashPattern, t: number): number {
         return intensity - (intensity - floor) * easeOut((t - holdEnd) / (next.atMs - holdEnd));
     }
     if (t < holdEnd) return intensity;
-    return intensity * (1 - easeOut((t - holdEnd) / FLASH_TAIL_MS));
+    return intensity * (1 - easeOut((t - holdEnd) / (pattern.tailMs ?? FLASH_TAIL_MS)));
 }
 
 /** A pattern placed on the page clock: its first strike lands at `startAt`. */

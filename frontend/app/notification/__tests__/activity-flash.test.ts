@@ -116,6 +116,20 @@ describe("patternEnvelopeAt", () => {
     });
 });
 
+describe("a pattern's own tail", () => {
+    const LONG: FlashPattern = { strikes: [{ atMs: 0, intensity: 1 }], tailMs: 700 };
+
+    it("fades over its own length instead of the default tail", () => {
+        expect(patternDurationMs(LONG)).toBe(FLASH_STRIKE_HOLD_MS + 700);
+        expect(patternEnvelopeAt(LONG, FLASH_STRIKE_HOLD_MS + 350)).toBeCloseTo(1 - easeOut(0.5), 5);
+        expect(patternEnvelopeAt(LONG, FLASH_STRIKE_HOLD_MS + 700)).toBe(0);
+    });
+
+    it("leaves a pattern without one on the default tail", () => {
+        expect(patternDurationMs(SINGLE)).toBe(FLASH_STRIKE_HOLD_MS + FLASH_TAIL_MS);
+    });
+});
+
 describe("envelopeAt (overlapping sounds)", () => {
     it("is the per-instant maximum of every scheduled pattern", () => {
         const a = { startAt: 1000, pattern: THREE };
