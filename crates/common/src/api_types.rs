@@ -893,6 +893,14 @@ pub struct UiBrowserEndBypassRequest {
     pub pane: Option<String>,
 }
 
+/// `POST /api/v1/ui/browser/dialogs` — the page dialogs the caller's browser
+/// panes showed since it last asked (SPEC_BROWSER_PANE_NATIVE_DIALOGS_2026_10_17.md §6.1).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UiBrowserDialogsRequest {
+    #[serde(flatten)]
+    pub auth: UiAutomationAuth,
+}
+
 /// `POST /api/v1/ui/browser/open` — backs `OpenBrowser`. Opens a browser
 /// pane next to the caller's own pane and records the caller as its owner
 /// (SPEC_AGENT_DRIVEN_BROWSER_PANES_2026_10_07.md §3).

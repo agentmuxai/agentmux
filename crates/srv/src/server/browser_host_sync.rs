@@ -24,8 +24,10 @@ pub(crate) fn spawn(state: AppState) {
     });
 }
 
-/// Send the host the agent-owned panes, each limited pane's site list, and
-/// the panes asking the person about a navigation (allowed-origins spec §6).
+/// Send the host the agent-owned panes, each limited pane's site list, the
+/// panes asking the person about a navigation (allowed-origins spec §6), and
+/// the panes handed to the person, whose page dialogs are theirs to answer
+/// (SPEC_BROWSER_PANE_NATIVE_DIALOGS_2026_10_17.md §4.3).
 /// The sync loop does this on every change; a caller that needs the host to
 /// have it before the next navigation awaits it directly. The host replaces
 /// its copy with each push, so pushes go one at a time, each taking its
@@ -40,6 +42,7 @@ pub(crate) async fn push(state: &AppState) {
         "panes": crate::server::browser_owner::owned_panes(),
         "allowed": crate::server::browser_allowlist::snapshot(),
         "asking": crate::server::browser_attention::asking(crate::server::browser_attention::Kind::Navigation),
+        "handoff": crate::server::browser_attention::asking(crate::server::browser_attention::Kind::Handoff),
     });
     // Left out when the store can't be read: the host then keeps its jars.
     if let Some(jars) = crate::server::browser_identity::live_jars(state) {

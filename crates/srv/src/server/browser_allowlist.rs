@@ -338,12 +338,12 @@ mod tests {
 
     #[test]
     fn the_snapshot_lists_every_member() {
-        set("al-s-root", vec!["https://a.example".into()]);
-        join("al-s-popup", "al-s-root");
+        set("als-root", vec!["https://a.example".into()]);
+        join("als-popup", "als-root");
         let snap = snapshot();
-        assert_eq!(snap.get("al-s-root"), Some(&vec!["https://a.example".to_string()]));
-        assert_eq!(snap.get("al-s-popup"), Some(&vec!["https://a.example".to_string()]));
-        drop_pane("al-s-root");
-        drop_pane("al-s-popup");
+        assert_eq!(snap.get("als-root"), Some(&vec!["https://a.example".to_string()]));
+        assert_eq!(snap.get("als-popup"), Some(&vec!["https://a.example".to_string()]));
+        drop_pane("als-root");
+        drop_pane("als-popup");
     }
 }

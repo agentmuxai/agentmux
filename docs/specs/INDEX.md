@@ -553,6 +553,7 @@ partial list.
 | Spec | Title |
 |---|---|
 | [`ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14`](ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14.md) | Architecture rethink: making ABF mandatory ("every agent must have an ABF") |
+| [`PLAN_BROWSER_DRIVER_FIXES_2026_10_17`](PLAN_BROWSER_DRIVER_FIXES_2026_10_17.md) | Plan: fix the browser driver's roadblocks (R1–R11) |
 | [`PLAN_CI_TEST_SPEED_AND_DRY_FOLLOWUPS_2026_10_09`](PLAN_CI_TEST_SPEED_AND_DRY_FOLLOWUPS_2026_10_09.md) | Plan — faster CI tests, and the open architecture / DRY follow-ups |
 | [`PLAN_CODEX_GATE_TRANSIENT_FAILURES_AND_CI_SCRIPT_DRY_2026_10_14`](PLAN_CODEX_GATE_TRANSIENT_FAILURES_AND_CI_SCRIPT_DRY_2026_10_14.md) | Plan — the Codex review gate survives a transient GitHub error, and the CI script clean-ups around it |
 | [`PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20`](PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20.md) | Plan — collapse every provider-login code path onto one |
@@ -611,6 +612,7 @@ partial list.
 | [`SPEC_BROWSER_PANE_DOWNLOADS_2026_10_14`](SPEC_BROWSER_PANE_DOWNLOADS_2026_10_14.md) | SPEC: Downloads in a browser pane open the system "Save as" dialog |
 | [`SPEC_BROWSER_PANE_FORMS_IN_FRAMES_AND_VISUAL_FALLBACK_2026_10_16`](SPEC_BROWSER_PANE_FORMS_IN_FRAMES_AND_VISUAL_FALLBACK_2026_10_16.md) | SPEC: agents fill forms inside iframes, with a visual fallback for what the snapshot can't see |
 | [`SPEC_BROWSER_PANE_INPUT_OWNER_2026_10_15`](SPEC_BROWSER_PANE_INPUT_OWNER_2026_10_15.md) | Browser pane input owner: one state machine per window |
+| [`SPEC_BROWSER_PANE_NATIVE_DIALOGS_2026_10_17`](SPEC_BROWSER_PANE_NATIVE_DIALOGS_2026_10_17.md) | SPEC: Page dialogs (alert, confirm, prompt, leave-site) in an agent-driven browser pane |
 | [`SPEC_BROWSER_PANE_NATIVE_POPUPS_AGENT_DRIVEN_2026_10_08`](SPEC_BROWSER_PANE_NATIVE_POPUPS_AGENT_DRIVEN_2026_10_08.md) | SPEC: A browser pane's new windows open the way the page asked, and the agent that owns the opener drives them |
 | [`SPEC_BROWSER_PANE_NAV_BAR_RESPONSIVE_AND_CHROME_ZOOM_2026_10_14`](SPEC_BROWSER_PANE_NAV_BAR_RESPONSIVE_AND_CHROME_ZOOM_2026_10_14.md) | SPEC: The browser pane's nav bar stacks in thin panes and follows chrome zoom |
 | [`SPEC_BROWSER_PANE_POPUPS_ADOPTED_2026_10_08`](SPEC_BROWSER_PANE_POPUPS_ADOPTED_2026_10_08.md) | SPEC: Popups from a browser pane stay in AgentMux, and an agent can drive them |
