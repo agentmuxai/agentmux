@@ -176,8 +176,13 @@ const SELECT_OPTION: &str = r#"function (want) {
 
 /// Does clicking this element commit something (submit a form, or a button
 /// named like Send/Pay/Delete)? And what would the user be approving: the
-/// form's non-secret values (spec §5.4).
-const COMMIT_INFO: &str = r#"function () {
+/// form's non-secret values (spec §5.4). The element's name and the
+/// description its text may carry are told apart by `scripts/click_label.js`.
+const COMMIT_INFO: &str = concat!(
+    r#"function () {
+  const clickLabel = "#,
+    include_str!("scripts/click_label.js"),
+    r#";
   const t = (this.tagName || "").toLowerCase();
   // The type the browser applies, not the attribute: <button type="bogus">
   // is a submit button. Read through the prototype, which the page can't
@@ -189,8 +194,8 @@ const COMMIT_INFO: &str = r#"function () {
   const type = typeOf(this);
   const form = this.form || (this.closest && this.closest("form"));
   const submits = !!form && ((t === "button" && type === "submit") || (t === "input" && (type === "submit" || type === "image")));
-  const name = (this.getAttribute("aria-label") || this.innerText || this.value || "").trim().replace(/\s+/g, " ").slice(0, 120);
-  const verb = /\b(submit|send|pay|buy|purchase|order|checkout|check out|delete|remove|publish|post|confirm|sign up|sign|agree|accept|transfer|unsubscribe)\b/i.test(name);
+  const labelledBy = (this.getAttribute("aria-labelledby") || "").split(/\s+/).map(i => { const n = i && this.ownerDocument.getElementById(i); return n ? n.textContent : ""; }).join(" ");
+  const { name, description, verb } = clickLabel(this.getAttribute("aria-label"), labelledBy, this.innerText || this.value || "");
   const fields = [];
   const secret = el => {
     const ty = (el.type || "").toLowerCase();
@@ -272,8 +277,9 @@ const COMMIT_INFO: &str = r#"function () {
   }
   const sub = ["formmethod", "formenctype", "formtarget", "name", "value"].map(a => this.getAttribute(a));
   const fingerprint = JSON.stringify([action, form ? [formGet("method"), formGet("enctype"), formGet("target")] : null, sub, this.outerHTML, link ? link.outerHTML : null, sent]);
-  return { committing: submits || verb, name, action, fields, fingerprint, secrets };
-}"#;
+  return { committing: submits || verb, name, description, action, fields, fingerprint, secrets };
+}"#
+);
 
 /// The element's state, for read-back after every action.
 const READ_BACK: &str = r#"function () {
@@ -684,6 +690,9 @@ async fn act(
             let name = info.get("name").and_then(|v| v.as_str()).unwrap_or("");
             let ask = json!({
                 "what": if name.is_empty() { format!("Click a button that submits a form{in_a_frame}") } else { format!("Click \"{name}\"{in_a_frame}") },
+                // Shown under `what`, never judged: srv's payment check reads
+                // `what` alone (scripts/click_label.js).
+                "description": info.get("description").and_then(|v| v.as_str()).unwrap_or(""),
                 "page": now,
                 "action": info.get("action").cloned().unwrap_or(Value::Null),
                 "fields": info.get("fields").cloned().unwrap_or(json!([])),
@@ -812,6 +821,17 @@ mod tests {
 
     fn facts(tag: &str, attrs: &[(&str, &str)]) -> DomFacts {
         DomFacts { local_name: tag.into(), attrs: attrs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(), label: String::new() }
+    }
+
+    #[test]
+    fn the_click_label_rule_is_spliced_into_commit_info_whole() {
+        // click_label.js is one function expression assigned to `clickLabel`
+        // (its own tests run it); COMMIT_INFO is still one function.
+        assert!(COMMIT_INFO.starts_with("function () {\n  const clickLabel = // Copyright"));
+        assert!(COMMIT_INFO.contains("function clickLabel(ariaLabel, labelledBy, text) {"));
+        assert!(COMMIT_INFO.contains("}\n;\n  const t = "), "the rule ends before the rest of the function");
+        assert!(COMMIT_INFO.contains("const { name, description, verb } = clickLabel("));
+        assert!(COMMIT_INFO.trim_end().ends_with('}'));
     }
 
     /// POST `body` to a local server with the set_files body limit and
